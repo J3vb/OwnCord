@@ -7,7 +7,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createMessageList } from "@components/MessageList";
-import type { MessageListOptions } from "@components/MessageList";
 import { channelBitOrRole } from "@lib/permissions";
 import { Permission } from "@lib/types";
 import { addChannel, channelsStore, setChannels, setRoles } from "@stores/channels.store";
@@ -15,6 +14,7 @@ import type { Message } from "@stores/messages.store";
 import { messagesStore } from "@stores/messages.store";
 import { setConnectionStatus, uiStore } from "@stores/ui.store";
 import { createReactionController } from "../../src/pages/main-page/ReactionController";
+import { makeListOptions } from "../helpers/messageListHarness";
 import { resetMessagesState } from "../helpers/storeResets";
 import "../helpers/resizeObserverStub";
 import { signInAs, resetChannelsState } from "../helpers/storeSeeds";
@@ -57,25 +57,24 @@ function msg(id: number, userId: number): Message {
   };
 }
 
+function makeReactionController() {
+  const send = vi.fn(() => "c");
+  const showError = vi.fn();
+  const ctrl = createReactionController({
+    ws: { send } as unknown as Parameters<typeof createReactionController>[0]["ws"],
+    reactionsLimiter: { tryConsume: () => true },
+    getChannelId: () => 1,
+    showError,
+  });
+  return { send, showError, ctrl };
+}
+
 describe("channel permission bits (3A-13)", () => {
   let container: HTMLDivElement;
   let list: ReturnType<typeof createMessageList> | null = null;
 
   function mount(channelType: "text" | "dm" = "text"): void {
-    const options: MessageListOptions = {
-      channelId: 1,
-      channelName: "general",
-      channelType,
-      currentUserId: ME,
-      onScrollTop: vi.fn(),
-      onReplyClick: vi.fn(),
-      onEditClick: vi.fn(),
-      onEditSave: vi.fn(() => true),
-      onEmptyEdit: vi.fn(),
-      onDeleteClick: vi.fn(),
-      onReactionClick: vi.fn(),
-      onPinClick: vi.fn(),
-    };
+    const options = makeListOptions({ channelType });
     messagesStore.setState((prev) => {
       const next = new Map(prev.messagesByChannel);
       next.set(1, [msg(10, ME), msg(11, OTHER)]);
@@ -261,14 +260,7 @@ describe("channel permission bits (3A-13)", () => {
 
     it("the reaction controller refuses to send when can_react is false", () => {
       setChannel({ can_react: false });
-      const send = vi.fn(() => "c");
-      const showError = vi.fn();
-      const ctrl = createReactionController({
-        ws: { send } as unknown as Parameters<typeof createReactionController>[0]["ws"],
-        reactionsLimiter: { tryConsume: () => true },
-        getChannelId: () => 1,
-        showError,
-      });
+      const { send, showError, ctrl } = makeReactionController();
       ctrl.handleReaction(11, "🔥");
       expect(send).not.toHaveBeenCalled();
       expect(showError).toHaveBeenCalledWith("You can't add reactions in this channel");
@@ -277,14 +269,7 @@ describe("channel permission bits (3A-13)", () => {
 
     it("the reaction controller sends when can_react is absent", () => {
       setChannel({});
-      const send = vi.fn(() => "c");
-      const showError = vi.fn();
-      const ctrl = createReactionController({
-        ws: { send } as unknown as Parameters<typeof createReactionController>[0]["ws"],
-        reactionsLimiter: { tryConsume: () => true },
-        getChannelId: () => 1,
-        showError,
-      });
+      const { send, showError, ctrl } = makeReactionController();
       ctrl.handleReaction(11, "🔥");
       expect(send).toHaveBeenCalledTimes(1);
       expect(showError).not.toHaveBeenCalled();

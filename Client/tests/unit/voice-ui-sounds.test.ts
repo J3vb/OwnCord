@@ -8,6 +8,7 @@
  * notification-sound.test.ts's.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import * as voiceWidget from "../helpers/voiceWidgetHarness";
 
 const { testPrefs, playVoiceSound } = vi.hoisted(() => ({
   testPrefs: new Map<string, unknown>(),
@@ -89,19 +90,7 @@ beforeEach(() => {
     motd: null,
     isAuthenticated: true,
   }));
-  voiceStore.setState(() => ({
-    currentChannelId: null,
-    voiceUsers: new Map(),
-    voiceConfigs: new Map(),
-    localMuted: false,
-    localDeafened: false,
-    localCamera: false,
-    localScreenshare: false,
-    joinedAt: null,
-    listenOnly: false,
-    voiceStatus: "idle",
-    peerVerifications: new Map(),
-  }));
+  voiceWidget.resetVoiceState();
   stop = startVoiceUiSounds();
 });
 

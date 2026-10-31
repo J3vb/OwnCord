@@ -52,6 +52,24 @@ import { buildKeybindsTab } from "../../src/features/settings/KeybindsTab";
 import { KEYBIND_GROUPS } from "../../src/lib/prefs/keybindCatalog";
 import { settingsText as t } from "../../src/i18n/settings";
 
+async function expectNoGlobalShortcutService(): Promise<void> {
+  const el = buildTab();
+  const hint = el.querySelector("[data-testid='keybinds-global-hint']")!;
+  await vi.waitFor(() => {
+    expect(hint.textContent).toBe(
+      "Mute and Deafen work while OwnCord is unfocused through the tray menu. This desktop has no global shortcut service (macOS, or Linux on GNOME 47 or older, Sway or another wlroots desktop), so global mute/deafen shortcuts are not available.",
+    );
+  });
+}
+
+function startPendingCapture() {
+  const el = buildTab();
+  mockCaptureKeyPress.mockReturnValue(new Promise(() => {})); // never resolves
+  const pttBtn = firstKbdButton(el);
+  pttBtn.click();
+  return { el, pttBtn };
+}
+
 function buildTab(signal: AbortSignal = new AbortController().signal): HTMLElement {
   return buildKeybindsTab(signal);
 }
@@ -332,11 +350,7 @@ describe("KeybindsTab", () => {
   // --- PTT key capture flow ---
 
   it("shows 'Press a supported key...' when capture button is clicked", () => {
-    const el = buildTab();
-    mockCaptureKeyPress.mockReturnValue(new Promise(() => {})); // never resolves
-    const pttBtn = firstKbdButton(el);
-
-    pttBtn.click();
+    const { pttBtn } = startPendingCapture();
 
     expect(pttBtn.textContent).toBe("Press a supported key...");
     expect(pttBtn.style.borderColor).toBe("var(--accent)");
@@ -417,11 +431,7 @@ describe("KeybindsTab", () => {
   });
 
   it("ignores click when already capturing", () => {
-    const el = buildTab();
-    mockCaptureKeyPress.mockReturnValue(new Promise(() => {})); // never resolves
-    const pttBtn = firstKbdButton(el);
-
-    pttBtn.click();
+    const { pttBtn } = startPendingCapture();
     expect(pttBtn.textContent).toBe("Press a supported key...");
 
     // Second click should be ignored
@@ -636,24 +646,12 @@ describe("KeybindsTab", () => {
 
   it("discloses the missing global-key path on a desktop without it (U6)", async () => {
     mockSupported.mockResolvedValue(false);
-    const el = buildTab();
-    const hint = el.querySelector("[data-testid='keybinds-global-hint']")!;
-    await vi.waitFor(() => {
-      expect(hint.textContent).toBe(
-        "Mute and Deafen work while OwnCord is unfocused through the tray menu. This desktop has no global shortcut service (macOS, or Linux on GNOME 47 or older, Sway or another wlroots desktop), so global mute/deafen shortcuts are not available.",
-      );
-    });
+    await expectNoGlobalShortcutService();
   });
 
   it("falls back to the tray-only hint when the host cannot answer (U6)", async () => {
     mockSupported.mockRejectedValue(new Error("no Tauri host"));
-    const el = buildTab();
-    const hint = el.querySelector("[data-testid='keybinds-global-hint']")!;
-    await vi.waitFor(() => {
-      expect(hint.textContent).toBe(
-        "Mute and Deafen work while OwnCord is unfocused through the tray menu. This desktop has no global shortcut service (macOS, or Linux on GNOME 47 or older, Sway or another wlroots desktop), so global mute/deafen shortcuts are not available.",
-      );
-    });
+    await expectNoGlobalShortcutService();
   });
 
   it("disables PTT and discloses the gap where key polling is unsupported (voice #12)", async () => {
@@ -692,6 +690,12 @@ describe("KeybindsTab", () => {
       [...el.querySelectorAll(".keybind-row")]
         .find((row) => row.querySelector(".setting-label")?.textContent === label)!
         .querySelector(".kbd")!.textContent!;
+    const clickPortalSetUp = async (el: HTMLElement): Promise<HTMLButtonElement> => {
+      const setUp = testId(el, "keybinds-portal-setup") as HTMLButtonElement;
+      await vi.waitFor(() => expect(setUp.style.display).toBe(""));
+      setUp.click();
+      return setUp;
+    };
     const portalErr = (code: string) => Object.assign(new Error(code), { code });
 
     it("tells the user the desktop refused the session, and clears it when one opens", async () => {
@@ -710,9 +714,7 @@ describe("KeybindsTab", () => {
       mockStatus.mockResolvedValue(portal(unbound));
       mockBindPortal.mockRejectedValue(portalErr("bind_cancelled"));
       const el = buildTab();
-      const setUp = testId(el, "keybinds-portal-setup") as HTMLButtonElement;
-      await vi.waitFor(() => expect(setUp.style.display).toBe(""));
-      setUp.click();
+      await clickPortalSetUp(el);
       const note = testId(el, "keybinds-portal-note");
       await vi.waitFor(() => expect(note.textContent).toContain("cancelled"));
 
@@ -743,9 +745,7 @@ describe("KeybindsTab", () => {
       mockStatus.mockResolvedValue(portal(unbound));
       mockBindPortal.mockResolvedValue({ ...portal(unbound), triggersUnnamed: true });
       const el = buildTab();
-      const setUp = testId(el, "keybinds-portal-setup") as HTMLButtonElement;
-      await vi.waitFor(() => expect(setUp.style.display).toBe(""));
-      setUp.click();
+      await clickPortalSetUp(el);
       await vi.waitFor(() =>
         expect(localStorage.getItem("owncord:settings:globalKeysPortalBound")).toBe("true"),
       );
@@ -852,9 +852,7 @@ describe("KeybindsTab", () => {
       mockBindPortal.mockImplementation(() => new Promise((resolve) => (finish = resolve)));
       const controller = new AbortController();
       const el = buildKeybindsTab(controller.signal);
-      const setUp = testId(el, "keybinds-portal-setup") as HTMLButtonElement;
-      await vi.waitFor(() => expect(setUp.style.display).toBe(""));
-      setUp.click();
+      const setUp = await clickPortalSetUp(el);
       expect(setUp.disabled).toBe(true);
       controller.abort();
       const before = el.innerHTML;
@@ -869,9 +867,7 @@ describe("KeybindsTab", () => {
       mockStatus.mockResolvedValue(portal(unbound));
       mockBindPortal.mockRejectedValue(portalErr("bind_cancelled"));
       const el = buildTab();
-      const setUp = testId(el, "keybinds-portal-setup") as HTMLButtonElement;
-      await vi.waitFor(() => expect(setUp.style.display).toBe(""));
-      setUp.click();
+      const setUp = await clickPortalSetUp(el);
       const note = testId(el, "keybinds-portal-note");
       await vi.waitFor(() => expect(note.textContent).toContain("cancelled"));
       expect(note.style.display).toBe("");
@@ -927,6 +923,13 @@ describe("KeybindsTab", () => {
     });
 
     describe("push to talk", () => {
+      const startPortalPttCapture = async (el: HTMLElement): Promise<HTMLButtonElement> => {
+        const btn = pttButton(el);
+        await vi.waitFor(() => expect(testId(el, "keybinds-portal").style.display).toBe(""));
+        btn.click();
+        capture(document, "F8");
+        return btn;
+      };
       const pttButton = (el: HTMLElement): HTMLButtonElement =>
         el.querySelector('[aria-label="Push to Talk keybind — click to capture"]')!;
 
@@ -957,10 +960,7 @@ describe("KeybindsTab", () => {
         mockStatus.mockResolvedValue(portal(unbound));
         mockBindPortal.mockResolvedValue({ ...portal(unbound), triggersUnnamed: true });
         const el = buildTab();
-        const btn = pttButton(el);
-        await vi.waitFor(() => expect(testId(el, "keybinds-portal").style.display).toBe(""));
-        btn.click();
-        capture(document, "F8");
+        const btn = await startPortalPttCapture(el);
         await vi.waitFor(() => expect(mockUpdatePttKey).toHaveBeenCalledWith(0x77));
         expect(localStorage.getItem("owncord:settings:globalKeysPortalBound")).toBe("true");
         await vi.waitFor(() => expect(btn.textContent).toBe(mockVkName(0x77)));
@@ -986,10 +986,7 @@ describe("KeybindsTab", () => {
         mockStatus.mockResolvedValue(portal(unbound));
         mockBindPortal.mockRejectedValue(portalErr("bind_cancelled"));
         const el = buildTab();
-        const btn = pttButton(el);
-        await vi.waitFor(() => expect(testId(el, "keybinds-portal").style.display).toBe(""));
-        btn.click();
-        capture(document, "F8");
+        const btn = await startPortalPttCapture(el);
         const note = testId(el, "ptt-portal-note");
         await vi.waitFor(() => expect(note.textContent).toContain("cancelled"));
         expect(btn.textContent).toBe("Not set");
@@ -1003,10 +1000,7 @@ describe("KeybindsTab", () => {
         mockBindPortal.mockImplementation(() => new Promise((resolve) => (finish = resolve)));
         const controller = new AbortController();
         const el = buildKeybindsTab(controller.signal);
-        const btn = pttButton(el);
-        await vi.waitFor(() => expect(testId(el, "keybinds-portal").style.display).toBe(""));
-        btn.click();
-        capture(document, "F8");
+        const btn = await startPortalPttCapture(el);
         controller.abort();
         finish(portal({ ...bound, ptt: "F8" }));
         await vi.waitFor(() => expect(mockUpdatePttKey).toHaveBeenCalledWith(0x77));

@@ -23,11 +23,11 @@ import {
 } from "../../src/lib/text/mentions";
 import { membersStore } from "../../src/stores/members.store";
 import { authStore } from "../../src/stores/auth.store";
-import { channelsStore, setChannels, setRoles } from "../../src/stores/channels.store";
+import { channelsStore, setRoles } from "../../src/stores/channels.store";
 import type { Message } from "../../src/stores/messages.store";
 import type { MessageListOptions } from "../../src/components/MessageList";
 import type { ReadyChannel } from "../../src/lib/types";
-import { signInAs, resetChannelsState } from "../helpers/storeSeeds";
+import { seedMembersAndChannels } from "../helpers/contentRenderHarness";
 
 const CHANNELS: ReadyChannel[] = [
   { id: 1, name: "general", type: "text", category: null, position: 0 },
@@ -36,20 +36,14 @@ const CHANNELS: ReadyChannel[] = [
 ];
 
 function seedStores(): void {
-  membersStore.setState(() => ({
-    members: new Map([
-      [10, { id: 10, username: "alice", avatar: null, role: "member", status: "online" as const }],
-      [11, { id: 11, username: "Bob", avatar: null, role: "admin", status: "online" as const }],
-      [12, { id: 12, username: "me", avatar: null, role: "member", status: "online" as const }],
-    ]),
-    typingUsers: new Map(),
-  }));
-  signInAs(
-    { id: 12, username: "me", avatar: null, role: "member" },
-    { token: "t", serverName: null },
+  seedMembersAndChannels(
+    [
+      [10, { id: 10, username: "alice", avatar: null, role: "member", status: "online" }],
+      [11, { id: 11, username: "Bob", avatar: null, role: "admin", status: "online" }],
+      [12, { id: 12, username: "me", avatar: null, role: "member", status: "online" }],
+    ],
+    CHANNELS,
   );
-  resetChannelsState();
-  setChannels(CHANNELS);
 }
 
 let container: HTMLDivElement;
@@ -67,6 +61,13 @@ afterEach(() => {
 function render(text: string, info?: Parameters<typeof renderMentionSegment>[1]): HTMLDivElement {
   container.appendChild(renderMentionSegment(text, info));
   return container;
+}
+
+function holdRole5(): void {
+  authStore.setState((prev) => ({
+    ...prev,
+    user: prev.user === null ? null : { ...prev.user, role_ids: [5] },
+  }));
 }
 
 describe("@mention rendering", () => {
@@ -615,10 +616,7 @@ describe("id mention rendering", () => {
 
   it("marks a role pill for a held role with mention-self", () => {
     seedRoles();
-    authStore.setState((prev) => ({
-      ...prev,
-      user: prev.user === null ? null : { ...prev.user, role_ids: [5] },
-    }));
+    holdRole5();
     const el = render("<@&5> <@&6>", { mentionRoles: [5, 6] });
     const pills = el.querySelectorAll(".mention-role");
     expect(pills[0]?.classList.contains("mention-self")).toBe(true);
@@ -627,10 +625,7 @@ describe("id mention rendering", () => {
 
   it("a held role the server did not list is no mention-self pill", () => {
     seedRoles();
-    authStore.setState((prev) => ({
-      ...prev,
-      user: prev.user === null ? null : { ...prev.user, role_ids: [5] },
-    }));
+    holdRole5();
     const pill = render("<@&5>").querySelector(".mention-role");
     expect(pill?.textContent).toBe("@Mods");
     expect(pill?.classList.contains("mention-self")).toBe(false);

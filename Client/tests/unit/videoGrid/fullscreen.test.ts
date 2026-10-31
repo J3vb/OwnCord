@@ -2,84 +2,48 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as mocks from "../../helpers/videoGridMocks";
 import { cascadedDeclaration, keyword } from "../../helpers/app-css";
 import { expectConsole } from "../../helpers/console";
-import { type VideoGridComponent, type TileConfig } from "../../../src/components/VideoGrid";
+import { type VideoGridComponent } from "../../../src/components/VideoGrid";
 import type { ShareSenderSample } from "../../../src/features/voice/shareSenderStats";
-import { fakeStream, makeTileConfig, useVideoGridHarness } from "../../helpers/videoGridHarness";
+import {
+  fakeStream,
+  installFullscreenApi,
+  makeTileConfig,
+  SCREEN_TILE,
+  screenTileConfig,
+  tileLookups,
+  useVideoGridHarness,
+  type FullscreenApi,
+} from "../../helpers/videoGridHarness";
 
 vi.mock("@lib/ui/toast", () => mocks.uiToastMock());
 vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
 
 const { mockShowToast } = mocks;
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
 describe("VideoGrid", () => {
   let container: HTMLDivElement;
   let grid: VideoGridComponent;
 
-  useVideoGridHarness({
-    wired: (c, g) => {
-      container = c;
-      grid = g;
-    },
-    currentGrid: () => grid,
+  useVideoGridHarness((c, g) => {
+    container = c;
+    grid = g;
   });
 
   describe("full screen, pop-out and stream info (PR 4)", () => {
-    const SCREEN = 2 + 1_000_000;
-    const screenCfg: TileConfig = {
-      isSelf: false,
-      audioUserId: 2,
-      isScreenshare: true,
-      name: "Otto",
-    };
-    const cell = (id: number) =>
-      container.querySelector<HTMLElement>(`.video-cell[data-user-id='${id}']`)!;
-    const control = (id: number, name: string) =>
-      cell(id).querySelector<HTMLButtonElement>(`[data-tile-control='${name}']`)!;
-
-    let fullscreenElement: Element | null = null;
-    let requestFullscreen: ReturnType<typeof vi.fn>;
-    let exitFullscreen: ReturnType<typeof vi.fn>;
+    const SCREEN = SCREEN_TILE;
+    const screenCfg = screenTileConfig();
+    const { cell, control } = tileLookups(() => container);
+    let fsApi: FullscreenApi;
 
     beforeEach(() => {
       // Attached, as in the app: the theatre view's keys are document-level.
       document.body.appendChild(container);
-      fullscreenElement = null;
-      const enter = (el: Element): void => {
-        fullscreenElement = el;
-      };
-      requestFullscreen = vi.fn(function (this: Element) {
-        enter(this);
-        document.dispatchEvent(new Event("fullscreenchange"));
-        return Promise.resolve();
-      });
-      exitFullscreen = vi.fn(() => {
-        fullscreenElement = null;
-        document.dispatchEvent(new Event("fullscreenchange"));
-        return Promise.resolve();
-      });
-      Object.defineProperty(document, "fullscreenElement", {
-        configurable: true,
-        get: () => fullscreenElement,
-      });
-      Object.defineProperty(document, "exitFullscreen", {
-        configurable: true,
-        value: exitFullscreen,
-      });
-      Object.defineProperty(HTMLElement.prototype, "requestFullscreen", {
-        configurable: true,
-        value: requestFullscreen,
-      });
+      fsApi = installFullscreenApi();
     });
 
     afterEach(() => {
       container.remove();
-      delete (HTMLElement.prototype as { requestFullscreen?: unknown }).requestFullscreen;
-      delete (document as { exitFullscreen?: unknown }).exitFullscreen;
-      delete (document as { fullscreenElement?: unknown }).fullscreenElement;
+      fsApi.restore();
       vi.useRealTimers();
     });
 
@@ -93,14 +57,14 @@ describe("VideoGrid", () => {
       fs.click();
       await Promise.resolve();
 
-      expect(requestFullscreen).toHaveBeenCalledTimes(1);
-      expect(requestFullscreen.mock.contexts[0]).toBe(cell(SCREEN));
+      expect(fsApi.requestFullscreen).toHaveBeenCalledTimes(1);
+      expect(fsApi.requestFullscreen.mock.contexts[0]).toBe(cell(SCREEN));
       expect(control(SCREEN, "fullscreen").getAttribute("aria-label")).toBe("Exit full screen");
       expect(setWindowFullscreen).toHaveBeenLastCalledWith(true);
 
       control(SCREEN, "fullscreen").click();
       await Promise.resolve();
-      expect(exitFullscreen).toHaveBeenCalledTimes(1);
+      expect(fsApi.exitFullscreen).toHaveBeenCalledTimes(1);
       expect(control(SCREEN, "fullscreen").getAttribute("aria-label")).toBe("Full screen");
       expect(setWindowFullscreen).toHaveBeenLastCalledWith(false);
     });
@@ -111,15 +75,15 @@ describe("VideoGrid", () => {
         new KeyboardEvent("keydown", { key: "f", bubbles: true }),
       );
       await Promise.resolve();
-      expect(requestFullscreen).toHaveBeenCalledTimes(1);
+      expect(fsApi.requestFullscreen).toHaveBeenCalledTimes(1);
 
       cell(SCREEN).dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
       await Promise.resolve();
-      expect(exitFullscreen).toHaveBeenCalledTimes(1);
+      expect(fsApi.exitFullscreen).toHaveBeenCalledTimes(1);
     });
 
     it("falls back to a window-filling theatre view when the full-screen API is refused", async () => {
-      requestFullscreen.mockImplementation(() => Promise.reject(new Error("denied")));
+      fsApi.requestFullscreen.mockImplementation(() => Promise.reject(new Error("denied")));
       const setWindowFullscreen = vi.fn().mockResolvedValue(undefined);
       grid.setCallbacks({ setWindowFullscreen });
       grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screenCfg);
@@ -136,7 +100,7 @@ describe("VideoGrid", () => {
     });
 
     it("leaves the theatre view with Escape or F after focus has left the tile", async () => {
-      requestFullscreen.mockImplementation(() => Promise.reject(new Error("denied")));
+      fsApi.requestFullscreen.mockImplementation(() => Promise.reject(new Error("denied")));
       grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screenCfg);
       const root = container.querySelector<HTMLElement>("[data-testid='video-grid']")!;
 
@@ -195,7 +159,7 @@ describe("VideoGrid", () => {
       control(SCREEN, "fullscreen").click();
       await Promise.resolve();
       const fsCell = cell(SCREEN);
-      expect(fullscreenElement).toBe(fsCell);
+      expect(fsApi.fullscreenElement).toBe(fsCell);
       expect(grid.getFocusedTileId()).toBe(SCREEN);
       expect(control(SCREEN, "select").hidden).toBe(true);
 
@@ -211,7 +175,7 @@ describe("VideoGrid", () => {
       expect(removedNodes(observer).some((n) => n.contains(fsCell))).toBe(false);
       observer.disconnect();
       expect(grid.getFocusedTileId()).toBe(SCREEN);
-      expect(exitFullscreen).not.toHaveBeenCalled();
+      expect(fsApi.exitFullscreen).not.toHaveBeenCalled();
     });
 
     it("leaves full screen when Back to grid moves focus off the tile", async () => {
@@ -224,7 +188,7 @@ describe("VideoGrid", () => {
       control(SCREEN, "grid").click();
       await Promise.resolve();
 
-      expect(exitFullscreen).toHaveBeenCalledTimes(1);
+      expect(fsApi.exitFullscreen).toHaveBeenCalledTimes(1);
       expect(grid.getFocusedTileId()).toBeNull();
       expect(setWindowFullscreen).toHaveBeenLastCalledWith(false);
     });
@@ -239,12 +203,12 @@ describe("VideoGrid", () => {
 
       grid.destroy?.();
 
-      expect(exitFullscreen).toHaveBeenCalledTimes(1);
+      expect(fsApi.exitFullscreen).toHaveBeenCalledTimes(1);
       expect(setWindowFullscreen).toHaveBeenCalledWith(false);
     });
 
     it("takes the window out of the theatre view when the grid goes away", async () => {
-      requestFullscreen.mockImplementation(() => Promise.reject(new Error("denied")));
+      fsApi.requestFullscreen.mockImplementation(() => Promise.reject(new Error("denied")));
       const setWindowFullscreen = vi.fn().mockResolvedValue(undefined);
       grid.setCallbacks({ setWindowFullscreen });
       grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screenCfg);

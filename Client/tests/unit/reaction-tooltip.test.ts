@@ -241,14 +241,24 @@ describe("attachReactionTooltip", () => {
     return { chip, ac: new AbortController() };
   }
 
+  /** A chip with the tooltip attached for message 42 and `count` reactions. */
+  function attachedChip(count = 2) {
+    const made = makeChip();
+    attachReactionTooltip(
+      made.chip,
+      { channelId: 5, messageId: 42, emoji: "👍", count },
+      made.ac.signal,
+    );
+    return made;
+  }
+
   beforeEach(() => {
     document.body.textContent = "";
   });
 
   it("does not fetch before the debounce elapses", () => {
     vi.useFakeTimers();
-    const { chip, ac } = makeChip();
-    attachReactionTooltip(chip, { channelId: 5, messageId: 42, emoji: "👍", count: 2 }, ac.signal);
+    const { chip } = attachedChip();
 
     chip.dispatchEvent(new Event("mouseenter"));
     vi.advanceTimersByTime(REACTION_TOOLTIP_DEBOUNCE_MS - 1);
@@ -258,8 +268,7 @@ describe("attachReactionTooltip", () => {
   });
 
   it("shows the tooltip after the debounce elapses", async () => {
-    const { chip, ac } = makeChip();
-    attachReactionTooltip(chip, { channelId: 5, messageId: 42, emoji: "👍", count: 2 }, ac.signal);
+    const { chip } = attachedChip();
 
     chip.dispatchEvent(new Event("mouseenter"));
 
@@ -272,8 +281,7 @@ describe("attachReactionTooltip", () => {
 
   it("cancels the pending fetch when the pointer leaves first", () => {
     vi.useFakeTimers();
-    const { chip, ac } = makeChip();
-    attachReactionTooltip(chip, { channelId: 5, messageId: 42, emoji: "👍", count: 2 }, ac.signal);
+    const { chip } = attachedChip();
 
     chip.dispatchEvent(new Event("mouseenter"));
     chip.dispatchEvent(new Event("mouseleave"));
@@ -283,8 +291,7 @@ describe("attachReactionTooltip", () => {
   });
 
   it("removes the tooltip on mouseleave", async () => {
-    const { chip, ac } = makeChip();
-    attachReactionTooltip(chip, { channelId: 5, messageId: 42, emoji: "👍", count: 2 }, ac.signal);
+    const { chip } = attachedChip();
 
     chip.dispatchEvent(new Event("mouseenter"));
     await vi.waitFor(() => {
@@ -303,8 +310,7 @@ describe("attachReactionTooltip", () => {
       }),
     );
 
-    const { chip, ac } = makeChip();
-    attachReactionTooltip(chip, { channelId: 5, messageId: 42, emoji: "👍", count: 2 }, ac.signal);
+    const { chip } = attachedChip();
 
     chip.dispatchEvent(new Event("mouseenter"));
     await vi.waitFor(() => {
@@ -320,8 +326,7 @@ describe("attachReactionTooltip", () => {
 
   it("shows nothing when the reactor list comes back empty", async () => {
     fetcher.mockResolvedValue([]);
-    const { chip, ac } = makeChip();
-    attachReactionTooltip(chip, { channelId: 5, messageId: 42, emoji: "👍", count: 0 }, ac.signal);
+    const { chip } = attachedChip(0);
 
     chip.dispatchEvent(new Event("mouseenter"));
     await vi.waitFor(() => {
@@ -333,8 +338,7 @@ describe("attachReactionTooltip", () => {
   });
 
   it("mirrors hover on keyboard focus", async () => {
-    const { chip, ac } = makeChip();
-    attachReactionTooltip(chip, { channelId: 5, messageId: 42, emoji: "👍", count: 2 }, ac.signal);
+    const { chip } = attachedChip();
 
     chip.dispatchEvent(new Event("focusin"));
     await vi.waitFor(() => {
@@ -347,8 +351,7 @@ describe("attachReactionTooltip", () => {
 
   it("tears down the pending timer when the list is destroyed", () => {
     vi.useFakeTimers();
-    const { chip, ac } = makeChip();
-    attachReactionTooltip(chip, { channelId: 5, messageId: 42, emoji: "👍", count: 2 }, ac.signal);
+    const { chip, ac } = attachedChip();
 
     chip.dispatchEvent(new Event("mouseenter"));
     ac.abort();

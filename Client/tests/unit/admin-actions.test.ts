@@ -5,6 +5,13 @@ import type { MemberContextMenuOptions } from "@components/AdminActions";
 import type { VoiceModMenuOptions } from "@components/channel-sidebar/volumeMenu";
 import { useMountContainer } from "../helpers/mountContainer";
 
+const moderationNoops = () => ({
+  onToggleBlock: vi.fn(async () => {}),
+  onKick: vi.fn(async () => {}),
+  onBan: vi.fn(async () => {}),
+  onChangeRole: vi.fn(async () => {}),
+});
+
 describe("AdminActions", () => {
   let container: HTMLDivElement;
   useMountContainer((mounted) => {
@@ -321,10 +328,7 @@ describe("AdminActions", () => {
         availableRoles: ["member"],
         showAdminActions,
         isBlocked: false,
-        onToggleBlock: vi.fn(async () => {}),
-        onKick: vi.fn(async () => {}),
-        onBan: vi.fn(async () => {}),
-        onChangeRole: vi.fn(async () => {}),
+        ...moderationNoops(),
       });
       container.appendChild(result.element);
       return result;
@@ -376,10 +380,7 @@ describe("MemberContextMenu - full menu (3C-3)", () => {
       availableRoles: ["admin", "member"],
       showAdminActions: false,
       isBlocked: false,
-      onToggleBlock: vi.fn(async () => {}),
-      onKick: vi.fn(async () => {}),
-      onBan: vi.fn(async () => {}),
-      onChangeRole: vi.fn(async () => {}),
+      ...moderationNoops(),
       ...overrides,
     };
     const result = createMemberContextMenu(options);
@@ -412,6 +413,18 @@ describe("MemberContextMenu - full menu (3C-3)", () => {
       onMove: vi.fn(),
       onDisconnect: vi.fn(),
       ...over,
+    };
+  }
+
+  function fullActionHandlers() {
+    return {
+      onProfile: vi.fn(),
+      onMention: vi.fn(),
+      onMessage: vi.fn(),
+      onCall: vi.fn(),
+      voiceMod: voiceMod(),
+      onTimeout: vi.fn(async () => {}),
+      onRemoveTimeout: vi.fn(async () => {}),
     };
   }
 
@@ -623,13 +636,7 @@ describe("MemberContextMenu - full menu (3C-3)", () => {
     const { element, destroy } = open({
       isSelf: true,
       showAdminActions: true,
-      onProfile: vi.fn(),
-      onMention: vi.fn(),
-      onMessage: vi.fn(),
-      onCall: vi.fn(),
-      voiceMod: voiceMod(),
-      onTimeout: vi.fn(async () => {}),
-      onRemoveTimeout: vi.fn(async () => {}),
+      ...fullActionHandlers(),
     });
     expect(labels(element)).toEqual(["Profile", "Mention"]);
     destroy();
@@ -656,13 +663,7 @@ describe("MemberContextMenu - full menu (3C-3)", () => {
       canManageRoles: true,
       canTimeout: true,
       timeoutState: "none",
-      onProfile: vi.fn(),
-      onMention: vi.fn(),
-      onMessage: vi.fn(),
-      onCall: vi.fn(),
-      voiceMod: voiceMod(),
-      onTimeout: vi.fn(async () => {}),
-      onRemoveTimeout: vi.fn(async () => {}),
+      ...fullActionHandlers(),
     });
     expect(labels(element)).toEqual([
       "Profile",

@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { makeChannel } from "../helpers/channelFactory";
+import { seedChannelList as seed } from "../helpers/channelListSeed";
 import {
   findChannelById,
   navigateToChannel,
@@ -6,31 +8,9 @@ import {
   stepChannel,
 } from "../../src/lib/nav/channelNavigation";
 import { channelsStore } from "../../src/stores/channels.store";
-import type { Channel } from "../../src/stores/channels.store";
 import { dmStore } from "../../src/stores/dm.store";
 import type { DmChannel } from "../../src/stores/dm.store";
 import { uiStore } from "../../src/stores/ui.store";
-
-function makeChannel(overrides: Partial<Channel> = {}): Channel {
-  return {
-    id: 1,
-    name: "general",
-    type: "text",
-    category: null,
-    position: 0,
-    unreadCount: 0,
-    mentionCount: 0,
-    lastMessageId: null,
-    canSend: true,
-    slowMode: 0,
-    topic: "",
-    nsfw: false,
-    isPrivate: false,
-    voiceMaxUsers: 0,
-    voiceMaxVideo: 0,
-    ...overrides,
-  };
-}
 
 function makeDm(channelId: number, name: string): DmChannel {
   return {
@@ -45,15 +25,6 @@ function makeDm(channelId: number, name: string): DmChannel {
     unreadCount: 0,
     mentionCount: 0,
   };
-}
-
-function seed(channels: Channel[], active: number | null = null): void {
-  channelsStore.setState(() => ({
-    categories: [],
-    channels: new Map(channels.map((c) => [c.id, c])),
-    activeChannelId: active,
-    roles: [],
-  }));
 }
 
 const three = () =>

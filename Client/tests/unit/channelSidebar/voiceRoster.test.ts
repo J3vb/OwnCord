@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from "vitest";
+import { describe, it, expect, vi, type Mock } from "vitest";
 import * as mocks from "../../helpers/channelSidebarMocks";
 import {
   createChannelSidebar,
@@ -15,7 +15,6 @@ import { voiceStore, setSpeakers, removeVoiceUser } from "../../../src/stores/vo
 import { membersStore } from "../../../src/stores/members.store";
 import { noteJoinFailed, noteJoinSucceeded } from "../../../src/features/voice/joinBackoff";
 import {
-  resetStores,
   useSidebarFixture,
   addVoiceUser,
   joinVoiceRoomWith,
@@ -23,6 +22,7 @@ import {
   testChannels,
   voiceModCallbacks,
   setAdminUser,
+  useSidebarScope,
 } from "../../helpers/channelSidebarHarness";
 import { signInAs } from "../../helpers/storeSeeds";
 
@@ -715,19 +715,16 @@ describe("ChannelSidebar voice rows on models", () => {
     });
   });
 
-  beforeEach(() => {
-    resetStores();
-    container = document.createElement("div");
-    document.body.appendChild(container);
-    onVoiceJoin = vi.fn<(channelId: number) => void>();
-    onOpenCall = vi.fn<() => void>();
-    sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall });
-  });
-
-  afterEach(() => {
-    sidebar.destroy?.();
-    container.remove();
-    mockGetUserLocalMute.mockImplementation(() => false);
+  useSidebarScope({
+    build: true,
+    bind: ({ container: c, sidebar: s, onVoiceJoin: v, onOpenCall: o }) => {
+      container = c;
+      sidebar = s!;
+      onVoiceJoin = v!;
+      onOpenCall = o!;
+    },
+    current: () => sidebar,
+    teardown: () => mockGetUserLocalMute.mockImplementation(() => false),
   });
 
   it("rename mid-call updates the label", () => {

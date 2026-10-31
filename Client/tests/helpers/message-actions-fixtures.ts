@@ -5,7 +5,7 @@ import { vi } from "vitest";
 import type { MessageListOptions } from "../../src/components/MessageList";
 import { authStore } from "../../src/stores/auth.store";
 import { channelsStore, setRoles, type Channel } from "../../src/stores/channels.store";
-import type { Message } from "../../src/stores/messages.store";
+import { messagesStore, type Message } from "../../src/stores/messages.store";
 import { setConnectionStatus } from "../../src/stores/ui.store";
 import { setActiveTimeout } from "../../src/features/safety/store";
 import { resetAuthState } from "./storeSeeds";
@@ -107,4 +107,16 @@ export function setDeveloperMode(on: boolean): void {
   window.dispatchEvent(
     new CustomEvent("owncord:pref-change", { detail: { key: "developerMode" } }),
   );
+}
+
+/** Replace the message store with exactly `messages` in channel 1. */
+export function seedMessages(messages: Message[]): void {
+  messagesStore.setState(() => ({
+    messagesByChannel: new Map([[1, messages]]),
+    pendingSends: new Map(),
+    loadedChannels: new Set(),
+    hasMore: new Map(),
+    historyLoadState: new Map(),
+    detachedChannels: new Set(),
+  }));
 }

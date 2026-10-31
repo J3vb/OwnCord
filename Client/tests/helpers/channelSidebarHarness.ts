@@ -181,6 +181,47 @@ export function useSidebarFixture(
   });
 }
 
+export interface SidebarScope {
+  bind(fixture: Partial<SidebarFixture> & Pick<SidebarFixture, "container">): void;
+  current(): ReturnType<typeof createChannelSidebar>;
+  /** Runs after the store reset, before the container is created. */
+  arrange?(): void;
+  /** Creates the sidebar (with fresh spies) in beforeEach instead of leaving it to the test. */
+  build?: boolean;
+  /** Elements matching this selector are removed from the document after each test. */
+  strayElements?: string;
+  teardown?(): void;
+}
+
+/** Like `useSidebarFixture`, for suites that arrange their own stores or build the sidebar later. */
+export function useSidebarScope(scope: SidebarScope): void {
+  let container: HTMLDivElement;
+
+  beforeEach(() => {
+    resetStores();
+    scope.arrange?.();
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    if (!scope.build) {
+      scope.bind({ container });
+      return;
+    }
+    const onVoiceJoin = vi.fn<(channelId: number) => void>();
+    const onOpenCall = vi.fn<() => void>();
+    const sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall });
+    scope.bind({ container, sidebar, onVoiceJoin, onOpenCall });
+  });
+
+  afterEach(() => {
+    scope.current().destroy?.();
+    container.remove();
+    if (scope.strayElements) {
+      document.querySelectorAll(scope.strayElements).forEach((el) => el.remove());
+    }
+    scope.teardown?.();
+  });
+}
+
 /** Put the local user in channel 3 beside one peer, replacing the whole voice state. */
 export function joinVoiceRoomWith(
   userId: number,

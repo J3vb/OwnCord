@@ -400,6 +400,18 @@ const press = (k: string): void => {
 };
 const byId = <T extends HTMLElement>(id: string): T => q<T>(`[data-testid='${id}']`)!;
 
+/** Opens the card, types "lunch" and moves focus to Clear after; nothing is sent yet. */
+function typeLunchThenFocusClearAfter(ws: WsClient): HTMLSelectElement {
+  trigger().click();
+  const input = byId<HTMLInputElement>("spc-custom-input");
+  const select = byId<HTMLSelectElement>("spc-clear-after");
+  input.focus();
+  input.value = "lunch";
+  input.dispatchEvent(new FocusEvent("blur", { relatedTarget: select }));
+  expect(ws.send).not.toHaveBeenCalled();
+  return select;
+}
+
 function setOwn(customStatus: string, expiresAt: string | null | undefined): void {
   membersStore.setState((p) => ({
     ...p,
@@ -831,13 +843,7 @@ describe("SelfProfileCard: timers, Clear after, emoji", () => {
     });
 
     it("text typed before moving to Clear after is still sent when the select changes nothing and the card closes", () => {
-      trigger().click();
-      const input = byId<HTMLInputElement>("spc-custom-input");
-      const select = byId<HTMLSelectElement>("spc-clear-after");
-      input.focus();
-      input.value = "lunch";
-      input.dispatchEvent(new FocusEvent("blur", { relatedTarget: select }));
-      expect(ws.send).not.toHaveBeenCalled();
+      typeLunchThenFocusClearAfter(ws);
       document.body.click(); // outside click, no change event on the select
       expect(card()).toBeNull();
       expect(frames(ws)).toHaveLength(1);
@@ -883,13 +889,7 @@ describe("SelfProfileCard: timers, Clear after, emoji", () => {
     });
 
     it("moving from the text to Clear after sends one frame, not two", () => {
-      trigger().click();
-      const input = byId<HTMLInputElement>("spc-custom-input");
-      const select = byId<HTMLSelectElement>("spc-clear-after");
-      input.focus();
-      input.value = "lunch";
-      input.dispatchEvent(new FocusEvent("blur", { relatedTarget: select }));
-      expect(ws.send).not.toHaveBeenCalled();
+      const select = typeLunchThenFocusClearAfter(ws);
       select.value = "1h";
       select.dispatchEvent(new Event("change", { bubbles: true }));
       expect(frames(ws)).toHaveLength(1);

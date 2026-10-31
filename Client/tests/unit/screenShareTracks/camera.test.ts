@@ -32,6 +32,13 @@ import {
   fakeRoom,
   fakeNativeRoom,
   fakeDeps,
+  publishCamera,
+  expectAnnounced,
+  expectNotAnnounced,
+  cameraState,
+  enableCameraHoldingPublish,
+  expectUnplugTurnsCameraOff,
+  enableCameraAwaitingSupport,
   useScreenShareTracksHarness,
 } from "../../helpers/screenShareTracksHarness";
 
@@ -114,7 +121,7 @@ describe("enableCamera", () => {
     const deps = fakeDeps(rig.room);
     const track = fakeVideoTrack();
     createLocalVideoTrack.mockResolvedValue(track);
-    const state = { manualCameraTrack: null as LocalVideoTrack | null };
+    const state = cameraState();
 
     await enableCamera(state, deps);
 
@@ -122,10 +129,7 @@ describe("enableCamera", () => {
       track,
       expect.objectContaining({ source: Track.Source.Camera }),
     );
-    expect(deps.wsSend).toHaveBeenCalledWith({
-      type: "voice_camera",
-      payload: { enabled: true },
-    });
+    expectAnnounced(deps, "voice_camera", true);
     expect(deps.reapplyAudioPipeline).toHaveBeenCalled();
     expect(state.manualCameraTrack).toBe(track);
     expect(voiceStore.getState().localCamera).toBe(true);
@@ -144,10 +148,7 @@ describe("enableCamera", () => {
   });
 
   it("omits deviceId when no device is saved", async () => {
-    const rig = fakeRoom();
-    createLocalVideoTrack.mockResolvedValue(fakeVideoTrack());
-
-    await enableCamera({ manualCameraTrack: null }, fakeDeps(rig.room));
+    await publishCamera();
 
     expect(createLocalVideoTrack.mock.calls[0]?.[0]).not.toHaveProperty("deviceId");
   });
@@ -224,47 +225,18 @@ describe("enableCamera", () => {
   });
 
   it("does not re-enable the camera when a disable lands during the support check", async () => {
-    const rig = fakeNativeRoom();
-    const deps = fakeDeps(rig.room);
-    let resolveSupport!: (s: { available: boolean; missing: string[] }) => void;
-    nativeCameraSupport.mockReturnValue(
-      new Promise((resolve) => {
-        resolveSupport = resolve;
-      }),
-    );
-    const state = { manualCameraTrack: null as LocalVideoTrack | null };
-
-    const enabling = enableCamera(state, deps);
-    await vi.waitFor(() => {
-      expect(nativeCameraSupport).toHaveBeenCalled();
-    });
+    const { rig, deps, resolveSupport, state, enabling } = await enableCameraAwaitingSupport();
     await disableCamera(state, deps);
     resolveSupport({ available: true, missing: [] });
     await enabling;
 
     expect(rig.createCameraTracks).not.toHaveBeenCalled();
-    expect(deps.wsSend).not.toHaveBeenCalledWith({
-      type: "voice_camera",
-      payload: { enabled: true },
-    });
+    expectNotAnnounced(deps, "voice_camera", true);
     expect(voiceStore.getState().localCamera).toBe(false);
   });
 
   it("marks the camera on before the support check so a second toggle disables it", async () => {
-    const rig = fakeNativeRoom();
-    const deps = fakeDeps(rig.room);
-    let resolveSupport!: (s: { available: boolean; missing: string[] }) => void;
-    nativeCameraSupport.mockReturnValue(
-      new Promise((resolve) => {
-        resolveSupport = resolve;
-      }),
-    );
-    const state = { manualCameraTrack: null as LocalVideoTrack | null };
-
-    const enabling = enableCamera(state, deps);
-    await vi.waitFor(() => {
-      expect(nativeCameraSupport).toHaveBeenCalled();
-    });
+    const { rig, deps, resolveSupport, state, enabling } = await enableCameraAwaitingSupport();
 
     // A second click during the round-trip reads the camera as on, so
     // onCameraToggle routes it to disableCamera rather than re-entering here.
@@ -275,10 +247,7 @@ describe("enableCamera", () => {
 
     expect(rig.createCameraTracks).not.toHaveBeenCalled();
     expect(voiceStore.getState().localCamera).toBe(false);
-    expect(deps.wsSend).not.toHaveBeenCalledWith({
-      type: "voice_camera",
-      payload: { enabled: true },
-    });
+    expectNotAnnounced(deps, "voice_camera", true);
   });
 
   it("releases the created track when publishing fails", async () => {
@@ -287,7 +256,7 @@ describe("enableCamera", () => {
     createLocalVideoTrack.mockResolvedValue(track);
     rig.publishTrack.mockRejectedValue(new Error("publish failed"));
     const deps = fakeDeps(rig.room);
-    const state = { manualCameraTrack: null as LocalVideoTrack | null };
+    const state = cameraState();
 
     await enableCamera(state, deps);
 
@@ -334,7 +303,7 @@ describe("enableCamera", () => {
         resolveTrack = resolve;
       }),
     );
-    const state = { manualCameraTrack: null as LocalVideoTrack | null };
+    const state = cameraState();
 
     const enabling = enableCamera(state, deps);
     // A concurrent disable runs to completion while createLocalVideoTrack is
@@ -353,21 +322,7 @@ describe("enableCamera", () => {
 
   it("does not announce the camera when disableCamera runs during the publish round-trip", async () => {
     const rig = fakeRoom();
-    const deps = fakeDeps(rig.room);
-    const track = fakeVideoTrack();
-    createLocalVideoTrack.mockResolvedValue(track);
-    let resolvePublish!: () => void;
-    rig.publishTrack.mockReturnValue(
-      new Promise<void>((resolve) => {
-        resolvePublish = resolve;
-      }),
-    );
-    const state = { manualCameraTrack: null as LocalVideoTrack | null };
-
-    const enabling = enableCamera(state, deps);
-    await vi.waitFor(() => {
-      expect(rig.publishTrack).toHaveBeenCalled();
-    });
+    const { deps, track, state, enabling, resolvePublish } = await enableCameraHoldingPublish(rig);
     // A concurrent disable runs to completion while publishTrack is still in
     // flight — it announces voice_camera(false) and stops the track.
     await disableCamera(state, deps);
@@ -377,10 +332,7 @@ describe("enableCamera", () => {
     // The superseded enable must not announce voice_camera(true) after the
     // disable's voice_camera(false), or every peer renders a camera tile for
     // a stopped track while the local store says off.
-    expect(deps.wsSend).not.toHaveBeenCalledWith({
-      type: "voice_camera",
-      payload: { enabled: true },
-    });
+    expectNotAnnounced(deps, "voice_camera", true);
     expect(rig.unpublishTrack).toHaveBeenCalledWith(track.mediaStreamTrack);
     expect(track.stop).toHaveBeenCalled();
     expect(state.manualCameraTrack).toBeNull();
@@ -396,7 +348,7 @@ describe("enableCamera", () => {
       rejectA = reject;
     });
     createLocalVideoTrack.mockReturnValueOnce(promiseA).mockResolvedValueOnce(trackB);
-    const state = { manualCameraTrack: null as LocalVideoTrack | null };
+    const state = cameraState();
 
     // Attempt A starts (generation 0) and is stuck awaiting device acquisition.
     const enablingA = enableCamera(state, deps);
@@ -429,22 +381,12 @@ describe("enableCamera", () => {
     const video = fakeVideoTrack();
     createLocalVideoTrack.mockResolvedValue(video);
     const deps = fakeDeps(rig.room);
-    const state = { manualCameraTrack: null as LocalVideoTrack | null };
+    const state = cameraState();
 
     await enableCamera(state, deps);
     deps.wsSend.mockClear();
 
-    (video.mediaStreamTrack as unknown as { dispatch: (t: string) => void }).dispatch("ended");
-
-    await vi.waitFor(() => {
-      expect(deps.wsSend).toHaveBeenCalledWith({
-        type: "voice_camera",
-        payload: { enabled: false },
-      });
-    });
-    expect(voiceStore.getState().localCamera).toBe(false);
-    expect(state.manualCameraTrack).toBeNull();
-    expect(rig.unpublishTrack).toHaveBeenCalledWith(video.mediaStreamTrack);
+    await expectUnplugTurnsCameraOff(rig, deps, state, video);
   });
 
   it("turns the camera off when the track had already ended before it was observed", async () => {
@@ -453,35 +395,24 @@ describe("enableCamera", () => {
     Object.defineProperty(video.mediaStreamTrack, "readyState", { value: "ended" });
     createLocalVideoTrack.mockResolvedValue(video);
     const deps = fakeDeps(rig.room);
-    const state = { manualCameraTrack: null as LocalVideoTrack | null };
+    const state = cameraState();
 
     await enableCamera(state, deps);
 
-    expect(deps.wsSend).toHaveBeenCalledWith({
-      type: "voice_camera",
-      payload: { enabled: false },
-    });
+    expectAnnounced(deps, "voice_camera", false);
     expect(voiceStore.getState().localCamera).toBe(false);
     expect(state.manualCameraTrack).toBeNull();
   });
 
   it("unpublishes and stays silent when the device unplugs during the publish round-trip", async () => {
     const rig = fakeRoom();
-    const deps = fakeDeps(rig.room);
-    const video = fakeVideoTrack();
-    createLocalVideoTrack.mockResolvedValue(video);
-    let resolvePublish!: () => void;
-    rig.publishTrack.mockReturnValue(
-      new Promise<void>((resolve) => {
-        resolvePublish = resolve;
-      }),
-    );
-    const state = { manualCameraTrack: null as LocalVideoTrack | null };
-
-    const enabling = enableCamera(state, deps);
-    await vi.waitFor(() => {
-      expect(rig.publishTrack).toHaveBeenCalled();
-    });
+    const {
+      deps,
+      track: video,
+      state,
+      enabling,
+      resolvePublish,
+    } = await enableCameraHoldingPublish(rig);
     // The unplug lands after enableCamera observed the track as live but
     // before the publish resolves: it disables the camera, which stops the
     // track and clears state.
@@ -497,10 +428,7 @@ describe("enableCamera", () => {
     expect(rig.unpublishTrack).toHaveBeenCalledWith(video.mediaStreamTrack);
     expect(video.stop).toHaveBeenCalled();
     expect(state.manualCameraTrack).toBeNull();
-    expect(deps.wsSend).not.toHaveBeenCalledWith({
-      type: "voice_camera",
-      payload: { enabled: true },
-    });
+    expectNotAnnounced(deps, "voice_camera", true);
   });
 
   it("still turns the camera off on unplug after an earlier enable/disable cycle", async () => {
@@ -509,7 +437,7 @@ describe("enableCamera", () => {
     const first = fakeVideoTrack();
     const second = fakeVideoTrack();
     createLocalVideoTrack.mockResolvedValueOnce(first).mockResolvedValueOnce(second);
-    const state = { manualCameraTrack: null as LocalVideoTrack | null };
+    const state = cameraState();
 
     // First cycle installs and then removes its ended listener.
     await enableCamera(state, deps);
@@ -519,17 +447,7 @@ describe("enableCamera", () => {
     await enableCamera(state, deps);
     deps.wsSend.mockClear();
 
-    (second.mediaStreamTrack as unknown as { dispatch: (t: string) => void }).dispatch("ended");
-
-    await vi.waitFor(() => {
-      expect(deps.wsSend).toHaveBeenCalledWith({
-        type: "voice_camera",
-        payload: { enabled: false },
-      });
-    });
-    expect(voiceStore.getState().localCamera).toBe(false);
-    expect(state.manualCameraTrack).toBeNull();
-    expect(rig.unpublishTrack).toHaveBeenCalledWith(second.mediaStreamTrack);
+    await expectUnplugTurnsCameraOff(rig, deps, state, second);
   });
 });
 
@@ -546,10 +464,7 @@ describe("disableCamera", () => {
 
     expect(track.stop).toHaveBeenCalled();
     expect(rig.setCameraEnabled).toHaveBeenCalledWith(false);
-    expect(deps.wsSend).toHaveBeenCalledWith({
-      type: "voice_camera",
-      payload: { enabled: false },
-    });
+    expectAnnounced(deps, "voice_camera", false);
     expect(voiceStore.getState().localCamera).toBe(false);
   });
 
@@ -565,10 +480,7 @@ describe("disableCamera", () => {
     // The finally block matters: a failed teardown must not leave the UI
     // showing a camera that is not publishing.
     expect(voiceStore.getState().localCamera).toBe(false);
-    expect(deps.wsSend).toHaveBeenCalledWith({
-      type: "voice_camera",
-      payload: { enabled: false },
-    });
+    expectAnnounced(deps, "voice_camera", false);
   });
 
   it("works with no room", async () => {

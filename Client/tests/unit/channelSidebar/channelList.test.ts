@@ -31,11 +31,11 @@ import {
 import { STORAGE_PREFIX } from "@lib/prefs/preferences";
 import { setHideMutedChannels } from "@lib/prefs/hideMutedChannels";
 import {
-  resetStores,
   useSidebarFixture,
   addVoiceUser,
   testChannels,
   setAdminUser,
+  useSidebarScope,
 } from "../../helpers/channelSidebarHarness";
 import { signInAs } from "../../helpers/storeSeeds";
 
@@ -1013,16 +1013,12 @@ describe("ChannelSidebar text rows and groups on models", () => {
     return document.querySelector<HTMLElement>('[data-testid="channel-context-menu"]');
   }
 
-  beforeEach(() => {
-    resetStores();
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    sidebar.destroy?.();
-    container.remove();
-    document.querySelectorAll(".context-menu").forEach((el) => el.remove());
+  useSidebarScope({
+    bind: ({ container: c }) => {
+      container = c;
+    },
+    current: () => sidebar,
+    strayElements: ".context-menu",
   });
 
   it("an unread count change keeps the focused row's node", () => {
@@ -1237,21 +1233,20 @@ describe("ChannelSidebar on one select", () => {
   const row = (id: number): HTMLElement | null =>
     container.querySelector<HTMLElement>(`.channel-item[data-channel-id="${id}"]`);
 
-  beforeEach(() => {
-    resetStores();
+  useSidebarScope({
+    build: true,
+    bind: ({ container: c, sidebar: s }) => {
+      container = c;
+      sidebar = s!;
+    },
+    current: () => sidebar,
     // Mutes persist across tests; start with none.
-    unmuteChannel(1);
-    unmuteChannel(2);
-    invalidateMuteCache();
-    container = document.createElement("div");
-    document.body.appendChild(container);
-    sidebar = createChannelSidebar({ onVoiceJoin: vi.fn(), onOpenCall: vi.fn() });
-  });
-
-  afterEach(() => {
-    sidebar.destroy?.();
-    container.remove();
-    vi.restoreAllMocks();
+    arrange: () => {
+      unmuteChannel(1);
+      unmuteChannel(2);
+      invalidateMuteCache();
+    },
+    teardown: () => vi.restoreAllMocks(),
   });
 
   it("a muted channel that gains a mention under a collapsed category shows with its badge, and keeps it when expanded", () => {

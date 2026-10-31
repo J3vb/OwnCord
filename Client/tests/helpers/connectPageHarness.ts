@@ -140,6 +140,33 @@ export async function mountWithSavedPassword(
   return { page, onLogin, onLoginWithSavedPassword, onRegister };
 }
 
+/** Submits the remembered-password form and expects the backend path, not form text. */
+export async function expectSavedPasswordSubmittedViaBackend(
+  container: HTMLElement,
+): Promise<void> {
+  const { page, onLogin, onLoginWithSavedPassword } = await mountWithSavedPassword(container);
+
+  submitForm(container);
+
+  await waitForCall(onLoginWithSavedPassword, "localhost:8443", "saveduser");
+  expect(onLogin).not.toHaveBeenCalled();
+
+  page.destroy?.();
+}
+
+/** Waits for the saved username to land and expects no password to be in use or shown. */
+export async function expectSavedUserWithoutPassword(
+  container: ParentNode,
+  page: ConnectPageHandle,
+): Promise<void> {
+  await vi.waitFor(() => {
+    expect(qs<HTMLInputElement>(container, "#username").value).toBe("saveduser");
+  });
+
+  expect(page.isUsingSavedPassword()).toBe(false);
+  expect(qs<HTMLInputElement>(container, "#password").value).toBe("");
+}
+
 /** Dispatches a bubbling, cancelable event of `type` on `target`. */
 export function fire(target: EventTarget, type: string): void {
   target.dispatchEvent(new Event(type, { bubbles: true, cancelable: true }));
@@ -214,6 +241,25 @@ export function mountTotp(
   const page = mountPage(container, overrides);
   page.showTotp();
   return { page, totpInput: qs(container, ".totp-overlay input") };
+}
+
+/** Mounts a page, opens its two-factor overlay and returns the overlay's controls. */
+export function mountTotpOverlay(
+  container: HTMLElement,
+  overrides: Partial<ConnectPageCallbacks> = {},
+): {
+  page: ConnectPageHandle;
+  totpOverlay: HTMLDivElement;
+  totpInput: HTMLInputElement;
+  verifyBtn: HTMLButtonElement;
+} {
+  const { page, totpInput } = mountTotp(container, overrides);
+  return {
+    page,
+    totpInput,
+    totpOverlay: qs<HTMLDivElement>(container, ".totp-overlay"),
+    verifyBtn: qs<HTMLButtonElement>(container, ".totp-overlay .btn-primary"),
+  };
 }
 
 export function clickVerify(container: ParentNode): void {

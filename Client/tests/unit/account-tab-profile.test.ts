@@ -44,6 +44,13 @@ function makeOptions(overrides?: Partial<SettingsOverlayOptions>): SettingsOverl
   });
 }
 
+function build(opts: SettingsOverlayOptions): HTMLElement {
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  container.appendChild(buildAccountTab(opts, new AbortController().signal));
+  return container;
+}
+
 describe("validateAvatarFile", () => {
   const ok = { width: 512, height: 512 };
 
@@ -101,6 +108,20 @@ describe("Account tab profile fields", () => {
   });
 
   /** Focus only lands on what is shown, so open the collapsed editor first. */
+  /** Opens the profile editor over a save that stays pending until `settle` is called. */
+  function openEditorWithHeldSave() {
+    setUser({});
+    let settle!: () => void;
+    const options = makeOptions({
+      onUpdateProfile: vi.fn(() => new Promise<void>((resolve) => (settle = resolve))),
+    });
+    container.appendChild(buildAccountTab(options, ac.signal));
+
+    openProfileEditor();
+    const save = container.querySelector<HTMLButtonElement>('[data-testid="profile-save-btn"]')!;
+    return { settle: () => settle(), save };
+  }
+
   function openProfileEditor(): void {
     container.querySelector<HTMLButtonElement>('[data-testid="profile-edit-toggle"]')!.click();
   }
@@ -166,15 +187,7 @@ describe("Account tab profile fields", () => {
   });
 
   it("leaves focus where the user moved it while the save was in flight", async () => {
-    setUser({});
-    let settle!: () => void;
-    const options = makeOptions({
-      onUpdateProfile: vi.fn(() => new Promise<void>((resolve) => (settle = resolve))),
-    });
-    container.appendChild(buildAccountTab(options, ac.signal));
-
-    openProfileEditor();
-    const save = container.querySelector<HTMLButtonElement>('[data-testid="profile-save-btn"]')!;
+    const { settle, save } = openEditorWithHeldSave();
     const about = container.querySelector<HTMLTextAreaElement>('[data-testid="about-input"]')!;
     save.focus();
     save.click();
@@ -188,15 +201,7 @@ describe("Account tab profile fields", () => {
   });
 
   it("puts focus back on Save when it fell to the page during the save", async () => {
-    setUser({});
-    let settle!: () => void;
-    const options = makeOptions({
-      onUpdateProfile: vi.fn(() => new Promise<void>((resolve) => (settle = resolve))),
-    });
-    container.appendChild(buildAccountTab(options, ac.signal));
-
-    openProfileEditor();
-    const save = container.querySelector<HTMLButtonElement>('[data-testid="profile-save-btn"]')!;
+    const { settle, save } = openEditorWithHeldSave();
     save.focus();
     save.click();
     // What Chromium does to a focused control once it is disabled.
@@ -233,13 +238,6 @@ describe("Remove avatar (3C-7a)", () => {
   afterEach(() => {
     document.body.replaceChildren();
   });
-
-  function build(opts: SettingsOverlayOptions): HTMLElement {
-    const container = document.createElement("div");
-    document.body.appendChild(container);
-    container.appendChild(buildAccountTab(opts, new AbortController().signal));
-    return container;
-  }
 
   it("is hidden when the user has no avatar", () => {
     setUser({ avatar: null });
@@ -282,12 +280,6 @@ describe("Banner controls", () => {
   });
   let cropSpy: ReturnType<typeof vi.spyOn> | undefined;
 
-  function build(opts: SettingsOverlayOptions): HTMLElement {
-    const container = document.createElement("div");
-    document.body.appendChild(container);
-    container.appendChild(buildAccountTab(opts, new AbortController().signal));
-    return container;
-  }
   const q = (c: HTMLElement, id: string): HTMLButtonElement =>
     c.querySelector<HTMLButtonElement>(`[data-testid="${id}"]`)!;
   const withBanners = (over?: Partial<SettingsOverlayOptions>): SettingsOverlayOptions =>

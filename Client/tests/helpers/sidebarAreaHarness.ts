@@ -15,8 +15,10 @@ import { createVoiceWidget } from "@components/VoiceWidget";
 import { createCreateChannelModal } from "@components/CreateChannelModal";
 import { createEditChannelModal } from "@components/EditChannelModal";
 import { createDeleteChannelModal } from "@components/DeleteChannelModal";
+import { defaultSidebarAreaOpts } from "./sidebarAreaOpts";
 import { resetMembersState } from "./storeResets";
-import { resetChannelsState } from "./storeSeeds";
+import { makeChannelRow, resetChannelsState, resetVoiceState } from "./storeSeeds";
+import { resetUiState } from "./dmHarness";
 
 // ---------------------------------------------------------------------------
 // Helpers to access mock internals
@@ -46,24 +48,7 @@ export function getMockUpdate(factory: MockedFn): MockedFn {
 export function resetStores(): void {
   resetChannelsState();
   dmStore.setState(() => ({ channels: [] }));
-  uiStore.setState(() => ({
-    sidebarCollapsed: false,
-    memberListVisible: true,
-    settingsOpen: false,
-    activeModal: null,
-    theme: "dark" as const,
-    connectionStatus: "disconnected" as const,
-    connectionDialFailed: false,
-    transientError: null,
-    sessionReplaced: false,
-    persistentError: null,
-    updateRequiredHost: null,
-    collapsedCategories: new Set<string>(),
-    sidebarMode: "channels" as const,
-    activeDmUserId: null,
-    activeView: null,
-    settingsTab: null,
-  }));
+  resetUiState();
   authStore.setState(() => ({
     token: "test-token",
     user: { id: 1, username: "testuser", role: "admin", avatar: null, totp_enabled: false },
@@ -72,18 +57,7 @@ export function resetStores(): void {
     isAuthenticated: true,
   }));
   resetMembersState();
-  voiceStore.setState(() => ({
-    currentChannelId: null,
-    voiceUsers: new Map(),
-    voiceConfigs: new Map(),
-    localMuted: false,
-    localDeafened: false,
-    localCamera: false,
-    localScreenshare: false,
-    joinedAt: null,
-    listenOnly: false,
-    voiceStatus: "idle",
-  }));
+  resetVoiceState();
   localStorage.removeItem("owncord:member-list-height");
   localStorage.removeItem("owncord:member-list-collapsed");
   // The default layout is "right" (3C-6c); these tests exercise the left section.
@@ -143,47 +117,7 @@ export function makeDm(overrides: Partial<DmChannel> = {}): DmChannel {
   };
 }
 
-export function defaultOpts(): SidebarAreaOptions {
-  return {
-    ws: {
-      send: vi.fn(),
-      close: vi.fn(),
-      on: vi.fn(() => vi.fn()),
-      off: vi.fn(),
-    } as unknown as SidebarAreaOptions["ws"],
-    api: {
-      createDm: vi.fn().mockResolvedValue({
-        channel_id: 200,
-        recipient: { id: 20, username: "Bob", avatar: "", status: "online" },
-      }),
-      closeDm: vi.fn().mockResolvedValue(undefined),
-      getInvites: vi.fn().mockResolvedValue([]),
-      createInvite: vi
-        .fn()
-        .mockResolvedValue({ code: "abc", expires_at: "", max_uses: 0, use_count: 0 }),
-      revokeInvite: vi.fn().mockResolvedValue(undefined),
-      adminCreateChannel: vi.fn().mockResolvedValue(undefined),
-      adminUpdateChannel: vi.fn().mockResolvedValue(undefined),
-      adminDeleteChannel: vi.fn().mockResolvedValue(undefined),
-      purgeMessages: vi.fn().mockResolvedValue({ channel_id: 1, ids: [3, 2], count: 2 }),
-      adminKickMember: vi.fn().mockResolvedValue(undefined),
-      adminBanMember: vi.fn().mockResolvedValue(undefined),
-      adminChangeRole: vi.fn().mockResolvedValue(undefined),
-      getConfig: vi.fn().mockReturnValue({ host: "localhost:8080" }),
-    } as unknown as SidebarAreaOptions["api"],
-    limiters: {
-      voice: { tryConsume: vi.fn().mockReturnValue(true) },
-      voiceVideo: { tryConsume: vi.fn().mockReturnValue(true) },
-    } as unknown as SidebarAreaOptions["limiters"],
-    presenceSender: {
-      send: vi.fn(),
-      rollbackRefused: vi.fn(),
-      destroy: vi.fn(),
-    },
-    getRoot: vi.fn().mockReturnValue(document.createElement("div")),
-    getToast: vi.fn().mockReturnValue({ show: vi.fn() }),
-  };
-}
+export const defaultOpts = defaultSidebarAreaOpts;
 
 /** Helper to clean up a SidebarAreaResult */
 export function cleanup(result: ReturnType<typeof createSidebarArea>): void {
@@ -221,24 +155,7 @@ export function enterDmsMode(): void {
 }
 
 /** A complete Channel with quiet defaults; override only what the test cares about. */
-export function makeChannel(overrides: Partial<Channel> & Pick<Channel, "id" | "name">): Channel {
-  return {
-    type: "text",
-    category: null,
-    position: 0,
-    unreadCount: 0,
-    mentionCount: 0,
-    lastMessageId: null,
-    canSend: true,
-    topic: "",
-    slowMode: 0,
-    nsfw: false,
-    isPrivate: false,
-    voiceMaxUsers: 0,
-    voiceMaxVideo: 0,
-    ...overrides,
-  };
-}
+export const makeChannel = makeChannelRow;
 
 /** Add channels to channelsStore, optionally patching other state in the same write. */
 export function seedChannels(

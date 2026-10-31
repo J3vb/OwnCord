@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { withMeasuredSize } from "../helpers/measuredSize";
 import {
   showContextMenu,
   createSubmenuTrigger,
@@ -187,15 +188,7 @@ describe("showContextMenu", () => {
     // so stub the measured size.
     const innerWidth = window.innerWidth;
     const innerHeight = window.innerHeight;
-    Object.defineProperty(HTMLElement.prototype, "offsetWidth", {
-      configurable: true,
-      value: 200,
-    });
-    Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
-      configurable: true,
-      value: 300,
-    });
-    try {
+    withMeasuredSize(200, 300, () => {
       openMenu([{ label: "Purge", onClick: vi.fn(), danger: true }], {
         x: innerWidth - 10,
         y: innerHeight - 10,
@@ -204,34 +197,23 @@ describe("showContextMenu", () => {
       const menu = document.querySelector(".context-menu") as HTMLElement;
       expect(parseInt(menu.style.left, 10)).toBeLessThanOrEqual(innerWidth - 200);
       expect(menu.style.bottom).not.toBe("");
-    } finally {
-      delete (HTMLElement.prototype as unknown as Record<string, unknown>)["offsetWidth"];
-      delete (HTMLElement.prototype as unknown as Record<string, unknown>)["offsetHeight"];
-    }
+    });
   });
 
   it("never pushes a tall menu past the top of a short window", () => {
     vi.stubGlobal("innerWidth", 940);
     vi.stubGlobal("innerHeight", 500);
-    Object.defineProperty(HTMLElement.prototype, "offsetWidth", {
-      configurable: true,
-      value: 200,
-    });
-    Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
-      configurable: true,
-      value: 300,
-    });
     try {
-      openMenu([{ label: "Mark read", onClick: vi.fn() }], { x: 100, y: 250 });
+      withMeasuredSize(200, 300, () => {
+        openMenu([{ label: "Mark read", onClick: vi.fn() }], { x: 100, y: 250 });
 
-      const menu = document.querySelector(".context-menu") as HTMLElement;
-      // Spans y 8..308: its first item stays reachable.
-      expect(menu.style.top).toBe("");
-      expect(menu.style.bottom).toBe("192px");
+        const menu = document.querySelector(".context-menu") as HTMLElement;
+        // Spans y 8..308: its first item stays reachable.
+        expect(menu.style.top).toBe("");
+        expect(menu.style.bottom).toBe("192px");
+      });
     } finally {
       vi.unstubAllGlobals();
-      delete (HTMLElement.prototype as unknown as Record<string, unknown>)["offsetWidth"];
-      delete (HTMLElement.prototype as unknown as Record<string, unknown>)["offsetHeight"];
     }
   });
 
@@ -511,7 +493,7 @@ describe("showContextMenu", () => {
       expect(onClosed).toHaveBeenCalledTimes(1);
     });
 
-    it("restoreFocusTo used when the invoker is disconnected", async () => {
+    async function openMenuWithFocusFallback() {
       const invoker = document.createElement("button");
       const fallback = document.createElement("button");
       document.body.append(invoker, fallback);
@@ -521,6 +503,11 @@ describe("showContextMenu", () => {
         restoreFocusTo: () => fallback,
       });
       await new Promise((r) => setTimeout(r, 0));
+      return { invoker, fallback };
+    }
+
+    it("restoreFocusTo used when the invoker is disconnected", async () => {
+      const { invoker, fallback } = await openMenuWithFocusFallback();
       // The row was rebuilt while the menu was open.
       invoker.remove();
       (document.activeElement as HTMLElement).dispatchEvent(
@@ -531,15 +518,7 @@ describe("showContextMenu", () => {
     });
 
     it("restoreFocusTo is not used while the invoker is still on the page", async () => {
-      const invoker = document.createElement("button");
-      const fallback = document.createElement("button");
-      document.body.append(invoker, fallback);
-      invoker.focus();
-      openMenu([{ label: "One", onClick: vi.fn() }], {
-        className: "kbd-menu",
-        restoreFocusTo: () => fallback,
-      });
-      await new Promise((r) => setTimeout(r, 0));
+      const { invoker, fallback } = await openMenuWithFocusFallback();
       (document.activeElement as HTMLElement).dispatchEvent(
         new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
       );
@@ -649,7 +628,7 @@ describe("submenus and radio rows (3D-3a)", () => {
     expect(flyout.isConnected).toBe(false); // the menu closed
   });
 
-  it("Enter on a plain trigger still opens it", () => {
+  function mountPlainTrigger() {
     const onActivate = vi.fn();
     const menu = document.createElement("div");
     menu.className = "context-menu plain";
@@ -665,8 +644,15 @@ describe("submenus and radio rows (3D-3a)", () => {
     menu.append(trigger, flyout);
     document.body.appendChild(menu);
     // Same keyboard model every menu gets.
-    return import("../../src/lib/ui/contextMenu").then(({ enableMenuKeyboard }) => {
+    const ready = import("../../src/lib/ui/contextMenu").then(({ enableMenuKeyboard }) => {
       enableMenuKeyboard(menu, { signal: ac.signal, onClose: () => menu.remove() });
+    });
+    return { onActivate, trigger, flyout, row, ready };
+  }
+
+  it("Enter on a plain trigger still opens it", () => {
+    const { onActivate, trigger, flyout, row, ready } = mountPlainTrigger();
+    return ready.then(() => {
       trigger.focus();
       key(trigger, "Enter");
       expect(onActivate).not.toHaveBeenCalled();
@@ -676,23 +662,8 @@ describe("submenus and radio rows (3D-3a)", () => {
   });
 
   it("Space on a plain trigger opens it, as Enter does", () => {
-    const onActivate = vi.fn();
-    const menu = document.createElement("div");
-    menu.className = "context-menu plain";
-    const { trigger, flyout } = createSubmenuTrigger(
-      "Plain",
-      "context-menu-item",
-      { onActivate },
-      ac.signal,
-    );
-    const row = document.createElement("button");
-    row.setAttribute("role", "menuitem");
-    flyout.appendChild(row);
-    menu.append(trigger, flyout);
-    document.body.appendChild(menu);
-    // Same keyboard model every menu gets.
-    return import("../../src/lib/ui/contextMenu").then(({ enableMenuKeyboard }) => {
-      enableMenuKeyboard(menu, { signal: ac.signal, onClose: () => menu.remove() });
+    const { onActivate, trigger, flyout, row, ready } = mountPlainTrigger();
+    return ready.then(() => {
       trigger.focus();
       key(trigger, " ");
       expect(onActivate).not.toHaveBeenCalled();

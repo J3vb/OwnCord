@@ -1,7 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as mocks from "../../helpers/videoGridMocks";
 import { type VideoGridComponent, type TileConfig } from "../../../src/components/VideoGrid";
-import { fakeStream, useVideoGridHarness } from "../../helpers/videoGridHarness";
+import {
+  fakeStream,
+  installFullscreenApi,
+  useVideoGridHarness,
+  type FullscreenApi,
+} from "../../helpers/videoGridHarness";
 import { clearHost, hostAndroidApp, hostDesktopApp } from "../../helpers/androidHost";
 
 vi.mock("@lib/ui/toast", () => mocks.uiToastMock());
@@ -38,12 +43,9 @@ describe("VideoGrid on a phone", () => {
   let container: HTMLDivElement;
   let grid: VideoGridComponent;
 
-  useVideoGridHarness({
-    wired: (c, g) => {
-      container = c;
-      grid = g;
-    },
-    currentGrid: () => grid,
+  useVideoGridHarness((c, g) => {
+    container = c;
+    grid = g;
   });
 
   const cell = (id: number) =>
@@ -218,37 +220,12 @@ describe("VideoGrid on a phone", () => {
   });
 
   describe("full screen", () => {
-    let fullscreenElement: Element | null = null;
-    let requestFullscreen: ReturnType<typeof vi.fn>;
+    let fsApi: FullscreenApi;
     let lock: ReturnType<typeof vi.fn>;
     let unlock: ReturnType<typeof vi.fn>;
 
     beforeEach(() => {
-      fullscreenElement = null;
-      const enter = (el: Element): void => {
-        fullscreenElement = el;
-      };
-      requestFullscreen = vi.fn(function (this: Element) {
-        enter(this);
-        document.dispatchEvent(new Event("fullscreenchange"));
-        return Promise.resolve();
-      });
-      Object.defineProperty(document, "fullscreenElement", {
-        configurable: true,
-        get: () => fullscreenElement,
-      });
-      Object.defineProperty(document, "exitFullscreen", {
-        configurable: true,
-        value: vi.fn(() => {
-          fullscreenElement = null;
-          document.dispatchEvent(new Event("fullscreenchange"));
-          return Promise.resolve();
-        }),
-      });
-      Object.defineProperty(HTMLElement.prototype, "requestFullscreen", {
-        configurable: true,
-        value: requestFullscreen,
-      });
+      fsApi = installFullscreenApi();
       lock = vi.fn().mockResolvedValue(undefined);
       unlock = vi.fn();
       vi.stubGlobal("screen", { orientation: { lock, unlock } });
@@ -256,9 +233,7 @@ describe("VideoGrid on a phone", () => {
     });
 
     afterEach(() => {
-      delete (HTMLElement.prototype as { requestFullscreen?: unknown }).requestFullscreen;
-      delete (document as { exitFullscreen?: unknown }).exitFullscreen;
-      delete (document as { fullscreenElement?: unknown }).fullscreenElement;
+      fsApi.restore();
     });
 
     const fsButton = (): HTMLButtonElement =>
@@ -269,12 +244,12 @@ describe("VideoGrid on a phone", () => {
       grid.setFocusedTile(SHARE);
       fsButton().click();
       await vi.waitFor(() => expect(lock).toHaveBeenCalledWith("landscape"));
-      expect(requestFullscreen).toHaveBeenCalledTimes(1);
+      expect(fsApi.requestFullscreen).toHaveBeenCalledTimes(1);
       expect(backClaims.onBack).toHaveLength(1);
 
       // Back: the claim hands over to leave full screen, and the screen turns free.
       backClaims.onBack[0]!();
-      await vi.waitFor(() => expect(fullscreenElement).toBeNull());
+      await vi.waitFor(() => expect(fsApi.fullscreenElement).toBeNull());
       expect(unlock).toHaveBeenCalledTimes(1);
       expect(fsButton().getAttribute("aria-label")).toBe("Full screen");
     });
@@ -284,7 +259,7 @@ describe("VideoGrid on a phone", () => {
       fsButton().click();
       await vi.waitFor(() => expect(lock).toHaveBeenCalled());
       fsButton().click();
-      await vi.waitFor(() => expect(fullscreenElement).toBeNull());
+      await vi.waitFor(() => expect(fsApi.fullscreenElement).toBeNull());
       expect(backClaims.released).toBe(1);
       expect(unlock).toHaveBeenCalledTimes(1);
     });
@@ -295,16 +270,16 @@ describe("VideoGrid on a phone", () => {
       fsButton().click();
       await vi.waitFor(() => expect(lock).toHaveBeenCalled());
       await Promise.resolve();
-      expect(fullscreenElement).toBe(cell(SHARE));
+      expect(fsApi.fullscreenElement).toBe(cell(SHARE));
       fsButton().click();
-      await vi.waitFor(() => expect(fullscreenElement).toBeNull());
+      await vi.waitFor(() => expect(fsApi.fullscreenElement).toBeNull());
       // Nothing was locked, so nothing is unlocked.
       expect(unlock).not.toHaveBeenCalled();
     });
 
     it("falls back to the window-filling view when requestFullscreen is refused", async () => {
       usePhone(true);
-      requestFullscreen.mockImplementation(() => Promise.reject(new Error("denied")));
+      fsApi.requestFullscreen.mockImplementation(() => Promise.reject(new Error("denied")));
       fsButton().click();
       await vi.waitFor(() =>
         expect(cell(SHARE).classList.contains("video-cell--theatre")).toBe(true),
@@ -319,15 +294,15 @@ describe("VideoGrid on a phone", () => {
       usePhone(true);
       vi.stubGlobal("screen", {});
       fsButton().click();
-      await vi.waitFor(() => expect(fullscreenElement).toBe(cell(SHARE)));
+      await vi.waitFor(() => expect(fsApi.fullscreenElement).toBe(cell(SHARE)));
       fsButton().click();
-      await vi.waitFor(() => expect(fullscreenElement).toBeNull());
+      await vi.waitFor(() => expect(fsApi.fullscreenElement).toBeNull());
     });
 
     it("off a phone it claims neither Back nor the orientation", async () => {
       usePhone(false);
       fsButton().click();
-      await vi.waitFor(() => expect(fullscreenElement).toBe(cell(SHARE)));
+      await vi.waitFor(() => expect(fsApi.fullscreenElement).toBe(cell(SHARE)));
       expect(lock).not.toHaveBeenCalled();
       expect(backClaims.onBack).toHaveLength(0);
     });

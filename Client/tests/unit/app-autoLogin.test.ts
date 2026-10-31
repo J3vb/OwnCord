@@ -302,7 +302,7 @@ describe("resume guards", () => {
     expect(hoisted.startSession).not.toHaveBeenCalled();
   });
 
-  it("drops a credential that arrives after the page left", async () => {
+  async function startWithPendingCredential() {
     const cred = gate();
     hoisted.loadCredential.mockReturnValue(
       cred.promise.then(() => ({ username: "ann", token: "t" })),
@@ -310,6 +310,11 @@ describe("resume guards", () => {
     startup();
     loadGate.resolve();
     await flush();
+    return cred;
+  }
+
+  it("drops a credential that arrives after the page left", async () => {
+    const cred = await startWithPendingCredential();
     owner.dispose();
     cred.resolve();
     await flush();
@@ -319,13 +324,7 @@ describe("resume guards", () => {
   });
 
   it("drops a credential that arrives after a manual login superseded the attempt", async () => {
-    const cred = gate();
-    hoisted.loadCredential.mockReturnValue(
-      cred.promise.then(() => ({ username: "ann", token: "t" })),
-    );
-    startup();
-    loadGate.resolve();
-    await flush();
+    const cred = await startWithPendingCredential();
     api.endSession();
     cred.resolve();
     await flush();
@@ -352,13 +351,7 @@ describe("resume guards", () => {
   });
 
   it("does not sign in when Cancel arrived while the credential loaded", async () => {
-    const cred = gate();
-    hoisted.loadCredential.mockReturnValue(
-      cred.promise.then(() => ({ username: "ann", token: "t" })),
-    );
-    startup();
-    loadGate.resolve();
-    await flush();
+    const cred = await startWithPendingCredential();
     cancel();
     cred.resolve();
     await flush();

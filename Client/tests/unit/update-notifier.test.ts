@@ -76,11 +76,8 @@ describe("formatDownloadSize", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Banner rendering
-// ---------------------------------------------------------------------------
-
-describe("createUpdateNotifier download progress", () => {
+/** Registers fake timers and a fresh host element in the document for each test. */
+function useBannerHost(bind: (host: HTMLElement) => void): void {
   let host: HTMLElement;
 
   beforeEach(() => {
@@ -88,11 +85,23 @@ describe("createUpdateNotifier download progress", () => {
     vi.clearAllMocks();
     host = document.createElement("div");
     document.body.appendChild(host);
+    bind(host);
   });
 
   afterEach(() => {
     vi.useRealTimers();
     host.remove();
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Banner rendering
+// ---------------------------------------------------------------------------
+
+describe("createUpdateNotifier download progress", () => {
+  let host: HTMLElement;
+  useBannerHost((created) => {
+    host = created;
   });
 
   async function mountWithAvailableUpdate(): Promise<ReturnType<typeof createUpdateNotifier>> {
@@ -421,17 +430,8 @@ describe("createUpdateNotifier deferred check timer", () => {
 
 describe("createUpdateNotifier connected-path silence", () => {
   let host: HTMLElement;
-
-  beforeEach(() => {
-    vi.useFakeTimers();
-    vi.clearAllMocks();
-    host = document.createElement("div");
-    document.body.appendChild(host);
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-    host.remove();
+  useBannerHost((created) => {
+    host = created;
   });
 
   it("shows no notice when the server answers 204 / no update", async () => {
@@ -464,17 +464,8 @@ describe("createUpdateNotifier connected-path silence", () => {
 
 describe("createUpdateNotifier on a .deb install the server gave no offer", () => {
   let host: HTMLElement;
-
-  beforeEach(() => {
-    vi.useFakeTimers();
-    vi.clearAllMocks();
-    host = document.createElement("div");
-    document.body.appendChild(host);
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-    host.remove();
+  useBannerHost((created) => {
+    host = created;
   });
 
   it("says the server offered nothing instead of claiming the install cannot update itself", async () => {

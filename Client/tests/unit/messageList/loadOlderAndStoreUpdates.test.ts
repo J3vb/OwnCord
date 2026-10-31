@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, type Mock } from "vitest";
 import { fakeTimersTest } from "../../helpers/fakeTimersTest";
 import * as mocks from "../../helpers/messageListMocks";
 import { createMessageList } from "@components/MessageList";
@@ -16,6 +16,18 @@ import {
 vi.mock("../../../src/features/messaging/content/attachments", (importOriginal) =>
   mocks.listAttachmentsMock(importOriginal),
 );
+
+/** An onScrollTop whose fetch stays pending until `resolveLoad` is called. */
+function pendingScrollTop(): { onScrollTop: Mock<() => Promise<void>>; resolveLoad: () => void } {
+  let resolveLoad: () => void = () => {};
+  const onScrollTop = vi.fn(
+    () =>
+      new Promise<void>((resolve) => {
+        resolveLoad = resolve;
+      }),
+  );
+  return { onScrollTop, resolveLoad: () => resolveLoad() };
+}
 
 describe("MessageList", () => {
   let container: HTMLDivElement;
@@ -94,13 +106,7 @@ describe("MessageList", () => {
     // below and reset loadingOlder for an unrelated reason (prevMessageCount
     // syncing from its initial 0), masking the bug this test targets.
     messagesStore.flush();
-    let resolveLoad: () => void = () => {};
-    const onScrollTop = vi.fn(
-      () =>
-        new Promise<void>((resolve) => {
-          resolveLoad = resolve;
-        }),
-    );
+    const { onScrollTop, resolveLoad } = pendingScrollTop();
     // Recreate with the overriding onScrollTop — it's declared readonly, so
     // it must be set at construction rather than mutated on the shared
     // `options` object from beforeEach.
@@ -177,13 +183,7 @@ describe("MessageList", () => {
     setMessages(1, [makeMessage({ id: 1 })]);
     messagesStore.flush();
 
-    let resolveLoad: () => void = () => {};
-    const onScrollTop = vi.fn(
-      () =>
-        new Promise<void>((resolve) => {
-          resolveLoad = resolve;
-        }),
-    );
+    const { onScrollTop, resolveLoad } = pendingScrollTop();
     msgList = createMessageList({ ...options, onScrollTop });
     msgList.mount(container);
 
@@ -236,13 +236,7 @@ describe("MessageList", () => {
     setHasMore(1, true);
     setMessages(1, [makeMessage({ id: 10 })]);
     messagesStore.flush();
-    let resolveLoad: () => void = () => {};
-    const onScrollTop = vi.fn(
-      () =>
-        new Promise<void>((resolve) => {
-          resolveLoad = resolve;
-        }),
-    );
+    const { onScrollTop, resolveLoad } = pendingScrollTop();
     msgList = createMessageList({ ...options, onScrollTop });
     msgList.mount(container);
     const root = container.querySelector(".messages-container") as HTMLDivElement;

@@ -11,6 +11,9 @@ import {
   vUser,
   usersOf,
   useVideoModeControllerHarness,
+  callUser,
+  mountCallGrid,
+  unmountCallGrid,
 } from "../../helpers/videoModeControllerHarness";
 
 vi.mock("@stores/voice.store", () => mocks.voiceStoreMock());
@@ -341,12 +344,7 @@ describe("createVideoModeController", () => {
     });
   });
   describe("call pop-out", () => {
-    const user = (userId: number, username: string) => ({
-      userId,
-      username,
-      camera: false,
-      screenshare: false,
-    });
+    const user = callUser;
     let container: HTMLDivElement;
     let grid: ReturnType<typeof createVideoGrid>;
     let slots: ReturnType<typeof makeSlots>;
@@ -376,14 +374,6 @@ describe("createVideoModeController", () => {
 
     beforeEach(() => {
       vi.useFakeTimers();
-      vi.stubGlobal(
-        "ResizeObserver",
-        class {
-          observe(): void {}
-          unobserve(): void {}
-          disconnect(): void {}
-        },
-      );
       popDoc = document.implementation.createHTMLDocument("");
       win = Object.assign(new EventTarget(), {
         closed: false,
@@ -397,21 +387,12 @@ describe("createVideoModeController", () => {
         "open",
         vi.fn(() => win as unknown as Window),
       );
-      container = document.createElement("div");
-      document.body.appendChild(container);
-      grid = createVideoGrid();
-      grid.mount(container);
-      slots = makeSlots();
-      users = new Map([
-        [1, user(1, "me")],
-        [2, user(2, "bob")],
-      ]);
+      ({ container, grid, slots, users } = mountCallGrid());
       setVoice();
     });
 
     afterEach(() => {
-      grid.destroy?.();
-      container.remove();
+      unmountCallGrid({ container, grid });
       vi.useRealTimers();
       vi.unstubAllGlobals();
     });

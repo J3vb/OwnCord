@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createMessageList } from "@components/MessageList";
-import { messagesStore, type Message } from "@stores/messages.store";
+
 import { applyReadyCapabilities, resetServerCapabilities } from "@lib/net/serverCapabilities";
 import { resetThreadsStore } from "@stores/threads.store";
 import {
@@ -11,20 +11,10 @@ import {
   resetGateStores,
   setChannel,
   signInAs,
+  seedMessages as seed,
 } from "../helpers/message-actions-fixtures";
 import { resetMembersState } from "../helpers/storeResets";
 import "../helpers/resizeObserverStub";
-
-function seed(messages: Message[]): void {
-  messagesStore.setState(() => ({
-    messagesByChannel: new Map([[1, messages]]),
-    pendingSends: new Map(),
-    loadedChannels: new Set(),
-    hasMore: new Map(),
-    historyLoadState: new Map(),
-    detachedChannels: new Set(),
-  }));
-}
 
 describe("Create Thread in the message menu", () => {
   let container: HTMLDivElement;

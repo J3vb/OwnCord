@@ -7,7 +7,6 @@ import {
   openMessageTarget,
 } from "../../../src/lib/notifications";
 import { channelsStore } from "../../../src/stores/channels.store";
-import { membersStore } from "../../../src/stores/members.store";
 import { setBlockedByMe } from "../../../src/stores/blocks.store";
 import type { ChannelActivityEntry } from "../../../src/lib/types";
 import { setLogLevel } from "../../../src/lib/logger";
@@ -22,6 +21,7 @@ import {
   makePayload,
   seedBobDm,
   useNotificationsHarness,
+  seedNicknamedMember,
 } from "../../helpers/notificationsHarness";
 
 vi.mock("../../../src/lib/prefs/preferences", (importOriginal) =>
@@ -191,23 +191,7 @@ describe("notifyIncomingMessage", () => {
     }
 
     beforeEach(() => {
-      membersStore.setState(() => ({
-        members: new Map([
-          [
-            2,
-            {
-              id: 2,
-              username: "a_martinez",
-              avatar: null,
-              role: "member",
-              status: "online" as const,
-              displayName: "Alice",
-            },
-          ],
-        ]),
-        typingUsers: new Map(),
-        roleRevision: 0,
-      }));
+      seedNicknamedMember(0);
       setBlockedByMe([]);
     });
 

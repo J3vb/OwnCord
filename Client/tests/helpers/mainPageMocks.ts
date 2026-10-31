@@ -100,14 +100,7 @@ export const {
   memberPanels: { created: 0, destroyed: 0, events: [] as string[] },
 };
 
-// B9-8: this suite exercises content the viewer has already consented to;
-// the consent gate itself is proven in src/features/content-consent/external.test.ts.
-export async function consentExternalMock(importOriginal: <T>() => Promise<T>) {
-  return {
-    ...(await importOriginal<typeof import("../../src/features/content-consent/external")>()),
-    externalAllowed: () => true,
-  };
-}
+export { consentExternalMock } from "./mediaMocks";
 
 export { loggerMock } from "./loggerMock";
 

@@ -4,6 +4,7 @@ import { createVideoGrid, type VideoGridComponent } from "../../../src/component
 import { RemoteTracks } from "../../../src/features/voice/remoteTracks";
 import { VideoQuality, type Room } from "livekit-client";
 import {
+  addAudioTile,
   fakeStream,
   fakeStreamWithTrack,
   fakePopup,
@@ -14,20 +15,13 @@ import {
 vi.mock("@lib/ui/toast", () => mocks.uiToastMock());
 vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
 describe("VideoGrid", () => {
   let container: HTMLDivElement;
   let grid: VideoGridComponent;
 
-  useVideoGridHarness({
-    wired: (c, g) => {
-      container = c;
-      grid = g;
-    },
-    currentGrid: () => grid,
+  const harness = useVideoGridHarness((c, g) => {
+    container = c;
+    grid = g;
   });
 
   // -----------------------------------------------------------------------
@@ -143,8 +137,7 @@ describe("VideoGrid", () => {
     });
 
     it("clicking mute button on a focused tile does not switch focus", () => {
-      const config = makeTileConfig({ isSelf: false, audioUserId: 1, isScreenshare: false });
-      grid.addStream(1, "Alice", fakeStream(), config);
+      addAudioTile(grid, 1, "Alice", false);
       grid.addStream(2, "Bob", fakeStream());
 
       grid.setFocusedTile(1);
@@ -436,7 +429,7 @@ describe("VideoGrid", () => {
       Object.defineProperty(document, "hidden", { configurable: true, get: () => hidden });
 
       const tracks = new RemoteTracks(room);
-      grid = createVideoGrid();
+      grid = harness.adopt(createVideoGrid());
       grid.mount(container);
       grid.setCallbacks({
         setStreamView: (tileId, view) =>

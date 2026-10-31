@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { attachChannelContextMenu } from "@components/channel-sidebar/contextMenu";
+import { makeChannel } from "../helpers/channelFactory";
+import { openChannelMenu, useChannelMenuHost } from "../helpers/channelMenuHost";
 import { buildNotificationsTab } from "../../src/features/settings/NotificationsTab";
 import { invalidateMuteCache, muteChannel, setChannelMutesHost } from "@lib/prefs/channelMutes";
 import {
@@ -12,54 +13,28 @@ import { channelsStore } from "@stores/channels.store";
 import { cascadedDeclaration } from "../helpers/app-css";
 import type { Channel } from "@stores/channels.store";
 
-function channel(overrides: Partial<Channel> = {}): Channel {
-  return {
-    id: 5,
-    name: "general",
-    type: "text",
-    category: null,
-    position: 0,
-    unreadCount: 0,
-    mentionCount: 0,
-    lastMessageId: null,
-    canSend: true,
-    slowMode: 0,
-    topic: "",
-    nsfw: false,
-    isPrivate: false,
-    voiceMaxUsers: 0,
-    voiceMaxVideo: 0,
-    ...overrides,
-  };
-}
+const channel = (overrides: Partial<Channel> = {}): Channel => makeChannel({ id: 5, ...overrides });
 
 let container: HTMLDivElement;
 let ac: AbortController;
+useChannelMenuHost((c, a) => {
+  container = c;
+  ac = a;
+});
 
 beforeEach(() => {
   localStorage.clear();
   setChannelMutesHost("ui.example");
   invalidateMuteCache();
   setGlobalNotificationLevel("mentions");
-  container = document.createElement("div");
-  document.body.appendChild(container);
-  ac = new AbortController();
 });
 
 afterEach(() => {
-  ac.abort();
-  container.remove();
-  document.querySelectorAll(".channel-ctx-menu").forEach((el) => el.remove());
   setChannelMutesHost(null);
   localStorage.clear();
 });
 
-function openMenu(ch: Channel): void {
-  const el = document.createElement("div");
-  container.appendChild(el);
-  attachChannelContextMenu(el, ch, ac.signal, ac.signal);
-  el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 4, clientY: 4 }));
-}
+const openMenu = (ch: Channel): HTMLElement => openChannelMenu(container, ch, ac.signal);
 
 const q = (id: string): HTMLElement | null => document.querySelector(`[data-testid="${id}"]`);
 

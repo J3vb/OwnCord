@@ -1,36 +1,34 @@
-import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import * as mocks from "../../helpers/apiRequestsMocks";
-import { createApiClient, type OnUnauthorized } from "../../../src/lib/api";
-import { Api, okResponse, BASE } from "../../helpers/apiRequestsHarness";
+import { createApiClient } from "../../../src/lib/api";
+import {
+  Api,
+  okResponse,
+  BASE,
+  useRequestsClient,
+  requestReaders,
+} from "../../helpers/apiRequestsHarness";
 
 vi.mock("@tauri-apps/plugin-http", () => mocks.pluginHttpMock());
 vi.mock("@tauri-apps/api/event", () => mocks.apiEventMock());
 vi.mock("../../../src/lib/net/httpProxy", () => mocks.netHttpProxyMock());
 
-const { mockFetch, proxy, progressHandlers } = mocks;
+const { mockFetch } = mocks;
 
 describe("REST client requests", () => {
   let api: Api;
-  let onUnauthorized: Mock<OnUnauthorized>;
 
-  const callUrl = (n = 0): string => mockFetch.mock.calls[n]?.[0] as string;
-  const callInit = (n = 0): RequestInit => mockFetch.mock.calls[n]?.[1] as RequestInit;
-  const callHeaders = (n = 0): Record<string, string> =>
-    callInit(n).headers as Record<string, string>;
-  const callBody = (n = 0): unknown => JSON.parse(callInit(n).body as string);
+  const { callUrl, callInit, callHeaders, callBody } = requestReaders(mockFetch);
 
-  beforeEach(() => {
-    mockFetch.mockReset();
-    proxy.impl = (host) => Promise.resolve(`https://${host}`);
-    progressHandlers.clear();
-    mockFetch.mockImplementation(() => Promise.resolve(okResponse({})));
-    onUnauthorized = vi.fn<OnUnauthorized>();
-    api = createApiClient({ host: "host.test:8443", token: "tok-1" }, onUnauthorized);
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-  });
+  useRequestsClient(
+    mocks,
+    () => {
+      vi.useRealTimers();
+    },
+    (client) => {
+      api = client;
+    },
+  );
 
   interface Row {
     readonly name: string;

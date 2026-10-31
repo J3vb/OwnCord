@@ -10,6 +10,9 @@ import {
   makeController,
   vUser,
   useVideoModeControllerHarness,
+  callUser,
+  mountCallGrid,
+  unmountCallGrid,
 } from "../../helpers/videoModeControllerHarness";
 
 vi.mock("@stores/voice.store", () => mocks.voiceStoreMock());
@@ -164,12 +167,7 @@ describe("createVideoModeController", () => {
   });
 
   describe("call view (1B-1)", () => {
-    const user = (userId: number, username: string, video: Partial<{ camera: boolean }> = {}) => ({
-      userId,
-      username,
-      camera: video.camera ?? false,
-      screenshare: false,
-    });
+    const user = callUser;
     let container: HTMLDivElement;
     let grid: ReturnType<typeof createVideoGrid>;
     let slots: ReturnType<typeof makeSlots>;
@@ -192,30 +190,12 @@ describe("createVideoModeController", () => {
     const tileIds = () => avatarTiles().map((t) => t.dataset.personId);
 
     beforeEach(() => {
-      // ResizeObserver is not available in JSDOM
-      vi.stubGlobal(
-        "ResizeObserver",
-        class {
-          observe(): void {}
-          unobserve(): void {}
-          disconnect(): void {}
-        },
-      );
-      container = document.createElement("div");
-      document.body.appendChild(container);
-      grid = createVideoGrid();
-      grid.mount(container);
-      slots = makeSlots();
-      users = new Map([
-        [1, user(1, "me")],
-        [2, user(2, "bob")],
-      ]);
+      ({ container, grid, slots, users } = mountCallGrid());
       setVoice();
     });
 
     afterEach(() => {
-      grid.destroy?.();
-      container.remove();
+      unmountCallGrid({ container, grid });
       vi.unstubAllGlobals();
     });
 

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import * as mocks from "../../helpers/mainPageMocks";
 import { createMainPage } from "../../../src/pages/MainPage";
 import { channelsStore } from "../../../src/stores/channels.store";
@@ -19,14 +19,15 @@ import { desktop } from "../../../src/platform/desktop";
 import { saveUserStatus } from "../../../src/lib/presence/userStatus";
 import { markAllRead } from "../../../src/lib/readState";
 import {
-  resetStores,
   fakeWs,
   fakeApi,
   textChannel,
   dmChannel,
   useMainPageHarness,
+  useMainPageScope,
   mountPage,
   seedChannels,
+  oneToOneDm,
 } from "../../helpers/mainPageHarness";
 
 vi.mock("../../../src/features/content-consent/external", (importOriginal) =>
@@ -129,20 +130,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   it("scopes DM profile notes to the connected host, like channel mutes and the NSFW gate", async () => {
     seedChannels([dmChannel(60, "dm-carol")], 60);
     dmStore.setState(() => ({
-      channels: [
-        {
-          channelId: 60,
-          recipient: { id: 5, username: "carol", avatar: "", status: "online" },
-          participants: [{ id: 5, username: "carol", avatar: "", status: "online" }],
-          name: "carol",
-          isGroup: false,
-          lastMessageId: null,
-          lastMessage: "",
-          lastMessageAt: "",
-          unreadCount: 0,
-          mentionCount: 0,
-        },
-      ],
+      channels: [{ ...oneToOneDm(60, 5, "carol"), name: "carol" }],
     }));
 
     const hostedApi = {
@@ -490,29 +478,28 @@ describe("MainPage — presence", () => {
   let container: HTMLDivElement;
   let page: ReturnType<typeof createMainPage>;
 
-  beforeEach(() => {
-    resetStores();
+  useMainPageScope({
+    wired: (c) => {
+      container = c;
+    },
+    currentPage: () => page,
+    fakeTimers: true,
     // Match the client's own idea of the signed-in user's status to the
     // freshly-reset (default "online") saved preference, so the mount-time
     // restoreSavedPresence() call (MainPage.ts:340) is the no-op it
     // documents itself as being, and doesn't spend the single presence
     // token before this test gets to exercise applyPresence directly.
-    authStore.setState((prev) => ({
-      ...prev,
-      user: prev.user === null ? null : { ...prev.user, status: "online" },
-    }));
-    capturedAutoIdleOptions.current = null;
-    container = document.createElement("div");
-    document.body.appendChild(container);
-    vi.useFakeTimers();
-  });
-
-  afterEach(() => {
-    page?.destroy?.();
-    container.remove();
-    vi.useRealTimers();
-    localStorage.removeItem("owncord:settings:userStatus");
-    localStorage.removeItem("owncord:settings:userStatusOrigin");
+    arrange: () => {
+      authStore.setState((prev) => ({
+        ...prev,
+        user: prev.user === null ? null : { ...prev.user, status: "online" },
+      }));
+      capturedAutoIdleOptions.current = null;
+    },
+    teardown: () => {
+      localStorage.removeItem("owncord:settings:userStatus");
+      localStorage.removeItem("owncord:settings:userStatusOrigin");
+    },
   });
 
   it("does not tell auto-idle about voice calls: Idle still applies in a call", () => {
@@ -569,17 +556,12 @@ describe("MainPage — server restart banner", () => {
   let container: HTMLDivElement;
   let page: ReturnType<typeof createMainPage>;
 
-  beforeEach(() => {
-    resetStores();
-    container = document.createElement("div");
-    document.body.appendChild(container);
-    vi.useFakeTimers();
-  });
-
-  afterEach(() => {
-    page?.destroy?.();
-    container.remove();
-    vi.useRealTimers();
+  useMainPageScope({
+    wired: (c) => {
+      container = c;
+    },
+    currentPage: () => page,
+    fakeTimers: true,
   });
 
   it("re-syncs to the real (connected) status instead of counting down to a fake Reconnecting on an update_aborted cancel", () => {
@@ -617,17 +599,12 @@ describe("MainPage — mark-all-read teardown", () => {
   let container: HTMLDivElement;
   let page: ReturnType<typeof createMainPage>;
 
-  beforeEach(() => {
-    resetStores();
-    container = document.createElement("div");
-    document.body.appendChild(container);
-    vi.useFakeTimers();
-  });
-
-  afterEach(() => {
-    page?.destroy?.();
-    container.remove();
-    vi.useRealTimers();
+  useMainPageScope({
+    wired: (c) => {
+      container = c;
+    },
+    currentPage: () => page,
+    fakeTimers: true,
   });
 
   it("cancels a queued Mark All as Read burst on destroy instead of letting it fire after the page is torn down", () => {

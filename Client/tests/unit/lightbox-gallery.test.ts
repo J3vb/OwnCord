@@ -3,6 +3,7 @@
  * (3A-10c): lightbox-gallery.ts, driven through openImageLightbox.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as logMock from "../helpers/loggerMock";
 
 const { fetchMock, saveMock, writeFileMock } = vi.hoisted(() => ({
   fetchMock: vi.fn(),
@@ -17,9 +18,7 @@ vi.mock("@lib/net/httpProxy", () => ({
   ensureHttpProxy: () => Promise.resolve("http://127.0.0.1:9999"),
   stopHttpProxy: () => Promise.resolve(),
 }));
-vi.mock("@lib/logger", () => ({
-  createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
-}));
+vi.mock("@lib/logger", () => logMock.loggerMock());
 vi.mock("@lib/icons", () => ({ createIcon: () => document.createElement("span") }));
 
 import {

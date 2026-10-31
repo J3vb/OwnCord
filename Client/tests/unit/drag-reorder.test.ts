@@ -9,6 +9,7 @@
  */
 
 import { beforeEach, afterEach, describe, expect, it, vi, type Mock } from "vitest";
+import { makeChannel } from "../helpers/channelFactory";
 
 import {
   attachDragHandlers,
@@ -38,25 +39,8 @@ function signIn(role: string): void {
   }));
 }
 
-function makeCh(id: number, position: number, name = `ch-${id}`): Channel {
-  return {
-    id,
-    name,
-    type: "text",
-    category: null,
-    position,
-    unreadCount: 0,
-    mentionCount: 0,
-    lastMessageId: null,
-    canSend: true,
-    topic: "",
-    slowMode: 0,
-    nsfw: false,
-    isPrivate: false,
-    voiceMaxUsers: 0,
-    voiceMaxVideo: 0,
-  };
-}
+const makeCh = (id: number, position: number, name = `ch-${id}`): Channel =>
+  makeChannel({ id, name, position });
 
 interface Rig {
   container: HTMLElement;
@@ -606,12 +590,17 @@ describe("mid-drag sidebar re-render", () => {
     }));
   }
 
-  it("resolves the drop against the live rows after a re-render replaces the container", () => {
+  function ownerRigOfThree() {
     signIn("owner");
     const channels = [makeCh(1, 0), makeCh(2, 1), makeCh(3, 2)];
     setStoreChannels(channels);
     const rig = buildRig(channels);
     const source = rig.items.get(1)!;
+    return { channels, rig, source };
+  }
+
+  it("resolves the drop against the live rows after a re-render replaces the container", () => {
+    const { channels, rig, source } = ownerRigOfThree();
 
     // Start the drag on the original rows.
     beginDrag(source, 0);
@@ -632,11 +621,7 @@ describe("mid-drag sidebar re-render", () => {
   });
 
   it("moves the drop indicator to the live rows after a re-render replaces the container", () => {
-    signIn("owner");
-    const channels = [makeCh(1, 0), makeCh(2, 1), makeCh(3, 2)];
-    setStoreChannels(channels);
-    const rig = buildRig(channels);
-    const source = rig.items.get(1)!;
+    const { channels, rig, source } = ownerRigOfThree();
 
     beginDrag(source, 0);
 
@@ -649,11 +634,7 @@ describe("mid-drag sidebar re-render", () => {
   });
 
   it("discards the drop when the dragged channel has no live row after the re-render", () => {
-    signIn("owner");
-    const channels = [makeCh(1, 0), makeCh(2, 1), makeCh(3, 2)];
-    setStoreChannels(channels);
-    const rig = buildRig(channels);
-    const source = rig.items.get(1)!;
+    const { rig, source } = ownerRigOfThree();
 
     beginDrag(source, 0);
 

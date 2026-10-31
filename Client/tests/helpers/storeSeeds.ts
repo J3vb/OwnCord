@@ -1,5 +1,6 @@
 import { authStore, type AuthState } from "@stores/auth.store";
-import { channelsStore } from "@stores/channels.store";
+import { channelsStore, type Channel } from "@stores/channels.store";
+import { voiceStore } from "@stores/voice.store";
 
 /** Put authStore in its signed-out state. */
 export function resetAuthState(): void {
@@ -34,4 +35,42 @@ export function resetChannelsState(): void {
     roles: [],
     categories: [],
   }));
+}
+
+/** Put voiceStore back to idle: no channel joined, nothing muted or shared. */
+export function resetVoiceState(): void {
+  voiceStore.setState(() => ({
+    currentChannelId: null,
+    voiceUsers: new Map(),
+    voiceConfigs: new Map(),
+    localMuted: false,
+    localDeafened: false,
+    localCamera: false,
+    localScreenshare: false,
+    joinedAt: null,
+    listenOnly: false,
+    voiceStatus: "idle",
+  }));
+}
+
+/** A complete Channel with quiet defaults; override only what the test cares about. */
+export function makeChannelRow(
+  overrides: Pick<Channel, "id" | "name"> & Partial<Channel>,
+): Channel {
+  return {
+    type: "text",
+    category: null,
+    position: 0,
+    unreadCount: 0,
+    mentionCount: 0,
+    lastMessageId: null,
+    canSend: true,
+    topic: "",
+    slowMode: 0,
+    nsfw: false,
+    isPrivate: false,
+    voiceMaxUsers: 0,
+    voiceMaxVideo: 0,
+    ...overrides,
+  };
 }

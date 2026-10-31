@@ -84,6 +84,20 @@ describe("SidebarArea", () => {
 
   const signedIn = { token: "tok", isAuthenticated: true } as const;
 
+  /** Signs in with a single role and checks whether the header entry `testId` is shown. */
+  function expectEntryVisibility(
+    testId: string,
+    role: string,
+    permissions: number,
+    shown: boolean,
+  ): void {
+    signInWithRole(role, permissions, signedIn);
+    const result = createSidebarArea(defaultOpts());
+    const entry = result.sidebarWrapper.querySelector<HTMLElement>(`[data-testid='${testId}']`);
+    expect(entry?.style.display === "none").toBe(!shown);
+    cleanup(result);
+  }
+
   /** Give the current user a single role holding `permissions`. */
   function signInWithRole(
     roleName: string,
@@ -406,10 +420,7 @@ describe("SidebarArea", () => {
         },
       ]),
     )("%s", (_name, { role, permissions, shown }) => {
-      signInWithRole(role, permissions, signedIn);
-      const result = createSidebarArea(defaultOpts());
-      expect(auditBtn(result)?.style.display === "none").toBe(!shown);
-      cleanup(result);
+      expectEntryVisibility("audit-log-btn", role, permissions, shown);
     });
 
     // `ready` can land after the header is built, and a moderator whose role
@@ -496,10 +507,7 @@ describe("SidebarArea", () => {
         },
       ]),
     )("%s", (_name, { role, permissions, shown }) => {
-      signInWithRole(role, permissions, signedIn);
-      const result = createSidebarArea(defaultOpts());
-      expect(inviteBtn(result)?.style.display === "none").toBe(!shown);
-      cleanup(result);
+      expectEntryVisibility("invite-btn", role, permissions, shown);
     });
 
     it("follows a role list that arrives or changes after mount", () => {

@@ -1,5 +1,6 @@
 import { expect } from "vitest";
 import { JSDOM } from "jsdom";
+import { scriptedPanelFetch } from "./adminPanelFetch";
 import { ADMIN_HTML_SOURCE } from "./serverAdminStaticPanelMocks";
 
 // The panel's scripts are classic scripts: their top-level declarations live in
@@ -115,34 +116,7 @@ export function loadAdminPanel(calls: FetchCall[], respond: Responder): JSDOM {
     runScripts: "dangerously",
     pretendToBeVisual: true,
     beforeParse(window) {
-      window.fetch = (async (input: string, opts: Record<string, unknown> = {}) => {
-        const method = String((opts.method as string) || "GET").toUpperCase();
-        const p = String(input).replace(/^\/admin\/api/, "");
-        let body: unknown;
-        if (typeof opts.body === "string") {
-          try {
-            body = JSON.parse(opts.body);
-          } catch {
-            body = opts.body;
-          }
-        }
-        calls.push({
-          method,
-          url: String(input),
-          path: p,
-          body,
-          headers: (opts.headers as Record<string, string>) ?? {},
-        });
-        const r = respond(p, method);
-        const status = r.status ?? 200;
-        return {
-          ok: status >= 200 && status < 300,
-          status,
-          headers: new Headers(r.headers),
-          json: async () => r.json ?? {},
-          text: async () => r.text ?? JSON.stringify(r.json ?? {}),
-        } as Response;
-      }) as typeof fetch;
+      window.fetch = scriptedPanelFetch((call) => calls.push(call), respond);
     },
   });
 }

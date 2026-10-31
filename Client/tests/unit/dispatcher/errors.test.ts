@@ -33,20 +33,24 @@ vi.mock("../../../src/features/connection/dispatchContext", async (importOrigina
 
 const { mockShowToast } = dispatcherMocks;
 
+function dispatchBanned(): void {
+  patchAuth({
+    isAuthenticated: true,
+    user: { id: 1, username: "banned-user", avatar: null, role: "member" },
+  });
+
+  mock.dispatch("error", {
+    code: "BANNED",
+    message: "You have been banned from this server",
+  });
+  expectConsole("error", /\[dispatcher\] Server error/);
+}
+
 describe("WS Dispatcher", () => {
   useDispatcherHarness();
 
   it("wires error BANNED to clear auth and show error", () => {
-    patchAuth({
-      isAuthenticated: true,
-      user: { id: 1, username: "banned-user", avatar: null, role: "member" },
-    });
-
-    mock.dispatch("error", {
-      code: "BANNED",
-      message: "You have been banned from this server",
-    });
-    expectConsole("error", /\[dispatcher\] Server error/);
+    dispatchBanned();
 
     expect(authStore.getState().isAuthenticated).toBe(false);
     const error = uiStore.getState().transientError;
@@ -62,16 +66,7 @@ describe("WS Dispatcher", () => {
   });
 
   it("wires error BANNED to disconnect the ws client (without this the banned token reconnects forever)", () => {
-    patchAuth({
-      isAuthenticated: true,
-      user: { id: 1, username: "banned-user", avatar: null, role: "member" },
-    });
-
-    mock.dispatch("error", {
-      code: "BANNED",
-      message: "You have been banned from this server",
-    });
-    expectConsole("error", /\[dispatcher\] Server error/);
+    dispatchBanned();
 
     // clearAuth() alone flips isAuthenticated, but main.ts's authStore
     // subscriber only tears down the ws (and cancels the reconnect loop) when

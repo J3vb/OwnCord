@@ -5,43 +5,29 @@
  * route the popup body through it.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import * as voiceSession from "../helpers/voiceSessionMock";
+import * as mocks from "../helpers/notificationsMocks";
+import { testPrefs } from "../helpers/notificationsMocks";
+import { makePayload, seedGeneralChannel } from "../helpers/notificationsHarness";
 
 import { markdownToPlainText } from "../../src/lib/text/markdown";
 import { notifyIncomingMessage, resetNotificationCoalescing } from "../../src/lib/notifications";
-import { channelsStore } from "../../src/stores/channels.store";
 import { dmStore } from "../../src/stores/dm.store";
 import { signInAs } from "../helpers/storeSeeds";
+import type { ChatMessagePayload } from "../../src/lib/types";
 
-const { testPrefs } = vi.hoisted(() => ({ testPrefs: new Map<string, unknown>() }));
-
-vi.mock("../../src/lib/prefs/preferences", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../src/lib/prefs/preferences")>()),
-  STORAGE_PREFIX: "owncord:settings:",
-  loadPref: (key: string, fallback: unknown) => testPrefs.get(key) ?? fallback,
-  savePref: (key: string, value: unknown) => testPrefs.set(key, value),
-}));
-
-vi.mock("../../src/lib/voice/livekitSession", () => voiceSession.defaults());
-
-vi.mock("@tauri-apps/plugin-notification", () => ({
-  isPermissionGranted: vi.fn().mockResolvedValue(true),
-  requestPermission: vi.fn().mockResolvedValue("granted"),
-  sendNotification: vi.fn(),
-}));
+vi.mock("../../src/lib/prefs/preferences", (importOriginal) =>
+  mocks.prefsPreferencesMock(importOriginal),
+);
+vi.mock("../../src/lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
+vi.mock("@tauri-apps/plugin-notification", () => mocks.pluginNotificationMock());
 
 // The native path shows a message notification through the host's
 // `notify_message` command (so a click can open it); this records the args.
 const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn().mockResolvedValue(undefined) }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: invokeMock }));
 
-vi.mock("@tauri-apps/api/event", () => ({
-  listen: vi.fn().mockResolvedValue(() => {}),
-}));
-
-vi.mock("@tauri-apps/api/window", () => ({
-  getCurrentWindow: vi.fn().mockReturnValue({ requestUserAttention: vi.fn() }),
-}));
+vi.mock("@tauri-apps/api/event", () => mocks.apiEventMock());
+vi.mock("@tauri-apps/api/window", () => mocks.apiWindowMock());
 
 describe("markdownToPlainText", () => {
   it("replaces a spoiler with a label and never leaks its hidden text", () => {
@@ -91,113 +77,56 @@ describe("notifyIncomingMessage — popup body is plain text (U1a)", () => {
       { id: 1, username: "Me", avatar: null, role: "member" },
       { token: "t", serverName: null },
     );
-    channelsStore.setState(() => ({
-      categories: [],
-      channels: new Map([
-        [
-          1,
-          {
-            id: 1,
-            name: "general",
-            type: "text" as const,
-            category: null,
-            position: 0,
-            unreadCount: 0,
-            mentionCount: 0,
-            lastMessageId: null,
-            canSend: true,
-            topic: "",
-            slowMode: 0,
-            nsfw: false,
-            isPrivate: false,
-            voiceMaxUsers: 0,
-            voiceMaxVideo: 0,
-          },
-        ],
-      ]),
-      activeChannelId: null,
-      roles: [],
-    }));
+    seedGeneralChannel(null);
     dmStore.setState(() => ({ channels: [] }));
   });
 
-  it("strips spoilers and markdown from the body", async () => {
+  /** Sends one message from Bob with only the popup on, and waits for its popup body. */
+  async function expectPopupBody(
+    content: string,
+    attachments: ChatMessagePayload["attachments"],
+    body: string,
+  ): Promise<void> {
     (invokeMock as ReturnType<typeof vi.fn>).mockClear();
     testPrefs.set("desktopNotifications", true);
     testPrefs.set("flashTaskbar", false);
     testPrefs.set("notificationSounds", false);
-    // The body-serializer case is about content, not the level gate; use All so
-    // this non-mention message still fires.
+    // These cases are about the body, not the level gate; use All so a
+    // non-mention message still fires.
     testPrefs.set("notificationLevel", "all");
 
-    notifyIncomingMessage({
-      id: 1,
-      channel_id: 1,
-      user: { id: 2, username: "Bob", avatar: null },
-      content: "**hi** ||secret|| there",
-      reply_to: null,
-      attachments: [],
-      timestamp: new Date().toISOString(),
-    });
+    notifyIncomingMessage(
+      makePayload({ user: { id: 2, username: "Bob", avatar: null }, content, attachments }),
+    );
 
     await vi.waitFor(() => {
       const call = invokeMock.mock.calls.find((c) => c[0] === "notify_message")![1] as {
         body: string;
       };
-      expect(call.body).toBe("hi Spoiler there");
+      expect(call.body).toBe(body);
     });
+  }
+
+  it("strips spoilers and markdown from the body", async () => {
+    await expectPopupBody("**hi** ||secret|| there", [], "hi Spoiler there");
   });
 
   it("an empty-content message with 2 attachments has the body 'sent 2 attachments'", async () => {
-    (invokeMock as ReturnType<typeof vi.fn>).mockClear();
-    testPrefs.set("desktopNotifications", true);
-    testPrefs.set("flashTaskbar", false);
-    testPrefs.set("notificationSounds", false);
-    testPrefs.set("notificationLevel", "all");
-
-    notifyIncomingMessage({
-      id: 1,
-      channel_id: 1,
-      user: { id: 2, username: "Bob", avatar: null },
-      content: "",
-      reply_to: null,
-      attachments: [
+    await expectPopupBody(
+      "",
+      [
         { id: "a1", filename: "a.png", size: 1, mime: "image/png", url: "/a.png" },
         { id: "a2", filename: "b.png", size: 1, mime: "image/png", url: "/b.png" },
       ],
-      timestamp: new Date().toISOString(),
-    });
-
-    await vi.waitFor(() => {
-      const call = invokeMock.mock.calls.find((c) => c[0] === "notify_message")![1] as {
-        body: string;
-      };
-      expect(call.body).toBe("sent 2 attachments");
-    });
+      "sent 2 attachments",
+    );
   });
 
   it("an empty-content message with 1 attachment has the body 'sent an attachment'", async () => {
-    (invokeMock as ReturnType<typeof vi.fn>).mockClear();
-    testPrefs.set("desktopNotifications", true);
-    testPrefs.set("flashTaskbar", false);
-    testPrefs.set("notificationSounds", false);
-    testPrefs.set("notificationLevel", "all");
-
-    notifyIncomingMessage({
-      id: 1,
-      channel_id: 1,
-      user: { id: 2, username: "Bob", avatar: null },
-      content: "",
-      reply_to: null,
-      attachments: [{ id: "a1", filename: "a.png", size: 1, mime: "image/png", url: "/a.png" }],
-      timestamp: new Date().toISOString(),
-    });
-
-    await vi.waitFor(() => {
-      const call = invokeMock.mock.calls.find((c) => c[0] === "notify_message")![1] as {
-        body: string;
-      };
-      expect(call.body).toBe("sent an attachment");
-    });
+    await expectPopupBody(
+      "",
+      [{ id: "a1", filename: "a.png", size: 1, mime: "image/png", url: "/a.png" }],
+      "sent an attachment",
+    );
   });
 });

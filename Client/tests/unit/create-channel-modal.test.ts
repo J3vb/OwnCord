@@ -86,6 +86,23 @@ describe("CreateChannelModal", () => {
     return { modal, options };
   }
 
+  function submitNamed(name: string): HTMLButtonElement {
+    (container.querySelector("[data-testid='channel-name-input']") as HTMLInputElement).value =
+      name;
+    const submit = container.querySelector(
+      "[data-testid='channel-create-submit']",
+    ) as HTMLButtonElement;
+    submit.click();
+    return submit;
+  }
+
+  function typeOptionValues(): string[] {
+    const select = container.querySelector(
+      "[data-testid='channel-type-select']",
+    ) as HTMLSelectElement;
+    return Array.from(select.options).map((o) => o.value);
+  }
+
   const openDialog: MakeDialog = ({ action, onClose }) =>
     makeModal("Text Channels", { onCreate: action, onClose }).modal;
 
@@ -111,27 +128,13 @@ describe("CreateChannelModal", () => {
 
   it("offers every channel type under a text-sounding category", () => {
     const { modal } = makeModal("Text Channels");
-    const select = container.querySelector(
-      "[data-testid='channel-type-select']",
-    ) as HTMLSelectElement;
-    expect(Array.from(select.options).map((o) => o.value)).toEqual([
-      "text",
-      "voice",
-      "announcement",
-    ]);
+    expect(typeOptionValues()).toEqual(["text", "voice", "announcement"]);
     modal.destroy?.();
   });
 
   it("offers every channel type under a voice-sounding category too", () => {
     const { modal } = makeModal("Voice Channels");
-    const select = container.querySelector(
-      "[data-testid='channel-type-select']",
-    ) as HTMLSelectElement;
-    expect(Array.from(select.options).map((o) => o.value)).toEqual([
-      "text",
-      "voice",
-      "announcement",
-    ]);
+    expect(typeOptionValues()).toEqual(["text", "voice", "announcement"]);
     modal.destroy?.();
   });
 
@@ -254,15 +257,7 @@ describe("CreateChannelModal", () => {
     const onCreate = vi.fn(async () => {});
     const { modal } = makeModal("Text Channels", { onCreate });
 
-    const nameInput = container.querySelector(
-      "[data-testid='channel-name-input']",
-    ) as HTMLInputElement;
-    nameInput.value = "test-channel";
-
-    const submitBtn = container.querySelector(
-      "[data-testid='channel-create-submit']",
-    ) as HTMLButtonElement;
-    submitBtn.click();
+    submitNamed("test-channel");
 
     // Wait for async handler
     await vi.waitFor(() => {
@@ -379,9 +374,7 @@ describe("CreateChannelModal", () => {
       async (_data: { position: number; category?: string; category_id?: number }) => {},
     );
     const { modal } = makeModal("Chat", { onCreate });
-    (container.querySelector("[data-testid='channel-name-input']") as HTMLInputElement).value =
-      "fresh";
-    (container.querySelector("[data-testid='channel-create-submit']") as HTMLButtonElement).click();
+    submitNamed("fresh");
     await vi.waitFor(() => expect(onCreate).toHaveBeenCalled());
     expect(onCreate.mock.calls[0]![0]).toMatchObject({ category: "Chat", position: 8 });
     modal.destroy?.();
@@ -397,9 +390,7 @@ describe("CreateChannelModal", () => {
       async (_data: { position: number; category?: string; category_id?: number }) => {},
     );
     const { modal } = makeModal(NO_CATEGORY, { onCreate, type: "voice" });
-    (container.querySelector("[data-testid='channel-name-input']") as HTMLInputElement).value =
-      "fresh";
-    (container.querySelector("[data-testid='channel-create-submit']") as HTMLButtonElement).click();
+    submitNamed("fresh");
     await vi.waitFor(() => expect(onCreate).toHaveBeenCalled());
     expect(onCreate.mock.calls[0]![0].position).toBe(6);
     modal.destroy?.();
@@ -413,9 +404,7 @@ describe("CreateChannelModal", () => {
     ]);
     const onCreate = vi.fn(async (_data: { position: number; category_id?: number }) => {});
     const { modal } = makeModal({ id: 2, name: "Chat" }, { onCreate });
-    (container.querySelector("[data-testid='channel-name-input']") as HTMLInputElement).value =
-      "fresh";
-    (container.querySelector("[data-testid='channel-create-submit']") as HTMLButtonElement).click();
+    submitNamed("fresh");
     await vi.waitFor(() => expect(onCreate).toHaveBeenCalled());
     expect(onCreate.mock.calls[0]![0]).toMatchObject({ category_id: 2, position: 8 });
     modal.destroy?.();
@@ -427,9 +416,7 @@ describe("CreateChannelModal", () => {
       async (_data: { position: number; category?: string; category_id?: number }) => {},
     );
     const { modal } = makeModal("Brand New", { onCreate });
-    (container.querySelector("[data-testid='channel-name-input']") as HTMLInputElement).value =
-      "fresh";
-    (container.querySelector("[data-testid='channel-create-submit']") as HTMLButtonElement).click();
+    submitNamed("fresh");
     await vi.waitFor(() => expect(onCreate).toHaveBeenCalled());
     expect(onCreate.mock.calls[0]![0]).toMatchObject({ position: 4 });
     modal.destroy?.();
@@ -445,15 +432,7 @@ describe("CreateChannelModal", () => {
     const onCreate = vi.fn().mockRejectedValue(new Error("Name already exists"));
     const { modal } = makeModal("Text Channels", { onCreate });
 
-    const nameInput = container.querySelector(
-      "[data-testid='channel-name-input']",
-    ) as HTMLInputElement;
-    nameInput.value = "duplicate";
-
-    const submitBtn = container.querySelector(
-      "[data-testid='channel-create-submit']",
-    ) as HTMLButtonElement;
-    submitBtn.click();
+    const submitBtn = submitNamed("duplicate");
 
     await vi.waitFor(() => {
       const error = container.querySelector("[data-testid='channel-create-error']");
@@ -471,15 +450,7 @@ describe("CreateChannelModal", () => {
     const onCreate = vi.fn().mockRejectedValue("string error");
     const { modal } = makeModal("Text Channels", { onCreate });
 
-    const nameInput = container.querySelector(
-      "[data-testid='channel-name-input']",
-    ) as HTMLInputElement;
-    nameInput.value = "test";
-
-    const submitBtn = container.querySelector(
-      "[data-testid='channel-create-submit']",
-    ) as HTMLButtonElement;
-    submitBtn.click();
+    submitNamed("test");
 
     await vi.waitFor(() => {
       const error = container.querySelector("[data-testid='channel-create-error']");
@@ -499,15 +470,7 @@ describe("CreateChannelModal", () => {
     );
     const { modal } = makeModal("Text Channels", { onCreate });
 
-    const nameInput = container.querySelector(
-      "[data-testid='channel-name-input']",
-    ) as HTMLInputElement;
-    nameInput.value = "new-channel";
-
-    const submitBtn = container.querySelector(
-      "[data-testid='channel-create-submit']",
-    ) as HTMLButtonElement;
-    submitBtn.click();
+    const submitBtn = submitNamed("new-channel");
 
     expect(submitBtn.hasAttribute("disabled")).toBe(true);
     expect(submitBtn.textContent).toBe("Creating...");

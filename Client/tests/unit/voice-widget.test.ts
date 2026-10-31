@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as voiceSession from "../helpers/voiceSessionMock";
+import * as voiceWidget from "../helpers/voiceWidgetHarness";
 
 // Must mock before imports
 const mockRetryMicPermission = vi.fn().mockResolvedValue(undefined);
@@ -30,27 +31,7 @@ vi.mock("@lib/voice/livekitSession", () =>
   }),
 );
 
-vi.mock("@lib/voice/connectionStats", () => ({
-  createConnectionStatsPoller: vi.fn().mockReturnValue({
-    start: vi.fn(),
-    stop: vi.fn(),
-    getStats: vi.fn().mockReturnValue({
-      rtt: 0,
-      quality: "excellent",
-      outRate: 0,
-      inRate: 0,
-      outPackets: 0,
-      inPackets: 0,
-      totalUp: 0,
-      totalDown: 0,
-      available: true,
-    }),
-    onUpdate: vi.fn().mockReturnValue(() => {}),
-    onQualityChanged: vi.fn().mockReturnValue(() => {}),
-  }),
-  formatBytes: vi.fn((v: number) => `${v} B`),
-  formatRateCompact: vi.fn((v: number) => `${v} B/s`),
-}));
+vi.mock("@lib/voice/connectionStats", () => voiceWidget.connectionStatsMock(true));
 
 import { createVoiceWidget } from "../../src/components/VoiceWidget";
 import { createConnectionStatsPoller } from "@lib/voice/connectionStats";
@@ -60,27 +41,9 @@ import { dmStore } from "../../src/stores/dm.store";
 import { uiStore, setConnectionStatus } from "../../src/stores/ui.store";
 import type { VoiceUser } from "../../src/stores/voice.store";
 import { loadPref, savePref } from "../../src/lib/prefs/preferences";
-import { resetMembersState } from "../helpers/storeResets";
-import { resetChannelsState } from "../helpers/storeSeeds";
 
 function resetStores(): void {
-  voiceStore.setState(() => ({
-    currentChannelId: null,
-    voiceUsers: new Map(),
-    voiceConfigs: new Map(),
-    localMuted: false,
-    localDeafened: false,
-    localCamera: false,
-    localScreenshare: false,
-    joinedAt: null,
-    listenOnly: false,
-    voiceStatus: "idle",
-  }));
-  resetChannelsState();
-  resetMembersState();
-  // Voice controls freeze when the socket is down; keep it live by default so
-  // the interaction tests below operate on enabled controls.
-  setConnectionStatus("connected");
+  voiceWidget.resetVoiceWidgetStores();
 }
 
 function setVoiceStatus(status: VoiceStatus): void {
@@ -167,6 +130,21 @@ describe("VoiceWidget", () => {
     });
     widget.mount(container);
     return widget;
+  }
+
+  function mountListenOnly(): ReturnType<typeof mountVoiceWidget> {
+    setVoiceChannel(1, []);
+    voiceStore.setState((prev) => ({ ...prev, listenOnly: true }));
+    return mountVoiceWidget();
+  }
+
+  async function mountStreamCard() {
+    setVoiceChannel(1, []);
+    voiceStore.setState((prev) => ({ ...prev, localScreenshare: true }));
+    const widget = mountVoiceWidget();
+    await vi.dynamicImportSettled();
+    const card = container.querySelector<HTMLElement>('[data-testid="vw-stream-card"]')!;
+    return { widget, card };
   }
 
   it("renders hidden when not connected to a voice channel", () => {
@@ -295,11 +273,7 @@ describe("VoiceWidget", () => {
   it("the stream card offers only Stop where the share cannot change", async () => {
     mockShareQuality.mockReturnValueOnce(null);
     mockCanChange.mockReturnValueOnce(false);
-    setVoiceChannel(1, []);
-    voiceStore.setState((prev) => ({ ...prev, localScreenshare: true }));
-    const widget = mountVoiceWidget();
-    await vi.dynamicImportSettled();
-    const card = container.querySelector<HTMLElement>('[data-testid="vw-stream-card"]')!;
+    const { widget, card } = await mountStreamCard();
     expect(card.querySelector<HTMLElement>('[data-testid="vw-stream-change"]')!.hidden).toBe(true);
     expect(card.querySelector<HTMLElement>('[data-testid="vw-stream-quality"]')!.hidden).toBe(true);
     expect(card.querySelector<HTMLElement>('[data-testid="vw-stream-stop"]')!.hidden).toBe(false);
@@ -309,11 +283,7 @@ describe("VoiceWidget", () => {
   it("the stream card offers Change source without Quality on a Linux share", async () => {
     mockShareQuality.mockReturnValueOnce(null);
     mockCanChange.mockReturnValueOnce(true);
-    setVoiceChannel(1, []);
-    voiceStore.setState((prev) => ({ ...prev, localScreenshare: true }));
-    const widget = mountVoiceWidget();
-    await vi.dynamicImportSettled();
-    const card = container.querySelector<HTMLElement>('[data-testid="vw-stream-card"]')!;
+    const { widget, card } = await mountStreamCard();
     expect(card.querySelector<HTMLElement>('[data-testid="vw-stream-change"]')!.hidden).toBe(false);
     expect(card.querySelector<HTMLElement>('[data-testid="vw-stream-quality"]')!.hidden).toBe(true);
     widget.destroy?.();
@@ -523,10 +493,7 @@ describe("VoiceWidget", () => {
   });
 
   it("shows 'Grant Microphone' button when in listen-only mode", () => {
-    setVoiceChannel(1, []);
-    voiceStore.setState((prev) => ({ ...prev, listenOnly: true }));
-
-    const widget = mountVoiceWidget();
+    const widget = mountListenOnly();
 
     const grantBtn = container.querySelector(".vw-grant-mic") as HTMLButtonElement;
     expect(grantBtn).not.toBeNull();
@@ -549,10 +516,7 @@ describe("VoiceWidget", () => {
   });
 
   it("shows an actionable mic notice in listen-only mode and hides it otherwise", () => {
-    setVoiceChannel(1, []);
-    voiceStore.setState((prev) => ({ ...prev, listenOnly: true }));
-
-    const widget = mountVoiceWidget();
+    const widget = mountListenOnly();
 
     const notice = container.querySelector("[data-testid='vw-mic-notice']") as HTMLDivElement;
     expect(notice.getAttribute("role")).toBe("status");
@@ -574,10 +538,7 @@ describe("VoiceWidget", () => {
   });
 
   it("stops promising a permission grant once a retry leaves the mic unavailable", async () => {
-    setVoiceChannel(1, []);
-    voiceStore.setState((prev) => ({ ...prev, listenOnly: true }));
-
-    const widget = mountVoiceWidget();
+    const widget = mountListenOnly();
 
     const notice = container.querySelector("[data-testid='vw-mic-notice']") as HTMLDivElement;
     expect(notice.textContent).toContain("Grant microphone access");
@@ -596,10 +557,7 @@ describe("VoiceWidget", () => {
   });
 
   it("clicking 'Grant Microphone' calls retryMicPermission", async () => {
-    setVoiceChannel(1, []);
-    voiceStore.setState((prev) => ({ ...prev, listenOnly: true }));
-
-    const widget = mountVoiceWidget();
+    const widget = mountListenOnly();
 
     const grantBtn = container.querySelector(".vw-grant-mic") as HTMLButtonElement;
     grantBtn.click();
@@ -638,23 +596,7 @@ describe("VoiceWidget", () => {
 
   it("renders the signal readout as unavailable, not a false green, when no stats sample arrives", () => {
     const poller = createConnectionStatsPoller as unknown as ReturnType<typeof vi.fn>;
-    poller.mockReturnValueOnce({
-      start: vi.fn(),
-      stop: vi.fn(),
-      getStats: vi.fn().mockReturnValue({
-        rtt: 0,
-        quality: "excellent",
-        outRate: 0,
-        inRate: 0,
-        outPackets: 0,
-        inPackets: 0,
-        totalUp: 0,
-        totalDown: 0,
-        available: false,
-      }),
-      onUpdate: vi.fn().mockReturnValue(() => {}),
-      onQualityChanged: vi.fn().mockReturnValue(() => {}),
-    });
+    poller.mockReturnValueOnce(voiceWidget.statsPoller(false));
     setVoiceChannel(1, []);
 
     const widget = mountVoiceWidget();

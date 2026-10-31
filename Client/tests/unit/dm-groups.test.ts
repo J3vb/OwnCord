@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   getChannelMute,
   invalidateMuteCache,
@@ -7,7 +7,7 @@ import {
   toggleChannelMute,
   unmuteChannel,
 } from "@lib/prefs/channelMutes";
-import { createDmSidebar } from "@components/DmSidebar";
+import { useDmSidebarHost } from "../helpers/dmSidebarHost";
 import type { DmConversation } from "@components/DmSidebar";
 import { createIncomingCallBanner } from "@components/IncomingCallBanner";
 import { dmDisplayName, dmStore } from "@stores/dm.store";
@@ -131,27 +131,9 @@ describe("dmDisplayName", () => {
 
 describe("DmSidebar — group rows", () => {
   let container: HTMLDivElement;
-
-  beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
+  const mount = useDmSidebarHost((c) => {
+    container = c;
   });
-
-  afterEach(() => {
-    container.remove();
-    document.querySelectorAll(".context-menu").forEach((el) => el.remove());
-  });
-
-  function mount(conversations: DmConversation[], opts: Record<string, unknown> = {}) {
-    const sidebar = createDmSidebar({
-      conversations,
-      onSelectConversation: vi.fn(),
-      onNewDm: vi.fn(),
-      ...opts,
-    });
-    sidebar.mount(container);
-    return sidebar;
-  }
 
   it("draws stacked avatars for a group", () => {
     const sidebar = mount([bobCatGroup()]);
@@ -226,27 +208,9 @@ describe("DmSidebar — group rows", () => {
 
 describe("DmSidebar — muted rows", () => {
   let container: HTMLDivElement;
-
-  beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
+  const mount = useDmSidebarHost((c) => {
+    container = c;
   });
-
-  afterEach(() => {
-    container.remove();
-    document.querySelectorAll(".context-menu").forEach((el) => el.remove());
-  });
-
-  function mount(conversations: DmConversation[], opts: Record<string, unknown> = {}) {
-    const sidebar = createDmSidebar({
-      conversations,
-      onSelectConversation: vi.fn(),
-      onNewDm: vi.fn(),
-      ...opts,
-    });
-    sidebar.mount(container);
-    return sidebar;
-  }
 
   it("dims the unread badge but keeps the count", () => {
     const sidebar = mount([convo({ channelId: 7, muted: true, unread: true, unreadCount: 4 })]);

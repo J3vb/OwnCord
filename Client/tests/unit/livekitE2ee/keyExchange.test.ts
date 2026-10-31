@@ -10,7 +10,7 @@ import {
   generateECDHKeyPair,
 } from "@lib/net/e2eeCrypto";
 import { getOrCreateIdentityKeyPair, storeIdentityPin } from "@lib/net/identity";
-import { PEER_ID, newManager, sendsOfType } from "../../helpers/livekitE2eeHarness";
+import { PEER_ID, newManager, sendsOfType, stallNextWrap } from "../../helpers/livekitE2eeHarness";
 
 vi.mock("livekit-client", () => mocks.livekitClientMock());
 vi.mock("@lib/net/e2eeCrypto", () => mocks.netE2eeCryptoMock());
@@ -476,11 +476,7 @@ describe("E2EEManager", () => {
     const { ws, mgr } = newManager();
     await mgr.setupKeyExchange(true, 1); // holder, epoch 1
 
-    let releaseWrap!: (v: { encryptedKey: string; iv: string }) => void;
-    const stalledWrap = new Promise<{ encryptedKey: string; iv: string }>((resolve) => {
-      releaseWrap = resolve;
-    });
-    vi.mocked(wrapRoomKey).mockReturnValueOnce(stalledWrap);
+    const releaseWrap = stallNextWrap();
 
     const announcePromise = mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig");
     await vi.waitFor(() => expect(wrapRoomKey).toHaveBeenCalled());

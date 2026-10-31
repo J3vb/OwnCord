@@ -5,10 +5,10 @@
  * socket-to-track step (`openAppAudio`) is mocked.
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as shareRig from "../helpers/screenShareRig";
 import { Track } from "livekit-client";
-import type { LocalTrack, Room } from "livekit-client";
-import type { WsClient } from "@lib/ws";
+import type { LocalTrack } from "livekit-client";
 import { initToast, teardownToast } from "@lib/ui/toast";
 import type { ToastContainer } from "@components/Toast";
 import { expectConsole } from "../helpers/console";
@@ -17,29 +17,16 @@ const createLocalScreenTracks = vi.fn();
 const invoke = vi.hoisted(() => vi.fn());
 const openAppAudio = vi.hoisted(() => vi.fn());
 
-vi.mock("livekit-client", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("livekit-client")>();
-  class FakeLocalAudioTrack {
-    readonly kind = actual.Track.Kind.Audio;
-    constructor(readonly mediaStreamTrack: MediaStreamTrack) {}
-    stop(): void {
-      this.mediaStreamTrack.stop();
-    }
-  }
-  return {
-    ...actual,
-    LocalAudioTrack: FakeLocalAudioTrack,
-    createLocalScreenTracks: (...args: unknown[]) => createLocalScreenTracks(...args) as unknown,
-  };
-});
-vi.mock("@tauri-apps/api/core", () => ({ invoke: (...a: unknown[]) => invoke(...a) as unknown }));
-vi.mock("../../src/lib/voice/appAudioTrack", () => ({
-  openAppAudio: (...a: unknown[]) => openAppAudio(...a) as unknown,
-}));
-vi.mock("@lib/prefs/preferences", () => ({
-  loadPref: (_key: string, fallback: unknown) => fallback,
-  savePref: vi.fn(),
-}));
+vi.mock("livekit-client", (importOriginal) =>
+  shareRig.livekitScreenMock(
+    importOriginal,
+    (...a) => createLocalScreenTracks(...a) as unknown,
+    true,
+  ),
+);
+vi.mock("@tauri-apps/api/core", () => shareRig.tauriInvokeMock(invoke));
+vi.mock("../../src/lib/voice/appAudioTrack", () => shareRig.appAudioTrackMock(openAppAudio));
+vi.mock("@lib/prefs/preferences", () => shareRig.fallbackPrefsMock());
 
 const { disableScreenshare, enableScreenshare, stopManualScreenTracks } =
   await import("@lib/voice/screenShare");
@@ -47,7 +34,6 @@ const { setScreenSourcePicker } = await import("../../src/features/voice/native/
 const { voiceStore } = await import("@stores/voice.store");
 
 type State = Parameters<typeof enableScreenshare>[0];
-type Deps = Parameters<typeof enableScreenshare>[1];
 
 function mst(label = "", surface?: string): MediaStreamTrack {
   return {
@@ -66,25 +52,17 @@ function shareTrack(kind: Track.Kind, label = "", surface?: string): LocalTrack 
 }
 
 function rig() {
-  const publishTrack = vi.fn().mockResolvedValue(undefined);
-  const unpublishTrack = vi.fn().mockResolvedValue(undefined);
-  const room = {
-    localParticipant: {
-      publishTrack,
-      unpublishTrack,
-      setScreenShareEnabled: vi.fn().mockResolvedValue(undefined),
-    },
-  } as unknown as Room;
-  const wsSend = vi.fn();
-  const ws = { send: wsSend } as unknown as WsClient;
-  const deps: Deps & { onError: Mock<(m: string) => void> } = {
-    getRoom: () => room,
-    getWs: () => ws,
-    onError: vi.fn<(m: string) => void>(),
-    reapplyAudioPipeline: vi.fn(),
-  };
-  return { room, publishTrack, unpublishTrack, wsSend, deps };
+  return shareRig.screenShareRig(vi.fn());
 }
+
+/** A rig whose picker hands back a live window share titled "Game". */
+function rigSharingGame() {
+  createLocalScreenTracks.mockResolvedValue([shareTrack(Track.Kind.Video, "Game", "window")]);
+  return rig();
+}
+
+const publishedAudio = (r: ReturnType<typeof rig>) =>
+  r.publishTrack.mock.calls.filter((c) => (c[0] as LocalTrack).kind === Track.Kind.Audio);
 
 function handle() {
   const track = mst("app");
@@ -186,8 +164,7 @@ describe("enableScreenshare app audio", () => {
     );
     const h = handle();
     openAppAudio.mockResolvedValue(h);
-    createLocalScreenTracks.mockResolvedValue([shareTrack(Track.Kind.Video, "Game", "window")]);
-    const r = rig();
+    const r = rigSharingGame();
     const state: State = { manualScreenTracks: [] };
 
     const enabling = enableScreenshare(state, r.deps);
@@ -198,9 +175,7 @@ describe("enableScreenshare app audio", () => {
 
     expect(commands()).toContain("stop_app_audio");
     expect(openAppAudio).not.toHaveBeenCalled();
-    expect(
-      r.publishTrack.mock.calls.filter((c) => (c[0] as LocalTrack).kind === Track.Kind.Audio),
-    ).toHaveLength(0);
+    expect(publishedAudio(r)).toHaveLength(0);
     expect(r.wsSend).not.toHaveBeenCalledWith({
       type: "voice_screenshare",
       payload: { enabled: true },
@@ -212,8 +187,7 @@ describe("enableScreenshare app audio", () => {
     invoke.mockResolvedValue({ url: "ws://127.0.0.1:9/t/app-audio" });
     let opened!: (h: unknown) => void;
     openAppAudio.mockImplementation(() => new Promise((resolve) => (opened = resolve)));
-    createLocalScreenTracks.mockResolvedValue([shareTrack(Track.Kind.Video, "Game", "window")]);
-    const r = rig();
+    const r = rigSharingGame();
     const state: State = { manualScreenTracks: [] };
     const h = handle();
 
@@ -226,9 +200,7 @@ describe("enableScreenshare app audio", () => {
 
     expect(h.close).toHaveBeenCalled();
     expect(commands()).toEqual(["stop_app_audio"]);
-    expect(
-      r.publishTrack.mock.calls.filter((c) => (c[0] as LocalTrack).kind === Track.Kind.Audio),
-    ).toHaveLength(0);
+    expect(publishedAudio(r)).toHaveLength(0);
   });
 
   it("undoes the publish when the share stops while the audio track is publishing", async () => {
@@ -236,8 +208,7 @@ describe("enableScreenshare app audio", () => {
     invoke.mockResolvedValue({ url: "ws://127.0.0.1:9/t/app-audio" });
     const h = handle();
     openAppAudio.mockResolvedValue(h);
-    createLocalScreenTracks.mockResolvedValue([shareTrack(Track.Kind.Video, "Game", "window")]);
-    const r = rig();
+    const r = rigSharingGame();
     const state: State = { manualScreenTracks: [] };
     let release!: () => void;
     r.publishTrack.mockImplementation((t: LocalTrack) =>
@@ -262,8 +233,7 @@ describe("enableScreenshare app audio", () => {
     invoke.mockImplementation((cmd: string) =>
       cmd === "start_app_audio" ? Promise.reject("ambiguous") : Promise.resolve(),
     );
-    createLocalScreenTracks.mockResolvedValue([shareTrack(Track.Kind.Video, "Game", "window")]);
-    const r = rig();
+    const r = rigSharingGame();
     const state: State = { manualScreenTracks: [] };
 
     await enableScreenshare(state, r.deps);
@@ -286,8 +256,7 @@ describe("enableScreenshare app audio", () => {
       invoke.mockImplementation((cmd: string) =>
         cmd === "start_app_audio" ? Promise.reject(code) : Promise.resolve(),
       );
-      createLocalScreenTracks.mockResolvedValue([shareTrack(Track.Kind.Video, "Game", "window")]);
-      const r = rig();
+      const r = rigSharingGame();
 
       await enableScreenshare({ manualScreenTracks: [] }, r.deps);
 
@@ -303,8 +272,7 @@ describe("enableScreenshare app audio", () => {
     pickWith(true);
     invoke.mockResolvedValue({ url: "ws://127.0.0.1:9/t/app-audio" });
     openAppAudio.mockRejectedValue(new Error("refused"));
-    createLocalScreenTracks.mockResolvedValue([shareTrack(Track.Kind.Video, "Game", "window")]);
-    const r = rig();
+    const r = rigSharingGame();
     const state: State = { manualScreenTracks: [] };
 
     await enableScreenshare(state, r.deps);
@@ -320,8 +288,7 @@ describe("enableScreenshare app audio", () => {
     invoke.mockResolvedValue({ url: "ws://127.0.0.1:9/t/app-audio" });
     const h = handle();
     openAppAudio.mockResolvedValue(h);
-    createLocalScreenTracks.mockResolvedValue([shareTrack(Track.Kind.Video, "Game", "window")]);
-    const r = rig();
+    const r = rigSharingGame();
     r.publishTrack.mockImplementation((t: LocalTrack) =>
       t.kind === Track.Kind.Audio ? Promise.reject(new Error("no")) : Promise.resolve(),
     );
@@ -401,8 +368,7 @@ describe("app audio teardown", () => {
     invoke.mockResolvedValue({ url: "ws://127.0.0.1:9/t/app-audio" });
     const h = handle();
     openAppAudio.mockResolvedValue(h);
-    createLocalScreenTracks.mockResolvedValue([shareTrack(Track.Kind.Video, "Game", "window")]);
-    const r = rig();
+    const r = rigSharingGame();
     const state: State = { manualScreenTracks: [] };
     await enableScreenshare(state, r.deps);
     invoke.mockClear();

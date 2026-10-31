@@ -134,9 +134,7 @@ describe("ban dialog", () => {
     );
     expect(submit).not.toHaveBeenCalled();
     expect(dialog()).not.toBeNull();
-    q("ban-reason-input").dispatchEvent(
-      new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),
-    );
+    pressEnterInReason();
     await vi.waitFor(() => expect(dialog()).toBeNull());
     expect(submit).toHaveBeenCalledOnce();
   });
@@ -144,9 +142,7 @@ describe("ban dialog", () => {
   it("Enter in the reason field submits once", async () => {
     const submit = vi.fn(async () => ({}));
     setup(submit);
-    q("ban-reason-input").dispatchEvent(
-      new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),
-    );
+    pressEnterInReason();
     await vi.waitFor(() => expect(dialog()).toBeNull());
     expect(submit).toHaveBeenCalledOnce();
   });
@@ -258,9 +254,7 @@ describe("ban dialog", () => {
     expect(confirm().disabled).toBe(true);
     expect(confirm().textContent).toBe("Banning...");
     confirm().click();
-    q("ban-reason-input").dispatchEvent(
-      new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),
-    );
+    pressEnterInReason();
     expect(submit).toHaveBeenCalledOnce();
     release({});
     await vi.waitFor(() => expect(dialog()).toBeNull());
@@ -450,6 +444,28 @@ const escape = (): void => {
 const choose = (seconds: string): void => {
   q<HTMLSelectElement>("ban-delete-select").value = seconds;
 };
+const pressEnterInReason = (): void => {
+  q("ban-reason-input").dispatchEvent(
+    new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),
+  );
+};
+/** First request comes back with an incomplete purge; the retry never settles. */
+const incompleteThenHang = () =>
+  vi
+    .fn<(r: BanRequest) => Promise<BanMemberResponse>>()
+    .mockImplementationOnce(incomplete)
+    .mockImplementationOnce(() => new Promise(() => {}));
+/** Fake timers on, a 1 h purge ban submitted, and the button showing Retry. */
+async function reachRetryWithTimers(
+  submit: (req: BanRequest) => Promise<BanMemberResponse>,
+): Promise<void> {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  setup(submit);
+  choose("3600");
+  confirm().click();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(confirm().textContent).toBe("Retry");
+}
 
 const press = (key: string): KeyboardEvent => {
   const e = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
@@ -549,11 +565,7 @@ describe("ban dialog layout and lifetime", () => {
   });
 
   it("labels the button 'Retrying...' while a retry runs", async () => {
-    const submit = vi
-      .fn<(r: BanRequest) => Promise<BanMemberResponse>>()
-      .mockImplementationOnce(incomplete)
-      .mockImplementationOnce(() => new Promise(() => {}));
-    setup(submit);
+    setup(incompleteThenHang());
     choose("3600");
     confirm().click();
     await vi.waitFor(() => expect(confirm().textContent).toBe("Retry"));
@@ -657,11 +669,7 @@ describe("ban dialog layout and lifetime", () => {
   // Edge case: the retry window runs out while a retry is in flight.
   it("keeps a running retry busy when the retry window runs out underneath it", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-    const submit = vi
-      .fn<(r: BanRequest) => Promise<BanMemberResponse>>()
-      .mockImplementationOnce(incomplete)
-      .mockImplementationOnce(() => new Promise(() => {}));
-    setup(submit);
+    setup(incompleteThenHang());
     choose("3600");
     confirm().click();
     await vi.advanceTimersByTimeAsync(0);
@@ -675,12 +683,7 @@ describe("ban dialog layout and lifetime", () => {
   });
 
   it("keeps Retry for just under an hour and drops it at the hour", async () => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-    setup(vi.fn(incomplete));
-    choose("3600");
-    confirm().click();
-    await vi.advanceTimersByTimeAsync(0);
-    expect(confirm().textContent).toBe("Retry");
+    await reachRetryWithTimers(vi.fn(incomplete));
     vi.advanceTimersByTime(HOUR - 1);
     expect(confirm().textContent).toBe("Retry");
     expect(q<HTMLInputElement>("ban-reason-input").disabled).toBe(true);
@@ -692,12 +695,7 @@ describe("ban dialog layout and lifetime", () => {
   });
 
   it("leaves no retry timer running once the dialog is closed", async () => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-    setup(vi.fn(incomplete));
-    choose("3600");
-    confirm().click();
-    await vi.advanceTimersByTimeAsync(0);
-    expect(confirm().textContent).toBe("Retry");
+    await reachRetryWithTimers(vi.fn(incomplete));
     expect(vi.getTimerCount()).toBeGreaterThan(0);
     escape();
     expect(vi.getTimerCount()).toBe(0);

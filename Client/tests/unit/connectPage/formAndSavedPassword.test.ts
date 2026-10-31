@@ -20,6 +20,8 @@ import {
   waitForCalls,
   expectBannerVisible,
   signIn,
+  expectSavedPasswordSubmittedViaBackend,
+  expectSavedUserWithoutPassword,
 } from "../../helpers/connectPageHarness";
 
 vi.mock("../../../src/lib/net/credentials", () => mocks.netCredentialsMock());
@@ -307,14 +309,7 @@ describe("ConnectPage", () => {
   // ordinary (almost certainly wrong) typed password.
 
   it("submits a remembered password through the backend, not as form text", async () => {
-    const { page, onLogin, onLoginWithSavedPassword } = await mountWithSavedPassword(container);
-
-    submitForm(container);
-
-    await waitForCall(onLoginWithSavedPassword, "localhost:8443", "saveduser");
-    expect(onLogin).not.toHaveBeenCalled();
-
-    page.destroy?.();
+    await expectSavedPasswordSubmittedViaBackend(container);
   });
 
   it("falls back to a normal login once the user edits the remembered password", async () => {
@@ -440,14 +435,7 @@ describe("ConnectPage", () => {
     // The new placeholder check must not fire on the ordinary saved-password
     // path, where the field legitimately holds the placeholder text while
     // `usingSavedPassword` is true.
-    const { page, onLogin, onLoginWithSavedPassword } = await mountWithSavedPassword(container);
-
-    submitForm(container);
-
-    await waitForCall(onLoginWithSavedPassword, "localhost:8443", "saveduser");
-    expect(onLogin).not.toHaveBeenCalled();
-
-    page.destroy?.();
+    await expectSavedPasswordSubmittedViaBackend(container);
   });
 
   it("submits the bullet string as a real password when no placeholder was ever shown (login)", async () => {
@@ -658,12 +646,7 @@ describe("ConnectPage", () => {
     switchMode(container);
     qs<HTMLElement>(container, ".server-item").click();
 
-    await vi.waitFor(() => {
-      expect(qs<HTMLInputElement>(container, "#username").value).toBe("saveduser");
-    });
-
-    expect(page.isUsingSavedPassword()).toBe(false);
-    expect(qs<HTMLInputElement>(container, "#password").value).toBe("");
+    await expectSavedUserWithoutPassword(container, page);
 
     setField(container, "#invite", "invite-code");
     submitForm(container);
@@ -693,12 +676,7 @@ describe("ConnectPage", () => {
     switchMode(container);
     resolveCredential({ username: "saveduser", token: "tok", hasPassword: true });
 
-    await vi.waitFor(() => {
-      expect(qs<HTMLInputElement>(container, "#username").value).toBe("saveduser");
-    });
-
-    expect(page.isUsingSavedPassword()).toBe(false);
-    expect(qs<HTMLInputElement>(container, "#password").value).toBe("");
+    await expectSavedUserWithoutPassword(container, page);
 
     page.destroy?.();
   });

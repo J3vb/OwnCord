@@ -8,6 +8,7 @@ import {
   mockGetLocalScreenshareStream,
   mockVoiceStoreGetState,
 } from "./videoModeControllerMocks";
+import { createVideoGrid } from "../../src/components/VideoGrid";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -111,4 +112,53 @@ export function setupController(over: Partial<VideoModeControllerOptions> = {}) 
 
 export function makeController(over: Partial<VideoModeControllerOptions> = {}) {
   return setupController(over).ctrl;
+}
+
+export const callUser = (
+  userId: number,
+  username: string,
+  video: Partial<{ camera: boolean }> = {},
+) => ({
+  userId,
+  username,
+  camera: video.camera ?? false,
+  screenshare: false,
+});
+
+export interface CallGridRig {
+  container: HTMLDivElement;
+  grid: ReturnType<typeof createVideoGrid>;
+  slots: ReturnType<typeof makeSlots>;
+  users: Map<number, ReturnType<typeof callUser>>;
+}
+
+/** Mounts a real video grid for a call between "me" (1) and "bob" (2). */
+export function mountCallGrid(): CallGridRig {
+  // ResizeObserver is not available in JSDOM
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe(): void {}
+      unobserve(): void {}
+      disconnect(): void {}
+    },
+  );
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const grid = createVideoGrid();
+  grid.mount(container);
+  return {
+    container,
+    grid,
+    slots: makeSlots(),
+    users: new Map([
+      [1, callUser(1, "me")],
+      [2, callUser(2, "bob")],
+    ]),
+  };
+}
+
+export function unmountCallGrid(rig: Pick<CallGridRig, "container" | "grid">): void {
+  rig.grid.destroy?.();
+  rig.container.remove();
 }

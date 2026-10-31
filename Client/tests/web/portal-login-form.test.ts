@@ -15,18 +15,9 @@ vi.mock("../../src/features/settings/SettingsOverlay", () => ({
 import { createConnectPage } from "../../src/pages/ConnectPage";
 import type { ConnectPageCallbacks } from "../../src/pages/ConnectPage";
 import { portalText } from "../../src/i18n/portal";
+import { makeCallbacks } from "../helpers/connectPageHarness";
 
 const HOST = location.host;
-
-function makeCallbacks(overrides: Partial<ConnectPageCallbacks> = {}): ConnectPageCallbacks {
-  return {
-    onLogin: vi.fn().mockResolvedValue(undefined),
-    onLoginWithSavedPassword: vi.fn().mockResolvedValue(undefined),
-    onRegister: vi.fn().mockResolvedValue(undefined),
-    onTotpSubmit: vi.fn().mockResolvedValue(undefined),
-    ...overrides,
-  };
-}
 
 let container: HTMLDivElement;
 beforeEach(() => {

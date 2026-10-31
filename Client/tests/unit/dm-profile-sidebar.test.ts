@@ -77,6 +77,15 @@ describe("DmProfileSidebar banner", () => {
 describe("DmProfileSidebar", () => {
   let container: HTMLDivElement;
 
+  function readNote(user: DmProfileData, host: string): string {
+    const sidebar = createDmProfileSidebar(makeOptions({ user, host }));
+    sidebar.mount(container);
+    const note = container.querySelector('[data-testid="dps-note"]') as HTMLTextAreaElement;
+    const { value } = note;
+    sidebar.destroy?.();
+    return value;
+  }
+
   beforeEach(() => {
     fetchImageAsObjectUrl.mockReset();
     container = document.createElement("div");
@@ -354,11 +363,7 @@ describe("DmProfileSidebar", () => {
     );
 
     // The unrelated user 5 on a different server sees no note.
-    const sidebarB = createDmProfileSidebar(makeOptions({ user, host: "b.example.com" }));
-    sidebarB.mount(container);
-    const noteElB = container.querySelector('[data-testid="dps-note"]') as HTMLTextAreaElement;
-    expect(noteElB.value).toBe("");
-    sidebarB.destroy?.();
+    expect(readNote(user, "b.example.com")).toBe("");
 
     localStorage.removeItem("owncord:dm-note:a.example.com:5");
   });
@@ -428,28 +433,16 @@ describe("DmProfileSidebar", () => {
     localStorage.setItem("owncord:dm-note:42", "Pre-existing note");
 
     try {
-      const sidebarA = createDmProfileSidebar(makeOptions({ user, host: "a.example.com" }));
-      sidebarA.mount(container);
-      const noteElA = container.querySelector('[data-testid="dps-note"]') as HTMLTextAreaElement;
-      expect(noteElA.value).toBe("Pre-existing note");
-      sidebarA.destroy?.();
+      expect(readNote(user, "a.example.com")).toBe("Pre-existing note");
 
       // Migrated under server A's key and consumed at the legacy one.
       expect(localStorage.getItem("owncord:dm-note:a.example.com:42")).toBe("Pre-existing note");
       expect(localStorage.getItem("owncord:dm-note:42")).toBeNull();
 
-      const sidebarB = createDmProfileSidebar(makeOptions({ user, host: "b.example.com" }));
-      sidebarB.mount(container);
-      const noteElB = container.querySelector('[data-testid="dps-note"]') as HTMLTextAreaElement;
-      expect(noteElB.value).toBe("");
-      sidebarB.destroy?.();
+      expect(readNote(user, "b.example.com")).toBe("");
 
       // Reopening server A still finds its migrated note.
-      const sidebarA2 = createDmProfileSidebar(makeOptions({ user, host: "a.example.com" }));
-      sidebarA2.mount(container);
-      const noteElA2 = container.querySelector('[data-testid="dps-note"]') as HTMLTextAreaElement;
-      expect(noteElA2.value).toBe("Pre-existing note");
-      sidebarA2.destroy?.();
+      expect(readNote(user, "a.example.com")).toBe("Pre-existing note");
     } finally {
       localStorage.removeItem("owncord:dm-note:42");
       localStorage.removeItem("owncord:dm-note:a.example.com:42");
@@ -477,11 +470,7 @@ describe("DmProfileSidebar", () => {
     });
 
     try {
-      const sidebarA = createDmProfileSidebar(makeOptions({ user, host: "a.example.com" }));
-      sidebarA.mount(container);
-      const noteElA = container.querySelector('[data-testid="dps-note"]') as HTMLTextAreaElement;
-      expect(noteElA.value).toBe("Pre-existing note");
-      sidebarA.destroy?.();
+      expect(readNote(user, "a.example.com")).toBe("Pre-existing note");
       expect(localStorage.getItem("owncord:dm-note:a.example.com:42")).toBeNull();
       expect(localStorage.getItem("owncord:dm-note:42")).toBe("Pre-existing note");
       expect(localStorage.getItem("owncord:legacy-claim:owncord:dm-note:42")).toBe(
@@ -490,21 +479,13 @@ describe("DmProfileSidebar", () => {
 
       // The failed copy is bound to server A: the unrelated user 42 on
       // server B sees no note and leaves the retained one alone.
-      const sidebarB = createDmProfileSidebar(makeOptions({ user, host: "b.example.com" }));
-      sidebarB.mount(container);
-      const noteElB = container.querySelector('[data-testid="dps-note"]') as HTMLTextAreaElement;
-      expect(noteElB.value).toBe("");
-      sidebarB.destroy?.();
+      expect(readNote(user, "b.example.com")).toBe("");
       expect(localStorage.getItem("owncord:dm-note:b.example.com:42")).toBeNull();
       expect(localStorage.getItem("owncord:dm-note:42")).toBe("Pre-existing note");
 
       // Quota relieved: server A's next open completes the migration.
       setItem.mockRestore();
-      const sidebarA2 = createDmProfileSidebar(makeOptions({ user, host: "a.example.com" }));
-      sidebarA2.mount(container);
-      const noteElA2 = container.querySelector('[data-testid="dps-note"]') as HTMLTextAreaElement;
-      expect(noteElA2.value).toBe("Pre-existing note");
-      sidebarA2.destroy?.();
+      expect(readNote(user, "a.example.com")).toBe("Pre-existing note");
       expect(localStorage.getItem("owncord:dm-note:a.example.com:42")).toBe("Pre-existing note");
       expect(localStorage.getItem("owncord:dm-note:42")).toBeNull();
       expect(localStorage.getItem("owncord:legacy-claim:owncord:dm-note:42")).toBeNull();

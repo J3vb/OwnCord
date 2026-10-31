@@ -28,6 +28,7 @@ import {
   restorePeerKeyMocks,
   createManager,
   sendsOfType,
+  stallNextIdentityPin,
 } from "../../helpers/livekitE2eeHarness";
 
 vi.mock("livekit-client", () => mocks.livekitClientMock());
@@ -899,12 +900,7 @@ describe("E2EE operation ownership", () => {
     const { mgr } = newManager();
     try {
       await mgr.setupKeyExchange(true, 1);
-      let releasePin!: (v: { status: "unpinned" }) => void;
-      vi.mocked(getIdentityPin).mockReturnValueOnce(
-        new Promise((resolve) => {
-          releasePin = resolve;
-        }),
-      );
+      const releasePin = stallNextIdentityPin();
       const first = mgr.handleAnnounce(PEER_ID, "Zmlyc3Q=", "sig");
       await vi.waitFor(() => expect(getIdentityPin).toHaveBeenCalledTimes(1));
       const second = mgr.handleAnnounce(99, "c2Vjb25k", "sig");
@@ -923,12 +919,7 @@ describe("E2EE operation ownership", () => {
     const { mgr } = newManager();
     try {
       await mgr.setupKeyExchange(true, 1);
-      let releasePin!: (v: { status: "unpinned" }) => void;
-      vi.mocked(getIdentityPin).mockReturnValueOnce(
-        new Promise((resolve) => {
-          releasePin = resolve;
-        }),
-      );
+      const releasePin = stallNextIdentityPin();
       const announce = mgr.handleAnnounce(PEER_ID, "Zmlyc3Q=", "sig");
       await vi.waitFor(() => expect(getIdentityPin).toHaveBeenCalledTimes(1));
       const offer = mgr.handleOffer(PEER_ID, "enc", "iv");
@@ -949,12 +940,7 @@ describe("E2EE operation ownership", () => {
     try {
       await mgr.handleAnnounce(PEER_ID, "Zmlyc3Q=", "sig");
       await mgr.handleAnnounce(99, "c2Vjb25k", "sig");
-      let releasePin!: (v: { status: "unpinned" }) => void;
-      vi.mocked(getIdentityPin).mockReturnValueOnce(
-        new Promise((resolve) => {
-          releasePin = resolve;
-        }),
-      );
+      const releasePin = stallNextIdentityPin();
       const firstSetup = mgr.setupKeyExchange(true, 1);
       await vi.waitFor(() => expect(getIdentityPin).toHaveBeenCalledTimes(1));
       mgr.clearState();
@@ -971,12 +957,7 @@ describe("E2EE operation ownership", () => {
     const { mgr } = newManager();
     try {
       await mgr.setupKeyExchange(true, 1);
-      let releasePin!: (v: { status: "unpinned" }) => void;
-      vi.mocked(getIdentityPin).mockReturnValueOnce(
-        new Promise((resolve) => {
-          releasePin = resolve;
-        }),
-      );
+      const releasePin = stallNextIdentityPin();
       const announce = mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig");
       await vi.waitFor(() => expect(getIdentityPin).toHaveBeenCalledTimes(1));
       await mgr.handleParticipantLeft(PEER_ID);

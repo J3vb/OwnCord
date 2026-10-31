@@ -313,6 +313,9 @@ describe("publishAppAudio", () => {
     return { publishTrack, unpublishTrack, room, screenTracks, state, video };
   }
 
+  const publishAs = (r: ReturnType<typeof rig>) =>
+    publishAppAudio(r.state, r.room, r.screenTracks, r.video, 3, options);
+
   it("does nothing for a share that is not of a window", async () => {
     const r = rig();
     const video = { mediaStreamTrack: mst("scr", "monitor") } as unknown as LocalTrack;
@@ -358,9 +361,7 @@ describe("publishAppAudio", () => {
       r.state.generation = 4;
       return Promise.resolve({ ok: false, code: "not_found" });
     });
-    await expect(
-      publishAppAudio(r.state, r.room, r.screenTracks, r.video, 3, options),
-    ).resolves.toBe("stale");
+    await expect(publishAs(r)).resolves.toBe("stale");
   });
 
   it("reports stale when the share's track list was replaced during the start", async () => {
@@ -369,9 +370,7 @@ describe("publishAppAudio", () => {
       r.state.manualScreenTracks = [];
       return Promise.resolve({ ok: false, code: "not_found" });
     });
-    await expect(
-      publishAppAudio(r.state, r.room, r.screenTracks, r.video, 3, options),
-    ).resolves.toBe("stale");
+    await expect(publishAs(r)).resolves.toBe("stale");
   });
 
   it("reads an unset generation as 0", async () => {
@@ -411,7 +410,7 @@ describe("publishAppAudio", () => {
       r.state.appAudio = other;
       return Promise.reject(new Error("publish"));
     });
-    await publishAppAudio(r.state, r.room, r.screenTracks, r.video, 3, options);
+    await publishAs(r);
     expect(r.state.appAudio).toBe(other);
   });
 
@@ -422,9 +421,7 @@ describe("publishAppAudio", () => {
       r.state.generation = 9;
       return Promise.reject(new Error("publish"));
     });
-    await expect(
-      publishAppAudio(r.state, r.room, r.screenTracks, r.video, 3, options),
-    ).resolves.toBe("stale");
+    await expect(publishAs(r)).resolves.toBe("stale");
     expect(showToast).not.toHaveBeenCalled();
     expect(host.stop).toHaveBeenCalledTimes(1);
   });
@@ -436,9 +433,7 @@ describe("publishAppAudio", () => {
       r.state.generation = 9;
       return Promise.resolve(undefined);
     });
-    await expect(
-      publishAppAudio(r.state, r.room, r.screenTracks, r.video, 3, options),
-    ).resolves.toBe("stale");
+    await expect(publishAs(r)).resolves.toBe("stale");
     expect(r.state.appAudio).toBeUndefined();
     expect(h.close).toHaveBeenCalledTimes(1);
     expect(host.stop).toHaveBeenCalledTimes(1);
@@ -455,7 +450,7 @@ describe("publishAppAudio", () => {
       r.state.appAudio = other;
       return Promise.resolve(undefined);
     });
-    await publishAppAudio(r.state, r.room, r.screenTracks, r.video, 3, options);
+    await publishAs(r);
     expect(r.state.appAudio).toBe(other);
   });
 
@@ -468,9 +463,7 @@ describe("publishAppAudio", () => {
       r.state.generation = 9;
       return Promise.resolve(undefined);
     });
-    await expect(
-      publishAppAudio(r.state, r.room, r.screenTracks, r.video, 3, options),
-    ).resolves.toBe("stale");
+    await expect(publishAs(r)).resolves.toBe("stale");
     await vi.waitFor(() =>
       expect(logWarn).toHaveBeenCalledWith("Failed to unpublish the app's sound (non-fatal)", boom),
     );
@@ -492,8 +485,6 @@ describe("publishAppAudio", () => {
       r.state.generation = 9;
       return Promise.reject(new Error("host"));
     });
-    await expect(
-      publishAppAudio(r.state, r.room, r.screenTracks, r.video, 3, options),
-    ).resolves.toBe("stale");
+    await expect(publishAs(r)).resolves.toBe("stale");
   });
 });

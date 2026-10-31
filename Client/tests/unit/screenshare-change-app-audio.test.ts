@@ -5,9 +5,9 @@
  * cases as the "fresh audio" track.
  */
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
+import * as shareRig from "../helpers/screenShareRig";
 import { Track } from "livekit-client";
-import type { LocalTrack, Room } from "livekit-client";
-import type { WsClient } from "@lib/ws";
+import type { LocalTrack } from "livekit-client";
 import { initToast, teardownToast } from "@lib/ui/toast";
 import type { ToastContainer } from "@components/Toast";
 import { expectConsole } from "../helpers/console";
@@ -16,29 +16,16 @@ const createLocalScreenTracks = vi.fn();
 const invoke = vi.hoisted(() => vi.fn());
 const openAppAudio = vi.hoisted(() => vi.fn());
 
-vi.mock("livekit-client", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("livekit-client")>();
-  class FakeLocalAudioTrack {
-    readonly kind = actual.Track.Kind.Audio;
-    constructor(readonly mediaStreamTrack: MediaStreamTrack) {}
-    stop(): void {
-      this.mediaStreamTrack.stop();
-    }
-  }
-  return {
-    ...actual,
-    LocalAudioTrack: FakeLocalAudioTrack,
-    createLocalScreenTracks: (...args: unknown[]) => createLocalScreenTracks(...args) as unknown,
-  };
-});
-vi.mock("@tauri-apps/api/core", () => ({ invoke: (...a: unknown[]) => invoke(...a) as unknown }));
-vi.mock("../../src/lib/voice/appAudioTrack", () => ({
-  openAppAudio: (...a: unknown[]) => openAppAudio(...a) as unknown,
-}));
-vi.mock("@lib/prefs/preferences", () => ({
-  loadPref: (_key: string, fallback: unknown) => fallback,
-  savePref: vi.fn(),
-}));
+vi.mock("livekit-client", (importOriginal) =>
+  shareRig.livekitScreenMock(
+    importOriginal,
+    (...a) => createLocalScreenTracks(...a) as unknown,
+    true,
+  ),
+);
+vi.mock("@tauri-apps/api/core", () => shareRig.tauriInvokeMock(invoke));
+vi.mock("../../src/lib/voice/appAudioTrack", () => shareRig.appAudioTrackMock(openAppAudio));
+vi.mock("@lib/prefs/preferences", () => shareRig.fallbackPrefsMock());
 
 const { watchScreenEnded } = await import("@lib/voice/screenShare");
 const { changeScreenshareSource } = await import("../../src/features/voice/screenshareChange");
@@ -46,7 +33,6 @@ const { startAppShareAudio } = await import("../../src/lib/voice/appAudioShare")
 const { voiceStore } = await import("@stores/voice.store");
 
 type State = Parameters<typeof changeScreenshareSource>[0];
-type Deps = Parameters<typeof changeScreenshareSource>[1];
 
 function mst(id: string, surface?: string): MediaStreamTrack {
   return {
@@ -91,23 +77,7 @@ const commands = (): string[] => invoke.mock.calls.map((c) => c[0] as string);
 
 /** A live window share; `oldAudio` is the app's sound or Chromium's. */
 async function setup(opts: { audio: "app" | "chromium" | "none"; appAudioOn?: boolean }) {
-  const publishTrack = vi.fn().mockResolvedValue(undefined);
-  const unpublishTrack = vi.fn().mockResolvedValue(undefined);
-  const room = {
-    localParticipant: {
-      publishTrack,
-      unpublishTrack,
-      setScreenShareEnabled: vi.fn().mockResolvedValue(undefined),
-    },
-  } as unknown as Room;
-  const wsSend = vi.fn(() => "id");
-  const ws = { send: wsSend } as unknown as WsClient;
-  const deps: Deps & { onError: Mock<(m: string) => void> } = {
-    getRoom: () => room,
-    getWs: () => ws,
-    onError: vi.fn<(m: string) => void>(),
-    reapplyAudioPipeline: vi.fn(),
-  };
+  const { room, publishTrack, unpublishTrack, deps } = shareRig.screenShareRig();
   const video = track(Track.Kind.Video, "window-a", "window");
   // The old window's app sound is a real one, started through the lib, so
   // its close() applies the real "stop unless a newer start" rule.

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import * as mocks from "../../helpers/channelSidebarMocks";
 import { createChannelSidebar } from "../../../src/components/ChannelSidebar";
 import { channelsStore, setChannels } from "../../../src/stores/channels.store";
@@ -8,10 +8,10 @@ import { membersStore } from "../../../src/stores/members.store";
 import { computeKeyFingerprint } from "@lib/net/e2eeCrypto";
 import { expectConsole } from "../../helpers/console";
 import {
-  resetStores,
   addVoiceUser,
   setPeerVerif,
   testChannels,
+  useSidebarScope,
 } from "../../helpers/channelSidebarHarness";
 
 vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
@@ -62,19 +62,16 @@ describe("ChannelSidebar voice identity badge", () => {
 
   const VOICE_CH = 3; // "voice-lobby" in testChannels
 
-  beforeEach(() => {
-    resetStores();
-    setChannels(testChannels);
-    container = document.createElement("div");
-    document.body.appendChild(container);
-    sidebar = createChannelSidebar({ onVoiceJoin: vi.fn(), onOpenCall: vi.fn() });
-  });
-
-  afterEach(() => {
-    sidebar.destroy?.();
-    container.remove();
-    document.querySelectorAll(".modal-overlay").forEach((el) => el.remove());
-    mockRePinPeerIdentity.mockClear();
+  useSidebarScope({
+    build: true,
+    bind: ({ container: c, sidebar: s }) => {
+      container = c;
+      sidebar = s!;
+    },
+    current: () => sidebar,
+    arrange: () => setChannels(testChannels),
+    strayElements: ".modal-overlay",
+    teardown: () => mockRePinPeerIdentity.mockClear(),
   });
 
   function badgeFor(userId: number): HTMLElement | null {
@@ -338,18 +335,15 @@ describe("ChannelSidebar identity-mismatch modal lifetime", () => {
 
   const VOICE_CH = 3; // "voice-lobby" in testChannels
 
-  beforeEach(() => {
-    resetStores();
-    setChannels(testChannels);
-    container = document.createElement("div");
-    document.body.appendChild(container);
-    sidebar = createChannelSidebar({ onVoiceJoin: vi.fn(), onOpenCall: vi.fn() });
-  });
-
-  afterEach(() => {
-    sidebar.destroy?.();
-    container.remove();
-    document.querySelectorAll(".modal-overlay").forEach((el) => el.remove());
+  useSidebarScope({
+    build: true,
+    bind: ({ container: c, sidebar: s }) => {
+      container = c;
+      sidebar = s!;
+    },
+    current: () => sidebar,
+    arrange: () => setChannels(testChannels),
+    strayElements: ".modal-overlay",
   });
 
   function badgeFor(userId: number): HTMLElement | null {

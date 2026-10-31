@@ -1,5 +1,9 @@
 import { vi } from "vitest";
 import type { SidebarAreaOptions } from "../../src/pages/main-page/SidebarArea";
+import { dmStore } from "@stores/dm.store";
+import { uiStore } from "@stores/ui.store";
+import { resetMembersState } from "./storeResets";
+import { resetChannelsState, signInAs } from "./storeSeeds";
 
 /**
  * Fresh SidebarArea options. Kept apart from sidebarAreaHarness, which imports
@@ -45,4 +49,32 @@ export function defaultSidebarAreaOpts(): SidebarAreaOptions {
     getRoot: vi.fn().mockReturnValue(document.createElement("div")),
     getToast: vi.fn().mockReturnValue({ show: vi.fn() }),
   };
+}
+
+/** Bare SidebarArea options: inert socket and api, with `host` as the connected server. */
+export function lightSidebarAreaOpts(host: string): SidebarAreaOptions {
+  return {
+    ws: { send: vi.fn(), close: vi.fn(), on: vi.fn(), off: vi.fn() } as never,
+    api: { getConfig: vi.fn().mockReturnValue({ host }) } as never,
+    limiters: {
+      voice: { tryConsume: vi.fn().mockReturnValue(true) },
+      voiceVideo: { tryConsume: vi.fn().mockReturnValue(true) },
+    } as never,
+    presenceSender: { send: vi.fn(), rollbackRefused: vi.fn(), destroy: vi.fn() },
+    getRoot: vi.fn().mockReturnValue(document.createElement("div")),
+    getToast: vi.fn().mockReturnValue({ show: vi.fn() }),
+  };
+}
+
+/** Empty channels, DMs and members, expanded categories and channel mode, signed in as a member. */
+export function resetSidebarStoresAsMember(): void {
+  resetChannelsState();
+  dmStore.setState(() => ({ channels: [] }));
+  resetMembersState();
+  uiStore.setState((prev) => ({
+    ...prev,
+    collapsedCategories: new Set(),
+    sidebarMode: "channels" as const,
+  }));
+  signInAs({ id: 2, username: "Member", avatar: null, role: "member" });
 }

@@ -23,6 +23,46 @@ vi.mock("@lib/net/identity", () => mocks.netIdentityMock());
 
 const { mockVoiceState, mockRoom } = mocks;
 
+async function reconnectAfterFirstFailure(session: LiveKitSession) {
+  enterReconnecting(session, 5, { latestToken: "token" });
+  session.setServerHost("localhost:7880");
+  const ac = new AbortController();
+
+  mockRoom.connect
+    .mockRejectedValueOnce(new Error("first attempt failed"))
+    .mockResolvedValueOnce(undefined);
+
+  const reconnectPromise = startReconnect(session, 5, { token: "token", signal: ac.signal });
+
+  await vi.advanceTimersByTimeAsync(3000);
+  await vi.advanceTimersByTimeAsync(6000);
+  await reconnectPromise;
+}
+
+function seedRemoteCamera(target: LiveKitSession) {
+  const setSubscribed = vi.fn();
+  const publication = { kind: "audio", source: "microphone", setSubscribed };
+  const setCameraSubscribed = vi.fn();
+  const camera = { kind: "video", source: "camera", setSubscribed: setCameraSubscribed };
+  const onRemoteVideo = vi.fn();
+  target.setOnRemoteVideo(onRemoteVideo);
+  mockRoom.remoteParticipants = new Map([
+    [
+      "user-7:tok",
+      {
+        identity: "user-7:tok",
+        audioTrackPublications: new Map(),
+        trackPublications: new Map<string, unknown>([
+          ["TR_a", publication],
+          ["TR_v", camera],
+        ]),
+        getTrackPublication: (source: string) => (source === "camera" ? camera : undefined),
+      },
+    ],
+  ]);
+  return { setSubscribed, setCameraSubscribed, onRemoteVideo };
+}
+
 describe("LiveKitSession", () => {
   let session: LiveKitSession;
 
@@ -99,26 +139,7 @@ describe("LiveKitSession", () => {
       mockVoiceState.localDeafened = false;
       enterReconnecting(session, 9);
 
-      const setSubscribed = vi.fn();
-      const publication = { kind: "audio", source: "microphone", setSubscribed };
-      const setCameraSubscribed = vi.fn();
-      const camera = { kind: "video", source: "camera", setSubscribed: setCameraSubscribed };
-      const onRemoteVideo = vi.fn();
-      session.setOnRemoteVideo(onRemoteVideo);
-      mockRoom.remoteParticipants = new Map([
-        [
-          "user-7:tok",
-          {
-            identity: "user-7:tok",
-            audioTrackPublications: new Map(),
-            trackPublications: new Map<string, unknown>([
-              ["TR_a", publication],
-              ["TR_v", camera],
-            ]),
-            getTrackPublication: (source: string) => (source === "camera" ? camera : undefined),
-          },
-        ],
-      ]);
+      const { setSubscribed, setCameraSubscribed, onRemoteVideo } = seedRemoteCamera(session);
 
       await runReconnect(session, 9);
 
@@ -132,26 +153,7 @@ describe("LiveKitSession", () => {
       mockVoiceState.localDeafened = false;
       enterReconnecting(session, 9);
 
-      const setSubscribed = vi.fn();
-      const publication = { kind: "audio", source: "microphone", setSubscribed };
-      const setCameraSubscribed = vi.fn();
-      const camera = { kind: "video", source: "camera", setSubscribed: setCameraSubscribed };
-      const onRemoteVideo = vi.fn();
-      session.setOnRemoteVideo(onRemoteVideo);
-      mockRoom.remoteParticipants = new Map([
-        [
-          "user-7:tok",
-          {
-            identity: "user-7:tok",
-            audioTrackPublications: new Map(),
-            trackPublications: new Map<string, unknown>([
-              ["TR_a", publication],
-              ["TR_v", camera],
-            ]),
-            getTrackPublication: (source: string) => (source === "camera" ? camera : undefined),
-          },
-        ],
-      ]);
+      const { setSubscribed, setCameraSubscribed, onRemoteVideo } = seedRemoteCamera(session);
 
       await runReconnect(session, 9);
 
@@ -242,37 +244,13 @@ describe("LiveKitSession", () => {
     });
 
     it("succeeds on second attempt after first fails", async () => {
-      enterReconnecting(session, 5, { latestToken: "token" });
-      session.setServerHost("localhost:7880");
-      const ac = new AbortController();
-
-      mockRoom.connect
-        .mockRejectedValueOnce(new Error("first attempt failed"))
-        .mockResolvedValueOnce(undefined);
-
-      const reconnectPromise = startReconnect(session, 5, { token: "token", signal: ac.signal });
-
-      await vi.advanceTimersByTimeAsync(3000);
-      await vi.advanceTimersByTimeAsync(6000);
-      await reconnectPromise;
+      await reconnectAfterFirstFailure(session);
 
       expect(mockRoom.connect).toHaveBeenCalledTimes(2);
     });
 
     it("disconnects the failed attempt's room instead of leaking it", async () => {
-      enterReconnecting(session, 5, { latestToken: "token" });
-      session.setServerHost("localhost:7880");
-      const ac = new AbortController();
-
-      mockRoom.connect
-        .mockRejectedValueOnce(new Error("first attempt failed"))
-        .mockResolvedValueOnce(undefined);
-
-      const reconnectPromise = startReconnect(session, 5, { token: "token", signal: ac.signal });
-
-      await vi.advanceTimersByTimeAsync(3000);
-      await vi.advanceTimersByTimeAsync(6000);
-      await reconnectPromise;
+      await reconnectAfterFirstFailure(session);
 
       // The room whose connect failed must be torn down — in "reconnecting"
       // state this._room is null, so the cleanup must target the attempt's

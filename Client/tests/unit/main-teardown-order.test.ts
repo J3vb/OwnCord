@@ -64,88 +64,15 @@ const { mockLeaveVoice } = mocks;
 // api.ts — only login() is exercised (it drives wirePostAuth); the rest of the
 // real client stays, so getConfig()/setConfig() track the host the logout
 // subscriber reads when it deletes the stored credential.
-const mockLogin = vi.fn();
+const { mockLogin, capturedConnectCallbacks } = mocks;
 // The updater is Tauri-backed; stub it so nothing invokes into the void.
 vi.mock("@lib/net/updater", () => mocks.netUpdaterMock());
-vi.mock("@lib/api", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@lib/api")>();
-  return {
-    ...actual,
-    createApiClient: vi.fn(() => {
-      const api = actual.createApiClient({ host: "" });
-      return {
-        ...api,
-        login: (...args: unknown[]) => mockLogin(...args),
-        getHealth: vi.fn(() => Promise.resolve({ version: null, online_users: null })),
-        getServerInfo: vi.fn(() =>
-          Promise.resolve({
-            name: "Test Server",
-            protocol_epoch: 1,
-            browser_client_enabled: false,
-          }),
-        ),
-      };
-    }),
-  };
-});
+vi.mock("@lib/api", (importOriginal) => mocks.apiMock(importOriginal));
+vi.mock("@pages/ConnectPage", () => mocks.pagesConnectPageMock());
 
-// ConnectPage — captures the real onLogin callback main.ts wires up so the
-// test can drive wirePostAuth exactly the way a real login does, without
-// building the actual login form DOM.
-const capturedConnectCallbacks: {
-  onLogin?: (host: string, username: string, password: string) => Promise<void>;
-  onRegister?: (
-    host: string,
-    username: string,
-    password: string,
-    inviteCode: string,
-  ) => Promise<void>;
-  onRecover?: (
-    host: string,
-    username: string,
-    secret: string,
-    newPassword: string,
-  ) => Promise<void>;
-  onTotpSubmit?: (code: string) => Promise<void>;
-  getRegistrationMode?: (host: string) => string | null;
-  getRetentionNotice?: (host: string) => string | null;
-  onHostSettled?: (host: string) => void;
-  onDeleteProfile?: (profileId: string) => void;
-  onToggleAutoLogin?: (profileId: string, enabled: boolean) => void;
-  onAutoLoginCancel?: () => void;
-} = {};
-vi.mock("@pages/ConnectPage", () => ({
-  createConnectPage: vi.fn((callbacks: typeof capturedConnectCallbacks) => {
-    Object.assign(capturedConnectCallbacks, callbacks);
-    return {
-      mount: vi.fn(),
-      destroy: vi.fn(),
-      showTotp: vi.fn(),
-      showConnecting: vi.fn(),
-      showAutoConnecting: vi.fn(),
-      showError: vi.fn(),
-      showNotice: vi.fn(),
-      resetToIdle: vi.fn(),
-      updateHealthStatus: vi.fn(),
-      updateCompatibility: vi.fn(),
-      showIncompatible: vi.fn(),
-      getRememberPassword: vi.fn(() => false),
-      getAutoConnect: vi.fn(() => false),
-      getPassword: vi.fn(() => ""),
-      refreshProfiles: vi.fn(),
-      selectServer: vi.fn(),
-      applyInviteLink: vi.fn(),
-    };
-  }),
-}));
-
-// MainPage.ts pulls in the whole chat/voice UI stack. These tests need a real
-// "connect" -> "main" -> "connect" round trip through the router (the router only
-// navigates to "main" from the connected overlay's onReady callback), but do
-// not care what MainPage renders, so stand in with a lightweight shape.
-vi.mock("@pages/MainPage", () => ({
-  createMainPage: vi.fn(() => ({ mount: vi.fn(), destroy: vi.fn() })),
-}));
+// MainPage.ts pulls in the whole chat/voice UI stack; these tests only need a
+// lightweight stand-in so the router can round-trip "connect" -> "main" -> "connect".
+vi.mock("@pages/MainPage", () => mocks.pagesMainPageMock());
 
 // dispatcher.ts pulls in nearly every store/service in the app. Stand in
 // with a slim replacement that reproduces the one behavior these tests must

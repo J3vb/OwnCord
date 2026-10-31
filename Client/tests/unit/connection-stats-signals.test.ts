@@ -238,6 +238,13 @@ describe("connection stats poller figures", () => {
       { id: "out-video", type: "outbound-rtp", kind: "video", packetsSent: 1000 },
     ];
 
+    async function expectNoLossOrJitter(entry: Entry): Promise<void> {
+      run(liveRoom(() => [...base(), entry]));
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(updates[0]!.loss).toBe(0);
+      expect(updates[0]!.jitter).toBe(0);
+    }
+
     it("is used when it is a remote-inbound audio entry", async () => {
       run(
         liveRoom(() => [
@@ -258,62 +265,38 @@ describe("connection stats poller figures", () => {
     });
 
     it("ignores a remote-inbound video entry even when it points at an audio stream", async () => {
-      run(
-        liveRoom(() => [
-          ...base(),
-          {
-            id: "ri",
-            type: "remote-inbound-rtp",
-            kind: "video",
-            localId: "out-audio",
-            packetsLost: 500,
-            jitter: 0.5,
-          },
-        ]),
-      );
-      await vi.advanceTimersByTimeAsync(2000);
-      expect(updates[0]!.loss).toBe(0);
-      expect(updates[0]!.jitter).toBe(0);
+      await expectNoLossOrJitter({
+        id: "ri",
+        type: "remote-inbound-rtp",
+        kind: "video",
+        localId: "out-audio",
+        packetsLost: 500,
+        jitter: 0.5,
+      });
       expect(updates[0]!.quality).toBe("excellent");
     });
 
     it("ignores an audio entry that is not a remote-inbound report", async () => {
-      run(
-        liveRoom(() => [
-          ...base(),
-          {
-            id: "other",
-            type: "outbound-rtp",
-            kind: "audio",
-            localId: "out-audio",
-            packetsSent: 10,
-            packetsLost: 500,
-            jitter: 0.5,
-          },
-        ]),
-      );
-      await vi.advanceTimersByTimeAsync(2000);
-      expect(updates[0]!.loss).toBe(0);
-      expect(updates[0]!.jitter).toBe(0);
+      await expectNoLossOrJitter({
+        id: "other",
+        type: "outbound-rtp",
+        kind: "audio",
+        localId: "out-audio",
+        packetsSent: 10,
+        packetsLost: 500,
+        jitter: 0.5,
+      });
     });
 
     it("does not match a report to an outbound video stream", async () => {
-      run(
-        liveRoom(() => [
-          ...base(),
-          {
-            id: "ri",
-            type: "remote-inbound-rtp",
-            kind: "audio",
-            localId: "out-video",
-            packetsLost: 500,
-            jitter: 0.5,
-          },
-        ]),
-      );
-      await vi.advanceTimersByTimeAsync(2000);
-      expect(updates[0]!.loss).toBe(0);
-      expect(updates[0]!.jitter).toBe(0);
+      await expectNoLossOrJitter({
+        id: "ri",
+        type: "remote-inbound-rtp",
+        kind: "audio",
+        localId: "out-video",
+        packetsLost: 500,
+        jitter: 0.5,
+      });
     });
   });
 

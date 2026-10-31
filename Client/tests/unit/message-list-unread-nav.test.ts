@@ -34,7 +34,14 @@ import { formatMessageTimestamp } from "@lib/text/formatting";
 import { resetMessagesState, resetMembersState } from "../helpers/storeResets";
 import "../helpers/resizeObserverStub";
 import { resetChannelsState } from "../helpers/storeSeeds";
-import { makeListOptions } from "../helpers/messageListHarness";
+import {
+  makeListOptions,
+  setMessagesFlushed,
+  setDetached as setChannelDetached,
+  openChannel,
+  nextFrame,
+  stubElementHeights,
+} from "../helpers/messageListHarness";
 import { buildMessage } from "../helpers/messageFactory";
 
 const CHANNEL_ID = 1;
@@ -47,10 +54,6 @@ const CLIENT_HEIGHT = 600;
  *  measures 0): a day or NEW divider is 32 px, an ungrouped text row 61 px. */
 const DIVIDER_PX = 32;
 const ROW_PX = 61;
-
-function nextFrame(): Promise<void> {
-  return new Promise((resolve) => requestAnimationFrame(() => resolve()));
-}
 
 function resetStores(): void {
   resetMessagesState();
@@ -76,38 +79,17 @@ function range(from: number, to: number): Message[] {
 }
 
 function setMessages(messages: readonly Message[]): void {
-  messagesStore.setState((prev) => {
-    const next = new Map(prev.messagesByChannel);
-    next.set(CHANNEL_ID, [...messages]);
-    return { ...prev, messagesByChannel: next };
-  });
-  messagesStore.flush();
+  setMessagesFlushed(CHANNEL_ID, messages);
 }
 
 function setDetached(detached: boolean): void {
-  messagesStore.setState((prev) => {
-    const next = new Set(prev.detachedChannels);
-    if (detached) next.add(CHANNEL_ID);
-    else next.delete(CHANNEL_ID);
-    return { ...prev, detachedChannels: next };
-  });
+  setChannelDetached(CHANNEL_ID, detached);
 }
 
 /** Seed the channel with `unread` unread messages and open it the way the app
  *  does (the badge clears and the count is snapshotted for the divider). */
 function openChannelWithUnread(unread: number): void {
-  setChannels([
-    {
-      id: CHANNEL_ID,
-      name: "general",
-      type: "text",
-      category: null,
-      position: 0,
-      unread_count: unread,
-      mention_count: 0,
-    },
-  ]);
-  setActiveChannel(CHANNEL_ID);
+  openChannel(CHANNEL_ID, unread);
 }
 
 function toResponse(m: Message): MessageResponse {
@@ -134,12 +116,7 @@ describe("MessageList — unread navigation", () => {
   let options: MessageListOptions;
   let sendMarkRead: ReturnType<typeof vi.fn<(channelId: number) => void>>;
   let hasFocus: ReturnType<typeof vi.spyOn>;
-  const saved = new Map<string, PropertyDescriptor | undefined>();
-
-  function stub(prop: "scrollHeight" | "clientHeight", value: number): void {
-    saved.set(prop, Object.getOwnPropertyDescriptor(HTMLElement.prototype, prop));
-    Object.defineProperty(HTMLElement.prototype, prop, { configurable: true, get: () => value });
-  }
+  let restoreHeights: () => void;
 
   beforeEach(() => {
     resetStores();
@@ -149,8 +126,10 @@ describe("MessageList — unread navigation", () => {
     sendMarkRead = vi.fn<(channelId: number) => void>();
     setMarkReadSender(sendMarkRead);
     hasFocus = vi.spyOn(document, "hasFocus").mockReturnValue(true);
-    stub("scrollHeight", SCROLL_HEIGHT);
-    stub("clientHeight", CLIENT_HEIGHT);
+    restoreHeights = stubElementHeights({
+      scrollHeight: SCROLL_HEIGHT,
+      clientHeight: CLIENT_HEIGHT,
+    });
   });
 
   afterEach(() => {
@@ -159,11 +138,7 @@ describe("MessageList — unread navigation", () => {
     container.remove();
     setMarkReadSender(null);
     hasFocus.mockRestore();
-    for (const [prop, descriptor] of saved) {
-      if (descriptor) Object.defineProperty(HTMLElement.prototype, prop, descriptor);
-      else delete (HTMLElement.prototype as unknown as Record<string, unknown>)[prop];
-    }
-    saved.clear();
+    restoreHeights();
   });
 
   function mount(): void {

@@ -154,3 +154,21 @@ export function pageOverlayManagersMock() {
     }),
   };
 }
+
+/** livekitSession with a pinned-identity spy, for suites that mount the real sidebar. */
+export function rePinSessionMock() {
+  return withOverrides({ rePinPeerIdentity: vi.fn() });
+}
+
+export function e2eeCryptoMock() {
+  return {
+    importIdentityPublicKey: vi.fn(),
+    computeKeyFingerprint: vi.fn(),
+  };
+}
+
+export function inviteManagerMock(open = vi.fn().mockResolvedValue(undefined)) {
+  return {
+    createInviteManagerController: vi.fn().mockReturnValue({ open, cleanup: vi.fn() }),
+  };
+}

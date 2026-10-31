@@ -1,14 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as logMock from "../helpers/loggerMock";
 
 const invoke = vi.hoisted(() => vi.fn());
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
-vi.mock("@lib/logger", () => ({
-  createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
-}));
+vi.mock("@lib/logger", () => logMock.loggerMock());
 
 import { createUserProfilePopup } from "@components/UserProfilePopup";
 import { createDmProfileSidebar } from "@components/DmProfileSidebar";
-import { createDmSidebar, type DmConversation } from "@components/DmSidebar";
+import { makeDmConversation, useDmSidebarHost } from "../helpers/dmSidebarHost";
 import { buildGameActivityRows } from "../../src/features/settings/GameActivityRows";
 import { playingForLine, playingLine } from "../../src/features/members/gameActivityLine";
 import {
@@ -155,34 +154,17 @@ describe("profile card and DM profile sidebar", () => {
 
 describe("DM list rows", () => {
   let container: HTMLDivElement;
-  beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
+  const mount = useDmSidebarHost((c) => {
+    container = c;
   });
   afterEach(() => {
-    container.remove();
     dmStore.setState(() => ({ channels: [] }));
   });
 
-  const convo = (overrides: Partial<DmConversation> = {}): DmConversation => ({
-    channelId: 100,
-    userId: 1,
-    username: "Alice",
-    avatar: null,
-    status: "online",
-    lastMessage: "Hello!",
-    timestamp: "2025-01-01T00:00:00Z",
-    unread: false,
-    ...overrides,
-  });
+  const convo = makeDmConversation;
 
   it("draws the partner's game between the name and the last message, and updates in place", () => {
-    const sidebar = createDmSidebar({
-      conversations: [convo({ activity: "Playing Factorio" })],
-      onSelectConversation: vi.fn(),
-      onNewDm: vi.fn(),
-    });
-    sidebar.mount(container);
+    const sidebar = mount([convo({ activity: "Playing Factorio" })]);
     expect(container.querySelector('[data-testid="dm-activity-100"]')?.textContent).toBe(
       "Playing Factorio",
     );
@@ -194,12 +176,7 @@ describe("DM list rows", () => {
   });
 
   it("never draws a game on a group row", () => {
-    const sidebar = createDmSidebar({
-      conversations: [convo({ isGroup: true, activity: "Playing Factorio" })],
-      onSelectConversation: vi.fn(),
-      onNewDm: vi.fn(),
-    });
-    sidebar.mount(container);
+    const sidebar = mount([convo({ isGroup: true, activity: "Playing Factorio" })]);
     expect(container.querySelector('[data-testid="dm-activity-100"]')).toBeNull();
     sidebar.destroy?.();
   });

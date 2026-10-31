@@ -45,31 +45,56 @@ export function loadAdminPanel(html: string, calls: FetchCall[], respond: PanelR
     runScripts: "dangerously",
     pretendToBeVisual: true,
     beforeParse(window) {
-      window.fetch = (async (input: string, opts: Record<string, unknown> = {}) => {
-        const method = String((opts.method as string) || "GET").toUpperCase();
-        const path = String(input).replace(/^\/admin\/api/, "");
-        let body: unknown;
-        if (typeof opts.body === "string") {
-          try {
-            body = JSON.parse(opts.body);
-          } catch {
-            body = opts.body;
-          }
-        }
-        calls.push({ method, path, body });
-        const reply =
-          path === "/setup/status" ? { json: { needs_setup: false } } : respond(path, method);
-        const status = reply.status ?? 200;
-        return {
-          ok: status >= 200 && status < 300,
-          status,
-          headers: new Headers(reply.headers),
-          json: async () => reply.json ?? {},
-          text: async () => reply.text ?? JSON.stringify(reply.json ?? {}),
-        } as Response;
-      }) as typeof fetch;
+      window.fetch = scriptedPanelFetch(
+        ({ method, path, body }) => calls.push({ method, path, body }),
+        (path, method) =>
+          path === "/setup/status" ? { json: { needs_setup: false } } : respond(path, method),
+      );
     },
   });
+}
+
+export interface PanelRequest {
+  method: string;
+  url: string;
+  path: string;
+  body: unknown;
+  headers: Record<string, string>;
+}
+
+/** A `fetch` that hands each request to `record` and answers it from `answer`. */
+export function scriptedPanelFetch(
+  record: (call: PanelRequest) => void,
+  answer: PanelResponder,
+): typeof fetch {
+  return (async (input: string, opts: Record<string, unknown> = {}) => {
+    const method = String((opts.method as string) || "GET").toUpperCase();
+    const path = String(input).replace(/^\/admin\/api/, "");
+    let body: unknown;
+    if (typeof opts.body === "string") {
+      try {
+        body = JSON.parse(opts.body);
+      } catch {
+        body = opts.body;
+      }
+    }
+    record({
+      method,
+      url: String(input),
+      path,
+      body,
+      headers: (opts.headers as Record<string, string>) ?? {},
+    });
+    const reply = answer(path, method);
+    const status = reply.status ?? 200;
+    return {
+      ok: status >= 200 && status < 300,
+      status,
+      headers: new Headers(reply.headers),
+      json: async () => reply.json ?? {},
+      text: async () => reply.text ?? JSON.stringify(reply.json ?? {}),
+    } as Response;
+  }) as typeof fetch;
 }
 
 /**

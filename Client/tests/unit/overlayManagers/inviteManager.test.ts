@@ -1,9 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { Mock } from "vitest";
 import * as mocks from "../../helpers/overlayManagersMocks";
 import { createInviteManager } from "@components/InviteManager";
 import { mapInviteResponse, createInviteManagerController } from "@pages/main-page/OverlayManagers";
-import { makeInviteResponse, makeMockApi } from "../../helpers/overlayManagersHarness";
+import {
+  type CopyLinkOpts,
+  type FeaturedCodeOpts,
+  firstCallOpts,
+  type InviteListOpts,
+  makeInviteResponse,
+  makeMockApi,
+  type RevokeInviteOpts,
+} from "../../helpers/overlayManagersHarness";
 import { useMountContainer } from "../../helpers/mountContainer";
 
 vi.mock("@lib/logger", () => mocks.loggerMock());
@@ -72,9 +79,7 @@ describe("createInviteManagerController", () => {
 
     await openInvites(api);
 
-    const opts = (createInviteManager as Mock).mock.calls[0]![0] as {
-      invites: Array<{ code: string }>;
-    };
+    const opts = firstCallOpts<InviteListOpts>(createInviteManager);
     expect(opts.invites.map((i) => i.code)).toEqual(["live1"]);
   });
 
@@ -93,9 +98,7 @@ describe("createInviteManagerController", () => {
 
     await openInvites(api);
 
-    const opts = (createInviteManager as Mock).mock.calls[0]![0] as {
-      invites: Array<{ code: string }>;
-    };
+    const opts = firstCallOpts<InviteListOpts>(createInviteManager);
     expect(opts.invites.map((i) => i.code)).toEqual(["live1"]);
   });
 
@@ -107,9 +110,7 @@ describe("createInviteManagerController", () => {
     await openInvites(api);
 
     // Extract the onRevokeInvite callback passed to InviteManager
-    const opts = (createInviteManager as Mock).mock.calls[0]![0] as {
-      onRevokeInvite: (code: string) => Promise<void>;
-    };
+    const opts = firstCallOpts<RevokeInviteOpts>(createInviteManager);
 
     // The callback should re-throw so InviteManager's catch prevents optimistic removal
     await expect(opts.onRevokeInvite("abc123xyz")).rejects.toThrow("network error");
@@ -123,9 +124,7 @@ describe("createInviteManagerController", () => {
 
     await openInvites(api);
 
-    const opts = (createInviteManager as Mock).mock.calls[0]![0] as {
-      onRevokeInvite: (code: string) => Promise<void>;
-    };
+    const opts = firstCallOpts<RevokeInviteOpts>(createInviteManager);
 
     await expect(opts.onRevokeInvite("abc123xyz")).resolves.toBeUndefined();
     expect(mockLogError).not.toHaveBeenCalled();
@@ -140,10 +139,10 @@ describe("createInviteManagerController", () => {
     await controller.open();
     expect(api.createInvite).toHaveBeenCalledTimes(1);
     expect(api.createInvite).toHaveBeenCalledWith({ expires_in_hours: 168, max_uses: 0 });
-    const opts = (createInviteManager as Mock).mock.calls[0]![0] as {
+    const opts = firstCallOpts<{
       invites: Array<{ code: string }>;
       featuredCode: string;
-    };
+    }>(createInviteManager);
     expect(opts.featuredCode).toBe("fresh1");
     expect(opts.invites.map((i) => i.code)).toEqual(["fresh1"]);
   });
@@ -179,7 +178,7 @@ describe("createInviteManagerController", () => {
     const controller = createInviteManagerController({ api: api as never, getRoot: () => root });
     await controller.open();
     expect(api.createInvite).not.toHaveBeenCalled();
-    const opts = (createInviteManager as Mock).mock.calls[0]![0] as { featuredCode: string };
+    const opts = firstCallOpts<FeaturedCodeOpts>(createInviteManager);
     expect(opts.featuredCode).toBe("newer");
   });
 
@@ -196,7 +195,7 @@ describe("createInviteManagerController", () => {
     const controller = createInviteManagerController({ api: api as never, getRoot: () => root });
     await controller.open();
     expect(api.createInvite).toHaveBeenCalledTimes(1);
-    const opts = (createInviteManager as Mock).mock.calls[0]![0] as { featuredCode: string };
+    const opts = firstCallOpts<FeaturedCodeOpts>(createInviteManager);
     expect(opts.featuredCode).toBe("mine-new");
   });
 
@@ -210,10 +209,10 @@ describe("createInviteManagerController", () => {
     const controller = createInviteManagerController({ api: api as never, getRoot: () => root });
     await controller.open();
     expect(api.createInvite).toHaveBeenCalledTimes(1);
-    const opts = (createInviteManager as Mock).mock.calls[0]![0] as {
+    const opts = firstCallOpts<{
       invites: Array<{ code: string }>;
       featuredCode: string | null;
-    };
+    }>(createInviteManager);
     expect(opts.featuredCode).toBeNull();
     expect(opts.invites.map((i) => i.code)).toEqual(["theirs"]);
     expect(mockShowToast).toHaveBeenCalledWith("Invite limit reached", "error");
@@ -493,9 +492,9 @@ describe("createInviteManagerController (additional)", () => {
 
     await openInvites(api);
 
-    const opts = (createInviteManager as Mock).mock.calls[0]![0] as {
+    const opts = firstCallOpts<{
       onCreateInvite: (p: { expiresInHours: number; maxUses: number }) => Promise<unknown>;
-    };
+    }>(createInviteManager);
 
     const result = await opts.onCreateInvite({ expiresInHours: 24, maxUses: 5 });
     expect(api.createInvite).toHaveBeenCalledWith({ expires_in_hours: 24, max_uses: 5 });
@@ -511,9 +510,7 @@ describe("createInviteManagerController (additional)", () => {
 
     await openInvites(api);
 
-    const opts = (createInviteManager as Mock).mock.calls[0]![0] as {
-      onCopyLink: (code: string) => void;
-    };
+    const opts = firstCallOpts<CopyLinkOpts>(createInviteManager);
 
     opts.onCopyLink("test-code");
     expect(mockWriteText).toHaveBeenCalledWith("owncord://invite/test-code?host=chat.example.com");
@@ -523,9 +520,7 @@ describe("createInviteManagerController (additional)", () => {
     async function openAndGetCopy(host: string | undefined) {
       const api = makeMockApi({ getConfig: vi.fn().mockReturnValue({ host }) });
       await openInvites(api);
-      const opts = (createInviteManager as Mock).mock.calls[0]![0] as {
-        onCopyLink: (code: string) => void;
-      };
+      const opts = firstCallOpts<CopyLinkOpts>(createInviteManager);
       return opts.onCopyLink;
     }
 
@@ -572,9 +567,9 @@ describe("createInviteManagerController (additional)", () => {
 
     const controller = await openInvites(api);
 
-    const opts = (createInviteManager as Mock).mock.calls[0]![0] as {
+    const opts = firstCallOpts<{
       onClose: () => void;
-    };
+    }>(createInviteManager);
 
     opts.onClose();
     expect(mockInviteManagerDestroy).toHaveBeenCalled();
@@ -590,9 +585,9 @@ describe("createInviteManagerController (additional)", () => {
 
     await openInvites(api);
 
-    const opts = (createInviteManager as Mock).mock.calls[0]![0] as {
+    const opts = firstCallOpts<{
       onError: (message: string) => void;
-    };
+    }>(createInviteManager);
 
     opts.onError("Something went wrong");
     expect(mockLogError).toHaveBeenCalledWith("Something went wrong");
@@ -628,9 +623,7 @@ describe("createInviteManagerController (additional)", () => {
 
     await openInvites(api);
 
-    const opts = (createInviteManager as Mock).mock.calls[0]![0] as {
-      onRevokeInvite: (code: string) => Promise<void>;
-    };
+    const opts = firstCallOpts<RevokeInviteOpts>(createInviteManager);
 
     await expect(opts.onRevokeInvite("abc123xyz")).resolves.toBeUndefined();
     expect(api.revokeInvite).toHaveBeenCalledWith("abc123xyz");

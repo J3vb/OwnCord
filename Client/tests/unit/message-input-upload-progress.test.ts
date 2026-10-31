@@ -9,7 +9,7 @@ vi.mock("@components/GifPicker", () => mocks.gifPickerMock());
 
 import { createMessageInput } from "@components/MessageInput";
 import { useMountContainer } from "../helpers/mountContainer";
-import { makeOptions, queueFile } from "../helpers/messageInputHarness";
+import { controlledUpload, makeOptions, queueFile } from "../helpers/messageInputHarness";
 
 describe("MessageInput upload progress", () => {
   let container: HTMLDivElement;
@@ -18,27 +18,19 @@ describe("MessageInput upload progress", () => {
   });
 
   it("shows determinate progress from a progress callback while the upload runs", async () => {
-    let report: ((fraction: number) => void) | null = null;
-    let finish: (r: { id: string; url: string; filename: string }) => void = () => {};
-    const onUploadFile = vi.fn(
-      (_file: File, _signal?: AbortSignal, onProgress?: (fraction: number) => void) => {
-        report = onProgress ?? null;
-        return new Promise<{ id: string; url: string; filename: string }>((resolve) => {
-          finish = resolve;
-        });
-      },
-    );
+    const up = controlledUpload();
+    const onUploadFile = up.fn;
     const comp = createMessageInput(makeOptions({ onUploadFile }));
     comp.mount(container);
 
     queueFile(container, new File(["x"], "a.png", { type: "image/png" }));
     await vi.waitFor(() => expect(onUploadFile).toHaveBeenCalled());
 
-    report!(0.25);
+    up.progress(0.25);
     const bar = container.querySelector("progress") as HTMLProgressElement;
     await vi.waitFor(() => expect(bar?.value).toBeCloseTo(0.25));
 
-    finish({ id: "srv-1", url: "/f/1", filename: "a.png" });
+    up.resolve({ id: "srv-1", url: "/f/1", filename: "a.png" });
     await vi.waitFor(() => expect(container.querySelector(".uploading")).toBeNull());
     comp.destroy?.();
   });

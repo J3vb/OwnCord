@@ -26,20 +26,13 @@ const {
   mockShowToast,
 } = mocks;
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
 describe("VideoGrid", () => {
   let container: HTMLDivElement;
   let grid: VideoGridComponent;
 
-  useVideoGridHarness({
-    wired: (c, g) => {
-      container = c;
-      grid = g;
-    },
-    currentGrid: () => grid,
+  const harness = useVideoGridHarness((c, g) => {
+    container = c;
+    grid = g;
   });
 
   describe("call view: control bar and view toggles", () => {
@@ -428,7 +421,7 @@ describe("VideoGrid", () => {
       localStorage.setItem("owncord:settings:callShowStrip", "false");
       grid.destroy?.();
       container = document.createElement("div");
-      grid = createVideoGrid();
+      grid = harness.adopt(createVideoGrid());
       grid.mount(container);
       grid.setExitVisible(true);
       grid.setPeople([person(2, "Otto")]);
@@ -446,7 +439,7 @@ describe("VideoGrid", () => {
       localStorage.setItem("owncord:settings:callShowSelfCamera", "false");
       grid.destroy?.();
       container = document.createElement("div");
-      grid = createVideoGrid();
+      grid = harness.adopt(createVideoGrid());
       grid.mount(container);
       grid.setPeople([person(2, "Otto")]);
       grid.addStream(SELF, "You", fakeStream(), selfCfg);

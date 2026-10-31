@@ -4,7 +4,7 @@ import { createMessageList } from "@components/MessageList";
 import { renderMessage } from "@components/message-list/renderers";
 import { messageActionGates } from "@components/message-list/messageActions";
 import { shouldGroup } from "@lib/text/formatting";
-import { messagesStore, type Message } from "@stores/messages.store";
+import type { Message } from "@stores/messages.store";
 import { voiceStore } from "@stores/voice.store";
 import {
   ME,
@@ -17,6 +17,13 @@ import {
   signInAs,
 } from "../helpers/message-actions-fixtures";
 import "../helpers/resizeObserverStub";
+import {
+  expectNoRowMenu,
+  messageMenuNames,
+  openRowMenu,
+  seedChannelOneRows,
+  shownActions,
+} from "../helpers/readOnlyRowMenu";
 
 const START = "2024-01-15T12:00:00Z";
 
@@ -141,34 +148,18 @@ describe("call log row actions", () => {
   });
 
   function mount(): HTMLElement {
-    messagesStore.setState(() => ({
-      messagesByChannel: new Map([[1, [callRow({ endedAt: "2024-01-15T12:05:00Z", who: [ME] })]]]),
-      pendingSends: new Map(),
-      loadedChannels: new Set(),
-      hasMore: new Map(),
-      historyLoadState: new Map(),
-      detachedChannels: new Set(),
-    }));
+    seedChannelOneRows([callRow({ endedAt: "2024-01-15T12:05:00Z", who: [ME] })]);
     list = createMessageList(makeOpts({ channelType: "dm" }));
     list.mount(container);
     return container.querySelector<HTMLElement>('[data-testid="message-5"]')!;
   }
-  const menuNames = (): string[] =>
-    [...document.querySelectorAll<HTMLElement>('.message-context-menu [role="menuitem"]')].map(
-      (el) => el.getAttribute("aria-label") ?? el.textContent ?? "",
-    );
+  const menuNames = messageMenuNames;
 
   it("gates: only Copy ID can show, and only in developer mode", () => {
     const msg = callRow({ user: { id: ME, username: "me", avatar: null } });
     setDeveloperMode(true);
     const g = messageActionGates(msg, makeOpts({ onReportClick: vi.fn() }));
-    expect([g.react, g.edit, g.pin, g.delete, g.report].map((x) => x.shown)).toEqual([
-      false,
-      false,
-      false,
-      false,
-      false,
-    ]);
+    expect(shownActions(g)).toEqual([false, false, false, false, false]);
     expect(g.copyId.shown).toBe(true);
   });
 
@@ -176,19 +167,12 @@ describe("call log row actions", () => {
     setDeveloperMode(true);
     const row = mount();
     expect(row.querySelector(".msg-actions-bar")).toBeNull();
-    row.dispatchEvent(
-      new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 4, clientY: 4 }),
-    );
+    openRowMenu(row);
     await vi.waitFor(() => expect(menuNames()).toEqual(["Copy Message ID"]));
   });
 
   it("without developer mode there is no menu at all", async () => {
     const row = mount();
-    row.dispatchEvent(
-      new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 4, clientY: 4 }),
-    );
-    await import("@components/message-list/messageMenu");
-    await new Promise((r) => setTimeout(r, 0));
-    expect(document.querySelector(".message-context-menu")).toBeNull();
+    await expectNoRowMenu(row);
   });
 });

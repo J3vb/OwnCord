@@ -18,37 +18,8 @@ import {
   isWindowDetached,
   isChannelLoaded,
 } from "../../src/stores/messages.store";
-import type { ChatMessagePayload, MessageResponse, MessageUser } from "../../src/lib/types";
-
-const USER: MessageUser = { id: 1, username: "alice", avatar: null };
-
-function response(id: number): MessageResponse {
-  return {
-    id,
-    channel_id: 1,
-    user: USER,
-    content: `msg ${id}`,
-    reply_to: null,
-    attachments: [],
-    reactions: [],
-    pinned: false,
-    edited_at: null,
-    deleted: false,
-    timestamp: "2026-03-15T09:00:00Z",
-  };
-}
-
-function broadcast(id: number): ChatMessagePayload {
-  return {
-    id,
-    channel_id: 1,
-    user: USER,
-    content: `live ${id}`,
-    reply_to: null,
-    attachments: [],
-    timestamp: "2026-03-15T12:00:00Z",
-  } as ChatMessagePayload;
-}
+import type { MessageResponse } from "../../src/lib/types";
+import { buildResponse as response, buildBroadcast as broadcast } from "../helpers/messageFactory";
 
 const ids = (): number[] => getChannelMessages(1).map((m) => m.id);
 
@@ -69,7 +40,12 @@ describe("loadNewerMessages: recovering a live message refused while detached", 
       hasMore: new Map(),
       detachedChannels: new Set(),
     }));
-    setAroundMessages(1, [10, 11, 12].map(response), true, true);
+    setAroundMessages(
+      1,
+      [10, 11, 12].map((id) => response(id)),
+      true,
+      true,
+    );
   });
 
   function setup(getMessages: ReturnType<typeof vi.fn>) {

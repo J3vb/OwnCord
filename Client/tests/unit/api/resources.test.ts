@@ -1,8 +1,14 @@
-import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vitest";
+import { describe, it, expect, vi, type Mock } from "vitest";
 import * as mocks from "../../helpers/apiMocks";
 import { createApiClient, type OnUnauthorized } from "../../../src/lib/api";
 import { expectConsole } from "../../helpers/console";
-import { jsonResponse, errorResponse, brokenJsonErrorResponse } from "../../helpers/apiHarness";
+import {
+  jsonResponse,
+  errorResponse,
+  brokenJsonErrorResponse,
+  fetchCallReaders,
+  useDefaultApiClient,
+} from "../../helpers/apiHarness";
 
 vi.mock("@tauri-apps/plugin-http", () => mocks.pluginHttpMock());
 vi.mock("../../../src/lib/net/httpProxy", () => mocks.netHttpProxyMock());
@@ -13,25 +19,13 @@ describe("API Client", () => {
   let api: ReturnType<typeof createApiClient>;
   let onUnauthorized: Mock<OnUnauthorized>;
 
-  beforeEach(() => {
-    mockFetch.mockReset();
-    onUnauthorized = vi.fn<OnUnauthorized>();
-    api = createApiClient({ host: "localhost:8443", token: "test-token" }, onUnauthorized);
+  useDefaultApiClient(mockFetch, (client, unauthorized) => {
+    api = client;
+    onUnauthorized = unauthorized;
   });
 
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  // ── helpers ──────────────────────────────────────────────
-
-  /** Extract the call args for the Nth fetch invocation. */
-  function fetchCallUrl(n = 0): string {
-    return mockFetch.mock.calls[n]?.[0] as string;
-  }
-  function fetchCallOpts(n = 0): Record<string, unknown> {
-    return mockFetch.mock.calls[n]?.[1] as Record<string, unknown>;
-  }
+  const { url: fetchCallUrl, init } = fetchCallReaders(mockFetch);
+  const fetchCallOpts = (n = 0) => init(n) as Record<string, unknown>;
 
   describe("config management", () => {
     it("setConfig updates token", async () => {

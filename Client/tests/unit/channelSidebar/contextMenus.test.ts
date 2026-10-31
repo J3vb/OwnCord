@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from "vitest";
+import { describe, it, expect, vi, type Mock } from "vitest";
 import * as mocks from "../../helpers/channelSidebarMocks";
 import { cascadedDeclaration, varToken } from "../../helpers/app-css";
 import {
@@ -17,13 +17,13 @@ import { uiStore } from "../../../src/stores/ui.store";
 import { voiceStore, updateVoiceState } from "../../../src/stores/voice.store";
 import { Permission, type ReadyChannel, type VoiceStatePayload } from "../../../src/lib/types";
 import {
-  resetStores,
   rightClick,
   useSidebarFixture,
   addVoiceUser,
   testChannels,
   voiceModCallbacks,
   setAdminUser,
+  useSidebarScope,
 } from "../../helpers/channelSidebarHarness";
 import { signInAs } from "../../helpers/storeSeeds";
 
@@ -152,6 +152,22 @@ describe("ChannelSidebar", () => {
 
   // ── Purge messages context-menu item ──
 
+  /** Rebuilds the sidebar after `arrange` has set the roles and user, with a purge callback. */
+  function mountPurgeSidebar(
+    arrange: () => void,
+    extra: Partial<ChannelSidebarOptions> = {},
+  ): Mock<(channel: Channel, count: number) => Promise<void>> {
+    const onPurgeChannel = vi.fn<(channel: Channel, count: number) => Promise<void>>(
+      async () => {},
+    );
+    sidebar.destroy?.();
+    arrange();
+    sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall, ...extra, onPurgeChannel });
+    setChannels(testChannels);
+    sidebar.mount(container);
+    return onPurgeChannel;
+  }
+
   /** Right-click channel 1 and return the opened context menu. */
   function openChannelCtxMenu(): HTMLElement | null {
     const channelEl = container.querySelector('[data-channel-id="1"]') as HTMLElement;
@@ -160,16 +176,12 @@ describe("ChannelSidebar", () => {
   }
 
   it("shows Purge Messages for a role holding MANAGE_MESSAGES", () => {
-    const onPurgeChannel = vi.fn<(channel: Channel, count: number) => Promise<void>>(
-      async () => {},
-    );
-    sidebar.destroy?.();
-    setRoles([{ id: 3, name: "Moderator", color: null, permissions: Permission.MANAGE_MESSAGES }]);
-    signInAs({ id: 3, username: "Mod", avatar: null, role: "moderator" });
-    sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall, onPurgeChannel });
-
-    setChannels(testChannels);
-    sidebar.mount(container);
+    mountPurgeSidebar(() => {
+      setRoles([
+        { id: 3, name: "Moderator", color: null, permissions: Permission.MANAGE_MESSAGES },
+      ]);
+      signInAs({ id: 3, username: "Mod", avatar: null, role: "moderator" });
+    });
 
     // A moderator is not owner/admin, so the menu exists only because of purge.
     expect(openChannelCtxMenu()).not.toBeNull();
@@ -178,36 +190,23 @@ describe("ChannelSidebar", () => {
   });
 
   it("hides Purge Messages for a role without MANAGE_MESSAGES", () => {
-    const onPurgeChannel = vi.fn<(channel: Channel, count: number) => Promise<void>>(
-      async () => {},
+    mountPurgeSidebar(
+      () => {
+        setRoles([{ id: 2, name: "Admin", color: null, permissions: Permission.MANAGE_CHANNELS }]);
+        setAdminUser();
+      },
+      { onEditChannel: vi.fn() },
     );
-    sidebar.destroy?.();
-    setRoles([{ id: 2, name: "Admin", color: null, permissions: Permission.MANAGE_CHANNELS }]);
-    setAdminUser();
-    sidebar = createChannelSidebar({
-      onVoiceJoin,
-      onOpenCall,
-      onEditChannel: vi.fn(),
-      onPurgeChannel,
-    });
-
-    setChannels(testChannels);
-    sidebar.mount(container);
 
     expect(openChannelCtxMenu()).not.toBeNull();
     expect(document.querySelector('[data-testid="ctx-purge-messages"]')).toBeNull();
   });
 
   it("offers Purge Messages once a live role update grants MANAGE_MESSAGES", () => {
-    const onPurgeChannel = vi.fn<(channel: Channel, count: number) => Promise<void>>(
-      async () => {},
-    );
-    sidebar.destroy?.();
-    setRoles([{ id: 3, name: "Moderator", color: null, permissions: 0 }]);
-    signInAs({ id: 3, username: "Mod", avatar: null, role: "moderator" });
-    sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall, onPurgeChannel });
-    setChannels(testChannels);
-    sidebar.mount(container);
+    mountPurgeSidebar(() => {
+      setRoles([{ id: 3, name: "Moderator", color: null, permissions: 0 }]);
+      signInAs({ id: 3, username: "Mod", avatar: null, role: "moderator" });
+    });
     openChannelCtxMenu();
     expect(document.querySelector('[data-testid="ctx-purge-messages"]')).toBeNull();
     document.querySelectorAll(".channel-ctx-menu").forEach((el) => el.remove());
@@ -220,16 +219,10 @@ describe("ChannelSidebar", () => {
   });
 
   it("purge prompt clamps the count and calls onPurgeChannel with the channel", async () => {
-    const onPurgeChannel = vi.fn<(channel: Channel, count: number) => Promise<void>>(
-      async () => {},
-    );
-    sidebar.destroy?.();
-    setRoles([{ id: 2, name: "Admin", color: null, permissions: Permission.ADMINISTRATOR }]);
-    setAdminUser();
-    sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall, onPurgeChannel });
-
-    setChannels(testChannels);
-    sidebar.mount(container);
+    const onPurgeChannel = mountPurgeSidebar(() => {
+      setRoles([{ id: 2, name: "Admin", color: null, permissions: Permission.ADMINISTRATOR }]);
+      setAdminUser();
+    });
     openChannelCtxMenu();
 
     const trigger = document.querySelector('[data-testid="ctx-purge-messages"]') as HTMLElement;
@@ -248,16 +241,10 @@ describe("ChannelSidebar", () => {
   });
 
   it("does not offer purge on a voice channel", () => {
-    const onPurgeChannel = vi.fn<(channel: Channel, count: number) => Promise<void>>(
-      async () => {},
-    );
-    sidebar.destroy?.();
-    setRoles([{ id: 2, name: "Admin", color: null, permissions: Permission.ADMINISTRATOR }]);
-    setAdminUser();
-    sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall, onPurgeChannel });
-
-    setChannels(testChannels);
-    sidebar.mount(container);
+    mountPurgeSidebar(() => {
+      setRoles([{ id: 2, name: "Admin", color: null, permissions: Permission.ADMINISTRATOR }]);
+      setAdminUser();
+    });
 
     const voiceEl = container.querySelector('[data-channel-id="3"]') as HTMLElement;
     rightClick(voiceEl, 5, 5);
@@ -891,16 +878,12 @@ describe("ChannelSidebar channel context menu permissions", () => {
   let container: HTMLDivElement;
   let sidebar: ReturnType<typeof createChannelSidebar>;
 
-  beforeEach(() => {
-    resetStores();
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    sidebar.destroy?.();
-    container.remove();
-    document.querySelectorAll(".context-menu").forEach((el) => el.remove());
+  useSidebarScope({
+    bind: ({ container: c }) => {
+      container = c;
+    },
+    current: () => sidebar,
+    strayElements: ".context-menu",
   });
 
   function mountAs(roleName: string, permissions: number): HTMLElement | null {

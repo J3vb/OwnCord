@@ -36,9 +36,9 @@ export function livekitClientMock() {
   };
 }
 
-export function netE2eeCryptoMock() {
+export function netE2eeCryptoMock(keyPair: typeof mockKeyPair = mockKeyPair) {
   return {
-    generateECDHKeyPair: vi.fn(async () => mockKeyPair),
+    generateECDHKeyPair: vi.fn(async () => keyPair),
     exportPublicKey: vi.fn(async () => "bW9ja2VwaGVtZXJhbA=="),
     importPublicKey: vi.fn(async () => ({ type: "public" }) as unknown as CryptoKey),
     generateRoomKey: vi.fn(() => new Uint8Array(32)),

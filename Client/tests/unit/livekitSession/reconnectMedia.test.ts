@@ -5,7 +5,12 @@ import { LiveKitSession } from "../../../src/lib/voice/livekitSession";
 import { setLocalCamera, setLocalScreenshare } from "@stores/voice.store";
 import { channelsStore, resetChannelsStore } from "@stores/channels.store";
 import { keepDmForCall, resetKeptCallDms } from "../../../src/features/direct-messages/keptCallDms";
-import { createDeferred, useLiveKitSessionHarness } from "../../helpers/livekitSessionHarness";
+import {
+  captureDisconnectedHandler,
+  createDeferred,
+  useLiveKitSessionHarness,
+  joinSession,
+} from "../../helpers/livekitSessionHarness";
 
 vi.mock("livekit-client", () => mocks.livekitClientMock());
 vi.mock("@stores/voice.store", () => mocks.voiceStoreMock());
@@ -19,6 +24,15 @@ vi.mock("@lib/net/identity", () => mocks.netIdentityMock());
 
 const { mockVoiceState, mockRoom, mockShowActionToast } = mocks;
 
+function audioTrackOn(sid: string, el: HTMLAudioElement) {
+  return {
+    kind: "audio",
+    sid,
+    detach: vi.fn(() => [el]),
+    attach: vi.fn(() => el),
+  };
+}
+
 describe("LiveKitSession", () => {
   let session: LiveKitSession;
 
@@ -28,6 +42,17 @@ describe("LiveKitSession", () => {
     },
     currentSession: () => session,
   });
+
+  function watchScreenshareAudioPair() {
+    const firstAudioEl = document.createElement("audio");
+    const secondAudioEl = document.createElement("audio");
+    const firstTrack = audioTrackOn("track-1", firstAudioEl);
+    const secondTrack = audioTrackOn("track-2", secondAudioEl);
+    const publication = { source: "screenShareAudio", setSubscribed: vi.fn() };
+    (session as any)._remoteTracks.watch(42, "screenshare", true);
+    const participant = { identity: "user-42" };
+    return { secondAudioEl, firstTrack, secondTrack, publication, participant };
+  }
 
   it("a camera's Stop watching survives a channel switch and ends on leave", () => {
     session.setRemoteVideoWatched(7, "camera", false);
@@ -43,16 +68,11 @@ describe("LiveKitSession", () => {
       session.setWsClient({ send: vi.fn() } as any);
       mockRoom.localParticipant.unpublishTrack = vi.fn();
 
-      // Capture the Disconnected handler during room creation
-      let disconnectedHandler: ((reason?: number) => void) | undefined;
-      mockRoom.on.mockImplementation((event: string, handler: any) => {
-        if (event === "disconnected") disconnectedHandler = handler;
-        return mockRoom;
-      });
+      const disconnected = captureDisconnectedHandler();
 
       // Connect to create the room and register handlers
       await session.handleVoiceToken("test-token", "/livekit", 1, "ws://localhost:7880", true);
-      expect(disconnectedHandler).toBeDefined();
+      expect(disconnected()).toBeDefined();
 
       // Inject fake manual tracks as if camera/screen were enabled
       const mockCamTrack = { stop: vi.fn(), mediaStreamTrack: { id: "cam" } };
@@ -65,7 +85,7 @@ describe("LiveKitSession", () => {
       (setLocalScreenshare as any).mockClear();
 
       // Fire unexpected disconnect (non-CLIENT_INITIATED triggers reconnect path)
-      disconnectedHandler!(/* SERVER_SHUTDOWN */ 1);
+      disconnected()!(/* SERVER_SHUTDOWN */ 1);
 
       // Camera track stopped and state reset
       expect(mockCamTrack.stop).toHaveBeenCalled();
@@ -87,20 +107,16 @@ describe("LiveKitSession", () => {
       const sendSpy = vi.fn();
       session.setWsClient({ send: sendSpy } as any);
 
-      let disconnectedHandler: ((reason?: number) => void) | undefined;
-      mockRoom.on.mockImplementation((event: string, handler: any) => {
-        if (event === "disconnected") disconnectedHandler = handler;
-        return mockRoom;
-      });
+      const disconnected = captureDisconnectedHandler();
 
       await session.handleVoiceToken("test-token", "/livekit", 1, "ws://localhost:7880", true);
-      expect(disconnectedHandler).toBeDefined();
+      expect(disconnected()).toBeDefined();
 
       mockVoiceState.localCamera = true;
       mockVoiceState.localScreenshare = true;
       sendSpy.mockClear();
 
-      disconnectedHandler!(/* SERVER_SHUTDOWN */ 1);
+      disconnected()!(/* SERVER_SHUTDOWN */ 1);
 
       expect(sendSpy).toHaveBeenCalledWith({ type: "voice_camera", payload: { enabled: false } });
       expect(sendSpy).toHaveBeenCalledWith({
@@ -114,17 +130,13 @@ describe("LiveKitSession", () => {
       const sendSpy = vi.fn();
       session.setWsClient({ send: sendSpy } as any);
 
-      let disconnectedHandler: ((reason?: number) => void) | undefined;
-      mockRoom.on.mockImplementation((event: string, handler: any) => {
-        if (event === "disconnected") disconnectedHandler = handler;
-        return mockRoom;
-      });
+      const disconnected = captureDisconnectedHandler();
 
       await session.handleVoiceToken("test-token", "/livekit", 1, "ws://localhost:7880", true);
-      expect(disconnectedHandler).toBeDefined();
+      expect(disconnected()).toBeDefined();
 
       sendSpy.mockClear();
-      disconnectedHandler!(/* SERVER_SHUTDOWN */ 1);
+      disconnected()!(/* SERVER_SHUTDOWN */ 1);
 
       expect(sendSpy).not.toHaveBeenCalledWith(expect.objectContaining({ type: "voice_camera" }));
       expect(sendSpy).not.toHaveBeenCalledWith(
@@ -135,9 +147,7 @@ describe("LiveKitSession", () => {
 
   describe("leaveVoice camera/screenshare generation guard", () => {
     it("discards a camera track whose device-acquisition await resolves after leaveVoice() ran", async () => {
-      session.setServerHost("localhost:7880");
-      session.setWsClient({ send: vi.fn() } as any);
-      await session.handleVoiceToken("test-token", "/livekit", 1, "ws://localhost:7880", true);
+      await joinSession(session);
 
       let resolveTrack!: (t: { kind: string; mediaStreamTrack: unknown; stop: () => void }) => void;
       (createLocalVideoTrack as any).mockReturnValueOnce(
@@ -169,14 +179,10 @@ describe("LiveKitSession", () => {
       session.setServerHost("localhost:7880");
       session.setWsClient({ send: vi.fn() } as any);
 
-      let disconnectedHandler: ((reason?: number) => void) | undefined;
-      mockRoom.on.mockImplementation((event: string, handler: any) => {
-        if (event === "disconnected") disconnectedHandler = handler;
-        return mockRoom;
-      });
+      const disconnected = captureDisconnectedHandler();
 
       await session.handleVoiceToken("test-token", "/livekit", 1, "ws://localhost:7880", true);
-      expect(disconnectedHandler).toBeDefined();
+      expect(disconnected()).toBeDefined();
 
       let resolveTrack!: (t: { kind: string; mediaStreamTrack: unknown; stop: () => void }) => void;
       (createLocalVideoTrack as any).mockReturnValueOnce(
@@ -190,7 +196,7 @@ describe("LiveKitSession", () => {
 
       // An unexpected disconnect fires teardownForReconnect while the camera
       // permission prompt is still pending.
-      disconnectedHandler!(/* SERVER_SHUTDOWN */ 1);
+      disconnected()!(/* SERVER_SHUTDOWN */ 1);
 
       resolveTrack({ kind: "video", mediaStreamTrack: {}, stop: vi.fn() });
       await enabling;
@@ -221,16 +227,12 @@ describe("LiveKitSession", () => {
     async function dropWhile(media: { camera: boolean; screenshare: boolean }): Promise<void> {
       session.setServerHost("localhost:7880");
       session.setWsClient({ send: vi.fn(), getState: () => wsState, ping: async () => {} } as any);
-      let disconnectedHandler: ((reason?: number) => void) | undefined;
-      mockRoom.on.mockImplementation((event: string, handler: any) => {
-        if (event === "disconnected") disconnectedHandler = handler;
-        return mockRoom;
-      });
+      const disconnected = captureDisconnectedHandler();
       await session.handleVoiceToken("test-token", "/livekit", 1, "ws://localhost:7880", true);
       mockVoiceState.localCamera = media.camera;
       mockVoiceState.localScreenshare = media.screenshare;
-      disconnectedHandler!(/* SERVER_SHUTDOWN */ 1);
-      secondDrop = disconnectedHandler;
+      disconnected()!(/* SERVER_SHUTDOWN */ 1);
+      secondDrop = disconnected();
     }
 
     it("turns the camera back on by itself once a camera-on call reconnects, with no toast", async () => {
@@ -439,12 +441,7 @@ describe("LiveKitSession", () => {
       const connectDeferred = createDeferred<void>();
       mockRoom.connect.mockImplementation(() => connectDeferred.promise);
 
-      // Capture the Disconnected handler registered via room.on()
-      let disconnectedHandler: ((reason?: number) => void) | undefined;
-      mockRoom.on.mockImplementation((event: string, handler: any) => {
-        if (event === "disconnected") disconnectedHandler = handler;
-        return mockRoom;
-      });
+      const disconnected = captureDisconnectedHandler();
 
       const tokenPromise = session.handleVoiceToken(
         "test-token",
@@ -457,8 +454,8 @@ describe("LiveKitSession", () => {
 
       // Simulate LiveKit emitting Disconnected with JOIN_FAILURE (reason 7)
       // while the connect() is still in progress
-      expect(disconnectedHandler).toBeDefined();
-      disconnectedHandler!(7);
+      expect(disconnected()).toBeDefined();
+      disconnected()!(7);
 
       // The session should NOT have been reset to idle — retry loop is still in control
       expect((session as any)._state.type).not.toBe("idle");
@@ -491,23 +488,8 @@ describe("LiveKitSession", () => {
     });
 
     it("keeps a replacement screenshare audio element tracked when an older track unsubscribes", () => {
-      const firstAudioEl = document.createElement("audio");
-      const secondAudioEl = document.createElement("audio");
-      const firstTrack = {
-        kind: "audio",
-        sid: "track-1",
-        detach: vi.fn(() => [firstAudioEl]),
-        attach: vi.fn(() => firstAudioEl),
-      };
-      const secondTrack = {
-        kind: "audio",
-        sid: "track-2",
-        detach: vi.fn(() => [secondAudioEl]),
-        attach: vi.fn(() => secondAudioEl),
-      };
-      const publication = { source: "screenShareAudio", setSubscribed: vi.fn() };
-      (session as any)._remoteTracks.watch(42, "screenshare", true);
-      const participant = { identity: "user-42" };
+      const { secondAudioEl, firstTrack, secondTrack, publication, participant } =
+        watchScreenshareAudioPair();
 
       (session as any)._eventHandlers.handleTrackSubscribed(firstTrack, publication, participant);
       (session as any)._eventHandlers.handleTrackSubscribed(secondTrack, publication, participant);
@@ -522,23 +504,8 @@ describe("LiveKitSession", () => {
     });
 
     it("applies the stored mute state to replacement screenshare audio tracks", () => {
-      const firstAudioEl = document.createElement("audio");
-      const secondAudioEl = document.createElement("audio");
-      const firstTrack = {
-        kind: "audio",
-        sid: "track-1",
-        detach: vi.fn(() => [firstAudioEl]),
-        attach: vi.fn(() => firstAudioEl),
-      };
-      const secondTrack = {
-        kind: "audio",
-        sid: "track-2",
-        detach: vi.fn(() => [secondAudioEl]),
-        attach: vi.fn(() => secondAudioEl),
-      };
-      const publication = { source: "screenShareAudio", setSubscribed: vi.fn() };
-      (session as any)._remoteTracks.watch(42, "screenshare", true);
-      const participant = { identity: "user-42" };
+      const { secondAudioEl, firstTrack, secondTrack, publication, participant } =
+        watchScreenshareAudioPair();
 
       (session as any)._eventHandlers.handleTrackSubscribed(firstTrack, publication, participant);
       session.muteScreenshareAudio(42, true);
