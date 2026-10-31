@@ -2,11 +2,20 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const fetchImage = vi.hoisted(() => vi.fn<(url: string) => Promise<string | null>>());
 const showStill = vi.hoisted(() => vi.fn());
+const cachedBytes = vi.hoisted(() =>
+  vi.fn<(url: string) => (() => Promise<Uint8Array | null>) | null>(),
+);
+const observeMedia = vi.hoisted(() => vi.fn());
+const playMedia = vi.hoisted(() => vi.fn());
 
 vi.mock("../../src/features/messaging/content/attachments", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("../../src/features/messaging/content/attachments")>();
-  return { ...actual, fetchImageAsObjectUrl: fetchImage };
+  return { ...actual, fetchImageAsObjectUrl: fetchImage, cachedImageBytes: cachedBytes };
+});
+vi.mock("../../src/lib/prefs/mediaVisibility", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/lib/prefs/mediaVisibility")>();
+  return { ...actual, observeMedia, playMedia };
 });
 vi.mock("../../src/features/messaging/emojiStill", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../src/features/messaging/emojiStill")>();
@@ -16,6 +25,7 @@ vi.mock("../../src/features/messaging/emojiStill", async (importOriginal) => {
 import { renderMessage } from "@components/message-list/renderers";
 import { messageActionGates } from "@components/message-list/messageActions";
 import { stickerReplyPreview } from "@components/message-list/sticker";
+import { savePref } from "@lib/prefs/preferences";
 import type { Message } from "@stores/messages.store";
 import {
   OTHER,
@@ -28,6 +38,25 @@ import {
 } from "../helpers/message-actions-fixtures";
 
 const LIVE = { id: 3, name: "Wave", url: "/api/v1/stickers/3/image" };
+
+/** A GIF with two 1x1 frames: enough for the animation sniff. */
+function twoFrameGif(): Uint8Array {
+  const frame = [0x2c, 0, 0, 0, 0, 1, 0, 1, 0, 0, 2, 0];
+  return new Uint8Array([
+    ...Array.from("GIF89a", (c) => c.charCodeAt(0)),
+    1,
+    0,
+    1,
+    0,
+    0,
+    0,
+    0,
+    ...frame,
+    ...frame,
+    0x3b,
+  ]);
+}
+const STILL_PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 13, 10, 26, 10]);
 const flush = async (): Promise<void> => {
   await Promise.resolve();
   await Promise.resolve();
@@ -49,11 +78,70 @@ describe("sticker messages", () => {
     fetchImage.mockReset();
     fetchImage.mockResolvedValue("blob:sticker-3");
     showStill.mockReset();
+    cachedBytes.mockReset();
+    cachedBytes.mockReturnValue(null);
+    observeMedia.mockReset();
+    playMedia.mockReset();
     document.documentElement.classList.remove("reduced-motion");
   });
   afterEach(() => {
     resetGateStores();
+    localStorage.clear();
     document.documentElement.classList.remove("reduced-motion");
+  });
+
+  describe("auto-pause like GIFs", () => {
+    async function renderLoaded(
+      bytes: Uint8Array,
+    ): Promise<{ host: HTMLElement; img: HTMLImageElement }> {
+      cachedBytes.mockReturnValue(() => Promise.resolve(bytes));
+      const { el } = render(makeMessage({ sticker: LIVE }));
+      await flush();
+      await flush();
+      const img = el.querySelector<HTMLImageElement>(".msg-sticker-img")!;
+      img.dispatchEvent(new Event("load"));
+      return { host: el.querySelector<HTMLElement>(".msg-sticker")!, img };
+    }
+
+    it("an animated sticker joins the GIF pause logic once loaded", async () => {
+      const { host, img } = await renderLoaded(twoFrameGif());
+      expect(cachedBytes).toHaveBeenCalledWith("blob:sticker-3");
+      expect(observeMedia).toHaveBeenCalledWith(img, "blob:sticker-3", host, false);
+    });
+
+    it("plays again on hover and on a tap", async () => {
+      const { host, img } = await renderLoaded(twoFrameGif());
+      host.dispatchEvent(new Event("pointerenter"));
+      expect(playMedia).toHaveBeenCalledWith(img);
+      playMedia.mockClear();
+      img.dispatchEvent(new Event("click"));
+      expect(playMedia).toHaveBeenCalledWith(img);
+    });
+
+    it("starts frozen when Animate GIFs is off", async () => {
+      savePref("animateGifs", false);
+      const { host, img } = await renderLoaded(twoFrameGif());
+      expect(observeMedia).toHaveBeenCalledWith(img, "blob:sticker-3", host, true);
+    });
+
+    it("a still sticker gets no play button", async () => {
+      const { host, img } = await renderLoaded(STILL_PNG);
+      expect(observeMedia).not.toHaveBeenCalled();
+      host.dispatchEvent(new Event("pointerenter"));
+      img.dispatchEvent(new Event("click"));
+      expect(playMedia).not.toHaveBeenCalled();
+    });
+
+    it("an aborted row never joins", async () => {
+      cachedBytes.mockReturnValue(() => Promise.resolve(twoFrameGif()));
+      const ac = new AbortController();
+      const el = renderMessage(makeMessage({ sticker: LIVE }), false, [], makeOpts(), ac.signal);
+      await flush();
+      ac.abort();
+      await flush();
+      el.querySelector<HTMLImageElement>(".msg-sticker-img")!.dispatchEvent(new Event("load"));
+      expect(observeMedia).not.toHaveBeenCalled();
+    });
   });
 
   it("shows the image alone, with no text body", async () => {
