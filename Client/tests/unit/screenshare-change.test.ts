@@ -129,6 +129,13 @@ function picked(withAudio: boolean): FakeTrack[] {
   return fresh;
 }
 
+/** A host call that stays pending until the test finishes it. */
+function pendingHostCall() {
+  let finish!: () => void;
+  const fn = vi.fn(() => new Promise<void>((r) => (finish = r)));
+  return { fn, finish: () => finish() };
+}
+
 /** The ways something else can take a share while an async change is in flight. */
 function takenShareCases(
   generation: number,
@@ -535,13 +542,13 @@ describe("setScreenshareQuality on a share that changes its own quality (Linux n
   });
 
   it("a Stop that overtook the host's answer leaves the stopped share alone", async () => {
-    let finish!: () => void;
-    const rig = nativeRig(vi.fn(() => new Promise<void>((r) => (finish = r))));
+    const host = pendingHostCall();
+    const rig = nativeRig(host.fn);
 
     const changing = setScreenshareQuality(rig.state, rig.deps, "high");
     rig.state.generation = 1;
     rig.state.manualScreenTracks = [];
-    finish();
+    host.finish();
     await changing;
 
     expect(rig.state.quality).toBe("medium");
@@ -918,11 +925,11 @@ describe("changeScreenshareSource on a share that swaps its own capture", () => 
   it.each(takenShareCases(4))(
     "reports nothing when %s took the share meanwhile",
     async (_n, act) => {
-      let finish!: () => void;
-      const rig = inPlaceRig(() => new Promise<void>((r) => (finish = r)));
+      const host = pendingHostCall();
+      const rig = inPlaceRig(host.fn);
       const changing = changeScreenshareSource(rig.state, rig.deps);
       act(rig);
-      finish();
+      host.finish();
       await changing;
 
       expect(voiceStore.getState().localShareRev).toBe(0);
@@ -930,12 +937,12 @@ describe("changeScreenshareSource on a share that swaps its own capture", () => 
   );
 
   it("reports nothing when the room changed meanwhile", async () => {
-    let finish!: () => void;
-    const rig = inPlaceRig(() => new Promise<void>((r) => (finish = r)));
+    const host = pendingHostCall();
+    const rig = inPlaceRig(host.fn);
     const { deps, current } = movableDeps(rig);
     const changing = changeScreenshareSource(rig.state, deps);
     current.room = {} as Room;
-    finish();
+    host.finish();
     await changing;
 
     expect(voiceStore.getState().localShareRev).toBe(0);
@@ -1124,12 +1131,12 @@ describe("setScreenshareQuality on a share that changes its own quality: guards"
   });
 
   it("holds the change flag while the host works", async () => {
-    let finish!: () => void;
-    const rig = nativeRig(vi.fn(() => new Promise<void>((r) => (finish = r))));
+    const host = pendingHostCall();
+    const rig = nativeRig(host.fn);
 
     const changing = setScreenshareQuality(rig.state, rig.deps, "high");
     expect(rig.state.changing).toBe(true);
-    finish();
+    host.finish();
     await changing;
     expect(rig.state.changing).toBe(false);
   });
@@ -1159,11 +1166,11 @@ describe("setScreenshareQuality on a share that changes its own quality: guards"
   it.each(takenShareCases(1))(
     "reports nothing when %s took the share meanwhile",
     async (_n, act) => {
-      let finish!: () => void;
-      const rig = nativeRig(vi.fn(() => new Promise<void>((r) => (finish = r))));
+      const host = pendingHostCall();
+      const rig = nativeRig(host.fn);
       const changing = setScreenshareQuality(rig.state, rig.deps, "high");
       act(rig);
-      finish();
+      host.finish();
       await changing;
 
       expect(rig.state.quality).toBe("medium");
@@ -1172,12 +1179,12 @@ describe("setScreenshareQuality on a share that changes its own quality: guards"
   );
 
   it("reports nothing when the room changed meanwhile", async () => {
-    let finish!: () => void;
-    const rig = nativeRig(vi.fn(() => new Promise<void>((r) => (finish = r))));
+    const host = pendingHostCall();
+    const rig = nativeRig(host.fn);
     const { deps, current } = movableDeps(rig);
     const changing = setScreenshareQuality(rig.state, deps, "high");
     current.room = {} as Room;
-    finish();
+    host.finish();
     await changing;
 
     expect(rig.state.quality).toBe("medium");
@@ -1185,12 +1192,12 @@ describe("setScreenshareQuality on a share that changes its own quality: guards"
   });
 
   it("reports nothing when the connection changed meanwhile", async () => {
-    let finish!: () => void;
-    const rig = nativeRig(vi.fn(() => new Promise<void>((r) => (finish = r))));
+    const host = pendingHostCall();
+    const rig = nativeRig(host.fn);
     const { deps, current } = movableDeps(rig);
     const changing = setScreenshareQuality(rig.state, deps, "high");
     current.ws = { send: vi.fn() } as unknown as WsClient;
-    finish();
+    host.finish();
     await changing;
 
     expect(rig.state.quality).toBe("medium");

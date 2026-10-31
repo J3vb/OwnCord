@@ -37,6 +37,16 @@ const { init: initPtt, stop: stopPtt, updateKey: updatePttKey } = pushToTalk;
 // Tests: ptt-state event handler (integration via initPtt + listen callback)
 // ---------------------------------------------------------------------------
 
+/** Records the callback registered for each event name. */
+function captureListeners(): Record<string, (e: { payload: unknown }) => void> {
+  const capturedHandlers: Record<string, (e: { payload: unknown }) => void> = {};
+  mockListen.mockImplementation((event: string, cb: (e: { payload: unknown }) => void) => {
+    capturedHandlers[event] = cb;
+    return Promise.resolve(() => {});
+  });
+  return capturedHandlers;
+}
+
 describe("ptt-state event listener", () => {
   beforeEach(resetAll);
 
@@ -180,11 +190,7 @@ describe("ptt-error event listener", () => {
   it("registers a listener for 'ptt-error' and resets polling-live on a backend panic", async () => {
     testPrefs.set("pttVk", 0x20);
 
-    const capturedHandlers: Record<string, (e: { payload: unknown }) => void> = {};
-    mockListen.mockImplementation((event: string, cb: (e: { payload: unknown }) => void) => {
-      capturedHandlers[event] = cb;
-      return Promise.resolve(() => {});
-    });
+    const capturedHandlers = captureListeners();
 
     await initPtt();
     mockSetPttPollingLive.mockClear();
@@ -198,11 +204,7 @@ describe("ptt-error event listener", () => {
   it("opens a closed gate (never a mute change) when the backend thread panics", async () => {
     testPrefs.set("pttVk", 0x20);
 
-    const capturedHandlers: Record<string, (e: { payload: unknown }) => void> = {};
-    mockListen.mockImplementation((event: string, cb: (e: { payload: unknown }) => void) => {
-      capturedHandlers[event] = cb;
-      return Promise.resolve(() => {});
-    });
+    const capturedHandlers = captureListeners();
 
     await initPtt();
     pttState.pttGated = true;
@@ -218,11 +220,7 @@ describe("ptt-error event listener", () => {
   it("opens the gate but leaves the user's own self-mute alone when the polling thread panics", async () => {
     testPrefs.set("pttVk", 0x20);
 
-    const capturedHandlers: Record<string, (e: { payload: unknown }) => void> = {};
-    mockListen.mockImplementation((event: string, cb: (e: { payload: unknown }) => void) => {
-      capturedHandlers[event] = cb;
-      return Promise.resolve(() => {});
-    });
+    const capturedHandlers = captureListeners();
 
     await initPtt();
     pttState.pttGated = true;
