@@ -131,7 +131,16 @@ export const shards = {
     "src/features/voice-messages/voiceComposer.ts",
     "src/features/voice-messages/player.ts",
   ],
-  "transport-auth-1": ["src/lib/api.ts", "src/lib/permissions.ts", "src/lib/net/hostValidation.ts"],
+  "transport-auth-1": [
+    "src/lib/api.ts",
+    "src/lib/apiAccount.ts",
+    "src/lib/apiAdmin.ts",
+    "src/lib/apiChannels.ts",
+    "src/lib/apiDms.ts",
+    "src/lib/apiShared.ts",
+    "src/lib/permissions.ts",
+    "src/lib/net/hostValidation.ts",
+  ],
   "transport-auth-2": [
     "src/lib/ws.ts",
     "src/lib/net/rateLimiter.ts",

@@ -27,6 +27,7 @@ const config = {
     "src/components/message-list/avatar.ts",
     "src/features/members/memberRow.view.ts",
     "!src/lib/types.ts",
+    "!src/lib/wire*.ts", // split out of types.ts, excluded with it
     "!src/features/messaging/emojiData.ts", // generated data, no logic to mutate
     "!src/**/*.d.ts",
     "!src/**/*.test.ts",

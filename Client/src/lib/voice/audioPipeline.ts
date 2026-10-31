@@ -96,6 +96,14 @@ export interface VadDetector {
   resetFloor(): void;
 }
 
+/** RNNoise's speech probability for the detector's second input, and the
+ *  switch that runs RNNoise for it (MicProcessor.setSpeechDetection). */
+export interface SpeechDetection {
+  readonly source: AudioNode;
+  /** Resolves whether RNNoise runs; false leaves the gate on its level. */
+  setOn(on: boolean): Promise<boolean>;
+}
+
 export interface VadDetectorHandlers {
   /** The gate verdict: true = closed (silence). */
   onGate(gated: boolean): void;
@@ -114,7 +122,9 @@ export interface VadDetectorHandlers {
  * and hold (~500 ms), so the settings meter and the live gate open and
  * close alike. `gate` "auto" runs the threshold a margin
  * above the noise floor of the levels the detector reports (lib/voice/noiseFloor.ts),
- * starting at `seed`.
+ * starting at `seed`. With `speech`, "auto" also asks RNNoise whether a frame
+ * is a voice (vad-worklet.js's speech gate) once it runs; the fallback has
+ * no worklets, so no RNNoise, and gates on the level alone.
  */
 export function startVadDetector(
   ctx: AudioContext,
@@ -122,12 +132,35 @@ export function startVadDetector(
   gate: number | "auto",
   handlers: VadDetectorHandlers,
   seed?: number,
+  speech?: SpeechDetection,
 ): VadDetector {
   let tracker = gate === "auto" ? new NoiseFloorTracker(seed) : null;
   let threshold = tracker?.threshold ?? (gate as number);
   let stopped = false;
   let workletNode: AudioWorkletNode | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
+  /** Bumped on every mode change, so a late RNNoise load applies to the
+   *  mode that asked for it. */
+  let speechRequest = 0;
+
+  /** Run RNNoise's verdict for automatic sensitivity, or drop it. The
+   *  worklet is told once RNNoise answers, so the gate never waits on a
+   *  signal that is not there. */
+  const applySpeechGate = (auto: boolean): void => {
+    if (speech === undefined) return;
+    const request = ++speechRequest;
+    // The manual slider drops the rule at once; auto adds it once RNNoise runs.
+    // oxlint-disable-next-line require-post-message-target-origin -- MessagePort.postMessage, not Window.postMessage
+    if (!auto) workletNode?.port.postMessage({ type: "speechGate", on: false });
+    speech.setOn(auto).then(
+      (on) => {
+        if (stopped || request !== speechRequest || !auto || !on) return;
+        // oxlint-disable-next-line require-post-message-target-origin -- MessagePort.postMessage, not Window.postMessage
+        workletNode?.port.postMessage({ type: "speechGate", on: true });
+      },
+      (err: unknown) => log.warn("Speech detection could not start", err),
+    );
+  };
 
   /** Every level report: the meter's, and the automatic estimate's input. */
   const onLevel = (rms: number): void => {
@@ -209,7 +242,7 @@ export function startVadDetector(
     .then(() => {
       if (stopped) return;
       try {
-        workletNode = new AudioWorkletNode(ctx, "vad-processor");
+        workletNode = new AudioWorkletNode(ctx, "vad-processor", { numberOfInputs: 2 });
       } catch (err) {
         log.warn("Failed to create VAD AudioWorkletNode, falling back", err);
         startFallback();
@@ -217,8 +250,10 @@ export function startVadDetector(
       }
       // Analysis only: the worklet's output goes nowhere.
       analyser.connect(workletNode);
+      speech?.source.connect(workletNode, 0, 1);
       // oxlint-disable-next-line require-post-message-target-origin -- MessagePort.postMessage, not Window.postMessage
       workletNode.port.postMessage({ type: "config", threshold });
+      applySpeechGate(tracker !== null);
       // oxlint-disable-next-line prefer-add-event-listener -- MessagePort does not support addEventListener
       workletNode.port.onmessage = (event: MessageEvent) => {
         if (event.data.type === "gate") handlers.onGate(event.data.gated as boolean);
@@ -235,7 +270,9 @@ export function startVadDetector(
 
   const stop = (): Promise<void> => {
     stopped = true;
+    speechRequest++;
     if (timer !== null) clearTimeout(timer);
+    void speech?.setOn(false).catch((err: unknown) => log.debug("Speech detection stop", err));
     const node = workletNode;
     if (node === null) return Promise.resolve();
     workletNode = null;
@@ -253,6 +290,7 @@ export function startVadDetector(
     setThreshold(next: number | "auto"): void {
       tracker = next === "auto" ? new NoiseFloorTracker(tracker?.threshold) : null;
       threshold = tracker?.threshold ?? (next as number);
+      if (workletNode !== null) applySpeechGate(tracker !== null);
       // oxlint-disable-next-line require-post-message-target-origin -- MessagePort.postMessage, not Window.postMessage
       workletNode?.port.postMessage({ type: "config", threshold });
     },
@@ -260,6 +298,14 @@ export function startVadDetector(
       tracker?.reset(performance.now());
     },
   };
+}
+
+/** The processor's RNNoise verdict for the detector, once the processor has
+ *  its graph. */
+export function speechDetectionOf(processor: MicProcessor): SpeechDetection | undefined {
+  const source = processor.speechProbability;
+  if (source === null) return undefined;
+  return { source, setOn: (on) => processor.setSpeechDetection(on) };
 }
 
 /** A room that gates its own capture for push-to-talk: the Linux NativeRoom,
@@ -623,6 +669,7 @@ export class AudioPipeline {
         },
       },
       this.lastAutoThreshold,
+      speechDetectionOf(processor),
     );
   }
 
