@@ -14,6 +14,11 @@ export const serverRailText = defineCatalog("serverRail", {
     one: "{name}, {count} unread message",
     other: "{name}, {count} unread messages",
   },
+  dmCall: "In a call with {name}",
+  dmCallUnread: {
+    one: "In a call with {name}, {count} unread message",
+    other: "In a call with {name}, {count} unread messages",
+  },
   homeDirect: "Direct messages",
   add: "Add a server",
   join: "Join with an invite link",

@@ -454,6 +454,40 @@ test.describe("DM calls — starting a call", () => {
     await expect(page.locator("[data-testid='call-btn']")).toBeHidden();
   });
 
+  test("the server rail keeps the DM call one click away from a server's channels", async ({
+    page,
+  }) => {
+    await boot(page);
+    await openDm(page);
+    await page.locator("[data-testid='call-btn']").click();
+    await connectVoiceSession(page);
+    await expect(panel(page)).toBeVisible();
+
+    await page.getByTestId("server-rail-server").click();
+    await page.locator(".channel-item", { hasText: "general" }).first().click();
+    await expect(page.locator("[data-testid='chat-header-name']")).toHaveText("general");
+    await expect(panel(page)).toBeHidden();
+
+    const callIcon = page.getByTestId("server-rail-dm-call");
+    await expect(callIcon).toHaveAttribute("data-channel-id", String(DM_CHANNEL_ID));
+    await expect(callIcon).toHaveAttribute("aria-label", "In a call with otheruser");
+
+    expect(await findUnnamedControls(page.getByTestId("server-rail"))).toEqual([]);
+
+    // Reachable from Home by keyboard, with a visible focus ring, and Enter opens the call.
+    await page.getByTestId("server-rail-home").focus();
+    await page.keyboard.press("Tab");
+    await expect(callIcon).toBeFocused();
+    expect((await focusIndicator(page)).problems).toEqual([]);
+    await page.keyboard.press("Enter");
+    await expect(page.locator("[data-testid='chat-header-name']")).toHaveText("otheruser");
+    await expect(panel(page)).toBeVisible();
+
+    await panel(page).locator("[data-testid='dcp-leave']").click();
+    await waitForSent(page, "voice_leave");
+    await expect(callIcon).toBeHidden();
+  });
+
   test("a ring for a DM you are not viewing still raises the banner", async ({ page }) => {
     await boot(page);
 

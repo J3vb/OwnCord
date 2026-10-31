@@ -3,6 +3,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createServerRail } from "@components/ServerRail";
 import { setSidebarMode, uiStore } from "@stores/ui.store";
 import { dmStore, setDmChannels, type DmChannel } from "@stores/dm.store";
+import {
+  joinVoiceChannel,
+  leaveVoiceChannel,
+  resetVoiceStore,
+  voiceStore,
+} from "@stores/voice.store";
 import { RAIL_LAYOUT_KEY } from "@lib/prefs/serverRailLayout";
 import type { ServerProfile } from "@lib/presence/profiles";
 
@@ -80,6 +86,7 @@ describe("ServerRail", () => {
     for (const r of mounted.splice(0)) r.destroy?.();
     document.body.innerHTML = "";
     dmStore.setState(() => ({ channels: [] }));
+    resetVoiceStore();
   });
 
   it("clicking the connected server goes back to its channels", async () => {
@@ -135,6 +142,58 @@ describe("ServerRail", () => {
     ]);
     dmStore.flush();
     expect(document.querySelectorAll('[data-testid="server-rail-dm"]')).toHaveLength(0);
+  });
+
+  it("keeps the DM of your call first under Home with a call badge until the call ends", async () => {
+    const onOpenDm = vi.fn();
+    await mountRail({ onOpenDm });
+    const unread = { ...dm(1, 2), lastMessageAt: "2026-10-28T11:00:00Z" };
+    setDmChannels([unread, dm(2, 0)]);
+    dmStore.flush();
+    joinVoiceChannel(2);
+    voiceStore.flush();
+
+    const call = document.querySelector<HTMLButtonElement>('[data-testid="server-rail-dm-call"]')!;
+    expect(call.dataset["channelId"]).toBe("2");
+    expect(call.getAttribute("aria-label")).toBe("In a call with u2");
+    expect(call.parentElement?.querySelector(".server-rail-call-badge")).not.toBeNull();
+    const icons = Array.from(
+      document.querySelectorAll<HTMLElement>(".server-rail-dms [data-channel-id]"),
+    );
+    expect(icons.map((b) => b.dataset["channelId"])).toEqual(["2", "1"]);
+    call.click();
+    expect(onOpenDm).toHaveBeenCalledWith(expect.objectContaining({ channelId: 2 }));
+
+    leaveVoiceChannel();
+    voiceStore.flush();
+    expect(document.querySelector('[data-testid="server-rail-dm-call"]')).toBeNull();
+    expect(
+      Array.from(document.querySelectorAll<HTMLElement>(".server-rail-dms [data-channel-id]")).map(
+        (b) => b.dataset["channelId"],
+      ),
+    ).toEqual(["1"]);
+  });
+
+  it("shows the call DM once, with its unread count in the label", async () => {
+    await mountRail();
+    setDmChannels([dm(3, 4)]);
+    dmStore.flush();
+    joinVoiceChannel(3);
+    voiceStore.flush();
+    expect(document.querySelectorAll('.server-rail-dms [data-channel-id="3"]')).toHaveLength(1);
+    expect(
+      document.querySelector('[data-testid="server-rail-dm-call"]')?.getAttribute("aria-label"),
+    ).toBe("In a call with u3, 4 unread messages");
+  });
+
+  it("shows no call icon for a call outside the known DMs until the DM list has it", async () => {
+    await mountRail();
+    joinVoiceChannel(9);
+    voiceStore.flush();
+    expect(document.querySelector('[data-testid="server-rail-dm-call"]')).toBeNull();
+    setDmChannels([dm(9, 0)]);
+    dmStore.flush();
+    expect(document.querySelector('[data-testid="server-rail-dm-call"]')).not.toBeNull();
   });
 
   it("renders saved servers plus the current one, with initials and nav semantics", async () => {
