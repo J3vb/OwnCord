@@ -80,6 +80,55 @@
   }
 }
 
+/* Phones: the server rail sits on the drawer's left (server-rail.css), so the
+   channel list takes the rest of the drawer, under the search button. */
+.sidebar-drawer-search {
+  display: none;
+}
+@media (max-width: 800px) and (pointer: coarse) {
+  .app.has-server-rail .unified-sidebar.drawer-open {
+    left: var(--drawer-rail-width);
+    width: calc(min(350px, 90vw) - var(--drawer-rail-width));
+    padding-left: 0;
+    border-top-left-radius: 14px;
+  }
+  .unified-sidebar.drawer-open .sidebar-drawer-search {
+    display: flex;
+    flex: none;
+    align-items: center;
+    gap: 8px;
+    box-sizing: border-box;
+    min-height: 44px;
+    margin: 0 12px 8px;
+    padding: 0 12px;
+    border: 0;
+    border-radius: 10px;
+    background: var(--bg-tertiary);
+    color: var(--text-muted);
+    font: inherit;
+    font-size: var(--font-size-md, 14px);
+    text-align: left;
+  }
+  .sidebar-drawer-search span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  /* Horizontal moves belong to the swipes (phoneGestures.ts); vertical scrolls
+     and pinch zoom stay with the browser. */
+  .chat-area,
+  .messages-container,
+  .unified-sidebar,
+  .sidebar-content,
+  .channel-list,
+  .server-rail-slot,
+  .member-column,
+  .member-column-body {
+    touch-action: pan-y pinch-zoom;
+  }
+}
+
 /* Phones: a wider drawer, and the chat header drops its text-only extras. */
 @media (max-width: 600px) {
   .unified-sidebar.drawer-open {

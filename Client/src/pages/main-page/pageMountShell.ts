@@ -32,6 +32,7 @@ import { createCallChat } from "./callChat";
 import { createVideoModeController } from "./VideoModeController";
 import { createSidebarArea } from "./SidebarArea";
 import { createChatArea } from "./ChatArea";
+import { installPhoneNavWhenPhone } from "./lazyPhoneNav";
 import { createVoiceWidgetCallbacks } from "./VoiceCallbacks";
 import { loadMemberLayout, MEMBER_LAYOUT_PREF } from "../../features/members/memberLayout";
 import { NAVIGATION_DESTINATIONS } from "../../features/navigation/destinations";
@@ -493,6 +494,8 @@ export function mountLayout(st: PageState, pg: PageApi, ms: MountScope): void {
       sidebar: ms.sidebar.sidebarWrapper,
       toggle: ms.chatAreaResult.sidebarToggle,
       fallbackFocus: ms.focusReachable,
+      rail: ms.railSlot,
+      onSearch: () => ms.qsManager.open(),
       onOpen: () => {
         ms.chatAreaResult.closePinnedPanel();
         ms.chatAreaResult.closeMediaGallery();
@@ -523,6 +526,22 @@ export function mountLayout(st: PageState, pg: PageApi, ms: MountScope): void {
     });
     st.memberColumn.setCallView(st.callViewUp);
     st.memberColumn.sync();
+  });
+
+  // Phone: swipes between the chat, the drawer and the member list, swipe to
+  // reply, and Back closing overlays. Loaded once the window is a phone.
+  const phoneNavOwner = new Disposable();
+  st.unsubscribers.push(() => phoneNavOwner.destroy());
+  installPhoneNavWhenPhone({
+    signal: phoneNavOwner.signal,
+    root: st.root!,
+    chatArea: ms.chatAreaResult.chatArea,
+    drawerSurfaces:
+      ms.railSlot === null ? [ms.sidebar.sidebarWrapper] : [ms.sidebar.sidebarWrapper, ms.railSlot],
+    memberColumn: ms.memberColumnEl,
+    drawer: () => st.sidebarDrawer,
+    members: () => st.memberColumn,
+    closeView: () => st.contentNav?.close(),
   });
 
   ms.layoutOwner = new Disposable();

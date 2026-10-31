@@ -239,10 +239,60 @@
     gap: 6px;
   }
 }
-/* The portal serves one server, and the drawer layouts have no room for a rail. */
+/* The portal serves one server, and a narrow window has no room for a rail
+   beside the chat. */
 @media (max-width: 800px) {
   .server-rail-slot,
   .server-rail {
+    display: none;
+  }
+}
+/* On a phone the rail is part of the drawer: the same rail, shown on the
+   drawer's left in the drawer's layer while the drawer is open (SidebarDrawer
+   marks the slot), with the channel list to its right (responsive.css). It
+   replaces the user bar's Switch server button. */
+@media (max-width: 800px) and (pointer: coarse) {
+  .app.has-server-rail {
+    --drawer-rail-width: calc(72px + env(safe-area-inset-left));
+  }
+  .server-rail-slot.drawer-open {
+    display: flex;
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 100;
+    box-sizing: border-box;
+    width: var(--drawer-rail-width);
+    padding: env(safe-area-inset-top) 0 var(--safe-bottom) env(safe-area-inset-left);
+  }
+  .server-rail-slot.drawer-open .server-rail {
+    display: flex;
+    flex: 1;
+    width: auto;
+    padding: 14px 0 10px;
+    gap: 10px;
+  }
+  .server-rail-slot.drawer-open .server-rail-item {
+    width: 100%;
+  }
+  .server-rail-slot.drawer-open .server-rail-btn {
+    width: 48px;
+    height: 48px;
+    border-radius: 16px;
+    font-size: 14px;
+  }
+  .server-rail-slot.drawer-open .server-rail-badge {
+    right: 10px;
+    bottom: -4px;
+  }
+  .server-rail-slot.drawer-open .server-rail-sep {
+    width: 32px;
+  }
+  .server-rail-slot.drawer-open .server-rail-folder {
+    width: 56px;
+  }
+  .app.has-server-rail .user-bar [data-testid="disconnect-btn"] {
     display: none;
   }
 }

@@ -17,12 +17,17 @@
  * column steps aside so the call or the posts get the width: the toggle opens
  * it for the moment (never saved), and leaving puts the saved choice back.
  *
+ * On a phone the overlay claims the Back button while it is up, so Back closes
+ * it before it does anything else.
+ *
  * This controller is the only writer of the toggle's `hidden` and
  * `aria-pressed`.
  */
 
 import { isImeCommit } from "@lib/text/ime";
 import { Disposable } from "@lib/disposable";
+import { claimBack, type BackClaim } from "@lib/ui/backHistory";
+import { isPhoneLayout } from "@lib/ui/bottomSheet";
 import { loadPref, onPrefChange, savePref } from "@lib/prefs/preferences";
 import { channelsStore, getActiveChannel } from "@stores/channels.store";
 import { uiStore } from "@stores/ui.store";
@@ -64,6 +69,11 @@ export interface MemberColumn {
   toggle(): void;
   /** Close the narrow overlay (the sidebar drawer opening). No-op otherwise. */
   closeOverlay(): void;
+  /** Open the narrow overlay for the moment, as a swipe does (no focus move,
+   *  so no keyboard). False when there is no overlay to open here. */
+  openOverlay(): boolean;
+  /** The narrow overlay is up. */
+  isOverlayOpen(): boolean;
   /** The call view is up in this window (on) or gone (off). */
   setCallView(on: boolean): void;
   destroy(): void;
@@ -83,6 +93,7 @@ export function createMemberColumn(opts: MemberColumnOptions): MemberColumn {
   // jsdom has no matchMedia; without one the column is never an overlay.
   const narrow = typeof window.matchMedia === "function" ? window.matchMedia(NARROW_QUERY) : null;
   let narrowOpen = false;
+  let backClaim: BackClaim | null = null;
   let callView = false;
   /** Opened from the toggle while the column steps aside; not saved. */
   let asideOpen = false;
@@ -164,6 +175,19 @@ export function createMemberColumn(opts: MemberColumnOptions): MemberColumn {
     return callView || getActiveChannel()?.type === "forum";
   }
 
+  /** The overlay owns Back while it is up on a phone. */
+  function syncBackClaim(overlayUp: boolean): void {
+    if (overlayUp && backClaim === null && isPhoneLayout()) {
+      backClaim = claimBack(() => {
+        narrowOpen = false;
+        sync();
+      }, owner.signal);
+    } else if (!overlayUp && backClaim !== null) {
+      backClaim.release();
+      backClaim = null;
+    }
+  }
+
   function sync(): void {
     if (destroyed) return;
     const right = loadMemberLayout() === "right";
@@ -178,6 +202,7 @@ export function createMemberColumn(opts: MemberColumnOptions): MemberColumn {
     const shown = right && onScreen && uiStore.getState().activeView === null && wanted;
     button.hidden = !(right && onScreen);
     button.setAttribute("aria-pressed", String(shown));
+    syncBackClaim(overlay && shown);
     if (shown) {
       if (panel === null) {
         panel = opts.buildPanel();
@@ -259,6 +284,15 @@ export function createMemberColumn(opts: MemberColumnOptions): MemberColumn {
       narrowOpen = false;
       sync();
     },
+    openOverlay(): boolean {
+      if (destroyed || narrow?.matches !== true) return false;
+      if (!narrowOpen) {
+        narrowOpen = true;
+        sync();
+      }
+      return narrowOpen;
+    },
+    isOverlayOpen: () => !destroyed && narrow?.matches === true && narrowOpen,
     setCallView(on: boolean): void {
       if (destroyed || callView === on) return;
       callView = on;

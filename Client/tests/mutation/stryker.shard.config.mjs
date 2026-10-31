@@ -114,6 +114,8 @@ export const shards = {
     "src/lib/voice/deviceManager.ts",
     "src/lib/ui/touchInput.ts",
     "src/lib/ui/bottomSheet.ts",
+    "src/lib/ui/backHistory.ts",
+    "src/lib/ui/swipe.ts",
     "src/lib/ui/zoomPan.ts",
     "src/lib/voice/ptt.ts",
     "src/lib/voice/voiceTokenManager.ts",
