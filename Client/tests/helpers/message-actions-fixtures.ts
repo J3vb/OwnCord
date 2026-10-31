@@ -1,14 +1,16 @@
 // Shared fixtures for the message action gates and the message right-click
 // menu tests: a sent message, list options with spy callbacks, a channel with
 // the server's permission verdicts, and a signed-in role.
-import { vi } from "vitest";
 import type { MessageListOptions } from "../../src/components/MessageList";
 import { authStore } from "../../src/stores/auth.store";
 import { channelsStore, setRoles, type Channel } from "../../src/stores/channels.store";
-import { messagesStore, type Message } from "../../src/stores/messages.store";
+import { type Message } from "../../src/stores/messages.store";
 import { setConnectionStatus } from "../../src/stores/ui.store";
 import { setActiveTimeout } from "../../src/features/safety/store";
 import { resetAuthState } from "./storeSeeds";
+import { makeChannel } from "./channelFactory";
+import { makeListOptions } from "./messageListHarness";
+import { resetMessagesState } from "./storeResets";
 
 /** MANAGE_MESSAGES (see lib/types Permission). */
 const MANAGE_MESSAGES = 0x10000;
@@ -37,41 +39,11 @@ export function makeMessage(overrides: Partial<Message> = {}): Message {
 }
 
 export function makeOpts(overrides: Partial<MessageListOptions> = {}): MessageListOptions {
-  return {
-    channelId: 1,
-    channelName: "general",
-    currentUserId: ME,
-    onScrollTop: vi.fn(),
-    onReplyClick: vi.fn(),
-    onEditClick: vi.fn(),
-    onEditSave: vi.fn(() => true),
-    onEmptyEdit: vi.fn(),
-    onDeleteClick: vi.fn(),
-    onReactionClick: vi.fn(),
-    onPinClick: vi.fn(),
-    ...overrides,
-  };
+  return makeListOptions({ currentUserId: ME, ...overrides });
 }
 
 export function setChannel(overrides: Partial<Channel> = {}): void {
-  const channel: Channel = {
-    id: 1,
-    name: "general",
-    type: "text",
-    category: null,
-    topic: "",
-    position: 0,
-    unreadCount: 0,
-    mentionCount: 0,
-    lastMessageId: null,
-    canSend: true,
-    slowMode: 0,
-    nsfw: false,
-    isPrivate: false,
-    voiceMaxUsers: 0,
-    voiceMaxVideo: 0,
-    ...overrides,
-  };
+  const channel = makeChannel(overrides);
   channelsStore.setState((prev) => ({
     ...prev,
     channels: new Map([[channel.id, channel]]),
@@ -111,12 +83,5 @@ export function setDeveloperMode(on: boolean): void {
 
 /** Replace the message store with exactly `messages` in channel 1. */
 export function seedMessages(messages: Message[]): void {
-  messagesStore.setState(() => ({
-    messagesByChannel: new Map([[1, messages]]),
-    pendingSends: new Map(),
-    loadedChannels: new Set(),
-    hasMore: new Map(),
-    historyLoadState: new Map(),
-    detachedChannels: new Set(),
-  }));
+  resetMessagesState({ messagesByChannel: new Map([[1, messages]]) });
 }

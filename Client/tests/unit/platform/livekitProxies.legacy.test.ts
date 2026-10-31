@@ -8,7 +8,7 @@
 // fresh module instance.
 import { vi } from "vitest";
 import type { LiveKitProxiesSeam } from "./livekitProxies.suite";
-import { describeLiveKitProxiesSuite } from "./livekitProxies.suite";
+import { describeLiveKitProxiesSuite, livekitNativeControl } from "./livekitProxies.suite";
 import * as lm from "../../helpers/loggerMock";
 
 const invoke = vi.fn();
@@ -27,19 +27,6 @@ describeLiveKitProxiesSuite(async () => {
   };
   return {
     subject: legacy,
-    native: {
-      succeedWith(port: number) {
-        invoke.mockImplementation((cmd: string) =>
-          cmd === "start_livekit_proxy"
-            ? Promise.resolve({ port, token: "tun" })
-            : Promise.resolve(undefined),
-        );
-      },
-      failWith(error: unknown) {
-        invoke.mockImplementation((cmd: string) =>
-          cmd === "start_livekit_proxy" ? Promise.reject(error) : Promise.resolve(undefined),
-        );
-      },
-    },
+    native: livekitNativeControl(invoke),
   };
 });

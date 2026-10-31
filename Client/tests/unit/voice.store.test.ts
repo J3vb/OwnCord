@@ -1,5 +1,4 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import * as voiceWidget from "../helpers/voiceWidgetHarness";
 import {
   voiceStore,
   resetVoiceStore,
@@ -34,7 +33,7 @@ import {
 } from "../../src/stores/voice.store";
 import type { ReadyVoiceState, VoiceStatePayload, VoiceLeavePayload } from "../../src/lib/types";
 import { authStore, clearAuth } from "../../src/stores/auth.store";
-import { resetAuthState, signInAs } from "../helpers/storeSeeds";
+import { resetAuthState, resetVoiceState, signInAs } from "../helpers/storeSeeds";
 import { noteJoinFailed, joinRetryInMs } from "../../src/features/voice/joinBackoff";
 // vi.resetModules() below would hand the re-imported module a fresh logger,
 // which re-installs the logger's app-lifetime pref-change listener on every
@@ -50,7 +49,7 @@ function signInAsMe(): void {
 }
 
 function resetStore(): void {
-  voiceWidget.resetVoiceState();
+  resetVoiceState();
 }
 
 const VOICE_STATE_1: ReadyVoiceState = {

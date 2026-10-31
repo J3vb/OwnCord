@@ -1,4 +1,5 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
 
 import { createMessageList } from "@components/MessageList";
 import type { MessageListOptions } from "@components/MessageList";
@@ -56,6 +57,18 @@ describe("message actions sheet on a phone", () => {
     await vi.waitFor(() => expect(sheet()).not.toBeNull());
   }
 
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => {
+      closeBottomSheet();
+      list?.destroy?.();
+      resetGateStores();
+      vi.unstubAllGlobals();
+    },
+  );
+
   beforeEach(() => {
     vi.stubGlobal("matchMedia", (q: string) => ({ matches: q.includes("pointer: coarse") }));
     resetGateStores();
@@ -63,16 +76,6 @@ describe("message actions sheet on a phone", () => {
     signInAs("member");
     setChannel();
     resetMembersState();
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    closeBottomSheet();
-    list?.destroy?.();
-    container.remove();
-    resetGateStores();
-    vi.unstubAllGlobals();
   });
 
   it("opens the sheet, not the menu, with four large quick reactions and Add Reaction", async () => {

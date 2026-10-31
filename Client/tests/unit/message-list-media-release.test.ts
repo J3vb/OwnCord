@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // Spy on the media-visibility manager: MessageList must release every tracked
 // <img> (discardMedia) before discarding rendered rows, otherwise the
@@ -17,14 +17,8 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: () => new Promise(() => {}) }))
 vi.mock("@lib/prefs/mediaVisibility", () => mocks.mediaVisibilityMock());
 
 import { createMessageList } from "@components/MessageList";
-import type { MessageListOptions } from "@components/MessageList";
 import { messagesStore } from "@stores/messages.store";
-import {
-  makeListOptions,
-  makeMessage,
-  resetStores,
-  setMessages,
-} from "../helpers/messageListHarness";
+import { makeMessage, useMessageListHarness, setMessages } from "../helpers/messageListHarness";
 import "../helpers/resizeObserverStub";
 
 const { observeMediaMock, discardMediaMock } = mocks;
@@ -32,21 +26,18 @@ const { observeMediaMock, discardMediaMock } = mocks;
 describe("MessageList media release (GIF observer leak fix)", () => {
   let container: HTMLDivElement;
   let msgList: ReturnType<typeof createMessageList>;
-  let options: MessageListOptions;
+
+  useMessageListHarness(
+    (wired) => {
+      container = wired.container;
+      msgList = wired.msgList;
+    },
+    () => msgList,
+  );
 
   beforeEach(() => {
-    resetStores();
     observeMediaMock.mockClear();
     discardMediaMock.mockClear();
-    container = document.createElement("div");
-    document.body.appendChild(container);
-    options = makeListOptions();
-    msgList = createMessageList(options);
-  });
-
-  afterEach(() => {
-    msgList.destroy?.();
-    container.remove();
   });
 
   it("unobserves rendered <img> elements before a full re-render discards them", () => {

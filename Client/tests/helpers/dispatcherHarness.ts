@@ -11,6 +11,7 @@ import { resetJoinRequest } from "../../src/features/voice/joinRequest";
 import type { WsClient, WsListener, ConnectionState } from "../../src/lib/ws";
 import type { ServerMessage } from "../../src/lib/types";
 import type { DmChannel } from "../../src/stores/dm.store";
+import { dmRecipient, makeDm } from "./dmHarness";
 import { channelsStore, type Channel, type ChannelsState } from "../../src/stores/channels.store";
 import { membersStore, type Member } from "../../src/stores/members.store";
 import { getLazyVoiceImportsInFlight } from "./dispatcherMocks";
@@ -186,19 +187,7 @@ export function readyDm(overrides: Fields = {}): Fields {
 
 /** A DM row as dmStore holds it (id 50, with bob). */
 export function dmRow(overrides: Partial<DmChannel> = {}): DmChannel {
-  return {
-    channelId: 50,
-    recipient: { id: 10, username: "bob", avatar: "", status: "online" },
-    participants: [],
-    name: "",
-    isGroup: false,
-    lastMessageId: null,
-    lastMessage: "",
-    lastMessageAt: "",
-    unreadCount: 0,
-    mentionCount: 0,
-    ...overrides,
-  };
+  return makeDm({ channelId: 50, recipient: dmRecipient(10, "bob"), ...overrides });
 }
 
 /** An `auth_ok` payload for admin "alex" on "TestServer". */

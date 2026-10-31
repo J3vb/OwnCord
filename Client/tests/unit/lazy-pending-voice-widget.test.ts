@@ -2,13 +2,15 @@
  * The voice widget loads when the user is first in voice (O-6b). Each test
  * builds a fresh module graph so the widget's import can be held open.
  */
-import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
 import * as mocks from "../helpers/sidebarAreaMocks";
 import { defaultSidebarAreaOpts } from "../helpers/sidebarAreaOpts";
 import * as voiceSession from "../helpers/voiceSessionMock";
+import { makeGate, type ChunkGate } from "../helpers/chunkGate";
 
 const h = vi.hoisted(() => ({
-  gate: null as null | { promise: Promise<void>; open: () => void; fail: () => void },
+  gate: null as null | ChunkGate,
   loads: { value: 0 },
 }));
 
@@ -49,17 +51,6 @@ vi.mock("../../src/pages/main-page/OverlayManagers", () => mocks.pageOverlayMana
 type SidebarModule = typeof import("../../src/pages/main-page/SidebarArea");
 type VoiceStore = typeof import("../../src/stores/voice.store");
 
-function makeGate(): NonNullable<typeof h.gate> {
-  let open!: () => void;
-  let fail!: () => void;
-  const promise = new Promise<void>((resolve, reject) => {
-    open = resolve;
-    fail = () => reject(new Error("chunk load failed"));
-  });
-  promise.catch(() => {});
-  return { promise, open, fail };
-}
-
 describe("SidebarArea voice widget", () => {
   let container: HTMLDivElement;
   let result: ReturnType<SidebarModule["createSidebarArea"]> | null = null;
@@ -72,6 +63,20 @@ describe("SidebarArea voice widget", () => {
     voice = await import("../../src/stores/voice.store");
     toast = await import("@lib/ui/toast");
   });
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => {
+      if (result !== null) {
+        for (const c of result.children) c.destroy?.();
+        for (const unsub of result.unsubscribers) unsub();
+        result = null;
+      }
+      vi.doUnmock("@components/VoiceWidget");
+    },
+  );
+
   beforeEach(() => {
     voice.resetVoiceStore();
     h.gate = makeGate();
@@ -84,17 +89,6 @@ describe("SidebarArea voice widget", () => {
       return await vi.importActual<object>("@components/VoiceWidget");
     });
     vi.mocked(toast.showToast).mockClear();
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-  afterEach(() => {
-    if (result !== null) {
-      for (const c of result.children) c.destroy?.();
-      for (const unsub of result.unsubscribers) unsub();
-      result = null;
-    }
-    container.remove();
-    vi.doUnmock("@components/VoiceWidget");
   });
 
   function build(): void {

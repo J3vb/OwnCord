@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { stubCapturingResizeObserver } from "../../helpers/resizeObserverStub";
 import * as mocks from "../../helpers/videoGridMocks";
 import { createVideoGrid, type VideoGridComponent } from "../../../src/components/VideoGrid";
 import { RemoteTracks } from "../../../src/features/voice/remoteTracks";
@@ -409,17 +410,7 @@ describe("VideoGrid", () => {
         ["3:camera", publication()],
         ["3:screen_share", publication()],
       ]);
-      vi.stubGlobal(
-        "ResizeObserver",
-        class {
-          constructor(cb: () => void) {
-            observers.push(cb);
-          }
-          observe(): void {}
-          unobserve(): void {}
-          disconnect(): void {}
-        },
-      );
+      stubCapturingResizeObserver(observers);
       vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (
         this: HTMLElement,
       ) {

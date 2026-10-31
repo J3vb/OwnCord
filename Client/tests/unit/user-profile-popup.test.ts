@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   createUserProfilePopup,
   type ProfileRolesControl,
@@ -296,21 +296,23 @@ describe("UserProfilePopup positioning", () => {
   let originalInnerHeight: number;
   let offsetHeightDescriptor: PropertyDescriptor | undefined;
 
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => {
+      window.innerWidth = originalInnerWidth;
+      window.innerHeight = originalInnerHeight;
+      if (offsetHeightDescriptor) {
+        Object.defineProperty(HTMLElement.prototype, "offsetHeight", offsetHeightDescriptor);
+        offsetHeightDescriptor = undefined;
+      }
+    },
+  );
+
   beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
     originalInnerWidth = window.innerWidth;
     originalInnerHeight = window.innerHeight;
-  });
-
-  afterEach(() => {
-    container.remove();
-    window.innerWidth = originalInnerWidth;
-    window.innerHeight = originalInnerHeight;
-    if (offsetHeightDescriptor) {
-      Object.defineProperty(HTMLElement.prototype, "offsetHeight", offsetHeightDescriptor);
-      offsetHeightDescriptor = undefined;
-    }
   });
 
   function getPopupEl(): HTMLElement {

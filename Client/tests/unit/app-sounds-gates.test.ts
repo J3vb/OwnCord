@@ -4,6 +4,7 @@
  * Uses the real preferences, with the player mocked so the question is only
  * "was this sound asked for".
  */
+import { makePayload } from "../helpers/chatPayload";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as voiceSession from "../helpers/voiceSessionMock";
 
@@ -33,11 +34,7 @@ import {
 } from "../../src/lib/notifications";
 import { setGlobalNotificationLevel } from "../../src/lib/prefs/notificationLevel";
 import { savePref } from "../../src/lib/prefs/preferences";
-import type {
-  ChannelActivityEntry,
-  ChatMessagePayload,
-  VoiceStatePayload,
-} from "../../src/lib/types";
+import type { ChannelActivityEntry, VoiceStatePayload } from "../../src/lib/types";
 
 vi.mock("@tauri-apps/plugin-notification", () => ({
   isPermissionGranted: vi.fn().mockResolvedValue(true),
@@ -52,18 +49,7 @@ vi.mock("@tauri-apps/api/window", () => ({
   }),
 }));
 
-function payload(overrides: Partial<ChatMessagePayload> = {}): ChatMessagePayload {
-  return {
-    id: 1,
-    channel_id: 1,
-    user: { id: 2, username: "TestUser", avatar: null },
-    content: "Hello world",
-    reply_to: null,
-    attachments: [],
-    timestamp: new Date().toISOString(),
-    ...overrides,
-  };
-}
+const payload = makePayload;
 
 beforeEach(() => {
   localStorage.clear();

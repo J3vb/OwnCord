@@ -1,3 +1,4 @@
+import type { Locator, Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
 import {
   mockTauriConnect,
@@ -11,6 +12,20 @@ import {
 // ---------------------------------------------------------------------------
 // Tests: Connect Page — core
 // ---------------------------------------------------------------------------
+
+/** Submits the login against a 2FA server and returns the revealed TOTP overlay. */
+async function reachTotpOverlay(page: Page): Promise<Locator> {
+  await mockTauriConnectWith2FA(page);
+  await page.goto("/");
+
+  await submitLogin(page);
+
+  const totpOverlay = page.locator(".totp-overlay");
+  await expect(totpOverlay).not.toHaveClass(/totp-overlay--hidden/, {
+    timeout: 10_000,
+  });
+  return totpOverlay;
+}
 
 test.describe("Connect Page", () => {
   test.beforeEach(async ({ page }) => {
@@ -209,15 +224,7 @@ test.describe("Connect Page — TOTP", () => {
   });
 
   test("TOTP back button cancels 2FA flow", async ({ page }) => {
-    await mockTauriConnectWith2FA(page);
-    await page.goto("/");
-
-    await submitLogin(page);
-
-    const totpOverlay = page.locator(".totp-overlay");
-    await expect(totpOverlay).not.toHaveClass(/totp-overlay--hidden/, {
-      timeout: 10_000,
-    });
+    const totpOverlay = await reachTotpOverlay(page);
 
     const backBtn = totpOverlay.locator(".totp-back");
     await backBtn.click();
@@ -226,15 +233,7 @@ test.describe("Connect Page — TOTP", () => {
   });
 
   test("TOTP overlay shows title and subtitle", async ({ page }) => {
-    await mockTauriConnectWith2FA(page);
-    await page.goto("/");
-
-    await submitLogin(page);
-
-    const totpOverlay = page.locator(".totp-overlay");
-    await expect(totpOverlay).not.toHaveClass(/totp-overlay--hidden/, {
-      timeout: 10_000,
-    });
+    const totpOverlay = await reachTotpOverlay(page);
 
     const title = totpOverlay.locator(".totp-title");
     await expect(title).toBeVisible();

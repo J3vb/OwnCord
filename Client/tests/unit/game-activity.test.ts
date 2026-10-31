@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
+import { useFakeClockAndStorage } from "../helpers/withFakeTimers";
 import {
   startGameActivity,
   GAME_ACTIVITY_POLL_MS,
@@ -107,20 +108,17 @@ describe("game activity loop", () => {
     return startWith(start);
   }
 
+  useFakeClockAndStorage(() => {
+    loop?.destroy();
+    loop = null;
+  });
+
   beforeEach(() => {
-    vi.useFakeTimers();
-    localStorage.clear();
     current = null;
     supported = true;
     enabled = true;
     detect.mockClear();
     detect.mockImplementation(async () => current);
-  });
-
-  afterEach(() => {
-    loop?.destroy();
-    loop = null;
-    vi.useRealTimers();
   });
 
   it("sends the game once and stays quiet while it does not change", async () => {
@@ -666,18 +664,15 @@ describe("game activity loop: the user's own game choices", () => {
     return startWith(start);
   }
 
+  useFakeClockAndStorage(() => {
+    loop?.destroy();
+    loop = null;
+  });
+
   beforeEach(() => {
-    vi.useFakeTimers();
-    localStorage.clear();
     current = null;
     detect.mockClear();
     detect.mockImplementation(async () => current);
-  });
-
-  afterEach(() => {
-    loop?.destroy();
-    loop = null;
-    vi.useRealTimers();
   });
 
   it("hands the manual programs and hidden names to the detector", async () => {

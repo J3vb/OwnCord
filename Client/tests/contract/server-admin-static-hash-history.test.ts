@@ -17,6 +17,7 @@ import {
   adminHtmlWithBridge,
   loadPanelWithFetch,
   scriptedPanelFetch,
+  stubConfirm,
 } from "../helpers/adminPanelFetch";
 
 // Classic-script bindings never land on `window`; bridge the ones driven here.
@@ -84,16 +85,6 @@ function boot(me: object = OWNER_ME): {
   bridge.state.me = me;
   const tick = () => new Promise<void>((resolve) => dom.window.setTimeout(resolve, 0));
   return { dom, bridge, doc: dom.window.document, tick };
-}
-
-/** Replaces window.confirm and records the messages it was asked. */
-function stubConfirm(dom: JSDOM, answer: boolean): string[] {
-  const asked: string[] = [];
-  dom.window.confirm = (message?: string) => {
-    asked.push(String(message ?? ""));
-    return answer;
-  };
-  return asked;
 }
 
 /** Opens Settings, waits for its form, and types into the server name. */

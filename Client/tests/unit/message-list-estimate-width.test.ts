@@ -4,7 +4,9 @@
  * different one the unmeasured estimates are redone, and the reading position
  * holds across it.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { stubCapturingResizeObserver } from "../helpers/resizeObserverStub";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
 
 const { observers } = vi.hoisted(() => ({ observers: [] as Array<() => void> }));
 
@@ -43,19 +45,25 @@ describe("MessageList: estimates follow the list's width", () => {
     parseFloat(container.querySelector<HTMLElement>(".virtual-spacer-top")!.style.height);
   const frame = (): Promise<void> => new Promise((r) => setTimeout(r, 50));
 
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => {
+      list?.destroy?.();
+      list = null;
+      vi.unstubAllGlobals();
+      for (const [name, d] of Object.entries(saved)) {
+        if (d) Object.defineProperty(HTMLElement.prototype, name, d);
+        else delete (HTMLElement.prototype as unknown as Record<string, unknown>)[name];
+      }
+      width = 900;
+    },
+  );
+
   beforeEach(() => {
     observers.length = 0;
-    vi.stubGlobal(
-      "ResizeObserver",
-      class {
-        constructor(cb: () => void) {
-          observers.push(cb);
-        }
-        observe(): void {}
-        unobserve(): void {}
-        disconnect(): void {}
-      },
-    );
+    stubCapturingResizeObserver(observers);
     for (const name of ["scrollHeight", "offsetHeight", "clientWidth", "clientHeight"]) {
       saved[name] = Object.getOwnPropertyDescriptor(HTMLElement.prototype, name);
     }
@@ -81,20 +89,6 @@ describe("MessageList: estimates follow the list's width", () => {
     resetMembersState();
     setChannels([]);
     setActiveChannel(null);
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    list?.destroy?.();
-    list = null;
-    container.remove();
-    vi.unstubAllGlobals();
-    for (const [name, d] of Object.entries(saved)) {
-      if (d) Object.defineProperty(HTMLElement.prototype, name, d);
-      else delete (HTMLElement.prototype as unknown as Record<string, unknown>)[name];
-    }
-    width = 900;
   });
 
   it("re-estimates unmeasured rows at a new width and holds the reading position", async () => {

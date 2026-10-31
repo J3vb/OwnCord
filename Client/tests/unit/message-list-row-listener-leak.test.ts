@@ -1,15 +1,10 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 
 import { createMessageList } from "@components/MessageList";
 import type { MessageListOptions } from "@components/MessageList";
 import { messagesStore } from "@stores/messages.store";
 import { setConnectionStatus, uiStore } from "@stores/ui.store";
-import {
-  makeListOptions,
-  makeMessage,
-  resetStores,
-  setMessages,
-} from "../helpers/messageListHarness";
+import { makeMessage, useMessageListHarness, setMessages } from "../helpers/messageListHarness";
 import "../helpers/resizeObserverStub";
 
 // Reaction controls lock while the socket is down (3A-3); these tests react online.
@@ -32,18 +27,14 @@ describe("MessageList row listener lifecycle", () => {
   let msgList: ReturnType<typeof createMessageList>;
   let options: MessageListOptions;
 
-  beforeEach(() => {
-    resetStores();
-    container = document.createElement("div");
-    document.body.appendChild(container);
-    options = makeListOptions();
-    msgList = createMessageList(options);
-  });
-
-  afterEach(() => {
-    msgList.destroy?.();
-    container.remove();
-  });
+  useMessageListHarness(
+    (wired) => {
+      container = wired.container;
+      options = wired.options;
+      msgList = wired.msgList;
+    },
+    () => msgList,
+  );
 
   it("aborts a discarded row's listeners on a full rebuild instead of retaining them for the component's lifetime", () => {
     const later = makeMessage({ id: 3, content: "later", timestamp: "2024-01-15T12:01:00Z" });

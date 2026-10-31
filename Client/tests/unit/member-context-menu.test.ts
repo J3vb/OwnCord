@@ -3,7 +3,8 @@
  * server capability, the MANAGE_NICKNAMES bit (Administrator bypasses it), a
  * strictly higher top role than the target, and a target other than yourself.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
 import { createMemberList } from "@components/MemberList";
 import type { MemberListOptions } from "@components/MemberList";
 import { membersStore } from "@stores/members.store";
@@ -56,6 +57,20 @@ describe("member context menu: Change Nickname", () => {
   let list: ReturnType<typeof createMemberList> | null = null;
   const onChangeNickname = vi.fn();
 
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => {
+      list?.destroy?.();
+      list = null;
+      document.body.querySelectorAll(".context-menu").forEach((el) => el.remove());
+      resetServerCapabilities();
+      setRoles([]);
+      resetAuthState();
+    },
+  );
+
   beforeEach(() => {
     onChangeNickname.mockReset();
     resetServerCapabilities();
@@ -69,18 +84,6 @@ describe("member context menu: Change Nickname", () => {
         ].map((m) => [m.id, m]),
       ),
     }));
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    list?.destroy?.();
-    list = null;
-    document.body.querySelectorAll(".context-menu").forEach((el) => el.remove());
-    container.remove();
-    resetServerCapabilities();
-    setRoles([]);
-    resetAuthState();
   });
 
   async function openMenu(targetId: number): Promise<HTMLElement | null> {

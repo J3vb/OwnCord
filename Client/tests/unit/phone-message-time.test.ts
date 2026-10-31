@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
 
 import { createMessageList } from "@components/MessageList";
 import {
@@ -28,6 +29,19 @@ describe("message header time on a phone", () => {
     list.mount(container);
   }
 
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => {
+      list?.destroy?.();
+      list = null;
+      resetGateStores();
+      vi.unstubAllGlobals();
+      vi.useRealTimers();
+    },
+  );
+
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2024, 0, 15, 18, 34, 0));
@@ -41,17 +55,6 @@ describe("message header time on a phone", () => {
     signInAs("member");
     setChannel();
     resetMembersState();
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    list?.destroy?.();
-    list = null;
-    container.remove();
-    resetGateStores();
-    vi.unstubAllGlobals();
-    vi.useRealTimers();
   });
 
   it("keeps the day word and date off a desktop", () => {

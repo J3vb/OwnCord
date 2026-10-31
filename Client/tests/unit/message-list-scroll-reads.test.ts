@@ -13,10 +13,9 @@ globalThis.ResizeObserver = class {
 } as unknown as typeof ResizeObserver;
 
 import { createMessageList } from "@components/MessageList";
-import { messagesStore } from "@stores/messages.store";
 import type { Message } from "@stores/messages.store";
 import { buildMessage } from "../helpers/messageFactory";
-import { resetMembersState } from "../helpers/storeResets";
+import { resetMembersState, resetMessagesState } from "../helpers/storeResets";
 import { makeListOptions } from "../helpers/messageListHarness";
 
 function makeMessage(id: number): Message {
@@ -38,14 +37,9 @@ describe("MessageList scroll frame layout reads", () => {
   let scrollTop = 0;
 
   beforeEach(() => {
-    messagesStore.setState(() => ({
+    resetMessagesState({
       messagesByChannel: new Map([[1, Array.from({ length: 300 }, (_, i) => makeMessage(i + 1))]]),
-      pendingSends: new Map(),
-      loadedChannels: new Set(),
-      hasMore: new Map(),
-      historyLoadState: new Map(),
-      detachedChannels: new Set(),
-    }));
+    });
     resetMembersState();
     rafs = [];
     vi.spyOn(window, "requestAnimationFrame").mockImplementation((cb) => rafs.push(cb));

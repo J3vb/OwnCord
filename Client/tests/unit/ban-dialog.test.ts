@@ -5,6 +5,7 @@
  * with the identical request, and a rejection keeps the dialog open.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { pressComposingEnter } from "../helpers/keyEvents";
 import {
   openBanDialog,
   BAN_DELETE_OPTIONS,
@@ -124,14 +125,7 @@ describe("ban dialog", () => {
   it("Enter that commits an IME candidate does not submit a half-typed reason", async () => {
     const submit = vi.fn(async () => ({}));
     setup(submit);
-    q("ban-reason-input").dispatchEvent(
-      new KeyboardEvent("keydown", {
-        key: "Enter",
-        isComposing: true,
-        bubbles: true,
-        cancelable: true,
-      }),
-    );
+    pressComposingEnter(q("ban-reason-input"));
     expect(submit).not.toHaveBeenCalled();
     expect(dialog()).not.toBeNull();
     pressEnterInReason();

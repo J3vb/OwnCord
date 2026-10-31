@@ -1,4 +1,5 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
 import * as mocks from "../helpers/messageInputMocks";
 
 let stickerOpts: {
@@ -50,18 +51,21 @@ describe("expression popup", () => {
     await vi.dynamicImportSettled();
   }
 
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => {
+      comp.destroy?.();
+      resetServerCapabilities();
+    },
+  );
+
   beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
     applyReadyCapabilities({ stickers: true });
     stickerOpts = null;
     onSendSticker.mockClear();
     onSend.mockClear();
-  });
-  afterEach(() => {
-    comp.destroy?.();
-    container.remove();
-    resetServerCapabilities();
   });
 
   it("puts the sticker button between the emoji and GIF buttons", () => {

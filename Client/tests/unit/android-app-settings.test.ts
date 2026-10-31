@@ -1,7 +1,8 @@
 // The Android app leaves out the settings that only a desktop has and words the
 // rest without "desktop", "taskbar" or a keyboard shortcut. Each case checks the
 // desktop app still shows what the Android app hides.
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
 import * as voiceSession from "../helpers/voiceSessionMock";
 
 const { mockGetVersion, mockLoad } = vi.hoisted(() => ({
@@ -49,20 +50,22 @@ vi.mock("@tauri-apps/plugin-autostart", () => ({
 let ac: AbortController;
 let container: HTMLDivElement;
 
+useMountContainer(
+  (c) => {
+    container = c;
+  },
+  () => {
+    ac.abort();
+    clearHost();
+  },
+);
+
 beforeEach(() => {
   localStorage.clear();
   invokeMock.mockReset().mockResolvedValue(undefined);
   mockGetVersion.mockResolvedValue("1.0.0");
   mockLoad.mockResolvedValue([]);
   ac = new AbortController();
-  container = document.createElement("div");
-  document.body.appendChild(container);
-});
-
-afterEach(() => {
-  ac.abort();
-  container.remove();
-  clearHost();
 });
 
 /** Every row label and description text in the pane. */

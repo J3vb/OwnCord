@@ -5,13 +5,12 @@
  * - beforeunload sends voice_leave when in voice channel
  */
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import * as voiceWidget from "../helpers/voiceWidgetHarness";
 import * as voiceSession from "../helpers/voiceSessionMock";
 import { voiceStore, joinVoiceChannel, leaveVoiceChannel } from "../../src/stores/voice.store";
 import { authStore, clearAuth } from "../../src/stores/auth.store";
 import { createVoiceWidget } from "../../src/components/VoiceWidget";
 import { resetMembersState } from "../helpers/storeResets";
-import { resetAuthState, resetChannelsState } from "../helpers/storeSeeds";
+import { resetAuthState, resetChannelsState, resetVoiceState } from "../helpers/storeSeeds";
 import { resetUiState } from "../helpers/dmHarness";
 
 // clearAuth (used below to test the real logoutWasInVoice ordering fix)
@@ -20,7 +19,7 @@ import { resetUiState } from "../helpers/dmHarness";
 vi.mock("@lib/voice/livekitSession", () => voiceSession.defaults());
 
 function resetStores(): void {
-  voiceWidget.resetVoiceState();
+  resetVoiceState();
   resetAuthState();
   resetChannelsState();
   resetMembersState();

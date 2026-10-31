@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { useMountContainer } from "../helpers/mountContainer";
 import { buildAppearanceTab } from "../../src/features/settings/AppearanceTab";
 import { refreshTimeFormat } from "@lib/text/timeFormat";
@@ -22,21 +22,23 @@ describe("AppearanceTab — Accessibility", () => {
   let container: HTMLDivElement;
   const ac = new AbortController();
 
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => {
+      document.documentElement.removeAttribute("style");
+      document.body.removeAttribute("style");
+    },
+  );
+
   beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
     localStorage.clear();
     refreshTimeFormat();
     document.documentElement.removeAttribute("style");
     document.body.removeAttribute("style");
     vi.clearAllMocks();
     mockGetActiveThemeName.mockReturnValue("neon-glow");
-  });
-
-  afterEach(() => {
-    container.remove();
-    document.documentElement.removeAttribute("style");
-    document.body.removeAttribute("style");
   });
 
   it("theme tiles are <button> elements", () => {
@@ -561,9 +563,18 @@ describe("AppearanceTab - system theme", () => {
   let container: HTMLDivElement;
   let ac: AbortController;
 
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => {
+      ac.abort();
+      vi.unstubAllGlobals();
+      document.documentElement.removeAttribute("style");
+    },
+  );
+
   beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
     localStorage.clear();
     document.documentElement.removeAttribute("style");
     document.body.removeAttribute("style");
@@ -576,13 +587,6 @@ describe("AppearanceTab - system theme", () => {
       addEventListener: vi.fn(),
       removeEventListener: vi.fn(),
     }));
-  });
-
-  afterEach(() => {
-    ac.abort();
-    container.remove();
-    vi.unstubAllGlobals();
-    document.documentElement.removeAttribute("style");
   });
 
   it("adds a Sync with computer tile that stores the system choice", () => {

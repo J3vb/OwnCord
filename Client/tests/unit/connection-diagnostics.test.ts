@@ -174,6 +174,22 @@ describe("connection diagnostics", () => {
     expect(JSON.stringify(results)).not.toContain("secret");
   });
 
+  /** Runs the media check against a subscriber whose getStats is `stats`; it must end "not-tested". */
+  async function expectMediaNotTested(stats: ReturnType<typeof vi.fn>): Promise<void> {
+    services.getRoom = vi.fn().mockReturnValue({
+      state: "connected",
+      remoteParticipants: new Map([["other", {}]]),
+      engine: {
+        client: { ws: { readyState: WebSocket.OPEN } },
+        pcManager: { subscriber: { getStats: stats } },
+      },
+    });
+    const work = run(false);
+    await vi.advanceTimersByTimeAsync(3_100);
+    await work;
+    expect(final("media")?.status).toBe("not-tested");
+  }
+
   function activeRoom(
     before: Record<string, unknown>,
     after: Record<string, unknown>,
@@ -807,18 +823,7 @@ describe("connection diagnostics", () => {
           .mockResolvedValue(
             new Map([["out", { id: "out", type: "outbound-rtp", framesDecoded: 50 }]]),
           );
-        services.getRoom = vi.fn().mockReturnValue({
-          state: "connected",
-          remoteParticipants: new Map([["other", {}]]),
-          engine: {
-            client: { ws: { readyState: WebSocket.OPEN } },
-            pcManager: { subscriber: { getStats: stats } },
-          },
-        });
-        const work = run(false);
-        await vi.advanceTimersByTimeAsync(3_100);
-        await work;
-        expect(final("media")?.status).toBe("not-tested");
+        await expectMediaNotTested(stats);
       });
 
       it("ignores an inbound stream that has no string id", async () => {
@@ -826,18 +831,7 @@ describe("connection diagnostics", () => {
           .fn()
           .mockResolvedValueOnce(new Map([["x", { type: "inbound-rtp", framesDecoded: 1 }]]))
           .mockResolvedValue(new Map([["x", { type: "inbound-rtp", framesDecoded: 50 }]]));
-        services.getRoom = vi.fn().mockReturnValue({
-          state: "connected",
-          remoteParticipants: new Map([["other", {}]]),
-          engine: {
-            client: { ws: { readyState: WebSocket.OPEN } },
-            pcManager: { subscriber: { getStats: stats } },
-          },
-        });
-        const work = run(false);
-        await vi.advanceTimersByTimeAsync(3_100);
-        await work;
-        expect(final("media")?.status).toBe("not-tested");
+        await expectMediaNotTested(stats);
       });
 
       it("fails the media check when the call reconnects during the wait", async () => {

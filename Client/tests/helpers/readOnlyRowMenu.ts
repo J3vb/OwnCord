@@ -1,19 +1,13 @@
 import { expect } from "vitest";
-import { messagesStore, type Message } from "@stores/messages.store";
+import { resetMessagesState } from "./storeResets";
+import { type Message } from "@stores/messages.store";
 import type { messageActionGates } from "@components/message-list/messageActions";
 
 type Gates = ReturnType<typeof messageActionGates>;
 
 /** Puts exactly `rows` in channel 1 of the messages store. */
 export function seedChannelOneRows(rows: readonly Message[]): void {
-  messagesStore.setState(() => ({
-    messagesByChannel: new Map([[1, [...rows]]]),
-    pendingSends: new Map(),
-    loadedChannels: new Set(),
-    hasMore: new Map(),
-    historyLoadState: new Map(),
-    detachedChannels: new Set(),
-  }));
+  resetMessagesState({ messagesByChannel: new Map([[1, [...rows]]]) });
 }
 
 /** Whether each of react, edit, pin, delete and report is offered. */

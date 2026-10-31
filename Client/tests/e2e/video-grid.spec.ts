@@ -54,6 +54,16 @@ function voiceState(userId: number, flags: { camera?: boolean; screenshare?: boo
   };
 }
 
+/** A peer turns their camera on; clicking their roster row opens the grid. */
+async function openCameraGrid(page: Page) {
+  await emitWsMessage(page, voiceState(CAMERA_USER_ID, { camera: true }));
+  const row = page.locator(`.voice-user-item[data-voice-uid='${CAMERA_USER_ID}']`);
+  await expect(row).toBeVisible({ timeout: 5_000 });
+  await row.click();
+  await expect(gridSlot(page)).toBeVisible({ timeout: 5_000 });
+  return row;
+}
+
 test.describe("video grid — chat/grid toggle", () => {
   test("watching a streaming peer opens the grid over the chat surface", async ({ page }) => {
     await boot(page);
@@ -82,11 +92,7 @@ test.describe("video grid — chat/grid toggle", () => {
   }) => {
     await boot(page);
 
-    await emitWsMessage(page, voiceState(CAMERA_USER_ID, { camera: true }));
-    const row = page.locator(`.voice-user-item[data-voice-uid='${CAMERA_USER_ID}']`);
-    await expect(row).toBeVisible({ timeout: 5_000 });
-    await row.click();
-    await expect(gridSlot(page)).toBeVisible({ timeout: 5_000 });
+    await openCameraGrid(page);
 
     // Switch to a DIFFERENT text channel: general is already active, so
     // clicking it would fire no channel change and prove nothing.
@@ -100,11 +106,7 @@ test.describe("video grid — chat/grid toggle", () => {
   test("a peer who stops streaming closes the grid", async ({ page }) => {
     await boot(page);
 
-    await emitWsMessage(page, voiceState(CAMERA_USER_ID, { camera: true }));
-    const row = page.locator(`.voice-user-item[data-voice-uid='${CAMERA_USER_ID}']`);
-    await expect(row).toBeVisible({ timeout: 5_000 });
-    await row.click();
-    await expect(gridSlot(page)).toBeVisible({ timeout: 5_000 });
+    const row = await openCameraGrid(page);
 
     // The peer turns their camera off but stays in voice — with no stream
     // left there is nothing for the grid to show, so it must close itself

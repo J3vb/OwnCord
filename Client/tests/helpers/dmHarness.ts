@@ -1,8 +1,8 @@
 import { addDmChannel, dmStore } from "../../src/stores/dm.store";
 import type { DmChannel, DmUser } from "../../src/stores/dm.store";
-import { uiStore } from "../../src/stores/ui.store";
+import { uiStore, type UiState } from "../../src/stores/ui.store";
 
-export function resetUiState(): void {
+export function resetUiState(overrides: Partial<UiState> = {}): void {
   uiStore.setState(() => ({
     sidebarCollapsed: false,
     memberListVisible: true,
@@ -20,6 +20,7 @@ export function resetUiState(): void {
     activeDmUserId: null,
     activeView: null,
     settingsTab: null,
+    ...overrides,
   }));
 }
 

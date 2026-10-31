@@ -1,4 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
 import * as mocks from "../helpers/sidebarAreaMocks";
 import { lightSidebarAreaOpts, resetSidebarStoresAsMember } from "../helpers/sidebarAreaOpts";
 
@@ -58,6 +59,19 @@ describe("SidebarArea - server name menu", () => {
   let area: ReturnType<typeof createSidebarArea>;
   let sent: number[];
 
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => {
+      for (const unsub of area.unsubscribers) unsub();
+      document.querySelectorAll(".server-menu").forEach((el) => el.remove());
+      setMarkReadSender(null);
+      closeSettings();
+      localStorage.clear();
+    },
+  );
+
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
@@ -65,17 +79,6 @@ describe("SidebarArea - server name menu", () => {
     setMarkReadSender((id) => sent.push(id));
     resetSidebarStoresAsMember();
     grant(Permission.SEND_MESSAGES);
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    for (const unsub of area.unsubscribers) unsub();
-    document.querySelectorAll(".server-menu").forEach((el) => el.remove());
-    container.remove();
-    setMarkReadSender(null);
-    closeSettings();
-    localStorage.clear();
   });
 
   function mount(channels: ReadyChannel[] = READ): void {

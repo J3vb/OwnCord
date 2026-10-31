@@ -1,26 +1,8 @@
 import { vi } from "vitest";
-import { voiceStore, type VoiceState } from "@stores/voice.store";
+import type { VoiceState } from "@stores/voice.store";
 import { setConnectionStatus } from "@stores/ui.store";
 import { resetMembersState } from "./storeResets";
-import { resetChannelsState } from "./storeSeeds";
-
-/** Put the voice store back to an idle, empty call, with optional field overrides. */
-export function resetVoiceState(overrides: Partial<VoiceState> = {}): void {
-  voiceStore.setState(() => ({
-    currentChannelId: null,
-    voiceUsers: new Map(),
-    voiceConfigs: new Map(),
-    localMuted: false,
-    localDeafened: false,
-    localCamera: false,
-    localScreenshare: false,
-    joinedAt: null,
-    listenOnly: false,
-    voiceStatus: "idle",
-    peerVerifications: new Map(),
-    ...overrides,
-  }));
-}
+import { resetChannelsState, resetVoiceState } from "./storeSeeds";
 
 /** Reset voice, channels and members, with the socket live so controls stay enabled. */
 export function resetVoiceWidgetStores(overrides: Partial<VoiceState> = {}): void {

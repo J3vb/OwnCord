@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
 import * as voiceSession from "../helpers/voiceSessionMock";
 import { createSettingsOverlay } from "../../src/features/settings/SettingsOverlay";
 import { buildMyUploadsTab } from "../../src/features/uploads/myUploadsTab";
@@ -104,21 +105,23 @@ describe("settings search", () => {
   let container: HTMLDivElement;
   let overlay: ReturnType<typeof createSettingsOverlay> | null = null;
 
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => {
+      overlay?.destroy?.();
+      overlay = null;
+    },
+  );
+
   beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
     localStorage.clear();
     vi.clearAllMocks();
     mockAppVersion.mockResolvedValue("1.2.3-test");
     mockAuthState.user = { id: 1, username: "testuser", totp_enabled: false, display_name: null };
     mockUiState.settingsOpen = true;
     mockUiState.settingsTab = null;
-  });
-
-  afterEach(() => {
-    overlay?.destroy?.();
-    overlay = null;
-    container.remove();
   });
 
   function mountOverlay(extra: Partial<Parameters<typeof createSettingsOverlay>[0]> = {}): void {

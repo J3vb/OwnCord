@@ -3,6 +3,7 @@
 // the verify round trip could fire a second onTotpSubmit call before the
 // first resolved. Covered here through ConnectPage, which mounts LoginForm.
 import { describe, it, expect, vi } from "vitest";
+import { pressComposingEnter } from "../helpers/keyEvents";
 import * as mocks from "../helpers/connectPageMocks";
 import { createConnectPage } from "../../src/pages/ConnectPage";
 import { makeCallbacks, testProfiles } from "../helpers/connectPageHarness";
@@ -25,14 +26,7 @@ describe("LoginForm TOTP re-entrancy guard", () => {
 
     const totpInput = container.querySelector(".totp-overlay input") as HTMLInputElement;
     totpInput.value = "654321";
-    totpInput.dispatchEvent(
-      new KeyboardEvent("keydown", {
-        key: "Enter",
-        isComposing: true,
-        bubbles: true,
-        cancelable: true,
-      }),
-    );
+    pressComposingEnter(totpInput);
     expect(onTotpSubmit).not.toHaveBeenCalled();
 
     totpInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));

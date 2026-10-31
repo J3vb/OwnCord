@@ -8,6 +8,7 @@
  * relay and `parseRelayedLogin` — so what these cover is the join between them,
  * including the 2FA union, which is the part nothing else exercises.
  */
+import type { Locator, Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
 import {
   buildTauriMockScript,
@@ -66,6 +67,21 @@ async function selectSavedServer(page: import("@playwright/test").Page): Promise
   await page.locator(".server-item").first().click();
   const password = page.locator("#password");
   await expect(password).not.toHaveValue("", { timeout: 5000 });
+}
+
+/** The saved-password form with the user's first keystroke already in the password box. */
+async function startTypingPassword(page: Page): Promise<Locator> {
+  await mockWithSavedPassword(page, {
+    status: 200,
+    body: { token: MOCK_TOKEN, requires_2fa: false },
+  });
+  await page.goto("/");
+  await selectSavedServer(page);
+
+  const password = page.locator("#password");
+  await password.click();
+  await password.press("a");
+  return password;
 }
 
 test.describe("Saved-password login", () => {
@@ -141,16 +157,7 @@ test.describe("Saved-password login", () => {
   });
 
   test("falls back to a typed password once the user edits the box", async ({ page }) => {
-    await mockWithSavedPassword(page, {
-      status: 200,
-      body: { token: MOCK_TOKEN, requires_2fa: false },
-    });
-    await page.goto("/");
-    await selectSavedServer(page);
-
-    const password = page.locator("#password");
-    await password.click();
-    await password.press("a");
+    const password = await startTypingPassword(page);
     // The placeholder is replaced outright rather than appended to.
     await expect(password).toHaveValue("a");
     await password.fill("typed-password-123");
@@ -174,16 +181,7 @@ test.describe("Saved-password login", () => {
     // same host — so guarding the delete on it would only risk leaving a
     // declined password sitting on disk (e.g. after an account rename). The
     // delete is unconditional for the host; it stays that way here too.
-    await mockWithSavedPassword(page, {
-      status: 200,
-      body: { token: MOCK_TOKEN, requires_2fa: false },
-    });
-    await page.goto("/");
-    await selectSavedServer(page);
-
-    const password = page.locator("#password");
-    await password.click();
-    await password.press("a");
+    const password = await startTypingPassword(page);
     await password.fill("typed-password-123");
     await page.locator("#username").fill("someone-else");
     await page.locator("#remember-password").uncheck();
@@ -201,16 +199,7 @@ test.describe("Saved-password login", () => {
 
   test("declining to be remembered deletes the stored credential", async ({ page }) => {
     // OCV-022: the opt-out is an instruction, not just an absence of one.
-    await mockWithSavedPassword(page, {
-      status: 200,
-      body: { token: MOCK_TOKEN, requires_2fa: false },
-    });
-    await page.goto("/");
-    await selectSavedServer(page);
-
-    const password = page.locator("#password");
-    await password.click();
-    await password.press("a");
+    const password = await startTypingPassword(page);
     await password.fill("typed-password-123");
     await page.locator("#remember-password").uncheck();
     // Stay signed in keeps the token, so declining to be remembered means both.

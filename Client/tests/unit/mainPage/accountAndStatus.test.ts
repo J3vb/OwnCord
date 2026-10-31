@@ -24,6 +24,7 @@ import {
   textChannel,
   dmChannel,
   useMainPageHarness,
+  useWiredMainPage,
   useMainPageScope,
   mountPage,
   seedChannels,
@@ -69,15 +70,7 @@ function mountWithBanner(container: HTMLDivElement, ui: UiPatch) {
 }
 
 describe("MainPage — video grid, DM profile panel, calls, settings", () => {
-  let container: HTMLDivElement;
-  let page: ReturnType<typeof createMainPage>;
-
-  useMainPageHarness({
-    wired: (c) => {
-      container = c;
-    },
-    currentPage: () => page,
-  });
+  const m = useWiredMainPage();
 
   it("clears every external-content cache on sign-out so one server's previews never reach the next", async () => {
     const preview = vi.spyOn(desktop.externalContent, "preview").mockResolvedValue({
@@ -99,7 +92,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     const oembed = (): number =>
       preview.mock.calls.filter((c) => c[1].includes("oembed") && c[1].includes("tdvid")).length;
     try {
-      page = mountPage(container);
+      m.page = mountPage(m.container);
 
       // Fill each external cache once, and prove a re-render is served from it.
       renderGenericLinkPreview(pageUrl);
@@ -118,7 +111,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
       // The caches reset with the session (sessionRegistry, cache phase); the
       // page itself only tears down its DOM and controllers.
       clearAuth("server_switch");
-      page.destroy?.();
+      m.page.destroy?.();
 
       // Every one of them is asked for again, under a fresh broker partition.
       expect(externalPartition()).not.toBe(partitionBefore);
@@ -153,7 +146,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
       getSessions: vi.fn(async () => []),
     } as unknown as ApiClient;
 
-    page = mountPage(container, fakeWs(), hostedApi);
+    m.page = mountPage(m.container, fakeWs(), hostedApi);
 
     const chatAreaOpts = mockCreateChatArea.mock.calls[0]![0];
     chatAreaOpts.onToggleDmProfile();
@@ -201,14 +194,14 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
       getSessions: vi.fn(async () => []),
     } as unknown as ApiClient;
 
-    page = mountPage(container, fakeWs(), hostedApi);
+    m.page = mountPage(m.container, fakeWs(), hostedApi);
     uiStore.setState((prev) => ({ ...prev, settingsOpen: true }));
     // The store notifies on the next tick, and opening rebuilds the live
     // Account tab then — drive the form a user would see, not the
     // placeholder built at mount.
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    const inputs = [...container.querySelectorAll<HTMLInputElement>("input[type='password']")];
+    const inputs = [...m.container.querySelectorAll<HTMLInputElement>("input[type='password']")];
     const byPlaceholder = (placeholder: string): HTMLInputElement => {
       const el = inputs.find((i) => i.placeholder === placeholder);
       if (el === undefined) throw new Error(`no password input with placeholder ${placeholder}`);
@@ -217,7 +210,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     byPlaceholder("Old password").value = "old-password";
     byPlaceholder("New password").value = "new-password-1";
     byPlaceholder("Confirm new password").value = "new-password-1";
-    const changeBtn = [...container.querySelectorAll<HTMLButtonElement>("button")].find(
+    const changeBtn = [...m.container.querySelectorAll<HTMLButtonElement>("button")].find(
       (b) => b.textContent === "Change Password",
     );
     if (changeBtn === undefined) throw new Error("no Change Password button");
@@ -225,17 +218,17 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
 
     await vi.waitFor(() => {
       expect(hostedApi.changePassword).toHaveBeenCalledWith("old-password", "new-password-1");
-      const toast = container.querySelector('[data-testid="toast"]');
+      const toast = m.container.querySelector('[data-testid="toast"]');
       expect(toast).not.toBeNull();
       expect(toast!.classList.contains("toast-warning")).toBe(true);
       expect(toast!.textContent).toBe(warning);
     });
-    expect(container.querySelector(".toast-success")).toBeNull();
+    expect(m.container.querySelector(".toast-success")).toBeNull();
     // The form carries the same warning inline (Codex P2 on PR #1503): no
     // green "changed successfully" beside the warning toast.
     // The toast is shown before the callback resolves, so the form's own
     // update lands a microtask later.
-    const status = container.querySelector<HTMLElement>('[data-testid="pw-change-status"]');
+    const status = m.container.querySelector<HTMLElement>('[data-testid="pw-change-status"]');
     expect(status).not.toBeNull();
     await vi.waitFor(() => {
       expect(status!.textContent).toBe(warning);
@@ -245,15 +238,15 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     // created with so the swap to the warning text is announced.
     expect(status!.classList.contains("form-warning")).toBe(true);
     expect(status!.getAttribute("role")).toBe("alert");
-    expect(container.textContent).not.toContain("Password changed successfully.");
+    expect(m.container.textContent).not.toContain("Password changed successfully.");
   });
 
   it("shows Signed in elsewhere on SESSION_REPLACED, and Use here reconnects this device", async () => {
-    const mounted = mountWithBanner(container, {
+    const mounted = mountWithBanner(m.container, {
       sessionReplaced: true,
       connectionStatus: "disconnected",
     });
-    page = mounted.page;
+    m.page = mounted.page;
     const { ws, banner } = mounted;
     await vi.waitFor(() => {
       expect(banner.textContent).toBe("Signed in elsewhere Use here");
@@ -267,16 +260,21 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect(uiStore.getState().sessionReplaced).toBe(false);
   });
 
-  it("shows an actionable connection notice on disconnect and Retry redials", async () => {
-    const mounted = mountWithBanner(container, {
+  /** Mounts with the socket down and waits for the "can't reach" notice. */
+  const mountDisconnected = async () => {
+    const mounted = mountWithBanner(m.container, {
       sessionReplaced: false,
       connectionStatus: "disconnected",
     });
-    page = mounted.page;
-    const { ws, banner } = mounted;
+    m.page = mounted.page;
     await vi.waitFor(() => {
-      expect(banner.textContent).toContain("Can't reach this server");
+      expect(mounted.banner.textContent).toContain("Can't reach this server");
     });
+    return mounted;
+  };
+
+  it("shows an actionable connection notice on disconnect and Retry redials", async () => {
+    const { ws, banner } = await mountDisconnected();
 
     const retry = banner.querySelector("button")!;
     expect(retry.textContent).toBe("Retry");
@@ -285,12 +283,12 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   });
 
   it("keeps Reconnecting... until a dial fails, then offers Retry", async () => {
-    const mounted = mountWithBanner(container, {
+    const mounted = mountWithBanner(m.container, {
       sessionReplaced: false,
       connectionStatus: "reconnecting",
       connectionDialFailed: false,
     });
-    page = mounted.page;
+    m.page = mounted.page;
     const { ws, banner } = mounted;
     await vi.waitFor(() => {
       expect(banner.textContent).toBe("Reconnecting...");
@@ -315,10 +313,10 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     socket.simulateStateChange("connecting");
     socket.simulateStateChange("authenticating");
     socket.simulateStateChange("connected");
-    page = mountPage(container, ws, fakeApi("chat.example.com"));
+    m.page = mountPage(m.container, ws, fakeApi("chat.example.com"));
 
-    const banner = container.querySelector<HTMLElement>(".reconnecting-banner")!;
-    const live = container.querySelector<HTMLElement>("[data-testid='banner-announce']")!;
+    const banner = m.container.querySelector<HTMLElement>(".reconnecting-banner")!;
+    const live = m.container.querySelector<HTMLElement>("[data-testid='banner-announce']")!;
     const unreachable =
       "Can't reach this server right now. It may be down or blocked on this network.";
     const announced: string[] = [];
@@ -363,15 +361,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   });
 
   it("re-renders the notice on network loss and return without redialing", async () => {
-    const mounted = mountWithBanner(container, {
-      sessionReplaced: false,
-      connectionStatus: "disconnected",
-    });
-    page = mounted.page;
-    const { ws, banner } = mounted;
-    await vi.waitFor(() => {
-      expect(banner.textContent).toContain("Can't reach this server");
-    });
+    const { ws, banner } = await mountDisconnected();
 
     const onLine = vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
     try {
@@ -390,11 +380,11 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   it("does not clear a pending restart countdown on a network flap", () => {
     const ws = fakeWs();
     authStore.setState((prev) => ({ ...prev, token: "tok-here" }));
-    page = mountPage(container, ws, fakeApi("chat.example.com"));
+    m.page = mountPage(m.container, ws, fakeApi("chat.example.com"));
 
     // The server announces a restart while the socket is live.
     ws.emit("server_restart", { reason: "update", delay_seconds: 30 });
-    const banner = container.querySelector<HTMLElement>(".reconnecting-banner")!;
+    const banner = m.container.querySelector<HTMLElement>(".reconnecting-banner")!;
     expect(banner.textContent).toBe("Server restarting in 30 seconds...");
 
     // A network interface flaps (VPN toggle / Wi-Fi blip) during the
@@ -407,10 +397,10 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
 
   it("counts down a shutdown notice too: the session survives a restart (Q4)", () => {
     const ws = fakeWs();
-    page = mountPage(container, ws, fakeApi("chat.example.com"));
+    m.page = mountPage(m.container, ws, fakeApi("chat.example.com"));
 
     ws.emit("server_restart", { reason: "shutdown", delay_seconds: 5 });
-    const banner = container.querySelector<HTMLElement>(".reconnecting-banner")!;
+    const banner = m.container.querySelector<HTMLElement>(".reconnecting-banner")!;
     expect(banner.textContent).toBe("Server restarting in 5 seconds...");
     expect(banner.classList.contains("visible")).toBe(true);
   });
@@ -427,12 +417,12 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
       })),
     } as unknown as ApiClient;
     authStore.setState((prev) => ({ ...prev, isAuthenticated: true, token: "tok" }));
-    page = mountPage(container, fakeWs(), hostedApi);
+    m.page = mountPage(m.container, fakeWs(), hostedApi);
     uiStore.setState((prev) => ({ ...prev, settingsOpen: true }));
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    container.querySelector<HTMLButtonElement>('[data-testid="sessions-revoke-all"]')!.click();
-    container
+    m.container.querySelector<HTMLButtonElement>('[data-testid="sessions-revoke-all"]')!.click();
+    m.container
       .querySelector<HTMLButtonElement>('[data-testid="sessions-revoke-all-confirm"]')!
       .click();
 
@@ -461,10 +451,10 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
         },
       ]),
     } as unknown as ApiClient;
-    page = mountPage(container, fakeWs(), hostedApi);
+    m.page = mountPage(m.container, fakeWs(), hostedApi);
 
     await vi.waitFor(() => {
-      const toast = container.querySelector('[data-testid="toast"]');
+      const toast = m.container.querySelector('[data-testid="toast"]');
       expect(toast?.textContent).toContain("OwnCord desktop from 198.51.100.2");
     });
   });

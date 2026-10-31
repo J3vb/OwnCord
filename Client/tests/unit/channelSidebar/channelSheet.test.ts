@@ -13,27 +13,9 @@ import {
 } from "@lib/prefs/notificationLevel";
 import { closeBottomSheet } from "@lib/ui/bottomSheet";
 import { channelsStore, type Channel } from "@stores/channels.store";
+import { makeChannel } from "../../helpers/channelFactory";
 
-function channel(overrides: Partial<Channel> = {}): Channel {
-  return {
-    id: 5,
-    name: "general",
-    type: "text",
-    category: null,
-    position: 0,
-    unreadCount: 0,
-    mentionCount: 0,
-    lastMessageId: null,
-    canSend: true,
-    slowMode: 0,
-    topic: "",
-    nsfw: false,
-    isPrivate: false,
-    voiceMaxUsers: 0,
-    voiceMaxVideo: 0,
-    ...overrides,
-  };
-}
+const channel = (overrides: Partial<Channel> = {}): Channel => makeChannel({ id: 5, ...overrides });
 
 const SHEET = '[data-testid="channel-sheet"]';
 const sheet = (): HTMLElement | null => document.querySelector<HTMLElement>(SHEET);

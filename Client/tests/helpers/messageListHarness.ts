@@ -225,3 +225,19 @@ export function signInAsViewer(): void {
     { token: "t", serverName: null },
   );
 }
+
+export interface WiredMessageList {
+  container: HTMLDivElement;
+  options: MessageListOptions;
+  msgList: MessageListComponent;
+}
+
+/** useMessageListHarness with the wired pieces kept on one object; tests may replace `msgList`. */
+export function useWiredMessageList(): WiredMessageList {
+  const wired = {} as WiredMessageList;
+  useMessageListHarness(
+    (w) => Object.assign(wired, w),
+    () => wired.msgList,
+  );
+  return wired;
+}

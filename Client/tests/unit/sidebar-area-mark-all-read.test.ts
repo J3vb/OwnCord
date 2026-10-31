@@ -9,10 +9,15 @@
  * The real ChannelSidebar is mounted on purpose: the placement is a fact about
  * the composed DOM, and the CSS check below reads it from there.
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
 import { makeDm } from "../helpers/dmHarness";
 import * as mocks from "../helpers/sidebarAreaMocks";
-import { lightSidebarAreaOpts, resetSidebarStoresAsMember } from "../helpers/sidebarAreaOpts";
+import {
+  lightSidebarAreaOpts,
+  readStateChannels,
+  resetSidebarStoresAsMember,
+} from "../helpers/sidebarAreaOpts";
 import { cascadedDeclaration, keyword } from "../helpers/app-css";
 
 vi.mock("@lib/voice/livekitSession", () => mocks.rePinSessionMock());
@@ -30,18 +35,7 @@ import { dmStore } from "../../src/stores/dm.store";
 import { setMarkReadSender } from "@lib/readState";
 import { Permission, type ReadyChannel } from "../../src/lib/types";
 
-const CHANNELS: ReadyChannel[] = [
-  {
-    id: 1,
-    name: "general",
-    type: "text",
-    category: "Text Channels",
-    position: 0,
-    unread_count: 3,
-    mention_count: 1,
-  },
-  { id: 2, name: "random", type: "text", category: "Text Channels", position: 1, unread_count: 0 },
-];
+const CHANNELS = readStateChannels().slice(0, 2);
 
 /** Whether the header button is displayed (SidebarArea toggles `display`, as for Audit Log). */
 const shown = (el: HTMLElement): boolean => el.style.display !== "none";
@@ -55,18 +49,20 @@ describe("SidebarArea — Mark All as Read", () => {
   let area: ReturnType<typeof createSidebarArea>;
   let sent: number[];
 
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => {
+      for (const unsub of area.unsubscribers) unsub();
+      setMarkReadSender(null);
+    },
+  );
+
   beforeEach(() => {
     sent = [];
     setMarkReadSender((id) => sent.push(id));
     resetSidebarStoresAsMember();
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    for (const unsub of area.unsubscribers) unsub();
-    container.remove();
-    setMarkReadSender(null);
   });
 
   function mount(channels: ReadyChannel[]): void {

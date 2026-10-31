@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { resetMessagesState } from "../helpers/storeResets";
 
 const { createPopupMock, destroyMock } = vi.hoisted(() => {
   const destroy = vi.fn();
@@ -63,16 +64,11 @@ describe("MessageList profile popup", () => {
       ]),
       typingUsers: new Map(),
     }));
-    messagesStore.setState(() => ({
+    resetMessagesState({
       messagesByChannel: new Map([
         [1, [makeMessage({ id: 1, content: "hello @nine and @everyone", mentions: [9] })]],
       ]),
-      pendingSends: new Map(),
-      loadedChannels: new Set(),
-      hasMore: new Map(),
-      historyLoadState: new Map(),
-      detachedChannels: new Set(),
-    }));
+    });
     container = document.createElement("div");
     document.body.appendChild(container);
     const options: MessageListOptions = makeListOptions();

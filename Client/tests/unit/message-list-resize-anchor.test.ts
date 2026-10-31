@@ -5,6 +5,7 @@
  * top edge leaves the rows below it in place, and a reader at the bottom stays
  * at the bottom however much the last row grew.
  */
+import { stubCapturingResizeObserver } from "../helpers/resizeObserverStub";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const { observers } = vi.hoisted(() => ({ observers: [] as Array<() => void> }));
@@ -15,7 +16,7 @@ import type { Message } from "@stores/messages.store";
 import { setChannels, setActiveChannel } from "@stores/channels.store";
 import { clearRowHeights } from "@components/message-list/rowHeights";
 import { buildMessage } from "../helpers/messageFactory";
-import { resetMembersState } from "../helpers/storeResets";
+import { resetMembersState, resetMessagesState } from "../helpers/storeResets";
 import { makeListOptions } from "../helpers/messageListHarness";
 
 const CHANNEL_ID = 1;
@@ -88,17 +89,7 @@ describe("MessageList: rows resizing after they are drawn", () => {
     observers.length = 0;
     grown.clear();
     clearRowHeights();
-    vi.stubGlobal(
-      "ResizeObserver",
-      class {
-        constructor(cb: () => void) {
-          observers.push(cb);
-        }
-        observe(): void {}
-        unobserve(): void {}
-        disconnect(): void {}
-      },
-    );
+    stubCapturingResizeObserver(observers);
     for (const name of [
       "scrollHeight",
       "offsetHeight",
@@ -142,16 +133,12 @@ describe("MessageList: rows resizing after they are drawn", () => {
         scrollTops.set(this, Math.min(Math.max(0, v), max));
       },
     });
-    messagesStore.setState(() => ({
+    resetMessagesState({
       messagesByChannel: new Map([
         [CHANNEL_ID, Array.from({ length: 200 }, (_, i) => makeMessage(i + 1))],
       ]),
-      pendingSends: new Map(),
       loadedChannels: new Set([CHANNEL_ID]),
-      hasMore: new Map(),
-      historyLoadState: new Map(),
-      detachedChannels: new Set(),
-    }));
+    });
     resetMembersState();
     setChannels([]);
     setActiveChannel(null);

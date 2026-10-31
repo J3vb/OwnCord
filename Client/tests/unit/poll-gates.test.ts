@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
 import { messageActionGates } from "../../src/components/message-list/messageActions";
 import { createMessageInput } from "../../src/components/MessageInput";
 import type { PollView } from "../../src/lib/types";
@@ -70,14 +71,12 @@ describe("a poll message's gates", () => {
 
 describe("the composer's Poll button", () => {
   let container: HTMLDivElement;
-  beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-  afterEach(() => {
-    container.remove();
-    resetServerCapabilities();
-  });
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => resetServerCapabilities(),
+  );
 
   const mount = (onCreatePoll?: () => void) => {
     const comp = createMessageInput({

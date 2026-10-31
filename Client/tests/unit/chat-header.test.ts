@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
   buildChatHeader,
   updateChatHeaderForDm,
@@ -398,14 +398,14 @@ describe("updateChatHeaderForDm", () => {
 
 describe("ChatHeader channel type icon and topic modal (N21)", () => {
   let container: HTMLDivElement;
-  beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-  afterEach(() => {
-    container.remove();
-    document.querySelectorAll('[data-testid="channel-topic-modal"]').forEach((e) => e.remove());
-  });
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => {
+      document.querySelectorAll('[data-testid="channel-topic-modal"]').forEach((e) => e.remove());
+    },
+  );
 
   it("shows the megaphone for an announcement channel and # for a text one", () => {
     const { element, refs } = buildChatHeader({ onTogglePins: vi.fn() });

@@ -3,6 +3,7 @@
 // event, forwards only this request's ticks to the caller, and unsubscribes
 // once the request settles.
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { tauriEventMock } from "../helpers/tauriEventMock";
 
 const { mockFetch, handlers } = vi.hoisted(() => ({
   mockFetch: vi.fn(),
@@ -10,14 +11,7 @@ const { mockFetch, handlers } = vi.hoisted(() => ({
 }));
 
 vi.mock("@tauri-apps/plugin-http", () => ({ fetch: mockFetch }));
-vi.mock("@tauri-apps/api/event", () => ({
-  listen: (event: string, handler: (e: { payload: unknown }) => void) => {
-    const set = handlers.get(event) ?? new Set();
-    set.add(handler);
-    handlers.set(event, set);
-    return Promise.resolve(() => set.delete(handler));
-  },
-}));
+vi.mock("@tauri-apps/api/event", () => tauriEventMock(handlers));
 vi.mock("../../src/lib/net/httpProxy", () => ({
   ensureHttpProxy: (host: string) => Promise.resolve(`https://${host}`),
 }));

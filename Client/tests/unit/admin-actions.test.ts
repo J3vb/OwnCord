@@ -360,15 +360,12 @@ describe("AdminActions", () => {
 describe("MemberContextMenu - full menu (3C-3)", () => {
   let container: HTMLDivElement;
 
-  beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    setDeveloperMode(false);
-    container.remove();
-  });
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => setDeveloperMode(false),
+  );
 
   function open(overrides: Partial<MemberContextMenuOptions> = {}) {
     const options: MemberContextMenuOptions = {

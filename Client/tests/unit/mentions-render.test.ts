@@ -5,6 +5,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as voiceSession from "../helpers/voiceSessionMock";
+import { useMountContainer } from "../helpers/mountContainer";
 
 vi.mock("@lib/voice/livekitSession", () => voiceSession.defaults());
 
@@ -48,14 +49,12 @@ function seedStores(): void {
 
 let container: HTMLDivElement;
 
-beforeEach(() => {
-  seedStores();
-  container = document.createElement("div");
-  document.body.appendChild(container);
+useMountContainer((c) => {
+  container = c;
 });
 
-afterEach(() => {
-  container.remove();
+beforeEach(() => {
+  seedStores();
 });
 
 function render(text: string, info?: Parameters<typeof renderMentionSegment>[1]): HTMLDivElement {

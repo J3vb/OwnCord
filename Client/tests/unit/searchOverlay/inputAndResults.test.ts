@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
+import { pressComposingEnter } from "../../helpers/keyEvents";
 import { createSearchOverlay } from "../../../src/components/SearchOverlay";
 import { setDmChannels } from "../../../src/stores/dm.store";
 import { setMembers } from "../../../src/stores/members.store";
@@ -371,14 +372,7 @@ describe("createSearchOverlay", () => {
         "test",
       );
 
-      input.dispatchEvent(
-        new KeyboardEvent("keydown", {
-          key: "Enter",
-          isComposing: true,
-          bubbles: true,
-          cancelable: true,
-        }),
-      );
+      pressComposingEnter(input);
       input.dispatchEvent(
         new KeyboardEvent("keydown", { key: "Escape", keyCode: 229, bubbles: true }),
       );

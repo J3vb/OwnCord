@@ -1,6 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
 import * as mocks from "../../helpers/mainPageMocks";
-import { createMainPage } from "../../../src/pages/MainPage";
 import { channelsStore } from "../../../src/stores/channels.store";
 import { uiStore } from "../../../src/stores/ui.store";
 import { voiceStore } from "../../../src/stores/voice.store";
@@ -21,7 +20,7 @@ import {
   FakeWsClient,
   finishCallJoin,
   fakeWs,
-  useMainPageHarness,
+  useWiredMainPage,
   mountPage,
   voiceUser,
   connectedDm,
@@ -67,20 +66,12 @@ function makeGroupWithDan(status: "online" | "offline"): void {
 }
 
 describe("MainPage — video grid, DM profile panel, calls, settings", () => {
-  let container: HTMLDivElement;
-  let page: ReturnType<typeof createMainPage>;
-
-  useMainPageHarness({
-    wired: (c) => {
-      container = c;
-    },
-    currentPage: () => page,
-  });
+  const m = useWiredMainPage();
 
   it("tells the caller when the callee declines, and Ring again rings once more", async () => {
     const ws = fakeWs();
     connectedDm(50);
-    page = await mountSettled(container, ws);
+    m.page = await mountSettled(m.container, ws);
 
     startCall();
     finishCallJoin();
@@ -90,7 +81,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     callDeclined(ws);
     expect(panel.dataset.state).toBe("unanswered");
     // The panel is the caller's feedback while the DM is open: no toast too.
-    expect(container.querySelector('[data-testid="toast"]')).toBeNull();
+    expect(m.container.querySelector('[data-testid="toast"]')).toBeNull();
 
     vi.mocked(ws.send).mockClear();
     // Past the server's 3s ring window plus slack, so the redial goes out at once.
@@ -101,14 +92,14 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect(panel.dataset.state).toBe("outgoing");
 
     // The call timer is the page's to stop.
-    page.destroy?.();
+    m.page.destroy?.();
   });
 
   it("a group call is declined once every online callee declined; offline members are not waited on", async () => {
     const ws = fakeWs();
     connectedDm(50);
     makeGroupWithDan("offline");
-    page = await mountSettled(container, ws);
+    m.page = await mountSettled(m.container, ws);
 
     startCall();
     finishCallJoin();
@@ -117,14 +108,14 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
 
     callDeclined(ws);
     expect(panel.dataset.state).toBe("unanswered");
-    page.destroy?.();
+    m.page.destroy?.();
   });
 
   it("Ring again in a connected group call with a member missing re-rings the group without a Calling… state (3B-8)", async () => {
     const ws = fakeWs();
     connectedDm(50);
     makeGroupWithDan("online");
-    page = await mountSettled(container, ws);
+    m.page = await mountSettled(m.container, ws);
 
     // Alice and bob are in the room; dan is not.
     voiceStore.setState((prev) => ({
@@ -157,7 +148,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect(ws.send).toHaveBeenCalledWith({ type: "call_ring", payload: { channel_id: 50 } });
     // Bob is in the call: no ringing state is started over a live call.
     expect(panel.dataset.state).toBe("connected");
-    page.destroy?.();
+    m.page.destroy?.();
   });
 
   it("calling an offline 1:1 contact says so at once instead of ringing back for 30 s", async () => {
@@ -170,7 +161,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
         participants: c.participants.map((p) => ({ ...p, status: "offline" })),
       })),
     }));
-    page = await mountSettled(container, ws);
+    m.page = await mountSettled(m.container, ws);
     vi.mocked(startRingback).mockClear();
 
     startCall();
@@ -181,7 +172,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect(startRingback).not.toHaveBeenCalled();
     // Still rung: an invisible contact is shown offline but can still answer.
     expect(ws.send).toHaveBeenCalledWith({ type: "call_ring", payload: { channel_id: 50 } });
-    page.destroy?.();
+    m.page.destroy?.();
   });
 
   describe("ringing the callee", () => {
@@ -199,7 +190,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     async function mountCaller(): Promise<{ ws: FakeWsClient; panel: HTMLElement }> {
       const ws = fakeWs();
       connectedDm(50);
-      page = await mountSettled(container, ws);
+      m.page = await mountSettled(m.container, ws);
       return { ws, panel: callPanelEl() };
     }
 
@@ -212,7 +203,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
       finishCallJoin();
       expect(rings(ws)).toHaveLength(1);
       expect(voiceStore.getState().currentChannelId).toBe(50);
-      page.destroy?.();
+      m.page.destroy?.();
     });
 
     it("does not ring while the join is still securing or connecting", async () => {
@@ -224,7 +215,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
 
       finishCallJoin();
       expect(rings(ws)).toHaveLength(1);
-      page.destroy?.();
+      m.page.destroy?.();
     });
 
     it("drops a delayed Ring again when the caller leaves the call", async () => {
@@ -240,7 +231,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
 
         vi.advanceTimersByTime(5000);
         expect(rings(ws)).toHaveLength(1);
-        page.destroy?.();
+        m.page.destroy?.();
       });
     });
 
@@ -252,7 +243,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
 
       expect(rings(ws)).toHaveLength(0);
       expect(panel.dataset.state).not.toBe("outgoing");
-      page.destroy?.();
+      m.page.destroy?.();
     });
 
     it("a second Call 1 s after a ring waits for the server's 3 s window", async () => {
@@ -273,7 +264,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
         vi.advanceTimersByTime(1);
         expect(rings(ws)).toHaveLength(2);
         expect(panel.dataset.state).toBe("outgoing");
-        page.destroy?.();
+        m.page.destroy?.();
       });
     });
 
@@ -286,7 +277,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
 
         vi.advanceTimersByTime(5000);
         expect(rings(ws)).toHaveLength(1);
-        page.destroy?.();
+        m.page.destroy?.();
       });
     });
 
@@ -301,7 +292,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
 
         vi.advanceTimersByTime(5000);
         expect(rings(ws)).toHaveLength(1);
-        page.destroy?.();
+        m.page.destroy?.();
       });
     });
 
@@ -314,7 +305,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
         expect(rings(ws)).toHaveLength(1);
         vi.advanceTimersByTime(500);
         expect(rings(ws)).toHaveLength(2);
-        page.destroy?.();
+        m.page.destroy?.();
       });
     });
 
@@ -331,7 +322,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
       expect(panel.dataset.state).toBe("outgoing");
       ws.emit("error", { code: "RATE_LIMITED", message: "too many call attempts" }, "ring-id");
       expect(panel.dataset.state).not.toBe("outgoing");
-      page.destroy?.();
+      m.page.destroy?.();
     });
 
     it("drops a waiting ring when the caller leaves before it fires", async () => {
@@ -342,17 +333,17 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
 
         vi.advanceTimersByTime(5000);
         expect(rings(ws)).toHaveLength(1);
-        page.destroy?.();
+        m.page.destroy?.();
       });
     });
   });
 
-  it("a ring refused because the callee has not accepted ends the outgoing call at once", async () => {
+  /** Mounts with a connected DM, starts a call and returns its panel, ringing; the socket is left in `ringWs`. */
+  async function mountRinging(): Promise<HTMLElement> {
     const ws = fakeWs();
     connectedDm(50);
-    page = await mountSettled(container, ws);
+    m.page = await mountSettled(m.container, ws);
     vi.mocked(stopRingback).mockClear();
-
     vi.mocked(ws.send).mockImplementation((m) =>
       (m as { type: string }).type === "call_ring" ? "ring-id" : "id",
     );
@@ -360,6 +351,14 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     finishCallJoin();
     const panel = callPanelEl();
     expect(panel.dataset.state).toBe("outgoing");
+    ringWs = ws;
+    return panel;
+  }
+  let ringWs: ReturnType<typeof fakeWs>;
+
+  it("a ring refused because the callee has not accepted ends the outgoing call at once", async () => {
+    const panel = await mountRinging();
+    const ws = ringWs;
 
     const refusal = {
       code: "CALL_REQUIRES_ACCEPTANCE",
@@ -376,27 +375,10 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect(stopRingback).toHaveBeenCalledTimes(1);
     expect(panel.dataset.state).not.toBe("outgoing");
     expect(panel.dataset.state).not.toBe("unanswered");
-    page.destroy?.();
+    m.page.destroy?.();
   });
 
   describe("any error answering the ring ends the outgoing call", () => {
-    async function mountRinging(): Promise<HTMLElement> {
-      const ws = fakeWs();
-      connectedDm(50);
-      page = await mountSettled(container, ws);
-      vi.mocked(stopRingback).mockClear();
-      vi.mocked(ws.send).mockImplementation((m) =>
-        (m as { type: string }).type === "call_ring" ? "ring-id" : "id",
-      );
-      startCall();
-      finishCallJoin();
-      const panel = callPanelEl();
-      expect(panel.dataset.state).toBe("outgoing");
-      ringWs = ws;
-      return panel;
-    }
-    let ringWs: ReturnType<typeof fakeWs>;
-
     it.each(["FORBIDDEN", "TIMED_OUT", "VOICE_ERROR", "INTERNAL"])(
       "%s answering the ring stops the ringback and clears Calling",
       async (code) => {
@@ -407,7 +389,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
         expect(stopRingback).toHaveBeenCalledTimes(1);
         expect(panel.dataset.state).not.toBe("outgoing");
         expect(panel.dataset.state).not.toBe("unanswered");
-        page.destroy?.();
+        m.page.destroy?.();
       },
     );
 
@@ -418,14 +400,14 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
 
       expect(stopRingback).not.toHaveBeenCalled();
       expect(panel.dataset.state).toBe("outgoing");
-      page.destroy?.();
+      m.page.destroy?.();
     });
   });
 
   it("a callee's decline while the caller is on another channel shows one toast", async () => {
     const ws = fakeWs();
     connectedDm(50);
-    page = await mountSettled(container, ws);
+    m.page = await mountSettled(m.container, ws);
     vi.mocked(startRingback).mockClear();
     vi.mocked(stopRingback).mockClear();
 
@@ -439,17 +421,17 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     callDeclined(ws);
 
     expect(stopRingback).toHaveBeenCalledTimes(1);
-    const toasts = container.querySelectorAll('[data-testid="toast"]');
+    const toasts = m.container.querySelectorAll('[data-testid="toast"]');
     expect(toasts).toHaveLength(1);
     expect(toasts[0]!.textContent).toContain("bob declined");
 
-    page.destroy?.();
+    m.page.destroy?.();
   });
 
   it("an unanswered ring while the caller is on another channel shows one 'No answer' toast", async () => {
     const ws = fakeWs();
     connectedDm(50);
-    page = await mountSettled(container, ws);
+    m.page = await mountSettled(m.container, ws);
 
     // Catch the outgoing call's own 30s window and run it by hand.
     const realSetTimeout = globalThis.setTimeout;
@@ -473,11 +455,11 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     ringTimeout!();
 
     expect(stopRingback).toHaveBeenCalled();
-    const toasts = container.querySelectorAll('[data-testid="toast"]');
+    const toasts = m.container.querySelectorAll('[data-testid="toast"]');
     expect(toasts).toHaveLength(1);
     expect(toasts[0]!.textContent).toContain("No answer");
 
-    page.destroy?.();
+    m.page.destroy?.();
   });
 
   it("redialing from inside a live call rings but leaves no outgoing ring behind", async () => {
@@ -491,7 +473,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
       voiceUsers: roster(50, [alice, bob]),
     }));
     voiceStore.flush();
-    page = await mountSettled(container, ws);
+    m.page = await mountSettled(m.container, ws);
 
     startCall();
     expect(ws.send).toHaveBeenCalledWith({ type: "call_ring", payload: { channel_id: 50 } });
@@ -504,7 +486,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     voiceStore.flush();
     expect(panel.dataset.state).toBe("connected");
 
-    page.destroy?.();
+    m.page.destroy?.();
   });
 
   it("shows the caller's nickname on the incoming-call banner, not the raw username", () => {
@@ -528,7 +510,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
       roleRevision: 0,
     }));
 
-    page = mountPage(container, ws);
+    m.page = mountPage(m.container, ws);
 
     // Alice (10) has set a nickname of "Ali" -- every other identity surface
     // (voice roster, member list, DM header) resolves through it, so the
@@ -543,7 +525,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     const ws = fakeWs();
     uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
 
-    page = mountPage(container, ws);
+    m.page = mountPage(m.container, ws);
 
     ws.emit("call_incoming", { channel_id: 50, from_user: 999, username: "stranger" });
 
@@ -555,7 +537,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     const ws = fakeWs();
     uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
 
-    page = mountPage(container, ws);
+    m.page = mountPage(m.container, ws);
 
     // Alice (10) rings a group DM; this client is a third participant.
     incomingCall(ws);
@@ -583,7 +565,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     const ws = fakeWs();
     uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
 
-    page = mountPage(container, ws);
+    m.page = mountPage(m.container, ws);
 
     // Alice (10) rings this client's DM (channel 50).
     incomingCall(ws);
@@ -613,7 +595,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     const ws = fakeWs();
     uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
 
-    page = mountPage(container, ws);
+    m.page = mountPage(m.container, ws);
 
     // Alice (10) rings a group DM (channel 50); this client is a third
     // participant (C).
@@ -642,7 +624,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   it("stops a group ring when the last person leaves after the ringer did", () => {
     const ws = fakeWs();
     uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
-    page = mountPage(container, ws);
+    m.page = mountPage(m.container, ws);
     incomingCall(ws);
     const banner = incomingBannerEl();
 
@@ -669,7 +651,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     const ws = fakeWs();
     uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
 
-    page = mountPage(container, ws);
+    m.page = mountPage(m.container, ws);
 
     incomingCall(ws);
     const banner = incomingBannerEl();
@@ -686,7 +668,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
 
   it("a ring raises one call alert, and a redial of the same ring none", async () => {
     const ws = fakeWs();
-    page = mountPage(container, ws);
+    m.page = mountPage(m.container, ws);
     vi.mocked(alertIncomingCall).mockClear();
 
     incomingCall(ws);
@@ -701,7 +683,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
 
   it("a ring that times out reports one missed call; one the ringer cancelled reports none", async () => {
     const ws = fakeWs();
-    page = mountPage(container, ws);
+    m.page = mountPage(m.container, ws);
     vi.mocked(alertMissedCall).mockClear();
     vi.mocked(alertIncomingCall).mockClear();
 
@@ -756,7 +738,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     it("is cancelled with no missed call when the group leaves dmStore", async () => {
       const ws = fakeWs();
       dmStore.setState(() => ({ channels: [groupRow(50)] }));
-      page = mountPage(container, ws);
+      m.page = mountPage(m.container, ws);
       vi.mocked(alertMissedCall).mockClear();
       vi.mocked(alertIncomingCall).mockClear();
 
@@ -775,7 +757,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     it("is not cancelled by dmStore changes while its channel was never listed", async () => {
       const ws = fakeWs();
       dmStore.setState(() => ({ channels: [groupRow(60)] }));
-      page = mountPage(container, ws);
+      m.page = mountPage(m.container, ws);
       vi.mocked(alertIncomingCall).mockClear();
 
       // The ring beats its dm_channel_open: channel 50 is not in dmStore yet.
@@ -798,7 +780,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     saveUserStatus("dnd");
     try {
       const ws = fakeWs();
-      page = mountPage(container, ws);
+      m.page = mountPage(m.container, ws);
 
       incomingCall(ws);
 
@@ -815,7 +797,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     voiceStore.setState((prev) => ({ ...prev, currentChannelId: 50 }));
     voiceStore.flush();
 
-    page = mountPage(container, ws);
+    m.page = mountPage(m.container, ws);
     vi.mocked(startRingChime).mockClear();
 
     // Someone else in the call redials the DM: the server rings everyone
@@ -828,28 +810,28 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   });
 
   it("clears settingsOpen on destroy so the next page (e.g. ConnectPage after logout) doesn't inherit a stale open overlay", () => {
-    page = mountPage(container);
+    m.page = mountPage(m.container);
 
     uiStore.setState((prev) => ({ ...prev, settingsOpen: true }));
 
-    page.destroy?.();
+    m.page.destroy?.();
 
     expect(uiStore.getState().settingsOpen).toBe(false);
   });
 
   it("scopes per-user volume prefs to the connected host, like channel mutes and the NSFW gate", () => {
-    page = mountPage(container);
+    m.page = mountPage(m.container);
 
     expect(mockSetAudioVolumeHost).toHaveBeenCalledWith("");
   });
 
   it("closes an open image lightbox on destroy so it doesn't survive onto the next page", () => {
-    page = mountPage(container);
+    m.page = mountPage(m.container);
 
     openImageLightbox("https://example.com/pic.png", "pic");
     expect(document.body.querySelector(".image-lightbox")).not.toBeNull();
 
-    page.destroy?.();
+    m.page.destroy?.();
 
     expect(document.body.querySelector(".image-lightbox")).toBeNull();
   });

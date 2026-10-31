@@ -1,7 +1,8 @@
 // "Chat bar buttons" (Settings → Text & Images): each composer button the user
 // switches off leaves the bar at once, and switching it back on never shows a
 // button the server or host left out.
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
 import { createMessageInput } from "@components/MessageInput";
 import { savePref } from "@lib/prefs/preferences";
 import { applyReadyCapabilities, resetServerCapabilities } from "@lib/net/serverCapabilities";
@@ -41,20 +42,22 @@ function mountComposer() {
 const btn = (b: ComposerButton): HTMLButtonElement | null =>
   container.querySelector<HTMLButtonElement>(SELECTOR[b]);
 
+useMountContainer(
+  (c) => {
+    container = c;
+  },
+  () => {
+    for (const comp of made.splice(0)) comp.destroy?.();
+    resetServerCapabilities();
+    authStore.setState((s) => ({ ...s, uploadPolicy: null }));
+    localStorage.clear();
+  },
+);
+
 beforeEach(() => {
   localStorage.clear();
   applyReadyCapabilities({ stickers: true, polls: true, voice_messages: true });
   authStore.setState((s) => ({ ...s, uploadPolicy: { max_upload_bytes: 10 * 1024 * 1024 } }));
-  container = document.createElement("div");
-  document.body.appendChild(container);
-});
-
-afterEach(() => {
-  for (const comp of made.splice(0)) comp.destroy?.();
-  container.remove();
-  resetServerCapabilities();
-  authStore.setState((s) => ({ ...s, uploadPolicy: null }));
-  localStorage.clear();
 });
 
 describe("chat bar button settings", () => {

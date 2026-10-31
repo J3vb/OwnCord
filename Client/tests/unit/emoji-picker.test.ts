@@ -9,6 +9,8 @@ import {
   onTestFinished,
   type Mock,
 } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
+import { pressComposingEnter } from "../helpers/keyEvents";
 import { createEmojiPicker } from "@components/EmojiPicker";
 import { quickReactionEmoji } from "@components/message-list/quickReactions";
 import type { EmojiPickerOptions } from "@components/EmojiPicker";
@@ -44,17 +46,17 @@ describe("EmojiPicker", () => {
     await loadEmojiCatalog();
   });
 
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => localStorage.clear(),
+  );
+
   beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
     localStorage.clear();
     clearCustomEmoji();
     emojiStore.flush();
-  });
-
-  afterEach(() => {
-    container.remove();
-    localStorage.clear();
   });
 
   function makePicker(overrides?: Partial<EmojiPickerOptions>) {
@@ -451,14 +453,7 @@ describe("EmojiPicker", () => {
     const onSelect = vi.fn();
     const { picker } = makePicker({ onSelect });
     const input = searchFor(picker, "smile");
-    input.dispatchEvent(
-      new KeyboardEvent("keydown", {
-        key: "Enter",
-        isComposing: true,
-        bubbles: true,
-        cancelable: true,
-      }),
-    );
+    pressComposingEnter(input);
 
     expect(onSelect).not.toHaveBeenCalled();
     picker.destroy();

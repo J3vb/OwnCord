@@ -448,6 +448,15 @@ async function resetBrowserMeters(page: import("@playwright/test").Page) {
   });
 }
 
+/** `runNativePeer`, with every event the peer reports collected in `events`. */
+function runCollectingPeer(args: string[]) {
+  const events: NativeLine["event"][] = [];
+  const peer = runNativePeer(args, ({ event }) => {
+    events.push(event);
+  });
+  return { peer, events };
+}
+
 /** Joins the browser peer as user-1 under a fresh key; returns the room's key and URL. */
 async function joinRoom(
   page: import("@playwright/test").Page,
@@ -1072,8 +1081,7 @@ test("a native screen share's audio decodes in the browser and survives a video 
 }) => {
   const { key, url } = await joinRoom(page);
 
-  const events: Array<Record<string, unknown> & { type: string }> = [];
-  const peer = runNativePeer(
+  const { peer, events } = runCollectingPeer(
     nativePeerArgs(
       url,
       key,
@@ -1085,9 +1093,6 @@ test("a native screen share's audio decodes in the browser and survives a video 
       "3",
       "--republish-screen",
     ),
-    ({ event }) => {
-      events.push(event);
-    },
   );
   const audio = "user-2#screenaudio";
   await expect
@@ -1168,14 +1173,10 @@ test("a native share's audio reaches the browser as stereo with the channels apa
 }) => {
   const key = randomBytes(32).toString("base64");
   const url = `ws://127.0.0.1:${livekitPort}`;
-  const events: Array<Record<string, unknown> & { type: string }> = [];
   await joinBrowserPeer(page, url, joinToken("user-1"), key);
 
-  const peer = runNativePeer(
+  const { peer, events } = runCollectingPeer(
     nativePeerArgs(url, key, 25, "--screen", "1280x720", "--screen-audio"),
-    ({ event }) => {
-      events.push(event);
-    },
   );
   await expect
     .poll(async () => (await readBrowserPeer(page, "user-2#screenaudio")).samples, {
@@ -1290,8 +1291,7 @@ test("a native share's audio reaches the browser as stereo with the channels apa
 test("a native share changes quality live and keeps decoding in the browser", async ({ page }) => {
   const { key, url } = await joinRoom(page);
 
-  const events: Array<Record<string, unknown> & { type: string }> = [];
-  const peer = runNativePeer(
+  const { peer, events } = runCollectingPeer(
     nativePeerArgs(
       url,
       key,
@@ -1302,9 +1302,6 @@ test("a native share changes quality live and keeps decoding in the browser", as
       "--screen-quality-after",
       "8",
     ),
-    ({ event }) => {
-      events.push(event);
-    },
   );
   await waitForVideoSubscribed(page, "user-2#screen");
   // The share audio, subscribed before the change (it is published at once;

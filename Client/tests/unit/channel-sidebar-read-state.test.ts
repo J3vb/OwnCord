@@ -13,22 +13,9 @@ vi.mock("@lib/net/e2eeCrypto", () => mocks.inertE2eeCryptoMock());
 import { createChannelSidebar } from "../../src/components/ChannelSidebar";
 import { channelsStore, setChannels } from "../../src/stores/channels.store";
 import { setMarkReadSender } from "@lib/readState";
-import type { ReadyChannel } from "../../src/lib/types";
+import { readStateChannels } from "../helpers/sidebarAreaOpts";
 
-const CHANNELS: ReadyChannel[] = [
-  {
-    id: 1,
-    name: "general",
-    type: "text",
-    category: "Text Channels",
-    position: 0,
-    unread_count: 3,
-    mention_count: 1,
-  },
-  { id: 2, name: "random", type: "text", category: "Text Channels", position: 1, unread_count: 0 },
-  { id: 3, name: "lobby", type: "voice", category: "Voice Channels", position: 0 },
-  { id: 4, name: "feedback", type: "forum", category: "Text Channels", position: 2 },
-];
+const CHANNELS = readStateChannels();
 
 describe("ChannelSidebar — mark as read", () => {
   let container: HTMLDivElement;

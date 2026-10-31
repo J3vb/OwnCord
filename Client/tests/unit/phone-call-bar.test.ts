@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { usePhone } from "../helpers/phoneMedia";
 import { makeDm } from "../helpers/dmHarness";
 import { addVoiceUser } from "../helpers/voiceUsers";
 import { createPhoneCallBar, type PhoneCallBar } from "../../src/components/PhoneCallBar";
@@ -36,13 +37,6 @@ function flush(): void {
   channelsStore.flush();
   dmStore.flush();
   membersStore.flush();
-}
-
-function usePhone(on: boolean): void {
-  vi.stubGlobal(
-    "matchMedia",
-    vi.fn((q: string) => ({ matches: on && q.includes("pointer: coarse") })),
-  );
 }
 
 describe("PhoneCallBar", () => {

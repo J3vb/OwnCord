@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { useMountContainer } from "../../helpers/mountContainer";
 import "../../helpers/memberListMocks";
 import { createMemberList } from "@components/MemberList";
 import type { MemberListOptions } from "@components/MemberList";
@@ -6,7 +7,8 @@ import { membersStore, updatePresence, updateMemberRole } from "@stores/members.
 import type { Member } from "@stores/members.store";
 import { authStore } from "@stores/auth.store";
 import { channelsStore, setRoles, type Channel } from "@stores/channels.store";
-import { resetVoiceStore, updateVoiceState } from "@stores/voice.store";
+import { resetVoiceStore } from "@stores/voice.store";
+import { addVoiceUser } from "../../helpers/voiceUsers";
 import { setMemberTimeouts } from "../../../src/features/moderation/store";
 import { claimComposer } from "../../../src/features/messaging/activeComposer";
 import { Permission } from "../../../src/lib/types";
@@ -69,35 +71,28 @@ describe("MemberList full context menu (3C-3)", () => {
     makeChannelRow({ id, name: `ch-${id}`, type });
 
   function putInVoice(userId: number, channelId: number): void {
-    updateVoiceState({
-      channel_id: channelId,
-      user_id: userId,
-      username: `u${userId}`,
-      muted: false,
-      deafened: false,
-      speaking: false,
-      camera: false,
-      screenshare: false,
-    });
+    addVoiceUser(channelId, userId, `u${userId}`);
   }
+
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => {
+      list?.destroy?.();
+      list = null;
+      document.body.querySelectorAll(".context-menu").forEach((el) => el.remove());
+      setMemberTimeouts(undefined);
+      resetVoiceStore();
+      resetStore();
+    },
+  );
 
   beforeEach(() => {
     resetStore();
     seedRanks();
     setMemberTimeouts(undefined);
     resetVoiceStore();
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    list?.destroy?.();
-    list = null;
-    document.body.querySelectorAll(".context-menu").forEach((el) => el.remove());
-    container.remove();
-    setMemberTimeouts(undefined);
-    resetVoiceStore();
-    resetStore();
   });
 
   // (13)

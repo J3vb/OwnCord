@@ -16,6 +16,7 @@ import type { DmChannel } from "../../src/stores/dm.store";
 import { dmRecipient, makeDm, resetDmAndUiState } from "../helpers/dmHarness";
 import { resetMembersState } from "../helpers/storeResets";
 import { resetChannelsState } from "../helpers/storeSeeds";
+import { makeChannel } from "../helpers/channelFactory";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -40,21 +41,7 @@ function seedChannel(
 ): void {
   channelsStore.setState((prev) => {
     const next = new Map(prev.channels);
-    next.set(channel.id, {
-      ...channel,
-      category: null,
-      position: 0,
-      unreadCount: 0,
-      mentionCount: 0,
-      lastMessageId: null,
-      canSend: true,
-      topic: "",
-      slowMode: 0,
-      nsfw: false,
-      isPrivate: false,
-      voiceMaxUsers: 0,
-      voiceMaxVideo: 0,
-    });
+    next.set(channel.id, makeChannel(channel));
     return activeChannelId === undefined
       ? { ...prev, channels: next }
       : { ...prev, channels: next, activeChannelId };

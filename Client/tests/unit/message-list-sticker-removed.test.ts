@@ -4,7 +4,8 @@
  * and the patch path removes the row, regroups its neighbour and holds the
  * reader's place.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
 
 vi.mock("../../src/features/messaging/content/attachments", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../src/features/messaging/content/attachments")>()),
@@ -13,8 +14,7 @@ vi.mock("../../src/features/messaging/content/attachments", async (importOrigina
 
 import { createMessageList } from "@components/MessageList";
 import { messagesStore, markStickersDeleted } from "@stores/messages.store";
-import type { Message } from "@stores/messages.store";
-import { buildMessage } from "../helpers/messageFactory";
+import { buildMinuteMessage } from "../helpers/messageFactory";
 import {
   makeListOptions,
   resetStoresAndChannels,
@@ -23,29 +23,25 @@ import {
 import "../helpers/resizeObserverStub";
 
 const CHANNEL_ID = 1;
-const ME = { id: 1, username: "Alice", avatar: null };
 
-function makeMessage(overrides: Partial<Message> & { id: number }): Message {
-  return buildMessage(overrides, {
-    channelId: CHANNEL_ID,
-    user: ME,
-    timestamp: new Date(Date.UTC(2024, 0, 15, 12, overrides.id)).toISOString(),
-  });
-}
+const makeMessage = buildMinuteMessage;
 
 describe("MessageList — a removed sticker leaves loaded rows", () => {
   let container: HTMLDivElement;
   let list: ReturnType<typeof createMessageList> | null = null;
 
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => {
+      list?.destroy?.();
+      list = null;
+    },
+  );
+
   beforeEach(() => {
     resetStoresAndChannels();
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-  afterEach(() => {
-    list?.destroy?.();
-    list = null;
-    container.remove();
   });
 
   it("turns the row into 'Deleted sticker: name' and keeps the survivors", async () => {

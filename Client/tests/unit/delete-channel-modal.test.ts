@@ -1,4 +1,5 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
 import { createDeleteChannelModal } from "@components/DeleteChannelModal";
 import type { DeleteChannelModalOptions } from "@components/DeleteChannelModal";
 import {
@@ -18,15 +19,16 @@ import {
 describe("DeleteChannelModal", () => {
   let container: HTMLDivElement;
 
-  beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    container.remove();
-    document.querySelectorAll("[data-testid='delete-channel-modal']").forEach((el) => el.remove());
-  });
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => {
+      document
+        .querySelectorAll("[data-testid='delete-channel-modal']")
+        .forEach((el) => el.remove());
+    },
+  );
 
   function makeModal(overrides?: Partial<DeleteChannelModalOptions>) {
     const options: DeleteChannelModalOptions = {

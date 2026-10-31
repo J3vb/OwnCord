@@ -77,6 +77,15 @@ afterEach(() => {
   dom = undefined;
 });
 
+/** Clicks Edit on member `id`'s row and returns the dialog it opens. */
+async function openEditUser(env: Awaited<ReturnType<typeof boot>>, id: number) {
+  (
+    env.doc.querySelector(`[data-action="openEditUser"][data-args^="[${id},"]`) as HTMLElement
+  ).click();
+  await env.settle();
+  return env.doc.getElementById("modalInner")!;
+}
+
 describe("Server/admin/static — Members", () => {
   it("searches, filters by role and lists bans on the server, keeping focus in the search box", async () => {
     const calls: string[] = [];
@@ -474,16 +483,6 @@ describe("Server/admin/static — Members", () => {
       role_position: 80,
       is_owner: false,
     };
-    const manage = async (
-      env: Awaited<ReturnType<typeof boot>>,
-      id: number,
-    ): Promise<HTMLElement> => {
-      (
-        env.doc.querySelector(`[data-action="openEditUser"][data-args^="[${id},"]`) as HTMLElement
-      ).click();
-      await env.settle();
-      return env.doc.getElementById("modalInner")!;
-    };
     const chips = (el: Element) =>
       [...el.querySelectorAll(".role-chip .role-chip-name")].map((c) => c.textContent);
 
@@ -502,7 +501,7 @@ describe("Server/admin/static — Members", () => {
       await env.show(ME);
       expect(env.doc.querySelector("tbody tr td.col-role")!.textContent).toBe("Member");
 
-      const body = await manage(env, 4);
+      const body = await openEditUser(env, 4);
       expect(chips(body)).toEqual(["Member"]);
       // Only roles below the actor's own (80) and not already held are offered.
       const sel = body.querySelector("#editRoleSelect") as HTMLSelectElement;
@@ -549,7 +548,7 @@ describe("Server/admin/static — Members", () => {
       await env.show(ME);
       expect(env.doc.querySelector("tbody tr td.col-role")!.textContent).toBe("ModeratorMember");
 
-      let body = await manage(env, 4);
+      let body = await openEditUser(env, 4);
       expect(body.querySelectorAll('[data-action="removeMemberRole"]')).toHaveLength(2);
       (
         body.querySelector('[data-action="removeMemberRole"][data-args="[4,3]"]') as HTMLElement
@@ -574,7 +573,7 @@ describe("Server/admin/static — Members", () => {
         return {};
       });
       await env.show(ME);
-      const body = await manage(env, 4);
+      const body = await openEditUser(env, 4);
       expect(chips(body)).toEqual(["Admin", "Member"]);
       const removers = [...body.querySelectorAll('[data-action="removeMemberRole"]')];
       expect(removers.map((b) => b.getAttribute("data-args"))).toEqual(["[4,4]"]);
@@ -593,16 +592,6 @@ describe("Server/admin/static — Members", () => {
       role_position: 40,
       ...extra,
     });
-    const open = async (
-      env: Awaited<ReturnType<typeof boot>>,
-      id: number,
-    ): Promise<HTMLElement> => {
-      (
-        env.doc.querySelector(`[data-action="openEditUser"][data-args^="[${id},"]`) as HTMLElement
-      ).click();
-      await env.settle();
-      return env.doc.getElementById("modalInner")!;
-    };
     const input = (body: HTMLElement) => body.querySelector("#memberNickInput") as HTMLInputElement;
     const press = async (env: Awaited<ReturnType<typeof boot>>, id: string) => {
       (env.doc.getElementById(id) as HTMLElement).click();
@@ -629,7 +618,7 @@ describe("Server/admin/static — Members", () => {
         return {};
       });
       await env.show({ ...ME, permissions: MANAGE_ROLES });
-      const body = await open(env, 4);
+      const body = await openEditUser(env, 4);
       expect(body.querySelector("#memberNickRo")!.textContent).toBe("Cap");
       expect(body.querySelector("#memberNickInput")).toBeNull();
       expect(body.querySelector('[data-action="saveMemberNickname"]')).toBeNull();
@@ -642,7 +631,7 @@ describe("Server/admin/static — Members", () => {
         return {};
       });
       await env.show(ME);
-      const body = await open(env, 4);
+      const body = await openEditUser(env, 4);
       expect(body.querySelector("#memberNickRo")!.textContent).toBe("Cap");
       expect(body.querySelector('[data-action="saveMemberNickname"]')).toBeNull();
     });
@@ -661,7 +650,7 @@ describe("Server/admin/static — Members", () => {
         sent,
       );
       await env.show(ME);
-      const body = await open(env, 4);
+      const body = await openEditUser(env, 4);
       input(body).value = "  Cap \t  Hook  ";
       await press(env, "memberNickSave");
       expect(sent.filter((x) => x.call === `PUT ${NICK_PATH}`)).toEqual([
@@ -685,7 +674,7 @@ describe("Server/admin/static — Members", () => {
         sent,
       );
       await env.show(ME);
-      const body = await open(env, 4);
+      const body = await openEditUser(env, 4);
       expect(input(body).value).toBe("Cap");
       await press(env, "memberNickReset");
       expect(sent.filter((x) => x.call === `PUT ${NICK_PATH}`)).toEqual([
@@ -708,7 +697,7 @@ describe("Server/admin/static — Members", () => {
         sent,
       );
       await env.show(ME);
-      const body = await open(env, 4);
+      const body = await openEditUser(env, 4);
       // 33 astral characters: 66 UTF-16 units, 33 code points.
       input(body).value = "\u{1F600}".repeat(33);
       await press(env, "memberNickSave");
@@ -732,7 +721,7 @@ describe("Server/admin/static — Members", () => {
         return {};
       });
       await env.show(ME);
-      const body = await open(env, 4);
+      const body = await openEditUser(env, 4);
       input(body).value = "bad";
       await press(env, "memberNickSave");
       const msg = body.querySelector("#memberNickMsg") as HTMLElement;

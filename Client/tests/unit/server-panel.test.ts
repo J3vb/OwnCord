@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { pressComposingEnter } from "../helpers/keyEvents";
 import {
   createServerPanel,
   type ServerPanelOptions,
@@ -1126,14 +1127,7 @@ describe("ServerPanel", () => {
 
       const inputs = fillAddForm("IME Server", "ime.example.com:8443");
 
-      inputs[1]!.dispatchEvent(
-        new KeyboardEvent("keydown", {
-          key: "Enter",
-          isComposing: true,
-          bubbles: true,
-          cancelable: true,
-        }),
-      );
+      pressComposingEnter(inputs[1]!);
       expect(onAddProfile).not.toHaveBeenCalled();
       inputs[1]!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
       expect(onAddProfile).toHaveBeenCalledWith("IME Server", "ime.example.com:8443");

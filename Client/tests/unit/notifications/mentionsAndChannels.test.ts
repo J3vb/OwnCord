@@ -22,6 +22,7 @@ import {
   seedBobDm,
   useNotificationsHarness,
   seedNicknamedMember,
+  freshInvokeSpies,
 } from "../../helpers/notificationsHarness";
 
 vi.mock("../../../src/lib/prefs/preferences", (importOriginal) =>
@@ -46,13 +47,7 @@ describe("notifyIncomingMessage", () => {
 
   describe("notifyMention", () => {
     async function spies() {
-      const { invoke } = await import("@tauri-apps/api/core");
-      const { getCurrentWindow } = await import("@tauri-apps/api/window");
-      const win = getCurrentWindow();
-      (invoke as ReturnType<typeof vi.fn>).mockClear();
-      (win.requestUserAttention as ReturnType<typeof vi.fn>).mockClear();
-      mockOscillator.start.mockClear();
-      return { invoke: invoke as ReturnType<typeof vi.fn>, win };
+      return freshInvokeSpies();
     }
 
     it("Nothing silences the popup, the chime and the flash", async () => {
@@ -181,13 +176,7 @@ describe("notifyIncomingMessage", () => {
     }
 
     async function spies() {
-      const { invoke } = await import("@tauri-apps/api/core");
-      const { getCurrentWindow } = await import("@tauri-apps/api/window");
-      const win = getCurrentWindow();
-      (invoke as ReturnType<typeof vi.fn>).mockClear();
-      (win.requestUserAttention as ReturnType<typeof vi.fn>).mockClear();
-      mockOscillator.start.mockClear();
-      return { invoke: invoke as ReturnType<typeof vi.fn>, win };
+      return freshInvokeSpies();
     }
 
     beforeEach(() => {

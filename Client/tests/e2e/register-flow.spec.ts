@@ -275,8 +275,11 @@ test.describe("Register Flow — Submission", () => {
 test.describe("Register Flow — Registration modes", () => {
   const notice = (page: import("@playwright/test").Page) => page.locator(".registration-notice");
 
-  test("invite mode requires an invite code", async ({ page }) => {
-    await mockRegisterSuccess(page, "invite");
+  async function submitWithoutInvite(
+    page: import("@playwright/test").Page,
+    mode?: string,
+  ): Promise<void> {
+    await mockRegisterSuccess(page, mode);
     await page.goto("/");
     await switchToRegisterMode(page);
 
@@ -288,6 +291,10 @@ test.describe("Register Flow — Registration modes", () => {
     await submitRegister(page);
 
     await expect(page.locator(".error-banner")).toContainText("Invite code is required");
+  }
+
+  test("invite mode requires an invite code", async ({ page }) => {
+    await submitWithoutInvite(page, "invite");
   });
 
   test("open mode submits without an invite code", async ({ page }) => {
@@ -337,17 +344,6 @@ test.describe("Register Flow — Registration modes", () => {
   test("an unavailable server-info still requires an invite code", async ({ page }) => {
     // No server-info route: GET returns 404, so the mode is unknown. The form
     // must not silently widen registration.
-    await mockRegisterSuccess(page);
-    await page.goto("/");
-    await switchToRegisterMode(page);
-
-    await fillRegisterForm(page, {
-      host: "localhost:8443",
-      username: "newuser",
-      password: "password123",
-    });
-    await submitRegister(page);
-
-    await expect(page.locator(".error-banner")).toContainText("Invite code is required");
+    await submitWithoutInvite(page);
   });
 });

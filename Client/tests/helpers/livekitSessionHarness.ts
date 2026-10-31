@@ -2,23 +2,12 @@ import { vi, beforeEach, afterEach } from "vitest";
 import { LiveKitSession } from "../../src/lib/voice/livekitSession";
 import { channelsStore, resetChannelsStore } from "@stores/channels.store";
 import { mockLoadPref, mockVoiceState, mockRoom } from "./livekitSessionMocks";
+import { createDeferred } from "./deferred";
 
 /** A roster in which the server still holds every membership. */
 export const membershipHeld = { get: () => ({ has: () => true }) };
 
-export function createDeferred<T>(): {
-  promise: Promise<T>;
-  resolve: (value: T | PromiseLike<T>) => void;
-  reject: (reason?: unknown) => void;
-} {
-  let resolve!: (value: T | PromiseLike<T>) => void;
-  let reject!: (reason?: unknown) => void;
-  const promise = new Promise<T>((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
-}
+export { createDeferred };
 
 export interface LiveKitSessionHarnessBinding {
   wired(session: LiveKitSession): void;

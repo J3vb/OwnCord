@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as mocks from "../../helpers/mainPageMocks";
 import { noteJoinFailed, noteJoinSucceeded } from "../../../src/features/voice/joinBackoff";
 import { savePref } from "../../../src/lib/prefs/preferences";
-import { createMainPage } from "../../../src/pages/MainPage";
 import { channelsStore, setActiveChannel } from "../../../src/stores/channels.store";
 import { uiStore } from "../../../src/stores/ui.store";
 import { voiceStore } from "../../../src/stores/voice.store";
@@ -12,7 +11,7 @@ import {
   fakeWs,
   textChannel,
   dmChannel,
-  useMainPageHarness,
+  useWiredMainPage,
   mountPage,
   seedChannels,
   mountSettled,
@@ -42,15 +41,7 @@ vi.mock("../../../src/pages/main-page/ChatArea", () => mocks.pageChatAreaMock())
 const { mockCreateSidebarArea, mockCreateChatArea, capturedChatAreaRef } = mocks;
 
 describe("MainPage — video grid, DM profile panel, calls, settings", () => {
-  let container: HTMLDivElement;
-  let page: ReturnType<typeof createMainPage>;
-
-  useMainPageHarness({
-    wired: (c) => {
-      container = c;
-    },
-    currentPage: () => page,
-  });
+  const m = useWiredMainPage();
 
   describe("DM profile panel is open by default and remembered", () => {
     const panel = (): HTMLElement | null =>
@@ -79,9 +70,9 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
           { ...oneToOneDm(72, 9, "dave"), isGroup: true, name: "group" },
         ],
       }));
-      page = mountPage(container);
+      m.page = mountPage(m.container);
       // The mocked chat area's slot is detached; focus needs it in the document.
-      container.appendChild(capturedChatAreaRef.current!.dmProfileSlot);
+      m.container.appendChild(capturedChatAreaRef.current!.dmProfileSlot);
     }
     async function settle(): Promise<void> {
       await import("@components/DmProfileSidebar");
@@ -291,7 +282,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
       ],
     }));
 
-    page = mountPage(container);
+    m.page = mountPage(m.container);
 
     const chatAreaOpts = mockCreateChatArea.mock.calls[0]![0];
     chatAreaOpts.onToggleDmProfile();
@@ -312,7 +303,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     uiStore.setState((prev) => ({ ...prev, connectionStatus: "reconnecting" }));
 
     const ws = fakeWs();
-    page = mountPage(container, ws);
+    m.page = mountPage(m.container, ws);
 
     const chatAreaOpts = mockCreateChatArea.mock.calls[0]![0];
     chatAreaOpts.onStartCall();
@@ -327,7 +318,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     const ws = fakeWs();
     uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
 
-    page = mountPage(container, ws);
+    m.page = mountPage(m.container, ws);
 
     incomingCall(ws);
 
@@ -351,7 +342,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
     noteJoinFailed();
 
-    page = mountPage(container, ws);
+    m.page = mountPage(m.container, ws);
 
     incomingCall(ws);
 
@@ -375,7 +366,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   it("Join with video on the incoming banner joins and turns the camera on once connected (3B-4)", async () => {
     const ws = fakeWs();
     uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
-    page = await mountSettled(container, ws);
+    m.page = await mountSettled(m.container, ws);
     const lk = await import("@lib/voice/livekitSession");
     vi.mocked(lk.enableCamera).mockClear();
 
@@ -388,13 +379,13 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     voiceStore.flush();
     expect(lk.enableCamera).toHaveBeenCalledTimes(1);
     vi.mocked(lk.enableCamera).mockClear();
-    page.destroy?.();
+    m.page.destroy?.();
   });
 
   it("Ctrl+Enter accepts and Escape declines a ringing call (3B-4)", () => {
     const ws = fakeWs();
     uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
-    page = mountPage(container, ws);
+    m.page = mountPage(m.container, ws);
 
     incomingCall(ws);
     // The closed Settings panel is hidden by stylesheet only, which jsdom does
@@ -410,13 +401,13 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     ws.emit("call_incoming", { channel_id: 51, from_user: 11, username: "carol" });
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", cancelable: true }));
     expect(ws.send).toHaveBeenCalledWith({ type: "call_decline", payload: { channel_id: 51 } });
-    page.destroy?.();
+    m.page.destroy?.();
   });
 
   it("a ring replaced by a ring from another channel reports the first as missed (3B-4)", async () => {
     const ws = fakeWs();
     uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
-    page = mountPage(container, ws);
+    m.page = mountPage(m.container, ws);
     vi.mocked(alertSupersededCall).mockClear();
 
     incomingCall(ws);
@@ -427,7 +418,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     ws.emit("call_incoming", { channel_id: 51, from_user: 11, username: "carol" });
     await vi.waitFor(() => expect(alertSupersededCall).toHaveBeenCalledTimes(1));
     expect(vi.mocked(alertSupersededCall).mock.calls[0]![0]).toMatchObject({ channelId: 50 });
-    page.destroy?.();
+    m.page.destroy?.();
   });
 
   it("keeps the open DM profile panel's status and name live, like the chat header does", async () => {
@@ -460,7 +451,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     dmStore.setState(() => ({
       channels: [{ ...oneToOneDm(70, 7, "bob"), name: "bob" }],
     }));
-    page = mountPage(container);
+    m.page = mountPage(m.container);
     const chatAreaOpts = mockCreateChatArea.mock.calls[0]![0];
     return {
       toggle: () => chatAreaOpts.onToggleDmProfile(),

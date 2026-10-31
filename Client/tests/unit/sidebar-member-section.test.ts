@@ -1,4 +1,5 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
 import * as voiceSession from "../helpers/voiceSessionMock";
 
 // We need to mock livekitSession before importing anything that uses auth.store
@@ -32,6 +33,7 @@ import { Permission, type UserStatus } from "../../src/lib/types";
 import { ApiClientError } from "../../src/lib/api";
 import { openBanDialogFor } from "../helpers/banDialog";
 import { resetMembersState } from "../helpers/storeResets";
+import { signInAsAdmin } from "../helpers/storeSeeds";
 import { byName } from "../helpers/tableCases";
 
 // ---------------------------------------------------------------------------
@@ -42,13 +44,7 @@ const LS_KEY_HEIGHT = "owncord:member-list-height";
 const LS_KEY_COLLAPSED = "owncord:member-list-collapsed";
 
 function resetStores(): void {
-  authStore.setState(() => ({
-    token: null,
-    user: { id: 1, username: "testuser", role: "admin", avatar: null, totp_enabled: false },
-    serverName: "Test Server",
-    motd: null,
-    isAuthenticated: true,
-  }));
+  signInAsAdmin("testuser", { token: null });
   resetMembersState();
   // Role lookups read the dispatcher-updated channels.store (see the role-source
   // unification). Seed via the same setRoles action the dispatcher calls.
@@ -127,14 +123,12 @@ describe("SidebarMemberSection", () => {
     return section;
   }
 
-  beforeEach(() => {
-    resetStores();
-    container = document.createElement("div");
-    document.body.appendChild(container);
+  useMountContainer((c) => {
+    container = c;
   });
 
-  afterEach(() => {
-    container.remove();
+  beforeEach(() => {
+    resetStores();
   });
 
   // -------------------------------------------------------------------------

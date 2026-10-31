@@ -2,6 +2,7 @@
 // commands and its `voice-shortcut` subscription. There is no legacy binding —
 // see the suite's header.
 import { vi } from "vitest";
+import { tauriEventMock } from "../../helpers/tauriEventMock";
 import type { GlobalShortcuts } from "../../../src/platform/contracts/globalShortcuts";
 import { describeGlobalShortcutsSuite } from "./globalShortcuts.suite";
 
@@ -15,14 +16,7 @@ const keyCodes = vi.hoisted(() => ({
   value: undefined as { muteVk: number; deafenVk: number } | undefined,
 }));
 
-vi.mock("@tauri-apps/api/event", () => ({
-  listen: (event: string, handler: (e: { payload: unknown }) => void) => {
-    const set = handlers.get(event) ?? new Set();
-    set.add(handler);
-    handlers.set(event, set);
-    return Promise.resolve(() => set.delete(handler));
-  },
-}));
+vi.mock("@tauri-apps/api/event", () => tauriEventMock(handlers));
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: (command: string, args?: Record<string, unknown>) => {
@@ -70,7 +64,7 @@ describeGlobalShortcutsSuite(async () => {
       lastArgs: (command: string) => lastArgs.get(command),
       async emitsStatus(payload: unknown) {
         for (let i = 0; i < 8; i++) await Promise.resolve();
-        for (const handler of [...(handlers.get("global-keys-changed") ?? [])])
+        for (const handler of Array.from(handlers.get("global-keys-changed") ?? []))
           handler({ payload });
         // The payload is narrowed in a lazily imported module; let it settle.
         await new Promise((resolve) => setTimeout(resolve, 0));

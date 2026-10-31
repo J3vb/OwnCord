@@ -41,7 +41,7 @@ import type { MessageListOptions } from "@components/MessageList";
 import { messagesStore } from "@stores/messages.store";
 import type { Message } from "@stores/messages.store";
 import { setChannels, setActiveChannel } from "@stores/channels.store";
-import { resetMembersState } from "../helpers/storeResets";
+import { resetMembersState, resetMessagesState } from "../helpers/storeResets";
 import "../helpers/resizeObserverStub";
 import { makeListOptions, stubTallRowLayout } from "../helpers/messageListHarness";
 import { buildMessage } from "../helpers/messageFactory";
@@ -109,14 +109,7 @@ describe("MessageList — a history page keeps the rendered rows", () => {
   };
 
   beforeEach(() => {
-    messagesStore.setState(() => ({
-      messagesByChannel: new Map(),
-      pendingSends: new Map(),
-      loadedChannels: new Set(),
-      hasMore: new Map([[CHANNEL_ID, true]]),
-      historyLoadState: new Map(),
-      detachedChannels: new Set(),
-    }));
+    resetMessagesState({ hasMore: new Map([[CHANNEL_ID, true]]) });
     resetMembersState();
     setChannels([]);
     setActiveChannel(null);

@@ -1,4 +1,5 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
 import { createEditChannelModal } from "@components/EditChannelModal";
 import { ApiClientError } from "@lib/api";
 import { applyReadyCapabilities, resetServerCapabilities } from "@lib/net/serverCapabilities";
@@ -165,17 +166,20 @@ describe("mergeRemote keeps another admin's edits to tags this admin left alone"
 
 describe("Forum settings section in Edit Channel", () => {
   let container: HTMLDivElement;
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => {
+      resetServerCapabilities();
+      document.body.replaceChildren();
+    },
+  );
+
   beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
     seedForum({}, { tags: FORUM_STATE.tags, default_auto_archive_minutes: 4320 });
     applyReadyCapabilities({ forums: true });
     signInWith(Permission.MANAGE_CHANNELS | MEMBER);
-  });
-  afterEach(() => {
-    container.remove();
-    resetServerCapabilities();
-    document.body.replaceChildren();
   });
 
   const q = <T extends HTMLElement>(id: string): T =>

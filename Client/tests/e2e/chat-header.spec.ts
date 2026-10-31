@@ -1,5 +1,5 @@
 import { test, expect } from "./fixtures";
-import { startFullSession } from "./helpers";
+import { startFullSession, useLeftMemberList } from "./helpers";
 
 test.describe("Chat Header", () => {
   test.beforeEach(async ({ page }) => {
@@ -61,9 +61,7 @@ test.describe("Chat Header", () => {
 test.describe("Chat Header — member list under the channels", () => {
   test.beforeEach(async ({ page }) => {
     // The default moved to the right column in 3C-6c; this is the left layout.
-    await page.addInitScript(() => {
-      localStorage.setItem("owncord:settings:memberListLayout", JSON.stringify("left"));
-    });
+    await useLeftMemberList(page);
     await startFullSession(page);
   });
 

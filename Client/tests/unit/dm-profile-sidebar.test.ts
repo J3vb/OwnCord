@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
 
 import { avatarAttachmentsMock } from "../helpers/avatarAttachmentsMock";
 
@@ -86,14 +87,12 @@ describe("DmProfileSidebar", () => {
     return value;
   }
 
-  beforeEach(() => {
-    fetchImageAsObjectUrl.mockReset();
-    container = document.createElement("div");
-    document.body.appendChild(container);
+  useMountContainer((c) => {
+    container = c;
   });
 
-  afterEach(() => {
-    container.remove();
+  beforeEach(() => {
+    fetchImageAsObjectUrl.mockReset();
   });
 
   // -------------------------------------------------------------------------

@@ -13,7 +13,12 @@
 // ARCH-10 stage 4 (#section history) owns, so the two do not collide.
 import { describe, it, expect, afterEach } from "vitest";
 import { JSDOM } from "jsdom";
-import { adminHtmlWithBridge, bootAdminPanel, type FetchCall } from "../helpers/adminPanelFetch";
+import {
+  adminHtmlWithBridge,
+  bootAdminPanel,
+  stubConfirm,
+  type FetchCall,
+} from "../helpers/adminPanelFetch";
 
 // Classic-script bindings never land on `window`; bridge the ones driven here.
 const BRIDGE = `<script>
@@ -54,16 +59,6 @@ async function boot(
     doc,
     modalVisible: () => doc.getElementById("modal")!.classList.contains("visible"),
   };
-}
-
-/** Replaces window.confirm and records the messages it was asked. */
-function stubConfirm(dom: JSDOM, answer: boolean): string[] {
-  const asked: string[] = [];
-  dom.window.confirm = (message?: string) => {
-    asked.push(String(message ?? ""));
-    return answer;
-  };
-  return asked;
 }
 
 function unload(dom: JSDOM): Event {

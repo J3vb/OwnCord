@@ -11,6 +11,7 @@ import {
   openDmRow,
   BASE_SESSION_ROUTES,
   startFullSession,
+  useLeftMemberList,
 } from "./helpers";
 
 test.describe("Member List", () => {
@@ -144,9 +145,7 @@ test.describe("Member List", () => {
 test.describe("Member List — under the channels", () => {
   test.beforeEach(async ({ page }) => {
     // The default moved to the right column in 3C-6c; this is the left layout.
-    await page.addInitScript(() => {
-      localStorage.setItem("owncord:settings:memberListLayout", JSON.stringify("left"));
-    });
+    await useLeftMemberList(page);
     await startFullSession(page);
   });
 

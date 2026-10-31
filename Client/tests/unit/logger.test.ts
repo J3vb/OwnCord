@@ -10,6 +10,20 @@ import {
 } from "../../src/lib/logger";
 import { expectConsole } from "../helpers/console";
 
+/** Starts each test with no stored prefs, the debug level and restored mocks, and resets both afterwards. */
+function useCleanLogLevel(): void {
+  beforeEach(() => {
+    localStorage.clear();
+    setLogLevel("debug");
+    vi.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    localStorage.clear();
+    setLogLevel("debug");
+  });
+}
+
 describe("logger", () => {
   beforeEach(() => {
     setLogLevel("debug");
@@ -187,16 +201,7 @@ describe("logger", () => {
 });
 
 describe("applyStoredLogLevel", () => {
-  beforeEach(() => {
-    localStorage.clear();
-    setLogLevel("debug");
-    vi.restoreAllMocks();
-  });
-
-  afterEach(() => {
-    localStorage.clear();
-    setLogLevel("debug");
-  });
+  useCleanLogLevel();
 
   it("falls back to the given default when no pref is stored", () => {
     const debugSpy = vi.spyOn(console, "debug").mockImplementation(() => {});
@@ -257,16 +262,7 @@ describe("applyStoredLogLevel", () => {
 });
 
 describe("log level pref-change live updates", () => {
-  beforeEach(() => {
-    localStorage.clear();
-    setLogLevel("debug");
-    vi.restoreAllMocks();
-  });
-
-  afterEach(() => {
-    localStorage.clear();
-    setLogLevel("debug");
-  });
+  useCleanLogLevel();
 
   it("applies a new logs_min_level when owncord:pref-change fires", () => {
     const debugSpy = vi.spyOn(console, "debug").mockImplementation(() => {});

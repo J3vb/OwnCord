@@ -1,4 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import { useMountContainer } from "../../helpers/mountContainer";
 import { createTypingIndicator } from "@components/TypingIndicator";
 import { membersStore, setMembers, setTyping } from "@stores/members.store";
 import type { ReadyMember } from "@lib/types";
@@ -32,16 +33,16 @@ function resetStore(): void {
 describe("TypingIndicator", () => {
   let container: HTMLDivElement;
 
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => vi.useRealTimers(),
+  );
+
   beforeEach(() => {
     vi.useFakeTimers();
     resetStore();
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-    container.remove();
   });
 
   it("renders the member's display name, not the raw username, for a single typer", () => {

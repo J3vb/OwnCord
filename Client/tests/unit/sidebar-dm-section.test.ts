@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
 import {
   createSidebarDmSection,
   type SidebarDmSectionOptions,
@@ -42,17 +43,17 @@ describe("SidebarDmSection", () => {
     return section;
   }
 
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => vi.useRealTimers(),
+  );
+
   beforeEach(() => {
     resetDmAndUiState();
     localStorage.clear();
     invalidateMuteCache();
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    container.remove();
-    vi.useRealTimers();
   });
 
   // -------------------------------------------------------------------------

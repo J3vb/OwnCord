@@ -4,6 +4,7 @@
  * waits for the asynchronous popup path to settle before asserting that
  * something did NOT happen.
  */
+import { makePayload } from "../helpers/chatPayload";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as mocks from "../helpers/notificationsMocks";
 import { makeDm } from "../helpers/dmHarness";
@@ -55,18 +56,8 @@ function activity(flags: Partial<ChannelActivityEntry> = {}): ChannelActivityEnt
   };
 }
 
-function message(overrides: Partial<ChatMessagePayload> = {}): ChatMessagePayload {
-  return {
-    id: 7,
-    channel_id: 1,
-    user: { id: 2, username: "TestUser", avatar: null },
-    content: "Hello world",
-    reply_to: null,
-    attachments: [],
-    timestamp: new Date().toISOString(),
-    ...overrides,
-  };
-}
+const message = (overrides: Partial<ChatMessagePayload> = {}): ChatMessagePayload =>
+  makePayload({ id: 7, ...overrides });
 
 interface Alerts {
   readonly popups: number;

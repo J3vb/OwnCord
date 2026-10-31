@@ -9,6 +9,7 @@ import { describe, it, expect } from "vitest";
 import {
   adminHtmlWithBridge,
   bootAdminPanel,
+  mountSettings,
   type FetchCall,
   type PanelReply as Reply,
 } from "../helpers/adminPanelFetch";
@@ -32,12 +33,6 @@ const CHANNELS = [
 
 function boot(calls: FetchCall[], respond: (path: string, method: string) => Reply) {
   return bootAdminPanel<Bridge>(ADMIN_HTML, calls, respond);
-}
-
-async function mountSettings(bridge: Bridge, doc: Document): Promise<void> {
-  const content = doc.getElementById("content");
-  if (!content) throw new Error("expected #content");
-  content.innerHTML = await bridge.renderSettings();
 }
 
 describe("Server/admin/static — Welcome messages card", () => {

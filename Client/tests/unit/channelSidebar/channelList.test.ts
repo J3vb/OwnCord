@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as mocks from "../../helpers/channelSidebarMocks";
 import { cascadedDeclaration } from "../../helpers/app-css";
 import {
@@ -31,7 +31,7 @@ import {
 import { STORAGE_PREFIX } from "@lib/prefs/preferences";
 import { setHideMutedChannels } from "@lib/prefs/hideMutedChannels";
 import {
-  useSidebarFixture,
+  useWiredSidebarFixture,
   addVoiceUser,
   testChannels,
   setAdminUser,
@@ -66,29 +66,19 @@ const channelRowIds = (container: HTMLElement): string[] =>
   );
 
 describe("ChannelSidebar", () => {
-  let container: HTMLDivElement;
-  let sidebar: ReturnType<typeof createChannelSidebar>;
-  let onVoiceJoin: Mock<(channelId: number) => void>;
-  let onOpenCall: Mock<() => void>;
-
-  useSidebarFixture(
-    (fx) => {
-      ({ container, sidebar, onVoiceJoin, onOpenCall } = fx);
-    },
-    () => sidebar,
-  );
+  const fx = useWiredSidebarFixture();
 
   const createSidebarWith = (extra: Partial<ChannelSidebarOptions>) =>
-    createChannelSidebar({ onVoiceJoin, onOpenCall, ...extra });
+    createChannelSidebar({ onVoiceJoin: fx.onVoiceJoin, onOpenCall: fx.onOpenCall, ...extra });
 
   it("renders channel list from store", () => {
     setChannels(testChannels);
-    sidebar.mount(container);
+    fx.sidebar.mount(fx.container);
 
-    const items = container.querySelectorAll(".channel-item");
+    const items = fx.container.querySelectorAll(".channel-item");
     expect(items.length).toBe(4);
 
-    const names = Array.from(container.querySelectorAll(".ch-name")).map((el) => el.textContent);
+    const names = Array.from(fx.container.querySelectorAll(".ch-name")).map((el) => el.textContent);
     expect(names).toContain("general");
     expect(names).toContain("random");
     expect(names).toContain("voice-lobby");
@@ -100,9 +90,9 @@ describe("ChannelSidebar", () => {
     it("exposes exactly one Tab stop and marks the active channel", () => {
       setChannels(testChannels);
       setActiveChannel(1);
-      sidebar.mount(container);
+      fx.sidebar.mount(fx.container);
 
-      const tabbable = container.querySelectorAll(".channel-item[tabindex='0']");
+      const tabbable = fx.container.querySelectorAll(".channel-item[tabindex='0']");
       expect(tabbable.length).toBe(1);
       expect((tabbable[0] as HTMLElement).dataset.channelId).toBe("1");
       expect(tabbable[0]!.getAttribute("aria-current")).toBe("page");
@@ -110,9 +100,9 @@ describe("ChannelSidebar", () => {
 
     it("ArrowDown moves focus and the Tab stop to the next row", () => {
       setChannels(testChannels);
-      sidebar.mount(container);
+      fx.sidebar.mount(fx.container);
 
-      const first = container.querySelector(".channel-item") as HTMLElement;
+      const first = fx.container.querySelector(".channel-item") as HTMLElement;
       first.focus();
       first.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
 
@@ -125,9 +115,9 @@ describe("ChannelSidebar", () => {
 
     it("Enter on a focused row opens that channel", () => {
       setChannels(testChannels);
-      sidebar.mount(container);
+      fx.sidebar.mount(fx.container);
 
-      const row = container.querySelector('[data-channel-id="2"]') as HTMLElement;
+      const row = fx.container.querySelector('[data-channel-id="2"]') as HTMLElement;
       row.focus();
       row.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
 
@@ -137,9 +127,9 @@ describe("ChannelSidebar", () => {
 
   it("groups channels by category", () => {
     setChannels(testChannels);
-    sidebar.mount(container);
+    fx.sidebar.mount(fx.container);
 
-    const categories = container.querySelectorAll(".category");
+    const categories = fx.container.querySelectorAll(".category");
     const categoryNames = Array.from(categories).map(
       (el) => el.querySelector(".category-name")?.textContent,
     );
@@ -157,9 +147,9 @@ describe("ChannelSidebar", () => {
       { id: 1, name: "chat", type: "text", category: "Gaming", position: 0 },
       { id: 2, name: "lounge", type: "voice", category: "Gaming", position: 1 },
     ]);
-    sidebar.mount(container);
+    fx.sidebar.mount(fx.container);
 
-    const headers = Array.from(container.querySelectorAll(".category"));
+    const headers = Array.from(fx.container.querySelectorAll(".category"));
     const names = headers.map((el) => el.querySelector(".category-name")?.textContent);
     expect(names).toEqual(["Gaming"]);
 
@@ -175,28 +165,30 @@ describe("ChannelSidebar", () => {
       { id: 1, name: "loose-text", type: "text", category: null, position: 0 },
       { id: 2, name: "loose-voice", type: "voice", category: null, position: 1 },
     ]);
-    sidebar.mount(container);
+    fx.sidebar.mount(fx.container);
 
-    const names = Array.from(container.querySelectorAll(".category-name")).map(
+    const names = Array.from(fx.container.querySelectorAll(".category-name")).map(
       (el) => el.textContent,
     );
     expect(names).toEqual(["Voice"]);
 
     // The uncategorized TEXT channel still renders, headerless.
-    const allNames = Array.from(container.querySelectorAll(".ch-name")).map((el) => el.textContent);
+    const allNames = Array.from(fx.container.querySelectorAll(".ch-name")).map(
+      (el) => el.textContent,
+    );
     expect(allNames).toContain("loose-text");
     expect(allNames).toContain("loose-voice");
   });
 
   it("click channel sets active and clears unread", () => {
     setChannels(testChannels);
-    sidebar.mount(container);
+    fx.sidebar.mount(fx.container);
 
     // Channel 1 (general) has unread_count of 2
     const ch1Before = channelsStore.getState().channels.get(1);
     expect(ch1Before?.unreadCount).toBe(2);
 
-    const firstItem = container.querySelector('[data-channel-id="1"]') as HTMLElement;
+    const firstItem = fx.container.querySelector('[data-channel-id="1"]') as HTMLElement;
     expect(firstItem).not.toBeNull();
     firstItem.click();
 
@@ -207,14 +199,14 @@ describe("ChannelSidebar", () => {
 
   it("category collapse toggles visibility", () => {
     setChannels(testChannels);
-    sidebar.mount(container);
+    fx.sidebar.mount(fx.container);
 
     // Text Channels category should have 2 channels visible
-    const textChannelsBefore = container.querySelectorAll(".channel-item");
+    const textChannelsBefore = fx.container.querySelectorAll(".channel-item");
     expect(textChannelsBefore.length).toBe(4);
 
     // Click the "Text Channels" category header to collapse
-    const headers = container.querySelectorAll(".category");
+    const headers = fx.container.querySelectorAll(".category");
     const textHeader = Array.from(headers).find(
       (h) => h.querySelector(".category-name")?.textContent === "Text Channels",
     ) as HTMLElement;
@@ -225,40 +217,40 @@ describe("ChannelSidebar", () => {
     // After collapse, "Text Channels" channels should be hidden
     // The sidebar re-renders on uiStore change, so channels under
     // collapsed category are not in the DOM
-    const itemsAfter = container.querySelectorAll(".channel-item");
+    const itemsAfter = fx.container.querySelectorAll(".channel-item");
     // Voice + Info stay (their own categories); "general" is unread (2), so it
     // is the one row a collapsed Text Channels keeps (WP 2B-5).
     expect(itemsAfter.length).toBe(3);
 
     // Expand again
-    const headersAfter = container.querySelectorAll(".category");
+    const headersAfter = fx.container.querySelectorAll(".category");
     const textHeaderAfter = Array.from(headersAfter).find(
       (h) => h.querySelector(".category-name")?.textContent === "Text Channels",
     ) as HTMLElement;
     textHeaderAfter.click();
     uiStore.flush();
 
-    const itemsExpanded = container.querySelectorAll(".channel-item");
+    const itemsExpanded = fx.container.querySelectorAll(".channel-item");
     expect(itemsExpanded.length).toBe(4);
   });
 
   it("displays server name from auth store", () => {
-    sidebar.mount(container);
+    fx.sidebar.mount(fx.container);
 
-    const serverName = container.querySelector(".channel-sidebar-header h2");
+    const serverName = fx.container.querySelector(".channel-sidebar-header h2");
     expect(serverName?.textContent).toBe("Test Server");
   });
 
   it("shows plain unread as bold name and pill only, with no number badge", () => {
     setChannels(testChannels);
-    sidebar.mount(container);
+    fx.sidebar.mount(fx.container);
 
     // general (2) and announcements (5) are unread: the `.unread` class carries
     // the bold name and the white pill; the count is not drawn.
-    const unreadRows = container.querySelectorAll(".channel-item.unread");
+    const unreadRows = fx.container.querySelectorAll(".channel-item.unread");
     expect(unreadRows.length).toBe(2);
-    expect(container.querySelectorAll(".unread-badge").length).toBe(0);
-    expect(container.querySelector('[data-channel-id="1"]')?.textContent).not.toContain("2");
+    expect(fx.container.querySelectorAll(".unread-badge").length).toBe(0);
+    expect(fx.container.querySelector('[data-channel-id="1"]')?.textContent).not.toContain("2");
     // The pill and the bold name are CSS on `.unread`; pin both.
     expect(cascadedDeclaration(".channel-item.unread .ch-name", "font-weight")).toBeDefined();
     expect(cascadedDeclaration(".channel-item.unread::before", "background")).toBeDefined();
@@ -268,9 +260,9 @@ describe("ChannelSidebar", () => {
 
   it("keeps the red mention badge, with the count, on a mentioned row", () => {
     setChannels([{ ...testChannels[0]!, unread_count: 7, mention_count: 2 }, testChannels[1]!]);
-    sidebar.mount(container);
+    fx.sidebar.mount(fx.container);
 
-    const item = container.querySelector('[data-channel-id="1"]')!;
+    const item = fx.container.querySelector('[data-channel-id="1"]')!;
     expect(item.classList.contains("mentioned")).toBe(true);
     expect(item.querySelector(".mention-badge")?.textContent).toBe("2");
     expect(item.querySelector(".unread-badge")).toBeNull();
@@ -278,9 +270,9 @@ describe("ChannelSidebar", () => {
 
   it("an unread row with no mentions has no mention badge and no count", () => {
     setChannels([{ ...testChannels[0]!, unread_count: 7, mention_count: 0 }]);
-    sidebar.mount(container);
+    fx.sidebar.mount(fx.container);
 
-    const item = container.querySelector('[data-channel-id="1"]')!;
+    const item = fx.container.querySelector('[data-channel-id="1"]')!;
     expect(item.classList.contains("unread")).toBe(true);
     expect(item.classList.contains("mentioned")).toBe(false);
     expect(item.querySelector(".mention-badge")).toBeNull();
@@ -300,9 +292,9 @@ describe("ChannelSidebar", () => {
     it("a muted unread row has no .unread class and no badge", () => {
       setChannels([{ ...testChannels[0]!, unread_count: 5, mention_count: 0 }]);
       muteChannel(1);
-      sidebar.mount(container);
+      fx.sidebar.mount(fx.container);
 
-      const item = container.querySelector('[data-channel-id="1"]')!;
+      const item = fx.container.querySelector('[data-channel-id="1"]')!;
       expect(item.classList.contains("muted")).toBe(true);
       expect(item.classList.contains("unread")).toBe(false);
       expect(item.querySelector(".unread-badge")).toBeNull();
@@ -315,10 +307,10 @@ describe("ChannelSidebar", () => {
         { ...testChannels[0]!, unread_count: 5, mention_count: 0 },
         { ...testChannels[1]!, unread_count: 5, mention_count: 1 },
       ]);
-      sidebar.mount(container);
+      fx.sidebar.mount(fx.container);
 
-      const plain = container.querySelector(`[data-channel-id="${testChannels[0]!.id}"]`)!;
-      const mentioned = container.querySelector(`[data-channel-id="${testChannels[1]!.id}"]`)!;
+      const plain = fx.container.querySelector(`[data-channel-id="${testChannels[0]!.id}"]`)!;
+      const mentioned = fx.container.querySelector(`[data-channel-id="${testChannels[1]!.id}"]`)!;
       expect(plain.getAttribute("aria-description")).toBe("Unread");
       expect(mentioned.hasAttribute("aria-description")).toBe(false);
     });
@@ -326,9 +318,9 @@ describe("ChannelSidebar", () => {
     it("a muted row with mentions still shows the mention", () => {
       setChannels([{ ...testChannels[0]!, unread_count: 5, mention_count: 2 }]);
       muteChannel(1);
-      sidebar.mount(container);
+      fx.sidebar.mount(fx.container);
 
-      const item = container.querySelector('[data-channel-id="1"]')!;
+      const item = fx.container.querySelector('[data-channel-id="1"]')!;
       expect(item.classList.contains("unread")).toBe(true);
       expect(item.classList.contains("mentioned")).toBe(true);
       expect(item.querySelector(".mention-badge")?.textContent).toBe("2");
@@ -337,74 +329,74 @@ describe("ChannelSidebar", () => {
     it("unmuting restores the unread look", () => {
       setChannels([{ ...testChannels[0]!, unread_count: 5, mention_count: 0 }]);
       muteChannel(1);
-      sidebar.mount(container);
+      fx.sidebar.mount(fx.container);
       unmuteChannel(1);
       channelsStore.flush();
-      const item = container.querySelector('[data-channel-id="1"]')!;
+      const item = fx.container.querySelector('[data-channel-id="1"]')!;
       expect(item.classList.contains("unread")).toBe(true);
     });
   });
 
   it("leaves the mention badge uncapped", () => {
     setChannels([{ ...testChannels[0]!, unread_count: 0, mention_count: 137 }]);
-    sidebar.mount(container);
+    fx.sidebar.mount(fx.container);
 
-    const badge = container.querySelector('[data-channel-id="1"] .mention-badge');
+    const badge = fx.container.querySelector('[data-channel-id="1"] .mention-badge');
     expect(badge?.textContent).toBe("137");
   });
 
   it("clears the mention badge when the channel is activated", () => {
     setChannels([{ ...testChannels[0]!, unread_count: 7, mention_count: 2 }]);
-    sidebar.mount(container);
+    fx.sidebar.mount(fx.container);
 
-    (container.querySelector('[data-channel-id="1"]') as HTMLElement).click();
+    (fx.container.querySelector('[data-channel-id="1"]') as HTMLElement).click();
     channelsStore.flush();
 
     expect(channelsStore.getState().channels.get(1)?.mentionCount).toBe(0);
     expect(channelsStore.getState().activeChannelId).toBe(1);
-    expect(container.querySelector(".mention-badge")).toBeNull();
+    expect(fx.container.querySelector(".mention-badge")).toBeNull();
   });
 
   it("marks active channel with active class", () => {
     setChannels(testChannels);
     setActiveChannel(2);
-    sidebar.mount(container);
+    fx.sidebar.mount(fx.container);
 
-    const activeItem = container.querySelector('[data-channel-id="2"]');
+    const activeItem = fx.container.querySelector('[data-channel-id="2"]');
     expect(activeItem?.classList.contains("active")).toBe(true);
   });
 
   it("shows voice icon for voice channels", () => {
     setChannels(testChannels);
-    sidebar.mount(container);
+    fx.sidebar.mount(fx.container);
 
-    const voiceItem = container.querySelector('[data-channel-id="3"]');
+    const voiceItem = fx.container.querySelector('[data-channel-id="3"]');
     const icon = voiceItem?.querySelector(".ch-icon");
     expect(icon).not.toBeNull();
   });
 
   it("clicking voice channel calls onVoiceJoin instead of setActiveChannel", () => {
     setChannels(testChannels);
-    sidebar.mount(container);
+    fx.sidebar.mount(fx.container);
 
-    const voiceItem = container.querySelector('[data-channel-id="3"]') as HTMLElement;
+    const voiceItem = fx.container.querySelector('[data-channel-id="3"]') as HTMLElement;
     voiceItem.click();
 
     // Should NOT set active channel
     expect(channelsStore.getState().activeChannelId).toBeNull();
     // Should call onVoiceJoin with channel id
-    expect(onVoiceJoin).toHaveBeenCalledWith(3);
+    expect(fx.onVoiceJoin).toHaveBeenCalledWith(3);
   });
 
   it("clicking text channel still sets active channel normally", () => {
     setChannels(testChannels);
-    sidebar.mount(container);
+    fx.sidebar.mount(fx.container);
 
-    const textItem = container.querySelector('[data-channel-id="1"]') as HTMLElement;
+    const textItem = fx.container.querySelector('[data-channel-id="1"]') as HTMLElement;
     textItem.click();
 
     expect(channelsStore.getState().activeChannelId).toBe(1);
-    expect(onVoiceJoin).not.toHaveBeenCalled();
+    expect(fx.onVoiceJoin).not.toHaveBeenCalled();
   });
 
   it("clicking the joined voice channel opens the call instead of leaving (V1)", () => {
@@ -412,13 +404,13 @@ describe("ChannelSidebar", () => {
     // the voice widget's Disconnect leaves. The sidebar has no leave callback.
     setChannels(testChannels);
     voiceStore.setState((prev) => ({ ...prev, currentChannelId: 3, voiceStatus: "connected" }));
-    sidebar.mount(container);
+    fx.sidebar.mount(fx.container);
 
-    const voiceItem = container.querySelector('[data-channel-id="3"]') as HTMLElement;
+    const voiceItem = fx.container.querySelector('[data-channel-id="3"]') as HTMLElement;
     voiceItem.click();
 
-    expect(onOpenCall).toHaveBeenCalledOnce();
-    expect(onVoiceJoin).not.toHaveBeenCalled();
+    expect(fx.onOpenCall).toHaveBeenCalledOnce();
+    expect(fx.onVoiceJoin).not.toHaveBeenCalled();
     expect(voiceStore.getState().currentChannelId).toBe(3);
   });
 
@@ -428,17 +420,17 @@ describe("ChannelSidebar", () => {
     // voice_leave before the SFU was ever reached: rapid clicks cycled
     // voice_join/voice_leave on the server several times a second.
     setChannels(testChannels);
-    sidebar.mount(container);
+    fx.sidebar.mount(fx.container);
     for (const voiceStatus of ["joining", "securing"] as const) {
       voiceStore.setState((prev) => ({ ...prev, currentChannelId: 3, voiceStatus }));
       voiceStore.flush();
-      (container.querySelector('[data-channel-id="3"]') as HTMLElement).click();
-      expect(onOpenCall).not.toHaveBeenCalled();
+      (fx.container.querySelector('[data-channel-id="3"]') as HTMLElement).click();
+      expect(fx.onOpenCall).not.toHaveBeenCalled();
     }
     voiceStore.setState((prev) => ({ ...prev, voiceStatus: "connected" }));
     voiceStore.flush();
-    (container.querySelector('[data-channel-id="3"]') as HTMLElement).click();
-    expect(onOpenCall).toHaveBeenCalledOnce();
+    (fx.container.querySelector('[data-channel-id="3"]') as HTMLElement).click();
+    expect(fx.onOpenCall).toHaveBeenCalledOnce();
   });
 
   // ── V9: a collapsed category keeps the voice channel you are in ──
@@ -454,25 +446,25 @@ describe("ChannelSidebar", () => {
       ...prev,
       collapsedCategories: new Set(["Voice Channels"]),
     }));
-    sidebar.mount(container);
+    fx.sidebar.mount(fx.container);
 
-    expect(container.querySelector('[data-channel-id="3"]')).not.toBeNull();
-    expect(container.querySelector('[data-channel-id="5"]')).toBeNull();
+    expect(fx.container.querySelector('[data-channel-id="3"]')).not.toBeNull();
+    expect(fx.container.querySelector('[data-channel-id="5"]')).toBeNull();
 
     // Leaving hides it; joining the other channel shows that one instead.
     voiceStore.setState((prev) => ({ ...prev, currentChannelId: null }));
     voiceStore.flush();
-    expect(container.querySelector('[data-channel-id="3"]')).toBeNull();
+    expect(fx.container.querySelector('[data-channel-id="3"]')).toBeNull();
     voiceStore.setState((prev) => ({ ...prev, currentChannelId: 5 }));
     voiceStore.flush();
-    expect(container.querySelector('[data-channel-id="5"]')).not.toBeNull();
-    expect(container.querySelector('[data-channel-id="3"]')).toBeNull();
+    expect(fx.container.querySelector('[data-channel-id="5"]')).not.toBeNull();
+    expect(fx.container.querySelector('[data-channel-id="3"]')).toBeNull();
 
     // Expanding restores every row.
     uiStore.setState((prev) => ({ ...prev, collapsedCategories: new Set<string>() }));
     uiStore.flush();
-    expect(container.querySelector('[data-channel-id="3"]')).not.toBeNull();
-    expect(container.querySelector('[data-channel-id="5"]')).not.toBeNull();
+    expect(fx.container.querySelector('[data-channel-id="3"]')).not.toBeNull();
+    expect(fx.container.querySelector('[data-channel-id="5"]')).not.toBeNull();
   });
 
   it("a collapsed category hides an empty voice channel the user is not in (V9)", () => {
@@ -481,10 +473,10 @@ describe("ChannelSidebar", () => {
       ...prev,
       collapsedCategories: new Set(["Voice Channels"]),
     }));
-    sidebar.mount(container);
+    fx.sidebar.mount(fx.container);
 
-    expect(container.querySelector('[data-channel-id="3"]')).toBeNull();
-    expect(container.querySelector(".voice-user-item")).toBeNull();
+    expect(fx.container.querySelector('[data-channel-id="3"]')).toBeNull();
+    expect(fx.container.querySelector(".voice-user-item")).toBeNull();
   });
 
   // ── WP 2B-5: a collapsed category keeps the rows that matter ──
@@ -499,7 +491,7 @@ describe("ChannelSidebar", () => {
       category: "Voice Channels",
       position: id,
     });
-    const rowIds = (): string[] => channelRowIds(container);
+    const rowIds = (): string[] => channelRowIds(fx.container);
     const flush = (): void => {
       channelsStore.flush();
       voiceStore.flush();
@@ -518,7 +510,7 @@ describe("ChannelSidebar", () => {
     it("shows muted rows while the preference is off", () => {
       setChannels([text(1), text(2)]);
       muteChannel(2);
-      sidebar.mount(container);
+      fx.sidebar.mount(fx.container);
       expect(rowIds()).toEqual(["1", "2"]);
     });
 
@@ -526,7 +518,7 @@ describe("ChannelSidebar", () => {
       setChannels([text(1), text(2), text(3)]);
       muteChannel(2);
       setHideMutedChannels(true);
-      sidebar.mount(container);
+      fx.sidebar.mount(fx.container);
       expect(rowIds()).toEqual(["1", "3"]);
     });
 
@@ -536,7 +528,7 @@ describe("ChannelSidebar", () => {
       muteChannel(2);
       setHideMutedChannels(true);
       channelsStore.setState((prev) => ({ ...prev, activeChannelId: 2 }));
-      sidebar.mount(container);
+      fx.sidebar.mount(fx.container);
       expect(rowIds()).toEqual(["2"]);
     });
 
@@ -549,7 +541,7 @@ describe("ChannelSidebar", () => {
       muteChannel(1);
       muteChannel(2);
       setHideMutedChannels(true);
-      sidebar.mount(container);
+      fx.sidebar.mount(fx.container);
       expect(rowIds()).toEqual(["1", "3"]);
     });
 
@@ -559,7 +551,7 @@ describe("ChannelSidebar", () => {
       muteChannel(11);
       addVoiceUser(10, 30, "alice");
       setHideMutedChannels(true);
-      sidebar.mount(container);
+      fx.sidebar.mount(fx.container);
       expect(rowIds()).toEqual(["1", "10"]);
     });
 
@@ -567,14 +559,14 @@ describe("ChannelSidebar", () => {
       setChannels([text(1), voice(10)]);
       muteChannel(1);
       setHideMutedChannels(true);
-      sidebar.mount(container);
-      const headers = Array.from(container.querySelectorAll<HTMLElement>(".category")).map(
+      fx.sidebar.mount(fx.container);
+      const headers = Array.from(fx.container.querySelectorAll<HTMLElement>(".category")).map(
         (el) => el.dataset.category,
       );
       expect(headers).toEqual(["Text Channels", "Voice Channels"]);
       expect(rowIds()).toEqual(["10"]);
       expect(
-        container
+        fx.container
           .querySelector('[data-category="Text Channels"]')
           ?.parentElement?.querySelector(".category-channels-container")?.children.length,
       ).toBe(0);
@@ -585,7 +577,7 @@ describe("ChannelSidebar", () => {
       muteChannel(1);
       setHideMutedChannels(true);
       uiStore.setState((prev) => ({ ...prev, collapsedCategories: new Set(["Text Channels"]) }));
-      sidebar.mount(container);
+      fx.sidebar.mount(fx.container);
       // Collapsed: only the unread unmuted row remains; the muted one stays hidden.
       expect(rowIds()).toEqual(["2"]);
     });
@@ -593,7 +585,7 @@ describe("ChannelSidebar", () => {
     it("redraws live when the preference is toggled", () => {
       setChannels([text(1), text(2)]);
       muteChannel(2);
-      sidebar.mount(container);
+      fx.sidebar.mount(fx.container);
       expect(rowIds()).toEqual(["1", "2"]);
 
       setHideMutedChannels(true);
@@ -606,7 +598,7 @@ describe("ChannelSidebar", () => {
     it("redraws live when a channel is muted and unmuted", () => {
       setChannels([text(1), text(2)]);
       setHideMutedChannels(true);
-      sidebar.mount(container);
+      fx.sidebar.mount(fx.container);
       expect(rowIds()).toEqual(["1", "2"]);
 
       muteChannel(2);
@@ -619,24 +611,24 @@ describe("ChannelSidebar", () => {
     it("a focused row that hides moves focus to the row that took its place", () => {
       setChannels([text(1), text(2), text(3)]);
       setHideMutedChannels(true);
-      sidebar.mount(container);
-      container.querySelector<HTMLElement>('[data-channel-id="2"]')!.focus();
+      fx.sidebar.mount(fx.container);
+      fx.container.querySelector<HTMLElement>('[data-channel-id="2"]')!.focus();
 
       muteChannel(2);
 
       expect(rowIds()).toEqual(["1", "3"]);
-      expect(document.activeElement).toBe(container.querySelector('[data-channel-id="3"]'));
+      expect(document.activeElement).toBe(fx.container.querySelector('[data-channel-id="3"]'));
     });
 
     it("the last focused row that hides moves focus to the row before it", () => {
       setChannels([text(1), text(2)]);
       setHideMutedChannels(true);
-      sidebar.mount(container);
-      container.querySelector<HTMLElement>('[data-channel-id="2"]')!.focus();
+      fx.sidebar.mount(fx.container);
+      fx.container.querySelector<HTMLElement>('[data-channel-id="2"]')!.focus();
 
       muteChannel(2);
 
-      expect(document.activeElement).toBe(container.querySelector('[data-channel-id="1"]'));
+      expect(document.activeElement).toBe(fx.container.querySelector('[data-channel-id="1"]'));
     });
 
     it("redraws live when you switch channels: the one you leave hides, the one you open shows", () => {
@@ -645,7 +637,7 @@ describe("ChannelSidebar", () => {
       muteChannel(2);
       setHideMutedChannels(true);
       channelsStore.setState((prev) => ({ ...prev, activeChannelId: 1 }));
-      sidebar.mount(container);
+      fx.sidebar.mount(fx.container);
       expect(rowIds()).toEqual(["1"]);
 
       channelsStore.setState((prev) => ({ ...prev, activeChannelId: 2 }));
@@ -658,7 +650,7 @@ describe("ChannelSidebar", () => {
       muteChannel(2);
       muteChannel(10);
       setHideMutedChannels(true);
-      sidebar.mount(container);
+      fx.sidebar.mount(fx.container);
       expect(rowIds()).toEqual(["1"]);
 
       channelsStore.setState((prev) => {
@@ -678,12 +670,12 @@ describe("ChannelSidebar", () => {
       setChannels([text(1), text(2)]);
       muteChannel(2);
       setHideMutedChannels(true);
-      sidebar.mount(container);
-      const before = container.querySelector('[data-channel-id="1"]');
+      fx.sidebar.mount(fx.container);
+      const before = fx.container.querySelector('[data-channel-id="1"]');
 
       window.dispatchEvent(new CustomEvent("owncord:pref-change", { detail: { key: "fontSize" } }));
 
-      expect(container.querySelector('[data-channel-id="1"]')).toBe(before);
+      expect(fx.container.querySelector('[data-channel-id="1"]')).toBe(before);
       expect(rowIds()).toEqual(["1"]);
     });
   });
@@ -692,7 +684,7 @@ describe("ChannelSidebar", () => {
     const collapse = (...names: string[]): void => {
       uiStore.setState((prev) => ({ ...prev, collapsedCategories: new Set(names) }));
     };
-    const rowIds = (): string[] => channelRowIds(container);
+    const rowIds = (): string[] => channelRowIds(fx.container);
 
     beforeEach(() => {
       localStorage.clear();
@@ -707,7 +699,7 @@ describe("ChannelSidebar", () => {
     it("a collapsed group with one unread channel renders exactly that row", () => {
       setChannels([text(1), text(2, { unread_count: 3 }), text(3)]);
       collapse("Text Channels");
-      sidebar.mount(container);
+      fx.sidebar.mount(fx.container);
       expect(rowIds()).toEqual(["2"]);
     });
 
@@ -720,19 +712,19 @@ describe("ChannelSidebar", () => {
       muteChannel(1);
       muteChannel(2);
       collapse("Text Channels");
-      sidebar.mount(container);
+      fx.sidebar.mount(fx.container);
       expect(rowIds()).toEqual(["1"]);
       // The hidden muted row looks read, so the header carries no dot (3D-2b).
-      expect(container.querySelector(".category-unread-dot")).toBeNull();
-      expect(container.querySelector(".channel-item.unread")).not.toBeNull();
-      expect(container.querySelector('[data-channel-id="2"]')).toBeNull();
+      expect(fx.container.querySelector(".category-unread-dot")).toBeNull();
+      expect(fx.container.querySelector(".channel-item.unread")).not.toBeNull();
+      expect(fx.container.querySelector('[data-channel-id="2"]')).toBeNull();
     });
 
     it("a mentioned muted channel alone still shows", () => {
       setChannels([text(1, { unread_count: 2, mention_count: 1 }), text(2)]);
       muteChannel(1);
       collapse("Text Channels");
-      sidebar.mount(container);
+      fx.sidebar.mount(fx.container);
       expect(rowIds()).toEqual(["1"]);
     });
 
@@ -744,28 +736,28 @@ describe("ChannelSidebar", () => {
       ]);
       addVoiceUser(3, 30, "alice");
       collapse("Voice Channels");
-      sidebar.mount(container);
-      expect(container.querySelector('[data-channel-id="3"]')).not.toBeNull();
-      expect(container.querySelector('[data-channel-id="5"]')).toBeNull();
-      expect(container.querySelector('.voice-user-item[data-voice-uid="30"]')).not.toBeNull();
+      fx.sidebar.mount(fx.container);
+      expect(fx.container.querySelector('[data-channel-id="3"]')).not.toBeNull();
+      expect(fx.container.querySelector('[data-channel-id="5"]')).toBeNull();
+      expect(fx.container.querySelector('.voice-user-item[data-voice-uid="30"]')).not.toBeNull();
       // Live: the last person leaving hides the row again.
       voiceStore.setState((prev) => ({ ...prev, voiceUsers: new Map() }));
       voiceStore.flush();
-      expect(container.querySelector('[data-channel-id="3"]')).toBeNull();
+      expect(fx.container.querySelector('[data-channel-id="3"]')).toBeNull();
     });
 
     it("keeps the active channel", () => {
       setChannels([text(1), text(2), text(3)]);
       setActiveChannel(2);
       collapse("Text Channels");
-      sidebar.mount(container);
+      fx.sidebar.mount(fx.container);
       expect(rowIds()).toEqual(["2"]);
     });
 
     it("rows appear and disappear live as unread state changes", () => {
       setChannels([text(1), text(2), text(3)]);
       collapse("Text Channels");
-      sidebar.mount(container);
+      fx.sidebar.mount(fx.container);
       expect(rowIds()).toEqual([]);
 
       channelsStore.setState((prev) => {
@@ -788,7 +780,7 @@ describe("ChannelSidebar", () => {
     it("muting a collapsed unread row hides it; unmuting reverses", () => {
       setChannels([text(1, { unread_count: 2 })]);
       collapse("Text Channels");
-      sidebar.mount(container);
+      fx.sidebar.mount(fx.container);
       expect(rowIds()).toEqual(["1"]);
       muteChannel(1);
       expect(rowIds()).toEqual([]);
@@ -799,21 +791,21 @@ describe("ChannelSidebar", () => {
     it("an expanded category shows every row", () => {
       setChannels([text(1, { unread_count: 2 }), text(2), text(3, { unread_count: 1 })]);
       muteChannel(3);
-      sidebar.mount(container);
+      fx.sidebar.mount(fx.container);
       expect(rowIds()).toEqual(["1", "2", "3"]);
     });
 
     it("Move Up in a collapsed category swaps with the row shown above, not a hidden one", () => {
       const onReorderChannel = vi.fn<(reorders: readonly ChannelReorderData[]) => void>();
-      sidebar.destroy?.();
+      fx.sidebar.destroy?.();
       setAdminUser();
-      sidebar = createSidebarWith({ onReorderChannel });
+      fx.sidebar = createSidebarWith({ onReorderChannel });
       setChannels([text(1, { unread_count: 1 }), text(2), text(3, { unread_count: 1 })]);
       collapse("Text Channels");
-      sidebar.mount(container);
+      fx.sidebar.mount(fx.container);
       expect(rowIds()).toEqual(["1", "3"]);
 
-      container
+      fx.container
         .querySelector('[data-channel-id="3"]')!
         .dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 5, clientY: 5 }));
       (document.querySelector('[data-testid="ctx-move-up"]') as HTMLElement).click();
@@ -828,8 +820,8 @@ describe("ChannelSidebar", () => {
     it("a focused row that stops showing hands focus to the category arrow", () => {
       setChannels([text(1), text(2, { unread_count: 1 })]);
       collapse("Text Channels");
-      sidebar.mount(container);
-      const row = container.querySelector<HTMLElement>('[data-channel-id="2"]')!;
+      fx.sidebar.mount(fx.container);
+      const row = fx.container.querySelector<HTMLElement>('[data-channel-id="2"]')!;
       row.focus();
       expect(document.activeElement).toBe(row);
 
@@ -841,21 +833,21 @@ describe("ChannelSidebar", () => {
       });
       channelsStore.flush();
 
-      expect(container.querySelector('[data-channel-id="2"]')).toBeNull();
-      expect(document.activeElement).toBe(container.querySelector(".category-arrow"));
+      expect(fx.container.querySelector('[data-channel-id="2"]')).toBeNull();
+      expect(document.activeElement).toBe(fx.container.querySelector(".category-arrow"));
     });
   });
 
   // ── Empty state ──
 
   it("shows empty state when no channels exist", () => {
-    sidebar.mount(container);
+    fx.sidebar.mount(fx.container);
 
-    const emptyText = container.querySelector(".channel-list-empty-text");
+    const emptyText = fx.container.querySelector(".channel-list-empty-text");
     expect(emptyText).not.toBeNull();
     expect(emptyText!.textContent).toBe("No channels yet");
 
-    const hint = container.querySelector(".channel-list-empty-hint");
+    const hint = fx.container.querySelector(".channel-list-empty-hint");
     expect(hint).not.toBeNull();
   });
 
@@ -863,27 +855,27 @@ describe("ChannelSidebar", () => {
     // With zero channels there is no category header and therefore no "+";
     // the old hint pointed at a right-click that did nothing.
     const onCreateChannel = vi.fn();
-    sidebar.destroy?.();
+    fx.sidebar.destroy?.();
     setAdminUser();
-    sidebar = createSidebarWith({ onCreateChannel });
-    sidebar.mount(container);
+    fx.sidebar = createSidebarWith({ onCreateChannel });
+    fx.sidebar.mount(fx.container);
 
-    const btn = container.querySelector<HTMLElement>("[data-testid='create-channel-empty']");
+    const btn = fx.container.querySelector<HTMLElement>("[data-testid='create-channel-empty']");
     expect(btn).not.toBeNull();
     btn!.click();
     expect(onCreateChannel).toHaveBeenCalledWith({ id: 0, name: "" });
   });
 
   it("hides the empty-state create affordance from a non-manager (#9)", () => {
-    sidebar.mount(container);
-    expect(container.querySelector("[data-testid='create-channel-empty']")).toBeNull();
+    fx.sidebar.mount(fx.container);
+    expect(fx.container.querySelector("[data-testid='create-channel-empty']")).toBeNull();
   });
 
   // ── Server name updates ──
 
   it("updates server name when auth store changes", () => {
-    sidebar.mount(container);
-    const h2 = container.querySelector(".channel-sidebar-header h2");
+    fx.sidebar.mount(fx.container);
+    const h2 = fx.container.querySelector(".channel-sidebar-header h2");
     expect(h2?.textContent).toBe("Test Server");
 
     authStore.setState((prev) => ({ ...prev, serverName: "Renamed Server" }));
@@ -894,9 +886,9 @@ describe("ChannelSidebar", () => {
 
   it("falls back to 'Server Name' when serverName is null", () => {
     authStore.setState((prev) => ({ ...prev, serverName: null }));
-    sidebar.mount(container);
+    fx.sidebar.mount(fx.container);
 
-    const h2 = container.querySelector(".channel-sidebar-header h2");
+    const h2 = fx.container.querySelector(".channel-sidebar-header h2");
     expect(h2?.textContent).toBe("Server Name");
   });
 
@@ -908,9 +900,9 @@ describe("ChannelSidebar", () => {
       ...prev,
       collapsedCategories: new Set(["Text Channels"]),
     }));
-    sidebar.mount(container);
+    fx.sidebar.mount(fx.container);
 
-    const headers = container.querySelectorAll(".category");
+    const headers = fx.container.querySelectorAll(".category");
     const textHeader = Array.from(headers).find(
       (h) => h.querySelector(".category-name")?.textContent === "Text Channels",
     );
@@ -921,73 +913,73 @@ describe("ChannelSidebar", () => {
   // ── Channels store subscription re-renders on channel map changes ──
 
   it("re-renders when channels store changes after mount", () => {
-    sidebar.mount(container);
-    expect(container.querySelectorAll(".channel-item").length).toBe(0);
+    fx.sidebar.mount(fx.container);
+    expect(fx.container.querySelectorAll(".channel-item").length).toBe(0);
 
     // Add channels after mount
     setChannels(testChannels);
     channelsStore.flush();
 
-    expect(container.querySelectorAll(".channel-item").length).toBe(4);
+    expect(fx.container.querySelectorAll(".channel-item").length).toBe(4);
   });
 
   // ── Destroy cleanup ──
 
   it("destroy removes the sidebar from the DOM", () => {
     setChannels(testChannels);
-    sidebar.mount(container);
-    expect(container.querySelector('[data-testid="channel-sidebar"]')).not.toBeNull();
+    fx.sidebar.mount(fx.container);
+    expect(fx.container.querySelector('[data-testid="channel-sidebar"]')).not.toBeNull();
 
-    sidebar.destroy?.();
-    expect(container.querySelector('[data-testid="channel-sidebar"]')).toBeNull();
+    fx.sidebar.destroy?.();
+    expect(fx.container.querySelector('[data-testid="channel-sidebar"]')).toBeNull();
   });
 
   // ── Drag reorder setup for admin (attaches drag handlers) ──
 
   it("admin sidebar with onReorderChannel adds channel-draggable class to items", () => {
     const onReorderChannel = vi.fn();
-    sidebar.destroy?.();
+    fx.sidebar.destroy?.();
     setAdminUser();
-    sidebar = createSidebarWith({ onReorderChannel });
+    fx.sidebar = createSidebarWith({ onReorderChannel });
 
     setChannels(testChannels);
-    sidebar.mount(container);
+    fx.sidebar.mount(fx.container);
 
     // Admin + onReorderChannel -> items should have channel-draggable class
-    const draggables = container.querySelectorAll(".channel-draggable");
+    const draggables = fx.container.querySelectorAll(".channel-draggable");
     expect(draggables.length).toBeGreaterThan(0);
   });
 
   it("non-admin does not get draggable class on channel items", () => {
     const onReorderChannel = vi.fn();
-    sidebar.destroy?.();
+    fx.sidebar.destroy?.();
     signInAs({ id: 2, username: "Member", avatar: null, role: "member" });
-    sidebar = createSidebarWith({ onReorderChannel });
+    fx.sidebar = createSidebarWith({ onReorderChannel });
 
     setChannels(testChannels);
-    sidebar.mount(container);
+    fx.sidebar.mount(fx.container);
 
-    const draggables = container.querySelectorAll(".channel-draggable");
+    const draggables = fx.container.querySelectorAll(".channel-draggable");
     expect(draggables.length).toBe(0);
   });
 
   it("destroy cleans up global drag listeners when last sidebar instance is destroyed", () => {
     const onReorderChannel = vi.fn();
-    sidebar.destroy?.();
+    fx.sidebar.destroy?.();
     setAdminUser();
-    sidebar = createSidebarWith({ onReorderChannel });
+    fx.sidebar = createSidebarWith({ onReorderChannel });
 
     setChannels(testChannels);
-    sidebar.mount(container);
+    fx.sidebar.mount(fx.container);
 
     // After mount with drag support, destroy should not throw
-    sidebar.destroy?.();
+    fx.sidebar.destroy?.();
 
     // Verify sidebar is removed
-    expect(container.querySelector('[data-testid="channel-sidebar"]')).toBeNull();
+    expect(fx.container.querySelector('[data-testid="channel-sidebar"]')).toBeNull();
 
     // Re-create for afterEach cleanup
-    sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall });
+    fx.sidebar = createChannelSidebar({ onVoiceJoin: fx.onVoiceJoin, onOpenCall: fx.onOpenCall });
   });
 });
 

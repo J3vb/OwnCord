@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as mocks from "../helpers/livekitE2eeMocks";
 
 // Behaviour of E2EEManager's session, announce, rotation and teardown guards,
 // driven through the manager with the crypto and stores mocked. The protocol
@@ -7,46 +8,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // which attempt owns the state when an async step resumes, what each log line
 // records, and what a teardown leaves behind.
 
-const mockSetKey = vi.hoisted(() => vi.fn());
-
-vi.mock("livekit-client", () => ({
-  ExternalE2EEKeyProvider: vi.fn(function () {
-    return { setKey: mockSetKey, getKeys: vi.fn().mockReturnValue([]) };
-  }),
-}));
-
 const OWN_PUB = "bW9ja2VwaGVtZXJhbA==";
-const mockKeyPair = vi.hoisted(() => ({
-  publicKey: { type: "public" } as unknown as CryptoKey,
-  privateKey: { type: "private" } as unknown as CryptoKey,
-}));
-const mockIdentityKeyPair = vi.hoisted(() => ({
-  publicKey: { type: "id-public" } as unknown as CryptoKey,
-  privateKey: { type: "id-private" } as unknown as CryptoKey,
-}));
+const { mockSetKey, mockKeyPair } = mocks;
 
-vi.mock("@lib/net/e2eeCrypto", () => ({
-  generateECDHKeyPair: vi.fn(async () => mockKeyPair),
-  exportPublicKey: vi.fn(async (key: { b64?: string }) => key.b64 ?? "bW9ja2VwaGVtZXJhbA=="),
-  importPublicKey: vi.fn(async (b64: string) => ({ type: "peer", b64 }) as unknown as CryptoKey),
-  generateRoomKey: vi.fn(() => new Uint8Array(32)),
-  roomKeyToBase64: vi.fn(() => "mock-room-key-base64"),
-  wrapRoomKey: vi.fn(async () => ({ encryptedKey: "enc", iv: "iv" })),
-  unwrapRoomKey: vi.fn(async () => ({ roomKey: new Uint8Array(32), epoch: 0 })),
-  signEphemeralKey: vi.fn(async () => "mock-signature"),
-  verifyEphemeralKeySignature: vi.fn(async () => true),
-  importIdentityPublicKey: vi.fn(
-    async () => ({ type: "id-public-imported" }) as unknown as CryptoKey,
-  ),
-  computeKeyFingerprint: vi.fn(async () => "AB12 CD34 EF56 7890"),
-  computeRawKeyFingerprint: vi.fn(async () => "5E55 1234 5678 9ABC"),
-}));
+vi.mock("livekit-client", () => mocks.livekitClientMock());
 
-vi.mock("@lib/net/identity", () => ({
-  getOrCreateIdentityKeyPair: vi.fn(async () => mockIdentityKeyPair),
-  getIdentityPin: vi.fn(async () => ({ status: "unpinned" })),
-  storeIdentityPin: vi.fn(async () => "stored"),
-}));
+vi.mock("@lib/net/e2eeCrypto", () =>
+  mocks.netE2eeCryptoMock(mocks.mockKeyPair, {
+    exportPublicKey: vi.fn(async (key: { b64?: string }) => key.b64 ?? "bW9ja2VwaGVtZXJhbA=="),
+    importPublicKey: vi.fn(async (b64: string) => ({ type: "peer", b64 }) as unknown as CryptoKey),
+  }),
+);
+
+vi.mock("@lib/net/identity", () => mocks.netIdentityMock());
 
 const auth = vi.hoisted(() => ({ id: 1 }));
 vi.mock("@stores/auth.store", () => ({

@@ -3,7 +3,8 @@
  * the load window, a sidebar destroyed before the code arrives, and the
  * keyboard path landing focus inside the menu.
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
 import * as voiceSession from "../helpers/voiceSessionMock";
 
 vi.mock("@lib/voice/livekitSession", () => voiceSession.defaults());
@@ -44,20 +45,22 @@ describe("per-user volume menu during its load", () => {
     container.querySelector(`[data-voice-uid="${TARGET_ID}"]`) as HTMLElement;
   const menus = (): NodeListOf<Element> => document.querySelectorAll(".user-vol-menu");
 
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => {
+      sidebar?.destroy?.();
+      sidebar = null;
+      document.querySelectorAll(".user-vol-menu").forEach((el) => el.remove());
+    },
+  );
+
   beforeEach(() => {
     resetChannelsState();
     voiceStore.setState((prev) => ({ ...prev, currentChannelId: null, voiceUsers: new Map() }));
     uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" as const }));
     signInAs({ id: SELF_ID, username: "Me", avatar: null, role: "member" });
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    sidebar?.destroy?.();
-    sidebar = null;
-    document.querySelectorAll(".user-vol-menu").forEach((el) => el.remove());
-    container.remove();
   });
 
   it("two opens before the code arrives mount one menu, the second open's", async () => {

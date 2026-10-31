@@ -21,6 +21,7 @@ import {
   seedBobDm,
   expectNoAlerts,
   useNotificationsHarness,
+  freshAlertSpies,
 } from "../../helpers/notificationsHarness";
 
 vi.mock("../../../src/lib/prefs/preferences", (importOriginal) =>
@@ -45,12 +46,7 @@ describe("notifyIncomingMessage", () => {
 
   describe("Do Not Disturb", () => {
     it("suppresses the desktop notification, the sound and the taskbar flash while DND", async () => {
-      const { sendNotification } = await import("@tauri-apps/plugin-notification");
-      const { getCurrentWindow } = await import("@tauri-apps/api/window");
-      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
-      const win = getCurrentWindow();
-      (win.requestUserAttention as ReturnType<typeof vi.fn>).mockClear();
-      mockOscillator.start.mockClear();
+      const { sendNotification, win } = await freshAlertSpies();
 
       setAlertPrefs(true, true, true);
       testPrefs.set("userStatus", "dnd");
@@ -80,12 +76,7 @@ describe("notifyIncomingMessage", () => {
 
   describe("notification level (U1b)", () => {
     it("Nothing silences the popup, the chime and the taskbar flash even for a mention", async () => {
-      const { sendNotification } = await import("@tauri-apps/plugin-notification");
-      const { getCurrentWindow } = await import("@tauri-apps/api/window");
-      const win = getCurrentWindow();
-      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
-      (win.requestUserAttention as ReturnType<typeof vi.fn>).mockClear();
-      mockOscillator.start.mockClear();
+      const { sendNotification, win } = await freshAlertSpies();
       testPrefs.set("notificationLevel", "nothing");
 
       notifyIncomingMessage(

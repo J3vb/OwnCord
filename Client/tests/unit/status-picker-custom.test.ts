@@ -1,4 +1,6 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
+import { pressComposingEnter } from "../helpers/keyEvents";
+import { useMountContainer } from "../helpers/mountContainer";
 import { createStatusPicker, type StatusPickerComponent } from "@components/StatusPicker";
 import { MAX_CUSTOM_STATUS_LEN } from "@lib/presence/userStatus";
 
@@ -11,15 +13,12 @@ describe("StatusPicker", () => {
   let container: HTMLDivElement;
   let picker: StatusPickerComponent | null = null;
 
-  beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
+  useMountContainer((c) => {
+    container = c;
   });
-
   afterEach(() => {
     picker?.destroy?.();
     picker = null;
-    container.remove();
   });
 
   function labels(): string[] {
@@ -99,14 +98,7 @@ describe("StatusPicker", () => {
   it("Enter that commits an IME candidate does not commit the custom status", () => {
     const { onCustomStatusChange, input } = mountWithCustomStatus("");
     input.value = "half";
-    input.dispatchEvent(
-      new KeyboardEvent("keydown", {
-        key: "Enter",
-        isComposing: true,
-        bubbles: true,
-        cancelable: true,
-      }),
-    );
+    pressComposingEnter(input);
 
     expect(onCustomStatusChange).not.toHaveBeenCalled();
   });

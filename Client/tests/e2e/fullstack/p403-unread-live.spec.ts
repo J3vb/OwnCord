@@ -2,6 +2,7 @@ import { test, expect } from "./fixtures";
 import type { Page } from "@playwright/test";
 import { channelIdByName, channelItem } from "./serverApi";
 import { rawSocket } from "../support/raw-socket";
+import type { TestServer } from "../support/server";
 
 /**
  * P4-03 step A live validation.
@@ -19,6 +20,14 @@ async function setFocused(page: Page, focused: boolean): Promise<void> {
   }, focused);
 }
 
+/** The window focused on the open `general` channel; returns that channel's id. */
+async function focusGeneral(page: Page, server: TestServer): Promise<number> {
+  const general = await channelIdByName(server, "general");
+  await expect(channelItem(page, "general")).toHaveClass(/active/);
+  await setFocused(page, true);
+  return general;
+}
+
 // A server channel shows plain unread as the `.unread` row (bold name + pill),
 // with no count; the fullstack assertions below therefore check presence only.
 const unreadBadge = (page: Page, channelId: number) =>
@@ -31,9 +40,7 @@ test("unfocused message in the active channel counts unread, then refocus at the
   bobTransport,
   server,
 }) => {
-  const general = await channelIdByName(server, "general");
-  await expect(channelItem(bob, "general")).toHaveClass(/active/);
-  await setFocused(bob, true);
+  const general = await focusGeneral(bob, server);
   await expect(unreadBadge(bob, general)).toHaveCount(0);
 
   // Window unfocused: a message in the channel on screen must count.
@@ -55,9 +62,7 @@ test("unfocused message in the active channel counts unread, then refocus at the
 });
 
 test("focused message in the active channel does not count as unread", async ({ bob, server }) => {
-  const general = await channelIdByName(server, "general");
-  await expect(channelItem(bob, "general")).toHaveClass(/active/);
-  await setFocused(bob, true);
+  const general = await focusGeneral(bob, server);
 
   const aliceSocket = await rawSocket(server, "alice");
   await aliceSocket.post(general, ["on screen, focused"]);
@@ -72,9 +77,7 @@ test("an unfocused full-ready resync keeps the restated unread and sends no mark
   bobTransport,
   server,
 }) => {
-  const general = await channelIdByName(server, "general");
-  await expect(channelItem(bob, "general")).toHaveClass(/active/);
-  await setFocused(bob, true);
+  const general = await focusGeneral(bob, server);
   await expect(unreadBadge(bob, general)).toHaveCount(0);
 
   // Drop bob's socket, unfocused; messages land in his active channel during

@@ -36,7 +36,10 @@ export function livekitClientMock() {
   };
 }
 
-export function netE2eeCryptoMock(keyPair: typeof mockKeyPair = mockKeyPair) {
+export function netE2eeCryptoMock(
+  keyPair: typeof mockKeyPair = mockKeyPair,
+  overrides: Record<string, unknown> = {},
+) {
   return {
     generateECDHKeyPair: vi.fn(async () => keyPair),
     exportPublicKey: vi.fn(async () => "bW9ja2VwaGVtZXJhbA=="),
@@ -52,6 +55,7 @@ export function netE2eeCryptoMock(keyPair: typeof mockKeyPair = mockKeyPair) {
     ),
     computeKeyFingerprint: vi.fn(async () => "AB12 CD34 EF56 7890"),
     computeRawKeyFingerprint: vi.fn(async () => "5E55 1234 5678 9ABC"),
+    ...overrides,
   };
 }
 

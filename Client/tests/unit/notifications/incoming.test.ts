@@ -13,6 +13,7 @@ import {
   makePayload,
   setAlertPrefs,
   useNotificationsHarness,
+  freshAlertSpies,
 } from "../../helpers/notificationsHarness";
 import { resetAuthState } from "../../helpers/storeSeeds";
 
@@ -124,12 +125,7 @@ describe("notifyIncomingMessage", () => {
   });
 
   it("with document.hasFocus() true and a message in a non-active channel, no OS notification and no taskbar flash fire", async () => {
-    const { sendNotification } = await import("@tauri-apps/plugin-notification");
-    const { getCurrentWindow } = await import("@tauri-apps/api/window");
-    const win = getCurrentWindow();
-    (sendNotification as ReturnType<typeof vi.fn>).mockClear();
-    (win.requestUserAttention as ReturnType<typeof vi.fn>).mockClear();
-    mockOscillator.start.mockClear();
+    const { sendNotification, win } = await freshAlertSpies();
     vi.spyOn(document, "hasFocus").mockReturnValue(true);
     channelsStore.setState((prev) => ({ ...prev, activeChannelId: 2 }));
     setAlertPrefs(true, true, true);
@@ -263,12 +259,7 @@ describe("notifyIncomingMessage", () => {
 
   describe("a blocked author", () => {
     async function alerts() {
-      const { sendNotification } = await import("@tauri-apps/plugin-notification");
-      const { getCurrentWindow } = await import("@tauri-apps/api/window");
-      const win = getCurrentWindow();
-      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
-      (win.requestUserAttention as ReturnType<typeof vi.fn>).mockClear();
-      mockOscillator.start.mockClear();
+      const { sendNotification, win } = await freshAlertSpies();
       setAlertPrefs(true, true, true);
       return {
         popup: sendNotification as ReturnType<typeof vi.fn>,
@@ -355,12 +346,7 @@ describe("notifyIncomingMessage", () => {
   });
 
   it("fires all notification types when all enabled", async () => {
-    const { sendNotification } = await import("@tauri-apps/plugin-notification");
-    const { getCurrentWindow } = await import("@tauri-apps/api/window");
-    const win = getCurrentWindow();
-    (sendNotification as ReturnType<typeof vi.fn>).mockClear();
-    (win.requestUserAttention as ReturnType<typeof vi.fn>).mockClear();
-    mockOscillator.start.mockClear();
+    const { sendNotification, win } = await freshAlertSpies();
 
     // All defaults are true, so just fire and confirm all three channels fired
     setAlertPrefs(true, true, true);
