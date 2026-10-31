@@ -21,6 +21,7 @@ import { withMessageMenu } from "./message-list/messageMenuLoader";
 import { preloadInlineEdit } from "../features/messaging/inlineEditLoader";
 import { clearContentParseCache, relabelInlineTimestamps } from "./message-list/contentParser";
 import { canManageMessages } from "@lib/permissions";
+import { onPhoneLayoutChange } from "@lib/ui/bottomSheet";
 import { channelsStore, getPointerOnOpen, getUnreadOnOpen } from "@stores/channels.store";
 import { UNREAD_COUNT_CAP, atEachMidnight } from "@lib/text/formatting";
 import type { VirtualItemMessage } from "./message-list/virtualItems";
@@ -889,6 +890,9 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     // place, the same way midnight does. Owned by disposable.signal, so the
     // listener dies with the component.
     onPrefChange(["timeFormat"], api.relabelRenderedTimes, st.disposable.signal);
+    // A phone shows the clock alone in the header, so a rotation or resize that
+    // crosses the phone layout rewrites the rendered times too.
+    onPhoneLayoutChange(api.relabelRenderedTimes, st.disposable.signal);
     // Role Colors on/off recolours the names already drawn. formatting.ts
     // refreshes its cached flag from the same event first (it registered
     // earlier), so the rows are repainted from the new value.

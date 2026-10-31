@@ -13,7 +13,9 @@
   display: none;
 }
 
-@media (max-width: 800px) {
+@media (max-width: 800px),
+  (pointer: coarse) and (max-width: 899px),
+  (pointer: coarse) and (max-height: 499px) {
   .unified-sidebar {
     width: 0;
     overflow: hidden;
@@ -65,7 +67,9 @@
 }
 
 /* The drawer clears the notch; the member overlay (member-list.css) its right edge. */
-@media (max-width: 800px) {
+@media (max-width: 800px),
+  (pointer: coarse) and (max-width: 899px),
+  (pointer: coarse) and (max-height: 499px) {
   .unified-sidebar.drawer-open {
     padding: env(safe-area-inset-top) 0 var(--safe-bottom) env(safe-area-inset-left);
   }
@@ -74,7 +78,7 @@
     width: auto;
   }
 }
-@media (max-width: 800px) and (pointer: coarse) {
+@media (pointer: coarse) and (max-width: 899px), (pointer: coarse) and (max-height: 499px) {
   .unified-sidebar.drawer-open {
     width: min(320px, 88vw);
   }
@@ -85,7 +89,7 @@
 .sidebar-drawer-search {
   display: none;
 }
-@media (max-width: 800px) and (pointer: coarse) {
+@media (pointer: coarse) and (max-width: 899px), (pointer: coarse) and (max-height: 499px) {
   .app.has-server-rail .unified-sidebar.drawer-open {
     left: var(--drawer-rail-width);
     width: calc(min(350px, 90vw) - var(--drawer-rail-width));

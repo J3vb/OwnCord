@@ -19,11 +19,38 @@ import { applyDialogSemantics, focusDialog, trapFocus } from "./a11y";
 import { claimBack } from "./backHistory";
 import { closeOnBackdropClick } from "./modalFactory";
 
-/** The drawer's gate: a narrow window driven by touch. */
-export const PHONE_LAYOUT_QUERY = "(max-width: 800px) and (pointer: coarse)";
+/**
+ * The phone layout's gate: a touch screen that is narrow (a phone upright) or
+ * short (a phone on its side, which is wider than a tablet in portrait but
+ * has no room to spare). The CSS phone media queries repeat this text and
+ * `tests/unit/phone-query-css.test.ts` fails when one of them differs, so
+ * change both together.
+ */
+export const PHONE_LAYOUT_QUERY =
+  "(pointer: coarse) and (max-width: 899px), (pointer: coarse) and (max-height: 499px)";
 
 export function isPhoneLayout(): boolean {
   return typeof window.matchMedia === "function" && window.matchMedia(PHONE_LAYOUT_QUERY).matches;
+}
+
+/**
+ * Run `handler` when a resize or a rotation moves the window onto or off the
+ * phone layout. It listens to `resize` (rotation fires one) and compares
+ * `isPhoneLayout()` itself, so it needs nothing from the media query object.
+ * The listener goes with `signal`.
+ */
+export function onPhoneLayoutChange(handler: (phone: boolean) => void, signal: AbortSignal): void {
+  let last = isPhoneLayout();
+  window.addEventListener(
+    "resize",
+    () => {
+      const now = isPhoneLayout();
+      if (now === last) return;
+      last = now;
+      handler(now);
+    },
+    { signal },
+  );
 }
 
 /** How far down a swipe must travel before the lift closes the sheet. */
@@ -62,8 +89,35 @@ interface OpenSheet {
 
 let current: OpenSheet | null = null;
 
+/** Called once by the next sheet that opens; see `watchNextBottomSheet`. */
+let nextSheetWatcher: (() => void) | null = null;
+
+/**
+ * Run `fn` once when the next sheet opens (the touch input uses it to tell a
+ * long-press that opened a sheet from one that opened nothing, or a menu).
+ * Only the latest watcher is kept, and it is dropped when `signal` aborts.
+ */
+export function watchNextBottomSheet(fn: () => void, signal: AbortSignal): void {
+  if (signal.aborted) return;
+  const watcher = (): void => {
+    nextSheetWatcher = null;
+    fn();
+  };
+  nextSheetWatcher = watcher;
+  signal.addEventListener(
+    "abort",
+    () => {
+      if (nextSheetWatcher === watcher) nextSheetWatcher = null;
+    },
+    { once: true },
+  );
+}
+
 // Module lifetime: a sheet from the old server never outlives a switch.
-void registerSessionReset("bottomSheet:open", () => closeBottomSheet());
+void registerSessionReset("bottomSheet:open", () => {
+  nextSheetWatcher = null;
+  closeBottomSheet();
+});
 
 /** Whether a sheet is open (the swipes stay out of the way while one is). */
 export function isBottomSheetOpen(): boolean {
@@ -219,5 +273,6 @@ export function openBottomSheet(options: BottomSheetOptions): BottomSheet {
     };
   }
 
+  nextSheetWatcher?.();
   return { panel, signal, close };
 }

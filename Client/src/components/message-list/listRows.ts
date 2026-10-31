@@ -4,7 +4,7 @@
  */
 import { isServerRowKind } from "@lib/text/messageKind";
 import { membersStore, memberDisplayName } from "@stores/members.store";
-import { authorAvatarKey, fullDateTimeTitle } from "./renderers";
+import { authorAvatarKey, fullDateTimeTitle, messageHeaderTime } from "./renderers";
 import { createAvatarElement, pickAvatarColor } from "./avatar";
 import { withInlineEdit } from "../../features/messaging/inlineEditLoader";
 import { relabelInlineTimestamps, resyncMentions } from "./contentParser";
@@ -127,9 +127,11 @@ export function createListRows(st: ListState, api: ListApi) {
     for (let i = 0; i < children.length; i++) {
       const item = st.virtualItems[st.renderedStart + i];
       if (item?.kind !== "message") continue;
-      const text = formatMessageTimestamp(item.message.timestamp);
-      for (const el of children[i]!.querySelectorAll(".msg-time, .sm-time")) {
-        el.textContent = text;
+      for (const el of children[i]!.querySelectorAll(".msg-time")) {
+        el.textContent = messageHeaderTime(item.message.timestamp);
+      }
+      for (const el of children[i]!.querySelectorAll(".sm-time")) {
+        el.textContent = formatMessageTimestamp(item.message.timestamp);
       }
       // The gutter and compact times are the short clock form, with no day word.
       const clock = formatClockTime(item.message.timestamp);

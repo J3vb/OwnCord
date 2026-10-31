@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createPhoneCallBar, type PhoneCallBar } from "../../src/components/PhoneCallBar";
-import { channelsStore, resetChannelsStore, setChannels } from "../../src/stores/channels.store";
+import {
+  channelsStore,
+  resetChannelsStore,
+  setActiveChannel,
+  setChannels,
+} from "../../src/stores/channels.store";
 import { dmStore, setDmChannels, type DmChannel } from "../../src/stores/dm.store";
 import {
   joinVoiceChannel,
@@ -158,6 +163,68 @@ describe("PhoneCallBar", () => {
       b.refresh();
       expect(root().hidden).toBe(false);
       expect(vi.getTimerCount()).toBe(1);
+    });
+  });
+
+  describe("while you look at your own DM call", () => {
+    it("steps aside, since the DM's call panel has its own controls", () => {
+      setDmChannels([dm()]);
+      mountBar();
+      joinCall(DM);
+      expect(root().hidden).toBe(false);
+
+      setActiveChannel(DM);
+      flush();
+      expect(root().hidden).toBe(true);
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it("returns when you open another channel, and steps aside again on coming back", () => {
+      setDmChannels([dm()]);
+      mountBar();
+      joinCall(DM);
+      setActiveChannel(DM);
+      flush();
+      expect(root().hidden).toBe(true);
+
+      setActiveChannel(VOICE);
+      flush();
+      expect(root().hidden).toBe(false);
+      expect(vi.getTimerCount()).toBe(1);
+
+      setActiveChannel(DM);
+      flush();
+      expect(root().hidden).toBe(true);
+    });
+
+    it("shows when the DM you are looking at is not the call you are in", () => {
+      setDmChannels([dm(), { ...dm(), channelId: 30 }]);
+      mountBar();
+      joinCall(DM);
+      setActiveChannel(30);
+      flush();
+      expect(root().hidden).toBe(false);
+    });
+
+    it("stays up in a guild voice channel's own chat, which has no call panel", () => {
+      mountBar();
+      joinCall();
+      setActiveChannel(VOICE);
+      flush();
+      expect(root().hidden).toBe(false);
+    });
+
+    it("comes back when you leave the call", () => {
+      setDmChannels([dm()]);
+      mountBar();
+      joinCall(DM);
+      setActiveChannel(DM);
+      flush();
+      leaveVoiceChannel();
+      flush();
+      expect(root().hidden).toBe(true);
+      joinCall(VOICE);
+      expect(root().hidden).toBe(false);
     });
   });
 

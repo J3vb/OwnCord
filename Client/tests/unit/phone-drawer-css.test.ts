@@ -8,6 +8,8 @@ import { describe, expect, it } from "vitest";
 
 interface FlatRule {
   readonly media: string;
+  /** Each comma-separated query of the media rule, as Lightning CSS parsed it. */
+  readonly queries: readonly string[];
   readonly selector: string;
   readonly declarations: string;
 }
@@ -44,45 +46,58 @@ function flatRules(): FlatRule[] {
     },
   });
   const out: FlatRule[] = [];
-  const walk = (rules: Rule[], media: string): void => {
+  const walk = (rules: Rule[], media: string, queries: readonly string[]): void => {
     for (const rule of rules) {
-      if (rule.type === "media") walk(rule.value.rules, JSON.stringify(rule.value.query));
-      else if (rule.type === "style") {
+      if (rule.type === "media") {
+        walk(
+          rule.value.rules,
+          JSON.stringify(rule.value.query),
+          rule.value.query.mediaQueries.map((q) => JSON.stringify(q)),
+        );
+      } else if (rule.type === "style") {
         const decls = [
           ...(rule.value.declarations?.declarations ?? []),
           ...(rule.value.declarations?.importantDeclarations ?? []),
         ];
         for (const sel of rule.value.selectors) {
-          out.push({ media, selector: selectorText(sel), declarations: JSON.stringify(decls) });
+          out.push({
+            media,
+            queries,
+            selector: selectorText(sel),
+            declarations: JSON.stringify(decls),
+          });
         }
       }
     }
   };
-  walk(sheetRules, "");
+  walk(sheetRules, "", []);
   return out;
 }
 
 const rules = flatRules();
 
-/** The media text of the phone layout: narrow and touch. */
-const isPhoneMedia = (media: string): boolean =>
-  media.includes('"name":"width"') &&
-  media.includes('"less-than-equal"') &&
-  media.includes('"value":800') &&
-  media.includes('"name":"pointer"') &&
-  media.includes('"coarse"');
+/** The media text of the phone layout: a touch screen that is narrow or short. */
+const isPhoneMedia = (r: FlatRule): boolean =>
+  // Exactly the phone query's two halves: a rule that also lists the plain
+  // 800 px width is the narrow-window rule, not a phone-only one.
+  r.queries.length === 2 &&
+  r.queries.every((q) => q.includes('"name":"pointer"') && q.includes('"coarse"')) &&
+  r.media.includes('"name":"width"') &&
+  r.media.includes('"value":899') &&
+  r.media.includes('"name":"height"') &&
+  r.media.includes('"value":499');
 
 function phoneRule(selector: string): FlatRule | undefined {
-  return rules.find((r) => r.selector === selector && isPhoneMedia(r.media));
+  return rules.find((r) => r.selector === selector && isPhoneMedia(r));
 }
 
 describe("the server rail in the phone drawer", () => {
   it("stays hidden in a narrow window, whatever the pointer", () => {
+    // One query of the rule is the plain 800 px width, with no pointer in it.
     const hiding = rules.filter(
       (r) =>
         r.selector === ".server-rail-slot" &&
-        r.media.includes('"value":800') &&
-        !r.media.includes("coarse") &&
+        r.queries.some((q) => q.includes('"value":800') && !q.includes("coarse")) &&
         r.declarations.includes('"none"'),
     );
     expect(hiding.length).toBeGreaterThan(0);

@@ -988,6 +988,16 @@
   border-color: var(--text-muted);
   color: var(--text-muted);
 }
+/* Phones: a chip and the "+" are 44 px to hit, the chip's look otherwise as before. */
+@media (pointer: coarse) and (max-width: 899px), (pointer: coarse) and (max-height: 499px) {
+  .reaction-chip {
+    min-height: 44px;
+    justify-content: center;
+  }
+  .reaction-chip.add-reaction {
+    min-width: 44px;
+  }
+}
 /* Timed out (B9-15, Q4): reacting is disabled inline. */
 .reaction-chip[aria-disabled="true"],
 .msg-actions-bar button[aria-disabled="true"] {

@@ -7,6 +7,7 @@
 import { Disposable } from "@lib/disposable";
 import { isImeCommit } from "@lib/text/ime";
 import { isDisplayed } from "@lib/ui/dialogOpen";
+import { isPhoneLayout } from "@lib/ui/bottomSheet";
 import { applyDialogSemantics, focusDialog, trapFocus } from "@lib/ui/a11y";
 import { createElement, appendChildren, clearChildren } from "@lib/dom";
 import { closeOnBackdropClick } from "@lib/ui/modalFactory";
@@ -42,7 +43,11 @@ import { isAndroidApp } from "../features/voice/native/platform";
 
 const log = createLogger("SettingsOverlay");
 
-/** Matches the phone rules in settings.css: the list and a section take turns. */
+/**
+ * With `isPhoneLayout()`, this matches the phone rules in settings.css: the
+ * list and a section take turns on a narrow window, and on a phone of any
+ * orientation.
+ */
 const PHONE_QUERY = "(max-width: 600px)";
 
 // ---------------------------------------------------------------------------
@@ -232,7 +237,10 @@ export function createSettingsOverlay(
   /** On a phone the panel shows either the section list or one open section. */
   let sectionOpen = false;
   let backBtn: HTMLButtonElement | null = null;
-  const phone = typeof window.matchMedia === "function" ? window.matchMedia(PHONE_QUERY) : null;
+  const narrowWindow =
+    typeof window.matchMedia === "function" ? window.matchMedia(PHONE_QUERY) : null;
+  /** The panel is laid out as pages: a narrow window, or a phone in any orientation. */
+  const pagedLayout = (): boolean => narrowWindow?.matches === true || isPhoneLayout();
 
   // Stateful tabs — create via factory for proper cleanup on tab switch
   const logsTab = createLogsTab(() => activeTab, disposable.signal);
@@ -427,7 +435,7 @@ export function createSettingsOverlay(
     setActiveTab(tab);
     if (activeTab !== tab) return;
     setSectionOpen(true);
-    if (phone?.matches !== true) return;
+    if (!pagedLayout()) return;
     contentArea?.scrollTo?.({ top: 0 });
     // The list (and the tab that had focus) is hidden now: focus moves to Back.
     backBtn?.focus();
@@ -852,7 +860,7 @@ export function createSettingsOverlay(
           root?.classList.contains("open")
         ) {
           // On a phone, Back leaves the open section before it closes Settings.
-          if (sectionOpen && phone?.matches === true) backToList();
+          if (sectionOpen && pagedLayout()) backToList();
           else requestClose();
         } else if (
           !promptOpen() &&

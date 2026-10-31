@@ -346,6 +346,9 @@ export const shellText = defineCatalog("shell", {
   "status.clearsToday": "Clears today",
   "status.emojiButton": "Add an emoji to your custom status",
 
+  "sheet.back": "Back",
+  "channel.sheetLabel": "{name} options",
+
   "sidebar.open": "Open navigation",
   "sidebar.close": "Close navigation",
   "sidebar.search": "Find or start a conversation",

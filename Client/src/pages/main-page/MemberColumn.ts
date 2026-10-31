@@ -27,7 +27,7 @@
 import { isImeCommit } from "@lib/text/ime";
 import { Disposable } from "@lib/disposable";
 import { claimBack, type BackClaim } from "@lib/ui/backHistory";
-import { isPhoneLayout } from "@lib/ui/bottomSheet";
+import { isPhoneLayout, onPhoneLayoutChange } from "@lib/ui/bottomSheet";
 import { loadPref, onPrefChange, savePref } from "@lib/prefs/preferences";
 import { channelsStore, getActiveChannel } from "@stores/channels.store";
 import { uiStore } from "@stores/ui.store";
@@ -43,7 +43,10 @@ import {
 } from "../../features/members/memberLayout";
 import { shellText } from "../../i18n/shell";
 
-/** Below this the column is an overlay. Keep in step with `member-list.css`. */
+/**
+ * Below this the column is an overlay, and so it is on a phone on its side
+ * (`isPhoneLayout()`). Keep in step with `member-list.css`.
+ */
 const NARROW_QUERY = "(max-width: 899px)";
 const KEY_STEP = 16;
 
@@ -92,6 +95,8 @@ export function createMemberColumn(opts: MemberColumnOptions): MemberColumn {
   let destroyed = false;
   // jsdom has no matchMedia; without one the column is never an overlay.
   const narrow = typeof window.matchMedia === "function" ? window.matchMedia(NARROW_QUERY) : null;
+  /** The column is an overlay now: a narrow window, or a phone on its side. */
+  const overlayMode = (): boolean => narrow?.matches === true || isPhoneLayout();
   let narrowOpen = false;
   let backClaim: BackClaim | null = null;
   let callView = false;
@@ -192,7 +197,7 @@ export function createMemberColumn(opts: MemberColumnOptions): MemberColumn {
     if (destroyed) return;
     const right = loadMemberLayout() === "right";
     const onScreen = guildChannelOnScreen();
-    const overlay = narrow?.matches === true;
+    const overlay = overlayMode();
     if (!right || !onScreen) narrowOpen = false;
     const wanted = overlay
       ? narrowOpen
@@ -250,21 +255,19 @@ export function createMemberColumn(opts: MemberColumnOptions): MemberColumn {
   // handler orders the destroy of one host before the create of the other.
   onPrefChange([MEMBER_OPEN_PREF], () => sync(), owner.signal);
 
-  narrow?.addEventListener(
-    "change",
-    () => {
-      narrowOpen = false;
-      sync();
-    },
-    { signal: owner.signal },
-  );
+  const onBreakpoint = (): void => {
+    narrowOpen = false;
+    sync();
+  };
+  narrow?.addEventListener("change", onBreakpoint, { signal: owner.signal });
+  onPhoneLayoutChange(onBreakpoint, owner.signal);
   // Capture phase: the member search clears itself on Escape, and this must
   // read it before that, so a first Escape clears and a second one closes.
   owner.onEvent(
     column,
     "keydown",
     (e) => {
-      if (e.key !== "Escape" || isImeCommit(e) || narrow?.matches !== true || !narrowOpen) return;
+      if (e.key !== "Escape" || isImeCommit(e) || !overlayMode() || !narrowOpen) return;
       const search = body.querySelector<HTMLInputElement>('[data-testid="member-search"]');
       if (search !== null && search.value !== "") return;
       e.preventDefault();
@@ -285,14 +288,14 @@ export function createMemberColumn(opts: MemberColumnOptions): MemberColumn {
       sync();
     },
     openOverlay(): boolean {
-      if (destroyed || narrow?.matches !== true) return false;
+      if (destroyed || !overlayMode()) return false;
       if (!narrowOpen) {
         narrowOpen = true;
         sync();
       }
       return narrowOpen;
     },
-    isOverlayOpen: () => !destroyed && narrow?.matches === true && narrowOpen,
+    isOverlayOpen: () => !destroyed && overlayMode() && narrowOpen,
     setCallView(on: boolean): void {
       if (destroyed || callView === on) return;
       callView = on;
@@ -301,7 +304,7 @@ export function createMemberColumn(opts: MemberColumnOptions): MemberColumn {
     },
     toggle(): void {
       if (destroyed) return;
-      if (narrow?.matches === true) {
+      if (overlayMode()) {
         narrowOpen = !narrowOpen;
         sync();
         if (narrowOpen) focusSearch();

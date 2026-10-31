@@ -652,12 +652,183 @@ for (const profile of PROFILES) {
       expect(Math.round(box?.width ?? 0)).toBe(page.viewportSize()?.width);
     });
 
-    test("long-press on a channel row opens the channel menu", async ({ page }) => {
+    test("long-press on a channel row opens the channel menu as a sheet", async ({ page }) => {
       await signIn(page);
       await page.locator("[data-testid='sidebar-toggle']").click();
       await expect(page.locator("[data-testid='unified-sidebar']")).toHaveClass(/drawer-open/);
       await holdFinger(page, ".channel-list .channel-item", 800);
-      await expect(page.locator("[data-testid='channel-context-menu']")).toBeVisible();
+      const sheet = page.locator("[data-testid='channel-sheet']");
+      await expect(sheet).toBeVisible();
+      await expect(page.locator("[data-testid='channel-context-menu']")).toHaveCount(0);
+      // The sheet runs edge to edge and sits on the bottom of the screen.
+      const box = await sheet.boundingBox();
+      expect(Math.round(box?.width ?? 0)).toBe(page.viewportSize()?.width);
+      expect(Math.round((box?.y ?? 0) + (box?.height ?? 0))).toBe(page.viewportSize()?.height);
+      // Rows are 44 px or more to hit.
+      for (const id of ["ctx-mute-channel", "ctx-notify-settings"]) {
+        const row = await sheet.locator(`[data-testid='${id}']`).boundingBox();
+        expect(row?.height ?? 0).toBeGreaterThanOrEqual(44);
+      }
+    });
+
+    test("Mute Channel in the channel sheet opens a second page, and the back arrow returns", async ({
+      page,
+    }) => {
+      await signIn(page);
+      await page.locator("[data-testid='sidebar-toggle']").click();
+      await holdFinger(page, ".channel-list .channel-item", 800);
+      const sheet = page.locator("[data-testid='channel-sheet']");
+      await expect(sheet).toBeVisible();
+
+      await sheet.locator("[data-testid='ctx-mute-channel']").tap();
+      await expect(sheet.locator("[data-testid='menu-sheet-back']")).toBeVisible();
+      await expect(sheet.locator("[data-testid='ctx-mute-for-3600000']")).toBeVisible();
+      await expect(sheet.locator("[data-testid='ctx-mute-channel']")).toHaveCount(0);
+
+      await sheet.locator("[data-testid='menu-sheet-back']").tap();
+      await expect(sheet.locator("[data-testid='ctx-mute-channel']")).toBeVisible();
+      await expect(sheet.locator("[data-testid='menu-sheet-back']")).toHaveCount(0);
+
+      await sheet.locator("[data-testid='ctx-notify-settings']").tap();
+      await expect(sheet.locator("[role='radio']")).toHaveCount(4);
+      await sheet.locator("[data-testid='ctx-notify-nothing']").tap();
+      await expect(sheet).toHaveCount(0);
+    });
+
+    test("the server name opens the server menu as a sheet", async ({ page }) => {
+      await signIn(page);
+      await page.locator("[data-testid='sidebar-toggle']").click();
+      await page.locator("button[data-testid='server-name']").tap();
+      const sheet = page.locator("[data-testid='server-sheet']");
+      await expect(sheet).toBeVisible();
+      await expect(page.locator(".server-menu")).toHaveCount(0);
+      await expect(sheet.locator("[data-testid='server-menu-notifications']")).toBeVisible();
+      await page.locator(".bottom-sheet-overlay").tap({ position: { x: 20, y: 20 } });
+      await expect(sheet).toHaveCount(0);
+    });
+
+    test("the status dot opens the status picker as a sheet", async ({ page }) => {
+      await signIn(page);
+      await page.locator("[data-testid='sidebar-toggle']").click();
+      await page.locator(".status-picker-dot").tap();
+      const sheet = page.locator("[data-testid='status-sheet']");
+      await expect(sheet).toBeVisible();
+      await expect(page.locator(".status-picker-dropdown--open")).toHaveCount(0);
+      await expect(sheet.locator("[role='radio']")).toHaveCount(4);
+      await expect(sheet.locator("[data-testid='status-sheet-online']")).toHaveAttribute(
+        "aria-checked",
+        "true",
+      );
+      const idle = sheet.locator("[data-testid='status-sheet-idle']");
+      expect((await idle.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
+      await idle.tap();
+      await expect(sheet).toHaveCount(0);
+      await expect(page.locator(".status-picker-dot")).toHaveCSS("background-color", /rgb\(/);
+    });
+
+    test("a message's header shows the time alone, with the full date on hover", async ({
+      page,
+    }) => {
+      await signIn(page);
+      const time = page.locator("[data-testid='message-101'] .msg-time");
+      await expect(time).toBeVisible();
+      // "10:00 AM" or "10:00": no day word and no date.
+      await expect(time).toHaveText(/^\d{1,2}:\d{2}( [AP]M)?$/);
+      await expect(time).toHaveAttribute("title", /March 15, 2026|15 March 2026/);
+    });
+
+    test("reaction chips and the menu rows are 44 px to hit", async ({ page }) => {
+      await signIn(page);
+      await page.evaluate(() => {
+        const chip = document.createElement("button");
+        chip.className = "reaction-chip add-reaction";
+        chip.dataset["testid"] = "probe-chip";
+        chip.textContent = "+";
+        document.body.appendChild(chip);
+        const menu = document.createElement("div");
+        menu.className = "context-menu";
+        menu.style.cssText = "top:0;left:0";
+        menu.innerHTML = '<button class="context-menu-item" data-testid="probe-row">Row</button>';
+        document.body.appendChild(menu);
+      });
+      for (const id of ["probe-chip", "probe-row"]) {
+        const box = await page.locator(`[data-testid='${id}']`).boundingBox();
+        expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+      }
+      expect(
+        (await page.locator("[data-testid='probe-chip']").boundingBox())?.width ?? 0,
+      ).toBeGreaterThanOrEqual(44);
+    });
+
+    // A phone on its side: wider than 800 px, but short. Not the desktop layout.
+    const landscape =
+      profile.name === "Pixel 7" ? { width: 915, height: 412 } : { width: 844, height: 390 };
+
+    test("a phone turned sideways keeps the drawer, not the desktop sidebar", async ({ page }) => {
+      await signIn(page);
+      await page.setViewportSize(landscape);
+      const toggle = page.locator("[data-testid='sidebar-toggle']");
+      await expect(toggle).toBeVisible();
+      const sidebar = page.locator("[data-testid='unified-sidebar']");
+      await expect(sidebar).toHaveCSS("width", "0px");
+      await expect(page.locator("[data-testid='server-rail']")).toBeHidden();
+      await noHorizontalScroll(page);
+
+      await toggle.tap();
+      await expect(sidebar).toHaveClass(/drawer-open/);
+      const box = await sidebar.boundingBox();
+      expect(box?.width ?? 0).toBeGreaterThan(150);
+      expect(box?.width ?? 0).toBeLessThanOrEqual(350);
+      await expect(page.locator("[data-testid='server-rail']")).toBeVisible();
+      await expect(sidebar.locator(".channel-list .channel-item").first()).toBeInViewport();
+      await noHorizontalScroll(page);
+
+      await page
+        .locator("[data-testid='sidebar-drawer-backdrop']")
+        .tap({ position: { x: 600, y: 200 } });
+      await expect(sidebar).not.toHaveClass(/drawer-open/);
+    });
+
+    test("a phone turned sideways gets the member list as an overlay", async ({ page }) => {
+      await signIn(page);
+      await page.setViewportSize(landscape);
+      await page.locator("[data-testid='member-list-toggle']").tap();
+      const column = page.locator("#member-column");
+      await expect(column).toBeVisible();
+      await expect(column).toHaveCSS("position", "fixed");
+      // Over the chat, not squeezing it: the chat keeps nearly its whole width.
+      const chat = await page.getByTestId("chat-area").boundingBox();
+      expect(chat?.width ?? 0).toBeGreaterThan(landscape.width - 40);
+      await noHorizontalScroll(page);
+    });
+
+    test("a phone turned sideways keeps Settings as a list and a section", async ({ page }) => {
+      await signIn(page);
+      await page.setViewportSize(landscape);
+      await page.locator("[data-testid='sidebar-toggle']").tap();
+      await page.locator("button[aria-label='Settings']").tap();
+      const overlay = page.locator("[data-testid='settings-overlay']");
+      await expect(overlay).toHaveClass(/open/);
+      const appearance = overlay.locator(".settings-nav-item[role='tab']", {
+        hasText: "Appearance",
+      });
+      await expect(overlay.locator(".settings-content")).toBeHidden();
+      await appearance.tap();
+      await expect(overlay.locator(".settings-content h1")).toHaveText("Appearance");
+      await overlay.locator("[data-testid='settings-back']").tap();
+      await expect(appearance).toBeVisible();
+      await noHorizontalScroll(page);
+    });
+
+    test("turning the phone sideways and back swaps the layout both ways", async ({ page }) => {
+      await signIn(page);
+      const portrait = page.viewportSize()!;
+      await page.setViewportSize(landscape);
+      await expect(page.locator("[data-testid='unified-sidebar']")).toHaveCSS("width", "0px");
+      await page.setViewportSize(portrait);
+      await expect(page.locator("[data-testid='sidebar-toggle']")).toBeVisible();
+      await page.locator("[data-testid='sidebar-toggle']").tap();
+      await expect(page.locator("[data-testid='unified-sidebar']")).toHaveClass(/drawer-open/);
     });
 
     test("a tap on a message shows no action bar and opens no menu", async ({ page }) => {
@@ -732,6 +903,21 @@ for (const profile of PROFILES) {
 
       await bar.locator("[data-testid='pcb-mute']").tap();
       await expect(bar.locator("[data-testid='pcb-mute']")).toHaveAttribute("aria-pressed", "true");
+    });
+
+    test("the call bar shows on a phone turned sideways", async ({ page }) => {
+      await page.setViewportSize(
+        profile.name === "Pixel 7" ? { width: 915, height: 412 } : { width: 844, height: 390 },
+      );
+      await page.locator("[data-testid='sidebar-toggle']").tap();
+      await expect(page.locator("[data-testid='unified-sidebar']")).toHaveClass(/drawer-open/);
+      await page.locator(".channel-item.voice", { hasText: "Voice Chat" }).tap();
+      await page.getByRole("button", { name: "Join Voice" }).tap();
+      await markConnected(page);
+      const bar = page.locator("[data-testid='phone-call-bar']");
+      await expect(bar).toBeVisible();
+      await expect(bar.locator("[data-testid='pcb-name']")).toHaveText("Voice Chat");
+      await noHorizontalScroll(page);
     });
 
     test("Leave on the call bar ends the call and hides the bar", async ({ page }) => {

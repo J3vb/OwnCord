@@ -241,7 +241,9 @@
 }
 /* The portal serves one server, and a narrow window has no room for a rail
    beside the chat. */
-@media (max-width: 800px) {
+@media (max-width: 800px),
+  (pointer: coarse) and (max-width: 899px),
+  (pointer: coarse) and (max-height: 499px) {
   .server-rail-slot,
   .server-rail {
     display: none;
@@ -251,7 +253,7 @@
    drawer's left in the drawer's layer while the drawer is open (SidebarDrawer
    marks the slot), with the channel list to its right (responsive.css). It
    replaces the user bar's Switch server button. */
-@media (max-width: 800px) and (pointer: coarse) {
+@media (pointer: coarse) and (max-width: 899px), (pointer: coarse) and (max-height: 499px) {
   .app.has-server-rail {
     --drawer-rail-width: calc(72px + env(safe-area-inset-left));
   }
