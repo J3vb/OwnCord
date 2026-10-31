@@ -157,8 +157,14 @@ function captureStill(img: HTMLImageElement, key: string, done: (s: Still | null
   let canvas: HTMLCanvasElement;
   try {
     canvas = document.createElement("canvas");
-    const w = Math.min(img.naturalWidth, img.width || 400);
-    const h = Math.min(img.naturalHeight, img.height || 350);
+    // Scale as a whole, so a box that is not the image's shape (a sticker's
+    // square, object-fit: contain) does not stretch the still.
+    const nw = img.naturalWidth;
+    const nh = img.naturalHeight;
+    const scale =
+      nw > 0 && nh > 0 ? Math.min(1, (img.width || 400) / nw, (img.height || 350) / nh) : 1;
+    const w = Math.round(nw * scale);
+    const h = Math.round(nh * scale);
     canvas.width = w;
     canvas.height = h;
     const ctx = canvas.getContext("2d");
@@ -506,6 +512,16 @@ export function discardMedia(img: HTMLImageElement): void {
   tracked.delete(img);
   observer?.unobserve(img);
   allTracked.delete(entry.ref);
+}
+
+/**
+ * Play a tracked image for another AUTO_PAUSE_MS, as its ▶ button does. For
+ * surfaces that also play on hover or tap (stickers); untracked images are left alone.
+ */
+export function playMedia(img: HTMLImageElement): void {
+  const entry = tracked.get(img);
+  if (entry === undefined) return;
+  unfreezeImage(img, entry);
 }
 
 /** Freeze all tracked GIFs (called on window hide/blur). */

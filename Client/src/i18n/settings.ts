@@ -214,7 +214,7 @@ export const settingsText = defineCatalog("settings", {
   "images.inline.desc": "Automatically display images, videos, and GIFs inline",
   "images.animateGifs.label": "Animate GIFs",
   "images.animateGifs.desc":
-    "Play GIF animations automatically. When disabled, GIFs show as static images",
+    "Play GIF and sticker animations automatically. When disabled, they show as static images",
 
   "images.animateEmoji.label": "Animate emoji",
   "images.animateEmoji.desc":

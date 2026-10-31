@@ -1499,6 +1499,8 @@ ul.md-list-nested {
 }
 .msg-image:hover .gif-play-btn,
 .msg-image:focus-within .gif-play-btn,
+.msg-sticker:hover .gif-play-btn,
+.msg-sticker:focus-within .gif-play-btn,
 .gif-paused .gif-play-btn {
   opacity: 1;
 }
@@ -2472,6 +2474,10 @@ ul.md-list-nested {
   width: 160px;
   height: 160px;
   object-fit: contain;
+}
+/* A paused sticker keeps its ▶ button but is not labelled "GIF". */
+.msg-sticker.gif-paused::after {
+  content: none;
 }
 .msg-sticker-deleted {
   display: inline-block;
