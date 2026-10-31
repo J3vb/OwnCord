@@ -1,6 +1,5 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import * as mocks from "../../helpers/mainPageMocks";
-import { savePref } from "../../../src/lib/prefs/preferences";
 import { createMainPage } from "../../../src/pages/MainPage";
 import { channelsStore } from "../../../src/stores/channels.store";
 import { uiStore } from "../../../src/stores/ui.store";
@@ -19,13 +18,23 @@ import {
   alertMissedCall,
 } from "../../../src/features/direct-messages/callAlerts";
 import {
-  resetStores,
   FakeWsClient,
   finishCallJoin,
   fakeWs,
-  fakeApi,
-  dmChannel,
+  useMainPageHarness,
+  mountPage,
+  voiceUser,
+  connectedDm,
+  mountSettled,
+  startCall,
+  callPanelEl,
+  incomingCall,
+  callDeclined,
+  roster,
+  leaveVoice,
+  incomingBannerEl,
 } from "../../helpers/mainPageHarness";
+import { withFakeTimers } from "../../helpers/withFakeTimers";
 
 vi.mock("../../../src/features/content-consent/external", (importOriginal) =>
   mocks.consentExternalMock(importOriginal),
@@ -45,81 +54,30 @@ vi.mock("../../../src/pages/main-page/SidebarArea", () => mocks.pageSidebarAreaM
 vi.mock("../../../src/features/navigation/destinations", () => mocks.navigationDestinationsMock());
 vi.mock("../../../src/pages/main-page/ChatArea", () => mocks.pageChatAreaMock());
 
-const {
-  mockSetAudioVolumeHost,
-  mockMountChannel,
-  mockDestroyChannel,
-  mockCreateChatArea,
-  capturedChatAreaRef,
-} = mocks;
-
-// The remembered-open pref must never leak between tests, whatever their order.
-afterEach(() => {
-  localStorage.removeItem("owncord:settings:dmProfileOpen");
-});
+const { mockSetAudioVolumeHost, mockCreateChatArea } = mocks;
 
 describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   let container: HTMLDivElement;
   let page: ReturnType<typeof createMainPage>;
 
-  beforeEach(() => {
-    resetStores();
-    mockMountChannel.mockClear();
-    mockDestroyChannel.mockClear();
-    mockCreateChatArea.mockClear();
-    capturedChatAreaRef.current = null;
-    // The panel opens with a 1:1 DM by default (WP 3B-3); the toggle tests below
-    // start from "remembered closed" and the auto-open tests set it back.
-    savePref("dmProfileOpen", false);
-    container = document.createElement("div");
-    document.body.appendChild(container);
+  useMainPageHarness({
+    wired: (c) => {
+      container = c;
+    },
+    currentPage: () => page,
   });
-
-  afterEach(() => {
-    page?.destroy?.();
-    container.remove();
-    localStorage.removeItem("owncord:settings:dmProfileOpen");
-  });
-
-  function openOneToOneDm(id: number): void {
-    channelsStore.setState((prev) => {
-      const ch = new Map(prev.channels);
-      ch.set(id, dmChannel(id, "dm-bob"));
-      return { ...prev, channels: ch, activeChannelId: id };
-    });
-    dmStore.setState(() => ({
-      channels: [
-        {
-          channelId: id,
-          recipient: { id: 10, username: "bob", avatar: "", status: "online" },
-          participants: [{ id: 10, username: "bob", avatar: "", status: "online" }],
-          name: "",
-          isGroup: false,
-          lastMessageId: null,
-          lastMessage: "",
-          lastMessageAt: "",
-          unreadCount: 0,
-          mentionCount: 0,
-        },
-      ],
-    }));
-  }
 
   it("tells the caller when the callee declines, and Ring again rings once more", async () => {
     const ws = fakeWs();
-    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
-    openOneToOneDm(50);
-    page = createMainPage({ ws, api: fakeApi() });
-    page.mount(container);
-    // The panel is a lazy chunk.
-    await vi.dynamicImportSettled();
+    connectedDm(50);
+    page = await mountSettled(container, ws);
 
-    mockCreateChatArea.mock.calls[0]![0].onStartCall();
+    startCall();
     finishCallJoin();
-    const panel = document.querySelector('[data-testid="dm-call-panel"]') as HTMLElement;
+    const panel = callPanelEl();
     expect(panel.dataset.state).toBe("outgoing");
 
-    ws.emit("call_declined", { channel_id: 50, from_user: 10, username: "bob" });
+    callDeclined(ws);
     expect(panel.dataset.state).toBe("unanswered");
     // The panel is the caller's feedback while the DM is open: no toast too.
     expect(container.querySelector('[data-testid="toast"]')).toBeNull();
@@ -138,8 +96,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
 
   it("a group call is declined once every online callee declined; offline members are not waited on", async () => {
     const ws = fakeWs();
-    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
-    openOneToOneDm(50);
+    connectedDm(50);
     dmStore.setState((prev) => ({
       channels: prev.channels.map((c) => ({
         ...c,
@@ -150,24 +107,21 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
         ],
       })),
     }));
-    page = createMainPage({ ws, api: fakeApi() });
-    page.mount(container);
-    await vi.dynamicImportSettled();
+    page = await mountSettled(container, ws);
 
-    mockCreateChatArea.mock.calls[0]![0].onStartCall();
+    startCall();
     finishCallJoin();
-    const panel = document.querySelector('[data-testid="dm-call-panel"]') as HTMLElement;
+    const panel = callPanelEl();
     expect(panel.dataset.state).toBe("outgoing");
 
-    ws.emit("call_declined", { channel_id: 50, from_user: 10, username: "bob" });
+    callDeclined(ws);
     expect(panel.dataset.state).toBe("unanswered");
     page.destroy?.();
   });
 
   it("Ring again in a connected group call with a member missing re-rings the group without a Calling… state (3B-8)", async () => {
     const ws = fakeWs();
-    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
-    openOneToOneDm(50);
+    connectedDm(50);
     dmStore.setState((prev) => ({
       channels: prev.channels.map((c) => ({
         ...c,
@@ -178,9 +132,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
         ],
       })),
     }));
-    page = createMainPage({ ws, api: fakeApi() });
-    page.mount(container);
-    await vi.dynamicImportSettled();
+    page = await mountSettled(container, ws);
 
     // Alice and bob are in the room; dan is not.
     voiceStore.setState((prev) => ({
@@ -196,22 +148,14 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
               [10, "bob"],
             ].map(([userId, username]) => [
               userId as number,
-              {
-                userId: userId as number,
-                username: username as string,
-                muted: false,
-                deafened: false,
-                speaking: false,
-                camera: false,
-                screenshare: false,
-              },
+              voiceUser(userId as number, { username: username as string }),
             ]),
           ),
         ],
       ]),
     }));
     voiceStore.flush();
-    const panel = document.querySelector('[data-testid="dm-call-panel"]') as HTMLElement;
+    const panel = callPanelEl();
     expect(panel.dataset.state).toBe("connected");
     const again = panel.querySelector('[data-testid="dcp-ring-again"]') as HTMLElement;
     expect(again).not.toBeNull();
@@ -226,8 +170,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
 
   it("calling an offline 1:1 contact says so at once instead of ringing back for 30 s", async () => {
     const ws = fakeWs();
-    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
-    openOneToOneDm(50);
+    connectedDm(50);
     dmStore.setState((prev) => ({
       channels: prev.channels.map((c) => ({
         ...c,
@@ -235,14 +178,12 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
         participants: c.participants.map((p) => ({ ...p, status: "offline" })),
       })),
     }));
-    page = createMainPage({ ws, api: fakeApi() });
-    page.mount(container);
-    await vi.dynamicImportSettled();
+    page = await mountSettled(container, ws);
     vi.mocked(startRingback).mockClear();
 
-    mockCreateChatArea.mock.calls[0]![0].onStartCall();
+    startCall();
     finishCallJoin();
-    const panel = document.querySelector('[data-testid="dm-call-panel"]') as HTMLElement;
+    const panel = callPanelEl();
     expect(panel.dataset.state).toBe("unanswered");
     expect(panel.querySelector('[data-testid="dcp-caption"]')!.textContent).toBe("bob is offline");
     expect(startRingback).not.toHaveBeenCalled();
@@ -257,17 +198,14 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
 
     async function mountCaller(): Promise<{ ws: FakeWsClient; panel: HTMLElement }> {
       const ws = fakeWs();
-      uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
-      openOneToOneDm(50);
-      page = createMainPage({ ws, api: fakeApi() });
-      page.mount(container);
-      await vi.dynamicImportSettled();
-      return { ws, panel: document.querySelector('[data-testid="dm-call-panel"]') as HTMLElement };
+      connectedDm(50);
+      page = await mountSettled(container, ws);
+      return { ws, panel: callPanelEl() };
     }
 
     it("rings only once the caller's join has left joining, and keeps the join", async () => {
       const { ws } = await mountCaller();
-      mockCreateChatArea.mock.calls[0]![0].onStartCall();
+      startCall();
       expect(voiceStore.getState().voiceStatus).toBe("joining");
       expect(rings(ws)).toHaveLength(0);
 
@@ -279,7 +217,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
 
     it("does not ring while the join is still securing or connecting", async () => {
       const { ws } = await mountCaller();
-      mockCreateChatArea.mock.calls[0]![0].onStartCall();
+      startCall();
       voiceStore.setState((prev) => ({ ...prev, voiceStatus: "securing" as const }));
       voiceStore.flush();
       expect(rings(ws)).toHaveLength(0);
@@ -290,40 +228,27 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     });
 
     it("drops a delayed Ring again when the caller leaves the call", async () => {
-      vi.useFakeTimers();
-      try {
+      await withFakeTimers(async () => {
         const { ws } = await mountCaller();
-        mockCreateChatArea.mock.calls[0]![0].onStartCall();
+        startCall();
         finishCallJoin();
         vi.advanceTimersByTime(1000);
         // The callee declines; Ring again inside the spacing window.
-        ws.emit("call_declined", { channel_id: 50, from_user: 10, username: "bob" });
+        callDeclined(ws);
         (document.querySelector('[data-testid="dcp-ring-again"]') as HTMLElement).click();
-        voiceStore.setState((prev) => ({
-          ...prev,
-          currentChannelId: null,
-          voiceStatus: "idle" as const,
-        }));
-        voiceStore.flush();
+        leaveVoice();
 
         vi.advanceTimersByTime(5000);
         expect(rings(ws)).toHaveLength(1);
         page.destroy?.();
-      } finally {
-        vi.useRealTimers();
-      }
+      });
     });
 
     it("sends no ring and shows no Calling… when the join is refused", async () => {
       const { ws, panel } = await mountCaller();
-      mockCreateChatArea.mock.calls[0]![0].onStartCall();
+      startCall();
       // The dispatcher's join rollback.
-      voiceStore.setState((prev) => ({
-        ...prev,
-        currentChannelId: null,
-        voiceStatus: "idle" as const,
-      }));
-      voiceStore.flush();
+      leaveVoice();
 
       expect(rings(ws)).toHaveLength(0);
       expect(panel.dataset.state).not.toBe("outgoing");
@@ -331,8 +256,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     });
 
     it("a second Call 1 s after a ring waits for the server's 3 s window", async () => {
-      vi.useFakeTimers();
-      try {
+      await withFakeTimers(async () => {
         const { ws, panel } = await mountCaller();
         const start = mockCreateChatArea.mock.calls[0]![0].onStartCall;
         start();
@@ -350,14 +274,11 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
         expect(rings(ws)).toHaveLength(2);
         expect(panel.dataset.state).toBe("outgoing");
         page.destroy?.();
-      } finally {
-        vi.useRealTimers();
-      }
+      });
     });
 
     it("drops a waiting ring when the socket drops before it fires", async () => {
-      vi.useFakeTimers();
-      try {
+      await withFakeTimers(async () => {
         const { ws } = await mountCaller();
         const start = mockCreateChatArea.mock.calls[0]![0].onStartCall;
         start();
@@ -370,14 +291,11 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
         vi.advanceTimersByTime(5000);
         expect(rings(ws)).toHaveLength(1);
         page.destroy?.();
-      } finally {
-        vi.useRealTimers();
-      }
+      });
     });
 
     it("drops a waiting ring across a drop that reconnects before it fires", async () => {
-      vi.useFakeTimers();
-      try {
+      await withFakeTimers(async () => {
         const { ws } = await mountCaller();
         const start = mockCreateChatArea.mock.calls[0]![0].onStartCall;
         start();
@@ -392,14 +310,11 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
         vi.advanceTimersByTime(5000);
         expect(rings(ws)).toHaveLength(1);
         page.destroy?.();
-      } finally {
-        vi.useRealTimers();
-      }
+      });
     });
 
     it("keeps a margin over the server's 3 s window for transport jitter", async () => {
-      vi.useFakeTimers();
-      try {
+      await withFakeTimers(async () => {
         const { ws } = await mountCaller();
         const start = mockCreateChatArea.mock.calls[0]![0].onStartCall;
         start();
@@ -412,9 +327,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
         vi.advanceTimersByTime(500);
         expect(rings(ws)).toHaveLength(2);
         page.destroy?.();
-      } finally {
-        vi.useRealTimers();
-      }
+      });
     });
 
     it("a ring the server rate-limits ends the outgoing call", async () => {
@@ -422,7 +335,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
       vi.mocked(ws.send).mockImplementation((m) =>
         (m as { type: string }).type === "call_ring" ? "ring-id" : "id",
       );
-      mockCreateChatArea.mock.calls[0]![0].onStartCall();
+      startCall();
       finishCallJoin();
       expect(panel.dataset.state).toBe("outgoing");
 
@@ -434,45 +347,34 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     });
 
     it("drops a waiting ring when the caller leaves before it fires", async () => {
-      vi.useFakeTimers();
-      try {
+      await withFakeTimers(async () => {
         const { ws } = await mountCaller();
         const start = mockCreateChatArea.mock.calls[0]![0].onStartCall;
         start();
         finishCallJoin();
         vi.advanceTimersByTime(1000);
         start();
-        voiceStore.setState((prev) => ({
-          ...prev,
-          currentChannelId: null,
-          voiceStatus: "idle" as const,
-        }));
-        voiceStore.flush();
+        leaveVoice();
 
         vi.advanceTimersByTime(5000);
         expect(rings(ws)).toHaveLength(1);
         page.destroy?.();
-      } finally {
-        vi.useRealTimers();
-      }
+      });
     });
   });
 
   it("a ring refused because the callee has not accepted ends the outgoing call at once", async () => {
     const ws = fakeWs();
-    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
-    openOneToOneDm(50);
-    page = createMainPage({ ws, api: fakeApi() });
-    page.mount(container);
-    await vi.dynamicImportSettled();
+    connectedDm(50);
+    page = await mountSettled(container, ws);
     vi.mocked(stopRingback).mockClear();
 
     vi.mocked(ws.send).mockImplementation((m) =>
       (m as { type: string }).type === "call_ring" ? "ring-id" : "id",
     );
-    mockCreateChatArea.mock.calls[0]![0].onStartCall();
+    startCall();
     finishCallJoin();
-    const panel = document.querySelector('[data-testid="dm-call-panel"]') as HTMLElement;
+    const panel = callPanelEl();
     expect(panel.dataset.state).toBe("outgoing");
 
     const refusal = {
@@ -496,18 +398,15 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   describe("any error answering the ring ends the outgoing call", () => {
     async function mountRinging(): Promise<HTMLElement> {
       const ws = fakeWs();
-      uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
-      openOneToOneDm(50);
-      page = createMainPage({ ws, api: fakeApi() });
-      page.mount(container);
-      await vi.dynamicImportSettled();
+      connectedDm(50);
+      page = await mountSettled(container, ws);
       vi.mocked(stopRingback).mockClear();
       vi.mocked(ws.send).mockImplementation((m) =>
         (m as { type: string }).type === "call_ring" ? "ring-id" : "id",
       );
-      mockCreateChatArea.mock.calls[0]![0].onStartCall();
+      startCall();
       finishCallJoin();
-      const panel = document.querySelector('[data-testid="dm-call-panel"]') as HTMLElement;
+      const panel = callPanelEl();
       expect(panel.dataset.state).toBe("outgoing");
       ringWs = ws;
       return panel;
@@ -541,22 +440,19 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
 
   it("a callee's decline while the caller is on another channel shows one toast", async () => {
     const ws = fakeWs();
-    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
-    openOneToOneDm(50);
-    page = createMainPage({ ws, api: fakeApi() });
-    page.mount(container);
-    await vi.dynamicImportSettled();
+    connectedDm(50);
+    page = await mountSettled(container, ws);
     vi.mocked(startRingback).mockClear();
     vi.mocked(stopRingback).mockClear();
 
-    mockCreateChatArea.mock.calls[0]![0].onStartCall();
+    startCall();
     finishCallJoin();
     expect(startRingback).toHaveBeenCalledTimes(1);
     // The caller moves on to another channel while the callee decides.
     channelsStore.setState((prev) => ({ ...prev, activeChannelId: 7 }));
     channelsStore.flush();
 
-    ws.emit("call_declined", { channel_id: 50, from_user: 10, username: "bob" });
+    callDeclined(ws);
 
     expect(stopRingback).toHaveBeenCalledTimes(1);
     const toasts = container.querySelectorAll('[data-testid="toast"]');
@@ -568,11 +464,8 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
 
   it("an unanswered ring while the caller is on another channel shows one 'No answer' toast", async () => {
     const ws = fakeWs();
-    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
-    openOneToOneDm(50);
-    page = createMainPage({ ws, api: fakeApi() });
-    page.mount(container);
-    await vi.dynamicImportSettled();
+    connectedDm(50);
+    page = await mountSettled(container, ws);
 
     // Catch the outgoing call's own 30s window and run it by hand.
     const realSetTimeout = globalThis.setTimeout;
@@ -585,7 +478,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
       ringTimeout = fn;
       return 0;
     }) as unknown as typeof setTimeout);
-    mockCreateChatArea.mock.calls[0]![0].onStartCall();
+    startCall();
     finishCallJoin();
     timers.mockRestore();
 
@@ -605,41 +498,25 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
 
   it("redialing from inside a live call rings but leaves no outgoing ring behind", async () => {
     const ws = fakeWs();
-    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
-    openOneToOneDm(50);
-    const vu = (userId: number, username: string) => ({
-      userId,
-      username,
-      muted: false,
-      deafened: false,
-      speaking: false,
-      camera: false,
-      screenshare: false,
-    });
-    const roster = (ids: Array<[number, string]>) =>
-      new Map([[50, new Map(ids.map(([id, name]) => [id, vu(id, name)]))]]);
+    connectedDm(50);
+    const alice = voiceUser(1, { username: "alice" });
+    const bob = voiceUser(10, { username: "bob" });
     voiceStore.setState((prev) => ({
       ...prev,
       currentChannelId: 50,
-      voiceUsers: roster([
-        [1, "alice"],
-        [10, "bob"],
-      ]),
+      voiceUsers: roster(50, [alice, bob]),
     }));
     voiceStore.flush();
-    page = createMainPage({ ws, api: fakeApi() });
-    page.mount(container);
-    // The panel is a lazy chunk.
-    await vi.dynamicImportSettled();
+    page = await mountSettled(container, ws);
 
-    mockCreateChatArea.mock.calls[0]![0].onStartCall();
+    startCall();
     expect(ws.send).toHaveBeenCalledWith({ type: "call_ring", payload: { channel_id: 50 } });
-    const panel = document.querySelector('[data-testid="dm-call-panel"]') as HTMLElement;
+    const panel = callPanelEl();
     expect(panel.dataset.state).toBe("connected");
 
     // Bob hangs up before any other voice change: the panel must not start
     // "Calling bob…" about someone who was just in the call.
-    voiceStore.setState((prev) => ({ ...prev, voiceUsers: roster([[1, "alice"]]) }));
+    voiceStore.setState((prev) => ({ ...prev, voiceUsers: roster(50, [alice]) }));
     voiceStore.flush();
     expect(panel.dataset.state).toBe("connected");
 
@@ -667,8 +544,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
       roleRevision: 0,
     }));
 
-    page = createMainPage({ ws, api: fakeApi() });
-    page.mount(container);
+    page = mountPage(container, ws);
 
     // Alice (10) has set a nickname of "Ali" -- every other identity surface
     // (voice roster, member list, DM header) resolves through it, so the
@@ -683,8 +559,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     const ws = fakeWs();
     uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
 
-    page = createMainPage({ ws, api: fakeApi() });
-    page.mount(container);
+    page = mountPage(container, ws);
 
     ws.emit("call_incoming", { channel_id: 50, from_user: 999, username: "stranger" });
 
@@ -696,13 +571,12 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     const ws = fakeWs();
     uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
 
-    page = createMainPage({ ws, api: fakeApi() });
-    page.mount(container);
+    page = mountPage(container, ws);
 
     // Alice (10) rings a group DM; this client is a third participant.
-    ws.emit("call_incoming", { channel_id: 50, from_user: 10, username: "alice" });
+    incomingCall(ws);
 
-    const banner = document.querySelector('[data-testid="incoming-call-banner"]') as HTMLElement;
+    const banner = incomingBannerEl();
     expect(banner.style.display).not.toBe("none");
 
     // Bob (11), a different callee in the same group DM, declines. The
@@ -725,14 +599,13 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     const ws = fakeWs();
     uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
 
-    page = createMainPage({ ws, api: fakeApi() });
-    page.mount(container);
+    page = mountPage(container, ws);
 
     // Alice (10) rings this client's DM (channel 50).
-    ws.emit("call_incoming", { channel_id: 50, from_user: 10, username: "alice" });
+    incomingCall(ws);
 
     vi.mocked(alertMissedCall).mockClear();
-    const banner = document.querySelector('[data-testid="incoming-call-banner"]') as HTMLElement;
+    const banner = incomingBannerEl();
     expect(banner.style.display).not.toBe("none");
 
     // Alice also happens to be sitting in an unrelated server voice channel
@@ -756,14 +629,13 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     const ws = fakeWs();
     uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
 
-    page = createMainPage({ ws, api: fakeApi() });
-    page.mount(container);
+    page = mountPage(container, ws);
 
     // Alice (10) rings a group DM (channel 50); this client is a third
     // participant (C).
-    ws.emit("call_incoming", { channel_id: 50, from_user: 10, username: "alice" });
+    incomingCall(ws);
 
-    const banner = document.querySelector('[data-testid="incoming-call-banner"]') as HTMLElement;
+    const banner = incomingBannerEl();
     expect(banner.style.display).not.toBe("none");
 
     // Bob (11) already accepted and is sitting in the DM's voice channel.
@@ -772,25 +644,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     // her entry is absent here too — only Bob remains.
     voiceStore.setState((prev) => ({
       ...prev,
-      voiceUsers: new Map([
-        [
-          50,
-          new Map([
-            [
-              11,
-              {
-                userId: 11,
-                username: "bob",
-                muted: false,
-                deafened: false,
-                speaking: false,
-                camera: false,
-                screenshare: false,
-              },
-            ],
-          ]),
-        ],
-      ]),
+      voiceUsers: roster(50, [voiceUser(11, { username: "bob" })]),
     }));
     voiceStore.flush();
 
@@ -804,21 +658,12 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   it("stops a group ring when the last person leaves after the ringer did", () => {
     const ws = fakeWs();
     uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
-    page = createMainPage({ ws, api: fakeApi() });
-    page.mount(container);
-    ws.emit("call_incoming", { channel_id: 50, from_user: 10, username: "alice" });
-    const banner = document.querySelector('[data-testid="incoming-call-banner"]') as HTMLElement;
+    page = mountPage(container, ws);
+    incomingCall(ws);
+    const banner = incomingBannerEl();
 
-    const carol = {
-      userId: 11,
-      username: "carol",
-      muted: false,
-      deafened: false,
-      speaking: false,
-      camera: false,
-      screenshare: false,
-    };
-    const roster = (users: (typeof carol)[]) => {
+    const carol = voiceUser(11, { username: "carol" });
+    const setRoster = (users: (typeof carol)[]) => {
       voiceStore.setState((prev) => ({
         ...prev,
         voiceUsers: new Map([[50, new Map(users.map((u) => [u.userId, u]))]]),
@@ -826,12 +671,12 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
       voiceStore.flush();
     };
     // alice leaves while carol stays: the ring stays (OC-0235).
-    roster([carol]);
+    setRoster([carol]);
     ws.emit("voice_leave", { channel_id: 50, user_id: 10 });
     expect(banner.style.display).not.toBe("none");
 
     // carol, not the ringer, empties the room: the ring is over.
-    roster([]);
+    setRoster([]);
     ws.emit("voice_leave", { channel_id: 50, user_id: 11 });
     expect(banner.style.display).toBe("none");
   });
@@ -840,11 +685,10 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     const ws = fakeWs();
     uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
 
-    page = createMainPage({ ws, api: fakeApi() });
-    page.mount(container);
+    page = mountPage(container, ws);
 
-    ws.emit("call_incoming", { channel_id: 50, from_user: 10, username: "alice" });
-    const banner = document.querySelector('[data-testid="incoming-call-banner"]') as HTMLElement;
+    incomingCall(ws);
+    const banner = incomingBannerEl();
     expect(banner.style.display).not.toBe("none");
 
     // Joined without Accept (the header's call button, the Join strip, the
@@ -858,12 +702,11 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
 
   it("a ring raises one call alert, and a redial of the same ring none", async () => {
     const ws = fakeWs();
-    page = createMainPage({ ws, api: fakeApi() });
-    page.mount(container);
+    page = mountPage(container, ws);
     vi.mocked(alertIncomingCall).mockClear();
 
-    ws.emit("call_incoming", { channel_id: 50, from_user: 10, username: "alice" });
-    ws.emit("call_incoming", { channel_id: 50, from_user: 10, username: "alice" });
+    incomingCall(ws);
+    incomingCall(ws);
 
     await vi.waitFor(() => expect(alertIncomingCall).toHaveBeenCalledTimes(1));
     expect(vi.mocked(alertIncomingCall).mock.calls[0]![0]).toMatchObject({
@@ -874,13 +717,12 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
 
   it("a ring that times out reports one missed call; one the ringer cancelled reports none", async () => {
     const ws = fakeWs();
-    page = createMainPage({ ws, api: fakeApi() });
-    page.mount(container);
+    page = mountPage(container, ws);
     vi.mocked(alertMissedCall).mockClear();
     vi.mocked(alertIncomingCall).mockClear();
 
     // The ringer hangs up first: not a missed call.
-    ws.emit("call_incoming", { channel_id: 50, from_user: 10, username: "alice" });
+    incomingCall(ws);
     await vi.waitFor(() => expect(alertIncomingCall).toHaveBeenCalledTimes(1));
     ws.emit("call_declined", { channel_id: 50, from_user: 10 });
     // Catch the ring's 30s timer and run it by hand: fake timers would also
@@ -895,7 +737,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
       ringTimeout = fn;
       return 0;
     }) as unknown as typeof setTimeout);
-    ws.emit("call_incoming", { channel_id: 50, from_user: 10, username: "alice" });
+    incomingCall(ws);
     timers.mockRestore();
     expect(ringTimeout).not.toBeNull();
     // Let this ring's own alert land first: a mocked module imported again
@@ -905,7 +747,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
 
     await vi.waitFor(() => expect(alertMissedCall).toHaveBeenCalledTimes(1));
     expect(vi.mocked(alertMissedCall).mock.calls[0]![0]).toMatchObject({ channelId: 50 });
-    const banner = document.querySelector('[data-testid="incoming-call-banner"]') as HTMLElement;
+    const banner = incomingBannerEl();
     expect(banner.style.display).toBe("none");
   });
 
@@ -925,18 +767,16 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
       unreadCount: 0,
       mentionCount: 0,
     });
-    const banner = () =>
-      document.querySelector('[data-testid="incoming-call-banner"]') as HTMLElement;
+    const banner = () => incomingBannerEl();
 
     it("is cancelled with no missed call when the group leaves dmStore", async () => {
       const ws = fakeWs();
       dmStore.setState(() => ({ channels: [groupRow(50)] }));
-      page = createMainPage({ ws, api: fakeApi() });
-      page.mount(container);
+      page = mountPage(container, ws);
       vi.mocked(alertMissedCall).mockClear();
       vi.mocked(alertIncomingCall).mockClear();
 
-      ws.emit("call_incoming", { channel_id: 50, from_user: 10, username: "alice" });
+      incomingCall(ws);
       await vi.waitFor(() => expect(alertIncomingCall).toHaveBeenCalledTimes(1));
       expect(banner().style.display).not.toBe("none");
 
@@ -951,12 +791,11 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     it("is not cancelled by dmStore changes while its channel was never listed", async () => {
       const ws = fakeWs();
       dmStore.setState(() => ({ channels: [groupRow(60)] }));
-      page = createMainPage({ ws, api: fakeApi() });
-      page.mount(container);
+      page = mountPage(container, ws);
       vi.mocked(alertIncomingCall).mockClear();
 
       // The ring beats its dm_channel_open: channel 50 is not in dmStore yet.
-      ws.emit("call_incoming", { channel_id: 50, from_user: 10, username: "alice" });
+      incomingCall(ws);
       await vi.waitFor(() => expect(alertIncomingCall).toHaveBeenCalledTimes(1));
 
       // An unrelated group goes away, then another DM changes.
@@ -975,12 +814,11 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     saveUserStatus("dnd");
     try {
       const ws = fakeWs();
-      page = createMainPage({ ws, api: fakeApi() });
-      page.mount(container);
+      page = mountPage(container, ws);
 
-      ws.emit("call_incoming", { channel_id: 50, from_user: 10, username: "alice" });
+      incomingCall(ws);
 
-      const banner = document.querySelector('[data-testid="incoming-call-banner"]') as HTMLElement;
+      const banner = incomingBannerEl();
       expect(banner.style.display).not.toBe("none");
     } finally {
       saveUserStatus("online");
@@ -993,22 +831,20 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     voiceStore.setState((prev) => ({ ...prev, currentChannelId: 50 }));
     voiceStore.flush();
 
-    page = createMainPage({ ws, api: fakeApi() });
-    page.mount(container);
+    page = mountPage(container, ws);
     vi.mocked(startRingChime).mockClear();
 
     // Someone else in the call redials the DM: the server rings everyone
     // else in it, this client included.
-    ws.emit("call_incoming", { channel_id: 50, from_user: 10, username: "alice" });
+    incomingCall(ws);
 
-    const banner = document.querySelector('[data-testid="incoming-call-banner"]') as HTMLElement;
+    const banner = incomingBannerEl();
     expect(banner.style.display).toBe("none");
     expect(startRingChime).not.toHaveBeenCalled();
   });
 
   it("clears settingsOpen on destroy so the next page (e.g. ConnectPage after logout) doesn't inherit a stale open overlay", () => {
-    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
-    page.mount(container);
+    page = mountPage(container);
 
     uiStore.setState((prev) => ({ ...prev, settingsOpen: true }));
 
@@ -1018,15 +854,13 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   });
 
   it("scopes per-user volume prefs to the connected host, like channel mutes and the NSFW gate", () => {
-    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
-    page.mount(container);
+    page = mountPage(container);
 
     expect(mockSetAudioVolumeHost).toHaveBeenCalledWith("");
   });
 
   it("closes an open image lightbox on destroy so it doesn't survive onto the next page", () => {
-    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
-    page.mount(container);
+    page = mountPage(container);
 
     openImageLightbox("https://example.com/pic.png", "pic");
     expect(document.body.querySelector(".image-lightbox")).not.toBeNull();

@@ -5,7 +5,15 @@ import { setTalkButton } from "../../../src/lib/ui/inputMode";
 import { setLocalMuted, setLocalDeafened, setPttGated, setListenOnly } from "@stores/voice.store";
 import { getLiveKitProxyPort } from "../../../src/platform/desktop/nativeProxies";
 import { takeWatchRefusal } from "../../../src/lib/voice/watchRequest";
-import { createDeferred, useLiveKitSessionHarness } from "../../helpers/livekitSessionHarness";
+import {
+  createDeferred,
+  useLiveKitSessionHarness,
+  enterReconnecting,
+  runReconnect,
+  startReconnect,
+  enterConnected,
+  stubPrefs,
+} from "../../helpers/livekitSessionHarness";
 
 vi.mock("livekit-client", () => mocks.livekitClientMock());
 vi.mock("@stores/voice.store", () => mocks.voiceStoreMock());
@@ -17,7 +25,7 @@ vi.mock("@lib/voice/noiseSuppression", () => mocks.voiceNoiseSuppressionMock());
 vi.mock("@lib/net/e2eeCrypto", () => mocks.netE2eeCryptoMock());
 vi.mock("@lib/net/identity", () => mocks.netIdentityMock());
 
-const { mockVoiceState, pttPollingListeners, mockRoom, mockInvoke, mockLoadPref } = mocks;
+const { mockVoiceState, pttPollingListeners, mockRoom, mockInvoke } = mocks;
 
 describe("LiveKitSession", () => {
   let session: LiveKitSession;
@@ -201,13 +209,11 @@ describe("LiveKitSession", () => {
         };
         const roomReady = createDeferred<any>();
         vi.spyOn(session as any, "createRoom").mockImplementationOnce(() => roomReady.promise);
-        const reconnect = (session as any).attemptAutoReconnect(
-          "old-token",
-          "/livekit",
-          1,
-          undefined,
-          ac.signal,
-        );
+        const reconnect = startReconnect(session, 1, {
+          token: "old-token",
+          directUrl: undefined,
+          signal: ac.signal,
+        });
         await vi.advanceTimersByTimeAsync(3000);
         const roomB = makeRoom();
         installRoom(roomB, 2);
@@ -243,14 +249,7 @@ describe("LiveKitSession", () => {
       onPermissions =
         mockRoom.on.mock.calls.find(([event]) => event === "participantPermissionsChanged")?.[1] ??
         (() => {});
-      (session as any)._state = {
-        type: "connected",
-        room: mockRoom,
-        channelId: 1,
-        latestToken: "token",
-        lastUrl: "/livekit",
-        lastDirectUrl: undefined,
-      };
+      enterConnected(session);
       (session as any).syncModuleRooms();
       vi.mocked(setListenOnly).mockClear();
     });
@@ -324,14 +323,7 @@ describe("LiveKitSession", () => {
       onPermissions =
         mockRoom.on.mock.calls.find(([event]) => event === "participantPermissionsChanged")?.[1] ??
         (() => {});
-      (session as any)._state = {
-        type: "connected",
-        room: mockRoom,
-        channelId: 1,
-        latestToken: "token",
-        lastUrl: "/livekit",
-        lastDirectUrl: undefined,
-      };
+      enterConnected(session);
       mockVoiceState.localCamera = true;
       mockVoiceState.localScreenshare = true;
     });
@@ -455,13 +447,11 @@ describe("LiveKitSession", () => {
     afterEach(() => {
       // setPttPollingLive is a module-level flag shared across tests.
       setPttPollingLive(false);
-      mockLoadPref.mockImplementation((_key: string, defaultVal: unknown) => defaultVal);
+      stubPrefs();
     });
 
     it("publishes the mic and closes the pipeline's PTT gate at join when a PTT key is bound and the poller is confirmed live", async () => {
-      mockLoadPref.mockImplementation((key: string, defaultVal: unknown) =>
-        key === "pttVk" ? 0x41 : defaultVal,
-      );
+      stubPrefs({ pttVk: 0x41 });
       setPttPollingLive(true);
       session.setServerHost("localhost:7880");
       session.setWsClient({ send: vi.fn() } as any);
@@ -484,9 +474,7 @@ describe("LiveKitSession", () => {
     // checked_new() returns None) — neither platform can ever emit a
     // ptt-state event to lift the mute.
     it("does not mute at join when a PTT key is bound but the poller is not confirmed live", async () => {
-      mockLoadPref.mockImplementation((key: string, defaultVal: unknown) =>
-        key === "pttVk" ? 0x41 : defaultVal,
-      );
+      stubPrefs({ pttVk: 0x41 });
       // setPttPollingLive intentionally not called — defaults to false.
       session.setServerHost("localhost:7880");
       session.setWsClient({ send: vi.fn() } as any);
@@ -514,9 +502,7 @@ describe("LiveKitSession", () => {
     });
 
     it("does not close the gate at join for a key bound in Voice Activity mode", async () => {
-      mockLoadPref.mockImplementation((key: string, defaultVal: unknown) =>
-        key === "pttVk" ? 0x41 : key === "inputMode" ? "vad" : defaultVal,
-      );
+      stubPrefs({ pttVk: 0x41, inputMode: "vad" });
       setPttPollingLive(true);
       session.setServerHost("localhost:7880");
       session.setWsClient({ send: vi.fn() } as any);
@@ -531,9 +517,7 @@ describe("LiveKitSession", () => {
     });
 
     it("closes the gate at join when the talk button is the trigger, with no key bound", async () => {
-      mockLoadPref.mockImplementation((key: string, defaultVal: unknown) =>
-        key === "inputMode" ? "ptt" : defaultVal,
-      );
+      stubPrefs({ inputMode: "ptt" });
       setTalkButton(true);
       setPttPollingLive(true);
       session.setServerHost("localhost:7880");
@@ -553,9 +537,7 @@ describe("LiveKitSession", () => {
     });
 
     it("does not close the gate at join for the talk button in Voice Activity mode", async () => {
-      mockLoadPref.mockImplementation((key: string, defaultVal: unknown) =>
-        key === "inputMode" ? "vad" : defaultVal,
-      );
+      stubPrefs({ inputMode: "vad" });
       setTalkButton(true);
       setPttPollingLive(true);
       session.setServerHost("localhost:7880");
@@ -1126,16 +1108,7 @@ describe("LiveKitSession", () => {
       mockRoom.localParticipant.setMicrophoneEnabled.mockRejectedValueOnce(new Error("mic gone"));
 
       const ac = new AbortController();
-      const reconnectPromise = (session as any).attemptAutoReconnect(
-        "reconnect-token",
-        "/lk",
-        7,
-        "ws://localhost:7880",
-        ac.signal,
-      );
-
-      await vi.advanceTimersByTimeAsync(3100);
-      await reconnectPromise;
+      await runReconnect(session, 7, { url: "/lk", signal: ac.signal });
 
       // On reconnect mic failure, error callback should NOT be called
       expect(errorCb).not.toHaveBeenCalledWith(
@@ -1157,26 +1130,10 @@ describe("LiveKitSession", () => {
 
       // Mirrors the real caller (handleDisconnected via setReconnectAc),
       // which always sets "reconnecting" before starting this loop.
-      (session as any)._state = {
-        type: "reconnecting",
-        channelId: 7,
-        latestToken: "token",
-        lastUrl: "/lk",
-        lastDirectUrl: "ws://localhost:7880",
-        ac: new AbortController(),
-      };
+      enterReconnecting(session, 7, { latestToken: "token", lastUrl: "/lk" });
 
       const ac = new AbortController();
-      const reconnectPromise = (session as any).attemptAutoReconnect(
-        "reconnect-token",
-        "/lk",
-        7,
-        "ws://localhost:7880",
-        ac.signal,
-      );
-
-      await vi.advanceTimersByTimeAsync(3100);
-      await reconnectPromise;
+      await runReconnect(session, 7, { url: "/lk", signal: ac.signal });
 
       expect(gateSpy).toHaveBeenCalledWith(true);
       expect(mockRoom.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(true);
