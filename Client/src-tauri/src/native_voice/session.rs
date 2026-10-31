@@ -1111,9 +1111,10 @@ impl NativeSession {
     }
 
     /// Set the input-sensitivity gate's threshold (0: no gate); `retune`
-    /// moves it without restarting the detector.
-    pub fn set_voice_gate(&self, threshold: f32, retune: bool) {
-        self.capture.set_voice_gate(threshold, retune);
+    /// moves it without restarting the detector, `speech` adds RNNoise's
+    /// verdict to the rule.
+    pub fn set_voice_gate(&self, threshold: f32, retune: bool, speech: bool) {
+        self.capture.set_voice_gate(threshold, retune, speech);
     }
 
     /// Set the input volume as a linear gain (0 to 2).

@@ -574,7 +574,12 @@ function buildVoiceAudioTabInner(
   function resetNativeTestGate(): void {
     if (nativeTestId === null) return;
     makeNativeTestFloor();
-    updateNativeTest({ kind: "voiceGate", threshold: nativeTestThreshold(), retune: false });
+    updateNativeTest({
+      kind: "voiceGate",
+      threshold: nativeTestThreshold(),
+      retune: false,
+      ...(nativeTestFloor === null ? {} : { speech: true }),
+    });
   }
 
   function paintTestButton(on: boolean): void {
@@ -636,6 +641,7 @@ function buildVoiceAudioTabInner(
         inputGain: inputVolumePercent,
         outputGain: monitor ? 0 : micTestVolume(loadPref<number>("outputVolume", 100)),
         threshold: nativeTestThreshold(),
+        ...(nativeTestFloor === null ? {} : { speech: true }),
         ...(monitor ? { monitor } : {}),
       });
       if (signal.aborted || request !== nativeTestRequest) {
