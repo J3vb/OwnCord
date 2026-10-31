@@ -1,31 +1,15 @@
 // LoginForm — login/register form sub-component for ConnectPage.
 // Pure extraction from ConnectPage.ts. No behavior changes.
 
-import { createElement, setText, appendChildren, qs, setOwnedTimeout, focusIsOurs } from "@lib/dom";
-import { isImeCommit } from "@lib/text/ime";
-import { createIcon } from "@lib/icons";
-import { ApiClientError, TLS_CERT_CODE, TransportError, errorText } from "@lib/api";
-import { isValidHost } from "@lib/net/hostValidation";
-import {
-  canonicalServerHost,
-  normalizeHostForCertCompare,
-  setAddressInputHints,
-} from "@lib/net/hostNormalize";
-import { normaliseInviteCode } from "@lib/nav/deepLink";
+import { createElement, setText } from "@lib/dom";
+import { normalizeHostForCertCompare } from "@lib/net/hostNormalize";
 import type { RegistrationMode } from "@lib/types";
-import type { RecoverContext } from "./RecoverOverlay";
 import { connectText } from "../../i18n/connect";
-import { portalText } from "../../i18n/portal";
-import {
-  attachLimitHint,
-  checkNewUsername,
-  toggleDescribedBy,
-  usernameHintText,
-  usernameProblemText,
-  MAX_USERNAME_LEN,
-  type LimitHint,
-} from "@lib/text/nameLimits";
-import { RestErrorCode } from "@lib/protocolTypes";
+import { SAVED_PASSWORD_PLACEHOLDER } from "./login-form/loginShared";
+import type { LoginFormState, LoginFormInternals } from "./login-form/loginState";
+import { createLoginFormDom } from "./login-form/loginFormDom";
+import { createLoginFormView } from "./login-form/loginFormView";
+import { createLoginFormSubmit } from "./login-form/loginFormSubmit";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -36,42 +20,6 @@ export type FormState = "idle" | "loading" | "totp" | "connecting" | "error" | "
 
 /** Form mode: login or register. */
 export type FormMode = "login" | "register";
-
-/** A connect-form field a validation error can be tied to. */
-type FieldId = "host" | "username" | "password" | "invite";
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-const MIN_PASSWORD_LENGTH = 8;
-
-// The password box shows this when a saved password exists. It is never sent
-// anywhere: submission branches on `usingSavedPassword`, never on the field's
-// text, so this string can never be mistaken for a real password.
-const SAVED_PASSWORD_PLACEHOLDER = "•".repeat(12);
-
-/**
- * What the 2FA box accepts: a six-digit authenticator code, or an emergency
- * recovery code (`XXXXX-XXXXX`, case-insensitive, separator optional). The
- * server routes the one `code` field by this same shape.
- */
-const TOTP_OR_RECOVERY_CODE = /^(?:\d{6}|[A-Za-z0-9]{5}-?[A-Za-z0-9]{5})$/;
-
-/**
- * Copy shown in the register notice for a mode, or null when no notice
- * applies. `closed` states why register is refused; `approval` states the
- * pending-approval fact up front, not only after a 202.
- */
-function registrationNoticeText(mode: RegistrationMode | null): string | null {
-  if (mode === "closed") {
-    return connectText("registration.closedNotice");
-  }
-  if (mode === "approval") {
-    return connectText("registration.approvalNotice");
-  }
-  return null;
-}
 
 // ---------------------------------------------------------------------------
 // Options & Return type
@@ -186,31 +134,6 @@ export interface LoginFormApi {
   destroy(): void;
 }
 
-// ---------------------------------------------------------------------------
-// Factory
-// ---------------------------------------------------------------------------
-
-/** How long a login keeps retrying a busy server before it gives up (P5-S02). */
-const AUTH_BUSY_RETRY_BUDGET_MS = 70_000;
-/** The shortest wait before a retry, whatever Retry-After says (the
- *  saved-password relay sends none). The login route allows 5 attempts per IP
- *  per minute and refused ones count, so attempts at least 15 s apart keep
- *  one client to 4 in any minute. */
-const AUTH_BUSY_MIN_RETRY_MS = 15_000;
-/** Up to this much is added to each wait, so a burst of refused clients
- *  does not come back in lockstep. */
-const AUTH_BUSY_JITTER_MS = 1_000;
-
-/** The server's password-check queue was full: a refusal worth retrying. A
- *  per-IP RATE_LIMITED is not — retrying only spends the window again. */
-function isAuthBusy(err: unknown): err is ApiClientError {
-  return err instanceof ApiClientError && err.code === RestErrorCode.AUTH_BUSY;
-}
-
-function isBusy(state: FormState): boolean {
-  return state === "loading" || state === "connecting" || state === "auto-connecting";
-}
-
 export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
   const {
     signal,
@@ -227,1326 +150,169 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     onHostInput,
     getSavedHosts,
   } = opts;
+
   // Written literally at every use so the desktop build drops each branch.
   const fixedHost = __OWNCORD_WEB__ ? opts.fixedHost : undefined;
-
-  // Debounce token: only the latest scheduled host-settled call fires.
-  let hostSettledSeq = 0;
-
-  let usingSavedPassword = false;
-
-  /** Drop the placeholder the moment the user edits the field. */
-  function clearSavedPasswordPlaceholder(): void {
-    if (!usingSavedPassword) return;
-    usingSavedPassword = false;
-    // Only wipe the field if it still holds the placeholder. `beforeinput`
-    // runs before the edit lands, so the field is still the placeholder
-    // there and this clears it so the edit lands in an empty field. The
-    // `input` backstop runs after a password manager has already replaced
-    // the value with the real password it wants to submit — wiping that
-    // unconditionally would blank a required field and block the login the
-    // manager was trying to help with.
-    if (passwordInput.value === SAVED_PASSWORD_PLACEHOLDER) {
-      passwordInput.value = "";
-    }
-  }
-
-  // --- internal state ---
-  let formState: FormState = "idle";
-  let formMode: FormMode = "login";
-  let errorMessage = "";
-  // A non-error notice (pending approval). Shown until the form next goes busy
-  // or an error replaces it.
-  let noticeMessage = "";
-  /**
-   * The field the current banner error belongs to, so the error is
-   * linked to its input with aria-describedby/aria-invalid and focus moves
-   * there. Null for a server error that names no field.
-   */
-  let errorField: FieldId | null = null;
-  // True while a TOTP challenge is outstanding (from showTotp() until it is
-  // cancelled or resolved). A rejected verify moves formState to "error" for
-  // the banner/shake, but the overlay must stay up so the code can be
-  // re-entered — see updateTotpOverlay().
-  let totpPending = false;
-  // The last submit the desktop proxy refused because its host's certificate
-  // was not confirmed yet. Accepting that certificate resubmits it once.
-  let certRefusedSubmit: { host: string; mode: FormMode } | null = null;
-  // What had focus when a request disabled the form, restored when it settles.
-  let focusBeforeBusy: Element | null = null;
-
-  // --- cached DOM references ---
-  let formTitle: HTMLHeadingElement;
-  let hostInput: HTMLInputElement;
-  let usernameInput: HTMLInputElement;
-  // The new-username rules, shown under the field in Register only (an
-  // existing account may predate them, so Login keeps the field unbounded).
-  let usernameHint: LimitHint;
-  let usernameCap = 0;
-  let passwordInput: HTMLInputElement;
-  let inviteGroup: HTMLDivElement;
-  let inviteInput: HTMLInputElement;
-  let registrationNotice: HTMLDivElement;
-  let submitBtn: HTMLButtonElement;
-  let submitBtnText: HTMLSpanElement;
-  let toggleModeBtn: HTMLButtonElement;
-  let errorBanner: HTMLDivElement;
-  let infoNotice: HTMLDivElement;
-  let totpInput: HTMLInputElement;
-  let totpError: HTMLDivElement;
-  let totpSubmitBtn: HTMLButtonElement;
-  let rememberPasswordCheckbox: HTMLInputElement;
-  let autoConnectCheckbox: HTMLInputElement;
-  let autoConnectServerName: HTMLSpanElement;
-  let serverWait: HTMLDivElement;
-  let serverWaitText: HTMLSpanElement;
-  let serverWaitHost = "";
-  let authBusyRetry: HTMLDivElement;
-  /** The busy line's Cancel: ends the wait and stops the AUTH_BUSY retries. */
-  let cancelAuthBusyRetry: (() => void) | null = null;
-
-  // ---------------------------------------------------------------------------
-  // DOM construction
-  // ---------------------------------------------------------------------------
-
-  function buildFormPanel(): HTMLDivElement {
-    const panel = createElement("div", { class: "form-panel" });
-
-    // Settings gear (top right)
-    const settingsBtn = createElement("button", {
-      class: "settings-gear",
-      type: "button",
-      "aria-label": connectText("common.settings"),
-    });
-    settingsBtn.textContent = "";
-    settingsBtn.appendChild(createIcon("settings", 16));
-    settingsBtn.addEventListener("click", () => onSettingsOpen(), { signal });
-
-    // Form container
-    const formContainer = createElement("div", { class: "form-container" });
-
-    // Logo section — OC neon glow SVG
-    const formLogo = createElement("div", { class: "form-logo" });
-    const logoSvg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-    logoSvg.setAttribute("width", "70");
-    logoSvg.setAttribute("height", "42");
-    logoSvg.setAttribute("viewBox", "0 0 120 70");
-    logoSvg.setAttribute("class", "oc-logo");
-    const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
-    const grad = document.createElementNS("http://www.w3.org/2000/svg", "linearGradient");
-    grad.setAttribute("id", "oc-grad-form");
-    grad.setAttribute("x1", "0%");
-    grad.setAttribute("y1", "0%");
-    grad.setAttribute("x2", "100%");
-    grad.setAttribute("y2", "0%");
-    for (const [offset, color] of [
-      ["0%", "#f97316"],
-      ["30%", "#ec4899"],
-      ["65%", "#8b5cf6"],
-      ["100%", "#06b6d4"],
-    ] as const) {
-      const stop = document.createElementNS("http://www.w3.org/2000/svg", "stop");
-      stop.setAttribute("offset", offset);
-      stop.setAttribute("style", `stop-color:${color}`);
-      grad.appendChild(stop);
-    }
-    const filter = document.createElementNS("http://www.w3.org/2000/svg", "filter");
-    filter.setAttribute("id", "oc-glow-form");
-    const blur = document.createElementNS("http://www.w3.org/2000/svg", "feGaussianBlur");
-    blur.setAttribute("stdDeviation", "4");
-    blur.setAttribute("result", "blur");
-    filter.appendChild(blur);
-    const comp = document.createElementNS("http://www.w3.org/2000/svg", "feComposite");
-    comp.setAttribute("in", "SourceGraphic");
-    comp.setAttribute("in2", "blur");
-    comp.setAttribute("operator", "over");
-    filter.appendChild(comp);
-    defs.appendChild(grad);
-    defs.appendChild(filter);
-    logoSvg.appendChild(defs);
-    for (const [opacity, filterAttr] of [
-      ["0.4", "url(#oc-glow-form)"],
-      [null, null],
-    ] as const) {
-      const t = document.createElementNS("http://www.w3.org/2000/svg", "text");
-      t.setAttribute("x", "60");
-      t.setAttribute("y", "56");
-      t.setAttribute("text-anchor", "middle");
-      t.setAttribute("font-family", "'Segoe UI',system-ui,sans-serif");
-      t.setAttribute("font-size", "68");
-      t.setAttribute("font-weight", "900");
-      t.setAttribute("fill", "url(#oc-grad-form)");
-      t.setAttribute("letter-spacing", "-4");
-      if (opacity) {
-        t.setAttribute("opacity", opacity);
-        t.setAttribute("class", "oc-glow-layer");
-      }
-      if (filterAttr) t.setAttribute("filter", filterAttr);
-      t.textContent = "OC"; // i18n-exempt: logo monogram, not copy
-      logoSvg.appendChild(t);
-    }
-    // i18n-exempt: product name, never translated
-    const logoTitle = createElement("h1", {}, "OwnCord");
-    const logoSubtitle = createElement("p", {}, connectText("login.subtitle"));
-    appendChildren(formLogo, logoSvg, logoTitle, logoSubtitle);
-
-    // Form title
-    formTitle = createElement("h1", {}, connectText("login.title"));
-
-    // Error banner (hidden by default via CSS display:none, shown with .visible)
-    errorBanner = createElement("div", {
-      class: "error-banner",
-      role: "alert",
-      id: "connect-error-banner",
-    });
-
-    // Informational notice: a green/neutral status line for a fact the
-    // user needs (pending approval), never the red error banner.
-    infoNotice = createElement("div", { class: "info-notice", role: "status" });
-
-    serverWait = buildServerWait();
-    authBusyRetry = buildAuthBusyRetry();
-
-    // Form
-    const form = createElement("form", { class: "connect-form" });
-    form.setAttribute("novalidate", "");
-
-    // Host
-    const hostGroup = buildFormGroup(
-      "host",
-      connectText("login.hostLabel"),
-      "text",
-      connectText("login.hostPlaceholder"),
-    );
-    hostInput = qs("input", hostGroup)!;
-    if (__OWNCORD_WEB__ && fixedHost !== undefined) {
-      hostInput.value = fixedHost;
-      hostGroup.classList.add("form-group--hidden");
-    }
-    // Registration policy is per host, so a manually edited address re-derives
-    // the mode (and the invite requirement) as the user types.
-    hostInput.addEventListener(
-      "input",
-      () => {
-        // A typed address is a different host, and the saved password is not its.
-        clearSavedPasswordPlaceholder();
-        updateRegistrationUi();
-        scheduleHostSettled();
-        onHostInput?.(currentHost());
-      },
-      { signal },
-    );
-    // Show the address the form will use once the user leaves the box.
-    hostInput.addEventListener(
-      "change",
-      () => {
-        const host = currentHost();
-        if (hostInput.value !== host) hostInput.value = host;
-      },
-      { signal },
-    );
-
-    // Username
-    const usernameGroup = buildFormGroup(
-      "username",
-      connectText("login.usernameLabel"),
-      "text",
-      "",
-    );
-    usernameInput = qs("input", usernameGroup)!;
-    if (__OWNCORD_WEB__ && fixedHost !== undefined) {
-      usernameInput.setAttribute("autocomplete", "username");
-    }
-    usernameHint = attachLimitHint(usernameInput, {
-      max: MAX_USERNAME_LEN,
-      countCharacters: true,
-      hint: usernameHintText(),
-      id: "username-hint",
-      signal,
-    });
-    usernameCap = usernameInput.maxLength;
-    usernameGroup.appendChild(usernameHint.el);
-    applyUsernameRules();
-
-    // Password
-    const passwordGroup = buildFormGroup(
-      "password",
-      connectText("login.passwordLabel"),
-      "password",
-      "",
-    );
-    passwordInput = qs("input", passwordGroup)!;
-
-    // Remember password checkbox
-    const rememberGroup = createElement("div", { class: "form-group remember-password-group" });
-    rememberPasswordCheckbox = createElement("input", {
-      type: "checkbox",
-      id: "remember-password",
-    });
-    const rememberLabel = createElement(
-      "label",
-      {
-        for: "remember-password",
-        class: "remember-password-label",
-      },
-      connectText("login.rememberPassword"),
-    );
-    appendChildren(rememberGroup, rememberPasswordCheckbox, rememberLabel);
-    // The portal keeps no password: the token alone is kept, by Stay signed in.
-    if (__OWNCORD_WEB__ && fixedHost !== undefined) {
-      rememberGroup.classList.add("form-group--hidden");
-    }
-
-    // Auto connect checkbox
-    const autoConnectGroup = createElement("div", { class: "form-group remember-password-group" });
-    autoConnectCheckbox = createElement("input", { type: "checkbox", id: "auto-connect" });
-    // Stay signed in by default; a saved profile overrides it.
-    autoConnectCheckbox.checked = true;
-    const autoConnectLabel = createElement(
-      "label",
-      {
-        for: "auto-connect",
-        class: "remember-password-label",
-      },
-      __OWNCORD_WEB__ && fixedHost !== undefined
-        ? portalText("login.stayLoggedIn")
-        : connectText("login.autoConnect"),
-    );
-    appendChildren(autoConnectGroup, autoConnectCheckbox, autoConnectLabel);
-
-    // `beforeinput` fires for every actual edit — typing, paste, drag-drop —
-    // and only for edits, so caret movement leaves the placeholder alone. It
-    // runs before the value changes, so clearing there means the edit lands in
-    // an empty field instead of mixing with the placeholder.
-    //
-    // `input` is the backstop: a password manager can replace the value and
-    // emit only `input`, and leaving the flag set there would submit the stored
-    // password while the field shows the one the manager just filled in. It is
-    // a no-op after `beforeinput` has already cleared the flag, so it cannot
-    // swallow a typed character.
-    passwordInput.addEventListener("beforeinput", clearSavedPasswordPlaceholder, { signal });
-    passwordInput.addEventListener("input", clearSavedPasswordPlaceholder, { signal });
-
-    // Invite code (register only, hidden by default)
-    inviteGroup = buildFormGroup("invite", connectText("login.inviteLabel"), "text", "");
-    inviteGroup.classList.add("form-group--hidden");
-    inviteInput = qs("input", inviteGroup)!;
-
-    // Registration notice (register only): states the server's policy up
-    // front for `closed` (why register is refused) and `approval` (the
-    // pending-approval state, shown before the attempt rather than only after
-    // a 202). Hidden by default.
-    registrationNotice = createElement("div", {
-      class: "registration-notice",
-      role: "status",
-    });
-
-    // Submit button
-    submitBtn = createElement("button", {
-      class: "btn-primary",
-      type: "submit",
-    });
-    submitBtnText = createElement("span", { class: "btn-text" }, connectText("login.title"));
-    const spinnerWrapper = createElement("span", { class: "btn-spinner" });
-    const spinner = createElement("div", { class: "spinner" });
-    spinnerWrapper.appendChild(spinner);
-    appendChildren(submitBtn, spinnerWrapper, submitBtnText);
-
-    // Toggle mode link
-    const formSwitch = createElement("div", { class: "form-switch" });
-    // Buttons, not anchors: an <a> with no href is not focusable, so the
-    // login/register toggle and the recovery entry point would be unreachable
-    // by Tab (A11Y-02). They are styled as links by .form-switch button /
-    // .totp-backup-link.
-    toggleModeBtn = createElement("button", { type: "button" }, connectText("login.toRegister"));
-    formSwitch.appendChild(toggleModeBtn);
-    // Outside .form-switch: that button is the login/register toggle.
-    let recoverLink: HTMLButtonElement | null = null;
-    if (onRecover !== undefined) {
-      recoverLink = createElement(
-        "button",
-        {
-          type: "button",
-          class: "totp-backup-link",
-          "data-testid": "recover-account-link",
-        },
-        connectText("login.recoverLink"),
-      );
-      recoverLink.addEventListener("click", openRecover, { signal });
-    }
-
-    appendChildren(
-      form,
-      hostGroup,
-      usernameGroup,
-      passwordGroup,
-      rememberGroup,
-      autoConnectGroup,
-      registrationNotice,
-      inviteGroup,
-      submitBtn,
-      formSwitch,
-      ...(recoverLink ? [recoverLink] : []),
-    );
-
-    // Wire form events
-    form.addEventListener("submit", handleFormSubmit, { signal });
-    // An edit after a certificate refusal is a new sign-in the user has not
-    // sent yet, so accepting the certificate must not send it for them.
-    form.addEventListener(
-      "input",
-      () => {
-        certRefusedSubmit = null;
-      },
-      { signal },
-    );
-    // Typing means the user is taking over from the automatic retry.
-    for (const input of [hostInput, usernameInput, passwordInput]) {
-      input.addEventListener("input", cancelServerWait, { signal });
-    }
-    toggleModeBtn.addEventListener("click", handleToggleMode, { signal });
-
-    appendChildren(
-      formContainer,
-      formLogo,
-      errorBanner,
-      infoNotice,
-      serverWait,
-      authBusyRetry,
-      form,
-    );
-    appendChildren(panel, settingsBtn, formContainer);
-    return panel;
-  }
-
-  function buildFormGroup(
-    id: string,
-    labelText: string,
-    inputType: string,
-    placeholder: string,
-  ): HTMLDivElement {
-    const group = createElement("div", { class: "form-group" });
-    const label = createElement("label", { class: "form-label", for: id }, labelText);
-    const input = createElement("input", {
-      class: "form-input",
-      id,
-      name: id,
-      type: inputType,
-      placeholder,
-      autocomplete: inputType === "password" ? "current-password" : "off",
-    });
-    if (id === "host") {
-      input.setAttribute("required", "");
-      setAddressInputHints(input);
-    }
-    if (id === "username" || id === "password") {
-      input.setAttribute("required", "");
-    }
-    // Phone keyboards would capitalise or correct a name or code.
-    if (id === "username" || id === "invite") {
-      input.setAttribute("autocapitalize", "none");
-      input.setAttribute("autocorrect", "off");
-      input.setAttribute("spellcheck", "false");
-    }
-
-    if (inputType === "password") {
-      const wrapper = createElement("div", { class: "password-wrapper" });
-      const toggle = createElement("button", {
-        class: "password-toggle",
-        type: "button",
-        "aria-label": connectText("login.togglePassword"),
-      });
-      toggle.appendChild(createIcon("eye", 16));
-      toggle.addEventListener(
-        "click",
-        () => {
-          const isPassword = input.getAttribute("type") === "password";
-          input.setAttribute("type", isPassword ? "text" : "password");
-          toggle.textContent = "";
-          toggle.appendChild(createIcon(isPassword ? "eye-off" : "eye", 16));
-        },
-        { signal },
-      );
-      appendChildren(wrapper, input, toggle);
-      appendChildren(group, label, wrapper);
-    } else {
-      appendChildren(group, label, input);
-    }
-
-    return group;
-  }
-
-  function buildTotpOverlay(): HTMLDivElement {
-    const overlay = createElement("div", { class: "totp-overlay totp-overlay--hidden" });
-    const card = createElement("div", { class: "totp-card" });
-    const title = createElement("h2", { class: "totp-title" }, connectText("totp.title"));
-    const description = createElement(
-      "p",
-      {
-        class: "totp-subtitle",
-      },
-      connectText("totp.description"),
-    );
-
-    // Not numeric-only: an emergency recovery code is letters and digits,
-    // 11 characters with its separator, and goes in this same box.
-    totpInput = createElement("input", {
-      class: "form-input",
-      type: "text",
-      maxlength: "11",
-      placeholder: connectText("totp.placeholder"),
-      inputmode: "text",
-      pattern: "[0-9]{6}|[A-Za-z0-9]{5}-?[A-Za-z0-9]{5}",
-      autocomplete: "one-time-code",
-      "aria-label": connectText("totp.inputLabel"),
-      "aria-describedby": "totp-error",
-    });
-    // A malformed code used to be a 500 ms red border with no text and no
-    // announcement, so a screen reader got nothing. The message is the
-    // input's description and focus returns to the input, so it is read once
-    // with the field; it is a live alert only when the input already has
-    // focus and so is not re-read.
-    totpError = createElement("div", {
-      class: "form-error",
-      id: "totp-error",
-      "data-testid": "totp-invalid",
-    });
-
-    totpSubmitBtn = createElement(
-      "button",
-      {
-        class: "btn-primary",
-        type: "button",
-      },
-      connectText("totp.verify"),
-    );
-
-    const cancelBtn = createElement(
-      "button",
-      {
-        class: "totp-back",
-        type: "button",
-      },
-      connectText("common.cancel"),
-    );
-
-    totpSubmitBtn.addEventListener("click", handleTotpSubmit, { signal });
-    cancelBtn.addEventListener("click", handleTotpCancel, { signal });
-
-    // Allow Enter key in TOTP input
-    totpInput.addEventListener(
-      "keydown",
-      (e) => {
-        if (e.key === "Enter" && !isImeCommit(e)) {
-          e.preventDefault();
-          void handleTotpSubmit();
-        }
-      },
-      { signal },
-    );
-
-    appendChildren(card, title, description, totpInput, totpError, totpSubmitBtn, cancelBtn);
-    overlay.appendChild(card);
-    return overlay;
-  }
-
-  function buildAutoConnectOverlay(): HTMLDivElement {
-    const overlay = createElement("div", {
-      class: "auto-connect-overlay auto-connect-overlay--hidden",
-    });
-    const card = createElement("div", { class: "auto-connect-card" });
-
-    const spinner = createElement("div", { class: "auto-connect-spinner" });
-    const spinnerEl = createElement("div", { class: "spinner" });
-    spinner.appendChild(spinnerEl);
-
-    const title = createElement(
-      "h2",
-      { class: "auto-connect-title" },
-      connectText("login.autoConnecting"),
-    );
-    autoConnectServerName = createElement("span", { class: "auto-connect-server" });
-
-    const cancelBtn = createElement(
-      "button",
-      {
-        class: "btn-ghost auto-connect-cancel",
-        type: "button",
-      },
-      connectText("common.cancel"),
-    );
-
-    cancelBtn.addEventListener(
-      "click",
-      () => {
-        transitionTo("idle");
-        onAutoLoginCancel?.();
-      },
-      { signal },
-    );
-
-    appendChildren(card, spinner, title, autoConnectServerName, cancelBtn);
-    overlay.appendChild(card);
-    return overlay;
-  }
-
-  function buildServerWait(): HTMLDivElement {
-    // A live status line, not a modal: the form beneath stays usable.
-    const wait = createElement("div", { class: "server-wait", role: "status" });
-    wait.hidden = true;
-    serverWaitText = createElement("span", { class: "server-wait-text" });
-    const cancelBtn = createElement(
-      "button",
-      { class: "btn-ghost server-wait-cancel", type: "button" },
-      connectText("common.cancel"),
-    );
-    cancelBtn.addEventListener("click", cancelServerWait, { signal });
-    appendChildren(wait, serverWaitText, cancelBtn);
-    return wait;
-  }
-
-  function buildAuthBusyRetry(): HTMLDivElement {
-    // The server-wait line's look: a live status while a busy login retries.
-    const line = createElement("div", { class: "server-wait auth-busy-retry", role: "status" });
-    line.hidden = true;
-    const text = createElement(
-      "span",
-      { class: "server-wait-text" },
-      connectText("login.serverBusyRetrying"),
-    );
-    const cancelBtn = createElement(
-      "button",
-      { class: "btn-ghost server-wait-cancel", type: "button" },
-      connectText("common.cancel"),
-    );
-    cancelBtn.addEventListener("click", () => cancelAuthBusyRetry?.(), { signal });
-    appendChildren(line, text, cancelBtn);
-    return line;
-  }
-
-  function cancelServerWait(): void {
-    if (serverWait.hidden) return;
-    serverWait.hidden = true;
-    onAutoLoginCancel?.();
-  }
+  // The DOM references are left out: buildFormPanel and the overlay builders
+  // fill them in below, before any handler can read them.
+  const st = {
+    opts,
+    signal,
+    onLogin,
+    onLoginWithSavedPassword,
+    onRegister,
+    onTotpSubmit,
+    onRecover,
+    onSettingsOpen,
+    onAutoLoginCancel,
+    getRegistrationMode,
+    getRetentionNotice,
+    onHostSettled,
+    onHostInput,
+    getSavedHosts,
+    fixedHost,
+    hostSettledSeq: 0,
+    usingSavedPassword: false,
+    formState: "idle",
+    formMode: "login",
+    errorMessage: "",
+    noticeMessage: "",
+    errorField: null,
+    totpPending: false,
+    certRefusedSubmit: null,
+    focusBeforeBusy: null,
+    usernameCap: 0,
+    serverWaitHost: "",
+    cancelAuthBusyRetry: null,
+    recoverCtx: undefined,
+  } as LoginFormState;
+  const lf = {} as LoginFormInternals;
+  Object.assign(
+    lf,
+    createLoginFormDom(st, lf),
+    createLoginFormView(st, lf),
+    createLoginFormSubmit(st, lf),
+  );
 
   // ---------------------------------------------------------------------------
   // Build elements (before state transition functions that reference them)
   // ---------------------------------------------------------------------------
 
-  const panelEl = buildFormPanel();
+  st.panelEl = lf.buildFormPanel();
 
   // Status bar (hidden by default, shown with .visible class)
-  const statusBar = createElement("div", { class: "status-bar" });
-  const statusBarFill = createElement("div", { class: "status-bar-fill" });
-  statusBar.appendChild(statusBarFill);
+  st.statusBar = createElement("div", { class: "status-bar" });
+
+  st.statusBarFill = createElement("div", { class: "status-bar-fill" });
+
+  st.statusBar.appendChild(st.statusBarFill);
 
   // TOTP overlay (hidden by default)
-  const totpOverlay = buildTotpOverlay();
+  st.totpOverlay = lf.buildTotpOverlay();
 
   // Auto-connect overlay (hidden by default)
-  const autoConnectOverlay = buildAutoConnectOverlay();
-
-  // ---------------------------------------------------------------------------
-  // State transitions
-  // ---------------------------------------------------------------------------
-
-  function transitionTo(state: FormState, error?: string, field: FieldId | null = null): void {
-    const wasBusy = isBusy(formState);
-    const focused = document.activeElement;
-    formState = state;
-    errorMessage = error ?? "";
-    // A validation error names its field; a server error names none. Kept on
-    // the instance so the input keeps aria-invalid/aria-describedby while the
-    // banner is up, through unrelated store updates.
-    errorField = state === "error" ? field : null;
-    // Any state change supersedes an informational notice: the user is trying
-    // again (busy), a real error replaced it, or the form reset.
-    noticeMessage = "";
-    updateInfoNotice();
-
-    // Update UI based on state
-    updateSubmitButton();
-    updateErrorBanner();
-    updateStatusBar();
-    updateTotpOverlay();
-    updateAutoConnectOverlay();
-    updateFormInputsDisabled();
-
-    // Disabling the inputs drops a focused one to <body>; once the request
-    // settles, put focus back where the user submitted from.
-    if (!wasBusy && isBusy(state)) {
-      focusBeforeBusy = focused;
-    } else if (wasBusy && !isBusy(state)) {
-      const restore = focusBeforeBusy;
-      focusBeforeBusy = null;
-      if (restore instanceof HTMLElement && restore !== document.body && focusIsOurs(restore)) {
-        restore.focus();
-      }
-    }
-  }
-
-  /** The input a banner error for `field` belongs to. */
-  function fieldInput(field: FieldId): HTMLInputElement {
-    if (field === "host") return hostInput;
-    if (field === "username") return usernameInput;
-    if (field === "password") return passwordInput;
-    return inviteInput;
-  }
-
-  function updateSubmitButton(): void {
-    const isLoading = isBusy(formState);
-    // A closed server refuses registration outright — disable the control and
-    // let the notice state why, rather than collecting a doomed attempt.
-    const refused = isRegisterRefused();
-    submitBtn.disabled = isLoading || refused;
-    submitBtn.classList.toggle("loading", isLoading);
-
-    if (formState === "connecting" || formState === "auto-connecting") {
-      setText(submitBtnText, connectText("login.connecting"));
-    } else if (formState === "loading") {
-      setText(
-        submitBtnText,
-        connectText(formMode === "login" ? "login.loggingIn" : "login.registering"),
-      );
-    } else if (refused) {
-      setText(submitBtnText, connectText("login.registrationClosed"));
-    } else {
-      setText(
-        submitBtnText,
-        connectText(formMode === "login" ? "login.title" : "login.registerTitle"),
-      );
-    }
-  }
-
-  /** All inputs a banner error can be linked to. */
-  function allFieldInputs(): HTMLInputElement[] {
-    return [hostInput, usernameInput, passwordInput, inviteInput];
-  }
-
-  function updateErrorBanner(): void {
-    // A field error is linked to its input and focus moves there, so a
-    // keyboard/screen-reader user lands on the control to fix rather than on
-    // an unassociated sentence. The banner is only a live alert when
-    // focus does not move — a server error naming no field, or a field that
-    // already has focus — so each error is announced once.
-    const field = formState === "error" ? errorField : null;
-    const target = field === null ? null : fieldInput(field);
-    if (target === null || target === document.activeElement) {
-      errorBanner.setAttribute("role", "alert");
-    } else {
-      errorBanner.removeAttribute("role");
-    }
-    for (const input of allFieldInputs()) {
-      input.removeAttribute("aria-invalid");
-      toggleDescribedBy(input, errorBanner.id, false);
-    }
-    if (formState === "error" && errorMessage) {
-      setText(errorBanner, errorMessage);
-      errorBanner.classList.add("visible");
-      if (target !== null) {
-        target.setAttribute("aria-invalid", "true");
-        toggleDescribedBy(target, errorBanner.id, true);
-        target.focus();
-      }
-      // The shakeX animation plays automatically via CSS on .error-banner
-      // Re-trigger animation by removing and re-adding the element
-      errorBanner.style.animation = "none";
-      // Force reflow to restart animation
-      void errorBanner.offsetWidth;
-      errorBanner.style.animation = "";
-    } else {
-      errorBanner.classList.remove("visible");
-    }
-  }
-
-  function updateInfoNotice(): void {
-    if (noticeMessage) {
-      setText(infoNotice, noticeMessage);
-      infoNotice.classList.add("visible");
-    } else {
-      setText(infoNotice, "");
-      infoNotice.classList.remove("visible");
-    }
-  }
-
-  function updateStatusBar(): void {
-    switch (formState) {
-      case "idle":
-      case "totp":
-      case "error":
-        statusBar.classList.remove("visible", "indeterminate");
-        break;
-      case "loading":
-      case "connecting":
-      case "auto-connecting":
-        statusBar.classList.add("visible", "indeterminate");
-        break;
-    }
-  }
-
-  function updateTotpOverlay(): void {
-    if (formState === "totp") {
-      totpOverlay.classList.remove("totp-overlay--hidden");
-      totpInput.value = "";
-      totpInput.classList.remove("error");
-      totpInput.removeAttribute("aria-invalid");
-      setText(totpError, "");
-      totpInput.focus();
-    } else if (formState === "error" && totpPending) {
-      // A rejected verify lands here — keep the overlay up (and the
-      // already-entered code in place) instead of dropping the user back on
-      // the login form with no way to retry. The banner is inside the form
-      // panel, which the opaque overlay covers, so the rejection must also be
-      // written to the in-overlay error node or the user sees nothing (F2).
-      totpOverlay.classList.remove("totp-overlay--hidden");
-      if (errorMessage) {
-        setText(totpError, errorMessage);
-        totpInput.classList.add("error");
-        totpInput.setAttribute("aria-invalid", "true");
-      }
-    } else {
-      totpOverlay.classList.add("totp-overlay--hidden");
-    }
-  }
-
-  function updateAutoConnectOverlay(): void {
-    if (formState === "auto-connecting") {
-      autoConnectOverlay.classList.remove("auto-connect-overlay--hidden");
-    } else {
-      autoConnectOverlay.classList.add("auto-connect-overlay--hidden");
-    }
-  }
-
-  function updateFormInputsDisabled(): void {
-    const disable = isBusy(formState);
-    hostInput.disabled = disable;
-    usernameInput.disabled = disable;
-    passwordInput.disabled = disable;
-    inviteInput.disabled = disable;
-  }
-
-  // ---------------------------------------------------------------------------
-  // Registration mode
-  // ---------------------------------------------------------------------------
-
-  /**
-   * The live registration mode for the currently-typed host, or null when it
-   * is unknown. Only `invite` and null require an invite code; unknown is
-   * deliberately treated as invite-required, never as `open`.
-   */
-  function currentRegistrationMode(): RegistrationMode | null {
-    const host = currentHost();
-    if (!host) return null;
-    return getRegistrationMode?.(host) ?? null;
-  }
-
-  function isRegisterRefused(): boolean {
-    return formMode === "register" && currentRegistrationMode() === "closed";
-  }
-
-  /**
-   * Bring the register affordances in line with the selected host's mode:
-   * the invite field is shown only when a code is actually needed, the notice
-   * states `closed`/`approval` up front, and `closed` disables the submit
-   * control. Idempotent and cheap; call it whenever the mode may have changed
-   * (host edit, mode toggle, a late server-info snapshot).
-   */
-  function updateRegistrationUi(): void {
-    const registering = formMode === "register";
-    const mode = registering ? currentRegistrationMode() : null;
-    const requiresInvite = mode === "invite" || mode === null;
-
-    inviteGroup.classList.toggle("form-group--hidden", !(registering && requiresInvite));
-
-    // Where registration is possible, the server's retention window is part
-    // of what the user signs up to, so it is disclosed here too.
-    const host = currentHost();
-    const retention =
-      registering && mode !== "closed" && host ? (getRetentionNotice?.(host) ?? null) : null;
-    const text =
-      [registering ? registrationNoticeText(mode) : null, retention]
-        .filter((part) => part !== null)
-        .join(" ") || null;
-    if (text !== null) {
-      setText(registrationNotice, text);
-      registrationNotice.classList.add("visible");
-    } else {
-      setText(registrationNotice, "");
-      registrationNotice.classList.remove("visible");
-    }
-
-    updateSubmitButton();
-  }
-
-  // ---------------------------------------------------------------------------
-  // Event handlers
-  // ---------------------------------------------------------------------------
-
-  /** The host box's address as the form saves and compares it. */
-  function currentHost(): string {
-    return canonicalServerHost(hostInput.value, getSavedHosts?.() ?? []);
-  }
-
-  /** Every write of the host goes through here: a new host ends the old one's busy retry and saved password. */
-  function writeHost(host: string): void {
-    if (host !== currentHost()) {
-      cancelAuthBusyRetry?.();
-      // The saved password belongs to the old host's stored credential.
-      clearSavedPasswordPlaceholder();
-    }
-    hostInput.value = host;
-  }
-
-  /** Register mode only: tell the owner which host the user settled on. */
-  function scheduleHostSettled(delayMs = 500): void {
-    if (!onHostSettled || formMode !== "register") return;
-    const seq = ++hostSettledSeq;
-    const host = currentHost();
-    if (!host) return;
-    setOwnedTimeout(
-      signal,
-      () => {
-        if (seq === hostSettledSeq && formMode === "register") onHostSettled(host);
-      },
-      delayMs,
-    );
-  }
-
-  /** Register holds the username to the new-name rules; Login does not. */
-  function applyUsernameRules(): void {
-    const registering = formMode === "register";
-    usernameHint.el.hidden = !registering;
-    usernameHint.reset();
-    // Login lifts the cap and the hint: nothing may describe the field by it.
-    toggleDescribedBy(usernameInput, usernameHint.el.id, registering);
-    if (registering) usernameInput.maxLength = usernameCap;
-    else usernameInput.removeAttribute("maxlength");
-  }
-
-  function handleToggleMode(): void {
-    cancelAuthBusyRetry?.();
-    formMode = formMode === "login" ? "register" : "login";
-    applyUsernameRules();
-
-    // A remembered password belongs to an EXISTING account. Carrying the
-    // placeholder into Register would submit a fixed, publicly known constant
-    // as the new account's password, because only the login branch consults
-    // `usingSavedPassword`.
-    clearSavedPasswordPlaceholder();
-
-    const title = connectText(formMode === "login" ? "login.title" : "login.registerTitle");
-    setText(formTitle, title);
-    setText(submitBtnText, title);
-    setText(
-      toggleModeBtn,
-      connectText(formMode === "login" ? "login.toRegister" : "login.toLogin"),
-    );
-
-    // Password managers offer a generated password for a new account.
-    passwordInput.setAttribute(
-      "autocomplete",
-      formMode === "login" ? "current-password" : "new-password",
-    );
-
-    updateRegistrationUi();
-    scheduleHostSettled(0);
-
-    // Clear any existing error
-    if (formState === "error") {
-      transitionTo("idle");
-    }
-  }
-
-  function validateForm(): {
-    message: string;
-    field: FieldId | null;
-    /** The message is shown under the field (its hint); the banner points there. */
-    inline?: boolean;
-  } | null {
-    const host = currentHost();
-    const username = usernameInput.value.trim();
-    const password = passwordInput.value;
-
-    if (!host) {
-      return { message: connectText("validation.hostRequired"), field: "host" };
-    }
-    if (!isValidHost(host)) {
-      return { message: connectText("validation.hostInvalid"), field: "host" };
-    }
-    if (!username) {
-      return { message: connectText("validation.usernameRequired"), field: "username" };
-    }
-    // A new name is checked against the server's rules; Login sends whatever
-    // the account was created with.
-    if (formMode === "register") {
-      const problem = checkNewUsername(username);
-      if (problem !== null) {
-        return { message: usernameProblemText(problem), field: "username", inline: true };
-      }
-    }
-    // A saved password is already known-good; it is never re-validated here
-    // because its plaintext is not available to this process. The bypass is
-    // login-only: registration always needs a real, freshly typed password.
-    if (!usingSavedPassword || formMode !== "login") {
-      if (!password) {
-        return { message: connectText("validation.passwordRequired"), field: "password" };
-      }
-      if (password.length < MIN_PASSWORD_LENGTH) {
-        return {
-          message: connectText("validation.passwordTooShort", { min: MIN_PASSWORD_LENGTH }),
-          field: "password",
-        };
-      }
-    }
-    if (formMode === "register") {
-      // The placeholder can re-enter the field as literal text (reveal it,
-      // copy the bullets, paste them back — `beforeinput` clears the flag
-      // before the paste lands), with nothing left marking it as anything
-      // but ordinary text. Registration is the only place that turns that
-      // text into a lasting, guessable credential, so it is the only place
-      // it is refused — statelessly, because gating this on remembered
-      // history (whether the field had shown the placeholder before) was
-      // wrong in both directions.
-      if (password === SAVED_PASSWORD_PLACEHOLDER) {
-        return { message: connectText("validation.placeholderPassword"), field: "password" };
-      }
-      const mode = currentRegistrationMode();
-      if (mode === "closed") {
-        // No field is at fault (and the invite field is hidden in this mode),
-        // so the banner stands alone.
-        return { message: connectText("registration.closedNotice"), field: null };
-      }
-      // `invite` and an unknown mode (older server / failed read) both require
-      // a code. Never widen registration because the mode could not be read.
-      if (mode === "invite" || mode === null) {
-        const inviteCode = normaliseInviteCode(inviteInput.value);
-        if (!inviteCode) {
-          return { message: connectText("validation.inviteRequired"), field: "invite" };
-        }
-      }
-    }
-    return null;
-  }
-
-  /**
-   * Run a login, retrying an AUTH_BUSY refusal after the larger of its
-   * Retry-After and AUTH_BUSY_MIN_RETRY_MS (plus jitter) until it succeeds,
-   * fails any other way, or that wait (before jitter) would overrun the retry budget —
-   * that refusal is the one shown. The busy line shows while it retries; its
-   * Cancel, or picking another host, sends no further attempt, reports
-   * `onAutoLoginCancel` (which ends the attempt in flight) and returns the
-   * form to idle.
-   */
-  async function loginRetryingWhileBusy(login: () => Promise<void>): Promise<void> {
-    const deadline = Date.now() + AUTH_BUSY_RETRY_BUDGET_MS;
-    let cancelled = false;
-    let wake: (() => void) | null = null;
-    cancelAuthBusyRetry = () => {
-      cancelled = true;
-      authBusyRetry.hidden = true;
-      wake?.();
-      onAutoLoginCancel?.();
-    };
-    try {
-      for (;;) {
-        try {
-          // oxlint-disable-next-line no-await-in-loop -- a retry is sequential by definition
-          await login();
-          return;
-        } catch (err) {
-          if (cancelled) {
-            transitionTo("idle");
-            return;
-          }
-          if (!isAuthBusy(err)) throw err;
-          const minWait = Math.max(err.retryAfterMs ?? 0, AUTH_BUSY_MIN_RETRY_MS);
-          const left = deadline - Date.now();
-          if (minWait > left) throw err;
-          // Jitter never costs the last retry: it is clipped to the budget.
-          const wait = Math.min(minWait + Math.random() * AUTH_BUSY_JITTER_MS, left);
-          authBusyRetry.hidden = false;
-          // oxlint-disable-next-line no-await-in-loop -- the wait between retries
-          await new Promise<void>((resolve) => {
-            wake = resolve;
-            setOwnedTimeout(signal, resolve, wait);
-          });
-          if (cancelled) {
-            transitionTo("idle");
-            return;
-          }
-        }
-      }
-    } finally {
-      cancelAuthBusyRetry = null;
-      authBusyRetry.hidden = true;
-    }
-  }
-
-  async function handleFormSubmit(e: Event): Promise<void> {
-    e.preventDefault();
-
-    if (formState === "loading" || formState === "connecting") {
-      return;
-    }
-
-    const validationError = validateForm();
-    if (validationError !== null) {
-      if (validationError.inline === true) {
-        // Said once, under the field; the banner points at it.
-        usernameHint.showError(validationError.message);
-        transitionTo("error", connectText("limits.checkField"), validationError.field);
-        return;
-      }
-      transitionTo("error", validationError.message, validationError.field);
-      return;
-    }
-
-    const host = currentHost();
-    const username = usernameInput.value.trim();
-    const password = passwordInput.value;
-    // The mode toggle stays live while a request is in flight.
-    const mode = formMode;
-
-    certRefusedSubmit = null;
-    transitionTo("loading");
-
-    try {
-      if (mode === "login") {
-        const savedPassword = usingSavedPassword;
-        await loginRetryingWhileBusy(() =>
-          savedPassword
-            ? onLoginWithSavedPassword(host, username)
-            : onLogin(host, username, password),
-        );
-      } else {
-        const inviteCode = normaliseInviteCode(inviteInput.value);
-        await onRegister(host, username, password, inviteCode);
-      }
-      // If the callback didn't throw, the caller handles navigation.
-      // The caller may also call showTotp() or showError() on this page.
-    } catch (err: unknown) {
-      let message: string;
-      if (err instanceof TransportError || err instanceof ApiClientError) {
-        // A transport failure or server refusal: plain catalog copy for an
-        // unreachable server or a known code, the capitalised server message
-        // otherwise.
-        message = errorText(err, connectText("error.serverFallback"));
-      } else if (err instanceof Error) {
-        message = err.message;
-      } else if (typeof err === "string") {
-        message = err;
-      } else if (err !== null && typeof err === "object" && "message" in err) {
-        message = String(err.message);
-      } else {
-        message = String(err);
-      }
-      // Cap length to prevent phishing via server-controlled error messages
-      if (message.length > 200) {
-        message = message.slice(0, 200) + "...";
-      }
-      // The server refused the name itself (a reserved name, a character the
-      // client check does not mirror): say so under the field and keep what
-      // was typed, so it can be edited rather than retyped.
-      if (
-        formMode === "register" &&
-        err instanceof ApiClientError &&
-        err.code === RestErrorCode.INVALID_INPUT &&
-        /^username\b/i.test(err.message)
-      ) {
-        usernameHint.showError(message);
-        transitionTo("error", connectText("limits.checkField"), "username");
-        return;
-      }
-      if (err instanceof ApiClientError && err.code === TLS_CERT_CODE) {
-        certRefusedSubmit = { host, mode };
-      }
-      transitionTo("error", message);
-    }
-  }
-
-  async function handleTotpSubmit(): Promise<void> {
-    // Re-entrancy guard: the click path is protected by the button's
-    // disabled attribute, but the Enter-key listener on totpInput (below) is
-    // not — key auto-repeat or a fast double-Enter during the verify round
-    // trip would otherwise fire a second request with the same one-time code,
-    // which the server 401s (codes are single-use) and paints a spurious
-    // "invalid two-factor code" error over a login that already succeeded.
-    // The disabled flag already brackets exactly the in-flight window, so
-    // reusing it covers both paths with one check.
-    if (totpSubmitBtn.disabled) return;
-
-    const code = totpInput.value.trim();
-    if (!TOTP_OR_RECOVERY_CODE.test(code)) {
-      totpInput.classList.add("error");
-      totpInput.setAttribute("aria-invalid", "true");
-      if (document.activeElement === totpInput) totpError.setAttribute("role", "alert");
-      else totpError.removeAttribute("role");
-      setText(totpError, connectText("totp.invalidCode"));
-      setOwnedTimeout(signal, () => totpInput.classList.remove("error"), 500);
-      totpInput.focus();
-      return;
-    }
-    totpInput.classList.remove("error");
-    totpInput.removeAttribute("aria-invalid");
-    setText(totpError, "");
-
-    totpSubmitBtn.disabled = true;
-    setText(totpSubmitBtn, connectText("totp.verifying"));
-
-    try {
-      await onTotpSubmit(code);
-      // Verify succeeded — the challenge is resolved, so drop the latch.
-      // Otherwise any later, unrelated error (e.g. the post-auth WS connect
-      // failing) would hit the `formState === "error" && totpPending` branch
-      // in updateTotpOverlay() and re-open this now-dead overlay, whose
-      // partial token has already been consumed by main.ts.
-      totpPending = false;
-    } catch (err) {
-      const message =
-        err instanceof ApiClientError &&
-        err.code === RestErrorCode.RATE_LIMITED &&
-        err.message === "too many failed attempts, try again later"
-          ? connectText("error.totpTooManyAttempts")
-          : errorText(err, connectText("totp.failed"));
-      transitionTo("error", message);
-    } finally {
-      totpSubmitBtn.disabled = false;
-      setText(totpSubmitBtn, connectText("totp.verify"));
-      if (totpPending && focusIsOurs(totpSubmitBtn)) totpSubmitBtn.focus();
-    }
-  }
-
-  function handleTotpCancel(): void {
-    totpPending = false;
-    transitionTo("idle");
-  }
-
-  // ---------------------------------------------------------------------------
-  // Account recovery (lazy: the overlay module loads on first use)
-  // ---------------------------------------------------------------------------
-
-  // One context per form: it is the overlay module's cache key.
-  let recoverCtx: RecoverContext | undefined;
-
-  function openRecover(): void {
-    if (onRecover === undefined) return;
-    if (formState === "loading" || formState === "connecting") return;
-    recoverCtx ??= {
-      signal,
-      anchor: totpOverlay,
-      hostInput,
-      usernameInput,
-      placeholder: SAVED_PASSWORD_PLACEHOLDER,
-      onRecover,
-      onRecovered: () => transitionTo("connecting"),
-    };
-    const ctx = recoverCtx;
-    void import("./RecoverOverlay")
-      .then((m) => m.openRecoverOverlay(ctx))
-      .catch(() => transitionTo("error", connectText("login.recoveryUnavailable")));
-  }
+  st.autoConnectOverlay = lf.buildAutoConnectOverlay();
 
   // ---------------------------------------------------------------------------
   // Public API
   // ---------------------------------------------------------------------------
 
   return {
-    element: panelEl,
-    statusBarElement: statusBar,
-    totpOverlayElement: totpOverlay,
-    autoConnectOverlayElement: autoConnectOverlay,
+    element: st.panelEl,
+    statusBarElement: st.statusBar,
+    totpOverlayElement: st.totpOverlay,
+    autoConnectOverlayElement: st.autoConnectOverlay,
 
     showTotp(): void {
-      totpPending = true;
-      transitionTo("totp");
+      st.totpPending = true;
+      lf.transitionTo("totp");
     },
 
     showConnecting(): void {
-      transitionTo("connecting");
+      lf.transitionTo("connecting");
     },
 
     showAutoConnecting(serverName: string): void {
-      setText(autoConnectServerName, serverName);
-      transitionTo("auto-connecting");
+      setText(st.autoConnectServerName, serverName);
+      lf.transitionTo("auto-connecting");
     },
 
     showServerWait(serverName: string, host: string): void {
-      setText(serverWaitText, connectText("login.waitingForServer", { server: serverName }));
-      serverWaitHost = host;
-      serverWait.hidden = false;
+      setText(st.serverWaitText, connectText("login.waitingForServer", { server: serverName }));
+      st.serverWaitHost = host;
+      st.serverWait.hidden = false;
     },
 
     cancelServerWaitUnless(host: string): void {
-      if (host !== serverWaitHost) cancelServerWait();
+      if (host !== st.serverWaitHost) lf.cancelServerWait();
     },
 
     hideServerWait(): void {
-      serverWait.hidden = true;
+      st.serverWait.hidden = true;
     },
 
     showError(message: string): void {
-      transitionTo("error", message);
+      lf.transitionTo("error", message);
     },
 
     clearError(message: string | null): void {
-      if (formState === "error" && message !== null && errorMessage === message) {
-        transitionTo("idle");
+      if (st.formState === "error" && message !== null && st.errorMessage === message) {
+        lf.transitionTo("idle");
       }
     },
 
     showNotice(message: string): void {
       // A notice supersedes any error banner, and the form stays usable.
-      transitionTo("idle");
-      noticeMessage = message;
-      updateInfoNotice();
+      lf.transitionTo("idle");
+      st.noticeMessage = message;
+      lf.updateInfoNotice();
     },
 
     resetToIdle(): void {
-      totpPending = false;
-      transitionTo("idle");
+      st.totpPending = false;
+      lf.transitionTo("idle");
     },
 
     getRememberPassword(): boolean {
-      return rememberPasswordCheckbox?.checked ?? false;
+      return st.rememberPasswordCheckbox?.checked ?? false;
     },
 
     getAutoConnect(): boolean {
-      return autoConnectCheckbox?.checked ?? false;
+      return st.autoConnectCheckbox?.checked ?? false;
     },
 
     setAutoConnect(enabled: boolean): void {
-      autoConnectCheckbox.checked = enabled;
+      st.autoConnectCheckbox.checked = enabled;
     },
 
     setRememberPassword(enabled: boolean): void {
-      if (__OWNCORD_WEB__ && fixedHost !== undefined) return;
-      rememberPasswordCheckbox.checked = enabled;
+      if (__OWNCORD_WEB__ && st.fixedHost !== undefined) return;
+      st.rememberPasswordCheckbox.checked = enabled;
     },
 
     getPassword(): string {
       // Never hand back the placeholder. Callers use this to decide what to
       // persist, and "" means "nothing new to save" — save_credential then
       // preserves the password already in the credential store.
-      if (usingSavedPassword) return "";
-      return passwordInput?.value ?? "";
+      if (st.usingSavedPassword) return "";
+      return st.passwordInput?.value ?? "";
     },
 
     setHost(host: string): void {
-      if (__OWNCORD_WEB__ && fixedHost !== undefined) return;
-      certRefusedSubmit = null;
-      writeHost(host);
+      if (__OWNCORD_WEB__ && st.fixedHost !== undefined) return;
+      st.certRefusedSubmit = null;
+      lf.writeHost(host);
       // The host's registration mode may differ from the previous one.
-      updateRegistrationUi();
+      lf.updateRegistrationUi();
     },
 
     refreshRegistrationMode(): void {
-      updateRegistrationUi();
+      lf.updateRegistrationUi();
     },
 
     setCredentials(username: string, hasSavedPassword?: boolean): void {
-      certRefusedSubmit = null;
-      usernameInput.value = username;
+      st.certRefusedSubmit = null;
+      st.usernameInput.value = username;
       // The placeholder only ever belongs to LOGGING IN to an existing
       // account. Registration reads the password field as typed text, so a
       // placeholder there would be submitted as the new account's password —
@@ -1557,19 +323,19 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
       // a switch to Register, or fire while Register is already showing
       // (clicking a server row does not force the form back to login). Both
       // orderings re-arm the placeholder if this is guarded anywhere else.
-      if (hasSavedPassword && formMode === "login") {
+      if (hasSavedPassword && st.formMode === "login") {
         // Show the box as filled — the user ticked "Remember password" and
         // expects exactly that — without the plaintext ever being here.
-        usingSavedPassword = true;
-        passwordInput.value = SAVED_PASSWORD_PLACEHOLDER;
-        rememberPasswordCheckbox.checked = true;
+        st.usingSavedPassword = true;
+        st.passwordInput.value = SAVED_PASSWORD_PLACEHOLDER;
+        st.rememberPasswordCheckbox.checked = true;
       } else {
-        clearSavedPasswordPlaceholder();
+        lf.clearSavedPasswordPlaceholder();
       }
     },
 
     isUsingSavedPassword(): boolean {
-      return usingSavedPassword;
+      return st.usingSavedPassword;
     },
 
     /**
@@ -1578,37 +344,37 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
      * which case the user still needs to enter the server address.
      */
     applyInviteLink(code: string, host?: string): void {
-      const hostFixed = __OWNCORD_WEB__ && fixedHost !== undefined;
-      if (host && !hostFixed) writeHost(host);
-      if (formMode !== "register") handleToggleMode();
-      inviteInput.value = code;
-      updateRegistrationUi();
+      const hostFixed = __OWNCORD_WEB__ && st.fixedHost !== undefined;
+      if (host && !hostFixed) lf.writeHost(host);
+      if (st.formMode !== "register") lf.handleToggleMode();
+      st.inviteInput.value = code;
+      lf.updateRegistrationUi();
       // Focus the first field the user still has to fill in.
-      if (host || hostFixed) usernameInput.focus();
-      else hostInput.focus();
+      if (host || hostFixed) st.usernameInput.focus();
+      else st.hostInput.focus();
     },
 
     getHost(): string {
-      return hostInput === undefined ? "" : currentHost();
+      return st.hostInput === undefined ? "" : lf.currentHost();
     },
 
     focusHost(): void {
       // A touch screen opens its keyboard on focus, covering the saved servers.
       if (typeof window.matchMedia === "function" && window.matchMedia("(pointer: coarse)").matches)
         return;
-      if (__OWNCORD_WEB__ && fixedHost !== undefined) usernameInput.focus();
-      else hostInput.focus();
+      if (__OWNCORD_WEB__ && st.fixedHost !== undefined) st.usernameInput.focus();
+      else st.hostInput.focus();
     },
 
     resubmitAfterCertAccept(host: string): void {
-      const refused = certRefusedSubmit;
+      const refused = st.certRefusedSubmit;
       if (refused === null || normalizeHostForCertCompare(refused.host) !== host) return;
-      certRefusedSubmit = null;
+      st.certRefusedSubmit = null;
       // The user may have moved on since: another server, the other mode, or
       // a submit of their own already under way.
-      if (formState !== "error" || formMode !== refused.mode) return;
-      if (currentHost() !== refused.host) return;
-      void handleFormSubmit(new Event("submit"));
+      if (st.formState !== "error" || st.formMode !== refused.mode) return;
+      if (lf.currentHost() !== refused.host) return;
+      void lf.handleFormSubmit(new Event("submit"));
     },
 
     destroy(): void {
