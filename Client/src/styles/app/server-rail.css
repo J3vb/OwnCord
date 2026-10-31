@@ -128,6 +128,26 @@
 .server-rail-dm {
   background: transparent;
 }
+.server-rail-call-badge {
+  position: absolute;
+  right: 4px;
+  bottom: -3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  box-sizing: border-box;
+  border-radius: 50%;
+  border: 2px solid var(--bg-tertiary);
+  background: var(--green);
+  color: #fff;
+  pointer-events: none;
+}
+.server-rail-call-badge .icon {
+  width: 10px;
+  height: 10px;
+}
 .server-rail-dm-avatar {
   display: flex;
   align-items: center;

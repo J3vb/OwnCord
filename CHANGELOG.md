@@ -47,6 +47,10 @@ and only when it changes something a contributor or fork holder must do
 
 ## Unreleased
 
+### Added
+
+- While you are in a DM call, that person's avatar stays in the server rail under Home with a green call badge, so you can see the call and get back to it in one click from any server.
+
 ## v2.7.0
 
 **OwnCord 2.7** (the eighth public beta) is the first release with an **Android app**: download the APK from the release page and it updates itself after that. On phones, OwnCord now works like a phone app, with a server drawer, a call bar, a full-screen call view, Push to Talk and a phone-shaped status dot. Admins get a Storage page, per-member upload limits, a health row and saved server logs, and the voice gate now works in decibels like Discord's.
