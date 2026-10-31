@@ -132,6 +132,23 @@ describe("MessageList: NEW line by read pointer and Mark Unread", () => {
   const row = (id: number): HTMLElement =>
     container.querySelector<HTMLElement>(`[data-testid="message-${id}"]`)!;
 
+  function altClick(target: Element, init: MouseEventInit = {}): void {
+    target.dispatchEvent(
+      new MouseEvent("click", { bubbles: true, cancelable: true, altKey: true, ...init }),
+    );
+  }
+  const altClickText = (id: number): void => altClick(row(id).querySelector(".msg-text")!);
+
+  /** Right-clicks a message's text and waits for its context menu. */
+  async function openMessageMenu(id: number): Promise<void> {
+    row(id)
+      .querySelector(".msg-text")!
+      .dispatchEvent(
+        new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 5, clientY: 5 }),
+      );
+    await vi.waitFor(() => expect(document.querySelector(".message-context-menu")).not.toBeNull());
+  }
+
   describe("placed by the pointer", () => {
     it("goes above the first message past the pointer", () => {
       setMessages(CHANNEL_ID, [1, 2, 3, 4, 5].map(msg));
@@ -255,12 +272,6 @@ describe("MessageList: NEW line by read pointer and Mark Unread", () => {
       await new Promise((r) => setTimeout(r, 0));
     };
 
-    function altClick(target: Element, init: MouseEventInit = {}): void {
-      target.dispatchEvent(
-        new MouseEvent("click", { bubbles: true, cancelable: true, altKey: true, ...init }),
-      );
-    }
-
     beforeEach(() => {
       setMessages(CHANNEL_ID, [1, 2, 3, 4, 5].map(msg));
       openChannel(0, 5);
@@ -268,7 +279,7 @@ describe("MessageList: NEW line by read pointer and Mark Unread", () => {
 
     it("Alt+click sends mark_unread, moves the pointer and draws the line there", async () => {
       mount();
-      altClick(row(3).querySelector(".msg-text")!);
+      altClickText(3);
       await vi.waitFor(() => expect(unreads).toEqual([[CHANNEL_ID, 3]]));
       expect(channelsStore.getState().channels.get(CHANNEL_ID)?.lastReadMessageId).toBe(2);
       expect(lineAbove()).toBe("message-3");
@@ -276,9 +287,9 @@ describe("MessageList: NEW line by read pointer and Mark Unread", () => {
 
     it("moves the line when another message is marked unread", async () => {
       mount();
-      altClick(row(3).querySelector(".msg-text")!);
+      altClickText(3);
       await vi.waitFor(() => expect(lineAbove()).toBe("message-3"));
-      altClick(row(5).querySelector(".msg-text")!);
+      altClickText(5);
       await vi.waitFor(() => expect(lineAbove()).toBe("message-5"));
       expect(container.querySelectorAll('[data-testid="new-messages-divider"]')).toHaveLength(1);
     });
@@ -321,7 +332,7 @@ describe("MessageList: NEW line by read pointer and Mark Unread", () => {
     it("Alt+click does nothing without the capability", async () => {
       applyReadyCapabilities({});
       mount();
-      altClick(row(3).querySelector(".msg-text")!);
+      altClickText(3);
       await settled();
       expect(unreads).toEqual([]);
       expect(lineAbove()).toBeNull();
@@ -330,7 +341,7 @@ describe("MessageList: NEW line by read pointer and Mark Unread", () => {
     it("the top bar follows the new count once the server answers", async () => {
       messagesStore.flush();
       mount();
-      altClick(row(3).querySelector(".msg-text")!);
+      altClickText(3);
       const label = (): string =>
         container.querySelector('[data-testid="unread-bar-label"]')?.textContent ?? "";
       await vi.waitFor(() => expect(label()).toMatch(/^3 new messages since/));
@@ -345,7 +356,7 @@ describe("MessageList: NEW line by read pointer and Mark Unread", () => {
       messagesStore.flush();
       mount();
       expect(lineAbove()).toBeNull();
-      altClick(row(3).querySelector(".msg-text")!);
+      altClickText(3);
       await vi.waitFor(() => expect(lineAbove()).toBe("message-3"));
       expect(barLabel()).toMatch(/^3 new messages since/);
       expect(failMarkUnread("req-1", "rateLimited")).toBe(true);
@@ -356,10 +367,10 @@ describe("MessageList: NEW line by read pointer and Mark Unread", () => {
 
     it("a failed send takes the line back to where an earlier Mark Unread put it", async () => {
       mount();
-      altClick(row(3).querySelector(".msg-text")!);
+      altClickText(3);
       await vi.waitFor(() => expect(lineAbove()).toBe("message-3"));
       writeReadPointer(CHANNEL_ID, 2, { unread: 3, mention: 0 });
-      altClick(row(4).querySelector(".msg-text")!);
+      altClickText(4);
       await vi.waitFor(() => expect(lineAbove()).toBe("message-4"));
       expect(failMarkUnread("req-2", "failed")).toBe(true);
       expect(lineAbove()).toBe("message-3");
@@ -368,7 +379,7 @@ describe("MessageList: NEW line by read pointer and Mark Unread", () => {
     it("a confirmed Mark Unread keeps the line and the bar", async () => {
       messagesStore.flush();
       mount();
-      altClick(row(3).querySelector(".msg-text")!);
+      altClickText(3);
       await vi.waitFor(() => expect(lineAbove()).toBe("message-3"));
       writeReadPointer(CHANNEL_ID, 2, { unread: 3, mention: 0 });
       // The server's answer settles the request, so a late failure restores nothing.
@@ -379,19 +390,7 @@ describe("MessageList: NEW line by read pointer and Mark Unread", () => {
 
     it("the message menu offers Mark Unread just above Copy Message Link", async () => {
       mount();
-      row(3)
-        .querySelector(".msg-text")!
-        .dispatchEvent(
-          new MouseEvent("contextmenu", {
-            bubbles: true,
-            cancelable: true,
-            clientX: 5,
-            clientY: 5,
-          }),
-        );
-      await vi.waitFor(() =>
-        expect(document.querySelector(".message-context-menu")).not.toBeNull(),
-      );
+      await openMessageMenu(3);
       const names = [
         ...document.querySelectorAll<HTMLElement>('.message-context-menu [role="menuitem"]'),
       ].map((el) => el.dataset["testid"]);
@@ -407,19 +406,7 @@ describe("MessageList: NEW line by read pointer and Mark Unread", () => {
     it("the message menu hides Mark Unread without the capability", async () => {
       applyReadyCapabilities({});
       mount();
-      row(3)
-        .querySelector(".msg-text")!
-        .dispatchEvent(
-          new MouseEvent("contextmenu", {
-            bubbles: true,
-            cancelable: true,
-            clientX: 5,
-            clientY: 5,
-          }),
-        );
-      await vi.waitFor(() =>
-        expect(document.querySelector(".message-context-menu")).not.toBeNull(),
-      );
+      await openMessageMenu(3);
       expect(document.querySelector('[data-testid="msg-menu-mark-unread"]')).toBeNull();
     });
   });

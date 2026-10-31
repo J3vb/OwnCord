@@ -4,24 +4,17 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 // <img> (discardMedia) before discarding rendered rows, otherwise the
 // IntersectionObserver + allTracked set + pending timers retain every GIF
 // ever rendered.
-const { observeMediaMock, discardMediaMock } = vi.hoisted(() => ({
-  observeMediaMock: vi.fn(),
-  discardMediaMock: vi.fn(),
-}));
 // B9-8: this suite exercises content the viewer has already consented to;
 // the consent gate itself is proven in src/features/content-consent/external.test.ts.
-vi.mock("../../src/features/content-consent/external", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../src/features/content-consent/external")>()),
-  externalAllowed: () => true,
-}));
+import * as mocks from "../helpers/messageListMocks";
+vi.mock("../../src/features/content-consent/external", (importOriginal) =>
+  mocks.consentedExternalMock(importOriginal),
+);
 
 // No native host: the GIF stays loading, so the suite sees only the observer.
 vi.mock("@tauri-apps/api/core", () => ({ invoke: () => new Promise(() => {}) }));
 
-vi.mock("@lib/prefs/mediaVisibility", () => ({
-  observeMedia: observeMediaMock,
-  discardMedia: discardMediaMock,
-}));
+vi.mock("@lib/prefs/mediaVisibility", () => mocks.mediaVisibilityMock());
 
 import { createMessageList } from "@components/MessageList";
 import type { MessageListOptions } from "@components/MessageList";
@@ -33,6 +26,8 @@ import {
   setMessages,
 } from "../helpers/messageListHarness";
 import "../helpers/resizeObserverStub";
+
+const { observeMediaMock, discardMediaMock } = mocks;
 
 describe("MessageList media release (GIF observer leak fix)", () => {
   let container: HTMLDivElement;

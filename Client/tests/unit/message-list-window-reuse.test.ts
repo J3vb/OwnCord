@@ -1,26 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-const { fetchImageAsObjectUrlMock } = vi.hoisted(() => ({
-  fetchImageAsObjectUrlMock: vi.fn(() => Promise.resolve("data:image/png;base64,AAAA")),
-}));
-vi.mock("../../src/features/messaging/content/attachments", async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import("../../src/features/messaging/content/attachments")>();
-  return { ...actual, fetchImageAsObjectUrl: fetchImageAsObjectUrlMock };
-});
+import * as mocks from "../helpers/messageListMocks";
+vi.mock("../../src/features/messaging/content/attachments", (importOriginal) =>
+  mocks.listAttachmentsMock(importOriginal),
+);
 
-const { observeMediaMock, discardMediaMock } = vi.hoisted(() => ({
-  observeMediaMock: vi.fn(),
-  discardMediaMock: vi.fn(),
-}));
-vi.mock("../../src/features/content-consent/external", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../src/features/content-consent/external")>()),
-  externalAllowed: () => true,
-}));
-vi.mock("@lib/prefs/mediaVisibility", () => ({
-  observeMedia: observeMediaMock,
-  discardMedia: discardMediaMock,
-}));
+vi.mock("../../src/features/content-consent/external", (importOriginal) =>
+  mocks.consentedExternalMock(importOriginal),
+);
+vi.mock("@lib/prefs/mediaVisibility", () => mocks.mediaVisibilityMock());
 
 import { createMessageList } from "@components/MessageList";
 import type { MessageListOptions } from "@components/MessageList";
@@ -32,6 +20,8 @@ import {
   setMessages,
 } from "../helpers/messageListHarness";
 import "../helpers/resizeObserverStub";
+
+const { observeMediaMock, discardMediaMock } = mocks;
 
 const ROW_H = 61;
 
