@@ -113,6 +113,7 @@ export const shards = {
     "src/lib/ui/virtualRange.ts",
     "src/features/members/memberModel.ts",
     "src/features/members/memberRow.view.ts",
+    "src/lib/ui/statusIndicator.ts",
     "src/features/members/gameActivityLine.ts",
     "src/features/members/listeningLine.ts",
     "src/features/members/listeningCard.ts",

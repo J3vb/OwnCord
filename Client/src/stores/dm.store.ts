@@ -15,6 +15,8 @@ export interface DmUser {
   readonly username: string;
   readonly avatar: string;
   readonly status: string;
+  /** On the Android app, copied from presence like `status`. Undefined = not. */
+  readonly mobile?: boolean;
   /** Nickname to render instead of `username`. "" = unset. */
   readonly displayName?: string;
   /** The game this person is playing, copied from presence like
@@ -250,6 +252,7 @@ export function dmChannelFromPayload(p: DmChannelPayload): DmChannel {
     username: u.username,
     avatar: u.avatar,
     status: u.status,
+    ...(u.mobile === true ? { mobile: true } : {}),
     displayName: u.display_name ?? "",
   }));
   return {
@@ -259,6 +262,7 @@ export function dmChannelFromPayload(p: DmChannelPayload): DmChannel {
       username: p.recipient.username,
       avatar: p.recipient.avatar,
       status: p.recipient.status,
+      ...(p.recipient.mobile === true ? { mobile: true } : {}),
       displayName: p.recipient.display_name ?? "",
     },
     participants,

@@ -752,6 +752,9 @@ export interface PresencePayload {
   /** The song the user is listening to. Always present on a server
    *  with `listening_activity` (null = none); absent from an older one. */
   readonly listening?: ListeningActivity | null;
+  /** True when the user is on the Android app. Absent means not: the server
+   *  omits it when false. */
+  readonly mobile?: boolean;
 }
 
 export interface ChannelCreatePayload {
@@ -928,6 +931,8 @@ export interface DmRecipient {
   readonly status: string;
   /** Chosen nickname, "" when unset. Absent from pre-phase-6 servers. */
   readonly display_name?: string;
+  /** True when this person is on the Android app. Absent = not. */
+  readonly mobile?: boolean;
 }
 
 /** DM channel object in ready payload and dm_channel_open event. */

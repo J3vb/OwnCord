@@ -459,7 +459,7 @@ func QualityBitrateForTest(quality string) int {
 // BuildDMChannelOpenForTest exposes buildDMChannelOpenFor for external tests,
 // with every participant connected and online.
 func BuildDMChannelOpenForTest(channelID int64, recipient *db.User) []byte {
-	return buildDMChannelOpenFor(channelID, recipient, 0, func(int64) string { return db.StatusOnline })
+	return buildDMChannelOpenFor(channelID, recipient, 0, func(int64) string { return db.StatusOnline }, nil)
 }
 
 // BuildCallSignalForTest exposes buildCallSignal for external tests.
@@ -842,3 +842,6 @@ func (h *Hub) newestLocked(userID int64) *Client {
 	}
 	return conns[len(conns)-1]
 }
+
+// MarkMobileForTest makes c a connection that declared the "mobile" client feature.
+func MarkMobileForTest(c *Client) { c.features.mobile = true }

@@ -208,6 +208,7 @@ func NewHub(opts HubOptions) (*Hub, error) {
 	chatDeps := ChatDeps{
 		Limiter:    h.limiter,
 		LiveStatus: h.LiveStatus,
+		LiveMobile: h.LiveMobile,
 	}
 	presenceDeps := PresenceDeps{Limiter: h.limiter, GameActivityEnabled: h.gameActivity.on.Load}
 	reactionDeps := ReactionDeps{}
@@ -227,6 +228,7 @@ func NewHub(opts HubOptions) (*Hub, error) {
 		// So every DM payload DMService builds applies the same live-connection rule, not
 		// only the ready payload's presentableDMChannels.
 		svc.DMs.SetLiveStatusLookup(h.LiveStatus)
+		svc.DMs.SetLiveMobileLookup(h.LiveMobile)
 		// A mention raising a badge in a channel the reader is not viewing never reaches
 		// them via the channel topic, so the mention worker pushes a per-user
 		// mention_count frame. Installed before the composition root starts the worker so

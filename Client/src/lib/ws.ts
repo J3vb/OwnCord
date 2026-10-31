@@ -12,6 +12,7 @@ import type {
 import { createLogger } from "./logger";
 import { PROTOCOL_EPOCH } from "./protocolTypes";
 import { Disposable } from "./disposable";
+import { isAndroidHost } from "./hostPlatform";
 import { normalizeHostForCertCompare } from "./net/hostNormalize";
 import { WsErrorCode } from "@lib/protocolTypes";
 import {
@@ -79,6 +80,14 @@ const log = createLogger("ws");
  * declare them, so an older client never shows a broken forum.
  */
 const CLIENT_FEATURES: readonly string[] = ["forums"];
+
+/** CLIENT_FEATURES plus `mobile` in the Android app (and only there: a phone's
+ *  browser is a web client and counts as a desktop). It tells the server to show
+ *  other members the phone shape on this account's status. Read per auth frame,
+ *  since the host does not change but tests stub it. */
+function clientFeatures(): readonly string[] {
+  return isAndroidHost() ? [...CLIENT_FEATURES, "mobile"] : CLIENT_FEATURES;
+}
 
 /** Monotonic generation counter — incremented on each connect() to invalidate
  *  stale event listeners from a previous connection attempt. */
@@ -762,7 +771,7 @@ export function createWsClient({
         epoch: PROTOCOL_EPOCH,
         ...(activeChannelId !== null ? { active_channel_id: activeChannelId } : {}),
         ...(pendingWake ? { wake: true } : {}),
-        features: CLIENT_FEATURES,
+        features: clientFeatures(),
       };
       if (identityKeyProvider === null) {
         send({ type: "auth", payload: frame });

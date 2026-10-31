@@ -64,9 +64,16 @@ type MemberSummary struct {
 	// embedded pointer keeps MemberSummary under the range-copy size limit.
 	*MemberBanner
 	// CustomStatus is the free-text status line shown under the name. Null
-	// when unset. It must stay the LAST field: encodeRoster in package ws
+	// when unset. It must stay the last field with a value in the cached encoding
+	// (Mobile, omitted when false, follows it): encodeRoster in package ws
 	// splices the per-viewer status and custom_status around it.
 	CustomStatus *string `json:"custom_status"`
+	// Mobile is the live "on the Android app" flag, set only by the ws ready
+	// presentation (never read from the database) and omitted when false. It
+	// follows CustomStatus so a marshal puts it where writeReadyMembers splices
+	// it; encodeRoster encodes members with it false, so the cached bytes never
+	// carry it.
+	Mobile bool `json:"mobile,omitempty"`
 }
 
 // ForViewer returns a copy of the summary as viewerID may see it: an invisible
@@ -80,6 +87,11 @@ func (m MemberSummary) ForViewer(viewerID int64) MemberSummary {
 	// the member is online. Blank it at the same choke point.
 	if m.ID != viewerID && m.Status == StatusOffline {
 		m.CustomStatus = nil
+	}
+	// An offline member is on no phone, and a phone on an invisible member would
+	// give them away the same way.
+	if m.Status == StatusOffline {
+		m.Mobile = false
 	}
 	return m
 }

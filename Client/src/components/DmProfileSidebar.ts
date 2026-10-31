@@ -28,7 +28,12 @@ import {
 import { blocksStore } from "@stores/blocks.store";
 import { paintBanner } from "../features/profiles/banner";
 import { bannerImages } from "../features/profiles/bannerImages";
-import { shellText, statusLabel } from "../i18n/shell";
+import { shellText } from "../i18n/shell";
+import {
+  applyStatusIndicator,
+  applyStatusLine,
+  statusIndicatorLabel,
+} from "@lib/ui/statusIndicator";
 import { requestsText } from "../i18n/requests";
 import { playingForLine } from "../features/members/gameActivityLine";
 import { mountListeningCard } from "../features/members/listeningCard";
@@ -52,6 +57,8 @@ export interface DmProfileData {
   readonly displayName?: string | null;
   readonly avatar: string | null;
   readonly status: UserStatus;
+  /** On the Android app: the status dot becomes a phone. */
+  readonly mobile?: boolean;
   /** The game being played: "Playing <game> · for N min" under the status. */
   readonly activity?: { readonly name: string; readonly startedAt: number } | null;
   /** The song being listened to, with a progress bar that ticks while open. */
@@ -114,16 +121,6 @@ export type DmProfileSidebarComponent = MountableComponent & {
 // ---------------------------------------------------------------------------
 
 const SIDEBAR_WIDTH = 340;
-
-const STATUS_COLORS: Readonly<Record<UserStatus, string>> = {
-  online: "var(--green)",
-  idle: "var(--yellow)",
-  dnd: "var(--red)",
-  // A DM partner is never invisible from here — the server maps it to offline
-  // for everyone but its owner — but the map has to be total over UserStatus.
-  invisible: "var(--text-micro)",
-  offline: "var(--text-micro)",
-};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -262,8 +259,7 @@ export function createDmProfileSidebar(
 
     // Status dot overlay
     const statusDot = createElement("div", { class: "dps-status-dot" });
-    statusDot.style.background = STATUS_COLORS[user.status] ?? STATUS_COLORS.offline;
-    statusDot.title = statusLabel(user.status);
+    applyStatusIndicator(statusDot, user.status, user.mobile === true);
     statusDotNode = statusDot;
     wrapper.appendChild(statusDot);
 
@@ -297,10 +293,13 @@ export function createDmProfileSidebar(
     });
 
     const statusDotInline = createElement("span", { class: "dps-status-dot-inline" });
-    statusDotInline.style.background = STATUS_COLORS[user.status] ?? STATUS_COLORS.offline;
     statusDotInlineNode = statusDotInline;
 
-    const statusText = createElement("span", {}, statusLabel(user.status));
+    const statusText = createElement(
+      "span",
+      {},
+      applyStatusLine(statusDotInline, user.status, user.mobile === true),
+    );
     statusTextNode = statusText;
     appendChildren(statusLine, statusDotInline, statusText);
 
@@ -562,16 +561,12 @@ export function createDmProfileSidebar(
     if (nameNode !== null) setText(nameNode, resolveDisplayName(user));
     if (contentNode !== null && bannerKeyOf(user) !== bannerKey) paintBannerStrip(contentNode);
 
-    const color = STATUS_COLORS[user.status] ?? STATUS_COLORS.offline;
-    const label = statusLabel(user.status);
-
-    if (statusDotNode !== null) {
-      statusDotNode.style.background = color;
-      statusDotNode.title = label;
-    }
-    if (statusDotInlineNode !== null) {
-      statusDotInlineNode.style.background = color;
-    }
+    const mobile = user.mobile === true;
+    if (statusDotNode !== null) applyStatusIndicator(statusDotNode, user.status, mobile);
+    const label =
+      statusDotInlineNode !== null
+        ? applyStatusLine(statusDotInlineNode, user.status, mobile)
+        : statusIndicatorLabel(user.status, mobile);
     if (statusTextNode !== null) setText(statusTextNode, label);
     paintActivity();
     paintListening();

@@ -276,6 +276,7 @@ function itemModel(item: ListItem): MemberItemModel {
     activityIcon: shown === null ? "gamepad-2" : shown.icon,
     colorVar: item.colorVar,
     status: member.status,
+    mobile: member.mobile === true,
     away: isAwayStatus(member.status),
   };
 }

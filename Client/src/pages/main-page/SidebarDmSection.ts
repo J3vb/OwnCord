@@ -32,6 +32,7 @@ import { voiceText } from "../../i18n/voice";
 import { dmPreviewText, isDmInCall } from "./SidebarDmHelpers";
 import { rowActivity } from "../../features/members/listeningLine";
 import { onPrefChange } from "@lib/prefs/preferences";
+import { applyStatusIndicator } from "@lib/ui/statusIndicator";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -73,6 +74,7 @@ function dmRowSignature(dm: DmChannel): string {
     dmDisplayName(dm),
     dm.isGroup ? "g" : "1",
     dm.recipient.status,
+    dm.recipient.mobile === true && !dm.isGroup ? "p" : "",
     dm.isGroup ? "" : (rowActivity(dm.recipient.activity, dm.recipient.listening)?.text ?? ""),
     isChannelMuted(dm.channelId) ? "m" : "",
     isDmInCall(dm.channelId) ? "c" : "",
@@ -230,19 +232,12 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
     dmItem.dataset.channelId = String(dm.channelId);
     // A group has no presence of its own, so it gets a neutral marker rather
     // than the first member's dot dressed up as the conversation's state.
-    const statusColor = dm.isGroup
-      ? "var(--text-micro)"
-      : dm.recipient.status === "online"
-        ? "var(--green)"
-        : dm.recipient.status === "idle"
-          ? "var(--yellow)"
-          : dm.recipient.status === "dnd"
-            ? "var(--red)"
-            : "var(--text-micro)";
     const statusDot = createElement("span", {
-      style: `display:inline-block;width:8px;height:8px;border-radius:${dm.isGroup ? "2px" : "50%"};background:${statusColor};flex-shrink:0;`,
+      class: dm.isGroup ? "dm-section-status dm-section-status-group" : "dm-section-status",
       "aria-hidden": "true",
     });
+    if (dm.isGroup) statusDot.style.background = "var(--text-micro)";
+    else applyStatusIndicator(statusDot, dm.recipient.status, dm.recipient.mobile === true);
     const name = createElement("span", { class: "ch-name" }, dmDisplayName(dm));
     // Discord's DM list shows the last line and when it arrived. An empty
     // timestamp means the DM was never messaged, so no time is drawn.

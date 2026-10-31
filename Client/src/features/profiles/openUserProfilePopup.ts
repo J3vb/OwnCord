@@ -213,6 +213,7 @@ export function openUserProfilePopup(options: OpenUserProfilePopupOptions): () =
           avatar: live.avatar,
           role: live.role,
           status: live.status,
+          ...(live.mobile === true ? { mobile: true } : {}),
           displayName: live.displayName,
           customStatus: live.customStatus,
           activity: live.activity ?? null,

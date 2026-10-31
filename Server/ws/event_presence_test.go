@@ -29,7 +29,7 @@ type presenceEnvelope struct {
 
 func TestPresenceEvents_InvisibleBlanksCustomStatusForOthers(t *testing.T) {
 	text := "in a meeting"
-	events := presenceEvents(99, db.StatusInvisible, &text, nil, nil)
+	events := presenceEvents(99, db.StatusInvisible, &text, nil, nil, false)
 
 	var sawOthers, sawSelf bool
 	for _, e := range events {

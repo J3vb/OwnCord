@@ -56,6 +56,9 @@ type DMUser struct {
 	Status   string `json:"status"`
 	// DisplayName is the participant's nickname, "" when unset.
 	DisplayName string `json:"display_name"`
+	// Mobile is the live "on the Android app" flag, filled by the ws ready
+	// presentation only and omitted when false.
+	Mobile bool `json:"mobile,omitempty"`
 }
 
 // NewDMChannelInfo assembles the payload shape for one DM from its channel id,

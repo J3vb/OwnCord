@@ -213,8 +213,7 @@
   font-size: 9px;
 }
 .sidebar-members-section .member-item .mi-status {
-  width: 8px;
-  height: 8px;
+  --sd: 8px;
   border-width: 2px;
 }
 .sidebar-members-section .member-item .mi-name {
@@ -294,14 +293,47 @@
   font-size: 13px;
   color: var(--on-fill);
 }
+/* The presence dot. --sd is the round dot's size; a member on the phone app
+   (.status-mobile, set by lib/ui/statusIndicator.ts) keeps the same
+   element and colour but takes the phone proportions below. Every status dot
+   in the app reads these custom properties the same way. */
 .member-item .mi-status {
+  --sd: 12px;
+  --status-ring: var(--bg-secondary);
   position: absolute;
   bottom: -1px;
   right: -1px;
-  width: 12px;
-  height: 12px;
+  width: calc(var(--sd) * var(--phone-w, 1));
+  height: calc(var(--sd) * var(--phone-h, 1));
+  border-radius: var(--status-shape, var(--radius-circle));
+  border: 3px solid var(--status-ring);
+}
+.status-mobile {
+  --phone-w: 1.34;
+  --phone-h: 1.75;
+  --status-shape: calc(var(--sd) * 0.3);
+}
+/* The screen and the home dot, drawn in the ring colour over the status fill.
+   Percentages are of the fill (the padding box), so the phone scales with --sd. */
+.status-mobile::before,
+.status-mobile::after {
+  content: "";
+  position: absolute;
+  background: var(--status-screen, var(--status-ring));
+}
+.status-mobile::after {
+  left: 20%;
+  top: 10%;
+  width: 60%;
+  height: 57%;
+  border-radius: calc(var(--sd) * 0.1);
+}
+.status-mobile::before {
+  left: 40%;
+  bottom: 9%;
+  width: 20%;
+  aspect-ratio: 1;
   border-radius: var(--radius-circle);
-  border: 3px solid var(--bg-secondary);
 }
 .member-item .mi-name {
   font-size: var(--font-size-md);

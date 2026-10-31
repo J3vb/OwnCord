@@ -13,6 +13,11 @@ const (
 	// with a composer whose sends are refused.
 	featureForums = "forums"
 
+	// featureMobile marks the Android app. The web client in a phone browser does
+	// not declare it and counts as a desktop. It decides only whether other
+	// members see the phone icon on the user's status (mergeLivePresence).
+	featureMobile = "mobile"
+
 	// maxAuthFeatures and maxAuthFeatureLen bound what the parser reads from
 	// the auth frame, so a hostile list costs nothing.
 	maxAuthFeatures   = 32
@@ -23,6 +28,7 @@ const (
 // client that declared nothing.
 type clientFeatures struct {
 	forums bool
+	mobile bool
 }
 
 // parseClientFeatures reads the auth frame's features list. Unknown names are
@@ -37,8 +43,11 @@ func parseClientFeatures(raw []string) clientFeatures {
 		if len(name) > maxAuthFeatureLen {
 			continue
 		}
-		if name == featureForums {
+		switch name {
+		case featureForums:
 			f.forums = true
+		case featureMobile:
+			f.mobile = true
 		}
 	}
 	return f

@@ -42,6 +42,9 @@ type DMService struct {
 	// a chosen idle/dnd/invisible across a disconnect and trails a connect by the
 	// batched stamp. Nil (tests, no hub) leaves the row's status untouched.
 	liveStatus func(userID int64) string
+	// liveMobile returns whether userID's live presence is on the Android app (the
+	// ws layer wires Hub.LiveMobile). Nil leaves every DM user off the phone.
+	liveMobile func(userID int64) bool
 }
 
 // NewDMService creates a DMService. perms answers whether an actor is timed out,
@@ -54,6 +57,19 @@ func NewDMService(st dmStore, perms *PermissionService) *DMService {
 // users.status; nil clears it. Call once at startup or from a test.
 func (s *DMService) SetLiveStatusLookup(liveStatus func(userID int64) string) {
 	s.liveStatus = liveStatus
+}
+
+// SetLiveMobileLookup wires the lookup DM payloads read the phone flag from; nil
+// clears it. Call once at startup or from a test.
+func (s *DMService) SetLiveMobileLookup(liveMobile func(userID int64) bool) {
+	s.liveMobile = liveMobile
+}
+
+// PresentableMobile reports whether subjectID shows the phone to a viewer who is
+// shown them with presented status (PresentableStatus): never while they read as
+// offline.
+func (s *DMService) PresentableMobile(subjectID int64, presented string) bool {
+	return s.liveMobile != nil && presented != db.StatusOffline && s.liveMobile(subjectID)
 }
 
 // PresentableStatus returns the status viewerID should see for subjectID: offline
@@ -73,6 +89,7 @@ func (s *DMService) PresentableStatus(subjectID, viewerID int64, status string) 
 
 func (s *DMService) presentableDMUser(u db.DMUser, viewerID int64) db.DMUser {
 	u.Status = s.PresentableStatus(u.ID, viewerID, u.Status)
+	u.Mobile = s.PresentableMobile(u.ID, u.Status)
 	return u
 }
 

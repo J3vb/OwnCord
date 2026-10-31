@@ -314,13 +314,13 @@ func (e PresenceSelfEvent) Payload() []byte              { return e.payload }
 // the broadcast excludes the owner and a second targeted event carries their real
 // status. Every presence emitter goes through here so no call site can leak an
 // invisible user by forgetting the mapping.
-func presenceEvents(userID int64, status string, customStatus *string, activity *gameActivity, listening *listeningActivity) []Event {
+func presenceEvents(userID int64, status string, customStatus *string, activity *gameActivity, listening *listeningActivity, mobile bool) []Event {
 	public := db.BroadcastStatus(status)
 	if public == status {
 		return []Event{PresenceEvent{
 			userID:  userID,
-			payload: buildPresenceMsg(userID, status, customStatus, activity, listening),
-			bare:    bareActivityFrame(userID, status, customStatus, activity, listening),
+			payload: buildPresenceMsg(userID, status, customStatus, activity, listening, mobile),
+			bare:    bareActivityFrame(userID, status, customStatus, activity, listening, mobile),
 		}}
 	}
 	return []Event{
@@ -330,12 +330,13 @@ func presenceEvents(userID int64, status string, customStatus *string, activity 
 			// to "offline", and a free-text status, game or song on an "offline" member would
 			// give the invisible user away. Mirrors BroadcastPresence and
 			// db.MemberSummary.ForViewer.
-			payload: buildPresenceMsg(userID, public, nil, nil, nil),
+			// mobile is dropped for the same reason: it would show the member is online.
+			payload: buildPresenceMsg(userID, public, nil, nil, nil, false),
 		},
 		PresenceSelfEvent{
 			targetUserID: userID,
-			payload:      buildPresenceMsg(userID, status, customStatus, activity, listening),
-			bare:         bareActivityFrame(userID, status, customStatus, activity, listening),
+			payload:      buildPresenceMsg(userID, status, customStatus, activity, listening, mobile),
+			bare:         bareActivityFrame(userID, status, customStatus, activity, listening, mobile),
 		},
 	}
 }

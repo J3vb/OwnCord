@@ -34,13 +34,15 @@
   border-radius: var(--radius-circle);
 }
 .dps-status-dot {
+  --sd: 16px;
+  --status-ring: var(--bg-secondary);
   position: absolute;
   bottom: 2px;
   right: 2px;
-  width: 16px;
-  height: 16px;
-  border-radius: var(--radius-circle);
-  border: 3px solid var(--bg-secondary);
+  width: calc(var(--sd) * var(--phone-w, 1));
+  height: calc(var(--sd) * var(--phone-h, 1));
+  border-radius: var(--status-shape, var(--radius-circle));
+  border: 3px solid var(--status-ring);
 }
 .dps-close {
   position: absolute;
@@ -164,6 +166,12 @@
   height: 8px;
   border-radius: var(--radius-circle);
   display: inline-block;
+}
+.dps-status-dot-inline.status-line-phone {
+  display: inline-flex;
+  width: auto;
+  height: auto;
+  border-radius: 0;
 }
 .dps-divider {
   height: 1px;
