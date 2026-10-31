@@ -2,6 +2,7 @@
  * Quick Switcher (Ctrl+K) parity (N9): ordering, DM rows, markers, the empty
  * state, and the manager routing a pick through navigateToChannel.
  */
+import { makeDm } from "../helpers/dmHarness";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { createQuickSwitcher } from "@components/QuickSwitcher";
 import { createQuickSwitcherManager } from "../../src/pages/main-page/OverlayManagers";
@@ -14,19 +15,7 @@ import { resetChannelsState } from "../helpers/storeSeeds";
 
 function dm(channelId: number, username: string, over: Partial<DmChannel> = {}): DmChannel {
   const user = { id: channelId + 100, username, avatar: "", status: "online" };
-  return {
-    channelId,
-    recipient: user,
-    participants: [user],
-    name: "",
-    isGroup: false,
-    lastMessageId: null,
-    lastMessage: "",
-    lastMessageAt: "",
-    unreadCount: 0,
-    mentionCount: 0,
-    ...over,
-  };
+  return makeDm({ channelId, recipient: user, participants: [user], ...over });
 }
 
 function names(container: HTMLElement): (string | null | undefined)[] {

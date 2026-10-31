@@ -1,6 +1,5 @@
-import { expect } from "vitest";
 import { JSDOM } from "jsdom";
-import { scriptedPanelFetch } from "./adminPanelFetch";
+import { loadPanelWithFetch, scriptedPanelFetch, settlePanel } from "./adminPanelFetch";
 import { ADMIN_HTML_SOURCE } from "./serverAdminStaticPanelMocks";
 
 // The panel's scripts are classic scripts: their top-level declarations live in
@@ -111,14 +110,14 @@ export const proposedPreview = {
 export const ADMINISTRATOR = 0x40000000;
 
 export function loadAdminPanel(calls: FetchCall[], respond: Responder): JSDOM {
-  return new JSDOM(ADMIN_HTML, {
-    url: "http://localhost:8080/admin",
-    runScripts: "dangerously",
-    pretendToBeVisual: true,
-    beforeParse(window) {
-      window.fetch = scriptedPanelFetch((call) => calls.push(call), respond);
-    },
-  });
+  return loadPanelWithFetch(
+    ADMIN_HTML,
+    scriptedPanelFetch(
+      (call) => calls.push(call),
+      (path, method) =>
+        path === "/setup/status" ? { json: { needs_setup: false } } : respond(path, method),
+    ),
+  );
 }
 
 export async function boot(
@@ -126,12 +125,19 @@ export async function boot(
   respond: Responder,
 ): Promise<{ dom: JSDOM; bridge: Bridge }> {
   const dom = loadAdminPanel(calls, respond);
-  // Let the page's own bootstrap (checkAuth -> GET /setup/status) settle.
-  await new Promise((resolve) => dom.window.setTimeout(resolve, 0));
+  const bridge = await settlePanel<Bridge>(dom);
   calls.length = 0;
-  const bridge = (dom.window as unknown as { __test: Bridge }).__test;
-  expect(bridge).toBeTruthy();
   return { dom, bridge };
+}
+
+/** `boot`, then signs in as an administrator who outranks everyone. */
+export async function bootAsAdmin(
+  calls: FetchCall[],
+  respond: Responder,
+): Promise<{ dom: JSDOM; bridge: Bridge }> {
+  const booted = await boot(calls, respond);
+  booted.bridge.state.me = { id: 1, permissions: ADMINISTRATOR, role_position: 100 };
+  return booted;
 }
 
 /** What core.js showApp does after sign-in. jsdom, like a browser, only
@@ -148,7 +154,4 @@ export async function submitForm(doc: Document, id: string): Promise<void> {
   for (let i = 0; i < 5; i++) await new Promise((resolve) => win.setTimeout(resolve, 0));
 }
 
-export const defaultRespond: Responder = (p) => {
-  if (p === "/setup/status") return { json: { needs_setup: false } };
-  return { json: {} };
-};
+export const defaultRespond: Responder = () => ({ json: {} });

@@ -1,10 +1,9 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { loggerMock } from "../helpers/loggerMock";
 
 const invoke = vi.hoisted(() => vi.fn());
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
-vi.mock("@lib/logger", () => ({
-  createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
-}));
+vi.mock("@lib/logger", () => loggerMock());
 
 import { createUserProfilePopup } from "@components/UserProfilePopup";
 import { createDmProfileSidebar } from "@components/DmProfileSidebar";

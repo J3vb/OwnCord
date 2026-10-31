@@ -2,10 +2,11 @@
 // any sensitivity, and speech must open it inside the pipeline's lookahead so
 // the start of a word is not cut off. Drives the real public/vad-worklet.js
 // in the 128-sample render quanta the audio thread delivers.
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { FIXTURE_SAMPLE_RATE, placeInRoomTone, readAudioFixture } from "../helpers/wav";
 import { vadThreshold } from "../../src/lib/voice/audioPipeline";
+import { useFakeWorkletHost } from "../helpers/workletHost";
 
 type Message = { type: string; gated?: boolean; value?: number };
 type Processor = {
@@ -23,19 +24,12 @@ describe("voice gate on recorded audio", () => {
   let processorCtor: (new () => Processor) | null = null;
   const registered = new Map<string, new () => Processor>();
 
+  useFakeWorkletHost<Processor>((name, ctor) => {
+    registered.set(name, ctor);
+    if (name === "vad-processor") processorCtor = ctor;
+  });
   beforeEach(() => {
-    vi.resetModules();
     registered.clear();
-    class FakeAudioWorkletProcessor {
-      readonly port = { onmessage: null, postMessage: () => {} };
-    }
-    Object.assign(globalThis, {
-      registerProcessor: (name: string, ctor: new () => Processor) => {
-        registered.set(name, ctor);
-        if (name === "vad-processor") processorCtor = ctor;
-      },
-      AudioWorkletProcessor: FakeAudioWorkletProcessor,
-    });
   });
 
   /** RNNoise's speech probability for each quantum of `input`, as its
@@ -57,11 +51,6 @@ describe("voice gate on recorded audio", () => {
     }
     return out;
   }
-
-  afterEach(() => {
-    delete (globalThis as Record<string, unknown>).registerProcessor;
-    delete (globalThis as Record<string, unknown>).AudioWorkletProcessor;
-  });
 
   /** Run `input` through the gate; every message with the ms it was posted
    *  at. With `speech`, RNNoise's verdict per quantum feeds the gate's second

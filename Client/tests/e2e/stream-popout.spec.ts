@@ -62,16 +62,22 @@ async function mountGrid(page: Page): Promise<void> {
 
 const tile = (page: Page) => page.locator(`#popout-grid-host .video-cell[data-user-id='${TILE}']`);
 
+/** Pop the tile's stream out with its pip control; returns the new window. */
+async function popOut(page: Page): Promise<Page> {
+  await tile(page).hover();
+  const [popup] = await Promise.all([
+    page.waitForEvent("popup"),
+    tile(page).locator("[data-tile-control='pip']").click(),
+  ]);
+  return popup;
+}
+
 test.describe("stream pop-out window", () => {
   test("moves the playing stream into its own window, full screen there, and back on close", async ({
     page,
   }) => {
     await mountGrid(page);
-    await tile(page).hover();
-    const [popup] = await Promise.all([
-      page.waitForEvent("popup"),
-      tile(page).locator("[data-tile-control='pip']").click(),
-    ]);
+    const popup = await popOut(page);
 
     // The video left the tile for the window, and plays there.
     await expect(tile(page).locator("video")).toHaveCount(0);
@@ -117,11 +123,7 @@ test.describe("stream pop-out window", () => {
 
   test("Bring back closes the window", async ({ page }) => {
     await mountGrid(page);
-    await tile(page).hover();
-    const [popup] = await Promise.all([
-      page.waitForEvent("popup"),
-      tile(page).locator("[data-tile-control='pip']").click(),
-    ]);
+    const popup = await popOut(page);
     await expect(popup.locator(".video-popout video")).toHaveCount(1);
 
     // Tab reaches Bring back, not the tile controls under the cover.
@@ -142,11 +144,7 @@ test.describe("stream pop-out window", () => {
 
   test("the stream's volume and mute go along into the window, usable there", async ({ page }) => {
     await mountGrid(page);
-    await tile(page).hover();
-    const [popup] = await Promise.all([
-      page.waitForEvent("popup"),
-      tile(page).locator("[data-tile-control='pip']").click(),
-    ]);
+    const popup = await popOut(page);
     await expect(popup.locator(".video-popout video")).toHaveCount(1);
 
     // Shown without a hover, on the left of the window's full-screen control.
@@ -174,11 +172,7 @@ test.describe("stream pop-out window", () => {
       });
     });
     await mountGrid(page);
-    await tile(page).hover();
-    const [popup] = await Promise.all([
-      page.waitForEvent("popup"),
-      tile(page).locator("[data-tile-control='pip']").click(),
-    ]);
+    const popup = await popOut(page);
     const video = popup.locator(".video-popout video");
     await expect(video).toHaveCount(1);
 

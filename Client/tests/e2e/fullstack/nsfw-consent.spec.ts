@@ -11,6 +11,7 @@
 
 import type { Browser, Page } from "@playwright/test";
 import { test, expect, login } from "./fixtures";
+import { generalChannel, signIn } from "./serverApi";
 import { installRealTransport, TUNNEL_TOKEN } from "../support/real-transport";
 import type { TestServer } from "../support/server";
 import { openSettings } from "../helpers";
@@ -89,12 +90,7 @@ test.describe("NSFW consent gate (real server)", () => {
     server,
   }) => {
     const owner = server.owner!.token;
-    const channels = (await server.api("/api/v1/channels/", undefined, owner)) as {
-      id: number;
-      name: string;
-      type: string;
-    }[];
-    const general = channels.find((c) => c.name === "general" && c.type === "text")!;
+    const general = await generalChannel(server);
     await server.api("/admin/api/channels", { name: "random", type: "text" }, owner);
     await expect(channelItem(bob, "random")).toBeVisible();
 
@@ -119,12 +115,9 @@ test.describe("NSFW consent gate (real server)", () => {
     await expect(gate(alice)).toBeVisible();
 
     // The server itself refuses bob's pre-consent read.
-    const bobLogin = (await server.api("/api/v1/auth/login", {
-      username: "bob",
-      password: "OwnCord-E2E-pass-123!",
-    })) as { token: string };
+    const bobToken = await signIn(server, "bob");
     await expect(
-      server.api(`/api/v1/channels/${general.id}/messages`, undefined, bobLogin.token),
+      server.api(`/api/v1/channels/${general.id}/messages`, undefined, bobToken),
     ).rejects.toThrow(/NSFW_ACKNOWLEDGEMENT_REQUIRED/);
 
     // Alternate entry points behind the gate: pins fetch nothing, and search
@@ -171,7 +164,7 @@ test.describe("NSFW consent gate (real server)", () => {
     expect(await contentTraffic(bob, general.id)).toEqual([]);
     // Still refused by the server: the failed PUT recorded nothing.
     await expect(
-      server.api(`/api/v1/channels/${general.id}/messages`, undefined, bobLogin.token),
+      server.api(`/api/v1/channels/${general.id}/messages`, undefined, bobToken),
     ).rejects.toThrow(/NSFW_ACKNOWLEDGEMENT_REQUIRED/);
 
     // 4. Accept: content loads only after the server's 204.
@@ -222,7 +215,7 @@ test.describe("NSFW consent gate (real server)", () => {
       await shot(device2.page, "06-revoked-pins-closed");
       expect(await contentTraffic(device2.page, general.id)).toEqual([]);
       await expect(
-        server.api(`/api/v1/channels/${general.id}/messages`, undefined, bobLogin.token),
+        server.api(`/api/v1/channels/${general.id}/messages`, undefined, bobToken),
       ).rejects.toThrow(/NSFW_ACKNOWLEDGEMENT_REQUIRED/);
 
       // 7. Device 1 reconnects (its transport is cut and restored): the
@@ -265,18 +258,8 @@ test.describe("NSFW remote regate focus (real server)", () => {
     server,
   }) => {
     const owner = server.owner!.token;
-    const channels = (await server.api("/api/v1/channels/", undefined, owner)) as {
-      id: number;
-      name: string;
-      type: string;
-    }[];
-    const general = channels.find((c) => c.name === "general" && c.type === "text")!;
-    const bobApi = (
-      (await server.api("/api/v1/auth/login", {
-        username: "bob",
-        password: "OwnCord-E2E-pass-123!",
-      })) as { token: string }
-    ).token;
+    const general = await generalChannel(server);
+    const bobApi = await signIn(server, "bob");
     const composer = bob.locator("[data-testid='message-input'] textarea");
     const withdrawElsewhere = () =>
       server.api(

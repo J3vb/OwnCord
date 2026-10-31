@@ -3,7 +3,7 @@
  * `<url>` with no embed, `<t:…>` timestamps and `-#` subtext.
  */
 
-import { describe, it, expect, beforeAll, beforeEach, afterEach, vi, type Mock } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach, vi, type Mock } from "vitest";
 import * as voiceSession from "../helpers/voiceSessionMock";
 
 vi.mock("@lib/voice/livekitSession", () => voiceSession.defaults());
@@ -12,7 +12,8 @@ import {
   filterChannelSuggestions,
   MAX_CHANNEL_SUGGESTIONS,
 } from "../../src/components/ChannelAutocomplete";
-import { createMessageInput, type MessageInputOptions } from "../../src/components/MessageInput";
+import { useMountedComposer } from "../helpers/composerFixture";
+import type { MessageInputOptions } from "../../src/components/MessageInput";
 import {
   relabelInlineTimestamps,
   renderMessageContent,
@@ -109,25 +110,11 @@ describe("filterChannelSuggestions", () => {
 
 describe("composer: #channel autocomplete", () => {
   let container: HTMLDivElement;
-  let input: ReturnType<typeof createMessageInput>;
   let onSend: Mock<MessageInputOptions["onSend"]>;
 
-  beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
-    onSend = vi.fn<MessageInputOptions["onSend"]>();
-    input = createMessageInput({
-      channelId: 1,
-      channelName: "general",
-      onSend,
-      onTyping: vi.fn(),
-    });
-    input.mount(container);
-  });
-
-  afterEach(() => {
-    input.destroy?.();
-    container.remove();
+  useMountedComposer((mounted, _composer, send) => {
+    container = mounted;
+    onSend = send;
   });
 
   function textarea(): HTMLTextAreaElement {

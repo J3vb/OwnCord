@@ -16,28 +16,17 @@ import type { Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
 import {
   buildTauriMockScript,
-  submitLogin,
-  waitForWsReady,
   openDmRow,
   BASE_SESSION_ROUTES,
+  navigateToMainPageReady,
+  dmChannel,
 } from "./helpers";
 import { findUnnamedControls, focusIndicator, keyboardReachable } from "./support/accessibility";
 
-const DM_CHANNELS = [
-  {
-    channel_id: 100,
-    recipient: { id: 2, username: "otheruser", avatar: "", status: "online" },
-    last_message_id: 500,
-    last_message: "Hey there!",
-    last_message_at: "2026-03-15T12:00:00Z",
-    unread_count: 0,
-  },
-];
+const DM_CHANNELS = [dmChannel(100)];
 
 async function signIn(page: Page): Promise<void> {
-  await submitLogin(page);
-  await expect(page.locator("[data-testid='app-layout']")).toBeVisible({ timeout: 15_000 });
-  await waitForWsReady(page);
+  await navigateToMainPageReady(page);
   await expect(page.locator("[data-testid='chat-header-name']")).toHaveText("general");
 }
 

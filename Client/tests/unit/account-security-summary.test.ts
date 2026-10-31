@@ -1,9 +1,8 @@
 // Account tab, settings UX clarity pass: security state first, forms on demand.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { loggerMock } from "../helpers/loggerMock";
 
-vi.mock("@lib/logger", () => ({
-  createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
-}));
+vi.mock("@lib/logger", () => loggerMock());
 
 const mockAuthState = vi.hoisted(() => ({
   user: { id: 1, username: "testuser", totp_enabled: false, display_name: null as string | null },

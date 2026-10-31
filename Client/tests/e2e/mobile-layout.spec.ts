@@ -25,10 +25,10 @@ import {
   mockTauriFullSessionWithVoice,
   navigateToMainPage,
   parkLiveKitSocket,
-  submitLogin,
   voiceJoinWithTokenHandlers,
   waitForWsReady,
   BASE_SESSION_ROUTES,
+  navigateToMainPageReady,
 } from "./helpers";
 import { callLog, mountCallGrid } from "./support/callGrid";
 
@@ -141,9 +141,7 @@ for (const profile of PROFILES) {
     });
 
     async function signIn(page: Page): Promise<void> {
-      await submitLogin(page);
-      await expect(page.locator("[data-testid='app-layout']")).toBeVisible({ timeout: 15_000 });
-      await waitForWsReady(page);
+      await navigateToMainPageReady(page);
       await expect(page.locator("[data-testid='chat-header-name']")).toHaveText("general");
       await expect(page.locator("[data-testid='sidebar-drawer-backdrop']")).toBeAttached();
     }

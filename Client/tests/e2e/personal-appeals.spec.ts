@@ -13,39 +13,37 @@
  */
 import type { Locator, Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
-import { buildTauriMockScript, submitLogin, waitForWsReady, BASE_SESSION_ROUTES } from "./helpers";
+import {
+  buildTauriMockScript,
+  BASE_SESSION_ROUTES,
+  navigateToMainPageReady,
+  moderationHistoryEntry,
+} from "./helpers";
 import {
   Q1,
   findUnnamedControls,
   focusIndicator,
   setAppearance,
   textContrast,
-  type AppearancePrefs,
 } from "./support/accessibility";
+import { APPEARANCE_MATRIX } from "./support/a11yHarness";
 
 const HISTORY = [
-  {
+  moderationHistoryEntry({
     id: 21,
     kind: "timeout",
     reason: "Flooding the channel",
     created_at: "2026-09-21T09:00:00Z",
     expires_at: "2026-09-21T10:00:00Z",
-    lifted_at: null,
-    acknowledged_at: null,
-    appealable: true,
-    appeal: null,
-  },
-  {
+  }),
+  moderationHistoryEntry({
     id: 9,
     kind: "removal",
     reason: "Off-topic post",
     created_at: "2026-09-19T09:00:00Z",
-    expires_at: null,
-    lifted_at: null,
-    acknowledged_at: null,
     appealable: false,
     appeal: { id: "APL-1", state: "open" },
-  },
+  }),
 ];
 
 const APPEALS = [
@@ -95,13 +93,7 @@ async function start(page: Page, opts: { fileStatus?: number } = {}): Promise<vo
     }),
   );
   await page.goto("/");
-  await signIn(page);
-}
-
-async function signIn(page: Page): Promise<void> {
-  await submitLogin(page);
-  await expect(page.locator("[data-testid='app-layout']")).toBeVisible({ timeout: 15_000 });
-  await waitForWsReady(page);
+  await navigateToMainPageReady(page);
 }
 
 async function openSafety(page: Page): Promise<Locator> {
@@ -231,18 +223,10 @@ test.describe("personal appeals", () => {
     page,
   }) => {
     await start(page);
-    const matrix: AppearancePrefs[] = [
-      { theme: "dark" },
-      { theme: "midnight" },
-      { theme: "neon-glow" },
-      { theme: "light" },
-      { theme: "dark", highContrast: true },
-      { theme: "light", accent: "#fee75c" }, // below 3:1 on light: falls back (Q8)
-    ];
     const rows: string[] = [];
-    for (const prefs of matrix) {
+    for (const prefs of APPEARANCE_MATRIX) {
       await setAppearance(page, prefs);
-      await signIn(page);
+      await navigateToMainPageReady(page);
       const pane = await openSafety(page);
       await appealButton(page).click();
       const parts = {
@@ -279,7 +263,7 @@ test.describe("personal appeals", () => {
     await page.setViewportSize({ width: 940, height: 500 });
     await start(page);
     await setAppearance(page, { fontSize: 20, largeFont: true, reducedMotion: true });
-    await signIn(page);
+    await navigateToMainPageReady(page);
     const pane = await openSafety(page);
     await appealButton(page).click();
     expect(await pane.evaluate((el) => el.scrollWidth - el.clientWidth)).toBe(0);

@@ -18,6 +18,7 @@ import {
   mockTauriFullSession,
   submitLogin,
   BASE_SESSION_ROUTES,
+  ROUTE_HEALTH,
 } from "./helpers";
 
 const HOST = "staging.example:8443";
@@ -229,9 +230,7 @@ test.describe("Server profiles — row actions", () => {
   test.beforeEach(async ({ page }) => {
     await page.addInitScript(
       buildTauriMockScript({
-        httpRoutes: [
-          { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-        ],
+        httpRoutes: [ROUTE_HEALTH],
         simulateWsFlow: false,
         storedSettings: storedProfiles([
           profile("pa", "Server A", A),

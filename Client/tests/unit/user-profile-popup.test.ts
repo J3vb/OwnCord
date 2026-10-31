@@ -601,12 +601,8 @@ describe("UserProfilePopup profile fields", () => {
 
 describe("UserProfilePopup role chips", () => {
   let container: HTMLDivElement;
-  beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-  afterEach(() => {
-    container.remove();
+  useMountContainer((mounted) => {
+    container = mounted;
   });
 
   function controlFor(

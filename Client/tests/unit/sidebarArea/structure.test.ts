@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import * as mocks from "../../helpers/sidebarAreaMocks";
 import { cascadedDeclaration, keyword } from "../../helpers/app-css";
 import {
@@ -21,8 +21,6 @@ import {
   MockedFn,
   getMockMount,
   getMockDestroy,
-  resetStores,
-  resetMocks,
   enterVoiceAndAwaitWidget,
   makeDm,
   defaultOpts,
@@ -32,6 +30,7 @@ import {
   openMemberPicker,
   seedMembers,
   addUserDms,
+  useSidebarAreaHarness,
 } from "../../helpers/sidebarAreaHarness";
 
 vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
@@ -58,17 +57,8 @@ vi.mock("../../../src/pages/main-page/OverlayManagers", () => mocks.pageOverlayM
 describe("SidebarArea", () => {
   let container: HTMLDivElement;
 
-  beforeEach(() => {
-    resetStores();
-    resetMocks();
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    container.remove();
-    // Clean up any modals left on body
-    document.querySelectorAll(".modal-overlay").forEach((el) => el.remove());
+  useSidebarAreaHarness((c) => {
+    container = c;
   });
 
   // -------------------------------------------------------------------------

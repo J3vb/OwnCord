@@ -1,5 +1,5 @@
 import { test, expect } from "./fixtures";
-import { mockTauriFullSession, navigateToMainPage } from "./helpers";
+import { startFullSession } from "./helpers";
 
 // ---------------------------------------------------------------------------
 // Tests: User Bar
@@ -7,9 +7,7 @@ import { mockTauriFullSession, navigateToMainPage } from "./helpers";
 
 test.describe("User Bar", () => {
   test.beforeEach(async ({ page }) => {
-    await mockTauriFullSession(page);
-    await page.goto("/");
-    await navigateToMainPage(page);
+    await startFullSession(page);
   });
 
   test("user bar is visible", async ({ page }) => {

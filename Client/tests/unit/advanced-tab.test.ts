@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { loggerMock } from "../helpers/loggerMock";
 import { useMountContainer } from "../helpers/mountContainer";
 
 const {
@@ -57,14 +58,7 @@ vi.mock("@tauri-apps/plugin-autostart", () => ({
   enable: mockEnable,
   disable: mockDisable,
 }));
-vi.mock("@lib/logger", () => ({
-  createLogger: () => ({
-    debug: vi.fn(),
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-  }),
-}));
+vi.mock("@lib/logger", () => loggerMock());
 
 vi.mock("@lib/logPersistence", () => ({
   clearPendingPersistedLogs: mockClearPendingPersistedLogs,

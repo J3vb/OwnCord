@@ -9,7 +9,14 @@
 // your rank. Server/admin/members_test.go pins the server half of both.
 import { describe, it, expect, afterEach } from "vitest";
 import { JSDOM } from "jsdom";
-import { adminPanelHtml } from "../helpers/admin-panel";
+import {
+  adminHtmlWithBridge,
+  jsonResponder,
+  loadPanelWithFetch,
+  recordLabelled,
+  scriptedPanelFetch,
+  type SentBody as Sent,
+} from "../helpers/adminPanelFetch";
 
 const BRIDGE = `<script>
 window.__test = {
@@ -18,7 +25,7 @@ window.__test = {
   closeModal: closeModal
 };
 </script>`;
-const ADMIN_HTML = adminPanelHtml().replace("</body>", `${BRIDGE}\n</body>`);
+const ADMIN_HTML = adminHtmlWithBridge(BRIDGE);
 
 const ADMINISTRATOR = 0x40000000;
 const MANAGE_ROLES = 0x1000000;
@@ -26,7 +33,6 @@ const BAN_MEMBERS = 0x80000;
 const MANAGE_NICKNAMES = 0x800000;
 
 type Responder = (path: string, method: string) => unknown;
-type Sent = { call: string; body: unknown };
 
 interface Bridge {
   state: any;
@@ -37,33 +43,10 @@ interface Bridge {
 let dom: JSDOM | undefined;
 
 async function boot(calls: string[], respond: Responder, sent: Sent[] = []) {
-  dom = new JSDOM(ADMIN_HTML, {
-    url: "http://localhost:8080/admin",
-    runScripts: "dangerously",
-    pretendToBeVisual: true,
-    beforeParse(window) {
-      window.fetch = (async (input: string, opts: Record<string, unknown> = {}) => {
-        const method = String((opts.method as string) || "GET").toUpperCase();
-        const p = String(input).replace(/^\/admin\/api/, "");
-        calls.push(`${method} ${p}`);
-        if (typeof opts.body === "string")
-          sent.push({ call: `${method} ${p}`, body: JSON.parse(opts.body) });
-        const out =
-          p === "/setup/status" ? { needs_setup: false } : ((await respond(p, method)) ?? {});
-        // A responder answers a refusal with { __status, body }.
-        const refusal = out as { __status?: number; body?: unknown } | null;
-        const refused = typeof refusal === "object" && refusal !== null && "__status" in refusal;
-        const json = refused ? refusal.body : out;
-        const status = refused ? Number(refusal.__status) : 200;
-        return {
-          ok: !refused,
-          status,
-          json: async () => json,
-          text: async () => JSON.stringify(json),
-        } as Response;
-      }) as typeof fetch;
-    },
-  });
+  dom = loadPanelWithFetch(
+    ADMIN_HTML,
+    scriptedPanelFetch(recordLabelled(calls, sent), jsonResponder(respond)),
+  );
   const settle = (ms = 0) => new Promise((resolve) => dom!.window.setTimeout(resolve, ms));
   await settle();
   calls.length = 0;

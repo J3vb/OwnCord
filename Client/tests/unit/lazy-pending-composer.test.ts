@@ -4,32 +4,13 @@
  * resolved, so what they check is what happens to a click that lands mid-load.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import * as mocks from "../helpers/messageInputMocks";
 
-vi.mock("@components/EmojiPicker", () => ({
-  createEmojiPicker: () => {
-    const element = document.createElement("div");
-    element.classList.add("emoji-picker");
-    return { element, destroy: vi.fn() };
-  },
-}));
-vi.mock("@components/GifPicker", () => ({
-  createGifPicker: () => {
-    const element = document.createElement("div");
-    element.classList.add("gif-picker");
-    return { element, destroy: vi.fn() };
-  },
-}));
+vi.mock("@components/EmojiPicker", () => mocks.emojiPickerMock());
+vi.mock("@components/GifPicker", () => mocks.gifPickerMock());
 
 import { createMessageInput, type MessageInputOptions } from "@components/MessageInput";
-import type { GifApi, GifFavoritesApi } from "@lib/media/gifProvider";
-
-const gifApi: GifApi & GifFavoritesApi = {
-  gifSearch: vi.fn(async () => ({ results: [] })),
-  gifTrending: vi.fn(async () => ({ results: [] })),
-  gifFavorites: vi.fn(async () => ({ favorites: [] })),
-  addGifFavorite: vi.fn(async () => undefined),
-  removeGifFavorite: vi.fn(async () => undefined),
-};
+import { stubGifApi as gifApi } from "../helpers/messageInputHarness";
 
 function options(): MessageInputOptions {
   return { channelId: 1, channelName: "general", gifApi, onSend: vi.fn(), onTyping: vi.fn() };

@@ -28,25 +28,21 @@ import {
 } from "./support/accessibility";
 import {
   buildTauriMockScript,
-  MOCK_LOGIN_RESPONSE,
   MOCK_MESSAGES,
   MOCK_MESSAGES_RICH,
   MOCK_PINNED_MESSAGES,
   MOCK_READY_PAYLOAD,
   MOCK_ROLES,
   navigateToMainPageReady,
+  ROUTE_HEALTH,
+  ROUTE_LOGIN,
+  ROUTE_MESSAGES,
 } from "./helpers";
+import { type FetchCall, decodeBody, fetchCalls, waitForFetch } from "./support/invokeLog";
 
 // ---------------------------------------------------------------------------
 // Outgoing-traffic helpers (the mock's own IPC log)
 // ---------------------------------------------------------------------------
-
-interface FetchCall {
-  readonly method: string;
-  readonly url: string;
-  readonly data: number[] | null;
-  readonly headers: [string, string][];
-}
 
 interface InvokeEntry {
   readonly cmd: string;
@@ -64,16 +60,6 @@ async function invokeLog(page: Page): Promise<InvokeEntry[]> {
   return page.evaluate(() => (window as unknown as { __invokeLog: InvokeEntry[] }).__invokeLog);
 }
 
-async function fetchCalls(page: Page): Promise<FetchCall[]> {
-  const calls: FetchCall[] = [];
-  for (const entry of await invokeLog(page)) {
-    if (entry.cmd === "plugin:http|fetch" && entry.args?.clientConfig !== undefined) {
-      calls.push(entry.args.clientConfig);
-    }
-  }
-  return calls;
-}
-
 async function wsSends(page: Page): Promise<Record<string, unknown>[]> {
   const sends: Record<string, unknown>[] = [];
   for (const entry of await invokeLog(page)) {
@@ -82,20 +68,6 @@ async function wsSends(page: Page): Promise<Record<string, unknown>[]> {
     }
   }
   return sends;
-}
-
-/** Poll until a request matching `predicate` has been sent. */
-async function waitForFetch(
-  page: Page,
-  predicate: (call: FetchCall) => boolean,
-  timeout = 5_000,
-): Promise<FetchCall> {
-  let found: FetchCall | undefined;
-  await expect(async () => {
-    found = (await fetchCalls(page)).find(predicate);
-    expect(found).toBeDefined();
-  }).toPass({ timeout });
-  return found!;
 }
 
 /** Poll until an outgoing WS frame matching `predicate` has been sent. */
@@ -112,26 +84,10 @@ async function waitForWsSend(
   return found!;
 }
 
-function decodeBody(call: FetchCall): string | null {
-  if (!Array.isArray(call.data)) return null;
-  return new TextDecoder().decode(new Uint8Array(call.data));
-}
-
 // ---------------------------------------------------------------------------
 // Routes + fixtures
 // ---------------------------------------------------------------------------
 
-const ROUTE_HEALTH: HttpRoute = {
-  pattern: "/api/v1/health",
-  status: 200,
-  body: { status: "ok", version: "1.0.0" },
-};
-const ROUTE_LOGIN: HttpRoute = {
-  pattern: "/api/v1/auth/login",
-  status: 200,
-  body: MOCK_LOGIN_RESPONSE,
-};
-const ROUTE_MESSAGES: HttpRoute = { pattern: "/messages", status: 200, body: MOCK_MESSAGES };
 // Longer pattern than `/messages` so buildTauriMockScript's longest-first sort
 // makes the reaction-carrying fixture win for channel 1 (the plain `/messages`
 // route would otherwise match first and leave the pills unrendered).

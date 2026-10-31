@@ -1,12 +1,17 @@
 import type { Locator, Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
-import { buildTauriMockScript, MOCK_LOGIN_RESPONSE, submitLogin, waitForWsReady } from "./helpers";
+import { ROUTE_MESSAGES_EMPTY } from "./helpers";
+import { type AppearancePrefs, findUnnamedControls } from "./support/accessibility";
 import {
-  type AppearancePrefs,
-  contrastMeter,
-  findUnnamedControls,
-  setAppearance,
-} from "./support/accessibility";
+  attachScreenshot,
+  bootSignedIn,
+  contrastMatrix,
+  expectNoMotion,
+  expectReachable,
+  horizontalOverflow,
+  openModerationReport,
+  undersizedTargets,
+} from "./support/a11yHarness";
 
 // ---------------------------------------------------------------------------
 // B9-11: the Moderation Center's queue and a report's evidence against the
@@ -19,7 +24,6 @@ import {
 // tests/e2e/fullstack/moderation-queue.spec.ts. Synthetic content only.
 // ---------------------------------------------------------------------------
 
-const THEMES = ["dark", "neon-glow", "midnight", "light"] as const;
 const OPEN = "a".repeat(32);
 const ASSIGNED = "b".repeat(32);
 
@@ -91,38 +95,20 @@ const DETAIL = {
 };
 
 async function boot(page: Page, prefs?: AppearancePrefs): Promise<void> {
-  await page.addInitScript(
-    buildTauriMockScript({
-      httpRoutes: [
-        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-        { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
-        { pattern: "/messages", status: 200, body: { messages: [], has_more: false } },
-        { pattern: "/api/v1/moderation/queue", method: "GET", status: 200, body: QUEUE },
-        { pattern: `/api/v1/moderation/queue/${OPEN}`, method: "GET", status: 200, body: DETAIL },
-      ],
-      simulateWsFlow: true,
-    }),
+  await bootSignedIn(
+    page,
+    [
+      ROUTE_MESSAGES_EMPTY,
+      { pattern: "/api/v1/moderation/queue", method: "GET", status: 200, body: QUEUE },
+      { pattern: `/api/v1/moderation/queue/${OPEN}`, method: "GET", status: 200, body: DETAIL },
+    ],
+    prefs,
   );
-  await page.goto("/");
-  if (prefs !== undefined) await setAppearance(page, prefs);
-  await submitLogin(page);
-  await expect(page.locator("[data-testid='app-layout']")).toBeVisible({ timeout: 15_000 });
-  await waitForWsReady(page);
 }
 
 /** Open the Moderation Center and the open report, from the keyboard. */
-async function openReport(page: Page): Promise<Locator> {
-  const entry = page.getByTestId("moderation-btn");
-  await entry.focus();
-  await page.keyboard.press("Enter");
-  const center = page.getByRole("region", { name: "Moderation" });
-  await expect(center.getByTestId("mod-status")).toHaveText("2 reports open or in review");
-  const row = center.getByTestId("mod-queue-row").first();
-  await row.focus();
-  await page.keyboard.press("Enter");
-  await expect(center.getByTestId("mod-report").getByRole("heading", { level: 3 })).toBeFocused();
-  return center;
-}
+const openReport = (page: Page): Promise<Locator> =>
+  openModerationReport(page, "2 reports open or in review");
 
 test.describe("Moderation Center accessibility", () => {
   test("keyboard: Tab order, Enter, Escape back to the row, then back to the channel", async ({
@@ -160,14 +146,7 @@ test.describe("Moderation Center accessibility", () => {
   test("pointer targets are at least 24x24 CSS px (2.5.8)", async ({ page }) => {
     await boot(page);
     const center = await openReport(page);
-    const small: string[] = [];
-    for (const target of await center.locator("button, select").all()) {
-      if (!(await target.isVisible())) continue;
-      const box = await target.boundingBox();
-      if (box === null || box.width < 24 || box.height < 24) {
-        small.push(`${await target.textContent()}: ${box?.width}x${box?.height}`);
-      }
-    }
+    const small = await undersizedTargets(center.locator("button, select"), { skipHidden: true });
     expect(small).toEqual([]);
   });
 
@@ -175,62 +154,51 @@ test.describe("Moderation Center accessibility", () => {
     await page.emulateMedia({ reducedMotion: "no-preference" });
     await boot(page);
     const center = await openReport(page);
-    for (const el of [
+    await expectNoMotion([
       center.getByTestId("mod-queue-row").first(),
       center.getByTestId("mod-report"),
       center.locator(".mod-evidence-item").first(),
-    ]) {
-      await expect(el).toHaveCSS("animation-name", "none");
-      await expect(el).toHaveCSS("transition-duration", "0s");
-    }
+    ]);
   });
 
-  for (const theme of THEMES) {
-    for (const highContrast of [false, true]) {
-      test(`${theme}${highContrast ? " + High Contrast" : ""}: text and focus contrast`, async ({
-        page,
-      }, testInfo) => {
-        await boot(page, { theme, highContrast, accent: null });
-        const { measured, failures, measure, ring } = contrastMeter(page);
+  for (const c of contrastMatrix({
+    title: "text and focus contrast",
+    attachName: (theme, hc) => `b9-11-contrast-${theme}${hc ? "-hc" : ""}.json`,
+    boot: boot,
+    scenario: async (page, { measure, ring }) => {
+      const center = await openReport(page);
+      const report = center.getByTestId("mod-report");
+      await measure("intro", center.locator(".mod-center-intro"));
+      await measure("filter label", center.locator(".mod-center-toolbar label"));
+      await measure("count", center.getByTestId("mod-status"));
+      await measure("row: report (selected)", center.locator(".mod-queue-what").first());
+      await measure("row: who (selected)", center.locator(".mod-queue-who").first());
+      await measure("row: report", center.locator(".mod-queue-what").nth(1));
+      await measure("row: state", center.locator(".mod-queue-state").nth(1));
+      await measure("row: date", center.locator(".mod-queue-when").nth(1));
+      await measure("report title", report.locator("h3"));
+      await measure("fact label", report.locator("dt").first());
+      await measure("fact value", report.locator("dd").first());
+      await measure("section heading", report.locator("h4").first());
+      await measure("reporter detail", report.locator(".mod-report-note"));
+      await measure("captured note", report.locator(".mod-evidence-status").first());
+      await measure("evidence author", report.locator(".mod-evidence-author").first());
+      await measure("evidence text", report.locator(".mod-evidence-text").first());
+      await measure("reported marker", report.locator(".mod-evidence-marker"));
+      await measure("reported text", report.locator(".mod-evidence-reported .mod-evidence-text"));
+      await measure("attachment", report.locator(".mod-evidence-files li"));
 
-        const center = await openReport(page);
-        const report = center.getByTestId("mod-report");
-        await measure("intro", center.locator(".mod-center-intro"));
-        await measure("filter label", center.locator(".mod-center-toolbar label"));
-        await measure("count", center.getByTestId("mod-status"));
-        await measure("row: report (selected)", center.locator(".mod-queue-what").first());
-        await measure("row: who (selected)", center.locator(".mod-queue-who").first());
-        await measure("row: report", center.locator(".mod-queue-what").nth(1));
-        await measure("row: state", center.locator(".mod-queue-state").nth(1));
-        await measure("row: date", center.locator(".mod-queue-when").nth(1));
-        await measure("report title", report.locator("h3"));
-        await measure("fact label", report.locator("dt").first());
-        await measure("fact value", report.locator("dd").first());
-        await measure("section heading", report.locator("h4").first());
-        await measure("reporter detail", report.locator(".mod-report-note"));
-        await measure("captured note", report.locator(".mod-evidence-status").first());
-        await measure("evidence author", report.locator(".mod-evidence-author").first());
-        await measure("evidence text", report.locator(".mod-evidence-text").first());
-        await measure("reported marker", report.locator(".mod-evidence-marker"));
-        await measure("reported text", report.locator(".mod-evidence-reported .mod-evidence-text"));
-        await measure("attachment", report.locator(".mod-evidence-files li"));
-
-        await center.getByTestId("mod-filter").focus();
-        await page.keyboard.press("Tab");
-        await ring("selected row");
-        await page.keyboard.press("Tab");
-        await ring("row");
-        await page.keyboard.press("Shift+Tab");
-        await page.keyboard.press("Shift+Tab");
-        await ring("filter");
-
-        await testInfo.attach(`b9-11-contrast-${theme}${highContrast ? "-hc" : ""}.json`, {
-          body: JSON.stringify(measured, null, 2),
-          contentType: "application/json",
-        });
-        expect(failures).toEqual([]);
-      });
-    }
+      await center.getByTestId("mod-filter").focus();
+      await page.keyboard.press("Tab");
+      await ring("selected row");
+      await page.keyboard.press("Tab");
+      await ring("row");
+      await page.keyboard.press("Shift+Tab");
+      await page.keyboard.press("Shift+Tab");
+      await ring("filter");
+    },
+  })) {
+    test(c.title, c.run);
   }
 
   test.describe("reflow at the 940x500 minimum window with 20 px Large Font", () => {
@@ -242,20 +210,15 @@ test.describe("Moderation Center accessibility", () => {
       await boot(page, { fontSize: 20, largeFont: true });
       const center = await openReport(page);
       const view = page.getByTestId("feature-view");
-      const overflow = (el: Locator) => el.evaluate((n) => n.scrollWidth - n.clientWidth);
-      expect(await overflow(view)).toBeLessThanOrEqual(0);
-      expect(await overflow(center.getByTestId("mod-queue"))).toBeLessThanOrEqual(0);
-      for (const el of await center
-        .locator("select, button, .mod-report dd, .mod-evidence-text, .mod-evidence-files li")
-        .all()) {
-        if (!(await el.isVisible())) continue;
-        await el.scrollIntoViewIfNeeded();
-        await expect(el).toBeInViewport();
-      }
-      await testInfo.attach("b9-11-moderation-940x500-20px.png", {
-        body: await page.screenshot(),
-        contentType: "image/png",
-      });
+      expect(await horizontalOverflow(view)).toBeLessThanOrEqual(0);
+      expect(await horizontalOverflow(center.getByTestId("mod-queue"))).toBeLessThanOrEqual(0);
+      await expectReachable(
+        center.locator(
+          "select, button, .mod-report dd, .mod-evidence-text, .mod-evidence-files li",
+        ),
+        { skipHidden: true },
+      );
+      await attachScreenshot(testInfo, "b9-11-moderation-940x500-20px.png", page);
     });
   });
 });

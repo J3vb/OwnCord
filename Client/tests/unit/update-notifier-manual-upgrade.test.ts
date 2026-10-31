@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { loggerMock } from "../helpers/loggerMock";
 
 // ---------------------------------------------------------------------------
 // Mocks — the notifier reads the update check and the shared install
@@ -10,9 +11,7 @@ const { mockCheckForUpdate, mockSubscribeToUpdateInstall } = vi.hoisted(() => ({
   mockSubscribeToUpdateInstall: vi.fn(),
 }));
 
-vi.mock("@lib/logger", () => ({
-  createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
-}));
+vi.mock("@lib/logger", () => loggerMock());
 
 vi.mock("@lib/net/updater", () => ({
   checkForUpdate: mockCheckForUpdate,

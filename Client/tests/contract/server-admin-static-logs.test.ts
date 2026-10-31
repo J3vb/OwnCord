@@ -166,9 +166,34 @@ function backfillEntry(i: number) {
   };
 }
 
-describe("Server/admin/static — log stream (re)connect", () => {
-  let dom: JSDOM | undefined;
+let dom: JSDOM | undefined;
 
+afterEach(() => {
+  dom?.window?.close();
+  dom = undefined;
+  FakeEventSource.instances = [];
+});
+
+/** Boots the panel, opens the Logs page and lets its fetches settle. */
+async function openLogs(
+  fetchCalls: FetchCall[],
+  options: {
+    history?: HistoryHandler;
+    settle?: (window: JSDOM["window"]) => Promise<void>;
+    mode?: string;
+  } = {},
+) {
+  dom = loadAdminPanel(fetchCalls, undefined, options.history);
+  const { window, bridge } = await readyPanel(dom, options.settle);
+  const doc = window.document;
+  bridge.state.section = "logs";
+  if (options.mode) bridge.state.logMode = options.mode;
+  doc.getElementById("content")!.innerHTML = bridge.renderLogs();
+  await (options.settle ?? ((w: JSDOM["window"]) => ticks(w, 2)))(window);
+  return { window, bridge, doc };
+}
+
+describe("Server/admin/static — log stream (re)connect", () => {
   afterEach(() => {
     dom?.window?.close();
     dom = undefined;
@@ -266,12 +291,7 @@ describe("Server/admin/static — log stream (re)connect", () => {
   // Linux Chromium) and level chips whose on/off state was colour only.
   it("renders level chips as aria-pressed toggles and an icon toolbar", async () => {
     const fetchCalls: FetchCall[] = [];
-    dom = loadAdminPanel(fetchCalls);
-    const { window, bridge } = await readyPanel(dom);
-    const doc = window.document;
-    bridge.state.section = "logs";
-    doc.getElementById("content")!.innerHTML = bridge.renderLogs();
-    await ticks(window, 2);
+    const { window, doc } = await openLogs(fetchCalls);
 
     const toolbar = doc.querySelector(".log-toolbar")!;
     expect(toolbar.textContent).not.toMatch(/[⬇⏸▶]/);
@@ -413,12 +433,7 @@ describe("Server/admin/static — log stream (re)connect", () => {
   // the raw text.
   it("renders structured log lines with the full attrs behind details", async () => {
     const fetchCalls: FetchCall[] = [];
-    dom = loadAdminPanel(fetchCalls);
-    const { window, bridge } = await readyPanel(dom);
-    const doc = window.document;
-    bridge.state.section = "logs";
-    doc.getElementById("content")!.innerHTML = bridge.renderLogs();
-    await ticks(window, 2);
+    const { window, doc } = await openLogs(fetchCalls);
 
     const es = FakeEventSource.instances[0]!;
     const attrs = JSON.stringify({
@@ -674,14 +689,6 @@ function savedEntry(minute: number, msg: string) {
 }
 
 describe("Server/admin/static — saved log history", () => {
-  let dom: JSDOM | undefined;
-
-  afterEach(() => {
-    dom?.window?.close();
-    dom = undefined;
-    FakeEventSource.instances = [];
-  });
-
   async function settle(window: JSDOM["window"]): Promise<void> {
     await ticks(window, 5);
   }
@@ -703,21 +710,19 @@ describe("Server/admin/static — saved log history", () => {
   it("stops the live stream and pages through saved lines, oldest at the top of each page", async () => {
     const fetchCalls: FetchCall[] = [];
     const queries: URLSearchParams[] = [];
-    dom = loadAdminPanel(fetchCalls, undefined, (q) => {
-      queries.push(q);
-      return q.get("cursor") === "c1"
-        ? { enabled: true, entries: [savedEntry(1, "one")] }
-        : {
-            enabled: true,
-            entries: [savedEntry(3, "three"), savedEntry(2, "two")],
-            next_cursor: "c1",
-          };
+    const { window, doc } = await openLogs(fetchCalls, {
+      history: (q) => {
+        queries.push(q);
+        return q.get("cursor") === "c1"
+          ? { enabled: true, entries: [savedEntry(1, "one")] }
+          : {
+              enabled: true,
+              entries: [savedEntry(3, "three"), savedEntry(2, "two")],
+              next_cursor: "c1",
+            };
+      },
+      settle,
     });
-    const { window, bridge } = await readyPanel(dom, settle);
-    const doc = window.document;
-    bridge.state.section = "logs";
-    doc.getElementById("content")!.innerHTML = bridge.renderLogs();
-    await settle(window);
     const live = FakeEventSource.instances[0]!;
     expect(live.closed).toBe(false);
 
@@ -754,15 +759,13 @@ describe("Server/admin/static — saved log history", () => {
 
   it("drops live lines still waiting to paint when switching to History", async () => {
     const fetchCalls: FetchCall[] = [];
-    dom = loadAdminPanel(fetchCalls, undefined, () => ({
-      enabled: true,
-      entries: [savedEntry(1, "saved")],
-    }));
-    const { window, bridge } = await readyPanel(dom, settle);
-    const doc = window.document;
-    bridge.state.section = "logs";
-    doc.getElementById("content")!.innerHTML = bridge.renderLogs();
-    await settle(window);
+    const { window, doc } = await openLogs(fetchCalls, {
+      history: () => ({
+        enabled: true,
+        entries: [savedEntry(1, "saved")],
+      }),
+      settle,
+    });
     const live = FakeEventSource.instances[0]!;
     live.onopen?.();
     live.onmessage?.({ data: JSON.stringify(backfillEntry(1)) });
@@ -780,17 +783,15 @@ describe("Server/admin/static — saved log history", () => {
     const fetchCalls: FetchCall[] = [];
     let releaseFirst: (body: unknown) => void = () => {};
     const queries: URLSearchParams[] = [];
-    dom = loadAdminPanel(fetchCalls, undefined, (q) => {
-      queries.push(q);
-      if (queries.length === 1) return new Promise((resolve) => (releaseFirst = resolve));
-      return { enabled: true, entries: [savedEntry(5, "fresh")] };
+    const { window, doc } = await openLogs(fetchCalls, {
+      history: (q) => {
+        queries.push(q);
+        if (queries.length === 1) return new Promise((resolve) => (releaseFirst = resolve));
+        return { enabled: true, entries: [savedEntry(5, "fresh")] };
+      },
+      settle,
+      mode: "history",
     });
-    const { window, bridge } = await readyPanel(dom, settle);
-    const doc = window.document;
-    bridge.state.section = "logs";
-    bridge.state.logMode = "history";
-    doc.getElementById("content")!.innerHTML = bridge.renderLogs();
-    await settle(window);
     expect(queries).toHaveLength(1);
 
     doc.querySelector<HTMLButtonElement>('.level-toggle[data-level="DEBUG"]')!.click();
@@ -805,13 +806,11 @@ describe("Server/admin/static — saved log history", () => {
 
   it("says when saved logs are turned off on the server", async () => {
     const fetchCalls: FetchCall[] = [];
-    dom = loadAdminPanel(fetchCalls, undefined, () => ({ enabled: false, entries: [] }));
-    const { window, bridge } = await readyPanel(dom, settle);
-    const doc = window.document;
-    bridge.state.section = "logs";
-    bridge.state.logMode = "history";
-    doc.getElementById("content")!.innerHTML = bridge.renderLogs();
-    await settle(window);
+    const { doc } = await openLogs(fetchCalls, {
+      history: () => ({ enabled: false, entries: [] }),
+      settle,
+      mode: "history",
+    });
     expect(doc.getElementById("logHistoryStatus")!.textContent).toContain("logging.history_days");
   });
 });

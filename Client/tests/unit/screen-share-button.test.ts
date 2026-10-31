@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vitest";
+import { makeChannel } from "../helpers/channelFactory";
 import * as voiceSession from "../helpers/voiceSessionMock";
 import * as voiceWidget from "../helpers/voiceWidgetHarness";
 
@@ -22,28 +23,7 @@ function resetStores(): void {
 function setVoiceConnected(screenshare = false): void {
   channelsStore.setState((prev) => ({
     ...prev,
-    channels: new Map([
-      [
-        1,
-        {
-          id: 1,
-          name: "Voice",
-          type: "voice" as const,
-          category: null,
-          position: 0,
-          unreadCount: 0,
-          mentionCount: 0,
-          lastMessageId: null,
-          canSend: true,
-          topic: "",
-          slowMode: 0,
-          nsfw: false,
-          isPrivate: false,
-          voiceMaxUsers: 0,
-          voiceMaxVideo: 0,
-        },
-      ],
-    ]),
+    channels: new Map([[1, makeChannel({ name: "Voice", type: "voice" })]]),
   }));
   voiceStore.setState((prev) => ({
     ...prev,

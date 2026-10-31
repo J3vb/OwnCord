@@ -15,29 +15,21 @@
  */
 
 import { test, expect, login } from "./fixtures";
-import { TEST_PASSWORD, type TestServer } from "../support/server";
+import {
+  MEMBER_ROLE_ID,
+  MODERATOR_ROLE_ID,
+  createRole,
+  generalChannel,
+  post,
+  register,
+  setRole,
+  signIn,
+  userIds,
+} from "./serverApi";
 
-const MODERATOR_ROLE_ID = 3;
-const MEMBER_ROLE_ID = 4;
 const MEMBER_BITS = 0x663;
 const MUTE_MEMBERS = 0x100000;
 const MODERATE_MEMBERS = 0x400000;
-
-async function token(server: TestServer, username: string): Promise<string> {
-  const auth = await server.api("/api/v1/auth/login", { username, password: TEST_PASSWORD });
-  return auth.token as string;
-}
-
-/** POST as `auth`; the status and the server's error code. */
-async function post(server: TestServer, path: string, auth: string, body: unknown = {}) {
-  const response = await fetch(`${server.origin}${path}`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${auth}`, "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  const text = await response.text();
-  return { status: response.status, code: text ? (JSON.parse(text).error as string) : "" };
-}
 
 type LedgerRow = {
   kind: string;
@@ -56,25 +48,9 @@ test.describe("Moderation actions (real server)", () => {
     const owner = server.owner!.token;
     // The server rate-limits registration and login: two new accounts, one login each.
     for (const name of ["carol", "dave"]) {
-      await server.api("/api/v1/auth/register", {
-        username: name,
-        password: TEST_PASSWORD,
-        invite_code: server.owner!.invite_code,
-      });
+      await register(server, name);
     }
-    const users = (await server.api("/admin/api/users", undefined, owner)) as {
-      id: number;
-      username: string;
-    }[];
-    const id = (name: string) => users.find((u) => u.username === name)!.id;
-    const setRole = (userId: number, roleId: number) =>
-      server.api(`/admin/api/users/${userId}`, { role_id: roleId }, owner, "PATCH");
-    const role = async (name: string, permissions: number, position: number) =>
-      (
-        (await server.api("/admin/api/roles", { name, permissions, position }, owner)) as {
-          id: number;
-        }
-      ).id;
+    const id = await userIds(server);
     const ledger = async (userId: number) =>
       (await server.api(
         `/api/v1/moderation/users/${userId}/actions`,
@@ -82,13 +58,13 @@ test.describe("Moderation actions (real server)", () => {
         owner,
       )) as LedgerRow[];
 
-    const warden = await role("Warden", MEMBER_BITS | MODERATE_MEMBERS, 50);
-    const muter = await role("Muter", MEMBER_BITS | MUTE_MEMBERS, 45);
-    await setRole(id("bob"), warden);
+    const warden = await createRole(server, "Warden", MEMBER_BITS | MODERATE_MEMBERS, 50);
+    const muter = await createRole(server, "Muter", MEMBER_BITS | MUTE_MEMBERS, 45);
+    await setRole(server, id("bob"), warden);
 
-    const carol = await token(server, "carol");
-    const dave = await token(server, "dave");
-    const bobToken = await token(server, "bob");
+    const carol = await signIn(server, "carol");
+    const dave = await signIn(server, "dave");
+    const bobToken = await signIn(server, "bob");
     const file = async (subject: string) =>
       (
         await server.api(
@@ -173,9 +149,9 @@ test.describe("Moderation actions (real server)", () => {
     // dave becomes a peer, then a superior. The client can't see ranks, so it
     // still offers the action and shows the server's refusal; nothing is
     // recorded and the report stays open.
-    await setRole(id("dave"), warden);
+    await setRole(server, id("dave"), warden);
     expect((await warn(bobToken, "dave")).status).toBe(403);
-    await setRole(id("dave"), MODERATOR_ROLE_ID);
+    await setRole(server, id("dave"), MODERATOR_ROLE_ID);
     await acts.getByRole("spinbutton", { name: "Timeout length" }).fill("1");
     await acts.getByRole("combobox", { name: "Unit" }).selectOption("hours");
     await acts.getByRole("button", { name: "Time out" }).click();
@@ -190,7 +166,7 @@ test.describe("Moderation actions (real server)", () => {
     ]);
 
     // A mute-only role reaches none of this.
-    await setRole(id("dave"), muter);
+    await setRole(server, id("dave"), muter);
     expect((await warn(dave, "carol")).status).toBe(403);
     expect(
       (await post(server, `/api/v1/moderation/queue/${aboutAlice}/act`, dave, { kind: "warning" }))
@@ -199,10 +175,10 @@ test.describe("Moderation actions (real server)", () => {
 
     // Demoted mid-submission: bob's frames are held back, so his view still
     // offers the timeout; the server refuses it and the view then clears.
-    await setRole(id("dave"), MEMBER_ROLE_ID);
+    await setRole(server, id("dave"), MEMBER_ROLE_ID);
     await acts.getByRole("textbox", { name: "Timeout reason, shown to the member" }).fill("stale");
     aliceTransport.filterServerMessages(() => false);
-    await setRole(id("bob"), MEMBER_ROLE_ID);
+    await setRole(server, id("bob"), MEMBER_ROLE_ID);
     await acts.getByRole("button", { name: "Time out" }).click();
     await expect(alert).toHaveText("You no longer have permission to moderate on this server.");
     await expect(center.getByTestId("mod-report")).toHaveCount(0);
@@ -242,25 +218,9 @@ test.describe("Removal, kick and ban (real server)", () => {
   }) => {
     const owner = server.owner!.token;
     for (const name of ["carol", "dave"]) {
-      await server.api("/api/v1/auth/register", {
-        username: name,
-        password: TEST_PASSWORD,
-        invite_code: server.owner!.invite_code,
-      });
+      await register(server, name);
     }
-    const users = (await server.api("/admin/api/users", undefined, owner)) as {
-      id: number;
-      username: string;
-    }[];
-    const id = (name: string) => users.find((u) => u.username === name)!.id;
-    const setRole = (userId: number, roleId: number) =>
-      server.api(`/admin/api/users/${userId}`, { role_id: roleId }, owner, "PATCH");
-    const role = async (name: string, permissions: number, position: number) =>
-      (
-        (await server.api("/admin/api/roles", { name, permissions, position }, owner)) as {
-          id: number;
-        }
-      ).id;
+    const id = await userIds(server);
     const kinds = async () =>
       (
         (await server.api(
@@ -272,11 +232,11 @@ test.describe("Removal, kick and ban (real server)", () => {
 
     const base = MEMBER_BITS | MODERATE_MEMBERS;
     // All ranked below Moderator, and above a member.
-    const warden = await role("Warden", base, 50);
-    const remover = await role("Remover", base | MANAGE_MESSAGES, 49);
-    const kicker = await role("Kicker", base | KICK_MEMBERS, 48);
-    const banner = await role("Banner", base | BAN_MEMBERS, 47);
-    await setRole(id("bob"), remover);
+    const warden = await createRole(server, "Warden", base, 50);
+    const remover = await createRole(server, "Remover", base | MANAGE_MESSAGES, 49);
+    const kicker = await createRole(server, "Kicker", base | KICK_MEMBERS, 48);
+    const banner = await createRole(server, "Banner", base | BAN_MEMBERS, 47);
+    await setRole(server, id("bob"), remover);
 
     // dave posts the message carol reports, from his own client.
     const dave = (bobTransport as typeof bobTransport & { page: typeof page }).page;
@@ -286,15 +246,10 @@ test.describe("Removal, kick and ban (real server)", () => {
     await composer.fill(text);
     await composer.press("Enter");
     await expect(dave.locator(".msg-text", { hasText: text })).toBeVisible();
-    const channels = (await server.api("/api/v1/channels/", undefined, owner)) as {
-      id: number;
-      name: string;
-      type: string;
-    }[];
-    const general = channels.find((c) => c.name === "general" && c.type === "text")!;
+    const general = await generalChannel(server);
     const history = await server.api(`/api/v1/channels/${general.id}/messages`, undefined, owner);
     const messageId = history.messages.find((m: { content: string }) => m.content === text).id;
-    const carol = await token(server, "carol");
+    const carol = await signIn(server, "carol");
     const report = (
       await server.api(
         "/api/v1/reports",
@@ -305,7 +260,7 @@ test.describe("Removal, kick and ban (real server)", () => {
 
     // Server authority, straight from the server: a member may not act, and
     // a role without the bit may not either.
-    const bobToken = await token(server, "bob");
+    const bobToken = await signIn(server, "bob");
     const act = (auth: string, kind: string) =>
       post(server, `/api/v1/moderation/queue/${report}/act`, auth, { kind, reason: "" });
     expect((await act(carol, "ban")).status).toBe(403);
@@ -342,7 +297,7 @@ test.describe("Removal, kick and ban (real server)", () => {
 
     // Kicker: the offer follows the role change with no server round trip;
     // the kick ends dave's session on his client.
-    await setRole(id("bob"), kicker);
+    await setRole(server, id("bob"), kicker);
     await expect.poll(offered).toEqual(["Log out of every session"]);
     await acts.getByRole("button", { name: "Log out of every session" }).click();
     await dialog.getByRole("button", { name: "Log out" }).click();
@@ -352,30 +307,30 @@ test.describe("Removal, kick and ban (real server)", () => {
 
     // Banner, against a superior: the client can't see ranks, so the server's
     // refusal is shown and nothing is recorded.
-    await setRole(id("bob"), banner);
+    await setRole(server, id("bob"), banner);
     await expect.poll(offered).toEqual(["Ban member"]);
-    await setRole(id("dave"), MODERATOR_ROLE_ID);
+    await setRole(server, id("dave"), MODERATOR_ROLE_ID);
     await acts.getByRole("button", { name: "Ban member" }).click();
     await dialog.getByRole("button", { name: "Ban", exact: true }).click();
     await expect(alert).toHaveText(
       "The server refused this action: your role doesn't allow it, or their role isn't below yours.",
     );
     await expect(status).toHaveText("");
-    await setRole(id("dave"), MEMBER_ROLE_ID);
+    await setRole(server, id("dave"), MEMBER_ROLE_ID);
 
     // Demoted with the dialog open: the confirmation sends nothing.
     await acts.getByRole("button", { name: "Ban member" }).click();
-    await setRole(id("bob"), warden);
+    await setRole(server, id("bob"), warden);
     await expect.poll(offered).toEqual([]);
     await dialog.getByRole("button", { name: "Ban", exact: true }).click();
     await expect(dialog).toHaveCount(0);
 
     // Demoted while his frames are lost: the stale offer reaches the server,
     // which refuses it.
-    await setRole(id("bob"), banner);
+    await setRole(server, id("bob"), banner);
     await expect.poll(offered).toEqual(["Ban member"]);
     aliceTransport.filterServerMessages(() => false);
-    await setRole(id("bob"), warden);
+    await setRole(server, id("bob"), warden);
     await acts.getByRole("button", { name: "Ban member" }).click();
     await dialog.getByRole("button", { name: "Ban", exact: true }).click();
     await expect(alert).toHaveText(
@@ -385,7 +340,7 @@ test.describe("Removal, kick and ban (real server)", () => {
     expect((await kinds()).toSorted()).toEqual(["kick", "removal"]);
 
     // Banner again, against a member: banned, and recorded with the report.
-    await setRole(id("bob"), banner);
+    await setRole(server, id("bob"), banner);
     await expect.poll(offered).toEqual(["Ban member"]);
     await acts.getByRole("button", { name: "Ban member" }).click();
     await dialog.getByRole("button", { name: "Ban", exact: true }).click();

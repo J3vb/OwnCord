@@ -2,7 +2,9 @@
 // owncord-voice-settings-debug scout (2026-10-08). Each `it` is one finding;
 // all are expected to FAIL before the fix and pass once the finding is fixed.
 // F4 (lookahead vs main-thread trip) is batch 2 and is not covered here.
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { loggerMock } from "../helpers/loggerMock";
+import { useFakeWorkletHost } from "../helpers/workletHost";
 import { Track } from "livekit-client";
 import { FIXTURE_SAMPLE_RATE, placeInRoomTone, readAudioFixture } from "../helpers/wav";
 import { vadThreshold } from "../../src/lib/voice/audioPipeline";
@@ -13,9 +15,7 @@ import {
   installFakeAudio,
 } from "../helpers/fakeAudioContext";
 
-vi.mock("@lib/logger", () => ({
-  createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
-}));
+vi.mock("@lib/logger", () => loggerMock());
 
 type Message = { type: string; gated?: boolean; value?: number };
 type Processor = {
@@ -27,21 +27,10 @@ const QUANTUM_MS = (QUANTUM / FIXTURE_SAMPLE_RATE) * 1000;
 
 describe("voice gate defects (vad-worklet.js + micProcessor.ts)", () => {
   let processorCtor: (new () => Processor) | null = null;
-  beforeEach(() => {
-    vi.resetModules();
-    class FakeAudioWorkletProcessor {
-      readonly port = { onmessage: null, postMessage: () => {} };
-    }
-    Object.assign(globalThis, {
-      registerProcessor: (_name: string, ctor: new () => Processor) => {
-        processorCtor = ctor;
-      },
-      AudioWorkletProcessor: FakeAudioWorkletProcessor,
-    });
+  useFakeWorkletHost<Processor>((_name, ctor) => {
+    processorCtor = ctor;
   });
   afterEach(() => {
-    delete (globalThis as Record<string, unknown>).registerProcessor;
-    delete (globalThis as Record<string, unknown>).AudioWorkletProcessor;
     vi.unstubAllGlobals();
   });
 

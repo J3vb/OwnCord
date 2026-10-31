@@ -163,20 +163,52 @@ async function invokesOf(page: Page, cmd: string): Promise<Array<Record<string, 
   );
 }
 
+/** Mock the session, sign in, announce `peer` (2) and join the voice channel. */
+async function joinAnnouncedPeer(
+  page: Page,
+  peer: PeerCrypto,
+  mockOpts: Parameters<typeof mockE2EEVoiceSession>[1],
+  withSignature = true,
+): Promise<void> {
+  await mockE2EEVoiceSession(page, mockOpts);
+  await page.goto("/");
+  await navigateToMainPageReady(page);
+  await emitPeerAnnounce(page, 2, peer, withSignature);
+  await joinVoiceChannelByName(page);
+}
+
 const peerBadge = (page: Page): ReturnType<Page["locator"]> =>
   page.locator('.voice-user-item[data-voice-uid="2"] .vu-verify');
+
+/** A pinned peer whose announce is blocked as a mismatch, then handed a key; the block stands. */
+async function blockedPeerBadge(page: Page) {
+  const peer = await makePeerCrypto(2);
+  const oldPin = (await makePeerCrypto(2)).identityPublicKeyB64;
+  // Pinned, but the server delivers no key for the peer: blocked.
+  await joinAnnouncedPeer(page, peer, { identityPins: { "2": oldPin } });
+
+  const badge = peerBadge(page);
+  await expect(badge).toHaveClass(/mismatch/, { timeout: 10_000 });
+  // A key is delivered again; the block stands until the user reviews it.
+  await emitWsMessage(page, {
+    type: "user_update",
+    payload: {
+      user_id: 2,
+      username: "moderator1",
+      avatar: "",
+      identity_public_key: peer.identityPublicKeyB64,
+    },
+  });
+  await expect(badge).toHaveClass(/mismatch/);
+  return { peer, oldPin, badge };
+}
 
 test.describe("Voice E2EE identity verification (§7)", () => {
   test("a valid signed announce verifies the peer: green badge with safety number, pinned on first sight", async ({
     page,
   }) => {
     const peer = await makePeerCrypto(2);
-    await mockE2EEVoiceSession(page, { peerIdentityKeyB64: peer.identityPublicKeyB64 });
-    await page.goto("/");
-    await navigateToMainPageReady(page);
-
-    await emitPeerAnnounce(page, 2, peer);
-    await joinVoiceChannelByName(page);
+    await joinAnnouncedPeer(page, peer, { peerIdentityKeyB64: peer.identityPublicKeyB64 });
 
     const badge = peerBadge(page);
     await expect(badge).toBeVisible({ timeout: 10_000 });
@@ -191,12 +223,7 @@ test.describe("Voice E2EE identity verification (§7)", () => {
 
   test("your own row's shield shows your own safety number to compare", async ({ page }) => {
     const peer = await makePeerCrypto(2);
-    await mockE2EEVoiceSession(page, { peerIdentityKeyB64: peer.identityPublicKeyB64 });
-    await page.goto("/");
-    await navigateToMainPageReady(page);
-
-    await emitPeerAnnounce(page, 2, peer);
-    await joinVoiceChannelByName(page);
+    await joinAnnouncedPeer(page, peer, { peerIdentityKeyB64: peer.identityPublicKeyB64 });
 
     const own = page.locator('.voice-user-item[data-voice-uid="1"] .vu-session-fp');
     await expect(own).toBeVisible({ timeout: 10_000 });
@@ -210,12 +237,7 @@ test.describe("Voice E2EE identity verification (§7)", () => {
     page,
   }) => {
     const peer = await makePeerCrypto(2);
-    await mockE2EEVoiceSession(page, {}); // no identity_public_key on member 2
-    await page.goto("/");
-    await navigateToMainPageReady(page);
-
-    await emitPeerAnnounce(page, 2, peer, false);
-    await joinVoiceChannelByName(page);
+    await joinAnnouncedPeer(page, peer, {}, false); // no identity_public_key on member 2
 
     const badge = peerBadge(page);
     await expect(badge).toBeVisible({ timeout: 10_000 });
@@ -235,15 +257,10 @@ test.describe("Voice E2EE identity verification (§7)", () => {
   }) => {
     const peer = await makePeerCrypto(2);
     const oldPin = (await makePeerCrypto(2)).identityPublicKeyB64; // a different, previously-pinned key
-    await mockE2EEVoiceSession(page, {
+    await joinAnnouncedPeer(page, peer, {
       peerIdentityKeyB64: peer.identityPublicKeyB64,
       identityPins: { "2": oldPin },
     });
-    await page.goto("/");
-    await navigateToMainPageReady(page);
-
-    await emitPeerAnnounce(page, 2, peer);
-    await joinVoiceChannelByName(page);
 
     const badge = peerBadge(page);
     await expect(badge).toBeVisible({ timeout: 10_000 });
@@ -264,28 +281,7 @@ test.describe("Voice E2EE identity verification (§7)", () => {
   });
 
   test("mismatch modal journey — reject (Cancel) keeps the peer blocked", async ({ page }) => {
-    const peer = await makePeerCrypto(2);
-    const oldPin = (await makePeerCrypto(2)).identityPublicKeyB64;
-    // Pinned, but the server delivers no key for the peer: blocked.
-    await mockE2EEVoiceSession(page, { identityPins: { "2": oldPin } });
-    await page.goto("/");
-    await navigateToMainPageReady(page);
-    await emitPeerAnnounce(page, 2, peer);
-    await joinVoiceChannelByName(page);
-
-    const badge = peerBadge(page);
-    await expect(badge).toHaveClass(/mismatch/, { timeout: 10_000 });
-    // A key is delivered again; the block stands until the user reviews it.
-    await emitWsMessage(page, {
-      type: "user_update",
-      payload: {
-        user_id: 2,
-        username: "moderator1",
-        avatar: "",
-        identity_public_key: peer.identityPublicKeyB64,
-      },
-    });
-    await expect(badge).toHaveClass(/mismatch/);
+    const { badge } = await blockedPeerBadge(page);
     await badge.click();
 
     // The modal shows the participant and the NEW key's fingerprint so the
@@ -306,28 +302,7 @@ test.describe("Voice E2EE identity verification (§7)", () => {
   test("mismatch modal journey — Trust New Key re-pins the displayed key and clears the block", async ({
     page,
   }) => {
-    const peer = await makePeerCrypto(2);
-    const oldPin = (await makePeerCrypto(2)).identityPublicKeyB64;
-    // Pinned, but the server delivers no key for the peer: blocked.
-    await mockE2EEVoiceSession(page, { identityPins: { "2": oldPin } });
-    await page.goto("/");
-    await navigateToMainPageReady(page);
-    await emitPeerAnnounce(page, 2, peer);
-    await joinVoiceChannelByName(page);
-
-    const badge = peerBadge(page);
-    await expect(badge).toHaveClass(/mismatch/, { timeout: 10_000 });
-    // A key is delivered again; the block stands until the user reviews it.
-    await emitWsMessage(page, {
-      type: "user_update",
-      payload: {
-        user_id: 2,
-        username: "moderator1",
-        avatar: "",
-        identity_public_key: peer.identityPublicKeyB64,
-      },
-    });
-    await expect(badge).toHaveClass(/mismatch/);
+    const { peer, oldPin, badge } = await blockedPeerBadge(page);
     await badge.click();
     await expect(page.locator("h3", { hasText: "Identity Warning" })).toBeVisible();
 
@@ -354,15 +329,10 @@ test.describe("Voice E2EE identity verification (§7)", () => {
     page,
   }) => {
     const peer = await makePeerCrypto(2);
-    await mockE2EEVoiceSession(page, {
+    await joinAnnouncedPeer(page, peer, {
       peerIdentityKeyB64: peer.identityPublicKeyB64,
       identityPinError: true,
     });
-    await page.goto("/");
-    await navigateToMainPageReady(page);
-
-    await emitPeerAnnounce(page, 2, peer);
-    await joinVoiceChannelByName(page);
 
     const badge = peerBadge(page);
     await expect(badge).toBeVisible({ timeout: 10_000 });

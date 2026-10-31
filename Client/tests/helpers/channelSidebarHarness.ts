@@ -3,11 +3,13 @@ import { createChannelSidebar } from "../../src/components/ChannelSidebar";
 import { mockOpenUserProfilePopup } from "./channelSidebarMocks";
 import { authStore } from "../../src/stores/auth.store";
 import { uiStore } from "../../src/stores/ui.store";
-import { voiceStore, updateVoiceState } from "../../src/stores/voice.store";
+import { voiceStore } from "../../src/stores/voice.store";
 import type { PeerVerification } from "../../src/stores/voice.store";
-import { type ReadyChannel, type VoiceStatePayload } from "../../src/lib/types";
+import { type ReadyChannel } from "../../src/lib/types";
 import { resetMembersState } from "./storeResets";
 import { signInAs, resetChannelsState } from "./storeSeeds";
+
+export { addVoiceUser } from "./voiceUsers";
 
 export function resetStores(): void {
   resetChannelsState();
@@ -52,28 +54,6 @@ export function resetStores(): void {
     peerVerifications: new Map(),
   }));
   resetMembersState();
-}
-
-/** Add a connected voice user to a channel (via the same store path the WS uses). */
-export function addVoiceUser(
-  channelId: number,
-  userId: number,
-  username: string,
-  flags: Partial<
-    Pick<VoiceStatePayload, "muted" | "deafened" | "speaking" | "camera" | "screenshare">
-  > = {},
-): void {
-  updateVoiceState({
-    channel_id: channelId,
-    user_id: userId,
-    username,
-    muted: false,
-    deafened: false,
-    speaking: false,
-    camera: false,
-    screenshare: false,
-    ...flags,
-  });
 }
 
 /** Record a peer's E2EE identity verification result in the voice store. */

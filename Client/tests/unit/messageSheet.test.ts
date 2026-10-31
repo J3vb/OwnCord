@@ -2,13 +2,14 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 import { createMessageList } from "@components/MessageList";
 import type { MessageListOptions } from "@components/MessageList";
-import { messagesStore, type Message } from "@stores/messages.store";
+import type { Message } from "@stores/messages.store";
 import { closeBottomSheet } from "@lib/ui/bottomSheet";
 import {
   ME,
   makeMessage,
   makeOpts,
   resetGateStores,
+  seedMessages as seed,
   setChannel,
   signInAs,
 } from "../helpers/message-actions-fixtures";
@@ -16,17 +17,6 @@ import { resetMembersState } from "../helpers/storeResets";
 import "../helpers/resizeObserverStub";
 
 const SHEET = '[data-testid="message-sheet"]';
-
-function seed(messages: Message[]): void {
-  messagesStore.setState(() => ({
-    messagesByChannel: new Map([[1, messages]]),
-    pendingSends: new Map(),
-    loadedChannels: new Set(),
-    hasMore: new Map(),
-    historyLoadState: new Map(),
-    detachedChannels: new Set(),
-  }));
-}
 
 function mine(over: Partial<Message> = {}): Message {
   return makeMessage({ user: { id: ME, username: "me", avatar: null }, ...over });

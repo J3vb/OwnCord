@@ -24,23 +24,15 @@ import {
   buildTauriMockScript,
   MOCK_AUTH_OK,
   MOCK_LOGIN_2FA_RESPONSE,
-  MOCK_LOGIN_RESPONSE,
-  MOCK_MESSAGES,
-  MOCK_PINNED_MESSAGES,
   navigateToMainPageReady,
   openSettings,
   switchSettingsTab,
+  ROUTE_HEALTH,
+  ROUTE_LOGIN,
+  ROUTE_MESSAGES,
+  ROUTE_PINS,
 } from "./helpers";
 import { findUnnamedControls, focusIndicator, textContrast, Q1 } from "./support/accessibility";
-
-const ROUTE_HEALTH = {
-  pattern: "/api/v1/health",
-  status: 200,
-  body: { status: "ok", version: "1.0.0" },
-};
-const ROUTE_LOGIN = { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE };
-const ROUTE_MESSAGES = { pattern: "/messages", status: 200, body: MOCK_MESSAGES };
-const ROUTE_PINS = { pattern: "/pins", status: 200, body: MOCK_PINNED_MESSAGES };
 
 function meRoute(totpEnabled = false) {
   return {
@@ -75,27 +67,32 @@ async function bootAccount(page: Page, extraRoutes: HttpRoute[] = []): Promise<v
 const accountPane = (page: Page) =>
   page.locator("[data-testid='settings-overlay'] .settings-pane.active");
 
+/** The connect page against a server that answers health, login and server-info. */
+async function openConnectPage(page: Page): Promise<void> {
+  await page.addInitScript(
+    buildTauriMockScript({
+      httpRoutes: [
+        ROUTE_HEALTH,
+        ROUTE_LOGIN,
+        {
+          pattern: "/api/v1/server-info",
+          status: 200,
+          body: { name: "Test", protocol_epoch: 1 },
+        },
+      ],
+      simulateWsFlow: false,
+    }),
+  );
+  await page.goto("/");
+}
+
 // ---------------------------------------------------------------------------
 // Connect form: field-linked validation (BPR-091)
 // ---------------------------------------------------------------------------
 
 test.describe("connect form validation is field-linked", () => {
   test("the host error marks the host input invalid and focuses it", async ({ page }) => {
-    await page.addInitScript(
-      buildTauriMockScript({
-        httpRoutes: [
-          ROUTE_HEALTH,
-          ROUTE_LOGIN,
-          {
-            pattern: "/api/v1/server-info",
-            status: 200,
-            body: { name: "Test", protocol_epoch: 1 },
-          },
-        ],
-        simulateWsFlow: false,
-      }),
-    );
-    await page.goto("/");
+    await openConnectPage(page);
 
     const host = page.locator("#host");
     await host.fill("");
@@ -294,21 +291,7 @@ test.describe("account settings feedback and disclosure", () => {
   });
 
   test("the recovery overlay's error is associated with every field", async ({ page }) => {
-    await page.addInitScript(
-      buildTauriMockScript({
-        httpRoutes: [
-          ROUTE_HEALTH,
-          ROUTE_LOGIN,
-          {
-            pattern: "/api/v1/server-info",
-            status: 200,
-            body: { name: "Test", protocol_epoch: 1 },
-          },
-        ],
-        simulateWsFlow: false,
-      }),
-    );
-    await page.goto("/");
+    await openConnectPage(page);
 
     await page.locator("[data-testid='recover-account-link']").click();
     const overlay = page.locator("[data-testid='recover-overlay']");

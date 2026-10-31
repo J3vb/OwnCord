@@ -63,6 +63,37 @@ function seedRemoteCamera(target: LiveKitSession) {
   return { setSubscribed, setCameraSubscribed, onRemoteVideo };
 }
 
+/**
+ * Runs a reconnect whose every attempt fails; on the final attempt a newer
+ * join to `channelId` lands and the chat socket closes, so the loop reaches
+ * the post-loop give-up check. Resolves with the error callback.
+ */
+async function reconnectUntilSuperseded(
+  session: LiveKitSession,
+  channelId: number,
+  latestToken: string,
+) {
+  session.setServerHost("localhost:7880");
+  const errorCb = vi.fn();
+  session.setOnError(errorCb);
+  const ac = new AbortController();
+
+  let connectCalls = 0;
+  mockRoom.connect.mockImplementation(() => {
+    connectCalls++;
+    if (connectCalls >= 5) {
+      enterConnected(session, channelId, { latestToken, lastDirectUrl: "ws://localhost:7880" });
+      session.setWsClient({ send: vi.fn(), getState: () => "disconnected" } as any);
+    }
+    return Promise.reject(new Error("always fails"));
+  });
+
+  const reconnectPromise = startReconnect(session, 5, { token: "token", signal: ac.signal });
+  await vi.advanceTimersByTimeAsync(27_000);
+  await reconnectPromise;
+  return errorCb;
+}
+
 describe("LiveKitSession", () => {
   let session: LiveKitSession;
 
@@ -302,35 +333,7 @@ describe("LiveKitSession", () => {
     // voice sessions are superseded, not cancelled).
     it("skips give-up cleanup when superseded before the final attempt resolves", async () => {
       enterReconnecting(session, 5, { latestToken: "token" });
-      session.setServerHost("localhost:7880");
-      const errorCb = vi.fn();
-      session.setOnError(errorCb);
-      const ac = new AbortController();
-
-      // Every attempt fails, and on the LAST attempt's failure the session
-      // has already moved on to a different (live) channel — simulating the
-      // user joining channel 9 while the final attempt
-      // (MAX_RECONNECT_ATTEMPTS) was still connecting.
-      let connectCalls = 0;
-      mockRoom.connect.mockImplementation(() => {
-        connectCalls++;
-        if (connectCalls >= 5) {
-          enterConnected(session, 9, {
-            latestToken: "other-token",
-            lastDirectUrl: "ws://localhost:7880",
-          });
-          // ...and the chat socket closes for good, so the loop breaks straight
-          // into the post-loop give-up check instead of an in-loop checkpoint.
-          session.setWsClient({ send: vi.fn(), getState: () => "disconnected" } as any);
-        }
-        return Promise.reject(new Error("always fails"));
-      });
-
-      const reconnectPromise = startReconnect(session, 5, { token: "token", signal: ac.signal });
-
-      // Exhaust the fast attempts so the loop reaches the post-loop check.
-      await vi.advanceTimersByTimeAsync(27_000);
-      await reconnectPromise;
+      const errorCb = await reconnectUntilSuperseded(session, 9, "other-token");
 
       // The give-up path must not have run: no error toast, no leaveVoiceChannel,
       // and channel 9's "connected" state must still be intact.
@@ -347,34 +350,7 @@ describe("LiveKitSession", () => {
     // state-type check can tell the stale loop it no longer owns the session.
     it("skips give-up cleanup when the same channel was re-joined by a newer session", async () => {
       enterReconnecting(session, 5, { latestToken: "token" });
-      session.setServerHost("localhost:7880");
-      const errorCb = vi.fn();
-      session.setOnError(errorCb);
-      const ac = new AbortController();
-
-      let connectCalls = 0;
-      mockRoom.connect.mockImplementation(() => {
-        connectCalls++;
-        if (connectCalls >= 5) {
-          // A fresh join for the SAME channel completed while the final
-          // reconnect attempt was in flight.
-          enterConnected(session, 5, {
-            latestToken: "fresh-token",
-            lastDirectUrl: "ws://localhost:7880",
-          });
-          // ...and the chat socket closes for good, so the loop breaks straight
-          // into the post-loop give-up check instead of an in-loop checkpoint.
-          session.setWsClient({ send: vi.fn(), getState: () => "disconnected" } as any);
-        }
-        return Promise.reject(new Error("always fails"));
-      });
-
-      const reconnectPromise = startReconnect(session, 5, { token: "token", signal: ac.signal });
-
-      // Exhaust the fast attempts so the loop reaches the post-loop check.
-      await vi.advanceTimersByTimeAsync(27_000);
-      await reconnectPromise;
-
+      const errorCb = await reconnectUntilSuperseded(session, 5, "fresh-token");
       expect(errorCb).not.toHaveBeenCalledWith("Voice connection lost — failed to reconnect");
       expect(leaveVoiceChannel).not.toHaveBeenCalled();
       expect((session as any)._state.type).toBe("connected");

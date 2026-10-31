@@ -1,6 +1,6 @@
 import { test, expect } from "./fixtures";
 import type { Page } from "@playwright/test";
-import { buildTauriMockScript, emitWsEvent, submitLogin, MOCK_LOGIN_RESPONSE } from "./helpers";
+import { buildTauriMockScript, emitWsEvent, submitLogin, ROUTE_LOGIN } from "./helpers";
 
 // ---------------------------------------------------------------------------
 // Tests: incompatible protocol epoch (B7-12, PRD BPR-033; spec:
@@ -19,8 +19,6 @@ const ROUTE_HEALTH = {
   status: 200,
   body: { status: "ok", uptime: 10, online_users: 0 },
 };
-
-const ROUTE_LOGIN = { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE };
 
 /** A server that speaks a NEWER epoch than this client build (1). */
 const ROUTE_SERVER_INFO_NEWER = {

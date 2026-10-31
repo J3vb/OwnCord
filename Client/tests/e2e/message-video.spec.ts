@@ -10,10 +10,11 @@ import { resolve } from "node:path";
 import { test, expect } from "./fixtures";
 import {
   buildTauriMockScript,
-  MOCK_LOGIN_RESPONSE,
   MOCK_PINNED_MESSAGES,
   navigateToMainPage,
   waitForWsReady,
+  ROUTE_HEALTH,
+  ROUTE_LOGIN,
 } from "./helpers";
 
 const MP4 = readFileSync(resolve("tests/fixtures/video/clip.mp4"));
@@ -70,8 +71,8 @@ async function boot(page: Page): Promise<void> {
   await page.addInitScript(
     buildTauriMockScript({
       httpRoutes: [
-        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-        { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
+        ROUTE_HEALTH,
+        ROUTE_LOGIN,
         {
           pattern: "/messages",
           status: 200,

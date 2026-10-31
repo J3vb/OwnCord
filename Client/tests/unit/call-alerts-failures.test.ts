@@ -4,6 +4,7 @@
  * reported as an empty one. Also which conversation a replaced ring names.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { makeDm } from "../helpers/dmHarness";
 import type { RingState } from "../../src/lib/voice/callRing";
 
 const { debug, showCall, clearCall, requestAttention, showToast } = vi.hoisted(() => ({
@@ -31,18 +32,7 @@ const ring: RingState = { channelId: 50, fromUserId: 10, fromUsername: "Otto" };
 
 function dm(channelId: number, name: string, isGroup: boolean) {
   const user = { id: 10, username: "Otto", avatar: "", status: "online" };
-  return {
-    channelId,
-    recipient: user,
-    participants: [user],
-    name,
-    isGroup,
-    lastMessageId: null,
-    lastMessage: "",
-    lastMessageAt: "",
-    unreadCount: 0,
-    mentionCount: 0,
-  };
+  return makeDm({ channelId, recipient: user, participants: [user], name, isGroup });
 }
 
 beforeEach(() => {

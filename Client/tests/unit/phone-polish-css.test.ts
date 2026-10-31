@@ -1,69 +1,13 @@
 // The phone polish is mostly CSS, which jsdom never applies, so these read the
 // parsed stylesheet (Lightning CSS, as tests/helpers/app-css.ts does) and walk
 // its @media rules too.
-import { join } from "node:path";
-import { bundle } from "lightningcss";
-import type { Declaration, Rule, Selector } from "lightningcss";
+import type { Declaration } from "lightningcss";
 import { describe, expect, it } from "vitest";
 import { cascadedDeclaration, keyword } from "../helpers/app-css";
+import { flatMediaRules } from "../helpers/appCssMedia";
 
-interface FlatRule {
-  readonly queries: readonly string[];
-  readonly selector: string;
-  readonly declarations: readonly Declaration[];
-}
-
-function selectorText(selector: Selector): string {
-  return selector
-    .map((c) => {
-      switch (c.type) {
-        case "class":
-          return `.${c.name}`;
-        case "type":
-          return c.name;
-        case "combinator":
-          return c.value === "descendant" ? " " : ` ${c.value} `;
-        default:
-          return `<${c.type}>`;
-      }
-    })
-    .join("");
-}
-
-function flatRules(): FlatRule[] {
-  let sheetRules: Rule[] = [];
-  bundle({
-    filename: join(process.cwd(), "src/styles/app.css"),
-    visitor: {
-      StyleSheet(s) {
-        sheetRules = s.rules;
-      },
-    },
-  });
-  const out: FlatRule[] = [];
-  const walk = (rules: Rule[], queries: readonly string[]): void => {
-    for (const rule of rules) {
-      if (rule.type === "media") {
-        walk(
-          rule.value.rules,
-          rule.value.query.mediaQueries.map((q) => JSON.stringify(q)),
-        );
-      } else if (rule.type === "style") {
-        const declarations = [
-          ...(rule.value.declarations?.declarations ?? []),
-          ...(rule.value.declarations?.importantDeclarations ?? []),
-        ];
-        for (const sel of rule.value.selectors) {
-          out.push({ queries, selector: selectorText(sel), declarations });
-        }
-      }
-    }
-  };
-  walk(sheetRules, []);
-  return out;
-}
-
-const rules = flatRules();
+const rules = flatMediaRules();
+type FlatRule = (typeof rules)[number];
 
 /** Only the phone layout: both halves of the query are a coarse pointer and a size. */
 function phoneRule(selector: string): FlatRule | undefined {

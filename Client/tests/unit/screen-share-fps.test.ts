@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { loggerMock } from "../helpers/loggerMock";
 
 const { mockLoadPref } = vi.hoisted(() => ({
   mockLoadPref: vi.fn((_key: string, defaultVal: unknown) => defaultVal),
@@ -9,14 +10,7 @@ vi.mock("@lib/prefs/preferences", () => ({
   savePref: vi.fn(),
 }));
 
-vi.mock("@lib/logger", () => ({
-  createLogger: () => ({
-    debug: vi.fn(),
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-  }),
-}));
+vi.mock("@lib/logger", () => loggerMock());
 
 vi.mock("@stores/voice.store", () => ({
   setLocalCamera: vi.fn(),

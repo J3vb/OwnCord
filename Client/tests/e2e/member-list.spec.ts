@@ -1,7 +1,6 @@
 import { test, expect } from "./fixtures";
 import {
   buildTauriMockScript,
-  mockTauriFullSession,
   mockTauriFullSessionWithMessages,
   navigateToMainPage,
   emitWsMessage,
@@ -11,13 +10,12 @@ import {
   MOCK_PINNED_MESSAGES,
   openDmRow,
   BASE_SESSION_ROUTES,
+  startFullSession,
 } from "./helpers";
 
 test.describe("Member List", () => {
   test.beforeEach(async ({ page }) => {
-    await mockTauriFullSession(page);
-    await page.goto("/");
-    await navigateToMainPage(page);
+    await startFullSession(page);
   });
 
   test("renders members with role groups, avatars, names, and status", async ({ page }) => {
@@ -149,9 +147,7 @@ test.describe("Member List — under the channels", () => {
     await page.addInitScript(() => {
       localStorage.setItem("owncord:settings:memberListLayout", JSON.stringify("left"));
     });
-    await mockTauriFullSession(page);
-    await page.goto("/");
-    await navigateToMainPage(page);
+    await startFullSession(page);
   });
 
   test("member list is always visible in sidebar", async ({ page }) => {

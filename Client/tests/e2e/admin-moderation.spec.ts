@@ -17,7 +17,13 @@
 
 import { test, expect } from "./fixtures";
 import type { Page } from "@playwright/test";
-import { buildTauriMockScript, MOCK_LOGIN_RESPONSE, navigateToMainPage } from "./helpers";
+import {
+  buildTauriMockScript,
+  navigateToMainPage,
+  ROUTE_HEALTH,
+  ROUTE_LOGIN,
+  openContextMenuOn,
+} from "./helpers";
 import { captureCalls, fetchCalls, waitForFetchCall } from "./support/ipcCapture";
 
 // ---------------------------------------------------------------------------
@@ -26,8 +32,8 @@ import { captureCalls, fetchCalls, waitForFetchCall } from "./support/ipcCapture
 
 /** The mock's route table plus the admin routes the moderation flows touch. */
 const ADMIN_ROUTES = [
-  { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-  { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
+  ROUTE_HEALTH,
+  ROUTE_LOGIN,
   { pattern: "/api/v1/blocks", status: 200, body: { blocked_user_ids: [] } },
   // GET /api/v1/moderation/members?limit=… — the banned-list walk on every roster change.
   { pattern: "/api/v1/moderation/members", status: 200, body: [] },
@@ -57,22 +63,7 @@ async function mockModerationSession(page: Page): Promise<void> {
  *  from a safe coordinate: MemberList's real handler builds and positions the
  *  menu exactly as a click at that point would. */
 async function openMemberMenu(page: Page, testId: string) {
-  const row = page.locator(`[data-testid='${testId}']`);
-  await expect(row).toBeVisible({ timeout: 5_000 });
-  await row.evaluate((el) =>
-    el.dispatchEvent(
-      new MouseEvent("contextmenu", {
-        bubbles: true,
-        cancelable: true,
-        clientX: 640,
-        clientY: 80,
-        button: 2,
-      }),
-    ),
-  );
-  const menu = page.locator(".context-menu").first();
-  await expect(menu).toBeVisible({ timeout: 5_000 });
-  return menu;
+  return openContextMenuOn(page, page.locator(`[data-testid='${testId}']`));
 }
 
 test.describe("Admin moderation — member context menu", () => {

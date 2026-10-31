@@ -1,27 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createMessageList } from "@components/MessageList";
-import { messagesStore, type Message } from "@stores/messages.store";
 import {
   makeMessage,
   makeOpts,
   resetGateStores,
+  seedMessages as seed,
   setChannel,
   signInAs,
 } from "../helpers/message-actions-fixtures";
 import { resetMembersState } from "../helpers/storeResets";
 import "../helpers/resizeObserverStub";
-
-function seed(messages: Message[]): void {
-  messagesStore.setState(() => ({
-    messagesByChannel: new Map([[1, messages]]),
-    pendingSends: new Map(),
-    loadedChannels: new Set(),
-    hasMore: new Map(),
-    historyLoadState: new Map(),
-    detachedChannels: new Set(),
-  }));
-}
 
 /** The clock alone: "2:34 PM" or "14:34", nothing before or after it. */
 const CLOCK_ONLY = /^\d{1,2}:\d{2}( [AP]M)?$/;

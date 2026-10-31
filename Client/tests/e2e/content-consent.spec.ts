@@ -7,23 +7,25 @@
  * tests/e2e/native/content-consent.spec.ts; NVDA/Orca recordings are
  * owner-run and not claimed here.
  */
-import type { Locator, Page } from "@playwright/test";
+import type { Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
 import {
   buildTauriMockScript,
-  MOCK_LOGIN_RESPONSE,
   MOCK_MESSAGES,
   navigateToMainPageReady,
   openSettings,
   switchSettingsTab,
+  ROUTE_HEALTH,
+  ROUTE_LOGIN,
 } from "./helpers";
+import { findUnnamedControls, setAppearance } from "./support/accessibility";
 import {
-  Q1,
-  findUnnamedControls,
-  focusIndicator,
-  setAppearance,
-  textContrast,
-} from "./support/accessibility";
+  attachScreenshot,
+  contrastMatrix,
+  expectControlFits,
+  expectNoPageScroll,
+  runningMotion,
+} from "./support/a11yHarness";
 
 const LINK = "https://news.example/story";
 const IMAGE = "https://cdn.example/cat.png";
@@ -35,8 +37,8 @@ async function mockSession(page: Page, content = `See ${LINK} and ${IMAGE}`): Pr
   await page.addInitScript(
     buildTauriMockScript({
       httpRoutes: [
-        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-        { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
+        ROUTE_HEALTH,
+        ROUTE_LOGIN,
         {
           pattern: "/messages",
           status: 200,
@@ -69,16 +71,6 @@ async function brokerUrls(page: Page): Promise<string[]> {
 
 const loadButton = (page: Page, host: string) =>
   page.getByRole("button", { name: `Load external content from ${host}` });
-/** Animations still moving inside `root` (a reduced-motion 0.01 ms one is not). */
-const runningMotion = (root: Locator): Promise<number> =>
-  root.evaluate(
-    (el) =>
-      el
-        .getAnimations({ subtree: true })
-        .filter((a) => a.playState === "running" && Number(a.effect?.getTiming().duration) > 1)
-        .length,
-  );
-
 const dialog = (page: Page) =>
   page.getByRole("dialog", { name: "Load external content on this server?" });
 
@@ -164,52 +156,39 @@ test.describe("external-content consent", () => {
 });
 
 test.describe("external-content consent — accessibility", () => {
-  for (const theme of ["dark", "neon-glow", "midnight", "light"] as const) {
-    for (const highContrast of [false, true]) {
-      test(`${theme}${highContrast ? " + High Contrast" : ""}: names, focus and contrast`, async ({
-        page,
-      }, testInfo) => {
-        await mockSession(page);
-        await setAppearance(page, { theme, highContrast, accent: null });
-        await navigateToMainPageReady(page);
-        const item = page.locator(".msg-embed-concealed").first();
-        await expect(item).toBeVisible();
+  for (const c of contrastMatrix({
+    title: "names, focus and contrast",
+    attachName: (theme, hc) => `external-consent-contrast-${theme}-hc-${hc}.json`,
+    boot: async (page, prefs) => {
+      await mockSession(page);
+      await setAppearance(page, prefs);
+      await navigateToMainPageReady(page);
+    },
+    scenario: async (page, { measure, ring }) => {
+      const item = page.locator(".msg-embed-concealed").first();
+      await expect(item).toBeVisible();
 
-        const measured: Record<string, number> = {};
-        const failures: string[] = [];
-        const check = async (name: string, ratio: number): Promise<void> => {
-          measured[name] = Number(ratio.toFixed(2));
-          if (ratio < Q1.text) failures.push(`${name} ${ratio.toFixed(2)} < ${Q1.text}`);
-        };
-        expect(await findUnnamedControls(item)).toEqual([]);
-        await check("item", (await textContrast(item.locator("button"))).ratio);
-        await item.locator("button").focus();
-        await page.keyboard.press("Shift+Tab");
-        await page.keyboard.press("Tab");
-        const ring = await focusIndicator(page);
-        measured["focus item"] = Number(ring.ratio.toFixed(2));
-        for (const p of ring.problems) failures.push(`focus item: ${p}`);
-        expect(
-          await item.locator("button").evaluate((el) => (el as HTMLElement).offsetHeight),
-        ).toBeGreaterThanOrEqual(24);
+      expect(await findUnnamedControls(item)).toEqual([]);
+      await measure("item", item.locator("button"));
+      await item.locator("button").focus();
+      await page.keyboard.press("Shift+Tab");
+      await page.keyboard.press("Tab");
+      await ring("item");
+      expect(
+        await item.locator("button").evaluate((el) => (el as HTMLElement).offsetHeight),
+      ).toBeGreaterThanOrEqual(24);
 
-        await page.keyboard.press("Enter");
-        await expect(dialog(page)).toBeVisible();
-        expect(await findUnnamedControls(dialog(page))).toEqual([]);
-        await check("dialog body", (await textContrast(dialog(page).locator("p"))).ratio);
-        for (const name of ["Cancel", "Ask each time", "Load automatically on this server"]) {
-          const button = dialog(page).getByRole("button", { name });
-          await check(name, (await textContrast(button)).ratio);
-        }
-        await page.keyboard.press("Escape");
-
-        await testInfo.attach(`external-consent-contrast-${theme}-hc-${highContrast}.json`, {
-          body: JSON.stringify(measured, null, 2),
-          contentType: "application/json",
-        });
-        expect(failures).toEqual([]);
-      });
-    }
+      await page.keyboard.press("Enter");
+      await expect(dialog(page)).toBeVisible();
+      expect(await findUnnamedControls(dialog(page))).toEqual([]);
+      await measure("dialog body", dialog(page).locator("p"));
+      for (const name of ["Cancel", "Ask each time", "Load automatically on this server"]) {
+        await measure(name, dialog(page).getByRole("button", { name }));
+      }
+      await page.keyboard.press("Escape");
+    },
+  })) {
+    test(c.title, c.run);
   }
 
   test("no motion under the in-app reduced-motion setting", async ({ page }) => {
@@ -257,17 +236,14 @@ test.describe("external-content consent — accessibility", () => {
         await expect(item).toBeInViewport();
         await item.click();
         for (const control of await dialog(page).getByRole("button").all()) {
-          await control.scrollIntoViewIfNeeded();
-          await expect(control).toBeInViewport();
-          expect(await control.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+          await expectControlFits(control);
         }
-        expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBe(
-          0,
+        await expectNoPageScroll(page);
+        await attachScreenshot(
+          testInfo,
+          `external-consent-940x500-${label.replaceAll(/\W+/g, "-")}.png`,
+          page,
         );
-        await testInfo.attach(`external-consent-940x500-${label.replaceAll(/\W+/g, "-")}.png`, {
-          body: await page.screenshot(),
-          contentType: "image/png",
-        });
       });
     });
   }

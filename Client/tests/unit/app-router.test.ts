@@ -13,6 +13,7 @@
  *    and handed to the next connect mount exactly once.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { loggerMock } from "../helpers/loggerMock";
 import type { ApiClient } from "@lib/api";
 import type { ProfileManager } from "@lib/presence/profiles";
 import type { WsClient } from "@lib/ws";
@@ -49,14 +50,7 @@ const hoisted = vi.hoisted(() => {
   };
 });
 
-vi.mock("@lib/logger", () => ({
-  createLogger: () => ({
-    debug: vi.fn(),
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: hoisted.logError,
-  }),
-}));
+vi.mock("@lib/logger", () => loggerMock({ error: hoisted.logError }));
 vi.mock("../../src/app/serverHealth", () => ({ serverInfoFor: vi.fn(() => undefined) }));
 vi.mock("../../src/app/connectRoute", () => ({
   renderConnect: (...args: unknown[]) => {

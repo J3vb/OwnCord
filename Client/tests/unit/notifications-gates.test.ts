@@ -6,6 +6,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as mocks from "../helpers/notificationsMocks";
+import { makeDm } from "../helpers/dmHarness";
 import {
   notifyChannelActivity,
   notifyIncomingMessage,
@@ -94,18 +95,7 @@ const ENTRY_POINTS: readonly EntryPoint[] = [
 
 function dmChannel(channelId: number) {
   const user = { id: 2, username: "bob", avatar: "", status: "online" };
-  return {
-    channelId,
-    recipient: user,
-    participants: [user],
-    name: "",
-    isGroup: false,
-    lastMessageId: null,
-    lastMessage: "",
-    lastMessageAt: "",
-    unreadCount: 0,
-    mentionCount: 0,
-  };
+  return makeDm({ channelId, recipient: user, participants: [user] });
 }
 
 let hasFocus: ReturnType<typeof vi.spyOn>;

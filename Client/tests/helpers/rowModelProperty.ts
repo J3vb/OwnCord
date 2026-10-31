@@ -8,7 +8,7 @@
  */
 
 import fc from "fast-check";
-import { expect } from "vitest";
+import { expect, vi } from "vitest";
 
 export type PlainModel = { readonly [k: string]: unknown };
 
@@ -81,4 +81,49 @@ export async function assertEveryFieldDraws<M extends PlainModel>(
     }),
     { numRuns },
   );
+}
+
+/** A flush long enough for the avatar's microtask fetch and its image swap. */
+export async function settleAvatar(): Promise<void> {
+  for (let i = 0; i < 4; i++) await Promise.resolve();
+}
+
+/**
+ * Factory body for the attachments module with the authenticated avatar fetch
+ * stubbed to a URL-derived data URI, so a changed avatarUrl shows in the DOM.
+ */
+export async function dataUriAvatarFetchMock(
+  importOriginal: <T>() => Promise<T>,
+): Promise<Record<string, unknown>> {
+  const actual =
+    await importOriginal<typeof import("../../src/features/messaging/content/attachments")>();
+  return {
+    ...actual,
+    fetchImageAsObjectUrl: vi.fn((url: string) =>
+      Promise.resolve(`data:,${encodeURIComponent(url)}`),
+    ),
+  };
+}
+
+type AvatarModel = {
+  readonly avatarName: string;
+  readonly avatarColor: string;
+  readonly avatarUrl: string | null;
+};
+
+/** The model with one avatar field changed, or undefined when `field` is not one. */
+export function mutateAvatarField<M extends AvatarModel>(model: M, field: string): M | undefined {
+  switch (field) {
+    case "avatarName":
+      return { ...model, avatarName: model.avatarName.toUpperCase().startsWith("Q") ? "R" : "Q" };
+    case "avatarColor":
+      return { ...model, avatarColor: model.avatarColor === "#123456" ? "#654321" : "#123456" };
+    case "avatarUrl":
+      return {
+        ...model,
+        avatarUrl: model.avatarUrl === null ? "/api/v1/files/p" : `${model.avatarUrl}x`,
+      };
+    default:
+      return undefined;
+  }
 }

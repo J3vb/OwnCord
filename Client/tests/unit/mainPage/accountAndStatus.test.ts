@@ -56,6 +56,18 @@ const {
   mockPruneAttachmentCacheScope,
 } = mocks;
 
+type UiPatch = Partial<ReturnType<typeof uiStore.getState>>;
+
+/** Mounts the page as a signed-in user, applies `ui`, and returns the status banner. */
+function mountWithBanner(container: HTMLDivElement, ui: UiPatch) {
+  const ws = fakeWs();
+  authStore.setState((prev) => ({ ...prev, token: "tok-here" }));
+  const page = mountPage(container, ws, fakeApi("chat.example.com"));
+  uiStore.setState((prev) => ({ ...prev, ...ui }));
+  const banner = container.querySelector<HTMLElement>(".reconnecting-banner")!;
+  return { ws, page, banner };
+}
+
 describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   let container: HTMLDivElement;
   let page: ReturnType<typeof createMainPage>;
@@ -237,16 +249,12 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   });
 
   it("shows Signed in elsewhere on SESSION_REPLACED, and Use here reconnects this device", async () => {
-    const ws = fakeWs();
-    authStore.setState((prev) => ({ ...prev, token: "tok-here" }));
-    page = mountPage(container, ws, fakeApi("chat.example.com"));
-
-    uiStore.setState((prev) => ({
-      ...prev,
+    const mounted = mountWithBanner(container, {
       sessionReplaced: true,
       connectionStatus: "disconnected",
-    }));
-    const banner = container.querySelector<HTMLElement>(".reconnecting-banner")!;
+    });
+    page = mounted.page;
+    const { ws, banner } = mounted;
     await vi.waitFor(() => {
       expect(banner.textContent).toBe("Signed in elsewhere Use here");
     });
@@ -260,16 +268,12 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   });
 
   it("shows an actionable connection notice on disconnect and Retry redials", async () => {
-    const ws = fakeWs();
-    authStore.setState((prev) => ({ ...prev, token: "tok-here" }));
-    page = mountPage(container, ws, fakeApi("chat.example.com"));
-
-    uiStore.setState((prev) => ({
-      ...prev,
+    const mounted = mountWithBanner(container, {
       sessionReplaced: false,
       connectionStatus: "disconnected",
-    }));
-    const banner = container.querySelector<HTMLElement>(".reconnecting-banner")!;
+    });
+    page = mounted.page;
+    const { ws, banner } = mounted;
     await vi.waitFor(() => {
       expect(banner.textContent).toContain("Can't reach this server");
     });
@@ -281,17 +285,13 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   });
 
   it("keeps Reconnecting... until a dial fails, then offers Retry", async () => {
-    const ws = fakeWs();
-    authStore.setState((prev) => ({ ...prev, token: "tok-here" }));
-    page = mountPage(container, ws, fakeApi("chat.example.com"));
-
-    uiStore.setState((prev) => ({
-      ...prev,
+    const mounted = mountWithBanner(container, {
       sessionReplaced: false,
       connectionStatus: "reconnecting",
       connectionDialFailed: false,
-    }));
-    const banner = container.querySelector<HTMLElement>(".reconnecting-banner")!;
+    });
+    page = mounted.page;
+    const { ws, banner } = mounted;
     await vi.waitFor(() => {
       expect(banner.textContent).toBe("Reconnecting...");
     });
@@ -363,16 +363,12 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   });
 
   it("re-renders the notice on network loss and return without redialing", async () => {
-    const ws = fakeWs();
-    authStore.setState((prev) => ({ ...prev, token: "tok-here" }));
-    page = mountPage(container, ws, fakeApi("chat.example.com"));
-
-    uiStore.setState((prev) => ({
-      ...prev,
+    const mounted = mountWithBanner(container, {
       sessionReplaced: false,
       connectionStatus: "disconnected",
-    }));
-    const banner = container.querySelector<HTMLElement>(".reconnecting-banner")!;
+    });
+    page = mounted.page;
+    const { ws, banner } = mounted;
     await vi.waitFor(() => {
       expect(banner.textContent).toContain("Can't reach this server");
     });

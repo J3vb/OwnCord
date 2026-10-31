@@ -25,6 +25,9 @@ import {
   waitForWsReady,
   openDmRow,
   BASE_SESSION_ROUTES,
+  dmChannel,
+  groupDmChannel,
+  dispatchContextMenu,
 } from "./helpers";
 import { captureCalls, fetchCalls, waitForFetchCall } from "./support/ipcCapture";
 
@@ -42,31 +45,7 @@ const DM_MEMBERS = [
   { id: 4, username: "member2", avatar: "", status: "dnd", role: "member" },
 ];
 
-const DM_CHANNELS = [
-  {
-    channel_id: DM_ONE_TO_ONE_ID,
-    recipient: { id: 2, username: "otheruser", avatar: "", status: "online" },
-    last_message_id: 500,
-    last_message: "Hey there!",
-    last_message_at: "2026-03-15T12:00:00Z",
-    unread_count: 0,
-  },
-  {
-    channel_id: GROUP_DM_ID,
-    recipient: { id: 3, username: "member1", avatar: "", status: "idle" },
-    recipients: [
-      { id: 3, username: "member1", avatar: "", status: "idle" },
-      { id: 4, username: "member2", avatar: "", status: "dnd" },
-    ],
-    name: "Study Group",
-    is_group: true,
-    last_message_id: null,
-    last_message: "Hey everyone",
-    last_message_at: "2026-03-15T12:00:00Z",
-    unread_count: 0,
-    mention_count: 0,
-  },
-];
+const DM_CHANNELS = [dmChannel(DM_ONE_TO_ONE_ID), groupDmChannel(GROUP_DM_ID)];
 
 /** `GET /api/v1/moderation/members` — one live permanent ban for the banned section. */
 const BANNED_USER = {
@@ -125,19 +104,7 @@ async function submitLoginAndWait(page: Page): Promise<void> {
  *  real handler builds and positions the menu exactly as a click would (same
  *  approach as admin-moderation.spec.ts). */
 async function openDmRowMenu(page: Page, channelId: number): Promise<void> {
-  const row = page.locator(`.dm-item[data-channel-id="${channelId}"]`);
-  await expect(row).toBeVisible({ timeout: 5_000 });
-  await row.evaluate((el) =>
-    el.dispatchEvent(
-      new MouseEvent("contextmenu", {
-        bubbles: true,
-        cancelable: true,
-        clientX: 640,
-        clientY: 80,
-        button: 2,
-      }),
-    ),
-  );
+  await dispatchContextMenu(page.locator(`.dm-item[data-channel-id="${channelId}"]`));
   await expect(page.locator(".dm-context-menu")).toBeVisible({ timeout: 3_000 });
 }
 

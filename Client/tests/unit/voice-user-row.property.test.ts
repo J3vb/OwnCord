@@ -12,19 +12,17 @@
 
 import { describe, it, expect, vi } from "vitest";
 import fc from "fast-check";
+import {
+  assertEveryFieldDraws,
+  dataUriAvatarFetchMock,
+  mutateAvatarField,
+  settleAvatar as settle,
+} from "../helpers/rowModelProperty";
 
-// The avatar image is behind the session token; stub the authenticated fetch
-// with a URL-derived data URI so a changed avatarUrl shows in the DOM.
-vi.mock("../../src/features/messaging/content/attachments", async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import("../../src/features/messaging/content/attachments")>();
-  return {
-    ...actual,
-    fetchImageAsObjectUrl: vi.fn((url: string) =>
-      Promise.resolve(`data:,${encodeURIComponent(url)}`),
-    ),
-  };
-});
+// The avatar image is behind the session token; stub the authenticated fetch.
+vi.mock("../../src/features/messaging/content/attachments", (importOriginal) =>
+  dataUriAvatarFetchMock(importOriginal),
+);
 
 import {
   VOICE_USER_PATCH_FIELDS,
@@ -35,15 +33,9 @@ import {
   type VoiceVerifyModel,
 } from "../../src/features/channels/voiceRow.view";
 import { createAvatarElement } from "../../src/features/profiles/avatar";
-import { assertEveryFieldDraws } from "../helpers/rowModelProperty";
 
 const draw = (model: VoiceUserRowModel): HTMLElement =>
   drawVoiceUserRow(model, createAvatarElement);
-
-/** A flush long enough for the avatar's microtask fetch and its image swap. */
-async function settle(): Promise<void> {
-  for (let i = 0; i < 4; i++) await Promise.resolve();
-}
 
 const text = fc.stringMatching(/^[A-Za-z0-9]{1,8}$/);
 
@@ -89,20 +81,13 @@ function other<T>(choices: readonly T[], current: T): T {
 }
 
 function mutateRow(model: VoiceUserRowModel, field: string): VoiceUserRowModel {
+  const avatar = mutateAvatarField(model, field);
+  if (avatar !== undefined) return avatar;
   switch (field) {
     case "userId":
       return { ...model, userId: model.userId + 1 };
     case "name":
       return { ...model, name: `${model.name}x` };
-    case "avatarName":
-      return { ...model, avatarName: model.avatarName.toUpperCase().startsWith("Q") ? "R" : "Q" };
-    case "avatarColor":
-      return { ...model, avatarColor: model.avatarColor === "#123456" ? "#654321" : "#123456" };
-    case "avatarUrl":
-      return {
-        ...model,
-        avatarUrl: model.avatarUrl === null ? "/api/v1/files/p" : `${model.avatarUrl}x`,
-      };
     case "speaking":
       return { ...model, speaking: !model.speaking };
     case "camera":

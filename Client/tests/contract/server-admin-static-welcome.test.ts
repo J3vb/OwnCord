@@ -5,8 +5,7 @@
 //
 // WP 8.6: the Settings page's "Welcome messages" card, driven against the real
 // admin scripts in jsdom.
-import { describe, it, expect, afterEach } from "vitest";
-import { JSDOM } from "jsdom";
+import { describe, it, expect } from "vitest";
 import {
   adminHtmlWithBridge,
   bootAdminPanel,
@@ -42,12 +41,6 @@ async function mountSettings(bridge: Bridge, doc: Document): Promise<void> {
 }
 
 describe("Server/admin/static — Welcome messages card", () => {
-  let dom: JSDOM | undefined;
-  afterEach(() => {
-    dom?.window?.close();
-    dom = undefined;
-  });
-
   function responder(opts: { channels: unknown; welcome?: string }) {
     return (path: string, method: string): Reply => {
       if (path === "/settings" && method === "GET") {
@@ -69,7 +62,6 @@ describe("Server/admin/static — Welcome messages card", () => {
   it("offers Off then every non-archived text channel, with the hint", async () => {
     const calls: FetchCall[] = [];
     const b = await boot(calls, responder({ channels: CHANNELS }));
-    dom = b.dom;
     await mountSettings(b.bridge, b.doc);
     const sel = b.doc.getElementById("s-welcome_channel_id") as HTMLSelectElement;
     expect([...sel.options].map((o) => o.textContent)).toEqual(["Off", "general", "hello"]);
@@ -82,7 +74,6 @@ describe("Server/admin/static — Welcome messages card", () => {
   it("saves a chosen channel and clears it back to empty, sending nothing when unchanged", async () => {
     const calls: FetchCall[] = [];
     const b = await boot(calls, responder({ channels: CHANNELS, welcome: "4" }));
-    dom = b.dom;
     await mountSettings(b.bridge, b.doc);
     const sel = b.doc.getElementById("s-welcome_channel_id") as HTMLSelectElement;
     expect(sel.value).toBe("4");
@@ -102,7 +93,6 @@ describe("Server/admin/static — Welcome messages card", () => {
   it("keeps a saved channel that was archived since, marked, so a save does not clear it", async () => {
     const calls: FetchCall[] = [];
     const b = await boot(calls, responder({ channels: CHANNELS, welcome: "3" }));
-    dom = b.dom;
     await mountSettings(b.bridge, b.doc);
     const sel = b.doc.getElementById("s-welcome_channel_id") as HTMLSelectElement;
     expect([...sel.options].map((o) => o.textContent)).toContain("old-news (archived)");
@@ -112,7 +102,6 @@ describe("Server/admin/static — Welcome messages card", () => {
   it("shows a disabled select outside the save when the channel list is unreadable", async () => {
     const calls: FetchCall[] = [];
     const b = await boot(calls, responder({ channels: null, welcome: "4" }));
-    dom = b.dom;
     await mountSettings(b.bridge, b.doc);
     expect(b.doc.getElementById("s-welcome_channel_id")).toBeNull();
     const sel = b.doc.getElementById("s-welcome_channel_unavailable") as HTMLSelectElement;

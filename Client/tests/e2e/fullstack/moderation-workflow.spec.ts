@@ -12,46 +12,16 @@
 
 import type { Page } from "@playwright/test";
 import { test, expect, login } from "./fixtures";
-import { TEST_PASSWORD, type TestServer } from "../support/server";
-
-const MODERATOR_ROLE_ID = 3;
-const MEMBER_ROLE_ID = 4;
-
-async function token(server: TestServer, username: string): Promise<string> {
-  const auth = await server.api("/api/v1/auth/login", { username, password: TEST_PASSWORD });
-  return auth.token as string;
-}
-
-async function register(server: TestServer, username: string): Promise<void> {
-  await server.api("/api/v1/auth/register", {
-    username,
-    password: TEST_PASSWORD,
-    invite_code: server.owner!.invite_code,
-  });
-}
-
-/** POST as `auth`; the status and the server's error code. */
-async function post(server: TestServer, path: string, auth: string, body: unknown = {}) {
-  const response = await fetch(`${server.origin}${path}`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${auth}`, "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  const text = await response.text();
-  return { status: response.status, code: text ? (JSON.parse(text).error as string) : "" };
-}
-
-async function userIds(server: TestServer): Promise<(name: string) => number> {
-  const users = (await server.api("/admin/api/users", undefined, server.owner!.token)) as {
-    id: number;
-    username: string;
-  }[];
-  return (name) => users.find((u) => u.username === name)!.id;
-}
-
-async function setRole(server: TestServer, userId: number, roleId: number): Promise<void> {
-  await server.api(`/admin/api/users/${userId}`, { role_id: roleId }, server.owner!.token, "PATCH");
-}
+import {
+  MEMBER_ROLE_ID,
+  MODERATOR_ROLE_ID,
+  post,
+  register,
+  setRole,
+  signIn,
+  userIds,
+} from "./serverApi";
+import { type TestServer } from "../support/server";
 
 async function reportUser(
   server: TestServer,
@@ -82,10 +52,10 @@ test.describe("Moderation review workflow (real server)", () => {
     await setRole(server, id("bob"), MODERATOR_ROLE_ID);
 
     // One login per account: the server rate-limits logins.
-    const carol = await token(server, "carol");
-    const bobToken = await token(server, "bob");
+    const carol = await signIn(server, "carol");
+    const bobToken = await signIn(server, "bob");
     const reportA = await reportUser(server, carol, id("dave"), "harassment");
-    const reportB = await reportUser(server, await token(server, "dave"), id("carol"), "spam");
+    const reportB = await reportUser(server, await signIn(server, "dave"), id("carol"), "spam");
     const reportAboutBob = await reportUser(server, carol, id("bob"), "other");
     const reportE = await reportUser(server, carol, id("alice"), "other");
     const reportByBob = await reportUser(server, bobToken, id("dave"), "spam");

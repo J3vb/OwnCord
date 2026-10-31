@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { makeDm } from "../helpers/dmHarness";
 
 const fetchImageAsObjectUrl = vi.hoisted(() => vi.fn());
 
@@ -158,20 +159,16 @@ describe("group icon — DM list row and menu", () => {
 describe("group icon — conversation builder", () => {
   it("carries the icon onto the row, and omits an empty one", () => {
     const user = { id: 2, username: "bob", avatar: "", status: "online", displayName: "" };
-    const dm = (icon: string | undefined): DmChannel => ({
-      channelId: 7,
-      recipient: user,
-      participants: [user],
-      name: "Crew",
-      isGroup: true,
-      ownerId: 1,
-      ...(icon !== undefined && { icon }),
-      lastMessageId: null,
-      lastMessage: "",
-      lastMessageAt: "",
-      unreadCount: 0,
-      mentionCount: 0,
-    });
+    const dm = (icon: string | undefined): DmChannel =>
+      makeDm({
+        channelId: 7,
+        recipient: user,
+        participants: [user],
+        name: "Crew",
+        isGroup: true,
+        ownerId: 1,
+        ...(icon !== undefined && { icon }),
+      });
     dmStore.setState(() => ({ channels: [dm("/api/v1/files/1")] }));
     expect(buildDmConversations(null)[0]?.icon).toBe("/api/v1/files/1");
     dmStore.setState(() => ({ channels: [dm("")] }));

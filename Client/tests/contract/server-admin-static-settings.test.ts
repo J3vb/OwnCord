@@ -188,6 +188,29 @@ async function render(
   return content;
 }
 
+interface OpenOptions {
+  calls?: FetchCall[];
+  overrides?: Record<string, { status?: number; json?: unknown }>;
+  as?: { perm: string; owner: boolean };
+  section?: string;
+}
+
+/** Boots the panel, signs in as `as`, and renders `page` into #content. */
+async function open(
+  page: "renderSettings" | "renderBackups" | "renderUpdates" | "renderPlugins",
+  options: OpenOptions = {},
+) {
+  const booted = await boot(options.calls ?? [], respondWith(options.overrides));
+  const { bridge } = booted;
+  if (options.as) {
+    bridge.state.me = { permissions: bridge.PERM[options.as.perm], is_owner: options.as.owner };
+  }
+  if (options.section) bridge.state.section = options.section;
+  const { window } = booted.dom;
+  const content = await render(bridge, window, bridge[page]);
+  return { booted, window, document: window.document, content };
+}
+
 describe("Server/admin/static — Settings page", () => {
   let dom: JSDOM | undefined;
 
@@ -197,9 +220,7 @@ describe("Server/admin/static — Settings page", () => {
   });
 
   it("groups the editable settings into sections and shows config.yaml values as read-only facts", async () => {
-    const booted = await boot([], respondWith());
-    dom = booted.dom;
-    const content = await render(booted.bridge, dom.window, booted.bridge.renderSettings);
+    const { content } = await open("renderSettings");
 
     const headings = [...content.querySelectorAll("section.section-card h3")].map(
       (h) => h.textContent,
@@ -253,9 +274,9 @@ describe("Server/admin/static — Settings page", () => {
         ([k]) => !["tls_domain", "voice_url", "backup_dir"].includes(k),
       ),
     );
-    const booted = await boot([], respondWith({ "GET /config": { json: managerFacts } }));
-    dom = booted.dom;
-    const content = await render(booted.bridge, dom.window, booted.bridge.renderSettings);
+    const { content } = await open("renderSettings", {
+      overrides: { "GET /config": { json: managerFacts } },
+    });
     const facts = content.querySelector(".fact-list")?.textContent ?? "";
     expect(facts).toContain("8443");
     expect(facts).toContain("acme");
@@ -301,10 +322,7 @@ describe("Server/admin/static — Settings page", () => {
   // into the same change tracking as every other field.
   it("edits registration through radio cards that drive the save bar", async () => {
     const calls: FetchCall[] = [];
-    const booted = await boot(calls, respondWith());
-    dom = booted.dom;
-    const { document } = dom.window;
-    await render(booted.bridge, dom.window, booted.bridge.renderSettings);
+    const { booted, window, document } = await open("renderSettings", { calls });
     const group = document.getElementById("s-registration_mode")!;
     expect(group.tagName).toBe("FIELDSET");
     expect(group.querySelector("legend")?.textContent).toBe("Who can join");
@@ -316,15 +334,15 @@ describe("Server/admin/static — Settings page", () => {
     const save = document.getElementById("saveSettingsBtn") as HTMLButtonElement;
     expect(save.disabled).toBe(true);
     radios[3]!.checked = true;
-    radios[3]!.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    radios[3]!.dispatchEvent(new window.Event("change", { bubbles: true }));
     expect(save.disabled).toBe(false);
     expect(booted.bridge.state.settingsChanged).toBe(true);
     radios[0]!.checked = true;
-    radios[0]!.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    radios[0]!.dispatchEvent(new window.Event("change", { bubbles: true }));
     expect(save.disabled).toBe(true);
 
     radios[3]!.checked = true;
-    radios[3]!.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    radios[3]!.dispatchEvent(new window.Event("change", { bubbles: true }));
     calls.length = 0;
     await booted.bridge.saveSettings();
     expect(calls.find((c) => c.path === "/settings" && c.method === "PATCH")?.body).toEqual({
@@ -333,16 +351,13 @@ describe("Server/admin/static — Settings page", () => {
   });
 
   it("shows the Members › Pending link only while Approval is the checked mode", async () => {
-    const booted = await boot([], respondWith());
-    dom = booted.dom;
-    const { document } = dom.window;
-    await render(booted.bridge, dom.window, booted.bridge.renderSettings);
+    const { booted, window, document } = await open("renderSettings");
     const group = document.getElementById("s-registration_mode")!;
     const hint = document.getElementById("s-registration_mode-desc")!;
     const pick = (value: string) => {
       const radio = group.querySelector<HTMLInputElement>(`input[value="${value}"]`)!;
       radio.checked = true;
-      radio.dispatchEvent(new dom!.window.Event("change", { bubbles: true }));
+      radio.dispatchEvent(new window.Event("change", { bubbles: true }));
     };
     expect(hint.hidden).toBe(true);
     expect(group.hasAttribute("aria-describedby")).toBe(false);
@@ -361,18 +376,16 @@ describe("Server/admin/static — Settings page", () => {
   });
 
   it("keeps the Members tab when leaving for Members › Pending is cancelled", async () => {
-    const booted = await boot([], respondWith());
-    dom = booted.dom;
-    const { document } = dom.window;
-    booted.bridge.state.me = { permissions: booted.bridge.PERM.ADMINISTRATOR, is_owner: true };
-    booted.bridge.state.section = "settings";
-    await render(booted.bridge, dom.window, booted.bridge.renderSettings);
+    const { booted, window, document } = await open("renderSettings", {
+      as: { perm: "ADMINISTRATOR", owner: true },
+      section: "settings",
+    });
     const approval = document.querySelector<HTMLInputElement>(
       '#s-registration_mode input[value="approval"]',
     )!;
     approval.checked = true;
-    approval.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
-    dom.window.confirm = () => false;
+    approval.dispatchEvent(new window.Event("change", { bubbles: true }));
+    window.confirm = () => false;
 
     document.querySelector<HTMLButtonElement>("#s-registration_mode-desc button")!.click();
     expect(booted.bridge.state.section).toBe("settings");
@@ -380,10 +393,7 @@ describe("Server/admin/static — Settings page", () => {
   });
 
   it("drives the save bar from the actual difference, so reverting an edit clears it", async () => {
-    const booted = await boot([], respondWith());
-    dom = booted.dom;
-    const { document } = dom.window;
-    await render(booted.bridge, dom.window, booted.bridge.renderSettings);
+    const { booted, document } = await open("renderSettings");
     const motd = document.getElementById("s-motd") as HTMLInputElement;
     const save = document.getElementById("saveSettingsBtn") as HTMLButtonElement;
     const discard = document.getElementById("discardSettingsBtn") as HTMLButtonElement;
@@ -408,15 +418,12 @@ describe("Server/admin/static — Settings page", () => {
   });
 
   it("discards an unsaved edit when the page is rendered again, showing server values and a clean save bar", async () => {
-    const booted = await boot([], respondWith());
-    dom = booted.dom;
-    const { document } = dom.window;
-    await render(booted.bridge, dom.window, booted.bridge.renderSettings);
+    const { booted, window, document } = await open("renderSettings");
     (document.getElementById("s-motd") as HTMLInputElement).value = "Draft MOTD";
     booted.bridge.markSettingsChanged();
     expect(booted.bridge.state.settingsChanged).toBe(true);
 
-    await render(booted.bridge, dom.window, booted.bridge.renderSettings);
+    await render(booted.bridge, window, booted.bridge.renderSettings);
     expect((document.getElementById("s-motd") as HTMLInputElement).value).toBe(
       LOADED_SETTINGS.motd,
     );
@@ -430,17 +437,15 @@ describe("Server/admin/static — Settings page", () => {
   });
 
   it("clears the unsaved state when the operator leaves Settings, so the nav dot does not linger", async () => {
-    const booted = await boot([], respondWith());
-    dom = booted.dom;
-    const { document } = dom.window;
-    booted.bridge.state.me = { permissions: booted.bridge.PERM.ADMINISTRATOR, is_owner: true };
-    booted.bridge.state.section = "settings";
-    await render(booted.bridge, dom.window, booted.bridge.renderSettings);
+    const { booted, window, document } = await open("renderSettings", {
+      as: { perm: "ADMINISTRATOR", owner: true },
+      section: "settings",
+    });
     (document.getElementById("s-motd") as HTMLInputElement).value = "Draft MOTD";
     booted.bridge.markSettingsChanged();
     expect(booted.bridge.state.settingsChanged).toBe(true);
     const asked: string[] = [];
-    dom.window.confirm = (message?: string) => {
+    window.confirm = (message?: string) => {
       asked.push(String(message ?? ""));
       return true;
     };
@@ -917,11 +922,10 @@ describe("Server/admin/static — upload file types", () => {
 
   it("shows config.yaml's lists and saves only the list the owner changed, normalized", async () => {
     const calls: FetchCall[] = [];
-    const booted = await boot(calls, respondWith());
-    dom = booted.dom;
-    const { document } = dom.window;
-    booted.bridge.state.me = { permissions: booted.bridge.PERM.ADMINISTRATOR, is_owner: true };
-    await render(booted.bridge, dom.window, booted.bridge.renderSettings);
+    const { booted, window, document } = await open("renderSettings", {
+      calls,
+      as: { perm: "ADMINISTRATOR", owner: true },
+    });
 
     const blocked = field(document, "upload_blocked_extensions");
     const allowed = field(document, "upload_allowed_extensions");
@@ -933,11 +937,11 @@ describe("Server/admin/static — upload file types", () => {
 
     // The same list, spelled differently, is not a change.
     blocked.value = ".BAT ps1";
-    blocked.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    blocked.dispatchEvent(new window.Event("input", { bubbles: true }));
     expect(save.disabled).toBe(true);
 
     allowed.value = ".PNG, jpg jpg";
-    allowed.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    allowed.dispatchEvent(new window.Event("input", { bubbles: true }));
     expect(save.disabled).toBe(false);
     calls.length = 0;
     await booted.bridge.saveSettings();
@@ -987,11 +991,9 @@ describe("Server/admin/static — upload file types", () => {
   });
 
   it("is read-only for anyone but the owner", async () => {
-    const booted = await boot([], respondWith());
-    dom = booted.dom;
-    const { document } = dom.window;
-    booted.bridge.state.me = { permissions: booted.bridge.PERM.ADMINISTRATOR, is_owner: false };
-    const content = await render(booted.bridge, dom.window, booted.bridge.renderSettings);
+    const { document, content } = await open("renderSettings", {
+      as: { perm: "ADMINISTRATOR", owner: false },
+    });
     for (const key of ["upload_blocked_extensions", "upload_allowed_extensions"]) {
       expect(field(document, key).disabled).toBe(true);
     }
@@ -1013,11 +1015,10 @@ describe("Server/admin/static — voice_owner_movable switch", () => {
 
   it("is on when the setting is unset, and saves only the flip, as a string", async () => {
     const calls: FetchCall[] = [];
-    const booted = await boot(calls, respondWith());
-    dom = booted.dom;
-    const { document } = dom.window;
-    booted.bridge.state.me = { permissions: booted.bridge.PERM.ADMINISTRATOR, is_owner: true };
-    await render(booted.bridge, dom.window, booted.bridge.renderSettings);
+    const { booted, document } = await open("renderSettings", {
+      calls,
+      as: { perm: "ADMINISTRATOR", owner: true },
+    });
 
     const sw = toggle(document)!;
     expect(sw.getAttribute("role")).toBe("switch");
@@ -1051,11 +1052,10 @@ describe("Server/admin/static — voice_owner_movable switch", () => {
   });
 
   it("is not shown to anyone but the owner", async () => {
-    const booted = await boot([], respondWith());
-    dom = booted.dom;
-    booted.bridge.state.me = { permissions: booted.bridge.PERM.ADMINISTRATOR, is_owner: false };
-    await render(booted.bridge, dom.window, booted.bridge.renderSettings);
-    expect(toggle(dom.window.document)).toBeNull();
+    const { window } = await open("renderSettings", {
+      as: { perm: "ADMINISTRATOR", owner: false },
+    });
+    expect(toggle(window.document)).toBeNull();
   });
 });
 
@@ -1073,11 +1073,10 @@ describe("Server/admin/static — game_activity_enabled switch", () => {
 
   it("is on when the setting is unset, shown to a non-owner, and saves only the flip", async () => {
     const calls: FetchCall[] = [];
-    const booted = await boot(calls, respondWith());
-    dom = booted.dom;
-    const { document } = dom.window;
-    booted.bridge.state.me = { permissions: booted.bridge.PERM.MANAGE_SERVER, is_owner: false };
-    await render(booted.bridge, dom.window, booted.bridge.renderSettings);
+    const { booted, document } = await open("renderSettings", {
+      calls,
+      as: { perm: "MANAGE_SERVER", owner: false },
+    });
 
     const sw = toggle(document)!;
     expect(sw.getAttribute("role")).toBe("switch");

@@ -4,11 +4,7 @@
  */
 import type { Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
-import {
-  mockTauriFullSession,
-  mockTauriFullSessionWithAutoConnect,
-  navigateToMainPage,
-} from "./helpers";
+import { mockTauriFullSessionWithAutoConnect, startFullSession } from "./helpers";
 
 /** Log Out asks first; answer the prompt. */
 async function confirmLogout(page: Page): Promise<void> {
@@ -19,9 +15,7 @@ async function confirmLogout(page: Page): Promise<void> {
 
 test.describe("Logout Flow", () => {
   test.beforeEach(async ({ page }) => {
-    await mockTauriFullSession(page);
-    await page.goto("/");
-    await navigateToMainPage(page);
+    await startFullSession(page);
   });
 
   test("clicking Log Out in settings returns to connect page", async ({ page }) => {

@@ -9,11 +9,7 @@
 // preview must never write an override.
 import { describe, it, expect, afterEach } from "vitest";
 import { JSDOM } from "jsdom";
-import {
-  adminHtmlWithBridge,
-  loadAdminPanel as loadPanel,
-  type FetchCall,
-} from "../helpers/adminPanelFetch";
+import { adminHtmlWithBridge, bootAdminPanel, type FetchCall } from "../helpers/adminPanelFetch";
 
 // Classic-script bindings never land on `window`; bridge the ones driven here.
 const BRIDGE = `<script>
@@ -40,10 +36,9 @@ async function openModal(
   calls: FetchCall[],
   respond: (p: string) => unknown,
 ): Promise<{ dom: JSDOM; bridge: Bridge }> {
-  const dom = loadPanel(ADMIN_HTML, calls, (p) => ({ json: respond(p) }));
-  await new Promise((resolve) => dom.window.setTimeout(resolve, 0));
-  calls.length = 0;
-  const bridge = (dom.window as unknown as { __test: Bridge }).__test;
+  const { dom, bridge } = await bootAdminPanel<Bridge>(ADMIN_HTML, calls, (p) => ({
+    json: respond(p),
+  }));
   bridge.state.permChannel = {
     id: 42,
     name: "general",

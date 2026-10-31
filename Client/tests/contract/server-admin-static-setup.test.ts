@@ -11,6 +11,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { JSDOM } from "jsdom";
 import { adminPanelHtml } from "../helpers/admin-panel";
+import { loadPanelWithFetch, scriptedPanelFetch } from "../helpers/adminPanelFetch";
 import { expectConsole } from "../helpers/console";
 
 const ADMIN_HTML = adminPanelHtml();
@@ -40,33 +41,19 @@ async function boot(
   defaults: Record<string, unknown> = DEFAULTS,
 ): Promise<{ dom: JSDOM; doc: Document; calls: Call[] }> {
   const calls: Call[] = [];
-  const dom = new JSDOM(ADMIN_HTML, {
-    url: "http://localhost:8080/admin",
-    runScripts: "dangerously",
-    pretendToBeVisual: true,
-    beforeParse(window) {
-      window.fetch = (async (input: string, opts: Record<string, unknown> = {}) => {
-        const method = String((opts.method as string) || "GET").toUpperCase();
-        const p = String(input).replace(/^\/admin\/api/, "");
-        calls.push({
-          method,
-          path: p,
-          body: typeof opts.body === "string" ? JSON.parse(opts.body) : undefined,
-        });
-        let r: SetupReply = { json: {} };
-        if (p === "/setup/status") r = { json: { needs_setup: true, defaults } };
-        else if (p === "/setup") r = setupReply;
-        else if (p === "/api/v1/auth/login")
-          r = { status: 401, json: { message: "invalid credentials" } };
-        const status = r.status ?? 200;
-        return {
-          ok: status >= 200 && status < 300,
-          status,
-          json: async () => r.json,
-        } as Response;
-      }) as typeof fetch;
-    },
-  });
+  const dom = loadPanelWithFetch(
+    ADMIN_HTML,
+    scriptedPanelFetch(
+      ({ method, path, body }) => calls.push({ method, path, body }),
+      (p) => {
+        if (p === "/setup/status") return { json: { needs_setup: true, defaults } };
+        if (p === "/setup") return setupReply;
+        if (p === "/api/v1/auth/login")
+          return { status: 401, json: { message: "invalid credentials" } };
+        return { json: {} };
+      },
+    ),
+  );
   await settle(dom);
   return { dom, doc: dom.window.document, calls };
 }

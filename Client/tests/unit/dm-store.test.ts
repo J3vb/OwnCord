@@ -728,24 +728,17 @@ describe("addDmToChannelsStore", () => {
         lastReadMessageId: 10,
       }),
     );
-    expect(channelsStore.getState().channels.get(5)).toStrictEqual({
-      id: 5,
-      name: "alice",
-      type: "dm",
-      category: null,
-      position: 0,
-      unreadCount: 3,
-      mentionCount: 1,
-      lastMessageId: 11,
-      lastReadMessageId: 10,
-      canSend: true,
-      slowMode: 0,
-      topic: "",
-      nsfw: false,
-      isPrivate: false,
-      voiceMaxUsers: 0,
-      voiceMaxVideo: 0,
-    });
+    expect(channelsStore.getState().channels.get(5)).toStrictEqual(
+      makeChannel({
+        id: 5,
+        name: "alice",
+        type: "dm",
+        unreadCount: 3,
+        mentionCount: 1,
+        lastMessageId: 11,
+        lastReadMessageId: 10,
+      }),
+    );
   });
 
   it("leaves an up-to-date mirror row alone", () => {

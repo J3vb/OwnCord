@@ -9,6 +9,7 @@ import {
   MEMBER_OPEN_PREF,
   MEMBER_WIDTH_PREF,
 } from "../../src/features/members/memberLayout";
+import { guarded, settle } from "../helpers/backNav";
 
 /** A controllable `(max-width: 899px)` media query: jsdom has no matchMedia. */
 class FakeMediaQueryList extends EventTarget {
@@ -570,14 +571,6 @@ describe("MemberColumn", () => {
     });
 
     describe("openOverlay and Back", () => {
-      const guarded = (): boolean => {
-        const state: unknown = history.state;
-        return typeof state === "object" && state !== null && "owncordBack" in state;
-      };
-      const settle = async (): Promise<void> => {
-        for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 0));
-      };
-
       afterEach(async () => {
         ctrl?.destroy();
         await settle();

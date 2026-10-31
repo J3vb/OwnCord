@@ -4,6 +4,7 @@
  * attachment's own index, and a store deletion closes the open viewer.
  */
 import { describe, expect, it, vi } from "vitest";
+import { loggerMock } from "../helpers/loggerMock";
 
 const { fetchMock } = vi.hoisted(() => ({ fetchMock: vi.fn() }));
 
@@ -12,9 +13,7 @@ vi.mock("@lib/net/httpProxy", () => ({
   ensureHttpProxy: () => Promise.resolve("http://127.0.0.1:9999"),
   stopHttpProxy: () => Promise.resolve(),
 }));
-vi.mock("@lib/logger", () => ({
-  createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
-}));
+vi.mock("@lib/logger", () => loggerMock());
 vi.mock("@lib/icons", () => ({ createIcon: () => document.createElement("span") }));
 vi.mock("@lib/prefs/mediaVisibility", () => ({ observeMedia: vi.fn() }));
 

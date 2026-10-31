@@ -19,6 +19,7 @@ import {
   vi,
   type MockedObject,
 } from "vitest";
+import { makeDm } from "../helpers/dmHarness";
 import * as mainMocks from "../helpers/mainMocks";
 import * as wsMocks from "./helpers/ws-mocks";
 
@@ -322,18 +323,14 @@ async function loginWithPassword(host: string, userId: number, ready: object = {
   await completeHandshake(userId, host, ready);
 }
 
-const dmChannelRow = (channelId: number): DmChannel => ({
-  channelId,
-  recipient: { id: 7, username: "alex", avatar: "", status: "online" },
-  participants: [],
-  name: "",
-  isGroup: false,
-  lastMessageId: null,
-  lastMessage: "hi",
-  lastMessageAt: "",
-  unreadCount: 3,
-  mentionCount: 1,
-});
+const dmChannelRow = (channelId: number): DmChannel =>
+  makeDm({
+    channelId,
+    recipient: { id: 7, username: "alex", avatar: "", status: "online" },
+    lastMessage: "hi",
+    unreadCount: 3,
+    mentionCount: 1,
+  });
 const memberOf = (id: number): object => ({
   id,
   username: `user${id}`,

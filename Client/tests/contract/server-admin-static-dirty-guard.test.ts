@@ -13,11 +13,7 @@
 // ARCH-10 stage 4 (#section history) owns, so the two do not collide.
 import { describe, it, expect, afterEach } from "vitest";
 import { JSDOM } from "jsdom";
-import {
-  adminHtmlWithBridge,
-  loadAdminPanel as loadPanel,
-  type FetchCall,
-} from "../helpers/adminPanelFetch";
+import { adminHtmlWithBridge, bootAdminPanel, type FetchCall } from "../helpers/adminPanelFetch";
 
 // Classic-script bindings never land on `window`; bridge the ones driven here.
 const BRIDGE = `<script>
@@ -49,12 +45,9 @@ async function boot(
   calls: FetchCall[] = [],
   respond: (p: string) => unknown = () => ({}),
 ): Promise<{ dom: JSDOM; bridge: Bridge; doc: Document; modalVisible: () => boolean }> {
-  const dom = loadPanel(ADMIN_HTML, calls, (p) => ({ json: respond(p) }));
-  await new Promise((resolve) => dom.window.setTimeout(resolve, 0));
-  calls.length = 0;
-  const bridge = (dom.window as unknown as { __test: Bridge }).__test;
-  expect(bridge).toBeTruthy();
-  const doc = dom.window.document;
+  const { dom, bridge, doc } = await bootAdminPanel<Bridge>(ADMIN_HTML, calls, (p) => ({
+    json: respond(p),
+  }));
   return {
     dom,
     bridge,

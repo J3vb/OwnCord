@@ -9,6 +9,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { makeDm } from "../helpers/dmHarness";
 import * as voiceSession from "../helpers/voiceSessionMock";
 
 vi.mock("@lib/voice/livekitSession", () => voiceSession.defaults());
@@ -589,18 +590,11 @@ describe("permalink chips in message content", () => {
 
   it("labels a DM permalink chip with '@', not '#' (F15)", () => {
     setDmChannels([
-      {
+      makeDm({
         channelId: 50,
         recipient: { id: 10, username: "bob", avatar: "", status: "online" },
         participants: [{ id: 10, username: "bob", avatar: "", status: "online" }],
-        name: "",
-        isGroup: false,
-        lastMessageId: null,
-        lastMessage: "",
-        lastMessageAt: "",
-        unreadCount: 0,
-        mentionCount: 0,
-      },
+      }),
     ]);
     container.appendChild(renderMentionSegment("owncord://message/50/99"));
 

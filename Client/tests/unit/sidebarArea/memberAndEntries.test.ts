@@ -34,6 +34,7 @@ import {
   lastCallArg,
   makeChannel,
   seedChannels,
+  useSidebarAreaHarness,
 } from "../../helpers/sidebarAreaHarness";
 
 vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
@@ -62,17 +63,8 @@ const { mockOpenUrl } = mocks;
 describe("SidebarArea", () => {
   let container: HTMLDivElement;
 
-  beforeEach(() => {
-    resetStores();
-    resetMocks();
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    container.remove();
-    // Clean up any modals left on body
-    document.querySelectorAll(".modal-overlay").forEach((el) => el.remove());
+  useSidebarAreaHarness((c) => {
+    container = c;
   });
 
   const mountWithStartCall = () => {

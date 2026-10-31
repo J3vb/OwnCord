@@ -1,11 +1,9 @@
 import { test, expect } from "./fixtures";
 import {
   buildTauriMockScript,
-  mockTauriFullSession,
-  navigateToMainPage,
-  submitLogin,
-  waitForWsReady,
   BASE_SESSION_ROUTES,
+  navigateToMainPageReady,
+  startFullSession,
 } from "./helpers";
 
 // ---------------------------------------------------------------------------
@@ -14,9 +12,7 @@ import {
 
 test.describe("Main Page Layout", () => {
   test.beforeEach(async ({ page }) => {
-    await mockTauriFullSession(page);
-    await page.goto("/");
-    await navigateToMainPage(page);
+    await startFullSession(page);
   });
 
   test("app layout has all major sections", async ({ page }) => {
@@ -130,9 +126,7 @@ async function signInFreshProfile(
     }, stored);
   }
   await page.goto("/");
-  await submitLogin(page);
-  await expect(page.locator("[data-testid='app-layout']")).toBeVisible({ timeout: 15_000 });
-  await waitForWsReady(page);
+  await navigateToMainPageReady(page);
 }
 
 /**

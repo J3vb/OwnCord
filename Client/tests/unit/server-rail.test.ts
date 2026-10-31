@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { makeDm } from "../helpers/dmHarness";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createServerRail } from "@components/ServerRail";
 import { setSidebarMode, uiStore } from "@stores/ui.store";
@@ -60,18 +61,7 @@ async function mountRail(o: Opts = {}) {
 
 function dm(channelId: number, unreadCount: number): DmChannel {
   const user = { id: channelId, username: `u${channelId}`, avatar: "", status: "online" as const };
-  return {
-    channelId,
-    recipient: user,
-    participants: [user],
-    name: "",
-    isGroup: false,
-    lastMessageId: null,
-    lastMessage: "",
-    lastMessageAt: "",
-    unreadCount,
-    mentionCount: 0,
-  };
+  return makeDm({ channelId, recipient: user, participants: [user], unreadCount });
 }
 
 const servers = () =>

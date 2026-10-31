@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { loggerMock } from "../helpers/loggerMock";
 
 // P4-01 R3: a revisit keeps the older history the reader had loaded. The
 // revisit pages backwards from the newest message (100-row server pages) until
@@ -6,9 +7,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 // revalidated: an edit made while away shows, a delete made while away is
 // gone, and the older rows need no rebuild.
 
-vi.mock("@lib/logger", () => ({
-  createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
-}));
+vi.mock("@lib/logger", () => loggerMock());
 
 import { createMessageController } from "../../src/pages/main-page/MessageController";
 import type { MessageControllerOptions } from "../../src/pages/main-page/MessageController";

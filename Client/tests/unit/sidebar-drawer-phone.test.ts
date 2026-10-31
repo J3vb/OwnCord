@@ -4,6 +4,7 @@ import type { SidebarDrawer } from "../../src/pages/main-page/SidebarDrawer";
 import { setActiveChannel } from "@stores/channels.store";
 import { closeSettings } from "@stores/ui.store";
 import { closeBottomSheet, openBottomSheet } from "@lib/ui/bottomSheet";
+import { guarded, pressBack, settle } from "../helpers/backNav";
 
 const ANDROID_UA = "Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 Chrome/140.0";
 
@@ -17,18 +18,6 @@ class FakeMediaQueryList extends EventTarget {
 
 let narrow: FakeMediaQueryList;
 let phone: { matches: boolean };
-
-async function settle(): Promise<void> {
-  for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 0));
-}
-async function pressBack(): Promise<void> {
-  history.back();
-  await settle();
-}
-const guarded = (): boolean => {
-  const state: unknown = history.state;
-  return typeof state === "object" && state !== null && "owncordBack" in state;
-};
 
 function setAndroid(on: boolean): void {
   if (on) {

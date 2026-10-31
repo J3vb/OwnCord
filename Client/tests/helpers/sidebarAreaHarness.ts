@@ -1,4 +1,4 @@
-import { vi } from "vitest";
+import { afterEach, beforeEach, vi } from "vitest";
 import { createSidebarArea, type SidebarAreaOptions } from "../../src/pages/main-page/SidebarArea";
 import { dmStore, addDmChannel } from "../../src/stores/dm.store";
 import { membersStore, type Member } from "../../src/stores/members.store";
@@ -118,6 +118,28 @@ export function makeDm(overrides: Partial<DmChannel> = {}): DmChannel {
 }
 
 export const defaultOpts = defaultSidebarAreaOpts;
+
+/**
+ * Registers the per-test setup shared by the SidebarArea suites: reset stores
+ * and mocks, hand `bind` a fresh container, and drop it and any modal
+ * overlays afterwards.
+ */
+export function useSidebarAreaHarness(bind: (container: HTMLDivElement) => void): void {
+  let container: HTMLDivElement;
+
+  beforeEach(() => {
+    resetStores();
+    resetMocks();
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    bind(container);
+  });
+
+  afterEach(() => {
+    container.remove();
+    document.querySelectorAll(".modal-overlay").forEach((el) => el.remove());
+  });
+}
 
 /** Helper to clean up a SidebarAreaResult */
 export function cleanup(result: ReturnType<typeof createSidebarArea>): void {

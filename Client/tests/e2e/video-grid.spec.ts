@@ -15,6 +15,7 @@
 import type { Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
 import { mockTauriFullSessionWithVoice, emitWsMessage, navigateToMainPageReady } from "./helpers";
+import { waitForSent } from "./support/invokeLog";
 
 const VOICE_CHANNEL_ID = 10;
 /** MOCK_MEMBERS_MULTI_ROLE ids: 2 moderator1, 3 member1, 4 member2. */
@@ -51,33 +52,6 @@ function voiceState(userId: number, flags: { camera?: boolean; screenshare?: boo
       screenshare: flags.screenshare ?? false,
     },
   };
-}
-
-/** The app records every IPC invoke; the outgoing WS frames are the `ws_send`s. */
-async function sentFrames(
-  page: Page,
-): Promise<Array<{ type: string; payload?: Record<string, unknown> }>> {
-  return page.evaluate(() => {
-    const log = (
-      window as unknown as { __invokeLog: Array<{ cmd: string; args?: { message?: string } }> }
-    ).__invokeLog;
-    const frames: Array<{ type: string; payload?: Record<string, unknown> }> = [];
-    for (const entry of log) {
-      if (entry.cmd !== "ws_send") continue;
-      try {
-        frames.push(JSON.parse(entry.args?.message ?? "{}"));
-      } catch {
-        // Not a JSON client frame; skip.
-      }
-    }
-    return frames;
-  });
-}
-
-async function waitForSent(page: Page, type: string): Promise<void> {
-  await expect
-    .poll(async () => (await sentFrames(page)).some((f) => f.type === type), { timeout: 5_000 })
-    .toBe(true);
 }
 
 test.describe("video grid — chat/grid toggle", () => {

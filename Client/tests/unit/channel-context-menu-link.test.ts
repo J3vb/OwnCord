@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { makeChannel } from "../helpers/channelFactory";
 import { attachChannelContextMenu } from "@components/channel-sidebar/contextMenu";
 import { authStore } from "@stores/auth.store";
 import { channelsStore, type Channel } from "@stores/channels.store";
@@ -7,23 +8,7 @@ import { setChannelMutesHost } from "@lib/prefs/channelMutes";
 import { parseChannelLink } from "@lib/nav/deepLink";
 import { setDeveloperMode } from "../helpers/message-actions-fixtures";
 
-const channel: Channel = {
-  id: 42,
-  name: "general",
-  type: "text",
-  category: null,
-  position: 0,
-  unreadCount: 0,
-  mentionCount: 0,
-  lastMessageId: null,
-  canSend: true,
-  slowMode: 0,
-  topic: "",
-  nsfw: false,
-  isPrivate: false,
-  voiceMaxUsers: 0,
-  voiceMaxVideo: 0,
-};
+const channel: Channel = makeChannel({ id: 42 });
 
 let container: HTMLDivElement;
 let ac: AbortController;

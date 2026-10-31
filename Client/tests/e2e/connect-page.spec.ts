@@ -5,6 +5,7 @@ import {
   mockTauriLoginError,
   mockTauriFullSession,
   submitLogin,
+  delayHttpResponses,
 } from "./helpers";
 
 // ---------------------------------------------------------------------------
@@ -109,30 +110,7 @@ test.describe("Connect Page", () => {
   test("form shows loading state on submit", async ({ page }) => {
     // Hold the login HTTP response open so the in-flight loading state is
     // observable rather than a race against an instantly-resolving mock.
-    await page.addInitScript(() => {
-      const t = (
-        window as unknown as {
-          __TAURI_INTERNALS__: { invoke: (c: string, a?: unknown) => Promise<unknown> };
-        }
-      ).__TAURI_INTERNALS__;
-      const orig = t.invoke.bind(t);
-      const urls = new Map<number, string>();
-      t.invoke = async (cmd: string, args?: unknown) => {
-        if (cmd === "plugin:http|fetch") {
-          const a = args as { rid?: number; clientConfig?: { url?: string } };
-          const rid = (await orig(cmd, args)) as number;
-          urls.set(rid, a.clientConfig?.url ?? "");
-          return rid;
-        }
-        if (cmd === "plugin:http|fetch_send") {
-          const rid = (args as { rid?: number }).rid ?? -1;
-          if (urls.get(rid)?.includes("/api/v1/auth/login")) {
-            await new Promise((r) => setTimeout(r, 800));
-          }
-        }
-        return orig(cmd, args);
-      };
-    });
+    await delayHttpResponses(page, "/api/v1/auth/login");
     // Re-navigate so the wrapper (registered after beforeEach's goto) is live.
     await page.goto("/");
 
@@ -217,10 +195,7 @@ test.describe("Connect Page — TOTP", () => {
     const totpOverlay = page.locator(".totp-overlay");
     await expect(totpOverlay).toHaveClass(/totp-overlay--hidden/);
 
-    await page.locator("#host").fill("localhost:8443");
-    await page.locator("#username").fill("testuser");
-    await page.locator("#password").fill("password123");
-    await page.locator("button.btn-primary[type='submit']").click();
+    await submitLogin(page);
 
     await expect(totpOverlay).not.toHaveClass(/totp-overlay--hidden/, {
       timeout: 10_000,
@@ -237,10 +212,7 @@ test.describe("Connect Page — TOTP", () => {
     await mockTauriConnectWith2FA(page);
     await page.goto("/");
 
-    await page.locator("#host").fill("localhost:8443");
-    await page.locator("#username").fill("testuser");
-    await page.locator("#password").fill("password123");
-    await page.locator("button.btn-primary[type='submit']").click();
+    await submitLogin(page);
 
     const totpOverlay = page.locator(".totp-overlay");
     await expect(totpOverlay).not.toHaveClass(/totp-overlay--hidden/, {
@@ -257,10 +229,7 @@ test.describe("Connect Page — TOTP", () => {
     await mockTauriConnectWith2FA(page);
     await page.goto("/");
 
-    await page.locator("#host").fill("localhost:8443");
-    await page.locator("#username").fill("testuser");
-    await page.locator("#password").fill("password123");
-    await page.locator("button.btn-primary[type='submit']").click();
+    await submitLogin(page);
 
     const totpOverlay = page.locator(".totp-overlay");
     await expect(totpOverlay).not.toHaveClass(/totp-overlay--hidden/, {

@@ -3,6 +3,8 @@
 // client mirror and the two behaviours the inputs promise: an over-limit value
 // is never sent, and a server refusal shows inline with the typed value kept.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import * as mocks from "../helpers/connectPageMocks";
+import { useMountContainer } from "../helpers/mountContainer";
 import { ApiClientError } from "../../src/lib/api";
 import {
   attachLimitHint,
@@ -15,19 +17,16 @@ import {
 import { createPromptModal } from "../../src/lib/ui/modalFactory";
 import { createStatusPicker, type StatusPickerComponent } from "@components/StatusPicker";
 import { createConnectPage } from "../../src/pages/ConnectPage";
-import type { ConnectPageCallbacks, SimpleProfile } from "../../src/pages/ConnectPage";
+import { makeCallbacks, testProfiles as profiles } from "../helpers/connectPageHarness";
+import type { ConnectPageCallbacks } from "../../src/pages/ConnectPage";
 import { createMemberPickerModal } from "../../src/pages/main-page/MemberPickerModal";
 import { membersStore } from "@stores/members.store";
 import { authStore } from "@stores/auth.store";
 
 const mockToast = vi.hoisted(() => vi.fn());
 vi.mock("../../src/lib/ui/toast", () => ({ showToast: mockToast }));
-vi.mock("../../src/lib/net/credentials", () => ({
-  loadCredential: vi.fn().mockResolvedValue(null),
-}));
-vi.mock("../../src/features/settings/SettingsOverlay", () => ({
-  createSettingsOverlay: () => ({ mount: vi.fn(), destroy: vi.fn() }),
-}));
+vi.mock("../../src/lib/net/credentials", () => mocks.netCredentialsMock());
+vi.mock("../../src/features/settings/SettingsOverlay", () => mocks.settingsOverlayMock());
 
 describe("checkNewUsername mirrors auth.ValidateNewUsername", () => {
   const ok = [
@@ -155,24 +154,11 @@ describe("attachLimitHint", () => {
 // Register form
 // ---------------------------------------------------------------------------
 
-function makeCallbacks(overrides: Partial<ConnectPageCallbacks> = {}): ConnectPageCallbacks {
-  return {
-    onLogin: vi.fn().mockResolvedValue(undefined),
-    onLoginWithSavedPassword: vi.fn().mockResolvedValue(undefined),
-    onRegister: vi.fn().mockResolvedValue(undefined),
-    onTotpSubmit: vi.fn().mockResolvedValue(undefined),
-    ...overrides,
-  };
-}
-const profiles: SimpleProfile[] = [{ name: "Test Server", host: "localhost:8443" }];
-
 describe("register form username", () => {
   let container: HTMLDivElement;
-  beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
+  useMountContainer((mounted) => {
+    container = mounted;
   });
-  afterEach(() => container.remove());
 
   function openRegister(callbacks: ConnectPageCallbacks) {
     const page = createConnectPage(callbacks, profiles);
