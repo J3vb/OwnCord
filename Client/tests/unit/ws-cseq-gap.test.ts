@@ -1,27 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-// vi.mock is hoisted per file; the factories resolve to the shared handles
-// exported from ./helpers/ws-mocks (see that module's doc comment).
-vi.mock("@tauri-apps/api/core", async () => ({
-  invoke: (await import("./helpers/ws-mocks")).mockInvoke,
-}));
+import * as wsMocks from "./helpers/ws-mocks";
 
-vi.mock("@tauri-apps/api/event", async () => ({
-  listen: (await import("./helpers/ws-mocks")).mockListen,
-}));
+vi.mock("@tauri-apps/api/core", () => wsMocks.tauriCoreMock());
+vi.mock("@tauri-apps/api/event", () => wsMocks.tauriEventMock());
 
 import { mockInvoke, mockListen, eventHandlers, emitTauriEvent } from "./helpers/ws-mocks";
-import { createWsClient, type ConnectionState, type WsClientConfig } from "../../src/lib/ws";
+import { createWsClient, type WsClientConfig } from "../../src/lib/ws";
 import { expectConsole } from "../helpers/console";
-
-const AUTH_OK = JSON.stringify({
-  type: "auth_ok",
-  payload: {
-    user: { id: 1, username: "a", avatar: null, role: "admin" },
-    server_name: "S",
-    motd: "",
-  },
-});
+import { emitAuthOk, trackStates } from "../helpers/wsSuiteHarness";
 
 function frame(seq: number, cseq?: number, extra = ""): string {
   const head = cseq === undefined ? "" : `"cseq":${cseq},`;
@@ -71,14 +58,13 @@ describe("cseq gap detection", () => {
     client.connect(cfg);
     await vi.advanceTimersByTimeAsync(10);
     emitTauriEvent("ws-state", "open");
-    emitTauriEvent("ws-message", AUTH_OK);
+    emitAuthOk();
   }
 
   it("resumes exactly once when cseq goes 1, 2, 4", async () => {
     await connectAndAuth();
     mockInvoke.mockClear();
-    const states: ConnectionState[] = [];
-    client.onStateChange((s) => states.push(s));
+    const states = trackStates(client);
 
     emitTauriEvent("ws-message", frame(10, 1));
     emitTauriEvent("ws-message", frame(11, 2));
@@ -159,7 +145,7 @@ describe("cseq gap detection", () => {
     emitTauriEvent("ws-state", "closed");
     await vi.advanceTimersByTimeAsync(2_000);
     emitTauriEvent("ws-state", "open");
-    emitTauriEvent("ws-message", AUTH_OK);
+    emitAuthOk();
     mockInvoke.mockClear();
 
     emitTauriEvent("ws-message", frame(12, 1));
@@ -201,7 +187,7 @@ describe("cseq gap detection", () => {
     emitTauriEvent("ws-message", frame(12, 3));
     await vi.advanceTimersByTimeAsync(1_010);
     emitTauriEvent("ws-state", "open");
-    emitTauriEvent("ws-message", AUTH_OK);
+    emitAuthOk();
     mockInvoke.mockClear();
 
     emitTauriEvent("ws-message", frame(13, 1));
@@ -222,7 +208,7 @@ describe("cseq gap detection", () => {
         waited += 500;
       }
       emitTauriEvent("ws-state", "open");
-      emitTauriEvent("ws-message", AUTH_OK);
+      emitAuthOk();
       return waited;
     };
     expect(await gapThenResume()).toBe(1_000);

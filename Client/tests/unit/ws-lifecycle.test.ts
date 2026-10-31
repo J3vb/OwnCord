@@ -1,21 +1,27 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { ConnectionState } from "../../src/lib/ws";
 
-// vi.mock is hoisted per file; the factories resolve to the shared handles
-// exported from ./helpers/ws-mocks (see that module's doc comment).
-vi.mock("@tauri-apps/api/core", async () => ({
-  invoke: (await import("./helpers/ws-mocks")).mockInvoke,
-}));
+import * as wsMocks from "./helpers/ws-mocks";
 
-vi.mock("@tauri-apps/api/event", async () => ({
-  listen: (await import("./helpers/ws-mocks")).mockListen,
-}));
+vi.mock("@tauri-apps/api/core", () => wsMocks.tauriCoreMock());
+vi.mock("@tauri-apps/api/event", () => wsMocks.tauriEventMock());
 
 import { mockInvoke, mockListen, eventHandlers, emitTauriEvent } from "./helpers/ws-mocks";
 import { createWsClient, bracketBareIPv6Host } from "../../src/lib/ws";
 import { addLogListener, type LogEntry } from "../../src/lib/logger";
 import { expectConsole } from "../helpers/console";
 import { useWsClientFixture } from "../helpers/wsClientFixture";
+import {
+  openSocket,
+  authOkFrame,
+  emitAuthOk,
+  emitChat,
+  wsConnectCalls,
+  collect,
+  sentFramesOfType,
+  sendChat,
+  trackStates,
+} from "../helpers/wsSuiteHarness";
 
 describe("WebSocket Client (Tauri proxy)", () => {
   let client: ReturnType<typeof createWsClient>;
@@ -28,8 +34,7 @@ describe("WebSocket Client (Tauri proxy)", () => {
   });
 
   it("transitions to connecting on connect", async () => {
-    const states: ConnectionState[] = [];
-    client.onStateChange((s) => states.push(s));
+    const states = trackStates(client);
     client.connect({ host: "localhost:8443", token: "test-token" });
     await vi.advanceTimersByTimeAsync(10);
     expect(states).toContain("connecting");
@@ -90,90 +95,51 @@ describe("WebSocket Client (Tauri proxy)", () => {
   });
 
   it("transitions to connected on auth_ok", async () => {
-    client.connect({ host: "localhost:8443", token: "test-token" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
+    await openSocket(client, { host: "localhost:8443", token: "test-token" });
 
-    const states: ConnectionState[] = [];
-    client.onStateChange((s) => states.push(s));
+    const states = trackStates(client);
 
-    emitTauriEvent(
-      "ws-message",
-      JSON.stringify({
-        type: "auth_ok",
-        payload: {
-          user: { id: 1, username: "alex", avatar: null, role: "admin" },
-          server_name: "Test",
-          motd: "Hello",
-        },
-      }),
-    );
+    emitAuthOk({ username: "alex", serverName: "Test", motd: "Hello" });
 
     expect(states).toContain("connected");
   });
 
   it("dispatches messages to typed listeners", async () => {
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
+    await openSocket(client);
 
-    const messages: unknown[] = [];
-    client.on("chat_message", (payload) => messages.push(payload));
+    const messages = collect(client, "chat_message");
 
-    emitTauriEvent(
-      "ws-message",
-      JSON.stringify({
-        type: "chat_message",
-        payload: {
-          id: 1,
-          channel_id: 5,
-          user: { id: 1, username: "alex", avatar: null },
-          content: "Hello",
-          reply_to: null,
-          attachments: [],
-          timestamp: "2026-03-14T10:00:00Z",
-        },
-      }),
-    );
+    emitChat({
+      channelId: 5,
+      username: "alex",
+      content: "Hello",
+      timestamp: "2026-03-14T10:00:00Z",
+    });
 
     expect(messages).toHaveLength(1);
   });
 
   it("unsubscribe removes listener", async () => {
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
+    await openSocket(client);
 
     const messages: unknown[] = [];
     const unsub = client.on("chat_message", (payload) => messages.push(payload));
     unsub();
 
-    emitTauriEvent(
-      "ws-message",
-      JSON.stringify({
-        type: "chat_message",
-        payload: {
-          id: 1,
-          channel_id: 5,
-          user: { id: 1, username: "alex", avatar: null },
-          content: "Hello",
-          reply_to: null,
-          attachments: [],
-          timestamp: "2026-03-14T10:00:00Z",
-        },
-      }),
-    );
+    emitChat({
+      channelId: 5,
+      username: "alex",
+      content: "Hello",
+      timestamp: "2026-03-14T10:00:00Z",
+    });
 
     expect(messages).toHaveLength(0);
   });
 
   it("auth_error does NOT trigger reconnect", async () => {
-    client.connect({ host: "localhost:8443", token: "bad-token" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
+    await openSocket(client, { host: "localhost:8443", token: "bad-token" });
 
-    const authErrors: unknown[] = [];
-    client.on("auth_error", (payload) => authErrors.push(payload));
+    const authErrors = collect(client, "auth_error");
 
     emitTauriEvent(
       "ws-message",
@@ -191,24 +157,11 @@ describe("WebSocket Client (Tauri proxy)", () => {
   });
 
   it("reconnects on unexpected close with backoff", async () => {
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
+    await openSocket(client);
 
-    emitTauriEvent(
-      "ws-message",
-      JSON.stringify({
-        type: "auth_ok",
-        payload: {
-          user: { id: 1, username: "a", avatar: null, role: "admin" },
-          server_name: "S",
-          motd: "",
-        },
-      }),
-    );
+    emitAuthOk();
 
-    const states: ConnectionState[] = [];
-    client.onStateChange((s) => states.push(s));
+    const states = trackStates(client);
 
     // Simulate connection closed by Rust proxy
     emitTauriEvent("ws-state", "closed");
@@ -222,14 +175,9 @@ describe("WebSocket Client (Tauri proxy)", () => {
   });
 
   it("send returns correlation ID", async () => {
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
+    await openSocket(client);
 
-    const id = client.send({
-      type: "chat_send",
-      payload: { channel_id: 1, content: "hi", reply_to: null, attachments: [] },
-    });
+    const id = sendChat(client);
 
     expect(id).toBe("test-uuid-1234");
   });
@@ -243,8 +191,7 @@ describe("WebSocket Client (Tauri proxy)", () => {
     await vi.advanceTimersByTimeAsync(10);
     emitTauriEvent("ws-state", "open");
 
-    const messages: unknown[] = [];
-    client.on("chat_message", (p) => messages.push(p));
+    const messages = collect(client, "chat_message");
 
     const bigData = JSON.stringify({
       type: "chat_message",
@@ -265,12 +212,9 @@ describe("WebSocket Client (Tauri proxy)", () => {
   });
 
   it("drops malformed JSON", async () => {
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
+    await openSocket(client);
 
-    const messages: unknown[] = [];
-    client.on("chat_message", (p) => messages.push(p));
+    const messages = collect(client, "chat_message");
 
     emitTauriEvent("ws-message", "not-json{{{");
     expectConsole("warn", /\[ws\] Failed to parse WS message/);
@@ -278,9 +222,7 @@ describe("WebSocket Client (Tauri proxy)", () => {
   });
 
   it("does not log raw frame content on parse failure (no plaintext leak)", async () => {
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
+    await openSocket(client);
 
     const entries: LogEntry[] = [];
     const remove = addLogListener((e) => entries.push(e));
@@ -313,54 +255,23 @@ describe("heartbeat", () => {
   });
 
   it("sends heartbeat ping every 30 seconds after auth_ok", async () => {
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
+    await openSocket(client);
 
-    emitTauriEvent(
-      "ws-message",
-      JSON.stringify({
-        type: "auth_ok",
-        seq: 1,
-        payload: {
-          user: { id: 1, username: "a", avatar: null, role: "admin" },
-          server_name: "S",
-          motd: "",
-        },
-      }),
-    );
+    emitAuthOk({ seq: 1 });
 
     mockInvoke.mockClear();
 
     // Advance 30 seconds — should send a ping
     await vi.advanceTimersByTimeAsync(30_000);
 
-    const pingSends = mockInvoke.mock.calls.filter(
-      (c) =>
-        c[0] === "ws_send" &&
-        typeof c[1]?.message === "string" &&
-        (c[1].message as string).includes('"type":"ping"'),
-    );
+    const pingSends = sentFramesOfType("ping");
     expect(pingSends.length).toBeGreaterThanOrEqual(1);
   });
 
   it("stops heartbeat on disconnect", async () => {
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
+    await openSocket(client);
 
-    emitTauriEvent(
-      "ws-message",
-      JSON.stringify({
-        type: "auth_ok",
-        seq: 1,
-        payload: {
-          user: { id: 1, username: "a", avatar: null, role: "admin" },
-          server_name: "S",
-          motd: "",
-        },
-      }),
-    );
+    emitAuthOk({ seq: 1 });
 
     client.disconnect();
     mockInvoke.mockClear();
@@ -368,12 +279,7 @@ describe("heartbeat", () => {
     // No heartbeat should be sent after disconnect
     await vi.advanceTimersByTimeAsync(60_000);
 
-    const pingSends = mockInvoke.mock.calls.filter(
-      (c) =>
-        c[0] === "ws_send" &&
-        typeof c[1]?.message === "string" &&
-        (c[1].message as string).includes('"type":"ping"'),
-    );
+    const pingSends = sentFramesOfType("ping");
     expect(pingSends).toHaveLength(0);
   });
 
@@ -382,30 +288,16 @@ describe("heartbeat", () => {
     // A resumed session can see two auth_ok frames (server replay, or an
     // auth_ok racing a reconnect); if the old interval survived, every
     // heartbeat window would fire N pings for N handshakes.
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
+    await openSocket(client);
 
-    const authOk = JSON.stringify({
-      type: "auth_ok",
-      payload: {
-        user: { id: 1, username: "a", avatar: null, role: "admin" },
-        server_name: "S",
-        motd: "",
-      },
-    });
+    const authOk = authOkFrame();
     emitTauriEvent("ws-message", authOk);
     emitTauriEvent("ws-message", authOk);
 
     mockInvoke.mockClear();
     await vi.advanceTimersByTimeAsync(30_000);
 
-    const pingSends = mockInvoke.mock.calls.filter(
-      (c) =>
-        c[0] === "ws_send" &&
-        typeof c[1]?.message === "string" &&
-        (c[1].message as string).includes('"type":"ping"'),
-    );
+    const pingSends = sentFramesOfType("ping");
     expect(pingSends).toHaveLength(1);
   });
 });
@@ -417,8 +309,7 @@ describe("setState deduplication", () => {
   });
 
   it("does not notify listeners when state is already the same", async () => {
-    const states: ConnectionState[] = [];
-    client.onStateChange((s) => states.push(s));
+    const states = trackStates(client);
 
     client.connect({ host: "localhost:8443", token: "t" });
     await vi.advanceTimersByTimeAsync(10);
@@ -435,8 +326,7 @@ describe("setState deduplication", () => {
     // re-renders (and flaps) on every redundant transition. The test above
     // counts occurrences of a state that is only ever set once, so it cannot
     // see the guard at all; this one drives a genuine no-op transition.
-    const states: ConnectionState[] = [];
-    client.onStateChange((s) => states.push(s));
+    const states = trackStates(client);
 
     client.disconnect();
 
@@ -445,24 +335,11 @@ describe("setState deduplication", () => {
   });
 
   it("notifies listeners when state actually changes", async () => {
-    const states: ConnectionState[] = [];
-    client.onStateChange((s) => states.push(s));
+    const states = trackStates(client);
 
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
+    await openSocket(client);
 
-    emitTauriEvent(
-      "ws-message",
-      JSON.stringify({
-        type: "auth_ok",
-        payload: {
-          user: { id: 1, username: "a", avatar: null, role: "admin" },
-          server_name: "S",
-          motd: "",
-        },
-      }),
-    );
+    emitAuthOk();
 
     // Should have transitioned: connecting -> authenticating -> connected
     expect(states).toContain("connecting");
@@ -474,68 +351,37 @@ describe("setState deduplication", () => {
 describe("getReconnectDelay boundary and arithmetic", () => {
   let client: ReturnType<typeof createWsClient>;
 
-  beforeEach(() => {
-    vi.useFakeTimers();
-    mockInvoke.mockReset();
-    mockInvoke.mockResolvedValue(undefined);
-    mockListen.mockClear();
-    eventHandlers.clear();
-    // Pin the upper jitter endpoint so the exact exponential ceilings stay tested.
-    client = createWsClient({ random: () => 1 });
-  });
-
-  afterEach(() => {
-    client.disconnect();
-    vi.useRealTimers();
-  });
+  // Pin the upper jitter endpoint so the exact exponential ceilings stay tested.
+  useWsClientFixture(
+    (created) => {
+      client = created;
+    },
+    { clientOptions: { random: () => 1 } },
+  );
 
   it("first reconnect delay is 1000ms (1000 * 2^0)", async () => {
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
+    await openSocket(client);
 
-    emitTauriEvent(
-      "ws-message",
-      JSON.stringify({
-        type: "auth_ok",
-        payload: {
-          user: { id: 1, username: "a", avatar: null, role: "admin" },
-          server_name: "S",
-          motd: "",
-        },
-      }),
-    );
+    emitAuthOk();
 
     emitTauriEvent("ws-state", "closed");
     mockInvoke.mockClear();
 
     // At 999ms, should NOT have reconnected yet
     await vi.advanceTimersByTimeAsync(999);
-    const callsBefore = mockInvoke.mock.calls.filter((c) => c[0] === "ws_connect");
+    const callsBefore = wsConnectCalls();
     expect(callsBefore).toHaveLength(0);
 
     // At 1000ms total, should reconnect
     await vi.advanceTimersByTimeAsync(1);
-    const callsAfter = mockInvoke.mock.calls.filter((c) => c[0] === "ws_connect");
+    const callsAfter = wsConnectCalls();
     expect(callsAfter).toHaveLength(1);
   });
 
   it("second reconnect delay is 2000ms (1000 * 2^1)", async () => {
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
+    await openSocket(client);
 
-    emitTauriEvent(
-      "ws-message",
-      JSON.stringify({
-        type: "auth_ok",
-        payload: {
-          user: { id: 1, username: "a", avatar: null, role: "admin" },
-          server_name: "S",
-          motd: "",
-        },
-      }),
-    );
+    emitAuthOk();
 
     // First drop + reconnect
     emitTauriEvent("ws-state", "closed");
@@ -548,30 +394,18 @@ describe("getReconnectDelay boundary and arithmetic", () => {
 
     // Second attempt should have 2000ms delay
     await vi.advanceTimersByTimeAsync(1999);
-    const callsBefore = mockInvoke.mock.calls.filter((c) => c[0] === "ws_connect");
+    const callsBefore = wsConnectCalls();
     expect(callsBefore).toHaveLength(0);
 
     await vi.advanceTimersByTimeAsync(1);
-    const callsAfter = mockInvoke.mock.calls.filter((c) => c[0] === "ws_connect");
+    const callsAfter = wsConnectCalls();
     expect(callsAfter).toHaveLength(1);
   });
 
   it("delay uses default 30000ms cap when maxReconnectDelayMs not set", async () => {
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
+    await openSocket(client);
 
-    emitTauriEvent(
-      "ws-message",
-      JSON.stringify({
-        type: "auth_ok",
-        payload: {
-          user: { id: 1, username: "a", avatar: null, role: "admin" },
-          server_name: "S",
-          motd: "",
-        },
-      }),
-    );
+    emitAuthOk();
 
     // Simulate many drops to ramp up backoff
     for (let i = 0; i < 10; i++) {
@@ -586,7 +420,7 @@ describe("getReconnectDelay boundary and arithmetic", () => {
 
     // Should reconnect within 30s (capped), not 1024s
     await vi.advanceTimersByTimeAsync(30_001);
-    const calls = mockInvoke.mock.calls.filter((c) => c[0] === "ws_connect");
+    const calls = wsConnectCalls();
     expect(calls.length).toBeGreaterThanOrEqual(1);
   });
 });
@@ -609,8 +443,7 @@ describe("wsGeneration stale listener guard", () => {
     client.connect({ host: "localhost:8443", token: "t2" });
     await vi.advanceTimersByTimeAsync(10);
 
-    const states: ConnectionState[] = [];
-    client.onStateChange((s) => states.push(s));
+    const states = trackStates(client);
 
     // If any old handlers survived cleanup, calling them should be a no-op
     // because gen !== wsGeneration
@@ -686,17 +519,7 @@ describe("connect() catch guards against a superseded ws_connect rejection", () 
 
     // B completes its handshake and reaches "connected".
     emitTauriEvent("ws-state", "open");
-    emitTauriEvent(
-      "ws-message",
-      JSON.stringify({
-        type: "auth_ok",
-        payload: {
-          user: { id: 1, username: "a", avatar: null, role: "admin" },
-          server_name: "S",
-          motd: "",
-        },
-      }),
-    );
+    emitAuthOk();
     expect(client.getState()).toBe("connected");
 
     // A's stale ws_connect now rejects with the real error the Rust proxy
@@ -717,32 +540,19 @@ describe("connect() catch guards against a superseded ws_connect rejection", () 
     emitTauriEvent("ws-message", JSON.stringify({ type: "pong" }));
     await vi.advanceTimersByTimeAsync(30_000);
     emitTauriEvent("ws-message", JSON.stringify({ type: "pong" }));
-    const reconnectCalls = mockInvoke.mock.calls.filter((c) => c[0] === "ws_connect");
+    const reconnectCalls = wsConnectCalls();
     expect(reconnectCalls).toHaveLength(0);
   });
 });
 
 describe("disconnect() cancelling an in-flight connect()", () => {
   let client: ReturnType<typeof createWsClient>;
-  let originalMockListenImpl: (typeof mockListen)["getMockImplementation"] extends () => infer R
-    ? R
-    : never;
-
-  beforeEach(() => {
-    vi.useFakeTimers();
-    mockInvoke.mockReset();
-    mockInvoke.mockResolvedValue(undefined);
-    originalMockListenImpl = mockListen.getMockImplementation()!;
-    mockListen.mockClear();
-    eventHandlers.clear();
-    client = createWsClient();
-  });
-
-  afterEach(() => {
-    mockListen.mockImplementation(originalMockListenImpl!);
-    client.disconnect();
-    vi.useRealTimers();
-  });
+  useWsClientFixture(
+    (created) => {
+      client = created;
+    },
+    { restoreListenImpl: true },
+  );
 
   // Mirrors main.ts's onAutoLoginCancel: by the time the Cancel button is
   // clickable, wirePostAuth has already called ws.connect() and connect()
@@ -751,6 +561,7 @@ describe("disconnect() cancelling an in-flight connect()", () => {
   // suspended connect() resumes.
   it("prevents ws_connect from being invoked after disconnect() runs mid-connect()", async () => {
     let releaseListen: (() => void) | null = null;
+    const originalMockListenImpl = mockListen.getMockImplementation()!;
     mockListen.mockImplementation(
       async (event: string, handler: (e: { payload: unknown }) => void) => {
         if (event === "ws-message" && releaseListen === null) {
@@ -780,8 +591,7 @@ describe("disconnect() cancelling an in-flight connect()", () => {
     releaseListen!();
     await vi.advanceTimersByTimeAsync(10);
 
-    const wsConnectCalls = mockInvoke.mock.calls.filter((c) => c[0] === "ws_connect");
-    expect(wsConnectCalls).toHaveLength(0);
+    expect(wsConnectCalls()).toHaveLength(0);
     // The cancelled attempt must not have flipped the state back out of
     // "disconnected" (e.g. to "authenticating"/"reconnecting").
     expect(client.getState()).toBe("disconnected");
@@ -790,25 +600,12 @@ describe("disconnect() cancelling an in-flight connect()", () => {
 
 describe("overlapping connect() attempts", () => {
   let client: ReturnType<typeof createWsClient>;
-  let originalMockListenImpl: (typeof mockListen)["getMockImplementation"] extends () => infer R
-    ? R
-    : never;
-
-  beforeEach(() => {
-    vi.useFakeTimers();
-    mockInvoke.mockReset();
-    mockInvoke.mockResolvedValue(undefined);
-    originalMockListenImpl = mockListen.getMockImplementation()!;
-    mockListen.mockClear();
-    eventHandlers.clear();
-    client = createWsClient();
-  });
-
-  afterEach(() => {
-    mockListen.mockImplementation(originalMockListenImpl!);
-    client.disconnect();
-    vi.useRealTimers();
-  });
+  useWsClientFixture(
+    (created) => {
+      client = created;
+    },
+    { restoreListenImpl: true },
+  );
 
   // OC-0219: eventUnsubs is a single client-scoped array shared by every
   // connect() attempt. If a stale attempt A resumes inside setupEventListeners()
@@ -821,6 +618,7 @@ describe("overlapping connect() attempts", () => {
     let releaseFirstMsgListen: (() => void) | null = null;
     let firstMsgListenSeen = false;
 
+    const originalMockListenImpl = mockListen.getMockImplementation()!;
     mockListen.mockImplementation(
       async (event: string, handler: (e: { payload: unknown }) => void) => {
         if (event === "ws-message" && !firstMsgListenSeen) {
@@ -859,27 +657,12 @@ describe("overlapping connect() attempts", () => {
     emitTauriEvent("ws-state", "open");
     await vi.advanceTimersByTimeAsync(10);
 
-    const authSends = mockInvoke.mock.calls.filter(
-      (c) =>
-        c[0] === "ws_send" &&
-        typeof c[1]?.message === "string" &&
-        (c[1].message as string).includes('"type":"auth"'),
-    );
+    const authSends = sentFramesOfType("auth");
     expect(authSends.length).toBeGreaterThanOrEqual(1);
 
     // Complete the handshake and confirm B reaches "connected" — proof its
     // ws-message listener also survived A's stale cleanup.
-    emitTauriEvent(
-      "ws-message",
-      JSON.stringify({
-        type: "auth_ok",
-        payload: {
-          user: { id: 1, username: "b", avatar: null, role: "admin" },
-          server_name: "S",
-          motd: "",
-        },
-      }),
-    );
+    emitAuthOk({ username: "b" });
 
     expect(client.getState()).toBe("connected");
   });
@@ -892,21 +675,9 @@ describe("heartbeat proxyOpen guard", () => {
   });
 
   it("does not send ping when proxyOpen is false (connection dropped mid-heartbeat)", async () => {
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
+    await openSocket(client);
 
-    emitTauriEvent(
-      "ws-message",
-      JSON.stringify({
-        type: "auth_ok",
-        payload: {
-          user: { id: 1, username: "a", avatar: null, role: "admin" },
-          server_name: "S",
-          motd: "",
-        },
-      }),
-    );
+    emitAuthOk();
 
     // Heartbeat started. Now close the proxy (sets proxyOpen=false)
     emitTauriEvent("ws-state", "closed");
@@ -917,12 +688,7 @@ describe("heartbeat proxyOpen guard", () => {
     // The heartbeat was stopped by close handler, so no pings should fire
     await vi.advanceTimersByTimeAsync(35_000);
 
-    const pings = mockInvoke.mock.calls.filter(
-      (c) =>
-        c[0] === "ws_send" &&
-        typeof c[1]?.message === "string" &&
-        (c[1].message as string).includes('"type":"ping"'),
-    );
+    const pings = sentFramesOfType("ping");
     expect(pings).toHaveLength(0);
   });
 });
@@ -951,27 +717,12 @@ describe("connect when Tauri APIs unavailable", () => {
 
 describe("cleanupEventListeners edge cases", () => {
   let client: ReturnType<typeof createWsClient>;
-  // Save original mockListen implementation to restore after override tests
-  let originalMockListenImpl: (typeof mockListen)["getMockImplementation"] extends () => infer R
-    ? R
-    : never;
-
-  beforeEach(() => {
-    vi.useFakeTimers();
-    mockInvoke.mockReset();
-    mockInvoke.mockResolvedValue(undefined);
-    originalMockListenImpl = mockListen.getMockImplementation()!;
-    mockListen.mockClear();
-    eventHandlers.clear();
-    client = createWsClient();
-  });
-
-  afterEach(() => {
-    client.disconnect();
-    // Restore the original mockListen implementation so later tests work
-    mockListen.mockImplementation(originalMockListenImpl!);
-    vi.useRealTimers();
-  });
+  useWsClientFixture(
+    (created) => {
+      client = created;
+    },
+    { restoreListenImpl: true },
+  );
 
   it("handles unsub functions that return rejected promises", async () => {
     // Override mockListen to return an unsub that returns a rejected promise
@@ -1028,9 +779,7 @@ describe("listener registry mechanics (on/off/dispatch)", () => {
 
   it("off via returned unsubscribe removes a specific listener", async () => {
     // Connect so we can dispatch messages through the proxy
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
+    await openSocket(client);
 
     const calls: string[] = [];
     const listenerA = () => calls.push("A");
@@ -1042,58 +791,26 @@ describe("listener registry mechanics (on/off/dispatch)", () => {
     // Remove only B
     unsubB();
 
-    emitTauriEvent(
-      "ws-message",
-      JSON.stringify({
-        type: "chat_message",
-        payload: {
-          id: 1,
-          channel_id: 1,
-          user: { id: 1, username: "a", avatar: null },
-          content: "test",
-          reply_to: null,
-          attachments: [],
-          timestamp: "2026-01-01T00:00:00Z",
-        },
-      }),
-    );
+    emitChat({ content: "test" });
 
     expect(calls).toEqual(["A"]);
   });
 
   it("multiple listeners on the same event type all get called", async () => {
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
+    await openSocket(client);
 
     const calls: string[] = [];
     client.on("chat_message", () => calls.push("first"));
     client.on("chat_message", () => calls.push("second"));
     client.on("chat_message", () => calls.push("third"));
 
-    emitTauriEvent(
-      "ws-message",
-      JSON.stringify({
-        type: "chat_message",
-        payload: {
-          id: 1,
-          channel_id: 1,
-          user: { id: 1, username: "a", avatar: null },
-          content: "test",
-          reply_to: null,
-          attachments: [],
-          timestamp: "2026-01-01T00:00:00Z",
-        },
-      }),
-    );
+    emitChat({ content: "test" });
 
     expect(calls).toEqual(["first", "second", "third"]);
   });
 
   it("listener removal mid-dispatch does not crash", async () => {
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
+    await openSocket(client);
 
     const calls: string[] = [];
     let unsubSelf: (() => void) | null = null;
@@ -1132,9 +849,7 @@ describe("listener registry mechanics (on/off/dispatch)", () => {
   });
 
   it("unknown event type dispatch does not throw", async () => {
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
+    await openSocket(client);
 
     // Dispatch a completely unknown event type — should not crash
     expect(() => {
@@ -1149,9 +864,7 @@ describe("listener registry mechanics (on/off/dispatch)", () => {
   });
 
   it("error boundary: throwing listener does not prevent next listener from running", async () => {
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
+    await openSocket(client);
 
     const received: string[] = [];
 
@@ -1168,21 +881,7 @@ describe("listener registry mechanics (on/off/dispatch)", () => {
       received.push("fourth:" + (payload as { content: string }).content);
     });
 
-    emitTauriEvent(
-      "ws-message",
-      JSON.stringify({
-        type: "chat_message",
-        payload: {
-          id: 1,
-          channel_id: 1,
-          user: { id: 1, username: "a", avatar: null },
-          content: "hello",
-          reply_to: null,
-          attachments: [],
-          timestamp: "2026-01-01T00:00:00Z",
-        },
-      }),
-    );
+    emitChat({ content: "hello" });
     expectConsole("error", /\[ws\] Listener error for chat_message/);
     expectConsole("error", /\[ws\] Listener error for chat_message/);
 

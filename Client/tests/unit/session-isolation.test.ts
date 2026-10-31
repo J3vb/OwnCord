@@ -19,6 +19,8 @@ import {
   vi,
   type MockedObject,
 } from "vitest";
+import * as mainMocks from "../helpers/mainMocks";
+import * as wsMocks from "./helpers/ws-mocks";
 
 // ---------------------------------------------------------------------------
 // Tauri API mocks — reuse the ws-mocks.ts event-registry helper so ws.ts's
@@ -27,45 +29,26 @@ import {
 // listen() call registered by main.ts is capturable via the same
 // emitTauriEvent().
 // ---------------------------------------------------------------------------
-vi.mock("@tauri-apps/api/core", async () => ({
-  invoke: (await import("./helpers/ws-mocks")).mockInvoke,
-}));
-vi.mock("@tauri-apps/api/event", async () => ({
-  listen: (await import("./helpers/ws-mocks")).mockListen,
-}));
+vi.mock("@tauri-apps/api/core", () => wsMocks.tauriCoreMock());
+vi.mock("@tauri-apps/api/event", () => wsMocks.tauriEventMock());
 
 // CSS imports are handled natively by vite/vitest — no mock needed.
 
-vi.mock("@lib/prefs/appearance", () => ({ applyStoredAppearance: vi.fn() }));
-vi.mock("@lib/net/connectionDiagnostics", () => ({ configureConnectionDiagnostics: vi.fn() }));
-vi.mock("@lib/pendingMessages", () => ({ deactivatePendingMessages: vi.fn() }));
-vi.mock("../../src/platform/desktop/pushToTalk", () => ({
-  pushToTalk: { init: vi.fn().mockResolvedValue(undefined) },
-}));
-vi.mock("@lib/logPersistence", () => ({
-  initLogPersistence: vi.fn().mockResolvedValue(undefined),
-  flushLogs: vi.fn().mockResolvedValue(undefined),
-}));
-vi.mock("@lib/net/credentials", () => ({
-  saveCredential: vi.fn().mockResolvedValue(true),
-  loadCredential: vi.fn().mockResolvedValue(null),
-  deleteCredential: vi.fn().mockResolvedValue(undefined),
-  createUserUpdateCredentialSaver: vi.fn(() => vi.fn()),
-}));
-vi.mock("@lib/prefs/windowState", () => ({
-  initWindowState: vi.fn().mockResolvedValue(undefined),
-}));
+vi.mock("@lib/prefs/appearance", () => mainMocks.prefsAppearanceMock());
+vi.mock("@lib/net/connectionDiagnostics", () => mainMocks.netConnectionDiagnosticsMock());
+vi.mock("@lib/pendingMessages", () => mainMocks.pendingMessagesMock());
+vi.mock("../../src/platform/desktop/pushToTalk", () => mainMocks.desktopPushToTalkMock());
+vi.mock("@lib/logPersistence", () => mainMocks.logPersistenceMock());
+vi.mock("@lib/net/credentials", () => mainMocks.netCredentialsMock());
+vi.mock("@lib/prefs/windowState", () => mainMocks.prefsWindowStateMock());
 vi.mock("@tauri-apps/plugin-deep-link", () => ({
   register: vi.fn().mockResolvedValue(undefined),
   getCurrent: vi.fn().mockResolvedValue(null),
   onOpenUrl: vi.fn().mockResolvedValue(undefined),
 }));
-vi.mock("@lib/nav/messageNavigation", () => ({ jumpToMessage: vi.fn() }));
-vi.mock("@components/CertMismatchModal", () => ({
-  createCertMismatchModal: vi.fn(() => ({ mount: vi.fn(), destroy: vi.fn() })),
-  createCertFirstUseModal: vi.fn(() => ({ mount: vi.fn(), destroy: vi.fn() })),
-}));
-vi.mock("@lib/net/certReconnect", () => ({ reconnectAfterCertAccept: vi.fn() }));
+vi.mock("@lib/nav/messageNavigation", () => mainMocks.navMessageNavigationMock());
+vi.mock("@components/CertMismatchModal", () => mainMocks.certMismatchModalMock());
+vi.mock("@lib/net/certReconnect", () => mainMocks.netCertReconnectMock());
 const PROFILES = [
   {
     id: "p-a",
@@ -251,6 +234,9 @@ import { createConnectPage } from "@pages/ConnectPage";
 const A = "a.example:8443";
 const B = "b.example:8443";
 
+const storedA = async (host: string) =>
+  host === A ? { username: "alex", token: "stored-token-a", hasPassword: true } : null;
+
 // main.ts builds its profile manager once at startup, before the per-test
 // mock clear wipes mock.results.
 let startupProfileManager: MockedObject<ReturnType<typeof createProfileManager>>;
@@ -330,6 +316,19 @@ async function completeHandshake(
   );
   emitTauriEvent("ws-message", JSON.stringify({ type: "ready", payload: ready }));
   await vi.advanceTimersByTimeAsync(800);
+}
+
+/** Makes the startup profile manager's removeProfile drop the entry from PROFILES. */
+function spliceOnRemoveProfile(): { removeProfile: ReturnType<typeof vi.fn> } {
+  const manager = startupProfileManager as { removeProfile: ReturnType<typeof vi.fn> };
+  manager.removeProfile.mockImplementation((id: string) => {
+    PROFILES.splice(
+      PROFILES.findIndex((p) => p.id === id),
+      1,
+    );
+    return true;
+  });
+  return manager;
 }
 
 async function loginWithPassword(host: string, userId: number, ready: object = {}): Promise<void> {
@@ -479,9 +478,7 @@ describe("quick switch keeps each server's saved sign-in", () => {
   });
 
   it("resumes with the stored token when switching back, without a password", async () => {
-    vi.mocked(loadCredential).mockImplementation(async (host: string) =>
-      host === A ? { username: "alex", token: "stored-token-a", hasPassword: true } : null,
-    );
+    vi.mocked(loadCredential).mockImplementation(storedA);
     await loginWithPassword(A, 1);
     await quickSwitchTo(B);
     // B has no stored credential: the prefilled form waits for a password.
@@ -501,9 +498,7 @@ describe("quick switch keeps each server's saved sign-in", () => {
   });
 
   it("times out a resume to an offline server, returning to the form with an error", async () => {
-    vi.mocked(loadCredential).mockImplementation(async (host: string) =>
-      host === A ? { username: "alex", token: "stored-token-a", hasPassword: true } : null,
-    );
+    vi.mocked(loadCredential).mockImplementation(storedA);
     await loginWithPassword(A, 1);
 
     await quickSwitchTo(A);
@@ -523,9 +518,7 @@ describe("quick switch keeps each server's saved sign-in", () => {
   });
 
   it("keeps A's sign-in through Add server, so switching back skips the password", async () => {
-    vi.mocked(loadCredential).mockImplementation(async (host: string) =>
-      host === A ? { username: "alex", token: "stored-token-a", hasPassword: true } : null,
-    );
+    vi.mocked(loadCredential).mockImplementation(storedA);
     await loginWithPassword(A, 1);
 
     // SidebarArea's Add server: end the session with no switch target.
@@ -552,16 +545,7 @@ describe("quick switch keeps each server's saved sign-in", () => {
       { ...PROFILES[0]!, id: "p-main", host: shared },
       { ...PROFILES[0]!, id: "p-alt", host: shared },
     );
-    const manager = startupProfileManager as {
-      removeProfile: ReturnType<typeof vi.fn>;
-    };
-    manager.removeProfile.mockImplementation((id: string) => {
-      PROFILES.splice(
-        PROFILES.findIndex((p) => p.id === id),
-        1,
-      );
-      return true;
-    });
+    const manager = spliceOnRemoveProfile();
     try {
       capturedConnectCallbacks.onDeleteProfile!("p-main");
       expect(deleteCredential).not.toHaveBeenCalled();
@@ -585,9 +569,6 @@ describe("quick switch keeps each server's saved sign-in", () => {
 });
 
 describe("keeps retrying a server that was down at launch (P2-T7)", () => {
-  const storedA = async (host: string) =>
-    host === A ? { username: "alex", token: "stored-token-a", hasPassword: true } : null;
-
   /** Stored-token connects to A so far. */
   const connectsToA = (): number =>
     transportLog().filter((e) => e.startsWith("connect") && e.includes("a.example")).length;
@@ -712,16 +693,7 @@ describe("keeps retrying a server that was down at launch (P2-T7)", () => {
 
   it("ends the wait at once when the waited-on profile is deleted", async () => {
     const original = PROFILES[0]!;
-    const manager = startupProfileManager as {
-      removeProfile: ReturnType<typeof vi.fn>;
-    };
-    manager.removeProfile.mockImplementation((id: string) => {
-      PROFILES.splice(
-        PROFILES.findIndex((p) => p.id === id),
-        1,
-      );
-      return true;
-    });
+    const manager = spliceOnRemoveProfile();
     await resumeAgainstDownServer();
     const before = connectsToA();
     try {
@@ -832,9 +804,7 @@ describe("a stored-token resume refused SERVER_BUSY keeps connecting (P5-S04)", 
   }
 
   async function resumeA(): Promise<number> {
-    vi.mocked(loadCredential).mockImplementation(async (host: string) =>
-      host === A ? { username: "alex", token: "stored-token-a", hasPassword: true } : null,
-    );
+    vi.mocked(loadCredential).mockImplementation(storedA);
     await loginWithPassword(A, 1);
     await quickSwitchTo(A);
     await vi.advanceTimersByTimeAsync(10);

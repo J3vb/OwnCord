@@ -1,20 +1,31 @@
 import { describe, it, expect, vi } from "vitest";
 import type { ConnectionState } from "../../src/lib/ws";
 
-// vi.mock is hoisted per file; the factories resolve to the shared handles
-// exported from ./helpers/ws-mocks (see that module's doc comment).
-vi.mock("@tauri-apps/api/core", async () => ({
-  invoke: (await import("./helpers/ws-mocks")).mockInvoke,
-}));
+import * as wsMocks from "./helpers/ws-mocks";
 
-vi.mock("@tauri-apps/api/event", async () => ({
-  listen: (await import("./helpers/ws-mocks")).mockListen,
-}));
+vi.mock("@tauri-apps/api/core", () => wsMocks.tauriCoreMock());
+vi.mock("@tauri-apps/api/event", () => wsMocks.tauriEventMock());
 
 import { mockInvoke, emitTauriEvent } from "./helpers/ws-mocks";
 import { createWsClient, toConnectionStatus } from "../../src/lib/ws";
 import { expectConsole } from "../helpers/console";
 import { useWsClientFixture } from "../helpers/wsClientFixture";
+import {
+  WS_CONFIG,
+  chatMessage,
+  openSocket,
+  emitAuthOk,
+  emitChat,
+  dropAndReopen,
+  expectAuthLastSeq,
+  wsConnectCalls,
+  collect,
+  emitCertMismatch,
+  sendChat,
+  trackSendFailures,
+  rejectWsSend,
+  trackStates,
+} from "../helpers/wsSuiteHarness";
 
 describe("message handling edge cases", () => {
   let client: ReturnType<typeof createWsClient>;
@@ -23,12 +34,9 @@ describe("message handling edge cases", () => {
   });
 
   it("silently ignores pong messages", async () => {
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
+    await openSocket(client);
 
-    const messages: unknown[] = [];
-    client.on("chat_message", (p) => messages.push(p));
+    const messages = collect(client, "chat_message");
 
     // "pong" is not part of the ServerMessage union — the transport eats it
     // before dispatch — so the registry has to be reached through a cast to
@@ -45,12 +53,9 @@ describe("message handling edge cases", () => {
   });
 
   it("drops messages with missing type", async () => {
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
+    await openSocket(client);
 
-    const messages: unknown[] = [];
-    client.on("chat_message", (p) => messages.push(p));
+    const messages = collect(client, "chat_message");
 
     emitTauriEvent("ws-message", JSON.stringify({ payload: { data: "no type" } }));
     expectConsole("warn", /\[ws\] Invalid WS message: missing type or payload/);
@@ -58,12 +63,9 @@ describe("message handling edge cases", () => {
   });
 
   it("drops messages with undefined payload", async () => {
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
+    await openSocket(client);
 
-    const messages: unknown[] = [];
-    client.on("chat_message", (p) => messages.push(p));
+    const messages = collect(client, "chat_message");
 
     emitTauriEvent("ws-message", JSON.stringify({ type: "chat_message" }));
     expectConsole("warn", /\[ws\] Invalid WS message: missing type or payload/);
@@ -71,57 +73,14 @@ describe("message handling edge cases", () => {
   });
 
   it("tracks highest seq number (ignores lower seq)", async () => {
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
+    await openSocket(client);
 
-    emitTauriEvent(
-      "ws-message",
-      JSON.stringify({
-        type: "auth_ok",
-        seq: 10,
-        payload: {
-          user: { id: 1, username: "a", avatar: null, role: "admin" },
-          server_name: "S",
-          motd: "",
-        },
-      }),
-    );
+    emitAuthOk({ seq: 10 });
 
     // seq=50 then seq=30 — should keep 50
-    emitTauriEvent(
-      "ws-message",
-      JSON.stringify({
-        type: "chat_message",
-        seq: 50,
-        payload: {
-          id: 1,
-          channel_id: 1,
-          user: { id: 1, username: "a", avatar: null },
-          content: "hi",
-          reply_to: null,
-          attachments: [],
-          timestamp: "2026-01-01T00:00:00Z",
-        },
-      }),
-    );
+    emitChat({ seq: 50 });
 
-    emitTauriEvent(
-      "ws-message",
-      JSON.stringify({
-        type: "chat_message",
-        seq: 30,
-        payload: {
-          id: 2,
-          channel_id: 1,
-          user: { id: 1, username: "a", avatar: null },
-          content: "hello",
-          reply_to: null,
-          attachments: [],
-          timestamp: "2026-01-01T00:00:00Z",
-        },
-      }),
-    );
+    emitChat({ seq: 30, id: 2, content: "hello" });
 
     // Disconnect and reconnect to verify lastSeq
     emitTauriEvent("ws-state", "closed");
@@ -129,23 +88,13 @@ describe("message handling edge cases", () => {
     await vi.advanceTimersByTimeAsync(1100);
     emitTauriEvent("ws-state", "open");
 
-    const authCall = mockInvoke.mock.calls.find(
-      (c) =>
-        c[0] === "ws_send" &&
-        typeof c[1]?.message === "string" &&
-        (c[1].message as string).includes('"type":"auth"'),
-    );
-    const authMsg = JSON.parse((authCall![1] as { message: string }).message);
-    expect(authMsg.payload.last_seq).toBe(50);
+    expectAuthLastSeq(50);
   });
 
   it("handles message without seq field (defaults to 0)", async () => {
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
+    await openSocket(client);
 
-    const messages: unknown[] = [];
-    client.on("chat_message", (p) => messages.push(p));
+    const messages = collect(client, "chat_message");
 
     emitTauriEvent(
       "ws-message",
@@ -168,31 +117,17 @@ describe("message handling edge cases", () => {
   });
 
   it("dispatch logs when no listeners for message type", async () => {
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
+    await openSocket(client);
 
     // Send a message with no listener registered — should log "no listeners"
-    emitTauriEvent(
-      "ws-message",
-      JSON.stringify({
-        type: "auth_ok",
-        payload: {
-          user: { id: 1, username: "a", avatar: null, role: "admin" },
-          server_name: "S",
-          motd: "",
-        },
-      }),
-    );
+    emitAuthOk();
 
     // No crash means the "no listeners" debug log path executed
     expect(client.getState()).toBe("connected");
   });
 
   it("dispatch catches listener errors", async () => {
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
+    await openSocket(client);
 
     // Register a listener that throws
     client.on("chat_message", () => {
@@ -200,24 +135,9 @@ describe("message handling edge cases", () => {
     });
 
     // Also register a second listener to verify it still runs
-    const messages: unknown[] = [];
-    client.on("chat_message", (p) => messages.push(p));
+    const messages = collect(client, "chat_message");
 
-    emitTauriEvent(
-      "ws-message",
-      JSON.stringify({
-        type: "chat_message",
-        payload: {
-          id: 1,
-          channel_id: 1,
-          user: { id: 1, username: "a", avatar: null },
-          content: "test",
-          reply_to: null,
-          attachments: [],
-          timestamp: "2026-01-01T00:00:00Z",
-        },
-      }),
-    );
+    emitChat({ content: "test" });
     expectConsole("error", /\[ws\] Listener error for chat_message/);
 
     // Second listener should still receive the message
@@ -280,19 +200,11 @@ describe("message handling edge cases", () => {
     const events: unknown[] = [];
     const unsub = client.onCertMismatch((evt) => events.push(evt));
 
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
+    await openSocket(client);
 
     unsub();
 
-    emitTauriEvent("cert-tofu", {
-      host: "localhost:8443",
-      fingerprint: "sha256:NEW",
-      status: "mismatch",
-      message: "Stored: sha256:OLD",
-    });
-    expectConsole("error", /\[ws\] Certificate fingerprint mismatch/);
+    emitCertMismatch("localhost:8443");
 
     expect(events).toHaveLength(0);
   });
@@ -306,25 +218,11 @@ describe("handleMessage size boundary", () => {
 
   it("accepts message exactly at size limit", async () => {
     const limit = 200;
-    client.connect({ host: "localhost:8443", token: "t", maxMessageSizeBytes: limit });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
+    await openSocket(client, { ...WS_CONFIG, maxMessageSizeBytes: limit });
 
-    const messages: unknown[] = [];
-    client.on("chat_message", (p) => messages.push(p));
+    const messages = collect(client, "chat_message");
 
-    const msg = {
-      type: "chat_message",
-      payload: {
-        id: 1,
-        channel_id: 1,
-        user: { id: 1, username: "a", avatar: null },
-        content: "",
-        reply_to: null,
-        attachments: [],
-        timestamp: "2026-01-01T00:00:00Z",
-      },
-    };
+    const msg = chatMessage({ content: "" });
     const json = JSON.stringify(msg);
     // Pad content to make JSON exactly at limit
     const padding = limit - json.length;
@@ -343,25 +241,11 @@ describe("handleMessage size boundary", () => {
 
   it("drops message one byte over size limit", async () => {
     const limit = 100;
-    client.connect({ host: "localhost:8443", token: "t", maxMessageSizeBytes: limit });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
+    await openSocket(client, { ...WS_CONFIG, maxMessageSizeBytes: limit });
 
-    const messages: unknown[] = [];
-    client.on("chat_message", (p) => messages.push(p));
+    const messages = collect(client, "chat_message");
 
-    const msg = {
-      type: "chat_message",
-      payload: {
-        id: 1,
-        channel_id: 1,
-        user: { id: 1, username: "a", avatar: null },
-        content: "x".repeat(limit), // guarantees over limit
-        reply_to: null,
-        attachments: [],
-        timestamp: "2026-01-01T00:00:00Z",
-      },
-    };
+    const msg = chatMessage({ content: "x".repeat(limit) }); // guarantees over limit
 
     emitTauriEvent("ws-message", JSON.stringify(msg));
     expectConsole("warn", /\[ws\] Message exceeds size limit, dropping/);
@@ -369,12 +253,9 @@ describe("handleMessage size boundary", () => {
   });
 
   it("uses default 1MB limit when maxMessageSizeBytes not configured", async () => {
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
+    await openSocket(client);
 
-    const messages: unknown[] = [];
-    client.on("chat_message", (p) => messages.push(p));
+    const messages = collect(client, "chat_message");
 
     // Message under 1MB should pass
     const smallMsg = JSON.stringify({
@@ -395,12 +276,9 @@ describe("handleMessage size boundary", () => {
 
   it("does not drop an oversized `ready` frame — the handshake payload has no seq and no retry path", async () => {
     const limit = 200;
-    client.connect({ host: "localhost:8443", token: "t", maxMessageSizeBytes: limit });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
+    await openSocket(client, { ...WS_CONFIG, maxMessageSizeBytes: limit });
 
-    const readyMessages: unknown[] = [];
-    client.on("ready", (p) => readyMessages.push(p));
+    const readyMessages = collect(client, "ready");
 
     const msg = {
       type: "ready",
@@ -423,9 +301,7 @@ describe("handleMessage size boundary", () => {
 
   it("does not drop an oversized `auth_ok` frame (handshake exempt from size limit)", async () => {
     const limit = 100;
-    client.connect({ host: "localhost:8443", token: "t", maxMessageSizeBytes: limit });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
+    await openSocket(client, { ...WS_CONFIG, maxMessageSizeBytes: limit });
 
     const msg = {
       type: "auth_ok",
@@ -444,25 +320,11 @@ describe("handleMessage size boundary", () => {
 
   it("still drops an oversized regular (non-handshake) frame (regression guard)", async () => {
     const limit = 100;
-    client.connect({ host: "localhost:8443", token: "t", maxMessageSizeBytes: limit });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
+    await openSocket(client, { ...WS_CONFIG, maxMessageSizeBytes: limit });
 
-    const messages: unknown[] = [];
-    client.on("chat_message", (p) => messages.push(p));
+    const messages = collect(client, "chat_message");
 
-    const msg = {
-      type: "chat_message",
-      payload: {
-        id: 1,
-        channel_id: 1,
-        user: { id: 1, username: "a", avatar: null },
-        content: "x".repeat(limit),
-        reply_to: null,
-        attachments: [],
-        timestamp: "2026-01-01T00:00:00Z",
-      },
-    };
+    const msg = chatMessage({ content: "x".repeat(limit) });
 
     emitTauriEvent("ws-message", JSON.stringify(msg));
     expectConsole("warn", /\[ws\] Message exceeds size limit, dropping/);
@@ -477,61 +339,28 @@ describe("dispatch with no listeners for type", () => {
   });
 
   it("does not crash when dispatching to type with empty listener set", async () => {
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
+    await openSocket(client);
 
     // Register and immediately unregister a listener
     const unsub = client.on("chat_message", () => {});
     unsub();
 
     // Now dispatch a message to that type — empty set
-    emitTauriEvent(
-      "ws-message",
-      JSON.stringify({
-        type: "chat_message",
-        payload: {
-          id: 1,
-          channel_id: 1,
-          user: { id: 1, username: "a", avatar: null },
-          content: "test",
-          reply_to: null,
-          attachments: [],
-          timestamp: "2026-01-01T00:00:00Z",
-        },
-      }),
-    );
+    emitChat({ content: "test" });
 
     // No crash
     expect(true).toBe(true);
   });
 
   it("dispatches message with id to listener", async () => {
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
+    await openSocket(client);
 
     const receivedIds: (string | undefined)[] = [];
     client.on("chat_message", (_payload, id) => {
       receivedIds.push(id);
     });
 
-    emitTauriEvent(
-      "ws-message",
-      JSON.stringify({
-        type: "chat_message",
-        id: "correlation-123",
-        payload: {
-          id: 1,
-          channel_id: 1,
-          user: { id: 1, username: "a", avatar: null },
-          content: "test",
-          reply_to: null,
-          attachments: [],
-          timestamp: "2026-01-01T00:00:00Z",
-        },
-      }),
-    );
+    emitChat({ corrId: "correlation-123", content: "test" });
 
     expect(receivedIds).toEqual(["correlation-123"]);
   });
@@ -544,12 +373,9 @@ describe("on() creates Set for new type", () => {
   });
 
   it("creates a listener set for a type that has never been registered", async () => {
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
+    await openSocket(client);
 
-    const results: unknown[] = [];
-    client.on("presence", (p) => results.push(p));
+    const results = collect(client, "presence");
 
     emitTauriEvent(
       "ws-message",
@@ -563,9 +389,7 @@ describe("on() creates Set for new type", () => {
   });
 
   it("multiple listeners on same type all receive messages", async () => {
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
+    await openSocket(client);
 
     const results1: unknown[] = [];
     const results2: unknown[] = [];
@@ -592,21 +416,9 @@ describe("send envelope format", () => {
   });
 
   it("wraps message with id and serializes to JSON", async () => {
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
+    await openSocket(client);
 
-    emitTauriEvent(
-      "ws-message",
-      JSON.stringify({
-        type: "auth_ok",
-        payload: {
-          user: { id: 1, username: "a", avatar: null, role: "admin" },
-          server_name: "S",
-          motd: "",
-        },
-      }),
-    );
+    emitAuthOk();
 
     mockInvoke.mockClear();
 
@@ -636,10 +448,7 @@ describe("send edge cases", () => {
 
   it("send when not connected does not crash (logs warning)", () => {
     // Client is disconnected — send should warn but not crash
-    const id = client.send({
-      type: "chat_send",
-      payload: { channel_id: 1, content: "hi", reply_to: null, attachments: [] },
-    });
+    const id = sendChat(client);
     expectConsole("warn", /\[ws\] Cannot send, WebSocket not open/);
 
     expect(id).toBe("test-uuid-1234");
@@ -651,8 +460,7 @@ describe("send edge cases", () => {
       return undefined;
     });
 
-    const states: ConnectionState[] = [];
-    client.onStateChange((s) => states.push(s));
+    const states = trackStates(client);
 
     client.connect({ host: "localhost:8443", token: "t" });
     await vi.advanceTimersByTimeAsync(10);
@@ -663,22 +471,9 @@ describe("send edge cases", () => {
   });
 
   it("reconnect with successful auth_ok resets reconnect attempt counter", async () => {
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
+    await openSocket(client);
 
-    emitTauriEvent(
-      "ws-message",
-      JSON.stringify({
-        type: "auth_ok",
-        seq: 1,
-        payload: {
-          user: { id: 1, username: "a", avatar: null, role: "admin" },
-          server_name: "S",
-          motd: "",
-        },
-      }),
-    );
+    emitAuthOk({ seq: 1 });
 
     // Drop connection
     emitTauriEvent("ws-state", "closed");
@@ -687,18 +482,7 @@ describe("send edge cases", () => {
     await vi.advanceTimersByTimeAsync(1100);
     emitTauriEvent("ws-state", "open");
 
-    emitTauriEvent(
-      "ws-message",
-      JSON.stringify({
-        type: "auth_ok",
-        seq: 2,
-        payload: {
-          user: { id: 1, username: "a", avatar: null, role: "admin" },
-          server_name: "S",
-          motd: "",
-        },
-      }),
-    );
+    emitAuthOk({ seq: 2 });
 
     // Drop again
     emitTauriEvent("ws-state", "closed");
@@ -707,39 +491,20 @@ describe("send edge cases", () => {
     mockInvoke.mockClear();
     await vi.advanceTimersByTimeAsync(1100);
 
-    const reconnects = mockInvoke.mock.calls.filter((c) => c[0] === "ws_connect");
+    const reconnects = wsConnectCalls();
     expect(reconnects.length).toBeGreaterThanOrEqual(1);
   });
 
   it("ws_send rejection is caught without crash", async () => {
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
+    await openSocket(client);
 
-    emitTauriEvent(
-      "ws-message",
-      JSON.stringify({
-        type: "auth_ok",
-        seq: 1,
-        payload: {
-          user: { id: 1, username: "a", avatar: null, role: "admin" },
-          server_name: "S",
-          motd: "",
-        },
-      }),
-    );
+    emitAuthOk({ seq: 1 });
 
     // Make ws_send reject
-    mockInvoke.mockImplementation(async (cmd: string) => {
-      if (cmd === "ws_send") throw new Error("send failed");
-      return undefined;
-    });
+    rejectWsSend("send failed");
 
     // Send should not crash despite ws_send rejection
-    client.send({
-      type: "chat_send",
-      payload: { channel_id: 1, content: "hi", reply_to: null, attachments: [] },
-    });
+    sendChat(client);
 
     // Flush promise to trigger the catch
     await vi.advanceTimersByTimeAsync(10);
@@ -748,34 +513,14 @@ describe("send edge cases", () => {
   });
 
   it("onSendFailure fires with NETWORK when ws_send hits backpressure (channel full)", async () => {
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
-    emitTauriEvent(
-      "ws-message",
-      JSON.stringify({
-        type: "auth_ok",
-        seq: 1,
-        payload: {
-          user: { id: 1, username: "a", avatar: null, role: "admin" },
-          server_name: "S",
-          motd: "",
-        },
-      }),
-    );
+    await openSocket(client);
+    emitAuthOk({ seq: 1 });
 
-    mockInvoke.mockImplementation(async (cmd: string) => {
-      if (cmd === "ws_send") throw new Error("ws_send: channel full, message dropped");
-      return undefined;
-    });
+    rejectWsSend("ws_send: channel full, message dropped");
 
-    const failures: Array<{ id: string; code: string }> = [];
-    client.onSendFailure((id, code) => failures.push({ id, code }));
+    const failures = trackSendFailures(client);
 
-    const id = client.send({
-      type: "chat_send",
-      payload: { channel_id: 1, content: "hi", reply_to: null, attachments: [] },
-    });
+    const id = sendChat(client);
     await vi.advanceTimersByTimeAsync(10);
     expectConsole("warn", /\[ws\] ws_send: outbound channel full, message dropped/);
 
@@ -783,34 +528,14 @@ describe("send edge cases", () => {
   });
 
   it("onSendFailure fires with OFFLINE when ws_send reports the channel closed", async () => {
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
-    emitTauriEvent(
-      "ws-message",
-      JSON.stringify({
-        type: "auth_ok",
-        seq: 1,
-        payload: {
-          user: { id: 1, username: "a", avatar: null, role: "admin" },
-          server_name: "S",
-          motd: "",
-        },
-      }),
-    );
+    await openSocket(client);
+    emitAuthOk({ seq: 1 });
 
-    mockInvoke.mockImplementation(async (cmd: string) => {
-      if (cmd === "ws_send") throw new Error("ws_send: channel closed");
-      return undefined;
-    });
+    rejectWsSend("ws_send: channel closed");
 
-    const failures: Array<{ id: string; code: string }> = [];
-    client.onSendFailure((id, code) => failures.push({ id, code }));
+    const failures = trackSendFailures(client);
 
-    const id = client.send({
-      type: "chat_send",
-      payload: { channel_id: 1, content: "hi", reply_to: null, attachments: [] },
-    });
+    const id = sendChat(client);
     await vi.advanceTimersByTimeAsync(10);
     expectConsole("error", /\[ws\] ws_send failed/);
 
@@ -818,32 +543,15 @@ describe("send edge cases", () => {
   });
 
   it("onSendFailure fires with OFFLINE when sending while the proxy is not open", async () => {
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
-    emitTauriEvent(
-      "ws-message",
-      JSON.stringify({
-        type: "auth_ok",
-        seq: 1,
-        payload: {
-          user: { id: 1, username: "a", avatar: null, role: "admin" },
-          server_name: "S",
-          motd: "",
-        },
-      }),
-    );
+    await openSocket(client);
+    emitAuthOk({ seq: 1 });
 
     // Drop the proxy: subsequent sends take the not-open early return.
     emitTauriEvent("ws-state", "closed");
 
-    const failures: Array<{ id: string; code: string }> = [];
-    client.onSendFailure((id, code) => failures.push({ id, code }));
+    const failures = trackSendFailures(client);
 
-    const id = client.send({
-      type: "chat_send",
-      payload: { channel_id: 1, content: "hi", reply_to: null, attachments: [] },
-    });
+    const id = sendChat(client);
     expectConsole("warn", /\[ws\] Cannot send, WebSocket not open/);
     // The early-return notification is deferred a microtask so callers can
     // register the id (optimistic row) before the failure lands.
@@ -854,29 +562,12 @@ describe("send edge cases", () => {
   });
 
   it("heartbeat ping failures do not fire onSendFailure (no envelope id)", async () => {
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
-    emitTauriEvent(
-      "ws-message",
-      JSON.stringify({
-        type: "auth_ok",
-        seq: 1,
-        payload: {
-          user: { id: 1, username: "a", avatar: null, role: "admin" },
-          server_name: "S",
-          motd: "",
-        },
-      }),
-    );
+    await openSocket(client);
+    emitAuthOk({ seq: 1 });
 
-    mockInvoke.mockImplementation(async (cmd: string) => {
-      if (cmd === "ws_send") throw new Error("ws_send: channel full, message dropped");
-      return undefined;
-    });
+    rejectWsSend("ws_send: channel full, message dropped");
 
-    const failures: Array<{ id: string; code: string }> = [];
-    client.onSendFailure((id, code) => failures.push({ id, code }));
+    const failures = trackSendFailures(client);
 
     // Let the 30s heartbeat fire (and its ws_send reject).
     await vi.advanceTimersByTimeAsync(30_100);
@@ -886,35 +577,16 @@ describe("send edge cases", () => {
   });
 
   it("onSendFailure unsubscribe works", async () => {
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
-    emitTauriEvent(
-      "ws-message",
-      JSON.stringify({
-        type: "auth_ok",
-        seq: 1,
-        payload: {
-          user: { id: 1, username: "a", avatar: null, role: "admin" },
-          server_name: "S",
-          motd: "",
-        },
-      }),
-    );
+    await openSocket(client);
+    emitAuthOk({ seq: 1 });
 
-    mockInvoke.mockImplementation(async (cmd: string) => {
-      if (cmd === "ws_send") throw new Error("ws_send: channel full, message dropped");
-      return undefined;
-    });
+    rejectWsSend("ws_send: channel full, message dropped");
 
     const failures: Array<{ id: string; code: string }> = [];
     const unsub = client.onSendFailure((id, code) => failures.push({ id, code }));
     unsub();
 
-    client.send({
-      type: "chat_send",
-      payload: { channel_id: 1, content: "hi", reply_to: null, attachments: [] },
-    });
+    sendChat(client);
     await vi.advanceTimersByTimeAsync(10);
     expectConsole("warn", /\[ws\] ws_send: outbound channel full, message dropped/);
 
@@ -922,22 +594,9 @@ describe("send edge cases", () => {
   });
 
   it("ws_disconnect error is ignored during disconnectProxy", async () => {
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
+    await openSocket(client);
 
-    emitTauriEvent(
-      "ws-message",
-      JSON.stringify({
-        type: "auth_ok",
-        seq: 1,
-        payload: {
-          user: { id: 1, username: "a", avatar: null, role: "admin" },
-          server_name: "S",
-          motd: "",
-        },
-      }),
-    );
+    emitAuthOk({ seq: 1 });
 
     // Make ws_disconnect throw
     mockInvoke.mockImplementation(async (cmd: string) => {
@@ -960,24 +619,11 @@ describe("send edge cases", () => {
     await vi.advanceTimersByTimeAsync(10);
     emitTauriEvent("ws-state", "open");
 
-    emitTauriEvent(
-      "ws-message",
-      JSON.stringify({
-        type: "auth_ok",
-        seq: 1,
-        payload: {
-          user: { id: 1, username: "a", avatar: null, role: "admin" },
-          server_name: "S",
-          motd: "",
-        },
-      }),
-    );
+    emitAuthOk({ seq: 1 });
 
     // Force multiple reconnect attempts to ramp up backoff
     for (let i = 0; i < 5; i++) {
-      emitTauriEvent("ws-state", "closed");
-      await vi.advanceTimersByTimeAsync(10_000); // well past any backoff
-      emitTauriEvent("ws-state", "open");
+      await dropAndReopen(10_000); // well past any backoff
       emitTauriEvent(
         "ws-message",
         JSON.stringify({
