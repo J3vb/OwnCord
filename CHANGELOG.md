@@ -124,6 +124,7 @@ and only when it changes something a contributor or fork holder must do
 **Desktop UI**
 
 - Turning Role Colors on or off in Settings > Accessibility now recolours the usernames already in the chat, without reopening the channel.
+- The Media panel and the Pinned messages panel stayed open when you clicked outside them — a click anywhere else now closes them.
 
 **Phones and touch screens**
 
