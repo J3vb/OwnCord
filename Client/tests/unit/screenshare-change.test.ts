@@ -25,7 +25,12 @@ vi.mock("livekit-client", (importOriginal) =>
 );
 
 const setH264GpuProfiles = vi.hoisted(() => vi.fn());
-vi.mock("@lib/voice/h264Profile", () => ({ setH264GpuProfiles }));
+const fitGpuH264Share = vi.hoisted(() => vi.fn(() => Promise.resolve()));
+vi.mock("@lib/voice/h264Profile", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@lib/voice/h264Profile")>()),
+  setH264GpuProfiles,
+  fitGpuH264Share,
+}));
 vi.mock("../../src/features/voice/videoCodec", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../src/features/voice/videoCodec")>()),
   h264GpuPublish: (codec: string) => codec === "h264",
@@ -166,6 +171,51 @@ describe("changeScreenshareSource", () => {
     expect(setH264GpuProfiles).toHaveBeenCalledWith(freshVideo!.mediaStreamTrack, true);
     expect(logs.find("Screenshare source changed")[0]!.component).toBe("screenShare");
   });
+
+  it("fits a GPU H.264 share's new capture to the encoder before the sender gets it", async () => {
+    fitGpuH264Share.mockClear();
+    const rig = setup(false);
+    rig.state.published = "h264";
+    const [freshVideo] = picked(false);
+
+    await changeScreenshareSource(rig.state, rig.deps);
+
+    expect(fitGpuH264Share).toHaveBeenCalledExactlyOnceWith(freshVideo!.mediaStreamTrack);
+    expect(fitGpuH264Share.mock.invocationCallOrder[0]!).toBeLessThan(
+      rig.video.replaceTrack.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it("leaves a VP8 share's new capture at its size", async () => {
+    fitGpuH264Share.mockClear();
+    const rig = setup(false);
+    rig.state.published = "vp8";
+    picked(false);
+
+    await changeScreenshareSource(rig.state, rig.deps);
+
+    expect(fitGpuH264Share).not.toHaveBeenCalled();
+    expect(rig.video.replaceTrack).toHaveBeenCalled();
+  });
+
+  it.each(takenShareCases(1))(
+    "drops the new capture when %s took the share while it was being fitted",
+    async (_n, act) => {
+      const rig = setup(false);
+      rig.state.published = "h264";
+      const [freshVideo] = picked(false);
+      fitGpuH264Share.mockImplementationOnce(() => {
+        act(rig);
+        return Promise.resolve();
+      });
+
+      await changeScreenshareSource(rig.state, rig.deps);
+
+      expect(rig.video.replaceTrack).not.toHaveBeenCalled();
+      expect(freshVideo!.mediaStreamTrack.stop).toHaveBeenCalled();
+      expect(rig.state.changing).toBe(false);
+    },
+  );
 
   it("swaps the capture under the same publication and tells the server nothing", async () => {
     const rig = setup(false);
@@ -995,6 +1045,34 @@ describe("setScreenshareQuality on the web", () => {
       frameRate: 30,
     });
     expect(rig.state.quality).toBe("source");
+  });
+
+  it("holds a GPU H.264 share at Source to the encoder's limit and keeps its 60 fps", async () => {
+    const rig = setup(false);
+    rig.state.published = "h264";
+    rig.state.fps = 60;
+
+    await setScreenshareQuality(rig.state, rig.deps, "source");
+
+    expect(rig.video.mediaStreamTrack.applyConstraints).toHaveBeenCalledExactlyOnceWith({
+      width: { max: 3840 },
+      height: { max: 2160 },
+      frameRate: 60,
+    });
+    expect(rig.state.quality).toBe("source");
+  });
+
+  it("keeps a preset's own size on a GPU H.264 share", async () => {
+    const rig = setup(false);
+    rig.state.published = "h264";
+
+    await setScreenshareQuality(rig.state, rig.deps, "high");
+
+    expect(rig.video.mediaStreamTrack.applyConstraints).toHaveBeenCalledExactlyOnceWith({
+      width: { max: 1920 },
+      height: { max: 1080 },
+      frameRate: 30,
+    });
   });
 
   it("sets the track again on its sender with the user's own track kept, then reports", async () => {

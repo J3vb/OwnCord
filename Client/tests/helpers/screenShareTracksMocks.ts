@@ -13,6 +13,8 @@ export const offer120 = { value: false };
 
 export const setH264GpuProfiles = vi.fn();
 
+export const fitGpuH264Share = vi.fn(() => Promise.resolve());
+
 export const gpuProfiles = { value: false };
 
 export const nativeCameraSupport = vi.fn();
@@ -27,7 +29,7 @@ export async function voiceShareFpsMock(importOriginal: <T>() => Promise<T>) {
 }
 
 export function voiceH264ProfileMock() {
-  return { setH264GpuProfiles };
+  return { setH264GpuProfiles, fitGpuH264Share };
 }
 
 export async function voiceVideoCodecMock(importOriginal: <T>() => Promise<T>) {

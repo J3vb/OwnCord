@@ -1,5 +1,6 @@
 /**
- * Which H.264 profiles a camera or screen share offers to LiveKit.
+ * Which H.264 profiles a camera or screen share offers to LiveKit, and the
+ * frame size a graphics-card H.264 screen share is held to.
  *
  * WebView2 encodes H.264 Main and High on the graphics card, but Constrained
  * Baseline only in software (OpenH264), and LiveKit's answer puts Constrained
@@ -37,6 +38,52 @@ export function setH264GpuProfiles(track: MediaStreamTrack, gpuProfiles: boolean
   }
   installOfferHook();
   markedTracks.add(track);
+}
+
+/** The largest frame WebView2's graphics-card H.264 encoder takes: edge://gpu
+ *  lists hardware H.264 encode up to 3840x2160. A larger frame, such as a
+ *  5120x1440 screen shared at Source, makes WebRTC fall back to OpenH264, and
+ *  the live check in `codecSwitch` then turns the share into VP8. */
+export const GPU_H264_MAX_WIDTH = 3840;
+export const GPU_H264_MAX_HEIGHT = 2160;
+
+export interface FrameSize {
+  readonly width: number;
+  readonly height: number;
+}
+
+/** The size box a GPU H.264 share is held to: `cap` (a quality preset's size,
+ *  or none for Source) shrunk to fit the encoder's limit. */
+export function gpuH264SizeCap(cap?: FrameSize): FrameSize {
+  return {
+    width: Math.min(cap?.width ?? GPU_H264_MAX_WIDTH, GPU_H264_MAX_WIDTH),
+    height: Math.min(cap?.height ?? GPU_H264_MAX_HEIGHT, GPU_H264_MAX_HEIGHT),
+  };
+}
+
+/** Shrink a GPU H.264 share's capture to fit the encoder before it reaches
+ *  the sender, keeping its aspect ratio and frame rate. A capture that
+ *  already fits is left alone. `applyConstraints` replaces every constraint
+ *  the capture was opened with, so the frame rate is passed again. A refusal
+ *  is only logged: the share then runs at full size and the live check still
+ *  catches a software fallback. */
+export async function fitGpuH264Share(track: MediaStreamTrack): Promise<void> {
+  const { width, height, frameRate } = track.getSettings();
+  if (width === undefined || height === undefined) return;
+  if (width <= GPU_H264_MAX_WIDTH && height <= GPU_H264_MAX_HEIGHT) return;
+  try {
+    await track.applyConstraints({
+      width: { max: GPU_H264_MAX_WIDTH },
+      height: { max: GPU_H264_MAX_HEIGHT },
+      ...(frameRate === undefined ? {} : { frameRate }),
+    });
+    log.info("Screen share shrunk to fit the GPU H.264 encoder", {
+      from: `${width}x${height}`,
+      frameRate,
+    });
+  } catch (err) {
+    log.warn("Could not shrink the screen share to fit the GPU H.264 encoder", err);
+  }
 }
 
 /** Whether an H.264 fmtp line is Baseline or Constrained Baseline: profile_idc

@@ -48,6 +48,7 @@ const {
   loadPref,
   offer120,
   setH264GpuProfiles,
+  fitGpuH264Share,
   gpuProfiles,
 } = mocks;
 
@@ -369,6 +370,33 @@ describe("video codec", () => {
     expect(setH264GpuProfiles).toHaveBeenCalledWith(video.mediaStreamTrack, true);
     const publishOrder = rig.publishTrack.mock.invocationCallOrder[0]!;
     expect(setH264GpuProfiles.mock.invocationCallOrder[0]!).toBeLessThan(publishOrder);
+  });
+
+  it("fits a GPU H.264 share to the encoder's size before publishing it", async () => {
+    prefs({ videoCodec: "h264" });
+    gpuProfiles.value = true;
+    const rig = fakeRoom();
+    const video = fakeVideoTrack();
+    createLocalScreenTracks.mockResolvedValue([video]);
+
+    await enableScreenshare({ manualScreenTracks: [] }, fakeDeps(rig.room));
+
+    expect(fitGpuH264Share).toHaveBeenCalledExactlyOnceWith(video.mediaStreamTrack);
+    expect(fitGpuH264Share.mock.invocationCallOrder[0]!).toBeLessThan(
+      rig.publishTrack.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it("leaves a VP8 share's size alone", async () => {
+    prefs({ videoCodec: "vp8" });
+    gpuProfiles.value = true;
+    const rig = fakeRoom();
+    createLocalScreenTracks.mockResolvedValue([fakeVideoTrack()]);
+
+    await enableScreenshare({ manualScreenTracks: [] }, fakeDeps(rig.room));
+
+    expect(fitGpuH264Share).not.toHaveBeenCalled();
+    expect(rig.publishTrack).toHaveBeenCalled();
   });
 
   it("marks an H.264 camera where the GPU profiles apply", async () => {

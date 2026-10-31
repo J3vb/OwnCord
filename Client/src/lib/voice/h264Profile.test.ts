@@ -44,7 +44,8 @@ class FakePeerConnection {
 vi.stubGlobal("RTCPeerConnection", FakePeerConnection);
 vi.stubGlobal("RTCRtpSender", { getCapabilities: () => ({ codecs: CAPABILITIES }) });
 
-const { setH264GpuProfiles, nonBaselineH264Order } = await import("./h264Profile");
+const { setH264GpuProfiles, nonBaselineH264Order, gpuH264SizeCap, fitGpuH264Share } =
+  await import("./h264Profile");
 
 function videoTrack(): MediaStreamTrack {
   return { kind: "video" } as MediaStreamTrack;
@@ -199,5 +200,62 @@ describe("setH264GpuProfiles", () => {
     await expect(offer()).resolves.toBeUndefined();
     expectConsole("warn", "Could not prefer H.264 Main/High");
     expect(offers).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("gpuH264SizeCap", () => {
+  it("holds Source to the GPU encoder's 3840x2160", () => {
+    expect(gpuH264SizeCap()).toEqual({ width: 3840, height: 2160 });
+  });
+
+  it("keeps a preset that already fits", () => {
+    expect(gpuH264SizeCap({ width: 1920, height: 1080 })).toEqual({ width: 1920, height: 1080 });
+  });
+});
+
+function capture(settings: MediaTrackSettings) {
+  const applyConstraints = vi.fn<(c: MediaTrackConstraints) => Promise<void>>(() =>
+    Promise.resolve(),
+  );
+  const track = { getSettings: () => settings, applyConstraints } as unknown as MediaStreamTrack;
+  return { track, applyConstraints };
+}
+
+describe("fitGpuH264Share", () => {
+  it("shrinks a 5120x1440 screen to the GPU encoder's limit and keeps its 60 fps", async () => {
+    const { track, applyConstraints } = capture({ width: 5120, height: 1440, frameRate: 60 });
+
+    await fitGpuH264Share(track);
+
+    expect(applyConstraints).toHaveBeenCalledExactlyOnceWith({
+      width: { max: 3840 },
+      height: { max: 2160 },
+      frameRate: 60,
+    });
+  });
+
+  it("leaves a capture that already fits alone", async () => {
+    const { track, applyConstraints } = capture({ width: 3840, height: 2160, frameRate: 30 });
+
+    await fitGpuH264Share(track);
+
+    expect(applyConstraints).not.toHaveBeenCalled();
+  });
+
+  it("leaves a capture with no reported size alone", async () => {
+    const { track, applyConstraints } = capture({ frameRate: 30 });
+
+    await fitGpuH264Share(track);
+
+    expect(applyConstraints).not.toHaveBeenCalled();
+  });
+
+  it("logs a refusal and lets the share go on at full size", async () => {
+    const { track, applyConstraints } = capture({ width: 5120, height: 1440 });
+    applyConstraints.mockRejectedValueOnce(new DOMException("over", "OverconstrainedError"));
+
+    await expect(fitGpuH264Share(track)).resolves.toBeUndefined();
+    expectConsole("warn", "Could not shrink the screen share");
+    expect(applyConstraints).toHaveBeenCalledWith({ width: { max: 3840 }, height: { max: 2160 } });
   });
 });

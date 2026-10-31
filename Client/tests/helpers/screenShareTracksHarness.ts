@@ -8,6 +8,7 @@ import {
   loadPref,
   offer120,
   setH264GpuProfiles,
+  fitGpuH264Share,
   gpuProfiles,
   nativeCameraSupport,
 } from "./screenShareTracksMocks";
@@ -134,6 +135,7 @@ export function useScreenShareTracksHarness(): void {
     offer120.value = false;
     gpuProfiles.value = false;
     setH264GpuProfiles.mockReset();
+    fitGpuH264Share.mockClear();
     createLocalVideoTrack.mockReset();
     createLocalScreenTracks.mockReset();
     loadPref.mockReset().mockReturnValue("");

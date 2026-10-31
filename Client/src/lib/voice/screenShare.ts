@@ -21,7 +21,7 @@ import {
   voiceStore,
 } from "@stores/voice.store";
 import { loadPref } from "@lib/prefs/preferences";
-import { setH264GpuProfiles } from "@lib/voice/h264Profile";
+import { fitGpuH264Share, setH264GpuProfiles } from "@lib/voice/h264Profile";
 import { createLogger } from "@lib/logger";
 import { showToast } from "@lib/ui/toast";
 import {
@@ -625,9 +625,12 @@ export async function enableScreenshare(
             channelPeerDecode,
           );
     const videoCodec = choice.codec;
+    if (videoTrack !== undefined && h264GpuPublish(videoCodec)) {
+      await fitGpuH264Share(videoTrack.mediaStreamTrack);
+    }
     if ((state.generation ?? 0) !== generation || state.manualScreenTracks !== screenTracks) {
       // A disableScreenshare (or the OS stop-sharing button) ran to
-      // completion while Auto's probe was pending: it already stopped these
+      // completion while Auto's probe or the GPU fit was pending: it already stopped these
       // tracks and sent voice_screenshare(false). Nothing is published yet.
       removeEndedListener?.();
       for (const t of screenTracks) t.stop();
