@@ -70,6 +70,15 @@ pub struct CameraDevice {
     pub index: u16,
 }
 
+/// `gst::init` with GStreamer's plugin-load fault trap off. The trap catches
+/// a fault while a plugin loads and ends the process with `exit(-1)`, which
+/// leaves no crash line and no core dump; without it a fault reaches the
+/// crash log like any other.
+fn init_gst() -> Result<(), gst::glib::Error> {
+    gst::segtrap_set_enabled(false);
+    gst::init()
+}
+
 /// The device property that carries a stable path. V4L2 uses `device.path`
 /// (`/dev/video0`); PipeWire's monitor uses `pipewire.path` or `object.path`
 /// depending on the release. The first present wins, then the display name.
@@ -111,7 +120,7 @@ fn colour_first(mut devices: Vec<CameraDevice>) -> Vec<CameraDevice> {
 /// PipeWire virtual cameras. Blocking (the monitor starts a discovery pass).
 pub fn list_devices() -> Vec<CameraDevice> {
     // The monitor needs GStreamer initialised; a failure just means no list.
-    if gst::init().is_err() {
+    if init_gst().is_err() {
         return Vec::new();
     }
     let monitor = gst::DeviceMonitor::new();
@@ -208,7 +217,7 @@ fn support_with(init: bool, find: &dyn Fn(&str) -> bool) -> CameraSupport {
 /// `pipewiresrc`, lists no cameras and cannot capture; this tells the webview
 /// why instead of leaving an unexplained empty list.
 pub fn support() -> CameraSupport {
-    support_with(gst::init().is_ok(), &|name| {
+    support_with(init_gst().is_ok(), &|name| {
         gst::ElementFactory::find(name).is_some()
     })
 }
@@ -541,7 +550,7 @@ fn copy_out_of_pipewire(source: &gst::Element) {
 /// Re-find the monitored device with this id and let it build its element; the
 /// monitor knows which backend (V4L2, PipeWire) the id belongs to.
 fn monitor_element(id: &str, direct: bool) -> Option<(gst::Element, Option<gst::Caps>, bool)> {
-    if gst::init().is_err() {
+    if init_gst().is_err() {
         return None;
     }
     let monitor = gst::DeviceMonitor::new();

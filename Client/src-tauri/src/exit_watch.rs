@@ -245,12 +245,17 @@ fn write_run_file(watch: &Watch) {
         since if since < 0 => "answering".to_string(),
         since => format!("not answering for {}", duration_text(m - since)),
     };
+    // Which native captures were running: a crash that leaves no signal line
+    // (a thread whose stack was gone, an `exit()` inside a library) is read
+    // on the next start, and "camera and screen capturing" is the lead.
     let body = format!(
-        "version={}\nstarted={}\nlast_seen={}\nstate={state}\n{}\nmain_thread={main}\nwebview={webview}\n",
+        "version={}\nstarted={}\nlast_seen={}\nstate={state}\n{}\nmain_thread={main}\nwebview={webview}\ncaptures=camera:{} screen:{}\n",
         watch.version,
         utc(watch.started),
         utc(t),
         memory_text().replace(", ", "\n"),
+        crate::native_voice::camera::active_captures(),
+        crate::native_voice::screen::active_captures(),
     );
     if let Err(e) = crate::json_store::write_atomic(&watch.run_file, body.as_bytes()) {
         log::debug!("[exit] run file not written: {e}");
