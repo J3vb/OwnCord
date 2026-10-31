@@ -229,10 +229,10 @@ async function saveUploadLimit(uid){
 }
 
 function memberRowHtml(u,storage){
-  const guard=memberGuard(u);const items=guard?[]:memberMenuItems(u);
+  const guard=memberGuard(u);const items=memberMenuItems(u);
   const initial=u.username?u.username[0].toUpperCase():'?';
   const name=esc(u.username);
-  const more=guard?MEMBER_GUARD_TEXT[guard]:items.length?'More actions for '+u.username:'No other actions available for '+u.username;
+  const more=items.length?'More actions for '+u.username:guard?MEMBER_GUARD_TEXT[guard]:'No other actions available for '+u.username;
   const role=memberChipsHtml(u,null);
   return'<tr><td><div class="member-cell"><span class="avatar" aria-hidden="true" style="background:var(--accent)">'+esc(initial)+'</span><div><strong>'+name+'</strong>'+(guard?' <span class="badge '+(guard==='self'?'badge-accent':'badge-muted')+'" title="'+esc(MEMBER_GUARD_TEXT[guard])+'">'+MEMBER_GUARD_BADGE[guard]+'</span>':'')+(u.display_name?'<div class="member-sub member-nick">'+esc(u.display_name)+'</div>':'')+'<div class="member-role-inline">'+role+'</div></div></div></td>'
     +'<td class="col-role">'+role+'</td>'
@@ -256,10 +256,13 @@ function canIssueRecoveryTo(u){
 /* The overflow menu's actions, gated like their routes. Erasure (B4-9) is the
    only irreversible action in the panel, so it sits last behind a separator
    rather than beside Force Logout — a slip aimed at a reversible item must not
-   be able to reach it. */
+   be able to reach it. Upload limit is not moderation, so it stays on your own
+   row; every other item needs a member ranked below you. */
 function memberMenuItems(u){
   const banned=effectiveBan(u);const items=[];
   if(can(PERM.MANAGE_SERVER))items.push(['openUploadLimit','Upload limit',I.upload,[u.id,u.username]]);
+  const guard=memberGuard(u);
+  if(guard)return guard==='self'?items:[];
   if(can(PERM.KICK_MEMBERS))items.push(['forceLogout','Force logout',I.disconnect,[u.id]]);
   if(canIssueRecoveryTo(u)&&!banned)items.push(['openIssueRecovery','Issue recovery credential',I.lock,[u.id,u.username]]);
   if(can(PERM.BAN_MEMBERS))items.push(banned?['unbanUser','Unban',I.check,[u.id]]:['openBanUser','Ban',I.ban,[u.id,u.username],'danger']);
