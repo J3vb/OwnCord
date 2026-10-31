@@ -132,6 +132,8 @@ export const SETTINGS_SEARCH_INDEX: Readonly<Record<SearchableTab, () => readonl
     s("voiceAudio.videoDevice"),
     s("voiceAudio.autoPlayCameras"),
     s("voiceAudio.autoPlayCamerasDesc"),
+    s("voiceAudio.mirrorSelfCamera"),
+    s("voiceAudio.mirrorSelfCameraDesc"),
     s("voiceAudio.cameraQuality"),
     s("voiceAudio.cameraQualityDesc"),
     ...desktopOnly(

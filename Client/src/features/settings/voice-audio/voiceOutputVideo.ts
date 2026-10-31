@@ -6,6 +6,11 @@ import { createElement, appendChildren, setText } from "@lib/dom";
 import { loadPref, savePref, createToggle } from "../helpers";
 import { SHARE_FPS_OPTIONS, offeredShareFps } from "@lib/voice/shareFps";
 import { AUTO_PLAY_CAMERAS_PREF, autoPlayCameras } from "../../voice/autoPlayCameras";
+import {
+  MIRROR_SELF_CAMERA_PREF,
+  applyMirrorSelfCamera,
+  mirrorSelfCamera,
+} from "@lib/prefs/appearance";
 import { setOutputVolume } from "@lib/voice/livekitSession";
 import { isLinuxDesktop } from "../../voice/native/platform";
 import {
@@ -246,6 +251,30 @@ export function mountOutputAndVideo(sc: VoiceTabScope): void {
   );
 
   sc.cameraCard.appendChild(sc.autoPlayRow);
+
+  const mirrorRow = createElement("div", {
+    class: "setting-row",
+    "data-testid": "mirror-self-camera",
+  });
+  const mirrorInfo = createElement("div", {});
+  appendChildren(
+    mirrorInfo,
+    createElement("div", { class: "setting-label" }, t("voiceAudio.mirrorSelfCamera")),
+    createElement("div", { class: "setting-desc" }, t("voiceAudio.mirrorSelfCameraDesc")),
+  );
+  appendChildren(
+    mirrorRow,
+    mirrorInfo,
+    createToggle(mirrorSelfCamera(), {
+      signal: sc.signal,
+      label: t("voiceAudio.mirrorSelfCamera"),
+      onChange: (nowOn) => {
+        savePref(MIRROR_SELF_CAMERA_PREF, nowOn);
+        applyMirrorSelfCamera(nowOn);
+      },
+    }),
+  );
+  sc.cameraCard.appendChild(mirrorRow);
 
   // Camera preview
   sc.previewWrap = createElement("div", { class: "camera-preview" });

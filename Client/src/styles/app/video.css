@@ -105,7 +105,7 @@ video[hidden] + .video-surface {
 }
 /* Ctrl + wheel zoom and drag pan (lib/ui/zoomPan.ts bindVideoZoom): the host
    tile or pop-out carries the view, its picture shows it. The individual
-   properties apply outside `transform`, so your own camera's mirror stays. */
+   properties apply outside `transform`, so a mirrored own camera stays mirrored. */
 .video-cell video,
 .video-cell .video-surface,
 .video-popout video,
@@ -130,10 +130,11 @@ video[hidden] + .video-surface {
   object-fit: cover;
 }
 
-/* Your own camera is mirrored, as every call app shows it; others see it
-   unmirrored. A screen share never carries this class. */
-.video-cell--self video,
-.video-cell--self .video-surface {
+/* Your own camera is mirrored while "Mirror my camera preview" is on (the
+   default); off, it shows what others see. Others always see it unmirrored. A screen share never carries this
+   class. */
+.mirror-self-camera .video-cell--self video,
+.mirror-self-camera .video-cell--self .video-surface {
   transform: scaleX(-1);
 }
 

@@ -576,7 +576,7 @@ describe("VideoGrid", () => {
     });
   });
 
-  describe("your own camera is mirrored", () => {
+  describe("your own camera tile", () => {
     /** Whether the cascaded transform for `selector` is exactly scaleX(-1). */
     function mirrored(selector: string): boolean {
       const d = cascadedDeclaration(selector, "transform")?.value;
@@ -618,9 +618,12 @@ describe("VideoGrid", () => {
       expect(cell.classList.contains("video-cell--self")).toBe(false);
     });
 
-    it("flips the self tile's video and the settings camera preview horizontally", () => {
-      expect(mirrored(".video-cell--self video")).toBe(true);
-      expect(mirrored(".camera-preview video")).toBe(true);
+    it("shows your own camera as others see it unless Mirror my camera preview is on", () => {
+      expect(mirrored(".video-cell--self video")).toBe(false);
+      expect(mirrored(".camera-preview video")).toBe(false);
+      expect(mirrored(".mirror-self-camera .video-cell--self video")).toBe(true);
+      expect(mirrored(".mirror-self-camera .video-cell--self .video-surface")).toBe(true);
+      expect(mirrored(".mirror-self-camera .camera-preview video")).toBe(true);
       expect(mirrored(".video-cell video")).toBe(false);
     });
   });

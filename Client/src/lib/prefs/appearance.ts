@@ -82,6 +82,18 @@ export function applySaturation(): void {
   root.classList.toggle("custom-saturation", pct !== DEFAULT_SATURATION_PCT);
 }
 
+export const MIRROR_SELF_CAMERA_PREF = "mirrorSelfCamera";
+
+/** Your own camera preview is mirrored (default on), or shows what others
+ *  see when off; others always get the unflipped picture either way. */
+export function mirrorSelfCamera(): boolean {
+  return loadPref<boolean>(MIRROR_SELF_CAMERA_PREF, true);
+}
+
+export function applyMirrorSelfCamera(on: boolean = mirrorSelfCamera()): void {
+  document.documentElement.classList.toggle("mirror-self-camera", on);
+}
+
 /**
  * Apply stored appearance preferences (theme, font size, compact mode).
  * Call at app startup so the UI doesn't flash default styles.
@@ -108,6 +120,7 @@ export function applyStoredAppearance(): void {
     loadPref<boolean>("highContrast", false),
   );
   document.documentElement.classList.toggle("large-font", loadPref<boolean>("largeFont", false));
+  applyMirrorSelfCamera();
 
   syncOsMotionListener(loadPref<boolean>("syncOsMotion", SYNC_OS_MOTION_DEFAULT));
 }

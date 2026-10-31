@@ -41,7 +41,7 @@ describe("VoiceAudioTab UI structure", () => {
     const { ac, el } = mountTab();
 
     const settingRows = el.querySelectorAll(
-      ".setting-row:not([data-testid='auto-sensitivity']):not([data-testid='mic-test']):not([data-testid='auto-play-cameras'])",
+      ".setting-row:not([data-testid='auto-sensitivity']):not([data-testid='mic-test']):not([data-testid='auto-play-cameras']):not([data-testid='mirror-self-camera'])",
     );
     // 4 toggles: echo cancellation, noise suppression, auto gain control, enhanced NS
     expect(settingRows.length).toBe(4);
@@ -60,13 +60,30 @@ describe("VoiceAudioTab UI structure", () => {
     ac.abort();
   });
 
+  it("Mirror my camera preview is on by default and flips the preview at once", () => {
+    stubNavigator();
+    const { ac, el } = mountTab();
+
+    const toggle = el.querySelector<HTMLElement>("[data-testid='mirror-self-camera'] .toggle")!;
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+    expect(toggle.getAttribute("aria-label")).toBe("Mirror my camera preview");
+    toggle.click();
+    expect(localStorage.getItem("owncord:settings:mirrorSelfCamera")).toBe("false");
+    expect(document.documentElement.classList.contains("mirror-self-camera")).toBe(false);
+    toggle.click();
+    expect(localStorage.getItem("owncord:settings:mirrorSelfCamera")).toBe("true");
+    expect(document.documentElement.classList.contains("mirror-self-camera")).toBe(true);
+    document.documentElement.classList.remove("mirror-self-camera");
+    ac.abort();
+  });
+
   it("audio toggle calls reapplyAudioProcessing when changed", () => {
     stubNavigator();
     const { ac, el } = mountTab();
 
     // Toggles are divs with class "toggle" (not buttons)
     const toggleDiv = el.querySelector(
-      ".setting-row:not([data-testid='auto-sensitivity']):not([data-testid='auto-play-cameras']) .toggle",
+      ".setting-row:not([data-testid='auto-sensitivity']):not([data-testid='auto-play-cameras']):not([data-testid='mirror-self-camera']) .toggle",
     ) as HTMLElement;
     expect(toggleDiv).not.toBeNull();
     toggleDiv.click();
