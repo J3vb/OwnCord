@@ -3,7 +3,6 @@ import { createEditChannelModal } from "@components/EditChannelModal";
 import { ApiClientError } from "@lib/api";
 import { applyReadyCapabilities, resetServerCapabilities } from "@lib/net/serverCapabilities";
 import { Permission, type ForumSettings, type ForumSettingsBody } from "@lib/types";
-import { authStore } from "@stores/auth.store";
 import { setRoles, updateChannel } from "@stores/channels.store";
 import {
   draftFromForum,
@@ -13,18 +12,13 @@ import {
   validateDraft,
 } from "../../src/features/forums/forumSettingsModel";
 import { FORUM, seedForum } from "../helpers/forum-fixtures";
+import { signInAs } from "../helpers/storeSeeds";
 
 const MEMBER = Permission.READ_MESSAGES | Permission.SEND_MESSAGES;
 
 function signInWith(permissions: number): void {
   setRoles([{ id: 9, name: "Curator", color: null, permissions }]);
-  authStore.setState(() => ({
-    token: "tok",
-    user: { id: 1, username: "A", avatar: null, role: "Curator" },
-    serverName: "T",
-    motd: null,
-    isAuthenticated: true,
-  }));
+  signInAs({ id: 1, username: "A", avatar: null, role: "Curator" }, { serverName: "T" });
 }
 
 const FORUM_STATE: ForumSettings = {

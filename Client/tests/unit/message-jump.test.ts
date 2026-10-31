@@ -37,7 +37,6 @@ import {
 import type { Message } from "@stores/messages.store";
 import { channelsStore, setChannels } from "@stores/channels.store";
 import { setDmChannels } from "@stores/dm.store";
-import { authStore } from "@stores/auth.store";
 import { ApiClientError } from "@lib/api";
 import type { ApiClient } from "@lib/api";
 import type { MessageResponse, ReadyChannel } from "@lib/types";
@@ -46,6 +45,7 @@ import { buildMessage } from "../helpers/messageFactory";
 import { resetMessagesState, resetMembersState } from "../helpers/storeResets";
 import "../helpers/resizeObserverStub";
 import { useMountContainer } from "../helpers/mountContainer";
+import { signInAs, resetChannelsState } from "../helpers/storeSeeds";
 
 const CHANNELS: ReadyChannel[] = [
   { id: 1, name: "general", type: "text", category: null, position: 0 },
@@ -55,19 +55,11 @@ const CHANNELS: ReadyChannel[] = [
 function resetStores(): void {
   resetMessagesState();
   resetMembersState();
-  authStore.setState(() => ({
-    token: "t",
-    user: { id: 1, username: "alice", avatar: null, role: "member" },
-    serverName: null,
-    motd: null,
-    isAuthenticated: true,
-  }));
-  channelsStore.setState(() => ({
-    channels: new Map(),
-    activeChannelId: null,
-    roles: [],
-    categories: [],
-  }));
+  signInAs(
+    { id: 1, username: "alice", avatar: null, role: "member" },
+    { token: "t", serverName: null },
+  );
+  resetChannelsState();
   setChannels(CHANNELS);
   toastCalls.length = 0;
 }

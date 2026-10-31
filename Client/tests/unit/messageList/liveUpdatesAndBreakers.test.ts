@@ -3,7 +3,6 @@ import * as mocks from "../../helpers/messageListMocks";
 import type { MessageListOptions } from "@components/MessageList";
 import { messagesStore } from "@stores/messages.store";
 import { membersStore } from "@stores/members.store";
-import { authStore } from "@stores/auth.store";
 import type { Message } from "@stores/messages.store";
 import {
   resetSafetyStore,
@@ -20,6 +19,7 @@ import {
   MessageListComponent,
   useMessageListHarness,
 } from "../../helpers/messageListHarness";
+import { signInAs } from "../../helpers/storeSeeds";
 
 vi.mock("../../../src/components/message-list/attachments", (importOriginal) =>
   mocks.listAttachmentsMock(importOriginal),
@@ -225,13 +225,10 @@ describe("MessageList", () => {
     });
 
     it("re-resolves @mention highlighting on every rendered row on a rename (F3)", () => {
-      authStore.setState(() => ({
-        token: "t",
-        user: { id: 99, username: "me", avatar: null, role: "member" },
-        serverName: null,
-        motd: null,
-        isAuthenticated: true,
-      }));
+      signInAs(
+        { id: 99, username: "me", avatar: null, role: "member" },
+        { token: "t", serverName: null },
+      );
       membersStore.setState(() => ({
         members: new Map([
           [
@@ -279,13 +276,10 @@ describe("MessageList", () => {
     });
 
     it("wraps every newly-resolving @token across sibling prose nodes on a member join (F3)", () => {
-      authStore.setState(() => ({
-        token: "t",
-        user: { id: 99, username: "me", avatar: null, role: "member" },
-        serverName: null,
-        motd: null,
-        isAuthenticated: true,
-      }));
+      signInAs(
+        { id: 99, username: "me", avatar: null, role: "member" },
+        { token: "t", serverName: null },
+      );
       membersStore.setState(() => ({
         members: new Map([
           [2, { id: 2, username: "Bob", avatar: null, role: "member", status: "online" as const }],
@@ -343,13 +337,10 @@ describe("MessageList", () => {
     });
 
     it("does not promote an @token inside a rejected masked link to a pill (F3)", () => {
-      authStore.setState(() => ({
-        token: "t",
-        user: { id: 99, username: "me", avatar: null, role: "member" },
-        serverName: null,
-        motd: null,
-        isAuthenticated: true,
-      }));
+      signInAs(
+        { id: 99, username: "me", avatar: null, role: "member" },
+        { token: "t", serverName: null },
+      );
       membersStore.setState(() => ({
         members: new Map([
           [2, { id: 2, username: "Bob", avatar: null, role: "member", status: "online" as const }],
@@ -388,13 +379,10 @@ describe("MessageList", () => {
     });
 
     it("does not promote an @token inside a rejected bare URL to a pill (F3)", () => {
-      authStore.setState(() => ({
-        token: "t",
-        user: { id: 99, username: "me", avatar: null, role: "member" },
-        serverName: null,
-        motd: null,
-        isAuthenticated: true,
-      }));
+      signInAs(
+        { id: 99, username: "me", avatar: null, role: "member" },
+        { token: "t", serverName: null },
+      );
       membersStore.setState(() => ({
         members: new Map([
           [2, { id: 2, username: "Bob", avatar: null, role: "member", status: "online" as const }],

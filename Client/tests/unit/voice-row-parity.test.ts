@@ -59,6 +59,7 @@ import {
   type VoiceRowInputs,
 } from "../../src/features/channels/voiceRowModel";
 import type { ReadyChannel } from "../../src/lib/types";
+import { signInAs, resetChannelsState } from "../helpers/storeSeeds";
 
 const CH = 10;
 const SELF = 1;
@@ -170,19 +171,8 @@ describe("voice row view matches today's renderVoiceChannelItem", () => {
     localMuted.clear();
     volumes.clear();
     resetSafetyStore();
-    channelsStore.setState(() => ({
-      channels: new Map(),
-      activeChannelId: null,
-      roles: [],
-      categories: [],
-    }));
-    authStore.setState(() => ({
-      token: "tok",
-      user: { id: SELF, username: "user1", avatar: null, role: "member" },
-      serverName: "Test Server",
-      motd: null,
-      isAuthenticated: true,
-    }));
+    resetChannelsState();
+    signInAs({ id: SELF, username: "user1", avatar: null, role: "member" });
     uiStore.setState((prev) => ({
       ...prev,
       connectionStatus: "connected",

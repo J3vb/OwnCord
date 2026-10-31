@@ -20,6 +20,7 @@ import {
   voiceModCallbacks,
   setAdminUser,
 } from "../../helpers/channelSidebarHarness";
+import { signInAs } from "../../helpers/storeSeeds";
 
 vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
 vi.mock("@lib/ui/toast", () => mocks.uiToastMock());
@@ -164,13 +165,7 @@ describe("ChannelSidebar", () => {
     const onEditChannel = vi.fn();
     sidebar.destroy?.();
     // Set a regular member (not admin/owner)
-    authStore.setState(() => ({
-      token: "tok",
-      user: { id: 2, username: "Member", avatar: null, role: "member" },
-      serverName: "Test Server",
-      motd: null,
-      isAuthenticated: true,
-    }));
+    signInAs({ id: 2, username: "Member", avatar: null, role: "member" });
     sidebar = createChannelSidebar({
       onVoiceJoin,
       onOpenCall,
@@ -214,13 +209,7 @@ describe("ChannelSidebar", () => {
     );
     sidebar.destroy?.();
     setRoles([{ id: 3, name: "Moderator", color: null, permissions: Permission.MANAGE_MESSAGES }]);
-    authStore.setState(() => ({
-      token: "tok",
-      user: { id: 3, username: "Mod", avatar: null, role: "moderator" },
-      serverName: "Test Server",
-      motd: null,
-      isAuthenticated: true,
-    }));
+    signInAs({ id: 3, username: "Mod", avatar: null, role: "moderator" });
     sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall, onPurgeChannel });
 
     setChannels(testChannels);
@@ -259,13 +248,7 @@ describe("ChannelSidebar", () => {
     );
     sidebar.destroy?.();
     setRoles([{ id: 3, name: "Moderator", color: null, permissions: 0 }]);
-    authStore.setState(() => ({
-      token: "tok",
-      user: { id: 3, username: "Mod", avatar: null, role: "moderator" },
-      serverName: "Test Server",
-      motd: null,
-      isAuthenticated: true,
-    }));
+    signInAs({ id: 3, username: "Mod", avatar: null, role: "moderator" });
     sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall, onPurgeChannel });
     setChannels(testChannels);
     sidebar.mount(container);
@@ -413,13 +396,7 @@ describe("ChannelSidebar", () => {
   it("does not show create channel button for non-admin users", () => {
     const onCreateChannel = vi.fn();
     sidebar.destroy?.();
-    authStore.setState(() => ({
-      token: "tok",
-      user: { id: 2, username: "Member", avatar: null, role: "member" },
-      serverName: "Test Server",
-      motd: null,
-      isAuthenticated: true,
-    }));
+    signInAs({ id: 2, username: "Member", avatar: null, role: "member" });
     sidebar = createChannelSidebar({
       onVoiceJoin,
       onOpenCall,
@@ -440,13 +417,7 @@ describe("ChannelSidebar", () => {
     const onCreateChannel = vi.fn();
     sidebar.destroy?.();
     setRoles([{ id: 3, name: "Moderator", color: null, permissions: Permission.MANAGE_CHANNELS }]);
-    authStore.setState(() => ({
-      token: "tok",
-      user: { id: 3, username: "Mod", avatar: null, role: "moderator" },
-      serverName: "Test Server",
-      motd: null,
-      isAuthenticated: true,
-    }));
+    signInAs({ id: 3, username: "Mod", avatar: null, role: "moderator" });
     sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall, onCreateChannel });
 
     setChannels(testChannels);
@@ -461,13 +432,7 @@ describe("ChannelSidebar", () => {
     // A role the server DID send, holding no channel bit: the name fallback
     // must not apply, even for a role called "admin".
     setRoles([{ id: 2, name: "Admin", color: null, permissions: Permission.SEND_MESSAGES }]);
-    authStore.setState(() => ({
-      token: "tok",
-      user: { id: 2, username: "Admin", avatar: null, role: "admin" },
-      serverName: "Test Server",
-      motd: null,
-      isAuthenticated: true,
-    }));
+    signInAs({ id: 2, username: "Admin", avatar: null, role: "admin" });
     sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall, onCreateChannel });
 
     setChannels(testChannels);
@@ -485,13 +450,7 @@ describe("ChannelSidebar", () => {
   it("repaints channel-management affordances when the signed-in user's own role changes", () => {
     const onCreateChannel = vi.fn();
     sidebar.destroy?.();
-    authStore.setState(() => ({
-      token: "tok",
-      user: { id: 2, username: "Member", avatar: null, role: "member" },
-      serverName: "Test Server",
-      motd: null,
-      isAuthenticated: true,
-    }));
+    signInAs({ id: 2, username: "Member", avatar: null, role: "member" });
     sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall, onCreateChannel });
 
     setChannels(testChannels);
@@ -516,13 +475,7 @@ describe("ChannelSidebar", () => {
     const onCreateChannel = vi.fn();
     sidebar.destroy?.();
     setRoles([{ id: 3, name: "Moderator", color: null, permissions: Permission.SEND_MESSAGES }]);
-    authStore.setState(() => ({
-      token: "tok",
-      user: { id: 3, username: "Mod", avatar: null, role: "moderator" },
-      serverName: "Test Server",
-      motd: null,
-      isAuthenticated: true,
-    }));
+    signInAs({ id: 3, username: "Mod", avatar: null, role: "moderator" });
     sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall, onCreateChannel });
 
     setChannels(testChannels);
@@ -544,13 +497,7 @@ describe("ChannelSidebar", () => {
 
   it("right-click on other user's voice row opens volume context menu", async () => {
     // Set current user to something different from the voice user
-    authStore.setState(() => ({
-      token: "tok",
-      user: { id: 99, username: "Me", avatar: null, role: "member" },
-      serverName: "Test Server",
-      motd: null,
-      isAuthenticated: true,
-    }));
+    signInAs({ id: 99, username: "Me", avatar: null, role: "member" });
 
     setChannels(testChannels);
     updateVoiceState({
@@ -608,13 +555,7 @@ describe("ChannelSidebar", () => {
   ): Promise<HTMLElement | null> {
     sidebar.destroy?.();
     setRoles([{ id: 3, name: "Moderator", color: null, permissions }]);
-    authStore.setState(() => ({
-      token: "tok",
-      user: { id: 99, username: "Mod", avatar: null, role: "moderator" },
-      serverName: "Test Server",
-      motd: null,
-      isAuthenticated: true,
-    }));
+    signInAs({ id: 99, username: "Mod", avatar: null, role: "moderator" });
     sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall, onVoiceModerate });
 
     setChannels(
@@ -1052,13 +993,7 @@ describe("ChannelSidebar channel context menu permissions", () => {
 
   function mountAs(roleName: string, permissions: number): HTMLElement | null {
     setRoles([{ id: 9, name: roleName, color: null, permissions }]);
-    authStore.setState(() => ({
-      token: "tok",
-      user: { id: 9, username: "U", avatar: null, role: roleName },
-      serverName: "Test Server",
-      motd: null,
-      isAuthenticated: true,
-    }));
+    signInAs({ id: 9, username: "U", avatar: null, role: roleName });
     sidebar = createChannelSidebar({
       onVoiceJoin: vi.fn(),
       onOpenCall: vi.fn(),

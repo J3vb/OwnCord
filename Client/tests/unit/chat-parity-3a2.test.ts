@@ -24,9 +24,10 @@ import { refreshTimeFormat, saveTimeFormat } from "../../src/lib/text/timeFormat
 import { replaceEmojiShortcodes } from "../../src/features/messaging/shortcodes";
 import { loadEmojiCatalog } from "../../src/features/messaging/emojiCatalog";
 import { clearCustomEmoji, emojiStore, setCustomEmoji } from "../../src/stores/emoji.store";
-import { channelsStore, setChannels } from "../../src/stores/channels.store";
+import { setChannels } from "../../src/stores/channels.store";
 import type { ReadyChannel } from "../../src/lib/types";
 import { resetMembersState } from "../helpers/storeResets";
+import { resetChannelsState } from "../helpers/storeSeeds";
 
 const CHANNELS: ReadyChannel[] = [
   { id: 1, name: "general", type: "text", category: "Text", position: 0 },
@@ -43,12 +44,7 @@ beforeAll(async () => {
 
 beforeEach(() => {
   localStorage.clear();
-  channelsStore.setState(() => ({
-    channels: new Map(),
-    activeChannelId: null,
-    roles: [],
-    categories: [],
-  }));
+  resetChannelsState();
   setChannels(CHANNELS);
   resetMembersState();
   clearCustomEmoji();

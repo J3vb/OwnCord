@@ -4,10 +4,10 @@ const mockShowToast = vi.fn();
 vi.mock("@lib/ui/toast", () => ({ showToast: (...args: unknown[]) => mockShowToast(...args) }));
 
 import { buildAccountTab } from "@components/settings/AccountTab";
-import { authStore } from "@stores/auth.store";
 import { setSessionReplaced } from "@stores/ui.store";
 import type { SettingsOverlayOptions } from "@components/SettingsOverlay";
 import type { SessionInfo } from "@lib/api";
+import { signInAs } from "../helpers/storeSeeds";
 
 // B7-14: the Account tab lists every signed-in device, signs one out by id,
 // and signs out everywhere behind a confirmation that says this device is
@@ -65,13 +65,7 @@ describe("Account tab — devices", () => {
     ac = new AbortController();
     mockShowToast.mockClear();
     setSessionReplaced(false);
-    authStore.setState(() => ({
-      token: "tok",
-      user: { id: 1, username: "alice", avatar: null, role: "member" },
-      serverName: "s",
-      motd: null,
-      isAuthenticated: true,
-    }));
+    signInAs({ id: 1, username: "alice", avatar: null, role: "member" }, { serverName: "s" });
   });
 
   afterEach(() => {

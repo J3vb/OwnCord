@@ -6,6 +6,7 @@ import { channelsStore } from "@stores/channels.store";
 import { setDeveloperMode } from "../helpers/message-actions-fixtures";
 import type { ChannelAccess } from "../../src/features/channels/channelRow.view";
 import type { Channel } from "@stores/channels.store";
+import { signInAs } from "../helpers/storeSeeds";
 
 function channel(id: number, position: number): Channel {
   return {
@@ -31,13 +32,10 @@ let container: HTMLDivElement;
 let ac: AbortController;
 
 beforeEach(() => {
-  authStore.setState(() => ({
-    token: "t",
-    user: { id: 1, username: "tester", avatar: null, role: "owner" },
-    serverName: "s",
-    motd: "",
-    isAuthenticated: true,
-  }));
+  signInAs(
+    { id: 1, username: "tester", avatar: null, role: "owner" },
+    { token: "t", serverName: "s", motd: "" },
+  );
   container = document.createElement("div");
   document.body.appendChild(container);
   ac = new AbortController();

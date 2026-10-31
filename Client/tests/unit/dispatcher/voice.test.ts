@@ -17,6 +17,7 @@ import { rollbackPendingVideo as mockRollbackPendingVideo } from "@lib/voice/scr
 import { takeVoiceMoved } from "../../../src/features/voice/moveHint";
 import { noteJoinSent, takeJoinRefusal } from "../../../src/features/voice/joinRequest";
 import { useDispatcherHarness, type DispatcherMock } from "../../helpers/dispatcherHarness";
+import { signInAs } from "../../helpers/storeSeeds";
 
 vi.mock("@lib/notifications", () => dispatcherMocks.notificationsMock());
 vi.mock("@lib/voice/livekitSession", () => dispatcherMocks.livekitSessionMock());
@@ -509,13 +510,10 @@ describe("WS Dispatcher", () => {
     voiceStore.setState((prev) => ({ ...prev, voiceStatus: "idle" }));
 
     // Set up auth so the current user ID is 42
-    authStore.setState(() => ({
-      token: "test-token",
-      user: { id: 42, username: "ghost", avatar: null, role: "member" },
-      serverName: "Test",
-      motd: "",
-      isAuthenticated: true,
-    }));
+    signInAs(
+      { id: 42, username: "ghost", avatar: null, role: "member" },
+      { token: "test-token", serverName: "Test", motd: "" },
+    );
 
     mock.dispatch("ready", {
       channels: [{ id: 1, name: "general", type: "text", category: "", position: 0 }],
@@ -535,13 +533,10 @@ describe("WS Dispatcher", () => {
     // session (the lazily-loaded module's store-backed "connected" flag).
     voiceStore.setState((prev) => ({ ...prev, voiceStatus: "connected" }));
 
-    authStore.setState(() => ({
-      token: "test-token",
-      user: { id: 42, username: "active", avatar: null, role: "member" },
-      serverName: "Test",
-      motd: "",
-      isAuthenticated: true,
-    }));
+    signInAs(
+      { id: 42, username: "active", avatar: null, role: "member" },
+      { token: "test-token", serverName: "Test", motd: "" },
+    );
 
     mock.dispatch("ready", {
       channels: [{ id: 1, name: "general", type: "text", category: "", position: 0 }],
@@ -563,13 +558,10 @@ describe("WS Dispatcher", () => {
   // camera/share flag behind what this session sends; `ready` checks it.
   it("ready hands the server's camera and share flags to the live voice session", async () => {
     voiceStore.setState((prev) => ({ ...prev, voiceStatus: "connected", currentChannelId: 10 }));
-    authStore.setState(() => ({
-      token: "test-token",
-      user: { id: 42, username: "active", avatar: null, role: "member" },
-      serverName: "Test",
-      motd: "",
-      isAuthenticated: true,
-    }));
+    signInAs(
+      { id: 42, username: "active", avatar: null, role: "member" },
+      { token: "test-token", serverName: "Test", motd: "" },
+    );
     const { reconcileVideoFlags } = await import("@lib/voice/livekitSession");
     vi.mocked(reconcileVideoFlags).mockClear();
 
@@ -589,13 +581,10 @@ describe("WS Dispatcher", () => {
   it("ready does NOT send voice_leave when user is NOT in voice_states", () => {
     voiceStore.setState((prev) => ({ ...prev, voiceStatus: "idle" }));
 
-    authStore.setState(() => ({
-      token: "test-token",
-      user: { id: 42, username: "notinvoice", avatar: null, role: "member" },
-      serverName: "Test",
-      motd: "",
-      isAuthenticated: true,
-    }));
+    signInAs(
+      { id: 42, username: "notinvoice", avatar: null, role: "member" },
+      { token: "test-token", serverName: "Test", motd: "" },
+    );
 
     mock.dispatch("ready", {
       channels: [{ id: 1, name: "general", type: "text", category: "", position: 0 }],
@@ -623,13 +612,10 @@ describe("WS Dispatcher", () => {
   it("reconciles E2EE state for peers who left during a full-ready resync with a live voice session", async () => {
     vi.mocked(mockHandleParticipantLeft).mockClear();
 
-    authStore.setState(() => ({
-      token: "test-token",
-      user: { id: 42, username: "me", avatar: null, role: "member" },
-      serverName: "Test",
-      motd: "",
-      isAuthenticated: true,
-    }));
+    signInAs(
+      { id: 42, username: "me", avatar: null, role: "member" },
+      { token: "test-token", serverName: "Test", motd: "" },
+    );
 
     // Before the resync: self (42) and peer (7) are both in channel 10 — the
     // live LiveKit session survived the WS drop.

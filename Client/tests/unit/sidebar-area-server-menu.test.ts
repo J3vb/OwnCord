@@ -52,6 +52,7 @@ import { setMarkReadSender } from "@lib/readState";
 import { isHideMutedChannels, setHideMutedChannels } from "@lib/prefs/hideMutedChannels";
 import { Permission, type ReadyChannel } from "../../src/lib/types";
 import { resetMembersState } from "../helpers/storeResets";
+import { signInAs, resetChannelsState } from "../helpers/storeSeeds";
 
 const UNREAD: ReadyChannel[] = [
   {
@@ -98,12 +99,7 @@ describe("SidebarArea - server name menu", () => {
     localStorage.clear();
     sent = [];
     setMarkReadSender((id) => sent.push(id));
-    channelsStore.setState(() => ({
-      channels: new Map(),
-      activeChannelId: null,
-      roles: [],
-      categories: [],
-    }));
+    resetChannelsState();
     dmStore.setState(() => ({ channels: [] }));
     resetMembersState();
     uiStore.setState((prev) => ({
@@ -111,13 +107,7 @@ describe("SidebarArea - server name menu", () => {
       collapsedCategories: new Set(),
       sidebarMode: "channels" as const,
     }));
-    authStore.setState(() => ({
-      token: "tok",
-      user: { id: 2, username: "Member", avatar: null, role: "member" },
-      serverName: "Test Server",
-      motd: null,
-      isAuthenticated: true,
-    }));
+    signInAs({ id: 2, username: "Member", avatar: null, role: "member" });
     grant(Permission.SEND_MESSAGES);
     container = document.createElement("div");
     document.body.appendChild(container);

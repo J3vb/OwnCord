@@ -19,6 +19,7 @@ import {
 import type { DmChannel } from "@stores/dm.store";
 import { applyReadyDms } from "../../src/features/direct-messages/wsHandlers";
 import type { DmChannelPayload, ReadyChannel } from "@lib/types";
+import { resetChannelsState } from "../helpers/storeSeeds";
 
 const ch = (id: number, pointer?: number): ReadyChannel => ({
   id,
@@ -47,12 +48,7 @@ const dm = (over: Partial<DmChannel> = {}): DmChannel => ({
 });
 
 beforeEach(() => {
-  channelsStore.setState(() => ({
-    channels: new Map(),
-    activeChannelId: null,
-    roles: [],
-    categories: [],
-  }));
+  resetChannelsState();
   dmStore.setState(() => ({ channels: [] }));
 });
 

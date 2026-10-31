@@ -31,6 +31,7 @@ import { authStore } from "../../src/stores/auth.store";
 import { channelsStore, setRoles } from "../../src/stores/channels.store";
 import { emojiStore, setCustomEmoji, clearCustomEmoji } from "../../src/stores/emoji.store";
 import { Permission } from "../../src/lib/types";
+import { resetChannelsState } from "../helpers/storeSeeds";
 
 const NAMES = ["alice", "Alan", "Bob", "carol", "dave_99", "eve-ish"];
 
@@ -61,12 +62,7 @@ function signInAs(role: string, permissions: number): void {
     motd: null,
     isAuthenticated: true,
   }));
-  channelsStore.setState(() => ({
-    channels: new Map(),
-    activeChannelId: null,
-    roles: [],
-    categories: [],
-  }));
+  resetChannelsState();
   setRoles([{ id: 1, name: role, color: null, permissions }]);
   channelsStore.flush();
 }

@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { authStore } from "@stores/auth.store";
 import { createUserBar } from "@components/UserBar";
 import { voiceStore, resetVoiceStore, joinVoiceChannel } from "@stores/voice.store";
 import { channelsStore, setChannels, updateChannel } from "@stores/channels.store";
 import { cascadedDeclaration, keyword, varToken } from "../helpers/app-css";
+import { signInAs } from "../helpers/storeSeeds";
 
 const connection = vi.hoisted(() => ({ status: "connected" }));
 
@@ -43,13 +43,10 @@ describe("UserBar mute and deafen", () => {
 
   beforeEach(() => {
     resetVoiceStore();
-    authStore.setState(() => ({
-      token: "tok",
-      user: { id: 1, username: "alice", avatar: null, role: "member" },
-      serverName: "TestServer",
-      motd: null,
-      isAuthenticated: true,
-    }));
+    signInAs(
+      { id: 1, username: "alice", avatar: null, role: "member" },
+      { serverName: "TestServer" },
+    );
     connection.status = "connected";
     onMuteToggle = vi.fn<() => void>();
     onDeafenToggle = vi.fn<() => void>();

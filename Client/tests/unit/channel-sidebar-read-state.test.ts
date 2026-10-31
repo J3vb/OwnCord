@@ -14,12 +14,12 @@ vi.mock("@lib/net/e2eeCrypto", () => ({
 import { createChannelSidebar } from "../../src/components/ChannelSidebar";
 import { channelsStore, setChannels } from "../../src/stores/channels.store";
 import { dmStore } from "../../src/stores/dm.store";
-import { authStore } from "../../src/stores/auth.store";
 import { uiStore } from "../../src/stores/ui.store";
 import { voiceStore } from "../../src/stores/voice.store";
 import { setMarkReadSender } from "@lib/readState";
 import type { ReadyChannel } from "../../src/lib/types";
 import { resetMembersState } from "../helpers/storeResets";
+import { signInAs, resetChannelsState } from "../helpers/storeSeeds";
 
 const CHANNELS: ReadyChannel[] = [
   {
@@ -44,23 +44,12 @@ describe("ChannelSidebar — mark as read", () => {
   beforeEach(() => {
     sent = [];
     setMarkReadSender((id) => sent.push(id));
-    channelsStore.setState(() => ({
-      channels: new Map(),
-      activeChannelId: null,
-      roles: [],
-      categories: [],
-    }));
+    resetChannelsState();
     dmStore.setState(() => ({ channels: [] }));
     resetMembersState();
     uiStore.setState((prev) => ({ ...prev, collapsedCategories: new Set() }));
     voiceStore.setState((prev) => ({ ...prev, voiceStates: new Map() }));
-    authStore.setState(() => ({
-      token: "tok",
-      user: { id: 2, username: "Member", avatar: null, role: "member" },
-      serverName: "Test Server",
-      motd: null,
-      isAuthenticated: true,
-    }));
+    signInAs({ id: 2, username: "Member", avatar: null, role: "member" });
 
     container = document.createElement("div");
     document.body.appendChild(container);

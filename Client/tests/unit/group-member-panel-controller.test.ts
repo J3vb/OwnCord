@@ -6,7 +6,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vitest";
 import { createGroupMemberPanelController } from "../../src/pages/main-page/GroupMemberPanelController";
 import type { ApiClient } from "../../src/lib/api";
-import { authStore } from "../../src/stores/auth.store";
 import { channelsStore } from "../../src/stores/channels.store";
 import {
   addDmChannel,
@@ -16,6 +15,7 @@ import {
   type DmUser,
 } from "../../src/stores/dm.store";
 import { membersStore, updatePresence } from "../../src/stores/members.store";
+import { signInAs } from "../helpers/storeSeeds";
 
 const ME = 1;
 const user = (id: number, username: string): DmUser => ({
@@ -102,13 +102,10 @@ describe("GroupMemberPanelController", () => {
       setGroupDmOwner: vi.fn().mockResolvedValue(undefined),
     };
     notify = vi.fn<(message: string) => void>();
-    authStore.setState(() => ({
-      token: "t",
-      user: { id: ME, username: "me", avatar: null, role: "member" },
-      serverName: null,
-      motd: null,
-      isAuthenticated: true,
-    }));
+    signInAs(
+      { id: ME, username: "me", avatar: null, role: "member" },
+      { token: "t", serverName: null },
+    );
     membersStore.setState(() => ({
       members: new Map(
         [1, 2, 3, 4, 5].map((id) => [

@@ -12,11 +12,11 @@ vi.mock("../../src/features/profiles/openUserProfilePopup", () => ({
 }));
 
 import { createChannelSidebar, type ChannelReorderData } from "../../src/components/ChannelSidebar";
-import { channelsStore, setChannels } from "../../src/stores/channels.store";
-import { authStore } from "../../src/stores/auth.store";
+import { setChannels } from "../../src/stores/channels.store";
 import { uiStore } from "../../src/stores/ui.store";
 import { voiceStore, updateVoiceState } from "../../src/stores/voice.store";
 import type { ReadyChannel } from "../../src/lib/types";
+import { signInAs, resetChannelsState } from "../helpers/storeSeeds";
 
 const SELF_ID = 99;
 const TARGET_ID = 80;
@@ -115,21 +115,10 @@ describe("drag a voice user onto another channel", () => {
   }
 
   beforeEach(() => {
-    channelsStore.setState(() => ({
-      channels: new Map(),
-      activeChannelId: null,
-      roles: [],
-      categories: [],
-    }));
+    resetChannelsState();
     voiceStore.setState((prev) => ({ ...prev, currentChannelId: null, voiceUsers: new Map() }));
     uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" as const }));
-    authStore.setState(() => ({
-      token: "tok",
-      user: { id: SELF_ID, username: "Me", avatar: null, role: "admin" },
-      serverName: "Test Server",
-      motd: null,
-      isAuthenticated: true,
-    }));
+    signInAs({ id: SELF_ID, username: "Me", avatar: null, role: "admin" });
     mockOpenUserProfilePopup.mockClear();
     onMove = vi.fn<(userId: number, toChannelId: number) => void>();
     onReorderChannel = vi.fn<(reorders: readonly ChannelReorderData[]) => void>();

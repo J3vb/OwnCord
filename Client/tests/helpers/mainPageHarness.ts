@@ -1,6 +1,4 @@
 import { vi } from "vitest";
-import { channelsStore } from "../../src/stores/channels.store";
-import { authStore } from "../../src/stores/auth.store";
 import { uiStore } from "../../src/stores/ui.store";
 import { voiceStore } from "../../src/stores/voice.store";
 import { dmStore } from "../../src/stores/dm.store";
@@ -8,21 +6,14 @@ import { membersStore } from "../../src/stores/members.store";
 import type { WsClient, WsListener, ConnectionState } from "../../src/lib/ws";
 import type { ApiClient } from "../../src/lib/api";
 import type { ServerMessage } from "../../src/lib/types";
+import { signInAs, resetChannelsState } from "./storeSeeds";
 
 export function resetStores(): void {
-  channelsStore.setState(() => ({
-    channels: new Map(),
-    activeChannelId: null,
-    roles: [],
-    categories: [],
-  }));
-  authStore.setState(() => ({
-    token: "t",
-    user: { id: 1, username: "alice", avatar: null, role: "member" },
-    serverName: null,
-    motd: null,
-    isAuthenticated: true,
-  }));
+  resetChannelsState();
+  signInAs(
+    { id: 1, username: "alice", avatar: null, role: "member" },
+    { token: "t", serverName: null },
+  );
   uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected", settingsOpen: false }));
   voiceStore.setState(() => ({
     currentChannelId: null,

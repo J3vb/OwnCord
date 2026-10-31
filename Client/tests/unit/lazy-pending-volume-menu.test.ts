@@ -9,11 +9,11 @@ import * as voiceSession from "../helpers/voiceSessionMock";
 vi.mock("@lib/voice/livekitSession", () => voiceSession.defaults());
 
 import { createChannelSidebar } from "../../src/components/ChannelSidebar";
-import { channelsStore, setChannels } from "../../src/stores/channels.store";
-import { authStore } from "../../src/stores/auth.store";
+import { setChannels } from "../../src/stores/channels.store";
 import { uiStore } from "../../src/stores/ui.store";
 import { voiceStore, updateVoiceState } from "../../src/stores/voice.store";
 import type { ReadyChannel } from "../../src/lib/types";
+import { signInAs, resetChannelsState } from "../helpers/storeSeeds";
 
 const SELF_ID = 99;
 const TARGET_ID = 80;
@@ -45,21 +45,10 @@ describe("per-user volume menu during its load", () => {
   const menus = (): NodeListOf<Element> => document.querySelectorAll(".user-vol-menu");
 
   beforeEach(() => {
-    channelsStore.setState(() => ({
-      channels: new Map(),
-      activeChannelId: null,
-      roles: [],
-      categories: [],
-    }));
+    resetChannelsState();
     voiceStore.setState((prev) => ({ ...prev, currentChannelId: null, voiceUsers: new Map() }));
     uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" as const }));
-    authStore.setState(() => ({
-      token: "tok",
-      user: { id: SELF_ID, username: "Me", avatar: null, role: "member" },
-      serverName: "Test Server",
-      motd: null,
-      isAuthenticated: true,
-    }));
+    signInAs({ id: SELF_ID, username: "Me", avatar: null, role: "member" });
     container = document.createElement("div");
     document.body.appendChild(container);
   });

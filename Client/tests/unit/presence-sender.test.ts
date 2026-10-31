@@ -18,6 +18,7 @@ import {
 } from "@lib/presence/userStatus";
 import type { WsClient } from "@lib/ws";
 import { resetMembersState } from "../helpers/storeResets";
+import { resetAuthState, signInAs } from "../helpers/storeSeeds";
 
 function createMockWs(): WsClient {
   return {
@@ -79,13 +80,10 @@ function createErrorableWs(returnIds = true): {
 describe("createPresenceSender — last requested status always reaches the server", () => {
   beforeEach(() => {
     localStorage.clear();
-    authStore.setState(() => ({
-      token: "tok",
-      user: { id: 1, username: "alice", avatar: null, role: "member" },
-      serverName: "TestServer",
-      motd: null,
-      isAuthenticated: true,
-    }));
+    signInAs(
+      { id: 1, username: "alice", avatar: null, role: "member" },
+      { serverName: "TestServer" },
+    );
     membersStore.setState(() => ({
       members: new Map([
         [
@@ -107,13 +105,7 @@ describe("createPresenceSender — last requested status always reaches the serv
 
   afterEach(() => {
     vi.useRealTimers();
-    authStore.setState(() => ({
-      token: null,
-      user: null,
-      serverName: null,
-      motd: null,
-      isAuthenticated: false,
-    }));
+    resetAuthState();
     resetMembersState();
   });
 
@@ -175,13 +167,10 @@ describe("createPresenceSender — last requested status always reaches the serv
 describe("createPresenceSender — a TIMED_OUT refusal rolls back the optimistic status", () => {
   beforeEach(() => {
     localStorage.clear();
-    authStore.setState(() => ({
-      token: "tok",
-      user: { id: 1, username: "alice", avatar: null, role: "member" },
-      serverName: "TestServer",
-      motd: null,
-      isAuthenticated: true,
-    }));
+    signInAs(
+      { id: 1, username: "alice", avatar: null, role: "member" },
+      { serverName: "TestServer" },
+    );
     membersStore.setState(() => ({
       members: new Map([
         [
@@ -203,13 +192,7 @@ describe("createPresenceSender — a TIMED_OUT refusal rolls back the optimistic
 
   afterEach(() => {
     vi.useRealTimers();
-    authStore.setState(() => ({
-      token: null,
-      user: null,
-      serverName: null,
-      motd: null,
-      isAuthenticated: false,
-    }));
+    resetAuthState();
     resetMembersState();
   });
 
@@ -352,13 +335,10 @@ describe("createPresenceSender — a TIMED_OUT refusal rolls back the optimistic
 describe("createPresenceSender — custom_status survival across supersession", () => {
   beforeEach(() => {
     localStorage.clear();
-    authStore.setState(() => ({
-      token: "tok",
-      user: { id: 1, username: "alice", avatar: null, role: "member" },
-      serverName: "TestServer",
-      motd: null,
-      isAuthenticated: true,
-    }));
+    signInAs(
+      { id: 1, username: "alice", avatar: null, role: "member" },
+      { serverName: "TestServer" },
+    );
     membersStore.setState(() => ({
       members: new Map([
         [
@@ -380,13 +360,7 @@ describe("createPresenceSender — custom_status survival across supersession", 
 
   afterEach(() => {
     vi.useRealTimers();
-    authStore.setState(() => ({
-      token: null,
-      user: null,
-      serverName: null,
-      motd: null,
-      isAuthenticated: false,
-    }));
+    resetAuthState();
     resetMembersState();
   });
 
@@ -445,13 +419,10 @@ describe("createPresenceSender — rollback, retry and teardown details", () => 
 
   beforeEach(() => {
     localStorage.clear();
-    authStore.setState(() => ({
-      token: "tok",
-      user: { id: 1, username: "alice", avatar: null, role: "member" },
-      serverName: "TestServer",
-      motd: null,
-      isAuthenticated: true,
-    }));
+    signInAs(
+      { id: 1, username: "alice", avatar: null, role: "member" },
+      { serverName: "TestServer" },
+    );
     membersStore.setState(() => ({
       members: new Map([
         [
@@ -473,13 +444,7 @@ describe("createPresenceSender — rollback, retry and teardown details", () => 
 
   afterEach(() => {
     vi.useRealTimers();
-    authStore.setState(() => ({
-      token: null,
-      user: null,
-      serverName: null,
-      motd: null,
-      isAuthenticated: false,
-    }));
+    resetAuthState();
     resetMembersState();
   });
 

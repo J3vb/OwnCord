@@ -10,6 +10,7 @@ import { createPresenceSender } from "@lib/presence/presence";
 import { createPresenceLimiter } from "@lib/net/rateLimiter";
 import type { WsClient } from "@lib/ws";
 import { resetMembersState } from "../helpers/storeResets";
+import { resetAuthState } from "../helpers/storeSeeds";
 
 function setAuthState(
   user: { username: string; custom_status?: string | null } | null,
@@ -85,13 +86,7 @@ describe("StatusPicker wired to UserBar", () => {
     comp?.destroy?.();
     container.remove();
     setConnectionStatus("disconnected");
-    authStore.setState(() => ({
-      token: null,
-      user: null,
-      serverName: null,
-      motd: null,
-      isAuthenticated: false,
-    }));
+    resetAuthState();
   });
 
   it("click on status picker dot opens the dropdown", () => {

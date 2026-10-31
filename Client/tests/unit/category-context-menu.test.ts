@@ -16,12 +16,12 @@ import {
   type Channel,
 } from "../../src/stores/channels.store";
 import { dmStore } from "../../src/stores/dm.store";
-import { authStore } from "../../src/stores/auth.store";
 import { uiStore, isCategoryCollapsed } from "../../src/stores/ui.store";
 import { voiceStore } from "../../src/stores/voice.store";
 import { setMarkReadSender } from "@lib/readState";
 import type { ReadyChannel } from "../../src/lib/types";
 import { resetMembersState } from "../helpers/storeResets";
+import { signInAs, resetChannelsState } from "../helpers/storeSeeds";
 
 const CHANNELS: ReadyChannel[] = [
   { id: 1, name: "a1", type: "text", category: "Alpha", position: 0, unread_count: 2 },
@@ -39,23 +39,12 @@ describe("category context menu", () => {
     vi.useFakeTimers();
     sent = [];
     setMarkReadSender((id) => sent.push(id));
-    channelsStore.setState(() => ({
-      channels: new Map(),
-      activeChannelId: null,
-      roles: [],
-      categories: [],
-    }));
+    resetChannelsState();
     dmStore.setState(() => ({ channels: [] }));
     resetMembersState();
     uiStore.setState((prev) => ({ ...prev, collapsedCategories: new Set() }));
     voiceStore.setState((prev) => ({ ...prev, voiceStates: new Map() }));
-    authStore.setState(() => ({
-      token: "tok",
-      user: { id: 2, username: "Member", avatar: null, role: "member" },
-      serverName: "Test Server",
-      motd: null,
-      isAuthenticated: true,
-    }));
+    signInAs({ id: 2, username: "Member", avatar: null, role: "member" });
     container = document.createElement("div");
     document.body.appendChild(container);
     sidebar = createChannelSidebar({ onVoiceJoin: vi.fn(), onOpenCall: vi.fn() });
@@ -154,12 +143,7 @@ describe("category context menu", () => {
 
 describe("text before voice inside a category (N23)", () => {
   beforeEach(() => {
-    channelsStore.setState(() => ({
-      channels: new Map(),
-      activeChannelId: null,
-      roles: [],
-      categories: [],
-    }));
+    resetChannelsState();
     setChannels([
       { id: 1, name: "lobby", type: "voice", category: "Mix", position: 0 },
       { id: 2, name: "chat", type: "text", category: "Mix", position: 1 },
@@ -183,13 +167,10 @@ describe("text before voice inside a category (N23)", () => {
     const onReorder = vi.fn();
     const el = document.createElement("div");
     document.body.appendChild(el);
-    authStore.setState(() => ({
-      token: "t",
-      user: { id: 1, username: "o", avatar: null, role: "owner" },
-      serverName: "s",
-      motd: "",
-      isAuthenticated: true,
-    }));
+    signInAs(
+      { id: 1, username: "o", avatar: null, role: "owner" },
+      { token: "t", serverName: "s", motd: "" },
+    );
     const ac = new AbortController();
     const chat = channelsStore.getState().channels.get(2) as Channel;
     attachChannelContextMenu(

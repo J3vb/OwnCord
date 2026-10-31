@@ -52,11 +52,11 @@ vi.mock("../../src/pages/main-page/OverlayManagers", () => ({
 import { createSidebarArea, type SidebarAreaOptions } from "../../src/pages/main-page/SidebarArea";
 import { channelsStore, setChannels, setRoles } from "../../src/stores/channels.store";
 import { dmStore } from "../../src/stores/dm.store";
-import { authStore } from "../../src/stores/auth.store";
 import { uiStore } from "../../src/stores/ui.store";
 import { setMarkReadSender } from "@lib/readState";
 import { Permission, type ReadyChannel } from "../../src/lib/types";
 import { resetMembersState } from "../helpers/storeResets";
+import { signInAs, resetChannelsState } from "../helpers/storeSeeds";
 
 const CHANNELS: ReadyChannel[] = [
   {
@@ -96,12 +96,7 @@ describe("SidebarArea — Mark All as Read", () => {
   beforeEach(() => {
     sent = [];
     setMarkReadSender((id) => sent.push(id));
-    channelsStore.setState(() => ({
-      channels: new Map(),
-      activeChannelId: null,
-      roles: [],
-      categories: [],
-    }));
+    resetChannelsState();
     dmStore.setState(() => ({ channels: [] }));
     resetMembersState();
     uiStore.setState((prev) => ({
@@ -109,13 +104,7 @@ describe("SidebarArea — Mark All as Read", () => {
       collapsedCategories: new Set(),
       sidebarMode: "channels" as const,
     }));
-    authStore.setState(() => ({
-      token: "tok",
-      user: { id: 2, username: "Member", avatar: null, role: "member" },
-      serverName: "Test Server",
-      motd: null,
-      isAuthenticated: true,
-    }));
+    signInAs({ id: 2, username: "Member", avatar: null, role: "member" });
     container = document.createElement("div");
     document.body.appendChild(container);
   });
