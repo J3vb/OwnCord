@@ -2,7 +2,7 @@
  * B7-13 / BPR-034: one live connection, a complete teardown on a profile
  * switch, and a switch that keeps each server's saved sign-in.
  *
- * Drives the real main.ts, ws.ts and stores through main.test.ts's harness,
+ * Drives the real main.ts, ws.ts and stores through the main/ tests' harness,
  * counting transports at the mocked ws_connect / ws_disconnect seam rather
  * than instrumenting ws.ts. Credentials stay keyed by host; there is one
  * profile per host (main.ts ensureProfileExists), so the isolation proven here
