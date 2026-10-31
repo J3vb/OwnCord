@@ -15,6 +15,7 @@
 import { describe, it, expect } from "vitest";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
+import { isInstrumented } from "../helpers/instrumented";
 
 const CLIENT = resolve(__dirname, "../..");
 const SRC = join(CLIENT, "src");
@@ -41,17 +42,21 @@ function sourceFiles(dir: string): string[] {
   });
 }
 
-function lineCount(path: string): number {
-  const text = readFileSync(path, "utf8");
+function lineCount(text: string): number {
   if (text === "") return 0;
   return text.endsWith("\n") ? text.split("\n").length - 1 : text.split("\n").length;
 }
 
+const texts = sourceFiles(SRC)
+  .map(
+    (path) => [relative(CLIENT, path).split("\\").join("/"), readFileSync(path, "utf8")] as const,
+  )
+  .filter(([file]) => !GENERATED.has(file));
+const skipped = new Set(texts.filter(([, text]) => isInstrumented(text)).map(([file]) => file));
 const sizes = new Map(
-  sourceFiles(SRC)
-    .map((path) => [relative(CLIENT, path).split("\\").join("/"), lineCount(path)] as const)
-    .filter(([file]) => !GENERATED.has(file)),
+  texts.filter(([file]) => !skipped.has(file)).map(([file, text]) => [file, lineCount(text)]),
 );
+const listed = Object.entries(ceilings).filter(([file]) => !skipped.has(file));
 
 describe("source file size", () => {
   it("finds the source files it is meant to measure", () => {
@@ -66,14 +71,14 @@ describe("source file size", () => {
   });
 
   it("lists only files that exist and are still over the limit", () => {
-    const stale = Object.keys(ceilings).filter(
-      (file) => !existsSync(join(CLIENT, file)) || (sizes.get(file) ?? 0) <= MAX_LINES,
-    );
+    const stale = listed
+      .map(([file]) => file)
+      .filter((file) => !existsSync(join(CLIENT, file)) || (sizes.get(file) ?? 0) <= MAX_LINES);
     expect(stale).toEqual([]);
   });
 
   it("lowers a ceiling once its file has shrunk by a step", () => {
-    const loose = Object.entries(ceilings)
+    const loose = listed
       .filter(([file, ceiling]) => ceiling - (sizes.get(file) ?? 0) >= STEP)
       .map(([file, ceiling]) => {
         const lines = sizes.get(file) ?? 0;
