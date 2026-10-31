@@ -121,6 +121,8 @@ export const shards = {
     "src/lib/voice/voiceTokenManager.ts",
     "src/features/channels/voiceRow.view.ts",
     "src/features/channels/voiceRowModel.ts",
+    "src/features/channels/channelMoves.ts",
+    "src/features/menus/menuSheet.ts",
     "src/features/voice-messages/waveform.ts",
     "src/features/voice-messages/wav.ts",
     "src/features/voice-messages/mime.ts",

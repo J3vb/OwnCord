@@ -30,10 +30,10 @@ import type { ContextMenuItem, ContextMenuSeparator } from "@lib/ui/contextMenu"
 import { appendPurgeSection } from "@components/purgePrompt";
 import { copyWithToast, isDeveloperMode } from "../../features/developer-mode/developerTools";
 import type { ChannelReorderData } from "../ChannelSidebar";
-import { openMenuSheet } from "../menuSheet";
+import { openMenuSheet } from "../../features/menus/menuSheet";
 import { muteChoices, mutedUntilLabel } from "../muteMenu";
 import { shellText } from "../../i18n/shell";
-import { channelMoves } from "./channelMoves";
+import { channelMoves } from "../../features/channels/channelMoves";
 
 const LEVEL_KEYS = {
   all: "channel.notify.all",

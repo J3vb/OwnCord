@@ -145,7 +145,7 @@ export function attachServerMenu(
       openAtPress = false;
       if (isPhoneLayout()) {
         // A phone gets the same rows as a bottom sheet, loaded on first use.
-        import("@components/menuSheet").then(
+        import("../../features/menus/menuSheet").then(
           ({ openMenuSheet }) => {
             if (signal.aborted) return;
             openMenuSheet({

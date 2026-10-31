@@ -195,7 +195,7 @@ export function createStatusPicker(options: StatusPickerOptions): StatusPickerCo
       "aria-label": shellText("status.customLabel"),
       "data-testid": "custom-status-input",
     });
-    input.value = options.currentCustomStatus ?? "";
+    input.value = lastCommittedCustom;
     const hint = attachLimitHint(input, {
       max: MAX_CUSTOM_STATUS_LEN,
       hint: lineHintText(MAX_CUSTOM_STATUS_LEN),

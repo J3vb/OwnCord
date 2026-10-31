@@ -112,6 +112,25 @@ describe("StatusPicker on a phone", () => {
     expect(sheet()).toBeNull();
   });
 
+  it("seeds a reopened sheet from the latest custom status, not the one it was built with", () => {
+    mount();
+    dot().click();
+    customInput().value = "in a meeting";
+    customInput().dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),
+    );
+    dot().click();
+    expect(customInput().value).toBe("in a meeting");
+    closeBottomSheet();
+
+    // A change from elsewhere (another device) reaches the next sheet too.
+    picker!.setCustomStatus("lunch");
+    dot().click();
+    expect(customInput().value).toBe("lunch");
+    customInput().dispatchEvent(new FocusEvent("blur"));
+    expect(onCustomStatusChange).toHaveBeenCalledTimes(1);
+  });
+
   it("restores the typed text and closes on Escape in the field, sending nothing", () => {
     mount();
     dot().click();

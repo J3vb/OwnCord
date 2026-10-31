@@ -14,12 +14,12 @@
  * on the second page goes back one page first.
  */
 
-import type { ContextMenuItem, ContextMenuSeparator } from "@lib/ui/contextMenu";
-import { openBottomSheet, type BottomSheet } from "@lib/ui/bottomSheet";
-import { isImeCommit } from "@lib/text/ime";
-import { createElement } from "@lib/dom";
-import { createIcon } from "@lib/icons";
-import { shellText } from "../i18n/shell";
+import type { ContextMenuItem, ContextMenuSeparator } from "../../lib/ui/contextMenu";
+import { openBottomSheet, type BottomSheet } from "../../lib/ui/bottomSheet";
+import { isImeCommit } from "../../lib/text/ime";
+import { createElement } from "../../lib/dom";
+import { createIcon } from "../../lib/icons";
+import { shellText } from "../../i18n/shell";
 
 type MenuRow = ContextMenuItem | ContextMenuSeparator;
 
