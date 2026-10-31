@@ -269,10 +269,28 @@ func (lf *LogFile) rotate(day string) error {
 		return fmt.Errorf("opening log history file: %w", err)
 	}
 	lf.f, lf.bw, lf.cur, lf.size = f, bufio.NewWriterSize(f, logFileBuffer), key, size
+	if size > 0 && !endsWithNewline(filepath.Join(lf.opts.Dir, key.name()), size) {
+		// A crash mid-flush left half a line: end it so the next entry starts clean.
+		n, _ := lf.bw.WriteString("\n")
+		lf.size += int64(n)
+	}
 	if rotated {
 		lf.sweep()
 	}
 	return nil
+}
+
+func endsWithNewline(path string, size int64) bool {
+	f, err := os.Open(path) //nolint:gosec // G304: path is built from a date and a counter, not from input
+	if err != nil {
+		return true
+	}
+	defer func() { _ = f.Close() }()
+	last := make([]byte, 1)
+	if _, err := f.ReadAt(last, size-1); err != nil {
+		return true
+	}
+	return last[0] == '\n'
 }
 
 // fail stops disk writes until the next day starts, and says so once.

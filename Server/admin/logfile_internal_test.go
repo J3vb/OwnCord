@@ -99,6 +99,29 @@ func TestLogFile_RestartAppendsToTodaysFile(t *testing.T) {
 	}
 }
 
+// A crash mid-flush leaves half a line at the end of today's file. After a
+// restart the first new entry still gets a line of its own.
+func TestLogFile_RestartAfterHalfWrittenLineStartsANewLine(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "owncord-2026-10-30.log")
+	if err := os.WriteFile(path, []byte(`{"ts":"2026-10-30T11:00:00Z","level":"INFO","msg":"whole"}`+"\n"+`{"ts":"2026-10-30T11:00:01Z","lev`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	clock := newTestClock(time.Date(2026, 10, 30, 12, 0, 0, 0, time.UTC))
+	lf := newLogFile(LogFileOptions{Dir: dir, MaxAge: 7 * 24 * time.Hour, MaxBytes: 1 << 30, now: clock.now}, func() {})
+	lf.write(entryAt(clock.now(), "INFO", "after restart"))
+	lf.closeFile()
+
+	q := historyQuery(t, "")
+	resp, err := readLogHistory(context.Background(), dir, q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Entries) != 2 || resp.Entries[0].Message != "after restart" || resp.Entries[1].Message != "whole" {
+		t.Fatalf("entries = %+v", resp.Entries)
+	}
+}
+
 func TestLogFile_SweepDeletesOldFilesThenOldestPastSizeCap(t *testing.T) {
 	dir := t.TempDir()
 	write := func(name string, size int) {
