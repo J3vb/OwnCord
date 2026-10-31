@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as mocks from "../../helpers/mainPageMocks";
-import { savePref } from "../../../src/lib/prefs/preferences";
 import { createMainPage } from "../../../src/pages/MainPage";
 import { channelsStore } from "../../../src/stores/channels.store";
 import { authStore, clearAuth } from "../../../src/stores/auth.store";
@@ -25,6 +24,9 @@ import {
   fakeApi,
   textChannel,
   dmChannel,
+  useMainPageHarness,
+  mountPage,
+  seedChannels,
 } from "../../helpers/mainPageHarness";
 
 vi.mock("../../../src/features/content-consent/external", (importOriginal) =>
@@ -48,39 +50,20 @@ vi.mock("../../../src/pages/main-page/ChatArea", () => mocks.pageChatAreaMock())
 const {
   capturedAutoIdleOptions,
   autoIdleController,
-  mockMountChannel,
-  mockDestroyChannel,
   mockCreateChatArea,
   capturedChatAreaRef,
   mockPruneAttachmentCacheScope,
 } = mocks;
 
-// The remembered-open pref must never leak between tests, whatever their order.
-afterEach(() => {
-  localStorage.removeItem("owncord:settings:dmProfileOpen");
-});
-
 describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   let container: HTMLDivElement;
   let page: ReturnType<typeof createMainPage>;
 
-  beforeEach(() => {
-    resetStores();
-    mockMountChannel.mockClear();
-    mockDestroyChannel.mockClear();
-    mockCreateChatArea.mockClear();
-    capturedChatAreaRef.current = null;
-    // The panel opens with a 1:1 DM by default (WP 3B-3); the toggle tests below
-    // start from "remembered closed" and the auto-open tests set it back.
-    savePref("dmProfileOpen", false);
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    page?.destroy?.();
-    container.remove();
-    localStorage.removeItem("owncord:settings:dmProfileOpen");
+  useMainPageHarness({
+    wired: (c) => {
+      container = c;
+    },
+    currentPage: () => page,
   });
 
   it("clears every external-content cache on sign-out so one server's previews never reach the next", async () => {
@@ -103,8 +86,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     const oembed = (): number =>
       preview.mock.calls.filter((c) => c[1].includes("oembed") && c[1].includes("tdvid")).length;
     try {
-      page = createMainPage({ ws: fakeWs(), api: fakeApi() });
-      page.mount(container);
+      page = mountPage(container);
 
       // Fill each external cache once, and prove a re-render is served from it.
       renderGenericLinkPreview(pageUrl);
@@ -145,11 +127,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   });
 
   it("scopes DM profile notes to the connected host, like channel mutes and the NSFW gate", async () => {
-    channelsStore.setState((prev) => {
-      const ch = new Map(prev.channels);
-      ch.set(60, dmChannel(60, "dm-carol"));
-      return { ...prev, channels: ch, activeChannelId: 60 };
-    });
+    seedChannels([dmChannel(60, "dm-carol")], 60);
     dmStore.setState(() => ({
       channels: [
         {
@@ -175,8 +153,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
       getSessions: vi.fn(async () => []),
     } as unknown as ApiClient;
 
-    page = createMainPage({ ws: fakeWs(), api: hostedApi });
-    page.mount(container);
+    page = mountPage(container, fakeWs(), hostedApi);
 
     const chatAreaOpts = mockCreateChatArea.mock.calls[0]![0];
     chatAreaOpts.onToggleDmProfile();
@@ -224,8 +201,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
       getSessions: vi.fn(async () => []),
     } as unknown as ApiClient;
 
-    page = createMainPage({ ws: fakeWs(), api: hostedApi });
-    page.mount(container);
+    page = mountPage(container, fakeWs(), hostedApi);
     uiStore.setState((prev) => ({ ...prev, settingsOpen: true }));
     // The store notifies on the next tick, and opening rebuilds the live
     // Account tab then — drive the form a user would see, not the
@@ -275,8 +251,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   it("shows Signed in elsewhere on SESSION_REPLACED, and Use here reconnects this device", async () => {
     const ws = fakeWs();
     authStore.setState((prev) => ({ ...prev, token: "tok-here" }));
-    page = createMainPage({ ws, api: fakeApi("chat.example.com") });
-    page.mount(container);
+    page = mountPage(container, ws, fakeApi("chat.example.com"));
 
     uiStore.setState((prev) => ({
       ...prev,
@@ -299,8 +274,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   it("shows an actionable connection notice on disconnect and Retry redials", async () => {
     const ws = fakeWs();
     authStore.setState((prev) => ({ ...prev, token: "tok-here" }));
-    page = createMainPage({ ws, api: fakeApi("chat.example.com") });
-    page.mount(container);
+    page = mountPage(container, ws, fakeApi("chat.example.com"));
 
     uiStore.setState((prev) => ({
       ...prev,
@@ -321,8 +295,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   it("keeps Reconnecting... until a dial fails, then offers Retry", async () => {
     const ws = fakeWs();
     authStore.setState((prev) => ({ ...prev, token: "tok-here" }));
-    page = createMainPage({ ws, api: fakeApi("chat.example.com") });
-    page.mount(container);
+    page = mountPage(container, ws, fakeApi("chat.example.com"));
 
     uiStore.setState((prev) => ({
       ...prev,
@@ -354,8 +327,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     socket.simulateStateChange("connecting");
     socket.simulateStateChange("authenticating");
     socket.simulateStateChange("connected");
-    page = createMainPage({ ws, api: fakeApi("chat.example.com") });
-    page.mount(container);
+    page = mountPage(container, ws, fakeApi("chat.example.com"));
 
     const banner = container.querySelector<HTMLElement>(".reconnecting-banner")!;
     const live = container.querySelector<HTMLElement>("[data-testid='banner-announce']")!;
@@ -405,8 +377,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   it("re-renders the notice on network loss and return without redialing", async () => {
     const ws = fakeWs();
     authStore.setState((prev) => ({ ...prev, token: "tok-here" }));
-    page = createMainPage({ ws, api: fakeApi("chat.example.com") });
-    page.mount(container);
+    page = mountPage(container, ws, fakeApi("chat.example.com"));
 
     uiStore.setState((prev) => ({
       ...prev,
@@ -435,8 +406,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   it("does not clear a pending restart countdown on a network flap", () => {
     const ws = fakeWs();
     authStore.setState((prev) => ({ ...prev, token: "tok-here" }));
-    page = createMainPage({ ws, api: fakeApi("chat.example.com") });
-    page.mount(container);
+    page = mountPage(container, ws, fakeApi("chat.example.com"));
 
     // The server announces a restart while the socket is live.
     ws.emit("server_restart", { reason: "update", delay_seconds: 30 });
@@ -453,8 +423,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
 
   it("counts down a shutdown notice too: the session survives a restart (Q4)", () => {
     const ws = fakeWs();
-    page = createMainPage({ ws, api: fakeApi("chat.example.com") });
-    page.mount(container);
+    page = mountPage(container, ws, fakeApi("chat.example.com"));
 
     ws.emit("server_restart", { reason: "shutdown", delay_seconds: 5 });
     const banner = container.querySelector<HTMLElement>(".reconnecting-banner")!;
@@ -474,8 +443,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
       })),
     } as unknown as ApiClient;
     authStore.setState((prev) => ({ ...prev, isAuthenticated: true, token: "tok" }));
-    page = createMainPage({ ws: fakeWs(), api: hostedApi });
-    page.mount(container);
+    page = mountPage(container, fakeWs(), hostedApi);
     uiStore.setState((prev) => ({ ...prev, settingsOpen: true }));
     await new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -509,8 +477,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
         },
       ]),
     } as unknown as ApiClient;
-    page = createMainPage({ ws: fakeWs(), api: hostedApi });
-    page.mount(container);
+    page = mountPage(container, fakeWs(), hostedApi);
 
     await vi.waitFor(() => {
       const toast = container.querySelector('[data-testid="toast"]');
@@ -549,8 +516,7 @@ describe("MainPage — presence", () => {
   });
 
   it("does not tell auto-idle about voice calls: Idle still applies in a call", () => {
-    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
-    page.mount(container);
+    page = mountPage(container);
     const options = capturedAutoIdleOptions.current!;
     expect(options).not.toHaveProperty("inCall");
     expect(autoIdleController).not.toHaveProperty("setInCall");
@@ -564,8 +530,7 @@ describe("MainPage — presence", () => {
 
   it("retries the return-to-online presence_update once the limiter's window reopens instead of dropping it forever", () => {
     const ws = fakeWs();
-    page = createMainPage({ ws, api: fakeApi() });
-    page.mount(container);
+    page = mountPage(container, ws);
 
     const onStatusChange = capturedAutoIdleOptions.current!.onStatusChange;
 
@@ -619,8 +584,7 @@ describe("MainPage — server restart banner", () => {
 
   it("re-syncs to the real (connected) status instead of counting down to a fake Reconnecting on an update_aborted cancel", () => {
     const ws = fakeWs();
-    page = createMainPage({ ws, api: fakeApi() });
-    page.mount(container);
+    page = mountPage(container, ws);
 
     // Server announces a real restart countdown.
     ws.emit("server_restart", { reason: "update", delay_seconds: 5 });
@@ -670,19 +634,19 @@ describe("MainPage — mark-all-read teardown", () => {
     // Five unread channels: readState.ts paces sends in bursts of 4 per
     // 1100ms, so the 5th send is queued behind a timer instead of going out
     // synchronously.
-    channelsStore.setState((prev) => {
-      const ch = new Map(prev.channels);
-      ch.set(1, { ...textChannel(1, "c1"), unreadCount: 1 });
-      ch.set(2, { ...textChannel(2, "c2"), unreadCount: 1 });
-      ch.set(3, { ...textChannel(3, "c3"), unreadCount: 1 });
-      ch.set(4, { ...textChannel(4, "c4"), unreadCount: 1 });
-      ch.set(5, { ...textChannel(5, "c5"), unreadCount: 1 });
-      return { ...prev, channels: ch, activeChannelId: null };
-    });
+    seedChannels(
+      [
+        { ...textChannel(1, "c1"), unreadCount: 1 },
+        { ...textChannel(2, "c2"), unreadCount: 1 },
+        { ...textChannel(3, "c3"), unreadCount: 1 },
+        { ...textChannel(4, "c4"), unreadCount: 1 },
+        { ...textChannel(5, "c5"), unreadCount: 1 },
+      ],
+      null,
+    );
 
     const ws = fakeWs();
-    page = createMainPage({ ws, api: fakeApi() });
-    page.mount(container);
+    page = mountPage(container, ws);
     // Mount can itself send (e.g. a presence re-sync) — clear those so the
     // counts below track only the mark_read burst.
     (ws.send as ReturnType<typeof vi.fn>).mockClear();
@@ -724,21 +688,15 @@ describe("MainPage — account deletion", () => {
   let container: HTMLDivElement;
   let page: ReturnType<typeof createMainPage>;
 
-  beforeEach(() => {
-    resetStores();
-    mockPruneAttachmentCacheScope.mockClear();
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    page?.destroy?.();
-    container.remove();
+  useMainPageHarness({
+    wired: (c) => {
+      container = c;
+    },
+    currentPage: () => page,
   });
 
   async function deleteAccount(api: ApiClient): Promise<void> {
-    page = createMainPage({ ws: fakeWs(), api });
-    page.mount(container);
+    page = mountPage(container, fakeWs(), api);
     // The Account tab (and its delete control) is only built once Settings is
     // open (DP-52), so open it before driving the delete flow.
     uiStore.setState((prev) => ({ ...prev, settingsOpen: true }));

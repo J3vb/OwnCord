@@ -9,11 +9,15 @@ import { voiceStore } from "../../../src/stores/voice.store";
 import { dmStore, updateDmParticipant } from "../../../src/stores/dm.store";
 import { alertSupersededCall } from "../../../src/features/direct-messages/callAlerts";
 import {
-  resetStores,
   fakeWs,
-  fakeApi,
   textChannel,
   dmChannel,
+  useMainPageHarness,
+  mountPage,
+  seedChannels,
+  mountSettled,
+  incomingCall,
+  incomingBannerEl,
 } from "../../helpers/mainPageHarness";
 
 vi.mock("../../../src/features/content-consent/external", (importOriginal) =>
@@ -34,40 +38,17 @@ vi.mock("../../../src/pages/main-page/SidebarArea", () => mocks.pageSidebarAreaM
 vi.mock("../../../src/features/navigation/destinations", () => mocks.navigationDestinationsMock());
 vi.mock("../../../src/pages/main-page/ChatArea", () => mocks.pageChatAreaMock());
 
-const {
-  mockMountChannel,
-  mockDestroyChannel,
-  mockCreateSidebarArea,
-  mockCreateChatArea,
-  capturedChatAreaRef,
-} = mocks;
-
-// The remembered-open pref must never leak between tests, whatever their order.
-afterEach(() => {
-  localStorage.removeItem("owncord:settings:dmProfileOpen");
-});
+const { mockCreateSidebarArea, mockCreateChatArea, capturedChatAreaRef } = mocks;
 
 describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   let container: HTMLDivElement;
   let page: ReturnType<typeof createMainPage>;
 
-  beforeEach(() => {
-    resetStores();
-    mockMountChannel.mockClear();
-    mockDestroyChannel.mockClear();
-    mockCreateChatArea.mockClear();
-    capturedChatAreaRef.current = null;
-    // The panel opens with a 1:1 DM by default (WP 3B-3); the toggle tests below
-    // start from "remembered closed" and the auto-open tests set it back.
-    savePref("dmProfileOpen", false);
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    page?.destroy?.();
-    container.remove();
-    localStorage.removeItem("owncord:settings:dmProfileOpen");
+  useMainPageHarness({
+    wired: (c) => {
+      container = c;
+    },
+    currentPage: () => page,
   });
 
   describe("DM profile panel is open by default and remembered", () => {
@@ -93,14 +74,15 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
       mentionCount: 0,
     });
     function mountOnTwoDms(): void {
-      channelsStore.setState((prev) => {
-        const ch = new Map(prev.channels);
-        ch.set(1, textChannel(1, "general"));
-        ch.set(70, dmChannel(70, "dm-bob"));
-        ch.set(71, dmChannel(71, "dm-carol"));
-        ch.set(72, dmChannel(72, "group"));
-        return { ...prev, channels: ch, activeChannelId: 70 };
-      });
+      seedChannels(
+        [
+          textChannel(1, "general"),
+          dmChannel(70, "dm-bob"),
+          dmChannel(71, "dm-carol"),
+          dmChannel(72, "group"),
+        ],
+        70,
+      );
       dmStore.setState(() => ({
         channels: [
           oneToOne(70, 7, "bob"),
@@ -108,8 +90,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
           { ...oneToOne(72, 9, "dave"), isGroup: true, name: "group" },
         ],
       }));
-      page = createMainPage({ ws: fakeWs(), api: fakeApi() });
-      page.mount(container);
+      page = mountPage(container);
       // The mocked chat area's slot is detached; focus needs it in the document.
       container.appendChild(capturedChatAreaRef.current!.dmProfileSlot);
     }
@@ -300,11 +281,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   });
 
   it("does not open the 1:1 profile panel for a group DM header click", () => {
-    channelsStore.setState((prev) => {
-      const ch = new Map(prev.channels);
-      ch.set(50, dmChannel(50, "Group Chat"));
-      return { ...prev, channels: ch, activeChannelId: 50 };
-    });
+    seedChannels([dmChannel(50, "Group Chat")], 50);
     dmStore.setState(() => ({
       channels: [
         {
@@ -325,8 +302,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
       ],
     }));
 
-    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
-    page.mount(container);
+    page = mountPage(container);
 
     const chatAreaOpts = mockCreateChatArea.mock.calls[0]![0];
     chatAreaOpts.onToggleDmProfile();
@@ -343,16 +319,11 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   });
 
   it("does not ring or announce 'Calling…' when starting a call while the socket is reconnecting", () => {
-    channelsStore.setState((prev) => {
-      const ch = new Map(prev.channels);
-      ch.set(50, dmChannel(50, "dm-alice"));
-      return { ...prev, channels: ch, activeChannelId: 50 };
-    });
+    seedChannels([dmChannel(50, "dm-alice")], 50);
     uiStore.setState((prev) => ({ ...prev, connectionStatus: "reconnecting" }));
 
     const ws = fakeWs();
-    page = createMainPage({ ws, api: fakeApi() });
-    page.mount(container);
+    page = mountPage(container, ws);
 
     const chatAreaOpts = mockCreateChatArea.mock.calls[0]![0];
     chatAreaOpts.onStartCall();
@@ -367,12 +338,11 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     const ws = fakeWs();
     uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
 
-    page = createMainPage({ ws, api: fakeApi() });
-    page.mount(container);
+    page = mountPage(container, ws);
 
-    ws.emit("call_incoming", { channel_id: 50, from_user: 10, username: "alice" });
+    incomingCall(ws);
 
-    const banner = document.querySelector('[data-testid="incoming-call-banner"]') as HTMLElement;
+    const banner = incomingBannerEl();
     expect(banner.style.display).not.toBe("none");
 
     // The socket drops mid-ring.
@@ -392,12 +362,11 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
     noteJoinFailed();
 
-    page = createMainPage({ ws, api: fakeApi() });
-    page.mount(container);
+    page = mountPage(container, ws);
 
-    ws.emit("call_incoming", { channel_id: 50, from_user: 10, username: "alice" });
+    incomingCall(ws);
 
-    const banner = document.querySelector('[data-testid="incoming-call-banner"]') as HTMLElement;
+    const banner = incomingBannerEl();
     const acceptBtn = document.querySelector('[data-testid="incoming-call-accept"]') as HTMLElement;
     acceptBtn.click();
 
@@ -417,13 +386,11 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   it("Join with video on the incoming banner joins and turns the camera on once connected (3B-4)", async () => {
     const ws = fakeWs();
     uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
-    page = createMainPage({ ws, api: fakeApi() });
-    page.mount(container);
-    await vi.dynamicImportSettled();
+    page = await mountSettled(container, ws);
     const lk = await import("@lib/voice/livekitSession");
     vi.mocked(lk.enableCamera).mockClear();
 
-    ws.emit("call_incoming", { channel_id: 50, from_user: 10, username: "alice" });
+    incomingCall(ws);
     (document.querySelector('[data-testid="incoming-call-accept-video"]') as HTMLElement).click();
     expect(ws.send).toHaveBeenCalledWith(expect.objectContaining({ type: "voice_join" }));
     expect(lk.enableCamera).not.toHaveBeenCalled();
@@ -438,10 +405,9 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   it("Ctrl+Enter accepts and Escape declines a ringing call (3B-4)", () => {
     const ws = fakeWs();
     uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
-    page = createMainPage({ ws, api: fakeApi() });
-    page.mount(container);
+    page = mountPage(container, ws);
 
-    ws.emit("call_incoming", { channel_id: 50, from_user: 10, username: "alice" });
+    incomingCall(ws);
     // The closed Settings panel is hidden by stylesheet only, which jsdom does
     // not load; hide it the way the real page's CSS does.
     const settingsOverlay = document.querySelector<HTMLElement>('[data-testid="settings-overlay"]');
@@ -461,12 +427,11 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   it("a ring replaced by a ring from another channel reports the first as missed (3B-4)", async () => {
     const ws = fakeWs();
     uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
-    page = createMainPage({ ws, api: fakeApi() });
-    page.mount(container);
+    page = mountPage(container, ws);
     vi.mocked(alertSupersededCall).mockClear();
 
-    ws.emit("call_incoming", { channel_id: 50, from_user: 10, username: "alice" });
-    ws.emit("call_incoming", { channel_id: 50, from_user: 10, username: "alice" });
+    incomingCall(ws);
+    incomingCall(ws);
     await vi.dynamicImportSettled();
     expect(alertSupersededCall).not.toHaveBeenCalled();
 
@@ -477,11 +442,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   });
 
   it("keeps the open DM profile panel's status and name live, like the chat header does", async () => {
-    channelsStore.setState((prev) => {
-      const ch = new Map(prev.channels);
-      ch.set(70, dmChannel(70, "dm-bob"));
-      return { ...prev, channels: ch, activeChannelId: 70 };
-    });
+    seedChannels([dmChannel(70, "dm-bob")], 70);
     dmStore.setState(() => ({
       channels: [
         {
@@ -499,8 +460,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
       ],
     }));
 
-    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
-    page.mount(container);
+    page = mountPage(container);
 
     const chatAreaOpts = mockCreateChatArea.mock.calls[0]![0];
     chatAreaOpts.onToggleDmProfile();
@@ -529,11 +489,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
 
   /** Mount the page on a DM with bob and return its profile toggle and slot. */
   function mountOnDm(): { toggle: () => void; slot: HTMLElement } {
-    channelsStore.setState((prev) => {
-      const ch = new Map(prev.channels);
-      ch.set(70, dmChannel(70, "dm-bob"));
-      return { ...prev, channels: ch, activeChannelId: 70 };
-    });
+    seedChannels([dmChannel(70, "dm-bob")], 70);
     dmStore.setState(() => ({
       channels: [
         {
@@ -550,8 +506,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
         },
       ],
     }));
-    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
-    page.mount(container);
+    page = mountPage(container);
     const chatAreaOpts = mockCreateChatArea.mock.calls[0]![0];
     return {
       toggle: () => chatAreaOpts.onToggleDmProfile(),

@@ -15,6 +15,10 @@ import {
   fakeApi,
   textChannel,
   dmChannel,
+  useMainPageHarness,
+  mountPage,
+  seedChannels,
+  mountSettled,
 } from "../../helpers/mainPageHarness";
 
 vi.mock("../../../src/features/content-consent/external", (importOriginal) =>
@@ -47,50 +51,29 @@ const {
   memberPanels,
 } = mocks;
 
-// The remembered-open pref must never leak between tests, whatever their order.
-afterEach(() => {
-  localStorage.removeItem("owncord:settings:dmProfileOpen");
-});
-
 describe("MainPage — activeChannelId subscriber", () => {
   let container: HTMLDivElement;
   let page: ReturnType<typeof createMainPage>;
 
-  beforeEach(() => {
-    resetStores();
-    mockMountChannel.mockClear();
-    mockDestroyChannel.mockClear();
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    page?.destroy?.();
-    container.remove();
+  useMainPageHarness({
+    wired: (c) => {
+      container = c;
+    },
+    currentPage: () => page,
   });
 
   it("mounts the channel when an active channel is set", () => {
-    channelsStore.setState((prev) => {
-      const ch = new Map(prev.channels);
-      ch.set(1, textChannel(1, "general"));
-      return { ...prev, channels: ch, activeChannelId: 1 };
-    });
+    seedChannels([textChannel(1, "general")], 1);
 
-    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
-    page.mount(container);
+    page = mountPage(container);
 
     expect(mockMountChannel).toHaveBeenCalledWith(1, "general", "text");
   });
 
   it("destroys the mounted channel when the active channel is cleared (deleted/closed while offline)", () => {
-    channelsStore.setState((prev) => {
-      const ch = new Map(prev.channels);
-      ch.set(1, textChannel(1, "general"));
-      return { ...prev, channels: ch, activeChannelId: 1 };
-    });
+    seedChannels([textChannel(1, "general")], 1);
 
-    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
-    page.mount(container);
+    page = mountPage(container);
     expect(mockMountChannel).toHaveBeenCalledWith(1, "general", "text");
 
     // The channel is gone and nothing replaces it as active — this is what
@@ -103,15 +86,9 @@ describe("MainPage — activeChannelId subscriber", () => {
   });
 
   it("mounts the newly active channel when switching between two channels", () => {
-    channelsStore.setState((prev) => {
-      const ch = new Map(prev.channels);
-      ch.set(1, textChannel(1, "general"));
-      ch.set(2, textChannel(2, "random", 1));
-      return { ...prev, channels: ch, activeChannelId: 1 };
-    });
+    seedChannels([textChannel(1, "general"), textChannel(2, "random", 1)], 1);
 
-    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
-    page.mount(container);
+    page = mountPage(container);
 
     setActiveChannel(2);
     channelsStore.flush();
@@ -149,8 +126,7 @@ describe("MainPage — content view wiring", () => {
     }));
     container = document.createElement("div");
     document.body.appendChild(container);
-    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
-    page.mount(container);
+    page = mountPage(container);
   });
 
   afterEach(() => {
@@ -263,9 +239,7 @@ describe("MainPage — member list placement (3C-6b)", () => {
     }));
     container = document.createElement("div");
     document.body.appendChild(container);
-    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
-    page.mount(container);
-    await vi.dynamicImportSettled();
+    page = await mountSettled(container);
   });
 
   afterEach(() => {
@@ -318,11 +292,7 @@ describe("MainPage — member list placement (3C-6b)", () => {
   });
 
   it("a flip with a DM on screen leaves no member list in either layout", () => {
-    channelsStore.setState((prev) => {
-      const ch = new Map(prev.channels);
-      ch.set(2, dmChannel(2, "dm-with-bob"));
-      return { ...prev, channels: ch, activeChannelId: 2 };
-    });
+    seedChannels([dmChannel(2, "dm-with-bob")], 2);
     uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
     flip("right");
     expect(container.querySelector("#member-column [data-testid='member-list']")).toBeNull();
@@ -336,8 +306,7 @@ describe("MainPage — member list placement (3C-6b)", () => {
     memberPanels.destroyed = 0;
     localStorage.setItem("owncord:settings:memberListLayout", '"right"');
 
-    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
-    page.mount(container);
+    page = mountPage(container);
     page.destroy?.();
     await vi.dynamicImportSettled();
 
@@ -366,8 +335,7 @@ describe("MainPage — focus fallback skips hidden sidebar buttons", () => {
     }));
     container = document.createElement("div");
     document.body.appendChild(container);
-    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
-    page.mount(container);
+    page = mountPage(container);
   });
 
   afterEach(() => {
@@ -416,8 +384,7 @@ describe("MainPage — focus fallback when the channel is declined", () => {
     }));
     container = document.createElement("div");
     document.body.appendChild(container);
-    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
-    page.mount(container);
+    page = mountPage(container);
   });
 
   afterEach(() => {

@@ -1,18 +1,25 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import * as mocks from "../../helpers/mainPageMocks";
-import { savePref } from "../../../src/lib/prefs/preferences";
 import { createMainPage } from "../../../src/pages/MainPage";
 import { channelsStore, setActiveChannel } from "../../../src/stores/channels.store";
-import { uiStore } from "../../../src/stores/ui.store";
 import { voiceStore, updateVoiceUserProfile } from "../../../src/stores/voice.store";
-import { dmStore } from "../../../src/stores/dm.store";
 import { membersStore, updateMemberProfile } from "../../../src/stores/members.store";
 import {
-  resetStores,
   fakeWs,
   fakeApi,
   textChannel,
   dmChannel,
+  useMainPageHarness,
+  mountPage,
+  seedChannels,
+  voiceChannel,
+  openOneToOneDm,
+  voiceUser,
+  connectedDm,
+  mountSettled,
+  chatAreaProps,
+  startCall,
+  roster,
 } from "../../helpers/mainPageHarness";
 
 vi.mock("../../../src/features/content-consent/external", (importOriginal) =>
@@ -36,59 +43,33 @@ vi.mock("../../../src/pages/main-page/ChatArea", () => mocks.pageChatAreaMock())
 const {
   capturedOnRemoteVideo,
   mockCreateUpdateNotifier,
-  mockMountChannel,
-  mockDestroyChannel,
   mockCreateSidebarArea,
-  mockCreateChatArea,
   capturedChatAreaRef,
   mockRenameGroup,
 } = mocks;
-
-// The remembered-open pref must never leak between tests, whatever their order.
-afterEach(() => {
-  localStorage.removeItem("owncord:settings:dmProfileOpen");
-});
 
 describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   let container: HTMLDivElement;
   let page: ReturnType<typeof createMainPage>;
 
-  beforeEach(() => {
-    resetStores();
-    mockMountChannel.mockClear();
-    mockDestroyChannel.mockClear();
-    mockCreateChatArea.mockClear();
-    capturedChatAreaRef.current = null;
-    // The panel opens with a 1:1 DM by default (WP 3B-3); the toggle tests below
-    // start from "remembered closed" and the auto-open tests set it back.
-    savePref("dmProfileOpen", false);
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    page?.destroy?.();
-    container.remove();
-    localStorage.removeItem("owncord:settings:dmProfileOpen");
+  useMainPageHarness({
+    wired: (c) => {
+      container = c;
+    },
+    currentPage: () => page,
   });
 
   it("dismisses the video grid when switching to a non-voice channel (dm/announcement), not just 'text'", () => {
-    channelsStore.setState((prev) => {
-      const ch = new Map(prev.channels);
-      ch.set(1, textChannel(1, "general"));
-      ch.set(2, dmChannel(2, "dm-with-bob"));
-      return { ...prev, channels: ch, activeChannelId: 1 };
-    });
+    seedChannels([textChannel(1, "general"), dmChannel(2, "dm-with-bob")], 1);
 
-    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
-    page.mount(container);
+    page = mountPage(container);
 
     // Open the call view while in voice with the camera on (the real,
     // unmocked VideoModeController drives this off voiceStore).
     voiceStore.setState((prev) => ({
       ...prev,
       currentChannelId: 9,
-      voiceUsers: new Map([[9, new Map()]]),
+      voiceUsers: roster(9, []),
       localCamera: true,
     }));
     voiceStore.flush();
@@ -108,20 +89,14 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   });
 
   it("opening the call view of a voice channel selects it and keeps its chat beside the grid", () => {
-    channelsStore.setState((prev) => {
-      const ch = new Map(prev.channels);
-      ch.set(1, textChannel(1, "general"));
-      ch.set(9, { ...textChannel(9, "lounge", 1), type: "voice" as const });
-      return { ...prev, channels: ch, activeChannelId: 1 };
-    });
+    seedChannels([textChannel(1, "general"), voiceChannel(9, "lounge", 1)], 1);
 
-    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
-    page.mount(container);
+    page = mountPage(container);
 
     voiceStore.setState((prev) => ({
       ...prev,
       currentChannelId: 9,
-      voiceUsers: new Map([[9, new Map()]]),
+      voiceUsers: roster(9, []),
     }));
     voiceStore.flush();
     (mockCreateSidebarArea.mock.calls.at(-1)![0] as { onOpenCall: () => void }).onOpenCall();
@@ -144,21 +119,17 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   });
 
   it("opening another voice channel's chat while in a call dismisses the grid", () => {
-    channelsStore.setState((prev) => {
-      const ch = new Map(prev.channels);
-      ch.set(1, textChannel(1, "general"));
-      ch.set(9, { ...textChannel(9, "lounge", 1), type: "voice" as const });
-      ch.set(10, { ...textChannel(10, "music", 2), type: "voice" as const });
-      return { ...prev, channels: ch, activeChannelId: 1 };
-    });
+    seedChannels(
+      [textChannel(1, "general"), voiceChannel(9, "lounge", 1), voiceChannel(10, "music", 2)],
+      1,
+    );
 
-    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
-    page.mount(container);
+    page = mountPage(container);
 
     voiceStore.setState((prev) => ({
       ...prev,
       currentChannelId: 9,
-      voiceUsers: new Map([[9, new Map()]]),
+      voiceUsers: roster(9, []),
     }));
     voiceStore.flush();
     (mockCreateSidebarArea.mock.calls.at(-1)![0] as { onOpenCall: () => void }).onOpenCall();
@@ -172,14 +143,9 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   });
 
   it("does not clear a just-added remote video tile when a voice-channel switch left the camera/screenshare signature unchanged", () => {
-    channelsStore.setState((prev) => {
-      const ch = new Map(prev.channels);
-      ch.set(1, textChannel(1, "general"));
-      return { ...prev, channels: ch, activeChannelId: 1 };
-    });
+    seedChannels([textChannel(1, "general")], 1);
 
-    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
-    page.mount(container);
+    page = mountPage(container);
 
     // Alice joins voice channel A (9). Someone's camera briefly toggles the
     // signature so the real VideoModeController actually runs checkVideoMode
@@ -188,48 +154,12 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     voiceStore.setState((prev) => ({
       ...prev,
       currentChannelId: 9,
-      voiceUsers: new Map([
-        [
-          9,
-          new Map([
-            [
-              100,
-              {
-                userId: 100,
-                username: "carl",
-                muted: false,
-                deafened: false,
-                speaking: false,
-                camera: true,
-                screenshare: false,
-              },
-            ],
-          ]),
-        ],
-      ]),
+      voiceUsers: roster(9, [voiceUser(100, { username: "carl", camera: true })]),
     }));
     voiceStore.flush();
     voiceStore.setState((prev) => ({
       ...prev,
-      voiceUsers: new Map([
-        [
-          9,
-          new Map([
-            [
-              100,
-              {
-                userId: 100,
-                username: "carl",
-                muted: false,
-                deafened: false,
-                speaking: false,
-                camera: false,
-                screenshare: false,
-              },
-            ],
-          ]),
-        ],
-      ]),
+      voiceUsers: roster(9, [voiceUser(100, { username: "carl" })]),
     }));
     voiceStore.flush();
 
@@ -239,7 +169,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     voiceStore.setState((prev) => ({
       ...prev,
       currentChannelId: 10,
-      voiceUsers: new Map([[10, new Map()]]),
+      voiceUsers: roster(10, []),
     }));
     voiceStore.flush();
 
@@ -263,30 +193,15 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   });
 
   it("applies a cross-channel roster click's channel change before watching, so clearStreams cannot drop the watch", () => {
-    channelsStore.setState((prev) => {
-      const ch = new Map(prev.channels);
-      ch.set(1, textChannel(1, "general"));
-      ch.set(10, { ...textChannel(10, "lounge", 1), type: "voice" as const });
-      return { ...prev, channels: ch, activeChannelId: 1 };
-    });
-    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
-    page.mount(container);
+    seedChannels([textChannel(1, "general"), voiceChannel(10, "lounge", 1)], 1);
+    page = mountPage(container);
 
-    const user = (userId: number, screenshare: boolean) => ({
-      userId,
-      username: `u${userId}`,
-      muted: false,
-      deafened: false,
-      speaking: false,
-      camera: false,
-      screenshare,
-    });
     voiceStore.setState((prev) => ({
       ...prev,
       currentChannelId: 9,
       voiceUsers: new Map([
-        [9, new Map([[100, user(100, true)]])],
-        [10, new Map([[200, user(200, true)]])],
+        ...roster(9, [voiceUser(100, { screenshare: true })]),
+        ...roster(10, [voiceUser(200, { screenshare: true })]),
       ]),
     }));
     voiceStore.flush();
@@ -308,27 +223,13 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   });
 
   it("opens the call view from the joined channel, and keeps its avatar tiles in step with who joins (1B-1)", () => {
-    channelsStore.setState((prev) => {
-      const ch = new Map(prev.channels);
-      ch.set(1, textChannel(1, "general"));
-      return { ...prev, channels: ch, activeChannelId: 1 };
-    });
-    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
-    page.mount(container);
+    seedChannels([textChannel(1, "general")], 1);
+    page = mountPage(container);
 
-    const user = (userId: number) => ({
-      userId,
-      username: `u${userId}`,
-      muted: false,
-      deafened: false,
-      speaking: false,
-      camera: false,
-      screenshare: false,
-    });
     voiceStore.setState((prev) => ({
       ...prev,
       currentChannelId: 9,
-      voiceUsers: new Map([[9, new Map([[100, user(100)]])]]),
+      voiceUsers: roster(9, [voiceUser(100)]),
     }));
     voiceStore.flush();
 
@@ -343,15 +244,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     // A join with no video changes no camera/share flag.
     voiceStore.setState((prev) => ({
       ...prev,
-      voiceUsers: new Map([
-        [
-          9,
-          new Map([
-            [100, user(100)],
-            [101, user(101)],
-          ]),
-        ],
-      ]),
+      voiceUsers: roster(9, [voiceUser(100), voiceUser(101)]),
     }));
     voiceStore.flush();
     expect(ids()).toEqual([100, 101]);
@@ -359,11 +252,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   });
 
   it("relabels a remote video tile with the member's display name, not the raw username, and keeps it in sync with a mid-call rename", () => {
-    channelsStore.setState((prev) => {
-      const ch = new Map(prev.channels);
-      ch.set(1, textChannel(1, "general"));
-      return { ...prev, channels: ch, activeChannelId: 1 };
-    });
+    seedChannels([textChannel(1, "general")], 1);
     membersStore.setState(() => ({
       members: new Map([
         [
@@ -382,31 +271,12 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
       roleRevision: 0,
     }));
 
-    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
-    page.mount(container);
+    page = mountPage(container);
 
     voiceStore.setState((prev) => ({
       ...prev,
       currentChannelId: 9,
-      voiceUsers: new Map([
-        [
-          9,
-          new Map([
-            [
-              200,
-              {
-                userId: 200,
-                username: "bob_1994",
-                muted: false,
-                deafened: false,
-                speaking: false,
-                camera: true,
-                screenshare: false,
-              },
-            ],
-          ]),
-        ],
-      ]),
+      voiceUsers: roster(9, [voiceUser(200, { username: "bob_1994", camera: true })]),
     }));
     voiceStore.flush();
 
@@ -437,14 +307,9 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   });
 
   it('keeps "(You)" on the self-view tile when the server echoes our own voice_state', () => {
-    channelsStore.setState((prev) => {
-      const ch = new Map(prev.channels);
-      ch.set(1, textChannel(1, "general"));
-      return { ...prev, channels: ch, activeChannelId: 1 };
-    });
+    seedChannels([textChannel(1, "general")], 1);
 
-    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
-    page.mount(container);
+    page = mountPage(container);
 
     // resetStores authenticates user 1 ("alice"). This is the server's own
     // voice_state echo landing in voiceUsers for the local user — updateVoiceState
@@ -452,25 +317,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     voiceStore.setState((prev) => ({
       ...prev,
       currentChannelId: 9,
-      voiceUsers: new Map([
-        [
-          9,
-          new Map([
-            [
-              1,
-              {
-                userId: 1,
-                username: "alice",
-                muted: false,
-                deafened: false,
-                speaking: false,
-                camera: true,
-                screenshare: false,
-              },
-            ],
-          ]),
-        ],
-      ]),
+      voiceUsers: roster(9, [voiceUser(1, { username: "alice", camera: true })]),
     }));
     voiceStore.flush();
 
@@ -484,14 +331,9 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   });
 
   it("brackets a bare IPv6 host when building the auto-updater URL", () => {
-    channelsStore.setState((prev) => {
-      const ch = new Map(prev.channels);
-      ch.set(1, textChannel(1, "general"));
-      return { ...prev, channels: ch, activeChannelId: 1 };
-    });
+    seedChannels([textChannel(1, "general")], 1);
 
-    page = createMainPage({ ws: fakeWs(), api: fakeApi("2001:db8::1") });
-    page.mount(container);
+    page = mountPage(container, fakeWs(), fakeApi("2001:db8::1"));
 
     // A bare IPv6 literal spliced into a URL authority is not parseable — the
     // host parser enters the port state at the first colon — so build_updater
@@ -505,14 +347,9 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   });
 
   it("leaves a DNS host unbracketed in the auto-updater URL", () => {
-    channelsStore.setState((prev) => {
-      const ch = new Map(prev.channels);
-      ch.set(1, textChannel(1, "general"));
-      return { ...prev, channels: ch, activeChannelId: 1 };
-    });
+    seedChannels([textChannel(1, "general")], 1);
 
-    page = createMainPage({ ws: fakeWs(), api: fakeApi("chat.example.com:8443") });
-    page.mount(container);
+    page = mountPage(container, fakeWs(), fakeApi("chat.example.com:8443"));
 
     expect(mockCreateUpdateNotifier).toHaveBeenCalledWith({
       serverUrl: "https://chat.example.com:8443",
@@ -520,34 +357,9 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     });
   });
 
-  function openOneToOneDm(id: number): void {
-    channelsStore.setState((prev) => {
-      const ch = new Map(prev.channels);
-      ch.set(id, dmChannel(id, "dm-bob"));
-      return { ...prev, channels: ch, activeChannelId: id };
-    });
-    dmStore.setState(() => ({
-      channels: [
-        {
-          channelId: id,
-          recipient: { id: 10, username: "bob", avatar: "", status: "online" },
-          participants: [{ id: 10, username: "bob", avatar: "", status: "online" }],
-          name: "",
-          isGroup: false,
-          lastMessageId: null,
-          lastMessage: "",
-          lastMessageAt: "",
-          unreadCount: 0,
-          mentionCount: 0,
-        },
-      ],
-    }));
-  }
-
   it("stops your screen share from the grid's self-preview cover, and names remote tiles for their controls", async () => {
     const { disableScreenshare } = await import("@lib/voice/livekitSession");
-    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
-    page.mount(container);
+    page = mountPage(container);
     const grid = capturedChatAreaRef.current!.videoGrid;
     const cbs = grid.setCallbacks.mock.calls.at(-1)![0] as { onStopSharing: () => void };
 
@@ -570,25 +382,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     });
     voiceStore.setState((prev) => ({
       ...prev,
-      voiceUsers: new Map([
-        [
-          9,
-          new Map([
-            [
-              10,
-              {
-                userId: 10,
-                username: "bob",
-                muted: false,
-                deafened: false,
-                speaking: false,
-                camera: false,
-                screenshare: true,
-              },
-            ],
-          ]),
-        ],
-      ]),
+      voiceUsers: roster(9, [voiceUser(10, { username: "bob", screenshare: true })]),
     }));
     capturedOnRemoteVideo.current!(10, {} as MediaStream, true);
     const config = grid.addStream.mock.calls.at(-1)![3] as { name?: string };
@@ -597,15 +391,12 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
 
   it("the header's video call button joins the DM call and turns the camera on once connected (3B-1)", async () => {
     const ws = fakeWs();
-    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
-    openOneToOneDm(50);
-    page = createMainPage({ ws, api: fakeApi() });
-    page.mount(container);
-    await vi.dynamicImportSettled();
+    connectedDm(50);
+    page = await mountSettled(container, ws);
     const lk = await import("@lib/voice/livekitSession");
     vi.mocked(lk.enableCamera).mockClear();
 
-    mockCreateChatArea.mock.calls[0]![0].onStartVideoCall();
+    chatAreaProps().onStartVideoCall();
     // Not before the join lands: the camera follows "connected".
     expect(lk.enableCamera).not.toHaveBeenCalled();
     voiceStore.setState((prev) => ({ ...prev, currentChannelId: 50, voiceStatus: "connected" }));
@@ -616,10 +407,9 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
 
   it("the header's group name click renames the open DM through the sidebar (3B-1)", () => {
     openOneToOneDm(50);
-    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
-    page.mount(container);
+    page = mountPage(container);
 
-    mockCreateChatArea.mock.calls[0]![0].onRenameGroup();
+    chatAreaProps().onRenameGroup();
 
     expect(mockRenameGroup).toHaveBeenCalledWith(50);
     page.destroy?.();
@@ -627,11 +417,8 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
 
   it("Video while already connected in the DM's call turns the camera on at once (3B-1)", async () => {
     const ws = fakeWs();
-    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
-    openOneToOneDm(50);
-    page = createMainPage({ ws, api: fakeApi() });
-    page.mount(container);
-    await vi.dynamicImportSettled();
+    connectedDm(50);
+    page = await mountSettled(container, ws);
     const lk = await import("@lib/voice/livekitSession");
     voiceStore.setState((prev) => ({
       ...prev,
@@ -642,7 +429,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     voiceStore.flush();
     vi.mocked(lk.enableCamera).mockClear();
 
-    mockCreateChatArea.mock.calls[0]![0].onStartVideoCall();
+    chatAreaProps().onStartVideoCall();
 
     expect(lk.enableCamera).toHaveBeenCalledTimes(1);
     page.destroy?.();
@@ -650,11 +437,8 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
 
   it("a Video start refused by join backoff does not arm the camera for a later plain join (3B-1)", async () => {
     const ws = fakeWs();
-    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
-    openOneToOneDm(50);
-    page = createMainPage({ ws, api: fakeApi() });
-    page.mount(container);
-    await vi.dynamicImportSettled();
+    connectedDm(50);
+    page = await mountSettled(container, ws);
     const lk = await import("@lib/voice/livekitSession");
     vi.mocked(lk.enableCamera).mockClear();
     const { noteJoinFailed } = await import("../../../src/features/voice/joinBackoff");
@@ -662,7 +446,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     noteJoinFailed(Date.now(), true);
     noteJoinFailed(Date.now(), true);
 
-    mockCreateChatArea.mock.calls[0]![0].onStartVideoCall();
+    chatAreaProps().onStartVideoCall();
     // The refused join left no channel; a later join of the same DM, plain.
     voiceStore.setState((prev) => ({ ...prev, currentChannelId: 50, voiceStatus: "connected" }));
     voiceStore.flush();
@@ -675,15 +459,12 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
 
   it("a plain header call leaves the camera off (3B-1)", async () => {
     const ws = fakeWs();
-    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
-    openOneToOneDm(50);
-    page = createMainPage({ ws, api: fakeApi() });
-    page.mount(container);
-    await vi.dynamicImportSettled();
+    connectedDm(50);
+    page = await mountSettled(container, ws);
     const lk = await import("@lib/voice/livekitSession");
     vi.mocked(lk.enableCamera).mockClear();
 
-    mockCreateChatArea.mock.calls[0]![0].onStartCall();
+    startCall();
     voiceStore.setState((prev) => ({ ...prev, currentChannelId: 50, voiceStatus: "connected" }));
     voiceStore.flush();
     expect(lk.enableCamera).not.toHaveBeenCalled();
