@@ -1,13 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import * as logger from "../helpers/loggerMock";
 
-vi.mock("@lib/logger", () => ({
-  createLogger: () => ({
-    debug: vi.fn(),
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-  }),
-}));
+vi.mock("@lib/logger", () => logger.loggerMock());
 
 import {
   createConnectionStatsPoller,
@@ -195,6 +189,56 @@ describe("createConnectionStatsPoller", () => {
     };
   }
 
+  type PollerRoom = NonNullable<ReturnType<Parameters<typeof createConnectionStatsPoller>[0]>>;
+
+  function candidatePair(rtt: number, id = "cp1"): Record<string, unknown> {
+    return {
+      id,
+      type: "candidate-pair",
+      currentRoundTripTime: rtt,
+      bytesSent: 0,
+      bytesReceived: 0,
+    };
+  }
+
+  /** A publisher-only room whose candidate-pair RTT is read afresh on every poll. */
+  function rttRoom(rtt: () => number): unknown {
+    return {
+      engine: {
+        pcManager: {
+          publisher: {
+            getStats: vi.fn().mockImplementation(() => {
+              const report = new Map();
+              report.set("cp1", {
+                type: "candidate-pair",
+                currentRoundTripTime: rtt(),
+                bytesSent: 0,
+                bytesReceived: 0,
+              });
+              return Promise.resolve(report);
+            }),
+          },
+        },
+      },
+    };
+  }
+
+  function startPolling(room: unknown): ReturnType<typeof vi.fn> {
+    const cb = vi.fn();
+    poller = createConnectionStatsPoller(() => room as PollerRoom);
+    poller.onUpdate(cb);
+    poller.start();
+    return cb;
+  }
+
+  function startWatchingQuality(room: unknown): ReturnType<typeof vi.fn> {
+    const cb = vi.fn();
+    poller = createConnectionStatsPoller(() => room as PollerRoom);
+    poller.onQualityChanged(cb);
+    poller.start();
+    return cb;
+  }
+
   function createMockRoom(statsEntries: Array<Record<string, unknown>>): unknown {
     const report = new Map<string, Record<string, unknown>>();
     for (const entry of statsEntries) {
@@ -225,10 +269,7 @@ describe("createConnectionStatsPoller", () => {
         bytesReceived: 2000,
       },
     ]);
-    const cb = vi.fn();
-    poller = createConnectionStatsPoller(() => room as any);
-    poller.onUpdate(cb);
-    poller.start();
+    const cb = startPolling(room);
 
     // Advance past one poll interval
     await vi.advanceTimersByTimeAsync(2100);
@@ -240,19 +281,8 @@ describe("createConnectionStatsPoller", () => {
   });
 
   it("classifies quality as fair for RTT 100-200ms", async () => {
-    const room = createMockRoom([
-      {
-        id: "cp1",
-        type: "candidate-pair",
-        currentRoundTripTime: 0.15,
-        bytesSent: 0,
-        bytesReceived: 0,
-      },
-    ]);
-    const cb = vi.fn();
-    poller = createConnectionStatsPoller(() => room as any);
-    poller.onUpdate(cb);
-    poller.start();
+    const room = createMockRoom([candidatePair(0.15)]);
+    const cb = startPolling(room);
     await vi.advanceTimersByTimeAsync(2100);
 
     const stats = cb.mock.calls[0]![0];
@@ -261,13 +291,7 @@ describe("createConnectionStatsPoller", () => {
 
   it("lowers quality when a good-RTT link is dropping packets", async () => {
     const room = createMockRoom([
-      {
-        id: "cp1",
-        type: "candidate-pair",
-        currentRoundTripTime: 0.04, // 40ms — on RTT alone this is excellent
-        bytesSent: 0,
-        bytesReceived: 0,
-      },
+      candidatePair(0.04),
       // 80 lost of 1000 = 8% inbound loss => poor
       {
         id: "in1",
@@ -278,10 +302,7 @@ describe("createConnectionStatsPoller", () => {
         bytesReceived: 1000,
       },
     ]);
-    const cb = vi.fn();
-    poller = createConnectionStatsPoller(() => room as any);
-    poller.onUpdate(cb);
-    poller.start();
+    const cb = startPolling(room);
     await vi.advanceTimersByTimeAsync(2100);
 
     const stats = cb.mock.calls[0]![0];
@@ -292,20 +313,11 @@ describe("createConnectionStatsPoller", () => {
 
   it("lowers quality when a good-RTT link is jittery", async () => {
     const room = createMockRoom([
-      {
-        id: "cp1",
-        type: "candidate-pair",
-        currentRoundTripTime: 0.04,
-        bytesSent: 0,
-        bytesReceived: 0,
-      },
+      candidatePair(0.04),
       // 120 ms interarrival jitter => bad
       { id: "in1", type: "inbound-rtp", kind: "audio", packetsReceived: 100, jitter: 0.12 },
     ]);
-    const cb = vi.fn();
-    poller = createConnectionStatsPoller(() => room as any);
-    poller.onUpdate(cb);
-    poller.start();
+    const cb = startPolling(room);
     await vi.advanceTimersByTimeAsync(2100);
 
     const stats = cb.mock.calls[0]![0];
@@ -315,13 +327,7 @@ describe("createConnectionStatsPoller", () => {
 
   it("uses remote-inbound-rtp packetsLost for the far end's view of our stream", async () => {
     const room = createMockRoom([
-      {
-        id: "cp1",
-        type: "candidate-pair",
-        currentRoundTripTime: 0.04,
-        bytesSent: 0,
-        bytesReceived: 0,
-      },
+      candidatePair(0.04),
       { id: "out-audio", type: "outbound-rtp", kind: "audio", packetsSent: 1000 },
       // The far end reports it lost 12% of our outbound packets.
       {
@@ -333,10 +339,7 @@ describe("createConnectionStatsPoller", () => {
         jitter: 0.01,
       },
     ]);
-    const cb = vi.fn();
-    poller = createConnectionStatsPoller(() => room as any);
-    poller.onUpdate(cb);
-    poller.start();
+    const cb = startPolling(room);
     await vi.advanceTimersByTimeAsync(2100);
 
     const stats = cb.mock.calls[0]![0];
@@ -367,10 +370,7 @@ describe("createConnectionStatsPoller", () => {
         packetsReceived: received,
       },
     ]);
-    const cb = vi.fn();
-    poller = createConnectionStatsPoller(() => room as any);
-    poller.onUpdate(cb);
-    poller.start();
+    const cb = startPolling(room);
     await vi.advanceTimersByTimeAsync(2100);
 
     // Both sides fall silent: one lost of five packets each poll is no sample.
@@ -398,10 +398,7 @@ describe("createConnectionStatsPoller", () => {
         packetsReceived: received,
       },
     ]);
-    const cb = vi.fn();
-    poller = createConnectionStatsPoller(() => room as any);
-    poller.onUpdate(cb);
-    poller.start();
+    const cb = startPolling(room);
 
     // About 100 packets a poll, one of every 200 lost.
     for (let i = 0; i < 8; i++) {
@@ -438,10 +435,7 @@ describe("createConnectionStatsPoller", () => {
         jitter: 0.12,
       },
     ]);
-    const cb = vi.fn();
-    poller = createConnectionStatsPoller(() => room as any);
-    poller.onUpdate(cb);
-    poller.start();
+    const cb = startPolling(room);
 
     // Both directions talk over an 8% lossy, jittery link.
     for (let i = 0; i < 4; i++) {
@@ -467,13 +461,7 @@ describe("createConnectionStatsPoller", () => {
 
   it("ignores video jitter and loss, so a screen share on a clean link stays excellent", async () => {
     const room = createMockRoom([
-      {
-        id: "cp1",
-        type: "candidate-pair",
-        currentRoundTripTime: 0.04,
-        bytesSent: 0,
-        bytesReceived: 0,
-      },
+      candidatePair(0.04),
       { id: "in-audio", type: "inbound-rtp", kind: "audio", packetsReceived: 500, jitter: 0.005 },
       // Screen-share keyframes spread one RTP timestamp across many packets.
       {
@@ -486,10 +474,7 @@ describe("createConnectionStatsPoller", () => {
       },
       { id: "ri-video", type: "remote-inbound-rtp", kind: "video", packetsLost: 1000, jitter: 0.2 },
     ]);
-    const cb = vi.fn();
-    poller = createConnectionStatsPoller(() => room as any);
-    poller.onUpdate(cb);
-    poller.start();
+    const cb = startPolling(room);
     await vi.advanceTimersByTimeAsync(2100);
 
     const stats = cb.mock.calls[0]![0];
@@ -511,10 +496,7 @@ describe("createConnectionStatsPoller", () => {
         packetsReceived: received,
       },
     ]);
-    const cb = vi.fn();
-    poller = createConnectionStatsPoller(() => room as any);
-    poller.onUpdate(cb);
-    poller.start();
+    const cb = startPolling(room);
     await vi.advanceTimersByTimeAsync(2100); // a long clean call so far
     expect(cb.mock.lastCall![0].quality).toBe("excellent");
 
@@ -539,19 +521,8 @@ describe("createConnectionStatsPoller", () => {
   });
 
   it("classifies quality as poor for RTT 200-400ms", async () => {
-    const room = createMockRoom([
-      {
-        id: "cp1",
-        type: "candidate-pair",
-        currentRoundTripTime: 0.3,
-        bytesSent: 0,
-        bytesReceived: 0,
-      },
-    ]);
-    const cb = vi.fn();
-    poller = createConnectionStatsPoller(() => room as any);
-    poller.onUpdate(cb);
-    poller.start();
+    const room = createMockRoom([candidatePair(0.3)]);
+    const cb = startPolling(room);
     await vi.advanceTimersByTimeAsync(2100);
 
     const stats = cb.mock.calls[0]![0];
@@ -559,19 +530,8 @@ describe("createConnectionStatsPoller", () => {
   });
 
   it("classifies quality as bad for RTT >= 400ms", async () => {
-    const room = createMockRoom([
-      {
-        id: "cp1",
-        type: "candidate-pair",
-        currentRoundTripTime: 0.5,
-        bytesSent: 0,
-        bytesReceived: 0,
-      },
-    ]);
-    const cb = vi.fn();
-    poller = createConnectionStatsPoller(() => room as any);
-    poller.onUpdate(cb);
-    poller.start();
+    const room = createMockRoom([candidatePair(0.5)]);
+    const cb = startPolling(room);
     await vi.advanceTimersByTimeAsync(2100);
 
     const stats = cb.mock.calls[0]![0];
@@ -590,10 +550,7 @@ describe("createConnectionStatsPoller", () => {
       { id: "out1", type: "outbound-rtp", packetsSent: 500, bytesSent: 40000 },
       { id: "in1", type: "inbound-rtp", packetsReceived: 300, bytesReceived: 30000 },
     ]);
-    const cb = vi.fn();
-    poller = createConnectionStatsPoller(() => room as any);
-    poller.onUpdate(cb);
-    poller.start();
+    const cb = startPolling(room);
     await vi.advanceTimersByTimeAsync(2100);
 
     const stats = cb.mock.calls[0]![0];
@@ -606,18 +563,9 @@ describe("createConnectionStatsPoller", () => {
     const room = createMockRoom([
       { id: "out1", type: "outbound-rtp", packetsSent: 100, bytesSent: 10000 },
       { id: "in1", type: "inbound-rtp", packetsReceived: 50, bytesReceived: 5000 },
-      {
-        id: "cp1",
-        type: "candidate-pair",
-        currentRoundTripTime: 0.01,
-        bytesSent: 0,
-        bytesReceived: 0,
-      },
+      candidatePair(0.01),
     ]);
-    const cb = vi.fn();
-    poller = createConnectionStatsPoller(() => room as any);
-    poller.onUpdate(cb);
-    poller.start();
+    const cb = startPolling(room);
 
     // First poll establishes baseline
     await vi.advanceTimersByTimeAsync(2100);
@@ -682,29 +630,9 @@ describe("createConnectionStatsPoller", () => {
     // timer — otherwise the timer can never reach its 3s deadline and the
     // quality-change notification never fires.
     let currentRtt = 0.01;
-    const room = {
-      engine: {
-        pcManager: {
-          publisher: {
-            getStats: vi.fn().mockImplementation(() => {
-              const report = new Map();
-              report.set("cp1", {
-                type: "candidate-pair",
-                currentRoundTripTime: currentRtt,
-                bytesSent: 0,
-                bytesReceived: 0,
-              });
-              return Promise.resolve(report);
-            }),
-          },
-        },
-      },
-    };
+    const room = rttRoom(() => currentRtt);
 
-    const qualityCb = vi.fn();
-    poller = createConnectionStatsPoller(() => room as any);
-    poller.onQualityChanged(qualityCb);
-    poller.start();
+    const qualityCb = startWatchingQuality(room);
 
     // t=2000: first poll establishes "excellent" baseline.
     await vi.advanceTimersByTimeAsync(2100);
@@ -734,15 +662,7 @@ describe("createConnectionStatsPoller", () => {
   });
 
   it("unsubscribed onUpdate callback is not called", async () => {
-    const room = createMockRoom([
-      {
-        id: "cp1",
-        type: "candidate-pair",
-        currentRoundTripTime: 0.01,
-        bytesSent: 0,
-        bytesReceived: 0,
-      },
-    ]);
+    const room = createMockRoom([candidatePair(0.01)]);
     const cb = vi.fn();
     poller = createConnectionStatsPoller(() => room as any);
     const unsub = poller.onUpdate(cb);
@@ -754,24 +674,7 @@ describe("createConnectionStatsPoller", () => {
 
   it("unsubscribed onQualityChanged callback is not called", async () => {
     let currentRtt = 0.01;
-    const room = {
-      engine: {
-        pcManager: {
-          publisher: {
-            getStats: vi.fn().mockImplementation(() => {
-              const report = new Map();
-              report.set("cp1", {
-                type: "candidate-pair",
-                currentRoundTripTime: currentRtt,
-                bytesSent: 0,
-                bytesReceived: 0,
-              });
-              return Promise.resolve(report);
-            }),
-          },
-        },
-      },
-    };
+    const room = rttRoom(() => currentRtt);
 
     const cb = vi.fn();
     poller = createConnectionStatsPoller(() => room as any);
@@ -795,10 +698,7 @@ describe("createConnectionStatsPoller", () => {
         },
       },
     };
-    const cb = vi.fn();
-    poller = createConnectionStatsPoller(() => room as any);
-    poller.onUpdate(cb);
-    poller.start();
+    const cb = startPolling(room);
     await vi.advanceTimersByTimeAsync(2100);
     // On failure, collectAllStats returns [], so no update callback fires
     expect(cb).not.toHaveBeenCalled();
@@ -806,10 +706,7 @@ describe("createConnectionStatsPoller", () => {
 
   it("handles room with no pcManager", async () => {
     const room = { engine: {} };
-    const cb = vi.fn();
-    poller = createConnectionStatsPoller(() => room as any);
-    poller.onUpdate(cb);
-    poller.start();
+    const cb = startPolling(room);
     await vi.advanceTimersByTimeAsync(2100);
     // No pcManager = no PCs = empty reports = no update
     expect(cb).not.toHaveBeenCalled();
@@ -835,10 +732,7 @@ describe("createConnectionStatsPoller", () => {
       },
     };
 
-    const cb = vi.fn();
-    poller = createConnectionStatsPoller(() => room as any);
-    poller.onUpdate(cb);
-    poller.start();
+    const cb = startPolling(room);
     await vi.advanceTimersByTimeAsync(2100);
     expect(cb).toHaveBeenCalled();
     expect(cb.mock.calls[0]![0].rtt).toBe(50);
@@ -863,10 +757,7 @@ describe("createConnectionStatsPoller", () => {
       },
     };
 
-    const cb = vi.fn();
-    poller = createConnectionStatsPoller(() => room as any);
-    poller.onUpdate(cb);
-    poller.start();
+    const cb = startPolling(room);
     await vi.advanceTimersByTimeAsync(2100);
     expect(cb).toHaveBeenCalled();
     expect(cb.mock.calls[0]![0].rtt).toBe(120);
@@ -882,18 +773,9 @@ describe("createConnectionStatsPoller", () => {
         bytesSent: 0,
         bytesReceived: 0,
       },
-      {
-        id: "cp2",
-        type: "candidate-pair",
-        currentRoundTripTime: 0,
-        bytesSent: 0,
-        bytesReceived: 0,
-      },
+      candidatePair(0, "cp2"),
     ]);
-    const cb = vi.fn();
-    poller = createConnectionStatsPoller(() => room as any);
-    poller.onUpdate(cb);
-    poller.start();
+    const cb = startPolling(room);
     await vi.advanceTimersByTimeAsync(2100);
     expect(cb).toHaveBeenCalled();
     expect(cb.mock.calls[0]![0].rtt).toBe(0);
@@ -901,26 +783,8 @@ describe("createConnectionStatsPoller", () => {
   });
 
   it("picks the lowest RTT when multiple candidate-pairs exist", async () => {
-    const room = createMockRoom([
-      {
-        id: "cp1",
-        type: "candidate-pair",
-        currentRoundTripTime: 0.3,
-        bytesSent: 0,
-        bytesReceived: 0,
-      },
-      {
-        id: "cp2",
-        type: "candidate-pair",
-        currentRoundTripTime: 0.05,
-        bytesSent: 0,
-        bytesReceived: 0,
-      },
-    ]);
-    const cb = vi.fn();
-    poller = createConnectionStatsPoller(() => room as any);
-    poller.onUpdate(cb);
-    poller.start();
+    const room = createMockRoom([candidatePair(0.3), candidatePair(0.05, "cp2")]);
+    const cb = startPolling(room);
     await vi.advanceTimersByTimeAsync(2100);
     expect(cb.mock.calls[0]![0].rtt).toBe(50);
   });
@@ -959,10 +823,7 @@ describe("createConnectionStatsPoller", () => {
       },
     };
 
-    const cb = vi.fn();
-    poller = createConnectionStatsPoller(() => room as any);
-    poller.onUpdate(cb);
-    poller.start();
+    const cb = startPolling(room);
     await vi.advanceTimersByTimeAsync(2100); // First poll
     await vi.advanceTimersByTimeAsync(2100); // Second poll
     const lastStats = cb.mock.calls[cb.mock.calls.length - 1]![0];
@@ -973,29 +834,9 @@ describe("createConnectionStatsPoller", () => {
 
   it("quality change callback is not fired if quality reverts before debounce expires", async () => {
     let currentRtt = 0.01;
-    const room = {
-      engine: {
-        pcManager: {
-          publisher: {
-            getStats: vi.fn().mockImplementation(() => {
-              const report = new Map();
-              report.set("cp1", {
-                type: "candidate-pair",
-                currentRoundTripTime: currentRtt,
-                bytesSent: 0,
-                bytesReceived: 0,
-              });
-              return Promise.resolve(report);
-            }),
-          },
-        },
-      },
-    };
+    const room = rttRoom(() => currentRtt);
 
-    const qualityCb = vi.fn();
-    poller = createConnectionStatsPoller(() => room as any);
-    poller.onQualityChanged(qualityCb);
-    poller.start();
+    const qualityCb = startWatchingQuality(room);
 
     // First poll (excellent)
     await vi.advanceTimersByTimeAsync(2100);
@@ -1019,10 +860,7 @@ describe("createConnectionStatsPoller", () => {
     const room = createMockRoom([
       { id: "cp1", type: "candidate-pair", currentRoundTripTime: 0.05 },
     ]);
-    const cb = vi.fn();
-    poller = createConnectionStatsPoller(() => room as any);
-    poller.onUpdate(cb);
-    poller.start();
+    const cb = startPolling(room);
     await vi.advanceTimersByTimeAsync(2100);
     expect(cb).toHaveBeenCalled();
     const stats = cb.mock.calls[0]![0];
@@ -1032,19 +870,10 @@ describe("createConnectionStatsPoller", () => {
 
   it("handles outbound-rtp without packetsSent", async () => {
     const room = createMockRoom([
-      {
-        id: "cp1",
-        type: "candidate-pair",
-        currentRoundTripTime: 0.01,
-        bytesSent: 0,
-        bytesReceived: 0,
-      },
+      candidatePair(0.01),
       { id: "out1", type: "outbound-rtp", bytesSent: 100 },
     ]);
-    const cb = vi.fn();
-    poller = createConnectionStatsPoller(() => room as any);
-    poller.onUpdate(cb);
-    poller.start();
+    const cb = startPolling(room);
     await vi.advanceTimersByTimeAsync(2100);
     expect(cb).toHaveBeenCalled();
     expect(cb.mock.calls[0]![0].outPackets).toBe(0);
@@ -1052,19 +881,10 @@ describe("createConnectionStatsPoller", () => {
 
   it("handles inbound-rtp without packetsReceived", async () => {
     const room = createMockRoom([
-      {
-        id: "cp1",
-        type: "candidate-pair",
-        currentRoundTripTime: 0.01,
-        bytesSent: 0,
-        bytesReceived: 0,
-      },
+      candidatePair(0.01),
       { id: "in1", type: "inbound-rtp", bytesReceived: 100 },
     ]);
-    const cb = vi.fn();
-    poller = createConnectionStatsPoller(() => room as any);
-    poller.onUpdate(cb);
-    poller.start();
+    const cb = startPolling(room);
     await vi.advanceTimersByTimeAsync(2100);
     expect(cb).toHaveBeenCalled();
     expect(cb.mock.calls[0]![0].inPackets).toBe(0);
