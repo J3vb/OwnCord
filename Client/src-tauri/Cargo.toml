@@ -19,6 +19,13 @@ publish = false
 unsafe_op_in_unsafe_fn = "deny"
 unused_unsafe = "warn"
 
+# A panic in the app takes the whole window down, so production code handles
+# the error instead. Tests may still unwrap (clippy.toml allows it there);
+# tests/unit/rust-source-limits.test.ts holds the same line on every platform.
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+
 [lib]
 name = "owncord_client_lib"
 crate-type = ["lib", "cdylib", "staticlib"]

@@ -193,10 +193,11 @@ pub fn unprotect(key: &[u8; KEY_LEN], blob: &[u8], aad: &[u8]) -> Result<Vec<u8>
         .map_err(|_| "failed to build the fallback sealing key".to_string())?;
     let opening = LessSafeKey::new(unbound);
 
-    let nonce_bytes: [u8; NONCE_LEN] = blob[..NONCE_LEN].try_into().expect("length checked");
-    let nonce = Nonce::assume_unique_for_key(nonce_bytes);
+    let (nonce_bytes, sealed) = blob.split_at(NONCE_LEN);
+    let nonce = Nonce::try_assume_unique_for_key(nonce_bytes)
+        .map_err(|_| "fallback entry has a malformed nonce".to_string())?;
 
-    let mut in_out = blob[NONCE_LEN..].to_vec();
+    let mut in_out = sealed.to_vec();
     let plaintext = opening
         .open_in_place(nonce, Aad::from(aad), &mut in_out)
         .map_err(|_| {

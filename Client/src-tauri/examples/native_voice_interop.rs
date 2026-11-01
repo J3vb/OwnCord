@@ -767,10 +767,16 @@ mod linux {
 
 #[cfg(target_os = "linux")]
 fn main() {
-    let rt = tokio::runtime::Builder::new_multi_thread()
+    let rt = match tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
-        .expect("tokio runtime");
+    {
+        Ok(rt) => rt,
+        Err(e) => {
+            eprintln!("native_voice_interop: cannot start the tokio runtime: {e}");
+            std::process::exit(1);
+        }
+    };
     if let Err(e) = rt.block_on(linux::run()) {
         eprintln!("native_voice_interop: {e}");
         std::process::exit(1);
