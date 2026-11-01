@@ -93,19 +93,16 @@ function stripLiterals(src: string): string {
   return out;
 }
 
-/** `#[cfg(test)]`, `#[cfg(all(.., test, ..))]`, `#[test]`, `#[tokio::test(..)]`; never `not(test)` or `any(..)`. */
-const TEST_ATTR =
-  /#\[\s*(?:cfg\s*\(\s*(?:test|all\s*\((?:[^()]|\([^()]*\))*\btest\b(?:[^()]|\([^()]*\))*\))\s*\)|(?:tokio::)?test(?:\s*\([^\]]*\))?)\s*\]/g;
-
-function isTestAttr(attr: string): boolean {
-  return !/not\s*\(\s*test\s*\)/.test(attr);
-}
+/**
+ * `#[cfg(test)]`, `#[test]`, `#[tokio::test(..)]`: what clippy's allow-*-in-tests exempts. A
+ * `#[cfg(all(test, ..))]` module is not exempt there, so only its `#[test]` fns are skipped here.
+ */
+const TEST_ATTR = /#\[\s*(?:cfg\s*\(\s*test\s*\)|(?:tokio::)?test(?:\s*\([^\]]*\))?)\s*\]/g;
 
 /** Blanks every item a test-only attribute guards, through its matching brace or its `;`. */
 function dropTestItems(code: string): string {
   let out = code;
   for (const match of code.matchAll(TEST_ATTR)) {
-    if (!isTestAttr(match[0])) continue;
     let j = match.index + match[0].length;
     while (j < code.length && code[j] !== "{" && code[j] !== ";") j++;
     if (code[j] === "{") {
@@ -120,7 +117,8 @@ function dropTestItems(code: string): string {
 }
 
 function panicCalls(src: string): number {
-  return (dropTestItems(stripLiterals(src)).match(/\.\s*(?:unwrap|expect)\s*\(/g) ?? []).length;
+  return (dropTestItems(stripLiterals(src)).match(/\.\s*(?:unwrap|expect)(?:_err)?\s*\(/g) ?? [])
+    .length;
 }
 
 /** Files that exist only because a test-only `mod name;` declaration pulls them in. */
@@ -136,7 +134,7 @@ function testOnlyFiles(files: Map<string, string>): Set<string> {
     const dir = isRoot ? dirname(path) : join(dirname(path), name.slice(0, -3));
     for (const match of code.matchAll(decl)) {
       const mod = match[match.length - 1];
-      if (!isTestAttr(match[0]) || mod === undefined) continue;
+      if (mod === undefined) continue;
       for (const candidate of [join(dir, `${mod}.rs`), join(dir, mod, "mod.rs")]) {
         if (existsSync(candidate)) declared.add(candidate);
       }
@@ -196,16 +194,18 @@ describe("the unwrap counter", () => {
     const src = [
       "#[cfg(test)]\nmod tests { fn a() { x.unwrap(); { y.unwrap(); } } }",
       '#[cfg(all(test, target_os = "linux"))]\nfn b() { x.unwrap(); }',
+      "#[cfg(all(test, unix))]\nmod t { #[test]\nfn b2() { x.unwrap(); } }",
       '#[test]\nfn c() { x.expect("t"); }',
       '#[tokio::test(flavor = "multi_thread")]\nasync fn d() { x.unwrap(); }',
       '#[cfg(any(test, target_os = "android"))]\nfn e() { x.unwrap(); }',
       "#[cfg(not(test))]\nfn f() { x.unwrap(); }",
       '#[cfg(target_os = "windows")]\nfn g() { x.unwrap(); }',
     ].join("\n");
-    expect(panicCalls(src)).toBe(3);
+    expect(panicCalls(src)).toBe(4);
   });
 
   it("leaves the methods with a fallback alone", () => {
-    expect(panicCalls('x.unwrap_or(1); y.unwrap_or_default(); z.expect_err("e");')).toBe(0);
+    expect(panicCalls("x.unwrap_or(1); y.unwrap_or_default(); z.unwrap_or_else(f);")).toBe(0);
+    expect(panicCalls('a.unwrap_err(); b.expect_err("e");')).toBe(2);
   });
 });
