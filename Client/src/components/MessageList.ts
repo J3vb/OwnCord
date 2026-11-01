@@ -9,6 +9,8 @@ import type { MountableComponent } from "@lib/text/safeRender";
 import { messagesStore, getChannelMessages, isWindowDetached } from "@stores/messages.store";
 import { membersStore } from "@stores/members.store";
 import { blocksStore } from "@stores/blocks.store";
+import { emojiStore } from "@stores/emoji.store";
+import type { Message } from "@stores/messages.store";
 import { authorityChannelId, threadsStore } from "@stores/threads.store";
 import { refreshThreadChips } from "./message-list/threadChip";
 import { safetyStore } from "../features/safety/store";
@@ -153,6 +155,12 @@ export type MessageListComponent = MountableComponent & {
   /** True while an inline editor is open (or loading) in this list. */
   isEditing(): boolean;
 };
+
+/** A `:shortcode:` in the text or a reaction: the row may hold a custom emoji. */
+const SHORTCODE_TOKEN = /:[A-Za-z0-9_]{2,32}:/;
+function namesCustomEmoji(m: Message): boolean {
+  return SHORTCODE_TOKEN.test(m.content) || m.reactions.some((r) => r.emoji.startsWith(":"));
+}
 
 export function createMessageList(options: MessageListOptions): MessageListComponent {
   const disposable = new Disposable();
@@ -780,6 +788,17 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
           }
           prevBlocked = now;
           api.renderAll();
+        },
+      ),
+    );
+    // Rows drawn before the server's emoji set arrived (or before an emoji was
+    // added or removed) show the shortcode as text. Rebuild them when the set
+    // changes, but only if a loaded message could name a custom emoji.
+    st.unsubscribers.push(
+      emojiStore.subscribeSelector(
+        (s) => s.byShortcode,
+        () => {
+          if (st.allMessages.some(namesCustomEmoji)) api.renderAll();
         },
       ),
     );
