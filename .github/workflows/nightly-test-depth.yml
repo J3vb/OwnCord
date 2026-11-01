@@ -367,7 +367,9 @@ jobs:
         env:
           OWNCORD_E2E_LIVEKIT_BINARY: tests/e2e/.bin/livekit-server
           OWNCORD_CALL_SOAK_MIN: "60"
-        run: npx playwright test --config tests/e2e/config/playwright.config.fullstack.ts --retries 0 in-call-heap.spec.ts
+        # The fullstack config caps a whole run at 26 minutes; this one test runs
+        # about 70 (warm-up, the hour, setup), so it gets its own 80-minute cap.
+        run: npx playwright test --config tests/e2e/config/playwright.config.fullstack.ts --retries 0 --global-timeout 4800000 in-call-heap.spec.ts
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
