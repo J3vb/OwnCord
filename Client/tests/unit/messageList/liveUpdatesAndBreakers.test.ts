@@ -454,45 +454,51 @@ describe("MessageList", () => {
       vi.useRealTimers();
     });
 
-    it("renders the final state once the 2s burst window resets, instead of staying stuck at the pre-trip state", () => {
-      const others = Array.from({ length: 25 }, (_, i) => makeMessage({ id: i + 2 }));
-      setMessages(1, [makeMessage({ id: 1, content: "v0" }), ...others]);
-      w.msgList.mount(w.container); // 1st renderAll call, starts the 2s window
+    // 26 full renders of a 26-row list take about 1.4 s on an idle machine,
+    // so the suite's 2 s default times out on a busy CI runner.
+    it(
+      "renders the final state once the 2s burst window resets, instead of staying stuck at the pre-trip state",
+      { timeout: 20_000 },
+      () => {
+        const others = Array.from({ length: 25 }, (_, i) => makeMessage({ id: i + 2 }));
+        setMessages(1, [makeMessage({ id: 1, content: "v0" }), ...others]);
+        w.msgList.mount(w.container); // 1st renderAll call, starts the 2s window
 
-      // Fire 25 updates back-to-back, well inside the 2s window, each editing
-      // message 1 and moving it one row further down. Every update is then a
-      // reorder against any earlier state, the last one rendered before the
-      // breaker trips included, and the row patch leaves a reorder to
-      // renderAll. Combined with the mount's call, this is 26 renderAll
-      // invocations — calls 21+ trip the >20-in-2s breaker and must return
-      // without rendering.
-      for (let i = 1; i <= 25; i++) {
-        setMessages(1, others.toSpliced(i, 0, makeMessage({ id: 1, content: `v${i}` })));
-        messagesStore.flush();
-      }
-      expectConsole("error", /\[MessageList\] renderAll called >20 times in 2s/);
-      expectConsole("error", /\[MessageList\] renderAll called >20 times in 2s/);
-      expectConsole("error", /\[MessageList\] renderAll called >20 times in 2s/);
-      expectConsole("error", /\[MessageList\] renderAll called >20 times in 2s/);
-      expectConsole("error", /\[MessageList\] renderAll called >20 times in 2s/);
-      expectConsole("error", /\[MessageList\] renderAll called >20 times in 2s/);
+        // Fire 25 updates back-to-back, well inside the 2s window, each editing
+        // message 1 and moving it one row further down. Every update is then a
+        // reorder against any earlier state, the last one rendered before the
+        // breaker trips included, and the row patch leaves a reorder to
+        // renderAll. Combined with the mount's call, this is 26 renderAll
+        // invocations — calls 21+ trip the >20-in-2s breaker and must return
+        // without rendering.
+        for (let i = 1; i <= 25; i++) {
+          setMessages(1, others.toSpliced(i, 0, makeMessage({ id: 1, content: `v${i}` })));
+          messagesStore.flush();
+        }
+        expectConsole("error", /\[MessageList\] renderAll called >20 times in 2s/);
+        expectConsole("error", /\[MessageList\] renderAll called >20 times in 2s/);
+        expectConsole("error", /\[MessageList\] renderAll called >20 times in 2s/);
+        expectConsole("error", /\[MessageList\] renderAll called >20 times in 2s/);
+        expectConsole("error", /\[MessageList\] renderAll called >20 times in 2s/);
+        expectConsole("error", /\[MessageList\] renderAll called >20 times in 2s/);
 
-      const rowDuringBurst = w.container.querySelector("[data-testid='message-1']");
-      expect(rowDuringBurst).not.toBeNull();
-      // The breaker tripped partway through, so the DOM is stuck behind the
-      // final store state (still showing an earlier version, not "v25").
-      expect(rowDuringBurst!.textContent).not.toContain("v25");
+        const rowDuringBurst = w.container.querySelector("[data-testid='message-1']");
+        expect(rowDuringBurst).not.toBeNull();
+        // The breaker tripped partway through, so the DOM is stuck behind the
+        // final store state (still showing an earlier version, not "v25").
+        expect(rowDuringBurst!.textContent).not.toContain("v25");
 
-      // Let the 2s reset window elapse with no further store updates.
-      vi.advanceTimersByTime(2100);
+        // Let the 2s reset window elapse with no further store updates.
+        vi.advanceTimersByTime(2100);
 
-      // Once the burst is over, the list must reflect the final state that
-      // triggered the last suppressed renderAll — not stay frozen on
-      // whatever rendered right before the breaker tripped.
-      const rowAfterReset = w.container.querySelector("[data-testid='message-1']");
-      expect(rowAfterReset).not.toBeNull();
-      expect(rowAfterReset!.textContent).toContain("v25");
-    });
+        // Once the burst is over, the list must reflect the final state that
+        // triggered the last suppressed renderAll — not stay frozen on
+        // whatever rendered right before the breaker tripped.
+        const rowAfterReset = w.container.querySelector("[data-testid='message-1']");
+        expect(rowAfterReset).not.toBeNull();
+        expect(rowAfterReset!.textContent).toContain("v25");
+      },
+    );
   });
 
   describe("renderWindow rebuild breaker replay", () => {
