@@ -130,9 +130,9 @@ video[hidden] + .video-surface {
   object-fit: cover;
 }
 
-/* Your own camera is mirrored while "Mirror my camera preview" is on (the
-   default); off, it shows what others see. Others always see it unmirrored. A screen share never carries this
-   class. */
+/* Your own camera is mirrored while "Mirror my camera preview" is on; off
+   (the default), it shows what others see. Others always see it unmirrored.
+   A screen share never carries this class. */
 .mirror-self-camera .video-cell--self video,
 .mirror-self-camera .video-cell--self .video-surface {
   transform: scaleX(-1);
