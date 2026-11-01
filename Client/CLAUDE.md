@@ -102,7 +102,7 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   `registerVoiceLogoutTeardown` at load, and `lib/notifications.ts` registers the
   notification-audio cleanup through `registerSessionReset`
   (`lib/net/sessionRegistry.ts`, the leaf every per-server reset registers with). In
-  `components/message-list/`, `attachments.ts` is the leaf every renderer
+  `features/messaging/content/`, `attachments.ts` is the leaf every renderer
   imports (it also owns the image lightbox, which `media.ts` re-exports), so it
   must not import a sibling renderer. `madge` still lists cycles that close only
   through a lazy `import()` or an `import type`; oxlint does not count those.
