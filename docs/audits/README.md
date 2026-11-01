@@ -5,6 +5,7 @@ never edited afterwards, so read them as history, not as current status. Each
 file name starts with its date. Current status lives in the findings ledger and
 the plan index (see [Where status lives](../README.md#where-status-lives)).
 
+- [2026-11-01-non-media-comparative-audit.md](2026-11-01-non-media-comparative-audit.md): Messaging recovery, uploads, history/scroll, database wait metrics and restart load compared with two other chat projects; source reading plus synthetic probes (probe files not included). Tasks are in the [non-media adoption plan](../plans/non-media-adoption-2026-11-01.md).
 - [2026-10-21-ci-cost.md](2026-10-21-ci-cost.md): CI cost over 30 days: job-minutes per workflow and job, the Windows native E2E, and why the nightly fails.
 - [2026-10-09-parity-sweep.md](2026-10-09-parity-sweep.md): Every user-facing area compared with what a Discord user expects, plus a bug sweep.
 - [2026-10-09-ci-flake.md](2026-10-09-ci-flake.md): CI flakes: checks ranked by red-then-green reruns over 60 days, causes and fixes.
