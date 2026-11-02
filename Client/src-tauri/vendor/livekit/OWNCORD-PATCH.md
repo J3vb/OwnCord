@@ -113,6 +113,22 @@ All changes are marked `OWNCORD-PATCH`. Diff against the pristine package
              frame_metadata_features: FrameMetadataFeatures::default(),
 ```
 
+## Dual PC stereo receive
+
+OwnCord connects with `single_peer_connection = false` (see
+`room_options` in `native_voice/session.rs`). Upstream adds `stereo=1` to the
+Opus fmtp lines only in single PC mode, in the client's offer. In dual PC mode
+the SFU offers to the subscriber transport and libwebrtc writes the answer
+without `stereo=1`, so the receive Opus decoder runs mono and a stereo screen
+share's audio reaches a Linux viewer downmixed. `PeerTransport::create_anwser`
+now passes the answer through `stereo_receive_answer`, which applies the same
+`munge_stereo_for_audio` to it. Only the subscriber transport answers, and its
+audio m-lines only receive; a mono track decodes the same with the flag set.
+Marked `OWNCORD-PATCH (dual PC stereo receive)` in
+`src/rtc_engine/peer_transport.rs`. Covered by the native-voice interop case
+"native and browser peers decode each other's audio with the same key", which
+asserts the native receiver's negotiated Opus fmtp carries `stereo=1`.
+
 ## Dropping it
 
 Remove `vendor/livekit` and the `[patch.crates-io]` table once a livekit

@@ -14,8 +14,6 @@ export default defineConfig({
   // required run; `OWNCORD_FLAKES=1` runs them again. Policy and guard:
   // docs/testing-behavior.md, scripts/check-quarantine.mjs.
   grepInvert: quarantineGrepInvert(),
-  grep: /decode each other's video with the same key/,
-  repeatEach: 40,
   timeout: 180_000,
   expect: { timeout: 30_000 },
   workers: 1,
@@ -39,4 +37,8 @@ export default defineConfig({
     },
     trace: "retain-on-failure",
   },
+  projects: [
+    { name: "video-repeat", grep: /decode each other's video with the same key/, repeatEach: 65 },
+    { name: "audio-once", grep: /decode each other's audio with the same key/ },
+  ],
 });

@@ -379,6 +379,37 @@ mod linux {
         }
     }
 
+    /// The Opus fmtp this side negotiated for one remote audio track, once
+    /// its first packets have a codec: `stereo=1` there is what lets the
+    /// decoder keep a stereo track's two channels apart.
+    async fn audio_codec(identity: String, track: RemoteAudioTrack) {
+        for _ in 0..20 {
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            let Ok(stats) = track.get_stats().await else {
+                continue;
+            };
+            let codec_id = stats.iter().find_map(|s| match s {
+                livekit::webrtc::stats::RtcStats::InboundRtp(s) => Some(s.stream.codec_id.clone()),
+                _ => None,
+            });
+            let Some(codec_id) = codec_id.filter(|id| !id.is_empty()) else {
+                continue;
+            };
+            let fmtp = stats.iter().find_map(|s| match s {
+                livekit::webrtc::stats::RtcStats::Codec(c) if c.rtc.id == codec_id => {
+                    Some(c.codec.sdp_fmtp_line.clone())
+                }
+                _ => None,
+            });
+            if let Some(fmtp) = fmtp {
+                emit(
+                    serde_json::json!({ "event": { "type": "audioCodec", "identity": identity, "fmtp": fmtp } }),
+                );
+                return;
+            }
+        }
+    }
+
     /// The thread count once it has held still for a second (at most 6 s).
     /// The receive threads for a remote video start with its first frames,
     /// which can land just after the baseline moment; reading too early
@@ -787,6 +818,7 @@ mod linux {
                         if let Some(v) = volume {
                             session.set_volume(participant.identity().as_str(), v);
                         }
+                        meters.push(tokio::spawn(audio_codec(participant.identity().to_string(), track.clone())));
                         meters.push(tokio::spawn(meter(participant.identity().to_string(), track)));
                     }
                     Some(RoomEvent::TrackSubscribed { track: RemoteTrack::Video(track), publication, participant }) => {

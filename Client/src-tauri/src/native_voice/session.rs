@@ -75,9 +75,10 @@ fn room_options(key_provider: KeyProvider) -> RoomOptions {
     // With one shared peer connection, a publish or unpublish of our own
     // track (a camera toggle) renegotiates the connection that carries the
     // remote videos, and now and then a remote video that just subscribed
-    // keeps decoding without its frames ever reaching the track: a black tile
+    // kept decoding without its frames ever reaching the track: a black tile
     // for the rest of the call. A separate subscriber connection is never
-    // renegotiated by our own publishes, as on the web path.
+    // renegotiated by our own publishes. Its answer gets stereo Opus from the
+    // vendored SDK (vendor/livekit/OWNCORD-PATCH.md).
     options.single_peer_connection = false;
     // The report's proven configuration. `encryption` would also enable
     // data-track encryption, which livekit-client's `e2ee` path lacks.
@@ -480,9 +481,8 @@ impl NativeSession {
             .await
             .map_err(|e| e.to_string())?;
         room.e2ee_manager().set_enabled(true);
-        // The share audio's stereo comes from the publish options (the
-        // server's answer), not from this mode; the log records which mode the
-        // server granted, which decides whether a native viewer decodes it.
+        // Always false: `room_options` asks for separate connections. Kept so
+        // a support log shows the mode the session actually ran in.
         log::info!(
             "[native_voice] single peer connection active: {}",
             room.is_single_peer_connection_active()

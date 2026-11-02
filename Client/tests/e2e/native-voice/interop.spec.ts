@@ -503,6 +503,7 @@ test("native and browser peers decode each other's audio with the same key", asy
   const threads: Array<{ phase: string; count: number }> = [];
   const devices: Array<{ ok: boolean; detail: string }> = [];
   const playout: number[] = [];
+  const codecs: Array<{ identity: string; fmtp: string }> = [];
   const peer = runNativePeer(
     [
       "--url",
@@ -530,6 +531,8 @@ test("native and browser peers decode each other's audio with the same key", asy
       if (event.type === "devices")
         devices.push(event as unknown as { ok: boolean; detail: string });
       if (event.type === "playout") playout.push((event as unknown as { rms: number }).rms);
+      if (event.type === "audioCodec")
+        codecs.push(event as unknown as { identity: string; fmtp: string });
     },
   );
 
@@ -552,6 +555,10 @@ test("native and browser peers decode each other's audio with the same key", asy
   const fromBrowser = nativeAudio.filter((a) => a.identity === "user-1");
   expect(fromBrowser.length).toBeGreaterThan(0);
   expect(Math.max(...fromBrowser.map((a) => a.rms))).toBeGreaterThan(100);
+  // The native side receives on its own subscriber connection, whose answer
+  // must still ask for stereo Opus, or a stereo screen share's audio would
+  // decode downmixed on Linux.
+  expect(codecs.find((c) => c.identity === "user-1")?.fmtp).toContain("stereo=1");
   // 3. The SDK reports the browser peer's frames as encrypted.
   expect(encryption).toContainEqual({
     type: "encryptionStatus",
