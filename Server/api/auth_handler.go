@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/clientip"
 	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/go-chi/chi/v5"
@@ -115,7 +116,7 @@ func handleRegister(svc AuthService, trustedProxies []string) http.HandlerFunc {
 			Password:   req.Password,
 			InviteCode: req.InviteCode,
 			Device:     truncateDevice(r.Header.Get("User-Agent")),
-			IP:         clientIPWithProxies(r, proxyNets),
+			IP:         clientip.Resolve(r, proxyNets),
 		})
 		if err != nil {
 			writeAuthError(r.Context(), w, err)
@@ -196,7 +197,7 @@ func handleLogin(svc AuthService, trustedProxies []string) http.HandlerFunc {
 			Username: req.Username,
 			Password: req.Password,
 			Device:   truncateDevice(r.Header.Get("User-Agent")),
-			IP:       clientIPWithProxies(r, proxyNets),
+			IP:       clientip.Resolve(r, proxyNets),
 		})
 		if err != nil {
 			writeAuthError(r.Context(), w, err)

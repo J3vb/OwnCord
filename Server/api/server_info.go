@@ -34,30 +34,11 @@ type retentionSummary struct {
 	MessagesDays int `json:"messages_days"`
 }
 
-type serverInfoDeps struct {
-	registrationMode func(context.Context) (service.RegistrationMode, error)
-	retentionDays    func(context.Context) (int, error)
-	serverName       func(context.Context) (string, error)
-}
-
-func routerServerInfoDeps(svc *service.Services) serverInfoDeps {
-	return serverInfoDeps{
-		registrationMode: svc.Settings.RegistrationMode,
-		retentionDays:    svc.Retention.ServerDays,
-		serverName: func(ctx context.Context) (string, error) {
-			return svc.Settings.ServerName(ctx)
-		},
-	}
-}
-
 // liveServerName is the name the admin page edits: the server_name setting,
 // falling back to config.yaml's server.name when the setting is missing or
 // blank. A read error is returned so the caller can decide.
-func liveServerName(ctx context.Context, cfg *config.Config, deps serverInfoDeps) (string, error) {
-	if deps.serverName == nil {
-		return cfg.Server.Name, nil
-	}
-	name, err := deps.serverName(ctx)
+func liveServerName(ctx context.Context, cfg *config.Config, svc *service.Services) (string, error) {
+	name, err := svc.Settings.ServerName(ctx)
 	if err != nil {
 		return "", fmt.Errorf("server name: %w", err)
 	}
@@ -74,7 +55,7 @@ const (
 	serverInfoReadTimeout = 1 * time.Second
 )
 
-func handleServerInfo(cfg *config.Config, deps serverInfoDeps) http.HandlerFunc {
+func handleServerInfo(cfg *config.Config, svc *service.Services) http.HandlerFunc {
 	var mu syncutil.Mutex
 	var cachedAt time.Time
 	var cached serverInfoResponse
@@ -85,7 +66,7 @@ func handleServerInfo(cfg *config.Config, deps serverInfoDeps) http.HandlerFunc 
 			// The shared result must outlive a disconnected caller, but the
 			// settings reads still have a bounded deadline, as health does.
 			ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), serverInfoReadTimeout)
-			cached, cachedErr = buildServerInfo(ctx, cfg, deps)
+			cached, cachedErr = buildServerInfo(ctx, cfg, svc)
 			cancel()
 			cachedAt = time.Now()
 			if cachedErr != nil {
@@ -102,16 +83,16 @@ func handleServerInfo(cfg *config.Config, deps serverInfoDeps) http.HandlerFunc 
 	}
 }
 
-func buildServerInfo(ctx context.Context, cfg *config.Config, deps serverInfoDeps) (serverInfoResponse, error) {
-	mode, err := deps.registrationMode(ctx)
+func buildServerInfo(ctx context.Context, cfg *config.Config, svc *service.Services) (serverInfoResponse, error) {
+	mode, err := svc.Settings.RegistrationMode(ctx)
 	if err != nil {
 		return serverInfoResponse{}, err
 	}
-	days, err := deps.retentionDays(ctx)
+	days, err := svc.Retention.ServerDays(ctx)
 	if err != nil {
 		return serverInfoResponse{}, err
 	}
-	name, err := liveServerName(ctx, cfg, deps)
+	name, err := liveServerName(ctx, cfg, svc)
 	if err != nil {
 		return serverInfoResponse{}, err
 	}
