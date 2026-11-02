@@ -14,12 +14,14 @@ export default defineConfig({
   // required run; `OWNCORD_FLAKES=1` runs them again. Policy and guard:
   // docs/testing-behavior.md, scripts/check-quarantine.mjs.
   grepInvert: quarantineGrepInvert(),
+  grep: /decode each other's video with the same key/,
+  repeatEach: 40,
   timeout: 180_000,
   expect: { timeout: 30_000 },
   workers: 1,
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 1 : 0,
+  retries: 0,
   // A retry hides a flaky interop run, which is exactly what this proof must
   // not do: the same gate the other configs carry, so a run that needs its
   // retry still turns the job red.

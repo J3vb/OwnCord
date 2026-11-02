@@ -342,6 +342,41 @@ mod linux {
                 last = tokio::time::Instant::now();
             }
         }
+        emit(
+            serde_json::json!({ "event": { "type": "videoWatchEnd", "identity": identity, "frames": frames } }),
+        );
+    }
+
+    /// The receiver's own counters for one remote video, once a second, so a
+    /// run where no frame reaches the frame socket says whether packets
+    /// arrived, whole frames were assembled, the decoder ran, and how many
+    /// keyframe requests went out.
+    async fn receive_stats(identity: String, track: RemoteVideoTrack) {
+        loop {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            let Ok(stats) = track.get_stats().await else {
+                continue;
+            };
+            for s in stats {
+                if let livekit::webrtc::stats::RtcStats::InboundRtp(s) = s {
+                    emit(serde_json::json!({ "event": {
+                        "type": "videoStats",
+                        "identity": identity,
+                        "packets": s.received.packets_received,
+                        "lost": s.received.packets_lost,
+                        "framesReceived": s.inbound.frames_received,
+                        "framesDecoded": s.inbound.frames_decoded,
+                        "keyFramesDecoded": s.inbound.key_frames_decoded,
+                        "framesDropped": s.inbound.frames_dropped,
+                        "pli": s.inbound.pli_count,
+                        "fir": s.inbound.fir_count,
+                        "nack": s.inbound.nack_count,
+                        "width": s.inbound.frame_width,
+                        "decoder": s.inbound.decoder_implementation,
+                    }}));
+                }
+            }
+        }
     }
 
     /// Open file descriptors: sockets, pipes and device handles a capture or
@@ -731,9 +766,10 @@ mod linux {
                         }
                         meters.push(tokio::spawn(meter(participant.identity().to_string(), track)));
                     }
-                    Some(RoomEvent::TrackSubscribed { track: RemoteTrack::Video(_), publication, participant }) => {
+                    Some(RoomEvent::TrackSubscribed { track: RemoteTrack::Video(track), publication, participant }) => {
                         let url = format!("{frames_url}/remote/{}", publication.sid());
                         meters.push(tokio::spawn(watch(participant.identity().to_string(), url)));
+                        meters.push(tokio::spawn(receive_stats(participant.identity().to_string(), track)));
                     }
                     Some(_) => {}
                     None => break,
