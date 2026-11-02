@@ -67,10 +67,17 @@ pub fn shared_key_material(base64_room_key: &str) -> Vec<u8> {
 /// The `RoomOptions` every native session connects with: dynacast on, so a
 /// video layer nobody subscribes to is paused (the SDK re-applies the
 /// paused layers after every publisher renegotiation, so starting or stopping
-/// another track does not resume them), and GCM e2ee.
+/// another track does not resume them), GCM e2ee, and separate publish and
+/// subscribe peer connections.
 fn room_options(key_provider: KeyProvider) -> RoomOptions {
     let mut options = RoomOptions::default();
     options.dynacast = true;
+    // With one shared peer connection, a publish or unpublish of our own
+    // track (a camera toggle) renegotiates the connection that carries the
+    // remote videos, and now and then a remote video that just subscribed
+    // keeps decoding without its frames ever reaching the track: a black tile
+    // for the rest of the call. A separate subscriber connection is never
+    // renegotiated by our own publishes, as on the web path.
     options.single_peer_connection = false;
     // The report's proven configuration. `encryption` would also enable
     // data-track encryption, which livekit-client's `e2ee` path lacks.

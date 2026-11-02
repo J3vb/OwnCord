@@ -166,6 +166,16 @@ GStreamer `-dev` headers — are documented in
 [contributing.md](../contributing.md#client-tauri-v2); `Client/scripts/linux-webrtc-toolchain.sh`
 installs clang and fetches libwebrtc and the CUDA headers.
 
+The native room connects with separate publish and subscribe peer
+connections (`room_options` in `session.rs`), as livekit-client does. In the
+SDK's default single-connection mode, our own camera publish or unpublish
+renegotiates the connection the remote videos arrive on, and in a few of every
+forty runs of the interop video case a browser camera subscribed just before it
+kept decoding (the receiver's `framesDecoded` climbing at full rate) while no
+sink on the track ever got a frame: a black tile for the rest of the call.
+Measured on 40 repeats each, 1 to 4 black runs in single-connection mode and
+none with a separate subscriber.
+
 ### Phase 1: audio
 
 **Where the switch is.** `features/voice/native/platform.ts`'s

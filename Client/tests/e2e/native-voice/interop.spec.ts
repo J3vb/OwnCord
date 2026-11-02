@@ -668,7 +668,8 @@ test("native and browser peers decode each other's video with the same key", asy
     nativePeerArgs(url, key, 16, "--video", "640x360", "--camera-cycles", "5"),
     ({ event }) => {
       // The receiver's counters and the per-peer encryption state say where a
-      // starved video stops: no packets, no whole frame, or no decode.
+      // starved video stops: no packets, no whole frame, no decode, or
+      // decoded frames that never reach the track.
       const detail = ["videoStats", "encryptionStatus", "videoWatchEnd"].includes(
         String(event.type),
       )
@@ -715,7 +716,6 @@ test("native and browser peers decode each other's video with the same key", asy
   const perSecond = fromBrowser.map((v) => v.frames);
   console.log(`native decoded browser video, frames/s after settle: ${perSecond.join(",")}`);
   const seen = timeline.map((e) => `${String(e.type)}${e.detail}@${e.at - settledAt}ms`).join(" ");
-  console.log(`DIAG timeline: ${seen}`);
   expect(fromBrowser.length, `native peer events relative to settle: ${seen}`).toBeGreaterThan(0);
   expect(Math.max(...perSecond)).toBeGreaterThan(10);
   expect(fromBrowser.at(-1)!.width).toBeGreaterThan(0);
