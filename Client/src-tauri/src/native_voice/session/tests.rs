@@ -5,10 +5,14 @@ use livekit::options::{DegradationPreference, TrackPublishOptions, VideoCodec};
 use livekit_protocol as proto;
 
 #[test]
-fn room_options_enable_dynacast_and_gcm_e2ee() {
+fn room_options_enable_dynacast_gcm_e2ee_and_a_separate_subscriber() {
     let key_provider = KeyProvider::with_shared_key(key_provider_options(), vec![7; 32]);
     let options = room_options(key_provider.clone());
     assert!(options.dynacast);
+    assert!(
+        !options.single_peer_connection,
+        "our own publishes must not renegotiate the connection remote video arrives on"
+    );
     #[allow(deprecated)]
     let e2ee = options.e2ee;
     let e2ee = e2ee.expect("e2ee is configured");

@@ -207,7 +207,10 @@ impl PeerTransport {
         options: AnswerOptions,
     ) -> EngineResult<SessionDescription> {
         self.set_remote_description(offer).await?;
-        let answer = self.peer_connection().create_answer(options).await?;
+        let mut answer = self.peer_connection().create_answer(options).await?;
+        // OWNCORD-PATCH (dual PC stereo receive): not in upstream livekit 0.10.0. See
+        // OWNCORD-PATCH.md.
+        answer = Self::stereo_receive_answer(answer);
         self.peer_connection().set_local_description(answer.clone()).await?;
 
         Ok(answer)
@@ -380,6 +383,26 @@ impl PeerTransport {
             munged.push_str(eol);
         }
         munged
+    }
+
+    // OWNCORD-PATCH (dual PC stereo receive): not in upstream livekit 0.10.0. Only the
+    // subscriber transport answers, and its audio m-lines only receive. libwebrtc sizes the
+    // receive Opus decoder from our own (answer) fmtp, which carries no stereo=1, so a
+    // stereo track would decode as mono. Single PC mode gets the same flag from the offer
+    // munge below; livekit-client munges its subscriber answer the same way.
+    fn stereo_receive_answer(answer: SessionDescription) -> SessionDescription {
+        let sdp = answer.to_string();
+        let munged = Self::munge_stereo_for_audio(&sdp);
+        if munged == sdp {
+            return answer;
+        }
+        match SessionDescription::parse(&munged, answer.sdp_type()) {
+            Ok(parsed) => parsed,
+            Err(e) => {
+                log::warn!("Failed to parse stereo-munged answer, using original: {e}");
+                answer
+            }
+        }
     }
 
     /// Munge SDP to add stereo=1 to opus audio fmtp lines for single PC mode

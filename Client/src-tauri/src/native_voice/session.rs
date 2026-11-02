@@ -67,10 +67,19 @@ pub fn shared_key_material(base64_room_key: &str) -> Vec<u8> {
 /// The `RoomOptions` every native session connects with: dynacast on, so a
 /// video layer nobody subscribes to is paused (the SDK re-applies the
 /// paused layers after every publisher renegotiation, so starting or stopping
-/// another track does not resume them), and GCM e2ee.
+/// another track does not resume them), GCM e2ee, and separate publish and
+/// subscribe peer connections.
 fn room_options(key_provider: KeyProvider) -> RoomOptions {
     let mut options = RoomOptions::default();
     options.dynacast = true;
+    // With one shared peer connection, a publish or unpublish of our own
+    // track (a camera toggle) renegotiates the connection that carries the
+    // remote videos, and now and then a remote video that just subscribed
+    // kept decoding without its frames ever reaching the track: a black tile
+    // for the rest of the call. A separate subscriber connection is never
+    // renegotiated by our own publishes. Its answer gets stereo Opus from the
+    // vendored SDK (vendor/livekit/OWNCORD-PATCH.md).
+    options.single_peer_connection = false;
     // The report's proven configuration. `encryption` would also enable
     // data-track encryption, which livekit-client's `e2ee` path lacks.
     #[allow(deprecated)]
@@ -472,9 +481,8 @@ impl NativeSession {
             .await
             .map_err(|e| e.to_string())?;
         room.e2ee_manager().set_enabled(true);
-        // The share audio's stereo comes from the publish options (the
-        // server's answer), not from this mode; the log records which mode the
-        // server granted, which decides whether a native viewer decodes it.
+        // Always false: `room_options` asks for separate connections. Kept so
+        // a support log shows the mode the session actually ran in.
         log::info!(
             "[native_voice] single peer connection active: {}",
             room.is_single_peer_connection_active()

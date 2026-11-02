@@ -503,6 +503,7 @@ test("native and browser peers decode each other's audio with the same key", asy
   const threads: Array<{ phase: string; count: number }> = [];
   const devices: Array<{ ok: boolean; detail: string }> = [];
   const playout: number[] = [];
+  const codecs: Array<{ identity: string; fmtp: string }> = [];
   const peer = runNativePeer(
     [
       "--url",
@@ -530,6 +531,8 @@ test("native and browser peers decode each other's audio with the same key", asy
       if (event.type === "devices")
         devices.push(event as unknown as { ok: boolean; detail: string });
       if (event.type === "playout") playout.push((event as unknown as { rms: number }).rms);
+      if (event.type === "audioCodec")
+        codecs.push(event as unknown as { identity: string; fmtp: string });
     },
   );
 
@@ -552,6 +555,10 @@ test("native and browser peers decode each other's audio with the same key", asy
   const fromBrowser = nativeAudio.filter((a) => a.identity === "user-1");
   expect(fromBrowser.length).toBeGreaterThan(0);
   expect(Math.max(...fromBrowser.map((a) => a.rms))).toBeGreaterThan(100);
+  // The native side receives on its own subscriber connection, whose answer
+  // must still ask for stereo Opus, or a stereo screen share's audio would
+  // decode downmixed on Linux.
+  expect(codecs.find((c) => c.identity === "user-1")?.fmtp).toContain("stereo=1");
   // 3. The SDK reports the browser peer's frames as encrypted.
   expect(encryption).toContainEqual({
     type: "encryptionStatus",
@@ -663,11 +670,19 @@ test("native and browser peers decode each other's video with the same key", asy
   const threads: Array<{ phase: string; count: number }> = [];
   // Every peer event with its arrival time, so a run where the native side
   // decodes nothing says whether its watch never opened or opened and starved.
-  const timeline: Array<{ type: unknown; at: number }> = [];
+  const timeline: Array<{ type: unknown; detail: string; at: number }> = [];
   const peer = runNativePeer(
     nativePeerArgs(url, key, 16, "--video", "640x360", "--camera-cycles", "5"),
     ({ event }) => {
-      timeline.push({ type: event.type, at: Date.now() });
+      // The receiver's counters and the per-peer encryption state say where a
+      // starved video stops: no packets, no whole frame, no decode, or
+      // decoded frames that never reach the track.
+      const detail = ["videoStats", "encryptionStatus", "videoWatchEnd"].includes(
+        String(event.type),
+      )
+        ? JSON.stringify(event)
+        : "";
+      timeline.push({ type: event.type, detail, at: Date.now() });
       if (event.type === "threads")
         threads.push(event as unknown as { phase: string; count: number });
       if (event.type === "video")
@@ -707,7 +722,7 @@ test("native and browser peers decode each other's video with the same key", asy
   const fromBrowser = nativeVideo.filter((v) => v.identity === "user-1" && v.at >= settledAt);
   const perSecond = fromBrowser.map((v) => v.frames);
   console.log(`native decoded browser video, frames/s after settle: ${perSecond.join(",")}`);
-  const seen = timeline.map((e) => `${String(e.type)}@${e.at - settledAt}ms`).join(" ");
+  const seen = timeline.map((e) => `${String(e.type)}${e.detail}@${e.at - settledAt}ms`).join(" ");
   expect(fromBrowser.length, `native peer events relative to settle: ${seen}`).toBeGreaterThan(0);
   expect(Math.max(...perSecond)).toBeGreaterThan(10);
   expect(fromBrowser.at(-1)!.width).toBeGreaterThan(0);
