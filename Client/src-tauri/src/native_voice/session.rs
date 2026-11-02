@@ -71,6 +71,7 @@ pub fn shared_key_material(base64_room_key: &str) -> Vec<u8> {
 fn room_options(key_provider: KeyProvider) -> RoomOptions {
     let mut options = RoomOptions::default();
     options.dynacast = true;
+    options.single_peer_connection = false;
     // The report's proven configuration. `encryption` would also enable
     // data-track encryption, which livekit-client's `e2ee` path lacks.
     #[allow(deprecated)]
