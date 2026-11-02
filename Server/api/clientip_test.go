@@ -1,56 +1,58 @@
 package api
 
 // White-box tests for clientIP and the trusted-proxy CIDR matching
-// (parseCIDRList + ipInNets — the W3-3a replacement for isTrustedProxy).
+// (parseCIDRList + clientip.InNets — the W3-3a replacement for isTrustedProxy).
 // These live in package api (not api_test) so they can reach unexported symbols.
 
 import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/J3vb/OwnCord/Server/clientip"
 )
 
-// ─── parseCIDRList + ipInNets ────────────────────────────────────────────────
+// ─── parseCIDRList + clientip.InNets ────────────────────────────────────────────────
 
 // inCIDRs is the test shorthand for the old isTrustedProxy semantics: does ip
 // fall inside any of the (string) CIDRs?
 func inCIDRs(ip string, cidrs []string) bool {
-	return ipInNets(ip, parseCIDRList(cidrs))
+	return clientip.InNets(ip, parseCIDRList(cidrs))
 }
 
 func TestIPInNets_EmptyList_ReturnsFalse(t *testing.T) {
 	if inCIDRs("10.0.0.1", nil) {
-		t.Error("ipInNets(empty list) = true, want false")
+		t.Error("clientip.InNets(empty list) = true, want false")
 	}
 }
 
 func TestIPInNets_ExactIPMatch(t *testing.T) {
 	if !inCIDRs("10.0.0.1", []string{"10.0.0.1/32"}) {
-		t.Error("ipInNets exact match = false, want true")
+		t.Error("clientip.InNets exact match = false, want true")
 	}
 }
 
 func TestIPInNets_CIDRMatch(t *testing.T) {
 	if !inCIDRs("192.168.1.50", []string{"192.168.1.0/24"}) {
-		t.Error("ipInNets CIDR match = false, want true")
+		t.Error("clientip.InNets CIDR match = false, want true")
 	}
 }
 
 func TestIPInNets_CIDRNoMatch(t *testing.T) {
 	if inCIDRs("10.9.9.9", []string{"192.168.1.0/24"}) {
-		t.Error("ipInNets CIDR non-match = true, want false")
+		t.Error("clientip.InNets CIDR non-match = true, want false")
 	}
 }
 
 func TestIPInNets_MultipleCIDRs_FirstMatches(t *testing.T) {
 	if !inCIDRs("10.0.0.5", []string{"172.16.0.0/12", "10.0.0.0/8"}) {
-		t.Error("ipInNets multi-CIDR first match = false, want true")
+		t.Error("clientip.InNets multi-CIDR first match = false, want true")
 	}
 }
 
 func TestIPInNets_MultipleCIDRs_NoneMatch(t *testing.T) {
 	if inCIDRs("8.8.8.8", []string{"10.0.0.0/8", "192.168.0.0/16"}) {
-		t.Error("ipInNets multi-CIDR no match = true, want false")
+		t.Error("clientip.InNets multi-CIDR no match = true, want false")
 	}
 }
 
@@ -77,14 +79,14 @@ func TestParseCIDRList_MixedValidInvalid_KeepsValid(t *testing.T) {
 	if len(nets) != 1 {
 		t.Fatalf("parseCIDRList(mixed) = %d nets, want 1", len(nets))
 	}
-	if !ipInNets("10.1.2.3", nets) {
+	if !clientip.InNets("10.1.2.3", nets) {
 		t.Error("valid entry from mixed list did not match")
 	}
 }
 
 func TestIPInNets_IPv6Match(t *testing.T) {
 	if !inCIDRs("::1", []string{"::1/128"}) {
-		t.Error("ipInNets IPv6 exact match = false, want true")
+		t.Error("clientip.InNets IPv6 exact match = false, want true")
 	}
 }
 
@@ -96,7 +98,7 @@ func TestClientIP_NoTrustedProxies_UsesRemoteAddr(t *testing.T) {
 	req.Header.Set("X-Real-IP", "1.2.3.4")
 	req.Header.Set("X-Forwarded-For", "1.2.3.4")
 
-	ip := clientIPWithProxies(req, nil)
+	ip := clientip.Resolve(req, nil)
 	if ip != "203.0.113.5" {
 		t.Errorf("clientIP no trusted proxies = %q, want %q", ip, "203.0.113.5")
 	}
@@ -107,7 +109,7 @@ func TestClientIP_TrustedProxy_UsesXRealIP(t *testing.T) {
 	req.RemoteAddr = "10.0.0.1:9999"
 	req.Header.Set("X-Real-IP", "203.0.113.42")
 
-	ip := clientIPWithProxies(req, parseCIDRList([]string{"10.0.0.0/8"}))
+	ip := clientip.Resolve(req, parseCIDRList([]string{"10.0.0.0/8"}))
 	if ip != "203.0.113.42" {
 		t.Errorf("clientIP trusted proxy = %q, want %q", ip, "203.0.113.42")
 	}
@@ -118,7 +120,7 @@ func TestClientIP_TrustedProxy_NoXRealIP_FallsBackToRemoteAddr(t *testing.T) {
 	req.RemoteAddr = "10.0.0.1:9999"
 	// No X-Real-IP header set.
 
-	ip := clientIPWithProxies(req, parseCIDRList([]string{"10.0.0.0/8"}))
+	ip := clientip.Resolve(req, parseCIDRList([]string{"10.0.0.0/8"}))
 	if ip != "10.0.0.1" {
 		t.Errorf("clientIP trusted proxy no header = %q, want %q", ip, "10.0.0.1")
 	}
@@ -129,7 +131,7 @@ func TestClientIP_UntrustedSource_IgnoresXRealIP(t *testing.T) {
 	req.RemoteAddr = "8.8.8.8:12345"
 	req.Header.Set("X-Real-IP", "192.168.1.1") // attacker-supplied
 
-	ip := clientIPWithProxies(req, parseCIDRList([]string{"10.0.0.0/8"}))
+	ip := clientip.Resolve(req, parseCIDRList([]string{"10.0.0.0/8"}))
 	// Must use RemoteAddr, not the forged X-Real-IP.
 	if ip != "8.8.8.8" {
 		t.Errorf("clientIP untrusted source = %q, want %q", ip, "8.8.8.8")
@@ -142,7 +144,7 @@ func TestClientIP_XForwardedFor_UsedWhenNoXRealIP(t *testing.T) {
 	req.Header.Set("X-Forwarded-For", "203.0.113.10, 10.0.0.1")
 	// No X-Real-IP; X-Forwarded-For first entry should be used.
 
-	ip := clientIPWithProxies(req, parseCIDRList([]string{"10.0.0.0/8"}))
+	ip := clientip.Resolve(req, parseCIDRList([]string{"10.0.0.0/8"}))
 	if ip != "203.0.113.10" {
 		t.Errorf("clientIP X-Forwarded-For = %q, want %q", ip, "203.0.113.10")
 	}
@@ -162,7 +164,7 @@ func TestClientIP_TrustedProxy_XForwardedForWinsOverXRealIP(t *testing.T) {
 	req.Header.Set("X-Real-IP", "192.168.1.50")                // attacker-supplied; proxy never overwrites it
 	req.Header.Set("X-Forwarded-For", "203.0.113.9, 10.0.0.2") // proxy-appended, trustworthy
 
-	ip := clientIPWithProxies(req, parseCIDRList([]string{"10.0.0.0/8"}))
+	ip := clientip.Resolve(req, parseCIDRList([]string{"10.0.0.0/8"}))
 	if ip != "203.0.113.9" {
 		t.Errorf("clientIP trusted proxy with both headers = %q, want %q (X-Forwarded-For)", ip, "203.0.113.9")
 	}
@@ -183,14 +185,14 @@ func TestClientIP_BroadTrustedCIDRKeepsClientsDistinct(t *testing.T) {
 		return req
 	}
 
-	ip1 := clientIPWithProxies(newReq("10.5.1.7"), trusted)
-	ip2 := clientIPWithProxies(newReq("10.5.1.8"), trusted)
+	ip1 := clientip.Resolve(newReq("10.5.1.7"), trusted)
+	ip2 := clientip.Resolve(newReq("10.5.1.8"), trusted)
 	if ip1 != "10.5.1.7" || ip2 != "10.5.1.8" {
 		t.Fatalf("clients behind broad trusted CIDR collapsed: ip1=%q ip2=%q", ip1, ip2)
 	}
 
 	// Multi-hop: leftmost valid entry (furthest upstream) wins on exhaustion.
-	ip3 := clientIPWithProxies(newReq("10.5.1.9, 10.0.0.3"), trusted)
+	ip3 := clientip.Resolve(newReq("10.5.1.9, 10.0.0.3"), trusted)
 	if ip3 != "10.5.1.9" {
 		t.Fatalf("expected furthest-upstream entry, got %q", ip3)
 	}
@@ -204,7 +206,7 @@ func TestClientIP_SpoofedXFFFromUntrustedRemoteIgnored(t *testing.T) {
 	req.RemoteAddr = "203.0.113.9:1234"
 	req.Header.Set("X-Forwarded-For", "10.5.1.7")
 
-	ip := clientIPWithProxies(req, parseCIDRList([]string{"10.0.0.0/8"}))
+	ip := clientip.Resolve(req, parseCIDRList([]string{"10.0.0.0/8"}))
 	if ip != "203.0.113.9" {
 		t.Fatalf("spoofed XFF from untrusted remote honoured: got %q", ip)
 	}
@@ -236,7 +238,7 @@ func TestClientIP_XForwardedFor_SkipsMalformedEntries(t *testing.T) {
 			req.RemoteAddr = "10.0.0.1:9999" // the trusted proxy
 			req.Header.Set("X-Forwarded-For", tt.xff)
 
-			if ip := clientIPWithProxies(req, trusted); ip != tt.want {
+			if ip := clientip.Resolve(req, trusted); ip != tt.want {
 				t.Errorf("clientIP XFF %q = %q, want %q", tt.xff, ip, tt.want)
 			}
 		})
@@ -248,7 +250,7 @@ func TestClientIP_RemoteAddrWithoutPort(t *testing.T) {
 	req := httptest.NewRequest("GET", "/", nil)
 	req.RemoteAddr = "10.0.0.1"
 
-	ip := clientIPWithProxies(req, nil)
+	ip := clientip.Resolve(req, nil)
 	if ip != "10.0.0.1" {
 		t.Errorf("clientIP no port = %q, want %q", ip, "10.0.0.1")
 	}

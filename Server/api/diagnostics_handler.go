@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/J3vb/OwnCord/Server/clientip"
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/netclass"
 	"github.com/J3vb/OwnCord/Server/ws"
@@ -55,7 +56,7 @@ func handleDiagnosticsConnectivity(
 ) http.HandlerFunc {
 	proxyNets := parseCIDRList(cfg.Server.TrustedProxies) // parse once at construction
 	return func(w http.ResponseWriter, r *http.Request) {
-		clientAddr := clientIPWithProxies(r, proxyNets)
+		clientAddr := clientip.Resolve(r, proxyNets)
 
 		lkHealthy := false
 		if ok, _ := hub.LiveKitHealthCheck(r.Context()); ok {

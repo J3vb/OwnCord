@@ -6,7 +6,7 @@ package clientip
 // address). api/middleware.go now delegates to it and its own clientip_test.go
 // still pins the behaviour end to end.
 //
-// The security model is unchanged from api's clientIPWithProxies:
+// The security model is unchanged from the copy that used to live in api:
 //   - Always parse the connecting address from r.RemoteAddr.
 //   - Only honour X-Real-IP/X-Forwarded-For when the connecting address
 //     matches a trusted network, so a client cannot forge its IP.

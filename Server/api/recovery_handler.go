@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/clientip"
 	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/service"
 )
@@ -115,7 +116,7 @@ func handleRecover(svc AuthService, trustedProxies []string) http.HandlerFunc {
 			KitSecret:   secret,
 			NewPassword: req.NewPassword,
 			Device:      truncateDevice(r.Header.Get("User-Agent")),
-			IP:          clientIPWithProxies(r, proxyNets),
+			IP:          clientip.Resolve(r, proxyNets),
 		})
 		if err != nil {
 			writeAuthError(r.Context(), w, err)
