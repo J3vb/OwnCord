@@ -34,7 +34,11 @@
      built and reviewed straight from the PRs. -->
 
 - Built by: <!-- Sonnet worker / main session / person -->
-- Review: <!-- opus-reviewer / Sonnet reviewer / fable-reviewer / skipped (low-risk, say why) -->
+- Review: <!-- opus-reviewer / Sonnet reviewer / fable-reviewer / skipped (low-risk, say why).
+     Skipping is only for docs, tests, CI/config, budget or lockfile bumps, or under about 50
+     changed lines with no logic. New files, new goroutines, handlers, middleware, Rust or
+     call/voice lifecycle code, and anything touching server/ws, db or auth are never low-risk.
+     Keep this section even in batch PRs. -->
 
 ## Test Plan
 
