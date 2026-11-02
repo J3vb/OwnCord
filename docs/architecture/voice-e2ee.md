@@ -173,7 +173,7 @@ connection the remote videos arrive on, and in the interop video case a
 browser camera subscribed just before the camera cycles now and then kept
 decoding (the receiver's `framesDecoded` climbing at full rate) while no sink
 on the track ever got a frame: a black tile for the rest of the call. That
-happened in 5 of 80 single-connection runs and in none of the runs with a
+happened in 5 of 80 single-connection runs and in none of 105 runs with a
 separate subscriber connection. The SDK only asks for
 stereo Opus in single-connection mode, so the vendored copy adds `stereo=1` to
 the subscriber's answer too (`vendor/livekit/OWNCORD-PATCH.md`).

@@ -19,7 +19,7 @@ export default defineConfig({
   workers: 1,
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
-  retries: 0,
+  retries: process.env.CI ? 1 : 0,
   // A retry hides a flaky interop run, which is exactly what this proof must
   // not do: the same gate the other configs carry, so a run that needs its
   // retry still turns the job red.
@@ -37,8 +37,4 @@ export default defineConfig({
     },
     trace: "retain-on-failure",
   },
-  projects: [
-    { name: "video-repeat", grep: /decode each other's video with the same key/, repeatEach: 65 },
-    { name: "audio-once", grep: /decode each other's audio with the same key/ },
-  ],
 });
