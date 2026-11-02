@@ -347,11 +347,30 @@ mod linux {
         );
     }
 
+    struct AbortOnDrop(tokio::task::JoinHandle<()>);
+
+    impl Drop for AbortOnDrop {
+        fn drop(&mut self) {
+            self.0.abort();
+        }
+    }
+
     /// The receiver's own counters for one remote video, once a second, so a
     /// run where no frame reaches the frame socket says whether packets
     /// arrived, whole frames were assembled, the decoder ran, and how many
     /// keyframe requests went out.
     async fn receive_stats(identity: String, track: RemoteVideoTrack) {
+        let rtc = track.rtc_track();
+        let rtc_id = rtc.id();
+        let direct = Arc::new(AtomicU64::new(0));
+        let counter = direct.clone();
+        let reader = tokio::spawn(async move {
+            let mut stream = livekit::webrtc::video_stream::native::NativeVideoStream::new(rtc);
+            while stream.next().await.is_some() {
+                counter.fetch_add(1, Ordering::Relaxed);
+            }
+        });
+        let _reader = AbortOnDrop(reader);
         loop {
             tokio::time::sleep(Duration::from_secs(1)).await;
             let Ok(stats) = track.get_stats().await else {
@@ -373,6 +392,10 @@ mod linux {
                         "nack": s.inbound.nack_count,
                         "width": s.inbound.frame_width,
                         "decoder": s.inbound.decoder_implementation,
+                        "directFrames": direct.load(Ordering::Relaxed),
+                        "trackId": rtc_id,
+                        "statsTrackId": s.inbound.track_identifier,
+                        "mid": s.inbound.mid,
                     }}));
                 }
             }
