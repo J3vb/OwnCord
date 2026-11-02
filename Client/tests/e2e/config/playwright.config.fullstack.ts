@@ -2,6 +2,15 @@ import { defineConfig, devices } from "@playwright/test";
 import { clientRoot, fromClientRoot } from "./clientRoot";
 import { quarantineGrepInvert } from "../../../scripts/check-quarantine.mjs";
 
+// The nightly in-call heap check sets OWNCORD_CALL_SOAK_MIN and stays in one
+// call for that long after its warm-up, so its run gets the call length plus
+// ten minutes for setup instead of the regular suite's ceiling. Scheduled runs
+// use the workflow file from the release branch, so this lives here rather
+// than as a command-line flag.
+const callSoakMin = Number(process.env.OWNCORD_CALL_SOAK_MIN ?? 0);
+const callWarmupMin = Number(process.env.OWNCORD_CALL_SOAK_WARMUP_MIN ?? 5);
+const callSoakGlobalTimeout = (callWarmupMin + callSoakMin + 10) * 60 * 1000;
+
 export default defineConfig({
   outputDir: fromClientRoot("test-results/fullstack"),
   testDir: fromClientRoot("tests/e2e/fullstack"),
@@ -19,7 +28,7 @@ export default defineConfig({
   // A clean run takes about 18 minutes on CI; the soak's one retry adds about
   // 3, which a 20-minute ceiling could not hold. ci.yml's job timeout sits
   // above this so the reporters still write.
-  globalTimeout: 26 * 60 * 1000,
+  globalTimeout: callSoakMin > 0 ? callSoakGlobalTimeout : 26 * 60 * 1000,
   reporter: [
     ["list"],
     ["html", { open: "never", outputFolder: fromClientRoot("playwright-report/fullstack") }],
