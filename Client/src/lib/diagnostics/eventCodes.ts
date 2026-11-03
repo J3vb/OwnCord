@@ -148,7 +148,10 @@ const EXIT_WATCH = "src-tauri/src/exit_watch.rs";
 const CRASH_LOG = "src-tauri/src/crash_log.rs";
 const EXCEPTION_LOG = "src-tauri/src/exception_log.rs";
 const SYSTEM_CRASH = "src-tauri/src/system_crash_report.rs";
-const ANDROID = "src-tauri/gen/android/app/src/main/java/com/owncord/client/MainActivity.kt";
+const ANDROID_DIR = "src-tauri/gen/android/app/src/main/java/com/owncord/client";
+const ANDROID_EXITS = `${ANDROID_DIR}/ExitInfoPlugin.kt`;
+const ANDROID_CRASH = `${ANDROID_DIR}/NativeLog.kt`;
+const ANDROID_WEBVIEW = `${ANDROID_DIR}/RenderGoneClient.kt`;
 const EVENT_LOG = "src/lib/diagnostics/eventLog.ts";
 
 const CAMERA_STATS = {
@@ -195,7 +198,7 @@ export const EVENT_CODES = {
 
   "native.crash": {
     label: "App crashed last time", // i18n-exempt: support bundle text, never shown in the app
-    owners: [CRASH_LOG, EXCEPTION_LOG, SYSTEM_CRASH, ANDROID],
+    owners: [CRASH_LOG, EXCEPTION_LOG, SYSTEM_CRASH, ANDROID_CRASH, ANDROID_EXITS],
     dataClasses: [],
     fields: {
       platform: PLATFORMS,
@@ -210,7 +213,7 @@ export const EVENT_CODES = {
   },
   "native.exit": {
     label: "How the last run ended", // i18n-exempt: support bundle text, never shown in the app
-    owners: [EXIT_WATCH, ANDROID],
+    owners: [EXIT_WATCH, ANDROID_EXITS],
     dataClasses: [],
     fields: {
       platform: PLATFORMS,
@@ -246,7 +249,7 @@ export const EVENT_CODES = {
   },
   "native.webview_process_failed": {
     label: "A webview helper process failed", // i18n-exempt: support bundle text, never shown in the app
-    owners: [EXIT_WATCH, ANDROID],
+    owners: [EXIT_WATCH, ANDROID_WEBVIEW],
     dataClasses: [],
     fields: {
       process: { type: "enum", values: ["browser", "renderer", "gpu", "utility", "unknown"] },

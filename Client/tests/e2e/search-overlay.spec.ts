@@ -158,7 +158,7 @@ test.describe("Search overlay", () => {
     await expect(page.locator(INPUT)).toHaveAttribute("placeholder", "Search messages...");
   });
 
-  test("focusing the chat-header search input opens the overlay", async ({ page }) => {
+  test("clicking the chat-header search input opens the overlay", async ({ page }) => {
     await page.locator("[data-testid='search-input']").click();
     await expect(page.locator(OVERLAY)).toBeVisible();
     await expect(page.locator(INPUT)).toBeFocused();

@@ -8,6 +8,7 @@ const no = <T>(): Promise<T> => refuse<T>();
 
 export const nativeVoice: NativeVoice = {
   setRoomKey: () => no(),
+  useKeySlot: () => no(),
   clearRoomKey: () => no(),
   connect: () => no(),
   disconnect: () => no(),

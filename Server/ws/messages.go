@@ -266,6 +266,8 @@ type voiceE2EEAnnounceBroadcast struct {
 	// when none was sent. Peers verify Signature against it when present, else the
 	// member's published key.
 	IdentityPublicKey string `json:"identity_public_key,omitempty"`
+	// KeySlots is the sender's key_slots flag, omitted when false.
+	KeySlots bool `json:"key_slots,omitempty"`
 }
 
 // voiceE2EEOfferRelay is the server-to-client relay with from_user_id.
@@ -640,6 +642,7 @@ func buildVoiceE2EEAnnounce(userID int64, a e2eeAnnounce) []byte {
 			Signature:         a.sig,
 			VideoDecode:       a.videoDecode,
 			IdentityPublicKey: a.identityKey,
+			KeySlots:          a.keySlots,
 		},
 	})
 }
