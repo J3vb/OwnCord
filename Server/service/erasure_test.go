@@ -945,3 +945,59 @@ func TestErasureService_ReplayPurgeIsRetriedFromTheJournal(t *testing.T) {
 		t.Errorf("unfinished jobs after the hub-less erasure: %+v", jobs)
 	}
 }
+
+// namingStore runs onBatch after the first multi-name lookup, the way a forward
+// can insert the row for a new file while Reconcile is between its batch
+// lookup and its delete.
+type namingStore struct {
+	*db.DB
+	onBatch func()
+}
+
+func (s *namingStore) ReferencedStoredFiles(ctx context.Context, names []string) (map[string]bool, error) {
+	got, err := s.DB.ReferencedStoredFiles(ctx, names)
+	if len(names) > 1 && s.onBatch != nil {
+		s.onBatch()
+		s.onBatch = nil
+	}
+	return got, err
+}
+
+// A file named by a row after the batch lookup is kept: Reconcile checks each
+// name again right before deleting it.
+func TestErasureService_ReconcileKeepsAFileNamedAfterTheBatchLookup(t *testing.T) {
+	database := newTestDB(t)
+	ctx := context.Background()
+	dir := t.TempDir()
+	uid, err := database.CreateUser(ctx, "reconcile-race", "hash", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-2 * time.Hour)
+	for _, name := range []string{"forwarded", "stranded"} {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(p, old, old); err != nil {
+			t.Fatal(err)
+		}
+	}
+	store := newTestStorage(t, dir)
+	st := &namingStore{DB: database, onBatch: func() {
+		if _, err := database.ExecContext(ctx, `INSERT INTO attachments (id, filename, stored_as, mime_type, size, uploader_id) VALUES ('fwd', 'f', 'forwarded', 'image/png', 1, ?)`, uid); err != nil {
+			t.Error(err)
+		}
+	}}
+	svc := NewErasureService(st)
+	svc.SetFiles(store)
+	if n, err := svc.Reconcile(ctx, store, time.Now().Add(-time.Hour), 100); n != 1 || err != nil {
+		t.Fatalf("Reconcile = %d, %v; want 1 (only the stranded file)", n, err)
+	}
+	if !fileExists(t, filepath.Join(dir, "forwarded")) {
+		t.Error("the file a row named after the batch lookup was removed")
+	}
+	if fileExists(t, filepath.Join(dir, "stranded")) {
+		t.Error("the stranded file was kept")
+	}
+}
