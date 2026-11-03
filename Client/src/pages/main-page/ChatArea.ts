@@ -203,8 +203,8 @@ export function createChatArea(opts: ChatAreaOptions): ChatAreaResult {
       pinnedCtrl.cleanup();
       void mediaCtrl.toggle();
     },
-    onSearchFocus: () => {
-      searchCtrl.open();
+    onSearchFocus: (typed) => {
+      searchCtrl.open(typed);
     },
     onToggleDmProfile: opts.onToggleDmProfile,
     onToggleMemberList: opts.onToggleMemberList,

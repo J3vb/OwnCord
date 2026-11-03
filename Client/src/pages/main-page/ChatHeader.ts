@@ -8,6 +8,8 @@ import type { ChannelType } from "@lib/types";
 import { messagingText } from "../../i18n/messaging";
 import { requestsText } from "../../i18n/requests";
 import { shellText } from "../../i18n/shell";
+import { isTypedCharacter } from "@lib/ui/typeAhead";
+import { isImeCommit } from "@lib/text/ime";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -60,7 +62,8 @@ export interface ChatHeaderOptions {
   readonly onToggleThreads?: (anchor: HTMLButtonElement) => void;
   /** Open or close the channel's media gallery. */
   readonly onToggleMedia?: () => void;
-  readonly onSearchFocus?: () => void;
+  /** Open search; `typed` is the character that opened it from the header box. */
+  readonly onSearchFocus?: (typed?: string) => void;
   readonly onToggleDmProfile?: () => void;
   /** Show or hide the group DM member panel. */
   readonly onToggleMemberList?: () => void;
@@ -263,10 +266,15 @@ export function buildChatHeader(opts: ChatHeaderOptions): {
   pinBtn.addEventListener("click", () => {
     opts.onTogglePins();
   });
+  // A trigger styled as a field: readonly so Tab can pass over it without
+  // opening search; a click, Enter or the first typed character opens it.
   const searchInput = createElement("input", {
     class: "search-input",
     type: "text",
+    readonly: "",
     placeholder: messagingText("header.search"),
+    "aria-label": messagingText("header.search"),
+    "aria-haspopup": "dialog",
     "data-testid": "search-input",
   });
   // On a phone the box gives way to an icon; CSS shows one or the other.
@@ -280,9 +288,16 @@ export function buildChatHeader(opts: ChatHeaderOptions): {
   searchBtn.appendChild(createIcon("search", 18));
   if (opts.onSearchFocus !== undefined) {
     const onFocus = opts.onSearchFocus;
-    searchInput.addEventListener("focus", () => {
-      onFocus();
-      searchInput.blur();
+    searchInput.addEventListener("click", () => onFocus());
+    searchInput.addEventListener("keydown", (e) => {
+      if (isImeCommit(e)) return;
+      if (e.key === "Enter" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        onFocus();
+      } else if (e.key !== " " && isTypedCharacter(e)) {
+        e.preventDefault();
+        onFocus(e.key);
+      }
     });
     searchBtn.addEventListener("click", () => onFocus());
   }

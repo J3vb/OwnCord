@@ -264,6 +264,20 @@ func TestAPIV1ServerInfoReturnsNameEpochAndBrowserFlag(t *testing.T) {
 	assertServerInfoRetention(t, body, 0)
 }
 
+// TestAPIV1ServerInfoReportsUploadTransferLifetime: the client sizes its own
+// transfer bound from this field, so it must be present and match the lifetime
+// the upload route enforces (the 100 MiB default body cap at 64 KiB/s).
+func TestAPIV1ServerInfoReportsUploadTransferLifetime(t *testing.T) {
+	body := serverInfoBody(t, setupRouter(t))
+	upload, ok := body["upload"].(map[string]any)
+	if !ok {
+		t.Fatalf("upload = %#v, want an object", body["upload"])
+	}
+	if len(upload) != 1 || upload["transfer_lifetime_seconds"] != float64(1600) {
+		t.Errorf("upload = %#v, want only transfer_lifetime_seconds: 1600", upload)
+	}
+}
+
 func assertServerInfoRetention(t *testing.T, body map[string]any, days int) {
 	t.Helper()
 	retention, ok := body["retention"].(map[string]any)

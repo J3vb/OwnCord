@@ -30,6 +30,7 @@ import { resolveDisplayName } from "@lib/ui/avatar";
 import { formatInviteLink } from "@lib/nav/deepLink";
 import { shellText } from "../../i18n/shell";
 import { dialogOpen } from "@lib/ui/dialogOpen";
+import { holdTypeAhead } from "@lib/ui/typeAhead";
 import { copyThenToast } from "@lib/ui/clipboard";
 
 const log = createLogger("overlays");
@@ -176,24 +177,40 @@ export function createQuickSwitcherManager(
   // Set while the switcher's code loads. A second Ctrl+K in that window is
   // swallowed (it opens once), and close()/detach cancels the pending open.
   let pendingOpen: object | null = null;
+  // Keys typed before the switcher's input has focus wait here for it.
+  let releaseTypeAhead: (() => void) | null = null;
+
+  function dropTypeAhead(): void {
+    releaseTypeAhead?.();
+    releaseTypeAhead = null;
+  }
 
   function open(): void {
     const root = getRoot();
     if (instance !== null || pendingOpen !== null || root === null) return;
     const ticket = {};
     pendingOpen = ticket;
+    dropTypeAhead();
+    releaseTypeAhead = holdTypeAhead();
     void quickSwitcherScreen
       .load(() => pendingOpen === ticket)
       .then((screen) => {
         if (pendingOpen !== ticket) return;
         pendingOpen = null;
-        if (screen === null) return;
         // Re-derive the root: a page teardown during the load nulls it.
         const liveRoot = getRoot();
-        if (liveRoot === null || instance !== null) return;
         // The keydown handler's gates held when the key was pressed; Settings or
         // a dialog may have opened since, and the switcher must not stack on it.
-        if (isSuspended?.() === true || dialogOpen()) return;
+        if (
+          screen === null ||
+          liveRoot === null ||
+          instance !== null ||
+          isSuspended?.() === true ||
+          dialogOpen()
+        ) {
+          dropTypeAhead();
+          return;
+        }
         mountSwitcher(screen, liveRoot);
       });
   }
@@ -240,6 +257,7 @@ export function createQuickSwitcherManager(
 
   function close(): void {
     pendingOpen = null;
+    dropTypeAhead();
     if (instance !== null) {
       instance.destroy?.();
       instance = null;
@@ -756,7 +774,8 @@ export function createPinnedPanelController(opts: {
 // ---------------------------------------------------------------------------
 
 export interface SearchOverlayController {
-  open(): void;
+  /** Open the overlay; `typed` is text the user already typed to open it. */
+  open(typed?: string): void;
   cleanup(): void;
 }
 
@@ -778,9 +797,17 @@ export function createSearchOverlayController(opts: {
   let pendingOpen: object | null = null;
   /** The mounted overlay's lifetime: its Back claim on a phone. */
   let mounted: Disposable | null = null;
+  // Keys typed before the overlay's input has focus wait here for it.
+  let releaseTypeAhead: (() => void) | null = null;
+
+  function dropTypeAhead(): void {
+    releaseTypeAhead?.();
+    releaseTypeAhead = null;
+  }
 
   function close(): void {
     pendingOpen = null;
+    dropTypeAhead();
     mounted?.destroy();
     mounted = null;
     if (instance !== null) {
@@ -789,20 +816,24 @@ export function createSearchOverlayController(opts: {
     }
   }
 
-  function open(): void {
+  function open(typed = ""): void {
     const root = opts.getRoot();
     if (instance !== null || pendingOpen !== null || root === null) return;
     const ticket = {};
     pendingOpen = ticket;
+    dropTypeAhead();
+    releaseTypeAhead = holdTypeAhead(typed);
     void searchOverlayScreen
       .load(() => pendingOpen === ticket)
       .then((screen) => {
         if (pendingOpen !== ticket) return;
         pendingOpen = null;
-        if (screen === null) return;
         // Re-derive the root: a page teardown during the load nulls it.
         const liveRoot = opts.getRoot();
-        if (liveRoot === null || instance !== null) return;
+        if (screen === null || liveRoot === null || instance !== null) {
+          dropTypeAhead();
+          return;
+        }
         mountOverlay(screen, liveRoot);
       });
   }

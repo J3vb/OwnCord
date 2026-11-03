@@ -456,7 +456,7 @@ describe("createChatArea", () => {
 
   // --- Search input interaction ---
 
-  it("focusing search input opens the search overlay controller", () => {
+  it("clicking the search box opens the search overlay controller", () => {
     const result = createChatArea(makeOptions());
 
     const searchInput = result.chatArea.querySelector(
@@ -464,7 +464,11 @@ describe("createChatArea", () => {
     ) as HTMLInputElement;
     expect(searchInput).not.toBeNull();
     searchInput.dispatchEvent(new Event("focus"));
+    expect(mockSearchOpen).not.toHaveBeenCalled();
+    searchInput.click();
     expect(mockSearchOpen).toHaveBeenCalledTimes(1);
+    searchInput.dispatchEvent(new KeyboardEvent("keydown", { key: "q", bubbles: true }));
+    expect(mockSearchOpen).toHaveBeenLastCalledWith("q");
   });
 
   // --- Channel controller integration via getCurrentChannelId ---

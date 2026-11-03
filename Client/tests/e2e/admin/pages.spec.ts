@@ -7,7 +7,7 @@ import { Q1, findUnnamedControls, textContrast } from "../support/accessibility"
 // journey in admin-panel.spec.ts covers setup, the dashboard, channel CRUD,
 // the audit log, support bundles and login. These fill the remaining
 // destinations — Members, Roles, Emoji, Settings, Retention, Backups, Updates,
-// What's new, Logs, Tokens, Plugins — each against a fresh real server and database, so a
+// What's new, System health, Logs, Tokens, Plugins — each against a fresh real server and database, so a
 // page that silently loses its data path fails here rather than in the field.
 
 // A valid 1×1 PNG: the emoji route sniffs the type from the bytes, so a
@@ -384,6 +384,33 @@ test("What's new: the embedded release notes load from the top bar version", asy
     "href",
     "https://github.com/J3vb/OwnCord",
   );
+});
+
+test("System health: the cards fill from the real server and stop polling on leave", async ({
+  page,
+  seededAdminServer,
+}) => {
+  await signInAsOwner(page, seededAdminServer);
+  const first = page.waitForResponse((res) => res.url().endsWith("/admin/api/system/health"));
+  await navigate(page, "System health");
+  expect((await first).status()).toBe(200);
+
+  await expect(page.locator(".page-title")).toHaveText("System health");
+  for (const id of ["#sysHub", "#sysDatabase", "#sysVoice", "#sysProcess"]) {
+    await expect(page.locator(id)).toBeVisible();
+  }
+  // A real database answers inside the deadline: its figures, not "could not read".
+  await expect(page.locator("#sysDatabase dl.facts")).toContainText("Schema");
+  await expect(page.locator("#sysProcess dl.facts")).toContainText("Uptime");
+
+  // Leaving the page ends the poll: no further health request.
+  await navigate(page, "Server logs");
+  let polled = false;
+  page.on("request", (req) => {
+    if (req.url().endsWith("/admin/api/system/health")) polled = true;
+  });
+  await page.waitForTimeout(6_000);
+  expect(polled).toBe(false);
 });
 
 test("Server logs: the live stream connects", async ({ page, seededAdminServer }) => {

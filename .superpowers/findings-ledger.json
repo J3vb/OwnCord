@@ -1,5 +1,5 @@
 {
-  "nextId": 542,
+  "nextId": 544,
   "findings": [
     {
       "id": "OC-0001",
@@ -12496,6 +12496,52 @@
     },
     {
       "id": "OC-0541",
+      "title": "The first keys typed after opening search or the quick switcher landed in the message box",
+      "file": "Client/src/pages/main-page/OverlayManagers.ts",
+      "line": 180,
+      "severity": "medium",
+      "why": "Both overlays load their code on first use and focus their input a frame after mounting. Until then nothing (or the message box) held focus, and the page's type-to-compose rule sent printable keys to the message box. The header search box also opened on focus, so Tab could not pass through the header.",
+      "repro": "Click the header search box (or press Ctrl+K in the message box) and type 'hello' at once: 'h' (or 'ra' after Ctrl+K) lands in the message box draft.",
+      "evidence": "Client/tests/unit/overlay-type-ahead.test.ts, Client/tests/unit/type-ahead.test.ts, Client/tests/e2e/chat-header.spec.ts, Client/tests/e2e/overlays.spec.ts.",
+      "suggestedFix": "Hold plain printable keys while an overlay open is pending and hand them to the first text field that takes focus; open the header box on click, Enter or a typed key instead of on focus.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/unit/overlay-type-ahead.test.ts",
+        "revertProof": "fail (the Ctrl+K case puts 'ra' in the message box without the hold)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-03",
+      "hunt": "client-review-2026-11-03",
+      "lens": "design-visual",
+      "finder": "claude",
+      "fixedDate": "2026-11-03"
+    },
+    {
+      "id": "OC-0542",
+      "title": "Avatar, banner and group-icon uploads were cut by the 30 s read timeout on a slow link",
+      "file": "Server/api/profile_banner.go",
+      "line": 40,
+      "severity": "low",
+      "why": "The three image routes are exempt from the request deadline because a transfer deadline was meant to govern them, but none started one, so the whole multipart body was read under the global 30 s read timeout.",
+      "repro": "Upload a 4 MB banner over a 1 Mbit/s link: the body takes about 34 s, the read is cut at 30 s and the client gets a network error.",
+      "evidence": "Server/api/transfer_timeout_test.go (TestProfileImageUploads_SlowProgressingBodySurvivesRequestTimeout, TestProfileImageUploads_StalledBodyAnswers408TransferTimedOut).",
+      "suggestedFix": "Read the three bodies through the same progress deadline as the attachment upload, and answer a cut with 408 TRANSFER_TIMED_OUT.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/api/transfer_timeout_test.go",
+        "revertProof": "fail (without the progress deadline the slow banner upload is cut at the 250 ms read timeout)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-03",
+      "hunt": "server-review-2026-11-03",
+      "lens": "uploads-media-lifecycle",
+      "finder": "claude",
+      "fixedDate": "2026-11-03"
+    },
+    {
+      "id": "OC-0543",
       "title": "A voice leave made while the chat socket was down left a ghost voice membership after the socket resumed",
       "file": "Server/ws/voice_grace.go",
       "line": 330,

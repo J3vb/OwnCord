@@ -95,7 +95,7 @@ describe("ChatHeader", () => {
     expect(pinBtn?.getAttribute("aria-label")).toBe("Pins");
   });
 
-  it("calls onSearchFocus and blurs input when search is focused", () => {
+  it("search box: focus alone leaves search closed; click, Enter and a typed key open it", () => {
     const onSearchFocus = vi.fn();
     const { element } = buildChatHeader({
       onTogglePins: vi.fn(),
@@ -104,12 +104,41 @@ describe("ChatHeader", () => {
     container.appendChild(element);
 
     const searchInput = container.querySelector('[data-testid="search-input"]') as HTMLInputElement;
-    const blurSpy = vi.spyOn(searchInput, "blur");
-
+    expect(searchInput.readOnly).toBe(true);
+    searchInput.focus();
     searchInput.dispatchEvent(new Event("focus"));
+    expect(onSearchFocus).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(searchInput);
 
-    expect(onSearchFocus).toHaveBeenCalledOnce();
-    expect(blurSpy).toHaveBeenCalledOnce();
+    searchInput.click();
+    expect(onSearchFocus).toHaveBeenLastCalledWith();
+
+    const enter = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+    searchInput.dispatchEvent(enter);
+    expect(enter.defaultPrevented).toBe(true);
+    expect(onSearchFocus).toHaveBeenCalledTimes(2);
+
+    const typed = new KeyboardEvent("keydown", { key: "h", bubbles: true, cancelable: true });
+    searchInput.dispatchEvent(typed);
+    expect(typed.defaultPrevented).toBe(true);
+    expect(onSearchFocus).toHaveBeenLastCalledWith("h");
+
+    const altGr = new KeyboardEvent("keydown", {
+      key: "@",
+      ctrlKey: true,
+      altKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    searchInput.dispatchEvent(altGr);
+    expect(onSearchFocus).toHaveBeenLastCalledWith("@");
+
+    for (const init of [{ key: "Tab" }, { key: " " }, { key: "k", ctrlKey: true }]) {
+      const e = new KeyboardEvent("keydown", { ...init, bubbles: true, cancelable: true });
+      searchInput.dispatchEvent(e);
+      expect(e.defaultPrevented).toBe(false);
+    }
+    expect(onSearchFocus).toHaveBeenCalledTimes(4);
   });
 
   it("does not add focus listener when onSearchFocus is not provided", () => {
