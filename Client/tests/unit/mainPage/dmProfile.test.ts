@@ -6,6 +6,7 @@ import { channelsStore, setActiveChannel } from "../../../src/stores/channels.st
 import { uiStore } from "../../../src/stores/ui.store";
 import { voiceStore } from "../../../src/stores/voice.store";
 import { dmStore, updateDmParticipant } from "../../../src/stores/dm.store";
+import { closeUserProfilePopup } from "../../../src/features/profiles/openUserProfilePopup";
 import { alertSupersededCall } from "../../../src/features/direct-messages/callAlerts";
 import {
   fakeWs,
@@ -154,6 +155,66 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
       await vi.waitFor(() => expect(panel()).not.toBeNull());
       expect(pressed()).toBe("true");
       expect(pref()).toBe("true");
+    });
+
+    describe("on the phone layout", () => {
+      const media = (phone: boolean): void => {
+        vi.stubGlobal(
+          "matchMedia",
+          vi.fn((q: string) =>
+            Object.assign(new EventTarget(), {
+              matches: phone && q.includes("pointer: coarse"),
+              media: q,
+            }),
+          ),
+        );
+      };
+      afterEach(() => media(false));
+
+      it("never opens the side panel by itself, at mount or on a DM switch, and keeps the preference", async () => {
+        savePref("dmProfileOpen", true);
+        media(true);
+        mountOnTwoDms();
+        await settle();
+        expect(panel()).toBeNull();
+        setActiveChannel(71);
+        channelsStore.flush();
+        await settle();
+        expect(panel()).toBeNull();
+        expect(pref()).toBe("true");
+      });
+
+      it("the header button opens the partner's profile sheet, not the panel", async () => {
+        media(true);
+        mountOnTwoDms();
+        const before = pref();
+        mockCreateChatArea.mock.calls[0]![0].onToggleDmProfile();
+        const sheet = await vi.waitFor(() => {
+          const el = document.querySelector<HTMLElement>('[data-testid="profile-sheet"]');
+          expect(el).not.toBeNull();
+          return el!;
+        });
+        expect(sheet.textContent).toContain("bob");
+        expect(panel()).toBeNull();
+        expect(pref()).toBe(before);
+        closeUserProfilePopup();
+        expect(document.querySelector('[data-testid="profile-sheet"]')).toBeNull();
+      });
+
+      it("turning onto the phone layout closes an open panel; back on the desktop it returns", async () => {
+        savePref("dmProfileOpen", true);
+        mountOnTwoDms();
+        await vi.waitFor(() => expect(panel()).not.toBeNull());
+
+        media(true);
+        window.dispatchEvent(new Event("resize"));
+        expect(panel()).toBeNull();
+        expect(pref()).toBe("true");
+
+        media(false);
+        window.dispatchEvent(new Event("resize"));
+        await vi.waitFor(() => expect(panel()).not.toBeNull());
+      });
     });
 
     describe("focus and Escape", () => {

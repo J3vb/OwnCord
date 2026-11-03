@@ -3,9 +3,10 @@
  * Appears when clicking the DM header ("@ username" area).
  * 340px wide, slides in from the right with a 170ms animation.
  *
- * Content: 80px avatar, username, status dot + label, about section,
- * "Member Since" date, and an editable private Note field (kept on the
- * server with the `user_notes` capability, else in localStorage).
+ * Content: 80px avatar, name, @username (when a nickname stands in for it),
+ * custom status, status dot + label, about section, "Member Since" date, an
+ * editable private Note field (kept on the server with the `user_notes`
+ * capability, else in localStorage), Report and Block.
  *
  * A11y: role="complementary", aria-label="User profile", Esc to close,
  * focus first focusable on open.
@@ -35,6 +36,7 @@ import {
   statusIndicatorLabel,
 } from "@lib/ui/statusIndicator";
 import { requestsText } from "../i18n/requests";
+import { reportEntryText } from "../i18n/reportEntry";
 import { playingForLine } from "../features/members/gameActivityLine";
 import { mountListeningCard } from "../features/members/listeningCard";
 import type { ListeningSong } from "../features/members/listeningLine";
@@ -57,6 +59,8 @@ export interface DmProfileData {
   readonly displayName?: string | null;
   readonly avatar: string | null;
   readonly status: UserStatus;
+  /** The person's own status line under the name. Null or absent = none. */
+  readonly customStatus?: string | null;
   /** On the Android app: the status dot becomes a phone. */
   readonly mobile?: boolean;
   /** The game being played: "Playing <game> · for N min" under the status. */
@@ -76,6 +80,8 @@ export interface DmProfileSidebarOptions {
   /** Block (`block` true) or Unblock this user. The owner confirms a
    *  Block; the label follows `blocksStore`. Omitted: no button. */
   readonly onToggleBlock?: (userId: number, block: boolean) => void;
+  /** Open the report form for this user. Omitted: no button. */
+  readonly onReport?: (userId: number) => void;
   /**
    * The connected server's host, used to scope the note's localStorage key.
    * User ids are per-server, so without this a note about user 5 on one
@@ -151,6 +157,8 @@ export function createDmProfileSidebar(
   // -- see the `update()` doc comment on DmProfileSidebarComponent for why
   // these are repainted in place instead of the whole panel being rebuilt.
   let nameNode: HTMLDivElement | null = null;
+  let handleNode: HTMLDivElement | null = null;
+  let customStatusNode: HTMLDivElement | null = null;
   let contentNode: HTMLDivElement | null = null;
   let contentOwner: Disposable | null = null;
   let avatarLetterNode: HTMLSpanElement | null = null;
@@ -191,6 +199,16 @@ export function createDmProfileSidebar(
     listeningNode.replaceChildren();
     if (user.listening == null) return;
     stopListening = mountListeningCard(listeningNode, user.listening, { prefix: "dps" });
+  }
+
+  /** The @username line shows only while a nickname stands in for it, since
+   *  mentions still resolve by username. Empty lines are hidden by CSS. */
+  function paintIdentityLines(): void {
+    if (handleNode !== null) {
+      const name = resolveDisplayName(user);
+      setText(handleNode, name !== user.username ? `@${user.username}` : "");
+    }
+    if (customStatusNode !== null) setText(customStatusNode, user.customStatus ?? "");
   }
 
   function isOpen(): boolean {
@@ -285,6 +303,12 @@ export function createDmProfileSidebar(
     });
     setText(nameEl, resolveDisplayName(user));
     nameNode = nameEl;
+    handleNode = createElement("div", { class: "dps-handle", "data-testid": "dps-handle" });
+    customStatusNode = createElement("div", {
+      class: "dps-custom-status",
+      "data-testid": "dps-custom-status",
+    });
+    paintIdentityLines();
 
     // Status line
     const statusLine = createElement("div", {
@@ -317,7 +341,15 @@ export function createDmProfileSidebar(
     listeningNode = listeningLine;
     paintListening();
 
-    appendChildren(content, nameEl, statusLine, activityLine, listeningLine);
+    appendChildren(
+      content,
+      nameEl,
+      handleNode,
+      customStatusNode,
+      statusLine,
+      activityLine,
+      listeningLine,
+    );
 
     // About section
     if (user.about !== undefined && user.about !== null && user.about.length > 0) {
@@ -409,6 +441,28 @@ export function createDmProfileSidebar(
 
     appendChildren(content, noteTitle, noteInput, noteError);
 
+    const actionsDivider = makeDivider();
+    let actionsShown = false;
+    const showActionsDivider = (): void => {
+      if (!actionsShown) content.append(actionsDivider);
+      actionsShown = true;
+    };
+
+    if (options.onReport !== undefined) {
+      const onReport = options.onReport;
+      const reportBtn = createElement("button", {
+        class: "dps-report-btn",
+        type: "button",
+        "aria-haspopup": "dialog",
+        "data-testid": "dps-report-btn",
+      });
+      reportBtn.appendChild(createIcon("flag", 14));
+      reportBtn.appendChild(document.createTextNode(` ${reportEntryText("report")}`));
+      reportBtn.addEventListener("click", () => onReport(user.id), { signal: contentSignal });
+      showActionsDivider();
+      content.append(reportBtn);
+    }
+
     // Block / Unblock. The label follows blocksStore, so it flips when the
     // owner's request lands and stays put when it fails.
     if (options.onToggleBlock !== undefined) {
@@ -434,7 +488,8 @@ export function createDmProfileSidebar(
       );
       const unsub = blocksStore.subscribe(paint);
       contentSignal.addEventListener("abort", unsub, { once: true });
-      content.append(makeDivider(), blockBtn);
+      showActionsDivider();
+      content.append(blockBtn);
     }
 
     return content;
@@ -523,6 +578,8 @@ export function createDmProfileSidebar(
       panel = null;
     }
     nameNode = null;
+    handleNode = null;
+    customStatusNode = null;
     avatarLetterNode = null;
     avatarWrapperNode = null;
     contentNode = null;
@@ -559,6 +616,7 @@ export function createDmProfileSidebar(
     }
 
     if (nameNode !== null) setText(nameNode, resolveDisplayName(user));
+    paintIdentityLines();
     if (contentNode !== null && bannerKeyOf(user) !== bannerKey) paintBannerStrip(contentNode);
 
     const mobile = user.mobile === true;

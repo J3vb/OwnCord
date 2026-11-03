@@ -18,6 +18,7 @@ import {
 } from "../../src/stores/dm.store";
 import { membersStore, updatePresence } from "../../src/stores/members.store";
 import { signInAs } from "../helpers/storeSeeds";
+import { usePhone } from "../helpers/phoneMedia";
 
 const ME = 1;
 const user = (id: number, username: string): DmUser => ({
@@ -105,6 +106,7 @@ describe("GroupMemberPanelController", () => {
     });
   });
   afterEach(() => {
+    vi.unstubAllGlobals();
     ctrl.destroy();
     slot.remove();
     button.remove();
@@ -183,6 +185,45 @@ describe("GroupMemberPanelController", () => {
     ctrl.toggle();
     await settle();
     expect(button.getAttribute("aria-pressed")).toBe("true");
+  });
+
+  describe("on the phone layout", () => {
+    beforeEach(() => usePhone());
+
+    it("never opens by itself, and closes one already open", async () => {
+      activate(10);
+      ctrl.syncToActive();
+      await new Promise((r) => setTimeout(r, 20));
+      expect(panelEl()).toBeNull();
+
+      ctrl.toggle();
+      await settle();
+      ctrl.syncToActive();
+      expect(panelEl()).toBeNull();
+      expect(button.getAttribute("aria-pressed")).toBe("false");
+    });
+
+    it("the header toggle opens it without touching the desktop preference", async () => {
+      localStorage.clear();
+      activate(10);
+      ctrl.toggle();
+      await settle();
+      expect(button.getAttribute("aria-pressed")).toBe("true");
+      ctrl.toggle();
+      expect(panelEl()).toBeNull();
+      expect(Object.keys(localStorage).some((k) => k.includes("dmMembersOpen"))).toBe(false);
+    });
+
+    it("Back closes the open panel", async () => {
+      activate(10);
+      ctrl.toggle();
+      await settle();
+      const popped = new Promise((r) => window.addEventListener("popstate", r, { once: true }));
+      history.back();
+      await popped;
+      await vi.waitFor(() => expect(panelEl()).toBeNull());
+      expect(button.getAttribute("aria-pressed")).toBe("false");
+    });
   });
 
   it("a close during the lazy load is not undone when the import resolves", async () => {

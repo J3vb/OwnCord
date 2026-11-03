@@ -652,3 +652,46 @@ describe("DmProfileSidebar", () => {
     });
   });
 });
+
+describe("DmProfileSidebar identity lines and Report", () => {
+  let container: HTMLDivElement;
+  beforeEach(() => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+  });
+  afterEach(() => container.remove());
+  const text = (id: string): string =>
+    container.querySelector<HTMLElement>(`[data-testid="${id}"]`)?.textContent ?? "";
+
+  it("shows @username only under a nickname, and the custom status, live", () => {
+    const sidebar = createDmProfileSidebar(makeOptions());
+    sidebar.mount(container);
+    expect(text("dps-handle")).toBe("");
+    expect(text("dps-custom-status")).toBe("");
+
+    sidebar.update(makeUser({ displayName: "Ally", customStatus: "brb" }));
+    expect(text("dps-username")).toBe("Ally");
+    expect(text("dps-handle")).toBe("@Alice");
+    expect(text("dps-custom-status")).toBe("brb");
+
+    sidebar.update(makeUser());
+    expect(text("dps-handle")).toBe("");
+    expect(text("dps-custom-status")).toBe("");
+    sidebar.destroy?.();
+  });
+
+  it("Report asks the owner with the person shown now; no handler, no button", () => {
+    const onReport = vi.fn();
+    const sidebar = createDmProfileSidebar(makeOptions({ onReport }));
+    sidebar.mount(container);
+    sidebar.update(makeUser({ id: 2, username: "Bob" }));
+    container.querySelector<HTMLElement>('[data-testid="dps-report-btn"]')!.click();
+    expect(onReport).toHaveBeenCalledWith(2);
+    sidebar.destroy?.();
+
+    const plain = createDmProfileSidebar(makeOptions());
+    plain.mount(container);
+    expect(container.querySelector('[data-testid="dps-report-btn"]')).toBeNull();
+    plain.destroy?.();
+  });
+});
