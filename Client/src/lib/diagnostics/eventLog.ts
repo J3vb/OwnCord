@@ -146,9 +146,15 @@ export function startEventLog(): void {
   detach = attachRecorder(record);
 }
 
+/** Store the drop counts still waiting for their code's next event, so a
+ *  burst that ended reaches the disk writer and the bundle. */
+export function flushDroppedCounts(now = Date.now()): void {
+  for (const [code, window] of windows) flushDropped(code, window, now);
+}
+
 /** The ring as JSON lines, oldest first, with any pending drop counts. */
 export function getEventLines(now = Date.now()): string[] {
-  for (const [code, window] of windows) flushDropped(code, window, now);
+  flushDroppedCounts(now);
   trim(now);
   return events.map((e) => e.line);
 }

@@ -26,18 +26,21 @@ const NATIVE_LOG_PREFIX = "owncord-client";
 const NATIVE_LOG_TAIL_BYTES = 2 << 20; // 2 MB
 
 // The diagnostic event log (lib/diagnostics/eventLog.ts) is written beside the
-// logs as events-YYYY-MM-DD.jsonl so it survives a crash; the support bundle
-// reads it with the logs. Its files rotate on their own count, and a day's
-// file stops growing at a fixed size so a long reconnect loop cannot fill the disk.
+// logs as events-<start time>.jsonl so it survives a crash; the support bundle
+// reads it with the logs. Each run starts a new file, and a file that reaches
+// EVENT_FILE_BYTES is closed for a new one, so the newest events are always
+// kept and the oldest files go first: MAX_EVENT_FILES older files plus the
+// one being written.
 const EVENTS_PREFIX = "events-";
-const MAX_EVENT_FILES = 2;
-const MAX_EVENT_BYTES_PER_DAY = 2 << 20; // 2 MB
+const MAX_EVENT_FILES = 4;
+const EVENT_FILE_BYTES = 1 << 20; // 1 MB
 
 let logDir: string | null = null;
 let eventBuffer: string[] = [];
-let eventDate: string | null = null;
+let eventFile: string | null = null;
 let eventBytes = 0;
 let stopEvents: (() => void) | null = null;
+let flushDroppedCounts: (() => void) | null = null;
 let currentDate: string | null = null;
 let buffer: string[] = [];
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -89,20 +92,30 @@ async function doFlush(): Promise<void> {
   }
 }
 
-/** Write the buffered event lines to today's events file. */
+// This run's start time and its file count: names sort by run, then by part.
+const eventRun = new Date().toISOString().slice(0, 19).replaceAll(":", "-");
+let eventPart = 0;
+
+/** A sortable file name for events written from now on. */
+function newEventFileName(): string {
+  eventPart++;
+  return `${EVENTS_PREFIX}${eventRun}-${String(eventPart).padStart(3, "0")}.jsonl`;
+}
+
+/** Write the buffered event lines to the current events file. */
 async function flushEvents(): Promise<void> {
+  flushDroppedCounts?.();
   if (eventBuffer.length === 0 || !logDir) return;
-  const date = today();
-  if (date !== eventDate) {
-    eventDate = date;
-    eventBytes = 0;
-  }
   const lines = eventBuffer.join("\n") + "\n";
   eventBuffer = [];
-  if (eventBytes + lines.length > MAX_EVENT_BYTES_PER_DAY) return;
+  if (eventFile === null || eventBytes + lines.length > EVENT_FILE_BYTES) {
+    eventFile = newEventFileName();
+    eventBytes = 0;
+    await rotateOldFiles();
+  }
   eventBytes += lines.length;
   try {
-    await writeTextFile(`${logDir}/${EVENTS_PREFIX}${date}.jsonl`, lines, { append: true });
+    await writeTextFile(`${logDir}/${eventFile}`, lines, { append: true });
   } catch (err) {
     log.error("event flush failed", err);
   }
@@ -117,6 +130,7 @@ function onEventLine(line: string): void {
 /** Delete the events files only (the event log was turned off). */
 async function clearEventFiles(): Promise<void> {
   eventBuffer = [];
+  eventFile = null;
   await writeChain;
   if (!logDir) return;
   try {
@@ -137,11 +151,13 @@ async function attachEventLog(): Promise<void> {
     const eventLog = await import("@lib/diagnostics/eventLog");
     if (!initialized || stopEvents !== null) return;
     for (const line of eventLog.getEventLines()) eventBuffer.push(line);
+    flushDroppedCounts = () => eventLog.flushDroppedCounts();
     const offLine = eventLog.onEventLine(onEventLine);
     const offClear = eventLog.onEventLogCleared(() => void clearEventFiles());
     stopEvents = () => {
       offLine();
       offClear();
+      flushDroppedCounts = null;
       stopEvents = null;
     };
     if (eventBuffer.length > 0) scheduleFlush();

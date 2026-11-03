@@ -96,11 +96,13 @@ at most 30 events a minute; the rest are counted and written once as
 `events.dropped` with the code and count, so a reconnect loop or a flapping
 device cannot push the start of an incident out of the log.
 
-On the desktop and Android the log is also written to a rotating
-`events-<date>.jsonl` file in the client log folder, so it survives a crash.
-The newest 2 days are kept, and a day's file stops growing at 2 MB. The support
-bundle carries these files with the logs. The browser client keeps the log in
-memory only, and its bundle gets `events-memory.jsonl`.
+On the desktop and Android the log is also written to `events-<run start>-<part>.jsonl`
+files in the client log folder, so it survives a crash. Each app run starts a
+new file and a file that reaches 1 MB is closed for the next part, so the
+newest events are always kept; the 4 newest older files are kept besides the
+one being written. The support bundle carries these files with the logs. The
+browser client keeps the log in memory only, and its bundle gets
+`events-memory.jsonl`.
 A setting, **Keep a diagnostic event log** (on by default), clears and stops
 it.
 

@@ -98,33 +98,71 @@ function asked(value: unknown): number | null {
   return null;
 }
 
-function localTrackStarted(pub: LocalTrackPublication, owner: Disposable): void {
-  const media = pub.track?.mediaStreamTrack;
-  const source = sourceOf(pub);
-  if (media === undefined || (source !== "camera" && source !== "microphone")) return;
+function recordStarted(source: "camera" | "microphone", media: MediaStreamTrack): void {
   const settings = media.getSettings();
   const device = settings.deviceId ? reportHash(settings.deviceId) : null;
-  if (source === "camera") {
-    const wanted = media.getConstraints();
-    const facing = settings.facingMode;
-    recordEvent("camera.started", {
-      device,
-      width: num(settings.width),
-      height: num(settings.height),
-      fps: num(settings.frameRate),
-      requested_width: asked(wanted.width),
-      requested_height: asked(wanted.height),
-      requested_fps: asked(wanted.frameRate),
-      facing: facing === "user" || facing === "environment" ? facing : "unknown",
-    });
-    const opts = { signal: owner.signal };
-    media.addEventListener("mute", () => recordEvent("camera.muted", { by: "browser" }), opts);
-    media.addEventListener("unmute", () => recordEvent("camera.unmuted", { by: "browser" }), opts);
-    media.addEventListener("ended", () => recordEvent("camera.ended"), opts);
-  } else {
+  if (source === "microphone") {
     recordEvent("mic.started", { device, sample_rate: num(settings.sampleRate) });
-    media.addEventListener("ended", () => recordEvent("mic.ended"), { signal: owner.signal });
+    return;
   }
+  const wanted = media.getConstraints();
+  const facing = settings.facingMode;
+  recordEvent("camera.started", {
+    device,
+    width: num(settings.width),
+    height: num(settings.height),
+    fps: num(settings.frameRate),
+    requested_width: asked(wanted.width),
+    requested_height: asked(wanted.height),
+    requested_fps: asked(wanted.frameRate),
+    facing: facing === "user" || facing === "environment" ? facing : "unknown",
+  });
+}
+
+/**
+ * Follow a local camera or microphone publication's browser track. The SDK
+ * replaces that track when the camera is turned back on or the device
+ * changes (its "restarted" event), so the listeners move to each new track.
+ */
+function followLocalTrack(pub: LocalTrackPublication, owner: Disposable): void {
+  const track = pub.track;
+  const source = sourceOf(pub);
+  if (track === undefined || (source !== "camera" && source !== "microphone")) return;
+  let current: Disposable | null = null;
+  const wire = (): void => {
+    current?.destroy();
+    current = null;
+    const media = track.mediaStreamTrack;
+    if (media === undefined) return;
+    current = new Disposable();
+    recordStarted(source, media);
+    const opts = { signal: current.signal };
+    if (source === "camera") {
+      media.addEventListener("mute", () => recordEvent("camera.muted", { by: "browser" }), opts);
+      media.addEventListener(
+        "unmute",
+        () => recordEvent("camera.unmuted", { by: "browser" }),
+        opts,
+      );
+      media.addEventListener("ended", () => recordEvent("camera.ended"), opts);
+    } else {
+      media.addEventListener("ended", () => recordEvent("mic.ended"), opts);
+    }
+  };
+  wire();
+  const onRestarted = (): void => {
+    try {
+      wire();
+    } catch {
+      // A diagnostic must never break the track it watches.
+    }
+  };
+  track.on("restarted", onRestarted);
+  owner.addCleanup(() => {
+    track.off("restarted", onRestarted);
+    current?.destroy();
+    current = null;
+  });
 }
 
 type OnRoom = <E extends keyof RoomEventCallbacks>(
@@ -134,16 +172,35 @@ type OnRoom = <E extends keyof RoomEventCallbacks>(
 ) => void;
 
 /** Attach the event-log listeners to a room through the caller's onRoom, so
- *  they are removed with the room's other app listeners. */
-export function attachVoiceEventLog(room: Room, onRoom: OnRoom): void {
+ *  they are removed with the room's other app listeners. Each listener is
+ *  guarded: these run before the app's own handlers and must never throw. */
+export function attachVoiceEventLog(room: Room, onRoomFn: OnRoom): void {
   const owners = new Map<string, Disposable>();
   let reconnectingAt: number | null = null;
   let attempt = 0;
+
+  const onRoom: OnRoom = (target, event, listener) => {
+    const call = listener as (...args: unknown[]) => void;
+    const guarded = (...args: unknown[]): void => {
+      try {
+        call(...args);
+      } catch {
+        // A diagnostic must never stop the app's own handler for this event.
+      }
+    };
+    onRoomFn(target, event, guarded as RoomEventCallbacks[typeof event]);
+  };
 
   const release = (sid: string): void => {
     owners.get(sid)?.destroy();
     owners.delete(sid);
   };
+  const releaseAll = (): void => {
+    for (const sid of owners.keys()) release(sid);
+  };
+  // Outside onRoom on purpose: a room the app abandons loses its app listeners
+  // before it disconnects, and the track listeners must still be released then.
+  room.once?.(RoomEvent.Disconnected, releaseAll);
 
   onRoom(room, RoomEvent.Connected, () => recordEvent("voice.joined"));
   onRoom(room, RoomEvent.SignalReconnecting, () => {
@@ -164,7 +221,7 @@ export function attachVoiceEventLog(room: Room, onRoom: OnRoom): void {
   onRoom(room, RoomEvent.Disconnected, (reason?: DisconnectReason) => {
     const named = disconnectReason(reason);
     recordEvent("voice.disconnected", { reason: named, unexpected: named !== "client_initiated" });
-    for (const sid of owners.keys()) release(sid);
+    releaseAll();
   });
 
   onRoom(room, RoomEvent.LocalTrackPublished, (pub: LocalTrackPublication) => {
@@ -178,7 +235,7 @@ export function attachVoiceEventLog(room: Room, onRoom: OnRoom): void {
     release(pub.trackSid);
     const owner = new Disposable();
     owners.set(pub.trackSid, owner);
-    localTrackStarted(pub, owner);
+    followLocalTrack(pub, owner);
   });
   onRoom(room, RoomEvent.LocalTrackUnpublished, (pub: LocalTrackPublication) => {
     const source = sourceOf(pub);

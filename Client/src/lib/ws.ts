@@ -166,6 +166,9 @@ export function createWsClient({
   let state: ConnectionState = "disconnected";
   // When the current attempt's connect() started, for ws.ready's after_ms.
   let attemptStartedAt = 0;
+  // The generation whose socket opened last, so its close is tagged with it
+  // even after a disconnect() or a newer connect() moved the counter on.
+  let socketGeneration = 0;
   let reconnectAttempt = 0;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
@@ -778,6 +781,7 @@ export function createWsClient({
       lastCseq = 0;
       cancelGapResume();
       connectFailureCode = null;
+      socketGeneration = wsGeneration;
       recordEvent("ws.open", { generation: wsGeneration });
       log.info("WebSocket open, sending auth", {
         host: config?.host ?? "unknown",
@@ -839,7 +843,7 @@ export function createWsClient({
       // it. The pre-auth deadline reads this to name the failure.
       connectFailureCode = retryHint?.errorCode ?? null;
       recordEvent("ws.closed", {
-        generation: wsGeneration,
+        generation: socketGeneration,
         close_class: intentionalClose
           ? "normal"
           : certMismatchBlock

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EVENT_CODES, EVENT_LOG_CAPS, type EventCode } from "./eventCodes";
 import {
   clearEventLog,
+  flushDroppedCounts,
   getEventLines,
   onEventLine,
   onEventLogCleared,
@@ -126,6 +127,16 @@ describe("diagnostic event log", () => {
     const events = getEventLines(T0 + 61_000).map((l) => JSON.parse(l) as Record<string, unknown>);
     expect(events.at(-2)).toMatchObject({ code: "events.dropped", count: 5 });
     expect(events.at(-1)).toMatchObject({ code: "app.network", state: "offline" });
+  });
+
+  it("hands pending drop counts to listeners when asked, without a new event", () => {
+    const lines: string[] = [];
+    onEventLine((line) => lines.push(line));
+    for (let i = 0; i < 40; i++) record("app.network", { state: "online" }, T0 + i);
+    flushDroppedCounts(T0 + 100);
+    expect(JSON.parse(lines.at(-1)!)).toMatchObject({ code: "events.dropped", count: 10 });
+    flushDroppedCounts(T0 + 200);
+    expect(lines.filter((l) => l.includes("events.dropped"))).toHaveLength(1);
   });
 
   it("keeps at most the event cap, oldest dropped first", () => {
