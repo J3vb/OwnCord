@@ -4,6 +4,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -172,4 +173,46 @@ func TestTransferDeadline_ShutdownLeavesOtherServersAlone(t *testing.T) {
 func serverOf(r *http.Request) *http.Server {
 	srv, _ := r.Context().Value(http.ServerContextKey).(*http.Server)
 	return srv
+}
+
+// TestTransferDeadline_ShutdownCutAnswers503: an upload still moving when the
+// shutdown grace runs out is told the server is going away, not that the file
+// was too big for the link.
+func TestTransferDeadline_ShutdownCutAnswers503(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		d := startTransfer(w, r, time.Second, time.Minute)
+		defer d.release()
+		d.touch()
+		time.AfterFunc(50*time.Millisecond, shutdownTransfers(serverOf(r), 100*time.Millisecond))
+		_, err := io.Copy(io.Discard, progressReader{r: r.Body, d: d})
+		if !writeTransferTimedOut(w, err, "test upload") {
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	defer srv.Close()
+
+	pr, pw := io.Pipe()
+	defer pr.Close()
+	go func() {
+		for stop := time.Now().Add(3 * time.Second); time.Now().Before(stop); {
+			if _, err := pw.Write(make([]byte, 512)); err != nil {
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		_ = pw.Close()
+	}()
+	req, err := http.NewRequest(http.MethodPost, srv.URL, pr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("shutdown-cut upload got no answer: %v", err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusServiceUnavailable || !strings.Contains(string(raw), "SERVER_SHUTTING_DOWN") {
+		t.Fatalf("shutdown-cut upload = %d %s, want 503 SERVER_SHUTTING_DOWN", resp.StatusCode, raw)
+	}
 }

@@ -84,6 +84,7 @@ const (
 	CodeStorageQuotaExceeded Code = "STORAGE_QUOTA_EXCEEDED"
 	CodeTimedOut             Code = "TIMED_OUT"
 	CodeTOTPAlreadyEnabled   Code = "TOTP_ALREADY_ENABLED"
+	CodeTransferTimedOut     Code = "TRANSFER_TIMED_OUT"
 	CodeUnauthorized         Code = "UNAUTHORIZED"
 	// Diagnostics could not be collected, or the export could not be recorded.
 	// SERVICE_UNAVAILABLE is the general form.

@@ -51,6 +51,8 @@ func adminSetupOptions(cfg *config.Config, rt Runtime, importer admin.DiscordImp
 			UploadBytes: uploadBytes,
 			Started:     serverStartTime,
 			SlowRoutes:  slow,
+
+			MaxWSConnections: cfg.Server.MaxWSConnections,
 		},
 	}
 	// Only a real store: a typed nil pointer would make a non-nil interface.

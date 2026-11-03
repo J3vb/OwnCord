@@ -28,6 +28,8 @@ use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::OnceLock;
 
+use crate::crash_line::{put_timestamp, Writer};
+
 /// Crash signals: always handled, then handed back.
 const FATAL: usize = 6;
 const SIGNALS: [(c_int, &str); 10] = [
@@ -169,10 +171,7 @@ extern "C" fn on_fatal_signal(signal: c_int, info: *mut libc::siginfo_t, _: *mut
 /// read, 0 when it is gone. Async-signal-safe: open/read/close only.
 fn read_comm(pid: libc::pid_t, out: &mut [u8; 16]) -> usize {
     let mut path = [0u8; 32];
-    let mut w = Writer {
-        buf: &mut path,
-        len: 0,
-    };
+    let mut w = Writer::new(&mut path);
     w.put(b"/proc/");
     w.num(pid.into(), 1);
     w.put(b"/comm\0");
@@ -189,38 +188,6 @@ fn read_comm(pid: libc::pid_t, out: &mut [u8; 16]) -> usize {
     }
 }
 
-/// Writes `[YYYY-MM-DD][HH:MM:SS]` (UTC), the log plugin's timestamp.
-fn put_timestamp(w: &mut Writer<'_>, unix_secs: i64) {
-    let (date, time) = (unix_secs.div_euclid(86_400), unix_secs.rem_euclid(86_400));
-    let (year, month, day) = civil_from_days(date);
-    w.put(b"[");
-    w.num(year, 4);
-    w.put(b"-");
-    w.num(month, 2);
-    w.put(b"-");
-    w.num(day, 2);
-    w.put(b"][");
-    w.num(time / 3600, 2);
-    w.put(b":");
-    w.num(time / 60 % 60, 2);
-    w.put(b":");
-    w.num(time % 60, 2);
-    w.put(b"]");
-}
-
-/// `unix_secs` as `YYYY-MM-DD HH:MM:SS UTC`, for lines that read back a time.
-pub fn utc(unix_secs: i64) -> String {
-    let mut buf = [0u8; 32];
-    let mut w = Writer {
-        buf: &mut buf,
-        len: 0,
-    };
-    put_timestamp(&mut w, unix_secs);
-    let len = w.len;
-    let text = String::from_utf8_lossy(&buf[1..len - 1]).into_owned();
-    format!("{} UTC", text.replace("][", " "))
-}
-
 /// One log line in the log plugin's format (UTC):
 /// `[YYYY-MM-DD][HH:MM:SS][target][ERROR] message`. No allocation: this runs
 /// in signal context. Returns the length written.
@@ -234,7 +201,7 @@ fn format_line(
     let index = SIGNALS.iter().position(|(s, _)| *s == signal);
     let name = index.map_or("signal", |i| SIGNALS[i].1);
     let fatal = index.is_some_and(|i| i < FATAL);
-    let mut w = Writer { buf, len: 0 };
+    let mut w = Writer::new(buf);
     put_timestamp(&mut w, unix_secs);
     if fatal {
         w.put(b"[owncord_client_lib::crash_log][ERROR] [crash] fatal signal ");
@@ -264,52 +231,7 @@ fn format_line(
         }
     }
     w.put(b"\n");
-    w.len
-}
-
-/// Days since 1970-01-01 to a proleptic Gregorian (year, month, day).
-fn civil_from_days(days: i64) -> (i64, i64, i64) {
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z.rem_euclid(146_097);
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let day = doy - (153 * mp + 2) / 5 + 1;
-    let month = if mp < 10 { mp + 3 } else { mp - 9 };
-    let year = yoe + era * 400 + i64::from(month <= 2);
-    (year, month, day)
-}
-
-/// Appends to a fixed buffer, silently truncating.
-struct Writer<'a> {
-    buf: &'a mut [u8],
-    len: usize,
-}
-
-impl Writer<'_> {
-    fn put(&mut self, bytes: &[u8]) {
-        let n = bytes.len().min(self.buf.len() - self.len);
-        self.buf[self.len..self.len + n].copy_from_slice(&bytes[..n]);
-        self.len += n;
-    }
-
-    /// `value` in decimal, zero-padded to `width` digits.
-    fn num(&mut self, value: i64, width: usize) {
-        let mut digits = [0u8; 20];
-        let mut v = value.unsigned_abs();
-        let mut n = 0;
-        while v > 0 || n < width {
-            digits[n] = b'0' + (v % 10) as u8;
-            v /= 10;
-            n += 1;
-        }
-        if value < 0 {
-            self.put(b"-");
-        }
-        digits[..n].reverse();
-        self.put(&digits[..n]);
-    }
+    w.len()
 }
 
 /// Xlib's `XErrorEvent`.
@@ -516,11 +438,6 @@ mod tests {
         let n = read_comm(unsafe { libc::getpid() }, &mut comm);
         assert!(n > 0);
         assert_eq!(read_comm(i32::MAX, &mut comm), 0);
-    }
-
-    #[test]
-    fn utc_reads_like_the_log() {
-        assert_eq!(utc(1_790_958_439), "2026-10-02 16:27:19 UTC");
     }
 
     /// Runs only as the child of `a_terminate_is_logged_with_its_sender`.

@@ -61,7 +61,9 @@ and only when it changes something a contributor or fork holder must do
 - While you are in a DM call, that person's avatar stays in the server rail under Home with a green call badge, so you can see the call and get back to it in one click from any server.
 - On a phone, the "+" in the message box now opens a sheet with Take photo, Gallery and Files, so you can take a photo with the camera and send it straight away, or pick several photos and videos from the gallery. On a computer "+" still opens the file picker.
 - The DM profile panel on a computer now also shows the person's @username (under a nickname) and custom status, and has a Report button.
+- Admin panel: a new **System health** page (Operations, for anyone with View Diagnostics) shows connections, message-delivery timings, the database (file and log size, schema, reader and writer waits), voice and the server process on one page, refreshed every 5 seconds. Each card lists the Dashboard warnings that belong to it, and **Copy for support** copies the same health figures a support bundle carries. If the database does not answer within 2 seconds its card says so and the rest of the page still loads.
 - On Linux, after the app closes unexpectedly, the next start adds what the system recorded about it (the crash report from `coredumpctl` and the kernel's crash line, where the system keeps them) to the app's log, so a support bundle shows what crashed. Nothing extra needs to be installed; without those tools it is skipped. The log also notes whether the camera or a screen share was running.
+- On Windows, the app's log (and so the support bundle) now says why the last run ended: a crash names the error and the file it happened in, a run that Windows closed as not responding or that was ended in Task Manager shows up on the next start with its last memory and freeze state, and a crash or restart of WebView2's page, graphics or camera process is logged with what it caused. Nothing is sent anywhere; it stays in the log until you save a support bundle.
 - On Android 11 and newer, the next start adds to the app's log how the previous run ended (crash, killed for memory, not responding, stopped by you or by the system). The log also notes an app crash, the web view's page process going away, the call keeping alive in the background, and the app moving to the background and back, so a support bundle shows what happened. No message text, links or names are written.
 
 ### Fixed
@@ -82,9 +84,11 @@ and only when it changes something a contributor or fork holder must do
 
 - Clicking a channel right after a new message arrived sometimes opened the channel below it: a Mark Server as Read icon appeared in the header and pushed the channel list down. The icon is gone, so the list no longer moves; Mark as Read stays in the server name menu and on Shift+Esc.
 - A forwarded file could, rarely, lose its contents to the server's 15-minute storage cleanup in the moment before the forward was saved, and then show as missing. The cleanup now leaves it alone.
+- An upload that stalled for 30 seconds was cut with no answer, so it looked like the server was down. The server now answers `408 TRANSFER_TIMED_OUT`, and its time limit grows with the upload limit (about 27 minutes at 100 MB, up to an hour; the desktop app still stops at 10 minutes for now). Avatar, banner and group-icon uploads no longer fail on a slow link after 30 seconds.
 
 ### Under the hood
 
+- `GET /api/v1/server-info` now reports `upload.transfer_lifetime_seconds`, so a client can wait longer than the server before giving up on an upload.
 - Database change 090: three indexes for attachment lookups. The first start after the update builds them, which takes a little longer on a large database.
 - The storage cleanup, the admin Storage page's leftover scan and the orphaned-upload sweep look files up by index: about 19 s down to 0.3 s per pass at 100,000 files, so the leftover scan no longer answers "server busy" on a big upload folder.
 

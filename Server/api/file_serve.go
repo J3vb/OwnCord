@@ -231,10 +231,17 @@ func fileModTime(f storage.File) time.Time {
 func serveFileContent(w http.ResponseWriter, r *http.Request, aa *db.AttachmentAccess, mimeType string, modTime time.Time, content io.ReadSeeker, allowedOrigins []string) {
 	// A download longer than the global 30 s WriteTimeout is truncated with no
 	// error. Wrap the writer so every chunk that lands pushes the write deadline
-	// out; a stalled peer is abandoned after transferProgressTimeout and any
-	// download closes after transferMaxLifetime.
-	deadlines := newTransferDeadline(w, r)
+	// out; a stalled peer is abandoned after transferProgressTimeout and a
+	// download closes after the lifetime its file size earns. A cut download
+	// has no way to answer: net/http closes the connection and the client sees
+	// fewer bytes than Content-Length.
+	deadlines := newTransferDeadline(w, r, aa.Size)
 	defer deadlines.release()
+	defer func() {
+		if deadlines.timedOut() {
+			slog.Info("file download cut by the transfer deadline", "id", aa.ID)
+		}
+	}()
 	deadlines.touch()
 	w = progressWriter{ResponseWriter: w, d: deadlines}
 

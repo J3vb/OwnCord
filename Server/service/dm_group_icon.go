@@ -14,7 +14,7 @@ import (
 // bytes are read or stored: the caller is a member (anyone else learns
 // nothing: not found), is not timed out, and the channel is a group (a 1:1
 // answers 400).
-func (s *DMService) AuthorizeGroupIcon(ctx context.Context, userID, channelID int64) error {
+func (s *groupManagement) AuthorizeGroupIcon(ctx context.Context, userID, channelID int64) error {
 	return s.requireGroupActor(ctx, userID, channelID)
 }
 
@@ -25,7 +25,7 @@ func (s *DMService) AuthorizeGroupIcon(ctx context.Context, userID, channelID in
 // not found and nothing is written; the caller then drops the file it stored.
 // The last committed change wins: each call replaces whatever icon the group
 // has when its transaction runs.
-func (s *DMService) SetGroupIcon(ctx context.Context, userID, channelID int64, iconID *string) (*GroupChangeResult, error) {
+func (s *groupManagement) SetGroupIcon(ctx context.Context, userID, channelID int64, iconID *string) (*GroupChangeResult, error) {
 	ctx, done := traceCall(ctx, "service/dm", "DMService.SetGroupIcon",
 		telemetry.Int64("user_id", userID),
 		telemetry.Int64("channel_id", channelID),
