@@ -127,6 +127,13 @@ the accepted cost.
 | screenshare on | Screen tile; a stop-share affordance always visible                                                                                                                                                                                                                                    |
 | speaking       | Green ring on the speaking user's tile/avatar, and on your own user-panel avatar (your own: the input-sensitivity gate when one runs; others: LiveKit ActiveSpeakers, held 200 ms after they drop out; a mute or disconnect clears it at once, and leaving a channel clears its rings) |
 
+**DM call panel on a phone** (`features/direct-messages/DmCallPanel.ts`,
+`styles/app/dm-call.css`): the open call is the call view and takes the chat
+column, as a guild call's grid does. Back or Collapse turns it into a one-row
+call bar above the chat (Mute, Leave, Expand); reopening the DM opens the call
+view again. On a computer the panel keeps its resizable height and the
+collapsed choice survives a DM switch.
+
 **Video tiles** (`components/VideoGrid.ts`, in guild voice and DM calls alike):
 each tile is a button (click, Enter, Space) that opens it in focus view, with a
 filmstrip for the rest and **Back to grid** to leave. Screen shares carry a
