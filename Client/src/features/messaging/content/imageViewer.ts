@@ -67,6 +67,8 @@ export interface LightboxHandle {
   setCurrent(current: LightboxCurrent): void;
   /** Resets zoom and pan and ends a drag in progress. */
   resetView(): void;
+  /** What a sideways swipe at 1x does: 1 is the next image, -1 the previous. */
+  onSwipeStep(step: (direction: 1 | -1) => void): void;
   closeMenu(): void;
   /** True while the image menu is open; it owns the arrow keys. */
   isImageMenuOpen(): boolean;
@@ -366,7 +368,13 @@ export function openImageLightbox(
   // Use a Disposable for cleanup of document-level listeners to prevent leaks
   const disposable = new Disposable();
   // Pinch and drag on a touch screen, where the page itself does not zoom.
-  bindTouchZoom(overlay, view, disposable.signal);
+  // At 1x a swipe up or down closes; a sideways one steps once the gallery
+  // has loaded (a single image has nothing to step to).
+  let swipeStep: ((direction: 1 | -1) => void) | null = null;
+  bindTouchZoom(overlay, view, disposable.signal, {
+    step: (direction) => swipeStep?.(direction),
+    close,
+  });
 
   // One path for the menu's Save Image and Share Image and the Download (or
   // Save and Share) buttons. It reads the current image once, at the click,
@@ -484,6 +492,9 @@ export function openImageLightbox(
         current = next;
       },
       resetView: () => view.reset(),
+      onSwipeStep: (step) => {
+        swipeStep = step;
+      },
       closeMenu: () => imageMenuModule?.closeImageMenu(),
       // The menu's own class (image-menu.ts MENU_CLASS): asked of the DOM so it
       // holds even before the lazy menu module has loaded.

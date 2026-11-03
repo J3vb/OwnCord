@@ -156,15 +156,52 @@ export function createZoomPan(opts: ZoomPanOptions): ZoomPan {
   };
 }
 
+/** A one-finger swipe at 1x this far sideways steps to the next picture. */
+export const SWIPE_STEP = 60;
+/** A one-finger swipe at 1x this far up or down closes the viewer. */
+export const SWIPE_CLOSE = 80;
+/** A swipe counts along one axis only when it moved this many times further
+ *  along it than across it; a diagonal does nothing. */
+const SWIPE_RATIO = 1.5;
+
+/** What a one-finger swipe does while the view is not zoomed in. */
+export interface TouchSwipe {
+  /** Sideways: 1 for a swipe to the left (the next picture), -1 to the right. */
+  readonly step?: (direction: 1 | -1) => void;
+  /** Up or down. */
+  readonly close?: () => void;
+}
+
 /**
  * Touch screens have no wheel or mouse drag: two fingers on `target` pinch
  * the view towards their midpoint, and one finger pans it once zoomed in.
+ * At 1x a one-finger swipe goes to `swipe` instead: sideways steps, up or
+ * down closes. A gesture that ever had a second finger is no swipe.
  * The element needs `touch-action: none` so the browser leaves the fingers
  * to this.
  */
-export function bindTouchZoom(target: HTMLElement, view: ZoomPan, signal: AbortSignal): void {
+export function bindTouchZoom(
+  target: HTMLElement,
+  view: ZoomPan,
+  signal: AbortSignal,
+  swipe?: TouchSwipe,
+): void {
   const fingers = new Map<number, { x: number; y: number }>();
   let pinch: { distance: number; scale: number } | null = null;
+  // The finger a swipe may come from; null once a second finger joins.
+  let swipeStart: { id: number; x: number; y: number } | null = null;
+
+  const endSwipe = (e: PointerEvent): void => {
+    const start = swipeStart;
+    swipeStart = null;
+    if (start === null || start.id !== e.pointerId || view.scale > PAN_MIN_SCALE) return;
+    const dx = e.clientX - start.x;
+    const dy = e.clientY - start.y;
+    const across = Math.abs(dx);
+    const along = Math.abs(dy);
+    if (across >= SWIPE_STEP && across > along * SWIPE_RATIO) swipe?.step?.(dx < 0 ? 1 : -1);
+    else if (along >= SWIPE_CLOSE && along > across * SWIPE_RATIO) swipe?.close?.();
+  };
 
   const pair = (): [{ x: number; y: number }, { x: number; y: number }] | null => {
     const [a, b] = [...fingers.values()];
@@ -177,6 +214,10 @@ export function bindTouchZoom(target: HTMLElement, view: ZoomPan, signal: AbortS
       if (e.pointerType !== "touch") return;
       fingers.set(e.pointerId, { x: e.clientX, y: e.clientY });
       target.setPointerCapture?.(e.pointerId);
+      swipeStart =
+        fingers.size === 1 && view.scale <= PAN_MIN_SCALE
+          ? { id: e.pointerId, x: e.clientX, y: e.clientY }
+          : null;
       const both = pair();
       if (fingers.size === 2 && both !== null) {
         const distance = Math.hypot(both[0].x - both[1].x, both[0].y - both[1].y);
@@ -205,12 +246,26 @@ export function bindTouchZoom(target: HTMLElement, view: ZoomPan, signal: AbortS
     },
     { signal },
   );
-  const lift = (e: PointerEvent): void => {
-    if (!fingers.delete(e.pointerId)) return;
+  const lift = (e: PointerEvent): boolean => {
+    if (!fingers.delete(e.pointerId)) return false;
     if (fingers.size < 2) pinch = null;
+    return true;
   };
-  target.addEventListener("pointerup", lift, { signal });
-  target.addEventListener("pointercancel", lift, { signal });
+  target.addEventListener(
+    "pointerup",
+    (e) => {
+      if (lift(e) && fingers.size === 0) endSwipe(e);
+    },
+    { signal },
+  );
+  target.addEventListener(
+    "pointercancel",
+    (e) => {
+      lift(e);
+      swipeStart = null;
+    },
+    { signal },
+  );
 }
 
 /** Presses on the host's own controls never pan; the tile's select button
