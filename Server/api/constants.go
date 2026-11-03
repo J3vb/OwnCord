@@ -79,6 +79,12 @@ const (
 	// once; change the two together.
 	maxConcurrentUploadsPerUser = 10
 
+	// maxConcurrentImageUploadsPerUser caps one user's in-flight avatar, banner
+	// or group-icon uploads on each route. Each parses its multipart body into
+	// memory under a transfer deadline that can run for minutes on a slow link,
+	// and one at a time is all a person needs.
+	maxConcurrentImageUploadsPerUser = 2
+
 	// emojiUploadRateLimitPerMinute (per MANAGE_SERVER holder) is lower than the
 	// attachment limit: every accepted upload fans an emoji_update out to every
 	// connected session.

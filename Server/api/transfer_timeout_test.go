@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -37,6 +38,8 @@ func startTransferServer(t *testing.T, h http.Handler) *httptest.Server {
 	return srv
 }
 
+// postStalled and postSlow return the response for the caller to close.
+
 // postStalled sends the first sendBytes of body, declares the full length, and
 // then sends nothing more, returning the server's answer.
 func postStalled(t *testing.T, url, token, contentType string, body []byte, sendBytes int) *http.Response {
@@ -57,7 +60,6 @@ func postStalled(t *testing.T, url, token, contentType string, body []byte, send
 	if err != nil {
 		t.Fatalf("stalled upload got no answer: %v", err)
 	}
-	t.Cleanup(func() { _ = resp.Body.Close() })
 	return resp
 }
 
@@ -76,7 +78,6 @@ func postSlow(t *testing.T, url, token, contentType string, body []byte) *http.R
 	if err != nil {
 		t.Fatalf("slow upload cut: %v", err)
 	}
-	t.Cleanup(func() { _ = resp.Body.Close() })
 	return resp
 }
 
@@ -141,6 +142,7 @@ func TestUpload_StalledBodyAnswers408TransferTimedOut(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			start := time.Now()
 			resp := postStalled(t, srv.URL+"/api/v1/uploads", token, contentType, body.Bytes(), tc.sent)
+			defer resp.Body.Close()
 			assertTransferTimedOut(t, resp)
 			if elapsed := time.Since(start); elapsed < testTransferIdle {
 				t.Fatalf("answered after %v, before the %v idle rule", elapsed, testTransferIdle)
@@ -185,6 +187,7 @@ func TestProfileImageUploads_SlowProgressingBodySurvivesRequestTimeout(t *testin
 			srv := startTransferServer(t, route.handler)
 			body, contentType := paddedImageForm(t, makePNGBytes(t, 64, 64), 48<<10)
 			resp := postSlow(t, srv.URL+route.path, route.token, contentType, body)
+			defer resp.Body.Close()
 			if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 				raw, _ := io.ReadAll(resp.Body)
 				t.Fatalf("slow %s upload status = %d; body: %s", route.name, resp.StatusCode, raw)
@@ -200,6 +203,7 @@ func TestProfileImageUploads_StalledBodyAnswers408TransferTimedOut(t *testing.T)
 			srv := startTransferServer(t, route.handler)
 			body, contentType := paddedImageForm(t, makePNGBytes(t, 64, 64), 48<<10)
 			resp := postStalled(t, srv.URL+route.path, route.token, contentType, body, 8<<10)
+			defer resp.Body.Close()
 			assertTransferTimedOut(t, resp)
 		})
 	}
@@ -271,5 +275,45 @@ func TestServeFile_StalledClientClosesWithContentLengthMismatch(t *testing.T) {
 	got, err := io.ReadAll(resp.Body)
 	if !errors.Is(err, io.ErrUnexpectedEOF) {
 		t.Fatalf("after the stall: read %d more bytes, err = %v; want the body cut short (unexpected EOF)", len(got), err)
+	}
+}
+
+// TestUploadAvatar_InFlightUploadsPerUserCapped: a slow avatar upload now
+// lives for minutes, so one user may hold only two at a time; a third is
+// refused before any of its body is read.
+func TestUploadAvatar_InFlightUploadsPerUserCapped(t *testing.T) {
+	database := newUploadTestDB(t)
+	store := newUploadTestStorage(t)
+	router := buildAvatarRouter(database, store)
+	token := uploadCreateToken(t, database, "busy-avatar", 4)
+	raw, contentType := paddedImageForm(t, makePNGBytes(t, 8, 8), 1<<10)
+
+	done := make(chan *httptest.ResponseRecorder, 2)
+	for range 2 {
+		pr, pw := io.Pipe()
+		t.Cleanup(func() { _ = pw.CloseWithError(io.ErrUnexpectedEOF) })
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/users/me/avatar", pr)
+		req.Header.Set("Content-Type", contentType)
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.RemoteAddr = "127.0.0.1:9999"
+		go func() {
+			rr := httptest.NewRecorder()
+			router.ServeHTTP(rr, req)
+			done <- rr
+		}()
+		// The write returns once the handler has read it: the upload holds its slot.
+		if _, err := pw.Write(raw[:len(raw)/2]); err != nil {
+			t.Fatalf("holding upload: %v", err)
+		}
+	}
+
+	rr := doAvatarUpload(t, router, token, "third.png", makePNGBytes(t, 8, 8))
+	if rr.Code != http.StatusTooManyRequests || !strings.Contains(rr.Body.String(), "in progress") {
+		t.Fatalf("third concurrent avatar upload = %d %s, want 429", rr.Code, rr.Body.String())
+	}
+	select {
+	case rr := <-done:
+		t.Fatalf("a held upload ended early: %d %s", rr.Code, rr.Body.String())
+	default:
 	}
 }

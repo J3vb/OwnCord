@@ -20,6 +20,7 @@ import (
 // handleUploadGroupIcon processes POST /api/v1/dms/{channelId}/icon
 // (multipart: `file`). Any member may set the icon of a group DM.
 func handleUploadGroupIcon(svc *service.Services, broadcaster DMBroadcaster, store FileStore, limiter *auth.RateLimiter) http.HandlerFunc {
+	slots := newUploadSlots(maxConcurrentImageUploadsPerUser)
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := requireUser(w, r)
 		if !ok {
@@ -33,6 +34,11 @@ func handleUploadGroupIcon(svc *service.Services, broadcaster DMBroadcaster, sto
 			writeErr(w, http.StatusTooManyRequests, httperr.CodeRateLimited, "icon upload rate limit exceeded, try again later")
 			return
 		}
+		if !slots.acquire(user.ID) {
+			writeErr(w, http.StatusTooManyRequests, httperr.CodeRateLimited, "icon upload already in progress, wait for it to finish")
+			return
+		}
+		defer slots.release(user.ID)
 		// Membership, group-ness and timeout are decided before any byte is
 		// read or stored, so a non-member or a 1:1 costs nothing.
 		if err := svc.DMs.AuthorizeGroupIcon(r.Context(), user.ID, channelID); err != nil {

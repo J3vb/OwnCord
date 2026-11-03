@@ -47,6 +47,10 @@ var transferProgressTimeout = 30 * time.Second
 // whatever wraps it (the multipart parser, storage.Save).
 var errTransferTimedOut = errors.New("transfer deadline passed")
 
+// errTransferShutdown marks a body read cut because the server began shutting
+// down, so the uploader is told to retry rather than to send a smaller file.
+var errTransferShutdown = errors.New("transfer cut by server shutdown")
+
 // transferLifetimeFor is the total lifetime of a transfer of size bytes: the
 // time it takes at transferSlowestRate, clamped to [transferMinLifetime,
 // transferMaxLifetime].
@@ -97,6 +101,8 @@ type transferDeadline struct {
 	mu      syncutil.Mutex
 	until   time.Time
 	expired bool
+	// shutdown is set once a server shutdown has lowered until.
+	shutdown bool
 }
 
 // newTransferDeadline starts the deadlines of a transfer of up to size bytes;
@@ -127,6 +133,7 @@ func startTransfer(w http.ResponseWriter, r *http.Request, timeout, lifetime tim
 	inFlight.mu.Lock()
 	if cutoff, closing := inFlight.closing[srv]; closing && srv != nil && cutoff.Before(d.until) {
 		d.until = cutoff
+		d.shutdown = true
 	}
 	inFlight.set[d] = struct{}{}
 	inFlight.mu.Unlock()
@@ -144,6 +151,7 @@ func (d *transferDeadline) capAt(cutoff time.Time) {
 	defer d.mu.Unlock()
 	if cutoff.Before(d.until) {
 		d.until = cutoff
+		d.shutdown = true
 	}
 	d.arm()
 }
@@ -169,18 +177,19 @@ func (d *transferDeadline) arm() {
 	_ = d.ctl.SetWriteDeadline(deadline)
 }
 
-// expire records that the deadline cut the transfer. Progress no longer
-// re-arms anything; the write deadline moves to now+transferTimedOutWriteGrace
-// so an upload handler can still deliver its 408 (a download has nothing left
-// to say and its connection closes).
-func (d *transferDeadline) expire() {
+// expire records that the deadline cut the transfer and reports whether a
+// server shutdown had lowered it. Progress no longer re-arms anything; the
+// write deadline moves to now+transferTimedOutWriteGrace so an upload handler
+// can still deliver its answer (a download has nothing left to say and its
+// connection closes).
+func (d *transferDeadline) expire() (byShutdown bool) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if d.expired {
-		return
+	if !d.expired {
+		d.expired = true
+		_ = d.ctl.SetWriteDeadline(time.Now().Add(transferTimedOutWriteGrace))
 	}
-	d.expired = true
-	_ = d.ctl.SetWriteDeadline(time.Now().Add(transferTimedOutWriteGrace))
+	return d.shutdown
 }
 
 // timedOut reports whether the deadline cut the transfer.
@@ -191,8 +200,15 @@ func (d *transferDeadline) timedOut() bool {
 }
 
 // writeTransferTimedOut answers 408 TRANSFER_TIMED_OUT when err is a body read
-// the transfer deadline cut, reporting whether it did.
+// the transfer deadline cut (503 SERVER_SHUTTING_DOWN when a shutdown cut it),
+// reporting whether it answered.
 func writeTransferTimedOut(w http.ResponseWriter, err error, what string) bool {
+	if errors.Is(err, errTransferShutdown) {
+		slog.Info("upload cut by server shutdown", "upload", what, "error", err)
+		writeErr(w, http.StatusServiceUnavailable, httperr.CodeServerShuttingDown,
+			"the server is restarting; try the upload again in a moment")
+		return true
+	}
 	if !errors.Is(err, errTransferTimedOut) {
 		return false
 	}
@@ -212,12 +228,14 @@ type progressReader struct {
 
 func (p progressReader) Read(b []byte) (int, error) {
 	n, err := p.r.Read(b)
+	if err != nil && errors.Is(err, os.ErrDeadlineExceeded) {
+		if p.d.expire() {
+			return n, fmt.Errorf("%w: %w", errTransferShutdown, err)
+		}
+		return n, fmt.Errorf("%w: %w", errTransferTimedOut, err)
+	}
 	if n > 0 {
 		p.d.touch()
-	}
-	if err != nil && errors.Is(err, os.ErrDeadlineExceeded) {
-		p.d.expire()
-		return n, fmt.Errorf("%w: %w", errTransferTimedOut, err)
 	}
 	return n, err
 }
@@ -246,14 +264,20 @@ func (p progressWriter) Write(b []byte) (int, error) {
 // this wrapper.
 func (p progressWriter) Unwrap() http.ResponseWriter { return p.ResponseWriter }
 
-// uploadSlots counts each user's in-flight uploads against
-// maxConcurrentUploadsPerUser, bounding one member's reserved headroom to that
-// many times the per-file cap (the 30 s whole-request timeout used to bound it
-// implicitly). It lives here beside the transfer-deadline machinery to keep
-// upload_handler.go under the file-size invariant.
+// uploadSlots counts each user's in-flight uploads on one route against max
+// (maxConcurrentUploadsPerUser for attachments), bounding one member's reserved
+// headroom and parse buffers to that many transfers (the 30 s whole-request
+// timeout used to bound it implicitly). It lives here beside the
+// transfer-deadline machinery to keep upload_handler.go under the file-size
+// invariant.
 type uploadSlots struct {
-	mu syncutil.Mutex
-	n  map[int64]int
+	mu  syncutil.Mutex
+	n   map[int64]int
+	max int
+}
+
+func newUploadSlots(maxPerUser int) *uploadSlots {
+	return &uploadSlots{n: make(map[int64]int), max: maxPerUser}
 }
 
 // acquire takes a slot for userID, reporting false at the per-user cap. Callers
@@ -261,7 +285,7 @@ type uploadSlots struct {
 func (s *uploadSlots) acquire(userID int64) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.n[userID] >= maxConcurrentUploadsPerUser {
+	if s.n[userID] >= s.max {
 		return false
 	}
 	s.n[userID]++

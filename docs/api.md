@@ -2774,7 +2774,10 @@ sends no byte for 30 seconds, or runs past its lifetime, is refused with
 cap at 64 KiB/s, kept between 10 and 60 minutes (about 27 minutes for the 100
 MiB default); `upload.transfer_lifetime_seconds` in
 [`GET /api/v1/server-info`](#get-apiv1server-info) reports it. Avatar, banner
-and group-icon uploads follow the same rules. A download is held to the same
+and group-icon uploads follow the same rules, with at most two in flight per
+user on each of those routes (`429 RATE_LIMITED` beyond that). An upload cut
+because the server is shutting down gets `503 SERVER_SHUTTING_DOWN` instead;
+retry it. A download is held to the same
 idle rule and a lifetime sized from its file; one cut short has no answer to
 give, so its body ends before `Content-Length`.
 

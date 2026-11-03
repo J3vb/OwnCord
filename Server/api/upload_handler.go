@@ -211,7 +211,7 @@ func handleDiscardUpload(uploads *service.UploadService, store FileStore) http.H
 }
 
 func handleUpload(uploads *service.UploadService, store FileStore, limiter *auth.RateLimiter) http.HandlerFunc {
-	slots := &uploadSlots{n: make(map[int64]int)}
+	slots := newUploadSlots(maxConcurrentUploadsPerUser)
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := requireUser(w, r)
 		if !ok {

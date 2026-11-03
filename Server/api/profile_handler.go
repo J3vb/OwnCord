@@ -648,6 +648,7 @@ func handleUploadAvatar(
 	limiter *auth.RateLimiter,
 	broadcaster ProfileBroadcaster,
 ) http.HandlerFunc {
+	slots := newUploadSlots(maxConcurrentImageUploadsPerUser)
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := requireUser(w, r)
 		if !ok {
@@ -658,6 +659,11 @@ func handleUploadAvatar(
 			writeErr(w, http.StatusTooManyRequests, httperr.CodeRateLimited, "avatar upload rate limit exceeded, try again later")
 			return
 		}
+		if !slots.acquire(user.ID) {
+			writeErr(w, http.StatusTooManyRequests, httperr.CodeRateLimited, "avatar upload already in progress, wait for it to finish")
+			return
+		}
+		defer slots.release(user.ID)
 
 		// Bound the body before the multipart parser: the route has MaxBodySize
 		// too, but the parser is what turns an unbounded body into heap. The
