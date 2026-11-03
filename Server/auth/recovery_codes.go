@@ -3,6 +3,7 @@ package auth
 import (
 	"crypto/rand"
 	"fmt"
+	"io"
 	"strings"
 
 	"golang.org/x/crypto/bcrypt"
@@ -16,8 +17,8 @@ import (
 const (
 	recoveryCodeCount = 10
 	// recoveryCodeLen is the number of alphabet symbols per code: ten symbols
-	// from a 32-symbol alphabet is 50 bits, and the bcrypt work factor below
-	// is what makes a database dump useless against them offline.
+	// from the 31-symbol alphabet is about 49.5 bits, and the bcrypt work
+	// factor below is what makes a database dump useless against them offline.
 	recoveryCodeLen = 10
 	// recoveryCodeAlphabet omits 0/O and 1/I/L so a code read back from paper
 	// cannot be mistyped by shape; digits and letters mix freely.
@@ -36,16 +37,16 @@ func GenerateRecoveryCodes() (codes []string, hashes []string, err error) {
 	codes = make([]string, 0, recoveryCodeCount)
 	hashes = make([]string, 0, recoveryCodeCount)
 	for range recoveryCodeCount {
-		raw := make([]byte, recoveryCodeLen)
-		if _, err := rand.Read(raw); err != nil {
+		symbols, err := recoveryCodeSymbols(rand.Reader, recoveryCodeLen)
+		if err != nil {
 			return nil, nil, fmt.Errorf("GenerateRecoveryCodes: %w", err)
 		}
 		var b strings.Builder
-		for i, r := range raw {
+		for i, c := range symbols {
 			if i == recoveryCodeLen/2 {
 				b.WriteByte('-')
 			}
-			b.WriteByte(recoveryCodeAlphabet[int(r)%len(recoveryCodeAlphabet)])
+			b.WriteByte(c)
 		}
 		code := b.String()
 		canonical, _ := NormalizeRecoveryCode(code)
@@ -57,6 +58,34 @@ func GenerateRecoveryCodes() (codes []string, hashes []string, err error) {
 		hashes = append(hashes, string(h))
 	}
 	return codes, hashes, nil
+}
+
+// recoveryCodeSampleLimit is the largest multiple of the alphabet size that
+// fits in a byte. Bytes at or above it are thrown away, so every byte that is
+// kept maps onto the same number of symbols and each symbol is equally likely.
+const recoveryCodeSampleLimit = 256 - 256%len(recoveryCodeAlphabet)
+
+// recoveryCodeSymbols draws n alphabet symbols from src with rejection
+// sampling. About 3% of bytes are thrown away, so one read of n bytes plus a
+// few refills is the usual cost.
+func recoveryCodeSymbols(src io.Reader, n int) ([]byte, error) {
+	out := make([]byte, 0, n)
+	buf := make([]byte, n)
+	for len(out) < n {
+		if _, err := io.ReadFull(src, buf); err != nil {
+			return nil, fmt.Errorf("recoveryCodeSymbols: %w", err)
+		}
+		for _, r := range buf {
+			if int(r) >= recoveryCodeSampleLimit {
+				continue
+			}
+			out = append(out, recoveryCodeAlphabet[int(r)%len(recoveryCodeAlphabet)])
+			if len(out) == n {
+				break
+			}
+		}
+	}
+	return out, nil
 }
 
 // NormalizeRecoveryCode turns user input into the canonical form the hashes
