@@ -7,9 +7,11 @@ import {
   getActiveThemeName,
   onSystemThemePainted,
   readableRoleColor,
+  reclampRoleColors,
   resolveSystemTheme,
   restoreTheme,
 } from "@lib/prefs/themes";
+import { contrastRatio, parseColor } from "@lib/text/colorContrast";
 
 describe("themes", () => {
   beforeEach(() => {
@@ -187,12 +189,68 @@ describe("readableRoleColor (B9 Q13 role clamp)", () => {
     expect(readableRoleColor("rgb(87, 242, 135)")).toBe("#57f287");
   });
 
-  it("falls back to --text-normal below 4.5:1, like --accent-text", () => {
+  it("moves a colour below 4.5:1 to a readable lightness of the same hue", () => {
     setSurfaces(LIGHT);
-    expect(readableRoleColor("#ff0000")).toBe("var(--text-normal)"); // 4.00:1 on white
-    expect(readableRoleColor("#57f287")).toBe("var(--text-normal)");
+    expect(readableRoleColor("#ff0000")).toBe("#e00000"); // 4.00:1 on white before
     setSurfaces(DARK);
-    expect(readableRoleColor("#ff0000")).toBe("var(--text-normal)"); // 2.9:1 on #383a40
+    const red = readableRoleColor("#ff0000"); // 4.2:1 on #313338 before
+    expect(red).toMatch(/^#ff[0-9a-f]{4}$/);
+    const rgb = parseColor(red)!;
+    expect(rgb[1]).toBe(rgb[2]);
+    for (const surface of [DARK[0], DARK[1]]) {
+      expect(contrastRatio(rgb, parseColor(surface)!)).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  it("also reads on a hovered mentioned row's yellow tint", () => {
+    setSurfaces(DARK);
+    expect(readableRoleColor("#00aaff")).toBe("#00aaff");
+    html.setProperty("--yellow", "#f0b232");
+    applyThemeByName("dark");
+    const blue = parseColor(readableRoleColor("#00aaff"))!;
+    const row = parseColor("#484237")!; // #f0b232 at 12 % over #313338
+    expect(contrastRatio(blue, row)).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it("keeps the strict fallback to --text-normal under High Contrast", () => {
+    document.documentElement.classList.add("high-contrast");
+    try {
+      setSurfaces(LIGHT);
+      expect(readableRoleColor("#ff0000")).toBe("var(--text-normal)");
+      setSurfaces(DARK);
+      expect(readableRoleColor("#ff0000")).toBe("var(--text-normal)"); // 2.9:1 on #383a40
+      expect(readableRoleColor("#57f287")).toBe("#57f287");
+    } finally {
+      document.documentElement.classList.remove("high-contrast");
+    }
+  });
+
+  it("leaves role mention pills to their CSS colour on a re-clamp", () => {
+    setSurfaces(DARK);
+    const pill = document.createElement("span");
+    pill.className = "mention mention-role";
+    pill.dataset["roleColor"] = "#ff0000";
+    document.body.appendChild(pill);
+    reclampRoleColors();
+    expect(pill.style.color).toBe("");
+  });
+
+  it("re-clamps rendered names when High Contrast is toggled", () => {
+    setSurfaces(DARK);
+    const name = document.createElement("span");
+    name.dataset["roleColor"] = "#ff0000";
+    name.style.color = readableRoleColor("#ff0000");
+    document.body.appendChild(name);
+    expect(name.style.color).not.toBe("var(--text-normal)");
+    document.documentElement.classList.add("high-contrast");
+    try {
+      reclampRoleColors();
+      expect(name.style.color).toBe("var(--text-normal)");
+    } finally {
+      document.documentElement.classList.remove("high-contrast");
+    }
+    reclampRoleColors();
+    expect(name.style.color).not.toBe("var(--text-normal)");
   });
 
   it("never hands back the raw server string", () => {
@@ -210,7 +268,7 @@ describe("readableRoleColor (B9 Q13 role clamp)", () => {
     expect(name.style.color).toBe("rgb(87, 242, 135)");
 
     setSurfaces(LIGHT);
-    expect(name.style.color).toBe("var(--text-normal)");
+    expect(name.style.color).toBe("rgb(10, 128, 46)");
     setSurfaces(DARK);
     expect(name.style.color).toBe("rgb(87, 242, 135)");
   });

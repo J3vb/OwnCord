@@ -63,6 +63,7 @@ and only when it changes something a contributor or fork holder must do
 
 ### Fixed
 
+- Role colours show again on names. A colour that is hard to read on the theme (for example pure red or blurple on Dark) used to turn the name plain white or black; now it keeps its colour and only gets lighter or darker until it reads well. With High Contrast on, a colour that does not read stays plain text as before.
 - On Linux, someone else's camera could stay black for the whole call when it started just as you turned your own camera on or off. It now shows as soon as it arrives.
 - Android: the app icon's "OC" logo ran off the edges of the home-screen icon. It now sits inside the icon shape on every launcher, and Android 13+ themed icons show a single-colour OC.
 - Android: a cold start signed you out unless you had ticked "Remember password", and signing in to a second server signed you out of the first. The sign-in page now has one "Stay signed in" box, ticked by default, that keeps each server's sign-in; untick it on a shared phone.
