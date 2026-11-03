@@ -340,6 +340,38 @@ func (q *Queries) ListPendingUsers(ctx context.Context, arg ListPendingUsersPara
 	return items, nil
 }
 
+const listUserTOTPSecrets = `-- name: ListUserTOTPSecrets :many
+SELECT id, totp_secret FROM users WHERE totp_secret IS NOT NULL ORDER BY id
+`
+
+type ListUserTOTPSecretsRow struct {
+	ID         int64   `json:"id"`
+	TotpSecret *string `json:"totpSecret"`
+}
+
+func (q *Queries) ListUserTOTPSecrets(ctx context.Context) ([]ListUserTOTPSecretsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listUserTOTPSecrets)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListUserTOTPSecretsRow{}
+	for rows.Next() {
+		var i ListUserTOTPSecretsRow
+		if err := rows.Scan(&i.ID, &i.TotpSecret); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const nextMemberBanLapse = `-- name: NextMemberBanLapse :one
 SELECT CAST(COALESCE(MIN(replace(ban_expires, ' ', 'T')), '') AS TEXT)
 FROM users
@@ -357,6 +389,27 @@ func (q *Queries) NextMemberBanLapse(ctx context.Context) (string, error) {
 	var column_1 string
 	err := row.Scan(&column_1)
 	return column_1, err
+}
+
+const replaceUserTOTPSecret = `-- name: ReplaceUserTOTPSecret :execrows
+UPDATE users SET totp_secret = ?1
+WHERE id = ?2 AND totp_secret = ?3
+`
+
+type ReplaceUserTOTPSecretParams struct {
+	NewSecret *string `json:"newSecret"`
+	ID        int64   `json:"id"`
+	OldSecret *string `json:"oldSecret"`
+}
+
+// Compare-and-set: writes only while the row still holds the value read, so a
+// concurrent enable or disable is never overwritten.
+func (q *Queries) ReplaceUserTOTPSecret(ctx context.Context, arg ReplaceUserTOTPSecretParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, replaceUserTOTPSecret, arg.NewSecret, arg.ID, arg.OldSecret)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const resetAllUserStatuses = `-- name: ResetAllUserStatuses :exec

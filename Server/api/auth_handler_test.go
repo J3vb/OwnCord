@@ -671,7 +671,7 @@ func TestVerifyTotp_Success(t *testing.T) {
 	hash, _ := auth.HashPassword("correctPass1")
 	userID, _ := database.CreateUser(context.Background(), "totpverify", hash, 4)
 	secret := "JBSWY3DPEHPK3PXP"
-	if _, err := database.ExecContext(context.Background(), `UPDATE users SET totp_secret = ? WHERE id = ?`, secret, userID); err != nil {
+	if _, err := database.ExecContext(context.Background(), `UPDATE users SET totp_secret = ? WHERE id = ?`, sealedTOTP(t, secret), userID); err != nil {
 		t.Fatalf("set totp secret: %v", err)
 	}
 
@@ -844,7 +844,7 @@ func TestVerifyTotp_ConsumesChallengeAfterRepeatedFailures(t *testing.T) {
 	hash, _ := auth.HashPassword("correctPass1")
 	userID, _ := database.CreateUser(context.Background(), "totplockout", hash, 4)
 	secret := "JBSWY3DPEHPK3PXP"
-	if _, err := database.ExecContext(context.Background(), `UPDATE users SET totp_secret = ? WHERE id = ?`, secret, userID); err != nil {
+	if _, err := database.ExecContext(context.Background(), `UPDATE users SET totp_secret = ? WHERE id = ?`, sealedTOTP(t, secret), userID); err != nil {
 		t.Fatalf("set totp secret: %v", err)
 	}
 

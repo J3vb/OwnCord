@@ -4,6 +4,7 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
+	"encoding/base32"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 const (
@@ -179,23 +181,24 @@ func EncryptTOTPSecret(key []byte, plaintext string) (string, error) {
 	return hex.EncodeToString(ciphertext), nil
 }
 
+// ErrTOTPSecretMalformed reports a stored TOTP secret that is not in the
+// sealed format (hex nonce+ciphertext). Callers treat it as a store failure,
+// never as a wrong code.
+var ErrTOTPSecretMalformed = errors.New("stored TOTP secret is not sealed")
+
 // DecryptTOTPSecret decrypts a hex-encoded AES-256-GCM ciphertext back to the
-// plaintext TOTP secret. For backwards compatibility a value that does not look
-// encrypted (not valid hex, or too short for nonce+tag) is returned as-is so
-// existing unencrypted secrets keep working.
+// plaintext TOTP secret. A value that is not in the sealed format, or that
+// fails authentication, is an error and yields the empty string: the stored
+// value is never handed back as a secret. Rows written before secrets were
+// sealed are converted once at startup by SealLegacyTOTPSecret.
 func DecryptTOTPSecret(key []byte, ciphertext string) (string, error) {
-	// Backwards compatibility: warn when a value doesn't look encrypted, so
-	// operators can detect and migrate unencrypted TOTP secrets.
 	if len(ciphertext) < minEncryptedHexLen {
-		slog.Warn("TOTP secret returned as plaintext (too short for encrypted format) — consider encrypting legacy secrets")
-		return ciphertext, nil
+		return "", fmt.Errorf("%w: too short", ErrTOTPSecretMalformed)
 	}
 
 	data, err := hex.DecodeString(ciphertext)
 	if err != nil {
-		// Not valid hex -- treat as unencrypted plaintext (backwards compat).
-		slog.Warn("TOTP secret returned as plaintext (not valid hex) — consider encrypting legacy secrets")
-		return ciphertext, nil //nolint:nilerr
+		return "", fmt.Errorf("%w: not hex", ErrTOTPSecretMalformed)
 	}
 
 	block, err := aes.NewCipher(key)
@@ -210,22 +213,59 @@ func DecryptTOTPSecret(key []byte, ciphertext string) (string, error) {
 
 	nonceSize := gcm.NonceSize()
 	if len(data) < nonceSize+gcm.Overhead() {
-		// Too short to be valid encrypted data -- return as plaintext.
-		slog.Warn("TOTP secret returned as plaintext (data too short for nonce+tag)")
-		return ciphertext, nil
+		return "", fmt.Errorf("%w: shorter than nonce and tag", ErrTOTPSecretMalformed)
 	}
 
 	nonce, sealed := data[:nonceSize], data[nonceSize:]
 	plaintext, err := gcm.Open(nil, nonce, sealed, nil)
 	if err != nil {
-		// The value has the full encrypted shape but GCM authentication failed:
-		// a wrong TOTP_ENCRYPTION_KEY or tampered/corrupted ciphertext, not a
-		// legacy plaintext secret (the not-hex and too-short branches catch
-		// those). Fail closed: returning the ciphertext as the secret would mask
-		// key misconfiguration.
+		// A wrong key or a damaged value, either way not something to use.
 		slog.Error("TOTP secret decryption failed — check TOTP_ENCRYPTION_KEY", "error", err)
 		return "", fmt.Errorf("decrypting TOTP secret: %w", err)
 	}
 
 	return string(plaintext), nil
+}
+
+// SealOutcome is what SealLegacyTOTPSecret decided about one stored value.
+type SealOutcome int
+
+const (
+	// SealAlreadySealed: the value decrypts under key; leave it.
+	SealAlreadySealed SealOutcome = iota
+	// SealConverted: the value was an unsealed base32 secret; the returned
+	// string is its sealed form.
+	SealConverted
+	// SealUnreadable: the value neither decrypts nor is a usable base32
+	// secret. It is left as it is and logins against it report a store failure.
+	SealUnreadable
+)
+
+// SealLegacyTOTPSecret classifies a stored TOTP secret and, when it is an
+// unsealed base32 secret from before encryption at rest, returns its sealed
+// form. Only a value that decrypts under key counts as sealed, and only a value
+// GenerateTOTPCode can use counts as a legacy secret, so a damaged ciphertext
+// is never wrapped and then trusted as a secret.
+func SealLegacyTOTPSecret(key []byte, stored string) (string, SealOutcome, error) {
+	_, err := DecryptTOTPSecret(key, stored)
+	if err == nil {
+		return stored, SealAlreadySealed, nil
+	}
+	if !errors.Is(err, ErrTOTPSecretMalformed) || !usableBase32Secret(stored) {
+		return stored, SealUnreadable, nil
+	}
+	sealed, err := EncryptTOTPSecret(key, stored)
+	if err != nil {
+		return stored, SealUnreadable, fmt.Errorf("sealing a legacy TOTP secret: %w", err)
+	}
+	return sealed, SealConverted, nil
+}
+
+// usableBase32Secret reports whether GenerateTOTPCode can derive codes from
+// secret: after the same normalisation it applies, it decodes as unpadded
+// base32 to at least 10 bytes (80 bits, the RFC 4226 minimum).
+func usableBase32Secret(secret string) bool {
+	normalised := strings.ToUpper(strings.TrimSpace(secret))
+	decoded, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(normalised)
+	return err == nil && len(decoded) >= 10
 }

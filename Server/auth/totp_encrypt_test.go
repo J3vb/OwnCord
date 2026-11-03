@@ -3,9 +3,12 @@ package auth_test
 import (
 	"bytes"
 	"encoding/hex"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/J3vb/OwnCord/Server/auth"
 )
@@ -112,28 +115,87 @@ func TestDecryptTOTPSecret_FailsClosed(t *testing.T) {
 	}
 }
 
-// TestDecryptTOTPSecret_LegacyPlaintextPassthrough pins the backwards-compat
-// branches: values that cannot be encrypted data are handed back unchanged
-// with no error, which is what makes the fail-closed branch above safe.
-func TestDecryptTOTPSecret_LegacyPlaintextPassthrough(t *testing.T) {
+// TestDecryptTOTPSecret_UnsealedValueIsAnError pins strict decrypt: a value
+// that is not in the sealed format is reported as ErrTOTPSecretMalformed with
+// an empty result, never handed back as the secret.
+func TestDecryptTOTPSecret_UnsealedValueIsAnError(t *testing.T) {
 	key := testKey(0x03)
 	tests := []struct {
 		name  string
 		value string
 	}{
 		{name: "short base32 secret", value: "JBSWY3DPEHPK3PXP"},
-		// Long enough for the encrypted format but not valid hex.
+		{name: "empty value", value: ""},
+		// Long enough for the sealed format but not valid hex.
 		{name: "long non-hex value", value: "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQGEZDGNBV"},
+		{name: "odd-length hex", value: strings.Repeat("a", 57)},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := auth.DecryptTOTPSecret(key, tc.value)
-			if err != nil {
-				t.Fatalf("DecryptTOTPSecret(%q): %v", tc.value, err)
+			if !errors.Is(err, auth.ErrTOTPSecretMalformed) {
+				t.Fatalf("DecryptTOTPSecret(%q) error = %v, want ErrTOTPSecretMalformed", tc.value, err)
 			}
-			if got != tc.value {
-				t.Fatalf("DecryptTOTPSecret(%q) = %q, want the value unchanged", tc.value, got)
+			if got != "" {
+				t.Fatalf("DecryptTOTPSecret(%q) = %q, want the empty string", tc.value, got)
+			}
+		})
+	}
+}
+
+// TestSealLegacyTOTPSecret pins the startup conversion's classification: a
+// sealed value is left alone, an unsealed base32 secret is sealed and decrypts
+// back to itself, and anything else (a damaged ciphertext, a value no code can
+// be derived from) is reported unreadable and returned unchanged.
+func TestSealLegacyTOTPSecret(t *testing.T) {
+	key := testKey(0x04)
+	const legacy = "JBSWY3DPEHPK3PXP"
+	sealed, err := auth.EncryptTOTPSecret(key, legacy)
+	if err != nil {
+		t.Fatalf("EncryptTOTPSecret: %v", err)
+	}
+	underOtherKey, err := auth.EncryptTOTPSecret(testKey(0x05), legacy)
+	if err != nil {
+		t.Fatalf("EncryptTOTPSecret: %v", err)
+	}
+
+	t.Run("legacy base32 is sealed", func(t *testing.T) {
+		for _, v := range []string{legacy, "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ", "jbswy3dpehpk3pxp"} {
+			got, outcome, err := auth.SealLegacyTOTPSecret(key, v)
+			if err != nil || outcome != auth.SealConverted {
+				t.Fatalf("SealLegacyTOTPSecret(%q) = %v, %v, want SealConverted", v, outcome, err)
+			}
+			back, err := auth.DecryptTOTPSecret(key, got)
+			if err != nil || back != v {
+				t.Fatalf("sealed form of %q decrypts to %q, %v", v, back, err)
+			}
+			code, err := auth.GenerateTOTPCode(back, time.Unix(1_700_000_000, 0))
+			want, _ := auth.GenerateTOTPCode(v, time.Unix(1_700_000_000, 0))
+			if err != nil || code != want {
+				t.Fatalf("code from the sealed form = %q, %v, want %q", code, err, want)
+			}
+		}
+	})
+
+	t.Run("sealed value is left alone", func(t *testing.T) {
+		got, outcome, err := auth.SealLegacyTOTPSecret(key, sealed)
+		if err != nil || outcome != auth.SealAlreadySealed || got != sealed {
+			t.Fatalf("SealLegacyTOTPSecret(sealed) = %q, %v, %v, want it unchanged", got, outcome, err)
+		}
+	})
+
+	for _, tc := range []struct{ name, value string }{
+		{"sealed under another key", underOtherKey},
+		{"empty", ""},
+		{"not base32", "not a secret!"},
+		{"too few bits", "JBSWY3DP"},
+		{"long non-hex non-base32", strings.Repeat("Z1", 30)},
+	} {
+		t.Run(tc.name+" is unreadable", func(t *testing.T) {
+			got, outcome, err := auth.SealLegacyTOTPSecret(key, tc.value)
+			if err != nil || outcome != auth.SealUnreadable || got != tc.value {
+				t.Fatalf("SealLegacyTOTPSecret(%q) = %q, %v, %v, want it unchanged and unreadable", tc.value, got, outcome, err)
 			}
 		})
 	}
