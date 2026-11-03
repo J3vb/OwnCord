@@ -1,6 +1,6 @@
 // "Chat bar buttons" (Settings → Text & Images): each composer button the user
-// switches off leaves the bar at once, and switching it back on never shows a
-// button the server or host left out.
+// switches off leaves the bar (or, for Sticker and Poll, the "+" menu) at once,
+// and switching it back on never shows a button the server or host left out.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useMountContainer } from "../helpers/mountContainer";
 import { resetComposerServer, useFullComposerServer } from "../helpers/composerSheets";
@@ -42,6 +42,18 @@ function mountComposer() {
 const btn = (b: ComposerButton): HTMLButtonElement | null =>
   container.querySelector<HTMLButtonElement>(SELECTOR[b]);
 
+/** Sticker and Poll are "+" menu tiles; the rest are chat bar buttons. */
+const IN_MENU: readonly ComposerButton[] = ["sticker", "poll"];
+
+/** Whether `b` is on offer: its bar button shows, or its tile is in the open "+" menu. */
+function offered(b: ComposerButton): boolean {
+  if (!IN_MENU.includes(b)) return btn(b)?.hidden === false;
+  container.querySelector<HTMLButtonElement>(".attach-btn")!.click();
+  const tile = container.querySelector(`.attach-menu [data-testid="attach-sheet-${b}"]`);
+  container.querySelector<HTMLButtonElement>(".attach-btn")!.click();
+  return tile !== null;
+}
+
 useMountContainer(
   (c) => {
     container = c;
@@ -57,7 +69,8 @@ beforeEach(useFullComposerServer);
 describe("chat bar button settings", () => {
   it("shows every button by default", () => {
     mountComposer();
-    for (const b of COMPOSER_BUTTONS) expect(btn(b)?.hidden, b).toBe(false);
+    for (const b of COMPOSER_BUTTONS) expect(offered(b), b).toBe(true);
+    for (const b of IN_MENU) expect(btn(b)?.hidden, b).toBe(true);
   });
 
   it("a button switched off before mount starts hidden; the others stay", () => {
@@ -72,9 +85,9 @@ describe("chat bar button settings", () => {
     mountComposer();
     for (const b of COMPOSER_BUTTONS) {
       savePref(composerButtonPrefKey(b), false);
-      expect(btn(b)?.hidden, b).toBe(true);
+      expect(offered(b), b).toBe(false);
       savePref(composerButtonPrefKey(b), true);
-      expect(btn(b)?.hidden, b).toBe(false);
+      expect(offered(b), b).toBe(true);
     }
   });
 

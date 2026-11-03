@@ -28,7 +28,7 @@ mod external_content;
 mod external_open;
 #[cfg(not(windows))]
 mod fallback_crypto;
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "android"))]
 mod file_transfer;
 #[cfg(any(target_os = "android", test))]
 mod files;
@@ -66,6 +66,8 @@ pub mod native_voice;
 mod proxy_common;
 mod ptt;
 mod secret_store;
+#[cfg(any(target_os = "android", test))]
+mod share_in;
 mod shortcuts;
 mod sync;
 #[cfg(any(target_os = "linux", windows))]
@@ -227,6 +229,7 @@ pub fn run() {
         .plugin(call_service::init())
         .plugin(exit_info::init())
         .plugin(files::init())
+        .plugin(share_in::init())
         .plugin(android_notifications::init());
 
     // Desktop-only convenience plugins. window-state auto-saves/restores window
@@ -350,8 +353,10 @@ pub fn run() {
             #[cfg(desktop)]
             tray::open_log_folder,
             external_open::open_external_url,
-            #[cfg(target_os = "linux")]
+            #[cfg(any(target_os = "linux", target_os = "android"))]
             file_transfer::read_staged_file,
+            #[cfg(target_os = "android")]
+            share_in::android::take_shared,
             #[cfg(target_os = "linux")]
             file_transfer::clipboard_files,
             #[cfg(target_os = "linux")]

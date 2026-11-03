@@ -79,6 +79,7 @@ const shareSheet: ShareSheet = {
   available: false,
   shareFile: () => refuse(),
   shareText: () => refuse(),
+  onReceived: inertUnsubscribe,
 };
 
 // The version is the one the bundle was built from: the server embeds the

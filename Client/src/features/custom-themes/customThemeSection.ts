@@ -226,25 +226,31 @@ export function buildCustomThemeSection(signal: AbortSignal): HTMLElement {
     render();
   }
 
-  function remove(theme: CustomTheme): void {
-    createConfirmModal({
-      title: t("appearance.customThemes.deleteTitle", { name: theme.name }),
-      body: t("appearance.customThemes.deleteBody"),
-      confirmLabel: t("appearance.customThemes.delete"),
-      cancelLabel: t("appearance.customThemes.cancel"),
-      testId: "custom-theme-delete-dialog",
-      confirmTestId: "custom-theme-delete-confirm",
-      signal,
-      onConfirm: () => {
-        if (!saveCustomThemes(loadCustomThemes().filter((other) => other.id !== theme.id))) {
-          showToast(t("appearance.customThemes.saveFailed"), "error");
-          return;
-        }
-        if (getActiveCustomThemeId() === theme.id) setActiveCustomTheme(null);
-        if (editing === theme.id) closeEditor();
-        render();
+  function remove(theme: CustomTheme, opener: HTMLElement): void {
+    // Mounted in the settings overlay: the body would stack beneath it.
+    const container = opener.closest("[data-testid='settings-overlay']") ?? document.body;
+    createConfirmModal(
+      {
+        title: t("appearance.customThemes.deleteTitle", { name: theme.name }),
+        body: t("appearance.customThemes.deleteBody"),
+        confirmLabel: t("appearance.customThemes.delete"),
+        cancelLabel: t("appearance.customThemes.cancel"),
+        testId: "custom-theme-delete-dialog",
+        confirmTestId: "custom-theme-delete-confirm",
+        signal,
+        fallbackFocus: () => (opener.isConnected ? opener : newBtn),
+        onConfirm: () => {
+          if (!saveCustomThemes(loadCustomThemes().filter((other) => other.id !== theme.id))) {
+            showToast(t("appearance.customThemes.saveFailed"), "error");
+            return;
+          }
+          if (getActiveCustomThemeId() === theme.id) setActiveCustomTheme(null);
+          if (editing === theme.id) closeEditor();
+          render();
+        },
       },
-    });
+      container,
+    );
   }
 
   function render(): void {
@@ -282,6 +288,12 @@ export function buildCustomThemeSection(signal: AbortSignal): HTMLElement {
         signal,
       );
       use.setAttribute("aria-pressed", active ? "true" : "false");
+      const deleteBtn: HTMLButtonElement = button(
+        t("appearance.customThemes.delete"),
+        t("appearance.customThemes.deleteAria", { name: theme.name }),
+        () => remove(theme, deleteBtn),
+        signal,
+      );
       appendChildren(
         row,
         use,
@@ -317,12 +329,7 @@ export function buildCustomThemeSection(signal: AbortSignal): HTMLElement {
           () => void exportTheme(theme),
           signal,
         ),
-        button(
-          t("appearance.customThemes.delete"),
-          t("appearance.customThemes.deleteAria", { name: theme.name }),
-          () => remove(theme),
-          signal,
-        ),
+        deleteBtn,
       );
       list.appendChild(row);
     }

@@ -162,6 +162,21 @@ describe("custom theme section", () => {
     expect(getActiveCustomThemeId()).toBeNull();
   });
 
+  it("opens the delete dialog inside the settings overlay so it stacks above it", () => {
+    saveCustomThemes([{ id: "a1", name: "One", css: "" }]);
+    const overlay = document.createElement("div");
+    overlay.setAttribute("data-testid", "settings-overlay");
+    document.body.appendChild(overlay);
+    section = buildCustomThemeSection(owner.signal);
+    overlay.appendChild(section);
+    buttonByText(section, "Delete").click();
+    const dialog = q<HTMLElement>(document, "[data-testid='custom-theme-delete-dialog']");
+    expect(dialog.parentElement).toBe(overlay);
+    q<HTMLButtonElement>(dialog, "[data-testid='custom-theme-delete-confirm']").click();
+    expect(loadCustomThemes()).toEqual([]);
+    overlay.remove();
+  });
+
   it("imports a .css file under its file name", async () => {
     mount();
     const input = q<HTMLInputElement>(section, "[data-testid='custom-theme-file']");
