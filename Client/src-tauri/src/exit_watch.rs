@@ -218,6 +218,8 @@ fn watchdog<R: Runtime>(app: &AppHandle<R>, watch: &Arc<Watch>) {
             last_beat = t;
             log_memory_step(watch);
             write_run_file(watch);
+            #[cfg(windows)]
+            crate::exception_log::follow_rotation();
         }
     }
 }
