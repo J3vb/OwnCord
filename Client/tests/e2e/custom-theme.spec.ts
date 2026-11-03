@@ -57,6 +57,21 @@ test.describe("Custom themes", () => {
     await expect.poll(() => bgTertiary(page)).toBe(before);
   });
 
+  test("a theme can be deleted from the list", async ({ page }) => {
+    await page.getByRole("button", { name: "New theme" }).click();
+    await page.getByTestId("custom-theme-name").fill("Plum");
+    await page.getByTestId("custom-theme-css").fill(THEME_CSS);
+    await page.getByTestId("custom-theme-save").click();
+    await page.getByRole("button", { name: "Use Plum" }).click();
+    await expect.poll(() => bgTertiary(page)).toBe("#4a1030");
+
+    await page.getByRole("button", { name: "Delete Plum" }).click();
+    await page.getByTestId("custom-theme-delete-confirm").click();
+    await expect(page.getByTestId("custom-theme-row")).toHaveCount(0);
+    await expect(page.getByTestId("custom-theme-delete-dialog")).toHaveCount(0);
+    await expect.poll(() => bgTertiary(page)).not.toBe("#4a1030");
+  });
+
   test("a theme that names an outside file is refused", async ({ page }) => {
     await page.getByRole("button", { name: "New theme" }).click();
     await page.getByTestId("custom-theme-name").fill("Remote");
