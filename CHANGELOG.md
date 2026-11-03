@@ -61,6 +61,7 @@ and only when it changes something a contributor or fork holder must do
 - On a phone, the "+" in the message box now opens a sheet with Take photo, Gallery and Files, so you can take a photo with the camera and send it straight away, or pick several photos and videos from the gallery. On a computer "+" still opens the file picker.
 - The DM profile panel on a computer now also shows the person's @username (under a nickname) and custom status, and has a Report button.
 - On Linux, after the app closes unexpectedly, the next start adds what the system recorded about it (the crash report from `coredumpctl` and the kernel's crash line, where the system keeps them) to the app's log, so a support bundle shows what crashed. Nothing extra needs to be installed; without those tools it is skipped. The log also notes whether the camera or a screen share was running.
+- On Windows, the app's log (and so the support bundle) now says why the last run ended: a crash names the error and the file it happened in, a run that Windows closed as not responding or that was ended in Task Manager shows up on the next start with its last memory and freeze state, and a crash or restart of WebView2's page, graphics or camera process is logged with what it caused. Nothing is sent anywhere; it stays in the log until you save a support bundle.
 
 ### Fixed
 

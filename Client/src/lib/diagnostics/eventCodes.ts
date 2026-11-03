@@ -146,6 +146,7 @@ const E2EE = "src/lib/voice/livekitE2EE.ts";
 const MAIN = "src/main.ts";
 const EXIT_WATCH = "src-tauri/src/exit_watch.rs";
 const CRASH_LOG = "src-tauri/src/crash_log.rs";
+const EXCEPTION_LOG = "src-tauri/src/exception_log.rs";
 const SYSTEM_CRASH = "src-tauri/src/system_crash_report.rs";
 const ANDROID = "src-tauri/gen/android/app/src/main/java/com/owncord/client/MainActivity.kt";
 const EVENT_LOG = "src/lib/diagnostics/eventLog.ts";
@@ -194,7 +195,7 @@ export const EVENT_CODES = {
 
   "native.crash": {
     label: "App crashed last time", // i18n-exempt: support bundle text, never shown in the app
-    owners: [CRASH_LOG, SYSTEM_CRASH, ANDROID],
+    owners: [CRASH_LOG, EXCEPTION_LOG, SYSTEM_CRASH, ANDROID],
     dataClasses: [],
     fields: {
       platform: PLATFORMS,
