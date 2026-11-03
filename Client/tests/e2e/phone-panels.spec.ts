@@ -114,6 +114,7 @@ test("the two-factor screen keeps a side gutter", async ({ page }) => {
         ROUTE_HEALTH,
         { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_2FA_RESPONSE },
       ],
+      simulateWsFlow: false,
     }),
   );
   await page.goto("/");
