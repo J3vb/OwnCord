@@ -1164,6 +1164,20 @@ describe("contract: epoch-1 fixtures through the client dispatcher", () => {
     vi.mocked(showToast).mockClear();
     await dispatch("moderation-queue", "mod_action", { id: 5300 });
     expect(safetyStore.getState().notices.map((n) => n.reason)).toEqual(["fixture warning"]);
+    // The notice banner carries it; a toast would repeat the same sentence.
+    expect(vi.mocked(showToast)).not.toHaveBeenCalled();
+  });
+
+  it("moderation-queue: mod_action toasts the warning while settings hides the banner", async () => {
+    vi.mocked(showToast).mockClear();
+    safetyStore.setState((prev) => ({ ...prev, notices: [] }));
+    uiStore.setState((prev) => ({ ...prev, settingsOpen: true }));
+    try {
+      await dispatch("moderation-queue", "mod_action", { id: 5300 });
+    } finally {
+      uiStore.setState((prev) => ({ ...prev, settingsOpen: false }));
+    }
+    expect(safetyStore.getState().notices.map((n) => n.reason)).toEqual(["fixture warning"]);
     expect(vi.mocked(showToast)).toHaveBeenCalledWith(
       expect.stringContaining("fixture warning"),
       "warning",

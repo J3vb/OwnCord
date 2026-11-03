@@ -228,20 +228,31 @@
 }
 
 /* ── Toast Notification ── */
-/* Anchored at the top centre of the chat column, just below its 48px header,
-   so a toast that waits to be dismissed never sits over the composer. The
-   130px offset is half the 260px sidebar (responsive.css drops it below
-   800px, where the sidebar collapses). */
+/* Stacked just above the composer and centred on it: Toast.ts writes the
+   composer's top edge and box as --toast-bottom, --toast-center and
+   --toast-room. Without a composer (voice, forum, home) the stack keeps clear
+   of a bottom control bar; the fallback centre is the chat column (half the
+   260px sidebar right of the middle; responsive.css drops that offset). */
 .toast-container {
+  --toast-room-fallback: calc(100vw - 260px);
+  --toast-center-fallback: calc(50% + 130px);
   position: fixed;
-  top: 56px;
-  left: calc(50% + 130px);
+  bottom: calc(var(--toast-bottom, var(--safe-bottom, 0px) + 88px) + 8px);
+  left: var(--toast-center, var(--toast-center-fallback));
+  width: min(560px, var(--toast-room, var(--toast-room-fallback)) - 32px);
   transform: translateX(-50%);
   z-index: 9999;
   display: flex;
   flex-direction: column;
   gap: 8px;
   pointer-events: none;
+}
+/* A dialog or the settings overlay hides the composer: drop to the window
+   edge, under a centred panel's own buttons. */
+body:has(.modal-overlay, .settings-overlay:where(.open)) .toast-container {
+  bottom: calc(var(--safe-bottom, 0px) + 16px);
+  left: 50%;
+  width: min(560px, 100vw - 32px);
 }
 .toast {
   background: var(--bg-secondary);
@@ -257,6 +268,11 @@
   display: flex;
   align-items: center;
   gap: 8px;
+}
+.toast-text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .toast.show {
   opacity: 1;
@@ -355,16 +371,16 @@
 }
 
 /* ── Moderation notices (B9-15, Q4): persistent, never a modal ── */
+/* Always rendered so its status region can announce; empty, it has no height. */
 .moderation-notices {
-  display: none;
   flex-shrink: 0;
   max-height: 40vh;
   overflow-y: auto;
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border-strong);
 }
-.moderation-notices.visible {
-  display: block;
+.moderation-notices:not(.visible) {
+  border-bottom: 0;
 }
 .moderation-notice {
   padding: 8px 16px;

@@ -1,7 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../lib/ui/toast", () => ({ showToast: vi.fn() }));
-vi.mock("@stores/ui.store", () => ({ openSettings: vi.fn() }));
+const ui = vi.hoisted(() => ({ settingsOpen: false }));
+vi.mock("@stores/ui.store", () => ({
+  openSettings: vi.fn(),
+  uiStore: { getState: () => ui },
+}));
 
 import { expectConsole } from "../../../tests/helpers/console";
 import { ApiClientError, type OwnModerationAction } from "../../lib/api";
@@ -198,16 +202,29 @@ describe("safety ws handlers", () => {
     expect(safetyStore.getState().notices).toEqual([]);
   });
 
-  it("a live warning shows once and announces once, even when the frame repeats", () => {
+  it("a live warning raises the banner without a duplicate toast, even when the frame repeats", () => {
     const frame = { id: 9, kind: "warning", reason: "spam", expires_at: null } as const;
     handleModAction(undefined, frame);
     handleModAction(undefined, frame);
     expect(safetyStore.getState().notices.map((n) => n.id)).toEqual([9]);
-    expect(showToast).toHaveBeenCalledTimes(1);
-    expect(showToast).toHaveBeenCalledWith(
-      "You received a warning from the moderators: spam",
-      "warning",
-    );
+    expect(showToast).not.toHaveBeenCalled();
+  });
+
+  it("a live warning toasts once while the settings overlay hides the banner", () => {
+    ui.settingsOpen = true;
+    try {
+      const frame = { id: 9, kind: "warning", reason: "spam", expires_at: null } as const;
+      handleModAction(undefined, frame);
+      handleModAction(undefined, frame);
+      expect(safetyStore.getState().notices.map((n) => n.id)).toEqual([9]);
+      expect(showToast).toHaveBeenCalledTimes(1);
+      expect(showToast).toHaveBeenCalledWith(
+        "You received a warning from the moderators: spam",
+        "warning",
+      );
+    } finally {
+      ui.settingsOpen = false;
+    }
   });
 
   it("a ready notice and the same live warning dedupe by action id", () => {
@@ -405,6 +422,32 @@ const ackButtons = (el: HTMLElement) => [
 ];
 
 describe("notice banner", () => {
+  it("announces a warning that arrives after mount, not the ones already pending", async () => {
+    setReadyNotices([
+      { id: 1, kind: "warning", reason: "old", created_at: "2026-09-01T10:00:00Z" },
+    ]);
+    const { el, ac } = mount(vi.fn());
+    const announcer = el.querySelector<HTMLElement>(":scope > [role='status']")!;
+    expect(announcer.textContent).toBe("");
+    handleModAction(undefined, { id: 9, kind: "warning", reason: "spam", expires_at: null });
+    await flush();
+    expect(announcer.textContent).toBe("You received a warning from the moderators: spam");
+    // Two arriving in one update are both read, not just the last.
+    safetyStore.setState((prev) => ({
+      ...prev,
+      notices: [
+        ...prev.notices,
+        { id: 10, reason: "a", createdAt: "2026-09-03T10:00:00Z", ack: "idle" as const },
+        { id: 11, reason: "b", createdAt: "2026-09-03T10:01:00Z", ack: "idle" as const },
+      ],
+    }));
+    await flush();
+    expect(announcer.textContent).toBe(
+      "You received a warning from the moderators: a You received a warning from the moderators: b",
+    );
+    ac.abort();
+  });
+
   it("stays hidden with no notices and shows them oldest first with reason and date", async () => {
     const { el, ac } = mount(vi.fn());
     expect(el.classList.contains("visible")).toBe(false);
