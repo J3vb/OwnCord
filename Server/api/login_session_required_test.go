@@ -73,6 +73,8 @@ func TestAccountSecurityRoutes_RequireLoginSession(t *testing.T) {
 		{http.MethodGet, "/api/v1/users/me/sessions", nil},
 		{http.MethodDelete, "/api/v1/users/me/sessions", nil},
 		{http.MethodDelete, fmt.Sprintf("/api/v1/users/me/sessions/%d", sess.ID), nil},
+		{http.MethodGet, "/api/v1/users/me/api-tokens", nil},
+		{http.MethodDelete, "/api/v1/users/me/api-tokens/1", nil},
 		{http.MethodPatch, "/api/v1/users/me", map[string]string{"username": "token-holder", "identity_public_key": deviceKey}},
 		// The token is refused before the key is even validated.
 		{http.MethodPatch, "/api/v1/users/me", map[string]string{"username": "token-holder", "identity_public_key": "not base64!"}},

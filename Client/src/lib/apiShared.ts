@@ -310,6 +310,20 @@ export interface UserNote {
   readonly note: string;
 }
 
+/** One of the caller's live API tokens, from GET /users/me/api-tokens
+ *  (`{tokens: [...]}`). Revoked and expired tokens are not listed. */
+export interface OwnApiToken {
+  readonly id: number;
+  readonly label: string;
+  readonly created_at: string;
+  readonly last_used: string | null;
+  readonly expires_at: string | null;
+}
+
+export interface OwnApiTokensListResponse {
+  readonly tokens: readonly OwnApiToken[];
+}
+
 /** DELETE /users/me/sessions: every session is revoked, the caller's included. */
 export interface RevokeAllSessionsResponse {
   readonly sessions_revoked: number;

@@ -39,6 +39,7 @@ function passwordField(
 export function buildPasswordSection(
   options: SettingsOverlayOptions,
   signal: AbortSignal,
+  tokensChanged?: EventTarget,
 ): HTMLLIElement {
   const { row, icon, result, body } = createStatusRow(
     t("password.sectionTitle"),
@@ -63,6 +64,51 @@ export function buildPasswordSection(
   const pwError = outcomeEl("error", "pw-change-status");
   pwError.style.marginBottom = "8px";
   const pwBtn = createElement("button", { class: "ac-btn" }, t("password.change"));
+  // Ticked by default: a password change after a suspected leak should end
+  // every credential. Hidden only once the list confirms there are no tokens;
+  // until then, or when the list fails, the default still applies (revoking
+  // nothing is harmless) and a failed list shows the option.
+  const revokeTokensRow = createElement("label", {
+    class: "form-check",
+    "data-testid": "pw-revoke-api-tokens-row",
+  });
+  const revokeTokensBox = createElement("input", {
+    type: "checkbox",
+    "data-testid": "pw-revoke-api-tokens",
+  });
+  revokeTokensBox.checked = options.onListApiTokens !== undefined;
+  // Once the user has set the box, a later refresh never overrides it.
+  let userSetBox = false;
+  revokeTokensBox.addEventListener("change", () => (userSetBox = true), { signal });
+  appendChildren(
+    revokeTokensRow,
+    revokeTokensBox,
+    createElement("span", {}, t("password.revokeApiTokens")),
+  );
+  revokeTokensRow.hidden = true;
+  revokeTokensRow.style.marginBottom = "12px";
+  let refreshGen = 0;
+  const refreshTokenOption = (): void => {
+    const listTokens = options.onListApiTokens;
+    if (listTokens === undefined) return;
+    const gen = ++refreshGen;
+    void listTokens()
+      .then((tokens) => {
+        if (signal.aborted || gen !== refreshGen) return;
+        const hasTokens = tokens.length > 0;
+        // Confirmed none: nothing to revoke. Newly shown: back to the default.
+        if (!hasTokens) revokeTokensBox.checked = false;
+        else if (revokeTokensRow.hidden && !userSetBox) revokeTokensBox.checked = true;
+        revokeTokensRow.hidden = !hasTokens;
+      })
+      .catch((err: unknown) => {
+        if (signal.aborted || gen !== refreshGen) return;
+        log.warn("Failed to list API tokens", err);
+        revokeTokensRow.hidden = false;
+      });
+  };
+  refreshTokenOption();
+  tokensChanged?.addEventListener("change", refreshTokenOption, { signal });
   let pwSuccessTimer: ReturnType<typeof setTimeout> | null = null;
 
   pwBtn.addEventListener(
@@ -95,12 +141,17 @@ export function buildPasswordSection(
         setText(pwBtn, t("password.change"));
         if (focusIsOurs(pwBtn)) pwBtn.focus();
       };
+      const revokeApiTokens = revokeTokensBox.checked;
       void options
-        .onChangePassword(oldVal, newVal)
+        .onChangePassword(oldVal, newVal, revokeApiTokens)
         .then((outcome) => {
           oldPw.value = "";
           newPw.value = "";
           confirmPw.value = "";
+          if (revokeApiTokens) {
+            if (tokensChanged === undefined) refreshTokenOption();
+            else tokensChanged.dispatchEvent(new Event("change"));
+          }
           if (pwSuccessTimer !== null) {
             clearTimeout(pwSuccessTimer);
             pwSuccessTimer = null;
@@ -129,7 +180,15 @@ export function buildPasswordSection(
     { signal },
   );
 
-  appendChildren(wrapper, oldField.wrapper, newField.wrapper, confirmField.wrapper, pwError, pwBtn);
+  appendChildren(
+    wrapper,
+    oldField.wrapper,
+    newField.wrapper,
+    confirmField.wrapper,
+    revokeTokensRow,
+    pwError,
+    pwBtn,
+  );
   return row;
 }
 

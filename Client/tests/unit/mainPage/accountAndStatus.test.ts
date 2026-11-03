@@ -144,6 +144,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
       getReactionUsers: vi.fn(async () => ({ users: [] })),
       getRecoveryKitStatus: vi.fn(async () => ({ enrolled: false, used_at: null })),
       getSessions: vi.fn(async () => []),
+      getApiTokens: vi.fn(async () => []),
     } as unknown as ApiClient;
 
     m.page = mountPage(m.container, fakeWs(), hostedApi);
@@ -192,6 +193,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
       changePassword: vi.fn(async () => ({ warning, sessions_revoked: 0 })),
       getRecoveryKitStatus: vi.fn(async () => ({ enrolled: false, used_at: null })),
       getSessions: vi.fn(async () => []),
+      getApiTokens: vi.fn(async () => []),
     } as unknown as ApiClient;
 
     m.page = mountPage(m.container, fakeWs(), hostedApi);
@@ -217,7 +219,11 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     changeBtn.click();
 
     await vi.waitFor(() => {
-      expect(hostedApi.changePassword).toHaveBeenCalledWith("old-password", "new-password-1");
+      expect(hostedApi.changePassword).toHaveBeenCalledWith(
+        "old-password",
+        "new-password-1",
+        false,
+      );
       const toast = m.container.querySelector('[data-testid="toast"]');
       expect(toast).not.toBeNull();
       expect(toast!.classList.contains("toast-warning")).toBe(true);
@@ -411,6 +417,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
       getSession: () => ({ signal: new AbortController().signal }),
       getRecoveryKitStatus: vi.fn(async () => ({ enrolled: false, used_at: null })),
       getSessions: vi.fn(async () => []),
+      getApiTokens: vi.fn(async () => []),
       revokeAllSessions: vi.fn(async () => ({
         sessions_revoked: 2,
         current_session_revoked: true,

@@ -30,6 +30,22 @@ WHERE id = ? AND revoked_at IS NULL;
 UPDATE api_tokens SET revoked_at = datetime('now')
 WHERE label = ? AND revoked_at IS NULL;
 
+-- name: ListUserActiveAPITokens :many
+-- The account's own live tokens for its Sessions screen. Never selects
+-- token_hash. Revoked and expired rows are left out: they no longer work.
+SELECT id, label, created_at, last_used_at, expires_at
+FROM api_tokens
+WHERE user_id = ?
+  AND revoked_at IS NULL
+  AND (expires_at IS NULL OR strftime('%s', expires_at) > strftime('%s', 'now'))
+ORDER BY id DESC;
+
+-- name: RevokeOwnAPIToken :execresult
+-- Revokes one token only when it belongs to the given account, so a caller
+-- cannot touch another account's token by guessing its id.
+UPDATE api_tokens SET revoked_at = datetime('now')
+WHERE id = ? AND user_id = ? AND revoked_at IS NULL;
+
 -- name: RevokeUserAPITokens :execresult
 -- Sign-out-everywhere and account recovery revoke every live token of the
 -- account along with its sessions.

@@ -207,7 +207,7 @@ func TestAuditCoverage_ServiceMutations(t *testing.T) {
 			_, database := newTestModerationService(t)
 			hash, _ := auth.HashPassword("NewPassw0rd!")
 			rec := audittest.Install(t, database)
-			if _, err := NewUserService(database).ChangePassword(context.Background(), 4, hash, 0); err != nil {
+			if _, err := NewUserService(database).ChangePassword(context.Background(), 4, hash, 0, false); err != nil {
 				t.Fatalf("ChangePassword: %v", err)
 			}
 			return rec, []string{"NewPassw0rd!", hash}
