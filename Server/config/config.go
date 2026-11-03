@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -191,6 +192,10 @@ type VoiceConfig struct {
 	LiveKitAPISecret  string `yaml:"livekit_api_secret"` // LiveKit API secret
 	LiveKitURL        string `yaml:"livekit_url"`        // LiveKit server WebSocket URL (e.g. ws://localhost:7880)
 	LiveKitBinaryPath string `yaml:"livekit_binary"`     // path to livekit-server binary; empty = don't auto-start
+	// LiveKitMetricsURL is the http(s) address of LiveKit's Prometheus page
+	// (livekit.yaml `prometheus: port:`), e.g. http://livekit:6789/metrics. The
+	// admin Dashboard's LiveKit card reads it; empty = off.
+	LiveKitMetricsURL string `yaml:"livekit_metrics_url"`
 	// AutoDownloadLiveKit downloads a pinned, checksum-verified livekit-server
 	// release into <data_dir>/livekit/ and runs it as the companion process when
 	// no livekit_binary is configured. Fresh installs enable it in the generated
@@ -594,6 +599,9 @@ voice:
                               # no livekit_binary is set (verified against the
                               # official LiveKit release checksums; stored in data/livekit/)
   # livekit_version: ""            # override the pinned livekit-server version (e.g. "1.13.11")
+  # livekit_metrics_url: ""        # LiveKit's stats page for the admin Dashboard card, e.g.
+  #                                # "http://livekit:6789/metrics" (needs prometheus: port: 6789
+  #                                # in livekit.yaml); empty = off
   # livekit_binary: ""             # path to an existing livekit-server binary; set this to
   #                                # skip auto-download and run your own build
   # node_ip: ""                    # public IP for WebRTC media; empty = auto-detect (pin only if detection fails)
@@ -808,6 +816,14 @@ func normalizeUploadExtensions(u *UploadConfig) (err error) {
 		return fmt.Errorf("upload.allowed_extensions: %w", err)
 	}
 	return nil
+}
+
+// ValidMetricsURL reports whether raw is an absolute http or https URL. Load
+// keeps whatever the operator wrote; the app warns and leaves the LiveKit card
+// off when this is false.
+func ValidMetricsURL(raw string) bool {
+	u, err := url.Parse(raw)
+	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
 }
 
 func warnInvalidCIDRs(key string, cidrs []string) {

@@ -111,6 +111,7 @@ input,select,textarea{font-family:inherit;border:none}
 .health-spark-line{fill:none;stroke:var(--accent);stroke-width:1.5;vector-effect:non-scaling-stroke}
 .health-spark-area{fill:var(--accent-glow);stroke:none}
 .health-tile.warn .health-spark-line{stroke:var(--text-warning)}.health-tile.crit .health-spark-line{stroke:var(--text-danger)}
+.lk-status{margin-bottom:12px;font-size:13px}.section-card-body>.health-row{margin-bottom:0}
 .health-meter{display:flex;height:6px;margin-top:auto;background:var(--bg-input);border-radius:var(--radius-pill);overflow:hidden}
 .health-meter span{display:block;height:100%}
 .health-meter .m-other{background:var(--border-control)}.health-meter .m-uploads{background:var(--accent)}

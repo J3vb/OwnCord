@@ -37,5 +37,9 @@ func init() {
 		"ws auth: recording the session identity key failed":                                              "ws_auth_record_session_identity_key_failed",
 		"ws voice_e2ee_announce: identity_public_key ignored, not a string":                               "ws_voice_e2ee_announce_identity_key_ignored_not_string",
 		"ws voice_e2ee_announce: identity_public_key ignored, invalid":                                    "ws_voice_e2ee_announce_identity_key_ignored_invalid",
+		"lkstats: LiveKit stats page not reachable":                                                       "lkstats_livekit_stats_not_reachable",
+		"lkstats: LiveKit stats page has no LiveKit metrics":                                              "lkstats_livekit_stats_not_set_up",
+		"config: voice.livekit_metrics_url is not an http(s) URL":                                         "config_livekit_metrics_url_invalid",
+		"livekit stats sampler did not stop before the close budget ran out":                              "livekit_stats_sampler_stop_timeout",
 	})
 }

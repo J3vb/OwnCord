@@ -448,4 +448,126 @@ describe("Server/admin/static — Dashboard health row", () => {
       expect(host.querySelector("#slowRequests tbody")).toBeNull();
     });
   });
+  describe("LiveKit card", () => {
+    const LK = {
+      configured: true,
+      status: "ok",
+      since: T - 600,
+      interval_seconds: 10,
+      window_seconds: 3600,
+      current: {
+        t: T,
+        cpu: 142.5,
+        memory: 209_715_200,
+        rooms: 1,
+        participants: 4,
+        tracks_published: 6,
+        tracks_subscribed: 18,
+        bytes_in_per_sec: 250_000,
+        bytes_out_per_sec: 1_250_000,
+      },
+      series: Array.from({ length: 12 }, (_, i) => ({
+        t: T - (11 - i) * 10,
+        cpu: 100 + i,
+        memory: 200_000_000 + i * 1000,
+        rooms: 1,
+        participants: 4,
+        tracks_published: 6,
+        tracks_subscribed: 18,
+        bytes_in_per_sec: 250_000,
+        bytes_out_per_sec: 1_250_000,
+      })),
+    };
+    const answer =
+      (lk: unknown) =>
+      (p: string): unknown =>
+        p.startsWith("/system/livekit") ? lk : p.startsWith("/system/stats") ? STATS : {};
+    const body = (host: Element) => host.querySelector("#livekitCard")!;
+
+    it("shows status, CPU as a share of one core, memory, usage and traffic", async () => {
+      const paths: string[] = [];
+      const { host } = await openDashboard(paths, answer(LK));
+      expect(paths).toContain("/system/livekit?window=1h");
+      expect(body(host).querySelector(".badge")?.textContent).toBe("Reachable");
+      expect(text(host, "lkCpu", "health-value")).toBe("143%");
+      expect(text(host, "lkCpu", "health-sub")).toBe("100% = one core");
+      expect(tile(host, "lkCpu").querySelector(".health-spark-line")).toBeTruthy();
+      expect(text(host, "lkMemory", "health-value")).toBe("200.0 MB");
+      expect(tile(host, "lkMemory").querySelector(".health-spark-line")).toBeTruthy();
+      expect(text(host, "lkUsage", "health-value")).toBe("1 room");
+      expect(text(host, "lkUsage", "health-sub")).toBe(
+        "4 participants · 6 tracks published · 18 tracks subscribed",
+      );
+      expect(text(host, "lkTraffic", "health-value")).toBe("In 2.00 Mbit/s");
+      expect(text(host, "lkTraffic", "health-sub")).toBe("Out 10.0 Mbit/s");
+    });
+
+    it("says since when LiveKit is not reachable and shows dashes, never zeros", async () => {
+      const { host } = await openDashboard(
+        [],
+        answer({
+          ...LK,
+          status: "unreachable",
+          current: { t: T, cpu: null, memory: null, rooms: null },
+          series: [],
+        }),
+      );
+      expect(body(host).querySelector(".badge")?.textContent).toBe("Not reachable");
+      expect(body(host).querySelector("#livekitStatus")?.textContent).toMatch(
+        /since \d{1,2}:\d{2}/,
+      );
+      expect(text(host, "lkCpu", "health-value")).toBe("–");
+      expect(text(host, "lkMemory", "health-value")).toBe("–");
+      expect(text(host, "lkUsage", "health-value")).toBe("–");
+    });
+
+    it("explains how to turn it on when the stats page has no LiveKit figures", async () => {
+      const { host } = await openDashboard(
+        [],
+        answer({ ...LK, status: "not_set_up", current: null, series: [] }),
+      );
+      expect(body(host).querySelector(".badge")?.textContent).toBe("Not set up");
+      expect(body(host).textContent).toContain("prometheus: port: 6789");
+      expect(body(host).textContent).toContain("voice.livekit_metrics_url");
+    });
+
+    it("shows the how-to when not configured, and points built-in LiveKit at the Attention panel", async () => {
+      let { host } = await openDashboard([], answer({ configured: false, managed: false }));
+      expect(body(host).textContent).toContain("prometheus: port: 6789");
+      expect(body(host).querySelector(".health-tile")).toBeNull();
+
+      dom?.window?.close();
+      ({ host } = await openDashboard([], answer({ configured: false, managed: true })));
+      expect(body(host).textContent).toContain("Attention panel");
+      expect(body(host).textContent).not.toContain("prometheus");
+    });
+
+    it("renders a status from the server as text, never markup", async () => {
+      const { host } = await openDashboard(
+        [],
+        answer({ ...LK, status: "<img src=x onerror=alert(1)>" }),
+      );
+      expect(body(host).querySelector("img")).toBeNull();
+      expect(body(host).textContent).toContain("<img");
+    });
+
+    it("keeps the last answer and the poll when its read fails", async () => {
+      let fail = false;
+      const booted = await boot([], (p) => {
+        if (p.startsWith("/system/livekit")) {
+          if (fail) throw new Error("down");
+          return LK;
+        }
+        return p.startsWith("/system/stats") ? STATS : {};
+      });
+      dom = booted.dom;
+      const { bridge } = booted;
+      bridge.state.me = { permissions: ADMINISTRATOR };
+      render(dom, await bridge.renderDashboard());
+      fail = true;
+      await bridge.pollHealth(bridge.health.seq, "tok");
+      expect(dom.window.document.querySelector("#lkCpu .health-value")?.textContent).toBe("143%");
+      expect(bridge.health.timer).not.toBeNull();
+    });
+  });
 });

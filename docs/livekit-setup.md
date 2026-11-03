@@ -64,6 +64,15 @@ You can also set them as `OWNCORD_VOICE_LIVEKIT_API_KEY` and
 **An older `livekit.yaml`** still works, with two catches: a `webhook:` block
 must use the same key as `.env`, and a `key_file:` line must go.
 
+**LiveKit health on the Dashboard.** The compose file sets
+`voice.livekit_metrics_url` to `http://livekit:6789/metrics`, and
+`livekit.yaml.example` turns that page on with `prometheus: port: 6789`. The
+admin Dashboard then shows a LiveKit card: whether it is reachable, its CPU and
+memory, and rooms, participants, tracks and traffic. The port is not published,
+so only containers on the compose network can reach it. An older `livekit.yaml`
+needs the two `prometheus:` lines added (then `docker compose restart livekit`);
+until then the card says "Not set up".
+
 **Voice needs your public address.** Keep `use_external_ip: true` in
 `livekit.yaml`. LiveKit looks up your address each time it starts, so after
 your public address changes, run `docker compose restart livekit`. Only on a
@@ -92,6 +101,7 @@ Or keep the server in charge but use your own copy of the program: set
 | `livekit_api_secret`    | Secret for voice sign-in, at least 32 characters                 | random if unset       |
 | `livekit_url`           | Where LiveKit listens                                            | `ws://localhost:7880` |
 | `livekit_binary`        | Path to your own `livekit-server` program                        | empty                 |
+| `livekit_metrics_url`   | LiveKit's stats page, for the Dashboard's LiveKit card           | empty (card off)      |
 | `auto_download_livekit` | Download and run LiveKit when no program is set                  | on in a new config    |
 | `livekit_version`       | A different LiveKit version to download                          | built-in version      |
 | `node_ip`               | Fixed public address for voice. Only when detection cannot work. | empty (detect)        |

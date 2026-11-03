@@ -12,6 +12,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/diskutil"
+	"github.com/J3vb/OwnCord/Server/lkstats"
 	"github.com/J3vb/OwnCord/Server/plugin"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/storage"
@@ -134,10 +135,25 @@ func StartRuntime(cfg *config.Config, database *db.DB, pluginRegistry *plugin.Re
 
 	return api.Runtime{
 		Hub: hub, Limiter: limiter, Services: svc, VoiceEnabled: voiceEnabled, MetricsWindows: windows,
-		SystemStats: sysstats.NewSampler(),
-		Auth:        authSvc, Storage: in.Storage,
+		SystemStats:  sysstats.NewSampler(),
+		LiveKitStats: liveKitStats(cfg),
+		Auth:         authSvc, Storage: in.Storage,
 		Updater: updater.NewUpdater(in.Version, cfg.GitHub.Token, cfg.GitHub.Owner, cfg.GitHub.Repo),
 	}, nil
+}
+
+// liveKitStats returns the sampler for LiveKit's stats page, or nil when
+// voice.livekit_metrics_url is empty or not an http(s) URL.
+func liveKitStats(cfg *config.Config) *lkstats.Sampler {
+	raw := cfg.Voice.LiveKitMetricsURL
+	if raw == "" {
+		return nil
+	}
+	if !config.ValidMetricsURL(raw) {
+		slog.Warn("config: voice.livekit_metrics_url is not an http(s) URL", "effect", "the LiveKit card is off")
+		return nil
+	}
+	return lkstats.New(raw, slog.Default())
 }
 
 // storageLimits is the two bounds on the upload service: the per-user quota

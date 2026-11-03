@@ -53,6 +53,7 @@ and only when it changes something a contributor or fork holder must do
 
 ### Added
 
+- The admin Dashboard has a LiveKit card for setups where LiveKit runs as its own container (the Docker compose stack): whether it is reachable, its CPU (100% is one core) and memory with one-hour lines, and rooms, participants, tracks and traffic. If LiveKit stops answering, the card says "Not reachable since" the time. The compose file turns it on; with your own setup, add `prometheus: port: 6789` to `livekit.yaml` and set `voice.livekit_metrics_url`. Shown to admins with View Diagnostics.
 - Your own camera (call tiles, pop-out and the settings preview) now shows you exactly as others see you, with your right hand on the right; before, it was always mirrored. A new "Mirror my camera preview" switch in Voice & Video (off by default) brings the mirror back. Others always see you the right way round.
 - While you are in a DM call, that person's avatar stays in the server rail under Home with a green call badge, so you can see the call and get back to it in one click from any server.
 - On a phone, the "+" in the message box now opens a sheet with Take photo, Gallery and Files, so you can take a photo with the camera and send it straight away, or pick several photos and videos from the gallery. On a computer "+" still opens the file picker.
