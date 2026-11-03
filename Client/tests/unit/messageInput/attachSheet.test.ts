@@ -120,6 +120,39 @@ describe("MessageInput attach sheet", () => {
       comp.destroy?.();
     });
 
+    it("an Upload tile left open after the server turns uploads off opens nothing", () => {
+      const { comp, attachBtn } = mountUploader();
+      const click = vi.spyOn(inputOf(container, "files"), "click").mockImplementation(() => {});
+      attachBtn.click();
+      authStore.setState((s) => ({ ...s, uploadPolicy: { max_upload_bytes: 0 } }));
+      menuTile("files").click();
+      expect(click).not.toHaveBeenCalled();
+      expect(document.activeElement).toBe(attachBtn);
+      authStore.setState((s) => ({ ...s, uploadPolicy: null }));
+      comp.destroy?.();
+    });
+
+    it("closes when Tab moves focus out of it", () => {
+      const { comp, attachBtn } = mountUploader();
+      attachBtn.click();
+      menuTile("files").dispatchEvent(
+        new FocusEvent("focusout", { bubbles: true, relatedTarget: attachBtn }),
+      );
+      expect(container.querySelector(".attach-menu")).toBeNull();
+      comp.destroy?.();
+    });
+
+    it("closes when the window crosses onto the phone layout, so the next + opens the sheet", () => {
+      const { comp, attachBtn } = mountUploader();
+      attachBtn.click();
+      usePhone();
+      window.dispatchEvent(new Event("resize"));
+      expect(container.querySelector(".attach-menu")).toBeNull();
+      attachBtn.click();
+      expect(sheet()).not.toBeNull();
+      comp.destroy?.();
+    });
+
     it("leaves + disabled when uploads are off and the menu has nothing else", () => {
       authStore.setState((s) => ({ ...s, uploadPolicy: { max_upload_bytes: 0 } }));
       const { comp, attachBtn } = mountUploader();

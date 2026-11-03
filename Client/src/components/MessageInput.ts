@@ -876,6 +876,8 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     applyButtonPrefs();
     onPrefChange(COMPOSER_BUTTON_PREF_KEYS, applyButtonPrefs, st.signal);
     onPhoneLayoutChange(applyButtonPrefs, st.signal);
+    // The open menu belongs to the old layout; the next "+" opens the new one.
+    onPhoneLayoutChange(() => st.closeAttachMenu?.(), st.signal);
     st.slowModeNoteEl = createElement("div", {
       class: "composer-slow-note",
       "data-testid": "slow-mode-note",

@@ -223,8 +223,11 @@ export function createAttachPickers(options: AttachPickersOptions): AttachPicker
     };
     const closeNow = (): void => closeMenu();
     closeOpen = closeNow;
+    // A tile hands focus back to "+" first, so a dialog it opens restores
+    // focus there rather than to the page.
+    const closeForTile = (): void => closeMenu(true);
     for (const tile of tiles) {
-      const btn = tileButton(tile, closeNow, life.signal);
+      const btn = tileButton(tile, closeForTile, life.signal);
       btn.setAttribute("role", "menuitem");
       menu.appendChild(btn);
     }
@@ -238,6 +241,15 @@ export function createAttachPickers(options: AttachPickersOptions): AttachPicker
         e.preventDefault();
         e.stopPropagation();
         closeMenu(true);
+      },
+      { signal: life.signal },
+    );
+    // Tab out of the menu closes it, as a click outside does.
+    menu.addEventListener(
+      "focusout",
+      (e) => {
+        const next = e.relatedTarget;
+        if (next instanceof Node && !menu.contains(next)) closeMenu();
       },
       { signal: life.signal },
     );
