@@ -29,6 +29,7 @@ type configOverridesFixture struct {
 	dataDir  string
 	cfg      *config.Config
 	restarts chan string
+	cfgPath  string
 }
 
 func newConfigOverridesFixture(t *testing.T) configOverridesFixture {
