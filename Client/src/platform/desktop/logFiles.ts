@@ -25,7 +25,19 @@ const LOG_SUBDIR = "client-logs";
 const NATIVE_LOG_PREFIX = "owncord-client";
 const NATIVE_LOG_TAIL_BYTES = 2 << 20; // 2 MB
 
+// The diagnostic event log (lib/diagnostics/eventLog.ts) is written beside the
+// logs as events-YYYY-MM-DD.jsonl so it survives a crash; the support bundle
+// reads it with the logs. Its files rotate on their own count, and a day's
+// file stops growing at a fixed size so a long reconnect loop cannot fill the disk.
+const EVENTS_PREFIX = "events-";
+const MAX_EVENT_FILES = 2;
+const MAX_EVENT_BYTES_PER_DAY = 2 << 20; // 2 MB
+
 let logDir: string | null = null;
+let eventBuffer: string[] = [];
+let eventDate: string | null = null;
+let eventBytes = 0;
+let stopEvents: (() => void) | null = null;
 let currentDate: string | null = null;
 let buffer: string[] = [];
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -36,6 +48,7 @@ let writeChain: Promise<void> = Promise.resolve();
 
 export async function clearPendingPersistedLogs(): Promise<void> {
   buffer = [];
+  eventBuffer = [];
   if (flushTimer !== null) {
     clearTimeout(flushTimer);
     flushTimer = null;
@@ -55,6 +68,7 @@ function logFilePath(dir: string, date: string): string {
 
 /** Write the buffered log lines; always runs on `writeChain`. */
 async function doFlush(): Promise<void> {
+  await flushEvents();
   if (buffer.length === 0 || !logDir) return;
 
   const date = today();
@@ -72,6 +86,67 @@ async function doFlush(): Promise<void> {
   } catch (err) {
     // Log persistence failure shouldn't crash the app.
     log.error("flush failed", err);
+  }
+}
+
+/** Write the buffered event lines to today's events file. */
+async function flushEvents(): Promise<void> {
+  if (eventBuffer.length === 0 || !logDir) return;
+  const date = today();
+  if (date !== eventDate) {
+    eventDate = date;
+    eventBytes = 0;
+  }
+  const lines = eventBuffer.join("\n") + "\n";
+  eventBuffer = [];
+  if (eventBytes + lines.length > MAX_EVENT_BYTES_PER_DAY) return;
+  eventBytes += lines.length;
+  try {
+    await writeTextFile(`${logDir}/${EVENTS_PREFIX}${date}.jsonl`, lines, { append: true });
+  } catch (err) {
+    log.error("event flush failed", err);
+  }
+}
+
+function onEventLine(line: string): void {
+  if (!initialized) return;
+  eventBuffer.push(line);
+  scheduleFlush();
+}
+
+/** Delete the events files only (the event log was turned off). */
+async function clearEventFiles(): Promise<void> {
+  eventBuffer = [];
+  await writeChain;
+  if (!logDir) return;
+  try {
+    for (const entry of await readDir(logDir)) {
+      if (!entry.isDirectory && entry.name?.startsWith(EVENTS_PREFIX)) {
+        // oxlint-disable-next-line no-await-in-loop -- at most MAX_EVENT_FILES files
+        await remove(`${logDir}/${entry.name}`);
+      }
+    }
+  } catch (err) {
+    log.warn("clearing event files failed", err);
+  }
+}
+
+/** Follow the event log once its lazy module loads: what it holds so far, then each new line. */
+async function attachEventLog(): Promise<void> {
+  try {
+    const eventLog = await import("@lib/diagnostics/eventLog");
+    if (!initialized || stopEvents !== null) return;
+    for (const line of eventLog.getEventLines()) eventBuffer.push(line);
+    const offLine = eventLog.onEventLine(onEventLine);
+    const offClear = eventLog.onEventLogCleared(() => void clearEventFiles());
+    stopEvents = () => {
+      offLine();
+      offClear();
+      stopEvents = null;
+    };
+    if (eventBuffer.length > 0) scheduleFlush();
+  } catch (err) {
+    log.warn("event log unavailable", err);
   }
 }
 
@@ -99,13 +174,15 @@ async function rotateOldFiles(): Promise<void> {
       .filter((e) => e.name?.endsWith(".jsonl") && !e.isDirectory)
       .map((e) => e.name)
       .toSorted((a, b) => a.localeCompare(b));
-
-    if (jsonlFiles.length > MAX_LOG_FILES) {
-      const toRemove = jsonlFiles.slice(0, jsonlFiles.length - MAX_LOG_FILES);
-      for (const file of toRemove) {
-        // oxlint-disable-next-line no-await-in-loop -- sequential file deletion to avoid overwhelming the filesystem
-        await remove(`${logDir}/${file}`);
-      }
+    const logs = jsonlFiles.filter((name) => !name.startsWith(EVENTS_PREFIX));
+    const eventFiles = jsonlFiles.filter((name) => name.startsWith(EVENTS_PREFIX));
+    const toRemove = [
+      ...logs.slice(0, Math.max(0, logs.length - MAX_LOG_FILES)),
+      ...eventFiles.slice(0, Math.max(0, eventFiles.length - MAX_EVENT_FILES)),
+    ];
+    for (const file of toRemove) {
+      // oxlint-disable-next-line no-await-in-loop -- sequential file deletion to avoid overwhelming the filesystem
+      await remove(`${logDir}/${file}`);
     }
   } catch (err) {
     log.warn("rotation failed", err);
@@ -163,9 +240,11 @@ async function init(): Promise<() => void> {
     if (buffer.length > 0) {
       scheduleFlush();
     }
+    void attachEventLog();
 
     return () => {
       removeListener(); // stop receiving new entries first
+      stopEvents?.();
       initialized = false;
       if (flushTimer !== null) {
         clearTimeout(flushTimer);

@@ -221,6 +221,10 @@ export const shards = {
     "src/lib/text/statusChoices.ts",
     "src/lib/text/ime.ts",
     "src/lib/diagnostics/eventCodes.ts",
+    "src/lib/diagnostics/eventLog.ts",
+    "src/lib/diagnostics/eventSink.ts",
+    "src/lib/diagnostics/identifiers.ts",
+    "src/lib/diagnostics/appEvents.ts",
   ],
   "lib-rest-2": [
     "src/lib/presence/autoIdle.ts",
@@ -435,6 +439,8 @@ export const shards = {
     "src/features/reports/myReports.ts",
     "src/features/moderation/AppealDetail.ts",
     "src/lib/voice/livekitDiagnostics.ts",
+    "src/lib/voice/voiceEventLog.ts",
+    "src/lib/voice/cameraStallWatchdog.ts",
   ],
   "safety-moderation-5": [
     "src/features/uploads/myUploadsTab.ts",
