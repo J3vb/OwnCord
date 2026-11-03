@@ -492,12 +492,14 @@ describe("LogsTab", () => {
       return el;
     }
 
-    it("states that nothing is uploaded and that logs are not redacted", () => {
+    it("states that nothing is uploaded and that redaction is not a reason to skip reading", () => {
       const el = build();
       expect(el.textContent).toContain(
         "Saves a zip of your logs, diagnostics and settings on this computer. Nothing is uploaded.",
       );
-      expect(el.textContent).toContain("Log lines are not redacted, so read them before sharing.");
+      expect(el.textContent).toContain(
+        "Tokens, links, addresses and other secrets are removed first, but read it before sharing.",
+      );
       el.remove();
     });
 
