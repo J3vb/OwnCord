@@ -1,5 +1,5 @@
 {
-  "nextId": 546,
+  "nextId": 547,
   "findings": [
     {
       "id": "OC-0001",
@@ -12588,6 +12588,29 @@
     },
     {
       "id": "OC-0545",
+      "title": "An E2EE key offer could be relayed after its sender stopped being the call's key holder",
+      "file": "Server/ws/voice_e2ee.go",
+      "line": 299,
+      "severity": "low",
+      "why": "The offer handler checked the recorded key holder, then delivery only checked that the target was still in the channel, so a lower-uid join completing (or the sender leaving) between the two steps let a former holder's offer through and the call re-keyed twice.",
+      "repro": "User 5 holds the key in a call with user 7 and sends an offer; user 3 joins before the offer is delivered; user 7 still receives user 5's offer.",
+      "evidence": "Server/ws/voice_e2ee_offer_holder_test.go (TestVoiceE2EEOffer_DeliveryRechecksKeyHolder).",
+      "suggestedFix": "At delivery, hold the key-holder lock across the membership checks and send, and relay only if the sender is still the recorded holder with a connection in the channel.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/ws/voice_e2ee_offer_holder_test.go",
+        "revertProof": "fail (without the delivery holder check the completed lower-uid join case still delivers the offer)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-03",
+      "hunt": "server-review-2026-11-03",
+      "lens": "ws-voice",
+      "finder": "claude",
+      "fixedDate": "2026-11-03"
+    },
+    {
+      "id": "OC-0546",
       "title": "A voice leave made while the chat socket was down left a ghost voice membership after the socket resumed",
       "file": "Server/ws/voice_grace.go",
       "line": 330,

@@ -45,7 +45,7 @@ func planRows(p db.ChannelSyncPlan) []db.OverrideRow {
 // verifies the rows it is shown were already checked and runs the escalation guard
 // over their union. A refusal is also recorded in *refused for the caller to
 // answer unwrapped.
-func (s *ChannelService) prepareSync(ctx context.Context, actorRole *db.Role, channelID, categoryID int64, refused *error) (db.ChannelSyncGuard, error) {
+func (s *channelOverrides) prepareSync(ctx context.Context, actorRole *db.Role, channelID, categoryID int64, refused *error) (db.ChannelSyncGuard, error) {
 	cp, err := s.catPermStore()
 	if err != nil {
 		return nil, err
@@ -109,7 +109,7 @@ func (s *ChannelService) prepareSync(ctx context.Context, actorRole *db.Role, ch
 
 // effectOfPlan names who to invalidate after a replace: the holders of every
 // role, and every member, whose row was removed or written.
-func (s *ChannelService) effectOfPlan(ctx context.Context, plan db.ChannelSyncPlan) PermEffect {
+func (s *channelOverrides) effectOfPlan(ctx context.Context, plan db.ChannelSyncPlan) PermEffect {
 	roleIDs := make([]int64, 0, len(plan.Removed.Roles)+len(plan.Written.Roles))
 	userIDs := make([]int64, 0, len(plan.Removed.Users)+len(plan.Written.Users))
 	for _, r := range append(append([]db.OverrideRow{}, plan.Removed.Roles...), plan.Written.Roles...) {
@@ -122,7 +122,7 @@ func (s *ChannelService) effectOfPlan(ctx context.Context, plan db.ChannelSyncPl
 }
 
 // auditSync writes the channel_perms_sync audit row and the log line.
-func (s *ChannelService) auditSync(ctx context.Context, actorID int64, ch *db.Channel, plan db.ChannelSyncPlan) {
+func (s *channelOverrides) auditSync(ctx context.Context, actorID int64, ch *db.Channel, plan db.ChannelSyncPlan) {
 	slog.Info("channel permissions synced", "actor_id", actorID, "channel_id", ch.ID, "category_id", plan.CategoryID,
 		"removed", len(plan.Removed.Roles)+len(plan.Removed.Users), "written", len(plan.Written.Roles)+len(plan.Written.Users))
 	db.WriteAudit(ctx, s.st, actorID, "channel_perms_sync", "channel", ch.ID,
@@ -134,7 +134,7 @@ func (s *ChannelService) auditSync(ctx context.Context, actorID int64, ch *db.Ch
 // and member overrides are replaced with the template's and it is marked synced,
 // in one transaction. ErrBadRequest when the channel has no category; ErrForbidden
 // when the actor could not have written the rows removed or written.
-func (s *ChannelService) SyncChannelPermissions(ctx context.Context, actorID int64, actorRole *db.Role, ch *db.Channel) (PermEffect, error) {
+func (s *channelOverrides) SyncChannelPermissions(ctx context.Context, actorID int64, actorRole *db.Role, ch *db.Channel) (PermEffect, error) {
 	cp, err := s.catPermStore()
 	if err != nil {
 		return PermEffect{}, err
@@ -180,7 +180,7 @@ func mapSyncErr(err, refused error) error {
 // its category's template: the holders of every role and every member the template
 // has a row for. Without it a connected member's cached overrides would not know
 // the new channel's rows until the cache expires.
-func (s *ChannelService) templateEffect(ctx context.Context, categoryID int64) PermEffect {
+func (s *channelOverrides) templateEffect(ctx context.Context, categoryID int64) PermEffect {
 	if categoryID == 0 || s.cperm == nil {
 		return PermEffect{}
 	}
@@ -229,7 +229,7 @@ func (s *ChannelService) AdminListChannelsSynced(ctx context.Context) ([]AdminCh
 
 // prepareUpdateSync arms the update's sync guard when the request asked for a
 // permission sync. It is a no-op otherwise.
-func (s *ChannelService) prepareUpdateSync(ctx context.Context, req AdminChannelUpdate, channelID, categoryID int64, update *db.ChannelUpdate, refused *error) error {
+func (s *channelOverrides) prepareUpdateSync(ctx context.Context, req AdminChannelUpdate, channelID, categoryID int64, update *db.ChannelUpdate, refused *error) error {
 	if !req.SyncPermissions {
 		return nil
 	}
@@ -247,7 +247,7 @@ func (s *ChannelService) prepareUpdateSync(ctx context.Context, req AdminChannel
 // afterUpdateSync audits a committed sync and drops the cached permissions of
 // everyone its replaced rows name. The effect says whether any row changed, so the
 // caller refreshes the channel's audience after re-reading the row.
-func (s *ChannelService) afterUpdateSync(ctx context.Context, actorID int64, ch *db.Channel, req AdminChannelUpdate, plan db.ChannelSyncPlan) PermEffect {
+func (s *channelOverrides) afterUpdateSync(ctx context.Context, actorID int64, ch *db.Channel, req AdminChannelUpdate, plan db.ChannelSyncPlan) PermEffect {
 	if !req.SyncPermissions {
 		return PermEffect{}
 	}
