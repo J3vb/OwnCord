@@ -119,8 +119,8 @@ type ProfileBroadcaster interface {
 }
 
 // revokeAllSessionsRateLimitPerMinute bounds DELETE /api/v1/users/me/sessions
-// per account. Every call revokes the caller's own session or API token, so the
-// cap bounds how fast a fresh sign-in can repeat it.
+// per account. Every call revokes the caller's own session, so the cap bounds
+// how fast a fresh sign-in can repeat it.
 const revokeAllSessionsRateLimitPerMinute = 5
 
 // MountProfileRoutes registers the authenticated user profile endpoints;
@@ -276,8 +276,13 @@ func parseUpdateProfileRequest(w http.ResponseWriter, r *http.Request, selfHosts
 	}
 
 	// Validate the identity key before any write so the request is
-	// all-or-nothing.
+	// all-or-nothing. A device key belongs to a login session, so an API token
+	// may edit the profile but not publish one.
 	if req.IdentityPublicKey != nil {
+		if p, _ := principal(r); p.Session == nil {
+			writeLoginSessionRequired(w)
+			return req, false
+		}
 		trimmed := strings.TrimSpace(*req.IdentityPublicKey)
 		if err := service.ValidateIdentityKey(trimmed); err != nil {
 			writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, err.Error())
@@ -298,15 +303,6 @@ func handleUpdateProfile(svc *service.Services, broadcaster ProfileBroadcaster, 
 		req, ok := parseUpdateProfileRequest(w, r, selfHosts, user.Username)
 		if !ok {
 			return
-		}
-		// A device key belongs to a login session, so an API token may edit the
-		// profile but not publish one. Refused before any write: the request is
-		// all-or-nothing.
-		if req.IdentityPublicKey != nil {
-			if p, _ := principal(r); p.Session == nil {
-				writeLoginSessionRequired(w)
-				return
-			}
 		}
 
 		updated, err := svc.Users.UpdateProfile(r.Context(), user.ID, service.ProfilePatch{
@@ -561,6 +557,8 @@ func handleRevokeAllSessions(svc *service.Services, limiter *auth.RateLimiter, b
 				d.DisconnectRevokedUser(user.ID)
 			}
 		}
+		// requireLoginSession guarantees sess; the check keeps the handler from
+		// claiming a revoke it was not given.
 		writeJSON(w, http.StatusOK, revokeAllSessionsResponse{
 			SessionsRevoked: n,
 			CurrentRevoked:  sess != nil,

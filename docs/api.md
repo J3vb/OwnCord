@@ -1172,8 +1172,8 @@ anything was revoked. Limited to 5 calls per account per minute
 }
 ```
 
-`current_session_revoked` is `false` only for an API-token principal, which
-holds no session of its own.
+`current_session_revoked` is always `true`: the route takes a login session,
+and that session is among those revoked.
 
 ---
 
