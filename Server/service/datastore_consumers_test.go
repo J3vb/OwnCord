@@ -25,8 +25,9 @@ var storeConsumersAllowed = map[string]bool{
 // shrink lowers the number in the same change, and a growth is argued for in
 // review. Lower one when a service stops calling a method; never raise one to
 // fit a new feature without asking whether the call belongs in another service.
-// MessageService is pinned by part: its write path (st) and the three parts it
-// embeds, each with its own st.
+// A split service is pinned by part: MessageService's write path (st) and the
+// three parts it embeds, and UserService's core and its two parts, each with its
+// own st.
 var serviceStoreBaselines = map[reflect.Type]int{
 	reflect.TypeFor[AppealService]():         11,
 	reflect.TypeFor[AuthService]():           55,
@@ -55,7 +56,9 @@ var serviceStoreBaselines = map[reflect.Type]int{
 	reflect.TypeFor[ThreadService]():         7,
 	reflect.TypeFor[TokenService]():          9,
 	reflect.TypeFor[UploadService]():         15,
-	reflect.TypeFor[UserService]():           24,
+	reflect.TypeFor[UserService]():           17,
+	reflect.TypeFor[userSessions]():          5,
+	reflect.TypeFor[registrationQueue]():     4,
 	reflect.TypeFor[VoiceService]():          18,
 	reflect.TypeFor[WelcomeService]():        4,
 }

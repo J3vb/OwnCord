@@ -496,7 +496,7 @@ test.describe("messaging text", () => {
       "placeholder",
       "Search...",
     );
-    await page.locator("[data-testid='search-input']").focus();
+    await page.locator("[data-testid='search-input']").click();
     await expect(page.locator("[data-testid='search-overlay-input']")).toHaveAttribute(
       "placeholder",
       "Search messages...",
@@ -548,7 +548,7 @@ test.describe("messaging text", () => {
     await panel.locator(".pinned-panel__close").click();
 
     // The search overlay resolves its placeholder and label through the seam.
-    await page.locator("[data-testid='search-input']").focus();
+    await page.locator("[data-testid='search-input']").click();
     const searchInput = page.locator("[data-testid='search-overlay-input']");
     await expect(searchInput).toHaveAttribute(
       "placeholder",

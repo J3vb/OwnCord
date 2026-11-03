@@ -248,6 +248,7 @@ export const shards = {
     "src/lib/ui/contextMenu.ts",
     "src/features/developer-mode/developerTools.ts",
     "src/lib/ui/dialogOpen.ts",
+    "src/lib/ui/typeAhead.ts",
     "src/lib/prefs/keybindCatalog.ts",
     "src/lib/disposable.ts",
     "src/lib/text/discordTimestamp.ts",

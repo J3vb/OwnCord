@@ -50,6 +50,7 @@ and only when it changes something a contributor or fork holder must do
 ### Changed
 
 - The server no longer starts when `server.trusted_proxies` holds an entry that covers every address (such as `0.0.0.0/0` or `::/0`); the error names the entry. List only your reverse proxy's own address. The admin panel refuses the same values.
+- Clicking the channel topic in the header no longer opens a popup, and the topic no longer looks clickable. A long, cut-off topic still shows in full when you hover over it.
 - Account-security actions now need a normal sign-in: an API token can no longer change the password, turn two-factor on or off, issue recovery codes or a recovery kit, list or sign out sessions, delete the account or publish a device key (it gets `403 LOGIN_SESSION_REQUIRED`). Bots and scripts that read, post or edit the profile keep working.
 
 ### Added
@@ -61,9 +62,11 @@ and only when it changes something a contributor or fork holder must do
 - On a phone, the "+" in the message box now opens a sheet with Take photo, Gallery and Files, so you can take a photo with the camera and send it straight away, or pick several photos and videos from the gallery. On a computer "+" still opens the file picker.
 - The DM profile panel on a computer now also shows the person's @username (under a nickname) and custom status, and has a Report button.
 - On Linux, after the app closes unexpectedly, the next start adds what the system recorded about it (the crash report from `coredumpctl` and the kernel's crash line, where the system keeps them) to the app's log, so a support bundle shows what crashed. Nothing extra needs to be installed; without those tools it is skipped. The log also notes whether the camera or a screen share was running.
+- On Android 11 and newer, the next start adds to the app's log how the previous run ended (crash, killed for memory, not responding, stopped by you or by the system). The log also notes an app crash, the web view's page process going away, the call keeping alive in the background, and the app moving to the background and back, so a support bundle shows what happened. No message text, links or names are written.
 
 ### Fixed
 
+- The first letters typed right after clicking Search or pressing Ctrl+K landed in the message box. They now go into the search or the quick switcher. Tabbing through the channel header no longer opens Search; click it, press Enter on it or start typing.
 - In calls, cameras and screen shares could freeze for a few seconds every five minutes (each time the call's encryption key changed) and when someone left. A new key now reaches everyone before anyone sends with it, so the picture keeps going. Needs the server and every client in the call on this version; otherwise calls behave as before.
 - Role colours show again on names. A colour that is hard to read on the theme (for example pure red or blurple on Dark) used to turn the name plain white or black; now it keeps its colour and only gets lighter or darker until it reads well. With High Contrast on, a colour that does not read stays plain text as before.
 - On Linux, someone else's camera could stay black for the whole call when it started just as you turned your own camera on or off. It now shows as soon as it arrives.
