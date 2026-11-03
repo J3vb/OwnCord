@@ -396,16 +396,11 @@ describe("updateChatHeaderForDm", () => {
   });
 });
 
-describe("ChatHeader channel type icon and topic modal (N21)", () => {
+describe("ChatHeader channel type icon and topic", () => {
   let container: HTMLDivElement;
-  useMountContainer(
-    (c) => {
-      container = c;
-    },
-    () => {
-      document.querySelectorAll('[data-testid="channel-topic-modal"]').forEach((e) => e.remove());
-    },
-  );
+  useMountContainer((c) => {
+    container = c;
+  });
 
   it("shows the megaphone for an announcement channel and # for a text one", () => {
     const { element, refs } = buildChatHeader({ onTogglePins: vi.fn() });
@@ -420,37 +415,33 @@ describe("ChatHeader channel type icon and topic modal (N21)", () => {
     expect(refs.hashEl.textContent).toBe("#");
   });
 
-  it("opens the full topic as plain text on click; Escape and the close button close it", () => {
+  it("shows a long topic as plain text with the full text as tooltip, and opens nothing on click", () => {
     const { element, refs } = buildChatHeader({ onTogglePins: vi.fn() });
     container.appendChild(element);
     const topic = 'A very long topic <img src=x onerror="alert(1)"> <b>bold</b>';
     setChatHeaderTopic(refs, topic);
 
-    refs.topicEl.click();
-    const text = document.querySelector('[data-testid="channel-topic-text"]')!;
-    expect(text.textContent).toBe(topic);
-    expect(text.querySelector("img, b")).toBeNull();
-
-    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
-    expect(document.querySelector('[data-testid="channel-topic-modal"]')).toBeNull();
+    expect(refs.topicEl.textContent).toBe(topic);
+    expect(refs.topicEl.querySelector("img, b")).toBeNull();
+    expect(refs.topicEl.title).toBe(topic);
+    expect(refs.topicEl.getAttribute("role")).toBeNull();
+    expect(refs.topicEl.getAttribute("tabindex")).toBeNull();
 
     refs.topicEl.click();
-    (document.querySelector('[data-testid="channel-topic-close"]') as HTMLElement).click();
-    expect(document.querySelector('[data-testid="channel-topic-modal"]')).toBeNull();
+    expect(document.querySelector(".modal-overlay, [role='dialog']")).toBeNull();
   });
 
-  it("does nothing for an empty topic or a DM status line", () => {
+  it("clears the tooltip for an empty topic or a DM status line", () => {
     const { element, refs } = buildChatHeader({ onTogglePins: vi.fn() });
     container.appendChild(element);
 
+    setChatHeaderTopic(refs, "topic");
     setChatHeaderTopic(refs, "");
-    refs.topicEl.click();
-    expect(document.querySelector('[data-testid="channel-topic-modal"]')).toBeNull();
+    expect(refs.topicEl.hasAttribute("title")).toBe(false);
 
     setChatHeaderTopic(refs, "topic");
     updateChatHeaderForDm(refs, { username: "bob", status: "online" });
-    refs.topicEl.click();
-    expect(document.querySelector('[data-testid="channel-topic-modal"]')).toBeNull();
+    expect(refs.topicEl.hasAttribute("title")).toBe(false);
     expect(refs.topicEl.textContent).toBe("online");
   });
 
