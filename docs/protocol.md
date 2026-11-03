@@ -3383,6 +3383,12 @@ The key holder wraps the room key for a specific participant:
 }
 ```
 
+The server relays the offer only if, at the moment it sends it, the sender is
+still the channel's key holder and in the channel, and the target is still in
+the channel. The holder changes when a lower user ID's join completes or the
+holder leaves. Otherwise the offer is dropped without an error; the new key
+holder sends its own offers.
+
 `encrypted_key` is opaque to the server (base64 and length checks only). Its
 layout is:
 

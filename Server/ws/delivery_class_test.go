@@ -55,7 +55,7 @@ func deliveryClassCases() []deliveryClassCase {
 		{"VoiceStateEvent", VoiceStateEvent{voiceChannelID: 7, userID: 4, payload: p}, classVoiceVisibility, false, nil},
 		{"VoiceE2EEAnnounceEvent", VoiceE2EEAnnounceEvent{voiceChannelID: 7, excludeUserID: 5, payload: p}, classVoiceChannel, true,
 			map[int64]string{4: "normal"}},
-		{"VoiceE2EEOfferGuardedEvent", VoiceE2EEOfferGuardedEvent{voiceChannelID: 7, targetUserID: 4, payload: p}, classVoiceChannelGuarded, true,
+		{"VoiceE2EEOfferGuardedEvent", VoiceE2EEOfferGuardedEvent{voiceChannelID: 7, senderUserID: 4, targetUserID: 4, payload: p}, classVoiceChannelGuarded, true,
 			map[int64]string{4: "normal"}},
 		{"DMChannelOpenEvent", DMChannelOpenEvent{targetUserID: 2, payload: p}, classUserTargeted, true,
 			map[int64]string{2: "high"}},
@@ -225,6 +225,7 @@ func routeHub() (*Hub, map[int64]*routeObserver) {
 	add(2, 0, 0)
 	add(3, 99, 0)
 	add(4, 0, 7)
+	h.updateKeyHolder(7)
 	return h, obs
 }
 
