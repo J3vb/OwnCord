@@ -28,6 +28,7 @@ import {
 
 vi.mock("@lib/voice/shareFps", (importOriginal) => mocks.voiceShareFpsMock(importOriginal));
 vi.mock("@lib/voice/h264Profile", () => mocks.voiceH264ProfileMock());
+vi.mock("@lib/voice/shareResolutionRecovery", () => mocks.shareResolutionRecoveryMock());
 vi.mock("../../../src/features/voice/videoCodec", (importOriginal) =>
   mocks.voiceVideoCodecMock(importOriginal),
 );
@@ -42,6 +43,73 @@ useScreenShareTracksHarness();
 // ── enableScreenshare ──────────────────────────────────────────────────────
 
 describe("enableScreenshare", () => {
+  it.each(["legacy", "detail-framerate"])(
+    "applies the %s content hint to the video before publishing",
+    async (policy) => {
+      loadPref.mockImplementation((key: string, fallback: unknown) =>
+        key === "shareMotionPolicy" ? policy : fallback,
+      );
+      const rig = fakeRoom();
+      const video = fakeVideoTrack();
+      const audio = fakeAudioTrack();
+      createLocalScreenTracks.mockResolvedValue([video, audio]);
+      let hintAtPublish: string | undefined;
+      rig.publishTrack.mockImplementation(async (track: LocalTrack) => {
+        if (track === video) hintAtPublish = track.mediaStreamTrack.contentHint;
+      });
+
+      await enableScreenshare({ manualScreenTracks: [] }, fakeDeps(rig.room));
+
+      expect(rig.publishTrack).toHaveBeenCalledWith(video, expect.anything());
+      expect(hintAtPublish).toBe(policy === "legacy" ? "motion" : "detail");
+      expect(audio.mediaStreamTrack.contentHint).toBe("");
+    },
+  );
+
+  it("watches the published video's resolution until the share stops", async () => {
+    mocks.watchShareResolutionRecovery.mockClear();
+    mocks.stopResolutionRecovery.mockClear();
+    const rig = fakeRoom();
+    const video = fakeVideoTrack();
+    createLocalScreenTracks.mockResolvedValue([video]);
+    const state = { manualScreenTracks: [] };
+    const deps = fakeDeps(rig.room);
+
+    await enableScreenshare(state, deps);
+    await vi.dynamicImportSettled();
+
+    expect(mocks.watchShareResolutionRecovery).toHaveBeenCalledExactlyOnceWith(
+      video,
+      "maintain-framerate",
+    );
+    expect(mocks.stopResolutionRecovery).not.toHaveBeenCalled();
+    await disableScreenshare(state, deps);
+    expect(mocks.stopResolutionRecovery).toHaveBeenCalledOnce();
+  });
+
+  it("starts no resolution watcher for a share stopped while it loads", async () => {
+    mocks.watchShareResolutionRecovery.mockClear();
+    const rig = fakeRoom();
+    createLocalScreenTracks.mockResolvedValue([fakeVideoTrack()]);
+    const state = { manualScreenTracks: [] };
+    const deps = fakeDeps(rig.room);
+
+    await enableScreenshare(state, deps);
+    await disableScreenshare(state, deps);
+    await vi.dynamicImportSettled();
+
+    expect(mocks.watchShareResolutionRecovery).not.toHaveBeenCalled();
+  });
+
+  it("still publishes when the browser does not support content hints", async () => {
+    const video = fakeVideoTrack();
+    Reflect.deleteProperty(video.mediaStreamTrack, "contentHint");
+    const rig = await publishScreen([video]);
+
+    expect(rig.publishTrack).toHaveBeenCalledWith(video, expect.anything());
+    expect(video.mediaStreamTrack).not.toHaveProperty("contentHint");
+  });
+
   it("publishes video and audio tracks with the right sources", async () => {
     const rig = fakeRoom();
     const video = fakeVideoTrack();
@@ -614,6 +682,7 @@ describe("enableScreenshare quality step", () => {
     const createScreenTracks = vi.fn().mockResolvedValue([fakeVideoTrack()]);
     (rig.room.localParticipant as unknown as { createScreenTracks: unknown }).createScreenTracks =
       createScreenTracks;
+    mocks.watchShareResolutionRecovery.mockClear();
 
     try {
       await enableScreenshare({ manualScreenTracks: [] }, fakeDeps(rig.room));
@@ -625,6 +694,9 @@ describe("enableScreenshare quality step", () => {
     expect(picker).not.toHaveBeenCalled();
     expect(createScreenTracks).toHaveBeenCalledTimes(1);
     expect(createLocalScreenTracks).not.toHaveBeenCalled();
+    // The native capture is not a browser source: nothing to recover.
+    await vi.dynamicImportSettled();
+    expect(mocks.watchShareResolutionRecovery).not.toHaveBeenCalled();
   });
 
   it("shares at the saved defaults when the dialog cannot load", async () => {

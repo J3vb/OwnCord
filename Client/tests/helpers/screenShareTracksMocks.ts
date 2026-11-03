@@ -28,6 +28,14 @@ export async function voiceShareFpsMock(importOriginal: <T>() => Promise<T>) {
   };
 }
 
+export const stopResolutionRecovery = vi.fn();
+
+export const watchShareResolutionRecovery = vi.fn(() => stopResolutionRecovery);
+
+export function shareResolutionRecoveryMock() {
+  return { watchShareResolutionRecovery };
+}
+
 export function voiceH264ProfileMock() {
   return { setH264GpuProfiles, fitGpuH264Share };
 }

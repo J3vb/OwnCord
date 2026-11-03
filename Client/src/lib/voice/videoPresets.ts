@@ -256,6 +256,20 @@ export function getScreenShareCaptureOptions(
   return contentHint === undefined ? options : { ...options, contentHint };
 }
 
+/** The standalone LiveKit capture factory ignores contentHint. Apply it to
+ *  the actual track before publishing or replacing a source, so VP8 can use
+ *  motion encoding and resolution adaptation just like the SDK's VP9 path.
+ *  Only VP8 has been measured with it: every other codec keeps the browser's
+ *  default hint (the SDK still sets VP9's itself on publish). */
+export function applyScreenShareContentHint(
+  track: MediaStreamTrack,
+  options: ScreenShareCaptureOptions,
+  codec: PublishCodec,
+): void {
+  if (!("contentHint" in track)) return;
+  track.contentHint = codec === "vp8" ? (options.contentHint ?? "") : "";
+}
+
 function baseScreenShareCaptureOptions(
   quality: StreamQuality,
   fps: number,
