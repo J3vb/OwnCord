@@ -349,6 +349,16 @@ describe("ToastContainer", () => {
       }
     });
 
+    it("keeps the stack on screen when the composer's top is above the window", () => {
+      vi.stubGlobal("innerHeight", 600);
+      try {
+        toast.anchorTo(anchorWithBox({ top: -40, left: 0, width: 400, height: 700 }));
+        expect(root().style.getPropertyValue("--toast-bottom")).toBe("536px");
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+
     it("falls back to the stylesheet's placement when the view has no composer", () => {
       toast.anchorTo(anchorWithBox({ top: 0, left: 0, width: 0, height: 0 }));
       toast.show("Hello");

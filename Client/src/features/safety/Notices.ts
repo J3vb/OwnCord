@@ -153,18 +153,20 @@ export function createNoticesBanner(opts: NoticesBannerOptions): HTMLElement {
     });
     // Oldest first. Only a row out of place moves: moving a node drops its focus.
     let prev: Element | null = null;
+    const arrived: string[] = [];
     for (const n of notices) {
       let row = rows.get(n.id);
       if (row === undefined) {
         row = buildRow(n);
         rows.set(n.id, row);
-        if (mounted) setText(announcer, t("toast.warning", { reason: n.reason }));
+        if (mounted) arrived.push(t("toast.warning", { reason: n.reason }));
       }
       applyAck(row, n);
       const slot: Element | null = prev === null ? list.firstElementChild : prev.nextElementSibling;
       if (slot !== row.el) list.insertBefore(row.el, slot);
       prev = row.el;
     }
+    if (arrived.length > 0) setText(announcer, arrived.join(" "));
     root.classList.toggle("visible", notices.length > 0);
     if (lostFocusAt !== null) {
       const next = [...rows.values()][Math.min(lostFocusAt, rows.size - 1)];

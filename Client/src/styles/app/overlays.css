@@ -249,7 +249,7 @@
 }
 /* A dialog or the settings overlay hides the composer: drop to the window
    edge, under a centred panel's own buttons. */
-body:has(.settings-overlay.open, .modal-overlay) .toast-container {
+body:has(.modal-overlay, .settings-overlay:where(.open)) .toast-container {
   bottom: calc(var(--safe-bottom, 0px) + 16px);
   left: 50%;
   width: min(560px, 100vw - 32px);
@@ -371,16 +371,16 @@ body:has(.settings-overlay.open, .modal-overlay) .toast-container {
 }
 
 /* ── Moderation notices (B9-15, Q4): persistent, never a modal ── */
+/* Always rendered so its status region can announce; empty, it has no height. */
 .moderation-notices {
-  display: none;
   flex-shrink: 0;
   max-height: 40vh;
   overflow-y: auto;
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border-strong);
 }
-.moderation-notices.visible {
-  display: block;
+.moderation-notices:not(.visible) {
+  border-bottom: 0;
 }
 .moderation-notice {
   padding: 8px 16px;

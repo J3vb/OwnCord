@@ -432,6 +432,19 @@ describe("notice banner", () => {
     handleModAction(undefined, { id: 9, kind: "warning", reason: "spam", expires_at: null });
     await flush();
     expect(announcer.textContent).toBe("You received a warning from the moderators: spam");
+    // Two arriving in one update are both read, not just the last.
+    safetyStore.setState((prev) => ({
+      ...prev,
+      notices: [
+        ...prev.notices,
+        { id: 10, reason: "a", createdAt: "2026-09-03T10:00:00Z", ack: "idle" as const },
+        { id: 11, reason: "b", createdAt: "2026-09-03T10:01:00Z", ack: "idle" as const },
+      ],
+    }));
+    await flush();
+    expect(announcer.textContent).toBe(
+      "You received a warning from the moderators: a You received a warning from the moderators: b",
+    );
     ac.abort();
   });
 

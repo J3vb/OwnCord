@@ -87,7 +87,9 @@ export function createToastContainer(): ToastContainer {
       style.removeProperty("--toast-center");
       style.removeProperty("--toast-room");
     }
-    if (tall) style.setProperty("--toast-bottom", `${Math.max(0, window.innerHeight - box.top)}px`);
+    // Clamped so a composer scrolled off the top still leaves the stack on screen.
+    const above = Math.min(window.innerHeight - 64, window.innerHeight - (box?.top ?? 0));
+    if (tall) style.setProperty("--toast-bottom", `${Math.max(0, above)}px`);
     else style.removeProperty("--toast-bottom");
   }
 
