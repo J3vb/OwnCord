@@ -141,9 +141,17 @@ export class E2EEManager {
     getRoomKey: () => this._roomKey,
     onKeyInstalled: () => this.deps.onRoomKeyInstalled?.(),
   });
-  /** E2EE key provider — shared across Room instances. */
+  /** The current Room's E2EE key provider. */
   get keyProvider(): ExternalE2EEKeyProvider {
     return this._worker.keyProvider;
+  }
+  /** A fresh key provider for a new Room. See e2eeWorker.ts. */
+  newKeyProvider(): ExternalE2EEKeyProvider {
+    return this._worker.newKeyProvider();
+  }
+  /** Drop the ended call's key provider. See e2eeWorker.ts. */
+  releaseKeyProvider(): void {
+    this._worker.releaseKeyProvider();
   }
   /** Receiving, applying, wrapping and pacing voice_e2ee_offer. See e2eeOffer.ts. */
   private _offers = new E2EEOffer({

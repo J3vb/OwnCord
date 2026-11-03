@@ -32,25 +32,24 @@ describe("LiveKitSession", () => {
   });
 
   describe("E2EE worker lifecycle", () => {
-    // The key provider lives for the whole process while livekit registers a
-    // new SetKey listener on it per Room — with no matching removal — and the
-    // per-room E2EE Worker is never terminated. Without explicit teardown,
-    // every join/switch/reconnect-attempt leaks a running worker that keeps
-    // receiving every future room key via setKey fan-out.
-    it("clears stale provider listeners and terminates the previous worker on createRoom", () => {
-      (session as any).createRoom();
+    // livekit's E2EEManager subscribes to its key provider and never
+    // unsubscribes, and the per-room E2EE Worker is never terminated by the
+    // SDK. A provider or worker that outlives its Room keeps that Room, and
+    // the last room key, alive.
+    it("gives every room a fresh key provider and terminates the previous worker", async () => {
+      await (session as any).createRoom();
       const workerMock = globalThis.Worker as unknown as ReturnType<typeof vi.fn>;
       const worker1 = workerMock.mock.instances.at(-1) as unknown as { terminate: () => void };
+      const provider1 = (session as any)._e2ee.keyProvider;
 
-      (session as any).createRoom();
+      await (session as any).createRoom();
 
       expect(worker1.terminate).toHaveBeenCalled();
-      const provider = (session as any)._e2ee.keyProvider;
-      expect(provider.removeAllListeners).toHaveBeenCalled();
+      expect((session as any)._e2ee.keyProvider).not.toBe(provider1);
     });
 
-    it("terminates the current worker on leaveVoice so the last room key does not stay resident", () => {
-      (session as any).createRoom();
+    it("terminates the current worker on leaveVoice so the last room key does not stay resident", async () => {
+      await (session as any).createRoom();
       const workerMock = globalThis.Worker as unknown as ReturnType<typeof vi.fn>;
       const worker = workerMock.mock.instances.at(-1) as unknown as { terminate: () => void };
 
