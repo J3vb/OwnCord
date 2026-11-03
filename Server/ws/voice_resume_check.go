@@ -11,14 +11,16 @@ package ws
 // 60 to 120 s later.
 //
 // So a resumed socket that holds a membership (grace inherit or old-socket
-// transfer) gets one check voiceResumeCheckDelay later: the SFU is asked for
-// that exact identity (user and join token). Present, the check is done. Absent
-// while the socket still holds that join, the membership ends through the
-// normal leave tail, voice_leave to everyone including the owner. A join the
-// socket no longer holds (left, moved, rejoined, dropped again) is someone
-// else's to tear down, so the check just ends. A failed list is not "absent":
-// it is retried next tick until voiceResumeCheckGiveUp past due, and the
-// reconciler stays the backstop.
+// transfer) gets a check voiceResumeCheckDelay later: the SFU is asked for that
+// exact identity (user and join token). Present, the check is done. Absent, it
+// looks again voiceResumeConfirmGap later, because the media path of a resumed
+// socket is often recovering too: the client's own SFU retries run up to 15 s
+// apart. Absent on both looks while the socket still holds that join, the
+// membership ends through the normal leave tail, voice_leave to everyone
+// including the owner. A join the socket no longer holds (left, moved,
+// rejoined, dropped again) is someone else's to tear down, so the check just
+// ends. A failed list is not "absent": it is retried next tick until
+// voiceResumeCheckGiveUp past due, and the reconciler stays the backstop.
 
 import (
 	"context"
@@ -28,12 +30,13 @@ import (
 	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
-// voiceResumeCheckDelay is how long after a resume the SFU must show the
-// inherited join. It covers a client finishing its SFU connect once the network
-// is back. A var so tests can shrink it.
-var voiceResumeCheckDelay = 10 * time.Second
-
 const (
+	// voiceResumeCheckDelay is when the SFU is first asked for the resumed join.
+	voiceResumeCheckDelay = 10 * time.Second
+	// voiceResumeConfirmGap is how long after a first miss the second look runs.
+	// Longer than the client's longest SFU retry step (15 s), so a call that is
+	// reconnecting shows up on one of the two looks.
+	voiceResumeConfirmGap = 20 * time.Second
 	// voiceResumeCheckGiveUp bounds the retries of a check whose SFU list keeps
 	// failing; the reconciler handles anything left.
 	voiceResumeCheckGiveUp = 30 * time.Second
@@ -49,6 +52,8 @@ type resumeCheck struct {
 	channelID int64
 	token     string
 	due       time.Time
+	misses    int    // absent lists so far; the second ends the membership
+	gen       uint64 // tells this check from a newer one for the same join
 }
 
 // voiceResumeChecks holds pending checks by user. A user has one voice row, so a
@@ -56,6 +61,7 @@ type resumeCheck struct {
 type voiceResumeChecks struct {
 	mu      syncutil.Ranked[lockRankLeaf]
 	entries map[int64]resumeCheck
+	gen     uint64
 	now     func() time.Time // test seam; nil means time.Now
 }
 
@@ -77,7 +83,32 @@ func (s *voiceResumeChecks) record(userID, channelID int64, token string) {
 	if s.entries == nil {
 		s.entries = map[int64]resumeCheck{}
 	}
-	s.entries[userID] = resumeCheck{userID: userID, channelID: channelID, token: token, due: s.clock().Add(voiceResumeCheckDelay)}
+	s.gen++
+	s.entries[userID] = resumeCheck{userID: userID, channelID: channelID, token: token, due: s.clock().Add(voiceResumeCheckDelay), gen: s.gen}
+}
+
+// current reports whether e is still userID's check, not ended or replaced by a
+// newer resume.
+func (s *voiceResumeChecks) current(e resumeCheck) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cur, ok := s.entries[e.userID]
+	return ok && cur.gen == e.gen
+}
+
+// missed records a first absent list for e and schedules the second look;
+// false when e is no longer current.
+func (s *voiceResumeChecks) missed(e resumeCheck) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cur, ok := s.entries[e.userID]
+	if !ok || cur.gen != e.gen {
+		return false
+	}
+	cur.misses++
+	cur.due = s.clock().Add(voiceResumeConfirmGap)
+	s.entries[e.userID] = cur
+	return true
 }
 
 // pending reports whether any check is waiting.
@@ -107,12 +138,12 @@ func (s *voiceResumeChecks) takeDue() map[int64][]resumeCheck {
 	return out
 }
 
-// done ends userID's check if it is still for token; a newer resume's check stays.
-func (s *voiceResumeChecks) done(userID int64, token string) {
+// done ends e if it is still current; a newer resume's check stays.
+func (s *voiceResumeChecks) done(e resumeCheck) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if e, ok := s.entries[userID]; ok && e.token == token {
-		delete(s.entries, userID)
+	if cur, ok := s.entries[e.userID]; ok && cur.gen == e.gen {
+		delete(s.entries, e.userID)
 	}
 }
 
@@ -172,20 +203,31 @@ func (h *Hub) checkResumedVoice(ctx context.Context) {
 			present[id] = struct{}{}
 		}
 		for _, e := range checks {
-			if _, ok := present[participantIdentity(e.userID, e.token)]; !ok {
-				h.endUnconfirmedVoice(ctx, e)
+			if _, ok := present[participantIdentity(e.userID, e.token)]; ok {
+				h.voiceResumeChecks.done(e)
+				continue
 			}
-			h.voiceResumeChecks.done(e.userID, e.token)
+			if e.misses == 0 {
+				h.voiceResumeChecks.missed(e)
+				continue
+			}
+			h.endUnconfirmedVoice(ctx, e)
 		}
 	}
 }
 
 // endUnconfirmedVoice ends the membership e names when a live socket still
-// holds exactly that join. Otherwise nothing: whoever cleared it owns the
-// teardown, and a membership parked again belongs to the grace window.
+// holds exactly that join and e is still the current check. Otherwise nothing:
+// whoever cleared it owns the teardown, a membership parked again belongs to
+// the grace window, and a newer resume (recorded under the same member lock)
+// carries its own check, whose lists postdate it.
 func (h *Hub) endUnconfirmedVoice(ctx context.Context, e resumeCheck) {
 	txn := h.begin(e.userID)
 	defer txn.end()
+	if !h.voiceResumeChecks.current(e) {
+		return
+	}
+	h.voiceResumeChecks.done(e)
 	for _, c := range h.clientsOf(e.userID) {
 		if !txn.clearExact(c, e.channelID, e.token) {
 			continue

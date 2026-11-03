@@ -78,6 +78,11 @@ import {
 import type { WsClient } from "../../src/lib/ws";
 import { noteJoinFailed, noteJoinSucceeded } from "../../src/features/voice/joinBackoff";
 import { takeJoinRefusal } from "../../src/features/voice/joinRequest";
+import {
+  clearOwedLeave,
+  isVoiceLeaveOwed,
+  sendOwedVoiceLeave,
+} from "../../src/features/voice/leaveOwed";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -171,6 +176,19 @@ describe("createVoiceWidgetCallbacks", () => {
       expect(mockVoiceSessionLeave).toHaveBeenCalledWith(false);
       expect(mockLeaveVoiceChannel).toHaveBeenCalled();
       expect(ws.send).not.toHaveBeenCalled();
+    });
+
+    it("owes the leave it could not send, and the next handshake sends it", () => {
+      clearOwedLeave();
+      mockUiGetState.mockReturnValue({ connectionStatus: "reconnecting" });
+      const { ws, cbs } = widgetWith();
+
+      cbs.onDisconnect();
+      expect(isVoiceLeaveOwed()).toBe(true);
+
+      mockVoiceStoreGetState.mockReturnValue(makeVoiceState({ voiceStatus: "idle" }));
+      expect(sendOwedVoiceLeave(ws)).toBe(true);
+      expect(ws.send).toHaveBeenCalledExactlyOnceWith({ type: "voice_leave", payload: {} });
     });
   });
 
@@ -537,6 +555,20 @@ describe("createSidebarVoiceCallbacks", () => {
     expect(mockVoiceSessionLeave).toHaveBeenCalledWith(false);
     expect(mockLeaveVoiceChannel).toHaveBeenCalled();
     expect(ws.send).toHaveBeenCalledWith({ type: "voice_leave", payload: {} });
+  });
+
+  it("onVoiceLeave while reconnecting owes the leave to the next handshake", () => {
+    clearOwedLeave();
+    mockUiGetState.mockReturnValue({ connectionStatus: "reconnecting" });
+    const { ws, cbs } = sidebarCallbacks();
+
+    cbs.onVoiceLeave();
+    expect(ws.send).not.toHaveBeenCalled();
+    expect(isVoiceLeaveOwed()).toBe(true);
+
+    mockVoiceStoreGetState.mockReturnValue(makeVoiceState({ voiceStatus: "idle" }));
+    expect(sendOwedVoiceLeave(ws)).toBe(true);
+    expect(ws.send).toHaveBeenCalledExactlyOnceWith({ type: "voice_leave", payload: {} });
   });
 
   it("onVoiceJoin waits out the backoff after a failed join instead of re-sending voice_join", () => {

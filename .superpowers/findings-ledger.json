@@ -12411,7 +12411,7 @@
       "why": "The client sent voice_leave only on a live socket, and a resume inherited the parked membership of a join that never reached the SFU; nothing ended it until the reconciler's second miss, 60 to 120 s later.",
       "repro": "Join voice, drop the chat socket before the SFU connect finishes, leave voice while reconnecting, let the socket resume: the user stays listed in the channel and counts toward its cap.",
       "evidence": "Server/ws/voice_resume_check_test.go (TestVoiceResumeCheck_EndsJoinMissingAtSFU and five boundary tests); Client/src/features/voice/leaveOwed.test.ts; Client/src/features/connection/wsHandlers.test.ts.",
-      "suggestedFix": "Remember a leave the server has not confirmed and send it after the next auth_ok while idle; on the server, check a resumed membership at the SFU about 10 s after the resume and end it when absent.",
+      "suggestedFix": "Remember a leave the server has not confirmed and send it after the next auth_ok while idle; on the server, check a resumed membership at the SFU 10 s after the resume and again 20 s later, and end it when absent from both.",
       "fix": {
         "commit": "pending",
         "test": "Server/ws/voice_resume_check_test.go",

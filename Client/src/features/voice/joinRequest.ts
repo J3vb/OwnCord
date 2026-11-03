@@ -58,6 +58,8 @@ export function onNonRetryJoin(listener: () => void): void {
  */
 export function noteJoinSent(id: string | undefined, passwordRetry = false): void {
   if (!passwordRetry) nonRetryJoinListener?.();
+  // Even a join dropped on a down socket: the server's resume check ends a
+  // membership that never reaches the SFU.
   clearOwedLeave();
   joinCount += 1;
   pendingId = id ?? null;

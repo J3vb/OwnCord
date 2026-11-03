@@ -56,7 +56,8 @@ func (h *vmHarness) parkAndResume(m *vmMember, chID int64) string {
 
 // TestVoiceResumeCheck_EndsJoinMissingAtSFU: the resumed client gave the call up
 // while offline, so its join never shows at the SFU. Before the delay nothing
-// happens; after it the membership ends with reason "unconfirmed".
+// happens, the first miss only schedules a second look, and the second miss
+// ends the membership with reason "unconfirmed".
 func TestVoiceResumeCheck_EndsJoinMissingAtSFU(t *testing.T) {
 	withGraceWindow(t, time.Minute)
 	h := newVMHarness(t, 1)
@@ -71,8 +72,19 @@ func TestVoiceResumeCheck_EndsJoinMissingAtSFU(t *testing.T) {
 		t.Fatal("membership ended before the check delay")
 	}
 
-	buf := captureVoiceLog(t)
 	clk.advance(voiceResumeCheckDelay)
+	h.hub.checkResumedVoice(context.Background())
+	if alice.c.voice.channel() != chID {
+		t.Fatal("membership ended on the first miss")
+	}
+	clk.advance(voiceResumeConfirmGap - time.Second)
+	h.hub.checkResumedVoice(context.Background())
+	if alice.c.voice.channel() != chID {
+		t.Fatal("second look ran before the confirm gap")
+	}
+
+	buf := captureVoiceLog(t)
+	clk.advance(time.Second)
 	h.runResumeChecks()
 	if row := h.rowOf(alice); row != nil {
 		t.Fatalf("ghost row survived the resume check: %+v", row)
@@ -107,6 +119,63 @@ func TestVoiceResumeCheck_KeepsJoinPresentAtSFU(t *testing.T) {
 		t.Fatal("confirmed check still pending")
 	}
 	h.leave(alice)
+}
+
+// TestVoiceResumeCheck_KeepsCallThatReconnectsBetweenLooks: the media path is
+// still recovering at the first look and back by the second, so the call stays.
+func TestVoiceResumeCheck_KeepsCallThatReconnectsBetweenLooks(t *testing.T) {
+	withGraceWindow(t, time.Minute)
+	h := newVMHarness(t, 1)
+	alice := h.members[0]
+	chID := h.chanOf("resume-check-recovering")
+	clk := pinResumeCheckClock(h)
+	token := h.parkAndResume(alice, chID)
+	h.severSFU(alice)
+
+	clk.advance(voiceResumeCheckDelay)
+	h.hub.checkResumedVoice(context.Background())
+	h.sfu.add(RoomName(chID), participantIdentity(alice.userID, token))
+	clk.advance(voiceResumeConfirmGap)
+	h.runResumeChecks()
+	if ch, got := alice.c.voice.state(); ch != chID || got != token {
+		t.Fatalf("a call back at the SFU by the second look was ended: %d/%s", ch, got)
+	}
+	if h.hub.voiceResumeChecks.pending() {
+		t.Fatal("confirmed check still pending")
+	}
+	h.leave(alice)
+}
+
+// TestVoiceResumeCheck_NewerResumeRestartsCheck: the socket drops and resumes
+// again after a first miss. The newer resume's check replaces the old one and
+// starts over, so the old miss does not count toward ending the call.
+func TestVoiceResumeCheck_NewerResumeRestartsCheck(t *testing.T) {
+	withGraceWindow(t, time.Minute)
+	h := newVMHarness(t, 1)
+	alice := h.members[0]
+	chID := h.chanOf("resume-check-reresume")
+	clk := pinResumeCheckClock(h)
+	h.parkAndResume(alice, chID)
+	h.severSFU(alice)
+
+	clk.advance(voiceResumeCheckDelay)
+	h.hub.checkResumedVoice(context.Background())
+	_, token := alice.c.voice.state()
+	h.sfu.add(RoomName(chID), participantIdentity(alice.userID, token))
+	h.disconnect(alice, true)
+	h.resume(alice)
+	h.severSFU(alice)
+
+	clk.advance(voiceResumeConfirmGap)
+	h.hub.checkResumedVoice(context.Background())
+	if alice.c.voice.channel() != chID {
+		t.Fatal("the old check's miss counted against the newer resume")
+	}
+	clk.advance(voiceResumeConfirmGap)
+	h.hub.checkResumedVoice(context.Background())
+	if alice.c.voice.channel() != 0 {
+		t.Fatal("the newer resume's own two misses did not end the ghost")
+	}
 }
 
 // TestVoiceResumeCheck_FailedListIsNotAbsent: a failing SFU list keeps the call
@@ -161,6 +230,8 @@ func TestVoiceResumeCheck_RejoinSupersedes(t *testing.T) {
 
 	clk.advance(voiceResumeCheckDelay)
 	h.runResumeChecks()
+	clk.advance(voiceResumeConfirmGap)
+	h.runResumeChecks()
 	if ch, got := alice.c.voice.state(); ch != chID || got != fresh {
 		t.Fatalf("resume check touched the new join: %d/%s, want %d/%s", ch, got, chID, fresh)
 	}
@@ -180,6 +251,8 @@ func TestVoiceResumeCheck_DroppedAgainLeavesParked(t *testing.T) {
 	h.disconnect(alice, true)
 
 	clk.advance(voiceResumeCheckDelay)
+	h.hub.checkResumedVoice(context.Background())
+	clk.advance(voiceResumeConfirmGap)
 	h.hub.checkResumedVoice(context.Background())
 	if !h.hub.voiceReg.voiceGrace.has(alice.userID, chID) {
 		t.Fatal("resume check tore down a membership parked again")
