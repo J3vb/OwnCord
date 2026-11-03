@@ -38,13 +38,14 @@ export function startBackgroundCamera(signal: AbortSignal): void {
 
   const resume = async (): Promise<void> => {
     if (hidden() || paused === null) return;
+    const state = voiceStore.getState();
+    // A reconnecting call keeps the pending resume until it is connected again.
+    if (state.voiceStatus !== "connected") return;
     const mine = paused;
     paused = null;
-    const state = voiceStore.getState();
     if (
       state.currentChannelId !== mine.channelId ||
       state.joinedAt !== mine.joinedAt ||
-      state.voiceStatus !== "connected" ||
       state.localCamera
     ) {
       return;
@@ -69,5 +70,19 @@ export function startBackgroundCamera(signal: AbortSignal): void {
       paused = null;
     },
   );
-  signal.addEventListener("abort", stop, { once: true });
+  // A reconnect can swallow a visibility change: settle it once connected.
+  const stopStatus = voiceStore.subscribeSelector(
+    (state) => state.voiceStatus,
+    (status) => {
+      if (status === "connected") onVisibility();
+    },
+  );
+  signal.addEventListener(
+    "abort",
+    () => {
+      stop();
+      stopStatus();
+    },
+    { once: true },
+  );
 }

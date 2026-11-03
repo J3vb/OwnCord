@@ -4,7 +4,7 @@ const session = vi.hoisted(() => ({ enableCamera: vi.fn(), disableCamera: vi.fn(
 vi.mock("../../lib/voice/livekitSession", () => session);
 
 import { startBackgroundCamera } from "./backgroundCamera";
-import { resetVoiceStore, voiceStore } from "../../stores/voice.store";
+import { resetVoiceStore, voiceStore, type VoiceStatus } from "../../stores/voice.store";
 
 let vis: DocumentVisibilityState = "visible";
 
@@ -21,6 +21,11 @@ function setCall(channel: number | null, camera: boolean, joinedAt: number | nul
     localCamera: camera,
     joinedAt: channel === null ? null : joinedAt,
   }));
+  voiceStore.flush();
+}
+
+function setStatus(status: VoiceStatus): void {
+  voiceStore.setState((s) => ({ ...s, voiceStatus: status }));
   voiceStore.flush();
 }
 
@@ -129,5 +134,30 @@ describe("background camera", () => {
     setVisibility("hidden");
     await settle();
     expect(session.disableCamera).not.toHaveBeenCalled();
+  });
+  it("resumes after a reconnect that was running when the app came back", async () => {
+    setCall(7, true);
+    startBackgroundCamera(owner.signal);
+    setVisibility("hidden");
+    await vi.waitFor(() => expect(session.disableCamera).toHaveBeenCalledTimes(1));
+    setStatus("reconnecting");
+    setVisibility("visible");
+    await settle();
+    expect(session.enableCamera).not.toHaveBeenCalled();
+    setStatus("connected");
+    await vi.waitFor(() => expect(session.enableCamera).toHaveBeenCalledTimes(1));
+  });
+
+  it("pauses once a reconnect that was running when the app was hidden ends", async () => {
+    setCall(7, true);
+    startBackgroundCamera(owner.signal);
+    setStatus("reconnecting");
+    setVisibility("hidden");
+    await settle();
+    expect(session.disableCamera).not.toHaveBeenCalled();
+    setStatus("connected");
+    await vi.waitFor(() => expect(session.disableCamera).toHaveBeenCalledTimes(1));
+    setVisibility("visible");
+    await vi.waitFor(() => expect(session.enableCamera).toHaveBeenCalledTimes(1));
   });
 });
