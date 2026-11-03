@@ -13,7 +13,7 @@ import type { RateLimiterSet } from "@lib/net/rateLimiter";
 import type { PresenceSender } from "@lib/presence/presence";
 import type { ToastContainer } from "@components/Toast";
 import { createCategoryDialogs } from "./categoryDialogs";
-import { logout } from "@lib/net/logout";
+import { logout } from "../../features/connection/logout";
 import { createUserBar } from "@components/UserBar";
 import { createVoiceWidgetCallbacks } from "./VoiceCallbacks";
 import { type MemberPanel } from "../../features/members/memberPanel";

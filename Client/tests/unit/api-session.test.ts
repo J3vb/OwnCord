@@ -53,7 +53,7 @@ describe("API session ownership", () => {
   );
 
   it("sends the logout revocation outside the ending session's scope", async () => {
-    // lib/net/logout.ts calls clearAuth() synchronously after api.logout(), and
+    // features/connection/logout.ts calls clearAuth() synchronously after api.logout(), and
     // clearAuth ends the API session. The revocation must still go out, with
     // the credential it was called with.
     const api = createApiClient({ host: "same.example", token: "alice" });

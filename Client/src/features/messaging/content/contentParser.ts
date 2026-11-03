@@ -32,7 +32,7 @@ import {
 } from "@lib/text/mentions";
 import { isSafeUrl } from "./attachments";
 import { EMOJI_TOKEN_REGEX, buildCustomEmojiNode, isEmojiOnlyMessage } from "./customEmoji";
-import { formatDiscordTimestamp, type TimestampStyle } from "../discordTimestamp";
+import { formatDiscordTimestamp, type TimestampStyle } from "@lib/text/discordTimestamp";
 import { messagingText } from "../../../i18n/messaging";
 import { desktop } from "../../../platform/desktop";
 import {

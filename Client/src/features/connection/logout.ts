@@ -7,7 +7,7 @@
  * block or delay the local logout — `clearAuth()` always runs synchronously.
  */
 
-import type { ApiClient } from "../api";
+import type { ApiClient } from "../../lib/api";
 import { clearAuth } from "@stores/auth.store";
 
 export function logout(api: Pick<ApiClient, "logout">): void {

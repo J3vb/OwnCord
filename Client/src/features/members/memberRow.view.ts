@@ -58,8 +58,6 @@ export type MemberItemModel = MemberRowModel | MemberHeaderModel | MemberEmptyMo
 /** The fields `patchMemberItem` changes in place. */
 export const MEMBER_PATCH_FIELDS = ["status", "mobile", "away", "text"] as const;
 
-export { statusColor } from "../../lib/ui/statusIndicator";
-
 function drawRow(model: MemberRowModel, createAvatar: CreateAvatar): HTMLDivElement {
   const item = createElement("div", {
     class: model.away ? "member-item offline" : "member-item",
