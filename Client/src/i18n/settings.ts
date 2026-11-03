@@ -228,13 +228,14 @@ export const settingsText = defineCatalog("settings", {
   "images.chatBar.emoji.desc":
     "Show the emoji button in the chat bar. Ctrl+E still opens the picker",
   "images.chatBar.emoji.desc.android": "Show the emoji button in the chat bar",
-  "images.chatBar.sticker.label": "Show sticker button",
-  "images.chatBar.sticker.desc": "Show the sticker button in the chat bar",
+  "images.chatBar.sticker.label": "Show Sticker in the + menu",
+  "images.chatBar.sticker.desc":
+    "Show the Sticker tile in the + menu. On a phone, stickers stay a tab of the emoji picker",
   "images.chatBar.gif.label": "Show GIF button",
   "images.chatBar.gif.desc": "Show the GIF button in the chat bar. Ctrl+G still opens the picker",
   "images.chatBar.gif.desc.android": "Show the GIF button in the chat bar",
-  "images.chatBar.poll.label": "Show Poll button",
-  "images.chatBar.poll.desc": "Show the Poll button in the chat bar",
+  "images.chatBar.poll.label": "Show Poll in the + menu",
+  "images.chatBar.poll.desc": "Show the Poll tile in the + menu",
   "images.chatBar.voice.label": "Show voice message button",
   "images.chatBar.voice.desc": "Show the microphone button for voice messages in the chat bar",
 

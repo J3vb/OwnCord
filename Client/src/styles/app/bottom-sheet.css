@@ -135,8 +135,9 @@
   background: var(--bg-modifier-selected);
 }
 
-/* The composer's attach sheet (features/messaging/attachSheet.ts): the file
-   sources, then Poll and Voice message where the server and Settings allow. */
+/* The composer's "+" menu (features/messaging/attachSheet.ts): the file
+   sources, then Poll (and Sticker off the phone) where the server and
+   Settings allow. A sheet on a phone, a small grid above the chat bar elsewhere. */
 .attach-sheet {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -175,6 +176,37 @@
 }
 .attach-sheet-icon-gallery {
   color: var(--accent);
+}
+.attach-sheet-icon-poll {
+  color: var(--yellow);
+}
+.attach-sheet-icon-sticker {
+  color: var(--accent);
+}
+.attach-menu {
+  position: absolute;
+  z-index: 90;
+  bottom: 100%;
+  left: 0;
+  margin-bottom: 4px;
+  display: grid;
+  grid-template-columns: repeat(2, 96px);
+  gap: 6px;
+  padding: 8px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+}
+.attach-menu .attach-sheet-tile {
+  min-height: 84px;
+  gap: 8px;
+  background: var(--bg-secondary);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+}
+.attach-menu .attach-sheet-tile:is(:hover, :focus-visible) {
+  background: var(--bg-hover);
 }
 
 /* Menus as sheets (components/menuSheet.ts): the channel and server menus. A

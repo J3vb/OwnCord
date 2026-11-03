@@ -63,13 +63,116 @@ describe("MessageInput attach sheet", () => {
     comp.destroy?.();
   });
 
-  it("opens the file picker directly off the phone layout", () => {
-    const { comp, attachBtn } = mountUploader();
-    const click = vi.spyOn(inputOf(container, "files"), "click").mockImplementation(() => {});
-    attachBtn.click();
-    expect(sheet()).toBeNull();
-    expect(click).toHaveBeenCalledOnce();
-    comp.destroy?.();
+  describe("off the phone layout", () => {
+    const menuTile = (id: string): HTMLButtonElement =>
+      container.querySelector<HTMLButtonElement>(
+        `.attach-menu [data-testid="attach-sheet-${id}"]`,
+      )!;
+    const key = (el: Element, k: string): void => {
+      el.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true }));
+    };
+
+    it("opens a tile menu above the bar; Upload closes it and opens the file picker once", () => {
+      const { comp, attachBtn } = mountUploader();
+      const click = vi.spyOn(inputOf(container, "files"), "click").mockImplementation(() => {});
+      attachBtn.click();
+      const menu = container.querySelector(".attach-menu");
+      expect(menu?.getAttribute("role")).toBe("menu");
+      expect(document.activeElement).toBe(menuTile("files"));
+      const upload = menuTile("files");
+      upload.click();
+      upload.click();
+      expect(container.querySelector(".attach-menu")).toBeNull();
+      expect(click).toHaveBeenCalledOnce();
+      comp.destroy?.();
+    });
+
+    it("toggles with +, and closes on Escape with focus back on +", () => {
+      const { comp, attachBtn } = mountUploader();
+      attachBtn.click();
+      attachBtn.click();
+      expect(container.querySelector(".attach-menu")).toBeNull();
+      attachBtn.click();
+      key(menuTile("files"), "Escape");
+      expect(container.querySelector(".attach-menu")).toBeNull();
+      expect(document.activeElement).toBe(attachBtn);
+      comp.destroy?.();
+    });
+
+    it("closes on a click outside it", async () => {
+      const { comp, attachBtn } = mountUploader();
+      attachBtn.click();
+      await new Promise((r) => setTimeout(r, 0));
+      document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+      expect(container.querySelector(".attach-menu")).toBeNull();
+      comp.destroy?.();
+    });
+
+    it("closes, and does nothing, when the composer locks while it is open", () => {
+      const { comp, attachBtn } = mountUploader();
+      const click = vi.spyOn(inputOf(container, "files"), "click").mockImplementation(() => {});
+      attachBtn.click();
+      const upload = menuTile("files");
+      comp.setDisabled("Slow mode is on");
+      expect(container.querySelector(".attach-menu")).toBeNull();
+      upload.click();
+      expect(click).not.toHaveBeenCalled();
+      comp.destroy?.();
+    });
+
+    it("an Upload tile left open after the server turns uploads off opens nothing", () => {
+      const { comp, attachBtn } = mountUploader();
+      const click = vi.spyOn(inputOf(container, "files"), "click").mockImplementation(() => {});
+      attachBtn.click();
+      authStore.setState((s) => ({ ...s, uploadPolicy: { max_upload_bytes: 0 } }));
+      menuTile("files").click();
+      expect(click).not.toHaveBeenCalled();
+      expect(document.activeElement).toBe(attachBtn);
+      authStore.setState((s) => ({ ...s, uploadPolicy: null }));
+      comp.destroy?.();
+    });
+
+    it("closes when Tab moves focus out of it", () => {
+      const { comp, attachBtn } = mountUploader();
+      attachBtn.click();
+      const textarea = container.querySelector<HTMLTextAreaElement>(".msg-textarea")!;
+      menuTile("files").dispatchEvent(
+        new FocusEvent("focusout", { bubbles: true, relatedTarget: textarea }),
+      );
+      expect(container.querySelector(".attach-menu")).toBeNull();
+      comp.destroy?.();
+    });
+
+    it("stays open while focus moves to +, so the click on + closes it", () => {
+      const { comp, attachBtn } = mountUploader();
+      attachBtn.click();
+      menuTile("files").dispatchEvent(
+        new FocusEvent("focusout", { bubbles: true, relatedTarget: attachBtn }),
+      );
+      expect(container.querySelector(".attach-menu")).not.toBeNull();
+      attachBtn.click();
+      expect(container.querySelector(".attach-menu")).toBeNull();
+      comp.destroy?.();
+    });
+
+    it("closes when the window crosses onto the phone layout, so the next + opens the sheet", () => {
+      const { comp, attachBtn } = mountUploader();
+      attachBtn.click();
+      usePhone();
+      window.dispatchEvent(new Event("resize"));
+      expect(container.querySelector(".attach-menu")).toBeNull();
+      attachBtn.click();
+      expect(sheet()).not.toBeNull();
+      comp.destroy?.();
+    });
+
+    it("leaves + disabled when uploads are off and the menu has nothing else", () => {
+      authStore.setState((s) => ({ ...s, uploadPolicy: { max_upload_bytes: 0 } }));
+      const { comp, attachBtn } = mountUploader();
+      expect(attachBtn.disabled).toBe(true);
+      authStore.setState((s) => ({ ...s, uploadPolicy: null }));
+      comp.destroy?.();
+    });
   });
 
   describe("on a phone", () => {

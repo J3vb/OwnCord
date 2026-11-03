@@ -22,7 +22,7 @@ import { acceptSharesFor } from "../features/share/shareInbox";
 import type { PickedMention } from "@lib/text/pickedMentions";
 import { FORMAT_MARKERS, wrapWithMarker } from "../features/messaging/markdownMarkers";
 import { authStore } from "@stores/auth.store";
-import { pollsEnabled, stickersEnabled, voiceMessagesEnabled } from "@lib/net/serverCapabilities";
+import { pollsEnabled, stickersEnabled } from "@lib/net/serverCapabilities";
 import { onPrefChange } from "@lib/prefs/preferences";
 import {
   COMPOSER_BUTTON_PREF_KEYS,
@@ -279,6 +279,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     uploadErrorId: `composer-refusal-${++nextComposerId}`,
     openPicker: null,
     attachHasActions: () => false,
+    closeAttachMenu: null,
     togglePickerOf: null,
     mentionPopup: null,
     pickedMentions: [],
@@ -420,13 +421,16 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
         : null;
     micBtn?.appendChild(createIcon("mic", 20));
     micBtn?.setAttribute("hidden", "");
-    // File pickers via attach button: a sheet with the camera on a phone, where
-    // Poll and Voice message join it so the row stays "+", text and send.
+    const hasPlusMenu = st.options.onUploadFile !== undefined && st.options.noAttach !== true;
+    // "+" opens a menu of tiles: the file sources, then Poll and (off the
+    // phone) Sticker. Their bar buttons stay in the DOM, always hidden, as the
+    // targets the tiles click, so gates and the picker tabs work as before.
     if (st.options.onUploadFile !== undefined) {
       const pickers = createAttachPickers({
         onFile: (file) => void api.handlePasteFile(file),
         canAttach: () => st.disabledReason === null && !uploadsDisabledByServer(),
         signal: st.signal,
+        menuHost: () => st.root,
         actions: [
           {
             id: "poll",
@@ -437,22 +441,20 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
             run: () => pollBtn?.click(),
           },
           {
-            id: "voice",
-            icon: "mic",
-            label: messagingText("attach.voice"),
+            id: "sticker",
+            icon: "sticker",
+            label: messagingText("attach.sticker"),
+            layout: "desktop",
             available: () =>
-              micBtn !== null &&
-              st.disabledReason === null &&
-              !uploadsDisabledByServer() &&
-              voiceMessagesEnabled() &&
-              composerButtonShown("voice"),
-            run: () => micBtn?.click(),
+              stickerBtn !== null && st.disabledReason === null && composerButtonShown("sticker"),
+            run: () => stickerBtn?.click(),
           },
         ],
       });
-      attachBtn.addEventListener("click", pickers.open, { signal: st.signal });
+      attachBtn.addEventListener("click", () => pickers.open(attachBtn), { signal: st.signal });
       st.openPicker = pickers.openFiles;
       st.attachHasActions = pickers.hasActions;
+      st.closeAttachMenu = pickers.close;
       st.root?.append(...pickers.inputs);
     } else {
       attachBtn.setAttribute("disabled", "true");
@@ -639,8 +641,10 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       if (!returnFocus) return;
       const btn = tabButton(tab);
       // A button the user hid in settings (or the phone row left out) cannot
-      // take focus; the phone's one expression button or the textarea can.
+      // take focus; "+" (where Sticker lives), the phone's one expression
+      // button or the textarea can.
       if (btn !== null && !btn.hidden) btn.focus();
+      else if (tab === "sticker" && hasPlusMenu && !isPhoneLayout()) attachBtn.focus();
       else if (!emojiBtn.hidden) emojiBtn.focus();
       else st.textarea?.focus();
     }
@@ -812,13 +816,10 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       }
     }
 
-    // On a phone the smiley is the one expression button: it opens on the
-    // first tab the user keeps in the bar.
+    // On a phone the smiley holds the emoji and sticker tabs: it opens on
+    // the first of them the user keeps.
     const expressionTab = (): ExpressionTab => {
       if (!isPhoneLayout() || composerButtonShown("emoji")) return "emoji";
-      if (composerButtonShown("gif") && !st.gifUnavailable && st.options.gifApi !== undefined) {
-        return "gif";
-      }
       return stickerBtn !== null && composerButtonShown("sticker") ? "sticker" : "emoji";
     };
     emojiBtn.addEventListener("click", () => toggleTab(expressionTab()), { signal: st.signal });
@@ -854,26 +855,30 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     if (micBtn !== null) inputBox.appendChild(micBtn);
     appendChildren(inputBox, st.charCounter, sendBtn);
     // Settings → Text & Images can hide each of these; the switch applies live.
-    // A phone row has no room for them: the smiley stands for all three
-    // expression tabs, and Poll and the mic move to the "+" sheet.
+    // Sticker and Poll live in the "+" menu. On a phone the smiley also holds
+    // the sticker tab.
     const applyButtonPrefs = (): void => {
       const phone = isPhoneLayout();
+      // GIF has its own button; on a phone the smiley also stands for stickers.
       const anyExpression =
-        composerButtonShown("emoji") ||
-        composerButtonShown("gif") ||
-        (stickerBtn !== null && composerButtonShown("sticker"));
+        composerButtonShown("emoji") || (stickerBtn !== null && composerButtonShown("sticker"));
       emojiBtn.hidden = phone ? !anyExpression : !composerButtonShown("emoji");
       const emojiLabel = messagingText(phone ? "expression.label" : "emoji.label");
       emojiBtn.setAttribute("aria-label", emojiLabel);
       emojiBtn.title = phone ? emojiLabel : "";
-      gifBtn.hidden = phone || !composerButtonShown("gif");
-      if (stickerBtn !== null) stickerBtn.hidden = phone || !composerButtonShown("sticker");
-      if (pollBtn !== null) pollBtn.hidden = phone || !composerButtonShown("poll");
+      gifBtn.hidden = !composerButtonShown("gif");
+      // A composer without "+" (a thread's) keeps Sticker in its bar.
+      if (stickerBtn !== null) {
+        stickerBtn.hidden = hasPlusMenu || phone || !composerButtonShown("sticker");
+      }
+      if (pollBtn !== null) pollBtn.hidden = hasPlusMenu || phone || !composerButtonShown("poll");
       api.applyDisabledState();
     };
     applyButtonPrefs();
     onPrefChange(COMPOSER_BUTTON_PREF_KEYS, applyButtonPrefs, st.signal);
     onPhoneLayoutChange(applyButtonPrefs, st.signal);
+    // The open menu belongs to the old layout; the next "+" opens the new one.
+    onPhoneLayoutChange(() => st.closeAttachMenu?.(), st.signal);
     st.slowModeNoteEl = createElement("div", {
       class: "composer-slow-note",
       "data-testid": "slow-mode-note",
@@ -997,6 +1002,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     st.uploadErrorEl = null;
     st.charCounter = null;
     st.openPicker = null;
+    st.closeAttachMenu = null;
     st.togglePickerOf = null;
   }
 
