@@ -202,6 +202,16 @@ describe("readableRoleColor (B9 Q13 role clamp)", () => {
     }
   });
 
+  it("also reads on a hovered mentioned row's yellow tint", () => {
+    setSurfaces(DARK);
+    expect(readableRoleColor("#00aaff")).toBe("#00aaff");
+    html.setProperty("--yellow", "#f0b232");
+    applyThemeByName("dark");
+    const blue = parseColor(readableRoleColor("#00aaff"))!;
+    const row = parseColor("#484237")!; // #f0b232 at 12 % over #313338
+    expect(contrastRatio(blue, row)).toBeGreaterThanOrEqual(4.5);
+  });
+
   it("keeps the strict fallback to --text-normal under High Contrast", () => {
     document.documentElement.classList.add("high-contrast");
     try {

@@ -10,6 +10,7 @@ import { readStored, removeStored, writeStored } from "./preferences";
 import {
   clampTextColor,
   deriveAccentTokens,
+  mix,
   parseColor,
   toHex,
   type Rgb,
@@ -297,12 +298,28 @@ function themeSurfaces(tokens: readonly string[] = SURFACE_TOKENS): Rgb[] {
 /** Clamped role colours by High Contrast state and requested colour. */
 const roleTextCache = new Map<string, string>();
 
+/**
+ * `.message.mentioned:hover` in messages.css is --yellow at 12 % over the list;
+ * one point more keeps the browser's own blend from rounding a name under 4.5:1.
+ */
+const MENTION_ROW_TINT = 0.13;
+
+/** The name surfaces, plus a mentioned message row when the theme has a --yellow. */
+function nameSurfaces(): Rgb[] {
+  const surfaces = themeSurfaces(NAME_SURFACE_TOKENS);
+  const yellow = parseColor(getComputedStyle(document.body).getPropertyValue("--yellow"));
+  if (surfaces.length > 0 && yellow !== null) {
+    surfaces.push(mix(surfaces[0]!, yellow, MENTION_ROW_TINT));
+  }
+  return surfaces;
+}
+
 function roleText(rgb: Rgb): string | null {
   // High Contrast keeps the strict rule: the exact colour on every surface, or none.
   if (document.documentElement.classList.contains("high-contrast")) {
     return deriveAccentTokens(rgb, themeSurfaces()).text;
   }
-  const clamped = clampTextColor(rgb, themeSurfaces(NAME_SURFACE_TOKENS));
+  const clamped = clampTextColor(rgb, nameSurfaces());
   return clamped === null ? null : toHex(clamped);
 }
 
@@ -312,8 +329,8 @@ function roleText(rgb: Rgb): string | null {
  * Role colours are server-set, so nothing else stands between an admin's
  * `#ff0000` and a name that cannot be read. The colour keeps its hue and moves
  * only its lightness until it reads at 4.5:1 on the surfaces names sit on
- * (--bg-primary, --bg-secondary); only when no lightness works is the name
- * `--text-normal`. Under High Contrast the colour is used unchanged where it
+ * (--bg-primary, --bg-secondary, and a mentioned row's yellow tint); only
+ * when no lightness works is the name `--text-normal`. Under High Contrast the colour is used unchanged where it
  * reads at 4.5:1 on every theme surface, otherwise the name is
  * `--text-normal`. `color` may be any CSS colour, including a `var(--role-*)`
  * fallback; the result is a normalised `#rrggbb` or `var(--text-normal)`, never

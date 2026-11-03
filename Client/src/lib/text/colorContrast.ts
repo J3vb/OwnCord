@@ -69,7 +69,7 @@ export function contrastRatio(a: Rgb, b: Rgb): number {
   return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
 }
 
-function mix(from: Rgb, to: Rgb, weight: number): Rgb {
+export function mix(from: Rgb, to: Rgb, weight: number): Rgb {
   return from.map((c, i) => Math.round(c + (to[i]! - c) * weight)) as unknown as Rgb;
 }
 
