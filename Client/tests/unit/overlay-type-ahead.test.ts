@@ -6,45 +6,35 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const h = vi.hoisted(() => {
-  const gates = {
-    quick: { wait: Promise.resolve(), release: (): void => undefined },
-    search: { wait: Promise.resolve(), release: (): void => undefined },
+  // One gate per screen: its module resolves when the test opens the gate.
+  const deferred = (): { promise: Promise<void>; resolve: () => void } => {
+    let resolve = (): void => undefined;
+    const promise = new Promise<void>((r) => (resolve = r));
+    return { promise, resolve };
   };
-  for (const g of Object.values(gates)) {
-    g.wait = new Promise<void>((resolve) => {
-      g.release = resolve;
-    });
-  }
+  const quick = deferred();
+  const search = deferred();
   const fakeOverlay = (testId: string) => () => {
     let input: HTMLInputElement | null = null;
     return {
       mount(root: HTMLElement): void {
-        input = document.createElement("input");
-        input.type = "text";
+        input = Object.assign(document.createElement("input"), { type: "text" });
         input.dataset.testid = testId;
         root.appendChild(input);
         requestAnimationFrame(() => input?.focus());
       },
-      destroy(): void {
-        input?.remove();
-      },
+      destroy: (): void => input?.remove(),
     };
   };
-  return {
-    gates,
-    createQuickSwitcher: vi.fn(fakeOverlay("qs-input")),
-    createSearchOverlay: vi.fn(fakeOverlay("search-input")),
-  };
+  return { quick, search, fakeOverlay };
 });
 
-vi.mock("@components/QuickSwitcher", async () => {
-  await h.gates.quick.wait;
-  return { createQuickSwitcher: h.createQuickSwitcher };
-});
-vi.mock("@components/SearchOverlay", async () => {
-  await h.gates.search.wait;
-  return { createSearchOverlay: h.createSearchOverlay };
-});
+vi.mock("@components/QuickSwitcher", () =>
+  h.quick.promise.then(() => ({ createQuickSwitcher: h.fakeOverlay("qs-input") })),
+);
+vi.mock("@components/SearchOverlay", () =>
+  h.search.promise.then(() => ({ createSearchOverlay: h.fakeOverlay("search-input") })),
+);
 
 import {
   createQuickSwitcherManager,
@@ -97,7 +87,7 @@ describe("type-ahead while an overlay loads", () => {
     composer.focus();
     ctrlK();
     type("ra");
-    h.gates.quick.release();
+    h.quick.resolve();
     await settle();
     type("ndom");
     const input = root.querySelector<HTMLInputElement>("[data-testid='qs-input']");
@@ -116,7 +106,7 @@ describe("type-ahead while an overlay loads", () => {
     });
     c.open("h");
     type("ello");
-    h.gates.search.release();
+    h.search.resolve();
     await settle();
     const input = root.querySelector<HTMLInputElement>("[data-testid='search-input']");
     expect(input?.value).toBe("hello");
