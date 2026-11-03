@@ -13,6 +13,10 @@
  * the same store: they can never disagree. The bottom-left widget stays as the
  * way back to the call from anywhere else.
  *
+ * On a phone the open call is the call view: it takes the chat column, Back
+ * collapses it to the call bar above the chat, and reopening the DM (from the
+ * call bar, say) opens it again. The stylesheet does the layout.
+ *
  * The DOM is rebuilt only when the panel's structure changes (state, who is in
  * the room and their names and avatars, collapsed); speaking rings, mute badges, control states and the
  * timer update in place, so a speaking tick never re-fetches an avatar or drops
@@ -24,6 +28,8 @@ import { createElement, appendChildren, setText, clearChildren } from "@lib/dom"
 import { createIcon } from "@lib/icons";
 import { loadPref, savePref } from "@lib/prefs/preferences";
 import type { MountableComponent } from "@lib/text/safeRender";
+import { claimBack, type BackClaim } from "@lib/ui/backHistory";
+import { isPhoneLayout } from "@lib/ui/bottomSheet";
 import type { RingState, OutgoingCallState } from "@lib/voice/callRing";
 import { voiceStore, isSelfMuted } from "@stores/voice.store";
 import { channelsStore } from "@stores/channels.store";
@@ -161,6 +167,34 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
   st.root.hidden = true;
 
   appendChildren(st.root, st.body, st.resizer, st.live);
+
+  /** Back collapses the call view while it is up on a phone. */
+  let backClaim: BackClaim | null = null;
+  /** The DM whose call the panel showed at the last update; null while hidden. */
+  let shownDm: number | null = null;
+
+  /** On a phone, coming back to the call's DM opens the call view again. */
+  function expandOnReturn(): void {
+    const dm = st.view.kind === "none" ? null : st.view.dm.channelId;
+    if (dm === shownDm) return;
+    shownDm = dm;
+    if (dm !== null && isPhoneLayout()) st.collapsed = false;
+  }
+
+  function syncBackClaim(): void {
+    const collapsible = st.view.kind === "outgoing" || st.view.kind === "connected";
+    const wanted = collapsible && !st.collapsed && isPhoneLayout();
+    if (wanted && backClaim === null) {
+      backClaim = claimBack(() => {
+        backClaim = null;
+        st.collapsed = true;
+        update();
+      });
+    } else if (!wanted && backClaim !== null) {
+      backClaim.release();
+      backClaim = null;
+    }
+  }
 
   function computeView(): DmCallView {
     const voice = voiceStore.getState();
@@ -506,6 +540,7 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
     // A late ring-state change during page teardown must not re-arm the timer.
     if (st.destroyed) return;
     st.view = computeView();
+    expandOnReturn();
     // Names and avatars are part of the structure: a rename redraws the stage
     // and the captions.
     const key =
@@ -519,6 +554,7 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
     }
     refresh();
     syncTimer();
+    syncBackClaim();
     const hosting = `${String(inCallChannel())}|${String(videoElement() !== null)}`;
     if (hosting !== st.hostSignature) {
       st.hostSignature = hosting;
@@ -570,6 +606,8 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
       });
       tiles.observe(st.videoEl, { childList: true, subtree: true });
       st.disposable.addCleanup(() => tiles.disconnect());
+      // Turning the device moves the window onto or off the phone layout.
+      st.disposable.onEvent(window, "resize", () => update());
       st.unsubs.push(
         voiceStore.subscribe(() => update()),
         channelsStore.subscribeSelector(
@@ -601,6 +639,8 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
       }
       for (const unsub of st.unsubs) unsub();
       st.unsubs.length = 0;
+      backClaim?.release();
+      backClaim = null;
       st.disposable.destroy();
       st.root.remove();
     },
