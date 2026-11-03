@@ -256,6 +256,8 @@ export interface ServerInfoResponse {
   readonly registration_mode?: RegistrationMode;
   /** Server-default message retention window; `messages_days: 0` = indefinitely. */
   readonly retention?: { readonly messages_days: number };
+  /** How long an upload may take before the server answers 408 TRANSFER_TIMED_OUT. */
+  readonly upload?: { readonly transfer_lifetime_seconds: number };
 }
 
 /** Single channel object from REST API. */

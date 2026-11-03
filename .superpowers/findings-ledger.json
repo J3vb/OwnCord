@@ -1,5 +1,5 @@
 {
-  "nextId": 542,
+  "nextId": 545,
   "findings": [
     {
       "id": "OC-0001",
@@ -12514,6 +12514,75 @@
       "found": "2026-11-03",
       "hunt": "client-review-2026-11-03",
       "lens": "design-visual",
+      "finder": "claude",
+      "fixedDate": "2026-11-03"
+    },
+    {
+      "id": "OC-0542",
+      "title": "Avatar, banner and group-icon uploads were cut by the 30 s read timeout on a slow link",
+      "file": "Server/api/profile_banner.go",
+      "line": 40,
+      "severity": "low",
+      "why": "The three image routes are exempt from the request deadline because a transfer deadline was meant to govern them, but none started one, so the whole multipart body was read under the global 30 s read timeout.",
+      "repro": "Upload a 4 MB banner over a 1 Mbit/s link: the body takes about 34 s, the read is cut at 30 s and the client gets a network error.",
+      "evidence": "Server/api/transfer_timeout_test.go (TestProfileImageUploads_SlowProgressingBodySurvivesRequestTimeout, TestProfileImageUploads_StalledBodyAnswers408TransferTimedOut).",
+      "suggestedFix": "Read the three bodies through the same progress deadline as the attachment upload, and answer a cut with 408 TRANSFER_TIMED_OUT.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/api/transfer_timeout_test.go",
+        "revertProof": "fail (without the progress deadline the slow banner upload is cut at the 250 ms read timeout)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-03",
+      "hunt": "server-review-2026-11-03",
+      "lens": "uploads-media-lifecycle",
+      "finder": "claude",
+      "fixedDate": "2026-11-03"
+    },
+    {
+      "id": "OC-0543",
+      "title": "After the open channel was deleted, or the open DM was closed on another device, the app jumped to a channel that looked random",
+      "file": "Client/src/features/channels/wsHandlers.ts",
+      "line": 667,
+      "severity": "low",
+      "why": "Both fallbacks sorted the remaining text channels by position alone, but positions count inside each category, so the lowest one overall could sit in the last category. The DM-close fallback also took the first DM in the list rather than the most recent conversation.",
+      "repro": "Have channels in two categories where the later category holds a channel at position 0 and the earlier one starts at position 3; delete the open channel: the app lands in the later category instead of on the first channel the sidebar shows.",
+      "evidence": "Client/tests/unit/dispatcher/core.test.ts, Client/tests/unit/dispatcher/dmEvents.test.ts.",
+      "suggestedFix": "One helper that walks the sidebar's own groups (categoryGroups) for the first text-like channel, used by sign-in, channel delete and DM close; the DM fallback picks the DM with the newest message.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/unit/dispatcher/core.test.ts",
+        "revertProof": "fail (the delete redirect lands on the later category's channel without the helper)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-03",
+      "hunt": "client-review-2026-11-03",
+      "lens": "net-state",
+      "finder": "claude",
+      "fixedDate": "2026-11-03"
+    },
+    {
+      "id": "OC-0544",
+      "title": "A profile update for the signed-in user that left out the display name or about text blanked them",
+      "file": "Client/src/features/channels/wsHandlers.ts",
+      "line": 772,
+      "severity": "low",
+      "why": "The signed-in user's copy spread display_name and about straight from the frame, while the member and DM copies treat an absent field as unchanged; an older or partial frame left the three copies disagreeing until the next sign-in.",
+      "repro": "Send a user_update for the signed-in user with username and avatar only: the own display name and about text become undefined while the member list still shows them.",
+      "evidence": "Client/tests/unit/dispatcher/presence.test.ts.",
+      "suggestedFix": "Apply the same 'absent keeps, null clears' rule used for banner and banner_color to display_name and about.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/unit/dispatcher/presence.test.ts",
+        "revertProof": "fail (display_name reads undefined after the partial frame)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-03",
+      "hunt": "client-review-2026-11-03",
+      "lens": "net-state",
       "finder": "claude",
       "fixedDate": "2026-11-03"
     }

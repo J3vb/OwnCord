@@ -66,6 +66,7 @@ export default defineConfig({
         "content-consent.spec.ts",
         "cross-feature-journeys.spec.ts",
         "diagnostics-log.spec.ts",
+        "exit-info.spec.ts",
       ],
     },
     {

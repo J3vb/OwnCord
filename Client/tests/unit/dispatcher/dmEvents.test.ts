@@ -396,6 +396,56 @@ describe("WS Dispatcher", () => {
       expect(channelsStore.getState().activeChannelId).toBe(30);
     });
 
+    it("falls back to the conversation with the newest message, not the first in the list", () => {
+      const person = (id: number, username: string) => ({
+        id,
+        username,
+        avatar: "",
+        status: "online" as const,
+      });
+      seedDms([
+        dmRow({ lastMessageId: 500 }),
+        dmRow({
+          channelId: 60,
+          recipient: person(11, "carl"),
+          participants: [person(11, "carl")],
+          lastMessageId: 100,
+        }),
+        dmRow({
+          channelId: 70,
+          recipient: person(12, "dee"),
+          participants: [person(12, "dee")],
+          lastMessageId: 300,
+        }),
+        dmRow({
+          channelId: 80,
+          recipient: person(13, "eve"),
+          participants: [person(13, "eve")],
+          lastMessageId: null,
+        }),
+      ]);
+      setActiveChannel(50);
+
+      mock.dispatch("dm_channel_close", { channel_id: 50 });
+
+      expect(channelsStore.getState().activeChannelId).toBe(70);
+    });
+
+    it("falls back to the first text channel in sidebar order when no DMs remain", () => {
+      seedDms([dmRow()]);
+      seedChannels(
+        [
+          channelRow({ id: 41, name: "late", position: 0, categoryId: 4, categoryPosition: 1 }),
+          channelRow({ id: 42, name: "early", position: 3, categoryId: 3, categoryPosition: 0 }),
+        ],
+        { activeChannelId: 50 },
+      );
+
+      mock.dispatch("dm_channel_close", { channel_id: 50 });
+
+      expect(channelsStore.getState().activeChannelId).toBe(42);
+    });
+
     it("does not change the active channel when the closed DM was not active", () => {
       seedDms([dmRow()]);
       setActiveChannel(1);

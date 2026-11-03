@@ -1,32 +1,43 @@
-//! What the system saw of a run that ended without a word (Linux).
+//! What the system saw of a run that ended without a word.
 //!
-//! A native thread whose stack is gone cannot run our crash handler, so the
-//! only witnesses are the kernel and systemd: the kernel logs the faulting
-//! thread and library, and systemd-coredump keeps a stack trace. When the
-//! next start finds such a run (`exit_watch`), this asks both and copies the
-//! answer into our log, so the support bundle names what crashed without the
-//! user running anything. Either tool may be missing or refuse (no
-//! systemd-coredump, no journal access): that is logged once and skipped.
+//! A native thread whose stack is gone cannot run our crash handler, and a
+//! fast fail on Windows skips it by design, so the only witnesses are the
+//! system's own records. When the next start finds such a run (`exit_watch`),
+//! this asks them and copies the answer into our log, so the support bundle
+//! names what crashed without the user running anything:
+//!
+//! - Linux: the kernel logs the faulting thread and library, and
+//!   systemd-coredump keeps a stack trace.
+//! - Windows: the Application event log keeps an "Application Error" record
+//!   (exception code, faulting module) for a crash and an "Application Hang"
+//!   record for a window Windows closed as not responding (`windows_events`).
+//!
+//! Any of these may be missing or refuse (no systemd-coredump, no journal
+//! access, an event log that cannot be read): that is logged once and
+//! skipped, and the user is never asked to install anything.
 //!
 //! The log is shared in support bundles, so what is copied is kept to the
-//! crash: no host or machine ids, other processes only by their crash line,
-//! and the home directory written as `~`.
+//! crash: no host or machine ids, no paths (a module by its file name only),
+//! other processes only by their crash line, and the home directory written
+//! as `~`.
 use std::io::Read;
 use std::process::Stdio;
 use std::time::{Duration, Instant};
 
-use crate::external_open::host_command;
+#[cfg(any(windows, test))]
+mod windows_events;
 
 /// How long one system query may take: coredumpctl can be slow while it
 /// reads a large core.
 const QUERY_TIMEOUT: Duration = Duration::from_secs(20);
 /// Most output read from one query.
 const MAX_OUTPUT: u64 = 256 * 1024;
+#[cfg(target_os = "linux")]
 /// Lines of a coredump report kept: the header and the crashing thread's
 /// stack come first.
 const CORE_LINES: usize = 80;
-/// Seconds around the run's last heartbeat searched for kernel lines and
-/// core dumps. A heartbeat is every 10 s; a hung process can stop beating
+/// Seconds around the run's last heartbeat searched for kernel lines, core
+/// dumps and event log records. A heartbeat is every 10 s; a hung process can stop beating
 /// a while before it dies.
 const WINDOW_SECS: i64 = 300;
 
@@ -39,6 +50,7 @@ pub struct EndedRun {
 }
 
 /// Ask the system about `runs` on a background thread and log what it says.
+#[cfg(target_os = "linux")]
 pub fn report(runs: Vec<EndedRun>) {
     if runs.is_empty() {
         return;
@@ -57,6 +69,42 @@ pub fn report(runs: Vec<EndedRun>) {
     }
 }
 
+/// Ask the Application event log about `runs` on a background thread and log
+/// what it says.
+#[cfg(windows)]
+pub fn report(runs: Vec<EndedRun>) {
+    if runs.is_empty() {
+        return;
+    }
+    let spawned = std::thread::Builder::new()
+        .name("owncord-crash-report".into())
+        .spawn(move || {
+            let exe = std::env::current_exe()
+                .ok()
+                .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+                .unwrap_or_default();
+            let lines = match query("wevtutil", &windows_events::QUERY_ARGS) {
+                Ok(answer) if answer.out.trim().is_empty() && !answer.success => {
+                    vec![format!(
+                        "[exit] the Windows event log is not available ({})",
+                        answer.status
+                    )]
+                }
+                Ok(answer) => windows_events::report_lines(&answer.out, &exe, &runs),
+                Err(e) => vec![format!(
+                    "[exit] the Windows event log is not available: {e}"
+                )],
+            };
+            for line in lines {
+                log::warn!("{line}");
+            }
+        });
+    if let Err(e) = spawned {
+        log::warn!("[exit] system crash report not started: {e}");
+    }
+}
+
+#[cfg(target_os = "linux")]
 fn log_coredump(run: EndedRun, home: Option<&str>) {
     let pid = run.pid.to_string();
     // Only a dump from around this run: a pid is reused across boots.
@@ -84,6 +132,7 @@ fn log_coredump(run: EndedRun, home: Option<&str>) {
     }
 }
 
+#[cfg(target_os = "linux")]
 fn log_kernel(run: EndedRun, home: Option<&str>) {
     let Some(last_seen) = run.last_seen else {
         return;
@@ -123,11 +172,30 @@ fn log_kernel(run: EndedRun, home: Option<&str>) {
 struct Answer {
     out: String,
     status: String,
+    #[cfg_attr(not(windows), allow(dead_code))]
+    success: bool,
+}
+
+/// A command for a system program: on Linux with the host's environment
+/// (outside an AppImage's bundled libraries), on Windows without the console
+/// window a console program would otherwise flash.
+#[cfg(target_os = "linux")]
+fn system_command(program: &str) -> std::process::Command {
+    crate::external_open::host_command(program)
+}
+
+#[cfg(windows)]
+fn system_command(program: &str) -> std::process::Command {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let mut command = std::process::Command::new(program);
+    command.creation_flags(CREATE_NO_WINDOW);
+    command
 }
 
 /// Run a host program with a deadline and return its standard output.
 fn query(program: &str, args: &[&str]) -> Result<Answer, String> {
-    let mut child = host_command(program)
+    let mut child = system_command(program)
         .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -177,10 +245,12 @@ fn query(program: &str, args: &[&str]) -> Result<Answer, String> {
     Ok(Answer {
         out: String::from_utf8_lossy(&out).into_owned(),
         status: status.to_string(),
+        success: status.success(),
     })
 }
 
 /// `line` with the home directory written as `~`.
+#[cfg(target_os = "linux")]
 fn private(line: &str, home: Option<&str>) -> String {
     match home.filter(|h| h.len() > 1) {
         Some(home) => line.replace(home, "~"),
@@ -188,6 +258,7 @@ fn private(line: &str, home: Option<&str>) -> String {
     }
 }
 
+#[cfg(target_os = "linux")]
 /// The useful part of `coredumpctl info`: everything but the lines that
 /// identify the machine, capped at [`CORE_LINES`].
 fn coredump_lines(out: &str, home: Option<&str>) -> Vec<String> {
@@ -201,6 +272,7 @@ fn coredump_lines(out: &str, home: Option<&str>) -> Vec<String> {
         .collect()
 }
 
+#[cfg(target_os = "linux")]
 /// Kernel lines that report a crash (any process: the line names the
 /// faulting thread, which carries no pid of ours) or that killed `pid`.
 fn kernel_lines(out: &str, pid: u32, home: Option<&str>) -> Vec<String> {
@@ -212,7 +284,7 @@ fn kernel_lines(out: &str, pid: u32, home: Option<&str>) -> Vec<String> {
         .collect()
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "linux"))]
 mod tests {
     use super::*;
 
