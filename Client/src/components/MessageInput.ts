@@ -942,9 +942,11 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     st.root.addEventListener("focusin", () => focusComposer(mentionTarget), {
       signal: st.disposable.signal,
     });
-    // Apply any initial disabled reason before focusing.
+    // Apply any initial disabled reason before focusing. On a phone a focus
+    // raises the keyboard over the chat the user just opened, so it waits for
+    // a tap on the text box.
     api.applyDisabledState();
-    if (st.disabledReason === null) {
+    if (st.disabledReason === null && !isPhoneLayout()) {
       st.textarea.focus();
     }
   }

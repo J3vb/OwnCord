@@ -255,8 +255,13 @@ export function createMemberColumn(opts: MemberColumnOptions): MemberColumn {
   // handler orders the destroy of one host before the create of the other.
   onPrefChange([MEMBER_OPEN_PREF], () => sync(), owner.signal);
 
+  // A rotation that keeps the column an overlay (a phone turned on its side)
+  // keeps it open; only leaving the overlay layout dismisses it.
+  let wasOverlay = overlayMode();
   const onBreakpoint = (): void => {
-    narrowOpen = false;
+    const overlay = overlayMode();
+    if (!overlay || !wasOverlay) narrowOpen = false;
+    wasOverlay = overlay;
     sync();
   };
   narrow?.addEventListener("change", onBreakpoint, { signal: owner.signal });
