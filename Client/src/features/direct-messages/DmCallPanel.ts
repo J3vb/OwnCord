@@ -107,6 +107,10 @@ export {
   clearIncomingCall,
 } from "./callAlerts";
 
+/** Outgoing and connected are the call view; the rest never collapse. */
+const isCallView = (kind: DmCallView["kind"]): boolean =>
+  kind === "outgoing" || kind === "connected";
+
 export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelComponent {
   const disposable = new Disposable();
   const st: DmCallState = {
@@ -172,23 +176,35 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
   let backClaim: BackClaim | null = null;
   /** The DM whose call the panel showed at the last update; null while hidden. */
   let shownDm: number | null = null;
+  /** The view kind at the last update. */
+  let shownKind: DmCallView["kind"] = "none";
 
-  /** On a phone, coming back to the call's DM opens the call view again. */
+  /** On a phone, coming back to the call's DM, or a new call starting in it
+   *  (a ring sent again, a ring answered, a join), opens the call view. A call
+   *  going from ringing to connected keeps the user's choice. */
   function expandOnReturn(): void {
     const dm = st.view.kind === "none" ? null : st.view.dm.channelId;
-    if (dm === shownDm) return;
+    const kind = st.view.kind;
+    const returned = dm !== shownDm;
+    const started = isCallView(kind) && !isCallView(shownKind);
     shownDm = dm;
-    if (dm !== null && isPhoneLayout()) st.collapsed = false;
+    shownKind = kind;
+    if (dm !== null && (returned || started) && isPhoneLayout()) st.collapsed = false;
   }
 
   function syncBackClaim(): void {
-    const collapsible = st.view.kind === "outgoing" || st.view.kind === "connected";
-    const wanted = collapsible && !st.collapsed && isPhoneLayout();
+    const wanted = isCallView(st.view.kind) && !st.collapsed && isPhoneLayout();
     if (wanted && backClaim === null) {
       backClaim = claimBack(() => {
         backClaim = null;
+        const hadFocus = st.root.contains(document.activeElement);
         st.collapsed = true;
         update();
+        // The control that had focus may be one the call bar leaves out.
+        const active = document.activeElement;
+        if (hadFocus && (active === null || active === document.body)) {
+          st.body.querySelector<HTMLElement>("[data-testid='dcp-collapse']")?.focus();
+        }
       });
     } else if (!wanted && backClaim !== null) {
       backClaim.release();
