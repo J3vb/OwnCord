@@ -1,10 +1,12 @@
-//! Why the process ended (Linux), for the support bundle.
+//! Why the process ended (Linux and Windows), for the support bundle.
 //!
-//! `crash_log` catches what can be caught in-process: panics, crash signals,
-//! terminate and hang-up signals, X errors. Some endings leave nothing: a
-//! `SIGKILL` (the out-of-memory killer, or a desktop killing a window it judged
-//! frozen), or an exit through a path that skips the event loop. This module
-//! makes those visible on the next start, and logs what precedes them:
+//! `crash_log` (Linux) and `exception_log` (Windows) catch what can be caught
+//! in-process: panics, crash signals or exceptions, terminate and hang-up
+//! signals, X errors. Some endings leave nothing: a `SIGKILL` (the
+//! out-of-memory killer, or a desktop killing a window it judged frozen), End
+//! task in Task Manager, a crash Windows ends with a fast fail, or an exit
+//! through a path that skips the event loop. This module makes those visible
+//! on the next start, and logs what precedes them:
 //!
 //! - A run file per process (`run-<pid>.state` in the log directory),
 //!   rewritten every [`HEARTBEAT`] with the time, memory, thread count and
@@ -12,13 +14,19 @@
 //!   ([`note_exit`]) deletes it. At startup, a run file left by a process that
 //!   is gone is logged with its last contents, so a silent ending reads as
 //!   "last seen at T, 1.8 GB, main thread frozen 40 s".
-//! - A main-thread watchdog: the GTK main loop is pinged every second, and a
+//! - A main-thread watchdog: the event loop is pinged every second, and a
 //!   ping unanswered for [`HANG_AFTER`] is logged, then its recovery. A frozen
-//!   main thread is what makes a desktop offer to kill a window.
-//! - The webview's web process: its termination (crash, memory limit) and
-//!   its responsiveness, which WebKitGTK reports separately from ours.
+//!   main thread is what makes a desktop offer to kill a window, and what
+//!   Windows calls "Not responding".
+//! - The webview's helper processes: their end (crash, memory limit; on
+//!   Windows also the GPU and utility processes, such as video capture) and
+//!   the page's responsiveness, which the webview reports separately from ours.
 //! - Memory: a line each time the resident size crosses another 512 MB.
-//! - The session at startup: X11 or Wayland, desktop, AppImage, kernel, RAM.
+//! - The session at startup (Linux: X11 or Wayland, desktop, AppImage, kernel,
+//!   RAM; Windows: build, RAM, WebView2 version).
+//! - For a run that ended without a word, what the system recorded of it
+//!   (`system_crash_report`): the kernel and systemd-coredump on Linux, the
+//!   Application event log on Windows.
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -26,12 +34,28 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use tauri::{AppHandle, Runtime};
 
-use crate::crash_log::utc;
+use crate::crash_line::utc;
+
+#[cfg(target_os = "linux")]
+mod linux;
+#[cfg(target_os = "linux")]
+use linux as platform;
+#[cfg(any(windows, test))]
+mod webview_failure;
+#[cfg(windows)]
+mod win;
+#[cfg(windows)]
+use win as platform;
 
 const HEARTBEAT: Duration = Duration::from_secs(10);
 const PING_EVERY: Duration = Duration::from_secs(1);
 const HANG_AFTER: Duration = Duration::from_secs(5);
 const MEMORY_STEP_MB: u64 = 512;
+/// The run file's state while an update installer takes over.
+const UPDATE_STATE: &str = "handing over to an update installer";
+/// Seconds after which an unanswered webview probe no longer holds back the
+/// next one.
+const PROBE_GIVE_UP_SECS: i64 = 30;
 const RUN_FILE_PREFIX: &str = "run-";
 const RUN_FILE_SUFFIX: &str = ".state";
 
@@ -56,6 +80,32 @@ struct Watch {
     run_file_lock: Mutex<()>,
     /// Highest memory step logged so far, in MB.
     memory_logged_mb: AtomicU64,
+    /// Asks a webview that stopped answering whether it answers again, where
+    /// the webview reports only the stop (WebView2). Set once by
+    /// [`watch_webview`].
+    webview_probe: OnceLock<Box<dyn Fn() + Send + Sync>>,
+    /// Monotonic second the probe in flight was sent; -1 when none is. A
+    /// probe whose answer never comes (its page replaced) stops blocking the
+    /// next one after [`PROBE_GIVE_UP_SECS`].
+    webview_probe_sent: AtomicI64,
+}
+
+impl Watch {
+    fn new(run_file: PathBuf, version: &str) -> Self {
+        Self {
+            run_file,
+            started: now(),
+            version: version.to_string(),
+            main_answered: AtomicI64::new(mono()),
+            ping_pending: AtomicBool::new(false),
+            webview_unresponsive_since: AtomicI64::new(-1),
+            exited: AtomicBool::new(false),
+            run_file_lock: Mutex::new(()),
+            memory_logged_mb: AtomicU64::new(0),
+            webview_probe: OnceLock::new(),
+            webview_probe_sent: AtomicI64::new(-1),
+        }
+    }
 }
 
 static WATCH: OnceLock<Arc<Watch>> = OnceLock::new();
@@ -76,25 +126,19 @@ fn now() -> i64 {
 /// Report run files that earlier processes left, log the session, then start
 /// this process's run file and watchdog. Once per process.
 pub fn start<R: Runtime>(app: &AppHandle<R>, log_dir: &Path, version: &str) {
-    log_session();
+    platform::log_session();
     report_previous_runs(log_dir, std::process::id());
-    let watch = Arc::new(Watch {
-        run_file: run_file_path(log_dir, std::process::id()),
-        started: now(),
-        version: version.to_string(),
-        main_answered: AtomicI64::new(mono()),
-        ping_pending: AtomicBool::new(false),
-        webview_unresponsive_since: AtomicI64::new(-1),
-        exited: AtomicBool::new(false),
-        run_file_lock: Mutex::new(()),
-        memory_logged_mb: AtomicU64::new(0),
-    });
+    let watch = Arc::new(Watch::new(
+        run_file_path(log_dir, std::process::id()),
+        version,
+    ));
     if WATCH.set(watch.clone()).is_err() {
         return;
     }
     // A terminate or hang-up already logs its own line: the handler removes
     // the run file so the next start does not report that run a second time.
-    crate::crash_log::set_run_file(&watch.run_file);
+    #[cfg(target_os = "linux")]
+    platform::set_run_file(&watch.run_file);
     let app = app.clone();
     let spawned = std::thread::Builder::new()
         .name("owncord-exit-watch".into())
@@ -154,7 +198,7 @@ fn watchdog<R: Runtime>(app: &AppHandle<R>, watch: &Arc<Watch>) {
             None if silent_for >= hang_secs => {
                 log::warn!(
                     "[hang] main thread has not answered for {silent_for} s (window frozen); {}",
-                    memory_text()
+                    platform::memory_text()
                 );
                 log::logger().flush();
                 hang_logged_at = Some(t - silent_for);
@@ -169,51 +213,92 @@ fn watchdog<R: Runtime>(app: &AppHandle<R>, watch: &Arc<Watch>) {
             }
             _ => {}
         }
+        probe_webview(watch);
         if t - last_beat >= i64::try_from(HEARTBEAT.as_secs()).unwrap_or(10) {
             last_beat = t;
             log_memory_step(watch);
             write_run_file(watch);
+            #[cfg(windows)]
+            crate::exception_log::follow_rotation();
         }
     }
 }
 
-/// Watch the webview's web process: log its end and its responsiveness.
+/// Watch the webview's helper processes: log their end and the page's
+/// responsiveness.
 pub fn watch_webview<R: Runtime>(window: &tauri::WebviewWindow<R>) {
-    let result = window.with_webview(|webview| {
-        use webkit2gtk::WebViewExt;
-        let view = webview.inner();
-        view.connect_web_process_terminated(|_, reason| {
-            log::error!(
-                "[exit] webview process ended: {reason:?}; the window goes blank until reloaded"
-            );
-            log::logger().flush();
-        });
-        view.connect_is_web_process_responsive_notify(|view| {
-            let Some(watch) = WATCH.get() else { return };
-            if view.is_web_process_responsive() {
-                let since = watch.webview_unresponsive_since.swap(-1, Ordering::SeqCst);
-                if since >= 0 {
-                    log::warn!(
-                        "[hang] webview answers again after {}",
-                        duration_text(mono() - since)
-                    );
-                }
-            } else {
-                watch
-                    .webview_unresponsive_since
-                    .store(mono(), Ordering::SeqCst);
-                log::warn!(
-                    "[hang] webview stopped answering (page script busy or stuck); {}",
-                    memory_text()
-                );
-                log::logger().flush();
-            }
-            // The run file picks this up on the watchdog's next beat: no
-            // disk write on the main thread.
-        });
-    });
-    if let Err(e) = result {
-        log::warn!("[exit] webview not watched: {e}");
+    platform::watch_webview(window);
+}
+
+/// The webview stopped answering (`why`: what the webview said). Logged once
+/// per stop; the run file picks it up on the watchdog's next beat, so no disk
+/// write lands on the thread that reports it.
+fn webview_stopped_answering(why: &str) {
+    let Some(watch) = WATCH.get() else { return };
+    let started = watch
+        .webview_unresponsive_since
+        .compare_exchange(-1, mono(), Ordering::SeqCst, Ordering::SeqCst)
+        .is_ok();
+    if started {
+        log::warn!(
+            "[hang] webview stopped answering ({why}); {}",
+            platform::memory_text()
+        );
+        log::logger().flush();
+    }
+}
+
+/// The webview answers again after a stop.
+fn webview_answers() {
+    let Some(watch) = WATCH.get() else { return };
+    let since = watch.webview_unresponsive_since.swap(-1, Ordering::SeqCst);
+    if since >= 0 {
+        log::warn!(
+            "[hang] webview answers again after {}",
+            duration_text(mono() - since)
+        );
+    }
+}
+
+/// While the webview is not answering, ask it again through the platform's
+/// probe, one question at a time.
+fn probe_webview(watch: &Watch) {
+    if watch.webview_unresponsive_since.load(Ordering::SeqCst) < 0 {
+        return;
+    }
+    let Some(probe) = watch.webview_probe.get() else {
+        return;
+    };
+    let now = mono();
+    let sent = watch.webview_probe_sent.load(Ordering::SeqCst);
+    let free = sent < 0 || now - sent >= PROBE_GIVE_UP_SECS;
+    if free
+        && watch
+            .webview_probe_sent
+            .compare_exchange(sent, now, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
+    {
+        probe();
+    }
+}
+
+/// The probe [`probe_webview`] asks with. Set once.
+#[cfg(windows)]
+fn set_webview_probe(probe: Box<dyn Fn() + Send + Sync>) {
+    if let Some(watch) = WATCH.get() {
+        let _ = watch.webview_probe.set(probe);
+    }
+}
+
+/// The probe's question was answered (`answered`) or dropped: either way the
+/// next one may go.
+#[cfg(windows)]
+fn webview_probe_done(answered: bool) {
+    if let Some(watch) = WATCH.get() {
+        watch.webview_probe_sent.store(-1, Ordering::SeqCst);
+    }
+    if answered {
+        webview_answers();
     }
 }
 
@@ -225,7 +310,7 @@ fn write_run_file(watch: &Watch) {
     // Kept on every heartbeat while the installer runs, so a process the
     // installer ends reads as the update handoff, not an unexplained end.
     let state = if crate::update_commands::installer_launching() {
-        "handing over to an update installer"
+        UPDATE_STATE
     } else {
         "running"
     };
@@ -245,18 +330,17 @@ fn write_run_file(watch: &Watch) {
         since if since < 0 => "answering".to_string(),
         since => format!("not answering for {}", duration_text(m - since)),
     };
-    // Which native captures were running: a crash that leaves no signal line
-    // (a thread whose stack was gone, an `exit()` inside a library) is read
-    // on the next start, and "camera and screen capturing" is the lead.
-    let body = format!(
-        "version={}\nstarted={}\nlast_seen={}\nstate={state}\n{}\nmain_thread={main}\nwebview={webview}\ncaptures=camera:{} screen:{}\n",
+    let mut body = format!(
+        "version={}\nstarted={}\nlast_seen={}\nstate={state}\n{}\nmain_thread={main}\nwebview={webview}\n",
         watch.version,
         utc(watch.started),
         utc(t),
-        memory_text().replace(", ", "\n"),
-        crate::native_voice::camera::active_captures(),
-        crate::native_voice::screen::active_captures(),
+        platform::memory_text().replace(", ", "\n"),
     );
+    if let Some(captures) = platform::captures_text() {
+        body.push_str(&captures);
+        body.push('\n');
+    }
     if let Err(e) = crate::json_store::write_atomic(&watch.run_file, body.as_bytes()) {
         log::debug!("[exit] run file not written: {e}");
     }
@@ -274,7 +358,7 @@ fn report_previous_runs(dir: &Path, own_pid: u32) {
     for entry in entries.flatten() {
         let path = entry.path();
         if let Some(pid) = run_file_tmp_pid(&path) {
-            if !still_running(pid, own_pid, is_owncord_running) {
+            if !still_running(pid, own_pid, platform::is_owncord_running) {
                 std::fs::remove_file(&path).ok();
             }
             continue;
@@ -282,20 +366,24 @@ fn report_previous_runs(dir: &Path, own_pid: u32) {
         let Some(pid) = run_file_pid(&path) else {
             continue;
         };
-        if still_running(pid, own_pid, is_owncord_running) {
+        if still_running(pid, own_pid, platform::is_owncord_running) {
             continue;
         }
         let contents = std::fs::read_to_string(&path).unwrap_or_default();
-        log::warn!("{}", previous_run_report(pid, &contents));
-        ended.push(crate::system_crash_report::EndedRun {
-            pid,
-            last_seen: modified_secs(&path),
-        });
+        if handed_to_update(&contents) {
+            log::info!("[exit] the previous run (pid {pid}) ended for an update");
+        } else {
+            log::warn!("{}", previous_run_report(pid, &contents));
+            ended.push(crate::system_crash_report::EndedRun {
+                pid,
+                last_seen: modified_secs(&path),
+            });
+        }
         if let Err(e) = std::fs::remove_file(&path) {
             log::warn!("[exit] stale run file not removed: {e}");
         }
     }
-    crate::system_crash_report::report(ended);
+    platform::report_ended(ended);
 }
 
 /// A file's modification time as a Unix second: a run file's is its last
@@ -326,22 +414,12 @@ fn run_file_pid(path: &Path) -> Option<u32> {
         .ok()
 }
 
-/// Whether `pid` is a running process (not a thread of one) with this
-/// process's name.
-fn is_owncord_running(pid: u32) -> bool {
-    let read = |p: &str| std::fs::read_to_string(format!("/proc/{p}/status")).ok();
-    let field = |status: &str, name: &str| {
-        status
-            .lines()
-            .find_map(|l| l.strip_prefix(name))
-            .map(|v| v.trim().to_string())
-    };
-    let (Some(theirs), Some(ours)) = (read(&pid.to_string()), read("self")) else {
-        return false;
-    };
-    field(&theirs, "Tgid:") == Some(pid.to_string())
-        && field(&theirs, "Name:").is_some()
-        && field(&theirs, "Name:") == field(&ours, "Name:")
+/// The installer ends the old process without an event-loop exit, so its
+/// run file stays: the state it last wrote says so.
+fn handed_to_update(contents: &str) -> bool {
+    contents
+        .lines()
+        .any(|l| l.trim() == format!("state={UPDATE_STATE}"))
 }
 
 fn previous_run_report(pid: u32, contents: &str) -> String {
@@ -353,49 +431,18 @@ fn previous_run_report(pid: u32, contents: &str) -> String {
     };
     format!(
         "[exit] the previous run (pid {pid}) ended without a normal exit or a logged signal: \
-         a SIGKILL (the out-of-memory killer, or the desktop after a freeze), a power loss, \
-         or a crash logged before this line. Its last record: {detail}"
+         {}, a power loss, or a crash logged before this line. Its last record: {detail}",
+        platform::SILENT_ENDINGS
     )
-}
-
-/// Resident and peak memory and thread count, from `/proc/self/status`.
-fn memory_text() -> String {
-    let status = std::fs::read_to_string("/proc/self/status").unwrap_or_default();
-    format_memory(&status)
-}
-
-fn format_memory(status: &str) -> String {
-    let field = |name: &str| {
-        status
-            .lines()
-            .find_map(|l| l.strip_prefix(name))
-            .and_then(|v| v.split_whitespace().next())
-            .and_then(|v| v.parse::<u64>().ok())
-    };
-    let mb = |kb: Option<u64>| kb.map_or("unknown".to_string(), |kb| format!("{} MB", kb / 1024));
-    format!(
-        "memory={}, memory_peak={}, threads={}",
-        mb(field("VmRSS:")),
-        mb(field("VmHWM:")),
-        field("Threads:").map_or("unknown".to_string(), |t| t.to_string())
-    )
-}
-
-fn resident_mb() -> Option<u64> {
-    let status = std::fs::read_to_string("/proc/self/status").ok()?;
-    status
-        .lines()
-        .find_map(|l| l.strip_prefix("VmRSS:"))
-        .and_then(|v| v.split_whitespace().next())
-        .and_then(|v| v.parse::<u64>().ok())
-        .map(|kb| kb / 1024)
 }
 
 fn log_memory_step(watch: &Watch) {
-    let Some(mb) = resident_mb() else { return };
+    let Some(mb) = platform::resident_mb() else {
+        return;
+    };
     let step = mb / MEMORY_STEP_MB * MEMORY_STEP_MB;
     if step >= MEMORY_STEP_MB && step > watch.memory_logged_mb.fetch_max(step, Ordering::SeqCst) {
-        log::info!("[resource] {}", memory_text());
+        log::info!("[resource] {}", platform::memory_text());
     }
 }
 
@@ -408,45 +455,6 @@ fn duration_text(secs: i64) -> String {
     } else {
         format!("{} h {} min", secs / 3600, secs / 60 % 60)
     }
-}
-
-/// The desktop session, once at startup: what a "works on my machine"
-/// report needs first. No paths, names or identifiers.
-fn log_session() {
-    let var = |name: &str| std::env::var(name).ok().filter(|v| !v.is_empty());
-    let set = |name: &str| if var(name).is_some() { "set" } else { "unset" };
-    let kernel = {
-        // SAFETY: uname(2) fills a zeroed struct.
-        let mut uts: libc::utsname = unsafe { std::mem::zeroed() };
-        if unsafe { libc::uname(&mut uts) } == 0 {
-            // SAFETY: uname NUL-terminates `release`.
-            unsafe { std::ffi::CStr::from_ptr(uts.release.as_ptr()) }
-                .to_string_lossy()
-                .into_owned()
-        } else {
-            "unknown".into()
-        }
-    };
-    let ram = std::fs::read_to_string("/proc/meminfo")
-        .ok()
-        .and_then(|m| {
-            m.lines()
-                .find_map(|l| l.strip_prefix("MemTotal:"))
-                .and_then(|v| v.split_whitespace().next())
-                .and_then(|v| v.parse::<u64>().ok())
-        })
-        .map_or("unknown".to_string(), |kb| format!("{} MB", kb / 1024));
-    log::info!(
-        "[startup] session: type={}, desktop={}, WAYLAND_DISPLAY {}, DISPLAY {}, GDK_BACKEND={}, AppImage={}, kernel={kernel}, RAM={ram}, WEBKIT_DISABLE_DMABUF_RENDERER={}, WEBKIT_DISABLE_COMPOSITING_MODE={}",
-        var("XDG_SESSION_TYPE").unwrap_or_else(|| "unknown".into()),
-        var("XDG_CURRENT_DESKTOP").unwrap_or_else(|| "unknown".into()),
-        set("WAYLAND_DISPLAY"),
-        set("DISPLAY"),
-        var("GDK_BACKEND").unwrap_or_else(|| "default".into()),
-        if var("APPIMAGE").is_some() { "yes" } else { "no" },
-        var("WEBKIT_DISABLE_DMABUF_RENDERER").unwrap_or_else(|| "unset".into()),
-        var("WEBKIT_DISABLE_COMPOSITING_MODE").unwrap_or_else(|| "unset".into()),
-    );
 }
 
 #[cfg(test)]
@@ -521,17 +529,7 @@ mod tests {
     #[test]
     fn no_write_lands_after_a_normal_exit() {
         let dir = TempDir::new("exit");
-        let watch = Watch {
-            run_file: run_file_path(&dir.0, 1),
-            started: now(),
-            version: "test".into(),
-            main_answered: AtomicI64::new(mono()),
-            ping_pending: AtomicBool::new(false),
-            webview_unresponsive_since: AtomicI64::new(-1),
-            exited: AtomicBool::new(false),
-            run_file_lock: Mutex::new(()),
-            memory_logged_mb: AtomicU64::new(0),
-        };
+        let watch = Watch::new(run_file_path(&dir.0, 1), "test");
         write_run_file(&watch);
         assert!(watch.run_file.exists());
         watch.exited.store(true, Ordering::SeqCst);
@@ -558,17 +556,12 @@ mod tests {
     }
 
     #[test]
-    fn memory_is_read_from_proc_status() {
-        let status = "Name:\towncord\nVmHWM:\t 1887436 kB\nVmRSS:\t  838860 kB\nThreads:\t56\n";
-        assert_eq!(
-            format_memory(status),
-            "memory=819 MB, memory_peak=1843 MB, threads=56"
-        );
-        assert_eq!(
-            format_memory(""),
-            "memory=unknown, memory_peak=unknown, threads=unknown"
-        );
-        assert!(resident_mb().is_some());
+    fn an_update_handoff_is_not_an_unexplained_end() {
+        assert!(handed_to_update(&format!(
+            "version=1\nstate={UPDATE_STATE}\n"
+        )));
+        assert!(!handed_to_update("version=1\nstate=running\n"));
+        assert!(!handed_to_update(""));
     }
 
     #[test]
@@ -577,11 +570,5 @@ mod tests {
         assert_eq!(duration_text(45), "45 s");
         assert_eq!(duration_text(600), "10 min");
         assert_eq!(duration_text(3 * 3600 + 120), "3 h 2 min");
-    }
-
-    #[test]
-    fn a_running_process_is_recognised_by_name() {
-        assert!(is_owncord_running(std::process::id()));
-        assert!(!is_owncord_running(4_194_304));
     }
 }

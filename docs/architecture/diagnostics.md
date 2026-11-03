@@ -86,6 +86,29 @@ or hang-up removes the file as it logs its own line. Memory lines count only
 the app's own process: the webview's separate web process is not included, and
 its end is logged as `[exit] webview process ended`.
 
+On Windows the native log says the same, with Windows' own sources:
+
+- `exception_log.rs` installs an unhandled-exception filter that writes one
+  `[crash] unhandled exception` line (code and its plain name, faulting module
+  file name and offset, thread), then hands the exception on so Windows Error
+  Reporting still runs. `OWNCORD_EXCEPTION_LOG=off` leaves it out.
+- `exit_watch.rs` keeps the same `run-<pid>.state` file (working set, peak,
+  committed memory, threads, main-thread and page state) and `[hang]` lines,
+  and logs the Windows build, RAM and WebView2 version at startup.
+- WebView2's helper processes report their failures: the page's renderer, the
+  GPU process, utility processes such as video capture, and the browser
+  process itself. Each gives an `[exit] webview <process> process failed`
+  line with the reason, exit code, service name, failing module and what the
+  user saw. A GPU or capture process restart pauses video or stops the camera,
+  so this is the line to look for next to a frozen webcam.
+- A start that finds a run file from a process that is gone asks the
+  Application event log (`wevtutil`) for an Application Error or Application
+  Hang record of that pid, and copies the exception code, faulting module and
+  version, or that Windows closed the window as not responding. Without a
+  record (End task, sign-out, power loss) it says so; when the event log
+  cannot be read it logs one "not available" line and carries on. Paths are
+  never copied, only module file names.
+
 A settings key that is not on the allowlist never enters the bundle, whatever
 it holds; device ids and the custom status text are left out on purpose. The
 OS keychain, which holds saved passwords and session tokens, is never read.
