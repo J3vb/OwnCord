@@ -13,8 +13,16 @@ import (
 	"github.com/J3vb/OwnCord/Server/telemetry"
 )
 
-// moderationStore is what ModerationService reads and writes. *db.DB satisfies it.
+// moderationStore is what NewModerationService wires: the core's store plus the
+// action history's. *db.DB satisfies it.
 type moderationStore interface {
+	moderationCoreStore
+	moderationHistoryStore
+}
+
+// moderationCoreStore is what ModerationService's sanction, role and erasure
+// paths read and write.
+type moderationCoreStore interface {
 	db.Auditor
 	subjectStore
 	GetChannel(ctx context.Context, id int64) (*db.Channel, error)
@@ -35,10 +43,6 @@ type moderationStore interface {
 	// session, not this ledger.
 	LiftTimeout(ctx context.Context, targetID, actorID int64) (liftedIDs []int64, err error)
 	HasActiveTimeout(ctx context.Context, userID int64) (bool, error)
-	AcknowledgeWarning(ctx context.Context, userID, actionID int64) (bool, error)
-	ListModerationActionsForTarget(ctx context.Context, targetID int64) ([]db.ModerationAction, error)
-	ListOwnModerationActions(ctx context.Context, userID, limit int64) ([]db.OwnModerationAction, error)
-	ListModerationActionsForReport(ctx context.Context, reportID int64) ([]db.ModerationAction, error)
 	// BanUserWithAction/ForceLogoutWithAction are BanUser/ForceLogoutUser plus a
 	// ledger row, in one transaction.
 	BanUserWithAction(ctx context.Context, targetID int64, reason string, expires *time.Time, actorID int64, reportID *int64) (int64, error)
@@ -51,7 +55,8 @@ type moderationStore interface {
 
 // ModerationService handles user ban, unban, warn, timeout and erasure operations.
 type ModerationService struct {
-	st    moderationStore
+	*moderationHistory
+	st    moderationCoreStore
 	perms *PermissionService
 	// erasure runs the administrator's account erasure; nil fails EraseUser closed.
 	erasure *ErasureService
@@ -108,7 +113,7 @@ type TimeoutVoiceMuter interface {
 
 // NewModerationService creates a ModerationService.
 func NewModerationService(st moderationStore, perms *PermissionService) *ModerationService {
-	return &ModerationService{st: st, perms: perms, banPurgeSem: make(chan struct{}, 1)}
+	return &ModerationService{moderationHistory: &moderationHistory{st: st}, st: st, perms: perms, banPurgeSem: make(chan struct{}, 1)}
 }
 
 // SetNotifier installs the live mod_action notifier.
@@ -794,61 +799,9 @@ func (s *ModerationService) ListActionsForTarget(ctx context.Context, actorID, t
 	if _, err := s.requirePerm(ctx, actorID, permissions.ModerateMembers); err != nil {
 		return nil, err
 	}
-	rows, err := s.st.ListModerationActionsForTarget(ctx, targetID)
+	rows, err := s.moderationHistory.st.ListModerationActionsForTarget(ctx, targetID)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInternal, err)
 	}
 	return rows, nil
-}
-
-// ListActionsForReport lists a report's "actions taken". It checks no permission:
-// ReportService.Get already gated the read.
-func (s *ModerationService) ListActionsForReport(ctx context.Context, reportID int64) ([]db.ModerationAction, error) {
-	rows, err := s.st.ListModerationActionsForReport(ctx, reportID)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrInternal, err)
-	}
-	return rows, nil
-}
-
-// OwnModerationAction is one row of GET /api/v1/users/me/moderation. Appealable
-// means an appealable kind with no appeal filed yet.
-type OwnModerationAction struct {
-	db.OwnModerationAction
-	Appealable bool
-}
-
-// ownModerationListLimit caps ListOwnActions: removal and ban rows never retire.
-const ownModerationListLimit = 200
-
-// ListOwnActions reads userID's own ledger rows from storage with no permission
-// bit: the query is scoped to target_id = userID and selects nothing a member may
-// not see.
-func (s *ModerationService) ListOwnActions(ctx context.Context, userID int64) ([]OwnModerationAction, error) {
-	rows, err := s.st.ListOwnModerationActions(ctx, userID, ownModerationListLimit)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrInternal, err)
-	}
-	out := make([]OwnModerationAction, 0, len(rows))
-	for _, r := range rows {
-		out = append(out, OwnModerationAction{OwnModerationAction: r, Appealable: appealableKinds[r.Kind] && r.AppealID == nil})
-	}
-	return out, nil
-}
-
-// AcknowledgeWarning marks actionID acknowledged for userID (own rows only).
-// ErrNotFound covers a foreign, already-acknowledged or non-warning id alike, so
-// the route cannot probe another user's ids.
-func (s *ModerationService) AcknowledgeWarning(ctx context.Context, userID, actionID int64) error {
-	if actionID <= 0 {
-		return fmt.Errorf("%w: id must be positive", ErrBadRequest)
-	}
-	ok, err := s.st.AcknowledgeWarning(ctx, userID, actionID)
-	if err != nil {
-		return fmt.Errorf("%w: %w", ErrInternal, err)
-	}
-	if !ok {
-		return fmt.Errorf("%w: notice not found", ErrNotFound)
-	}
-	return nil
 }
