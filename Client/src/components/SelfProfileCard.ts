@@ -15,6 +15,7 @@ import { isImeCommit } from "@lib/text/ime";
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { resolveDisplayName } from "@lib/ui/avatar";
+import { isPhoneLayout, openBottomSheet } from "@lib/ui/bottomSheet";
 import type { UserStatus } from "@lib/types";
 import {
   CLEAR_AFTER_OPTIONS,
@@ -95,6 +96,7 @@ function ownIdentity(): { id: number | null; username: string; displayName: stri
 export function createSelfProfileCard(options: SelfProfileCardOptions): SelfProfileCard {
   let disposable: Disposable | null = null;
   let cardEl: HTMLDivElement | null = null;
+  let tearingDown = false;
 
   function isOpen(): boolean {
     return cardEl !== null;
@@ -105,7 +107,10 @@ export function createSelfProfileCard(options: SelfProfileCardOptions): SelfProf
     const card = cardEl;
     const focusInside = card.contains(document.activeElement);
     const focusLost = document.activeElement === null || document.activeElement === document.body;
+    // The phone sheet closes with the owner and reports it; this close is already on its way.
+    tearingDown = true;
     disposable?.destroy();
+    tearingDown = false;
     disposable = null;
     cardEl = null;
     card.remove();
@@ -720,12 +725,32 @@ export function createSelfProfileCard(options: SelfProfileCardOptions): SelfProf
       createElement("div", { class: "spc-divider" }),
       actions,
     );
-    document.body.appendChild(card);
-
-    // ---- Placement: above the trigger, left edges aligned --------------------
-    const rect = options.trigger.getBoundingClientRect();
-    card.style.left = `${Math.max(8, rect.left)}px`;
-    card.style.bottom = `${Math.max(8, window.innerHeight - rect.top + 8)}px`;
+    /** What a click must land outside of to close the card. */
+    let host: HTMLElement = card;
+    if (isPhoneLayout()) {
+      // A phone gets the card as a bottom sheet, like every other profile; the
+      // sheet is the dialog.
+      card.removeAttribute("role");
+      card.removeAttribute("aria-label");
+      host = openBottomSheet({
+        label: shellText("status.profileLabel"),
+        content: card,
+        className: "self-profile-sheet",
+        testId: "self-profile-sheet",
+        signal,
+        focusFirst: false,
+        fallbackFocus: () => (options.trigger.isConnected ? options.trigger : null),
+        onClosed: () => {
+          if (cardEl === card && !tearingDown) close();
+        },
+      }).panel;
+    } else {
+      document.body.appendChild(card);
+      // ---- Placement: above the trigger, left edges aligned ------------------
+      const rect = options.trigger.getBoundingClientRect();
+      card.style.left = `${Math.max(8, rect.left)}px`;
+      card.style.bottom = `${Math.max(8, window.innerHeight - rect.top + 8)}px`;
+    }
 
     options.trigger.setAttribute("aria-expanded", "true");
 
@@ -737,7 +762,7 @@ export function createSelfProfileCard(options: SelfProfileCardOptions): SelfProf
       (e: MouseEvent) => {
         const target = e.target;
         if (!(target instanceof Node)) return;
-        if (card.contains(target) || options.trigger.contains(target)) return;
+        if (host.contains(target) || options.trigger.contains(target)) return;
         close();
       },
       { signal, capture: true },
