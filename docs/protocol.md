@@ -3256,7 +3256,8 @@ published identity key but the signature is missing/invalid → reject).
     "public_key": "base64-ecdh-pubkey",
     "signature": "base64-ecdsa-signature",
     "identity_public_key": "base64-device-identity-public-key",
-    "video_decode": ["vp8", "h264", "vp9"]
+    "video_decode": ["vp8", "h264", "vp9"],
+    "key_slots": true
   }
 }
 ```
@@ -3285,6 +3286,14 @@ still accepts the announce — a bad list never affects the key. Each announce
 replaces the stored list; an announce without the field clears it. Receivers
 treat an absent or empty list as `["vp8", "h264"]`.
 
+`key_slots` is optional: `true` says this client can hold the room key in two
+key slots and stage a new key in one before sending with it. The server
+stores and relays it only when it is JSON `true`; any other value is dropped
+and the announce kept. The key holder rotates the room key that way only when
+every peer in the channel announced it (see
+[voice_e2ee_offer](#voice_e2ee_offer-client---server)); otherwise every client
+keeps the one-slot behaviour.
+
 ### voice_e2ee_announce (Server -> Client, broadcast to voice channel)
 
 Relayed to the other participants with the sender's user ID attached. Also
@@ -3305,10 +3314,13 @@ the client sent neither (an older client):
     "public_key": "base64-ecdh-pubkey",
     "signature": "base64-ecdsa-signature",
     "video_decode": ["vp8", "h264", "vp9"],
-    "identity_public_key": "base64-device-identity-public-key"
+    "identity_public_key": "base64-device-identity-public-key",
+    "key_slots": true
   }
 }
 ```
+
+`key_slots` is present (and `true`) only when the announcing client sent it.
 
 **Verify rule.** A receiving client verifies `signature` against the
 announce's `identity_public_key` when it is present, and otherwise against the
@@ -3378,6 +3390,27 @@ re-announces); the mark resets when the sender announces a new ephemeral key.
 A blob with no header (exactly 48 bytes: key + GCM tag) is the pre-epoch
 format and is still accepted from holders on an older build; that
 compatibility path is scheduled for removal in the next release.
+
+A holder sends a peer that announced `key_slots` the v2 layout instead:
+
+```
+0x02 ‖ epoch (u64 big-endian) ‖ slot (u8, 0 or 1) ‖ flags (u8) ‖ AES-GCM ciphertext
+```
+
+The whole 11-byte header is GCM additional data. `slot` is the key slot the
+receiver puts the key in; every encrypted frame names its sender's slot, so a
+receiver holding both slots decrypts frames sent with either key. Flag bit 0
+(stage) means: keep sending with the current key and switch to this slot
+about two seconds later. Every other flag bit must be 0. A receiver with no
+room key yet uses the key at once whatever the flag says. A v1 offer means
+slot 0, used at once.
+
+The holder stages a rotated key (in the slot nobody sends with) only when
+every peer announced `key_slots`; then every peer has the new key before
+anyone sends with it, so no frame is lost at a rotation. While any peer has
+not, the holder rotates in slot 0 at once, and a peer that joins without
+`key_slots` while the call is on slot 1 makes the holder rotate back to slot
+0 straight away.
 
 ### voice_e2ee_offer (Server -> Client, relay to target)
 

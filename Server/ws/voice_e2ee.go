@@ -138,7 +138,13 @@ func handleVoiceE2EEAnnounceV2(_ context.Context, cmd Command, info ClientInfo, 
 	if identityKey == "" {
 		identityKey = info.IdentityKey
 	}
-	announce := e2eeAnnounce{key: pubKey, sig: sig, videoDecode: sanitizeVideoDecode(announceCmd.VideoDecode), identityKey: identityKey}
+	announce := e2eeAnnounce{
+		key:         pubKey,
+		sig:         sig,
+		videoDecode: sanitizeVideoDecode(announceCmd.VideoDecode),
+		identityKey: identityKey,
+		keySlots:    announceCmd.KeySlots,
+	}
 	msg := buildVoiceE2EEAnnounce(userID, announce)
 	return Result{
 		SetE2EEAnnounce: &announce,

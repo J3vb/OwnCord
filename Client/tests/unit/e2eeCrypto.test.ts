@@ -148,7 +148,7 @@ describe("e2eeCrypto", () => {
 
     it("rejects an unknown format version byte", async () => {
       const { alice, bob, iv, bytes } = await wrappedBlob(3);
-      bytes[0] = 2;
+      bytes[0] = 3;
       await expect(
         unwrapRoomKey(bob.privateKey, alice.publicKey, b64(bytes), iv),
       ).rejects.toThrow();
@@ -199,6 +199,52 @@ describe("e2eeCrypto", () => {
       const unwrapped = await unwrapRoomKey(bob.privateKey, alice.publicKey, encryptedKey, iv);
       expect(unwrapped.roomKey).toEqual(roomKey);
       expect(unwrapped.epoch).toBe(Number.MAX_SAFE_INTEGER);
+    });
+
+    it("carries a key placement as a 0x02 header and returns it", async () => {
+      const { alice, bob, roomKey } = await twoParties();
+      const { encryptedKey, iv } = await wrapRoomKey(alice.privateKey, bob.publicKey, roomKey, 5, {
+        slot: 1,
+        stage: true,
+      });
+      const bytes = fromB64(encryptedKey);
+      expect(Array.from(bytes.subarray(0, 11))).toEqual([2, 0, 0, 0, 0, 0, 0, 0, 5, 1, 1]);
+      expect(bytes.byteLength).toBe(11 + 48);
+
+      const unwrapped = await unwrapRoomKey(bob.privateKey, alice.publicKey, encryptedKey, iv);
+      expect(unwrapped.roomKey).toEqual(roomKey);
+      expect(unwrapped.epoch).toBe(5);
+      expect(unwrapped.placement).toEqual({ slot: 1, stage: true });
+    });
+
+    it("reports no placement for a v1 blob", async () => {
+      const { alice, bob, roomKey } = await twoParties();
+      const { encryptedKey, iv } = await wrapRoomKey(alice.privateKey, bob.publicKey, roomKey, 2);
+      const unwrapped = await unwrapRoomKey(bob.privateKey, alice.publicKey, encryptedKey, iv);
+      expect(unwrapped.placement).toBeUndefined();
+    });
+
+    it("rejects a v2 blob whose slot or flags were edited", async () => {
+      const { alice, bob, roomKey } = await twoParties();
+      const { encryptedKey, iv } = await wrapRoomKey(alice.privateKey, bob.publicKey, roomKey, 5, {
+        slot: 0,
+        stage: false,
+      });
+      const flipped = fromB64(encryptedKey);
+      flipped[9] = 1; // slot 0 -> 1, ciphertext untouched: the AAD no longer matches
+      await expect(
+        unwrapRoomKey(bob.privateKey, alice.publicKey, b64(flipped), iv),
+      ).rejects.toThrow();
+      const outOfRange = fromB64(encryptedKey);
+      outOfRange[9] = 2;
+      await expect(
+        unwrapRoomKey(bob.privateKey, alice.publicKey, b64(outOfRange), iv),
+      ).rejects.toThrow("E2EE: offer key slot out of range");
+      const unknownFlag = fromB64(encryptedKey);
+      unknownFlag[10] = 2;
+      await expect(
+        unwrapRoomKey(bob.privateKey, alice.publicKey, b64(unknownFlag), iv),
+      ).rejects.toThrow("E2EE: offer key slot out of range");
     });
 
     it("rejects a blob truncated below the header length", async () => {

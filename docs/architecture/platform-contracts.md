@@ -101,8 +101,8 @@ platform invoke bindings, including all conditional platform/feature handlers:
 | Measure                                                    | Value |
 | ---------------------------------------------------------- | ----- |
 | Files under `Client/src/` importing `@tauri-apps/*`        | 27    |
-| Distinct `invoke` command names called from `Client/src/`  | 106   |
-| `#[tauri::command]` handlers in `Client/src-tauri/`        | 109   |
+| Distinct `invoke` command names called from `Client/src/`  | 107   |
+| `#[tauri::command]` handlers in `Client/src-tauri/`        | 110   |
 | TS calls with no matching Rust handler                     | 0     |
 | Uses of the `window.__TAURI__` global                      | 0     |
 | Environment-detection helper (`isDesktop()` or equivalent) | 1     |
@@ -207,6 +207,7 @@ native_voice_unpublish_camera
 native_voice_unpublish_screen
 native_voice_unpublish_screen_audio
 native_voice_update_mic_test
+native_voice_use_key_slot
 native_voice_video_codecs
 native_voice_watch_devices
 notify_message

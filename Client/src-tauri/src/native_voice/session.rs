@@ -47,11 +47,16 @@ pub use publish_options::{
     process_threads, screen_audio_source, CameraOptions, PublishCodec, ScreenOptions,
 };
 
-/// The only key index OwnCord ever uses. livekit-client's
-/// `ExternalE2EEKeyProvider.setKey(key)` writes index 0, and upstream livekit/rust-sdks issue 1280
-/// aborts the process on an out-of-range index, so this is a constant, not a
-/// parameter.
+/// The key index a session starts on, and the one an older client uses for
+/// every key: livekit-client's `ExternalE2EEKeyProvider.setKey(key)` writes
+/// index 0.
 pub const KEY_INDEX: i32 = 0;
+
+/// The key indexes ("slots") a room key can go in. A new key is staged in the
+/// slot nobody sends with and sending switches to it a moment later. Upstream
+/// livekit/rust-sdks issue 1280 aborts the process on an index outside the
+/// key ring, so a slot from the webview is checked against this first.
+pub const KEY_SLOTS: std::ops::RangeInclusive<i32> = 0..=1;
 
 /// The bytes the frame cryptor derives the AES key from.
 ///
@@ -548,10 +553,23 @@ impl NativeSession {
         Err("the media server did not accept end-to-end encryption for this track".into())
     }
 
-    /// Rotate the room key in place (index 0), the way OwnCord rotates on
-    /// leave and on the periodic timer.
-    pub fn set_key(&self, key_material: Vec<u8>) {
-        self.key_provider.set_shared_key(key_material, KEY_INDEX);
+    /// Install the room key in `slot` and send with it from now on.
+    pub fn set_key(&self, key_material: Vec<u8>, slot: i32) {
+        self.key_provider.set_shared_key(key_material, slot);
+        self.use_key_slot(slot);
+    }
+
+    /// Install the room key in `slot` for receiving only; `use_key_slot`
+    /// switches sending to it.
+    pub fn stage_key(&self, key_material: Vec<u8>, slot: i32) {
+        self.key_provider.set_shared_key(key_material, slot);
+    }
+
+    /// Encrypt every local track with the key in `slot`.
+    pub fn use_key_slot(&self, slot: i32) {
+        self.room
+            .e2ee_manager()
+            .set_sender_key_index(&self.room.local_participant().identity(), slot);
     }
 
     /// A second, raw view of the room's events, for the interop example

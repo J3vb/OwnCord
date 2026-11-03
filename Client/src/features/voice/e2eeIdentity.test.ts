@@ -95,6 +95,7 @@ describe("E2EEIdentity", () => {
       signature: "sig",
       identity_public_key: "device-pub",
       video_decode: ["vp8", "h264"],
+      key_slots: true,
     });
     expect(exportPublicKey).toHaveBeenCalledWith("pub");
     expect(getOrCreateIdentityKeyPair).toHaveBeenCalledWith("chat.example", 7);
@@ -106,6 +107,7 @@ describe("E2EEIdentity", () => {
     await expect(identity.buildAnnouncePayload(EPHEMERAL)).resolves.toEqual({
       public_key: EPHEMERAL,
       video_decode: ["vp8", "h264"],
+      key_slots: true,
     });
     expect(getOrCreateIdentityKeyPair).not.toHaveBeenCalled();
   });
@@ -116,6 +118,7 @@ describe("E2EEIdentity", () => {
     await expect(identity.buildAnnouncePayload(EPHEMERAL)).resolves.toEqual({
       public_key: EPHEMERAL,
       video_decode: ["vp8", "h264"],
+      key_slots: true,
     });
     expect(getOrCreateIdentityKeyPair).not.toHaveBeenCalled();
   });
@@ -154,6 +157,7 @@ describe("E2EEIdentity", () => {
     await expect(pending).resolves.toEqual({
       public_key: EPHEMERAL,
       video_decode: ["vp8", "h264"],
+      key_slots: true,
     });
     // The stale pair was not cached: the next announce loads again.
     await identity.buildAnnouncePayload(EPHEMERAL);
@@ -173,6 +177,7 @@ describe("E2EEIdentity", () => {
       await expect(pending).resolves.toEqual({
         public_key: EPHEMERAL,
         video_decode: ["vp8", "h264"],
+        key_slots: true,
       });
       expect(signEphemeralKey).not.toHaveBeenCalled();
     },
@@ -192,6 +197,7 @@ describe("E2EEIdentity", () => {
       signature: "sig",
       identity_public_key: "device-pub",
       video_decode: ["vp8", "h264"],
+      key_slots: true,
     });
   });
 
@@ -209,6 +215,7 @@ describe("E2EEIdentity", () => {
     await expect(identity.buildAnnouncePayload(EPHEMERAL)).resolves.toEqual({
       public_key: EPHEMERAL,
       video_decode: ["vp8", "h264"],
+      key_slots: true,
     });
   });
 });
@@ -216,19 +223,31 @@ describe("E2EEIdentity", () => {
 describe("E2EEIdentity unsigned announces", () => {
   it("carries exactly the public key and decode list when there is no host", async () => {
     const payload = await setup(null).identity.buildAnnouncePayload(EPHEMERAL);
-    expect(payload).toStrictEqual({ public_key: EPHEMERAL, video_decode: ["vp8", "h264"] });
+    expect(payload).toStrictEqual({
+      public_key: EPHEMERAL,
+      video_decode: ["vp8", "h264"],
+      key_slots: true,
+    });
   });
 
   it("carries no signature field when signing fails", async () => {
     vi.mocked(signEphemeralKey).mockRejectedValueOnce(new Error("keyring"));
     const payload = await setup().identity.buildAnnouncePayload(EPHEMERAL);
-    expect(payload).toStrictEqual({ public_key: EPHEMERAL, video_decode: ["vp8", "h264"] });
+    expect(payload).toStrictEqual({
+      public_key: EPHEMERAL,
+      video_decode: ["vp8", "h264"],
+      key_slots: true,
+    });
   });
 
   it("drops a signature that has no key to verify it when the export fails", async () => {
     vi.mocked(exportPublicKey).mockRejectedValueOnce(new Error("export"));
     const payload = await setup().identity.buildAnnouncePayload(EPHEMERAL);
-    expect(payload).toStrictEqual({ public_key: EPHEMERAL, video_decode: ["vp8", "h264"] });
+    expect(payload).toStrictEqual({
+      public_key: EPHEMERAL,
+      video_decode: ["vp8", "h264"],
+      key_slots: true,
+    });
   });
 
   it("logs why the announce went out unsigned", async () => {

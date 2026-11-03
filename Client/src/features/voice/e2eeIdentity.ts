@@ -106,6 +106,7 @@ export class E2EEIdentity {
     signature?: string;
     identity_public_key?: string;
     video_decode: readonly string[];
+    key_slots: true;
   }> {
     // Started before the key load so the load's staleness guards see the same
     // ordering as before the decode list became async.
@@ -133,9 +134,12 @@ export class E2EEIdentity {
         signature,
         identity_public_key: identityPublicKey,
         video_decode,
+        key_slots: true,
       };
     }
-    if (signature !== undefined) return { public_key: ephemeralPubBase64, signature, video_decode };
-    return { public_key: ephemeralPubBase64, video_decode };
+    if (signature !== undefined) {
+      return { public_key: ephemeralPubBase64, signature, video_decode, key_slots: true };
+    }
+    return { public_key: ephemeralPubBase64, video_decode, key_slots: true };
   }
 }
