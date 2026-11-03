@@ -135,6 +135,47 @@
   background: var(--bg-modifier-selected);
 }
 
+/* The composer's attach sheet (features/messaging/attachSheet.ts): three tiles. */
+.attach-sheet {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  padding: 4px 12px 16px;
+}
+.attach-sheet-tile {
+  min-height: 104px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border: none;
+  border-radius: var(--radius-lg);
+  background: var(--bg-input);
+  color: var(--text-normal);
+  font-size: var(--font-size-md);
+  font-weight: 500;
+}
+.attach-sheet-tile:active {
+  background: var(--bg-modifier-active);
+}
+.attach-sheet-icon {
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--bg-primary);
+  color: var(--text-muted);
+}
+.attach-sheet-icon-camera {
+  color: var(--green);
+}
+.attach-sheet-icon-gallery {
+  color: var(--accent);
+}
+
 /* Menus as sheets (components/menuSheet.ts): the channel and server menus. A
    row can carry a second line, a chevron (it opens a second page) or a check. */
 .menu-sheet-row {

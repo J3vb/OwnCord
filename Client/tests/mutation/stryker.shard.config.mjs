@@ -281,6 +281,7 @@ export const shards = {
     "src/features/messaging/forwardTargets.ts",
     "src/features/messaging/forwardSend.ts",
     "src/features/messaging/forwardRequests.ts",
+    "src/features/messaging/attachSheet.ts",
     "src/lib/pollState.ts",
     "src/features/messaging/pollModel.ts",
     "src/features/messaging/pollSend.ts",

@@ -50,6 +50,7 @@ import { createInputComposer } from "./message-input/inputComposer";
 import { createInputSend } from "./message-input/inputSend";
 import { createInputAttachments } from "./message-input/inputAttachments";
 import { createInputDraft } from "./message-input/inputDraft";
+import { createAttachPickers } from "../features/messaging/attachSheet";
 
 export { wrapWithMarker };
 
@@ -342,29 +343,16 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       "+",
     );
 
-    // File picker via attach button
+    // File pickers via attach button: a sheet with the camera on a phone.
     if (st.options.onUploadFile !== undefined) {
-      const fileInput = createElement("input", {
-        type: "file",
-        multiple: "",
-        style: "display: none;",
+      const pickers = createAttachPickers({
+        onFile: (file) => void api.handlePasteFile(file),
+        canAttach: () => st.disabledReason === null && !uploadsDisabledByServer(),
+        signal: st.signal,
       });
-      fileInput.addEventListener(
-        "change",
-        () => {
-          // Copied first: clearing the value empties the live FileList.
-          const files = [...(fileInput.files ?? [])];
-          fileInput.value = "";
-          for (const file of files) void api.handlePasteFile(file);
-        },
-        { signal: st.signal },
-      );
-      attachBtn.addEventListener("click", () => fileInput.click(), { signal: st.signal });
-      st.openPicker = () => {
-        if (st.disabledReason !== null || uploadsDisabledByServer()) return;
-        fileInput.click();
-      };
-      st.root?.appendChild(fileInput);
+      attachBtn.addEventListener("click", pickers.open, { signal: st.signal });
+      st.openPicker = pickers.openFiles;
+      st.root?.append(...pickers.inputs);
     } else {
       attachBtn.setAttribute("disabled", "true");
       attachBtn.title = messagingText("attach.unavailable");

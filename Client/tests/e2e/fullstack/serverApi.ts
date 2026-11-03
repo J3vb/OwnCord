@@ -87,7 +87,7 @@ export const composer = (page: Page) => page.locator("[data-testid='message-inpu
 export async function sendMessage(page: Page, text: string, file?: string): Promise<void> {
   const input = page.locator("[data-testid='message-input']");
   if (file !== undefined) {
-    await input.locator("input[type='file']").setInputFiles({
+    await input.locator("input[data-attach-source='files']").setInputFiles({
       name: file,
       mimeType: "text/plain",
       buffer: Buffer.from("synthetic attachment"),
