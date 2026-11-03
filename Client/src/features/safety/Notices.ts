@@ -93,6 +93,9 @@ export function createNoticesBanner(opts: NoticesBannerOptions): HTMLElement {
   const announcer = createElement("div", { class: "sr-only", role: "status" });
   root.append(list, announcer);
   const rows = new Map<number, NoticeRow>();
+  // Notices already pending at mount are part of the page; one that arrives
+  // later is announced, since the banner is its only notice (no toast).
+  let mounted = false;
 
   function buildRow(n: ModerationNotice): NoticeRow {
     const titleId = `moderation-notice-${n.id}-title`;
@@ -155,6 +158,7 @@ export function createNoticesBanner(opts: NoticesBannerOptions): HTMLElement {
       if (row === undefined) {
         row = buildRow(n);
         rows.set(n.id, row);
+        if (mounted) setText(announcer, t("toast.warning", { reason: n.reason }));
       }
       applyAck(row, n);
       const slot: Element | null = prev === null ? list.firstElementChild : prev.nextElementSibling;
@@ -170,6 +174,7 @@ export function createNoticesBanner(opts: NoticesBannerOptions): HTMLElement {
   }
 
   render(safetyStore.getState().notices);
+  mounted = true;
   const unsub = safetyStore.subscribeSelector((s) => s.notices, render);
   signal.addEventListener("abort", unsub, { once: true });
   return root;

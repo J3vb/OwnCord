@@ -1,5 +1,5 @@
 /**
- * Toast notification system — shows stacking notifications at top-centre.
+ * Toast notification system — stacking notifications just above the composer.
  * Supports info, error, success and warning types with auto-dismiss.
  *
  * Errors are the exception: they stay until dismissed, because a message
@@ -11,6 +11,7 @@
  */
 
 import { createElement, setText } from "@lib/dom";
+import { Disposable } from "@lib/disposable";
 import type { MountableComponent } from "@lib/text/safeRender";
 import { shellText } from "../i18n/shell";
 
@@ -50,6 +51,9 @@ export interface ToastContainer extends MountableComponent {
   /** Returns a function that removes the toast. */
   show(message: string, type?: ToastType, durationMs?: number, action?: ToastAction): () => void;
   clear(): void;
+  /** Keep the stack just above `anchor` (the composer slot) and centred on
+   *  it. While the anchor has no box, the CSS fallback places the stack. */
+  anchorTo(anchor: HTMLElement): void;
 }
 
 /** Freeze an auto-dismissing toast, holding the time it has left. A module
@@ -64,6 +68,28 @@ function pauseEntry(entry: ToastEntry): void {
 export function createToastContainer(): ToastContainer {
   let root: HTMLDivElement | null = null;
   const toasts: ToastEntry[] = [];
+  let anchor: HTMLElement | null = null;
+  let anchorWatch: Disposable | null = null;
+
+  /** Copy the anchor's box into the container's custom properties. A
+   *  zero-height anchor (no composer in this view) leaves the vertical
+   *  fallback, a zero-width one (hidden) both fallbacks. */
+  function place(): void {
+    if (root === null) return;
+    const box = anchor?.getBoundingClientRect();
+    const wide = box !== undefined && box.width > 0;
+    const tall = wide && box.height > 0;
+    const style = root.style;
+    if (wide) {
+      style.setProperty("--toast-center", `${box.left + box.width / 2}px`);
+      style.setProperty("--toast-room", `${box.width}px`);
+    } else {
+      style.removeProperty("--toast-center");
+      style.removeProperty("--toast-room");
+    }
+    if (tall) style.setProperty("--toast-bottom", `${Math.max(0, window.innerHeight - box.top)}px`);
+    else style.removeProperty("--toast-bottom");
+  }
 
   function removeToast(entry: ToastEntry): void {
     const idx = toasts.indexOf(entry);
@@ -190,6 +216,7 @@ export function createToastContainer(): ToastContainer {
       resume(entry);
     });
     toasts.push(entry);
+    place();
     root.appendChild(el);
     resume(entry);
 
@@ -223,7 +250,27 @@ export function createToastContainer(): ToastContainer {
     container.appendChild(root);
   }
 
+  function anchorTo(next: HTMLElement): void {
+    anchorWatch?.destroy();
+    anchor = next;
+    const watch = new Disposable();
+    anchorWatch = watch;
+    // The composer grows with a reply bar, attachments or more lines; the
+    // window and the on-screen keyboard move it.
+    if (typeof ResizeObserver !== "undefined") {
+      const observer = new ResizeObserver(place);
+      observer.observe(next);
+      watch.addCleanup(() => observer.disconnect());
+    }
+    window.addEventListener("resize", place, { signal: watch.signal });
+    window.visualViewport?.addEventListener("resize", place, { signal: watch.signal });
+    place();
+  }
+
   function destroy(): void {
+    anchorWatch?.destroy();
+    anchorWatch = null;
+    anchor = null;
     clear();
     if (root !== null) {
       root.remove();
@@ -231,5 +278,5 @@ export function createToastContainer(): ToastContainer {
     }
   }
 
-  return { mount, destroy, show, clear };
+  return { mount, destroy, show, clear, anchorTo };
 }

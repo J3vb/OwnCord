@@ -400,6 +400,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     // Toast container
     st.toast = createToastContainer();
     st.toast.mount(st.root);
+    st.toast.anchorTo(ms.chatAreaResult.slots.inputSlot);
     st.children.push(st.toast);
     initToast(st.toast);
     mountCalls(st, pg, ms);
