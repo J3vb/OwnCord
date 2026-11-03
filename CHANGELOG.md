@@ -54,6 +54,7 @@ and only when it changes something a contributor or fork holder must do
 
 ### Added
 
+- **Settings → Account → Signed-in devices** now also lists your API tokens (label, created, last used) with a Revoke button each. Changing your password offers "Also revoke my API tokens", ticked by default when you have any. `docs/security.md` now spells out what a password change, account recovery and sign-out-everywhere each end.
 - On Android, your camera now pauses while the app is in the background, so others see your avatar instead of a frozen picture, and turns back on when you return.
 - Your own camera (call tiles, pop-out and the settings preview) now shows you exactly as others see you, with your right hand on the right; before, it was always mirrored. A new "Mirror my camera preview" switch in Voice & Video (off by default) brings the mirror back. Others always see you the right way round.
 - While you are in a DM call, that person's avatar stays in the server rail under Home with a green call badge, so you can see the call and get back to it in one click from any server.
@@ -64,6 +65,7 @@ and only when it changes something a contributor or fork holder must do
 ### Fixed
 
 - In calls, cameras and screen shares could freeze for a few seconds every five minutes (each time the call's encryption key changed) and when someone left. A new key now reaches everyone before anyone sends with it, so the picture keeps going. Needs the server and every client in the call on this version; otherwise calls behave as before.
+- Role colours show again on names. A colour that is hard to read on the theme (for example pure red or blurple on Dark) used to turn the name plain white or black; now it keeps its colour and only gets lighter or darker until it reads well. With High Contrast on, a colour that does not read stays plain text as before.
 - On Linux, someone else's camera could stay black for the whole call when it started just as you turned your own camera on or off. It now shows as soon as it arrives.
 - Android: the app icon's "OC" logo ran off the edges of the home-screen icon. It now sits inside the icon shape on every launcher, and Android 13+ themed icons show a single-colour OC.
 - Android: a cold start signed you out unless you had ticked "Remember password", and signing in to a second server signed you out of the first. The sign-in page now has one "Stay signed in" box, ticked by default, that keeps each server's sign-in; untick it on a shared phone.

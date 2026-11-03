@@ -2,8 +2,8 @@
 
 import { createElement, appendChildren, setText, focusIsOurs } from "@lib/dom";
 import type { UserStatus } from "@lib/types";
-import { errorText } from "@lib/api";
-import type { SessionInfo } from "@lib/api";
+import { errorText, ApiClientError } from "@lib/api";
+import type { OwnApiToken, SessionInfo } from "@lib/api";
 import { showToast } from "@lib/ui/toast";
 import { sessionDeviceLabel } from "@lib/net/sessionNotice";
 import { formatMessageTimestamp } from "@lib/text/formatting";
@@ -144,9 +144,133 @@ function buildSessionRow(
   return row;
 }
 
+// ---------------------------------------------------------------------------
+// API tokens builder
+// ---------------------------------------------------------------------------
+
+function buildApiTokenRow(
+  tok: OwnApiToken,
+  revoke: (id: number) => Promise<void>,
+  signal: AbortSignal,
+  onListChanged: () => void,
+  onRevoked: () => void,
+): HTMLDivElement {
+  const row = createElement("div", {
+    class: "session-row",
+    "data-testid": "api-token-row",
+    "data-token-id": String(tok.id),
+  });
+  const info = createElement("div", { class: "session-info" });
+  appendChildren(
+    info,
+    createElement("div", { class: "session-device" }, tok.label),
+    createElement(
+      "div",
+      { class: "session-detail" },
+      t("apiTokens.detail", {
+        created: formatMessageTimestamp(tok.created_at),
+        used:
+          tok.last_used === null ? t("apiTokens.neverUsed") : formatMessageTimestamp(tok.last_used),
+      }),
+    ),
+  );
+  const revokeBtn = createElement(
+    "button",
+    { class: "ac-btn secondary", "data-testid": "api-token-revoke" },
+    t("apiTokens.revoke"),
+  );
+  revokeBtn.addEventListener(
+    "click",
+    () => {
+      const list = row.parentElement;
+      const next = row.nextSibling;
+      row.remove();
+      onListChanged();
+      void revoke(tok.id)
+        .then(() => {
+          showToast(t("apiTokens.revoked"), "success");
+          onRevoked();
+        })
+        .catch((err: unknown) => {
+          // 404: already revoked or expired elsewhere, so the row stays gone.
+          if (err instanceof ApiClientError && err.status === 404) {
+            onRevoked();
+            return;
+          }
+          if (next?.parentNode === list) list?.insertBefore(row, next);
+          else list?.appendChild(row);
+          onListChanged();
+          showToast(errorText(err, t("apiTokens.revokeFailed")), "error");
+        });
+    },
+    { signal },
+  );
+  appendChildren(row, info, revokeBtn);
+  return row;
+}
+
+/** The account's API tokens with a revoke button each. Stays hidden while the
+ *  account has none, and when the list cannot be read. Reloads on a `change`
+ *  from `tokensChanged` and sends one after each revoke, so the password
+ *  form's option stays in step. */
+function buildApiTokensBlock(
+  options: SettingsOverlayOptions,
+  signal: AbortSignal,
+  tokensChanged?: EventTarget,
+): HTMLDivElement | null {
+  const listTokens = options.onListApiTokens;
+  const revoke = options.onRevokeApiToken;
+  if (listTokens === undefined || revoke === undefined) return null;
+  const block = createElement("div", { "data-testid": "api-tokens-section" });
+  block.hidden = true;
+  const list = createElement("div", { class: "session-list", "data-testid": "api-tokens-list" });
+  appendChildren(
+    block,
+    createElement("div", { class: "settings-section-title" }, t("apiTokens.title")),
+    createElement("div", { class: "setting-desc" }, t("apiTokens.description")),
+    list,
+  );
+  const sync = (): void => {
+    block.hidden = list.childElementCount === 0;
+  };
+  // A revoke here announces the change; the listener below skips that echo.
+  let announcing = false;
+  const announce = (): void => {
+    announcing = true;
+    tokensChanged?.dispatchEvent(new Event("change"));
+    announcing = false;
+  };
+  let loadGen = 0;
+  const load = (): void => {
+    const gen = ++loadGen;
+    void listTokens()
+      .then((tokens) => {
+        if (signal.aborted || gen !== loadGen) return;
+        list.replaceChildren(
+          ...tokens.map((tok) => buildApiTokenRow(tok, revoke, signal, sync, announce)),
+        );
+        sync();
+      })
+      .catch((err: unknown) => {
+        if (signal.aborted || gen !== loadGen) return;
+        log.warn("Failed to list API tokens", err);
+      });
+  };
+  load();
+  tokensChanged?.addEventListener(
+    "change",
+    () => {
+      if (!announcing) load();
+    },
+    { signal },
+  );
+  return block;
+}
+
 export function buildSessionsSection(
   options: SettingsOverlayOptions,
   signal: AbortSignal,
+  tokensChanged?: EventTarget,
 ): HTMLLIElement {
   const { row, icon, result, body } = createStatusRow(
     t("devices.sectionTitle"),
@@ -262,6 +386,11 @@ export function buildSessionsSection(
   );
 
   appendChildren(panel, description, list, revokeAllBtn, confirmArea);
+  const tokensBlock = buildApiTokensBlock(options, signal, tokensChanged);
+  if (tokensBlock !== null) {
+    tokensBlock.style.marginTop = "16px";
+    panel.appendChild(tokensBlock);
+  }
   load();
   return row;
 }

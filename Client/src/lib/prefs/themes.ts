@@ -7,7 +7,14 @@
 
 import { Disposable } from "../disposable";
 import { readStored, removeStored, writeStored } from "./preferences";
-import { deriveAccentTokens, parseColor, type Rgb } from "../text/colorContrast";
+import {
+  clampTextColor,
+  deriveAccentTokens,
+  mix,
+  parseColor,
+  toHex,
+  type Rgb,
+} from "../text/colorContrast";
 
 /** Built-in theme palettes. Moved here from `features/settings/helpers` so
  *  `lib/` and `features/` modules can apply a theme without importing the
@@ -272,45 +279,75 @@ export function getActiveThemeName(): string {
 /** Every surface an accent can sit on as text or as a focus ring. */
 const SURFACE_TOKENS = ["--bg-primary", "--bg-secondary", "--bg-tertiary", "--bg-input"] as const;
 
-function themeSurfaces(): Rgb[] {
+/** The surfaces usernames are drawn on: the message list and the side columns. */
+const NAME_SURFACE_TOKENS = ["--bg-primary", "--bg-secondary"] as const;
+
+function themeSurfaces(tokens: readonly string[] = SURFACE_TOKENS): Rgb[] {
   const cs = getComputedStyle(document.body);
   const surfaces: Rgb[] = [];
-  for (const token of SURFACE_TOKENS) {
+  for (const token of tokens) {
     const rgb = parseColor(cs.getPropertyValue(token));
-    // One unreadable surface means the accent's contrast is unknown, and
-    // deriveAccentTokens falls back to the theme colour on an empty list.
+    // One unreadable surface means the colour's contrast is unknown, and
+    // callers fall back to the theme colour on an empty list.
     if (rgb === null) return [];
     surfaces.push(rgb);
   }
   return surfaces;
 }
 
-/** Clamped role colours by requested colour, for the current theme's surfaces. */
+/** Clamped role colours by High Contrast state and requested colour. */
 const roleTextCache = new Map<string, string>();
 
 /**
- * A role colour used as text, e.g. a username (B9 Q13 role clamp).
+ * `.message.mentioned:hover` in messages.css is --yellow at 12 % over the list;
+ * one point more keeps the browser's own blend from rounding a name under 4.5:1.
+ */
+const MENTION_ROW_TINT = 0.13;
+
+/** The name surfaces, plus a mentioned message row when the theme has a --yellow. */
+function nameSurfaces(): Rgb[] {
+  const surfaces = themeSurfaces(NAME_SURFACE_TOKENS);
+  const yellow = parseColor(getComputedStyle(document.body).getPropertyValue("--yellow"));
+  if (surfaces.length > 0 && yellow !== null) {
+    surfaces.push(mix(surfaces[0]!, yellow, MENTION_ROW_TINT));
+  }
+  return surfaces;
+}
+
+function roleText(rgb: Rgb): string | null {
+  // High Contrast keeps the strict rule: the exact colour on every surface, or none.
+  if (document.documentElement.classList.contains("high-contrast")) {
+    return deriveAccentTokens(rgb, themeSurfaces()).text;
+  }
+  const clamped = clampTextColor(rgb, nameSurfaces());
+  return clamped === null ? null : toHex(clamped);
+}
+
+/**
+ * A role colour used as text, e.g. a username.
  *
  * Role colours are server-set, so nothing else stands between an admin's
- * `#ff0000` and a name that cannot be read. The rule and the math are the
- * custom accent's `--accent-text` (deriveAccentTokens): the colour is used only
- * where it reads at 4.5:1 on every theme surface, otherwise the name is
+ * `#ff0000` and a name that cannot be read. The colour keeps its hue and moves
+ * only its lightness until it reads at 4.5:1 on the surfaces names sit on
+ * (--bg-primary, --bg-secondary, and a mentioned row's yellow tint); only
+ * when no lightness works is the name `--text-normal`. Under High Contrast the colour is used unchanged where it
+ * reads at 4.5:1 on every theme surface, otherwise the name is
  * `--text-normal`. `color` may be any CSS colour, including a `var(--role-*)`
  * fallback; the result is a normalised `#rrggbb` or `var(--text-normal)`, never
  * the raw string. Render the element with `data-role-color` holding `color`
  * so a theme switch can clamp it again.
  */
 export function readableRoleColor(color: string): string {
-  let out = roleTextCache.get(color);
+  const key = `${document.documentElement.classList.contains("high-contrast") ? "hc" : ""}|${color}`;
+  let out = roleTextCache.get(key);
   if (out === undefined) {
     const probe = document.createElement("span");
     probe.style.color = color;
     document.body.appendChild(probe);
     const rgb = parseColor(getComputedStyle(probe).color);
     probe.remove();
-    const text = rgb === null ? null : deriveAccentTokens(rgb, themeSurfaces()).text;
-    out = text ?? "var(--text-normal)";
-    roleTextCache.set(color, out);
+    out = (rgb === null ? null : roleText(rgb)) ?? "var(--text-normal)";
+    roleTextCache.set(key, out);
   }
   return out;
 }
@@ -318,7 +355,8 @@ export function readableRoleColor(color: string): string {
 /** Re-clamp every rendered role colour against the theme now applied. */
 export function reclampRoleColors(): void {
   roleTextCache.clear();
-  for (const el of document.querySelectorAll<HTMLElement>("[data-role-color]")) {
+  // Role mention pills colour themselves from --role-pill in CSS.
+  for (const el of document.querySelectorAll<HTMLElement>("[data-role-color]:not(.mention-role)")) {
     el.style.color = readableRoleColor(el.dataset["roleColor"] ?? "");
   }
 }

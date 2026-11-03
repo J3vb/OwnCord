@@ -96,6 +96,47 @@ func (d *DB) RevokeAPITokenByLabel(ctx context.Context, label string) (int64, er
 	return res.RowsAffected()
 }
 
+// ListUserActiveAPITokens returns the account's tokens that still work
+// (neither revoked nor expired), newest first, without hashes.
+func (d *DB) ListUserActiveAPITokens(ctx context.Context, userID int64) ([]APITokenListItem, error) {
+	rows, err := d.q.ListUserActiveAPITokens(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("ListUserActiveAPITokens: %w", err)
+	}
+	out := make([]APITokenListItem, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, APITokenListItem{
+			ID:        r.ID,
+			UserID:    userID,
+			Label:     r.Label,
+			CreatedAt: r.CreatedAt,
+			LastUsed:  r.LastUsedAt,
+			ExpiresAt: r.ExpiresAt,
+		})
+	}
+	return out, nil
+}
+
+// RevokeOwnAPIToken revokes the token with the given ID only if it belongs to
+// userID and is still live, and returns the rows affected (0 otherwise).
+func (d *DB) RevokeOwnAPIToken(ctx context.Context, userID, id int64) (int64, error) {
+	res, err := d.q.RevokeOwnAPIToken(ctx, dbgen.RevokeOwnAPITokenParams{ID: id, UserID: userID})
+	if err != nil {
+		return 0, fmt.Errorf("RevokeOwnAPIToken: %w", err)
+	}
+	return res.RowsAffected()
+}
+
+// RevokeUserAPITokens revokes every live token of the account and returns how
+// many were revoked.
+func (d *DB) RevokeUserAPITokens(ctx context.Context, userID int64) (int64, error) {
+	res, err := d.q.RevokeUserAPITokens(ctx, userID)
+	if err != nil {
+		return 0, fmt.Errorf("RevokeUserAPITokens: %w", err)
+	}
+	return res.RowsAffected()
+}
+
 // TouchAPIToken updates last_used_at for the token with the given hash.
 // Best-effort: callers run this off the hot auth path.
 func (d *DB) TouchAPIToken(ctx context.Context, tokenHash string) error {
