@@ -21,6 +21,9 @@ import { createElement, setText } from "@lib/dom";
 import { Disposable } from "@lib/disposable";
 import { createIcon, type IconName } from "@lib/icons";
 import { createConfirmModal } from "../features/dialogs/confirmModal";
+import { openMenuSheet } from "../features/menus/menuSheet";
+import { isPhoneLayout } from "@lib/ui/bottomSheet";
+import type { ContextMenuItem } from "@lib/ui/contextMenu";
 import { formatMessageTimestamp, resolveAuthor, userRoleColorVar } from "@lib/text/formatting";
 import { resolveDisplayName } from "@lib/ui/avatar";
 import { readableRoleColor } from "@lib/prefs/themes";
@@ -184,8 +187,70 @@ export function createThreadPanel(options: ThreadPanelOptions): ThreadPanelCompo
   const deleteBtn = iconButton("trash-2", "thread-delete", () => confirmDelete());
   deleteBtn.classList.add("danger");
   const closeBtn = iconButton("x", "thread-close", onClose);
+  closeBtn.classList.add("thread-panel-close");
   closeBtn.title = threadsText("panel.close");
   closeBtn.setAttribute("aria-label", threadsText("panel.close"));
+  // A phone shows only this and Close; the actions open in one sheet.
+  const moreBtn = iconButton("ellipsis", "thread-more", () => openActionsSheet());
+  moreBtn.classList.add("thread-panel-more");
+  moreBtn.title = threadsText("panel.more");
+  moreBtn.setAttribute("aria-label", threadsText("panel.more"));
+  moreBtn.setAttribute("aria-haspopup", "true");
+  moreBtn.setAttribute("aria-expanded", "false");
+
+  /** Where focus lands after an action, on whichever layout shows it. */
+  const actionFocus = (desktopBtn: HTMLButtonElement): HTMLButtonElement =>
+    isPhoneLayout() ? moreBtn : desktopBtn;
+
+  /** The header actions this viewer may use, as sheet rows in the desktop order. */
+  function actionItems(): ContextMenuItem[] {
+    const items: ContextMenuItem[] = [];
+    const row = (btn: HTMLButtonElement, item: ContextMenuItem): void => {
+      if (!btn.hidden) items.push(item);
+    };
+    row(followBtn, {
+      label: threadsText("follow.follow"),
+      checked: isFollowed(threadId),
+      testId: "thread-sheet-follow",
+      onClick: () => followBtn.click(),
+    });
+    row(renameBtn, {
+      label: threadsText("action.rename"),
+      testId: "thread-sheet-rename",
+      onClick: () => startRename(),
+    });
+    row(archiveBtn, {
+      label: archiveBtn.getAttribute("aria-label") ?? "",
+      testId: "thread-sheet-archive",
+      onClick: () => archiveBtn.click(),
+    });
+    row(lockBtn, {
+      label: lockBtn.getAttribute("aria-label") ?? "",
+      testId: "thread-sheet-lock",
+      onClick: () => lockBtn.click(),
+    });
+    row(deleteBtn, {
+      label: threadsText("action.delete"),
+      danger: true,
+      testId: "thread-sheet-delete",
+      onClick: () => confirmDelete(),
+    });
+    return items;
+  }
+
+  function openActionsSheet(): void {
+    const items = actionItems();
+    if (items.length === 0) return;
+    moreBtn.setAttribute("aria-expanded", "true");
+    openMenuSheet({
+      items,
+      label: threadsText("panel.more"),
+      testId: "thread-actions-sheet",
+      signal,
+      fallbackFocus: () => (moreBtn.isConnected ? moreBtn : null),
+      onClosed: () => moreBtn.setAttribute("aria-expanded", "false"),
+    });
+  }
 
   function update(fields: Parameters<typeof sendThreadUpdate>[2]): void {
     if (!sendThreadUpdate(ws, threadId, fields)) {
@@ -222,7 +287,7 @@ export function createThreadPanel(options: ThreadPanelOptions): ThreadPanelCompo
   function endRename(): void {
     renameForm.hidden = true;
     titleEl.hidden = false;
-    renameBtn.focus();
+    actionFocus(renameBtn).focus();
   }
   renameCancel.addEventListener("click", endRename, { signal });
   renameInput.addEventListener(
@@ -259,7 +324,7 @@ export function createThreadPanel(options: ThreadPanelOptions): ThreadPanelCompo
       confirmTestId: "thread-delete-confirm",
       cancelTestId: "thread-delete-cancel",
       signal,
-      fallbackFocus: () => deleteBtn,
+      fallbackFocus: () => actionFocus(deleteBtn),
       onConfirm: () => {
         if (!sendThreadDelete(ws, threadId)) {
           showToast(threadsText("toast.notConnected"), "error");
@@ -306,6 +371,7 @@ export function createThreadPanel(options: ThreadPanelOptions): ThreadPanelCompo
     archiveBtn.hidden = !manage;
     lockBtn.hidden = !moderator;
     deleteBtn.hidden = !moderator;
+    moreBtn.hidden = [followBtn, renameBtn, archiveBtn, lockBtn, deleteBtn].every((b) => b.hidden);
     const archiveLabel = threadsText(t.archived ? "action.unarchive" : "action.archive");
     archiveBtn.title = archiveLabel;
     archiveBtn.setAttribute("aria-label", archiveLabel);
@@ -559,7 +625,7 @@ export function createThreadPanel(options: ThreadPanelOptions): ThreadPanelCompo
     });
     const header = createElement("div", { class: "thread-panel-header" });
     titleEl.append(nameEl, parentEl, statusEl, tagsEl);
-    actionsEl.append(followBtn, renameBtn, archiveBtn, lockBtn, deleteBtn, closeBtn);
+    actionsEl.append(followBtn, renameBtn, archiveBtn, lockBtn, deleteBtn, moreBtn, closeBtn);
     header.append(titleEl, renameForm, actionsEl);
     const messagesSlot = createElement("div", {
       class: "thread-panel-messages",

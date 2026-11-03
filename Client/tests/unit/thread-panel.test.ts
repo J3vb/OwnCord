@@ -374,6 +374,43 @@ describe("a locked or archived thread", () => {
     document.querySelector<HTMLButtonElement>('[data-testid="thread-delete-confirm"]')!.click();
     expect(sent.find((m) => m.type === "thread_delete")?.payload).toEqual({ thread_id: THREAD });
   });
+
+  it("lists the actions the viewer may use in one sheet, which runs them", () => {
+    signInAs("moderator");
+    setChannel({ canDeleteOthers: true });
+    setConnectionStatus("connected");
+    applyReadyCapabilities({ threads: true, thread_follows: true });
+    mountPanel();
+    const more = q<HTMLButtonElement>('[data-testid="thread-more"]');
+    expect(more.hidden).toBe(false);
+    more.click();
+    const sheet = document.querySelector<HTMLElement>('[data-testid="thread-actions-sheet"]')!;
+    expect(more.getAttribute("aria-expanded")).toBe("true");
+    const rows = [...sheet.querySelectorAll<HTMLElement>("[data-testid^='thread-sheet-']")];
+    expect(rows.map((r) => r.dataset["testid"])).toEqual([
+      "thread-sheet-follow",
+      "thread-sheet-rename",
+      "thread-sheet-archive",
+      "thread-sheet-lock",
+      "thread-sheet-delete",
+    ]);
+    sheet.querySelector<HTMLButtonElement>('[data-testid="thread-sheet-lock"]')!.click();
+    expect(document.querySelector('[data-testid="thread-actions-sheet"]')).toBeNull();
+    expect(more.getAttribute("aria-expanded")).toBe("false");
+    const sent = ws.getSentMessages() as unknown as { type: string; payload: unknown }[];
+    expect(sent.find((m) => m.type === "thread_update")?.payload).toEqual({
+      thread_id: THREAD,
+      locked: true,
+    });
+  });
+
+  it("hides the actions button when the viewer may use none of them", () => {
+    upsertThread(makeThread({ id: THREAD, parent_id: PARENT, owner_id: OTHER }));
+    mountPanel();
+    expect(q<HTMLButtonElement>('[data-testid="thread-follow"]').hidden).toBe(true);
+    expect(q<HTMLButtonElement>('[data-testid="thread-more"]').hidden).toBe(true);
+    expect(q<HTMLButtonElement>('[data-testid="thread-close"]').hidden).toBe(false);
+  });
 });
 
 describe("ThreadPanelHost", () => {

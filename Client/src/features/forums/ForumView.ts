@@ -21,6 +21,7 @@ import { errorText } from "@lib/api";
 import { createLogger } from "@lib/logger";
 import { avatarInitial, resolveDisplayName } from "@lib/ui/avatar";
 import { loadPref, savePref } from "@lib/prefs/preferences";
+import { isPhoneLayout, onPhoneLayoutChange } from "@lib/ui/bottomSheet";
 import type { ForumTag, ThreadInfo } from "@lib/types";
 import { channelsStore } from "@stores/channels.store";
 import { uiStore } from "@stores/ui.store";
@@ -128,7 +129,8 @@ export function renderForumView(root: HTMLElement, ctx: ForumViewContext): void 
   const seen = new Map<number, ThreadInfo>();
   /** True while this view itself writes a page into the store (not a live frame). */
   let writing = false;
-  let guidelinesOpen = loadPref<boolean>(FORUM_GUIDELINES_PREF, true);
+  // A phone starts with the guidelines folded so the posts are on screen.
+  let guidelinesOpen = loadPref<boolean>(FORUM_GUIDELINES_PREF, !isPhoneLayout());
   let layout: ForumLayout = parseForumLayout(loadPref<string>(FORUM_LAYOUT_PREF, "grid"));
   /** A refresh keeps the rows on screen until its first page lands, then swaps. */
   let refreshing = false;
@@ -166,7 +168,12 @@ export function renderForumView(root: HTMLElement, ctx: ForumViewContext): void 
     class: "btn-primary forum-new-post",
     "data-testid": "forum-new-post",
   });
-  newPostBtn.append(createIcon("pencil", 14), ` ${forumsText("newPost")}`);
+  newPostBtn.append(
+    createIcon("pencil", 14),
+    createElement("span", { class: "forum-new-post-label" }, forumsText("newPost")),
+  );
+  // The label folds away on a phone; the name stays for screen readers.
+  newPostBtn.setAttribute("aria-label", forumsText("newPost"));
 
   const sortGroup = createElement("div", {
     class: "forum-sort",
@@ -399,6 +406,11 @@ export function renderForumView(root: HTMLElement, ctx: ForumViewContext): void 
     }
   }
 
+  /** The stored layout, except that a phone has no room for a reader beside the list. */
+  function shownLayout(): ForumLayout {
+    return layout === "split" && isPhoneLayout() ? "list" : layout;
+  }
+
   function paintHeader(): void {
     const channel = forumChannel();
     const topic = (channel?.topic ?? "").trim();
@@ -416,8 +428,9 @@ export function renderForumView(root: HTMLElement, ctx: ForumViewContext): void 
       btn.setAttribute("aria-pressed", String(value === sort));
     for (const [value, btn] of layoutButtons)
       btn.setAttribute("aria-pressed", String(value === layout));
+    const shown = shownLayout();
     for (const value of FORUM_LAYOUTS)
-      root.classList.toggle(`forum-view--${value}`, value === layout);
+      root.classList.toggle(`forum-view--${value}`, value === shown);
 
     const tags = forumTags();
     tagBar.hidden = tags.length === 0;
@@ -622,6 +635,7 @@ export function renderForumView(root: HTMLElement, ctx: ForumViewContext): void 
       { signal },
     );
   }
+  onPhoneLayoutChange(() => paintHeader(), signal);
   moreBtn.addEventListener("click", () => void loadMore(), { signal });
   newPostBtn.addEventListener(
     "click",
