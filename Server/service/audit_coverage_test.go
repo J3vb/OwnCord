@@ -243,7 +243,7 @@ func TestAuditCoverage_ServiceMutations(t *testing.T) {
 			if err != nil {
 				t.Fatalf("EnrolRecoveryKit: %v", err)
 			}
-			kit, _ := svc.st.GetRecoveryKit(context.Background(), user.ID)
+			kit, _ := svc.accountRecovery.st.GetRecoveryKit(context.Background(), user.ID)
 			return rec, []string{issue.Secret, kit.Verifier, kitPassword}
 		}},
 		{"recovery kit locked", "recovery_kit_locked", func(t *testing.T) (*audittest.Recorder, []string) {

@@ -62,9 +62,9 @@ var FileSizeOverrides = map[string]FileSizeOverride{
 	},
 
 	"service/auth.go": {
-		Ceiling: 1300,
+		Ceiling: 1000,
 		Class:   classGrandfathered,
-		Note:    "sessions, TOTP, password reset",
+		Note:    "registration, login, sessions, account deletion",
 	},
 	"db/message_queries.go": {
 		Ceiling: 1050,

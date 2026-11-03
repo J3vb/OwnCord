@@ -1409,7 +1409,7 @@ For readers who want the evidence behind the claims above:
   `Server/auth/tls_expiry_test.go` (`TestExpiredSelfSignedCertIsServedAsIs`),
   and the fingerprint checks in `Client/src-tauri/src/tofu.rs`.
 - 2FA secrets are decrypted before the code is checked:
-  `Server/service/auth.go`.
+  `Server/service/auth_two_factor.go` (`unsealTOTPSecret`).
 - The disk-full and restore behaviour was measured by the failure drills in
   `Server/cmd/smoke` (`-drills`), described in
   [data-lifecycle.md](../architecture/data-lifecycle.md).

@@ -22,7 +22,7 @@ func keepSessionID(p Principal) int64 {
 // contention); if the retry also fails, revoked reports what did succeed and
 // failed is true so the caller can report a partial success instead of
 // silently claiming the other sessions were revoked when they were not.
-func (s *AuthService) revokeOtherSessionsAfterAuthChange(ctx context.Context, userID, keepSessionID int64, action string) (revoked int64, failed bool) {
+func (s *twoFactor) revokeOtherSessionsAfterAuthChange(ctx context.Context, userID, keepSessionID int64, action string) (revoked int64, failed bool) {
 	revoked, err := s.st.DeleteOtherSessions(ctx, userID, keepSessionID)
 	if err != nil {
 		slog.Error("DeleteOtherSessions after "+action, "err", err, "user_id", userID)
