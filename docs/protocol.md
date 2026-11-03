@@ -2973,6 +2973,14 @@ Quality presets:
 { "type": "voice_leave", "payload": {} }
 ```
 
+It ends only the membership held by the socket that sends it; on a socket with
+no membership it does nothing. A client that left voice while its socket was
+down sends it once after the next `auth_ok`, before applying `ready`, so a
+membership the resumed socket took back from the grace window ends. The server
+also asks the SFU for the join 10 s after a resume takes over a membership,
+and again 20 s later if it was missing; missing both times, the membership ends
+and `voice_leave` goes out, the owner included.
+
 ### voice_leave (Server -> Client, broadcast)
 
 ```json
@@ -3374,6 +3382,12 @@ The key holder wraps the room key for a specific participant:
   }
 }
 ```
+
+The server relays the offer only if, at the moment it sends it, the sender is
+still the channel's key holder and in the channel, and the target is still in
+the channel. The holder changes when a lower user ID's join completes or the
+holder leaves. Otherwise the offer is dropped without an error; the new key
+holder sends its own offers.
 
 `encrypted_key` is opaque to the server (base64 and length checks only). Its
 layout is:

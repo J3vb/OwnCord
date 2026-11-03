@@ -321,7 +321,7 @@ func TestCategoryOverride_InvalidationFailsSafeToFullFlush(t *testing.T) {
 }
 
 func TestCategoryOverride_StoreWithoutCategoriesAnswersInternal(t *testing.T) {
-	svc := &ChannelService{}
+	svc := &ChannelService{channelOverrides: &channelOverrides{}}
 	if _, err := svc.PutCategoryRoleOverride(context.Background(), 1, &db.Role{}, 1, 1, 0, 0); !errors.Is(err, ErrInternal) {
 		t.Errorf("err = %v, want ErrInternal", err)
 	}

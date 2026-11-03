@@ -85,6 +85,7 @@ import {
 import { buildBlockedUsersSection } from "../../src/features/safety/BlockedUsers";
 import { createAvatarElement } from "../../src/features/profiles/avatar";
 import { isVoiceMovePending, noteVoiceMoved } from "../../src/features/voice/moveHint";
+import { isVoiceLeaveOwed, noteVoiceLeave } from "../../src/features/voice/leaveOwed";
 import { noteWatchSent, takeWatchRefusal } from "../../src/lib/voice/watchRequest";
 import { getChannelMutesHost, setChannelMutesHost } from "../../src/lib/prefs/channelMutes";
 import {
@@ -441,6 +442,14 @@ const PROBES: readonly Probe[] = [
       blockedUsersTab.abort();
       return !busy;
     },
+  },
+  {
+    name: "voice:leave-owed",
+    mutate: () => {
+      noteVoiceLeave();
+      expect(isVoiceLeaveOwed()).toBe(true);
+    },
+    isInitial: () => !isVoiceLeaveOwed(),
   },
   {
     name: "voice:move-hint",

@@ -27,6 +27,7 @@ vi.mock("../../stores/voice.store", () => ({
   setLocalScreenshare: vi.fn(),
   bumpLocalShareRev: vi.fn(),
   setVoiceStatus: vi.fn(),
+  voiceStore: { getState: () => ({ currentChannelId: null, voiceStatus: "idle" }) },
 }));
 vi.mock("../../lib/prefs/preferences", () => ({
   loadPref: (_key: string, fallback: unknown) => fallback,

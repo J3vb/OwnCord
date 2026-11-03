@@ -26,9 +26,9 @@ describe("TextImagesTab", () => {
     expect(labelTexts).toContain("Animate GIFs");
     expect(labelTexts).toContain("Animate emoji");
     expect(labelTexts).toContain("Show emoji button");
-    expect(labelTexts).toContain("Show sticker button");
+    expect(labelTexts).toContain("Show Sticker in the + menu");
     expect(labelTexts).toContain("Show GIF button");
-    expect(labelTexts).toContain("Show Poll button");
+    expect(labelTexts).toContain("Show Poll in the + menu");
     expect(labelTexts).toContain("Show voice message button");
 
     // Dead toggles should NOT be present

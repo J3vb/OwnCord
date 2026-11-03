@@ -56,13 +56,13 @@ func invalidateUsers(perms *PermissionService, userIDs []int64) {
 
 // SetPermissionNotifier installs the live fan-out port for channel override
 // changes. Call it before the server starts serving; nil is a no-op.
-func (s *ChannelService) SetPermissionNotifier(n PermissionChangeNotifier) { s.notifier = n }
+func (s *channelOverrides) SetPermissionNotifier(n PermissionChangeNotifier) { s.notifier = n }
 
 // applyOverrideEffects runs an override mutation's post-commit work: cache
 // invalidation narrowed to who can be affected (full flush as the fail-safe, since
 // a missed eviction is a stale grant), THEN the audience refresh, because the hub
 // resolves visibility through the same cache.
-func (s *ChannelService) applyOverrideEffects(res OverrideResult, ch *db.Channel) {
+func (s *channelOverrides) applyOverrideEffects(res OverrideResult, ch *db.Channel) {
 	if s.perms != nil {
 		if res.AffectedAll {
 			s.perms.InvalidateAll()
@@ -77,7 +77,7 @@ func (s *ChannelService) applyOverrideEffects(res OverrideResult, ch *db.Channel
 
 // invalidatePermEffect drops the cached permissions a PermEffect names: the
 // listed users, or every cached mask when the narrow list could not be read.
-func (s *ChannelService) invalidatePermEffect(e PermEffect) {
+func (s *channelOverrides) invalidatePermEffect(e PermEffect) {
 	if s.perms == nil {
 		return
 	}
@@ -89,14 +89,14 @@ func (s *ChannelService) invalidatePermEffect(e PermEffect) {
 }
 
 // notifyAudience re-derives who can see ch. Callers invalidate first.
-func (s *ChannelService) notifyAudience(ch *db.Channel) {
+func (s *channelOverrides) notifyAudience(ch *db.Channel) {
 	if s.notifier != nil {
 		s.notifier.ChannelAudienceChanged(ch)
 	}
 }
 
 // notifyAudienceIf is notifyAudience when applied is true.
-func (s *ChannelService) notifyAudienceIf(applied bool, ch *db.Channel) {
+func (s *channelOverrides) notifyAudienceIf(applied bool, ch *db.Channel) {
 	if applied {
 		s.notifyAudience(ch)
 	}

@@ -8,7 +8,6 @@ import { MAX_MESSAGE_LEN } from "../../features/messaging/messageLimits";
 import { applyPickedMentions } from "@lib/text/pickedMentions";
 import { idMentionsEnabled, voiceMessagesEnabled } from "@lib/net/serverCapabilities";
 import { composerButtonShown } from "../../features/messaging/composerButtons";
-import { isPhoneLayout } from "@lib/ui/bottomSheet";
 import { composerPlaceholder } from "../../features/messaging/composerPlaceholder";
 import { messagingText } from "../../i18n/messaging";
 import {
@@ -149,16 +148,14 @@ export function createInputComposer(st: InputState, api: InputApi) {
     for (const btn of st.controlButtons) {
       // The mic needs what "+" needs (an upload) and a server that keeps the clip's metadata.
       if (btn.classList.contains("mic-btn")) {
-        // On a phone the mic lives in the "+" sheet instead.
-        btn.hidden =
-          uploadsOff || !voiceMessagesEnabled() || !composerButtonShown("voice") || isPhoneLayout();
+        btn.hidden = uploadsOff || !voiceMessagesEnabled() || !composerButtonShown("voice");
         if (disabled) btn.setAttribute("disabled", "true");
         else btn.removeAttribute("disabled");
         continue;
       }
       const isAttach = btn.classList.contains("attach-btn");
-      // A phone's "+" also holds Poll, so uploads being off leaves it usable.
-      const attachOff = isAttach && uploadsOff && !(isPhoneLayout() && st.attachHasActions());
+      // "+" also holds Poll and Sticker, so uploads being off leaves it usable.
+      const attachOff = isAttach && uploadsOff && !st.attachHasActions();
       if (isAttach) btn.title = attachOff ? messagingText("attach.serverDisabled") : "";
       if (disabled || attachOff) {
         btn.setAttribute("disabled", "true");
@@ -168,6 +165,8 @@ export function createInputComposer(st: InputState, api: InputApi) {
         btn.removeAttribute("disabled");
       }
     }
+    // A menu opened before the composer closed offers nothing now.
+    if (disabled) st.closeAttachMenu?.();
     if (st.root !== null) {
       st.root.classList.toggle("composer-disabled", disabled);
     }

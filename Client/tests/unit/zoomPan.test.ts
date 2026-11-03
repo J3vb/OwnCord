@@ -3,6 +3,8 @@ import {
   bindTouchZoom,
   bindVideoZoom,
   createZoomPan,
+  SWIPE_CLOSE,
+  SWIPE_STEP,
   type ZoomPanOptions,
 } from "../../src/lib/ui/zoomPan";
 
@@ -292,6 +294,72 @@ describe("bindTouchZoom", () => {
     el.dispatchEvent(finger("pointermove", 7, 200, 100, "mouse"));
     expect(zp.scale).toBe(1);
     expect(zp.x).toBe(0);
+  });
+
+  function swipeSetup() {
+    const { zp } = view();
+    const el = document.createElement("div");
+    const step = vi.fn();
+    const close = vi.fn();
+    bindTouchZoom(el, zp, new AbortController().signal, { step, close });
+    const swipe = (dx: number, dy: number, end = "pointerup", id = 1): void => {
+      el.dispatchEvent(finger("pointerdown", id, 200, 200));
+      el.dispatchEvent(finger("pointermove", id, 200 + dx / 2, 200 + dy / 2));
+      el.dispatchEvent(finger(end, id, 200 + dx, 200 + dy));
+    };
+    return { zp, el, step, close, swipe };
+  }
+
+  it("a sideways swipe at 1x steps: left is next, right is previous", () => {
+    const { zp, step, close, swipe } = swipeSetup();
+    swipe(-SWIPE_STEP, 10);
+    expect(step).toHaveBeenLastCalledWith(1);
+    swipe(SWIPE_STEP + 40, -20);
+    expect(step).toHaveBeenLastCalledWith(-1);
+    expect(step).toHaveBeenCalledTimes(2);
+    expect(close).not.toHaveBeenCalled();
+    expect(zp.x).toBe(0);
+  });
+
+  it("a swipe up or down at 1x closes", () => {
+    const { step, close, swipe } = swipeSetup();
+    swipe(10, SWIPE_CLOSE);
+    swipe(-5, -SWIPE_CLOSE - 50);
+    expect(close).toHaveBeenCalledTimes(2);
+    expect(step).not.toHaveBeenCalled();
+  });
+
+  it("a short, diagonal or cancelled swipe does nothing", () => {
+    const { step, close, swipe } = swipeSetup();
+    swipe(-(SWIPE_STEP - 1), 0);
+    swipe(0, SWIPE_CLOSE - 1);
+    // Diagonal: as far down as sideways.
+    swipe(-120, 100);
+    swipe(-120, 0, "pointercancel");
+    expect(step).not.toHaveBeenCalled();
+    expect(close).not.toHaveBeenCalled();
+  });
+
+  it("no swipe once zoomed in, after a pinch, or from a mouse", () => {
+    const { zp, el, step, close, swipe } = swipeSetup();
+    zp.setScale(3);
+    // It pans by the move (half way), the lift does not step.
+    swipe(-120, 0);
+    expect(zp.x).toBe(-60);
+    zp.reset();
+
+    // Pinch out and back to 1x, then lift both fingers far apart.
+    el.dispatchEvent(finger("pointerdown", 1, 190, 200));
+    el.dispatchEvent(finger("pointerdown", 2, 210, 200));
+    el.dispatchEvent(finger("pointermove", 2, 230, 200));
+    el.dispatchEvent(finger("pointermove", 2, 210, 200));
+    el.dispatchEvent(finger("pointerup", 2, 210, 200));
+    el.dispatchEvent(finger("pointerup", 1, 40, 200));
+
+    el.dispatchEvent(finger("pointerdown", 7, 200, 200, "mouse"));
+    el.dispatchEvent(finger("pointerup", 7, 40, 200, "mouse"));
+    expect(step).not.toHaveBeenCalled();
+    expect(close).not.toHaveBeenCalled();
   });
 
   it("stops listening when its signal aborts", () => {

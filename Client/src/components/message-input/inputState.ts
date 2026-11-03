@@ -51,8 +51,10 @@ export interface InputState {
   readonly uploadErrorId: string;
   /** Set by mount() when file uploads are wired; backs openFilePicker(). */
   openPicker: (() => void) | null;
-  /** Set by mount(): whether the phone "+" sheet has a row besides files. */
+  /** Set by mount(): whether the "+" menu has a tile besides the file sources. */
   attachHasActions: () => boolean;
+  /** Set by mount(): closes an open "+" menu. */
+  closeAttachMenu: (() => void) | null;
   /** Set by mount(); backs togglePicker(). */
   togglePickerOf: ((kind: "emoji" | "gif" | "sticker") => void) | null;
   mentionPopup: MentionAutocompleteComponent | null;
