@@ -359,6 +359,39 @@
   display: none;
 }
 
+/* A phone: one toolbar row, no layout picker (the view picks), tags scroll sideways. */
+@media (pointer: coarse) and (max-width: 899px), (pointer: coarse) and (max-height: 499px) {
+  .forum-toolbar,
+  .forum-tag-bar {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .forum-toolbar > *,
+  .forum-tag-bar > * {
+    flex-shrink: 0;
+  }
+  .forum-toolbar > .forum-toolbar-spacer {
+    flex-shrink: 1;
+  }
+  .forum-layouts,
+  .forum-new-post-label {
+    display: none;
+  }
+  .btn-primary.forum-new-post {
+    min-width: 44px;
+    min-height: 36px;
+    justify-content: center;
+    padding: 6px 12px;
+  }
+  .forum-sort-btn,
+  .forum-tag-chip,
+  .forum-tag-clear,
+  .forum-guidelines-toggle {
+    white-space: nowrap;
+  }
+}
+
 /* An author display rule would otherwise beat the [hidden] attribute. */
 .forum-view [hidden] {
   display: none;

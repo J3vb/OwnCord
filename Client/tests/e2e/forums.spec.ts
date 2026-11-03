@@ -1,4 +1,4 @@
-import type { Page } from "@playwright/test";
+import { devices, type Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
 import {
   MOCK_PINNED_MESSAGES,
@@ -416,3 +416,92 @@ for (const theme of ["dark", "light"] as const) {
     });
   });
 }
+
+const { defaultBrowserType: _pixelBrowser, ...pixel7 } = devices["Pixel 7"];
+
+test.describe("Forum channel on a phone", () => {
+  test.use(pixel7);
+
+  async function openForum(page: Page): Promise<void> {
+    await setup(page);
+    await page.getByTestId("sidebar-toggle").click();
+    await page.locator("[data-testid='channel-9']").click();
+    await expect(page.getByTestId("forum-post-1")).toBeVisible();
+  }
+
+  async function sideScroll(page: Page): Promise<number> {
+    return page.evaluate(() => {
+      const el = document.documentElement;
+      return Math.max(el.scrollWidth, document.body.scrollWidth) - el.clientWidth;
+    });
+  }
+
+  test("keeps the toolbar on one row, hides the layout picker and folds the guidelines", async ({
+    page,
+  }) => {
+    await openForum(page);
+    await expect(page.getByTestId("forum-layout-grid")).toBeHidden();
+    await expect(page.getByTestId("forum-guidelines-body")).toBeHidden();
+    await expect(page.getByTestId("forum-guidelines-toggle")).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    await expect(page.getByTestId("forum-new-post")).toBeInViewport();
+    const centres = await page
+      .locator(".forum-toolbar > :not([hidden], .forum-toolbar-spacer)")
+      .evaluateAll((els) =>
+        els
+          .map((el) => el.getBoundingClientRect())
+          .filter((r) => r.width > 0)
+          .map((r) => (r.top + r.bottom) / 2),
+      );
+    expect(Math.max(...centres) - Math.min(...centres)).toBeLessThan(4);
+    const toolbar = await page.locator(".forum-toolbar").evaluate((el) => ({
+      scroll: el.scrollWidth,
+      width: el.clientWidth,
+    }));
+    expect(toolbar.scroll).toBeLessThanOrEqual(toolbar.width);
+    const tags = await page.getByTestId("forum-tag-bar").evaluate((el) => ({
+      height: el.getBoundingClientRect().height,
+      wraps: getComputedStyle(el).flexWrap,
+    }));
+    expect(tags.wraps).toBe("nowrap");
+    expect(tags.height).toBeLessThan(48);
+    expect(await sideScroll(page)).toBeLessThanOrEqual(0);
+    await shot(page, "phone", "20-phone-forum");
+  });
+
+  test("a stored List and reader layout falls back to List", async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem("owncord:settings:forumLayout", '"split"'));
+    await openForum(page);
+    await expect(page.getByTestId("forum-view")).toHaveClass(/forum-view--list/);
+  });
+
+  test("an open post fits the screen and its actions sit behind one menu", async ({ page }) => {
+    await openForum(page);
+    await page.getByTestId("forum-post-1").click();
+    const panel = page.getByTestId("thread-panel");
+    await expect(panel).toBeVisible();
+    const viewport = page.viewportSize();
+    const box = await panel.boundingBox();
+    expect(Math.round((box?.x ?? 0) + (box?.width ?? 0))).toBeLessThanOrEqual(viewport?.width ?? 0);
+    expect(await sideScroll(page)).toBeLessThanOrEqual(0);
+    await expect(page.getByTestId("thread-rename")).toBeHidden();
+    for (const id of ["thread-close", "thread-more"]) {
+      const btn = page.getByTestId(id);
+      await expect(btn).toBeInViewport({ ratio: 1 });
+      const b = await btn.boundingBox();
+      expect(b?.width ?? 0).toBeGreaterThanOrEqual(44);
+      expect(b?.height ?? 0).toBeGreaterThanOrEqual(44);
+    }
+    await shot(page, "phone", "21-phone-post-panel");
+
+    await page.getByTestId("thread-more").click();
+    const sheet = page.getByTestId("thread-actions-sheet");
+    await expect(sheet).toBeVisible();
+    await expect(sheet.getByTestId("thread-sheet-rename")).toBeVisible();
+    await shot(page, "phone", "22-phone-post-actions");
+    await sheet.getByTestId("thread-sheet-rename").click();
+    await expect(page.getByTestId("thread-rename-input")).toBeFocused();
+  });
+});

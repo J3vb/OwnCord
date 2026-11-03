@@ -6,6 +6,7 @@ import { defineCatalog } from "./format";
 export const threadsText = defineCatalog("threads", {
   "panel.label": "Thread",
   "panel.close": "Close thread",
+  "panel.more": "Thread actions",
   "panel.in": "in #{channel}",
   "starter.deleted": "The original message was deleted",
   "starter.unavailable": "The original message isn't available",
