@@ -330,6 +330,7 @@ describe("error mapping", () => {
       ["GIF_DISABLED", "x", "error.gifDisabled"],
       ["LAST_ROLE", "x", "error.lastRole"],
       ["PUSH_DISABLED", "x", "error.pushDisabled"],
+      ["LOGIN_SESSION_REQUIRED", "x", "error.loginSessionRequired"],
     ] as const)("%s maps to %s copy", (code, message, key) => {
       expect(serverErrorCopy(code, message)).toBe(connectText(key));
     });
@@ -353,6 +354,7 @@ describe("error mapping", () => {
         "GIF_DISABLED",
         "LAST_ROLE",
         "PUSH_DISABLED",
+        "LOGIN_SESSION_REQUIRED",
       ];
       const copies = codes.map((c) => serverErrorCopy(c, "x"));
       expect(copies.every((c) => typeof c === "string" && c.length > 0)).toBe(true);

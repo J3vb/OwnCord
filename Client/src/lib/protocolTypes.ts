@@ -217,6 +217,10 @@ export const RestErrorCode = {
   INVALID_INPUT: "INVALID_INPUT",
   LAST_ROLE: "LAST_ROLE",
   LOCKOUT: "LOCKOUT",
+  // An account-security route (password, two-factor, recovery, sessions,
+  // account deletion, device key) was called with an API token; it takes a
+  // login session.
+  LOGIN_SESSION_REQUIRED: "LOGIN_SESSION_REQUIRED",
   MISSING_ASSETS: "MISSING_ASSETS",
   NOT_FOUND: "NOT_FOUND",
   NOT_NSFW: "NOT_NSFW",

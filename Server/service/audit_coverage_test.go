@@ -239,7 +239,7 @@ func TestAuditCoverage_ServiceMutations(t *testing.T) {
 		{"recovery kit issued", "recovery_kit_issued", func(t *testing.T) (*audittest.Recorder, []string) {
 			svc, user, _ := newKitService(t, false)
 			rec := audittest.Install(t, svc.st.(*db.DB))
-			issue, err := svc.EnrolRecoveryKit(context.Background(), Principal{User: user}, kitPassword, "")
+			issue, err := svc.EnrolRecoveryKit(context.Background(), sessionPrincipal(user), kitPassword, "")
 			if err != nil {
 				t.Fatalf("EnrolRecoveryKit: %v", err)
 			}
@@ -248,7 +248,7 @@ func TestAuditCoverage_ServiceMutations(t *testing.T) {
 		}},
 		{"recovery kit locked", "recovery_kit_locked", func(t *testing.T) (*audittest.Recorder, []string) {
 			svc, user, _ := newKitService(t, false)
-			issue, err := svc.EnrolRecoveryKit(context.Background(), Principal{User: user}, kitPassword, "")
+			issue, err := svc.EnrolRecoveryKit(context.Background(), sessionPrincipal(user), kitPassword, "")
 			if err != nil {
 				t.Fatalf("EnrolRecoveryKit: %v", err)
 			}

@@ -138,7 +138,7 @@ func TestAuthService_DeleteAccountReportsSuccessWhileInProgress(t *testing.T) {
 	svc.UseErasure(shared)
 	installFailDrain(t, database)
 
-	if err := svc.DeleteAccount(ctx, Principal{User: user}, "correct horse battery", ""); err != nil {
+	if err := svc.DeleteAccount(ctx, sessionPrincipal(user), "correct horse battery", ""); err != nil {
 		t.Fatalf("DeleteAccount with the erasure in progress = %v, want success", err)
 	}
 	clearFailDrain(t, database)
