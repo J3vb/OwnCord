@@ -87,7 +87,7 @@ func (h *Hub) emitVoiceChannelGuarded(_ context.Context, _ int64, ev Event) bool
 	if !ok {
 		return false
 	}
-	h.sendToUserIfInVoiceChannel(e.VoiceChannelID(), e.TargetUserID(), e.Payload())
+	h.sendToUserIfInVoiceChannel(e.VoiceChannelID(), e.SenderUserID(), e.TargetUserID(), e.Payload())
 	return true
 }
 

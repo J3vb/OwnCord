@@ -151,12 +151,13 @@ type VoiceChannelEvent interface {
 }
 
 // VoiceChannelGuardedEvent routes to Hub.sendToUserIfInVoiceChannel: an atomic
-// check-and-send under one h.mu.RLock that the target is still in the expected
-// voice channel, preventing TOCTOU races with a concurrent voice_leave
-// (voice_e2ee_offer).
+// check-and-send under one h.mu.RLock that the sender still holds the channel key
+// and the target is still in the expected voice channel, preventing TOCTOU races
+// with a concurrent voice_join or voice_leave (voice_e2ee_offer).
 type VoiceChannelGuardedEvent interface {
 	Event
 	VoiceChannelID() int64
+	SenderUserID() int64
 	TargetUserID() int64
 	Payload() []byte
 }
@@ -368,9 +369,11 @@ func (e VoiceE2EEAnnounceEvent) ExcludeUserID() int64         { return e.exclude
 func (e VoiceE2EEAnnounceEvent) Payload() []byte              { return e.payload }
 
 // VoiceE2EEOfferGuardedEvent relays an encrypted room key to one user via the
-// atomic check-and-send that the target is still in the same voice channel.
+// atomic check-and-send that the sender still holds the key and the target is
+// still in the same voice channel.
 type VoiceE2EEOfferGuardedEvent struct {
 	voiceChannelID int64
+	senderUserID   int64
 	targetUserID   int64
 	payload        []byte
 }
@@ -378,6 +381,7 @@ type VoiceE2EEOfferGuardedEvent struct {
 func (e VoiceE2EEOfferGuardedEvent) EventType() string            { return MsgTypeVoiceE2EEOfferRelay }
 func (e VoiceE2EEOfferGuardedEvent) deliveryClass() deliveryClass { return classVoiceChannelGuarded }
 func (e VoiceE2EEOfferGuardedEvent) VoiceChannelID() int64        { return e.voiceChannelID }
+func (e VoiceE2EEOfferGuardedEvent) SenderUserID() int64          { return e.senderUserID }
 func (e VoiceE2EEOfferGuardedEvent) TargetUserID() int64          { return e.targetUserID }
 func (e VoiceE2EEOfferGuardedEvent) Payload() []byte              { return e.payload }
 
