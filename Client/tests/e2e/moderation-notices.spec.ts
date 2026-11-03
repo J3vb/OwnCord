@@ -173,13 +173,14 @@ test.describe("moderation notices", () => {
     };
     await emitWsMessage(page, warning);
     await expect(notice(page, 30)).toContainText("Reason: Live one");
-    await expect(
-      toasts.filter({ hasText: "You received a warning from the moderators: Live one" }),
-    ).toHaveCount(1);
+    // The banner announces it; a toast would repeat the same sentence over it.
+    const announcer = page.locator("[data-testid='moderation-notices'] > [role='status']");
+    await expect(announcer).toHaveText("You received a warning from the moderators: Live one");
+    await expect(toasts.filter({ hasText: "Live one" })).toHaveCount(0);
     // A repeated frame neither duplicates the notice nor re-announces.
     await emitWsMessage(page, warning);
     await expect(page.locator("[data-testid='moderation-notice-30']")).toHaveCount(1);
-    await expect(toasts.filter({ hasText: "Live one" })).toHaveCount(1);
+    await expect(toasts.filter({ hasText: "Live one" })).toHaveCount(0);
 
     const until = new Date(Date.now() + 3_600_000).toISOString();
     await emitWsMessage(page, {

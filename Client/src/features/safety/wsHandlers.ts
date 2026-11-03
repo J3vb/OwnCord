@@ -11,6 +11,7 @@ import {
   setReadyNotices,
 } from "./store";
 import { WsErrorCode } from "@lib/protocolTypes";
+import { uiStore } from "@stores/ui.store";
 
 type SafetyApi = DispatchApi | undefined;
 
@@ -37,7 +38,10 @@ export function refreshSafetyOnResume(api: SafetyApi, payload: Payload<"auth_ok"
 /** A live warning, timeout or lift. Announced once: a duplicate frame is ignored. */
 export function handleModAction(api: SafetyApi, payload: Payload<"mod_action">): void {
   if (payload.kind === "warning") {
-    if (addNotice(payload.id, payload.reason, new Date().toISOString())) {
+    // The notice banner already shows the warning; only the settings
+    // overlay hides it, so that is the one view that still needs a toast.
+    const fresh = addNotice(payload.id, payload.reason, new Date().toISOString());
+    if (fresh && uiStore.getState().settingsOpen) {
       showToast(safetyText("toast.warning", { reason: payload.reason }), "warning");
     }
   } else if (payload.expires_at === null) {

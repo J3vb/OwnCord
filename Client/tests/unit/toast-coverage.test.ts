@@ -19,6 +19,7 @@ function createMockContainer(): ToastContainer {
     destroy: vi.fn(),
     show: vi.fn(),
     clear: vi.fn(),
+    anchorTo: vi.fn(),
   };
 }
 

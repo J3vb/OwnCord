@@ -22,7 +22,19 @@
   }
 
   .toast-container {
-    left: 50%;
+    --toast-room-fallback: 100vw;
+    --toast-center-fallback: 50%;
+  }
+  /* A sheet or dialog docks to the bottom on a phone: toasts move to the top. */
+  body:has(.bottom-sheet-overlay, .modal-overlay) .toast-container {
+    top: calc(env(safe-area-inset-top, 0px) + 8px);
+    bottom: auto;
+  }
+  /* The dismiss button gets the full 44px touch target without growing the toast. */
+  .toast-close {
+    min-width: 44px;
+    min-height: 44px;
+    margin: -12px -18px -12px -8px;
   }
 
   .ch-sidebar-toggle {
