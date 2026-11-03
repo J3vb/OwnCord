@@ -90,6 +90,7 @@ func TestSaveOverrides_ValidatesSensitiveValues(t *testing.T) {
 		{"server.admin_allowed_cidrs", []any{"10.0.0.1"}}, // bare IP
 		{"server.trusted_proxies", []any{"0.0.0.0/0"}},    // trusting everyone lets any client forge X-Forwarded-For
 		{"server.trusted_proxies", []any{"::/0"}},
+		{"server.trusted_proxies", []any{"10.0.0.2/32", "::ffff:0.0.0.0/96"}}, // every IPv4 client
 		{"database.path", ""},
 		{"database.path", "a\x00b"},
 		{"upload.storage_dir", ""},
