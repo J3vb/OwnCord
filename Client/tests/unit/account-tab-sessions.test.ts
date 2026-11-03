@@ -46,23 +46,27 @@ function makeOptions(overrides?: Partial<SettingsOverlayOptions>): SettingsOverl
   });
 }
 
-describe("Account tab — devices", () => {
-  let ac: AbortController;
-
+/** Fresh sign-in and abort signal per test; returns the current controller. */
+function useAccountTabHarness(): () => AbortController {
+  let ac = new AbortController();
   beforeEach(() => {
     ac = new AbortController();
     mockShowToast.mockClear();
     setSessionReplaced(false);
     signInAs({ id: 1, username: "alice", avatar: null, role: "member" }, { serverName: "s" });
   });
-
   afterEach(() => {
     ac.abort();
     document.body.replaceChildren();
   });
+  return () => ac;
+}
+
+describe("Account tab — devices", () => {
+  const harness = useAccountTabHarness();
 
   async function render(options: SettingsOverlayOptions): Promise<HTMLElement> {
-    const tab = buildAccountTab(options, ac.signal);
+    const tab = buildAccountTab(options, harness().signal);
     document.body.appendChild(tab);
     await vi.waitFor(() => {
       expect(tab.querySelectorAll('[data-testid="session-row"]').length).toBeGreaterThan(0);
@@ -212,18 +216,7 @@ const BOT: OwnApiToken = {
 };
 
 describe("Account tab — API tokens", () => {
-  let ac: AbortController;
-
-  beforeEach(() => {
-    ac = new AbortController();
-    mockShowToast.mockClear();
-    signInAs({ id: 1, username: "alice", avatar: null, role: "member" }, { serverName: "s" });
-  });
-
-  afterEach(() => {
-    ac.abort();
-    document.body.replaceChildren();
-  });
+  const ac = useAccountTabHarness();
 
   const tokenRows = (tab: HTMLElement): HTMLElement[] => [
     ...tab.querySelectorAll<HTMLElement>('[data-testid="api-token-row"]'),
@@ -234,7 +227,7 @@ describe("Account tab — API tokens", () => {
     tab.querySelector<HTMLElement>('[data-testid="pw-revoke-api-tokens-row"]')!;
 
   async function renderWith(overrides: Partial<SettingsOverlayOptions>): Promise<HTMLElement> {
-    const tab = buildAccountTab(makeOptions(overrides), ac.signal);
+    const tab = buildAccountTab(makeOptions(overrides), ac().signal);
     document.body.appendChild(tab);
     await vi.waitFor(() => {
       expect(tab.querySelectorAll('[data-testid="session-row"]').length).toBeGreaterThan(0);

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"testing"
 
@@ -132,9 +133,7 @@ func TestChangePassword_RevokeAPITokensOption(t *testing.T) {
 			otherRaw := issueAPIToken(t, database, otherUID)
 
 			body := map[string]any{"old_password": loginSessionTestPassword, "new_password": "Another-Pass2!"}
-			for k, v := range tc.body {
-				body[k] = v
-			}
+			maps.Copy(body, tc.body)
 			rr := bearerJSON(t, router, http.MethodPut, "/api/v1/users/me/password", sessionTok, body)
 			if rr.Code != http.StatusNoContent {
 				t.Fatalf("change password: status = %d, want 204; body = %s", rr.Code, rr.Body.String())
