@@ -34,23 +34,27 @@ export function openMessageReport(
 }
 
 /**
- * Report a user by their id; `name` is only the dialog's title. The member
- * list rebuilds its rows, so focus returns to the user's current row, else the
- * list's first row, when the one that opened the form has gone.
+ * Report a user by their id; `name` is only the dialog's title. Opened from
+ * the member list, which rebuilds its rows, focus returns to the user's current
+ * row, else the list's first row, when the one that opened the form has gone.
+ * Without a `list` (the phone DM profile sheet) it takes `fallbackFocus`.
  */
 export function openUserReport(
   ctx: OpenerContext & {
     readonly userId: number;
     readonly name: string;
-    readonly list: HTMLElement;
+    readonly list?: HTMLElement;
   },
 ): ModalInstance {
   const { list, userId } = ctx;
   return openReportDialog({
     ...ctx,
-    fallbackFocus: () =>
-      list.querySelector<HTMLElement>(`[data-testid="member-${userId}"]`) ??
-      list.querySelector<HTMLElement>(".member-item"),
+    fallbackFocus:
+      list === undefined
+        ? ctx.fallbackFocus
+        : () =>
+            list.querySelector<HTMLElement>(`[data-testid="member-${userId}"]`) ??
+            list.querySelector<HTMLElement>(".member-item"),
     title: t("dialog.titleUser", { name: ctx.name }),
     targets: [{ type: "user", id: String(ctx.userId), label: ctx.name }],
   });

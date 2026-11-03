@@ -10,6 +10,8 @@ import { desktop } from "../platform/desktop";
 import { createRateLimiterSet } from "@lib/net/rateLimiter";
 import { createToastContainer } from "@components/Toast";
 import { initToast, teardownToast, showToast } from "@lib/ui/toast";
+import { onPhoneLayoutChange } from "@lib/ui/bottomSheet";
+import { Disposable } from "@lib/disposable";
 import { onAuthCleared } from "@stores/auth.store";
 import { closeSettings, openSettings, uiStore } from "@stores/ui.store";
 import { loadGlobalShortcutVks } from "@lib/voice/voiceShortcuts";
@@ -535,6 +537,15 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       pg.syncDmProfileToActive();
       pg.withGroupPanel((ctrl) => ctrl.syncToActive());
     }
+
+    // Turning the device onto the phone layout puts the side panels away;
+    // back on the desktop layout they follow the saved preference again.
+    const layoutWatch = new Disposable();
+    st.unsubscribers.push(() => layoutWatch.destroy());
+    onPhoneLayoutChange(() => {
+      pg.syncDmProfileToActive();
+      pg.withGroupPanel((ctrl) => ctrl.syncToActive());
+    }, layoutWatch.signal);
   }
 
   function destroy(): void {

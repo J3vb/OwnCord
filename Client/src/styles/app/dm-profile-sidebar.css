@@ -13,6 +13,20 @@
   position: relative;
   transition: margin-right 170ms ease;
 }
+/* A phone has no room beside the chat: the group members panel (the only one
+   that opens there) is an overlay below the chat header, like the member
+   column. The 1:1 profile opens as the profile sheet instead. */
+@media (pointer: coarse) and (max-width: 899px), (pointer: coarse) and (max-height: 499px) {
+  .dm-profile-sidebar {
+    position: fixed;
+    top: calc(var(--header-height, 48px) + env(safe-area-inset-top));
+    bottom: 0;
+    right: 0;
+    width: min(340px, 85vw);
+    z-index: 100;
+    box-shadow: var(--shadow-lg);
+  }
+}
 .dps-avatar {
   width: 80px;
   height: 80px;
@@ -205,6 +219,38 @@
   font-size: var(--font-size-sm);
   padding: 8px;
   font-family: inherit;
+}
+.dps-handle,
+.dps-custom-status {
+  overflow-wrap: anywhere;
+  text-align: center;
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+.dps-handle:empty,
+.dps-custom-status:empty {
+  display: none;
+}
+.dps-report-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  padding: 8px 12px;
+  margin-bottom: 8px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+  color: var(--text-normal);
+  font-family: inherit;
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  cursor: pointer;
+}
+.dps-report-btn:hover {
+  background: var(--bg-modifier-hover, var(--bg-tertiary));
 }
 .dps-block-btn {
   width: 100%;

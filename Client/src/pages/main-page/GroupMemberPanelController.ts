@@ -10,10 +10,16 @@
  * group (it has no single recipient) and this one never opens for a 1:1 DM.
  * While open, the panel repaints from dmStore (a dm_channel_open that adds,
  * removes or re-owns members) and from the members those DMs name.
+ *
+ * On the phone layout the panel never opens by itself: there is no room
+ * beside the chat. The header button opens it as an overlay that Back closes,
+ * and the saved preference (a desktop choice) is left alone.
  */
 
 import { ApiClientError, type ApiClient } from "@lib/api";
 import { loadPref, savePref } from "@lib/prefs/preferences";
+import { claimBack, type BackClaim } from "@lib/ui/backHistory";
+import { isPhoneLayout } from "@lib/ui/bottomSheet";
 import type { Member } from "@stores/members.store";
 import { membersStore } from "@stores/members.store";
 import { getActiveChannel } from "@stores/channels.store";
@@ -111,6 +117,8 @@ export function createGroupMemberPanelController(
   let boundChannelId = 0;
   let picker: MountableComponent | null = null;
   let destroyed = false;
+  /** Back closes the overlay while it is up on a phone. */
+  let backClaim: BackClaim | null = null;
 
   const isOpen = (): boolean => panel !== null || load !== null;
 
@@ -207,7 +215,9 @@ export function createGroupMemberPanelController(
     created.mount(document.body);
   }
 
-  function openFor(channelId: number, focus: boolean): boolean {
+  /** `phone` is read when the user asked, so a layout flip during the load
+   *  cannot change whether Back is claimed. */
+  function openFor(channelId: number, focus: boolean, phone = isPhoneLayout()): boolean {
     const slot = opts.getSlot();
     if (slot === null || activeGroupId() !== channelId) return false;
     const token = {};
@@ -234,7 +244,7 @@ export function createGroupMemberPanelController(
           focus,
           onClose: () => {
             close();
-            savePref(GROUP_MEMBERS_PREF, false);
+            if (!isPhoneLayout()) savePref(GROUP_MEMBERS_PREF, false);
           },
           onAddPeople: addPeople,
           onOpenProfile: (member, x, y) => openProfile(member, x, y),
@@ -251,6 +261,12 @@ export function createGroupMemberPanelController(
         });
         panel.mount(mountSlot);
         bind(channelId);
+        if (phone) {
+          backClaim = claimBack(() => {
+            backClaim = null;
+            close();
+          });
+        }
         syncButton();
       },
       () => {
@@ -264,6 +280,8 @@ export function createGroupMemberPanelController(
 
   function close(): void {
     load = null;
+    backClaim?.release();
+    backClaim = null;
     unsub?.();
     unsub = null;
     closePicker();
@@ -275,19 +293,25 @@ export function createGroupMemberPanelController(
   }
 
   function toggle(): void {
+    const phone = isPhoneLayout();
     if (isOpen()) {
       close();
-      savePref(GROUP_MEMBERS_PREF, false);
+      if (!phone) savePref(GROUP_MEMBERS_PREF, false);
       return;
     }
     const id = activeGroupId();
     if (id === null) return;
-    if (openFor(id, true)) savePref(GROUP_MEMBERS_PREF, true);
+    if (openFor(id, true, phone) && !phone) savePref(GROUP_MEMBERS_PREF, true);
   }
 
   function syncToActive(): void {
+    // Off the phone layout the panel sits beside the chat: Back is not its.
+    if (!isPhoneLayout()) {
+      backClaim?.release();
+      backClaim = null;
+    }
     const id = activeGroupId();
-    if (id === null || !loadPref<boolean>(GROUP_MEMBERS_PREF, true)) {
+    if (id === null || isPhoneLayout() || !loadPref<boolean>(GROUP_MEMBERS_PREF, true)) {
       close();
       return;
     }
