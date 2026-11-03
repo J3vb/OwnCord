@@ -98,6 +98,8 @@ export function createContentNavigator(opts: ContentNavigatorOptions): ContentNa
     owner.destroy();
     clearChildren(element);
     element.removeAttribute("aria-labelledby");
+    // A hidden column claims no landmark.
+    element.removeAttribute("role");
     element.style.display = "none";
     chatArea.style.display = "";
     setActiveView(null);

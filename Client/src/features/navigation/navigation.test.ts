@@ -807,6 +807,7 @@ describe("the People view as DM mode's home", () => {
     flush();
 
     expect(uiStore.getState().activeView).toBeNull();
+    expect(nav.element.hasAttribute("role")).toBe(false);
     expect(people.contexts[0]?.signal.aborted).toBe(true);
     expect(returnTarget).toBe(GENERAL);
   });
