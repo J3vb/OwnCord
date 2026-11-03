@@ -177,19 +177,6 @@ describe("createVoiceWidgetCallbacks", () => {
       expect(mockLeaveVoiceChannel).toHaveBeenCalled();
       expect(ws.send).not.toHaveBeenCalled();
     });
-
-    it("owes the leave it could not send, and the next handshake sends it", () => {
-      clearOwedLeave();
-      mockUiGetState.mockReturnValue({ connectionStatus: "reconnecting" });
-      const { ws, cbs } = widgetWith();
-
-      cbs.onDisconnect();
-      expect(isVoiceLeaveOwed()).toBe(true);
-
-      mockVoiceStoreGetState.mockReturnValue(makeVoiceState({ voiceStatus: "idle" }));
-      expect(sendOwedVoiceLeave(ws)).toBe(true);
-      expect(ws.send).toHaveBeenCalledExactlyOnceWith({ type: "voice_leave", payload: {} });
-    });
   });
 
   describe("onMuteToggle", () => {
@@ -557,12 +544,27 @@ describe("createSidebarVoiceCallbacks", () => {
     expect(ws.send).toHaveBeenCalledWith({ type: "voice_leave", payload: {} });
   });
 
-  it("onVoiceLeave while reconnecting owes the leave to the next handshake", () => {
+  it.each([
+    [
+      "widget hang-up",
+      () => {
+        const { ws, cbs } = widgetWith(makeVoiceState({ currentChannelId: 10 }));
+        cbs.onDisconnect();
+        return ws;
+      },
+    ],
+    [
+      "sidebar leave",
+      () => {
+        const { ws, cbs } = sidebarCallbacks();
+        cbs.onVoiceLeave();
+        return ws;
+      },
+    ],
+  ])("a %s while reconnecting owes the leave to the next handshake", (_name, leave) => {
     clearOwedLeave();
     mockUiGetState.mockReturnValue({ connectionStatus: "reconnecting" });
-    const { ws, cbs } = sidebarCallbacks();
-
-    cbs.onVoiceLeave();
+    const ws = leave();
     expect(ws.send).not.toHaveBeenCalled();
     expect(isVoiceLeaveOwed()).toBe(true);
 
