@@ -49,11 +49,13 @@ and only when it changes something a contributor or fork holder must do
 
 ### Changed
 
+- The server no longer starts when `server.trusted_proxies` holds an entry that covers every address (such as `0.0.0.0/0` or `::/0`); the error names the entry. List only your reverse proxy's own address. The admin panel refuses the same values.
 - Account-security actions now need a normal sign-in: an API token can no longer change the password, turn two-factor on or off, issue recovery codes or a recovery kit, list or sign out sessions, delete the account or publish a device key (it gets `403 LOGIN_SESSION_REQUIRED`). Bots and scripts that read, post or edit the profile keep working.
 
 ### Added
 
 - **Settings → Account → Signed-in devices** now also lists your API tokens (label, created, last used) with a Revoke button each. Changing your password offers "Also revoke my API tokens", ticked by default when you have any. `docs/security.md` now spells out what a password change, account recovery and sign-out-everywhere each end.
+- On Android, your camera now pauses while the app is in the background, so others see your avatar instead of a frozen picture, and turns back on when you return.
 - Your own camera (call tiles, pop-out and the settings preview) now shows you exactly as others see you, with your right hand on the right; before, it was always mirrored. A new "Mirror my camera preview" switch in Voice & Video (off by default) brings the mirror back. Others always see you the right way round.
 - While you are in a DM call, that person's avatar stays in the server rail under Home with a green call badge, so you can see the call and get back to it in one click from any server.
 - On a phone, the "+" in the message box now opens a sheet with Take photo, Gallery and Files, so you can take a photo with the camera and send it straight away, or pick several photos and videos from the gallery. On a computer "+" still opens the file picker.
