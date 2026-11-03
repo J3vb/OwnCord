@@ -4,7 +4,6 @@
 
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import { createModal } from "@lib/ui/modalFactory";
 import type { ChannelType } from "@lib/types";
 import { messagingText } from "../../i18n/messaging";
 import { requestsText } from "../../i18n/requests";
@@ -145,22 +144,6 @@ export function buildChatHeader(opts: ChatHeaderOptions): {
     { class: "ch-topic", "data-testid": "chat-header-topic" },
     "",
   );
-  // A long topic is ellipsised in one line; clicking it (or Enter/Space on the
-  // focused topic) opens the full text. Only armed while a channel topic is
-  // shown: a DM's status line carries no `data-topic`.
-  const openTopic = (): void => {
-    const topic = topicEl.dataset["topic"];
-    if (topic === undefined || topic === "") return;
-    openTopicModal(nameEl.textContent ?? "", topic);
-  };
-  topicEl.addEventListener("click", openTopic);
-  topicEl.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" || e.key === " ") {
-      e.preventDefault();
-      openTopic();
-    }
-  });
-
   const tools = createElement("div", { class: "ch-tools" });
   const callBtn = createElement("button", {
     type: "button",
@@ -395,55 +378,17 @@ export function setChatHeaderCallChat(
   refs.callChatBtn.setAttribute("aria-label", label);
 }
 
-/** Show a channel topic in the header and arm the click-to-read-in-full. */
+/**
+ * Show a channel topic in the header. A long topic is cut off in one line, so
+ * the full text also goes in the hover tooltip.
+ */
 export function setChatHeaderTopic(refs: ChatHeaderRefs, topic: string): void {
   setText(refs.topicEl, topic);
   if (topic === "") {
-    delete refs.topicEl.dataset["topic"];
-    refs.topicEl.removeAttribute("role");
-    refs.topicEl.removeAttribute("tabindex");
     refs.topicEl.removeAttribute("title");
     return;
   }
-  refs.topicEl.dataset["topic"] = topic;
-  refs.topicEl.setAttribute("role", "button");
-  refs.topicEl.setAttribute("tabindex", "0");
-  refs.topicEl.title = messagingText("header.topicOpen");
-}
-
-/**
- * A small modal with the whole topic. The topic is user text, so it goes in
- * through `textContent` only, never as markup; Escape, the backdrop and the
- * close button all dismiss it.
- */
-export function openTopicModal(channelName: string, topic: string): void {
-  const title = createElement("h3", { id: "channel-topic-title" });
-  title.textContent = messagingText("header.topicTitle", { channel: channelName });
-  const closeBtn = createElement("button", {
-    class: "modal-close",
-    type: "button",
-    "aria-label": shellText("common.close"),
-    "data-testid": "channel-topic-close",
-  });
-  closeBtn.appendChild(createIcon("x", 14));
-  const header = createElement("div", { class: "modal-header" });
-  appendChildren(header, title, closeBtn);
-
-  const body = createElement("div", { class: "modal-body" });
-  const text = createElement("p", {
-    class: "channel-topic-full",
-    "data-testid": "channel-topic-text",
-  });
-  text.textContent = topic;
-  body.appendChild(text);
-
-  const instance = createModal({
-    content: header,
-    overlayAttrs: { "data-testid": "channel-topic-modal" },
-    ariaLabelledBy: "channel-topic-title",
-  });
-  instance.modal.appendChild(body);
-  closeBtn.addEventListener("click", () => instance.close());
+  refs.topicEl.title = topic;
 }
 
 // ---------------------------------------------------------------------------
