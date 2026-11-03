@@ -240,9 +240,8 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	routerMetricsRoutes(r, cfg, database, svc, hub, rt.MetricsWindows)
 
 	u := rt.Updater
-	adminOpts := adminSetupOptions(cfg, rt, newDiscordImporter(database, svc, hub, store, rt), database.TotalAttachmentBytes, slowRoutes)
-	adminOpts.System.Database = systemDatabaseSource(database)
-	adminHandler := admin.NewHandler(database, ver, hub, u, logBuf, cfg.Server.AllowedOrigins, svc.Permissions, svc, adminOpts)
+	adminHandler := admin.NewHandler(database, ver, hub, u, logBuf, cfg.Server.AllowedOrigins, svc.Permissions, svc,
+		withSystemDatabase(adminSetupOptions(cfg, rt, newDiscordImporter(database, svc, hub, store, rt), database.TotalAttachmentBytes, slowRoutes), database))
 	// The client's member actions, reachable without the /admin prefix (see
 	// admin.NewMemberAPI). Deliberately outside the admin CIDR gate below: they
 	// accept only a session or API token issued by this server, plus the
@@ -802,9 +801,9 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	}
 }
 
-// systemDatabaseSource reads the admin System health page's database card.
-func systemDatabaseSource(database *db.DB) func(context.Context) (admin.SystemDatabase, error) {
-	return func(ctx context.Context) (admin.SystemDatabase, error) {
+// withSystemDatabase gives the admin System health page its database card.
+func withSystemDatabase(opts admin.SetupOptions, database *db.DB) admin.SetupOptions {
+	opts.System.Database = func(ctx context.Context) (admin.SystemDatabase, error) {
 		st, err := database.HealthStats(ctx)
 		if err != nil {
 			return admin.SystemDatabase{}, fmt.Errorf("system health database: %w", err)
@@ -816,4 +815,5 @@ func systemDatabaseSource(database *db.DB) func(context.Context) (admin.SystemDa
 			WriterWaitCount: st.WriterWaitCount, WriterWaitMs: st.WriterWaitMs,
 		}, nil
 	}
+	return opts
 }

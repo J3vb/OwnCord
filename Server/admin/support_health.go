@@ -75,20 +75,18 @@ type healthSnapshot struct {
 	WSDispatchLagMs        *metrics.Summary `json:"ws_dispatch_lag_ms,omitempty"`
 }
 
-func ptr[T any](v T) *T { return &v }
-
 func supportHealth(hub HubBroadcaster, at time.Time) healthSnapshot {
 	var mem runtime.MemStats
 	runtime.ReadMemStats(&mem)
 	out := healthSnapshot{CapturedAt: at, Scope: supportHealthScope, DatabaseReadable: true, Goroutines: runtime.NumGoroutine(), HeapAllocBytes: mem.HeapAlloc, GCCycles: mem.NumGC}
 	if hub != nil {
-		out.ConnectedUsers = ptr(hub.UserCount())
+		out.ConnectedUsers = new(hub.UserCount())
 	}
 	if h, ok := hub.(supportHubMetrics); ok {
-		out.VoiceSessions = ptr(h.VoiceSessionCount())
-		out.WSConnectionRejects = ptr(h.ConnRejectCount())
-		out.DispatchAlive = ptr(h.DispatchAlive())
-		out.BroadcastDrops = ptr(h.BroadcastDropCount())
+		out.VoiceSessions = new(h.VoiceSessionCount())
+		out.WSConnectionRejects = new(h.ConnRejectCount())
+		out.DispatchAlive = new(h.DispatchAlive())
+		out.BroadcastDrops = new(h.BroadcastDropCount())
 		qd, hp, lp := h.BackpressureStats()
 		out.QueueDisconnects, out.HighPriorityFallbacks, out.LowPriorityDrops = &qd, &hp, &lp
 		rb, rd, rf := h.ReconnectTierStats()
@@ -97,19 +95,19 @@ func supportHealth(hub HubBroadcaster, at time.Time) healthSnapshot {
 	// SRE-M1's shipped latency surface: aggregate distributions and gauges,
 	// no per-user labels.
 	if h, ok := hub.(supportHubLatency); ok {
-		out.TopicShedsTotal = ptr(h.TopicShedCount())
-		out.WSBroadcastMs = ptr(h.BroadcastMs())
-		out.WSDispatchLagMs = ptr(h.DispatchLagMs())
-		out.ChatSendAckMs = ptr(h.ChatAckMs())
-		out.HubBroadcastQueueDepth = ptr(h.BroadcastQueueDepth())
-		out.HubSeqMuMaxHoldMs = ptr(h.SeqMuMaxHoldMs())
+		out.TopicShedsTotal = new(h.TopicShedCount())
+		out.WSBroadcastMs = new(h.BroadcastMs())
+		out.WSDispatchLagMs = new(h.DispatchLagMs())
+		out.ChatSendAckMs = new(h.ChatAckMs())
+		out.HubBroadcastQueueDepth = new(h.BroadcastQueueDepth())
+		out.HubSeqMuMaxHoldMs = new(h.SeqMuMaxHoldMs())
 	}
 	if v, ok := hub.(supportHubVoice); ok && v.LiveKitManaged() {
 		status := v.LiveKitProcessStatus()
-		out.LiveKitManaged = ptr(true)
-		out.LiveKitHealthy = ptr(status.Running)
-		out.LiveKitRestarts = ptr(status.Restarts)
-		out.LiveKitGaveUp = ptr(status.GaveUp)
+		out.LiveKitManaged = new(true)
+		out.LiveKitHealthy = new(status.Running)
+		out.LiveKitRestarts = new(status.Restarts)
+		out.LiveKitGaveUp = new(status.GaveUp)
 	}
 	return out
 }

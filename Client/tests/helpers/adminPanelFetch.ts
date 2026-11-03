@@ -198,3 +198,39 @@ export async function mountSettings(
   if (!content) throw new Error("expected #content");
   content.innerHTML = await bridge.renderSettings();
 }
+
+/**
+ * Boots the panel from `html`, logs each request path to `paths`, answers
+ * through `respond` (a `{ __status }` object is a refusal, see
+ * `jsonResponder`), then signs in as "tok" on `section` with the bootstrap
+ * traffic dropped from `paths`.
+ */
+export async function bootPanelOnSection<
+  Bridge extends { state: { token: string; section: string } },
+>(
+  html: string,
+  section: string,
+  paths: string[],
+  respond: (path: string) => unknown,
+): Promise<{ dom: JSDOM; bridge: Bridge }> {
+  const dom = loadPanelWithFetch(
+    html,
+    scriptedPanelFetch(
+      ({ path }) => paths.push(path),
+      jsonResponder((p) => respond(p)),
+    ),
+  );
+  const bridge = await settlePanel<Bridge>(dom);
+  paths.length = 0;
+  bridge.state.token = "tok";
+  bridge.state.section = section;
+  return { dom, bridge };
+}
+
+/** Puts rendered section HTML into the panel's content area and returns its host. */
+export function renderIntoContent(dom: JSDOM, html: string): Element {
+  const host = dom.window.document.createElement("div");
+  host.innerHTML = html;
+  dom.window.document.getElementById("content")!.replaceChildren(host);
+  return host;
+}

@@ -6,10 +6,8 @@ import { describe, it, expect, afterEach } from "vitest";
 import { JSDOM } from "jsdom";
 import {
   adminHtmlWithBridge,
-  jsonResponder,
-  loadPanelWithFetch,
-  scriptedPanelFetch,
-  settlePanel,
+  bootPanelOnSection,
+  renderIntoContent,
 } from "../helpers/adminPanelFetch";
 
 const BRIDGE = `<script>
@@ -34,18 +32,8 @@ interface Bridge {
 type Responder = (path: string) => Promise<unknown> | unknown;
 
 async function boot(paths: string[], respond: Responder): Promise<{ dom: JSDOM; bridge: Bridge }> {
-  const dom = loadPanelWithFetch(
-    ADMIN_HTML,
-    scriptedPanelFetch(
-      ({ path }) => paths.push(path),
-      jsonResponder((p) => respond(p)),
-    ),
-  );
-  const bridge = await settlePanel<Bridge>(dom);
-  paths.length = 0;
-  bridge.state.token = "tok";
-  bridge.state.section = "dashboard";
-  return { dom, bridge };
+  const booted = await bootPanelOnSection<Bridge>(ADMIN_HTML, "dashboard", paths, respond);
+  return booted;
 }
 
 const T = 1_793_386_035;
@@ -85,12 +73,7 @@ const STATS = {
   },
 };
 
-function render(dom: JSDOM, html: string): Element {
-  const host = dom.window.document.createElement("div");
-  host.innerHTML = html;
-  dom.window.document.getElementById("content")!.replaceChildren(host);
-  return host;
-}
+const render = renderIntoContent;
 
 const tile = (host: Element, id: string) => host.querySelector(`#${id}`)!;
 const text = (host: Element, id: string, part: string) =>

@@ -6,10 +6,8 @@ import { describe, it, expect, afterEach } from "vitest";
 import { JSDOM } from "jsdom";
 import {
   adminHtmlWithBridge,
-  jsonResponder,
-  loadPanelWithFetch,
-  scriptedPanelFetch,
-  settlePanel,
+  bootPanelOnSection,
+  renderIntoContent,
 } from "../helpers/adminPanelFetch";
 
 const BRIDGE = `<script>
@@ -36,19 +34,9 @@ interface Bridge {
 type Responder = (path: string) => Promise<unknown> | unknown;
 
 async function boot(paths: string[], respond: Responder): Promise<{ dom: JSDOM; bridge: Bridge }> {
-  const dom = loadPanelWithFetch(
-    ADMIN_HTML,
-    scriptedPanelFetch(
-      ({ path }) => paths.push(path),
-      jsonResponder((p) => respond(p)),
-    ),
-  );
-  const bridge = await settlePanel<Bridge>(dom);
-  paths.length = 0;
-  bridge.state.token = "tok";
-  bridge.state.section = "health";
-  bridge.state.me = { permissions: ADMINISTRATOR };
-  return { dom, bridge };
+  const booted = await bootPanelOnSection<Bridge>(ADMIN_HTML, "health", paths, respond);
+  booted.bridge.state.me = { permissions: ADMINISTRATOR };
+  return booted;
 }
 
 const HEALTH = {
@@ -104,11 +92,21 @@ const HEALTH = {
   ],
 };
 
-function render(dom: JSDOM, html: string): Element {
-  const host = dom.window.document.createElement("div");
-  host.innerHTML = html;
-  dom.window.document.getElementById("content")!.replaceChildren(host);
-  return host;
+const render = renderIntoContent;
+
+/** Answers `HEALTH` until `hold` is set, then parks each request until `release`. */
+function holdable() {
+  const gate = {
+    hold: false,
+    release: undefined as ((v: unknown) => void) | undefined,
+    respond: (): unknown =>
+      gate.hold
+        ? new Promise((resolve) => {
+            gate.release = resolve;
+          })
+        : HEALTH,
+  };
+  return gate;
 }
 
 function fact(host: Element, card: string, label: string): string | undefined {
@@ -256,26 +254,19 @@ describe("Server/admin/static — System health page", () => {
   // Leaving the page while a poll is in flight: the late answer must not
   // repaint or restart the timer.
   it("drops a poll answered after leaving the page and stops polling", async () => {
-    let release: ((v: unknown) => void) | undefined;
-    let hold = false;
-    const booted = await boot([], () =>
-      hold
-        ? new Promise((resolve) => {
-            release = resolve;
-          })
-        : HEALTH,
-    );
+    const gate = holdable();
+    const booted = await boot([], gate.respond);
     dom = booted.dom;
     const { bridge } = booted;
     render(dom, await bridge.renderSystemHealth());
     const before = bridge.sysHealth.data;
 
-    hold = true;
+    gate.hold = true;
     const inFlight = bridge.pollSystemHealth(bridge.sysHealth.seq, "tok");
     await new Promise((resolve) => dom!.window.setTimeout(resolve, 0));
-    expect(release).toBeDefined();
+    expect(gate.release).toBeDefined();
     bridge.state.section = "users";
-    release!({ ...HEALTH, snapshot: { ...HEALTH.snapshot, connected_users: 99 } });
+    gate.release!({ ...HEALTH, snapshot: { ...HEALTH.snapshot, connected_users: 99 } });
     await inFlight;
 
     expect(bridge.sysHealth.data).toBe(before);
@@ -283,25 +274,18 @@ describe("Server/admin/static — System health page", () => {
   });
 
   it("drops an answer from a superseded render", async () => {
-    let release: ((v: unknown) => void) | undefined;
-    let hold = false;
-    const booted = await boot([], () =>
-      hold
-        ? new Promise((resolve) => {
-            release = resolve;
-          })
-        : HEALTH,
-    );
+    const gate = holdable();
+    const booted = await boot([], gate.respond);
     dom = booted.dom;
     const { bridge } = booted;
     render(dom, await bridge.renderSystemHealth());
     const oldSeq = bridge.sysHealth.seq;
 
-    hold = true;
+    gate.hold = true;
     const stale = bridge.pollSystemHealth(oldSeq, "tok");
     await new Promise((resolve) => dom!.window.setTimeout(resolve, 0));
-    const staleRelease = release!;
-    hold = false;
+    const staleRelease = gate.release!;
+    gate.hold = false;
     render(dom, await bridge.renderSystemHealth());
     expect(bridge.sysHealth.seq).toBe(oldSeq + 1);
 

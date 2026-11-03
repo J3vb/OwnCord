@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"bytes"
 	"encoding/json"
 	"reflect"
 	"testing"
@@ -173,7 +174,7 @@ func TestSupportHealth_BundleBytesUnchanged(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if string(gotJSON) != string(wantJSON) {
+		if !bytes.Equal(gotJSON, wantJSON) {
 			t.Errorf("%s: health.json changed\ngot:  %s\nwant: %s", name, gotJSON, wantJSON)
 		}
 	}

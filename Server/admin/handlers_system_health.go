@@ -91,10 +91,10 @@ func handleGetSystemHealth(src SystemSources, hub HubBroadcaster, attention *ser
 			Signals:    []service.AttentionSignal{},
 		}
 		if c, ok := hub.(interface{ ClientCount() int }); ok {
-			resp.Hub.Connections = ptr(c.ClientCount())
+			resp.Hub.Connections = new(c.ClientCount())
 		}
 		if !src.Started.IsZero() {
-			resp.Process.UptimeSeconds = ptr(int64(at.Sub(src.Started) / time.Second))
+			resp.Process.UptimeSeconds = new(int64(at.Sub(src.Started) / time.Second))
 		}
 		if v, ok := hub.(supportHubVoice); ok {
 			resp.LiveKit.Managed = v.LiveKitManaged()
