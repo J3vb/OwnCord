@@ -1,5 +1,5 @@
 {
-  "nextId": 537,
+  "nextId": 538,
   "findings": [
     {
       "id": "OC-0001",
@@ -12399,6 +12399,29 @@
       "found": "2026-11-03",
       "hunt": "server-review-2026-11-03",
       "lens": "db-config-lifecycle",
+      "finder": "claude",
+      "fixedDate": "2026-11-03"
+    },
+    {
+      "id": "OC-0537",
+      "title": "A voice leave made while the chat socket was down left a ghost voice membership after the socket resumed",
+      "file": "Server/ws/voice_grace.go",
+      "line": 330,
+      "severity": "medium",
+      "why": "The client sent voice_leave only on a live socket, and a resume inherited the parked membership of a join that never reached the SFU; nothing ended it until the reconciler's second miss, 60 to 120 s later.",
+      "repro": "Join voice, drop the chat socket before the SFU connect finishes, leave voice while reconnecting, let the socket resume: the user stays listed in the channel and counts toward its cap.",
+      "evidence": "Server/ws/voice_resume_check_test.go (TestVoiceResumeCheck_EndsJoinMissingAtSFU and five boundary tests); Client/src/features/voice/leaveOwed.test.ts; Client/src/features/connection/wsHandlers.test.ts.",
+      "suggestedFix": "Remember a leave the server has not confirmed and send it after the next auth_ok while idle; on the server, check a resumed membership at the SFU about 10 s after the resume and end it when absent.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/ws/voice_resume_check_test.go",
+        "revertProof": "fail (the ghost test fails without the resume check)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-03",
+      "hunt": "client-review-2026-11-03",
+      "lens": "voice-ui",
       "finder": "claude",
       "fixedDate": "2026-11-03"
     }

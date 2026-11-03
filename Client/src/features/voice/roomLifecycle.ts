@@ -34,6 +34,7 @@ import type { RoomEventHandlers } from "../../lib/voice/roomEventHandlers";
 import { parseUserId, type SessionState } from "./sessionState";
 import { isLinuxDesktop } from "./native/platform";
 import { syncShareGrant } from "./mediaControl";
+import { noteVoiceLeave } from "./leaveOwed";
 
 // Same logger tag as before the extraction, so the lifecycle log lines are unchanged.
 const log = createLogger("livekitSession");
@@ -375,6 +376,7 @@ export class RoomLifecycle {
     stopManualCameraTrack(this._cameraState, this._room);
     stopManualScreenTracks(this._screenState, this._room);
     if (sendWs && this.ws !== null) {
+      noteVoiceLeave();
       this.ws.send({ type: "voice_leave", payload: {} });
     }
     // Remove orphaned remote audio elements (normally cleaned up by

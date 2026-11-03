@@ -17,6 +17,7 @@ func init() {
 		"handleVoiceJoin: stale voice state persists after leave, aborting switch":                        "handlevoicejoin_stale_voice_state_persists_after_leave",
 		"voice reconcile: ListRooms failed, checking rooms with rows only":                                "voice_reconcile_listrooms_failed",
 		"voice removed watch: ListParticipants failed, retrying next tick":                                "voice_removed_watch_listparticipants_failed",
+		"voice resume check: ListParticipants failed, retrying next tick":                                 "voice_resume_check_listparticipants_failed",
 		"voice removed watch: reading voice state failed, retrying next tick":                             "voice_removed_watch_read_voice_state_failed",
 		"ws voiceModTarget owner movable setting":                                                         "ws_voicemodtarget_owner_movable_setting",
 		"ws voice_join: channel password grant lookup failed, denying":                                    "ws_voice_join_password_grant_lookup_failed",

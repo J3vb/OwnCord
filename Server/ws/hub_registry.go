@@ -175,6 +175,9 @@ func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool, txn *voi
 	if inheritedVoiceChID != 0 {
 		h.updateKeyHolder(inheritedVoiceChID)
 	}
+	// A membership a resume took over may name a join that never reached the SFU
+	// (the client gave it up while offline): check it shortly.
+	h.noteResumedVoice(c)
 
 	// Re-sync this connection's E2EE peer-key map. voice_e2ee_announce is an
 	// unsequenced pub/sub frame (bypassing deliverBroadcast and the replay buffer), so

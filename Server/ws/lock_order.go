@@ -96,6 +96,7 @@
 //	9     voiceReconcileState.mu     voice_reconcile.go:42    leaf
 //	9     voiceRejoinBlockState.mu   voice_rejoin_block.go:34 leaf
 //	9     removedIdentities.mu       voice_removed_watch.go:35 leaf
+//	9     voiceResumeChecks.mu       voice_resume_check.go:57 leaf
 //	9     presenceRepairState.mu     hub_presence.go:92       leaf
 //	9     queueDropState.mu          hub_stats.go:163         leaf
 //	9     EventRingBuffer.mu RW      ringbuffer.go:14         leaf

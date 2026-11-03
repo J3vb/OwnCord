@@ -50,6 +50,9 @@ const (
 	// voiceLeaveReasonAFK is the AFK sweep moving a member idle past the timeout to the
 	// AFK channel (EvictForAFKMove).
 	voiceLeaveReasonAFK = "afk"
+	// voiceLeaveReasonUnconfirmed is a membership a resumed socket took over that
+	// never showed at the SFU (voice_resume_check.go).
+	voiceLeaveReasonUnconfirmed = "unconfirmed"
 )
 
 // handleVoiceLeave processes an explicit voice_leave or a disconnect: clears the

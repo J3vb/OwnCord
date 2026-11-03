@@ -1,4 +1,5 @@
 import { WsErrorCode } from "@lib/protocolTypes";
+import { clearOwedLeave } from "./leaveOwed";
 // Which error frame answers the voice_join in flight. Servers echo the join's
 // envelope id on every refusal, so an error for any other command (a refused
 // chat_edit, a rate-limited typing frame) must not cancel the join. Older
@@ -57,6 +58,7 @@ export function onNonRetryJoin(listener: () => void): void {
  */
 export function noteJoinSent(id: string | undefined, passwordRetry = false): void {
   if (!passwordRetry) nonRetryJoinListener?.();
+  clearOwedLeave();
   joinCount += 1;
   pendingId = id ?? null;
   pendingPasswordRetry = id !== undefined && passwordRetry;
