@@ -261,3 +261,48 @@ func TestFilePool_ReadDuringOpenWriteTx(t *testing.T) {
 		t.Errorf("read after commit saw %d messages, want 2", count)
 	}
 }
+
+// TestFilePool_ThreadListDuringOpenWriteTx pins the thread list (its default
+// activity sort is a CTE) to the reader pool: it must finish while the single
+// writer connection is held by an open write transaction.
+func TestFilePool_ThreadListDuringOpenWriteTx(t *testing.T) {
+	database := openFileDB(t)
+	ctx := context.Background()
+	channelID, userID := seedChannelAndUser(t, database)
+
+	for _, name := range []string{"first", "second"} {
+		starter, err := database.CreateMessage(ctx, channelID, userID, "starter "+name, nil)
+		if err != nil {
+			t.Fatalf("CreateMessage: %v", err)
+		}
+		if _, _, err := database.CreateThread(ctx, db.NewThread{
+			ParentID: channelID, StarterMessageID: starter, OwnerID: userID, Name: name, AutoArchiveMinutes: 1440,
+		}); err != nil {
+			t.Fatalf("CreateThread(%q): %v", name, err)
+		}
+	}
+
+	tx, err := database.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("BeginTx: %v", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO messages (channel_id, user_id, content) VALUES (?, ?, 'held')`,
+		channelID, userID,
+	); err != nil {
+		t.Fatalf("tx insert: %v", err)
+	}
+
+	readCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	for _, sort := range []string{db.ThreadSortActivity, db.ThreadSortCreated} {
+		rows, err := database.ListThreadsBy(readCtx, channelID, false, db.ThreadListOptions{Sort: sort}, db.ThreadCursor{}, 50)
+		if err != nil {
+			t.Fatalf("ListThreadsBy(sort %q) while the writer is held: %v", sort, err)
+		}
+		if len(rows) != 2 {
+			t.Errorf("ListThreadsBy(sort %q) = %d rows, want 2", sort, len(rows))
+		}
+	}
+}
