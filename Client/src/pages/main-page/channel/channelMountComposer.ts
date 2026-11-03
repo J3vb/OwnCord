@@ -40,10 +40,13 @@ export function mountComposer(st: ChannelState, cc: ChannelApi, ms: MountScope):
     ms.channelType === "dm"
       ? dmStore.getState().channels.find((c) => c.channelId === ms.channelId)
       : undefined;
+  // A DM the store has not loaded yet still reads as one, by the name it was opened with.
   const dmPlaceholder =
-    dm === undefined
+    ms.channelType !== "dm"
       ? undefined
-      : composerPlaceholder(dm.isGroup ? "group" : "dm", dmDisplayName(dm));
+      : dm === undefined
+        ? composerPlaceholder("dm", ms.channelName)
+        : composerPlaceholder(dm.isGroup ? "group" : "dm", dmDisplayName(dm));
   st.messageInput = createMessageInput({
     channelId: ms.channelId,
     channelName: ms.channelName,

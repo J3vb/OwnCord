@@ -66,6 +66,10 @@ describe("createChannelController", () => {
       createChannelController(makeOpts()).mountChannel(42, "Crew", "dm");
       expect(mocks.capturedMessageInputOpts.placeholder).toBe("Message Crew");
 
+      mockDmStoreGetState.mockReturnValue({ channels: [] });
+      createChannelController(makeOpts()).mountChannel(42, "alice", "dm");
+      expect(mocks.capturedMessageInputOpts.placeholder).toBe("Message @alice");
+
       createChannelController(makeOpts()).mountChannel(7, "general", "text");
       expect(mocks.capturedMessageInputOpts.placeholder).toBeUndefined();
     });

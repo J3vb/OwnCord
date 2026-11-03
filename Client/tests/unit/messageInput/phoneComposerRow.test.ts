@@ -144,6 +144,30 @@ describe("phone composer row", () => {
     b.comp.destroy?.();
   });
 
+  it("opens the smiley on the sticker tab when emoji and GIF are switched off", () => {
+    savePref(composerButtonPrefKey("emoji"), false);
+    savePref(composerButtonPrefKey("gif"), false);
+    usePhone();
+    const b = mountFull();
+    b.emoji.click();
+    const sheetEl = document.querySelector('[data-testid="expression-sheet"]');
+    expect(sheetEl).not.toBeNull();
+    expect(
+      sheetEl!.querySelector('[role="tab"][aria-selected="true"]')?.getAttribute("data-testid"),
+    ).toBe("xp-tab-sticker");
+    b.comp.destroy?.();
+  });
+
+  it("offers no sheet while the composer is disabled", () => {
+    usePhone();
+    const b = mountFull();
+    b.comp.setDisabled("You cannot send messages here");
+    expect(b.attach.disabled).toBe(true);
+    b.attach.click();
+    expect(sheet()).toBeNull();
+    b.comp.destroy?.();
+  });
+
   it("moves the buttons when a resize crosses onto or off the phone layout", () => {
     const b = mountFull();
     expect(b.gif.hidden).toBe(false);
