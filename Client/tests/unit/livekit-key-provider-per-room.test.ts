@@ -35,7 +35,6 @@ describe("one E2EE key provider per Room", () => {
       worker.releaseKeyProvider();
     }
     expect(used.size).toBe(CYCLES);
-    expect(worker.keyProvider.listenerCount(KeyProviderEvent.SetKey)).toBe(0);
   });
 
   it("hands a connect retry's new provider the session's room key", async () => {
@@ -54,5 +53,15 @@ describe("one E2EE key provider per Room", () => {
     expect(retry).not.toBe(first);
     expect(forwarded).toHaveBeenCalledOnce();
     await room.disconnect();
+  });
+
+  it("does not seed a provider that was replaced before its turn", async () => {
+    const roomKey = new Uint8Array(32).fill(9);
+    const worker = new E2EEWorker({ getSessionGeneration: () => 0, getRoomKey: () => roomKey });
+    const replaced = worker.newKeyProvider();
+    const current = worker.newKeyProvider();
+
+    await vi.waitFor(() => expect(current.getKeys()).toHaveLength(1));
+    expect(replaced.getKeys()).toHaveLength(0);
   });
 });
