@@ -5,8 +5,11 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+
 	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/metrics"
+	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/sysstats"
 )
 
@@ -33,6 +36,15 @@ type SystemSources struct {
 	Database func(context.Context) (SystemDatabase, error)
 	// MaxWSConnections is server.max_ws_connections (0 is unlimited).
 	MaxWSConnections int
+}
+
+// mountSystemRoutes mounts the Dashboard health row, the slow requests card
+// and the System health page: server health detail, so View Diagnostics like
+// the attention panel.
+func mountSystemRoutes(r chi.Router, gates *gateRegistry, src SystemSources, hub HubBroadcaster, attention *service.AttentionService, version string) {
+	gates.route(r, gateViewDiagnostics, http.MethodGet, "/system/stats", handleGetSystemStats(src, hub))
+	gates.route(r, gateViewDiagnostics, http.MethodGet, "/system/slow-requests", handleGetSlowRequests(src))
+	gates.route(r, gateViewDiagnostics, http.MethodGet, "/system/health", handleGetSystemHealth(src, hub, attention, version, time.Now))
 }
 
 // systemWindows are the history lengths the route serves.
