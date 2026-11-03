@@ -25,6 +25,20 @@ test.describe("Quick Switcher", () => {
     await expect(input).toBeFocused();
   });
 
+  test("keys typed right after Ctrl+K from the message box reach the switcher", async ({
+    page,
+  }) => {
+    const composer = page.locator("[data-testid='msg-textarea']");
+    await composer.click();
+    await page.keyboard.press("Control+k");
+    await page.keyboard.type("ra");
+
+    const input = page.locator(".quick-switcher__input");
+    await expect(input).toBeFocused({ timeout: 3_000 });
+    await expect(input).toHaveValue("ra");
+    await expect(composer).toHaveValue("");
+  });
+
   test("quick switcher shows channel results", async ({ page }) => {
     await page.keyboard.press("Control+k");
 

@@ -61,7 +61,8 @@ export interface ChatHeaderOptions {
   readonly onToggleThreads?: (anchor: HTMLButtonElement) => void;
   /** Open or close the channel's media gallery. */
   readonly onToggleMedia?: () => void;
-  readonly onSearchFocus?: () => void;
+  /** Open search; `typed` is the character that opened it from the header box. */
+  readonly onSearchFocus?: (typed?: string) => void;
   readonly onToggleDmProfile?: () => void;
   /** Show or hide the group DM member panel. */
   readonly onToggleMemberList?: () => void;
@@ -280,10 +281,15 @@ export function buildChatHeader(opts: ChatHeaderOptions): {
   pinBtn.addEventListener("click", () => {
     opts.onTogglePins();
   });
+  // A trigger styled as a field: readonly so Tab can pass over it without
+  // opening search; a click, Enter or the first typed character opens it.
   const searchInput = createElement("input", {
     class: "search-input",
     type: "text",
+    readonly: "",
     placeholder: messagingText("header.search"),
+    "aria-label": messagingText("header.search"),
+    "aria-haspopup": "dialog",
     "data-testid": "search-input",
   });
   // On a phone the box gives way to an icon; CSS shows one or the other.
@@ -297,9 +303,16 @@ export function buildChatHeader(opts: ChatHeaderOptions): {
   searchBtn.appendChild(createIcon("search", 18));
   if (opts.onSearchFocus !== undefined) {
     const onFocus = opts.onSearchFocus;
-    searchInput.addEventListener("focus", () => {
-      onFocus();
-      searchInput.blur();
+    searchInput.addEventListener("click", () => onFocus());
+    searchInput.addEventListener("keydown", (e) => {
+      if (e.isComposing || e.ctrlKey || e.metaKey || e.altKey) return;
+      if (e.key === "Enter") {
+        e.preventDefault();
+        onFocus();
+      } else if (e.key.length === 1 && e.key !== " ") {
+        e.preventDefault();
+        onFocus(e.key);
+      }
     });
     searchBtn.addEventListener("click", () => onFocus());
   }
