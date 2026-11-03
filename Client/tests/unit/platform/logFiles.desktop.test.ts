@@ -377,3 +377,49 @@ describe("LogFiles event files", () => {
     ]);
   });
 });
+
+describe("LogFiles event files when the log is turned off", () => {
+  test("a clear during a write deletes that write's file too", async () => {
+    const mod = await freshModule();
+    appLogDir.mockResolvedValue("/logs");
+    const eventLog = await import("../../../src/lib/diagnostics/eventLog");
+    await mod.logFiles.init();
+    await vi.waitFor(() => {
+      eventLog.record("ws.open", { generation: 1 }, Date.now());
+      return mod.logFiles.flush().then(() => expect(writeTextFile).toHaveBeenCalled());
+    });
+    const written = new Set<string>();
+    writeTextFile.mockImplementation((path: string) => {
+      written.add(path);
+      return Promise.resolve(undefined);
+    });
+    // The first file holds one line; a big batch forces a new file, whose
+    // rotation read is where a clear can land.
+    let releaseRotation!: () => void;
+    readDir.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          releaseRotation = () => resolve([]);
+        }),
+    );
+    let at = Date.now();
+    const codes = ["ws.open", "ws.ready", "ws.closed", "ws.connecting"] as const;
+    for (let i = 0; i < 24_000; i++) {
+      at += 2_100;
+      eventLog.record(codes[i % codes.length]!, { generation: i }, at);
+    }
+    const flushing = mod.logFiles.flush();
+    await vi.waitFor(() => expect(releaseRotation).toBeTypeOf("function"));
+    eventLog.clearEventLog();
+    readDir.mockImplementation(() =>
+      Promise.resolve([...written].map((p) => ({ name: p.split("/").pop(), isDirectory: false }))),
+    );
+    releaseRotation();
+    await flushing;
+    await mod.logFiles.flush();
+
+    expect([...written].every((p) => /\/events-[^/]+\.jsonl$/.test(p))).toBe(true);
+    const removed = new Set(remove.mock.calls.map((call) => call[0] as string));
+    for (const path of written) expect(removed.has(path)).toBe(true);
+  });
+});

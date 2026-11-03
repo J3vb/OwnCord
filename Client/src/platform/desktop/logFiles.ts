@@ -108,14 +108,18 @@ async function flushEvents(): Promise<void> {
   if (eventBuffer.length === 0 || !logDir) return;
   const lines = eventBuffer.join("\n") + "\n";
   eventBuffer = [];
-  if (eventFile === null || eventBytes + lines.length > EVENT_FILE_BYTES) {
-    eventFile = newEventFileName();
+  // The name is fixed before any await, so a clear that lands meanwhile cannot
+  // change where this batch goes; the clear runs after it on the write chain.
+  let file = eventFile;
+  if (file === null || eventBytes + lines.length > EVENT_FILE_BYTES) {
+    file = newEventFileName();
+    eventFile = file;
     eventBytes = 0;
     await rotateOldFiles();
   }
   eventBytes += lines.length;
   try {
-    await writeTextFile(`${logDir}/${eventFile}`, lines, { append: true });
+    await writeTextFile(`${logDir}/${file}`, lines, { append: true });
   } catch (err) {
     log.error("event flush failed", err);
   }
@@ -127,11 +131,16 @@ function onEventLine(line: string): void {
   scheduleFlush();
 }
 
-/** Delete the events files only (the event log was turned off). */
-async function clearEventFiles(): Promise<void> {
+/** Delete the events files only (the event log was turned off). Runs on the
+ *  write chain, after any write already in flight, so nothing lands after it. */
+function clearEventFiles(): Promise<void> {
   eventBuffer = [];
+  writeChain = writeChain.then(deleteEventFiles, deleteEventFiles);
+  return writeChain;
+}
+
+async function deleteEventFiles(): Promise<void> {
   eventFile = null;
-  await writeChain;
   if (!logDir) return;
   try {
     for (const entry of await readDir(logDir)) {
