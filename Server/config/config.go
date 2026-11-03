@@ -2,6 +2,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -13,6 +14,7 @@ import (
 
 	goyaml "go.yaml.in/yaml/v3"
 
+	"github.com/J3vb/OwnCord/Server/clientip"
 	"github.com/J3vb/OwnCord/Server/storage"
 )
 
@@ -510,6 +512,8 @@ server:
   #                           # Never list client networks here: a range that covers
   #                           # clients degrades per-client rate limiting and lets
   #                           # covered clients influence their own rate-limit key.
+  #                           # An entry that covers every address (0.0.0.0/0, ::/0)
+  #                           # is refused and the server will not start.
   # admin_allowed_cidrs:      # CIDRs allowed to access /admin (default: private networks only)
   #   - "127.0.0.0/8"
   #   - "::1/128"
@@ -803,7 +807,25 @@ func loadBytesWith(raw []byte, cfgPath string, overrides map[string]any) (*Confi
 	if err := normalizeUploadExtensions(&cfg.Upload); err != nil {
 		return nil, err
 	}
+	if err := checkTrustedProxies(cfg.Server.TrustedProxies); err != nil {
+		return nil, err
+	}
 	return &cfg, nil
+}
+
+// ErrCatchAllTrustedProxy marks a server.trusted_proxies entry that covers
+// every address. The load fails rather than skipping the entry: skipping it
+// would fold every client behind the proxy into one rate-limit bucket, while
+// keeping it would let each client choose the address it is limited and
+// audited by.
+var ErrCatchAllTrustedProxy = errors.New("server.trusted_proxies must list only proxy hops")
+
+func checkTrustedProxies(cidrs []string) error {
+	if entry, found := clientip.FirstCatchAll(cidrs); found {
+		return fmt.Errorf("%w: entry %q covers every address; list each proxy's own address instead (e.g. 10.0.0.2/32)",
+			ErrCatchAllTrustedProxy, entry)
+	}
+	return nil
 }
 
 // normalizeUploadExtensions fails the load on a bad entry: skipping it could

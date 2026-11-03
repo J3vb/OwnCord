@@ -12,6 +12,8 @@ server:
   #                           # Never list client networks here: a range that covers
   #                           # clients degrades per-client rate limiting and lets
   #                           # covered clients influence their own rate-limit key.
+  #                           # An entry that covers every address (0.0.0.0/0, ::/0)
+  #                           # is refused and the server will not start.
   # admin_allowed_cidrs:      # CIDRs allowed to access /admin (default: private networks only)
   #   - "127.0.0.0/8"
   #   - "::1/128"

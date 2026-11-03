@@ -2,6 +2,7 @@ package config_test
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -971,4 +972,49 @@ func TestLoadEventPersistenceBoundsAreClamped(t *testing.T) {
 	if ep.BatchFlushMs != 100 {
 		t.Errorf("batch_flush_ms = %d after 0 (below the minimum of 1), want the default 100", ep.BatchFlushMs)
 	}
+}
+
+// TestLoadRefusesCatchAllTrustedProxy pins that a trusted-proxy entry covering
+// every address fails the load from either the file or the environment, and
+// that ordinary proxy hops still load.
+func TestLoadRefusesCatchAllTrustedProxy(t *testing.T) {
+	write := func(t *testing.T, body string) string {
+		t.Helper()
+		cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+		if err := os.WriteFile(cfgPath, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return cfgPath
+	}
+
+	for _, entry := range []string{"0.0.0.0/0", "::/0", "::ffff:0.0.0.0/96"} {
+		t.Run("file "+entry, func(t *testing.T) {
+			cfgPath := write(t, "server:\n  trusted_proxies:\n    - \"10.0.0.2/32\"\n    - \""+entry+"\"\n")
+			_, err := config.Load(cfgPath)
+			if !errors.Is(err, config.ErrCatchAllTrustedProxy) {
+				t.Fatalf("Load() error = %v, want ErrCatchAllTrustedProxy", err)
+			}
+			if !strings.Contains(err.Error(), entry) {
+				t.Errorf("error %q does not name the entry %q", err, entry)
+			}
+		})
+	}
+
+	t.Run("environment", func(t *testing.T) {
+		t.Setenv("OWNCORD_SERVER_TRUSTED_PROXIES", "0.0.0.0/0")
+		_, err := config.Load(write(t, "server:\n  name: \"x\"\n"))
+		if !errors.Is(err, config.ErrCatchAllTrustedProxy) {
+			t.Fatalf("Load() error = %v, want ErrCatchAllTrustedProxy", err)
+		}
+	})
+
+	t.Run("proxy hops load", func(t *testing.T) {
+		cfg, err := config.Load(write(t, "server:\n  trusted_proxies:\n    - \"10.0.0.2/32\"\n    - \"172.16.0.0/12\"\n    - \"fd00::1/128\"\n"))
+		if err != nil {
+			t.Fatalf("Load() error = %v", err)
+		}
+		if len(cfg.Server.TrustedProxies) != 3 {
+			t.Errorf("TrustedProxies = %v, want the three entries", cfg.Server.TrustedProxies)
+		}
+	})
 }
