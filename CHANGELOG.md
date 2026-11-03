@@ -54,6 +54,7 @@ and only when it changes something a contributor or fork holder must do
 
 ### Added
 
+- **Settings → Account → Signed-in devices** now also lists your API tokens (label, created, last used) with a Revoke button each. Changing your password offers "Also revoke my API tokens", ticked by default when you have any. `docs/security.md` now spells out what a password change, account recovery and sign-out-everywhere each end.
 - On Android, your camera now pauses while the app is in the background, so others see your avatar instead of a frozen picture, and turns back on when you return.
 - Your own camera (call tiles, pop-out and the settings preview) now shows you exactly as others see you, with your right hand on the right; before, it was always mirrored. A new "Mirror my camera preview" switch in Voice & Video (off by default) brings the mirror back. Others always see you the right way round.
 - While you are in a DM call, that person's avatar stays in the server rail under Home with a green call badge, so you can see the call and get back to it in one click from any server.
@@ -64,6 +65,7 @@ and only when it changes something a contributor or fork holder must do
 ### Fixed
 
 - The first letters typed right after clicking Search or pressing Ctrl+K landed in the message box. They now go into the search or the quick switcher. Tabbing through the channel header no longer opens Search; click it, press Enter on it or start typing.
+- In calls, cameras and screen shares could freeze for a few seconds every five minutes (each time the call's encryption key changed) and when someone left. A new key now reaches everyone before anyone sends with it, so the picture keeps going. Needs the server and every client in the call on this version; otherwise calls behave as before.
 - Role colours show again on names. A colour that is hard to read on the theme (for example pure red or blurple on Dark) used to turn the name plain white or black; now it keeps its colour and only gets lighter or darker until it reads well. With High Contrast on, a colour that does not read stays plain text as before.
 - On Linux, someone else's camera could stay black for the whole call when it started just as you turned your own camera on or off. It now shows as soon as it arrives.
 - Android: the app icon's "OC" logo ran off the edges of the home-screen icon. It now sits inside the icon shape on every launcher, and Android 13+ themed icons show a single-colour OC.
@@ -77,6 +79,12 @@ and only when it changes something a contributor or fork holder must do
 - Voice Activity with the sensitivity slider set by hand let typing, a fan or breathing through, and after you spoke it stayed open through them. The slider now also asks the noise filter whether it hears a voice, as automatic sensitivity already did.
 
 - Clicking a channel right after a new message arrived sometimes opened the channel below it: a Mark Server as Read icon appeared in the header and pushed the channel list down. The icon is gone, so the list no longer moves; Mark as Read stays in the server name menu and on Shift+Esc.
+- A forwarded file could, rarely, lose its contents to the server's 15-minute storage cleanup in the moment before the forward was saved, and then show as missing. The cleanup now leaves it alone.
+
+### Under the hood
+
+- Database change 090: three indexes for attachment lookups. The first start after the update builds them, which takes a little longer on a large database.
+- The storage cleanup, the admin Storage page's leftover scan and the orphaned-upload sweep look files up by index: about 19 s down to 0.3 s per pass at 100,000 files, so the leftover scan no longer answers "server busy" on a big upload folder.
 
 ## v2.7.0
 

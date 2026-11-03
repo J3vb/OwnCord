@@ -22,7 +22,12 @@ export const mockMembers = new Map<number, { identityPublicKey: string | null }>
 
 export const mockVoiceState = {
   voiceUsers: new Map<number, Map<number, unknown>>(),
+  peerKeySlots: new Set<number>(),
 };
+
+export const mockStageKey = vi.fn(async (_key: string, _slot: number) => undefined);
+export const mockUseKey = vi.fn(async (_key: string, _slot: number) => undefined);
+export const mockUseSlot = vi.fn((_slot: number) => true);
 
 export function livekitClientMock() {
   return {
@@ -30,6 +35,9 @@ export function livekitClientMock() {
     ExternalE2EEKeyProvider: vi.fn(function () {
       return {
         setKey: mockSetKey,
+        stageKey: mockStageKey,
+        useKey: mockUseKey,
+        useSlot: mockUseSlot,
         getKeys: vi.fn().mockReturnValue([]),
       };
     }),

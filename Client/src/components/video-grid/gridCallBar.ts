@@ -432,7 +432,12 @@ export function createGridCallBar(st: GridState, api: GridApi) {
       log.debug("Stream stats unavailable", { tileId, err });
     }
     // Loaded on first use: only a watched stream needs the readout.
-    st.infoModule ??= await import("./streamInfo");
+    try {
+      st.infoModule ??= await import("./streamInfo");
+    } catch (err) {
+      log.debug("Stream info unavailable", { tileId, err });
+      return;
+    }
     const { chipText, renderStats, streamInfo } = st.infoModule;
     if (st.statsTile !== tileId || st.cells.get(tileId) !== entry) return;
     const info = sample !== null ? streamInfo(sample, entry.prevSample) : sizeOf(entry.video);

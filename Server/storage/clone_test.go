@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func newCloneStorage(t *testing.T) (*Storage, string) {
@@ -131,6 +132,59 @@ func TestClone_LinkAndCopyFallback(t *testing.T) {
 			if err := s.Clone(ctx, bad, "dst"); err == nil {
 				t.Errorf("Clone from %q succeeded", bad)
 			}
+		}
+	})
+}
+
+// A hard link shares the source inode, so without a fresh stamp the new name
+// looks as old as the source to storage reconciliation before its row exists.
+func TestClone_LinkGetsFreshModTime(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("linked clone is stamped now", func(t *testing.T) {
+		s, dir := newCloneStorage(t)
+		old := time.Now().Add(-48 * time.Hour)
+		if err := os.Chtimes(filepath.Join(dir, "src"), old, old); err != nil {
+			t.Fatal(err)
+		}
+		before := time.Now().Add(-time.Minute)
+		if err := s.Clone(ctx, "src", "dst"); err != nil {
+			t.Fatalf("Clone: %v", err)
+		}
+		fi, err := os.Stat(filepath.Join(dir, "dst"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if fi.ModTime().Before(before) {
+			t.Errorf("clone mtime %v, want after %v", fi.ModTime(), before)
+		}
+	})
+
+	t.Run("a stamp failure drops the link and copies instead", func(t *testing.T) {
+		s, dir := newCloneStorage(t)
+		calls := 0
+		oldCh := chtimesFile
+		chtimesFile = func(string, time.Time, time.Time) error {
+			calls++
+			return errors.New("read-only inode")
+		}
+		t.Cleanup(func() { chtimesFile = oldCh })
+		if err := s.Clone(ctx, "src", "dst"); err != nil {
+			t.Fatalf("Clone: %v", err)
+		}
+		if calls != 1 {
+			t.Errorf("chtimes calls = %d, want 1", calls)
+		}
+		if got := readStored(t, dir, "dst"); got != "forwarded bytes" {
+			t.Errorf("dst = %q", got)
+		}
+		a, errA := os.Stat(filepath.Join(dir, "src"))
+		b, errB := os.Stat(filepath.Join(dir, "dst"))
+		if errA != nil || errB != nil {
+			t.Fatal(errA, errB)
+		}
+		if os.SameFile(a, b) {
+			t.Error("dst still shares the source inode, want a copy")
 		}
 	})
 }

@@ -58,6 +58,8 @@ export const accountText = defineCatalog("account", {
   "password.changed": "Password changed successfully.",
   "password.changeFailed": "Failed to change password.",
   "password.required": "Password is required.",
+  "password.revokeApiTokens":
+    "Also revoke my API tokens. Bots and scripts that use them stop working.",
 
   "totp.description": "Add an extra layer of security to your account.",
   "totp.enable": "Enable 2FA",
@@ -111,6 +113,15 @@ export const accountText = defineCatalog("account", {
   "devices.signOutEverywhereWarning":
     "This signs out every device, including this one. You will need to sign in again here.",
   "devices.signOutEverywhereFailed": "Failed to sign out everywhere.",
+
+  "apiTokens.title": "API tokens",
+  "apiTokens.description":
+    "Tokens that let bots and scripts act as you. Revoke any you no longer use or do not recognise.",
+  "apiTokens.detail": "Created {created} · Last used {used}",
+  "apiTokens.neverUsed": "never",
+  "apiTokens.revoke": "Revoke",
+  "apiTokens.revoked": "API token revoked. It can no longer be used.",
+  "apiTokens.revokeFailed": "Failed to revoke the API token.",
 
   "retention.sectionTitle": "Message Retention",
 

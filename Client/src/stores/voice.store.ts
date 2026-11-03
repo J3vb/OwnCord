@@ -150,6 +150,11 @@ export interface VoiceState {
    *  peerVerifications (that runs at key setup, after a list may have arrived).
    *  Reset at session end. Optional for the same fixture reason. */
   readonly peerVideoDecode?: ReadonlyMap<number, readonly string[]>;
+  /** Peers whose last `voice_e2ee_announce` said `key_slots`: they stage a new
+   *  room key in its own slot and switch to it a moment later. The key holder
+   *  rotates that way only when every peer is in here. Same writer and
+   *  lifetime as peerVideoDecode. */
+  readonly peerKeySlots?: ReadonlySet<number>;
   /** Whose screen share each member of the current channel watches, from
    *  their `voice_watching` frames (sorted user ids). Written only from the
    *  dispatcher's handler; removeVoiceUser drops a member, leaveVoiceChannel
@@ -191,6 +196,7 @@ const INITIAL_STATE: VoiceState = {
   encryptionDegraded: false,
   peerVerifications: new Map(),
   peerVideoDecode: new Map(),
+  peerKeySlots: new Set(),
   peerWatching: new Map(),
   localGateSpeaking: null,
 };
@@ -259,6 +265,7 @@ export function resetVoiceStore(): void {
     encryptionDegraded: false,
     peerVerifications: new Map(),
     peerVideoDecode: new Map(),
+    peerKeySlots: new Set(),
     peerWatching: new Map(),
   }));
 }
@@ -502,6 +509,7 @@ export function leaveVoiceChannel(): void {
       encryptionDegraded: false,
       shareDenied: false,
       peerVideoDecode: new Map<number, readonly string[]>(),
+      peerKeySlots: new Set<number>(),
       peerWatching: new Map<number, readonly number[]>(),
     };
     const channelId = prev.currentChannelId;
@@ -832,6 +840,19 @@ export function setPeerVideoDecode(userId: number, list: readonly string[] | und
     const next = new Map(current);
     next.set(userId, [...list]);
     return { ...prev, peerVideoDecode: next };
+  });
+}
+
+/** Record whether a peer's announce said `key_slots`. Single writer: the
+ *  dispatcher's voice_e2ee_announce handler. */
+export function setPeerKeySlots(userId: number, keySlots: boolean): void {
+  voiceStore.setState((prev) => {
+    const current = prev.peerKeySlots;
+    if ((current?.has(userId) ?? false) === keySlots) return prev;
+    const next = new Set(current);
+    if (keySlots) next.add(userId);
+    else next.delete(userId);
+    return { ...prev, peerKeySlots: next };
   });
 }
 

@@ -95,6 +95,7 @@ export const shards = {
     "src/lib/voice/shareDiagnostics.ts",
     "src/lib/voice/shareFlags.ts",
     "src/features/voice/e2eeWorker.ts",
+    "src/features/voice/slotKeyProvider.ts",
     "src/features/voice/native/counters.ts",
     "src/features/voice/native/devices.ts",
     "src/features/voice/native/micProbe.ts",
@@ -193,6 +194,7 @@ export const shards = {
     "src/features/direct-messages/wsHandlers.ts",
     "src/lib/voice/roomEventHandlers.ts",
     "src/lib/net/e2eeCrypto.ts",
+    "src/lib/net/keyPlacement.ts",
     "src/lib/net/legacyKeyMigration.ts",
   ],
   "transport-auth-4": [

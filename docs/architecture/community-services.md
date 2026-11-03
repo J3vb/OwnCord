@@ -127,7 +127,11 @@ member's own upload limit, set by a MANAGE_SERVER holder on the admin Storage pa
 part of the per-user counter row and shares its ownership, erasure (deleted with the
 account) and backup behaviour; no new data class. **Amended 2026-10-30 (unread
 counts):** `089_messages_live_index.sql` adds the index `idx_messages_channel_live` on
-`messages`; it stores no data of its own, so no table, column or data class. Other historical
+`messages`; it stores no data of its own, so no table, column or data class. **Amended
+2026-11-03 (attachment lookups):** `090_attachment_lookup_indexes.sql` adds the indexes
+`idx_attachments_stored_as` and `idx_attachments_uploaded_at` on `attachments` and
+`idx_messages_deleted` on `messages`; like 089 they store no data of their own, so no
+table, column or data class. Other historical
 status statements retain their `cbebd37c` baseline.
 **Amended 2026-10-21 (polls):** `073_polls.sql` adds `polls`, `poll_answers` and
 `poll_votes` (WP 6.9b). A poll is an ordinary message of its author whose text is a

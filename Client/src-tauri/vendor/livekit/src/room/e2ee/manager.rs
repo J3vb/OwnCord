@@ -57,6 +57,8 @@ struct ManagerInner {
     dc_encryption_enabled: bool,
     frame_cryptors: HashMap<(ParticipantIdentity, TrackSid), FrameCryptor>,
     data_packet_cryptor: Option<DataPacketCryptor>,
+    // OWNCORD-PATCH (key slots): the key index every local sender encrypts with.
+    sender_key_index: i32,
 }
 
 #[derive(Clone)]
@@ -82,6 +84,7 @@ impl E2eeManager {
                 options,
                 frame_cryptors: HashMap::new(),
                 data_packet_cryptor,
+                sender_key_index: 0, // OWNCORD-PATCH (key slots)
             })),
             state_changed: Default::default(),
         }
@@ -198,7 +201,25 @@ impl E2eeManager {
         self.setup_cryptor(&frame_cryptor);
 
         let mut inner = self.inner.lock();
+        // OWNCORD-PATCH (key slots): a set_sender_key_index that ran after
+        // setup_rtp_sender but before this insert did not see this cryptor.
+        frame_cryptor.set_key_index(inner.sender_key_index);
         inner.frame_cryptors.insert((identity, publication.sid()), frame_cryptor.clone());
+    }
+
+    // OWNCORD-PATCH (key slots): not in upstream livekit 0.10.0.
+    /// Encrypt every local track, and every one published later, with the
+    /// shared key at `index`. Receivers decrypt by the index each frame names,
+    /// so a key staged in another index first reaches every peer before the
+    /// sender switches to it.
+    pub fn set_sender_key_index(&self, local_identity: &ParticipantIdentity, index: i32) {
+        let mut inner = self.inner.lock();
+        inner.sender_key_index = index;
+        for ((identity, _), cryptor) in inner.frame_cryptors.iter() {
+            if identity == local_identity {
+                cryptor.set_key_index(index);
+            }
+        }
     }
 
     fn setup_cryptor(&self, frame_cryptor: &FrameCryptor) {
@@ -278,6 +299,7 @@ impl E2eeManager {
             options.key_provider.handle.clone(),
             sender,
         );
+        frame_cryptor.set_key_index(inner.sender_key_index); // OWNCORD-PATCH (key slots)
         frame_cryptor.set_enabled(inner.enabled);
         frame_cryptor
     }

@@ -167,6 +167,54 @@ func (q *Queries) ListAPITokens(ctx context.Context) ([]ListAPITokensRow, error)
 	return items, nil
 }
 
+const listUserActiveAPITokens = `-- name: ListUserActiveAPITokens :many
+SELECT id, label, created_at, last_used_at, expires_at
+FROM api_tokens
+WHERE user_id = ?
+  AND revoked_at IS NULL
+  AND (expires_at IS NULL OR strftime('%s', expires_at) > strftime('%s', 'now'))
+ORDER BY id DESC
+`
+
+type ListUserActiveAPITokensRow struct {
+	ID         int64   `json:"id"`
+	Label      string  `json:"label"`
+	CreatedAt  string  `json:"createdAt"`
+	LastUsedAt *string `json:"lastUsedAt"`
+	ExpiresAt  *string `json:"expiresAt"`
+}
+
+// The account's own live tokens for its Sessions screen. Never selects
+// token_hash. Revoked and expired rows are left out: they no longer work.
+func (q *Queries) ListUserActiveAPITokens(ctx context.Context, userID int64) ([]ListUserActiveAPITokensRow, error) {
+	rows, err := q.db.QueryContext(ctx, listUserActiveAPITokens, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListUserActiveAPITokensRow{}
+	for rows.Next() {
+		var i ListUserActiveAPITokensRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Label,
+			&i.CreatedAt,
+			&i.LastUsedAt,
+			&i.ExpiresAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const revokeAPIToken = `-- name: RevokeAPIToken :execresult
 UPDATE api_tokens SET revoked_at = datetime('now')
 WHERE id = ? AND revoked_at IS NULL
@@ -183,6 +231,22 @@ WHERE label = ? AND revoked_at IS NULL
 
 func (q *Queries) RevokeAPITokenByLabel(ctx context.Context, label string) (sql.Result, error) {
 	return q.db.ExecContext(ctx, revokeAPITokenByLabel, label)
+}
+
+const revokeOwnAPIToken = `-- name: RevokeOwnAPIToken :execresult
+UPDATE api_tokens SET revoked_at = datetime('now')
+WHERE id = ? AND user_id = ? AND revoked_at IS NULL
+`
+
+type RevokeOwnAPITokenParams struct {
+	ID     int64 `json:"id"`
+	UserID int64 `json:"userId"`
+}
+
+// Revokes one token only when it belongs to the given account, so a caller
+// cannot touch another account's token by guessing its id.
+func (q *Queries) RevokeOwnAPIToken(ctx context.Context, arg RevokeOwnAPITokenParams) (sql.Result, error) {
+	return q.db.ExecContext(ctx, revokeOwnAPIToken, arg.ID, arg.UserID)
 }
 
 const revokeUserAPITokens = `-- name: RevokeUserAPITokens :execresult
