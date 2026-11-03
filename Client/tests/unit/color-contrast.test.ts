@@ -161,6 +161,22 @@ describe("clampTextColor", () => {
     expect(clampTextColor(parseColor("#ff0000")!, surfaces)).toBeNull();
   });
 
+  it("moves a grey along its own lightness and stays grey", () => {
+    for (const surfaces of Object.values(THEMES)) {
+      const out = clampTextColor(parseColor("#808080")!, surfaces)!;
+      expect(out[0]).toBe(out[1]);
+      expect(out[1]).toBe(out[2]);
+      for (const s of surfaces) expect(contrastRatio(out, s)).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  it("reaches pure white or black when only that reads", () => {
+    // On #747474 at 4.65:1 only #ffffff passes (#fefefe reads 4.63:1), and
+    // #7b7b7b's lightness is off the 0.005 grid.
+    const out = clampTextColor(parseColor("#7b7b7b")!, [parseColor("#747474")!], 4.65);
+    expect(out === null ? null : toHex(out)).toBe("#ffffff");
+  });
+
   it("fails closed with nothing to measure", () => {
     expect(clampTextColor(parseColor("#ff0000")!, [])).toBeNull();
   });

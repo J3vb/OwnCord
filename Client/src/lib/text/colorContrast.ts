@@ -165,8 +165,7 @@ export function clampTextColor(
   const steps = Math.ceil(1 / LIGHTNESS_STEP);
   for (let i = 1; i <= steps; i++) {
     const delta = i * LIGHTNESS_STEP;
-    for (const l of [l0 + delta, l0 - delta]) {
-      if (l < 0 || l > 1) continue;
+    for (const l of [Math.min(1, l0 + delta), Math.max(0, l0 - delta)]) {
       const candidate = fromHsl([h, s, l]);
       if (reads(candidate)) return candidate;
     }

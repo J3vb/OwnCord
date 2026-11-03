@@ -215,6 +215,16 @@ describe("readableRoleColor (B9 Q13 role clamp)", () => {
     }
   });
 
+  it("leaves role mention pills to their CSS colour on a re-clamp", () => {
+    setSurfaces(DARK);
+    const pill = document.createElement("span");
+    pill.className = "mention mention-role";
+    pill.dataset["roleColor"] = "#ff0000";
+    document.body.appendChild(pill);
+    reclampRoleColors();
+    expect(pill.style.color).toBe("");
+  });
+
   it("re-clamps rendered names when High Contrast is toggled", () => {
     setSurfaces(DARK);
     const name = document.createElement("span");

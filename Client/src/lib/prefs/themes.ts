@@ -338,7 +338,8 @@ export function readableRoleColor(color: string): string {
 /** Re-clamp every rendered role colour against the theme now applied. */
 export function reclampRoleColors(): void {
   roleTextCache.clear();
-  for (const el of document.querySelectorAll<HTMLElement>("[data-role-color]")) {
+  // Role mention pills colour themselves from --role-pill in CSS.
+  for (const el of document.querySelectorAll<HTMLElement>("[data-role-color]:not(.mention-role)")) {
     el.style.color = readableRoleColor(el.dataset["roleColor"] ?? "");
   }
 }
