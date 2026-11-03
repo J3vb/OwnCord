@@ -27,6 +27,7 @@ type userStore interface {
 	UpdateUserPassword(ctx context.Context, userID int64, newPasswordHash string) error
 	UpdateUserIdentityKey(ctx context.Context, id int64, key *string) error
 	DeleteOtherSessions(ctx context.Context, userID, keepSessionID int64) (int64, error)
+	RevokeUserAPITokens(ctx context.Context, userID int64) (int64, error)
 	SignOutEverywhere(ctx context.Context, userID int64) (sessions, tokens int64, err error)
 	DeleteSessionByID(ctx context.Context, sessionID, userID int64) error
 	ListUserSessions(ctx context.Context, userID int64) ([]db.Session, error)
@@ -293,16 +294,19 @@ func (s *UserService) UpdateIdentityKey(ctx context.Context, userID int64, key s
 }
 
 // ChangePasswordResult reports a completed password change. RevokeFailed means
-// the password committed but other sessions could not be revoked: surface it as a
-// warning, never a 5xx, since the old password is already dead and a "failed"
-// answer would walk the user into retrying with it and tripping the lockout.
+// the password committed but other sessions, or the API tokens the caller asked
+// to revoke, could not be revoked: surface it as a warning, never a 5xx, since
+// the old password is already dead and a "failed" answer would walk the user
+// into retrying with it and tripping the lockout.
 type ChangePasswordResult struct {
 	SessionsRevoked int64
+	TokensRevoked   int64
 	RevokeFailed    bool
 }
 
-// ChangePassword updates the user's password and revokes other sessions.
-func (s *UserService) ChangePassword(ctx context.Context, userID int64, newPasswordHash string, keepSessionID int64) (ChangePasswordResult, error) {
+// ChangePassword updates the user's password and revokes other sessions, and
+// every API token of the account too when revokeTokens is set.
+func (s *UserService) ChangePassword(ctx context.Context, userID int64, newPasswordHash string, keepSessionID int64, revokeTokens bool) (ChangePasswordResult, error) {
 	if err := s.st.UpdateUserPassword(ctx, userID, newPasswordHash); err != nil {
 		return ChangePasswordResult{}, fmt.Errorf("%w: failed to update password: %w", ErrInternal, err)
 	}
@@ -324,9 +328,27 @@ func (s *UserService) ChangePassword(ctx context.Context, userID int64, newPassw
 			res.RevokeFailed = true
 		}
 	}
-	db.WriteAudit(tailCtx, s.st, userID, "password_change", "user", userID, "password changed")
+	if revokeTokens {
+		tokens, tokErr := s.st.RevokeUserAPITokens(tailCtx, userID)
+		if tokErr != nil {
+			slog.Error("UserService.ChangePassword RevokeUserAPITokens", "err", tokErr, "user_id", userID)
+			// Same single retry as the sessions above.
+			tokens, tokErr = s.st.RevokeUserAPITokens(tailCtx, userID)
+		}
+		if tokErr != nil {
+			res.RevokeFailed = true
+		} else {
+			res.TokensRevoked = tokens
+		}
+	}
+	detail := "password changed"
+	if res.TokensRevoked > 0 {
+		detail = fmt.Sprintf("password changed (%d API tokens revoked)", res.TokensRevoked)
+	}
+	db.WriteAudit(tailCtx, s.st, userID, "password_change", "user", userID, detail)
 	slog.Info("password changed", "user_id", userID,
-		"sessions_revoked", res.SessionsRevoked, "revoke_failed", res.RevokeFailed)
+		"sessions_revoked", res.SessionsRevoked, "api_tokens_revoked", res.TokensRevoked,
+		"revoke_failed", res.RevokeFailed)
 	return res, nil
 }
 
