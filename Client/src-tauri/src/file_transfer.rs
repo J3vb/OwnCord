@@ -6,17 +6,24 @@
 //! host reads the files itself: a drop or a clipboard read stages the regular
 //! files it names, the page gets their names and sizes, and reads each one
 //! once by its token. The page can never name a path of its own.
+//!
+//! The Android app stages the files another app shared the same way
+//! (`share_in.rs`), so only the drop and clipboard halves are Linux-only.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+#[cfg(target_os = "linux")]
 use std::time::Duration;
 
 use serde::Serialize;
-use tauri::{AppHandle, DragDropEvent, Emitter, Manager, State};
+use tauri::State;
+#[cfg(target_os = "linux")]
+use tauri::{AppHandle, DragDropEvent, Emitter, Manager};
 
 use crate::sync::lock;
 
+#[cfg(target_os = "linux")]
 /// The event the page listens on for drags from the file manager.
 pub const DRAG_EVENT: &str = "native-file-drag";
 
@@ -24,6 +31,7 @@ pub const DRAG_EVENT: &str = "native-file-drag";
 /// far below it.
 const MAX_READ_BYTES: u64 = 1024 * 1024 * 1024;
 
+#[cfg(target_os = "linux")]
 /// How long a clipboard read may take before the paste falls back to text.
 const CLIPBOARD_TIMEOUT: Duration = Duration::from_secs(3);
 
@@ -87,6 +95,7 @@ impl StagedFiles {
     }
 }
 
+#[cfg(target_os = "linux")]
 /// Local paths in a `text/uri-list` or `x-special/gnome-copied-files` body.
 /// Comment lines, the gnome "copy"/"cut" verb and non-file URIs are skipped.
 pub fn paths_from_uri_list(text: &str) -> Vec<PathBuf> {
@@ -97,6 +106,7 @@ pub fn paths_from_uri_list(text: &str) -> Vec<PathBuf> {
         .collect()
 }
 
+#[cfg(target_os = "linux")]
 fn path_from_uri(uri: &str) -> Option<PathBuf> {
     let url = url::Url::parse(uri).ok()?;
     if url.scheme() != "file" {
@@ -110,6 +120,7 @@ fn path_from_uri(uri: &str) -> Option<PathBuf> {
     url.to_file_path().ok()
 }
 
+#[cfg(target_os = "linux")]
 #[derive(Clone, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 enum DragPayload {
@@ -125,6 +136,7 @@ enum DragPayload {
     Leave,
 }
 
+#[cfg(target_os = "linux")]
 /// Forward the main window's native drag events to the page, staging the
 /// files of a drop.
 pub fn on_drag_drop(app: &AppHandle, event: &DragDropEvent) {
@@ -177,6 +189,7 @@ pub async fn read_staged_file(
     Ok(tauri::ipc::Response::new(bytes))
 }
 
+#[cfg(target_os = "linux")]
 /// The files on the clipboard, copied from a file manager. Empty when the
 /// clipboard holds no files, so the paste stays text.
 #[tauri::command]
@@ -198,6 +211,7 @@ pub async fn clipboard_files(
     Ok(state.stage(paths_from_uri_list(&body)))
 }
 
+#[cfg(target_os = "linux")]
 /// Ask GTK for the clipboard's file list: `text/uri-list` first, then the
 /// gnome copied-files target some file managers offer alone. Runs on the GTK
 /// main thread; the answer goes to `tx` as a uri-list body.

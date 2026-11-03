@@ -392,6 +392,14 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       void badge.askNotificationPermissionOnce(desktop.notifier);
     });
 
+    // Shares from other apps (Android): the "Send to" sheet, then the
+    // picked channel's composer.
+    if (desktop.shareSheet.available) {
+      void import("../features/share/shareIn").then((share) => {
+        if (!st.tornDown) st.unsubscribers.push(share.startShareIn(desktop.shareSheet));
+      });
+    }
+
     // Short voice UI sounds on join/leave and mute/deafen. This module
     // statically imports stores the page already pulls in, so it rides the
     // MainPage chunk rather than splitting a new shared one off the entry.
