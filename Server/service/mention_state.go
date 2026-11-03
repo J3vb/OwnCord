@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"sync/atomic"
 
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/syncutil"
@@ -56,10 +57,79 @@ type mentionState struct {
 	// readStateNotifier delivers the read_state frame MoveReadPointer sends under
 	// mentionEmitMu; nil leaves it off.
 	readStateNotifier ReadStateNotifier
+	// mentionWorker is the single bounded worker owning every mention-badge write.
+	// Nil until the composition root starts it (app.startHub); then SendMessage
+	// resolves inline through bg. Atomic because it is started while other
+	// goroutines may already be sending.
+	mentionWorker atomic.Pointer[mentionWorker]
 }
 
 func newMentionState(st mentionStateStore, perms *PermissionService) *mentionState {
 	m := &mentionState{st: st, perms: perms}
 	m.mentionIDs, _ = st.(MentionIDStore)
 	return m
+}
+
+// StartMentionWorker creates and starts the bounded mention-badge worker and
+// routes SendMessage's bookkeeping through it. The root calls it once
+// (app.startHub); tests leave it uncalled for deterministic inline writes. ctx
+// bounds the loop; the returned func drains and stops it (App.Close's job).
+func (s *mentionState) StartMentionWorker(ctx context.Context) func(context.Context) {
+	w := newMentionWorker(s.st)
+	// Share the write+emit lock with the removal paths so a coalesced increment
+	// flush cannot be overtaken by an older decrement frame, or vice versa.
+	w.emitMu = &s.mentionEmitMu
+	// NewHub installed the hook before this runs; nil means no hub and no pushes.
+	if s.mentionNotifier != nil {
+		w.notify = s.mentionNotifier.NotifyMentionCount
+	}
+	// Start before publishing: run sets started synchronously, so a sender seeing
+	// the worker never observes it as not-started and drops a job.
+	w.run(ctx)
+	s.mentionWorker.Store(w)
+	return w.stopAndDrain
+}
+
+func (s *mentionState) mentionWorkerForSend() *mentionWorker {
+	if s == nil {
+		return nil
+	}
+	return s.mentionWorker.Load()
+}
+
+// FlushPendingMentionCounts applies any still-queued mention-badge job for msgIDs
+// before the caller reverses them. Removal paths (DeleteMessage, PurgeMessages,
+// erasure) must call it first: a message removed inside the coalesce window would
+// be reversed before its increment landed, and the later flush would raise a
+// phantom badge or, with the liveness guard, be skipped and take a genuine badge
+// with it. A no-op without a worker (the inline fallback already wrote the
+// increment). ctx only bounds the wait; the worker applies jobs on its own loop
+// context, so a canceled caller cannot drop the flush.
+func (s *mentionState) FlushPendingMentionCounts(ctx context.Context, msgIDs []int64) {
+	w := s.mentionWorkerForSend()
+	if w == nil {
+		return
+	}
+	w.flushMessages(ctx, msgIDs)
+}
+
+// flushChannelMentionCounts is FlushPendingMentionCounts for every queued job on
+// a channel (PurgeMessages cannot name the ids until after the purge).
+func (s *mentionState) flushChannelMentionCounts(ctx context.Context, channelID int64) {
+	w := s.mentionWorkerForSend()
+	if w == nil {
+		return
+	}
+	w.flushChannel(ctx, channelID)
+}
+
+// FlushAllPendingMentionCounts applies every queued job, ignoring the coalesce
+// window. Erasure calls it first since it deletes all of a user's messages and
+// cannot cheaply name them. A no-op without a worker.
+func (s *mentionState) FlushAllPendingMentionCounts(ctx context.Context) {
+	w := s.mentionWorkerForSend()
+	if w == nil {
+		return
+	}
+	w.flushNow(ctx)
 }
