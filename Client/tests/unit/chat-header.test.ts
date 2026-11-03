@@ -123,12 +123,22 @@ describe("ChatHeader", () => {
     expect(typed.defaultPrevented).toBe(true);
     expect(onSearchFocus).toHaveBeenLastCalledWith("h");
 
+    const altGr = new KeyboardEvent("keydown", {
+      key: "@",
+      ctrlKey: true,
+      altKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    searchInput.dispatchEvent(altGr);
+    expect(onSearchFocus).toHaveBeenLastCalledWith("@");
+
     for (const init of [{ key: "Tab" }, { key: " " }, { key: "k", ctrlKey: true }]) {
       const e = new KeyboardEvent("keydown", { ...init, bubbles: true, cancelable: true });
       searchInput.dispatchEvent(e);
       expect(e.defaultPrevented).toBe(false);
     }
-    expect(onSearchFocus).toHaveBeenCalledTimes(3);
+    expect(onSearchFocus).toHaveBeenCalledTimes(4);
   });
 
   it("does not add focus listener when onSearchFocus is not provided", () => {

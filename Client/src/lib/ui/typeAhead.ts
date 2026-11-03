@@ -9,6 +9,7 @@
  */
 
 import { Disposable } from "../disposable";
+import { isImeCommit } from "../text/ime";
 
 const TEXT_INPUT_TYPES = new Set(["text", "search"]);
 
@@ -16,6 +17,14 @@ function textField(target: EventTarget | null): HTMLInputElement | HTMLTextAreaE
   if (target instanceof HTMLTextAreaElement) return target.readOnly ? null : target;
   if (!(target instanceof HTMLInputElement) || target.readOnly || target.disabled) return null;
   return TEXT_INPUT_TYPES.has(target.type) ? target : null;
+}
+
+/** A key that types one character: no shortcut modifier, except AltGr
+ *  (reported as Ctrl+Alt on Windows) which types @, € and the like. */
+export function isTypedCharacter(e: KeyboardEvent): boolean {
+  if (e.key.length !== 1 || e.metaKey) return false;
+  const altGr = e.getModifierState("AltGraph") || (e.ctrlKey && e.altKey);
+  return altGr || (!e.ctrlKey && !e.altKey);
 }
 
 /** Start holding typed keys. `seed` is text already typed (the key that
@@ -26,7 +35,17 @@ export function holdTypeAhead(seed = ""): () => void {
   let held = seed;
 
   const onKeydown = (e: KeyboardEvent): void => {
-    if (e.isComposing || e.ctrlKey || e.metaKey || e.altKey || e.key.length !== 1) return;
+    if (isImeCommit(e)) return;
+    if (e.key === "Enter" || e.key === "Backspace") {
+      // Meant for the overlay too: Enter must not send a draft, and
+      // Backspace edits what is held.
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.key === "Backspace") held = held.slice(0, -1);
+      return;
+    }
+    if (!isTypedCharacter(e)) return;
     e.preventDefault();
     e.stopPropagation();
     held += e.key;

@@ -94,3 +94,19 @@ describe("holdTypeAhead", () => {
     expect(press(document.body, { key: "z" }).defaultPrevented).toBe(false);
   });
 });
+
+describe("holdTypeAhead: AltGr, Enter and Backspace", () => {
+  it("holds AltGr characters, swallows Enter and lets Backspace edit what is held", () => {
+    const release = holdTypeAhead();
+    press(document.body, { key: "a" });
+    press(document.body, { key: "@", ctrlKey: true, altKey: true });
+    press(document.body, { key: "x" });
+    expect(press(document.body, { key: "Backspace" }).defaultPrevented).toBe(true);
+    expect(press(document.body, { key: "Enter" }).defaultPrevented).toBe(true);
+    expect(press(document.body, { key: "Enter", ctrlKey: true }).defaultPrevented).toBe(false);
+    const input = field();
+    input.focus();
+    expect(input.value).toBe("a@");
+    release();
+  });
+});

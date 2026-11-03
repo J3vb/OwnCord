@@ -9,6 +9,8 @@ import type { ChannelType } from "@lib/types";
 import { messagingText } from "../../i18n/messaging";
 import { requestsText } from "../../i18n/requests";
 import { shellText } from "../../i18n/shell";
+import { isTypedCharacter } from "@lib/ui/typeAhead";
+import { isImeCommit } from "@lib/text/ime";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -305,11 +307,11 @@ export function buildChatHeader(opts: ChatHeaderOptions): {
     const onFocus = opts.onSearchFocus;
     searchInput.addEventListener("click", () => onFocus());
     searchInput.addEventListener("keydown", (e) => {
-      if (e.isComposing || e.ctrlKey || e.metaKey || e.altKey) return;
-      if (e.key === "Enter") {
+      if (isImeCommit(e)) return;
+      if (e.key === "Enter" && !e.ctrlKey && !e.metaKey && !e.altKey) {
         e.preventDefault();
         onFocus();
-      } else if (e.key.length === 1 && e.key !== " ") {
+      } else if (e.key !== " " && isTypedCharacter(e)) {
         e.preventDefault();
         onFocus(e.key);
       }
