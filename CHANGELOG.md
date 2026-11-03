@@ -66,6 +66,7 @@ and only when it changes something a contributor or fork holder must do
 
 ### Fixed
 
+- The first letters typed right after clicking Search or pressing Ctrl+K landed in the message box. They now go into the search or the quick switcher. Tabbing through the channel header no longer opens Search; click it, press Enter on it or start typing.
 - In calls, cameras and screen shares could freeze for a few seconds every five minutes (each time the call's encryption key changed) and when someone left. A new key now reaches everyone before anyone sends with it, so the picture keeps going. Needs the server and every client in the call on this version; otherwise calls behave as before.
 - Role colours show again on names. A colour that is hard to read on the theme (for example pure red or blurple on Dark) used to turn the name plain white or black; now it keeps its colour and only gets lighter or darker until it reads well. With High Contrast on, a colour that does not read stays plain text as before.
 - On Linux, someone else's camera could stay black for the whole call when it started just as you turned your own camera on or off. It now shows as soon as it arrives.

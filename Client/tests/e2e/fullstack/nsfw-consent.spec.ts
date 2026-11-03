@@ -96,7 +96,7 @@ test.describe("NSFW consent gate (real server)", () => {
     // Alternate entry points behind the gate: pins fetch nothing, and search
     // (server-wide only here) does not surface the labelled channel's text.
     await bob.getByTestId("pin-btn").click();
-    await bob.getByTestId("search-input").focus();
+    await bob.getByTestId("search-input").click();
     await bob.getByTestId("search-overlay-input").fill(secret);
     await expect(bob.locator(".search-overlay")).toBeVisible();
     await bob.waitForTimeout(1_500);
@@ -156,7 +156,7 @@ test.describe("NSFW consent gate (real server)", () => {
     expect(put).toBeGreaterThanOrEqual(0);
     expect(firstRead).toBeGreaterThan(put);
     // Control for the gated search above: with consent the same query finds it.
-    await bob.getByTestId("search-input").focus();
+    await bob.getByTestId("search-input").click();
     await bob.getByTestId("search-overlay-input").fill(secret);
     await expect(bob.locator(".search-result-item", { hasText: secret })).toHaveCount(1);
     await shot(bob, "04b-consented-search-finds-it");
