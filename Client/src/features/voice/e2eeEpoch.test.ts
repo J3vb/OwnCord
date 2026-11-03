@@ -18,6 +18,7 @@ vi.mock("../../lib/logger", () => ({
 }));
 
 import { E2EEEpoch } from "./e2eeEpoch";
+import type { KeyPlacement } from "../../lib/net/keyPlacement";
 
 const KEYPAIR = { privateKey: "priv", publicKey: "pub" } as unknown as CryptoKeyPair;
 const ROTATION_MS = 5 * 60 * 1000;
@@ -30,6 +31,7 @@ function setup() {
     generation: 0,
     keypair: KEYPAIR as CryptoKeyPair | null,
     peers: new Map<number, CryptoKey>([[2, "peer" as unknown as CryptoKey]]),
+    placement: { slot: 0, stage: false } as KeyPlacement,
   };
   const host = {
     isKeyHolder: () => state.keyHolder,
@@ -38,7 +40,8 @@ function setup() {
     getSessionGeneration: () => state.generation,
     getEcdhKeyPair: () => state.keypair,
     getPeerPublicKeys: () => state.peers,
-    applyRoomKey: vi.fn(async (_roomKey: Uint8Array) => true),
+    applyRoomKey: vi.fn(async (_roomKey: Uint8Array, _placement: KeyPlacement) => true),
+    rotationPlacement: () => state.placement,
     distributeRoomKey: vi.fn(
       async (_k: CryptoKeyPair, _r: Uint8Array, _p: Iterable<[number, CryptoKey]>) => {},
     ),
@@ -87,7 +90,15 @@ describe("rotateRoomKey", () => {
     expect(key).toEqual(new Uint8Array([9]));
     expect(epoch.epoch).toBe(1);
     expect(epoch.roomKey).toBe(key);
-    expect(host.applyRoomKey).toHaveBeenCalledWith(key);
+    expect(host.applyRoomKey).toHaveBeenCalledWith(key, { slot: 0, stage: false });
+  });
+
+  it("installs the key where the host places it and remembers that placement", async () => {
+    const { epoch, host, state } = setup();
+    state.placement = { slot: 1, stage: true };
+    const key = await epoch.rotateRoomKey();
+    expect(host.applyRoomKey).toHaveBeenCalledWith(key, { slot: 1, stage: true });
+    expect(epoch.roomKeyPlacement).toEqual({ slot: 1, stage: true });
   });
 
   it("returns null when the provider write was superseded", async () => {

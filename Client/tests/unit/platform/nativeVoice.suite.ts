@@ -108,6 +108,15 @@ export function describeNativeVoiceSuite(
       ]);
     });
 
+    check("hands a staged key its slot and switches sending to a slot", async () => {
+      await ctx.subject.setRoomKey("bW9jay1yb29tLWtleQ==", { slot: 1, stage: true });
+      await ctx.subject.useKeySlot(1);
+      expect(ctx.native.commands()).toEqual([
+        ["native_voice_set_key", { key: "bW9jay1yb29tLWtleQ==", slot: 1, stage: true }],
+        ["native_voice_use_key_slot", { slot: 1 }],
+      ]);
+    });
+
     check("connect resolves the host's session id, identity and frame socket", async () => {
       ctx.native.connectsAs(7, "user-42", "ws://127.0.0.1:9/token");
       await expect(ctx.subject.connect("ws://127.0.0.1:7881/lk", "tok", audio)).resolves.toEqual({

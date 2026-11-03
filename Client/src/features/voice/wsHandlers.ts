@@ -14,6 +14,7 @@ import {
   setModeratorDeafened,
   restateSelfVoiceState,
   setPeerVideoDecode,
+  setPeerKeySlots,
   setPeerWatching,
   noteWatchingResync,
   clearPeerWatching,
@@ -212,7 +213,10 @@ export function snapshotReadyVoice(): (ws: DispatchWs, payload: Payload<"ready">
       }
       // The same gap for the camera and share flags: an announce sent while
       // the socket was down never reached the server.
-      for (const uid of left) setPeerVideoDecode(uid, undefined);
+      for (const uid of left) {
+        setPeerVideoDecode(uid, undefined);
+        setPeerKeySlots(uid, false);
+      }
       void livekitSession().then(
         ({ handleParticipantLeft, reconcileVideoFlags, resendWatching }) => {
           for (const uid of left) void handleParticipantLeft(uid);
@@ -421,6 +425,7 @@ export function handleVoiceLeave(payload: Payload<"voice_leave">, clock: Reconne
   if (shouldTeardownSession && !loopMayOwn) leaveVoiceChannel();
   // A rejoin may come from another client; its own announce restates the list.
   setPeerVideoDecode(payload.user_id, undefined);
+  setPeerKeySlots(payload.user_id, false);
   void livekitSession().then(({ handleParticipantLeft, leaveVoice, isAutoReconnecting }) => {
     if (sameChannel) void handleParticipantLeft(payload.user_id);
     if (shouldTeardownSession && !isAutoReconnecting()) {
@@ -472,6 +477,11 @@ export function handleVoiceE2eeAnnounce(payload: Payload<"voice_e2ee_announce">)
     setPeerVideoDecode(payload.user_id, narrowVideoDecode(payload.video_decode));
   } catch (err) {
     log.warn("voice_e2ee_announce: could not record video_decode", err);
+  }
+  try {
+    setPeerKeySlots(payload.user_id, payload.key_slots === true);
+  } catch (err) {
+    log.warn("voice_e2ee_announce: could not record key_slots", err);
   }
   void livekitSession().then(({ handleE2EEAnnounce }) =>
     // The announcing device's own key rides along only when the server sent one
