@@ -76,6 +76,6 @@ class ExitInfoPlugin(private val activity: Activity) : Plugin(activity) {
       val message = ExitInfo.exitMessage(exit, now)
       if (ExitInfo.isCrash(exit.reason)) NativeLog.warn(message) else NativeLog.info(message)
     }
-    prefs.edit().putLong(NativeLog.KEY_LAST_EXIT_MS, fresh.last().timestampMs).apply()
+    prefs.edit().putLong(NativeLog.KEY_LAST_EXIT_MS, fresh.last().timestampMs).commit()
   }
 }

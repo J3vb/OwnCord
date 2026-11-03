@@ -53,7 +53,7 @@ class CallService : Service() {
     val notification = buildNotification()
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
       startForeground(NOTIFICATION_ID, notification)
-      NativeLog.info(ExitInfo.callServiceStarted(mic = true, camera = camera))
+      NativeLog.info(ExitInfo.callServiceStarted(granted(Manifest.permission.RECORD_AUDIO), camera))
       return
     }
     var types = 0
