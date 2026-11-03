@@ -228,15 +228,19 @@ func (h *Hub) endUnconfirmedVoice(ctx context.Context, e resumeCheck) {
 		return
 	}
 	h.voiceResumeChecks.done(e)
+	var holder *Client
 	for _, c := range h.clientsOf(e.userID) {
-		if !txn.clearExact(c, e.channelID, e.token) {
-			continue
+		if txn.clearExact(c, e.channelID, e.token) {
+			holder = c
+			break
 		}
-		tailCtx, cancelTail := h.sweepTailCtx(ctx)
-		defer cancelTail()
-		slog.Info("voice resume check: resumed membership never reached the SFU",
-			"user_id", e.userID, "channel_id", e.channelID)
-		h.finishVoiceLeave(tailCtx, txn, c, e.channelID, e.token, voiceLeaveReasonUnconfirmed)
+	}
+	if holder == nil {
 		return
 	}
+	tailCtx, cancelTail := h.sweepTailCtx(ctx)
+	defer cancelTail()
+	slog.Info("voice resume check: resumed membership never reached the SFU",
+		"user_id", e.userID, "channel_id", e.channelID)
+	h.finishVoiceLeave(tailCtx, txn, holder, e.channelID, e.token, voiceLeaveReasonUnconfirmed)
 }
