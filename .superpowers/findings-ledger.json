@@ -12457,7 +12457,7 @@
       "why": "ReferencedStoredFiles looks names up with stored_as IN (200 names), and attachments had no index on stored_as, so every chunk was a full table scan: the 15-minute reconciliation and the admin leftover scan cost files x rows / 200 (about 19 s at 100,000 files and rows), and the leftover scan answered 503 once it passed the 15 s request deadline. The orphan sweep and the stored-file-in-use check scanned the same table.",
       "repro": "Seed 100,000 attachment rows and 100,000 old files and run a reconciliation tick or the admin Scan leftovers: EXPLAIN QUERY PLAN shows SCAN attachments for each chunk.",
       "evidence": "Server/db/attachment_index_test.go (TestStoredNameLookups_PlanUsesStoredAsIndex, TestOrphanSweep_PlansSeekByMessage).",
-      "suggestedFix": "Migration 090 indexes attachments(stored_as), attachments(uploaded_at, id) and messages(id) WHERE deleted = 1; split the orphan sweep into an unlinked half and a deleted-message half; exempt the leftover routes from the request deadline.",
+      "suggestedFix": "Migration 090 indexes attachments(stored_as), attachments(uploaded_at, id) and messages(id) WHERE deleted = 1; split the orphan sweep into an unlinked half and a deleted-message half. With the index the leftover scan fits the 15 s request deadline.",
       "fix": {
         "commit": "pending",
         "test": "Server/db/attachment_index_test.go",

@@ -94,3 +94,15 @@ func TestOrphanSweep_PlansSeekByMessage(t *testing.T) {
 		}
 	}
 }
+
+// The admin and own upload lists page newest first; the sort must come from
+// idx_attachments_uploaded_at instead of sorting every row.
+func TestUploadListNewestFirst_PlanUsesUploadedAtIndex(t *testing.T) {
+	database := openMigratedMemory(t)
+	plan := queryPlan(t, database, `SELECT a.id FROM attachments a
+		LEFT JOIN messages m ON m.id = a.message_id
+		ORDER BY a.uploaded_at DESC, a.id DESC LIMIT ?`, 50)
+	if !planHas(plan, "idx_attachments_uploaded_at") || planHas(plan, "TEMP B-TREE") {
+		t.Errorf("newest-first page does not read idx_attachments_uploaded_at in order; plan:\n%s", strings.Join(plan, "\n"))
+	}
+}

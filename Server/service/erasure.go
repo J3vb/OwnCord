@@ -438,7 +438,11 @@ func (s *ErasureService) Reconcile(ctx context.Context, lister StorageLister, cu
 		}
 		// The batch lookup can be seconds old on a big directory: a row that
 		// named this file since then keeps it.
-		if named, err := s.st.ReferencedStoredFiles(ctx, []string{name}); err != nil || named[name] {
+		named, err := s.st.ReferencedStoredFiles(ctx, []string{name})
+		if err != nil {
+			return removed, fmt.Errorf("reconcile: re-check: %w", err)
+		}
+		if named[name] {
 			continue
 		}
 		if err := s.files.Delete(name); err != nil && !errors.Is(err, fs.ErrNotExist) {

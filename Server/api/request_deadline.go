@@ -82,8 +82,6 @@ var requestDeadlineExempt = []requestDeadlineExemption{
 		"full-archive build and download, under the archive progress deadline"},
 	{http.MethodGet, regexp.MustCompile(`^/admin/api/archive/download$`),
 		"link-token archive download, under the archive progress deadline"},
-	{"", regexp.MustCompile(`^/admin/api/storage/leftovers$`),
-		"leftover scan and cleanup: lists the whole upload directory and looks every file up, so it runs as long as the directory is large"},
 	{http.MethodPost, regexp.MustCompile(`^/admin/api/backup$`),
 		"database backup: runs as long as the database is large"},
 	{http.MethodGet, regexp.MustCompile(`^/admin/api/backups/[^/]+/download$`),
