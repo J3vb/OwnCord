@@ -33,6 +33,8 @@ class CallService : Service() {
       // A refused start (no permission, or the app was not in front) must not
       // take the call down: the call goes on, it just may stop in background.
       Log.w(TAG, "foreground start refused: $e")
+      NativeLog.load(this)
+      NativeLog.warn(ExitInfo.callServiceRefused(e))
       stopSelf()
       return START_NOT_STICKY
     }
@@ -41,6 +43,7 @@ class CallService : Service() {
   }
 
   override fun onDestroy() {
+    NativeLog.info(ExitInfo.callServiceStopped())
     wakeLock?.let { if (it.isHeld) it.release() }
     wakeLock = null
     super.onDestroy()
@@ -50,6 +53,7 @@ class CallService : Service() {
     val notification = buildNotification()
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
       startForeground(NOTIFICATION_ID, notification)
+      NativeLog.info(ExitInfo.callServiceStarted(mic = true, camera = camera))
       return
     }
     var types = 0
@@ -63,6 +67,12 @@ class CallService : Service() {
       throw SecurityException("no microphone or camera permission")
     }
     startForeground(NOTIFICATION_ID, notification, types)
+    NativeLog.info(
+      ExitInfo.callServiceStarted(
+        mic = types and ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE != 0,
+        camera = types and ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA != 0,
+      )
+    )
   }
 
   private fun granted(permission: String): Boolean =

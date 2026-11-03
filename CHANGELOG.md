@@ -61,6 +61,7 @@ and only when it changes something a contributor or fork holder must do
 - On a phone, the "+" in the message box now opens a sheet with Take photo, Gallery and Files, so you can take a photo with the camera and send it straight away, or pick several photos and videos from the gallery. On a computer "+" still opens the file picker.
 - The DM profile panel on a computer now also shows the person's @username (under a nickname) and custom status, and has a Report button.
 - On Linux, after the app closes unexpectedly, the next start adds what the system recorded about it (the crash report from `coredumpctl` and the kernel's crash line, where the system keeps them) to the app's log, so a support bundle shows what crashed. Nothing extra needs to be installed; without those tools it is skipped. The log also notes whether the camera or a screen share was running.
+- On Android 11 and newer, the next start adds to the app's log how the previous run ended (crash, killed for memory, not responding, stopped by you or by the system). The log also notes an app crash, the web view's page process going away, the call keeping alive in the background, and the app moving to the background and back, so a support bundle shows what happened. No message text, links or names are written.
 
 ### Fixed
 

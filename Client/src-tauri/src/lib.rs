@@ -16,6 +16,8 @@ mod deb_install;
 mod diagnostics;
 #[cfg(windows)]
 mod dpapi;
+#[cfg(target_os = "android")]
+mod exit_info;
 #[cfg(target_os = "linux")]
 mod exit_watch;
 mod external_content;
@@ -219,6 +221,7 @@ pub fn run() {
     let builder = builder
         .plugin(update_commands::android::init())
         .plugin(call_service::init())
+        .plugin(exit_info::init())
         .plugin(files::init())
         .plugin(android_notifications::init());
 
@@ -501,6 +504,11 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         // A run that ends without a trace (SIGKILL) is reported by
         // the next start; freezes and memory are logged as they happen.
         exit_watch::start(app.handle(), &dir, &app.package_info().version.to_string());
+    }
+    // How earlier runs ended, from Android, into the same native log.
+    #[cfg(target_os = "android")]
+    if let Ok(dir) = tauri::Manager::path(app).app_log_dir() {
+        exit_info::start(app.handle(), &dir.join("owncord-client.log"));
     }
     // Record the credential backend first: if this build has no
     // persistent store, every later credential symptom follows from it.
