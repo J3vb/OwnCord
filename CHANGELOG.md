@@ -82,7 +82,7 @@ and only when it changes something a contributor or fork holder must do
 
 - Clicking a channel right after a new message arrived sometimes opened the channel below it: a Mark Server as Read icon appeared in the header and pushed the channel list down. The icon is gone, so the list no longer moves; Mark as Read stays in the server name menu and on Shift+Esc.
 - A forwarded file could, rarely, lose its contents to the server's 15-minute storage cleanup in the moment before the forward was saved, and then show as missing. The cleanup now leaves it alone.
-- An upload that stalled for 30 seconds or ran past 10 minutes was cut with no answer, so it looked like the server was down, and big files on a slow link always hit the 10-minute cut. The server now answers `408 TRANSFER_TIMED_OUT`, and the time allowed grows with the upload limit (about 27 minutes at 100 MB, up to an hour). Avatar, banner and group-icon uploads no longer fail on a slow link after 30 seconds.
+- An upload that stalled for 30 seconds was cut with no answer, so it looked like the server was down. The server now answers `408 TRANSFER_TIMED_OUT`, and its time limit grows with the upload limit (about 27 minutes at 100 MB, up to an hour; the desktop app still stops at 10 minutes for now). Avatar, banner and group-icon uploads no longer fail on a slow link after 30 seconds.
 
 ### Under the hood
 
