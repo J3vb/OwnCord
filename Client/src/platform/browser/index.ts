@@ -161,6 +161,7 @@ const inertNotifier: Notifier = {
   showMessage: async () => undefined,
   showCall: async () => undefined,
   clearCall: async () => undefined,
+  clearMessages: async () => undefined,
   onMessageActivated: inertUnsubscribe,
   flashTaskbar: async () => undefined,
   requestAttention: async () => undefined,

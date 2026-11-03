@@ -301,6 +301,7 @@ const nullNotifier = async () => {
     showMessage: async () => undefined,
     showCall: async () => undefined,
     clearCall: async () => undefined,
+    clearMessages: async () => undefined,
     onMessageActivated: () => () => undefined,
     flashTaskbar: async () => undefined,
     requestAttention: async () => undefined,

@@ -208,6 +208,7 @@ describe("browser platform registry", () => {
     await expect(b.notifier.showMessage("t", "b", target)).resolves.toBeUndefined();
     await expect(b.notifier.showCall("t", "b", target)).resolves.toBeUndefined();
     await expect(b.notifier.clearCall(1)).resolves.toBeUndefined();
+    await expect(b.notifier.clearMessages(1)).resolves.toBeUndefined();
     expect(() => b.notifier.onMessageActivated(() => undefined)()).not.toThrow();
     await expect(b.notifier.flashTaskbar()).resolves.toBeUndefined();
     await expect(b.notifier.requestAttention()).resolves.toBeUndefined();
