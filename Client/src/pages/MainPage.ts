@@ -380,8 +380,14 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     // logout or server switch does not leave this session's count behind.
     // destroy() sets tornDown before it runs unsubscribers, so a stopper
     // pushed while !tornDown always runs.
+    // With it, the phone's notifications for a channel go once it is read
+    // (its stopper withdraws what is left), and the phone asks once for the
+    // notification permission.
     void import("../features/unread-badge/unreadBadge").then((badge) => {
-      if (!st.tornDown) st.unsubscribers.push(badge.startUnreadBadge(desktop.notifier));
+      if (st.tornDown) return;
+      st.unsubscribers.push(badge.startUnreadBadge(desktop.notifier));
+      st.unsubscribers.push(badge.startNotificationClearing(desktop.notifier));
+      void badge.askNotificationPermissionOnce(desktop.notifier);
     });
 
     // Short voice UI sounds on join/leave and mute/deafen. This module

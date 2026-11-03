@@ -26,12 +26,23 @@ import { resolveDisplayName } from "@lib/ui/avatar";
 import { desktop } from "../platform/desktop";
 import type { NotificationTarget } from "../platform/contracts/notifications";
 import { connectText } from "../i18n/connect";
+import { isAndroidHost } from "./hostPlatform";
 
 const log = createLogger("notifications");
 
 /** Check if the app window is currently focused. */
 function isWindowFocused(): boolean {
   return document.hasFocus();
+}
+
+/**
+ * Whether the popup shows while the app is in front on another channel. On
+ * the phone it does, as in Discord's phone app: one channel fills the screen,
+ * there is no taskbar to flash, and the banner is the only way to learn a DM
+ * arrived. On the desktop the window is in use and only the chime plays.
+ */
+function popupWhileFocused(): boolean {
+  return isAndroidHost();
 }
 
 /**
@@ -208,7 +219,10 @@ export function notifyIncomingMessage(payload: ChatMessagePayload): void {
   // notifications", so honour it for the popup, the chime and the taskbar
   // flash alike (a mention included, matching the popup and chime).
   const dnd = loadUserStatus() === "dnd";
-  const showPopup = !dnd && !focusedElsewhere && loadPref<boolean>("desktopNotifications", true);
+  const showPopup =
+    !dnd &&
+    (!focusedElsewhere || popupWhileFocused()) &&
+    loadPref<boolean>("desktopNotifications", true);
   const flash = !dnd && !focusedElsewhere && loadPref<boolean>("flashTaskbar", true);
   const chime = !dnd && chimeEnabled(mentioned);
   if (!showPopup && !flash && !chime) return;
@@ -239,13 +253,13 @@ export function notifyIncomingMessage(payload: ChatMessagePayload): void {
   // dynamic import of the markdown tokenizer: this module is in the startup
   // closure, so a static import would drag the tokenizer in with it
   // (bundle-budget's startup-closure gate).
-  if (showPopup) {
-    fireDesktopNotification(title, payload.content, payload.attachments.length, {
-      host: currentHost(),
-      channelId: payload.channel_id,
-      messageId: payload.id,
-    });
-  }
+  const popup = showPopup
+    ? fireDesktopNotification(title, payload.content, payload.attachments.length, {
+        host: currentHost(),
+        channelId: payload.channel_id,
+        messageId: payload.id,
+      })
+    : null;
 
   // Flash taskbar
   if (flash) {
@@ -254,7 +268,7 @@ export function notifyIncomingMessage(payload: ChatMessagePayload): void {
 
   // Notification sound
   if (chime) {
-    playNotificationSound();
+    chimeUnlessOsSounds(popup);
   }
 }
 
@@ -294,19 +308,23 @@ export function notifyMention(channelId: number, thread?: ThreadNotifyContext): 
   if (!notificationAllowed(authority, true)) return;
 
   const dnd = loadUserStatus() === "dnd";
-  const showPopup = !dnd && !focusedElsewhere && loadPref<boolean>("desktopNotifications", true);
+  const showPopup =
+    !dnd &&
+    (!focusedElsewhere || popupWhileFocused()) &&
+    loadPref<boolean>("desktopNotifications", true);
   const flash = !dnd && !focusedElsewhere && loadPref<boolean>("flashTaskbar", true);
   const chime = !dnd && chimeEnabled(true);
 
+  let popup: Promise<boolean> | null = null;
   if (showPopup) {
     const title = sanitizeNotif(
       connectText("notifications.mentionedIn", { channel: alertLabel(channelName, thread) }),
       80,
     );
-    fireDesktopNotification(title, "", 0, { host: currentHost(), channelId: authority });
+    popup = fireDesktopNotification(title, "", 0, { host: currentHost(), channelId: authority });
   }
   if (flash) flashTaskbar();
-  if (chime) playNotificationSound();
+  if (chime) chimeUnlessOsSounds(popup);
 }
 
 /**
@@ -356,13 +374,17 @@ export function notifyChannelActivity(
   if (!notificationAllowed(authority, mentioned)) return;
 
   const dnd = loadUserStatus() === "dnd";
-  const showPopup = !dnd && !focusedElsewhere && loadPref<boolean>("desktopNotifications", true);
+  const showPopup =
+    !dnd &&
+    (!focusedElsewhere || popupWhileFocused()) &&
+    loadPref<boolean>("desktopNotifications", true);
   const flash = !dnd && !focusedElsewhere && loadPref<boolean>("flashTaskbar", true);
   const chime = !dnd && chimeEnabled(mentioned);
   if (!showPopup && !flash && !chime) return;
 
   if (shouldCoalesce(entry.channel_id, mentioned, Date.now())) return;
 
+  let popup: Promise<boolean> | null = null;
   if (showPopup) {
     const channel = alertLabel(channelName, thread);
     const member =
@@ -377,7 +399,7 @@ export function notifyChannelActivity(
           ? connectText("notifications.mentioned", { author, channel })
           : connectText("notifications.inChannel", { author, channel });
     // A thread's message is not in its parent's list, so the click opens the parent.
-    fireDesktopNotification(
+    popup = fireDesktopNotification(
       sanitizeNotif(title, 80),
       "",
       0,
@@ -387,7 +409,22 @@ export function notifyChannelActivity(
     );
   }
   if (flash) flashTaskbar();
-  if (chime) playNotificationSound();
+  if (chime) chimeUnlessOsSounds(popup);
+}
+
+/**
+ * Play the chime, except on the phone when Android shows the popup: its
+ * "Messages" channel makes a sound of its own, and two would play. A popup
+ * Android refused (notifications blocked) still gets the chime.
+ */
+function chimeUnlessOsSounds(popup: Promise<boolean> | null): void {
+  if (popup === null || !isAndroidHost()) {
+    playNotificationSound();
+    return;
+  }
+  void popup.then((shown) => {
+    if (!shown) playNotificationSound();
+  });
 }
 
 /** Whether `channelId` is the open channel, or the open thread: the reader's current surface. */
@@ -462,21 +499,27 @@ export function openNotificationTarget(target: NotificationTarget): void {
 
 /**
  * Fire a Tauri desktop notification. Falls back to Web Notification API.
+ * Resolves whether the native notifier showed it; never rejects.
  *
  * The native host shows a message notification through its own command so a
  * click can open `target` (the plugin's desktop backend drops clicks); the Web
  * Notification fallback keeps its own `onclick`, which works in the browser.
+ *
+ * The Android app asks for the permission once after sign-in
+ * (`features/unread-badge/permissionAsk.ts`) and in Settings, never from a
+ * message, and has no Web Notification to fall back to.
  */
 function fireDesktopNotification(
   title: string,
   rawContent: string,
   attachmentCount: number,
   target: NotificationTarget,
-): void {
-  void (async () => {
+): Promise<boolean> {
+  return (async () => {
+    const phone = isAndroidHost();
     try {
       let permitted = await desktop.notifier.permissionGranted();
-      if (!permitted) {
+      if (!permitted && !phone) {
         permitted = await desktop.notifier.requestPermission();
       }
 
@@ -487,7 +530,12 @@ function fireDesktopNotification(
           target,
         );
       }
+      return permitted;
     } catch (err) {
+      if (phone) {
+        log.warn("Notification not shown", err);
+        return false;
+      }
       log.debug("Tauri notification plugin unavailable, falling back to Web API", err);
       // Fallback to Web Notification API (dev mode / non-Tauri). Clicking it
       // focuses the window and opens the target as the native activation does.
@@ -508,6 +556,7 @@ function fireDesktopNotification(
       } catch (fallbackErr) {
         log.debug("Notifications not available", fallbackErr);
       }
+      return false;
     }
   })();
 }

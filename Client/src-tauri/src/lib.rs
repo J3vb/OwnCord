@@ -1,5 +1,7 @@
 mod active_session;
 #[cfg(target_os = "android")]
+mod android_notifications;
+#[cfg(target_os = "android")]
 mod call_service;
 mod commands;
 // Test-only: gates over tauri.conf.json and the source text itself.
@@ -217,7 +219,8 @@ pub fn run() {
     let builder = builder
         .plugin(update_commands::android::init())
         .plugin(call_service::init())
-        .plugin(files::init());
+        .plugin(files::init())
+        .plugin(android_notifications::init());
 
     // Desktop-only convenience plugins. window-state auto-saves/restores window
     // geometry (off-screen correction lives in the frontend); autostart backs
@@ -297,6 +300,16 @@ pub fn run() {
             update_commands::android::download_and_install_update,
             #[cfg(target_os = "android")]
             call_service::set_call_service,
+            #[cfg(target_os = "android")]
+            android_notifications::android_notification_channels,
+            #[cfg(target_os = "android")]
+            android_notifications::android_notify,
+            #[cfg(target_os = "android")]
+            android_notifications::android_clear_notifications,
+            #[cfg(target_os = "android")]
+            android_notifications::android_notification_permission,
+            #[cfg(target_os = "android")]
+            android_notifications::take_notification_tap,
             #[cfg(target_os = "android")]
             files::android::save_file,
             #[cfg(target_os = "android")]

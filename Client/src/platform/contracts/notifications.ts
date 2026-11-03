@@ -53,9 +53,15 @@ export interface Notifier {
   ): Promise<void>;
   /**
    * Withdraw the ringing call notification for `channelId` from the
-   * notification centre. Windows only; elsewhere a no-op.
+   * notification centre. Windows and Android; elsewhere a no-op.
    */
   clearCall(channelId: number): Promise<void>;
+  /**
+   * Withdraw the message notifications shown for `channelId` (every one when
+   * no id is given) once the reader has seen that channel. Android only: a
+   * desktop toast leaves the screen on its own, so elsewhere a no-op.
+   */
+  clearMessages(channelId?: number): Promise<void>;
   /**
    * Subscribe to activations of message notifications. `handler` gets the
    * target the user clicked; the return value unsubscribes. Delivered once per

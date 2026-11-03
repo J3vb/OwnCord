@@ -986,6 +986,12 @@ export function buildTauriMockScript(opts: {
              "open_external_url", "plugin:dialog|save", "ptt_set_key", "ptt_start", "ptt_stop",
              "voice_shortcuts_start", "voice_shortcuts_set_keys",
              "open_devtools", "frontend_ready"].includes(cmd)) return null;
+        // The Android app's notifier: Android allows notifications, shows and
+        // withdraws them, and no notification was tapped.
+        if (cmd === "android_notification_permission") return "granted";
+        if (["android_notification_channels", "android_notify", "android_clear_notifications",
+             "take_notification_tap", "plugin:notification|registerListener",
+             "plugin:notification|register_listener", "plugin:notification|remove_listener"].includes(cmd)) return null;
         // Auto-idle's OS idle poll (DP-33): null is "the OS cannot say", so the
         // mocked app keeps the in-window idle timer it had before the poll.
         if (cmd === "system_idle_ms") return null;

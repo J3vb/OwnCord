@@ -44,10 +44,14 @@ export function describeNotifierSuite(
     /** False for a platform with no window to flash (the browser): the two
      *  attention tests are skipped and that platform's own test pins the no-op. */
     windowAttention?: boolean;
+    /** False for a platform whose launcher draws its own badge (Android):
+     *  the badge test is skipped and that platform's own test pins the no-op. */
+    unreadBadge?: boolean;
   },
 ): void {
   const check = options?.expectEveryTestToFail ? test.fails : test;
   const checkAttention = options?.windowAttention === false ? test.skip : check;
+  const checkBadge = options?.unreadBadge === false ? test.skip : check;
   describe("Notifier", () => {
     let ctx: NotifierSubject;
     beforeEach(async () => {
@@ -137,7 +141,7 @@ export function describeNotifierSuite(
       expect(handler.mock.calls).toEqual([[{ host: "h", channelId: 7 }]]);
     });
 
-    check("hands each unread badge count to the native host as given", async () => {
+    checkBadge("hands each unread badge count to the native host as given", async () => {
       await ctx.subject.setUnreadBadge(12);
       await ctx.subject.setUnreadBadge(0);
       expect(ctx.native.badgeCounts()).toEqual([12, 0]);

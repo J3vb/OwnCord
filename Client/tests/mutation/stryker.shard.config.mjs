@@ -319,6 +319,8 @@ export const shards = {
     "src/lib/notifications.ts",
     "src/lib/prefs/soundPrefs.ts",
     "src/features/unread-badge/unreadBadge.ts",
+    "src/features/unread-badge/clearOnRead.ts",
+    "src/features/unread-badge/permissionAsk.ts",
     "src/lib/text/safeRender.ts",
     "src/features/whats-new/changelog.ts",
     "src/lib/net/updater.ts",
