@@ -93,6 +93,9 @@ OS keychain, which holds saved passwords and session tokens, is never read.
 kit secret, recovery code and TOTP secret in storage and in the profiles, and
 proves none reaches the zip.
 
+The diagnostic event log that will join this bundle, its event codes and its
+privacy rules are specified in [client-diagnostics.md](client-diagnostics.md).
+
 **Log lines are exported verbatim.** The client logger does not redact, so the
 bundle does not claim to: the Diagnostics & logs tab and `README.txt` both say the log files
 are unredacted and should be read before the bundle is shared.
