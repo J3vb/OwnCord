@@ -32,6 +32,7 @@ func okM(cpu, in, out float64) fetchResult {
 		Rooms: 1, HasRooms: true, Participants: 2, HasParticipants: true,
 		TracksPublished: 3, HasTracksPublished: true, TracksSubscribed: 4, HasTracksSubscribed: true,
 		BytesIn: in, HasBytesIn: true, BytesOut: out, HasBytesOut: true,
+		Cores: 8, HasCores: true,
 	}}
 }
 
@@ -55,7 +56,7 @@ func TestSampler_RatesAndFirstSample(t *testing.T) {
 	if first.CPU != nil || first.BytesInPerSec != nil {
 		t.Errorf("first sample has nothing to measure from: %+v", first)
 	}
-	if first.Rooms == nil || *first.Rooms != 1 || *first.Memory != 1<<20 {
+	if first.Rooms == nil || *first.Rooms != 1 || *first.Memory != 1<<20 || first.Cores == nil || *first.Cores != 8 {
 		t.Errorf("gauges are available on the first sample: %+v", first)
 	}
 	step(s, clk)

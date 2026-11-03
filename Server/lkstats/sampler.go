@@ -51,6 +51,9 @@ type Point struct {
 	TracksSubscribed *int     `json:"tracks_subscribed"`
 	BytesInPerSec    *float64 `json:"bytes_in_per_sec"`
 	BytesOutPerSec   *float64 `json:"bytes_out_per_sec"`
+	// Cores is how many cores LiveKit may use: the container's CPU limit,
+	// or the host's cores when there is none.
+	Cores *int `json:"cores"`
 }
 
 // Snapshot is the newest sample, the status and the series over a window.
@@ -71,6 +74,7 @@ type sample struct {
 	cpu, mem               float32
 	rooms, parts, pub, sub float32
 	bytesIn, bytesOut      float32
+	cores                  float32
 }
 
 // fetchResult is one read: the figures and how it went.
@@ -206,6 +210,7 @@ func (s *Sampler) sample(ctx context.Context) {
 		sm.parts = optional(m.Participants, m.HasParticipants)
 		sm.pub = optional(m.TracksPublished, m.HasTracksPublished)
 		sm.sub = optional(m.TracksSubscribed, m.HasTracksSubscribed)
+		sm.cores = optional(m.Cores, m.HasCores)
 		if s.hasPrev {
 			// A counter that went down means LiveKit restarted; that figure
 			// is skipped for this sample rather than shown as a spike.
@@ -248,7 +253,7 @@ func (s *Sampler) noteStatus(r fetchResult, at time.Time) {
 
 func missing(at int64) sample {
 	nan := float32(math.NaN())
-	return sample{at: at, cpu: nan, mem: nan, rooms: nan, parts: nan, pub: nan, sub: nan, bytesIn: nan, bytesOut: nan}
+	return sample{at: at, cpu: nan, mem: nan, rooms: nan, parts: nan, pub: nan, sub: nan, bytesIn: nan, bytesOut: nan, cores: nan}
 }
 
 func optional(v float64, ok bool) float32 {
@@ -311,6 +316,7 @@ func downsample(in []sample, maxPoints int) []Point {
 		avg.sub = mean(run, func(s sample) float32 { return s.sub })
 		avg.bytesIn = mean(run, func(s sample) float32 { return s.bytesIn })
 		avg.bytesOut = mean(run, func(s sample) float32 { return s.bytesOut })
+		avg.cores = mean(run, func(s sample) float32 { return s.cores })
 		out = append(out, avg.point())
 	}
 	return out
@@ -342,6 +348,7 @@ func (s sample) point() Point {
 		TracksSubscribed: count(s.sub),
 		BytesInPerSec:    round1(s.bytesIn),
 		BytesOutPerSec:   round1(s.bytesOut),
+		Cores:            count(s.cores),
 	}
 }
 

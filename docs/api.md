@@ -4793,7 +4793,8 @@ contacts nothing.
     "tracks_published": 6,
     "tracks_subscribed": 18,
     "bytes_in_per_sec": 250000,
-    "bytes_out_per_sec": 1250000
+    "bytes_out_per_sec": 1250000,
+    "cores": 4
   },
   "series": []
 }
@@ -4812,6 +4813,9 @@ runs its own LiveKit, which has no separate stats page.
   packet bytes per second, from the change in the counters. All three are
   `null` for the first reading, after a read that failed, and when a counter
   went down because LiveKit restarted.
+- `cores` is how many cores LiveKit may use (its Go runtime's GOMAXPROCS,
+  which follows the container's CPU limit, or the host's cores when there is
+  none); `null` when the page does not report it.
 - A read that failed is a point with every figure `null`. `series` is oldest
   first, averaged down to at most 360 points; `t` is unix seconds. A restart
   of OwnCord clears the history.

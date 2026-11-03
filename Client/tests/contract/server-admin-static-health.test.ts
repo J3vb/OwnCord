@@ -362,13 +362,14 @@ describe("Server/admin/static — Dashboard health row", () => {
         [...tr.querySelectorAll("td")].map((td) => td.textContent),
       );
 
-    it("lists routes with calls, typical and worst time under the health row", async () => {
+    it("lists routes with calls, typical and worst time under the health row and LiveKit card", async () => {
       const paths: string[] = [];
       const { host } = await openDashboard(paths, (p) =>
         p === "/system/slow-requests" ? SLOW : p.startsWith("/system/stats") ? STATS : {},
       );
       expect(paths).toContain("/system/slow-requests");
-      expect(host.querySelector("#healthRow + section #slowRequests")).toBeTruthy();
+      expect(host.querySelector("#healthRow + section #livekitCard")).toBeTruthy();
+      expect(host.querySelector("#healthRow + section + section #slowRequests")).toBeTruthy();
       expect(rows(host)).toEqual([
         ["POST /api/v1/channels/{id}/messages", (1204).toLocaleString(), "2.5 s", "12 s"],
         ["GET /admin/api/<b>x</b>", "3", "500 ms", "730 ms"],
@@ -483,6 +484,14 @@ describe("Server/admin/static — Dashboard health row", () => {
       (p: string): unknown =>
         p.startsWith("/system/livekit") ? lk : p.startsWith("/system/stats") ? STATS : {};
     const body = (host: Element) => host.querySelector("#livekitCard")!;
+
+    it("names how many cores LiveKit may use when its page reports it", async () => {
+      const { host } = await openDashboard(
+        [],
+        answer({ ...LK, current: { ...LK.current, cores: 4 } }),
+      );
+      expect(text(host, "lkCpu", "health-sub")).toBe("of 4 cores · 100% = one core");
+    });
 
     it("shows status, CPU as a share of one core, memory, usage and traffic", async () => {
       const paths: string[] = [];

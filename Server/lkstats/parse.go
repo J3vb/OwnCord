@@ -24,10 +24,13 @@ type Metrics struct {
 	TracksSubscribed float64 // livekit_track_subscribed_total
 	BytesIn          float64 // livekit_packet_bytes{direction="incoming"}
 	BytesOut         float64 // livekit_packet_bytes{direction="outgoing"}
+	// Cores is GOMAXPROCS, which Go sets from the container's CPU limit
+	// (or the host's cores when there is none).
+	Cores float64 // go_sched_gomaxprocs_threads
 
 	HasCPU, HasRSS, HasRooms, HasParticipants bool
 	HasTracksPublished, HasTracksSubscribed   bool
-	HasBytesIn, HasBytesOut                   bool
+	HasBytesIn, HasBytesOut, HasCores         bool
 	livekit                                   bool
 }
 
@@ -78,7 +81,7 @@ func wanted(name string) bool {
 	case "process_cpu_seconds_total", "process_resident_memory_bytes",
 		"livekit_room_total", "livekit_participant_total",
 		"livekit_track_published_total", "livekit_track_subscribed_total",
-		"livekit_packet_bytes":
+		"livekit_packet_bytes", "go_sched_gomaxprocs_threads":
 		return true
 	}
 	return false
@@ -98,6 +101,8 @@ func (m *Metrics) add(name, labels string, v float64) {
 		m.TracksPublished, m.HasTracksPublished = m.TracksPublished+v, true
 	case "livekit_track_subscribed_total":
 		m.TracksSubscribed, m.HasTracksSubscribed = m.TracksSubscribed+v, true
+	case "go_sched_gomaxprocs_threads":
+		m.Cores, m.HasCores = v, true
 	case "livekit_packet_bytes":
 		switch labelValue(labels, "direction") {
 		case "incoming":

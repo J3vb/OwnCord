@@ -89,10 +89,10 @@ function paintHealth(){
 }
 function healthRow(){
   return'<section id="healthRow" class="health-row" aria-label="Server resources">'+healthTiles(health.data)+'</section>'
-    +'<section class="section-card" aria-labelledby="slowRequestsTitle"><div class="section-card-header"><h3 id="slowRequestsTitle">Slow requests</h3><span class="checks-sum">Last hour</span></div>'
-    +'<div class="section-card-body" id="slowRequests">'+slowRequestsBody(health.slow)+'</div></section>'
     +'<section class="section-card" aria-labelledby="livekitTitle"><div class="section-card-header"><h3 id="livekitTitle">LiveKit</h3><span class="checks-sum">Last hour</span></div>'
-    +'<div class="section-card-body" id="livekitCard">'+livekitBody(health.lk)+'</div></section>';
+    +'<div class="section-card-body" id="livekitCard">'+livekitBody(health.lk)+'</div></section>'
+    +'<section class="section-card" aria-labelledby="slowRequestsTitle"><div class="section-card-header"><h3 id="slowRequestsTitle">Slow requests</h3><span class="checks-sum">Last hour</span></div>'
+    +'<div class="section-card-body" id="slowRequests">'+slowRequestsBody(health.slow)+'</div></section>';
 }
 
 /* The LiveKit card: figures read from LiveKit's own stats page by the server.
@@ -133,7 +133,7 @@ function livekitBody(d){
   const memHi=mem.length?Math.max(...mem)*1.15:1,memLo=mem.length?Math.min(...mem)*0.85:0;
   const usage=[lkCount(cur.participants,'participant','participants'),lkCount(cur.tracks_published,'track published','tracks published'),lkCount(cur.tracks_subscribed,'track subscribed','tracks subscribed')];
   return'<p class="health-sub lk-status" id="livekitStatus">'+line+'</p><div class="health-row">'
-    +healthTile('lkCpu','CPU',healthPct(cur.cpu),'100% = one core',healthSpark(series,'cpu',0,lkSpace(series,'cpu')),'','')
+    +healthTile('lkCpu','CPU',healthPct(cur.cpu),(typeof cur.cores==='number'?'of '+lkCount(cur.cores,'core','cores')+' · ':'')+'100% = one core',healthSpark(series,'cpu',0,lkSpace(series,'cpu')),'','')
     +healthTile('lkMemory','Memory',typeof cur.memory==='number'?fmtBytes(cur.memory):HEALTH_DASH,'resident',healthSpark(series,'memory',memLo,memHi),'','')
     +healthTile('lkUsage','Usage',lkCount(cur.rooms,'room','rooms'),esc(usage.join(' · ')),'','','')
     +healthTile('lkTraffic','Traffic','In '+lkMbit(cur.bytes_in_per_sec),'Out '+lkMbit(cur.bytes_out_per_sec),'','','')

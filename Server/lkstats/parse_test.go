@@ -10,6 +10,7 @@ const samplePage = `# HELP process_cpu_seconds_total Total user and system CPU t
 process_cpu_seconds_total 12.5
 process_resident_memory_bytes 1.048576e+08
 go_goroutines 42
+go_sched_gomaxprocs_threads 4
 livekit_room_total{node_id="ND_1",node_type="SERVER"} 2
 livekit_participant_total{node_id="ND_1",node_type="SERVER"} 5
 livekit_track_published_total{kind="audio",node_id="ND_1"} 3
@@ -40,6 +41,7 @@ func TestParse_SumsAndDirections(t *testing.T) {
 		{"subscribed", m.TracksSubscribed, 9, m.HasTracksSubscribed},
 		{"in", m.BytesIn, 1500, m.HasBytesIn},
 		{"out", m.BytesOut, 7000, m.HasBytesOut},
+		{"cores", m.Cores, 4, m.HasCores},
 	}
 	for _, c := range checks {
 		if !c.has || c.got != c.want {
