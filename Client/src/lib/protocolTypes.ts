@@ -255,6 +255,7 @@ export const RestErrorCode = {
   STORAGE_QUOTA_EXCEEDED: "STORAGE_QUOTA_EXCEEDED",
   TIMED_OUT: "TIMED_OUT",
   TOTP_ALREADY_ENABLED: "TOTP_ALREADY_ENABLED",
+  TRANSFER_TIMED_OUT: "TRANSFER_TIMED_OUT",
   UNAUTHORIZED: "UNAUTHORIZED",
   // Diagnostics could not be collected, or the export could not be recorded.
   // SERVICE_UNAVAILABLE is the general form.

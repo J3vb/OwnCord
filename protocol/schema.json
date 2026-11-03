@@ -506,6 +506,11 @@
         "go": "CodeTOTPAlreadyEnabled",
         "ts": "TOTP_ALREADY_ENABLED"
       },
+      {
+        "wire": "TRANSFER_TIMED_OUT",
+        "go": "CodeTransferTimedOut",
+        "ts": "TRANSFER_TIMED_OUT"
+      },
       { "wire": "UNAUTHORIZED", "go": "CodeUnauthorized", "ts": "UNAUTHORIZED" },
       {
         "wire": "UNAVAILABLE",

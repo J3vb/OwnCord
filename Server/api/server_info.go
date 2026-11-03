@@ -15,7 +15,8 @@ import (
 )
 
 // serverInfoResponse is GET /api/v1/server-info: public identity, compatibility,
-// registration mode and the server-default message retention window.
+// registration mode, the server-default message retention window and the upload
+// transfer lifetime.
 // ProtocolEpoch is here because a client (a browser above all) must know whether
 // it can speak to this server BEFORE opening a WebSocket; otherwise the only
 // signal is a rejected connection. There is deliberately no version field: build
@@ -28,10 +29,28 @@ type serverInfoResponse struct {
 	BrowserClientEnabled bool             `json:"browser_client_enabled"`
 	RegistrationMode     string           `json:"registration_mode"`
 	Retention            retentionSummary `json:"retention"`
+	Upload               uploadSummary    `json:"upload"`
 }
 
 type retentionSummary struct {
 	MessagesDays int `json:"messages_days"`
+}
+
+// uploadSummary lets a client size its own transfer bound above the server's,
+// so the server is the side that cuts a slow upload and its 408 reaches the
+// user.
+type uploadSummary struct {
+	TransferLifetimeSeconds int64 `json:"transfer_lifetime_seconds"`
+}
+
+// uploadTransferLifetime is the lifetime handleUpload gives an upload under the
+// current per-file cap.
+func uploadTransferLifetime(svc *service.Services) time.Duration {
+	var fileCap int64
+	if svc.Uploads != nil {
+		fileCap = svc.Uploads.MaxUploadBytes()
+	}
+	return transferLifetimeFor(uploadBodyCap(fileCap))
 }
 
 // liveServerName is the name the admin page edits: the server_name setting,
@@ -113,5 +132,6 @@ func buildServerInfo(ctx context.Context, cfg *config.Config, svc *service.Servi
 		BrowserClientEnabled: cfg.Server.BrowserClientEnabled,
 		RegistrationMode:     string(mode),
 		Retention:            retentionSummary{MessagesDays: days},
+		Upload:               uploadSummary{TransferLifetimeSeconds: int64(uploadTransferLifetime(svc) / time.Second)},
 	}, nil
 }

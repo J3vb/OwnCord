@@ -660,9 +660,15 @@ func handleUploadAvatar(
 		}
 
 		// Bound the body before the multipart parser: the route has MaxBodySize
-		// too, but the parser is what turns an unbounded body into heap.
-		r.Body = http.MaxBytesReader(w, r.Body, avatarMaxBodySize)
+		// too, but the parser is what turns an unbounded body into heap. The
+		// global 30 s ReadTimeout would cut a slow uplink mid-body, so the read
+		// runs under a transfer deadline instead.
+		release := transferBody(w, r, avatarMaxBodySize)
+		defer release()
 		if err := r.ParseMultipartForm(avatarMultipartMemoryLimit); err != nil {
+			if writeTransferTimedOut(w, err, "avatar upload") {
+				return
+			}
 			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "invalid multipart form")
 			return
 		}

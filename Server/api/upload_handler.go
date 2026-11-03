@@ -137,6 +137,9 @@ func safeStorageErrorMessage(err error) string {
 // dashboards tell them from bad uploads; everything else is 400. Detail never
 // crosses the boundary (see safeStorageErrorMessage).
 func writeStorageSaveError(w http.ResponseWriter, saveErr error, what string) {
+	if writeTransferTimedOut(w, saveErr, what) {
+		return
+	}
 	// The two bounds refuse with 507 and their own codes so a client can tell
 	// "your quota is full" from "the server is out of disk" from a filesystem
 	// failure; no body carries a path.
@@ -235,15 +238,12 @@ func handleUpload(uploads *service.UploadService, store FileStore, limiter *auth
 		// The global 30 s Read/WriteTimeout bound the WHOLE request, so a 25 MB
 		// upload on a slow uplink is cut mid-body and its 201 never lands. The
 		// route-scoped body wrapper pushes the read and write deadlines out on
-		// every chunk that moves, so a progressing transfer survives until
-		// transferMaxLifetime and a stalled peer does not. The global timeouts
-		// stay: they still bound the header phase and slowloris.
-		deadlines := newTransferDeadline(w, r)
-		defer deadlines.release()
-		deadlines.touch()
-
+		// every chunk that moves, so a progressing transfer survives until its
+		// lifetime (sized from the body cap) and a stalled peer does not. The
+		// global timeouts stay: they still bound the header phase and slowloris.
 		fileCap := uploads.MaxUploadBytes()
-		r.Body = progressReader{r: http.MaxBytesReader(w, r.Body, uploadBodyCap(fileCap)), d: deadlines}
+		release := transferBody(w, r, uploadBodyCap(fileCap))
+		defer release()
 
 		// Stream the multipart body instead of buffering or spooling it: no
 		// part is read until the bytes it could cost are admitted below.
@@ -373,6 +373,9 @@ func drainMultipartTail(mr *multipart.Reader) error {
 // "missing file field", and any structural failure (malformed boundary,
 // truncated headers) is "invalid multipart form".
 func writeUploadPartError(w http.ResponseWriter, err error) {
+	if writeTransferTimedOut(w, err, "file upload") {
+		return
+	}
 	if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
 		writeErr(w, http.StatusRequestEntityTooLarge, httperr.CodePayloadTooLarge, "request body exceeds the upload size limit")
 		return
@@ -407,6 +410,9 @@ func uploadStoreFile(ctx context.Context, w http.ResponseWriter, file io.Reader,
 	var sniffBuf [512]byte
 	n, readErr := io.ReadFull(file, sniffBuf[:])
 	if readErr != nil && !errors.Is(readErr, io.EOF) && !errors.Is(readErr, io.ErrUnexpectedEOF) {
+		if writeTransferTimedOut(w, readErr, "file upload") {
+			return storedUpload{}, false
+		}
 		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "failed to read uploaded file")
 		return storedUpload{}, false
 	}

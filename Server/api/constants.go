@@ -71,7 +71,7 @@ const (
 	uploadRateLimitPerMinute = 10
 
 	// maxConcurrentUploadsPerUser caps one user's in-flight uploads. Each can
-	// live up to transferMaxLifetime and holds a storage reservation of up to
+	// live up to its transfer lifetime and holds a storage reservation of up to
 	// the per-file cap, so without this bound one member could reserve enough
 	// headroom to push every other user into the low-disk refusal. It matches
 	// the desktop client's MAX_ATTACHMENTS
@@ -134,21 +134,23 @@ const (
 
 	maxUploadFilenameLength = 255
 
-	// transferProgressTimeout is the gap without any byte read or written after
-	// which a transfer is abandoned. The global 30 s ReadTimeout/WriteTimeout
-	// bound the WHOLE request, so a slow-uplink upload (25 MB at 1 Mbit/s is
-	// about 200 s) would be cut mid-body and a download truncated with no error.
-	// The progress wrappers in upload_handler.go push the deadline out on every
-	// chunk, so a moving transfer survives until transferMaxLifetime and a
-	// stalled peer does not.
-	transferProgressTimeout = 30 * time.Second
+	// transferMinLifetime and transferMaxLifetime bound a transfer's total
+	// lifetime however steadily it progresses: a peer trickling a byte per
+	// transferProgressTimeout would otherwise hold its storage reservation,
+	// connection and goroutine indefinitely. Between the two bounds the lifetime
+	// follows the transfer's size at transferSlowestRate (transferLifetimeFor),
+	// so an admin who raises the upload cap does not make the window tighter.
+	transferMinLifetime = 10 * time.Minute
+	transferMaxLifetime = 60 * time.Minute
 
-	// transferMaxLifetime caps a transfer's total lifetime however steadily it
-	// progresses: a peer trickling a byte per transferProgressTimeout would
-	// otherwise hold its storage reservation, connection and goroutine
-	// indefinitely. 10 minutes matches the client tunnel's 600 s data-copy
-	// bound.
-	transferMaxLifetime = 10 * time.Minute
+	// transferSlowestRate is the slowest link a full-size transfer is sized
+	// for: 64 KiB/s, about 0.5 Mbit/s. A 100 MiB upload gets about 27 minutes.
+	transferSlowestRate = 64 << 10
+
+	// transferTimedOutWriteGrace is how long the handler has to write its 408
+	// once a transfer's read deadline has passed. The read and write deadlines
+	// are armed to the same instant, so without it the answer could never land.
+	transferTimedOutWriteGrace = 5 * time.Second
 
 	// shutdownTransferGrace is how long an in-flight transfer may keep going
 	// once server shutdown begins. It fits inside the 30 s HTTP drain budget

@@ -330,6 +330,7 @@ renamed once shipped, because clients compare it. The common ones:
 | `INVALID_CREDENTIALS`           | 401         | Login/register with bad username/password/invite (generic to prevent enumeration)                                                                                                                                                                                                                                                                                                                                                                                          |
 | `FORBIDDEN`                     | 403         | Insufficient permissions, banned account, or admin IP restriction                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `TIMED_OUT`                     | 403         | The caller has an active moderator timeout and the action is one it refuses (B5-9) — see `POST /api/v1/moderation/users/{id}/timeout` for the full list                                                                                                                                                                                                                                                                                                                    |
+| `TRANSFER_TIMED_OUT`            | 408         | The upload sent no byte for 30 s or ran past its transfer lifetime (`upload.transfer_lifetime_seconds` in server-info); nothing was stored                                                                                                                                                                                                                                                                                                                                 |
 | `NOT_FOUND`                     | 404         | Resource (channel, message, user, invite, file, backup) not found                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `RATE_LIMITED`                  | 429         | Too many requests; `Retry-After` header gives the seconds left until a retry is allowed                                                                                                                                                                                                                                                                                                                                                                                    |
 | `AUTH_BUSY`                     | 429         | The bounded queue for password checks is full, or the request gave up waiting in it; nothing was checked or counted. Login, register and verify-totp set `Retry-After`                                                                                                                                                                                                                                                                                                     |
@@ -2767,6 +2768,16 @@ Upload a file as multipart form data.
 
 Files are validated against blocked magic bytes (PE executables, ELF binaries, Mach-O binaries, shell scripts). Files are stored with UUID filenames.
 
+**Transfer deadline:** the body may arrive slowly, but not stall. An upload that
+sends no byte for 30 seconds, or runs past its lifetime, is refused with
+`408 TRANSFER_TIMED_OUT` (the connection then closes). The lifetime is the body
+cap at 64 KiB/s, kept between 10 and 60 minutes (about 27 minutes for the 100
+MiB default); `upload.transfer_lifetime_seconds` in
+[`GET /api/v1/server-info`](#get-apiv1server-info) reports it. Avatar, banner
+and group-icon uploads follow the same rules. A download is held to the same
+idle rule and a lifetime sized from its file; one cut short has no answer to
+give, so its body ends before `Content-Length`.
+
 Before any of its bytes are read, the file name is checked against the server's file-type policy (`upload.blocked_extensions` and `upload.allowed_extensions` in config.yaml, or the owner's saved `upload_blocked_extensions`/`upload_allowed_extensions` settings, which replace them). Matching is case-insensitive and looks only at the final extension, the one Windows opens the file by, so `report.pdf.bat` is refused when `bat` is blocked and `report.bat.pdf` is not; trailing dots and spaces are ignored. A non-empty allowed list means only those final extensions are accepted. A refused name gets `400 BAD_REQUEST` ("upload rejected: blocked file type: .bat"), the same shape as a magic-byte refusal. Allowing an extension never lifts the magic-byte blocks.
 
 #### Voice messages
@@ -4067,19 +4078,22 @@ unauthenticated endpoint (anti-fingerprinting hardening, C-2).
 
 ### GET /api/v1/server-info
 
-Reports server identity, connection compatibility, registration mode and the
-server-default message retention window before sign-in.
+Reports server identity, connection compatibility, registration mode, the
+server-default message retention window and the upload transfer lifetime before
+sign-in.
 
 **Auth:** None
 
-| Field                     | Type    | Meaning                                                                                                                                                 |
-| ------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `name`                    | string  | The operator's server name (`server.name`)                                                                                                              |
-| `protocol_epoch`          | integer | The wire-protocol epoch this server speaks. A client whose epoch differs cannot connect                                                                 |
-| `browser_client_enabled`  | boolean | Whether the operator has opted in to browser-client hosting (`server.browser_client_enabled`)                                                           |
-| `registration_mode`       | string  | `closed`, `invite`, `approval`, or `open`. A missing setting defaults to `invite`; an invalid value fails closed to `closed`                            |
-| `retention`               | object  | Server-default message retention only; channel overrides are not disclosed                                                                              |
-| `retention.messages_days` | integer | Server-default message window in days; `0` means kept indefinitely. Attachments are deleted with their messages; there is no separate attachment window |
+| Field                              | Type    | Meaning                                                                                                                                                               |
+| ---------------------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`                             | string  | The operator's server name (`server.name`)                                                                                                                            |
+| `protocol_epoch`                   | integer | The wire-protocol epoch this server speaks. A client whose epoch differs cannot connect                                                                               |
+| `browser_client_enabled`           | boolean | Whether the operator has opted in to browser-client hosting (`server.browser_client_enabled`)                                                                         |
+| `registration_mode`                | string  | `closed`, `invite`, `approval`, or `open`. A missing setting defaults to `invite`; an invalid value fails closed to `closed`                                          |
+| `retention`                        | object  | Server-default message retention only; channel overrides are not disclosed                                                                                            |
+| `retention.messages_days`          | integer | Server-default message window in days; `0` means kept indefinitely. Attachments are deleted with their messages; there is no separate attachment window               |
+| `upload`                           | object  | Upload limits a client sizes its own bounds from                                                                                                                      |
+| `upload.transfer_lifetime_seconds` | integer | How long an upload may take under the current `upload.max_size_mb` before the server answers `408 TRANSFER_TIMED_OUT`; a client's own transfer bound should be longer |
 
 ```json
 {
@@ -4089,6 +4103,9 @@ server-default message retention window before sign-in.
   "registration_mode": "invite",
   "retention": {
     "messages_days": 0
+  },
+  "upload": {
+    "transfer_lifetime_seconds": 1600
   }
 }
 ```

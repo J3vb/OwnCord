@@ -1,10 +1,15 @@
 package api
 
 import (
+	"errors"
+	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
+	"os"
 	"time"
 
+	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
@@ -17,8 +22,12 @@ import (
 // Rather than relax the global timeouts (which would weaken slowloris protection
 // for every route), the two transfer routes wrap their reader/writer so every
 // chunk that moves pushes the connection deadline forward. A progressing
-// transfer is not cut before transferMaxLifetime, a peer that stops is abandoned
-// after transferProgressTimeout, and no transfer outlives transferMaxLifetime.
+// transfer is not cut before its lifetime (transferLifetimeFor, sized from the
+// upload cap or the file), a peer that stops is abandoned after
+// transferProgressTimeout, and no transfer outlives transferMaxLifetime.
+// An upload cut by either rule answers 408 TRANSFER_TIMED_OUT
+// (writeTransferTimedOut) instead of a closed socket, so the client can tell it
+// from an outage.
 // admin/logstream.go applies the same SetWriteDeadline(time.Time{}) override to
 // its stream.
 // The deadline lives on the underlying *net.Conn, reached through
@@ -29,6 +38,25 @@ import (
 // CancelInFlightTransfers (registered with http.Server.RegisterOnShutdown) caps
 // every transfer at shutdownTransferGrace from the start of shutdown, so short
 // transfers finish and the drain stays bounded.
+
+// transferProgressTimeout is the gap without any byte read or written after
+// which a transfer is abandoned. A variable only so tests can shorten it.
+var transferProgressTimeout = 30 * time.Second
+
+// errTransferTimedOut marks a body read cut by the transfer deadline, through
+// whatever wraps it (the multipart parser, storage.Save).
+var errTransferTimedOut = errors.New("transfer deadline passed")
+
+// transferLifetimeFor is the total lifetime of a transfer of size bytes: the
+// time it takes at transferSlowestRate, clamped to [transferMinLifetime,
+// transferMaxLifetime].
+func transferLifetimeFor(size int64) time.Duration {
+	secs := size / transferSlowestRate
+	if secs >= int64(transferMaxLifetime/time.Second) {
+		return transferMaxLifetime
+	}
+	return max(transferMinLifetime, time.Duration(secs)*time.Second)
+}
 
 // inFlight holds the transfers whose handlers are still running and the servers
 // that have begun shutting down.
@@ -66,14 +94,26 @@ type transferDeadline struct {
 	timeout time.Duration
 	srv     *http.Server
 
-	mu    syncutil.Mutex
-	until time.Time
+	mu      syncutil.Mutex
+	until   time.Time
+	expired bool
 }
 
-// newTransferDeadline starts a transfer's deadlines; the handler must defer
-// release so a later shutdown does not touch a connection it no longer owns.
-func newTransferDeadline(w http.ResponseWriter, r *http.Request) *transferDeadline {
-	return startTransfer(w, r, transferProgressTimeout, transferMaxLifetime)
+// newTransferDeadline starts the deadlines of a transfer of up to size bytes;
+// the handler must defer release so a later shutdown does not touch a
+// connection it no longer owns.
+func newTransferDeadline(w http.ResponseWriter, r *http.Request, size int64) *transferDeadline {
+	return startTransfer(w, r, transferProgressTimeout, transferLifetimeFor(size))
+}
+
+// transferBody caps r's body at maxBytes and reads it under a transfer
+// deadline sized for maxBytes, returning the deadline's release for the
+// handler to defer. A read the deadline cuts fails with errTransferTimedOut.
+func transferBody(w http.ResponseWriter, r *http.Request, maxBytes int64) (release func()) {
+	d := newTransferDeadline(w, r, maxBytes)
+	d.touch()
+	r.Body = progressReader{r: http.MaxBytesReader(w, r.Body, maxBytes), d: d}
+	return d.release
 }
 
 func startTransfer(w http.ResponseWriter, r *http.Request, timeout, lifetime time.Duration) *transferDeadline {
@@ -118,12 +158,48 @@ func (d *transferDeadline) touch() {
 }
 
 func (d *transferDeadline) arm() {
+	if d.expired {
+		return
+	}
 	deadline := time.Now().Add(d.timeout)
 	if deadline.After(d.until) {
 		deadline = d.until
 	}
 	_ = d.ctl.SetReadDeadline(deadline)
 	_ = d.ctl.SetWriteDeadline(deadline)
+}
+
+// expire records that the deadline cut the transfer. Progress no longer
+// re-arms anything; the write deadline moves to now+transferTimedOutWriteGrace
+// so an upload handler can still deliver its 408 (a download has nothing left
+// to say and its connection closes).
+func (d *transferDeadline) expire() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.expired {
+		return
+	}
+	d.expired = true
+	_ = d.ctl.SetWriteDeadline(time.Now().Add(transferTimedOutWriteGrace))
+}
+
+// timedOut reports whether the deadline cut the transfer.
+func (d *transferDeadline) timedOut() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.expired
+}
+
+// writeTransferTimedOut answers 408 TRANSFER_TIMED_OUT when err is a body read
+// the transfer deadline cut, reporting whether it did.
+func writeTransferTimedOut(w http.ResponseWriter, err error, what string) bool {
+	if !errors.Is(err, errTransferTimedOut) {
+		return false
+	}
+	slog.Info("upload cut by the transfer deadline", "upload", what, "error", err)
+	writeErr(w, http.StatusRequestTimeout, httperr.CodeTransferTimedOut,
+		"the upload took too long for this connection; try a smaller file or a faster link")
+	return true
 }
 
 // progressReader re-arms the transfer deadline on every read that returns bytes,
@@ -138,6 +214,10 @@ func (p progressReader) Read(b []byte) (int, error) {
 	n, err := p.r.Read(b)
 	if n > 0 {
 		p.d.touch()
+	}
+	if err != nil && errors.Is(err, os.ErrDeadlineExceeded) {
+		p.d.expire()
+		return n, fmt.Errorf("%w: %w", errTransferTimedOut, err)
 	}
 	return n, err
 }
@@ -155,6 +235,9 @@ func (p progressWriter) Write(b []byte) (int, error) {
 	n, err := p.ResponseWriter.Write(b)
 	if n > 0 {
 		p.d.touch()
+	}
+	if err != nil && errors.Is(err, os.ErrDeadlineExceeded) {
+		p.d.expire()
 	}
 	return n, err
 }
