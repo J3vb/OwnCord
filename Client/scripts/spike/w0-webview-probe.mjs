@@ -14,7 +14,8 @@ import os from "node:os";
 
 const args = Object.fromEntries(
   process.argv.slice(2).reduce((acc, a, i, all) => {
-    if (a.startsWith("--")) acc.push([a.slice(2), all[i + 1]?.startsWith("--") ? "1" : (all[i + 1] ?? "1")]);
+    if (a.startsWith("--"))
+      acc.push([a.slice(2), all[i + 1]?.startsWith("--") ? "1" : (all[i + 1] ?? "1")]);
     return acc;
   }, []),
 );
@@ -33,7 +34,9 @@ if (typeof WebSocket !== "function") {
 async function pickTarget() {
   const list = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
   const pages = list.filter((t) => t.type === "page" && !t.url.startsWith("devtools://"));
-  const main = pages.find((t) => /tauri|localhost/.test(t.url) && !/popout|share-bar/i.test(t.url)) ?? pages[0];
+  const main =
+    pages.find((t) => /tauri|localhost/.test(t.url) && !/popout|share-bar/i.test(t.url)) ??
+    pages[0];
   if (!main) throw new Error(`no page target on port ${port}: ${JSON.stringify(list)}`);
   return { main, all: list.map((t) => ({ type: t.type, url: t.url, title: t.title })) };
 }
@@ -81,7 +84,9 @@ while ($true) {
   [Console]::Out.WriteLine(($o | ConvertTo-Json -Compress))
   Start-Sleep -Milliseconds 1000
 }`;
-  const child = spawn("powershell.exe", ["-NoProfile", "-Command", ps], { stdio: ["ignore", "pipe", "ignore"] });
+  const child = spawn("powershell.exe", ["-NoProfile", "-Command", ps], {
+    stdio: ["ignore", "pipe", "ignore"],
+  });
   child.on("error", () => {});
   const samples = [];
   let buf = "";
@@ -104,8 +109,14 @@ while ($true) {
       const a = s[0];
       const b = s[s.length - 1];
       const sec = (b.t - a.t) / 1000;
-      const pct = (d) => Math.round(((d / sec / cores) * 100) * 10) / 10;
-      return { ownPctOfAllCores: pct(b.own - a.own), dwmPctOfAllCores: pct(b.dwm - a.dwm), processes: b.n, seconds: sec, cores };
+      const pct = (d) => Math.round((d / sec / cores) * 100 * 10) / 10;
+      return {
+        ownPctOfAllCores: pct(b.own - a.own),
+        dwmPctOfAllCores: pct(b.dwm - a.dwm),
+        processes: b.n,
+        seconds: sec,
+        cores,
+      };
     },
   };
 }
@@ -341,9 +352,19 @@ async function main() {
   const c = cdp(target.webSocketDebuggerUrl);
   await c.ready;
   const evalPage = async (expr, ms = 120000) => {
-    const r = await c.send("Runtime.evaluate", { expression: expr, awaitPromise: true, returnByValue: true, userGesture: true, timeout: ms });
+    const r = await c.send("Runtime.evaluate", {
+      expression: expr,
+      awaitPromise: true,
+      returnByValue: true,
+      userGesture: true,
+      timeout: ms,
+    });
     if (r.error) return { cdpError: r.error };
-    if (r.result.exceptionDetails) return { exception: r.result.exceptionDetails.exception?.description ?? r.result.exceptionDetails.text };
+    if (r.result.exceptionDetails)
+      return {
+        exception:
+          r.result.exceptionDetails.exception?.description ?? r.result.exceptionDetails.text,
+      };
     return r.result.result.value;
   };
   const inject = await evalPage(PAGE_HELPERS);
@@ -351,7 +372,15 @@ async function main() {
 
   const cpu = startCpuSampler();
   await new Promise((r) => setTimeout(r, 2500));
-  const results = { label, at: new Date().toISOString(), node: process.version, browser: version, targets: all, hwnd, phases: [] };
+  const results = {
+    label,
+    at: new Date().toISOString(),
+    node: process.version,
+    browser: version,
+    targets: all,
+    hwnd,
+    phases: [],
+  };
   const phase = async (name, expr, ms) => {
     console.log(`[${new Date().toISOString()}] ${name} ...`);
     const t0 = Date.now();
@@ -378,7 +407,11 @@ async function main() {
     ["generator", 5120, 1440, 60, "video/H265"],
   ];
   for (const [kind, w, h, fps, mime] of runs) {
-    await phase(`encode ${kind} ${w}x${h}@${fps} ${mime}`, `window.__w0.encode(${JSON.stringify(kind)}, ${w}, ${h}, ${fps}, ${JSON.stringify(mime)}, ${encodeSecs})`, (encodeSecs + 60) * 1000);
+    await phase(
+      `encode ${kind} ${w}x${h}@${fps} ${mime}`,
+      `window.__w0.encode(${JSON.stringify(kind)}, ${w}, ${h}, ${fps}, ${JSON.stringify(mime)}, ${encodeSecs})`,
+      (encodeSecs + 60) * 1000,
+    );
   }
   cpu.stop();
   c.close();
