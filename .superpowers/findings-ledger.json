@@ -1,5 +1,5 @@
 {
-  "nextId": 541,
+  "nextId": 542,
   "findings": [
     {
       "id": "OC-0001",
@@ -12487,6 +12487,29 @@
         "revertProof": "fail (without the re-check Reconcile removes the file named after its batch lookup)"
       },
       "confidence": "medium",
+      "status": "fixed",
+      "found": "2026-11-03",
+      "hunt": "server-review-2026-11-03",
+      "lens": "uploads-media-lifecycle",
+      "finder": "claude",
+      "fixedDate": "2026-11-03"
+    },
+    {
+      "id": "OC-0541",
+      "title": "Avatar, banner and group-icon uploads were cut by the 30 s read timeout on a slow link",
+      "file": "Server/api/profile_banner.go",
+      "line": 40,
+      "severity": "low",
+      "why": "The three image routes are exempt from the request deadline because a transfer deadline was meant to govern them, but none started one, so the whole multipart body was read under the global 30 s read timeout.",
+      "repro": "Upload a 4 MB banner over a 1 Mbit/s link: the body takes about 34 s, the read is cut at 30 s and the client gets a network error.",
+      "evidence": "Server/api/transfer_timeout_test.go (TestProfileImageUploads_SlowProgressingBodySurvivesRequestTimeout, TestProfileImageUploads_StalledBodyAnswers408TransferTimedOut).",
+      "suggestedFix": "Read the three bodies through the same progress deadline as the attachment upload, and answer a cut with 408 TRANSFER_TIMED_OUT.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/api/transfer_timeout_test.go",
+        "revertProof": "fail (without the progress deadline the slow banner upload is cut at the 250 ms read timeout)"
+      },
+      "confidence": "high",
       "status": "fixed",
       "found": "2026-11-03",
       "hunt": "server-review-2026-11-03",
