@@ -672,6 +672,21 @@ for (const profile of PROFILES) {
       await expect(sheet).toHaveCount(0);
     });
 
+    test("the composer row is +, the text and send, with room to type", async ({ page }) => {
+      await signIn(page);
+      const row = page.locator(".message-input-box");
+      for (const hidden of [".gif-btn", ".sticker-btn", ".poll-btn", ".mic-btn"]) {
+        await expect(row.locator(hidden)).toBeHidden();
+      }
+      await expect(row.locator(".attach-btn")).toBeVisible();
+      await expect(row.locator(".emoji-btn")).toBeVisible();
+      await expect(row.locator(".send-btn")).toBeVisible();
+      const text = await row.locator(".msg-textarea").boundingBox();
+      const viewport = page.viewportSize();
+      expect(text?.width ?? 0).toBeGreaterThan((viewport?.width ?? 0) * 0.5);
+      await noHorizontalScroll(page);
+    });
+
     test("a tap on a member opens the profile sheet", async ({ page }) => {
       await signIn(page);
       await page.locator("[data-testid='member-list-toggle']").click();
