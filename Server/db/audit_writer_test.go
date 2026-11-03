@@ -619,16 +619,14 @@ func TestAuditWriter_TryEnqueueRacingStopNeverStrands(t *testing.T) {
 		var wg sync.WaitGroup
 		start := make(chan struct{})
 		for g := range 8 {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				<-start
 				for i := range 100 {
 					if w.TryEnqueue(db.AuditEntry{ActorID: int64(g), Action: "race_action", TargetType: "user", TargetID: int64(i)}) {
 						accepted.Add(1)
 					}
 				}
-			}()
+			})
 		}
 		close(start)
 		w.Stop(context.Background())
