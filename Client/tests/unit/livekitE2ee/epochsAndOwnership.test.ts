@@ -81,6 +81,7 @@ describe("E2EEManager", () => {
       expect.anything(),
       expect.anything(),
       mgr.epoch,
+      undefined,
     );
 
     await mgr.rotateKeyPeriodically();
@@ -89,6 +90,7 @@ describe("E2EEManager", () => {
       expect.anything(),
       expect.anything(),
       mgr.epoch,
+      undefined,
     );
   });
 

@@ -536,6 +536,31 @@ describe("ThreadPanelHost", () => {
     host.close();
   });
 
+  it("focuses the thread's text box on a desktop, but not on a phone", async () => {
+    const { host, slot } = await makeHost();
+    host.open(getThread(THREAD)!);
+    await vi.waitFor(() =>
+      expect(document.activeElement).toBe(slot.querySelector(".msg-textarea")),
+    );
+    host.close();
+
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn(() => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() })),
+    );
+    try {
+      host.open(getThread(THREAD)!);
+      await vi.waitFor(() => expect(slot.querySelector(".msg-textarea")).not.toBeNull());
+      await flush();
+      expect(document.activeElement).not.toBe(slot.querySelector(".msg-textarea"));
+      host.open(getThread(THREAD)!);
+      expect(document.activeElement).not.toBe(slot.querySelector(".msg-textarea"));
+      host.close();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("switching to another thread closes the first and focuses the second", async () => {
     upsertThread(makeThread({ id: 92, parent_id: PARENT, starter_message_id: 2 }));
     const { host, slot } = await makeHost();

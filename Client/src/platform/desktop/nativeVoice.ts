@@ -8,7 +8,8 @@ async function service(): Promise<NativeVoice> {
 }
 
 export const nativeVoice: NativeVoice = {
-  setRoomKey: async (key) => (await service()).setRoomKey(key),
+  setRoomKey: async (key, placement) => (await service()).setRoomKey(key, placement),
+  useKeySlot: async (slot) => (await service()).useKeySlot(slot),
   clearRoomKey: async () => (await service()).clearRoomKey(),
   connect: async (url, token, audio) => (await service()).connect(url, token, audio),
   disconnect: async (session) => (await service()).disconnect(session),
