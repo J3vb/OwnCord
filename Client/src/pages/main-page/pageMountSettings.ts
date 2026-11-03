@@ -6,7 +6,7 @@ import { ApiClientError, errorText } from "@lib/api";
 import { createSettingsOverlay } from "../../features/settings/SettingsOverlay";
 import { showToast, showChangeOutcomeToast } from "@lib/ui/toast";
 import { accountText as account } from "../../i18n/account";
-import { logout } from "@lib/net/logout";
+import { logout } from "../../features/connection/logout";
 import { authStore, clearAuth, updateUser } from "@stores/auth.store";
 import { closeSettings, uiStore } from "@stores/ui.store";
 import {

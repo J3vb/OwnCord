@@ -26,7 +26,6 @@ import {
   MEMBER_PATCH_FIELDS,
   drawMemberItem,
   patchMemberItem,
-  statusColor,
   type MemberEmptyModel,
   type MemberHeaderModel,
   type MemberItemModel,
@@ -34,7 +33,7 @@ import {
 } from "../../src/features/members/memberRow.view";
 import { createAvatarElement } from "../../src/features/profiles/avatar";
 import type { UserStatus } from "../../src/lib/types";
-import { showsPhone } from "../../src/lib/ui/statusIndicator";
+import { showsPhone, statusColor } from "../../src/lib/ui/statusIndicator";
 
 const draw = (model: MemberItemModel): HTMLElement => drawMemberItem(model, createAvatarElement);
 

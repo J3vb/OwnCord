@@ -16,10 +16,7 @@
  * inside code" all fall out of one rule set instead of fighting each other.
  */
 
-import {
-  formatDiscordTimestamp,
-  type TimestampStyle,
-} from "../../features/messaging/discordTimestamp";
+import { formatDiscordTimestamp, type TimestampStyle } from "./discordTimestamp";
 
 /** Emphasis-style wrappers, in the flavour Discord uses. */
 export type InlineStyle = "strong" | "em" | "underline" | "strike" | "spoiler";

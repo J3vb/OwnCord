@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { savePref } from "../../lib/prefs/preferences";
-import { refreshTimeFormat } from "../../lib/text/timeFormat";
+import { savePref } from "../prefs/preferences";
+import { refreshTimeFormat } from "./timeFormat";
 import type { TimestampStyle } from "./discordTimestamp";
 
 /** Loaded inside the tests so the module's own tables are part of what they check. */

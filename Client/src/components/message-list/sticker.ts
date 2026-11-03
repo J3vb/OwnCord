@@ -22,7 +22,7 @@
 import { createElement } from "@lib/dom";
 import { observeMedia, playMedia } from "@lib/prefs/mediaVisibility";
 import { loadPref } from "@lib/prefs/preferences";
-import { isAnimatedImage } from "@lib/ui/animatedStill";
+import { isAnimatedImage, motionReduced } from "@lib/ui/animatedStill";
 import type { MessageStickerInfo } from "@lib/types";
 import { showStillFrame } from "../../features/messaging/emojiStill";
 import { stickersText } from "../../i18n/stickers";
@@ -32,11 +32,6 @@ import {
   recoverEvictedImage,
   resolveServerUrl,
 } from "../../features/messaging/content/attachments";
-
-/** Whether motion is reduced, by the OS setting or the in-app toggle (os-motion.ts owns the class). */
-export function motionReduced(): boolean {
-  return document.documentElement.classList.contains("reduced-motion");
-}
 
 /**
  * Hand an animated sticker to the GIF pause logic once it has loaded, with

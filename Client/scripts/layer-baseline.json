@@ -87,12 +87,6 @@
       "features/voice/voiceSession.ts": 2,
       "stores/voice.store.ts": 2
     },
-    "lib/net/logout.ts": {
-      "stores/auth.store.ts": 1
-    },
-    "lib/text/markdown.ts": {
-      "features/messaging/discordTimestamp.ts": 1
-    },
     "lib/text/mentions.ts": {
       "stores/auth.store.ts": 1,
       "stores/members.store.ts": 1

@@ -20,7 +20,7 @@ import {
 } from "../../src/features/messaging/content/contentParser";
 import { extractUrls } from "../../src/features/messaging/content/media";
 import { markdownToPlainText, parseBlocks, parseInline } from "../../src/lib/text/markdown";
-import { formatDiscordTimestamp } from "../../src/features/messaging/discordTimestamp";
+import { formatDiscordTimestamp } from "../../src/lib/text/discordTimestamp";
 import { refreshTimeFormat, saveTimeFormat } from "../../src/lib/text/timeFormat";
 import { replaceEmojiShortcodes } from "../../src/features/messaging/shortcodes";
 import { loadEmojiCatalog } from "../../src/features/messaging/emojiCatalog";
