@@ -270,6 +270,7 @@ func (h *Hub) flushRoleRefresh(ctx context.Context) time.Duration {
 // joins. Kept out of Run so hub.go stays within its size ceiling.
 func (h *Hub) startSweepWorkers() {
 	h.sweeps.Go(h.runRemovedVoiceWatch)
+	h.sweeps.Go(h.runVoiceResumeChecksLife)
 	h.sweeps.Go(h.runChannelActivityLife)
 	h.sweeps.Go(h.runRoleRefreshLife)
 }

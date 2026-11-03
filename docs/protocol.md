@@ -2973,6 +2973,14 @@ Quality presets:
 { "type": "voice_leave", "payload": {} }
 ```
 
+It ends only the membership held by the socket that sends it; on a socket with
+no membership it does nothing. A client that left voice while its socket was
+down sends it once after the next `auth_ok`, before applying `ready`, so a
+membership the resumed socket took back from the grace window ends. The server
+also asks the SFU for the join 10 s after a resume takes over a membership,
+and again 20 s later if it was missing; missing both times, the membership ends
+and `voice_leave` goes out, the owner included.
+
 ### voice_leave (Server -> Client, broadcast)
 
 ```json

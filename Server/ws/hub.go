@@ -126,7 +126,10 @@ type Hub struct {
 	voiceSweepInFlight, voiceReconcileInFlight, afkSweepInFlight atomic.Bool
 
 	voiceReconcile voiceReconcileState // polling reconciler (voice_reconcile.go)
-	voiceReg       voiceRegistry       // voice membership lock and grace window (voice_registry.go)
+	// voiceResumeChecks are the SFU checks of memberships resumed sockets took over
+	// (voice_resume_check.go).
+	voiceResumeChecks voiceResumeChecks
+	voiceReg          voiceRegistry // voice membership lock and grace window (voice_registry.go)
 
 	voiceRejoinBlocks voiceRejoinBlockState // voice_rejoin_block.go
 

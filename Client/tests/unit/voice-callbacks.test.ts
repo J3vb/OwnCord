@@ -78,6 +78,11 @@ import {
 import type { WsClient } from "../../src/lib/ws";
 import { noteJoinFailed, noteJoinSucceeded } from "../../src/features/voice/joinBackoff";
 import { takeJoinRefusal } from "../../src/features/voice/joinRequest";
+import {
+  clearOwedLeave,
+  isVoiceLeaveOwed,
+  sendOwedVoiceLeave,
+} from "../../src/features/voice/leaveOwed";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -537,6 +542,35 @@ describe("createSidebarVoiceCallbacks", () => {
     expect(mockVoiceSessionLeave).toHaveBeenCalledWith(false);
     expect(mockLeaveVoiceChannel).toHaveBeenCalled();
     expect(ws.send).toHaveBeenCalledWith({ type: "voice_leave", payload: {} });
+  });
+
+  it.each([
+    [
+      "widget hang-up",
+      () => {
+        const { ws, cbs } = widgetWith(makeVoiceState({ currentChannelId: 10 }));
+        cbs.onDisconnect();
+        return ws;
+      },
+    ],
+    [
+      "sidebar leave",
+      () => {
+        const { ws, cbs } = sidebarCallbacks();
+        cbs.onVoiceLeave();
+        return ws;
+      },
+    ],
+  ])("a %s while reconnecting owes the leave to the next handshake", (_name, leave) => {
+    clearOwedLeave();
+    mockUiGetState.mockReturnValue({ connectionStatus: "reconnecting" });
+    const ws = leave();
+    expect(ws.send).not.toHaveBeenCalled();
+    expect(isVoiceLeaveOwed()).toBe(true);
+
+    mockVoiceStoreGetState.mockReturnValue(makeVoiceState({ voiceStatus: "idle" }));
+    expect(sendOwedVoiceLeave(ws)).toBe(true);
+    expect(ws.send).toHaveBeenCalledExactlyOnceWith({ type: "voice_leave", payload: {} });
   });
 
   it("onVoiceJoin waits out the backoff after a failed join instead of re-sending voice_join", () => {

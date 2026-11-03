@@ -56,6 +56,7 @@ vi.mock("../../stores/voice.store", () => ({
   setLocalCamera: vi.fn(),
   setLocalScreenshare: vi.fn(),
   setVoiceStatus: vi.fn(),
+  voiceStore: { getState: () => ({ currentChannelId: null, voiceStatus: "idle" }) },
 }));
 vi.mock("../../lib/prefs/preferences", () => ({
   loadPref: (key: string, fallback: unknown) =>

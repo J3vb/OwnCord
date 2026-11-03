@@ -31,6 +31,7 @@ import {
   takeRefusedJoin,
 } from "./joinRequest";
 import { noteVoiceMoved, noteAfkMove, takeAfkMove, clearAfkMove } from "./moveHint";
+import { settleVoiceLeave } from "./leaveOwed";
 import { channelsStore } from "../../stores/channels.store";
 import { membersStore, memberDisplayName } from "../../stores/members.store";
 import { livekitSession, cancelVoiceRejoin } from "../connection/dispatchContext";
@@ -399,6 +400,7 @@ export function handleVoiceLeave(payload: Payload<"voice_leave">, clock: Reconne
   // Leaving after an AFK move was noted ends the move; the leave that
   // precedes the voice_moved frame arrives before the note is made.
   if (isSelf) clearAfkMove();
+  if (isSelf) settleVoiceLeave(payload.channel_id);
   // Notify E2EE state machine so key holder can rotate the room key, and
   // (when applicable) tear down the media session — both through one lazy
   // import so the two effects cannot land in different ticks.
