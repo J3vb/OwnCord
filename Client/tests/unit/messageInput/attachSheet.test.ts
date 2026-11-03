@@ -135,9 +135,22 @@ describe("MessageInput attach sheet", () => {
     it("closes when Tab moves focus out of it", () => {
       const { comp, attachBtn } = mountUploader();
       attachBtn.click();
+      const textarea = container.querySelector<HTMLTextAreaElement>(".msg-textarea")!;
+      menuTile("files").dispatchEvent(
+        new FocusEvent("focusout", { bubbles: true, relatedTarget: textarea }),
+      );
+      expect(container.querySelector(".attach-menu")).toBeNull();
+      comp.destroy?.();
+    });
+
+    it("stays open while focus moves to +, so the click on + closes it", () => {
+      const { comp, attachBtn } = mountUploader();
+      attachBtn.click();
       menuTile("files").dispatchEvent(
         new FocusEvent("focusout", { bubbles: true, relatedTarget: attachBtn }),
       );
+      expect(container.querySelector(".attach-menu")).not.toBeNull();
+      attachBtn.click();
       expect(container.querySelector(".attach-menu")).toBeNull();
       comp.destroy?.();
     });

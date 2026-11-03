@@ -7,6 +7,7 @@
 import { devices, type Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
 import { buildTauriMockScript, navigateToMainPageReady, BASE_SESSION_ROUTES } from "./helpers";
+import { Q1, findUnnamedControls, focusIndicator, textContrast } from "./support/accessibility";
 
 async function start(page: Page): Promise<void> {
   await page.addInitScript(
@@ -60,6 +61,28 @@ test.describe("desktop", () => {
     await expect(menu).toHaveCount(0);
     await expect(page.locator(".attach-btn")).toBeFocused();
   });
+
+  test("a second click on + closes the menu", async ({ page }) => {
+    await page.locator(".attach-btn").click();
+    await expect(page.locator(".attach-menu")).toBeVisible();
+    await page.locator(".attach-btn").click();
+    await expect(page.locator(".attach-menu")).toHaveCount(0);
+  });
+
+  test("the open menu meets the shared accessibility checks", async ({ page }) => {
+    await page.locator(".attach-btn").focus();
+    await page.keyboard.press("Enter");
+    const menu = page.locator(".attach-menu");
+    await expect(menu.locator(".attach-sheet-tile")).toHaveCount(3);
+    expect(await findUnnamedControls(menu)).toEqual([]);
+    await page.keyboard.press("ArrowRight");
+    const ring = await focusIndicator(page);
+    expect(ring.problems).toEqual([]);
+    expect(ring.ratio).toBeGreaterThanOrEqual(Q1.focus);
+    for (const label of await menu.locator(".attach-sheet-tile > span:last-child").all()) {
+      expect((await textContrast(label)).ratio).toBeGreaterThanOrEqual(Q1.text);
+    }
+  });
 });
 
 const { defaultBrowserType: _pixelBrowser, ...pixel7 } = devices["Pixel 7"];
@@ -96,7 +119,9 @@ test.describe("phone", () => {
     await expect(row.locator(".mic-btn")).toBeHidden();
   });
 
-  test("+ opens the sheet with the file sources and Poll", async ({ page }) => {
+  test("+ opens the sheet with the file sources and Poll, and it meets the shared checks", async ({
+    page,
+  }) => {
     await page.locator(".attach-btn").tap();
     const sheet = page.locator("[data-testid='attach-sheet']");
     await expect(sheet.locator(".attach-sheet-tile")).toHaveText([
@@ -105,5 +130,9 @@ test.describe("phone", () => {
       "Files",
       "Poll",
     ]);
+    expect(await findUnnamedControls(sheet)).toEqual([]);
+    for (const label of await sheet.locator(".attach-sheet-tile > span:last-child").all()) {
+      expect((await textContrast(label)).ratio).toBeGreaterThanOrEqual(Q1.text);
+    }
   });
 });

@@ -249,7 +249,10 @@ export function createAttachPickers(options: AttachPickersOptions): AttachPicker
       "focusout",
       (e) => {
         const next = e.relatedTarget;
-        if (next instanceof Node && !menu.contains(next)) closeMenu();
+        // Focus moving to "+" is a click on it, which toggles the menu itself.
+        if (!(next instanceof Node) || menu.contains(next)) return;
+        if (trigger?.contains(next) === true) return;
+        closeMenu();
       },
       { signal: life.signal },
     );
