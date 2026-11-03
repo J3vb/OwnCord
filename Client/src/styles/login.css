@@ -1472,6 +1472,14 @@
   .form-container {
     max-width: none;
   }
+  /* The two-factor screen keeps the sign-in card's side gutter. */
+  .totp-overlay {
+    box-sizing: border-box;
+    padding: 20px 16px;
+  }
+  .totp-card {
+    width: 100%;
+  }
   .settings-gear {
     top: calc(env(safe-area-inset-top, 0px) + 16px);
     right: 20px;

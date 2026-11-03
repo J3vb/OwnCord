@@ -494,3 +494,14 @@
     display: flex;
   }
 }
+
+/* The own profile card as a sheet: the sheet draws the frame. */
+.self-profile-sheet .self-profile-card {
+  position: static;
+  width: auto;
+  max-width: none;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+}
