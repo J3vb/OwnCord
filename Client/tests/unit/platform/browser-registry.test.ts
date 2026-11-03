@@ -39,6 +39,7 @@ describe("browser platform registry", () => {
         "pushToTalk",
         "serverScope",
         "settings",
+        "shareSheet",
         "socket",
         "systemIdle",
         "trayStatus",
@@ -164,6 +165,9 @@ describe("browser platform registry", () => {
     expect(await b.mediaDetector.detect({ hidden: [] })).toEqual({ state: "none" });
     expect(() => b.trayStatus.onStatusChange(() => undefined)()).not.toThrow();
     expect(b.callService.update({ active: true, camera: true })).toBeUndefined();
+    // No share sheet in a tab: Share is not offered, and a call refuses.
+    expect(b.shareSheet.available).toBe(false);
+    await expect(b.shareSheet.shareText("x")).rejects.toThrow();
 
     // The four contracts a Settings control sits on say they are unavailable.
     expect(b.updater.available).toBe(false);

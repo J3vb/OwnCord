@@ -78,14 +78,26 @@ function toggleUse(theme: CustomTheme, active: boolean): void {
   }
 }
 
+/** Save the theme as a .css file, or in the Android app hand it to the share
+ *  sheet (mail, Drive, a chat), which is how a phone passes a file on. */
 async function exportTheme(theme: CustomTheme): Promise<void> {
+  const share = desktop.shareSheet.available;
   try {
-    const path = await desktop.fileSaver.pickSaveLocation(themeFileName(theme.name));
+    const name = themeFileName(theme.name);
+    const bytes = new TextEncoder().encode(theme.css);
+    if (share) {
+      await desktop.shareSheet.shareFile(name, bytes);
+      return;
+    }
+    const path = await desktop.fileSaver.pickSaveLocation(name);
     if (path === null) return;
-    await desktop.fileSaver.writeFile(path, new TextEncoder().encode(theme.css));
+    await desktop.fileSaver.writeFile(path, bytes);
   } catch (err) {
-    log.error("Export custom theme failed", { error: String(err) });
-    showToast(t("appearance.customThemes.exportFailed"), "error");
+    log.error("Export custom theme failed", { share, error: String(err) });
+    showToast(
+      t(share ? "appearance.customThemes.shareFailed" : "appearance.customThemes.exportFailed"),
+      "error",
+    );
   }
 }
 
@@ -291,8 +303,17 @@ export function buildCustomThemeSection(signal: AbortSignal): HTMLElement {
           signal,
         ),
         button(
-          t("appearance.customThemes.export"),
-          t("appearance.customThemes.exportAria", { name: theme.name }),
+          t(
+            desktop.shareSheet.available
+              ? "appearance.customThemes.share"
+              : "appearance.customThemes.export",
+          ),
+          t(
+            desktop.shareSheet.available
+              ? "appearance.customThemes.shareAria"
+              : "appearance.customThemes.exportAria",
+            { name: theme.name },
+          ),
           () => void exportTheme(theme),
           signal,
         ),

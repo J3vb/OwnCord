@@ -22,6 +22,8 @@ mod external_open;
 mod fallback_crypto;
 #[cfg(target_os = "linux")]
 mod file_transfer;
+#[cfg(any(target_os = "android", test))]
+mod files;
 mod game_activity;
 mod http_pool;
 mod http_proxy;
@@ -214,7 +216,8 @@ pub fn run() {
     #[cfg(target_os = "android")]
     let builder = builder
         .plugin(update_commands::android::init())
-        .plugin(call_service::init());
+        .plugin(call_service::init())
+        .plugin(files::init());
 
     // Desktop-only convenience plugins. window-state auto-saves/restores window
     // geometry (off-screen correction lives in the frontend); autostart backs
@@ -294,6 +297,12 @@ pub fn run() {
             update_commands::android::download_and_install_update,
             #[cfg(target_os = "android")]
             call_service::set_call_service,
+            #[cfg(target_os = "android")]
+            files::android::save_file,
+            #[cfg(target_os = "android")]
+            files::android::share_file,
+            #[cfg(target_os = "android")]
+            files::android::share_text,
             ptt::ptt_start,
             ptt::ptt_stop,
             ptt::ptt_set_key,
