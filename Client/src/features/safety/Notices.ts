@@ -82,9 +82,10 @@ export function createNoticesBanner(opts: NoticesBannerOptions): HTMLElement {
   // The Safety tab's appeals use this page's client (buildSafetyTab takes only
   // a signal). The tab lives inside this page, so it never outlives it.
   tabApi = api;
+  // Named (so a region) only while it shows notices: empty, it stays rendered
+  // for its status region but is no landmark.
   const root = createElement("section", {
     class: "moderation-notices",
-    "aria-label": t("banner.label"),
     "data-testid": "moderation-notices",
   });
   const list = createElement("div", { class: "moderation-notices-list" });
@@ -168,6 +169,8 @@ export function createNoticesBanner(opts: NoticesBannerOptions): HTMLElement {
     }
     if (arrived.length > 0) setText(announcer, arrived.join(" "));
     root.classList.toggle("visible", notices.length > 0);
+    if (notices.length > 0) root.setAttribute("aria-label", t("banner.label"));
+    else root.removeAttribute("aria-label");
     if (lostFocusAt !== null) {
       const next = [...rows.values()][Math.min(lostFocusAt, rows.size - 1)];
       if (next !== undefined) next.ack.focus();
