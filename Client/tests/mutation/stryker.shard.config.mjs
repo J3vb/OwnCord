@@ -217,6 +217,7 @@ export const shards = {
     "src/lib/prefs/hideMutedChannels.ts",
     "src/lib/text/statusChoices.ts",
     "src/lib/text/ime.ts",
+    "src/lib/diagnostics/eventCodes.ts",
   ],
   "lib-rest-2": [
     "src/lib/presence/autoIdle.ts",
