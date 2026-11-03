@@ -9,10 +9,12 @@ import { createElement } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { createZoomPan, PAN_MIN_SCALE, bindTouchZoom } from "@lib/ui/zoomPan";
 import { showToast } from "@lib/ui/toast";
+import { announceSaved } from "@lib/ui/savedNotice";
 import { desktop } from "../../../platform/desktop";
 import type { ExternalImageSource } from "../../../platform/contracts/externalContent";
 import { mediaControlsText } from "../../../i18n/mediaControls";
 import { messageStatusText } from "../../../i18n/messageStatus";
+import { fileTransferText } from "../../../i18n/fileTransfer";
 import type { ImageMenuTarget } from "../../../components/message-list/imageMenu";
 import {
   fetchExternalImage,
@@ -75,15 +77,38 @@ export interface LightboxHandle {
   close(): void;
 }
 
-/** Download a file via Tauri HTTP plugin and save to disk with native dialog.
- *  `fs:allow-write-file` is statically scoped to `$APPLOG` (nothing covers app
- *  data); the save dialog grants the one path the user chose at runtime, so the
- *  dialog itself is the boundary for the download. */
-export async function downloadFile(url: string, filename: string): Promise<void> {
+/** What a file button does with the bytes: save them, or (where the host
+ *  has a share sheet) hand them to another app. */
+export type FileAction = "save" | "share";
+
+function failedText(action: FileAction, filename: string): string {
+  return action === "share"
+    ? fileTransferText("shareFailed", { filename })
+    : messageStatusText("file.downloadFailed", { filename });
+}
+
+/** Saves and shares in flight, by action and URL: a second tap while the first
+ *  still runs does nothing, so a slow download is not saved twice. */
+const inFlight = new Set<string>();
+
+/** Download a file via Tauri HTTP plugin and save to disk with native dialog,
+ *  or open the share sheet on it. `fs:allow-write-file` is statically scoped
+ *  to `$APPLOG` (nothing covers app data); the save dialog grants the one path
+ *  the user chose at runtime, so the dialog itself is the boundary for the
+ *  download. The Android app has no dialog: the host saves into shared
+ *  storage and a toast says where. */
+export async function downloadFile(
+  url: string,
+  filename: string,
+  action: FileAction = "save",
+): Promise<void> {
+  const key = `${action} ${url}`;
+  if (inFlight.has(key)) return;
+  inFlight.add(key);
   try {
-    // Show native save dialog with suggested filename
-    const filePath = await desktop.fileSaver.pickSaveLocation(filename);
-    if (filePath === null) return; // User cancelled
+    // The dialog opens before the fetch, so it answers the click at once.
+    const filePath = action === "save" ? await desktop.fileSaver.pickSaveLocation(filename) : null;
+    if (action === "save" && filePath === null) return; // User cancelled
 
     // Fetch file data — server downloads go through the cert-pinned HTTP proxy
     // with the session bearer token (the files endpoint requires auth).
@@ -94,11 +119,17 @@ export async function downloadFile(url: string, filename: string): Promise<void>
       return;
     }
 
-    const buffer = await res.arrayBuffer();
-    await desktop.fileSaver.writeFile(filePath, new Uint8Array(buffer));
+    const data = new Uint8Array(await res.arrayBuffer());
+    if (filePath === null) await desktop.shareSheet.shareFile(filename, data);
+    else announceSaved(await desktop.fileSaver.writeFile(filePath, data), filename);
   } catch (err) {
-    log.error("Download failed", { filename, error: String(err) });
-    showToast(messageStatusText("file.downloadFailed", { filename }), "error");
+    log.error(action === "share" ? "Share failed" : "Download failed", {
+      filename,
+      error: String(err),
+    });
+    showToast(failedText(action, filename), "error");
+  } finally {
+    inFlight.delete(key);
   }
 }
 
@@ -115,9 +146,13 @@ function loadImageMenu(): Promise<ImageMenuModule> {
   });
 }
 
-/** Save an image whose bytes are already in the webview. */
-export function saveImageBytes(src: string, url: string): Promise<void> {
-  return loadImageMenu().then((m) => m.saveImageBytes(src, url));
+/** Save (or share) an image whose bytes are already in the webview. */
+export function saveImageBytes(
+  src: string,
+  url: string,
+  action: FileAction = "save",
+): Promise<void> {
+  return loadImageMenu().then((m) => m.saveImageBytes(src, url, action));
 }
 
 /**
@@ -151,6 +186,18 @@ export function bindImageMenu(target: ImageMenuTarget, signal?: AbortSignal): vo
 }
 
 // -- Lightbox -----------------------------------------------------------------
+
+/** A labelled Save or Share button of the Android app's lightbox bar. */
+function barButton(
+  bar: HTMLElement,
+  label: string,
+  icon: "download" | "share-2",
+): HTMLButtonElement {
+  const btn = createElement("button", { class: "image-lightbox-bar-btn", type: "button" });
+  btn.append(createIcon(icon, 20), createElement("span", {}, label));
+  bar.appendChild(btn);
+  return btn;
+}
 
 // Store the cleanup function for the active lightbox so rapid reopens
 // properly remove document-level listeners from the previous instance.
@@ -243,11 +290,17 @@ export function openImageLightbox(
     toolbar.appendChild(btn);
     return btn;
   };
-  const downloadBtn = lightboxButton(
-    "image-lightbox-action",
-    mediaControlsText("lightbox.download"),
-    "download",
-  );
+  // In the Android app Save and Share sit under the image as labelled
+  // buttons a thumb can hit; the toolbar keeps Close and Open original.
+  const phoneBar = desktop.shareSheet.available
+    ? createElement("div", { class: "image-lightbox-actions" })
+    : null;
+  const downloadBtn =
+    phoneBar === null
+      ? lightboxButton("image-lightbox-action", mediaControlsText("lightbox.download"), "download")
+      : barButton(phoneBar, mediaControlsText("lightbox.save"), "download");
+  const shareBtn =
+    phoneBar === null ? null : barButton(phoneBar, mediaControlsText("lightbox.share"), "share-2");
   const openBtn =
     originalOf(current) === null
       ? null
@@ -257,11 +310,17 @@ export function openImageLightbox(
           "external-link",
         );
   const closeBtn = lightboxButton("image-lightbox-close", mediaControlsText("lightbox.close"), "x");
-  // DOM order is the visual order left to right, and so the Tab order.
-  const controls: HTMLButtonElement[] =
-    openBtn === null ? [downloadBtn, closeBtn] : [downloadBtn, openBtn, closeBtn];
+  // DOM order is the visual order left to right (the phone bar under the
+  // toolbar), and so the Tab order.
+  const controls: HTMLButtonElement[] = [
+    ...(phoneBar === null ? [downloadBtn] : []),
+    ...(openBtn === null ? [] : [openBtn]),
+    closeBtn,
+    ...(shareBtn === null ? [] : [downloadBtn, shareBtn]),
+  ];
 
   overlay.appendChild(toolbar);
+  if (phoneBar !== null) overlay.appendChild(phoneBar);
 
   const view = createZoomPan({
     min: 0.5,
@@ -309,18 +368,19 @@ export function openImageLightbox(
   // Pinch and drag on a touch screen, where the page itself does not zoom.
   bindTouchZoom(overlay, view, disposable.signal);
 
-  // One save path for the menu's Save Image and the Download button. It reads
-  // the current image once, at the click, so a step cannot redirect it.
-  const save = (): Promise<void> => {
+  // One path for the menu's Save Image and Share Image and the Download (or
+  // Save and Share) buttons. It reads the current image once, at the click,
+  // so a step cannot redirect it.
+  const transfer = (action: FileAction): Promise<void> => {
     const c = current;
     const sourceUrl = sourceOf(c);
     const shown = img.src;
-    if (sourceUrl !== null && isServerUrl(sourceUrl)) return downloadFile(sourceUrl, c.alt);
-    if (sourceUrl === null) return saveImageBytes(shown, "");
+    if (sourceUrl !== null && isServerUrl(sourceUrl)) return downloadFile(sourceUrl, c.alt, action);
+    if (sourceUrl === null) return saveImageBytes(shown, "", action);
     // The broker's bytes, not img.src: a lightbox opened from a frozen GIF
     // shows a one-frame preview.
     return fetchExternalImage({ url: sourceUrl }).then((bytes) =>
-      saveImageBytes(bytes ?? shown, sourceUrl),
+      saveImageBytes(bytes ?? shown, sourceUrl, action),
     );
   };
   bindImageMenu(
@@ -338,30 +398,35 @@ export function openImageLightbox(
             ? () => fetchImageAsObjectUrl(sourceUrl)
             : () => fetchExternalImage({ url: sourceUrl });
       },
-      save,
+      save: () => transfer("save"),
+      share: () => transfer("share"),
     },
     disposable.signal,
   );
 
   // aria-disabled, not disabled: a disabled button drops focus and with it the
   // Tab cycle, which keys off the focused control.
-  let saving = false;
-  downloadBtn.addEventListener("click", (e) => {
-    e.stopPropagation();
-    if (saving) return;
-    saving = true;
-    const filename = current.alt;
-    downloadBtn.setAttribute("aria-disabled", "true");
-    save()
-      .catch((err: unknown) => {
-        log.error("Lightbox download failed", { filename, error: String(err) });
-        showToast(messageStatusText("file.downloadFailed", { filename }), "error");
-      })
-      .finally(() => {
-        saving = false;
-        downloadBtn.removeAttribute("aria-disabled");
-      });
-  });
+  const bindTransfer = (btn: HTMLButtonElement, action: FileAction): void => {
+    let busy = false;
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (busy) return;
+      busy = true;
+      const filename = current.alt;
+      btn.setAttribute("aria-disabled", "true");
+      transfer(action)
+        .catch((err: unknown) => {
+          log.error("Lightbox download failed", { filename, action, error: String(err) });
+          showToast(failedText(action, filename), "error");
+        })
+        .finally(() => {
+          busy = false;
+          btn.removeAttribute("aria-disabled");
+        });
+    });
+  };
+  bindTransfer(downloadBtn, "save");
+  if (shareBtn !== null) bindTransfer(shareBtn, "share");
   openBtn?.addEventListener("click", (e) => {
     e.stopPropagation();
     const originalUrl = originalOf(current);

@@ -289,7 +289,7 @@ export const SETTINGS_SEARCH_INDEX: Readonly<Record<SearchableTab, () => readonl
     s("diagnostics.limitation"),
     s("diagnostics.micCheck"),
     s("logs.getHelp"),
-    s("logs.bundleNote"),
+    platformText(s("logs.bundleNote"), s("logs.bundleNoteShare")),
     s("logs.clientLogs"),
     s("logs.voiceDiagnostics"),
     s("logs.filter"),

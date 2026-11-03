@@ -7,10 +7,12 @@ export const imageMenuText = defineCatalog("imageMenu", {
   copyLink: "Copy Link",
   openLink: "Open Link",
   save: "Save Image",
+  share: "Share Image",
   copied: "Image copied",
   copyFailed: "Couldn't copy the image",
   linkCopied: "Link copied",
   linkCopyFailed: "Couldn't copy the link",
   openFailed: "Couldn't open the link",
   saveFailed: "Couldn't save the image",
+  shareFailed: "Couldn't share the image",
 });

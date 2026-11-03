@@ -44,6 +44,11 @@ import { atReactionLimit } from "./reactions";
 import { copyThenToast } from "@lib/ui/clipboard";
 import { isPhoneLayout } from "@lib/ui/bottomSheet";
 import { openMessageSheet } from "./messageSheet";
+import { createLogger } from "@lib/logger";
+import { showToast } from "@lib/ui/toast";
+import { desktop } from "../../platform/desktop";
+
+const log = createLogger("message-menu");
 
 /** The phone sheet's quick row has room for one more emoji than the menu's. */
 const PHONE_QUICK_REACTIONS = QUICK_REACTIONS + 1;
@@ -82,6 +87,13 @@ function rowOf(id: number): HTMLElement | null {
 
 function copyText(text: string): void {
   copyThenToast(text, messageMenuText("copied"), messageMenuText("copyFailed"));
+}
+
+function shareText(text: string): void {
+  desktop.shareSheet.shareText(text).catch((err: unknown) => {
+    log.warn("Share message failed", { error: String(err) });
+    showToast(messageMenuText("shareFailed"), "error");
+  });
 }
 
 /** The selected text, when the selection starts and ends inside `row`. */
@@ -273,6 +285,14 @@ function buildItems(
       label: messageMenuText("copyText"),
       testId: "msg-menu-copy-text",
       onClick: act((m) => copyText(m.content)),
+    });
+  }
+  // The phone's share sheet: the text, links included, to another app.
+  if (phone && msg.content.trim() !== "" && desktop.shareSheet.available) {
+    items.push({
+      label: messageMenuText("share"),
+      testId: "msg-menu-share",
+      onClick: act((m) => shareText(m.content)),
     });
   }
   if (gates.pin.shown) {

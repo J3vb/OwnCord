@@ -472,6 +472,8 @@ export function renderInlineImage(url: string): HTMLDivElement {
     link: url,
     full: () => fetchExternalImage({ url }),
     save: () => fetchExternalImage({ url }).then((src) => saveImageBytes(src ?? img.src, url)),
+    share: () =>
+      fetchExternalImage({ url }).then((src) => saveImageBytes(src ?? img.src, url, "share")),
   });
 
   function load(): void {

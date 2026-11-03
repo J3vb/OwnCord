@@ -134,6 +134,7 @@ export const shards = {
     "src/lib/ui/backHistory.ts",
     "src/lib/ui/swipe.ts",
     "src/lib/ui/zoomPan.ts",
+    "src/lib/ui/savedNotice.ts",
     "src/lib/voice/ptt.ts",
     "src/lib/voice/voiceTokenManager.ts",
     "src/features/channels/voiceRow.view.ts",

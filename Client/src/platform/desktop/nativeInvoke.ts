@@ -3,7 +3,7 @@
 // missing bridge) comes back as a value or a typed error, never as the raw
 // string the host rejected with. `local/invoke-needs-try-catch` is an error
 // everywhere in the folder but this file.
-import { invoke, type InvokeArgs } from "@tauri-apps/api/core";
+import { invoke, type InvokeArgs, type InvokeOptions } from "@tauri-apps/api/core";
 
 /** A host command that failed. `reason` is what the host rejected with
  *  (usually a string, sometimes a `{stage, message}` object), kept for callers
@@ -33,10 +33,19 @@ function reasonText(reason: unknown): string {
 }
 
 /** Runs `command`; never rejects. The command is sent before the first await,
- *  so fire-and-forget callers keep their order with the host. */
-export async function tryInvoke<T>(command: string, args?: InvokeArgs): Promise<NativeResult<T>> {
+ *  so fire-and-forget callers keep their order with the host. `options`
+ *  carries headers, for a command whose body is raw bytes. */
+export async function tryInvoke<T>(
+  command: string,
+  args?: InvokeArgs,
+  options?: InvokeOptions,
+): Promise<NativeResult<T>> {
   try {
-    const value = await (args === undefined ? invoke<T>(command) : invoke<T>(command, args));
+    const value = await (args === undefined
+      ? invoke<T>(command)
+      : options === undefined
+        ? invoke<T>(command, args)
+        : invoke<T>(command, args, options));
     return { ok: true, value };
   } catch (reason) {
     return { ok: false, error: new NativeCallError(command, reason) };
@@ -45,8 +54,12 @@ export async function tryInvoke<T>(command: string, args?: InvokeArgs): Promise<
 
 /** Runs `command` for a contract whose callers handle the failure: rejects
  *  with a `NativeCallError`. */
-export async function invokeOrThrow<T>(command: string, args?: InvokeArgs): Promise<T> {
-  const result = await tryInvoke<T>(command, args);
+export async function invokeOrThrow<T>(
+  command: string,
+  args?: InvokeArgs,
+  options?: InvokeOptions,
+): Promise<T> {
+  const result = await tryInvoke<T>(command, args, options);
   if (!result.ok) throw result.error;
   return result.value;
 }

@@ -1,14 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { showToast, pickSaveLocation, writeFile } = vi.hoisted(() => ({
+const { showToast, pickSaveLocation, writeFile, shareSheet } = vi.hoisted(() => ({
   showToast: vi.fn(),
   pickSaveLocation: vi.fn<(name: string) => Promise<string | null>>(),
-  writeFile: vi.fn<(path: string, data: Uint8Array) => Promise<void>>(),
+  writeFile: vi.fn<(path: string, data: Uint8Array) => Promise<null>>(),
+  shareSheet: {
+    available: false,
+    shareFile: vi.fn<(name: string, data: Uint8Array) => Promise<void>>(),
+  },
 }));
 
 vi.mock("@lib/ui/toast", () => ({ showToast }));
 vi.mock("../../src/platform/desktop", () => ({
-  desktop: { fileSaver: { pickSaveLocation, writeFile } },
+  desktop: { fileSaver: { pickSaveLocation, writeFile }, shareSheet },
 }));
 
 import { expectConsole } from "../helpers/console";
@@ -186,12 +190,28 @@ describe("custom theme section", () => {
   it("exports the CSS through the file saver", async () => {
     saveCustomThemes([{ id: "a1", name: "Night Owl!", css: ".a{}" }]);
     pickSaveLocation.mockResolvedValue("/tmp/night-owl.css");
-    writeFile.mockResolvedValue();
+    writeFile.mockResolvedValue(null);
     mount();
     buttonByText(section, "Export").click();
     await vi.waitFor(() => expect(writeFile).toHaveBeenCalled());
     expect(pickSaveLocation).toHaveBeenCalledWith("night-owl.css");
     expect(new TextDecoder().decode(writeFile.mock.calls[0]?.[1])).toBe(".a{}");
+  });
+
+  it("shares the CSS in the Android app, which has no save dialog", async () => {
+    shareSheet.available = true;
+    shareSheet.shareFile.mockResolvedValue(undefined);
+    try {
+      saveCustomThemes([{ id: "a1", name: "Night Owl!", css: ".a{}" }]);
+      mount();
+      buttonByText(section, "Share").click();
+      await vi.waitFor(() => expect(shareSheet.shareFile).toHaveBeenCalled());
+      expect(shareSheet.shareFile.mock.calls[0]?.[0]).toBe("night-owl.css");
+      expect(new TextDecoder().decode(shareSheet.shareFile.mock.calls[0]?.[1])).toBe(".a{}");
+      expect(pickSaveLocation).not.toHaveBeenCalled();
+    } finally {
+      shareSheet.available = false;
+    }
   });
 
   it("shows a toast when the export fails", async () => {
