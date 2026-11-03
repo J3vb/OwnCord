@@ -423,6 +423,8 @@ export function mountLayout(st: PageState, pg: PageApi, ms: MountScope): void {
     returnToChannel: ms.sidebar.returnToChannel,
     // The opener is gone (the Requests entry leaves with DM mode).
     fallbackFocus: ms.focusReachable,
+    messageUser: ms.sidebar.messageUser,
+    openSidebar: () => ms.chatAreaResult.sidebarToggle.click(),
   });
 
   // The member column: always present, hidden until MemberColumn shows it.

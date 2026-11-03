@@ -358,6 +358,27 @@ for (const profile of PROFILES) {
       await expect(drawer(page).locator(".channel-list .channel-item").first()).toBeVisible();
     });
 
+    test("Direct Messages puts People behind the drawer, and its menu button reopens it", async ({
+      page,
+    }) => {
+      await signIn(page);
+      await page.locator("[data-testid='sidebar-toggle']").tap();
+      await rail(page).locator("[data-testid='server-rail-home']").tap();
+      await expect(drawer(page).locator(".dm-sidebar-header")).toBeVisible();
+      await page
+        .locator("[data-testid='sidebar-drawer-backdrop']")
+        .tap({ position: { x: 380, y: 300 } });
+      await expect(drawer(page)).not.toHaveClass(/drawer-open/);
+
+      await expect(page.getByTestId("people-home")).toBeVisible();
+      await expect(page.getByTestId("chat-area")).toBeHidden();
+      // Active now needs the room a phone does not have.
+      await expect(page.getByTestId("people-active")).toBeHidden();
+      await noHorizontalScroll(page);
+      await page.getByTestId("feature-view-menu").tap();
+      await expect(drawer(page)).toHaveClass(/drawer-open/);
+    });
+
     test("the user bar's Switch server button gives way to the rail", async ({ page }) => {
       await signIn(page);
       await page.locator("[data-testid='sidebar-toggle']").tap();

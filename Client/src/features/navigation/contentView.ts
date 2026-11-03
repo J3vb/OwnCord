@@ -44,6 +44,10 @@ export interface ContentNavigatorOptions {
   readonly returnToChannel: () => void;
   /** Focus something reachable when the opener is gone. Runs after the channel remounts. */
   readonly fallbackFocus: () => void;
+  /** Open (or create) the 1:1 DM with a member, as the member list's Message does. */
+  readonly messageUser?: (userId: number) => void;
+  /** Open the narrow-width sidebar drawer: the chat header's toggle is hidden with the chat. */
+  readonly openSidebar?: () => void;
 }
 
 export interface ContentNavigator {
@@ -56,10 +60,16 @@ export interface ContentNavigator {
   destroy(): void;
 }
 
-const TITLE: Readonly<Record<ContentViewId, "requests.title" | "moderation.title">> = {
+const TITLE: Readonly<
+  Record<ContentViewId, "requests.title" | "moderation.title" | "people.title">
+> = {
   requests: "requests.title",
   moderation: "moderation.title",
+  people: "people.title",
 };
+
+/** Views that belong to DM mode: leaving DM mode closes them. */
+const DM_MODE_VIEWS: ReadonlySet<ContentViewId> = new Set(["requests", "people"]);
 
 export function createContentNavigator(opts: ContentNavigatorOptions): ContentNavigator {
   const { destinations, chatArea } = opts;
@@ -75,6 +85,7 @@ export function createContentNavigator(opts: ContentNavigatorOptions): ContentNa
 
   function builderFor(id: ContentViewId): FeatureViewBuilder | null {
     if (id === "requests") return destinations.requests?.build ?? null;
+    if (id === "people") return destinations.people?.build ?? null;
     if (!canModerateMembers()) return null;
     return destinations.moderation?.build ?? null;
   }
@@ -149,6 +160,18 @@ export function createContentNavigator(opts: ContentNavigatorOptions): ContentNa
       { class: "ch-name feature-view-title", id: titleId, tabindex: "-1" },
       name,
     );
+    if (opts.openSidebar !== undefined) {
+      const menuBtn = createElement("button", {
+        type: "button",
+        class: "ch-sidebar-toggle",
+        "aria-label": navigationText("view.menu"),
+        title: navigationText("view.menu"),
+        "data-testid": "feature-view-menu",
+      });
+      menuBtn.appendChild(createIcon("menu", 18));
+      menuBtn.addEventListener("click", opts.openSidebar, { signal: owner.signal });
+      header.appendChild(menuBtn);
+    }
     const tools = createElement("div", { class: "ch-tools" });
     const closeBtn = createElement("button", {
       type: "button",
@@ -179,7 +202,9 @@ export function createContentNavigator(opts: ContentNavigatorOptions): ContentNa
     );
 
     try {
-      body.appendChild(build({ signal: owner.signal, close, api: opts.api }));
+      body.appendChild(
+        build({ signal: owner.signal, close, api: opts.api, messageUser: opts.messageUser }),
+      );
     } catch (err) {
       log.error("Feature view failed to build", { id, error: String(err) });
       close();
@@ -199,6 +224,31 @@ export function createContentNavigator(opts: ContentNavigatorOptions): ContentNa
       if (id === null || current === null) return;
       teardown();
       if (channelsStore.getState().channels.get(id)?.type !== "dm") opts.forgetChannel();
+    },
+  );
+
+  // DM mode with no conversation on screen shows the People view, so the
+  // channel the user left is never mistaken for a DM. Store notifications run
+  // after the caller's synchronous work, so a DM opened in the same step as
+  // the mode switch is already active here and the view stays shut.
+  page.onStoreChange(
+    uiStore,
+    (s) => s.sidebarMode,
+    (mode) => {
+      if (page.signal.aborted) return;
+      if (mode === "channels") {
+        if (current === null || !DM_MODE_VIEWS.has(current.id)) return;
+        teardown();
+        // A caller that left DM mode without choosing a channel would leave
+        // the column empty: take the back path instead.
+        if (channelsStore.getState().activeChannelId === null) opts.returnToChannel();
+        return;
+      }
+      if (current !== null && DM_MODE_VIEWS.has(current.id)) return;
+      const st = channelsStore.getState();
+      const active = st.activeChannelId !== null ? st.channels.get(st.activeChannelId) : undefined;
+      if (active?.type === "dm") return;
+      open("people", null);
     },
   );
 

@@ -140,8 +140,22 @@ export function mountMembersAndMode(sc: SidebarScope): void {
       // "Message Requests (N)" at the top of DM mode. N is the
       // pending-request count and is never folded into unread.
       const requests = sc.opts.destinations?.requests;
+      const section = createElement("div", { class: "dm-requests-section" });
+      if (sc.opts.destinations?.people !== undefined) {
+        const people = createElement(
+          "button",
+          {
+            type: "button",
+            class: "sidebar-dm-view-all dm-requests-entry",
+            "data-testid": "dm-people-entry",
+          },
+          navigationText("people.title"),
+        );
+        people.addEventListener("click", () => sc.opts.onOpenView?.("people", people));
+        sc.channelModeUnsubs.push(trackCurrentView(people, "people"));
+        section.appendChild(people);
+      }
       if (requests !== undefined) {
-        const section = createElement("div", { class: "dm-requests-section" });
         const entry = createElement("button", {
           type: "button",
           class: "sidebar-dm-view-all dm-requests-entry",
@@ -161,8 +175,8 @@ export function mountMembersAndMode(sc: SidebarScope): void {
         sc.channelModeUnsubs.push(requests.pending.subscribe(renderEntry));
         sc.channelModeUnsubs.push(trackCurrentView(entry, "requests"));
         section.appendChild(entry);
-        sc.contentSlot.appendChild(section);
       }
+      if (section.childElementCount > 0) sc.contentSlot.appendChild(section);
 
       const dmSidebar = sc.buildDmSidebar();
       dmSidebar.mount(innerSlot);
