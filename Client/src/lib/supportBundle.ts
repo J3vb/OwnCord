@@ -264,18 +264,22 @@ export function buildSupportBundle(src: SupportBundleSources): Uint8Array {
 }
 
 /**
- * Ask where to save, then read the sources and write the bundle there.
+ * Ask where to save, then read the sources and write the bundle there. Where
+ * the host has a share sheet (the Android app) the bundle goes to it instead,
+ * so the user sends it straight to mail or Drive.
  * Resolves false when the user cancels the dialog; nothing is read then.
  */
 export async function exportSupportBundle(
-  desktop: Pick<Platform, "fileSaver" | "appMetadata" | "logFiles" | "settings">,
+  desktop: Pick<Platform, "fileSaver" | "appMetadata" | "logFiles" | "settings" | "shareSheet">,
   voiceDiagnostics: unknown,
   shareDiagnostics?: unknown,
 ): Promise<boolean> {
   const now = new Date();
   const stamp = now.toISOString().slice(0, 19).replace(/[:T]/g, "-");
-  const path = await desktop.fileSaver.pickSaveLocation(`owncord-support-${stamp}.zip`);
-  if (path === null) return false;
+  const name = `owncord-support-${stamp}.zip`;
+  const share = desktop.shareSheet.available;
+  const path = share ? null : await desktop.fileSaver.pickSaveLocation(name);
+  if (!share && path === null) return false;
   const [appVersion, logs, nativeLogs, snapshot] = await Promise.all([
     desktop.appMetadata.getVersion().catch(() => "unknown"),
     desktop.logFiles.readAll(),
@@ -296,6 +300,7 @@ export async function exportSupportBundle(
     shareDiagnostics,
     now,
   });
-  await desktop.fileSaver.writeFile(path, bundle);
+  if (path === null) await desktop.shareSheet.shareFile(name, bundle);
+  else await desktop.fileSaver.writeFile(path, bundle);
   return true;
 }

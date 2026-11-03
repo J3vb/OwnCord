@@ -160,12 +160,18 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
 
     // Support bundle: lazily loaded so the zip writer stays off the
     // startup path. Everything is read and written on this machine.
+    // The Android app has no save dialog: the bundle goes to the share sheet.
+    const shareBundle = desktop.shareSheet.available;
     const bundleBtn = createElement(
       "button",
       { class: "ac-btn", type: "button", "data-testid": "export-support-bundle" },
-      t("logs.exportBundle"),
+      t(shareBundle ? "logs.shareBundle" : "logs.exportBundle"),
     );
-    const bundleNote = createElement("p", { class: "setting-desc" }, t("logs.bundleNote"));
+    const bundleNote = createElement(
+      "p",
+      { class: "setting-desc" },
+      t(shareBundle ? "logs.bundleNoteShare" : "logs.bundleNote"),
+    );
     const bundleStatus = createElement("div", {
       class: "setting-desc",
       role: "status",
@@ -181,7 +187,7 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
             exportSupportBundle(desktop, getSessionDebugInfo(), getShareDiagnostics()),
           )
           .then((saved) => {
-            bundleStatus.textContent = saved ? t("logs.bundleSaved") : "";
+            bundleStatus.textContent = saved && !shareBundle ? t("logs.bundleSaved") : "";
           })
           .catch((err: unknown) => {
             bundleStatus.textContent = t("logs.exportFailed", {

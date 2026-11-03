@@ -13,6 +13,7 @@ import { showContextMenu, type ContextMenuItem } from "@lib/ui/contextMenu";
 import { Disposable } from "@lib/disposable";
 import { createLogger } from "@lib/logger";
 import { showToast } from "@lib/ui/toast";
+import { announceSaved } from "@lib/ui/savedNotice";
 import { desktop } from "../../platform/desktop";
 import { imageMenuText } from "../../i18n/imageMenu";
 import { copyThenToast } from "@lib/ui/clipboard";
@@ -31,6 +32,9 @@ export interface ImageMenuTarget {
   readonly full?: () => Promise<string | null>;
   /** Save the full image to a location the user picks. */
   readonly save: () => Promise<void>;
+  /** Hand the full image to the share sheet; offered only where the host has
+   *  one (the Android app). */
+  readonly share?: () => Promise<void>;
 }
 
 /** Above the lightbox (z-index 600), so the menu opens over it. */
@@ -142,6 +146,14 @@ function menuItems(target: ImageMenuTarget): ContextMenuItem[] {
     testId: "image-menu-save",
     onClick: () => void target.save(),
   });
+  const { share } = target;
+  if (share !== undefined && desktop.shareSheet.available) {
+    items.push({
+      label: imageMenuText("share"),
+      testId: "image-menu-share",
+      onClick: () => void share(),
+    });
+  }
   return items;
 }
 
@@ -179,15 +191,29 @@ export function imageFilename(url: string, mime: string): string {
 }
 
 /** Save an image whose bytes are already in the webview (a broker blob: URL)
- *  through the native save dialog. */
-export async function saveImageBytes(src: string, url: string): Promise<void> {
+ *  through the native save dialog, or hand it to the share sheet. */
+export async function saveImageBytes(
+  src: string,
+  url: string,
+  action: "save" | "share" = "save",
+): Promise<void> {
   try {
     const blob = await (await fetch(src)).blob();
-    const path = await desktop.fileSaver.pickSaveLocation(imageFilename(url, blob.type));
+    const name = imageFilename(url, blob.type);
+    if (action === "share") {
+      await desktop.shareSheet.shareFile(name, new Uint8Array(await blob.arrayBuffer()));
+      return;
+    }
+    const path = await desktop.fileSaver.pickSaveLocation(name);
     if (path === null) return;
-    await desktop.fileSaver.writeFile(path, new Uint8Array(await blob.arrayBuffer()));
+    announceSaved(
+      await desktop.fileSaver.writeFile(path, new Uint8Array(await blob.arrayBuffer())),
+      name,
+    );
   } catch (err) {
-    log.error("Save image failed", { error: String(err) });
-    showToast(imageMenuText("saveFailed"), "error");
+    log.error(action === "share" ? "Share image failed" : "Save image failed", {
+      error: String(err),
+    });
+    showToast(imageMenuText(action === "share" ? "shareFailed" : "saveFailed"), "error");
   }
 }

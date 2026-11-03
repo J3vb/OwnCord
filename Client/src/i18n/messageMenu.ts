@@ -21,4 +21,6 @@ export const messageMenuText = defineCatalog("messageMenu", {
   quickReactions: "Quick reactions",
   copied: "Copied",
   copyFailed: "Couldn't copy the text",
+  share: "Share",
+  shareFailed: "Couldn't share the message",
 });

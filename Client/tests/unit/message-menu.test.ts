@@ -22,6 +22,7 @@ import {
 } from "../helpers/message-actions-fixtures";
 import { resetMembersState } from "../helpers/storeResets";
 import "../helpers/resizeObserverStub";
+import { desktop } from "../../src/platform/desktop";
 
 const MENU = ".message-context-menu";
 
@@ -350,6 +351,23 @@ describe("message right-click menu", () => {
       expect(sheetItem("msg-menu-copy-message-link")).not.toBeNull();
       sheetItem("msg-menu-copy-link")!.click();
       expect(writeText).toHaveBeenCalledWith("https://example.com/page");
+    });
+
+    it("offers Share in the Android app and hands the text to the share sheet", async () => {
+      vi.spyOn(desktop.shareSheet, "available", "get").mockReturnValue(true);
+      const share = vi.spyOn(desktop.shareSheet, "shareText").mockResolvedValue(undefined);
+      mount([makeMessage({ content: "release notes <https://example.com/2.7>" })]);
+      await press(text());
+      sheetItem("msg-menu-share")!.click();
+      expect(share).toHaveBeenCalledWith("release notes <https://example.com/2.7>");
+    });
+
+    it("offers no Share where the host has no share sheet", async () => {
+      vi.spyOn(desktop.shareSheet, "available", "get").mockReturnValue(false);
+      mount([makeMessage({ content: "hello" })]);
+      await press(text());
+      expect(sheetItem("msg-menu-copy-text")).not.toBeNull();
+      expect(sheetItem("msg-menu-share")).toBeNull();
     });
 
     it("a message with two different links offers only the one pressed", async () => {
