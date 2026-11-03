@@ -215,7 +215,9 @@ export function createGroupMemberPanelController(
     created.mount(document.body);
   }
 
-  function openFor(channelId: number, focus: boolean): boolean {
+  /** `phone` is read when the user asked, so a layout flip during the load
+   *  cannot change whether Back is claimed. */
+  function openFor(channelId: number, focus: boolean, phone = isPhoneLayout()): boolean {
     const slot = opts.getSlot();
     if (slot === null || activeGroupId() !== channelId) return false;
     const token = {};
@@ -259,7 +261,7 @@ export function createGroupMemberPanelController(
         });
         panel.mount(mountSlot);
         bind(channelId);
-        if (isPhoneLayout()) {
+        if (phone) {
           backClaim = claimBack(() => {
             backClaim = null;
             close();
@@ -299,10 +301,15 @@ export function createGroupMemberPanelController(
     }
     const id = activeGroupId();
     if (id === null) return;
-    if (openFor(id, true) && !phone) savePref(GROUP_MEMBERS_PREF, true);
+    if (openFor(id, true, phone) && !phone) savePref(GROUP_MEMBERS_PREF, true);
   }
 
   function syncToActive(): void {
+    // Off the phone layout the panel sits beside the chat: Back is not its.
+    if (!isPhoneLayout()) {
+      backClaim?.release();
+      backClaim = null;
+    }
     const id = activeGroupId();
     if (id === null || isPhoneLayout() || !loadPref<boolean>(GROUP_MEMBERS_PREF, true)) {
       close();

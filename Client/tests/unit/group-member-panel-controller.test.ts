@@ -214,6 +214,17 @@ describe("GroupMemberPanelController", () => {
       expect(Object.keys(localStorage).some((k) => k.includes("dmMembersOpen"))).toBe(false);
     });
 
+    it("turning onto the desktop layout gives Back up and keeps the panel", async () => {
+      activate(10);
+      ctrl.toggle();
+      await settle();
+      expect(history.state).not.toBeNull();
+      usePhone(false);
+      ctrl.syncToActive();
+      expect(panelEl()).not.toBeNull();
+      await vi.waitFor(() => expect(history.state).toBeNull());
+    });
+
     it("Back closes the open panel", async () => {
       activate(10);
       ctrl.toggle();
