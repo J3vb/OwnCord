@@ -101,6 +101,10 @@ if (isAndroidHost()) {
   void import("./features/voice/backgroundCall")
     .then((m) => m.startBackgroundCall(new Disposable().signal))
     .catch((e: unknown) => log.warn("Background call service failed to start", e));
+  // Pause the camera while the app is in the background, resume on return.
+  void import("./features/voice/backgroundCamera")
+    .then((m) => m.startBackgroundCamera(new Disposable().signal))
+    .catch((e: unknown) => log.warn("Background camera pause failed to start", e));
 }
 
 const appEl = document.getElementById("app");

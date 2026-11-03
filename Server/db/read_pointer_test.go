@@ -287,3 +287,26 @@ func TestMoveReadPointer_BlockedAuthorReceiptsNotCounted(t *testing.T) {
 	}
 	wantRP(t, f.move(t, db.MarkUnread, f.msgs[1]), f.msgs[0], 2, 0)
 }
+
+// A trailing deleted message keeps the two channel bounds apart: a read up to
+// any id may land on it, a read at latest stops at the newest live message.
+func TestMoveReadPointer_TrailingDeletedMessageSplitsBounds(t *testing.T) {
+	f := newRPFixture(t, 4)
+	f.exec(t, `UPDATE messages SET deleted = 1 WHERE id = ?`, f.msgs[3])
+
+	wantRP(t, f.move(t, db.ReadAtLatest, 0), f.msgs[2], 0, 0)
+	wantRP(t, f.move(t, db.ReadUpTo, 1<<40), f.msgs[3], 0, 0)
+	// At latest never moves the pointer back from the deleted message.
+	wantRP(t, f.move(t, db.ReadAtLatest, 0), f.msgs[3], 0, 0)
+}
+
+// An empty channel and one with only deleted messages give a zero live bound.
+func TestMoveReadPointer_NoLiveMessages(t *testing.T) {
+	f := newRPFixture(t, 0)
+	wantRP(t, f.move(t, db.ReadAtLatest, 0), 0, 0, 0)
+
+	g := newRPFixture(t, 2)
+	g.exec(t, `UPDATE messages SET deleted = 1 WHERE channel_id = ?`, g.ch)
+	wantRP(t, g.move(t, db.ReadAtLatest, 0), 0, 0, 0)
+	wantRP(t, g.move(t, db.ReadUpTo, 1<<40), g.msgs[1], 0, 0)
+}

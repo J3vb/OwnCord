@@ -53,6 +53,7 @@ export const shards = {
     "src/features/voice/joinRequest.ts",
     "src/lib/voice/watchRequest.ts",
     "src/features/voice/backgroundCall.ts",
+    "src/features/voice/backgroundCamera.ts",
     "src/features/voice/talkSlot.ts",
     "src/features/voice/cameraMenu.ts",
     "src/features/voice/autoPlayCameras.ts",
@@ -218,6 +219,7 @@ export const shards = {
     "src/lib/prefs/hideMutedChannels.ts",
     "src/lib/text/statusChoices.ts",
     "src/lib/text/ime.ts",
+    "src/lib/diagnostics/eventCodes.ts",
   ],
   "lib-rest-2": [
     "src/lib/presence/autoIdle.ts",

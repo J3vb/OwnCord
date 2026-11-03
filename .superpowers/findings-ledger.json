@@ -1,5 +1,5 @@
 {
-  "nextId": 539,
+  "nextId": 540,
   "findings": [
     {
       "id": "OC-0001",
@@ -12427,6 +12427,29 @@
     },
     {
       "id": "OC-0538",
+      "title": "Every mark-read walked the whole channel inside the writer transaction to find its newest message ids",
+      "file": "Server/db/read_pointer.go",
+      "line": 90,
+      "severity": "medium",
+      "why": "MoveReadPointer read both channel bounds with one MAX(CASE WHEN deleted = 0 ...) statement, which cannot seek either index, so it fetched every message row of the channel while holding the single writer connection and the mention lock (68 ms at 100k messages).",
+      "repro": "Seed a channel with 100,000 messages and time a mark_read: the bounds statement alone takes tens of milliseconds and every chat send queues behind it.",
+      "evidence": "Server/db/unread_index_test.go (TestMoveReadPointer_BoundsPlansUseIndexes), Server/db/read_pointer_test.go (TestMoveReadPointer_TrailingDeletedMessageSplitsBounds).",
+      "suggestedFix": "Read the newest message and the newest live message with two MAX reads, one on idx_messages_channel and one on idx_messages_channel_live, in the same transaction.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/db/unread_index_test.go",
+        "revertProof": "fail (the plan test sees a non-covering index walk on the old statement)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-03",
+      "hunt": "server-review-2026-11-03",
+      "lens": "ws-chat",
+      "finder": "claude",
+      "fixedDate": "2026-11-03"
+    },
+    {
+      "id": "OC-0539",
       "title": "A voice leave made while the chat socket was down left a ghost voice membership after the socket resumed",
       "file": "Server/ws/voice_grace.go",
       "line": 330,
