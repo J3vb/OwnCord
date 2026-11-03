@@ -7,7 +7,12 @@ import { Disposable } from "@lib/disposable";
 import { isImeCommit } from "@lib/text/ime";
 import { isAndroidApp } from "../features/voice/native/platform";
 import { dialogOpen } from "@lib/ui/dialogOpen";
-import { isPhoneLayout, openBottomSheet, type BottomSheet } from "@lib/ui/bottomSheet";
+import {
+  isPhoneLayout,
+  onPhoneLayoutChange,
+  openBottomSheet,
+  type BottomSheet,
+} from "@lib/ui/bottomSheet";
 import { createElement, appendChildren, setOwnedTimeout } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/text/safeRender";
@@ -16,7 +21,7 @@ import { claimComposer, focusComposer } from "../features/messaging/activeCompos
 import type { PickedMention } from "@lib/text/pickedMentions";
 import { FORMAT_MARKERS, wrapWithMarker } from "../features/messaging/markdownMarkers";
 import { authStore } from "@stores/auth.store";
-import { pollsEnabled, stickersEnabled } from "@lib/net/serverCapabilities";
+import { pollsEnabled, stickersEnabled, voiceMessagesEnabled } from "@lib/net/serverCapabilities";
 import { onPrefChange } from "@lib/prefs/preferences";
 import {
   COMPOSER_BUTTON_PREF_KEYS,
@@ -272,6 +277,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     charCounter: null,
     uploadErrorId: `composer-refusal-${++nextComposerId}`,
     openPicker: null,
+    attachHasActions: () => false,
     togglePickerOf: null,
     mentionPopup: null,
     pickedMentions: [],
@@ -343,20 +349,6 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       "+",
     );
 
-    // File pickers via attach button: a sheet with the camera on a phone.
-    if (st.options.onUploadFile !== undefined) {
-      const pickers = createAttachPickers({
-        onFile: (file) => void api.handlePasteFile(file),
-        canAttach: () => st.disabledReason === null && !uploadsDisabledByServer(),
-        signal: st.signal,
-      });
-      attachBtn.addEventListener("click", pickers.open, { signal: st.signal });
-      st.openPicker = pickers.openFiles;
-      st.root?.append(...pickers.inputs);
-    } else {
-      attachBtn.setAttribute("disabled", "true");
-      attachBtn.title = messagingText("attach.unavailable");
-    }
     st.textarea = createElement("textarea", {
       class: "msg-textarea",
       placeholder: api.idlePlaceholder(),
@@ -427,6 +419,44 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
         : null;
     micBtn?.appendChild(createIcon("mic", 20));
     micBtn?.setAttribute("hidden", "");
+    // File pickers via attach button: a sheet with the camera on a phone, where
+    // Poll and Voice message join it so the row stays "+", text and send.
+    if (st.options.onUploadFile !== undefined) {
+      const pickers = createAttachPickers({
+        onFile: (file) => void api.handlePasteFile(file),
+        canAttach: () => st.disabledReason === null && !uploadsDisabledByServer(),
+        signal: st.signal,
+        actions: [
+          {
+            id: "poll",
+            icon: "chart-column",
+            label: messagingText("attach.poll"),
+            available: () =>
+              pollBtn !== null && st.disabledReason === null && composerButtonShown("poll"),
+            run: () => pollBtn?.click(),
+          },
+          {
+            id: "voice",
+            icon: "mic",
+            label: messagingText("attach.voice"),
+            available: () =>
+              micBtn !== null &&
+              st.disabledReason === null &&
+              !uploadsDisabledByServer() &&
+              voiceMessagesEnabled() &&
+              composerButtonShown("voice"),
+            run: () => micBtn?.click(),
+          },
+        ],
+      });
+      attachBtn.addEventListener("click", pickers.open, { signal: st.signal });
+      st.openPicker = pickers.openFiles;
+      st.attachHasActions = pickers.hasActions;
+      st.root?.append(...pickers.inputs);
+    } else {
+      attachBtn.setAttribute("disabled", "true");
+      attachBtn.title = messagingText("attach.unavailable");
+    }
     // Register interactive controls so the disabled state can toggle them.
     st.controlButtons.length = 0;
     st.controlButtons.push(sendBtn, emojiBtn, gifBtn);
@@ -607,8 +637,10 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       closing.destroy();
       if (!returnFocus) return;
       const btn = tabButton(tab);
-      // A button the user hid in settings cannot take focus; the textarea can.
+      // A button the user hid in settings (or the phone row left out) cannot
+      // take focus; the phone's one expression button or the textarea can.
       if (btn !== null && !btn.hidden) btn.focus();
+      else if (!emojiBtn.hidden) emojiBtn.focus();
       else st.textarea?.focus();
     }
 
@@ -779,7 +811,16 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       }
     }
 
-    emojiBtn.addEventListener("click", () => toggleTab("emoji"), { signal: st.signal });
+    // On a phone the smiley is the one expression button: it opens on the
+    // first tab the user keeps in the bar.
+    const expressionTab = (): ExpressionTab => {
+      if (!isPhoneLayout() || composerButtonShown("emoji")) return "emoji";
+      if (composerButtonShown("gif") && !st.gifUnavailable && st.options.gifApi !== undefined) {
+        return "gif";
+      }
+      return stickerBtn !== null && composerButtonShown("sticker") ? "sticker" : "emoji";
+    };
+    emojiBtn.addEventListener("click", () => toggleTab(expressionTab()), { signal: st.signal });
     gifBtn.addEventListener("click", () => toggleTab("gif"), { signal: st.signal });
     stickerBtn?.addEventListener("click", () => toggleTab("sticker"), { signal: st.signal });
 
@@ -812,15 +853,26 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     if (micBtn !== null) inputBox.appendChild(micBtn);
     appendChildren(inputBox, st.charCounter, sendBtn);
     // Settings → Text & Images can hide each of these; the switch applies live.
+    // A phone row has no room for them: the smiley stands for all three
+    // expression tabs, and Poll and the mic move to the "+" sheet.
     const applyButtonPrefs = (): void => {
-      emojiBtn.hidden = !composerButtonShown("emoji");
-      gifBtn.hidden = !composerButtonShown("gif");
-      if (stickerBtn !== null) stickerBtn.hidden = !composerButtonShown("sticker");
-      if (pollBtn !== null) pollBtn.hidden = !composerButtonShown("poll");
+      const phone = isPhoneLayout();
+      const anyExpression =
+        composerButtonShown("emoji") ||
+        composerButtonShown("gif") ||
+        (stickerBtn !== null && composerButtonShown("sticker"));
+      emojiBtn.hidden = phone ? !anyExpression : !composerButtonShown("emoji");
+      const emojiLabel = messagingText(phone ? "expression.label" : "emoji.label");
+      emojiBtn.setAttribute("aria-label", emojiLabel);
+      emojiBtn.title = phone ? emojiLabel : "";
+      gifBtn.hidden = phone || !composerButtonShown("gif");
+      if (stickerBtn !== null) stickerBtn.hidden = phone || !composerButtonShown("sticker");
+      if (pollBtn !== null) pollBtn.hidden = phone || !composerButtonShown("poll");
       api.applyDisabledState();
     };
     applyButtonPrefs();
     onPrefChange(COMPOSER_BUTTON_PREF_KEYS, applyButtonPrefs, st.signal);
+    onPhoneLayoutChange(applyButtonPrefs, st.signal);
     st.slowModeNoteEl = createElement("div", {
       class: "composer-slow-note",
       "data-testid": "slow-mode-note",

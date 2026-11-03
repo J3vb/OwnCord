@@ -51,6 +51,26 @@ const {
 describe("createChannelController", () => {
   useChannelControllerHarness();
 
+  describe("DM composer placeholder", () => {
+    it("addresses a 1:1 DM to the person and a group by its name, a channel by #", () => {
+      mockMembersStoreGetState.mockReturnValue({ members: new Map() });
+      mockDmStoreGetState.mockReturnValue({ channels: [dmSummary([dmUser(5, "alice")])] });
+      createChannelController(makeOpts()).mountChannel(42, "alice", "dm");
+      expect(mocks.capturedMessageInputOpts.placeholder).toBe("Message @alice");
+
+      mockDmStoreGetState.mockReturnValue({
+        channels: [
+          dmSummary([dmUser(5, "alice"), dmUser(6, "bob")], { name: "Crew", isGroup: true }),
+        ],
+      });
+      createChannelController(makeOpts()).mountChannel(42, "Crew", "dm");
+      expect(mocks.capturedMessageInputOpts.placeholder).toBe("Message Crew");
+
+      createChannelController(makeOpts()).mountChannel(7, "general", "text");
+      expect(mocks.capturedMessageInputOpts.placeholder).toBeUndefined();
+    });
+  });
+
   describe("DM channel header", () => {
     it("updates chat header for DM channel with recipient status", () => {
       mockDmStoreGetState.mockReturnValue({

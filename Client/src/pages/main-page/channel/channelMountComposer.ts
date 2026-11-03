@@ -13,6 +13,8 @@ import { createTypingIndicator } from "@components/TypingIndicator";
 import { getChannelMessages } from "@stores/messages.store";
 import { canManageMessages } from "@lib/permissions";
 import { blocksStore, dmComposerBlockReason } from "@stores/blocks.store";
+import { dmStore, dmDisplayName } from "@stores/dm.store";
+import { composerPlaceholder } from "../../../features/messaging/composerPlaceholder";
 import { membersStore } from "@stores/members.store";
 import { channelsStore } from "@stores/channels.store";
 import { uiStore } from "@stores/ui.store";
@@ -33,10 +35,19 @@ export function mountComposer(st: ChannelState, cc: ChannelApi, ms: MountScope):
 
   st.typingIndicator.mount(st.slots.typingSlot);
 
-  // MessageInput
+  // MessageInput. A DM is addressed to a person ("Message @Ana"), a group by its name.
+  const dm =
+    ms.channelType === "dm"
+      ? dmStore.getState().channels.find((c) => c.channelId === ms.channelId)
+      : undefined;
+  const dmPlaceholder =
+    dm === undefined
+      ? undefined
+      : composerPlaceholder(dm.isGroup ? "group" : "dm", dmDisplayName(dm));
   st.messageInput = createMessageInput({
     channelId: ms.channelId,
     channelName: ms.channelName,
+    ...(dmPlaceholder === undefined ? {} : { placeholder: dmPlaceholder }),
     gifApi: st.api,
     onSend: (
       content: string,

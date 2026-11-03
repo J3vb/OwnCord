@@ -90,7 +90,8 @@ export type IconName =
   | "ellipsis"
   | "gamepad-2"
   | "music"
-  | "zap";
+  | "zap"
+  | "chart-column";
 
 // ---------------------------------------------------------------------------
 // SVG inner content (innerHTML) — Lucide 0.x path data
@@ -265,6 +266,9 @@ const ICON_PATHS: Record<IconName, string> = {
 
   // Lightning bolt (auto-login indicator)
   zap: `<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>`,
+
+  // Bar chart: the composer sheet's Poll row
+  "chart-column": `<path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/>`,
 
   // Security shields — E2EE identity verification badges (F3 TOFU voice panel).
   shield: `<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/>`,
