@@ -3,6 +3,8 @@
  * plug into the existing shell. There is no new navigation rail.
  *
  * - Message Requests: "Message Requests (N)" at the top of DM mode.
+ * - People: "People" above it, and what DM mode shows while no conversation
+ *   is open (the Home button), in place of the channel the user left.
  * - Moderation: "Moderation" beside "Audit Log", shown only with
  *   MODERATE_MEMBERS, opening in the content area (not the browser).
  * - Safety: a Settings tab, which the notice banner links to.
@@ -29,10 +31,11 @@ import { buildForumView } from "../forums/view";
 import { pendingRequestCount } from "../message-requests/store";
 import { buildInbox } from "../message-requests/view";
 import { buildModerationCenter } from "../moderation/view";
+import { buildPeopleHome } from "../people-home/view";
 import { buildSafetyPane } from "../reports/safetyPane";
 
 /** A destination that opens in the content area, in place of the chat column. */
-export type ContentViewId = "requests" | "moderation";
+export type ContentViewId = "requests" | "moderation" | "people";
 
 export interface FeatureViewContext {
   /**
@@ -45,6 +48,8 @@ export interface FeatureViewContext {
   readonly close: () => void;
   /** The page's API client; the server authorizes every read behind a view. */
   readonly api: ApiClient;
+  /** Open (or create) the 1:1 DM with a member. Absent where no DMs can open. */
+  readonly messageUser?: (userId: number) => void;
 }
 
 /**
@@ -79,6 +84,8 @@ export interface CountSource {
 export interface NavigationDestinations {
   /** The inbox. `pending` is N for the entry label and the DM header badge. */
   readonly requests?: { readonly build: FeatureViewBuilder; readonly pending: CountSource };
+  /** DM mode's home: the server's members, who is online and who is active. */
+  readonly people?: { readonly build: FeatureViewBuilder };
   /** The Moderation Center. The open-report count belongs inside the view. */
   readonly moderation?: { readonly build: FeatureViewBuilder };
   /**
@@ -96,6 +103,7 @@ export interface NavigationDestinations {
 export const NAVIGATION_DESTINATIONS: NavigationDestinations = {
   requests: { build: buildInbox, pending: pendingRequestCount },
   moderation: { build: buildModerationCenter },
+  people: { build: buildPeopleHome },
   safety: { build: buildSafetyPane },
   forum: { build: buildForumView },
 };

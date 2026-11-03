@@ -16,7 +16,12 @@ import { channelsStore, setActiveChannel, setRoles, type Channel } from "@stores
 import { closeSettings, openSettings, setSidebarMode, uiStore } from "@stores/ui.store";
 import { applyReadyActiveChannel } from "../channels/wsHandlers";
 import type { Payload } from "../connection/dispatchContext";
-import { createContentNavigator, trackCurrentView, type ContentNavigator } from "./contentView";
+import {
+  createContentNavigator,
+  trackCurrentView,
+  type ContentNavigator,
+  type ContentNavigatorOptions,
+} from "./contentView";
 import type { FeatureViewContext, NavigationDestinations } from "./destinations";
 
 const GENERAL = 1;
@@ -107,8 +112,12 @@ let requests: InertView;
 let moderation: InertView;
 
 /** The sidebar's channelBeforeDm path, reduced to what the navigator calls. */
-function makeNavigator(destinations: NavigationDestinations): ContentNavigator {
+function makeNavigator(
+  destinations: NavigationDestinations,
+  extra: Pick<ContentNavigatorOptions, "messageUser" | "openSidebar"> = {},
+): ContentNavigator {
   const created = createContentNavigator({
+    ...extra,
     destinations,
     api: {} as ApiClient,
     chatArea,
@@ -733,5 +742,125 @@ describe("trackCurrentView on an entry that is built late", () => {
     expect(mine.getAttribute("aria-current")).toBe("page");
     expect(other.hasAttribute("aria-current")).toBe(false);
     for (const stop of stops) stop();
+  });
+});
+
+/** The DM sidebar's way into a conversation: DM mode and the DM in one step. */
+function selectDm(): void {
+  setSidebarMode("dms");
+  setActiveChannel(DM);
+}
+
+describe("the People view as DM mode's home", () => {
+  let people: InertView;
+  const messageUser = vi.fn();
+  const openSidebar = vi.fn();
+
+  beforeEach(() => {
+    nav.destroy();
+    people = inertView("people");
+    nav = makeNavigator(
+      {
+        requests: { build: requests.build, pending: { get: () => 0, subscribe: () => () => {} } },
+        moderation: { build: moderation.build },
+        people: { build: people.build },
+      },
+      { messageUser, openSidebar },
+    );
+  });
+
+  it("opens in place of the channel on screen when DM mode is entered", () => {
+    setSidebarMode("dms");
+    flush();
+
+    expect(uiStore.getState().activeView).toBe("people");
+    expect(nav.element.querySelector("[data-testid='inert-people']")).not.toBeNull();
+    expect(chatArea.style.display).toBe("none");
+    expect(channelsStore.getState().activeChannelId).toBeNull();
+    expect(returnTarget).toBe(GENERAL);
+  });
+
+  it("opens without taking focus, which stays where the user tapped", () => {
+    const home = opener();
+    home.focus();
+    setSidebarMode("dms");
+    flush();
+
+    expect(uiStore.getState().activeView).toBe("people");
+    expect(document.activeElement).toBe(home);
+  });
+
+  it("stays shut when a DM is opened in the same step as the mode switch", () => {
+    selectDm();
+    flush();
+
+    expect(uiStore.getState().activeView).toBeNull();
+    expect(people.contexts).toHaveLength(0);
+    expect(channelsStore.getState().activeChannelId).toBe(DM);
+    expect(chatArea.style.display).toBe("");
+  });
+
+  it("gives way to a DM chosen from it and keeps the way back", () => {
+    setSidebarMode("dms");
+    flush();
+    setActiveChannel(DM);
+    flush();
+
+    expect(uiStore.getState().activeView).toBeNull();
+    expect(nav.element.hasAttribute("role")).toBe(false);
+    expect(people.contexts[0]?.signal.aborted).toBe(true);
+    expect(returnTarget).toBe(GENERAL);
+  });
+
+  it("closes on leaving DM mode and lands on the channel the user left", () => {
+    setSidebarMode("dms");
+    flush();
+    setSidebarMode("channels");
+    setActiveChannel(returnTarget);
+    flush();
+
+    expect(uiStore.getState().activeView).toBeNull();
+    expect(chatArea.style.display).toBe("");
+    expect(channelsStore.getState().activeChannelId).toBe(GENERAL);
+  });
+
+  it("takes the back path when DM mode ends without a channel chosen", () => {
+    setSidebarMode("dms");
+    flush();
+    setSidebarMode("channels");
+    flush();
+
+    expect(uiStore.getState().activeView).toBeNull();
+    expect(channelsStore.getState().activeChannelId).toBe(GENERAL);
+  });
+
+  it("replaces a channel-mode view such as Moderation", () => {
+    nav.open("moderation", opener());
+    flush();
+    setSidebarMode("dms");
+    flush();
+
+    expect(uiStore.getState().activeView).toBe("people");
+    expect(moderation.contexts[0]?.signal.aborted).toBe(true);
+    expect(returnTarget).toBe(GENERAL);
+  });
+
+  it("leaves Message Requests open: it is already a DM-mode view", () => {
+    nav.open("requests", opener());
+    flush();
+    setSidebarMode("dms");
+    flush();
+
+    expect(uiStore.getState().activeView).toBe("requests");
+  });
+
+  it("hands the view the page's Message action and a drawer button", () => {
+    nav.open("people", opener());
+
+    people.contexts[0]?.messageUser?.(42);
+    expect(messageUser).toHaveBeenCalledWith(42);
+    nav.element.querySelector<HTMLButtonElement>("[data-testid='feature-view-menu']")?.click();
+    expect(openSidebar).toHaveBeenCalledOnce();
+    expect(nav.element.querySelector("h2")?.textContent).toBe("People");
   });
 });

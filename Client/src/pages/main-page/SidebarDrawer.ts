@@ -198,15 +198,44 @@ export function createSidebarDrawer(opts: SidebarDrawerOptions): SidebarDrawer {
   // this fires for a channel, a DM, the requests inbox, the Moderation Center
   // and Settings (where My reports lives).
   const destinationChosen = (): void => closeDrawer("destination");
-  owner.onStoreChange(channelsStore, (s) => s.activeChannelId, destinationChosen);
-  owner.onStoreChange(uiStore, (s) => s.activeView, destinationChosen);
+  // No channel (null) is a content view opening, which the view line handles.
+  owner.onStoreChange(
+    channelsStore,
+    (s) => s.activeChannelId,
+    (id) => {
+      if (id !== null) destinationChosen();
+    },
+  );
+  // People opens by itself as DM mode's home, while the DM list is still being
+  // chosen from: only a tap on its own entry closes the drawer for it.
+  owner.onStoreChange(
+    uiStore,
+    (s) => s.activeView,
+    (view) => {
+      if (view !== "people") {
+        destinationChosen();
+        return;
+      }
+      // The view claims Back as it opens; the drawer is on top, so its claim
+      // moves above the view's once every listener of this change has run.
+      queueMicrotask(() => {
+        const prev = backClaim;
+        if (!open || prev === null) return;
+        backClaim = claimBack(() => closeDrawer("dismiss"), owner.signal);
+        prev.release();
+      });
+    },
+  );
   owner.onStoreChange(uiStore, (s) => s.settingsOpen, destinationChosen);
 
   // A navigation row re-selected while it is already active changes no store,
   // so its click closes the drawer directly.
   owner.onEvent(sidebar, "click", (e: MouseEvent) => {
     const target = e.target;
-    if (target instanceof Element && target.closest("[data-channel-id], [data-testid='dm-entry']"))
+    if (
+      target instanceof Element &&
+      target.closest("[data-channel-id], [data-testid='dm-entry'], [data-testid='dm-people-entry']")
+    )
       closeDrawer("destination");
   });
 

@@ -36,7 +36,7 @@ async function mockTauriSessionWithDms(page: import("@playwright/test").Page): P
     httpRoutes: [
       ...BASE_SESSION_ROUTES,
       { pattern: "/pins", status: 200, body: MOCK_PINNED_MESSAGES },
-      { pattern: "POST /api/v1/dms", status: 200, body: MOCK_DM_CHANNELS[0] },
+      { pattern: "/api/v1/dms", method: "POST", status: 200, body: MOCK_DM_CHANNELS[0] },
       { pattern: "GET /api/v1/dms", status: 200, body: MOCK_DM_CHANNELS },
       { pattern: "DELETE /api/v1/dms/", status: 200, body: { success: true } },
     ],
@@ -131,6 +131,46 @@ test.describe("DM System — Sidebar Mode", () => {
 
     // Back header should be gone
     await expect(backHeader).not.toBeVisible();
+  });
+});
+
+test.describe("DM System — People home", () => {
+  test.beforeEach(async ({ page }) => {
+    await mockTauriSessionWithDms(page);
+    await page.goto("/");
+    await navigateToMainPageWithDms(page);
+  });
+
+  test("Home replaces the channel on screen with People", async ({ page }) => {
+    await expect(page.getByTestId("chat-area")).toBeVisible();
+    await openHome(page);
+
+    const view = page.getByTestId("feature-view");
+    await expect(view.getByRole("heading", { name: "People" })).toBeVisible({ timeout: 5_000 });
+    await expect(page.getByTestId("chat-area")).toBeHidden();
+    await expect(page.getByTestId("people-row-2")).toBeVisible();
+    await expect(page.getByTestId("people-row-3")).toBeVisible();
+    await expect(page.getByTestId("people-row-1")).toHaveCount(0);
+    await expect(page.getByTestId("dm-people-entry")).toHaveAttribute("aria-current", "page");
+  });
+
+  test("Message on People opens that DM", async ({ page }) => {
+    await openHome(page);
+    await page.getByTestId("people-message-2").click();
+
+    await expect(page.getByTestId("feature-view")).toBeHidden({ timeout: 5_000 });
+    await expect(page.getByTestId("chat-area")).toBeVisible();
+    await expect(dmRows(page).first()).toHaveClass(/active/);
+  });
+
+  test("Back to Server from People shows the channel again", async ({ page }) => {
+    await openHome(page);
+    await expect(page.getByTestId("people-home")).toBeVisible({ timeout: 5_000 });
+    await page.getByTestId("dm-back-header").click();
+
+    await expect(page.getByTestId("feature-view")).toBeHidden({ timeout: 5_000 });
+    await expect(page.getByTestId("chat-area")).toBeVisible();
+    await expect(page.locator(".channel-item").filter({ visible: true }).first()).toBeVisible();
   });
 });
 

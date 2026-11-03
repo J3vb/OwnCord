@@ -438,6 +438,9 @@ export const shards = {
     "src/features/reports/myReports.ts",
     "src/features/moderation/AppealDetail.ts",
     "src/lib/voice/livekitDiagnostics.ts",
+    "src/features/people-home/model.ts",
+    "src/features/people-home/PeopleHome.ts",
+    "src/features/people-home/view.ts",
   ],
   "safety-moderation-5": [
     "src/features/uploads/myUploadsTab.ts",

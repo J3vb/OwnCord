@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createSidebarDrawer } from "../../src/pages/main-page/SidebarDrawer";
 import type { SidebarDrawer } from "../../src/pages/main-page/SidebarDrawer";
 import { setActiveChannel } from "@stores/channels.store";
-import { closeSettings } from "@stores/ui.store";
+import { closeSettings, setActiveView, uiStore } from "@stores/ui.store";
+import { claimBack } from "@lib/ui/backHistory";
 import { closeBottomSheet, openBottomSheet } from "@lib/ui/bottomSheet";
 import { guarded, pressBack, settle } from "../helpers/backNav";
 
@@ -182,6 +183,25 @@ describe("the drawer on a phone", () => {
   });
 
   describe("Back", () => {
+    it("stays open over People and keeps Back for itself", async () => {
+      const s = setup();
+      drawer = s.drawer;
+      s.toggle.click();
+      const viewBack = vi.fn();
+      setActiveView("people");
+      uiStore.flush();
+      // The phone navigation claims Back for the view in the same notification.
+      const viewClaim = claimBack(viewBack);
+      await settle();
+      expect(s.sidebar.classList.contains("drawer-open")).toBe(true);
+
+      await pressBack();
+      expect(s.sidebar.classList.contains("drawer-open")).toBe(false);
+      expect(viewBack).not.toHaveBeenCalled();
+      viewClaim.release();
+      setActiveView(null);
+    });
+
     it("closes a drawer opened with the menu button", async () => {
       const s = setup();
       drawer = s.drawer;
