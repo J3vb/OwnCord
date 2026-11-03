@@ -79,7 +79,11 @@ function setup(initial: SessionState = { type: "idle" }) {
     setOnToast: vi.fn(),
   };
   const ws = { send: vi.fn() };
-  const e2ee = { keyProvider: { removeAllListeners: vi.fn() }, clearState: vi.fn() };
+  const e2ee = {
+    newKeyProvider: vi.fn(() => ({})),
+    releaseKeyProvider: vi.fn(),
+    clearState: vi.fn(),
+  };
   const host = {
     getState: () => state,
     setState: vi.fn((next: SessionState) => {
@@ -139,16 +143,28 @@ describe("syncModuleRooms", () => {
   });
 });
 
+const providerOf = (room: Room): unknown =>
+  (room as unknown as { options: { e2ee: { keyProvider: unknown } } }).options.e2ee.keyProvider;
+
 describe("createRoom", () => {
   it("replaces the previous room's E2EE worker and enables encryption", async () => {
-    const { lifecycle, e2ee } = setup();
+    const { lifecycle } = setup();
     const first = await lifecycle.createRoom(1);
     await lifecycle.createRoom(1);
     expect(workers).toHaveLength(2);
     expect(workers[0]!.terminate).toHaveBeenCalledOnce();
     expect(workers[1]!.terminate).not.toHaveBeenCalled();
-    expect(e2ee.keyProvider.removeAllListeners).toHaveBeenCalledTimes(2);
     expect(first.setE2EEEnabled).toHaveBeenCalledWith(true);
+  });
+
+  it("builds each room on its own key provider", async () => {
+    const { lifecycle, e2ee } = setup();
+    const first = await lifecycle.createRoom(1);
+    const second = await lifecycle.createRoom(1);
+    expect(e2ee.newKeyProvider).toHaveBeenCalledTimes(2);
+    expect(providerOf(first)).toBe(e2ee.newKeyProvider.mock.results[0]!.value);
+    expect(providerOf(second)).toBe(e2ee.newKeyProvider.mock.results[1]!.value);
+    expect(providerOf(first)).not.toBe(providerOf(second));
   });
 
   // The processor has to be on the microphone before it is published: a
@@ -203,6 +219,7 @@ describe("leaveVoice", () => {
     expect(ws.send).toHaveBeenCalledWith({ type: "voice_leave", payload: {} });
     expect(room.disconnect).toHaveBeenCalled();
     expect(e2ee.clearState).toHaveBeenCalled();
+    expect(e2ee.releaseKeyProvider).toHaveBeenCalledOnce();
     expect(workers[0]!.terminate).toHaveBeenCalledOnce();
     expect(host.clearPendingReconnectFields).toHaveBeenCalled();
     expect(host.setPendingMicrophoneRoom).toHaveBeenCalledWith(null);
