@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -602,5 +603,42 @@ func TestWriteAudit_FallbackKeepsUnlinkRules(t *testing.T) {
 	}
 	if actorID != 0 || detail != "" || token != "marker-token" {
 		t.Errorf("fallback row = actor %d, detail %q, token %q; want it unlinked (0, \"\", marker-token)", actorID, detail, token)
+	}
+}
+
+// TestAuditWriter_TryEnqueueRacingStopNeverStrands: every entry TryEnqueue
+// accepts while Stop runs on another goroutine reaches the store, so an
+// accepted entry is never left in the queue after the final drain.
+func TestAuditWriter_TryEnqueueRacingStopNeverStrands(t *testing.T) {
+	for range 50 {
+		store := &fakeAuditStore{}
+		w := db.NewAuditWriter(store, 4096, 50, time.Hour)
+		w.Start(context.Background())
+
+		var accepted atomic.Int64
+		var wg sync.WaitGroup
+		start := make(chan struct{})
+		for g := range 8 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-start
+				for i := range 100 {
+					if w.TryEnqueue(db.AuditEntry{ActorID: int64(g), Action: "race_action", TargetType: "user", TargetID: int64(i)}) {
+						accepted.Add(1)
+					}
+				}
+			}()
+		}
+		close(start)
+		w.Stop(context.Background())
+		wg.Wait()
+
+		if _, entries := store.snapshot(); int64(len(entries)) != accepted.Load() {
+			t.Fatalf("store has %d entries, TryEnqueue accepted %d", len(entries), accepted.Load())
+		}
+		if w.TryEnqueue(db.AuditEntry{Action: "after_stop"}) {
+			t.Fatal("TryEnqueue accepted an entry after Stop returned")
+		}
 	}
 }

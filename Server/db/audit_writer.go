@@ -45,8 +45,14 @@ type AuditWriter struct {
 	startOnce sync.Once
 	started   atomic.Bool
 	stopOnce  sync.Once
-	stop      chan struct{}
-	done      chan struct{}
+	// sendMu makes "not stopped, so send" one step against Stop: TryEnqueue
+	// checks stopped and sends under the read lock, and Stop sets stopped under
+	// the write lock before it closes w.stop, so every accepted send is in the
+	// queue before run() starts its final drain.
+	sendMu  syncutil.RWMutex
+	stopped bool
+	stop    chan struct{}
+	done    chan struct{}
 	// stopCtxDone is the Done channel of the context passed to Stop. run's
 	// drain-on-stop loop reads it only after observing stop closed, which gives
 	// the happens-before without a lock. Nil (an uncancellable ctx) means drain
@@ -134,7 +140,12 @@ func (w *AuditWriter) EnqueueEntry(e AuditEntry) {
 // writer is stopping or stopped, so the caller can write the entry itself
 // while the database is still open.
 func (w *AuditWriter) TryEnqueue(e AuditEntry) bool {
-	if w == nil || w.stopping() {
+	if w == nil {
+		return false
+	}
+	w.sendMu.RLock()
+	defer w.sendMu.RUnlock()
+	if w.stopped || w.stopping() {
 		return false
 	}
 	select {
@@ -171,6 +182,9 @@ func (w *AuditWriter) Stop(ctx context.Context) {
 		return
 	}
 	w.stopOnce.Do(func() {
+		w.sendMu.Lock()
+		defer w.sendMu.Unlock()
+		w.stopped = true
 		// Published before close(w.stop): run() reads stopCtxDone only after its
 		// receive observes the close, which makes this write visible race-free.
 		w.stopCtxDone = ctx.Done()
@@ -183,10 +197,11 @@ func (w *AuditWriter) Stop(ctx context.Context) {
 	// Always wait for the goroutine to exit; never race it against ctx.
 	<-w.done
 
-	// A concurrent enqueue that passed the stopping check just before Stop can
-	// still send into w.queue as run() exits, stranding the entry. The store is
-	// still open (the caller closes it only after Stop returns), so write the
-	// stranded entries directly, bounded so a stuck store cannot hold shutdown.
+	// Entries can still be queued here: run() exits early when the Stop context
+	// expires mid-drain, or when its own context was cancelled before Stop and a
+	// send raced that exit. The store is still open (the caller closes it only
+	// after Stop returns), so write them directly, bounded so a stuck store
+	// cannot hold shutdown.
 	stranded := w.drainQueued(nil)
 	if len(stranded) == 0 {
 		return
