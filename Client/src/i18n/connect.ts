@@ -231,6 +231,7 @@ export const connectText = defineCatalog("connect", {
   "error.gifDisabled": "GIF search is not configured on this server.",
   "error.lastRole": "A member must keep at least one role.",
   "error.pushDisabled": "Notifications are not enabled on this server.",
+  "error.loginSessionRequired": "Sign in with your password to change this.",
   "session.passwordRemoveFailed": "Could not remove the saved password — it is still stored",
   "session.credentialsSaveFailed": "Could not save credentials — auto-login won't work",
   "session.savedLoginUnavailable":

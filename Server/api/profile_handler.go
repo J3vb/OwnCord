@@ -140,7 +140,7 @@ func MountProfileRoutes(r chi.Router, svc *service.Services, store FileStore, li
 		r.With(RateLimitMiddleware(limiter, "profile:", profileUpdateRateLimitPerMinute, time.Minute, trustedProxies)).
 			Patch("/", handleUpdateProfile(svc, broadcaster, selfHosts))
 
-		r.With(RateLimitMiddleware(limiter, "pw:", profilePasswordRateLimitPerMinute, time.Minute, trustedProxies)).
+		r.With(requireLoginSession, RateLimitMiddleware(limiter, "pw:", profilePasswordRateLimitPerMinute, time.Minute, trustedProxies)).
 			Put("/password", handleChangePassword(svc, limiter, broadcaster))
 
 		r.With(RateLimitMiddleware(limiter, "profile:", profileUpdateRateLimitPerMinute, time.Minute, trustedProxies)).
@@ -168,12 +168,12 @@ func MountProfileRoutes(r chi.Router, svc *service.Services, store FileStore, li
 				Put("/privacy", handlePutPrivacy(svc.Privacy, broadcaster))
 		}
 
-		r.Get("/sessions", handleListSessions(svc))
+		r.With(requireLoginSession).Get("/sessions", handleListSessions(svc))
 
 		r.With(RateLimitMiddleware(limiter, "own_moderation:", ownModerationRateLimitPerMinute, time.Minute, trustedProxies)).
 			Get("/moderation", handleOwnModeration(svc))
-		r.Delete("/sessions", handleRevokeAllSessions(svc, limiter, broadcaster))
-		r.Delete("/sessions/{id}", handleRevokeSession(svc, broadcaster))
+		r.With(requireLoginSession).Delete("/sessions", handleRevokeAllSessions(svc, limiter, broadcaster))
+		r.With(requireLoginSession).Delete("/sessions/{id}", handleRevokeSession(svc, broadcaster))
 	})
 }
 
@@ -298,6 +298,15 @@ func handleUpdateProfile(svc *service.Services, broadcaster ProfileBroadcaster, 
 		req, ok := parseUpdateProfileRequest(w, r, selfHosts, user.Username)
 		if !ok {
 			return
+		}
+		// A device key belongs to a login session, so an API token may edit the
+		// profile but not publish one. Refused before any write: the request is
+		// all-or-nothing.
+		if req.IdentityPublicKey != nil {
+			if p, _ := principal(r); p.Session == nil {
+				writeLoginSessionRequired(w)
+				return
+			}
 		}
 
 		updated, err := svc.Users.UpdateProfile(r.Context(), user.ID, service.ProfilePatch{
@@ -454,8 +463,8 @@ func handleListSessions(svc *service.Services) http.HandlerFunc {
 			return
 		}
 
-		// An API-token principal has a nil session (middleware.go); the list
-		// still works, with no row marked current.
+		// requireLoginSession guarantees a session; the nil check below stays
+		// so the handler never dereferences one it was not given.
 		sess, _ := r.Context().Value(SessionKey).(*db.Session)
 
 		sessions, err := svc.Users.ListSessions(r.Context(), user.ID)
@@ -480,8 +489,7 @@ func handleListSessions(svc *service.Services) http.HandlerFunc {
 		}
 
 		// This listing is the acknowledgement of the response's flags, except
-		// for the caller's own session. An API-token principal has no session
-		// and acknowledges every row.
+		// for the caller's own session.
 		var callerSessionID int64
 		if sess != nil {
 			callerSessionID = sess.ID

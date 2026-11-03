@@ -253,7 +253,7 @@ func TestRecoveryAssist_ConcurrentRedemptionAdmitsOne(t *testing.T) {
 func TestRecoveryAssist_KitAndCredentialDoNotInterfere(t *testing.T) {
 	ctx := context.Background()
 	svc, owner, user, database := newAssistFixture(t, false)
-	kit, err := svc.EnrolRecoveryKit(ctx, Principal{User: user}, kitPassword, "")
+	kit, err := svc.EnrolRecoveryKit(ctx, sessionPrincipal(user), kitPassword, "")
 	if err != nil {
 		t.Fatalf("EnrolRecoveryKit: %v", err)
 	}
@@ -266,7 +266,7 @@ func TestRecoveryAssist_KitAndCredentialDoNotInterfere(t *testing.T) {
 	if _, err := recoverWith(svc, "kitholder", cred.Credential[:29], "203.0.113.20"); err != nil {
 		t.Fatalf("credential = %v, want success", err)
 	}
-	if status, _ := svc.RecoveryKitStatus(ctx, Principal{User: user}); !status.Enrolled {
+	if status, _ := svc.RecoveryKitStatus(ctx, sessionPrincipal(user)); !status.Enrolled {
 		t.Fatal("an assisted recovery spent the account's own kit")
 	}
 	if _, err := recoverWith(svc, "kitholder", kit.Secret, "203.0.113.21"); err != nil {
@@ -277,7 +277,7 @@ func TestRecoveryAssist_KitAndCredentialDoNotInterfere(t *testing.T) {
 		t.Fatalf("re-issue: %v", err)
 	}
 	recovered, _ := database.GetUserByID(ctx, user.ID)
-	again, err := svc.EnrolRecoveryKit(ctx, Principal{User: recovered}, "Recovered-Pass2!", "")
+	again, err := svc.EnrolRecoveryKit(ctx, sessionPrincipal(recovered), "Recovered-Pass2!", "")
 	if err != nil {
 		t.Fatalf("re-enrol: %v", err)
 	}

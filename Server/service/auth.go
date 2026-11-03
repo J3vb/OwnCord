@@ -31,7 +31,9 @@ type SessionDisconnector interface {
 }
 
 // Principal is the authenticated caller api.AuthMiddleware resolved for a
-// request. Session is nil for an API-token principal.
+// request. Session is nil for an API-token principal. The account-security
+// methods (two-factor changes, recovery codes and kit, account deletion)
+// refuse a principal without a session with ErrLoginSessionRequired.
 type Principal struct {
 	User    *db.User
 	Session *db.Session
@@ -190,6 +192,11 @@ var (
 
 	// Logout.
 	ErrLogoutFailed = &authError{ErrInternal, "failed to logout"}
+
+	// ErrLoginSessionRequired refuses an account-security change made with an
+	// API token: those changes take a login session. The transport writes it as
+	// 403 LOGIN_SESSION_REQUIRED.
+	ErrLoginSessionRequired = &authError{ErrForbidden, "this action requires a login session"}
 
 	// Password confirmation (account deletion and TOTP management).
 	ErrTooManyAttempts = &authError{ErrRateLimited, "too many failed attempts, try again later"}
@@ -801,6 +808,9 @@ func (s *AuthService) consumeRecoveryCode(ctx context.Context, userID int64, can
 // the old set is invalid the moment the new one is stored (one transaction).
 // Requires 2FA: the codes stand in for a TOTP code.
 func (s *AuthService) RegenerateRecoveryCodes(ctx context.Context, p Principal, password string) ([]string, error) {
+	if p.Session == nil {
+		return nil, ErrLoginSessionRequired
+	}
 	user := p.User
 
 	lockKey := auth.Key("pw_confirm_lock", user.ID)
@@ -910,6 +920,9 @@ func (s *AuthService) Logout(ctx context.Context, p Principal) error {
 // deletes it) or after (messages.user_id has no users row, so the foreign-key
 // check fails). The member_ban broadcast then disconnects the socket.
 func (s *AuthService) DeleteAccount(ctx context.Context, p Principal, password, ip string) error {
+	if p.Session == nil {
+		return ErrLoginSessionRequired
+	}
 	user := p.User
 
 	// Per-user lockout against password brute force on this destructive endpoint.
@@ -971,6 +984,9 @@ func (s *AuthService) DeleteAccount(ctx context.Context, p Principal, password, 
 // code hashes are stored now so they exist the moment ConfirmTOTP turns the
 // factor on; staging again replaces both.
 func (s *AuthService) EnableTOTP(ctx context.Context, p Principal, password string) (*TOTPEnrollment, error) {
+	if p.Session == nil {
+		return nil, ErrLoginSessionRequired
+	}
 	user := p.User
 
 	lockKey := auth.Key("pw_confirm_lock", user.ID)
@@ -1009,6 +1025,9 @@ func (s *AuthService) EnableTOTP(ctx context.Context, p Principal, password stri
 // ConfirmTOTP verifies code against the pending secret, persists it and revokes
 // the caller's other sessions.
 func (s *AuthService) ConfirmTOTP(ctx context.Context, p Principal, password, code string) (*TOTPChangeResult, error) {
+	if p.Session == nil {
+		return nil, ErrLoginSessionRequired
+	}
 	user := p.User
 
 	lockKey := auth.Key("pw_confirm_lock", user.ID)
@@ -1062,6 +1081,9 @@ func (s *AuthService) ConfirmTOTP(ctx context.Context, p Principal, password, co
 // DisableTOTP confirms the password, refuses while the server requires 2FA,
 // clears the secret and revokes the caller's other sessions.
 func (s *AuthService) DisableTOTP(ctx context.Context, p Principal, password string) (*TOTPChangeResult, error) {
+	if p.Session == nil {
+		return nil, ErrLoginSessionRequired
+	}
 	user := p.User
 
 	lockKey := auth.Key("pw_confirm_lock", user.ID)

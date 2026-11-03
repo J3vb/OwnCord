@@ -480,6 +480,14 @@ does not claim").
   and never another account's (`UserService.RevokeAllSessions`, audit
   `session_revoke_all`; test `TestRevokeAllSessions_OnlyTheCallersAccount`).
 - A password change revokes every other session (`Server/service/user.go:336`).
+- Account-security changes take a login session: password change, two-factor
+  enable/confirm/disable, recovery codes and kit, the sessions list and
+  revokes, account deletion and publishing a device key answer an API token
+  with `403 LOGIN_SESSION_REQUIRED` (`requireLoginSession` in
+  `Server/api/middleware.go`; the `AuthService` methods behind them refuse a
+  principal without a session too; tests
+  `TestAccountSecurityRoutes_RequireLoginSession`,
+  `TestAccountSecurityMethods_RefuseAPITokenPrincipal`).
 - Admin force-logout revokes all of a user's sessions
   (`Server/admin/api.go:114`; test `TestForceLogout_AuthorizationMatrix`).
 - Voice E2EE identity is per install, but peers keep **one pin per account**

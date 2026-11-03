@@ -331,6 +331,7 @@ renamed once shipped, because clients compare it. The common ones:
 | `NOT_FOUND`                     | 404         | Resource (channel, message, user, invite, file, backup) not found                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `RATE_LIMITED`                  | 429         | Too many requests; `Retry-After` header gives the seconds left until a retry is allowed                                                                                                                                                                                                                                                                                                                                                                                    |
 | `AUTH_BUSY`                     | 429         | The bounded queue for password checks is full, or the request gave up waiting in it; nothing was checked or counted. Login, register and verify-totp set `Retry-After`                                                                                                                                                                                                                                                                                                     |
+| `LOGIN_SESSION_REQUIRED`        | 403         | An account-security route (password, two-factor, recovery codes or kit, sessions, account deletion, publishing a device key) was called with an API token; sign in and use the login session                                                                                                                                                                                                                                                                               |
 | `INVALID_INPUT` / `BAD_REQUEST` | 400         | Missing required fields, invalid query params, a non-positive or non-numeric id in a path (emoji and sticker image routes answer 404 instead), or a file over the upload size limit. A JSON body that does not decode (an empty one included where the body is required) is always `400 INVALID_INPUT` "malformed request body" on the `/api/v1` routes and `400 BAD_REQUEST` "malformed request body" under `/admin/api` and `/api/v1/moderation/members` and `/channels` |
 | `PAYLOAD_TOO_LARGE`             | 413         | A JSON body past its route's size cap (every route that reads JSON, `/admin/api` included), or an upload body padded past its cap, the plugin-install upload included                                                                                                                                                                                                                                                                                                      |
 | `UNSUPPORTED_MEDIA_TYPE`        | 415         | A plugin upload whose file part is labelled as something other than a `.zip`                                                                                                                                                                                                                                                                                                                                                                                               |
@@ -702,7 +703,7 @@ journal (`erasure_jobs`) that survives a restart and is resumed until every
 file is gone. The last admin-class account cannot be erased. Connected
 clients receive `member_ban` and the account's own socket is closed.
 
-**Auth:** Required (Bearer token)
+**Auth:** Required, login session only (an API token gets `403 LOGIN_SESSION_REQUIRED`)
 **Rate limit:** 5 requests/minute per IP. After 3 failed password attempts, the endpoint locks out for 15 minutes per user.
 
 #### Request
@@ -741,7 +742,7 @@ the moment `confirm` succeeds, each once, in place of a TOTP code at
 `POST /api/v1/auth/verify-totp`. Calling `enable` again replaces the set;
 disabling 2FA removes it.
 
-**Auth:** Required
+**Auth:** Required, login session only (an API token gets `403 LOGIN_SESSION_REQUIRED`)
 **Rate limit:** 5 requests/minute per IP
 
 #### Request
@@ -769,7 +770,7 @@ Confirm a pending TOTP enrollment. On success the account's other sessions are
 revoked, and its live WebSocket closes in the same request if it rode one of
 them.
 
-**Auth:** Required
+**Auth:** Required, login session only (an API token gets `403 LOGIN_SESSION_REQUIRED`)
 **Rate limit:** 5 requests/minute per IP
 
 #### Request
@@ -789,7 +790,7 @@ them.
 
 Disable TOTP for the authenticated user. The account's recovery codes are removed with the secret, and its other sessions are revoked; the account's live WebSocket closes in the same request if it rode one of them.
 
-**Auth:** Required
+**Auth:** Required, login session only (an API token gets `403 LOGIN_SESSION_REQUIRED`)
 **Rate limit:** 5 requests/minute per IP
 
 #### Request
@@ -811,7 +812,7 @@ previous set is invalid the moment the new one is stored. Requires 2FA to be
 enabled (`409 CONFLICT` otherwise) and writes a `recovery_codes_regenerated`
 audit row that carries no code.
 
-**Auth:** Required
+**Auth:** Required, login session only (an API token gets `403 LOGIN_SESSION_REQUIRED`)
 **Rate limit:** 5 requests/minute per IP
 
 #### Request
@@ -841,7 +842,7 @@ one. The server stores only an argon2id verifier of the kit secret. With no
 any grouping or case) and the response never echoes it. Writes a
 `recovery_kit_issued` audit row that carries no secret.
 
-**Auth:** Required
+**Auth:** Required, login session only (an API token gets `403 LOGIN_SESSION_REQUIRED`)
 **Rate limit:** 5 requests/minute per IP
 
 #### Request
@@ -891,7 +892,7 @@ Update the authenticated user's profile. Broadcasts a `user_update` WebSocket
 message to all clients on success, carrying the full profile snapshot (the
 event replaces the client's copy rather than patching it).
 
-**Auth:** Required
+**Auth:** Required; a request carrying `identity_public_key` takes a login session (an API token gets `403 LOGIN_SESSION_REQUIRED` and nothing is applied)
 **Rate limit:** 10 requests/minute
 
 #### Request
@@ -1072,7 +1073,7 @@ Change the authenticated user's password. Verifies the old password, enforces
 password strength, and revokes all _other_ sessions on success. The account's
 live WebSocket closes in the same request if it rode one of them.
 
-**Auth:** Required
+**Auth:** Required, login session only (an API token gets `403 LOGIN_SESSION_REQUIRED`)
 **Rate limit:** 5 requests/minute, plus a failed-confirmation lockout on
 repeated wrong old passwords
 
@@ -1112,11 +1113,11 @@ starts `true` and stays so until the account lists its sessions from
 another device. This listing is that acknowledgement — every row's flag
 clears except the caller's own, so the device that just signed in never
 acknowledges itself, and the response carries the flags as they were before
-it. An API-token principal, which holds no session, acknowledges every row.
+it.
 No push transport exists for the signal; a client that wants it polls this
 route.
 
-**Auth:** Required
+**Auth:** Required, login session only (an API token gets `403 LOGIN_SESSION_REQUIRED`)
 
 #### Response 200 OK
 
@@ -1143,7 +1144,7 @@ route.
 Revoke one of the authenticated user's sessions by ID. The account's live
 WebSocket closes in the same request if it rode that session.
 
-**Auth:** Required
+**Auth:** Required, login session only (an API token gets `403 LOGIN_SESSION_REQUIRED`)
 
 #### Response 204 No Content
 
@@ -1160,7 +1161,7 @@ next 401 as an error. Never touches another account's credentials. Writes a
 anything was revoked. Limited to 5 calls per account per minute
 (`429 RATE_LIMITED`).
 
-**Auth:** Required
+**Auth:** Required, login session only (an API token gets `403 LOGIN_SESSION_REQUIRED`)
 
 #### Response 200 OK
 

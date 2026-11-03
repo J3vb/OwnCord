@@ -41,11 +41,15 @@ const (
 	CodeInstallReadOnly      Code = "INSTALL_READ_ONLY"
 	// REST form of an internal failure; the WebSocket sends INTERNAL for the same
 	// thing.
-	CodeInternalError               Code = "INTERNAL_ERROR"
-	CodeInvalidCredentials          Code = "INVALID_CREDENTIALS"
-	CodeInvalidInput                Code = "INVALID_INPUT"
-	CodeLastRole                    Code = "LAST_ROLE"
-	CodeLockout                     Code = "LOCKOUT"
+	CodeInternalError      Code = "INTERNAL_ERROR"
+	CodeInvalidCredentials Code = "INVALID_CREDENTIALS"
+	CodeInvalidInput       Code = "INVALID_INPUT"
+	CodeLastRole           Code = "LAST_ROLE"
+	CodeLockout            Code = "LOCKOUT"
+	// An account-security route (password, two-factor, recovery, sessions,
+	// account deletion, device key) was called with an API token; it takes a
+	// login session.
+	CodeLoginSessionRequired        Code = "LOGIN_SESSION_REQUIRED"
 	CodeMissingAssets               Code = "MISSING_ASSETS"
 	CodeNotFound                    Code = "NOT_FOUND"
 	CodeNotNSFW                     Code = "NOT_NSFW"

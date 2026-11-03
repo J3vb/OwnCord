@@ -434,6 +434,12 @@
       { "wire": "INVALID_INPUT", "go": "CodeInvalidInput", "ts": "INVALID_INPUT" },
       { "wire": "LAST_ROLE", "go": "CodeLastRole", "ts": "LAST_ROLE" },
       { "wire": "LOCKOUT", "go": "CodeLockout", "ts": "LOCKOUT" },
+      {
+        "wire": "LOGIN_SESSION_REQUIRED",
+        "go": "CodeLoginSessionRequired",
+        "ts": "LOGIN_SESSION_REQUIRED",
+        "note": "An account-security route (password, two-factor, recovery, sessions, account deletion, device key) was called with an API token; it takes a login session."
+      },
       { "wire": "MISSING_ASSETS", "go": "CodeMissingAssets", "ts": "MISSING_ASSETS" },
       { "wire": "NOT_FOUND", "go": "CodeNotFound", "ts": "NOT_FOUND" },
       { "wire": "NOT_NSFW", "go": "CodeNotNSFW", "ts": "NOT_NSFW" },

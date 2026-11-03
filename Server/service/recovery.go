@@ -101,6 +101,9 @@ type RecoverInput struct {
 // client; otherwise the server generates it and returns it once. Only the
 // verifier is stored.
 func (s *AuthService) EnrolRecoveryKit(ctx context.Context, p Principal, password, clientSecret string) (*RecoveryKitIssue, error) {
+	if p.Session == nil {
+		return nil, ErrLoginSessionRequired
+	}
 	user := p.User
 	lockKey := auth.Key("pw_confirm_lock", user.ID)
 	if s.limiter.IsLockedOut(lockKey) {
