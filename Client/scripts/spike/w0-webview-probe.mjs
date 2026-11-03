@@ -25,6 +25,10 @@ const hwnd = args.hwnd ? Number(args.hwnd) : 0;
 const encodeSecs = Number(args.secs ?? 20);
 const outFile = args.out ?? `w0-results-${label}.json`;
 const skipGdm = args["skip-gdm"] === "1";
+// WebView2 hides encoderImplementation unless the page holds a capture
+// permission, so the encoder runs can keep a microphone stream open.
+const holdMic = args["hold-mic"] === "1";
+const onlyEncode = args["only-encode"] === "1";
 
 if (typeof WebSocket !== "function") {
   console.error("Node 22 or newer is needed (global WebSocket).");
@@ -395,9 +399,16 @@ async function main() {
 
   await phase("idle 10 s (CPU baseline)", "window.__w0.sleep(10000).then(() => 'idle')", 20000);
   await phase("features", "window.__w0.features()", 30000);
-  await phase("source ids (probe 1)", `window.__w0.sourceIds(${hwnd})`, 120000);
-  if (!skipGdm) await phase("getDisplayMedia monitor", "window.__w0.gdm()", 40000);
-  const runs = [
+  if (!onlyEncode) await phase("source ids (probe 1)", `window.__w0.sourceIds(${hwnd})`, 120000);
+  if (holdMic) {
+    await phase(
+      "hold microphone",
+      "navigator.mediaDevices.getUserMedia({ audio: true }).then((s) => { window.__w0.mic = s; return window.__w0.describe(s); }).catch((e) => ({ error: String(e) }))",
+      20000,
+    );
+  }
+  if (!skipGdm && !onlyEncode) await phase("getDisplayMedia monitor", "window.__w0.gdm()", 40000);
+  const allRuns = [
     ["canvas", 1920, 1080, 60, "video/H264"],
     ["generator", 1920, 1080, 60, "video/H264"],
     ["generator", 2560, 1440, 60, "video/H264"],
@@ -406,6 +417,7 @@ async function main() {
     ["generator", 2560, 1440, 60, "video/H265"],
     ["generator", 5120, 1440, 60, "video/H265"],
   ];
+  const runs = onlyEncode ? allRuns.filter((r) => r[4] === "video/H264") : allRuns;
   for (const [kind, w, h, fps, mime] of runs) {
     await phase(
       `encode ${kind} ${w}x${h}@${fps} ${mime}`,
