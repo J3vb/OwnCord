@@ -150,7 +150,7 @@ func TestSampler_HealthyStartIsSilent(t *testing.T) {
 }
 
 func TestSampler_WindowAndDownsample(t *testing.T) {
-	var rs []fetchResult
+	rs := make([]fetchResult, 0, 10)
 	for i := range 10 {
 		rs = append(rs, okM(float64(i), 0, 0))
 	}

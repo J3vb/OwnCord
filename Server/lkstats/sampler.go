@@ -142,7 +142,7 @@ func fetchPage(ctx context.Context, c *http.Client, url string, timeout time.Dur
 	if err != nil {
 		return fetchResult{status: StatusUnreachable, reason: failReason(err)}
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 	if resp.StatusCode != http.StatusOK {
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
 		return fetchResult{status: StatusUnreachable, reason: fmt.Sprintf("HTTP %d", resp.StatusCode)}

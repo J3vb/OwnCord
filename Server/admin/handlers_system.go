@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+
 	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/lkstats"
 	"github.com/J3vb/OwnCord/Server/metrics"
@@ -32,6 +34,15 @@ type SystemSources struct {
 	// SlowRoutes holds request times per route for GET /system/slow-requests;
 	// nil answers an empty list.
 	SlowRoutes *metrics.SlowRoutes
+}
+
+// mountSystemRoutes mounts the Dashboard health row: CPU, memory, disk,
+// uptime, LiveKit and slow requests, the same server health detail as the
+// attention panel, so VIEW_DIAGNOSTICS like it.
+func mountSystemRoutes(r chi.Router, gates *gateRegistry, src SystemSources, hub HubBroadcaster) {
+	gates.route(r, gateViewDiagnostics, http.MethodGet, "/system/stats", handleGetSystemStats(src, hub))
+	gates.route(r, gateViewDiagnostics, http.MethodGet, "/system/livekit", handleGetSystemLiveKit(src, hub))
+	gates.route(r, gateViewDiagnostics, http.MethodGet, "/system/slow-requests", handleGetSlowRequests(src))
 }
 
 // systemWindows are the history lengths the route serves.

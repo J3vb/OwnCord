@@ -147,8 +147,8 @@ func labelValue(labels, key string) string {
 		i += from
 		if i == 0 || labels[i-1] == ',' || labels[i-1] == ' ' {
 			rest := labels[i+len(needle):]
-			if end := strings.IndexByte(rest, '"'); end >= 0 {
-				return rest[:end]
+			if v, _, ok := strings.Cut(rest, `"`); ok {
+				return v
 			}
 			return ""
 		}
