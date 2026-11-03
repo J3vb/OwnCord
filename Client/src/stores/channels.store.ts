@@ -16,6 +16,7 @@ import type {
   ChannelCategory,
   ForumSettings,
 } from "@lib/types";
+import { isTextLikeChannel } from "@lib/types";
 
 export interface Channel {
   readonly id: number;
@@ -172,12 +173,8 @@ export function getUnreadOnOpen(channelId: number): number {
   return unreadOnOpen.get(channelId) ?? 0;
 }
 
-/** Bulk set channels from the ready payload. Converts ReadyChannel[] to Map. */
-export function setChannels(channels: readonly ReadyChannel[]): void {
-  // A fresh ready payload restates unread from the server; any snapshot from
-  // the previous connection describes a read position that no longer applies.
-  unreadOnOpen.clear();
-  pointerOnOpen.clear();
+/** The ready payload's channels as channelsStore rows, keyed by id. */
+export function readyChannelMap(channels: readonly ReadyChannel[]): Map<number, Channel> {
   const map = new Map<number, Channel>();
   for (const ch of channels) {
     map.set(ch.id, {
@@ -214,6 +211,16 @@ export function setChannels(channels: readonly ReadyChannel[]): void {
       forum: ch.forum,
     });
   }
+  return map;
+}
+
+/** Bulk set channels from the ready payload. Converts ReadyChannel[] to Map. */
+export function setChannels(channels: readonly ReadyChannel[]): void {
+  // A fresh ready payload restates unread from the server; any snapshot from
+  // the previous connection describes a read position that no longer applies.
+  unreadOnOpen.clear();
+  pointerOnOpen.clear();
+  const map = readyChannelMap(channels);
   channelsStore.setState((prev) => {
     // The ready payload never includes DM rows (those arrive via dm_channels
     // and are synthesized into this store on selection), so carry them across
@@ -657,6 +664,21 @@ export function categoryGroups(
         (a, b) => Number(a.type === "voice") - Number(b.type === "voice"),
       ),
     }));
+}
+
+/**
+ * The first text-like channel the channel list draws, walking the groups in
+ * sidebar order. Where the app lands when it has to pick a channel itself:
+ * after sign-in, after the open channel is deleted, after the open DM closes.
+ */
+export function firstTextInSidebarOrder(
+  channels: ReadonlyMap<number, Channel>,
+): Channel | undefined {
+  for (const group of categoryGroups(channels)) {
+    const first = group.channels.find((ch) => isTextLikeChannel(ch));
+    if (first !== undefined) return first;
+  }
+  return undefined;
 }
 
 /** The groups keyed by `CategoryGroup.key`, in sidebar order. */
