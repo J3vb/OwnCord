@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 258 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, the browser client portal, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 260 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, the browser client portal, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -252,6 +252,8 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | POST    | `/api/v1/uploads`                                                    |
 | DELETE  | `/api/v1/uploads/{id}`                                               |
 | PATCH   | `/api/v1/users/me/`                                                  |
+| GET     | `/api/v1/users/me/api-tokens`                                        |
+| DELETE  | `/api/v1/users/me/api-tokens/{id}`                                   |
 | DELETE  | `/api/v1/users/me/avatar`                                            |
 | POST    | `/api/v1/users/me/avatar`                                            |
 | DELETE  | `/api/v1/users/me/banner`                                            |
@@ -1071,7 +1073,9 @@ The same user object `PATCH /api/v1/users/me` returns, with `banner: null`.
 
 Change the authenticated user's password. Verifies the old password, enforces
 password strength, and revokes all _other_ sessions on success. The account's
-live WebSocket closes in the same request if it rode one of them.
+live WebSocket closes in the same request if it rode one of them. With
+`revoke_api_tokens: true` it also revokes every API token of the account;
+absent or `false` leaves the tokens working.
 
 **Auth:** Required, login session only (an API token gets `403 LOGIN_SESSION_REQUIRED`)
 **Rate limit:** 5 requests/minute, plus a failed-confirmation lockout on
@@ -1082,16 +1086,25 @@ repeated wrong old passwords
 ```json
 {
   "old_password": "OldPass!1",
-  "new_password": "NewStr0ng!Pass"
+  "new_password": "NewStr0ng!Pass",
+  "revoke_api_tokens": true
 }
 ```
 
 #### Response 204 No Content
 
 Password changed and other sessions revoked. If the password change committed
-but revoking other sessions failed, the endpoint returns **200 OK** with a
-warning body instead (the new password is in effect — do not retry with the
-old one).
+but revoking other sessions or the requested API tokens failed, the endpoint
+returns **200 OK** with a warning body instead (the new password is in effect —
+do not retry with the old one).
+
+```json
+{
+  "warning": "password changed, but other sessions or API tokens could not be revoked; revoke them from the sessions list",
+  "sessions_revoked": 0,
+  "api_tokens_revoked": 0
+}
+```
 
 #### Errors
 
@@ -1147,6 +1160,50 @@ WebSocket closes in the same request if it rode that session.
 **Auth:** Required, login session only (an API token gets `403 LOGIN_SESSION_REQUIRED`)
 
 #### Response 204 No Content
+
+---
+
+### GET /api/v1/users/me/api-tokens
+
+List the authenticated user's API tokens that still work, newest first.
+Revoked and expired tokens are left out, and no token value or hash is ever
+returned. `last_used` and `expires_at` are `null` when the token was never
+used or never expires.
+
+**Auth:** Required, login session only (an API token gets `403 LOGIN_SESSION_REQUIRED`)
+
+#### Response 200 OK
+
+```json
+{
+  "tokens": [
+    {
+      "id": 4,
+      "label": "release-bot",
+      "created_at": "2026-10-01 10:00:00",
+      "last_used": null,
+      "expires_at": null
+    }
+  ]
+}
+```
+
+---
+
+### DELETE /api/v1/users/me/api-tokens/{id}
+
+Revoke one of the authenticated user's API tokens. It stops working at once.
+Writes an `api_token_revoke` audit row.
+
+**Auth:** Required, login session only (an API token gets `403 LOGIN_SESSION_REQUIRED`)
+
+#### Response 204 No Content
+
+#### Errors
+
+| Status | Code        | Cause                                                                     |
+| ------ | ----------- | ------------------------------------------------------------------------- |
+| 404    | `NOT_FOUND` | No live token of this account has that id (revoked, expired or not yours) |
 
 ---
 

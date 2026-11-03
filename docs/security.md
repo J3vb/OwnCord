@@ -57,7 +57,14 @@ reset it. It is not in a database backup: back up the whole `data/` folder.
 ### Sessions
 
 A sign-in lasts 30 days after last use, and never more than a year. Members
-can see and end their sessions in **Settings**.
+can see and end their sessions, and revoke their API tokens, in **Settings**.
+
+What ends what: a password change signs out every other device, and also
+revokes the account's API tokens when the member leaves "Also revoke my API
+tokens" ticked (it is ticked by default whenever the account has any). Account
+recovery and **Sign out everywhere** end every session and every API token.
+A sign-in that has already passed the password step when one of these happens
+is not cancelled: it finishes or expires within its ten-minute window.
 
 ### Recovery kit
 

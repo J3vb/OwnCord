@@ -46,6 +46,7 @@ export type {
   DmPrivacy,
   UserNote,
   RevokeAllSessionsResponse,
+  OwnApiToken,
   RecoveryKitIssue,
   RecoveryKitStatus,
   OwnModerationAction,

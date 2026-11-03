@@ -253,6 +253,43 @@ describe("SettingsOverlay", () => {
     overlay.destroy?.();
   });
 
+  it("revokes API tokens with the password change while the option stays ticked", async () => {
+    const onChangePassword = vi.fn().mockResolvedValue(undefined);
+    const overlay = openOverlay(container, {
+      ...defaultOptions,
+      onChangePassword,
+      onListApiTokens: vi.fn().mockResolvedValue([
+        {
+          id: 1,
+          label: "bot",
+          created_at: "2026-10-01 10:00:00",
+          last_used: null,
+          expires_at: null,
+        },
+      ]),
+      onRevokeApiToken: vi.fn().mockResolvedValue(undefined),
+    });
+    const row = container.querySelector<HTMLElement>('[data-testid="pw-revoke-api-tokens-row"]')!;
+    await vi.waitFor(() => expect(row.hidden).toBe(false));
+
+    fillPasswordForm(container, "oldpass123", "newpassword123", "newpassword123");
+    acButton(container, "Change Password").click();
+    await vi.waitFor(() => {
+      expect(onChangePassword).toHaveBeenCalledWith("oldpass123", "newpassword123", true);
+    });
+
+    await vi.waitFor(() => expect(acButton(container, "Change Password").disabled).toBe(false));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const box = container.querySelector<HTMLInputElement>('[data-testid="pw-revoke-api-tokens"]')!;
+    box.checked = false;
+    fillPasswordForm(container, "newpassword123", "another-pass1", "another-pass1");
+    acButton(container, "Change Password").click();
+    await vi.waitFor(() => {
+      expect(onChangePassword).toHaveBeenLastCalledWith("newpassword123", "another-pass1", false);
+    });
+    overlay.destroy?.();
+  });
+
   it("calls onChangePassword and clears inputs on success", async () => {
     const onChangePassword = vi.fn().mockResolvedValue(undefined);
     const overlay = openOverlay(container, { ...defaultOptions, onChangePassword });
@@ -263,7 +300,7 @@ describe("SettingsOverlay", () => {
     changePwBtn.click();
 
     await vi.waitFor(() => {
-      expect(onChangePassword).toHaveBeenCalledWith("oldpass123", "newpassword123");
+      expect(onChangePassword).toHaveBeenCalledWith("oldpass123", "newpassword123", false);
     });
 
     // Inputs should be cleared after success
@@ -293,7 +330,7 @@ describe("SettingsOverlay", () => {
     const status = container.querySelector<HTMLElement>('[data-testid="pw-change-status"]');
     expect(status).not.toBeNull();
     await vi.waitFor(() => {
-      expect(onChangePassword).toHaveBeenCalledWith("oldpass123", "newpassword123");
+      expect(onChangePassword).toHaveBeenCalledWith("oldpass123", "newpassword123", false);
       expect(status!.textContent).toBe(warning);
     });
     // B9-23: the warning is the qualified .form-warning class, not an inline

@@ -63,6 +63,39 @@ export function buildPasswordSection(
   const pwError = outcomeEl("error", "pw-change-status");
   pwError.style.marginBottom = "8px";
   const pwBtn = createElement("button", { class: "ac-btn" }, t("password.change"));
+  // Shown only when the account has API tokens, and then ticked: a password
+  // change after a suspected leak should end every credential by default.
+  const revokeTokensRow = createElement("label", {
+    class: "form-check",
+    "data-testid": "pw-revoke-api-tokens-row",
+  });
+  const revokeTokensBox = createElement("input", {
+    type: "checkbox",
+    "data-testid": "pw-revoke-api-tokens",
+  });
+  appendChildren(
+    revokeTokensRow,
+    revokeTokensBox,
+    createElement("span", {}, t("password.revokeApiTokens")),
+  );
+  revokeTokensRow.hidden = true;
+  revokeTokensRow.style.marginBottom = "12px";
+  const refreshTokenOption = (): void => {
+    const listTokens = options.onListApiTokens;
+    if (listTokens === undefined) return;
+    void listTokens()
+      .then((tokens) => {
+        if (signal.aborted) return;
+        const hasTokens = tokens.length > 0;
+        revokeTokensRow.hidden = !hasTokens;
+        revokeTokensBox.checked = hasTokens;
+      })
+      .catch((err: unknown) => {
+        if (signal.aborted) return;
+        log.warn("Failed to list API tokens", err);
+      });
+  };
+  refreshTokenOption();
   let pwSuccessTimer: ReturnType<typeof setTimeout> | null = null;
 
   pwBtn.addEventListener(
@@ -96,11 +129,12 @@ export function buildPasswordSection(
         if (focusIsOurs(pwBtn)) pwBtn.focus();
       };
       void options
-        .onChangePassword(oldVal, newVal)
+        .onChangePassword(oldVal, newVal, !revokeTokensRow.hidden && revokeTokensBox.checked)
         .then((outcome) => {
           oldPw.value = "";
           newPw.value = "";
           confirmPw.value = "";
+          refreshTokenOption();
           if (pwSuccessTimer !== null) {
             clearTimeout(pwSuccessTimer);
             pwSuccessTimer = null;
@@ -129,7 +163,15 @@ export function buildPasswordSection(
     { signal },
   );
 
-  appendChildren(wrapper, oldField.wrapper, newField.wrapper, confirmField.wrapper, pwError, pwBtn);
+  appendChildren(
+    wrapper,
+    oldField.wrapper,
+    newField.wrapper,
+    confirmField.wrapper,
+    revokeTokensRow,
+    pwError,
+    pwBtn,
+  );
   return row;
 }
 

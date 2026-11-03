@@ -87,7 +87,7 @@ describe("REST client requests", () => {
       call: (a) => a.changePassword("old", "new"),
       method: "PUT",
       path: "/users/me/password",
-      body: { old_password: "old", new_password: "new" },
+      body: { old_password: "old", new_password: "new", revoke_api_tokens: false },
     },
     {
       name: "enableTotp",
@@ -292,6 +292,12 @@ describe("REST client requests", () => {
       call: (a) => a.revokeSession(3),
       method: "DELETE",
       path: "/users/me/sessions/3",
+    },
+    {
+      name: "revokeApiToken",
+      call: (a) => a.revokeApiToken(5),
+      method: "DELETE",
+      path: "/users/me/api-tokens/5",
     },
     {
       name: "revokeAllSessions",

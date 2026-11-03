@@ -83,6 +83,7 @@ export function fakeApi(host = ""): ApiClient {
     getReactionUsers: vi.fn(async () => ({ users: [] })),
     getRecoveryKitStatus: vi.fn(async () => ({ enrolled: false, used_at: null })),
     getSessions: vi.fn(async () => []),
+    getApiTokens: vi.fn(async () => []),
   } as unknown as ApiClient;
 }
 
