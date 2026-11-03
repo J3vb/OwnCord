@@ -44,7 +44,7 @@ func TestChangePassword_RevokeFailureIsPartialSuccess(t *testing.T) {
 	fs := &pwStore{DB: database, failRevokes: 99}
 	svc := NewUserService(fs)
 
-	res, err := svc.ChangePassword(context.Background(), 7, "newhash", 1)
+	res, err := svc.ChangePassword(context.Background(), 7, "newhash", 1, false)
 	if err != nil {
 		t.Fatalf("committed password change must not return an error: %v", err)
 	}
@@ -67,7 +67,7 @@ func TestChangePassword_RetryRecoversRevocation(t *testing.T) {
 	fs := &pwStore{DB: database, failRevokes: 1}
 	svc := NewUserService(fs)
 
-	res, err := svc.ChangePassword(context.Background(), 7, "newhash", 1)
+	res, err := svc.ChangePassword(context.Background(), 7, "newhash", 1, false)
 	if err != nil {
 		t.Fatalf("ChangePassword: %v", err)
 	}
@@ -79,5 +79,51 @@ func TestChangePassword_RetryRecoversRevocation(t *testing.T) {
 	}
 	if fs.revokeCalls != 2 {
 		t.Fatalf("expected exactly one retry (2 calls), got %d", fs.revokeCalls)
+	}
+}
+
+// tokenFailStore fails every API-token revoke after the password commits.
+type tokenFailStore struct {
+	*db.DB
+	tokenCalls int
+}
+
+func (f *tokenFailStore) RevokeUserAPITokens(_ context.Context, _ int64) (int64, error) {
+	f.tokenCalls++
+	return 0, errors.New("token table locked")
+}
+
+// A committed password with a failed token revoke is the same partial
+// success as a failed session revoke: no error, the password stays changed.
+func TestChangePassword_TokenRevokeFailureIsPartialSuccess(t *testing.T) {
+	database := newTestDB(t)
+	seedUser(t, database, &db.User{ID: 7, Username: "pat", PasswordHash: "oldhash"})
+	fs := &tokenFailStore{DB: database}
+	svc := NewUserService(fs)
+
+	res, err := svc.ChangePassword(context.Background(), 7, "newhash", 1, true)
+	if err != nil {
+		t.Fatalf("committed password change must not return an error: %v", err)
+	}
+	if !res.RevokeFailed {
+		t.Fatal("RevokeFailed should be set when the token revoke keeps failing")
+	}
+	if fs.tokenCalls != 2 {
+		t.Fatalf("token revoke calls = %d, want 2 (one retry)", fs.tokenCalls)
+	}
+	if u, _ := database.GetUserByID(context.Background(), 7); u.PasswordHash != "newhash" {
+		t.Fatal("password should be committed")
+	}
+}
+
+func TestChangePassword_TokensUntouchedUnlessAsked(t *testing.T) {
+	database := newTestDB(t)
+	seedUser(t, database, &db.User{ID: 7, Username: "pat", PasswordHash: "oldhash"})
+	fs := &tokenFailStore{DB: database}
+	if _, err := NewUserService(fs).ChangePassword(context.Background(), 7, "newhash", 1, false); err != nil {
+		t.Fatalf("ChangePassword: %v", err)
+	}
+	if fs.tokenCalls != 0 {
+		t.Fatalf("token revoke called %d times without being asked", fs.tokenCalls)
 	}
 }

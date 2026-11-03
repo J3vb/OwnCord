@@ -370,13 +370,26 @@ export interface NativeVoiceStats {
   localVideo: { camera?: NativeVoiceSenderLayer[]; screen_share?: NativeVoiceSenderLayer[] };
 }
 
+/** A room key slot. Each sent frame names its sender's slot. */
+export type NativeKeySlot = 0 | 1;
+
+/** Where a room key goes: its slot, and whether it is only staged there. */
+export interface NativeKeyPlacement {
+  readonly slot: NativeKeySlot;
+  readonly stage: boolean;
+}
+
 /** A simulcast layer, as `native_voice_set_video_view` names it. */
 export type NativeVideoQuality = "low" | "medium" | "high";
 
 export interface NativeVoice {
   /** Install or rotate the room key: the same base64 text the web key
-   *  provider receives, so both derive the same key (index 0). */
-  setRoomKey(keyBase64: string): Promise<void>;
+   *  provider receives, so both derive the same key. Without `placement` it
+   *  goes in slot 0 and is sent with at once; a staged key is received with
+   *  until `useKeySlot` switches sending to its slot. */
+  setRoomKey(keyBase64: string, placement?: NativeKeyPlacement): Promise<void>;
+  /** Send with the key already installed in `slot`. */
+  useKeySlot(slot: NativeKeySlot): Promise<void>;
   clearRoomKey(): Promise<void>;
   connect(
     url: string,

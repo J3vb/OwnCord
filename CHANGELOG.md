@@ -50,20 +50,28 @@ and only when it changes something a contributor or fork holder must do
 ### Changed
 
 - The server no longer starts when `server.trusted_proxies` holds an entry that covers every address (such as `0.0.0.0/0` or `::/0`); the error names the entry. List only your reverse proxy's own address. The admin panel refuses the same values.
+- Clicking the channel topic in the header no longer opens a popup, and the topic no longer looks clickable. A long, cut-off topic still shows in full when you hover over it.
 - Account-security actions now need a normal sign-in: an API token can no longer change the password, turn two-factor on or off, issue recovery codes or a recovery kit, list or sign out sessions, delete the account or publish a device key (it gets `403 LOGIN_SESSION_REQUIRED`). Bots and scripts that read, post or edit the profile keep working.
 
 ### Added
 
 - The admin Dashboard has a LiveKit card for setups where LiveKit runs as its own container (the Docker compose stack): whether it is reachable, its CPU (100% is one core) and memory with one-hour lines, and rooms, participants, tracks and traffic. If LiveKit stops answering, the card says "Not reachable since" the time. The compose file turns it on; with your own setup, add `prometheus: port: 6789` to `livekit.yaml` and set `voice.livekit_metrics_url`. Shown to admins with View Diagnostics.
+- **Settings → Account → Signed-in devices** now also lists your API tokens (label, created, last used) with a Revoke button each. Changing your password offers "Also revoke my API tokens", ticked by default when you have any. `docs/security.md` now spells out what a password change, account recovery and sign-out-everywhere each end.
 - On Android, your camera now pauses while the app is in the background, so others see your avatar instead of a frozen picture, and turns back on when you return.
 - Your own camera (call tiles, pop-out and the settings preview) now shows you exactly as others see you, with your right hand on the right; before, it was always mirrored. A new "Mirror my camera preview" switch in Voice & Video (off by default) brings the mirror back. Others always see you the right way round.
 - While you are in a DM call, that person's avatar stays in the server rail under Home with a green call badge, so you can see the call and get back to it in one click from any server.
 - On a phone, the "+" in the message box now opens a sheet with Take photo, Gallery and Files, so you can take a photo with the camera and send it straight away, or pick several photos and videos from the gallery. On a computer "+" still opens the file picker.
 - The DM profile panel on a computer now also shows the person's @username (under a nickname) and custom status, and has a Report button.
+- Admin panel: a new **System health** page (Operations, for anyone with View Diagnostics) shows connections, message-delivery timings, the database (file and log size, schema, reader and writer waits), voice and the server process on one page, refreshed every 5 seconds. Each card lists the Dashboard warnings that belong to it, and **Copy for support** copies the same health figures a support bundle carries. If the database does not answer within 2 seconds its card says so and the rest of the page still loads.
 - On Linux, after the app closes unexpectedly, the next start adds what the system recorded about it (the crash report from `coredumpctl` and the kernel's crash line, where the system keeps them) to the app's log, so a support bundle shows what crashed. Nothing extra needs to be installed; without those tools it is skipped. The log also notes whether the camera or a screen share was running.
+- On Windows, the app's log (and so the support bundle) now says why the last run ended: a crash names the error and the file it happened in, a run that Windows closed as not responding or that was ended in Task Manager shows up on the next start with its last memory and freeze state, and a crash or restart of WebView2's page, graphics or camera process is logged with what it caused. Nothing is sent anywhere; it stays in the log until you save a support bundle.
+- On Android 11 and newer, the next start adds to the app's log how the previous run ended (crash, killed for memory, not responding, stopped by you or by the system). The log also notes an app crash, the web view's page process going away, the call keeping alive in the background, and the app moving to the background and back, so a support bundle shows what happened. No message text, links or names are written.
 
 ### Fixed
 
+- The first letters typed right after clicking Search or pressing Ctrl+K landed in the message box. They now go into the search or the quick switcher. Tabbing through the channel header no longer opens Search; click it, press Enter on it or start typing.
+- In calls, cameras and screen shares could freeze for a few seconds every five minutes (each time the call's encryption key changed) and when someone left. A new key now reaches everyone before anyone sends with it, so the picture keeps going. Needs the server and every client in the call on this version; otherwise calls behave as before.
+- Role colours show again on names. A colour that is hard to read on the theme (for example pure red or blurple on Dark) used to turn the name plain white or black; now it keeps its colour and only gets lighter or darker until it reads well. With High Contrast on, a colour that does not read stays plain text as before.
 - On Linux, someone else's camera could stay black for the whole call when it started just as you turned your own camera on or off. It now shows as soon as it arrives.
 - Android: the app icon's "OC" logo ran off the edges of the home-screen icon. It now sits inside the icon shape on every launcher, and Android 13+ themed icons show a single-colour OC.
 - Android: a cold start signed you out unless you had ticked "Remember password", and signing in to a second server signed you out of the first. The sign-in page now has one "Stay signed in" box, ticked by default, that keeps each server's sign-in; untick it on a shared phone.
@@ -76,6 +84,12 @@ and only when it changes something a contributor or fork holder must do
 - Voice Activity with the sensitivity slider set by hand let typing, a fan or breathing through, and after you spoke it stayed open through them. The slider now also asks the noise filter whether it hears a voice, as automatic sensitivity already did.
 
 - Clicking a channel right after a new message arrived sometimes opened the channel below it: a Mark Server as Read icon appeared in the header and pushed the channel list down. The icon is gone, so the list no longer moves; Mark as Read stays in the server name menu and on Shift+Esc.
+- A forwarded file could, rarely, lose its contents to the server's 15-minute storage cleanup in the moment before the forward was saved, and then show as missing. The cleanup now leaves it alone.
+
+### Under the hood
+
+- Database change 090: three indexes for attachment lookups. The first start after the update builds them, which takes a little longer on a large database.
+- The storage cleanup, the admin Storage page's leftover scan and the orphaned-upload sweep look files up by index: about 19 s down to 0.3 s per pass at 100,000 files, so the leftover scan no longer answers "server busy" on a big upload folder.
 
 ## v2.7.0
 

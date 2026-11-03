@@ -43,15 +43,10 @@ func (q *Queries) CreateAttachment(ctx context.Context, arg CreateAttachmentPara
 	return err
 }
 
-const deleteOrphanedAttachments = `-- name: DeleteOrphanedAttachments :many
+const deleteDeletedMessageAttachments = `-- name: DeleteDeletedMessageAttachments :many
 DELETE FROM attachments
-WHERE uploaded_at < ?
-  AND (
-    message_id IS NULL
-    OR EXISTS (
-      SELECT 1 FROM messages m WHERE m.id = attachments.message_id AND m.deleted = 1
-    )
-  )
+WHERE message_id IN (SELECT m.id FROM messages m WHERE m.deleted = 1)
+  AND uploaded_at < ?
   AND NOT EXISTS (
     SELECT 1 FROM users u WHERE u.avatar = '/api/v1/files/' || attachments.id
   )
@@ -64,25 +59,19 @@ WHERE uploaded_at < ?
 RETURNING stored_as
 `
 
-// Avatars are attachments that are never linked to a message on purpose: the
-// users.avatar URL is what keeps them alive and authorizes serving them
-// (migration 027). Excluding them here is what stops the sweep from destroying
-// every avatar in the instance. idx_users_avatar makes the lookup cheap. A
-// group DM icon (channels.dm_icon, migration 066) and a profile banner
-// (users.banner_id, migration 069) are kept the same way.
-//
-// OC-0279: a message delete is a soft delete (messages.deleted=1, the row
-// survives), so an attachment linked to a deleted message keeps a non-NULL
-// message_id forever -- message_id IS NULL alone never matches it, so its
-// file was permanently unreclaimable even though serveFileResolve already
-// 404s it once the owning message is deleted. The second EXISTS below
-// catches that case by joining back to messages.deleted instead. Matching on
+// The orphan sweep's second half: rows linked to a soft-deleted message.
+// A message delete is a soft delete (messages.deleted=1, the row survives), so
+// an attachment linked to a deleted message keeps a non-NULL message_id
+// forever and the first half never matches it, even though serveFileResolve
+// already 404s it once the owning message is deleted. Matching on
 // messages.deleted=1 here (rather than unlinking message_id in the delete
 // path) is deliberate: unlinking would move the row onto the "unlinked
 // attachment" access branch in serveFileAuthorize and make it downloadable
-// again by the uploader.
-func (q *Queries) DeleteOrphanedAttachments(ctx context.Context, uploadedAt string) ([]string, error) {
-	rows, err := q.db.QueryContext(ctx, deleteOrphanedAttachments, uploadedAt)
+// again by the uploader. The deleted messages come from idx_messages_deleted
+// (migration 090) and their attachments from idx_attachments_message. The
+// avatar, banner and group icon guards match the first half.
+func (q *Queries) DeleteDeletedMessageAttachments(ctx context.Context, uploadedAt string) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, deleteDeletedMessageAttachments, uploadedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -119,6 +108,54 @@ func (q *Queries) DeleteUnlinkedAttachment(ctx context.Context, arg DeleteUnlink
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+const deleteUnlinkedOrphanedAttachments = `-- name: DeleteUnlinkedOrphanedAttachments :many
+DELETE FROM attachments
+WHERE message_id IS NULL
+  AND uploaded_at < ?
+  AND NOT EXISTS (
+    SELECT 1 FROM users u WHERE u.avatar = '/api/v1/files/' || attachments.id
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM channels c WHERE c.dm_icon = attachments.id
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM users u WHERE u.banner_id = attachments.id
+  )
+RETURNING stored_as
+`
+
+// The orphan sweep's first half: rows never linked to a message, older than the
+// cutoff. message_id IS NULL is a seek on idx_attachments_message.
+//
+// Avatars are attachments that are never linked to a message on purpose: the
+// users.avatar URL is what keeps them alive and authorizes serving them
+// (migration 027). Excluding them here is what stops the sweep from destroying
+// every avatar in the instance. idx_users_avatar makes the lookup cheap. A
+// group DM icon (channels.dm_icon, migration 066) and a profile banner
+// (users.banner_id, migration 069) are kept the same way.
+func (q *Queries) DeleteUnlinkedOrphanedAttachments(ctx context.Context, uploadedAt string) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, deleteUnlinkedOrphanedAttachments, uploadedAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var stored_as string
+		if err := rows.Scan(&stored_as); err != nil {
+			return nil, err
+		}
+		items = append(items, stored_as)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const discardUnlinkedAttachment = `-- name: DiscardUnlinkedAttachment :one

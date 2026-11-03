@@ -81,11 +81,13 @@ function mutateChrome(model: VoiceChannelChromeModel, field: string): VoiceChann
 }
 
 describe("voice channel row view", () => {
+  // About 0.7 s locally and over 2 s on a busy CI runner (40 runs, each
+  // drawing every field twice), so it gets more than the 2 s default.
   it("every chrome model field changes the wrapper's DOM", async () => {
     await assertEveryFieldDraws(chromeModel, drawVoiceChannelChrome, mutateChrome, {
       patch: { fields: VOICE_CHROME_PATCH_FIELDS, apply: patchVoiceChannelChrome },
     });
-  });
+  }, 10_000);
 
   it("patching between any two states equals drawing the second", () => {
     fc.assert(

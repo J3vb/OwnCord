@@ -287,11 +287,11 @@ describe("MemberList", () => {
     // Store notifications are batched onto a microtask.
     channelsStore.flush();
 
-    // The new colour reaches the row; #0000ff reads 1.36:1 on #383a40, so the
-    // role clamp shows the name in --text-normal.
+    // The new colour reaches the row; #0000ff reads under 4.5:1 on the dark
+    // surfaces, so the role clamp lightens it to a readable blue.
     const stanName = container.querySelector<HTMLSpanElement>('[data-testid="member-2"] .mi-name')!;
     expect(stanName.dataset["roleColor"]).toBe("#0000FF");
-    expect(stanName.style.color).toBe("var(--text-normal)");
+    expect(stanName.style.color).toBe("rgb(143, 143, 255)");
   });
 
   it("renders groups for custom server roles, colored by the server's role color", () => {

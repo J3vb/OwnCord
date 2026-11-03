@@ -156,6 +156,14 @@ describe("ThreadPanel", () => {
     panel.destroy?.();
   });
 
+  it("marks the starter's author name for a role-colour re-clamp", async () => {
+    const panel = mountPanel();
+    await flush();
+    const name = q('[data-testid="thread-starter"] .msg-author');
+    expect(name.dataset["roleColor"]).toBeDefined();
+    panel.destroy?.();
+  });
+
   it("has a one-line text-only composer: short placeholder, no attach button", async () => {
     const panel = mountPanel();
     await flush();
@@ -526,6 +534,31 @@ describe("ThreadPanelHost", () => {
     expect(slot.querySelector('[data-testid="thread-panel-resize"]')).not.toBeNull();
     expect(slot.style.getPropertyValue("--thread-panel-width")).toBe("396px");
     host.close();
+  });
+
+  it("focuses the thread's text box on a desktop, but not on a phone", async () => {
+    const { host, slot } = await makeHost();
+    host.open(getThread(THREAD)!);
+    await vi.waitFor(() =>
+      expect(document.activeElement).toBe(slot.querySelector(".msg-textarea")),
+    );
+    host.close();
+
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn(() => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() })),
+    );
+    try {
+      host.open(getThread(THREAD)!);
+      await vi.waitFor(() => expect(slot.querySelector(".msg-textarea")).not.toBeNull());
+      await flush();
+      expect(document.activeElement).not.toBe(slot.querySelector(".msg-textarea"));
+      host.open(getThread(THREAD)!);
+      expect(document.activeElement).not.toBe(slot.querySelector(".msg-textarea"));
+      host.close();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("switching to another thread closes the first and focuses the second", async () => {

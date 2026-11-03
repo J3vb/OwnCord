@@ -361,6 +361,11 @@ fn key_material_is_the_base64_text_bytes() {
 fn key_index_is_zero_and_provider_matches_external_key_provider() {
     assert_eq!(KEY_INDEX, 0);
     let o = key_provider_options();
+    assert!(KEY_SLOTS.contains(&KEY_INDEX));
+    assert!(
+        *KEY_SLOTS.end() < o.key_ring_size,
+        "every slot must sit in the key ring"
+    );
     assert_eq!(o.ratchet_window_size, 0);
     assert_eq!(o.failure_tolerance, -1);
     assert_eq!(o.ratchet_salt, b"LKFrameEncryptionKey");

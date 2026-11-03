@@ -15,6 +15,10 @@ type e2eeAnnounce struct {
 	// It is stored with the announce, so every replay carries the key of the
 	// device that announced, not whichever device the user signed in on last.
 	identityKey string
+	// keySlots is true when the client installs each new room key in its own
+	// key slot and switches to it a moment later (voice_e2ee_announce
+	// key_slots). The key holder only rotates that way when every peer says so.
+	keySlots bool
 }
 
 // clone returns a copy that shares no slice storage with the receiver.

@@ -8,6 +8,8 @@ mod commands;
 #[cfg(test)]
 mod config_gates;
 mod constants;
+#[cfg(any(target_os = "linux", windows))]
+mod crash_line;
 #[cfg(target_os = "linux")]
 mod crash_log;
 mod credentials;
@@ -16,7 +18,11 @@ mod deb_install;
 mod diagnostics;
 #[cfg(windows)]
 mod dpapi;
-#[cfg(target_os = "linux")]
+#[cfg(any(windows, test))]
+mod exception_log;
+#[cfg(target_os = "android")]
+mod exit_info;
+#[cfg(any(target_os = "linux", windows))]
 mod exit_watch;
 mod external_content;
 mod external_open;
@@ -62,7 +68,7 @@ mod ptt;
 mod secret_store;
 mod shortcuts;
 mod sync;
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", windows))]
 mod system_crash_report;
 mod text;
 mod tofu;
@@ -219,6 +225,7 @@ pub fn run() {
     let builder = builder
         .plugin(update_commands::android::init())
         .plugin(call_service::init())
+        .plugin(exit_info::init())
         .plugin(files::init())
         .plugin(android_notifications::init());
 
@@ -352,6 +359,8 @@ pub fn run() {
             #[cfg(target_os = "linux")]
             native_voice::native_voice_set_key,
             #[cfg(target_os = "linux")]
+            native_voice::native_voice_use_key_slot,
+            #[cfg(target_os = "linux")]
             native_voice::native_voice_clear_key,
             #[cfg(target_os = "linux")]
             native_voice::native_voice_connect,
@@ -455,9 +464,9 @@ pub fn run() {
                     }
                 }
                 if let tauri::RunEvent::Exit = event {
-                    #[cfg(target_os = "linux")]
+                    #[cfg(any(target_os = "linux", windows))]
                     exit_watch::note_exit("event loop finished");
-                    #[cfg(not(target_os = "linux"))]
+                    #[cfg(not(any(target_os = "linux", windows)))]
                     log::info!("[exit] event loop finished; normal exit");
                     // Stop the PTT polling thread before the process tears down.
                     // This ensures the AppHandle held inside the thread is released
@@ -495,12 +504,22 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     // A native crash (signal, or GDK's exit on an X error) leaves no
     // panic: give it a last log line. After GTK init, so GDK's X
     // handlers are the ones it chains to.
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", windows))]
     if let Ok(dir) = tauri::Manager::path(app).app_log_dir() {
+        #[cfg(target_os = "linux")]
         crash_log::install(&dir.join("owncord-client.log"));
-        // A run that ends without a trace (SIGKILL) is reported by
-        // the next start; freezes and memory are logged as they happen.
+        // An unhandled native exception (a driver or library fault) gets
+        // the same last line on Windows.
+        #[cfg(windows)]
+        exception_log::install(&dir.join("owncord-client.log"));
+        // A run that ends without a trace (SIGKILL, End task) is reported
+        // by the next start; freezes and memory are logged as they happen.
         exit_watch::start(app.handle(), &dir, &app.package_info().version.to_string());
+    }
+    // How earlier runs ended, from Android, into the same native log.
+    #[cfg(target_os = "android")]
+    if let Ok(dir) = tauri::Manager::path(app).app_log_dir() {
+        exit_info::start(app.handle(), &dir.join("owncord-client.log"));
     }
     // Record the credential backend first: if this build has no
     // persistent store, every later credential symptom follows from it.
@@ -552,7 +571,7 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             &window,
             windows_media::app_origin(app.config(), config.use_https_scheme),
         );
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", windows))]
         exit_watch::watch_webview(&window);
         #[cfg(desktop)]
         let handle = app.handle().clone();
@@ -602,6 +621,8 @@ fn show_startup_failure(error: &str) {
         exit_watch::note_exit("startup failed");
         show_linux_startup_dialog(error);
     }
+    #[cfg(windows)]
+    exit_watch::note_exit("startup failed");
     #[cfg(all(desktop, not(target_os = "linux")))]
     rfd::MessageDialog::new()
         .set_title(text::STARTUP_DIALOG_TITLE)

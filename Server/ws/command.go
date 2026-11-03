@@ -233,6 +233,8 @@ type VoiceE2EEAnnounceCmd struct {
 	// VideoDecode is the sender's raw video_decode list. Unvalidated
 	// here; handleVoiceE2EEAnnounceV2 runs it through sanitizeVideoDecode.
 	VideoDecode []string
+	// KeySlots is the sender's key_slots flag; anything but JSON true is false.
+	KeySlots bool
 }
 
 func (c VoiceE2EEAnnounceCmd) Type() string  { return MsgTypeVoiceE2EEAnnounce }
@@ -568,6 +570,7 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 			Signature   string          `json:"signature"`
 			IdentityKey json.RawMessage `json:"identity_public_key"`
 			VideoDecode json.RawMessage `json:"video_decode"`
+			KeySlots    json.RawMessage `json:"key_slots"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("invalid voice_e2ee_announce payload: %w", err)
@@ -583,6 +586,7 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 			Signature:   p.Signature,
 			IdentityKey: announceIdentityKey(userID, p.IdentityKey),
 			VideoDecode: videoDecode,
+			KeySlots:    string(p.KeySlots) == "true",
 		}, nil
 	},
 

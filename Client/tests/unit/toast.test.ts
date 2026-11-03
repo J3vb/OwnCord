@@ -313,4 +313,74 @@ describe("ToastContainer", () => {
     toast.show("Hello");
     expect(container.querySelector(".toast-action")).toBeNull();
   });
+
+  describe("anchorTo", () => {
+    function anchorWithBox(box: { top: number; left: number; width: number; height: number }) {
+      const el = document.createElement("div");
+      el.getBoundingClientRect = () => DOMRect.fromRect({ x: box.left, y: box.top, ...box });
+      return el;
+    }
+    const root = () => container.querySelector<HTMLElement>(".toast-container")!;
+
+    it("stacks the toasts just above the composer and centres them on it", () => {
+      vi.stubGlobal("innerHeight", 900);
+      try {
+        toast.anchorTo(anchorWithBox({ top: 834, left: 318, width: 882, height: 66 }));
+        toast.show("Hello");
+        expect(root().style.getPropertyValue("--toast-bottom")).toBe("66px");
+        expect(root().style.getPropertyValue("--toast-center")).toBe("759px");
+        expect(root().style.getPropertyValue("--toast-room")).toBe("882px");
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it("re-measures on a window resize, so a moved composer carries the stack", () => {
+      vi.stubGlobal("innerHeight", 900);
+      try {
+        const box = { top: 834, left: 0, width: 400, height: 66 };
+        toast.anchorTo(anchorWithBox(box));
+        box.top = 700;
+        box.height = 200;
+        window.dispatchEvent(new Event("resize"));
+        expect(root().style.getPropertyValue("--toast-bottom")).toBe("200px");
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it("keeps the stack on screen when the composer's top is above the window", () => {
+      vi.stubGlobal("innerHeight", 600);
+      try {
+        toast.anchorTo(anchorWithBox({ top: -40, left: 0, width: 400, height: 700 }));
+        expect(root().style.getPropertyValue("--toast-bottom")).toBe("536px");
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it("falls back to the stylesheet's placement when the view has no composer", () => {
+      toast.anchorTo(anchorWithBox({ top: 0, left: 0, width: 0, height: 0 }));
+      toast.show("Hello");
+      expect(root().style.getPropertyValue("--toast-bottom")).toBe("");
+      expect(root().style.getPropertyValue("--toast-center")).toBe("");
+      expect(root().style.getPropertyValue("--toast-room")).toBe("");
+    });
+
+    it("an empty composer slot keeps the centre but not the height", () => {
+      toast.anchorTo(anchorWithBox({ top: 900, left: 100, width: 600, height: 0 }));
+      expect(root().style.getPropertyValue("--toast-bottom")).toBe("");
+      expect(root().style.getPropertyValue("--toast-center")).toBe("400px");
+    });
+
+    it("a new anchor replaces the old one's listeners", () => {
+      const first = anchorWithBox({ top: 834, left: 0, width: 400, height: 66 });
+      const measure = vi.spyOn(first, "getBoundingClientRect");
+      toast.anchorTo(first);
+      toast.anchorTo(anchorWithBox({ top: 800, left: 0, width: 400, height: 100 }));
+      measure.mockClear();
+      window.dispatchEvent(new Event("resize"));
+      expect(measure).not.toHaveBeenCalled();
+    });
+  });
 });

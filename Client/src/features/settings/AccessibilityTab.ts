@@ -6,6 +6,7 @@
 import { appendChildren, createElement, setText } from "@lib/dom";
 import { appendToggleRows, loadPref, savePref, type ToggleItem } from "./helpers";
 import { SYNC_OS_MOTION_DEFAULT, syncOsMotionListener } from "@lib/ui/osMotion";
+import { reclampRoleColors } from "@lib/prefs/themes";
 import {
   applyFontSize,
   applySaturation,
@@ -53,6 +54,7 @@ const readabilityToggles = (onFontChange: () => void): ReadonlyArray<ToggleItem>
     fallback: false,
     sideEffect: (nowOn) => {
       document.documentElement.classList.toggle("high-contrast", nowOn);
+      reclampRoleColors();
     },
   },
   {

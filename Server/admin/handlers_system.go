@@ -10,6 +10,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/lkstats"
 	"github.com/J3vb/OwnCord/Server/metrics"
+	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/sysstats"
 )
 
@@ -34,15 +35,21 @@ type SystemSources struct {
 	// SlowRoutes holds request times per route for GET /system/slow-requests;
 	// nil answers an empty list.
 	SlowRoutes *metrics.SlowRoutes
+	// Database reads the System health page's database card; nil leaves the
+	// card "not measured".
+	Database func(context.Context) (SystemDatabase, error)
+	// MaxWSConnections is server.max_ws_connections (0 is unlimited).
+	MaxWSConnections int
 }
 
-// mountSystemRoutes mounts the Dashboard health row: CPU, memory, disk,
-// uptime, LiveKit and slow requests, the same server health detail as the
-// attention panel, so VIEW_DIAGNOSTICS like it.
-func mountSystemRoutes(r chi.Router, gates *gateRegistry, src SystemSources, hub HubBroadcaster) {
+// mountSystemRoutes mounts the Dashboard health row, the LiveKit and slow requests cards
+// and the System health page: server health detail, so View Diagnostics like
+// the attention panel.
+func mountSystemRoutes(r chi.Router, gates *gateRegistry, src SystemSources, hub HubBroadcaster, attention *service.AttentionService, version string) {
 	gates.route(r, gateViewDiagnostics, http.MethodGet, "/system/stats", handleGetSystemStats(src, hub))
 	gates.route(r, gateViewDiagnostics, http.MethodGet, "/system/livekit", handleGetSystemLiveKit(src, hub))
 	gates.route(r, gateViewDiagnostics, http.MethodGet, "/system/slow-requests", handleGetSlowRequests(src))
+	gates.route(r, gateViewDiagnostics, http.MethodGet, "/system/health", handleGetSystemHealth(src, hub, attention, version, time.Now))
 }
 
 // systemWindows are the history lengths the route serves.

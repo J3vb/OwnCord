@@ -95,6 +95,9 @@ type updateProfileRequest struct {
 type changePasswordRequest struct {
 	OldPassword string `json:"old_password"`
 	NewPassword string `json:"new_password"`
+	// RevokeAPITokens also revokes every API token of the account. Absent means
+	// false, so a client that predates the field keeps its tokens as before.
+	RevokeAPITokens bool `json:"revoke_api_tokens"`
 }
 
 type sessionResponse struct {
@@ -112,6 +115,20 @@ type sessionResponse struct {
 
 type sessionsListResponse struct {
 	Sessions []sessionResponse `json:"sessions"`
+}
+
+// ownAPITokenResponse is one of the caller's live API tokens. Never a hash or
+// raw token: only the raw token shown at creation is usable.
+type ownAPITokenResponse struct {
+	ID        int64   `json:"id"`
+	Label     string  `json:"label"`
+	CreatedAt string  `json:"created_at"`
+	LastUsed  *string `json:"last_used"`
+	ExpiresAt *string `json:"expires_at"`
+}
+
+type ownAPITokensListResponse struct {
+	Tokens []ownAPITokenResponse `json:"tokens"`
 }
 
 type ProfileBroadcaster interface {
@@ -174,6 +191,11 @@ func MountProfileRoutes(r chi.Router, svc *service.Services, store FileStore, li
 			Get("/moderation", handleOwnModeration(svc))
 		r.With(requireLoginSession).Delete("/sessions", handleRevokeAllSessions(svc, limiter, broadcaster))
 		r.With(requireLoginSession).Delete("/sessions/{id}", handleRevokeSession(svc, broadcaster))
+
+		if svc.Tokens != nil {
+			r.With(requireLoginSession).Get("/api-tokens", handleListOwnAPITokens(svc.Tokens))
+			r.With(requireLoginSession).Delete("/api-tokens/{id}", handleRevokeOwnAPIToken(svc.Tokens))
+		}
 	})
 }
 
@@ -427,7 +449,7 @@ func handleChangePassword(svc *service.Services, limiter *auth.RateLimiter, broa
 			keepSessionID = sess.ID
 		}
 
-		res, err := svc.Users.ChangePassword(r.Context(), user.ID, hash, keepSessionID)
+		res, err := svc.Users.ChangePassword(r.Context(), user.ID, hash, keepSessionID, req.RevokeAPITokens)
 		if err != nil {
 			writeServiceError(r.Context(), w, err)
 			return
@@ -439,11 +461,12 @@ func handleChangePassword(svc *service.Services, limiter *auth.RateLimiter, broa
 		}
 		if res.RevokeFailed {
 			// Partial success: the password IS changed; only revoking the other
-			// sessions failed, and a 5xx would tell the user to retry with a
-			// password that no longer works.
+			// sessions or the API tokens failed, and a 5xx would tell the user to
+			// retry with a password that no longer works.
 			writeJSON(w, http.StatusOK, map[string]any{
-				"warning":          "password changed, but other sessions could not be revoked; revoke them from the sessions list",
-				"sessions_revoked": res.SessionsRevoked,
+				"warning":            "password changed, but other sessions or API tokens could not be revoked; revoke them from the sessions list",
+				"sessions_revoked":   res.SessionsRevoked,
+				"api_tokens_revoked": res.TokensRevoked,
 			})
 			return
 		}
@@ -518,6 +541,53 @@ func handleRevokeSession(svc *service.Services, broadcaster ProfileBroadcaster) 
 		}
 		disconnectIfSessionRevoked(broadcaster, user.ID)
 
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// handleListOwnAPITokens lists the caller's live API tokens, so a member can
+// see every credential that acts as them besides their sessions.
+func handleListOwnAPITokens(tokens *service.TokenService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user, ok := requireUser(w, r)
+		if !ok {
+			return
+		}
+		items, err := tokens.ListMine(r.Context(), user.ID)
+		if err != nil {
+			writeServiceError(r.Context(), w, err)
+			return
+		}
+		resp := ownAPITokensListResponse{Tokens: make([]ownAPITokenResponse, 0, len(items))}
+		for _, it := range items {
+			resp.Tokens = append(resp.Tokens, ownAPITokenResponse{
+				ID:        it.ID,
+				Label:     it.Label,
+				CreatedAt: it.CreatedAt,
+				LastUsed:  it.LastUsed,
+				ExpiresAt: it.ExpiresAt,
+			})
+		}
+		writeJSON(w, http.StatusOK, resp)
+	}
+}
+
+// handleRevokeOwnAPIToken revokes one of the caller's API tokens. Any id that
+// is not one of the caller's live tokens is 404.
+func handleRevokeOwnAPIToken(tokens *service.TokenService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user, ok := requireUser(w, r)
+		if !ok {
+			return
+		}
+		id, ok := parseIDParam(w, r, "id")
+		if !ok {
+			return
+		}
+		if err := tokens.RevokeMine(r.Context(), user.ID, id); err != nil {
+			writeServiceError(r.Context(), w, err)
+			return
+		}
 		w.WriteHeader(http.StatusNoContent)
 	}
 }

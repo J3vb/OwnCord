@@ -241,23 +241,32 @@ func (d *DB) GetAttachmentsByMessageIDs(ctx context.Context, msgIDs []int64) (ma
 
 // DeleteOrphanedAttachments removes attachment records that are unlinked, or
 // linked to a soft-deleted message, and whose uploaded_at is older than the
-// cutoff; live avatars are excluded by the query. It returns the stored_as
-// filenames for the caller to remove.
+// cutoff; live avatars, banners and group icons are excluded by the queries.
+// It returns the stored_as filenames for the caller to remove.
 //
 // A message delete is soft (the row survives with deleted=1), so its
-// attachments never match message_id IS NULL; the query's second WHERE half
-// reclaims those files, which serveFileResolve already treats as unservable.
+// attachments never match message_id IS NULL; the second statement reclaims
+// those files, which serveFileResolve already treats as unservable. The two
+// halves are separate statements so each reads its own index instead of one
+// statement scanning every attachment row.
 //
 // cutoff is a time.Time, not a string, because uploaded_at is SQLite's
 // 'YYYY-MM-DD HH:MM:SS' compared bytewise; a caller formatting RFC3339 would
 // collapse the grace period to "same date". Formatting here prevents that.
 //
-// DELETE ... RETURNING makes select+delete atomic, so an attachment linked
-// between a SELECT and DELETE cannot lose its file while the row survives.
+// Each DELETE ... RETURNING makes select+delete atomic, so an attachment linked
+// between a SELECT and DELETE cannot lose its file while the row survives. When
+// the second statement fails, the first one's rows are already gone, so their
+// names come back with the error: the caller must still remove those files.
 func (d *DB) DeleteOrphanedAttachments(ctx context.Context, cutoff time.Time) ([]string, error) {
-	files, err := d.q.DeleteOrphanedAttachments(ctx, cutoff.UTC().Format(dbtime.SQLiteLayout))
+	at := cutoff.UTC().Format(dbtime.SQLiteLayout)
+	files, err := d.q.DeleteUnlinkedOrphanedAttachments(ctx, at)
 	if err != nil {
-		return nil, fmt.Errorf("DeleteOrphanedAttachments: %w", err)
+		return nil, fmt.Errorf("DeleteOrphanedAttachments: unlinked: %w", err)
 	}
-	return files, nil
+	deleted, err := d.q.DeleteDeletedMessageAttachments(ctx, at)
+	if err != nil {
+		return files, fmt.Errorf("DeleteOrphanedAttachments: deleted messages: %w", err)
+	}
+	return append(files, deleted...), nil
 }

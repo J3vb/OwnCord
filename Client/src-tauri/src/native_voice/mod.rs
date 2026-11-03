@@ -68,6 +68,10 @@ struct Inner {
     /// Key material for the next/current room. Set before connect by the TS
     /// key exchange, rotated in place, cleared on leave.
     key: Option<Vec<u8>>,
+    /// The slot `key` is in and sent with.
+    key_slot: i32,
+    /// A key staged in the other slot (received with, not sent with yet).
+    staged: Option<(i32, Vec<u8>)>,
     session: Option<(u64, NativeSession)>,
     /// The out-of-call camera preview (settings tab).
     standalone: Option<Standalone>,
@@ -207,22 +211,116 @@ pub fn native_voice_build_info() -> String {
     format!("livekit {} libwebrtc-ok {probe}", livekit::SDK_VERSION)
 }
 
+/// A slot from the webview, checked against the key ring.
+fn key_slot(slot: Option<i32>) -> Result<i32, String> {
+    let slot = slot.unwrap_or(session::KEY_INDEX);
+    if session::KEY_SLOTS.contains(&slot) {
+        Ok(slot)
+    } else {
+        Err(format!("key slot {slot} out of range"))
+    }
+}
+
+impl Inner {
+    /// Record a room key: staged in `slot` (received with only) or sent
+    /// with at once. Staging into the slot being sent on replaces the sending
+    /// key, so that is a send-at-once.
+    fn install_key(&mut self, material: Vec<u8>, slot: i32, stage: bool) -> bool {
+        let stage = stage && self.key.is_some() && slot != self.key_slot;
+        if stage {
+            if let Some((_, mut old)) = self.staged.take() {
+                old.iter_mut().for_each(|b| *b = 0);
+            }
+            self.staged = Some((slot, material));
+        } else {
+            if matches!(&self.staged, Some((s, _)) if *s == slot) {
+                let mut old = self.staged.take();
+                if let Some((_, k)) = old.as_mut() {
+                    k.iter_mut().for_each(|b| *b = 0);
+                }
+            }
+            wipe(&mut self.key);
+            self.key = Some(material);
+            self.key_slot = slot;
+        }
+        stage
+    }
+
+    /// Send with the key staged in `slot`. The key sent with until now stays
+    /// in its own slot, staged, for frames still in flight. False when nothing
+    /// is staged there.
+    fn use_key_slot(&mut self, slot: i32) -> bool {
+        if slot == self.key_slot && self.key.is_some() {
+            return true;
+        }
+        match self.staged.take() {
+            Some((s, material)) if s == slot => {
+                let previous = self.key.replace(material);
+                if let Some(prev) = previous {
+                    self.staged = Some((self.key_slot, prev));
+                }
+                self.key_slot = slot;
+                true
+            }
+            other => {
+                self.staged = other;
+                false
+            }
+        }
+    }
+
+    /// Forget every key (leave).
+    fn clear_keys(&mut self) {
+        wipe(&mut self.key);
+        if let Some((_, mut k)) = self.staged.take() {
+            k.iter_mut().for_each(|b| *b = 0);
+        }
+        self.key_slot = session::KEY_INDEX;
+    }
+}
+
 /// Install or rotate the room key. `key` is the base64 text livekit-client
 /// would receive in `ExternalE2EEKeyProvider.setKey`; see
-/// `session::shared_key_material` for why it is used as text.
+/// `session::shared_key_material` for why it is used as text. Without a
+/// `slot` it goes in slot 0; `stage` keeps sending on the current key until
+/// `native_voice_use_key_slot`.
 #[tauri::command]
 pub async fn native_voice_set_key(
     state: tauri::State<'_, NativeVoiceState>,
     key: String,
+    slot: Option<i32>,
+    stage: Option<bool>,
 ) -> Result<(), String> {
+    let slot = key_slot(slot)?;
     let material = session::shared_key_material(&key);
     let mut inner = state.inner.lock().await;
+    let staged = inner.install_key(material.clone(), slot, stage.unwrap_or(false));
     if let Some((_, s)) = &inner.session {
-        s.set_key(material.clone());
+        if staged {
+            s.stage_key(material, slot);
+        } else {
+            s.set_key(material, slot);
+        }
     }
-    wipe(&mut inner.key);
-    inner.key = Some(material);
-    log::debug!("[native_voice] room key installed");
+    log::debug!("[native_voice] room key installed in slot {slot} (staged: {staged})");
+    Ok(())
+}
+
+/// Send with the room key already installed in `slot`.
+#[tauri::command]
+pub async fn native_voice_use_key_slot(
+    state: tauri::State<'_, NativeVoiceState>,
+    slot: i32,
+) -> Result<(), String> {
+    let slot = key_slot(Some(slot))?;
+    let mut inner = state.inner.lock().await;
+    if !inner.use_key_slot(slot) {
+        return Err(format!("no room key in slot {slot}"));
+    }
+    if let Some((_, s)) = &inner.session {
+        s.use_key_slot(slot);
+    }
+    log::debug!("[native_voice] sending with key slot {slot}");
     Ok(())
 }
 
@@ -232,7 +330,7 @@ pub async fn native_voice_set_key(
 pub async fn native_voice_clear_key(
     state: tauri::State<'_, NativeVoiceState>,
 ) -> Result<(), String> {
-    wipe(&mut state.inner.lock().await.key);
+    state.inner.lock().await.clear_keys();
     Ok(())
 }
 
@@ -302,8 +400,18 @@ pub async fn native_voice_connect<R: Runtime>(
             session.close().await;
             return Err(e);
         }
-        Ok(Some(k)) => session.set_key(k),
-        Ok(None) => {}
+        Ok(rotated) => {
+            // Connect installs the key in slot 0. A rotation that landed
+            // meanwhile, or a call on slot 1, needs the current slots here.
+            if rotated.is_some() || inner.key_slot != session::KEY_INDEX {
+                if let Some(k) = inner.key.clone() {
+                    session.set_key(k, inner.key_slot);
+                }
+            }
+            if let Some((slot, k)) = inner.staged.clone() {
+                session.stage_key(k, slot);
+            }
+        }
     }
     log::info!("[native_voice] session {id} connected as {identity}");
     let frames = session.frames_url().to_string();
@@ -1280,198 +1388,4 @@ pub async fn native_voice_get_stats(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Proves both that the SDK version is readable and that a libwebrtc symbol
-    /// links and runs. If the prebuilt archive were missing or ABI-mismatched,
-    /// this binary would not link at all.
-    #[test]
-    fn build_info_reports_sdk_and_libwebrtc() {
-        let info = native_voice_build_info();
-        assert!(info.contains("livekit 0.10.0"), "unexpected: {info}");
-        assert!(info.contains("libwebrtc-ok"), "unexpected: {info}");
-    }
-
-    #[test]
-    fn video_codecs_probe_runs() {
-        // Either answer is valid for a build; the probe must not panic.
-        let _ = probe_video_codecs();
-        assert!(is_h264_mime("video/h264"));
-        assert!(!is_h264_mime("video/VP8"));
-        assert!(is_vp9_mime("video/vp9"));
-        assert!(!is_vp9_mime("video/VP8"));
-    }
-
-    #[test]
-    fn decode_names_lowercase_dedupe_and_drop_support_entries() {
-        let mimes = [
-            "video/VP8",
-            "video/H264",
-            "video/H264",
-            "video/VP9",
-            "video/rtx",
-            "video/red",
-            "video/ulpfec",
-            "video/flexfec-03",
-            "video/AV1",
-        ];
-        assert_eq!(
-            decode_names(mimes.into_iter()),
-            vec!["vp8", "h264", "vp9", "av1"]
-        );
-        assert!(decode_names(std::iter::empty()).is_empty());
-        assert_eq!(decode_codec_name("video"), None);
-    }
-
-    #[test]
-    fn wipe_zeroes_before_dropping() {
-        let mut key = Some(vec![7u8; 4]);
-        wipe(&mut key);
-        assert!(key.is_none());
-    }
-
-    #[test]
-    fn key_after_connect_applies_a_rotation_and_rejects_supersession() {
-        let mut inner = Inner {
-            key: Some(vec![1]),
-            session: None,
-            standalone: None,
-            standalone_generation: 0,
-            next_id: 3,
-            ..Default::default()
-        };
-        assert_eq!(inner.key_after_connect(3, &[1]), Ok(None));
-        inner.key = Some(vec![2]);
-        assert_eq!(inner.key_after_connect(3, &[1]), Ok(Some(vec![2])));
-        assert!(inner.key_after_connect(2, &[1]).is_err());
-        inner.key = None;
-        assert!(inner.key_after_connect(3, &[1]).is_err());
-    }
-
-    #[test]
-    fn stale_session_ids_are_rejected() {
-        let mut inner = Inner::default();
-        assert!(inner.current(1).is_err());
-        assert_eq!(inner.resources().rooms, 0);
-    }
-
-    #[test]
-    fn a_superseded_camera_preview_start_does_not_claim_the_slot() {
-        let mut inner = Inner::default();
-        let older = inner.begin_standalone();
-        let newer = inner.begin_standalone();
-        // The older start finishes last: it must not claim the slot the newer
-        // start owns.
-        assert!(!inner.standalone_is_latest(older));
-        assert!(inner.standalone_is_latest(newer));
-        // A stop while a start is in flight supersedes it too.
-        inner.clear_standalone();
-        assert!(!inner.standalone_is_latest(newer));
-    }
-
-    /// A double start: the older one is superseded and drops its own test.
-    #[test]
-    fn a_second_mic_test_start_supersedes_the_first() {
-        let mut inner = Inner::default();
-        let (_, older, seen) = inner.begin_mic_test().unwrap();
-        let (_, newer, _) = inner.begin_mic_test().unwrap();
-        assert_ne!(older, newer);
-        assert_eq!(
-            inner.admit_mic_test(older, seen),
-            Err("mic test superseded".to_string())
-        );
-        assert_eq!(inner.admit_mic_test(newer, seen), Ok(()));
-    }
-
-    #[test]
-    fn stopping_a_mic_test_supersedes_its_start_and_ignores_stale_ids() {
-        let mut inner = Inner::default();
-        let (_, older, seen) = inner.begin_mic_test().unwrap();
-        let (_, current, _) = inner.begin_mic_test().unwrap();
-        assert!(inner.stop_mic_test(older).is_none());
-        assert_eq!(
-            inner.admit_mic_test(current, seen),
-            Ok(()),
-            "a stale stop leaves the current start admitted"
-        );
-        assert!(inner.stop_mic_test(current).is_none(), "nothing stored yet");
-        assert!(inner.admit_mic_test(current, seen).is_err());
-    }
-
-    #[test]
-    fn a_connect_ends_the_mic_test_and_refuses_one_still_starting() {
-        let mut inner = Inner::default();
-        let (_, id, seen) = inner.begin_mic_test().unwrap();
-        // What `native_voice_connect` does under its first lock hold.
-        assert!(inner.take_mic_test().is_none());
-        inner.next_id += 1;
-        assert_eq!(
-            inner.admit_mic_test(id, seen),
-            Err(MIC_TEST_IN_CALL.to_string())
-        );
-    }
-
-    #[test]
-    fn a_start_between_the_two_connect_locks_is_refused() {
-        let mut inner = Inner::default();
-        // First lock hold of `native_voice_connect`.
-        assert!(inner.take_mic_test().is_none());
-        inner.next_id += 1;
-        // A start that begins after it sees the bumped connect count, so
-        // only the second take can refuse it.
-        let (_, id, seen) = inner.begin_mic_test().unwrap();
-        assert!(inner.take_mic_test().is_none());
-        assert!(inner.admit_mic_test(id, seen).is_err());
-    }
-
-    #[test]
-    fn a_mic_test_cannot_start_during_a_call() {
-        assert!(mic_test_blocked(true));
-        assert!(!mic_test_blocked(false));
-        let mut inner = Inner::default();
-        assert!(!inner.mic_test_blocked());
-        assert!(inner.begin_mic_test().is_ok());
-    }
-
-    fn idle_test(monitor: bool) -> MicTest {
-        let audio = session::AudioOptions {
-            echo_cancellation: false,
-            noise_suppression: false,
-            auto_gain_control: false,
-            enhanced_noise_suppression: false,
-        };
-        MicTest::idle_for_test(audio, monitor, tokio::spawn(async {}))
-    }
-
-    /// The meter's monitor holds the test slot: a test start takes it over, a
-    /// stop of the old id is stale, and a connect takes it out.
-    #[tokio::test]
-    async fn a_mic_test_start_replaces_a_running_monitor_and_a_connect_ends_it() {
-        let mut inner = Inner::default();
-        let (_, monitor_id, seen) = inner.begin_mic_test().unwrap();
-        inner.admit_mic_test(monitor_id, seen).unwrap();
-        inner.mic_test = Some((monitor_id, idle_test(true)));
-        let (replaced, test_id, seen) = inner.begin_mic_test().unwrap();
-        assert_eq!(replaced.map(|(id, _)| id), Some(monitor_id));
-        assert!(inner.stop_mic_test(monitor_id).is_none(), "stale id");
-        inner.admit_mic_test(test_id, seen).unwrap();
-        inner.mic_test = Some((test_id, idle_test(false)));
-        let ended = inner.take_mic_test();
-        assert_eq!(ended.map(|(id, _)| id), Some(test_id));
-        assert!(inner.mic_test.is_none());
-    }
-
-    /// A monitor that finishes opening after a call joined must not claim
-    /// the slot: the call's capture owns the device.
-    #[test]
-    fn a_monitor_that_finishes_after_a_connect_is_refused() {
-        let mut inner = Inner::default();
-        let (_, id, seen) = inner.begin_mic_test().unwrap();
-        inner.next_id += 1;
-        assert_eq!(
-            inner.admit_mic_test(id, seen),
-            Err(MIC_TEST_IN_CALL.to_string())
-        );
-    }
-}
+mod tests;

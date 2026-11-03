@@ -460,7 +460,11 @@ export function createThreadPanel(options: ThreadPanelOptions): ThreadPanelCompo
         ? createImportedName(imported, "msg-author msg-author--imported")
         : createElement(
             "span",
-            { class: "msg-author", style: `color: ${readableRoleColor(color)}` },
+            {
+              class: "msg-author",
+              style: `color: ${readableRoleColor(color)}`,
+              "data-role-color": color,
+            },
             resolveDisplayName(author),
           ),
     );

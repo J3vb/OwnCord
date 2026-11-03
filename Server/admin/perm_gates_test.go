@@ -298,6 +298,7 @@ var expectedGatedRoutes = []admin.GatedRoute{
 	{Method: http.MethodGet, Pattern: "/system/stats", Gate: "view_diagnostics"},
 	{Method: http.MethodGet, Pattern: "/system/livekit", Gate: "view_diagnostics"},
 	{Method: http.MethodGet, Pattern: "/system/slow-requests", Gate: "view_diagnostics"},
+	{Method: http.MethodGet, Pattern: "/system/health", Gate: "view_diagnostics"},
 	{Method: http.MethodDelete, Pattern: "/users/{id}", Gate: "erase_accounts"},
 }
 

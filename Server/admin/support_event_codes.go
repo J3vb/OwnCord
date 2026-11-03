@@ -78,6 +78,7 @@ var supportEventCodes = map[string]string{ //nolint:gosec // G101: false positiv
 	"TOTP secret decryption failed — check OWNCORD_TOTP_KEY":                                  "totp_secret_decryption_failed",
 	"UpdateProfile post-commit re-read failed; returning locally merged row":                  "updateprofile_post_commit_re_read_failed",
 	"UserService.ChangePassword DeleteOtherSessions":                                          "userservice_changepassword_deleteothersessions",
+	"UserService.ChangePassword RevokeUserAPITokens":                                          "userservice_changepassword_revokeuserapitokens",
 	"admin erasure failed":                                                                    "admin_erasure_failed",
 	"admin erasure: files pending":                                                            "admin_erasure_files_pending",
 	"admin: roles_update broadcast skipped, role list unreadable":                             "admin_roles_update_broadcast_skipped_role",

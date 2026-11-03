@@ -632,6 +632,8 @@ details.disclose:not([open])>summary.section-card-header{border-bottom:none}
 .facts{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:8px 16px;font-size:13px}
 .facts dt{color:var(--text-muted)}
 .facts dd{min-width:0}
+.sys-health-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(340px,100%),1fr));gap:16px}.sys-health-grid .section-card{margin-bottom:0}
+.sys-health-actions{margin-bottom:16px}.sys-signals{list-style:none;margin:12px 0 8px;padding:0;display:grid;gap:6px;font-size:13px}.sys-stale{margin-bottom:12px}.sys-health-grid .btn-sm{margin:4px 8px 0 0}.sys-health-grid code{overflow-wrap:anywhere}
 code.hash{font-family:var(--font-mono);font-size:12px;overflow-wrap:anywhere;word-break:break-all}
 #support-preview .tbl code{font-family:var(--font-mono);font-size:12px}
 #support-preview .tbl code.hash{display:inline-block;min-width:32ch}

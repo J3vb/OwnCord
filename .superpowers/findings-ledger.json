@@ -1,5 +1,5 @@
 {
-  "nextId": 539,
+  "nextId": 542,
   "findings": [
     {
       "id": "OC-0001",
@@ -12445,6 +12445,75 @@
       "found": "2026-11-03",
       "hunt": "server-review-2026-11-03",
       "lens": "ws-chat",
+      "finder": "claude",
+      "fixedDate": "2026-11-03"
+    },
+    {
+      "id": "OC-0539",
+      "title": "Storage reconciliation and the leftover scan read the whole attachments table once per 200 files",
+      "file": "Server/db/erasure.go",
+      "line": 480,
+      "severity": "medium",
+      "why": "ReferencedStoredFiles looks names up with stored_as IN (200 names), and attachments had no index on stored_as, so every chunk was a full table scan: the 15-minute reconciliation and the admin leftover scan cost files x rows / 200 (about 19 s at 100,000 files and rows), and the leftover scan answered 503 once it passed the 15 s request deadline. The orphan sweep and the stored-file-in-use check scanned the same table.",
+      "repro": "Seed 100,000 attachment rows and 100,000 old files and run a reconciliation tick or the admin Scan leftovers: EXPLAIN QUERY PLAN shows SCAN attachments for each chunk.",
+      "evidence": "Server/db/attachment_index_test.go (TestStoredNameLookups_PlanUsesStoredAsIndex, TestOrphanSweep_PlansSeekByMessage).",
+      "suggestedFix": "Migration 090 indexes attachments(stored_as), attachments(uploaded_at, id) and messages(id) WHERE deleted = 1; split the orphan sweep into an unlinked half and a deleted-message half. With the index the leftover scan fits the 15 s request deadline.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/db/attachment_index_test.go",
+        "revertProof": "fail (without migration 090 both plan tests see SCAN attachments or SCAN messages)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-03",
+      "hunt": "server-review-2026-11-03",
+      "lens": "uploads-media-lifecycle",
+      "finder": "claude",
+      "fixedDate": "2026-11-03"
+    },
+    {
+      "id": "OC-0540",
+      "title": "A forwarded file could be removed by storage reconciliation in the moment before its row was written",
+      "file": "Server/storage/clone.go",
+      "line": 53,
+      "severity": "low",
+      "why": "A forward hard-links the source file, so the new name carries the source's old modification time; reconciliation treats it as an old file with no row in the gap between the link and the row insert, and its batch lookup can be seconds old by the time it deletes.",
+      "repro": "Forward an attachment whose file is older than an hour while a reconciliation tick sits between its directory listing and its delete loop: the new name can be deleted and the forward then answers 404.",
+      "evidence": "Server/storage/clone_test.go (TestClone_LinkGetsFreshModTime), Server/service/erasure_test.go (TestErasureService_ReconcileKeepsAFileNamedAfterTheBatchLookup).",
+      "suggestedFix": "Stamp a fresh modification time on the hard link (copy instead when the stamp fails), and re-check each name right before Reconcile deletes it.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/service/erasure_test.go",
+        "revertProof": "fail (without the re-check Reconcile removes the file named after its batch lookup)"
+      },
+      "confidence": "medium",
+      "status": "fixed",
+      "found": "2026-11-03",
+      "hunt": "server-review-2026-11-03",
+      "lens": "uploads-media-lifecycle",
+      "finder": "claude",
+      "fixedDate": "2026-11-03"
+    },
+    {
+      "id": "OC-0541",
+      "title": "The first keys typed after opening search or the quick switcher landed in the message box",
+      "file": "Client/src/pages/main-page/OverlayManagers.ts",
+      "line": 180,
+      "severity": "medium",
+      "why": "Both overlays load their code on first use and focus their input a frame after mounting. Until then nothing (or the message box) held focus, and the page's type-to-compose rule sent printable keys to the message box. The header search box also opened on focus, so Tab could not pass through the header.",
+      "repro": "Click the header search box (or press Ctrl+K in the message box) and type 'hello' at once: 'h' (or 'ra' after Ctrl+K) lands in the message box draft.",
+      "evidence": "Client/tests/unit/overlay-type-ahead.test.ts, Client/tests/unit/type-ahead.test.ts, Client/tests/e2e/chat-header.spec.ts, Client/tests/e2e/overlays.spec.ts.",
+      "suggestedFix": "Hold plain printable keys while an overlay open is pending and hand them to the first text field that takes focus; open the header box on click, Enter or a typed key instead of on focus.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/unit/overlay-type-ahead.test.ts",
+        "revertProof": "fail (the Ctrl+K case puts 'ra' in the message box without the hold)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-03",
+      "hunt": "client-review-2026-11-03",
+      "lens": "design-visual",
       "finder": "claude",
       "fixedDate": "2026-11-03"
     }

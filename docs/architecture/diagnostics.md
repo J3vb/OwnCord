@@ -40,6 +40,7 @@ BPR-055.)
 | Attention panel                   | Admin panel **Dashboard**, `GET /admin/api/attention` (RI-07)            | `ADMINISTRATOR`                                                                                                      | no — in memory, never exported                                                                                                                                       |
 | Health row                        | Admin panel **Dashboard**, `GET /admin/api/system/stats`                 | `ADMINISTRATOR` or `VIEW_DIAGNOSTICS`                                                                                | no — in memory (24 h of 5 s samples), never exported                                                                                                                 |
 | Slow requests card                | Admin panel **Dashboard**, `GET /admin/api/system/slow-requests`         | `ADMINISTRATOR` or `VIEW_DIAGNOSTICS`                                                                                | no — in memory (1 h, per route pattern), never exported                                                                                                              |
+| System health page                | Admin panel **System health**, `GET /admin/api/system/health`            | `ADMINISTRATOR` or `VIEW_DIAGNOSTICS`                                                                                | no — read on request, never exported                                                                                                                                 |
 | Support bundle                    | Admin panel **Diagnostics**, `/admin/api/support-bundles/*`              | `ADMINISTRATOR` or `VIEW_DIAGNOSTICS`, with a current login session; explicit preview and confirmation               | local download only, never uploaded                                                                                                                                  |
 | Audit log                         | `audit_log` table, admin panel                                           | `VIEW_AUDIT_LOG`                                                                                                     | no                                                                                                                                                                   |
 | Backups                           | `backup.dir` (scheduled and on demand)                                   | the process owner only on disk; over the admin API the owner, or a Manage Backups / Restore Backups holder per route | no                                                                                                                                                                   |
@@ -85,6 +86,29 @@ out-of-memory killer, or a desktop killing a frozen window) shows up. A terminat
 or hang-up removes the file as it logs its own line. Memory lines count only
 the app's own process: the webview's separate web process is not included, and
 its end is logged as `[exit] webview process ended`.
+
+On Windows the native log says the same, with Windows' own sources:
+
+- `exception_log.rs` installs an unhandled-exception filter that writes one
+  `[crash] unhandled exception` line (code and its plain name, faulting module
+  file name and offset, thread), then hands the exception on so Windows Error
+  Reporting still runs. `OWNCORD_EXCEPTION_LOG=off` leaves it out.
+- `exit_watch.rs` keeps the same `run-<pid>.state` file (working set, peak,
+  committed memory, threads, main-thread and page state) and `[hang]` lines,
+  and logs the Windows build, RAM and WebView2 version at startup.
+- WebView2's helper processes report their failures: the page's renderer, the
+  GPU process, utility processes such as video capture, and the browser
+  process itself. Each gives an `[exit] webview <process> process failed`
+  line with the reason, exit code, service name, failing module and what the
+  user saw. A GPU or capture process restart pauses video or stops the camera,
+  so this is the line to look for next to a frozen webcam.
+- A start that finds a run file from a process that is gone asks the
+  Application event log (`wevtutil`) for an Application Error or Application
+  Hang record of that pid, and copies the exception code, faulting module and
+  version, or that Windows closed the window as not responding. Without a
+  record (End task, sign-out, power loss) it says so; when the event log
+  cannot be read it logs one "not available" line and carries on. Paths are
+  never copied, only module file names.
 
 A settings key that is not on the allowlist never enters the bundle, whatever
 it holds; device ids and the custom status text are left out on purpose. The
