@@ -26,6 +26,7 @@ func init() {
 		"register: reading registration_mode failed":            "register_mode_read_failed",
 		"registration policy: reading registration_mode failed": "registration_policy_mode_read_failed",
 		"registration policy: reading require_2fa failed":       "registration_policy_require_2fa_read_failed",
+		"stored TOTP secrets unreadable":                        "totp_stored_secrets_unreadable",
 		"totp confirm: storing the secret failed":               "totp_confirm_store_failed",
 		"totp disable: clearing the secret failed":              "totp_disable_clear_failed",
 		"totp disable: reading require_2fa failed":              "totp_disable_require_2fa_read_failed",

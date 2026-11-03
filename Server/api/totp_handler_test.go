@@ -24,7 +24,7 @@ func TestVerifyTOTP_Success(t *testing.T) {
 	secret, _ := auth.GenerateTOTPSecret()
 	hash, _ := auth.HashPassword("Password1!")
 	uid, _ := database.CreateUser(context.Background(), "totpuser", hash, 4)
-	_ = database.UpdateUserTOTPSecret(context.Background(), uid, &secret)
+	storeSealedTOTP(t, database, uid, secret)
 
 	// Login should return requires_2fa + partial_token.
 	rr := postJSON(t, router, "/api/v1/auth/login", map[string]string{
@@ -72,7 +72,7 @@ func TestVerifyTOTP_InvalidCode(t *testing.T) {
 	secret, _ := auth.GenerateTOTPSecret()
 	hash, _ := auth.HashPassword("Password1!")
 	uid, _ := database.CreateUser(context.Background(), "totpuser2", hash, 4)
-	_ = database.UpdateUserTOTPSecret(context.Background(), uid, &secret)
+	storeSealedTOTP(t, database, uid, secret)
 
 	// Login to get partial token.
 	rr := postJSON(t, router, "/api/v1/auth/login", map[string]string{
@@ -124,7 +124,7 @@ func TestVerifyTOTP_MalformedBody(t *testing.T) {
 	secret, _ := auth.GenerateTOTPSecret()
 	hash, _ := auth.HashPassword("Password1!")
 	uid, _ := database.CreateUser(context.Background(), "totpuser3", hash, 4)
-	_ = database.UpdateUserTOTPSecret(context.Background(), uid, &secret)
+	storeSealedTOTP(t, database, uid, secret)
 
 	rr := postJSON(t, router, "/api/v1/auth/login", map[string]string{
 		"username": "totpuser3",
@@ -156,7 +156,7 @@ func TestVerifyTOTP_ReplayProtection(t *testing.T) {
 	secret, _ := auth.GenerateTOTPSecret()
 	hash, _ := auth.HashPassword("Password1!")
 	uid, _ := database.CreateUser(context.Background(), "totpuser4", hash, 4)
-	_ = database.UpdateUserTOTPSecret(context.Background(), uid, &secret)
+	storeSealedTOTP(t, database, uid, secret)
 
 	code, _ := auth.GenerateTOTPCode(secret, time.Now().UTC())
 
@@ -412,7 +412,7 @@ func TestVerifyTOTP_BannedAfterPasswordStep(t *testing.T) {
 	secret, _ := auth.GenerateTOTPSecret()
 	hash, _ := auth.HashPassword("Password1!")
 	uid, _ := database.CreateUser(context.Background(), "banafterpw", hash, 4)
-	_ = database.UpdateUserTOTPSecret(context.Background(), uid, &secret)
+	storeSealedTOTP(t, database, uid, secret)
 
 	rr := postJSON(t, router, "/api/v1/auth/login", map[string]string{
 		"username": "banafterpw",
@@ -666,4 +666,49 @@ func extractSecretFromURI(t *testing.T, uri string) string {
 		t.Fatalf("no secret param in URI: %s", uri)
 	}
 	return s
+}
+
+// TestVerifyTOTP_UnsealedStoredSecretIsAStoreFailure pins strict decrypt on
+// the sign-in path: a stored secret that is not sealed answers 500, not a
+// wrong-code 401, and charges nothing, so once the row is sealed the same
+// challenge still completes.
+func TestVerifyTOTP_UnsealedStoredSecretIsAStoreFailure(t *testing.T) {
+	database := newAuthTestDB(t)
+	limiter := auth.NewRateLimiter()
+	router := buildAuthRouter(database, limiter)
+
+	secret, _ := auth.GenerateTOTPSecret()
+	hash, _ := auth.HashPassword("Password1!")
+	uid, _ := database.CreateUser(context.Background(), "unsealed", hash, 4)
+	if err := database.UpdateUserTOTPSecret(context.Background(), uid, &secret); err != nil {
+		t.Fatalf("UpdateUserTOTPSecret: %v", err)
+	}
+
+	rr := postJSON(t, router, "/api/v1/auth/login", map[string]string{
+		"username": "unsealed",
+		"password": "Password1!",
+	})
+	var loginResp map[string]any
+	_ = json.NewDecoder(rr.Body).Decode(&loginResp)
+	partialToken, _ := loginResp["partial_token"].(string)
+	if partialToken == "" {
+		t.Fatalf("login gave no partial_token; status %d", rr.Code)
+	}
+
+	for i := range 6 {
+		code, _ := auth.GenerateTOTPCode(secret, time.Now().UTC())
+		rr = postJSONWithToken(t, router, "/api/v1/auth/verify-totp", partialToken,
+			map[string]string{"code": code})
+		if rr.Code != http.StatusInternalServerError {
+			t.Fatalf("verify %d with an unsealed stored secret: status = %d, want 500; body = %s", i, rr.Code, rr.Body.String())
+		}
+	}
+
+	storeSealedTOTP(t, database, uid, secret)
+	code, _ := auth.GenerateTOTPCode(secret, time.Now().UTC())
+	rr = postJSONWithToken(t, router, "/api/v1/auth/verify-totp", partialToken,
+		map[string]string{"code": code})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("verify after sealing: status = %d, want 200; body = %s", rr.Code, rr.Body.String())
+	}
 }

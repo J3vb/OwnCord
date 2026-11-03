@@ -686,7 +686,7 @@ func (s *AuthService) VerifyTOTP(ctx context.Context, partialToken, code string)
 		return nil, ErrTooManyAttempts
 	}
 
-	user, secret, err := s.challengeSecret(ctx, challenge.UserID)
+	user, err := s.challengeUser(ctx, challenge.UserID)
 	if err != nil {
 		return nil, err
 	}
@@ -703,6 +703,12 @@ func (s *AuthService) VerifyTOTP(ctx context.Context, partialToken, code string)
 	// up to ten bcrypt hashes, so it takes an admission slot first (a refusal charges
 	// nothing, and it queues like login); a TOTP code is an HMAC and needs none.
 	canonical, isRecovery := auth.NormalizeRecoveryCode(code)
+	// Only a TOTP code needs the stored secret, so an unreadable one still lets a
+	// recovery code through, and it fails before Allow, charging nothing.
+	secret, err := s.unsealTOTPSecret(user, isRecovery)
+	if err != nil {
+		return nil, err
+	}
 	release := func() {}
 	if isRecovery {
 		if release, err = s.acquireAdmission(ctx); err != nil {
@@ -855,33 +861,40 @@ func (s *AuthService) issueRecoveryCodes(ctx context.Context, userID int64) ([]s
 	return codes, nil
 }
 
-// challengeSecret resolves the user behind a partial-auth challenge and returns
-// their decrypted TOTP secret.
-func (s *AuthService) challengeSecret(ctx context.Context, challengeUserID int64) (*db.User, string, error) {
+// challengeUser resolves the user behind a partial-auth challenge.
+func (s *AuthService) challengeUser(ctx context.Context, challengeUserID int64) (*db.User, error) {
 	user, err := s.st.GetUserByID(ctx, challengeUserID)
 	if err != nil {
 		// GetUserByID answers (nil, nil) for an unknown user, so an error is a store
 		// fault: report the outage and record no attempt.
 		slog.Error("verify-totp: GetUserByID failed", "err", err, "user_id", challengeUserID)
-		return nil, "", ErrTOTPUnavailable
+		return nil, ErrTOTPUnavailable
 	}
 	if user == nil || user.TOTPSecret == nil {
-		return nil, "", ErrTOTPChallengeInvalid
+		return nil, ErrTOTPChallengeInvalid
 	}
 
 	// A ban can land inside the partial-token window, so the second factor refuses
 	// banned users as the login path does.
 	if auth.IsEffectivelyBanned(user) {
-		return nil, "", ErrBanned
+		return nil, ErrBanned
 	}
+	return user, nil
+}
 
+// unsealTOTPSecret decrypts the challenged user's stored TOTP secret, or
+// returns "" for a recovery code, which never uses it. A value that cannot be
+// read is a store failure, never a wrong code.
+func (s *AuthService) unsealTOTPSecret(user *db.User, isRecovery bool) (string, error) {
+	if isRecovery {
+		return "", nil
+	}
 	secret, decErr := auth.DecryptTOTPSecret(s.totpKey, *user.TOTPSecret)
 	if decErr != nil {
 		slog.Error("failed to decrypt TOTP secret", "user_id", user.ID, "error", decErr)
-		return nil, "", ErrTOTPSecretUnreadable
+		return "", ErrTOTPSecretUnreadable
 	}
-
-	return user, secret, nil
+	return secret, nil
 }
 
 // Logout revokes p.Session and clears the custom status. p.Session must be

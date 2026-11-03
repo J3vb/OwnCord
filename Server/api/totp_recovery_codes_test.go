@@ -236,3 +236,28 @@ func TestRecoveryCodes_StoredHashedOnly(t *testing.T) {
 		t.Fatalf("stored %d code rows, want 10", n)
 	}
 }
+
+// TestRecoveryCodes_WorkWhenTheStoredSecretIsUnreadable pins that a recovery
+// code does not depend on the stored TOTP secret: with a secret that cannot be
+// read, a TOTP code is a store failure but a recovery code still signs in, so
+// the user can turn two-factor off and enrol again.
+func TestRecoveryCodes_WorkWhenTheStoredSecretIsUnreadable(t *testing.T) {
+	database := newAuthTestDB(t)
+	router := buildAuthRouter(database, auth.NewRateLimiter())
+	token := loginAndGetToken(t, router, database, "unreadable-user", 4)
+	enr := enrolWithCodes(t, router, token)
+
+	damaged := "not a sealed secret"
+	if _, err := database.SQLDb().ExecContext(context.Background(),
+		`UPDATE users SET totp_secret = ? WHERE username = ?`, damaged, "unreadable-user"); err != nil {
+		t.Fatalf("damage the stored secret: %v", err)
+	}
+
+	partial := challenge(t, router, "unreadable-user")
+	if status, body := verifyWith(t, router, partial, freshTOTPCode(t, enr.secret, enr.confirmCode)); status != http.StatusInternalServerError {
+		t.Fatalf("TOTP code with an unreadable secret: status = %d, want 500; body = %v", status, body)
+	}
+	if status, body := verifyWith(t, router, partial, enr.codes[0]); status != http.StatusOK {
+		t.Fatalf("recovery code with an unreadable secret: status = %d, want 200; body = %v", status, body)
+	}
+}
