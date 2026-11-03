@@ -82,9 +82,10 @@ export function createNoticesBanner(opts: NoticesBannerOptions): HTMLElement {
   // The Safety tab's appeals use this page's client (buildSafetyTab takes only
   // a signal). The tab lives inside this page, so it never outlives it.
   tabApi = api;
+  // Named (so a region) only while it shows notices: empty, it stays rendered
+  // for its status region but is no landmark.
   const root = createElement("section", {
     class: "moderation-notices",
-    "aria-label": t("banner.label"),
     "data-testid": "moderation-notices",
   });
   const list = createElement("div", { class: "moderation-notices-list" });
@@ -93,6 +94,9 @@ export function createNoticesBanner(opts: NoticesBannerOptions): HTMLElement {
   const announcer = createElement("div", { class: "sr-only", role: "status" });
   root.append(list, announcer);
   const rows = new Map<number, NoticeRow>();
+  // Notices already pending at mount are part of the page; one that arrives
+  // later is announced, since the banner is its only notice (no toast).
+  let mounted = false;
 
   function buildRow(n: ModerationNotice): NoticeRow {
     const titleId = `moderation-notice-${n.id}-title`;
@@ -150,18 +154,23 @@ export function createNoticesBanner(opts: NoticesBannerOptions): HTMLElement {
     });
     // Oldest first. Only a row out of place moves: moving a node drops its focus.
     let prev: Element | null = null;
+    const arrived: string[] = [];
     for (const n of notices) {
       let row = rows.get(n.id);
       if (row === undefined) {
         row = buildRow(n);
         rows.set(n.id, row);
+        if (mounted) arrived.push(t("toast.warning", { reason: n.reason }));
       }
       applyAck(row, n);
       const slot: Element | null = prev === null ? list.firstElementChild : prev.nextElementSibling;
       if (slot !== row.el) list.insertBefore(row.el, slot);
       prev = row.el;
     }
+    if (arrived.length > 0) setText(announcer, arrived.join(" "));
     root.classList.toggle("visible", notices.length > 0);
+    if (notices.length > 0) root.setAttribute("aria-label", t("banner.label"));
+    else root.removeAttribute("aria-label");
     if (lostFocusAt !== null) {
       const next = [...rows.values()][Math.min(lostFocusAt, rows.size - 1)];
       if (next !== undefined) next.ack.focus();
@@ -170,6 +179,7 @@ export function createNoticesBanner(opts: NoticesBannerOptions): HTMLElement {
   }
 
   render(safetyStore.getState().notices);
+  mounted = true;
   const unsub = safetyStore.subscribeSelector((s) => s.notices, render);
   signal.addEventListener("abort", unsub, { once: true });
   return root;

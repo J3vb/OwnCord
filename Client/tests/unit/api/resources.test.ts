@@ -160,7 +160,39 @@ describe("API Client", () => {
       const body = JSON.parse(fetchCallOpts().body as string);
       // The server decodes json:"old_password" (Server/api/profile_handler.go),
       // and Go's encoding/json has no alias matching: any other key is a 400.
-      expect(body).toEqual({ old_password: "oldpw", new_password: "newpw" });
+      expect(body).toEqual({
+        old_password: "oldpw",
+        new_password: "newpw",
+        revoke_api_tokens: false,
+      });
+    });
+
+    it("changePassword asks the server to revoke API tokens when told to", async () => {
+      mockFetch.mockResolvedValue(jsonResponse(undefined, 204));
+      await api.changePassword("oldpw", "newpw", true);
+      const body = JSON.parse(fetchCallOpts().body as string);
+      expect(body.revoke_api_tokens).toBe(true);
+    });
+
+    it("getApiTokens unwraps the {tokens: [...]} envelope", async () => {
+      const token = {
+        id: 4,
+        label: "ci",
+        created_at: "2026-11-01 10:00:00",
+        last_used: null,
+        expires_at: null,
+      };
+      mockFetch.mockResolvedValue(jsonResponse({ tokens: [token] }));
+      await expect(api.getApiTokens()).resolves.toEqual([token]);
+      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/users/me/api-tokens");
+      expect(fetchCallOpts().method).toBe("GET");
+    });
+
+    it("revokeApiToken calls DELETE with the token ID", async () => {
+      mockFetch.mockResolvedValue(jsonResponse(undefined, 204));
+      await api.revokeApiToken(4);
+      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/users/me/api-tokens/4");
+      expect(fetchCallOpts().method).toBe("DELETE");
     });
 
     it("changePassword resolves undefined on 204 and hands back the partial-success body on 200", async () => {

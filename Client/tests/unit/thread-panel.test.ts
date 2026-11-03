@@ -156,6 +156,14 @@ describe("ThreadPanel", () => {
     panel.destroy?.();
   });
 
+  it("marks the starter's author name for a role-colour re-clamp", async () => {
+    const panel = mountPanel();
+    await flush();
+    const name = q('[data-testid="thread-starter"] .msg-author');
+    expect(name.dataset["roleColor"]).toBeDefined();
+    panel.destroy?.();
+  });
+
   it("has a one-line text-only composer: short placeholder, no attach button", async () => {
     const panel = mountPanel();
     await flush();

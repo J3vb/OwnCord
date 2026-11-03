@@ -87,12 +87,15 @@ function buildSecurityCard(options: SettingsOverlayOptions, signal: AbortSignal)
       paintNextStep();
     };
 
+  // The password form and the token list both change the account's tokens;
+  // each reloads when the other does.
+  const tokensChanged = new EventTarget();
   appendChildren(
     list,
     buildTotpSection(options, signal, report("totp")),
     buildRecoveryKitSection(options, signal, report("recovery")),
-    buildPasswordSection(options, signal),
-    buildSessionsSection(options, signal),
+    buildPasswordSection(options, signal, tokensChanged),
+    buildSessionsSection(options, signal, tokensChanged),
   );
   paintNextStep();
   appendChildren(card, head, list);

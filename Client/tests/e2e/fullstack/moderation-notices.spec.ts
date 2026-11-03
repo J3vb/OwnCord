@@ -30,7 +30,11 @@ test.describe("moderation notices (real server)", () => {
 
     await server.api(`/api/v1/moderation/users/${target}/warn`, { reason: "Live: no spam" }, owner);
     await expect(banner(bob)).toContainText("Reason: Live: no spam");
-    await expect(bob.locator(".toast", { hasText: "Live: no spam" })).toHaveCount(1);
+    // The banner announces it; no toast repeats the same sentence.
+    await expect(bob.locator("[data-testid='moderation-notices'] > [role='status']")).toContainText(
+      "Live: no spam",
+    );
+    await expect(bob.locator(".toast", { hasText: "Live: no spam" })).toHaveCount(0);
 
     // Miss the next live frame, then reconnect: the warning still arrives.
     bobTransport.filterServerMessages((m) => m.type !== "mod_action");

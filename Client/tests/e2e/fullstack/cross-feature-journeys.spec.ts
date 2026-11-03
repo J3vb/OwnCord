@@ -142,7 +142,10 @@ test.describe("moderation journey (real server)", () => {
     // The recipient sees exactly the warning, never who issued it.
     await expect(notice(bob)).toContainText(warnReason);
     await expect(notice(bob)).not.toContainText("alice");
-    await expect(bob.locator(".toast", { hasText: warnReason })).toHaveCount(1);
+    await expect(bob.locator("[data-testid='moderation-notices'] > [role='status']")).toContainText(
+      warnReason,
+    );
+    await expect(bob.locator(".toast", { hasText: warnReason })).toHaveCount(0);
 
     // The server recorded it against the report; the member read stays narrow.
     const ledger = (await server.api(

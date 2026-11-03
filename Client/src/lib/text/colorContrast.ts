@@ -69,7 +69,7 @@ export function contrastRatio(a: Rgb, b: Rgb): number {
   return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
 }
 
-function mix(from: Rgb, to: Rgb, weight: number): Rgb {
+export function mix(from: Rgb, to: Rgb, weight: number): Rgb {
   return from.map((c, i) => Math.round(c + (to[i]! - c) * weight)) as unknown as Rgb;
 }
 
@@ -105,4 +105,70 @@ export function deriveAccentTokens(accent: Rgb, surfaces: readonly Rgb[]): Accen
     text: surfaces.length > 0 && minContrast >= ACCENT_TEXT_MIN_CONTRAST ? toHex(accent) : null,
     focus: surfaces.length > 0 && minContrast >= ACCENT_FOCUS_MIN_CONTRAST ? toHex(accent) : null,
   };
+}
+
+type Hsl = readonly [number, number, number];
+
+function toHsl(rgb: Rgb): Hsl {
+  const [r, g, b] = rgb.map((c) => c / 255) as unknown as Rgb;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  if (max === min) return [0, 0, l];
+  const d = max - min;
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+  let h: number;
+  if (max === r) h = (g - b) / d + (g < b ? 6 : 0);
+  else if (max === g) h = (b - r) / d + 2;
+  else h = (r - g) / d + 4;
+  return [h / 6, s, l];
+}
+
+function hueChannel(p: number, q: number, t: number): number {
+  const u = t < 0 ? t + 1 : t > 1 ? t - 1 : t;
+  if (u < 1 / 6) return p + (q - p) * 6 * u;
+  if (u < 1 / 2) return q;
+  if (u < 2 / 3) return p + (q - p) * (2 / 3 - u) * 6;
+  return p;
+}
+
+function fromHsl(hsl: Hsl): Rgb {
+  const [h, s, l] = hsl;
+  if (s === 0) {
+    const v = Math.round(l * 255);
+    return [v, v, v];
+  }
+  const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+  const p = 2 * l - q;
+  return [hueChannel(p, q, h + 1 / 3), hueChannel(p, q, h), hueChannel(p, q, h - 1 / 3)].map((c) =>
+    Math.round(c * 255),
+  ) as unknown as Rgb;
+}
+
+const LIGHTNESS_STEP = 0.005;
+
+/**
+ * `color` as text on `surfaces`, keeping its hue and saturation and moving only
+ * its lightness, the shortest way, until it reads at `min` on every surface.
+ * Returns the colour itself when it already does, and null when no lightness
+ * works (surfaces on both sides of the colour) or nothing was measurable.
+ */
+export function clampTextColor(
+  color: Rgb,
+  surfaces: readonly Rgb[],
+  min: number = ACCENT_TEXT_MIN_CONTRAST,
+): Rgb | null {
+  if (surfaces.length === 0) return null;
+  const reads = (c: Rgb): boolean => surfaces.every((s) => contrastRatio(c, s) >= min);
+  if (reads(color)) return color;
+  const [h, s, l0] = toHsl(color);
+  const steps = Math.ceil(1 / LIGHTNESS_STEP);
+  for (let i = 1; i <= steps; i++) {
+    const delta = i * LIGHTNESS_STEP;
+    for (const l of [Math.min(1, l0 + delta), Math.max(0, l0 - delta)]) {
+      const candidate = fromHsl([h, s, l]);
+      if (reads(candidate)) return candidate;
+    }
+  }
+  return null;
 }

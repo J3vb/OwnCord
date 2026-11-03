@@ -27,6 +27,8 @@ type tokenStore interface {
 	ListAPITokens(ctx context.Context) ([]db.APITokenListItem, error)
 	RevokeAPIToken(ctx context.Context, id int64) (int64, error)
 	RevokeAPITokenByLabel(ctx context.Context, label string) (int64, error)
+	ListUserActiveAPITokens(ctx context.Context, userID int64) ([]db.APITokenListItem, error)
+	RevokeOwnAPIToken(ctx context.Context, userID, id int64) (int64, error)
 }
 
 // TokenService owns API tokens: minting, listing and revoking the long-lived
@@ -209,6 +211,32 @@ func (s *TokenService) RevokeOwn(ctx context.Context, actorID, id int64) error {
 		return fmt.Errorf("no active token with that id%.0w", ErrNotFound)
 	}
 	return s.Revoke(ctx, actorID, id)
+}
+
+// ListMine lists the account's own tokens that still work, for its Sessions
+// screen. Unlike ListOwn it reads only that account's rows, so the admin list's
+// cap never hides one, and it leaves out revoked and expired tokens.
+func (s *TokenService) ListMine(ctx context.Context, userID int64) ([]db.APITokenListItem, error) {
+	tokens, err := s.st.ListUserActiveAPITokens(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("%w: failed to list tokens: %w", ErrInternal, err)
+	}
+	return tokens, nil
+}
+
+// RevokeMine revokes one of the account's own live tokens. Another account's
+// token, a revoked one and a missing id are all the same ErrNotFound.
+func (s *TokenService) RevokeMine(ctx context.Context, userID, id int64) error {
+	affected, err := s.st.RevokeOwnAPIToken(ctx, userID, id)
+	if err != nil {
+		return fmt.Errorf("%w: failed to revoke token: %w", ErrInternal, err)
+	}
+	if affected == 0 {
+		return fmt.Errorf("no active token with that id%.0w", ErrNotFound)
+	}
+	slog.Warn("api token revoked", "actor_id", userID, "token_id", id)
+	db.WriteAudit(context.WithoutCancel(ctx), s.st, userID, "api_token_revoke", "api_token", id, "")
+	return nil
 }
 
 // ListFor lists the tokens the actor may see: all for the owner, else their own.
