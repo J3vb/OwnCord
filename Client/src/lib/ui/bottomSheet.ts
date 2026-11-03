@@ -16,7 +16,7 @@ import { createElement } from "../dom";
 import { isImeCommit } from "../text/ime";
 import { registerSessionReset } from "../net/sessionRegistry";
 import { applyDialogSemantics, focusDialog, trapFocus } from "./a11y";
-import { claimBack } from "./backHistory";
+import { claimBack, type BackClaim } from "./backHistory";
 import { closeOnBackdropClick } from "./modalFactory";
 
 /**
@@ -51,6 +51,30 @@ export function onPhoneLayoutChange(handler: (phone: boolean) => void, signal: A
     },
     { signal },
   );
+}
+
+/**
+ * Let a panel that is not a dialog (search, pins, the thread list) claim the
+ * Back button while it is open on the phone layout, so Back closes it instead
+ * of opening the drawer under it. A rotation onto the phone layout claims, one
+ * off it releases. `onBack` closes the panel; `signal` is the panel's lifetime
+ * and releases the claim when the panel closes any other way.
+ */
+export function claimBackOnPhone(onBack: () => void, signal: AbortSignal): void {
+  let claim: BackClaim | null = null;
+  const sync = (phone: boolean): void => {
+    if (phone && claim === null && !signal.aborted) {
+      claim = claimBack(() => {
+        claim = null;
+        onBack();
+      }, signal);
+    } else if (!phone && claim !== null) {
+      claim.release();
+      claim = null;
+    }
+  };
+  sync(isPhoneLayout());
+  onPhoneLayoutChange(sync, signal);
 }
 
 /** How far down a swipe must travel before the lift closes the sheet. */

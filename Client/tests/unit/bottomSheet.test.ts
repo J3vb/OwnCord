@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   PHONE_LAYOUT_QUERY,
+  claimBackOnPhone,
   closeBottomSheet,
   isPhoneLayout,
   onPhoneLayoutChange,
@@ -137,6 +138,70 @@ describe("onPhoneLayoutChange", () => {
     phone = true;
     window.dispatchEvent(new Event("resize"));
     expect(seen).toEqual([true, false]);
+  });
+});
+
+describe("claimBackOnPhone", () => {
+  let phone = true;
+  const guarded = (): boolean => {
+    const state: unknown = history.state;
+    return typeof state === "object" && state !== null && "owncordBack" in state;
+  };
+
+  function stubPhone(): void {
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn(() => ({ matches: phone })),
+    );
+  }
+
+  afterEach(async () => {
+    await settleHistory();
+    vi.unstubAllGlobals();
+  });
+
+  it("on a phone, Back runs the panel's close and nothing else claims", async () => {
+    phone = true;
+    stubPhone();
+    const owner = new AbortController();
+    const onBack = vi.fn(() => owner.abort());
+    claimBackOnPhone(onBack, owner.signal);
+    expect(guarded()).toBe(true);
+    history.back();
+    await settleHistory();
+    expect(onBack).toHaveBeenCalledOnce();
+    expect(guarded()).toBe(false);
+  });
+
+  it("a panel closed another way gives Back up", async () => {
+    phone = true;
+    stubPhone();
+    const owner = new AbortController();
+    const onBack = vi.fn();
+    claimBackOnPhone(onBack, owner.signal);
+    owner.abort();
+    await settleHistory();
+    expect(guarded()).toBe(false);
+    expect(onBack).not.toHaveBeenCalled();
+  });
+
+  it("claims nothing off the phone layout, and follows a rotation onto and off it", async () => {
+    phone = false;
+    stubPhone();
+    const owner = new AbortController();
+    claimBackOnPhone(vi.fn(), owner.signal);
+    expect(guarded()).toBe(false);
+    phone = true;
+    window.dispatchEvent(new Event("resize"));
+    expect(guarded()).toBe(true);
+    phone = false;
+    window.dispatchEvent(new Event("resize"));
+    await settleHistory();
+    expect(guarded()).toBe(false);
+    owner.abort();
+    phone = true;
+    window.dispatchEvent(new Event("resize"));
+    expect(guarded()).toBe(false);
   });
 });
 

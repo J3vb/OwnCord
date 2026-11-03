@@ -18,6 +18,7 @@ import { createElement, appendChildren } from "@lib/dom";
 import { desktop } from "../../platform/desktop";
 import { createServerBanner, applyConnectionStatus } from "@components/ServerBanner";
 import { showToast } from "@lib/ui/toast";
+import { isPhoneLayout } from "@lib/ui/bottomSheet";
 import { shellText } from "../../i18n/shell";
 import { sessionNoticeMessage, startSessionNotice } from "@lib/net/sessionNotice";
 import { authStore } from "@stores/auth.store";
@@ -394,10 +395,13 @@ export function mountLayout(st: PageState, pg: PageApi, ms: MountScope): void {
   // the sidebar's first control that is not hidden (a hidden header action
   // — Invite or Audit Log without the permission, Mark All as Read with
   // nothing unread — would swallow the focus call and leave it on <body>):
-  // the first of them that takes focus.
+  // the first of them that takes focus. On a phone the composer is skipped:
+  // focusing it raises the keyboard over the chat.
   ms.focusReachable = (): HTMLElement | null => {
     const candidates = [
-      ms.chatAreaResult.slots.inputSlot.querySelector<HTMLElement>("textarea:enabled"),
+      isPhoneLayout()
+        ? null
+        : ms.chatAreaResult.slots.inputSlot.querySelector<HTMLElement>("textarea:enabled"),
       ms.chatAreaResult.sidebarToggle,
       ...Array.from(ms.sidebar.sidebarWrapper.querySelectorAll<HTMLElement>("button")).filter(
         (b) => b.style.display !== "none" && b.style.visibility !== "hidden",
