@@ -6,19 +6,20 @@ import * as mocks from "../../helpers/messageInputMocks";
 import { usePhone } from "../../helpers/phoneMedia";
 import { closeBottomSheet } from "@lib/ui/bottomSheet";
 import { savePref } from "@lib/prefs/preferences";
-import { applyReadyCapabilities, resetServerCapabilities } from "@lib/net/serverCapabilities";
 import { authStore } from "@stores/auth.store";
 import { composerButtonPrefKey } from "../../../src/features/messaging/composerButtons";
 import { mountMessageInput, useMessageInputContainer } from "../../helpers/messageInputHarness";
+import {
+  attachSheetEl,
+  resetComposerServer,
+  settleHistory,
+  useFullComposerServer,
+} from "../../helpers/composerSheets";
 
 vi.mock("@components/EmojiPicker", () => mocks.emojiPickerMock());
 vi.mock("@components/GifPicker", () => mocks.gifPickerMock());
 
-async function settleHistory(): Promise<void> {
-  for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 0));
-}
-
-const sheet = (): HTMLElement | null => document.querySelector('[data-testid="attach-sheet"]');
+const sheet = attachSheetEl;
 const tileLabels = (): string[] =>
   [...(sheet()?.querySelectorAll(".attach-sheet-tile") ?? [])].map(
     (b) => b.textContent?.trim() ?? "",
@@ -30,19 +31,13 @@ describe("phone composer row", () => {
     container = el;
   });
 
-  beforeEach(() => {
-    localStorage.clear();
-    applyReadyCapabilities({ stickers: true, polls: true, voice_messages: true });
-    authStore.setState((s) => ({ ...s, uploadPolicy: { max_upload_bytes: 10 * 1024 * 1024 } }));
-  });
+  beforeEach(useFullComposerServer);
 
   afterEach(async () => {
     closeBottomSheet();
     await settleHistory();
     vi.unstubAllGlobals();
-    resetServerCapabilities();
-    authStore.setState((s) => ({ ...s, uploadPolicy: null }));
-    localStorage.clear();
+    resetComposerServer();
   });
 
   function mountFull() {
