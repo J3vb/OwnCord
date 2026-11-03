@@ -137,3 +137,9 @@ const (
 	ChannelMaxAnySQLForTest  = channelMaxAnySQL
 	ChannelMaxLiveSQLForTest = channelMaxLiveSQL
 )
+
+// ReferencedStoredFilesSQLForTest and AttachmentStoredNameInUseSQLForTest are
+// the stored-name lookups, so db_test can pin their query plans.
+func ReferencedStoredFilesSQLForTest(n int) string { return referencedStoredFilesSQL(n) }
+
+const AttachmentStoredNameInUseSQLForTest = attachmentStoredNameInUseSQL

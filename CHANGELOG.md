@@ -77,6 +77,12 @@ and only when it changes something a contributor or fork holder must do
 - Voice Activity with the sensitivity slider set by hand let typing, a fan or breathing through, and after you spoke it stayed open through them. The slider now also asks the noise filter whether it hears a voice, as automatic sensitivity already did.
 
 - Clicking a channel right after a new message arrived sometimes opened the channel below it: a Mark Server as Read icon appeared in the header and pushed the channel list down. The icon is gone, so the list no longer moves; Mark as Read stays in the server name menu and on Shift+Esc.
+- A forwarded file could, rarely, lose its contents to the server's 15-minute storage cleanup in the moment before the forward was saved, and then show as missing. The cleanup now leaves it alone.
+
+### Under the hood
+
+- Database change 090: three indexes for attachment lookups. The first start after the update builds them, which takes a little longer on a large database.
+- The storage cleanup, the admin Storage page's leftover scan and the orphaned-upload sweep look files up by index: about 19 s down to 0.3 s per pass at 100,000 files, so the leftover scan no longer answers "server busy" on a big upload folder.
 
 ## v2.7.0
 
