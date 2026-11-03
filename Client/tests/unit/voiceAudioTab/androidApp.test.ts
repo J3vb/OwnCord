@@ -48,6 +48,20 @@ describe("VoiceAudioTab on the Android app and the desktop app", () => {
     expect(labelled("Screen Share Quality")).toBe(true);
     expect(labelled("Screen Share FPS")).toBe(true);
     expect(labelled("Video Codec")).toBe(true);
+    expect(labelled("Input Device")).toBe(true);
+    expect(el.querySelector('[data-testid="mic-automatic"]')).toBeNull();
+  });
+
+  it("shows the phone's automatic mic instead of the input device picker on Android", () => {
+    hostAndroidApp();
+    mount();
+    expect(labelled("Input Device")).toBe(false);
+    expect(text()).not.toContain("Input Device");
+    const row = el.querySelector<HTMLElement>('[data-testid="mic-automatic"]')!;
+    expect(row.textContent).toContain("Microphone");
+    expect(row.textContent).toContain("Automatic");
+    // It sits in the microphone card, ahead of the volume slider.
+    expect(row.closest(".settings-card")?.textContent).toContain("Input Volume");
   });
 
   it("leaves out the output device, screen share and codec controls on Android", () => {

@@ -1,8 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { clearHost, hostAndroidApp, hostDesktopApp } from "../helpers/androidHost";
 import {
   autoInputSensitivity,
   effectiveVoiceGate,
   effectiveVoiceSensitivity,
+  forgetAndroidInputDevice,
   inputMode,
   migrateAutoInputSensitivity,
   migrateInputMode,
@@ -193,5 +195,30 @@ describe("pttGates with the talk button", () => {
     expect(pttGates(true)).toBe(false);
     set("inputMode", "ptt");
     expect(pttGates(false)).toBe(false);
+  });
+});
+
+describe("forgetAndroidInputDevice", () => {
+  beforeEach(() => localStorage.clear());
+  afterEach(() => clearHost());
+
+  it("forgets an input route saved from the old picker on Android", () => {
+    hostAndroidApp();
+    set("audioInputDevice", "speakerphone-route");
+    forgetAndroidInputDevice();
+    expect(get("audioInputDevice")).toBe("");
+  });
+
+  it("writes nothing on Android when no input was saved", () => {
+    hostAndroidApp();
+    forgetAndroidInputDevice();
+    expect(get("audioInputDevice")).toBeNull();
+  });
+
+  it("keeps the chosen microphone on the desktop app", () => {
+    hostDesktopApp();
+    set("audioInputDevice", "usb-mic");
+    forgetAndroidInputDevice();
+    expect(get("audioInputDevice")).toBe("usb-mic");
   });
 });
