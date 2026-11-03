@@ -440,6 +440,9 @@ export const settingsText = defineCatalog("settings", {
   "logs.bundleNote":
     "Saves a zip of your logs, diagnostics and settings on this computer. Nothing is uploaded. Log lines are not redacted, so read them before sharing.",
   "logs.bundleSaved": "Support bundle saved.",
+  "logs.eventLog": "Keep a diagnostic event log",
+  "logs.eventLogDesc":
+    "Records what the camera, calls and server connection did in the last 30 minutes, without names, messages or addresses. It stays on this device and goes into the support bundle. Turning it off deletes it.",
   "logs.shareBundle": "Share Support Bundle",
   "logs.bundleNoteShare":
     "Makes a zip of your logs, diagnostics and settings on this phone and opens the share sheet, so you choose where it goes. Log lines are not redacted, so read them before sharing.",

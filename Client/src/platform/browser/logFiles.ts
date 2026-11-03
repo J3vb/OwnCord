@@ -8,6 +8,7 @@ import type { LogFiles } from "../contracts/logFiles";
 /** The most lines the ring keeps; the oldest go first. */
 export const RING_CAPACITY = 2000;
 const RING_FILE_NAME = "owncord-client-memory.jsonl";
+const EVENTS_FILE_NAME = "events-memory.jsonl";
 
 let ring: string[] = [];
 let stop: (() => void) | null = null;
@@ -46,7 +47,12 @@ export const logFiles: LogFiles = {
     ring = [];
   },
   async readAll() {
-    return ring.length === 0 ? [] : [{ name: RING_FILE_NAME, text: `${ring.join("\n")}\n` }];
+    const files = ring.length === 0 ? [] : [{ name: RING_FILE_NAME, text: `${ring.join("\n")}\n` }];
+    // The diagnostic event log has no file in a page; its memory ring goes in instead.
+    const { getEventLines } = await import("@lib/diagnostics/eventLog");
+    const events = getEventLines();
+    if (events.length > 0) files.push({ name: EVENTS_FILE_NAME, text: `${events.join("\n")}\n` });
+    return files;
   },
   readNative: async () => [],
   openFolder: async () => ({ ok: false, error: "log files are unavailable in the browser" }), // i18n-exempt: diagnostic

@@ -13,6 +13,30 @@ import {
   type EventCodeSpec,
   type FieldSpec,
 } from "./eventCodes";
+import { STALL_THRESHOLD_MS } from "../voice/cameraStallWatchdog";
+
+// Codes in the catalogue whose emitter is not built yet. Each is removed from
+// this list when its owner starts recording it; the test below fails if a code
+// here gains an emitter, or a code not here has none.
+const NOT_EMITTED_YET = new Set<EventCode>([
+  "app.suspended",
+  "app.resumed",
+  "native.crash",
+  "native.exit",
+  "native.hang",
+  "native.hang_recovered",
+  "native.webview_process_failed",
+  "camera.device_changed",
+  "mic.device_changed",
+  "track.replaced",
+  "track.layers_changed",
+  "share.started",
+  "share.stopped",
+  "share.ended",
+  "share.source_changed",
+  "voice.left",
+  "ice.state",
+]);
 
 const clientRoot = process.cwd();
 const repoRoot = join(clientRoot, "..");
@@ -201,6 +225,21 @@ describe("client diagnostic event catalogue", () => {
     }
     expect(doc).toContain(`${EVENT_LOG_CAPS.maxEvents.toLocaleString("en-US")} events`);
     expect(doc).toContain(`${CAMERA_STALL_THRESHOLD_MS / 1000} s`);
+  });
+
+  it("has every emitted code recorded by the files it names", () => {
+    for (const [code, spec] of entries) {
+      const tsOwners = spec.owners.filter((o) => o.endsWith(".ts"));
+      const recorded = tsOwners.some((owner) => {
+        const path = join(clientRoot, owner);
+        return existsSync(path) && readFileSync(path, "utf8").includes(`"${code}"`);
+      });
+      expect(recorded, code).toBe(!NOT_EMITTED_YET.has(code));
+    }
+  });
+
+  it("uses the catalogue's stall threshold in the camera watchdog", () => {
+    expect(STALL_THRESHOLD_MS).toBe(CAMERA_STALL_THRESHOLD_MS);
   });
 
   it("keeps the caps bounded", () => {

@@ -456,6 +456,48 @@
       "binding": "heldListeners",
       "category": "dom-owned",
       "reason": "Repaint callbacks of the mounted talk buttons, each removed when its button's owner signal aborts"
+    },
+    {
+      "file": "lib/diagnostics/eventLog.ts",
+      "binding": "events",
+      "category": "app-lifetime",
+      "reason": "The diagnostic event log covers the whole app run across server switches, so a call that drops while switching stays in one timeline; it holds no server data (codes, numbers, per-run pseudonyms) and the Logs tab switch clears it"
+    },
+    {
+      "file": "lib/diagnostics/eventLog.ts",
+      "binding": "windows",
+      "category": "app-lifetime",
+      "reason": "Per-code rate-limit windows of the app-lifetime event log; cleared with it"
+    },
+    {
+      "file": "lib/diagnostics/eventLog.ts",
+      "binding": "lineListeners",
+      "category": "app-lifetime",
+      "reason": "The desktop disk writer's subscription to the app-lifetime event log"
+    },
+    {
+      "file": "lib/diagnostics/eventLog.ts",
+      "binding": "clearListeners",
+      "category": "app-lifetime",
+      "reason": "The desktop disk writer's subscription to the event log's clear signal"
+    },
+    {
+      "file": "lib/diagnostics/eventSink.ts",
+      "binding": "pending",
+      "category": "transient",
+      "reason": "Events recorded before the lazy event log attaches at startup; drained once, capped at 200"
+    },
+    {
+      "file": "lib/diagnostics/identifiers.ts",
+      "binding": "tables",
+      "category": "app-lifetime",
+      "reason": "Per-run pseudonym tables for the event log; a reset per server would give one user two names inside one timeline"
+    },
+    {
+      "file": "platform/desktop/logFiles.ts",
+      "binding": "eventBuffer",
+      "category": "transient",
+      "reason": "Event lines waiting for the next debounced disk write, like the log buffer beside it"
     }
   ]
 }

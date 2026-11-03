@@ -298,3 +298,128 @@ describe("LogFiles.flush ordering", () => {
     }
   });
 });
+
+// The diagnostic event log's disk half: its own files beside the logs.
+describe("LogFiles event files", () => {
+  async function initWithEventLog(mod: Awaited<ReturnType<typeof freshModule>>) {
+    appLogDir.mockResolvedValue("/logs");
+    const eventLog = await import("../../../src/lib/diagnostics/eventLog");
+    await mod.logFiles.init();
+    await vi.waitFor(() => {
+      eventLog.record("ws.open", { generation: 1 }, Date.now());
+      expect(writeTextFile).not.toHaveBeenCalled();
+      return mod.logFiles.flush().then(() => {
+        expect(writeTextFile).toHaveBeenCalled();
+      });
+    });
+    writeTextFile.mockClear();
+    return eventLog;
+  }
+
+  test("writes event lines to an events file, not to the day's log", async () => {
+    const mod = await freshModule();
+    const eventLog = await initWithEventLog(mod);
+    eventLog.record("ws.ready", { generation: 1, after_ms: 12 }, Date.now());
+    await mod.logFiles.flush();
+
+    const [path, text] = writeTextFile.mock.calls[0] as [string, string];
+    expect(path).toMatch(
+      /^\/logs\/client-logs\/events-\d{4}-\d\d-\d\dT\d\d-\d\d-\d\d-\d{3}\.jsonl$/,
+    );
+    expect(text).toContain('"code":"ws.ready"');
+  });
+
+  test("starts a new file once one is full, so the newest events are kept", async () => {
+    const mod = await freshModule();
+    const eventLog = await initWithEventLog(mod);
+    // About 1.4 MB of rate-limit-free lines over two flushes.
+    const codes = ["ws.open", "ws.ready", "ws.closed", "ws.connecting"] as const;
+    let at = Date.now();
+    for (let round = 0; round < 2; round++) {
+      for (let i = 0; i < 12_000; i++) {
+        at += 2_100;
+        eventLog.record(codes[i % codes.length]!, { generation: i }, at);
+      }
+      // oxlint-disable-next-line no-await-in-loop -- two flushes in order
+      await mod.logFiles.flush();
+    }
+    const paths = writeTextFile.mock.calls.map((call) => call[0] as string);
+    expect(paths).toHaveLength(2);
+    expect(paths[1]).not.toBe(paths[0]);
+    expect(paths[1]! > paths[0]!).toBe(true);
+    const total = writeTextFile.mock.calls.reduce((n, call) => n + (call[1] as string).length, 0);
+    expect(total).toBeGreaterThan(1 << 20);
+  });
+
+  test("rotates log files and event files on their own counts", async () => {
+    const mod = await freshModule();
+    appLogDir.mockResolvedValue("/logs");
+    readDir.mockResolvedValue(
+      [
+        "2026-10-28.jsonl",
+        "2026-10-29.jsonl",
+        "2026-10-30.jsonl",
+        "2026-10-31.jsonl",
+        "2026-11-01.jsonl",
+        "2026-11-02.jsonl",
+        "events-2026-10-30T08-00-00.jsonl",
+        "events-2026-10-31T08-00-00.jsonl",
+        "events-2026-11-01T08-00-00.jsonl",
+        "events-2026-11-02T08-00-00.jsonl",
+        "events-2026-11-03T08-00-00.jsonl",
+      ].map((name) => ({ name, isDirectory: false })),
+    );
+    await mod.logFiles.init();
+
+    expect(remove.mock.calls.map((call) => call[0])).toEqual([
+      "/logs/client-logs/2026-10-28.jsonl",
+      "/logs/client-logs/events-2026-10-30T08-00-00.jsonl",
+    ]);
+  });
+});
+
+describe("LogFiles event files when the log is turned off", () => {
+  test("a clear during a write deletes that write's file too", async () => {
+    const mod = await freshModule();
+    appLogDir.mockResolvedValue("/logs");
+    const eventLog = await import("../../../src/lib/diagnostics/eventLog");
+    await mod.logFiles.init();
+    await vi.waitFor(() => {
+      eventLog.record("ws.open", { generation: 1 }, Date.now());
+      return mod.logFiles.flush().then(() => expect(writeTextFile).toHaveBeenCalled());
+    });
+    const written = new Set<string>();
+    writeTextFile.mockImplementation((path: string) => {
+      written.add(path);
+      return Promise.resolve(undefined);
+    });
+    // The first file holds one line; a big batch forces a new file, whose
+    // rotation read is where a clear can land.
+    let releaseRotation!: () => void;
+    readDir.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          releaseRotation = () => resolve([]);
+        }),
+    );
+    let at = Date.now();
+    const codes = ["ws.open", "ws.ready", "ws.closed", "ws.connecting"] as const;
+    for (let i = 0; i < 24_000; i++) {
+      at += 2_100;
+      eventLog.record(codes[i % codes.length]!, { generation: i }, at);
+    }
+    const flushing = mod.logFiles.flush();
+    await vi.waitFor(() => expect(releaseRotation).toBeTypeOf("function"));
+    eventLog.clearEventLog();
+    readDir.mockImplementation(() =>
+      Promise.resolve([...written].map((p) => ({ name: p.split("/").pop(), isDirectory: false }))),
+    );
+    releaseRotation();
+    await flushing;
+    await mod.logFiles.flush();
+
+    expect([...written].every((p) => /\/events-[^/]+\.jsonl$/.test(p))).toBe(true);
+    const removed = new Set(remove.mock.calls.map((call) => call[0] as string));
+    for (const path of written) expect(removed.has(path)).toBe(true);
+  });
+});
