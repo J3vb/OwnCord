@@ -240,8 +240,9 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	routerMetricsRoutes(r, cfg, database, svc, hub, rt.MetricsWindows)
 
 	u := rt.Updater
-	adminHandler := admin.NewHandler(database, ver, hub, u, logBuf, cfg.Server.AllowedOrigins, svc.Permissions, svc,
-		adminSetupOptions(cfg, rt, newDiscordImporter(database, svc, hub, store, rt), database.TotalAttachmentBytes, slowRoutes))
+	adminOpts := adminSetupOptions(cfg, rt, newDiscordImporter(database, svc, hub, store, rt), database.TotalAttachmentBytes, slowRoutes)
+	adminOpts.System.Database = systemDatabaseSource(database)
+	adminHandler := admin.NewHandler(database, ver, hub, u, logBuf, cfg.Server.AllowedOrigins, svc.Permissions, svc, adminOpts)
 	// The client's member actions, reachable without the /admin prefix (see
 	// admin.NewMemberAPI). Deliberately outside the admin CIDR gate below: they
 	// accept only a session or API token issued by this server, plus the
@@ -798,5 +799,21 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(v); err != nil {
 		slog.Error("writeJSON: failed to encode response", "error", err)
+	}
+}
+
+// systemDatabaseSource reads the admin System health page's database card.
+func systemDatabaseSource(database *db.DB) func(context.Context) (admin.SystemDatabase, error) {
+	return func(ctx context.Context) (admin.SystemDatabase, error) {
+		st, err := database.HealthStats(ctx)
+		if err != nil {
+			return admin.SystemDatabase{}, fmt.Errorf("system health database: %w", err)
+		}
+		return admin.SystemDatabase{
+			FileBytes: st.FileBytes, WALBytes: st.WALBytes, SchemaVersion: st.SchemaVersion,
+			ReadersInUse: st.ReadersInUse, ReadersOpen: st.ReadersOpen, ReadersMax: st.ReadersMax,
+			ReaderWaitCount: st.ReaderWaitCount, ReaderWaitMs: st.ReaderWaitMs,
+			WriterWaitCount: st.WriterWaitCount, WriterWaitMs: st.WriterWaitMs,
+		}, nil
 	}
 }

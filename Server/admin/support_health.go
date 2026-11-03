@@ -39,37 +39,77 @@ type supportHubVoice interface {
 	LiveKitManaged() bool
 }
 
-func supportHealth(hub HubBroadcaster, at time.Time) map[string]any {
+const supportHealthScope = "database, process and local hub counters; LiveKit is reported from the supervisor's own state, never probed"
+
+// healthSnapshot is health.json in the support bundle and the snapshot on the
+// System health page. Fields are in JSON-key order and the ones a hub may not
+// report are pointers left nil, so the bundle's bytes match the map this
+// replaced: a field the hub cannot report is absent, never a made-up zero.
+type healthSnapshot struct {
+	BroadcastDrops         *uint64          `json:"broadcast_drops,omitempty"`
+	CapturedAt             time.Time        `json:"captured_at"`
+	ChatSendAckMs          *metrics.Summary `json:"chat_send_ack_ms,omitempty"`
+	ConnectedUsers         *int             `json:"connected_users,omitempty"`
+	DatabaseReadable       bool             `json:"database_readable"`
+	DispatchAlive          *bool            `json:"dispatch_alive,omitempty"`
+	GCCycles               uint32           `json:"gc_cycles"`
+	Goroutines             int              `json:"goroutines"`
+	HeapAllocBytes         uint64           `json:"heap_alloc_bytes"`
+	HighPriorityFallbacks  *uint64          `json:"high_priority_fallbacks,omitempty"`
+	HubBroadcastQueueDepth *int             `json:"hub_broadcast_queue_depth,omitempty"`
+	HubSeqMuMaxHoldMs      *float64         `json:"hub_seqmu_max_hold_ms,omitempty"`
+	LiveKitGaveUp          *bool            `json:"livekit_gave_up,omitempty"`
+	LiveKitHealthy         *bool            `json:"livekit_healthy,omitempty"`
+	LiveKitManaged         *bool            `json:"livekit_managed,omitempty"`
+	LiveKitRestarts        *int             `json:"livekit_restarts,omitempty"`
+	LowPriorityDrops       *uint64          `json:"low_priority_drops,omitempty"`
+	QueueDisconnects       *uint64          `json:"queue_disconnects,omitempty"`
+	ReconnectBuffer        *uint64          `json:"reconnect_buffer,omitempty"`
+	ReconnectDatabase      *uint64          `json:"reconnect_database,omitempty"`
+	ReconnectFull          *uint64          `json:"reconnect_full,omitempty"`
+	Scope                  string           `json:"scope"`
+	TopicShedsTotal        *uint64          `json:"topic_sheds_total,omitempty"`
+	VoiceSessions          *int             `json:"voice_sessions,omitempty"`
+	WSBroadcastMs          *metrics.Summary `json:"ws_broadcast_ms,omitempty"`
+	WSConnectionRejects    *uint64          `json:"ws_connection_rejects,omitempty"`
+	WSDispatchLagMs        *metrics.Summary `json:"ws_dispatch_lag_ms,omitempty"`
+}
+
+func ptr[T any](v T) *T { return &v }
+
+func supportHealth(hub HubBroadcaster, at time.Time) healthSnapshot {
 	var mem runtime.MemStats
 	runtime.ReadMemStats(&mem)
-	out := map[string]any{"captured_at": at, "scope": "database, process and local hub counters; LiveKit is reported from the supervisor's own state, never probed", "database_readable": true, "goroutines": runtime.NumGoroutine(), "heap_alloc_bytes": mem.HeapAlloc, "gc_cycles": mem.NumGC}
+	out := healthSnapshot{CapturedAt: at, Scope: supportHealthScope, DatabaseReadable: true, Goroutines: runtime.NumGoroutine(), HeapAllocBytes: mem.HeapAlloc, GCCycles: mem.NumGC}
 	if hub != nil {
-		out["connected_users"] = hub.UserCount()
+		out.ConnectedUsers = ptr(hub.UserCount())
 	}
 	if h, ok := hub.(supportHubMetrics); ok {
-		out["voice_sessions"] = h.VoiceSessionCount()
-		out["broadcast_drops"] = h.BroadcastDropCount()
-		out["dispatch_alive"] = h.DispatchAlive()
-		out["ws_connection_rejects"] = h.ConnRejectCount()
-		out["queue_disconnects"], out["high_priority_fallbacks"], out["low_priority_drops"] = h.BackpressureStats()
-		out["reconnect_buffer"], out["reconnect_database"], out["reconnect_full"] = h.ReconnectTierStats()
+		out.VoiceSessions = ptr(h.VoiceSessionCount())
+		out.WSConnectionRejects = ptr(h.ConnRejectCount())
+		out.DispatchAlive = ptr(h.DispatchAlive())
+		out.BroadcastDrops = ptr(h.BroadcastDropCount())
+		qd, hp, lp := h.BackpressureStats()
+		out.QueueDisconnects, out.HighPriorityFallbacks, out.LowPriorityDrops = &qd, &hp, &lp
+		rb, rd, rf := h.ReconnectTierStats()
+		out.ReconnectBuffer, out.ReconnectDatabase, out.ReconnectFull = &rb, &rd, &rf
 	}
 	// SRE-M1's shipped latency surface: aggregate distributions and gauges,
 	// no per-user labels.
 	if h, ok := hub.(supportHubLatency); ok {
-		out["topic_sheds_total"] = h.TopicShedCount()
-		out["ws_broadcast_ms"] = h.BroadcastMs()
-		out["ws_dispatch_lag_ms"] = h.DispatchLagMs()
-		out["chat_send_ack_ms"] = h.ChatAckMs()
-		out["hub_broadcast_queue_depth"] = h.BroadcastQueueDepth()
-		out["hub_seqmu_max_hold_ms"] = h.SeqMuMaxHoldMs()
+		out.TopicShedsTotal = ptr(h.TopicShedCount())
+		out.WSBroadcastMs = ptr(h.BroadcastMs())
+		out.WSDispatchLagMs = ptr(h.DispatchLagMs())
+		out.ChatSendAckMs = ptr(h.ChatAckMs())
+		out.HubBroadcastQueueDepth = ptr(h.BroadcastQueueDepth())
+		out.HubSeqMuMaxHoldMs = ptr(h.SeqMuMaxHoldMs())
 	}
 	if v, ok := hub.(supportHubVoice); ok && v.LiveKitManaged() {
 		status := v.LiveKitProcessStatus()
-		out["livekit_managed"] = true
-		out["livekit_healthy"] = status.Running
-		out["livekit_restarts"] = status.Restarts
-		out["livekit_gave_up"] = status.GaveUp
+		out.LiveKitManaged = ptr(true)
+		out.LiveKitHealthy = ptr(status.Running)
+		out.LiveKitRestarts = ptr(status.Restarts)
+		out.LiveKitGaveUp = ptr(status.GaveUp)
 	}
 	return out
 }

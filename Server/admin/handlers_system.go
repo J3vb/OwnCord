@@ -28,6 +28,11 @@ type SystemSources struct {
 	// SlowRoutes holds request times per route for GET /system/slow-requests;
 	// nil answers an empty list.
 	SlowRoutes *metrics.SlowRoutes
+	// Database reads the System health page's database card; nil leaves the
+	// card "not measured".
+	Database func(context.Context) (SystemDatabase, error)
+	// MaxWSConnections is server.max_ws_connections (0 is unlimited).
+	MaxWSConnections int
 }
 
 // systemWindows are the history lengths the route serves.
