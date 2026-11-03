@@ -133,6 +133,8 @@ export const notifier: Notifier = {
     ringing.get(channelId)?.close();
     ringing.delete(channelId);
   },
+  // A web notification leaves the screen on its own.
+  async clearMessages(): Promise<void> {},
   onMessageActivated(handler: (target: NotificationTarget) => void): () => void {
     activationHandlers.add(handler);
     return () => {

@@ -29,6 +29,10 @@ import { Disposable } from "../../lib/disposable";
 import { loadPref, onPrefChange } from "../../lib/prefs/preferences";
 import type { Notifier } from "../../platform/contracts/notifications";
 
+// Loaded with the badge by the main page, in one chunk.
+export { startNotificationClearing } from "./clearOnRead";
+export { askNotificationPermissionOnce } from "./permissionAsk";
+
 /**
  * Settings > Notifications > "Unread message badge"; on unless switched off.
  * A stored value of the wrong type reads as the default (on).

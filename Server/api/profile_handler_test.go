@@ -857,13 +857,12 @@ func TestUpdateProfile_IdentityKeyInvalid(t *testing.T) {
 
 // ─── GET /api/v1/users/me/sessions with an API-token principal ────────────────
 
-func TestListSessions_APITokenPrincipal(t *testing.T) {
+func TestListSessions_APITokenPrincipalIsRefused(t *testing.T) {
 	database := newAuthTestDB(t)
 	router := buildProfileRouter(database)
 
 	// One login session exists, but the caller authenticates with an API
-	// token (nil SessionKey). The sibling DELETE works for this principal;
-	// the list must too, with no session marked current.
+	// token (nil SessionKey): the list is a login-session route.
 	_ = profileCreateToken(t, database, "apisessions", 4)
 	user, _ := database.GetUserByUsername(context.Background(), "apisessions")
 	if user == nil {
@@ -883,22 +882,7 @@ func TestListSessions_APITokenPrincipal(t *testing.T) {
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
 
-	if rr.Code != http.StatusOK {
-		t.Fatalf("sessions list via API token: status = %d, want 200; body = %s", rr.Code, rr.Body.String())
-	}
-	var resp struct {
-		Sessions []struct {
-			ID        int64 `json:"id"`
-			IsCurrent bool  `json:"is_current"`
-		} `json:"sessions"`
-	}
-	_ = json.NewDecoder(rr.Body).Decode(&resp)
-	if len(resp.Sessions) != 1 {
-		t.Fatalf("sessions = %d, want 1", len(resp.Sessions))
-	}
-	if resp.Sessions[0].IsCurrent {
-		t.Error("API-token principal must not mark any session as current")
-	}
+	wantErr(t, rr, http.StatusForbidden, "LOGIN_SESSION_REQUIRED", "this action requires a login session")
 }
 
 // ─── Rate-limit bucket isolation ─────────────────────────────────────────────

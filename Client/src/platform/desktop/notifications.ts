@@ -64,6 +64,7 @@ export const notifier: Notifier = {
   async clearCall(channelId: number): Promise<void> {
     await invokeOrThrow("clear_call_notification", { channelId });
   },
+  async clearMessages(): Promise<void> {},
   onMessageActivated(handler: (target: NotificationTarget) => void): () => void {
     let active = true;
     let unlisten: (() => void) | null = null;

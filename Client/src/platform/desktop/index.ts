@@ -22,6 +22,8 @@ import { nativeFiles } from "./nativeFiles";
 import { nativeProxies } from "./nativeProxies";
 import { nativeVoice } from "./nativeVoice";
 import { notifier } from "./notifications";
+import { androidNotifier } from "./androidNotifierLazy";
+import { isAndroidHost } from "@lib/hostPlatform";
 import { pendingMessages } from "./pendingMessages";
 import { pushToTalk } from "./pushToTalk";
 import { globalShortcuts } from "./globalShortcuts";
@@ -58,7 +60,8 @@ export const desktop: Platform = {
   nativeFiles,
   nativeProxies,
   nativeVoice,
-  notifier,
+  // The desktop host's notification command is not built for Android.
+  notifier: isAndroidHost() ? androidNotifier : notifier,
   pendingMessages,
   pushToTalk,
   globalShortcuts,

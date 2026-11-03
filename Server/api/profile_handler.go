@@ -119,8 +119,8 @@ type ProfileBroadcaster interface {
 }
 
 // revokeAllSessionsRateLimitPerMinute bounds DELETE /api/v1/users/me/sessions
-// per account. Every call revokes the caller's own session or API token, so the
-// cap bounds how fast a fresh sign-in can repeat it.
+// per account. Every call revokes the caller's own session, so the cap bounds
+// how fast a fresh sign-in can repeat it.
 const revokeAllSessionsRateLimitPerMinute = 5
 
 // MountProfileRoutes registers the authenticated user profile endpoints;
@@ -140,7 +140,7 @@ func MountProfileRoutes(r chi.Router, svc *service.Services, store FileStore, li
 		r.With(RateLimitMiddleware(limiter, "profile:", profileUpdateRateLimitPerMinute, time.Minute, trustedProxies)).
 			Patch("/", handleUpdateProfile(svc, broadcaster, selfHosts))
 
-		r.With(RateLimitMiddleware(limiter, "pw:", profilePasswordRateLimitPerMinute, time.Minute, trustedProxies)).
+		r.With(requireLoginSession, RateLimitMiddleware(limiter, "pw:", profilePasswordRateLimitPerMinute, time.Minute, trustedProxies)).
 			Put("/password", handleChangePassword(svc, limiter, broadcaster))
 
 		r.With(RateLimitMiddleware(limiter, "profile:", profileUpdateRateLimitPerMinute, time.Minute, trustedProxies)).
@@ -168,12 +168,12 @@ func MountProfileRoutes(r chi.Router, svc *service.Services, store FileStore, li
 				Put("/privacy", handlePutPrivacy(svc.Privacy, broadcaster))
 		}
 
-		r.Get("/sessions", handleListSessions(svc))
+		r.With(requireLoginSession).Get("/sessions", handleListSessions(svc))
 
 		r.With(RateLimitMiddleware(limiter, "own_moderation:", ownModerationRateLimitPerMinute, time.Minute, trustedProxies)).
 			Get("/moderation", handleOwnModeration(svc))
-		r.Delete("/sessions", handleRevokeAllSessions(svc, limiter, broadcaster))
-		r.Delete("/sessions/{id}", handleRevokeSession(svc, broadcaster))
+		r.With(requireLoginSession).Delete("/sessions", handleRevokeAllSessions(svc, limiter, broadcaster))
+		r.With(requireLoginSession).Delete("/sessions/{id}", handleRevokeSession(svc, broadcaster))
 	})
 }
 
@@ -276,8 +276,13 @@ func parseUpdateProfileRequest(w http.ResponseWriter, r *http.Request, selfHosts
 	}
 
 	// Validate the identity key before any write so the request is
-	// all-or-nothing.
+	// all-or-nothing. A device key belongs to a login session, so an API token
+	// may edit the profile but not publish one.
 	if req.IdentityPublicKey != nil {
+		if p, _ := principal(r); p.Session == nil {
+			writeLoginSessionRequired(w)
+			return req, false
+		}
 		trimmed := strings.TrimSpace(*req.IdentityPublicKey)
 		if err := service.ValidateIdentityKey(trimmed); err != nil {
 			writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, err.Error())
@@ -454,8 +459,8 @@ func handleListSessions(svc *service.Services) http.HandlerFunc {
 			return
 		}
 
-		// An API-token principal has a nil session (middleware.go); the list
-		// still works, with no row marked current.
+		// requireLoginSession guarantees a session; the nil check below stays
+		// so the handler never dereferences one it was not given.
 		sess, _ := r.Context().Value(SessionKey).(*db.Session)
 
 		sessions, err := svc.Users.ListSessions(r.Context(), user.ID)
@@ -480,8 +485,7 @@ func handleListSessions(svc *service.Services) http.HandlerFunc {
 		}
 
 		// This listing is the acknowledgement of the response's flags, except
-		// for the caller's own session. An API-token principal has no session
-		// and acknowledges every row.
+		// for the caller's own session.
 		var callerSessionID int64
 		if sess != nil {
 			callerSessionID = sess.ID
@@ -553,6 +557,8 @@ func handleRevokeAllSessions(svc *service.Services, limiter *auth.RateLimiter, b
 				d.DisconnectRevokedUser(user.ID)
 			}
 		}
+		// requireLoginSession guarantees sess; the check keeps the handler from
+		// claiming a revoke it was not given.
 		writeJSON(w, http.StatusOK, revokeAllSessionsResponse{
 			SessionsRevoked: n,
 			CurrentRevoked:  sess != nil,

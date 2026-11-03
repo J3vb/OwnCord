@@ -4,16 +4,12 @@ import { usePhone } from "../../helpers/phoneMedia";
 import { closeBottomSheet } from "@lib/ui/bottomSheet";
 import { authStore } from "@stores/auth.store";
 import { mountMessageInput, useMessageInputContainer } from "../../helpers/messageInputHarness";
+import { attachSheetEl, settleHistory } from "../../helpers/composerSheets";
 
 vi.mock("@components/EmojiPicker", () => mocks.emojiPickerMock());
 vi.mock("@components/GifPicker", () => mocks.gifPickerMock());
 
-/** history.back() lands its popstate on a later task in jsdom. */
-async function settleHistory(): Promise<void> {
-  for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 0));
-}
-
-const sheet = (): HTMLElement | null => document.querySelector('[data-testid="attach-sheet"]');
+const sheet = attachSheetEl;
 const tile = (source: string): HTMLButtonElement =>
   document.querySelector<HTMLButtonElement>(`[data-testid="attach-sheet-${source}"]`)!;
 

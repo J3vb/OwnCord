@@ -78,7 +78,7 @@ func newAdmissionFixture(t *testing.T, budget int) *admissionFixture {
 	}
 	return &admissionFixture{
 		svc: svc, limiter: limiter, database: database,
-		plain: Principal{User: plain}, totpUID: totpID, partial: partial,
+		plain: sessionPrincipal(plain), totpUID: totpID, partial: partial,
 	}
 }
 

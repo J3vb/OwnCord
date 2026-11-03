@@ -90,6 +90,31 @@ func requireUser(w http.ResponseWriter, r *http.Request) (*db.User, bool) {
 	return user, true
 }
 
+// requireLoginSession admits only a principal that holds a login session; an
+// API-token principal gets 403 LOGIN_SESSION_REQUIRED. It guards the
+// account-security routes (password, two-factor, recovery, sessions, account
+// deletion) and mounts after AuthMiddleware.
+func requireLoginSession(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p, ok := principal(r)
+		if !ok {
+			writeNotAuthenticated(w)
+			return
+		}
+		if p.Session == nil {
+			writeLoginSessionRequired(w)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// writeLoginSessionRequired answers a request that needs a login session but
+// carried an API token.
+func writeLoginSessionRequired(w http.ResponseWriter) {
+	writeErr(w, http.StatusForbidden, httperr.CodeLoginSessionRequired, service.ErrLoginSessionRequired.Error())
+}
+
 // backgroundWriteTimeout bounds AuthMiddleware's session writes that run when
 // no connection-writes batch is installed (the expired-session delete and the
 // API-token touch), so a wedged DB cannot hold a request forever. A var so tests can shorten it.

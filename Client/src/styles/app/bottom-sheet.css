@@ -135,7 +135,8 @@
   background: var(--bg-modifier-selected);
 }
 
-/* The composer's attach sheet (features/messaging/attachSheet.ts): three tiles. */
+/* The composer's attach sheet (features/messaging/attachSheet.ts): the file
+   sources, then Poll and Voice message where the server and Settings allow. */
 .attach-sheet {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

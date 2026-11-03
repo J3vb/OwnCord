@@ -1,5 +1,5 @@
 {
-  "nextId": 536,
+  "nextId": 537,
   "findings": [
     {
       "id": "OC-0001",
@@ -12358,6 +12358,29 @@
     },
     {
       "id": "OC-0535",
+      "title": "The voice key provider outlived its Room and kept the last call's Room alive",
+      "file": "Client/src/features/voice/e2eeWorker.ts",
+      "line": 26,
+      "severity": "medium",
+      "why": "One ExternalE2EEKeyProvider served every Room for the app's lifetime. livekit's E2EEManager subscribes to its provider and never unsubscribes, so the provider held the newest Room (engine, participants, tracks) until the next join, and only a blanket removeAllListeners before each join stopped the listeners from piling up.",
+      "repro": "Join and leave a voice channel on Windows or the web client: the left Room stays reachable from the key provider while idle.",
+      "evidence": "Client/tests/unit/livekit-key-provider-per-room.test.ts (one listener per event on the live provider after 12 join/leave cycles, with the real livekit-client).",
+      "suggestedFix": "Give each Room its own provider (E2EEWorker.newKeyProvider from RoomLifecycle.createRoom) and drop it on leave.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/unit/livekit-key-provider-per-room.test.ts",
+        "revertProof": "fail (a shared provider fails both tests)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-03",
+      "hunt": "client-review-2026-11-03",
+      "lens": "e2ee-auth",
+      "finder": "claude",
+      "fixedDate": "2026-11-03"
+    },
+    {
+      "id": "OC-0536",
       "title": "Audit entries the background writer could not queue were lost instead of written directly",
       "file": "Server/db/audit_writer.go",
       "line": 360,

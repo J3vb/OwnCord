@@ -47,7 +47,7 @@ export interface RoomLifecycleHost {
   getRoom(): Room | null;
   getWs(): WsClient | null;
   getOnError(): ((message: string) => void) | null;
-  getE2EE(): Pick<E2EEManager, "keyProvider" | "clearState">;
+  getE2EE(): Pick<E2EEManager, "newKeyProvider" | "releaseKeyProvider" | "clearState">;
   getEventHandlers(): RoomEventHandlers;
   getAudioPipeline(): AudioPipeline;
   getAudioElements(): AudioElements;
@@ -85,7 +85,7 @@ export class RoomLifecycle {
   private get onErrorCallback(): ((message: string) => void) | null {
     return this.host.getOnError();
   }
-  private get _e2ee(): Pick<E2EEManager, "keyProvider" | "clearState"> {
+  private get _e2ee(): Pick<E2EEManager, "newKeyProvider" | "releaseKeyProvider" | "clearState"> {
     return this.host.getE2EE();
   }
   private get _eventHandlers(): RoomEventHandlers {
@@ -136,16 +136,16 @@ export class RoomLifecycle {
   // --- Room factory ---
 
   /** The current room's E2EE worker. livekit never terminates it, so the
-   *  session must — a leaked worker keeps receiving every future room key
-   *  through the process-lifetime key provider's setKey fan-out. */
+   *  session must — a leaked worker keeps running with the last room key
+   *  resident in it. */
   private _e2eeWorker: Worker | null = null;
 
   async createRoom(channelId?: number): Promise<Room> {
     if (isLinuxDesktop()) return this.createNativeRoom();
-    // livekit's per-room E2EEManager registers a SetKey listener on the
-    // shared key provider and never removes it; only those managers
-    // subscribe, so clear them all before the new Room re-registers.
-    this._e2ee.keyProvider.removeAllListeners();
+    // livekit's per-room E2EEManager subscribes to its key provider and
+    // never unsubscribes, so each Room gets its own provider and the old one
+    // goes with the old Room.
+    const keyProvider = this._e2ee.newKeyProvider();
     this._e2eeWorker?.terminate();
     this._e2eeWorker = new Worker(new URL("livekit-client/e2ee-worker", import.meta.url));
     const quality = getCameraQuality();
@@ -202,7 +202,7 @@ export class RoomLifecycle {
       // End-to-end encryption: SFrame-based E2EE using a server-distributed
       // per-channel symmetric key. The SFU only sees encrypted frames.
       e2ee: {
-        keyProvider: this._e2ee.keyProvider,
+        keyProvider,
         worker: this._e2eeWorker,
       },
     });
@@ -393,6 +393,7 @@ export class RoomLifecycle {
     // Clear client-side E2EE state (ECDH keypair, room key, peer keys), and
     // kill the E2EE worker so the last room key does not stay resident in it.
     this._e2ee.clearState();
+    this._e2ee.releaseKeyProvider();
     this._e2eeWorker?.terminate();
     this._e2eeWorker = null;
     // Transition to idle — atomically clears room, channelId, tokens, reconnectAc,
