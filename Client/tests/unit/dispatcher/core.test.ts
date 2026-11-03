@@ -338,6 +338,23 @@ describe("WS Dispatcher", () => {
     expect(channelsStore.getState().activeChannelId).toBe(30);
   });
 
+  it("wires channel_delete and redirects to the first text channel the sidebar draws", () => {
+    // Positions count inside each category, so the lowest one overall can sit
+    // in the later category; the redirect follows the sidebar instead.
+    seedChannels(
+      [
+        channelRow({ id: 10, name: "active-ch" }),
+        channelRow({ id: 41, name: "late", position: 0, categoryId: 4, categoryPosition: 1 }),
+        channelRow({ id: 42, name: "early", position: 3, categoryId: 3, categoryPosition: 0 }),
+      ],
+      { activeChannelId: 10 },
+    );
+
+    mock.dispatch("channel_delete", { id: 10 });
+
+    expect(channelsStore.getState().activeChannelId).toBe(42);
+  });
+
   it("wires member_update to update role", () => {
     seedMembers([memberRow({ id: 42, username: "alice" })]);
 

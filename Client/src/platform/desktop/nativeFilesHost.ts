@@ -61,7 +61,8 @@ function isStagedFile(raw: unknown): raw is StagedFile {
   );
 }
 
-function toNativeFiles(raw: unknown): NativeFile[] {
+/** The host's staged files as page files, each read once by its token. */
+export function toNativeFiles(raw: unknown): NativeFile[] {
   if (!Array.isArray(raw)) return [];
   return raw.filter(isStagedFile).map(({ token, name, size }) => ({
     name,
