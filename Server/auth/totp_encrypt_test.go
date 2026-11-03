@@ -75,7 +75,7 @@ func TestEncryptTOTPSecret_NonceIsRandom(t *testing.T) {
 // totp_encrypt.go: a value that has the full encrypted shape (valid hex, long
 // enough for nonce+tag) but fails GCM authentication must return an error and
 // an EMPTY string. Returning the ciphertext would silently mask a wrong
-// TOTP_ENCRYPTION_KEY and hand the caller a bogus "secret".
+// OWNCORD_TOTP_KEY and hand the caller a bogus "secret".
 func TestDecryptTOTPSecret_FailsClosed(t *testing.T) {
 	key := testKey(0x01)
 	const secret = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"
@@ -161,7 +161,7 @@ func TestSealLegacyTOTPSecret(t *testing.T) {
 	}
 
 	t.Run("legacy base32 is sealed", func(t *testing.T) {
-		for _, v := range []string{legacy, "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ", "jbswy3dpehpk3pxp"} {
+		for _, v := range []string{legacy, "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ", "jbswy3dpehpk3pxp", " JBSWY3DPEHPK3PXP "} {
 			got, outcome, err := auth.SealLegacyTOTPSecret(key, v)
 			if err != nil || outcome != auth.SealConverted {
 				t.Fatalf("SealLegacyTOTPSecret(%q) = %v, %v, want SealConverted", v, outcome, err)
@@ -191,6 +191,7 @@ func TestSealLegacyTOTPSecret(t *testing.T) {
 		{"not base32", "not a secret!"},
 		{"too few bits", "JBSWY3DP"},
 		{"long non-hex non-base32", strings.Repeat("Z1", 30)},
+		{"truncated lower-case hex", "abcdef234567abcdef234567abcdef23"},
 	} {
 		t.Run(tc.name+" is unreadable", func(t *testing.T) {
 			got, outcome, err := auth.SealLegacyTOTPSecret(key, tc.value)

@@ -220,7 +220,7 @@ func DecryptTOTPSecret(key []byte, ciphertext string) (string, error) {
 	plaintext, err := gcm.Open(nil, nonce, sealed, nil)
 	if err != nil {
 		// A wrong key or a damaged value, either way not something to use.
-		slog.Error("TOTP secret decryption failed — check TOTP_ENCRYPTION_KEY", "error", err)
+		slog.Error("TOTP secret decryption failed — check OWNCORD_TOTP_KEY", "error", err)
 		return "", fmt.Errorf("decrypting TOTP secret: %w", err)
 	}
 
@@ -263,8 +263,13 @@ func SealLegacyTOTPSecret(key []byte, stored string) (string, SealOutcome, error
 
 // usableBase32Secret reports whether GenerateTOTPCode can derive codes from
 // secret: after the same normalisation it applies, it decodes as unpadded
-// base32 to at least 10 bytes (80 bits, the RFC 4226 minimum).
+// base32 to at least 10 bytes (80 bits, the RFC 4226 minimum). Secrets were
+// always generated upper-case and sealed values are lower-case hex, so a value
+// made only of lower-case hex characters is a damaged ciphertext, not a secret.
 func usableBase32Secret(secret string) bool {
+	if strings.Trim(secret, "0123456789abcdef") == "" {
+		return false
+	}
 	normalised := strings.ToUpper(strings.TrimSpace(secret))
 	decoded, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(normalised)
 	return err == nil && len(decoded) >= 10

@@ -18,6 +18,8 @@ const totpSealBudget = 30 * time.Second
 // restored older backup is converted too. A store error stops the boot: the
 // pass is idempotent and the next start resumes it.
 func (a *App) startTOTPSecrets() error {
+	// Not Run's context: cancelling it stops serving, not a start stage
+	// (lifecycle.go), and the pass is short and bounded by its own budget.
 	ctx, cancel := context.WithTimeout(context.Background(), totpSealBudget)
 	defer cancel()
 	sealed, unreadable, err := service.SealLegacyTOTPSecrets(ctx, a.database, a.totpKey)
@@ -27,8 +29,8 @@ func (a *App) startTOTPSecrets() error {
 	if sealed > 0 {
 		a.log.Info("stored TOTP secrets sealed", "count", sealed)
 	}
-	if unreadable > 0 {
-		a.log.Warn("stored TOTP secrets unreadable", "count", unreadable,
+	if len(unreadable) > 0 {
+		a.log.Warn("stored TOTP secrets unreadable", "count", len(unreadable), "user_ids", unreadable,
 			"advice", "check OWNCORD_TOTP_KEY or totp.key: these users cannot finish a two-factor sign-in")
 	}
 	return nil

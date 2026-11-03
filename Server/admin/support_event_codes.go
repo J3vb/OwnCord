@@ -75,7 +75,7 @@ var supportEventCodes = map[string]string{ //nolint:gosec // G101: false positiv
 	"PushDispatcher.recipientBlocksAuthor IsBlocked":                                          "pushdispatcher_recipientblocksauthor_isblocked",
 	"PushDispatcher.subscriptionStillCurrent ListPushSubscriptionsForDispatch":                "pushdispatcher_subscriptionstillcurrent_listpushsubscriptions",
 	"TLS certificate issuance failed — clients cannot connect over HTTPS until this is fixed": "tls_certificate_issuance_failed",
-	"TOTP secret decryption failed — check TOTP_ENCRYPTION_KEY":                               "totp_secret_decryption_failed",
+	"TOTP secret decryption failed — check OWNCORD_TOTP_KEY":                                  "totp_secret_decryption_failed",
 	"UpdateProfile post-commit re-read failed; returning locally merged row":                  "updateprofile_post_commit_re_read_failed",
 	"UserService.ChangePassword DeleteOtherSessions":                                          "userservice_changepassword_deleteothersessions",
 	"admin erasure failed":                                                                    "admin_erasure_failed",

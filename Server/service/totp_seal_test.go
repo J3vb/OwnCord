@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"slices"
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/auth"
@@ -78,8 +79,8 @@ func TestSealLegacyTOTPSecrets_ConvertsOnlyUnsealedSecrets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sealLegacyTOTPSecrets: %v", err)
 	}
-	if sealed != 1 || unreadable != 1 {
-		t.Fatalf("sealed, unreadable = %d, %d, want 1, 1", sealed, unreadable)
+	if sealed != 1 || !slices.Equal(unreadable, []int64{damagedUID}) {
+		t.Fatalf("sealed, unreadable = %d, %v, want 1, [%d]", sealed, unreadable, damagedUID)
 	}
 
 	got := storedSecret(t, database, legacyUID)
@@ -102,8 +103,8 @@ func TestSealLegacyTOTPSecrets_ConvertsOnlyUnsealedSecrets(t *testing.T) {
 
 	before := *storedSecret(t, database, legacyUID)
 	sealed, unreadable, err = SealLegacyTOTPSecrets(ctx, database, key)
-	if err != nil || sealed != 0 || unreadable != 1 {
-		t.Fatalf("second run = %d, %d, %v, want 0, 1, nil", sealed, unreadable, err)
+	if err != nil || sealed != 0 || !slices.Equal(unreadable, []int64{damagedUID}) {
+		t.Fatalf("second run = %d, %v, %v, want 0, [%d], nil", sealed, unreadable, err, damagedUID)
 	}
 	if after := *storedSecret(t, database, legacyUID); after != before {
 		t.Fatal("second run rewrote an already sealed row")
@@ -134,8 +135,8 @@ func TestSealLegacyTOTPSecrets_YieldsToAConcurrentChange(t *testing.T) {
 	uid := sealTestUser(t, database, "racer", &legacy)
 
 	sealed, unreadable, err := SealLegacyTOTPSecrets(context.Background(), racingStore{database, t}, sealTestKey())
-	if err != nil || sealed != 0 || unreadable != 0 {
-		t.Fatalf("sealLegacyTOTPSecrets = %d, %d, %v, want 0, 0, nil", sealed, unreadable, err)
+	if err != nil || sealed != 0 || len(unreadable) != 0 {
+		t.Fatalf("SealLegacyTOTPSecrets = %d, %v, %v, want 0, none, nil", sealed, unreadable, err)
 	}
 	if got := storedSecret(t, database, uid); got != nil {
 		t.Fatalf("secret = %q after a concurrent disable, want NULL", *got)
