@@ -23,6 +23,9 @@ export async function startNativeApp(
     /** Seed `owncord-client.log` to this size before launch, so the log
      *  plugin's first write rotates it (CLI-03 rollover coverage). */
     seedActiveLogBytes?: number;
+    /** Files to plant in the log folder before launch, by name (a run file
+     *  an earlier process left, for the next-start report). */
+    seedLogFiles?: Record<string, string>;
     /** Runs after the profile clear and before launch, with the app data dir
      *  (`%APPDATA%/<identifier>`, where Tauri's `app_data_dir` points). */
     seedAppData?: (appDataDir: string) => Promise<void>;
@@ -56,6 +59,19 @@ export async function startNativeApp(
     await writeFile(
       join(logDir, "owncord-client.log"),
       Buffer.alloc(options.seedActiveLogBytes, 0x61),
+    );
+  }
+  if (options.seedLogFiles) {
+    const logDir = join(
+      process.env.LOCALAPPDATA ?? "",
+      options.identifier ?? "com.owncord.e2e",
+      "logs",
+    );
+    await mkdir(logDir, { recursive: true });
+    await Promise.all(
+      Object.entries(options.seedLogFiles).map(([name, text]) =>
+        writeFile(join(logDir, name), text),
+      ),
     );
   }
   if (options.seedAppData) {

@@ -89,8 +89,8 @@ func applyCancelled(ctx context.Context, w http.ResponseWriter) bool {
 }
 
 // applyBudget bounds one POST /updates/apply: the release check, the asset
-// download and its verification, together. It matches the transfer lifetime in
-// api (transferMaxLifetime). The request context ends at this budget and the
+// download and its verification, together. It matches the shortest transfer
+// lifetime in api (transferMinLifetime). The request context ends at this budget and the
 // connection deadlines extend to it plus applyDeadlineMargin.
 const applyBudget = 10 * time.Minute
 

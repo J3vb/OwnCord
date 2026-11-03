@@ -478,6 +478,7 @@ const NAV=[
   {id:'updates',label:'Updates',icon:I.updates,badge:()=>state.badges.update,badgeText:'update available',allowed:()=>ownerOrHolds(PERM.MANAGE_UPDATES)},
   {id:'whatsnew',label:'What\'s new',icon:I.star},
   {section:'Operations'},
+  {id:'health',label:'System health',icon:I.activity,allowed:()=>can(PERM.VIEW_DIAGNOSTICS)},
   {id:'logs',label:'Server logs',icon:I.logs,allowed:()=>can(PERM.VIEW_DIAGNOSTICS)},
   {id:'diagnostics',label:'Diagnostics',icon:I.activity,allowed:()=>can(PERM.VIEW_DIAGNOSTICS)},
   {section:'Integrations'},
@@ -663,7 +664,7 @@ function dismissButton(id,sig,what){return'<button class="notice-dismiss" aria-l
 /* ═══ Content Router ═══ */
 function renderContent(){
   const c=document.getElementById('content');if(!c)return;c.scrollTop=0;
-  const r={dashboard:renderDashboard,users:renderUsers,channels:renderChannels,roles:renderRoles,emoji:renderEmoji,stickers:renderStickers,invites:renderInvites,audit:renderAudit,tokens:renderTokens,plugins:renderPlugins,logs:renderLogs,diagnostics:renderDiagnostics,settings:renderSettings,config:renderServerConfig,retention:renderRetention,storage:renderStorage,backups:renderBackups,updates:renderUpdates,whatsnew:renderWhatsNew};
+  const r={dashboard:renderDashboard,users:renderUsers,channels:renderChannels,roles:renderRoles,emoji:renderEmoji,stickers:renderStickers,invites:renderInvites,audit:renderAudit,tokens:renderTokens,plugins:renderPlugins,logs:renderLogs,diagnostics:renderDiagnostics,health:renderSystemHealth,settings:renderSettings,config:renderServerConfig,retention:renderRetention,storage:renderStorage,backups:renderBackups,updates:renderUpdates,whatsnew:renderWhatsNew};
   c.innerHTML='<div class="page-title">Loading...</div>';
   const fn=r[state.section];
   if(typeof fn!=='function'){console.error('[Admin] No render function for section: '+state.section);c.innerHTML='<div class="page-title">Error</div><p style="color:var(--text-danger)">Unknown section: '+esc(state.section)+'</p><button class="btn btn-accent" data-action="navigateTo" data-args="'+actArgs('dashboard')+'">Back to Dashboard</button>';return}
