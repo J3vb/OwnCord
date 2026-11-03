@@ -62,7 +62,7 @@ func accountBlock(u *db.User) string {
 
 // loadAccessMember resolves userID's live Subject in ch, composing every role
 // they hold.
-func (s *ChannelService) loadAccessMember(ctx context.Context, userID int64, ch *db.Channel) (*accessMember, error) {
+func (s *channelOverrides) loadAccessMember(ctx context.Context, userID int64, ch *db.Channel) (*accessMember, error) {
 	user, err := s.st.GetUserByID(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("%w: failed to fetch user: %w", ErrInternal, err)
@@ -147,7 +147,7 @@ func (m *accessMember) decisions(sub permissions.Subject) []permissions.Decision
 // channel ch and the rules behind it. The read is audited: it discloses a member's
 // restriction state, so like editing their override it is refused for a member
 // ranked at or above the actor.
-func (s *ChannelService) ExplainAccess(ctx context.Context, actorID int64, actorRole *db.Role, userID int64, ch *db.Channel, action string) (AccessExplanation, error) {
+func (s *channelOverrides) ExplainAccess(ctx context.Context, actorID int64, actorRole *db.Role, userID int64, ch *db.Channel, action string) (AccessExplanation, error) {
 	if _, err := permissions.Explain(permissions.Action(action), permissions.Subject{}); err != nil {
 		return AccessExplanation{}, fmt.Errorf("%w%.0w", err, ErrBadRequest)
 	}
@@ -214,7 +214,7 @@ type AccessPreview struct {
 // is. Only the audit row is written; the save path re-checks its own authority.
 // ponytail: one live Subject per member of the role (a few indexed reads each);
 // batch the reads if a role grows to tens of thousands of members.
-func (s *ChannelService) PreviewOverride(ctx context.Context, actorID int64, actorRole *db.Role, ch *db.Channel, roleID, userID, allowRaw, denyRaw int64) (AccessPreview, error) {
+func (s *channelOverrides) PreviewOverride(ctx context.Context, actorID int64, actorRole *db.Role, ch *db.Channel, roleID, userID, allowRaw, denyRaw int64) (AccessPreview, error) {
 	if (roleID == 0) == (userID == 0) {
 		return AccessPreview{}, fmt.Errorf("exactly one of role_id or user_id is required%.0w", ErrBadRequest)
 	}

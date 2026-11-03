@@ -13,34 +13,26 @@ import (
 	"github.com/J3vb/OwnCord/Server/telemetry"
 )
 
-// channelStore is what ChannelService reads and writes. *db.DB satisfies it.
+// channelStore is what ChannelService reads and writes. *db.DB satisfies it. It is
+// the core's store plus each part's, so the constructor still takes one value.
 type channelStore interface {
+	channelCoreStore
+	channelOverridesStore
+	readFocusStore
+}
+
+// channelCoreStore is the store the channel listing, presence and admin paths use
+// directly; the override and focus read-state calls live on the parts.
+type channelCoreStore interface {
 	db.Auditor
 	permissions.DB
 	readAdmitStore
 	subjectStore
-	// MarkChannelReadAtLatest is the mark-read that computes its own watermark. The
-	// send path's read-state advance happens inside CreateMessageWithMentions /
-	// CreateMessageDelivery.
-	MarkChannelReadAtLatest(ctx context.Context, userID, channelID int64) error
-	GetReadState(ctx context.Context, userID, channelID int64) (lastMessageID, mentionCount int64, found bool, err error)
-	GetLatestMessageID(ctx context.Context, channelID int64) (int64, error)
 	ListChannels(ctx context.Context) ([]db.Channel, error)
-	// Override CRUD for the channel permission layer: the listings the matrix editor
-	// renders and the gated writes/clears.
-	ListChannelRoleOverrides(ctx context.Context, channelID int64) ([]db.ChannelRoleOverride, error)
-	ListChannelUserOverrides(ctx context.Context, channelID int64) ([]db.ChannelUserOverride, error)
-	UpsertChannelOverride(ctx context.Context, channelID, roleID, allow, deny int64) error
-	DeleteChannelOverride(ctx context.Context, channelID, roleID int64) error
-	UpsertChannelUserOverride(ctx context.Context, channelID, userID, allow, deny int64) error
-	DeleteChannelUserOverride(ctx context.Context, channelID, userID int64) error
 	GetMemberGrants(ctx context.Context, userID int64) (permissions.MemberGrants, error)
 	GetUserByID(ctx context.Context, id int64) (*db.User, error)
 	UpdateUserPresence(ctx context.Context, userID int64, status string, customStatus, expiresAt *string) error
 	UpdateUserStatus(ctx context.Context, id int64, status string) error
-	GetRoleByID(ctx context.Context, id int64) (*db.Role, error)
-	GetMemberRoles(ctx context.Context, userID int64) (*db.MemberRoles, error)
-	ListUserIDsByRole(ctx context.Context, roleID int64) ([]int64, error)
 	GetDMParticipantIDs(ctx context.Context, channelID int64) ([]int64, error)
 	AdminUpdateChannelClearingNSFW(ctx context.Context, id int64, u db.ChannelUpdate) error
 	AdminCreateChannel(ctx context.Context, name, chanType, category, topic string, position int) (int64, error)
@@ -48,21 +40,37 @@ type channelStore interface {
 	AdminDeleteChannel(ctx context.Context, id int64) error
 }
 
+// readFocusStore is the read-state calls a channel or thread focus makes.
+type readFocusStore interface {
+	// MarkChannelReadAtLatest is the mark-read that computes its own watermark. The
+	// send path's read-state advance happens inside CreateMessageWithMentions /
+	// CreateMessageDelivery.
+	MarkChannelReadAtLatest(ctx context.Context, userID, channelID int64) error
+	GetReadState(ctx context.Context, userID, channelID int64) (lastMessageID, mentionCount int64, found bool, err error)
+	GetLatestMessageID(ctx context.Context, channelID int64) (int64, error)
+}
+
+// readFocus is the read-state write a focus makes.
+type readFocus struct {
+	st readFocusStore
+}
+
 // ChannelService handles channel listing, permission-filtered access, typing,
-// presence and read state.
+// presence and read state. Its permission-override work lives on the embedded
+// channelOverrides and its focus read-state write on readFocus.
 type ChannelService struct {
-	st    channelStore
+	st    channelCoreStore
 	afk   AFKStore
 	cats  CategoryStore
-	cperm CategoryPermStore
 	forum ForumStore
 	perms *PermissionService
 	batch *ConnWrites
-	// notifier re-derives channel audiences after an override change; nil is a no-op.
-	notifier PermissionChangeNotifier
 	// wakeExpiry nudges the custom status expirer after an expiring status commits.
 	wakeExpiry func()
 	now        func() time.Time
+
+	*channelOverrides
+	*readFocus
 }
 
 // NewChannelService creates a ChannelService.
@@ -78,10 +86,16 @@ func NewChannelService(st channelStore, perms *PermissionService) *ChannelServic
 		st:    st,
 		afk:   afk,
 		cats:  cats,
-		cperm: cperm,
 		forum: forum,
 		perms: perms,
 		now:   time.Now,
+		channelOverrides: &channelOverrides{
+			st:    st,
+			cats:  cats,
+			cperm: cperm,
+			perms: perms,
+		},
+		readFocus: &readFocus{st: st},
 	}
 }
 
@@ -340,7 +354,7 @@ func (s *ChannelService) HandleChannelFocus(ctx context.Context, userID, channel
 
 // markFocusedRead marks channelID read at its latest message (the write half of
 // channel_focus and thread_focus).
-func (s *ChannelService) markFocusedRead(ctx context.Context, userID, channelID int64) {
+func (s *readFocus) markFocusedRead(ctx context.Context, userID, channelID int64) {
 	// latestID == 0 (no undeleted messages) still writes: the upsert zeroes
 	// mention_count and a last_read of 0 is right since any future id is larger.
 	// Skip the UPSERT when the stored row already says exactly this (same
