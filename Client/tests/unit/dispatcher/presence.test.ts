@@ -5,6 +5,7 @@ import { expectConsole } from "../../helpers/console";
 import { membersStore } from "../../../src/stores/members.store";
 import { voiceStore } from "../../../src/stores/voice.store";
 import { dmStore } from "../../../src/stores/dm.store";
+import { authStore } from "../../../src/stores/auth.store";
 import {
   resetServerCapabilities,
   serverSupportsGameActivity,
@@ -578,6 +579,36 @@ describe("WS Dispatcher", () => {
     const member = membersStore.getState().members.get(1);
     expect(member?.displayName).toBe("Alex A.");
     expect(member?.avatar).toBe("/api/v1/files/abc");
+  });
+
+  it("keeps the signed-in user's display name and about when user_update omits them", () => {
+    authStore.setState((prev) => ({
+      ...prev,
+      user: {
+        id: 5,
+        username: "me",
+        avatar: null,
+        role: "member",
+        display_name: "Me",
+        about: "hello",
+      },
+    }));
+
+    mock.dispatch("user_update", { user_id: 5, username: "me2", avatar: null });
+    expect(authStore.getState().user).toMatchObject({
+      username: "me2",
+      display_name: "Me",
+      about: "hello",
+    });
+
+    mock.dispatch("user_update", {
+      user_id: 5,
+      username: "me2",
+      avatar: null,
+      display_name: null,
+      about: "",
+    });
+    expect(authStore.getState().user).toMatchObject({ display_name: null, about: "" });
   });
 
   // OC-0009: voiceStore.voiceUsers keeps its own frozen copy of each
