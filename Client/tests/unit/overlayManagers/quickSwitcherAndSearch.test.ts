@@ -14,6 +14,7 @@ import {
   type SelectResultOpts,
 } from "../../helpers/overlayManagersHarness";
 import { useMountContainer } from "../../helpers/mountContainer";
+import { guarded, pressBack, settle } from "../../helpers/backNav";
 
 vi.mock("@lib/logger", () => mocks.loggerMock());
 vi.mock("@components/QuickSwitcher", () => mocks.quickSwitcherMock());
@@ -37,9 +38,17 @@ const {
 } = mocks;
 
 let root: HTMLDivElement;
-useMountContainer((container) => {
-  root = container;
-});
+/** Search controllers a test opened: each holds its Back hook until closed. */
+const openSearches: ReturnType<typeof createSearchOverlayController>[] = [];
+
+useMountContainer(
+  (container) => {
+    root = container;
+  },
+  () => {
+    for (const c of openSearches.splice(0)) c.cleanup();
+  },
+);
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -70,6 +79,7 @@ async function openSearch(
     getCurrentChannelId: () => 5,
     ...over,
   });
+  openSearches.push(controller);
   controller.open();
   await vi.dynamicImportSettled();
   return controller;
@@ -365,6 +375,28 @@ describe("createQuickSwitcherManager.open (the phone drawer's search button)", (
 // ---------------------------------------------------------------------------
 
 describe("createSearchOverlayController", () => {
+  it("closes on Back on a phone, and gives Back up when closed another way", async () => {
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn(() => ({ matches: true })),
+    );
+    try {
+      await openSearch();
+      expect(guarded()).toBe(true);
+      await pressBack();
+      expect(mockSearchOverlayDestroy).toHaveBeenCalledOnce();
+      expect(guarded()).toBe(false);
+
+      const controller = await openSearch();
+      expect(guarded()).toBe(true);
+      controller.cleanup();
+      await settle();
+      expect(guarded()).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("opens search overlay and mounts to root", async () => {
     const api = makeMockApi();
     await openSearch(api);

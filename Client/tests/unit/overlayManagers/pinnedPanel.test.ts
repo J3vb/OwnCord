@@ -15,6 +15,7 @@ import {
   openPinnedControllers,
   type UnpinOpts,
 } from "../../helpers/overlayManagersHarness";
+import { guarded, pressBack } from "../../helpers/backNav";
 
 vi.mock("@lib/logger", () => mocks.loggerMock());
 vi.mock("@components/QuickSwitcher", () => mocks.quickSwitcherMock());
@@ -61,6 +62,23 @@ describe("createPinnedPanelController", () => {
       getCurrentChannelId: () => channelId,
     });
   }
+
+  it("closes on Back on a phone", async () => {
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn(() => ({ matches: true })),
+    );
+    try {
+      const controller = newPinned(makeMockApi(), 42);
+      await controller.open();
+      expect(guarded()).toBe(true);
+      await pressBack();
+      expect(mockPinnedMessagesDestroy).toHaveBeenCalledOnce();
+      expect(guarded()).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 
   it("toggles pinned panel open and mounts to root", async () => {
     const api = makeMockApi();

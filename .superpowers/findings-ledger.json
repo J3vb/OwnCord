@@ -1,5 +1,5 @@
 {
-  "nextId": 538,
+  "nextId": 539,
   "findings": [
     {
       "id": "OC-0001",
@@ -12404,6 +12404,29 @@
     },
     {
       "id": "OC-0537",
+      "title": "The thread list query ran on the single writer connection instead of the reader pool",
+      "file": "Server/db/db.go",
+      "line": 335,
+      "severity": "medium",
+      "why": "isReadOnlySQL accepted only SELECT and PRAGMA as a leading keyword, so ListThreadInfosByParent, which starts with a WITH clause, was routed to the writer and every thread or forum page view held it.",
+      "repro": "Hold the writer with an open write transaction and list a channel's threads in the default activity order: the list waits for the transaction.",
+      "evidence": "Server/db/pool_test.go (TestFilePool_ThreadListDuringOpenWriteTx), Server/db/sql_router_queries_test.go (TestIsReadOnlySQL_GeneratedQueries).",
+      "suggestedFix": "Treat a WITH statement as read-only when no word in it is a write keyword, and pin the classification against the generated query text.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/db/pool_test.go",
+        "revertProof": "fail (both tests fail on the old classifier)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-03",
+      "hunt": "server-review-2026-11-03",
+      "lens": "db-config-lifecycle",
+      "finder": "claude",
+      "fixedDate": "2026-11-03"
+    },
+    {
+      "id": "OC-0538",
       "title": "A voice leave made while the chat socket was down left a ghost voice membership after the socket resumed",
       "file": "Server/ws/voice_grace.go",
       "line": 330,

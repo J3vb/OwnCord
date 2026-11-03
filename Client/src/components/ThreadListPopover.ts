@@ -13,6 +13,7 @@
 import { isImeCommit } from "@lib/text/ime";
 import { createElement } from "@lib/dom";
 import { Disposable } from "@lib/disposable";
+import { claimBackOnPhone } from "@lib/ui/bottomSheet";
 import { createIcon } from "@lib/icons";
 import type { ApiClient } from "@lib/api";
 import { errorText } from "@lib/api";
@@ -230,6 +231,7 @@ export function openThreadListPopover(options: ThreadListPopoverOptions): Thread
     { signal: owner.signal, capture: true },
   );
   window.addEventListener("resize", place, { signal: owner.signal });
+  claimBackOnPhone(close, owner.signal);
   void loadNext().then(() => {
     // An empty open list leads straight into the archived ones.
     if (!closed && phase === "archived" && !archivedShown && activeList.childElementCount === 0) {

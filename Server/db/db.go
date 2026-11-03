@@ -328,9 +328,11 @@ func (t *dbtx) pool(query string) *sql.DB {
 }
 
 // isReadOnlySQL reports whether the statement's leading keyword, after
-// whitespace and `--` line comments, is SELECT or PRAGMA. Skipping comments
-// matters because sqlc SQL starts with `-- name: ...`. Anything unrecognized
-// (including `/* */`) is treated as a write.
+// whitespace and `--` line comments, is SELECT or PRAGMA, or is WITH and no
+// word in the text is a write keyword (a CTE can lead an INSERT, UPDATE or
+// DELETE). Skipping comments matters because sqlc SQL starts with
+// `-- name: ...`. Anything unrecognized (including `/* */`) is treated as a
+// write.
 func isReadOnlySQL(query string) bool {
 	s := query
 	for {
@@ -344,7 +346,44 @@ func isReadOnlySQL(query string) bool {
 		}
 		s = s[nl+1:]
 	}
+	if hasKeywordPrefix(s, "WITH") {
+		return !hasWriteKeyword(s)
+	}
 	return hasKeywordPrefix(s, "SELECT") || hasKeywordPrefix(s, "PRAGMA")
+}
+
+// writeKeywords are the words that make a WITH statement a write. RETURNING
+// is listed too so an unusual write shape still lands on the writer.
+var writeKeywords = [...]string{"INSERT", "UPDATE", "DELETE", "REPLACE", "RETURNING"}
+
+// hasWriteKeyword reports whether any whole word of s (ASCII
+// case-insensitive) is a write keyword. Words inside string literals,
+// quoted identifiers and comments count too: a false hit only sends a read
+// to the writer, which is slower but correct.
+func hasWriteKeyword(s string) bool {
+	start := -1
+	for i := 0; i <= len(s); i++ {
+		if i < len(s) && isIdentByte(s[i]) {
+			if start < 0 {
+				start = i
+			}
+			continue
+		}
+		if start >= 0 {
+			word := s[start:i]
+			for _, kw := range writeKeywords {
+				if strings.EqualFold(word, kw) {
+					return true
+				}
+			}
+			start = -1
+		}
+	}
+	return false
+}
+
+func isIdentByte(c byte) bool {
+	return c == '_' || (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
 }
 
 // hasKeywordPrefix reports whether s starts with the keyword (ASCII
@@ -356,8 +395,7 @@ func hasKeywordPrefix(s, keyword string) bool {
 	if len(s) == len(keyword) {
 		return true
 	}
-	c := s[len(keyword)]
-	return c != '_' && (c < '0' || c > '9') && (c < 'a' || c > 'z') && (c < 'A' || c > 'Z')
+	return !isIdentByte(s[len(keyword)])
 }
 
 // Migrate runs all embedded SQL migrations in lexicographic order, each once,

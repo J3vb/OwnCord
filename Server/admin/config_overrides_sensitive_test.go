@@ -62,7 +62,7 @@ func newSensitiveFixture(t *testing.T, adminCIDRs string, overrides string) conf
 	restarts := make(chan string, 4)
 	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database),
 		admin.SetupOptions{ConfigPath: cfgPath, RunningCfg: cfg, Restart: func(r string) { restarts <- r }})
-	return configOverridesFixture{handler: handler, database: database, dataDir: dataDir, cfg: cfg, restarts: restarts}
+	return configOverridesFixture{handler: handler, database: database, dataDir: dataDir, cfg: cfg, restarts: restarts, cfgPath: cfgPath}
 }
 
 // patchConfig PATCHes /config/settings, confirming the given keys, from
@@ -313,6 +313,37 @@ func TestConfigOverridesSensitive_PerimeterResetLockoutGuard(t *testing.T) {
 		t.Errorf("reset to a config.yaml allowlist excluding the caller = %d %s, want 409 LOCKOUT", w.Code, w.Body.String())
 	}
 	if _, ok := savedOverrides(t, f.dataDir)["server.admin_allowed_cidrs"]; !ok {
+		t.Error("the refused reset removed the override anyway")
+	}
+}
+
+// The panel refuses a trusted-proxy list that covers every address, both as a
+// new value and as the config.yaml value a reset would fall back to.
+func TestConfigOverridesSensitive_CatchAllTrustedProxyRefused(t *testing.T) {
+	f := newSensitiveFixture(t, `["192.0.2.0/24"]`, `{"server.trusted_proxies": ["10.0.0.1/32"]}`)
+	token := createAdminUser(t, f.database)
+	proxyKey := []string{"server.trusted_proxies"}
+
+	for _, entry := range []string{"0.0.0.0/0", "::/0", "::ffff:0.0.0.0/96"} {
+		w := patchConfig(t, f.handler, token, map[string]any{"server.trusted_proxies": []string{"10.0.0.2/32", entry}}, proxyKey, "")
+		if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), entry) {
+			t.Errorf("PATCH trusted_proxies with %s = %d %s, want 400 naming the entry", entry, w.Code, w.Body.String())
+		}
+	}
+
+	raw, err := os.ReadFile(f.cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	edited := string(raw) + "  trusted_proxies: [\"0.0.0.0/0\"]\n"
+	if err := os.WriteFile(f.cfgPath, []byte(edited), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	w := patchConfig(t, f.handler, token, map[string]any{"server.trusted_proxies": nil}, proxyKey, "")
+	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "0.0.0.0/0") {
+		t.Errorf("reset to a config.yaml list covering every address = %d %s, want 400", w.Code, w.Body.String())
+	}
+	if got := savedOverrides(t, f.dataDir)["server.trusted_proxies"]; got == nil {
 		t.Error("the refused reset removed the override anyway")
 	}
 }

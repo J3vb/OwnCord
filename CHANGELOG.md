@@ -49,6 +49,7 @@ and only when it changes something a contributor or fork holder must do
 
 ### Changed
 
+- The server no longer starts when `server.trusted_proxies` holds an entry that covers every address (such as `0.0.0.0/0` or `::/0`); the error names the entry. List only your reverse proxy's own address. The admin panel refuses the same values.
 - Account-security actions now need a normal sign-in: an API token can no longer change the password, turn two-factor on or off, issue recovery codes or a recovery kit, list or sign out sessions, delete the account or publish a device key (it gets `403 LOGIN_SESSION_REQUIRED`). Bots and scripts that read, post or edit the profile keep working.
 
 ### Added

@@ -8,6 +8,7 @@ import type { ApiClient } from "@lib/api";
 import { Disposable } from "@lib/disposable";
 import { appendChildren, createElement, setOwnedTimeout } from "@lib/dom";
 import { createModal } from "@lib/ui/modalFactory";
+import { claimBackOnPhone } from "@lib/ui/bottomSheet";
 import { canManageInvites } from "@lib/permissions";
 import { createLogger } from "@lib/logger";
 import { createLazyScreen } from "@components/lazyScreen";
@@ -404,17 +405,20 @@ export function createAsyncOverlayController<T>(opts: {
   readonly inlineError?: { readonly message: string; readonly retryLabel: string };
   /** A side panel closes on a press outside it (see closeOnOutsidePress). */
   readonly outsidePress?: OutsidePressTargets;
+  /** A side panel closes on Back on the phone layout (see claimBackOnPhone). */
+  readonly backOnPhone?: boolean;
 }): { open(): Promise<void>; close(): void; isOpen(): boolean } {
   let instance: MountableComponent | null = null;
   let opening = false;
   let generation = 0;
-  let outside: Disposable | null = null;
+  /** The mounted panel's lifetime: its outside-press and Back hooks. */
+  let mounted: Disposable | null = null;
 
   function close(): void {
     generation++;
     opening = false;
-    outside?.destroy();
-    outside = null;
+    mounted?.destroy();
+    mounted = null;
     if (instance !== null) {
       instance.destroy?.();
       instance = null;
@@ -434,10 +438,10 @@ export function createAsyncOverlayController<T>(opts: {
       if (liveRoot === null) return;
       instance = opts.build(data, liveRoot, close);
       instance.mount(liveRoot);
-      if (opts.outsidePress !== undefined) {
-        outside = new Disposable();
-        closeOnOutsidePress(liveRoot, opts.outsidePress, close, outside.signal);
-      }
+      mounted = new Disposable();
+      if (opts.outsidePress !== undefined)
+        closeOnOutsidePress(liveRoot, opts.outsidePress, close, mounted.signal);
+      if (opts.backOnPhone === true) claimBackOnPhone(close, mounted.signal);
     } catch (err) {
       if (gen !== generation) return;
       log.error(opts.errorLog, { error: String(err) });
@@ -726,6 +730,7 @@ export function createPinnedPanelController(opts: {
     errorLog: "Failed to load pinned messages", // i18n-exempt: developer log line, never shown
     errorToast: shellText("pins.loadFailed"),
     outsidePress: { panel: ".pinned-panel", toggle: ".pins-btn" },
+    backOnPhone: true,
   });
 
   async function toggle(): Promise<void> {
@@ -771,9 +776,13 @@ export function createSearchOverlayController(opts: {
   // Set while the overlay's code loads: a second open() is ignored, and
   // close()/cleanup cancels the pending mount.
   let pendingOpen: object | null = null;
+  /** The mounted overlay's lifetime: its Back claim on a phone. */
+  let mounted: Disposable | null = null;
 
   function close(): void {
     pendingOpen = null;
+    mounted?.destroy();
+    mounted = null;
     if (instance !== null) {
       instance.destroy?.();
       instance = null;
@@ -830,6 +839,8 @@ export function createSearchOverlayController(opts: {
       onClose: close,
     });
     instance.mount(root);
+    mounted = new Disposable();
+    claimBackOnPhone(close, mounted.signal);
   }
 
   return { open, cleanup: close };

@@ -28,6 +28,33 @@ func ParseCIDRList(cidrs []string) []*net.IPNet {
 	return nets
 }
 
+// CoversEveryAddress reports whether n spans the whole IPv4 or the whole IPv6
+// address space. A prefix holds every address between its two ends, so holding
+// both ends means holding the whole space. This also catches an IPv4-mapped
+// form such as ::ffff:0.0.0.0/96, which matches every IPv4 client.
+func CoversEveryAddress(n *net.IPNet) bool {
+	return (n.Contains(net.IPv4zero) && n.Contains(net.IPv4bcast)) ||
+		(n.Contains(net.IPv6zero) && n.Contains(allOnesIPv6))
+}
+
+var allOnesIPv6 = net.IP{
+	0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+	0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+}
+
+// FirstCatchAll returns the first entry of cidrs that parses and covers every
+// address (see CoversEveryAddress), so a trusted-proxy list can be refused
+// before it lets any client choose its own address.
+func FirstCatchAll(cidrs []string) (entry string, found bool) {
+	for _, c := range cidrs {
+		_, n, err := net.ParseCIDR(c)
+		if err == nil && CoversEveryAddress(n) {
+			return c, true
+		}
+	}
+	return "", false
+}
+
 // InNets reports whether ipStr (a plain IP, no port) falls inside any net.
 func InNets(ipStr string, nets []*net.IPNet) bool {
 	ip := net.ParseIP(ipStr)
