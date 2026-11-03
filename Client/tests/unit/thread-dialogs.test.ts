@@ -10,6 +10,7 @@ import type { WsClient } from "@lib/ws";
 import type { ThreadInfo } from "@lib/types";
 import { createMockWsClient } from "../helpers/mock-ws";
 import { makeThread } from "../helpers/thread-fixtures";
+import { guarded, pressBack } from "../helpers/backNav";
 
 const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
 let ac: AbortController;
@@ -249,5 +250,30 @@ describe("ThreadListPopover", () => {
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     expect(document.querySelector('[data-testid="thread-popover"]')).toBeNull();
     expect(onClosed).toHaveBeenCalledTimes(1);
+  });
+
+  it("closes on Back on a phone instead of letting Back reach the drawer", async () => {
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn(() => ({ matches: true })),
+    );
+    const listThreads = vi.fn(async () => ({ threads: [], next_before: "", has_more: false }));
+    const anchor = document.createElement("button");
+    document.body.appendChild(anchor);
+    const onClosed = vi.fn();
+    openThreadListPopover({
+      api: { listThreads } as unknown as ApiClient,
+      channelId: 1,
+      anchor,
+      signal: ac.signal,
+      onOpenThread: vi.fn(),
+      onClosed,
+    });
+    expect(guarded()).toBe(true);
+    await pressBack();
+    expect(document.querySelector('[data-testid="thread-popover"]')).toBeNull();
+    expect(onClosed).toHaveBeenCalledTimes(1);
+    expect(guarded()).toBe(false);
+    vi.unstubAllGlobals();
   });
 });
