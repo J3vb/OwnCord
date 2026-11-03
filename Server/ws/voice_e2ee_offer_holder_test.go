@@ -6,8 +6,9 @@ import (
 	"time"
 )
 
-// An offer checked against the recorded key holder is delivered only if the sender
-// still holds the key from live membership when the frame is sent.
+// An offer that passed the handler's key-holder check is delivered only if the
+// sender is still the recorded holder, with a connection in the call, when the
+// frame is sent.
 func TestVoiceE2EEOffer_DeliveryRechecksKeyHolder(t *testing.T) {
 	const voiceCh = 50
 	cases := []struct {
@@ -16,14 +17,23 @@ func TestVoiceE2EEOffer_DeliveryRechecksKeyHolder(t *testing.T) {
 		wantDeliver bool
 	}{
 		{name: "holder unchanged", between: func(*Hub) {}, wantDeliver: true},
-		{name: "lower uid joins before delivery", between: func(h *Hub) {
+		{name: "lower uid join completes before delivery", between: func(h *Hub) {
 			_ = registerEmitTestVoiceClient(h, 3, 0, voiceCh)
+			h.updateKeyHolder(voiceCh)
 		}, wantDeliver: false},
+		{name: "lower uid join still in flight", between: func(h *Hub) {
+			_ = registerEmitTestVoiceClient(h, 3, 0, voiceCh)
+		}, wantDeliver: true},
 		{name: "sender leaves before delivery", between: func(h *Hub) {
 			SetClientVoiceChID(h.clients[5][0], 0)
 		}, wantDeliver: false},
-		{name: "higher uid joins before delivery", between: func(h *Hub) {
+		{name: "sender has a second device outside the call", between: func(h *Hub) {
+			other := NewTestClientWithChannel(h, 5, 0, make(chan []byte, 8))
+			h.clients[5] = append(h.clients[5], other)
+		}, wantDeliver: true},
+		{name: "higher uid join completes before delivery", between: func(h *Hub) {
 			_ = registerEmitTestVoiceClient(h, 9, 0, voiceCh)
+			h.updateKeyHolder(voiceCh)
 		}, wantDeliver: true},
 	}
 	for _, tc := range cases {

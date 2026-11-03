@@ -225,6 +225,7 @@ func routeHub() (*Hub, map[int64]*routeObserver) {
 	add(2, 0, 0)
 	add(3, 99, 0)
 	add(4, 0, 7)
+	h.updateKeyHolder(7)
 	return h, obs
 }
 

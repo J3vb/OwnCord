@@ -325,6 +325,7 @@ func TestEmitEvents_VoiceChannelGuardedEvent(t *testing.T) {
 	// Sender (lowest uid) holds the key in voice channel 50; target is there too.
 	_ = registerEmitTestVoiceClient(h, 1, 0, 50)
 	sendTarget := registerEmitTestVoiceClient(h, 2, 0, 50)
+	h.updateKeyHolder(50)
 	// User 3 is in the same voice channel but is not the target.
 	sendOther := registerEmitTestVoiceClient(h, 3, 0, 50)
 	// User 4 is in a different voice channel.
@@ -358,6 +359,7 @@ func TestEmitEvents_VoiceChannelGuardedEvent(t *testing.T) {
 func TestEmitEvents_VoiceChannelGuardedEvent_TargetNotInChannel(t *testing.T) {
 	h := newEmitTestHub()
 	_ = registerEmitTestVoiceClient(h, 1, 0, 50)
+	h.updateKeyHolder(50)
 	// Target is in voice channel 99, but event targets voice channel 50.
 	sendTarget := registerEmitTestVoiceClient(h, 2, 0, 99)
 

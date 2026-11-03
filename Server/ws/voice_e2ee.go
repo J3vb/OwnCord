@@ -66,8 +66,8 @@ func (h *Hub) updateKeyHolder(channelID int64) {
 }
 
 // IsVoiceKeyHolder reports whether userID is the current key holder for channelID
-// (KeyHolderChecker). The recorded holder can lag a join or leave, so offer
-// delivery checks again from live membership; see sendToUserIfInVoiceChannel.
+// (KeyHolderChecker). Offer delivery checks the holder again under the same lock
+// as the membership check; see sendToUserIfInVoiceChannel.
 func (h *Hub) IsVoiceKeyHolder(channelID, userID int64) bool {
 	h.keyHolderMu.RLock()
 	kh, ok := h.voiceKeyHolders[channelID]
@@ -208,9 +208,9 @@ func sanitizeVideoDecode(in []string) []string {
 // handleVoiceE2EEOfferV2 handles voice_e2ee_offer: it validates the payload and key
 // holder status, then returns a VoiceE2EEOfferGuardedEvent for atomic
 // check-and-send delivery. The holder check here answers the sender with
-// NOT_KEY_HOLDER; delivery checks the holder again from live membership under the
-// same lock as the target check, so a holder that lost the role in between (a
-// lower-uid member joined, or the sender left) has its offer dropped.
+// NOT_KEY_HOLDER; delivery checks the holder again under the same locks as the
+// sender and target membership checks, so a holder that lost the role in between
+// (a lower-uid member's join completed, or the sender left) has its offer dropped.
 func handleVoiceE2EEOfferV2(_ context.Context, cmd Command, info ClientInfo, deps any) Result {
 	d := deps.(VoiceDeps)
 	offerCmd := cmd.(VoiceE2EEOfferCmd)
@@ -275,20 +275,43 @@ func handleVoiceE2EEOfferV2(_ context.Context, cmd Command, info ClientInfo, dep
 	}
 }
 
-// sendToUserIfInVoiceChannel atomically verifies that senderUserID still holds the
-// key for the voice channel and that targetUserID is in it, then sends, all under
-// one h.mu.RLock. The holder is derived from live membership (a connection of the
-// sender is in the channel and no connection there has a lower userID), the same
-// rule updateKeyHolder records, so it cannot lag behind a join or leave the way the
-// recorded holder can. Used by VoiceChannelGuardedEvent (voice_e2ee_offer).
+// sendToUserIfInVoiceChannel atomically verifies that senderUserID is still the
+// recorded key holder for the voice channel with a connection in it, and that
+// targetUserID is in it, then sends. keyHolderMu (read) is held across the h.mu
+// read section (the documented order), so a holder change recorded by
+// updateKeyHolder cannot land between the check and the send. The recorded holder
+// changes only once a join completes or a member leaves, so an in-flight join that
+// later rolls back never costs the current holder its offers.
+// Used by VoiceChannelGuardedEvent (voice_e2ee_offer).
 func (h *Hub) sendToUserIfInVoiceChannel(voiceChannelID, senderUserID, targetUserID int64, msg []byte) {
+	if !h.relayKeyOffer(voiceChannelID, senderUserID, targetUserID, msg) {
+		slog.Debug("e2ee: key offer dropped, sender no longer key holder",
+			"sender_user_id", senderUserID, "target_user_id", targetUserID, "voice_channel_id", voiceChannelID)
+	}
+}
+
+// relayKeyOffer does the checked send for sendToUserIfInVoiceChannel. It returns
+// false only when the sender no longer holds the key, so that drop is logged after
+// the locks are released.
+func (h *Hub) relayKeyOffer(voiceChannelID, senderUserID, targetUserID int64, msg []byte) bool {
+	h.keyHolderMu.RLock()
+	defer h.keyHolderMu.RUnlock()
+	if kh, ok := h.voiceKeyHolders[voiceChannelID]; !ok || kh != senderUserID {
+		return false
+	}
+
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
-	if !h.isLiveKeyHolderLocked(voiceChannelID, senderUserID) {
-		slog.Debug("e2ee: key offer dropped, sender no longer key holder",
-			"sender_user_id", senderUserID, "target_user_id", targetUserID, "voice_channel_id", voiceChannelID)
-		return
+	senderInChannel := false
+	for _, c := range h.clients[senderUserID] {
+		if c.voice.channel() == voiceChannelID {
+			senderInChannel = true
+			break
+		}
+	}
+	if !senderInChannel {
+		return false
 	}
 
 	targets := h.clients[targetUserID]
@@ -297,7 +320,7 @@ func (h *Hub) sendToUserIfInVoiceChannel(voiceChannelID, senderUserID, targetUse
 		// never the encrypted key) so the failure is diagnosable.
 		slog.Debug("e2ee: key offer dropped, target not connected",
 			"target_user_id", targetUserID, "voice_channel_id", voiceChannelID)
-		return
+		return true
 	}
 	// The offer is for the device holding the call; the user's other connections have
 	// no slot in it and never see the wrapped key.
@@ -311,31 +334,6 @@ func (h *Hub) sendToUserIfInVoiceChannel(voiceChannelID, senderUserID, targetUse
 	if !delivered {
 		slog.Debug("e2ee: key offer dropped, target not in expected voice channel",
 			"target_user_id", targetUserID, "voice_channel_id", voiceChannelID)
-	}
-}
-
-// isLiveKeyHolderLocked reports whether userID has a connection in channelID and no
-// connection in channelID belongs to a lower userID. The caller holds h.mu.
-func (h *Hub) isLiveKeyHolderLocked(channelID, userID int64) bool {
-	inChannel := false
-	for _, c := range h.clients[userID] {
-		if c.voice.channel() == channelID {
-			inChannel = true
-			break
-		}
-	}
-	if !inChannel {
-		return false
-	}
-	for uid, list := range h.clients {
-		if uid >= userID {
-			continue
-		}
-		for _, c := range list {
-			if c.voice.channel() == channelID {
-				return false
-			}
-		}
 	}
 	return true
 }
