@@ -2,11 +2,13 @@
 import type { Room } from "livekit-client";
 import { LogLevel, RoomEvent, Track, setLogExtension, setLogLevel } from "livekit-client";
 import { createLogger } from "@lib/logger";
+import { recordEvent } from "@lib/diagnostics/eventSink";
 import { parseUserId } from "../../features/voice/sessionState";
 import { onRoom } from "../../features/voice/releaseRoom";
 import { voiceJoinSnapshot } from "@lib/voice/voiceJoinTrace";
 import type { AudioPipeline } from "@lib/voice/audioPipeline";
 import type { AudioElements } from "@lib/voice/audioElements";
+import { attachVoiceEventLog } from "@lib/voice/voiceEventLog";
 
 const log = createLogger("livekitDiagnostics");
 
@@ -25,6 +27,7 @@ export function installLivekitLogging(): void {
 
 /** Attach lightweight diagnostic-only event listeners to a Room. */
 export function attachDiagnosticListeners(room: Room): void {
+  attachVoiceEventLog(room, onRoom);
   onRoom(room, RoomEvent.Reconnecting, () => {
     log.warn("LiveKit room reconnecting");
   });
@@ -45,6 +48,16 @@ export function attachDiagnosticListeners(room: Room): void {
 }
 
 // --- ICE helpers (no instance state) ---
+
+function candidateType(value: string): "host" | "srflx" | "prflx" | "relay" | "unknown" {
+  return value === "host" || value === "srflx" || value === "prflx" || value === "relay"
+    ? value
+    : "unknown";
+}
+
+function routeProtocol(value: string): "udp" | "tcp" | "tls" | "unknown" {
+  return value === "udp" || value === "tcp" || value === "tls" ? value : "unknown";
+}
 
 /**
  * Resolve the publisher/subscriber PCTransports LiveKit's engine currently
@@ -108,6 +121,11 @@ export function logIceConnectionInfo(room: Room | null): void {
                 }
               });
 
+              recordEvent("ice.route", {
+                local_type: candidateType(localType),
+                remote_type: candidateType(remoteType),
+                protocol: routeProtocol(localProtocol),
+              });
               log.info(`ICE ${label} selected candidate pair`, {
                 localType,
                 remoteType,

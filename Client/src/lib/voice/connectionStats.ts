@@ -1,5 +1,6 @@
 // Connection stats poller — extracts WebRTC metrics from LiveKit Room
-import type { Room } from "livekit-client";
+import type { Room, Track } from "livekit-client";
+import type { CameraStallWatchdog, cameraSampleFromStats } from "./cameraStallWatchdog";
 import { createLogger } from "@lib/logger";
 
 const log = createLogger("connection-stats");
@@ -291,10 +292,49 @@ export function createConnectionStatsPoller(getRoom: () => Room | null): Connect
   let lastQuality: QualityLevel = "excellent";
   let qualityDebounceTimer: ReturnType<typeof setTimeout> | null = null;
   const QUALITY_DEBOUNCE_MS = 3000;
+  // The camera stall check rides this poll; its module loads the first time a
+  // camera is published. `run` changes on every start/stop so a sample that
+  // settles after stop() is dropped.
+  let watchdog: CameraStallWatchdog | null = null;
+  let toSample: typeof cameraSampleFromStats | null = null;
+  let watchdogLoading = false;
+  let run = 0;
+
+  async function sampleCamera(room: Room, now: number): Promise<void> {
+    const pub = room.localParticipant?.getTrackPublication?.("camera" as Track.Source);
+    const track = pub?.track;
+    const sender = (track as { sender?: RTCRtpSender } | undefined)?.sender;
+    if (pub === undefined || track === undefined || sender === undefined) {
+      watchdog?.reset();
+      return;
+    }
+    if (watchdog === null) {
+      if (watchdogLoading) return;
+      watchdogLoading = true;
+      const loadRun = run;
+      try {
+        const mod = await import("./cameraStallWatchdog");
+        toSample = mod.cameraSampleFromStats;
+        if (loadRun === run) watchdog = mod.createCameraStallWatchdog();
+      } finally {
+        watchdogLoading = false;
+      }
+      return;
+    }
+    const live = track.mediaStreamTrack?.readyState === "live" && !pub.isMuted;
+    const sampleRun = run;
+    const report = await sender.getStats();
+    if (sampleRun !== run || watchdog === null || toSample === null) return;
+    watchdog.sample(now, toSample(live, report.values()));
+  }
 
   async function poll(): Promise<void> {
     const room = getRoom();
     if (!room) return;
+
+    void sampleCamera(room, Date.now()).catch((err: unknown) => {
+      log.debug("camera stall sample failed", err);
+    });
 
     const reports = await collectAllStats(room);
     if (reports.length === 0) return;
@@ -376,6 +416,7 @@ export function createConnectionStatsPoller(getRoom: () => Room | null): Connect
     log.info("Starting connection stats poller");
     prev = { timestamp: Date.now(), ...EMPTY_SNAPSHOT };
     current = EMPTY_STATS;
+    run++;
     intervalId = setInterval(() => void poll(), POLL_INTERVAL_MS);
   }
 
@@ -384,6 +425,8 @@ export function createConnectionStatsPoller(getRoom: () => Room | null): Connect
     log.info("Stopping connection stats poller");
     clearInterval(intervalId);
     intervalId = null;
+    run++;
+    watchdog = null;
     // BUG-071B: Clear pending quality debounce timer to prevent it firing
     // after the poller is stopped (would call listeners against a dead room).
     if (qualityDebounceTimer !== null) {

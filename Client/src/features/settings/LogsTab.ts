@@ -27,6 +27,7 @@ import { desktop } from "../../platform/desktop";
 import { isAndroidApp, isLinuxDesktop } from "../voice/native/platform";
 import { settingsText as t } from "../../i18n/settings";
 import { copyThenRelabel } from "@lib/ui/clipboard";
+import { EVENT_LOG_PREF_KEY, setEventSinkEnabled } from "@lib/diagnostics/eventSink";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -65,6 +66,13 @@ function logCounts(entries: readonly LogEntry[]): string {
     t("logs.warnings", { count: warnings }),
     t("logs.errors", { count: errors }),
   ].join(" · ");
+}
+
+/** The event log switch: off stops recording and deletes what was kept. */
+function setEventLogKept(on: boolean): void {
+  setEventSinkEnabled(on);
+  if (on) return;
+  void import("@lib/diagnostics/eventLog").then((m) => m.clearEventLog());
 }
 
 // ---------------------------------------------------------------------------
@@ -230,6 +238,19 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
     if (__OWNCORD_WEB__ || isAndroidApp()) appendChildren(helpHead, helpTitle, diagCopy, bundleBtn);
     else appendChildren(helpHead, helpTitle, diagCopy, openLogsBtn, bundleBtn);
     appendChildren(helpCard, helpHead, bundleNote, bundleStatus);
+    appendToggleRows(
+      helpCard,
+      [
+        {
+          key: EVENT_LOG_PREF_KEY,
+          label: t("logs.eventLog"),
+          desc: t("logs.eventLogDesc"),
+          fallback: true,
+          sideEffect: setEventLogKept,
+        },
+      ],
+      buildSignal,
+    );
     section.appendChild(helpCard);
 
     // ---- Client logs (disclosure; the summary carries the counts) ---------

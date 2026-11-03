@@ -279,6 +279,8 @@ export class RoomLifecycle {
   }
 
   private wireRoomEvents(newRoom: Room): void {
+    // Diagnostics first, so they have seen an event before the app reacts to it.
+    attachDiagnosticListeners(newRoom);
     onRoom(newRoom, RoomEvent.TrackSubscribed, this._eventHandlers.handleTrackSubscribed);
     onRoom(newRoom, RoomEvent.TrackUnsubscribed, this._eventHandlers.handleTrackUnsubscribed);
     onRoom(newRoom, RoomEvent.TrackPublished, this._eventHandlers.handleTrackPublished);
@@ -323,7 +325,6 @@ export class RoomLifecycle {
     // The only SDK-level signal that the E2EE worker died after the
     // key exchange already succeeded — see roomEventHandlers.ts for detail.
     onRoom(newRoom, RoomEvent.EncryptionError, this._eventHandlers.handleEncryptionError);
-    attachDiagnosticListeners(newRoom);
   }
 
   // --- Module wiring helper ---

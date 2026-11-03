@@ -13,6 +13,35 @@ import (
 // clamping, the write/clear/audit sequence and the invalidation and fan-out after
 // it all live here; handlers only decode and respond.
 
+// channelOverridesStore is what the channel and category override paths, the
+// access explainer and the sync preview read and write.
+type channelOverridesStore interface {
+	db.Auditor
+	permissions.DB
+	GetChannel(ctx context.Context, id int64) (*db.Channel, error)
+	GetUserByID(ctx context.Context, id int64) (*db.User, error)
+	GetRoleByID(ctx context.Context, id int64) (*db.Role, error)
+	GetMemberRoles(ctx context.Context, userID int64) (*db.MemberRoles, error)
+	ListUserIDsByRole(ctx context.Context, roleID int64) ([]int64, error)
+	HasNSFWAcknowledgement(ctx context.Context, userID, channelID int64) (bool, error)
+	ListChannelRoleOverrides(ctx context.Context, channelID int64) ([]db.ChannelRoleOverride, error)
+	ListChannelUserOverrides(ctx context.Context, channelID int64) ([]db.ChannelUserOverride, error)
+	UpsertChannelOverride(ctx context.Context, channelID, roleID, allow, deny int64) error
+	DeleteChannelOverride(ctx context.Context, channelID, roleID int64) error
+	UpsertChannelUserOverride(ctx context.Context, channelID, userID, allow, deny int64) error
+	DeleteChannelUserOverride(ctx context.Context, channelID, userID int64) error
+}
+
+// channelOverrides is the channel permission-override layer of ChannelService.
+type channelOverrides struct {
+	st    channelOverridesStore
+	cats  CategoryStore
+	cperm CategoryPermStore
+	perms *PermissionService
+	// notifier re-derives channel audiences after an override change; nil is a no-op.
+	notifier PermissionChangeNotifier
+}
+
 // requireGrantableChannelOverride refuses an override whose allow or deny mask
 // holds a bit the actor's own role lacks; otherwise any MANAGE_CHANNELS holder
 // could grant themselves or another user a permission (e.g. MANAGE_SERVER) via a
@@ -48,7 +77,7 @@ func requireGrantableChannelOverride(actorRole *db.Role, allow, deny int64) erro
 // ChannelPermissions returns every role's override row (zero masks when none) and
 // the per-user rows that exist; listing every member is not sensible, so the
 // matrix editor adds a user by writing a row.
-func (s *ChannelService) ChannelPermissions(ctx context.Context, channelID int64) ([]db.ChannelRoleOverride, []db.ChannelUserOverride, error) {
+func (s *channelOverrides) ChannelPermissions(ctx context.Context, channelID int64) ([]db.ChannelRoleOverride, []db.ChannelUserOverride, error) {
 	roles, err := s.st.ListChannelRoleOverrides(ctx, channelID)
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: failed to list channel permissions: %w", ErrInternal, err)
@@ -76,7 +105,7 @@ type OverrideResult struct {
 // write and clear: the escalation guard over the union of written and existing
 // bits, and the hierarchy rule (strictly below the actor's position, as
 // requireBelowActor).
-func (s *ChannelService) resolveOverrideRole(ctx context.Context, actorRole *db.Role, channelID, roleID, allow, deny int64) (*db.Role, error) {
+func (s *channelOverrides) resolveOverrideRole(ctx context.Context, actorRole *db.Role, channelID, roleID, allow, deny int64) (*db.Role, error) {
 	role, err := s.st.GetRoleByID(ctx, roleID)
 	if err != nil {
 		return nil, fmt.Errorf("%w: failed to fetch role: %w", ErrInternal, err)
@@ -101,7 +130,7 @@ func (s *ChannelService) resolveOverrideRole(ctx context.Context, actorRole *db.
 // holders of the role, since a role override cannot change anyone else's verdict
 // and a full flush made every connected user repopulate inside the visibility
 // refresh, a stampede growing with total population.
-func (s *ChannelService) roleOverrideAffected(ctx context.Context, roleID int64) ([]int64, bool) {
+func (s *channelOverrides) roleOverrideAffected(ctx context.Context, roleID int64) ([]int64, bool) {
 	affected, err := s.st.ListUserIDsByRole(ctx, roleID)
 	if err != nil {
 		return nil, true
@@ -112,7 +141,7 @@ func (s *ChannelService) roleOverrideAffected(ctx context.Context, roleID int64)
 // PutRoleOverride validates and writes a role-layer override, audits it and
 // reports who to invalidate. allow/deny are clamped to defined bits so garbage
 // cannot persist undefined perms.
-func (s *ChannelService) PutRoleOverride(ctx context.Context, actorID int64, actorRole *db.Role, ch *db.Channel, roleID, allowRaw, denyRaw int64) (OverrideResult, error) {
+func (s *channelOverrides) PutRoleOverride(ctx context.Context, actorID int64, actorRole *db.Role, ch *db.Channel, roleID, allowRaw, denyRaw int64) (OverrideResult, error) {
 	allow := allowRaw & permissions.AllPerms
 	deny := denyRaw & permissions.AllPerms
 
@@ -138,7 +167,7 @@ func (s *ChannelService) PutRoleOverride(ctx context.Context, actorID int64, act
 // DeleteRoleOverride clears a role-layer override. Clearing is a permission
 // mutation: removing a deny row restores access the PUT path refuses to grant, so
 // it is gated identically against the bits the deleted row carries.
-func (s *ChannelService) DeleteRoleOverride(ctx context.Context, actorID int64, actorRole *db.Role, ch *db.Channel, roleID int64) (OverrideResult, error) {
+func (s *channelOverrides) DeleteRoleOverride(ctx context.Context, actorID int64, actorRole *db.Role, ch *db.Channel, roleID int64) (OverrideResult, error) {
 	role, err := s.resolveOverrideRole(ctx, actorRole, ch.ID, roleID, 0, 0)
 	if err != nil {
 		return OverrideResult{}, err
@@ -162,7 +191,7 @@ func (s *ChannelService) DeleteRoleOverride(ctx context.Context, actorID int64, 
 // user-hierarchy rule, since a per-user override (last in resolution order, beats
 // the member's role allow) may not target a member at or above the actor's rank.
 // ADMINISTRATOR bypasses the hierarchy rule.
-func (s *ChannelService) resolveOverrideUser(ctx context.Context, actorRole *db.Role, channelID, userID, allow, deny int64) (*db.User, error) {
+func (s *channelOverrides) resolveOverrideUser(ctx context.Context, actorRole *db.Role, channelID, userID, allow, deny int64) (*db.User, error) {
 	user, err := s.st.GetUserByID(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("%w: failed to fetch user: %w", ErrInternal, err)
@@ -185,7 +214,7 @@ func (s *ChannelService) resolveOverrideUser(ctx context.Context, actorRole *db.
 
 // requireOutranks is the user-hierarchy rule: user's role must sit below the
 // actor's own rank. ADMINISTRATOR bypasses it.
-func (s *ChannelService) requireOutranks(ctx context.Context, actorRole *db.Role, user *db.User) error {
+func (s *channelOverrides) requireOutranks(ctx context.Context, actorRole *db.Role, user *db.User) error {
 	if permissions.HasAdmin(actorRole.Permissions) {
 		return nil
 	}
@@ -201,7 +230,7 @@ func (s *ChannelService) requireOutranks(ctx context.Context, actorRole *db.Role
 
 // PutUserOverride validates and writes a per-user override, audits it and reports
 // the one user to invalidate.
-func (s *ChannelService) PutUserOverride(ctx context.Context, actorID int64, actorRole *db.Role, ch *db.Channel, userID, allowRaw, denyRaw int64) (OverrideResult, error) {
+func (s *channelOverrides) PutUserOverride(ctx context.Context, actorID int64, actorRole *db.Role, ch *db.Channel, userID, allowRaw, denyRaw int64) (OverrideResult, error) {
 	allow := allowRaw & permissions.AllPerms
 	deny := denyRaw & permissions.AllPerms
 
@@ -225,7 +254,7 @@ func (s *ChannelService) PutUserOverride(ctx context.Context, actorID int64, act
 
 // DeleteUserOverride clears a per-user override, gated identically to
 // writing one and checked against the bits the deleted row carries.
-func (s *ChannelService) DeleteUserOverride(ctx context.Context, actorID int64, actorRole *db.Role, ch *db.Channel, userID int64) (OverrideResult, error) {
+func (s *channelOverrides) DeleteUserOverride(ctx context.Context, actorID int64, actorRole *db.Role, ch *db.Channel, userID int64) (OverrideResult, error) {
 	user, err := s.resolveOverrideUser(ctx, actorRole, ch.ID, userID, 0, 0)
 	if err != nil {
 		return OverrideResult{}, err
