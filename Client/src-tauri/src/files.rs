@@ -152,8 +152,9 @@ pub(crate) mod android {
     /// The header that carries the URI-encoded file name.
     const NAME_HEADER: &str = "x-owncord-file-name";
     /// A shared file must outlive the share: the receiving app reads it after
-    /// the sheet closes. Older ones are removed at the next save or share.
-    const KEEP_SHARED: Duration = Duration::from_secs(15 * 60);
+    /// the sheet closes, and a mail draft may hold it a while. Older ones are
+    /// removed at app start and at the next save or share.
+    const KEEP_SHARED: Duration = Duration::from_secs(60 * 60);
 
     static NEXT_SLOT: AtomicU64 = AtomicU64::new(0);
 
@@ -165,6 +166,11 @@ pub(crate) mod android {
             .setup(|app, api: PluginApi<Wry, ()>| {
                 let handle = api.register_android_plugin("com.owncord.client", "FilesPlugin")?;
                 app.manage(FilesHandle(handle));
+                // A support bundle shared last week holds logs: do not keep
+                // it in the cache until the next share.
+                if let Ok(dir) = outgoing_dir(app) {
+                    prune(&dir);
+                }
                 Ok(())
             })
             .build()

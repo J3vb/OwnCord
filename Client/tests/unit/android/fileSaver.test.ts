@@ -89,6 +89,13 @@ describe("the Android file saver", () => {
     expect(fsWriteMock).not.toHaveBeenCalled();
   });
 
+  it("sends a name with a broken emoji instead of failing the save", async () => {
+    await fileSaver.writeFile("a\uD83D.png", BYTES);
+    expect(invokeMock).toHaveBeenCalledWith("save_file", BYTES, {
+      headers: { "x-owncord-file-name": "a%EF%BF%BD.png" },
+    });
+  });
+
   it("reports a save that went to the share sheet (Android 9)", async () => {
     invokeMock.mockResolvedValueOnce({ status: "shared", folder: "downloads" });
     await expect(fileSaver.writeFile("a.zip", BYTES)).resolves.toBe("shared");

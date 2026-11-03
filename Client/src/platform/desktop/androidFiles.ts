@@ -14,7 +14,9 @@ interface SaveReply {
 }
 
 function nameHeader(name: string): { headers: Record<string, string> } {
-  return { headers: { [NAME_HEADER]: encodeURIComponent(name) } };
+  // A lone surrogate (a broken emoji) would make encodeURIComponent throw.
+  const wellFormed = name.replace(/[\uD800-\uDFFF]/gu, "\uFFFD");
+  return { headers: { [NAME_HEADER]: encodeURIComponent(wellFormed) } };
 }
 
 /** The file name a save path stands for: there is no dialog on Android, so
