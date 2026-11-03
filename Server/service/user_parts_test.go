@@ -34,7 +34,7 @@ func TestServicesWelcomeReachesRegistrationPart(t *testing.T) {
 	if svcs.Welcome == nil {
 		t.Fatal("Services.Welcome is nil; the fixture store should support welcome rows")
 	}
-	if got := svcs.Users.registrationQueue.welcome; got != svcs.Welcome {
+	if got := svcs.Users.welcome; got != svcs.Welcome {
 		t.Errorf("registration part welcome = %p, want the shared %p", got, svcs.Welcome)
 	}
 }
