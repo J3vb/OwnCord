@@ -100,6 +100,7 @@ const HEALTH = {
     { id: "reconnects", label: "Client reconnects", status: "ok", value: "0/min" },
     { id: "voice", label: "Voice (LiveKit)", status: "unknown" },
     { id: "job:Backups", label: "Maintenance: Backups", status: "ok" },
+    { id: "certificate", label: "TLS certificate", status: "critical", value: "expires in 3 days" },
   ],
 };
 
@@ -176,6 +177,7 @@ describe("Server/admin/static — System health page", () => {
     expect(host.querySelector("#sysProcess .sys-signals")?.textContent).toContain(
       "Maintenance: Backups",
     );
+    expect(host.querySelector("#sysProcess .badge-red")?.textContent).toBe("Critical");
   });
 
   it("shows the managed LiveKit's supervisor state", async () => {
@@ -238,6 +240,17 @@ describe("Server/admin/static — System health page", () => {
     refuse = true;
     await bridge.pollSystemHealth(bridge.sysHealth.seq, "tok");
     expect(bridge.sysHealth.timer).toBeNull();
+    // The frozen figures say why they stopped refreshing.
+    const body = dom.window.document.getElementById("sysHealthBody")!;
+    expect(body.querySelector(".sys-stale")?.textContent).toContain("stopped refreshing");
+  });
+
+  it("explains a refusal on the first load instead of loading forever", async () => {
+    const booted = await boot([], () => ({ __status: 403, body: { message: "no" } }));
+    dom = booted.dom;
+    const host = render(dom, await booted.bridge.renderSystemHealth());
+    expect(host.textContent).toContain("can no longer view this page");
+    expect(host.textContent).not.toContain("Loading");
   });
 
   // Leaving the page while a poll is in flight: the late answer must not

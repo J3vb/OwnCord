@@ -19,7 +19,7 @@ const SYS_SIGNALS={
   hub:id=>id==='reconnects'||id==='delivery',
   database:id=>id==='db_writer_wait'||id==='backup'||id==='disk',
   voice:id=>id==='voice',
-  process:id=>id==='last_exit'||id==='last_restore'||id.startsWith('job:'),
+  process:id=>id==='last_exit'||id==='last_restore'||id==='certificate'||id.startsWith('job:'),
 };
 
 function sysHealthOwns(seq,token){return seq===sysHealth.seq&&state.section==='health'&&state.token===token}
@@ -55,7 +55,10 @@ async function loadSystemHealth(seq,token){
     if(sysHealthOwns(seq,token)){sysHealth.data=data;sysHealth.error=''}
     return true;
   }catch(e){
-    if(e&&(e.status===403||e.status===401))return false;
+    if(e&&(e.status===403||e.status===401)){
+      if(sysHealthOwns(seq,token)){sysHealth.error='your account can no longer view this page, so it stopped refreshing';paintSystemHealth()}
+      return false;
+    }
     if(sysHealthOwns(seq,token))sysHealth.error=(e&&e.message)||'request failed';
     return state.token===token;
   }
