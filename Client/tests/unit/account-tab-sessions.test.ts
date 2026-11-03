@@ -312,4 +312,30 @@ describe("Account tab — API tokens", () => {
     expect(section(tab).hidden).toBe(false);
     expect(mockShowToast).toHaveBeenCalledWith(expect.any(String), "error");
   });
+
+  it("reloads the token list after a password change that revoked the tokens", async () => {
+    // The password form and the token list each read the list once on build.
+    const onListApiTokens = vi
+      .fn()
+      .mockResolvedValueOnce([BOT])
+      .mockResolvedValueOnce([BOT])
+      .mockResolvedValue([]);
+    const tab = await renderWith({
+      onListApiTokens,
+      onRevokeApiToken: vi.fn().mockResolvedValue(undefined),
+      onChangePassword: vi.fn().mockResolvedValue(undefined),
+    });
+    await vi.waitFor(() => expect(tokenRows(tab)).toHaveLength(1));
+    const inputs = tab.querySelectorAll<HTMLInputElement>("#pw-old, #pw-new, #pw-confirm");
+    inputs[0]!.value = "oldpass123";
+    inputs[1]!.value = "newpassword123";
+    inputs[2]!.value = "newpassword123";
+    const changeBtn = [...tab.querySelectorAll<HTMLButtonElement>("button")].find(
+      (b) => b.textContent === "Change Password",
+    )!;
+    changeBtn.click();
+    await vi.waitFor(() => expect(tokenRows(tab)).toHaveLength(0));
+    expect(section(tab).hidden).toBe(true);
+    await vi.waitFor(() => expect(revokeOption(tab).hidden).toBe(true));
+  });
 });

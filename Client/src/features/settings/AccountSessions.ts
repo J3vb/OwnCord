@@ -153,6 +153,7 @@ function buildApiTokenRow(
   revoke: (id: number) => Promise<void>,
   signal: AbortSignal,
   onListChanged: () => void,
+  onRevoked: () => void,
 ): HTMLDivElement {
   const row = createElement("div", {
     class: "session-row",
@@ -188,10 +189,14 @@ function buildApiTokenRow(
       void revoke(tok.id)
         .then(() => {
           showToast(t("apiTokens.revoked"), "success");
+          onRevoked();
         })
         .catch((err: unknown) => {
           // 404: already revoked or expired elsewhere, so the row stays gone.
-          if (err instanceof ApiClientError && err.status === 404) return;
+          if (err instanceof ApiClientError && err.status === 404) {
+            onRevoked();
+            return;
+          }
           if (next?.parentNode === list) list?.insertBefore(row, next);
           else list?.appendChild(row);
           onListChanged();
@@ -205,10 +210,13 @@ function buildApiTokenRow(
 }
 
 /** The account's API tokens with a revoke button each. Stays hidden while the
- *  account has none, and when the list cannot be read. */
+ *  account has none, and when the list cannot be read. Reloads on a `change`
+ *  from `tokensChanged` and sends one after each revoke, so the password
+ *  form's option stays in step. */
 function buildApiTokensBlock(
   options: SettingsOverlayOptions,
   signal: AbortSignal,
+  tokensChanged?: EventTarget,
 ): HTMLDivElement | null {
   const listTokens = options.onListApiTokens;
   const revoke = options.onRevokeApiToken;
@@ -225,22 +233,44 @@ function buildApiTokensBlock(
   const sync = (): void => {
     block.hidden = list.childElementCount === 0;
   };
-  void listTokens()
-    .then((tokens) => {
-      if (signal.aborted) return;
-      list.replaceChildren(...tokens.map((tok) => buildApiTokenRow(tok, revoke, signal, sync)));
-      sync();
-    })
-    .catch((err: unknown) => {
-      if (signal.aborted) return;
-      log.warn("Failed to list API tokens", err);
-    });
+  // A revoke here announces the change; the listener below skips that echo.
+  let announcing = false;
+  const announce = (): void => {
+    announcing = true;
+    tokensChanged?.dispatchEvent(new Event("change"));
+    announcing = false;
+  };
+  let loadGen = 0;
+  const load = (): void => {
+    const gen = ++loadGen;
+    void listTokens()
+      .then((tokens) => {
+        if (signal.aborted || gen !== loadGen) return;
+        list.replaceChildren(
+          ...tokens.map((tok) => buildApiTokenRow(tok, revoke, signal, sync, announce)),
+        );
+        sync();
+      })
+      .catch((err: unknown) => {
+        if (signal.aborted || gen !== loadGen) return;
+        log.warn("Failed to list API tokens", err);
+      });
+  };
+  load();
+  tokensChanged?.addEventListener(
+    "change",
+    () => {
+      if (!announcing) load();
+    },
+    { signal },
+  );
   return block;
 }
 
 export function buildSessionsSection(
   options: SettingsOverlayOptions,
   signal: AbortSignal,
+  tokensChanged?: EventTarget,
 ): HTMLLIElement {
   const { row, icon, result, body } = createStatusRow(
     t("devices.sectionTitle"),
@@ -356,7 +386,7 @@ export function buildSessionsSection(
   );
 
   appendChildren(panel, description, list, revokeAllBtn, confirmArea);
-  const tokensBlock = buildApiTokensBlock(options, signal);
+  const tokensBlock = buildApiTokensBlock(options, signal, tokensChanged);
   if (tokensBlock !== null) {
     tokensBlock.style.marginTop = "16px";
     panel.appendChild(tokensBlock);

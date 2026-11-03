@@ -253,39 +253,102 @@ describe("SettingsOverlay", () => {
     overlay.destroy?.();
   });
 
+  const BOT_TOKEN = {
+    id: 1,
+    label: "bot",
+    created_at: "2026-10-01 10:00:00",
+    last_used: null,
+    expires_at: null,
+  };
+  const revokeRow = (): HTMLElement =>
+    container.querySelector<HTMLElement>('[data-testid="pw-revoke-api-tokens-row"]')!;
+  const revokeBox = (): HTMLInputElement =>
+    container.querySelector<HTMLInputElement>('[data-testid="pw-revoke-api-tokens"]')!;
+
   it("revokes API tokens with the password change while the option stays ticked", async () => {
     const onChangePassword = vi.fn().mockResolvedValue(undefined);
     const overlay = openOverlay(container, {
       ...defaultOptions,
       onChangePassword,
-      onListApiTokens: vi.fn().mockResolvedValue([
-        {
-          id: 1,
-          label: "bot",
-          created_at: "2026-10-01 10:00:00",
-          last_used: null,
-          expires_at: null,
-        },
-      ]),
+      onListApiTokens: vi.fn().mockResolvedValue([BOT_TOKEN]),
       onRevokeApiToken: vi.fn().mockResolvedValue(undefined),
     });
-    const row = container.querySelector<HTMLElement>('[data-testid="pw-revoke-api-tokens-row"]')!;
-    await vi.waitFor(() => expect(row.hidden).toBe(false));
+    await vi.waitFor(() => expect(revokeRow().hidden).toBe(false));
+    expect(revokeBox().checked).toBe(true);
 
     fillPasswordForm(container, "oldpass123", "newpassword123", "newpassword123");
     acButton(container, "Change Password").click();
     await vi.waitFor(() => {
       expect(onChangePassword).toHaveBeenCalledWith("oldpass123", "newpassword123", true);
     });
+    overlay.destroy?.();
+  });
 
+  it("never re-ticks the option after the user unticked it, even when a refresh lands later", async () => {
+    let releaseRefresh!: (tokens: (typeof BOT_TOKEN)[]) => void;
+    const onListApiTokens = vi
+      .fn()
+      .mockResolvedValueOnce([BOT_TOKEN])
+      .mockImplementation(
+        () =>
+          new Promise<(typeof BOT_TOKEN)[]>((resolve) => {
+            releaseRefresh = resolve;
+          }),
+      );
+    const onChangePassword = vi.fn().mockResolvedValue(undefined);
+    const overlay = openOverlay(container, {
+      ...defaultOptions,
+      onChangePassword,
+      onListApiTokens,
+      onRevokeApiToken: vi.fn().mockResolvedValue(undefined),
+    });
+    await vi.waitFor(() => expect(revokeRow().hidden).toBe(false));
+
+    // A ticked change asks for a refresh, which stays in flight.
+    fillPasswordForm(container, "oldpass123", "newpassword123", "newpassword123");
+    acButton(container, "Change Password").click();
+    await vi.waitFor(() => expect(onListApiTokens.mock.calls.length).toBeGreaterThan(1));
+
+    revokeBox().checked = false;
+    revokeBox().dispatchEvent(new Event("change"));
+    releaseRefresh([BOT_TOKEN]);
     await vi.waitFor(() => expect(acButton(container, "Change Password").disabled).toBe(false));
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    const box = container.querySelector<HTMLInputElement>('[data-testid="pw-revoke-api-tokens"]')!;
-    box.checked = false;
+    await Promise.resolve();
+    expect(revokeBox().checked).toBe(false);
+
     fillPasswordForm(container, "newpassword123", "another-pass1", "another-pass1");
     acButton(container, "Change Password").click();
     await vi.waitFor(() => {
       expect(onChangePassword).toHaveBeenLastCalledWith("newpassword123", "another-pass1", false);
+    });
+    overlay.destroy?.();
+  });
+
+  it("keeps the revoke default when the token list cannot be read", async () => {
+    const onChangePassword = vi.fn().mockResolvedValue(undefined);
+    const overlay = openOverlay(container, {
+      ...defaultOptions,
+      onChangePassword,
+      onListApiTokens: vi.fn().mockRejectedValue(new Error("network down")),
+      onRevokeApiToken: vi.fn().mockResolvedValue(undefined),
+    });
+    await vi.waitFor(() => expect(revokeRow().hidden).toBe(false));
+    expect(revokeBox().checked).toBe(true);
+    overlay.destroy?.();
+  });
+
+  it("sends the revoke default when the form is submitted before the token list loads", async () => {
+    const onChangePassword = vi.fn().mockResolvedValue(undefined);
+    const overlay = openOverlay(container, {
+      ...defaultOptions,
+      onChangePassword,
+      onListApiTokens: vi.fn(() => new Promise<never>(() => {})),
+      onRevokeApiToken: vi.fn().mockResolvedValue(undefined),
+    });
+    fillPasswordForm(container, "oldpass123", "newpassword123", "newpassword123");
+    acButton(container, "Change Password").click();
+    await vi.waitFor(() => {
+      expect(onChangePassword).toHaveBeenCalledWith("oldpass123", "newpassword123", true);
     });
     overlay.destroy?.();
   });
