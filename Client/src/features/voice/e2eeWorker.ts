@@ -1,7 +1,7 @@
 // Voice E2EE worker-side key provider — extracted from livekitE2EE.ts.
-// Owns the ExternalE2EEKeyProvider every Room's E2EE worker reads its key
-// from, and the single write queue that installs room keys into it in order,
-// skipping any key superseded before its turn. The room key and the session
+// Owns the current Room's ExternalE2EEKeyProvider and the single write queue
+// that installs room keys into it in order, skipping any key superseded before
+// its turn. The room key and the session
 // generation stay owned by E2EEManager; this module reads them through
 // E2EEWorkerHost.
 import { ExternalE2EEKeyProvider } from "livekit-client";
@@ -21,14 +21,43 @@ export interface E2EEWorkerHost {
 }
 
 export class E2EEWorker {
-  /** E2EE key provider — shared across Room instances. The room key is generated
-   *  and exchanged client-side via ECDH; the server never sees it. */
-  readonly keyProvider = new ExternalE2EEKeyProvider();
+  /** The current Room's key provider. Each Room gets its own: livekit's
+   *  E2EEManager subscribes to its provider and never unsubscribes, so a
+   *  provider that outlived its Room would keep that Room alive. The room key
+   *  is generated and exchanged client-side via ECDH; the server never sees it. */
+  private _keyProvider = new ExternalE2EEKeyProvider();
   /** Provider imports are asynchronous. Keep one write queue across session
    *  resets so an abandoned import cannot overwrite a newer session's key. */
   private _keyApplyChain: Promise<void> = Promise.resolve();
 
   constructor(private readonly host: E2EEWorkerHost) {}
+
+  get keyProvider(): ExternalE2EEKeyProvider {
+    return this._keyProvider;
+  }
+
+  /** A fresh provider for the Room about to be built. When the session
+   *  already has a room key (a connect retry builds its Room after the key
+   *  exchange) it is queued into the new provider through the write queue, so
+   *  a write still in flight for the previous provider cannot land after it.
+   *  The Room subscribes at construction and forwards the key when it lands. */
+  newKeyProvider(): ExternalE2EEKeyProvider {
+    const provider = new ExternalE2EEKeyProvider();
+    this._keyProvider = provider;
+    const roomKey = this._roomKey;
+    if (roomKey !== null) {
+      this.applyRoomKey(roomKey, () => this._keyProvider === provider).catch((err: unknown) =>
+        log.warn("room key install into the new provider failed", err),
+      );
+    }
+    return provider;
+  }
+
+  /** Let go of the last Room's provider when the call ends, so nothing keeps
+   *  that Room alive while idle. */
+  releaseKeyProvider(): void {
+    this._keyProvider = new ExternalE2EEKeyProvider();
+  }
 
   // --- Host views, named as the pre-extraction fields so the bodies read the same ---
 
@@ -68,7 +97,7 @@ export class E2EEWorker {
       await desktop.nativeVoice.setRoomKey(keyBase64);
       return;
     }
-    await this.keyProvider.setKey(keyBase64);
+    await this._keyProvider.setKey(keyBase64);
   }
 
   /** Linux: forget the backend's room key when the session ends. Queued on

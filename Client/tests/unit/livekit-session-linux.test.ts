@@ -38,7 +38,7 @@ vi.mock("../../src/features/voice/native/platform", async (importOriginal) => ({
   isLinuxDesktop: () => true,
 }));
 
-const webKeyProvider = vi.hoisted(() => ({ setKey: vi.fn(), removeAllListeners: vi.fn() }));
+const webKeyProvider = vi.hoisted(() => ({ setKey: vi.fn() }));
 vi.mock("livekit-client", () => ({
   // installLivekitLogging runs when livekitSession loads.
   LogLevel: { warn: 3, error: 4 },
