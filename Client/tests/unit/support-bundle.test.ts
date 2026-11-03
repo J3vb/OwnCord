@@ -9,6 +9,7 @@ const { desktop } = vi.hoisted(() => ({
     appMetadata: { getVersion: vi.fn() },
     logFiles: { readAll: vi.fn(), readNative: vi.fn() },
     settings: { load: vi.fn() },
+    shareSheet: { available: false, shareFile: vi.fn() },
   },
 }));
 
@@ -334,6 +335,20 @@ describe("exportSupportBundle", () => {
     expect(desktop.logFiles.readAll).not.toHaveBeenCalled();
     expect(desktop.logFiles.readNative).not.toHaveBeenCalled();
     expect(desktop.fileSaver.writeFile).not.toHaveBeenCalled();
+  });
+
+  it("hands the zip to the share sheet in the Android app, with no dialog", async () => {
+    desktop.shareSheet.available = true;
+    try {
+      await expect(exportSupportBundle(desktop as never, {})).resolves.toBe(true);
+      expect(desktop.fileSaver.pickSaveLocation).not.toHaveBeenCalled();
+      expect(desktop.fileSaver.writeFile).not.toHaveBeenCalled();
+      const [name, bytes] = desktop.shareSheet.shareFile.mock.calls[0]! as [string, Uint8Array];
+      expect(name).toMatch(/^owncord-support-\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}\.zip$/);
+      expect(bytes.length).toBeGreaterThan(0);
+    } finally {
+      desktop.shareSheet.available = false;
+    }
   });
 
   it("writes the zip to the chosen path without calling any server", async () => {

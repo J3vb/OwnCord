@@ -27,6 +27,7 @@ import { pushToTalk } from "./pushToTalk";
 import { globalShortcuts } from "./globalShortcuts";
 import { serverScope } from "./serverScope";
 import { settings } from "./settings";
+import { shareSheet } from "./shareSheet";
 import { socket } from "./socket";
 import { systemIdle } from "./systemIdle";
 import { gameDetector } from "./gameDetector";
@@ -63,6 +64,7 @@ export const desktop: Platform = {
   globalShortcuts,
   serverScope,
   settings,
+  shareSheet,
   socket,
   systemIdle,
   trayStatus,
