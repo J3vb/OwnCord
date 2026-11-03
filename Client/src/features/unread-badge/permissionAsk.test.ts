@@ -52,4 +52,13 @@ describe("askNotificationPermissionOnce", () => {
     await expect(askNotificationPermissionOnce(notifier)).resolves.toBeUndefined();
     expectConsole("warn", /Notification permission not asked/);
   });
+
+  it("keeps its one ask when the request itself failed", async () => {
+    notifier.requestPermission.mockRejectedValueOnce(new Error("no activity"));
+    await askNotificationPermissionOnce(notifier);
+    expectConsole("warn", /Notification permission not asked/);
+    await askNotificationPermissionOnce(notifier);
+    expect(notifier.requestPermission).toHaveBeenCalledTimes(2);
+    expect(loadPref("notificationPermissionAsked", false)).toBe(true);
+  });
 });

@@ -22,8 +22,9 @@ export async function askNotificationPermissionOnce(
   if (!isAndroidHost() || loadPref<boolean>(ASKED_KEY, false)) return;
   try {
     if (await notifier.permissionGranted()) return;
-    savePref(ASKED_KEY, true);
+    // Saved once Android answered: a host that could not ask leaves the one ask for later.
     await notifier.requestPermission();
+    savePref(ASKED_KEY, true);
   } catch (err) {
     log.warn("Notification permission not asked", err);
   }

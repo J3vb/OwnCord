@@ -356,6 +356,12 @@
       "reason": "The Android notifications still in the shade, by id; each leaves on tap, on read (clearMessages) or at logout, when the main page's clearing stops"
     },
     {
+      "file": "platform/desktop/androidNotifications.ts",
+      "binding": "showing",
+      "category": "transient",
+      "reason": "Notifications asked for and not yet confirmed by the host, by id; each entry leaves as soon as its show settles"
+    },
+    {
       "file": "platform/desktop/logFiles.ts",
       "binding": "buffer",
       "category": "app-lifetime",

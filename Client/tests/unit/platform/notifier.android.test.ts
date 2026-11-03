@@ -25,6 +25,8 @@ const native = vi.hoisted(() => ({
   actionHandlers: new Set<(event: { actionId: string }) => void>(),
   unregistered: 0,
   requests: 0,
+  failClear: false,
+  notifyGate: Promise.resolve() as Promise<void>,
 }));
 
 const invoke = vi.hoisted(() =>
@@ -37,6 +39,10 @@ const invoke = vi.hoisted(() =>
         return native.answer;
       case "android_notify":
         if (native.failNotify) throw new Error("notify refused");
+        await native.notifyGate;
+        return undefined;
+      case "android_clear_notifications":
+        if (native.failClear) throw new Error("clear refused");
         return undefined;
       case "take_notification_tap": {
         const id = native.tapped;
@@ -97,6 +103,8 @@ async function freshNotifier(): Promise<Notifier> {
     tapped: null,
     unregistered: 0,
     requests: 0,
+    failClear: false,
+    notifyGate: Promise.resolve(),
   });
   native.actionHandlers.clear();
   const mod = await import("../../../src/platform/desktop/androidNotifications");
@@ -261,6 +269,31 @@ describe("Android notifier", () => {
     await expect(notifier.showMessage("a", "b", dm)).rejects.toThrow("notify refused");
     await notifier.clearMessages(7);
     expect(calls("android_clear_notifications")).toEqual([]);
+  });
+
+  test("keeps what a failed withdrawal left on screen, to withdraw it later", async () => {
+    await notifier.showMessage("a", "b", dm);
+    const id = notified()[0]!.id;
+    native.failClear = true;
+    await expect(notifier.clearMessages(7)).rejects.toThrow("clear refused");
+    native.failClear = false;
+    await notifier.clearMessages(7);
+    expect(removed()).toEqual([id, id]);
+  });
+
+  test("withdraws a notification only once Android has shown it", async () => {
+    let release = (): void => {};
+    native.notifyGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const showing = notifier.showMessage("a", "b", dm);
+    await flush();
+    const clearing = notifier.clearMessages(7);
+    await flush();
+    expect(calls("android_clear_notifications")).toEqual([]);
+    release();
+    await Promise.all([showing, clearing]);
+    expect(removed()).toEqual([notified()[0]!.id]);
   });
 
   test("ignores a tap on a notification it did not show", async () => {

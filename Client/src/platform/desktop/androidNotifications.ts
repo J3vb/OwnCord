@@ -31,6 +31,11 @@ interface Shown {
   readonly kind: "message" | "call" | "ring";
 }
 
+// Notifications asked for and not yet confirmed by the host, by id: a
+// withdrawal waits for them, so its removal never reaches Android before the
+// notification it removes.
+const showing = new Map<number, Promise<unknown>>();
+
 // Notifications this process showed and Android may still display, by id.
 // Lost when the process dies; a tap on an older one then just opens the app.
 const shown = new Map<number, Shown>();
@@ -76,17 +81,21 @@ async function present(
   await ensureChannels();
   const id = takeId();
   shown.set(id, entry);
+  const shownNow = invokeOrThrow("android_notify", {
+    id,
+    channel: channelId,
+    title,
+    body,
+    group: groupOf(entry.target) ?? null,
+  });
+  showing.set(id, shownNow);
   try {
-    await invokeOrThrow("android_notify", {
-      id,
-      channel: channelId,
-      title,
-      body,
-      group: groupOf(entry.target) ?? null,
-    });
+    await shownNow;
   } catch (err) {
     shown.delete(id);
     throw err;
+  } finally {
+    showing.delete(id);
   }
 }
 
@@ -97,8 +106,20 @@ async function withdraw(matches: (entry: Shown) => boolean): Promise<void> {
     if (matches(entry)) ids.push(id);
   }
   if (ids.length === 0) return;
+  const removed = ids.map((id) => [id, shown.get(id)!] as const);
   for (const id of ids) shown.delete(id);
-  await invokeOrThrow("android_clear_notifications", { ids });
+  const pending = ids.flatMap((id) => {
+    const notify = showing.get(id);
+    return notify === undefined ? [] : [notify];
+  });
+  await Promise.allSettled(pending);
+  try {
+    await invokeOrThrow("android_clear_notifications", { ids });
+  } catch (err) {
+    // Still on screen: keep them, so a later read or tap still finds them.
+    for (const [id, entry] of removed) shown.set(id, entry);
+    throw err;
+  }
 }
 
 /** The target of the notification the user just tapped, if this process showed it. */

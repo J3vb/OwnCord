@@ -148,8 +148,8 @@ struct Tap {
     id: Option<i32>,
 }
 
-/// The id of the notification tapped since the last call, once; `None` when
-/// none was.
+/// The id of the oldest notification tap not taken yet, once; `None` when
+/// there is none.
 #[tauri::command]
 pub async fn take_notification_tap(app: AppHandle) -> Result<Option<i32>, String> {
     let plugin = app.state::<NotificationTapHandle>();
