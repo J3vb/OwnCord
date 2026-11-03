@@ -3,6 +3,7 @@
 
 import { createElement, setText } from "@lib/dom";
 import { normalizeHostForCertCompare } from "@lib/net/hostNormalize";
+import { isAndroidHost } from "@lib/hostPlatform";
 import type { RegistrationMode } from "@lib/types";
 import { connectText } from "../../i18n/connect";
 import { SAVED_PASSWORD_PLACEHOLDER } from "./login-form/loginShared";
@@ -153,6 +154,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
 
   // Written literally at every use so the desktop build drops each branch.
   const fixedHost = __OWNCORD_WEB__ ? opts.fixedHost : undefined;
+  const android = isAndroidHost();
   // The DOM references are left out: buildFormPanel and the overlay builders
   // fill them in below, before any handler can read them.
   const st = {
@@ -278,16 +280,22 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     },
 
     getAutoConnect(): boolean {
+      // On the phone the one "Stay signed in" box also opens this server at
+      // the next start.
+      if (android) return st.rememberPasswordCheckbox?.checked ?? false;
       return st.autoConnectCheckbox?.checked ?? false;
     },
 
     setAutoConnect(enabled: boolean): void {
+      if (android) return;
       st.autoConnectCheckbox.checked = enabled;
     },
 
     setRememberPassword(enabled: boolean): void {
       if (__OWNCORD_WEB__ && st.fixedHost !== undefined) return;
-      st.rememberPasswordCheckbox.checked = enabled;
+      // The phone resets "Stay signed in" to ticked for every server picked;
+      // leaving it is an explicit untick at each sign-in.
+      st.rememberPasswordCheckbox.checked = android || enabled;
     },
 
     getPassword(): string {

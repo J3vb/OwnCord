@@ -107,6 +107,8 @@ export const connectText = defineCatalog("connect", {
   "login.passwordLabel": "Password",
   "login.rememberPassword": "Remember password",
   "login.autoConnect": "Auto connect",
+  "login.staySignedIn": "Stay signed in",
+  "login.staySignedInHint": "On by default on your phone. Untick on a shared device.",
   "login.inviteLabel": "Invite Code",
   "login.toRegister": "Need an account? Register",
   "login.toLogin": "Already have an account? Login",
