@@ -1,5 +1,7 @@
 // @ts-check
+import { readFileSync } from "node:fs";
 import base from "../../stryker.config.mjs";
+import { filesForNight, nightFromEnv } from "./nights.mjs";
 
 // One explicit file list per shard. Explicit lists (not globs) are what makes
 // the union check in scripts/check-mutation-shards.mjs exact: the union of
@@ -484,9 +486,16 @@ if (!Object.hasOwn(shards, shard) && !Object.hasOwn(legacy, shard)) {
 // mutants but Stryker estimated 83-97% of its test time, and eight shards hit
 // 90 min. Skipped mutants report as Ignored and leave the score's denominator.
 
+const clientDir = new URL("../../", import.meta.url);
+const readText = (file) => readFileSync(new URL(file, clientDir), "utf8");
+const night = nightFromEnv(process.env);
+const selected = filesForNight(shards[shard] ?? legacy[shard], night, readText);
+if (selected.length === 0) throw new Error(`shard "${shard}" has no files on the ${night} night`);
+if (night !== "both") console.log(`shard ${shard}: ${night} night, ${selected.length} file(s)`);
+
 export default {
   ...base,
-  mutate: shards[shard] ?? legacy[shard],
+  mutate: selected,
   ignoreStatic: true,
   // The base list has no "json", so jsonReporter.fileName alone writes nothing.
   reporters: [...base.reporters, "json"],
