@@ -101,22 +101,24 @@ platform invoke bindings, including all conditional platform/feature handlers:
 | Measure                                                    | Value |
 | ---------------------------------------------------------- | ----- |
 | Files under `Client/src/` importing `@tauri-apps/*`        | 27    |
-| Distinct `invoke` command names called from `Client/src/`  | 107   |
-| `#[tauri::command]` handlers in `Client/src-tauri/`        | 110   |
+| Distinct `invoke` command names called from `Client/src/`  | 108   |
+| `#[tauri::command]` handlers in `Client/src-tauri/`        | 111   |
 | TS calls with no matching Rust handler                     | 0     |
 | Uses of the `window.__TAURI__` global                      | 0     |
 | Environment-detection helper (`isDesktop()` or equivalent) | 1     |
-| Files under `Client/src/platform/`                         | 59    |
+| Files under `Client/src/platform/`                         | 60    |
 
-The handler count covers the 109 distinct registrations
+The handler count covers the 110 distinct registrations
 (`Client/src-tauri/src/lib.rs`); `open_devtools` sits behind
 `#[cfg(feature = "devtools")]`, and the forty-three `native_voice_*` commands
 and the two Linux file commands (`clipboard_files`, `read_staged_file`, for
 files dragged in or copied from the file manager) behind
-`#[cfg(target_os = "linux")]`, so a default build (no `devtools`) registers 99 on Linux
-and 54 elsewhere, plus nine Android-only ones: `set_call_service`, `save_file`,
-`share_file`, `share_text` and the five notification commands in
-`android_notifications.rs`. The one environment-detection helper is
+`#[cfg(target_os = "linux")]` (`read_staged_file` also on Android, where it
+reads the files another app shared), so a default build (no `devtools`)
+registers 99 on Linux and 54 elsewhere, plus eleven Android-only ones:
+`set_call_service`, `save_file`, `share_file`, `share_text`, `read_staged_file`,
+`take_shared` (`share_in.rs`, the share another app sent to OwnCord) and the
+five notification commands in `android_notifications.rs`. The one environment-detection helper is
 `features/voice/native/platform.ts`'s `isLinuxDesktop()`, a Tauri-host plus
 Linux user-agent check that selects the native voice backend; it is not a
 desktop/browser seam.
@@ -240,6 +242,7 @@ stop_livekit_proxy
 store_identity_pin
 system_idle_ms
 take_notification_tap
+take_shared
 voice_shortcuts_set_keys
 voice_shortcuts_start
 voice_shortcuts_supported
@@ -287,6 +290,10 @@ The five Android notification commands
 handing over the id of the notification the user tapped, which
 tauri-plugin-notification's tap event leaves out) have one caller,
 `src/platform/desktop/androidNotifications.ts`, the Android `Notifier`.
+`take_shared` (Android only, `src-tauri/src/share_in.rs`) hands over a share
+from another app once, its files staged for `read_staged_file`; its caller is
+`src/platform/desktop/androidShareIn.ts`, loaded lazily behind the
+`ShareSheet` contract's `onReceived`.
 
 There is no `window.__TAURI__` access, and the only environment branching is
 the SDK `isTauri` guard in `lib/pendingMessages.ts` (imported, not global), which is

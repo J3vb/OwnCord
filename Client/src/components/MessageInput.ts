@@ -18,6 +18,7 @@ import { createIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/text/safeRender";
 import { listCustomEmoji } from "@stores/emoji.store";
 import { claimComposer, focusComposer } from "../features/messaging/activeComposer";
+import { acceptSharesFor } from "../features/share/shareInbox";
 import type { PickedMention } from "@lib/text/pickedMentions";
 import { FORMAT_MARKERS, wrapWithMarker } from "../features/messaging/markdownMarkers";
 import { authStore } from "@stores/auth.store";
@@ -938,6 +939,12 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     st.releaseComposer?.();
     const mentionTarget = { insertMention: api.insertMentionAtCaret, canMention: api.canTakeText };
     st.releaseComposer = claimComposer(mentionTarget);
+    // A share from another app picked for this chat (features/share).
+    const releaseShares = acceptSharesFor(options.channelId, (share) => {
+      api.restoreDraftText(share.text === "" ? undefined : share.text);
+      void api.handleNativeFiles(share.files);
+    });
+    st.signal.addEventListener("abort", releaseShares, { once: true });
     // With a thread's composer beside this one, a Mention goes where the user is.
     st.root.addEventListener("focusin", () => focusComposer(mentionTarget), {
       signal: st.disposable.signal,
