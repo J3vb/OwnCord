@@ -178,7 +178,15 @@ export function renderPeopleHome(root: HTMLElement, ctx: FeatureViewContext): vo
   function activeCard(person: ActiveModel): HTMLLIElement {
     const li = createElement("li", {
       class: "member-item people-card",
+      role: "button",
+      tabindex: "0",
+      "aria-label": t("message", { name: person.name }),
       "data-testid": `people-active-${person.id}`,
+    });
+    li.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      e.preventDefault();
+      ctx.messageUser?.(person.id);
     });
     const lines: string[] = [];
     if (person.game !== null) lines.push(person.game);
@@ -217,7 +225,8 @@ export function renderPeopleHome(root: HTMLElement, ctx: FeatureViewContext): vo
       );
     }
     if (focusedId !== undefined) {
-      list.querySelector<HTMLElement>(`[data-user-id="${focusedId}"]`)?.focus();
+      // The person left this tab: the search keeps focus inside the view.
+      (list.querySelector<HTMLElement>(`[data-user-id="${focusedId}"]`) ?? search).focus();
     }
 
     const cards = activeNow(

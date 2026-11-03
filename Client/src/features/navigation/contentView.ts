@@ -134,12 +134,14 @@ export function createContentNavigator(opts: ContentNavigatorOptions): ContentNa
     restoreFocus(opener);
   }
 
-  function open(id: ContentViewId, opener: HTMLElement | null): void {
+  /** `takeFocus` false: the view opened by itself (DM mode's home), so focus
+   *  stays where the user is, in the drawer on a phone. */
+  function open(id: ContentViewId, opener: HTMLElement | null, takeFocus = true): void {
     if (page.signal.aborted) return;
     const build = builderFor(id);
     if (build === null) return;
     if (current?.id === id) {
-      element.querySelector<HTMLElement>(".feature-view-title")?.focus();
+      if (takeFocus) element.querySelector<HTMLElement>(".feature-view-title")?.focus();
       return;
     }
     // Switching views keeps the first opener: that is where the user started.
@@ -212,7 +214,7 @@ export function createContentNavigator(opts: ContentNavigatorOptions): ContentNa
     }
     chatArea.style.display = "none";
     element.style.display = "";
-    title.focus();
+    if (takeFocus) title.focus();
   }
 
   // Choosing a channel or DM while a view is open replaces it. The back path
@@ -248,7 +250,7 @@ export function createContentNavigator(opts: ContentNavigatorOptions): ContentNa
       const st = channelsStore.getState();
       const active = st.activeChannelId !== null ? st.channels.get(st.activeChannelId) : undefined;
       if (active?.type === "dm") return;
-      open("people", null);
+      open("people", null, false);
     },
   );
 
@@ -268,7 +270,7 @@ export function createContentNavigator(opts: ContentNavigatorOptions): ContentNa
 
   return {
     element,
-    open,
+    open: (id, opener) => open(id, opener),
     close,
     destroy: () => {
       teardown();

@@ -780,6 +780,16 @@ describe("the People view as DM mode's home", () => {
     expect(returnTarget).toBe(GENERAL);
   });
 
+  it("opens without taking focus, which stays where the user tapped", () => {
+    const home = opener();
+    home.focus();
+    setSidebarMode("dms");
+    flush();
+
+    expect(uiStore.getState().activeView).toBe("people");
+    expect(document.activeElement).toBe(home);
+  });
+
   it("stays shut when a DM is opened in the same step as the mode switch", () => {
     selectDm();
     flush();

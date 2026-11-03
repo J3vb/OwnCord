@@ -212,7 +212,18 @@ export function createSidebarDrawer(opts: SidebarDrawerOptions): SidebarDrawer {
     uiStore,
     (s) => s.activeView,
     (view) => {
-      if (view !== "people") destinationChosen();
+      if (view !== "people") {
+        destinationChosen();
+        return;
+      }
+      // The view claims Back as it opens; the drawer is on top, so its claim
+      // moves above the view's once every listener of this change has run.
+      queueMicrotask(() => {
+        const prev = backClaim;
+        if (!open || prev === null) return;
+        backClaim = claimBack(() => closeDrawer("dismiss"), owner.signal);
+        prev.release();
+      });
     },
   );
   owner.onStoreChange(uiStore, (s) => s.settingsOpen, destinationChosen);

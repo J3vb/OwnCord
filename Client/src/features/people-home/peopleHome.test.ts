@@ -246,7 +246,15 @@ describe("the view", () => {
     }));
     voiceStore.setState((prev) => ({ ...prev, voiceUsers: new Map([[10, inVoice(2)]]) }));
     flush();
-    const card = root.querySelector("[data-testid='people-active-2']");
-    expect(card?.textContent).toContain("In Lounge");
+    const card = root.querySelector<HTMLElement>("[data-testid='people-active-2']")!;
+    expect(card.textContent).toContain("In Lounge");
+    card.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    expect(messageUser).toHaveBeenCalledWith(2);
+  });
+
+  it("moves focus to the search when the focused person leaves the tab", () => {
+    root.querySelector<HTMLButtonElement>("[data-testid='people-message-2']")?.focus();
+    setRoster(member(ME, "me", "online"), member(2, "amy", "offline"));
+    expect(document.activeElement?.getAttribute("data-testid")).toBe("people-search");
   });
 });
