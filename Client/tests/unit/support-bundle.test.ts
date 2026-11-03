@@ -622,18 +622,17 @@ describe("support bundle manifest", () => {
   });
 });
 
-describe("support bundle size cap", () => {
-  // One line per second; the newest 30 minutes are the incident window.
-  function logDay(prefix: string, lines: number, width: number): string {
-    const pad = "x".repeat(width);
-    return (
-      Array.from(
-        { length: lines },
-        (_, i) => `${prefix} ${String(i).padStart(7, "0")} ${pad}`,
-      ).join("\n") + "\n"
-    );
-  }
+// One line per second; the newest 30 minutes are the incident window.
+function logDay(prefix: string, lines: number, width: number): string {
+  const pad = "x".repeat(width);
+  return (
+    Array.from({ length: lines }, (_, i) => `${prefix} ${String(i).padStart(7, "0")} ${pad}`).join(
+      "\n",
+    ) + "\n"
+  );
+}
 
+describe("support bundle size cap", () => {
   it("stays under the cap and keeps the newest lines of every log whole", () => {
     const events = logDay("event", 3_000, 100);
     const bundle = buildSupportBundle(
