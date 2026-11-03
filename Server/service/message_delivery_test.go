@@ -107,7 +107,7 @@ func TestMessageDelivery_PayloadMismatchAndSenderScope(t *testing.T) {
 func TestMessageDelivery_RetryAfterRevokeIsDuplicateAndSkipsSlowMode(t *testing.T) {
 	svc, database := newTestMessageService(t)
 	svc.RunBackgroundInlineForTest()
-	svc.limiter = auth.NewRateLimiter()
+	svc.setLimiterForTest(auth.NewRateLimiter())
 	ctx := context.Background()
 	if _, err := database.ExecContext(ctx, `UPDATE channels SET slow_mode = 60 WHERE id = 10`); err != nil {
 		t.Fatal(err)
@@ -246,7 +246,7 @@ func TestMessageDelivery_AttachmentOnlyFailureIsAtomicAndRetryable(t *testing.T)
 func TestMessageDelivery_DuplicateStillUsesGeneralRateLimit(t *testing.T) {
 	svc, _ := newTestMessageService(t)
 	svc.RunBackgroundInlineForTest()
-	svc.limiter = auth.NewRateLimiter()
+	svc.setLimiterForTest(auth.NewRateLimiter())
 	p := deliveryTestParams()
 	if _, err := svc.SendMessage(context.Background(), p); err != nil {
 		t.Fatal(err)

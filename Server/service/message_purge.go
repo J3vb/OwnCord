@@ -24,7 +24,7 @@ const maxPurgeLimit = 100
 // toggle locked out of a private channel wipe it. DMs are rejected outright: they
 // have no MANAGE_MESSAGES gate, so no participant-scoped authority could answer to
 // a bulk delete.
-func (s *MessageService) PurgeMessages(ctx context.Context, userID, channelID int64, limit int, before int64) (*PurgeMessagesResult, error) {
+func (s *messageRemoval) PurgeMessages(ctx context.Context, userID, channelID int64, limit int, before int64) (*PurgeMessagesResult, error) {
 	ratKey := auth.Key("chat_purge", userID)
 	if s.limiter != nil && !s.limiter.Allow(ratKey, 5, time.Second) {
 		return nil, ErrRateLimited
@@ -65,7 +65,7 @@ func (s *MessageService) PurgeMessages(ctx context.Context, userID, channelID in
 	// window would otherwise be reversed before its increment landed, and the later
 	// flush would raise a phantom badge or, skipped by the liveness guard, take a
 	// genuine one with it.
-	s.flushChannelMentionCounts(context.WithoutCancel(ctx), channelID)
+	s.mentions.flushChannelMentionCounts(context.WithoutCancel(ctx), channelID)
 
 	ids, err := s.st.PurgeChannelMessagesWithAction(ctx, channelID, before, limit, userID, nil)
 	if err != nil {
@@ -85,7 +85,7 @@ func (s *MessageService) PurgeMessages(ctx context.Context, userID, channelID in
 	// Reverse the mention_count increments of every purged message,
 	// the same correction a single moderator delete makes in DeleteMessage.
 	// Detached from ctx for the same reason as the audit write above.
-	if mcErr := s.reverseMentionCounts(context.WithoutCancel(ctx), channelID, ids); mcErr != nil {
+	if mcErr := s.mentions.reverseMentionCounts(context.WithoutCancel(ctx), channelID, ids); mcErr != nil {
 		slog.Error("MessageService.PurgeMessages DecrementMentionCounts", "err", mcErr, "channel_id", channelID)
 	}
 

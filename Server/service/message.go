@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"html"
 	"strings"
-	"sync/atomic"
 	"unicode/utf8"
 
 	"github.com/J3vb/OwnCord/Server/auth"
@@ -121,26 +120,12 @@ type messageStore interface {
 	GetMessage(ctx context.Context, id int64) (*db.Message, error)
 	EditMessage(ctx context.Context, id, userID int64, content string) (*db.Message, error)
 	DeleteMessage(ctx context.Context, id, userID int64, isMod bool) error
-	SetMessagePinned(ctx context.Context, p db.SetPinnedParams) (*db.PinEventRow, error)
 	AddReaction(ctx context.Context, messageID, userID int64, emoji string) error
 	RemoveReaction(ctx context.Context, messageID, userID int64, emoji string) error
 	ReplaceMessageMentions(ctx context.Context, messageID int64, mentionedUserIDs []int64, mentionsEveryone bool, mentionedRoleIDs []int64) (replyPingUserID int64, err error)
 	LinkAttachmentsToMessage(ctx context.Context, messageID, uploaderID int64, attachmentIDs []string) ([]string, error)
 	GetAttachmentsByMessageIDs(ctx context.Context, msgIDs []int64) (map[int64][]db.AttachmentInfo, error)
 	GetReferencedMessages(ctx context.Context, channelID int64, ids []int64) (map[int64]*db.ReferencedMessage, error)
-	GetUserByID(ctx context.Context, id int64) (*db.User, error)
-	GetRoleByID(ctx context.Context, id int64) (*db.Role, error)
-	// DeleteMessageWithRemoval/PurgeChannelMessagesWithAction are DeleteMessage/
-	// PurgeChannelMessages plus a removal ledger row in the same transaction, when
-	// the deleter is not the author. DeleteMessageWithRemoval's reason is the row's
-	// text; empty falls back to "message removed".
-	DeleteMessageWithRemoval(ctx context.Context, msgID, deleterID int64, isMod bool, authorID int64, reportID *int64, reason string) error
-	PurgeChannelMessagesWithAction(ctx context.Context, channelID, before int64, limit int, actorID int64, reportID *int64) ([]int64, error)
-	// PurgeUserChannelMessagesSince/ListUserMessageChannelsSince are the ban purge's
-	// author-and-window-scoped counterparts of PurgeChannelMessagesWithAction;
-	// RecordRemovalAction writes the one removal ledger row (targeting the author).
-	PurgeUserChannelMessagesSince(ctx context.Context, channelID, userID int64, since string, limit int) ([]int64, error)
-	ListUserMessageChannelsSince(ctx context.Context, userID int64, since string) ([]int64, error)
 }
 
 // messageServiceStore is everything NewMessageService hands out: the write
@@ -150,20 +135,24 @@ type messageServiceStore interface {
 	messageReadStore
 	mentionStateStore
 	dmDeliveryStore
+	messagePinStore
+	messageRemovalStore
 }
 
 // MessageService handles message business logic: send, edit, delete, reactions,
 // pins and search.
 type MessageService struct {
-	// The read side, the mention and read-state writes, and DM delivery each
-	// take their own store interface; their methods are promoted onto
+	// The read side, the mention and read-state writes, DM delivery, pins and
+	// removal each take their own store interface; their methods are promoted onto
 	// MessageService, so callers see one service.
 	*messageReads
 	*mentionState
 	*dmDelivery
+	*messagePins
+	*messageRemoval
 
-	// st is what the write path itself calls: send, edit, delete, forward,
-	// polls, reactions, pins and purge.
+	// st is what the write path itself calls: send, edit, forward, polls and
+	// reactions.
 	st      messageStore
 	perms   *PermissionService
 	limiter *auth.RateLimiter
@@ -173,11 +162,6 @@ type MessageService struct {
 	// job on a fresh unowned group. Tests use RunBackgroundInlineForTest.
 	bg       *syncutil.Group
 	bgInline bool
-	// mentionWorker is the single bounded worker owning every mention-badge write.
-	// Nil until the composition root starts it (app.startHub); then SendMessage
-	// resolves inline through bg. Atomic because it is started while other
-	// goroutines may already be sending.
-	mentionWorker atomic.Pointer[mentionWorker]
 	// pushNotifier is the Web Push dispatch hook. Nil means dispatch is off
 	// (push.enabled or push.dispatch_enabled false); the root installs a
 	// *PushDispatcher only when both are true.
@@ -191,9 +175,7 @@ type MessageService struct {
 	sticker StickerStore
 	// threads reads a forum post's thread for a retry; nil disables forum posts.
 	threads ThreadStore
-	// emptyDeleter and storedMentions back AfterAttachmentRemoved; nil disables the
-	// auto-delete and reports no stored mentions.
-	emptyDeleter   EmptyMessageDeleter
+	// storedMentions backs AfterAttachmentRemoved; nil reports no stored mentions.
 	storedMentions StoredMentionStore
 	// afterRemovalRead is a test seam called after AfterAttachmentRemoved reads the
 	// message and before it deletes. Nil in production.
@@ -227,19 +209,22 @@ var backgroundJobTimeout = pushDispatchTimeout
 
 // NewMessageService creates a MessageService.
 func NewMessageService(st messageServiceStore, perms *PermissionService, limiter *auth.RateLimiter) *MessageService {
+	mentions := newMentionState(st, perms)
+	dm := &dmDelivery{st: st}
 	s := &MessageService{
-		messageReads: newMessageReads(st, perms),
-		mentionState: newMentionState(st, perms),
-		dmDelivery:   &dmDelivery{st: st},
-		st:           st,
-		perms:        perms,
-		limiter:      limiter,
+		messageReads:   newMessageReads(st, perms),
+		mentionState:   mentions,
+		dmDelivery:     dm,
+		messagePins:    &messagePins{st: st, perms: perms, limiter: limiter, dm: dm},
+		messageRemoval: newMessageRemoval(st, perms, limiter, mentions, dm),
+		st:             st,
+		perms:          perms,
+		limiter:        limiter,
 	}
 	s.forward.store, _ = st.(ForwardStore)
 	s.poll.store, _ = st.(PollStore)
 	s.sticker, _ = st.(StickerStore)
 	s.threads, _ = st.(ThreadStore)
-	s.emptyDeleter, _ = st.(EmptyMessageDeleter)
 	s.storedMentions, _ = st.(StoredMentionStore)
 	return s
 }
@@ -252,70 +237,6 @@ func (s *MessageService) SetUploads(u *UploadService) { s.forward.uploads = u }
 // dispatch synchronously so tests can assert right after SendMessage. Test-only.
 func (s *MessageService) RunBackgroundInlineForTest() {
 	s.bgInline = true
-}
-
-// StartMentionWorker creates and starts the bounded mention-badge worker and
-// routes SendMessage's bookkeeping through it. The root calls it once
-// (app.startHub); tests leave it uncalled for deterministic inline writes. ctx
-// bounds the loop; the returned func drains and stops it (App.Close's job).
-func (s *MessageService) StartMentionWorker(ctx context.Context) func(context.Context) {
-	w := newMentionWorker(s.mentionState.st)
-	// Share the write+emit lock with the removal paths so a coalesced increment
-	// flush cannot be overtaken by an older decrement frame, or vice versa.
-	w.emitMu = &s.mentionEmitMu
-	// NewHub installed the hook before this runs; nil means no hub and no pushes.
-	if s.mentionNotifier != nil {
-		w.notify = s.mentionNotifier.NotifyMentionCount
-	}
-	// Start before publishing: run sets started synchronously, so a sender seeing
-	// the worker never observes it as not-started and drops a job.
-	w.run(ctx)
-	s.mentionWorker.Store(w)
-	return w.stopAndDrain
-}
-
-func (s *MessageService) mentionWorkerForSend() *mentionWorker {
-	if s == nil {
-		return nil
-	}
-	return s.mentionWorker.Load()
-}
-
-// FlushPendingMentionCounts applies any still-queued mention-badge job for msgIDs
-// before the caller reverses them. Removal paths (DeleteMessage, PurgeMessages,
-// erasure) must call it first: a message removed inside the coalesce window would
-// be reversed before its increment landed, and the later flush would raise a
-// phantom badge or, with the liveness guard, be skipped and take a genuine badge
-// with it. A no-op without a worker (the inline fallback already wrote the
-// increment). ctx only bounds the wait; the worker applies jobs on its own loop
-// context, so a canceled caller cannot drop the flush.
-func (s *MessageService) FlushPendingMentionCounts(ctx context.Context, msgIDs []int64) {
-	w := s.mentionWorkerForSend()
-	if w == nil {
-		return
-	}
-	w.flushMessages(ctx, msgIDs)
-}
-
-// flushChannelMentionCounts is FlushPendingMentionCounts for every queued job on
-// a channel (PurgeMessages cannot name the ids until after the purge).
-func (s *MessageService) flushChannelMentionCounts(ctx context.Context, channelID int64) {
-	w := s.mentionWorkerForSend()
-	if w == nil {
-		return
-	}
-	w.flushChannel(ctx, channelID)
-}
-
-// FlushAllPendingMentionCounts applies every queued job, ignoring the coalesce
-// window. Erasure calls it first since it deletes all of a user's messages and
-// cannot cheaply name them. A no-op without a worker.
-func (s *MessageService) FlushAllPendingMentionCounts(ctx context.Context) {
-	w := s.mentionWorkerForSend()
-	if w == nil {
-		return
-	}
-	w.flushNow(ctx)
 }
 
 // sanitizePass is one unescape-sanitize-unescape cycle; both unescapes are

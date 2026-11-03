@@ -91,7 +91,7 @@ type mentionWorker struct {
 	// committed on the worker loop and a decrement on the request goroutine push
 	// absolute totals from independent emitters, so a delete inside the coalesce
 	// window could be overtaken by an older total and leave the badge stale-low until
-	// the next ready. StartMentionWorker points this at MessageService's lock so the
+	// the next ready. StartMentionWorker points this at mentionState's lock so the
 	// inline fallback and removal paths share it.
 	emitMu *syncutil.Mutex
 }
