@@ -495,3 +495,112 @@ func TestWriteAudit_AsyncWithInstalledWriter(t *testing.T) {
 		t.Fatalf("GetAuditLog() after Stop = %+v, want the drained async_action entry", got)
 	}
 }
+
+// auditActions reads audit_log directly, oldest first, so a test sees every
+// row whichever path wrote it.
+func auditActions(t *testing.T, database *db.DB) []string {
+	t.Helper()
+	rows, err := database.SQLDb().QueryContext(context.Background(), `SELECT action FROM audit_log ORDER BY id`)
+	if err != nil {
+		t.Fatalf("query audit_log: %v", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var got []string
+	for rows.Next() {
+		var a string
+		if err := rows.Scan(&a); err != nil {
+			t.Fatalf("scan audit_log: %v", err)
+		}
+		got = append(got, a)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate audit_log: %v", err)
+	}
+	return got
+}
+
+// TestWriteAudit_FullQueueFallsBackToSyncWrite: with the writer's loop not yet
+// reading and its queue full, the next entry is written directly instead of
+// being dropped, and nothing counts as dropped.
+func TestWriteAudit_FullQueueFallsBackToSyncWrite(t *testing.T) {
+	database := newSchemaTestDB(t, adminTestSchema)
+	uid := seedUser(t, database, "burstactor")
+
+	w := db.NewAuditWriter(database, 2, 50, time.Hour)
+	database.SetAuditWriter(w)
+
+	out := captureLogs(t, func() {
+		for _, action := range []string{"queued_1", "queued_2", "overflow"} {
+			db.WriteAudit(context.Background(), database, uid, action, "user", uid, "")
+		}
+	})
+
+	if got := auditActions(t, database); len(got) != 1 || got[0] != "overflow" {
+		t.Fatalf("audit_log before the writer runs = %v, want only the overflow entry written directly", got)
+	}
+	if strings.Contains(out, "audit log dropped") {
+		t.Errorf("a fallback write was logged as a drop: %s", out)
+	}
+
+	w.Start(context.Background())
+	w.Stop(context.Background())
+
+	got := auditActions(t, database)
+	if len(got) != 3 {
+		t.Fatalf("audit_log after drain = %v, want all three entries", got)
+	}
+	if _, dropped, _, _ := w.Stats(); dropped != 0 {
+		t.Errorf("dropped counter = %d, want 0", dropped)
+	}
+}
+
+// TestWriteAudit_AfterStopFallsBackToSyncWrite: an audit written after the
+// writer stopped (a teardown step that runs after the audit-writer step) lands
+// through the direct write while the database is still open.
+func TestWriteAudit_AfterStopFallsBackToSyncWrite(t *testing.T) {
+	database := newSchemaTestDB(t, adminTestSchema)
+	uid := seedUser(t, database, "lateactor")
+
+	w := db.NewAuditWriter(database, 16, 50, time.Hour)
+	w.Start(context.Background())
+	database.SetAuditWriter(w)
+	w.Stop(context.Background())
+
+	db.WriteAudit(context.Background(), database, uid, "after_stop", "user", uid, "")
+	db.WriteAuditEntry(context.Background(), database, db.AuditEntry{ActorID: uid, Action: "after_stop_entry", TargetType: "user", TargetID: uid})
+
+	got := auditActions(t, database)
+	if len(got) != 2 || got[0] != "after_stop" || got[1] != "after_stop_entry" {
+		t.Fatalf("audit_log = %v, want both post-Stop entries written directly", got)
+	}
+	if _, dropped, _, _ := w.Stats(); dropped != 0 {
+		t.Errorf("dropped counter = %d, want 0", dropped)
+	}
+}
+
+// TestWriteAudit_FallbackKeepsUnlinkRules: the direct write taken after Stop
+// still applies an erasure's unlinking rule, because the stopped writer stays
+// installed and keeps its rule set.
+func TestWriteAudit_FallbackKeepsUnlinkRules(t *testing.T) {
+	database := openMigratedMemory(t)
+	const uid = int64(42)
+
+	w := db.NewAuditWriter(database, 16, 50, time.Hour)
+	w.Start(context.Background())
+	database.SetAuditWriter(w)
+	w.Unlink(uid, "marker-token")
+	w.Stop(context.Background())
+
+	db.WriteAudit(context.Background(), database, uid, "late_by_subject", "user", 0, "names the subject")
+
+	var actorID int64
+	var detail, token string
+	if err := database.SQLDb().QueryRowContext(context.Background(),
+		`SELECT actor_id, detail, COALESCE(actor_token, '') FROM audit_log WHERE action = 'late_by_subject'`,
+	).Scan(&actorID, &detail, &token); err != nil {
+		t.Fatalf("read fallback row: %v", err)
+	}
+	if actorID != 0 || detail != "" || token != "marker-token" {
+		t.Errorf("fallback row = actor %d, detail %q, token %q; want it unlinked (0, \"\", marker-token)", actorID, detail, token)
+	}
+}

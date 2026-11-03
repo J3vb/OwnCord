@@ -19,10 +19,11 @@ type AuditStore interface {
 
 // AuditWriter drains audit entries from an in-memory channel into audit_log in
 // batches through an AuditStore, modeled on ws.EventPersister. It must never
-// block the request path, so when the queue is full the entry is dropped and
-// counted. A drop is never silent: it is logged with the actor/action/target
-// (never the detail string, which can carry sensitive text), and flush losses
-// are logged the same way.
+// block the request path: when the queue is full or the writer is stopping,
+// TryEnqueue refuses and the DB path writes the entry synchronously instead.
+// Enqueue, which has no such fallback, drops and counts. A drop is never
+// silent: it is logged with the actor/action/target (never the detail string,
+// which can carry sensitive text), and flush losses are logged the same way.
 type AuditWriter struct {
 	store      AuditStore
 	queue      chan AuditEntry
@@ -96,25 +97,22 @@ func (w *AuditWriter) Start(ctx context.Context) {
 	})
 }
 
-// Enqueue queues an audit entry without blocking. On a full queue the entry is
-// dropped, counted and logged with the same identifying fields WriteAudit uses
-// for a synchronous failure, never the detail string.
+// Enqueue queues an audit entry without blocking. On a full queue, or once the
+// writer is stopping, the entry is dropped, counted and logged with the same
+// identifying fields WriteAudit uses for a synchronous failure, never the
+// detail string. The DB path uses TryEnqueue instead and writes a refused
+// entry directly.
 func (w *AuditWriter) Enqueue(actorID int64, action, targetType string, targetID int64, detail string) {
 	w.EnqueueEntry(AuditEntry{ActorID: actorID, Action: action, TargetType: targetType, TargetID: targetID, Detail: detail})
 }
 
 // EnqueueEntry is Enqueue for a whole entry, subject token included.
 func (w *AuditWriter) EnqueueEntry(e AuditEntry) {
-	if w == nil {
+	if w == nil || w.TryEnqueue(e) {
 		return
 	}
-	// run() stops reading w.queue the instant it exits, but the channel keeps
-	// accepting sends; without this check an enqueue after Stop (main.go closes
-	// the DB right after) would vanish silently. w.done closes only when run() has
-	// exited, so the check is exact.
-	select {
-	case <-w.done:
-		w.dropped.Add(1)
+	w.dropped.Add(1)
+	if w.stopping() {
 		slog.Error("audit log dropped: writer stopped",
 			"action", e.Action,
 			"actor_id", e.ActorID,
@@ -122,18 +120,42 @@ func (w *AuditWriter) EnqueueEntry(e AuditEntry) {
 			"target_id", e.TargetID,
 		)
 		return
-	default:
+	}
+	slog.Error("audit log dropped: queue full",
+		"action", e.Action,
+		"actor_id", e.ActorID,
+		"target_type", e.TargetType,
+		"target_id", e.TargetID,
+	)
+}
+
+// TryEnqueue queues e without blocking and reports whether the writer took it.
+// It refuses, with nothing counted or logged, when the queue is full or the
+// writer is stopping or stopped, so the caller can write the entry itself
+// while the database is still open.
+func (w *AuditWriter) TryEnqueue(e AuditEntry) bool {
+	if w == nil || w.stopping() {
+		return false
 	}
 	select {
 	case w.queue <- e:
+		return true
 	default:
-		w.dropped.Add(1)
-		slog.Error("audit log dropped: queue full",
-			"action", e.Action,
-			"actor_id", e.ActorID,
-			"target_type", e.TargetType,
-			"target_id", e.TargetID,
-		)
+		return false
+	}
+}
+
+// stopping reports whether Stop was called or run() has exited. run() stops
+// reading w.queue the instant it exits, but the channel keeps accepting sends,
+// so an entry sent after either point could be stranded.
+func (w *AuditWriter) stopping() bool {
+	select {
+	case <-w.stop:
+		return true
+	case <-w.done:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -161,24 +183,29 @@ func (w *AuditWriter) Stop(ctx context.Context) {
 	// Always wait for the goroutine to exit; never race it against ctx.
 	<-w.done
 
-	// A concurrent Enqueue can win the race against run()'s last drain and send
-	// into w.queue as run() exits, stranding the entry. Sweep it here so it is
-	// dropped loudly instead of silently.
-	for {
-		select {
-		case e := <-w.queue:
-			w.dropped.Add(1)
-			slog.Error("audit log dropped: writer stopped",
-				"action", e.Action,
-				"actor_id", e.ActorID,
-				"target_type", e.TargetType,
-				"target_id", e.TargetID,
-			)
-		default:
-			return
-		}
+	// A concurrent enqueue that passed the stopping check just before Stop can
+	// still send into w.queue as run() exits, stranding the entry. The store is
+	// still open (the caller closes it only after Stop returns), so write the
+	// stranded entries directly, bounded so a stuck store cannot hold shutdown.
+	stranded := w.drainQueued(nil)
+	if len(stranded) == 0 {
+		return
+	}
+	sweepCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), strandedWriteTimeout)
+	defer cancel()
+	persisted, err := w.store.PersistAudits(sweepCtx, stranded)
+	if persisted > 0 {
+		w.persisted.Add(uint64(persisted))
+	}
+	if failed := len(stranded) - persisted; failed > 0 {
+		w.dropped.Add(uint64(failed)) //nolint:gosec // failed is non-negative
+		slog.Error("audit writer: flush lost audit entries",
+			"failed", failed, "batch", len(stranded), "error", err)
 	}
 }
+
+// strandedWriteTimeout bounds Stop's direct write of entries that raced it.
+const strandedWriteTimeout = 2 * time.Second
 
 // Stats returns lifetime counters.
 func (w *AuditWriter) Stats() (persisted, dropped, flushes, errs uint64) {
@@ -356,14 +383,13 @@ func (d *DB) SetAuditWriter(w *AuditWriter) {
 }
 
 // EnqueueAuditEntry implements AsyncEntryAuditor: WriteAudit's asynchronous
-// fast path, carrying the subject token.
+// fast path, carrying the subject token. It reports false without a writer,
+// with the writer's queue full, or once the writer is stopping, so the caller
+// writes the entry synchronously instead of losing it. The writer stays
+// installed after Stop on purpose: the synchronous path reads the erasure's
+// unlinking rules from it.
 func (d *DB) EnqueueAuditEntry(e AuditEntry) bool {
-	w := d.auditWriter.Load()
-	if w == nil {
-		return false
-	}
-	w.EnqueueEntry(e)
-	return true
+	return d.auditWriter.Load().TryEnqueue(e)
 }
 
 // FlushAudits is the erasure's audit-writer barrier: everything the installed

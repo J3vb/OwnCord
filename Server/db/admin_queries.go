@@ -305,9 +305,11 @@ func (d *DB) AdminDeleteChannel(ctx context.Context, id int64) error {
 	return nil
 }
 
-// LogAudit inserts an audit log entry.
+// LogAudit inserts an audit log entry. It goes through LogAuditEntry so the
+// erasure's unlinking rules apply to it too: WriteAudit takes this path when
+// the audit writer cannot queue an entry.
 func (d *DB) LogAudit(ctx context.Context, actorID int64, action, targetType string, targetID int64, detail string) error {
-	if err := d.q.LogAudit(ctx, dbgen.LogAuditParams{
+	if err := d.LogAuditEntry(ctx, AuditEntry{
 		ActorID:    actorID,
 		Action:     action,
 		TargetType: targetType,
