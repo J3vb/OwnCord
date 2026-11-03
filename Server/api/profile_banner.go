@@ -25,6 +25,7 @@ func handleUploadBanner(
 	limiter *auth.RateLimiter,
 	broadcaster ProfileBroadcaster,
 ) http.HandlerFunc {
+	slots := newUploadSlots(maxConcurrentImageUploadsPerUser)
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := requireUser(w, r)
 		if !ok {
@@ -35,9 +36,20 @@ func handleUploadBanner(
 			writeErr(w, http.StatusTooManyRequests, httperr.CodeRateLimited, "banner upload rate limit exceeded, try again later")
 			return
 		}
+		if !slots.acquire(user.ID) {
+			writeErr(w, http.StatusTooManyRequests, httperr.CodeRateLimited, "banner upload already in progress, wait for it to finish")
+			return
+		}
+		defer slots.release(user.ID)
 
-		r.Body = http.MaxBytesReader(w, r.Body, bannerMaxBodySize)
+		// The global 30 s ReadTimeout would cut a slow uplink mid-body, so the
+		// read runs under a transfer deadline instead.
+		release := transferBody(w, r, bannerMaxBodySize)
+		defer release()
 		if err := r.ParseMultipartForm(bannerMultipartMemoryLimit); err != nil {
+			if writeTransferTimedOut(w, err, "banner upload") {
+				return
+			}
 			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "invalid multipart form")
 			return
 		}
