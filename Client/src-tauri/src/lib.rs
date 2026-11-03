@@ -351,6 +351,7 @@ pub fn run() {
             native_voice::native_voice_build_info,
             #[cfg(target_os = "linux")]
             native_voice::native_voice_set_key,
+            #[cfg(target_os = "linux")]
             native_voice::native_voice_use_key_slot,
             #[cfg(target_os = "linux")]
             native_voice::native_voice_clear_key,

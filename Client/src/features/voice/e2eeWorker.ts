@@ -26,8 +26,7 @@ export interface E2EEWorkerHost {
 }
 
 /** How long a staged room key is only received with before this client sends
- *  with it. Every peer gets the key within this window, so no frame is ever
- *  encrypted with a key a receiver does not hold yet. */
+ *  with it: room for the key to reach every peer before frames use it. */
 export const KEY_SWITCH_DELAY_MS = 2_000;
 
 export class E2EEWorker {
@@ -44,6 +43,8 @@ export class E2EEWorker {
   /** Owns the pending switch to a staged key; aborted by a newer key and by
    *  the session reset. */
   private _switchOwner = new Disposable();
+  /** The slot a pending switch will send with, null when none is pending. */
+  private _pendingSlot: KeySlot | null = null;
 
   /** The slot this client sends with: a staged key goes in the other one. */
   get sendSlot(): KeySlot {
@@ -108,6 +109,16 @@ export class E2EEWorker {
       this._sessionGeneration === myGeneration && this._roomKey === roomKey && isCurrent();
     const run = this._keyApplyChain.then(async () => {
       if (!ownsKey()) return false;
+      // A key staged into the slot this client still sends on, while its own
+      // switch away from that slot is pending, means the sender already
+      // switched and rotated again: catch up first, so the new key does not
+      // replace the key the rest of the call still sends with.
+      const pending = this._pendingSlot;
+      if (placement.stage && placement.slot === this._sendSlot && pending !== null) {
+        this.cancelPendingSwitch();
+        await this.useSlot(pending);
+        this._sendSlot = pending;
+      }
       // Staging into the slot being sent on would replace the sending key:
       // that is a switch at once.
       const stage = placement.stage && placement.slot !== this._sendSlot;
@@ -153,12 +164,14 @@ export class E2EEWorker {
    *  if it is still the session's room key then. Queued behind any key write
    *  already in flight, so a newer key always wins. */
   private scheduleSwitch(slot: KeySlot, ownsKey: () => boolean): void {
+    this._pendingSlot = slot;
     setOwnedTimeout(
       this._switchOwner.signal,
       () => {
         this._keyApplyChain = this._keyApplyChain
           .then(async () => {
-            if (!ownsKey()) return;
+            if (!ownsKey() || this._pendingSlot !== slot) return;
+            this._pendingSlot = null;
             await this.useSlot(slot);
             this._sendSlot = slot;
             log.info("E2EE: sending with the new room key", { slot });
@@ -180,12 +193,14 @@ export class E2EEWorker {
   private cancelPendingSwitch(): void {
     this._switchOwner.destroy();
     this._switchOwner = new Disposable();
+    this._pendingSlot = null;
   }
 
-  /** Session reset: drop a pending switch. The next session's first key is
-   *  used at once, whatever slot it names. */
+  /** Session reset: drop a pending switch and start over on slot 0. The next
+   *  session's first key is used at once, whatever slot it names. */
   resetSlots(): void {
     this.cancelPendingSwitch();
+    this._sendSlot = 0;
   }
 
   /** Linux: forget the backend's room key when the session ends. Queued on

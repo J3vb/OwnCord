@@ -311,6 +311,34 @@ describe("E2EEWorker key slots", () => {
     expect(useSlot).not.toHaveBeenCalled();
   });
 
+  it("resetSlots starts the next session on slot 0", async () => {
+    const { state, worker } = slotSetup();
+    state.roomKey = new Uint8Array([4]);
+    await worker.applyRoomKey(state.roomKey, undefined, { slot: 1, stage: false });
+    expect(worker.sendSlot).toBe(1);
+    worker.resetSlots();
+    expect(worker.sendSlot).toBe(0);
+  });
+
+  it("a key staged into the old slot before this client switched catches up first", async () => {
+    const { state, worker, stageKey, useKey, useSlot } = slotSetup();
+    state.roomKey = new Uint8Array([4]);
+    await worker.applyRoomKey(state.roomKey, undefined, { slot: 1, stage: true });
+    await vi.advanceTimersByTimeAsync(KEY_SWITCH_DELAY_MS / 2);
+
+    // The sender already switched to slot 1 and now stages the next key in 0.
+    state.roomKey = new Uint8Array([5]);
+    await worker.applyRoomKey(state.roomKey, undefined, { slot: 0, stage: true });
+    expect(useSlot).toHaveBeenCalledWith(1);
+    expect(stageKey).toHaveBeenLastCalledWith("b64:5", 0);
+    expect(useKey).not.toHaveBeenCalled();
+    expect(worker.sendSlot).toBe(1);
+
+    await vi.advanceTimersByTimeAsync(KEY_SWITCH_DELAY_MS);
+    expect(useSlot).toHaveBeenLastCalledWith(0);
+    expect(worker.sendSlot).toBe(0);
+  });
+
   it("staging into the slot being sent on is a switch at once", async () => {
     const { state, worker, stageKey, useKey } = slotSetup();
     state.roomKey = new Uint8Array([4]);
