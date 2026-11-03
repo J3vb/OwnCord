@@ -1,5 +1,5 @@
 {
-  "nextId": 544,
+  "nextId": 545,
   "findings": [
     {
       "id": "OC-0001",
@@ -12542,24 +12542,47 @@
     },
     {
       "id": "OC-0543",
-      "title": "A voice leave made while the chat socket was down left a ghost voice membership after the socket resumed",
-      "file": "Server/ws/voice_grace.go",
-      "line": 330,
-      "severity": "medium",
-      "why": "The client sent voice_leave only on a live socket, and a resume inherited the parked membership of a join that never reached the SFU; nothing ended it until the reconciler's second miss, 60 to 120 s later.",
-      "repro": "Join voice, drop the chat socket before the SFU connect finishes, leave voice while reconnecting, let the socket resume: the user stays listed in the channel and counts toward its cap.",
-      "evidence": "Server/ws/voice_resume_check_test.go (TestVoiceResumeCheck_EndsJoinMissingAtSFU and five boundary tests); Client/src/features/voice/leaveOwed.test.ts; Client/src/features/connection/wsHandlers.test.ts.",
-      "suggestedFix": "Remember a leave the server has not confirmed and send it after the next auth_ok while idle; on the server, check a resumed membership at the SFU 10 s after the resume and again 20 s later, and end it when absent from both.",
+      "title": "After the open channel was deleted, or the open DM was closed on another device, the app jumped to a channel that looked random",
+      "file": "Client/src/features/channels/wsHandlers.ts",
+      "line": 667,
+      "severity": "low",
+      "why": "Both fallbacks sorted the remaining text channels by position alone, but positions count inside each category, so the lowest one overall could sit in the last category. The DM-close fallback also took the first DM in the list rather than the most recent conversation.",
+      "repro": "Have channels in two categories where the later category holds a channel at position 0 and the earlier one starts at position 3; delete the open channel: the app lands in the later category instead of on the first channel the sidebar shows.",
+      "evidence": "Client/tests/unit/dispatcher/core.test.ts, Client/tests/unit/dispatcher/dmEvents.test.ts.",
+      "suggestedFix": "One helper that walks the sidebar's own groups (categoryGroups) for the first text-like channel, used by sign-in, channel delete and DM close; the DM fallback picks the DM with the newest message.",
       "fix": {
         "commit": "pending",
-        "test": "Server/ws/voice_resume_check_test.go",
-        "revertProof": "fail (the ghost test fails without the resume check)"
+        "test": "Client/tests/unit/dispatcher/core.test.ts",
+        "revertProof": "fail (the delete redirect lands on the later category's channel without the helper)"
       },
       "confidence": "high",
       "status": "fixed",
       "found": "2026-11-03",
       "hunt": "client-review-2026-11-03",
-      "lens": "voice-ui",
+      "lens": "net-state",
+      "finder": "claude",
+      "fixedDate": "2026-11-03"
+    },
+    {
+      "id": "OC-0544",
+      "title": "A profile update for the signed-in user that left out the display name or about text blanked them",
+      "file": "Client/src/features/channels/wsHandlers.ts",
+      "line": 772,
+      "severity": "low",
+      "why": "The signed-in user's copy spread display_name and about straight from the frame, while the member and DM copies treat an absent field as unchanged; an older or partial frame left the three copies disagreeing until the next sign-in.",
+      "repro": "Send a user_update for the signed-in user with username and avatar only: the own display name and about text become undefined while the member list still shows them.",
+      "evidence": "Client/tests/unit/dispatcher/presence.test.ts.",
+      "suggestedFix": "Apply the same 'absent keeps, null clears' rule used for banner and banner_color to display_name and about.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/unit/dispatcher/presence.test.ts",
+        "revertProof": "fail (display_name reads undefined after the partial frame)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-03",
+      "hunt": "client-review-2026-11-03",
+      "lens": "net-state",
       "finder": "claude",
       "fixedDate": "2026-11-03"
     }

@@ -16,6 +16,7 @@ import {
 import { claimPollRequest, isPollRequest } from "../../src/features/messaging/pollRequests";
 import { pollCardState } from "../../src/components/message-list/pollCard";
 import { withThreadsStore } from "../../src/stores/threadsLoader";
+import { acceptSharesFor, sendShareTo } from "../../src/features/share/shareInbox";
 import { setFocusedThread, threadsStore, upsertThread } from "../../src/stores/threads.store";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -572,6 +573,20 @@ const PROBES: readonly Probe[] = [
     isInitial: async () => {
       await vi.dynamicImportSettled();
       return !threadsJobRan;
+    },
+  },
+  {
+    name: "share-inbox",
+    mutate: () => sendShareTo(9_001, { files: [], text: "probe" }),
+    isInitial: () => {
+      let waiting = false;
+      // Taking it consumes the share, so the probe still reads as mutated
+      // only until it has been read once.
+      acceptSharesFor(9_001, () => {
+        waiting = true;
+      })();
+      if (waiting) sendShareTo(9_001, { files: [], text: "probe" });
+      return !waiting;
     },
   },
   {

@@ -214,6 +214,9 @@ export const shards = {
     "src/features/messaging/textPreview.ts",
   ],
   "lib-rest-7": [
+    "src/features/share/shareInbox.ts",
+    "src/features/share/shareIn.ts",
+    "src/features/share/SharePicker.ts",
     "src/lib/text/markdown.ts",
     "src/features/updates/availableUpdate.ts",
     "src/features/whats-new/appVersion.ts",

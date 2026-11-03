@@ -36,4 +36,16 @@ describe("the Android manifest", () => {
       expect(body).toContain('<exclude domain="external" path="." />');
     }
   });
+
+  it("offers the app in the share sheet for one or several items of any type", () => {
+    const activity = /<activity\b[\s\S]*?<\/activity>/.exec(manifest)?.[0] ?? "";
+    for (const action of ["SEND", "SEND_MULTIPLE"]) {
+      const filter = new RegExp(
+        `<intent-filter>\\s*<action android:name="android\\.intent\\.action\\.${action}" />([\\s\\S]*?)</intent-filter>`,
+      ).exec(activity)?.[1];
+      expect(filter, action).toBeDefined();
+      expect(filter).toContain('<category android:name="android.intent.category.DEFAULT" />');
+      expect(filter).toContain('<data android:mimeType="*/*" />');
+    }
+  });
 });
