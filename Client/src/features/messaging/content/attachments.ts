@@ -668,6 +668,7 @@ function renderAttachmentContent(att: Attachment, gallery?: LightboxGallery): HT
         // (a HEIC or TIFF has only its JPEG preview to copy).
         full: () => fetchImageAsObjectUrl(shownImageUrl(resolvedUrl, att.mime)),
         save: () => downloadFile(resolvedUrl, att.filename),
+        share: () => downloadFile(resolvedUrl, att.filename, "share"),
       });
       img.addEventListener(
         "load",

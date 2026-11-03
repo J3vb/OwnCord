@@ -357,7 +357,8 @@ test.describe("Composer — Ctrl+B/I/U formatting", () => {
 // Attachment preview / remove
 // ---------------------------------------------------------------------------
 
-const fileInput = (page: Page) => page.locator("[data-testid='message-input'] input[type='file']");
+const fileInput = (page: Page) =>
+  page.locator("[data-testid='message-input'] input[data-attach-source='files']");
 const previewBar = (page: Page) =>
   page.locator("[data-testid='message-input'] .attachment-preview-bar");
 

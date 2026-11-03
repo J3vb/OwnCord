@@ -6,6 +6,8 @@ import { defineCatalog } from "./format";
 export const mediaControlsText = defineCatalog("mediaControls", {
   "lightbox.close": "Close image",
   "lightbox.download": "Download image",
+  "lightbox.save": "Save",
+  "lightbox.share": "Share",
   "lightbox.openOriginal": "Open original",
   "lightbox.prev": "Previous image",
   "lightbox.next": "Next image",

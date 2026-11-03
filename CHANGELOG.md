@@ -51,12 +51,14 @@ and only when it changes something a contributor or fork holder must do
 
 - Your own camera (call tiles, pop-out and the settings preview) now shows you exactly as others see you, with your right hand on the right; before, it was always mirrored. A new "Mirror my camera preview" switch in Voice & Video (off by default) brings the mirror back. Others always see you the right way round.
 - While you are in a DM call, that person's avatar stays in the server rail under Home with a green call badge, so you can see the call and get back to it in one click from any server.
+- On a phone, the "+" in the message box now opens a sheet with Take photo, Gallery and Files, so you can take a photo with the camera and send it straight away, or pick several photos and videos from the gallery. On a computer "+" still opens the file picker.
 - On Linux, after the app closes unexpectedly, the next start adds what the system recorded about it (the crash report from `coredumpctl` and the kernel's crash line, where the system keeps them) to the app's log, so a support bundle shows what crashed. Nothing extra needs to be installed; without those tools it is skipped. The log also notes whether the camera or a screen share was running.
 
 ### Fixed
 
 - On Linux, someone else's camera could stay black for the whole call when it started just as you turned your own camera on or off. It now shows as soon as it arrives.
 - Android: the app icon's "OC" logo ran off the edges of the home-screen icon. It now sits inside the icon shape on every launcher, and Android 13+ themed icons show a single-colour OC.
+- Android: a cold start signed you out unless you had ticked "Remember password", and signing in to a second server signed you out of the first. The sign-in page now has one "Stay signed in" box, ticked by default, that keeps each server's sign-in; untick it on a shared phone.
 - Android: calls stopped (no mic, then no sound) once the app went to the background or the screen turned off. A call now shows an "In a call" notification and keeps your mic, sound and camera running in the background until you leave.
 - In a call, turning your camera on and back off no longer leaves your tile showing the first letter of your name instead of your profile picture. This happened in DM calls and, in some cases, in voice channels.
 - On Linux, dragging files from the file manager into a channel, or pasting files you copied there (Ctrl+V), attached nothing. Both now attach the files, as on Windows.

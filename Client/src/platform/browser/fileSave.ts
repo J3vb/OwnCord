@@ -5,7 +5,7 @@
 // "location", and `writeFile` downloads the bytes under that name's last path
 // segment. This is the one mismatch with the contract: a caller cannot tell
 // where the file went, nor whether the user cancelled the browser's prompt.
-import type { FileSaver } from "../contracts/fileSave";
+import type { FileSaver, SavedTo } from "../contracts/fileSave";
 
 /** How long the blob URL stays valid after the click: long enough for the
  *  browser to start reading it, short enough not to hold the bytes. */
@@ -32,7 +32,7 @@ export const fileSaver: FileSaver = {
   async pickSaveLocation(suggestedName: string): Promise<string | null> {
     return suggestedName;
   },
-  async writeFile(path: string, data: Uint8Array): Promise<void> {
+  async writeFile(path: string, data: Uint8Array): Promise<SavedTo | null> {
     const url = URL.createObjectURL(new Blob([data.slice()], { type: "application/octet-stream" }));
     const link = document.createElement("a");
     link.href = url;
@@ -50,5 +50,6 @@ export const fileSaver: FileSaver = {
       link.remove();
     }
     releaseLater(url);
+    return null;
   },
 };

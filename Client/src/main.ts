@@ -28,7 +28,11 @@ import {
   installCustomThemeEscape,
 } from "./features/custom-themes/customTheme";
 import { startZoom } from "./features/zoom/zoomKeys";
-import { migrateAutoInputSensitivity, migrateInputMode } from "@lib/ui/inputMode";
+import {
+  forgetAndroidInputDevice,
+  migrateAutoInputSensitivity,
+  migrateInputMode,
+} from "@lib/ui/inputMode";
 import { migrateVoiceSensitivityScale } from "@lib/voice/gateScale";
 import { configureSession, installLogoutTeardown, voiceSessionLeave } from "./app/session";
 import { createLogger, applyStoredLogLevel } from "@lib/logger";
@@ -81,6 +85,7 @@ installCustomThemeEscape(new Disposable().signal);
 // from before the decibel slider keeps its gate level.
 migrateAutoInputSensitivity();
 migrateVoiceSensitivityScale();
+forgetAndroidInputDevice();
 
 // Start push-to-talk listener (Rust-side polling, non-consuming), once the
 // input mode is settled: a profile from before Input Mode keeps its PTT key.

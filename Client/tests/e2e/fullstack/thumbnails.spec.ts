@@ -40,7 +40,7 @@ test("inline image shows the bounded thumbnail and the lightbox loads the full f
   expect(jpeg.length).toBeGreaterThan(1000);
 
   const composer = alice.locator("[data-testid='message-input']");
-  await composer.locator("input[type='file']").setInputFiles({
+  await composer.locator("input[data-attach-source='files']").setInputFiles({
     name: `big-${id}.jpg`,
     mimeType: "image/jpeg",
     buffer: jpeg,
@@ -89,7 +89,7 @@ test("a non-image file has no thumbnail route (404) and the row is a file chip",
 }) => {
   const id = crypto.randomUUID().slice(0, 8);
   const composer = alice.locator("[data-testid='message-input']");
-  await composer.locator("input[type='file']").setInputFiles({
+  await composer.locator("input[data-attach-source='files']").setInputFiles({
     name: `notes-${id}.txt`,
     mimeType: "text/plain",
     buffer: Buffer.from(`plain text, not an image ${id}`),
@@ -127,7 +127,7 @@ test("erasing a user removes their kept thumbnail with the original", async ({
   const id = crypto.randomUUID().slice(0, 8);
   const jpeg = await bigJpeg(bob);
   const composer = bob.locator("[data-testid='message-input']");
-  await composer.locator("input[type='file']").setInputFiles({
+  await composer.locator("input[data-attach-source='files']").setInputFiles({
     name: `bob-${id}.jpg`,
     mimeType: "image/jpeg",
     buffer: jpeg,

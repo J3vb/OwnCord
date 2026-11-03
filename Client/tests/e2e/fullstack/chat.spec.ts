@@ -276,7 +276,7 @@ test("pressing Enter while a file uploads posts the message with its attachment 
   const release = aliceTransport.holdHttpRequests(
     ({ path, method }) => method === "POST" && path.endsWith("/uploads"),
   );
-  await composer.locator("input[type='file']").setInputFiles({
+  await composer.locator("input[data-attach-source='files']").setInputFiles({
     name: `notes-${id}.txt`,
     mimeType: "text/plain",
     buffer: Buffer.from(`notes ${id}\n`),
@@ -334,7 +334,7 @@ test("a playing video keeps playing while bob reacts to another message 20 times
     return [...new Uint8Array(await new Blob(chunks).arrayBuffer())];
   });
   const composer = alice.locator("[data-testid='message-input']");
-  await composer.locator("input[type='file']").setInputFiles({
+  await composer.locator("input[data-attach-source='files']").setInputFiles({
     name: `clip-${id}.webm`,
     mimeType: "video/webm",
     buffer: Buffer.from(clip),

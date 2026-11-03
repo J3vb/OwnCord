@@ -213,6 +213,13 @@ Usernames are inserted as text nodes — never markup.
 The composer supports file attach with client-side validation and per-item
 upload state (already thorough — `MessageInput.ts`).
 
+**Picking files.** On a computer "+" opens the file picker. On the phone
+layout it opens a bottom sheet (`features/messaging/attachSheet.ts`) with
+Take photo (`accept="image/*" capture="environment"`), Gallery
+(`accept="image/*,video/*"`, several at once) and Files (any file, several
+at once). Each row has its own hidden input; all three feed
+`handlePasteFile()`. A row tapped after uploads were turned off opens nothing.
+
 | State      | Presentation                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | selected   | Thumbnail/chip per file                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
@@ -472,7 +479,7 @@ the same signal in future.
 
 ## Source of truth
 
-`src/components/MessageList.ts` (+ `message-list/`), `src/components/MessageInput.ts`,
+`src/components/MessageList.ts` (+ `message-list/`), `src/components/MessageInput.ts` (+ `src/features/messaging/attachSheet.ts`),
 `src/pages/main-page/ChannelController.ts`,
 `src/pages/main-page/MessageController.ts`, `src/pages/main-page/ReactionController.ts`,
 `src/stores/messages.store.ts` (+ its reducers in `src/features/messaging/`), `src/lib/dispatcher.ts`, `src/features/messaging/wsHandlers.ts`, `src/lib/ws.ts`,

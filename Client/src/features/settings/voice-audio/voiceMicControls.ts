@@ -57,9 +57,30 @@ export function mountMicControls(sc: VoiceTabScope): void {
 
   sc.inputSelect.appendChild(sc.defaultInputOpt);
 
-  sc.micCard.appendChild(sc.inputHeader);
-
-  sc.micCard.appendChild(sc.inputSelect);
+  // Android's inputs are routes named after the output ("Speakerphone",
+  // "Headset earpiece"), not microphones: the phone picks the mic that goes
+  // with the output, so the row says so instead of offering a choice.
+  if (sc.android) {
+    const autoMic = createElement("div", {
+      class: "setting-row",
+      "data-testid": "mic-automatic",
+    });
+    const autoMicInfo = createElement("div", {});
+    appendChildren(
+      autoMicInfo,
+      createElement("div", { class: "setting-label" }, t("voiceAudio.microphone.android")),
+      createElement("div", { class: "setting-desc" }, t("voiceAudio.microphone.android.desc")),
+    );
+    appendChildren(
+      autoMic,
+      autoMicInfo,
+      createElement("span", { class: "setting-value" }, t("voiceAudio.microphone.android.auto")),
+    );
+    sc.micCard.appendChild(autoMic);
+  } else {
+    sc.micCard.appendChild(sc.inputHeader);
+    sc.micCard.appendChild(sc.inputSelect);
+  }
 
   // Input Volume slider
   sc.inputVolumeHeader = createElement(

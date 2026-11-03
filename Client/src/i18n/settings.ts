@@ -112,6 +112,9 @@ export const settingsText = defineCatalog("settings", {
   "appearance.customThemes.export": "Export",
   "appearance.customThemes.exportAria": "Export {name} as a .css file",
   "appearance.customThemes.exportFailed": "Could not save the theme file",
+  "appearance.customThemes.share": "Share",
+  "appearance.customThemes.shareAria": "Share {name} as a .css file",
+  "appearance.customThemes.shareFailed": "Could not share the theme file",
   "appearance.customThemes.delete": "Delete",
   "appearance.customThemes.deleteAria": "Delete {name}",
   "appearance.customThemes.deleteTitle": "Delete {name}?",
@@ -436,6 +439,9 @@ export const settingsText = defineCatalog("settings", {
   "logs.bundleNote":
     "Saves a zip of your logs, diagnostics and settings on this computer. Nothing is uploaded. Log lines are not redacted, so read them before sharing.",
   "logs.bundleSaved": "Support bundle saved.",
+  "logs.shareBundle": "Share Support Bundle",
+  "logs.bundleNoteShare":
+    "Makes a zip of your logs, diagnostics and settings on this phone and opens the share sheet, so you choose where it goes. Log lines are not redacted, so read them before sharing.",
   "logs.openFolder": "Open Log Folder",
   "logs.openFolderFailed": "Could not open the log folder: {error}",
   "logs.exportFailed": "Export failed: {error}",
@@ -555,6 +561,10 @@ export const settingsText = defineCatalog("settings", {
   "voiceAudio.gstreamerMissing":
     "Camera support is missing. Install the GStreamer plugins: gstreamer1.0-plugins-good (Ubuntu/Debian), gstreamer1-plugins-good (Fedora) or gst-plugins-good (Arch), then restart OwnCord.",
   "voiceAudio.inputDevice": "Input Device",
+  "voiceAudio.microphone.android": "Microphone",
+  "voiceAudio.microphone.android.desc":
+    "Android picks the mic that matches the output: phone, wired or Bluetooth headset.",
+  "voiceAudio.microphone.android.auto": "Automatic",
   "voiceAudio.default": "Default",
   "voiceAudio.defaultLive": "Default ({device})",
   "voiceAudio.inputVolume": "Input Volume",

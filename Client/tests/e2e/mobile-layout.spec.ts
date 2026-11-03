@@ -650,6 +650,28 @@ for (const profile of PROFILES) {
       await noHorizontalScroll(page);
     });
 
+    test("the composer's + opens the attach sheet, and Take photo asks for the camera", async ({
+      page,
+    }) => {
+      await signIn(page);
+      await page.locator(".attach-btn").tap();
+      const sheet = page.locator("[data-testid='attach-sheet']");
+      await expect(sheet).toBeVisible();
+      await expect(sheet.locator(".attach-sheet-tile")).toHaveText([
+        "Take photo",
+        "Gallery",
+        "Files",
+      ]);
+      await noHorizontalScroll(page);
+
+      const chooser = page.waitForEvent("filechooser");
+      await sheet.locator("[data-testid='attach-sheet-camera']").tap();
+      const input = (await chooser).element();
+      expect(await input.getAttribute("accept")).toBe("image/*");
+      expect(await input.getAttribute("capture")).toBe("environment");
+      await expect(sheet).toHaveCount(0);
+    });
+
     test("a tap on a member opens the profile sheet", async ({ page }) => {
       await signIn(page);
       await page.locator("[data-testid='member-list-toggle']").click();
