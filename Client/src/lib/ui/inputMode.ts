@@ -1,4 +1,5 @@
 import { loadPref, savePref } from "@lib/prefs/preferences";
+import { isAndroidHost } from "@lib/hostPlatform";
 
 /** How the microphone decides when to transmit: the sensitivity gate
  *  (Voice Activity) or a held key (Push to Talk). */
@@ -58,6 +59,15 @@ export function migrateAutoInputSensitivity(): void {
     loadPref<boolean>("autoInputSensitivity", false)
   ) {
     savePref("autoInputSensitivity", autoInputSensitivity());
+  }
+}
+
+/** The Android app offers no input device choice: its inputs are routes
+ *  ("Speakerphone"), not microphones. Forget one saved from the old picker
+ *  at startup, so every capture opens the mic the phone picks. */
+export function forgetAndroidInputDevice(): void {
+  if (isAndroidHost() && loadPref<string>("audioInputDevice", "") !== "") {
+    savePref("audioInputDevice", "");
   }
 }
 

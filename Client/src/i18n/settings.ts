@@ -555,6 +555,10 @@ export const settingsText = defineCatalog("settings", {
   "voiceAudio.gstreamerMissing":
     "Camera support is missing. Install the GStreamer plugins: gstreamer1.0-plugins-good (Ubuntu/Debian), gstreamer1-plugins-good (Fedora) or gst-plugins-good (Arch), then restart OwnCord.",
   "voiceAudio.inputDevice": "Input Device",
+  "voiceAudio.microphone.android": "Microphone",
+  "voiceAudio.microphone.android.desc":
+    "Android picks the mic that matches the output: phone, wired or Bluetooth headset.",
+  "voiceAudio.microphone.android.auto": "Automatic",
   "voiceAudio.default": "Default",
   "voiceAudio.defaultLive": "Default ({device})",
   "voiceAudio.inputVolume": "Input Volume",
