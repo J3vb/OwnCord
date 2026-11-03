@@ -174,3 +174,35 @@ func TestVoiceMembership_ParkedMoveExpiresWithWindow(t *testing.T) {
 		t.Fatalf("clearing the flags left the parked move in place")
 	}
 }
+
+// TestVoiceMembership_ParkedMoveSurvivesFailedResume pins that a resume whose
+// connection dies before the client acts on voice_moved does not use the move
+// up: the next resume of the session inside the window receives it again.
+func TestVoiceMembership_ParkedMoveSurvivesFailedResume(t *testing.T) {
+	withGraceWindow(t, time.Minute)
+	h := newVMHarness(t, 1)
+	alice := h.members[0]
+	chA := h.chanOf("vm-parked-move-retry-from")
+	chB := h.chanOf("vm-parked-move-retry-to")
+
+	h.connect(alice)
+	h.join(alice, chA)
+	h.disconnect(alice, true)
+	if evicted, sent := h.moveParked(alice, chA, chB, true); !evicted || !sent {
+		t.Fatalf("move of a parked call: evicted=%v sent=%v", evicted, sent)
+	}
+	h.resume(alice)
+	h.disconnect(alice, true) // the handshake failed after registering
+
+	h.resume(alice)
+	if pendingFrameOfType(t, alice.c, MsgTypeVoiceMoved) == nil {
+		t.Fatalf("the second resume did not receive voice_moved")
+	}
+	if !h.join(alice, chB) {
+		t.Fatalf("re-join of the destination did not complete")
+	}
+	if row, err := h.db.GetVoiceState(context.Background(), alice.userID); err != nil || row == nil || !row.ServerMuted {
+		t.Fatalf("the moderator mute did not survive a failed resume: row=%+v err=%v", row, err)
+	}
+	h.leave(alice)
+}

@@ -829,6 +829,35 @@ func TestMultiDevice_FlushDropsQueuedOfflineForConnectedUser(t *testing.T) {
 	}
 }
 
+// A moderator move of A's parked call is ended by the user joining on device
+// B inside the window: B's join carries the moderator mute, and A's later
+// resume is not sent voice_moved, which would pull the call off B.
+func TestMultiDevice_JoinElsewhereEndsAParkedMove(t *testing.T) {
+	f := newMDFix(t)
+	a := f.dev("session-a", f.text)
+	b := f.dev("session-b", f.text)
+	f.join(a, f.voiceA)
+	f.dropSocket(a)
+	if !f.hub.EvictForModeratorMove(context.Background(), f.uid, f.voiceA, true, false, nil) {
+		t.Fatal("moderator move did not tear down the parked call")
+	}
+	if !f.hub.SendToVoiceDevice(f.uid, buildVoiceMoved(f.voiceB, "", 99)) {
+		t.Fatal("the parked move did not keep its frame")
+	}
+	f.join(b, f.voiceA)
+	if row := f.row(f.uid); row == nil || row.ChannelID != f.voiceA || !row.ServerMuted {
+		t.Fatalf("B's join did not carry the moderator mute: %+v", row)
+	}
+	resumed := f.newConn(f.uid, "session-a", f.text)
+	resumed.lastSeq = 1
+	f.hub.registerNowTest(resumed, map[int64]bool{f.text: true})
+	r := &mdDev{c: resumed}
+	r.settle()
+	if r.index(0, MsgTypeVoiceMoved, nil) >= 0 {
+		t.Fatal("A's resume got voice_moved after the user joined on B")
+	}
+}
+
 func TestMultiDevice_ModeratorFramesReachOnlyTheCallDevice(t *testing.T) {
 	t.Parallel()
 	t.Run("live call", func(t *testing.T) {

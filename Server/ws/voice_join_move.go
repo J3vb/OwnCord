@@ -97,6 +97,10 @@ func (h *Hub) voiceJoinMoveCall(fctx, ctx context.Context, txn *voiceTxn, c *Cli
 // connection's. The caller holds the user's membership lock, so no stash is set or
 // consumed meanwhile: a moderator move that evicted the call from device A leaves
 // its flags on A, and they must follow the user to whichever device joins next.
+//
+// It also ends a moderator move kept for a parked session (endParkedModMove): the
+// user is joining now, so a later resume of that session must not pull the call
+// away, and the kept flags apply to this join when no connection carries any.
 func (h *Hub) takeUserModFlags(c *Client) (serverMuted, serverDeafened bool, serverMutedBy *int64) {
 	serverMuted, serverDeafened, serverMutedBy = c.voice.takeModFlags()
 	for _, o := range h.clientsOf(c.userID) {
@@ -107,6 +111,9 @@ func (h *Hub) takeUserModFlags(c *Client) (serverMuted, serverDeafened bool, ser
 		if !serverMuted && !serverDeafened && (sm || sd) {
 			serverMuted, serverDeafened, serverMutedBy = sm, sd, sby
 		}
+	}
+	if kept := h.voiceReg.voiceGrace.endParkedModMove(c.userID); !serverMuted && !serverDeafened && (kept.muted || kept.deafened) {
+		serverMuted, serverDeafened, serverMutedBy = kept.muted, kept.deafened, kept.mutedBy
 	}
 	return serverMuted, serverDeafened, serverMutedBy
 }
