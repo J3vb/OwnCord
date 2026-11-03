@@ -182,6 +182,7 @@ export function renderPeopleHome(root: HTMLElement, ctx: FeatureViewContext): vo
       tabindex: "0",
       "aria-label": t("message", { name: person.name }),
       "data-testid": `people-active-${person.id}`,
+      "data-active-id": String(person.id),
     });
     li.addEventListener("keydown", (e) => {
       if (e.key !== "Enter" && e.key !== " ") return;
@@ -200,10 +201,11 @@ export function renderPeopleHome(root: HTMLElement, ctx: FeatureViewContext): vo
 
   function render(): void {
     if (signal.aborted) return;
+    const focused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const focusedId =
-      document.activeElement instanceof HTMLElement && list.contains(document.activeElement)
-        ? document.activeElement.dataset["userId"]
-        : undefined;
+      focused !== null && list.contains(focused) ? focused.dataset["userId"] : undefined;
+    const focusedCard =
+      focused !== null && activeList.contains(focused) ? focused.dataset["activeId"] : undefined;
 
     for (const [id, btn] of tabButtons) btn.setAttribute("aria-pressed", String(id === tab));
 
@@ -237,6 +239,13 @@ export function renderPeopleHome(root: HTMLElement, ctx: FeatureViewContext): vo
     );
     activeList.replaceChildren(...cards.map(activeCard));
     activeEmpty.hidden = cards.length > 0;
+    if (focusedCard !== undefined) {
+      (
+        activeList.querySelector<HTMLElement>(`[data-active-id="${focusedCard}"]`) ??
+        activeList.querySelector<HTMLElement>("[data-active-id]") ??
+        search
+      ).focus();
+    }
   }
 
   const unsubs = [

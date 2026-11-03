@@ -252,6 +252,18 @@ describe("the view", () => {
     expect(messageUser).toHaveBeenCalledWith(2);
   });
 
+  it("keeps focus on an Active now card through an update", () => {
+    channelsStore.setState((prev) => ({
+      ...prev,
+      channels: new Map([[10, voiceChannel(10, "Lounge", "voice")]]),
+    }));
+    voiceStore.setState((prev) => ({ ...prev, voiceUsers: new Map([[10, inVoice(2)]]) }));
+    flush();
+    root.querySelector<HTMLElement>("[data-testid='people-active-2']")?.focus();
+    setRoster(member(ME, "me", "online"), member(2, "amy", "idle"), member(3, "bob", "online"));
+    expect(document.activeElement?.getAttribute("data-testid")).toBe("people-active-2");
+  });
+
   it("moves focus to the search when the focused person leaves the tab", () => {
     root.querySelector<HTMLButtonElement>("[data-testid='people-message-2']")?.focus();
     setRoster(member(ME, "me", "online"), member(2, "amy", "offline"));
