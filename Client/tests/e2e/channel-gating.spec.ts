@@ -494,7 +494,7 @@ test.describe("Composer gating — DM blocks", () => {
       "otheruser, thirduser",
     );
     await expect(textarea(page)).toBeEnabled({ timeout: 5_000 });
-    await expect(textarea(page)).toHaveAttribute("placeholder", "Message #otheruser, thirduser");
+    await expect(textarea(page)).toHaveAttribute("placeholder", "Message otheruser, thirduser");
     await expect(composer(page)).not.toHaveClass(/composer-disabled/);
 
     await sendMessage(page, "group message");

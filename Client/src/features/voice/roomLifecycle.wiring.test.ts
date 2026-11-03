@@ -122,7 +122,11 @@ function setup(initial: SessionState = { type: "idle" }) {
   const cameraState = { manualCameraTrack: null };
   const screenState = { manualScreenTracks: [] };
   const ws = { send: vi.fn() };
-  const e2ee = { keyProvider: { removeAllListeners: vi.fn() }, clearState: vi.fn() };
+  const e2ee = {
+    newKeyProvider: vi.fn(() => ({})),
+    releaseKeyProvider: vi.fn(),
+    clearState: vi.fn(),
+  };
   const host = {
     getState: () => state,
     setState: vi.fn((next: SessionState) => {

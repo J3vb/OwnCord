@@ -51,9 +51,8 @@ var _ EntryAuditor = (*DB)(nil)
 // AsyncEntryAuditor is the optional asynchronous fast path for WriteAudit.
 // An Auditor that also implements it — in practice *DB, once main.go installs
 // an AuditWriter via SetAuditWriter — can take the entry off the request
-// path. It reports true when it took responsibility for the entry (the
-// background writer may still drop it under load, but never silently — see
-// AuditWriter.Enqueue), and false when no writer is installed, in which case
+// path. It reports true when the writer queued the entry, and false when no
+// writer is installed, its queue is full or it is stopping, in which case
 // WriteAudit performs the synchronous best-effort write. The token CLI and
 // tests never install a writer, so they stay synchronous. The assertion sees
 // the dynamic type, so a *DB held behind the service Store still takes this

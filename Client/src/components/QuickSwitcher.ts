@@ -236,11 +236,7 @@ export function createQuickSwitcher(options: QuickSwitcherOptions): MountableCom
 
   function mount(container: Element): void {
     // Overlay backdrop
-    root = createElement("div", {
-      class: "quick-switcher-overlay",
-      style:
-        "position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 1000; display: flex; justify-content: center; padding-top: 20vh;",
-    });
+    root = createElement("div", { class: "quick-switcher-overlay" });
 
     // Modal container
     const modal = createElement("div", { class: "quick-switcher" });

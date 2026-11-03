@@ -6,6 +6,7 @@ import { createElement, appendChildren, qs } from "@lib/dom";
 import { isImeCommit } from "@lib/text/ime";
 import { createIcon } from "@lib/icons";
 import { setAddressInputHints } from "@lib/net/hostNormalize";
+import { isAndroidHost } from "@lib/hostPlatform";
 import { connectText } from "../../../i18n/connect";
 import { portalText } from "../../../i18n/portal";
 import { attachLimitHint, usernameHintText, MAX_USERNAME_LEN } from "@lib/text/nameLimits";
@@ -207,14 +208,30 @@ export function createLoginFormDom(st: LoginFormState, lf: LoginFormInternals) {
       type: "checkbox",
       id: "remember-password",
     });
+    // The phone shows one box, "Stay signed in", ticked by default: it keeps
+    // this server's sign-in (and password) per server, so switching servers
+    // does not sign the other one out. Auto connect follows it.
+    const android = isAndroidHost();
     const rememberLabel = createElement(
       "label",
       {
         for: "remember-password",
         class: "remember-password-label",
       },
-      connectText("login.rememberPassword"),
+      connectText(android ? "login.staySignedIn" : "login.rememberPassword"),
     );
+    if (android) {
+      st.rememberPasswordCheckbox.checked = true;
+      rememberLabel.classList.add("remember-password-label--stacked");
+      appendChildren(
+        rememberLabel,
+        createElement(
+          "span",
+          { class: "remember-password-hint" },
+          connectText("login.staySignedInHint"),
+        ),
+      );
+    }
     appendChildren(rememberGroup, st.rememberPasswordCheckbox, rememberLabel);
     // The portal keeps no password: the token alone is kept, by Stay signed in.
     if (__OWNCORD_WEB__ && st.fixedHost !== undefined) {
@@ -237,6 +254,7 @@ export function createLoginFormDom(st: LoginFormState, lf: LoginFormInternals) {
         : connectText("login.autoConnect"),
     );
     appendChildren(autoConnectGroup, st.autoConnectCheckbox, autoConnectLabel);
+    if (android) autoConnectGroup.classList.add("form-group--hidden");
 
     // `beforeinput` fires for every actual edit — typing, paste, drag-drop —
     // and only for edits, so caret movement leaves the placeholder alone. It

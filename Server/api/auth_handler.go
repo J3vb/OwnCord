@@ -64,30 +64,30 @@ func MountAuthRoutes(r chi.Router, svc AuthService, requireAuth func(http.Handle
 		r.With(requireAuth).
 			Get("/me", handleMe())
 
-		r.With(requireAuth,
+		r.With(requireAuth, requireLoginSession,
 			RateLimitMiddleware(limiter, "del_account:", scaledAuthLimit(sensitiveEndpointRateLimitPerMinute), time.Minute, trustedProxies)).
 			Delete("/account", handleDeleteAccount(svc))
 	})
 
-	r.With(requireAuth,
+	r.With(requireAuth, requireLoginSession,
 		RateLimitMiddleware(limiter, "totp:", scaledAuthLimit(sensitiveEndpointRateLimitPerMinute), time.Minute, trustedProxies)).
 		Post("/api/v1/users/me/totp/enable", handleEnableTOTP(svc))
 
-	r.With(requireAuth,
+	r.With(requireAuth, requireLoginSession,
 		RateLimitMiddleware(limiter, "totp:", scaledAuthLimit(sensitiveEndpointRateLimitPerMinute), time.Minute, trustedProxies)).
 		Post("/api/v1/users/me/totp/confirm", handleConfirmTOTP(svc))
 
-	r.With(requireAuth,
+	r.With(requireAuth, requireLoginSession,
 		RateLimitMiddleware(limiter, "totp:", scaledAuthLimit(sensitiveEndpointRateLimitPerMinute), time.Minute, trustedProxies)).
 		Delete("/api/v1/users/me/totp", handleDisableTOTP(svc))
 
-	r.With(requireAuth,
+	r.With(requireAuth, requireLoginSession,
 		RateLimitMiddleware(limiter, "totp:", scaledAuthLimit(sensitiveEndpointRateLimitPerMinute), time.Minute, trustedProxies)).
 		Post("/api/v1/users/me/totp/recovery-codes", handleRegenerateRecoveryCodes(svc))
 
 	// The recovery kit: enrolment and status beside the credential
 	// routes, redemption public and budgeted like login.
-	r.With(requireAuth,
+	r.With(requireAuth, requireLoginSession,
 		RateLimitMiddleware(limiter, "kit:", scaledAuthLimit(sensitiveEndpointRateLimitPerMinute), time.Minute, trustedProxies)).
 		Post("/api/v1/users/me/recovery-kit", handleEnrolRecoveryKit(svc))
 	r.With(requireAuth).
@@ -316,7 +316,7 @@ func writeNotAuthenticated(w http.ResponseWriter) {
 
 // writeAuthError encodes a service.Err* refusal from the auth slice. Each
 // named value's Error() is the public message; its category picks the
-// status and code, and three values carry a code of their own. Anything that
+// status and code, and four values carry a code of their own. Anything that
 // is not an auth refusal is a contract bug in the service, logged and
 // answered as a generic 500 so no cause leaks to the client.
 func writeAuthError(ctx context.Context, w http.ResponseWriter, err error) {
@@ -327,6 +327,8 @@ func writeAuthError(ctx context.Context, w http.ResponseWriter, err error) {
 		status, code = http.StatusBadRequest, httperr.CodeInvalidCredentials
 	case errors.Is(err, service.ErrTOTPAlreadyEnabled):
 		status, code = http.StatusConflict, httperr.CodeTOTPAlreadyEnabled
+	case errors.Is(err, service.ErrLoginSessionRequired):
+		status, code = http.StatusForbidden, httperr.CodeLoginSessionRequired
 	case errors.Is(err, service.ErrConflict):
 		status, code = http.StatusConflict, httperr.CodeConflict
 	case errors.Is(err, service.ErrAuthBusy):

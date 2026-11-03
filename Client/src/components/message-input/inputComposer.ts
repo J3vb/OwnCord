@@ -8,6 +8,8 @@ import { MAX_MESSAGE_LEN } from "../../features/messaging/messageLimits";
 import { applyPickedMentions } from "@lib/text/pickedMentions";
 import { idMentionsEnabled, voiceMessagesEnabled } from "@lib/net/serverCapabilities";
 import { composerButtonShown } from "../../features/messaging/composerButtons";
+import { isPhoneLayout } from "@lib/ui/bottomSheet";
+import { composerPlaceholder } from "../../features/messaging/composerPlaceholder";
 import { messagingText } from "../../i18n/messaging";
 import {
   TYPING_THROTTLE_MS,
@@ -128,10 +130,7 @@ export function createInputComposer(st: InputState, api: InputApi) {
   }
 
   function idlePlaceholder(): string {
-    return (
-      st.options.placeholder ??
-      messagingText("composer.placeholder", { channel: st.options.channelName })
-    );
+    return st.options.placeholder ?? composerPlaceholder("channel", st.options.channelName);
   }
 
   /** Reflect the current disabledReason onto the DOM (textarea + controls). */
@@ -150,14 +149,18 @@ export function createInputComposer(st: InputState, api: InputApi) {
     for (const btn of st.controlButtons) {
       // The mic needs what "+" needs (an upload) and a server that keeps the clip's metadata.
       if (btn.classList.contains("mic-btn")) {
-        btn.hidden = uploadsOff || !voiceMessagesEnabled() || !composerButtonShown("voice");
+        // On a phone the mic lives in the "+" sheet instead.
+        btn.hidden =
+          uploadsOff || !voiceMessagesEnabled() || !composerButtonShown("voice") || isPhoneLayout();
         if (disabled) btn.setAttribute("disabled", "true");
         else btn.removeAttribute("disabled");
         continue;
       }
       const isAttach = btn.classList.contains("attach-btn");
-      if (isAttach) btn.title = uploadsOff ? messagingText("attach.serverDisabled") : "";
-      if (disabled || (isAttach && uploadsOff)) {
+      // A phone's "+" also holds Poll, so uploads being off leaves it usable.
+      const attachOff = isAttach && uploadsOff && !(isPhoneLayout() && st.attachHasActions());
+      if (isAttach) btn.title = attachOff ? messagingText("attach.serverDisabled") : "";
+      if (disabled || attachOff) {
         btn.setAttribute("disabled", "true");
       } else {
         // Likewise for GIFs when this server has no GIF provider configured.

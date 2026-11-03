@@ -19,6 +19,7 @@ import { createPresenceLimiter } from "@lib/net/rateLimiter";
 import type { WsClient } from "@lib/ws";
 import { clearHost, hostAndroidApp } from "../helpers/androidHost";
 import { resetAuthState, seedOnlineMember } from "../helpers/storeSeeds";
+import { usePhone } from "../helpers/phoneMedia";
 
 function setUser(custom: string | null = null): void {
   authStore.setState(() => ({
@@ -97,6 +98,31 @@ describe("SelfProfileCard from the user bar", () => {
     btn.click();
     expect(card()).toBeNull();
     expect(btn.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("opens in a bottom sheet on a phone, and the sheet and the card close together", () => {
+    usePhone();
+    try {
+      trigger().click();
+      const sheet = q("[data-testid='self-profile-sheet']");
+      expect(sheet?.contains(card())).toBe(true);
+      expect(card()?.hasAttribute("role")).toBe(false);
+      // A tap inside the sheet but outside the card keeps it open.
+      sheet!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      expect(card()).not.toBeNull();
+
+      q<HTMLButtonElement>("[data-testid='spc-status-idle']")!.click();
+      expect(q("[data-testid='self-profile-sheet']")).toBeNull();
+      expect(card()).toBeNull();
+      expect(trigger().getAttribute("aria-expanded")).toBe("false");
+
+      trigger().click();
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      expect(q("[data-testid='self-profile-sheet']")).toBeNull();
+      expect(card()).toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("marks the current status and shows the notes under DnD and Invisible", () => {

@@ -23,6 +23,7 @@ import type {
   AppUpdater,
   Autostart,
   CallService,
+  ShareSheet,
   CredentialStore,
   DevTools,
   ExternalContentBroker,
@@ -71,6 +72,13 @@ const appAudio: AppAudio = {
 // A browser tab has no service to keep a call alive in the background.
 const callService: CallService = {
   update: () => undefined,
+};
+
+// No share sheet in a tab: callers offer no Share.
+const shareSheet: ShareSheet = {
+  available: false,
+  shareFile: () => refuse(),
+  shareText: () => refuse(),
 };
 
 // The version is the one the bundle was built from: the server embeds the
@@ -161,6 +169,7 @@ const inertNotifier: Notifier = {
   showMessage: async () => undefined,
   showCall: async () => undefined,
   clearCall: async () => undefined,
+  clearMessages: async () => undefined,
   onMessageActivated: inertUnsubscribe,
   flashTaskbar: async () => undefined,
   requestAttention: async () => undefined,
@@ -321,6 +330,7 @@ export const browser: Platform = {
   pushToTalk,
   globalShortcuts,
   serverScope,
+  shareSheet,
   systemIdle,
   trayStatus,
   updater,

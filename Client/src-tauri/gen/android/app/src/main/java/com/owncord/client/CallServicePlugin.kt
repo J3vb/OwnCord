@@ -27,7 +27,7 @@ class SetCallArgs {
 // from the permission dialog (onResume), still in front.
 @TauriPlugin
 class CallServicePlugin(private val activity: Activity) : Plugin(activity) {
-  private var askedForNotifications = false
+  private var askedForCallPermissions = false
   private var wantActive = false
   private var wantCamera = false
   private var started = false
@@ -79,20 +79,30 @@ class CallServicePlugin(private val activity: Activity) : Plugin(activity) {
     CallService.start(activity, wantCamera)
     started = true
     startedWithCamera = camera
-    askForNotificationsOnce()
+    askForCallPermissionsOnce()
   }
 
   private fun granted(permission: String): Boolean =
     activity.checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED
 
-  // Without this the service still runs, but its notification is hidden.
-  // Asked only once the mic is granted, so it never cuts across the
-  // webview's own mic prompt (Android drops one of two overlapping asks).
-  private fun askForNotificationsOnce() {
-    if (askedForNotifications || Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
-    askedForNotifications = true
-    if (!granted(Manifest.permission.POST_NOTIFICATIONS)) {
-      activity.requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 41)
+  // Asked together, once, only after the mic is granted, so they never cut
+  // across the webview's own mic prompt (Android drops one of two
+  // overlapping asks). Without notifications the service still runs, but
+  // its notification is hidden; without Bluetooth (Android 12+) the
+  // webview leaves a Bluetooth headset's mic out of the call.
+  private fun askForCallPermissionsOnce() {
+    if (askedForCallPermissions) return
+    askedForCallPermissions = true
+    val wanted = mutableListOf<String>()
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+      wanted += Manifest.permission.POST_NOTIFICATIONS
+    }
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+      wanted += Manifest.permission.BLUETOOTH_CONNECT
+    }
+    val missing = wanted.filter { !granted(it) }
+    if (missing.isNotEmpty()) {
+      activity.requestPermissions(missing.toTypedArray(), 41)
     }
   }
 }

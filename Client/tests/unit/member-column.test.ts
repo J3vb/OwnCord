@@ -666,6 +666,30 @@ describe("MemberColumn", () => {
         expect(ctrl.isOverlayOpen()).toBe(false);
       });
 
+      it("a phone turned sideways keeps the overlay open", () => {
+        const sideways = { matches: true };
+        vi.stubGlobal(
+          "matchMedia",
+          vi.fn((q: string) => (q.includes("pointer: coarse") ? sideways : mq)),
+        );
+        ctrl = make();
+        expect(ctrl.openOverlay()).toBe(true);
+        // Upright to sideways: past the narrow width, still the phone layout.
+        mq.set(false);
+        window.dispatchEvent(new Event("resize"));
+        expect(ctrl.isOverlayOpen()).toBe(true);
+        expect(column.hidden).toBe(false);
+        expect(guarded()).toBe(true);
+        mq.set(true);
+        window.dispatchEvent(new Event("resize"));
+        expect(ctrl.isOverlayOpen()).toBe(true);
+        // A window that leaves the overlay layout still dismisses it.
+        sideways.matches = false;
+        mq.set(false);
+        window.dispatchEvent(new Event("resize"));
+        expect(ctrl.isOverlayOpen()).toBe(false);
+      });
+
       it("a window that is not a phone leaves Back alone", () => {
         vi.stubGlobal(
           "matchMedia",

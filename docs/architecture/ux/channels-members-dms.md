@@ -170,6 +170,19 @@ sequenceDiagram
     Note over U,DM: on a newly created DM the server sends dm_channel_open to the recipient
 ```
 
+### 3.1b The DM side panels
+
+A 1:1 DM shows the partner's profile panel (`components/DmProfileSidebar.ts`:
+name, @username under a nickname, custom status, about, note, Report, Block)
+and a group shows its member panel, both in the slot beside the chat. On a
+computer they open with the conversation while the saved preference is on
+(`pages/main-page/dmProfilePanel.ts`, `GroupMemberPanelController.ts`). On the
+phone layout neither opens by itself: the header's profile button opens the
+member profile sheet (`pages/main-page/dmProfileSheet.ts`), the members button
+opens the group panel as an overlay that Back closes, and the saved preference
+is left alone. Turning the device across the phone layout closes or restores
+the panels.
+
 ### 3.1a Group DMs
 
 One picker covers 1:1 and group creation

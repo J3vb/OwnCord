@@ -106,20 +106,21 @@ func TestRevokeAllSessions_NothingToRevokeWritesNoAuditRow(t *testing.T) {
 	tok, uid := apiTokenFor(t, database, "token-only")
 	rec := audittest.Install(t, database)
 
-	// An API-token principal holds no session: the call revokes its token
-	// and no session, and leaves no socket to drop.
+	// Sign-out-everywhere is a login-session route: an API token is refused
+	// before anything is revoked or audited.
 	rr := profileDelete(t, router, "/api/v1/users/me/sessions", tok)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body = %s", rr.Code, rr.Body.String())
-	}
-	if n, current := decodeRevokeAll(t, rr.Body.Bytes()); n != 0 || current {
-		t.Fatalf("revoked = %d, current = %v; want 0 and false", n, current)
+	wantErr(t, rr, http.StatusForbidden, "LOGIN_SESSION_REQUIRED", "this action requires a login session")
+
+	// The service call revokes the token and no session; a repeat finds
+	// nothing left and must not add a row. The writer keeps order, so once a
+	// later sentinel lands any row the repeat wrote is in.
+	ctx := context.Background()
+	users := service.New(database, auth.NewRateLimiter()).Users
+	if n, err := users.RevokeAllSessions(ctx, uid); err != nil || n != 0 {
+		t.Fatalf("RevokeAllSessions = %d, %v; want 0 sessions", n, err)
 	}
 	rec.Wait(t, "session_revoke_all")
-	// A repeat finds nothing left and must not add a row. The writer keeps
-	// order, so once a later sentinel lands any row the repeat wrote is in.
-	ctx := context.Background()
-	if _, err := service.New(database, auth.NewRateLimiter()).Users.RevokeAllSessions(ctx, uid); err != nil {
+	if _, err := users.RevokeAllSessions(ctx, uid); err != nil {
 		t.Fatalf("RevokeAllSessions: %v", err)
 	}
 	db.WriteAudit(ctx, database, uid, "test_sentinel", "user", uid, "")
@@ -134,7 +135,7 @@ func TestRevokeAllSessions_NothingToRevokeWritesNoAuditRow(t *testing.T) {
 		t.Fatalf("session_revoke_all rows = %d, want 1: a no-op sign-out-everywhere wrote one", rows)
 	}
 	if len(spy.disconnected) != 0 {
-		t.Fatalf("a sign-out-everywhere with no session disconnected %v", spy.disconnected)
+		t.Fatalf("a refused sign-out-everywhere disconnected %v", spy.disconnected)
 	}
 }
 

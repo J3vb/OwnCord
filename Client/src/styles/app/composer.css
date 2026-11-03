@@ -253,6 +253,7 @@
 }
 .msg-textarea {
   flex: 1;
+  min-width: 0;
   background: transparent;
   color: var(--text-normal);
   font-size: var(--font-size-md);
@@ -264,6 +265,11 @@
 }
 .msg-textarea::placeholder {
   color: var(--text-muted);
+  /* One line: a long channel or person name ends in "…" instead of wrapping
+     onto a second line the one-row box clips. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .msg-textarea:disabled,
 .msg-textarea[aria-disabled="true"] {

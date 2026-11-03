@@ -218,6 +218,8 @@ export function serverErrorCopy(code: string, message: string): string | null {
       return connectText("error.lastRole");
     case RestErrorCode.PUSH_DISABLED:
       return connectText("error.pushDisabled");
+    case RestErrorCode.LOGIN_SESSION_REQUIRED:
+      return connectText("error.loginSessionRequired");
     default:
       return null;
   }

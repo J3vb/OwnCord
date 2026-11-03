@@ -650,6 +650,43 @@ for (const profile of PROFILES) {
       await noHorizontalScroll(page);
     });
 
+    test("the composer's + opens the attach sheet, and Take photo asks for the camera", async ({
+      page,
+    }) => {
+      await signIn(page);
+      await page.locator(".attach-btn").tap();
+      const sheet = page.locator("[data-testid='attach-sheet']");
+      await expect(sheet).toBeVisible();
+      await expect(sheet.locator(".attach-sheet-tile")).toHaveText([
+        "Take photo",
+        "Gallery",
+        "Files",
+      ]);
+      await noHorizontalScroll(page);
+
+      const chooser = page.waitForEvent("filechooser");
+      await sheet.locator("[data-testid='attach-sheet-camera']").tap();
+      const input = (await chooser).element();
+      expect(await input.getAttribute("accept")).toBe("image/*");
+      expect(await input.getAttribute("capture")).toBe("environment");
+      await expect(sheet).toHaveCount(0);
+    });
+
+    test("the composer row is +, the text and send, with room to type", async ({ page }) => {
+      await signIn(page);
+      const row = page.locator(".message-input-box");
+      for (const hidden of [".gif-btn", ".sticker-btn", ".poll-btn", ".mic-btn"]) {
+        await expect(row.locator(hidden)).toBeHidden();
+      }
+      await expect(row.locator(".attach-btn")).toBeVisible();
+      await expect(row.locator(".emoji-btn")).toBeVisible();
+      await expect(row.locator(".send-btn")).toBeVisible();
+      const text = await row.locator(".msg-textarea").boundingBox();
+      const viewport = page.viewportSize();
+      expect(text?.width ?? 0).toBeGreaterThan((viewport?.width ?? 0) * 0.5);
+      await noHorizontalScroll(page);
+    });
+
     test("a tap on a member opens the profile sheet", async ({ page }) => {
       await signIn(page);
       await page.locator("[data-testid='member-list-toggle']").click();

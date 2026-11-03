@@ -435,3 +435,57 @@ button.dcp-verify:focus-visible {
 .vw-channel-link:hover {
   color: var(--text-normal);
 }
+
+/* A phone has no room for the call and the chat stacked: the open call is the
+   call view and takes the chat column, as a server call's grid does; collapsed
+   it is the call bar above the chat. The drag handle is a mouse affordance and
+   the collapse button gets a finger-sized target. */
+@media (pointer: coarse) and (max-width: 899px), (pointer: coarse) and (max-height: 499px) {
+  .dm-call-panel--expanded:is([data-state="outgoing"], [data-state="connected"]) {
+    flex: 1 1 auto;
+    height: auto;
+    border-bottom: none;
+  }
+  /* A ring and an unanswered call cannot collapse, so they leave the chat in
+     view below them, as on a computer. */
+  .chat-area:has(
+      > .call-panel-slot
+        > .dm-call-panel--expanded:is([data-state="outgoing"], [data-state="connected"]):not(
+          [hidden]
+        )
+    )
+    > :is(.messages-slot, .typing-slot, .input-slot) {
+    display: none;
+  }
+  .dcp-resize {
+    display: none;
+  }
+  .dcp-collapse {
+    min-height: 44px;
+    padding: 0 var(--space-3);
+    font-size: var(--font-size-sm);
+  }
+  /* The call bar keeps one row: Mute and Leave, like a server call's bar,
+     and an icon-only Expand (its name stays in aria-label). The rest of the
+     controls are one tap away in the call view. */
+  .dm-call-panel--collapsed .dcp-row {
+    flex-wrap: nowrap;
+  }
+  .dm-call-panel--collapsed
+    :is([data-testid="dcp-deafen"], [data-testid="dcp-camera"], [data-testid="dcp-share"]) {
+    display: none;
+  }
+  .dm-call-panel--collapsed .dcp-collapse {
+    min-width: 44px;
+    justify-content: center;
+    padding: 0;
+  }
+  .dm-call-panel--collapsed .dcp-collapse-label {
+    display: none;
+  }
+  .dm-call-panel--collapsed .dcp-row-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}

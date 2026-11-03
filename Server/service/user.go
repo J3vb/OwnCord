@@ -380,8 +380,8 @@ func (s *UserService) ListSessions(ctx context.Context, userID int64) ([]db.Sess
 
 // MarkSessionsSeen acknowledges the account's unseen logins: every other
 // session's flag clears, the caller's own stays so the new device never
-// acknowledges itself. An API-token principal passes 0 and acknowledges all. No
-// audit row; nothing security-sensitive changes.
+// acknowledges itself. A callerSessionID of 0 acknowledges all. No audit row;
+// nothing security-sensitive changes.
 func (s *UserService) MarkSessionsSeen(ctx context.Context, userID, callerSessionID int64) error {
 	if _, err := s.st.MarkSessionsSeen(ctx, userID, callerSessionID); err != nil {
 		return fmt.Errorf("%w: failed to acknowledge sessions: %w", ErrInternal, err)

@@ -171,7 +171,13 @@ export function createDmCallRender(st: DmCallState, dc: DmCallApi) {
       "data-testid": "dcp-collapse",
     });
     btn.appendChild(createIcon(st.collapsed ? "chevron-down" : "chevron-up", 14));
-    btn.appendChild(document.createTextNode(st.collapsed ? d("expand") : d("collapse")));
+    btn.appendChild(
+      createElement(
+        "span",
+        { class: "dcp-collapse-label" },
+        st.collapsed ? d("expand") : d("collapse"),
+      ),
+    );
     btn.addEventListener(
       "click",
       () => {

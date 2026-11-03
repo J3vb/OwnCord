@@ -104,7 +104,7 @@ func TestSecondFactor_PendingEnrolmentSurvivesRestart(t *testing.T) {
 	if err != nil || user == nil {
 		t.Fatalf("GetUserByID: %v", err)
 	}
-	p := Principal{User: user}
+	p := sessionPrincipal(user)
 
 	first := NewAuthService(database, auth.NewRateLimiter(), key, nil)
 	enr, err := first.EnableTOTP(ctx, p, "correctPass1")

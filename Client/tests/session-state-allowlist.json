@@ -8,6 +8,12 @@
       "reason": "Advisory per-host server-info snapshot, rewritten or dropped by each probe of that host; moved verbatim from main.ts, whose registered reset never cleared it"
     },
     {
+      "file": "features/messaging/content/imageViewer.ts",
+      "binding": "inFlight",
+      "category": "transient",
+      "reason": "Saves and shares in flight, each removed in its own finally, so a second tap does not save twice"
+    },
+    {
       "file": "app/serverHealth.ts",
       "binding": "serverInfoInFlight",
       "category": "transient",
@@ -348,6 +354,18 @@
       "binding": "ringing",
       "category": "transient",
       "reason": "The open ringing-call notification per channel; removed when the ring ends (clearCall) or the user clicks it"
+    },
+    {
+      "file": "platform/desktop/androidNotifications.ts",
+      "binding": "shown",
+      "category": "transient",
+      "reason": "The Android notifications still in the shade, by id; each leaves on tap, on read (clearMessages) or at logout, when the main page's clearing stops"
+    },
+    {
+      "file": "platform/desktop/androidNotifications.ts",
+      "binding": "showing",
+      "category": "transient",
+      "reason": "Notifications asked for and not yet confirmed by the host, by id; each entry leaves as soon as its show settles"
     },
     {
       "file": "platform/desktop/logFiles.ts",

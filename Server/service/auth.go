@@ -31,7 +31,9 @@ type SessionDisconnector interface {
 }
 
 // Principal is the authenticated caller api.AuthMiddleware resolved for a
-// request. Session is nil for an API-token principal.
+// request. Session is nil for an API-token principal. The account-security
+// methods (two-factor changes, recovery codes and kit, account deletion)
+// refuse a principal without a session with ErrLoginSessionRequired.
 type Principal struct {
 	User    *db.User
 	Session *db.Session
@@ -190,6 +192,11 @@ var (
 
 	// Logout.
 	ErrLogoutFailed = &authError{ErrInternal, "failed to logout"}
+
+	// ErrLoginSessionRequired refuses an account-security change made with an
+	// API token: those changes take a login session. The transport writes it as
+	// 403 LOGIN_SESSION_REQUIRED.
+	ErrLoginSessionRequired = &authError{ErrForbidden, "this action requires a login session"}
 
 	// Password confirmation (account deletion and TOTP management).
 	ErrTooManyAttempts = &authError{ErrRateLimited, "too many failed attempts, try again later"}
@@ -679,7 +686,7 @@ func (s *AuthService) VerifyTOTP(ctx context.Context, partialToken, code string)
 		return nil, ErrTooManyAttempts
 	}
 
-	user, secret, err := s.challengeSecret(ctx, challenge.UserID)
+	user, err := s.challengeUser(ctx, challenge.UserID)
 	if err != nil {
 		return nil, err
 	}
@@ -696,6 +703,12 @@ func (s *AuthService) VerifyTOTP(ctx context.Context, partialToken, code string)
 	// up to ten bcrypt hashes, so it takes an admission slot first (a refusal charges
 	// nothing, and it queues like login); a TOTP code is an HMAC and needs none.
 	canonical, isRecovery := auth.NormalizeRecoveryCode(code)
+	// Only a TOTP code needs the stored secret, so an unreadable one still lets a
+	// recovery code through, and it fails before Allow, charging nothing.
+	secret, err := s.unsealTOTPSecret(user, isRecovery)
+	if err != nil {
+		return nil, err
+	}
 	release := func() {}
 	if isRecovery {
 		if release, err = s.acquireAdmission(ctx); err != nil {
@@ -801,6 +814,9 @@ func (s *AuthService) consumeRecoveryCode(ctx context.Context, userID int64, can
 // the old set is invalid the moment the new one is stored (one transaction).
 // Requires 2FA: the codes stand in for a TOTP code.
 func (s *AuthService) RegenerateRecoveryCodes(ctx context.Context, p Principal, password string) ([]string, error) {
+	if p.Session == nil {
+		return nil, ErrLoginSessionRequired
+	}
 	user := p.User
 
 	lockKey := auth.Key("pw_confirm_lock", user.ID)
@@ -845,33 +861,40 @@ func (s *AuthService) issueRecoveryCodes(ctx context.Context, userID int64) ([]s
 	return codes, nil
 }
 
-// challengeSecret resolves the user behind a partial-auth challenge and returns
-// their decrypted TOTP secret.
-func (s *AuthService) challengeSecret(ctx context.Context, challengeUserID int64) (*db.User, string, error) {
+// challengeUser resolves the user behind a partial-auth challenge.
+func (s *AuthService) challengeUser(ctx context.Context, challengeUserID int64) (*db.User, error) {
 	user, err := s.st.GetUserByID(ctx, challengeUserID)
 	if err != nil {
 		// GetUserByID answers (nil, nil) for an unknown user, so an error is a store
 		// fault: report the outage and record no attempt.
 		slog.Error("verify-totp: GetUserByID failed", "err", err, "user_id", challengeUserID)
-		return nil, "", ErrTOTPUnavailable
+		return nil, ErrTOTPUnavailable
 	}
 	if user == nil || user.TOTPSecret == nil {
-		return nil, "", ErrTOTPChallengeInvalid
+		return nil, ErrTOTPChallengeInvalid
 	}
 
 	// A ban can land inside the partial-token window, so the second factor refuses
 	// banned users as the login path does.
 	if auth.IsEffectivelyBanned(user) {
-		return nil, "", ErrBanned
+		return nil, ErrBanned
 	}
+	return user, nil
+}
 
+// unsealTOTPSecret decrypts the challenged user's stored TOTP secret, or
+// returns "" for a recovery code, which never uses it. A value that cannot be
+// read is a store failure, never a wrong code.
+func (s *AuthService) unsealTOTPSecret(user *db.User, isRecovery bool) (string, error) {
+	if isRecovery {
+		return "", nil
+	}
 	secret, decErr := auth.DecryptTOTPSecret(s.totpKey, *user.TOTPSecret)
 	if decErr != nil {
 		slog.Error("failed to decrypt TOTP secret", "user_id", user.ID, "error", decErr)
-		return nil, "", ErrTOTPSecretUnreadable
+		return "", ErrTOTPSecretUnreadable
 	}
-
-	return user, secret, nil
+	return secret, nil
 }
 
 // Logout revokes p.Session and clears the custom status. p.Session must be
@@ -910,6 +933,9 @@ func (s *AuthService) Logout(ctx context.Context, p Principal) error {
 // deletes it) or after (messages.user_id has no users row, so the foreign-key
 // check fails). The member_ban broadcast then disconnects the socket.
 func (s *AuthService) DeleteAccount(ctx context.Context, p Principal, password, ip string) error {
+	if p.Session == nil {
+		return ErrLoginSessionRequired
+	}
 	user := p.User
 
 	// Per-user lockout against password brute force on this destructive endpoint.
@@ -971,6 +997,9 @@ func (s *AuthService) DeleteAccount(ctx context.Context, p Principal, password, 
 // code hashes are stored now so they exist the moment ConfirmTOTP turns the
 // factor on; staging again replaces both.
 func (s *AuthService) EnableTOTP(ctx context.Context, p Principal, password string) (*TOTPEnrollment, error) {
+	if p.Session == nil {
+		return nil, ErrLoginSessionRequired
+	}
 	user := p.User
 
 	lockKey := auth.Key("pw_confirm_lock", user.ID)
@@ -1009,6 +1038,9 @@ func (s *AuthService) EnableTOTP(ctx context.Context, p Principal, password stri
 // ConfirmTOTP verifies code against the pending secret, persists it and revokes
 // the caller's other sessions.
 func (s *AuthService) ConfirmTOTP(ctx context.Context, p Principal, password, code string) (*TOTPChangeResult, error) {
+	if p.Session == nil {
+		return nil, ErrLoginSessionRequired
+	}
 	user := p.User
 
 	lockKey := auth.Key("pw_confirm_lock", user.ID)
@@ -1062,6 +1094,9 @@ func (s *AuthService) ConfirmTOTP(ctx context.Context, p Principal, password, co
 // DisableTOTP confirms the password, refuses while the server requires 2FA,
 // clears the secret and revokes the caller's other sessions.
 func (s *AuthService) DisableTOTP(ctx context.Context, p Principal, password string) (*TOTPChangeResult, error) {
+	if p.Session == nil {
+		return nil, ErrLoginSessionRequired
+	}
 	user := p.User
 
 	lockKey := auth.Key("pw_confirm_lock", user.ID)

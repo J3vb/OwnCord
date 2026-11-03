@@ -724,6 +724,18 @@
   overflow: hidden;
   width: min(520px, 94vw);
 }
+/* A phone shows it as a bottom sheet, like the other pickers. */
+@media (pointer: coarse) and (max-width: 899px), (pointer: coarse) and (max-height: 499px) {
+  .modal-overlay:has(> .modal.poll-composer) {
+    align-items: flex-end;
+  }
+  .modal.poll-composer {
+    width: 100%;
+    max-height: calc(100% - 48px);
+    padding-bottom: var(--safe-bottom, 0px);
+    border-radius: 16px 16px 0 0;
+  }
+}
 .poll-composer .modal-header {
   flex: none;
   padding-bottom: 12px;

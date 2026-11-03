@@ -1,5 +1,5 @@
 {
-  "nextId": 535,
+  "nextId": 538,
   "findings": [
     {
       "id": "OC-0001",
@@ -12355,6 +12355,75 @@
       "lens": "client-ui",
       "finder": "claude",
       "fixedDate": "2026-10-30"
+    },
+    {
+      "id": "OC-0535",
+      "title": "The voice key provider outlived its Room and kept the last call's Room alive",
+      "file": "Client/src/features/voice/e2eeWorker.ts",
+      "line": 26,
+      "severity": "medium",
+      "why": "One ExternalE2EEKeyProvider served every Room for the app's lifetime. livekit's E2EEManager subscribes to its provider and never unsubscribes, so the provider held the newest Room (engine, participants, tracks) until the next join, and only a blanket removeAllListeners before each join stopped the listeners from piling up.",
+      "repro": "Join and leave a voice channel on Windows or the web client: the left Room stays reachable from the key provider while idle.",
+      "evidence": "Client/tests/unit/livekit-key-provider-per-room.test.ts (one listener per event on the live provider after 12 join/leave cycles, with the real livekit-client).",
+      "suggestedFix": "Give each Room its own provider (E2EEWorker.newKeyProvider from RoomLifecycle.createRoom) and drop it on leave.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/unit/livekit-key-provider-per-room.test.ts",
+        "revertProof": "fail (a shared provider fails both tests)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-03",
+      "hunt": "client-review-2026-11-03",
+      "lens": "e2ee-auth",
+      "finder": "claude",
+      "fixedDate": "2026-11-03"
+    },
+    {
+      "id": "OC-0536",
+      "title": "Audit entries the background writer could not queue were lost instead of written directly",
+      "file": "Server/db/audit_writer.go",
+      "line": 360,
+      "severity": "medium",
+      "why": "EnqueueAuditEntry reported success whenever a writer was installed, so WriteAudit never took its synchronous fallback when the queue was full or the writer had stopped.",
+      "repro": "Audit more than the queue holds inside one flush window, or write an audit entry after the audit-writer shutdown step: the entry never reaches audit_log.",
+      "evidence": "Server/db/audit_writer_test.go (TestWriteAudit_FullQueueFallsBackToSyncWrite, TestWriteAudit_AfterStopFallsBackToSyncWrite, TestWriteAudit_FallbackKeepsUnlinkRules).",
+      "suggestedFix": "Report the enqueue result so WriteAudit falls back to the direct insert; keep the stopped writer installed so the direct insert keeps the erasure unlinking rules.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/db/audit_writer_test.go",
+        "revertProof": "fail (all three tests fail on the old enqueue)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-03",
+      "hunt": "server-review-2026-11-03",
+      "lens": "db-config-lifecycle",
+      "finder": "claude",
+      "fixedDate": "2026-11-03"
+    },
+    {
+      "id": "OC-0537",
+      "title": "The thread list query ran on the single writer connection instead of the reader pool",
+      "file": "Server/db/db.go",
+      "line": 335,
+      "severity": "medium",
+      "why": "isReadOnlySQL accepted only SELECT and PRAGMA as a leading keyword, so ListThreadInfosByParent, which starts with a WITH clause, was routed to the writer and every thread or forum page view held it.",
+      "repro": "Hold the writer with an open write transaction and list a channel's threads in the default activity order: the list waits for the transaction.",
+      "evidence": "Server/db/pool_test.go (TestFilePool_ThreadListDuringOpenWriteTx), Server/db/sql_router_queries_test.go (TestIsReadOnlySQL_GeneratedQueries).",
+      "suggestedFix": "Treat a WITH statement as read-only when no word in it is a write keyword, and pin the classification against the generated query text.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/db/pool_test.go",
+        "revertProof": "fail (both tests fail on the old classifier)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-03",
+      "hunt": "server-review-2026-11-03",
+      "lens": "db-config-lifecycle",
+      "finder": "claude",
+      "fixedDate": "2026-11-03"
     }
   ]
 }

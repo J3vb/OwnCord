@@ -3,10 +3,10 @@
 // button the server or host left out.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useMountContainer } from "../helpers/mountContainer";
+import { resetComposerServer, useFullComposerServer } from "../helpers/composerSheets";
 import { createMessageInput } from "@components/MessageInput";
 import { savePref } from "@lib/prefs/preferences";
-import { applyReadyCapabilities, resetServerCapabilities } from "@lib/net/serverCapabilities";
-import { authStore } from "@stores/auth.store";
+import { applyReadyCapabilities } from "@lib/net/serverCapabilities";
 import {
   COMPOSER_BUTTONS,
   composerButtonPrefKey,
@@ -48,17 +48,11 @@ useMountContainer(
   },
   () => {
     for (const comp of made.splice(0)) comp.destroy?.();
-    resetServerCapabilities();
-    authStore.setState((s) => ({ ...s, uploadPolicy: null }));
-    localStorage.clear();
+    resetComposerServer();
   },
 );
 
-beforeEach(() => {
-  localStorage.clear();
-  applyReadyCapabilities({ stickers: true, polls: true, voice_messages: true });
-  authStore.setState((s) => ({ ...s, uploadPolicy: { max_upload_bytes: 10 * 1024 * 1024 } }));
-});
+beforeEach(useFullComposerServer);
 
 describe("chat bar button settings", () => {
   it("shows every button by default", () => {

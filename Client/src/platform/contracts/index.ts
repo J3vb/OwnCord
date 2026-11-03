@@ -12,6 +12,7 @@ export type { PendingMessageStore } from "./pendingMessages";
 export type { SettingsStore } from "./settings";
 export type { LogFiles } from "./logFiles";
 export type { FileSaver } from "./fileSave";
+export type { ShareSheet } from "./shareSheet";
 export type { NativeFiles } from "./nativeFiles";
 export type { NativeProxies } from "./nativeProxies";
 export type { Notifier } from "./notifications";
@@ -65,6 +66,7 @@ import type { WindowPrefs } from "./windowPrefs";
 import type { AppAudio } from "./appAudio";
 import type { CallService } from "./callService";
 import type { ServerScope } from "./serverScope";
+import type { ShareSheet } from "./shareSheet";
 
 /** Every platform capability, one readonly member per contract interface. */
 export interface Platform {
@@ -99,4 +101,5 @@ export interface Platform {
   readonly appAudio: AppAudio;
   readonly callService: CallService;
   readonly serverScope: ServerScope;
+  readonly shareSheet: ShareSheet;
 }
