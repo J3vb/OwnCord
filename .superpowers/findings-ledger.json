@@ -1,5 +1,5 @@
 {
-  "nextId": 535,
+  "nextId": 536,
   "findings": [
     {
       "id": "OC-0001",
@@ -12355,6 +12355,29 @@
       "lens": "client-ui",
       "finder": "claude",
       "fixedDate": "2026-10-30"
+    },
+    {
+      "id": "OC-0535",
+      "title": "Audit entries the background writer could not queue were lost instead of written directly",
+      "file": "Server/db/audit_writer.go",
+      "line": 360,
+      "severity": "medium",
+      "why": "EnqueueAuditEntry reported success whenever a writer was installed, so WriteAudit never took its synchronous fallback when the queue was full or the writer had stopped.",
+      "repro": "Audit more than the queue holds inside one flush window, or write an audit entry after the audit-writer shutdown step: the entry never reaches audit_log.",
+      "evidence": "Server/db/audit_writer_test.go (TestWriteAudit_FullQueueFallsBackToSyncWrite, TestWriteAudit_AfterStopFallsBackToSyncWrite, TestWriteAudit_FallbackKeepsUnlinkRules).",
+      "suggestedFix": "Report the enqueue result so WriteAudit falls back to the direct insert; keep the stopped writer installed so the direct insert keeps the erasure unlinking rules.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/db/audit_writer_test.go",
+        "revertProof": "fail (all three tests fail on the old enqueue)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-03",
+      "hunt": "server-review-2026-11-03",
+      "lens": "db-config-lifecycle",
+      "finder": "claude",
+      "fixedDate": "2026-11-03"
     }
   ]
 }
