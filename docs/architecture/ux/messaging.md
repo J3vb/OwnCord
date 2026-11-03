@@ -87,6 +87,8 @@ by default). A switch hides its button in every open composer at once through
 `onPrefChange`; it only removes the icon, so the emoji and GIF shortcuts still
 open the picker. Switching a button back on never shows one the server or host
 left out (no stickers, polls or voice messages). Send and "+" cannot be hidden.
+Sticker and Poll are tiles in the "+" menu, so their switches add or remove
+the tile; a composer without "+" (a thread's) keeps Sticker in its bar.
 
 > **✓ Implemented (2026-07).** The server sends an authoritative per-channel
 > `can_send` in the ready payload (`ws/serve.go` `channelCanSend`, mirroring
@@ -213,12 +215,19 @@ Usernames are inserted as text nodes — never markup.
 The composer supports file attach with client-side validation and per-item
 upload state (already thorough — `MessageInput.ts`).
 
-**Picking files.** On a computer "+" opens the file picker. On the phone
-layout it opens a bottom sheet (`features/messaging/attachSheet.ts`) with
-Take photo (`accept="image/*" capture="environment"`), Gallery
-(`accept="image/*,video/*"`, several at once) and Files (any file, several
-at once). Each row has its own hidden input; all three feed
-`handlePasteFile()`. A row tapped after uploads were turned off opens nothing.
+**The "+" menu.** The chat bar is "+", the text, GIF, emoji, the mic and
+send; "+" opens a menu of tiles (`features/messaging/attachSheet.ts`). On a
+computer it is a two-wide grid above the bar (`role="menu"`, arrow keys move,
+Escape closes and hands focus back to "+") with Upload, Poll and Sticker. On
+the phone layout it is a bottom sheet with Take photo
+(`accept="image/*" capture="environment"`), Gallery (`accept="image/*,video/*"`,
+several at once), Files (any file, several at once) and Poll; stickers stay a
+tab of the smiley's picker there. Each file tile has its own hidden input; all
+three feed `handlePasteFile()`. With uploads off the file tiles go and "+"
+stays usable for Poll and Sticker; it is disabled only when nothing is left. A
+tile tapped after the composer locked does nothing, and locking it closes an
+open menu. On a phone row the mic and send take turns: the mic shows while
+there is nothing to send, send once there is text or a picked file.
 
 | State      | Presentation                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

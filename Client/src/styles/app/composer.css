@@ -503,3 +503,19 @@
     height: 44px;
   }
 }
+
+/* A phone row has room for the mic or send, not both: the mic shows while
+   there is nothing to send, and send takes its place once there is. */
+@media (pointer: coarse) and (max-width: 899px), (pointer: coarse) and (max-height: 499px) {
+  .message-input-box:not(.attachment-preview-bar.visible + *):has(.mic-btn:not([hidden])):has(
+      .msg-textarea:placeholder-shown
+    )
+    .send-btn,
+  .message-input-box:is(
+      .attachment-preview-bar.visible + *,
+      :has(.msg-textarea:not(:placeholder-shown))
+    )
+    .mic-btn {
+    display: none;
+  }
+}

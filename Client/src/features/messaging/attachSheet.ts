@@ -1,27 +1,33 @@
 /**
- * The composer's "+" on a phone: a sheet with Take photo, Gallery and Files,
- * each backed by its own hidden file input so the phone opens its camera,
- * its photo picker or its file manager. Every row hands the chosen files to
- * the same upload path. The owner can add rows of its own after those (Poll,
- * Voice message), so the phone row keeps only "+", the text and send. Off the
- * phone layout "+" opens the file picker, as it always did.
+ * The composer's "+": a menu of tiles. On a phone it is a bottom sheet with
+ * Take photo, Gallery and Files, each backed by its own hidden file input so
+ * the phone opens its camera, its photo picker or its file manager. Elsewhere
+ * it is a small grid above the chat bar that starts with Upload. Every file
+ * tile hands the chosen files to the same upload path. The owner adds tiles
+ * of its own after those (Poll, Sticker), so the chat bar keeps only what is
+ * used most.
  */
 
-import { appendChildren, createElement } from "@lib/dom";
+import { appendChildren, createElement, setOwnedTimeout } from "@lib/dom";
+import { Disposable } from "@lib/disposable";
 import { createIcon, type IconName } from "@lib/icons";
+import { isImeCommit } from "@lib/text/ime";
+import { enableRovingNavigation, setRovingTabindex } from "@lib/ui/a11y";
 import { isPhoneLayout, openBottomSheet } from "@lib/ui/bottomSheet";
 import { messagingText } from "../../i18n/messaging";
 
 export type AttachSource = "camera" | "gallery" | "files";
 
-/** A sheet row that is not a file source: it runs its own action. */
+/** A tile that is not a file source: it runs its own action. */
 export interface AttachAction {
-  /** Names the row's test id, `attach-sheet-<id>`. */
+  /** Names the tile's test id, `attach-sheet-<id>`. */
   readonly id: string;
   readonly icon: IconName;
   readonly label: string;
-  /** Read when the sheet opens: false leaves the row out. */
+  /** Read when the menu opens: false leaves the tile out. */
   readonly available: () => boolean;
+  /** Only in this layout; in both when left out. */
+  readonly layout?: "phone" | "desktop";
   readonly run: () => void;
 }
 
@@ -29,24 +35,29 @@ export interface AttachPickersOptions {
   readonly onFile: (file: File) => void;
   /** Read at tap time: false when attaching is off (gated, or uploads disabled). */
   readonly canAttach: () => boolean;
-  /** The composer's lifetime: listeners go, and an open sheet closes. */
+  /** The composer's lifetime: listeners go, and an open menu closes. */
   readonly signal: AbortSignal;
-  /** Rows after the file sources, on the phone sheet only. */
+  /** Tiles after the file sources. */
   readonly actions?: readonly AttachAction[];
+  /** Where the desktop menu mounts; it sits above this element's top edge. */
+  readonly menuHost?: () => HTMLElement | null;
 }
 
 export interface AttachPickers {
   /** Hidden inputs for the owner to mount; the Files one comes first. */
   readonly inputs: readonly HTMLInputElement[];
-  /** The "+" button: the sheet on a phone, the file picker elsewhere. */
-  open(): void;
-  /** Whether the phone sheet has a row besides the file sources right now. */
+  /** The "+" button: opens the menu, or closes it when it is open. `trigger`
+   *  gets focus back when the desktop menu closes with Escape. */
+  open(trigger?: HTMLElement): void;
+  /** Closes an open menu (a no-op when none is open). */
+  close(): void;
+  /** Whether the menu has a tile besides the file sources right now. */
   hasActions(): boolean;
   /** Straight to the file picker, whatever the layout. */
   openFiles(): void;
 }
 
-const ROWS: readonly { source: AttachSource; icon: IconName }[] = [
+const PHONE_SOURCES: readonly { source: AttachSource; icon: IconName }[] = [
   { source: "camera", icon: "camera" },
   { source: "gallery", icon: "image" },
   { source: "files", icon: "file-text" },
@@ -64,10 +75,48 @@ const LABEL_KEYS = {
   files: "attach.files",
 } as const;
 
+const DESKTOP_COLUMNS = 2;
+
+interface Tile {
+  readonly id: string;
+  readonly icon: IconName;
+  readonly label: string;
+  readonly run: () => void;
+}
+
+/** One tile button; `close` runs before the tile's own action. */
+function tileButton(tile: Tile, close: () => void, tileSignal: AbortSignal): HTMLButtonElement {
+  const badge = createElement("span", {
+    class: `attach-sheet-icon attach-sheet-icon-${tile.id}`,
+    "aria-hidden": "true",
+  });
+  badge.appendChild(createIcon(tile.icon, 22));
+  const btn = createElement("button", {
+    type: "button",
+    class: "attach-sheet-tile",
+    "data-testid": `attach-sheet-${tile.id}`,
+  });
+  appendChildren(btn, badge, createElement("span", {}, tile.label));
+  // The tile's signal ends on close, so a second tap runs nothing.
+  btn.addEventListener(
+    "click",
+    () => {
+      close();
+      tile.run();
+    },
+    { signal: tileSignal },
+  );
+  return btn;
+}
+
 export function createAttachPickers(options: AttachPickersOptions): AttachPickers {
   const { onFile, canAttach, signal } = options;
   const actions = options.actions ?? [];
-  const liveActions = (): AttachAction[] => actions.filter((a) => a.available());
+  const liveActions = (phone: boolean): AttachAction[] =>
+    actions.filter(
+      (a) =>
+        (a.layout === undefined || a.layout === (phone ? "phone" : "desktop")) && a.available(),
+    );
 
   function makeInput(source: AttachSource): HTMLInputElement {
     const input = createElement("input", {
@@ -95,7 +144,49 @@ export function createAttachPickers(options: AttachPickersOptions): AttachPicker
     gallery: makeInput("gallery"),
   };
 
-  function openSheet(): void {
+  const pickSource = (source: AttachSource) => () => {
+    if (canAttach()) bySource[source].click();
+  };
+
+  /** The tiles on offer right now; with uploads off the file tiles go. */
+  function tilesFor(phone: boolean): Tile[] {
+    const tiles: Tile[] = [];
+    if (canAttach()) {
+      if (phone) {
+        for (const { source, icon } of PHONE_SOURCES) {
+          tiles.push({
+            id: source,
+            icon,
+            label: messagingText(LABEL_KEYS[source]),
+            run: pickSource(source),
+          });
+        }
+      } else {
+        tiles.push({
+          id: "files",
+          icon: "file-text",
+          label: messagingText("attach.upload"),
+          run: pickSource("files"),
+        });
+      }
+    }
+    for (const action of liveActions(phone)) {
+      tiles.push({
+        id: action.id,
+        icon: action.icon,
+        label: action.label,
+        run: () => {
+          if (action.available()) action.run();
+        },
+      });
+    }
+    return tiles;
+  }
+
+  /** The open menu's teardown, or null when none is open. */
+  let closeOpen: (() => void) | null = null;
+
+  function openSheet(tiles: readonly Tile[]): void {
     const grid = createElement("div", { class: "attach-sheet" });
     const sheet = openBottomSheet({
       label: messagingText("attach.sheetLabel"),
@@ -103,55 +194,91 @@ export function createAttachPickers(options: AttachPickersOptions): AttachPicker
       className: "attach-sheet-panel",
       testId: "attach-sheet",
       signal,
+      onClosed: () => {
+        if (closeOpen === closeSheet) closeOpen = null;
+      },
     });
-    const addTile = (id: string, icon: IconName, label: string, run: () => void): void => {
-      const badge = createElement("span", {
-        class: `attach-sheet-icon attach-sheet-icon-${id}`,
-        "aria-hidden": "true",
-      });
-      badge.appendChild(createIcon(icon, 22));
-      const btn = createElement("button", {
-        type: "button",
-        class: "attach-sheet-tile",
-        "data-testid": `attach-sheet-${id}`,
-      });
-      appendChildren(btn, badge, createElement("span", {}, label));
-      // The sheet's signal ends on close, so a second tap runs nothing.
-      btn.addEventListener(
-        "click",
-        () => {
-          sheet.close();
-          run();
-        },
-        { signal: sheet.signal },
-      );
-      grid.appendChild(btn);
+    const closeSheet = (): void => {
+      closeOpen = null;
+      sheet.close();
     };
-    // With uploads off the file rows go and only the actions stay.
-    if (canAttach()) {
-      for (const { source, icon } of ROWS) {
-        addTile(source, icon, messagingText(LABEL_KEYS[source]), () => {
-          if (canAttach()) bySource[source].click();
-        });
-      }
+    closeOpen = closeSheet;
+    for (const tile of tiles) grid.appendChild(tileButton(tile, closeSheet, sheet.signal));
+  }
+
+  function openMenu(tiles: readonly Tile[], host: HTMLElement, trigger?: HTMLElement): void {
+    const life = new Disposable();
+    signal.addEventListener("abort", () => life.destroy(), { signal: life.signal });
+    const menu = createElement("div", {
+      class: "attach-menu",
+      role: "menu",
+      "aria-label": messagingText("attach.sheetLabel"),
+      "data-testid": "attach-sheet",
+    });
+    const closeMenu = (returnFocus = false): void => {
+      if (closeOpen === closeNow) closeOpen = null;
+      life.destroy();
+      menu.remove();
+      if (returnFocus) trigger?.focus();
+    };
+    const closeNow = (): void => closeMenu();
+    closeOpen = closeNow;
+    for (const tile of tiles) {
+      const btn = tileButton(tile, closeNow, life.signal);
+      btn.setAttribute("role", "menuitem");
+      menu.appendChild(btn);
     }
-    for (const action of liveActions()) {
-      addTile(action.id, action.icon, action.label, () => {
-        if (action.available()) action.run();
-      });
-    }
+    host.appendChild(menu);
+    setRovingTabindex(menu, ".attach-sheet-tile");
+    enableRovingNavigation(menu, ".attach-sheet-tile", life.signal, "grid", DESKTOP_COLUMNS);
+    menu.addEventListener(
+      "keydown",
+      (e) => {
+        if (e.key !== "Escape" || isImeCommit(e)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        closeMenu(true);
+      },
+      { signal: life.signal },
+    );
+    menu.querySelector<HTMLElement>(".attach-sheet-tile")?.focus();
+    // Deferred so the click that opened the menu does not close it at once.
+    setOwnedTimeout(
+      life.signal,
+      () =>
+        document.addEventListener(
+          "mousedown",
+          (e) => {
+            const target = e.target as Node;
+            if (menu.contains(target) || trigger?.contains(target) === true) return;
+            closeMenu();
+          },
+          { signal: life.signal },
+        ),
+      0,
+    );
   }
 
   return {
     inputs: [bySource.files, bySource.camera, bySource.gallery],
-    open: () => {
-      if (isPhoneLayout()) {
-        if (canAttach() || liveActions().length > 0) openSheet();
-      } else if (canAttach()) {
-        bySource.files.click();
+    open: (trigger) => {
+      if (closeOpen !== null) {
+        closeOpen();
+        return;
       }
+      const phone = isPhoneLayout();
+      const tiles = tilesFor(phone);
+      if (tiles.length === 0) return;
+      if (phone) {
+        openSheet(tiles);
+        return;
+      }
+      const host = options.menuHost?.() ?? null;
+      if (host !== null) openMenu(tiles, host, trigger);
+      else if (canAttach()) bySource.files.click();
     },
-    hasActions: () => liveActions().length > 0,
+    close: () => closeOpen?.(),
+    hasActions: () => liveActions(isPhoneLayout()).length > 0,
     openFiles: () => {
       if (canAttach()) bySource.files.click();
     },

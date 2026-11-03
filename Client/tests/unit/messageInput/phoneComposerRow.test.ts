@@ -1,6 +1,6 @@
-// The phone composer row is "+", the text and send: the smiley stands for the
-// emoji, GIF and sticker tabs, and Poll and Voice message move to the "+"
-// sheet. A wider window keeps every button in the row.
+// The composer row is "+", the text, GIF, emoji, the mic and send. Poll moves
+// to the "+" menu everywhere; Sticker joins it off the phone, and on a phone
+// the smiley holds the sticker tab instead.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as mocks from "../../helpers/messageInputMocks";
 import { usePhone } from "../../helpers/phoneMedia";
@@ -61,47 +61,38 @@ describe("phone composer row", () => {
     };
   }
 
-  it("keeps only +, the smiley and send in the row on a phone", () => {
+  it("keeps +, GIF, the smiley, the mic and send in the row on a phone", () => {
     usePhone();
     const b = mountFull();
-    expect(b.attach.hidden).toBe(false);
-    expect(b.emoji.hidden).toBe(false);
-    expect(b.send.hidden).toBe(false);
-    for (const hidden of [b.gif, b.sticker, b.poll, b.mic]) expect(hidden.hidden).toBe(true);
-    expect(b.emoji.getAttribute("aria-label")).toBe("Emoji, GIFs and stickers");
+    for (const shown of [b.attach, b.gif, b.emoji, b.mic, b.send]) expect(shown.hidden).toBe(false);
+    for (const hidden of [b.sticker, b.poll]) expect(hidden.hidden).toBe(true);
+    expect(b.emoji.getAttribute("aria-label")).toBe("Emoji and stickers");
     b.comp.destroy?.();
   });
 
-  it("keeps every button in the row off the phone layout", () => {
+  it("keeps the same row off the phone layout, with Sticker and Poll in the + menu", () => {
     const b = mountFull();
-    for (const shown of [b.emoji, b.gif, b.sticker, b.poll, b.mic])
-      expect(shown.hidden).toBe(false);
+    for (const shown of [b.attach, b.gif, b.emoji, b.mic, b.send]) expect(shown.hidden).toBe(false);
+    for (const hidden of [b.sticker, b.poll]) expect(hidden.hidden).toBe(true);
     expect(b.emoji.getAttribute("aria-label")).toBe("Emoji");
     b.attach.click();
-    expect(sheet()).toBeNull();
+    expect(tileLabels()).toEqual(["Upload", "Poll", "Sticker"]);
     b.comp.destroy?.();
   });
 
-  it("offers Poll and Voice message in the + sheet, each running its own action", () => {
+  it("offers Poll in the + sheet, running its own action", () => {
     usePhone();
     const b = mountFull();
-    const micClick = vi.spyOn(b.mic, "click");
     b.attach.click();
-    expect(tileLabels()).toEqual(["Take photo", "Gallery", "Files", "Poll", "Voice message"]);
+    expect(tileLabels()).toEqual(["Take photo", "Gallery", "Files", "Poll"]);
     document.querySelector<HTMLButtonElement>('[data-testid="attach-sheet-poll"]')!.click();
     expect(sheet()).toBeNull();
     expect(b.onCreatePoll).toHaveBeenCalledOnce();
-
-    b.attach.click();
-    document.querySelector<HTMLButtonElement>('[data-testid="attach-sheet-voice"]')!.click();
-    expect(sheet()).toBeNull();
-    expect(micClick).toHaveBeenCalledOnce();
     b.comp.destroy?.();
   });
 
   it("leaves out a sheet row the user switched off in settings", () => {
     savePref(composerButtonPrefKey("poll"), false);
-    savePref(composerButtonPrefKey("voice"), false);
     usePhone();
     const b = mountFull();
     b.attach.click();
@@ -119,6 +110,16 @@ describe("phone composer row", () => {
     b.comp.destroy?.();
   });
 
+  it("keeps + usable for Poll and Sticker off the phone when the server has uploads off", () => {
+    authStore.setState((s) => ({ ...s, uploadPolicy: { max_upload_bytes: 0 } }));
+    const b = mountFull();
+    expect(b.attach.disabled).toBe(false);
+    expect(b.mic.hidden).toBe(true);
+    b.attach.click();
+    expect(tileLabels()).toEqual(["Poll", "Sticker"]);
+    b.comp.destroy?.();
+  });
+
   it("disables + when uploads are off and nothing else is in the sheet", () => {
     authStore.setState((s) => ({ ...s, uploadPolicy: { max_upload_bytes: 0 } }));
     savePref(composerButtonPrefKey("poll"), false);
@@ -128,20 +129,19 @@ describe("phone composer row", () => {
     b.comp.destroy?.();
   });
 
-  it("hides the smiley only when all three expression buttons are switched off", () => {
+  it("hides the smiley only when emoji and stickers are both switched off", () => {
     savePref(composerButtonPrefKey("emoji"), false);
     usePhone();
     const b = mountFull();
     expect(b.emoji.hidden).toBe(false);
-    savePref(composerButtonPrefKey("gif"), false);
     savePref(composerButtonPrefKey("sticker"), false);
     expect(b.emoji.hidden).toBe(true);
+    expect(b.gif.hidden).toBe(false);
     b.comp.destroy?.();
   });
 
-  it("opens the smiley on the sticker tab when emoji and GIF are switched off", () => {
+  it("opens the smiley on the sticker tab when emoji is switched off", () => {
     savePref(composerButtonPrefKey("emoji"), false);
-    savePref(composerButtonPrefKey("gif"), false);
     usePhone();
     const b = mountFull();
     b.emoji.click();
@@ -163,17 +163,19 @@ describe("phone composer row", () => {
     b.comp.destroy?.();
   });
 
-  it("moves the buttons when a resize crosses onto or off the phone layout", () => {
+  it("swaps the + menu's Sticker tile when a resize crosses onto or off the phone layout", () => {
     const b = mountFull();
-    expect(b.gif.hidden).toBe(false);
     usePhone();
     window.dispatchEvent(new Event("resize"));
-    expect(b.gif.hidden).toBe(true);
-    expect(b.mic.hidden).toBe(true);
+    expect(b.mic.hidden).toBe(false);
+    b.attach.click();
+    expect(tileLabels()).not.toContain("Sticker");
+    closeBottomSheet();
     usePhone(false);
     window.dispatchEvent(new Event("resize"));
     expect(b.gif.hidden).toBe(false);
-    expect(b.mic.hidden).toBe(false);
+    b.attach.click();
+    expect(tileLabels()).toContain("Sticker");
     b.comp.destroy?.();
   });
 });

@@ -672,18 +672,22 @@ for (const profile of PROFILES) {
       await expect(sheet).toHaveCount(0);
     });
 
-    test("the composer row is +, the text and send, with room to type", async ({ page }) => {
+    test("the composer row is +, the text, GIF, emoji and send, with room to type", async ({
+      page,
+    }) => {
       await signIn(page);
       const row = page.locator(".message-input-box");
-      for (const hidden of [".gif-btn", ".sticker-btn", ".poll-btn", ".mic-btn"]) {
+      for (const hidden of [".sticker-btn", ".poll-btn"]) {
         await expect(row.locator(hidden)).toBeHidden();
       }
-      await expect(row.locator(".attach-btn")).toBeVisible();
-      await expect(row.locator(".emoji-btn")).toBeVisible();
-      await expect(row.locator(".send-btn")).toBeVisible();
+      for (const shown of [".attach-btn", ".gif-btn", ".emoji-btn", ".send-btn"]) {
+        await expect(row.locator(shown)).toBeVisible();
+      }
       const text = await row.locator(".msg-textarea").boundingBox();
       const viewport = page.viewportSize();
-      expect(text?.width ?? 0).toBeGreaterThan((viewport?.width ?? 0) * 0.5);
+      // Four controls share the row with the text (the mic and send take
+      // turns), so the text keeps at least two fifths of the screen.
+      expect(text?.width ?? 0).toBeGreaterThan((viewport?.width ?? 0) * 0.4);
       await noHorizontalScroll(page);
     });
 
