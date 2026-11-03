@@ -1,5 +1,5 @@
 {
-  "nextId": 546,
+  "nextId": 547,
   "findings": [
     {
       "id": "OC-0001",
@@ -12600,6 +12600,29 @@
         "commit": "pending",
         "test": "Server/ws/voice_e2ee_offer_holder_test.go",
         "revertProof": "fail (without the delivery holder check the completed lower-uid join case still delivers the offer)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-03",
+      "hunt": "server-review-2026-11-03",
+      "lens": "ws-voice",
+      "finder": "claude",
+      "fixedDate": "2026-11-03"
+    },
+    {
+      "id": "OC-0546",
+      "title": "A moderator move of a member parked in the reconnect grace window ended the call and dropped the server mute",
+      "file": "Server/ws/voice_moderation_move.go",
+      "line": 58,
+      "severity": "medium",
+      "why": "With no live connection to hold the move, the parked membership was torn down with no stash and no voice_moved, so a resume inside the window found itself out of voice and the moderator's mute or deafen was lost with the row.",
+      "repro": "Member in voice drops its socket (call parked); a moderator moves it to another channel; the member resumes within 15 s and receives no voice_moved, and the mute is gone on its next join.",
+      "evidence": "Server/ws/voice_grace_modmove_test.go (TestVoiceMembership_ModeratorMoveOfParkedCallFollowsResume).",
+      "suggestedFix": "Keep the move (flags and voice_moved) for the parking session in the grace state; its resume collects it, stashes the flags and delivers the frame.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/ws/voice_grace_modmove_test.go",
+        "revertProof": "fail (without the kept move the resume gets no voice_moved and the re-join row is not server-muted)"
       },
       "confidence": "high",
       "status": "fixed",

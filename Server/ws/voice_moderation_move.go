@@ -46,15 +46,22 @@ func evictForMove(ctx context.Context, mod VoiceModerator, targetID, channelID i
 // it had been set. Under the lock the stash exists exactly when the eviction
 // happened. It reports false, with nothing stashed, when the target has no
 // connection on this node or has left channelID. A target whose connection is
-// parked in the grace window is evicted without a stash (there is no live
-// connection to hold one), as the unlocked pair did.
+// parked in the grace window has no live connection to hold the stash, so the
+// move is kept for the parking session instead (parkedModMove): its resume
+// collects the flags and the voice_moved frame and re-joins the destination.
 func (h *Hub) EvictForModeratorMove(ctx context.Context, userID, channelID int64, serverMuted, serverDeafened bool, serverMutedBy *int64) bool {
 	txn := h.begin(userID)
 	defer txn.end()
 	c := h.voiceClient(userID)
 	if c == nil {
 		h.noteModeratorExit(userID, nil)
-		return h.leaveParkedVoice(ctx, txn, txn.takeParked(channelID), voiceLeaveReasonModerator)
+		e := txn.takeParked(channelID)
+		if !h.leaveParkedVoice(ctx, txn, e, voiceLeaveReasonModerator) {
+			return false
+		}
+		h.voiceReg.voiceGrace.noteParkedModMove(userID, e.client.tokenHash,
+			modFlagStash{muted: serverMuted, deafened: serverDeafened, mutedBy: serverMutedBy})
+		return true
 	}
 	evicted := h.evictAndStash(ctx, txn, c, channelID,
 		modFlagStash{muted: serverMuted, deafened: serverDeafened, mutedBy: serverMutedBy},

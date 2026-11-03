@@ -865,13 +865,26 @@ func TestMultiDevice_ModeratorFramesReachOnlyTheCallDevice(t *testing.T) {
 		if !f.hub.EvictForModeratorMove(context.Background(), f.uid, f.voiceA, false, false, nil) {
 			t.Fatal("moderator move did not tear down the parked call")
 		}
-		if f.hub.SendToVoiceDevice(f.uid, buildVoiceMoved(f.voiceB, "", 99)) {
-			t.Fatal("a parked call's moderator frame was routed to another device")
+		if !f.hub.SendToVoiceDevice(f.uid, buildVoiceMoved(f.voiceB, "", 99)) {
+			t.Fatal("a parked call's moderator frame was not kept for its session")
 		}
 		b.settle()
 		if b.index(0, MsgTypeVoiceMoved, nil) >= 0 {
 			t.Fatal("device B received voice_moved for A's parked call")
 		}
+		// Another session resuming does not collect A's move; A's resume does.
+		other := f.newConn(f.uid, "session-c", f.text)
+		other.lastSeq = 1
+		f.hub.registerNowTest(other, map[int64]bool{f.text: true})
+		c := &mdDev{c: other}
+		c.settle()
+		if c.index(0, MsgTypeVoiceMoved, nil) >= 0 {
+			t.Fatal("another session's resume collected A's parked move")
+		}
+		resumed := f.newConn(f.uid, "session-a", f.text)
+		resumed.lastSeq = 1
+		f.hub.registerNowTest(resumed, map[int64]bool{f.text: true})
+		(&mdDev{c: resumed}).await(t, MsgTypeVoiceMoved, nil)
 	})
 }
 

@@ -3151,10 +3151,15 @@ the destination, so capacity, token minting and key-holder election keep their
 single implementation.
 
 A target whose socket has dropped while the server holds its call open for a
-reconnect (up to 15 seconds) has no socket to receive `voice_moved`. The server
-removes it from voice instead, audits the action as `voice_mod_kick`, and
-answers the moderator with `VOICE_ERROR` ("user was reconnecting; removed from
-voice instead of moved").
+reconnect (up to 15 seconds) has no socket to receive `voice_moved` yet. The
+server removes it from the source channel at once and keeps the move for that
+device session: when the same session resumes inside the window it receives
+`voice_moved` first, and its re-join of the destination keeps any server
+mute or deafen. The move is audited as `voice_mod_move`. A fresh connect
+(a reload) or a resume after the window gets nothing and is simply out of
+voice. Only when the move cannot be kept or delivered (the destination grant fails) does
+the server answer the moderator with `VOICE_ERROR` ("user was reconnecting;
+removed from voice instead of moved") and audit `voice_mod_kick`.
 
 ### voice_moved (Server -> Client, direct)
 

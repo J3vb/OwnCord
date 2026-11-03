@@ -536,6 +536,11 @@ func (h *Hub) DisconnectFromVoiceInChannel(ctx context.Context, userID, channelI
 func (h *Hub) SetPendingVoiceModFlags(userID int64, serverMuted, serverDeafened bool, serverMutedBy *int64) bool {
 	txn := h.begin(userID)
 	defer txn.end()
+	if !serverMuted && !serverDeafened {
+		// A clear also forgets a move kept for a parked session: the move it
+		// belonged to did not complete.
+		h.voiceReg.voiceGrace.dropParkedModMove(userID)
+	}
 	// The stash rides the connection holding the call: its eviction and the target's
 	// re-join consume it.
 	c := h.voiceClient(userID)

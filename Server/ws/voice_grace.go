@@ -50,6 +50,9 @@ type voiceGraceState struct {
 	// next registers. Consumed by takeMoved, dropped when stale (movedNoteTTL) and
 	// capped (movedNoteCap).
 	moved map[movedKey]movedNote
+	// modMoves holds, per user, a moderator move that evicted a parked call, for
+	// the parking session to collect on resume (voice_grace_modmove.go).
+	modMoves map[int64]*parkedModMove
 	// expiring counts expiry teardowns past takeForExpiry, so close can wait for one
 	// already writing to the database.
 	expiring sync.WaitGroup
@@ -123,6 +126,7 @@ func (s *voiceGraceState) close() {
 	s.mu.Lock()
 	s.closed = true
 	clear(s.moved)
+	clear(s.modMoves)
 	for uid, e := range s.entries {
 		e.timer.Stop()
 		delete(s.entries, uid)

@@ -122,8 +122,11 @@ const voiceExitWindow = 30 * time.Second
 // which send no moderator frame, so a stamp there is never read. Only moderator
 // paths stamp: a move to another device or an ordinary leave must not make a device
 // the target of a later moderator frame. c == nil is a parked call being torn down:
-// every stamp is cleared and the frame goes nowhere (the "reconnecting" answer).
+// every stamp is cleared and the frame goes nowhere (the "reconnecting" answer),
+// unless the move of a parked call then keeps it for the resume
+// (noteParkedModMove). Any moderator exit supersedes an earlier parked move.
 func (h *Hub) noteModeratorExit(userID int64, c *Client) {
+	h.voiceReg.voiceGrace.dropParkedModMove(userID)
 	for _, o := range h.clientsOf(userID) {
 		if o != c {
 			o.voiceExitAt.Store(0)
@@ -137,10 +140,15 @@ func (h *Hub) noteModeratorExit(userID int64, c *Client) {
 // SendToVoiceDevice delivers msg to the connection of userID that holds their call
 // or just lost it to a moderator (Client.voiceExitAt), and to no other device: a
 // voice_moved frame makes its receiver join the destination, which on the user's
-// other devices would steal the call. It reports false when no connection qualifies
-// (the call was parked, or nothing left it), which the moderator handlers read as
-// "the user was reconnecting".
+// other devices would steal the call. A moderator move that evicted a parked call
+// keeps msg for that session's resume (queueParkedModMoveFrame) and reports true.
+// It reports false when no connection qualifies (the call was parked and not
+// moved, or nothing left it), which the moderator handlers read as "the user was
+// reconnecting".
 func (h *Hub) SendToVoiceDevice(userID int64, msg []byte) bool {
+	if h.voiceReg.voiceGrace.queueParkedModMoveFrame(userID, msg) {
+		return true
+	}
 	var target *Client
 	var latest int64
 	for _, c := range h.clientsOf(userID) {
