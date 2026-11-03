@@ -433,6 +433,14 @@ func (s *ErasureService) Reconcile(ctx context.Context, lister StorageLister, cu
 		if referenced[name] {
 			continue
 		}
+		if err := ctx.Err(); err != nil {
+			return removed, fmt.Errorf("reconcile: %w", err)
+		}
+		// The batch lookup can be seconds old on a big directory: a row that
+		// named this file since then keeps it.
+		if named, err := s.st.ReferencedStoredFiles(ctx, []string{name}); err != nil || named[name] {
+			continue
+		}
 		if err := s.files.Delete(name); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			slog.Warn("erasure: reconciliation could not remove a stranded file", "err", err)
 			continue

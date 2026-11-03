@@ -302,20 +302,21 @@ func (m *maintenance) sweepOrphans(ctx context.Context) error {
 		return nil
 	}
 	cutoff := time.Now().Add(-1 * time.Hour)
+	// On an error the names of rows already deleted still come back: their
+	// files are removed before the error is reported.
 	orphanFiles, err := m.database.DeleteOrphanedAttachments(ctx, cutoff)
-	if err != nil {
-		return err
-	}
-	if len(orphanFiles) == 0 {
-		return nil
-	}
 	// Best-effort file cleanup.
 	for _, filename := range orphanFiles {
 		if delErr := m.files.Delete(filename); delErr != nil {
 			m.log.Warn("failed to delete orphan file", "file", filename, "error", delErr)
 		}
 	}
-	m.log.Info("cleaned up orphaned attachments", "count", len(orphanFiles))
+	if len(orphanFiles) > 0 {
+		m.log.Info("cleaned up orphaned attachments", "count", len(orphanFiles))
+	}
+	if err != nil {
+		return fmt.Errorf("sweep orphans: %w", err)
+	}
 	return nil
 }
 

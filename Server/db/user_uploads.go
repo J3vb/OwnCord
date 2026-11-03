@@ -184,12 +184,14 @@ func (d *DB) OwnAttachmentInUse(ctx context.Context, id string, userID int64) (i
 	return inUse, true, nil
 }
 
+// attachmentStoredNameInUseSQL seeks idx_attachments_stored_as.
+const attachmentStoredNameInUseSQL = `SELECT EXISTS (SELECT 1 FROM attachments WHERE stored_as = ?)`
+
 // AttachmentStoredNameInUse reports whether any attachment row still names the
 // stored file storedAs.
 func (d *DB) AttachmentStoredNameInUse(ctx context.Context, storedAs string) (bool, error) {
 	var n int
-	err := d.reader.QueryRowContext(ctx,
-		`SELECT EXISTS (SELECT 1 FROM attachments WHERE stored_as = ?)`, storedAs).Scan(&n)
+	err := d.reader.QueryRowContext(ctx, attachmentStoredNameInUseSQL, storedAs).Scan(&n)
 	if err != nil {
 		return false, fmt.Errorf("AttachmentStoredNameInUse: %w", err)
 	}
