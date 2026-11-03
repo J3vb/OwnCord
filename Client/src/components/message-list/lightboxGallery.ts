@@ -1,5 +1,6 @@
 /**
- * Previous/next arrows between a message's images in the image viewer (3A-10c).
+ * Previous/next arrows between a message's images in the image viewer (3A-10c),
+ * plus a sideways swipe on a touch screen.
  *
  * Loaded lazily by `openImageLightbox` (attachments.ts) only when the clicked
  * message has two or more images, so a single-image open never pays for it. It
@@ -131,6 +132,8 @@ export function attachLightboxGallery(gallery: LightboxGallery, handle: Lightbox
       { signal },
     );
   }
+
+  handle.onSwipeStep((direction) => show(index + direction, direction));
 
   document.addEventListener(
     "keydown",
