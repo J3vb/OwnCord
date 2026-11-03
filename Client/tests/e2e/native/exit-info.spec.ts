@@ -6,8 +6,9 @@
  * - the run file (`run-<pid>.state`) is written on Windows, with memory and
  *   the main thread's state, so a silent ending reads as "last seen at T";
  * - a run file an earlier process left is reported at the next start, and
- *   the Application event log is asked about that pid (a dead pid with no
- *   record gives the "no crash or hang record" line, never an error);
+ *   the Application event log's crash record for that pid is copied into the
+ *   log (the test writes a real Application Error record first, so the
+ *   query, the record's encoding and the parser are all exercised);
  * - a WebView2 renderer crash (CDP `Page.crash`, the `chrome://crash`
  *   equivalent) is logged through WebView2's ProcessFailed event.
  *
@@ -17,13 +18,35 @@
  */
 
 import { test, expect } from "@playwright/test";
+import { execFile } from "node:child_process";
 import { readFile, readdir } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, join } from "node:path";
+import { promisify } from "node:util";
 import { startNativeApp, withNativeArtifacts, type NativeApp } from "../support/native-app";
 
 const APP_LOG_DIR = join(process.env.LOCALAPPDATA ?? "", "com.owncord.e2e", "logs");
 /** A pid no process holds: Windows pids are multiples of four. */
 const GONE_PID = 4_000_001;
+
+/** Write an Application Error record, as Windows Error Reporting would,
+ *  for a crash of `GONE_PID` in `x.dll`. CI runners are administrators. */
+async function writeCrashRecord(): Promise<void> {
+  const exe = basename(process.env.OWNCORD_E2E_CLIENT_BINARY ?? "owncord-client.exe");
+  const fields = [exe, "0.0.0.0", "0", "x.dll", "1.2.3.4", "0", "c0000005", "0x10"]
+    .concat(`0x${GONE_PID.toString(16)}`)
+    .map((value) => `'${value}'`)
+    .join(",");
+  const script =
+    "$i = New-Object System.Diagnostics.EventInstance(1000, 100, " +
+    "[System.Diagnostics.EventLogEntryType]::Error); " +
+    `[System.Diagnostics.EventLog]::WriteEvent('Application Error', $i, @(${fields}))`;
+  await promisify(execFile)("powershell.exe", [
+    "-NoProfile",
+    "-NonInteractive",
+    "-Command",
+    script,
+  ]);
+}
 
 async function readLog(): Promise<string> {
   return readFile(join(APP_LOG_DIR, "owncord-client.log"), "utf8").catch(() => "");
@@ -48,6 +71,7 @@ test("the run file, a previous run's report and a renderer crash reach the nativ
   test.setTimeout(180_000);
   let app: NativeApp | undefined;
   try {
+    await writeCrashRecord();
     app = await startNativeApp(undefined, {
       seedLogFiles: {
         [`run-${GONE_PID}.state`]:
@@ -67,7 +91,7 @@ test("the run file, a previous run's report and a renderer crash reach the nativ
         );
         const report = await logShows(
           new RegExp(
-            `(no crash or hang record for pid ${GONE_PID}|Windows event log is not available)`,
+            `Windows recorded a crash of the previous run \\(pid ${GONE_PID}\\): exception 0xC0000005 \\(access violation\\) in module 'x\\.dll' version 1\\.2\\.3\\.4`,
           ),
         );
         expect(report).not.toContain("panicked");

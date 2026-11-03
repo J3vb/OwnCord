@@ -51,6 +51,11 @@ const HEARTBEAT: Duration = Duration::from_secs(10);
 const PING_EVERY: Duration = Duration::from_secs(1);
 const HANG_AFTER: Duration = Duration::from_secs(5);
 const MEMORY_STEP_MB: u64 = 512;
+/// The run file's state while an update installer takes over.
+const UPDATE_STATE: &str = "handing over to an update installer";
+/// Seconds after which an unanswered webview probe no longer holds back the
+/// next one.
+const PROBE_GIVE_UP_SECS: i64 = 30;
 const RUN_FILE_PREFIX: &str = "run-";
 const RUN_FILE_SUFFIX: &str = ".state";
 
@@ -79,8 +84,10 @@ struct Watch {
     /// the webview reports only the stop (WebView2). Set once by
     /// [`watch_webview`].
     webview_probe: OnceLock<Box<dyn Fn() + Send + Sync>>,
-    /// A probe is in flight: no second one is queued behind a busy page.
-    webview_probe_pending: AtomicBool,
+    /// Monotonic second the probe in flight was sent; -1 when none is. A
+    /// probe whose answer never comes (its page replaced) stops blocking the
+    /// next one after [`PROBE_GIVE_UP_SECS`].
+    webview_probe_sent: AtomicI64,
 }
 
 impl Watch {
@@ -96,7 +103,7 @@ impl Watch {
             run_file_lock: Mutex::new(()),
             memory_logged_mb: AtomicU64::new(0),
             webview_probe: OnceLock::new(),
-            webview_probe_pending: AtomicBool::new(false),
+            webview_probe_sent: AtomicI64::new(-1),
         }
     }
 }
@@ -260,7 +267,15 @@ fn probe_webview(watch: &Watch) {
     let Some(probe) = watch.webview_probe.get() else {
         return;
     };
-    if !watch.webview_probe_pending.swap(true, Ordering::SeqCst) {
+    let now = mono();
+    let sent = watch.webview_probe_sent.load(Ordering::SeqCst);
+    let free = sent < 0 || now - sent >= PROBE_GIVE_UP_SECS;
+    if free
+        && watch
+            .webview_probe_sent
+            .compare_exchange(sent, now, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
+    {
         probe();
     }
 }
@@ -278,7 +293,7 @@ fn set_webview_probe(probe: Box<dyn Fn() + Send + Sync>) {
 #[cfg(windows)]
 fn webview_probe_done(answered: bool) {
     if let Some(watch) = WATCH.get() {
-        watch.webview_probe_pending.store(false, Ordering::SeqCst);
+        watch.webview_probe_sent.store(-1, Ordering::SeqCst);
     }
     if answered {
         webview_answers();
@@ -293,7 +308,7 @@ fn write_run_file(watch: &Watch) {
     // Kept on every heartbeat while the installer runs, so a process the
     // installer ends reads as the update handoff, not an unexplained end.
     let state = if crate::update_commands::installer_launching() {
-        "handing over to an update installer"
+        UPDATE_STATE
     } else {
         "running"
     };
@@ -353,11 +368,15 @@ fn report_previous_runs(dir: &Path, own_pid: u32) {
             continue;
         }
         let contents = std::fs::read_to_string(&path).unwrap_or_default();
-        log::warn!("{}", previous_run_report(pid, &contents));
-        ended.push(crate::system_crash_report::EndedRun {
-            pid,
-            last_seen: modified_secs(&path),
-        });
+        if handed_to_update(&contents) {
+            log::info!("[exit] the previous run (pid {pid}) ended for an update");
+        } else {
+            log::warn!("{}", previous_run_report(pid, &contents));
+            ended.push(crate::system_crash_report::EndedRun {
+                pid,
+                last_seen: modified_secs(&path),
+            });
+        }
         if let Err(e) = std::fs::remove_file(&path) {
             log::warn!("[exit] stale run file not removed: {e}");
         }
@@ -391,6 +410,14 @@ fn run_file_pid(path: &Path) -> Option<u32> {
         .strip_suffix(RUN_FILE_SUFFIX)?
         .parse()
         .ok()
+}
+
+/// The installer ends the old process without an event-loop exit, so its
+/// run file stays: the state it last wrote says so.
+fn handed_to_update(contents: &str) -> bool {
+    contents
+        .lines()
+        .any(|l| l.trim() == format!("state={UPDATE_STATE}"))
 }
 
 fn previous_run_report(pid: u32, contents: &str) -> String {
@@ -524,6 +551,15 @@ mod tests {
             "{text}"
         );
         assert!(previous_run_report(1, "").contains("no details recorded"));
+    }
+
+    #[test]
+    fn an_update_handoff_is_not_an_unexplained_end() {
+        assert!(handed_to_update(&format!(
+            "version=1\nstate={UPDATE_STATE}\n"
+        )));
+        assert!(!handed_to_update("version=1\nstate=running\n"));
+        assert!(!handed_to_update(""));
     }
 
     #[test]

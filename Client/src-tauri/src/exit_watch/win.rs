@@ -226,7 +226,9 @@ fn on_process_failed(args: &ICoreWebView2ProcessFailedEventArgs) {
         return;
     }
     if failure.kind == RENDER_PROCESS_EXITED {
-        // The page is gone with its process: whatever hang it had is over.
+        // The page is gone with its process: whatever hang it had is over,
+        // and the probe sent to it will not be answered.
+        super::webview_probe_done(false);
         super::webview_answers();
     }
     log::error!("{}", failure_text(&failure));

@@ -9,10 +9,15 @@
 //! Windows, so Windows Error Reporting and its Application Error record are
 //! unchanged.
 //!
-//! The filter runs in a crashing process, possibly with a corrupt heap or
-//! little stack left, so it only formats into a fixed stack buffer and writes
-//! once, opening the file by path at that moment. A crash inside the filter
-//! itself cannot loop: a second entry skips straight to the hand-over.
+//! The filter runs in a crashing process, possibly with a corrupt heap, a
+//! held loader lock or little stack left, so it takes no lock and allocates
+//! nothing it can avoid: the log file is opened once at install (a rotation
+//! renames it, so a crash after one lands in the rotated file, which the
+//! support bundle also carries), and the filter only formats into a fixed
+//! stack buffer and writes once. The faulting module is looked up through the
+//! loader except for a stack overflow or heap corruption, where the raw
+//! address is logged instead. A crash inside the filter itself cannot loop: a
+//! second entry skips straight to the hand-over.
 //!
 //! A fast fail (`__fastfail`, which `abort` and stack-buffer checks use)
 //! skips every filter by design; the next start reads that crash from the
@@ -86,10 +91,9 @@ pub use filter::install;
 mod filter {
     use std::os::windows::ffi::OsStrExt;
     use std::path::Path;
-    use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
-    use std::sync::OnceLock;
+    use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, AtomicUsize, Ordering};
 
-    use windows_sys::Win32::Foundation::{CloseHandle, FILETIME, HMODULE, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::Foundation::{FILETIME, HMODULE, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::Storage::FileSystem::{
         CreateFileW, WriteFile, FILE_APPEND_DATA, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_DELETE,
         FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_ALWAYS,
@@ -112,8 +116,11 @@ mod filter {
     /// FILETIME of 1970-01-01, in 100 ns units since 1601.
     const UNIX_EPOCH_FILETIME: u64 = 116_444_736_000_000_000;
 
-    /// The native log file, as a NUL-terminated wide path.
-    static LOG_FILE: OnceLock<Vec<u16>> = OnceLock::new();
+    /// The native log file, opened for appending at install (null: none).
+    static LOG_FILE: AtomicPtr<core::ffi::c_void> = AtomicPtr::new(std::ptr::null_mut());
+    /// Codes whose module lookup could fault or block again: the loader may
+    /// need stack or a heap the crash has used up or broken.
+    const NO_LOOKUP: [u32; 2] = [0xC000_00FD, 0xC000_0374];
     /// The filter ours replaced, as a function address (0: none).
     static PREVIOUS: AtomicUsize = AtomicUsize::new(0);
     /// Set on the filter's first entry: a second (a crash inside it, or a
@@ -129,17 +136,31 @@ mod filter {
             log::info!("[crash] exception filter off (OWNCORD_EXCEPTION_LOG=off)");
             return;
         }
-        let wide = log_file
+        if !LOG_FILE.load(Ordering::SeqCst).is_null() {
+            return;
+        }
+        let wide: Vec<u16> = log_file
             .as_os_str()
             .encode_wide()
             .chain(std::iter::once(0))
             .collect();
-        if LOG_FILE.set(wide).is_err() {
-            return;
-        }
-        // SAFETY: plain Win32 calls; the filter only formats into stack
-        // buffers and makes no allocation.
+        // SAFETY: plain Win32 calls; the handle stays open for the process's
+        // life, and the filter only formats into stack buffers.
         unsafe {
+            let file = CreateFileW(
+                wide.as_ptr(),
+                FILE_APPEND_DATA,
+                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                std::ptr::null(),
+                OPEN_ALWAYS,
+                FILE_ATTRIBUTE_NORMAL,
+                std::ptr::null_mut(),
+            );
+            if file == INVALID_HANDLE_VALUE {
+                log::warn!("[crash] exception filter off: the log file did not open");
+                return;
+            }
+            LOG_FILE.store(file, Ordering::SeqCst);
             MAIN_THREAD.store(GetCurrentThreadId(), Ordering::SeqCst);
             let previous = SetUnhandledExceptionFilter(Some(on_unhandled_exception));
             PREVIOUS.store(previous.map_or(0, |f| f as usize), Ordering::SeqCst);
@@ -164,7 +185,10 @@ mod filter {
     }
 
     unsafe fn write_line(info: *const EXCEPTION_POINTERS) {
-        let Some(path) = LOG_FILE.get() else { return };
+        let file = LOG_FILE.load(Ordering::SeqCst);
+        if file.is_null() {
+            return;
+        }
         // SAFETY: every pointer is null-checked; the Win32 calls write only
         // into the stack buffers given.
         unsafe {
@@ -185,12 +209,13 @@ mod filter {
             let mut name = [0u8; 64];
             let mut name_len = 0;
             let mut offset = address as u64;
-            if GetModuleHandleExW(
-                GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS
-                    | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                address as *const u16,
-                &mut module,
-            ) != 0
+            if !NO_LOOKUP.contains(&code)
+                && GetModuleHandleExW(
+                    GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS
+                        | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                    address as *const u16,
+                    &mut module,
+                ) != 0
             {
                 let mut wide = [0u16; 260];
                 let len = GetModuleFileNameW(module, wide.as_mut_ptr(), wide.len() as u32);
@@ -215,26 +240,14 @@ mod filter {
                 offset,
                 thread,
             );
-            let file = CreateFileW(
-                path.as_ptr(),
-                FILE_APPEND_DATA,
-                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                std::ptr::null(),
-                OPEN_ALWAYS,
-                FILE_ATTRIBUTE_NORMAL,
+            let mut written = 0u32;
+            WriteFile(
+                file,
+                line.as_ptr(),
+                len as u32,
+                &mut written,
                 std::ptr::null_mut(),
             );
-            if file != INVALID_HANDLE_VALUE {
-                let mut written = 0u32;
-                WriteFile(
-                    file,
-                    line.as_ptr(),
-                    len as u32,
-                    &mut written,
-                    std::ptr::null_mut(),
-                );
-                CloseHandle(file);
-            }
         }
     }
 }
