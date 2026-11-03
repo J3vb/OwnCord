@@ -126,7 +126,7 @@ device: the user saves the zip, nothing is uploaded. Built by
 and the redaction report, which the bundle writes itself, skip it. The rules
 look for shapes, each also in its JSON-escaped and URL-encoded forms and
 across a wrapped line: a value whose name says it is secret (`token`,
-`password`, `secret`, `key`, `cookie`, `invite`, …), bearer and JWT tokens,
+`password`, `secret`, `api_key`, `cookie`, `invite`, …), bearer and JWT tokens,
 `Authorization` and `Cookie` headers (to the end of the line or string),
 recovery kit secrets and recovery codes, hex strings of 48 characters or more
 (a session token is 64), URLs (cut to scheme and host; the app's own asset

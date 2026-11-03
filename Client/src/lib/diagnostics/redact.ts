@@ -49,22 +49,29 @@ const LOOPBACK_V4 = /^(?:127\.\d+\.\d+\.\d+|0\.0\.0\.0)$/;
 // then the rest; the rest stops at a backslash unless it escapes a slash, so
 // an escaped closing quote stays in place.
 const URL_RE =
-  /\b([a-z][a-z0-9+.-]{1,15}):((?:\\{0,3}\/){2})([^\s"'<>\\/?#]*)((?:(?:[/?#]|\\\/)(?:[^\s"'<>\\]|\\\/)*)?)/gi;
+  /\b([a-z][a-z0-9+.-]{1,15}):((?:\\{0,3}\/){2})([^\s"'<>\\/?#]*)((?:(?:[/?#]|\\\/)(?:[^\s"'<>\\]|\\\/|\\u[0-9a-fA-F]{4})*)?)/gi;
 
 const AUTH_HEADER_RE =
   /\b(authorization|proxy-authorization|cookie|set-cookie|x-api-key)(\\{0,3}["']?\s*:\s*\\{0,3}["']?)(?!\[redacted\])([^\r\n"'\\]+)/gi;
 
-const BEARER_RE = /\b(bearer|basic)((?:\s|\\[nrt])+)(?!\[redacted\])([A-Za-z0-9._~+/=-]{8,})/gi;
+// The token must hold a digit or token punctuation, so "Bearer authentication" stays.
+const BEARER_RE =
+  /\b(bearer)((?:\s|\\[nrt])+)(?!\[redacted\])(?=[A-Za-z0-9._~+/=-]*[0-9._~+/=])([A-Za-z0-9._~+/=-]{8,})/gi;
 
 const JWT_RE = /\beyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]*/g;
 
 // A name ending in one of the secret words, a separator (: or =, also as
 // \u003d or %3D, with optional escaped quotes), then a quoted or bare value.
+// The name starts only where a run of name characters starts and its prefix
+// is bounded, so a long dotted run is scanned once, not once per dot. A
+// quoted value runs to the quote that closes it: one followed by a JSON or
+// pair delimiter or the end of the line, so a quote inside the value does not
+// end it early.
 const SECRET_NAME =
-  "[A-Za-z0-9_.-]*?(?:token|tokens|password|passwd|passphrase|pwd|secret|key|apikey|sessionid|session_id|cookie|invite|invitecode|invite_code|credential|credentials|otp|totp)";
+  "[A-Za-z0-9_.-]{0,40}?(?:token|password|passwd|passphrase|pwd|password_hash|passwordhash|secret|apikey|api_key|api-key|privatekey|private_key|accesskey|access_key|secretkey|secret_key|signingkey|signing_key|sessionid|session_id|cookie|invite|invitecode|invite_code|credential|credentials|otp|totp)";
 const SECRET_PAIR_RE = new RegExp(
-  `\\b(${SECRET_NAME})((?:\\\\{0,3}["'])?\\s*(?::|=|\\\\u003[dD]|%3[dD])\\s*(?:\\\\{0,3}["'])?)` +
-    `(?:((?<=["'])[^"'\\r\\n]*?)(?=\\\\{0,3}["'])|([^\\s"'\\\\&,;{}\\[\\]<>]+))`,
+  `(?<![A-Za-z0-9_.-])(${SECRET_NAME})((?:\\\\{0,3}["'])?\\s*(?::|=|\\\\u003[dD]|%3[dD])\\s*(?:\\\\{0,3}["'])?)` +
+    `(?:((?<=["'])[^\\r\\n]*?)(?=\\\\{0,3}["'](?:\\s*[,;}\\]&)]|\\s*\\\\[nr]|\\s*\\r?\\n|\\s*$))|([^\\s"'\\\\&,;{}\\[\\]<>]+))`,
   "gi",
 );
 const NOT_SECRET_VALUE = /^(?:true|false|null|undefined|none|\[redacted\]|\[jwt\]|\[hex\])$/i;
@@ -77,10 +84,15 @@ const RECOVERY_RE =
 // A session token is 64 hex characters; a git commit (40) stays readable.
 const LONG_HEX_RE = /\b[0-9a-fA-F]{48,}\b/g;
 
-const EMAIL_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}\b/g;
+// Starts only where a run of local-part characters starts, and the local part
+// is at most 64 long, so a long run with no @ is scanned once.
+const EMAIL_RE =
+  /(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9-]{1,63}(?:\.[A-Za-z0-9-]{1,63}){0,8}\.[A-Za-z]{2,24}\b/g;
 
+// A macOS or Windows account folder may hold a space: the name then runs to
+// the next separator; without one it ends at the first space.
 const HOME_RE =
-  /(?:(?:\/var)?\/home|\/Users)\/[^/\s"'\\:]+|\b[A-Za-z]:(?:\\{1,4}|\/)(?:Users|Documents and Settings)(?:\\{1,4}|\/)[^\\/\s"':]+/gi;
+  /(?:\/var)?\/home\/[^/\s"'\\:]+|\/Users\/(?:[^/"'\\:\r\n]+(?=\/)|[^/\s"'\\:]+)|\b[A-Za-z]:(?:\\{1,4}|\/)(?:Users|Documents and Settings)(?:\\{1,4}|\/)(?:[^\\/"':\r\n]+(?=\\|\/)|[^\\/\s"':]+)/gi;
 
 // Not after a slash, word character or dot, so "Chrome/130.0.0.0" and longer
 // dotted version numbers stay.
@@ -112,7 +124,9 @@ function redactUrls(text: string, count: Counter): string {
       const host = hostOnly(authority);
       let kept = rest;
       if (rest !== "") {
-        kept = APP_ASSET_HOST.test(host) ? rest.replace(/[?#].*$/, "") : "";
+        // Closing punctuation after a URL in prose belongs to the prose.
+        const tail = /[).,;\]]+$/.exec(rest)?.[0] ?? "";
+        kept = APP_ASSET_HOST.test(host) ? rest.replace(/[?#].*$/, "") : tail;
       }
       const out = `${scheme}:${slashes}${host}${kept}`;
       if (out !== match) count("url");

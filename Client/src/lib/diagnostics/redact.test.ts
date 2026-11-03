@@ -124,6 +124,31 @@ const CORPUS: readonly {
     gone: [SECRETS.user],
   },
   { name: "Windows home with slashes", text: `c:/users/${SECRETS.user}/x`, gone: [SECRETS.user] },
+  {
+    name: "Windows home with a space",
+    text: `C:\\Users\\Planted ${SECRETS.user}\\AppData\\Local`,
+    gone: [SECRETS.user, "Planted"],
+  },
+  {
+    name: "macOS home with a space",
+    text: `/Users/Planted ${SECRETS.user}/Library`,
+    gone: [SECRETS.user, "Planted"],
+  },
+  {
+    name: "password holding an escaped quote",
+    text: `{"password":"pa\\"ss ${SECRETS.token}"}`,
+    gone: [SECRETS.token, "ss "],
+  },
+  {
+    name: "password holding an apostrophe",
+    text: `password="it's ${SECRETS.token}"`,
+    gone: [SECRETS.token],
+  },
+  {
+    name: "query after a JSON-escaped ampersand",
+    text: `"https://a.example/x?y=1\\u0026token=${SECRETS.token}"`,
+    gone: [SECRETS.token],
+  },
 ];
 
 describe("redactText corpus", () => {
@@ -154,6 +179,9 @@ describe("redactText keeps what a reader needs", () => {
     '{"rememberPassword": true, "autoConnect": false}',
     "at render (https://tauri.localhost/assets/index-abc123.js:1:234)",
     "uptime 00:12:30 and 16:27:19",
+    "Basic authentication failed, using basic configuration now",
+    "Bearer authentication is required",
+    "Unknown key: foo, Hotkey: Ctrl+K, tokens: 5 used",
   ];
   for (const line of KEPT) {
     it(`keeps ${line.slice(0, 48)}`, () => {
@@ -166,6 +194,25 @@ describe("redactText keeps what a reader needs", () => {
       "see https://chat.example.org now",
     );
   });
+
+  it("keeps the punctuation that closes a URL in prose", () => {
+    expect(redactText("(see https://example.com/a/b), then").text).toBe(
+      "(see https://example.com), then",
+    );
+  });
+
+  it("scans long runs in linear time", () => {
+    const started = performance.now();
+    for (const run of [
+      "x".repeat(400_000),
+      "ab.cd-".repeat(60_000),
+      "a.".repeat(200_000),
+      "1.".repeat(200_000),
+    ]) {
+      redactText(run);
+    }
+    expect(performance.now() - started).toBeLessThan(3_000);
+  }, 20_000);
 
   it("drops only the query from an app asset URL", () => {
     expect(redactText("https://tauri.localhost/assets/x.js?v=1").text).toBe(
