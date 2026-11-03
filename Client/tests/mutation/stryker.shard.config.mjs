@@ -53,6 +53,7 @@ export const shards = {
     "src/features/voice/joinRequest.ts",
     "src/lib/voice/watchRequest.ts",
     "src/features/voice/backgroundCall.ts",
+    "src/features/voice/backgroundCamera.ts",
     "src/features/voice/talkSlot.ts",
     "src/features/voice/cameraMenu.ts",
     "src/features/voice/autoPlayCameras.ts",
