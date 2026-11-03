@@ -27,6 +27,9 @@ export interface VoiceE2EEAnnouncePayload {
   /** Video codecs the sender decodes (lowercase MIME subtypes). Absent from an
    *  old client or server: the receiver assumes VP8 and H.264. */
   readonly video_decode?: readonly string[];
+  /** The sender stages each new room key in its own slot and switches to it a
+   *  moment later. Absent from an old client or server: slot 0 only. */
+  readonly key_slots?: boolean;
 }
 
 /** Server→Client relay of an encrypted room key from the key holder. */

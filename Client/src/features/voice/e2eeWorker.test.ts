@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const setKey = vi.hoisted(() => vi.fn());
 vi.mock("livekit-client", () => ({
@@ -10,7 +10,7 @@ vi.mock("../../lib/net/e2eeCrypto", () => ({
   roomKeyToBase64: (key: Uint8Array) => `b64:${key[0]}`,
 }));
 
-import { E2EEWorker } from "./e2eeWorker";
+import { E2EEWorker, KEY_SWITCH_DELAY_MS } from "./e2eeWorker";
 // vi.resetModules() below would hand the re-imported module a fresh logger,
 // which re-installs the logger's app-lifetime pref-change listener on every
 // reset. Those tests re-import against this already-loaded instance instead,
@@ -243,5 +243,126 @@ describe("E2EEWorker.clearRoomKey backends", () => {
     expect(entries[0]?.data).toMatchObject({ error: "ipc closed" });
     expectConsole("warn", "native key clear failed");
     unmock();
+  });
+});
+
+function slotSetup() {
+  const { state, worker, onKeyInstalled } = setup();
+  const stageKey = vi.spyOn(worker.keyProvider, "stageKey").mockResolvedValue(undefined);
+  const useKey = vi.spyOn(worker.keyProvider, "useKey").mockResolvedValue(undefined);
+  const useSlot = vi.spyOn(worker.keyProvider, "useSlot").mockReturnValue(true);
+  return { state, worker, onKeyInstalled, stageKey, useKey, useSlot };
+}
+
+describe("E2EEWorker key slots", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("stages a key in the free slot and sends with it only after the switch delay", async () => {
+    const { state, worker, stageKey, useSlot } = slotSetup();
+    state.roomKey = new Uint8Array([4]);
+    await expect(
+      worker.applyRoomKey(state.roomKey, undefined, { slot: 1, stage: true }),
+    ).resolves.toBe(true);
+    expect(stageKey).toHaveBeenCalledWith("b64:4", 1);
+    expect(worker.sendSlot).toBe(0);
+
+    await vi.advanceTimersByTimeAsync(KEY_SWITCH_DELAY_MS - 1);
+    expect(useSlot).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(useSlot).toHaveBeenCalledWith(1);
+    expect(worker.sendSlot).toBe(1);
+  });
+
+  it("a newer key before the switch replaces it, so the stale switch never fires", async () => {
+    const { state, worker, useSlot } = slotSetup();
+    state.roomKey = new Uint8Array([4]);
+    await worker.applyRoomKey(state.roomKey, undefined, { slot: 1, stage: true });
+    await vi.advanceTimersByTimeAsync(KEY_SWITCH_DELAY_MS / 2);
+
+    state.roomKey = new Uint8Array([5]);
+    await worker.applyRoomKey(state.roomKey, undefined, { slot: 1, stage: true });
+    await vi.advanceTimersByTimeAsync(KEY_SWITCH_DELAY_MS / 2);
+    expect(useSlot).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(KEY_SWITCH_DELAY_MS / 2);
+    expect(useSlot).toHaveBeenCalledTimes(1);
+  });
+
+  it("drops the pending switch when the room key is no longer the session's", async () => {
+    const { state, worker, useSlot } = slotSetup();
+    state.roomKey = new Uint8Array([4]);
+    await worker.applyRoomKey(state.roomKey, undefined, { slot: 1, stage: true });
+    state.generation++;
+    await vi.advanceTimersByTimeAsync(KEY_SWITCH_DELAY_MS);
+    expect(useSlot).not.toHaveBeenCalled();
+    expect(worker.sendSlot).toBe(0);
+  });
+
+  it("resetSlots cancels a pending switch", async () => {
+    const { state, worker, useSlot } = slotSetup();
+    state.roomKey = new Uint8Array([4]);
+    await worker.applyRoomKey(state.roomKey, undefined, { slot: 1, stage: true });
+    worker.resetSlots();
+    await vi.advanceTimersByTimeAsync(KEY_SWITCH_DELAY_MS);
+    expect(useSlot).not.toHaveBeenCalled();
+  });
+
+  it("staging into the slot being sent on is a switch at once", async () => {
+    const { state, worker, stageKey, useKey } = slotSetup();
+    state.roomKey = new Uint8Array([4]);
+    await worker.applyRoomKey(state.roomKey, undefined, { slot: 0, stage: true });
+    expect(stageKey).not.toHaveBeenCalled();
+    expect(setKey).toHaveBeenCalledWith("b64:4");
+    state.roomKey = new Uint8Array([6]);
+    await worker.applyRoomKey(state.roomKey, undefined, { slot: 1, stage: false });
+    expect(useKey).toHaveBeenCalledWith("b64:6", 1);
+    expect(worker.sendSlot).toBe(1);
+  });
+
+  it("re-applies the current key at once in the slot it is in", async () => {
+    const { state } = slotSetup();
+    const placement = { slot: 1 as const, stage: true };
+    const w = new E2EEWorker({
+      getSessionGeneration: () => state.generation,
+      getRoomKey: () => state.roomKey,
+      getRoomKeyPlacement: () => placement,
+    });
+    const reuse = vi.spyOn(w.keyProvider, "useKey").mockResolvedValue(undefined);
+    state.roomKey = new Uint8Array([8]);
+    await w.applyCurrentRoomKey(() => true);
+    expect(reuse).toHaveBeenCalledWith("b64:8", 1);
+    expect(w.sendSlot).toBe(1);
+  });
+});
+
+describe("E2EEWorker key slots on the Linux native backend", () => {
+  it("stages over IPC and switches the native sender after the delay", async () => {
+    vi.useFakeTimers();
+    vi.resetModules();
+    vi.doMock("../../lib/logger", () => appLogger);
+    vi.doMock("./native/platform", () => ({ isLinuxDesktop: () => true }));
+    const setRoomKey = vi.fn(async () => undefined);
+    const useKeySlot = vi.fn(async () => undefined);
+    vi.doMock("../../platform/desktop", () => ({
+      desktop: { nativeVoice: { setRoomKey, useKeySlot } },
+    }));
+    const mod = await import("./e2eeWorker");
+    const roomKey = new Uint8Array([3]);
+    const worker = new mod.E2EEWorker({
+      getSessionGeneration: () => 0,
+      getRoomKey: () => roomKey,
+    });
+    await worker.applyRoomKey(roomKey, undefined, { slot: 1, stage: true });
+    expect(setRoomKey).toHaveBeenCalledWith("b64:3", { slot: 1, stage: true });
+    await vi.advanceTimersByTimeAsync(mod.KEY_SWITCH_DELAY_MS);
+    expect(useKeySlot).toHaveBeenCalledWith(1);
+    vi.doUnmock("./native/platform");
+    vi.doUnmock("../../platform/desktop");
+    vi.doUnmock("../../lib/logger");
+    vi.useRealTimers();
   });
 });

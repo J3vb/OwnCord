@@ -23,6 +23,7 @@ vi.mock("../../lib/logger", () => ({
 
 import { wrapRoomKey, unwrapRoomKey } from "../../lib/net/e2eeCrypto";
 import { E2EEOffer } from "./e2eeOffer";
+import type { KeyPlacement } from "../../lib/net/keyPlacement";
 
 const HOLDER = 1;
 const KEYPAIR = { privateKey: "priv", publicKey: "pub" } as unknown as CryptoKeyPair;
@@ -54,7 +55,11 @@ function setup() {
     setRoomKey: (key: Uint8Array | null) => {
       state.roomKey = key;
     },
-    applyRoomKey: vi.fn(async (_key: Uint8Array, _isCurrent: () => boolean) => true),
+    applyRoomKey: vi.fn(
+      async (_key: Uint8Array, _isCurrent: () => boolean, _placement: KeyPlacement) => true,
+    ),
+    setRoomKeyPlacement: vi.fn((_placement: KeyPlacement) => {}),
+    offerPlacement: vi.fn((_peerId: number): KeyPlacement | undefined => undefined),
     isKeyHolder: () => state.keyHolder,
     setKeyHolder: (value: boolean) => {
       state.keyHolder = value;
@@ -89,6 +94,55 @@ beforeEach(() => {
   vi.mocked(unwrapRoomKey).mockResolvedValue({ roomKey: new Uint8Array([7]), epoch: 3 });
 });
 
+describe("E2EEOffer key placement", () => {
+  it("stages a v2 key in its slot when a key is already in use", async () => {
+    const { state, host, offers } = setup();
+    state.roomKey = new Uint8Array([1]);
+    vi.mocked(unwrapRoomKey).mockResolvedValueOnce({
+      roomKey: new Uint8Array([7]),
+      epoch: 3,
+      placement: { slot: 1, stage: true },
+    });
+    await offers.handleOffer(HOLDER, "enc", "iv");
+    expect(host.applyRoomKey).toHaveBeenCalledWith(new Uint8Array([7]), expect.any(Function), {
+      slot: 1,
+      stage: true,
+    });
+    expect(host.setRoomKeyPlacement).toHaveBeenCalledWith({ slot: 1, stage: true });
+  });
+
+  it("uses a first key at once, in the slot the offer names", async () => {
+    const { host, offers } = setup();
+    vi.mocked(unwrapRoomKey).mockResolvedValueOnce({
+      roomKey: new Uint8Array([7]),
+      epoch: 3,
+      placement: { slot: 1, stage: true },
+    });
+    await offers.handleOffer(HOLDER, "enc", "iv");
+    expect(host.applyRoomKey).toHaveBeenCalledWith(new Uint8Array([7]), expect.any(Function), {
+      slot: 1,
+      stage: false,
+    });
+  });
+
+  it("wraps each peer's offer with the placement the host gives that peer", async () => {
+    const { state, host, offers } = setup();
+    const roomKey = new Uint8Array([5]);
+    state.roomKey = roomKey;
+    host.offerPlacement.mockImplementation((peerId: number) =>
+      peerId === HOLDER ? { slot: 1, stage: true } : undefined,
+    );
+    await offers.distributeRoomKey(KEYPAIR, roomKey, [
+      [HOLDER, PEER_KEY],
+      [99, PEER_KEY],
+    ]);
+    expect(vi.mocked(wrapRoomKey).mock.calls.map((c) => c[4])).toEqual([
+      { slot: 1, stage: true },
+      undefined,
+    ]);
+  });
+});
+
 describe("E2EEOffer.handleOffer", () => {
   it("applies the unwrapped key, records the epoch and wakes the waiting join", async () => {
     const { state, host, offers } = setup();
@@ -97,7 +151,10 @@ describe("E2EEOffer.handleOffer", () => {
     state.rejector = vi.fn();
     await offers.handleOffer(HOLDER, "enc", "iv");
     expect(state.roomKey).toEqual(new Uint8Array([7]));
-    expect(host.applyRoomKey).toHaveBeenCalledWith(state.roomKey, expect.any(Function));
+    expect(host.applyRoomKey).toHaveBeenCalledWith(state.roomKey, expect.any(Function), {
+      slot: 0,
+      stage: false,
+    });
     expect(state.offerEpochs.get(HOLDER)).toBe(3);
     expect(resolver).toHaveBeenCalledTimes(1);
     expect(state.resolver).toBeNull();
@@ -368,6 +425,8 @@ describe("E2EEOffer offer handling records", () => {
     expect(log.info).toHaveBeenCalledWith("E2EE: room key received and applied", {
       fromUserId: HOLDER,
       epoch: 3,
+      slot: 0,
+      staged: false,
     });
   });
 

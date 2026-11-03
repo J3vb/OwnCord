@@ -67,7 +67,12 @@ function qualityFailure(err: unknown): NativeVoiceScreenQualityResult {
 }
 
 export const nativeVoice: NativeVoice = {
-  setRoomKey: (key) => invokeOrThrow<void>("native_voice_set_key", { key }),
+  setRoomKey: (key, placement) =>
+    invokeOrThrow<void>(
+      "native_voice_set_key",
+      placement === undefined ? { key } : { key, slot: placement.slot, stage: placement.stage },
+    ),
+  useKeySlot: (slot) => invokeOrThrow<void>("native_voice_use_key_slot", { slot }),
   clearRoomKey: () => invokeOrThrow<void>("native_voice_clear_key"),
   connect: (url, token, audio) =>
     invokeOrThrow<NativeVoiceConnected>("native_voice_connect", { url, token, audio }),

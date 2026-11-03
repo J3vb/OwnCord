@@ -5,6 +5,7 @@
 // key-holder role, the ECDH keypair and the peer set stay owned by
 // E2EEManager; this module reads them only through E2EEEpochHost.
 import { generateRoomKey } from "../../lib/net/e2eeCrypto";
+import { LEGACY_PLACEMENT, type KeyPlacement } from "../../lib/net/keyPlacement";
 import { createLogger } from "../../lib/logger";
 
 // Same logger tag as before the extraction, so the E2EE log lines are unchanged.
@@ -21,7 +22,10 @@ export interface E2EEEpochHost {
   getSessionGeneration(): number;
   getEcdhKeyPair(): CryptoKeyPair | null;
   getPeerPublicKeys(): Map<number, CryptoKey>;
-  applyRoomKey(roomKey: Uint8Array): Promise<boolean>;
+  applyRoomKey(roomKey: Uint8Array, placement: KeyPlacement): Promise<boolean>;
+  /** Where a rotated key goes: staged in the free slot when every peer
+   *  supports key slots, else slot 0 at once. */
+  rotationPlacement(): KeyPlacement;
   distributeRoomKey(
     keypair: CryptoKeyPair,
     roomKey: Uint8Array,
@@ -33,6 +37,9 @@ export class E2EEEpoch {
   /** The 256-bit symmetric room key (plaintext). Only held by the key holder
    *  initially; other participants receive it via ECDH-wrapped offers. */
   private _roomKey: Uint8Array | null = null;
+  /** Where the room key went: its slot and whether it was staged. Re-offers of
+   *  the same key name the same slot. */
+  private _roomKeyPlacement: KeyPlacement = LEGACY_PLACEMENT;
   /** Highest offer epoch applied per sender. The holder binds its
    *  epoch into every wrapped room key; an offer below this mark is a
    *  superseded key and is discarded. Per sender because each client's epoch
@@ -61,6 +68,12 @@ export class E2EEEpoch {
   }
   set roomKey(value: Uint8Array | null) {
     this._roomKey = value;
+  }
+  get roomKeyPlacement(): KeyPlacement {
+    return this._roomKeyPlacement;
+  }
+  set roomKeyPlacement(value: KeyPlacement) {
+    this._roomKeyPlacement = value;
   }
   get epoch(): number {
     return this._e2eeEpoch;
@@ -101,8 +114,8 @@ export class E2EEEpoch {
   private get _peerPublicKeys(): Map<number, CryptoKey> {
     return this.host.getPeerPublicKeys();
   }
-  private applyRoomKey(roomKey: Uint8Array): Promise<boolean> {
-    return this.host.applyRoomKey(roomKey);
+  private applyRoomKey(roomKey: Uint8Array, placement: KeyPlacement): Promise<boolean> {
+    return this.host.applyRoomKey(roomKey, placement);
   }
   private distributeRoomKey(
     keypair: CryptoKeyPair,
@@ -112,12 +125,26 @@ export class E2EEEpoch {
     return this.host.distributeRoomKey(keypair, roomKey, peers);
   }
 
-  /** Install a fresh key before distribution; return null when superseded. */
+  /** Install a fresh key before distribution; return null when superseded.
+   *  With every peer on key slots it is staged: peers get it while everyone
+   *  still sends with the old one, and each side switches a moment later. */
   async rotateRoomKey(): Promise<Uint8Array | null> {
     this._e2eeEpoch++;
     const roomKey = generateRoomKey();
+    const placement = this.host.rotationPlacement();
     this._roomKey = roomKey;
-    return (await this.applyRoomKey(roomKey)) ? roomKey : null;
+    this._roomKeyPlacement = placement;
+    return (await this.applyRoomKey(roomKey, placement)) ? roomKey : null;
+  }
+
+  /** Rotate now, or right after the rotation in flight. */
+  requestRotation(): void {
+    if (this._rotatingKey) {
+      this._rotationPending = true;
+      return;
+    }
+    this.clearKeyRotationTimer();
+    void this.rotateKeyPeriodically();
   }
 
   // ── Periodic key rotation ──────────────────────────────────────────────────

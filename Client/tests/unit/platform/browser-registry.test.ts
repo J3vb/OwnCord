@@ -252,6 +252,7 @@ describe("browser platform registry", () => {
     const cameraOptions = { ...publish };
     const refusals: readonly (() => Promise<unknown>)[] = [
       () => v.setRoomKey("k"),
+      () => v.useKeySlot(1),
       () => v.clearRoomKey(),
       () => v.connect("wss://x", "t", audio),
       () => v.disconnect(1),

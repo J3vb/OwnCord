@@ -212,6 +212,8 @@ export type ClientMessage =
       /** This device's identity public key (the one that signed `signature`). */
       identity_public_key?: string;
       video_decode?: readonly string[];
+      /** The sender stages each new room key in its own slot. */
+      key_slots?: boolean;
     }> & {
       readonly type: "voice_e2ee_announce";
     })
