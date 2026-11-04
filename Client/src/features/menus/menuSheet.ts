@@ -180,7 +180,10 @@ export function openMenuSheet(req: MenuSheetRequest): BottomSheet {
   );
 
   showFirstPage();
-  // The sheet focused its (still empty) panel as it opened: the first row is the better start.
-  content.querySelector<HTMLElement>(".menu-sheet-row")?.focus();
+  // The sheet focused its (still empty) panel as it opened: the first row is
+  // the better start. A sheet opens from a tap or long press, so the row
+  // takes focus without the keyboard ring (clipped by the card, it read as an
+  // underline); an arrow key or Tab brings the ring back.
+  content.querySelector<HTMLElement>(".menu-sheet-row")?.focus({ focusVisible: false });
   return sheet;
 }

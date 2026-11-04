@@ -67,11 +67,24 @@ type ReportService struct {
 	// force-reassign path needs the same hierarchy rule as ban/kick/timeout.
 	moderation *ModerationService
 	limiter    *auth.RateLimiter
+	// links is the batched report-link read; nil (a store without it) resolves
+	// each link with its own GetReport.
+	links ReportLinkStore
 }
+
+// ReportLinkStore is the slice of the database VisibleReportPublicIDs reads
+// beyond Store: many report links in one query. *db.DB satisfies it; declared
+// here so Store, whose size is pinned, does not grow.
+type ReportLinkStore interface {
+	ListReportLinks(ctx context.Context, ids []int64) (map[int64]db.ReportLink, error)
+}
+
+var _ ReportLinkStore = (*db.DB)(nil)
 
 // NewReportService creates a ReportService.
 func NewReportService(st reportStore, perms *PermissionService, messages *MessageService, uploads *UploadService, moderation *ModerationService, limiter *auth.RateLimiter) *ReportService {
-	return &ReportService{st: st, perms: perms, messages: messages, uploads: uploads, moderation: moderation, limiter: limiter}
+	links, _ := st.(ReportLinkStore)
+	return &ReportService{st: st, perms: perms, messages: messages, uploads: uploads, moderation: moderation, limiter: limiter, links: links}
 }
 
 // Valid target types, reasons and outcomes (the wire contract).
@@ -429,10 +442,16 @@ func requireModerate(ctx context.Context, perms *PermissionService, actorID int6
 // may not read or act on a report about themselves. ErrNotFound, never Forbidden,
 // so the subject cannot learn a report about them exists.
 func guardConfidentiality(actorID int64, report *db.Report) error {
-	if report.SubjectID != 0 && report.SubjectID == actorID {
+	if isReportSubject(actorID, report.SubjectID) {
 		return fmt.Errorf("%w: report not found", ErrNotFound)
 	}
 	return nil
+}
+
+// isReportSubject is the confidentiality predicate itself, shared by the
+// single and the batched lookups so they cannot drift.
+func isReportSubject(actorID, subjectID int64) bool {
+	return subjectID != 0 && subjectID == actorID
 }
 
 // ErrSelfReview is a 403: a moderator may not act on, or read the notes of, a
@@ -466,6 +485,36 @@ func (s *ReportService) VisibleReportPublicID(ctx context.Context, viewerID, rep
 		return "", false
 	}
 	return report.PublicID, true
+}
+
+// VisibleReportPublicIDs is VisibleReportPublicID for a whole list, in one
+// read: it maps each resolvable report id to its public id, leaving out ids
+// that no longer resolve and reports about the viewer. A failed read hides
+// every link, as a failed single lookup hides its one.
+func (s *ReportService) VisibleReportPublicIDs(ctx context.Context, viewerID int64, reportIDs []int64) map[int64]string {
+	out := make(map[int64]string, len(reportIDs))
+	if len(reportIDs) == 0 {
+		return out
+	}
+	if s.links == nil {
+		for _, id := range reportIDs {
+			if pub, ok := s.VisibleReportPublicID(ctx, viewerID, id); ok {
+				out[id] = pub
+			}
+		}
+		return out
+	}
+	links, err := s.links.ListReportLinks(ctx, reportIDs)
+	if err != nil {
+		return out
+	}
+	for id, link := range links {
+		if isReportSubject(viewerID, link.SubjectID) {
+			continue
+		}
+		out[id] = link.PublicID
+	}
+	return out
 }
 
 // Queue lists reports for the moderator view: state is "open", "assigned",

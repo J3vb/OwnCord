@@ -38,6 +38,12 @@ const (
 	// a row whose file has shrunk below the default is deleted rather than
 	// raised.
 	classGrandfathered = "grandfathered"
+
+	// classRegistrationPoint: a wiring file every feature used to edit, now
+	// a short list features register into. Held tighter than the default so
+	// a feature's routes go in its own file, not back into the wiring. Only
+	// goes down.
+	classRegistrationPoint = "registration-point"
 )
 
 // FileSizeOverride is one declared exemption from DefaultFileLimit.
@@ -82,9 +88,9 @@ var FileSizeOverrides = map[string]FileSizeOverride{
 		Note:    "bans, kicks, the moderation log",
 	},
 	"api/router.go": {
-		Ceiling: 880,
-		Class:   classGrandfathered,
-		Note:    "the route table and middleware chain",
+		Ceiling: 300,
+		Class:   classRegistrationPoint,
+		Note:    "middleware chain and NewRouter; feature routes live in route_groups.go and their own files",
 	},
 	"config/config.go": {
 		Ceiling: 900,

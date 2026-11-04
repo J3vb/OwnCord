@@ -251,7 +251,10 @@ fn send_launcher_count(desktop_names: &[String], count: u32) {
 
 /// Show `count` on the taskbar button and in the tray tooltip; 0 clears both.
 /// A platform that cannot draw one part is logged and the rest still applies.
-#[tauri::command]
+/// Async so the bitmap render and the Linux bus signal stay off the UI thread;
+/// the webview sends one call at a time (`platform/desktop/notifications.ts`),
+/// so two counts never race here.
+#[tauri::command(async)]
 pub fn set_unread_badge<R: Runtime>(app: tauri::AppHandle<R>, count: u32) {
     #[cfg(any(windows, target_os = "macos"))]
     if let Some(window) = app.get_webview_window("main") {

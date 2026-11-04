@@ -10,6 +10,8 @@ import { createStatusRow, setStatusIcon, createRevealToggle, type StatusKind } f
 import { accountText as t } from "../../i18n/account";
 import { RestErrorCode } from "@lib/protocolTypes";
 import { createLogger } from "@lib/logger";
+import { copyThenRelabel } from "@lib/ui/clipboard";
+import { isPhoneLayout } from "@lib/ui/bottomSheet";
 
 const log = createLogger("AccountTab");
 
@@ -285,6 +287,98 @@ function buildTotpEnrollForm(
   return wrapper;
 }
 
+/** The secret an otpauth:// link carries, or null when it has none. */
+export function totpSecretOf(uri: string): string | null {
+  const match = /[?&]secret=([^&#]+)/i.exec(uri);
+  if (match === null) return null;
+  try {
+    return decodeURIComponent(match[1]!).replaceAll(/\s+/g, "").toUpperCase();
+  } catch {
+    return null;
+  }
+}
+
+/** The key in groups of four, as authenticator apps show it. */
+const groupKey = (key: string): string => key.replaceAll(/(.{4})(?=.)/g, "$1 ");
+
+/**
+ * The enrolment's setup key: a QR code to scan, the key itself with a Copy
+ * button for typing it in (first on a phone, which cannot scan its own
+ * screen), and the full link behind a disclosure.
+ */
+function buildTotpSetupKey(uri: string, signal: AbortSignal): HTMLElement[] {
+  const phone = isPhoneLayout();
+  const secret = totpSecretOf(uri);
+
+  const linkBox = createElement("details", { class: "disclose totp-link" });
+  const summary = createElement("summary", {}, t("totp.showLink"));
+  const link = createElement(
+    "code",
+    { class: "totp-link-value", "data-testid": "totp-qr-uri" },
+    uri,
+  );
+  linkBox.append(summary, link);
+  // Without a key the link is the only fallback to a QR that cannot be drawn.
+  if (secret === null) linkBox.open = true;
+
+  const qrBlock = createElement("div", { class: "totp-qr", "data-testid": "totp-qr" });
+  // The encoder loads with the enrolment, not with Settings.
+  void import("@lib/ui/qrCode").then(
+    ({ qrCodeSvg }) => {
+      if (signal.aborted) return;
+      const qr = qrCodeSvg(uri, t("totp.qrLabel"));
+      if (qr === null) {
+        linkBox.open = true;
+        return;
+      }
+      const frame = createElement("div", { class: "totp-qr-code" });
+      frame.appendChild(qr);
+      qrBlock.append(createElement("div", { class: "totp-setup-label" }, t("totp.scanQr")), frame);
+    },
+    (err: unknown) => {
+      log.warn("QR encoder failed to load", { error: String(err) });
+      if (!signal.aborted) linkBox.open = true;
+    },
+  );
+
+  const keyBlock = createElement("div", { class: "totp-key" });
+  if (secret !== null) {
+    const keyText = createElement(
+      "code",
+      { class: "totp-key-value", "data-testid": "totp-secret" },
+      groupKey(secret),
+    );
+    const copyBtn = createElement(
+      "button",
+      { class: "ac-btn secondary", type: "button", "data-testid": "totp-copy-key" },
+      t("totp.copyKey"),
+    );
+    copyBtn.addEventListener(
+      "click",
+      () =>
+        copyThenRelabel(
+          secret,
+          copyBtn,
+          { idle: t("totp.copyKey"), done: t("totp.keyCopied"), failed: t("totp.copyFailed") },
+          { signal },
+        ),
+      { signal },
+    );
+    const keyRow = createElement("div", { class: "totp-key-row" });
+    keyRow.append(keyText, copyBtn);
+    keyBlock.append(
+      createElement(
+        "div",
+        { class: "totp-setup-label" },
+        phone ? t("totp.enterKey") : t("totp.orEnterKey"),
+      ),
+      keyRow,
+    );
+  }
+
+  return phone ? [keyBlock, qrBlock, linkBox] : [qrBlock, keyBlock, linkBox];
+}
+
 function buildTotpConfirmArea(
   container: HTMLDivElement,
   options: SettingsOverlayOptions,
@@ -298,27 +392,7 @@ function buildTotpConfirmArea(
     container.removeChild(container.firstChild);
   }
 
-  const qrLabel = createElement(
-    "div",
-    {
-      style: "color:var(--text-muted);font-size:13px;margin-bottom:8px",
-    },
-    t("totp.scanUri"),
-  );
-
-  const qrUri = createElement(
-    "code",
-    {
-      style:
-        "display:block;background:var(--bg-active);padding:8px 12px;border-radius:6px;" +
-        "font-family:monospace;font-size:12px;word-break:break-all;margin-bottom:12px;" +
-        "color:var(--text-primary);user-select:all",
-      "data-testid": "totp-qr-uri",
-    },
-    result.qr_uri,
-  );
-
-  const elements: HTMLElement[] = [qrLabel, qrUri];
+  const elements: HTMLElement[] = buildTotpSetupKey(result.qr_uri, signal);
 
   if (result.backup_codes.length > 0) {
     // These codes are shown exactly once — the confirm step replaces this view.

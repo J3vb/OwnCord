@@ -110,7 +110,9 @@ var DBImportAllow = map[string]DBImportEntry{
 	"api/profile_handler.go":          {Disposition: "adapter", Note: "User/Session types in the profile and session response shapes; the services own the calls"},
 	"api/push_handler.go":             {Disposition: "adapter", Note: "db.User type on the context key only; PushService owns every call"},
 	"api/report_handler.go":           {Disposition: "adapter", Note: "db.User from the auth context only; ReportService owns every call"},
-	"api/router.go":                   {Disposition: "boundary", Note: "health probe (PingRead, SQLDb, SQLReaderDB) and the System health page's database card (HealthStats); hub construction left in B3-3", Calls: calls{"HealthStats": 1, "PingRead": 1, "SQLDb": 1, "SQLReaderDB": 1}, Hands: calls{"admin.NewHandler": 1}},
+	"api/route_groups.go":             {Disposition: "boundary", Note: "the metrics source (SQLDb, SQLReaderDB) and the System health page's database card (HealthStats); hands the handle (read from routeDeps) to the admin panel, the plugin admin, the Discord importer and the metrics routes", Calls: calls{"HealthStats": 1, "SQLDb": 1, "SQLReaderDB": 1}, Hands: calls{"NewPluginAdminHandler": 2, "admin.NewHandler": 1, "newDiscordImporter": 1, "routerMetricsRoutes": 1, "withSystemDatabase": 1}},
+	"api/router.go":                   {Disposition: "boundary", Note: "takes the handle from internal/app and passes it to the health probe and the route groups; no calls"},
+	"api/router_health.go":            {Disposition: "boundary", Note: "the /health database probe (PingRead)", Calls: calls{"PingRead": 1}},
 	// ── auth ──────────────────────────────────────────────────────────────
 	"auth/helpers.go": {Disposition: "adapter", Note: "db.User type in a helper signature"},
 	"auth/resolve.go": {Disposition: "adapter", Note: "Session/APIToken/Role/User types; resolution is injected"},

@@ -6,6 +6,7 @@ import { isImeCommit } from "@lib/text/ime";
 import { createElement, appendChildren } from "@lib/dom";
 import { createIcon, type IconName } from "@lib/icons";
 import { showToast } from "@lib/ui/toast";
+import { showContextMenu, type ContextMenuItem } from "@lib/ui/contextMenu";
 import { loadPref, savePref } from "@lib/prefs/preferences";
 import { voiceText } from "../../i18n/voice";
 import type { StreamSample } from "../../features/voice/remoteTracks";
@@ -15,6 +16,15 @@ import { createTalkSlot } from "../../features/voice/talkSlot";
 import { STATS_POLL_MS, VIEW_PREFS, type ViewToggle, log, callButton, sizeOf } from "./gridShared";
 import type { GridState, GridApi } from "./gridState";
 import type { VideoGridCallbacks } from "../VideoGrid";
+
+/** Swap a control's icon only when it changes: the bars redraw on every voice
+ *  store tick, and speaking alone ticks it several times a second. */
+function setIcon(btn: HTMLButtonElement, name: IconName): void {
+  const current = btn.querySelector("svg");
+  if (current?.getAttribute("data-icon") === name) return;
+  current?.remove();
+  btn.appendChild(createIcon(name, 18));
+}
 
 export function createGridCallBar(st: GridState, api: GridApi) {
   /** The call view's hold-to-talk button (Android app only), above the round
@@ -97,6 +107,18 @@ export function createGridCallBar(st: GridState, api: GridApi) {
         callButton(voiceText("widget.control.shareStart"), "monitor", "share", onShare),
       );
     }
+    if (inCallView) {
+      // A phone's view options: one round control instead of square toggles.
+      const views: HTMLButtonElement = callButton(
+        voiceText("grid.viewOptions"),
+        "ellipsis",
+        "views",
+        () => openViewMenu(views),
+        " video-fs-btn--views",
+      );
+      views.setAttribute("aria-haspopup", "menu");
+      bar.appendChild(views);
+    }
     const showChat = st.callbacks.onExitGrid;
     if (inCallView && showChat !== undefined) {
       // Hidden off a phone, where the view bar's own chat control does this.
@@ -135,10 +157,7 @@ export function createGridCallBar(st: GridState, api: GridApi) {
     const deafen = bar.querySelector<HTMLButtonElement>("[data-call-control='deafen']");
     if (mute !== null) {
       mute.setAttribute("aria-pressed", String(st.callState.muted));
-      mute.querySelector("svg")?.remove();
-      mute.appendChild(
-        createIcon(st.callState.muted || st.callState.listenOnly ? "mic-off" : "mic", 18),
-      );
+      setIcon(mute, st.callState.muted || st.callState.listenOnly ? "mic-off" : "mic");
       mute.disabled = st.callState.listenOnly || st.callState.serverMuted === true;
       mute.title = voiceText(
         st.callState.serverMuted === true
@@ -150,8 +169,7 @@ export function createGridCallBar(st: GridState, api: GridApi) {
     }
     if (deafen !== null) {
       deafen.setAttribute("aria-pressed", String(st.callState.deafened));
-      deafen.querySelector("svg")?.remove();
-      deafen.appendChild(createIcon(st.callState.deafened ? "headphones-off" : "headphones", 18));
+      setIcon(deafen, st.callState.deafened ? "headphones-off" : "headphones");
       deafen.disabled = st.callState.serverDeafened === true;
       deafen.title = voiceText(
         st.callState.serverDeafened === true
@@ -228,8 +246,7 @@ export function createGridCallBar(st: GridState, api: GridApi) {
   /** Camera or share: pressed while on, inert while locked. */
   function drawMediaButton(btn: HTMLButtonElement, on: boolean, icon: IconName): void {
     btn.setAttribute("aria-pressed", String(on));
-    btn.querySelector("svg")?.remove();
-    btn.appendChild(createIcon(icon, 18));
+    setIcon(btn, icon);
     btn.disabled = mediaLockReason() !== null;
   }
 
@@ -237,7 +254,7 @@ export function createGridCallBar(st: GridState, api: GridApi) {
 
   const VIEW_TOGGLES: readonly [ViewToggle, string, IconName][] = [
     ["nonVideo", voiceText("grid.showNonVideo"), "user"],
-    ["selfCamera", voiceText("grid.showMyCamera"), "camera"],
+    ["selfCamera", voiceText("grid.showMyCamera"), "square-user"],
     ["strip", voiceText("grid.showStrip"), "layout-grid"],
   ];
 
@@ -276,6 +293,37 @@ export function createGridCallBar(st: GridState, api: GridApi) {
     if (st.exitBtn !== null) bar.appendChild(st.exitBtn);
     syncPopButton();
     return bar;
+  }
+
+  /** The view toggles as one menu, for the phone's round control row. */
+  function openViewMenu(anchor: HTMLButtonElement): void {
+    const items: ContextMenuItem[] = VIEW_TOGGLES.filter(
+      ([key]) => key !== "strip" || st.focusedTileId !== null,
+    ).map(([key, label]) => ({
+      label,
+      checked: st.viewOn[key],
+      testId: `view-menu-${key}`,
+      onClick: () => setView(key, !st.viewOn[key]),
+    }));
+    if (st.popBtn !== null) {
+      items.push({
+        label: voiceText(st.callPop === null ? "grid.popOutCall" : "grid.popInCall"),
+        testId: "view-menu-popout",
+        onClick: () => {
+          if (st.callPop === null) popOutCall();
+          else closeCallPopout(true);
+        },
+      });
+    }
+    const rect = anchor.getBoundingClientRect();
+    showContextMenu({
+      x: rect.left,
+      y: rect.top,
+      items,
+      ariaLabel: voiceText("grid.viewOptions"),
+      restoreFocusTo: () => (anchor.isConnected ? anchor : null),
+      signal: st.gridListeners.signal,
+    });
   }
 
   // --- Pop out the whole call ----------------------------------------------------

@@ -83,6 +83,13 @@ impl WsState {
         claimed
     }
 
+    /// Whether `generation` is still the newest attempt. A lock-free read for
+    /// steps that only need to stop early, such as raising a certificate
+    /// prompt; taking the slot still goes through `install_sender`.
+    fn is_current(&self, generation: u64) -> bool {
+        self.generation.load(Ordering::SeqCst) == generation
+    }
+
     /// Install `tx` as the live sender if `generation` is still current.
     /// Returns false when a newer `ws_connect` superseded this attempt.
     async fn install_sender(&self, generation: u64, tx: mpsc::Sender<String>) -> bool {
@@ -207,6 +214,14 @@ pub async fn ws_connect<R: Runtime>(
         })?;
 
     debug!("[ws_proxy] WebSocket handshake complete");
+
+    // A profile switch during the handshake already started a newer attempt:
+    // stop before the certificate check, so the old host's prompt never
+    // appears over the new server.
+    if !state.is_current(my_generation) {
+        info!("[ws_proxy] handshake superseded by a newer connect; skipping the certificate check");
+        return Err("superseded by a newer connection".into());
+    }
 
     // ── TOFU check ───────────────────────────────────────────────────────
     let host = tofu::extract_host(&url);
@@ -894,6 +909,19 @@ mod tests {
             slot.as_ref().is_some_and(|t| t.same_channel(&tx_b)),
             "the live connection's sender must still be installed"
         );
+    }
+
+    #[tokio::test]
+    async fn a_superseded_attempt_is_no_longer_current() {
+        let state = WsState::new();
+        let gen_a = state.begin_connection().await;
+        assert!(state.is_current(gen_a));
+        let gen_b = state.begin_connection().await;
+        assert!(
+            !state.is_current(gen_a),
+            "an attempt replaced during its handshake must not reach the certificate prompt"
+        );
+        assert!(state.is_current(gen_b));
     }
 
     // ── Generation-owned teardown ───────────────────────────────────────────

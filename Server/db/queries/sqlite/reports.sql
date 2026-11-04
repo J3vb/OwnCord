@@ -29,6 +29,14 @@ SELECT id, public_id, reporter_id, reporter_token, subject_id, subject_token, ta
        created_at, updated_at, closed_at, source_nsfw
   FROM reports WHERE id = ?;
 
+-- name: ListReportLinksByIDs :many
+-- The public id and subject of each listed report, in one read, so a
+-- moderation action list resolves its report links without a query per row.
+-- The caller applies the subject guard: a report about the viewer stays hidden.
+SELECT id, public_id, subject_id
+  FROM reports
+ WHERE id IN (sqlc.slice('ids'));
+
 -- name: GetReportByPublicID :one
 -- The only lookup a route parameter or a mod_queue frame's id ever drives:
 -- public_id is the sole externally-visible identifier (Codex review).

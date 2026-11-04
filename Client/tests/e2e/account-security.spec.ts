@@ -330,9 +330,12 @@ test.describe("Settings > Account — enable and confirm 2FA", () => {
 
     await expect(section.locator("[data-testid='totp-qr-uri']")).toHaveText(QUIET_URI);
     await expect(section.locator("[data-testid='totp-backup-codes']")).toContainText(CODES[0]!);
+    // The setup key is a scannable QR code with the key and a Copy key button.
+    await expect(section.locator("[data-testid='totp-qr'] svg")).toBeVisible();
+    await expect(section.locator("[data-testid='totp-secret']")).toHaveText("JBSW Y3DP EHPK 3PXP");
     // The focused Submit is hidden with the password step; focus moves to the
-    // first control of the code step (the one-time codes' copy button).
-    await expect(section.locator("[data-testid='totp-copy-backup-codes']")).toBeFocused();
+    // first control of the code step (the setup key's copy button).
+    await expect(section.locator("[data-testid='totp-copy-key']")).toBeFocused();
     await expect(section.locator("[data-testid='totp-status-badge']")).toHaveText("Disabled");
 
     const enableCall = await waitForFetch(page, requestTo("POST", "/users/me/totp/enable"));

@@ -1,6 +1,7 @@
 ---
 paths:
   - "Server/api/router.go"
+  - "Server/api/route_groups.go"
   - "Server/config/config.go"
   - "Server/migrations/**"
 ---

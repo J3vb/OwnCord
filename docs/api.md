@@ -396,7 +396,8 @@ setting (B4-1; the admin panel's Settings page, or the setup wizard):
 
 `approval` and `open` also budget 5 registrations per client address per 24
 hours, and `approval` caps the pending queue at 100 applications; both refusals
-are `429 RATE_LIMITED`. A fresh install is `invite`; an upgraded server keeps
+are `429 RATE_LIMITED`. Only a registration that went through counts against
+the address: a taken username, a busy server or a full queue does not. A fresh install is `invite`; an upgraded server keeps
 its former `registration_open` choice as `invite` (1) or `closed` (0), never
 `open`. The first user is created via `/admin/api/setup` instead.
 
@@ -926,6 +927,10 @@ Omitting a field leaves it unchanged; sending `""` clears the nullable ones.
 `display_name` and `about` are HTML-sanitized and trimmed server-side, and the
 length caps count characters, not bytes.
 
+The request is all-or-nothing: the profile fields and `identity_public_key`
+are written in one transaction, so an error response means nothing was
+saved, and a retry of the whole request is safe.
+
 While a moderator timeout is active on your account, a `display_name` or
 `username` that differs from your current one is refused with `403`
 `TIMED_OUT`, and the whole request is not applied. Resending the current
@@ -1130,7 +1135,7 @@ starts `true` and stays so until the account lists its sessions from
 another device. This listing is that acknowledgement — every row's flag
 clears except the caller's own, so the device that just signed in never
 acknowledges itself, and the response carries the flags as they were before
-it.
+it. A listing with no unseen row other than the caller's own writes nothing.
 No push transport exists for the signal; a client that wants it polls this
 route.
 

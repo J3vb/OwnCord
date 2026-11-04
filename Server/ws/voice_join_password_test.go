@@ -442,6 +442,37 @@ func TestVoiceJoinPassword_ServerWideBackstop(t *testing.T) {
 	}
 }
 
+// An attempt the server-wide budget refuses spends nothing from the member's
+// own budgets, across channels or for this channel.
+func TestVoiceJoinPassword_ServerWideRefusalSparesTheMembersBudget(t *testing.T) {
+	hub, database, limiter := newPasswordHub(t)
+	chanID := seedVoiceChan(t, database, "pw-backstop-spare")
+	protectVoiceChannel(t, database, chanID, joinPasswordSecret)
+	user := seedVoiceMember(t, database, "pw-backstop-spare-user")
+	c, send := connectPasswordClient(t, hub, user, chanID)
+
+	for range 60 {
+		limiter.Allow("voice_join_password_all", 60, time.Minute)
+	}
+	if code := tryJoin(hub, c, send, chanID, joinPasswordSecret); code != "RATE_LIMITED" {
+		t.Fatalf("code = %q, want RATE_LIMITED", code)
+	}
+	budgets := map[string]struct {
+		key   string
+		limit int
+	}{
+		"across channels":  {auth.Key("voice_join_password_user", user.ID), 10},
+		"for this channel": {auth.Key(auth.Key("voice_join_password", user.ID), chanID), 5},
+	}
+	for name, b := range budgets {
+		for i := range b.limit {
+			if !limiter.Allow(b.key, b.limit, time.Minute) {
+				t.Fatalf("member budget %s: slot %d of %d spent by the refused attempt", name, i+1, b.limit)
+			}
+		}
+	}
+}
+
 // The gate comes after the role rules: a member who may not join the channel
 // is told so, not asked for a password.
 func TestVoiceJoinPassword_RoleRulesAnswerFirst(t *testing.T) {

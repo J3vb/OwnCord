@@ -1,5 +1,5 @@
 {
-  "nextId": 553,
+  "nextId": 555,
   "findings": [
     {
       "id": "OC-0001",
@@ -12767,6 +12767,52 @@
       "status": "fixed",
       "found": "2026-11-03",
       "hunt": "server-review-2026-11-03",
+      "finder": "claude",
+      "fixedDate": "2026-11-04"
+    },
+    {
+      "id": "OC-0553",
+      "title": "A profile save with an identity key could fail after the profile part was already saved",
+      "file": "Server/service/user.go",
+      "line": 231,
+      "severity": "low",
+      "why": "PATCH /users/me wrote the profile columns and then the E2EE identity key as two separate writes. When the key write failed, the request answered an error while the new username or display name had already committed and been broadcast, so a client that reported 'nothing saved' was wrong.",
+      "repro": "Make the identity key write fail and PATCH a new username with identity_public_key. Before the fix the username was changed and the response was 500.",
+      "evidence": "Server/api/profile_handler_identity_key_test.go (TestUpdateProfile_IdentityKeyFailureLeavesProfileUnchanged), Server/db/profile_queries_test.go (TestUpdateUserProfileAndIdentityKey_AllOrNothing).",
+      "suggestedFix": "Write the profile columns and the identity key in one transaction.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/api/profile_handler_identity_key_test.go",
+        "revertProof": "fail (the pre-change test pinned the username as committed after the key write failed)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-03",
+      "hunt": "server-review-2026-11-03",
+      "lens": "rest-api",
+      "finder": "claude",
+      "fixedDate": "2026-11-04"
+    },
+    {
+      "id": "OC-0554",
+      "title": "The account-deletion log named the reverse proxy instead of the client",
+      "file": "Server/api/auth_handler.go",
+      "line": 286,
+      "severity": "low",
+      "why": "DELETE /auth/account resolved the client address without the trusted_proxies list, so behind the recommended reverse proxy its log line named the proxy, while login, register and recovery named the real client.",
+      "repro": "Mount the auth routes with a trusted proxy, send DELETE /api/v1/auth/account from it with X-Forwarded-For. Before the fix the service received the proxy address.",
+      "evidence": "Server/api/auth_handler_delete_ip_test.go (TestDeleteAccount_ResolvesClientIPThroughTrustedProxy).",
+      "suggestedFix": "Resolve the address through the trusted proxy list parsed once at construction, as the other auth handlers do.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/api/auth_handler_delete_ip_test.go",
+        "revertProof": "fail (ip 10.0.0.1, want 203.0.113.7)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-03",
+      "hunt": "server-review-2026-11-03",
+      "lens": "rest-api",
       "finder": "claude",
       "fixedDate": "2026-11-04"
     }

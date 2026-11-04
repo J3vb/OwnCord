@@ -6,7 +6,8 @@
 //! pinned) — and pulls the rest from here. The long-lived data phase of the
 //! LiveKit tunnel deliberately keeps a plain `io::copy_bidirectional` (a WS
 //! connection may idle for hours), while the request/response HTTP tunnel
-//! wraps the same copy in [`copy_with_deadline`].
+//! wraps the same copy in [`copy_with_deadline`], which cuts it only after a
+//! stretch with no bytes moving.
 
 use log::{debug, error, info, warn};
 use rustls::pki_types::ServerName;
@@ -171,22 +172,125 @@ pub(crate) async fn read_request_headers(
     Ok(buf)
 }
 
-/// Run io::copy_bidirectional under a deadline.
+/// When bytes last moved on a tunneled connection, for an idle deadline that a
+/// slow but progressing transfer never reaches.
+pub(crate) struct Activity {
+    start: tokio::time::Instant,
+    last_ms: AtomicU64,
+}
+
+impl Activity {
+    pub(crate) fn new() -> Arc<Self> {
+        Arc::new(Self {
+            start: tokio::time::Instant::now(),
+            last_ms: AtomicU64::new(0),
+        })
+    }
+
+    fn mark(&self) {
+        let ms = u64::try_from(self.start.elapsed().as_millis()).unwrap_or(u64::MAX);
+        self.last_ms.fetch_max(ms, Ordering::Relaxed);
+    }
+
+    fn last(&self) -> tokio::time::Instant {
+        self.start + Duration::from_millis(self.last_ms.load(Ordering::Relaxed))
+    }
+}
+
+/// Run `work` until it finishes or `idle` passes with no byte moved through a
+/// stream wrapped in [`ActivityStream`] over the same `activity`.
+pub(crate) async fn until_idle<F: std::future::Future>(
+    activity: &Activity,
+    idle: Duration,
+    work: F,
+) -> Result<F::Output, io::Error> {
+    tokio::pin!(work);
+    loop {
+        let deadline = activity.last() + idle;
+        tokio::select! {
+            out = &mut work => return Ok(out),
+            () = tokio::time::sleep_until(deadline) => {
+                if activity.last() + idle <= tokio::time::Instant::now() {
+                    return Err(io::Error::new(io::ErrorKind::TimedOut, "data phase idle"));
+                }
+            }
+        }
+    }
+}
+
+/// Run io::copy_bidirectional until it ends or no byte has moved either way
+/// for `idle`. A stuck remote (one that completes the handshake, then neither
+/// answers nor closes) is reclaimed; a slow upload that keeps moving is not,
+/// so the server's own transfer limit is the one that ends it, with an answer
+/// the webview can show.
 pub(crate) async fn copy_with_deadline<A, B>(
     local: &mut A,
     remote: &mut B,
-    dur: Duration,
+    idle: Duration,
 ) -> io::Result<(u64, u64)>
 where
     A: io::AsyncRead + io::AsyncWrite + Unpin + ?Sized,
     B: io::AsyncRead + io::AsyncWrite + Unpin + ?Sized,
 {
-    match timeout(dur, io::copy_bidirectional(local, remote)).await {
-        Ok(result) => result,
-        Err(_) => Err(io::Error::new(
-            io::ErrorKind::TimedOut,
-            "data phase timed out",
-        )),
+    let activity = Activity::new();
+    let mut local = ActivityStream::new(local, Arc::clone(&activity));
+    let mut remote = ActivityStream::new(remote, Arc::clone(&activity));
+    until_idle(
+        &activity,
+        idle,
+        io::copy_bidirectional(&mut local, &mut remote),
+    )
+    .await?
+}
+
+/// Marks its [`Activity`] whenever a read or write moves at least one byte.
+pub(crate) struct ActivityStream<A> {
+    inner: A,
+    activity: Arc<Activity>,
+}
+
+impl<A> ActivityStream<A> {
+    pub(crate) fn new(inner: A, activity: Arc<Activity>) -> Self {
+        Self { inner, activity }
+    }
+}
+
+impl<A: AsyncRead + Unpin> AsyncRead for ActivityStream<A> {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        let this = self.get_mut();
+        let before = buf.filled().len();
+        let result = Pin::new(&mut this.inner).poll_read(cx, buf);
+        if matches!(result, Poll::Ready(Ok(()))) && buf.filled().len() > before {
+            this.activity.mark();
+        }
+        result
+    }
+}
+
+impl<A: AsyncWrite + Unpin> AsyncWrite for ActivityStream<A> {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<io::Result<usize>> {
+        let this = self.get_mut();
+        let result = Pin::new(&mut this.inner).poll_write(cx, buf);
+        if matches!(result, Poll::Ready(Ok(n)) if n > 0) {
+            this.activity.mark();
+        }
+        result
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.get_mut().inner).poll_flush(cx)
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.get_mut().inner).poll_shutdown(cx)
     }
 }
 
@@ -582,6 +686,36 @@ mod tests {
     // forever. Simulate the stall with two in-memory duplex pairs where
     // neither peer ever writes or disconnects, so raw `io::copy_bidirectional`
     // would block forever.
+    #[tokio::test(start_paused = true)]
+    async fn a_transfer_that_keeps_moving_outlives_the_idle_deadline() {
+        let (mut local_near, mut local_far) = tokio::io::duplex(64);
+        let (mut remote_near, mut remote_far) = tokio::io::duplex(64);
+        let idle = Duration::from_millis(200);
+
+        // One byte every 50 ms for ten times the idle window, then a close.
+        let writer = tokio::spawn(async move {
+            for _ in 0..40 {
+                local_far.write_all(b"x").await.expect("write");
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            local_far.shutdown().await.expect("shutdown");
+        });
+        let reader = tokio::spawn(async move {
+            let mut sink = Vec::new();
+            remote_far.read_to_end(&mut sink).await.expect("read");
+            remote_far.shutdown().await.expect("shutdown");
+            sink.len()
+        });
+
+        let copied = copy_with_deadline(&mut local_near, &mut remote_near, idle).await;
+        assert_eq!(
+            copied.expect("a progressing transfer must not be cut").0,
+            40
+        );
+        writer.await.expect("writer");
+        assert_eq!(reader.await.expect("reader"), 40);
+    }
+
     #[tokio::test]
     async fn copy_with_deadline_reclaims_a_stalled_connection() {
         let (mut local_near, _local_far) = tokio::io::duplex(64);

@@ -306,7 +306,7 @@ describe("SidebarArea", () => {
 
       await openMemberPicker(container);
 
-      const cancelBtn = document.querySelector(".btn-secondary") as HTMLElement;
+      const cancelBtn = document.querySelector(".btn-modal-cancel") as HTMLElement;
       cancelBtn.click();
 
       expect(document.querySelector(".modal-overlay")).toBeNull();

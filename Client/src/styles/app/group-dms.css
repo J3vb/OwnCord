@@ -179,6 +179,12 @@
   font-size: var(--font-size-sm);
   margin: 8px 0 0;
 }
+.dm-member-picker-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
 .group-member-panel .gm-main {
   display: flex;
   align-items: center;

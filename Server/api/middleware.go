@@ -37,30 +37,33 @@ const (
 // request serialized API traffic behind the single SQLite writer.
 const sessionTouchInterval = 60 * time.Second
 
-const touchThrottleMaxEntries = 4096
-
 var middlewareNow = time.Now
 
 // touchThrottle remembers when each session hash was last touched so
-// TouchSession runs at most once per sessionTouchInterval per session.
+// TouchSession runs at most once per sessionTouchInterval per session. Once per
+// interval the next call drops every entry older than the interval, so the map
+// holds only sessions seen in about the last two intervals and no call pays
+// for more than one scan per interval.
 type touchThrottle struct {
-	mu   sync.Mutex
-	seen map[string]time.Time
+	mu        sync.Mutex
+	seen      map[string]time.Time
+	lastSweep time.Time
 }
 
 func (t *touchThrottle) shouldTouch(hash string, now time.Time) bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if last, ok := t.seen[hash]; ok && now.Sub(last) < sessionTouchInterval {
-		return false
-	}
-	if len(t.seen) >= touchThrottleMaxEntries {
+	if now.Sub(t.lastSweep) >= sessionTouchInterval {
+		t.lastSweep = now
 		cutoff := now.Add(-sessionTouchInterval)
 		for h, ts := range t.seen {
 			if ts.Before(cutoff) {
 				delete(t.seen, h)
 			}
 		}
+	}
+	if last, ok := t.seen[hash]; ok && now.Sub(last) < sessionTouchInterval {
+		return false
 	}
 	t.seen[hash] = now
 	return true
@@ -288,15 +291,6 @@ func RateLimitMiddleware(limiter *auth.RateLimiter, prefix string, limit int, wi
 			next.ServeHTTP(w, r)
 		})
 	}
-}
-
-// clientIP returns the connecting IP from RemoteAddr, ignoring proxy headers;
-// use it for audit and lockout keys where proxy trust is not established, and
-// clientip.Resolve for rate limiting. The resolution algorithm lives in the
-// clientip package because the WebSocket handshake needs the identical result
-// and ws cannot import api.
-func clientIP(r *http.Request) string {
-	return clientip.Resolve(r, nil)
 }
 
 // parseCIDRList parses CIDR strings, skipping invalid entries with a warning so

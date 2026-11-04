@@ -296,6 +296,18 @@ describe("CreateChannelModal", () => {
       modal.destroy?.();
     });
 
+    it("caps the name at the server's 100 characters and shows the limit", () => {
+      const { modal } = makeModal("Chat");
+      const name = q<HTMLInputElement>("channel-name-input");
+      expect(name.maxLength).toBe(200);
+      const hintId = name.getAttribute("aria-describedby")!.split(" ").at(-1)!;
+      expect(container.querySelector(`#${hintId}`)?.textContent).toContain("100 characters");
+      name.value = "n".repeat(120);
+      name.dispatchEvent(new Event("input", { bubbles: true }));
+      expect(name.value).toHaveLength(100);
+      modal.destroy?.();
+    });
+
     it("sends a trimmed topic when given", async () => {
       const onCreate = vi.fn(async (_d: { name: string; topic?: string }) => {});
       const { modal } = makeModal("Chat", { onCreate });
