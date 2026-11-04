@@ -4,7 +4,6 @@ package ws
 import (
 	"context"
 	"log/slog"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -32,8 +31,6 @@ type Hub struct {
 	// then register, admitting a dead ghost until the stale sweep.
 	clientEvents chan clientEvent
 	stop         chan struct{}
-	stopOnce     sync.Once
-	gracefulOnce sync.Once
 	// stopUsers: see StoppedUserIDs. Guarded by mu.
 	stopUsers   []int64
 	livekit     *LiveKitClient
@@ -51,8 +48,6 @@ type Hub struct {
 	audience audienceMemo
 	pubsub   *PubSub // topic-based pub/sub for O(subscribers) broadcast
 
-	restartGate restartNoticeGate // dedupes BroadcastServerRestart
-
 	seq         uint64                       // atomic monotonic sequence counter
 	seqMu       syncutil.Ranked[lockRankSeq] // seq assignment + replay + delivery order; order: lock_order.go
 	timeoutView timeoutViewState             // member_timeouts delivery; lock order in member_timeouts_delivery.go
@@ -66,42 +61,12 @@ type Hub struct {
 	// events is the persistence, replay and plugin fan-out tier.
 	events hubEventTier
 
-	// running flips when Run starts; tests read it via RunningForTest to wait for the
-	// dispatch loop.
-	running atomic.Bool
+	// lifecycle is the run, stop and sweep-guard state.
+	lifecycle hubLifecycle
 
-	// dispatchExited flips when Run returns for good (Stop or the panic breaker).
-	// /health reads it via DispatchAlive: clients keep registering and appearing
-	// online through registerNow even with the loop dead, so nothing else makes the
-	// outage observable.
-	dispatchExited atomic.Bool
-
-	// runDone closes when Run returns, after dispatchExited is set and its sweeps
-	// returned. Stop and GracefulStopContext only signal the loop; whoever started Run
-	// joins it here (Done) before releasing what it reads. Made by NewHub; nil on
-	// struct-literal hubs in internal tests.
-	runDone chan struct{}
-
-	// life is cancelled by closeStop; sweeps and background work (voice-leave cleanup,
-	// joined by JoinBackground) run under it. Made by NewHub.
-	life       context.Context
-	stopLife   context.CancelFunc
-	sweeps     sync.WaitGroup
-	background *syncutil.Group
-	gates      contentGates // NSFW content gate reads parked off the dispatch goroutine (hub_content_gate.go)
-
-	// fatalFn runs when the panic breaker trips (3 panics/60s). A hub that panicked
-	// that often has unknown state, so production exits and lets the supervisor
-	// restart rather than serve connections that can never receive a broadcast. Tests
-	// replace it.
-	fatalFn func()
+	gates contentGates // NSFW content gate reads parked off the dispatch goroutine (hub_content_gate.go)
 
 	readyGate chan struct{} // one slot per concurrent fresh-connect ready build (admitReady)
-
-	// In-flight guards for the DB-heavy sweeps (startSweep): a tick arriving while the
-	// previous sweep runs is skipped, not stacked.
-	sessionSweepInFlight                                         atomic.Bool
-	voiceSweepInFlight, voiceReconcileInFlight, afkSweepInFlight atomic.Bool
 
 	voiceReconcile voiceReconcileState // polling reconciler (voice_reconcile.go)
 	// voiceResumeChecks are the SFU checks of memberships resumed sockets took over
@@ -183,11 +148,11 @@ type Hub struct {
 // panics within 60 seconds stops it permanently to avoid a crash loop.
 // avoid a tight crash loop.
 func (h *Hub) Run() {
-	if h.runDone != nil {
+	if h.lifecycle.runDone != nil {
 		defer h.finishRun()
 	}
-	h.running.Store(true)
-	defer h.dispatchExited.Store(true)
+	h.lifecycle.running.Store(true)
+	defer h.lifecycle.dispatchExited.Store(true)
 	h.startSweepWorkers()
 	var panicCount int
 	var lastPanicReset time.Time
@@ -226,9 +191,9 @@ func (h *Hub) Run() {
 						slog.Error("hub: stopping and exiting for supervisor restart",
 							"hardware_fault", hardware, "panic_count", panicCount)
 						h.Stop()
-						h.dispatchExited.Store(true)
-						if h.fatalFn != nil {
-							h.fatalFn()
+						h.lifecycle.dispatchExited.Store(true)
+						if h.lifecycle.fatalFn != nil {
+							h.lifecycle.fatalFn()
 						}
 						return
 					}
@@ -250,13 +215,13 @@ func (h *Hub) Run() {
 				case <-sessionSweepTicker.C:
 					// The revoked-session and stale-voice sweeps do per-client DB work, so they run
 					// off the dispatch goroutine; a slow sweep must not stall broadcast delivery.
-					h.startSweep(&h.sessionSweepInFlight, h.sweepRevokedSessions)
+					h.startSweep(&h.lifecycle.sessionSweepInFlight, h.sweepRevokedSessions)
 				case <-voiceSweepTicker.C:
-					h.startSweep(&h.voiceSweepInFlight, h.sweepStaleVoiceStates)
+					h.startSweep(&h.lifecycle.voiceSweepInFlight, h.sweepStaleVoiceStates)
 					// The reconciler and the AFK moves have their own guards: a slow ListParticipants
 					// or move never suppresses the ghost sweep.
-					h.startSweep(&h.voiceReconcileInFlight, h.reconcileVoiceMembership)
-					h.startSweep(&h.afkSweepInFlight, h.sweepAFK)
+					h.startSweep(&h.lifecycle.voiceReconcileInFlight, h.reconcileVoiceMembership)
+					h.startSweep(&h.lifecycle.afkSweepInFlight, h.sweepAFK)
 				}
 			}
 		}()
@@ -294,7 +259,7 @@ func (h *Hub) GracefulStop() {
 // the restart notice tells clients (an update, a restore). Safe to call
 // concurrently; only the first call's ctx and reason are used.
 func (h *Hub) GracefulStopContext(ctx context.Context, reason RestartReason) {
-	h.gracefulOnce.Do(func() {
+	h.lifecycle.gracefulOnce.Do(func() {
 		h.recordStopUsers()
 		// The notice window matters only when someone is connected to hear it; an idle
 		// server skips straight to teardown.
@@ -320,6 +285,6 @@ func (h *Hub) GracefulStopContext(ctx context.Context, reason RestartReason) {
 		// The voice rows stay for the next boot's wipe.
 		h.StopLiveKit()
 
-		h.stopOnce.Do(h.closeStop)
+		h.lifecycle.stopOnce.Do(h.closeStop)
 	})
 }

@@ -84,7 +84,7 @@ func TestDispatchAlive_FlipsOnStop(t *testing.T) {
 func TestDone_ClosesOnlyOnceDispatchHasExited(t *testing.T) {
 	h := &Hub{
 		stop:         make(chan struct{}),
-		runDone:      make(chan struct{}),
+		lifecycle:    hubLifecycle{runDone: make(chan struct{})},
 		clientEvents: make(chan clientEvent, 1),
 		broadcast:    make(chan broadcastMsg, 1),
 	}
@@ -120,7 +120,7 @@ func TestPanicBreaker_CallsFatalFn(t *testing.T) {
 		broadcast:    make(chan broadcastMsg, 3),
 	}
 	fatal := make(chan struct{})
-	h.fatalFn = func() { close(fatal) }
+	h.lifecycle.fatalFn = func() { close(fatal) }
 
 	// Each frame makes deliverBroadcast panic through the dispatch-side NSFW
 	// hook. It must be an explicit panic, not a nil dereference: on Windows a

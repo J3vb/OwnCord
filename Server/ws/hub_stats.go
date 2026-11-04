@@ -321,7 +321,7 @@ func (h *Hub) BroadcastDropCount() uint64 {
 // starts (so a health probe racing startup does not flap), false once Run has
 // returned (shutdown or the panic breaker). Safe from any goroutine.
 func (h *Hub) DispatchAlive() bool {
-	return !h.dispatchExited.Load()
+	return !h.lifecycle.dispatchExited.Load()
 }
 
 // BackpressureStats returns process-lifetime per-client counters: connections

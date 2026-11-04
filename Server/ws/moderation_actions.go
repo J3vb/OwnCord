@@ -72,7 +72,7 @@ func (h *Hub) scheduleTimeoutExpiryRefresh(userID int64, expiresAt time.Time) {
 // from the hub's lifecycle context so Stop interrupts it (Background for a hub
 // built without NewHub).
 func (h *Hub) expiryCtx() (context.Context, context.CancelFunc) {
-	parent := h.life
+	parent := h.lifecycle.ctx
 	if parent == nil {
 		parent = context.Background()
 	}

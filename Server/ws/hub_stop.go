@@ -9,17 +9,17 @@ import (
 
 // Stop signals Run to exit. Safe to call multiple times.
 func (h *Hub) Stop() {
-	h.stopOnce.Do(h.closeStop)
+	h.lifecycle.stopOnce.Do(h.closeStop)
 }
 
 // initLife makes the hub's lifecycle context and the background group rooted
 // at it. NewHub calls it once, before any goroutine can reach the hub.
 func (h *Hub) initLife() {
-	h.life, h.stopLife = context.WithCancel(context.Background())
+	h.lifecycle.ctx, h.lifecycle.cancel = context.WithCancel(context.Background())
 	// WithoutCancel: closeStop must not cancel a LiveKit removal mid-request
 	// (that leaves a ghost participant in the SFU); JoinBackground gives the
 	// jobs a short grace and then cancels them.
-	h.background = syncutil.NewGroup(context.WithoutCancel(h.life))
+	h.lifecycle.background = syncutil.NewGroup(context.WithoutCancel(h.lifecycle.ctx))
 }
 
 // closeStop signals Run to exit and cancels the in-flight sweeps. Only ever
@@ -27,8 +27,8 @@ func (h *Hub) initLife() {
 func (h *Hub) closeStop() {
 	close(h.stop)
 	h.stopThreadFeed()
-	if h.stopLife != nil {
-		h.stopLife()
+	if h.lifecycle.cancel != nil {
+		h.lifecycle.cancel()
 	}
 }
 
@@ -37,8 +37,8 @@ func (h *Hub) closeStop() {
 // name the api suite's goleak filter ignores.
 func (h *Hub) finishRun() {
 	h.closeParkedBarriers()
-	h.sweeps.Wait()
-	close(h.runDone)
+	h.lifecycle.sweeps.Wait()
+	close(h.lifecycle.runDone)
 }
 
 // Done returns a channel that closes once Run has returned, with
@@ -46,7 +46,7 @@ func (h *Hub) finishRun() {
 // GracefulStopContext do not wait for that, so a caller that must know the
 // loop is gone waits here.
 func (h *Hub) Done() <-chan struct{} {
-	return h.runDone
+	return h.lifecycle.runDone
 }
 
 // backgroundJoinGrace is how long JoinBackground lets a voice-leave job finish
@@ -65,5 +65,5 @@ const backgroundJoinGrace = 2 * time.Second
 // the dispatch goroutine's exit on a job that may need a user lock. No hub
 // lock is held here.
 func (h *Hub) JoinBackground(ctx context.Context) (stragglers int) {
-	return h.background.Stop(ctx, backgroundJoinGrace)
+	return h.lifecycle.background.Stop(ctx, backgroundJoinGrace)
 }
