@@ -30,7 +30,6 @@ import type { SidebarAreaResult } from "./SidebarArea";
 import type { ChatAreaResult } from "./ChatArea";
 import type { QuickSwitcherManager } from "./OverlayManagers";
 import type { VoiceWidgetCallbacks } from "./VoiceCallbacks";
-import type { GlobalShortcutVks } from "../../lib/voice/voiceShortcuts";
 import type { Channel } from "../../stores/channels.store";
 import type { VoiceModMenuOptions } from "../../components/channel-sidebar/volumeMenu";
 export interface PageState {
@@ -220,25 +219,6 @@ export interface MountScope {
   voiceKeybindActions: VoiceWidgetCallbacks;
   shortcutsOverlay: typeof import("@components/ShortcutsOverlay") | null;
   shortcutsClosed: boolean;
-  // Once the poller runs it also sees the keys while the window is focused,
-  // so the in-app handler stands down to avoid a double toggle. The flag is
-  // set before start() so a press during startup is missed, never doubled.
-  // On a Wayland session the desktop's shortcut service is the "poller": it
-  // is live only once both keys are bound, so the flag follows the host's
-  // status changes too (a bind, the user editing the keys, a portal restart).
-  // start() runs whether or not the host says it is supported: the host
-  // decides whether anything can observe keys, and on Wayland it arms the
-  // portal so a press from a key the compositor itself was told to deliver
-  // (Hyprland: the portal names no keys, so it never reads as bound) gets
-  // through. Only the in-app stand-down follows `supported`.
-  // Answers can arrive out of order (a status change during startup), so
-  // only the latest query may set the flag.
-  refreshSeq: number;
-  refreshGlobalKeys: () => void;
-  // Push the persisted rebind onto the running poller at startup, so a
-  // choice made in Settings survives a restart (the native default is
-  // Ctrl+Shift+M / Ctrl+Shift+D).
-  globalKeys: GlobalShortcutVks;
   // The label shown on a video tile: memberDisplayName when known —
   // the same identity a rename shows everywhere else (ChannelSidebar's
   // voice roster, message rows, the member list) — falling back to the
@@ -268,9 +248,6 @@ export interface MountScope {
   prevTileLabels: Map<number, string>;
   // A page rebuilt while already in voice (reconnect) loads the grid now.
   gridLoadChannel: number | null;
-  // Release notes, once, on the first start after an update. Loaded on
-  // demand so the prompt stays out of the eager MainPage chunk (bundle budget).
-  promptHost: HTMLDivElement;
   // Only the channel that owns the current call keeps the grid up: the joined
   // voice channel (its chat sits beside the grid) or the DM whose
   // call panel shows the video above the chat (its own update re-seats the
