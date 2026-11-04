@@ -16,7 +16,7 @@ import { createElement } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import type { VoiceUploadMeta } from "@lib/types";
 import { authStore } from "@stores/auth.store";
-import { ATTACHMENT_TTL_MS } from "../messaging/attachmentTtl";
+import { attachmentTtlMs } from "../messaging/attachmentTtl";
 import { voiceMessagesText } from "../../i18n/voiceMessages";
 import {
   createVoiceRecorder,
@@ -366,9 +366,9 @@ export function createVoiceComposer(options: VoiceComposerOptions): VoiceCompose
       setStatus(refusal);
       return;
     }
-    // The server sweeps an unsent upload after about an hour: a retained id
-    // that old is withdrawn and the held clip uploads again.
-    if (uploaded !== null && Date.now() - uploadedAt >= ATTACHMENT_TTL_MS) {
+    // The server sweeps an unsent upload after its staged lifetime: a retained
+    // id that old is withdrawn and the held clip uploads again.
+    if (uploaded !== null && Date.now() - uploadedAt >= attachmentTtlMs()) {
       withdraw(uploaded.id);
       uploaded = null;
     }

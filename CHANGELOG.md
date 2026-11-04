@@ -50,6 +50,7 @@ and only when it changes something a contributor or fork holder must do
 ### Changed
 
 - The admin Live log no longer fills with the panel's own request lines, and a viewer that falls behind sees how many lines were skipped.
+- A file attached to a draft is now kept for a day instead of an hour, so a message written across a laptop sleep or a long phone reconnect still sends its files. Unsent uploads count against a member's storage quota until then.
 
 ### Added
 

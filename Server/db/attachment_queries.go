@@ -259,12 +259,19 @@ func (d *DB) GetAttachmentsByMessageIDs(ctx context.Context, msgIDs []int64) (ma
 // the second statement fails, the first one's rows are already gone, so their
 // names come back with the error: the caller must still remove those files.
 func (d *DB) DeleteOrphanedAttachments(ctx context.Context, cutoff time.Time) ([]string, error) {
-	at := cutoff.UTC().Format(dbtime.SQLiteLayout)
-	files, err := d.q.DeleteUnlinkedOrphanedAttachments(ctx, at)
+	return d.DeleteOrphanedAttachmentsBefore(ctx, cutoff, cutoff)
+}
+
+// DeleteOrphanedAttachmentsBefore is DeleteOrphanedAttachments with a cutoff per
+// half: unlinkedBefore for uploads no message names (a draft may still send
+// them), deletedBefore for files of soft-deleted messages (nothing will serve
+// them again).
+func (d *DB) DeleteOrphanedAttachmentsBefore(ctx context.Context, unlinkedBefore, deletedBefore time.Time) ([]string, error) {
+	files, err := d.q.DeleteUnlinkedOrphanedAttachments(ctx, unlinkedBefore.UTC().Format(dbtime.SQLiteLayout))
 	if err != nil {
 		return nil, fmt.Errorf("DeleteOrphanedAttachments: unlinked: %w", err)
 	}
-	deleted, err := d.q.DeleteDeletedMessageAttachments(ctx, at)
+	deleted, err := d.q.DeleteDeletedMessageAttachments(ctx, deletedBefore.UTC().Format(dbtime.SQLiteLayout))
 	if err != nil {
 		return files, fmt.Errorf("DeleteOrphanedAttachments: deleted messages: %w", err)
 	}

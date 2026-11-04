@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
@@ -59,6 +60,12 @@ type UploadService struct {
 }
 
 var _ BannerFileStore = (*db.DB)(nil)
+
+// StagedUploadLifetime is how long an upload no message names is kept before the
+// maintenance sweep deletes it. A draft can sit through a laptop sleep or a long
+// phone reconnect and still send its files; the uploader's quota stays charged
+// meanwhile. Clients learn it from auth_ok's upload_policy.
+const StagedUploadLifetime = 24 * time.Hour
 
 // BannerFileStore answers whether an attachment is named by some user's banner_id
 // right now. *db.DB satisfies it.
