@@ -178,7 +178,8 @@ export const shellText = defineCatalog("shell", {
     "Same key as before · Safety number: {safetyNumber} · Compare it with them to confirm it is them",
   "identity.mismatch":
     "Blocked — unverified: this participant's key is missing or its signature is invalid. Click to review",
-  "identity.newDevice": "New device · Safety number: {safetyNumber}",
+  "identity.keyChanged":
+    "Key changed, not yet confirmed · Safety number: {safetyNumber} · Compare it with them to confirm it is them",
   "identity.unknown":
     "Could not check this participant's identity — key storage is unavailable, so they are blocked for E2EE until it recovers",
   "identity.unverified": "Identity not verified — this participant published no key.",
@@ -190,7 +191,9 @@ export const shellText = defineCatalog("shell", {
     "This participant is blocked from end-to-end encryption: the server stopped delivering their identity key, or their announce was not signed by it. This can be a glitch, but it could also indicate that the server tampered with their key. Verify the key out-of-band before trusting it.",
   "identity.participant": "Participant",
   "identity.newKey": "New key",
-  "identity.accept": "Trust New Key",
+  "identity.accept": "Trust this key as well",
+  "identity.acceptNote":
+    "Trusting adds this key. Keys you trusted for them before stay trusted. You can forget old keys from their shield.",
   "identity.rePinFailed":
     "Couldn't save the new security key — the participant stays blocked. Try again.",
 

@@ -3298,7 +3298,8 @@ published identity key but the signature is missing/invalid → reject).
     "signature": "base64-ecdsa-signature",
     "identity_public_key": "base64-device-identity-public-key",
     "video_decode": ["vp8", "h264", "vp9"],
-    "key_slots": true
+    "key_slots": true,
+    "bound_offers": true
   }
 }
 ```
@@ -3335,6 +3336,11 @@ every peer in the channel announced it (see
 [voice_e2ee_offer](#voice_e2ee_offer-client---server)); otherwise every client
 keeps the one-slot behaviour.
 
+`bound_offers` is optional: `true` says this client unwraps the v3 offer
+layout, whose wrapping key names the sender and the recipient. The server
+treats it exactly like `key_slots`: stored and relayed only when it is JSON
+`true`, otherwise dropped with the announce kept.
+
 ### voice_e2ee_announce (Server -> Client, broadcast to voice channel)
 
 Relayed to the other participants with the sender's user ID attached. Also
@@ -3356,12 +3362,14 @@ the client sent neither (an older client):
     "signature": "base64-ecdsa-signature",
     "video_decode": ["vp8", "h264", "vp9"],
     "identity_public_key": "base64-device-identity-public-key",
-    "key_slots": true
+    "key_slots": true,
+    "bound_offers": true
   }
 }
 ```
 
-`key_slots` is present (and `true`) only when the announcing client sent it.
+`key_slots` and `bound_offers` are each present (and `true`) only when the
+announcing client sent them.
 
 **Verify rule.** A receiving client verifies `signature` against the
 announce's `identity_public_key` when it is present, and otherwise against the
@@ -3458,6 +3466,19 @@ anyone sends with it, so no frame is lost at a rotation. While any peer has
 not, the holder rotates in slot 0 at once, and a peer that joins without
 `key_slots` while the call is on slot 1 makes the holder rotate back to slot
 0 straight away.
+
+A holder sends a peer that announced `bound_offers` the v3 layout: the v2
+header with version byte `0x03`, also bound as GCM additional data. Its
+wrapping key comes from the same ECDH and HKDF-SHA256 steps, with the HKDF
+info `"owncord-room-key-wrap-v3"` followed by the sender's and then the
+recipient's user ID (u64 big-endian each). The receiver derives it with the
+offer's `from_user_id` and its own user ID, so an offer only unwraps for the
+direction it was made for. A peer that did not announce `bound_offers` still
+gets v1 or v2, and every client still accepts those.
+
+A receiver that is itself the key holder ignores an offer from a user ID that
+is not lower than its own: the server elects the lowest user ID, so such an
+offer cannot come from the holder.
 
 ### voice_e2ee_offer (Server -> Client, relay to target)
 

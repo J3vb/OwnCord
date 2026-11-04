@@ -15,6 +15,7 @@ import {
   restateSelfVoiceState,
   setPeerVideoDecode,
   setPeerKeySlots,
+  setPeerBoundOffers,
   setPeerWatching,
   noteWatchingResync,
   clearPeerWatching,
@@ -216,6 +217,7 @@ export function snapshotReadyVoice(): (ws: DispatchWs, payload: Payload<"ready">
       for (const uid of left) {
         setPeerVideoDecode(uid, undefined);
         setPeerKeySlots(uid, false);
+        setPeerBoundOffers(uid, false);
       }
       void livekitSession().then(
         ({ handleParticipantLeft, reconcileVideoFlags, resendWatching }) => {
@@ -426,6 +428,7 @@ export function handleVoiceLeave(payload: Payload<"voice_leave">, clock: Reconne
   // A rejoin may come from another client; its own announce restates the list.
   setPeerVideoDecode(payload.user_id, undefined);
   setPeerKeySlots(payload.user_id, false);
+  setPeerBoundOffers(payload.user_id, false);
   void livekitSession().then(({ handleParticipantLeft, leaveVoice, isAutoReconnecting }) => {
     if (sameChannel) void handleParticipantLeft(payload.user_id);
     if (shouldTeardownSession && !isAutoReconnecting()) {
@@ -480,6 +483,7 @@ export function handleVoiceE2eeAnnounce(payload: Payload<"voice_e2ee_announce">)
   }
   try {
     setPeerKeySlots(payload.user_id, payload.key_slots === true);
+    setPeerBoundOffers(payload.user_id, payload.bound_offers === true);
   } catch (err) {
     log.warn("voice_e2ee_announce: could not record key_slots", err);
   }

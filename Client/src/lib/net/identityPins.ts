@@ -51,6 +51,11 @@ export function withPin(keys: readonly string[], key: string): readonly string[]
   return [...keys, key].slice(-MAX_PINS_PER_USER);
 }
 
+/** `keys` without `key`. Unchanged (same array) when `key` is not there. */
+export function withoutPin(keys: readonly string[], key: string): readonly string[] {
+  return keys.includes(key) ? keys.filter((k) => k !== key) : keys;
+}
+
 /** Every key trusted for a pinned peer. `pins` is only present on a lookup
  *  that holds more than one key; `pin` is always the newest. */
 export function trustedPins(lookup: {

@@ -144,6 +144,7 @@ func handleVoiceE2EEAnnounceV2(_ context.Context, cmd Command, info ClientInfo, 
 		videoDecode: sanitizeVideoDecode(announceCmd.VideoDecode),
 		identityKey: identityKey,
 		keySlots:    announceCmd.KeySlots,
+		boundOffers: announceCmd.BoundOffers,
 	}
 	msg := buildVoiceE2EEAnnounce(userID, announce)
 	return Result{

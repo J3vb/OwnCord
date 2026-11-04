@@ -1,9 +1,20 @@
-import { vi } from "vitest";
+import { beforeEach, vi } from "vitest";
+import { mockSelf } from "./livekitE2eeMocks";
 import { E2EEManager } from "../../src/lib/voice/livekitE2EE";
 import { importPublicKey, exportPublicKey, wrapRoomKey } from "@lib/net/e2eeCrypto";
 import { getIdentityPin } from "@lib/net/identity";
 
 export const PEER_ID = 42;
+
+/** The key holder is the lowest user id in the call, so an offer from PEER_ID
+ *  reaches a user with a higher id. */
+export const OFFER_RECEIVER = 100;
+
+// Every test starts as user 1, the usual key holder; one that receives an
+// offer switches to OFFER_RECEIVER first.
+beforeEach(() => {
+  mockSelf.id = 1;
+});
 
 export function createManager(ws: { send: ReturnType<typeof vi.fn> }): E2EEManager {
   return new E2EEManager({

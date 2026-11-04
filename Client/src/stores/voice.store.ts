@@ -155,6 +155,10 @@ export interface VoiceState {
    *  rotates that way only when every peer is in here. Same writer and
    *  lifetime as peerVideoDecode. */
   readonly peerKeySlots?: ReadonlySet<number>;
+  /** Peers whose last `voice_e2ee_announce` said `bound_offers`: the key
+   *  holder sends them offers that bind sender and recipient. Same writer and
+   *  lifetime as peerKeySlots. */
+  readonly peerBoundOffers?: ReadonlySet<number>;
   /** Whose screen share each member of the current channel watches, from
    *  their `voice_watching` frames (sorted user ids). Written only from the
    *  dispatcher's handler; removeVoiceUser drops a member, leaveVoiceChannel
@@ -197,6 +201,7 @@ const INITIAL_STATE: VoiceState = {
   peerVerifications: new Map(),
   peerVideoDecode: new Map(),
   peerKeySlots: new Set(),
+  peerBoundOffers: new Set(),
   peerWatching: new Map(),
   localGateSpeaking: null,
 };
@@ -266,6 +271,7 @@ export function resetVoiceStore(): void {
     peerVerifications: new Map(),
     peerVideoDecode: new Map(),
     peerKeySlots: new Set(),
+    peerBoundOffers: new Set(),
     peerWatching: new Map(),
   }));
 }
@@ -510,6 +516,7 @@ export function leaveVoiceChannel(): void {
       shareDenied: false,
       peerVideoDecode: new Map<number, readonly string[]>(),
       peerKeySlots: new Set<number>(),
+      peerBoundOffers: new Set<number>(),
       peerWatching: new Map<number, readonly number[]>(),
     };
     const channelId = prev.currentChannelId;
@@ -853,6 +860,19 @@ export function setPeerKeySlots(userId: number, keySlots: boolean): void {
     if (keySlots) next.add(userId);
     else next.delete(userId);
     return { ...prev, peerKeySlots: next };
+  });
+}
+
+/** Record whether a peer's announce said `bound_offers`. Single writer: the
+ *  dispatcher's voice_e2ee_announce handler. */
+export function setPeerBoundOffers(userId: number, boundOffers: boolean): void {
+  voiceStore.setState((prev) => {
+    const current = prev.peerBoundOffers;
+    if ((current?.has(userId) ?? false) === boundOffers) return prev;
+    const next = new Set(current);
+    if (boundOffers) next.add(userId);
+    else next.delete(userId);
+    return { ...prev, peerBoundOffers: next };
   });
 }
 
