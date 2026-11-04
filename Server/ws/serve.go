@@ -18,9 +18,8 @@ import (
 )
 
 const (
-	authDeadline     = 10 * time.Second
-	writeTimeout     = 10 * time.Second
-	settingsCacheTTL = 30 * time.Second
+	authDeadline = 10 * time.Second
+	writeTimeout = 10 * time.Second
 
 	// wsReadLimitBytes is the maximum inbound WebSocket message size; must match the client upload cap.
 	wsReadLimitBytes = config.MaxMessageBytes
