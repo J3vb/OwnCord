@@ -373,3 +373,30 @@ func TestPasswordBcryptCostIsTwelve(t *testing.T) {
 		t.Fatalf("production bcrypt cost = %d, want 12", got)
 	}
 }
+
+// A waiter handed a slot in the instant it gives up passes the slot on without
+// booking an admission: it never ran, so the gauges and the hold average that
+// feeds the retry hint stay as the real holder left them.
+func TestAdmissionBudget_AbandonedHandoffIsNotAnAdmission(t *testing.T) {
+	b := auth.NewAdmissionBudget(1)
+	release, ok := b.TryAcquire()
+	if !ok {
+		t.Fatal("could not take the only slot")
+	}
+	b.SetAvgHoldForTest(time.Second)
+	b.AbandonHandedSlotForTest(release)
+
+	if b.InFlight() != 0 || b.Peak() != 1 || b.QueuedForTest() != 0 {
+		t.Fatalf("in flight = %d, peak = %d, queued = %d, want 0, 1 and 0", b.InFlight(), b.Peak(), b.QueuedForTest())
+	}
+	// The holder's near-zero sample moves a 1 s average to about 875 ms; a
+	// second sample for the handoff would take it under 770 ms.
+	if got := b.AvgHoldForTest(); got < 800*time.Millisecond {
+		t.Fatalf("hold average = %v, want the holder's sample alone (about 875ms)", got)
+	}
+	again, ok := b.TryAcquire()
+	if !ok {
+		t.Fatal("the abandoned slot did not come back to the budget")
+	}
+	again()
+}

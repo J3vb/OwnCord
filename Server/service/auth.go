@@ -359,40 +359,46 @@ const (
 	maxPendingRegistrations            = 100
 )
 
-// admitRegistration runs the mode's gates before any bcrypt work.
-func (s *AuthService) admitRegistration(ctx context.Context, in RegisterInput) (RegistrationMode, error) {
-	mode, err := registrationModeSetting(ctx, s.st)
+// admitRegistration runs the mode's gates before any bcrypt work. In the
+// invite-free modes it reserves one of the address's daily registrations;
+// refund hands it back, and Register calls it unless the account or application
+// committed, so a busy server, a taken username or a full queue costs the
+// address nothing. refund is never nil.
+func (s *AuthService) admitRegistration(ctx context.Context, in RegisterInput) (mode RegistrationMode, refund func(), err error) {
+	noRefund := func() {}
+	mode, err = registrationModeSetting(ctx, s.st)
 	if err != nil {
 		slog.Error("register: reading registration_mode failed", "err", err)
-		return "", ErrRegistrationPolicyUnavailable
+		return "", noRefund, ErrRegistrationPolicyUnavailable
 	}
 	switch mode {
 	case RegistrationClosed:
-		return "", ErrRegistrationClosed
+		return "", noRefund, ErrRegistrationClosed
 	case RegistrationInvite:
 		if strings.TrimSpace(in.InviteCode) == "" {
 			// Same answer as a bad code, so the response reveals nothing new.
 			slog.WarnContext(ctx, "registration refused", "cause", "invite required",
 				"ip", in.IP, "username", in.Username)
-			return "", ErrRegistrationRejected
+			return "", noRefund, ErrRegistrationRejected
 		}
-		return mode, nil
+		return mode, noRefund, nil
 	case RegistrationApproval, RegistrationOpen:
-	}
-	if !s.limiter.Allow("register_ip:"+clientip.RateKey(in.IP), inviteFreeRegistrationsPerIPPerDay, 24*time.Hour) {
-		return "", ErrRegistrationRateLimited
 	}
 	if mode == RegistrationApproval {
 		pending, err := s.st.CountPendingUsers(ctx)
 		if err != nil {
 			slog.Error("register: counting pending applications failed", "err", err)
-			return "", ErrRegistrationPolicyUnavailable
+			return "", noRefund, ErrRegistrationPolicyUnavailable
 		}
 		if pending >= maxPendingRegistrations {
-			return "", ErrRegistrationQueueFull
+			return "", noRefund, ErrRegistrationQueueFull
 		}
 	}
-	return mode, nil
+	refund, ok := s.limiter.Reserve("register_ip:"+clientip.RateKey(in.IP), inviteFreeRegistrationsPerIPPerDay, 24*time.Hour)
+	if !ok {
+		return "", noRefund, ErrRegistrationRateLimited
+	}
+	return mode, refund, nil
 }
 
 // createRegisteredAccount persists an application (no session) or an account with
@@ -428,10 +434,16 @@ func (s *AuthService) createRegisteredAccount(ctx context.Context, mode Registra
 // application and issues nothing. Closed is refused again in case a caller skips
 // RegistrationPolicy.
 func (s *AuthService) Register(ctx context.Context, in RegisterInput) (*AuthResult, error) {
-	mode, err := s.admitRegistration(ctx, in)
+	mode, refund, err := s.admitRegistration(ctx, in)
 	if err != nil {
 		return nil, err
 	}
+	committed := false
+	defer func() {
+		if !committed {
+			refund()
+		}
+	}()
 
 	// Hash before consuming the invite so a hashing failure does not burn it. The
 	// hash is full-cost bcrypt, so it takes an admission slot like a compare does and
@@ -451,6 +463,7 @@ func (s *AuthService) Register(ctx context.Context, in RegisterInput) (*AuthResu
 	// account, invite use and first session commit together; a fault at any step
 	// rolls the whole registration back and burns nothing.
 	uid, token, err := s.createRegisteredAccount(ctx, mode, in, hash)
+	committed = err == nil
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrRegistrationQueueFull):
