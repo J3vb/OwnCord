@@ -41,7 +41,7 @@ import { attachThreadContextMenu } from "./channel-sidebar/threadMenu";
 import { followedThreadsStore, type FollowedThreadsView } from "@stores/followedThreads.store";
 import { attachCategoryDragHandlers, attachDragHandlers } from "./channel-sidebar/dragReorder";
 import { attachVoiceUserDrag, markVoiceDropTarget } from "../features/voice/dragMove";
-import { openIdentityMismatchModal } from "../features/voice/peerVerification";
+import { openPeerShield } from "../features/voice/peerVerification";
 import { createAvatarElement, pickAvatarColor } from "../features/profiles/avatar";
 import { membersStore, type Member, type MembersState } from "@stores/members.store";
 import { currentUserRoleHasPermission } from "@lib/permissions";
@@ -544,18 +544,17 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     const lifetimeSignal = disposable.signal;
     voiceRowByUserId.set(model.userId, row);
 
-    // A blocked peer's shield opens the re-trust prompt. The modal shows the
-    // username, never the nickname: a nickname is user-settable.
-    if (model.verify?.cls === "mismatch") {
-      row.querySelector(":scope > .vu-verify.mismatch")?.addEventListener(
+    // A blocked peer's shield opens the re-trust prompt, a peer with an
+    // identity key their trusted keys. Both show the username, never the
+    // nickname: a nickname is user-settable.
+    const verifyCls = model.verify?.cls;
+    if (verifyCls === "mismatch" || verifyCls === "verified" || verifyCls === "changed") {
+      row.querySelector(`:scope > .vu-verify.${verifyCls}`)?.addEventListener(
         "click",
         (e) => {
           e.stopPropagation();
-          void openIdentityMismatchModal(
-            model.userId,
-            atEvent().username || shellText("common.unknown"),
-            lifetimeSignal,
-          );
+          const username = atEvent().username || shellText("common.unknown");
+          openPeerShield(verifyCls, model.userId, username, lifetimeSignal);
         },
         { signal },
       );

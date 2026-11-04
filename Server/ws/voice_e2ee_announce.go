@@ -19,6 +19,10 @@ type e2eeAnnounce struct {
 	// key slot and switches to it a moment later (voice_e2ee_announce
 	// key_slots). The key holder only rotates that way when every peer says so.
 	keySlots bool
+	// boundOffers is true when the client unwraps room-key offers that bind
+	// sender and recipient (voice_e2ee_announce bound_offers). The key holder
+	// sends such a peer that offer format.
+	boundOffers bool
 }
 
 // clone returns a copy that shares no slice storage with the receiver.

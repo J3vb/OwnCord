@@ -11,5 +11,6 @@ export async function voicePeerVerificationMock(importOriginal: <T>() => Promise
   return {
     ...(await importOriginal<typeof import("../../src/features/voice/peerVerification")>()),
     openIdentityMismatchModal: vi.fn().mockResolvedValue(undefined),
+    openTrustedKeysPanel: vi.fn().mockResolvedValue(undefined),
   };
 }

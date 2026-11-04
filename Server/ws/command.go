@@ -235,6 +235,8 @@ type VoiceE2EEAnnounceCmd struct {
 	VideoDecode []string
 	// KeySlots is the sender's key_slots flag; anything but JSON true is false.
 	KeySlots bool
+	// BoundOffers is the sender's bound_offers flag; anything but JSON true is false.
+	BoundOffers bool
 }
 
 func (c VoiceE2EEAnnounceCmd) Type() string  { return MsgTypeVoiceE2EEAnnounce }
@@ -571,6 +573,7 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 			IdentityKey json.RawMessage `json:"identity_public_key"`
 			VideoDecode json.RawMessage `json:"video_decode"`
 			KeySlots    json.RawMessage `json:"key_slots"`
+			BoundOffers json.RawMessage `json:"bound_offers"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("invalid voice_e2ee_announce payload: %w", err)
@@ -587,6 +590,7 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 			IdentityKey: announceIdentityKey(userID, p.IdentityKey),
 			VideoDecode: videoDecode,
 			KeySlots:    string(p.KeySlots) == "true",
+			BoundOffers: string(p.BoundOffers) == "true",
 		}, nil
 	},
 

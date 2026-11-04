@@ -420,7 +420,7 @@ describe("verifyPeerAnnounce with a key per device", () => {
     await peers.verifyPeerAnnounce(PEER, EPHEMERAL, "sig", current, "key-b");
     expect(showToast).toHaveBeenCalledTimes(1);
     expect(vi.mocked(showToast).mock.lastCall?.[0]).toContain("alice");
-    expect(vi.mocked(showToast).mock.lastCall?.[0]).toContain("new device");
+    expect(vi.mocked(showToast).mock.lastCall?.[0]).toContain("a key you haven't seen before");
     expect(lastVerification()).toMatchObject({ status: "changed", safetyNumber: "safety-number" });
 
     // Back to A and to B again: both are pinned, so nothing more is shown.

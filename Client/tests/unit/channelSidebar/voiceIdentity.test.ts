@@ -150,7 +150,7 @@ describe("ChannelSidebar voice identity badge", () => {
     expect(own!.getAttribute("title")).toContain("0123 4567 89AB CDEF");
   });
 
-  it("shows a new-device badge, not a plain verified one, after a new device key was accepted", () => {
+  it("shows a key-changed badge, not a plain verified one, after a new key was accepted", () => {
     addVoiceUser(VOICE_CH, 10, "Alice");
     setPeerVerif(10, "changed", "AB12 CD34");
     ui.sidebar.mount(ui.container);
@@ -158,7 +158,7 @@ describe("ChannelSidebar voice identity badge", () => {
     const badge = ui.badgeFor(10);
     expect(badge).not.toBeNull();
     expect(badge!.classList.contains("changed")).toBe(true);
-    expect(badge!.getAttribute("title")).toContain("New device");
+    expect(badge!.getAttribute("title")).toContain("Key changed, not yet confirmed");
     expect(badge!.getAttribute("title")).toContain("AB12 CD34");
     expect(badge!.getAttribute("title")).not.toContain("Same key as before");
   });

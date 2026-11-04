@@ -10,6 +10,8 @@ import {
   ownIdentityTitle,
   verifyPresentation,
   openIdentityMismatchModal,
+  openTrustedKeysPanel,
+  shieldOpens,
 } from "../../voice/peerVerification";
 import { dmCallText as d } from "../../../i18n/dmCall";
 import {
@@ -117,8 +119,9 @@ export function createDmCallVerify(st: DmCallState, _dc: DmCallApi) {
   function buildShield(userId: number, v: PeerVerification, dm: DmChannel): HTMLElement {
     const { icon, color, title } = verifyPresentation(v);
     const cls = `dcp-verify ${v.status}`;
+    const opens = shieldOpens(v);
     const el =
-      v.status === "mismatch"
+      opens !== null
         ? createElement("button", { type: "button", class: cls, title, "aria-label": title })
         : createElement("span", { class: cls, title, role: "img", "aria-label": title });
     el.style.color = color;
@@ -138,16 +141,20 @@ export function createDmCallVerify(st: DmCallState, _dc: DmCallApi) {
         ),
       { signal: st.disposable.signal },
     );
-    if (v.status === "mismatch") {
+    if (opens !== null) {
       el.addEventListener(
         "click",
         (e) => {
           // A tile in the video grid has its own click.
           e.stopPropagation();
           const name = resolvePerson(userId, dm, voiceStore.getState(), currentUserId()).name;
-          void openIdentityMismatchModal(userId, name, st.disposable.signal, () =>
-            focusFallback(userId),
-          );
+          const fallback = () => focusFallback(userId);
+          if (opens === "mismatch") {
+            void openIdentityMismatchModal(userId, name, st.disposable.signal, fallback);
+          } else {
+            const changed = v.status === "changed";
+            void openTrustedKeysPanel(userId, name, changed, st.disposable.signal, fallback);
+          }
         },
         { signal: st.disposable.signal },
       );

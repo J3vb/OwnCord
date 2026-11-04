@@ -27,6 +27,7 @@ import {
   loadIdentityKey,
   deleteIdentityKey,
   storeIdentityPin,
+  forgetIdentityPin,
   getIdentityPin,
   getOrCreateIdentityKeyPair,
   resetIdentityKeyPairCache,
@@ -764,6 +765,48 @@ describe("identity pins as a set per device", () => {
     expect(await getIdentityPin("chat.example", "42")).toEqual({ status: "unavailable" });
     expect(await storeIdentityPin("chat.example", "42", "keyB")).toBe("failed");
     expect(slots.get("chat.example:42")).toBe("[not json");
+  });
+});
+
+describe("forgetting a trusted identity key", () => {
+  it("removes one older key and keeps the rest in order", async () => {
+    const slots = pinStoreDouble({ "chat.example:42": "keyA_keyB_keyC" });
+    expect(await forgetIdentityPin("chat.example", "42", "keyB", "keyC")).toBe("forgotten");
+    expect(slots.get("chat.example:42")).toBe("keyA_keyC");
+  });
+
+  it("keeps the key in the call and the last key", async () => {
+    const slots = pinStoreDouble({ "chat.example:42": "keyA_keyB" });
+    expect(await forgetIdentityPin("chat.example", "42", "keyB", "keyB")).toBe("kept");
+    expect(slots.get("chat.example:42")).toBe("keyA_keyB");
+    slots.set("chat.example:42", "keyA");
+    expect(await forgetIdentityPin("chat.example", "42", "keyA", null)).toBe("kept");
+    expect(slots.get("chat.example:42")).toBe("keyA");
+  });
+
+  it("treats a key that is not trusted as already forgotten, without a write", async () => {
+    const slots = pinStoreDouble({ "chat.example:42": "keyA_keyB" });
+    invokeMock.mockClear();
+    expect(await forgetIdentityPin("chat.example", "42", "keyZ", "keyB")).toBe("forgotten");
+    expect(await forgetIdentityPin("chat.example", "7", "keyA", null)).toBe("forgotten");
+    expect(invokeMock.mock.calls.some((c) => c[0] === "store_identity_pin")).toBe(false);
+    expect(slots.get("chat.example:42")).toBe("keyA_keyB");
+  });
+
+  it("fails on an unreadable slot and never overwrites it", async () => {
+    const slots = pinStoreDouble({ "chat.example:42": "[not json" });
+    expect(await forgetIdentityPin("chat.example", "42", "keyA", null)).toBe("failed");
+    expect(slots.get("chat.example:42")).toBe("[not json");
+  });
+
+  it("does not drop a key added while a forget runs on the same peer", async () => {
+    const slots = pinStoreDouble({ "chat.example:42": "keyA_keyB" });
+    const [forgot, stored] = await Promise.all([
+      forgetIdentityPin("chat.example", "42", "keyA", "keyB"),
+      storeIdentityPin("chat.example", "42", "keyC"),
+    ]);
+    expect([forgot, stored]).toEqual(["forgotten", "stored"]);
+    expect(slots.get("chat.example:42")).toBe("keyB_keyC");
   });
 });
 

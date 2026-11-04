@@ -89,6 +89,9 @@ import {
 import { getIdentityPin, getOrCreateIdentityKeyPair, storeIdentityPin } from "@lib/net/identity";
 
 const SELF = 1;
+/** The key holder is the lowest user id in the call, so an offer from PEER_ID
+ *  (42) reaches a user with a higher id. */
+const OFFER_RECEIVER = 100;
 const CHANNEL = 7;
 
 const pk = (n: number | string): string => btoa(`peer-key-${n}`);
@@ -177,6 +180,7 @@ async function joinedAsNonHolder(options: Parameters<typeof create>[0] = {}) {
   await made.mgr.handleAnnounce(42, pk(42));
   const joined = made.mgr.setupKeyExchange(false, CHANNEL);
   await vi.waitFor(() => expect(sends(made.ws, "voice_e2ee_announce")).toHaveLength(1));
+  auth.id = OFFER_RECEIVER;
   await made.mgr.handleOffer(42, "enc", "iv");
   expect(await joined).toBe(true);
   return made;
@@ -905,6 +909,7 @@ describe("handleOffer wiring", () => {
     internals(mgr)._roomKeyRejector = vi.fn();
     internals(mgr)._isKeyHolder = false;
 
+    auth.id = OFFER_RECEIVER;
     await mgr.handleOffer(42, "enc", "iv");
 
     expect(resolver).toHaveBeenCalledTimes(1);
@@ -1174,6 +1179,7 @@ describe("room key installs and log tags", () => {
 
     await mgr.handleAnnounce(42, pk(42));
     internals(mgr)._isKeyHolder = false;
+    auth.id = OFFER_RECEIVER;
     await mgr.handleOffer(42, "enc", "iv");
     expect(installed).toHaveBeenCalledTimes(2);
   });
@@ -1184,6 +1190,7 @@ describe("room key installs and log tags", () => {
     await mgr.handleAnnounce(42, pk(42));
     expect(vi.getTimerCount()).toBe(1);
 
+    auth.id = OFFER_RECEIVER;
     await mgr.handleOffer(42, "enc", "iv");
 
     expect(internals(mgr)._isKeyHolder).toBe(false);

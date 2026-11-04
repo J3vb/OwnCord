@@ -359,12 +359,12 @@ Peer identity state lives in `voice.store` (per-participant
 `features/voice/e2eePeerState.ts` (driven by `lib/voice/livekitE2EE.ts`) as
 announces are verified against the pinned identity keys (`lib/net/identity.ts`).
 
-| State        | Roster / DM tile badge (`verifyPresentation()`, `features/voice/peerVerification.ts`)                                          | Interaction                               |
-| ------------ | ------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------- |
-| `verified`   | Green shield; title "Same key as before · Safety number: {n} · Compare it with them to confirm it is them"                     | none needed                               |
-| `changed`    | Amber shield-alert; title "Security key changed · Safety number: {n}"                                                          | none — the change already raised a notice |
-| `unverified` | Neutral shield; no pinned key yet                                                                                              | none — pins on first verified announce    |
-| `mismatch`   | Red shield-alert; title "Blocked — unverified: this participant's key is missing or its signature is invalid. Click to review" | Click → blocking identity-mismatch modal  |
+| State        | Roster / DM tile badge (`verifyPresentation()`, `features/voice/peerVerification.ts`)                                          | Interaction                                                     |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------- |
+| `verified`   | Green shield; title "Same key as before · Safety number: {n} · Compare it with them to confirm it is them"                     | Click → trusted keys panel                                      |
+| `changed`    | Amber shield-alert; title "Key changed, not yet confirmed · Safety number: {n} · Compare it with them to confirm it is them"   | Click → trusted keys panel (the change already raised a notice) |
+| `unverified` | Neutral shield; no pinned key yet                                                                                              | none — pins on first verified announce                          |
+| `mismatch`   | Red shield-alert; title "Blocked — unverified: this participant's key is missing or its signature is invalid. Click to review" | Click → blocking identity-mismatch modal                        |
 
 A pinned peer whose published key changed is accepted automatically when the
 announce verifies against the new key (`verifyPeerAnnounce` in
@@ -376,12 +376,21 @@ longer delivered, or an announce that fails verification.
 
 The mismatch modal (`createIdentityMismatchModal()`, `components/IdentityMismatchModal.ts`;
 opened from `openIdentityMismatchModal()` in `features/voice/peerVerification.ts`, shared with `DmCallPanel`) shows the **new key's fingerprint** so
-the user can verify it out-of-band before trusting. "Trust New Key" re-pins
+the user can verify it out-of-band before trusting. "Trust this key as well" re-pins
 via `rePinPeerIdentity` — deliberately pinning the exact key whose fingerprint
 was displayed, not a fresh store read, so a malicious server cannot swap the
 key during the human verification window (TOCTOU). Reject leaves the peer
 blocked for E2EE media. A stripped or malformed published key disables the
 trust action entirely (a blind accept is refused).
+
+The trusted keys panel (`features/voice/trustedKeysPanel.ts`, lazy-loaded by
+`openTrustedKeysPanel()`) lists every key pinned for the peer, newest first,
+with its safety number, and marks the key of the device in the call. "Forget
+this key" (`forgetIdentityPin` in `lib/net/identity.ts`, through the same
+serialized pin write as an add) is offered on every other key; the key in the
+call and the last key are never removed. A forgotten key that shows up again
+is treated like any changed key: accepted, with the notice and the `changed`
+badge.
 
 ## 8. Media processing & devices
 
