@@ -185,6 +185,14 @@ again. The handle's operations are:
 - `stashModFlags`, `setJoinToken`: keep a moderator mute across a move, and
   set the join token.
 
+A moderator move of a parked call cannot stash on a connection, so the grace
+state keeps the move for the parking session (`voice_grace_modmove.go`): the
+flags and the `voice_moved` frame wait up to the grace window, and that
+session's resume collects them in `registerNow`, so the member re-joins the
+destination with the mute intact. A fresh connect drops the kept move, and
+the user's next `voice_join` on any device ends it (carrying its flags), so a
+later resume never pulls a call off another device.
+
 At shutdown the hub calls `voiceReg.close()`. It stops every grace timer and
 leaves the rows for the next boot to wipe. Reads need no handle:
 `c.voice.channel()` and `c.voice.state()` take only the slot's own mutex.

@@ -160,6 +160,9 @@ func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool, txn *voi
 	if ch := h.voiceReg.voiceGrace.takeMoved(c.userID, c.tokenHash); ch != 0 && c.lastSeq > 0 {
 		c.sendMsg(buildVoiceDisconnected(ch, voiceMovedReason))
 	}
+	// A moderator moved this session's parked call: carry the mute and deliver
+	// voice_moved so the client re-joins the destination.
+	h.collectParkedModMove(c)
 
 	// A fresh connect drops the replaced connection's voice state without
 	// transferring it, so that channel lost a participant and the E2EE key holder may
