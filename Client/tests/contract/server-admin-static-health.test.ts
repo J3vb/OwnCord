@@ -508,6 +508,8 @@ describe("Server/admin/static — Dashboard health row", () => {
       expect(body(host).querySelector("#livekitStatus")?.textContent).toMatch(
         /since \d{1,2}:\d{2}/,
       );
+      expect(body(host).textContent).toContain("prometheus: port: 6789");
+      expect(body(host).textContent).toContain("restart LiveKit");
       expect(text(host, "lkCpu", "health-value")).toBe("–");
       expect(text(host, "lkMemory", "health-value")).toBe("–");
       expect(text(host, "lkUsage", "health-value")).toBe("–");
