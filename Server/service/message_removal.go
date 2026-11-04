@@ -55,6 +55,9 @@ func newMessageRemoval(st messageRemovalStore, perms *PermissionService, limiter
 // opaque ErrForbidden.
 func (s *messageRemoval) deleteAuthz(ctx context.Context, userID int64, msg *db.Message, ch *db.Channel) (bool, error) {
 	sub, err := channelSubject(ctx, s.st, s.perms, userID, ch, false)
+	if errors.Is(err, ErrInternal) {
+		return false, err
+	}
 	if err != nil {
 		return false, fmt.Errorf("%w: cannot delete this message", ErrForbidden)
 	}
@@ -96,7 +99,10 @@ func (s *messageRemoval) deleteMessage(ctx context.Context, userID, msgID int64,
 	}
 
 	msg, err := s.st.GetMessage(ctx, msgID)
-	if err != nil || msg == nil {
+	if err != nil {
+		return nil, fmt.Errorf("%w: delete message: load: %w", ErrInternal, err)
+	}
+	if msg == nil {
 		return nil, fmt.Errorf("%w: cannot delete this message", ErrForbidden)
 	}
 	// GetMessage returns tombstones (so callers can broadcast deletion) and lower
@@ -115,7 +121,10 @@ func (s *messageRemoval) deleteMessage(ctx context.Context, userID, msgID int64,
 	// Fail closed, as EditMessage: a lookup failure must not skip the DM-participant
 	// check or the archived gate.
 	ch, chErr := s.st.GetChannel(ctx, msg.ChannelID)
-	if chErr != nil || ch == nil {
+	if chErr != nil {
+		return nil, fmt.Errorf("%w: delete message: load channel: %w", ErrInternal, chErr)
+	}
+	if ch == nil {
 		return nil, fmt.Errorf("%w: cannot delete this message", ErrForbidden)
 	}
 	isDM := ch.Type == "dm"
@@ -200,7 +209,10 @@ func (s *messageRemoval) softDeleteRow(ctx context.Context, msgID, userID int64,
 		// the sequential-repeat guard, and so this request never reaches
 		// DecrementMentionCounts for a delete that did not happen.
 		return fmt.Errorf("%w: cannot delete this message", ErrDeletedMessage)
-	default:
+	case errors.Is(err, db.ErrForbidden):
 		return fmt.Errorf("%w: cannot delete this message", ErrForbidden)
+	default:
+		// A store failure is not a refusal: logged and answered INTERNAL.
+		return fmt.Errorf("%w: delete message: %w", ErrInternal, err)
 	}
 }

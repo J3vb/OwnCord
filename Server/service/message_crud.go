@@ -294,7 +294,10 @@ func (s *MessageService) EditMessage(ctx context.Context, userID, msgID int64, r
 	}
 
 	msg, err := s.st.GetMessage(ctx, msgID)
-	if err != nil || msg == nil {
+	if err != nil {
+		return nil, fmt.Errorf("%w: edit message: load: %w", ErrInternal, err)
+	}
+	if msg == nil {
 		return nil, fmt.Errorf("%w: cannot edit this message", ErrForbidden)
 	}
 	if msg.Deleted {
@@ -310,7 +313,10 @@ func (s *MessageService) EditMessage(ctx context.Context, userID, msgID int64, r
 	// mask alone (no per-channel override exists for a DM), skipping the
 	// DM-participant check and RequireDMReachable.
 	ch, chErr := s.st.GetChannel(ctx, msg.ChannelID)
-	if chErr != nil || ch == nil {
+	if chErr != nil {
+		return nil, fmt.Errorf("%w: edit message: load channel: %w", ErrInternal, chErr)
+	}
+	if ch == nil {
 		return nil, fmt.Errorf("%w: cannot edit this message", ErrForbidden)
 	}
 	chanType := ch.Type
@@ -327,6 +333,11 @@ func (s *MessageService) EditMessage(ctx context.Context, userID, msgID int64, r
 	// EditMessage checks ownership itself and returns the row via RETURNING, so
 	// edited_at arrives with the write.
 	msg, err = s.st.EditMessage(ctx, msgID, userID, content)
+	if err != nil && !errors.Is(err, db.ErrNotFound) && !errors.Is(err, db.ErrForbidden) {
+		// A store failure (busy database, spent deadline, I/O) is not a refusal:
+		// it is logged and answered INTERNAL, or REQUEST_TIMEOUT for a spent frame.
+		return nil, fmt.Errorf("%w: edit message: %w", ErrInternal, err)
+	}
 	if err != nil || msg == nil {
 		return nil, fmt.Errorf("%w: cannot edit this message", ErrForbidden)
 	}
@@ -386,9 +397,13 @@ func (s *MessageService) EditMessage(ctx context.Context, userID, msgID int64, r
 // copy, so a timed-out user cannot broadcast new text by editing an old message.
 // Most verdicts collapse into one opaque ErrForbidden (an ownership/permission
 // non-oracle), but ErrTimedOut and a DM's ErrBlocked pass through: the client
-// already surfaces them elsewhere.
+// already surfaces them elsewhere. A store failure while resolving the verdict
+// passes through as internal: it is not a refusal.
 func (s *MessageService) editMessageCheckAccess(ctx context.Context, userID int64, ch *db.Channel) error {
 	sub, err := channelSubject(ctx, s.st, s.perms, userID, ch, true)
+	if errors.Is(err, ErrInternal) {
+		return err
+	}
 	if err != nil {
 		return fmt.Errorf("%w: cannot edit this message", ErrForbidden)
 	}
