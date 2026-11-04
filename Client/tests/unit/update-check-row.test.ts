@@ -26,6 +26,7 @@ describe("Settings → Check for updates", () => {
   let row: HTMLElement;
   let resolveCheck: (o: UpdateOutcome) => void;
   const checkNow = vi.fn();
+  let emitOutcome: (o: UpdateOutcome) => void = () => undefined;
 
   const button = (): HTMLButtonElement => row.querySelector("button.update-check-btn")!;
   const status = (): string => row.querySelector("[data-testid=update-check-status]")!.textContent!;
@@ -42,7 +43,14 @@ describe("Settings → Check for updates", () => {
     mockInstall.mockReset();
     mockInstall.mockResolvedValue(undefined);
     mockInstallState.mockReturnValue({ status: "idle" });
-    mockActive.mockReturnValue({ serverUrl: "https://s.example", checkNow });
+    mockActive.mockReturnValue({
+      serverUrl: "https://s.example",
+      checkNow,
+      onOutcome: (listener: (o: UpdateOutcome) => void) => {
+        emitOutcome = listener;
+        return () => undefined;
+      },
+    });
     row = buildUpdateCheckRow(ac.signal);
     document.body.appendChild(row);
   });
@@ -79,6 +87,15 @@ describe("Settings → Check for updates", () => {
 
     (row.querySelector(".update-check-install") as HTMLButtonElement).click();
     expect(mockInstall).toHaveBeenCalledWith("https://s.example", "2.0.0");
+  });
+
+  it("follows a newer offer found after the install refused the old one", async () => {
+    await settle({ kind: "available", version: "2.0.0", body: "" });
+    emitOutcome({ kind: "available", version: "2.0.1", body: "" });
+    expect(status()).toBe("Update v2.0.1 available");
+
+    (row.querySelector(".update-check-install") as HTMLButtonElement).click();
+    expect(mockInstall).toHaveBeenLastCalledWith("https://s.example", "2.0.1");
   });
 
   it("does not offer the install again once an install already succeeded and only a restart is pending", async () => {

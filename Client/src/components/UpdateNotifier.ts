@@ -249,9 +249,9 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
       return;
     }
     // Nothing was downloaded. Ask again so the banner (and the About tab)
-    // show the version the server offers now, with its notes.
+    // show the version the server offers now, with its notes. The banner
+    // stays until the answer replaces it, so a failed check strands nothing.
     installState = state;
-    removeBanner();
     announce(connectText("update.versionChanged"));
     void checker.checkNow("manual");
   }

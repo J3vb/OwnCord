@@ -132,14 +132,20 @@ pub fn launched_minimized() -> bool {
 /// plain GNOME does not run: without one the icon is invisible, so hiding the
 /// window would strand the app.
 ///
-/// The Linux answer is probed once per run and remembered: the probe is a
-/// blocking bus call (up to 500 ms per name on a slow bus), and the close
-/// handler that asks runs on the UI thread.
+/// On Linux the probe is a blocking bus call (up to 500 ms per name on a slow
+/// bus) and the close handler that asks runs on the UI thread, so a "yes" is
+/// remembered for [`TRAY_TRUST`] and refreshed off the UI thread (at startup,
+/// when the preference is turned on, and whenever the window gains focus). A
+/// "no" is never remembered: a tray host that starts after OwnCord (a login
+/// autostart) is found by the next close.
 pub fn tray_available() -> bool {
     #[cfg(target_os = "linux")]
     {
-        static PRESENT: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-        *PRESENT.get_or_init(linux_tray_host_present)
+        let seen = *crate::sync::lock(&TRAY_SEEN);
+        if tray_seen_within(seen, std::time::Instant::now(), TRAY_TRUST) {
+            return true;
+        }
+        probe_tray()
     }
     #[cfg(not(target_os = "linux"))]
     {
@@ -147,14 +153,43 @@ pub fn tray_available() -> bool {
     }
 }
 
-/// Ask the tray question on a worker thread now, so the first close click
-/// reads the remembered answer instead of waiting on the bus. Only when the
-/// close button can hide the window: otherwise nothing asks.
+/// How long a positive tray probe is believed. A tray host that goes away
+/// (a disabled extension, a shell restart) is noticed within this.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+const TRAY_TRUST: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// When the tray host was last seen, or None when the last probe found none.
+#[cfg(target_os = "linux")]
+static TRAY_SEEN: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+
+/// Whether a tray host was seen at `seen`, less than `limit` before `now`.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn tray_seen_within(
+    seen: Option<std::time::Instant>,
+    now: std::time::Instant,
+    limit: std::time::Duration,
+) -> bool {
+    seen.is_some_and(|seen| now.saturating_duration_since(seen) < limit)
+}
+
+#[cfg(target_os = "linux")]
+fn probe_tray() -> bool {
+    let present = linux_tray_host_present();
+    *crate::sync::lock(&TRAY_SEEN) = present.then(std::time::Instant::now);
+    present
+}
+
+/// Ask the tray question on a worker thread now, so the next close click
+/// reads a fresh answer instead of waiting on the bus. Only when the close
+/// button can hide the window: otherwise nothing asks.
 pub fn warm_tray_probe(minimize_to_tray: bool) {
     #[cfg(target_os = "linux")]
     {
-        if minimize_to_tray {
-            drop(tauri::async_runtime::spawn_blocking(tray_available));
+        // Refreshed at half its trust, so a close soon after finds it fresh.
+        let seen = *crate::sync::lock(&TRAY_SEEN);
+        let fresh = tray_seen_within(seen, std::time::Instant::now(), TRAY_TRUST / 2);
+        if minimize_to_tray && !fresh {
+            drop(tauri::async_runtime::spawn_blocking(probe_tray));
         }
     }
     #[cfg(not(target_os = "linux"))]
@@ -190,6 +225,9 @@ fn linux_tray_host_present() -> bool {
 pub struct WindowPrefs {
     minimize_to_tray: AtomicBool,
     start_minimized: AtomicBool,
+    /// Held from the store write to the live value, so two quick toggles
+    /// cannot leave the file and the live value disagreeing.
+    saving: std::sync::Mutex<()>,
 }
 
 impl WindowPrefs {
@@ -206,6 +244,7 @@ impl WindowPrefs {
         Self {
             minimize_to_tray: AtomicBool::new(read(MINIMIZE_TO_TRAY_KEY, MINIMIZE_TO_TRAY_DEFAULT)),
             start_minimized: AtomicBool::new(read(START_MINIMIZED_KEY, START_MINIMIZED_DEFAULT)),
+            saving: std::sync::Mutex::new(()),
         }
     }
 
@@ -231,7 +270,7 @@ pub fn on_close_requested<R: Runtime>(
         window.label(),
         prefs.minimize_to_tray(),
         // Asked only when the preference is on, so a user who turned it off
-        // never pays for the bus call; after the first ask it is remembered.
+        // never pays for the bus call; a recent "yes" is reused.
         prefs.minimize_to_tray() && tray_available(),
         crate::update_commands::installer_launching(),
     );
@@ -322,6 +361,7 @@ pub fn set_window_pref(
     pref: WindowPref,
     enabled: bool,
 ) -> Result<(), String> {
+    let _saving = crate::sync::lock(&prefs.saving);
     let store = json_store::open(&app, SETTINGS_STORE)
         .map_err(|e| format!("failed to open settings store: {e}"))?;
     let previous = store.get(pref.store_key());
@@ -350,6 +390,14 @@ pub fn set_window_pref(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_tray_seen_recently_is_believed_and_an_old_or_missing_one_is_asked_again() {
+        let now = std::time::Instant::now();
+        assert!(tray_seen_within(Some(now), now, TRAY_TRUST));
+        assert!(!tray_seen_within(Some(now), now + TRAY_TRUST, TRAY_TRUST));
+        assert!(!tray_seen_within(None, now, TRAY_TRUST));
+    }
 
     #[test]
     fn the_main_window_hides_when_the_pref_is_on_and_the_tray_is_there() {

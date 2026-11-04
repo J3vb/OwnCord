@@ -616,6 +616,14 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                 #[cfg(desktop)]
                 popout::close_all(&handle);
             }
+            // Refresh the tray answer while the user is here, so the close
+            // button does not wait on the bus (window_prefs.rs).
+            #[cfg(target_os = "linux")]
+            tauri::WindowEvent::Focused(true) => window_prefs::warm_tray_probe(
+                handle
+                    .state::<window_prefs::WindowPrefs>()
+                    .minimize_to_tray(),
+            ),
             // The window's close button, Alt+F4, or the desktop
             // closing it: a quit, unless close to tray hides it.
             #[cfg(desktop)]

@@ -82,9 +82,12 @@ export function buildUpdateCheckRow(signal: AbortSignal): HTMLDivElement {
   }
 
   let installBtn: HTMLButtonElement | null = null;
+  /** The version the install button installs, while it is shown. */
+  let offered: string | null = null;
   const clearInstall = (): void => {
     installBtn?.remove();
     installBtn = null;
+    offered = null;
   };
 
   const show = (outcome: UpdateOutcome, serverUrl: string): void => {
@@ -113,6 +116,7 @@ export function buildUpdateCheckRow(signal: AbortSignal): HTMLDivElement {
           "success",
           connectText("update.available", { version: outcome.version }),
         );
+        offered = outcome.version;
         installBtn = createElement(
           "button",
           { class: "ac-btn update-check-install", type: "button" },
@@ -152,6 +156,19 @@ export function buildUpdateCheckRow(signal: AbortSignal): HTMLDivElement {
     },
     { signal },
   );
+
+  // The install refuses a version the user was not shown; the banner then
+  // checks again. Follow that newer offer here too, so this button does not
+  // keep asking for the old one.
+  const checker = getActiveUpdateChecker();
+  if (checker !== null) {
+    const off = checker.onOutcome((outcome) => {
+      if (offered === null || outcome.kind !== "available" || outcome.version === offered) return;
+      clearInstall();
+      show(outcome, checker.serverUrl);
+    });
+    signal.addEventListener("abort", off, { once: true });
+  }
 
   appendChildren(row, info, actions);
   return row;

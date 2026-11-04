@@ -146,11 +146,11 @@ function downloadAndInstallUpdate(serverUrl: string, expectedVersion?: string): 
       // A failed download may be retried. Once native installation succeeds,
       // keep the guard: reinstalling cannot repair a failed app restart.
       if (!installed) installation = null;
-      publishInstallState({
-        status: "failed",
-        restartRequired: installed,
-        reason: installed ? undefined : FAILURE_REASONS.get(String(err)),
-      });
+      const reason = installed ? undefined : FAILURE_REASONS.get(String(err));
+      publishInstallState({ status: "failed", restartRequired: installed, reason });
+      // Nothing was downloaded and the banner checks again: a page mounted
+      // later must not replay this as if it had just happened.
+      if (reason === "version-changed") publishInstallState({ status: "idle" });
       throw err;
     }
   });
