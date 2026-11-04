@@ -217,6 +217,9 @@ type frameRefs struct {
 		Updates []struct {
 			UserID int64 `json:"user_id"`
 		} `json:"updates"`
+		Members []struct {
+			UserID int64 `json:"user_id"`
+		} `json:"members"`
 		// A reply frame embeds its parent's snippet.
 		Referenced *struct {
 			ID   int64 `json:"id"`
@@ -241,7 +244,7 @@ func parseFrameRefs(data []byte) (frameRefs, bool) {
 
 // userIn returns the first user the frame names that is a key of set:
 // payload.user_id, payload.from_user_id, payload.user.id, the replied-to
-// message's author, payload.mentions, payload.call.participants, payload.group_event.target_user_id or payload.updates[].user_id.
+// message's author, payload.mentions, payload.call.participants, payload.group_event.target_user_id, payload.updates[].user_id or payload.members[].user_id.
 func userIn[V any](f *frameRefs, set map[int64]V) (int64, bool) {
 	pl := &f.Payload
 	var ids []int64
@@ -266,6 +269,9 @@ func userIn[V any](f *frameRefs, set map[int64]V) (int64, bool) {
 	}
 	for _, u := range pl.Updates {
 		ids = append(ids, u.UserID)
+	}
+	for _, m := range pl.Members {
+		ids = append(ids, m.UserID)
 	}
 	for _, id := range ids {
 		if _, ok := set[id]; ok {

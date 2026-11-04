@@ -121,12 +121,23 @@ func parseRRFrames(raw [][]byte) []rrFrame {
 		var env struct {
 			Type    string `json:"type"`
 			Payload struct {
-				ID     int64  `json:"id"`
-				UserID int64  `json:"user_id"`
-				Role   string `json:"role"`
+				ID      int64  `json:"id"`
+				UserID  int64  `json:"user_id"`
+				Role    string `json:"role"`
+				Members []struct {
+					UserID int64  `json:"user_id"`
+					Role   string `json:"role"`
+				} `json:"members"`
 			} `json:"payload"`
 		}
 		if json.Unmarshal(m, &env) != nil {
+			continue
+		}
+		// A batch reads as one member_update per member, so tests compare members, not frames.
+		if env.Type == MsgTypeMemberUpdateBatch {
+			for _, mb := range env.Payload.Members {
+				out = append(out, rrFrame{Type: MsgTypeMemberUpdate, Role: mb.Role, UID: mb.UserID, Raw: string(m)})
+			}
 			continue
 		}
 		out = append(out, rrFrame{Type: env.Type, ID: env.Payload.ID, Role: env.Payload.Role, UID: env.Payload.UserID, Raw: string(m)})

@@ -86,6 +86,11 @@ type memberUpdatePayload struct {
 	RoleIDs []int64 `json:"role_ids,omitempty"`
 }
 
+// memberUpdateBatchPayload is member_update for several members in one frame.
+type memberUpdateBatchPayload struct {
+	Members []memberUpdatePayload `json:"members"`
+}
+
 type userUpdatePayload struct {
 	UserID   int64   `json:"user_id"`
 	Username string  `json:"username"`
@@ -412,6 +417,13 @@ func buildMemberUpdate(userID int64, roleName string, roleIDs []int64) []byte {
 	return buildJSON(wsMsg{
 		Type:    MsgTypeMemberUpdate,
 		Payload: memberUpdatePayload{UserID: userID, Role: roleName, RoleIDs: roleIDs},
+	})
+}
+
+func buildMemberUpdateBatch(members []memberUpdatePayload) []byte {
+	return buildJSON(wsMsg{
+		Type:    MsgTypeMemberUpdateBatch,
+		Payload: memberUpdateBatchPayload{Members: members},
 	})
 }
 

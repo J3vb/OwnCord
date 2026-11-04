@@ -12,7 +12,8 @@ import (
 // The ring buffer's check and the events table's predicate are one rule over
 // two stores: they must agree on every frame, including a call log row, which
 // names its participants under call.participants, and a group add or remove
-// row, which names its target under group_event.target_user_id.
+// row, which names its target under group_event.target_user_id, and a
+// member_update_batch, which names each member under members[].user_id.
 func TestEventNamesUser_RingAndSQLPredicateAgree(t *testing.T) {
 	database, err := db.Open(":memory:")
 	if err != nil {
@@ -38,6 +39,8 @@ func TestEventNamesUser_RingAndSQLPredicateAgree(t *testing.T) {
 		{"group leave has no target", fmt.Sprintf(`{"seq":9,"type":"chat_message","payload":{"id":10,"user":{"id":%d},"kind":"group_leave","group_event":{}}}`, other), false},
 		{"empty participants", `{"seq":5,"type":"chat_edited","payload":{"message_id":5,"call":{"participants":[]}}}`, false},
 		{"no call block", `{"seq":6,"type":"chat_edited","payload":{"message_id":5,"call":null}}`, false},
+		{"member batch names a member", fmt.Sprintf(`{"seq":10,"type":"member_update_batch","payload":{"members":[{"user_id":%d,"role":"r"},{"user_id":%d,"role":"r","role_ids":[2]}]}}`, other, uid), true},
+		{"member batch without the user", fmt.Sprintf(`{"seq":11,"type":"member_update_batch","payload":{"members":[{"user_id":%d,"role":"r"}]}}`, other), false},
 	}
 	for i, f := range frames {
 		if _, err := database.ExecContext(ctx, `INSERT INTO events (seq, event_type, payload, channel_id) VALUES (?, 'x', ?, 0)`, i+1, f.payload); err != nil {
