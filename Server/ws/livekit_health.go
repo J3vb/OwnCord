@@ -15,6 +15,10 @@ import (
 // joins or a scraper costs at most one room listing per window.
 const liveKitHealthTTL = 5 * time.Second
 
+// liveKitHealthFailTTL is how long a failed verdict is reused: short, so one slow
+// probe does not refuse every voice join for the full window once LiveKit is back.
+const liveKitHealthFailTTL = time.Second
+
 // liveKitHealthCache holds the last verdict and coalesces concurrent probes into
 // one. The zero value is ready to use.
 type liveKitHealthCache struct {
@@ -36,7 +40,11 @@ func (h *liveKitHealthCache) clock() time.Time {
 func (h *liveKitHealthCache) fresh() (ok bool, err error, hit bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if h.at.IsZero() || h.clock().Sub(h.at) >= liveKitHealthTTL {
+	ttl := liveKitHealthTTL
+	if !h.ok {
+		ttl = liveKitHealthFailTTL
+	}
+	if h.at.IsZero() || h.clock().Sub(h.at) >= ttl {
 		return false, nil, false
 	}
 	return h.ok, h.err, true
@@ -48,7 +56,8 @@ func (h *liveKitHealthCache) store(ok bool, err error) {
 	h.at, h.ok, h.err = h.clock(), ok, err
 }
 
-// CachedHealthCheck is HealthCheck behind a liveKitHealthTTL cache with one probe in
+// CachedHealthCheck is HealthCheck behind a liveKitHealthTTL cache (liveKitHealthFailTTL
+// for a failure) with one probe in
 // flight: callers that find the cache cold while a probe runs wait for that probe
 // instead of starting their own. The probe is detached from the first caller's
 // cancellation (HealthCheck bounds it at 3 s), so a caller that gives up does not

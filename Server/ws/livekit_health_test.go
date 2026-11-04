@@ -84,9 +84,27 @@ func TestCachedHealthCheck_ConcurrentCallersShareOneProbe(t *testing.T) {
 	}
 }
 
-// The verdict is reused inside the TTL and re-probed after it; a failure is
-// cached the same way and keeps its reason.
+// A healthy verdict is reused inside the TTL and re-probed after it.
 func TestCachedHealthCheck_ReusesVerdictUntilTTL(t *testing.T) {
+	c, calls := countingLiveKit(t, http.StatusOK, nil)
+	now := time.Now()
+	c.health.now = func() time.Time { return now }
+
+	if ok, err := c.CachedHealthCheck(context.Background()); !ok || err != nil {
+		t.Fatalf("first check = %v, %v; want healthy", ok, err)
+	}
+	now = now.Add(liveKitHealthTTL - time.Millisecond)
+	if ok, _ := c.CachedHealthCheck(context.Background()); !ok || calls.Load() != 1 {
+		t.Fatalf("inside the TTL: ok=%v calls=%d; want the cached verdict and 1 call", ok, calls.Load())
+	}
+	now = now.Add(time.Millisecond)
+	if _, _ = c.CachedHealthCheck(context.Background()); calls.Load() != 2 {
+		t.Fatalf("calls after the TTL = %d, want 2", calls.Load())
+	}
+}
+
+// A failure is reused only for the shorter failure TTL and keeps its reason.
+func TestCachedHealthCheck_FailureUsesShortTTL(t *testing.T) {
 	c, calls := countingLiveKit(t, http.StatusInternalServerError, nil)
 	now := time.Now()
 	c.health.now = func() time.Time { return now }
@@ -95,14 +113,14 @@ func TestCachedHealthCheck_ReusesVerdictUntilTTL(t *testing.T) {
 	if ok || err == nil {
 		t.Fatalf("first check = %v, %v; want false with a reason", ok, err)
 	}
-	now = now.Add(liveKitHealthTTL - time.Millisecond)
-	ok, err2 := c.CachedHealthCheck(context.Background())
-	if ok || err2 == nil || calls.Load() != 1 {
-		t.Fatalf("inside the TTL: ok=%v err=%v calls=%d; want the cached failure and 1 call", ok, err2, calls.Load())
+	now = now.Add(liveKitHealthFailTTL - time.Millisecond)
+	ok, err = c.CachedHealthCheck(context.Background())
+	if ok || err == nil || calls.Load() != 1 {
+		t.Fatalf("inside the failure TTL: ok=%v err=%v calls=%d; want the cached failure and 1 call", ok, err, calls.Load())
 	}
 	now = now.Add(time.Millisecond)
 	if _, _ = c.CachedHealthCheck(context.Background()); calls.Load() != 2 {
-		t.Fatalf("calls after the TTL = %d, want 2", calls.Load())
+		t.Fatalf("calls after the failure TTL = %d, want 2", calls.Load())
 	}
 }
 

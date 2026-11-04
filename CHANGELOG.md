@@ -49,7 +49,7 @@ and only when it changes something a contributor or fork holder must do
 
 ### Changed
 
-- With your own LiveKit server (not the bundled one), joining voice no longer waits on a fresh LiveKit check every time, and metrics scrapes and the diagnostics card no longer ask LiveKit on every request. One check is shared for 5 seconds; `/api/v1/livekit/health` still checks live.
+- With your own LiveKit server (not the bundled one), joining voice no longer waits on a fresh LiveKit check every time, and metrics scrapes and the diagnostics card no longer ask LiveKit on every request. One check is shared for 5 seconds (1 second after a failure); `/api/v1/livekit/health` still checks live.
 - The server no longer starts when `server.trusted_proxies` holds an entry that covers every address (such as `0.0.0.0/0` or `::/0`); the error names the entry. List only your reverse proxy's own address. The admin panel refuses the same values.
 - Clicking the channel topic in the header no longer opens a popup, and the topic no longer looks clickable. A long, cut-off topic still shows in full when you hover over it.
 - Renaming, deleting or reordering a role that many members hold now sends every app one update per 64 members instead of one per member, so a big server no longer floods everyone's connection. An app older than this version shows the old role name on those members until it reconnects.
