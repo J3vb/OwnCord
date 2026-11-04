@@ -29,6 +29,7 @@ import {
   bumpGeneration,
 } from "../../lib/voice/screenShare";
 import { attachDiagnosticListeners } from "../../lib/voice/livekitDiagnostics";
+import { recordVoiceLeft } from "../../lib/voice/voiceEventLog";
 import { detachRoom, onRoom } from "./releaseRoom";
 import type { RoomEventHandlers } from "../../lib/voice/roomEventHandlers";
 import { parseUserId, type SessionState } from "./sessionState";
@@ -388,6 +389,7 @@ export class RoomLifecycle {
     const room = this._room;
     let disconnected: Promise<void> = Promise.resolve();
     if (room !== null) {
+      recordVoiceLeft(room);
       detachRoom(room);
       disconnected = room
         .disconnect()

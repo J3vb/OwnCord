@@ -19,25 +19,7 @@ import { repoRoot } from "../../../tests/helpers/repoRoot";
 // Codes in the catalogue whose emitter is not built yet. Each is removed from
 // this list when its owner starts recording it; the test below fails if a code
 // here gains an emitter, or a code not here has none.
-const NOT_EMITTED_YET = new Set<EventCode>([
-  "app.suspended",
-  "app.resumed",
-  "native.crash",
-  "native.exit",
-  "native.hang",
-  "native.hang_recovered",
-  "native.webview_process_failed",
-  "camera.device_changed",
-  "mic.device_changed",
-  "track.replaced",
-  "track.layers_changed",
-  "share.started",
-  "share.stopped",
-  "share.ended",
-  "share.source_changed",
-  "voice.left",
-  "ice.state",
-]);
+const NOT_EMITTED_YET = new Set<EventCode>([]);
 
 const clientRoot = process.cwd();
 const entries = Object.entries(EVENT_CODES) as [EventCode, EventCodeSpec][];

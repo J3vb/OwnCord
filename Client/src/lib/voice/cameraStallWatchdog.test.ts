@@ -90,6 +90,23 @@ describe("camera stall watchdog", () => {
     expect(seen.map((e) => e.code)).toEqual(["camera.stalled"]);
   });
 
+  it("records the active layer count when it moves, not on the first sample", () => {
+    const dog = createCameraStallWatchdog();
+    const at = (i: number, layers: CameraLayerSample[], live = true): void =>
+      dog.sample(i * POLL_MS, { live, layers });
+    at(0, [layer("f", 10), layer("q", 10)]);
+    at(1, [layer("f", 70), layer("q", 70)]);
+    at(2, [layer("f", 70, false), layer("q", 130)]);
+    at(3, [layer("f", 70, false), layer("q", 130, false)]);
+    at(4, [layer("f", 70, false), layer("q", 130, false)], false);
+    at(5, [layer("f", 70), layer("q", 190)]);
+    const changes = seen.filter((e) => e.code === "track.layers_changed").map((e) => e.fields);
+    expect(changes).toEqual([
+      { source: "camera", active_layers: 1 },
+      { source: "camera", active_layers: 0 },
+    ]);
+  });
+
   it("reads layers from outbound video entries only", () => {
     const sample = cameraSampleFromStats(true, [
       {

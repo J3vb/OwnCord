@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { RoomEvent, type Room } from "livekit-client";
 import { attachRecorder } from "@lib/diagnostics/eventSink";
-import { attachVoiceEventLog } from "./voiceEventLog";
+import { attachVoiceEventLog, recordVoiceLeft } from "./voiceEventLog";
 
 type Handler = (...args: unknown[]) => void;
 
@@ -69,6 +69,8 @@ describe("voice event log", () => {
     expect(seen.map((e) => e.code)).toEqual([
       "track.published",
       "camera.started",
+      "camera.device_changed",
+      "track.replaced",
       "camera.started",
       "camera.muted",
     ]);
@@ -76,6 +78,80 @@ describe("voice event log", () => {
     expect(devices[0]).toMatch(/^[0-9a-f]{8}$/);
     expect(devices[1]).not.toBe(devices[0]);
     expect(JSON.stringify(seen)).not.toContain("cam-a");
+  });
+
+  it("does not call turning the camera back on a device change", () => {
+    const { room, onRoom, fire } = fakeRoom();
+    attachVoiceEventLog(room, onRoom as never);
+    const track = fakeTrack(new FakeMedia("cam-a"));
+    fire(RoomEvent.LocalTrackPublished, { source: "camera", trackSid: "TR_1", track });
+    track.mediaStreamTrack = new FakeMedia("cam-a") as unknown as MediaStreamTrack;
+    track.emit("restarted");
+    expect(seen.map((e) => e.code)).not.toContain("camera.device_changed");
+    expect(seen.map((e) => e.code)).not.toContain("track.replaced");
+  });
+
+  it("records a screen share's start and one stop per publication", () => {
+    const { room, onRoom, fire } = fakeRoom();
+    attachVoiceEventLog(room, onRoom as never);
+    const media = new FakeMedia("screen") as FakeMedia & { getSettings(): MediaTrackSettings };
+    const settings = media.getSettings();
+    media.getSettings = () => ({ ...settings, displaySurface: "window" });
+    const pub = { source: "screen_share", trackSid: "TR_9", track: fakeTrack(media) };
+    fire(RoomEvent.LocalTrackPublished, pub);
+    fire(RoomEvent.LocalTrackUnpublished, pub);
+    fire(RoomEvent.LocalTrackUnpublished, pub);
+
+    expect(seen.filter((e) => e.code.startsWith("share.")).map((e) => e.code)).toEqual([
+      "share.started",
+      "share.stopped",
+    ]);
+    expect(seen.find((e) => e.code === "share.started")?.fields).toEqual({
+      surface: "window",
+      width: 1280,
+      height: 720,
+      fps: 30,
+    });
+  });
+
+  it("keeps a share LiveKit republishes while reconnecting out of the share events", () => {
+    const { room, onRoom, fire } = fakeRoom();
+    attachVoiceEventLog(room, onRoom as never);
+    const pub = { source: "screen_share", trackSid: "TR_9", track: fakeTrack(new FakeMedia("s")) };
+    fire(RoomEvent.LocalTrackPublished, pub);
+    fire(RoomEvent.Reconnecting);
+    fire(RoomEvent.LocalTrackUnpublished, pub);
+    fire(RoomEvent.LocalTrackPublished, pub);
+    fire(RoomEvent.Reconnected);
+    expect(seen.filter((e) => e.code.startsWith("share.")).map((e) => e.code)).toEqual([
+      "share.started",
+    ]);
+  });
+
+  it("tells a new default microphone apart, and the same mic picked by id is no change", () => {
+    const { room, onRoom, fire } = fakeRoom();
+    attachVoiceEventLog(room, onRoom as never);
+    const mic = (id: string, label: string) => {
+      const media = new FakeMedia(id) as FakeMedia & { label: string };
+      media.label = label;
+      return media as unknown as MediaStreamTrack;
+    };
+    const track = fakeTrack(new FakeMedia("x"));
+    track.mediaStreamTrack = mic("default", "Headset");
+    fire(RoomEvent.LocalTrackPublished, { source: "microphone", trackSid: "TR_3", track });
+    track.mediaStreamTrack = mic("default", "Speakerphone");
+    track.emit("restarted");
+    track.mediaStreamTrack = mic("id-speaker", "Speakerphone");
+    track.emit("restarted");
+    expect(seen.filter((e) => e.code === "mic.device_changed")).toHaveLength(1);
+    expect(JSON.stringify(seen)).not.toMatch(/Headset|Speaker/);
+  });
+
+  it("records leaving with the channel as a pseudonym, never its name", () => {
+    recordVoiceLeft({ name: "voice-7" } as unknown as Room);
+    expect(seen.map((e) => e.code)).toEqual(["voice.left"]);
+    expect(seen[0]!.fields.channel).toMatch(/^c\d+$/);
+    expect(JSON.stringify(seen)).not.toContain("voice-7");
   });
 
   it("releases the track listeners when the room disconnects without app listeners", () => {

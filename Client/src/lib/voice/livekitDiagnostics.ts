@@ -55,6 +55,23 @@ function candidateType(value: string): "host" | "srflx" | "prflx" | "relay" | "u
     : "unknown";
 }
 
+const ICE_STATES = [
+  "new",
+  "checking",
+  "connected",
+  "completed",
+  "failed",
+  "disconnected",
+  "closed",
+] as const;
+
+/** The transport's ICE state as the catalogue's word; null (left out) when unknown. */
+function iceState(value: string | undefined): (typeof ICE_STATES)[number] | null {
+  return (ICE_STATES as readonly string[]).includes(value ?? "")
+    ? (value as (typeof ICE_STATES)[number])
+    : null;
+}
+
 function routeProtocol(value: string): "udp" | "tcp" | "tls" | "unknown" {
   return value === "udp" || value === "tcp" || value === "tls" ? value : "unknown";
 }
@@ -93,6 +110,10 @@ export function logIceConnectionInfo(room: Room | null): void {
   if (room === null) return;
   try {
     for (const { label, transport } of getIceTransports(room)) {
+      recordEvent("ice.state", {
+        transport: label,
+        state: iceState(transport.getICEConnectionState()),
+      });
       log.info(`ICE ${label} connection state`, {
         iceConnectionState: transport.getICEConnectionState(),
         connectionState: transport.getConnectionState(),

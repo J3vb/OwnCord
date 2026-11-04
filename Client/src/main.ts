@@ -74,7 +74,7 @@ void initLogPersistence();
 // The diagnostic event log and the app's own lifecycle events, off the startup
 // path; owners that record earlier are queued until it attaches.
 void import("@lib/diagnostics/appEvents")
-  .then((m) => m.startAppEvents(desktop.appMetadata))
+  .then((m) => m.startAppEvents(desktop.appMetadata, desktop.logFiles))
   .catch((e: unknown) => log.warn("Diagnostic event log failed to start", e));
 
 // Apply stored theme/font/compact preferences before first render
