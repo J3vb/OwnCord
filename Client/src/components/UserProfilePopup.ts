@@ -233,6 +233,67 @@ function buildAvatar(user: UserProfileData): HTMLDivElement {
   return wrapper;
 }
 
+interface IdentityLines {
+  readonly nameEl: HTMLDivElement;
+  readonly handleEl: HTMLDivElement;
+  readonly customStatusEl: HTMLDivElement;
+  readonly activityEl: HTMLDivElement;
+  readonly listeningEl: HTMLDivElement;
+}
+
+/** The name, @username, custom status, game and song lines under the avatar. */
+function buildIdentityLines(
+  user: UserProfileData,
+  displayName: string,
+  disposable: Disposable,
+): IdentityLines {
+  // Username
+  const nameEl = createElement("div", { class: "upp-username" }, displayName);
+  if (user.isDeleted === true) {
+    nameEl.style.color = "var(--text-faint, #80848e)";
+  }
+
+  // Username line, shown only when a display name is standing in for it.
+  // @mentions still resolve by username, so the popup has to keep telling
+  // you what to type.
+  const handleEl = createElement("div", { class: "upp-username-handle" });
+  if (user.isDeleted !== true && displayName !== user.username) {
+    setText(handleEl, `@${user.username}`);
+  }
+
+  // Custom status line — the user's own words, under the name.
+  const customStatusEl = createElement("div", { class: "upp-custom-status" });
+  if (typeof user.customStatus === "string" && user.customStatus.length > 0) {
+    setText(customStatusEl, user.customStatus);
+  }
+
+  // The game being played, under the custom status. Empty (and
+  // hidden by CSS) when there is none.
+  const activityEl = createElement("div", {
+    class: "upp-activity",
+    "data-testid": "upp-activity",
+  });
+  if (user.activity != null && user.isDeleted !== true) {
+    const icon = createIcon("gamepad-2", 14);
+    icon.setAttribute("aria-hidden", "true");
+    icon.classList.add("upp-activity-icon");
+    const text = createElement("span", { class: "upp-activity-text" });
+    setText(text, playingForLine(user.activity, Date.now()));
+    appendChildren(activityEl, icon, text);
+  }
+
+  // The song being listened to, under the game. Its clock stops
+  // with the popup.
+  const listeningEl = createElement("div", {
+    class: "upp-listening",
+    "data-testid": "upp-listening",
+  });
+  if (user.listening != null && user.isDeleted !== true) {
+    disposable.addCleanup(mountListeningCard(listeningEl, user.listening, { prefix: "upp" }));
+  }
+  return { nameEl, handleEl, customStatusEl, activityEl, listeningEl };
+}
+
 // ---------------------------------------------------------------------------
 // Component factory
 // ---------------------------------------------------------------------------
@@ -306,50 +367,11 @@ export function createUserProfilePopup(
     // Avatar
     const avatar = buildAvatar(user);
 
-    // Username
-    const nameEl = createElement("div", { class: "upp-username" }, displayName);
-    if (user.isDeleted === true) {
-      nameEl.style.color = "var(--text-faint, #80848e)";
-    }
-
-    // Username line, shown only when a display name is standing in for it.
-    // @mentions still resolve by username, so the popup has to keep telling
-    // you what to type.
-    const handleEl = createElement("div", { class: "upp-username-handle" });
-    if (user.isDeleted !== true && displayName !== user.username) {
-      setText(handleEl, `@${user.username}`);
-    }
-
-    // Custom status line — the user's own words, under the name.
-    const customStatusEl = createElement("div", { class: "upp-custom-status" });
-    if (typeof user.customStatus === "string" && user.customStatus.length > 0) {
-      setText(customStatusEl, user.customStatus);
-    }
-
-    // The game being played, under the custom status. Empty (and
-    // hidden by CSS) when there is none.
-    const activityEl = createElement("div", {
-      class: "upp-activity",
-      "data-testid": "upp-activity",
-    });
-    if (user.activity != null && user.isDeleted !== true) {
-      const icon = createIcon("gamepad-2", 14);
-      icon.setAttribute("aria-hidden", "true");
-      icon.classList.add("upp-activity-icon");
-      const text = createElement("span", { class: "upp-activity-text" });
-      setText(text, playingForLine(user.activity, Date.now()));
-      appendChildren(activityEl, icon, text);
-    }
-
-    // The song being listened to, under the game. Its clock stops
-    // with the popup.
-    const listeningEl = createElement("div", {
-      class: "upp-listening",
-      "data-testid": "upp-listening",
-    });
-    if (user.listening != null && user.isDeleted !== true) {
-      disposable.addCleanup(mountListeningCard(listeningEl, user.listening, { prefix: "upp" }));
-    }
+    const { nameEl, handleEl, customStatusEl, activityEl, listeningEl } = buildIdentityLines(
+      user,
+      displayName,
+      disposable,
+    );
 
     // Role badge, or the role picker for a viewer who may change it.
     const roleHolder = createElement("div", { class: "upp-role", "data-testid": "upp-role" });
