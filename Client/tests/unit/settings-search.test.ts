@@ -86,7 +86,14 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: async (cmd: string): Promise<unknown> => {
     if (cmd !== "get_gpu_adapters") throw new Error("no host");
     const card = { id: "10de:1234:RTX", name: "RTX", vendorId: 1, deviceId: 2 };
-    return { cards: [card], saved: "auto", active: null, notFound: false, resetAfterCrash: false };
+    return {
+      cards: [card],
+      saved: "auto",
+      active: null,
+      notFound: false,
+      resetAfterCrash: false,
+      autoOff: false,
+    };
   },
 }));
 

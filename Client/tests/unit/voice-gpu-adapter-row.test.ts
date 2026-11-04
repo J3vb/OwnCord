@@ -20,7 +20,14 @@ const cards = [
   { id: "10de:1234:RTX", name: "NVIDIA RTX", vendorId: 0x10de, deviceId: 0x1234 },
   { id: "8086:0001:UHD", name: "Intel UHD", vendorId: 0x8086, deviceId: 1 },
 ];
-const base = { cards, saved: "auto", active: null, notFound: false, resetAfterCrash: false };
+const base = {
+  cards,
+  saved: "auto",
+  active: null,
+  notFound: false,
+  resetAfterCrash: false,
+  autoOff: false,
+};
 
 let parent: HTMLElement;
 let ctl: AbortController;
@@ -89,6 +96,16 @@ describe("graphics card row", () => {
   it("explains a missing saved card and a reset after a crash", async () => {
     await mount({ ...base, notFound: true, resetAfterCrash: true });
     expect(parent.textContent).toContain("Saved card not found, using Auto.");
-    expect(parent.textContent).toContain("went back to Auto");
+    expect(parent.textContent).toContain("could not start on that card");
+  });
+
+  it("offers to try Auto again after Auto stood down", async () => {
+    await mount({ ...base, autoOff: true });
+    expect(parent.textContent).toContain("Windows picks the card for now");
+    const retry = parent.querySelector<HTMLButtonElement>('[data-testid="gpu-adapter-retry"]')!;
+    retry.click();
+    await vi.waitFor(() => expect(host.set).toHaveBeenCalledWith("auto"));
+    await vi.waitFor(() => expect(restart().hidden).toBe(false));
+    expect(retry.hidden).toBe(true);
   });
 });

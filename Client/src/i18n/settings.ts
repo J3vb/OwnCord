@@ -627,7 +627,11 @@ export const settingsText = defineCatalog("settings", {
     "Used to draw, play and encode video. Auto picks the high performance card. Applies after a restart.",
   "voiceAudio.gpuAdapter.auto": "Auto (recommended)",
   "voiceAudio.gpuAdapterNotFound": "Saved card not found, using Auto.",
-  "voiceAudio.gpuAdapterReset": "OwnCord could not start on the chosen card and went back to Auto.",
+  "voiceAudio.gpuAdapterReset":
+    "OwnCord could not start on that card, so Windows picks the card for now.",
+  "voiceAudio.gpuAdapterAutoOff":
+    "Auto did not start on the best card last time, so Windows picks the card for now.",
+  "voiceAudio.gpuAdapterRetry": "Try Auto again",
   "voiceAudio.gpuAdapterRestart": "Restart to apply",
   "voiceAudio.gpuAdapterNotSaved": "Could not save the choice.",
   "voiceAudio.videoDevice": "Video Device",

@@ -37,26 +37,30 @@ function build(state: GpuAdapterState, signal: AbortSignal): HTMLElement[] {
   );
   restart.hidden = true;
 
-  let saved = select.value;
-  select.addEventListener(
-    "change",
-    () => {
-      const choice = select.value;
-      void (async () => {
-        const ok = await desktop.gpuAdapter.set(choice);
-        if (signal.aborted) return;
-        if (!ok) {
-          select.value = saved;
-          status.textContent = t("voiceAudio.gpuAdapterNotSaved");
-          return;
-        }
-        saved = choice;
-        status.textContent = "";
-        restart.hidden = false;
-      })();
-    },
-    { signal },
+  const retry = createElement(
+    "button",
+    { class: "ac-btn", type: "button", "data-testid": "gpu-adapter-retry" },
+    t("voiceAudio.gpuAdapterRetry"),
   );
+
+  let saved = select.value;
+  const save = (choice: string): void => {
+    void (async () => {
+      const ok = await desktop.gpuAdapter.set(choice);
+      if (signal.aborted) return;
+      if (!ok) {
+        select.value = saved;
+        status.textContent = t("voiceAudio.gpuAdapterNotSaved");
+        return;
+      }
+      saved = choice;
+      status.textContent = "";
+      restart.hidden = false;
+      if (choice === AUTO) retry.hidden = true;
+    })();
+  };
+  select.addEventListener("change", () => save(select.value), { signal });
+  retry.addEventListener("click", () => save(AUTO), { signal });
   restart.addEventListener(
     "click",
     () => {
@@ -75,6 +79,8 @@ function build(state: GpuAdapterState, signal: AbortSignal): HTMLElement[] {
   ];
   if (state.notFound) out.push(note(t("voiceAudio.gpuAdapterNotFound")));
   if (state.resetAfterCrash) out.push(note(t("voiceAudio.gpuAdapterReset")));
+  else if (state.autoOff && state.saved === AUTO) out.push(note(t("voiceAudio.gpuAdapterAutoOff")));
+  if (state.autoOff && state.saved === AUTO) out.push(retry);
   out.push(status, restart);
   return out;
 }

@@ -17,6 +17,7 @@ const state = {
   active: null,
   notFound: false,
   resetAfterCrash: false,
+  autoOff: false,
 };
 
 describe("gpuAdapter (desktop)", () => {

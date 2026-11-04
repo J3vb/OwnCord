@@ -1018,7 +1018,7 @@ export function buildTauriMockScript(opts: {
         if (cmd === "set_window_pref" || cmd === "show_next_launch") return null;
         // Graphics card for video: no cards, so the row stays hidden.
         if (cmd === "get_gpu_adapters")
-          return { cards: [], saved: "auto", active: null, notFound: false, resetAfterCrash: false };
+          return { cards: [], saved: "auto", active: null, notFound: false, resetAfterCrash: false, autoOff: false };
         if (cmd === "set_gpu_adapter") return null;
         // ---- External-content broker (B7-16) ----
         // No external network here: refuse the way the native broker does,
