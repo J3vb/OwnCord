@@ -87,6 +87,10 @@ describe("TOTP Settings", () => {
     });
   }
 
+  async function reachQr(): Promise<void> {
+    await vi.waitFor(() => expect(q("[data-testid='totp-qr-uri']")).not.toBeNull());
+  }
+
   function submitCode(code: string): void {
     byTestId<HTMLInputElement>("totp-code-input").value = code;
     byTestId<HTMLElement>("totp-confirm-btn").click();
@@ -232,6 +236,50 @@ describe("TOTP Settings", () => {
         expect(qrUri.textContent).toBe("otpauth://totp/OwnCord:testuser?secret=TESTSECRET");
       });
 
+      overlay.destroy?.();
+    });
+
+    it("shows a QR code, then the key with a Copy key button, then the link behind a disclosure", async () => {
+      const writeText = vi.fn().mockResolvedValue(undefined);
+      Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+      const { overlay } = openOverlay();
+      submitEnrolPassword("mypassword123");
+      await reachQr();
+      await vi.waitFor(() => expect(q("[data-testid='totp-qr'] svg")).not.toBeNull());
+
+      const svg = q<SVGSVGElement>("[data-testid='totp-qr'] svg")!;
+      expect(svg.getAttribute("role")).toBe("img");
+      expect(svg.getAttribute("aria-label")).toBe("Two-factor setup QR code");
+      expect(byTestId("totp-secret").textContent).toBe("TEST SECR ET");
+      const link = byTestId<HTMLElement>("totp-qr-uri");
+      expect(link.closest("details")?.open).toBe(false);
+
+      const order = ["totp-qr", "totp-secret", "totp-qr-uri"].map((id) => byTestId(id));
+      expect(
+        order[0]!.compareDocumentPosition(order[1]!) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+      expect(
+        order[1]!.compareDocumentPosition(order[2]!) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+
+      const copy = byTestId<HTMLButtonElement>("totp-copy-key");
+      copy.click();
+      expect(writeText).toHaveBeenCalledWith("TESTSECRET");
+      await vi.waitFor(() => expect(copy.textContent).toBe("Copied"));
+      overlay.destroy?.();
+    });
+
+    it("opens the link and draws no QR when the server's link carries no secret and is too long", async () => {
+      const { overlay } = openOverlay({
+        onEnableTotp: vi.fn().mockResolvedValue({ qr_uri: "x".repeat(800), backup_codes: [] }),
+      });
+      submitEnrolPassword("mypassword123");
+      await reachQr();
+      expect(q("[data-testid='totp-copy-key']")).toBeNull();
+      expect(byTestId<HTMLElement>("totp-qr-uri").closest("details")?.open).toBe(true);
+      await import("../../src/lib/ui/qrCode");
+      await new Promise((r) => setTimeout(r, 0));
+      expect(q("[data-testid='totp-qr'] svg")).toBeNull();
       overlay.destroy?.();
     });
 

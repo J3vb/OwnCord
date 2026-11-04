@@ -10,6 +10,7 @@
  */
 
 import { Disposable } from "@lib/disposable";
+import { attachLimitHint, lineHintText } from "@lib/text/nameLimits";
 import { isImeCommit } from "@lib/text/ime";
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
@@ -24,7 +25,11 @@ import {
   type CategoryRef,
 } from "@stores/channels.store";
 import { shellText } from "../i18n/shell";
-import { MAX_CHANNEL_TOPIC_LENGTH, channelTypeLabel } from "./channelTypes";
+import {
+  MAX_CHANNEL_NAME_LENGTH,
+  MAX_CHANNEL_TOPIC_LENGTH,
+  channelTypeLabel,
+} from "./channelTypes";
 import { buildCategorySelect, categoryFields, categoryOptionValue } from "./channelCategorySelect";
 
 export interface CreateChannelModalOptions {
@@ -112,7 +117,14 @@ export function createCreateChannelModal(options: CreateChannelModalOptions): Mo
       ),
       "data-testid": "channel-name-input",
     });
-    appendChildren(nameGroup, nameLabel, nameInput);
+    const nameHint = attachLimitHint(nameInput, {
+      max: MAX_CHANNEL_NAME_LENGTH,
+      countCharacters: true,
+      hint: lineHintText(MAX_CHANNEL_NAME_LENGTH),
+      id: "create-channel-name-hint",
+      signal: disposable.signal,
+    });
+    appendChildren(nameGroup, nameLabel, nameInput, nameHint.el);
 
     // Topic (optional, shown in the chat header)
     const topicGroup = createElement("div", { class: "form-group" });
