@@ -159,7 +159,7 @@ func TestVoiceRegistry_TransferMovesMembershipOnlyOnCompletedResume(t *testing.T
 func waitForWaiters(t *testing.T, h *Hub, userID int64, n int) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
-	for h.voiceHub.reg.voiceMember.refsForTest(userID) < n {
+	for h.voiceHub.reg.voiceMember.Refs(userID) < n {
 		if time.Now().After(deadline) {
 			t.Fatalf("lock for user %d never reached %d holders/waiters", userID, n)
 		}
@@ -170,7 +170,7 @@ func waitForWaiters(t *testing.T, h *Hub, userID int64, n int) {
 func waitForNoWaiters(t *testing.T, h *Hub, userID int64) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
-	for h.voiceHub.reg.voiceMember.refsForTest(userID) > 0 {
+	for h.voiceHub.reg.voiceMember.Refs(userID) > 0 {
 		if time.Now().After(deadline) {
 			t.Fatalf("lock for user %d still held", userID)
 		}

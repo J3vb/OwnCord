@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/syncutil"
+	"github.com/J3vb/OwnCord/Server/ws/voicestate"
 )
 
 // These tests drive the deadlock build's rank checker (syncutil/ranked_deadlock.go)
@@ -51,12 +52,12 @@ func wantBothStacks(t *testing.T, report, acquiring, held, test string) {
 }
 
 func TestRank_AllowsOutermostFirst(t *testing.T) {
-	h := &Hub{voiceHub: hubVoice{mod: newUserLocks[lockRankVoiceMod]()}}
+	h := &Hub{voiceHub: hubVoice{mod: voicestate.NewUserLocks[lockRankVoiceMod]()}}
 	ps := &PubSub{}
 	c := &Client{}
 	if r := rankPanic(t, func() {
-		unlockMember := h.voiceHub.reg.voiceMember.lock(1) // 1
-		unlockMod := h.voiceHub.mod.lock(1)                // 2
+		unlockMember := h.voiceHub.reg.voiceMember.Lock(1) // 1
+		unlockMod := h.voiceHub.mod.Lock(1)                // 2
 		h.tombstones.mu.Lock()                             // 3
 		h.presenceFeed.mu.Lock()                           // 4
 		h.seqMu.Lock()                                     // 5
@@ -76,7 +77,7 @@ func TestRank_AllowsOutermostFirst(t *testing.T) {
 		t.Fatalf("the documented order panicked:\n%s", r)
 	}
 	// Released in order, the outermost lock is free to take again.
-	if r := rankPanic(t, func() { h.voiceHub.reg.voiceMember.lock(1)() }); r != "" {
+	if r := rankPanic(t, func() { h.voiceHub.reg.voiceMember.Lock(1)() }); r != "" {
 		t.Fatalf("a lock taken after every hold was released panicked:\n%s", r)
 	}
 }
@@ -91,7 +92,7 @@ func TestRank_PanicsOnInversion(t *testing.T) {
 	wantBothStacks(t, r, "Hub (rank 7)", "Leaf (rank 9)", "TestRank_PanicsOnInversion")
 
 	h.seqMu.Lock()
-	r = rankPanic(t, func() { h.voiceHub.reg.voiceMember.lock(1)() })
+	r = rankPanic(t, func() { h.voiceHub.reg.voiceMember.Lock(1)() })
 	h.seqMu.Unlock()
 	wantBothStacks(t, r, "VoiceMember (rank 1)", "Seq (rank 5)", "TestRank_PanicsOnInversion")
 
@@ -103,8 +104,8 @@ func TestRank_PanicsOnInversion(t *testing.T) {
 
 func TestRank_PanicsOnTwoOfSameRank(t *testing.T) {
 	var reg voiceRegistry
-	unlock := reg.voiceMember.lock(1)
-	r := rankPanic(t, func() { reg.voiceMember.lock(2)() })
+	unlock := reg.voiceMember.Lock(1)
+	r := rankPanic(t, func() { reg.voiceMember.Lock(2)() })
 	unlock()
 	wantBothStacks(t, r, "VoiceMember (rank 1)", "VoiceMember (rank 1)", "TestRank_PanicsOnTwoOfSameRank")
 
@@ -126,7 +127,7 @@ func TestRank_PanicsOnTwoOfSameRank(t *testing.T) {
 }
 
 func TestRank_TryLockNotFlagged(t *testing.T) {
-	h := &Hub{voiceHub: hubVoice{mod: newUserLocks[lockRankVoiceMod]()}}
+	h := &Hub{voiceHub: hubVoice{mod: voicestate.NewUserLocks[lockRankVoiceMod]()}}
 	c := &Client{}
 
 	// A cold read's TryRLock of the tombstones (rank 3) under seqMu (5)
@@ -160,7 +161,7 @@ func TestRank_TryLockNotFlagged(t *testing.T) {
 	var unlock func()
 	if r := rankPanic(t, func() {
 		var ok bool
-		if unlock, ok = h.voiceHub.mod.tryLock(1); !ok {
+		if unlock, ok = h.voiceHub.mod.TryLock(1); !ok {
 			t.Error("tryLock of an idle user failed")
 		}
 	}); r != "" {

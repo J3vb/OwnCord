@@ -34,7 +34,7 @@ type voiceTxn struct {
 // Release with end, normally `defer txn.end()`. Callers hold none of the locks to
 // the right of voiceMember in the order (voice_registry.go).
 func (h *Hub) begin(userID int64) *voiceTxn {
-	return &voiceTxn{h: h, userID: userID, unlock: h.voiceHub.reg.voiceMember.lock(userID)}
+	return &voiceTxn{h: h, userID: userID, unlock: h.voiceHub.reg.voiceMember.Lock(userID)}
 }
 
 // heldTxn returns a lock-free handle. Its one production caller is onClientEvent:

@@ -511,7 +511,7 @@ func TestSweepAFK_SkipsMemberWithModerationInFlight(t *testing.T) {
 	// the goroutine that holds voiceMod would take voiceMember under it, which
 	// the lock order (and the deadlock build's rank check) forbids.
 	held := make(chan func())
-	go func() { held <- r.hub.voiceHub.mod.lock(a.userID) }()
+	go func() { held <- r.hub.voiceHub.mod.Lock(a.userID) }()
 	unlock := <-held
 	r.sweep()
 	unlock()
