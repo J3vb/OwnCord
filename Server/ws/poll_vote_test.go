@@ -470,17 +470,26 @@ func TestPollUpdate_ReplayAfterGap(t *testing.T) {
 	h.vote(h.bobCl, "g1", poll, 1)
 	h.vote(h.bobCl, "g2", poll, 1, 2)
 	h.endPoll(h.aliceCl, "g3", poll)
-	waitFor(t, waitTimeout, func() bool { return h.hub.CurrentSeqForTest() >= before+3 }, "the three updates to be sequenced")
-
-	frames := h.hub.ReplayBuffer().EventsSince(before)
-	var versions []int64
-	for _, raw := range frames {
-		var f pollFrame
-		if json.Unmarshal(raw, &f) == nil && f.Type == "poll_update" && f.Payload.MessageID == poll {
-			versions = append(versions, f.Payload.Version)
-			if f.Payload.Version == 3 && (!f.Payload.Ended || f.Payload.TotalVoters != 1 || f.Payload.Counts[0].Count != 1 || f.Payload.Counts[1].Count != 1) {
-				t.Errorf("the final replayed frame is not a complete state: %+v", f.Payload)
+	// Wait for the third update itself: other frames sequenced in the same window
+	// can move the counter three steps before it lands.
+	replayed := func() []pollFrame {
+		var out []pollFrame
+		for _, raw := range h.hub.ReplayBuffer().EventsSince(before) {
+			var f pollFrame
+			if json.Unmarshal(raw, &f) == nil && f.Type == "poll_update" && f.Payload.MessageID == poll {
+				out = append(out, f)
 			}
+		}
+		return out
+	}
+	waitFor(t, waitTimeout, func() bool { return len(replayed()) >= 3 }, "the three updates to be in the replay buffer")
+
+	frames := replayed()
+	versions := make([]int64, 0, len(frames))
+	for _, f := range frames {
+		versions = append(versions, f.Payload.Version)
+		if f.Payload.Version == 3 && (!f.Payload.Ended || f.Payload.TotalVoters != 1 || f.Payload.Counts[0].Count != 1 || f.Payload.Counts[1].Count != 1) {
+			t.Errorf("the final replayed frame is not a complete state: %+v", f.Payload)
 		}
 	}
 	if !slices.Equal(versions, []int64{1, 2, 3}) {
