@@ -901,7 +901,7 @@ gh workflow run load-baseline.yml -f profile=scale-role-flip --ref dev
   `K6_ROLE_FLIP_ROLE` (default Moderator), and PATCHes the default role, which
   every loadtest user holds, renaming it and flipping its ADD_REACTIONS bit.
   The second call is the one that touches every connected client: a
-  `member_update` per holder and a visibility refresh of everyone. It stops
+  `member_update_batch` frame per 64 holders and a visibility refresh of everyone. It stops
   before the herd, so the herd's zero-kick gate stays about the herd: the last
   tick before it only restores, so the run ends with the default role, its mask
   and the user as they started. Each PATCH has a 120 s timeout, so a slow

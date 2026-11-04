@@ -50,6 +50,10 @@ type broadcastMsg struct {
 	presence         map[int64]pendingPresence
 	droppable        bool
 	presenceSnapshot bool
+	// members are the entries msg was built from when it is a member_update or a
+	// member_update_batch, so an erased member costs only its own entry
+	// (memberUpdatesWithoutErased).
+	members []memberUpdatePayload
 }
 
 // BroadcastToChannel enqueues msg for clients subscribed to channelID (0 means
@@ -336,6 +340,13 @@ func (h *Hub) deliverGated(bm broadcastMsg, g gateResult) {
 		var private map[int64][]byte
 		if bm.presence != nil {
 			bm.msg, private = h.buildPresenceBatch(bm.presence)
+			if bm.msg == nil {
+				return 0, 0, false, nil
+			}
+		}
+
+		if bm.members != nil {
+			bm.msg = h.memberUpdatesWithoutErased(bm.members, bm.msg)
 			if bm.msg == nil {
 				return 0, 0, false, nil
 			}

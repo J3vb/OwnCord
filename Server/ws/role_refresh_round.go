@@ -437,58 +437,6 @@ func (h *Hub) roleNameNow(ctx context.Context, uid int64) (name string, roleIDs 
 	return name, slices.Clone(roleIDs), true
 }
 
-// sendMemberUpdates sends every listed user's role, connected or not, as one
-// member_update_batch per memberUpdateBatch members (a lone member gets a plain
-// member_update, which every client version understands). Each frame waits for
-// dispatch to catch up and then pauses, so a role with thousands of holders does not
-// flood the queue. A refused enqueue waits for dispatch and retries once; the drop is
-// already recorded as a loss for resumers.
-func (h *Hub) sendMemberUpdates(ctx context.Context, ids []int64) {
-	chunk := make([]memberUpdatePayload, 0, min(len(ids), memberUpdateBatch))
-	for _, uid := range ids {
-		if ctx.Err() != nil {
-			return
-		}
-		rctx, cancel := context.WithTimeout(ctx, roleRefreshUserBudget)
-		name, roleIDs, ok := h.roleNameNow(rctx, uid)
-		cancel()
-		if !ok {
-			continue
-		}
-		chunk = append(chunk, memberUpdatePayload{UserID: uid, Role: name, RoleIDs: roleIDs})
-		if len(chunk) < memberUpdateBatch {
-			continue
-		}
-		h.enqueueMemberUpdates(ctx, chunk)
-		chunk = chunk[:0]
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(memberUpdatePause):
-		}
-	}
-	if len(chunk) > 0 {
-		h.enqueueMemberUpdates(ctx, chunk)
-	}
-}
-
-// enqueueMemberUpdates enqueues one global frame for members and waits for dispatch.
-func (h *Hub) enqueueMemberUpdates(ctx context.Context, members []memberUpdatePayload) {
-	var msg []byte
-	if len(members) == 1 {
-		m := members[0]
-		msg = buildMemberUpdate(m.UserID, m.Role, m.RoleIDs)
-	} else {
-		msg = buildMemberUpdateBatch(members)
-	}
-	bm := broadcastMsg{channelID: 0, msg: msg}
-	if !h.enqueue(bm, "member_update") {
-		_ = h.awaitDispatch(ctx)
-		h.enqueue(bm, "member_update")
-	}
-	_ = h.awaitDispatch(ctx)
-}
-
 // broadcastRolesNow re-reads the role list and pushes it to every client. One
 // goroutine does the read and the enqueue, so lists go out in commit order.
 func (h *Hub) broadcastRolesNow(ctx context.Context) {

@@ -242,7 +242,8 @@ handler gets the same effects. The worker takes the pending users in rounds. Eac
 member's held topics are released before their sidebar is sent. For each
 user whose role changed it revokes held topics first, then sends
 `channel_create`/`channel_delete` in chunks (a client that does not drain is
-kicked, never sent `BANNED`), then paces `member_update` with the role name
+kicked, never sent `BANNED`), then paces `member_update_batch` frames (up to 64
+members each; a lone member gets a plain `member_update`) with the role name
 read at send time, redelivers the timeout views to those users only, and ends
 with one `roles_update`. A user who reconnects while its refresh is pending or
 running takes a full `ready`; every other reconnect still resumes by replay. A

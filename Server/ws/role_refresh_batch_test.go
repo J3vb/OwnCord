@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -101,5 +102,58 @@ func TestRoleRefresh_SingleMemberUpdateStaysPlain(t *testing.T) {
 	types, frames := memberFrames(t, f, obs, 1)
 	if !slices.Equal(types, []string{MsgTypeMemberUpdate}) || !slices.Equal(frames[0], []int64{holder}) {
 		t.Errorf("frames = %v %v, want one plain member_update for %d only", types, frames, holder)
+	}
+}
+
+// A member erased after the round read it costs only its own entry: the rest of the
+// batch is still sequenced, and a batch left with one member goes out plain.
+func TestMemberUpdates_ErasedMemberLeavesTheRestOfTheBatch(t *testing.T) {
+	ctx := context.Background()
+	h := newTestHubWith(t, HubOptions{DB: newTeardownTestDB(t)})
+	if err := h.PurgeUserFromReplay(ctx, 42); err != nil {
+		t.Fatalf("PurgeUserFromReplay: %v", err)
+	}
+	send := func(ids ...int64) {
+		members := make([]memberUpdatePayload, 0, len(ids))
+		for _, id := range ids {
+			members = append(members, memberUpdatePayload{UserID: id, Role: "r"})
+		}
+		h.deliverBroadcast(broadcastMsg{msg: memberUpdatesMsg(members), members: members})
+	}
+	sequenceFiller(h) // the ring replays only after a frame newer than its oldest
+	sequenceFiller(h)
+	before := atomic.LoadUint64(&h.seq)
+	send(41, 42, 43)
+	send(42, 44)
+	send(42)
+
+	type frame struct {
+		Type    string `json:"type"`
+		Payload struct {
+			UserID  int64 `json:"user_id"`
+			Members []struct {
+				UserID int64 `json:"user_id"`
+			} `json:"members"`
+		} `json:"payload"`
+	}
+	events := h.replayBuf.EventsSince(before)
+	got := make([]string, 0, len(events))
+	for _, data := range events {
+		var f frame
+		if err := json.Unmarshal(data, &f); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		ids := []int64{f.Payload.UserID}
+		if f.Type == MsgTypeMemberUpdateBatch {
+			ids = ids[:0]
+			for _, m := range f.Payload.Members {
+				ids = append(ids, m.UserID)
+			}
+		}
+		got = append(got, fmt.Sprint(f.Type, ids))
+	}
+	want := []string{"member_update_batch[41 43]", "member_update[44]"}
+	if !slices.Equal(got, want) {
+		t.Errorf("sequenced frames = %v, want %v", got, want)
 	}
 }
