@@ -42,6 +42,9 @@ var (
 	ErrContentEncoding = errors.New("safefetch: unsupported content encoding")
 	// ErrContentType — the declared or the sniffed media type is not allowed.
 	ErrContentType = errors.New("safefetch: content type not allowed")
+	// ErrBusy — no fetch slot came free before the deadline, so nothing was
+	// sent. It says nothing about the destination.
+	ErrBusy = errors.New("safefetch: no fetch slot came free")
 	// ErrPolicy — the Policy itself is unusable.
 	ErrPolicy = errors.New("safefetch: invalid policy")
 )

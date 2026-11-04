@@ -12,6 +12,8 @@ import (
 	"math"
 
 	xdraw "golang.org/x/image/draw"
+	// Registers the WebP decoder with image.Decode and image.DecodeConfig.
+	_ "golang.org/x/image/webp"
 )
 
 const (
@@ -23,23 +25,60 @@ const (
 	// through without a decode. 96 MiB still fits a 24-megapixel photo at
 	// 4 bytes a pixel and refuses a 4500x4500 16-bit image.
 	thumbMaxDecodeBytes = 96 << 20
-	// thumbConcurrency is how many thumbnails are generated at once; the rest
-	// wait. Each is generated once and then kept beside its original.
-	thumbConcurrency = 1
-	thumbJPEGQuality = 82
+	thumbJPEGQuality    = 82
+	// webpBytesPerPixel is what decoding a WebP pixel may cost: a lossless
+	// frame is decoded into 4 bytes a pixel and its inverse transforms can
+	// copy that once more, and a lossy frame with alpha stays well under it.
+	webpBytesPerPixel = 8
+
+	mimeWebP = "image/webp"
 )
 
-// thumbFormat is the image format a thumbnail is made in for an original of
-// mimeType, or "" when it is passed through as is: GIFs keep their animation,
-// and WebP and the rest have no encoder or decoder here.
+// pngSignature opens every PNG.
+var pngSignature = []byte("\x89PNG\r\n\x1a\n")
+
+// thumbFormat is the decoder name of an original of mimeType that is
+// thumbnailed, or "" when it is passed through as is: GIFs keep their
+// animation, and the rest have no decoder here. A JPEG or PNG thumbnail keeps
+// its original's format; a WebP's is a JPEG, or a PNG when it is transparent
+// (there is no WebP encoder here), see thumbMIME.
 func thumbFormat(mimeType string) string {
 	switch mimeType {
 	case "image/jpeg":
 		return "jpeg"
 	case "image/png":
 		return "png"
+	case mimeWebP:
+		return "webp"
 	}
 	return ""
+}
+
+// thumbMIME is the media type of a thumbnail whose first bytes are head, made
+// for an original of mimeType.
+func thumbMIME(mimeType string, head []byte) string {
+	if mimeType != mimeWebP {
+		return mimeType
+	}
+	if bytes.HasPrefix(head, pngSignature) {
+		return "image/png"
+	}
+	return "image/jpeg"
+}
+
+// webpAnimated reports whether the WebP in r declares an animation in its
+// extended header. The decoder here reads only still images, so an animated
+// WebP is passed through and keeps its frames.
+func webpAnimated(r io.ReadSeeker) bool {
+	if _, err := r.Seek(0, io.SeekStart); err != nil {
+		return true
+	}
+	var hdr [21]byte
+	if _, err := io.ReadFull(r, hdr[:]); err != nil {
+		return false
+	}
+	const animationBit = 1 << 1
+	return string(hdr[12:16]) == "VP8X" && hdr[20]&animationBit != 0
 }
 
 // thumbOrientation decides from the header alone whether the image in r is
@@ -57,6 +96,12 @@ func thumbOrientation(r io.ReadSeeker, format string) (orientation int, ok bool)
 		return 0, false
 	}
 	orientation, perPixel := 1, decodedBytesPerPixel(cfg.ColorModel)
+	if format == "webp" {
+		if webpAnimated(r) {
+			return 0, false
+		}
+		perPixel = webpBytesPerPixel
+	}
 	if format == "jpeg" {
 		if _, err := r.Seek(0, io.SeekStart); err != nil {
 			return 0, false
@@ -85,8 +130,9 @@ func decodedBytesPerPixel(m color.Model) int64 {
 }
 
 // makeThumbnail decodes the image in r, which thumbOrientation accepted, and
-// scales it to fit thumbBox in the same format, upright by orientation. ok is
-// false when it does not decode.
+// scales it to fit thumbBox, upright by orientation: in the same format for a
+// JPEG or PNG, and for a WebP as a JPEG when every pixel is opaque, else as a
+// PNG. ok is false when it does not decode.
 func makeThumbnail(r io.ReadSeeker, format string, orientation int) (thumb []byte, ok bool) {
 	if _, err := r.Seek(0, io.SeekStart); err != nil {
 		return nil, false
@@ -102,7 +148,7 @@ func makeThumbnail(r io.ReadSeeker, format string, orientation int) (thumb []byt
 	out := orient(dst, orientation)
 
 	var buf bytes.Buffer
-	if format == "jpeg" {
+	if format == "jpeg" || (format == "webp" && dst.Opaque()) {
 		err = jpeg.Encode(&buf, out, &jpeg.Options{Quality: thumbJPEGQuality})
 	} else {
 		err = png.Encode(&buf, out)

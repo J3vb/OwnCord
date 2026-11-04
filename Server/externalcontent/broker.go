@@ -25,8 +25,13 @@ const (
 	Unavailable        Failure = "unavailable"
 )
 
-// Error carries a Failure through an error return.
-type Error struct{ Failure Failure }
+// Error carries a Failure through an error return. transient marks one that
+// says nothing about the destination (no fetch slot came free), so it is never
+// remembered.
+type Error struct {
+	Failure   Failure
+	transient bool
+}
 
 func (e *Error) Error() string { return "externalcontent: " + string(e.Failure) }
 
@@ -53,6 +58,13 @@ const (
 	maxConcurrent = 6
 	cacheBytes    = 64 << 20
 	cacheTTL      = time.Hour
+	// failureTTL is how long a failed fetch is answered from the cache, so a
+	// link to a dead or slow host costs one fetch per five minutes instead of
+	// one per viewer per render.
+	failureTTL = 5 * time.Minute
+	// failureEntryBytes is what a remembered failure is weighed at in the
+	// cache, beside its key.
+	failureEntryBytes = 64
 	// handlesPerUser is how many preview image handles one member holds.
 	handlesPerUser = 256
 	// maxURLBytes bounds any URL the broker is asked for or mints a handle for.
@@ -178,16 +190,19 @@ func (b *Broker) Preview(ctx context.Context, owner int64, rawURL string) (Previ
 
 func (b *Broker) cachedPreview(ctx context.Context, key, rawURL string) (previewData, error) {
 	if entry, ok := b.cache.get(key); ok {
+		if entry.failure != "" {
+			return previewData{}, fail(entry.failure)
+		}
 		return entry.preview, nil
 	}
 	v, err, _ := b.flight.Do(key, func() (any, error) {
 		resp, fetchErr := b.fetch(ctx, b.page, rawURL, "text/html, application/json;q=0.9")
 		if fetchErr != nil {
-			return nil, fetchErr
+			return nil, b.rememberFailure(key, fetchErr)
 		}
 		data, reduceErr := reducePage(resp)
 		if reduceErr != nil {
-			return nil, reduceErr
+			return nil, b.rememberFailure(key, reduceErr)
 		}
 		b.cache.put(&cacheEntry{key: key, preview: data, size: data.size()})
 		return data, nil
@@ -220,17 +235,20 @@ func (b *Broker) Image(ctx context.Context, owner int64, handleID, rawURL string
 	}
 	key := "image:" + target
 	if entry, ok := b.cache.get(key); ok {
+		if entry.failure != "" {
+			return nil, "", fail(entry.failure)
+		}
 		return entry.image, entry.media, nil
 	}
 	v, err, _ := b.flight.Do(key, func() (any, error) {
 		resp, fetchErr := b.fetch(ctx, b.image, target, "image/*")
 		if fetchErr != nil {
-			return nil, fetchErr
+			return nil, b.rememberFailure(key, fetchErr)
 		}
 		media := sniffImage(resp.Body)
 		if media == "" || media != resp.ContentType {
 			// The declared type is only a claim: the bytes have to agree.
-			return nil, fail(WrongType)
+			return nil, b.rememberFailure(key, fail(WrongType))
 		}
 		entry := &cacheEntry{key: key, image: resp.Body, media: media, size: int64(len(resp.Body))}
 		b.cache.put(entry)
@@ -243,6 +261,22 @@ func (b *Broker) Image(ctx context.Context, owner int64, handleID, rawURL string
 	return entry.image, entry.media, nil
 }
 
+// rememberFailure keeps a failed fetch of key for failureTTL and returns err.
+// A refused destination is not kept (refusing it again costs nothing), nor is
+// a fetch that never started for want of a slot.
+func (b *Broker) rememberFailure(key string, err error) error {
+	e, ok := errors.AsType[*Error](err)
+	if !ok || e.transient {
+		return err
+	}
+	switch e.Failure {
+	case TooManyRedirects, Oversized, WrongType, Unavailable:
+		b.cache.putFor(&cacheEntry{key: key, failure: e.Failure, size: int64(len(key)) + failureEntryBytes}, failureTTL)
+	case BlockedDestination, ExpiredHandle:
+	}
+	return err
+}
+
 // fetch runs one bounded GET. The fetch is detached from the caller's
 // cancellation, because other viewers may be waiting on the same flight; the
 // policy's own deadline still bounds it.
@@ -252,6 +286,9 @@ func (b *Broker) fetch(ctx context.Context, f *safefetch.Fetcher, rawURL, accept
 		Header: map[string]string{"User-Agent": userAgent, "Accept": accept},
 	})
 	if err != nil {
+		if errors.Is(err, safefetch.ErrBusy) {
+			return nil, &Error{Failure: Unavailable, transient: true}
+		}
 		return nil, fail(classify(err))
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {

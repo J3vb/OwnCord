@@ -542,6 +542,13 @@ describe("renderAttachment — server thumbnails", () => {
     expect(fetchedPaths()).toEqual(["/api/v1/files/abc/thumb"]);
   });
 
+  it("requests /thumb for a WebP row, which the server scales too", async () => {
+    authStore.setState((prev) => ({ ...prev, uploadPolicy: { thumbnails: true } }));
+    const el = renderAttachment({ ...att, filename: "photo.webp", mime: "image/webp" });
+    await vi.waitFor(() => expect(el.querySelector("img")).not.toBeNull());
+    expect(fetchedPaths()).toEqual(["/api/v1/files/abc/thumb"]);
+  });
+
   it("requests the original for a GIF row, which the server passes through", async () => {
     authStore.setState((prev) => ({ ...prev, uploadPolicy: { thumbnails: true } }));
     const el = renderAttachment({ ...att, filename: "anim.gif", mime: "image/gif" });

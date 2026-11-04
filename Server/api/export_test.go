@@ -309,3 +309,19 @@ var (
 	TruncateCloseReasonForTest = truncateCloseReason
 	SendableCloseCodeForTest   = sendableCloseCode
 )
+
+// UseThumbSlotsForTest makes the thumbnail handlers built after it share n
+// slots and wait at most wait for one. hold takes every slot and returns
+// their release; restore puts production sizing back.
+func UseThumbSlotsForTest(n int, wait time.Duration) (hold func() (release func()), restore func()) {
+	slots := makeThumbSlots(n, wait)
+	prev := newThumbSlots
+	newThumbSlots = func() *thumbSlots { return slots }
+	hold = func() func() {
+		if err := slots.sem.Acquire(context.Background(), slots.size); err != nil {
+			panic(err)
+		}
+		return func() { slots.sem.Release(slots.size) }
+	}
+	return hold, func() { newThumbSlots = prev }
+}
