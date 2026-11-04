@@ -76,7 +76,7 @@ describe("VideoGrid", () => {
         [...bar()!.querySelectorAll<HTMLElement>("[data-call-control]")].map(
           (b) => b.dataset["callControl"],
         ),
-      ).toEqual(["mute", "deafen", "camera", "share", "leave"]);
+      ).toEqual(["mute", "deafen", "camera", "share", "views", "leave"]);
 
       grid.addStream(2, "Otto", fakeStream(), makeTileConfig({ audioUserId: 2 }));
       grid.addStream(3, "Sam", fakeStream(), makeTileConfig({ audioUserId: 3 }));
@@ -117,7 +117,7 @@ describe("VideoGrid", () => {
         [...bar()!.querySelectorAll<HTMLElement>("[data-call-control]")].map(
           (b) => b.dataset["callControl"],
         ),
-      ).toEqual(["mute", "deafen", "camera", "camera-device", "share", "leave"]);
+      ).toEqual(["mute", "deafen", "camera", "camera-device", "share", "views", "leave"]);
 
       const pick = barButton("camera-device");
       expect(pick.getAttribute("aria-label")).toBe("Choose camera");
@@ -457,6 +457,57 @@ describe("VideoGrid", () => {
 
     it("leaves room below the tiles for the bar (CSS)", () => {
       expect(cascadedDeclaration(".video-grid--call", "padding-bottom")).toBeDefined();
+      expect(cascadedDeclaration(".video-grid--views-above", "padding-bottom")).toBeDefined();
+    });
+
+    it("keeps each control's icon across redraws that change nothing", () => {
+      grid.setCallbacks({ callControls: controls() });
+      grid.setExitVisible(true);
+      const state = { muted: false, deafened: false, listenOnly: false, camera: false };
+      grid.setCallState(state);
+      const icons = ["mute", "deafen", "camera", "share"].map((id) =>
+        barButton(id).querySelector("svg")!,
+      );
+      grid.setCallState({ ...state });
+      ["mute", "deafen", "camera", "share"].forEach((id, i) =>
+        expect(barButton(id).querySelector("svg")).toBe(icons[i]),
+      );
+
+      grid.setCallState({ ...state, muted: true });
+      expect(barButton("mute").querySelectorAll("svg")).toHaveLength(1);
+      expect(barButton("mute").querySelector("svg")!.getAttribute("data-icon")).toBe("mic-off");
+      expect(barButton("deafen").querySelector("svg")).toBe(icons[1]);
+    });
+
+    it("gives Show my camera its own icon, not the camera's", () => {
+      grid.setExitVisible(true);
+      const icon = toggle("selfCamera").querySelector("svg")!.getAttribute("data-icon");
+      expect(icon).not.toBe("camera");
+      expect(icon).not.toBe("switch-camera");
+    });
+
+    it("stacks the view toggles above the bar, with room for them, when the call view is narrow", () => {
+      let width = 1200;
+      vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+        () => ({ width, height: 600, top: 0, left: 0, right: width, bottom: 600 }) as DOMRect,
+      );
+      grid.setCallbacks({ callControls: controls() });
+      grid.setExitVisible(true);
+      grid.addStream(2, "Otto", fakeStream(), makeTileConfig({ audioUserId: 2 }));
+      expect(root().classList.contains("video-grid--views-above")).toBe(false);
+      const wide = parseFloat(tile(2).style.height);
+
+      width = 600;
+      grid.addStream(3, "Sam", fakeStream(), makeTileConfig({ audioUserId: 3 }));
+      grid.removeStream(3);
+      expect(root().classList.contains("video-grid--views-above")).toBe(true);
+      expect(parseFloat(tile(2).style.height)).toBeLessThan(wide);
+
+      // Outside the call view there is no bar to stack above.
+      grid.setExitVisible(false);
+      grid.addStream(3, "Sam", fakeStream(), makeTileConfig({ audioUserId: 3 }));
+      expect(root().classList.contains("video-grid--views-above")).toBe(false);
+      vi.restoreAllMocks();
     });
   });
 

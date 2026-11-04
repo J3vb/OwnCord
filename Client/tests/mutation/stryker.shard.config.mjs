@@ -82,6 +82,7 @@ export const shards = {
     "src/features/voice/uiSounds.ts",
     "src/features/voice/moveHint.ts",
     "src/features/voice/leaveOwed.ts",
+    "src/features/voice/securedBadge.ts",
     "src/features/voice/native/screenPicker.ts",
     "src/features/voice/peerDecode.ts",
     "src/features/voice/joinBackoff.ts",

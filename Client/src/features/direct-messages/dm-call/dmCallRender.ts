@@ -12,6 +12,7 @@ import { headerStatusText } from "../../voice/voiceStatusText";
 import { voiceText as t } from "../../../i18n/voice";
 import { dmCallText as d } from "../../../i18n/dmCall";
 import { canPublishScreen } from "../../voice/native/platform";
+import { createSecuredBadge } from "../../voice/securedBadge";
 import {
   absentMembers,
   callName,
@@ -203,10 +204,10 @@ export function createDmCallRender(st: DmCallState, dc: DmCallApi) {
     );
     bar.appendChild(st.statusEl);
     if (withCall) {
-      st.securedEl = createElement("span", { class: "dcp-secured", "data-testid": "dcp-secured" });
+      st.secured = createSecuredBadge("dcp-secured");
       const timer = createElement("span", { class: "dcp-timer" }, "00:00");
       st.timerEls.push(timer);
-      appendChildren(bar, st.securedEl, timer);
+      appendChildren(bar, st.secured.el, timer);
     }
     bar.appendChild(createElement("span", { class: "dcp-spacer" }));
     if (collapsible) bar.appendChild(collapseButton());

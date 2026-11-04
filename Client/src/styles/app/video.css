@@ -58,16 +58,17 @@
 .video-grid__view[aria-pressed="false"] {
   opacity: 0.55;
 }
-/* Too narrow for both in one row (a small pop-out): they stack above it. */
-@container (max-width: 680px) {
-  .video-grid .video-grid__views {
-    bottom: 60px;
-  }
-}
-
-/* Room below the tiles (and the focus strip) for the call view's control bar. */
+/* Room below the tiles (and the focus strip) for the call view's control bar.
+   Too narrow for both in one row (VIEWS_ABOVE_PX in gridShared.ts), the
+   toggles stack above it and the tiles make room for them. */
 .video-grid--call {
   padding-bottom: 64px;
+}
+.video-grid--views-above {
+  padding-bottom: 104px;
+}
+.video-grid--views-above .video-grid__views {
+  bottom: 60px;
 }
 .video-grid .video-cell[hidden],
 .video-focus-strip[hidden] {
@@ -722,36 +723,36 @@ video[hidden] + .video-surface {
 /* ── The call view on a phone ── */
 /* Chat in the control bar is the phone's way back to the text channel: off a
    phone the view bar's own chat control does that. */
-.video-fs-btn--chat {
+.video-fs-btn--chat,
+.video-fs-btn--views {
   display: none;
 }
 @media (pointer: coarse) and (max-width: 899px), (pointer: coarse) and (max-height: 499px) {
-  /* Thumb-sized controls in one row: mic, deafen, camera, flip, chat, leave.
-     The camera menu is the desktop's choice of device; flip is the phone's. */
+  /* Thumb-sized round controls in one row: mic, deafen, camera, flip, view
+     options, chat, leave. The camera menu is the desktop's choice of device;
+     flip is the phone's. The gap keeps all seven inside a 360 px screen. */
   .video-fs-calls {
     bottom: max(12px, env(safe-area-inset-bottom));
     max-width: calc(100% - 16px);
+    gap: 4px;
   }
   .video-fs-btn {
     flex-shrink: 0;
     width: 44px;
     height: 44px;
   }
-  .video-fs-btn--leave {
-    width: 64px;
-  }
-  .video-fs-btn--device {
+  .video-fs-btn--device,
+  .video-grid .video-grid__views {
     display: none;
   }
-  .video-fs-btn--chat {
+  .video-fs-btn--chat,
+  .video-fs-btn--views {
     display: inline-flex;
   }
-  /* The view toggles ride above the control row (see CALL_BAR_SPACE_PHONE). */
+  /* Room above the control row for the hold-to-talk button (see
+     CALL_BAR_SPACE_PHONE). */
   .video-grid--call {
     padding-bottom: 112px;
-  }
-  .video-grid .video-grid__views {
-    bottom: 68px;
   }
   .video-grid__exit,
   .video-grid__view {

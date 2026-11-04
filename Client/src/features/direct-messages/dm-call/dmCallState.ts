@@ -8,6 +8,7 @@ import type { GridPerson } from "@components/VideoGrid";
 import type { AvatarRef, ControlRefs, DmCallView } from "../DmCallViewModel";
 import type { DmCallPanelOptions } from "../DmCallPanel";
 import type { TalkSlot } from "../../voice/talkSlot";
+import type { SecuredBadge } from "../../voice/securedBadge";
 
 export interface DmCallState {
   readonly options: DmCallPanelOptions;
@@ -44,7 +45,7 @@ export interface DmCallState {
   avatars: Map<number, AvatarRef>;
   controls: ControlRefs;
   statusEl: HTMLElement | null;
-  securedEl: HTMLElement | null;
+  secured: SecuredBadge | null;
   timerEls: HTMLElement[];
   speakingEl: HTMLElement | null;
   timerInterval: ReturnType<typeof setInterval> | null;

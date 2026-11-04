@@ -70,3 +70,16 @@ describe("the 'delivery not confirmed' line", () => {
     expect(cascadedDeclaration(".msg-send-failed-text", "white-space")).toBeUndefined();
   });
 });
+
+describe("the phone call view's one round control row", () => {
+  it("shows View options in place of the square view toggles", () => {
+    expect(keyword(cascadedDeclaration(".video-fs-btn--views", "display"))).toBe("none");
+    expect(declared(phoneRule(".video-fs-btn--views"), "display")).toContain('"outside":"inline"');
+    expect(declared(phoneRule(".video-grid .video-grid__views"), "display")).toContain("none");
+  });
+
+  it("keeps every control 44 px", () => {
+    expect(declared(phoneRule(".video-fs-btn"), "width")).toContain(FORTY_FOUR);
+    expect(declared(phoneRule(".video-fs-btn"), "height")).toContain(FORTY_FOUR);
+  });
+});
