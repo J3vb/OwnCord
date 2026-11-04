@@ -6,6 +6,7 @@ import "@styles/login.css";
 import "@styles/app.css";
 import "@styles/theme-neon-glow.css";
 
+import { setSystemDateLocale } from "@lib/text/timeFormat";
 import { installGlobalErrorHandlers } from "@lib/text/safeRender";
 import { createApiClient } from "@lib/api";
 import { Disposable } from "@lib/disposable";
@@ -96,6 +97,9 @@ forgetAndroidInputDevice();
 // input mode is settled: a profile from before Input Mode keeps its PTT key.
 migrateInputMode();
 void desktop.pushToTalk.init();
+// Dates follow the OS regional format where the host can read it (Windows
+// reports only its display language to the webview).
+void desktop.systemRegion.localeTag().then(setSystemDateLocale);
 // The Android app has no key to hold: its Push to Talk trigger is the
 // on-screen talk button, loaded on first use.
 if (isAndroidHost()) {

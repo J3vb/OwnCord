@@ -40,6 +40,7 @@ import { buildAdvancedTab } from "./AdvancedTab";
 import { createLogsTab } from "./LogsTab";
 import { highlightMatches, normalizeQuery, tabMatches } from "./settingsSearch";
 import { confirmLogout } from "./logoutConfirm";
+import { confirmDiscardUnsaved } from "./unsavedConfirm";
 import { readAppVersion } from "../whats-new/appVersion";
 import { subscribeAvailableUpdate } from "../updates/availableUpdate";
 import { isAndroidApp } from "../voice/native/platform";
@@ -278,7 +279,36 @@ export function createSettingsOverlay(
     };
   }
   function requestClose(): void {
-    if (secretRequests === 0) options.onClose();
+    if (secretRequests > 0 || blockedByUnsaved(requestClose)) return;
+    options.onClose();
+  }
+
+  // ---- Unsaved edits guard --------------------------------------------------
+
+  /** Set by the tab on screen when it holds a form that can be left half-typed. */
+  let dirtyCheck: (() => boolean) | null = null;
+  /** Closes the open "discard unsaved changes?" prompt; null when none is open. */
+  let closeUnsavedPrompt: (() => void) | null = null;
+
+  /**
+   * True when the open tab has unsaved edits: the user is asked first, and
+   * `retry` runs the same switch or close again only if they choose Discard.
+   */
+  function blockedByUnsaved(retry: () => void): boolean {
+    if (dirtyCheck?.() !== true) return false;
+    if (closeUnsavedPrompt !== null) return true;
+    closeUnsavedPrompt = confirmDiscardUnsaved({
+      signal: disposable.signal,
+      container: root ?? undefined,
+      onDiscard: () => {
+        dirtyCheck = null;
+        retry();
+      },
+      onClosed: () => {
+        closeUnsavedPrompt = null;
+      },
+    });
+    return true;
   }
 
   // ---- Tab content builders -------------------------------------------------
@@ -292,6 +322,9 @@ export function createSettingsOverlay(
           onRegenerateRecoveryCodes: holdOpen(options.onRegenerateRecoveryCodes),
         },
         signal,
+        (isDirty) => {
+          dirtyCheck = isDirty;
+        },
       ),
     // Only reachable through its tab button, which exists only with the option.
     Safety: (signal) => options.safetyTab?.(signal) ?? createElement("div"),
@@ -331,6 +364,7 @@ export function createSettingsOverlay(
     // the `renderOwner` comment above.
     renderOwner?.destroy();
     renderOwner = new Disposable();
+    dirtyCheck = null;
     const buildSignal = AbortSignal.any([disposable.signal, renderOwner.signal]);
     clearChildren(contentArea);
     if (pageTitle === null) return;
@@ -359,6 +393,15 @@ export function createSettingsOverlay(
     hit?.scrollIntoView?.({ block: "center" });
   }
 
+  /** On the side-by-side layout the open page follows the filter, so hits
+   *  highlight as you type; unsaved edits keep their tab. */
+  function followFilter(): void {
+    const first = visibleTabs()[0];
+    if (first === undefined || tabButtons.get(activeTab)?.hidden !== true) return;
+    if (pagedLayout() || dirtyCheck?.() === true) return;
+    setActiveTab(first);
+  }
+
   /** Hide the tabs (and headings) the query rules out; show the rest. */
   function applySearch(): void {
     let any = false;
@@ -375,8 +418,9 @@ export function createSettingsOverlay(
     }
     if (searchEmpty !== null) searchEmpty.hidden = any;
     if (searchClear !== null) searchClear.hidden = searchInput?.value === "";
-    // Keep one tab in the page Tab order when the open one was filtered out.
+    followFilter();
     const shown = visibleTabs();
+    // Keep one tab in the page Tab order when the open one was filtered out.
     const stop = tabButtons.get(activeTab)?.hidden === false ? activeTab : shown[0];
     for (const [name, btn] of tabButtons) btn.setAttribute("tabindex", name === stop ? "0" : "-1");
     markSearchHits();
@@ -421,6 +465,7 @@ export function createSettingsOverlay(
 
   function setActiveTab(tab: TabName): void {
     if (tab === activeTab || secretRequests > 0) return;
+    if (blockedByUnsaved(() => setActiveTab(tab))) return;
     // Clean up stateful tabs when switching away
     cleanupActiveTab();
     activeTab = tab;
@@ -442,6 +487,7 @@ export function createSettingsOverlay(
 
   /** A tab picked by tap or Enter: on a phone that also opens its section. */
   function openSection(tab: TabName): void {
+    if (tab !== activeTab && blockedByUnsaved(() => openSection(tab))) return;
     setActiveTab(tab);
     if (activeTab !== tab) return;
     setSectionOpen(true);
@@ -501,12 +547,17 @@ export function createSettingsOverlay(
 
   /** A dialog sits inside the panel: the Log Out prompt or one a tab opened. */
   function promptOpen(): boolean {
-    return closeLogoutPrompt !== null || root?.querySelector(".modal-overlay") != null;
+    return (
+      closeLogoutPrompt !== null ||
+      closeUnsavedPrompt !== null ||
+      root?.querySelector(".modal-overlay") != null
+    );
   }
 
   function hide(): void {
     // A Log Out prompt left open must not outlive the panel it belongs to.
     closeLogoutPrompt?.();
+    closeUnsavedPrompt?.();
     root?.classList.remove("open");
     // The hidden pane is rebuilt on reopen (contentLive), so drop its build
     // now: anything shown once (recovery codes, a recovery kit secret) is
@@ -565,7 +616,7 @@ export function createSettingsOverlay(
         const name = order[next]!;
         setActiveTab(name);
         // A blocked switch keeps focus on the selected tab (activate-on-focus).
-        if (secretRequests === 0) tabButtons.get(name)?.focus();
+        if (activeTab === name) tabButtons.get(name)?.focus();
       },
       { signal: disposable.signal },
     );
@@ -967,6 +1018,8 @@ export function createSettingsOverlay(
   function destroy(): void {
     closeLogoutPrompt?.();
     closeLogoutPrompt = null;
+    closeUnsavedPrompt?.();
+    closeUnsavedPrompt = null;
     disposable.destroy();
     if (unsubUi !== null) {
       unsubUi();

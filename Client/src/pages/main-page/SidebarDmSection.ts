@@ -394,7 +394,7 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
   // A row's time is "3:04 PM" today and "Sep 29" after midnight.
   atEachMidnight(listLifecycle.signal, renderDmListItems);
   // A clock-format change relabels the preview times in place.
-  onPrefChange(["timeFormat"], () => renderDmListItems(), listLifecycle.signal);
+  onPrefChange(["timeFormat", "dateFormat"], () => renderDmListItems(), listLifecycle.signal);
 
   // A mute toggled from a row menu (or Settings) is not in a store.
   window.addEventListener(CHANNEL_MUTE_CHANGED, () => renderDmListItems(), {
