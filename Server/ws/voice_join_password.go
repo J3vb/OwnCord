@@ -28,15 +28,35 @@ const (
 )
 
 // voiceJoinPasswordAttemptAllowed spends one password attempt from the
-// member's budget across channels, then the member's budget for this channel,
-// then the server-wide one. Without a limiter every attempt is allowed.
+// server-wide budget, the member's budget for this channel and the member's
+// budget across channels. All three are checked before any is charged, so an
+// attempt one budget refuses spends nothing from the others; they are then
+// charged widest first, so a caller that loses a race between the check and
+// the charge has spent only from budgets wider than the one that refused it.
+// Without a limiter every attempt is allowed.
 func (h *Hub) voiceJoinPasswordAttemptAllowed(userID, channelID int64) bool {
 	if h.limiter == nil {
 		return true
 	}
-	return h.limiter.Allow(auth.Key("voice_join_password_user", userID), voiceJoinPasswordUserLimit, voiceJoinPasswordWindow) &&
-		h.limiter.Allow(auth.Key(auth.Key("voice_join_password", userID), channelID), voiceJoinPasswordRateLimit, voiceJoinPasswordWindow) &&
-		h.limiter.Allow("voice_join_password_all", voiceJoinPasswordAllLimit, voiceJoinPasswordWindow)
+	budgets := [...]struct {
+		key   string
+		limit int
+	}{
+		{"voice_join_password_all", voiceJoinPasswordAllLimit},
+		{auth.Key(auth.Key("voice_join_password", userID), channelID), voiceJoinPasswordRateLimit},
+		{auth.Key("voice_join_password_user", userID), voiceJoinPasswordUserLimit},
+	}
+	for _, b := range budgets {
+		if !h.limiter.Check(b.key, b.limit, voiceJoinPasswordWindow) {
+			return false
+		}
+	}
+	for _, b := range budgets {
+		if !h.limiter.Allow(b.key, b.limit, voiceJoinPasswordWindow) {
+			return false
+		}
+	}
+	return true
 }
 
 // voiceJoinPasswordGate is the extra lock on a password-protected voice
