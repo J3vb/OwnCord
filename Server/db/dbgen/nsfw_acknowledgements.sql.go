@@ -32,6 +32,36 @@ func (q *Queries) AcknowledgeNSFW(ctx context.Context, arg AcknowledgeNSFWParams
 	return err
 }
 
+const channelContentGate = `-- name: ChannelContentGate :one
+SELECT CAST(CASE WHEN p.id IS NULL THEN c.nsfw ELSE p.nsfw END AS INTEGER) AS nsfw,
+       CAST(EXISTS (SELECT 1 FROM nsfw_acknowledgements a
+                    WHERE a.user_id = ?1
+                      AND a.channel_id = COALESCE(c.parent_channel_id, c.id)) AS INTEGER) AS acknowledged
+FROM channels c
+LEFT JOIN channels p ON p.id = c.parent_channel_id
+WHERE c.id = ?2 AND c.import_pending = 0
+`
+
+type ChannelContentGateParams struct {
+	UserID    int64 `json:"userId"`
+	ChannelID int64 `json:"channelId"`
+}
+
+type ChannelContentGateRow struct {
+	Nsfw         int64 `json:"nsfw"`
+	Acknowledged int64 `json:"acknowledged"`
+}
+
+// The NSFW content gate for one channel and user in one point read: the
+// effective label (a thread takes its parent's) and whether the user
+// acknowledged the governing channel. No row means the channel is missing.
+func (q *Queries) ChannelContentGate(ctx context.Context, arg ChannelContentGateParams) (ChannelContentGateRow, error) {
+	row := q.db.QueryRowContext(ctx, channelContentGate, arg.UserID, arg.ChannelID)
+	var i ChannelContentGateRow
+	err := row.Scan(&i.Nsfw, &i.Acknowledged)
+	return i, err
+}
+
 const deleteNSFWAcknowledgementsForChannel = `-- name: DeleteNSFWAcknowledgementsForChannel :exec
 DELETE FROM nsfw_acknowledgements WHERE channel_id = ?
 `
@@ -56,6 +86,33 @@ func (q *Queries) HasNSFWAcknowledgement(ctx context.Context, arg HasNSFWAcknowl
 	var count int64
 	err := row.Scan(&count)
 	return count, err
+}
+
+const listNSFWAcknowledgedChannelIDs = `-- name: ListNSFWAcknowledgedChannelIDs :many
+SELECT channel_id FROM nsfw_acknowledgements WHERE user_id = ?
+`
+
+func (q *Queries) ListNSFWAcknowledgedChannelIDs(ctx context.Context, userID int64) ([]int64, error) {
+	rows, err := q.db.QueryContext(ctx, listNSFWAcknowledgedChannelIDs, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var channel_id int64
+		if err := rows.Scan(&channel_id); err != nil {
+			return nil, err
+		}
+		items = append(items, channel_id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listNSFWAcknowledgedUserIDs = `-- name: ListNSFWAcknowledgedUserIDs :many

@@ -540,7 +540,7 @@ func TestReconnect_RevokeBetweenTwoFramesOfTheSameReplayDropsOnlyTheLaterOnes(t 
 }
 
 // erroringNSFWVisibilityReader wraps a real VisibilityReader and makes every
-// HasNSFWAcknowledgement call fail, standing in for a transient DB hiccup on
+// acknowledgement read fail, standing in for a transient DB hiccup on
 // computeReadableChannels' one extra read. Every other method passes through.
 type erroringNSFWVisibilityReader struct {
 	VisibilityReader
@@ -548,6 +548,10 @@ type erroringNSFWVisibilityReader struct {
 
 func (r *erroringNSFWVisibilityReader) HasNSFWAcknowledgement(context.Context, int64, int64) (bool, error) {
 	return false, errors.New("simulated transient lookup failure")
+}
+
+func (r *erroringNSFWVisibilityReader) ListNSFWAcknowledgedChannelIDs(context.Context, int64) (map[int64]bool, error) {
+	return nil, errors.New("simulated transient lookup failure")
 }
 
 // erroringGetChannelReader wraps a real VisibilityReader and makes every

@@ -95,6 +95,37 @@ func (d *DB) ListNSFWAcknowledgedUserIDs(ctx context.Context, channelID int64) (
 	return ids, nil
 }
 
+// ChannelContentGate answers the NSFW content gate for userID on channelID in
+// one point read, live: found is false when the channel does not exist (or is
+// still being imported), readable is true for an unlabelled channel or a
+// labelled one userID acknowledged. A thread takes its parent's label and consent.
+func (d *DB) ChannelContentGate(ctx context.Context, userID, channelID int64) (found, readable bool, err error) {
+	r, err := d.q.ChannelContentGate(ctx, dbgen.ChannelContentGateParams{UserID: userID, ChannelID: channelID})
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, false, nil
+	}
+	if err != nil {
+		return false, false, fmt.Errorf("ChannelContentGate: %w", err)
+	}
+	return true, r.Nsfw == 0 || r.Acknowledged != 0, nil
+}
+
+// ListNSFWAcknowledgedChannelIDs returns every channel userID acknowledged, as
+// a set, so a handshake resolves all of its labelled channels in one read.
+// Rows are keyed by the parent channel, never a thread: a caller resolving a
+// thread looks up its parent's id.
+func (d *DB) ListNSFWAcknowledgedChannelIDs(ctx context.Context, userID int64) (map[int64]bool, error) {
+	ids, err := d.q.ListNSFWAcknowledgedChannelIDs(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("ListNSFWAcknowledgedChannelIDs: %w", err)
+	}
+	acked := make(map[int64]bool, len(ids))
+	for _, id := range ids {
+		acked[id] = true
+	}
+	return acked, nil
+}
+
 // DeleteNSFWAcknowledgementsForChannel removes every acknowledgement of
 // channelID. Clearing the nsfw flag deletes standing consent in the flag's
 // transaction so a later re-label re-prompts everyone; deleting the channel

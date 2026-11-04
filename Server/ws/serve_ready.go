@@ -308,24 +308,26 @@ func (h *Hub) readyVoiceStates(ctx context.Context, database ReadySnapshotReader
 }
 
 // readyNSFWAcknowledgements resolves userID's acknowledgement for every labelled
-// channel in visibleChannels (the per-channel nsfw_acknowledged field). Bounded by
-// the labelled channels the caller can see, and skipped when none exist.
+// channel in visibleChannels (the per-channel nsfw_acknowledged field) from one
+// read of the user's acknowledgements, skipped when no visible channel is
+// labelled. A failed read reports every labelled channel as unacknowledged.
 func readyNSFWAcknowledgements(ctx context.Context, database VisibilityReader, userID int64, visibleChannels []db.Channel) map[int64]bool {
+	var acked map[int64]bool
 	var ackMap map[int64]bool
 	for i := range visibleChannels {
 		if !visibleChannels[i].NSFW {
 			continue
 		}
-		ok, err := database.HasNSFWAcknowledgement(ctx, userID, visibleChannels[i].ID)
-		if err != nil {
-			slog.Warn("ws: buildReady HasNSFWAcknowledgement failed, reporting unacknowledged",
-				"user_id", userID, "channel_id", visibleChannels[i].ID, "err", err)
-			continue
-		}
-		if ackMap == nil {
+		if acked == nil {
+			var err error
+			if acked, err = database.ListNSFWAcknowledgedChannelIDs(ctx, userID); err != nil {
+				slog.Warn("ws: buildReady ListNSFWAcknowledgedChannelIDs failed, reporting unacknowledged",
+					"user_id", userID, "err", err)
+				return nil
+			}
 			ackMap = make(map[int64]bool)
 		}
-		ackMap[visibleChannels[i].ID] = ok
+		ackMap[visibleChannels[i].ID] = acked[visibleChannels[i].ID]
 	}
 	return ackMap
 }
