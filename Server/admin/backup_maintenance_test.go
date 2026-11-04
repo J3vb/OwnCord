@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -426,4 +427,91 @@ func TestPruneSafetyCopies_ProtectsThroughSymlink(t *testing.T) {
 	if _, statErr := os.Stat(filepath.Join(dir, "pre_restore_d.db")); statErr != nil {
 		t.Fatalf("protected file is gone: %v", statErr)
 	}
+}
+
+// The schedule, the health signal and retention's keep-the-newest rule look
+// at scheduled and manual backups only: a fresh pre_restore_ or pre_migrate_
+// safety copy is the state before a restore or a migration, so it neither
+// postpones the next scheduled backup nor counts as the last backup.
+func TestBackupHistory_IgnoresSafetyCopies(t *testing.T) {
+	ctx := context.Background()
+	write := func(t *testing.T, dir, name string, age time.Duration) string {
+		t.Helper()
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		backdate(t, p, age)
+		return p
+	}
+
+	t.Run("health", func(t *testing.T) {
+		for _, tc := range []struct {
+			name  string
+			files map[string]time.Duration
+			want  time.Duration // 0 = no backup
+		}{
+			{"only safety copies", map[string]time.Duration{"pre_restore_1.db": time.Minute, "pre_migrate_090_x.db": time.Minute}, 0},
+			{"manual older than a safety copy", map[string]time.Duration{"chatserver_1.db": 5 * time.Hour, "pre_restore_1.db": time.Minute}, 5 * time.Hour},
+			{"scheduled newest", map[string]time.Duration{"scheduled_1.db": 2 * time.Hour, "chatserver_1.db": 9 * time.Hour, "pre_migrate_1.db": 3 * time.Hour}, 2 * time.Hour},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				dir := t.TempDir()
+				for name, age := range tc.files {
+					write(t, dir, name, age)
+				}
+				got, err := admin.NewestBackup(dir)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if tc.want == 0 {
+					if !got.IsZero() {
+						t.Fatalf("NewestBackup = %v, want none", got)
+					}
+					return
+				}
+				if age := time.Since(got); age < tc.want-time.Minute || age > tc.want+time.Minute {
+					t.Fatalf("NewestBackup is %v old, want about %v", age, tc.want)
+				}
+			})
+		}
+	})
+
+	t.Run("schedule", func(t *testing.T) {
+		database := openAdminTestDB(t)
+		dir := t.TempDir()
+		mustSetSetting(t, database, "backup_schedule", "daily")
+		write(t, dir, "chatserver_old.db", 30*time.Hour)
+		write(t, dir, "pre_restore_fresh.db", time.Minute)
+		write(t, dir, "pre_migrate_fresh.db", time.Minute)
+		if err := admin.MaintainBackups(ctx, database, service.NewSettingsService(database), dir); err != nil {
+			t.Fatalf("MaintainBackups: %v", err)
+		}
+		scheduled := 0
+		for _, name := range listBackupFiles(t, dir) {
+			if strings.HasPrefix(name, "scheduled_") {
+				scheduled++
+			}
+		}
+		if scheduled != 1 {
+			t.Fatalf("files = %v, want one new scheduled backup despite the fresh safety copies", listBackupFiles(t, dir))
+		}
+	})
+
+	t.Run("retention keeps the newest history backup", func(t *testing.T) {
+		database := openAdminTestDB(t)
+		dir := t.TempDir()
+		mustSetSetting(t, database, "backup_schedule", "off")
+		mustSetSetting(t, database, "backup_retention", "7")
+		write(t, dir, "chatserver_a.db", 30*24*time.Hour)
+		write(t, dir, "chatserver_b.db", 20*24*time.Hour)
+		write(t, dir, "pre_restore_new.db", time.Hour)
+		if err := admin.MaintainBackups(ctx, database, service.NewSettingsService(database), dir); err != nil {
+			t.Fatalf("MaintainBackups: %v", err)
+		}
+		got := listBackupFiles(t, dir)
+		if !slices.Equal(got, []string{"chatserver_b.db", "pre_restore_new.db"}) {
+			t.Fatalf("files = %v, want chatserver_b.db kept as the newest backup and the safety copy kept", got)
+		}
+	})
 }

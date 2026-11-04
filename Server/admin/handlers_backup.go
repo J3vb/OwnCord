@@ -15,6 +15,7 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/httperr"
+	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -23,7 +24,11 @@ import (
 // second VACUUM and leaves no partial file. The scheduled maintenance backup
 // does not take this guard: its files have their own names and BackupToSafe
 // publishes by atomic rename, so the two cannot collide.
-func handleBackup(database *db.DB, paths backupPaths, gate *backupGate) http.Handler {
+//
+// A volume too short for the copy answers 507 STORAGE_LOW_DISK with the
+// numbers, and a backup that lands refreshes the attention panel's backup
+// signal at once rather than on its next minute.
+func handleBackup(database *db.DB, paths backupPaths, gate *backupGate, attention *service.AttentionService) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !gate.running.CompareAndSwap(false, true) {
 			writeErr(w, http.StatusConflict, httperr.CodeBackupRunning, "A backup is already being taken. Try again when it finishes.")
@@ -57,7 +62,7 @@ func handleBackup(database *db.DB, paths backupPaths, gate *backupGate) http.Han
 		// truncated .db it would present as restorable. Rooted at the
 		// configured backup dir (SetupOptions.BackupDir).
 		if err := database.BackupToSafe(context.WithoutCancel(r.Context()), backupPath, backupDir); err != nil {
-			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "backup failed")
+			writeBackupFailure(w, err, "backup failed")
 			return
 		}
 
@@ -75,6 +80,8 @@ func handleBackup(database *db.DB, paths backupPaths, gate *backupGate) http.Han
 		slog.Info("database backup created", "actor_id", actor, "name", backupName)
 		db.WriteAudit(context.WithoutCancel(r.Context()), database, actor, "backup_create", "server", 0,
 			fmt.Sprintf("backup saved: %s", backupName))
+
+		attention.RefreshBackup(context.WithoutCancel(r.Context()), time.Now())
 
 		writeJSON(w, http.StatusOK, map[string]string{
 			"path":    filepath.Base(backupPath),
@@ -264,8 +271,7 @@ func handleRestoreBackup(database *db.DB, paths backupPaths, gate *backupGate) h
 			// created"; proceeding without one removes the safety net exactly
 			// when it is needed.
 			slog.Error("pre-restore backup failed — aborting restore", "err", err)
-			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError,
-				"could not create the pre-restore safety backup — restore aborted, database untouched")
+			writeBackupFailure(w, err, "could not create the pre-restore safety backup — restore aborted, database untouched")
 			return
 		}
 		// Nothing is restored on a refusal below, so the safety copy protects
@@ -333,4 +339,16 @@ func handleRestoreBackup(database *db.DB, paths backupPaths, gate *backupGate) h
 		commitRestartPending()
 		go requestRestart("backup_restore")
 	})
+}
+
+// writeBackupFailure answers a failed BackupToSafe. A copy refused for space
+// is 507 STORAGE_LOW_DISK with the db error's numbers and what to do about
+// it after what; anything else is a 500 carrying what alone.
+func writeBackupFailure(w http.ResponseWriter, err error, what string) {
+	if !errors.Is(err, db.ErrBackupNoSpace) {
+		writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, what)
+		return
+	}
+	writeErr(w, http.StatusInsufficientStorage, httperr.CodeStorageLowDisk,
+		what+": "+err.Error()+". Free some space on the backup volume, or delete old backups, and try again.")
 }

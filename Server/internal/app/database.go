@@ -28,6 +28,8 @@ func openDatabase(cfg *config.Config) (*db.DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("opening database: %w", err)
 	}
+	// Every backup copy, the pre-migration one included, leaves this much free.
+	database.SetBackupDiskReserve(cfg.Server.MinFreeDiskBytes())
 
 	return database, nil
 }

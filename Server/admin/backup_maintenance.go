@@ -22,8 +22,9 @@ import (
 // take a scheduled backup when the newest backup on disk is older than the
 // schedule interval, and prune backups past the retention window.
 //
-// Freshness is judged by the newest *.db file's mtime, manual backups
-// included. Retention prunes by mtime in whole days but never removes the
+// Freshness is judged by the newest scheduled or manual backup's mtime; the
+// pre_restore_ and pre_migrate_ safety copies do not count, because each is
+// the state before a restore or a migration, not a backup of what runs now. Retention prunes by mtime in whole days but never removes the
 // newest backup, so a long-dead schedule cannot delete the last copy.
 //
 // The returned error feeds the maintenance loop's circuit breaker; settings
@@ -292,7 +293,8 @@ func safetyCopiesNewestFirst(entries []os.DirEntry, prefix string) []string {
 
 // pruneExpiredBackups deletes *.db backups whose mtime is older than the
 // backup_retention window (in days), always keeping the newest one and never
-// touching the pre_restore_* or pre_migrate_* safety copies.
+// touching the pre_restore_* or pre_migrate_* safety copies (scanBackups
+// leaves them out).
 func pruneExpiredBackups(ctx context.Context, database *db.DB, settings *service.SettingsService, backupDir string) error {
 	retStr, err := settings.Setting(ctx, "backup_retention")
 	if err != nil {
@@ -318,9 +320,6 @@ func pruneExpiredBackups(ctx context.Context, database *db.DB, settings *service
 	cutoff := time.Now().Add(-time.Duration(days) * 24 * time.Hour)
 	pruned := 0
 	for _, e := range entries {
-		if isSafetyCopy(e.path) {
-			continue
-		}
 		if e.mtime.Before(cutoff) && !e.mtime.Equal(newest) {
 			if rmErr := os.Remove(e.path); rmErr != nil {
 				slog.Warn("backup retention: failed to remove expired backup", "path", e.path, "error", rmErr)
@@ -337,9 +336,10 @@ func pruneExpiredBackups(ctx context.Context, database *db.DB, settings *service
 	return nil
 }
 
-// NewestBackup returns the newest backup's mtime — the last successful
-// backup, since a failed one never leaves a file behind — or the zero time
-// when there is none. The admin attention panel reads it.
+// NewestBackup returns the newest scheduled or manual backup's mtime — the
+// last successful backup, since a failed one never leaves a file behind — or
+// the zero time when there is none. Safety copies do not count. The admin
+// attention panel reads it.
 func NewestBackup(backupDir string) (time.Time, error) {
 	newest, _, err := scanBackups(backupDir)
 	return newest, err
@@ -350,8 +350,11 @@ type backupFile struct {
 	mtime time.Time
 }
 
-// scanBackups lists *.db files in the backup dir, returning the newest mtime
-// and all entries. A missing directory is "no backups", not an error.
+// scanBackups lists the backup history in the backup dir: every *.db except
+// the pre_restore_ and pre_migrate_ safety copies, which the schedule, the
+// health signal and day-based retention all leave out (PruneSafetyCopies
+// bounds those by count). It returns the newest mtime and all entries. A
+// missing directory is "no backups", not an error.
 func scanBackups(backupDir string) (newest time.Time, files []backupFile, err error) {
 	entries, err := os.ReadDir(backupDir)
 	if err != nil {
@@ -361,7 +364,7 @@ func scanBackups(backupDir string) (newest time.Time, files []backupFile, err er
 		return time.Time{}, nil, fmt.Errorf("reading backup dir: %w", err)
 	}
 	for _, e := range entries {
-		if e.IsDir() || filepath.Ext(e.Name()) != ".db" {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".db" || isSafetyCopy(e.Name()) {
 			continue
 		}
 		info, infoErr := e.Info()
