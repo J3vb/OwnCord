@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -142,8 +143,8 @@ func TestExtract_TakesTheFirstRegularMatchAndReturnsItsHash(t *testing.T) {
 				if err != nil || !bytes.Equal(got, want) {
 					t.Fatalf("dest holds %q (err %v), want %q", got, err, want)
 				}
-				info, err := os.Stat(dest)
-				if err != nil || info.Mode().Perm() != 0o600 {
+				// Windows has no Unix permission bits; Go reports 0666 for any writable file there.
+				if info, err := os.Stat(dest); runtime.GOOS != "windows" && (err != nil || info.Mode().Perm() != 0o600) {
 					t.Errorf("dest mode = %v (err %v), want 0600", info.Mode().Perm(), err)
 				}
 			})
