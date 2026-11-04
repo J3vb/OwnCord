@@ -90,7 +90,7 @@ export function createInputAttachments(st: InputState, api: InputApi) {
    *  still lands on the slot underneath. */
   function wireDropOverlay(container: Element): void {
     if (st.root === null) return;
-    const area = container.closest(".chat-area") ?? container;
+    const area = container.closest(st.options.dropZone ?? ".chat-area") ?? container;
     const overlay = createElement("div", {
       class: "drop-overlay",
       "data-testid": "drop-overlay",
@@ -147,7 +147,7 @@ export function createInputAttachments(st: InputState, api: InputApi) {
   function acceptsDropAt(target: EventTarget | null): boolean {
     return (
       target instanceof Element &&
-      target.closest(DROP_SLOTS) !== null &&
+      target.closest(st.options.dropZone ?? DROP_SLOTS) !== null &&
       st.disabledReason === null &&
       !uploadsDisabledByServer() &&
       !dialogOpen()
