@@ -47,6 +47,10 @@ and only when it changes something a contributor or fork holder must do
 
 ## Unreleased
 
+### Changed
+
+- The admin Live log no longer fills with the panel's own request lines, and a viewer that falls behind sees how many lines were skipped.
+
 ### Added
 
 - On Linux, a crash report after an unexpected exit now includes the app's last error output, which names the library that closed the app when it exits without a crash signal.
