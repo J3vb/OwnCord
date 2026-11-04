@@ -71,7 +71,7 @@ admin Dashboard then shows a LiveKit card: whether it is reachable, its CPU and
 memory, and rooms, participants, tracks and traffic. The port is not published,
 so only containers on the compose network can reach it. An older `livekit.yaml`
 needs the two `prometheus:` lines added (then `docker compose restart livekit`);
-until then the card says "Not set up".
+until then the card says "Not reachable".
 
 The card finds its source by itself. When OwnCord runs LiveKit for you
 (`livekit_binary` or `auto_download_livekit`), it reads that process
