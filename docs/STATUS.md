@@ -12,7 +12,7 @@ _Last updated 2026-11-04._
 
 ## Current release
 
-**v2.8.0**, published 2026-11-06. It is still a beta and a hobby project:
+**v2.8.0**, published 2026-11-04. It is still a beta and a hobby project:
 Windows and Linux desktop (x64 and ARM64), plus a sideloaded Android app (arm64). Update the server and the
 desktop app together. From 2.5 on, version numbers drop the `-beta.N` suffix.
 
@@ -24,7 +24,7 @@ Newest first, one line each. The full notes are the matching section of
 <!-- prettier-ignore -->
 | Version | Date | What it brought |
 | --- | --- | --- |
-| v2.8.0 | 2026-11-06 | Share to OwnCord and notifications in the Android app, a People page with Active now, a "+" tile menu, image viewer swipes, calls that no longer freeze on a key change, an admin System health page and LiveKit card, and support bundles that remove private details. |
+| v2.8.0 | 2026-11-04 | Share to OwnCord and notifications in the Android app, a People page with Active now, a "+" tile menu, image viewer swipes, calls that no longer freeze on a key change, an admin System health page and LiveKit card, and support bundles that remove private details. |
 | v2.7.0 | 2026-10-31 | The first Android app (an APK that updates itself), a phone layout with a drawer, call bar, call screen and Push to Talk, a phone status dot, My uploads, an admin Storage page and health row, saved server logs and a voice gate in decibels. |
 | v2.6.0 | 2026-10-30 | A server rail, a Media panel per channel, Discord channel import, voice channel passwords, custom CSS themes, smoother screen shares and a web client on par with desktop. |
 | v2.5.0 | 2026-10-29 | Several devices at once, voice messages, stickers, videos that stream in chat, iPhone photos, animated avatars, game and music activity, zoom on streams and new role permissions. |
