@@ -57,7 +57,12 @@ export function createThreadSendQueue(options: ThreadSendQueueOptions): ThreadSe
   signal.addEventListener(
     "abort",
     () => {
-      for (const entry of entries.values()) stop(entry);
+      // A closed panel drops its unsent messages, so no row is left
+      // uploading with nothing behind it.
+      for (const entry of entries.values()) {
+        stop(entry);
+        removeOptimistic(entry.cid);
+      }
       entries.clear();
     },
     { once: true },

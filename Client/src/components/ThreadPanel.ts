@@ -581,12 +581,18 @@ export function createThreadPanel(options: ThreadPanelOptions): ThreadPanelCompo
     if (queue.retry(correlationId)) return;
     const draft = drafts.get(correlationId);
     if (draft === undefined) return;
+    // A refused reply may point at a message deleted outside the loaded
+    // window: nothing was stored, so it goes again as a plain message.
+    const refusedReply =
+      draft.replyTo !== null &&
+      getChannelMessages(threadId).find((m) => m.correlationId === correlationId)?.errorCode ===
+        WsErrorCode.BAD_REQUEST;
     drafts.delete(correlationId);
     removeOptimistic(correlationId);
     sendText(
       draft.content,
-      draft.replyTo,
-      draft.replyPing,
+      refusedReply ? null : draft.replyTo,
+      !refusedReply && draft.replyPing,
       draft.attachments,
       draft.clientMessageId,
       draft.sticker,
@@ -631,7 +637,9 @@ export function createThreadPanel(options: ThreadPanelOptions): ThreadPanelCompo
     disposable.addCleanup(
       ws.on("chat_send_ok", (payload, correlationId) => {
         const draft = correlationId === undefined ? undefined : drafts.get(correlationId);
-        if (draft === undefined || draft.attachments.length === 0) return;
+        if (draft === undefined || correlationId === undefined) return;
+        // Delivered: nothing will retry it, so its files are not held on to.
+        drafts.delete(correlationId);
         const skipped = new Set(payload.skipped_attachment_ids ?? []);
         const unsent = draft.attachments.filter((a) => skipped.has(a.id));
         if (unsent.length > 0) messageInput?.restoreUnsent(unsent, "skipped");

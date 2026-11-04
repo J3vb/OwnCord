@@ -951,6 +951,22 @@ describe("files in a thread", () => {
     );
   });
 
+  it("leaves no uploading row behind when the panel closes mid-upload", async () => {
+    vi.mocked(api.uploadFile).mockImplementationOnce(() => new Promise(() => {}));
+    const panel = mountPanel();
+    await flush();
+    pasteScreenshot();
+    await vi.waitFor(() => expect(api.uploadFile).toHaveBeenCalledTimes(1));
+    pressEnter();
+    const uploading = (): boolean =>
+      (messagesStore.getState().messagesByChannel.get(THREAD) ?? []).some(
+        (m) => m.status === "uploading",
+      );
+    await vi.waitFor(() => expect(uploading()).toBe(true));
+    panel.destroy?.();
+    expect(uploading()).toBe(false);
+  });
+
   it("puts a file the server skipped back into the composer", async () => {
     mountPanel();
     await flush();
