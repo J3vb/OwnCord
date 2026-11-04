@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/syncutil"
@@ -140,14 +141,52 @@ func Key(prefix string, id int64) string {
 // window, recording the current timestamp only when it is. It returns false
 // when key is locked out or has exceeded limit within window.
 func (r *RateLimiter) Allow(key string, limit int, window time.Duration) bool {
+	_, ok := r.record(key, limit, window)
+	return ok
+}
+
+// Reserve is Allow for an attempt that may still turn out not to count: ok
+// reports whether key is permitted, and refund takes back the timestamp this
+// call recorded, so a caller refused later for a reason that is not the key's
+// own leaves the budget as it found it. The slot is held from the start, so
+// concurrent attempts can never together exceed limit. refund is idempotent and
+// a no-op when ok is false.
+func (r *RateLimiter) Reserve(key string, limit int, window time.Duration) (refund func(), ok bool) {
+	stamp, ok := r.record(key, limit, window)
+	if !ok {
+		return func() {}, false
+	}
+	var once sync.Once
+	return func() { once.Do(func() { r.unrecord(key, stamp) }) }, true
+}
+
+// unrecord removes one timestamp equal to stamp from key's window.
+func (r *RateLimiter) unrecord(key string, stamp time.Time) {
+	s := r.shardFor(key)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	e, ok := s.windows[key]
+	if !ok {
+		return
+	}
+	for i, ts := range e.timestamps {
+		if ts.Equal(stamp) {
+			e.timestamps = append(e.timestamps[:i], e.timestamps[i+1:]...)
+			return
+		}
+	}
+}
+
+// record is Allow returning the timestamp it recorded.
+func (r *RateLimiter) record(key string, limit int, window time.Duration) (stamp time.Time, ok bool) {
 	s := r.shardFor(key)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	// Lockout takes priority.
-	if lo, ok := s.lockouts[key]; ok {
+	if lo, found := s.lockouts[key]; found {
 		if time.Now().Before(lo.expiresAt) {
-			return false
+			return time.Time{}, false
 		}
 		delete(s.lockouts, key)
 	}
@@ -155,8 +194,8 @@ func (r *RateLimiter) Allow(key string, limit int, window time.Duration) bool {
 	now := time.Now()
 	cutoff := now.Add(-window)
 
-	e, ok := s.windows[key]
-	if !ok {
+	e, found := s.windows[key]
+	if !found {
 		e = &entry{}
 		s.windows[key] = e
 	}
@@ -182,11 +221,11 @@ func (r *RateLimiter) Allow(key string, limit int, window time.Duration) bool {
 	e.timestamps = valid
 
 	if len(e.timestamps) >= limit {
-		return false
+		return time.Time{}, false
 	}
 
 	e.timestamps = append(e.timestamps, now)
-	return true
+	return now, true
 }
 
 // RetryAfter returns the whole seconds until key may retry under window, i.e.

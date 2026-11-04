@@ -130,19 +130,23 @@ func (b *AdmissionBudget) Acquire(ctx context.Context, maxWait time.Duration) (r
 	}
 
 	b.mu.Lock()
-	select {
-	case <-ready:
-		// Handed a slot while giving up: pass it on rather than hold it for a
-		// caller that no longer wants it.
-		b.mu.Unlock()
-		b.admitted()()
-		b.mu.Lock()
-	default:
-		b.waiters.Remove(elem)
-	}
+	b.abandonLocked(ready, elem)
 	retryAfter = b.retryAfterLocked()
 	b.mu.Unlock()
 	return func() {}, retryAfter, false
+}
+
+// abandonLocked takes a waiter that gave up out of the queue. One handed a
+// slot in the same instant passes it on rather than hold it for a caller that
+// no longer wants it; the slot never ran, so it is not booked as an admission
+// (InFlight, Peak and the hold average stay as they were).
+func (b *AdmissionBudget) abandonLocked(ready chan struct{}, elem *list.Element) {
+	select {
+	case <-ready:
+		b.handOffLocked()
+	default:
+		b.waiters.Remove(elem)
+	}
 }
 
 // estimatedWaitLocked is how long a caller joining the queue now would wait:
@@ -174,14 +178,20 @@ func (b *AdmissionBudget) admitted() func() {
 			b.mu.Lock()
 			defer b.mu.Unlock()
 			b.avgHold += (time.Since(start) - b.avgHold) / 8
-			if front := b.waiters.Front(); front != nil {
-				b.waiters.Remove(front)
-				close(front.Value.(chan struct{}))
-				return
-			}
-			b.held--
+			b.handOffLocked()
 		})
 	}
+}
+
+// handOffLocked gives one held slot back: to the oldest waiter when anyone
+// waits, so held never drops while the queue is not empty, else to the budget.
+func (b *AdmissionBudget) handOffLocked() {
+	if front := b.waiters.Front(); front != nil {
+		b.waiters.Remove(front)
+		close(front.Value.(chan struct{}))
+		return
+	}
+	b.held--
 }
 
 // Size is the number of concurrent computations the budget admits.
