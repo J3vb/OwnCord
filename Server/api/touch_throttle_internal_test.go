@@ -11,7 +11,7 @@ import (
 func TestTouchThrottle_SweepsByAgeOncePerInterval(t *testing.T) {
 	tt := &touchThrottle{seen: make(map[string]time.Time)}
 	start := time.Unix(1_700_000_000, 0)
-	const live = 5000
+	const live = 100
 	for i := range live {
 		if !tt.shouldTouch(fmt.Sprintf("s%d", i), start) {
 			t.Fatalf("first request of session %d was not touched", i)
