@@ -92,8 +92,7 @@ For such a run the next start also copies what the system kept of it
 skipped when either tool is missing or refuses) and the run's last 40 stderr
 lines (`stderr_capture.rs`, `[exit] stderr pid N:`). stderr goes to
 `stderr-<pid>.log` in the log directory unless it already goes to a terminal
-or a file, emptied past
-2 MiB, and the next start deletes it; it is where a library that ends the
+or a file, emptied past 2 MiB, and the next start deletes it; it is where a library that ends the
 process with `_exit()` (GDK on a Wayland or X error, a GLib fatal message)
 says why. The file itself is not in the bundle; copied lines show the home
 directory as `~`.
