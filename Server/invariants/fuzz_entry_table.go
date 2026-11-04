@@ -58,6 +58,7 @@ var FuzzEntryPoints = map[string]FuzzEntry{
 
 	"api.imageDimensions":        {Source: "emoji and sticker uploads", Targets: []string{"api.FuzzImageDimensions"}},
 	"api.webpDimensions":         {Source: "emoji and sticker uploads", Targets: []string{"api.FuzzImageDimensions"}, Manual: true},
+	"api.makeThumbnail":          {Source: "uploaded images", Targets: []string{"api.FuzzMakeThumbnail"}},
 	"api.thumbOrientation":       {Source: "uploaded images", Targets: []string{"api.FuzzMakeThumbnail"}},
 	"api.validateHEIC":           {Source: "uploaded HEIC images", Targets: []string{"api.FuzzValidateHEIC"}, Manual: true},
 	"api.validateAvatarURL":      {Source: "profile update body", Targets: []string{"api.FuzzValidateAvatarURL"}, Manual: true},
@@ -103,7 +104,6 @@ var FuzzGaps = map[string]FuzzGap{
 	"api.handleUploadAvatar":            {Source: "avatar upload (multipart)"},
 	"api.handleUploadBanner":            {Source: "banner upload (multipart)"},
 	"api.handleUploadGroupIcon":         {Source: "group DM icon upload (multipart)"},
-	"api.makeThumbnail":                 {Source: "uploaded images"},
 	"api.storedImageSize":               {Source: "uploaded images, read back from storage"},
 
 	"ws.(*Hub).authenticateConn":  {Source: "WebSocket auth frame (FuzzAuthPayload checks a copy of its decode, not this function)"},
@@ -133,7 +133,7 @@ var FuzzGaps = map[string]FuzzGap{
 }
 
 // fuzzGapCeiling is len(FuzzGaps). It only goes down.
-const fuzzGapCeiling = 41
+const fuzzGapCeiling = 40
 
 // FuzzTrustedDecodes decode bytes this server wrote itself (its database, its
 // own frames and files) or files the operator owns. Each value says why the
