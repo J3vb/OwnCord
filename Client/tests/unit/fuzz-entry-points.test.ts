@@ -216,7 +216,7 @@ describe("fuzz entry-point inventory", () => {
     expect(
       Object.keys(listed)
         .filter((k) => !decoders.has(k))
-        .sort(),
+        .toSorted(),
     ).toEqual([]);
   });
 
@@ -227,7 +227,7 @@ describe("fuzz entry-point inventory", () => {
     expect(
       Object.keys(listed)
         .filter((k) => !commands.has(k))
-        .sort(),
+        .toSorted(),
     ).toEqual([]);
   });
 
