@@ -36,6 +36,7 @@ import {
 import { loadMemberLayout, MEMBER_LAYOUT_PREF, type MemberLayout } from "../members/memberLayout";
 import { appZoom, ZOOM_LEVELS, zoomIndex } from "../zoom";
 import { buildCustomThemeSection } from "../custom-themes/customThemeSection";
+import { buildChoiceRow, buildSettingRow } from "./settingRow";
 import { settingsText as t } from "../../i18n/settings";
 
 const FALLBACK_ACCENT = "#5865f2";
@@ -62,8 +63,11 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
   const defaultAccent = getDefaultAccent(paletteOf(activeThemeName));
 
   // Theme selector
-  const themeHeader = createElement("h3", {}, t("appearance.theme"));
-  const themeRow = createElement("div", { class: "theme-options", role: "radiogroup" });
+  const themeRow = createElement("div", {
+    class: "theme-options",
+    role: "radiogroup",
+    "aria-label": t("appearance.theme"),
+  });
   const choices: string[] = [...(Object.keys(THEMES) as ThemeName[]), SYSTEM_THEME];
   for (const name of choices) {
     const isActive = name === currentTheme;
@@ -120,10 +124,11 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
   // tiles are a horizontal row, so ArrowLeft/Right is the stepping axis.
   setRovingTabindex(themeRow, "[role='radio']");
   enableRovingNavigation(themeRow, "[role='radio']", signal);
-  appendChildren(section, themeHeader, themeRow);
+  section.appendChild(
+    buildSettingRow({ label: t("appearance.theme"), control: themeRow, stacked: true }),
+  );
 
   // Font size slider
-  const fontHeader = createElement("h3", {}, t("appearance.fontSize"));
   const fontRow = createElement("div", { class: "slider-row" });
   const fontSlider = createElement("input", {
     class: "settings-slider",
@@ -153,11 +158,10 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
     { signal },
   );
   appendChildren(fontRow, fontSlider, fontLabel);
-  appendChildren(section, fontHeader, fontRow);
+  section.appendChild(buildSettingRow({ label: t("appearance.fontSize"), control: fontRow }));
 
   // Zoom level: the native webview zoom, snapping to Discord's levels. The
   // slider follows the zoom keys (Ctrl+= / Ctrl+- / Ctrl+0) while it is open.
-  const zoomHeader = createElement("h3", {}, t("appearance.zoom"));
   const zoomRow = createElement("div", { class: "slider-row" });
   const zoomSlider = createElement("input", {
     class: "settings-slider",
@@ -199,15 +203,11 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
   zoomReset.addEventListener("click", () => void appZoom.reset(), { signal });
   appendChildren(zoomRow, zoomSlider, zoomLabel, zoomReset);
   // The Android app has no webview zoom to set.
-  if (!isAndroidApp()) appendChildren(section, zoomHeader, zoomRow);
+  if (!isAndroidApp()) {
+    section.appendChild(buildSettingRow({ label: t("appearance.zoom"), control: zoomRow }));
+  }
 
   // Compact mode toggle
-  const compactRow = createElement("div", { class: "setting-row" });
-  const compactLabel = createElement(
-    "span",
-    { class: "setting-label" },
-    t("appearance.compactMode"),
-  );
   const compactToggle = createToggle(currentCompact, {
     signal,
     label: t("appearance.compactMode"),
@@ -216,8 +216,9 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
       document.documentElement.classList.toggle("compact-mode", isNowCompact);
     },
   });
-  appendChildren(compactRow, compactLabel, compactToggle);
-  section.appendChild(compactRow);
+  section.appendChild(
+    buildSettingRow({ label: t("appearance.compactMode"), control: compactToggle }),
+  );
 
   // Time format (12-hour / 24-hour) and date order. A date format change can
   // move the clock default, so it repaints both rows.
@@ -248,61 +249,18 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
   section.append(timeFormatRow.row, dateFormatRow.row);
 
   // Member list position (right column / under the channels)
-  const memberLayoutRow = createElement("div", { class: "setting-row" });
-  const memberLayoutInfo = createElement("div", {});
-  appendChildren(
-    memberLayoutInfo,
-    createElement("div", { class: "setting-label" }, t("appearance.memberLayout")),
-    createElement("div", { class: "setting-desc" }, t("appearance.memberLayout.desc")),
-  );
-  const memberLayoutGroup = createElement("div", {
-    class: "level-options",
-    role: "radiogroup",
-    "aria-label": t("appearance.memberLayout"),
-    "data-testid": "member-layout",
-  });
-  const memberLayoutButtons = new Map<MemberLayout, HTMLButtonElement>();
-  const memberLayoutLabels: Record<MemberLayout, string> = {
-    right: t("appearance.memberLayout.right"),
-    left: t("appearance.memberLayout.left"),
-  };
-  const paintMemberLayout = (): void => {
-    const current = loadMemberLayout();
-    for (const [value, button] of memberLayoutButtons) {
-      const on = value === current;
-      button.classList.toggle("active", on);
-      button.setAttribute("aria-checked", String(on));
-    }
-  };
-  for (const value of ["right", "left"] as const) {
-    const button = createElement(
-      "button",
-      {
-        class: "level-opt",
-        type: "button",
-        role: "radio",
-        "aria-checked": "false",
-        tabindex: "-1",
-        "data-testid": `member-layout-${value}`,
-        "data-value": value,
-      },
-      memberLayoutLabels[value],
-    );
-    button.addEventListener(
-      "click",
-      () => {
-        savePref(MEMBER_LAYOUT_PREF, value);
-        paintMemberLayout();
-      },
-      { signal },
-    );
-    memberLayoutButtons.set(value, button);
-    memberLayoutGroup.appendChild(button);
-  }
-  paintMemberLayout();
-  setRovingTabindex(memberLayoutGroup, "[role='radio']");
-  enableRovingNavigation(memberLayoutGroup, "[role='radio']", signal);
-  appendChildren(memberLayoutRow, memberLayoutInfo, memberLayoutGroup);
+  const memberLayoutRow = buildChoiceRow<MemberLayout>({
+    signal,
+    label: t("appearance.memberLayout"),
+    desc: t("appearance.memberLayout.desc"),
+    testId: "member-layout",
+    options: [
+      ["right", t("appearance.memberLayout.right")],
+      ["left", t("appearance.memberLayout.left")],
+    ],
+    current: loadMemberLayout,
+    save: (value) => savePref(MEMBER_LAYOUT_PREF, value),
+  }).row;
   // A phone shows the member list as an overlay, so it has no side to pick.
   if (!isAndroidApp()) section.appendChild(memberLayoutRow);
 
@@ -328,7 +286,6 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
     applyAccent(color);
   }
 
-  const accentHeader = createElement("h3", {}, t("appearance.accentColor"));
   const swatchesRow = createElement("div", { class: "accent-swatches" });
 
   // Declare hexInput early so swatch closures can reference it after construction
@@ -412,7 +369,11 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
   );
 
   appendChildren(hexInputRow, hexPrefix, hexInput);
-  appendChildren(section, accentHeader, swatchesRow, hexInputRow, accentNote);
+  const accentControl = createElement("div", { class: "accent-control" });
+  appendChildren(accentControl, swatchesRow, hexInputRow, accentNote);
+  section.appendChild(
+    buildSettingRow({ label: t("appearance.accentColor"), control: accentControl, stacked: true }),
+  );
   section.appendChild(buildCustomThemeSection(signal));
 
   // An OS light/dark flip under "Sync with computer" changes the default
@@ -446,72 +407,4 @@ function hexToRgb(hex: string): string {
   const g = parseInt(hex.slice(3, 5), 16);
   const b = parseInt(hex.slice(5, 7), 16);
   return `rgb(${r}, ${g}, ${b})`;
-}
-
-interface ChoiceRowOptions<T extends string> {
-  readonly signal: AbortSignal;
-  readonly label: string;
-  readonly desc: string;
-  readonly testId: string;
-  readonly options: readonly (readonly [T, string])[];
-  readonly current: () => T;
-  readonly save: (value: T) => void;
-}
-
-/** A setting row with a single-choice radio group; `paint` re-reads `current`. */
-function buildChoiceRow<T extends string>(
-  opts: ChoiceRowOptions<T>,
-): { row: HTMLDivElement; paint: () => void } {
-  const row = createElement("div", { class: "setting-row" });
-  const info = createElement("div", {});
-  appendChildren(
-    info,
-    createElement("div", { class: "setting-label" }, opts.label),
-    createElement("div", { class: "setting-desc" }, opts.desc),
-  );
-  const group = createElement("div", {
-    class: "level-options",
-    role: "radiogroup",
-    "aria-label": opts.label,
-    "data-testid": opts.testId,
-  });
-  const buttons = new Map<T, HTMLButtonElement>();
-  const paint = (): void => {
-    const current = opts.current();
-    for (const [value, button] of buttons) {
-      const on = value === current;
-      button.classList.toggle("active", on);
-      button.setAttribute("aria-checked", String(on));
-    }
-  };
-  for (const [value, text] of opts.options) {
-    const button = createElement(
-      "button",
-      {
-        class: "level-opt",
-        type: "button",
-        role: "radio",
-        "aria-checked": "false",
-        tabindex: "-1",
-        "data-testid": `${opts.testId}-${value}`,
-        "data-value": value,
-      },
-      text,
-    );
-    button.addEventListener(
-      "click",
-      () => {
-        opts.save(value);
-        paint();
-      },
-      { signal: opts.signal },
-    );
-    buttons.set(value, button);
-    group.appendChild(button);
-  }
-  paint();
-  setRovingTabindex(group, "[role='radio']");
-  enableRovingNavigation(group, "[role='radio']", opts.signal);
-  appendChildren(row, info, group);
-  return { row, paint };
 }

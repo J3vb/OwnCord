@@ -476,6 +476,7 @@ export const shards = {
     "src/features/messaging/composerButtons.ts",
     "src/features/settings/logoutConfirm.ts",
     "src/features/settings/unsavedConfirm.ts",
+    "src/features/settings/settingRow.ts",
     "src/features/zoom/zoomKeys.ts",
     "src/features/moderation/ActionForms.ts",
   ],

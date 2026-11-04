@@ -146,12 +146,30 @@
 .settings-pane.active {
   display: block;
 }
+/* Rows read the pane's width, so a segmented choice can turn into a select. */
+.settings-pane {
+  container: settings-pane / inline-size;
+}
+/* The one row pattern (features/settings/settingRow.ts): title and
+   description left, control right, a hairline between rows; stacked puts a
+   wide control under its title. */
 .setting-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 16px;
   padding: 16px 0;
   border-bottom: 1px solid var(--border);
+}
+.setting-info {
+  flex: 1;
+  min-width: 0;
+}
+.setting-row.stacked {
+  display: block;
+}
+.setting-row.stacked > .setting-info {
+  margin-bottom: 8px;
 }
 .setting-row:last-child {
   border-bottom: none;
@@ -197,29 +215,53 @@
 .toggle.on::after {
   transform: translateX(16px);
 }
-/* Notification level: All / Mentions only / Nothing, one segmented row. */
+/* A single choice: one segmented track that never wraps. Too narrow a pane
+   shows the same choice as a select. */
 .level-options {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-}
-.level-opt {
-  min-height: 32px;
-  padding: 0 var(--space-3);
+  display: inline-flex;
+  flex-wrap: nowrap;
+  padding: 2px;
   border: 1px solid var(--border-control);
   border-radius: var(--radius-pill);
   background: var(--bg-secondary);
+}
+.level-opt {
+  min-height: 30px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-pill);
+  background: transparent;
   color: var(--text-normal);
   font-size: var(--font-size-sm);
+  white-space: nowrap;
   cursor: pointer;
 }
 .level-opt:hover {
-  border-color: var(--border-strong);
+  background: var(--bg-hover);
 }
 .level-opt.active {
   background: var(--accent);
-  border-color: var(--accent);
   color: var(--on-accent);
+}
+.segmented-wrap {
+  flex-shrink: 0;
+}
+.segmented-select {
+  display: none;
+}
+@container settings-pane (max-width: 520px) {
+  .setting-row:has(> .segmented-wrap) {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+  .segmented-wrap > .segmented {
+    display: none;
+  }
+  .segmented-wrap > .segmented-select {
+    display: block;
+    width: 100%;
+    min-height: 36px;
+  }
 }
 /* Input mode: the mode choice, then the Push to Talk key and delay. */
 .input-mode-options,
@@ -286,7 +328,7 @@
   gap: 12px;
 }
 .setting-row .slider-row {
-  flex: 0 0 220px;
+  flex: 0 1 280px;
 }
 .settings-slider {
   flex: 1;

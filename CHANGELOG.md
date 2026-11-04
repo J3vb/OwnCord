@@ -52,6 +52,7 @@ and only when it changes something a contributor or fork holder must do
 - In-app dialogs (join with an invite link, rename prompts, new DM picker, nickname, new thread) use the same Save and Cancel buttons as Create Channel.
 - Privacy & Safety shows a failed load the same way in every section: the message in red with Retry beside it.
 - Small polish: the GIF consent button and the empty sticker panel sit in the middle of the picker; "Load external content" no longer shows an empty card beside it; the certificate prompts open on Cancel instead of the close button; a password voice channel shows its lock in the chat header; a phone menu sheet opens without a focus line on its first row; search on a phone is a top sheet in landscape too.
+- Settings rows look the same everywhere on Appearance and Notifications: name and description on the left, the control on the right. Choices like Notification Level and Date Format sit on one line and turn into a dropdown on a narrow screen instead of wrapping.
 - The admin Live log no longer fills with the panel's own request lines, and a viewer that falls behind sees how many lines were skipped.
 
 ### Added
