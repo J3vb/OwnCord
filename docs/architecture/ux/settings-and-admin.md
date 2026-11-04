@@ -59,10 +59,12 @@ password for sensitive changes and are rate-limited server-side.
 
 ### 2.1 Profile edit
 
-| Step                 | Reaction                                                                                                                  |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| Edit username/avatar | `PATCH /users/me`; optimistic `auth.updateUser`; server broadcasts `user_update` so the member list + own bar update live |
-| Failure              | Inline field error + rollback                                                                                             |
+| Step                 | Reaction                                                                                                                                                              |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Edit username/avatar | `PATCH /users/me`; optimistic `auth.updateUser`; server broadcasts `user_update` so the member list + own bar update live                                             |
+| Failure              | Inline field error + rollback                                                                                                                                         |
+| Rename               | Enter or Save submits; Save is disabled while the request is in flight, so a double click sends one rename                                                            |
+| Unsaved edits        | A tab switch, Escape, the close button or a backdrop click with unsaved name, about, banner colour or rename text asks "Discard?" first (Keep editing is the default) |
 
 ### 2.2 Change password (with session revocation)
 
