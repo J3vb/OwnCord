@@ -72,6 +72,8 @@ mod shortcuts;
 mod sync;
 #[cfg(any(target_os = "linux", windows))]
 mod system_crash_report;
+#[cfg(target_os = "linux")]
+mod stderr_capture;
 mod text;
 mod tofu;
 #[cfg(desktop)]

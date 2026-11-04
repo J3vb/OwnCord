@@ -251,7 +251,7 @@ fn query(program: &str, args: &[&str]) -> Result<Answer, String> {
 
 /// `line` with the home directory written as `~`.
 #[cfg(target_os = "linux")]
-fn private(line: &str, home: Option<&str>) -> String {
+pub(crate) fn private(line: &str, home: Option<&str>) -> String {
     match home.filter(|h| h.len() > 1) {
         Some(home) => line.replace(home, "~"),
         None => line.to_string(),

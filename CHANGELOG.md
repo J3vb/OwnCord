@@ -47,6 +47,10 @@ and only when it changes something a contributor or fork holder must do
 
 ## Unreleased
 
+### Added
+
+- On Linux, a crash report after an unexpected exit now includes the app's last error output, which names the library that closed the app when it exits without a crash signal.
+
 ## v2.8.0
 
 **OwnCord 2.8** (the ninth public beta) makes the Android app feel at home on a phone: share photos and files to OwnCord from other apps, notifications while the app is open, a People page with Active now, swipes in the image viewer, and calls that keep running in the background with the camera pausing cleanly. Admins get a **System health** page and a **LiveKit card** on the Dashboard, and the support bundle now removes private details before you share it. Calls no longer freeze when the call key changes.
