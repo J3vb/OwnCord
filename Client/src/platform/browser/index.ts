@@ -42,6 +42,7 @@ import type {
   SettingsStore,
   SocketTransport,
   SystemIdle,
+  SystemRegion,
   TrayStatus,
   WindowControl,
   WindowPrefs,
@@ -282,6 +283,11 @@ const systemIdle: SystemIdle = {
   idleMs: async () => null,
 };
 
+// navigator.language is all a page can know.
+const systemRegion: SystemRegion = {
+  localeTag: async () => null,
+};
+
 const trayStatus: TrayStatus = {
   onStatusChange: inertUnsubscribe,
 };
@@ -340,6 +346,7 @@ export const browser: Platform = {
   serverScope,
   shareSheet,
   systemIdle,
+  systemRegion,
   trayStatus,
   updater,
   urlOpener,

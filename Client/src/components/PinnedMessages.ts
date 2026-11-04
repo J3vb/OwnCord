@@ -9,6 +9,7 @@ import { createIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/text/safeRender";
 import { parseTimestamp } from "@lib/text/formatting";
 import { messagingText } from "../i18n/messaging";
+import { formatDate } from "../i18n/format";
 import { createAvatarElement } from "../features/profiles/avatar";
 import { renderMessageContent } from "../features/messaging/content/contentParser";
 import type { ImportedAuthor } from "@lib/types";
@@ -61,7 +62,7 @@ export interface PinnedMessagesPanel extends MountableComponent {
 function formatPinTime(iso: string): string {
   const d = parseTimestamp(iso);
   if (isNaN(d.getTime())) return iso;
-  return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  return formatDate(d, { month: "short", day: "numeric", year: "numeric" });
 }
 
 function renderPinnedItem(msg: PinnedMessage, canUnpin: boolean): HTMLDivElement {
