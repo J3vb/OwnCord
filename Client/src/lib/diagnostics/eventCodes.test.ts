@@ -14,6 +14,7 @@ import {
   type FieldSpec,
 } from "./eventCodes";
 import { STALL_THRESHOLD_MS } from "../voice/cameraStallWatchdog";
+import { repoRoot } from "../../../tests/helpers/repoRoot";
 
 // Codes in the catalogue whose emitter is not built yet. Each is removed from
 // this list when its owner starts recording it; the test below fails if a code
@@ -39,7 +40,6 @@ const NOT_EMITTED_YET = new Set<EventCode>([
 ]);
 
 const clientRoot = process.cwd();
-const repoRoot = join(clientRoot, "..");
 const entries = Object.entries(EVENT_CODES) as [EventCode, EventCodeSpec][];
 
 // Field names that suggest a value which could hold a person's name, a
