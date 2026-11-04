@@ -20,6 +20,12 @@
       "reason": "Hosts with a probe in flight, removed in the probe's finally; moved verbatim from main.ts"
     },
     {
+      "file": "i18n/format.ts",
+      "binding": "dateFormats",
+      "category": "pure-cache",
+      "reason": "Intl date formatters keyed by locale, clock, time-zone offset and options; holds no server data"
+    },
+    {
       "file": "stores/followedThreads.store.ts",
       "binding": "followedThreadsStore",
       "category": "reset-elsewhere",

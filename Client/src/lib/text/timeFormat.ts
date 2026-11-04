@@ -1,5 +1,12 @@
 /**
- * The client clock-format preference: 12-hour (default) or 24-hour.
+ * The client clock-format preference (12-hour or 24-hour) and the locale
+ * dates and times are written in.
+ *
+ * Dates follow the device language (navigator.language), so day/month order
+ * and the default clock match what the user reads everywhere else. Catalog
+ * text, plurals and numbers stay English (`TEXT_LOCALE`). Without a stored
+ * choice the clock defaults to the locale's own hour cycle; a choice made in
+ * Settings overrides it.
  *
  * A leaf module — it imports only `preferences.ts` — so both the low-level
  * `i18n/format.ts` and `lib/text/formatting.ts` can read it without a cycle.
@@ -15,13 +22,41 @@ export type TimeFormat = "12h" | "24h";
 
 const TIME_FORMAT_KEY = "timeFormat";
 
-const DEFAULT_TIME_FORMAT: TimeFormat = "12h";
+const FALLBACK_DATE_LOCALE = "en-US";
 
 const TIME_FORMATS: readonly TimeFormat[] = ["12h", "24h"];
 
+let checkedLanguage: string | null = null;
+let checkedLocale = FALLBACK_DATE_LOCALE;
+
+/** The locale dates and times are written in: the device language when the
+ *  engine knows it, else en-US. Read per call so a language change applies
+ *  to the next render; the validation is memoized per language tag. */
+export function dateLocale(): string {
+  const language = typeof navigator === "undefined" ? "" : navigator.language;
+  if (language === checkedLanguage) return checkedLocale;
+  checkedLanguage = language;
+  checkedLocale = FALLBACK_DATE_LOCALE;
+  if (language !== "") {
+    try {
+      checkedLocale = Intl.DateTimeFormat.supportedLocalesOf([language])[0] ?? FALLBACK_DATE_LOCALE;
+    } catch {
+      // A malformed tag throws a RangeError; keep the fallback.
+    }
+  }
+  return checkedLocale;
+}
+
+/** The clock a locale writes by default: 12-hour for h11/h12 (en-US), else 24-hour. */
+export function localeTimeFormat(locale: string = dateLocale()): TimeFormat {
+  const { hourCycle } = new Intl.DateTimeFormat(locale, { hour: "numeric" }).resolvedOptions();
+  return hourCycle === "h11" || hourCycle === "h12" ? "12h" : "24h";
+}
+
 function readTimeFormat(): TimeFormat {
-  const raw = loadPref<TimeFormat>(TIME_FORMAT_KEY, DEFAULT_TIME_FORMAT);
-  return (TIME_FORMATS as readonly string[]).includes(raw) ? raw : DEFAULT_TIME_FORMAT;
+  const fallback = localeTimeFormat();
+  const raw = loadPref<TimeFormat>(TIME_FORMAT_KEY, fallback);
+  return (TIME_FORMATS as readonly string[]).includes(raw) ? raw : fallback;
 }
 
 // Lazily read on first use, not at import: this module sits under

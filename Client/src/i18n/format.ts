@@ -22,12 +22,15 @@
  *   through the seam.
  *
  * English is the only shipped language: no locale picker and no runtime
- * download. The expansion transform exists for tests only.
+ * download. Dates and times are the exception to `TEXT_LOCALE`: they follow
+ * the device language (`dateLocale`), because day/month order and the clock
+ * are reading habits, not translation. The expansion transform exists for
+ * tests only.
  */
 
-import { getTimeFormat } from "../lib/text/timeFormat";
+import { dateLocale, getTimeFormat } from "../lib/text/timeFormat";
 
-/** The locale every catalog string, number and date is written in. */
+/** The locale every catalog string and number is written in. */
 export const TEXT_LOCALE = "en-US";
 
 type PluralEntry = Readonly<Partial<Record<Intl.LDMLPluralRule, string>>> & {
@@ -70,13 +73,28 @@ export function formatNumber(value: number, options?: Intl.NumberFormatOptions):
     : new Intl.NumberFormat(TEXT_LOCALE, options).format(value);
 }
 
-/** Format a date or time for display in the catalog locale, honouring the
+// Keyed by locale, clock, time-zone offset and options. A formatter keeps the
+// time zone it was built in, so a zone change (travel, a new system setting)
+// must build a new one; the offset is a cheap stand-in for the zone, and a DST
+// switch only adds one formatter. The option sets are literals in the code,
+// so the map stays small, and timestamp rows reuse one formatter.
+const dateFormats = new Map<string, Intl.DateTimeFormat>();
+
+/** Format a date or time for display in the device locale, honouring the
  *  user's 12h/24h clock preference. */
 export function formatDate(value: Date | number, options: Intl.DateTimeFormatOptions): string {
-  return new Intl.DateTimeFormat(TEXT_LOCALE, {
-    ...options,
-    hour12: getTimeFormat() === "12h",
-  }).format(value);
+  const locale = dateLocale();
+  const clock = getTimeFormat();
+  const key = `${locale}|${clock}|${new Date().getTimezoneOffset()}|${JSON.stringify(options)}`;
+  let format = dateFormats.get(key);
+  if (format === undefined) {
+    // h23, not hour12: false, which some engines resolve to h24 ("24:05").
+    const clockOption: Intl.DateTimeFormatOptions =
+      clock === "12h" ? { hour12: true } : { hourCycle: "h23" };
+    format = new Intl.DateTimeFormat(locale, { ...options, ...clockOption });
+    dateFormats.set(key, format);
+  }
+  return format.format(value);
 }
 
 function interpolate(template: string, params: Readonly<Record<string, TextValue>>): string {
