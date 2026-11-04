@@ -1,11 +1,7 @@
 package updater
 
 import (
-	"archive/tar"
-	"compress/gzip"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -16,6 +12,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"github.com/J3vb/OwnCord/Server/internal/archivebin"
 )
 
 // ValidateDownloadURL ensures the URL points to an expected GitHub release
@@ -179,74 +177,24 @@ func (u *Updater) downloadLinuxTarballAndVerify(ctx context.Context, downloadURL
 	return binaryHash, nil
 }
 
+// maxChatserverBytes bounds the staged server binary. Release builds are a
+// few tens of MiB; the cap only stops a damaged archive from filling the disk.
+const maxChatserverBytes = 512 << 20
+
 // extractChatserverFromTarGz extracts the "chatserver" entry from a tar.gz
 // stream to destPath and returns the hex SHA256 of the bytes it wrote, so the
 // caller gets a trusted hash of the staged binary without a path re-read.
 // destPath is created O_EXCL: a pre-existing file (attacker-planted staging
 // path) fails the extraction instead of being written through.
 func extractChatserverFromTarGz(r io.Reader, destPath string) (string, error) {
-	gr, err := gzip.NewReader(r)
+	sum, err := archivebin.FromTarGz(r, destPath, isChatserverEntry, maxChatserverBytes)
 	if err != nil {
-		return "", fmt.Errorf("gzip: %w", err)
+		return "", fmt.Errorf("chatserver from release archive: %w", err)
 	}
-	defer gr.Close() //nolint:errcheck
-
-	tr := tar.NewReader(gr)
-	for {
-		hdr, err := tr.Next()
-		if errors.Is(err, io.EOF) {
-			return "", fmt.Errorf("archive contains no file named chatserver")
-		}
-		if err != nil {
-			return "", fmt.Errorf("tar: %w", err)
-		}
-		skipBody := func() error {
-			if _, err := io.Copy(io.Discard, io.LimitReader(tr, hdr.Size)); err != nil {
-				return err
-			}
-			return nil
-		}
-		if hdr.Typeflag != tar.TypeReg {
-			if err := skipBody(); err != nil {
-				return "", err
-			}
-			continue
-		}
-		if strings.Contains(hdr.Name, "..") {
-			if err := skipBody(); err != nil {
-				return "", err
-			}
-			continue
-		}
-		if filepath.Base(hdr.Name) != "chatserver" {
-			if err := skipBody(); err != nil {
-				return "", err
-			}
-			continue
-		}
-
-		out, err := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o600)
-		if err != nil {
-			return "", err
-		}
-		h := sha256.New()
-		n, copyErr := io.Copy(io.MultiWriter(out, h), io.LimitReader(tr, hdr.Size))
-		closeErr := out.Close()
-		if copyErr != nil {
-			_ = os.Remove(destPath)
-			return "", fmt.Errorf("writing binary: %w", copyErr)
-		}
-		if closeErr != nil {
-			_ = os.Remove(destPath)
-			return "", closeErr
-		}
-		if n != hdr.Size {
-			_ = os.Remove(destPath)
-			return "", fmt.Errorf("incomplete tar entry (%d of %d bytes)", n, hdr.Size)
-		}
-		return hex.EncodeToString(h.Sum(nil)), nil
-	}
+	return sum, nil
 }
+
+func isChatserverEntry(name string) bool { return filepath.Base(name) == "chatserver" }
 
 // serverDownloadAssetName returns the GitHub release asset file name for the
 // server binary on the given GOOS/GOARCH. Only the four published pairs

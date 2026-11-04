@@ -65,6 +65,27 @@ func (b *AdmissionBudget) SetAvgHoldForTest(d time.Duration) {
 	b.avgHold = d
 }
 
+// AvgHoldForTest is the measured slot hold time. Exported for auth_test only.
+func (b *AdmissionBudget) AvgHoldForTest() time.Duration {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.avgHold
+}
+
+// AbandonHandedSlotForTest stages the give-up race Acquire cannot be steered
+// into on demand: a waiter queues, release hands it the slot, and the waiter
+// gives up in that same instant. Exported for auth_test only.
+func (b *AdmissionBudget) AbandonHandedSlotForTest(release func()) {
+	ready := make(chan struct{})
+	b.mu.Lock()
+	elem := b.waiters.PushBack(ready)
+	b.mu.Unlock()
+	release()
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.abandonLocked(ready, elem)
+}
+
 // ProductionBcryptCostForTest is bcryptCost as the package initialised it,
 // captured before any TestMain lowers it. Exported for auth_test only.
 var ProductionBcryptCostForTest = bcryptCost
