@@ -93,6 +93,7 @@ const (
 	MsgTypeVoiceDisconnected   = "voice_disconnected"
 	MsgTypeMemberJoin          = "member_join"
 	MsgTypeMemberUpdate        = "member_update"
+	MsgTypeMemberUpdateBatch   = "member_update_batch" // a role rename or reorder: member_update for up to 64 members in one sequenced global frame
 	MsgTypeUserUpdate          = "user_update"
 	MsgTypeMemberBan           = "member_ban"
 	MsgTypeRolesUpdate         = "roles_update"

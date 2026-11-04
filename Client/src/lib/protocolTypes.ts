@@ -52,6 +52,7 @@ export const ServerMessageType = {
   VOICE_DISCONNECTED: "voice_disconnected",
   MEMBER_JOIN: "member_join",
   MEMBER_UPDATE: "member_update",
+  MEMBER_UPDATE_BATCH: "member_update_batch", // a role rename or reorder: member_update for up to 64 members in one sequenced global frame
   USER_UPDATE: "user_update",
   MEMBER_BAN: "member_ban",
   ROLES_UPDATE: "roles_update",

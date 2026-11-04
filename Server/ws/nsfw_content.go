@@ -113,6 +113,7 @@ var contentBearingKinds = map[string]bool{
 	MsgTypeVoiceDisconnected:   false,
 	MsgTypeMemberJoin:          false,
 	MsgTypeMemberUpdate:        false,
+	MsgTypeMemberUpdateBatch:   false,
 	MsgTypeUserUpdate:          false,
 	MsgTypeMemberBan:           false,
 	MsgTypeRolesUpdate:         false,

@@ -121,6 +121,12 @@ export interface MemberUpdatePayload {
   readonly role_ids?: readonly number[];
 }
 
+/** member_update for several members (a role rename, delete or reorder); entries
+ *  apply in order. An older server never sends it. */
+export interface MemberUpdateBatchPayload {
+  readonly members: readonly MemberUpdatePayload[];
+}
+
 export interface UserUpdatePayload {
   readonly user_id: number;
   readonly username: string;

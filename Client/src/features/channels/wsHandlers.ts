@@ -21,7 +21,7 @@ import {
   setMembers,
   addMember,
   removeMember,
-  updateMemberRole,
+  updateMemberRoles,
   updateMemberProfile,
   updatePresence,
   applyPresenceBatch,
@@ -691,7 +691,18 @@ export function handleMemberBan(payload: Payload<"member_ban">): void {
 
 export function handleMemberUpdate(payload: Payload<"member_update">): void {
   log.info("Member role updated", { userId: payload.user_id, role: payload.role });
-  updateMemberRole(payload.user_id, payload.role, payload.role_ids);
+  applyMemberUpdates([payload]);
+}
+
+/** A role rename, delete or reorder: member_update for several members at once. */
+export function handleMemberUpdateBatch(payload: Payload<"member_update_batch">): void {
+  const members = payload.members ?? [];
+  log.info("Member roles updated", { count: members.length });
+  applyMemberUpdates(members);
+}
+
+function applyMemberUpdates(entries: readonly Payload<"member_update">[]): void {
+  updateMemberRoles(entries.map((e) => ({ userId: e.user_id, role: e.role, roleIds: e.role_ids })));
 
   // Keep authStore in sync when the signed-in user's own role changed —
   // every permission gate (canManageChannels, canViewAuditLog, ...) reads
@@ -699,7 +710,9 @@ export function handleMemberUpdate(payload: Payload<"member_update">): void {
   // demotion of the current user would leave every affordance stale until
   // the socket reconnects (mirrors the USER_UPDATE self-branch below).
   const me = authStore.getState().user;
-  if (me && payload.user_id === me.id) {
+  if (!me) return;
+  const payload = entries.findLast((e) => e.user_id === me.id);
+  if (payload !== undefined) {
     // role_ids rides along so the held-role gates follow the echo too.
     // An absent list drops the old one, as updateMemberRole does.
     const { role_ids: _old, ...withoutIds } = me;

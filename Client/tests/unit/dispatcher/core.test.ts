@@ -380,6 +380,27 @@ describe("WS Dispatcher", () => {
     expect(authStore.getState().user?.role_ids).toBeUndefined();
   });
 
+  it("applies a member_update_batch in one store change and syncs the signed-in user", () => {
+    patchAuth({ user: { id: 42, username: "alice", avatar: null, role: "member" } });
+    seedMembers([memberRow({ id: 42, username: "alice" }), memberRow({ id: 43, username: "bob" })]);
+    const revision = membersStore.getState().roleRevision ?? 0;
+
+    mock.dispatch("member_update_batch", {
+      members: [
+        { user_id: 43, role: "regulars", role_ids: [5] },
+        { user_id: 99, role: "regulars" },
+        { user_id: 42, role: "regulars", role_ids: [5, 3] },
+      ],
+    });
+
+    const members = membersStore.getState().members;
+    expect(members.get(43)?.role).toBe("regulars");
+    expect(members.get(42)?.roleIds).toEqual([5, 3]);
+    expect(members.has(99)).toBe(false);
+    expect(membersStore.getState().roleRevision).toBe(revision + 1);
+    expect(authStore.getState().user?.role_ids).toEqual([5, 3]);
+  });
+
   it("leaves authStore.user.role untouched for a member_update about someone else", () => {
     setMeUser();
 

@@ -99,7 +99,7 @@ The sequence number system enables reconnection with state recovery.
 | Category           | Has seq? | Examples                                                                                                                                                                                                                                                                                                                                                              |
 | ------------------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Channel broadcasts | Yes      | `chat_message`, `chat_edited`, `chat_deleted`, `chat_bulk_deleted`, `chat_pinned`, `reaction_update`, `poll_update`                                                                                                                                                                                                                                                   |
-| Global broadcasts  | Yes      | `presence`, `presence_batch` (see below), `member_join`, `member_update`, `member_ban`, `roles_update`, `emoji_update`, `sticker_update`, `voice_state` (broadcast form; see below), `voice_leave`, `channel_update`, `channel_delete`, `server_restart`                                                                                                              |
+| Global broadcasts  | Yes      | `presence`, `presence_batch` (see below), `member_join`, `member_update`, `member_update_batch`, `member_ban`, `roles_update`, `emoji_update`, `sticker_update`, `voice_state` (broadcast form; see below), `voice_leave`, `channel_update`, `channel_delete`, `server_restart`                                                                                       |
 | Ephemeral          | No       | `typing`, `upload_policy` (see below), `game_activity_policy` (see below), a full `presence_batch` snapshot (see below), `mod_queue`, `mod_action`, `member_timeouts` (see below), `channel_categories` (see below), `appeal_status`, `mention_count`, `read_state`, `channel_activity`, `thread_follow_update`, `channel_create` (targeted per recipient; see below) |
 | DM chat events     | Yes      | DM `chat_message`, `chat_edited`, `chat_deleted`, `reaction_update`, `poll_update` — sequenced and replayable exactly like channel broadcasts, delivered only to the DM's participants                                                                                                                                                                                |
 | DM lifecycle       | No       | `dm_channel_open`, `dm_channel_close`, `dm_request` (B5-6)                                                                                                                                                                                                                                                                                                            |
@@ -2472,6 +2472,33 @@ keep an older order for the tail. `role_ids` is absent when
 the server could not read the holder list for this frame and on an older
 server; keep the member's previous roles then.
 
+### member_update_batch (Server -> Client, broadcast)
+
+The same update as `member_update` for several members in one frame. A change
+that touches two or more members (a role rename, delete or reorder) is sent as
+`member_update_batch` frames of up to 64 members each, so a rename held by 1,000
+members costs 16 global frames instead of 1,000. A change that touches one member
+still sends a plain `member_update`.
+
+```json
+{
+  "seq": 74,
+  "type": "member_update_batch",
+  "payload": {
+    "members": [
+      { "user_id": 5, "role": "moderator", "role_ids": [3, 4] },
+      { "user_id": 9, "role": "member", "role_ids": [4] }
+    ]
+  }
+}
+```
+
+Each entry has the `member_update` payload's fields and meaning; apply them in
+order. A member whose roles the server could not read is left out. An older
+server never sends this frame. An older client ignores it, so after a bulk
+rename it shows the old top-role name until its next reconnect brings a fresh
+`ready`.
+
 ### member_ban (Server -> Client, broadcast)
 
 ```json
@@ -2525,7 +2552,8 @@ Unfiltered on purpose — the same list already ships in every client's `ready`
 payload, so it discloses nothing new. A role permission change that alters
 channel visibility is delivered separately, as targeted
 `channel_create`/`channel_delete` messages, and a role deletion additionally
-sends one `member_update` per reassigned member.
+sends the reassigned members a `member_update` (one member) or
+`member_update_batch` frames (several).
 
 ### sticker_update (Server -> Client, broadcast)
 
@@ -4047,6 +4075,7 @@ tables below add per-type behavioral notes.
 | `voice_token`          | No       | Direct to joiner                                                                                       |
 | `member_join`          | Yes      | All clients                                                                                            |
 | `member_update`        | Yes      | All clients                                                                                            |
+| `member_update_batch`  | Yes      | All clients (several members)                                                                          |
 | `user_update`          | Yes      | All clients (profile changes)                                                                          |
 | `member_ban`           | Yes      | All clients                                                                                            |
 | `roles_update`         | Yes      | All clients (full role list)                                                                           |

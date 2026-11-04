@@ -22,8 +22,8 @@ var (
 	// its threshold (room for two chunks before the first, a quarter of capacity
 	// between chunks) before kicking it.
 	roleRefreshDrainWait = 500 * time.Millisecond
-	// memberUpdateBatch is how many member_update frames are enqueued before the worker
-	// waits for dispatch, then pauses memberUpdatePause.
+	// memberUpdateBatch is how many members one member_update_batch frame carries;
+	// after each frame the worker waits for dispatch, then pauses memberUpdatePause.
 	memberUpdateBatch = 64
 	// roleRefreshListAttempts is how many consecutive rounds may fail to read the
 	// channel list before the affected users are closed.
@@ -31,7 +31,7 @@ var (
 	// roleRefreshRetryBackoff is the wait before re-running a round that could not read
 	// the channel list.
 	roleRefreshRetryBackoff = 500 * time.Millisecond
-	// memberUpdatePause is the breathing space between member_update batches.
+	// memberUpdatePause is the breathing space between member_update_batch frames.
 	memberUpdatePause = 5 * time.Millisecond
 )
 
@@ -53,8 +53,8 @@ type roleChannels struct {
 	known   map[int64]struct{} // every channel id in the snapshot
 }
 
-// runRoleRound is one round: sidebar and topics for the Visibility users, a paced
-// member_update per MemberUpdate user, the timeout views of users whose role
+// runRoleRound is one round: sidebar and topics for the Visibility users, paced
+// member_update_batch frames for the MemberUpdate users, the timeout views of users whose role
 // changed, then one roles_update. If the channel list cannot be read it puts the
 // batch back and returns the backoff; after roleRefreshListAttempts consecutive
 // failures the users are closed instead (they reconnect onto a full ready) and the
@@ -435,39 +435,6 @@ func (h *Hub) roleNameNow(ctx context.Context, uid int64) (name string, roleIDs 
 		return "", nil, false
 	}
 	return name, slices.Clone(roleIDs), true
-}
-
-// sendMemberUpdates enqueues one member_update per user, connected or not, in
-// batches. Each batch waits for dispatch to catch up and then pauses, so a role with
-// thousands of holders does not flood the queue. A refused enqueue waits for
-// dispatch and retries once; the drop is already recorded as a loss for resumers.
-func (h *Hub) sendMemberUpdates(ctx context.Context, ids []int64) {
-	sent := 0
-	for _, uid := range ids {
-		if ctx.Err() != nil {
-			return
-		}
-		rctx, cancel := context.WithTimeout(ctx, roleRefreshUserBudget)
-		name, roleIDs, ok := h.roleNameNow(rctx, uid)
-		cancel()
-		if !ok {
-			continue
-		}
-		bm := broadcastMsg{channelID: 0, msg: buildMemberUpdate(uid, name, roleIDs)}
-		if !h.enqueue(bm, "member_update") {
-			_ = h.awaitDispatch(ctx)
-			h.enqueue(bm, "member_update")
-		}
-		sent++
-		if sent%memberUpdateBatch == 0 {
-			_ = h.awaitDispatch(ctx)
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(memberUpdatePause):
-			}
-		}
-	}
 }
 
 // broadcastRolesNow re-reads the role list and pushes it to every client. One

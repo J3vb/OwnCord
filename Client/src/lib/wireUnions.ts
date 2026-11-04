@@ -85,6 +85,7 @@ import type {
   ErrorPayload,
   MemberBanPayload,
   MemberJoinPayload,
+  MemberUpdateBatchPayload,
   MemberUpdatePayload,
   PresenceBatchPayload,
   RolesUpdatePayload,
@@ -143,6 +144,7 @@ export type ServerMessage =
   | (WsEnvelope<VoiceWatchingPayload> & { readonly type: "voice_watching" })
   | (WsEnvelope<MemberJoinPayload> & { readonly type: "member_join" })
   | (WsEnvelope<MemberUpdatePayload> & { readonly type: "member_update" })
+  | (WsEnvelope<MemberUpdateBatchPayload> & { readonly type: "member_update_batch" })
   | (WsEnvelope<UserUpdatePayload> & { readonly type: "user_update" })
   | (WsEnvelope<MemberBanPayload> & { readonly type: "member_ban" })
   | (WsEnvelope<ModActionPayload> & { readonly type: "mod_action" })

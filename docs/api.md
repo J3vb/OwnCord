@@ -6076,15 +6076,16 @@ principal that clears the bit still cannot escalate through it.
 - Deleting a role gives the default role to each member it leaves with no
   role (a member who holds another role keeps it and is not moved), re-derives
   every holder's top role in the same transaction, drops the role's `channel_overrides` rows, invalidates the moved members'
-  cached permissions, and broadcasts a `member_update` per member.
+  cached permissions, and broadcasts the moved members' new roles
+  (`member_update` for one, `member_update_batch` frames of up to 64 for several).
 - Names are unique **case-insensitively** (migration `023`), matching the
   case-insensitive lookup the desktop client does. Max 32 characters.
 - Colors are `#rgb` or `#rrggbb`, normalized to uppercase. `""` clears the
   color. Anything else is `400`.
 - Unknown permission bits are masked off rather than rejected.
 - Moving a role (a `position` edit or a reorder) re-derives the top role of
-  every member who holds it next to another role, and sends them a
-  `member_update`.
+  every member who holds it next to another role, and sends their new roles
+  (`member_update` for one, `member_update_batch` for several).
 - Every mutation writes an audit row (`role_create`, `role_update`,
   `role_delete`, `role_reorder`) and broadcasts `roles_update` (see
   `docs/protocol.md`) carrying the full new list.

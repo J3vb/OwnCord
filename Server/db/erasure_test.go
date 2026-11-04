@@ -891,6 +891,9 @@ func TestDeleteEventsForUser_MatchesEveryEnvelopeShape(t *testing.T) {
 		// A call log row names its participants.
 		{fmt.Sprintf(`{"seq":12,"type":"chat_message","payload":{"id":11,"user":{"id":%d},"kind":"call","call":{"started_at":"x","ended_at":null,"participants":[%d,%d]}}}`, other, other, uid), true},
 		{fmt.Sprintf(`{"seq":13,"type":"chat_edited","payload":{"message_id":11,"kind":"call","call":{"started_at":"x","ended_at":"y","participants":[%d]}}}`, other), false},
+		// A role rename's batch names every member it lists.
+		{fmt.Sprintf(`{"seq":14,"type":"member_update_batch","payload":{"members":[{"user_id":%d,"role":"r"},{"user_id":%d,"role":"r","role_ids":[3]}]}}`, other, uid), true},
+		{fmt.Sprintf(`{"seq":15,"type":"member_update_batch","payload":{"members":[{"user_id":%d,"role":"r"}]}}`, other), false},
 	}
 	for i, r := range rows {
 		if _, err := database.ExecContext(ctx, `INSERT INTO events (seq, event_type, payload, channel_id) VALUES (?, 'x', ?, 0)`, i+1, r.payload); err != nil {
@@ -901,19 +904,19 @@ func TestDeleteEventsForUser_MatchesEveryEnvelopeShape(t *testing.T) {
 	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE `+db.EventNamesUserPredicate, uid).Scan(&before); err != nil {
 		t.Fatalf("count: %v", err)
 	}
-	if before != 7 {
-		t.Errorf("predicate matched %d rows, want 7", before)
+	if before != 8 {
+		t.Errorf("predicate matched %d rows, want 8", before)
 	}
 	n, err := database.DeleteEventsForUser(ctx, uid)
 	if err != nil {
 		t.Fatalf("DeleteEventsForUser: %v", err)
 	}
-	if n != 7 {
-		t.Errorf("deleted %d rows, want 7", n)
+	if n != 8 {
+		t.Errorf("deleted %d rows, want 8", n)
 	}
 	var left int
-	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM events`).Scan(&left); err != nil || left != 6 {
-		t.Errorf("rows left = %d (%v), want the 6 naming nobody or someone else", left, err)
+	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM events`).Scan(&left); err != nil || left != 7 {
+		t.Errorf("rows left = %d (%v), want the 7 naming nobody or someone else", left, err)
 	}
 }
 

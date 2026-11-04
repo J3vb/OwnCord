@@ -226,14 +226,33 @@ export function removeMember(userId: number): void {
 /** Update a member's role from a member_update event. `roleIds` is every held
  *  role; omitted by an older server, which also drops any stale list. */
 export function updateMemberRole(userId: number, role: string, roleIds?: readonly number[]): void {
+  updateMemberRoles([{ userId, role, roleIds }]);
+}
+
+/** One member's roles as a member_update or member_update_batch entry carries them. */
+export interface MemberRoleUpdate {
+  readonly userId: number;
+  readonly role: string;
+  readonly roleIds?: readonly number[] | undefined;
+}
+
+/** Apply several role updates in order as one store change; members the roster
+ *  does not know are skipped, and nothing changes when none is known. */
+export function updateMemberRoles(updates: readonly MemberRoleUpdate[]): void {
   membersStore.setState((prev) => {
-    const existing = prev.members.get(userId);
-    if (!existing) return prev;
-    const next = new Map(prev.members);
-    const updated: Member = { ...existing, role };
-    // Rebuilt without the old list so an absent field cannot keep a stale one.
-    const { roleIds: _old, ...withoutIds } = updated;
-    next.set(userId, roleIds === undefined ? withoutIds : { ...withoutIds, roleIds });
+    let next: Map<number, Member> | undefined;
+    for (const { userId, role, roleIds } of updates) {
+      const existing = (next ?? prev.members).get(userId);
+      if (!existing) continue;
+      next ??= new Map(prev.members);
+      // Rebuilt without the old list so an absent field cannot keep a stale one.
+      const { roleIds: _old, ...withoutIds } = existing;
+      next.set(
+        userId,
+        roleIds === undefined ? { ...withoutIds, role } : { ...withoutIds, role, roleIds },
+      );
+    }
+    if (next === undefined) return prev;
     return { ...prev, members: next, roleRevision: (prev.roleRevision ?? 0) + 1 };
   });
 }
