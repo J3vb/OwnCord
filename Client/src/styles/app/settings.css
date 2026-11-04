@@ -146,10 +146,6 @@
 .settings-pane.active {
   display: block;
 }
-/* Rows read the pane's width, so a segmented choice can turn into a select. */
-.settings-pane {
-  container: settings-pane / inline-size;
-}
 /* The one row pattern (features/settings/settingRow.ts): title and
    description left, control right, a hairline between rows; stacked puts a
    wide control under its title. */
@@ -157,13 +153,13 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
   padding: 16px 0;
   border-bottom: 1px solid var(--border);
 }
 .setting-info {
   flex: 1;
   min-width: 0;
+  margin-right: 16px;
 }
 .setting-row.stacked {
   display: block;
@@ -215,7 +211,7 @@
 .toggle.on::after {
   transform: translateX(16px);
 }
-/* A single choice: one segmented track that never wraps. Too narrow a pane
+/* A single choice: one segmented track that never wraps. A narrow window
    shows the same choice as a select. */
 .level-options {
   display: inline-flex;
@@ -248,11 +244,16 @@
 .segmented-select {
   display: none;
 }
-@container settings-pane (max-width: 520px) {
+/* A narrow window (a phone, or a desktop window beside the settings
+   sidebar) leaves the pane under about 520 px. */
+@media (max-width: 760px) {
   .setting-row:has(> .segmented-wrap) {
     flex-direction: column;
     align-items: stretch;
     gap: 8px;
+  }
+  .setting-row:has(> .segmented-wrap) > .setting-info {
+    margin-right: 0;
   }
   .segmented-wrap > .segmented {
     display: none;

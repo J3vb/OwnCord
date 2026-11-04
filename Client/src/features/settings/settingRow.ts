@@ -2,8 +2,8 @@
 // control on the right, a hairline between rows. A wide control (theme tiles,
 // a slider with its value, a list) uses the stacked row: title over control.
 // The single-choice control is a segmented row of radios that never wraps;
-// when the pane is too narrow for it (styles: settings.css, container query on
-// .settings-pane) the same choice shows as a <select> instead.
+// in a narrow window (styles: settings.css) the same choice shows as a
+// <select> instead.
 import { appendChildren, createElement } from "@lib/dom";
 import { enableRovingNavigation, setRovingTabindex } from "@lib/ui/a11y";
 
