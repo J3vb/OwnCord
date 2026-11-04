@@ -127,6 +127,29 @@ describe("LogFiles.clearAll", () => {
   });
 });
 
+describe("LogFiles daily limit", () => {
+  test("stops writing a day's file past about 20 MB, with one note", async () => {
+    const mod = await freshModule();
+    appLogDir.mockResolvedValue("/logs");
+    await mod.logFiles.init();
+    const line = (message: string): void =>
+      capturedListener?.({ timestamp: "t", level: "debug", component: "test", message });
+
+    line("x".repeat(15 << 20));
+    await mod.logFiles.flush();
+    line("y".repeat(10 << 20));
+    await mod.logFiles.flush();
+    line("z");
+    await mod.logFiles.flush();
+
+    const written = writeTextFile.mock.calls.map((call) => call[1] as string);
+    expect(written).toHaveLength(2);
+    expect(written[0]).toContain("xxx");
+    expect(written[1]).toContain("daily log limit reached");
+    expect(written[1]).not.toContain("yyy");
+  });
+});
+
 // The support bundle's log half (B7-15c).
 describe("LogFiles.readAll", () => {
   test("reads every persisted log file oldest first, verbatim, and nothing else", async () => {
@@ -164,6 +187,17 @@ describe("LogFiles.readAll", () => {
     readDir.mockRejectedValue(new Error("No such file or directory (os error 2)"));
 
     await expect(mod.logFiles.readAll()).resolves.toEqual([]);
+  });
+
+  test("keeps only the newest 4 MB of a large file", async () => {
+    const mod = await freshModule();
+    appLogDir.mockResolvedValue("/logs");
+    readDir.mockResolvedValue([{ name: "2026-09-20.jsonl", isDirectory: false }]);
+    const big = "o".repeat(1000) + "n".repeat(4 << 20);
+    readTextFile.mockResolvedValue(big);
+
+    const [file] = await mod.logFiles.readAll();
+    expect(file?.text).toBe("n".repeat(4 << 20));
   });
 
   test("propagates a failure that is not a missing directory", async () => {

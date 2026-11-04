@@ -263,8 +263,7 @@
       "createApiClient > doFetch": [30]
     },
     "lib/apiShared.ts": {
-      "authSliceCopy": [28],
-      "serverErrorCopy": [25]
+      "authSliceCopy": [28]
     },
     "lib/diagnostics/eventLog.ts": {
       "checkValue": [25]

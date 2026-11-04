@@ -18,8 +18,8 @@ export interface LogFiles {
   getDir(): string | null;
   /** Delete every persisted log file from disk. */
   clearAll(): Promise<void>;
-  /** Every persisted log file, oldest first, read verbatim — the support
-   *  bundle's log half. Empty when no log directory exists yet. */
+  /** Every persisted log file, oldest first, each cut to its newest few MB —
+   *  the support bundle's log half. Empty when no log directory exists yet. */
   readAll(): Promise<readonly { readonly name: string; readonly text: string }[]>;
   /**
    * The Rust log (`owncord-client.log`, plus any rotated

@@ -229,6 +229,8 @@ export const connectText = defineCatalog("connect", {
   "error.banned": "Your account has been suspended.",
   "error.unavailable": "The server is temporarily unavailable. Try again.",
   "error.storageQuota": "Your storage is full — delete files or ask a server admin.",
+  "error.transferTimedOut":
+    "The upload took too long for this connection. Try a smaller file or a faster network.",
   "error.storageLowDisk": "The server is low on disk space — try again later.",
   "error.storageError": "The server could not store that. Try again.",
   "error.gifDisabled": "GIF search is not configured on this server.",
