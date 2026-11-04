@@ -26,6 +26,7 @@ import { Disposable } from "@lib/disposable";
 import { AudioPipeline } from "@lib/voice/audioPipeline";
 import { AudioElements } from "@lib/voice/audioElements";
 import { E2EEManager } from "@lib/voice/livekitE2EE";
+import type { ForgetIdentityPinResult } from "@lib/net/identity";
 import { DeviceManager } from "@lib/voice/deviceManager";
 import {
   type CameraTrackState,
@@ -803,6 +804,16 @@ export class LiveKitSession {
     identityKeyBase64?: string,
   ): Promise<void> {
     return this._e2ee.handleAnnounce(userId, publicKeyBase64, signatureBase64, identityKeyBase64);
+  }
+
+  /** Every identity key trusted for a peer. See E2EEPeerState.trustedKeys. */
+  trustedPeerKeys(userId: number): Promise<readonly string[] | null> {
+    return this._e2ee.peerKeys.trustedKeys(userId);
+  }
+
+  /** Stop trusting one of a peer's keys. See E2EEPeerState.forgetKey. */
+  forgetPeerKey(userId: number, key: string): Promise<ForgetIdentityPinResult> {
+    return this._e2ee.peerKeys.forgetKey(userId, key);
   }
 
   /** The identity key from the peer's current announce, or null when they have

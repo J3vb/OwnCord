@@ -188,8 +188,15 @@ export function drawVoiceUserRow(
     badge.style.color = model.verify.color;
     badge.title = model.verify.title;
     badge.appendChild(createIcon(model.verify.icon, 14));
-    // A blocked peer's shield opens the re-trust prompt (bound by the sidebar).
-    if (model.verify.cls === "mismatch") badge.style.cursor = "pointer";
+    // A blocked peer's shield opens the re-trust prompt, any other with an
+    // identity key their trusted keys (both bound by the sidebar).
+    if (
+      model.verify.cls === "mismatch" ||
+      model.verify.cls === "verified" ||
+      model.verify.cls === "changed"
+    ) {
+      badge.style.cursor = "pointer";
+    }
     row.appendChild(badge);
   }
 

@@ -15,7 +15,7 @@
  */
 
 import { createLogger } from "@lib/logger";
-import type { KeyPlacement } from "./keyPlacement";
+import { LEGACY_PLACEMENT, type KeyPlacement } from "./keyPlacement";
 
 const log = createLogger("e2eeCrypto");
 
@@ -34,6 +34,8 @@ const HKDF_SALT = new Uint8Array([
 ]);
 // UTF-8 bytes of "room-key-wrap"
 const HKDF_INFO = new Uint8Array([114, 111, 111, 109, 45, 107, 101, 121, 45, 119, 114, 97, 112]);
+// Label for the v3 wrapping key, followed by sender and recipient user ids.
+const HKDF_INFO_V3_LABEL = new TextEncoder().encode("owncord-room-key-wrap-v3");
 const ROOM_KEY_BYTES = 32; // 256-bit AES key for LiveKit SFrame
 
 // ── Long-term identity keys (F3: voice E2EE TOFU) ──────────────────────────
@@ -221,18 +223,43 @@ export function roomKeyToBase64(key: Uint8Array): string {
  *  starts sending with it a moment later (flag bit 0). It goes only to a peer
  *  that announced `key_slots`; every other peer gets v1, which means slot 0,
  *  used at once.
+ *  v3 (`0x03`) has the v2 layout, but its wrapping key also binds the sender
+ *  and recipient user ids (see OfferBinding), so an offer only unwraps in the
+ *  direction it was made for.
  *  Blobs with no header are the pre-epoch format: unwrap still accepts them
  *  for holders on the old build, reporting `epoch: null`. */
 const OFFER_FORMAT_V1 = 0x01;
 const OFFER_FORMAT_V2 = 0x02;
+const OFFER_FORMAT_V3 = 0x03;
 const OFFER_HEADER_BYTES = 9;
 const OFFER_HEADER_V2_BYTES = 11;
 const OFFER_FLAG_STAGE = 0x01;
 
-function encodeOfferHeader(epoch: number, placement?: KeyPlacement): Uint8Array<ArrayBuffer> {
+/** Who an offer goes from and to. A v3 offer binds both user ids into its
+ *  wrapping key, so it unwraps only as an offer from `senderId` to
+ *  `recipientId`. It goes only to a peer that announced `bound_offers`. */
+export interface OfferBinding {
+  readonly senderId: number;
+  readonly recipientId: number;
+}
+
+function encodeOfferHeader(
+  epoch: number,
+  placement?: KeyPlacement,
+  bound = false,
+): Uint8Array<ArrayBuffer> {
   if (!Number.isSafeInteger(epoch) || epoch < 0) {
     // i18n-exempt: internal E2EE protocol guard, never rendered
     throw new Error("E2EE: offer epoch must be a non-negative safe integer");
+  }
+  if (bound) {
+    const at = placement ?? LEGACY_PLACEMENT;
+    const header = new Uint8Array(OFFER_HEADER_V2_BYTES);
+    header[0] = OFFER_FORMAT_V3;
+    new DataView(header.buffer).setBigUint64(1, BigInt(epoch));
+    header[9] = at.slot;
+    header[10] = at.stage ? OFFER_FLAG_STAGE : 0;
+    return header;
   }
   if (placement === undefined) {
     const header = new Uint8Array(OFFER_HEADER_BYTES);
@@ -255,6 +282,9 @@ function encodeOfferHeader(epoch: number, placement?: KeyPlacement): Uint8Array<
  * 2. HKDF-SHA256(shared, salt, info) → 256-bit AES wrapping key
  * 3. AES-GCM(wrappingKey, randomIV, roomKey, aad=header) → ciphertext
  * 4. encrypted_key = header ‖ ciphertext
+ *
+ * With `binding`, the blob is v3 and step 2 mixes both user ids into the
+ * HKDF info.
  */
 export async function wrapRoomKey(
   myPrivateKey: CryptoKey,
@@ -262,9 +292,10 @@ export async function wrapRoomKey(
   roomKey: Uint8Array,
   epoch: number,
   placement?: KeyPlacement,
+  binding?: OfferBinding,
 ): Promise<{ encryptedKey: string; iv: string }> {
-  const header = encodeOfferHeader(epoch, placement);
-  const wrapKey = await deriveWrappingKey(myPrivateKey, peerPublicKey);
+  const header = encodeOfferHeader(epoch, placement, binding !== undefined);
+  const wrapKey = await deriveWrappingKey(myPrivateKey, peerPublicKey, binding);
   const iv = crypto.getRandomValues(new Uint8Array(12)); // 96-bit GCM nonce
 
   const ciphertext = await crypto.subtle.encrypt(
@@ -285,17 +316,25 @@ export async function wrapRoomKey(
  * Same ECDH + HKDF derivation as wrapRoomKey, but on the receiver's side.
  * Returns the epoch the holder bound into the blob, or null for a legacy
  * (pre-epoch) blob, and the key's placement for a v2 blob (undefined for any
- * older one, which means LEGACY_PLACEMENT).
+ * older one, which means LEGACY_PLACEMENT). `binding` names the direction
+ * this offer arrived in (sender = the relayed from_user_id, recipient = us);
+ * a v3 blob unwraps only under it.
  */
 export async function unwrapRoomKey(
   myPrivateKey: CryptoKey,
   peerPublicKey: CryptoKey,
   encryptedKeyBase64: string,
   ivBase64: string,
+  binding?: OfferBinding,
 ): Promise<{ roomKey: Uint8Array; epoch: number | null; placement?: KeyPlacement }> {
-  const wrapKey = await deriveWrappingKey(myPrivateKey, peerPublicKey);
   const iv = base64ToUint8(ivBase64);
   const blob = base64ToUint8(encryptedKeyBase64);
+  const bound = blob.byteLength !== ROOM_KEY_BYTES + 16 && blob[0] === OFFER_FORMAT_V3;
+  if (bound && binding === undefined) {
+    // i18n-exempt: internal E2EE protocol guard, never rendered
+    throw new Error("E2EE: bound offer without sender and recipient");
+  }
+  const wrapKey = await deriveWrappingKey(myPrivateKey, peerPublicKey, bound ? binding : undefined);
 
   // Legacy blob: exactly key + GCM tag, no header. A v1 blob is 9 bytes
   // longer, so the two formats never collide on length.
@@ -306,10 +345,28 @@ export async function unwrapRoomKey(
     return { roomKey: new Uint8Array(plaintext), epoch: null };
   }
 
+  const { header, epoch, placement } = parseOfferHeader(blob);
+  const plaintext = await crypto.subtle.decrypt(
+    { name: "AES-GCM", iv, additionalData: header },
+    wrapKey,
+    blob.subarray(header.byteLength),
+  );
+  const roomKey = new Uint8Array(plaintext);
+  return placement === undefined ? { roomKey, epoch } : { roomKey, epoch, placement };
+}
+
+// ── Internal helpers ────────────────────────────────────────────────────────
+
+/** A v1/v2/v3 offer's header (all of it GCM additional data), epoch and placement. */
+function parseOfferHeader(blob: Uint8Array<ArrayBuffer>): {
+  header: Uint8Array<ArrayBuffer>;
+  epoch: number;
+  placement?: KeyPlacement;
+} {
   const headerBytes =
     blob[0] === OFFER_FORMAT_V1
       ? OFFER_HEADER_BYTES
-      : blob[0] === OFFER_FORMAT_V2
+      : blob[0] === OFFER_FORMAT_V2 || blob[0] === OFFER_FORMAT_V3
         ? OFFER_HEADER_V2_BYTES
         : 0;
   if (headerBytes === 0 || blob.byteLength < headerBytes) {
@@ -332,25 +389,36 @@ export async function unwrapRoomKey(
     }
     placement = { slot, stage: (flags & OFFER_FLAG_STAGE) !== 0 };
   }
-  const plaintext = await crypto.subtle.decrypt(
-    { name: "AES-GCM", iv, additionalData: header },
-    wrapKey,
-    blob.subarray(headerBytes),
-  );
-  const roomKey = new Uint8Array(plaintext);
   return placement === undefined
-    ? { roomKey, epoch: Number(epochBig) }
-    : { roomKey, epoch: Number(epochBig), placement };
+    ? { header, epoch: Number(epochBig) }
+    : { header, epoch: Number(epochBig), placement };
 }
 
-// ── Internal helpers ────────────────────────────────────────────────────────
+/** HKDF info for a v3 offer: label ‖ sender id (u64 BE) ‖ recipient id (u64 BE).
+ *  Fixed-width ids keep the encoding unambiguous. */
+function boundInfo(binding: OfferBinding): Uint8Array<ArrayBuffer> {
+  for (const id of [binding.senderId, binding.recipientId]) {
+    if (!Number.isSafeInteger(id) || id <= 0) {
+      // i18n-exempt: internal E2EE protocol guard, never rendered
+      throw new Error("E2EE: offer user id must be a positive safe integer");
+    }
+  }
+  const info = new Uint8Array(HKDF_INFO_V3_LABEL.length + 16);
+  info.set(HKDF_INFO_V3_LABEL, 0);
+  const view = new DataView(info.buffer);
+  view.setBigUint64(HKDF_INFO_V3_LABEL.length, BigInt(binding.senderId));
+  view.setBigUint64(HKDF_INFO_V3_LABEL.length + 8, BigInt(binding.recipientId));
+  return info;
+}
 
 /**
  * Derive a 256-bit AES-GCM wrapping key from an ECDH shared secret via HKDF.
+ * With `binding` the info also carries both user ids (v3).
  */
 async function deriveWrappingKey(
   myPrivateKey: CryptoKey,
   peerPublicKey: CryptoKey,
+  binding?: OfferBinding,
 ): Promise<CryptoKey> {
   // Step 1: ECDH → raw shared secret bits
   const sharedBits = await crypto.subtle.deriveBits(
@@ -368,7 +436,7 @@ async function deriveWrappingKey(
       name: "HKDF",
       hash: "SHA-256",
       salt: HKDF_SALT,
-      info: HKDF_INFO,
+      info: binding === undefined ? HKDF_INFO : boundInfo(binding),
     },
     hkdfKey,
     { name: "AES-GCM", length: 256 },

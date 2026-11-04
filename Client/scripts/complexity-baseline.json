@@ -226,7 +226,7 @@
       "createVoiceComposer > upload": [21]
     },
     "features/voice/e2eeOffer.ts": {
-      "E2EEOffer > handleOfferInner": [22]
+      "E2EEOffer > handleOfferInner": [21]
     },
     "features/voice/e2eePeerState.ts": {
       "E2EEPeerState > verifyPeerAnnounce": [33]
