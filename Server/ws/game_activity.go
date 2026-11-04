@@ -174,7 +174,7 @@ func clampActivityStart(startedAt int64, now time.Time) int64 {
 func (h *Hub) applyActivity(c *Client, next *gameActivity) {
 	h.presenceMu.Lock()
 	defer h.presenceMu.Unlock()
-	if next != nil && !h.gameActivity.on.Load() {
+	if next != nil && !h.settings.gameActivity.on.Load() {
 		return
 	}
 	h.applyActivityLocked(c, next)

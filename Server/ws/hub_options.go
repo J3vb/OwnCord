@@ -171,12 +171,9 @@ func NewHub(opts HubOptions) (*Hub, error) {
 		clients:             make(map[int64][]*Client),
 		db:                  database,
 		limiter:             limiter,
-		settings:            opts.Settings,
 		readers:             opts.Readers,
 		voice:               opts.Voice,
 		defaultVoiceQuality: defaultVoiceQuality,
-		settingsUpload:      opts.UploadPolicy,
-		uploadFileTypes:     opts.UploadFileTypes,
 		voiceMod:            newUserLocks[lockRankVoiceMod](),
 		presence:            opts.Presence,
 		broadcast:           make(chan broadcastMsg, 1024),
@@ -186,9 +183,14 @@ func NewHub(opts HubOptions) (*Hub, error) {
 		pubsub:              NewPubSub(),
 		replayBuf:           NewEventRingBuffer(ringSize),
 		permChecker:         permissions.NewChecker(database),
-		settingsName:        "OwnCord Server",
-		settingsMotd:        "Welcome!",
-		voiceKeyHolders:     make(map[int64]int64),
+		settings: hubSettings{
+			reader:          opts.Settings,
+			upload:          opts.UploadPolicy,
+			uploadFileTypes: opts.UploadFileTypes,
+			name:            "OwnCord Server",
+			motd:            "Welcome!",
+		},
+		voiceKeyHolders: make(map[int64]int64),
 		lifecycle: hubLifecycle{
 			runDone: make(chan struct{}),
 			fatalFn: func() { os.Exit(1) },
@@ -214,7 +216,7 @@ func NewHub(opts HubOptions) (*Hub, error) {
 		LiveStatus: h.LiveStatus,
 		LiveMobile: h.LiveMobile,
 	}
-	presenceDeps := PresenceDeps{Limiter: h.limiter, GameActivityEnabled: h.gameActivity.on.Load}
+	presenceDeps := PresenceDeps{Limiter: h.limiter, GameActivityEnabled: h.settings.gameActivity.on.Load}
 	reactionDeps := ReactionDeps{}
 	callDeps := CallDeps{Limiter: h.limiter}
 	if svc != nil {
@@ -282,7 +284,7 @@ func (h *Hub) voiceDeps() VoiceDeps {
 		TokenGen:    h, // Hub delegates to h.livekit at call time
 		KeyHolder:   h,
 		Mod:         h,
-		Settings:    h.settings,
+		Settings:    h.settings.reader,
 	}
 }
 

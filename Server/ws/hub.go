@@ -92,9 +92,9 @@ type Hub struct {
 	// are dropped, plus the purge/cold-read lock (hub_tombstones.go).
 	tombstones replayPurgeState
 
-	// Settings cache avoiding per-connection DB queries for server_name/motd; settings
-	// is the read seam it refreshes through.
-	settings SettingsReader
+	// settings is the cache avoiding per-connection DB queries for server_name/motd,
+	// with its read seam and the upload-policy and game activity state (hub_settings.go).
+	settings hubSettings
 
 	// readers are the hub's remaining read seams (readers.go).
 	readers HubReaders
@@ -113,7 +113,6 @@ type Hub struct {
 	// voiceQualities' keys (NewHub normalizes it). Set once, never mutated
 	// (voice.quality is startup-only), so no mutex guards it.
 	defaultVoiceQuality string
-	uploadFileTypes     UploadFileTypes // HubOptions.UploadFileTypes; may be nil
 
 	// voiceMod is the per-target-user lock serializing a voice-moderation DB
 	// transition with its paired LiveKit call (user_locks.go). Always non-nil (made in
@@ -121,13 +120,6 @@ type Hub struct {
 	// interleave.
 	voiceMod *userLocks[lockRankVoiceMod]
 
-	settingsMu         syncutil.RankedRW[lockRankHubCache]
-	settingsName       string
-	settingsMotd       string
-	settingsUpload     UploadPolicy // auth_ok's upload_policy; the lists refresh with the cache
-	settingsLastUpdate time.Time
-	uploadPolicyMu     syncutil.Ranked[lockRankSerialiser] // orders BroadcastUploadPolicy's saves (hub_settings.go)
-	gameActivity       gameActivityState                   // the game activity switch (hub_settings.go)
 	// voiceKeyHolders maps channelID to the current key holder (the connected
 	// participant with the lowest userID). Protected by keyHolderMu.
 	keyHolderMu     syncutil.RankedRW[lockRankHubCache]

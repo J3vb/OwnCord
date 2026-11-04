@@ -108,7 +108,7 @@ func (h *Hub) afkStillTarget(ctx context.Context, afkID int64) bool {
 // default. A read failure skips the sweep (false), so an unreadable setting never
 // moves anyone on a guess.
 func (h *Hub) afkTimeout(ctx context.Context) (time.Duration, bool) {
-	stored, err := h.settings.Setting(ctx, service.AFKTimeoutKey)
+	stored, err := h.settings.reader.Setting(ctx, service.AFKTimeoutKey)
 	if err != nil && !errors.Is(err, db.ErrNotFound) {
 		slog.Warn("voice afk: sweep read failed", "what", "timeout setting", "err", err)
 		return 0, false

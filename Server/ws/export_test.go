@@ -409,9 +409,9 @@ func PeekClientPendingModFlagsForTest(c *Client) (serverMuted, serverDeafened bo
 // ExpireSettingsCacheForTest forces the settings cache to appear stale so that
 // the next call to getCachedSettings triggers a DB refresh.
 func (h *Hub) ExpireSettingsCacheForTest() {
-	h.settingsMu.Lock()
-	defer h.settingsMu.Unlock()
-	h.settingsLastUpdate = time.Time{} // zero time — always older than any TTL
+	h.settings.mu.Lock()
+	defer h.settings.mu.Unlock()
+	h.settings.lastUpdate = time.Time{} // zero time — always older than any TTL
 }
 
 // BuildJSONForTest exposes buildJSON for external tests.

@@ -914,7 +914,7 @@ func TestListeningPolicy_ApplyAfterSwitchDropsSet(t *testing.T) {
 	settle(t, h)
 	drain(watcher.send)
 
-	h.gameActivity.on.Store(false)
+	h.settings.gameActivity.on.Store(false)
 	h.applyListening(player, &listeningActivity{Title: "S", Artist: "A", Player: "P", StartedAt: time.Now().UnixMilli()})
 	if err := h.awaitDispatch(context.Background()); err != nil {
 		t.Fatal(err)
@@ -927,9 +927,9 @@ func TestListeningPolicy_ApplyAfterSwitchDropsSet(t *testing.T) {
 	}
 
 	// A clear is always applied.
-	h.gameActivity.on.Store(true)
+	h.settings.gameActivity.on.Store(true)
 	h.applyListening(player, &listeningActivity{Title: "S", Artist: "A", Player: "P", StartedAt: time.Now().UnixMilli()})
-	h.gameActivity.on.Store(false)
+	h.settings.gameActivity.on.Store(false)
 	if err := h.awaitDispatch(context.Background()); err != nil {
 		t.Fatal(err)
 	}
