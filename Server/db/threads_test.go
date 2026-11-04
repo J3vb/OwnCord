@@ -223,6 +223,9 @@ func TestThreadNSFWConsentIsParents(t *testing.T) {
 	if ok, err := f.db.HasNSFWAcknowledgement(ctx, f.user, f.thread); err != nil || ok {
 		t.Fatalf("before the parent ack: %v, %v", ok, err)
 	}
+	if found, readable, err := f.db.ChannelContentGate(ctx, f.user, f.thread); err != nil || !found || readable {
+		t.Fatalf("ChannelContentGate(thread) before the parent ack = %v, %v, %v, want labelled and unreadable", found, readable, err)
+	}
 	if labelled, err := f.db.AcknowledgeNSFW(ctx, f.user, f.parent); err != nil || !labelled {
 		t.Fatalf("AcknowledgeNSFW(parent) = %v, %v", labelled, err)
 	}
@@ -232,6 +235,12 @@ func TestThreadNSFWConsentIsParents(t *testing.T) {
 	ids, err := f.db.ListNSFWAcknowledgedUserIDs(ctx, f.thread)
 	if err != nil || len(ids) != 1 || ids[0] != f.user {
 		t.Errorf("ListNSFWAcknowledgedUserIDs(thread) = %v, %v", ids, err)
+	}
+	if found, readable, err := f.db.ChannelContentGate(ctx, f.user, f.thread); err != nil || !found || !readable {
+		t.Errorf("ChannelContentGate(thread) = %v, %v, %v, want the parent's label and ack", found, readable, err)
+	}
+	if acked, err := f.db.ListNSFWAcknowledgedChannelIDs(ctx, f.user); err != nil || !acked[f.parent] || acked[f.thread] {
+		t.Errorf("ListNSFWAcknowledgedChannelIDs = %v, %v, want the parent only", acked, err)
 	}
 	var keyed int
 	if err := f.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM nsfw_acknowledgements WHERE channel_id = ?`, f.thread).Scan(&keyed); err != nil || keyed != 0 {

@@ -16,7 +16,8 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// switchableGetChannelReader fails GetChannel while fail is set.
+// switchableGetChannelReader fails the channel lookups (GetChannel and the
+// replay's per-frame ChannelContentGate) while fail is set.
 type switchableGetChannelReader struct {
 	VisibilityReader
 	fail atomic.Bool
@@ -27,6 +28,13 @@ func (r *switchableGetChannelReader) GetChannel(ctx context.Context, id int64) (
 		return nil, errors.New("simulated transient lookup failure")
 	}
 	return r.VisibilityReader.GetChannel(ctx, id)
+}
+
+func (r *switchableGetChannelReader) ChannelContentGate(ctx context.Context, userID, channelID int64) (found, readable bool, err error) {
+	if r.fail.Load() {
+		return false, false, errors.New("simulated transient lookup failure")
+	}
+	return r.VisibilityReader.ChannelContentGate(ctx, userID, channelID)
 }
 
 type cseqSocketFixture struct {

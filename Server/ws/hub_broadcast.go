@@ -279,6 +279,7 @@ func (h *Hub) SendToUserLow(userID int64, msg []byte) bool {
 func (h *Hub) sendSequencedToUsers(channelID int64, userIDs []int64, msg []byte) {
 	// The replay copy's JSON work happens before the lock.
 	rs := newReplaySplice(msg)
+	contentBearing := contentBearingKinds[extractEventType(msg)]
 	h.seqMu.Lock()
 	start := time.Now()
 	defer h.seqMu.Unlock()
@@ -290,7 +291,7 @@ func (h *Hub) sendSequencedToUsers(channelID int64, userIDs []int64, msg []byte)
 	seq := h.nextSeq()
 	wrapped := wrapWithSeq(msg, seq)
 	stored := storedCopy(rs, msg, wrapped, seq)
-	h.replayBuf.Push(seq, channelID, stored)
+	h.replayBuf.pushEntry(seq, channelID, contentBearing, stored)
 	h.persistEvent(seq, channelID, stored)
 
 	for _, userID := range userIDs {
@@ -308,8 +309,10 @@ func (h *Hub) deliverGated(bm broadcastMsg, g gateResult) {
 	// The replay copy's JSON work happens before seqMu. A presence window builds its
 	// frame under the lock and carries no reply snippet, so has nothing to precompute.
 	var rs *replaySplice
+	contentBearing := false
 	if bm.presence == nil {
 		rs = newReplaySplice(bm.msg)
+		contentBearing = contentBearingKinds[extractEventType(bm.msg)]
 	}
 
 	// The channel-broadcast debug log is emitted after seqMu is released so a slow
@@ -354,7 +357,7 @@ func (h *Hub) deliverGated(bm broadcastMsg, g gateResult) {
 		}
 
 		stored := storedCopy(rs, bm.msg, msg, seq)
-		h.replayBuf.Push(seq, bm.channelID, stored)
+		h.replayBuf.pushEntry(seq, bm.channelID, contentBearing, stored)
 		h.persistEvent(seq, bm.channelID, stored)
 
 		// Plugin fan-out is captured here and called after seqMu is released, on this same

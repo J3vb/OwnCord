@@ -17,13 +17,13 @@ import (
 
 // computeReadableChannels narrows allowed (the visible set) to the NSFW
 // content readable set: every visible channel that is either not labelled, or
-// labelled and acknowledged by user. Bounded by how many labelled channels
-// sit in the visible set (typically zero), not by the full channel list.
+// labelled and acknowledged by user. The acknowledgements come from one read,
+// taken only when a labelled channel sits in the visible set (typically none).
 //
 // A thread in allowed (admitThreads put it there for a socket that holds it)
 // takes its parent's label and consent: the thread row carries the parent's
-// NSFW flag and the acknowledgement read resolves to the parent, so it is
-// narrowed exactly like the parent would be.
+// NSFW flag and acknowledgements are keyed by the parent, so it is narrowed
+// exactly like the parent would be.
 func (h *Hub) computeReadableChannels(ctx context.Context, database VisibilityReader, user *db.User, allowed map[int64]bool) (map[int64]bool, error) {
 	channels, err := database.ListChannels(ctx)
 	if err != nil {
@@ -33,6 +33,16 @@ func (h *Hub) computeReadableChannels(ctx context.Context, database VisibilityRe
 	for id := range allowed {
 		readable[id] = true
 	}
+	var acked map[int64]bool
+	isAcked := func(id int64) (bool, error) {
+		if acked == nil {
+			var ackErr error
+			if acked, ackErr = database.ListNSFWAcknowledgedChannelIDs(ctx, user.ID); ackErr != nil {
+				return false, fmt.Errorf("computeReadableChannels ListNSFWAcknowledgedChannelIDs: %w", ackErr)
+			}
+		}
+		return acked[id], nil
+	}
 	known := make(map[int64]struct{}, len(channels))
 	for i := range channels {
 		ch := &channels[i]
@@ -40,9 +50,9 @@ func (h *Hub) computeReadableChannels(ctx context.Context, database VisibilityRe
 		if !ch.NSFW || !allowed[ch.ID] {
 			continue
 		}
-		ok, ackErr := database.HasNSFWAcknowledgement(ctx, user.ID, ch.ID)
+		ok, ackErr := isAcked(ch.ID)
 		if ackErr != nil {
-			return nil, fmt.Errorf("computeReadableChannels HasNSFWAcknowledgement: %w", ackErr)
+			return nil, ackErr
 		}
 		if !ok {
 			delete(readable, ch.ID)
@@ -60,9 +70,9 @@ func (h *Hub) computeReadableChannels(ctx context.Context, database VisibilityRe
 		if ch == nil || !ch.NSFW {
 			continue
 		}
-		ok, ackErr := database.HasNSFWAcknowledgement(ctx, user.ID, id)
+		ok, ackErr := isAcked(ch.AuthorityID())
 		if ackErr != nil {
-			return nil, fmt.Errorf("computeReadableChannels HasNSFWAcknowledgement: %w", ackErr)
+			return nil, ackErr
 		}
 		if !ok {
 			delete(readable, id)
