@@ -102,7 +102,8 @@
 .account-header,
 .account-header-identity,
 .account-field,
-.settings-sidebar-profile {
+.settings-sidebar-profile,
+.settings-sidebar-identity {
   min-width: 0;
 }
 .settings-content h1 {
@@ -849,9 +850,19 @@ details.disclose[open] > summary .icon {
   font-weight: 600;
   color: var(--header-primary);
 }
-.settings-sidebar-edit {
+.settings-sidebar-handle {
   font-size: var(--font-size-xs);
   color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+.settings-sidebar-edit {
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  text-align: left;
   cursor: pointer;
 }
 .settings-sidebar-edit:hover {

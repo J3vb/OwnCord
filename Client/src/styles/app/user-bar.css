@@ -29,17 +29,6 @@
     0 0 0 2px var(--green),
     0 0 8px color-mix(in srgb, var(--green) 30%, transparent);
 }
-/* The status picker's own trigger dot now lives here instead of a separate
-   static dot — same corner, but it's the real thing: colored per status and
-   clickable to open the picker. Sizing/border override lives with the rest
-   of the status-picker rules below. */
-.user-bar .ub-status-picker-wrap {
-  position: absolute;
-  /* Over the avatar's bottom-right corner: the avatar is 32px, centred in the
-     40px profile button, which is inset 4px from the left of .ub-self. */
-  left: 26px;
-  top: 25px;
-}
 .user-bar .ub-self {
   position: relative;
   flex: 1;
@@ -48,6 +37,7 @@
 }
 /* The avatar + name button that opens the self profile card. */
 .user-bar .ub-profile-btn {
+  position: relative;
   flex: 1;
   min-width: 0;
   height: 40px;
@@ -70,14 +60,6 @@
 .user-bar .ub-profile-btn:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
-}
-/* UserBar.ts toggles this whenever canSetStatus() is false (socket down, or
-   no ws send path at all) -- without it the dot, dropdown options and
-   custom-status input all stay fully interactive, so anything picked or
-   typed while disconnected is silently dropped instead of refused. */
-.user-bar .ub-status-picker-wrap.ub-status-picker--disabled {
-  pointer-events: none;
-  opacity: 0.5;
 }
 .user-bar .ub-info {
   flex: 1;
@@ -133,97 +115,33 @@
   color: var(--text-muted);
 }
 
-/* Status picker: the root is the inline anchor (trigger dot lives here and
-   must always be visible); the popup chrome + its display:none/open toggle
-   belong on the dropdown child, which is what StatusPicker.ts actually
-   toggles (status-picker-dropdown--open). This block used to be a verbatim
-   holdover from the pre-component popup and hid the whole picker. */
-.status-picker {
-  position: relative;
-  display: flex;
-  align-items: center;
-}
-.status-picker-dropdown {
-  position: absolute;
-  bottom: 60px;
-  left: 8px;
-  background: var(--bg-primary);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  padding: 6px;
-  box-shadow: var(--shadow-md);
-  z-index: 100;
-  display: none;
-  min-width: 160px;
-}
-.status-picker-dropdown--open {
-  display: block;
-}
-/* Trigger dot: only inline style is `background` (StatusPicker.ts), so the
-   size has to live here or the dot collapses to 0x0 and becomes both
-   invisible and unclickable. */
-.status-picker-dot {
-  --sd: 10px;
-  position: relative;
-  width: calc(var(--sd) * var(--phone-w, 1));
-  height: calc(var(--sd) * var(--phone-h, 1));
-  border-radius: var(--status-shape, var(--radius-circle));
-  cursor: pointer;
-  flex-shrink: 0;
-}
-.status-picker-dot:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
-}
-/* In the user bar the dot sits on the avatar corner, not inline next to
-   text — bigger, with a ring so it reads against any avatar picture. */
-.user-bar .status-picker-dot {
+/* The status dot on the avatar's corner, inside the profile button. Its only
+   inline style is `background` (UserBar.ts), so the size lives here. The ring
+   keeps it readable against any avatar picture. */
+.user-bar .ub-status-dot {
   --sd: 12px;
   --status-ring: color-mix(in srgb, var(--bg-tertiary) 60%, transparent);
   /* The phone's screen is opaque: the translucent ring would show the fill through it. */
   --status-screen: var(--bg-tertiary);
+  position: absolute;
+  /* The avatar is 32px, centred in the 40px button with 4px of padding. */
+  left: 26px;
+  top: 25px;
+  width: calc(var(--sd) * var(--phone-w, 1));
+  height: calc(var(--sd) * var(--phone-h, 1));
   border: 3px solid var(--status-ring);
+  border-radius: var(--status-shape, var(--radius-circle));
+  pointer-events: none;
 }
 /* The phone is taller than the round dot: grow it up and to the left so the
    bottom-right corner stays on the avatar's corner. */
-.user-bar .status-picker-dot.status-mobile {
+.user-bar .ub-status-dot.status-mobile {
   margin: calc(var(--sd) * (1 - var(--phone-h))) 0 0 calc(var(--sd) * (1 - var(--phone-w)));
 }
-.status-picker-option {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  font-size: var(--font-size-sm);
-  color: var(--text-normal);
-  transition: background 0.1s ease;
+/* While the connection is down the status cannot change: the dot dims. */
+.user-bar .ub-status-dot.ub-status-dot--offline {
+  opacity: 0.5;
 }
-.status-picker-option:hover {
-  background: var(--bg-hover);
-}
-/* Rows are tabindex="0" menuitems, not buttons, so they need their own
-   focus ring instead of relying on native button focus styling. */
-.status-picker-option:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: -2px;
-}
-.status-picker-option-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: var(--radius-circle);
-  flex-shrink: 0;
-}
-.status-picker-option-label {
-  flex: 1;
-}
-.status-picker-option-check {
-  display: flex;
-  color: var(--accent-text);
-  flex-shrink: 0;
-}
-
 /* ── Self profile card (opened from the user bar's avatar/name) ── */
 .self-profile-card {
   position: fixed;

@@ -80,7 +80,12 @@ describe("SettingsOverlay", () => {
     expect(container.querySelector(".settings-sidebar-avatar .avatar-initial")?.textContent).toBe(
       "Z",
     );
-    expect(container.querySelector(".settings-sidebar-name")?.textContent).toBe("testuser");
+    // The display name leads, like every other identity surface, with the
+    // username under it now that the two differ.
+    expect(container.querySelector(".settings-sidebar-name")?.textContent).toBe("Zed");
+    const handle = container.querySelector<HTMLElement>(".settings-sidebar-handle")!;
+    expect(handle.textContent).toBe("@testuser");
+    expect(handle.hidden).toBe(false);
 
     overlay.destroy?.();
   });

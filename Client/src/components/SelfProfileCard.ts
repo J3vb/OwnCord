@@ -1,13 +1,13 @@
 /**
- * SelfProfileCard — the popout your own avatar/name opens in the user panel.
- * Holds the status menu (with the note under Do Not Disturb and Invisible),
- * the custom status line, Edit Profile (Settings → Account) and, with
- * Developer Mode on, Copy User ID.
+ * SelfProfileCard — the popout your own avatar, status dot or name opens in
+ * the user panel: the one status menu. Holds the statuses (with the note
+ * under Do Not Disturb and Invisible), the custom status line, Edit Profile
+ * (the Account tab's profile editor) and, with Developer Mode on, Copy User ID.
  *
  * It is built per open and torn down on close: while shut there is no element
  * and no listener. It owns nothing about *saving* — the owner hands in the
- * same status/custom-status callbacks the status dropdown uses, so both go
- * through one presence path.
+ * status and custom-status callbacks, so every change goes through one
+ * presence path.
  */
 
 import { Disposable } from "@lib/disposable";
@@ -20,6 +20,7 @@ import type { UserStatus } from "@lib/types";
 import {
   CLEAR_AFTER_OPTIONS,
   STATUS_DURATIONS,
+  clampExpiresIn,
   clearAfterSeconds,
   isClearAfterId,
   type ClearAfterId,
@@ -38,6 +39,8 @@ import { openSettings, uiStore } from "@stores/ui.store";
 import {
   STATUS_DEFS,
   customStatusClearsLine,
+  customStatusKeepLabel,
+  isEndOfDayExpiry,
   parseExpiry,
   statusNote,
   statusTimerLine,
@@ -180,6 +183,15 @@ export function createSelfProfileCard(options: SelfProfileCardOptions): SelfProf
     appendChildren(names, nameEl, usernameEl, customLineEl, clearsLineEl);
     appendChildren(header, avatar, names);
 
+    /** The username line only adds something when a display name is set. */
+    function paintNames(next: ReturnType<typeof ownIdentity>): void {
+      const shown = resolveDisplayName(next);
+      setText(nameEl, shown);
+      setText(usernameEl, next.username);
+      usernameEl.hidden = shown === next.username;
+    }
+    paintNames(identity);
+
     function paintCustomLine(): void {
       setText(customLineEl, lastCommittedCustom);
       customLineEl.hidden = lastCommittedCustom === "";
@@ -236,7 +248,9 @@ export function createSelfProfileCard(options: SelfProfileCardOptions): SelfProf
     appendChildren(customRow, emojiBtn, input, clearBtn);
 
     // Clear after: how long the server keeps the text. "Don't clear" is the
-    // default, so nothing disappears on you unless you asked for it.
+    // default, so nothing disappears on you unless you asked for it. A status
+    // that already clears itself opens on its own expiry instead, so editing
+    // the text keeps it (syncClearAfter).
     const clearAfterRow = createElement("div", { class: "spc-clear-after" });
     const clearAfterSelect = createElement("select", {
       class: "spc-clear-after-select",
@@ -249,6 +263,16 @@ export function createSelfProfileCard(options: SelfProfileCardOptions): SelfProf
       );
     }
     clearAfterSelect.value = "never";
+    // "As set (until 3:40 PM)": present only while the current text has an
+    // expiry that no fixed choice matches.
+    const keepOption = createElement("option", {
+      value: "keep",
+      "data-testid": "spc-clear-after-keep",
+    });
+    /** The instant the "As set" choice stands for; null while it is not offered. */
+    let keepUntil: number | null = null;
+    /** Set once the user picks a choice: from then on it is theirs, not the store's. */
+    let clearAfterTouched = false;
     appendChildren(
       clearAfterRow,
       createElement(
@@ -263,6 +287,34 @@ export function createSelfProfileCard(options: SelfProfileCardOptions): SelfProf
       const v = clearAfterSelect.value;
       return isClearAfterId(v) ? v : "never";
     }
+
+    /** The `expiresInSeconds` the current choice sends with a non-empty text. */
+    function selectedExpiresIn(): number | undefined {
+      if (clearAfterSelect.value === "keep" && keepUntil !== null) {
+        return clampExpiresIn((keepUntil - Date.now()) / 1000);
+      }
+      return clearAfterSeconds(selectedClearAfter(), new Date());
+    }
+
+    /** Preselect the choice that matches the live expiry: "Today" for the
+     *  end-of-day one, "As set" for any other, "Don't clear" for none. */
+    function syncClearAfter(): void {
+      if (clearAfterTouched) return;
+      const now = Date.now();
+      const at = parseExpiry(options.getCustomStatusExpiresAt());
+      const live = at !== null && at > now && lastCommittedCustom !== "";
+      if (!live || isEndOfDayExpiry(at, now)) {
+        keepOption.remove();
+        keepUntil = null;
+        clearAfterSelect.value = live ? "today" : "never";
+        return;
+      }
+      keepUntil = at;
+      setText(keepOption, customStatusKeepLabel(at, now));
+      if (keepOption.parentNode === null) clearAfterSelect.prepend(keepOption);
+      clearAfterSelect.value = "keep";
+    }
+    syncClearAfter();
 
     function syncClearVisibility(): void {
       clearBtn.hidden = input.value === "" && lastCommittedCustom === "";
@@ -286,10 +338,7 @@ export function createSelfProfileCard(options: SelfProfileCardOptions): SelfProf
       syncClearVisibility();
       // The expiry goes with a non-empty text only; "Today" is measured from
       // this moment, and never under the server's 60-second minimum.
-      options.onCustomStatusChange(
-        text,
-        text === "" ? undefined : clearAfterSeconds(selectedClearAfter(), new Date()),
-      );
+      options.onCustomStatusChange(text, text === "" ? undefined : selectedExpiresIn());
       paintClearsLine();
       return true;
     }
@@ -297,6 +346,7 @@ export function createSelfProfileCard(options: SelfProfileCardOptions): SelfProf
     clearAfterSelect.addEventListener(
       "change",
       () => {
+        clearAfterTouched = true;
         // A new choice restates the text already set; with none there is
         // nothing to clear, so it only waits for the next commit.
         if (input.value.trim() !== "") commitCustom(true);
@@ -689,8 +739,8 @@ export function createSelfProfileCard(options: SelfProfileCardOptions): SelfProf
         // Close first so the focus the settings dialog remembers is the
         // trigger, not an element that is about to be removed.
         close();
-        // i18n-exempt: Settings tab id; its label is settingsText("tabs.account")
-        openSettings("Account");
+        // i18n-exempt: Settings request id; opens the Account tab's profile editor
+        openSettings("Profile");
       },
       { signal },
     );
@@ -798,14 +848,13 @@ export function createSelfProfileCard(options: SelfProfileCardOptions): SelfProf
       paintCustomLine();
       syncClearVisibility();
       paintClearsLine();
+      syncClearAfter();
     }
     d.onStoreChange(
       authStore,
       (s) => s.user,
       () => {
-        const next = ownIdentity();
-        setText(nameEl, resolveDisplayName(next));
-        setText(usernameEl, next.username);
+        paintNames(ownIdentity());
         syncCustom(options.getCustomStatus());
       },
     );
@@ -823,7 +872,10 @@ export function createSelfProfileCard(options: SelfProfileCardOptions): SelfProf
         const id = authStore.getState().user?.id;
         return id === undefined ? null : (s.members.get(id)?.customStatusExpiresAt ?? null);
       },
-      () => paintClearsLine(),
+      () => {
+        paintClearsLine();
+        syncClearAfter();
+      },
     );
     d.onStoreChange(
       uiStore,

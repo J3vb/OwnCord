@@ -59,6 +59,18 @@ interface ProfileCardResult {
 // Profile card builder
 // ---------------------------------------------------------------------------
 
+/**
+ * Open the profile editor of an Account tab built in `root` and put the caret
+ * in its display name field. Returns false when no Account tab is there.
+ */
+export function openProfileEditor(root: ParentNode): boolean {
+  const toggle = root.querySelector<HTMLButtonElement>("[data-testid='profile-edit-toggle']");
+  if (toggle === null) return false;
+  if (toggle.getAttribute("aria-expanded") !== "true") toggle.click();
+  root.querySelector<HTMLInputElement>("[data-testid='display-name-input']")?.focus();
+  return true;
+}
+
 export function buildProfileCard(
   displayName: string,
   username: string,

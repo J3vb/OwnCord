@@ -114,7 +114,7 @@ describe("main.ts tray status-change listener", () => {
 
     // This is the crux of OC-0037: the tray path must agree with the
     // client's own documented "single source of truth" for the selected
-    // status (lib/presence/userStatus.ts), the same way UserBar's StatusPicker does.
+    // status (lib/presence/userStatus.ts), the same way UserBar's status menu does.
     // Before the fix nothing here ever calls saveUserStatus, so this stays
     // "online" forever regardless of what the tray sent over the wire.
     expect(loadUserStatus()).toBe("dnd");

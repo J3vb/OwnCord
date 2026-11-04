@@ -72,14 +72,25 @@ export function statusTimerLine(until: number, now: number = Date.now()): string
 export function customStatusClearsLine(expiresAtIso: string, now: number = Date.now()): string {
   const at = new Date(expiresAtIso);
   const today = new Date(now);
-  const tomorrow = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
-  if (sameLocalDay(at, tomorrow) && at.getHours() === 0 && at.getMinutes() === 0) {
-    return shellText("status.clearsToday");
-  }
+  if (isEndOfDayExpiry(at.getTime(), now)) return shellText("status.clearsToday");
   const time = formatDate(at, TIME_OF_DAY);
   return sameLocalDay(at, today)
     ? shellText("status.clearsAt", { time })
     : shellText("status.clearsOn", { day: formatDate(at, { weekday: "short" }), time });
+}
+
+/** Whether an expiry is the "Today" choice: the first minute past the coming
+ *  local midnight (the server stores whole seconds, so it lands just after). */
+export function isEndOfDayExpiry(at: number, now: number = Date.now()): boolean {
+  const day = new Date(now);
+  const tomorrow = new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1);
+  const when = new Date(at);
+  return sameLocalDay(when, tomorrow) && when.getHours() === 0 && when.getMinutes() === 0;
+}
+
+/** The "Clear after" choice that keeps a running expiry: "As set (until 3:40 PM)". */
+export function customStatusKeepLabel(at: number, now: number = Date.now()): string {
+  return shellText("status.clearAfter.keep", { when: whenText(new Date(at), new Date(now)) });
 }
 
 /** The instant (epoch ms) a custom status expires, or null when it has none

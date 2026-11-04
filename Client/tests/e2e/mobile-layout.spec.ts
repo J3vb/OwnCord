@@ -809,23 +809,27 @@ for (const profile of PROFILES) {
       await expect(sheet).toHaveCount(0);
     });
 
-    test("the status dot opens the status picker as a sheet", async ({ page }) => {
+    test("the status dot opens the profile card as a sheet, the one status menu", async ({
+      page,
+    }) => {
       await signIn(page);
       await page.locator("[data-testid='sidebar-toggle']").click();
-      await page.locator(".status-picker-dot").tap();
-      const sheet = page.locator("[data-testid='status-sheet']");
+      // The dot is part of the profile button: a tap on it lands on the button.
+      const dot = page.locator("[data-testid='user-bar-status-dot']");
+      const box = await dot.boundingBox();
+      expect(box).not.toBeNull();
+      await page.touchscreen.tap(box!.x + box!.width / 2, box!.y + box!.height / 2);
+      const sheet = page.locator("[data-testid='self-profile-sheet']");
       await expect(sheet).toBeVisible();
-      await expect(page.locator(".status-picker-dropdown--open")).toHaveCount(0);
-      await expect(sheet.locator("[role='radio']")).toHaveCount(4);
-      await expect(sheet.locator("[data-testid='status-sheet-online']")).toHaveAttribute(
+      await expect(sheet.locator("[role='menuitemradio']")).toHaveCount(4);
+      await expect(sheet.locator("[data-testid='spc-status-online']")).toHaveAttribute(
         "aria-checked",
         "true",
       );
-      const idle = sheet.locator("[data-testid='status-sheet-idle']");
-      expect((await idle.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
-      await idle.tap();
+      await expect(sheet.locator("[data-testid='spc-clear-after']")).toBeVisible();
+      await sheet.locator("[data-testid='spc-status-idle']").tap();
       await expect(sheet).toHaveCount(0);
-      await expect(page.locator(".status-picker-dot")).toHaveCSS("background-color", /rgb\(/);
+      await expect(dot).toHaveCSS("background-color", /rgb\(/);
     });
 
     test("a message's header shows the time alone, with the full date on hover", async ({

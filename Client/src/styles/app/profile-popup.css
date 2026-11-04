@@ -292,6 +292,33 @@
   cursor: not-allowed;
   background: var(--accent);
 }
+/* Call: the secondary action, filled but not accent. */
+.upp-action-btn--secondary,
+.upp-action-btn--secondary:disabled,
+.upp-action-btn--secondary[aria-disabled="true"] {
+  background: var(--bg-input);
+  color: var(--text-normal);
+}
+.upp-action-btn--secondary:hover {
+  background: var(--bg-hover);
+}
+/* Report and Block: quiet text actions under the others, Block in red. */
+.upp-actions--quiet {
+  margin-top: 4px;
+  gap: 4px;
+}
+.upp-action-btn--quiet {
+  background: transparent;
+  color: var(--text-muted);
+}
+.upp-action-btn--quiet:hover {
+  background: var(--bg-hover);
+  color: var(--text-normal);
+}
+.upp-action-btn--danger,
+.upp-action-btn--danger:hover {
+  color: var(--text-danger);
+}
 @media (prefers-reduced-motion: reduce) {
   .upp-popup {
     transition: none;

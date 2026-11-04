@@ -27,7 +27,9 @@ import { uiStore } from "@stores/ui.store";
 import { settingsText } from "../../i18n/settings";
 import { authStore } from "@stores/auth.store";
 import { createAvatarElement } from "../profiles/avatar";
+import { resolveDisplayName } from "@lib/ui/avatar";
 import { buildAccountTab } from "./AccountTab";
+import { openProfileEditor } from "./AccountProfile";
 import { buildAppearanceTab } from "./AppearanceTab";
 import { buildNotificationsTab } from "./NotificationsTab";
 import { buildTextImagesTab } from "./TextImagesTab";
@@ -458,13 +460,22 @@ export function createSettingsOverlay(
   /** Another surface asked for a tab (a Q4 notice links to Safety, the server
    *  menu to Notifications). A tab that is not shown here is ignored. */
   function applyRequestedTab(): void {
-    const requested = uiStore.getState().settingsTab;
+    const raw = uiStore.getState().settingsTab;
+    // "Profile" is the Account tab with its editor open, done once the tab is
+    // built and focus has moved in (revealRequestedEditor).
+    const requested = raw === "Profile" ? ACCOUNT : raw;
     if (requested !== null && requested !== activeTab && tabButtons.has(requested)) {
       // A hidden requested tab would strand the only tab stop: reset search.
       clearSearch();
       setActiveTab(requested);
     }
     if (requested !== null && requested === activeTab) setSectionOpen(true);
+  }
+
+  /** Open the profile editor when the last request asked for it. */
+  function revealRequestedEditor(): void {
+    if (uiStore.getState().settingsTab !== "Profile" || activeTab !== ACCOUNT) return;
+    if (contentArea !== null) openProfileEditor(contentArea);
   }
 
   function show(): void {
@@ -485,6 +496,7 @@ export function createSettingsOverlay(
       // the caret there: focus lands on the active tab instead.
       if (document.activeElement === searchInput) tabButtons.get(activeTab)?.focus();
     }
+    revealRequestedEditor();
   }
 
   /** A dialog sits inside the panel: the Log Out prompt or one a tab opened. */
@@ -645,15 +657,22 @@ export function createSettingsOverlay(
         { className: "settings-sidebar-avatar" },
       );
     let avatarEl = buildAvatar(user);
-    const profileInfo = createElement("div", {});
-    const profileName = createElement(
-      "div",
-      { class: "settings-sidebar-name" },
-      user?.username ?? settingsText("common.unknown"),
-    );
+    const profileInfo = createElement("div", { class: "settings-sidebar-identity" });
+    // The display name like every other identity surface, with @username
+    // under it only when the two differ.
+    const profileName = createElement("div", { class: "settings-sidebar-name" });
+    const profileHandle = createElement("div", { class: "settings-sidebar-handle" });
+    const paintIdentity = (u: typeof user): void => {
+      const username = u?.username ?? settingsText("common.unknown");
+      const shown = resolveDisplayName({ username, displayName: u?.display_name ?? null });
+      profileName.textContent = shown;
+      profileHandle.textContent = `@${username}`;
+      profileHandle.hidden = shown === username;
+    };
+    paintIdentity(user);
     const editProfileLink = createElement(
-      "div",
-      { class: "settings-sidebar-edit" },
+      "button",
+      { class: "settings-sidebar-edit", type: "button" },
       settingsText("shell.editProfile"),
     );
     if (authenticated) {
@@ -662,13 +681,14 @@ export function createSettingsOverlay(
         () => {
           clearSearch();
           openSection(ACCOUNT);
+          if (activeTab === ACCOUNT && contentArea !== null) openProfileEditor(contentArea);
         },
         { signal: disposable.signal },
       );
     } else {
       editProfileLink.style.display = "none";
     }
-    appendChildren(profileInfo, profileName, editProfileLink);
+    appendChildren(profileInfo, profileName, profileHandle, editProfileLink);
     appendChildren(profileSection, avatarEl, profileInfo);
     sidebar.appendChild(profileSection);
 
@@ -678,7 +698,7 @@ export function createSettingsOverlay(
     unsubAuth = authStore.subscribeSelector(
       (s) => s.user,
       (u) => {
-        profileName.textContent = u?.username ?? settingsText("common.unknown");
+        paintIdentity(u);
         const next = buildAvatar(u);
         avatarEl.replaceWith(next);
         avatarEl = next;
@@ -925,7 +945,9 @@ export function createSettingsOverlay(
     unsubTabRequest = uiStore.subscribeSelector(
       (s) => s.settingsTabSeq,
       () => {
-        if (root?.classList.contains("open") === true) applyRequestedTab();
+        if (root?.classList.contains("open") !== true) return;
+        applyRequestedTab();
+        revealRequestedEditor();
       },
     );
 

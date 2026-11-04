@@ -279,11 +279,11 @@ describe("SelfProfileCard from the user bar", () => {
     uiStore.setState((p) => ({ ...p, activeView: null }));
   });
 
-  it("Edit Profile opens Settings on the Account tab", () => {
+  it("Edit Profile opens Settings on the profile editor", () => {
     trigger().click();
     q<HTMLButtonElement>("[data-testid='spc-edit-profile']")!.click();
     expect(uiStore.getState().settingsOpen).toBe(true);
-    expect(uiStore.getState().settingsTab).toBe("Account");
+    expect(uiStore.getState().settingsTab).toBe("Profile");
     expect(card()).toBeNull();
   });
 
@@ -316,17 +316,32 @@ describe("SelfProfileCard from the user bar", () => {
     expect(document.activeElement).toBe(trigger());
   });
 
-  it("an outside click closes the card; the status dot's click counts as outside", () => {
+  it("an outside click closes the card", () => {
     trigger().click();
     document.body.click();
     expect(card()).toBeNull();
+  });
 
-    trigger().click();
+  it("the status dot is part of the button: it opens and closes the same card", () => {
+    const dot = q<HTMLElement>("[data-testid='user-bar-status-dot']")!;
+    expect(trigger().contains(dot)).toBe(true);
+    expect(dot.getAttribute("aria-hidden")).toBe("true");
+    expect(q(".status-picker-dot, .status-picker-dropdown")).toBeNull();
+
+    dot.click();
     expect(card()).not.toBeNull();
-    q<HTMLElement>(".status-picker-dot")!.click();
+    expect(trigger().getAttribute("aria-expanded")).toBe("true");
+    dot.click();
     expect(card()).toBeNull();
-    // ...and the dot still opens its own dropdown.
-    expect(q(".status-picker-dropdown--open")).not.toBeNull();
+  });
+
+  it("shows the username line only when it differs from the name", () => {
+    trigger().click();
+    expect(q<HTMLElement>("[data-testid='spc-username']")!.hidden).toBe(false);
+    authStore.setState((p) => ({ ...p, user: { ...p.user!, display_name: null } }));
+    authStore.flush();
+    expect(q("[data-testid='spc-name']")?.textContent).toBe("alice");
+    expect(q<HTMLElement>("[data-testid='spc-username']")!.hidden).toBe(true);
   });
 
   it("a click inside the card does not close it", () => {
@@ -742,6 +757,40 @@ describe("SelfProfileCard: timers, Clear after, emoji", () => {
         setOwn("lunch", new Date(2026, 9, 18, 0, 0, 0).toISOString());
         trigger().click();
         expect(byId("spc-clears-line").textContent).toBe("Clears today");
+      });
+
+      it("Clear after opens on the running expiry, so editing the text keeps it", () => {
+        setOwn("in a meeting", new Date(2026, 9, 17, 14, 30).toISOString());
+        trigger().click();
+        const select = byId<HTMLSelectElement>("spc-clear-after");
+        expect(select.value).toBe("keep");
+        expect(byId("spc-clear-after-keep").textContent).toMatch(/^As set \(until 2:30\sPM\)$/);
+
+        const input = byId<HTMLInputElement>("spc-custom-input");
+        input.value = "in a long meeting";
+        input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+        expect(frames(ws)[0]!.payload).toEqual({
+          status: "online",
+          custom_status: "in a long meeting",
+          custom_status_expires_in: 2.5 * 3600,
+        });
+      });
+
+      it("an end-of-day expiry opens on Today, with no extra choice", () => {
+        setOwn("lunch", new Date(2026, 9, 18, 0, 0, 0).toISOString());
+        trigger().click();
+        expect(byId<HTMLSelectElement>("spc-clear-after").value).toBe("today");
+        expect(q("[data-testid='spc-clear-after-keep']")).toBeNull();
+      });
+
+      it("a choice the user made is not overwritten by a later expiry update", () => {
+        setOwn("in a meeting", new Date(2026, 9, 17, 14, 30).toISOString());
+        trigger().click();
+        const select = byId<HTMLSelectElement>("spc-clear-after");
+        select.value = "never";
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+        setOwn("in a meeting", new Date(2026, 9, 17, 16, 0).toISOString());
+        expect(select.value).toBe("never");
       });
 
       it("names the weekday when it is not today", () => {

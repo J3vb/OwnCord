@@ -89,7 +89,7 @@ export class RateLimiter {
  * Presence updates: 1 per 10 seconds.
  *
  * Exported on its own (not just inlined into `createRateLimiterSet`) because
- * presence-sender.test.ts and status-picker-userbar.test.ts also construct a
+ * presence-sender.test.ts and user-bar-status.test.ts also construct a
  * limiter with this exact budget directly, outside the bundled set.
  */
 export function createPresenceLimiter(): RateLimiter {
