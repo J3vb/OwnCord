@@ -69,6 +69,12 @@ cheapest replay tier that can serve it.
 - **Shed frames.** A message frame dropped before it got a `seq` (by the topic
   limiter or a full dispatch queue) moves the same watermark. A client resuming
   at or behind that point recovers the message from the database.
+- **Labelled content.** Each replayed content frame is checked live, right
+  before it is written, with one point read of the channel's label and the
+  user's consent, so a revoke during a replay stops the very next frame. The
+  readable set the replay starts from, and `ready`'s per-channel
+  `nsfw_acknowledged`, come from one read of the user's acknowledgements per
+  handshake.
 - **Reporting.** `auth_ok.replay_source` (`none`, `buffer` or `db`) says which
   tier served the reconnect. It also feeds the `ws_reconnect_tier_total`
   metric.
