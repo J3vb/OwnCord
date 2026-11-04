@@ -4,8 +4,8 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/J3vb/OwnCord/Server/livekitproc"
 	"github.com/J3vb/OwnCord/Server/metrics"
-	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 // These existing hub counters are local numeric aggregates. In particular,
@@ -35,7 +35,7 @@ type supportHubLatency interface {
 // Reading it probes nothing and discovers no address — it is the supervisor's
 // own running/restart flags, the same values the attention panel reads.
 type supportHubVoice interface {
-	LiveKitProcessStatus() ws.LiveKitProcessStatus
+	LiveKitProcessStatus() livekitproc.Status
 	LiveKitManaged() bool
 }
 

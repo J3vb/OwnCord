@@ -1281,7 +1281,7 @@ Client                     OwnCord Server              LiveKit Server
 ### Webhooks and clean-up
 
 **By default, LiveKit sends no webhooks.** Neither shipped LiveKit config
-(`Server/livekit.yaml.example`, or the one `Server/ws/livekit_process.go`
+(`Server/livekit.yaml.example`, or the one `Server/livekitproc/process.go`
 writes) turns them on. The server relies on its own LiveKit API calls and on
 clients' `voice_leave` messages instead.
 

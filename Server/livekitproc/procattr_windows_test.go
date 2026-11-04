@@ -1,6 +1,6 @@
 //go:build windows
 
-package ws
+package livekitproc
 
 import (
 	"os"

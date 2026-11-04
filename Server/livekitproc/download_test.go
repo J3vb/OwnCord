@@ -1,4 +1,4 @@
-package ws
+package livekitproc
 
 import (
 	"archive/tar"
@@ -175,9 +175,9 @@ func TestEnsureLiveKitBinary_DownloadsVerifiesAndCaches(t *testing.T) {
 	defer func() { livekitDownloadBase = oldBase }()
 
 	dataDir := t.TempDir()
-	path, err := EnsureLiveKitBinary(context.Background(), dataDir, version)
+	path, err := EnsureBinary(context.Background(), dataDir, version)
 	if err != nil {
-		t.Fatalf("EnsureLiveKitBinary: %v", err)
+		t.Fatalf("EnsureBinary: %v", err)
 	}
 	want := filepath.Join(dataDir, "livekit", livekitBinaryFilename(version))
 	if path != want {
@@ -199,8 +199,8 @@ func TestEnsureLiveKitBinary_DownloadsVerifiesAndCaches(t *testing.T) {
 	}
 
 	// Second call must hit the cache, not the network.
-	if _, err := EnsureLiveKitBinary(context.Background(), dataDir, version); err != nil {
-		t.Fatalf("cached EnsureLiveKitBinary: %v", err)
+	if _, err := EnsureBinary(context.Background(), dataDir, version); err != nil {
+		t.Fatalf("cached EnsureBinary: %v", err)
 	}
 	if n := archiveRequests.Load(); n != 1 {
 		t.Errorf("archive downloaded %d times, want 1 (second call must use cache)", n)
@@ -220,7 +220,7 @@ func TestEnsureLiveKitBinary_ChecksumMismatchRejects(t *testing.T) {
 	defer func() { livekitDownloadBase = oldBase }()
 
 	dataDir := t.TempDir()
-	if _, err := EnsureLiveKitBinary(context.Background(), dataDir, version); err == nil {
+	if _, err := EnsureBinary(context.Background(), dataDir, version); err == nil {
 		t.Fatal("expected checksum mismatch error")
 	}
 	if _, err := os.Stat(filepath.Join(dataDir, "livekit", livekitBinaryFilename(version))); !os.IsNotExist(err) {
@@ -250,8 +250,8 @@ func TestEnsureLiveKitBinary_CleansUpOldVersions(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := EnsureLiveKitBinary(context.Background(), dataDir, version); err != nil {
-		t.Fatalf("EnsureLiveKitBinary: %v", err)
+	if _, err := EnsureBinary(context.Background(), dataDir, version); err != nil {
+		t.Fatalf("EnsureBinary: %v", err)
 	}
 	if _, err := os.Stat(stale); !os.IsNotExist(err) {
 		t.Error("stale downloaded binary was not cleaned up")

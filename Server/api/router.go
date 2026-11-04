@@ -106,7 +106,7 @@ func warnOnServerConfig(cfg *config.Config) {
 
 // warnOnVoiceNodeIP warns about a voice.node_ip that remote clients cannot route
 // to. It is written into livekit.yaml as the external address LiveKit advertises
-// in ICE candidates, and livekit_process.go validates it only for YAML-unsafe
+// in ICE candidates, and livekitproc/process.go validates it only for YAML-unsafe
 // characters. A private, CGNAT or loopback address fails invisibly: joins
 // succeed (signalling uses OwnCord's own port) but no media arrives.
 // It warns and never refuses: a LAN-only or tailnet-only deployment may

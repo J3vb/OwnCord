@@ -168,7 +168,7 @@ permissions:
 
 env:
   # The livekit-server release OwnCord itself downloads
-  # (ws.DefaultLiveKitVersion). Measuring a different SFU release than the
+  # (livekitproc.DefaultVersion). Measuring a different SFU release than the
   # product ships would measure something no owner ever runs.
   LIVEKIT_VERSION: "1.13.11"
   LK_CLI_VERSION: "2.18.6"

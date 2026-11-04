@@ -80,7 +80,7 @@ encryption is subscribed again.
 Supporting pieces:
 
 - **Server:** `Server/ws/voice_e2ee.go` (relay + key-holder map),
-  `Server/ws/livekit.go` (token minting), `Server/ws/livekit_process.go`
+  `Server/ws/livekit.go` (token minting), `Server/livekitproc/process.go`
   (optional managed `livekit-server` subprocess),
   `Server/ws/livekit_webhook.go` (webhook, checked by its LiveKit JWT and
   limited to `server.livekit_webhook_allowed_cidrs`, which falls back to

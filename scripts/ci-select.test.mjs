@@ -189,7 +189,7 @@ test("tauri.conf.json runs the server job, because a Go test reads it", () => {
 
 test("client files carrying the LiveKit pin run the server job", () => {
   // Server/docker_image_test.go fails when either pin drifts from
-  // ws.DefaultLiveKitVersion, so a client-only bump must run it.
+  // livekitproc.DefaultVersion, so a client-only bump must run it.
   for (const path of [
     "Client/tests/e2e/scripts/install-livekit.mjs",
     "Client/voice-join-budget.json",

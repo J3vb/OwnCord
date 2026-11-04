@@ -3,6 +3,8 @@ package ws
 import (
 	"context"
 	"fmt"
+
+	"github.com/J3vb/OwnCord/Server/livekitproc"
 )
 
 // GenerateToken delegates to the LiveKit client. Returns an error if LiveKit
@@ -47,9 +49,9 @@ func (h *Hub) LiveKitHealthProbe(ctx context.Context) (bool, error) {
 // (running, restart count, gave-up). Managed is false when LiveKit is
 // externally managed (no companion), which callers must read as "don't
 // check" rather than "down". Reading it probes nothing.
-func (h *Hub) LiveKitProcessStatus() LiveKitProcessStatus {
+func (h *Hub) LiveKitProcessStatus() livekitproc.Status {
 	if h.voiceHub.lkProcess == nil {
-		return LiveKitProcessStatus{}
+		return livekitproc.Status{}
 	}
 	return h.voiceHub.lkProcess.Status()
 }

@@ -1,4 +1,4 @@
-package ws
+package livekitproc
 
 // Auto-download of the companion livekit-server binary.
 //
@@ -27,12 +27,12 @@ import (
 	"strings"
 )
 
-// DefaultLiveKitVersion is the livekit-server release the server downloads
+// DefaultVersion is the livekit-server release the server downloads
 // when voice.livekit_version is not set. Bump deliberately with releases.
 // Every other place that pins this version is listed in
 // TestLiveKitPinsAgreeEverywhere (Server/docker_image_test.go); bump them all
 // and run that test.
-const DefaultLiveKitVersion = "1.13.11"
+const DefaultVersion = "1.13.11"
 
 // livekitDownloadBase is the release download URL prefix. Package variable so
 // tests can point it at a local httptest server.
@@ -80,13 +80,13 @@ func livekitBinaryFilename(version string) string {
 	return name
 }
 
-// EnsureLiveKitBinary returns the path to a verified livekit-server binary
-// for the given release version (empty = DefaultLiveKitVersion), downloading
+// EnsureBinary returns the path to a verified livekit-server binary
+// for the given release version (empty = DefaultVersion), downloading
 // and extracting it into <dataDir>/livekit/ if it is not already cached.
-func EnsureLiveKitBinary(ctx context.Context, dataDir, version string) (string, error) {
+func EnsureBinary(ctx context.Context, dataDir, version string) (string, error) {
 	version = strings.TrimPrefix(version, "v")
 	if version == "" {
-		version = DefaultLiveKitVersion
+		version = DefaultVersion
 	}
 	asset, err := livekitAssetName(version, runtime.GOOS, runtime.GOARCH)
 	if err != nil {

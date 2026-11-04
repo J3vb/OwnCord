@@ -106,7 +106,6 @@
 //	9     roleRefreshState.mu        role_refresh.go:63       leaf; may be taken under Hub.seqMu
 //	9     restartNoticeGate.mu       restart_notice.go:16     leaf
 //	9     userLocks.mu               user_locks.go:34         leaf, but see userLocks.tryLock below
-//	-     LiveKitProcess.mu          livekit_process.go:37    unranked: independent subsystem
 //
 // hubLifecycle.background (hub_lifecycle.go:41) is a syncutil.Group, not a mutex, so it has no row.
 //

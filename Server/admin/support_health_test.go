@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/J3vb/OwnCord/Server/livekitproc"
 	"github.com/J3vb/OwnCord/Server/metrics"
-	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 // supportHealthHub is the narrow fake the health snapshot reads through: the
@@ -16,12 +16,12 @@ import (
 type supportHealthHub struct {
 	HubBroadcaster
 	managed bool
-	status  ws.LiveKitProcessStatus
+	status  livekitproc.Status
 }
 
-func (h supportHealthHub) LiveKitManaged() bool                          { return h.managed }
-func (h supportHealthHub) LiveKitProcessStatus() ws.LiveKitProcessStatus { return h.status }
-func (h supportHealthHub) UserCount() int                                { return 3 }
+func (h supportHealthHub) LiveKitManaged() bool                     { return h.managed }
+func (h supportHealthHub) LiveKitProcessStatus() livekitproc.Status { return h.status }
+func (h supportHealthHub) UserCount() int                           { return 3 }
 
 // SRE-M1's in-process latency surface, satisfied so the snapshot's latency
 // branch is exercised.
@@ -35,7 +35,7 @@ func (h supportHealthHub) SeqMuMaxHoldMs() float64        { return 205 }
 // A managed companion contributes its local running/restart/gave-up state,
 // read from the supervisor, never probed.
 func TestSupportHealth_ManagedLiveKitFields(t *testing.T) {
-	hub := supportHealthHub{managed: true, status: ws.LiveKitProcessStatus{Running: true, Restarts: 2}}
+	hub := supportHealthHub{managed: true, status: livekitproc.Status{Running: true, Restarts: 2}}
 	out := supportHealth(hub, time.Now())
 
 	if out.LiveKitManaged == nil || !*out.LiveKitManaged {
@@ -160,7 +160,7 @@ func TestSupportHealth_BundleBytesUnchanged(t *testing.T) {
 	hubs := map[string]HubBroadcaster{
 		"nil":             nil,
 		"latency":         supportHealthHub{},
-		"managed":         supportHealthHub{managed: true, status: ws.LiveKitProcessStatus{Restarts: 1, GaveUp: true}},
+		"managed":         supportHealthHub{managed: true, status: livekitproc.Status{Restarts: 1, GaveUp: true}},
 		"metrics+managed": supportHealthMetricsHub{supportHealthHub{managed: true}},
 	}
 	for name, hub := range hubs {

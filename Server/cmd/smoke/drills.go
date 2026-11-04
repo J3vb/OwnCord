@@ -2869,7 +2869,7 @@ func (d *drill) stepSSupervised(bin string) ([]failure, error) {
 	}
 
 	// The supervisor's first restart comes after a 3 second backoff
-	// (ws.LiveKitProcess), on a fresh socket again: the first is still in the
+	// (livekitproc.Process), on a fresh socket again: the first is still in the
 	// channel and would answer ALREADY_JOINED.
 	seen, err = probeVoiceJoin(token, voice.ID, supervisorRestartBudget, pollInterval/2,
 		func(f wsFrame) bool { return f.Type == "voice_token" })
@@ -2995,7 +2995,7 @@ func livekitBinary() (string, bool) {
 }
 
 // killLiveKit kills whatever process runs a given livekit-server binary. The
-// supervised child belongs to the server (ws.LiveKitProcess.runLoop), which
+// supervised child belongs to the server (livekitproc.Process.runLoop), which
 // holds the only handle and writes no PID file; killing by image is what an
 // operator's tooling has (taskkill, pkill), and nothing else on a drill
 // machine runs under that name.
@@ -3155,7 +3155,7 @@ const (
 
 	// restartWindow is how long the post-kill probe may keep asking while the
 	// managed SFU is down; the supervisor's first restart is after a 3 second
-	// backoff (ws.LiveKitProcess's baseDelay), so the window stays inside it.
+	// backoff (livekitproc.Process's baseDelay), so the window stays inside it.
 	restartWindow = 2500 * time.Millisecond
 
 	// voiceProbePause spaces the post-kill voice_join probe. voice_join is

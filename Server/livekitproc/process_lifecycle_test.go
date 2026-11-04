@@ -1,4 +1,4 @@
-package ws
+package livekitproc
 
 import (
 	"bytes"
@@ -71,7 +71,7 @@ func runLiveKitTestProcess(dir, mode string) {
 	_ = udp.Close()
 }
 
-func startLiveKitTestProcess(t *testing.T, mode string) (*LiveKitProcess, liveKitTestListeners) {
+func startLiveKitTestProcess(t *testing.T, mode string) (*Process, liveKitTestListeners) {
 	t.Helper()
 	t.Setenv("OWNCORD_LIVEKIT_TEST_PROCESS", mode)
 	bin, err := os.Executable()
@@ -79,7 +79,7 @@ func startLiveKitTestProcess(t *testing.T, mode string) (*LiveKitProcess, liveKi
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	p := NewLiveKitProcess(&config.VoiceConfig{
+	p := New(&config.VoiceConfig{
 		LiveKitAPIKey:     "test-key",
 		LiveKitAPISecret:  "test-secret",
 		LiveKitBinaryPath: bin,
@@ -211,7 +211,7 @@ func TestLiveKitProcess_StopDuringDownloadAndRejectDuplicateStart(t *testing.T) 
 	oldBase := livekitDownloadBase
 	livekitDownloadBase = srv.URL
 	defer func() { livekitDownloadBase = oldBase }()
-	p := NewLiveKitProcess(&config.VoiceConfig{
+	p := New(&config.VoiceConfig{
 		AutoDownloadLiveKit: true,
 		LiveKitAPIKey:       "test-key",
 		LiveKitAPISecret:    "test-secret",
@@ -313,11 +313,11 @@ func TestLiveKitLogWriter_CapsLongLines(t *testing.T) {
 // running/restart/gave-up flags without probing.
 func TestLiveKitProcess_Status(t *testing.T) {
 	t.Parallel()
-	var nilProc *LiveKitProcess
-	if got := nilProc.Status(); got != (LiveKitProcessStatus{}) {
+	var nilProc *Process
+	if got := nilProc.Status(); got != (Status{}) {
 		t.Fatalf("a nil process status = %+v, want the zero value", got)
 	}
-	p := &LiveKitProcess{}
+	p := &Process{}
 	if got := p.Status(); got.Running || got.Restarts != 0 || got.GaveUp {
 		t.Fatalf("fresh process status = %+v, want the zero value", got)
 	}

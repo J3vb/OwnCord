@@ -13,10 +13,10 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/admin"
+	"github.com/J3vb/OwnCord/Server/livekitproc"
 	"github.com/J3vb/OwnCord/Server/lkstats"
 	"github.com/J3vb/OwnCord/Server/metrics"
 	"github.com/J3vb/OwnCord/Server/sysstats"
-	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 type systemStats struct {
@@ -198,8 +198,8 @@ type managedHub struct {
 	managed bool
 }
 
-func (h managedHub) LiveKitManaged() bool                          { return h.managed }
-func (h managedHub) LiveKitProcessStatus() ws.LiveKitProcessStatus { return ws.LiveKitProcessStatus{} }
+func (h managedHub) LiveKitManaged() bool                     { return h.managed }
+func (h managedHub) LiveKitProcessStatus() livekitproc.Status { return livekitproc.Status{} }
 
 type systemLiveKit struct {
 	Configured      bool   `json:"configured"`

@@ -12,6 +12,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/diskutil"
+	"github.com/J3vb/OwnCord/Server/livekitproc"
 	"github.com/J3vb/OwnCord/Server/lkstats"
 	"github.com/J3vb/OwnCord/Server/plugin"
 	"github.com/J3vb/OwnCord/Server/service"
@@ -188,7 +189,7 @@ func storageLimits(cfg *config.Config) service.StorageLimits {
 // starts the process after the hub holds it. It reports whether voice is
 // configured, which api.Runtime.VoiceEnabled carries to the router for the
 // webhook, LiveKit health and signalling-proxy routes.
-func buildVoice(cfg *config.Config) (*ws.LiveKitClient, *ws.LiveKitProcess, bool) {
+func buildVoice(cfg *config.Config) (*ws.LiveKitClient, *livekitproc.Process, bool) {
 	// Voice is disabled when the client cannot be created.
 	lk, lkErr := ws.NewLiveKitClient(&cfg.Voice)
 	if lkErr != nil {
@@ -204,7 +205,7 @@ func buildVoice(cfg *config.Config) (*ws.LiveKitClient, *ws.LiveKitProcess, bool
 	// failed launch must fail joins closed rather than wave them through with
 	// no SFU running.
 	if cfg.Voice.LiveKitBinaryPath != "" || cfg.Voice.AutoDownloadLiveKit {
-		return lk, ws.NewLiveKitProcess(&cfg.Voice, &cfg.TLS, cfg.Server.DataDir), true
+		return lk, livekitproc.New(&cfg.Voice, &cfg.TLS, cfg.Server.DataDir), true
 	}
 
 	// No webhook warning here: the generated livekit.yaml sets no `webhook:`
