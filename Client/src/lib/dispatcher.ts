@@ -20,108 +20,81 @@ import { showToast } from "./ui/toast";
 import { connectText } from "../i18n/connect";
 import { ServerMessageType as S } from "./protocolTypes";
 import {
-  handleAuthError,
   handleAuthOk,
   handleConnectionError,
   handleRestartDrop,
-  handleServerRestart,
-  handleUploadPolicy,
   rejoinVoiceAfterRestart,
+  wsRoutes as connectionRoutes,
 } from "../features/connection/wsHandlers";
 import {
   applyReadyActiveChannel,
   applyReadyChannels,
   applyReadyEmoji,
   applyReadyStickers,
-  handleChannelCreate,
-  handleChannelDelete,
-  handleChannelUpdate,
-  handleChannelCategories,
-  handleMentionCount,
-  handleReadState,
   handleMarkUnreadError,
   applyReadyReadPointer,
-  handleChannelActivity,
   resetChannelActivity,
-  handleEmojiUpdate,
-  handleStickerUpdate,
-  handleMemberBan,
-  handleMemberJoin,
-  handleMemberUpdate,
-  handleMemberUpdateBatch,
-  handleNsfwAck,
-  handlePresence,
-  handlePresenceBatch,
   applyReadyGameActivities,
   applyAuthOkGameActivityPolicy,
-  handleGameActivityPolicy,
-  handleRolesUpdate,
-  handleUserUpdate,
   markReadyActiveChannelRead,
+  wsRoutes as channelRoutes,
 } from "../features/channels/wsHandlers";
 import {
   activateReadyPendingMessages,
   applyReadyMessageResync,
   failPendingOnDisconnect,
-  handleChatBulkDeleted,
-  handleChatDeleted,
-  handleChatEdited,
-  handleChatPinned,
-  handleChatMessage,
-  handleChatSendOk,
   handleMessagingError,
-  handlePollUpdate,
-  handlePollVoteOk,
-  handleReactionUpdate,
   handleSendFailure,
   applyReadyThreads,
-  handleThreadDeleted,
-  handleThreadFollow,
-  handleThreadState,
-  handleTyping,
   resumeThreadFocus,
+  wsRoutes as messagingRoutes,
 } from "../features/messaging/wsHandlers";
 import {
   applyReadyBlocks,
   applyReadyDms,
-  handleDmChannelClose,
-  handleDmChannelOpen,
+  wsRoutes as dmRoutes,
 } from "../features/direct-messages/wsHandlers";
-import { applyReadyDmRequests, handleDmRequest } from "../features/message-requests/wsHandlers";
 import {
-  handleVoiceConfig,
-  handleVoiceDisconnected,
-  handleVoiceE2eeAnnounce,
-  handleVoiceWatching,
+  applyReadyDmRequests,
+  wsRoutes as dmRequestRoutes,
+} from "../features/message-requests/wsHandlers";
+import {
   handleVoiceWatchError,
-  handleVoiceE2eeOffer,
   handleVoiceError,
   handleVoicePasswordRefusal,
   handleVoiceJoinRollback,
-  handleVoiceLeave,
-  handleVoiceMoved,
-  handleVoiceState,
-  handleVoiceTokenFrame,
   publishReadyIdentity,
   rollbackVideoOnError,
   snapshotReadyVoice,
+  wsRoutes as voiceRoutes,
 } from "../features/voice/wsHandlers";
 import { createReconnectClock, log } from "../features/connection/dispatchContext";
+import type { DispatchContext, Subscribe, WsRoute } from "../features/connection/dispatchContext";
 import { failMarkUnread, forgetPendingMarkUnread, resetReadPointerState } from "./readState";
 import { resetServerCapabilities } from "./net/serverCapabilities";
 import {
   applyReadySafety,
-  handleAppealStatus,
-  handleModAction,
   handleTimedOutRefusal,
   refreshSafetyOnResume,
+  wsRoutes as safetyRoutes,
 } from "../features/safety/wsHandlers";
 import {
   applyReadyMemberTimeouts,
-  handleMemberTimeouts,
-  handleModQueue,
+  wsRoutes as moderationRoutes,
 } from "../features/moderation/wsHandlers";
 import { WsErrorCode } from "@lib/protocolTypes";
+
+/** Every feature's own events. Each event appears in exactly one table. */
+export const featureRoutes: readonly WsRoute[] = [
+  ...connectionRoutes,
+  ...channelRoutes,
+  ...messagingRoutes,
+  ...dmRoutes,
+  ...dmRequestRoutes,
+  ...safetyRoutes,
+  ...moderationRoutes,
+  ...voiceRoutes,
+];
 
 /** Unsubscribe all listeners. */
 export type DispatcherCleanup = () => void;
@@ -214,8 +187,6 @@ export function wireDispatcher(
     }),
   );
 
-  unsubs.push(ws.on(S.AUTH_ERROR, (payload) => handleAuthError(api, payload)));
-
   // ── Ready (initial state dump) ────────────────────────
 
   unsubs.push(
@@ -258,144 +229,23 @@ export function wireDispatcher(
     }),
   );
 
-  // ── DM Channels ─────────────────────────────────────
+  // ── Feature routes ─────────────────────────────────
+  // Every event without a cross-feature order. A feature adds its events to
+  // its own wsRoutes table, not here.
 
-  unsubs.push(ws.on(S.DM_CHANNEL_OPEN, handleDmChannelOpen));
+  const ctx: DispatchContext = { ws, api, clock };
+  const subscribe: Subscribe = (type, listener) => ws.on(type, listener);
+  for (const r of featureRoutes) unsubs.push(r.attach(subscribe, ctx));
 
-  unsubs.push(ws.on(S.DM_CHANNEL_CLOSE, handleDmChannelClose));
-
-  unsubs.push(ws.on(S.DM_REQUEST, handleDmRequest));
-
-  // ── Chat Messages ─────────────────────────────────────
-
-  unsubs.push(ws.on(S.CHAT_MESSAGE, (payload) => handleChatMessage(clock, payload)));
-
-  // ── Threads ───────────────────────────────────
-
-  // thread_create_ok answers this socket's own create; thread_changed is the
-  // thread's whole state, sequenced on its parent. Both replace what we hold.
-  unsubs.push(ws.on(S.THREAD_CREATE_OK, handleThreadState));
-  unsubs.push(ws.on(S.THREAD_CHANGED, handleThreadState));
-  // A forum post's create ack carries the post's whole state, like thread_create_ok.
-  unsubs.push(ws.on(S.FORUM_POST_CREATE_OK, handleThreadState));
-  unsubs.push(ws.on(S.THREAD_DELETED, handleThreadDeleted));
-  // Following (c2): the ack and the update both state where the follow was left.
-  unsubs.push(ws.on(S.THREAD_FOLLOW_OK, handleThreadFollow));
-  unsubs.push(ws.on(S.THREAD_FOLLOW_UPDATE, handleThreadFollow));
-
-  unsubs.push(ws.on(S.CHAT_EDITED, (payload) => handleChatEdited(api, payload)));
-
-  unsubs.push(ws.on(S.CHAT_DELETED, (payload) => handleChatDeleted(api, payload)));
-
-  unsubs.push(ws.on(S.CHAT_BULK_DELETED, (payload) => handleChatBulkDeleted(api, payload)));
-
-  unsubs.push(ws.on(S.CHAT_PINNED, handleChatPinned));
-
-  unsubs.push(ws.on(S.CHAT_SEND_OK, (payload, id) => handleChatSendOk(api, payload, id)));
-
-  // ── Reactions ───────────────────────────────────────────
-
-  unsubs.push(ws.on(S.REACTION_UPDATE, handleReactionUpdate));
-
-  // ── Polls ───────────────────────────────────────────────
-
-  unsubs.push(ws.on(S.POLL_UPDATE, handlePollUpdate));
-  unsubs.push(ws.on(S.POLL_VOTE_OK, handlePollVoteOk));
-
-  // ── Typing ────────────────────────────────────────────
-
-  unsubs.push(ws.on(S.TYPING, handleTyping));
-
-  // ── Presence ──────────────────────────────────────────
-
-  unsubs.push(ws.on(S.PRESENCE, handlePresence));
-  unsubs.push(ws.on(S.PRESENCE_BATCH, handlePresenceBatch));
-
-  // ── Channels ──────────────────────────────────────────
-
-  unsubs.push(ws.on(S.CHANNEL_CREATE, handleChannelCreate));
-
-  unsubs.push(ws.on(S.CHANNEL_UPDATE, handleChannelUpdate));
-
-  // channel_categories: the manager's category list, replaced wholesale.
-  unsubs.push(ws.on(S.CHANNEL_CATEGORIES, handleChannelCategories));
-
-  unsubs.push(ws.on(S.CHANNEL_DELETE, handleChannelDelete));
-
-  unsubs.push(ws.on(S.NSFW_ACK, handleNsfwAck));
-
-  // mention_count: a mention raised this user's badge in a channel they may not
-  // be viewing.
-  unsubs.push(ws.on(S.MENTION_COUNT, handleMentionCount));
-
-  // read_state: this user's read pointer moved in a channel or DM.
-  unsubs.push(ws.on(S.READ_STATE, handleReadState));
   // A Mark Unread still waiting for its answer cannot get one across a change
   // of connection state; forget it rather than restore against the next.
   unsubs.push(ws.onStateChange(forgetPendingMarkUnread));
   // The capabilities and the seen/pending state belong to this session.
   unsubs.push(resetServerCapabilities, resetReadPointerState);
-
-  // channel_activity: new messages in readable channels this user is not
-  // viewing, for their unread dot and alerts.
-  unsubs.push(ws.on(S.CHANNEL_ACTIVITY, handleChannelActivity));
   unsubs.push(resetChannelActivity);
-
-  // ── Members ───────────────────────────────────────────
-
-  unsubs.push(ws.on(S.MEMBER_JOIN, handleMemberJoin));
-
-  unsubs.push(ws.on(S.MEMBER_BAN, handleMemberBan));
-
-  // mod_action: a warning or timeout applied to this user.
-  unsubs.push(ws.on(S.MOD_ACTION, (payload) => handleModAction(api, payload)));
-  // appeal_status: the caller's own appeal changed state.
-  unsubs.push(ws.on(S.APPEAL_STATUS, (payload) => handleAppealStatus(api, payload)));
-  // mod_queue: a report changed; an open Moderation Center re-reads.
-  unsubs.push(ws.on(S.MOD_QUEUE, handleModQueue));
-  // member_timeouts: the active-timeout list, replaced wholesale (3C-7c).
-  unsubs.push(ws.on(S.MEMBER_TIMEOUTS, handleMemberTimeouts));
-
-  unsubs.push(ws.on(S.MEMBER_UPDATE, handleMemberUpdate));
-  unsubs.push(ws.on(S.MEMBER_UPDATE_BATCH, handleMemberUpdateBatch));
-
-  unsubs.push(ws.on(S.ROLES_UPDATE, handleRolesUpdate));
-
-  unsubs.push(ws.on(S.EMOJI_UPDATE, handleEmojiUpdate));
-  unsubs.push(ws.on(S.STICKER_UPDATE, handleStickerUpdate));
-
-  unsubs.push(ws.on(S.UPLOAD_POLICY, handleUploadPolicy));
-
-  // game_activity_policy: an admin turned game activity on or off.
-  unsubs.push(ws.on(S.GAME_ACTIVITY_POLICY, handleGameActivityPolicy));
-
-  unsubs.push(ws.on(S.USER_UPDATE, handleUserUpdate));
-
-  // ── Voice ─────────────────────────────────────────────
-
-  unsubs.push(ws.on(S.VOICE_STATE, (payload) => handleVoiceState(ws, payload)));
-
-  unsubs.push(ws.on(S.VOICE_MOVED, (payload) => handleVoiceMoved(ws, payload, clock)));
-
-  unsubs.push(ws.on(S.VOICE_DISCONNECTED, (payload) => handleVoiceDisconnected(payload, clock)));
-
-  unsubs.push(ws.on(S.VOICE_LEAVE, (payload) => handleVoiceLeave(payload, clock)));
-
-  unsubs.push(ws.on(S.VOICE_CONFIG, handleVoiceConfig));
-
-  unsubs.push(ws.on(S.VOICE_TOKEN, handleVoiceTokenFrame));
-
-  // ── Voice E2EE (client-side ECDH key exchange) ────────
-
-  unsubs.push(ws.on(S.VOICE_E2EE_ANNOUNCE, handleVoiceE2eeAnnounce));
-
-  unsubs.push(ws.on(S.VOICE_E2EE_OFFER, handleVoiceE2eeOffer));
-
-  unsubs.push(ws.on(S.VOICE_WATCHING, handleVoiceWatching));
 
   // ── Server Events ─────────────────────────────────────
 
-  unsubs.push(ws.on(S.SERVER_RESTART, (payload) => handleServerRestart(clock, payload)));
   unsubs.push(ws.onStateChange((state) => handleRestartDrop(clock, state)));
 
   // Local transport failures (proxy not open, outbound channel full/closed):

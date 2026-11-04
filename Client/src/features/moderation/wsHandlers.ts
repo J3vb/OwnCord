@@ -1,7 +1,9 @@
 // Moderation Center handler bodies, called only from lib/dispatcher.ts.
-import type { Payload } from "../connection/dispatchContext";
+import type { Payload, WsRoute } from "../connection/dispatchContext";
 import type { ReadyPayload } from "@lib/types";
 import { noteAppealChange, noteQueueChange, setMemberTimeouts } from "./store";
+import { route } from "../connection/dispatchContext";
+import { ServerMessageType as S } from "@lib/protocolTypes";
 
 /** A report-queue or appeal-queue change: each bumps only its own view's signal. */
 export function handleModQueue(payload: Payload<"mod_queue">): void {
@@ -18,3 +20,10 @@ export function handleMemberTimeouts(payload: Payload<"member_timeouts">): void 
 export function applyReadyMemberTimeouts(payload: ReadyPayload): void {
   setMemberTimeouts(payload.member_timeouts);
 }
+
+// mod_queue tells an open Moderation Center to re-read; member_timeouts
+// replaces the active-timeout list wholesale.
+export const wsRoutes: readonly WsRoute[] = [
+  route(S.MOD_QUEUE, () => handleModQueue),
+  route(S.MEMBER_TIMEOUTS, () => handleMemberTimeouts),
+];

@@ -6,6 +6,7 @@
 
 import { createElement, appendChildren, setText, focusIsOurs } from "@lib/dom";
 import { errorText } from "@lib/api";
+import { isImeCommit } from "@lib/text/ime";
 import { authStore } from "@stores/auth.store";
 import { resolveDisplayName, avatarInitial } from "@lib/ui/avatar";
 import { isRenderableAvatar } from "../profiles/avatar";
@@ -109,6 +110,7 @@ function buildSecurityCard(options: SettingsOverlayOptions, signal: AbortSignal)
 export function buildAccountTab(
   options: SettingsOverlayOptions,
   signal: AbortSignal,
+  onDirtyCheck?: (isDirty: () => boolean) => void,
 ): HTMLDivElement {
   const section = createElement("div", { class: "settings-pane active" });
   const user = authStore.getState().user;
@@ -164,17 +166,18 @@ export function buildAccountTab(
     );
   }
   // Avatar, display name and about lead the editor; the username row follows.
+  const profileFields = buildProfileFields(
+    options,
+    (name) => {
+      setText(headerName, name);
+    },
+    signal,
+    bannerEditor,
+  );
   editor.prepend(
     buildAvatarUploader(options, avatarLarge, signal),
     ...(bannerEditor === null ? [] : [bannerEditor.el]),
-    buildProfileFields(
-      options,
-      (name) => {
-        setText(headerName, name);
-      },
-      signal,
-      bannerEditor,
-    ),
+    profileFields.el,
   );
 
   // Inline edit form
@@ -225,51 +228,77 @@ export function buildAccountTab(
 
   cancelBtn.addEventListener("click", closeEditForm, { signal });
 
-  saveBtn.addEventListener(
-    "click",
-    () => {
-      const newName = editInput.value.trim();
-      // Resending the name the account already has is checked by the server's
-      // loose rule (an older account may not meet the new one); a different
-      // name is a rename and must pass the new-name rules.
-      const problem =
-        newName === authStore.getState().user?.username ? null : checkNewUsername(newName);
-      if (problem !== null) {
+  let saving = false;
+  const saveUsername = (): void => {
+    if (saving) return;
+    const newName = editInput.value.trim();
+    // Resending the name the account already has is checked by the server's
+    // loose rule (an older account may not meet the new one); a different
+    // name is a rename and must pass the new-name rules.
+    const problem =
+      newName === authStore.getState().user?.username ? null : checkNewUsername(newName);
+    if (problem !== null) {
+      editInput.setAttribute("aria-invalid", "true");
+      setText(usernameError, usernameProblemText(problem));
+      return;
+    }
+    editInput.removeAttribute("aria-invalid");
+    setText(usernameError, "");
+    saving = true;
+    saveBtn.disabled = true;
+    void options
+      .onUpdateProfile({ username: newName })
+      .then(() => {
+        // The header shows the resolved display name, not the raw
+        // username — mirror buildProfileFields' onSaved callback so the
+        // two writers of `.account-header-name` agree. The
+        // store is already updated by the time this resolves, so read it
+        // fresh rather than assuming the username *is* the display name.
+        setText(
+          headerName,
+          resolveDisplayName({
+            username: newName,
+            displayName: authStore.getState().user?.display_name ?? null,
+          }),
+        );
+        setText(usernameValue, newName);
+        setText(headerHandle, t("profile.handle", { username: newName }));
+        closeEditForm();
+      })
+      .catch((err: unknown) => {
+        // The server's own refusal text, under the field; the typed name stays.
         editInput.setAttribute("aria-invalid", "true");
-        setText(usernameError, usernameProblemText(problem));
-        return;
-      }
-      editInput.removeAttribute("aria-invalid");
-      setText(usernameError, "");
-      void options
-        .onUpdateProfile({ username: newName })
-        .then(() => {
-          // The header shows the resolved display name, not the raw
-          // username — mirror buildProfileFields' onSaved callback so the
-          // two writers of `.account-header-name` agree. The
-          // store is already updated by the time this resolves, so read it
-          // fresh rather than assuming the username *is* the display name.
-          setText(
-            headerName,
-            resolveDisplayName({
-              username: newName,
-              displayName: authStore.getState().user?.display_name ?? null,
-            }),
-          );
-          setText(usernameValue, newName);
-          setText(headerHandle, t("profile.handle", { username: newName }));
-          closeEditForm();
-        })
-        .catch((err: unknown) => {
-          // The server's own refusal text, under the field; the typed name stays.
-          editInput.setAttribute("aria-invalid", "true");
-          setText(usernameError, errorText(err, t("profile.usernameSaveFailed")));
-        });
+        setText(usernameError, errorText(err, t("profile.usernameSaveFailed")));
+      })
+      .finally(() => {
+        saving = false;
+        saveBtn.disabled = false;
+      });
+  };
+
+  saveBtn.addEventListener("click", saveUsername, { signal });
+  editInput.addEventListener(
+    "keydown",
+    (e: KeyboardEvent) => {
+      if (e.key !== "Enter" || isImeCommit(e)) return;
+      e.preventDefault();
+      saveUsername();
     },
     { signal },
   );
 
   editor.appendChild(editForm);
+
+  // Settings asks before a tab switch or close throws away typed profile edits.
+  onDirtyCheck?.(() => {
+    if (profileFields.isDirty()) return true;
+    const typed = editInput.value.trim();
+    return (
+      editForm.style.display !== "none" &&
+      typed !== "" &&
+      typed !== (authStore.getState().user?.username ?? "")
+    );
+  });
 
   // Security state first, then status, retention and the danger zone.
   section.appendChild(buildSecurityCard(options, signal));

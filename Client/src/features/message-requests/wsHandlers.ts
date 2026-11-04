@@ -1,9 +1,11 @@
 // Message Requests WebSocket handlers — lib/dispatcher.ts keeps the
 // socket subscriptions and calls these plain functions.
-import type { DispatchApi, Payload } from "../connection/dispatchContext";
+import type { DispatchApi, Payload, WsRoute } from "../connection/dispatchContext";
 import { mapRequest } from "./api";
 import { applyFrame } from "./store";
 import { loadRequests } from "./sync";
+import { route } from "../connection/dispatchContext";
+import { ServerMessageType as S } from "@lib/protocolTypes";
 
 /**
  * The Message Requests slice of `ready`, and of a resumed `auth_ok` (which gets
@@ -18,3 +20,5 @@ export function applyReadyDmRequests(api: DispatchApi | undefined): void {
 export function handleDmRequest(payload: Payload<"dm_request">): void {
   applyFrame(mapRequest(payload), payload.state === "pending");
 }
+
+export const wsRoutes: readonly WsRoute[] = [route(S.DM_REQUEST, () => handleDmRequest)];

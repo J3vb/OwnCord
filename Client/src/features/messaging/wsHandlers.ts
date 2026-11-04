@@ -45,7 +45,7 @@ import { connectText } from "../../i18n/connect";
 import { readingAnchor } from "./readingAnchor";
 import { isForwardRequest } from "./forwardRequests";
 import { isPollRequest } from "./pollRequests";
-import { handleThreadState } from "./threadFrames";
+import { handleThreadDeleted, handleThreadFollow, handleThreadState } from "./threadFrames";
 import { loadedThreadsStore } from "../../stores/threadsLoader";
 import { isChannelAway, noteAwayUnread } from "@lib/readState";
 import {
@@ -53,9 +53,9 @@ import {
   acknowledgePendingMessage,
   pendingMessageBeforeRestore,
 } from "../../lib/pendingMessages";
-import type { DispatchApi, Payload, ReconnectClock } from "../connection/dispatchContext";
-import { log } from "../connection/dispatchContext";
-import { WsErrorCode } from "@lib/protocolTypes";
+import type { DispatchApi, Payload, ReconnectClock, WsRoute } from "../connection/dispatchContext";
+import { log, route } from "../connection/dispatchContext";
+import { WsErrorCode, ServerMessageType as S } from "@lib/protocolTypes";
 
 /**
  * serverClockSkewMs (see createReconnectClock) starts at 0 and is only
@@ -73,12 +73,7 @@ import { WsErrorCode } from "@lib/protocolTypes";
 const REPLAY_GATE_WINDOW_MS = 5_000;
 
 // Thread frames: the dispatcher reaches them through this module.
-export {
-  applyReadyThreads,
-  handleThreadDeleted,
-  handleThreadFollow,
-  handleThreadState,
-} from "./threadFrames";
+export { applyReadyThreads } from "./threadFrames";
 export { resumeThreadFocus } from "../../stores/threadsLoader";
 
 export function handleChatMessage(clock: ReconnectClock, payload: Payload<"chat_message">): void {
@@ -583,3 +578,24 @@ export function handleMessagingError(payload: Payload<"error">, id: string | und
   }
   return false;
 }
+
+// Messages, threads, reactions, polls and typing. thread_create_ok,
+// thread_changed and forum_post_create_ok all carry a thread's whole state.
+export const wsRoutes: readonly WsRoute[] = [
+  route(S.CHAT_MESSAGE, (c) => (p) => handleChatMessage(c.clock, p)),
+  route(S.THREAD_CREATE_OK, () => handleThreadState),
+  route(S.THREAD_CHANGED, () => handleThreadState),
+  route(S.FORUM_POST_CREATE_OK, () => handleThreadState),
+  route(S.THREAD_DELETED, () => handleThreadDeleted),
+  route(S.THREAD_FOLLOW_OK, () => handleThreadFollow),
+  route(S.THREAD_FOLLOW_UPDATE, () => handleThreadFollow),
+  route(S.CHAT_EDITED, (c) => (p) => handleChatEdited(c.api, p)),
+  route(S.CHAT_DELETED, (c) => (p) => handleChatDeleted(c.api, p)),
+  route(S.CHAT_BULK_DELETED, (c) => (p) => handleChatBulkDeleted(c.api, p)),
+  route(S.CHAT_PINNED, () => handleChatPinned),
+  route(S.CHAT_SEND_OK, (c) => (p, id) => handleChatSendOk(c.api, p, id)),
+  route(S.REACTION_UPDATE, () => handleReactionUpdate),
+  route(S.POLL_UPDATE, () => handlePollUpdate),
+  route(S.POLL_VOTE_OK, () => handlePollVoteOk),
+  route(S.TYPING, () => handleTyping),
+];

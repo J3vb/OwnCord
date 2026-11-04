@@ -34,16 +34,16 @@ import { noteVoiceMoved, noteAfkMove, takeAfkMove, clearAfkMove } from "./moveHi
 import { settleVoiceLeave } from "./leaveOwed";
 import { channelsStore } from "../../stores/channels.store";
 import { membersStore, memberDisplayName } from "../../stores/members.store";
-import { livekitSession, cancelVoiceRejoin } from "../connection/dispatchContext";
+import { livekitSession, cancelVoiceRejoin, log, route } from "../connection/dispatchContext";
 import type {
   DispatchApi,
   DispatchWs,
   Payload,
   ReconnectClock,
+  WsRoute,
 } from "../connection/dispatchContext";
-import { log } from "../connection/dispatchContext";
 import { connectText } from "../../i18n/connect";
-import { WsErrorCode } from "@lib/protocolTypes";
+import { WsErrorCode, ServerMessageType as S } from "@lib/protocolTypes";
 
 /**
  * Honor a moderator's mute/deafen locally. Mute is also enforced at the SFU,
@@ -700,3 +700,16 @@ export function rollbackVideoOnError(id: string | undefined): void {
     });
   }
 }
+
+// Voice state, moves, tokens and the client-side E2EE key exchange.
+export const wsRoutes: readonly WsRoute[] = [
+  route(S.VOICE_STATE, (c) => (p) => handleVoiceState(c.ws, p)),
+  route(S.VOICE_MOVED, (c) => (p) => handleVoiceMoved(c.ws, p, c.clock)),
+  route(S.VOICE_DISCONNECTED, (c) => (p) => handleVoiceDisconnected(p, c.clock)),
+  route(S.VOICE_LEAVE, (c) => (p) => handleVoiceLeave(p, c.clock)),
+  route(S.VOICE_CONFIG, () => handleVoiceConfig),
+  route(S.VOICE_TOKEN, () => handleVoiceTokenFrame),
+  route(S.VOICE_E2EE_ANNOUNCE, () => handleVoiceE2eeAnnounce),
+  route(S.VOICE_E2EE_OFFER, () => handleVoiceE2eeOffer),
+  route(S.VOICE_WATCHING, () => handleVoiceWatching),
+];
