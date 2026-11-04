@@ -54,6 +54,7 @@ and only when it changes something a contributor or fork holder must do
 ### Added
 
 - On Linux, a crash report after an unexpected exit now includes the app's last error output, which names the library that closed the app when it exits without a crash signal.
+- Voice used to stay off until the whole server restarted after the built-in LiveKit crashed 10 times in a row. OwnCord now tries again every 10 minutes, and the System health page has a **Restart voice server** button to try right away.
 
 ## v2.8.0
 

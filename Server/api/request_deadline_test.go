@@ -243,6 +243,7 @@ var deadlineBound = []string{
 	"GET /admin/api/system/livekit",
 	"GET /admin/api/system/slow-requests",
 	"GET /admin/api/system/health",
+	"POST /admin/api/system/livekit/restart",
 	"GET /admin/api/tokens",
 	"GET /admin/api/updates",
 	"GET /admin/api/users",

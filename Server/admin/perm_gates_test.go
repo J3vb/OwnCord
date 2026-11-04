@@ -220,6 +220,7 @@ func TestOwnerOnlyRoutes_ModeratorForbidden(t *testing.T) {
 		{http.MethodPost, "/updates/apply"},
 		{http.MethodGet, "/config/settings"},
 		{http.MethodPost, "/restart"},
+		{http.MethodPost, "/system/livekit/restart"},
 		{http.MethodGet, "/archive"},
 		{http.MethodPost, "/users/1/recovery-credential"},
 	} {
@@ -281,6 +282,7 @@ var expectedGatedRoutes = []admin.GatedRoute{
 	{Method: http.MethodGet, Pattern: "/config/settings", Gate: "manage_config"},
 	{Method: http.MethodPatch, Pattern: "/config/settings", Gate: "manage_config"},
 	{Method: http.MethodPost, Pattern: "/restart", Gate: "manage_config"},
+	{Method: http.MethodPost, Pattern: "/system/livekit/restart", Gate: "manage_config"},
 	{Method: http.MethodGet, Pattern: "/updates", Gate: "manage_updates"},
 	{Method: http.MethodPost, Pattern: "/updates/apply", Gate: "manage_updates"},
 	{Method: http.MethodGet, Pattern: "/tokens", Gate: "manage_tokens"},

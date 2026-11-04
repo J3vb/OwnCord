@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 262 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, the browser client portal, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 263 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, the browser client portal, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -122,6 +122,7 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | POST    | `/admin/api/support-bundles/preview`                                 |
 | GET     | `/admin/api/system/health`                                           |
 | GET     | `/admin/api/system/livekit`                                          |
+| POST    | `/admin/api/system/livekit/restart`                                  |
 | GET     | `/admin/api/system/slow-requests`                                    |
 | GET     | `/admin/api/system/stats`                                            |
 | GET     | `/admin/api/tokens`                                                  |
@@ -4468,6 +4469,7 @@ Authorization is two-layered:
 | `GET/PATCH /admin/api/settings`, `PUT /admin/api/afk-channel`                                                                                        | `MANAGE_SERVER`                                                                                                                                                                                                                                                                                              |
 | `GET /admin/api/config`                                                                                                                              | `MANAGE_SERVER`                                                                                                                                                                                                                                                                                              |
 | `GET/PATCH /admin/api/config/settings`, `POST /admin/api/restart`                                                                                    | Owner role **or** `MANAGE_CONFIG` (`permissions.CanManageConfig`; `ADMINISTRATOR` does not pass) — WP 8.4d                                                                                                                                                                                                   |
+| `POST /admin/api/system/livekit/restart`                                                                                                             | Owner role **or** `MANAGE_CONFIG` (`permissions.CanManageConfig`; `ADMINISTRATOR` does not pass)                                                                                                                                                                                                             |
 | `GET /admin/api/retention`, `GET /admin/api/retention/channels`, `GET /admin/api/retention/preview`, `PUT/DELETE /admin/api/channels/{id}/retention` | `MANAGE_SERVER` — B4-11                                                                                                                                                                                                                                                                                      |
 | `/admin/api/registrations…` (GET, and `POST` `{id}/approve` / `{id}/deny`)                                                                           | `MANAGE_SERVER`                                                                                                                                                                                                                                                                                              |
 | `POST /admin/api/logs/ticket`, `GET /admin/api/logs/stream`                                                                                          | `VIEW_DIAGNOSTICS` (`ADMINISTRATOR` passes); the stream re-checks it on every write — WP 8.4d                                                                                                                                                                                                                |
@@ -4753,8 +4755,9 @@ Nothing here is exported off the host.
   with the reason in `detail`.
 - `voice` reports LiveKit. An OwnCord-managed companion reports its
   supervisor's local state — `running`, plus a `not running` warning when it is
-  down and a `gave up` critical when the backoff stopped restarting it; a
-  restart count appears in the detail. An externally managed LiveKit is
+  down and a `gave up` critical when the quick restarts ran out (it then
+  tries every 10 minutes, or at once on `POST /admin/api/system/livekit/restart`);
+  a restart count appears in the detail. An externally managed LiveKit is
   probed over HTTP and reports `unreachable` as a warning when it does not
   answer; an unconfigured voice path is `unknown`.
 - The first disk or voice level is reported at once, and a stopped dispatch
@@ -4847,6 +4850,30 @@ space and the cached upload total.
 - `disk.low` is `free` below `server.min_free_disk_mb` (`min_free`, bytes),
   where uploads are refused; it is `null` when that floor is `0` or `free` is
   unknown. `uploads` is every upload's size summed.
+
+---
+
+### POST /admin/api/system/livekit/restart
+
+The System health page's **Restart voice server** button. When OwnCord runs
+LiveKit and the companion crashed 10 times in a row, the supervisor stops its
+quick restarts and tries once every 10 minutes; this route makes it try now,
+with the full set of quick restarts again. It never stops a running LiveKit.
+Each accepted press writes a `voice_server_restart_requested` audit entry.
+
+**Auth:** Owner role **or** `MANAGE_CONFIG` (like `POST /admin/api/restart`)
+
+#### Response 202 Accepted
+
+```json
+{ "restarting": true }
+```
+
+`409 CONFLICT` when there is nothing to restart: LiveKit is running or still in
+its quick restarts, or it runs on its own (not managed by OwnCord).
+
+The snapshot on `GET /admin/api/system/health` carries `livekit_gave_up` and,
+while the supervisor waits for its next try, `livekit_next_retry_at` (UTC).
 
 ---
 

@@ -149,6 +149,9 @@ func legacySupportHealth(hub HubBroadcaster, at time.Time, goroutines int, heap 
 		out["livekit_healthy"] = status.Running
 		out["livekit_restarts"] = status.Restarts
 		out["livekit_gave_up"] = status.GaveUp
+		if !status.NextRetryAt.IsZero() {
+			out["livekit_next_retry_at"] = status.NextRetryAt.UTC()
+		}
 	}
 	return out
 }
@@ -160,7 +163,7 @@ func TestSupportHealth_BundleBytesUnchanged(t *testing.T) {
 	hubs := map[string]HubBroadcaster{
 		"nil":             nil,
 		"latency":         supportHealthHub{},
-		"managed":         supportHealthHub{managed: true, status: livekitproc.Status{Restarts: 1, GaveUp: true}},
+		"managed":         supportHealthHub{managed: true, status: livekitproc.Status{Restarts: 1, GaveUp: true, NextRetryAt: time.Date(2026, 11, 3, 19, 10, 0, 0, time.UTC)}},
 		"metrics+managed": supportHealthMetricsHub{supportHealthHub{managed: true}},
 	}
 	for name, hub := range hubs {
@@ -183,7 +186,7 @@ func TestSupportHealth_BundleBytesUnchanged(t *testing.T) {
 // Every field of the snapshot is in the byte test above, so a new field must
 // be added there (and to the legacy map) on purpose.
 func TestSupportHealth_FieldCount(t *testing.T) {
-	if n := reflect.TypeFor[healthSnapshot]().NumField(); n != 27 {
+	if n := reflect.TypeFor[healthSnapshot]().NumField(); n != 28 {
 		t.Errorf("healthSnapshot has %d fields; update TestSupportHealth_BundleBytesUnchanged and this count", n)
 	}
 }
