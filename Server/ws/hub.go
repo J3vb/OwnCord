@@ -106,15 +106,13 @@ type Hub struct {
 	// construction.
 	voice VoiceStore
 
-	// Presence coalescer (QueuePresence): latest presence per user, flush armed. Guarded by presenceMu.
-	presenceMu         syncutil.Ranked[lockRankFeed]
-	presenceQueue      map[int64]pendingPresence
-	presenceFlushArmed bool
-	presenceRepair     presenceRepairState // dropped presence and its repair (hub_presence.go)
-	members            memberCache         // the ready payloads' shared member list (serve_ready_members_cache.go)
-	activity           activityState       // channel_activity coalescer (channel_activity.go)
-	roleRefresh        roleRefreshState    // role-change fan-out worker (role_refresh.go)
-	threadHub          threadHub           // thread service and thread_changed coalescer (thread_coalescer.go); timers guarded by mu
+	// presenceFeed is the presence coalescer and its repair state (hub_presence_state.go).
+	presenceFeed presenceFeedState
+
+	members     memberCache      // the ready payloads' shared member list (serve_ready_members_cache.go)
+	activity    activityState    // channel_activity coalescer (channel_activity.go)
+	roleRefresh roleRefreshState // role-change fan-out worker (role_refresh.go)
+	threadHub   threadHub        // thread service and thread_changed coalescer (thread_coalescer.go); timers guarded by mu
 }
 
 // Run starts the hub's dispatch loop and blocks until Stop is called; run it in its

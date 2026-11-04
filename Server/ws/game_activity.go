@@ -128,7 +128,7 @@ func handleActivityUpdateV2(ctx context.Context, cmd Command, info ClientInfo, d
 	}
 
 	// An admin turned game activity off for the server. Refused before the limiter so
-	// it costs no budget; the authoritative check is applyActivity's, under presenceMu.
+	// it costs no budget; the authoritative check is applyActivity's, under presenceFeed.mu.
 	if d.GameActivityEnabled != nil && !d.GameActivityEnabled() {
 		return Result{Error: ClientError{Code: ErrCodeGameActivityDisabled, Message: "game activity is turned off on this server"}}
 	}
@@ -162,25 +162,25 @@ func clampActivityStart(startedAt int64, now time.Time) int64 {
 // from the replaced connection must not speak for the user) and has a stamped
 // presence.
 //
-// Lock order is CustomStatusExpired's: presenceMu, then h.mu (read, in isRegistered),
+// Lock order is CustomStatusExpired's: presenceFeed.mu, then h.mu (read, in isRegistered),
 // then the client's atomic presence pointer, then non-blocking enqueues. The
-// compare-and-swap runs under presenceMu, so a racing status change either swaps
+// compare-and-swap runs under presenceFeed.mu, so a racing status change either swaps
 // first (this retries on top) or emits after this frame with the activity it read.
 //
 // A set is dropped while the server's game activity switch is off. The flag is read
-// under presenceMu, after ApplyGameActivityPolicy stored it and before its sweep
+// under presenceFeed.mu, after ApplyGameActivityPolicy stored it and before its sweep
 // takes the same lock: a set arriving after the sweep is dropped, one arriving first
 // is cleared by the sweep. A clear is always applied.
 func (h *Hub) applyActivity(c *Client, next *gameActivity) {
-	h.presenceMu.Lock()
-	defer h.presenceMu.Unlock()
+	h.presenceFeed.mu.Lock()
+	defer h.presenceFeed.mu.Unlock()
 	if next != nil && !h.settings.gameActivity.on.Load() {
 		return
 	}
 	h.applyActivityLocked(c, next)
 }
 
-// applyActivityLocked is applyActivity's body; the caller holds presenceMu.
+// applyActivityLocked is applyActivity's body; the caller holds presenceFeed.mu.
 func (h *Hub) applyActivityLocked(c *Client, next *gameActivity) {
 	h.swapActivityLocked(c, func(lp *livePresence) bool {
 		if sameActivity(lp.activity, next) {
@@ -196,7 +196,7 @@ func (h *Hub) applyActivityLocked(c *Client, next *gameActivity) {
 // swaps it in by compare-and-swap and broadcasts the presence frame carrying game
 // and song together. It does nothing unless c is still registered (a same-session
 // reconnect replaced it, and a late frame from the replaced connection must not
-// speak for the user) and has a stamped presence. The caller holds presenceMu.
+// speak for the user) and has a stamped presence. The caller holds presenceFeed.mu.
 func (h *Hub) swapActivityLocked(c *Client, edit func(lp *livePresence) bool) {
 	if !h.isRegistered(c) {
 		return
@@ -225,7 +225,7 @@ func (h *Hub) swapActivityLocked(c *Client, edit func(lp *livePresence) bool) {
 
 // broadcastMergedPresenceLocked sends merged, the user's presence across conns, as
 // the frame that speaks for the user. An unstamped presence sends nothing. The
-// caller holds presenceMu.
+// caller holds presenceFeed.mu.
 func (h *Hub) broadcastMergedPresenceLocked(userID int64, conns []*Client, merged livePresence) {
 	if merged.status == "" || len(conns) == 0 {
 		return
@@ -296,7 +296,7 @@ func readyListening(live map[int64]livePresence, viewerID int64) []readyListenin
 }
 
 // clearActivityAndListeningLocked clears c's game and song in one swap so the server
-// switch going off sends one presence frame per user. The caller holds presenceMu.
+// switch going off sends one presence frame per user. The caller holds presenceFeed.mu.
 func (h *Hub) clearActivityAndListeningLocked(c *Client) {
 	h.swapActivityLocked(c, func(lp *livePresence) bool {
 		if lp.activity == nil && lp.listening == nil {

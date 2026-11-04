@@ -444,9 +444,9 @@ func TestPresenceUpdate_InsideTheWindowStillDeliversTheNewMember(t *testing.T) {
 	m := memberJoinUser{ID: 9, Username: "newcomer"}
 	h.queuePresence(9, pendingPresence{status: db.StatusOnline, member: &m})
 	h.QueuePresence(9, db.StatusOnline, nil) // a later state keeps the member data
-	h.presenceMu.Lock()
-	kept := h.presenceQueue[9].member != nil
-	h.presenceMu.Unlock()
+	h.presenceFeed.mu.Lock()
+	kept := h.presenceFeed.queue[9].member != nil
+	h.presenceFeed.mu.Unlock()
 	if !kept {
 		t.Fatal("a later state in the window lost the member data")
 	}

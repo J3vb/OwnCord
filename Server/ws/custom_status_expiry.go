@@ -46,7 +46,7 @@ func storedCustomStatus(text, expiresAt *string, now time.Time) (visible *string
 }
 
 // customStatusExpiredLookupHook runs between CustomStatusExpired's client
-// lookup and presenceMu. Test-only (always nil in production).
+// lookup and presenceFeed.mu. Test-only (always nil in production).
 var customStatusExpiredLookupHook func(*Hub)
 
 // CustomStatusExpired is the expirer's hook (service.CustomStatusNotifier): the
@@ -54,17 +54,17 @@ var customStatusExpiredLookupHook func(*Hub)
 // connection still showing it drops it and everyone is told the status is null; a
 // connection showing a newer one, or none, is left alone.
 //
-// It takes presenceMu itself rather than through dropQueuedPresenceAndBroadcast,
+// It takes presenceFeed.mu itself rather than through dropQueuedPresenceAndBroadcast,
 // whose drop is unconditional: a stale tag must leave a queued connect presence
 // alone.
 //
-// Lock order: presenceMu, then h.mu (read, to confirm c is still the registered
-// client; nothing takes presenceMu while holding h.mu), then the client's atomic
+// Lock order: presenceFeed.mu, then h.mu (read, to confirm c is still the registered
+// client; nothing takes presenceFeed.mu while holding h.mu), then the client's atomic
 // presence pointer, then Client.mu (sendPresenceMsg, for the self half of an
-// invisible split), then the presenceResyncMu/presenceRepair leaf. Nothing takes
-// presenceMu while holding Client.mu (sendPresenceMsg releases c.mu before
-// presenceDropped), and there is no DB I/O under presenceMu, so this adds no edge.
-// The compare-and-swap runs under presenceMu, and a presence_update stores its live
+// invisible split), then the presenceResyncMu/presenceFeed.repair leaf. Nothing takes
+// presenceFeed.mu while holding Client.mu (sendPresenceMsg releases c.mu before
+// presenceDropped), and there is no DB I/O under presenceFeed.mu, so this adds no edge.
+// The compare-and-swap runs under presenceFeed.mu, and a presence_update stores its live
 // presence before it emits, so a racing set either swaps the pointer first (the tag
 // no longer matches and nothing is sent) or emits after this frame with newer text.
 func (h *Hub) CustomStatusExpired(userID int64, expiresAt string) {
@@ -75,8 +75,8 @@ func (h *Hub) CustomStatusExpired(userID int64, expiresAt string) {
 	if customStatusExpiredLookupHook != nil {
 		customStatusExpiredLookupHook(h)
 	}
-	h.presenceMu.Lock()
-	defer h.presenceMu.Unlock()
+	h.presenceFeed.mu.Lock()
+	defer h.presenceFeed.mu.Unlock()
 	// A same-session reconnect may have replaced a connection since the
 	// lookup; re-read so only live ones are cleared (the replacement carries
 	// its own presence and its own tag).
@@ -112,9 +112,9 @@ func (h *Hub) CustomStatusExpired(userID int64, expiresAt string) {
 }
 
 // enqueueExpiredPresence enqueues one half of an expired status's presence the way
-// emitEventsFrom does. CustomStatusExpired already holds presenceMu, so the only
+// emitEventsFrom does. CustomStatusExpired already holds presenceFeed.mu, so the only
 // further locks are the non-blocking enqueues' own: Client.mu in sendPresenceMsg
-// (released before presenceDropped), then the presenceResyncMu/presenceRepair leaf.
+// (released before presenceDropped), then the presenceResyncMu/presenceFeed.repair leaf.
 func (h *Hub) enqueueExpiredPresence(c *Client, ev Event) {
 	switch e := ev.(type) {
 	case PresenceEvent:

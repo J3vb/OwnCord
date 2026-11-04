@@ -701,12 +701,12 @@ func TestListening_PresenceSnapshotCarriesItAndHidesInvisibleFromOthers(t *testi
 func TestListening_BatchEntryBlanksInvisibleForOthers(t *testing.T) {
 	h, _, _ := presenceBatchHub(t)
 	song := &listeningActivity{Title: "Secret", Artist: "A", Player: "P", StartedAt: 1, DurationMS: 2}
-	h.presenceMu.Lock()
+	h.presenceFeed.mu.Lock()
 	public, private := h.buildPresenceBatch(map[int64]pendingPresence{
 		5: {status: db.StatusInvisible, listening: song},
 		6: {status: db.StatusOnline, listening: song},
 	})
-	h.presenceMu.Unlock()
+	h.presenceFeed.mu.Unlock()
 	titles := func(raw []byte) map[int64]string {
 		var f lisFrame
 		if err := json.Unmarshal(raw, &f); err != nil {
@@ -905,7 +905,7 @@ func TestListeningPolicy_OffSweepsBothInOneFrameAndRefusesSets(t *testing.T) {
 	}
 }
 
-// The handler check only decides the reply; the flag read under presenceMu is
+// The handler check only decides the reply; the flag read under presenceFeed.mu is
 // what keeps a set that raced the sweep from surviving it.
 func TestListeningPolicy_ApplyAfterSwitchDropsSet(t *testing.T) {
 	h, _, connect := presenceBatchHub(t)

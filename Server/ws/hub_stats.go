@@ -333,7 +333,7 @@ func (h *Hub) BackpressureStats() (queueDisconnects, highFallbacks, lowDrops uin
 
 // PresenceDropCount is the process-lifetime count of presence frames dropped on a
 // full normal buffer, each repaired by a snapshot (Client.sendPresenceMsg).
-func (h *Hub) PresenceDropCount() uint64 { return h.presenceRepair.drops.Load() }
+func (h *Hub) PresenceDropCount() uint64 { return h.presenceFeed.repair.drops.Load() }
 
 // DeliveryDropCount is the attention panel's delivery-pressure counter: broadcast
 // drops, topic-limiter sheds and send-queue overflow disconnects. Low-priority

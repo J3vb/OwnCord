@@ -163,7 +163,7 @@ func TestGameActivityPolicy_OffClearIsNoop(t *testing.T) {
 	}
 }
 
-// The handler check only decides the reply; the flag read under presenceMu
+// The handler check only decides the reply; the flag read under presenceFeed.mu
 // is what keeps a set that raced the sweep from surviving it.
 func TestGameActivityPolicy_ApplyAfterSwitchDropsSet(t *testing.T) {
 	h, _, connect := presenceBatchHub(t)

@@ -510,18 +510,18 @@ collaborator is now a `startHub` error at boot instead of a later panic
 
 ### Locks
 
-Three locks are declared directly on `Hub`, two on its `settings` group (`hubSettings`) and one on its `voiceHub` group (`hubVoice`), all `syncutil` (so the
+Two locks are declared directly on `Hub` (`mu`, `seqMu`), two on its `settings` group (`hubSettings`), one on its `voiceHub` group (`hubVoice`) and one on its `presenceFeed` group (`presenceFeedState`), all `syncutil` (so the
 `-tags deadlock` pass sees them). The hub's embedded states add more, and `ws`
 declares 27 mutexes in all (non-test files, at `f4a359e8`).
 
-| Lock                      | Declared                   | Guards (from the field comment)                                         |
-| ------------------------- | -------------------------- | ----------------------------------------------------------------------- |
-| `mu`                      | `ws/hub.go:24`             | the client registry and subscriptions                                   |
-| `seqMu`                   | `ws/hub.go:51`             | seq assignment + replay insertion + delivery order, serialised together |
-| `settings.mu`             | `ws/hub_settings.go:207`   | the cached server settings                                              |
-| `settings.uploadPolicyMu` | `ws/hub_settings.go:213`   | orders `BroadcastUploadPolicy`'s saves                                  |
-| `voiceHub.keyHolderMu`    | `ws/hub_voice_state.go:29` | the voice E2EE key-holder map                                           |
-| `presenceMu`              | `ws/hub.go:110`            | presence coalescing state                                               |
+| Lock                      | Declared                      | Guards (from the field comment)                                         |
+| ------------------------- | ----------------------------- | ----------------------------------------------------------------------- |
+| `mu`                      | `ws/hub.go:24`                | the client registry and subscriptions                                   |
+| `seqMu`                   | `ws/hub.go:51`                | seq assignment + replay insertion + delivery order, serialised together |
+| `settings.mu`             | `ws/hub_settings.go:207`      | the cached server settings                                              |
+| `settings.uploadPolicyMu` | `ws/hub_settings.go:213`      | orders `BroadcastUploadPolicy`'s saves                                  |
+| `voiceHub.keyHolderMu`    | `ws/hub_voice_state.go:29`    | the voice E2EE key-holder map                                           |
+| `presenceFeed.mu`         | `ws/hub_presence_state.go:12` | presence coalescing state                                               |
 
 **The order is written once, in `Server/ws/lock_order.go`**: the rule (no I/O
 under a state lock), the split between serialisers and state locks, and a rank
