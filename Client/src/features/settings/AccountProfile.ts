@@ -568,12 +568,18 @@ export function buildBannerEditor(
 // Display name + about
 // ---------------------------------------------------------------------------
 
+export interface ProfileFields {
+  readonly el: HTMLDivElement;
+  /** True while the display name, about text or banner colour differ from what the server has. */
+  readonly isDirty: () => boolean;
+}
+
 export function buildProfileFields(
   options: SettingsOverlayOptions,
   onSaved: (displayName: string) => void,
   signal: AbortSignal,
   bannerEditor: BannerEditor | null = null,
-): HTMLDivElement {
+): ProfileFields {
   const wrapper = createElement("div", {});
   const separator = createElement("div", { class: "settings-separator" });
   const header = createElement(
@@ -691,5 +697,13 @@ export function buildProfileFields(
     statusEl,
     saveBtn,
   );
-  return wrapper;
+  const isDirty = (): boolean => {
+    const stored = authStore.getState().user;
+    return (
+      collapseSpaces(nameInput.value) !== (stored?.display_name ?? "") ||
+      aboutInput.value.trim() !== (stored?.about ?? "").trim() ||
+      bannerEditor?.pending() !== undefined
+    );
+  };
+  return { el: wrapper, isDirty };
 }

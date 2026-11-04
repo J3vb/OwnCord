@@ -570,6 +570,25 @@ describe("settings search", () => {
       expect(stops[0]!.hidden).toBe(false);
     });
 
+    it("switches the open page to the first matching tab as you type", () => {
+      mountOverlay();
+      const active = (): string => container.querySelector(`${TAB_SELECTOR}.active`)!.textContent!;
+      expect(active()).toBe("Account");
+      type("zoom");
+      expect(active()).toBe(visibleNames()[0]);
+      expect(container.querySelector("mark.settings-search-hit")).not.toBeNull();
+      expect(document.activeElement).not.toBe(tabs().find((t) => t.classList.contains("active")));
+    });
+
+    it("keeps the open page while it still matches", () => {
+      mountOverlay();
+      tabs()
+        .find((t) => labelFor(t) === "Notifications")!
+        .click();
+      type("sound");
+      expect(container.querySelector(`${TAB_SELECTOR}.active`)!.textContent).toBe("Notifications");
+    });
+
     it("Ctrl+F focuses the box while the panel is open", () => {
       mountOverlay();
       const ev = press(document.body, { key: "f", ctrlKey: true });
