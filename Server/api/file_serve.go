@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"mime"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -38,13 +39,15 @@ func handleServeFile(uploads *service.UploadService, store FileStore, allowedOri
 
 // handleServeThumb serves an image's thumbnail: made on first request, then kept
 // beside the original and removed with it (storage.Delete). An image the server
-// does not shrink (already inside thumbBox, a GIF, an unencodable format, over
-// thumbMaxDecodeBytes, or undecodable) is served as the original, and a failed
-// generation is kept as an empty thumbnail so it is never retried. A non-image
-// is a 404. HEIC, HEIF and TIFF previews are always a JPEG and a failed
-// conversion is a 404 (serveConvertedPreview).
+// does not shrink (already inside thumbBox, a GIF, an animated WebP, a format
+// with no decoder, over thumbMaxDecodeBytes, or undecodable) is served as the
+// original, and a failed generation is kept as an empty thumbnail so it is never
+// retried. A request that finds no free slot within thumbSlotWait is served the
+// original without keeping anything, so a later request still makes the
+// thumbnail. A non-image is a 404. HEIC, HEIF and TIFF previews are always a
+// JPEG and a failed conversion is a 404 (serveConvertedPreview).
 func handleServeThumb(uploads *service.UploadService, store FileStore, allowedOrigins []string) http.HandlerFunc {
-	slots := make(chan struct{}, thumbConcurrency)
+	slots := newThumbSlots()
 	return func(w http.ResponseWriter, r *http.Request) {
 		aa, ok := authorizeFileRead(w, r, uploads)
 		if !ok {
@@ -63,8 +66,7 @@ func handleServeThumb(uploads *service.UploadService, store FileStore, allowedOr
 		if !passThrough {
 			t, found := keptThumb(store, aa.StoredAs)
 			if t != nil {
-				defer t.Close() //nolint:errcheck
-				serveFileContent(w, r, aa, aa.MimeType, fileModTime(t), t, allowedOrigins)
+				serveKeptThumb(w, r, aa, t, allowedOrigins)
 				return
 			}
 			passThrough = found
@@ -77,23 +79,13 @@ func handleServeThumb(uploads *service.UploadService, store FileStore, allowedOr
 		defer f.Close() //nolint:errcheck
 		var thumb []byte
 		if !passThrough {
-			if orientation, ok := thumbOrientation(f, format); ok {
-				select {
-				case slots <- struct{}{}:
-				case <-r.Context().Done():
-					return
-				}
-				t, found := keptThumb(store, aa.StoredAs)
-				if !found {
-					thumb, _ = makeThumbnail(f, format, orientation)
-					keepThumbnail(r.Context(), uploads, store, aa.StoredAs, thumb)
-				}
-				<-slots
-				if t != nil {
-					defer t.Close() //nolint:errcheck
-					serveFileContent(w, r, aa, aa.MimeType, fileModTime(t), t, allowedOrigins)
-					return
-				}
+			var kept storage.File
+			if thumb, kept, ok = generateThumb(r, uploads, store, slots, aa.StoredAs, f, format); !ok {
+				return
+			}
+			if kept != nil {
+				serveKeptThumb(w, r, aa, kept, allowedOrigins)
+				return
 			}
 		}
 		if thumb == nil {
@@ -104,17 +96,60 @@ func handleServeThumb(uploads *service.UploadService, store FileStore, allowedOr
 			serveFileContent(w, r, aa, aa.MimeType, fileModTime(f), f, allowedOrigins)
 			return
 		}
-		serveFileContent(w, r, aa, aa.MimeType, time.Now(), bytes.NewReader(thumb), allowedOrigins)
+		serveFileContent(w, r, aa, thumbMIME(aa.MimeType, thumb), time.Now(), bytes.NewReader(thumb), allowedOrigins)
 	}
+}
+
+// generateThumb makes and keeps the thumbnail of the original f under a slot.
+// It returns the new thumbnail, or one another request kept while this one
+// waited for the slot, or neither when the original is to be served: it is not
+// thumbnailed, it did not decode, or no slot came free in time. ok is false
+// only when the request ended while waiting.
+func generateThumb(r *http.Request, uploads *service.UploadService, store FileStore, slots *thumbSlots, storedAs string, f storage.File, format string) (thumb []byte, kept storage.File, ok bool) {
+	orientation, accepted := thumbOrientation(f, format)
+	if !accepted {
+		return nil, nil, true
+	}
+	release, got := slots.acquire(r.Context(), 1)
+	if !got {
+		return nil, nil, r.Context().Err() == nil
+	}
+	defer release()
+	kept, found := keptThumb(store, storedAs)
+	if found {
+		return nil, kept, true
+	}
+	thumb, _ = makeThumbnail(f, format, orientation)
+	keepThumbnail(r.Context(), uploads, store, storedAs, thumb)
+	return thumb, nil, true
+}
+
+// serveKeptThumb serves a kept thumbnail and closes it. A WebP's thumbnail is a
+// JPEG or a PNG, told apart by its first bytes.
+func serveKeptThumb(w http.ResponseWriter, r *http.Request, aa *db.AttachmentAccess, t storage.File, allowedOrigins []string) {
+	defer t.Close() //nolint:errcheck
+	mimeType := aa.MimeType
+	if mimeType == mimeWebP {
+		var head [8]byte
+		n, _ := io.ReadFull(t, head[:])
+		if _, err := t.Seek(0, io.SeekStart); err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		mimeType = thumbMIME(mimeType, head[:n])
+	}
+	serveFileContent(w, r, aa, mimeType, fileModTime(t), t, allowedOrigins)
 }
 
 // serveConvertedPreview answers the thumbnail route for a HEIC, HEIF or TIFF
 // original: always a JPEG, even for a picture inside thumbBox, because no
-// webview shows the original. It is generated once under the same slot as other
-// thumbnails and kept; a failed or refused conversion is kept as an empty
-// thumbnail and answered 404 from then on, so it is decoded at most once and the
-// original is never served as an image.
-func serveConvertedPreview(w http.ResponseWriter, r *http.Request, aa *db.AttachmentAccess, uploads *service.UploadService, store FileStore, slots chan struct{}, format string, allowedOrigins []string) {
+// webview shows the original. It is generated once under the same slots as other
+// thumbnails (a HEIC holds heicSlotWeight of them) and kept; a failed or refused
+// conversion is kept as an empty thumbnail and answered 404 from then on, so it
+// is decoded at most once and the original is never served as an image. A
+// request that finds no free slot in time is answered 503 with a Retry-After,
+// and nothing is kept.
+func serveConvertedPreview(w http.ResponseWriter, r *http.Request, aa *db.AttachmentAccess, uploads *service.UploadService, store FileStore, slots *thumbSlots, format string, allowedOrigins []string) {
 	serveKept := func(t storage.File) {
 		defer t.Close() //nolint:errcheck
 		serveFileContent(w, r, aa, convertedPreviewMIME, fileModTime(t), t, allowedOrigins)
@@ -134,9 +169,16 @@ func serveConvertedPreview(w http.ResponseWriter, r *http.Request, aa *db.Attach
 		return
 	}
 	defer f.Close() //nolint:errcheck
-	select {
-	case slots <- struct{}{}:
-	case <-r.Context().Done():
+	weight := int64(1)
+	if format == "heic" {
+		weight = heicSlotWeight
+	}
+	release, got := slots.acquire(r.Context(), weight)
+	if !got {
+		if r.Context().Err() == nil {
+			w.Header().Set("Retry-After", strconv.Itoa(int(thumbSlotWait/time.Second)))
+			writeErr(w, http.StatusServiceUnavailable, httperr.CodeServiceUnavailable, "the server is busy making previews; try again shortly")
+		}
 		return
 	}
 	// A request that waited for the slot may find the preview already made.
@@ -150,7 +192,7 @@ func serveConvertedPreview(w http.ResponseWriter, r *http.Request, aa *db.Attach
 		}
 		keepThumbnail(r.Context(), uploads, store, aa.StoredAs, preview)
 	}
-	<-slots
+	release()
 	switch {
 	case t != nil:
 		serveKept(t)
