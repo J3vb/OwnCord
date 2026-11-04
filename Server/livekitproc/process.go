@@ -318,7 +318,6 @@ func (p *Process) runLoop(ctx context.Context, cfgPath, binPath string) {
 			}
 			p.cmd = cmd
 			p.runDone = make(chan struct{})
-			p.gaveUp.Store(false)
 		}
 		p.mu.Unlock()
 
@@ -344,6 +343,7 @@ func (p *Process) runLoop(ctx context.Context, cfgPath, binPath string) {
 		if time.Since(startTime) > tm.stableAfter {
 			rapidFailures = 0
 			delay = tm.baseDelay
+			p.gaveUp.Store(false)
 		} else {
 			rapidFailures++
 		}
@@ -366,6 +366,7 @@ func (p *Process) runLoop(ctx context.Context, cfgPath, binPath string) {
 			rapidFailures = tm.maxRetries - 1
 			if manual {
 				rapidFailures = 0
+				p.gaveUp.Store(false)
 			}
 			delay = tm.baseDelay
 			continue

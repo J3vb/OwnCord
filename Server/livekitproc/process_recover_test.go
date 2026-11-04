@@ -17,7 +17,7 @@ func fakeCompanion(t *testing.T) (dir, bin string) {
 	t.Helper()
 	dir = t.TempDir()
 	bin = filepath.Join(dir, "fake-livekit.sh")
-	content := "#!/bin/sh\nif [ -f \"$(dirname \"$0\")/ok\" ]; then sleep 30; fi\nexit 1\n"
+	content := "#!/bin/sh\nif [ -f \"$(dirname \"$0\")/ok\" ]; then exec sleep 30; fi\nexit 1\n"
 	if runtime.GOOS == "windows" {
 		bin = filepath.Join(dir, "fake-livekit.bat")
 		content = "@if exist \"%~dp0ok\" ping -n 30 127.0.0.1 > nul\r\n@exit /b 1\r\n"
@@ -37,6 +37,9 @@ func startRecoveryProcess(t *testing.T, tm restartTiming) (p *Process, dir strin
 		LiveKitBinaryPath: bin,
 	}, &config.TLSConfig{}, dir)
 	p.timing = tm
+	prevGrace := liveKitStopGrace
+	liveKitStopGrace = 100 * time.Millisecond
+	t.Cleanup(func() { liveKitStopGrace = prevGrace })
 	if err := p.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +79,7 @@ func TestRecovery_SlowTierKeepsTrying(t *testing.T) {
 	p, _ := startRecoveryProcess(t, quickTiming(3, 20*time.Millisecond))
 
 	waitFor(t, "two slow-tier attempts", func() bool { return p.Status().Restarts >= 5 })
-	if !p.Status().GaveUp {
+	if !p.gaveUp.Load() {
 		t.Error("a failing slow-tier attempt cleared gave-up")
 	}
 	select {
@@ -86,7 +89,8 @@ func TestRecovery_SlowTierKeepsTrying(t *testing.T) {
 	}
 }
 
-// A slow-tier attempt that comes up clears gave-up while it runs.
+// A slow-tier attempt that comes up is not reported as given up while it runs,
+// and only a run past stableAfter clears the flag itself.
 func TestRecovery_SlowTierAttemptThatStartsClearsGaveUp(t *testing.T) {
 	p, dir := startRecoveryProcess(t, quickTiming(2, 50*time.Millisecond))
 	waitFor(t, "gave up", func() bool { return gaveUpWaiting(p) })
@@ -100,6 +104,9 @@ func TestRecovery_SlowTierAttemptThatStartsClearsGaveUp(t *testing.T) {
 	}
 	if p.Restart() {
 		t.Error("Restart accepted while the companion runs")
+	}
+	if !p.gaveUp.Load() {
+		t.Error("starting a slow-tier attempt cleared gave-up before it proved stable")
 	}
 }
 

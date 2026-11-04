@@ -32,9 +32,11 @@ func (p *Process) Status() Status {
 	next := p.nextRetry
 	p.mu.Unlock()
 	return Status{
-		Running:     running,
-		Restarts:    int(p.restarts.Load()),
-		GaveUp:      p.gaveUp.Load(),
+		Running:  running,
+		Restarts: int(p.restarts.Load()),
+		// A slow-tier attempt that is running is not given up: voice works while it
+		// runs. The flag itself stays set until a run proves stable.
+		GaveUp:      p.gaveUp.Load() && !running,
 		NextRetryAt: next,
 	}
 }
