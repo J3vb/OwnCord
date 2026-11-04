@@ -180,8 +180,15 @@ publication (`voiceEventLog.ts`); `share.ended` is the browser or OS ending the
 capture (its "Stop sharing" bar); `share.source_changed` and `track.replaced`
 are a Change source that swapped the capture under the same publication. A
 publication the log did not see start gets no stop, so leaving voice never
-records a second one. `track.layers_changed` comes from the camera watchdog
-when the number of active camera layers moves; 0 means nobody watches.
+records a second one. While LiveKit reconnects it republishes every track, and
+the share goes on, so that gets no share events; a reconnect that builds a new
+room records `share.started` again on it. `track.layers_changed` comes from the
+camera watchdog when the number of active camera layers moves; 0 means nobody
+watches. `voice.left` is recorded by the leave itself (`roomLifecycle.ts` calls
+`recordVoiceLeft`), because the leave drops the room's listeners before it
+disconnects. A device change compares the capture's label as well as its id,
+so a new default device counts and the same device picked by id does not; the
+label is never recorded.
 
 The log starts lazily after the first render (`appEvents.ts`). Events an owner
 records before then wait in `eventSink.ts` (at most 200), so `ws.ts` and the

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { attachRecorder } from "./eventSink";
+import { savePref } from "@lib/prefs/preferences";
+import { EVENT_LOG_PREF_KEY, attachRecorder } from "./eventSink";
 import { copyLastExit, webviewFailureFields } from "./appEvents";
 
 type Seen = { code: string; fields: Readonly<Record<string, unknown>> };
@@ -56,6 +57,23 @@ describe("copying how the last run ended", () => {
     await copyLastExit(native(CRASH, later), "windows");
     expect(seen.map((e) => e.code)).toEqual(["native.crash", "native.exit"]);
     expect(seen[1]!.fields).toEqual({ platform: "windows", kind: "normal" });
+  });
+
+  it("leaves out the age of a crash only recorded at the next start", async () => {
+    const wer = stamp(
+      "10:04:50",
+      "[exit] Windows recorded a crash of the previous run (pid 7): exception 0xC0000005 in module 'x.dll'",
+    );
+    await copyLastExit(native(wer), "windows", fiveMinutesLater);
+    expect(seen[0]!.fields).toMatchObject({ kind: "exception", age_ms: null });
+  });
+
+  it("keeps the lines for a later start while the event log is off", async () => {
+    savePref(EVENT_LOG_PREF_KEY, false);
+    await copyLastExit(native(CRASH), "linux");
+    savePref(EVENT_LOG_PREF_KEY, true);
+    await copyLastExit(native(CRASH), "linux");
+    expect(seen.map((e) => e.code)).toEqual(["native.crash"]);
   });
 
   it("records nothing when the native log cannot be read", async () => {

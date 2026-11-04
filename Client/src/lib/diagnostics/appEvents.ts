@@ -52,8 +52,13 @@ function oneOf<T extends string>(list: readonly T[], value: string): T | "unknow
 }
 
 function recordExit(exit: ExitRecord, platform: Platform, now: number): void {
+  // Only a line the dying process wrote dates the crash; the "previous run"
+  // lines are written at the next start, so their age says nothing.
+  const atCrash = /^\[crash\] (?:fatal signal|unhandled exception|uncaught exception)/.test(
+    exit.line,
+  );
   const age = now - Date.parse(exit.at);
-  const age_ms = Number.isFinite(age) && age >= 0 ? age : null;
+  const age_ms = atCrash && Number.isFinite(age) && age >= 0 ? age : null;
   if (exit.outcome === "crash") {
     recordEvent("native.crash", {
       platform,
@@ -102,6 +107,8 @@ export async function copyLastExit(
   platform: Platform,
   now: () => number = Date.now,
 ): Promise<void> {
+  // Turned off since start: leave the lines for a start that records them.
+  if (loadPref<boolean>(EVENT_LOG_PREF_KEY, true) === false) return;
   let files: readonly { readonly name: string; readonly text: string }[];
   try {
     files = await logFiles.readNative();

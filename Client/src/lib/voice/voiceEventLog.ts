@@ -117,6 +117,14 @@ function recordShareStarted(pub: LocalTrackPublication): void {
   });
 }
 
+function deviceChanged(
+  before: { id: string | undefined; label: string },
+  after: { id: string | undefined; label: string },
+): boolean {
+  if (before.label && after.label) return before.label !== after.label;
+  return before.id !== undefined && after.id !== undefined && before.id !== after.id;
+}
+
 function recordStarted(source: "camera" | "microphone", media: MediaStreamTrack): void {
   const settings = media.getSettings();
   const device = settings.deviceId ? reportHash(settings.deviceId) : null;
@@ -148,23 +156,26 @@ function followLocalTrack(pub: LocalTrackPublication, owner: Disposable): void {
   const source = sourceOf(pub);
   if (track === undefined || (source !== "camera" && source !== "microphone")) return;
   let current: Disposable | null = null;
-  let device: string | undefined;
+  // The capture's device id and label; the label is only compared, never
+  // recorded. Chromium reports "default" for the default device, so the label
+  // tells a new default apart, and the same mic picked by id is no change.
+  let device: { id: string | undefined; label: string } | null = null;
   const wire = (): void => {
     current?.destroy();
     current = null;
     const media = track.mediaStreamTrack;
     if (media === undefined) return;
     current = new Disposable();
-    const next = media.getSettings().deviceId;
+    const next = { id: media.getSettings().deviceId, label: media.label };
     // A restart on another device is a device change; turning the camera back
     // on restarts on the same one.
-    if (device !== undefined && next !== undefined && next !== device) {
+    if (device !== null && deviceChanged(device, next)) {
       recordEvent(source === "camera" ? "camera.device_changed" : "mic.device_changed", {
-        device: reportHash(next),
+        device: next.id === undefined ? null : reportHash(next.id),
       });
       recordEvent("track.replaced", { source });
     }
-    device = next ?? device;
+    device = next;
     recordStarted(source, media);
     const opts = { signal: current.signal };
     if (source === "camera") {
@@ -204,6 +215,12 @@ type OnRoom = <E extends keyof RoomEventCallbacks>(
 /** Attach the event-log listeners to a room through the caller's onRoom, so
  *  they are removed with the room's other app listeners. Each listener is
  *  guarded: these run before the app's own handlers and must never throw. */
+/** The user left the call. Called by the leave path itself: it drops the
+ *  room's listeners before disconnecting, so no room event reports it. */
+export function recordVoiceLeft(room: Room): void {
+  recordEvent("voice.left", { channel: room.name ? pseudonym("c", room.name) : null });
+}
+
 export function attachVoiceEventLog(room: Room, onRoomFn: OnRoom): void {
   const owners = new Map<string, Disposable>();
   let reconnectingAt: number | null = null;
@@ -251,9 +268,6 @@ export function attachVoiceEventLog(room: Room, onRoomFn: OnRoom): void {
   onRoom(room, RoomEvent.Disconnected, (reason?: DisconnectReason) => {
     const named = disconnectReason(reason);
     recordEvent("voice.disconnected", { reason: named, unexpected: named !== "client_initiated" });
-    if (named === "client_initiated") {
-      recordEvent("voice.left", { channel: room.name ? pseudonym("c", room.name) : null });
-    }
     releaseAll();
   });
 
@@ -265,11 +279,12 @@ export function attachVoiceEventLog(room: Room, onRoomFn: OnRoom): void {
       codec: mime ? (mime.split("/")[1] ?? null) : null,
       simulcast: pub.simulcasted ?? null,
     });
-    if (source === "screen_share") recordShareStarted(pub);
     release(pub.trackSid);
     const owner = new Disposable();
     owners.set(pub.trackSid, owner);
     followLocalTrack(pub, owner);
+    // LiveKit's own reconnect republishes every track; the share went on.
+    if (source === "screen_share" && reconnectingAt === null) recordShareStarted(pub);
   });
   onRoom(room, RoomEvent.LocalTrackUnpublished, (pub: LocalTrackPublication) => {
     // Only a publication this log saw start gets a stop, so leaving voice
@@ -279,7 +294,9 @@ export function attachVoiceEventLog(room: Room, onRoomFn: OnRoom): void {
     recordEvent("track.unpublished", { source, reason: "unknown" });
     if (source === "camera") recordEvent("camera.stopped", { reason: "unknown" });
     if (source === "microphone") recordEvent("mic.stopped", { reason: "unknown" });
-    if (source === "screen_share") recordEvent("share.stopped", { reason: "unknown" });
+    if (source === "screen_share" && reconnectingAt === null) {
+      recordEvent("share.stopped", { reason: "unknown" });
+    }
     release(pub.trackSid);
   });
   onRoom(room, RoomEvent.TrackMuted, (pub: TrackPublication, p: Participant) => {
