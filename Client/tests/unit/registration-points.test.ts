@@ -12,8 +12,9 @@ const lineCaps: Record<string, number> = {
   "lib/dispatcher.ts": 341,
 };
 
-/** ws.on calls allowed in the dispatcher: the ordered auth_ok, ready and error chains. */
-const dispatcherWsOnCap = 3;
+/** Subscriptions written in the dispatcher: the ordered auth_ok, ready and
+ *  error chains, plus the one `subscribe` the route tables go through. */
+const dispatcherOnCap = 4;
 
 function source(file: string): string {
   return readFileSync(path.join(srcDir, file), "utf8");
@@ -25,7 +26,7 @@ describe("registration points", () => {
   });
 
   it("the dispatcher subscribes features through their route tables", () => {
-    const calls = source("lib/dispatcher.ts").match(/\bws\.on\(S\./g) ?? [];
-    expect(calls.length).toBeLessThanOrEqual(dispatcherWsOnCap);
+    const calls = source("lib/dispatcher.ts").match(/\.on\(/g) ?? [];
+    expect(calls.length).toBeLessThanOrEqual(dispatcherOnCap);
   });
 });

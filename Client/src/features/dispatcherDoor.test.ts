@@ -78,4 +78,16 @@ describe("the dispatcher door", () => {
       expect(severities[i], path.relative(srcDir, file)).toEqual([2]);
     });
   });
+
+  // A route's listener reaches the socket through a parameter the lint rule
+  // cannot follow. Routes come only from wsHandlers modules, which only the
+  // dispatcher imports (above), so the dispatcher stays the one that attaches them.
+  it("only feature handler modules build routes", () => {
+    const importsRoute = /import\s*\{[^}]*\broute\b[^}]*\}\s*from\s*["'][^"']*dispatchContext["']/;
+    const builders = sourceFiles
+      .filter((file) => importsRoute.test(readFileSync(file, "utf8")))
+      .map((file) => path.relative(srcDir, file).split(path.sep).join("/"));
+    expect(builders.length).toBeGreaterThan(0);
+    for (const name of builders) expect(name).toMatch(/^features\/[^/]+\/wsHandlers\.ts$/);
+  });
 });
