@@ -50,6 +50,8 @@ and only when it changes something a contributor or fork holder must do
 ### Changed
 
 - The admin Live log no longer fills with the panel's own request lines, and a viewer that falls behind sees how many lines were skipped.
+- In Open and Approval registration, a refused attempt (username taken, server busy, queue full) no longer uses up one of the address's 5 registrations per day.
+- A voice-channel password attempt refused because the whole server is at its limit no longer counts against the member's own attempts.
 
 ### Added
 

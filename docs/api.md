@@ -395,7 +395,8 @@ setting (B4-1; the admin panel's Settings page, or the setup wizard):
 
 `approval` and `open` also budget 5 registrations per client address per 24
 hours, and `approval` caps the pending queue at 100 applications; both refusals
-are `429 RATE_LIMITED`. A fresh install is `invite`; an upgraded server keeps
+are `429 RATE_LIMITED`. Only a registration that went through counts against
+the address: a taken username, a busy server or a full queue does not. A fresh install is `invite`; an upgraded server keeps
 its former `registration_open` choice as `invite` (1) or `closed` (0), never
 `open`. The first user is created via `/admin/api/setup` instead.
 
