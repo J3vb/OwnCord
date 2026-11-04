@@ -6,8 +6,8 @@
 package lockrank
 
 type (
-	VoiceMember struct{} // userLockEntry.mu of voiceRegistry.voiceMember
-	VoiceMod    struct{} // userLockEntry.mu of hubVoice.mod
+	VoiceMember struct{} // voicestate.userLockEntry.mu of voiceRegistry.voiceMember
+	VoiceMod    struct{} // voicestate.userLockEntry.mu of hubVoice.mod
 	Serialiser  struct{} // the rank-3 serialisers
 	Feed        struct{} // timeoutViewState.mu, presenceFeedState.mu
 	Seq         struct{} // Hub.seqMu

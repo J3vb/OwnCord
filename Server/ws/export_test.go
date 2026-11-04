@@ -15,6 +15,7 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/ws/voicestate"
 )
 
 // SetVoiceRejoinBlockWindowForTest shrinks the moderator-removal rejoin block
@@ -233,7 +234,7 @@ func NewHubForTest() *Hub {
 		clients:  make(map[int64][]*Client),
 		pubsub:   NewPubSub(),
 		limiter:  auth.NewRateLimiter(),
-		voiceHub: hubVoice{mod: newUserLocks[lockRankVoiceMod]()},
+		voiceHub: hubVoice{mod: voicestate.NewUserLocks[lockRankVoiceMod]()},
 	}
 }
 

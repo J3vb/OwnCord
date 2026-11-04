@@ -710,6 +710,7 @@ export function createThreadPanel(options: ThreadPanelOptions): ThreadPanelCompo
         sendText("", replyTo, replyPing, undefined, sticker);
       },
       onTyping: () => {},
+      onReplyTargetChange: (messageId) => messageList?.setReplyTarget(messageId),
       placeholder: threadsText("composer.placeholder"),
       noAttach: true,
     });

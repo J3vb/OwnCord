@@ -1,8 +1,11 @@
 import { messagesStore, type MessagesState } from "@stores/messages.store";
 import { membersStore } from "@stores/members.store";
+import { clearReadingPositions } from "@components/message-list/readingPositions";
 
-/** Empty every message, pending send and history flag, as a fresh session starts. */
+/** Empty every message, pending send and history flag, and the reading
+ *  positions kept for them, as a fresh session starts. */
 export function resetMessagesState(overrides: Partial<MessagesState> = {}): void {
+  clearReadingPositions();
   messagesStore.setState(() => ({
     messagesByChannel: new Map(),
     pendingSends: new Map(),

@@ -520,7 +520,7 @@ declares 27 mutexes in all (non-test files, at `f4a359e8`).
 | `seqMu`                   | `ws/hub.go:51`                | seq assignment + replay insertion + delivery order, serialised together |
 | `settings.cache.mu`       | `ws/hubsettings/cache.go:55`  | the cached server settings                                              |
 | `settings.uploadPolicyMu` | `ws/hub_settings.go:162`      | orders `BroadcastUploadPolicy`'s saves                                  |
-| `voiceHub.keyHolderMu`    | `ws/hub_voice_state.go:29`    | the voice E2EE key-holder map                                           |
+| `voiceHub.keyHolderMu`    | `ws/hub_voice_state.go:33`    | the voice E2EE key-holder map                                           |
 | `presenceFeed.mu`         | `ws/hub_presence_state.go:12` | presence coalescing state                                               |
 
 **The order is written once, in `Server/ws/lock_order.go`**: the rule (no I/O

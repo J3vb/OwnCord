@@ -99,7 +99,7 @@ func TestVoiceRegistry_WebhookLeftRacingSameChannelRejoin(t *testing.T) {
 		defer close(done)
 		f.h.HandleWebhookParticipantLeftForTest(f.uid, f.chID, oldToken)
 	}()
-	waitFor(t, "webhook queued on the member lock", func() bool { return f.h.voiceHub.reg.voiceMember.refsForTest(f.uid) >= 2 })
+	waitFor(t, "webhook queued on the member lock", func() bool { return f.h.voiceHub.reg.voiceMember.Refs(f.uid) >= 2 })
 
 	txn.clear(f.c)
 	if _, err := txn.deleteRow(ctx, f.chID, oldToken); err != nil {

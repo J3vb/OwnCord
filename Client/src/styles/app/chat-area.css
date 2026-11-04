@@ -298,6 +298,11 @@
   font-size: var(--font-size-xxs);
   line-height: 18px;
 }
+.scroll-to-bottom-count.mention {
+  background: var(--danger-fill);
+  color: var(--on-fill);
+  font-weight: 700;
+}
 .scroll-to-bottom-count[hidden] {
   display: none;
 }
