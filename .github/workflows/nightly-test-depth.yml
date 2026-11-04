@@ -208,7 +208,9 @@ jobs:
   fuzz-and-simulation:
     name: Nightly generated fuzzing and hub simulation
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Every Go fuzz target at 30 s each plus its build, then the simulation. The
+    # script prints the target count and fuzz minutes in the job summary.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
