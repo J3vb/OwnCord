@@ -118,14 +118,15 @@ first), or copy the file in by hand if that is what you meant to do.
 		return 1
 	}
 
-	return replaceLiveDatabase(source, dbPath, backupDir)
+	return replaceLiveDatabase(source, dbPath, backupDir, cfg.Server.MinFreeDiskBytes())
 }
 
 // replaceLiveDatabase takes the pre-restore safety copy (or moves an unreadable
 // live database aside), stages source and applies it with the same db code the
 // admin panel and boot use. The caller holds the process lock, has verified
-// source and has checked that no other restore is pending.
-func replaceLiveDatabase(source, dbPath, backupDir string) int {
+// source and has checked that no other restore is pending. The safety copy
+// leaves reserve bytes free (server.min_free_disk_mb).
+func replaceLiveDatabase(source, dbPath, backupDir string, reserve uint64) int {
 	// A pre-restore safety copy of the CURRENT database makes the overwrite
 	// reversible. It is skipped only when the live database is missing or
 	// unreadable (the usual reason for restoring): there is nothing to copy and
@@ -134,7 +135,7 @@ func replaceLiveDatabase(source, dbPath, backupDir string) int {
 	safety := ""
 	if err := db.CheckBackupIntegrity(context.Background(), dbPath); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: the live database is missing or unreadable, so no pre-restore safety copy was taken (%v); its files will be moved aside instead\n", err)
-	} else if safety, err = safetyCopy(dbPath, backupDir); err != nil {
+	} else if safety, err = safetyCopy(dbPath, backupDir, reserve); err != nil {
 		fmt.Fprintf(os.Stderr, "error: could not take the pre-restore safety copy — database untouched: %v\n", err)
 		return 1
 	}
@@ -323,13 +324,15 @@ func checkRestoreSource(source, dbPath string) error {
 }
 
 // safetyCopy VACUUMs the current database to a timestamped pre_restore_ file
-// in backupDir, returning its path.
-func safetyCopy(dbPath, backupDir string) (string, error) {
+// in backupDir, returning its path. It refuses when the copy would leave less
+// than reserve bytes free.
+func safetyCopy(dbPath, backupDir string, reserve uint64) (string, error) {
 	src, err := db.OpenShared(dbPath)
 	if err != nil {
 		return "", err
 	}
 	defer src.Close() //nolint:errcheck
+	src.SetBackupDiskReserve(reserve)
 
 	out := filepath.Join(backupDir, admin.PreRestoreBackupPrefix+time.Now().UTC().Format("20060102_150405")+".db")
 	if err := src.BackupToSafe(context.Background(), out, backupDir); err != nil {

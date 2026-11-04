@@ -84,7 +84,6 @@ let router: Router;
 // Imported after each vi.resetModules(), so it is the instance router.ts sees.
 let setAuth: typeof import("@stores/auth.store").setAuth;
 let appEl: HTMLElement;
-const unauthorized = vi.fn();
 
 /** Lets a released gate's dynamic import and the code after it run. */
 async function settle(): Promise<void> {
@@ -93,7 +92,7 @@ async function settle(): Promise<void> {
 
 const FALLBACK_TEXT = connectText("app.renderFailed");
 const lastTakePendingInvite = (): (() => PendingInvite) =>
-  hoisted.renderConnect.mock.lastCall![5] as () => PendingInvite;
+  hoisted.renderConnect.mock.lastCall![4] as () => PendingInvite;
 
 beforeEach(async () => {
   vi.clearAllMocks();
@@ -106,13 +105,7 @@ beforeEach(async () => {
   appEl = document.getElementById("app")!;
   ({ setAuth } = await import("@stores/auth.store"));
   router = await import("../../src/app/router");
-  router.configureRouter(
-    {} as ApiClient,
-    {} as WsClient,
-    appEl,
-    {} as ProfileManager,
-    unauthorized,
-  );
+  router.configureRouter({} as ApiClient, {} as WsClient, appEl, {} as ProfileManager);
 });
 
 describe("the page id", () => {
@@ -124,13 +117,13 @@ describe("the page id", () => {
     expect(hoisted.renderConnect).toHaveBeenCalledTimes(1);
   });
 
-  it("hands the connect route the services, the recovery and the 401 handler", async () => {
+  it("hands the connect route the services, the recovery and the invite hand-off", async () => {
     await router.renderActive();
     const args = hoisted.renderConnect.mock.lastCall!;
     expect(args[2]).toBe(appEl);
     expect(args[3]).toBe(router.renderRecovery);
-    expect(args[4]).toBe(unauthorized);
-    expect(args).toHaveLength(6);
+    expect(args[4]).toBeTypeOf("function");
+    expect(args).toHaveLength(5);
   });
 });
 

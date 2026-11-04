@@ -34,7 +34,10 @@ stateDiagram-v2
 **Target rule:** the transition `Connect → Main` is gated by the **connected
 overlay**, which resolves only on the `ready` event — never navigate to Main on a
 bare socket-open. (Already the case: `wirePostAuth()` inside `renderPage()` in `main.ts`.) This guarantees Main
-never renders against empty stores.
+never renders against empty stores. The overlay waits at most 30 s for `ready`
+(restarted on each reconnect, `READY_TIMEOUT_MS` in `app/session.ts`); past
+that it tears the session down, keeps the stored sign-in, and returns to the
+connect form with "did not finish loading".
 
 ---
 
@@ -56,8 +59,12 @@ status area. Settings are reachable unauthenticated (for appearance/advanced).
 | epoch: compatible   | `server-info.protocol_epoch == PROTOCOL_EPOCH`                          | No badge, no notice — Connect behaves as before                                                                                                                          |
 | epoch: mismatch     | `server-info.protocol_epoch != PROTOCOL_EPOCH` (B7-12)                  | Advisory row badge only; Connect stays enabled                                                                                                                           |
 
-Health and `server-info` poll every 15 s (interval wired in `main.ts`, profile
-data via `profiles.ts`); auto-connect, if enabled for the active profile,
+Health and `server-info` poll every 15 s for the first minute, then every 60 s
+(`app/healthSchedule.ts`, wired in `app/connectRoute.ts`), and send nothing
+while the window is hidden or a sign-in is in flight; the rows refresh within
+15 s of the window being shown again. The dot and the response-time text share
+one cut-off (`lib/presence/latency.ts`: green below 500 ms, amber from it).
+Auto-connect, if enabled for the active profile,
 drives the login form's `auto-connecting` state.
 
 **Incompatible epoch state (B7-12).** A mismatch is shown in two places, never
@@ -101,7 +108,9 @@ The 2FA box takes either a six-digit authenticator code or an emergency
 recovery code (`XXXXX-XXXXX`, case-insensitive, separator optional); the server
 routes the one `code` field by shape. A wrong code of either kind keeps the
 overlay and the partial token, so the user can retry; the re-entrancy guard
-stops a double Enter spending a single-use code twice.
+stops a double Enter spending a single-use code twice. A refused credential
+(401 from login, verify-totp or recover) is only a form error: those calls skip
+the API client's session-expiry sink, as TOTP enrolment's confirm does.
 
 **Account recovery (B7-15b).** "Lost your password or 2FA device? Recover your
 account" opens a recovery overlay (`pages/connect-page/RecoverOverlay.ts`,
@@ -332,7 +341,8 @@ not a mismatch. This is correct today; the spec locks it.
 
 ## Source of truth
 
-`src/main.ts`, `src/pages/ConnectPage.ts`,
+`src/main.ts`, `src/app/connectRoute.ts`, `src/app/healthSchedule.ts`,
+`src/app/session.ts`, `src/lib/presence/latency.ts`, `src/pages/ConnectPage.ts`,
 `src/pages/connect-page/LoginForm.ts`, `src/lib/ws.ts`, `src/lib/api.ts`,
 `src/lib/net/httpProxy.ts`, `src/components/ConnectedOverlay.ts`,
 `src/components/ServerBanner.ts`, `src/components/CertMismatchModal.ts`,

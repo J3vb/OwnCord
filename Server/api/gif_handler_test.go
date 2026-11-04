@@ -199,7 +199,6 @@ func TestGIFPosForwardedUpstream(t *testing.T) {
 func TestGIFNextPassedThrough(t *testing.T) {
 	database := newAuthTestDB(t)
 	token := profileCreateToken(t, database, "gifuser", 4)
-	router := buildGIFRouter(database, "server-side-key")
 
 	for _, tt := range []struct{ name, body, want string }{
 		{"present", `{"results":[],"next":"CAoQ-9_.x:y="}`, "CAoQ-9_.x:y="},
@@ -213,6 +212,8 @@ func TestGIFNextPassedThrough(t *testing.T) {
 		{"escaped chars", `{"results":[],"next":"a+b/c%3D~"}`, "a+b/c%3D~"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
+			// A fresh router per case: trending answers are cached per handler.
+			router := buildGIFRouter(database, "server-side-key")
 			stubKlipy(t, tt.body, http.StatusOK)
 			rr := gifGET(t, router, "/api/v1/gif/trending", token)
 			if rr.Code != http.StatusOK {
@@ -235,7 +236,6 @@ func TestGIFNextPassedThrough(t *testing.T) {
 func TestGIFBadNextDropped(t *testing.T) {
 	database := newAuthTestDB(t)
 	token := profileCreateToken(t, database, "gifuser", 4)
-	router := buildGIFRouter(database, "server-side-key")
 
 	for name, next := range map[string]string{
 		"space":    "a b",
@@ -249,6 +249,8 @@ func TestGIFBadNextDropped(t *testing.T) {
 			if err != nil {
 				t.Fatalf("marshal: %v", err)
 			}
+			// A fresh router per case: trending answers are cached per handler.
+			router := buildGIFRouter(database, "server-side-key")
 			stubKlipy(t, string(body), http.StatusOK)
 			rr := gifGET(t, router, "/api/v1/gif/trending", token)
 			if rr.Code != http.StatusOK {

@@ -51,6 +51,7 @@ import {
 } from "../../lib/voice/appAudioShare";
 import { voiceText } from "../../i18n/voice";
 import { applyScreenShareContentHint } from "../../lib/voice/videoPresets";
+import { recordEvent } from "../../lib/diagnostics/eventSink";
 
 const log = createLogger("screenShare");
 
@@ -91,6 +92,21 @@ function superseded(state: ScreenTrackState, deps: VideoTrackDeps, live: LiveSha
     deps.getRoom() !== live.room ||
     deps.getWs() !== live.ws
   );
+}
+
+/** The diagnostic event log's record of a swap under the same publication.
+ *  Never throws: a failed read must not undo a swap that already worked. */
+function recordSourceChanged(media: MediaStreamTrack | undefined): void {
+  let s: string | undefined;
+  try {
+    s = media?.getSettings().displaySurface;
+  } catch {
+    s = undefined;
+  }
+  recordEvent("share.source_changed", {
+    surface: s === "monitor" || s === "window" || s === "browser" ? s : "unknown",
+  });
+  recordEvent("track.replaced", { source: "screen_share" });
 }
 
 /** A backup-codec sender (VP9/AV1 publishes one for viewers who cannot decode
@@ -219,6 +235,7 @@ export async function changeScreenshareSource(
     }
     deps.reapplyAudioPipeline();
     bumpLocalShareRev();
+    recordSourceChanged(live.video.mediaStreamTrack);
     log.info("Screenshare source changed", { audio: freshAudio !== undefined });
   } catch (err) {
     for (const t of fresh) t.stop();
@@ -263,6 +280,7 @@ async function changeInPlace(
     await share.changeSource();
     if (stale()) return;
     bumpLocalShareRev();
+    recordSourceChanged(undefined);
     log.info("Screenshare source changed", { inPlace: true });
   } catch (err) {
     if (stale()) return;

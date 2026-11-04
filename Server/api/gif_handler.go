@@ -51,6 +51,14 @@ const (
 	// makes at once. The picker searches on every debounced keystroke, so
 	// without a cap a room full of typing users is an amplifier.
 	gifMaxConcurrentUpstream = 8
+
+	// gifTrendingTTL is how long a trending page is answered from memory: it
+	// is the same for every member for minutes, and each upstream call costs
+	// the operator's key a request.
+	gifTrendingTTL = 60 * time.Second
+	// gifTrendingCacheEntries bounds the trending pages kept (one per limit
+	// and paging cursor asked for).
+	gifTrendingCacheEntries = 32
 )
 
 // gifFetcher performs the upstream call under the outbound-content policy
@@ -126,16 +134,17 @@ func MountGIFRoutes(r chi.Router, sessions *service.SessionService, limiter *aut
 // the server-held API key. requireQuery marks the endpoints that take a `q`
 // search term (search) versus those that do not (trending).
 func handleGIFProxy(apiKey, upstreamPath string, requireQuery bool) http.HandlerFunc {
+	var trending *gifPageCache
+	if !requireQuery {
+		trending = newGIFPageCache(gifTrendingTTL, gifTrendingCacheEntries)
+	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		if apiKey == "" {
 			writeErr(w, http.StatusServiceUnavailable, httperr.CodeGIFDisabled, "GIF search is not configured on this server")
 			return
 		}
 
-		params := url.Values{
-			"key":          {apiKey},
-			"media_filter": {"gif,tinygif"},
-		}
+		params := url.Values{"media_filter": {"gif,tinygif"}}
 
 		limit, ok := parseGIFLimit(r.URL.Query().Get("limit"))
 		if !ok {
@@ -165,11 +174,18 @@ func handleGIFProxy(apiKey, upstreamPath string, requireQuery bool) http.Handler
 			params.Set("pos", pos)
 		}
 
+		cacheKey := params.Encode()
+		if page, ok := trending.get(cacheKey); ok {
+			writeJSON(w, http.StatusOK, page)
+			return
+		}
+		params.Set("key", apiKey)
 		page, err := fetchGIFs(r, gifAPIBase+upstreamPath+"?"+params.Encode(), apiKey, limit)
 		if err != nil {
 			writeErr(w, http.StatusBadGateway, httperr.CodeBadGateway, "GIF provider is unavailable")
 			return
 		}
+		trending.put(cacheKey, page)
 
 		writeJSON(w, http.StatusOK, page)
 	}

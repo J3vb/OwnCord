@@ -58,11 +58,11 @@ func (f *Fetcher) Fetch(ctx context.Context, req Request) (*Response, error) {
 	// Two gates: this Fetcher's cap, then the process-wide one. Always in
 	// that order, so two Fetchers can never hold each other's slots.
 	if err := f.gate.acquire(ctx); err != nil {
-		return nil, fmt.Errorf("safefetch: waiting for a slot: %w", err)
+		return nil, fmt.Errorf("%w: waiting for a slot: %w", ErrBusy, err)
 	}
 	defer f.gate.release()
 	if err := processGate.acquire(ctx); err != nil {
-		return nil, fmt.Errorf("safefetch: waiting for a process slot: %w", err)
+		return nil, fmt.Errorf("%w: waiting for a process slot: %w", ErrBusy, err)
 	}
 	defer processGate.release()
 

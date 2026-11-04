@@ -7,6 +7,7 @@ vi.mock("@tauri-apps/api/event", () => wsMocks.tauriEventMock());
 
 import { mockInvoke, emitTauriEvent } from "./helpers/ws-mocks";
 import { createWsClient } from "../../src/lib/ws";
+import { attachRecorder } from "../../src/lib/diagnostics/eventSink";
 import { expectConsole } from "../helpers/console";
 import { useWsClientFixture } from "../helpers/wsClientFixture";
 import {
@@ -66,6 +67,24 @@ describe("wake reconnect signal (U4 follow-up)", () => {
     expect(reconnects().length).toBeGreaterThanOrEqual(1);
     emitTauriEvent("ws-state", "open");
     expect(lastAuthPayload().wake).toBe(true);
+  });
+
+  it("records waking up once per sleep, with how long it slept", async () => {
+    await connectAndAuth(client);
+    const resumed: unknown[] = [];
+    const detach = attachRecorder((code, fields) => {
+      if (code === "app.resumed") resumed.push(fields);
+    });
+    // Attaching replays what earlier tests queued; only this sleep counts.
+    resumed.length = 0;
+    try {
+      await wakeAndDial();
+      emitTauriEvent("ws-state", "open");
+      expect(resumed).toHaveLength(1);
+      expect((resumed[0] as { asleep_ms: number }).asleep_ms).toBeGreaterThan(10 * 60_000);
+    } finally {
+      detach();
+    }
   });
 
   it("marks a 90-180 s freeze as a wake too, closing the silent-displacement window", async () => {

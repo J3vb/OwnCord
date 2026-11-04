@@ -28,6 +28,10 @@ const (
 // (warning).
 const AttentionBackupJob = "Backups"
 
+// attentionBackupSignal is the backup signal's id, the one RefreshBackup
+// re-evaluates.
+const attentionBackupSignal = "backup"
+
 // AttentionInterval is how often Run samples the sources.
 const AttentionInterval = time.Minute
 
@@ -334,17 +338,6 @@ func (s *AttentionService) read(ctx context.Context) attentionReadings {
 	if s.src.DispatchAlive != nil {
 		r.dispatchAlive = s.src.DispatchAlive()
 	}
-	r.scheduleErr = errors.New("backup schedule is not available")
-	if s.src.BackupSchedule != nil {
-		r.schedule, r.scheduleErr = s.src.BackupSchedule(ctx)
-		if errors.Is(r.scheduleErr, db.ErrNotFound) {
-			r.schedule, r.scheduleErr = "off", nil
-		}
-	}
-	r.lastBackupErr = errors.New("backups are not available")
-	if s.src.LastBackup != nil {
-		r.lastBackup, r.lastBackupErr = s.src.LastBackup()
-	}
 	if s.src.VoiceHealth != nil {
 		v := s.src.VoiceHealth(ctx)
 		r.voice = &v
@@ -353,6 +346,10 @@ func (s *AttentionService) read(ctx context.Context) attentionReadings {
 		r.certMode, r.cert = s.src.Certificate()
 		r.certMeasured = true
 	}
+	// Last, after the voice probe that can block: a 'Backup now' refresh that
+	// lands while this sample is still reading must not be overwritten by an
+	// older backup reading.
+	s.readBackup(ctx, &r)
 	return r
 }
 

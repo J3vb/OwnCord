@@ -89,8 +89,10 @@ import {
   abandonInFlight,
   configureSession,
   installLogoutTeardown,
+  READY_TIMEOUT_MS,
   sessionInFlight,
   sessionTarget,
+  signInPending,
   startSession,
 } from "../../src/app/session";
 import type { PageId } from "../../src/app/context";
@@ -257,6 +259,90 @@ describe("pre-auth deadline", () => {
     await vi.advanceTimersByTimeAsync(PREAUTH_CONNECT_TIMEOUT_MS + 1);
     expect(onTimeout).not.toHaveBeenCalled();
     expect(sessionInFlight()).toBe(true);
+  });
+});
+
+describe("ready deadline", () => {
+  /** Delivers `ready`, the frame the connected overlay waits for. */
+  function ready(): void {
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "ready",
+        payload: { channels: [], members: [], voice_states: [], roles: [] },
+      }),
+    );
+  }
+
+  it("returns to the connect page with a message when ready never arrives", async () => {
+    startSession("a.example:8443", "tok-a", "casey");
+    await authOk();
+    setAuth("tok-a", USER, "Srv", "");
+    await vi.advanceTimersByTimeAsync(READY_TIMEOUT_MS - 1);
+    expect(overlays[0]!.destroyed).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(overlays[0]!.destroyed).toBe(true);
+    expect(sessionInFlight()).toBe(false);
+    expect(authStore.getState().isAuthenticated).toBe(false);
+    expect(uiStore.getState().transientError).not.toBeNull();
+    await vi.advanceTimersByTimeAsync(0);
+    // A stall is not a logout: the stored sign-in stays for the next try.
+    expect(hoisted.deleteCredential).not.toHaveBeenCalled();
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it("restarts on a reconnect while the overlay waits", async () => {
+    startSession("a.example:8443", "tok-a", "casey");
+    await authOk();
+    await vi.advanceTimersByTimeAsync(READY_TIMEOUT_MS - 5_000);
+    emitTauriEvent("ws-state", "closed");
+    await vi.advanceTimersByTimeAsync(0);
+    await authOk();
+    await vi.advanceTimersByTimeAsync(READY_TIMEOUT_MS - 1_000);
+    expect(overlays[0]!.destroyed).toBe(false);
+    expect(sessionInFlight()).toBe(true);
+  });
+
+  it("is cleared once ready arrives", async () => {
+    startSession("a.example:8443", "tok-a", "casey");
+    await authOk();
+    ready();
+    expect(overlays[0]!.ready).toBe(true);
+    await vi.advanceTimersByTimeAsync(READY_TIMEOUT_MS + 1);
+    expect(sessionInFlight()).toBe(true);
+    expect(overlays[0]!.destroyed).toBe(false);
+  });
+});
+
+describe("signInPending", () => {
+  it("holds from the dial until ready", async () => {
+    expect(signInPending()).toBe(false);
+    startSession("a.example:8443", "tok-a", "casey");
+    expect(signInPending()).toBe(true);
+    await authOk();
+    expect(signInPending()).toBe(true);
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "ready",
+        payload: { channels: [], members: [], voice_states: [], roles: [] },
+      }),
+    );
+    expect(signInPending()).toBe(false);
+    expect(sessionInFlight()).toBe(true);
+  });
+
+  it("ends when the first dial is refused, though the target is kept", async () => {
+    startSession("a.example:8443", "tok-a", "casey");
+    await vi.advanceTimersByTimeAsync(0);
+    emitTauriEvent("ws-state", "open");
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({ type: "auth_error", payload: { message: "invalid token" } }),
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sessionInFlight()).toBe(true);
+    expect(signInPending()).toBe(false);
   });
 });
 

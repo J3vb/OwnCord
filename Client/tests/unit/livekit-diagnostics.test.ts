@@ -12,6 +12,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { LogLevel, LoggerNames, RoomEvent, getLogger, setLogLevel } from "livekit-client";
 import { addLogListener, type LogEntry } from "@lib/logger";
+import { attachRecorder } from "@lib/diagnostics/eventSink";
 import type { Room } from "livekit-client";
 
 import {
@@ -202,6 +203,29 @@ describe("logIceConnectionInfo", () => {
 
     expect(subGetStats).toHaveBeenCalled();
     expect(pubGetStats).toHaveBeenCalled();
+  });
+
+  it("records each transport's ICE state, leaving out a state it does not know", () => {
+    const states: unknown[] = [];
+    const detach = attachRecorder((code, fields) => {
+      if (code === "ice.state") states.push(fields);
+    });
+    // Attaching replays what earlier tests queued; only this call counts.
+    states.length = 0;
+    try {
+      logIceConnectionInfo(
+        withEngine(
+          fakeTransport({ iceConnectionState: "checking" }),
+          fakeTransport({ iceConnectionState: "weird" as RTCIceConnectionState }),
+        ),
+      );
+    } finally {
+      detach();
+    }
+    expect(states).toEqual([
+      { transport: "subscriber", state: "checking" },
+      { transport: "publisher", state: null },
+    ]);
   });
 
   it("resolves the selected candidate pair from the stats report", async () => {

@@ -40,8 +40,12 @@ export function createAccountApi(t: ApiTransport) {
   return {
     // ── Auth ──────────────────────────────────────────────
 
+    /** A refused credential (401) is a form error, not a session expiring:
+     *  the sign-in calls skip the global 401 sink, as confirmTotp does. */
     login(username: string, password: string, signal?: AbortSignal): Promise<AuthResponse> {
-      return t.request<AuthResponse>("POST", "/auth/login", { username, password }, signal);
+      return t.request<AuthResponse>("POST", "/auth/login", { username, password }, signal, {
+        skipUnauthorized: true,
+      });
     },
 
     register(
@@ -72,6 +76,7 @@ export function createAccountApi(t: ApiTransport) {
     verifyTotp(code: string, partialToken: string, signal?: AbortSignal): Promise<AuthResponse> {
       return t.request<AuthResponse>("POST", "/auth/verify-totp", { code }, signal, {
         token: partialToken,
+        skipUnauthorized: true,
       });
     },
 
@@ -89,6 +94,7 @@ export function createAccountApi(t: ApiTransport) {
         "/auth/recover",
         { username, kit_secret: secret, new_password: newPassword },
         signal,
+        { skipUnauthorized: true },
       );
     },
 

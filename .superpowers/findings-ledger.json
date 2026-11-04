@@ -1,5 +1,5 @@
 {
-  "nextId": 553,
+  "nextId": 555,
   "findings": [
     {
       "id": "OC-0001",
@@ -12726,6 +12726,52 @@
     },
     {
       "id": "OC-0551",
+      "title": "A manual backup or a restore's safety copy postponed the next scheduled backup and counted as the last backup",
+      "file": "Server/admin/backup_maintenance.go",
+      "line": 358,
+      "severity": "low",
+      "why": "The schedule check and the attention panel's last-backup signal took the newest *.db in the backup directory, pre_restore_ and pre_migrate_ safety copies included. A safety copy is the state before a restore or a migration, so it pushed the next scheduled backup back a full interval and stood in for a backup of the current data; retention's keep-the-newest rule could also pick a safety copy and prune the newest real backup.",
+      "repro": "Daily schedule, one 30-hour-old chatserver_ backup and a fresh pre_restore_ copy: the tick took no scheduled backup. Retention 7 with two old chatserver_ backups and a fresh pre_restore_ copy pruned both chatserver_ files.",
+      "evidence": "Server/admin/backup_maintenance_test.go (TestBackupHistory_IgnoresSafetyCopies).",
+      "suggestedFix": "scanBackups leaves out the safety copies; PruneSafetyCopies already bounds them by count.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/admin/backup_maintenance_test.go",
+        "revertProof": "fail (no scheduled backup taken; chatserver_b.db pruned)"
+      },
+      "lens": "admin",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-03",
+      "hunt": "server-review-2026-11-03",
+      "finder": "claude",
+      "fixedDate": "2026-11-04"
+    },
+    {
+      "id": "OC-0552",
+      "title": "Backups copied the whole database without checking free disk space",
+      "file": "Server/db/backup_queries.go",
+      "line": 66,
+      "severity": "low",
+      "why": "Every VACUUM INTO (pre-migration, scheduled, manual, pre-restore safety copy) ran without comparing free space with the database plus its WAL, unlike uploads and the archive, which keep server.min_free_disk_mb free. On a nearly full disk the copy failed or filled the volume, the panel said only 'backup failed', and an update carrying a migration failed its boot on every restart.",
+      "repro": "Fake free space of 10 MB with a 256 MB reserve: BackupToSafe wrote the copy anyway. After the fix it refuses with ErrBackupNoSpace naming both numbers and creates no file, and POST /backup answers 507 STORAGE_LOW_DISK.",
+      "evidence": "Server/db/backup_space_test.go (TestBackupToSafe_RefusesWhenShortOfSpace), Server/admin/handlers_backup_space_test.go.",
+      "suggestedFix": "Check free space in the backup directory against database + WAL + min_free_disk_mb inside BackupToSafe, before the temp file exists.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/db/backup_space_test.go",
+        "revertProof": "fail (backup written below the floor)"
+      },
+      "lens": "db",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-03",
+      "hunt": "server-review-2026-11-03",
+      "finder": "claude",
+      "fixedDate": "2026-11-04"
+    },
+    {
+      "id": "OC-0553",
       "title": "A profile save with an identity key could fail after the profile part was already saved",
       "file": "Server/service/user.go",
       "line": 231,
@@ -12748,7 +12794,7 @@
       "fixedDate": "2026-11-04"
     },
     {
-      "id": "OC-0552",
+      "id": "OC-0554",
       "title": "The account-deletion log named the reverse proxy instead of the client",
       "file": "Server/api/auth_handler.go",
       "line": 286,

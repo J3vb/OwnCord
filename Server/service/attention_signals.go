@@ -197,7 +197,7 @@ func BackupScheduleInterval(schedule string) time.Duration {
 }
 
 func (s *AttentionService) evalBackup(r attentionReadings, now time.Time) {
-	sig := AttentionSignal{ID: "backup", Label: "Last successful backup", ObservedAt: now}
+	sig := AttentionSignal{ID: attentionBackupSignal, Label: "Last successful backup", ObservedAt: now}
 	title := "Backups are out of date"
 	action := "Open Backups and take a backup now; if scheduled backups keep failing, search Server Logs for \"backup maintenance failed\"."
 	if r.scheduleErr != nil || r.lastBackupErr != nil {

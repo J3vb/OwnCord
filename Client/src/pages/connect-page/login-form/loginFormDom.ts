@@ -313,7 +313,7 @@ export function createLoginFormDom(st: LoginFormState, lf: LoginFormInternals) {
         "button",
         {
           type: "button",
-          class: "totp-backup-link",
+          class: "totp-backup-link form-recover-link",
           "data-testid": "recover-account-link",
         },
         connectText("login.recoverLink"),
