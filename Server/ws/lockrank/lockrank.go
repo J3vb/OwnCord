@@ -11,7 +11,7 @@ type (
 	Serialiser  struct{} // the rank-3 serialisers
 	Feed        struct{} // timeoutViewState.mu, presenceFeedState.mu
 	Seq         struct{} // Hub.seqMu
-	HubCache    struct{} // hubVoice.keyHolderMu, hubSettings.mu
+	HubCache    struct{} // hubVoice.keyHolderMu, hubsettings.Cache.mu
 	Hub         struct{} // Hub.mu
 	PubSub      struct{} // PubSub.mu
 	Leaf        struct{} // the leaves
