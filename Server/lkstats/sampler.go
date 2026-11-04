@@ -37,6 +37,18 @@ const (
 	// StatusNotSetUp means the page answered 200 but carries no LiveKit
 	// series, as when livekit.yaml has no prometheus port or the URL is wrong.
 	StatusNotSetUp Status = "not_set_up"
+	// StatusRestarting means OwnCord's own LiveKit has no running process at
+	// the moment: still starting, or between restarts.
+	StatusRestarting Status = "restarting"
+)
+
+// Where the figures come from.
+const (
+	// SourceMetrics is LiveKit's Prometheus page.
+	SourceMetrics = "metrics"
+	// SourceManaged is the LiveKit process OwnCord runs, read through the
+	// operating system and LiveKit's room service.
+	SourceManaged = "managed"
 )
 
 // Point is one sample as the admin API serves it. A nil field is a figure the
@@ -58,6 +70,7 @@ type Point struct {
 
 // Snapshot is the newest sample, the status and the series over a window.
 type Snapshot struct {
+	Source string
 	Status Status
 	// Since is when Status last changed; zero before the first read.
 	Since  time.Time
@@ -82,14 +95,18 @@ type fetchResult struct {
 	m      Metrics
 	status Status
 	reason string
+	// reset says the figures after this one do not continue the ones before
+	// it (the process changed), so rates restart from this sample.
+	reset bool
 }
 
 // Sampler reads LiveKit's stats page every Interval into a fixed ring. One
 // goroutine (Run) writes; Snapshot reads under the same lock.
 type Sampler struct {
-	fetch func(ctx context.Context) fetchResult
-	now   func() time.Time
-	log   *slog.Logger
+	source string
+	fetch  func(ctx context.Context) fetchResult
+	now    func() time.Time
+	log    *slog.Logger
 
 	mu      syncutil.Mutex
 	ring    []sample
@@ -109,11 +126,11 @@ func New(url string, log *slog.Logger) *Sampler {
 		log = slog.Default()
 	}
 	c := newClient()
-	return newSampler(func(ctx context.Context) fetchResult { return fetchPage(ctx, c, url, Timeout) }, time.Now, log, ringSize)
+	return newSampler(SourceMetrics, func(ctx context.Context) fetchResult { return fetchPage(ctx, c, url, Timeout) }, time.Now, log, ringSize)
 }
 
-func newSampler(fetch func(context.Context) fetchResult, now func() time.Time, log *slog.Logger, size int) *Sampler {
-	return &Sampler{fetch: fetch, now: now, log: log, ring: make([]sample, size)}
+func newSampler(source string, fetch func(context.Context) fetchResult, now func() time.Time, log *slog.Logger, size int) *Sampler {
+	return &Sampler{source: source, fetch: fetch, now: now, log: log, ring: make([]sample, size)}
 }
 
 // newClient builds the HTTP client for the page. The address is the
@@ -203,6 +220,9 @@ func (s *Sampler) sample(ctx context.Context) {
 	defer s.mu.Unlock()
 	s.noteStatus(r, at)
 	sm := missing(at.Unix())
+	if r.reset {
+		s.hasPrev = false
+	}
 	if r.status == StatusOK {
 		m := r.m
 		sm.mem = optional(m.RSSBytes, m.HasRSS)
@@ -244,6 +264,8 @@ func (s *Sampler) noteStatus(r fetchResult, at time.Time) {
 		s.log.Warn("lkstats: LiveKit stats page not reachable", "reason", r.reason)
 	case StatusNotSetUp:
 		s.log.Warn("lkstats: LiveKit stats page has no LiveKit metrics", "hint", "check the prometheus port in livekit.yaml and voice.livekit_metrics_url")
+	case StatusRestarting:
+		s.log.Warn("lkstats: built-in LiveKit has no running process")
 	case StatusOK:
 		if !first {
 			s.log.Info("lkstats: LiveKit stats page reachable again")
@@ -277,7 +299,7 @@ func rate(prev, cur float64, ok bool, elapsed, scale float64) float32 {
 func (s *Sampler) Snapshot(window time.Duration, maxPoints int) Snapshot {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	snap := Snapshot{Status: s.status, Since: s.since, Points: []Point{}}
+	snap := Snapshot{Source: s.source, Status: s.status, Since: s.since, Points: []Point{}}
 	if s.size == 0 {
 		return snap
 	}

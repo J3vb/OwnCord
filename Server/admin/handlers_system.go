@@ -21,7 +21,7 @@ type SystemSources struct {
 	// Sampler holds the CPU and memory history; the app runs it.
 	Sampler *sysstats.Sampler
 	// LiveKit reads LiveKit's stats page for GET /system/livekit; nil when
-	// voice.livekit_metrics_url is not set.
+	// voice is off.
 	LiveKit *lkstats.Sampler
 	// DiskSpace reads free and total bytes on the data volume.
 	DiskSpace func() (free, total uint64, err error)
@@ -167,7 +167,10 @@ type systemLiveKitResponse struct {
 	Configured bool `json:"configured"`
 	// Managed is set only when not configured: whether OwnCord runs its own
 	// LiveKit, which has no separate stats page to read.
-	Managed         *bool  `json:"managed,omitempty"`
+	Managed *bool `json:"managed,omitempty"`
+	// Source is where the figures come from: "managed" (the LiveKit OwnCord
+	// runs, read through the operating system) or "metrics" (its stats page).
+	Source          string `json:"source,omitempty"`
 	Status          string `json:"status,omitempty"`
 	Since           *int64 `json:"since,omitempty"`
 	IntervalSeconds int    `json:"interval_seconds,omitempty"`
@@ -202,6 +205,7 @@ func handleGetSystemLiveKit(src SystemSources, hub HubBroadcaster) http.HandlerF
 		snap := src.LiveKit.Snapshot(window, systemMaxPoints)
 		resp := systemLiveKitResponse{
 			Configured:      true,
+			Source:          snap.Source,
 			Status:          string(snap.Status),
 			IntervalSeconds: int(lkstats.Interval / time.Second),
 			WindowSeconds:   int(window / time.Second),

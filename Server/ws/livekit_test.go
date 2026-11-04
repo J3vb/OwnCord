@@ -296,6 +296,23 @@ func TestLiveKitProcess_IsRunning_Default(t *testing.T) {
 	}
 }
 
+func TestLiveKitProcess_PID(t *testing.T) {
+	t.Parallel()
+
+	proc := ws.NewLiveKitProcess(&config.VoiceConfig{}, &config.TLSConfig{}, t.TempDir())
+	if pid, ok := proc.PID(); ok {
+		t.Fatalf("PID before Start = %d, true", pid)
+	}
+	proc.SetProcessCmdForTest() // a cmd that has not started has no Process
+	if pid, ok := proc.PID(); ok {
+		t.Fatalf("PID of an unstarted cmd = %d, true", pid)
+	}
+	proc.SetProcessPIDForTest(4321)
+	if pid, ok := proc.PID(); !ok || pid != 4321 {
+		t.Fatalf("PID = %d, %v; want 4321, true", pid, ok)
+	}
+}
+
 func TestLiveKitProcess_Stop_BeforeStart(t *testing.T) {
 	t.Parallel()
 

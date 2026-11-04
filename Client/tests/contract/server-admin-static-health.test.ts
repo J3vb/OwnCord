@@ -520,6 +520,8 @@ describe("Server/admin/static — Dashboard health row", () => {
       );
       expect(body(host).querySelector(".badge")?.textContent).toBe("Not set up");
       expect(body(host).textContent).toContain("prometheus: port: 6789");
+      expect(body(host).textContent).toContain("restart LiveKit");
+      expect(body(host).textContent).toContain("finds it by itself");
       expect(body(host).textContent).toContain("voice.livekit_metrics_url");
     });
 
@@ -532,6 +534,53 @@ describe("Server/admin/static — Dashboard health row", () => {
       ({ host } = await openDashboard([], answer({ configured: false, managed: true })));
       expect(body(host).textContent).toContain("Attention panel");
       expect(body(host).textContent).not.toContain("prometheus");
+    });
+
+    it("shows the built-in LiveKit with dashes for tracks and traffic", async () => {
+      const { host } = await openDashboard(
+        [],
+        answer({
+          ...LK,
+          source: "managed",
+          current: {
+            t: T,
+            cpu: 12.5,
+            memory: 104_857_600,
+            rooms: 1,
+            participants: 4,
+            tracks_published: null,
+            tracks_subscribed: null,
+            bytes_in_per_sec: null,
+            bytes_out_per_sec: null,
+            cores: 8,
+          },
+        }),
+      );
+      expect(body(host).querySelector(".badge")?.textContent).toBe("Running");
+      expect(body(host).querySelector(".badge")?.className).toContain("badge-green");
+      expect(body(host).querySelector("#livekitStatus")?.textContent).toContain("Built-in LiveKit");
+      expect(text(host, "lkCpu", "health-value")).toBe("13%");
+      expect(text(host, "lkCpu", "health-sub")).toBe("of 8 cores · 100% = one core");
+      expect(text(host, "lkUsage", "health-sub")).toBe("4 participants");
+      expect(text(host, "lkTraffic", "health-value")).toBe("–");
+      expect(text(host, "lkTraffic", "health-sub")).toBe("Docker setups only");
+    });
+
+    it("says the built-in LiveKit is restarting", async () => {
+      const { host } = await openDashboard(
+        [],
+        answer({
+          ...LK,
+          source: "managed",
+          status: "restarting",
+          current: { t: T, cpu: null, memory: null, rooms: null },
+          series: [],
+        }),
+      );
+      expect(body(host).querySelector(".badge")?.textContent).toBe("Restarting");
+      expect(body(host).querySelector(".badge")?.className).toContain("badge-yellow");
+      expect(body(host).querySelector("#livekitStatus")?.textContent).toContain("Built-in LiveKit");
+      expect(text(host, "lkCpu", "health-value")).toBe("–");
     });
 
     it("renders a status from the server as text, never markup", async () => {

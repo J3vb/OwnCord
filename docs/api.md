@@ -4843,10 +4843,12 @@ space and the cached upload total.
 
 ### GET /admin/api/system/livekit
 
-The Dashboard's LiveKit card, for a LiveKit that runs as its own container. The
-server reads LiveKit's Prometheus page (`voice.livekit_metrics_url`) every 10
-seconds into a 24-hour ring held in memory; this route only reads that ring and
-contacts nothing.
+The Dashboard's LiveKit card. The server picks its source by itself and reads it
+every 10 seconds into a 24-hour ring held in memory; this route only reads that
+ring and contacts nothing. When OwnCord runs LiveKit (`source: "managed"`) the
+source is that process and LiveKit's room list. Otherwise it is LiveKit's
+Prometheus page (`source: "metrics"`): `voice.livekit_metrics_url` when set, else
+port 6789 on the host of `voice.livekit_url`.
 
 **Auth:** `VIEW_DIAGNOSTICS` (`ADMINISTRATOR` passes)
 
@@ -4858,6 +4860,7 @@ contacts nothing.
 ```json
 {
   "configured": true,
+  "source": "metrics",
   "status": "ok",
   "since": 1793385435,
   "interval_seconds": 10,
@@ -4878,13 +4881,20 @@ contacts nothing.
 }
 ```
 
-Without `voice.livekit_metrics_url` the answer is
-`{"configured": false, "managed": false}`; `managed` is `true` when OwnCord
-runs its own LiveKit, which has no separate stats page.
+With voice off the answer is `{"configured": false, "managed": false}`.
 
+- `source` is `managed` (the LiveKit OwnCord runs, read through the operating
+  system and LiveKit's room service) or `metrics` (a stats page).
+- For `managed`, `cpu`, `memory` and `cores` come from the process and the
+  machine (`memory` is resident bytes; `cpu` is not available on macOS),
+  `rooms` and `participants` from LiveKit's room list (`null` while that call
+  fails), and the tracks and traffic figures are always `null`. A restart
+  (a new process id) gives `null` CPU for one sample.
 - `status` is `ok`, `unreachable` (a network error, a timeout after 2 seconds,
   or an answer other than 200) or `not_set_up` (the page answered but carries
-  no LiveKit figures, for example `livekit.yaml` has no `prometheus: port:`).
+  no LiveKit figures, for example `livekit.yaml` has no `prometheus: port:`)
+  or, for `managed` only, `restarting` (no LiveKit process runs right now:
+  still starting, or between restarts; the points are gaps).
   `since` is when the status last changed, in unix seconds.
 - `cpu` is LiveKit's CPU use where 100 is one core, from the change in its CPU
   counter between two reads. `bytes_in_per_sec` and `bytes_out_per_sec` are

@@ -204,6 +204,7 @@ func (h managedHub) LiveKitProcessStatus() ws.LiveKitProcessStatus { return ws.L
 type systemLiveKit struct {
 	Configured      bool   `json:"configured"`
 	Managed         *bool  `json:"managed"`
+	Source          string `json:"source"`
 	Status          string `json:"status"`
 	Since           *int64 `json:"since"`
 	IntervalSeconds int    `json:"interval_seconds"`
@@ -281,7 +282,7 @@ func TestAdminAPI_SystemLiveKit(t *testing.T) {
 		defer srv.Close()
 		h := run(t, srv.URL)
 		s := waitStatus(t, h, "ok")
-		if !s.Configured || s.Managed != nil || s.IntervalSeconds != 10 || s.WindowSeconds != 3600 || s.Since == nil {
+		if !s.Configured || s.Managed != nil || s.Source != "metrics" || s.IntervalSeconds != 10 || s.WindowSeconds != 3600 || s.Since == nil {
 			t.Errorf("header = %+v", s)
 		}
 		if s.Current == nil || *s.Current.Rooms != 2 || *s.Current.Participants != 6 || *s.Current.Memory != 1000 || len(s.Series) != 1 {
@@ -296,6 +297,28 @@ func TestAdminAPI_SystemLiveKit(t *testing.T) {
 		_, modToken := createRoleUser(t, database, 10, "Moderator", moderatorMask, 60, "lkmod")
 		if code, _ := getSystemLiveKit(t, h, modToken, ""); code != http.StatusForbidden {
 			t.Errorf("moderator status = %d, want 403", code)
+		}
+	})
+
+	t.Run("built-in LiveKit", func(t *testing.T) {
+		running := true
+		sampler := lkstats.NewManaged(lkstats.ManagedDeps{
+			PID: func() (int, bool) { return 7, running },
+			Read: func(int) (sysstats.ProcessReading, bool) {
+				return sysstats.ProcessReading{CPU: time.Second, RSS: 2048, Start: 1}, true
+			},
+			RoomUsage: func(context.Context) (int, int, error) { return 1, 3, nil },
+			Cores:     2,
+		}, slog.New(slog.DiscardHandler))
+		ctx, cancel := context.WithCancel(t.Context())
+		done := sampler.Run(ctx)
+		t.Cleanup(func() { cancel(); <-done })
+		h := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database), admin.SetupOptions{
+			System: admin.SystemSources{LiveKit: sampler},
+		})
+		s := waitStatus(t, h, "ok")
+		if !s.Configured || s.Source != "managed" || s.Current == nil || *s.Current.Memory != 2048 || *s.Current.Rooms != 1 || *s.Current.Participants != 3 {
+			t.Errorf("managed = %+v", s)
 		}
 	})
 

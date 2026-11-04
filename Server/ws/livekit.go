@@ -228,6 +228,21 @@ func (c *LiveKitClient) ListRoomChannelIDs(ctx context.Context) ([]int64, error)
 	return ids, nil
 }
 
+// RoomUsage returns how many rooms the SFU has open and how many participants
+// are in them, counting every room, OwnCord's or not.
+func (c *LiveKitClient) RoomUsage(ctx context.Context) (rooms, participants int, err error) {
+	ctx, cancel := context.WithTimeout(ctx, lkTimeout)
+	defer cancel()
+	resp, err := c.roomSvc.ListRooms(ctx, &livekit.ListRoomsRequest{})
+	if err != nil {
+		return 0, 0, fmt.Errorf("livekit: listing rooms: %w", err)
+	}
+	for _, r := range resp.GetRooms() {
+		participants += int(r.GetNumParticipants())
+	}
+	return len(resp.GetRooms()), participants, nil
+}
+
 // RemoveParticipant forcefully disconnects a participant from a room and
 // keeps that exact identity out of the room until any token minted for it
 // has expired (voice_removed_watch.go).
