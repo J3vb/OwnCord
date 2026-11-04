@@ -285,11 +285,6 @@
 .message-input-wrap.composer-disabled .msg-textarea {
   opacity: 1;
 }
-.message-input-wrap.composer-disabled .message-input-box:has(.msg-textarea:focus-visible),
-.message-input-wrap.composer-disabled .msg-textarea:focus-visible {
-  outline: none;
-  box-shadow: none;
-}
 /* Slow-mode send gate: the composer stays editable, only Send is held back. */
 .input-btn.send-gated {
   cursor: not-allowed;

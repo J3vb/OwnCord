@@ -48,6 +48,11 @@ export function createListUnread(st: ListState, api: ListApi) {
     const pos = st.restorePosition;
     // Hidden, the scroller cannot move: the resize observer places it once shown.
     if (pos === null || st.root === null || st.root.clientHeight === 0) return false;
+    // A jump since the mount owns the view now.
+    if (isWindowDetached(st.options.channelId)) {
+      st.restorePosition = null;
+      return false;
+    }
     // The window has not landed yet: a later settle places it.
     if (st.virtualItems.length === 0) return false;
     st.restorePosition = null;

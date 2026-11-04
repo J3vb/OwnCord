@@ -257,6 +257,8 @@ export function createListScroll(st: ListState, api: ListApi) {
 
   function scrollToMessage(messageId: number): boolean {
     if (st.root === null) return false;
+    // A jump replaces any spot the visit still owed the reader.
+    st.restorePosition = null;
     const idx = st.virtualItems.findIndex(
       (item) => item.kind === "message" && item.message.id === messageId,
     );

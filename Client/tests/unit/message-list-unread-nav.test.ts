@@ -444,6 +444,15 @@ describe("MessageList — unread navigation", () => {
         expectDividerInView(DIVIDER_PX + 45 * ROW_PX);
       });
 
+      it("gives way to a jump made before the window could be placed", async () => {
+        leaveAt(1500);
+        setDetached(true);
+        mount();
+        await nextFrame();
+
+        expect(Math.abs(root().scrollTop - 1500)).toBeGreaterThan(1);
+      });
+
       it("follows the tail when it was left at the bottom", async () => {
         leaveAt(SCROLL_HEIGHT - CLIENT_HEIGHT);
         mount();
