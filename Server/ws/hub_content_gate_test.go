@@ -292,13 +292,13 @@ func TestContentGate_AwaitDispatch_NotStarvedByLaterContent(t *testing.T) {
 // sequenced: a parked frame is ahead of the dropped one's place.
 func TestContentGate_QueueDrop_UnsettledWhileContentParked(t *testing.T) {
 	h := newEmitTestHub()
-	h.queueDrops.dropped.Add(1)
+	h.stats.queueDrops.dropped.Add(1)
 	h.gates.parked = 1
 
 	h.seqMu.Lock()
 	h.applyQueueContentDrops()
 	h.seqMu.Unlock()
-	if h.queueDrops.applied == h.queueDrops.dropped.Load() {
+	if h.stats.queueDrops.applied == h.stats.queueDrops.dropped.Load() {
 		t.Fatal("a drop settled while a dequeued frame was still parked")
 	}
 
@@ -306,7 +306,7 @@ func TestContentGate_QueueDrop_UnsettledWhileContentParked(t *testing.T) {
 	h.seqMu.Lock()
 	h.applyQueueContentDrops()
 	h.seqMu.Unlock()
-	if h.queueDrops.applied != h.queueDrops.dropped.Load() {
+	if h.stats.queueDrops.applied != h.stats.queueDrops.dropped.Load() {
 		t.Fatal("the drop did not settle once nothing was parked")
 	}
 }

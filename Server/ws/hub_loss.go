@@ -43,7 +43,7 @@ func (h *Hub) markLoss(r lossRoute) {
 		h.setPresenceResync(c.userID, c.tokenHash, true)
 		c.cseq.lossPending.Store(true)
 	}
-	h.queueDrops.lossMarks.Add(uint64(len(clients)))
+	h.stats.queueDrops.lossMarks.Add(uint64(len(clients)))
 }
 
 // noteDropRoute keeps a dropped frame's audience for the dispatch goroutine
@@ -54,7 +54,7 @@ func (h *Hub) noteDropRoute(bm broadcastMsg) {
 	if bm.presenceSnapshot || bm.droppable {
 		return
 	}
-	q := &h.queueDrops
+	q := &h.stats.queueDrops
 	q.mu.Lock()
 	if len(q.routes) < queueDropRouteCap {
 		q.routes = append(q.routes, lossRoute{channelID: bm.channelID, recipients: bm.recipients, excludeUserID: bm.excludeUserID})
@@ -69,7 +69,7 @@ func (h *Hub) noteDropRoute(bm broadcastMsg) {
 // goroutine, under seqMu. A full ready covers a loss from any position, so
 // marking need not wait for the drop to settle into the watermark.
 func (h *Hub) markDroppedRoutes() {
-	q := &h.queueDrops
+	q := &h.stats.queueDrops
 	if !q.routesPending.Swap(false) {
 		return
 	}
@@ -98,7 +98,7 @@ func (h *Hub) takeOwedResync(c *Client) bool {
 
 // LossMarkCount is the cumulative number of connections marked for a lost
 // frame (markLoss) since start.
-func (h *Hub) LossMarkCount() uint64 { return h.queueDrops.lossMarks.Load() }
+func (h *Hub) LossMarkCount() uint64 { return h.stats.queueDrops.lossMarks.Load() }
 
 // replayFrameAllowed gates one replayed content frame (frameReadableNow). A
 // frame withheld because the gate could not be read is lost to this
@@ -109,7 +109,7 @@ func (h *Hub) replayFrameAllowed(ctx context.Context, c *Client, channelID int64
 	if !confirmed {
 		h.setPresenceResync(c.userID, c.tokenHash, true)
 		c.cseq.lossPending.Store(true)
-		h.queueDrops.lossMarks.Add(1)
+		h.stats.queueDrops.lossMarks.Add(1)
 	}
 	return readable
 }

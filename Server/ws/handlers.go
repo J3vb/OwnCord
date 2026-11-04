@@ -294,7 +294,7 @@ func (h *Hub) handleMessageApply(ctx, fctx context.Context, c *Client, env envel
 		// chat_send_ack_ms measures the send-to-ack round trip for chat_send only; other
 		// reply kinds are not what the load run compares against k6.
 		if env.Type == MsgTypeChatSend {
-			h.latency.chatAck.Observe(float64(time.Since(receivedAt)) / float64(time.Millisecond))
+			h.stats.latency.chatAck.Observe(float64(time.Since(receivedAt)) / float64(time.Millisecond))
 		}
 	}
 	if len(result.Events) > 0 {

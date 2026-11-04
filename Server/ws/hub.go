@@ -53,15 +53,13 @@ type Hub struct {
 
 	restartGate restartNoticeGate // dedupes BroadcastServerRestart
 
-	seq            uint64                       // atomic monotonic sequence counter
-	seqMu          syncutil.Ranked[lockRankSeq] // seq assignment + replay + delivery order; order: lock_order.go
-	timeoutView    timeoutViewState             // member_timeouts delivery; lock order in member_timeouts_delivery.go
-	replayBuf      *EventRingBuffer             // recent broadcast events for reconnection replay
-	broadcastDrops atomic.Uint64                // counts messages dropped due to full broadcast channel
-	queueDrops     queueDropState               // frames the full broadcast queue dropped (hub_stats.go)
+	seq         uint64                       // atomic monotonic sequence counter
+	seqMu       syncutil.Ranked[lockRankSeq] // seq assignment + replay + delivery order; order: lock_order.go
+	timeoutView timeoutViewState             // member_timeouts delivery; lock order in member_timeouts_delivery.go
+	replayBuf   *EventRingBuffer             // recent broadcast events for reconnection replay
 
-	// latency is the shipped in-process metrics surface; the zero value is usable.
-	latency hubLatencyMetrics
+	// stats groups the hub's drop, backpressure, reject, reconnect-tier and latency counters.
+	stats hubStats
 
 	// seams are the services and policy sources the hub calls out to.
 	seams hubSeams
@@ -98,14 +96,7 @@ type Hub struct {
 	// replace it.
 	fatalFn func()
 
-	// Aggregate backpressure counters: the per-client msgsDropped is read once at
-	// disconnect and lost; these survive as process totals for the metrics endpoint.
-	bpQueueDisconnects atomic.Uint64 // clients disconnected because send (or high+send) overflowed
-	bpHighFallbacks    atomic.Uint64 // high-priority sends that fell back to the normal buffer
-	bpLowDrops         atomic.Uint64 // low-priority messages silently dropped on overflow
-
-	connRejects atomic.Uint64 // upgrades refused by the max_ws_connections guardrail (ServeWS)
-	readyGate   chan struct{} // one slot per concurrent fresh-connect ready build (admitReady)
+	readyGate chan struct{} // one slot per concurrent fresh-connect ready build (admitReady)
 
 	// In-flight guards for the DB-heavy sweeps (startSweep): a tick arriving while the
 	// previous sweep runs is skipped, not stacked.
@@ -119,12 +110,6 @@ type Hub struct {
 	voiceReg          voiceRegistry // voice membership lock and grace window (voice_registry.go)
 
 	voiceRejoinBlocks voiceRejoinBlockState // voice_rejoin_block.go
-
-	// Reconnection tier metrics, incremented per resume.
-	reconnectTierBuf  atomic.Uint64
-	reconnectTierDB   atomic.Uint64
-	reconnectTierFull atomic.Uint64
-	reconnectRingMiss atomic.Uint64 // resumes behind the ring (see noteRingMiss); usually ends in db or full
 
 	// Sequence watermark of the last channel-visibility change or content shed:
 	// neither reaches a client via replay, so a client resuming from a seq at or

@@ -84,7 +84,7 @@ func (h *Hub) handleVoiceJoinFrame(fctx, ctx context.Context, c *Client, payload
 
 	if h.voiceJoinComplete(ctx, txn, c, ch, channelID, state, reqID) {
 		h.voice.NoteJoinCompleted(channelID, c.userID)
-		h.latency.voiceJoin.observe(start, precheckDone, leaveDone, persistDone, tokenDone, time.Now())
+		h.stats.latency.voiceJoin.observe(start, precheckDone, leaveDone, persistDone, tokenDone, time.Now())
 	}
 }
 
