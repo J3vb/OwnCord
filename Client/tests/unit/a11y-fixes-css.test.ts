@@ -30,7 +30,7 @@ describe("B9 exit-audit accessibility CSS", () => {
   it.each([
     ".channel-mention:focus-visible",
     ".message-link-chip:focus-visible",
-    ".status-picker-custom-input:focus",
+    ".self-profile-card .spc-custom-input:focus-visible",
   ])("does not suppress the focus outline on %s (A11Y-03)", (selector) => {
     expect(keyword(cascadedDeclaration(selector, "outline"))).not.toBe("none");
   });

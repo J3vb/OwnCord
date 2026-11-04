@@ -818,7 +818,7 @@ export function createUserProfilePopup(
     if (options.onCall !== undefined) {
       const onCall = options.onCall;
       const callBtn = createElement("button", {
-        class: "upp-action-btn",
+        class: "upp-action-btn upp-action-btn--secondary",
         "data-testid": "upp-call-btn",
       });
       callBtn.appendChild(createIcon("phone", 16));
@@ -841,7 +841,7 @@ export function createUserProfilePopup(
     if (options.onReport !== undefined) {
       const onReport = options.onReport;
       const reportBtn = createElement("button", {
-        class: "upp-action-btn",
+        class: "upp-action-btn upp-action-btn--quiet",
         "data-testid": "upp-report-btn",
         "aria-haspopup": "dialog",
       });
@@ -864,7 +864,7 @@ export function createUserProfilePopup(
       const onToggleBlock = options.onToggleBlock;
       const block = options.blocked !== true;
       const blockBtn = createElement("button", {
-        class: "upp-action-btn",
+        class: "upp-action-btn upp-action-btn--quiet upp-action-btn--danger",
         "data-testid": "upp-block-btn",
         ...(block ? { "aria-haspopup": "dialog" } : {}),
       });
@@ -918,9 +918,18 @@ export function createUserProfilePopup(
         noteSection,
         joinSection,
       );
-      if (actions.childElementCount > 0) {
-        appendChildren(body, divider, actions);
+      // The same order of weight as the phone sheet: Message and Call on
+      // one row, Report and Block quiet on the row under it.
+      const primary = createElement("div", { class: "upp-actions" });
+      for (const btn of Array.from(actions.children)) {
+        if (!btn.classList.contains("upp-action-btn--quiet")) primary.appendChild(btn);
       }
+      actions.classList.add("upp-actions--quiet");
+      if (primary.childElementCount > 0 || actions.childElementCount > 0) {
+        body.appendChild(divider);
+      }
+      if (primary.childElementCount > 0) body.appendChild(primary);
+      if (actions.childElementCount > 0) body.appendChild(actions);
     }
     // The avatar hangs off the body's top edge, so it is a child of the card
     // rather than the body — the body scrolls, and a scroll container clips.

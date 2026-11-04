@@ -44,6 +44,24 @@ The server does not restart itself when it hangs, and it does not send
 alerts. Use your uptime checker, or a cron job, to restart the service after a
 few failed checks.
 
+## System health page
+
+The admin panel's **System health** page (under Operations, for anyone with
+View Diagnostics) shows what the server is doing right now, refreshed every 5
+seconds:
+
+- **Connections**: who is connected, against `server.max_ws_connections`,
+  message-delivery timings, dropped messages and refused connections.
+- **Database**: file and log size, schema version, and how long readers and
+  the writer wait.
+- **Voice**: whether LiveKit runs and answers.
+- **Process**: uptime, memory and the server version.
+
+Each card lists the Dashboard warnings that belong to it. **Copy for support**
+copies the same figures a support bundle carries. The Dashboard's **LiveKit
+card** adds LiveKit's own CPU, memory, rooms and traffic; with your own
+LiveKit, add `prometheus: port: 6789` to `livekit.yaml` so it can read them.
+
 ## Metrics
 
 `/api/v1/metrics` gives numbers about the running server, as JSON.
@@ -74,9 +92,15 @@ uploaded: it is a download you choose to share.
 If the log shows the problem, you can add the last 200 lines yourself. Say
 that you did: those lines contain usernames and addresses.
 
-**Problems in the desktop app** have their own bundle: **Settings → Diagnostics
-& logs → Export Support Bundle**. It copies the app's logs as they are, so look
-through it before you share it. The app's log folder:
+**Problems in the app** (desktop, Android or the browser client) have their own
+bundle: **Settings → Diagnostics & logs → Export Support Bundle**. It is saved
+on the device (on Android, through Save or Share), never uploaded. It holds the
+app's logs, a short timeline of what the camera, calls and server connection
+did in the last 30 minutes, and how the app's last run ended (crash, killed,
+normal). Tokens, passwords, links (cut to the server name), email and IP
+addresses and the home folder name are removed first, but plain words in a
+log line cannot be recognised, so look through it before you share it. The
+app's log folder:
 
 - Windows: `%LOCALAPPDATA%\com.owncord.client\logs`
 - Linux: `~/.local/share/com.owncord.client/logs`

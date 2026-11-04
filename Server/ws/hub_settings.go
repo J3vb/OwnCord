@@ -8,64 +8,21 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/syncutil"
+	"github.com/J3vb/OwnCord/Server/ws/hubsettings"
 )
 
 // SettingsReader is the hub's view of the settings family: one keyed read.
-// Defined on the consumer side so ws depends on the capability, not the provider.
-type SettingsReader interface {
-	Setting(ctx context.Context, key string) (string, error)
-}
+type SettingsReader = hubsettings.Reader
 
 // getCachedSettings returns server_name and motd, refreshing the cache if stale.
 func (h *Hub) getCachedSettings(ctx context.Context) (string, string) {
-	h.settings.mu.RLock()
-	if time.Since(h.settings.lastUpdate) < settingsCacheTTL {
-		name, motd := h.settings.name, h.settings.motd
-		h.settings.mu.RUnlock()
-		return name, motd
-	}
-	h.settings.mu.RUnlock()
-
-	h.settings.mu.Lock()
-	defer h.settings.mu.Unlock()
-	if time.Since(h.settings.lastUpdate) < settingsCacheTTL {
-		return h.settings.name, h.settings.motd
-	}
-	h.refreshSettingsLocked(ctx)
-	return h.settings.name, h.settings.motd
-}
-
-// refreshSettingsLocked reloads server_name and motd through the settings
-// reader, and upload_policy's extension lists. Caller must hold settings.mu
-// (write lock) or call during init.
-func (h *Hub) refreshSettingsLocked(ctx context.Context) {
-	// The refresh serves the hub-wide cache, not the connection that triggered it: a
-	// dying connection's ctx must not fail the fetches, or the TTL stamp below would
-	// pin stale values for 30s.
-	ctx = context.WithoutCancel(ctx)
-	if name, err := h.settings.reader.Setting(ctx, "server_name"); err == nil {
-		h.settings.name = name
-	}
-	if motd, err := h.settings.reader.Setting(ctx, "motd"); err == nil {
-		h.settings.motd = motd
-	}
-	if h.settings.uploadFileTypes != nil {
-		if p, err := h.settings.uploadFileTypes.FileTypePolicy(ctx); err == nil {
-			h.settings.upload.BlockedExtensions, h.settings.upload.AllowedExtensions = p.Blocked, p.Allowed
-		} else {
-			slog.Warn("auth_ok: reading the upload file-type policy failed", "error", err)
-		}
-	}
-	h.settings.lastUpdate = time.Now()
+	return h.settings.cache.Get(ctx)
 }
 
 // cachedUploadPolicy returns auth_ok's upload_policy, refreshed with the settings
 // cache when stale.
 func (h *Hub) cachedUploadPolicy(ctx context.Context) UploadPolicy {
-	h.getCachedSettings(ctx)
-	h.settings.mu.RLock()
-	defer h.settings.mu.RUnlock()
-	return h.settings.upload
+	return h.settings.cache.UploadPolicy(ctx)
 }
 
 // uploadPolicyReadTimeout bounds BroadcastUploadPolicy's settings read.
@@ -85,21 +42,20 @@ const uploadPolicyReadTimeout = 5 * time.Second
 // cache on the later one. The admin HubBroadcaster interface carries no context, so
 // the read runs against Background with its own bound.
 func (h *Hub) BroadcastUploadPolicy() {
-	if h.settings.uploadFileTypes == nil {
+	fileTypes := h.settings.cache.FileTypes()
+	if fileTypes == nil {
 		return
 	}
 	h.settings.uploadPolicyMu.Lock()
 	defer h.settings.uploadPolicyMu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), uploadPolicyReadTimeout)
 	defer cancel()
-	p, err := h.settings.uploadFileTypes.FileTypePolicy(ctx)
+	p, err := fileTypes.FileTypePolicy(ctx)
 	if err != nil {
 		slog.Warn("upload_policy: reading the upload file-type policy failed", "error", err)
 		return
 	}
-	h.settings.mu.Lock()
-	h.settings.upload.BlockedExtensions, h.settings.upload.AllowedExtensions = p.Blocked, p.Allowed
-	h.settings.mu.Unlock()
+	h.settings.cache.SetUploadLists(p.Blocked, p.Allowed)
 	msg := buildUploadPolicy(p.Blocked, p.Allowed)
 	for _, c := range h.clientSnapshot() {
 		c.trySendMsg(msg)
@@ -122,7 +78,7 @@ const gameActivityReadTimeout = 5 * time.Second
 // readGameActivitySwitch reads the stored game activity switch: a missing row
 // means on. ok is false when the read failed.
 func (h *Hub) readGameActivitySwitch(ctx context.Context) (enabled, ok bool, err error) {
-	return service.GameActivityEnabledFromRead(h.settings.reader.Setting(ctx, service.GameActivityEnabledKey))
+	return service.GameActivityEnabledFromRead(h.settings.cache.Reader().Setting(ctx, service.GameActivityEnabledKey))
 }
 
 // initGameActivityPolicy sets the switch from the stored setting when the hub is
@@ -195,20 +151,13 @@ func (h *Hub) clientSnapshot() []*Client {
 	return h.allClientsLocked()
 }
 
-// hubSettings groups the hub's settings cache, the upload-policy state and the
-// game activity switch. It holds two ranked locks, mu and uploadPolicyMu (see
-// lock_order.go), and must never be copied.
+// hubSettings groups the hub's settings cache, the upload-policy serialiser and
+// the game activity switch. It holds ranked locks (see lock_order.go) and must
+// never be copied.
 type hubSettings struct {
-	// reader is the read seam the cache refreshes through.
-	reader SettingsReader
-	// uploadFileTypes is HubOptions.UploadFileTypes; may be nil.
-	uploadFileTypes UploadFileTypes
-
-	mu         syncutil.RankedRW[lockRankHubCache]
-	name       string
-	motd       string
-	upload     UploadPolicy // auth_ok's upload_policy; the lists refresh with the cache
-	lastUpdate time.Time
+	// cache holds server_name, motd and the upload policy, and owns the settings
+	// and file-type seams.
+	cache hubsettings.Cache
 	// uploadPolicyMu orders BroadcastUploadPolicy's saves.
 	uploadPolicyMu syncutil.Ranked[lockRankSerialiser]
 	// gameActivity is the game activity switch.

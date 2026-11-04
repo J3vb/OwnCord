@@ -26,7 +26,7 @@ import { gameActivityText } from "../../i18n/gameActivity";
 import { listeningDetailsText } from "../../i18n/listeningDetails";
 import { settingsText } from "../../i18n/settings";
 import { whatsNewText } from "../../i18n/whatsNew";
-import { isAndroidApp } from "../voice/native/platform";
+import { isAndroidApp, isWindowsDesktop } from "../voice/native/platform";
 import { platformText } from "./helpers";
 
 const s = settingsText;
@@ -147,6 +147,8 @@ export const SETTINGS_SEARCH_INDEX: Readonly<Record<SearchableTab, () => readonl
       s("voiceAudio.videoCodec"),
       s("voiceAudio.videoCodecDesc"),
     ),
+    // The graphics card row exists on Windows only.
+    ...(isWindowsDesktop() ? [s("voiceAudio.gpuAdapter"), s("voiceAudio.gpuAdapterDesc")] : []),
     s("voiceAudio.echo.label"),
     s("voiceAudio.echo.desc"),
     s("voiceAudio.noise.label"),

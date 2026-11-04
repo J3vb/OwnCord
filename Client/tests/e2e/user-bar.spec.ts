@@ -34,10 +34,8 @@ test.describe("User Bar", () => {
     await expect(status).toHaveText("Online");
   });
 
-  test("status picker dot sits on the avatar corner", async ({ page }) => {
-    const dot = page.locator(
-      "[data-testid='user-bar'] [data-testid='status-picker-wrap'] .status-picker-dot",
-    );
+  test("the status dot sits on the avatar corner", async ({ page }) => {
+    const dot = page.locator("[data-testid='user-bar'] [data-testid='user-bar-status-dot']");
     await expect(dot).toBeVisible();
     const dotBox = await dot.boundingBox();
     const avatarBox = await page.locator("[data-testid='user-bar'] .ub-avatar").boundingBox();

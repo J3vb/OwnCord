@@ -48,6 +48,7 @@ describe("browser platform registry", () => {
         "urlOpener",
         "window",
         "windowPrefs",
+        "gpuAdapter",
       ].sort(),
     );
   });
@@ -92,6 +93,9 @@ describe("browser platform registry", () => {
     await expect(b.pendingMessages.delete(owner)).resolves.toBeUndefined();
     expect(await b.windowPrefs.load()).toBeNull();
     expect(await b.windowPrefs.set("minimizeToTray", true)).toBe(false);
+    expect(b.gpuAdapter.available).toBe(false);
+    expect(await b.gpuAdapter.list()).toBeNull();
+    expect(await b.gpuAdapter.set("auto")).toBe(false);
 
     // Transport: refuses.
     await expect(b.http.fetch("https://example.invalid/")).rejects.toThrow();

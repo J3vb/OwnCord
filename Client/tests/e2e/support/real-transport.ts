@@ -198,6 +198,18 @@ export async function installRealTransport(page: Page, server: TestServer) {
         case "set_window_pref":
         case "show_next_launch":
           return null;
+        // Graphics card for video: no cards, so the row stays hidden.
+        case "get_gpu_adapters":
+          return {
+            cards: [],
+            saved: "auto",
+            active: null,
+            notFound: false,
+            resetAfterCrash: false,
+            autoOff: false,
+          };
+        case "set_gpu_adapter":
+          return null;
         case "plugin:path|resolve_directory":
           return "/test-logs";
         case "plugin:path|join":

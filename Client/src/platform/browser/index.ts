@@ -46,6 +46,7 @@ import type {
   TrayStatus,
   WindowControl,
   WindowPrefs,
+  GpuAdapter,
 } from "../contracts";
 import type { SocketConnection } from "../contracts/socket";
 import { credentials as browserCredentials } from "./credentials";
@@ -319,6 +320,12 @@ const windowPrefs: WindowPrefs = {
   set: async () => false,
 };
 
+const gpuAdapter: GpuAdapter = {
+  available: false,
+  list: async () => null,
+  set: async () => false,
+};
+
 export const browser: Platform = {
   ...secureMembers,
   appAudio,
@@ -345,6 +352,7 @@ export const browser: Platform = {
   urlOpener,
   window: windowControl,
   windowPrefs,
+  gpuAdapter,
 };
 
 /** The name every caller imports the registry by; the web build swaps modules,

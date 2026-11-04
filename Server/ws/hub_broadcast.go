@@ -319,6 +319,9 @@ func (h *Hub) deliverGated(bm broadcastMsg, g gateResult) {
 		contentBearing = contentBearingKinds[extractEventType(bm.msg)]
 	}
 
+	// The limiter key depends on bm alone, so it is built before the lock.
+	limiterKey := topicLimiterKey(bm)
+
 	// The channel-broadcast debug log is emitted after seqMu is released so a slow
 	// sink never extends the critical section that serializes every broadcast.
 	seq, delivered, channelSend, pluginMsg := func() (seq uint64, delivered int, channelSend bool, pluginMsg []byte) {
@@ -331,8 +334,8 @@ func (h *Hub) deliverGated(bm broadcastMsg, g gateResult) {
 		// Consult the topic limiter before a seq is allocated: a shed frame that consumed
 		// a seq would sit in the replay buffer as a number no client saw live, and since
 		// clients ack only max(seq) it could never be requested back. allowTopicFrame owns
-		// the shed handling (count + watermark).
-		if !h.allowTopicFrame(bm) {
+		// the shed handling (count, watermark, loss mark).
+		if !h.allowTopicFrame(bm, limiterKey) {
 			return 0, 0, false, nil
 		}
 

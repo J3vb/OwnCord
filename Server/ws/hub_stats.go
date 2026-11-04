@@ -37,22 +37,9 @@ func (h *Hub) recordBroadcastLatency(enqueuedAt time.Time) {
 	h.stats.latency.ObserveBroadcast(enqueuedAt)
 }
 
-// allowTopicFrame reports whether bm, a channel-scoped broadcast, may proceed under
-// the per-channel, per-sender topic rate limit: a sliding 1s window via the shared
-// auth.RateLimiter (stricter than a token bucket on boundary-straddling bursts,
-// same sustained rate).
-//
-// A shed frame is counted (topic_sheds_total). For a content-bearing frame
-// (nsfwChannelID; contentBearingKinds) it also ratchets the visibility watermark,
-// so a client resuming from a seq at or before this point takes the full-ready
-// path and recovers the message from the database: the shed frame consumed no seq,
-// so replay can never carry it. Metadata sheds are not ratcheted (ephemeral or
-// reconstructed elsewhere; a full resync on a metadata burst would be a herd for
-// nothing). bumpVisibilityWatermark is lock-free, so this is safe under seqMu.
-func (h *Hub) allowTopicFrame(bm broadcastMsg) bool {
-	if bm.recipients != nil || bm.channelID == 0 {
-		return true
-	}
+// topicLimiterKey is the per-channel, per-sender key allowTopicFrame charges.
+// It depends on bm alone, so the dispatch goroutine builds it before seqMu.
+func topicLimiterKey(bm broadcastMsg) string {
 	// Counted per sender, so a few members cannot use up a channel's budget and
 	// suppress live delivery for everyone else; server-originated frames (senderID 0)
 	// share the channel's own key.
@@ -60,12 +47,36 @@ func (h *Hub) allowTopicFrame(bm broadcastMsg) bool {
 	if bm.senderID != 0 {
 		key += ":" + strconv.FormatInt(bm.senderID, 10)
 	}
+	return key
+}
+
+// allowTopicFrame reports whether bm, a channel-scoped broadcast, may proceed under
+// the per-channel, per-sender topic rate limit: a sliding 1s window via the shared
+// auth.RateLimiter (stricter than a token bucket on boundary-straddling bursts,
+// same sustained rate).
+//
+// A shed frame is counted (topic_sheds_total). For a content-bearing frame
+// (nsfwChannelID; contentBearingKinds) it also ratchets the visibility watermark
+// and marks the channel's subscribers as having lost a frame (markLoss), as the
+// unconfirmed-gate path does: the shed frame consumed no seq, so replay can never
+// carry it, a client resuming from a seq at or before this point takes the
+// full-ready path and recovers the message from the database, and a connected
+// subscriber sees a cseq gap and resumes. Metadata sheds are neither ratcheted nor
+// marked (ephemeral or reconstructed elsewhere; a full resync on a metadata burst
+// would be a herd for nothing). The caller holds seqMu, which markLoss requires;
+// bumpVisibilityWatermark is lock-free. key is topicLimiterKey(bm), built by the
+// caller before the lock.
+func (h *Hub) allowTopicFrame(bm broadcastMsg, key string) bool {
+	if bm.recipients != nil || bm.channelID == 0 {
+		return true
+	}
 	if h.limiter.Allow(key, topicRateLimitPerSecond, time.Duration(topicRateWindow.Load())) {
 		return true
 	}
 	h.stats.latency.CountTopicShed()
 	if bm.nsfwChannelID != 0 {
 		h.bumpVisibilityWatermark()
+		h.markLoss(lossRoute{channelID: bm.channelID})
 		slog.Warn("hub: topic rate limit shed a content frame, forcing resync on reconnect",
 			"channel_id", bm.channelID)
 	} else {

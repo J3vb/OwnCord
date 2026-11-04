@@ -344,6 +344,7 @@ export const shellText = defineCatalog("shell", {
   "status.clearAfter.1h": "1 hour",
   "status.clearAfter.30m": "30 minutes",
   "status.clearAfter.never": "Don't clear",
+  "status.clearAfter.keep": "As set (until {when})",
   "status.clearsAt": "Clears at {time}",
   "status.clearsOn": "Clears {day} at {time}",
   "status.clearsToday": "Clears today",

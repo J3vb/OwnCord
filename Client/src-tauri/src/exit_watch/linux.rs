@@ -7,9 +7,22 @@ use tauri::Runtime;
 pub(super) const SILENT_ENDINGS: &str =
     "a SIGKILL (the out-of-memory killer, or the desktop after a freeze)";
 
-/// Ask the kernel log and systemd-coredump about runs that ended silently.
-pub(super) fn report_ended(runs: Vec<crate::system_crash_report::EndedRun>) {
+/// Copy the last stderr lines of runs that ended silently, then ask the
+/// kernel log and systemd-coredump about them.
+pub(super) fn report_ended(dir: &std::path::Path, runs: Vec<crate::system_crash_report::EndedRun>) {
+    let pids: Vec<u32> = runs.iter().map(|r| r.pid).collect();
+    crate::stderr_capture::report_previous(dir, &pids, is_owncord_running);
     crate::system_crash_report::report(runs);
+}
+
+/// Keep this process's stderr on disk for the next start.
+pub(super) fn capture_stderr(dir: &std::path::Path) {
+    crate::stderr_capture::start(dir);
+}
+
+/// Bound the stderr file; on every heartbeat.
+pub(super) fn trim_stderr() {
+    crate::stderr_capture::trim();
 }
 
 /// Which native captures were running, for the run file: a crash that leaves
