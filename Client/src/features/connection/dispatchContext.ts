@@ -7,6 +7,7 @@ import type { WsClient } from "../../lib/ws";
 import { createLogger } from "../../lib/logger";
 import type { ApiClient } from "../../lib/api";
 import type { ServerMessage } from "../../lib/types";
+import type { WsListener } from "../../lib/wsConfig";
 
 /** The dispatcher's logger, shared by every handler module so their lines keep the `[dispatcher]` tag. */
 export const log = createLogger("dispatcher");
@@ -120,4 +121,37 @@ export function livekitSession(): Promise<typeof import("../../lib/voice/livekit
  */
 export function cancelVoiceRejoin(clock: ReconnectClock): void {
   clock.voiceRejoinChannelId = null;
+}
+
+/** What every route's listener may use: the socket, the REST client and the per-login clock. */
+export interface DispatchContext {
+  readonly ws: DispatchWs;
+  readonly api: DispatchApi | undefined;
+  readonly clock: ReconnectClock;
+}
+
+/** The socket's subscribe call, handed in by the dispatcher. */
+export type Subscribe = <T extends ServerMessage["type"]>(
+  type: T,
+  listener: WsListener<T>,
+) => () => void;
+
+/**
+ * One server event and the listener a feature wants for it. A feature lists
+ * its routes in its wsHandlers.ts; the dispatcher subscribes them, so it stays
+ * the only door into the stores. Events whose handlers must run in a set order
+ * across features (auth_ok, ready, error) are not routes: the dispatcher
+ * writes those chains out.
+ */
+export interface WsRoute {
+  readonly type: ServerMessage["type"];
+  readonly attach: (subscribe: Subscribe, ctx: DispatchContext) => () => void;
+}
+
+/** A route for `type`; `listen` builds the listener from this login's context. */
+export function route<T extends ServerMessage["type"]>(
+  type: T,
+  listen: (ctx: DispatchContext) => WsListener<T>,
+): WsRoute {
+  return { type, attach: (subscribe, ctx) => subscribe(type, listen(ctx)) };
 }
