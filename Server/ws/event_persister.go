@@ -305,9 +305,9 @@ func (p *EventPersister) run(ctx context.Context) {
 			// The owner went away with events still accepted: write what is queued on a
 			// context that outlives the cancellation, bounded so shutdown stays short.
 			fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), persisterFinalFlushTimeout)
-			defer cancel()
 			batch = p.drainQueued(batch)
 			flushWith(fctx)
+			cancel()
 			return
 		case evt := <-p.queue:
 			batch = append(batch, evt)
