@@ -78,7 +78,7 @@ describe("Safety tab markup", () => {
     expect(retry.className).toBe("ac-btn secondary inline-error-retry");
     expect(retry.textContent).toBe("Try again");
     expect(retry.hidden).toBe(true);
-    const failure = q(pane, "[data-testid='safety-history-error']");
+    const failure = q(pane, "[data-testid='moderation-history-error']");
     expect(failure.getAttribute("role")).toBe("alert");
     expect(failure.textContent).toBe("");
 
@@ -111,7 +111,7 @@ describe("Safety tab markup", () => {
     )!;
     expect(hint.hidden).toBe(true);
     expect(q<HTMLButtonElement>(pane, ".inline-error-retry").hidden).toBe(false);
-    expect(q(pane, "[data-testid='safety-history-error']").textContent).toBe(
+    expect(q(pane, "[data-testid='moderation-history-error']").textContent).toBe(
       "Your moderation history couldn't be loaded.",
     );
     expect(q(pane, "p.setting-desc[role='status']").textContent).toBe("");

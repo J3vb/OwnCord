@@ -98,7 +98,7 @@ export function createAppealsSection(api: AppealsApi | null, signal: AbortSignal
     retryLabel: t("tab.retry"),
     onRetry: () => refreshOwnModeration(),
     signal,
-    testId: "safety-appeals-error",
+    testId: "appeals-load-error",
   });
   const list = createElement("ul", {
     class: "safety-history safety-appeals-list",

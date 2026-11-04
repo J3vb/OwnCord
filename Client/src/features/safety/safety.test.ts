@@ -587,7 +587,7 @@ describe("Safety tab", () => {
     expect(pane.textContent).toContain("Your moderation history couldn't be loaded.");
     expectConsole("warn", "Failed to load own moderation history");
     const retry = pane.querySelector<HTMLButtonElement>(
-      "[data-testid='safety-history-error-retry']",
+      "[data-testid='moderation-history-error-retry']",
     )!;
     expect(retry.hidden).toBe(false);
 

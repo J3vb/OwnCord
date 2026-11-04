@@ -89,7 +89,7 @@ export function renderSafetyTab(
     retryLabel: t("tab.retry"),
     onRetry: () => refreshOwnModeration(),
     signal,
-    testId: "safety-history-error",
+    testId: "moderation-history-error",
   });
   const list = createElement("ul", { class: "safety-history", "aria-label": t("tab.history") });
   const historyHeading = createElement(

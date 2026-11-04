@@ -377,7 +377,7 @@ describe("tracking appeals", () => {
     await flush();
     expectConsole("warn", "Failed to load own appeals");
     expect(pane.textContent).toContain("Your appeals couldn't be loaded.");
-    const retry = q<HTMLButtonElement>(pane, "[data-testid='safety-appeals-error-retry']");
+    const retry = q<HTMLButtonElement>(pane, "[data-testid='appeals-load-error-retry']");
     expect(retry.hidden).toBe(false);
     api.getMyAppeals.mockResolvedValueOnce([appeal({ id: "O" })]);
     retry.click();
@@ -478,12 +478,12 @@ describe("appeals section markup", () => {
     expect(attrsOf(q(failure, "p"))).toEqual({
       class: "inline-error-text",
       role: "alert",
-      "data-testid": "safety-appeals-error",
+      "data-testid": "appeals-load-error",
     });
     expect(attrsOf(q(failure, "button"))).toMatchObject({
       type: "button",
       class: "ac-btn secondary inline-error-retry",
-      "data-testid": "safety-appeals-error-retry",
+      "data-testid": "appeals-load-error-retry",
     });
     expect(attrsOf(q(section, ":scope > ul"))).toEqual({
       class: "safety-history safety-appeals-list",
@@ -651,7 +651,7 @@ describe("appeals section markup", () => {
       [appeal({ id: "O" })],
     );
     const withdrawBtn = q<HTMLButtonElement>(pane, ".safety-appeal-withdraw");
-    const retry = q<HTMLButtonElement>(pane, "[data-testid='safety-appeals-error-retry']");
+    const retry = q<HTMLButtonElement>(pane, "[data-testid='appeals-load-error-retry']");
     openBtn(pane, 7).click();
     ac.abort();
 
