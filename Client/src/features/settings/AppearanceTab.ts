@@ -24,7 +24,15 @@ import {
   MIN_FONT_SIZE_PX,
   MAX_FONT_SIZE_PX,
 } from "@lib/prefs/appearance";
-import { getTimeFormat, saveTimeFormat, type TimeFormat } from "@lib/text/timeFormat";
+import {
+  DATE_FORMATS,
+  getDateFormat,
+  getTimeFormat,
+  saveDateFormat,
+  saveTimeFormat,
+  type DateFormat,
+  type TimeFormat,
+} from "@lib/text/timeFormat";
 import { loadMemberLayout, MEMBER_LAYOUT_PREF, type MemberLayout } from "../members/memberLayout";
 import { appZoom, ZOOM_LEVELS, zoomIndex } from "../zoom";
 import { buildCustomThemeSection } from "../custom-themes/customThemeSection";
@@ -211,63 +219,33 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
   appendChildren(compactRow, compactLabel, compactToggle);
   section.appendChild(compactRow);
 
-  // Time format (12-hour / 24-hour)
-  const timeFormatRow = createElement("div", { class: "setting-row" });
-  const timeFormatInfo = createElement("div", {});
-  appendChildren(
-    timeFormatInfo,
-    createElement("div", { class: "setting-label" }, t("appearance.timeFormat")),
-    createElement("div", { class: "setting-desc" }, t("appearance.timeFormat.desc")),
-  );
-  const timeFormatGroup = createElement("div", {
-    class: "level-options",
-    role: "radiogroup",
-    "aria-label": t("appearance.timeFormat"),
-    "data-testid": "time-format",
+  // Time format (12-hour / 24-hour) and date order. A date format change can
+  // move the clock default, so it repaints both rows.
+  const timeFormatRow = buildChoiceRow<TimeFormat>({
+    signal,
+    label: t("appearance.timeFormat"),
+    desc: t("appearance.timeFormat.desc"),
+    testId: "time-format",
+    options: [
+      ["12h", t("appearance.timeFormat.12h")],
+      ["24h", t("appearance.timeFormat.24h")],
+    ],
+    current: getTimeFormat,
+    save: saveTimeFormat,
   });
-  const timeFormatButtons = new Map<TimeFormat, HTMLButtonElement>();
-  const timeFormatLabels: Record<TimeFormat, string> = {
-    "12h": t("appearance.timeFormat.12h"),
-    "24h": t("appearance.timeFormat.24h"),
-  };
-  const paintTimeFormat = (): void => {
-    const current = getTimeFormat();
-    for (const [value, button] of timeFormatButtons) {
-      const on = value === current;
-      button.classList.toggle("active", on);
-      button.setAttribute("aria-checked", String(on));
-    }
-  };
-  for (const value of ["12h", "24h"] as const) {
-    const button = createElement(
-      "button",
-      {
-        class: "level-opt",
-        type: "button",
-        role: "radio",
-        "aria-checked": "false",
-        tabindex: "-1",
-        "data-testid": `time-format-${value}`,
-        "data-value": value,
-      },
-      timeFormatLabels[value],
-    );
-    button.addEventListener(
-      "click",
-      () => {
-        saveTimeFormat(value);
-        paintTimeFormat();
-      },
-      { signal },
-    );
-    timeFormatButtons.set(value, button);
-    timeFormatGroup.appendChild(button);
-  }
-  paintTimeFormat();
-  setRovingTabindex(timeFormatGroup, "[role='radio']");
-  enableRovingNavigation(timeFormatGroup, "[role='radio']", signal);
-  appendChildren(timeFormatRow, timeFormatInfo, timeFormatGroup);
-  section.appendChild(timeFormatRow);
+  const dateFormatRow = buildChoiceRow<DateFormat>({
+    signal,
+    label: t("appearance.dateFormat"),
+    desc: t("appearance.dateFormat.desc"),
+    testId: "date-format",
+    options: DATE_FORMATS.map((value) => [value, t(`appearance.dateFormat.${value}`)]),
+    current: getDateFormat,
+    save: (value) => {
+      saveDateFormat(value);
+      timeFormatRow.paint();
+    },
+  });
+  section.append(timeFormatRow.row, dateFormatRow.row);
 
   // Member list position (right column / under the channels)
   const memberLayoutRow = createElement("div", { class: "setting-row" });
@@ -468,4 +446,72 @@ function hexToRgb(hex: string): string {
   const g = parseInt(hex.slice(3, 5), 16);
   const b = parseInt(hex.slice(5, 7), 16);
   return `rgb(${r}, ${g}, ${b})`;
+}
+
+interface ChoiceRowOptions<T extends string> {
+  readonly signal: AbortSignal;
+  readonly label: string;
+  readonly desc: string;
+  readonly testId: string;
+  readonly options: readonly (readonly [T, string])[];
+  readonly current: () => T;
+  readonly save: (value: T) => void;
+}
+
+/** A setting row with a single-choice radio group; `paint` re-reads `current`. */
+function buildChoiceRow<T extends string>(
+  opts: ChoiceRowOptions<T>,
+): { row: HTMLDivElement; paint: () => void } {
+  const row = createElement("div", { class: "setting-row" });
+  const info = createElement("div", {});
+  appendChildren(
+    info,
+    createElement("div", { class: "setting-label" }, opts.label),
+    createElement("div", { class: "setting-desc" }, opts.desc),
+  );
+  const group = createElement("div", {
+    class: "level-options",
+    role: "radiogroup",
+    "aria-label": opts.label,
+    "data-testid": opts.testId,
+  });
+  const buttons = new Map<T, HTMLButtonElement>();
+  const paint = (): void => {
+    const current = opts.current();
+    for (const [value, button] of buttons) {
+      const on = value === current;
+      button.classList.toggle("active", on);
+      button.setAttribute("aria-checked", String(on));
+    }
+  };
+  for (const [value, text] of opts.options) {
+    const button = createElement(
+      "button",
+      {
+        class: "level-opt",
+        type: "button",
+        role: "radio",
+        "aria-checked": "false",
+        tabindex: "-1",
+        "data-testid": `${opts.testId}-${value}`,
+        "data-value": value,
+      },
+      text,
+    );
+    button.addEventListener(
+      "click",
+      () => {
+        opts.save(value);
+        paint();
+      },
+      { signal: opts.signal },
+    );
+    buttons.set(value, button);
+    group.appendChild(button);
+  }
+  paint();
+  setRovingTabindex(group, "[role='radio']");
+  enableRovingNavigation(group, "[role='radio']", opts.signal);
+  appendChildren(row, info, group);
+  return { row, paint };
 }
