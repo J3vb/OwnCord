@@ -129,10 +129,12 @@ func TestServeThumb_AnimatedWebPPassesThrough(t *testing.T) {
 func webpBomb(t *testing.T) []byte {
 	t.Helper()
 	frame := readWebP(t, "lossy-1600x1200.webp")[12:] // the VP8 chunk
-	body := append([]byte("WEBPVP8X"), 10, 0, 0, 0)   // chunk length 10
-	body = append(body, 0, 0, 0, 0)                   // no flags
-	body = append(body, 0xFF, 0x3F, 0x00)             // width 16384 - 1
-	body = append(body, 0xFF, 0x3F, 0x00)             // height 16384 - 1
+	body := append([]byte("WEBPVP8X"),
+		10, 0, 0, 0, // chunk length 10
+		0, 0, 0, 0, // no flags
+		0xFF, 0x3F, 0x00, // width 16384 - 1
+		0xFF, 0x3F, 0x00, // height 16384 - 1
+	)
 	body = append(body, frame...)
 	out := append([]byte("RIFF"), 0, 0, 0, 0)
 	binary.LittleEndian.PutUint32(out[4:], uint32(len(body)))
