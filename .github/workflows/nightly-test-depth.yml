@@ -3,9 +3,9 @@
 # Carried to main with the v2.3.0-beta.1 release, so GitHub now registers it.
 # The schedule runs main's copy of this file; `gh workflow run
 # nightly-test-depth.yml --ref dev` runs dev's copy. Either way every job
-# checks out dev. Until a release carries the 31-shard matrix to main, the
-# schedule still asks for the six old shard names, which
-# Client/tests/mutation/stryker.shard.config.mjs keeps accepting.
+# checks out dev. The shard names come from dev's
+# Client/tests/mutation/stryker.shard.config.mjs at the pinned revision, so
+# adding or renaming a shard there needs no release to reach the schedule.
 # Do NOT add a substitute trigger (e.g. a schedule on ci.yml): see
 # nightly-docker-smoke.yml:1-15 for why a scheduled run on the default
 # branch's tip would poison release gate-evidence.
@@ -42,7 +42,7 @@ jobs:
         env:
           REPO: ${{ github.repository }}
         run: echo "sha=$(git ls-remote "https://github.com/${REPO}" refs/heads/dev | cut -f1)" >> "$GITHUB_OUTPUT"
-      # If a scheduled run still starts during working hours, the 31-shard
+      # If a scheduled run still starts during working hours, the shard
       # matrix would hold most of the 20 runner slots and queue every PR, so
       # a schedule run that starts between 07:00 and 19:59 UTC skips the
       # mutation matrix. A manual dispatch always runs it.
@@ -58,9 +58,37 @@ jobs:
             echo "mutate=true" >> "$GITHUB_OUTPUT"
           fi
 
+  shards:
+    # The matrix is read from the shard config at the pinned dev revision, so
+    # the config alone decides how many shards run.
+    name: List mutation shards
+    needs: pin
+    if: needs.pin.outputs.mutate == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      names: ${{ steps.list.outputs.names }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: dev
+          persist-credentials: false
+      - name: Check out the pinned dev revision
+        env:
+          PIN_SHA: ${{ needs.pin.outputs.sha }}
+        run: |
+          git fetch --depth=1 origin "$PIN_SHA"
+          git checkout --detach "$PIN_SHA"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 26
+      - id: list
+        working-directory: Client
+        run: node scripts/list-mutation-shards.mjs >> "$GITHUB_OUTPUT"
+
   mutation:
     name: Nightly mutation baseline (${{ matrix.shard }})
-    needs: pin
+    needs: [pin, shards]
     if: needs.pin.outputs.mutate == 'true'
     runs-on: ubuntu-latest
     # The owner's ceiling is 90 min wall-clock per night. Shards run as parallel
@@ -76,38 +104,7 @@ jobs:
       # meaningful if every shard reports.
       fail-fast: false
       matrix:
-        shard:
-          - livekit-1
-          - livekit-2
-          - livekit-3
-          - livekit-4
-          - livekit-5
-          - livekit-6
-          - audio-media-1
-          - audio-media-2
-          - audio-media-3
-          - transport-auth-1
-          - transport-auth-2
-          - transport-auth-3
-          - transport-auth-4
-          - lib-rest-1
-          - lib-rest-2
-          - lib-rest-3
-          - lib-rest-4
-          - lib-rest-5
-          - lib-rest-6
-          - lib-rest-7
-          - lib-rest-8
-          - lib-rest-9
-          - stores-1
-          - stores-2
-          - stores-3
-          - stores-4
-          - safety-moderation-1
-          - safety-moderation-2
-          - safety-moderation-3
-          - safety-moderation-4
-          - safety-moderation-5
+        shard: ${{ fromJSON(needs.shards.outputs.names) }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -148,7 +145,7 @@ jobs:
     # report is missing, since a partial score is not the full-surface score.
     # Not a required status context; it only exists on the nightly.
     name: Nightly full-surface mutation score
-    needs: [pin, mutation]
+    needs: [pin, shards, mutation]
     if: always() && needs.pin.outputs.mutate == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
