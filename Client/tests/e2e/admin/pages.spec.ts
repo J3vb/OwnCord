@@ -424,8 +424,9 @@ test("Server logs: the live stream connects", async ({ page, seededAdminServer }
   // The connection state leads the toolbar, not the foot of the page.
   await expect(page.locator(".log-toolbar #logStatusText")).toBeVisible();
 
-  // The backfill carries this session's own requests, as chips with the
-  // full attrs behind a details toggle rather than inline JSON.
+  // The backfill carries the panel's own ticket request (admin writes stay at
+  // INFO; its polling reads go to DEBUG), as a chip with the full attrs behind
+  // a details toggle rather than inline JSON.
   const request = page.locator("#logOutput .log-line", { has: page.locator(".log-req") }).first();
   await expect(request).toBeVisible({ timeout: 15_000 });
   await expect(request.locator(".log-req")).toContainText("/admin/api/");
