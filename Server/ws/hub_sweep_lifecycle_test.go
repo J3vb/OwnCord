@@ -54,7 +54,7 @@ func TestHubStop_CancelsBlockedSweepAndDoneWaitsForIt(t *testing.T) {
 	h, authn := newBlockedSweepHub(t)
 	go h.Run()
 
-	h.startSweep(&h.sessionSweepInFlight, h.sweepRevokedSessions)
+	h.startSweep(&h.lifecycle.sessionSweepInFlight, h.sweepRevokedSessions)
 	waitEntered(t, authn.entered)
 
 	h.Stop()
@@ -82,7 +82,7 @@ func TestStartSweep_BlockedSweepEndsAtSweepTimeout(t *testing.T) {
 	t.Cleanup(func() { sweepTimeout = old })
 
 	h, authn := newBlockedSweepHub(t)
-	h.startSweep(&h.sessionSweepInFlight, h.sweepRevokedSessions)
+	h.startSweep(&h.lifecycle.sessionSweepInFlight, h.sweepRevokedSessions)
 	waitEntered(t, authn.entered)
 
 	select {
@@ -93,7 +93,7 @@ func TestStartSweep_BlockedSweepEndsAtSweepTimeout(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("blocked sweep never ended: its ctx has no deadline")
 	}
-	for h.sessionSweepInFlight.Load() {
+	for h.lifecycle.sessionSweepInFlight.Load() {
 		time.Sleep(time.Millisecond)
 	}
 }
@@ -145,7 +145,7 @@ func TestSweepStaleVoiceStates_StalledTailEndsAtTailTimeout(t *testing.T) {
 	h.readers.Visibility = stallAfterArmVisibility{VisibilityReader: h.readers.Visibility, armed: &armed}
 	go h.Run()
 
-	h.startSweep(&h.voiceSweepInFlight, h.sweepStaleVoiceStates)
+	h.startSweep(&h.lifecycle.voiceSweepInFlight, h.sweepStaleVoiceStates)
 	deadline := time.Now().Add(5 * time.Second)
 	for !armed.Load() {
 		if time.Now().After(deadline) {
@@ -153,7 +153,7 @@ func TestSweepStaleVoiceStates_StalledTailEndsAtTailTimeout(t *testing.T) {
 		}
 		time.Sleep(time.Millisecond)
 	}
-	for h.voiceSweepInFlight.Load() {
+	for h.lifecycle.voiceSweepInFlight.Load() {
 		if time.Now().After(deadline) {
 			t.Fatal("stalled tail never ended: voiceSweepInFlight stayed set")
 		}
@@ -188,7 +188,7 @@ func TestSweepStaleVoiceStates_StalledTailEndsAtHubStop(t *testing.T) {
 	h.readers.Visibility = stallAfterArmVisibility{VisibilityReader: h.readers.Visibility, armed: &armed}
 	go h.Run()
 
-	h.startSweep(&h.voiceSweepInFlight, h.sweepStaleVoiceStates)
+	h.startSweep(&h.lifecycle.voiceSweepInFlight, h.sweepStaleVoiceStates)
 	deadline := time.Now().Add(5 * time.Second)
 	for !armed.Load() {
 		if time.Now().After(deadline) {

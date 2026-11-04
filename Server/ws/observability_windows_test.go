@@ -32,7 +32,7 @@ func TestPanicBreaker_HardwareFaultExitsOnFirstPanic(t *testing.T) {
 		broadcast:    make(chan broadcastMsg, 1),
 	}
 	fatal := make(chan struct{})
-	h.fatalFn = func() { close(fatal) }
+	h.lifecycle.fatalFn = func() { close(fatal) }
 
 	nsfwDispatchResolveRaceHook = func(channelID int64) {
 		if channelID == panicChannelID {

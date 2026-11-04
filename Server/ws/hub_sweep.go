@@ -82,7 +82,7 @@ var sweepTailTimeout = 15 * time.Second
 
 func (h *Hub) sweepTailCtx(ctx context.Context) (context.Context, context.CancelFunc) {
 	tail, cancel := context.WithTimeout(context.WithoutCancel(ctx), sweepTailTimeout)
-	stop := context.AfterFunc(h.life, cancel)
+	stop := context.AfterFunc(h.lifecycle.ctx, cancel)
 	return tail, func() {
 		stop()
 		cancel()
@@ -98,8 +98,8 @@ func (h *Hub) startSweep(inFlight *atomic.Bool, sweep func(context.Context)) {
 	if !inFlight.CompareAndSwap(false, true) {
 		return
 	}
-	ctx, cancel := context.WithTimeout(h.life, sweepTimeout)
-	h.sweeps.Go(func() {
+	ctx, cancel := context.WithTimeout(h.lifecycle.ctx, sweepTimeout)
+	h.lifecycle.sweeps.Go(func() {
 		defer inFlight.Store(false)
 		defer cancel()
 		sweep(ctx)

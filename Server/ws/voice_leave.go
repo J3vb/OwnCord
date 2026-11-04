@@ -145,7 +145,7 @@ func (h *Hub) removeLiveKitParticipantAsync(ctx context.Context, channelID, user
 	// Runs on the hub's group so StopHub joins it: a removal in flight at stop is
 	// cancelled and waited for, and one requested after the group closed is refused.
 	// requested after the group closed is refused.
-	admitted := h.background.Go(ctx, func(jobCtx context.Context) {
+	admitted := h.lifecycle.background.Go(ctx, func(jobCtx context.Context) {
 		// Still matters for struct-literal test hubs, whose nil group is unowned and never
 		// cancelled by hub stop.
 		select {
@@ -204,7 +204,7 @@ func leaveVoiceChannelWithRetry(ctx context.Context, txn *voiceTxn, channelID in
 		// failing after the group closed gets no retry (the sweep clears the row). Go only
 		// takes the group's leaf mutex and returns; the job holds h and userID, never txn or
 		// any lock.
-		admitted := h.background.Go(ctx, func(retryCtx context.Context) {
+		admitted := h.lifecycle.background.Go(ctx, func(retryCtx context.Context) {
 			const maxRetries = 3
 			delay := 200 * time.Millisecond
 

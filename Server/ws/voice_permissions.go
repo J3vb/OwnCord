@@ -50,7 +50,7 @@ func (h *Hub) ReconcileChannelVoicePermissions(channelID int64) {
 	if len(members) == 0 {
 		return
 	}
-	ctx, cancel := context.WithTimeout(h.life, sweepTimeout)
+	ctx, cancel := context.WithTimeout(h.lifecycle.ctx, sweepTimeout)
 	defer cancel()
 	for _, c := range members {
 		if ctx.Err() != nil {

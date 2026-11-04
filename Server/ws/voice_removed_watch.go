@@ -105,7 +105,7 @@ func (h *Hub) runRemovedVoiceWatch() {
 	if h.livekit == nil {
 		return
 	}
-	life := h.life
+	life := h.lifecycle.ctx
 	if life == nil {
 		life = context.Background()
 	}

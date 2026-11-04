@@ -78,7 +78,7 @@ func TestRemoveParticipantAsync_JoinedByStopHub(t *testing.T) {
 	// Edge: a removal requested once the hub is stopped is refused, so nothing
 	// is running after the join returned and nothing reaches LiveKit.
 	h.removeLiveKitParticipantAsync(context.Background(), 1, 2, "tok2", "test-late")
-	if h.background.Go(context.Background(), func(context.Context) {}) {
+	if h.lifecycle.background.Go(context.Background(), func(context.Context) {}) {
 		t.Error("the hub's group admitted a job after JoinBackground")
 	}
 	time.Sleep(100 * time.Millisecond)

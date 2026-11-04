@@ -46,7 +46,7 @@ func (g *restartNoticeGate) claim(reason RestartReason, delaySeconds int) bool {
 // the graceful stop, and clients should see one countdown. A cancel
 // (delaySeconds 0) is never dropped.
 func (h *Hub) BroadcastServerRestart(reason RestartReason, delaySeconds int) {
-	if !h.restartGate.claim(reason, delaySeconds) {
+	if !h.lifecycle.restartGate.claim(reason, delaySeconds) {
 		return
 	}
 	h.BroadcastToAll(buildServerRestartMsg(reason, delaySeconds, restartSpreadMS(h.ClientCount())))

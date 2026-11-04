@@ -14,7 +14,7 @@ import (
 // shut: while one sweep is still running, further startSweep calls for the
 // same guard must be dropped, and once it finishes the next call runs again.
 func TestStartSweep_NeverRunsConcurrentlyWithItself(t *testing.T) {
-	h := &Hub{life: context.Background()}
+	h := &Hub{lifecycle: hubLifecycle{ctx: context.Background()}}
 
 	var inFlight atomic.Bool
 	var active, maxActive, runs atomic.Int64

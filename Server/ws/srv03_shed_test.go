@@ -132,7 +132,7 @@ func TestContentFrameLoss_ResumingClientTakesFullReadyAndRecoversMessage(t *test
 func waitDispatchDrained(t *testing.T, h *Hub) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
-	for !h.running.Load() {
+	for !h.lifecycle.running.Load() {
 		if time.Now().After(deadline) {
 			t.Fatal("dispatch loop never started")
 		}

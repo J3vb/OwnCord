@@ -250,7 +250,7 @@ func (h *Hub) purgePersisted(ctx context.Context, deleteRows func(context.Contex
 // hub whose dispatch loop is not running (a test hub, a hub after GracefulStop) has
 // nothing queued to wait for.
 func (h *Hub) awaitDispatch(ctx context.Context) error {
-	if !h.running.Load() || !h.DispatchAlive() {
+	if !h.lifecycle.running.Load() || !h.DispatchAlive() {
 		return nil
 	}
 	done := make(chan struct{})
