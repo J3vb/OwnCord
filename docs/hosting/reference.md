@@ -673,16 +673,23 @@ Each update is checked with an Ed25519 signature before it is applied.
 
 ### Client support bundle and logs
 
-When a _user_ has a problem, the desktop client can write its own support
-bundle, without contacting the server: **Settings → Diagnostics & logs →
-Export Support Bundle**.
+When a _user_ has a problem, the app can write its own support bundle, without
+contacting the server: **Settings → Diagnostics & logs → Export Support
+Bundle**. This works on the desktop, on Android and in the browser client.
 
-- It is a local zip, saved where the user chooses. Nothing is uploaded.
-- Unlike the server bundle, it copies client log lines as they are. The client
-  log is not cleaned. So review it before sharing. The **Diagnostics & logs**
-  tab says this too.
-- It contains both client logs, plus diagnostic sections the client collects
-  itself. Ask for this bundle first.
+- It is a local zip, saved where the user chooses (on Android through Save or
+  Share). Nothing is uploaded.
+- Every file is cleaned before it is zipped: tokens, passwords, keys, cookies,
+  recovery codes, links (cut to the server name), email and IP addresses and
+  the home folder name are removed, and `redactions.json` counts what was
+  removed. This works on the shape of a value, so plain words in a log line
+  still get through. Review the bundle before sharing; the **Diagnostics &
+  logs** tab says this too.
+- Besides both client logs it carries a diagnostic event log (what the camera,
+  calls and server connection did in the last 30 minutes, without names or
+  messages), `last-exit.json` (how the app's last run ended) and a
+  `manifest.json` that lists every file with its size and checksum. Ask for
+  this bundle first.
 
 The client keeps **two** logs: the webview's own rotating log (JSON lines),
 and the native log below.
@@ -1042,6 +1049,16 @@ restarts the service after repeated failures.
 troubleshooting. Only administrators can call it. In the admin panel it is the
 **Connectivity check** card on the Dashboard. See
 [port-forwarding.md](../port-forwarding.md).
+
+### System health
+
+The **System health** page (Operations, `GET /admin/api/system/health`, for
+`ADMINISTRATOR` or `VIEW_DIAGNOSTICS`) shows connections, message-delivery
+timings, the database, voice and the server process on four cards, refreshed
+every 5 seconds while the page is open. It reads the same figures as the
+support bundle's `health.json`, and **Copy for support** copies them. When the
+database does not answer within 2 seconds, its card says **Could not read**
+instead of holding up the page. See [Monitoring](monitoring.md#system-health-page).
 
 ### Support bundle contents
 
