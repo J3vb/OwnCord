@@ -15,6 +15,7 @@ use std::ffi::CString;
 use std::io::{Read, Seek, SeekFrom};
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 const PREFIX: &str = "stderr-";
 const SUFFIX: &str = ".log";
@@ -27,6 +28,10 @@ const TAIL_BYTES: u64 = 16 * 1024;
 const TAIL_LINES: usize = 40;
 /// Longest copied line, in characters.
 const LINE_CHARS: usize = 300;
+
+/// Set once stderr points at our file: [`trim`] never touches a file someone
+/// else redirected stderr to.
+static CAPTURED: AtomicBool = AtomicBool::new(false);
 
 fn path_for(dir: &Path, pid: u32) -> PathBuf {
     dir.join(format!("{PREFIX}{pid}{SUFFIX}"))
@@ -42,11 +47,18 @@ fn file_pid(path: &Path) -> Option<u32> {
 }
 
 /// Point this process's stderr at its file in `dir`, unless stderr is a
-/// terminal.
+/// terminal or a file the launcher chose.
 pub fn start(dir: &Path) {
-    // SAFETY: isatty(3) on a file descriptor number.
-    if unsafe { libc::isatty(libc::STDERR_FILENO) } == 1 {
-        log::info!("[exit] stderr is a terminal; not captured");
+    // SAFETY: isatty(3) and fstat(2) on a file descriptor number, into a
+    // zeroed struct.
+    let (tty, file) = unsafe {
+        let mut stat: libc::stat = std::mem::zeroed();
+        let file = libc::fstat(libc::STDERR_FILENO, &mut stat) == 0
+            && (stat.st_mode & libc::S_IFMT) == libc::S_IFREG;
+        (libc::isatty(libc::STDERR_FILENO) == 1, file)
+    };
+    if tty || file {
+        log::info!("[exit] stderr already goes to a terminal or file; not captured");
         return;
     }
     let path = path_for(dir, std::process::id());
@@ -65,11 +77,15 @@ pub fn start(dir: &Path) {
             false
         } else {
             let ok = libc::dup2(fd, libc::STDERR_FILENO) >= 0;
-            libc::close(fd);
+            // A stderr closed at launch makes open(2) return 2 itself.
+            if fd != libc::STDERR_FILENO {
+                libc::close(fd);
+            }
             ok
         }
     };
     if done {
+        CAPTURED.store(true, Ordering::Release);
         log::info!("[exit] stderr kept for the next start's report");
     } else {
         log::warn!(
@@ -82,8 +98,11 @@ pub fn start(dir: &Path) {
 /// Empty the file once it passes [`MAX_BYTES`]. Writes are appends, so they
 /// carry on at the new end.
 pub fn trim() {
-    // SAFETY: fstat(2) into a zeroed struct and ftruncate(2) on stderr; on a
-    // terminal or pipe both fail or do nothing.
+    if !CAPTURED.load(Ordering::Acquire) {
+        return;
+    }
+    // SAFETY: fstat(2) into a zeroed struct and ftruncate(2) on stderr,
+    // which is our own file once captured.
     unsafe {
         let mut stat: libc::stat = std::mem::zeroed();
         if libc::fstat(libc::STDERR_FILENO, &mut stat) == 0
