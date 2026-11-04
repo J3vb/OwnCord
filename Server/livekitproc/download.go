@@ -10,10 +10,7 @@ package livekitproc
 // picks up a new upstream release.
 
 import (
-	"archive/tar"
-	"archive/zip"
 	"bufio"
-	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -25,6 +22,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/J3vb/OwnCord/Server/internal/archivebin"
 )
 
 // DefaultVersion is the livekit-server release the server downloads
@@ -189,70 +188,24 @@ func livekitBinaryEntry(name string) bool {
 	return base == "livekit-server" || base == "livekit-server.exe"
 }
 
+// maxLiveKitBytes bounds the staged livekit-server binary. Releases are a
+// few tens of MiB; the cap only stops a damaged archive from filling the disk.
+const maxLiveKitBytes = 512 << 20
+
 // extractLiveKitFromTarGz extracts the livekit-server entry to destPath
 // (created O_EXCL so a pre-planted file fails the extraction).
 func extractLiveKitFromTarGz(r io.Reader, destPath string) error {
-	gr, err := gzip.NewReader(r)
-	if err != nil {
-		return fmt.Errorf("gzip: %w", err)
+	if _, err := archivebin.FromTarGz(r, destPath, livekitBinaryEntry, maxLiveKitBytes); err != nil {
+		return fmt.Errorf("livekit-server from archive: %w", err)
 	}
-	defer gr.Close() //nolint:errcheck
-
-	tr := tar.NewReader(gr)
-	for {
-		hdr, err := tr.Next()
-		if err == io.EOF {
-			return fmt.Errorf("archive contains no livekit-server binary")
-		}
-		if err != nil {
-			return fmt.Errorf("tar: %w", err)
-		}
-		if hdr.Typeflag != tar.TypeReg || strings.Contains(hdr.Name, "..") || !livekitBinaryEntry(hdr.Name) {
-			continue
-		}
-		return writeExact(destPath, io.LimitReader(tr, hdr.Size), hdr.Size)
-	}
+	return nil
 }
 
 // extractLiveKitFromZip extracts the livekit-server entry to destPath
 // (created O_EXCL). r must be positioned over the verified archive bytes.
 func extractLiveKitFromZip(r io.ReaderAt, size int64, destPath string) error {
-	zr, err := zip.NewReader(r, size)
-	if err != nil {
-		return fmt.Errorf("zip: %w", err)
-	}
-	for _, entry := range zr.File {
-		if entry.FileInfo().IsDir() || strings.Contains(entry.Name, "..") || !livekitBinaryEntry(entry.Name) {
-			continue
-		}
-		rc, err := entry.Open()
-		if err != nil {
-			return fmt.Errorf("opening zip entry: %w", err)
-		}
-		//nolint:gosec // G110: size is bounded by the verified archive's cap
-		writeErr := writeExact(destPath, rc, int64(entry.UncompressedSize64)) //nolint:gosec // G115: size fits int64
-		_ = rc.Close()
-		return writeErr
-	}
-	return fmt.Errorf("archive contains no livekit-server binary")
-}
-
-// writeExact writes exactly size bytes from r to destPath, O_EXCL.
-func writeExact(destPath string, r io.Reader, size int64) error {
-	out, err := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o600) //nolint:gosec // G304: trusted path
-	if err != nil {
-		return err
-	}
-	n, copyErr := io.Copy(out, r)
-	closeErr := out.Close()
-	if copyErr != nil {
-		return fmt.Errorf("writing binary: %w", copyErr)
-	}
-	if closeErr != nil {
-		return closeErr
-	}
-	if n != size {
-		return fmt.Errorf("incomplete archive entry (%d of %d bytes)", n, size)
+	if _, err := archivebin.FromZip(r, size, destPath, livekitBinaryEntry, maxLiveKitBytes); err != nil {
+		return fmt.Errorf("livekit-server from archive: %w", err)
 	}
 	return nil
 }
