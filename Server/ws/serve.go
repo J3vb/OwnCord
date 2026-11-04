@@ -54,7 +54,7 @@ func ServeWS(hub *Hub, allowedOrigins []string, maxConns int) http.HandlerFunc {
 	var pending atomic.Int64
 	return func(w http.ResponseWriter, r *http.Request) {
 		reject := func() {
-			hub.connRejects.Add(1)
+			hub.stats.connRejects.Add(1)
 			w.Header().Set("Retry-After", "30")
 			httperr.Write(w, http.StatusServiceUnavailable, httperr.CodeServerBusy, "server at connection capacity")
 		}

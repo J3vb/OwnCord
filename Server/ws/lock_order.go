@@ -50,7 +50,7 @@
 //	rank  lock                       declared                 taken under it
 //	1 S   userLockEntry.mu           voice_registry.go:45     DB, broadcasts, seqMu (replay.go:438-441); never a
 //	      (voiceRegistry.voiceMember) user_locks.go:44         LiveKit RPC
-//	2 S   userLockEntry.mu           hub.go:217               DB and LiveKit RPC (user_locks.go:9-17); never a
+//	2 S   userLockEntry.mu           hub.go:157               DB and LiveKit RPC (user_locks.go:9-17); never a
 //	      (Hub.voiceMod)             user_locks.go:44         membership path
 //	3 S   replayPurgeState.mu RW     hub_tombstones.go:53     seqMu (hub_events.go:210), then the persister
 //	      (Hub.tombstones)                                    Flush and the DB delete (hub_events.go:218-235).
@@ -61,7 +61,7 @@
 //	3 S   roleRefreshState.flushMu   role_refresh.go:74       DB reads, then roleRefreshState.mu, then Hub.mu,
 //	                                                          PubSub.mu, timeoutViewState.mu and Client.mu one
 //	                                                          at a time (role_refresh.go:24-30)
-//	3 S   Hub.uploadPolicyMu         hub.go:224               a DB read, then Hub.settingsMu, then Hub.mu (R),
+//	3 S   Hub.uploadPolicyMu         hub.go:164               a DB read, then Hub.settingsMu, then Hub.mu (R),
 //	                                                          then Client.mu (hub_settings.go:93-113)
 //	3 S   gameActivityState.mu       hub_settings.go:128      a DB read, then Hub.presenceMu (the game activity
 //	      (Hub.gameActivity)                                  sweep), Hub.mu (R), then Client.mu
@@ -71,18 +71,18 @@
 //	3 S   admissionMu (local)        serve.go:62              Hub.mu (R) via ClientCount (serve.go:73,83)
 //	4     timeoutViewState.mu        member_timeouts_       Hub.mu (R), Client.mu
 //	      (Hub.timeoutView)          delivery.go:23
-//	4     Hub.presenceMu             hub.go:232               the caller's closure, which only enqueues
+//	4     Hub.presenceMu             hub.go:171               the caller's closure, which only enqueues
 //	                                                          (hub_presence.go:211-216), Hub.mu (R), Client.mu,
 //	                                                          presenceRepairState.mu, queueDropState.mu
-//	5     Hub.seqMu                  hub.go:65                Hub.keyHolderMu (a resume's registerNow ->
+//	5     Hub.seqMu                  hub.go:57                Hub.keyHolderMu (a resume's registerNow ->
 //	                                                          updateKeyHolder, hub_registry.go:177,182), Hub.mu,
 //	                                                          PubSub.mu, Client.mu (SendToUser, hub_broadcast.go:
 //	                                                          294-299,354; registerNow, hub_registry.go:89),
 //	                                                          EventRingBuffer.mu, presenceRepairState.mu,
 //	                                                          queueDropState.mu, and the leaves below
-//	6     Hub.keyHolderMu RW         hub.go:228               Hub.mu (R), voiceSlot.voiceMu
+//	6     Hub.keyHolderMu RW         hub.go:168               Hub.mu (R), voiceSlot.voiceMu
 //	                                                          (voice_e2ee.go:44-60)
-//	6     Hub.settingsMu RW          hub.go:219               a DB read under the write lock
+//	6     Hub.settingsMu RW          hub.go:159               a DB read under the write lock
 //	                                                          (hub_settings.go:27-35); see the exceptions
 //	7     Hub.mu RW                  hub.go:25                PubSub.mu, Client.mu, voiceSlot.voiceMu,
 //	                                                          voiceGraceState.mu (hub_registry.go:60-162,
@@ -98,7 +98,7 @@
 //	9     removedIdentities.mu       voice_removed_watch.go:35 leaf
 //	9     voiceResumeChecks.mu       voice_resume_check.go:57 leaf
 //	9     presenceRepairState.mu     hub_presence.go:92       leaf
-//	9     queueDropState.mu          hub_stats.go:163         leaf
+//	9     queueDropState.mu          hub_stats.go:140         leaf
 //	9     EventRingBuffer.mu RW      ringbuffer.go:14         leaf
 //	9     memberCache.mu             serve_ready_members_cache.go:33  leaf
 //	9     activityState.mu           channel_activity.go:95   leaf
@@ -107,7 +107,7 @@
 //	9     userLocks.mu               user_locks.go:34         leaf, but see userLocks.tryLock below
 //	-     LiveKitProcess.mu          livekit_process.go:37    unranked: independent subsystem
 //
-// Hub.background (hub.go:110) is a syncutil.Group, not a mutex, so it has no row.
+// Hub.background (hub.go:90) is a syncutil.Group, not a mutex, so it has no row.
 //
 // Locks of one rank are not ordered against each other, so the checker
 // forbids nesting any two of them, two instances of one lock included.
