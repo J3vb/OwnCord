@@ -29,7 +29,10 @@ pub(super) const SILENT_ENDINGS: &str =
      a crash that skipped the crash filter, sign-out or shutdown";
 
 /// Ask the Application event log about runs that ended silently.
-pub(super) fn report_ended(runs: Vec<crate::system_crash_report::EndedRun>) {
+pub(super) fn report_ended(
+    _dir: &std::path::Path,
+    runs: Vec<crate::system_crash_report::EndedRun>,
+) {
     crate::system_crash_report::report(runs);
 }
 

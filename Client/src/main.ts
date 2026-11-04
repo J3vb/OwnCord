@@ -173,7 +173,7 @@ configureServerHealth(api);
 installCertPrompts(ws, activePageId, navigate, rerunHealth);
 
 // Route the tray's Status submenu (Online/Idle/Do Not Disturb/Offline) into
-// the same path the in-app StatusPicker uses (UserBar.ts): persist through
+// the same path the in-app status menu uses (UserBar.ts): persist through
 // saveUserStatus() — lib/presence/userStatus.ts's documented single source of truth —
 // before sending the wire message, not just a raw ws.send. Without this the
 // tray's choice never reaches loadUserStatus(), so notifications.ts's DND

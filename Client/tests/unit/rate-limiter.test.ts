@@ -129,7 +129,7 @@ describe("RateLimiter", () => {
 
 // ---------------------------------------------------------------------------
 // createPresenceLimiter — exported on its own for presence-sender.test.ts /
-// status-picker-userbar.test.ts, which construct one outside the bundled set.
+// user-bar-status.test.ts, which construct one outside the bundled set.
 // ---------------------------------------------------------------------------
 
 describe("createPresenceLimiter", () => {

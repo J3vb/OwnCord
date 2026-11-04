@@ -11,7 +11,6 @@ import { authStore } from "@stores/auth.store";
 import { membersStore, type MembersState } from "@stores/members.store";
 import { voiceStore, type VoiceState } from "@stores/voice.store";
 import { openSettings, uiStore } from "@stores/ui.store";
-import { createStatusPicker, type StatusPickerComponent } from "@components/StatusPicker";
 import { createSelfProfileCard, type SelfProfileCard } from "@components/SelfProfileCard";
 import type { UserStatus } from "@lib/types";
 import {
@@ -25,6 +24,7 @@ import {
 } from "@lib/presence/userStatus";
 import { parseExpiry } from "@components/statusDefs";
 import { avatarInitial, resolveDisplayName } from "@lib/ui/avatar";
+import { applyStatusIndicator, showsPhone } from "@lib/ui/statusIndicator";
 import {
   avatarAnimationMode,
   isRenderableAvatar,
@@ -49,11 +49,11 @@ export interface UserBarOptions {
   /**
    * The session's single shared presence sender (MainPage owns the instance
    * and threads it to every producer — auto-idle, the settings Account tab,
-   * and this picker). Sending straight through `ws` instead would bypass the
+   * and the profile card). Sending straight through `ws` instead would bypass the
    * presence rate limiter's client-side token *and* its retry, so a frame
    * the server drops (1 update / 10s, keyed by user id — service/
    * channel.go) is lost for the rest of the session instead of retried.
-   * Required, alongside `ws`, for the picker to be enabled.
+   * Required, alongside `ws`, for the card's status controls to be enabled.
    */
   readonly presenceSender?: PresenceSender | null;
   /** The mic and headphone buttons. They work in a call or not: outside one
@@ -172,7 +172,6 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
   let renderedAvatarUrl: string | null = null;
   let nameEl: HTMLSpanElement | null = null;
   let statusEl: HTMLSpanElement | null = null;
-  let statusPicker: StatusPickerComponent | null = null;
   let profileCard: SelfProfileCard | null = null;
 
   /** Swap the letter for the uploaded picture, or back again. */
@@ -250,9 +249,8 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
     avatarTextEl = createElement("span", {});
     avatarEl.appendChild(avatarTextEl);
 
-    // The avatar and name are one real button that opens your own profile
-    // card. The status dot is a sibling laid over the avatar's corner (a
-    // control cannot nest inside a button) and keeps its own dropdown.
+    // The avatar, its status dot and the name are one real button that opens
+    // your own profile card: one status menu, whichever part is clicked.
     const self = createElement("div", { class: "ub-self" });
     const profileBtn = createElement("button", {
       class: "ub-profile-btn",
@@ -266,15 +264,27 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
     statusEl = createElement("span", { class: "ub-status" });
     appendChildren(info, nameEl, statusEl);
 
-    // Status picker — the dot itself lives in the avatar's corner (same spot
-    // the old plain status indicator occupied) so it doubles as the status
-    // display and its click target; the dropdown still opens upward from there.
-    const statusPickerWrap = createElement("div", {
-      class: "ub-status-picker-wrap",
-      "data-testid": "status-picker-wrap",
+    // The dot sits on the avatar's corner. The status line next to it already
+    // says the same in words, so it is hidden from assistive tech.
+    const dot = createElement("span", {
+      class: "ub-status-dot",
+      "aria-hidden": "true",
+      "data-testid": "user-bar-status-dot",
+    });
+    let dotMobile = ownMobile(membersStore.getState());
+    const paintDot = (): void => {
+      const status = loadUserStatus();
+      applyStatusIndicator(dot, status, dotMobile);
+      if (!showsPhone(status, dotMobile)) dot.removeAttribute("title");
+    };
+    paintDot();
+    // Your own dot is a phone while the server says you are on the phone app.
+    disposable.onStoreChange(membersStore, ownMobile, (mobile: boolean) => {
+      dotMobile = mobile;
+      paintDot();
     });
 
-    // The picker is usable only when the socket is live (store-backed status,
+    // A status can be sent only when the socket is live (store-backed status,
     // docs/architecture/ux §3) AND a presence sender was provided to send
     // through — without one, selecting a status would either be a silent
     // no-op or (worse) bypass the shared presence rate limiter and its retry.
@@ -292,7 +302,7 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
       );
     };
 
-    // One save path for the dropdown and the profile card.
+    // One save path for every status control.
     function applyStatus(status: UserStatus, durationMs?: number): void {
       saveUserStatus(status);
       // After the save, which ends any earlier timer: this one reverts the
@@ -340,64 +350,31 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
     });
     disposable.onEvent(profileBtn, "click", () => profileCard?.toggle());
 
-    statusPicker = createStatusPicker({
-      // Start from the stored selection, not a hardcoded "online" — otherwise
-      // this picker and the settings Account tab show different statuses.
-      currentStatus: loadUserStatus(),
-      // The server's own auth_ok.user.custom_status is authoritative:
-      // the localStorage pref is only a same-window fallback for before the
-      // first `ready` arrives. Once authStore has a user, its custom_status —
-      // even null/"" meaning "no status set" — wins outright; falling through
-      // to the pref there (via `??`) would let a stale value from a previous
-      // account/server on this machine leak back in exactly when the server
-      // says there is nothing to show, which is the one case that must render
-      // empty for the picker's clear-it flow to work at all.
-      currentCustomStatus: serverCustomStatus() ?? loadCustomStatus(),
-      onStatusChange: applyStatus,
-      onCustomStatusChange: applyCustomStatus,
-    });
-    statusPicker.mount(statusPickerWrap);
-    // Your own dot is a phone while the server says you are on the phone app.
-    statusPicker.setMobile(ownMobile(membersStore.getState()));
-    disposable.onStoreChange(membersStore, ownMobile, (mobile: boolean) =>
-      statusPicker?.setMobile(mobile),
-    );
-
     // Reflect status changes made on the settings Account tab.
     disposable.addCleanup(
       onUserStatusChange(
-        (status) => {
-          statusPicker?.setStatus(status);
+        () => {
+          paintDot();
           updateFromState();
         },
         { signal: disposable.signal },
       ),
     );
 
-    // Disable picker (with a reason) when the connection is down. Truly inert
-    // (no Tab stop, no open, no selection): a custom status set while the
-    // socket is down is saved locally, never sent, and overwritten on the next
-    // reconnect (F16).
-    const updatePickerDisabled = (): void => {
-      const enabled = canSetStatus();
-      statusPicker?.setEnabled(enabled);
-      statusPickerWrap.classList.toggle("ub-status-picker--disabled", !enabled);
-      if (!enabled) {
-        statusPickerWrap.title = shellText("status.offline");
-      } else {
-        statusPickerWrap.title = "";
-      }
+    // While the connection is down the dot is dimmed: the card still opens,
+    // but its status controls are inert until the socket is back.
+    const paintConnection = (): void => {
+      dot.classList.toggle("ub-status-dot--offline", !canSetStatus());
     };
-    updatePickerDisabled();
-
+    paintConnection();
     disposable.onStoreChange(
       uiStore,
       (s) => s.connectionStatus,
-      () => updatePickerDisabled(),
+      () => paintConnection(),
     );
 
-    appendChildren(profileBtn, avatarEl, info);
-    appendChildren(self, profileBtn, statusPickerWrap);
+    appendChildren(profileBtn, avatarEl, dot, info);
+    appendChildren(self, profileBtn);
 
     const buttons = createElement("div", { class: "ub-controls" });
 
@@ -465,32 +442,12 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
       avatarEl?.classList.toggle("speaking", speaking),
     );
 
-    // Subscribe to auth changes. Also reflects a custom_status that arrives
-    // (or changes) through authStore — a later auth_ok, or the settings
-    // Account tab's own presence send being echoed back — into the picker,
-    // using the same setCustomStatus() the seed above trusts. The
-    // null-safe read happens inside the callback so both "no user yet" and
-    // "user with no custom status" collapse to the same "" default.
+    // The open card follows the stores itself (SelfProfileCard); the bar only
+    // repaints its own name, avatar and status line.
     disposable.onStoreChange(
       authStore,
       (s) => s.user,
-      () => {
-        updateFromState();
-        statusPicker?.setCustomStatus(serverCustomStatus() ?? "");
-      },
-    );
-
-    // A presence rollback (a TIMED_OUT refusal) puts the previous custom status
-    // back in the members store, which can leave authStore unchanged and so
-    // never fire the subscription above — the picker would keep the refused
-    // text and ignore a retype of it. Follow our own member entry as well.
-    disposable.onStoreChange(
-      membersStore,
-      (s) => {
-        const id = authStore.getState().user?.id;
-        return id === undefined ? "" : (s.members.get(id)?.customStatus ?? "");
-      },
-      (text: string) => statusPicker?.setCustomStatus(text),
+      () => updateFromState(),
     );
 
     container.appendChild(root);
@@ -499,8 +456,6 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
   function destroy(): void {
     profileCard?.destroy();
     profileCard = null;
-    statusPicker?.destroy?.();
-    statusPicker = null;
     disposable.destroy();
     if (root !== null) {
       root.remove();

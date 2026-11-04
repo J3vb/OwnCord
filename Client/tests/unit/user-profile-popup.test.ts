@@ -152,6 +152,38 @@ describe("UserProfilePopup", () => {
     popup.destroy?.();
   });
 
+  it("ranks the actions like the phone sheet: Message, then Call, then Report and Block quiet", () => {
+    const popup = createUserProfilePopup({
+      user: makeUser({ id: 9 }),
+      anchorX: 100,
+      anchorY: 100,
+      onMessage: vi.fn(),
+      onCall: vi.fn(),
+      onReport: vi.fn(),
+      onToggleBlock: vi.fn(),
+    });
+    popup.mount(container);
+    const cls = (id: string): string[] =>
+      Array.from(container.querySelector(`[data-testid="${id}"]`)!.classList);
+    expect(cls("upp-message-btn")).toEqual(["upp-action-btn"]);
+    expect(cls("upp-call-btn")).toContain("upp-action-btn--secondary");
+    expect(cls("upp-report-btn")).toContain("upp-action-btn--quiet");
+    expect(cls("upp-block-btn")).toEqual(
+      expect.arrayContaining(["upp-action-btn--quiet", "upp-action-btn--danger"]),
+    );
+
+    // Two rows: Message and Call, then the quiet row under them.
+    const rows = Array.from(container.querySelectorAll(".upp-actions"));
+    expect(
+      rows.map((r) => Array.from(r.children).map((b) => b.getAttribute("data-testid"))),
+    ).toEqual([
+      ["upp-message-btn", "upp-call-btn"],
+      ["upp-report-btn", "upp-block-btn"],
+    ]);
+    expect(rows[1]!.classList.contains("upp-actions--quiet")).toBe(true);
+    popup.destroy?.();
+  });
+
   it("Report closes the popup, returns focus, then reports the user", () => {
     const opener = document.createElement("button");
     container.appendChild(opener);

@@ -2,9 +2,11 @@
 // owns. Other files carry local fragments of it; where one disagrees with this
 // block, this block wins and the fragment is the bug. The order is read from
 // the code at the paths cited, and checked two ways. Each ranked lock is a
-// syncutil.Ranked[R] or RankedRW[R] whose R is one of the rank types at the
-// end of this file; the lock-rank invariant (invariants/lock_rank.go) holds
-// the table's rank column to those types. Under -tags deadlock every acquire
+// syncutil.Ranked[R] or RankedRW[R] whose R is one of the rank types of
+// ws/lockrank (aliased at the end of this file for use inside ws), so packages
+// under ws/ rank their locks with the same types. The lock-rank invariant
+// (invariants/lock_rank.go) holds the table's rank column to those types,
+// for ws and its packages alike. Under -tags deadlock every acquire
 // is checked against the ranks its goroutine already holds, and one whose
 // rank is not greater than all of them panics with both stacks
 // (syncutil/ranked_deadlock.go). go-deadlock runs underneath as before.
@@ -34,7 +36,8 @@
 //
 // # Ranks (outermost first)
 //
-// Lock names are Type.field, the Go declaration. A lock reached through a
+// Lock names are Type.field, the Go declaration; a lock in a package under
+// ws/ is pkg.Type.field. A lock reached through a
 // named field of another type says so in the "how" column. Line numbers were
 // read at origin/dev f4a359e8 and are cites, not contracts. The table runs in
 // rank order, unranked rows last; the lock-rank invariant fails it otherwise.
@@ -61,9 +64,9 @@
 //	3 S   roleRefreshState.flushMu   role_refresh.go:71       DB reads, then roleRefreshState.mu, then Hub.mu,
 //	                                                          PubSub.mu, timeoutViewState.mu and Client.mu one
 //	                                                          at a time (role_refresh.go:24-30)
-//	3 S   hubSettings.uploadPolicyMu hub_settings.go:213      a DB read, then hubSettings.mu, then Hub.mu (R),
-//	                                                          then Client.mu (hub_settings.go:93-113)
-//	3 S   gameActivityState.mu       hub_settings.go:116      a DB read, then presenceFeedState.mu (the game activity
+//	3 S   hubSettings.uploadPolicyMu hub_settings.go:162      a DB read, then hubsettings.Cache.mu, then Hub.mu (R),
+//	                                                          then Client.mu (hub_settings.go:46-64)
+//	3 S   gameActivityState.mu       hub_settings.go:72       a DB read, then presenceFeedState.mu (the game activity
 //	      (hubSettings.gameActivity)                          sweep), Hub.mu (R), then Client.mu
 //	                                                          (hub_settings.go)
 //	3 S   Client.focusMu             client.go:86             Client.mu, PubSub.mu, DB reads (focus_defer.go:21,
@@ -82,8 +85,8 @@
 //	                                                          queueDropState.mu, and the leaves below
 //	6     hubVoice.keyHolderMu RW    hub_voice_state.go:29    Hub.mu (R), voiceSlot.voiceMu
 //	                                                          (voice_e2ee.go:44-60)
-//	6     hubSettings.mu RW          hub_settings.go:207      a DB read under the write lock
-//	                                                          (hub_settings.go:27-35); see the exceptions
+//	6     hubsettings.Cache.mu RW    hubsettings/cache.go:55  a DB read under the write lock
+//	      (hubSettings.cache)                                 (hubsettings/cache.go:104-123); see the exceptions
 //	7     Hub.mu RW                  hub.go:24                PubSub.mu, Client.mu, voiceSlot.voiceMu,
 //	                                                          voiceGraceState.mu (hub_registry.go:60-162,
 //	                                                          hub_stats.go:329-355, voice_e2ee.go:268-288)
@@ -111,11 +114,11 @@
 //
 // Locks of one rank are not ordered against each other, so the checker
 // forbids nesting any two of them, two instances of one lock included.
-// hubSettings.uploadPolicyMu (3) taking hubSettings.mu (6) is not such a pair.
+// hubSettings.uploadPolicyMu (3) taking hubsettings.Cache.mu (6) is not such a pair.
 //
 // # Known exceptions to the rule
 //
-//   - hubSettings.mu is held for writing across a DB read (hub_settings.go:27-35).
+//   - hubsettings.Cache.mu is held for writing across a DB read (hubsettings/cache.go:104-123).
 //     It is the one state lock that does I/O. The read is bounded by a context.
 //   - slog on a non-error path under a lock: Hub.seqMu and Hub.mu in registerNow
 //     (hub_registry.go:100), Client.mu on overflow (client.go:195,303), and
@@ -140,28 +143,20 @@
 
 package ws
 
-// Rank types, one per rank of the table. Each is the R of the
-// syncutil.Ranked[R] or RankedRW[R] that declares a lock of that rank; the
-// lock-rank invariant reads the literal each Rank method returns, so keep it
-// a literal.
-type (
-	lockRankVoiceMember struct{} // userLockEntry.mu of voiceRegistry.voiceMember
-	lockRankVoiceMod    struct{} // userLockEntry.mu of hubVoice.mod
-	lockRankSerialiser  struct{} // the rank-3 serialisers
-	lockRankFeed        struct{} // timeoutViewState.mu, presenceFeedState.mu
-	lockRankSeq         struct{} // Hub.seqMu
-	lockRankHubCache    struct{} // hubVoice.keyHolderMu, hubSettings.mu
-	lockRankHub         struct{} // Hub.mu
-	lockRankPubSub      struct{} // PubSub.mu
-	lockRankLeaf        struct{} // the leaves
-)
+import "github.com/J3vb/OwnCord/Server/ws/lockrank"
 
-func (lockRankVoiceMember) Rank() int { return 1 }
-func (lockRankVoiceMod) Rank() int    { return 2 }
-func (lockRankSerialiser) Rank() int  { return 3 }
-func (lockRankFeed) Rank() int        { return 4 }
-func (lockRankSeq) Rank() int         { return 5 }
-func (lockRankHubCache) Rank() int    { return 6 }
-func (lockRankHub) Rank() int         { return 7 }
-func (lockRankPubSub) Rank() int      { return 8 }
-func (lockRankLeaf) Rank() int        { return 9 }
+// Rank types, one per rank of the table, named for use inside ws. They are
+// aliases of ws/lockrank's, where the Rank methods live, so a subpackage of ws
+// can declare a ranked lock with the same type (lockrank.HubCache is
+// lockRankHubCache).
+type (
+	lockRankVoiceMember = lockrank.VoiceMember
+	lockRankVoiceMod    = lockrank.VoiceMod
+	lockRankSerialiser  = lockrank.Serialiser
+	lockRankFeed        = lockrank.Feed
+	lockRankSeq         = lockrank.Seq
+	lockRankHubCache    = lockrank.HubCache
+	lockRankHub         = lockrank.Hub
+	lockRankPubSub      = lockrank.PubSub
+	lockRankLeaf        = lockrank.Leaf
+)

@@ -2,8 +2,10 @@
 
 This page is the contract for the client's diagnostic event log: which events
 the app may record, which fields each event may carry, how much is kept, and
-what must never be in it. It is written before the recorder exists, so every
-piece that records an event later builds against the same rules.
+what must never be in it. Every piece that records an event builds against
+these rules, and the support bundle section says how it all leaves the device.
+A short guide to reading a saved bundle is in
+[Reading a client support bundle](#reading-a-client-support-bundle).
 
 The source of truth is the catalogue in
 [`Client/src/lib/diagnostics/eventCodes.ts`](../../Client/src/lib/diagnostics/eventCodes.ts).
@@ -11,9 +13,8 @@ The tables below copy it, and `eventCodes.test.ts` fails when they differ.
 
 ## Why it exists
 
-When a webcam freezes for a few seconds or a call drops, the support bundle
-today has free-text log lines and nothing that says what the camera, tracks and
-connections did, in order. The event log is a short, structured timeline of
+When a webcam freezes for a few seconds or a call drops, free-text log lines
+do not say what the camera, tracks and connections did, in order. The event log is a short, structured timeline of
 those facts. It goes into the existing support bundle
 ([Desktop client support bundle](diagnostics.md#desktop-client-support-bundle)),
 saved through the same **Export Support Bundle** button. There is no other way
@@ -308,6 +309,44 @@ twice across two starts.
 | Code             | Label                   | Fields                                 | Emitted by                        |
 | ---------------- | ----------------------- | -------------------------------------- | --------------------------------- |
 | `events.dropped` | Similar events left out | `dropped_code` (code)<br>`count` (int) | `src/lib/diagnostics/eventLog.ts` |
+
+## Reading a client support bundle
+
+A short order that finds most problems fast:
+
+1. **`manifest.json`**: the app version, when the bundle was made, and which
+   files were trimmed or left out to stay under 4 MB. A trimmed file lost its
+   oldest lines, never its newest.
+2. **`last-exit.json`**: how the newest earlier run ended. `outcome` is
+   `crash`, `exit` or `normal`; `kind`, `code` and `module` say how (a signal,
+   a Windows exception code with the faulting module, an Android exit reason).
+   `lastWebviewFailure` is the newest webview helper process that failed: a GPU
+   or video-capture process restart there explains a camera that froze and
+   came back.
+3. **`logs/events-*.jsonl`**: one event per line, `{"t": <ms since epoch>,
+"code": "...", ...fields}`, oldest first. Find the user's time of trouble
+   and read around it:
+   - a frozen webcam shows as `camera.stalled` then `camera.resumed` with
+     `gap_ms`; `quality_limitation`, `encoder` and `hardware_encoder` say
+     whether the encoder was starved (`cpu`, `bandwidth`) or the camera stopped
+     delivering frames;
+   - a dropped call shows as `voice.reconnecting` / `voice.reconnected`, or
+     `voice.disconnected` with a `reason`;
+   - a lost server connection shows as `ws.closed` with `close_code` and
+     `close_class`, then `ws.reconnect_scheduled` and `ws.ready`. Compare the
+     `generation` numbers: an event with an older generation than the live
+     one belongs to a connection that was already replaced;
+   - `events.dropped` means a code fired more than 30 times a minute; the
+     count says how many were left out.
+4. **`logs/owncord-client*.log`**: the native log. Search for `[crash]`,
+   `[exit]`, `[hang]` and `[resource]` lines near the same time (the native
+   log stamps UTC).
+5. **`logs/*.jsonl`** (the client log) and `voice-diagnostics.json` for the
+   detail behind an event.
+
+Pseudonyms (`u1`, `c2`) and device hashes are new for every bundle, so they
+match within one bundle only. `redactions.json` says how many values each rule
+removed; a `[redacted]`, `[email]`, `[ip]`, `[hex]`, `[jwt]` or `~` in a line is that rule at work, not a bug.
 
 ## Adding a code
 

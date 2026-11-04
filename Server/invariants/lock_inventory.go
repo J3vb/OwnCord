@@ -6,6 +6,7 @@ import (
 	"go/parser"
 	"go/token"
 	"io/fs"
+	"path"
 	"regexp"
 	"sort"
 	"strings"
@@ -19,11 +20,13 @@ const lockInventoryID = "lock-inventory"
 const (
 	lockInventoryDir   = "ws"
 	lockOrderFile      = "ws/lock_order.go"
+	lockRankDir        = "ws/lockrank"
 	syncutilImportPath = "github.com/J3vb/OwnCord/Server/syncutil"
+	lockRankImport     = "github.com/J3vb/OwnCord/Server/ws/lockrank"
 )
 
-// lockInventory requires every mutex declared in package ws to be named in
-// the rank table of ws/lock_order.go.
+// lockInventory requires every mutex declared in package ws, or in a package
+// under ws/, to be named in the rank table of ws/lock_order.go.
 //
 // lock_order.go is the one written lock order. Nothing checked that it listed
 // the locks that exist, so a new mutex (or a renamed one) joined the hub
@@ -37,7 +40,9 @@ const (
 // which syncutil-locks forbids in ws but which is still a lock if one slips
 // in). A field is named Type.field after the struct that declares it, so an
 // embedded state's lock is activityState.mu, not Hub.activity.mu; a package
-// var or local is named by its identifier (admissionMu).
+// var or local is named by its identifier (admissionMu). A lock declared in a
+// package under ws/ is prefixed with that package's name
+// (hubsettings.Cache.mu), so two packages can reuse a type name.
 //
 // Cross-file, so it uses Tree rather than Check. It has no
 // //invariant:allow escape: an exempt lock is a row ranked "-" with an
@@ -51,7 +56,7 @@ var lockInventory = Rule{
 // lockRowRE matches one table row of lock_order.go: a tab, a rank (a number or
 // -), an optional S serialiser mark, then the lock name. Continuation lines
 // are indented past the tab and never match.
-var lockRowRE = regexp.MustCompile(`^\t(\d+|-)(?: S)?\s+([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)?)(?:\s|$)`)
+var lockRowRE = regexp.MustCompile(`^\t(\d+|-)(?: S)?\s+([A-Za-z_]\w*(?:\.[A-Za-z_]\w*){0,2})(?:\s|$)`)
 
 // lockDecl is one lock found in the code.
 type lockDecl struct {
@@ -73,7 +78,7 @@ type lockRow struct {
 	text string // the whole row, for the unranked: check
 }
 
-// checkLockInventoryTree reads the non-test files of ws/ from fsys.
+// checkLockInventoryTree reads the non-test files of ws/ and its subpackages from fsys.
 func checkLockInventoryTree(fsys fs.FS) []Violation {
 	files, bad := readLockFiles(fsys, lockInventoryID)
 	if bad != nil {
@@ -82,26 +87,45 @@ func checkLockInventoryTree(fsys fs.FS) []Violation {
 	return checkLockInventory(files)
 }
 
-// readLockFiles reads the non-test files of ws/, keyed by slash path. A read
-// failure comes back as a violation of rule.
+// readLockFiles reads the non-test files of ws/ and every package under it
+// (testdata excluded), keyed by slash path. A read error is reported as a
+// violation of rule.
 func readLockFiles(fsys fs.FS, rule string) (map[string][]byte, []Violation) {
-	entries, err := fs.ReadDir(fsys, lockInventoryDir)
+	files := make(map[string][]byte)
+	err := fs.WalkDir(fsys, lockInventoryDir, func(p string, e fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if e.IsDir() {
+			if e.Name() == "testdata" {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(p, ".go") || strings.HasSuffix(p, "_test.go") {
+			return nil
+		}
+		src, err := fs.ReadFile(fsys, p)
+		if err != nil {
+			return err
+		}
+		files[p] = src
+		return nil
+	})
 	if err != nil {
 		return nil, []Violation{{Rule: rule, File: lockInventoryDir, Msg: "reading ws/: " + err.Error()}}
 	}
-	files := make(map[string][]byte)
-	for _, e := range entries {
-		n := e.Name()
-		if e.IsDir() || !strings.HasSuffix(n, ".go") || strings.HasSuffix(n, "_test.go") {
-			continue
-		}
-		src, err := fs.ReadFile(fsys, lockInventoryDir+"/"+n)
-		if err != nil {
-			return nil, []Violation{{Rule: rule, File: lockInventoryDir + "/" + n, Msg: err.Error()}}
-		}
-		files[lockInventoryDir+"/"+n] = src
-	}
 	return files, nil
+}
+
+// lockQualifier is the prefix a lock in file p carries: "" in ws itself, the
+// package name (its directory's) plus a dot in a package under ws/.
+func lockQualifier(p string) string {
+	dir := path.Dir(p)
+	if dir == lockInventoryDir {
+		return ""
+	}
+	return path.Base(dir) + "."
 }
 
 // checkLockInventory is the rule over in-memory sources keyed by slash path,
@@ -131,6 +155,7 @@ func checkLockInventory(files map[string][]byte) []Violation {
 		decls = append(decls, lockDecls(f, fset, p)...)
 	}
 
+	out = append(out, sharedPackageNames(paths)...)
 	if !sawTable {
 		return append(out, Violation{Rule: lockInventoryID, File: lockOrderFile,
 			Msg: lockOrderFile + " is missing; the lock-order table lives there"})
@@ -163,8 +188,31 @@ func checkLockInventory(files map[string][]byte) []Violation {
 			continue
 		}
 		out = append(out, Violation{Rule: lockInventoryID, File: lockOrderFile, Line: r.line,
-			Msg: fmt.Sprintf("stale row: no mutex named %s is declared in non-test files of ws/; "+
+			Msg: fmt.Sprintf("stale row: no mutex named %s is declared in non-test files of ws/ or its packages; "+
 				"delete the row, or fix its name if the lock was renamed (Type.field)", r.name)})
+	}
+	return out
+}
+
+// sharedPackageNames fails two directories under ws/ with the same base name:
+// their locks would share one pkg. prefix, so a row could stand for either.
+func sharedPackageNames(paths []string) []Violation {
+	var out []Violation
+	dirOf := make(map[string]string)
+	reported := make(map[string]bool)
+	for _, p := range paths {
+		dir := path.Dir(p)
+		if dir == lockInventoryDir || reported[dir] {
+			continue
+		}
+		base := path.Base(dir)
+		if prev, ok := dirOf[base]; ok && prev != dir {
+			out = append(out, Violation{Rule: lockInventoryID, File: p,
+				Msg: fmt.Sprintf("%s and %s are both named %s; lock names are prefixed with the package name, so rename one", prev, dir, base)})
+			reported[dir] = true
+			continue
+		}
+		dirOf[base] = dir
 	}
 	return out
 }
@@ -200,6 +248,8 @@ type lockScan struct {
 	rel    string
 	named  map[*ast.StructType]string
 	params map[*ast.StructType]map[string]bool // a generic struct's type parameters
+	qual   string                              // lockQualifier of the file
+	ranks  map[string]bool                     // local names bound to ws/lockrank
 	out    []lockDecl
 }
 
@@ -217,8 +267,9 @@ func lockDecls(f *ast.File, fset *token.FileSet, rel string) []lockDecl {
 	if len(names) == 0 {
 		return nil
 	}
+	rankNames, _ := importNames(f, lockRankImport)
 	s := &lockScan{names: names, fset: fset, rel: rel, named: make(map[*ast.StructType]string),
-		params: make(map[*ast.StructType]map[string]bool)}
+		params: make(map[*ast.StructType]map[string]bool), qual: lockQualifier(rel), ranks: rankNames}
 	ast.Inspect(f, func(n ast.Node) bool {
 		switch x := n.(type) {
 		case *ast.TypeSpec:
@@ -236,7 +287,7 @@ func lockDecls(f *ast.File, fset *token.FileSet, rel string) []lockDecl {
 }
 
 func (s *lockScan) add(name string, pos token.Pos) {
-	s.out = append(s.out, lockDecl{name: name, file: s.rel, line: s.fset.Position(pos).Line})
+	s.out = append(s.out, lockDecl{name: s.qual + name, file: s.rel, line: s.fset.Position(pos).Line})
 }
 
 // addTyped adds a lock and records the rank its type carries, if any. params
@@ -251,11 +302,24 @@ func (s *lockScan) addTyped(name string, pos token.Pos, typ ast.Expr, params map
 		if !ok || !s.isMutexSel(ix.X) {
 			return true
 		}
-		if id, ok := ix.Index.(*ast.Ident); ok {
-			d := &s.out[len(s.out)-1]
-			d.rank = id.Name
+		d := &s.out[len(s.out)-1]
+		switch id := ix.Index.(type) {
+		case *ast.Ident:
+			// In a package under ws/ a bare rank name is that package's own
+			// type, never ws's alias, so it is qualified and fails closed.
+			d.rank = s.qual + id.Name
 			if params[id.Name] {
-				d.generic = owner
+				d.rank = id.Name
+				d.generic = s.qual + owner
+			}
+		case *ast.SelectorExpr:
+			// A rank type from any package but ws/lockrank keeps its own
+			// name, which is never a rank type, so it fails closed too.
+			if x, ok := id.X.(*ast.Ident); ok {
+				d.rank = x.Name + "." + id.Sel.Name
+				if s.ranks[x.Name] {
+					d.rank = "lockrank." + id.Sel.Name
+				}
 			}
 		}
 		return false

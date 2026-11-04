@@ -147,6 +147,7 @@
 .ep-body {
   display: flex;
   height: 320px;
+  user-select: none;
 }
 .xp-panel .ep-body {
   flex: 1;
