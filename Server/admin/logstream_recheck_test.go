@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -154,7 +155,10 @@ func TestHandleLogStream_RevocationEndsLiveStreamWithinWindow(t *testing.T) {
 		header: make(http.Header),
 		onData: func(n int) {
 			if n == 1 {
-				_ = database.DeleteSession(context.Background(), tokenHash)
+				if err := database.DeleteSession(context.Background(), tokenHash); err != nil {
+					t.Errorf("DeleteSession: %v", err)
+					return
+				}
 				revokedAt = time.Now()
 			}
 			// Keep the stream busy: one more line every 50 ms.
@@ -205,5 +209,34 @@ func TestRingBuffer_SlowSubscriberGetsSkippedMarker(t *testing.T) {
 	}
 	if len(rb.Snapshot()) != 70 {
 		t.Fatalf("ring holds %d entries, want 70", len(rb.Snapshot()))
+	}
+}
+
+// A viewer that frees one slot at a time still gets real lines, not a run of
+// markers that each push out the line behind them.
+func TestRingBuffer_ViewerFreeingOneSlotStillGetsLines(t *testing.T) {
+	rb := NewRingBuffer(256)
+	ch, unsub := rb.Subscribe()
+	defer unsub()
+
+	for i := range 65 {
+		rb.Write(LogEntry{Level: "INFO", Message: "fill " + strconv.Itoa(i)})
+	}
+	var got []LogEntry
+	for i := range 10 {
+		got = append(got, <-ch)
+		rb.Write(LogEntry{Level: "INFO", Message: "live " + strconv.Itoa(i)})
+	}
+	for len(ch) > 0 {
+		got = append(got, <-ch)
+	}
+	live := 0
+	for _, e := range got {
+		if strings.HasPrefix(e.Message, "live ") {
+			live++
+		}
+	}
+	if live == 0 {
+		t.Fatalf("viewer freeing one slot at a time got no live lines: %+v", got[len(got)-10:])
 	}
 }

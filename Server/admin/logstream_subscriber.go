@@ -14,11 +14,13 @@ type logSubscriber struct {
 }
 
 // deliver hands entry to a viewer without ever blocking. When the viewer fell
-// behind, it first tries to queue a marker saying how many lines were skipped;
-// the marker goes only to this viewer, never into the ring or the history.
-// Callers hold rb.mu.
+// behind, it first queues a marker saying how many lines were skipped, but only
+// when the line itself also fits: a viewer that frees one slot at a time would
+// otherwise get nothing but markers. The marker goes only to this viewer, never
+// into the ring or the history. Callers hold rb.mu, and only Write sends, so
+// the free space read here can only grow before the sends.
 func (sub *logSubscriber) deliver(entry LogEntry) {
-	if sub.dropped > 0 {
+	if sub.dropped > 0 && cap(sub.ch)-len(sub.ch) >= 2 {
 		marker := LogEntry{
 			Timestamp: time.Now().Format(time.RFC3339Nano),
 			Level:     "WARN",
@@ -29,9 +31,6 @@ func (sub *logSubscriber) deliver(entry LogEntry) {
 		case sub.ch <- marker:
 			sub.dropped = 0
 		default:
-			// Still no room: this entry is skipped too.
-			sub.dropped++
-			return
 		}
 	}
 	select {
