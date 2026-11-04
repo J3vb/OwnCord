@@ -393,6 +393,15 @@ export function createSettingsOverlay(
     hit?.scrollIntoView?.({ block: "center" });
   }
 
+  /** On the side-by-side layout the open page follows the filter, so hits
+   *  highlight as you type; unsaved edits keep their tab. */
+  function followFilter(): void {
+    const first = visibleTabs()[0];
+    if (first === undefined || tabButtons.get(activeTab)?.hidden !== true) return;
+    if (pagedLayout() || dirtyCheck?.() === true) return;
+    setActiveTab(first);
+  }
+
   /** Hide the tabs (and headings) the query rules out; show the rest. */
   function applySearch(): void {
     let any = false;
@@ -409,18 +418,8 @@ export function createSettingsOverlay(
     }
     if (searchEmpty !== null) searchEmpty.hidden = any;
     if (searchClear !== null) searchClear.hidden = searchInput?.value === "";
-    // On the side-by-side layout the open page follows the filter, so hits
-    // highlight as you type; unsaved edits keep their tab.
+    followFilter();
     const shown = visibleTabs();
-    const first = shown[0];
-    if (
-      tabButtons.get(activeTab)?.hidden === true &&
-      first !== undefined &&
-      !pagedLayout() &&
-      dirtyCheck?.() !== true
-    ) {
-      setActiveTab(first);
-    }
     // Keep one tab in the page Tab order when the open one was filtered out.
     const stop = tabButtons.get(activeTab)?.hidden === false ? activeTab : shown[0];
     for (const [name, btn] of tabButtons) btn.setAttribute("tabindex", name === stop ? "0" : "-1");
