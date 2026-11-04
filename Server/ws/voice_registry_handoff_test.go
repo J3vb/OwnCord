@@ -159,7 +159,7 @@ func TestVoiceRegistry_TransferMovesMembershipOnlyOnCompletedResume(t *testing.T
 func waitForWaiters(t *testing.T, h *Hub, userID int64, n int) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
-	for h.voiceReg.voiceMember.refsForTest(userID) < n {
+	for h.voiceHub.reg.voiceMember.refsForTest(userID) < n {
 		if time.Now().After(deadline) {
 			t.Fatalf("lock for user %d never reached %d holders/waiters", userID, n)
 		}
@@ -170,7 +170,7 @@ func waitForWaiters(t *testing.T, h *Hub, userID int64, n int) {
 func waitForNoWaiters(t *testing.T, h *Hub, userID int64) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
-	for h.voiceReg.voiceMember.refsForTest(userID) > 0 {
+	for h.voiceHub.reg.voiceMember.refsForTest(userID) > 0 {
 		if time.Now().After(deadline) {
 			t.Fatalf("lock for user %d still held", userID)
 		}
@@ -247,12 +247,12 @@ func TestVoiceRegistry_CloseStopsGraceTimers(t *testing.T) {
 		t.Fatal("a completed membership was not parked")
 	}
 	txn.end()
-	if !f.h.voiceReg.voiceGrace.has(f.uid, f.chID) {
+	if !f.h.voiceHub.reg.voiceGrace.has(f.uid, f.chID) {
 		t.Fatal("precondition: no grace entry after park")
 	}
 
 	f.h.GracefulStopContext(canceledContext(), RestartReasonShutdown)
-	if f.h.voiceReg.voiceGrace.get(f.uid) != nil {
+	if f.h.voiceHub.reg.voiceGrace.get(f.uid) != nil {
 		t.Error("shutdown left a grace entry")
 	}
 
@@ -269,7 +269,7 @@ func TestVoiceRegistry_CloseStopsGraceTimers(t *testing.T) {
 	if ch := f.c.voice.channel(); ch != 0 {
 		t.Errorf("late park left the slot in channel %d", ch)
 	}
-	if f.h.voiceReg.voiceGrace.get(f.uid) != nil {
+	if f.h.voiceHub.reg.voiceGrace.get(f.uid) != nil {
 		t.Error("late park armed a grace entry")
 	}
 
@@ -287,7 +287,7 @@ func TestVoiceRegistry_CloseStopsGraceTimers(t *testing.T) {
 		if !handled || snap.chID != f.chID {
 			t.Errorf("late park (kicked=%v) = (%+v, %v), want handled", kicked, snap, handled)
 		}
-		if f.h.voiceReg.voiceGrace.get(f.uid) != nil {
+		if f.h.voiceHub.reg.voiceGrace.get(f.uid) != nil {
 			t.Errorf("late park (kicked=%v) armed a grace entry", kicked)
 		}
 	}
@@ -338,7 +338,7 @@ func TestVoiceRegistry_CloseWaitsForInFlightExpiry(t *testing.T) {
 	}
 	closed := make(chan struct{})
 	go func() {
-		f.h.voiceReg.voiceGrace.close()
+		f.h.voiceHub.reg.voiceGrace.close()
 		close(closed)
 	}()
 	select {

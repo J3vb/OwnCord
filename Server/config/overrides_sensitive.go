@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/J3vb/OwnCord/Server/clientip"
 )
 
 // secretKeys is the exact set of panel-editable keys whose value is write-only:
@@ -241,16 +243,14 @@ func liveKitBinaryRule(v any) (any, error) {
 	return s, nil
 }
 
-// checkTrustedProxy rejects the default route: trusting 0.0.0.0/0 (or ::/0)
+// checkTrustedProxy rejects an entry that covers every address: trusting it
 // lets any client forge X-Forwarded-For past the perimeter and rate limits.
 func checkTrustedProxy(s string) error {
 	if err := checkCIDR(s); err != nil {
 		return err
 	}
-	if _, n, err := net.ParseCIDR(s); err == nil {
-		if ones, _ := n.Mask.Size(); ones == 0 {
-			return fmt.Errorf("entry %q must not trust every address", s)
-		}
+	if _, found := clientip.FirstCatchAll([]string{s}); found {
+		return fmt.Errorf("entry %q must not trust every address", s)
 	}
 	return nil
 }

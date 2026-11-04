@@ -23,7 +23,7 @@
  * disconnect/send/onServerBusy are added.
  */
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import * as voiceSession from "../helpers/voiceSessionMock";
+import * as mocks from "../helpers/mainMocks";
 
 /** Everything the session teardown does, in the order it did it. */
 const { events, wsClients } = vi.hoisted(() => ({
@@ -34,36 +34,14 @@ const { events, wsClients } = vi.hoisted(() => ({
   }>,
 }));
 
-// ---------------------------------------------------------------------------
-// Tauri API mocks — reuse the ws-mocks.ts event-registry helper so ws.ts's
-// real state machine can be driven with simulated Tauri events (same
-// mechanism ws-lifecycle.test.ts uses), and so the tray's "status-change"
-// listen() call registered by main.ts is capturable via the same
-// emitTauriEvent().
-// ---------------------------------------------------------------------------
-vi.mock("@tauri-apps/api/core", async () => ({
-  invoke: (await import("./helpers/ws-mocks")).mockInvoke,
-}));
-vi.mock("@tauri-apps/api/event", async () => ({
-  listen: (await import("./helpers/ws-mocks")).mockListen,
-}));
-const { mockOnOpenUrl } = vi.hoisted(() => ({
-  mockOnOpenUrl: vi.fn().mockResolvedValue(undefined),
-}));
-
-// CSS imports are handled natively by vite/vitest — no mock needed.
-
-vi.mock("@lib/prefs/appearance", () => ({ applyStoredAppearance: vi.fn() }));
-vi.mock("@lib/net/connectionDiagnostics", () => ({ configureConnectionDiagnostics: vi.fn() }));
-vi.mock("@pages/mainPagePrefetch", () => ({ prefetchMainPage: vi.fn() }));
-vi.mock("@lib/pendingMessages", () => ({ deactivatePendingMessages: vi.fn() }));
-vi.mock("../../src/platform/desktop/pushToTalk", () => ({
-  pushToTalk: { init: vi.fn().mockResolvedValue(undefined) },
-}));
-vi.mock("@lib/logPersistence", () => ({
-  initLogPersistence: vi.fn().mockResolvedValue(undefined),
-  flushLogs: vi.fn().mockResolvedValue(undefined),
-}));
+vi.mock("@tauri-apps/api/core", () => mocks.apiCoreMock());
+vi.mock("@tauri-apps/api/event", () => mocks.apiEventMock());
+vi.mock("@lib/prefs/appearance", () => mocks.prefsAppearanceMock());
+vi.mock("@lib/net/connectionDiagnostics", () => mocks.netConnectionDiagnosticsMock());
+vi.mock("@pages/mainPagePrefetch", () => mocks.pagesMainPagePrefetchMock());
+vi.mock("@lib/pendingMessages", () => mocks.pendingMessagesMock());
+vi.mock("../../src/platform/desktop/pushToTalk", () => mocks.desktopPushToTalkMock());
+vi.mock("@lib/logPersistence", () => mocks.logPersistenceMock());
 vi.mock("@lib/net/credentials", () => ({
   saveCredential: vi.fn().mockResolvedValue(true),
   loadCredential: vi.fn().mockResolvedValue(null),
@@ -73,140 +51,28 @@ vi.mock("@lib/net/credentials", () => ({
   }),
   createUserUpdateCredentialSaver: vi.fn(() => vi.fn()),
 }));
-vi.mock("@lib/prefs/windowState", () => ({
-  initWindowState: vi.fn().mockResolvedValue(undefined),
-}));
-vi.mock("@tauri-apps/plugin-deep-link", () => ({
-  register: vi.fn().mockResolvedValue(undefined),
-  getCurrent: vi.fn().mockResolvedValue(null),
-  onOpenUrl: (...args: unknown[]) => mockOnOpenUrl(...args),
-}));
-// The Reload recovery leaves a call through this lazily imported module.
-const { mockLeaveVoice } = vi.hoisted(() => ({
-  mockLeaveVoice: vi.fn((..._args: unknown[]): Promise<void> => Promise.resolve()),
-}));
-vi.mock("@lib/voice/livekitSession", () =>
-  voiceSession.withOverrides({
-    leaveVoice: (...args: unknown[]) => mockLeaveVoice(...args),
-  }),
-);
-vi.mock("@lib/nav/messageNavigation", () => ({ jumpToMessage: vi.fn() }));
-vi.mock("@components/CertMismatchModal", () => ({
-  createCertMismatchModal: vi.fn(() => ({ mount: vi.fn(), destroy: vi.fn() })),
-  createCertFirstUseModal: vi.fn(() => ({ mount: vi.fn(), destroy: vi.fn() })),
-}));
-vi.mock("@lib/net/certReconnect", () => ({ reconnectAfterCertAccept: vi.fn() }));
-const mockProfileManager = vi.hoisted(() => ({
-  loadProfiles: vi.fn().mockResolvedValue(undefined),
-  saveProfiles: vi.fn().mockResolvedValue(undefined),
-  getAll: vi.fn((): { id: string; name: string; host: string }[] => []),
-  addProfile: vi.fn((data: unknown) => ({ id: "profile-1", ...(data as object) })),
-  updateProfile: vi.fn(() => null),
-  removeProfile: vi.fn(() => true),
-  getAutoConnectProfile: vi.fn(() => null),
-  setAutoLogin: vi.fn(),
-  setLastConnected: vi.fn(),
-}));
+vi.mock("@lib/prefs/windowState", () => mocks.prefsWindowStateMock());
+vi.mock("@tauri-apps/plugin-deep-link", () => mocks.deepLinkMock());
+vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
+vi.mock("@lib/nav/messageNavigation", () => mocks.navMessageNavigationMock());
+vi.mock("@components/CertMismatchModal", () => mocks.certMismatchModalMock());
+vi.mock("@lib/net/certReconnect", () => mocks.netCertReconnectMock());
+vi.mock("@lib/presence/profiles", (importOriginal) => mocks.presenceProfilesMock(importOriginal));
 
-vi.mock("@lib/presence/profiles", async (importOriginal) => ({
-  deriveCompatibility: (await importOriginal<typeof import("@lib/presence/profiles")>())
-    .deriveCompatibility,
-  createTauriBackend: vi.fn(() => ({})),
-  createProfileManager: vi.fn(() => mockProfileManager),
-}));
+const { mockLeaveVoice } = mocks;
 
 // api.ts — only login() is exercised (it drives wirePostAuth); the rest of the
 // real client stays, so getConfig()/setConfig() track the host the logout
 // subscriber reads when it deletes the stored credential.
-const mockLogin = vi.fn();
+const { mockLogin, capturedConnectCallbacks } = mocks;
 // The updater is Tauri-backed; stub it so nothing invokes into the void.
-vi.mock("@lib/net/updater", () => ({
-  checkForUpdate: vi.fn(),
-  downloadAndInstallUpdate: vi.fn(),
-  subscribeToUpdateInstall: vi.fn((listener: (state: { status: "idle" }) => void) => {
-    listener({ status: "idle" });
-    return vi.fn();
-  }),
-}));
-vi.mock("@lib/api", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@lib/api")>();
-  return {
-    ...actual,
-    createApiClient: vi.fn(() => {
-      const api = actual.createApiClient({ host: "" });
-      return {
-        ...api,
-        login: (...args: unknown[]) => mockLogin(...args),
-        getHealth: vi.fn(() => Promise.resolve({ version: null, online_users: null })),
-        getServerInfo: vi.fn(() =>
-          Promise.resolve({
-            name: "Test Server",
-            protocol_epoch: 1,
-            browser_client_enabled: false,
-          }),
-        ),
-      };
-    }),
-  };
-});
+vi.mock("@lib/net/updater", () => mocks.netUpdaterMock());
+vi.mock("@lib/api", (importOriginal) => mocks.apiMock(importOriginal));
+vi.mock("@pages/ConnectPage", () => mocks.pagesConnectPageMock());
 
-// ConnectPage — captures the real onLogin callback main.ts wires up so the
-// test can drive wirePostAuth exactly the way a real login does, without
-// building the actual login form DOM.
-const capturedConnectCallbacks: {
-  onLogin?: (host: string, username: string, password: string) => Promise<void>;
-  onRegister?: (
-    host: string,
-    username: string,
-    password: string,
-    inviteCode: string,
-  ) => Promise<void>;
-  onRecover?: (
-    host: string,
-    username: string,
-    secret: string,
-    newPassword: string,
-  ) => Promise<void>;
-  onTotpSubmit?: (code: string) => Promise<void>;
-  getRegistrationMode?: (host: string) => string | null;
-  getRetentionNotice?: (host: string) => string | null;
-  onHostSettled?: (host: string) => void;
-  onDeleteProfile?: (profileId: string) => void;
-  onToggleAutoLogin?: (profileId: string, enabled: boolean) => void;
-  onAutoLoginCancel?: () => void;
-} = {};
-vi.mock("@pages/ConnectPage", () => ({
-  createConnectPage: vi.fn((callbacks: typeof capturedConnectCallbacks) => {
-    Object.assign(capturedConnectCallbacks, callbacks);
-    return {
-      mount: vi.fn(),
-      destroy: vi.fn(),
-      showTotp: vi.fn(),
-      showConnecting: vi.fn(),
-      showAutoConnecting: vi.fn(),
-      showError: vi.fn(),
-      showNotice: vi.fn(),
-      resetToIdle: vi.fn(),
-      updateHealthStatus: vi.fn(),
-      updateCompatibility: vi.fn(),
-      showIncompatible: vi.fn(),
-      getRememberPassword: vi.fn(() => false),
-      getAutoConnect: vi.fn(() => false),
-      getPassword: vi.fn(() => ""),
-      refreshProfiles: vi.fn(),
-      selectServer: vi.fn(),
-      applyInviteLink: vi.fn(),
-    };
-  }),
-}));
-
-// MainPage.ts pulls in the whole chat/voice UI stack. These tests need a real
-// "connect" -> "main" -> "connect" round trip through the router (the router only
-// navigates to "main" from the connected overlay's onReady callback), but do
-// not care what MainPage renders, so stand in with a lightweight shape.
-vi.mock("@pages/MainPage", () => ({
-  createMainPage: vi.fn(() => ({ mount: vi.fn(), destroy: vi.fn() })),
-}));
+// MainPage.ts pulls in the whole chat/voice UI stack; these tests only need a
+// lightweight stand-in so the router can round-trip "connect" -> "main" -> "connect".
+vi.mock("@pages/MainPage", () => mocks.pagesMainPageMock());
 
 // dispatcher.ts pulls in nearly every store/service in the app. Stand in
 // with a slim replacement that reproduces the one behavior these tests must

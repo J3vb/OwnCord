@@ -50,6 +50,10 @@ type broadcastMsg struct {
 	presence         map[int64]pendingPresence
 	droppable        bool
 	presenceSnapshot bool
+	// members are the entries msg was built from when it is a member_update or a
+	// member_update_batch, so an erased member costs only its own entry
+	// (memberUpdatesWithoutErased).
+	members []memberUpdatePayload
 }
 
 // BroadcastToChannel enqueues msg for clients subscribed to channelID (0 means
@@ -141,6 +145,7 @@ func (h *Hub) BroadcastChannelUpdate(ch *db.Channel) {
 // the channel's content still waiting on its gate, so a client never sees a
 // message for a channel it already removed.
 func (h *Hub) BroadcastChannelDelete(channelID int64) {
+	h.forgetChannelAudience(channelID)
 	h.enqueue(broadcastMsg{msg: buildChannelDelete(channelID), laneChannelID: channelID}, "global message")
 }
 
@@ -278,6 +283,7 @@ func (h *Hub) SendToUserLow(userID int64, msg []byte) bool {
 func (h *Hub) sendSequencedToUsers(channelID int64, userIDs []int64, msg []byte) {
 	// The replay copy's JSON work happens before the lock.
 	rs := newReplaySplice(msg)
+	contentBearing := contentBearingKinds[extractEventType(msg)]
 	h.seqMu.Lock()
 	start := time.Now()
 	defer h.seqMu.Unlock()
@@ -289,7 +295,7 @@ func (h *Hub) sendSequencedToUsers(channelID int64, userIDs []int64, msg []byte)
 	seq := h.nextSeq()
 	wrapped := wrapWithSeq(msg, seq)
 	stored := storedCopy(rs, msg, wrapped, seq)
-	h.replayBuf.Push(seq, channelID, stored)
+	h.replayBuf.pushEntry(seq, channelID, contentBearing, stored)
 	h.persistEvent(seq, channelID, stored)
 
 	for _, userID := range userIDs {
@@ -307,8 +313,10 @@ func (h *Hub) deliverGated(bm broadcastMsg, g gateResult) {
 	// The replay copy's JSON work happens before seqMu. A presence window builds its
 	// frame under the lock and carries no reply snippet, so has nothing to precompute.
 	var rs *replaySplice
+	contentBearing := false
 	if bm.presence == nil {
 		rs = newReplaySplice(bm.msg)
+		contentBearing = contentBearingKinds[extractEventType(bm.msg)]
 	}
 
 	// The channel-broadcast debug log is emitted after seqMu is released so a slow
@@ -337,6 +345,13 @@ func (h *Hub) deliverGated(bm broadcastMsg, g gateResult) {
 			}
 		}
 
+		if bm.members != nil {
+			bm.msg = h.memberUpdatesWithoutErased(bm.members, bm.msg)
+			if bm.msg == nil {
+				return 0, 0, false, nil
+			}
+		}
+
 		// A frame naming an erased user, produced by a request that read its rows before
 		// the erasure and reached the hub after the purge, must not be sequenced.
 		if h.dropsForTombstones(bm.msg) {
@@ -353,13 +368,13 @@ func (h *Hub) deliverGated(bm broadcastMsg, g gateResult) {
 		}
 
 		stored := storedCopy(rs, bm.msg, msg, seq)
-		h.replayBuf.Push(seq, bm.channelID, stored)
+		h.replayBuf.pushEntry(seq, bm.channelID, contentBearing, stored)
 		h.persistEvent(seq, bm.channelID, stored)
 
 		// Plugin fan-out is captured here and called after seqMu is released, on this same
 		// dispatch goroutine, so sink order equals seq order. A plugin has no NSFW
 		// acknowledgement, so a labelled channel's content never reaches the sink.
-		if h.pluginSink.Load() != nil && !labelled {
+		if h.events.pluginSink.Load() != nil && !labelled {
 			pluginMsg = msg
 		}
 

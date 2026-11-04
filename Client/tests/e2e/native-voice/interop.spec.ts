@@ -99,6 +99,21 @@ function joinToken(identity: string): string {
 
 type NativeLine = { event: Record<string, unknown> & { type: string } };
 
+/** The command line every native peer in these tests starts from. */
+function nativePeerArgs(url: string, key: string, secs: number, ...extra: string[]): string[] {
+  return [
+    "--url",
+    url,
+    "--token",
+    joinToken("user-2"),
+    "--key",
+    key,
+    "--secs",
+    String(secs),
+    ...extra,
+  ];
+}
+
 /** Run the native peer to completion and return its JSON lines. */
 function runNativePeer(
   args: string[],
@@ -150,7 +165,8 @@ test.beforeAll(async () => {
   await waitForHttp(`http://127.0.0.1:${livekitPort}`, livekit);
 });
 
-test.beforeEach(({}, testInfo) => {
+test.beforeEach(() => {
+  const testInfo = test.info();
   room = `native-interop-${testInfo.testId}-${testInfo.retry}`;
 });
 
@@ -432,16 +448,62 @@ async function resetBrowserMeters(page: import("@playwright/test").Page) {
   });
 }
 
-test("native and browser peers decode each other's audio with the same key", async ({ page }) => {
+/** `runNativePeer`, with every event the peer reports collected in `events`. */
+function runCollectingPeer(args: string[]) {
+  const events: NativeLine["event"][] = [];
+  const peer = runNativePeer(args, ({ event }) => {
+    events.push(event);
+  });
+  return { peer, events };
+}
+
+/** Joins the browser peer as user-1 under a fresh key; returns the room's key and URL. */
+async function joinRoom(
+  page: import("@playwright/test").Page,
+  video = false,
+  videoCodec?: "vp9",
+): Promise<{ key: string; url: string }> {
   const key = randomBytes(32).toString("base64");
   const url = `ws://127.0.0.1:${livekitPort}`;
-  await joinBrowserPeer(page, url, joinToken("user-1"), key);
+  await joinBrowserPeer(page, url, joinToken("user-1"), key, video, videoCodec);
+  return { key, url };
+}
+
+async function waitForVideoSubscribed(
+  page: import("@playwright/test").Page,
+  identity: string,
+): Promise<void> {
+  await expect
+    .poll(async () => (await readBrowserPeer(page, identity)).videoSubscribed, {
+      timeout: 60_000,
+    })
+    .toBe(true);
+}
+
+/** Frames decoded in each of `seconds` consecutive one-second windows. */
+async function sampleFramesPerSecond(
+  page: import("@playwright/test").Page,
+  identity: string,
+  seconds = 8,
+): Promise<number[]> {
+  const perSecond: number[] = [];
+  for (let i = 0; i < seconds; i++) {
+    await resetBrowserMeters(page);
+    await page.waitForTimeout(1_000);
+    perSecond.push((await readBrowserPeer(page, identity)).videoFrames);
+  }
+  return perSecond;
+}
+
+test("native and browser peers decode each other's audio with the same key", async ({ page }) => {
+  const { key, url } = await joinRoom(page);
 
   const nativeAudio: Array<{ identity: string; rms: number; frames: number }> = [];
   const encryption: Array<{ identity: string; encrypted: boolean }> = [];
   const threads: Array<{ phase: string; count: number }> = [];
   const devices: Array<{ ok: boolean; detail: string }> = [];
   const playout: number[] = [];
+  const codecs: Array<{ identity: string; fmtp: string }> = [];
   const peer = runNativePeer(
     [
       "--url",
@@ -469,6 +531,8 @@ test("native and browser peers decode each other's audio with the same key", asy
       if (event.type === "devices")
         devices.push(event as unknown as { ok: boolean; detail: string });
       if (event.type === "playout") playout.push((event as unknown as { rms: number }).rms);
+      if (event.type === "audioCodec")
+        codecs.push(event as unknown as { identity: string; fmtp: string });
     },
   );
 
@@ -491,6 +555,10 @@ test("native and browser peers decode each other's audio with the same key", asy
   const fromBrowser = nativeAudio.filter((a) => a.identity === "user-1");
   expect(fromBrowser.length).toBeGreaterThan(0);
   expect(Math.max(...fromBrowser.map((a) => a.rms))).toBeGreaterThan(100);
+  // The native side receives on its own subscriber connection, whose answer
+  // must still ask for stereo Opus, or a stereo screen share's audio would
+  // decode downmixed on Linux.
+  expect(codecs.find((c) => c.identity === "user-1")?.fmtp).toContain("stereo=1");
   // 3. The SDK reports the browser peer's frames as encrypted.
   expect(encryption).toContainEqual({
     type: "encryptionStatus",
@@ -533,31 +601,26 @@ test("native and browser peers decode each other's audio with the same key", asy
 });
 
 test("a native peer with the wrong key hears silence and is heard as silence", async ({ page }) => {
-  const key = randomBytes(32).toString("base64");
+  const { url } = await joinRoom(page);
   const wrongKey = randomBytes(32).toString("base64");
-  const url = `ws://127.0.0.1:${livekitPort}`;
-  await joinBrowserPeer(page, url, joinToken("user-1"), key);
 
   const nativeAudio: Array<{ identity: string; rms: number; at: number }> = [];
   // Every peer event with its arrival time, so a run with no settled audio
   // says whether the meter never started, starved, or the peer left early.
   const timeline: Array<{ type: unknown; identity?: unknown; frames?: unknown; at: number }> = [];
-  const peer = runNativePeer(
-    ["--url", url, "--token", joinToken("user-2"), "--key", wrongKey, "--secs", "12"],
-    ({ event }) => {
-      timeline.push({
-        type: event.type,
-        identity: event.identity,
-        frames: event.frames,
+  const peer = runNativePeer(nativePeerArgs(url, wrongKey, 12), ({ event }) => {
+    timeline.push({
+      type: event.type,
+      identity: event.identity,
+      frames: event.frames,
+      at: Date.now(),
+    });
+    if (event.type === "audio")
+      nativeAudio.push({
+        ...(event as unknown as { identity: string; rms: number }),
         at: Date.now(),
       });
-      if (event.type === "audio")
-        nativeAudio.push({
-          ...(event as unknown as { identity: string; rms: number }),
-          at: Date.now(),
-        });
-    },
-  );
+  });
   await expect
     .poll(async () => (await readBrowserPeer(page, "user-2")).subscribed, { timeout: 60_000 })
     .toContain("user-2");
@@ -598,9 +661,7 @@ test("a native peer with the wrong key hears silence and is heard as silence", a
 type NativeVideo = { identity: string; frames: number; width: number; height: number; at: number };
 
 test("native and browser peers decode each other's video with the same key", async ({ page }) => {
-  const key = randomBytes(32).toString("base64");
-  const url = `ws://127.0.0.1:${livekitPort}`;
-  await joinBrowserPeer(page, url, joinToken("user-1"), key, true);
+  const { key, url } = await joinRoom(page, true);
 
   const nativeVideo: NativeVideo[] = [];
   const socket: Array<Record<string, unknown>> = [];
@@ -609,24 +670,19 @@ test("native and browser peers decode each other's video with the same key", asy
   const threads: Array<{ phase: string; count: number }> = [];
   // Every peer event with its arrival time, so a run where the native side
   // decodes nothing says whether its watch never opened or opened and starved.
-  const timeline: Array<{ type: unknown; at: number }> = [];
+  const timeline: Array<{ type: unknown; detail: string; at: number }> = [];
   const peer = runNativePeer(
-    [
-      "--url",
-      url,
-      "--token",
-      joinToken("user-2"),
-      "--key",
-      key,
-      "--secs",
-      "16",
-      "--video",
-      "640x360",
-      "--camera-cycles",
-      "5",
-    ],
+    nativePeerArgs(url, key, 16, "--video", "640x360", "--camera-cycles", "5"),
     ({ event }) => {
-      timeline.push({ type: event.type, at: Date.now() });
+      // The receiver's counters and the per-peer encryption state say where a
+      // starved video stops: no packets, no whole frame, no decode, or
+      // decoded frames that never reach the track.
+      const detail = ["videoStats", "encryptionStatus", "videoWatchEnd"].includes(
+        String(event.type),
+      )
+        ? JSON.stringify(event)
+        : "";
+      timeline.push({ type: event.type, detail, at: Date.now() });
       if (event.type === "threads")
         threads.push(event as unknown as { phase: string; count: number });
       if (event.type === "video")
@@ -636,9 +692,7 @@ test("native and browser peers decode each other's video with the same key", asy
       if (event.type === "closed") closed = event;
     },
   );
-  await expect
-    .poll(async () => (await readBrowserPeer(page, "user-2")).videoSubscribed, { timeout: 60_000 })
-    .toBe(true);
+  await waitForVideoSubscribed(page, "user-2");
   // Same reason as the screen-share test below: `videoSubscribed` fires on the
   // first publish, before the five camera stop/start cycles land, so measure
   // from the peer's settled `camera-after` phase, not from subscription.
@@ -668,7 +722,7 @@ test("native and browser peers decode each other's video with the same key", asy
   const fromBrowser = nativeVideo.filter((v) => v.identity === "user-1" && v.at >= settledAt);
   const perSecond = fromBrowser.map((v) => v.frames);
   console.log(`native decoded browser video, frames/s after settle: ${perSecond.join(",")}`);
-  const seen = timeline.map((e) => `${String(e.type)}@${e.at - settledAt}ms`).join(" ");
+  const seen = timeline.map((e) => `${String(e.type)}${e.detail}@${e.at - settledAt}ms`).join(" ");
   expect(fromBrowser.length, `native peer events relative to settle: ${seen}`).toBeGreaterThan(0);
   expect(Math.max(...perSecond)).toBeGreaterThan(10);
   expect(fromBrowser.at(-1)!.width).toBeGreaterThan(0);
@@ -700,32 +754,11 @@ test("a simulcast native camera keeps decoding in the browser", async ({ page })
   // The app publishes its camera simulcast at every quality but "source",
   // 1280x720 for the default "high" preset (screenShare.ts), unlike the
   // 640x360 single-layer camera above.
-  const key = randomBytes(32).toString("base64");
-  const url = `ws://127.0.0.1:${livekitPort}`;
-  await joinBrowserPeer(page, url, joinToken("user-1"), key);
-  const peer = runNativePeer([
-    "--url",
-    url,
-    "--token",
-    joinToken("user-2"),
-    "--key",
-    key,
-    "--secs",
-    "20",
-    "--video",
-    "1280x720",
-    "--simulcast",
-  ]);
-  await expect
-    .poll(async () => (await readBrowserPeer(page, "user-2")).videoSubscribed, { timeout: 60_000 })
-    .toBe(true);
+  const { key, url } = await joinRoom(page);
+  const peer = runNativePeer(nativePeerArgs(url, key, 20, "--video", "1280x720", "--simulcast"));
+  await waitForVideoSubscribed(page, "user-2");
   await page.waitForTimeout(4_000);
-  const perSecond: number[] = [];
-  for (let i = 0; i < 8; i++) {
-    await resetBrowserMeters(page);
-    await page.waitForTimeout(1_000);
-    perSecond.push((await readBrowserPeer(page, "user-2")).videoFrames);
-  }
+  const perSecond = await sampleFramesPerSecond(page, "user-2");
   const browser = await readBrowserPeer(page, "user-2");
   await peer.done;
   console.log(
@@ -770,9 +803,7 @@ test("a native H.264 camera decodes in the browser with the same key", async ({ 
   try {
     const context = await browser.newContext({ permissions: ["microphone", "camera"] });
     const page = await context.newPage();
-    const key = randomBytes(32).toString("base64");
-    const url = `ws://127.0.0.1:${livekitPort}`;
-    await joinBrowserPeer(page, url, joinToken("user-1"), key);
+    const { key, url } = await joinRoom(page);
     const browserH264 = await page.evaluate(
       () =>
         RTCRtpReceiver.getCapabilities("video")?.codecs.some(
@@ -781,33 +812,12 @@ test("a native H.264 camera decodes in the browser with the same key", async ({ 
     );
     if (process.env.CI) expect(browserH264, "Google Chrome cannot decode H.264").toBe(true);
     else test.skip(!browserH264, "this browser cannot decode H.264");
-    const peer = runNativePeer([
-      "--url",
-      url,
-      "--token",
-      joinToken("user-2"),
-      "--key",
-      key,
-      "--secs",
-      "20",
-      "--video",
-      "1280x720",
-      "--simulcast",
-      "--codec",
-      "h264",
-    ]);
-    await expect
-      .poll(async () => (await readBrowserPeer(page, "user-2")).videoSubscribed, {
-        timeout: 60_000,
-      })
-      .toBe(true);
+    const peer = runNativePeer(
+      nativePeerArgs(url, key, 20, "--video", "1280x720", "--simulcast", "--codec", "h264"),
+    );
+    await waitForVideoSubscribed(page, "user-2");
     await page.waitForTimeout(4_000);
-    const perSecond: number[] = [];
-    for (let i = 0; i < 8; i++) {
-      await resetBrowserMeters(page);
-      await page.waitForTimeout(1_000);
-      perSecond.push((await readBrowserPeer(page, "user-2")).videoFrames);
-    }
+    const perSecond = await sampleFramesPerSecond(page, "user-2");
     const seen = await readBrowserPeer(page, "user-2");
     await peer.done;
     console.log(
@@ -840,19 +850,14 @@ async function gateNativeVp9Decode(): Promise<void> {
 
 test("a browser VP9 camera decodes natively with the same key", async ({ page }) => {
   await gateNativeVp9Decode();
-  const key = randomBytes(32).toString("base64");
-  const url = `ws://127.0.0.1:${livekitPort}`;
-  await joinBrowserPeer(page, url, joinToken("user-1"), key, true, "vp9");
+  const { key, url } = await joinRoom(page, true, "vp9");
   await expectBrowserVp9(page);
 
   const nativeVideo: NativeVideo[] = [];
-  const peer = runNativePeer(
-    ["--url", url, "--token", joinToken("user-2"), "--key", key, "--secs", "16"],
-    ({ event }) => {
-      if (event.type === "video")
-        nativeVideo.push({ ...(event as unknown as NativeVideo), at: Date.now() });
-    },
-  );
+  const peer = runNativePeer(nativePeerArgs(url, key, 16), ({ event }) => {
+    if (event.type === "video")
+      nativeVideo.push({ ...(event as unknown as NativeVideo), at: Date.now() });
+  });
   await expect
     .poll(() => nativeVideo.some((v) => v.identity === "user-1" && v.frames > 0), {
       timeout: 60_000,
@@ -874,22 +879,17 @@ test("a browser VP9 camera decodes natively with the same key", async ({ page })
 
 test("a browser VP9 camera with the wrong key decodes no VP9 frame natively", async ({ page }) => {
   await gateNativeVp9Decode();
-  const key = randomBytes(32).toString("base64");
+  const { url } = await joinRoom(page, true, "vp9");
   const wrongKey = randomBytes(32).toString("base64");
-  const url = `ws://127.0.0.1:${livekitPort}`;
-  await joinBrowserPeer(page, url, joinToken("user-1"), key, true, "vp9");
   await expectBrowserVp9(page);
 
   const nativeVideo: NativeVideo[] = [];
   const watching: string[] = [];
-  const peer = runNativePeer(
-    ["--url", url, "--token", joinToken("user-2"), "--key", wrongKey, "--secs", "14"],
-    ({ event }) => {
-      if (event.type === "video")
-        nativeVideo.push({ ...(event as unknown as NativeVideo), at: Date.now() });
-      if (event.type === "videoWatch") watching.push(String(event.identity));
-    },
-  );
+  const peer = runNativePeer(nativePeerArgs(url, wrongKey, 14), ({ event }) => {
+    if (event.type === "video")
+      nativeVideo.push({ ...(event as unknown as NativeVideo), at: Date.now() });
+    if (event.type === "videoWatch") watching.push(String(event.identity));
+  });
   await expect.poll(() => watching.includes("user-1"), { timeout: 60_000 }).toBe(true);
   const settledAt = Date.now();
   await page.waitForTimeout(5_000);
@@ -903,35 +903,14 @@ test("a browser VP9 camera with the wrong key decodes no VP9 frame natively", as
 // for `--simulcast`; the Rust unit test proves the host drops it for VP9.
 test("a native VP9 camera decodes in the browser with the same key", async ({ page }) => {
   await gateNativeVp9Encode();
-  const key = randomBytes(32).toString("base64");
-  const url = `ws://127.0.0.1:${livekitPort}`;
-  await joinBrowserPeer(page, url, joinToken("user-1"), key);
-  const peer = runNativePeer([
-    "--url",
-    url,
-    "--token",
-    joinToken("user-2"),
-    "--key",
-    key,
-    "--secs",
-    "20",
-    "--video",
-    "1280x720",
-    "--simulcast",
-    "--codec",
-    "vp9",
-  ]);
-  await expect
-    .poll(async () => (await readBrowserPeer(page, "user-2")).videoSubscribed, { timeout: 60_000 })
-    .toBe(true);
+  const { key, url } = await joinRoom(page);
+  const peer = runNativePeer(
+    nativePeerArgs(url, key, 20, "--video", "1280x720", "--simulcast", "--codec", "vp9"),
+  );
+  await waitForVideoSubscribed(page, "user-2");
   await page.waitForTimeout(4_000);
   await expectBrowserReceivedVp9(page, "camera");
-  const perSecond: number[] = [];
-  for (let i = 0; i < 8; i++) {
-    await resetBrowserMeters(page);
-    await page.waitForTimeout(1_000);
-    perSecond.push((await readBrowserPeer(page, "user-2")).videoFrames);
-  }
+  const perSecond = await sampleFramesPerSecond(page, "user-2");
   const seen = await readBrowserPeer(page, "user-2");
   await peer.done;
   console.log(
@@ -945,28 +924,11 @@ test("a native VP9 camera decodes in the browser with the same key", async ({ pa
 
 test("a native VP9 screen share decodes in the browser with the same key", async ({ page }) => {
   await gateNativeVp9Encode();
-  const key = randomBytes(32).toString("base64");
-  const url = `ws://127.0.0.1:${livekitPort}`;
-  await joinBrowserPeer(page, url, joinToken("user-1"), key);
-  const peer = runNativePeer([
-    "--url",
-    url,
-    "--token",
-    joinToken("user-2"),
-    "--key",
-    key,
-    "--secs",
-    "16",
-    "--screen",
-    "1280x720",
-    "--screen-codec",
-    "vp9",
-  ]);
-  await expect
-    .poll(async () => (await readBrowserPeer(page, "user-2#screen")).videoSubscribed, {
-      timeout: 60_000,
-    })
-    .toBe(true);
+  const { key, url } = await joinRoom(page);
+  const peer = runNativePeer(
+    nativePeerArgs(url, key, 16, "--screen", "1280x720", "--screen-codec", "vp9"),
+  );
+  await waitForVideoSubscribed(page, "user-2#screen");
   await page.waitForTimeout(4_000);
   await expectBrowserReceivedVp9(page, "screen_share");
   await resetBrowserMeters(page);
@@ -983,36 +945,25 @@ test("a native VP9 screen share decodes in the browser with the same key", async
 
 test("a native VP9 camera and share with the wrong key are decoded by no one", async ({ page }) => {
   await gateNativeVp9Encode();
-  const key = randomBytes(32).toString("base64");
+  const { url } = await joinRoom(page);
   const wrongKey = randomBytes(32).toString("base64");
-  const url = `ws://127.0.0.1:${livekitPort}`;
-  await joinBrowserPeer(page, url, joinToken("user-1"), key);
-  const peer = runNativePeer([
-    "--url",
-    url,
-    "--token",
-    joinToken("user-2"),
-    "--key",
-    wrongKey,
-    "--secs",
-    "14",
-    "--video",
-    "640x360",
-    "--codec",
-    "vp9",
-    "--screen",
-    "1280x720",
-    "--screen-codec",
-    "vp9",
-  ]);
-  await expect
-    .poll(async () => (await readBrowserPeer(page, "user-2")).videoSubscribed, { timeout: 60_000 })
-    .toBe(true);
-  await expect
-    .poll(async () => (await readBrowserPeer(page, "user-2#screen")).videoSubscribed, {
-      timeout: 60_000,
-    })
-    .toBe(true);
+  const peer = runNativePeer(
+    nativePeerArgs(
+      url,
+      wrongKey,
+      14,
+      "--video",
+      "640x360",
+      "--codec",
+      "vp9",
+      "--screen",
+      "1280x720",
+      "--screen-codec",
+      "vp9",
+    ),
+  );
+  await waitForVideoSubscribed(page, "user-2");
+  await waitForVideoSubscribed(page, "user-2#screen");
   await page.waitForTimeout(3_000);
   await resetBrowserMeters(page);
   await page.waitForTimeout(5_000);
@@ -1031,35 +982,20 @@ test("a native VP9 camera and share with the wrong key are decoded by no one", a
 test("a native peer with the wrong key decodes no video and is decoded by no one", async ({
   page,
 }) => {
-  const key = randomBytes(32).toString("base64");
+  const { url } = await joinRoom(page, true);
   const wrongKey = randomBytes(32).toString("base64");
-  const url = `ws://127.0.0.1:${livekitPort}`;
-  await joinBrowserPeer(page, url, joinToken("user-1"), key, true);
 
   const nativeVideo: NativeVideo[] = [];
   const watching: string[] = [];
   const peer = runNativePeer(
-    [
-      "--url",
-      url,
-      "--token",
-      joinToken("user-2"),
-      "--key",
-      wrongKey,
-      "--secs",
-      "14",
-      "--video",
-      "640x360",
-    ],
+    nativePeerArgs(url, wrongKey, 14, "--video", "640x360"),
     ({ event }) => {
       if (event.type === "video")
         nativeVideo.push({ ...(event as unknown as NativeVideo), at: Date.now() });
       if (event.type === "videoWatch") watching.push(String(event.identity));
     },
   );
-  await expect
-    .poll(async () => (await readBrowserPeer(page, "user-2")).videoSubscribed, { timeout: 60_000 })
-    .toBe(true);
+  await waitForVideoSubscribed(page, "user-2");
   await page.waitForTimeout(3_000);
   await resetBrowserMeters(page);
   const settledAt = Date.now();
@@ -1079,29 +1015,14 @@ test("a native peer with the wrong key decodes no video and is decoded by no one
 });
 
 test("a native screen share decodes in the browser with the same key", async ({ page }) => {
-  const key = randomBytes(32).toString("base64");
-  const url = `ws://127.0.0.1:${livekitPort}`;
-  await joinBrowserPeer(page, url, joinToken("user-1"), key);
+  const { key, url } = await joinRoom(page);
 
   const nativeVideo: NativeVideo[] = [];
   let resources: Record<string, number> = {};
   let closed: Record<string, unknown> = {};
   const threads: Array<{ phase: string; count: number; fds: number; captures: number }> = [];
   const peer = runNativePeer(
-    [
-      "--url",
-      url,
-      "--token",
-      joinToken("user-2"),
-      "--key",
-      key,
-      "--secs",
-      "16",
-      "--screen",
-      "1280x720",
-      "--screen-cycles",
-      "5",
-    ],
+    nativePeerArgs(url, key, 16, "--screen", "1280x720", "--screen-cycles", "5"),
     ({ event }) => {
       if (event.type === "threads")
         threads.push(
@@ -1113,11 +1034,7 @@ test("a native screen share decodes in the browser with the same key", async ({ 
       if (event.type === "closed") closed = event;
     },
   );
-  await expect
-    .poll(async () => (await readBrowserPeer(page, "user-2#screen")).videoSubscribed, {
-      timeout: 60_000,
-    })
-    .toBe(true);
+  await waitForVideoSubscribed(page, "user-2#screen");
   // `videoSubscribed` turns true on the first publish, which precedes the five
   // stop/start cycles. Measuring from there could land the window inside the
   // churn (observed: "0 frames in 5 s at 0x0", passing on retry). The peer
@@ -1177,31 +1094,20 @@ test("a native screen share decodes in the browser with the same key", async ({ 
 test("a native screen share's audio decodes in the browser and survives a video republish", async ({
   page,
 }) => {
-  const key = randomBytes(32).toString("base64");
-  const url = `ws://127.0.0.1:${livekitPort}`;
-  await joinBrowserPeer(page, url, joinToken("user-1"), key);
+  const { key, url } = await joinRoom(page);
 
-  const events: Array<Record<string, unknown> & { type: string }> = [];
-  const peer = runNativePeer(
-    [
-      "--url",
+  const { peer, events } = runCollectingPeer(
+    nativePeerArgs(
       url,
-      "--token",
-      joinToken("user-2"),
-      "--key",
       key,
-      "--secs",
-      "30",
+      30,
       "--screen",
       "1280x720",
       "--screen-audio",
       "--screen-audio-cycles",
       "3",
       "--republish-screen",
-    ],
-    ({ event }) => {
-      events.push(event);
-    },
+    ),
   );
   const audio = "user-2#screenaudio";
   await expect
@@ -1282,26 +1188,10 @@ test("a native share's audio reaches the browser as stereo with the channels apa
 }) => {
   const key = randomBytes(32).toString("base64");
   const url = `ws://127.0.0.1:${livekitPort}`;
-  const events: Array<Record<string, unknown> & { type: string }> = [];
   await joinBrowserPeer(page, url, joinToken("user-1"), key);
 
-  const peer = runNativePeer(
-    [
-      "--url",
-      url,
-      "--token",
-      joinToken("user-2"),
-      "--key",
-      key,
-      "--secs",
-      "25",
-      "--screen",
-      "1280x720",
-      "--screen-audio",
-    ],
-    ({ event }) => {
-      events.push(event);
-    },
+  const { peer, events } = runCollectingPeer(
+    nativePeerArgs(url, key, 25, "--screen", "1280x720", "--screen-audio"),
   );
   await expect
     .poll(async () => (await readBrowserPeer(page, "user-2#screenaudio")).samples, {
@@ -1414,36 +1304,21 @@ test("a native share's audio reaches the browser as stereo with the channels apa
 // it (livekit 0.9.5 cannot change a sender's encoding). The browser re-subscribes
 // at the new size with the same key, and the share audio keeps flowing.
 test("a native share changes quality live and keeps decoding in the browser", async ({ page }) => {
-  const key = randomBytes(32).toString("base64");
-  const url = `ws://127.0.0.1:${livekitPort}`;
-  await joinBrowserPeer(page, url, joinToken("user-1"), key);
+  const { key, url } = await joinRoom(page);
 
-  const events: Array<Record<string, unknown> & { type: string }> = [];
-  const peer = runNativePeer(
-    [
-      "--url",
+  const { peer, events } = runCollectingPeer(
+    nativePeerArgs(
       url,
-      "--token",
-      joinToken("user-2"),
-      "--key",
       key,
-      "--secs",
-      "30",
+      30,
       "--screen",
       "1280x720",
       "--screen-audio",
       "--screen-quality-after",
       "8",
-    ],
-    ({ event }) => {
-      events.push(event);
-    },
+    ),
   );
-  await expect
-    .poll(async () => (await readBrowserPeer(page, "user-2#screen")).videoSubscribed, {
-      timeout: 60_000,
-    })
-    .toBe(true);
+  await waitForVideoSubscribed(page, "user-2#screen");
   // The share audio, subscribed before the change (it is published at once;
   // the change comes 8 s later).
   await expect
@@ -1484,24 +1359,12 @@ test("a native share changes quality live and keeps decoding in the browser", as
 });
 
 test("a native screen share's audio with the wrong key is decoded as silence", async ({ page }) => {
-  const key = randomBytes(32).toString("base64");
+  const { url } = await joinRoom(page);
   const wrongKey = randomBytes(32).toString("base64");
-  const url = `ws://127.0.0.1:${livekitPort}`;
-  await joinBrowserPeer(page, url, joinToken("user-1"), key);
 
-  const peer = runNativePeer([
-    "--url",
-    url,
-    "--token",
-    joinToken("user-2"),
-    "--key",
-    wrongKey,
-    "--secs",
-    "14",
-    "--screen",
-    "1280x720",
-    "--screen-audio",
-  ]);
+  const peer = runNativePeer(
+    nativePeerArgs(url, wrongKey, 14, "--screen", "1280x720", "--screen-audio"),
+  );
   await expect
     .poll(async () => (await readBrowserPeer(page, "user-2#screenaudio")).samples, {
       timeout: 60_000,
@@ -1519,28 +1382,11 @@ test("a native screen share's audio with the wrong key is decoded as silence", a
 });
 
 test("a native screen share with the wrong key is decoded by no one", async ({ page }) => {
-  const key = randomBytes(32).toString("base64");
+  const { url } = await joinRoom(page);
   const wrongKey = randomBytes(32).toString("base64");
-  const url = `ws://127.0.0.1:${livekitPort}`;
-  await joinBrowserPeer(page, url, joinToken("user-1"), key);
 
-  const peer = runNativePeer([
-    "--url",
-    url,
-    "--token",
-    joinToken("user-2"),
-    "--key",
-    wrongKey,
-    "--secs",
-    "14",
-    "--screen",
-    "1280x720",
-  ]);
-  await expect
-    .poll(async () => (await readBrowserPeer(page, "user-2#screen")).videoSubscribed, {
-      timeout: 60_000,
-    })
-    .toBe(true);
+  const peer = runNativePeer(nativePeerArgs(url, wrongKey, 14, "--screen", "1280x720"));
+  await waitForVideoSubscribed(page, "user-2#screen");
   await page.waitForTimeout(3_000);
   await resetBrowserMeters(page);
   await page.waitForTimeout(5_000);
@@ -1560,40 +1406,19 @@ test("a native screen share with the wrong key is decoded by no one", async ({ p
 test("native camera and screen share run together with E2EE and close cleanly", async ({
   page,
 }) => {
-  const key = randomBytes(32).toString("base64");
-  const url = `ws://127.0.0.1:${livekitPort}`;
-  await joinBrowserPeer(page, url, joinToken("user-1"), key, true);
+  const { key, url } = await joinRoom(page, true);
 
   let resources: Record<string, number> = {};
   let closed: Record<string, unknown> = {};
   const peer = runNativePeer(
-    [
-      "--url",
-      url,
-      "--token",
-      joinToken("user-2"),
-      "--key",
-      key,
-      "--secs",
-      "150",
-      "--video",
-      "640x360",
-      "--screen",
-      "1280x720",
-    ],
+    nativePeerArgs(url, key, 150, "--video", "640x360", "--screen", "1280x720"),
     ({ event }) => {
       if (event.type === "resources") resources = event.resources as Record<string, number>;
       if (event.type === "closed") closed = event;
     },
   );
-  await expect
-    .poll(async () => (await readBrowserPeer(page, "user-2")).videoSubscribed, { timeout: 60_000 })
-    .toBe(true);
-  await expect
-    .poll(async () => (await readBrowserPeer(page, "user-2#screen")).videoSubscribed, {
-      timeout: 60_000,
-    })
-    .toBe(true);
+  await waitForVideoSubscribed(page, "user-2");
+  await waitForVideoSubscribed(page, "user-2#screen");
   await page.waitForTimeout(4_000);
   await resetBrowserMeters(page);
   // Both pipelines stay live for the soak window.

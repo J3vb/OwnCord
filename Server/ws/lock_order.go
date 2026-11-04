@@ -50,41 +50,41 @@
 //	rank  lock                       declared                 taken under it
 //	1 S   userLockEntry.mu           voice_registry.go:45     DB, broadcasts, seqMu (replay.go:438-441); never a
 //	      (voiceRegistry.voiceMember) user_locks.go:44         LiveKit RPC
-//	2 S   userLockEntry.mu           hub.go:217               DB and LiveKit RPC (user_locks.go:9-17); never a
-//	      (Hub.voiceMod)             user_locks.go:44         membership path
+//	2 S   userLockEntry.mu           hub_voice_state.go:25    DB and LiveKit RPC (user_locks.go:9-17); never a
+//	      (hubVoice.mod)             user_locks.go:44         membership path
 //	3 S   replayPurgeState.mu RW     hub_tombstones.go:53     seqMu (hub_events.go:210), then the persister
 //	      (Hub.tombstones)                                    Flush and the DB delete (hub_events.go:218-235).
 //	                                                          Cold reads only TryRLock (eventstore.go:46-62)
-//	3 S   activityState.flushMu      channel_activity.go:105  DB reads under activityFlushTimeout, then
+//	3 S   activityState.flushMu      channel_activity.go:103  DB reads under activityFlushTimeout, then
 //	                                                          activityState.mu, then Hub.mu, PubSub.mu and
 //	                                                          Client.mu one at a time
-//	3 S   roleRefreshState.flushMu   role_refresh.go:74       DB reads, then roleRefreshState.mu, then Hub.mu,
+//	3 S   roleRefreshState.flushMu   role_refresh.go:71       DB reads, then roleRefreshState.mu, then Hub.mu,
 //	                                                          PubSub.mu, timeoutViewState.mu and Client.mu one
 //	                                                          at a time (role_refresh.go:24-30)
-//	3 S   Hub.uploadPolicyMu         hub.go:224               a DB read, then Hub.settingsMu, then Hub.mu (R),
+//	3 S   hubSettings.uploadPolicyMu hub_settings.go:213      a DB read, then hubSettings.mu, then Hub.mu (R),
 //	                                                          then Client.mu (hub_settings.go:93-113)
-//	3 S   gameActivityState.mu       hub_settings.go:128      a DB read, then Hub.presenceMu (the game activity
-//	      (Hub.gameActivity)                                  sweep), Hub.mu (R), then Client.mu
+//	3 S   gameActivityState.mu       hub_settings.go:116      a DB read, then presenceFeedState.mu (the game activity
+//	      (hubSettings.gameActivity)                          sweep), Hub.mu (R), then Client.mu
 //	                                                          (hub_settings.go)
 //	3 S   Client.focusMu             client.go:86             Client.mu, PubSub.mu, DB reads (focus_defer.go:21,
 //	                                                          focus_defer.go:132, handlers.go:281-325)
 //	3 S   admissionMu (local)        serve.go:62              Hub.mu (R) via ClientCount (serve.go:73,83)
 //	4     timeoutViewState.mu        member_timeouts_       Hub.mu (R), Client.mu
 //	      (Hub.timeoutView)          delivery.go:23
-//	4     Hub.presenceMu             hub.go:232               the caller's closure, which only enqueues
-//	                                                          (hub_presence.go:211-216), Hub.mu (R), Client.mu,
+//	4     presenceFeedState.mu       hub_presence_state.go:12 the caller's closure, which only enqueues
+//	                                                          (hub_presence.go:240-245), Hub.mu (R), Client.mu,
 //	                                                          presenceRepairState.mu, queueDropState.mu
-//	5     Hub.seqMu                  hub.go:65                Hub.keyHolderMu (a resume's registerNow ->
-//	                                                          updateKeyHolder, hub_registry.go:177,182), Hub.mu,
+//	5     Hub.seqMu                  hub.go:51                hubVoice.keyHolderMu (a resume's registerNow ->
+//	                                                          updateKeyHolder, hub_registry.go:174,179), Hub.mu,
 //	                                                          PubSub.mu, Client.mu (SendToUser, hub_broadcast.go:
 //	                                                          294-299,354; registerNow, hub_registry.go:89),
 //	                                                          EventRingBuffer.mu, presenceRepairState.mu,
 //	                                                          queueDropState.mu, and the leaves below
-//	6     Hub.keyHolderMu RW         hub.go:228               Hub.mu (R), voiceSlot.voiceMu
+//	6     hubVoice.keyHolderMu RW    hub_voice_state.go:29    Hub.mu (R), voiceSlot.voiceMu
 //	                                                          (voice_e2ee.go:44-60)
-//	6     Hub.settingsMu RW          hub.go:219               a DB read under the write lock
+//	6     hubSettings.mu RW          hub_settings.go:207      a DB read under the write lock
 //	                                                          (hub_settings.go:27-35); see the exceptions
-//	7     Hub.mu RW                  hub.go:25                PubSub.mu, Client.mu, voiceSlot.voiceMu,
+//	7     Hub.mu RW                  hub.go:24                PubSub.mu, Client.mu, voiceSlot.voiceMu,
 //	                                                          voiceGraceState.mu (hub_registry.go:60-162,
 //	                                                          hub_stats.go:329-355, voice_e2ee.go:268-288)
 //	8     PubSub.mu RW               pubsub.go:65             Client.mu (Subscribe -> isSendClosed, pubsub.go:94);
@@ -95,26 +95,27 @@
 //	9     voiceGraceState.mu         voice_grace.go:54        leaf
 //	9     voiceReconcileState.mu     voice_reconcile.go:42    leaf
 //	9     voiceRejoinBlockState.mu   voice_rejoin_block.go:34 leaf
-//	9     removedIdentities.mu       voice_removed_watch.go:35 leaf
-//	9     presenceRepairState.mu     hub_presence.go:92       leaf
-//	9     queueDropState.mu          hub_stats.go:163         leaf
+//	9     removedIdentities.mu       voice_removed_watch.go:48 leaf
+//	9     liveKitHealthCache.mu      livekit_health.go:21     leaf
+//	9     voiceResumeChecks.mu       voice_resume_check.go:57 leaf
+//	9     presenceRepairState.mu     hub_presence.go:96       leaf
+//	9     queueDropState.mu          hub_stats.go:140         leaf
 //	9     EventRingBuffer.mu RW      ringbuffer.go:14         leaf
 //	9     memberCache.mu             serve_ready_members_cache.go:33  leaf
-//	9     activityState.mu           channel_activity.go:95   leaf
-//	9     roleRefreshState.mu        role_refresh.go:66       leaf; may be taken under Hub.seqMu
+//	9     activityState.mu           channel_activity.go:93   leaf
+//	9     roleRefreshState.mu        role_refresh.go:63       leaf; may be taken under Hub.seqMu
 //	9     restartNoticeGate.mu       restart_notice.go:16     leaf
 //	9     userLocks.mu               user_locks.go:34         leaf, but see userLocks.tryLock below
-//	-     LiveKitProcess.mu          livekit_process.go:37    unranked: independent subsystem
 //
-// Hub.background (hub.go:110) is a syncutil.Group, not a mutex, so it has no row.
+// hubLifecycle.background (hub_lifecycle.go:41) is a syncutil.Group, not a mutex, so it has no row.
 //
 // Locks of one rank are not ordered against each other, so the checker
 // forbids nesting any two of them, two instances of one lock included.
-// Hub.uploadPolicyMu (3) taking Hub.settingsMu (6) is not such a pair.
+// hubSettings.uploadPolicyMu (3) taking hubSettings.mu (6) is not such a pair.
 //
 // # Known exceptions to the rule
 //
-//   - Hub.settingsMu is held for writing across a DB read (hub_settings.go:27-35).
+//   - hubSettings.mu is held for writing across a DB read (hub_settings.go:27-35).
 //     It is the one state lock that does I/O. The read is bounded by a context.
 //   - slog on a non-error path under a lock: Hub.seqMu and Hub.mu in registerNow
 //     (hub_registry.go:100), Client.mu on overflow (client.go:195,303), and
@@ -131,9 +132,9 @@
 //
 // The whole -tags deadlock suite, run with the checker reporting instead of
 // panicking, found one out-of-order acquire and no production one: a test
-// (TestSweepAFK_SkipsMemberWithModerationInFlight) held voiceMod on the
+// (TestSweepAFK_SkipsMemberWithModerationInFlight) held hubVoice.mod on the
 // goroutine that then ran the AFK sweep, which takes voiceMember. In
-// production the moderator is another goroutine; the test now holds voiceMod
+// production the moderator is another goroutine; the test now holds hubVoice.mod
 // on one too. The checker sees only the paths the suite runs: a Client.mu
 // holder calling back into the hub on an untested path would still go unseen.
 
@@ -145,11 +146,11 @@ package ws
 // a literal.
 type (
 	lockRankVoiceMember struct{} // userLockEntry.mu of voiceRegistry.voiceMember
-	lockRankVoiceMod    struct{} // userLockEntry.mu of Hub.voiceMod
+	lockRankVoiceMod    struct{} // userLockEntry.mu of hubVoice.mod
 	lockRankSerialiser  struct{} // the rank-3 serialisers
-	lockRankFeed        struct{} // timeoutViewState.mu, Hub.presenceMu
+	lockRankFeed        struct{} // timeoutViewState.mu, presenceFeedState.mu
 	lockRankSeq         struct{} // Hub.seqMu
-	lockRankHubCache    struct{} // Hub.keyHolderMu, Hub.settingsMu
+	lockRankHubCache    struct{} // hubVoice.keyHolderMu, hubSettings.mu
 	lockRankHub         struct{} // Hub.mu
 	lockRankPubSub      struct{} // PubSub.mu
 	lockRankLeaf        struct{} // the leaves

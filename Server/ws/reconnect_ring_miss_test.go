@@ -193,7 +193,7 @@ func TestReconnect_RingMiss_NotCountedOnBufferHit(t *testing.T) {
 // same atomic the lifetime accessor does.
 func TestWindowSources_IncludesRingMisses(t *testing.T) {
 	e := newRingMissEnv(t, false)
-	e.hub.reconnectRingMiss.Add(3)
+	e.hub.stats.ReconnectRingMiss.Add(3)
 	_, _, counters := e.hub.WindowSources()
 	for _, nc := range counters {
 		if nc.Name != "reconnect_ring_misses" {

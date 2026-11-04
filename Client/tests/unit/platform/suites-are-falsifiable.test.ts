@@ -301,6 +301,7 @@ const nullNotifier = async () => {
     showMessage: async () => undefined,
     showCall: async () => undefined,
     clearCall: async () => undefined,
+    clearMessages: async () => undefined,
     onMessageActivated: () => () => undefined,
     flashTaskbar: async () => undefined,
     requestAttention: async () => undefined,
@@ -437,6 +438,7 @@ describeGlobalShortcutsSuite(async () => {
 describeNativeVoiceSuite(async () => {
   const subject = {
     setRoomKey: async () => undefined,
+    useKeySlot: async () => undefined,
     clearRoomKey: async () => undefined,
     connect: async () => undefined,
     disconnect: async () => undefined,

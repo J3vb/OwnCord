@@ -4,7 +4,11 @@
 // (js/health.js) against a stubbed GET /admin/api/system/stats.
 import { describe, it, expect, afterEach } from "vitest";
 import { JSDOM } from "jsdom";
-import { adminPanelHtml } from "../helpers/admin-panel";
+import {
+  adminHtmlWithBridge,
+  bootPanelOnSection,
+  renderIntoContent,
+} from "../helpers/adminPanelFetch";
 
 const BRIDGE = `<script>
 window.__test = {
@@ -12,7 +16,7 @@ window.__test = {
   renderDashboard: renderDashboard, startHealthPoll: startHealthPoll, pollHealth: pollHealth,
 };
 </script>`;
-const ADMIN_HTML = adminPanelHtml().replace("</body>", `${BRIDGE}\n</body>`);
+const ADMIN_HTML = adminHtmlWithBridge(BRIDGE);
 
 const ADMINISTRATOR = 0x40000000;
 const MANAGE_CHANNELS = 0x20000;
@@ -28,24 +32,8 @@ interface Bridge {
 type Responder = (path: string) => Promise<unknown> | unknown;
 
 async function boot(paths: string[], respond: Responder): Promise<{ dom: JSDOM; bridge: Bridge }> {
-  const dom = new JSDOM(ADMIN_HTML, {
-    url: "http://localhost:8080/admin",
-    runScripts: "dangerously",
-    beforeParse(window) {
-      window.fetch = (async (input: string) => {
-        const p = String(input).replace(/^\/admin\/api/, "");
-        paths.push(p);
-        const json = p === "/setup/status" ? { needs_setup: false } : await respond(p);
-        return { ok: true, status: 200, json: async () => json ?? {} } as Response;
-      }) as typeof fetch;
-    },
-  });
-  await new Promise((resolve) => dom.window.setTimeout(resolve, 0));
-  paths.length = 0;
-  const bridge = (dom.window as unknown as { __test: Bridge }).__test;
-  bridge.state.token = "tok";
-  bridge.state.section = "dashboard";
-  return { dom, bridge };
+  const booted = await bootPanelOnSection<Bridge>(ADMIN_HTML, "dashboard", paths, respond);
+  return booted;
 }
 
 const T = 1_793_386_035;
@@ -85,19 +73,39 @@ const STATS = {
   },
 };
 
-function render(dom: JSDOM, html: string): Element {
-  const host = dom.window.document.createElement("div");
-  host.innerHTML = html;
-  dom.window.document.getElementById("content")!.replaceChildren(host);
-  return host;
-}
+const render = renderIntoContent;
 
 const tile = (host: Element, id: string) => host.querySelector(`#${id}`)!;
 const text = (host: Element, id: string, part: string) =>
   tile(host, id).querySelector(`.${part}`)?.textContent;
 
+/** A responder that answers `/system/stats` with `STATS` until `hold` is set, then parks each request until `release` is called. */
+function holdableStats() {
+  const gate = {
+    hold: false,
+    release: undefined as ((v: unknown) => void) | undefined,
+    respond: (p: string): unknown => {
+      if (!p.startsWith("/system/stats")) return {};
+      if (!gate.hold) return STATS;
+      return new Promise((resolve) => {
+        gate.release = resolve;
+      });
+    },
+  };
+  return gate;
+}
+
 describe("Server/admin/static — Dashboard health row", () => {
   let dom: JSDOM | undefined;
+
+  /** Boots the panel as someone holding `permissions` and renders the Dashboard. */
+  async function openDashboard(paths: string[], respond: Responder, permissions = ADMINISTRATOR) {
+    const booted = await boot(paths, respond);
+    dom = booted.dom;
+    booted.bridge.state.me = { permissions };
+    const host = render(booted.dom, await booted.bridge.renderDashboard());
+    return { booted, host };
+  }
   afterEach(() => {
     dom?.window?.close();
     dom = undefined;
@@ -105,10 +113,9 @@ describe("Server/admin/static — Dashboard health row", () => {
 
   it("shows CPU, RAM, disk free and uptime with one-hour lines", async () => {
     const paths: string[] = [];
-    const booted = await boot(paths, (p) => (p.startsWith("/system/stats") ? STATS : {}));
-    dom = booted.dom;
-    booted.bridge.state.me = { permissions: ADMINISTRATOR };
-    const host = render(dom, await booted.bridge.renderDashboard());
+    const { host } = await openDashboard(paths, (p) =>
+      p.startsWith("/system/stats") ? STATS : {},
+    );
     expect(paths).toContain("/system/stats?window=1h");
 
     expect(host.querySelector("#healthRow")).toBeTruthy();
@@ -182,10 +189,7 @@ describe("Server/admin/static — Dashboard health row", () => {
 
   it("is not requested or shown without View Diagnostics", async () => {
     const paths: string[] = [];
-    const booted = await boot(paths, () => STATS);
-    dom = booted.dom;
-    booted.bridge.state.me = { permissions: MANAGE_CHANNELS };
-    const host = render(dom, await booted.bridge.renderDashboard());
+    const { booted, host } = await openDashboard(paths, () => STATS, MANAGE_CHANNELS);
     expect(paths.some((p) => p.startsWith("/system/stats"))).toBe(false);
     expect(host.querySelector("#healthRow")).toBeNull();
     expect(booted.bridge.health.timer).toBeNull();
@@ -212,27 +216,20 @@ describe("Server/admin/static — Dashboard health row", () => {
   // Leaving the Dashboard while a poll is in flight: the late answer must
   // not repaint or restart the timer.
   it("drops a poll answered after leaving the Dashboard and stops polling", async () => {
-    let release: ((v: unknown) => void) | undefined;
-    let hold = false;
-    const booted = await boot([], (p) => {
-      if (!p.startsWith("/system/stats")) return {};
-      if (!hold) return STATS;
-      return new Promise((resolve) => {
-        release = resolve;
-      });
-    });
+    const gate = holdableStats();
+    const booted = await boot([], gate.respond);
     dom = booted.dom;
     const { bridge } = booted;
     bridge.state.me = { permissions: ADMINISTRATOR };
     render(dom, await bridge.renderDashboard());
     const before = bridge.health.data;
 
-    hold = true;
+    gate.hold = true;
     const inFlight = bridge.pollHealth(bridge.health.seq, "tok");
     await new Promise((resolve) => dom!.window.setTimeout(resolve, 0));
-    expect(release).toBeDefined();
+    expect(gate.release).toBeDefined();
     bridge.state.section = "users";
-    release!({ ...STATS, current: { ...STATS.current, machine_cpu: 99 } });
+    gate.release!({ ...STATS, current: { ...STATS.current, machine_cpu: 99 } });
     await inFlight;
 
     expect(bridge.health.data).toBe(before);
@@ -243,26 +240,19 @@ describe("Server/admin/static — Dashboard health row", () => {
   // A re-render (Refresh, or leaving and coming back) starts a new
   // generation; the old loop's late answer is dropped.
   it("drops an answer from a superseded render", async () => {
-    let release: ((v: unknown) => void) | undefined;
-    let hold = false;
-    const booted = await boot([], (p) => {
-      if (!p.startsWith("/system/stats")) return {};
-      if (!hold) return STATS;
-      return new Promise((resolve) => {
-        release = resolve;
-      });
-    });
+    const gate = holdableStats();
+    const booted = await boot([], gate.respond);
     dom = booted.dom;
     const { bridge } = booted;
     bridge.state.me = { permissions: ADMINISTRATOR };
     render(dom, await bridge.renderDashboard());
     const oldSeq = bridge.health.seq;
 
-    hold = true;
+    gate.hold = true;
     const stale = bridge.pollHealth(oldSeq, "tok");
     await new Promise((resolve) => dom!.window.setTimeout(resolve, 0));
-    const staleRelease = release!;
-    hold = false;
+    const staleRelease = gate.release!;
+    gate.hold = false;
     await bridge.startHealthPoll();
     expect(bridge.health.seq).toBe(oldSeq + 1);
     const timer = bridge.health.timer;
@@ -355,16 +345,14 @@ describe("Server/admin/static — Dashboard health row", () => {
         [...tr.querySelectorAll("td")].map((td) => td.textContent),
       );
 
-    it("lists routes with calls, typical and worst time under the health row", async () => {
+    it("lists routes with calls, typical and worst time under the health row and LiveKit card", async () => {
       const paths: string[] = [];
-      const booted = await boot(paths, (p) =>
+      const { host } = await openDashboard(paths, (p) =>
         p === "/system/slow-requests" ? SLOW : p.startsWith("/system/stats") ? STATS : {},
       );
-      dom = booted.dom;
-      booted.bridge.state.me = { permissions: ADMINISTRATOR };
-      const host = render(dom, await booted.bridge.renderDashboard());
       expect(paths).toContain("/system/slow-requests");
-      expect(host.querySelector("#healthRow + section #slowRequests")).toBeTruthy();
+      expect(host.querySelector("#healthRow + section #livekitCard")).toBeTruthy();
+      expect(host.querySelector("#healthRow + section + section #slowRequests")).toBeTruthy();
       expect(rows(host)).toEqual([
         ["POST /api/v1/channels/{id}/messages", (1204).toLocaleString(), "2.5 s", "12 s"],
         ["GET /admin/api/<b>x</b>", "3", "500 ms", "730 ms"],
@@ -385,16 +373,13 @@ describe("Server/admin/static — Dashboard health row", () => {
     });
 
     it("says so when nothing was recorded yet", async () => {
-      const booted = await boot([], (p) =>
+      const { host } = await openDashboard([], (p) =>
         p === "/system/slow-requests"
           ? { window_seconds: 3600, routes: [] }
           : p.startsWith("/system/stats")
             ? STATS
             : {},
       );
-      dom = booted.dom;
-      booted.bridge.state.me = { permissions: ADMINISTRATOR };
-      const host = render(dom, await booted.bridge.renderDashboard());
       expect(host.querySelector("#slowRequests")?.textContent).toBe(
         "No requests in the last hour yet.",
       );
@@ -445,6 +430,185 @@ describe("Server/admin/static — Dashboard health row", () => {
       const host = render(dom, await bridge.renderDashboard());
       expect(bridge.health.slow).toBeNull();
       expect(host.querySelector("#slowRequests tbody")).toBeNull();
+    });
+  });
+  describe("LiveKit card", () => {
+    const LK = {
+      configured: true,
+      status: "ok",
+      since: T - 600,
+      interval_seconds: 10,
+      window_seconds: 3600,
+      current: {
+        t: T,
+        cpu: 142.5,
+        memory: 209_715_200,
+        rooms: 1,
+        participants: 4,
+        tracks_published: 6,
+        tracks_subscribed: 18,
+        bytes_in_per_sec: 250_000,
+        bytes_out_per_sec: 1_250_000,
+      },
+      series: Array.from({ length: 12 }, (_, i) => ({
+        t: T - (11 - i) * 10,
+        cpu: 100 + i,
+        memory: 200_000_000 + i * 1000,
+        rooms: 1,
+        participants: 4,
+        tracks_published: 6,
+        tracks_subscribed: 18,
+        bytes_in_per_sec: 250_000,
+        bytes_out_per_sec: 1_250_000,
+      })),
+    };
+    const answer =
+      (lk: unknown) =>
+      (p: string): unknown =>
+        p.startsWith("/system/livekit") ? lk : p.startsWith("/system/stats") ? STATS : {};
+    const body = (host: Element) => host.querySelector("#livekitCard")!;
+
+    it("names how many cores LiveKit may use when its page reports it", async () => {
+      const { host } = await openDashboard(
+        [],
+        answer({ ...LK, current: { ...LK.current, cores: 4 } }),
+      );
+      expect(text(host, "lkCpu", "health-sub")).toBe("of 4 cores · 100% = one core");
+    });
+
+    it("shows status, CPU as a share of one core, memory, usage and traffic", async () => {
+      const paths: string[] = [];
+      const { host } = await openDashboard(paths, answer(LK));
+      expect(paths).toContain("/system/livekit?window=1h");
+      expect(body(host).querySelector(".badge")?.textContent).toBe("Reachable");
+      expect(text(host, "lkCpu", "health-value")).toBe("143%");
+      expect(text(host, "lkCpu", "health-sub")).toBe("100% = one core");
+      expect(tile(host, "lkCpu").querySelector(".health-spark-line")).toBeTruthy();
+      expect(text(host, "lkMemory", "health-value")).toBe("200.0 MB");
+      expect(tile(host, "lkMemory").querySelector(".health-spark-line")).toBeTruthy();
+      expect(text(host, "lkUsage", "health-value")).toBe("1 room");
+      expect(text(host, "lkUsage", "health-sub")).toBe(
+        "4 participants · 6 tracks published · 18 tracks subscribed",
+      );
+      expect(text(host, "lkTraffic", "health-value")).toBe("In 2.00 Mbit/s");
+      expect(text(host, "lkTraffic", "health-sub")).toBe("Out 10.0 Mbit/s");
+    });
+
+    it("says since when LiveKit is not reachable and shows dashes, never zeros", async () => {
+      const { host } = await openDashboard(
+        [],
+        answer({
+          ...LK,
+          status: "unreachable",
+          current: { t: T, cpu: null, memory: null, rooms: null },
+          series: [],
+        }),
+      );
+      expect(body(host).querySelector(".badge")?.textContent).toBe("Not reachable");
+      expect(body(host).querySelector("#livekitStatus")?.textContent).toMatch(
+        /since \d{1,2}:\d{2}/,
+      );
+      expect(text(host, "lkCpu", "health-value")).toBe("–");
+      expect(text(host, "lkMemory", "health-value")).toBe("–");
+      expect(text(host, "lkUsage", "health-value")).toBe("–");
+    });
+
+    it("explains how to turn it on when the stats page has no LiveKit figures", async () => {
+      const { host } = await openDashboard(
+        [],
+        answer({ ...LK, status: "not_set_up", current: null, series: [] }),
+      );
+      expect(body(host).querySelector(".badge")?.textContent).toBe("Not set up");
+      expect(body(host).textContent).toContain("prometheus: port: 6789");
+      expect(body(host).textContent).toContain("restart LiveKit");
+      expect(body(host).textContent).toContain("finds it by itself");
+      expect(body(host).textContent).toContain("voice.livekit_metrics_url");
+    });
+
+    it("shows the how-to when not configured, and points built-in LiveKit at the Attention panel", async () => {
+      let { host } = await openDashboard([], answer({ configured: false, managed: false }));
+      expect(body(host).textContent).toContain("prometheus: port: 6789");
+      expect(body(host).querySelector(".health-tile")).toBeNull();
+
+      dom?.window?.close();
+      ({ host } = await openDashboard([], answer({ configured: false, managed: true })));
+      expect(body(host).textContent).toContain("Attention panel");
+      expect(body(host).textContent).not.toContain("prometheus");
+    });
+
+    it("shows the built-in LiveKit with dashes for tracks and traffic", async () => {
+      const { host } = await openDashboard(
+        [],
+        answer({
+          ...LK,
+          source: "managed",
+          current: {
+            t: T,
+            cpu: 12.5,
+            memory: 104_857_600,
+            rooms: 1,
+            participants: 4,
+            tracks_published: null,
+            tracks_subscribed: null,
+            bytes_in_per_sec: null,
+            bytes_out_per_sec: null,
+            cores: 8,
+          },
+        }),
+      );
+      expect(body(host).querySelector(".badge")?.textContent).toBe("Running");
+      expect(body(host).querySelector(".badge")?.className).toContain("badge-green");
+      expect(body(host).querySelector("#livekitStatus")?.textContent).toContain("Built-in LiveKit");
+      expect(text(host, "lkCpu", "health-value")).toBe("13%");
+      expect(text(host, "lkCpu", "health-sub")).toBe("of 8 cores · 100% = one core");
+      expect(text(host, "lkUsage", "health-sub")).toBe("4 participants");
+      expect(text(host, "lkTraffic", "health-value")).toBe("–");
+      expect(text(host, "lkTraffic", "health-sub")).toBe("Docker setups only");
+    });
+
+    it("says the built-in LiveKit is restarting", async () => {
+      const { host } = await openDashboard(
+        [],
+        answer({
+          ...LK,
+          source: "managed",
+          status: "restarting",
+          current: { t: T, cpu: null, memory: null, rooms: null },
+          series: [],
+        }),
+      );
+      expect(body(host).querySelector(".badge")?.textContent).toBe("Not running");
+      expect(body(host).querySelector(".badge")?.className).toContain("badge-yellow");
+      expect(body(host).querySelector("#livekitStatus")?.textContent).toContain("Built-in LiveKit");
+      expect(text(host, "lkCpu", "health-value")).toBe("–");
+    });
+
+    it("renders a status from the server as text, never markup", async () => {
+      const { host } = await openDashboard(
+        [],
+        answer({ ...LK, status: "<img src=x onerror=alert(1)>" }),
+      );
+      expect(body(host).querySelector("img")).toBeNull();
+      expect(body(host).textContent).toContain("<img");
+    });
+
+    it("keeps the last answer and the poll when its read fails", async () => {
+      let fail = false;
+      const booted = await boot([], (p) => {
+        if (p.startsWith("/system/livekit")) {
+          if (fail) throw new Error("down");
+          return LK;
+        }
+        return p.startsWith("/system/stats") ? STATS : {};
+      });
+      dom = booted.dom;
+      const { bridge } = booted;
+      bridge.state.me = { permissions: ADMINISTRATOR };
+      render(dom, await bridge.renderDashboard());
+      fail = true;
+      await bridge.pollHealth(bridge.health.seq, "tok");
+      expect(dom.window.document.querySelector("#lkCpu .health-value")?.textContent).toBe("143%");
+      expect(bridge.health.timer).not.toBeNull();
     });
   });
 });

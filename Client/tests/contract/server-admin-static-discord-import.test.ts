@@ -8,7 +8,7 @@
 // retention warning and that server text never reaches markup.
 import { describe, it, expect, afterEach } from "vitest";
 import { JSDOM } from "jsdom";
-import { adminPanelHtml } from "../helpers/admin-panel";
+import { adminHtmlWithBridge, bootAdminPanel, type FetchCall } from "../helpers/adminPanelFetch";
 
 const BRIDGE = `<script>
 window.__test = {
@@ -21,16 +21,8 @@ window.__test = {
   state: state
 };
 </script>`;
-const source = adminPanelHtml();
-if (!source.includes("</body>")) {
-  throw new Error("expected Server/admin/static/index.html to contain </body>");
-}
-const ADMIN_HTML = source.replace("</body>", `${BRIDGE}\n</body>`);
+const ADMIN_HTML = adminHtmlWithBridge(BRIDGE);
 
-interface FetchCall {
-  method: string;
-  path: string;
-}
 interface Job {
   id: number;
   status: string;
@@ -65,35 +57,13 @@ async function boot(
   calls: FetchCall[],
   respond: (path: string, method: string) => unknown,
 ): Promise<{ dom: JSDOM; bridge: Bridge; doc: Document }> {
-  const dom = new JSDOM(ADMIN_HTML, {
-    url: "http://localhost:8080/admin",
-    runScripts: "dangerously",
-    pretendToBeVisual: true,
-    beforeParse(window) {
-      window.fetch = (async (input: string, opts: Record<string, unknown> = {}) => {
-        const method = String((opts.method as string) || "GET").toUpperCase();
-        const path = String(input).replace(/^\/admin\/api/, "");
-        calls.push({ method, path });
-        const json = path === "/setup/status" ? { needs_setup: false } : respond(path, method);
-        return {
-          ok: true,
-          status: 200,
-          headers: new Headers(),
-          json: async () => json ?? {},
-          text: async () => JSON.stringify(json ?? {}),
-        } as Response;
-      }) as typeof fetch;
-    },
-  });
-  await new Promise((resolve) => dom.window.setTimeout(resolve, 0));
-  calls.length = 0;
-  const bridge = (dom.window as unknown as { __test: Bridge }).__test;
-  expect(bridge).toBeTruthy();
-  const doc = dom.window.document;
-  const content = doc.getElementById("content");
+  const booted = await bootAdminPanel<Bridge>(ADMIN_HTML, calls, (path, method) => ({
+    json: respond(path, method),
+  }));
+  const content = booted.doc.getElementById("content");
   if (!content) throw new Error("expected #content");
   content.innerHTML = '<div class="section-card" id="discordImportCard"></div>';
-  return { dom, bridge, doc };
+  return booted;
 }
 
 const latest = (j: Job | null, extra: Record<string, unknown> = {}) => ({

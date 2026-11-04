@@ -22,11 +22,14 @@ import type {
   AppProcess,
   AppUpdater,
   Autostart,
+  CallService,
+  ShareSheet,
   CredentialStore,
   DevTools,
   ExternalContentBroker,
   GameDetector,
   MediaDetector,
+  NativeFiles,
   GlobalShortcuts,
   HttpClient,
   IdentityStore,
@@ -64,6 +67,19 @@ const appAudio: AppAudio = {
   available: async () => false,
   start: async () => ({ ok: false, code: "unavailable" }),
   stop: async () => undefined,
+};
+
+// A browser tab has no service to keep a call alive in the background.
+const callService: CallService = {
+  update: () => undefined,
+};
+
+// No share sheet in a tab: callers offer no Share.
+const shareSheet: ShareSheet = {
+  available: false,
+  shareFile: () => refuse(),
+  shareText: () => refuse(),
+  onReceived: inertUnsubscribe,
 };
 
 // The version is the one the bundle was built from: the server embeds the
@@ -154,6 +170,7 @@ const inertNotifier: Notifier = {
   showMessage: async () => undefined,
   showCall: async () => undefined,
   clearCall: async () => undefined,
+  clearMessages: async () => undefined,
   onMessageActivated: inertUnsubscribe,
   flashTaskbar: async () => undefined,
   requestAttention: async () => undefined,
@@ -254,6 +271,12 @@ const mediaDetector: MediaDetector = {
   detect: async () => ({ state: "none" }),
 };
 
+const nativeFiles: NativeFiles = {
+  available: false,
+  onDrag: inertUnsubscribe,
+  clipboardFiles: async () => [],
+};
+
 const systemIdle: SystemIdle = {
   idleMs: async () => null,
 };
@@ -296,16 +319,19 @@ export const browser: Platform = {
   appMetadata,
   appProcess,
   autostart,
+  callService,
   deepLinks,
   devTools,
   fileSaver,
   gameDetector,
+  nativeFiles,
   mediaDetector,
   logFiles,
   nativeVoice,
   pushToTalk,
   globalShortcuts,
   serverScope,
+  shareSheet,
   systemIdle,
   trayStatus,
   updater,

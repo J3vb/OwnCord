@@ -353,3 +353,33 @@ export async function installRealTransport(page: Page, server: TestServer) {
     },
   };
 }
+
+/** Record every HTTP request and broker invocation the page makes from now on,
+ *  with the tunnel's path token removed so lines read as server paths. */
+export async function recordTraffic(page: Page): Promise<void> {
+  await page.evaluate((token) => {
+    const w = window as unknown as {
+      __TAURI_INTERNALS__: { invoke: (c: string, a?: Record<string, unknown>) => Promise<unknown> };
+      __traffic: string[];
+    };
+    w.__traffic = [];
+    const inner = w.__TAURI_INTERNALS__.invoke.bind(w.__TAURI_INTERNALS__);
+    w.__TAURI_INTERNALS__.invoke = (command, args = {}) => {
+      if (command === "plugin:http|fetch") {
+        const { method, url } = args.clientConfig as { method: string; url: string };
+        const { pathname, search } = new URL(url);
+        const path = pathname.startsWith(`/${token}/`)
+          ? pathname.slice(token.length + 1)
+          : pathname;
+        w.__traffic.push(`${method} ${path}${search}`);
+      } else if (command.startsWith("external_")) {
+        w.__traffic.push(`broker ${command}`);
+      }
+      return inner(command, args);
+    };
+  }, TUNNEL_TOKEN);
+}
+
+/** The lines `recordTraffic` has collected so far. */
+export const traffic = (page: Page): Promise<string[]> =>
+  page.evaluate(() => (window as unknown as { __traffic: string[] }).__traffic);

@@ -214,3 +214,54 @@ func TestAdminUpdateChannelClearingNSFW_ClearsAcksInTheSameCommit(t *testing.T) 
 		t.Fatalf("HasNSFWAcknowledgement after clearing update = (%v, %v), want (false, nil)", ok, err)
 	}
 }
+
+func TestChannelContentGateAndAcknowledgedChannelIDs(t *testing.T) {
+	ctx := context.Background()
+	database := openMigratedMemory(t)
+	uid := seedUser(t, database, "gater")
+	plain := seedChannel(t, database, "plain")
+	labelled := nsfwChannel(t, database, "labelled")
+	other := nsfwChannel(t, database, "other")
+
+	gate := func(chID int64) (bool, bool) {
+		t.Helper()
+		found, readable, err := database.ChannelContentGate(ctx, uid, chID)
+		if err != nil {
+			t.Fatalf("ChannelContentGate(%d): %v", chID, err)
+		}
+		return found, readable
+	}
+	if found, readable := gate(plain); !found || !readable {
+		t.Errorf("plain channel = (%v, %v), want found and readable", found, readable)
+	}
+	if found, readable := gate(labelled); !found || readable {
+		t.Errorf("labelled, unacknowledged = (%v, %v), want found and not readable", found, readable)
+	}
+	if found, readable := gate(plain + labelled + other + 1000); found || readable {
+		t.Errorf("missing channel = (%v, %v), want not found", found, readable)
+	}
+	if acked, err := database.ListNSFWAcknowledgedChannelIDs(ctx, uid); err != nil || len(acked) != 0 {
+		t.Fatalf("ListNSFWAcknowledgedChannelIDs before ack = (%v, %v), want empty", acked, err)
+	}
+
+	if _, err := database.AcknowledgeNSFW(ctx, uid, labelled); err != nil {
+		t.Fatalf("AcknowledgeNSFW: %v", err)
+	}
+	if found, readable := gate(labelled); !found || !readable {
+		t.Errorf("labelled, acknowledged = (%v, %v), want found and readable", found, readable)
+	}
+	if found, readable := gate(other); !found || readable {
+		t.Errorf("another labelled channel = (%v, %v), want not readable", found, readable)
+	}
+	acked, err := database.ListNSFWAcknowledgedChannelIDs(ctx, uid)
+	if err != nil || len(acked) != 1 || !acked[labelled] {
+		t.Fatalf("ListNSFWAcknowledgedChannelIDs = (%v, %v), want only %d", acked, err, labelled)
+	}
+
+	if err := database.RevokeNSFW(ctx, uid, labelled); err != nil {
+		t.Fatalf("RevokeNSFW: %v", err)
+	}
+	if found, readable := gate(labelled); !found || readable {
+		t.Errorf("after revoke = (%v, %v), want not readable", found, readable)
+	}
+}

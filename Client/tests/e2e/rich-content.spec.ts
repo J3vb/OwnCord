@@ -15,10 +15,11 @@ import { test, expect } from "./fixtures";
 import {
   buildTauriMockScript,
   grantExternalConsent,
-  MOCK_LOGIN_RESPONSE,
   navigateToMainPageReady,
   openSettings,
   switchSettingsTab,
+  ROUTE_HEALTH,
+  ROUTE_LOGIN,
 } from "./helpers";
 import {
   Q1,
@@ -27,6 +28,12 @@ import {
   setAppearance,
   textContrast,
 } from "./support/accessibility";
+import {
+  attachScreenshot,
+  expectControlFits,
+  expectNoPageScroll,
+  runningMotion,
+} from "./support/a11yHarness";
 
 const LINK = "https://news.example/story";
 const IMAGE = "https://cdn.example/cat.png";
@@ -65,8 +72,8 @@ async function mockSession(
   gifTrending?: { readonly status: number; readonly body: unknown },
 ): Promise<void> {
   const httpRoutes: Array<{ pattern: string; status: number; body: unknown }> = [
-    { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-    { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
+    ROUTE_HEALTH,
+    ROUTE_LOGIN,
     { pattern: "/messages", status: 200, body: { messages: [RICH_MESSAGE], has_more: false } },
     { pattern: "/pins", status: 200, body: { messages: [], has_more: false } },
   ];
@@ -84,16 +91,6 @@ const card = (page: Page): Locator => page.locator(`[data-testid='message-${LINK
 
 const linkCard = (page: Page): Locator => card(page).locator(".msg-embed-link");
 const imageWrap = (page: Page): Locator => card(page).locator(".msg-image");
-
-/** Animations still moving inside `root` (a reduced-motion 0.01 ms one is not). */
-const runningMotion = (root: Locator): Promise<number> =>
-  root.evaluate(
-    (el) =>
-      el
-        .getAnimations({ subtree: true })
-        .filter((a) => a.playState === "running" && Number(a.effect?.getTiming().duration) > 1)
-        .length,
-  );
 
 test.beforeEach(({ page }) => grantExternalConsent(page));
 
@@ -361,20 +358,13 @@ test.describe("rich-content states", () => {
         await setAppearance(page, { fontSize: 20, largeFont: true });
         await navigateToMainPageReady(page);
 
-        const retry = imageWrap(page).locator(".msg-media-retry");
-        await retry.scrollIntoViewIfNeeded();
-        await expect(retry).toBeInViewport();
-        expect(await retry.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
-        expect(
-          await retry.evaluate((el) => (el as HTMLElement).offsetHeight),
-        ).toBeGreaterThanOrEqual(24);
-        expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBe(
-          0,
+        await expectControlFits(imageWrap(page).locator(".msg-media-retry"), 24);
+        await expectNoPageScroll(page);
+        await attachScreenshot(
+          testInfo,
+          `rich-content-940x500-${label.replaceAll(/\W+/g, "-")}.png`,
+          page,
         );
-        await testInfo.attach(`rich-content-940x500-${label.replaceAll(/\W+/g, "-")}.png`, {
-          body: await page.screenshot(),
-          contentType: "image/png",
-        });
       });
     });
   }

@@ -4,7 +4,7 @@
  * (no innerHTML, no javascript: hrefs, no markdown inside code).
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import * as voiceSession from "../helpers/voiceSessionMock";
 
 vi.mock("@lib/voice/livekitSession", () => voiceSession.defaults());
@@ -19,40 +19,11 @@ import {
   resolveLanguage,
 } from "../../src/features/messaging/content/syntaxHighlight";
 import { extractUrls } from "../../src/features/messaging/content/media";
-import { membersStore } from "../../src/stores/members.store";
-import { setChannels } from "../../src/stores/channels.store";
-import type { ReadyChannel } from "../../src/lib/types";
-import { signInAs, resetChannelsState } from "../helpers/storeSeeds";
-
-const CHANNELS: ReadyChannel[] = [
-  { id: 1, name: "general", type: "text", category: null, position: 0 },
-];
-
-function seedStores(): void {
-  membersStore.setState(() => ({
-    members: new Map([
-      [10, { id: 10, username: "alice", avatar: null, role: "member", status: "online" as const }],
-    ]),
-    typingUsers: new Map(),
-  }));
-  signInAs(
-    { id: 12, username: "me", avatar: null, role: "member" },
-    { token: "t", serverName: null },
-  );
-  resetChannelsState();
-  setChannels(CHANNELS);
-}
+import { useContentContainer } from "../helpers/contentRenderHarness";
 
 let container: HTMLDivElement;
-
-beforeEach(() => {
-  seedStores();
-  container = document.createElement("div");
-  document.body.appendChild(container);
-});
-
-afterEach(() => {
-  container.remove();
+useContentContainer((c) => {
+  container = c;
 });
 
 /** Render inline markdown into the shared container. */

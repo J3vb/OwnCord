@@ -160,7 +160,7 @@ func handleListeningUpdateV2(ctx context.Context, cmd Command, info ClientInfo, 
 
 	// The same switch as the game's: refused before the limiter so the refusal
 	// costs no budget; the authoritative check is applyListening's, under
-	// presenceMu.
+	// presenceFeed.mu.
 	if d.GameActivityEnabled != nil && !d.GameActivityEnabled() {
 		return Result{Error: ClientError{Code: ErrCodeGameActivityDisabled, Message: "member activity is turned off on this server"}}
 	}
@@ -191,18 +191,18 @@ func handleListeningUpdateV2(ctx context.Context, cmd Command, info ClientInfo, 
 // applyListening swaps c's song for next and broadcasts the presence frame
 // that shows it. The ownership, lock-order and switch rules are
 // applyActivity's: it does nothing unless c still holds its user's slot, a set
-// is dropped while the server switch is off (read under presenceMu), and a
+// is dropped while the server switch is off (read under presenceFeed.mu), and a
 // clear is always applied.
 func (h *Hub) applyListening(c *Client, next *listeningActivity) {
-	h.presenceMu.Lock()
-	defer h.presenceMu.Unlock()
-	if next != nil && !h.gameActivity.on.Load() {
+	h.presenceFeed.mu.Lock()
+	defer h.presenceFeed.mu.Unlock()
+	if next != nil && !h.settings.gameActivity.on.Load() {
 		return
 	}
 	h.applyListeningLocked(c, next)
 }
 
-// applyListeningLocked is applyListening's body. The caller holds presenceMu.
+// applyListeningLocked is applyListening's body. The caller holds presenceFeed.mu.
 func (h *Hub) applyListeningLocked(c *Client, next *listeningActivity) {
 	h.swapActivityLocked(c, func(lp *livePresence) bool {
 		if sameListening(lp.listening, next) {

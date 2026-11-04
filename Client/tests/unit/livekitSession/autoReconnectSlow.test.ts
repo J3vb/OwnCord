@@ -4,7 +4,12 @@ import { LiveKitSession } from "../../../src/lib/voice/livekitSession";
 import { leaveVoiceChannel, setVoiceStatus } from "@stores/voice.store";
 import { channelsStore, resetChannelsStore } from "@stores/channels.store";
 import { takeJoinRefusal } from "../../../src/features/voice/joinRequest";
-import { useLiveKitSessionHarness } from "../../helpers/livekitSessionHarness";
+import {
+  useLiveKitSessionHarness,
+  enterReconnecting,
+  startReconnect,
+  enterConnected,
+} from "../../helpers/livekitSessionHarness";
 
 vi.mock("livekit-client", () => mocks.livekitClientMock());
 vi.mock("@stores/voice.store", () => mocks.voiceStoreMock());
@@ -384,14 +389,7 @@ describe("LiveKitSession", () => {
     // attempt too). The tail must instead recheck via isStateConnected(),
     // the same helper connectAndSetup's post-connect checkpoints use.
     it("does not touch a newer session's timer or send a stale token refresh when superseded mid-tail", async () => {
-      (session as any)._state = {
-        type: "reconnecting",
-        channelId: 5,
-        latestToken: "reconnect-token",
-        lastUrl: "/livekit",
-        lastDirectUrl: "ws://localhost:7880",
-        ac: new AbortController(),
-      };
+      enterReconnecting(session, 5);
       session.setServerHost("localhost:7880");
       const sendSpy = vi.fn();
       session.setWsClient({
@@ -410,13 +408,7 @@ describe("LiveKitSession", () => {
       const startTimerSpy = vi.spyOn(session as any, "startTokenRefreshTimer");
 
       const ac = new AbortController();
-      const reconnectPromise = (session as any).attemptAutoReconnect(
-        "reconnect-token",
-        "/livekit",
-        5,
-        "ws://localhost:7880",
-        ac.signal,
-      );
+      const reconnectPromise = startReconnect(session, 5, { signal: ac.signal });
 
       // Pass the reconnect delay and let the attempt reach "connected" for
       // channel 5, where it stalls inside restoreLocalVoiceState's mic-permission await.
@@ -426,14 +418,7 @@ describe("LiveKitSession", () => {
 
       // A newer join supersedes it: the user switched to channel 9 while
       // channel 5's reconnect tail was still stalled.
-      (session as any)._state = {
-        type: "connected",
-        room: mockRoom,
-        channelId: 9,
-        latestToken: "token-9",
-        lastUrl: "/livekit",
-        lastDirectUrl: "ws://localhost:7880",
-      };
+      enterConnected(session, 9, { latestToken: "token-9", lastDirectUrl: "ws://localhost:7880" });
       sendSpy.mockClear();
 
       resolveMic();

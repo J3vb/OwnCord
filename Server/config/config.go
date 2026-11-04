@@ -2,9 +2,11 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -12,6 +14,7 @@ import (
 
 	goyaml "go.yaml.in/yaml/v3"
 
+	"github.com/J3vb/OwnCord/Server/clientip"
 	"github.com/J3vb/OwnCord/Server/storage"
 )
 
@@ -191,6 +194,12 @@ type VoiceConfig struct {
 	LiveKitAPISecret  string `yaml:"livekit_api_secret"` // LiveKit API secret
 	LiveKitURL        string `yaml:"livekit_url"`        // LiveKit server WebSocket URL (e.g. ws://localhost:7880)
 	LiveKitBinaryPath string `yaml:"livekit_binary"`     // path to livekit-server binary; empty = don't auto-start
+	// LiveKitMetricsURL is the http(s) address of LiveKit's Prometheus page
+	// (livekit.yaml `prometheus: port:`), e.g. http://livekit:6789/metrics. The
+	// admin Dashboard's LiveKit card reads it. Optional: when empty the card
+	// reads the LiveKit OwnCord runs, or tries port 6789 on the host of
+	// voice.livekit_url.
+	LiveKitMetricsURL string `yaml:"livekit_metrics_url"`
 	// AutoDownloadLiveKit downloads a pinned, checksum-verified livekit-server
 	// release into <data_dir>/livekit/ and runs it as the companion process when
 	// no livekit_binary is configured. Fresh installs enable it in the generated
@@ -505,6 +514,8 @@ server:
   #                           # Never list client networks here: a range that covers
   #                           # clients degrades per-client rate limiting and lets
   #                           # covered clients influence their own rate-limit key.
+  #                           # An entry that covers every address (0.0.0.0/0, ::/0)
+  #                           # is refused and the server will not start.
   # admin_allowed_cidrs:      # CIDRs allowed to access /admin (default: private networks only)
   #   - "127.0.0.0/8"
   #   - "::1/128"
@@ -594,6 +605,9 @@ voice:
                               # no livekit_binary is set (verified against the
                               # official LiveKit release checksums; stored in data/livekit/)
   # livekit_version: ""            # override the pinned livekit-server version (e.g. "1.13.11")
+  # livekit_metrics_url: ""        # LiveKit's stats page for the admin Dashboard card, e.g.
+  #                                # "http://livekit:6789/metrics" (needs prometheus: port: 6789
+  #                                # in livekit.yaml); optional, empty = found by itself
   # livekit_binary: ""             # path to an existing livekit-server binary; set this to
   #                                # skip auto-download and run your own build
   # node_ip: ""                    # public IP for WebRTC media; empty = auto-detect (pin only if detection fails)
@@ -795,7 +809,25 @@ func loadBytesWith(raw []byte, cfgPath string, overrides map[string]any) (*Confi
 	if err := normalizeUploadExtensions(&cfg.Upload); err != nil {
 		return nil, err
 	}
+	if err := checkTrustedProxies(cfg.Server.TrustedProxies); err != nil {
+		return nil, err
+	}
 	return &cfg, nil
+}
+
+// ErrCatchAllTrustedProxy marks a server.trusted_proxies entry that covers
+// every address. The load fails rather than skipping the entry: skipping it
+// would fold every client behind the proxy into one rate-limit bucket, while
+// keeping it would let each client choose the address it is limited and
+// audited by.
+var ErrCatchAllTrustedProxy = errors.New("server.trusted_proxies must list only proxy hops")
+
+func checkTrustedProxies(cidrs []string) error {
+	if entry, found := clientip.FirstCatchAll(cidrs); found {
+		return fmt.Errorf("%w: entry %q covers every address; list each proxy's own address instead (e.g. 10.0.0.2/32)",
+			ErrCatchAllTrustedProxy, entry)
+	}
+	return nil
 }
 
 // normalizeUploadExtensions fails the load on a bad entry: skipping it could
@@ -808,6 +840,14 @@ func normalizeUploadExtensions(u *UploadConfig) (err error) {
 		return fmt.Errorf("upload.allowed_extensions: %w", err)
 	}
 	return nil
+}
+
+// ValidMetricsURL reports whether raw is an absolute http or https URL. Load
+// keeps whatever the operator wrote; the app warns and leaves the LiveKit card
+// off when this is false.
+func ValidMetricsURL(raw string) bool {
+	u, err := url.Parse(raw)
+	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
 }
 
 func warnInvalidCIDRs(key string, cidrs []string) {

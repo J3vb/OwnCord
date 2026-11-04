@@ -1,7 +1,7 @@
 // Behaviour suite for the `AppUpdater` half of the `updater.ts` contract
 // (`src/platform/contracts/updater.ts`). `Autostart` is no-seam — its suite
 // lands with the seam in B7-5.
-import { beforeEach, describe, expect, test } from "vitest";
+import { beforeEach, describe, expect, test, vi, type Mock } from "vitest";
 import type { AppUpdater, UpdateInstallState } from "../../../src/platform/contracts/updater";
 
 export interface NativeControl {
@@ -14,6 +14,42 @@ export interface NativeControl {
   checkFailsWith(error: unknown): void;
   installSucceeds(): void;
   installFailsWith(error: unknown): void;
+}
+
+/** Routes the mocked `invoke` so only the named command answers; every other command rejects. */
+export function updaterNativeControl(invoke: Mock): NativeControl {
+  const answering = (command: string, reply: () => Promise<unknown>): void => {
+    invoke.mockImplementation((cmd: string) =>
+      cmd === command ? reply() : Promise.reject(new Error(cmd)),
+    );
+  };
+  return {
+    checkSucceedsWith(result) {
+      answering("check_client_update", () => Promise.resolve(result));
+    },
+    checkFailsWith(error) {
+      answering("check_client_update", () => Promise.reject(error));
+    },
+    installSucceeds() {
+      answering("download_and_install_update", () => Promise.resolve(undefined));
+    },
+    installFailsWith(error) {
+      answering("download_and_install_update", () => Promise.reject(error));
+    },
+  };
+}
+
+/** Fresh module graph and cleared native mocks, so each test starts from a new updater. */
+export function resetUpdaterNatives(natives: {
+  invoke: Mock;
+  relaunch: Mock;
+  listen: Mock;
+  unlisten: Mock;
+}): void {
+  vi.resetModules();
+  natives.invoke.mockReset();
+  natives.relaunch.mockReset().mockResolvedValue(undefined);
+  natives.listen.mockReset().mockResolvedValue(natives.unlisten);
 }
 
 export interface AppUpdaterSubject {

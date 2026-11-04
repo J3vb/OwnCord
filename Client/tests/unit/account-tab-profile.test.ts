@@ -17,6 +17,7 @@ import { applyReadyCapabilities, resetServerCapabilities } from "@lib/net/server
 import { ApiClientError } from "@lib/api";
 import * as imageCrop from "@lib/ui/imageCrop";
 import type { SettingsOverlayOptions } from "../../src/features/settings/SettingsOverlay";
+import { makeOverlayOptions } from "../helpers/settingsOverlayOptions";
 
 /**
  * The Account tab's new job: edit the display name and about text, and upload
@@ -36,29 +37,18 @@ function setUser(patch: Record<string, unknown>): void {
 }
 
 function makeOptions(overrides?: Partial<SettingsOverlayOptions>): SettingsOverlayOptions {
-  return {
-    onClose: vi.fn(),
-    onChangePassword: vi.fn().mockResolvedValue(undefined),
-    onUpdateProfile: vi.fn().mockResolvedValue(undefined),
+  return makeOverlayOptions({
     onUploadAvatar: vi.fn().mockResolvedValue("/api/v1/files/abc"),
-    onRemoveAvatar: vi.fn().mockResolvedValue(undefined),
-    onLogout: vi.fn(),
-    onDeleteAccount: vi.fn().mockResolvedValue(undefined),
-    onStatusChange: vi.fn(),
     onEnableTotp: vi.fn().mockResolvedValue({ qr_uri: "", backup_codes: [] }),
-    onConfirmTotp: vi.fn().mockResolvedValue(undefined),
-    onDisableTotp: vi.fn().mockResolvedValue(undefined),
-    onRefreshTotpStatus: vi.fn().mockResolvedValue(undefined),
-    onRegenerateRecoveryCodes: vi.fn().mockResolvedValue([]),
-    onEnrolRecoveryKit: vi.fn().mockResolvedValue({ created_at: "" }),
-    onGetRecoveryKitStatus: vi.fn().mockResolvedValue({ enrolled: false, used_at: null }),
-    onListSessions: vi.fn().mockResolvedValue([]),
-    onRevokeSession: vi.fn().mockResolvedValue(undefined),
-    onRevokeAllSessions: vi
-      .fn()
-      .mockResolvedValue({ sessions_revoked: 0, current_session_revoked: false }),
     ...overrides,
-  };
+  });
+}
+
+function build(opts: SettingsOverlayOptions): HTMLElement {
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  container.appendChild(buildAccountTab(opts, new AbortController().signal));
+  return container;
 }
 
 describe("validateAvatarFile", () => {
@@ -118,6 +108,20 @@ describe("Account tab profile fields", () => {
   });
 
   /** Focus only lands on what is shown, so open the collapsed editor first. */
+  /** Opens the profile editor over a save that stays pending until `settle` is called. */
+  function openEditorWithHeldSave() {
+    setUser({});
+    let settle!: () => void;
+    const options = makeOptions({
+      onUpdateProfile: vi.fn(() => new Promise<void>((resolve) => (settle = resolve))),
+    });
+    container.appendChild(buildAccountTab(options, ac.signal));
+
+    openProfileEditor();
+    const save = container.querySelector<HTMLButtonElement>('[data-testid="profile-save-btn"]')!;
+    return { settle: () => settle(), save };
+  }
+
   function openProfileEditor(): void {
     container.querySelector<HTMLButtonElement>('[data-testid="profile-edit-toggle"]')!.click();
   }
@@ -183,15 +187,7 @@ describe("Account tab profile fields", () => {
   });
 
   it("leaves focus where the user moved it while the save was in flight", async () => {
-    setUser({});
-    let settle!: () => void;
-    const options = makeOptions({
-      onUpdateProfile: vi.fn(() => new Promise<void>((resolve) => (settle = resolve))),
-    });
-    container.appendChild(buildAccountTab(options, ac.signal));
-
-    openProfileEditor();
-    const save = container.querySelector<HTMLButtonElement>('[data-testid="profile-save-btn"]')!;
+    const { settle, save } = openEditorWithHeldSave();
     const about = container.querySelector<HTMLTextAreaElement>('[data-testid="about-input"]')!;
     save.focus();
     save.click();
@@ -205,15 +201,7 @@ describe("Account tab profile fields", () => {
   });
 
   it("puts focus back on Save when it fell to the page during the save", async () => {
-    setUser({});
-    let settle!: () => void;
-    const options = makeOptions({
-      onUpdateProfile: vi.fn(() => new Promise<void>((resolve) => (settle = resolve))),
-    });
-    container.appendChild(buildAccountTab(options, ac.signal));
-
-    openProfileEditor();
-    const save = container.querySelector<HTMLButtonElement>('[data-testid="profile-save-btn"]')!;
+    const { settle, save } = openEditorWithHeldSave();
     save.focus();
     save.click();
     // What Chromium does to a focused control once it is disabled.
@@ -250,13 +238,6 @@ describe("Remove avatar (3C-7a)", () => {
   afterEach(() => {
     document.body.replaceChildren();
   });
-
-  function build(opts: SettingsOverlayOptions): HTMLElement {
-    const container = document.createElement("div");
-    document.body.appendChild(container);
-    container.appendChild(buildAccountTab(opts, new AbortController().signal));
-    return container;
-  }
 
   it("is hidden when the user has no avatar", () => {
     setUser({ avatar: null });
@@ -299,12 +280,6 @@ describe("Banner controls", () => {
   });
   let cropSpy: ReturnType<typeof vi.spyOn> | undefined;
 
-  function build(opts: SettingsOverlayOptions): HTMLElement {
-    const container = document.createElement("div");
-    document.body.appendChild(container);
-    container.appendChild(buildAccountTab(opts, new AbortController().signal));
-    return container;
-  }
   const q = (c: HTMLElement, id: string): HTMLButtonElement =>
     c.querySelector<HTMLButtonElement>(`[data-testid="${id}"]`)!;
   const withBanners = (over?: Partial<SettingsOverlayOptions>): SettingsOverlayOptions =>

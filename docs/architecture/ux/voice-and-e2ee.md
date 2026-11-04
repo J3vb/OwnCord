@@ -127,6 +127,13 @@ the accepted cost.
 | screenshare on | Screen tile; a stop-share affordance always visible                                                                                                                                                                                                                                    |
 | speaking       | Green ring on the speaking user's tile/avatar, and on your own user-panel avatar (your own: the input-sensitivity gate when one runs; others: LiveKit ActiveSpeakers, held 200 ms after they drop out; a mute or disconnect clears it at once, and leaving a channel clears its rings) |
 
+**DM call panel on a phone** (`features/direct-messages/DmCallPanel.ts`,
+`styles/app/dm-call.css`): the open call is the call view and takes the chat
+column, as a guild call's grid does. Back or Collapse turns it into a one-row
+call bar above the chat (Mute, Leave, Expand); reopening the DM opens the call
+view again. On a computer the panel keeps its resizable height and the
+collapsed choice survives a DM switch.
+
 **Video tiles** (`components/VideoGrid.ts`, in guild voice and DM calls alike):
 each tile is a button (click, Enter, Space) that opens it in focus view, with a
 filmstrip for the rest and **Back to grid** to leave. Screen shares carry a
@@ -215,7 +222,11 @@ opens the picker and swaps the new capture under the published track
 (`features/voice/screenshareChange.ts`), so viewers keep watching and the
 server hears no `voice_screenshare`; cancelling the picker changes nothing.
 Quality re-sizes the running capture for this share only (the Settings default
-stays). On Linux the native capture picks in its own dialog, so the card has
+stays). On a slow uplink a web-path share gets smaller and keeps its frame
+rate; once the bandwidth is back, `lib/voice/shareResolutionRecovery.ts`
+restarts WebRTC's adaptation (Chromium's capturer never grows the source back
+by itself), so the share returns to full size after a hitch of a second or two,
+at most once per 30 s. On Linux the native capture picks in its own dialog, so the card has
 Stop sharing only. In a DM call, focus view stays inside the call panel and the
 chat remains visible below it. **Full screen** (the button, F, or a
 double-click) puts the tile in HTML full screen and the window with it
@@ -409,7 +420,11 @@ trust action entirely (a blind accept is refused).
   LiveKit answers Constrained Baseline first when it is offered. A saved
   H.264 there skips the `encodingInfo` probe, which always reports software
   in WebView2, and Auto there publishes H.264 the same way (a share that
-  lands on OpenH264 still switches to VP8). The 120 fps share option is hidden for now
+  lands on OpenH264 still switches to VP8). Such a share is also held to the
+  GPU encoder's 3840x2160 box (`fitGpuH264Share`, aspect ratio and frame rate
+  kept) on publish, Change source and a Quality change, so a 5120x1440 screen
+  at Source 60 fps goes out at 3840x1080 instead of falling back; the box is
+  the RTX 4080's edge://gpu figure. The 120 fps share option is hidden for now
   (`lib/voice/shareFps.ts`): WebView2's capture delivers about 60 fps, and a saved
   120 reads as 60.
 - **Sensitivity gate:** `public/vad-worklet.js` on the processor's tap
@@ -501,7 +516,7 @@ follows the `audioOutputDevice` chosen in Settings › Voice & Audio through
 `setSinkId`.
 Where the webview cannot route an `AudioContext` (WebKitGTK, the Linux webview),
 those sounds fall back to the system default — see
-[known limitations](../../known-limitations.md#client).
+[known limitations](../../known-limitations.md#desktop-app).
 
 `features/voice/uiSounds.ts` plays a short **voice UI sound** on your join,
 leave and move; on another member joining or leaving the channel you are in;

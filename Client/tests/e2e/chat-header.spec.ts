@@ -1,11 +1,9 @@
 import { test, expect } from "./fixtures";
-import { mockTauriFullSession, navigateToMainPage } from "./helpers";
+import { startFullSession, useLeftMemberList } from "./helpers";
 
 test.describe("Chat Header", () => {
   test.beforeEach(async ({ page }) => {
-    await mockTauriFullSession(page);
-    await page.goto("/");
-    await navigateToMainPage(page);
+    await startFullSession(page);
   });
 
   test("renders channel info with hash, name, tools, and search", async ({ page }) => {
@@ -29,19 +27,26 @@ test.describe("Chat Header", () => {
     await expect(page.locator("[data-testid='sidebar-members']")).toHaveCount(0);
   });
 
-  test("focusing the search input opens the SearchOverlay", async ({ page }) => {
-    // The search input is a trigger: focusing it opens the full SearchOverlay
-    // and blurs itself, delegating to the overlay's own search field. Assert
-    // the rendered overlay, not just that the trigger exists.
+  test("the search box opens on click, not on focus, and keeps what is typed", async ({ page }) => {
+    // The search box is a trigger: Tab passes over it, and a click opens the
+    // SearchOverlay. Keys typed right after the click, while the overlay is
+    // still loading, reach the overlay's field and not the message box.
     const search = page.locator(".ch-tools .search-input");
     await expect(search).toHaveAttribute("placeholder", "Search...");
+    const overlay = page.locator("[data-testid='search-overlay']");
 
     await search.focus();
+    await expect(search).toBeFocused();
+    await expect(overlay).toHaveCount(0);
 
-    const overlay = page.locator("[data-testid='search-overlay']");
+    await search.click();
+    await page.keyboard.type("hello");
+
     await expect(overlay).toHaveClass(/open/, { timeout: 3_000 });
-    await expect(page.locator("[data-testid='search-overlay-input']")).toBeFocused();
-    await expect(search).not.toBeFocused();
+    const field = page.locator("[data-testid='search-overlay-input']");
+    await expect(field).toBeFocused();
+    await expect(field).toHaveValue("hello");
+    await expect(page.locator("[data-testid='msg-textarea']")).toHaveValue("");
   });
 
   test("pin button opens pinned messages panel", async ({ page }) => {
@@ -63,12 +68,8 @@ test.describe("Chat Header", () => {
 test.describe("Chat Header — member list under the channels", () => {
   test.beforeEach(async ({ page }) => {
     // The default moved to the right column in 3C-6c; this is the left layout.
-    await page.addInitScript(() => {
-      localStorage.setItem("owncord:settings:memberListLayout", JSON.stringify("left"));
-    });
-    await mockTauriFullSession(page);
-    await page.goto("/");
-    await navigateToMainPage(page);
+    await useLeftMemberList(page);
+    await startFullSession(page);
   });
 
   test("member list is always visible in sidebar", async ({ page }) => {

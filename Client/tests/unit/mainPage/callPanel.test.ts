@@ -1,14 +1,21 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import * as mocks from "../../helpers/mainPageMocks";
-import { savePref } from "../../../src/lib/prefs/preferences";
-import { createMainPage } from "../../../src/pages/MainPage";
 import { channelsStore } from "../../../src/stores/channels.store";
 import { uiStore } from "../../../src/stores/ui.store";
-import { voiceStore } from "../../../src/stores/voice.store";
-import { dmStore } from "../../../src/stores/dm.store";
+import { voiceStore, type VoiceUser } from "../../../src/stores/voice.store";
 import { desktop } from "../../../src/platform/desktop";
 import { SCREENSHARE_TILE_ID_OFFSET } from "../../../src/lib/constants";
-import { resetStores, fakeWs, fakeApi, dmChannel } from "../../helpers/mainPageHarness";
+import {
+  fakeWs,
+  useWiredMainPage,
+  mountPage,
+  voiceUser,
+  connectedDm,
+  mountSettled,
+  callPanelEl,
+  incomingBannerEl,
+  roster,
+} from "../../helpers/mainPageHarness";
 
 vi.mock("../../../src/features/content-consent/external", (importOriginal) =>
   mocks.consentExternalMock(importOriginal),
@@ -28,73 +35,20 @@ vi.mock("../../../src/pages/main-page/SidebarArea", () => mocks.pageSidebarAreaM
 vi.mock("../../../src/features/navigation/destinations", () => mocks.navigationDestinationsMock());
 vi.mock("../../../src/pages/main-page/ChatArea", () => mocks.pageChatAreaMock());
 
-const { mockMountChannel, mockDestroyChannel, mockCreateChatArea, capturedChatAreaRef } = mocks;
-
-// The remembered-open pref must never leak between tests, whatever their order.
-afterEach(() => {
-  localStorage.removeItem("owncord:settings:dmProfileOpen");
-});
+const { capturedChatAreaRef } = mocks;
 
 describe("MainPage — video grid, DM profile panel, calls, settings", () => {
-  let container: HTMLDivElement;
-  let page: ReturnType<typeof createMainPage>;
-
-  beforeEach(() => {
-    resetStores();
-    mockMountChannel.mockClear();
-    mockDestroyChannel.mockClear();
-    mockCreateChatArea.mockClear();
-    capturedChatAreaRef.current = null;
-    // The panel opens with a 1:1 DM by default (WP 3B-3); the toggle tests below
-    // start from "remembered closed" and the auto-open tests set it back.
-    savePref("dmProfileOpen", false);
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    page?.destroy?.();
-    container.remove();
-    localStorage.removeItem("owncord:settings:dmProfileOpen");
-  });
-
-  function openOneToOneDm(id: number): void {
-    channelsStore.setState((prev) => {
-      const ch = new Map(prev.channels);
-      ch.set(id, dmChannel(id, "dm-bob"));
-      return { ...prev, channels: ch, activeChannelId: id };
-    });
-    dmStore.setState(() => ({
-      channels: [
-        {
-          channelId: id,
-          recipient: { id: 10, username: "bob", avatar: "", status: "online" },
-          participants: [{ id: 10, username: "bob", avatar: "", status: "online" }],
-          name: "",
-          isGroup: false,
-          lastMessageId: null,
-          lastMessage: "",
-          lastMessageAt: "",
-          unreadCount: 0,
-          mentionCount: 0,
-        },
-      ],
-    }));
-  }
+  const m = useWiredMainPage();
 
   it("answers a ring for the open DM in the call panel and hides the banner, handing it back when you look elsewhere", async () => {
     const ws = fakeWs();
-    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
-    openOneToOneDm(50);
-    page = createMainPage({ ws, api: fakeApi() });
-    page.mount(container);
-    // The panel is a lazy chunk.
-    await vi.dynamicImportSettled();
+    connectedDm(50);
+    m.page = await mountSettled(m.container, ws);
 
     ws.emit("call_incoming", { channel_id: 50, from_user: 10, username: "bob" });
 
-    const banner = document.querySelector('[data-testid="incoming-call-banner"]') as HTMLElement;
-    const panel = document.querySelector('[data-testid="dm-call-panel"]') as HTMLElement;
+    const banner = incomingBannerEl();
+    const panel = callPanelEl();
     expect(panel.dataset.state).toBe("incoming");
     expect(banner.style.display).toBe("none");
 
@@ -113,8 +67,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   });
 
   it("shows the DM's own call video in its panel, keeping the chat in view", async () => {
-    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
-    openOneToOneDm(50);
+    connectedDm(50);
     voiceStore.setState((prev) => ({
       ...prev,
       currentChannelId: 50,
@@ -122,38 +75,14 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
         [
           50,
           new Map([
-            [
-              1,
-              {
-                userId: 1,
-                username: "alice",
-                muted: false,
-                deafened: false,
-                speaking: false,
-                camera: false,
-                screenshare: false,
-              },
-            ],
-            [
-              10,
-              {
-                userId: 10,
-                username: "bob",
-                muted: false,
-                deafened: false,
-                speaking: false,
-                camera: false,
-                screenshare: true,
-              },
-            ],
+            [1, voiceUser(1, { username: "alice" })],
+            [10, voiceUser(10, { username: "bob", screenshare: true })],
           ]),
         ],
       ]),
       localCamera: true,
     }));
-    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
-    page.mount(container);
-    await vi.dynamicImportSettled();
+    m.page = await mountSettled(m.container);
     voiceStore.flush();
 
     const slots = capturedChatAreaRef.current!.slots;
@@ -169,38 +98,19 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     channelsStore.flush();
     expect(panelVideo!.contains(slots.videoGridSlot)).toBe(false);
 
-    page.destroy?.();
+    m.page.destroy?.();
   });
 
   it("keeps the DM call panel's video up across repeated video changes, never switching it off in between", async () => {
-    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
-    openOneToOneDm(50);
-    const vu = (userId: number, username: string, extra = {}) => ({
-      userId,
-      username,
-      muted: false,
-      deafened: false,
-      speaking: false,
-      camera: false,
-      screenshare: false,
-      ...extra,
-    });
+    connectedDm(50);
+    const alice = voiceUser(1, { username: "alice" });
+    const bob = (extra: Partial<VoiceUser> = {}) => voiceUser(10, { username: "bob", ...extra });
     voiceStore.setState((prev) => ({
       ...prev,
       currentChannelId: 50,
-      voiceUsers: new Map([
-        [
-          50,
-          new Map([
-            [1, vu(1, "alice")],
-            [10, vu(10, "bob", { screenshare: true })],
-          ]),
-        ],
-      ]),
+      voiceUsers: roster(50, [alice, bob({ screenshare: true })]),
     }));
-    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
-    page.mount(container);
-    await vi.dynamicImportSettled();
+    m.page = await mountSettled(m.container);
     voiceStore.flush();
 
     const mute = document.querySelector('[data-testid="dcp-mute"]');
@@ -211,15 +121,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     for (const extra of [{ screenshare: true, camera: true }, { screenshare: true }]) {
       voiceStore.setState((prev) => ({
         ...prev,
-        voiceUsers: new Map([
-          [
-            50,
-            new Map([
-              [1, vu(1, "alice")],
-              [10, vu(10, "bob", extra)],
-            ]),
-          ],
-        ]),
+        voiceUsers: roster(50, [alice, bob(extra)]),
       }));
       voiceStore.flush();
     }
@@ -227,12 +129,11 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect(setPeople).not.toHaveBeenCalledWith([]);
     expect(document.querySelector('[data-testid="dcp-mute"]')).toBe(mute);
 
-    page.destroy?.();
+    m.page.destroy?.();
   });
 
   it("joining voice calls ensureLoaded once per channel, not on every voice update", () => {
-    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
-    page.mount(container);
+    m.page = mountPage(m.container);
     const ensureLoaded = capturedChatAreaRef.current!.videoGrid.ensureLoaded;
     expect(ensureLoaded).not.toHaveBeenCalled();
 
@@ -255,8 +156,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   });
 
   it("rings the video tiles of whoever is speaking in the current call", () => {
-    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
-    page.mount(container);
+    m.page = mountPage(m.container);
     const grid = capturedChatAreaRef.current!.videoGrid;
 
     voiceStore.setState((prev) => ({
@@ -266,30 +166,8 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
         [
           9,
           new Map([
-            [
-              10,
-              {
-                userId: 10,
-                username: "bob",
-                muted: false,
-                deafened: false,
-                speaking: true,
-                camera: true,
-                screenshare: false,
-              },
-            ],
-            [
-              11,
-              {
-                userId: 11,
-                username: "cy",
-                muted: false,
-                deafened: false,
-                speaking: false,
-                camera: true,
-                screenshare: false,
-              },
-            ],
+            [10, voiceUser(10, { username: "bob", speaking: true, camera: true })],
+            [11, voiceUser(11, { username: "cy", camera: true })],
           ]),
         ],
       ]),
@@ -305,8 +183,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     const setFullscreen = vi.spyOn(desktop.window, "setFullscreen").mockResolvedValue(undefined);
     const ws = fakeWs();
     uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
-    page = createMainPage({ ws, api: fakeApi() });
-    page.mount(container);
+    m.page = mountPage(m.container, ws);
     const grid = capturedChatAreaRef.current!.videoGrid;
     const cbs = grid.setCallbacks.mock.calls.at(-1)![0] as {
       setWindowFullscreen: (on: boolean) => Promise<void>;
@@ -432,8 +309,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     const supported = vi.spyOn(desktop.globalShortcuts, "supported").mockResolvedValue(true);
     const ws = fakeWs();
     voiceStore.setState((prev) => ({ ...prev, currentChannelId: 9, localMuted: false }));
-    page = createMainPage({ ws, api: fakeApi() });
-    page.mount(container);
+    m.page = mountPage(m.container, ws);
 
     await vi.waitFor(() => expect(start).toHaveBeenCalledTimes(1));
     for (const handler of shortcutHandlers) handler("mute");
@@ -451,8 +327,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     const supported = vi.spyOn(desktop.globalShortcuts, "supported").mockResolvedValue(true);
     const ws = fakeWs();
     voiceStore.setState((prev) => ({ ...prev, currentChannelId: 9, localMuted: false }));
-    page = createMainPage({ ws, api: fakeApi() });
-    page.mount(container);
+    m.page = mountPage(m.container, ws);
     await vi.waitFor(() => expect(start).toHaveBeenCalledTimes(1));
     // jsdom loads no CSS, so the closed Settings panel would read as an open dialog.
     (document.querySelector(".settings-panel") as HTMLElement).style.display = "none";
@@ -480,15 +355,13 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     const supported = vi.spyOn(desktop.globalShortcuts, "supported").mockResolvedValue(true);
     const ws = fakeWs();
     voiceStore.setState((prev) => ({ ...prev, currentChannelId: 9, localMuted: false }));
-    page = createMainPage({ ws, api: fakeApi() });
-    page.mount(container);
+    m.page = mountPage(m.container, ws);
     await vi.waitFor(() => expect(start).toHaveBeenCalledTimes(1));
-    page.destroy?.();
+    m.page.destroy?.();
 
     // A logout or server switch remounts the page; the native poller is still live.
     supported.mockReturnValue(new Promise<boolean>(() => {}));
-    page = createMainPage({ ws, api: fakeApi() });
-    page.mount(container);
+    m.page = mountPage(m.container, ws);
     (document.querySelector(".settings-panel") as HTMLElement).style.display = "none";
     document.dispatchEvent(
       new KeyboardEvent("keydown", { key: "M", code: "KeyM", ctrlKey: true, shiftKey: true }),
@@ -505,8 +378,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     const supported = vi.spyOn(desktop.globalShortcuts, "supported").mockResolvedValue(false);
     const ws = fakeWs();
     voiceStore.setState((prev) => ({ ...prev, currentChannelId: 9, localMuted: false }));
-    page = createMainPage({ ws, api: fakeApi() });
-    page.mount(container);
+    m.page = mountPage(m.container, ws);
     await vi.waitFor(() => expect(supported).toHaveBeenCalled());
     await Promise.resolve();
     (document.querySelector(".settings-panel") as HTMLElement).style.display = "none";
@@ -545,17 +417,15 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
       vi.spyOn(desktop.globalShortcuts, "supported").mockResolvedValue(false);
 
       // Never bound before: no dialog is opened on its own.
-      page = createMainPage({ ws: fakeWs(), api: fakeApi() });
-      page.mount(container);
+      m.page = mountPage(m.container);
       await vi.waitFor(() => expect(status).toHaveBeenCalled());
       await Promise.resolve();
       expect(bind).not.toHaveBeenCalled();
-      page.destroy?.();
+      m.page.destroy?.();
 
       localStorage.setItem("owncord:settings:globalKeysPortalBound", "true");
       localStorage.setItem("owncord:settings:pttVk", String(0x77));
-      page = createMainPage({ ws: fakeWs(), api: fakeApi() });
-      page.mount(container);
+      m.page = mountPage(m.container);
       await vi.waitFor(() => expect(bind).toHaveBeenCalledTimes(1));
       expect(bind).toHaveBeenCalledWith({ pttVk: 0x77, muteVk: 0x4d, deafenVk: 0x44 });
       localStorage.removeItem("owncord:settings:pttVk");
@@ -569,8 +439,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
       });
       const bind = vi.spyOn(desktop.globalShortcuts, "bindPortal").mockResolvedValue(portal);
       vi.spyOn(desktop.globalShortcuts, "supported").mockResolvedValue(false);
-      page = createMainPage({ ws: fakeWs(), api: fakeApi() });
-      page.mount(container);
+      m.page = mountPage(m.container);
       await vi.waitFor(() => expect(status).toHaveBeenCalled());
       await new Promise((resolve) => setTimeout(resolve, 10));
       expect(bind).not.toHaveBeenCalled();
@@ -585,18 +454,16 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
 
       localStorage.setItem("owncord:settings:globalKeysPortalBound", "true");
       bind.mockRejectedValue(Object.assign(new Error("bind_timeout"), { code: "bind_timeout" }));
-      page = createMainPage({ ws: fakeWs(), api: fakeApi() });
-      page.mount(container);
+      m.page = mountPage(m.container);
       await vi.waitFor(() => expect(bind).toHaveBeenCalledTimes(1));
       await new Promise((resolve) => setTimeout(resolve, 10));
       expect(pref()).toBe("true");
-      page.destroy?.();
+      m.page.destroy?.();
 
       bind.mockRejectedValue(
         Object.assign(new Error("bind_cancelled"), { code: "bind_cancelled" }),
       );
-      page = createMainPage({ ws: fakeWs(), api: fakeApi() });
-      page.mount(container);
+      m.page = mountPage(m.container);
       await vi.waitFor(() => expect(pref()).toBe("false"));
     });
 
@@ -614,8 +481,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
         .mockImplementation(() => new Promise<boolean>((resolve) => answers.push(resolve)));
       const ws = fakeWs();
       voiceStore.setState((prev) => ({ ...prev, currentChannelId: 9, localMuted: false }));
-      page = createMainPage({ ws, api: fakeApi() });
-      page.mount(container);
+      m.page = mountPage(m.container, ws);
       await vi.waitFor(() => expect(supported).toHaveBeenCalledTimes(1));
       for (const handler of changeHandlers) handler(portal);
       expect(answers).toHaveLength(2);
@@ -643,8 +509,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
       vi.spyOn(desktop.globalShortcuts, "supported").mockResolvedValue(false);
       const ws = fakeWs();
       voiceStore.setState((prev) => ({ ...prev, currentChannelId: 9, localMuted: false }));
-      page = createMainPage({ ws, api: fakeApi() });
-      page.mount(container);
+      m.page = mountPage(m.container, ws);
       await vi.waitFor(() => expect(start).toHaveBeenCalledTimes(1));
       (document.querySelector(".settings-panel") as HTMLElement).style.display = "none";
       document.dispatchEvent(
@@ -660,8 +525,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
         .mockResolvedValue({ ...portal, triggersUnnamed: true });
       const bind = vi.spyOn(desktop.globalShortcuts, "bindPortal").mockResolvedValue(portal);
       vi.spyOn(desktop.globalShortcuts, "supported").mockResolvedValue(false);
-      page = createMainPage({ ws: fakeWs(), api: fakeApi() });
-      page.mount(container);
+      m.page = mountPage(m.container);
       await vi.waitFor(() => expect(status).toHaveBeenCalled());
       await vi.waitFor(() => expect(bind).toHaveBeenCalledTimes(1));
     });
@@ -672,8 +536,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
         .spyOn(desktop.globalShortcuts, "status")
         .mockResolvedValue({ ...portal, backend: "none" });
       const bind = vi.spyOn(desktop.globalShortcuts, "bindPortal").mockResolvedValue(portal);
-      page = createMainPage({ ws: fakeWs(), api: fakeApi() });
-      page.mount(container);
+      m.page = mountPage(m.container);
       await vi.waitFor(() => expect(status).toHaveBeenCalled());
       await Promise.resolve();
       expect(bind).not.toHaveBeenCalled();
@@ -690,8 +553,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
       const supported = vi.spyOn(desktop.globalShortcuts, "supported").mockResolvedValue(false);
       const ws = fakeWs();
       voiceStore.setState((prev) => ({ ...prev, currentChannelId: 9, localMuted: false }));
-      page = createMainPage({ ws, api: fakeApi() });
-      page.mount(container);
+      m.page = mountPage(m.container, ws);
       await vi.waitFor(() => expect(supported).toHaveBeenCalledTimes(1));
       (document.querySelector(".settings-panel") as HTMLElement).style.display = "none";
       const mutes = (): number =>
@@ -711,7 +573,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
       press();
       expect(mutes()).toBe(1); // the desktop's key owns it now
 
-      page.destroy?.();
+      m.page.destroy?.();
       expect(changeHandlers.size).toBe(0);
     });
   });
@@ -735,8 +597,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
       localMuted: false,
       localDeafened: false,
     }));
-    page = createMainPage({ ws, api: fakeApi() });
-    page.mount(container);
+    m.page = mountPage(m.container, ws);
     vi.mocked(lk.setMuted).mockClear();
     vi.mocked(lk.setDeafened).mockClear();
 
@@ -757,8 +618,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     const start = vi.spyOn(desktop.globalShortcuts, "start").mockResolvedValue(undefined);
     localStorage.setItem("owncord:settings:globalMuteVk", "75"); // Ctrl+Shift+K
 
-    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
-    page.mount(container);
+    m.page = mountPage(m.container);
 
     expect(setKeys).toHaveBeenCalledWith({ muteVk: 0x4b, deafenVk: 0x44 });
     localStorage.removeItem("owncord:settings:globalMuteVk");

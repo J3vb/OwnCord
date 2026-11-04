@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
 import { authStore } from "@stores/auth.store";
 import { openSettings } from "@stores/ui.store";
 import { createUserBar } from "@components/UserBar";
@@ -38,17 +39,19 @@ describe("UserBar", () => {
   let container: HTMLDivElement;
   let comp: ReturnType<typeof createUserBar>;
 
-  beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
-    vi.clearAllMocks();
-  });
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => {
+      comp?.destroy?.();
+      // Reset auth store
+      resetAuthState();
+    },
+  );
 
-  afterEach(() => {
-    comp?.destroy?.();
-    container.remove();
-    // Reset auth store
-    resetAuthState();
+  beforeEach(() => {
+    vi.clearAllMocks();
   });
 
   it("mounts with user-bar class", () => {

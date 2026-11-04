@@ -122,6 +122,29 @@ describe("openPopoutWindow", () => {
     expect(onDraw.mock.calls[0]![1]).toBeInstanceOf(AbortSignal);
   });
 
+  it("follows the app's root attributes while the window is open, and stops once it closes", async () => {
+    document.documentElement.setAttribute("data-theme", "dark");
+    const p = openPopoutWindow({ title: "A", content: content(), onClosed: vi.fn() })!;
+    const root = wins[0]!.document.documentElement;
+    expect(root.getAttribute("data-theme")).toBe("dark");
+    expect(root.classList.contains("mirror-self-camera")).toBe(false);
+
+    document.documentElement.classList.add("mirror-self-camera");
+    document.documentElement.setAttribute("data-theme", "light");
+    await Promise.resolve();
+    expect(root.classList.contains("mirror-self-camera")).toBe(true);
+    expect(root.getAttribute("data-theme")).toBe("light");
+
+    document.documentElement.removeAttribute("class");
+    await Promise.resolve();
+    expect(root.hasAttribute("class")).toBe(false);
+
+    p.close();
+    document.documentElement.classList.add("mirror-self-camera");
+    await Promise.resolve();
+    expect(root.hasAttribute("class")).toBe(false);
+  });
+
   it("does not draw twice into a document that already holds the content", () => {
     const onDraw = vi.fn();
     track(openPopoutWindow({ title: "A", content: content(), onDraw, onClosed: vi.fn() }));

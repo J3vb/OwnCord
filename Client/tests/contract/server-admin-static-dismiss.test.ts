@@ -5,12 +5,12 @@
 // /admin/api responses.
 import { describe, it, expect, afterEach } from "vitest";
 import { JSDOM } from "jsdom";
-import { adminPanelHtml } from "../helpers/admin-panel";
+import { adminHtmlWithBridge, bootAdminPanel } from "../helpers/adminPanelFetch";
 
 const BRIDGE = `<script>
 window.__test = { get state(){return state}, renderContent: renderContent };
 </script>`;
-const ADMIN_HTML = adminPanelHtml().replace("</body>", `${BRIDGE}\n</body>`);
+const ADMIN_HTML = adminHtmlWithBridge(BRIDGE);
 
 const ADMINISTRATOR = 0x40000000;
 
@@ -40,35 +40,23 @@ interface Server {
 }
 
 async function boot(server: Server, userId = 1) {
-  const dom = new JSDOM(ADMIN_HTML, {
-    url: "http://localhost:8080/admin",
-    runScripts: "dangerously",
-    beforeParse(window) {
-      window.fetch = (async (input: string) => {
-        const p = String(input).replace(/^\/admin\/api/, "");
-        const json =
-          p === "/setup/status"
-            ? { needs_setup: false }
-            : p === "/attention"
-              ? {
-                  evaluated_at: "2026-09-23T12:00:00Z",
-                  signals: server.signals ?? [],
-                  warnings: server.warnings,
-                }
-              : p === "/updates"
-                ? server.update
-                : p === "/config/settings"
-                  ? (server.config ?? {})
-                  : {};
-        return { ok: true, status: 200, json: async () => json } as Response;
-      }) as typeof fetch;
-    },
-  });
-  await new Promise((resolve) => dom.window.setTimeout(resolve, 0));
+  const { dom, bridge } = await bootAdminPanel<Bridge>(ADMIN_HTML, [], (p) => ({
+    json:
+      p === "/attention"
+        ? {
+            evaluated_at: "2026-09-23T12:00:00Z",
+            signals: server.signals ?? [],
+            warnings: server.warnings,
+          }
+        : p === "/updates"
+          ? server.update
+          : p === "/config/settings"
+            ? (server.config ?? {})
+            : {},
+  }));
   // What core.js showApp does after sign-in: jsdom, like a browser, only
   // focuses what is displayed.
   dom.window.document.getElementById("adminShell")!.classList.remove("hidden");
-  const bridge = (dom.window as unknown as { __test: Bridge }).__test;
   bridge.state.me = { id: userId, permissions: ADMINISTRATOR, is_owner: true };
   bridge.state.section = "dashboard";
   return { dom, bridge };

@@ -25,40 +25,20 @@ import {
 } from "../../src/lib/net/serverCapabilities";
 import type { MessageResponse } from "../../src/lib/types";
 import { Permission } from "../../src/lib/types";
-import { resetChannelsState } from "../helpers/storeSeeds";
+import {
+  composerTextarea,
+  pressIn,
+  seedMemberEntries,
+  seedMembers as seedRoster,
+  signInAs,
+  typeInto,
+  useComposer,
+} from "../helpers/composerAutocomplete";
 
 const NAMES = ["alice", "Alan", "Bob", "carol"];
 
 function seedMembers(names: readonly string[] = NAMES): void {
-  membersStore.setState(() => ({
-    members: new Map(
-      names.map((n, i) => [
-        i + 1,
-        {
-          id: i + 1,
-          username: n,
-          avatar: null,
-          role: "member" as const,
-          status: "online" as const,
-        },
-      ]),
-    ),
-    typingUsers: new Map(),
-  }));
-}
-
-/** Sign in as a role, and register that role's permission mask. */
-function signInAs(role: string, permissions: number): void {
-  authStore.setState(() => ({
-    token: "t",
-    user: { id: 99, username: "me", avatar: null, role },
-    serverName: null,
-    motd: null,
-    isAuthenticated: true,
-  }));
-  resetChannelsState();
-  setRoles([{ id: 1, name: role, color: null, permissions }]);
-  channelsStore.flush();
+  seedRoster(names);
 }
 
 /** A history row (newest-first page) authored by `userId`. */
@@ -198,33 +178,10 @@ describe("filterMentionSuggestions", () => {
   });
 
   it("matches a member by display name and shows it, keeping the username as the token", () => {
-    membersStore.setState(() => ({
-      members: new Map([
-        [
-          1,
-          {
-            id: 1,
-            username: "alice_w",
-            displayName: "Alice",
-            avatar: null,
-            role: "member" as const,
-            status: "online" as const,
-          },
-        ],
-        [
-          2,
-          {
-            id: 2,
-            username: "bob",
-            displayName: null,
-            avatar: null,
-            role: "member" as const,
-            status: "online" as const,
-          },
-        ],
-      ]),
-      typingUsers: new Map(),
-    }));
+    seedMemberEntries([
+      { username: "alice_w", displayName: "Alice" },
+      { username: "bob", displayName: null },
+    ]);
 
     const found = filterMentionSuggestions("Ali");
     expect(found.map((s) => s.token)).toEqual(["alice_w"]);
@@ -490,36 +447,11 @@ describe("composer integration", () => {
   let container: HTMLDivElement;
   let input: ReturnType<typeof createMessageInput>;
   let onSend: Mock<MessageInputOptions["onSend"]>;
+  useComposer((c) => ({ container, input, onSend } = c));
 
-  beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
-    onSend = vi.fn<MessageInputOptions["onSend"]>();
-    input = createMessageInput({
-      channelId: 1,
-      channelName: "general",
-      onSend,
-      onTyping: vi.fn(),
-    });
-    input.mount(container);
-  });
-
-  afterEach(() => {
-    input.destroy?.();
-    container.remove();
-  });
-
-  function textarea(): HTMLTextAreaElement {
-    return container.querySelector("textarea")!;
-  }
-
-  function type(value: string): void {
-    const ta = textarea();
-    ta.value = value;
-    ta.selectionStart = value.length;
-    ta.selectionEnd = value.length;
-    ta.dispatchEvent(new Event("input", { bubbles: true }));
-  }
+  const textarea = (): HTMLTextAreaElement => composerTextarea(container);
+  const type = (value: string): void => typeInto(container, value);
+  const press = (k: string): boolean => pressIn(container, k);
 
   function popupEl(): HTMLElement | null {
     return container.querySelector(".mention-autocomplete");
@@ -527,12 +459,6 @@ describe("composer integration", () => {
 
   function labels(): string[] {
     return Array.from(container.querySelectorAll(".ma-name")).map((e) => e.textContent ?? "");
-  }
-
-  function press(k: string): boolean {
-    const ev = new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true });
-    textarea().dispatchEvent(ev);
-    return ev.defaultPrevented;
   }
 
   it("opens the popup on a bare @", () => {
@@ -751,32 +677,11 @@ describe("composer id tokens", () => {
   let container: HTMLDivElement;
   let input: ReturnType<typeof createMessageInput>;
   let onSend: Mock<MessageInputOptions["onSend"]>;
+  useComposer((c) => ({ container, input, onSend } = c));
 
-  beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
-    onSend = vi.fn<MessageInputOptions["onSend"]>();
-    input = createMessageInput({ channelId: 1, channelName: "general", onSend, onTyping: vi.fn() });
-    input.mount(container);
-  });
-
-  afterEach(() => {
-    input.destroy?.();
-    container.remove();
-  });
-
-  const ta = (): HTMLTextAreaElement => container.querySelector("textarea")!;
-
-  function type(value: string): void {
-    ta().value = value;
-    ta().selectionStart = value.length;
-    ta().selectionEnd = value.length;
-    ta().dispatchEvent(new Event("input", { bubbles: true }));
-  }
-
-  function press(k: string): void {
-    ta().dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true }));
-  }
+  const ta = (): HTMLTextAreaElement => composerTextarea(container);
+  const type = (value: string): void => typeInto(container, value);
+  const press = (k: string): boolean => pressIn(container, k);
 
   it("sends id tokens only with the capability", () => {
     applyReadyCapabilities({ id_mentions: true });

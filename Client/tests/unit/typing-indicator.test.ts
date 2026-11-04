@@ -1,4 +1,5 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
 
 let storeCallback: (() => void) | null = null;
 let typingUsers: Array<{ id: number; username: string }> = [];
@@ -39,16 +40,16 @@ describe("TypingIndicator", () => {
   let container: HTMLDivElement;
   let comp: ReturnType<typeof createTypingIndicator>;
 
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => comp?.destroy?.(),
+  );
+
   beforeEach(() => {
     typingUsers = [];
     storeCallback = null;
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    comp?.destroy?.();
-    container.remove();
   });
 
   it("mounts with typing-bar class", () => {

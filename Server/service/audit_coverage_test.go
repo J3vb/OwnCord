@@ -207,7 +207,7 @@ func TestAuditCoverage_ServiceMutations(t *testing.T) {
 			_, database := newTestModerationService(t)
 			hash, _ := auth.HashPassword("NewPassw0rd!")
 			rec := audittest.Install(t, database)
-			if _, err := NewUserService(database).ChangePassword(context.Background(), 4, hash, 0); err != nil {
+			if _, err := NewUserService(database).ChangePassword(context.Background(), 4, hash, 0, false); err != nil {
 				t.Fatalf("ChangePassword: %v", err)
 			}
 			return rec, []string{"NewPassw0rd!", hash}
@@ -239,16 +239,16 @@ func TestAuditCoverage_ServiceMutations(t *testing.T) {
 		{"recovery kit issued", "recovery_kit_issued", func(t *testing.T) (*audittest.Recorder, []string) {
 			svc, user, _ := newKitService(t, false)
 			rec := audittest.Install(t, svc.st.(*db.DB))
-			issue, err := svc.EnrolRecoveryKit(context.Background(), Principal{User: user}, kitPassword, "")
+			issue, err := svc.EnrolRecoveryKit(context.Background(), sessionPrincipal(user), kitPassword, "")
 			if err != nil {
 				t.Fatalf("EnrolRecoveryKit: %v", err)
 			}
-			kit, _ := svc.st.GetRecoveryKit(context.Background(), user.ID)
+			kit, _ := svc.accountRecovery.st.GetRecoveryKit(context.Background(), user.ID)
 			return rec, []string{issue.Secret, kit.Verifier, kitPassword}
 		}},
 		{"recovery kit locked", "recovery_kit_locked", func(t *testing.T) (*audittest.Recorder, []string) {
 			svc, user, _ := newKitService(t, false)
-			issue, err := svc.EnrolRecoveryKit(context.Background(), Principal{User: user}, kitPassword, "")
+			issue, err := svc.EnrolRecoveryKit(context.Background(), sessionPrincipal(user), kitPassword, "")
 			if err != nil {
 				t.Fatalf("EnrolRecoveryKit: %v", err)
 			}

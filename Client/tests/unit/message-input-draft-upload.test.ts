@@ -3,69 +3,46 @@
 // sends its id once it finishes (WP 2A-10).
 import { describe, it, expect, vi } from "vitest";
 
-vi.mock("@components/EmojiPicker", () => ({
-  createEmojiPicker: () => ({ element: document.createElement("div"), destroy: vi.fn() }),
-}));
-vi.mock("@components/GifPicker", () => ({
-  createGifPicker: () => ({ element: document.createElement("div"), destroy: vi.fn() }),
-}));
+import * as mocks from "../helpers/messageInputMocks";
+vi.mock("@components/EmojiPicker", () => mocks.emojiPickerMock());
+vi.mock("@components/GifPicker", () => mocks.gifPickerMock());
 
-import { createMessageInput, type MessageInputOptions } from "@components/MessageInput";
-import type { GifApi, GifFavoritesApi } from "@lib/media/gifProvider";
+import { createMessageInput } from "@components/MessageInput";
 import { useMountContainer } from "../helpers/mountContainer";
+import {
+  clickSend,
+  controlledUpload,
+  makeOptions,
+  pdfFile,
+  queueFile,
+  type UploadResult,
+} from "../helpers/messageInputHarness";
 
-type UploadResult = { id: string; url: string; filename: string };
+type Opts = ReturnType<typeof makeOptions>;
 
-const stubGifApi: GifApi & GifFavoritesApi = {
-  gifSearch: vi.fn(async () => ({ results: [] })),
-  gifTrending: vi.fn(async () => ({ results: [] })),
-  gifFavorites: vi.fn(async () => ({ favorites: [] })),
-  addGifFavorite: vi.fn(async () => undefined),
-  removeGifFavorite: vi.fn(async () => undefined),
-};
-
-function makeOptions(overrides: Partial<MessageInputOptions> = {}): MessageInputOptions {
-  return {
-    channelId: 1,
-    channelName: "general",
-    gifApi: stubGifApi,
-    onSend: vi.fn(),
-    onTyping: vi.fn(),
-    ...overrides,
-  };
+/** Starts an upload in a composer, then leaves the channel: returns its handler, options and draft. */
+async function leaveMidUpload(container: HTMLElement, file: File) {
+  const up = controlledUpload();
+  const opts = makeOptions({ onUploadFile: up.fn });
+  const first = createMessageInput(opts);
+  first.mount(container);
+  queueFile(container, file);
+  await vi.waitFor(() => expect(up.fn).toHaveBeenCalled());
+  const draft = first.getDraft();
+  first.destroy?.();
+  return { up, opts, draft };
 }
 
-/** An upload handler whose single call the test settles by hand. */
-function controlledUpload() {
-  let resolve: (r: UploadResult) => void = () => {};
-  let reject: (e: Error) => void = () => {};
-  let progress: ((f: number) => void) | undefined;
-  let signal: AbortSignal | undefined;
-  const fn = vi.fn((_file: File, s?: AbortSignal, onProgress?: (f: number) => void) => {
-    signal = s;
-    progress = onProgress;
-    return new Promise<UploadResult>((res, rej) => {
-      resolve = res;
-      reject = rej;
-    });
-  });
-  return {
-    fn,
-    resolve: (r: UploadResult) => resolve(r),
-    reject: (e: Error) => reject(e),
-    progress: (f: number) => progress?.(f),
-    signal: () => signal,
-  };
-}
-
-function queueFile(container: HTMLElement, file: File): void {
-  const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
-  Object.defineProperty(fileInput, "files", { value: [file], writable: true });
-  fileInput.dispatchEvent(new Event("change", { bubbles: true }));
-}
-
-function send(container: HTMLElement): void {
-  (container.querySelector(".send-btn") as HTMLButtonElement).click();
+/** A fresh composer that restores `draft`, as when the user returns to the channel. */
+function returnToChannel(
+  container: HTMLElement,
+  opts: Opts,
+  draft: ReturnType<ReturnType<typeof createMessageInput>["getDraft"]>,
+) {
+  const next = createMessageInput(opts);
+  next.mount(container);
+  next.restoreDraft(draft);
+  return next;
 }
 
 describe("MessageInput upload in flight across a channel switch", () => {
@@ -75,20 +52,13 @@ describe("MessageInput upload in flight across a channel switch", () => {
   });
 
   it("keeps the upload running and finishes it on the restored chip", async () => {
-    const up = controlledUpload();
-    const opts = makeOptions({ onUploadFile: up.fn });
-    const first = createMessageInput(opts);
-    first.mount(container);
-    queueFile(container, new File(["x"], "big.zip", { type: "application/zip" }));
-    await vi.waitFor(() => expect(up.fn).toHaveBeenCalled());
-
-    const draft = first.getDraft();
-    first.destroy?.();
+    const { up, opts, draft } = await leaveMidUpload(
+      container,
+      new File(["x"], "big.zip", { type: "application/zip" }),
+    );
     expect(up.signal()!.aborted).toBe(false);
 
-    const next = createMessageInput(opts);
-    next.mount(container);
-    next.restoreDraft(draft);
+    const next = returnToChannel(container, opts, draft);
     const chip = container.querySelector(".attachment-preview-item") as HTMLDivElement;
     expect(chip.classList.contains("uploading")).toBe(true);
     expect(chip.textContent).toContain("big.zip");
@@ -100,7 +70,7 @@ describe("MessageInput upload in flight across a channel switch", () => {
     up.resolve({ id: "srv-7", url: "/f/7", filename: "big.zip" });
     await vi.waitFor(() => expect(chip.classList.contains("uploading")).toBe(false));
     (container.querySelector(".msg-textarea") as HTMLTextAreaElement).value = "done";
-    send(container);
+    clickSend(container);
     expect(opts.onSend).toHaveBeenCalledWith(
       "done",
       null,
@@ -112,23 +82,14 @@ describe("MessageInput upload in flight across a channel switch", () => {
   });
 
   it("shows an upload that finished while away as a ready chip", async () => {
-    const up = controlledUpload();
-    const opts = makeOptions({ onUploadFile: up.fn });
-    const first = createMessageInput(opts);
-    first.mount(container);
-    queueFile(container, new File(["x"], "doc.pdf", { type: "application/pdf" }));
-    await vi.waitFor(() => expect(up.fn).toHaveBeenCalled());
-    const draft = first.getDraft();
-    first.destroy?.();
+    const { up, opts, draft } = await leaveMidUpload(container, pdfFile("doc.pdf"));
 
     up.resolve({ id: "srv-9", url: "/f/9", filename: "doc.pdf" });
     await Promise.resolve();
 
-    const next = createMessageInput(opts);
-    next.mount(container);
-    next.restoreDraft(draft);
+    const next = returnToChannel(container, opts, draft);
     await vi.waitFor(() => expect(container.querySelector(".uploading")).toBeNull());
-    send(container);
+    clickSend(container);
     expect(opts.onSend).toHaveBeenCalledWith(
       "",
       null,
@@ -140,21 +101,12 @@ describe("MessageInput upload in flight across a channel switch", () => {
   });
 
   it("reports an upload that failed while away and drops its chip", async () => {
-    const up = controlledUpload();
-    const opts = makeOptions({ onUploadFile: up.fn });
-    const first = createMessageInput(opts);
-    first.mount(container);
-    queueFile(container, new File(["x"], "doc.pdf", { type: "application/pdf" }));
-    await vi.waitFor(() => expect(up.fn).toHaveBeenCalled());
-    const draft = first.getDraft();
-    first.destroy?.();
+    const { up, opts, draft } = await leaveMidUpload(container, pdfFile("doc.pdf"));
 
     up.reject(new Error("disk full"));
     await Promise.resolve();
 
-    const next = createMessageInput(opts);
-    next.mount(container);
-    next.restoreDraft(draft);
+    const next = returnToChannel(container, opts, draft);
     await vi.waitFor(() =>
       expect(container.querySelector(".attachment-upload-error")?.textContent).toMatch(/disk full/),
     );
@@ -163,18 +115,12 @@ describe("MessageInput upload in flight across a channel switch", () => {
   });
 
   it("removing the restored chip cancels the upload", async () => {
-    const up = controlledUpload();
-    const opts = makeOptions({ onUploadFile: up.fn });
-    const first = createMessageInput(opts);
-    first.mount(container);
-    queueFile(container, new File(["x"], "big.zip", { type: "application/zip" }));
-    await vi.waitFor(() => expect(up.fn).toHaveBeenCalled());
-    const draft = first.getDraft();
-    first.destroy?.();
+    const { up, opts, draft } = await leaveMidUpload(
+      container,
+      new File(["x"], "big.zip", { type: "application/zip" }),
+    );
 
-    const next = createMessageInput(opts);
-    next.mount(container);
-    next.restoreDraft(draft);
+    const next = returnToChannel(container, opts, draft);
     (container.querySelector("[data-testid='attachment-remove']") as HTMLButtonElement).click();
 
     expect(up.signal()!.aborted).toBe(true);
@@ -199,18 +145,16 @@ describe("MessageInput upload in flight across a channel switch", () => {
       const opts = makeOptions({ onUploadFile });
       const first = createMessageInput(opts);
       first.mount(container);
-      queueFile(container, new File(["x"], "a.pdf", { type: "application/pdf" }));
+      queueFile(container, pdfFile("a.pdf"));
       await vi.waitFor(() => expect(container.querySelector(".uploading")).toBeNull());
 
       vi.setSystemTime(Date.now() + 51 * 60 * 1000);
-      send(container);
+      clickSend(container);
       expect(onUploadFile).toHaveBeenCalledTimes(2);
       const draft = first.getDraft();
       first.destroy?.();
 
-      const next = createMessageInput(opts);
-      next.mount(container);
-      next.restoreDraft(draft);
+      const next = returnToChannel(container, opts, draft);
       failRefresh(new Error("network down"));
       await vi.waitFor(() =>
         expect(container.querySelector(".attachment-upload-error")?.textContent).toMatch(
@@ -220,12 +164,12 @@ describe("MessageInput upload in flight across a channel switch", () => {
       expect(container.querySelectorAll(".attachment-preview-item").length).toBe(1);
       expect(container.querySelector(".uploading")).toBeNull();
 
-      send(container);
+      clickSend(container);
       expect(opts.onSend).not.toHaveBeenCalled();
       expect(onUploadFile).toHaveBeenCalledTimes(3);
       await vi.waitFor(() => expect(container.querySelector(".uploading")).toBeNull());
       vi.setSystemTime(Date.now() + 1000);
-      send(container);
+      clickSend(container);
       expect(opts.onSend).toHaveBeenCalledWith(
         "",
         null,

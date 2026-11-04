@@ -293,6 +293,15 @@ func cloneRole(r *db.Role) *db.Role {
 	return &out
 }
 
+// Generation is the invalidation counter: it moves on every Invalidate*. A
+// caller deriving something from many Subject reads keeps the result only if the
+// generation is unchanged across them, so a racing invalidation is never lost.
+func (s *PermissionService) Generation() uint64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.gen
+}
+
 // InvalidateUser removes cached permissions for a user; call it when their role
 // changes.
 func (s *PermissionService) InvalidateUser(userID int64) {

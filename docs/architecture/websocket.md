@@ -69,6 +69,12 @@ cheapest replay tier that can serve it.
 - **Shed frames.** A message frame dropped before it got a `seq` (by the topic
   limiter or a full dispatch queue) moves the same watermark. A client resuming
   at or behind that point recovers the message from the database.
+- **Labelled content.** Each replayed content frame is checked live, right
+  before it is written, with one point read of the channel's label and the
+  user's consent, so a revoke during a replay stops the very next frame. The
+  readable set the replay starts from, and `ready`'s per-channel
+  `nsfw_acknowledged`, come from one read of the user's acknowledgements per
+  handshake.
 - **Reporting.** `auth_ok.replay_source` (`none`, `buffer` or `db`) says which
   tier served the reconnect. It also feeds the `ws_reconnect_tier_total`
   metric.
@@ -156,7 +162,7 @@ ended is first held for 15 s so a resuming socket can take it over
 
 ### Voice membership
 
-`voiceRegistry` owns voice membership in memory. It is the field `Hub.voiceReg`.
+`voiceRegistry` owns voice membership in memory. It is the field `Hub.voiceHub.reg`.
 It holds the per-user membership lock and the 15 s reconnect grace window. Each
 connection keeps its own slot in `Client.voice` (channel, join token, completed
 flag, E2EE announce and any moderator mute stash). The durable half is the
@@ -185,7 +191,15 @@ again. The handle's operations are:
 - `stashModFlags`, `setJoinToken`: keep a moderator mute across a move, and
   set the join token.
 
-At shutdown the hub calls `voiceReg.close()`. It stops every grace timer and
+A moderator move of a parked call cannot stash on a connection, so the grace
+state keeps the move for the parking session (`voice_grace_modmove.go`): the
+flags and the `voice_moved` frame wait up to the grace window, and that
+session's resume collects them in `registerNow`, so the member re-joins the
+destination with the mute intact. A fresh connect drops the kept move, and
+the user's next `voice_join` on any device ends it (carrying its flags), so a
+later resume never pulls a call off another device.
+
+At shutdown the hub calls `voiceHub.reg.close()`. It stops every grace timer and
 leaves the rows for the next boot to wipe. Reads need no handle:
 `c.voice.channel()` and `c.voice.state()` take only the slot's own mutex.
 
@@ -204,7 +218,7 @@ membership row.
 | Revoked-session sweep         | every 30 s, plus a check every 10 messages per connection, plus an immediate check for one account (`DisconnectIfSessionRevoked`) after a password or 2FA change or a session revoke |
 | Stale-voice-state sweep       | every 60 s                                                                                                                                                                           |
 | LiveKit membership reconciler | every 60 s (`voice_reconcile.go`; see [livekit-setup.md](../livekit-setup.md))                                                                                                       |
-| Removed-participant watch     | every 2 s, only while an SFU identity the server removed is still within its token lifetime (`voice_removed_watch.go`)                                                               |
+| Removed-participant watch     | every 2 s (every 10 s for a leave the client asked for), only while an SFU identity the server removed is still within its token lifetime (`voice_removed_watch.go`)                 |
 | Channel-activity worker       | coalesces unread hints for unfocused readable channels; leading-edge 1 s window (`channel_activity.go`, WP 2B-2)                                                                     |
 | Role-refresh worker           | fans a committed role change out per affected user, off the request goroutine; coalesces pending users (`role_refresh.go`, WP 4.4b, see below)                                       |
 | Panic containment             | on the run loop: 3 panics in 60 s, or one Windows memory fault (SRE-08), stops the hub and exits the process                                                                         |
@@ -228,7 +242,8 @@ handler gets the same effects. The worker takes the pending users in rounds. Eac
 member's held topics are released before their sidebar is sent. For each
 user whose role changed it revokes held topics first, then sends
 `channel_create`/`channel_delete` in chunks (a client that does not drain is
-kicked, never sent `BANNED`), then paces `member_update` with the role name
+kicked, never sent `BANNED`), then paces `member_update_batch` frames (up to 64
+members each; a lone member gets a plain `member_update`) with the role name
 read at send time, redelivers the timeout views to those users only, and ends
 with one `roles_update`. A user who reconnects while its refresh is pending or
 running takes a full `ready`; every other reconnect still resumes by replay. A

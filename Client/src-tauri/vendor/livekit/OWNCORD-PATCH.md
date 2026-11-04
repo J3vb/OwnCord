@@ -113,6 +113,93 @@ All changes are marked `OWNCORD-PATCH`. Diff against the pristine package
              frame_metadata_features: FrameMetadataFeatures::default(),
 ```
 
+## Dual PC stereo receive
+
+OwnCord connects with `single_peer_connection = false` (see
+`room_options` in `native_voice/session.rs`). Upstream adds `stereo=1` to the
+Opus fmtp lines only in single PC mode, in the client's offer. In dual PC mode
+the SFU offers to the subscriber transport and libwebrtc writes the answer
+without `stereo=1`, so the receive Opus decoder runs mono and a stereo screen
+share's audio reaches a Linux viewer downmixed. `PeerTransport::create_anwser`
+now passes the answer through `stereo_receive_answer`, which applies the same
+`munge_stereo_for_audio` to it. Only the subscriber transport answers, and its
+audio m-lines only receive; a mono track decodes the same with the flag set.
+Marked `OWNCORD-PATCH (dual PC stereo receive)` in
+`src/rtc_engine/peer_transport.rs`. Covered by the native-voice interop case
+"native and browser peers decode each other's audio with the same key", which
+asserts the native receiver's negotiated Opus fmtp carries `stereo=1`.
+
+## Key slots
+
+OwnCord stages each new voice room key in its own key index and switches
+sending to it a moment later, so receivers already hold the key every frame
+names (see `E2EEWorker` and `native_voice_use_key_slot`). Upstream's sender
+frame cryptors always encrypt with index 0 and expose no way to change that
+for the room's tracks. `E2eeManager::set_sender_key_index` sets the index for
+every local sender cryptor and for those created later; a cryptor created
+while it runs reads the value again when it is stored. Marked
+`OWNCORD-PATCH (key slots)` in `src/room/e2ee/manager.rs`. Covered by the
+native-voice interop cases, which decode frames across the browser and native
+engines.
+
+```diff
+--- src/room/e2ee/manager.rs
++++ src/room/e2ee/manager.rs
+@@ -57,6 +57,8 @@
+     dc_encryption_enabled: bool,
+     frame_cryptors: HashMap<(ParticipantIdentity, TrackSid), FrameCryptor>,
+     data_packet_cryptor: Option<DataPacketCryptor>,
++    // OWNCORD-PATCH (key slots): the key index every local sender encrypts with.
++    sender_key_index: i32,
+ }
+ 
+ #[derive(Clone)]
+@@ -82,6 +84,7 @@
+                 options,
+                 frame_cryptors: HashMap::new(),
+                 data_packet_cryptor,
++                sender_key_index: 0, // OWNCORD-PATCH (key slots)
+             })),
+             state_changed: Default::default(),
+         }
+@@ -198,9 +201,27 @@
+         self.setup_cryptor(&frame_cryptor);
+ 
+         let mut inner = self.inner.lock();
++        // OWNCORD-PATCH (key slots): a set_sender_key_index that ran after
++        // setup_rtp_sender but before this insert did not see this cryptor.
++        frame_cryptor.set_key_index(inner.sender_key_index);
+         inner.frame_cryptors.insert((identity, publication.sid()), frame_cryptor.clone());
+     }
+ 
++    // OWNCORD-PATCH (key slots): not in upstream livekit 0.10.0.
++    /// Encrypt every local track, and every one published later, with the
++    /// shared key at `index`. Receivers decrypt by the index each frame names,
++    /// so a key staged in another index first reaches every peer before the
++    /// sender switches to it.
++    pub fn set_sender_key_index(&self, local_identity: &ParticipantIdentity, index: i32) {
++        let mut inner = self.inner.lock();
++        inner.sender_key_index = index;
++        for ((identity, _), cryptor) in inner.frame_cryptors.iter() {
++            if identity == local_identity {
++                cryptor.set_key_index(index);
++            }
++        }
++    }
++
+     fn setup_cryptor(&self, frame_cryptor: &FrameCryptor) {
+         let state_changed = self.state_changed.clone();
+         frame_cryptor.on_state_change(Some(Box::new(move |participant_identity, state| {
+@@ -278,6 +299,7 @@
+             options.key_provider.handle.clone(),
+             sender,
+         );
++        frame_cryptor.set_key_index(inner.sender_key_index); // OWNCORD-PATCH (key slots)
+         frame_cryptor.set_enabled(inner.enabled);
+         frame_cryptor
+     }
+```
+
 ## Dropping it
 
 Remove `vendor/livekit` and the `[patch.crates-io]` table once a livekit

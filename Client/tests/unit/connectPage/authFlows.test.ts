@@ -1,8 +1,26 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import * as mocks from "../../helpers/connectPageMocks";
 import { ApiClientError, TransportError } from "../../../src/lib/api";
 import { createConnectPage } from "../../../src/pages/ConnectPage";
-import { makeCallbacks, testProfiles } from "../../helpers/connectPageHarness";
+import {
+  makeCallbacks,
+  useConnectPageContainer,
+  mountPage,
+  qs,
+  submitForm,
+  setField,
+  fillLogin,
+  switchMode,
+  waitForCall,
+  waitForCalls,
+  expectBannerVisible,
+  signIn,
+  expectBannerText,
+  expectBannerContains,
+  pendingLogin,
+  mountTotp,
+  clickVerify,
+} from "../../helpers/connectPageHarness";
 
 vi.mock("../../../src/lib/net/credentials", () => mocks.netCredentialsMock());
 vi.mock("../../../src/features/settings/SettingsOverlay", () => mocks.settingsOverlayMock());
@@ -12,29 +30,16 @@ const { mockLoadCredential } = mocks;
 
 describe("ConnectPage", () => {
   let container: HTMLDivElement;
-
-  beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
-    mockLoadCredential.mockReset();
-    mockLoadCredential.mockResolvedValue(null);
-  });
-
-  afterEach(() => {
-    container.remove();
+  useConnectPageContainer((mounted) => {
+    container = mounted;
   });
 
   it("TOTP submit rejects invalid code (not 6 digits)", () => {
     const onTotpSubmit = vi.fn().mockResolvedValue(undefined);
-    const page = createConnectPage(makeCallbacks({ onTotpSubmit }), testProfiles);
-    page.mount(container);
-
-    page.showTotp();
-
-    const totpInput = container.querySelector(".totp-overlay input") as HTMLInputElement;
+    const { page, totpInput } = mountTotp(container, { onTotpSubmit });
     totpInput.value = "abc";
 
-    const verifyBtn = container.querySelector(".totp-overlay .btn-primary") as HTMLButtonElement;
+    const verifyBtn = qs<HTMLButtonElement>(container, ".totp-overlay .btn-primary");
     verifyBtn.focus();
     verifyBtn.click();
 
@@ -51,11 +56,7 @@ describe("ConnectPage", () => {
 
   it("announces a malformed code submitted with Enter from the focused input", () => {
     const onTotpSubmit = vi.fn().mockResolvedValue(undefined);
-    const page = createConnectPage(makeCallbacks({ onTotpSubmit }), testProfiles);
-    page.mount(container);
-
-    page.showTotp();
-    const totpInput = container.querySelector(".totp-overlay input") as HTMLInputElement;
+    const { page, totpInput } = mountTotp(container, { onTotpSubmit });
     expect(document.activeElement).toBe(totpInput);
     totpInput.value = "abc";
     totpInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
@@ -72,14 +73,13 @@ describe("ConnectPage", () => {
   });
 
   it("TOTP cancel returns to idle state", () => {
-    const page = createConnectPage(makeCallbacks(), testProfiles);
-    page.mount(container);
+    const page = mountPage(container);
 
     page.showTotp();
     const totpOverlay = container.querySelector(".totp-overlay")!;
     expect(totpOverlay.classList.contains("totp-overlay--hidden")).toBe(false);
 
-    const cancelBtn = container.querySelector(".totp-back") as HTMLElement;
+    const cancelBtn = qs<HTMLElement>(container, ".totp-back");
     cancelBtn.click();
 
     expect(totpOverlay.classList.contains("totp-overlay--hidden")).toBe(true);
@@ -89,34 +89,22 @@ describe("ConnectPage", () => {
 
   it("TOTP Enter key submits the code", async () => {
     const onTotpSubmit = vi.fn().mockResolvedValue(undefined);
-    const page = createConnectPage(makeCallbacks({ onTotpSubmit }), testProfiles);
-    page.mount(container);
-
-    page.showTotp();
-
-    const totpInput = container.querySelector(".totp-overlay input") as HTMLInputElement;
+    const { page, totpInput } = mountTotp(container, { onTotpSubmit });
     totpInput.value = "654321";
 
     totpInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
 
-    await vi.waitFor(() => {
-      expect(onTotpSubmit).toHaveBeenCalledWith("654321");
-    });
+    await waitForCall(onTotpSubmit, "654321");
 
     page.destroy?.();
   });
 
   it("TOTP submit shows error when callback throws", async () => {
     const onTotpSubmit = vi.fn().mockRejectedValue(new Error("Invalid TOTP"));
-    const page = createConnectPage(makeCallbacks({ onTotpSubmit }), testProfiles);
-    page.mount(container);
-
-    page.showTotp();
-
-    const totpInput = container.querySelector(".totp-overlay input") as HTMLInputElement;
+    const { page, totpInput } = mountTotp(container, { onTotpSubmit });
     totpInput.value = "999999";
 
-    const verifyBtn = container.querySelector(".totp-overlay .btn-primary") as HTMLButtonElement;
+    const verifyBtn = qs<HTMLButtonElement>(container, ".totp-overlay .btn-primary");
     verifyBtn.click();
 
     await vi.waitFor(() => {
@@ -136,21 +124,16 @@ describe("ConnectPage", () => {
     // The TOTP overlay is opaque and covers the form panel's error banner, so
     // a rejection routed only there is invisible to the user.
     const onTotpSubmit = vi.fn().mockRejectedValue(new Error("Invalid TOTP"));
-    const page = createConnectPage(makeCallbacks({ onTotpSubmit }), testProfiles);
-    page.mount(container);
-
-    page.showTotp();
-
-    const totpInput = container.querySelector(".totp-overlay input") as HTMLInputElement;
+    const { page, totpInput } = mountTotp(container, { onTotpSubmit });
     totpInput.value = "999999";
-    (container.querySelector(".totp-overlay .btn-primary") as HTMLButtonElement).click();
+    clickVerify(container);
 
     await vi.waitFor(() => {
       const totpError = container.querySelector("[data-testid='totp-invalid']")!;
       expect(totpError.textContent).toBe("Invalid TOTP");
     });
 
-    const totpInputAfter = container.querySelector(".totp-overlay input") as HTMLInputElement;
+    const totpInputAfter = qs<HTMLInputElement>(container, ".totp-overlay input");
     expect(totpInputAfter.getAttribute("aria-invalid")).toBe("true");
     // The overlay stays up with the entered code intact for a retry.
     expect(
@@ -166,14 +149,9 @@ describe("ConnectPage", () => {
       .mockRejectedValue(
         new ApiClientError(429, "RATE_LIMITED", "too many failed attempts, try again later"),
       );
-    const page = createConnectPage(makeCallbacks({ onTotpSubmit }), testProfiles);
-    page.mount(container);
-
-    page.showTotp();
-
-    const totpInput = container.querySelector(".totp-overlay input") as HTMLInputElement;
+    const { page, totpInput } = mountTotp(container, { onTotpSubmit });
     totpInput.value = "999999";
-    (container.querySelector(".totp-overlay .btn-primary") as HTMLButtonElement).click();
+    clickVerify(container);
 
     await vi.waitFor(() => {
       expect(container.querySelector(".error-banner")!.textContent).toBe(
@@ -187,13 +165,12 @@ describe("ConnectPage", () => {
   // --- Password visibility toggle ---
 
   it("toggles password visibility when eye button is clicked", () => {
-    const page = createConnectPage(makeCallbacks(), testProfiles);
-    page.mount(container);
+    const page = mountPage(container);
 
-    const passwordInput = container.querySelector("#password") as HTMLInputElement;
+    const passwordInput = qs<HTMLInputElement>(container, "#password");
     expect(passwordInput.type).toBe("password");
 
-    const toggleBtn = container.querySelector(".password-toggle") as HTMLButtonElement;
+    const toggleBtn = qs<HTMLButtonElement>(container, ".password-toggle");
     toggleBtn.click();
     expect(passwordInput.type).toBe("text");
 
@@ -207,25 +184,15 @@ describe("ConnectPage", () => {
 
   it("calls onRegister when in register mode with valid form", async () => {
     const onRegister = vi.fn().mockResolvedValue(undefined);
-    const page = createConnectPage(makeCallbacks({ onRegister }), testProfiles);
-    page.mount(container);
+    const page = mountPage(container, { onRegister });
 
     // Switch to register mode
-    const toggleLink = container.querySelector(".form-switch button") as HTMLElement;
-    toggleLink.click();
+    switchMode(container);
 
-    const hostInput = container.querySelector("#host") as HTMLInputElement;
-    const usernameInput = container.querySelector("#username") as HTMLInputElement;
-    const passwordInput = container.querySelector("#password") as HTMLInputElement;
-    const inviteInput = container.querySelector("#invite") as HTMLInputElement;
+    fillLogin(container, "localhost:8443", "newuser", "password123");
+    setField(container, "#invite", "INVITE-CODE");
 
-    hostInput.value = "localhost:8443";
-    usernameInput.value = "newuser";
-    passwordInput.value = "password123";
-    inviteInput.value = "INVITE-CODE";
-
-    const form = container.querySelector(".connect-form") as HTMLFormElement;
-    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    submitForm(container);
 
     await vi.waitFor(() => {
       // The code is lower-cased before it is sent: server codes are lower-case
@@ -243,87 +210,42 @@ describe("ConnectPage", () => {
 
   it("accepts a pasted owncord:// invite link and sends just its code", async () => {
     const onRegister = vi.fn().mockResolvedValue(undefined);
-    const page = createConnectPage(makeCallbacks({ onRegister }), testProfiles);
-    page.mount(container);
+    const page = mountPage(container, { onRegister });
 
-    const toggleLink = container.querySelector(".form-switch button") as HTMLElement;
-    toggleLink.click();
+    switchMode(container);
 
-    const hostInput = container.querySelector("#host") as HTMLInputElement;
-    const usernameInput = container.querySelector("#username") as HTMLInputElement;
-    const passwordInput = container.querySelector("#password") as HTMLInputElement;
-    const inviteInput = container.querySelector("#invite") as HTMLInputElement;
+    fillLogin(container, "localhost:8443", "newuser", "password123");
+    setField(container, "#invite", "owncord://invite/AbCd1234");
 
-    hostInput.value = "localhost:8443";
-    usernameInput.value = "newuser";
-    passwordInput.value = "password123";
-    inviteInput.value = "owncord://invite/AbCd1234";
+    submitForm(container);
 
-    const form = container.querySelector(".connect-form") as HTMLFormElement;
-    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
-
-    await vi.waitFor(() => {
-      expect(onRegister).toHaveBeenCalledWith(
-        "localhost:8443",
-        "newuser",
-        "password123",
-        "abcd1234",
-      );
-    });
+    await waitForCall(onRegister, "localhost:8443", "newuser", "password123", "abcd1234");
 
     page.destroy?.();
   });
 
   it("sends just the code of a pasted link that carries the link's host", async () => {
     const onRegister = vi.fn().mockResolvedValue(undefined);
-    const page = createConnectPage(makeCallbacks({ onRegister }), testProfiles);
-    page.mount(container);
+    const page = mountPage(container, { onRegister });
 
-    const toggleLink = container.querySelector(".form-switch button") as HTMLElement;
-    toggleLink.click();
+    switchMode(container);
 
-    const hostInput = container.querySelector("#host") as HTMLInputElement;
-    const usernameInput = container.querySelector("#username") as HTMLInputElement;
-    const passwordInput = container.querySelector("#password") as HTMLInputElement;
-    const inviteInput = container.querySelector("#invite") as HTMLInputElement;
+    fillLogin(container, "localhost:8443", "newuser", "password123");
+    setField(container, "#invite", "owncord://invite/AbCd1234?host=chat.example.com");
 
-    hostInput.value = "localhost:8443";
-    usernameInput.value = "newuser";
-    passwordInput.value = "password123";
-    inviteInput.value = "owncord://invite/AbCd1234?host=chat.example.com";
+    submitForm(container);
 
-    const form = container.querySelector(".connect-form") as HTMLFormElement;
-    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
-
-    await vi.waitFor(() => {
-      expect(onRegister).toHaveBeenCalledWith(
-        "localhost:8443",
-        "newuser",
-        "password123",
-        "abcd1234",
-      );
-    });
+    await waitForCall(onRegister, "localhost:8443", "newuser", "password123", "abcd1234");
 
     page.destroy?.();
   });
 
   it("shows error when register mode missing invite code", async () => {
-    const page = createConnectPage(makeCallbacks(), testProfiles);
-    page.mount(container);
+    const page = mountPage(container);
 
-    const toggleLink = container.querySelector(".form-switch button") as HTMLElement;
-    toggleLink.click();
+    switchMode(container);
 
-    const hostInput = container.querySelector("#host") as HTMLInputElement;
-    const usernameInput = container.querySelector("#username") as HTMLInputElement;
-    const passwordInput = container.querySelector("#password") as HTMLInputElement;
-
-    hostInput.value = "localhost:8443";
-    usernameInput.value = "newuser";
-    passwordInput.value = "password123";
-
-    const form = container.querySelector(".connect-form") as HTMLFormElement;
-    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    signIn(container, "localhost:8443", "newuser", "password123");
 
     await vi.waitFor(() => {
       const errorBanner = container.querySelector(".error-banner")!;
@@ -338,98 +260,47 @@ describe("ConnectPage", () => {
 
   it("shows error when onLogin throws a string", async () => {
     const onLogin = vi.fn().mockRejectedValue("string error");
-    const page = createConnectPage(makeCallbacks({ onLogin }), testProfiles);
-    page.mount(container);
+    const page = mountPage(container, { onLogin });
 
-    const hostInput = container.querySelector("#host") as HTMLInputElement;
-    const usernameInput = container.querySelector("#username") as HTMLInputElement;
-    const passwordInput = container.querySelector("#password") as HTMLInputElement;
+    signIn(container, "localhost:8443", "testuser", "password123");
 
-    hostInput.value = "localhost:8443";
-    usernameInput.value = "testuser";
-    passwordInput.value = "password123";
-
-    const form = container.querySelector(".connect-form") as HTMLFormElement;
-    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
-
-    await vi.waitFor(() => {
-      const errorBanner = container.querySelector(".error-banner")!;
-      expect(errorBanner.textContent).toBe("string error");
-    });
+    await expectBannerText(container, "string error");
 
     page.destroy?.();
   });
 
   it("shows error when onLogin throws an object with message", async () => {
     const onLogin = vi.fn().mockRejectedValue({ message: "object error" });
-    const page = createConnectPage(makeCallbacks({ onLogin }), testProfiles);
-    page.mount(container);
+    const page = mountPage(container, { onLogin });
 
-    const hostInput = container.querySelector("#host") as HTMLInputElement;
-    const usernameInput = container.querySelector("#username") as HTMLInputElement;
-    const passwordInput = container.querySelector("#password") as HTMLInputElement;
+    signIn(container, "localhost:8443", "testuser", "password123");
 
-    hostInput.value = "localhost:8443";
-    usernameInput.value = "testuser";
-    passwordInput.value = "password123";
-
-    const form = container.querySelector(".connect-form") as HTMLFormElement;
-    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
-
-    await vi.waitFor(() => {
-      const errorBanner = container.querySelector(".error-banner")!;
-      expect(errorBanner.textContent).toBe("object error");
-    });
+    await expectBannerText(container, "object error");
 
     page.destroy?.();
   });
 
   it("shows stringified error when onLogin throws unknown type", async () => {
     const onLogin = vi.fn().mockRejectedValue(42);
-    const page = createConnectPage(makeCallbacks({ onLogin }), testProfiles);
-    page.mount(container);
+    const page = mountPage(container, { onLogin });
 
-    const hostInput = container.querySelector("#host") as HTMLInputElement;
-    const usernameInput = container.querySelector("#username") as HTMLInputElement;
-    const passwordInput = container.querySelector("#password") as HTMLInputElement;
+    signIn(container, "localhost:8443", "testuser", "password123");
 
-    hostInput.value = "localhost:8443";
-    usernameInput.value = "testuser";
-    passwordInput.value = "password123";
-
-    const form = container.querySelector(".connect-form") as HTMLFormElement;
-    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
-
-    await vi.waitFor(() => {
-      const errorBanner = container.querySelector(".error-banner")!;
-      expect(errorBanner.textContent).toBe("42");
-    });
+    await expectBannerText(container, "42");
 
     page.destroy?.();
   });
 
   it("shows friendly copy for a transport failure instead of raw fetch text", async () => {
     const onLogin = vi.fn().mockRejectedValue(new TransportError("Failed to fetch"));
-    const page = createConnectPage(makeCallbacks({ onLogin }), testProfiles);
-    page.mount(container);
+    const page = mountPage(container, { onLogin });
 
-    const hostInput = container.querySelector("#host") as HTMLInputElement;
-    const usernameInput = container.querySelector("#username") as HTMLInputElement;
-    const passwordInput = container.querySelector("#password") as HTMLInputElement;
+    signIn(container, "localhost:8443", "testuser", "password123");
 
-    hostInput.value = "localhost:8443";
-    usernameInput.value = "testuser";
-    passwordInput.value = "password123";
-
-    const form = container.querySelector(".connect-form") as HTMLFormElement;
-    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
-
-    await vi.waitFor(() => {
-      const errorBanner = container.querySelector(".error-banner")!;
-      expect(errorBanner.textContent).toBe(
-        "Couldn't reach this server — it may be offline. Check your connection and try again.",
-      );
-    });
+    await expectBannerText(
+      container,
+      "Couldn't reach this server — it may be offline. Check your connection and try again.",
+    );
 
     page.destroy?.();
   });
@@ -437,8 +308,7 @@ describe("ConnectPage", () => {
   // --- showNotice (P4-18): a non-error, informational message ---
 
   it("shows a pending-approval notice via showNotice, not the red error banner", () => {
-    const page = createConnectPage(makeCallbacks(), testProfiles);
-    page.mount(container);
+    const page = mountPage(container);
 
     page.showNotice("Registration received. An admin has to approve your account.");
 
@@ -453,8 +323,7 @@ describe("ConnectPage", () => {
   });
 
   it("clears an info notice when the form next shows an error or goes idle", () => {
-    const page = createConnectPage(makeCallbacks(), testProfiles);
-    page.mount(container);
+    const page = mountPage(container);
 
     page.showNotice("Approval pending");
     expect(container.querySelector(".info-notice")!.classList.contains("visible")).toBe(true);
@@ -468,25 +337,12 @@ describe("ConnectPage", () => {
 
   it("truncates an over-long auth error to 200 chars plus ellipsis (anti-phishing cap)", async () => {
     const onLogin = vi.fn().mockRejectedValue(new Error("x".repeat(500)));
-    const page = createConnectPage(makeCallbacks({ onLogin }), testProfiles);
-    page.mount(container);
+    const page = mountPage(container, { onLogin });
 
-    const hostInput = container.querySelector("#host") as HTMLInputElement;
-    const usernameInput = container.querySelector("#username") as HTMLInputElement;
-    const passwordInput = container.querySelector("#password") as HTMLInputElement;
+    signIn(container, "localhost:8443", "testuser", "password123");
 
-    hostInput.value = "localhost:8443";
-    usernameInput.value = "testuser";
-    passwordInput.value = "password123";
-
-    const form = container.querySelector(".connect-form") as HTMLFormElement;
-    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
-
-    await vi.waitFor(() => {
-      const errorBanner = container.querySelector(".error-banner")!;
-      expect(errorBanner.textContent).toBe("x".repeat(200) + "...");
-      expect(errorBanner.textContent).toHaveLength(203);
-    });
+    await expectBannerText(container, "x".repeat(200) + "...");
+    expect(qs(container, ".error-banner").textContent).toHaveLength(203);
 
     page.destroy?.();
   });
@@ -494,43 +350,33 @@ describe("ConnectPage", () => {
   // --- Empty username validation ---
 
   it("shows error when username is empty", async () => {
-    const page = createConnectPage(makeCallbacks(), testProfiles);
-    page.mount(container);
+    const page = mountPage(container);
 
-    const hostInput = container.querySelector("#host") as HTMLInputElement;
-    const passwordInput = container.querySelector("#password") as HTMLInputElement;
+    const hostInput = qs<HTMLInputElement>(container, "#host");
+    const passwordInput = qs<HTMLInputElement>(container, "#password");
 
     hostInput.value = "localhost:8443";
     passwordInput.value = "password123";
 
-    const form = container.querySelector(".connect-form") as HTMLFormElement;
-    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    submitForm(container);
 
-    await vi.waitFor(() => {
-      const errorBanner = container.querySelector(".error-banner")!;
-      expect(errorBanner.textContent).toContain("Username is required");
-    });
+    await expectBannerContains(container, "Username is required");
 
     page.destroy?.();
   });
 
   it("shows error when password is empty", async () => {
-    const page = createConnectPage(makeCallbacks(), testProfiles);
-    page.mount(container);
+    const page = mountPage(container);
 
-    const hostInput = container.querySelector("#host") as HTMLInputElement;
-    const usernameInput = container.querySelector("#username") as HTMLInputElement;
+    const hostInput = qs<HTMLInputElement>(container, "#host");
+    const usernameInput = qs<HTMLInputElement>(container, "#username");
 
     hostInput.value = "localhost:8443";
     usernameInput.value = "testuser";
 
-    const form = container.querySelector(".connect-form") as HTMLFormElement;
-    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    submitForm(container);
 
-    await vi.waitFor(() => {
-      const errorBanner = container.querySelector(".error-banner")!;
-      expect(errorBanner.textContent).toContain("Password is required");
-    });
+    await expectBannerContains(container, "Password is required");
 
     page.destroy?.();
   });
@@ -538,50 +384,32 @@ describe("ConnectPage", () => {
   // --- Duplicate submit prevention ---
 
   it("ignores submit while already loading", async () => {
-    let resolveLogin: () => void;
-    const loginPromise = new Promise<void>((resolve) => {
-      resolveLogin = resolve;
-    });
-    const onLogin = vi.fn().mockReturnValue(loginPromise);
+    const { onLogin, resolveLogin } = pendingLogin();
 
-    const page = createConnectPage(makeCallbacks({ onLogin }), testProfiles);
-    page.mount(container);
+    const page = mountPage(container, { onLogin });
 
-    const hostInput = container.querySelector("#host") as HTMLInputElement;
-    const usernameInput = container.querySelector("#username") as HTMLInputElement;
-    const passwordInput = container.querySelector("#password") as HTMLInputElement;
+    signIn(container, "localhost:8443", "testuser", "password123");
 
-    hostInput.value = "localhost:8443";
-    usernameInput.value = "testuser";
-    passwordInput.value = "password123";
-
-    const form = container.querySelector(".connect-form") as HTMLFormElement;
-    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
-
-    await vi.waitFor(() => {
-      expect(onLogin).toHaveBeenCalledTimes(1);
-    });
+    await waitForCalls(onLogin, 1);
 
     // Submit again while loading
-    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    submitForm(container);
     expect(onLogin).toHaveBeenCalledTimes(1);
 
-    resolveLogin!();
+    resolveLogin();
     page.destroy?.();
   });
 
   // --- Toggle mode clears error ---
 
   it("toggling mode clears existing error state", async () => {
-    const page = createConnectPage(makeCallbacks(), testProfiles);
-    page.mount(container);
+    const page = mountPage(container);
 
     page.showError("Some error");
     const errorBanner = container.querySelector(".error-banner")!;
     expect(errorBanner.classList.contains("visible")).toBe(true);
 
-    const toggleLink = container.querySelector(".form-switch button") as HTMLElement;
-    toggleLink.click();
+    switchMode(container);
 
     expect(errorBanner.classList.contains("visible")).toBe(false);
 
@@ -591,10 +419,9 @@ describe("ConnectPage", () => {
   // --- Toggle back to login ---
 
   it("toggling back to login shows correct text", () => {
-    const page = createConnectPage(makeCallbacks(), testProfiles);
-    page.mount(container);
+    const page = mountPage(container);
 
-    const toggleLink = container.querySelector(".form-switch button") as HTMLElement;
+    const toggleLink = qs<HTMLElement>(container, ".form-switch button");
     toggleLink.click(); // to register
     toggleLink.click(); // back to login
 
@@ -609,22 +436,21 @@ describe("ConnectPage", () => {
 
   it("does not apply credentials when host has changed before onCredentialLoaded", async () => {
     mockLoadCredential.mockResolvedValue({ username: "loaded", token: "tok", hasPassword: true });
-    const page = createConnectPage(makeCallbacks(), testProfiles);
-    page.mount(container);
+    const page = mountPage(container);
 
     // Click server item to trigger credential loading
-    const serverItem = container.querySelector(".server-item") as HTMLElement;
+    const serverItem = qs<HTMLElement>(container, ".server-item");
     serverItem.click();
 
     // Immediately change host
-    const hostInput = container.querySelector("#host") as HTMLInputElement;
+    const hostInput = qs<HTMLInputElement>(container, "#host");
     hostInput.value = "different-host:8443";
 
     // Wait for credential loading to complete
     await new Promise((r) => setTimeout(r, 20));
 
     // Username should not be updated due to host mismatch guard
-    const usernameInput = container.querySelector("#username") as HTMLInputElement;
+    const usernameInput = qs<HTMLInputElement>(container, "#username");
     // The onServerClick call doesn't have a username in testProfiles, so it stays empty
     // The credential should NOT be applied because host changed
     expect(usernameInput.value).toBe("");
@@ -636,10 +462,9 @@ describe("ConnectPage", () => {
 
   it("opens settings when gear button is clicked", async () => {
     const { openSettings } = await import("../../../src/stores/ui.store");
-    const page = createConnectPage(makeCallbacks(), testProfiles);
-    page.mount(container);
+    const page = mountPage(container);
 
-    const gearBtn = container.querySelector(".settings-gear") as HTMLButtonElement;
+    const gearBtn = qs<HTMLButtonElement>(container, ".settings-gear");
     gearBtn.click();
 
     expect(openSettings).toHaveBeenCalledTimes(1);
@@ -654,8 +479,7 @@ describe("ConnectPage", () => {
   it("closes settings on destroy so the flag doesn't leak into the next page", async () => {
     const { closeSettings } = await import("../../../src/stores/ui.store");
     vi.mocked(closeSettings).mockClear();
-    const page = createConnectPage(makeCallbacks(), testProfiles);
-    page.mount(container);
+    const page = mountPage(container);
 
     page.destroy?.();
 
@@ -666,17 +490,16 @@ describe("ConnectPage", () => {
 
   it("a saved password checks the remember-password box and fills a placeholder", async () => {
     mockLoadCredential.mockResolvedValue({ username: "user", token: "tok", hasPassword: true });
-    const page = createConnectPage(makeCallbacks(), testProfiles);
-    page.mount(container);
+    const page = mountPage(container);
 
-    const serverItem = container.querySelector(".server-item") as HTMLElement;
+    const serverItem = qs<HTMLElement>(container, ".server-item");
     serverItem.click();
 
     await vi.waitFor(() => {
       expect(page.getRememberPassword()).toBe(true);
     });
 
-    const passwordInput = container.querySelector("#password") as HTMLInputElement;
+    const passwordInput = qs<HTMLInputElement>(container, "#password");
     expect(passwordInput.value).not.toBe("");
     expect(passwordInput.value).not.toBe("pass123");
     // The property that actually matters: the box is on the saved-password
@@ -689,8 +512,7 @@ describe("ConnectPage", () => {
   // --- Status bar states ---
 
   it("status bar is hidden on idle/error/totp states and visible on loading/connecting", () => {
-    const page = createConnectPage(makeCallbacks(), testProfiles);
-    page.mount(container);
+    const page = mountPage(container);
 
     const statusBar = container.querySelector(".status-bar")!;
 
@@ -719,32 +541,18 @@ describe("ConnectPage", () => {
   // --- Loading state button text ---
 
   it("shows correct button text during loading states", async () => {
-    let resolveLogin: () => void;
-    const loginPromise = new Promise<void>((resolve) => {
-      resolveLogin = resolve;
-    });
-    const onLogin = vi.fn().mockReturnValue(loginPromise);
+    const { onLogin, resolveLogin } = pendingLogin();
 
-    const page = createConnectPage(makeCallbacks({ onLogin }), testProfiles);
-    page.mount(container);
+    const page = mountPage(container, { onLogin });
 
-    const hostInput = container.querySelector("#host") as HTMLInputElement;
-    const usernameInput = container.querySelector("#username") as HTMLInputElement;
-    const passwordInput = container.querySelector("#password") as HTMLInputElement;
-
-    hostInput.value = "localhost:8443";
-    usernameInput.value = "testuser";
-    passwordInput.value = "password123";
-
-    const form = container.querySelector(".connect-form") as HTMLFormElement;
-    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    signIn(container, "localhost:8443", "testuser", "password123");
 
     await vi.waitFor(() => {
       const btnText = container.querySelector(".btn-text")!;
       expect(btnText.textContent).toContain("Logging in");
     });
 
-    resolveLogin!();
+    resolveLogin();
     page.destroy?.();
   });
 
@@ -755,25 +563,15 @@ describe("ConnectPage", () => {
     });
     const onRegister = vi.fn().mockReturnValue(registerPromise);
 
-    const page = createConnectPage(makeCallbacks({ onRegister }), testProfiles);
-    page.mount(container);
+    const page = mountPage(container, { onRegister });
 
     // Switch to register mode
-    const toggleLink = container.querySelector(".form-switch button") as HTMLElement;
-    toggleLink.click();
+    switchMode(container);
 
-    const hostInput = container.querySelector("#host") as HTMLInputElement;
-    const usernameInput = container.querySelector("#username") as HTMLInputElement;
-    const passwordInput = container.querySelector("#password") as HTMLInputElement;
-    const inviteInput = container.querySelector("#invite") as HTMLInputElement;
+    fillLogin(container, "localhost:8443", "newuser", "password123");
+    setField(container, "#invite", "CODE");
 
-    hostInput.value = "localhost:8443";
-    usernameInput.value = "newuser";
-    passwordInput.value = "password123";
-    inviteInput.value = "CODE";
-
-    const form = container.querySelector(".connect-form") as HTMLFormElement;
-    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    submitForm(container);
 
     await vi.waitFor(() => {
       const btnText = container.querySelector(".btn-text")!;
@@ -787,8 +585,7 @@ describe("ConnectPage", () => {
   // --- Auto-connect overlay hidden by default ---
 
   it("auto-connect overlay is hidden by default", () => {
-    const page = createConnectPage(makeCallbacks(), testProfiles);
-    page.mount(container);
+    const page = mountPage(container);
 
     const overlay = container.querySelector(".auto-connect-overlay")!;
     expect(overlay.classList.contains("auto-connect-overlay--hidden")).toBe(true);
@@ -858,12 +655,11 @@ describe("ConnectPage", () => {
       vi.useFakeTimers();
       const modes = new Map<string, "open">();
       const onHostSettled = vi.fn((host: string) => modes.set(host, "open"));
-      const page = createConnectPage(
-        makeCallbacks({ onHostSettled, getRegistrationMode: (h) => modes.get(h) ?? null }),
-        testProfiles,
-      );
-      page.mount(container);
-      (container.querySelector(".form-switch button") as HTMLElement).click();
+      const page = mountPage(container, {
+        onHostSettled,
+        getRegistrationMode: (h) => modes.get(h) ?? null,
+      });
+      switchMode(container);
       typeHost(container, "typed.example:8443");
       expect(onHostSettled).not.toHaveBeenCalled();
       vi.advanceTimersByTime(500);
@@ -882,8 +678,7 @@ describe("ConnectPage", () => {
     it("does not probe in login mode", () => {
       vi.useFakeTimers();
       const onHostSettled = vi.fn();
-      const page = createConnectPage(makeCallbacks({ onHostSettled }), testProfiles);
-      page.mount(container);
+      const page = mountPage(container, { onHostSettled });
       typeHost(container, "typed.example:8443");
       vi.advanceTimersByTime(1000);
       expect(onHostSettled).not.toHaveBeenCalled();
@@ -893,18 +688,12 @@ describe("ConnectPage", () => {
 
   it("invite mode requires an invite code and hides no notice", async () => {
     const onRegister = vi.fn().mockResolvedValue(undefined);
-    const page = createConnectPage(
-      makeCallbacks({ onRegister, getRegistrationMode: () => "invite" }),
-      testProfiles,
-    );
-    page.mount(container);
+    const page = mountPage(container, { onRegister, getRegistrationMode: () => "invite" });
 
     const form = fillRegisterForm(container, null);
     form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
 
-    await vi.waitFor(() => {
-      expect(container.querySelector(".error-banner")!.classList.contains("visible")).toBe(true);
-    });
+    await expectBannerVisible(container);
     expect(onRegister).not.toHaveBeenCalled();
     expect(container.querySelector(".registration-notice")!.classList.contains("visible")).toBe(
       false,
@@ -915,29 +704,19 @@ describe("ConnectPage", () => {
 
   it("open mode submits without an invite code", async () => {
     const onRegister = vi.fn().mockResolvedValue(undefined);
-    const page = createConnectPage(
-      makeCallbacks({ onRegister, getRegistrationMode: () => "open" }),
-      testProfiles,
-    );
-    page.mount(container);
+    const page = mountPage(container, { onRegister, getRegistrationMode: () => "open" });
 
     const form = fillRegisterForm(container, null);
     form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
 
-    await vi.waitFor(() => {
-      expect(onRegister).toHaveBeenCalledWith("localhost:8443", "newuser", "password123", "");
-    });
+    await waitForCall(onRegister, "localhost:8443", "newuser", "password123", "");
 
     page.destroy?.();
   });
 
   it("approval mode submits without a code and shows the pending-approval notice up front", async () => {
     const onRegister = vi.fn().mockResolvedValue(undefined);
-    const page = createConnectPage(
-      makeCallbacks({ onRegister, getRegistrationMode: () => "approval" }),
-      testProfiles,
-    );
-    page.mount(container);
+    const page = mountPage(container, { onRegister, getRegistrationMode: () => "approval" });
 
     const form = fillRegisterForm(container, null);
 
@@ -946,32 +725,25 @@ describe("ConnectPage", () => {
     expect(notice.textContent).toContain("admin must approve");
 
     form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
-    await vi.waitFor(() => {
-      expect(onRegister).toHaveBeenCalledWith("localhost:8443", "newuser", "password123", "");
-    });
+    await waitForCall(onRegister, "localhost:8443", "newuser", "password123", "");
 
     page.destroy?.();
   });
 
   it("closed mode disables register and states why", () => {
     const onRegister = vi.fn();
-    const page = createConnectPage(
-      makeCallbacks({ onRegister, getRegistrationMode: () => "closed" }),
-      testProfiles,
-    );
-    page.mount(container);
+    const page = mountPage(container, { onRegister, getRegistrationMode: () => "closed" });
 
     selectHostAndRegister(container);
 
-    const submit = container.querySelector(".btn-primary[type='submit']") as HTMLButtonElement;
+    const submit = qs<HTMLButtonElement>(container, ".btn-primary[type='submit']");
     expect(submit.disabled).toBe(true);
     const notice = container.querySelector(".registration-notice")!;
     expect(notice.classList.contains("visible")).toBe(true);
     expect(notice.textContent).toContain("Registration is closed");
 
     // Even a forced submit refuses and never reaches the callback.
-    const form = container.querySelector(".connect-form") as HTMLFormElement;
-    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    submitForm(container);
     expect(onRegister).not.toHaveBeenCalled();
 
     page.destroy?.();
@@ -983,18 +755,14 @@ describe("ConnectPage", () => {
       host === "localhost:8443" ? retention : null,
     );
     let mode: import("../../../src/lib/types").RegistrationMode = "open";
-    const page = createConnectPage(
-      makeCallbacks({ getRegistrationMode: () => mode, getRetentionNotice }),
-      testProfiles,
-    );
-    page.mount(container);
+    const page = mountPage(container, { getRegistrationMode: () => mode, getRetentionNotice });
     const notice = container.querySelector(".registration-notice")!;
-    const host = container.querySelector("#host") as HTMLInputElement;
+    const host = qs<HTMLInputElement>(container, "#host");
     host.value = "localhost:8443";
     host.dispatchEvent(new Event("input", { bubbles: true }));
     expect(notice.textContent).not.toContain(retention);
 
-    (container.querySelector(".form-switch button") as HTMLElement).click();
+    switchMode(container);
     expect(notice.classList.contains("visible")).toBe(true);
     expect(notice.textContent).toBe(retention);
 
@@ -1014,8 +782,7 @@ describe("ConnectPage", () => {
     // No `getRegistrationMode` callback at all — the older-server / failed-read
     // fallback. Registration must not be silently widened.
     const onRegister = vi.fn().mockResolvedValue(undefined);
-    const page = createConnectPage(makeCallbacks({ onRegister }), testProfiles);
-    page.mount(container);
+    const page = mountPage(container, { onRegister });
 
     const form = fillRegisterForm(container, null);
     form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
@@ -1032,11 +799,7 @@ describe("ConnectPage", () => {
 
   it("an unknown mode string (null from the parser) still requires an invite code", async () => {
     const onRegister = vi.fn().mockResolvedValue(undefined);
-    const page = createConnectPage(
-      makeCallbacks({ onRegister, getRegistrationMode: () => null }),
-      testProfiles,
-    );
-    page.mount(container);
+    const page = mountPage(container, { onRegister, getRegistrationMode: () => null });
 
     const form = fillRegisterForm(container, null);
     form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
@@ -1053,25 +816,18 @@ describe("ConnectPage", () => {
 
   it("re-derives the mode when server-info arrives after a host is selected", () => {
     let mode: import("../../../src/lib/types").RegistrationMode | null = null;
-    const page = createConnectPage(
-      makeCallbacks({ getRegistrationMode: () => mode }),
-      testProfiles,
-    );
-    page.mount(container);
+    const page = mountPage(container, { getRegistrationMode: () => mode });
 
-    (container.querySelector(".server-item") as HTMLElement).click();
-    const toggle = container.querySelector(".form-switch button") as HTMLElement;
-    toggle.click();
-    expect(
-      (container.querySelector(".btn-primary[type='submit']") as HTMLButtonElement).disabled,
-    ).toBe(false);
+    qs<HTMLElement>(container, ".server-item").click();
+    switchMode(container);
+    expect(qs<HTMLButtonElement>(container, ".btn-primary[type='submit']").disabled).toBe(false);
 
     // A late snapshot flips the host to `closed`; updateCompatibility nudges
     // the form to re-read it.
     mode = "closed";
     page.updateCompatibility("localhost:8443", "compatible", 1);
 
-    const submit = container.querySelector(".btn-primary[type='submit']") as HTMLButtonElement;
+    const submit = qs<HTMLButtonElement>(container, ".btn-primary[type='submit']");
     expect(submit.disabled).toBe(true);
     expect(container.querySelector(".registration-notice")!.textContent).toContain(
       "Registration is closed",
@@ -1081,16 +837,12 @@ describe("ConnectPage", () => {
   });
 
   it("an invite link to another host re-derives the mode while already registering", () => {
-    const page = createConnectPage(
-      makeCallbacks({
-        getRegistrationMode: (host) => (host === "localhost:8443" ? "open" : "closed"),
-      }),
-      testProfiles,
-    );
-    page.mount(container);
+    const page = mountPage(container, {
+      getRegistrationMode: (host) => (host === "localhost:8443" ? "open" : "closed"),
+    });
 
     selectHostAndRegister(container);
-    const submit = container.querySelector(".btn-primary[type='submit']") as HTMLButtonElement;
+    const submit = qs<HTMLButtonElement>(container, ".btn-primary[type='submit']");
     expect(submit.disabled).toBe(false);
 
     page.applyInviteLink("abc123", "other.example:8443");

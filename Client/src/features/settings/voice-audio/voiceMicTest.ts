@@ -103,7 +103,7 @@ export function mountMicTest(sc: VoiceTabScope): void {
       kind: "voiceGate",
       threshold: sc.nativeTestThreshold(),
       retune: false,
-      ...(sc.nativeTestFloor === null ? {} : { speech: true }),
+      speech: true,
     });
   };
 
@@ -166,7 +166,7 @@ export function mountMicTest(sc: VoiceTabScope): void {
         inputGain: sc.inputVolumePercent,
         outputGain: monitor ? 0 : micTestVolume(loadPref<number>("outputVolume", 100)),
         threshold: sc.nativeTestThreshold(),
-        ...(sc.nativeTestFloor === null ? {} : { speech: true }),
+        speech: true,
         ...(monitor ? { monitor } : {}),
       });
       if (sc.signal.aborted || request !== sc.nativeTestRequest) {

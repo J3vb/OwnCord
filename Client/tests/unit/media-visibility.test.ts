@@ -1,6 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as mediaVisibility from "../../src/lib/prefs/mediaVisibility";
-import { observeMedia, unobserveMedia, pauseAllMedia } from "../../src/lib/prefs/mediaVisibility";
+import {
+  observeMedia,
+  unobserveMedia,
+  pauseAllMedia,
+  playMedia,
+} from "../../src/lib/prefs/mediaVisibility";
 import { runSessionResets } from "../../src/lib/net/sessionRegistry";
 
 // Resolved off the namespace so a missing export fails the assertion, not the import.
@@ -193,6 +198,28 @@ describe("media-visibility", () => {
     expect(img.src).toBe("data:image/png;base64,frozen");
     expect(wrap.classList.contains("gif-paused")).toBe(true);
     cleanup();
+  });
+
+  it("playMedia plays a paused image for another 10 seconds, like the play button", () => {
+    const cleanup = setupCanvasMocks();
+    const img = createFakeImg("https://example.com/sticker.gif");
+    const wrap = createWrapper();
+    observeMedia(img, "https://example.com/sticker.gif", wrap, true);
+    flushCapture();
+    expect(img.src).toBe("data:image/png;base64,frozen");
+    playMedia(img);
+    expect(img.src).toBe("https://example.com/sticker.gif");
+    expect(wrap.classList.contains("gif-paused")).toBe(false);
+    vi.advanceTimersByTime(10_000);
+    flushCapture();
+    expect(img.src).toBe("data:image/png;base64,frozen");
+    cleanup();
+  });
+
+  it("playMedia leaves an untracked image alone", () => {
+    const img = createFakeImg("https://example.com/plain.png");
+    playMedia(img);
+    expect(img.src).toBe("https://example.com/plain.png");
   });
 
   it("pause button click freezes immediately", () => {
@@ -407,6 +434,18 @@ describe("media-visibility still cache", () => {
     expect(drawImage).not.toHaveBeenCalled();
     flushCapture();
     expect(drawImage).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the image's shape when its box is not (a square sticker box)", () => {
+    const img = document.createElement("img");
+    img.src = "https://example.com/wide.gif";
+    Object.defineProperty(img, "naturalWidth", { value: 320 });
+    Object.defineProperty(img, "naturalHeight", { value: 200 });
+    Object.defineProperty(img, "width", { value: 160 });
+    Object.defineProperty(img, "height", { value: 160 });
+    observeMedia(img, "https://example.com/wide.gif", createWrapper(), true);
+    flushCapture();
+    expect(drawImage).toHaveBeenCalledWith(img, 0, 0, 160, 100);
   });
 
   it("freezes through a blob URL, not a data URL", () => {

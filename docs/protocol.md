@@ -99,7 +99,7 @@ The sequence number system enables reconnection with state recovery.
 | Category           | Has seq? | Examples                                                                                                                                                                                                                                                                                                                                                              |
 | ------------------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Channel broadcasts | Yes      | `chat_message`, `chat_edited`, `chat_deleted`, `chat_bulk_deleted`, `chat_pinned`, `reaction_update`, `poll_update`                                                                                                                                                                                                                                                   |
-| Global broadcasts  | Yes      | `presence`, `presence_batch` (see below), `member_join`, `member_update`, `member_ban`, `roles_update`, `emoji_update`, `sticker_update`, `voice_state` (broadcast form; see below), `voice_leave`, `channel_update`, `channel_delete`, `server_restart`                                                                                                              |
+| Global broadcasts  | Yes      | `presence`, `presence_batch` (see below), `member_join`, `member_update`, `member_update_batch`, `member_ban`, `roles_update`, `emoji_update`, `sticker_update`, `voice_state` (broadcast form; see below), `voice_leave`, `channel_update`, `channel_delete`, `server_restart`                                                                                       |
 | Ephemeral          | No       | `typing`, `upload_policy` (see below), `game_activity_policy` (see below), a full `presence_batch` snapshot (see below), `mod_queue`, `mod_action`, `member_timeouts` (see below), `channel_categories` (see below), `appeal_status`, `mention_count`, `read_state`, `channel_activity`, `thread_follow_update`, `channel_create` (targeted per recipient; see below) |
 | DM chat events     | Yes      | DM `chat_message`, `chat_edited`, `chat_deleted`, `reaction_update`, `poll_update` — sequenced and replayable exactly like channel broadcasts, delivered only to the DM's participants                                                                                                                                                                                |
 | DM lifecycle       | No       | `dm_channel_open`, `dm_channel_close`, `dm_request` (B5-6)                                                                                                                                                                                                                                                                                                            |
@@ -2472,6 +2472,33 @@ keep an older order for the tail. `role_ids` is absent when
 the server could not read the holder list for this frame and on an older
 server; keep the member's previous roles then.
 
+### member_update_batch (Server -> Client, broadcast)
+
+The same update as `member_update` for several members in one frame. A change
+that touches two or more members (a role rename, delete or reorder) is sent as
+`member_update_batch` frames of up to 64 members each, so a rename held by 1,000
+members costs 16 global frames instead of 1,000. A change that touches one member
+still sends a plain `member_update`.
+
+```json
+{
+  "seq": 74,
+  "type": "member_update_batch",
+  "payload": {
+    "members": [
+      { "user_id": 5, "role": "moderator", "role_ids": [3, 4] },
+      { "user_id": 9, "role": "member", "role_ids": [4] }
+    ]
+  }
+}
+```
+
+Each entry has the `member_update` payload's fields and meaning; apply them in
+order. A member whose roles the server could not read is left out. An older
+server never sends this frame. An older client ignores it, so after a bulk
+rename it shows the old top-role name until its next reconnect brings a fresh
+`ready`.
+
 ### member_ban (Server -> Client, broadcast)
 
 ```json
@@ -2525,7 +2552,8 @@ Unfiltered on purpose — the same list already ships in every client's `ready`
 payload, so it discloses nothing new. A role permission change that alters
 channel visibility is delivered separately, as targeted
 `channel_create`/`channel_delete` messages, and a role deletion additionally
-sends one `member_update` per reassigned member.
+sends the reassigned members a `member_update` (one member) or
+`member_update_batch` frames (several).
 
 ### sticker_update (Server -> Client, broadcast)
 
@@ -2973,6 +3001,14 @@ Quality presets:
 { "type": "voice_leave", "payload": {} }
 ```
 
+It ends only the membership held by the socket that sends it; on a socket with
+no membership it does nothing. A client that left voice while its socket was
+down sends it once after the next `auth_ok`, before applying `ready`, so a
+membership the resumed socket took back from the grace window ends. The server
+also asks the SFU for the join 10 s after a resume takes over a membership,
+and again 20 s later if it was missing; missing both times, the membership ends
+and `voice_leave` goes out, the owner included.
+
 ### voice_leave (Server -> Client, broadcast)
 
 ```json
@@ -3143,10 +3179,15 @@ the destination, so capacity, token minting and key-holder election keep their
 single implementation.
 
 A target whose socket has dropped while the server holds its call open for a
-reconnect (up to 15 seconds) has no socket to receive `voice_moved`. The server
-removes it from voice instead, audits the action as `voice_mod_kick`, and
-answers the moderator with `VOICE_ERROR` ("user was reconnecting; removed from
-voice instead of moved").
+reconnect (up to 15 seconds) has no socket to receive `voice_moved` yet. The
+server removes it from the source channel at once and keeps the move for that
+device session: when the same session resumes inside the window it receives
+`voice_moved` first, and its re-join of the destination keeps any server
+mute or deafen. The move is audited as `voice_mod_move`. A fresh connect
+(a reload) or a resume after the window gets nothing and is simply out of
+voice. Only when the move cannot be kept or delivered (the destination grant fails) does
+the server answer the moderator with `VOICE_ERROR` ("user was reconnecting;
+removed from voice instead of moved") and audit `voice_mod_kick`.
 
 ### voice_moved (Server -> Client, direct)
 
@@ -3256,7 +3297,8 @@ published identity key but the signature is missing/invalid → reject).
     "public_key": "base64-ecdh-pubkey",
     "signature": "base64-ecdsa-signature",
     "identity_public_key": "base64-device-identity-public-key",
-    "video_decode": ["vp8", "h264", "vp9"]
+    "video_decode": ["vp8", "h264", "vp9"],
+    "key_slots": true
   }
 }
 ```
@@ -3285,6 +3327,14 @@ still accepts the announce — a bad list never affects the key. Each announce
 replaces the stored list; an announce without the field clears it. Receivers
 treat an absent or empty list as `["vp8", "h264"]`.
 
+`key_slots` is optional: `true` says this client can hold the room key in two
+key slots and stage a new key in one before sending with it. The server
+stores and relays it only when it is JSON `true`; any other value is dropped
+and the announce kept. The key holder rotates the room key that way only when
+every peer in the channel announced it (see
+[voice_e2ee_offer](#voice_e2ee_offer-client---server)); otherwise every client
+keeps the one-slot behaviour.
+
 ### voice_e2ee_announce (Server -> Client, broadcast to voice channel)
 
 Relayed to the other participants with the sender's user ID attached. Also
@@ -3305,10 +3355,13 @@ the client sent neither (an older client):
     "public_key": "base64-ecdh-pubkey",
     "signature": "base64-ecdsa-signature",
     "video_decode": ["vp8", "h264", "vp9"],
-    "identity_public_key": "base64-device-identity-public-key"
+    "identity_public_key": "base64-device-identity-public-key",
+    "key_slots": true
   }
 }
 ```
+
+`key_slots` is present (and `true`) only when the announcing client sent it.
 
 **Verify rule.** A receiving client verifies `signature` against the
 announce's `identity_public_key` when it is present, and otherwise against the
@@ -3363,6 +3416,12 @@ The key holder wraps the room key for a specific participant:
 }
 ```
 
+The server relays the offer only if, at the moment it sends it, the sender is
+still the channel's key holder and in the channel, and the target is still in
+the channel. The holder changes when a lower user ID's join completes or the
+holder leaves. Otherwise the offer is dropped without an error; the new key
+holder sends its own offers.
+
 `encrypted_key` is opaque to the server (base64 and length checks only). Its
 layout is:
 
@@ -3378,6 +3437,27 @@ re-announces); the mark resets when the sender announces a new ephemeral key.
 A blob with no header (exactly 48 bytes: key + GCM tag) is the pre-epoch
 format and is still accepted from holders on an older build; that
 compatibility path is scheduled for removal in the next release.
+
+A holder sends a peer that announced `key_slots` the v2 layout instead:
+
+```
+0x02 ‖ epoch (u64 big-endian) ‖ slot (u8, 0 or 1) ‖ flags (u8) ‖ AES-GCM ciphertext
+```
+
+The whole 11-byte header is GCM additional data. `slot` is the key slot the
+receiver puts the key in; every encrypted frame names its sender's slot, so a
+receiver holding both slots decrypts frames sent with either key. Flag bit 0
+(stage) means: keep sending with the current key and switch to this slot
+about two seconds later. Every other flag bit must be 0. A receiver with no
+room key yet uses the key at once whatever the flag says. A v1 offer means
+slot 0, used at once.
+
+The holder stages a rotated key (in the slot nobody sends with) only when
+every peer announced `key_slots`; then every peer has the new key before
+anyone sends with it, so no frame is lost at a rotation. While any peer has
+not, the holder rotates in slot 0 at once, and a peer that joins without
+`key_slots` while the call is on slot 1 makes the holder rotate back to slot
+0 straight away.
 
 ### voice_e2ee_offer (Server -> Client, relay to target)
 
@@ -3995,6 +4075,7 @@ tables below add per-type behavioral notes.
 | `voice_token`          | No       | Direct to joiner                                                                                       |
 | `member_join`          | Yes      | All clients                                                                                            |
 | `member_update`        | Yes      | All clients                                                                                            |
+| `member_update_batch`  | Yes      | All clients (several members)                                                                          |
 | `user_update`          | Yes      | All clients (profile changes)                                                                          |
 | `member_ban`           | Yes      | All clients                                                                                            |
 | `roles_update`         | Yes      | All clients (full role list)                                                                           |

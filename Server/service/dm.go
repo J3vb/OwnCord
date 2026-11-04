@@ -11,16 +11,17 @@ import (
 	"github.com/J3vb/OwnCord/Server/telemetry"
 )
 
-// dmStore is what DMService reads and writes. *db.DB satisfies it.
-type dmStore interface {
+// dmCoreStore is what DMService itself reads and writes: channel lifecycle,
+// summaries and call targets. *db.DB satisfies it.
+type dmCoreStore interface {
 	dmReachStore
-	GroupDMStore
+	LeaveGroupDM(ctx context.Context, userID, channelID int64, content string) (*db.LeaveGroupResult, error)
 	GetChannel(ctx context.Context, id int64) (*db.Channel, error)
 	GetUserByID(ctx context.Context, id int64) (*db.User, error)
-	GetRoleByID(ctx context.Context, id int64) (*db.Role, error)
 	GetOrCreateDMChannelGated(ctx context.Context, callerID, recipientID int64) (ch *db.Channel, created, recipientOpened bool, accepted *db.MessageRequest, err error)
 	FindDMChannelIDBetween(ctx context.Context, user1ID, user2ID int64) (int64, bool, error)
 	GetUserDMChannels(ctx context.Context, userID int64) ([]db.DMChannelInfo, error)
+	GetDMHistoryForParticipants(ctx context.Context, channelID int64, userIDs []int64) (map[int64]db.DMHistory, error)
 	OpenDMIfParticipant(ctx context.Context, userID, channelID int64) (bool, error)
 	CloseDM(ctx context.Context, userID, channelID int64) error
 	IsDMParticipant(ctx context.Context, userID, channelID int64) (bool, error)
@@ -31,10 +32,18 @@ type dmStore interface {
 	IsTrustedSender(ctx context.Context, recipientID, senderID int64) (bool, error)
 }
 
+// dmStore is what the DM service and its group management part read and write.
+// *db.DB satisfies it.
+type dmStore interface {
+	dmCoreStore
+	groupManagementStore
+}
+
 // DMService handles direct-message channel operations.
 type DMService struct {
-	st    dmStore
+	st    dmCoreStore
 	perms *PermissionService
+	*groupManagement
 	// liveStatus returns userID's live status (what their connection last stamped or
 	// chose), "" with no connection or no stamp. The ws layer wires it
 	// (Hub.LiveStatus) so DM payloads apply the rules of ws/serve_ready.go's
@@ -50,7 +59,7 @@ type DMService struct {
 // NewDMService creates a DMService. perms answers whether an actor is timed out,
 // which refuses the writes that publish to other participants.
 func NewDMService(st dmStore, perms *PermissionService) *DMService {
-	return &DMService{st: st, perms: perms}
+	return &DMService{st: st, perms: perms, groupManagement: &groupManagement{st: st, perms: perms}}
 }
 
 // SetLiveStatusLookup wires the live-status lookup DM payloads present instead of
@@ -378,58 +387,6 @@ func (s *DMService) CreateGroupDM(ctx context.Context, userID int64, recipientID
 		Participants:   participants,
 		ParticipantIDs: participantIDs,
 	}, nil
-}
-
-// RenameGroupResult is what a rename did.
-type RenameGroupResult struct {
-	// Rows is the group_rename row, empty when the name did not change.
-	Rows []GroupEventRow
-	// Audience is the members, who receive the refreshed summary and the row.
-	Audience []int64
-}
-
-// RenameGroupDM sets (or, with "", clears) a group DM's name. Any participant may
-// rename (the owner has more authority over membership, not the name). A changed
-// name writes a group_rename row in the same transaction, returned in Rows; an
-// equal name writes none. A 1:1 DM refuses: its name is who is in it.
-func (s *DMService) RenameGroupDM(ctx context.Context, userID, channelID int64, name string) (*RenameGroupResult, error) {
-	if channelID <= 0 {
-		return nil, fmt.Errorf("%w: channel_id must be positive", ErrBadRequest)
-	}
-
-	ok, err := s.st.IsDMParticipant(ctx, userID, channelID)
-	if err != nil || !ok {
-		return nil, fmt.Errorf("%w: not a participant in this DM", ErrNotFound)
-	}
-	// The new name is pushed to every participant, so it is the caller's own text.
-	if err := requireNotTimedOut(ctx, s.perms, userID); err != nil {
-		return nil, err
-	}
-
-	isGroup, err := s.st.IsGroupDM(ctx, channelID)
-	if err != nil {
-		return nil, fmt.Errorf("%w: failed to read DM kind: %w", ErrInternal, err)
-	}
-	if !isGroup {
-		return nil, fmt.Errorf("%w: only group DMs can be named", ErrBadRequest)
-	}
-
-	// Bound the raw bytes before cleanText; see cleanTextBounded (user.go).
-	cleanName, err := cleanVisibleBounded(name, MaxGroupDMNameLen, "name")
-	if err != nil {
-		return nil, err
-	}
-
-	actor, _ := s.st.GetUserByID(ctx, userID) //nolint:errcheck // a failed lookup only changes the fallback text
-	change, err := s.st.SetGroupDMName(ctx, channelID, userID, cleanName, groupRenameContent(actor, cleanName))
-	if err != nil {
-		return nil, mapGroupDBError("failed to rename group DM", err)
-	}
-
-	// The rename committed: the reads below must not fail on a client hang-up, or
-	// the members never hear of it.
-	ctx = context.WithoutCancel(ctx)
-	return &RenameGroupResult{Rows: s.groupRows(ctx, change.Rows), Audience: change.MemberIDs}, nil
 }
 
 // DMSummaryFor returns one DM's payload as viewerID sees it: group name,

@@ -1,4 +1,5 @@
 /** The mutable state one message input instance keeps, shared by its modules. */
+import type { NativeFile } from "../../platform/contracts/nativeFiles";
 import type { Disposable } from "@lib/disposable";
 import type {
   MentionAutocompleteComponent,
@@ -50,6 +51,10 @@ export interface InputState {
   readonly uploadErrorId: string;
   /** Set by mount() when file uploads are wired; backs openFilePicker(). */
   openPicker: (() => void) | null;
+  /** Set by mount(): whether the "+" menu has a tile besides the file sources. */
+  attachHasActions: () => boolean;
+  /** Set by mount(): closes an open "+" menu. */
+  closeAttachMenu: (() => void) | null;
   /** Set by mount(); backs togglePicker(). */
   togglePickerOf: ((kind: "emoji" | "gif" | "sticker") => void) | null;
   mentionPopup: MentionAutocompleteComponent | null;
@@ -166,6 +171,8 @@ export interface InputApi {
   toggleSpoiler(att: InputState["pendingAttachments"][number], btn: HTMLButtonElement): void;
   appendSpoilerButton(item: HTMLDivElement, file: File | undefined): void;
   handlePasteFile(file: File, draftText?: string): Promise<void>;
+  handleNativeFiles(files: readonly NativeFile[]): Promise<void>;
+  pasteNativeFiles(e: ClipboardEvent): boolean;
   startUpload(
     upload: NonNullable<MessageInputOptions["onUploadFile"]>,
     file: File,

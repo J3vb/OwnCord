@@ -1,44 +1,38 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as mocks from "../../helpers/videoModeControllerMocks";
-import {
-  CALL_CHAT_STACK_BELOW_PX,
-  createVideoModeController,
-} from "../../../src/pages/main-page/VideoModeController";
+import { CALL_CHAT_STACK_BELOW_PX } from "../../../src/pages/main-page/VideoModeController";
 import { createVideoGrid } from "../../../src/components/VideoGrid";
 import {
   makeSlots,
   makeVideoGrid,
   VoiceStateStub,
   makeVoiceState,
+  makeController,
+  vUser,
+  usersOf,
+  useVideoModeControllerHarness,
+  callUser,
+  mountCallGrid,
+  unmountCallGrid,
 } from "../../helpers/videoModeControllerHarness";
 
 vi.mock("@stores/voice.store", () => mocks.voiceStoreMock());
 vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
 
-const { mockVoiceStoreGetState, mockGetLocalCameraStream, mockGetLocalScreenshareStream } = mocks;
+const { mockVoiceStoreGetState, mockGetLocalCameraStream } = mocks;
 
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
 describe("createVideoModeController", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mockVoiceStoreGetState.mockReturnValue(makeVoiceState());
-    mockGetLocalCameraStream.mockReturnValue(null);
-    mockGetLocalScreenshareStream.mockReturnValue(null);
-  });
+  useVideoModeControllerHarness();
 
   describe("chat beside the grid", () => {
     function setup() {
       const slots = makeSlots();
       const chatColumn = document.createElement("div");
-      const ctrl = createVideoModeController({
-        slots,
-        chatColumn,
-        videoGrid: makeVideoGrid(),
-        getCurrentUserId: () => 1,
-      });
+      const ctrl = makeController({ slots, chatColumn });
       return { slots, chatColumn, ctrl };
     }
 
@@ -143,8 +137,7 @@ describe("createVideoModeController", () => {
   });
 
   describe("your own video never takes over the chat", () => {
-    const me = () =>
-      new Map([[1, { userId: 1, camera: false, screenshare: false, username: "me" }]]);
+    const me = () => usersOf(vUser(1, "me"));
 
     it("camera on while reading chat stays in chat, and the tile waits in the grid", () => {
       const fakeStream = { getVideoTracks: () => [] } as unknown as MediaStream;
@@ -153,12 +146,7 @@ describe("createVideoModeController", () => {
       mockVoiceStoreGetState.mockReturnValue(state);
       const slots = makeSlots();
       const videoGrid = makeVideoGrid();
-      const ctrl = createVideoModeController({
-        slots,
-        chatColumn: document.createElement("div"),
-        videoGrid,
-        getCurrentUserId: () => 1,
-      });
+      const ctrl = makeController({ slots, videoGrid });
       ctrl.checkVideoMode();
 
       mockVoiceStoreGetState.mockReturnValue({ ...state, localCamera: true });
@@ -183,12 +171,7 @@ describe("createVideoModeController", () => {
       const state = makeVoiceState({ currentChannelId: 10, voiceUsers: new Map([[10, me()]]) });
       mockVoiceStoreGetState.mockReturnValue(state);
       const videoGrid = makeVideoGrid();
-      const ctrl = createVideoModeController({
-        slots: makeSlots(),
-        chatColumn: document.createElement("div"),
-        videoGrid,
-        getCurrentUserId: () => 1,
-      });
+      const ctrl = makeController({ videoGrid });
       ctrl.openCall();
 
       mockVoiceStoreGetState.mockReturnValue({ ...state, localCamera: true });
@@ -215,12 +198,7 @@ describe("createVideoModeController", () => {
       });
       mockVoiceStoreGetState.mockReturnValue(state);
       const slots = makeSlots();
-      const ctrl = createVideoModeController({
-        slots,
-        chatColumn: document.createElement("div"),
-        videoGrid: makeVideoGrid(),
-        getCurrentUserId: () => 1,
-      });
+      const ctrl = makeController({ slots });
       ctrl.openCall();
       expect(ctrl.isVideoMode()).toBe(true);
 
@@ -248,12 +226,7 @@ describe("createVideoModeController", () => {
         voiceUsers: new Map([[10, me()]]),
       });
       mockVoiceStoreGetState.mockReturnValue(inChannel);
-      const ctrl = createVideoModeController({
-        slots: makeSlots(),
-        chatColumn: document.createElement("div"),
-        videoGrid: makeVideoGrid(),
-        getCurrentUserId: () => 1,
-      });
+      const ctrl = makeController();
       ctrl.openCall();
       expect(ctrl.isVideoMode()).toBe(true);
 
@@ -274,9 +247,7 @@ describe("createVideoModeController", () => {
 
   describe("grid cleanup on close", () => {
     it("clears videoGrid streams on a real leave (currentChannelId becomes null)", () => {
-      const users = new Map([
-        [1, { userId: 1, camera: false, screenshare: false, username: "me" }],
-      ]);
+      const users = usersOf(vUser(1, "me"));
       const inChannel = makeVoiceState({
         currentChannelId: 10,
         localCamera: true,
@@ -285,12 +256,7 @@ describe("createVideoModeController", () => {
       mockVoiceStoreGetState.mockReturnValue(inChannel);
 
       const vg = makeVideoGrid();
-      const ctrl = createVideoModeController({
-        slots: makeSlots(),
-        chatColumn: document.createElement("div"),
-        videoGrid: vg,
-        getCurrentUserId: () => 1,
-      });
+      const ctrl = makeController({ videoGrid: vg });
 
       ctrl.checkVideoMode();
       expect(vg.clearStreams).not.toHaveBeenCalled();
@@ -307,20 +273,13 @@ describe("createVideoModeController", () => {
       // Auto-reconnect keeps currentChannelId set, so a transient no-video
       // state (all cameras off, still in the channel) must not wipe
       // in-flight remote tiles.
-      const users = new Map([
-        [1, { userId: 1, camera: false, screenshare: false, username: "me" }],
-      ]);
+      const users = usersOf(vUser(1, "me"));
       mockVoiceStoreGetState.mockReturnValue(
         makeVoiceState({ currentChannelId: 10, voiceUsers: new Map([[10, users]]) }),
       );
 
       const vg = makeVideoGrid();
-      const ctrl = createVideoModeController({
-        slots: makeSlots(),
-        chatColumn: document.createElement("div"),
-        videoGrid: vg,
-        getCurrentUserId: () => 1,
-      });
+      const ctrl = makeController({ videoGrid: vg });
 
       ctrl.checkVideoMode();
 
@@ -332,29 +291,20 @@ describe("createVideoModeController", () => {
       // old channel to the new one (joinVoiceChannel is optimistic), so the
       // channelId === null branch never runs on a switch. Remote tiles left
       // over from channel A must still be cleared when we land in channel B.
-      const usersA = new Map([
-        [1, { userId: 1, camera: false, screenshare: false, username: "me" }],
-      ]);
+      const usersA = usersOf(vUser(1, "me"));
       mockVoiceStoreGetState.mockReturnValue(
         makeVoiceState({ currentChannelId: 10, voiceUsers: new Map([[10, usersA]]) }),
       );
 
       const vg = makeVideoGrid();
-      const ctrl = createVideoModeController({
-        slots: makeSlots(),
-        chatColumn: document.createElement("div"),
-        videoGrid: vg,
-        getCurrentUserId: () => 1,
-      });
+      const ctrl = makeController({ videoGrid: vg });
 
       ctrl.checkVideoMode();
       expect(vg.clearStreams).not.toHaveBeenCalled();
 
       // Switch straight to channel B — currentChannelId goes 10 -> 20, never
       // through null.
-      const usersB = new Map([
-        [1, { userId: 1, camera: false, screenshare: false, username: "me" }],
-      ]);
+      const usersB = usersOf(vUser(1, "me"));
       mockVoiceStoreGetState.mockReturnValue(
         makeVoiceState({ currentChannelId: 20, voiceUsers: new Map([[20, usersB]]) }),
       );
@@ -364,20 +314,13 @@ describe("createVideoModeController", () => {
     });
 
     it("does not clear videoGrid streams across repeated checkVideoMode calls for the same channel (auto-reconnect)", () => {
-      const users = new Map([
-        [1, { userId: 1, camera: false, screenshare: false, username: "me" }],
-      ]);
+      const users = usersOf(vUser(1, "me"));
       mockVoiceStoreGetState.mockReturnValue(
         makeVoiceState({ currentChannelId: 10, voiceUsers: new Map([[10, users]]) }),
       );
 
       const vg = makeVideoGrid();
-      const ctrl = createVideoModeController({
-        slots: makeSlots(),
-        chatColumn: document.createElement("div"),
-        videoGrid: vg,
-        getCurrentUserId: () => 1,
-      });
+      const ctrl = makeController({ videoGrid: vg });
 
       ctrl.checkVideoMode();
       ctrl.checkVideoMode();
@@ -388,12 +331,7 @@ describe("createVideoModeController", () => {
 
     it("closeVideoGrid clears the videoGrid's own focus state, not just the controller's", () => {
       const vg = makeVideoGrid();
-      const ctrl = createVideoModeController({
-        slots: makeSlots(),
-        chatColumn: document.createElement("div"),
-        videoGrid: vg,
-        getCurrentUserId: () => 1,
-      });
+      const ctrl = makeController({ videoGrid: vg });
       ctrl.showVideoGrid();
       ctrl.setFocus(42);
       expect(vg.setFocusedTile).toHaveBeenCalledWith(42);
@@ -406,12 +344,7 @@ describe("createVideoModeController", () => {
     });
   });
   describe("call pop-out", () => {
-    const user = (userId: number, username: string) => ({
-      userId,
-      username,
-      camera: false,
-      screenshare: false,
-    });
+    const user = callUser;
     let container: HTMLDivElement;
     let grid: ReturnType<typeof createVideoGrid>;
     let slots: ReturnType<typeof makeSlots>;
@@ -432,12 +365,7 @@ describe("createVideoModeController", () => {
       [...d.querySelectorAll<HTMLElement>(".video-cell--avatar")].map((t) => t.dataset.personId);
 
     function openPoppedCall() {
-      const ctrl = createVideoModeController({
-        slots,
-        chatColumn: document.createElement("div"),
-        videoGrid: grid,
-        getCurrentUserId: () => 1,
-      });
+      const ctrl = makeController({ slots, videoGrid: grid });
       grid.setCallbacks({ onCallPopout: (out, restore) => ctrl.setCallPoppedOut(out, restore) });
       ctrl.openCall();
       popButton().click();
@@ -446,14 +374,6 @@ describe("createVideoModeController", () => {
 
     beforeEach(() => {
       vi.useFakeTimers();
-      vi.stubGlobal(
-        "ResizeObserver",
-        class {
-          observe(): void {}
-          unobserve(): void {}
-          disconnect(): void {}
-        },
-      );
       popDoc = document.implementation.createHTMLDocument("");
       win = Object.assign(new EventTarget(), {
         closed: false,
@@ -467,21 +387,12 @@ describe("createVideoModeController", () => {
         "open",
         vi.fn(() => win as unknown as Window),
       );
-      container = document.createElement("div");
-      document.body.appendChild(container);
-      grid = createVideoGrid();
-      grid.mount(container);
-      slots = makeSlots();
-      users = new Map([
-        [1, user(1, "me")],
-        [2, user(2, "bob")],
-      ]);
+      ({ container, grid, slots, users } = mountCallGrid());
       setVoice();
     });
 
     afterEach(() => {
-      grid.destroy?.();
-      container.remove();
+      unmountCallGrid({ container, grid });
       vi.useRealTimers();
       vi.unstubAllGlobals();
     });

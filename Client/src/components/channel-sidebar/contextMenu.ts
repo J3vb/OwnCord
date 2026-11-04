@@ -59,10 +59,6 @@ const LEVEL_KEYS = {
   nothing: "channel.notify.nothing",
 } as const satisfies Record<NotificationLevel, string>;
 
-/** Bubbles from a channel row when its mute is toggled. Re-exported from the
- *  mute store, which dispatches it on every write (F16). */
-export { CHANNEL_MUTE_CHANGED } from "@lib/prefs/channelMutes";
-
 /**
  * Attach a context menu to a channel element for mark-read/move/edit/delete/
  * purge. Opened by right-click or, on the focused row, Shift+F10 / the Menu

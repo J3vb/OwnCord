@@ -177,8 +177,8 @@ func (h *Hub) closeClientsForStop() {
 // (shouldMarkOffline), and a same-session replacement sends its own presence, so
 // callers skip both.
 func (h *Hub) rebroadcastAfterDeviceLeft(c *Client) {
-	h.presenceMu.Lock()
-	defer h.presenceMu.Unlock()
+	h.presenceFeed.mu.Lock()
+	defer h.presenceFeed.mu.Unlock()
 	remaining := h.clientsOf(c.userID)
 	if len(remaining) == 0 || slices.Contains(remaining, c) {
 		return

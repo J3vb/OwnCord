@@ -8,7 +8,14 @@
 // pins the server half.
 import { describe, it, expect, afterEach } from "vitest";
 import { JSDOM } from "jsdom";
-import { adminPanelHtml } from "../helpers/admin-panel";
+import {
+  adminHtmlWithBridge,
+  jsonResponder,
+  loadPanelWithFetch,
+  recordLabelled,
+  scriptedPanelFetch,
+  type SentBody as Sent,
+} from "../helpers/adminPanelFetch";
 
 const BRIDGE = `<script>
 window.__test = {
@@ -17,14 +24,13 @@ window.__test = {
   renderStorage, renderUsers, closeModal
 };
 </script>`;
-const ADMIN_HTML = adminPanelHtml().replace("</body>", `${BRIDGE}\n</body>`);
+const ADMIN_HTML = adminHtmlWithBridge(BRIDGE);
 
 const ADMINISTRATOR = 0x40000000;
 const MANAGE_SERVER = 0x2000000;
 const KICK_MEMBERS = 0x40000;
 
 type Responder = (path: string, method: string) => unknown;
-type Sent = { call: string; body: unknown };
 
 interface Bridge {
   state: { token: string; me: unknown; section: string };
@@ -37,29 +43,13 @@ interface Bridge {
 let dom: JSDOM | undefined;
 
 async function boot(respond: Responder, sent: Sent[] = [], calls: string[] = []) {
-  dom = new JSDOM(ADMIN_HTML, {
-    url: "http://localhost:8080/admin",
-    runScripts: "dangerously",
-    pretendToBeVisual: true,
-    beforeParse(window) {
+  dom = loadPanelWithFetch(
+    ADMIN_HTML,
+    scriptedPanelFetch(recordLabelled(calls, sent), jsonResponder(respond)),
+    (window) => {
       window.confirm = () => true;
-      window.fetch = (async (input: string, opts: Record<string, unknown> = {}) => {
-        const method = String((opts.method as string) || "GET").toUpperCase();
-        const p = String(input).replace(/^\/admin\/api/, "");
-        calls.push(`${method} ${p}`);
-        if (typeof opts.body === "string")
-          sent.push({ call: `${method} ${p}`, body: JSON.parse(opts.body) });
-        const json =
-          p === "/setup/status" ? { needs_setup: false } : ((await respond(p, method)) ?? {});
-        return {
-          ok: true,
-          status: 200,
-          json: async () => json,
-          text: async () => JSON.stringify(json),
-        } as Response;
-      }) as typeof fetch;
     },
-  });
+  );
   const settle = (ms = 0) => new Promise((resolve) => dom!.window.setTimeout(resolve, ms));
   await settle();
   calls.length = 0;

@@ -10,30 +10,12 @@
  */
 
 import { test, expect, login } from "./fixtures";
-import type { Locator, Page } from "@playwright/test";
+import { appealRow, openSafety, userIds } from "./serverApi";
+import type { Locator } from "@playwright/test";
 import type { TestServer } from "../support/server";
-
-async function bobId(server: TestServer): Promise<number> {
-  const users = (await server.api("/admin/api/users", undefined, server.owner!.token)) as {
-    id: number;
-    username: string;
-  }[];
-  return users.find((u) => u.username === "bob")!.id;
-}
-
-async function openSafety(page: Page): Promise<Locator> {
-  await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await page.getByRole("tab", { name: "Privacy & Safety" }).click();
-  const pane = page.locator(".safety-tab");
-  await expect(pane.getByRole("heading", { name: "Appeals" })).toBeVisible();
-  return pane;
-}
 
 const historyRow = (pane: Locator, reason: string) =>
   pane.locator("[data-testid^='safety-history-']", { hasText: `Reason: ${reason}` });
-const appealRow = (pane: Locator, reason: string) =>
-  pane.locator(".safety-appeals-list > .safety-history-row", { hasText: `Reason: ${reason}` });
-
 // The Safety tab also holds My reports, whose section has its own alert.
 const appealAlert = (pane: Locator) =>
   pane.getByRole("region", { name: "Appeals" }).getByRole("alert");
@@ -51,7 +33,7 @@ async function appealIdFor(server: TestServer, reason: string): Promise<string> 
     id: string;
     action_id: number;
   }[];
-  const target = await bobId(server);
+  const target = (await userIds(server))("bob");
   const actions = (await server.api(
     `/api/v1/moderation/users/${target}/actions`,
     undefined,
@@ -68,7 +50,7 @@ test.describe("personal appeals (real server)", () => {
     server,
   }) => {
     const owner = server.owner!.token;
-    const target = await bobId(server);
+    const target = (await userIds(server))("bob");
     const paths: string[] = [];
     await server.api(`/api/v1/moderation/users/${target}/warn`, { reason: "Appeal me" }, owner);
     await expect(bob.getByRole("region", { name: "Moderation notices" })).toContainText(
@@ -147,7 +129,7 @@ test.describe("personal appeals (real server)", () => {
     server,
   }) => {
     const owner = server.owner!.token;
-    const target = await bobId(server);
+    const target = (await userIds(server))("bob");
     for (const reason of ["W1", "W2", "W3", "W4"]) {
       await server.api(`/api/v1/moderation/users/${target}/warn`, { reason }, owner);
     }
@@ -185,7 +167,7 @@ test.describe("personal appeals (real server)", () => {
     server,
   }) => {
     const owner = server.owner!.token;
-    const target = await bobId(server);
+    const target = (await userIds(server))("bob");
     await server.api(
       `/admin/api/users/${target}`,
       { banned: true, ban_reason: "Raid" },

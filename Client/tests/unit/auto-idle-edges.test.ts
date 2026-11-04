@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   ACTIVITY_THROTTLE_MS,
   AUTO_IDLE_DELAY_MS,
@@ -8,6 +8,7 @@ import {
   type AutoIdleController,
 } from "../../src/lib/presence/autoIdle";
 import { loadUserStatus, saveUserStatus } from "../../src/lib/presence/userStatus";
+import { useFakeClockAndStorage } from "../helpers/withFakeTimers";
 
 type Target = Pick<Window, "addEventListener" | "removeEventListener">;
 
@@ -35,15 +36,10 @@ function ignoreAnswer(): void {}
 
 let controller: AutoIdleController | null = null;
 
-beforeEach(() => {
-  localStorage.clear();
-  vi.useFakeTimers();
-});
-
-afterEach(() => {
+useFakeClockAndStorage(() => {
   controller?.destroy();
+
   controller = null;
-  vi.useRealTimers();
 });
 
 describe("nextAutoStatus", () => {

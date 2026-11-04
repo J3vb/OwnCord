@@ -375,6 +375,44 @@ func (d *DB) GetUserDMChannels(ctx context.Context, userID int64) ([]DMChannelIn
 	}
 	return result, nil
 }
+
+// DMHistory is the history part of one participant's DM sidebar row: the last
+// message and that participant's unread and mention counts.
+type DMHistory struct {
+	LastMessageID *int64
+	LastMessage   string
+	LastMessageAt string
+	UnreadCount   int
+	MentionCount  int
+}
+
+// GetDMHistoryForParticipants returns the history fields of channelID's sidebar
+// row for each of userIDs that participates in it, in one query, keyed by user.
+// The counts match GetUserDMChannels. Non-participants are absent.
+func (d *DB) GetDMHistoryForParticipants(ctx context.Context, channelID int64, userIDs []int64) (map[int64]DMHistory, error) {
+	out := make(map[int64]DMHistory, len(userIDs))
+	if len(userIDs) == 0 {
+		return out, nil
+	}
+	rows, err := d.q.GetDMHistoryForParticipants(ctx, dbgen.GetDMHistoryForParticipantsParams{
+		ChannelID: channelID,
+		UserIds:   userIDs,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("GetDMHistoryForParticipants: %w", err)
+	}
+	for i := range rows {
+		out[rows[i].UserID] = DMHistory{
+			LastMessageID: rows[i].LastMessageID,
+			LastMessage:   rows[i].LastMessage,
+			LastMessageAt: rows[i].LastMessageAt,
+			UnreadCount:   int(rows[i].UnreadCount),
+			MentionCount:  int(rows[i].MentionCount),
+		}
+	}
+	return out, nil
+}
+
 func (d *DB) CountDMParticipants(ctx context.Context, channelID int64) (int, error) {
 	n, err := d.q.CountDMParticipants(ctx, channelID)
 	if err != nil {

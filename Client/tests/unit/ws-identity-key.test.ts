@@ -1,15 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-vi.mock("@tauri-apps/api/core", async () => ({
-  invoke: (await import("./helpers/ws-mocks")).mockInvoke,
-}));
+import * as wsMocks from "./helpers/ws-mocks";
 
-vi.mock("@tauri-apps/api/event", async () => ({
-  listen: (await import("./helpers/ws-mocks")).mockListen,
-}));
+vi.mock("@tauri-apps/api/core", () => wsMocks.tauriCoreMock());
+vi.mock("@tauri-apps/api/event", () => wsMocks.tauriEventMock());
 
-import { mockInvoke, mockListen, eventHandlers, emitTauriEvent } from "./helpers/ws-mocks";
+import { mockInvoke } from "./helpers/ws-mocks";
 import { createWsClient, setIdentityKeyProvider } from "../../src/lib/ws";
+import { useWsClientFixture } from "../helpers/wsClientFixture";
+import { openSocket } from "../helpers/wsSuiteHarness";
 
 function authFrames(): Array<Record<string, unknown>> {
   return mockInvoke.mock.calls
@@ -26,29 +25,25 @@ function authFrames(): Array<Record<string, unknown>> {
     );
 }
 
+/** Exactly one auth frame went out, and it carries no identity key. */
+function expectKeylessAuth(): void {
+  const frames = authFrames();
+  expect(frames).toHaveLength(1);
+  expect(Object.prototype.hasOwnProperty.call(frames[0], "identity_public_key")).toBe(false);
+}
+
 describe("auth frame: identity_public_key", () => {
   let client: ReturnType<typeof createWsClient>;
 
-  beforeEach(() => {
-    vi.useFakeTimers();
-    mockInvoke.mockReset();
-    mockInvoke.mockResolvedValue(undefined);
-    mockListen.mockClear();
-    eventHandlers.clear();
-    setIdentityKeyProvider(null);
-    client = createWsClient();
+  useWsClientFixture((created) => {
+    client = created;
   });
 
-  afterEach(() => {
-    client.disconnect();
-    setIdentityKeyProvider(null);
-    vi.useRealTimers();
-  });
+  beforeEach(() => setIdentityKeyProvider(null));
+  afterEach(() => setIdentityKeyProvider(null));
 
   async function open(): Promise<void> {
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
+    await openSocket(client);
     await vi.advanceTimersByTimeAsync(10);
   }
 
@@ -68,17 +63,13 @@ describe("auth frame: identity_public_key", () => {
       throw new Error("keyring locked");
     });
     await open();
-    const frames = authFrames();
-    expect(frames).toHaveLength(1);
-    expect(Object.prototype.hasOwnProperty.call(frames[0], "identity_public_key")).toBe(false);
+    expectKeylessAuth();
   });
 
   it("still sends auth, without the key, when the provider has none", async () => {
     setIdentityKeyProvider(async () => null);
     await open();
-    const frames = authFrames();
-    expect(frames).toHaveLength(1);
-    expect(Object.prototype.hasOwnProperty.call(frames[0], "identity_public_key")).toBe(false);
+    expectKeylessAuth();
   });
 
   it("does not wait on a hung keyring: auth goes out without the key after the cap", async () => {
@@ -86,9 +77,7 @@ describe("auth frame: identity_public_key", () => {
     await open();
     expect(authFrames()).toHaveLength(0);
     await vi.advanceTimersByTimeAsync(2_000);
-    const frames = authFrames();
-    expect(frames).toHaveLength(1);
-    expect(Object.prototype.hasOwnProperty.call(frames[0], "identity_public_key")).toBe(false);
+    expectKeylessAuth();
   });
 
   it("drops the frame of an attempt that a disconnect superseded while the key loaded", async () => {
@@ -103,8 +92,6 @@ describe("auth frame: identity_public_key", () => {
 
   it("sends a frame without the key when no provider is registered", async () => {
     await open();
-    const frames = authFrames();
-    expect(frames).toHaveLength(1);
-    expect(Object.prototype.hasOwnProperty.call(frames[0], "identity_public_key")).toBe(false);
+    expectKeylessAuth();
   });
 });

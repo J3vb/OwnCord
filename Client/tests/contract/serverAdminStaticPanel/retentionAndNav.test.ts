@@ -11,8 +11,21 @@ import {
   proposedPreview,
   ADMINISTRATOR,
   boot,
+  bootAsAdmin,
   defaultRespond,
 } from "../../helpers/serverAdminStaticPanelHarness";
+
+/** The /me answer for the Owner account, under `serverName`. */
+const ownerMe = (serverName: string) => ({
+  id: 1,
+  username: "ada",
+  role_name: "Owner",
+  permissions: ADMINISTRATOR,
+  role_position: 100,
+  is_owner: true,
+  server_name: serverName,
+  version: "1.2.0",
+});
 
 describe("Server/admin/static — panel behaviour", () => {
   let dom: JSDOM | undefined;
@@ -22,6 +35,17 @@ describe("Server/admin/static — panel behaviour", () => {
     dom = undefined;
   });
 
+  /** Opens the retention apply dialog for a 14-day window over the booted panel. */
+  async function openRetentionDialog(booted: Awaited<ReturnType<typeof boot>>) {
+    dom = booted.dom;
+    const { bridge } = booted;
+    const doc = dom.window.document;
+    bridge.state.retentionRevision = "revision-1";
+    doc.getElementById("content")!.innerHTML = '<input id="retentionDays" value="14">';
+    await bridge.openApplyRetention();
+    return { bridge, doc };
+  }
+
   // OC-0389. Four mounted retention routes and the retention_days setting had
   // no caller at all, so a policy that continuously and irreversibly deletes
   // message history could be neither set, inspected, overridden nor
@@ -29,7 +53,6 @@ describe("Server/admin/static — panel behaviour", () => {
   it("preserves the saved-policy preview and confirms all retention writes", async () => {
     const calls: FetchCall[] = [];
     const respond: Responder = (p, method) => {
-      if (p === "/setup/status") return { json: { needs_setup: false } };
       if (p === "/retention")
         return {
           json: {
@@ -62,9 +85,8 @@ describe("Server/admin/static — panel behaviour", () => {
         };
       return { json: {} };
     };
-    const booted = await boot(calls, respond);
+    const booted = await bootAsAdmin(calls, respond);
     dom = booted.dom;
-    booted.bridge.state.me = { id: 1, permissions: ADMINISTRATOR, role_position: 100 };
 
     const html = await booted.bridge.renderRetention();
 
@@ -118,7 +140,6 @@ describe("Server/admin/static — panel behaviour", () => {
   it("states channel counts only from the full channel list, in agreeing verb form", async () => {
     let channelsReadable = true;
     const respond: Responder = (p) => {
-      if (p === "/setup/status") return { json: { needs_setup: false } };
       if (p === "/retention")
         return {
           json: {
@@ -139,9 +160,8 @@ describe("Server/admin/static — panel behaviour", () => {
           : { status: 403, json: { message: "forbidden" } };
       return { json: {} };
     };
-    const booted = await boot([], respond);
+    const booted = await bootAsAdmin([], respond);
     dom = booted.dom;
-    booted.bridge.state.me = { id: 1, permissions: ADMINISTRATOR, role_position: 100 };
 
     const full = await booted.bridge.renderRetention();
     expect(full).toContain("1 channel follows this; 1 channel has its own rule.");
@@ -159,12 +179,7 @@ describe("Server/admin/static — panel behaviour", () => {
     const booted = await boot(calls, (p) =>
       p === "/retention/preview" ? { json: proposedPreview } : { json: { needs_setup: false } },
     );
-    dom = booted.dom;
-    const { bridge } = booted;
-    const doc = dom.window.document;
-    bridge.state.retentionRevision = "revision-1";
-    doc.getElementById("content")!.innerHTML = '<input id="retentionDays" value="14">';
-    await bridge.openApplyRetention();
+    const { bridge, doc } = await openRetentionDialog(booted);
     expect(calls.find((c) => c.method === "POST" && c.path === "/retention/preview")?.body).toEqual(
       { proposed: { scope: "server", days: 14 }, revision: "revision-1" },
     );
@@ -193,12 +208,7 @@ describe("Server/admin/static — panel behaviour", () => {
           : { json: proposedPreview }
         : { json: { needs_setup: false } },
     );
-    dom = booted.dom;
-    const { bridge } = booted;
-    const doc = dom.window.document;
-    bridge.state.retentionRevision = "revision-1";
-    doc.getElementById("content")!.innerHTML = '<input id="retentionDays" value="14">';
-    await bridge.openApplyRetention();
+    const { bridge, doc } = await openRetentionDialog(booted);
     (doc.getElementById("retentionDays") as HTMLInputElement).value = "1";
     await bridge.applyRetention();
     expect(calls.some((c) => c.method === "PATCH")).toBe(false);
@@ -306,20 +316,7 @@ describe("Server/admin/static — panel behaviour", () => {
     const calls: FetchCall[] = [];
     let pending = [{ id: 1 }, { id: 2 }];
     const respond: Responder = (p) => {
-      if (p === "/setup/status") return { json: { needs_setup: false } };
-      if (p === "/me")
-        return {
-          json: {
-            id: 1,
-            username: "ada",
-            role_name: "Owner",
-            permissions: ADMINISTRATOR,
-            role_position: 100,
-            is_owner: true,
-            server_name: "Lab <b>",
-            version: "1.2.0",
-          },
-        };
+      if (p === "/me") return { json: ownerMe("Lab <b>") };
       if (p.startsWith("/registrations")) {
         // Answers like the route: at most `limit` rows, 50 by default.
         const limit = /[?&]limit=(\d+)/.exec(p);
@@ -416,20 +413,7 @@ describe("Server/admin/static — panel behaviour", () => {
     const calls: FetchCall[] = [];
     let warnings = [{ id: "a" }];
     const respond: Responder = (p) => {
-      if (p === "/setup/status") return { json: { needs_setup: false } };
-      if (p === "/me")
-        return {
-          json: {
-            id: 1,
-            username: "ada",
-            role_name: "Owner",
-            permissions: ADMINISTRATOR,
-            role_position: 100,
-            is_owner: true,
-            server_name: "Lab",
-            version: "1.2.0",
-          },
-        };
+      if (p === "/me") return { json: ownerMe("Lab") };
       if (p === "/attention") return { json: { warnings } };
       if (p === "/registrations") return { json: [] };
       if (p === "/updates") return { json: { update_available: false } };

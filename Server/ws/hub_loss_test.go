@@ -172,12 +172,12 @@ func TestPresenceFrameRefused_NextFlushSnapshotsEveryClient(t *testing.T) {
 	registerEmitTestClient(h, 2, 6)
 	fillBroadcastQueue(h)
 	h.broadcastPresenceFrame(0, []byte(`{"type":"presence","payload":{"user_id":3,"status":"idle"}}`))
-	if !h.presenceRepair.lostAll.Load() {
+	if !h.presenceFeed.repair.lostAll.Load() {
 		t.Fatal("a refused presence frame was not recorded")
 	}
 	drainQueueThroughDispatch(h)
 	h.flushPresenceQueue()
-	if h.presenceRepair.lostAll.Load() {
+	if h.presenceFeed.repair.lostAll.Load() {
 		t.Fatal("the flush did not take the recorded loss")
 	}
 	for _, uid := range []int64{1, 2} {

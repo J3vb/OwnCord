@@ -15,7 +15,8 @@ import (
 )
 
 // serverInfoResponse is GET /api/v1/server-info: public identity, compatibility,
-// registration mode and the server-default message retention window.
+// registration mode, the server-default message retention window and the upload
+// transfer lifetime.
 // ProtocolEpoch is here because a client (a browser above all) must know whether
 // it can speak to this server BEFORE opening a WebSocket; otherwise the only
 // signal is a rejected connection. There is deliberately no version field: build
@@ -28,36 +29,35 @@ type serverInfoResponse struct {
 	BrowserClientEnabled bool             `json:"browser_client_enabled"`
 	RegistrationMode     string           `json:"registration_mode"`
 	Retention            retentionSummary `json:"retention"`
+	Upload               uploadSummary    `json:"upload"`
 }
 
 type retentionSummary struct {
 	MessagesDays int `json:"messages_days"`
 }
 
-type serverInfoDeps struct {
-	registrationMode func(context.Context) (service.RegistrationMode, error)
-	retentionDays    func(context.Context) (int, error)
-	serverName       func(context.Context) (string, error)
+// uploadSummary lets a client size its own transfer bound above the server's,
+// so the server is the side that cuts a slow upload and its 408 reaches the
+// user.
+type uploadSummary struct {
+	TransferLifetimeSeconds int64 `json:"transfer_lifetime_seconds"`
 }
 
-func routerServerInfoDeps(svc *service.Services) serverInfoDeps {
-	return serverInfoDeps{
-		registrationMode: svc.Settings.RegistrationMode,
-		retentionDays:    svc.Retention.ServerDays,
-		serverName: func(ctx context.Context) (string, error) {
-			return svc.Settings.ServerName(ctx)
-		},
+// uploadTransferLifetime is the lifetime handleUpload gives an upload under the
+// current per-file cap.
+func uploadTransferLifetime(svc *service.Services) time.Duration {
+	var fileCap int64
+	if svc.Uploads != nil {
+		fileCap = svc.Uploads.MaxUploadBytes()
 	}
+	return transferLifetimeFor(uploadBodyCap(fileCap))
 }
 
 // liveServerName is the name the admin page edits: the server_name setting,
 // falling back to config.yaml's server.name when the setting is missing or
 // blank. A read error is returned so the caller can decide.
-func liveServerName(ctx context.Context, cfg *config.Config, deps serverInfoDeps) (string, error) {
-	if deps.serverName == nil {
-		return cfg.Server.Name, nil
-	}
-	name, err := deps.serverName(ctx)
+func liveServerName(ctx context.Context, cfg *config.Config, svc *service.Services) (string, error) {
+	name, err := svc.Settings.ServerName(ctx)
 	if err != nil {
 		return "", fmt.Errorf("server name: %w", err)
 	}
@@ -74,7 +74,7 @@ const (
 	serverInfoReadTimeout = 1 * time.Second
 )
 
-func handleServerInfo(cfg *config.Config, deps serverInfoDeps) http.HandlerFunc {
+func handleServerInfo(cfg *config.Config, svc *service.Services) http.HandlerFunc {
 	var mu syncutil.Mutex
 	var cachedAt time.Time
 	var cached serverInfoResponse
@@ -85,7 +85,7 @@ func handleServerInfo(cfg *config.Config, deps serverInfoDeps) http.HandlerFunc 
 			// The shared result must outlive a disconnected caller, but the
 			// settings reads still have a bounded deadline, as health does.
 			ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), serverInfoReadTimeout)
-			cached, cachedErr = buildServerInfo(ctx, cfg, deps)
+			cached, cachedErr = buildServerInfo(ctx, cfg, svc)
 			cancel()
 			cachedAt = time.Now()
 			if cachedErr != nil {
@@ -102,16 +102,16 @@ func handleServerInfo(cfg *config.Config, deps serverInfoDeps) http.HandlerFunc 
 	}
 }
 
-func buildServerInfo(ctx context.Context, cfg *config.Config, deps serverInfoDeps) (serverInfoResponse, error) {
-	mode, err := deps.registrationMode(ctx)
+func buildServerInfo(ctx context.Context, cfg *config.Config, svc *service.Services) (serverInfoResponse, error) {
+	mode, err := svc.Settings.RegistrationMode(ctx)
 	if err != nil {
 		return serverInfoResponse{}, err
 	}
-	days, err := deps.retentionDays(ctx)
+	days, err := svc.Retention.ServerDays(ctx)
 	if err != nil {
 		return serverInfoResponse{}, err
 	}
-	name, err := liveServerName(ctx, cfg, deps)
+	name, err := liveServerName(ctx, cfg, svc)
 	if err != nil {
 		return serverInfoResponse{}, err
 	}
@@ -132,5 +132,6 @@ func buildServerInfo(ctx context.Context, cfg *config.Config, deps serverInfoDep
 		BrowserClientEnabled: cfg.Server.BrowserClientEnabled,
 		RegistrationMode:     string(mode),
 		Retention:            retentionSummary{MessagesDays: days},
+		Upload:               uploadSummary{TransferLifetimeSeconds: int64(uploadTransferLifetime(svc) / time.Second)},
 	}, nil
 }

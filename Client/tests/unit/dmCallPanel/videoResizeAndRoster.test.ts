@@ -31,6 +31,29 @@ vi.mock("../../../src/features/voice/peerVerification", (importOriginal) =>
   mocks.voicePeerVerificationMock(importOriginal),
 );
 
+/** A blocked peer's shield on their avatar, then their camera tile arriving in the grid. */
+async function mountBlockedPeerOnCameraTile(options: { attach?: boolean } = {}) {
+  setVoice(DM, [vu(SELF), vu(OTTO)]);
+  const { opts, root } = mount();
+  if (options.attach) document.body.appendChild(root);
+  panel!.setVideoActive(true);
+  setPeerVerification({
+    userId: OTTO,
+    status: "mismatch",
+    safetyNumber: null,
+    sessionFingerprint: null,
+  });
+  voiceStore.flush();
+  hostAvatars(opts);
+  const cell = document.createElement("div");
+  cell.className = "video-cell";
+  cell.dataset.userId = String(OTTO);
+  cell.dataset.streamType = "camera";
+  panel!.videoElement()!.appendChild(cell);
+  await Promise.resolve();
+  return { opts, root, cell };
+}
+
 describe("DmCallPanel — video in the call", () => {
   type Person = { userId: number; label: string; content: HTMLElement };
   const lastPeople = (opts: MockedOptions): Person[] =>
@@ -237,24 +260,7 @@ describe("DmCallPanel — video in the call", () => {
   });
 
   it("keeps focus on a focused shield when its camera tile is swapped away", async () => {
-    setVoice(DM, [vu(SELF), vu(OTTO)]);
-    const { opts, root } = mount();
-    document.body.appendChild(root);
-    panel!.setVideoActive(true);
-    setPeerVerification({
-      userId: OTTO,
-      status: "mismatch",
-      safetyNumber: null,
-      sessionFingerprint: null,
-    });
-    voiceStore.flush();
-    hostAvatars(opts);
-    const cell = document.createElement("div");
-    cell.className = "video-cell";
-    cell.dataset.userId = String(OTTO);
-    cell.dataset.streamType = "camera";
-    panel!.videoElement()!.appendChild(cell);
-    await Promise.resolve();
+    const { root, cell } = await mountBlockedPeerOnCameraTile({ attach: true });
 
     const badge = anyShield(root)!;
     badge.focus();
@@ -267,24 +273,7 @@ describe("DmCallPanel — video in the call", () => {
   });
 
   it("does not steal focus back after the shield was blurred and the grid mutates", async () => {
-    setVoice(DM, [vu(SELF), vu(OTTO)]);
-    const { opts, root } = mount();
-    document.body.appendChild(root);
-    panel!.setVideoActive(true);
-    setPeerVerification({
-      userId: OTTO,
-      status: "mismatch",
-      safetyNumber: null,
-      sessionFingerprint: null,
-    });
-    voiceStore.flush();
-    hostAvatars(opts);
-    const cell = document.createElement("div");
-    cell.className = "video-cell";
-    cell.dataset.userId = String(OTTO);
-    cell.dataset.streamType = "camera";
-    panel!.videoElement()!.appendChild(cell);
-    await Promise.resolve();
+    const { root, cell } = await mountBlockedPeerOnCameraTile({ attach: true });
 
     anyShield(root)!.focus();
     anyShield(root)!.blur();
@@ -296,24 +285,7 @@ describe("DmCallPanel — video in the call", () => {
   });
 
   it("refocuses the shield when blur fires before its tile is detached", async () => {
-    setVoice(DM, [vu(SELF), vu(OTTO)]);
-    const { opts, root } = mount();
-    document.body.appendChild(root);
-    panel!.setVideoActive(true);
-    setPeerVerification({
-      userId: OTTO,
-      status: "mismatch",
-      safetyNumber: null,
-      sessionFingerprint: null,
-    });
-    voiceStore.flush();
-    hostAvatars(opts);
-    const cell = document.createElement("div");
-    cell.className = "video-cell";
-    cell.dataset.userId = String(OTTO);
-    cell.dataset.streamType = "camera";
-    panel!.videoElement()!.appendChild(cell);
-    await Promise.resolve();
+    const { root, cell } = await mountBlockedPeerOnCameraTile({ attach: true });
 
     const badge = anyShield(root)!;
     badge.focus();
@@ -328,24 +300,7 @@ describe("DmCallPanel — video in the call", () => {
   });
 
   it("does not refocus a shield the panel itself replaced on rebuild", async () => {
-    setVoice(DM, [vu(SELF), vu(OTTO)]);
-    const { opts, root } = mount();
-    document.body.appendChild(root);
-    panel!.setVideoActive(true);
-    setPeerVerification({
-      userId: OTTO,
-      status: "mismatch",
-      safetyNumber: null,
-      sessionFingerprint: null,
-    });
-    voiceStore.flush();
-    hostAvatars(opts);
-    const cell = document.createElement("div");
-    cell.className = "video-cell";
-    cell.dataset.userId = String(OTTO);
-    cell.dataset.streamType = "camera";
-    panel!.videoElement()!.appendChild(cell);
-    await Promise.resolve();
+    const { root, cell } = await mountBlockedPeerOnCameraTile({ attach: true });
 
     anyShield(root)!.focus();
     q(root, "dcp-collapse")!.click();
@@ -361,23 +316,7 @@ describe("DmCallPanel — video in the call", () => {
   });
 
   it("leaves one shield on a camera tile across a panel rebuild", async () => {
-    setVoice(DM, [vu(SELF), vu(OTTO)]);
-    const { opts, root } = mount();
-    panel!.setVideoActive(true);
-    setPeerVerification({
-      userId: OTTO,
-      status: "mismatch",
-      safetyNumber: null,
-      sessionFingerprint: null,
-    });
-    voiceStore.flush();
-    hostAvatars(opts);
-    const cell = document.createElement("div");
-    cell.className = "video-cell";
-    cell.dataset.userId = String(OTTO);
-    cell.dataset.streamType = "camera";
-    panel!.videoElement()!.appendChild(cell);
-    await Promise.resolve();
+    const { root, cell } = await mountBlockedPeerOnCameraTile();
 
     q(root, "dcp-collapse")!.click();
     q(root, "dcp-collapse")?.click();

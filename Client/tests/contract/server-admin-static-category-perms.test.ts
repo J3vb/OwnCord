@@ -7,9 +7,12 @@
 // scripted jsdom window and drives it the way a browser would.
 import { describe, it, expect, afterEach } from "vitest";
 import { JSDOM } from "jsdom";
-import { adminPanelHtml } from "../helpers/admin-panel";
-
-const ADMIN_HTML_SOURCE = adminPanelHtml();
+import {
+  adminHtmlWithBridge,
+  loadAdminPanel as loadPanel,
+  type FetchCall,
+  type PanelReply,
+} from "../helpers/adminPanelFetch";
 
 const BRIDGE = `<script>
 window.__test = {
@@ -23,16 +26,7 @@ window.__test = {
   ACTIONS: ACTIONS
 };
 </script>`;
-if (!ADMIN_HTML_SOURCE.includes("</body>")) {
-  throw new Error("expected Server/admin/static/index.html to contain </body>");
-}
-const ADMIN_HTML = ADMIN_HTML_SOURCE.replace("</body>", `${BRIDGE}\n</body>`);
-
-interface FetchCall {
-  method: string;
-  path: string;
-  body: unknown;
-}
+const ADMIN_HTML = adminHtmlWithBridge(BRIDGE);
 
 const CHANNELS = [
   {
@@ -64,48 +58,25 @@ const CHANNELS = [
   },
 ];
 
+function respond(p: string, method: string): PanelReply {
+  if (p === "/channels") return { json: CHANNELS };
+  if (p === "/channels/categories") return { json: [{ id: 7, name: "Games", position: 0 }] };
+  if (p === "/channels/categories/7/permissions") {
+    return {
+      json: {
+        category_id: 7,
+        roles: [{ role_id: 5, role_name: "Member", permissions: 0, allow: 0, deny: 0 }],
+        users: [],
+      },
+    };
+  }
+  if (p.startsWith("/users") || p === "/roles") return { json: [] };
+  if (method === "DELETE") return { status: 204, text: "" };
+  return {};
+}
+
 function loadAdminPanel(fetchCalls: FetchCall[]): JSDOM {
-  return new JSDOM(ADMIN_HTML, {
-    url: "http://localhost:8080/admin",
-    runScripts: "dangerously",
-    pretendToBeVisual: true,
-    beforeParse(window) {
-      window.fetch = (async (input: string, opts: Record<string, unknown> = {}) => {
-        const method = String((opts.method as string) || "GET").toUpperCase();
-        const p = input.replace(/^\/admin\/api/, "");
-        let body: unknown;
-        if (typeof opts.body === "string") {
-          try {
-            body = JSON.parse(opts.body);
-          } catch {
-            body = opts.body;
-          }
-        }
-        fetchCalls.push({ method, path: p, body });
-        let payload: unknown = {};
-        if (p === "/setup/status") payload = { needs_setup: false };
-        else if (p === "/channels") payload = CHANNELS;
-        else if (p === "/channels/categories") payload = [{ id: 7, name: "Games", position: 0 }];
-        else if (p === "/channels/categories/7/permissions") {
-          payload = {
-            category_id: 7,
-            roles: [{ role_id: 5, role_name: "Member", permissions: 0, allow: 0, deny: 0 }],
-            users: [],
-          };
-        } else if (p.startsWith("/users")) payload = [];
-        else if (p === "/roles") payload = [];
-        else if (method === "DELETE") {
-          return {
-            ok: true,
-            status: 204,
-            json: async () => ({}),
-            text: async () => "",
-          } as Response;
-        }
-        return { ok: true, status: 200, json: async () => payload } as Response;
-      }) as typeof fetch;
-    },
-  });
+  return loadPanel(ADMIN_HTML, fetchCalls, respond);
 }
 
 type Bridge = {

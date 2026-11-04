@@ -1,9 +1,21 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { showContextMenu, createSubmenuTrigger } from "../../src/lib/ui/contextMenu";
+import { withMeasuredSize } from "../helpers/measuredSize";
+import {
+  showContextMenu,
+  createSubmenuTrigger,
+  type ContextMenuOptions,
+} from "../../src/lib/ui/contextMenu";
+
+let ac: AbortController;
+
+function openMenu(
+  items: ContextMenuOptions["items"],
+  extra: Partial<ContextMenuOptions> = {},
+): void {
+  showContextMenu({ x: 0, y: 0, items, signal: ac.signal, ...extra });
+}
 
 describe("showContextMenu", () => {
-  let ac: AbortController;
-
   beforeEach(() => {
     ac = new AbortController();
     // Clean up any leftover menus
@@ -16,12 +28,7 @@ describe("showContextMenu", () => {
   });
 
   it("renders menu at correct position", () => {
-    showContextMenu({
-      x: 100,
-      y: 200,
-      items: [{ label: "Test", onClick: vi.fn() }],
-      signal: ac.signal,
-    });
+    openMenu([{ label: "Test", onClick: vi.fn() }], { x: 100, y: 200 });
 
     const menu = document.querySelector(".context-menu") as HTMLElement;
     expect(menu).not.toBeNull();
@@ -30,15 +37,10 @@ describe("showContextMenu", () => {
   });
 
   it("renders all items", () => {
-    showContextMenu({
-      x: 0,
-      y: 0,
-      items: [
-        { label: "Edit", onClick: vi.fn() },
-        { label: "Delete", onClick: vi.fn(), danger: true },
-      ],
-      signal: ac.signal,
-    });
+    openMenu([
+      { label: "Edit", onClick: vi.fn() },
+      { label: "Delete", onClick: vi.fn(), danger: true },
+    ]);
 
     const items = document.querySelectorAll(".context-menu-item");
     expect(items.length).toBe(2);
@@ -48,12 +50,7 @@ describe("showContextMenu", () => {
 
   it("fires onClick when item clicked", () => {
     const onClick = vi.fn();
-    showContextMenu({
-      x: 0,
-      y: 0,
-      items: [{ label: "Action", onClick }],
-      signal: ac.signal,
-    });
+    openMenu([{ label: "Action", onClick }]);
 
     const item = document.querySelector(".context-menu-item") as HTMLElement;
     item.click();
@@ -62,12 +59,7 @@ describe("showContextMenu", () => {
   });
 
   it("removes menu after item click", () => {
-    showContextMenu({
-      x: 0,
-      y: 0,
-      items: [{ label: "Action", onClick: vi.fn() }],
-      signal: ac.signal,
-    });
+    openMenu([{ label: "Action", onClick: vi.fn() }]);
 
     const item = document.querySelector(".context-menu-item") as HTMLElement;
     item.click();
@@ -76,36 +68,21 @@ describe("showContextMenu", () => {
   });
 
   it("applies danger class to danger items", () => {
-    showContextMenu({
-      x: 0,
-      y: 0,
-      items: [{ label: "Delete", onClick: vi.fn(), danger: true }],
-      signal: ac.signal,
-    });
+    openMenu([{ label: "Delete", onClick: vi.fn(), danger: true }]);
 
     const item = document.querySelector(".context-menu-item") as HTMLElement;
     expect(item.classList.contains("danger")).toBe(true);
   });
 
   it("applies testId to items", () => {
-    showContextMenu({
-      x: 0,
-      y: 0,
-      items: [{ label: "Edit", onClick: vi.fn(), testId: "ctx-edit" }],
-      signal: ac.signal,
-    });
+    openMenu([{ label: "Edit", onClick: vi.fn(), testId: "ctx-edit" }]);
 
     const item = document.querySelector('[data-testid="ctx-edit"]');
     expect(item).not.toBeNull();
   });
 
   it("removes menu on AbortSignal abort", () => {
-    showContextMenu({
-      x: 0,
-      y: 0,
-      items: [{ label: "Test", onClick: vi.fn() }],
-      signal: ac.signal,
-    });
+    openMenu([{ label: "Test", onClick: vi.fn() }]);
 
     expect(document.querySelector(".context-menu")).not.toBeNull();
 
@@ -115,21 +92,9 @@ describe("showContextMenu", () => {
   });
 
   it("removes existing menu with same className before showing new one", () => {
-    showContextMenu({
-      x: 0,
-      y: 0,
-      items: [{ label: "First", onClick: vi.fn() }],
-      signal: ac.signal,
-      className: "my-menu",
-    });
+    openMenu([{ label: "First", onClick: vi.fn() }], { className: "my-menu" });
 
-    showContextMenu({
-      x: 50,
-      y: 50,
-      items: [{ label: "Second", onClick: vi.fn() }],
-      signal: ac.signal,
-      className: "my-menu",
-    });
+    openMenu([{ label: "Second", onClick: vi.fn() }], { x: 50, y: 50, className: "my-menu" });
 
     const menus = document.querySelectorAll(".my-menu");
     expect(menus.length).toBe(1);
@@ -137,12 +102,7 @@ describe("showContextMenu", () => {
   });
 
   it('uses default className "context-menu" when none specified', () => {
-    showContextMenu({
-      x: 10,
-      y: 20,
-      items: [{ label: "Default", onClick: vi.fn() }],
-      signal: ac.signal,
-    });
+    openMenu([{ label: "Default", onClick: vi.fn() }], { x: 10, y: 20 });
 
     const menu = document.querySelector(".context-menu") as HTMLElement;
     expect(menu).not.toBeNull();
@@ -150,15 +110,10 @@ describe("showContextMenu", () => {
   });
 
   it("adds separator before danger item when preceded by non-danger item", () => {
-    showContextMenu({
-      x: 0,
-      y: 0,
-      items: [
-        { label: "Edit", onClick: vi.fn() },
-        { label: "Delete", onClick: vi.fn(), danger: true },
-      ],
-      signal: ac.signal,
-    });
+    openMenu([
+      { label: "Edit", onClick: vi.fn() },
+      { label: "Delete", onClick: vi.fn(), danger: true },
+    ]);
 
     const menu = document.querySelector(".context-menu") as HTMLElement;
     const sep = menu.querySelector(".context-menu-sep");
@@ -166,12 +121,7 @@ describe("showContextMenu", () => {
   });
 
   it("does not add separator when danger item is first", () => {
-    showContextMenu({
-      x: 0,
-      y: 0,
-      items: [{ label: "Delete", onClick: vi.fn(), danger: true }],
-      signal: ac.signal,
-    });
+    openMenu([{ label: "Delete", onClick: vi.fn(), danger: true }]);
 
     const menu = document.querySelector(".context-menu") as HTMLElement;
     const sep = menu.querySelector(".context-menu-sep");
@@ -179,15 +129,10 @@ describe("showContextMenu", () => {
   });
 
   it("does not add separator between consecutive danger items", () => {
-    showContextMenu({
-      x: 0,
-      y: 0,
-      items: [
-        { label: "Delete", onClick: vi.fn(), danger: true },
-        { label: "Ban", onClick: vi.fn(), danger: true },
-      ],
-      signal: ac.signal,
-    });
+    openMenu([
+      { label: "Delete", onClick: vi.fn(), danger: true },
+      { label: "Ban", onClick: vi.fn(), danger: true },
+    ]);
 
     const menu = document.querySelector(".context-menu") as HTMLElement;
     const seps = menu.querySelectorAll(".context-menu-sep");
@@ -195,16 +140,11 @@ describe("showContextMenu", () => {
   });
 
   it("handles multiple non-danger items without separator", () => {
-    showContextMenu({
-      x: 0,
-      y: 0,
-      items: [
-        { label: "Copy", onClick: vi.fn() },
-        { label: "Edit", onClick: vi.fn() },
-        { label: "Reply", onClick: vi.fn() },
-      ],
-      signal: ac.signal,
-    });
+    openMenu([
+      { label: "Copy", onClick: vi.fn() },
+      { label: "Edit", onClick: vi.fn() },
+      { label: "Reply", onClick: vi.fn() },
+    ]);
 
     const menu = document.querySelector(".context-menu") as HTMLElement;
     const seps = menu.querySelectorAll(".context-menu-sep");
@@ -212,12 +152,7 @@ describe("showContextMenu", () => {
   });
 
   it("closes menu on click outside (mousedown)", async () => {
-    showContextMenu({
-      x: 0,
-      y: 0,
-      items: [{ label: "Test", onClick: vi.fn() }],
-      signal: ac.signal,
-    });
+    openMenu([{ label: "Test", onClick: vi.fn() }]);
 
     expect(document.querySelector(".context-menu")).not.toBeNull();
 
@@ -230,12 +165,7 @@ describe("showContextMenu", () => {
   });
 
   it("does not close menu on mousedown inside the menu", async () => {
-    showContextMenu({
-      x: 0,
-      y: 0,
-      items: [{ label: "Test", onClick: vi.fn() }],
-      signal: ac.signal,
-    });
+    openMenu([{ label: "Test", onClick: vi.fn() }]);
 
     const menu = document.querySelector(".context-menu") as HTMLElement;
     expect(menu).not.toBeNull();
@@ -258,68 +188,37 @@ describe("showContextMenu", () => {
     // so stub the measured size.
     const innerWidth = window.innerWidth;
     const innerHeight = window.innerHeight;
-    Object.defineProperty(HTMLElement.prototype, "offsetWidth", {
-      configurable: true,
-      value: 200,
-    });
-    Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
-      configurable: true,
-      value: 300,
-    });
-    try {
-      showContextMenu({
+    withMeasuredSize(200, 300, () => {
+      openMenu([{ label: "Purge", onClick: vi.fn(), danger: true }], {
         x: innerWidth - 10,
         y: innerHeight - 10,
-        items: [{ label: "Purge", onClick: vi.fn(), danger: true }],
-        signal: ac.signal,
       });
 
       const menu = document.querySelector(".context-menu") as HTMLElement;
       expect(parseInt(menu.style.left, 10)).toBeLessThanOrEqual(innerWidth - 200);
       expect(menu.style.bottom).not.toBe("");
-    } finally {
-      delete (HTMLElement.prototype as unknown as Record<string, unknown>)["offsetWidth"];
-      delete (HTMLElement.prototype as unknown as Record<string, unknown>)["offsetHeight"];
-    }
+    });
   });
 
   it("never pushes a tall menu past the top of a short window", () => {
     vi.stubGlobal("innerWidth", 940);
     vi.stubGlobal("innerHeight", 500);
-    Object.defineProperty(HTMLElement.prototype, "offsetWidth", {
-      configurable: true,
-      value: 200,
-    });
-    Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
-      configurable: true,
-      value: 300,
-    });
     try {
-      showContextMenu({
-        x: 100,
-        y: 250,
-        items: [{ label: "Mark read", onClick: vi.fn() }],
-        signal: ac.signal,
-      });
+      withMeasuredSize(200, 300, () => {
+        openMenu([{ label: "Mark read", onClick: vi.fn() }], { x: 100, y: 250 });
 
-      const menu = document.querySelector(".context-menu") as HTMLElement;
-      // Spans y 8..308: its first item stays reachable.
-      expect(menu.style.top).toBe("");
-      expect(menu.style.bottom).toBe("192px");
+        const menu = document.querySelector(".context-menu") as HTMLElement;
+        // Spans y 8..308: its first item stays reachable.
+        expect(menu.style.top).toBe("");
+        expect(menu.style.bottom).toBe("192px");
+      });
     } finally {
       vi.unstubAllGlobals();
-      delete (HTMLElement.prototype as unknown as Record<string, unknown>)["offsetWidth"];
-      delete (HTMLElement.prototype as unknown as Record<string, unknown>)["offsetHeight"];
     }
   });
 
   it("handles empty items list", () => {
-    showContextMenu({
-      x: 0,
-      y: 0,
-      items: [],
-      signal: ac.signal,
-    });
+    openMenu([]);
 
     const menu = document.querySelector(".context-menu") as HTMLElement;
     expect(menu).not.toBeNull();
@@ -329,15 +228,10 @@ describe("showContextMenu", () => {
   it("clicking one item does not affect other items", () => {
     const onClick1 = vi.fn();
     const onClick2 = vi.fn();
-    showContextMenu({
-      x: 0,
-      y: 0,
-      items: [
-        { label: "Action1", onClick: onClick1 },
-        { label: "Action2", onClick: onClick2 },
-      ],
-      signal: ac.signal,
-    });
+    openMenu([
+      { label: "Action1", onClick: onClick1 },
+      { label: "Action2", onClick: onClick2 },
+    ]);
 
     const items = document.querySelectorAll(".context-menu-item");
     (items[0] as HTMLElement).click();
@@ -347,16 +241,11 @@ describe("showContextMenu", () => {
   });
 
   it("handles non-danger item followed by danger item with separator", () => {
-    showContextMenu({
-      x: 0,
-      y: 0,
-      items: [
-        { label: "Copy", onClick: vi.fn() },
-        { label: "Edit", onClick: vi.fn() },
-        { label: "Delete", onClick: vi.fn(), danger: true },
-      ],
-      signal: ac.signal,
-    });
+    openMenu([
+      { label: "Copy", onClick: vi.fn() },
+      { label: "Edit", onClick: vi.fn() },
+      { label: "Delete", onClick: vi.fn(), danger: true },
+    ]);
 
     const menu = document.querySelector(".context-menu") as HTMLElement;
     const children = Array.from(menu.children);
@@ -366,12 +255,7 @@ describe("showContextMenu", () => {
   });
 
   it("menu is appended to document.body", () => {
-    showContextMenu({
-      x: 100,
-      y: 200,
-      items: [{ label: "Appended", onClick: vi.fn() }],
-      signal: ac.signal,
-    });
+    openMenu([{ label: "Appended", onClick: vi.fn() }], { x: 100, y: 200 });
 
     const menu = document.body.querySelector(".context-menu");
     expect(menu).not.toBeNull();
@@ -379,13 +263,7 @@ describe("showContextMenu", () => {
 
   describe("abort-listener teardown on the caller signal", () => {
     it("does not re-invoke menu cleanup off the caller signal after the menu was already dismissed", () => {
-      showContextMenu({
-        x: 0,
-        y: 0,
-        items: [{ label: "Action", onClick: vi.fn() }],
-        signal: ac.signal,
-        className: "oc0057-menu-a",
-      });
+      openMenu([{ label: "Action", onClick: vi.fn() }], { className: "oc0057-menu-a" });
 
       const menu = document.querySelector(".oc0057-menu-a") as HTMLElement;
       expect(menu).not.toBeNull();
@@ -411,13 +289,7 @@ describe("showContextMenu", () => {
       // right-clicks without the sidebar being rebuilt.
       const menus: HTMLElement[] = [];
       for (let i = 0; i < 3; i++) {
-        showContextMenu({
-          x: 0,
-          y: 0,
-          items: [{ label: "Action", onClick: vi.fn() }],
-          signal: ac.signal,
-          className: "oc0057-menu-b",
-        });
+        openMenu([{ label: "Action", onClick: vi.fn() }], { className: "oc0057-menu-b" });
         const menu = document.querySelector(".oc0057-menu-b") as HTMLElement;
         menus.push(menu);
         const item = menu.querySelector(".context-menu-item") as HTMLElement;
@@ -440,13 +312,7 @@ describe("showContextMenu", () => {
     it("cleans up immediately when the signal is already aborted before the menu is shown", () => {
       ac.abort();
 
-      showContextMenu({
-        x: 0,
-        y: 0,
-        items: [{ label: "Action", onClick: vi.fn() }],
-        signal: ac.signal,
-        className: "oc0057-menu-c",
-      });
+      openMenu([{ label: "Action", onClick: vi.fn() }], { className: "oc0057-menu-c" });
 
       // An already-aborted parent signal means the menu must never be left
       // dangling in the DOM — "abort" already fired before we could listen
@@ -455,13 +321,7 @@ describe("showContextMenu", () => {
     });
 
     it("releases the old menu's abort listener when it is swept away by a same-class reopen", () => {
-      showContextMenu({
-        x: 0,
-        y: 0,
-        items: [{ label: "First", onClick: vi.fn() }],
-        signal: ac.signal,
-        className: "oc0057-menu-d",
-      });
+      openMenu([{ label: "First", onClick: vi.fn() }], { className: "oc0057-menu-d" });
 
       const firstMenu = document.querySelector(".oc0057-menu-d") as HTMLElement;
       expect(firstMenu).not.toBeNull();
@@ -470,11 +330,9 @@ describe("showContextMenu", () => {
       // Reopening with the same className sweeps the first menu out via the
       // querySelectorAll(...).remove() path at the top of the function, not
       // via item click or outside click.
-      showContextMenu({
+      openMenu([{ label: "Second", onClick: vi.fn() }], {
         x: 10,
         y: 10,
-        items: [{ label: "Second", onClick: vi.fn() }],
-        signal: ac.signal,
         className: "oc0057-menu-d",
       });
 
@@ -614,19 +472,14 @@ describe("showContextMenu", () => {
     });
 
     it("group puts the chosen items in one role=group row", async () => {
-      showContextMenu({
-        x: 0,
-        y: 0,
-        items: [
+      openMenu(
+        [
           { label: "A", onClick: vi.fn() },
           { label: "B", onClick: vi.fn() },
           { label: "C", onClick: vi.fn() },
         ],
-        group: { start: 0, count: 2 },
-        ariaLabel: "Things",
-        signal: ac.signal,
-        className: "kbd-menu",
-      });
+        { group: { start: 0, count: 2 }, ariaLabel: "Things", className: "kbd-menu" },
+      );
       const menu = document.querySelector<HTMLElement>(".kbd-menu")!;
       expect(menu.getAttribute("aria-label")).toBe("Things");
       expect(menu.querySelectorAll('[role="group"] [role="menuitem"]').length).toBe(2);
@@ -635,32 +488,26 @@ describe("showContextMenu", () => {
 
     it("onClosed runs once when the menu closes", async () => {
       const onClosed = vi.fn();
-      showContextMenu({
-        x: 0,
-        y: 0,
-        items: [{ label: "One", onClick: vi.fn() }],
-        signal: ac.signal,
-        className: "kbd-menu",
-        onClosed,
-      });
+      openMenu([{ label: "One", onClick: vi.fn() }], { className: "kbd-menu", onClosed });
       document.querySelector<HTMLElement>(".kbd-menu button")!.click();
       expect(onClosed).toHaveBeenCalledTimes(1);
     });
 
-    it("restoreFocusTo used when the invoker is disconnected", async () => {
+    async function openMenuWithFocusFallback() {
       const invoker = document.createElement("button");
       const fallback = document.createElement("button");
       document.body.append(invoker, fallback);
       invoker.focus();
-      showContextMenu({
-        x: 0,
-        y: 0,
-        items: [{ label: "One", onClick: vi.fn() }],
-        signal: ac.signal,
+      openMenu([{ label: "One", onClick: vi.fn() }], {
         className: "kbd-menu",
         restoreFocusTo: () => fallback,
       });
       await new Promise((r) => setTimeout(r, 0));
+      return { invoker, fallback };
+    }
+
+    it("restoreFocusTo used when the invoker is disconnected", async () => {
+      const { invoker, fallback } = await openMenuWithFocusFallback();
       // The row was rebuilt while the menu was open.
       invoker.remove();
       (document.activeElement as HTMLElement).dispatchEvent(
@@ -671,19 +518,7 @@ describe("showContextMenu", () => {
     });
 
     it("restoreFocusTo is not used while the invoker is still on the page", async () => {
-      const invoker = document.createElement("button");
-      const fallback = document.createElement("button");
-      document.body.append(invoker, fallback);
-      invoker.focus();
-      showContextMenu({
-        x: 0,
-        y: 0,
-        items: [{ label: "One", onClick: vi.fn() }],
-        signal: ac.signal,
-        className: "kbd-menu",
-        restoreFocusTo: () => fallback,
-      });
-      await new Promise((r) => setTimeout(r, 0));
+      const { invoker, fallback } = await openMenuWithFocusFallback();
       (document.activeElement as HTMLElement).dispatchEvent(
         new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
       );
@@ -695,16 +530,11 @@ describe("showContextMenu", () => {
 
   describe("checkbox rows", () => {
     it("a row with `checked` is a menuitemcheckbox carrying aria-checked", () => {
-      showContextMenu({
-        x: 0,
-        y: 0,
-        items: [
-          { label: "On", onClick: vi.fn(), checked: true },
-          { label: "Off", onClick: vi.fn(), checked: false },
-          { label: "Plain", onClick: vi.fn() },
-        ],
-        signal: ac.signal,
-      });
+      openMenu([
+        { label: "On", onClick: vi.fn(), checked: true },
+        { label: "Off", onClick: vi.fn(), checked: false },
+        { label: "Plain", onClick: vi.fn() },
+      ]);
 
       const rows = Array.from(document.querySelectorAll<HTMLElement>(".context-menu-item"));
       expect(rows.map((r) => r.getAttribute("role"))).toEqual([
@@ -717,15 +547,10 @@ describe("showContextMenu", () => {
 
     it("a click runs onClick and closes the menu; arrow keys reach the row", async () => {
       const onClick = vi.fn();
-      showContextMenu({
-        x: 0,
-        y: 0,
-        items: [
-          { label: "First", onClick: vi.fn() },
-          { label: "Check", onClick, checked: false },
-        ],
-        signal: ac.signal,
-      });
+      openMenu([
+        { label: "First", onClick: vi.fn() },
+        { label: "Check", onClick, checked: false },
+      ]);
       await new Promise((r) => setTimeout(r, 0));
       (document.activeElement as HTMLElement).dispatchEvent(
         new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }),
@@ -742,8 +567,6 @@ describe("showContextMenu", () => {
 });
 
 describe("submenus and radio rows (3D-3a)", () => {
-  let ac: AbortController;
-
   beforeEach(() => {
     ac = new AbortController();
     document.querySelectorAll(".context-menu").forEach((el) => el.remove());
@@ -754,23 +577,18 @@ describe("submenus and radio rows (3D-3a)", () => {
   });
 
   function open(onClick = vi.fn(), onPick = vi.fn()) {
-    showContextMenu({
-      x: 0,
-      y: 0,
-      signal: ac.signal,
-      items: [
-        {
-          label: "Mute",
-          testId: "trigger",
-          onClick,
-          submenu: [
-            { label: "One", testId: "sub-one", onClick: onPick },
-            { label: "Two", testId: "sub-two", onClick: vi.fn() },
-          ],
-        },
-        { label: "Other", onClick: vi.fn() },
-      ],
-    });
+    openMenu([
+      {
+        label: "Mute",
+        testId: "trigger",
+        onClick,
+        submenu: [
+          { label: "One", testId: "sub-one", onClick: onPick },
+          { label: "Two", testId: "sub-two", onClick: vi.fn() },
+        ],
+      },
+      { label: "Other", onClick: vi.fn() },
+    ]);
     const trigger = document.querySelector('[data-testid="trigger"]') as HTMLElement;
     return { trigger, flyout: trigger.nextElementSibling as HTMLElement };
   }
@@ -810,7 +628,7 @@ describe("submenus and radio rows (3D-3a)", () => {
     expect(flyout.isConnected).toBe(false); // the menu closed
   });
 
-  it("Enter on a plain trigger still opens it", () => {
+  function mountPlainTrigger() {
     const onActivate = vi.fn();
     const menu = document.createElement("div");
     menu.className = "context-menu plain";
@@ -826,8 +644,15 @@ describe("submenus and radio rows (3D-3a)", () => {
     menu.append(trigger, flyout);
     document.body.appendChild(menu);
     // Same keyboard model every menu gets.
-    return import("../../src/lib/ui/contextMenu").then(({ enableMenuKeyboard }) => {
+    const ready = import("../../src/lib/ui/contextMenu").then(({ enableMenuKeyboard }) => {
       enableMenuKeyboard(menu, { signal: ac.signal, onClose: () => menu.remove() });
+    });
+    return { onActivate, trigger, flyout, row, ready };
+  }
+
+  it("Enter on a plain trigger still opens it", () => {
+    const { onActivate, trigger, flyout, row, ready } = mountPlainTrigger();
+    return ready.then(() => {
       trigger.focus();
       key(trigger, "Enter");
       expect(onActivate).not.toHaveBeenCalled();
@@ -837,23 +662,8 @@ describe("submenus and radio rows (3D-3a)", () => {
   });
 
   it("Space on a plain trigger opens it, as Enter does", () => {
-    const onActivate = vi.fn();
-    const menu = document.createElement("div");
-    menu.className = "context-menu plain";
-    const { trigger, flyout } = createSubmenuTrigger(
-      "Plain",
-      "context-menu-item",
-      { onActivate },
-      ac.signal,
-    );
-    const row = document.createElement("button");
-    row.setAttribute("role", "menuitem");
-    flyout.appendChild(row);
-    menu.append(trigger, flyout);
-    document.body.appendChild(menu);
-    // Same keyboard model every menu gets.
-    return import("../../src/lib/ui/contextMenu").then(({ enableMenuKeyboard }) => {
-      enableMenuKeyboard(menu, { signal: ac.signal, onClose: () => menu.remove() });
+    const { onActivate, trigger, flyout, row, ready } = mountPlainTrigger();
+    return ready.then(() => {
       trigger.focus();
       key(trigger, " ");
       expect(onActivate).not.toHaveBeenCalled();
@@ -912,16 +722,11 @@ describe("submenus and radio rows (3D-3a)", () => {
   });
 
   it("menuitemradio rows are keyboard navigable and report aria-checked", async () => {
-    showContextMenu({
-      x: 0,
-      y: 0,
-      signal: ac.signal,
-      items: [
-        { label: "A", checked: false, radio: true, onClick: vi.fn() },
-        { label: "B", checked: true, radio: true, onClick: vi.fn() },
-        { label: "C", onClick: vi.fn() },
-      ],
-    });
+    openMenu([
+      { label: "A", checked: false, radio: true, onClick: vi.fn() },
+      { label: "B", checked: true, radio: true, onClick: vi.fn() },
+      { label: "C", onClick: vi.fn() },
+    ]);
     const rows = [...document.querySelectorAll(".context-menu-item")] as HTMLElement[];
     expect(rows[0]!.getAttribute("role")).toBe("menuitemradio");
     expect(rows[0]!.getAttribute("aria-checked")).toBe("false");
@@ -938,12 +743,7 @@ describe("submenus and radio rows (3D-3a)", () => {
   });
 
   it("shows a detail line under the label", () => {
-    showContextMenu({
-      x: 0,
-      y: 0,
-      signal: ac.signal,
-      items: [{ label: "Unmute", detail: "Muted until 15:30", onClick: vi.fn() }],
-    });
+    openMenu([{ label: "Unmute", detail: "Muted until 15:30", onClick: vi.fn() }]);
     expect(document.querySelector(".context-menu-item__detail")!.textContent).toBe(
       "Muted until 15:30",
     );
@@ -951,7 +751,6 @@ describe("submenus and radio rows (3D-3a)", () => {
 });
 
 describe("submenu a11y and placement (3D-3a review)", () => {
-  let ac: AbortController;
   beforeEach(() => {
     ac = new AbortController();
   });
@@ -967,14 +766,9 @@ describe("submenu a11y and placement (3D-3a review)", () => {
   });
 
   it("slides the flyout up when it would run off the bottom edge", () => {
-    showContextMenu({
-      x: 0,
-      y: 0,
-      signal: ac.signal,
-      items: [
-        { label: "M", testId: "t", onClick: vi.fn(), submenu: [{ label: "A", onClick: vi.fn() }] },
-      ],
-    });
+    openMenu([
+      { label: "M", testId: "t", onClick: vi.fn(), submenu: [{ label: "A", onClick: vi.fn() }] },
+    ]);
     const trigger = document.querySelector('[data-testid="t"]') as HTMLElement;
     const flyout = trigger.nextElementSibling as HTMLElement;
     Object.defineProperty(trigger, "offsetTop", { value: 300 });

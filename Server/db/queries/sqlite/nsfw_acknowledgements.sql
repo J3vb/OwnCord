@@ -24,3 +24,18 @@ SELECT user_id FROM nsfw_acknowledgements WHERE channel_id = (
 
 -- name: DeleteNSFWAcknowledgementsForChannel :exec
 DELETE FROM nsfw_acknowledgements WHERE channel_id = ?;
+
+-- name: ListNSFWAcknowledgedChannelIDs :many
+SELECT channel_id FROM nsfw_acknowledgements WHERE user_id = ?;
+
+-- name: ChannelContentGate :one
+-- The NSFW content gate for one channel and user in one point read: the
+-- effective label (a thread takes its parent's) and whether the user
+-- acknowledged the governing channel. No row means the channel is missing.
+SELECT CAST(CASE WHEN p.id IS NULL THEN c.nsfw ELSE p.nsfw END AS INTEGER) AS nsfw,
+       CAST(EXISTS (SELECT 1 FROM nsfw_acknowledgements a
+                    WHERE a.user_id = sqlc.arg(user_id)
+                      AND a.channel_id = COALESCE(c.parent_channel_id, c.id)) AS INTEGER) AS acknowledged
+FROM channels c
+LEFT JOIN channels p ON p.id = c.parent_channel_id
+WHERE c.id = sqlc.arg(channel_id) AND c.import_pending = 0;

@@ -21,6 +21,12 @@ function labels(container: Element): string[] {
   return Array.from(container.children).map((el) => el.textContent ?? "");
 }
 
+const abcItems = () => [
+  { id: 1, label: "a" },
+  { id: 2, label: "b" },
+  { id: 3, label: "c" },
+];
+
 describe("reconcileChildren", () => {
   it("builds every row on the first pass", () => {
     const container = document.createElement("div");
@@ -52,15 +58,7 @@ describe("reconcileChildren", () => {
 
   it("rebuilds only the row whose signature changed, keeping the others", () => {
     const container = document.createElement("div");
-    reconcileChildren(
-      container,
-      [
-        { id: 1, label: "a" },
-        { id: 2, label: "b" },
-        { id: 3, label: "c" },
-      ],
-      opts,
-    );
+    reconcileChildren(container, abcItems(), opts);
     const row1 = container.children[0];
     const row3 = container.children[2];
 
@@ -80,15 +78,7 @@ describe("reconcileChildren", () => {
 
   it("inserts, removes and reorders while keeping surviving identities", () => {
     const container = document.createElement("div");
-    reconcileChildren(
-      container,
-      [
-        { id: 1, label: "a" },
-        { id: 2, label: "b" },
-        { id: 3, label: "c" },
-      ],
-      opts,
-    );
+    reconcileChildren(container, abcItems(), opts);
     const row1 = container.children[0];
     const row2 = container.children[1];
 

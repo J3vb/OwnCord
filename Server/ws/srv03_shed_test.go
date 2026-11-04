@@ -132,7 +132,7 @@ func TestContentFrameLoss_ResumingClientTakesFullReadyAndRecoversMessage(t *test
 func waitDispatchDrained(t *testing.T, h *Hub) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
-	for !h.running.Load() {
+	for !h.lifecycle.running.Load() {
 		if time.Now().After(deadline) {
 			t.Fatal("dispatch loop never started")
 		}
@@ -174,7 +174,7 @@ func TestQueueContentDrop_ResumeMidDispatchDoesNotSettleDrop(t *testing.T) {
 	for range 2 {
 		h.deliverBroadcast(broadcastMsg{msg: []byte(`{"type":"server_filler"}`)})
 	}
-	h.queueDrops.dropped.Add(1)
+	h.stats.queueDrops.dropped.Add(1)
 
 	c := NewTestClient(h, 2, make(chan []byte, 8))
 	if _, ok := h.ReconnectRegisterForTest(c, atomic.LoadUint64(&h.seq), nil); ok {

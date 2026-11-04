@@ -86,6 +86,11 @@ type memberUpdatePayload struct {
 	RoleIDs []int64 `json:"role_ids,omitempty"`
 }
 
+// memberUpdateBatchPayload is member_update for several members in one frame.
+type memberUpdateBatchPayload struct {
+	Members []memberUpdatePayload `json:"members"`
+}
+
 type userUpdatePayload struct {
 	UserID   int64   `json:"user_id"`
 	Username string  `json:"username"`
@@ -266,6 +271,8 @@ type voiceE2EEAnnounceBroadcast struct {
 	// when none was sent. Peers verify Signature against it when present, else the
 	// member's published key.
 	IdentityPublicKey string `json:"identity_public_key,omitempty"`
+	// KeySlots is the sender's key_slots flag, omitted when false.
+	KeySlots bool `json:"key_slots,omitempty"`
 }
 
 // voiceE2EEOfferRelay is the server-to-client relay with from_user_id.
@@ -410,6 +417,13 @@ func buildMemberUpdate(userID int64, roleName string, roleIDs []int64) []byte {
 	return buildJSON(wsMsg{
 		Type:    MsgTypeMemberUpdate,
 		Payload: memberUpdatePayload{UserID: userID, Role: roleName, RoleIDs: roleIDs},
+	})
+}
+
+func buildMemberUpdateBatch(members []memberUpdatePayload) []byte {
+	return buildJSON(wsMsg{
+		Type:    MsgTypeMemberUpdateBatch,
+		Payload: memberUpdateBatchPayload{Members: members},
 	})
 }
 
@@ -640,6 +654,7 @@ func buildVoiceE2EEAnnounce(userID int64, a e2eeAnnounce) []byte {
 			Signature:         a.sig,
 			VideoDecode:       a.videoDecode,
 			IdentityPublicKey: a.identityKey,
+			KeySlots:          a.keySlots,
 		},
 	})
 }

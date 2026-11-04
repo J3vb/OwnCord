@@ -12,6 +12,8 @@ server:
   #                           # Never list client networks here: a range that covers
   #                           # clients degrades per-client rate limiting and lets
   #                           # covered clients influence their own rate-limit key.
+  #                           # An entry that covers every address (0.0.0.0/0, ::/0)
+  #                           # is refused and the server will not start.
   # admin_allowed_cidrs:      # CIDRs allowed to access /admin (default: private networks only)
   #   - "127.0.0.0/8"
   #   - "::1/128"
@@ -101,6 +103,9 @@ voice:
                               # no livekit_binary is set (verified against the
                               # official LiveKit release checksums; stored in data/livekit/)
   # livekit_version: ""            # override the pinned livekit-server version (e.g. "1.13.11")
+  # livekit_metrics_url: ""        # LiveKit's stats page for the admin Dashboard card, e.g.
+  #                                # "http://livekit:6789/metrics" (needs prometheus: port: 6789
+  #                                # in livekit.yaml); optional, empty = found by itself
   # livekit_binary: ""             # path to an existing livekit-server binary; set this to
   #                                # skip auto-download and run your own build
   # node_ip: ""                    # public IP for WebRTC media; empty = auto-detect (pin only if detection fails)

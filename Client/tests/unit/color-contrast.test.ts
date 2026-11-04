@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  clampTextColor,
   contrastRatio,
   deriveAccentTokens,
   parseColor,
@@ -81,5 +82,102 @@ describe("deriveAccentTokens (Q8)", () => {
       }
     }
     expect(worst).toBeGreaterThanOrEqual(4.5);
+  });
+});
+
+describe("clampTextColor", () => {
+  /** Discord's preset role colours, the ones admins pick most. */
+  const PRESETS = [
+    "#1abc9c",
+    "#2ecc71",
+    "#3498db",
+    "#9b59b6",
+    "#e91e63",
+    "#f1c40f",
+    "#e67e22",
+    "#e74c3c",
+    "#95a5a6",
+    "#607d8b",
+    "#11806a",
+    "#1f8b4c",
+    "#206694",
+    "#71368a",
+    "#ad1457",
+    "#c27c0e",
+    "#a84300",
+    "#992d22",
+    "#979c9f",
+    "#546e7a",
+    "#ff0000",
+    "#5865f2",
+  ];
+  const THEMES: Record<string, Rgb[]> = {
+    dark: ["#313338", "#2b2d31"].map((c) => parseColor(c)!),
+    light: ["#ffffff", "#f2f3f5"].map((c) => parseColor(c)!),
+  };
+
+  function hue(rgb: Rgb): number {
+    const [r, g, b] = rgb.map((c) => c / 255) as unknown as Rgb;
+    const max = Math.max(r, g, b);
+    const d = max - Math.min(r, g, b);
+    if (d === 0) return 0;
+    const h = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+    return (h * 60 + 360) % 360;
+  }
+  const spread = (rgb: Rgb): number => Math.max(...rgb) - Math.min(...rgb);
+
+  for (const [theme, surfaces] of Object.entries(THEMES)) {
+    it(`keeps every preset readable and visibly tinted on ${theme}`, () => {
+      for (const hex of PRESETS) {
+        const input = parseColor(hex)!;
+        const out = clampTextColor(input, surfaces);
+        expect(out, hex).not.toBeNull();
+        for (const s of surfaces) {
+          expect(contrastRatio(out!, s), hex).toBeGreaterThanOrEqual(4.5);
+        }
+        // Still the same colour family, not grey: the hue holds and some tint is left.
+        const dh = Math.abs(hue(out!) - hue(input));
+        expect(Math.min(dh, 360 - dh), hex).toBeLessThan(8);
+        expect(spread(out!), hex).toBeGreaterThanOrEqual(Math.min(16, spread(input)));
+      }
+    });
+  }
+
+  it("returns a colour that already reads unchanged", () => {
+    const green = parseColor("#57f287")!;
+    expect(clampTextColor(green, THEMES["dark"]!)).toBe(green);
+  });
+
+  it("lightens on dark surfaces and darkens on light ones", () => {
+    const red = parseColor("#ff0000")!;
+    const onDark = clampTextColor(red, THEMES["dark"]!)!;
+    const onLight = clampTextColor(red, THEMES["light"]!)!;
+    expect(onDark[1]).toBeGreaterThan(0);
+    expect(onLight[0]).toBeLessThan(255);
+  });
+
+  it("gives up when no lightness reads on surfaces either side of mid-grey", () => {
+    const surfaces = ["#404040", "#c0c0c0"].map((c) => parseColor(c)!);
+    expect(clampTextColor(parseColor("#ff0000")!, surfaces)).toBeNull();
+  });
+
+  it("moves a grey along its own lightness and stays grey", () => {
+    for (const surfaces of Object.values(THEMES)) {
+      const out = clampTextColor(parseColor("#808080")!, surfaces)!;
+      expect(out[0]).toBe(out[1]);
+      expect(out[1]).toBe(out[2]);
+      for (const s of surfaces) expect(contrastRatio(out, s)).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  it("reaches pure white or black when only that reads", () => {
+    // On #747474 at 4.65:1 only #ffffff passes (#fefefe reads 4.63:1), and
+    // #7b7b7b's lightness is off the 0.005 grid.
+    const out = clampTextColor(parseColor("#7b7b7b")!, [parseColor("#747474")!], 4.65);
+    expect(out === null ? null : toHex(out)).toBe("#ffffff");
+  });
+
+  it("fails closed with nothing to measure", () => {
+    expect(clampTextColor(parseColor("#ff0000")!, [])).toBeNull();
   });
 });

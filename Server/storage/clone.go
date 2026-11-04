@@ -8,11 +8,16 @@ import (
 	"io/fs"
 	"log/slog"
 	"os"
+	"time"
 )
 
 // linkFile is os.Link, a variable so a test can make the hard link fail and
 // reach the copy fallback, which no ordinary temporary directory refuses.
 var linkFile = os.Link
+
+// chtimesFile is os.Chtimes, a variable so a test can make stamping a fresh
+// hard link fail and reach the copy fallback.
+var chtimesFile = os.Chtimes
 
 // ErrCloneExists reports that the destination name is already taken. Clone
 // never overwrites: a forwarded attachment gets a fresh uuid, so a collision
@@ -47,7 +52,21 @@ func (s *Storage) Clone(ctx context.Context, src, dst string) error {
 	}
 	linkErr := linkFile(srcPath, dstPath)
 	if linkErr == nil {
-		return nil
+		// A hard link shares the source's inode and so its old modification
+		// time: storage reconciliation would see the new name as an old file
+		// with no row in the moment before the caller inserts it, and could
+		// delete it. Stamping the inode now keeps the new name inside the
+		// reconciliation grace window (the source's stamp moves with it,
+		// which only delays its own reconciliation).
+		now := time.Now()
+		chErr := chtimesFile(dstPath, now, now)
+		if chErr == nil {
+			return nil
+		}
+		if rmErr := os.Remove(dstPath); rmErr != nil && !errors.Is(rmErr, fs.ErrNotExist) {
+			return fmt.Errorf("clone %s: removing unstamped link: %w: %w", src, ErrIO, rmErr)
+		}
+		linkErr = fmt.Errorf("stamping link: %w", chErr)
 	}
 	if errors.Is(linkErr, fs.ErrNotExist) {
 		return fmt.Errorf("clone %s: %w", src, linkErr)

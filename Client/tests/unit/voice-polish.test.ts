@@ -10,6 +10,7 @@
 // voice-polish-css.test.ts.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as voiceSession from "../helpers/voiceSessionMock";
+import * as voiceWidget from "../helpers/voiceWidgetHarness";
 
 vi.mock("@lib/voice/livekitSession", () =>
   voiceSession.withOverrides({
@@ -17,51 +18,15 @@ vi.mock("@lib/voice/livekitSession", () =>
   }),
 );
 
-vi.mock("@lib/voice/connectionStats", () => ({
-  createConnectionStatsPoller: vi.fn().mockReturnValue({
-    start: vi.fn(),
-    stop: vi.fn(),
-    getStats: vi.fn().mockReturnValue({
-      rtt: 0,
-      quality: "excellent",
-      outRate: 0,
-      inRate: 0,
-      outPackets: 0,
-      inPackets: 0,
-      totalUp: 0,
-      totalDown: 0,
-      available: true,
-    }),
-    onUpdate: vi.fn().mockReturnValue(() => {}),
-    onQualityChanged: vi.fn().mockReturnValue(() => {}),
-  }),
-  formatBytes: vi.fn((v: number) => `${v} B`),
-  formatRateCompact: vi.fn((v: number) => `${v} B/s`),
-}));
+vi.mock("@lib/voice/connectionStats", () => voiceWidget.connectionStatsMock(true));
 
 import { createVoiceWidget } from "../../src/components/VoiceWidget";
 import { createVideoGrid, type TileConfig } from "../../src/components/VideoGrid";
 import { voiceStore } from "../../src/stores/voice.store";
 import { uiStore, setConnectionStatus } from "../../src/stores/ui.store";
-import { resetMembersState } from "../helpers/storeResets";
-import { resetChannelsState } from "../helpers/storeSeeds";
 
 function resetStores(): void {
-  voiceStore.setState(() => ({
-    currentChannelId: null,
-    voiceUsers: new Map(),
-    voiceConfigs: new Map(),
-    localMuted: false,
-    localDeafened: false,
-    localCamera: false,
-    localScreenshare: false,
-    joinedAt: null,
-    listenOnly: false,
-    voiceStatus: "idle",
-  }));
-  resetChannelsState();
-  resetMembersState();
-  setConnectionStatus("connected");
+  voiceWidget.resetVoiceWidgetStores();
 }
 
 function mountWidget(container: HTMLElement) {

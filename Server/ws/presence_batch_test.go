@@ -225,8 +225,8 @@ func TestPresenceHerd_WindowWithNewMemberKicksNoSlowClient(t *testing.T) {
 	}
 	settle(t, h)
 
-	if slow.isSendClosed() || h.bpQueueDisconnects.Load() != 0 {
-		t.Fatalf("a herd window with a new member kicked a slow client (disconnects = %d)", h.bpQueueDisconnects.Load())
+	if slow.isSendClosed() || h.stats.BPQueueDisconnects.Load() != 0 {
+		t.Fatalf("a herd window with a new member kicked a slow client (disconnects = %d)", h.stats.BPQueueDisconnects.Load())
 	}
 	if !slow.presenceStale.Load() {
 		t.Fatal("the slow client's batch was not dropped as presence")
@@ -348,7 +348,7 @@ func TestPresenceFrame_FullQueueDropsAndMarksStale_ContentFrameStillCloses(t *te
 	if slow.isSendClosed() {
 		t.Fatal("a presence frame into a full queue closed the client")
 	}
-	if got := h.bpQueueDisconnects.Load(); got != 0 {
+	if got := h.stats.BPQueueDisconnects.Load(); got != 0 {
 		t.Fatalf("backpressure_queue_disconnects = %d, want 0", got)
 	}
 	if !slow.presenceStale.Load() {
@@ -444,9 +444,9 @@ func TestPresenceUpdate_InsideTheWindowStillDeliversTheNewMember(t *testing.T) {
 	m := memberJoinUser{ID: 9, Username: "newcomer"}
 	h.queuePresence(9, pendingPresence{status: db.StatusOnline, member: &m})
 	h.QueuePresence(9, db.StatusOnline, nil) // a later state keeps the member data
-	h.presenceMu.Lock()
-	kept := h.presenceQueue[9].member != nil
-	h.presenceMu.Unlock()
+	h.presenceFeed.mu.Lock()
+	kept := h.presenceFeed.queue[9].member != nil
+	h.presenceFeed.mu.Unlock()
 	if !kept {
 		t.Fatal("a later state in the window lost the member data")
 	}

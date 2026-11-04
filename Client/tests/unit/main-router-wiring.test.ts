@@ -11,42 +11,24 @@
  *    the link once.
  */
 import { beforeAll, describe, expect, it, vi } from "vitest";
+import * as mocks from "../helpers/mainMocks";
 
-vi.mock("@tauri-apps/api/core", async () => ({
-  invoke: (await import("./helpers/ws-mocks")).mockInvoke,
-}));
-vi.mock("@tauri-apps/api/event", async () => ({
-  listen: (await import("./helpers/ws-mocks")).mockListen,
-}));
-const { mockOnOpenUrl } = vi.hoisted(() => ({
-  mockOnOpenUrl: vi.fn().mockResolvedValue(undefined),
-}));
-vi.mock("@tauri-apps/plugin-deep-link", () => ({
-  register: vi.fn().mockResolvedValue(undefined),
-  getCurrent: vi.fn().mockResolvedValue(null),
-  onOpenUrl: (...args: unknown[]) => mockOnOpenUrl(...args),
-}));
-vi.mock("@lib/prefs/appearance", () => ({ applyStoredAppearance: vi.fn() }));
-vi.mock("@lib/net/connectionDiagnostics", () => ({ configureConnectionDiagnostics: vi.fn() }));
-vi.mock("@lib/pendingMessages", () => ({ deactivatePendingMessages: vi.fn() }));
-vi.mock("../../src/platform/desktop/pushToTalk", () => ({
-  pushToTalk: { init: vi.fn().mockResolvedValue(undefined) },
-}));
-vi.mock("@lib/logPersistence", () => ({
-  initLogPersistence: vi.fn().mockResolvedValue(undefined),
-  flushLogs: vi.fn().mockResolvedValue(undefined),
-}));
-vi.mock("@lib/prefs/windowState", () => ({
-  initWindowState: vi.fn().mockResolvedValue(undefined),
-}));
+vi.mock("@tauri-apps/api/core", () => mocks.apiCoreMock());
+vi.mock("@tauri-apps/api/event", () => mocks.apiEventMock());
+vi.mock("@tauri-apps/plugin-deep-link", () => mocks.deepLinkMock());
+vi.mock("@lib/prefs/appearance", () => mocks.prefsAppearanceMock());
+vi.mock("@lib/net/connectionDiagnostics", () => mocks.netConnectionDiagnosticsMock());
+vi.mock("@lib/pendingMessages", () => mocks.pendingMessagesMock());
+vi.mock("../../src/platform/desktop/pushToTalk", () => mocks.desktopPushToTalkMock());
+vi.mock("@lib/logPersistence", () => mocks.logPersistenceMock());
+vi.mock("@lib/prefs/windowState", () => mocks.prefsWindowStateMock());
+const { mockOnOpenUrl } = mocks;
 vi.mock("@lib/presence/profiles", () => ({
   createTauriBackend: vi.fn(() => ({})),
   createProfileManager: vi.fn(() => ({})),
 }));
-vi.mock("@pages/MainPage", () => ({
-  createMainPage: vi.fn(() => ({ mount: vi.fn(), destroy: vi.fn() })),
-}));
-vi.mock("@pages/mainPagePrefetch", () => ({ prefetchMainPage: vi.fn() }));
+vi.mock("@pages/MainPage", () => mocks.pagesMainPageMock());
+vi.mock("@pages/mainPagePrefetch", () => mocks.pagesMainPagePrefetchMock());
 vi.mock("@lib/dispatcher", () => ({ wireConnectionStatus: vi.fn(() => () => {}) }));
 
 type PendingInvite = { code: string; host?: string } | null;

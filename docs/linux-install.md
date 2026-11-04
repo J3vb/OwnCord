@@ -31,7 +31,7 @@ example `2.3.0-beta.1`.
 | ARM64        | `OwnCord_<version>_arm64.deb` | `OwnCord_<version>_aarch64.AppImage` |
 
 Each release also has `.sig` signature files and a checksum. See
-[Verifying a Download](deployment.md#verifying-a-download) to check yours. The
+[Verifying a download](hosting/reference.md#verifying-a-download) to check yours. The
 Linux files are not OS-signed.
 
 Not sure which CPU you have? Run `uname -m`. `x86_64` means x86-64. `aarch64`
@@ -226,7 +226,7 @@ You also need PipeWire for the capture itself.
   ```
 
 Your server passes the update files on from GitHub Releases. See
-[Client updates in deployment.md](deployment.md#client).
+[Desktop app updates](hosting/upgrades.md#desktop-app-updates).
 
 ## Logs and troubleshooting
 

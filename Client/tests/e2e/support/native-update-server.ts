@@ -1,12 +1,13 @@
 import { createServer, request } from "node:https";
-import { connect } from "node:tls";
-import { once } from "node:events";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { Socket } from "node:net";
 import type { TestServer } from "./server";
-import { X509Certificate } from "node:crypto";
-import type { PeerCertificate } from "node:tls";
+import {
+  forwardUpgrades,
+  listenOnLoopback,
+  loadUpstreamTLS,
+  socketTracker,
+} from "./upstreamGateway";
 
 /** Real TLS + Rust updater and real OwnCord HTTP/WS. Only external release
  * metadata/downloads are supplied by the fixture, signed with the CI key —
@@ -17,20 +18,7 @@ export async function startNativeUpdateServer(
   packageDir: string,
   release?: { archive: string; signature: string; version: string; target: string },
 ) {
-  const cert = await readFile(join(server.directory, "data/cert.pem"));
-  const key = await readFile(join(server.directory, "data/key.pem"));
-  // OwnCord's generated certificate has no DNS/IP SANs. Trust its exact
-  // certificate and identity on our owned loopback upstream, just as TOFU
-  // does, while retaining TLS chain/signature/expiry verification.
-  const fingerprint = new X509Certificate(cert).fingerprint256;
-  const upstreamTLS = {
-    ca: cert,
-    checkServerIdentity(host: string, peer: PeerCertificate) {
-      if (host !== "127.0.0.1" || peer.fingerprint256 !== fingerprint)
-        return new Error("Native test upstream certificate does not match its pin");
-      return undefined;
-    },
-  };
+  const { cert, key, upstreamTLS } = await loadUpstreamTLS(server, "Native test");
   const data = await readFile(release?.archive ?? join(packageDir, "new/update.nsis.zip"));
   const signature = (
     await readFile(release?.signature ?? join(packageDir, "new/update.nsis.zip.sig"), "utf8")
@@ -40,12 +28,7 @@ export async function startNativeUpdateServer(
   let origin = "";
   let downloads = 0;
   const targets: string[] = [];
-  const sockets = new Set<Socket>();
-  const track = (socket: Socket) => {
-    sockets.add(socket);
-    socket.on("close", () => sockets.delete(socket));
-    socket.on("error", () => socket.destroy());
-  };
+  const { track, destroyAll } = socketTracker();
   const gateway = createServer({ cert, key }, (req, res) => {
     const path = req.url ?? "/";
     if (path.startsWith("/api/v1/client-update/")) {
@@ -108,26 +91,8 @@ export async function startNativeUpdateServer(
     req.pipe(upstream);
   });
   gateway.on("connection", track);
-  gateway.on("upgrade", (req, socket, head) => {
-    const upstream = connect({ host: "127.0.0.1", port: server.port, ...upstreamTLS }, () => {
-      const headers = { ...req.headers, host: new URL(server.origin).host };
-      upstream.write(
-        `${req.method} ${req.url} HTTP/1.1\r\n${Object.entries(headers)
-          .map(([name, value]) => `${name}: ${value}`)
-          .join("\r\n")}\r\n\r\n`,
-      );
-      upstream.write(head);
-      socket.pipe(upstream).pipe(socket);
-    });
-    track(upstream);
-    socket.on("close", () => upstream.destroy());
-    upstream.on("close", () => socket.destroy());
-  });
-  gateway.listen(0, "127.0.0.1");
-  await once(gateway, "listening");
-  const address = gateway.address();
-  if (!address || typeof address === "string") throw new Error("No updater gateway port");
-  origin = `https://127.0.0.1:${address.port}`;
+  forwardUpgrades(gateway, server, upstreamTLS, track);
+  origin = await listenOnLoopback(gateway, "updater gateway");
   return {
     origin,
     downloads: () => downloads,
@@ -137,7 +102,7 @@ export async function startNativeUpdateServer(
       fault = value;
     },
     async close() {
-      for (const socket of sockets) socket.destroy();
+      destroyAll();
       await new Promise<void>((resolve) => gateway.close(() => resolve()));
     },
   };

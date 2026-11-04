@@ -50,6 +50,9 @@ type voiceGraceState struct {
 	// next registers. Consumed by takeMoved, dropped when stale (movedNoteTTL) and
 	// capped (movedNoteCap).
 	moved map[movedKey]movedNote
+	// modMoves holds, per user, a moderator move that evicted a parked call, for
+	// the parking session to collect on resume (voice_grace_modmove.go).
+	modMoves map[int64]*parkedModMove
 	// expiring counts expiry teardowns past takeForExpiry, so close can wait for one
 	// already writing to the database.
 	expiring sync.WaitGroup
@@ -123,6 +126,7 @@ func (s *voiceGraceState) close() {
 	s.mu.Lock()
 	s.closed = true
 	clear(s.moved)
+	clear(s.modMoves)
 	for uid, e := range s.entries {
 		e.timer.Stop()
 		delete(s.entries, uid)
@@ -251,7 +255,7 @@ func (t *voiceTxn) park(c *Client) (slotSnap, bool) {
 		return snap, true
 	}
 	h := t.h
-	if h.voiceReg.voiceGrace.isClosed() {
+	if h.voiceHub.reg.voiceGrace.isClosed() {
 		slog.Debug("voice leave dropped: hub is stopping",
 			"user_id", c.userID, "channel_id", snap.chID)
 		return snap, true
@@ -260,7 +264,7 @@ func (t *voiceTxn) park(c *Client) (slotSnap, bool) {
 		return snap, false
 	}
 	entry := &voiceGraceEntry{client: c, snap: snap}
-	if !h.voiceReg.voiceGrace.put(c.userID, entry, func() { //nolint:contextcheck // the timer outlives the disconnect ctx; expiry uses its own.
+	if !h.voiceHub.reg.voiceGrace.put(c.userID, entry, func() { //nolint:contextcheck // the timer outlives the disconnect ctx; expiry uses its own.
 		h.expireVoiceGrace(c.userID, entry)
 	}) {
 		return snap, true // closed between the check above and the put
@@ -280,10 +284,10 @@ func (t *voiceTxn) park(c *Client) (slotSnap, bool) {
 func (h *Hub) expireVoiceGrace(userID int64, entry *voiceGraceEntry) {
 	txn := h.begin(userID)
 	defer txn.end()
-	if !h.voiceReg.voiceGrace.takeForExpiry(userID, entry) {
+	if !h.voiceHub.reg.voiceGrace.takeForExpiry(userID, entry) {
 		return
 	}
-	defer h.voiceReg.voiceGrace.expiring.Done()
+	defer h.voiceHub.reg.voiceGrace.expiring.Done()
 	h.leaveParkedVoice(context.Background(), txn, entry, voiceLeaveReasonGraceExpired)
 }
 
@@ -302,7 +306,7 @@ func (h *Hub) leaveParkedVoice(ctx context.Context, txn *voiceTxn, e *voiceGrace
 // row (channel and joined_at) is gone, so a resume never inherits a membership with
 // no row. A failed read keeps the entry.
 func (h *Hub) dropOrphanVoiceGrace(ctx context.Context, userID int64) {
-	e := h.voiceReg.voiceGrace.get(userID)
+	e := h.voiceHub.reg.voiceGrace.get(userID)
 	if e == nil {
 		return
 	}
@@ -310,7 +314,7 @@ func (h *Hub) dropOrphanVoiceGrace(ctx context.Context, userID int64) {
 	if err != nil || (row != nil && row.ChannelID == e.snap.chID && row.JoinedAt == e.snap.joinToken) {
 		return
 	}
-	if h.voiceReg.voiceGrace.takeIfSame(userID, e) {
+	if h.voiceHub.reg.voiceGrace.takeIfSame(userID, e) {
 		slog.Info("voice grace dropped: its voice state row is gone",
 			"user_id", userID, "channel_id", e.snap.chID)
 	}
@@ -330,7 +334,7 @@ func (h *Hub) dropOrphanVoiceGrace(ctx context.Context, userID int64) {
 func (t *voiceTxn) inherit(c *Client) int64 {
 	// Only the session that parked the call may take it back. Another device's parked
 	// call stays parked for its own device (and expires on its own).
-	e := t.h.voiceReg.voiceGrace.get(c.userID)
+	e := t.h.voiceHub.reg.voiceGrace.get(c.userID)
 	if e == nil || e.client.tokenHash != c.tokenHash {
 		return 0
 	}

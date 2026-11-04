@@ -6,41 +6,26 @@
  * and background unread increments.
  */
 
+import type { Locator, Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
 import {
   buildTauriMockScript,
-  MOCK_LOGIN_RESPONSE,
-  MOCK_MESSAGES,
   MOCK_PINNED_MESSAGES,
   submitLogin,
   waitForWsReady,
   openHome,
   dmRows,
   emitWsMessage,
+  BASE_SESSION_ROUTES,
+  dmChannel,
+  thirdDmChannel,
 } from "./helpers";
 
 // ---------------------------------------------------------------------------
 // DM mock data
 // ---------------------------------------------------------------------------
 
-const MOCK_DM_CHANNELS = [
-  {
-    channel_id: 100,
-    recipient: { id: 2, username: "otheruser", avatar: "", status: "online" },
-    last_message_id: 500,
-    last_message: "Hey there!",
-    last_message_at: "2026-03-15T12:00:00Z",
-    unread_count: 0,
-  },
-  {
-    channel_id: 101,
-    recipient: { id: 3, username: "thirduser", avatar: "", status: "idle" },
-    last_message_id: 501,
-    last_message: "See you later",
-    last_message_at: "2026-03-15T11:00:00Z",
-    unread_count: 2,
-  },
-];
+const MOCK_DM_CHANNELS = [dmChannel(100), thirdDmChannel(101, { unread_count: 2 })];
 
 // ---------------------------------------------------------------------------
 // Custom mock session with DM support
@@ -49,11 +34,9 @@ const MOCK_DM_CHANNELS = [
 async function mockTauriSessionWithDms(page: import("@playwright/test").Page): Promise<void> {
   const script = buildTauriMockScript({
     httpRoutes: [
-      { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-      { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
-      { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
+      ...BASE_SESSION_ROUTES,
       { pattern: "/pins", status: 200, body: MOCK_PINNED_MESSAGES },
-      { pattern: "POST /api/v1/dms", status: 200, body: MOCK_DM_CHANNELS[0] },
+      { pattern: "/api/v1/dms", method: "POST", status: 200, body: MOCK_DM_CHANNELS[0] },
       { pattern: "GET /api/v1/dms", status: 200, body: MOCK_DM_CHANNELS },
       { pattern: "DELETE /api/v1/dms/", status: 200, body: { success: true } },
     ],
@@ -84,6 +67,15 @@ async function navigateToMainPageWithDms(page: import("@playwright/test").Page):
 // Tests: DM Sidebar Mode
 // ---------------------------------------------------------------------------
 
+/** Open Home, click the first DM row and return it. */
+async function openFirstDm(page: Page): Promise<Locator> {
+  await openHome(page);
+  const dmItem = dmRows(page).first();
+  await expect(dmItem).toBeVisible({ timeout: 5_000 });
+  await dmItem.click();
+  return dmItem;
+}
+
 test.describe("DM System — Sidebar Mode", () => {
   test.beforeEach(async ({ page }) => {
     await mockTauriSessionWithDms(page);
@@ -105,11 +97,7 @@ test.describe("DM System — Sidebar Mode", () => {
   });
 
   test("opening a DM from Home marks it active in DM mode", async ({ page }) => {
-    await openHome(page);
-    const dmItem = dmRows(page).first();
-    await expect(dmItem).toBeVisible({ timeout: 5_000 });
-
-    await dmItem.click();
+    const dmItem = await openFirstDm(page);
     await expect(dmItem).toHaveClass(/active/);
 
     // DM back header should appear (proves DM mode is active)
@@ -118,11 +106,7 @@ test.describe("DM System — Sidebar Mode", () => {
   });
 
   test("DM sidebar shows 'Back to Server' header", async ({ page }) => {
-    await openHome(page);
-    const dmItem = dmRows(page).first();
-    await expect(dmItem).toBeVisible({ timeout: 5_000 });
-
-    await dmItem.click();
+    await openFirstDm(page);
 
     const backHeader = page.locator("[data-testid='dm-back-header']");
     await expect(backHeader).toBeVisible({ timeout: 5_000 });
@@ -133,11 +117,7 @@ test.describe("DM System — Sidebar Mode", () => {
   });
 
   test("'Back to Server' returns to channel sidebar", async ({ page }) => {
-    await openHome(page);
-    const dmItem = dmRows(page).first();
-    await expect(dmItem).toBeVisible({ timeout: 5_000 });
-
-    await dmItem.click();
+    await openFirstDm(page);
 
     const backHeader = page.locator("[data-testid='dm-back-header']");
     await expect(backHeader).toBeVisible({ timeout: 5_000 });
@@ -151,6 +131,46 @@ test.describe("DM System — Sidebar Mode", () => {
 
     // Back header should be gone
     await expect(backHeader).not.toBeVisible();
+  });
+});
+
+test.describe("DM System — People home", () => {
+  test.beforeEach(async ({ page }) => {
+    await mockTauriSessionWithDms(page);
+    await page.goto("/");
+    await navigateToMainPageWithDms(page);
+  });
+
+  test("Home replaces the channel on screen with People", async ({ page }) => {
+    await expect(page.getByTestId("chat-area")).toBeVisible();
+    await openHome(page);
+
+    const view = page.getByTestId("feature-view");
+    await expect(view.getByRole("heading", { name: "People" })).toBeVisible({ timeout: 5_000 });
+    await expect(page.getByTestId("chat-area")).toBeHidden();
+    await expect(page.getByTestId("people-row-2")).toBeVisible();
+    await expect(page.getByTestId("people-row-3")).toBeVisible();
+    await expect(page.getByTestId("people-row-1")).toHaveCount(0);
+    await expect(page.getByTestId("dm-people-entry")).toHaveAttribute("aria-current", "page");
+  });
+
+  test("Message on People opens that DM", async ({ page }) => {
+    await openHome(page);
+    await page.getByTestId("people-message-2").click();
+
+    await expect(page.getByTestId("feature-view")).toBeHidden({ timeout: 5_000 });
+    await expect(page.getByTestId("chat-area")).toBeVisible();
+    await expect(dmRows(page).first()).toHaveClass(/active/);
+  });
+
+  test("Back to Server from People shows the channel again", async ({ page }) => {
+    await openHome(page);
+    await expect(page.getByTestId("people-home")).toBeVisible({ timeout: 5_000 });
+    await page.getByTestId("dm-back-header").click();
+
+    await expect(page.getByTestId("feature-view")).toBeHidden({ timeout: 5_000 });
+    await expect(page.getByTestId("chat-area")).toBeVisible();
+    await expect(page.locator(".channel-item").filter({ visible: true }).first()).toBeVisible();
   });
 });
 
@@ -251,11 +271,7 @@ test.describe("DM System — Message Display", () => {
   });
 
   test("sending message in DM echoes back in chat", async ({ page }) => {
-    await openHome(page);
-    const dmItem = dmRows(page).first();
-    await expect(dmItem).toBeVisible({ timeout: 5_000 });
-
-    await dmItem.click();
+    await openFirstDm(page);
 
     // Wait for the message input to appear after switching to DM
     const input = page.locator("[data-testid='msg-textarea']");
@@ -270,11 +286,7 @@ test.describe("DM System — Message Display", () => {
   });
 
   test("receiving WS chat_message in active DM shows in chat", async ({ page }) => {
-    await openHome(page);
-    const dmItem = dmRows(page).first();
-    await expect(dmItem).toBeVisible({ timeout: 5_000 });
-
-    await dmItem.click();
+    await openFirstDm(page);
 
     // Wait for messages container to be ready
     const messagesContainer = page.locator(".messages-container");

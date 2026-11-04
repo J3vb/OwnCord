@@ -6,6 +6,7 @@
  * This file covers the rendering paths and helper functions.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as mocks from "../helpers/attachmentsMocks";
 
 const { fetchMock, saveMock, writeFileMock, brokerImageMock } = vi.hoisted(() => ({
   fetchMock: vi.fn(),
@@ -14,37 +15,27 @@ const { fetchMock, saveMock, writeFileMock, brokerImageMock } = vi.hoisted(() =>
   brokerImageMock: vi.fn(),
 }));
 
-// B9-8: this suite exercises content the viewer has already consented to;
-// the consent gate itself is proven in src/features/content-consent/external.test.ts.
-vi.mock("../../src/features/content-consent/external", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../src/features/content-consent/external")>()),
-  externalAllowed: () => true,
-}));
+vi.mock("../../src/features/content-consent/external", (importOriginal) =>
+  mocks.consentExternalMock(importOriginal),
+);
 
-vi.mock("../../src/platform/desktop/externalContent", () => ({
-  externalContent: { preview: vi.fn(), image: brokerImageMock },
-}));
+vi.mock("../../src/platform/desktop/externalContent", () =>
+  mocks.externalContentMock(vi.fn(), brokerImageMock),
+);
 
-vi.mock("@tauri-apps/plugin-http", () => ({
-  fetch: fetchMock,
-}));
+vi.mock("@tauri-apps/plugin-http", () => mocks.httpPluginMock(fetchMock));
 
 // The HTTP TOFU proxy resolves a server host to a fixed loopback origin so
 // server-bound fetches are cert-pinned; external URLs go to the broker instead.
-vi.mock("@lib/net/httpProxy", () => ({
-  ensureHttpProxy: () => Promise.resolve("http://127.0.0.1:9999"),
-  stopHttpProxy: () => Promise.resolve(),
-}));
+vi.mock("@lib/net/httpProxy", () => mocks.httpProxyMock());
 
-vi.mock("@lib/logger", () => ({
-  createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
-}));
+vi.mock("@lib/logger", () => mocks.loggerMock());
 
-vi.mock("@tauri-apps/plugin-dialog", () => ({ save: saveMock }));
-vi.mock("@tauri-apps/plugin-fs", () => ({ writeFile: writeFileMock }));
-vi.mock("@lib/icons", () => ({ createIcon: () => document.createElement("span") }));
-vi.mock("@lib/prefs/mediaVisibility", () => ({ observeMedia: vi.fn() }));
-vi.mock("../../src/features/messaging/content/media", () => ({ openImageLightbox: vi.fn() }));
+vi.mock("@tauri-apps/plugin-dialog", () => mocks.dialogMock(saveMock));
+vi.mock("@tauri-apps/plugin-fs", () => mocks.fsMock(writeFileMock));
+vi.mock("@lib/icons", () => mocks.iconsMock());
+vi.mock("@lib/prefs/mediaVisibility", () => mocks.mediaVisibilityMock());
+vi.mock("../../src/features/messaging/content/media", () => mocks.contentMediaMock());
 
 const { showToastMock } = vi.hoisted(() => ({ showToastMock: vi.fn() }));
 vi.mock("@lib/ui/toast", () => ({
@@ -96,12 +87,7 @@ vi.stubGlobal("indexedDB", {
       onerror: null,
       onupgradeneeded: null,
     };
-    Promise.resolve().then(() => {
-      const upgrade = req.onupgradeneeded as ((ev: Event) => void) | null;
-      upgrade?.(new Event("upgradeneeded"));
-      const success = req.onsuccess as ((ev: Event) => void) | null;
-      success?.(new Event("success"));
-    });
+    mocks.settleOpenRequest(req);
     return req;
   },
 });
@@ -125,6 +111,43 @@ import { authStore } from "@stores/auth.store";
 // jsdom implements no object URLs; server images are handed out as blob: URLs.
 URL.createObjectURL = vi.fn(() => "blob:test-image");
 URL.revokeObjectURL = vi.fn();
+
+function renderArchive(): HTMLElement {
+  return renderAttachment({
+    id: "1",
+    url: "https://myserver.local:8443/file.zip",
+    filename: "archive.zip",
+    size: 2048,
+    mime: "application/zip",
+  });
+}
+
+function arrangeDownload(): void {
+  saveMock.mockResolvedValue("C:\\Downloads\\archive.zip");
+  fetchMock.mockResolvedValue({
+    ok: true,
+    arrayBuffer: () => Promise.resolve(new Uint8Array([1, 2, 3]).buffer),
+  });
+}
+
+function arrangePngFetch(): void {
+  fetchMock.mockResolvedValue({
+    ok: true,
+    headers: { get: () => "image/png" },
+    arrayBuffer: () => Promise.resolve(new Uint8Array([1]).buffer),
+  });
+}
+
+function renderPng(dimensions: { width?: number; height?: number } = {}): HTMLElement {
+  return renderAttachment({
+    id: "1",
+    url: "https://myserver.local:8443/img.png",
+    filename: "img.png",
+    size: 1000,
+    mime: "image/png",
+    ...dimensions,
+  });
+}
 
 describe("resolveServerUrl", () => {
   beforeEach(() => {
@@ -253,13 +276,7 @@ describe("renderAttachment — non-image file", () => {
   });
 
   it("renders a file attachment with name, size, and download button", () => {
-    const el = renderAttachment({
-      id: "1",
-      url: "https://myserver.local:8443/file.zip",
-      filename: "archive.zip",
-      size: 2048,
-      mime: "application/zip",
-    });
+    const el = renderArchive();
 
     expect(el.classList.contains("msg-file")).toBe(true);
     expect(el.querySelector(".msg-file-name")?.textContent).toBe("archive.zip");
@@ -268,19 +285,9 @@ describe("renderAttachment — non-image file", () => {
   });
 
   it("clicking filename triggers download with correct URL", async () => {
-    saveMock.mockResolvedValue("C:\\Downloads\\archive.zip");
-    fetchMock.mockResolvedValue({
-      ok: true,
-      arrayBuffer: () => Promise.resolve(new Uint8Array([1, 2, 3]).buffer),
-    });
+    arrangeDownload();
 
-    const el = renderAttachment({
-      id: "1",
-      url: "https://myserver.local:8443/file.zip",
-      filename: "archive.zip",
-      size: 2048,
-      mime: "application/zip",
-    });
+    const el = renderArchive();
 
     const nameEl = el.querySelector(".msg-file-name") as HTMLElement;
     nameEl.click();
@@ -295,19 +302,9 @@ describe("renderAttachment — non-image file", () => {
   });
 
   it("clicking download button triggers download", async () => {
-    saveMock.mockResolvedValue("C:\\Downloads\\archive.zip");
-    fetchMock.mockResolvedValue({
-      ok: true,
-      arrayBuffer: () => Promise.resolve(new Uint8Array([1, 2, 3]).buffer),
-    });
+    arrangeDownload();
 
-    const el = renderAttachment({
-      id: "1",
-      url: "https://myserver.local:8443/file.zip",
-      filename: "archive.zip",
-      size: 2048,
-      mime: "application/zip",
-    });
+    const el = renderArchive();
 
     const downloadBtn = el.querySelector(".msg-file-download") as HTMLButtonElement;
     downloadBtn.click();
@@ -322,13 +319,7 @@ describe("renderAttachment — non-image file", () => {
     saveMock.mockResolvedValue("C:\\Downloads\\archive.zip");
     fetchMock.mockResolvedValue({ ok: false, status: 403 });
 
-    const el = renderAttachment({
-      id: "1",
-      url: "https://myserver.local:8443/file.zip",
-      filename: "archive.zip",
-      size: 2048,
-      mime: "application/zip",
-    });
+    const el = renderArchive();
     (el.querySelector(".msg-file-download") as HTMLButtonElement).click();
 
     await vi.waitFor(() => {
@@ -339,13 +330,7 @@ describe("renderAttachment — non-image file", () => {
   it("does not write file when user cancels save dialog", async () => {
     saveMock.mockResolvedValue(null); // User cancelled
 
-    const el = renderAttachment({
-      id: "1",
-      url: "https://myserver.local:8443/file.zip",
-      filename: "archive.zip",
-      size: 2048,
-      mime: "application/zip",
-    });
+    const el = renderArchive();
 
     const nameEl = el.querySelector(".msg-file-name") as HTMLElement;
     nameEl.click();
@@ -369,21 +354,9 @@ describe("renderAttachment — image with dimensions", () => {
   });
 
   it("reserves space when width and height are provided", () => {
-    fetchMock.mockResolvedValue({
-      ok: true,
-      headers: { get: () => "image/png" },
-      arrayBuffer: () => Promise.resolve(new Uint8Array([1]).buffer),
-    });
+    arrangePngFetch();
 
-    const el = renderAttachment({
-      id: "1",
-      url: "https://myserver.local:8443/img.png",
-      filename: "img.png",
-      size: 1000,
-      mime: "image/png",
-      width: 800,
-      height: 600,
-    });
+    const el = renderPng({ width: 800, height: 600 });
 
     expect(el.classList.contains("msg-image")).toBe(true);
     // Should have computed reserved dimensions
@@ -407,19 +380,9 @@ describe("renderAttachment — image with dimensions", () => {
   });
 
   it("uses fallback min-height when dimensions are missing", () => {
-    fetchMock.mockResolvedValue({
-      ok: true,
-      headers: { get: () => "image/png" },
-      arrayBuffer: () => Promise.resolve(new Uint8Array([1]).buffer),
-    });
+    arrangePngFetch();
 
-    const el = renderAttachment({
-      id: "1",
-      url: "https://myserver.local:8443/img.png",
-      filename: "img.png",
-      size: 1000,
-      mime: "image/png",
-    });
+    const el = renderPng();
 
     expect(el.style.minHeight).toBe("200px");
   });
@@ -456,11 +419,7 @@ describe("renderAttachment — image with dimensions", () => {
       expect(el.querySelector(".msg-media-fallback")).not.toBeNull();
     });
 
-    fetchMock.mockResolvedValue({
-      ok: true,
-      headers: { get: () => "image/png" },
-      arrayBuffer: () => Promise.resolve(new Uint8Array([1]).buffer),
-    });
+    arrangePngFetch();
     (el.querySelector(".msg-media-retry") as HTMLButtonElement).click();
 
     await vi.waitFor(() => {
@@ -521,11 +480,7 @@ describe("fetchImageAsObjectUrl — network fetch failure", () => {
   });
 
   it("routes server URLs through the cert-pinned proxy and external URLs to the broker", async () => {
-    fetchMock.mockResolvedValue({
-      ok: true,
-      headers: { get: () => "image/png" },
-      arrayBuffer: () => Promise.resolve(new Uint8Array([1]).buffer),
-    });
+    arrangePngFetch();
 
     // A server URL is rewritten to the loopback proxy origin (path + query
     // preserved) and carries no danger option — the proxy pins the cert. The

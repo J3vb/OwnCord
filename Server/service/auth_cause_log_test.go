@@ -190,7 +190,7 @@ func TestAuthRefusals_LogTheCauseOnce(t *testing.T) {
 			}},
 		{"confirm_totp_store", "UpdateUserTOTPSecret", true, ErrTOTPEnableFailed,
 			func(t *testing.T, f *authCauseFixture) error {
-				if _, err := f.svc.EnableTOTP(ctx, Principal{User: f.user}, causeLogPassword); err != nil {
+				if _, err := f.svc.EnableTOTP(ctx, sessionPrincipal(f.user), causeLogPassword); err != nil {
 					t.Fatalf("EnableTOTP: %v", err)
 				}
 				secret, ok := f.svc.pending.Lookup(ctx, f.user.ID)
@@ -202,27 +202,27 @@ func TestAuthRefusals_LogTheCauseOnce(t *testing.T) {
 					t.Fatalf("GenerateTOTPCode: %v", err)
 				}
 				f.st.fail["UpdateUserTOTPSecret"] = cause
-				_, err = f.svc.ConfirmTOTP(ctx, Principal{User: f.user}, causeLogPassword, code)
+				_, err = f.svc.ConfirmTOTP(ctx, sessionPrincipal(f.user), causeLogPassword, code)
 				return err
 			}},
 		{"disable_totp_policy", "GetSetting:require_2fa", false, ErrAuthPolicyUnavailable,
 			func(t *testing.T, f *authCauseFixture) error {
-				_, err := f.svc.DisableTOTP(ctx, Principal{User: f.user}, causeLogPassword)
+				_, err := f.svc.DisableTOTP(ctx, sessionPrincipal(f.user), causeLogPassword)
 				return err
 			}},
 		{"disable_totp_store", "UpdateUserTOTPSecret", false, ErrTOTPDisableFailed,
 			func(t *testing.T, f *authCauseFixture) error {
-				_, err := f.svc.DisableTOTP(ctx, Principal{User: f.user}, causeLogPassword)
+				_, err := f.svc.DisableTOTP(ctx, sessionPrincipal(f.user), causeLogPassword)
 				return err
 			}},
 		{"recovery_kit_readback", "GetRecoveryKit", false, ErrRecoveryKitFailed,
 			func(t *testing.T, f *authCauseFixture) error {
-				_, err := f.svc.EnrolRecoveryKit(ctx, Principal{User: f.user}, causeLogPassword, "")
+				_, err := f.svc.EnrolRecoveryKit(ctx, sessionPrincipal(f.user), causeLogPassword, "")
 				return err
 			}},
 		{"recovery_new_password_hash", "", false, ErrPasswordHash,
 			func(t *testing.T, f *authCauseFixture) error {
-				issue, err := f.svc.EnrolRecoveryKit(ctx, Principal{User: f.user}, causeLogPassword, "")
+				issue, err := f.svc.EnrolRecoveryKit(ctx, sessionPrincipal(f.user), causeLogPassword, "")
 				if err != nil {
 					t.Fatalf("EnrolRecoveryKit: %v", err)
 				}
@@ -235,7 +235,7 @@ func TestAuthRefusals_LogTheCauseOnce(t *testing.T) {
 			}},
 		{"recovery_fresh_user", "GetUserByID", true, ErrRecoveryFailed,
 			func(t *testing.T, f *authCauseFixture) error {
-				issue, err := f.svc.EnrolRecoveryKit(ctx, Principal{User: f.user}, causeLogPassword, "")
+				issue, err := f.svc.EnrolRecoveryKit(ctx, sessionPrincipal(f.user), causeLogPassword, "")
 				if err != nil {
 					t.Fatalf("EnrolRecoveryKit: %v", err)
 				}

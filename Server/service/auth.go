@@ -11,7 +11,6 @@ import (
 	"github.com/J3vb/OwnCord/Server/clientip"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
-	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
 // AuthBroadcaster tells connected WebSocket clients an account is gone
@@ -31,7 +30,9 @@ type SessionDisconnector interface {
 }
 
 // Principal is the authenticated caller api.AuthMiddleware resolved for a
-// request. Session is nil for an API-token principal.
+// request. Session is nil for an API-token principal. The account-security
+// methods (two-factor changes, recovery codes and kit, account deletion)
+// refuse a principal without a session with ErrLoginSessionRequired.
 type Principal struct {
 	User    *db.User
 	Session *db.Session
@@ -191,6 +192,11 @@ var (
 	// Logout.
 	ErrLogoutFailed = &authError{ErrInternal, "failed to logout"}
 
+	// ErrLoginSessionRequired refuses an account-security change made with an
+	// API token: those changes take a login session. The transport writes it as
+	// 403 LOGIN_SESSION_REQUIRED.
+	ErrLoginSessionRequired = &authError{ErrForbidden, "this action requires a login session"}
+
 	// Password confirmation (account deletion and TOTP management).
 	ErrTooManyAttempts = &authError{ErrRateLimited, "too many failed attempts, try again later"}
 	// ErrAuthBusy is the admission refusal: the process-wide budget for expensive
@@ -230,63 +236,56 @@ var (
 	ErrRecoveryCodesFailed      = &authError{ErrInternal, "failed to issue recovery codes"}
 )
 
-// authStore is what AuthService reads and writes. *db.DB satisfies it.
-type authStore interface {
-	ErasureStore
-	// Second-factor state: the durable backend behind the auth service's
-	// partial-auth, pending-enrolment and used-code stores, plus the recovery-code
-	// rows. Stdlib types only, because auth cannot import db.
-	auth.SecondFactorPersister
+// authCoreStore is what the service itself reads and writes: registration,
+// login, logout, account deletion and the require_2fa setting. *db.DB satisfies
+// it. db.EntryAuditor is listed because DeleteAccount's subject-token audit
+// write silently drops the token when the store lacks it.
+type authCoreStore interface {
 	db.Auditor
+	db.EntryAuditor
 	sessionCreator
 	settingGetter
-	ReplaceRecoveryCodes(ctx context.Context, userID int64, codeHashes []string) error
-	ListUnusedRecoveryCodes(ctx context.Context, userID int64) (ids []int64, hashes []string, err error)
-	MarkRecoveryCodeUsed(ctx context.Context, id int64) (consumed bool, err error)
-	CountUnusedRecoveryCodes(ctx context.Context, userID int64) (int, error)
-	DeleteRecoveryCodes(ctx context.Context, userID int64) error
 	GetUserByID(ctx context.Context, id int64) (*db.User, error)
 	GetUserByUsername(ctx context.Context, username string) (*db.User, error)
 	CreateUserWithInvite(ctx context.Context, username, passwordHash string, roleID int, inviteCode, sessionTokenHash, device, ip string) (int64, error)
 	CreateUserWithSession(ctx context.Context, username, passwordHash string, roleID int, sessionTokenHash, device, ip string) (int64, error)
-	// Recovery kit.
-	UpsertRecoveryKit(ctx context.Context, userID int64, verifier string) error
-	GetRecoveryKit(ctx context.Context, userID int64) (*db.RecoveryKit, error)
-	RedeemRecoveryKit(ctx context.Context, userID int64, verifier, newPasswordHash, auditAction, auditDetail string) (int64, error)
-	// Owner-issued recovery credential.
-	UpsertRecoveryAssist(ctx context.Context, userID int64, verifier string, issuedBy int64, verification string, expiresAt time.Time) error
-	GetRecoveryAssist(ctx context.Context, userID int64) (*db.RecoveryAssist, error)
-	RedeemRecoveryAssist(ctx context.Context, userID int64, verifier, newPasswordHash, auditAction, auditDetail string) (int64, error)
 	// Approval-mode registration.
 	CreatePendingUser(ctx context.Context, username, passwordHash string, roleID, maxPending int) (int64, error)
 	CountPendingUsers(ctx context.Context) (int64, error)
-
 	UpdateUserCustomStatus(ctx context.Context, userID int64, customStatus *string) error
-	UpdateUserTOTPSecret(ctx context.Context, id int64, secret *string) error
 	DeleteSession(ctx context.Context, tokenHash string) error
-	DeleteOtherSessions(ctx context.Context, userID, keepSessionID int64) (int64, error)
-	GetMemberRoles(ctx context.Context, userID int64) (*db.MemberRoles, error)
 	GetInvite(ctx context.Context, code string) (*db.Invite, error)
+}
+
+// authStore is what NewAuthService takes: the core, each part, and the stores
+// the constructor builds from it (the erasure runner and the second-factor
+// persister). *db.DB satisfies it.
+type authStore interface {
+	authCoreStore
+	twoFactorStore
+	accountRecoveryStore
+	ErasureStore
+	// Second-factor state: the durable backend behind the auth service's
+	// partial-auth, pending-enrolment and used-code stores. Stdlib types only,
+	// because auth cannot import db.
+	auth.SecondFactorPersister
 }
 
 // AuthService owns the auth slice's orchestration: lockout and enumeration
 // guards, password and second-factor checks, session issue and revoke, audit
-// writes and the member_ban broadcast on self-erasure.
+// writes and the member_ban broadcast on self-erasure. The second factor and
+// account recovery live in embedded parts; a method that needs the core and a
+// part stays here.
 type AuthService struct {
-	// issueMu serializes the two-budget reservation of IssueRecoveryAssist.
-	issueMu     syncutil.Mutex
-	st          authStore
-	limiter     *auth.RateLimiter
-	partial     *auth.PartialAuthStore
-	pending     *auth.PendingTOTPStore
-	usedCodes   *auth.UsedTOTPCodeStore
-	totpKey     []byte
-	broadcaster AuthBroadcaster
+	*authCommon
+	*twoFactor
+	*accountRecovery
+	st authCoreStore
+	// admissionWait bounds acquireAdmission's queue wait.
+	admissionWait time.Duration
 	// erasure runs DeleteAccount's erasure; UseErasure swaps in the shared runner so
 	// file storage is installed once.
 	erasure *ErasureService
-	// admissionWait bounds acquireAdmission's queue wait.
-	admissionWait time.Duration
 	// welcome greets a new member once their account exists; nil greets nobody.
 	welcome *WelcomeService
 }
@@ -297,16 +296,21 @@ type AuthService struct {
 // restart keeps in-flight challenges and the replay window and a store fault
 // fails closed.
 func NewAuthService(st authStore, limiter *auth.RateLimiter, totpKey []byte, broadcaster AuthBroadcaster) *AuthService {
+	common := &authCommon{limiter: limiter, broadcaster: broadcaster}
 	return &AuthService{
-		st:            st,
-		limiter:       limiter,
-		partial:       auth.NewPartialAuthStore(partialAuthStoreTTL).WithPersister(st),
-		pending:       auth.NewPendingTOTPStore(pendingTOTPStoreTTL).WithPersister(st, totpKey),
-		usedCodes:     auth.NewUsedTOTPCodeStore().WithPersister(st),
-		totpKey:       totpKey,
-		broadcaster:   broadcaster,
-		erasure:       NewErasureService(st),
-		admissionWait: auth.AdmissionWait,
+		authCommon: common,
+		twoFactor: &twoFactor{
+			authCommon: common,
+			st:         st,
+			partial:    auth.NewPartialAuthStore(partialAuthStoreTTL).WithPersister(st),
+			pending:    auth.NewPendingTOTPStore(pendingTOTPStoreTTL).WithPersister(st, totpKey),
+			usedCodes:  auth.NewUsedTOTPCodeStore().WithPersister(st),
+			totpKey:    totpKey,
+		},
+		accountRecovery: &accountRecovery{authCommon: common, st: st},
+		st:              st,
+		admissionWait:   auth.AdmissionWait,
+		erasure:         NewErasureService(st),
 	}
 }
 
@@ -679,7 +683,7 @@ func (s *AuthService) VerifyTOTP(ctx context.Context, partialToken, code string)
 		return nil, ErrTooManyAttempts
 	}
 
-	user, secret, err := s.challengeSecret(ctx, challenge.UserID)
+	user, err := s.challengeUser(ctx, challenge.UserID)
 	if err != nil {
 		return nil, err
 	}
@@ -696,6 +700,12 @@ func (s *AuthService) VerifyTOTP(ctx context.Context, partialToken, code string)
 	// up to ten bcrypt hashes, so it takes an admission slot first (a refusal charges
 	// nothing, and it queues like login); a TOTP code is an HMAC and needs none.
 	canonical, isRecovery := auth.NormalizeRecoveryCode(code)
+	// Only a TOTP code needs the stored secret, so an unreadable one still lets a
+	// recovery code through, and it fails before Allow, charging nothing.
+	secret, err := s.unsealTOTPSecret(user, isRecovery)
+	if err != nil {
+		return nil, err
+	}
 	release := func() {}
 	if isRecovery {
 		if release, err = s.acquireAdmission(ctx); err != nil {
@@ -767,113 +777,6 @@ func (s *AuthService) VerifyTOTP(ctx context.Context, partialToken, code string)
 	return &AuthResult{Token: token, User: user, RecoveryCodesRemaining: recoveryRemaining}, nil
 }
 
-// consumeRecoveryCode spends the recovery code matching canonical, if the user
-// holds one. matched is false for no match or a code another verification spent
-// first; remaining is -1 when the count could not be read after a successful
-// spend (the code is gone either way).
-func (s *AuthService) consumeRecoveryCode(ctx context.Context, userID int64, canonical string) (remaining int, matched bool, err error) {
-	ids, hashes, err := s.st.ListUnusedRecoveryCodes(ctx, userID)
-	if err != nil {
-		slog.Error("recovery codes: listing failed", "user_id", userID, "error", err)
-		return 0, false, err
-	}
-	idx := auth.MatchRecoveryCode(canonical, hashes)
-	if idx < 0 {
-		return 0, false, nil
-	}
-	consumed, err := s.st.MarkRecoveryCodeUsed(ctx, ids[idx])
-	if err != nil {
-		slog.Error("recovery codes: consuming failed", "user_id", userID, "error", err)
-		return 0, false, err
-	}
-	if !consumed {
-		return 0, false, nil
-	}
-	left, err := s.st.CountUnusedRecoveryCodes(ctx, userID)
-	if err != nil {
-		slog.Warn("recovery codes: counting the remainder failed", "user_id", userID, "error", err)
-		return -1, true, nil
-	}
-	return left, true, nil
-}
-
-// RegenerateRecoveryCodes confirms the password and replaces the recovery codes;
-// the old set is invalid the moment the new one is stored (one transaction).
-// Requires 2FA: the codes stand in for a TOTP code.
-func (s *AuthService) RegenerateRecoveryCodes(ctx context.Context, p Principal, password string) ([]string, error) {
-	user := p.User
-
-	lockKey := auth.Key("pw_confirm_lock", user.ID)
-	if s.limiter.IsLockedOut(lockKey) {
-		return nil, ErrTooManyAttempts
-	}
-	if err := s.confirmPassword(ctx, user, password, lockKey); err != nil {
-		return nil, err
-	}
-	if user.TOTPSecret == nil || *user.TOTPSecret == "" {
-		return nil, ErrRecoveryCodesRequireTOTP
-	}
-
-	codes, err := s.issueRecoveryCodes(ctx, user.ID)
-	if err != nil {
-		return nil, err
-	}
-	slog.Info("recovery codes regenerated", "user_id", user.ID)
-	db.WriteAudit(context.WithoutCancel(ctx), s.st, user.ID, "recovery_codes_regenerated", "user", user.ID,
-		"emergency recovery codes regenerated")
-	return codes, nil
-}
-
-// issueRecoveryCodes generates a set and stores its hashes, replacing any
-// previous set.
-func (s *AuthService) issueRecoveryCodes(ctx context.Context, userID int64) ([]string, error) {
-	// Ten bcrypt hashes: one admission slot.
-	release, admitted := s.limiter.Admission().TryAcquire()
-	if !admitted {
-		return nil, ErrAuthBusy
-	}
-	codes, hashes, err := auth.GenerateRecoveryCodes()
-	release()
-	if err != nil {
-		slog.Error("recovery codes: generation failed", "user_id", userID, "error", err)
-		return nil, ErrRecoveryCodesFailed
-	}
-	if err := s.st.ReplaceRecoveryCodes(ctx, userID, hashes); err != nil {
-		slog.Error("recovery codes: storing failed", "user_id", userID, "error", err)
-		return nil, ErrRecoveryCodesFailed
-	}
-	return codes, nil
-}
-
-// challengeSecret resolves the user behind a partial-auth challenge and returns
-// their decrypted TOTP secret.
-func (s *AuthService) challengeSecret(ctx context.Context, challengeUserID int64) (*db.User, string, error) {
-	user, err := s.st.GetUserByID(ctx, challengeUserID)
-	if err != nil {
-		// GetUserByID answers (nil, nil) for an unknown user, so an error is a store
-		// fault: report the outage and record no attempt.
-		slog.Error("verify-totp: GetUserByID failed", "err", err, "user_id", challengeUserID)
-		return nil, "", ErrTOTPUnavailable
-	}
-	if user == nil || user.TOTPSecret == nil {
-		return nil, "", ErrTOTPChallengeInvalid
-	}
-
-	// A ban can land inside the partial-token window, so the second factor refuses
-	// banned users as the login path does.
-	if auth.IsEffectivelyBanned(user) {
-		return nil, "", ErrBanned
-	}
-
-	secret, decErr := auth.DecryptTOTPSecret(s.totpKey, *user.TOTPSecret)
-	if decErr != nil {
-		slog.Error("failed to decrypt TOTP secret", "user_id", user.ID, "error", decErr)
-		return nil, "", ErrTOTPSecretUnreadable
-	}
-
-	return user, secret, nil
-}
-
 // Logout revokes p.Session and clears the custom status. p.Session must be
 // non-nil: the transport answers an API-token principal with 401 first.
 func (s *AuthService) Logout(ctx context.Context, p Principal) error {
@@ -910,6 +813,9 @@ func (s *AuthService) Logout(ctx context.Context, p Principal) error {
 // deletes it) or after (messages.user_id has no users row, so the foreign-key
 // check fails). The member_ban broadcast then disconnects the socket.
 func (s *AuthService) DeleteAccount(ctx context.Context, p Principal, password, ip string) error {
+	if p.Session == nil {
+		return ErrLoginSessionRequired
+	}
 	user := p.User
 
 	// Per-user lockout against password brute force on this destructive endpoint.
@@ -967,101 +873,12 @@ func (s *AuthService) DeleteAccount(ctx context.Context, p Principal, password, 
 	return nil
 }
 
-// EnableTOTP confirms the password and stages a pending secret. The recovery
-// code hashes are stored now so they exist the moment ConfirmTOTP turns the
-// factor on; staging again replaces both.
-func (s *AuthService) EnableTOTP(ctx context.Context, p Principal, password string) (*TOTPEnrollment, error) {
-	user := p.User
-
-	lockKey := auth.Key("pw_confirm_lock", user.ID)
-	if s.limiter.IsLockedOut(lockKey) {
-		return nil, ErrTooManyAttempts
-	}
-
-	if user.TOTPSecret != nil && *user.TOTPSecret != "" {
-		return nil, ErrTOTPAlreadyEnabled
-	}
-
-	if err := s.confirmPassword(ctx, user, password, lockKey); err != nil {
-		return nil, err
-	}
-
-	secret, err := auth.GenerateTOTPSecret()
-	if err != nil {
-		slog.Error("totp enrol: secret generation failed", "err", err, "user_id", user.ID)
-		return nil, ErrTOTPSecretGenerate
-	}
-
-	if err := s.pending.Put(ctx, user.ID, secret); err != nil {
-		slog.Error("failed to stage two-factor enrolment", "user_id", user.ID, "error", err)
-		return nil, ErrTOTPEnrollmentStage
-	}
-	codes, err := s.issueRecoveryCodes(ctx, user.ID)
-	if err != nil {
-		return nil, err
-	}
-	return &TOTPEnrollment{
-		URI:           auth.BuildTOTPURI(user.Username, secret, "OwnCord"),
-		RecoveryCodes: codes,
-	}, nil
-}
-
-// ConfirmTOTP verifies code against the pending secret, persists it and revokes
-// the caller's other sessions.
-func (s *AuthService) ConfirmTOTP(ctx context.Context, p Principal, password, code string) (*TOTPChangeResult, error) {
-	user := p.User
-
-	lockKey := auth.Key("pw_confirm_lock", user.ID)
-	if s.limiter.IsLockedOut(lockKey) {
-		return nil, ErrTooManyAttempts
-	}
-
-	if err := s.confirmPassword(ctx, user, password, lockKey); err != nil {
-		return nil, err
-	}
-
-	secret, ok := s.pending.Lookup(ctx, user.ID)
-	if !ok {
-		return nil, ErrNoPendingTOTP
-	}
-
-	if !auth.VerifyTOTPCodeOnce(ctx, secret, strings.TrimSpace(code), time.Now().UTC(), user.ID, s.usedCodes) {
-		return nil, ErrTOTPCodeInvalid
-	}
-
-	encryptedSecret, encErr := auth.EncryptTOTPSecret(s.totpKey, secret)
-	if encErr != nil {
-		slog.Error("failed to encrypt TOTP secret", "user_id", user.ID, "error", encErr)
-		return nil, ErrTOTPEnableFailed
-	}
-
-	if err := s.st.UpdateUserTOTPSecret(ctx, user.ID, &encryptedSecret); err != nil {
-		slog.Error("totp confirm: storing the secret failed", "err", err, "user_id", user.ID)
-		return nil, ErrTOTPEnableFailed
-	}
-	s.pending.Delete(ctx, user.ID)
-
-	// Once the secret update committed, revoking other sessions must not be aborted
-	// by a dead request.
-	tailCtx := context.WithoutCancel(ctx)
-	revoked, revokeFailed := s.revokeOtherSessionsAfterAuthChange(tailCtx, user.ID, keepSessionID(p), "totp enable")
-
-	slog.Info("totp enabled", "user_id", user.ID)
-	db.WriteAudit(tailCtx, s.st, user.ID, "totp_enabled", "user", user.ID,
-		"two-factor authentication enrolled")
-
-	res := &TOTPChangeResult{SessionsRevoked: revoked}
-	if revokeFailed {
-		// Partial success: 2FA IS enabled. A 5xx would be a lie, so mirror
-		// ChangePassword (api/profile_handler.go): 200 with an explicit warning.
-		res.Warning = "two-factor authentication enabled, but other sessions could not be revoked; revoke them from the sessions list"
-	}
-	return res, nil
-}
-
 // DisableTOTP confirms the password, refuses while the server requires 2FA,
 // clears the secret and revokes the caller's other sessions.
 func (s *AuthService) DisableTOTP(ctx context.Context, p Principal, password string) (*TOTPChangeResult, error) {
+	if p.Session == nil {
+		return nil, ErrLoginSessionRequired
+	}
 	user := p.User
 
 	lockKey := auth.Key("pw_confirm_lock", user.ID)
@@ -1083,12 +900,12 @@ func (s *AuthService) DisableTOTP(ctx context.Context, p Principal, password str
 	}
 
 	s.pending.Delete(ctx, user.ID)
-	if err := s.st.UpdateUserTOTPSecret(ctx, user.ID, nil); err != nil {
+	if err := s.twoFactor.st.UpdateUserTOTPSecret(ctx, user.ID, nil); err != nil {
 		slog.Error("totp disable: clearing the secret failed", "err", err, "user_id", user.ID)
 		return nil, ErrTOTPDisableFailed
 	}
 	// Recovery codes mean nothing without 2FA; a leftover set is still a credential.
-	if err := s.st.DeleteRecoveryCodes(ctx, user.ID); err != nil {
+	if err := s.twoFactor.st.DeleteRecoveryCodes(ctx, user.ID); err != nil {
 		slog.Warn("recovery codes: deleting after 2FA disable failed", "user_id", user.ID, "error", err)
 	}
 
@@ -1108,25 +925,6 @@ func (s *AuthService) DisableTOTP(ctx context.Context, p Principal, password str
 		res.Warning = "two-factor authentication disabled, but other sessions could not be revoked; revoke them from the sessions list"
 	}
 	return res, nil
-}
-
-// confirmPassword is the password step the TOTP routes share: a missing or wrong
-// password counts against the pw_confirm budget and trips the lockout; a correct
-// one resets it.
-func (s *AuthService) confirmPassword(ctx context.Context, user *db.User, password, lockKey string) error {
-	failKey := auth.Key("pw_confirm_fail", user.ID)
-	if err := s.requirePasswordConfirmation(user, password); err != nil {
-		if errors.Is(err, ErrAuthBusy) {
-			// Refused before any compare ran: not an attempt.
-			return err
-		}
-		if !s.limiter.Allow(failKey, PwConfirmFailureThreshold, PwConfirmFailureWindow) {
-			s.limiter.Lockout(ctx, lockKey, PwConfirmLockoutDuration)
-		}
-		return err
-	}
-	s.limiter.Reset(ctx, failKey)
-	return nil
 }
 
 // newSessionToken generates a bearer token and hands its hash to persist (the
@@ -1165,20 +963,4 @@ func issueSession(ctx context.Context, st sessionCreator, userID int64, device, 
 
 func (s *AuthService) require2FAEnabled(ctx context.Context) (bool, error) {
 	return getBooleanSetting(ctx, s.st, "require_2fa", false)
-}
-
-// requirePasswordConfirmation checks the password inside one admission slot;
-// ErrAuthBusy means no compare ran.
-func (s *AuthService) requirePasswordConfirmation(user *db.User, password string) error {
-	if password == "" {
-		return ErrPasswordRequired
-	}
-	matched, admitted := s.limiter.Admission().CheckPassword(user.PasswordHash, password)
-	if !admitted {
-		return ErrAuthBusy
-	}
-	if !matched {
-		return ErrPasswordConfirmationFailed
-	}
-	return nil
 }

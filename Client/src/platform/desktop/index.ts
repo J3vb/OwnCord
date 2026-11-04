@@ -9,6 +9,7 @@ import { appAudio } from "./appAudio";
 import { appMetadata } from "./appMetadata";
 import { appProcess } from "./appProcess";
 import { autostart } from "./autostart";
+import { callService } from "./callService";
 import { credentials } from "./credentials";
 import { deepLinks } from "./deepLinks";
 import { devTools } from "./devTools";
@@ -17,14 +18,18 @@ import { fileSaver } from "./fileSave";
 import { http } from "./http";
 import { identity } from "./identity";
 import { logFiles } from "./logFiles";
+import { nativeFiles } from "./nativeFiles";
 import { nativeProxies } from "./nativeProxies";
 import { nativeVoice } from "./nativeVoice";
 import { notifier } from "./notifications";
+import { androidNotifier } from "./androidNotifierLazy";
+import { isAndroidHost } from "@lib/hostPlatform";
 import { pendingMessages } from "./pendingMessages";
 import { pushToTalk } from "./pushToTalk";
 import { globalShortcuts } from "./globalShortcuts";
 import { serverScope } from "./serverScope";
 import { settings } from "./settings";
+import { shareSheet } from "./shareSheet";
 import { socket } from "./socket";
 import { systemIdle } from "./systemIdle";
 import { gameDetector } from "./gameDetector";
@@ -41,6 +46,7 @@ export const desktop: Platform = {
   appMetadata,
   appProcess,
   autostart,
+  callService,
   credentials,
   deepLinks,
   devTools,
@@ -51,14 +57,17 @@ export const desktop: Platform = {
   http,
   identity,
   logFiles,
+  nativeFiles,
   nativeProxies,
   nativeVoice,
-  notifier,
+  // The desktop host's notification command is not built for Android.
+  notifier: isAndroidHost() ? androidNotifier : notifier,
   pendingMessages,
   pushToTalk,
   globalShortcuts,
   serverScope,
   settings,
+  shareSheet,
   socket,
   systemIdle,
   trayStatus,

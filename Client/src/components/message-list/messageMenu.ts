@@ -44,6 +44,11 @@ import { atReactionLimit } from "./reactions";
 import { copyThenToast } from "@lib/ui/clipboard";
 import { isPhoneLayout } from "@lib/ui/bottomSheet";
 import { openMessageSheet } from "./messageSheet";
+import { createLogger } from "@lib/logger";
+import { showToast } from "@lib/ui/toast";
+import { desktop } from "../../platform/desktop";
+
+const log = createLogger("message-menu");
 
 /** The phone sheet's quick row has room for one more emoji than the menu's. */
 const PHONE_QUICK_REACTIONS = QUICK_REACTIONS + 1;
@@ -84,6 +89,13 @@ function copyText(text: string): void {
   copyThenToast(text, messageMenuText("copied"), messageMenuText("copyFailed"));
 }
 
+function shareText(text: string): void {
+  desktop.shareSheet.shareText(text).catch((err: unknown) => {
+    log.warn("Share message failed", { error: String(err) });
+    showToast(messageMenuText("shareFailed"), "error");
+  });
+}
+
 /** The selected text, when the selection starts and ends inside `row`. */
 function selectionIn(row: HTMLElement | null): string {
   const selection = window.getSelection();
@@ -94,10 +106,20 @@ function selectionIn(row: HTMLElement | null): string {
   return selection.toString();
 }
 
+const LINK_SELECTOR = '.msg-text a[href^="http"]';
+
+/** The row's one web link; null when it has none or several. */
+function onlyLinkIn(row: HTMLElement | null): HTMLAnchorElement | null {
+  const links = row?.querySelectorAll<HTMLAnchorElement>(LINK_SELECTOR) ?? [];
+  const hrefs = new Set([...links].map((a) => a.getAttribute("href")));
+  return hrefs.size === 1 ? (links[0] ?? null) : null;
+}
+
 function buildItems(
   req: MessageMenuRequest,
   row: HTMLElement | null,
   quickCount: number,
+  phone: boolean,
 ): {
   items: (ContextMenuItem | ContextMenuSeparator)[];
   group: { start: number; count: number } | null;
@@ -150,7 +172,10 @@ function buildItems(
     };
 
   // -- Link under the pointer ------------------------------------------------
-  const anchor = target?.closest<HTMLAnchorElement>('.msg-text a[href^="http"]') ?? null;
+  // A finger rarely lands on the link itself: on a phone, a message with one
+  // link offers it wherever the row was pressed.
+  const anchor =
+    target?.closest<HTMLAnchorElement>(LINK_SELECTOR) ?? (phone ? onlyLinkIn(row) : null);
   const href = anchor?.getAttribute("href") ?? null;
   if (anchor !== null && href !== null) {
     items.push(
@@ -260,6 +285,14 @@ function buildItems(
       label: messageMenuText("copyText"),
       testId: "msg-menu-copy-text",
       onClick: act((m) => copyText(m.content)),
+    });
+  }
+  // The phone's share sheet: the text, links included, to another app.
+  if (phone && msg.content.trim() !== "" && desktop.shareSheet.available) {
+    items.push({
+      label: messageMenuText("share"),
+      testId: "msg-menu-share",
+      onClick: act((m) => shareText(m.content)),
     });
   }
   if (gates.pin.shown) {
@@ -447,7 +480,7 @@ export function openMessageMenu(req: MessageMenuRequest): void {
   });
 
   if (isPhoneLayout()) {
-    const { items, group } = buildItems(req, row, PHONE_QUICK_REACTIONS);
+    const { items, group } = buildItems(req, row, PHONE_QUICK_REACTIONS, true);
     row?.classList.add(SHEET_TARGET_CLASS);
     owner.addCleanup(() => rowOf(msg.id)?.classList.remove(SHEET_TARGET_CLASS));
     openMessageSheet({
@@ -463,7 +496,7 @@ export function openMessageMenu(req: MessageMenuRequest): void {
     return;
   }
 
-  const { items, group } = buildItems(req, row, QUICK_REACTIONS);
+  const { items, group } = buildItems(req, row, QUICK_REACTIONS, false);
   showContextMenu({
     x,
     y,

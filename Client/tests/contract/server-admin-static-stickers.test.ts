@@ -7,9 +7,13 @@
 // error messages (409 name taken, 413, the 60-sticker limit) shown as sent.
 import { describe, it, expect, afterEach } from "vitest";
 import { JSDOM } from "jsdom";
-import { adminPanelHtml } from "../helpers/admin-panel";
+import {
+  adminHtmlWithBridge,
+  loadPanelWithFetch,
+  scriptedPanelFetch,
+  settlePanel,
+} from "../helpers/adminPanelFetch";
 
-const SOURCE = adminPanelHtml();
 const BRIDGE = `<script>
 window.__test = {
   get state(){return state},
@@ -18,7 +22,7 @@ window.__test = {
   confirmDeleteSticker, deleteSticker, stickerFileProblem, stickerNameProblem
 };
 </script>`;
-const HTML = SOURCE.replace("</body>", `${BRIDGE}\n</body>`);
+const HTML = adminHtmlWithBridge(BRIDGE);
 
 interface Call {
   method: string;
@@ -44,54 +48,37 @@ const LIST = [
   { id: 2, name: "Party Blob", emoji: null, url: "/api/v1/stickers/2/image" },
 ];
 
+const STICKERS_URL = "/api/v1/stickers";
+
 type Reply = { status?: number; json?: unknown; text?: string };
 
 async function boot(
   calls: Call[],
   reply: (method: string, path: string) => Reply = () => ({ json: LIST }),
 ): Promise<{ dom: JSDOM; bridge: Bridge; doc: Document }> {
-  const dom = new JSDOM(HTML, {
-    url: "http://localhost:8080/admin",
-    runScripts: "dangerously",
-    pretendToBeVisual: true,
-    beforeParse(window) {
-      window.fetch = (async (input: string, opts: Record<string, unknown> = {}) => {
-        const method = String((opts.method as string) || "GET").toUpperCase();
-        const url = String(input);
-        if (url === "/admin/api/setup/status") {
-          return { ok: true, status: 200, json: async () => ({ needs_setup: false }) } as Response;
-        }
-        if (!url.startsWith("/api/v1/stickers")) {
-          return {
-            ok: true,
-            status: 200,
-            json: async () => ({}),
-            text: async () => "{}",
-          } as Response;
-        }
-        const path = url.slice("/api/v1/stickers".length) || "/";
-        calls.push({
-          method,
-          path,
-          body: opts.body,
-          headers: (opts.headers as Record<string, string>) ?? {},
-        });
-        const r = reply(method, path);
-        const status = r.status ?? 200;
-        const text = r.text ?? (r.json === undefined ? "" : JSON.stringify(r.json));
+  const stickerPath = (url: string) =>
+    url.startsWith(STICKERS_URL) ? url.slice(STICKERS_URL.length) || "/" : null;
+  const dom = loadPanelWithFetch(
+    HTML,
+    scriptedPanelFetch(
+      ({ method, url, body, headers }) => {
+        const path = stickerPath(url);
+        if (path !== null) calls.push({ method, path, body, headers });
+      },
+      (path, method) => {
+        if (path === "/setup/status") return { json: { needs_setup: false } };
+        const stickers = stickerPath(path);
+        if (stickers === null) return { json: {} };
+        const r = reply(method, stickers);
         return {
-          ok: status < 400,
-          status,
-          statusText: "status " + status,
-          text: async () => text,
-        } as Response;
-      }) as typeof fetch;
-    },
-  });
-  await new Promise((resolve) => dom.window.setTimeout(resolve, 0));
+          status: r.status,
+          text: r.text ?? (r.json === undefined ? "" : JSON.stringify(r.json)),
+        };
+      },
+    ),
+  );
+  const bridge = await settlePanel<Bridge>(dom);
   calls.length = 0;
-  const bridge = (dom.window as unknown as { __test: Bridge }).__test;
-  expect(bridge).toBeTruthy();
   bridge.state.token = "tok";
   (bridge.state as unknown as { me: unknown }).me = {
     id: 1,
@@ -285,7 +272,7 @@ describe("Server/admin/static — Stickers", () => {
       await bridge.saveSticker(1);
       const patch = calls.find((c) => c.method === "PATCH")!;
       expect(patch.path).toBe("/1");
-      expect(JSON.parse(patch.body as string)).toEqual({ name: "Big Wave", emoji: "" });
+      expect(patch.body).toEqual({ name: "Big Wave", emoji: "" });
       expect(patch.headers["Content-Type"]).toBe("application/json");
       expect(toast(doc)).toContain("Sticker updated");
     });

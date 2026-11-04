@@ -3,18 +3,12 @@
 // HTTP proxy emits while a request body crosses the loopback tunnel. The
 // desktop binding forwards every event verbatim; the caller correlates by id.
 import { vi } from "vitest";
+import { tauriEventMock } from "../../helpers/tauriEventMock";
 import { describe, expect, it } from "vitest";
 
 const handlers = vi.hoisted(() => new Map<string, Set<(e: { payload: unknown }) => void>>());
 
-vi.mock("@tauri-apps/api/event", () => ({
-  listen: (event: string, handler: (e: { payload: unknown }) => void) => {
-    const set = handlers.get(event) ?? new Set();
-    set.add(handler);
-    handlers.set(event, set);
-    return Promise.resolve(() => set.delete(handler));
-  },
-}));
+vi.mock("@tauri-apps/api/event", () => tauriEventMock(handlers));
 
 import { http } from "../../../src/platform/desktop/http";
 

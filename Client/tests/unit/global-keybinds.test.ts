@@ -1,17 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach, onTestFinished, type Mock } from "vitest";
+import * as logMock from "../helpers/loggerMock";
 
 const { mockVoiceGetState } = vi.hoisted(() => ({
   mockVoiceGetState: vi.fn(() => ({ currentChannelId: null as number | null })),
 }));
 
-vi.mock("@lib/logger", () => ({
-  createLogger: () => ({
-    debug: vi.fn(),
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-  }),
-}));
+vi.mock("@lib/logger", () => logMock.loggerMock());
 
 vi.mock("@stores/voice.store", () => ({
   voiceStore: { getState: mockVoiceGetState },
@@ -545,7 +539,7 @@ describe("global keybinds", () => {
       localStorage.clear();
     });
 
-    it("Ctrl+Shift+M mutes and Ctrl+Shift+D deafens, once each", () => {
+    function expectShiftChordsToggleOnce(): void {
       const h = makeHandlers();
       detach = attachGlobalKeybinds(h);
 
@@ -556,6 +550,10 @@ describe("global keybinds", () => {
       expect(h.onToggleDeafen).toHaveBeenCalledOnce();
       expect(mute.defaultPrevented).toBe(true);
       expect(deafen.defaultPrevented).toBe(true);
+    }
+
+    it("Ctrl+Shift+M mutes and Ctrl+Shift+D deafens, once each", () => {
+      expectShiftChordsToggleOnce();
     });
 
     it("keeps Ctrl+M and Ctrl+D as aliases that toggle once each", () => {
@@ -655,16 +653,7 @@ describe("global keybinds", () => {
 
     it("toggles mute on Ctrl+Shift+M outside a voice channel too", () => {
       mockVoiceGetState.mockReturnValue({ currentChannelId: null });
-      const h = makeHandlers();
-      detach = attachGlobalKeybinds(h);
-
-      const mute = press("M", { shiftKey: true, code: "KeyM" });
-      const deafen = press("D", { shiftKey: true, code: "KeyD" });
-
-      expect(h.onToggleMute).toHaveBeenCalledOnce();
-      expect(h.onToggleDeafen).toHaveBeenCalledOnce();
-      expect(mute.defaultPrevented).toBe(true);
-      expect(deafen.defaultPrevented).toBe(true);
+      expectShiftChordsToggleOnce();
     });
 
     it("does not treat an unbound Ctrl+Shift key as a voice shortcut", () => {
@@ -1191,6 +1180,61 @@ describe("global keybinds", () => {
       expect(h.onTogglePicker).not.toHaveBeenCalled();
     });
   });
+  function registerChordGuardTests(
+    keyOn: (el: HTMLElement, init: KeyboardEventInit) => KeyboardEvent,
+    key: string,
+    opens: "onOpenSettings" | "onOpenShortcuts",
+    composerTitle: string,
+  ): void {
+    it(composerTitle, () => {
+      const h = makeHandlers();
+      detach = attachGlobalKeybinds(h);
+      const composer = document.createElement("textarea");
+      composer.className = "msg-textarea";
+      onTestFinished(() => composer.remove());
+
+      keyOn(composer, { ctrlKey: true });
+
+      expect(h[opens]).toHaveBeenCalledOnce();
+    });
+
+    it("does nothing while Settings is open (isSuspended)", () => {
+      const h = makeHandlers();
+      let settingsOpen = true;
+      detach = attachGlobalKeybinds({ ...h, isSuspended: () => settingsOpen });
+
+      const event = press(key);
+      expect(h[opens]).not.toHaveBeenCalled();
+      expect(event.defaultPrevented).toBe(false);
+
+      settingsOpen = false;
+      press(key);
+      expect(h[opens]).toHaveBeenCalledOnce();
+    });
+
+    it("does nothing while a dialog is open", () => {
+      const h = makeHandlers();
+      detach = attachGlobalKeybinds(h);
+      const dialog = document.createElement("div");
+      dialog.className = "modal-overlay visible";
+      document.body.appendChild(dialog);
+      onTestFinished(() => dialog.remove());
+
+      press(key);
+
+      expect(h[opens]).not.toHaveBeenCalled();
+    });
+
+    it("ignores an auto-repeating key", () => {
+      const h = makeHandlers();
+      detach = attachGlobalKeybinds(h);
+
+      press(key, { repeat: true });
+
+      expect(h[opens]).not.toHaveBeenCalled();
+    });
+  }
+
   describe("Ctrl+, opens Settings", () => {
     /** Dispatch on `el` so the target is where focus really is. */
     function keyOn(el: HTMLElement, init: KeyboardEventInit): KeyboardEvent {
@@ -1236,53 +1280,12 @@ describe("global keybinds", () => {
       expect(bare.defaultPrevented).toBe(false);
     });
 
-    it("works from the message composer, like Ctrl+F", () => {
-      const h = makeHandlers();
-      detach = attachGlobalKeybinds(h);
-
-      const composer = document.createElement("textarea");
-      composer.className = "msg-textarea";
-      onTestFinished(() => composer.remove());
-      keyOn(composer, { ctrlKey: true });
-
-      expect(h.onOpenSettings).toHaveBeenCalledOnce();
-    });
-
-    it("does nothing while Settings is open (isSuspended)", () => {
-      const h = makeHandlers();
-      let settingsOpen = true;
-      detach = attachGlobalKeybinds({ ...h, isSuspended: () => settingsOpen });
-
-      const event = press(",");
-      expect(h.onOpenSettings).not.toHaveBeenCalled();
-      expect(event.defaultPrevented).toBe(false);
-
-      settingsOpen = false;
-      press(",");
-      expect(h.onOpenSettings).toHaveBeenCalledOnce();
-    });
-
-    it("does nothing while a dialog is open", () => {
-      const h = makeHandlers();
-      detach = attachGlobalKeybinds(h);
-      const dialog = document.createElement("div");
-      dialog.className = "modal-overlay visible";
-      document.body.appendChild(dialog);
-      onTestFinished(() => dialog.remove());
-
-      press(",");
-
-      expect(h.onOpenSettings).not.toHaveBeenCalled();
-    });
-
-    it("ignores an auto-repeating key", () => {
-      const h = makeHandlers();
-      detach = attachGlobalKeybinds(h);
-
-      press(",", { repeat: true });
-
-      expect(h.onOpenSettings).not.toHaveBeenCalled();
-    });
+    registerChordGuardTests(
+      keyOn,
+      ",",
+      "onOpenSettings",
+      "works from the message composer, like Ctrl+F",
+    );
   });
 
   describe("Ctrl+/ opens the shortcuts overlay", () => {
@@ -1329,52 +1332,6 @@ describe("global keybinds", () => {
       expect(bare.defaultPrevented).toBe(false);
     });
 
-    it("works from the message composer", () => {
-      const h = makeHandlers();
-      detach = attachGlobalKeybinds(h);
-      const composer = document.createElement("textarea");
-      composer.className = "msg-textarea";
-      onTestFinished(() => composer.remove());
-
-      keyOn(composer, { ctrlKey: true });
-
-      expect(h.onOpenShortcuts).toHaveBeenCalledOnce();
-    });
-
-    it("does nothing while Settings is open (isSuspended)", () => {
-      const h = makeHandlers();
-      let settingsOpen = true;
-      detach = attachGlobalKeybinds({ ...h, isSuspended: () => settingsOpen });
-
-      const event = press("/");
-      expect(h.onOpenShortcuts).not.toHaveBeenCalled();
-      expect(event.defaultPrevented).toBe(false);
-
-      settingsOpen = false;
-      press("/");
-      expect(h.onOpenShortcuts).toHaveBeenCalledOnce();
-    });
-
-    it("does nothing while a dialog is open", () => {
-      const h = makeHandlers();
-      detach = attachGlobalKeybinds(h);
-      const dialog = document.createElement("div");
-      dialog.className = "modal-overlay visible";
-      document.body.appendChild(dialog);
-      onTestFinished(() => dialog.remove());
-
-      press("/");
-
-      expect(h.onOpenShortcuts).not.toHaveBeenCalled();
-    });
-
-    it("ignores an auto-repeating key", () => {
-      const h = makeHandlers();
-      detach = attachGlobalKeybinds(h);
-
-      press("/", { repeat: true });
-
-      expect(h.onOpenShortcuts).not.toHaveBeenCalled();
-    });
+    registerChordGuardTests(keyOn, "/", "onOpenShortcuts", "works from the message composer");
   });
 });

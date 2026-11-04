@@ -7,6 +7,7 @@ package dbgen
 
 import (
 	"context"
+	"strings"
 )
 
 const closeDM = `-- name: CloseDM :exec
@@ -105,6 +106,87 @@ func (q *Queries) GetDMDeliveryTargets(ctx context.Context, arg GetDMDeliveryTar
 			&i.IsGroup,
 			&i.IsOpen,
 			&i.TrustsSender,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getDMHistoryForParticipants = `-- name: GetDMHistoryForParticipants :many
+SELECT
+    dp.user_id                                    AS user_id,
+    lm.id                                         AS last_message_id,
+    COALESCE(lm.content, '')                      AS last_message,
+    COALESCE(lm.timestamp, '')                    AS last_message_at,
+    (SELECT COUNT(*) FROM (SELECT 1 FROM messages mu
+      WHERE mu.channel_id = dp.channel_id AND mu.deleted = 0
+        AND mu.id > COALESCE((SELECT rs.last_message_id FROM read_states rs
+                               WHERE rs.channel_id = dp.channel_id AND rs.user_id = dp.user_id), 0)
+      LIMIT 100)
+    ) AS unread_count,
+    CAST(COALESCE((SELECT rs.mention_count FROM read_states rs
+               WHERE rs.channel_id = dp.channel_id AND rs.user_id = dp.user_id), 0) AS INTEGER) AS mention_count
+FROM dm_participants dp
+LEFT JOIN messages lm    ON lm.id = (
+    SELECT MAX(id) FROM messages WHERE channel_id = dp.channel_id AND deleted = 0
+)
+WHERE dp.channel_id = ?1 AND dp.user_id IN (/*SLICE:user_ids*/?)
+ORDER BY dp.user_id ASC
+`
+
+type GetDMHistoryForParticipantsParams struct {
+	ChannelID int64   `json:"channelId"`
+	UserIds   []int64 `json:"userIds"`
+}
+
+type GetDMHistoryForParticipantsRow struct {
+	UserID        int64  `json:"userId"`
+	LastMessageID *int64 `json:"lastMessageId"`
+	LastMessage   string `json:"lastMessage"`
+	LastMessageAt string `json:"lastMessageAt"`
+	UnreadCount   int64  `json:"unreadCount"`
+	MentionCount  int64  `json:"mentionCount"`
+}
+
+// The history fields of one DM's sidebar row for several of its participants in
+// one pass: the last message once, unread (capped at 100 like GetUserDMChannels)
+// and mention counts per participant. A DM ring reopening the DM for its targets
+// reads this instead of each target's whole open-DM list.
+func (q *Queries) GetDMHistoryForParticipants(ctx context.Context, arg GetDMHistoryForParticipantsParams) ([]GetDMHistoryForParticipantsRow, error) {
+	query := getDMHistoryForParticipants
+	var queryParams []interface{}
+	queryParams = append(queryParams, arg.ChannelID)
+	if len(arg.UserIds) > 0 {
+		for _, v := range arg.UserIds {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:user_ids*/?", strings.Repeat(",?", len(arg.UserIds))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:user_ids*/?", "NULL", 1)
+	}
+	rows, err := q.db.QueryContext(ctx, query, queryParams...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetDMHistoryForParticipantsRow{}
+	for rows.Next() {
+		var i GetDMHistoryForParticipantsRow
+		if err := rows.Scan(
+			&i.UserID,
+			&i.LastMessageID,
+			&i.LastMessage,
+			&i.LastMessageAt,
+			&i.UnreadCount,
+			&i.MentionCount,
 		); err != nil {
 			return nil, err
 		}

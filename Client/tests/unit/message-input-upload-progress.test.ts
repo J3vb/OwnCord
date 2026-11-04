@@ -3,41 +3,13 @@
 // the `onProgress` callback the upload handler reports.
 import { describe, it, expect, vi } from "vitest";
 
-vi.mock("@components/EmojiPicker", () => ({
-  createEmojiPicker: () => ({ element: document.createElement("div"), destroy: vi.fn() }),
-}));
-vi.mock("@components/GifPicker", () => ({
-  createGifPicker: () => ({ element: document.createElement("div"), destroy: vi.fn() }),
-}));
+import * as mocks from "../helpers/messageInputMocks";
+vi.mock("@components/EmojiPicker", () => mocks.emojiPickerMock());
+vi.mock("@components/GifPicker", () => mocks.gifPickerMock());
 
-import { createMessageInput, type MessageInputOptions } from "@components/MessageInput";
-import type { GifApi, GifFavoritesApi } from "@lib/media/gifProvider";
+import { createMessageInput } from "@components/MessageInput";
 import { useMountContainer } from "../helpers/mountContainer";
-
-const stubGifApi: GifApi & GifFavoritesApi = {
-  gifSearch: vi.fn(async () => ({ results: [] })),
-  gifTrending: vi.fn(async () => ({ results: [] })),
-  gifFavorites: vi.fn(async () => ({ favorites: [] })),
-  addGifFavorite: vi.fn(async () => undefined),
-  removeGifFavorite: vi.fn(async () => undefined),
-};
-
-function makeOptions(overrides: Partial<MessageInputOptions> = {}): MessageInputOptions {
-  return {
-    channelId: 1,
-    channelName: "general",
-    gifApi: stubGifApi,
-    onSend: vi.fn(),
-    onTyping: vi.fn(),
-    ...overrides,
-  };
-}
-
-function queueFile(container: HTMLElement, file: File): void {
-  const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
-  Object.defineProperty(fileInput, "files", { value: [file], writable: true });
-  fileInput.dispatchEvent(new Event("change", { bubbles: true }));
-}
+import { controlledUpload, makeOptions, queueFile } from "../helpers/messageInputHarness";
 
 describe("MessageInput upload progress", () => {
   let container: HTMLDivElement;
@@ -46,27 +18,19 @@ describe("MessageInput upload progress", () => {
   });
 
   it("shows determinate progress from a progress callback while the upload runs", async () => {
-    let report: ((fraction: number) => void) | null = null;
-    let finish: (r: { id: string; url: string; filename: string }) => void = () => {};
-    const onUploadFile = vi.fn(
-      (_file: File, _signal?: AbortSignal, onProgress?: (fraction: number) => void) => {
-        report = onProgress ?? null;
-        return new Promise<{ id: string; url: string; filename: string }>((resolve) => {
-          finish = resolve;
-        });
-      },
-    );
+    const up = controlledUpload();
+    const onUploadFile = up.fn;
     const comp = createMessageInput(makeOptions({ onUploadFile }));
     comp.mount(container);
 
     queueFile(container, new File(["x"], "a.png", { type: "image/png" }));
     await vi.waitFor(() => expect(onUploadFile).toHaveBeenCalled());
 
-    report!(0.25);
+    up.progress(0.25);
     const bar = container.querySelector("progress") as HTMLProgressElement;
     await vi.waitFor(() => expect(bar?.value).toBeCloseTo(0.25));
 
-    finish({ id: "srv-1", url: "/f/1", filename: "a.png" });
+    up.resolve({ id: "srv-1", url: "/f/1", filename: "a.png" });
     await vi.waitFor(() => expect(container.querySelector(".uploading")).toBeNull());
     comp.destroy?.();
   });

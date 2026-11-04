@@ -8,14 +8,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net/http"
-	"os/exec"
 	"sync/atomic"
 	"time"
 
+	"github.com/livekit/protocol/livekit"
+
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
-	"github.com/livekit/protocol/livekit"
 )
 
 // SetVoiceRejoinBlockWindowForTest shrinks the moderator-removal rejoin block
@@ -187,7 +186,7 @@ func NewTestClientWithTokenHash(hub *Hub, user *db.User, tokenHash string, chann
 
 // RunningForTest reports whether the hub's Run loop has started.
 func (h *Hub) RunningForTest() bool {
-	return h.running.Load()
+	return h.lifecycle.running.Load()
 }
 
 // ClientUserIDForTest returns the client's user ID for external tests.
@@ -226,31 +225,6 @@ func LeaveVoiceChannelWithRetryForTest(h *Hub, userID int64, channelID int64, jo
 
 // ─── livekit process/webhook helpers ───────────────────────────────────────
 
-// GenerateConfigForTest exposes LiveKitProcess.generateConfig for external tests.
-func (p *LiveKitProcess) GenerateConfigForTest() (string, error) {
-	return p.generateConfig()
-}
-
-// HTTPTransportForTest exposes the health-check client's transport so tests can
-// assert it does not share http.DefaultTransport's connection pool.
-func (p *LiveKitProcess) HTTPTransportForTest() http.RoundTripper {
-	return p.httpClient.Transport
-}
-
-// SetProcessCmdForTest sets cmd to a non-nil value to simulate "already running".
-func (p *LiveKitProcess) SetProcessCmdForTest() {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.cmd = &exec.Cmd{}
-}
-
-// SetProcessStoppedForTest sets stopped=true to simulate a stopped process.
-func (p *LiveKitProcess) SetProcessStoppedForTest() {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.stopped = true
-}
-
 // NewHubForTest creates a minimal Hub with no DB for webhook testing. limiter
 // is real (not nil): deliverBroadcast's channel-scoped path consults it for
 // the topic rate limit unconditionally.
@@ -259,7 +233,7 @@ func NewHubForTest() *Hub {
 		clients:  make(map[int64][]*Client),
 		pubsub:   NewPubSub(),
 		limiter:  auth.NewRateLimiter(),
-		voiceMod: newUserLocks[lockRankVoiceMod](),
+		voiceHub: hubVoice{mod: newUserLocks[lockRankVoiceMod]()},
 	}
 }
 
@@ -279,7 +253,7 @@ func (h *Hub) BuildAuthOKForTest(user *db.User, roleName string) []byte {
 // counts synchronously instead of on a background goroutine, so a test can read
 // the counts deterministically right after driving a chat_send through the hub.
 func (h *Hub) RunMentionCountsInlineForTest() {
-	h.messageSvc.RunBackgroundInlineForTest()
+	h.seams.messageSvc.RunBackgroundInlineForTest()
 }
 
 // BuildReadyForTest exposes Hub.buildReady for external tests.
@@ -401,9 +375,9 @@ func PeekClientPendingModFlagsForTest(c *Client) (serverMuted, serverDeafened bo
 // ExpireSettingsCacheForTest forces the settings cache to appear stale so that
 // the next call to getCachedSettings triggers a DB refresh.
 func (h *Hub) ExpireSettingsCacheForTest() {
-	h.settingsMu.Lock()
-	defer h.settingsMu.Unlock()
-	h.settingsLastUpdate = time.Time{} // zero time — always older than any TTL
+	h.settings.mu.Lock()
+	defer h.settings.mu.Unlock()
+	h.settings.lastUpdate = time.Time{} // zero time — always older than any TTL
 }
 
 // BuildJSONForTest exposes buildJSON for external tests.
@@ -426,11 +400,6 @@ func ParseParticipantIdentityForTest(identity string) (int64, string, error) {
 // ParseRoomChannelIDForTest exposes parseRoomChannelID for external tests.
 func ParseRoomChannelIDForTest(roomName string) (int64, error) {
 	return parseRoomChannelID(roomName)
-}
-
-// WsToHTTPForTest exposes wsToHTTP for external tests.
-func WsToHTTPForTest(wsURL string) string {
-	return wsToHTTP(wsURL)
 }
 
 // RegisterNowForTest exposes registerNow for external tests so clients are
@@ -777,18 +746,18 @@ func CommandDeadlineExemptTypesForTest() []string {
 
 // RegisteredTypesForTest returns every V2-registered message type.
 func (h *Hub) RegisteredTypesForTest() []string {
-	return h.registry.RegisteredV2Types()
+	return h.seams.registry.RegisteredV2Types()
 }
 
 // ReplaceHandlerForTest swaps typ's registered V2 handler for fn, keeping the
 // deps. The type must already be registered.
 func (h *Hub) ReplaceHandlerForTest(typ string, fn func(ctx context.Context) Result) {
-	entry, ok := h.registry.handlersV2[typ]
+	entry, ok := h.seams.registry.handlersV2[typ]
 	if !ok {
 		panic("ReplaceHandlerForTest: type not registered: " + typ)
 	}
 	entry.handler = func(ctx context.Context, _ Command, _ ClientInfo, _ any) Result { return fn(ctx) }
-	h.registry.handlersV2[typ] = entry
+	h.seams.registry.handlersV2[typ] = entry
 }
 
 // handleVoiceJoin runs a voice join with ctx as both the frame and connection

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { usePhone } from "../helpers/phoneMedia";
 
 // The shared Back history, replaced by a stub that records the claims.
 const back = vi.hoisted(() => ({ onBack: [] as Array<() => void>, released: 0 }));
@@ -20,13 +21,6 @@ import {
 import type { RingState } from "../../src/lib/voice/callRing";
 
 const RING: RingState = { channelId: 100, fromUserId: 2, fromUsername: "Otto" };
-
-function usePhone(on: boolean): void {
-  vi.stubGlobal(
-    "matchMedia",
-    vi.fn((q: string) => ({ matches: on && q.includes("pointer: coarse") })),
-  );
-}
 
 describe("incoming call on a phone", () => {
   let host: HTMLDivElement;

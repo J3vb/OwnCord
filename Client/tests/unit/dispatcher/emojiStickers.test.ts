@@ -1,6 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
 import * as dispatcherMocks from "../../helpers/dispatcherMocks";
-import { wireDispatcher } from "../../../src/lib/dispatcher";
 import { expectConsole } from "../../helpers/console";
 import { messagesStore, getChannelMessages, setMessages } from "../../../src/stores/messages.store";
 import {
@@ -11,7 +10,13 @@ import {
 } from "../../../src/stores/emoji.store";
 import { stickersStore, setStickers, listStickers } from "../../../src/stores/stickers.store";
 import type { MessageResponse } from "../../../src/lib/types";
-import { useDispatcherHarness, type DispatcherMock } from "../../helpers/dispatcherHarness";
+import {
+  useDispatcherHarness,
+  readyEvent,
+  authOkEvent,
+  mock,
+  replaceDispatcher,
+} from "../../helpers/dispatcherHarness";
 
 vi.mock("@lib/notifications", () => dispatcherMocks.notificationsMock());
 vi.mock("@lib/voice/livekitSession", () => dispatcherMocks.livekitSessionMock());
@@ -23,16 +28,7 @@ vi.mock("../../../src/features/connection/dispatchContext", async (importOrigina
 );
 
 describe("WS Dispatcher", () => {
-  let cleanup: () => void;
-  let mock: DispatcherMock;
-
-  useDispatcherHarness({
-    wired: (m, c) => {
-      mock = m;
-      cleanup = c;
-    },
-    currentCleanup: () => cleanup,
-  });
+  useDispatcherHarness();
 
   it("wires emoji_update to replace the custom-emoji set", () => {
     setCustomEmoji([
@@ -67,14 +63,13 @@ describe("WS Dispatcher", () => {
   });
 
   it("on ready loads the custom-emoji set from the REST list", async () => {
-    cleanup();
     const listBlocks = vi.fn().mockResolvedValue({ blocked_user_ids: [] });
     const listEmoji = vi
       .fn()
       .mockResolvedValue([{ id: 4, shortcode: "wave", url: "/api/v1/emoji/4/image" }]);
-    cleanup = wireDispatcher(mock.ws, { listBlocks, listEmoji });
+    replaceDispatcher({ listBlocks, listEmoji });
 
-    mock.dispatch("ready", { channels: [], members: [], voice_states: [], roles: [] });
+    mock.dispatch("ready", readyEvent());
 
     expect(listEmoji).toHaveBeenCalled();
     await Promise.resolve();
@@ -141,23 +136,16 @@ describe("WS Dispatcher", () => {
   });
 
   it("on ready loads the stickers only when the server advertises the capability", async () => {
-    cleanup();
     const listBlocks = vi.fn().mockResolvedValue({ blocked_user_ids: [] });
     const listStickersApi = vi
       .fn()
       .mockResolvedValue([{ id: 4, name: "Wave", emoji: null, url: "/api/v1/stickers/4/image" }]);
-    cleanup = wireDispatcher(mock.ws, { listBlocks, listStickers: listStickersApi });
+    replaceDispatcher({ listBlocks, listStickers: listStickersApi });
 
-    mock.dispatch("ready", { channels: [], members: [], voice_states: [], roles: [] });
+    mock.dispatch("ready", readyEvent());
     expect(listStickersApi).not.toHaveBeenCalled();
 
-    mock.dispatch("ready", {
-      channels: [],
-      members: [],
-      voice_states: [],
-      roles: [],
-      capabilities: { stickers: true },
-    });
+    mock.dispatch("ready", readyEvent({ capabilities: { stickers: true } }));
     expect(listStickersApi).toHaveBeenCalledTimes(1);
     await Promise.resolve();
     await Promise.resolve();
@@ -166,30 +154,17 @@ describe("WS Dispatcher", () => {
   });
 
   it("refetches the stickers on a resumed connection, which gets no ready", async () => {
-    cleanup();
     const listBlocks = vi.fn().mockResolvedValue({ blocked_user_ids: [] });
     const listStickersApi = vi.fn().mockResolvedValue([]);
-    cleanup = wireDispatcher(mock.ws, { listBlocks, listStickers: listStickersApi });
-    mock.dispatch("ready", {
-      channels: [],
-      members: [],
-      voice_states: [],
-      roles: [],
-      capabilities: { stickers: true },
-    });
+    replaceDispatcher({ listBlocks, listStickers: listStickersApi });
+    mock.dispatch("ready", readyEvent({ capabilities: { stickers: true } }));
     listStickersApi.mockClear();
 
-    mock.dispatch("auth_ok", {
-      user: { id: 1, username: "alex", avatar: null, role: "admin" },
-      server_name: "TestServer",
-      motd: "",
-      replay_source: "buffer",
-    } as never);
+    mock.dispatch("auth_ok", authOkEvent({ replay_source: "buffer" }) as never);
     expect(listStickersApi).toHaveBeenCalledTimes(1);
   });
 
   it("drops a ready-time sticker list that a fresher sticker_update overtook", async () => {
-    cleanup();
     const listBlocks = vi.fn().mockResolvedValue({ blocked_user_ids: [] });
     let resolveList: (v: unknown[]) => void = () => {};
     const listStickersApi = vi.fn(
@@ -198,17 +173,11 @@ describe("WS Dispatcher", () => {
           resolveList = r;
         }),
     );
-    cleanup = wireDispatcher(mock.ws, {
+    replaceDispatcher({
       listBlocks,
       listStickers: listStickersApi as never,
     });
-    mock.dispatch("ready", {
-      channels: [],
-      members: [],
-      voice_states: [],
-      roles: [],
-      capabilities: { stickers: true },
-    });
+    mock.dispatch("ready", readyEvent({ capabilities: { stickers: true } }));
     mock.dispatch("sticker_update", {
       stickers: [{ id: 9, name: "Fresh", emoji: null, url: "/api/v1/stickers/9/image" }],
     });
@@ -226,7 +195,6 @@ describe("WS Dispatcher", () => {
   // `emoji_update` can land and then be clobbered by the slower, stale GET
   // reply. Mirrors the OC-0218 blockedByMeRev guard for listBlocks.
   it("does not let a slow-to-resolve ready-time listEmoji revert a fresher emoji_update", async () => {
-    cleanup(); // tear down the no-api dispatcher wired in beforeEach
     const listBlocks = vi.fn().mockResolvedValue({ blocked_user_ids: [] });
     let resolveListEmoji!: (v: { id: number; shortcode: string; url: string }[]) => void;
     const listEmoji = vi.fn(
@@ -235,10 +203,10 @@ describe("WS Dispatcher", () => {
           resolveListEmoji = resolve;
         }),
     );
-    cleanup = wireDispatcher(mock.ws, { listBlocks, listEmoji });
+    replaceDispatcher({ listBlocks, listEmoji });
 
     // Reconnect: ready fires the GET, which does not resolve yet.
-    mock.dispatch("ready", { channels: [], members: [], voice_states: [], roles: [] });
+    mock.dispatch("ready", readyEvent());
     expect(listEmoji).toHaveBeenCalled();
 
     // While it's in flight, a fresher emoji_update lands on the socket (e.g.
@@ -261,12 +229,11 @@ describe("WS Dispatcher", () => {
   });
 
   it("survives a failed emoji load — shortcodes just stay plain text", async () => {
-    cleanup();
     const listBlocks = vi.fn().mockResolvedValue({ blocked_user_ids: [] });
     const listEmoji = vi.fn().mockRejectedValue(new Error("offline"));
-    cleanup = wireDispatcher(mock.ws, { listBlocks, listEmoji });
+    replaceDispatcher({ listBlocks, listEmoji });
 
-    mock.dispatch("ready", { channels: [], members: [], voice_states: [], roles: [] });
+    mock.dispatch("ready", readyEvent());
     await Promise.resolve();
     await Promise.resolve();
     emojiStore.flush();

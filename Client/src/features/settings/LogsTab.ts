@@ -27,6 +27,7 @@ import { desktop } from "../../platform/desktop";
 import { isAndroidApp, isLinuxDesktop } from "../voice/native/platform";
 import { settingsText as t } from "../../i18n/settings";
 import { copyThenRelabel } from "@lib/ui/clipboard";
+import { EVENT_LOG_PREF_KEY, setEventSinkEnabled } from "@lib/diagnostics/eventSink";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -65,6 +66,13 @@ function logCounts(entries: readonly LogEntry[]): string {
     t("logs.warnings", { count: warnings }),
     t("logs.errors", { count: errors }),
   ].join(" · ");
+}
+
+/** The event log switch: off stops recording and deletes what was kept. */
+function setEventLogKept(on: boolean): void {
+  setEventSinkEnabled(on);
+  if (on) return;
+  void import("@lib/diagnostics/eventLog").then((m) => m.clearEventLog());
 }
 
 // ---------------------------------------------------------------------------
@@ -160,12 +168,18 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
 
     // Support bundle: lazily loaded so the zip writer stays off the
     // startup path. Everything is read and written on this machine.
+    // The Android app has no save dialog: the bundle goes to the share sheet.
+    const shareBundle = desktop.shareSheet.available;
     const bundleBtn = createElement(
       "button",
       { class: "ac-btn", type: "button", "data-testid": "export-support-bundle" },
-      t("logs.exportBundle"),
+      t(shareBundle ? "logs.shareBundle" : "logs.exportBundle"),
     );
-    const bundleNote = createElement("p", { class: "setting-desc" }, t("logs.bundleNote"));
+    const bundleNote = createElement(
+      "p",
+      { class: "setting-desc" },
+      t(shareBundle ? "logs.bundleNoteShare" : "logs.bundleNote"),
+    );
     const bundleStatus = createElement("div", {
       class: "setting-desc",
       role: "status",
@@ -181,7 +195,7 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
             exportSupportBundle(desktop, getSessionDebugInfo(), getShareDiagnostics()),
           )
           .then((saved) => {
-            bundleStatus.textContent = saved ? t("logs.bundleSaved") : "";
+            bundleStatus.textContent = saved && !shareBundle ? t("logs.bundleSaved") : "";
           })
           .catch((err: unknown) => {
             bundleStatus.textContent = t("logs.exportFailed", {
@@ -224,6 +238,19 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
     if (__OWNCORD_WEB__ || isAndroidApp()) appendChildren(helpHead, helpTitle, diagCopy, bundleBtn);
     else appendChildren(helpHead, helpTitle, diagCopy, openLogsBtn, bundleBtn);
     appendChildren(helpCard, helpHead, bundleNote, bundleStatus);
+    appendToggleRows(
+      helpCard,
+      [
+        {
+          key: EVENT_LOG_PREF_KEY,
+          label: t("logs.eventLog"),
+          desc: t("logs.eventLogDesc"),
+          fallback: true,
+          sideEffect: setEventLogKept,
+        },
+      ],
+      buildSignal,
+    );
     section.appendChild(helpCard);
 
     // ---- Client logs (disclosure; the summary carries the counts) ---------

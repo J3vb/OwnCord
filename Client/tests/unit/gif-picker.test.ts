@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
 import { createGifPicker } from "@components/GifPicker";
 import { messagingText } from "../../src/i18n/messaging";
 import { gifFavoritesText } from "../../src/i18n/gifFavorites";
@@ -95,20 +96,78 @@ function makePicker(overrides?: Partial<GifPickerOptions>) {
   return { picker, options };
 }
 
+let container: HTMLDivElement;
+
+function mountPicker(overrides?: Partial<GifPickerOptions>) {
+  const made = makePicker(overrides);
+  container.appendChild(made.picker.element);
+  return made;
+}
+
+type MountedPicker = ReturnType<typeof mountPicker>["picker"];
+
+/** Trending resolves one GIF titled "" (so labels fall back to "GIF"). */
+function mockUntitledGif(): void {
+  const gifNoTitle: GifResult = {
+    id: "no-title",
+    title: "",
+    url: "https://media.klipy.com/preview/no-title.gif",
+    fullUrl: "https://media.klipy.com/full/no-title.gif",
+  };
+  vi.mocked(getTrendingGifs).mockResolvedValue(lastPage([gifNoTitle]));
+}
+
+function expectNoGifsFound(picker: MountedPicker): void {
+  const empty = picker.element.querySelector(".gp-empty");
+  expect(empty).not.toBeNull();
+  expect(empty!.textContent).toBe("No GIFs found");
+}
+
+/** First trending page resolves; the second stays pending until the returned function is called. */
+function holdSecondTrendingPage(): (page: GifPage) => void {
+  let resolveMore!: (p: GifPage) => void;
+  vi.mocked(getTrendingGifs)
+    .mockResolvedValueOnce({ gifs: [makeGif("a")], next: "C1" })
+    .mockReturnValueOnce(new Promise<GifPage>((r) => (resolveMore = r)));
+  return (page) => resolveMore(page);
+}
+
+function itemFullUrls(picker: MountedPicker): Array<string | undefined> {
+  return Array.from(picker.element.querySelectorAll<HTMLElement>(".gp-item")).map(
+    (i) => i.dataset.fullUrl,
+  );
+}
+
+async function flush(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
+function typeInto(input: HTMLInputElement, value: string): void {
+  input.value = value;
+  input.dispatchEvent(new Event("input"));
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
 describe("GifPicker", () => {
-  let container: HTMLDivElement;
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => {
+      vi.useRealTimers();
+      vi.clearAllMocks();
+    },
+  );
 
   beforeEach(() => {
     vi.useFakeTimers();
-
     // Default: trending returns data, search returns search data
     vi.mocked(getTrendingGifs).mockResolvedValue(lastPage(TRENDING_GIFS));
     vi.mocked(searchGifs).mockResolvedValue(lastPage(SEARCH_GIFS));
-
     URL.createObjectURL = createObjectURLMock;
     URL.revokeObjectURL = vi.fn();
     imageMock.mockResolvedValue({ ok: true, value: new Blob(["x"], { type: "image/gif" }) });
@@ -117,15 +176,6 @@ describe("GifPicker", () => {
       value: { title: null, description: null, siteName: null, image: null },
     });
     clearExternalImageCache();
-
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-    vi.clearAllMocks();
-    container.remove();
   });
 
   // ── Structure ─────────────────────────────────────────────────────────────
@@ -167,12 +217,10 @@ describe("GifPicker", () => {
     });
 
     it("debounces search — does not call searchGifs immediately on input", () => {
-      const { picker } = makePicker();
-      container.appendChild(picker.element);
+      const { picker } = mountPicker();
 
       const input = picker.element.querySelector(".gp-search") as HTMLInputElement;
-      input.value = "cats";
-      input.dispatchEvent(new Event("input"));
+      typeInto(input, "cats");
 
       // Before debounce fires — searchGifs should not have been called yet
       expect(vi.mocked(searchGifs)).not.toHaveBeenCalled();
@@ -180,12 +228,10 @@ describe("GifPicker", () => {
     });
 
     it("calls searchGifs after 300 ms debounce", async () => {
-      const { picker } = makePicker();
-      container.appendChild(picker.element);
+      const { picker } = mountPicker();
 
       const input = picker.element.querySelector(".gp-search") as HTMLInputElement;
-      input.value = "cats";
-      input.dispatchEvent(new Event("input"));
+      typeInto(input, "cats");
 
       vi.advanceTimersByTime(300);
       await Promise.resolve(); // flush microtasks
@@ -195,17 +241,14 @@ describe("GifPicker", () => {
     });
 
     it("cancels previous debounce timer when user types again quickly", async () => {
-      const { picker } = makePicker();
-      container.appendChild(picker.element);
+      const { picker } = mountPicker();
 
       const input = picker.element.querySelector(".gp-search") as HTMLInputElement;
 
-      input.value = "ca";
-      input.dispatchEvent(new Event("input"));
+      typeInto(input, "ca");
       vi.advanceTimersByTime(100);
 
-      input.value = "cats";
-      input.dispatchEvent(new Event("input"));
+      typeInto(input, "cats");
       vi.advanceTimersByTime(300);
       await Promise.resolve();
 
@@ -216,12 +259,10 @@ describe("GifPicker", () => {
     });
 
     it("trims whitespace from search query before fetching", async () => {
-      const { picker } = makePicker();
-      container.appendChild(picker.element);
+      const { picker } = mountPicker();
 
       const input = picker.element.querySelector(".gp-search") as HTMLInputElement;
-      input.value = "  dogs  ";
-      input.dispatchEvent(new Event("input"));
+      typeInto(input, "  dogs  ");
 
       vi.advanceTimersByTime(300);
       await Promise.resolve();
@@ -231,19 +272,16 @@ describe("GifPicker", () => {
     });
 
     it("calls getTrendingGifs when search is cleared (empty string)", async () => {
-      const { picker } = makePicker();
-      container.appendChild(picker.element);
+      const { picker } = mountPicker();
 
       const input = picker.element.querySelector(".gp-search") as HTMLInputElement;
       // Type something first
-      input.value = "cats";
-      input.dispatchEvent(new Event("input"));
+      typeInto(input, "cats");
       vi.advanceTimersByTime(300);
       await Promise.resolve();
 
       // Clear the input
-      input.value = "";
-      input.dispatchEvent(new Event("input"));
+      typeInto(input, "");
       vi.advanceTimersByTime(300);
       await Promise.resolve();
 
@@ -268,8 +306,7 @@ describe("GifPicker", () => {
       // Return a never-resolving promise to keep loading state
       vi.mocked(getTrendingGifs).mockReturnValue(new Promise(() => {}));
 
-      const { picker } = makePicker();
-      container.appendChild(picker.element);
+      const { picker } = mountPicker();
 
       const loading = picker.element.querySelector(".gp-loading");
       expect(loading).not.toBeNull();
@@ -278,12 +315,10 @@ describe("GifPicker", () => {
     });
 
     it("renders GIF grid after trending data resolves", async () => {
-      const { picker } = makePicker();
-      container.appendChild(picker.element);
+      const { picker } = mountPicker();
 
       // Flush the resolved promise
-      await Promise.resolve();
-      await Promise.resolve();
+      await flush();
 
       const items = picker.element.querySelectorAll(".gp-item");
       expect(items.length).toBe(TRENDING_GIFS.length);
@@ -291,11 +326,9 @@ describe("GifPicker", () => {
     });
 
     it("each grid item has an img with the preview url", async () => {
-      const { picker } = makePicker();
-      container.appendChild(picker.element);
+      const { picker } = mountPicker();
 
-      await Promise.resolve();
-      await Promise.resolve();
+      await flush();
 
       const imgs = picker.element.querySelectorAll(".gp-img") as NodeListOf<HTMLImageElement>;
       expect(imgs.length).toBe(TRENDING_GIFS.length);
@@ -320,11 +353,9 @@ describe("GifPicker", () => {
 
   describe("GIF grid rendering", () => {
     it("renders one .gp-item per gif", async () => {
-      const { picker } = makePicker();
-      container.appendChild(picker.element);
+      const { picker } = mountPicker();
 
-      await Promise.resolve();
-      await Promise.resolve();
+      await flush();
 
       const grid = picker.element.querySelector(".gp-grid");
       expect(grid).not.toBeNull();
@@ -333,19 +364,11 @@ describe("GifPicker", () => {
     });
 
     it("img alt falls back to 'GIF' when title is empty", async () => {
-      const gifNoTitle: GifResult = {
-        id: "no-title",
-        title: "",
-        url: "https://media.klipy.com/preview/no-title.gif",
-        fullUrl: "https://media.klipy.com/full/no-title.gif",
-      };
-      vi.mocked(getTrendingGifs).mockResolvedValue(lastPage([gifNoTitle]));
+      mockUntitledGif();
 
-      const { picker } = makePicker();
-      container.appendChild(picker.element);
+      const { picker } = mountPicker();
 
-      await Promise.resolve();
-      await Promise.resolve();
+      await flush();
 
       const img = picker.element.querySelector(".gp-img") as HTMLImageElement;
       expect(img.alt).toBe("GIF");
@@ -353,11 +376,9 @@ describe("GifPicker", () => {
     });
 
     it("img alt is the gif title when present", async () => {
-      const { picker } = makePicker();
-      container.appendChild(picker.element);
+      const { picker } = mountPicker();
 
-      await Promise.resolve();
-      await Promise.resolve();
+      await flush();
 
       const imgs = picker.element.querySelectorAll(".gp-img") as NodeListOf<HTMLImageElement>;
       expect(imgs[0]!.alt).toBe(TRENDING_GIFS[0]!.title);
@@ -365,11 +386,9 @@ describe("GifPicker", () => {
     });
 
     it("img has loading=lazy attribute", async () => {
-      const { picker } = makePicker();
-      container.appendChild(picker.element);
+      const { picker } = mountPicker();
 
-      await Promise.resolve();
-      await Promise.resolve();
+      await flush();
 
       const img = picker.element.querySelector(".gp-img") as HTMLImageElement;
       expect(img.getAttribute("loading")).toBe("lazy");
@@ -382,11 +401,9 @@ describe("GifPicker", () => {
   describe("clicking a GIF", () => {
     it("calls onSelect with the full URL", async () => {
       const onSelect = vi.fn();
-      const { picker } = makePicker({ onSelect });
-      container.appendChild(picker.element);
+      const { picker } = mountPicker({ onSelect });
 
-      await Promise.resolve();
-      await Promise.resolve();
+      await flush();
 
       const firstItem = picker.element.querySelector(".gp-item") as HTMLElement;
       firstItem.click();
@@ -397,11 +414,9 @@ describe("GifPicker", () => {
 
     it("also calls onClose after selecting a GIF", async () => {
       const onClose = vi.fn();
-      const { picker } = makePicker({ onClose });
-      container.appendChild(picker.element);
+      const { picker } = mountPicker({ onClose });
 
-      await Promise.resolve();
-      await Promise.resolve();
+      await flush();
 
       const firstItem = picker.element.querySelector(".gp-item") as HTMLElement;
       firstItem.click();
@@ -412,11 +427,9 @@ describe("GifPicker", () => {
 
     it("calls onSelect with the correct fullUrl for each item", async () => {
       const onSelect = vi.fn();
-      const { picker } = makePicker({ onSelect });
-      container.appendChild(picker.element);
+      const { picker } = mountPicker({ onSelect });
 
-      await Promise.resolve();
-      await Promise.resolve();
+      await flush();
 
       const items = picker.element.querySelectorAll(".gp-item") as NodeListOf<HTMLElement>;
 
@@ -436,23 +449,19 @@ describe("GifPicker", () => {
     // rest of the picker's life.
     it("does not fire onSelect for a cell discarded by a later search", async () => {
       const onSelect = vi.fn();
-      const { picker } = makePicker({ onSelect });
-      container.appendChild(picker.element);
+      const { picker } = mountPicker({ onSelect });
 
       // Flush trending
-      await Promise.resolve();
-      await Promise.resolve();
+      await flush();
 
       const staleItem = picker.element.querySelector(".gp-item") as HTMLElement;
       expect(staleItem).not.toBeNull();
 
       // A search re-renders the grid, discarding the trending cells.
       const input = picker.element.querySelector(".gp-search") as HTMLInputElement;
-      input.value = "cats";
-      input.dispatchEvent(new Event("input"));
+      typeInto(input, "cats");
       vi.advanceTimersByTime(300);
-      await Promise.resolve();
-      await Promise.resolve();
+      await flush();
 
       expect(picker.element.contains(staleItem)).toBe(false);
 
@@ -469,8 +478,7 @@ describe("GifPicker", () => {
   describe("Escape key", () => {
     it("calls onClose when Escape is pressed on the root element", () => {
       const onClose = vi.fn();
-      const { picker } = makePicker({ onClose });
-      container.appendChild(picker.element);
+      const { picker } = mountPicker({ onClose });
 
       picker.element.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
 
@@ -480,8 +488,7 @@ describe("GifPicker", () => {
 
     it("does not call onClose for other keys", () => {
       const onClose = vi.fn();
-      const { picker } = makePicker({ onClose });
-      container.appendChild(picker.element);
+      const { picker } = mountPicker({ onClose });
 
       picker.element.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
       picker.element.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true }));
@@ -497,49 +504,37 @@ describe("GifPicker", () => {
     it("shows empty state when getTrendingGifs returns empty array", async () => {
       vi.mocked(getTrendingGifs).mockResolvedValue(lastPage([]));
 
-      const { picker } = makePicker();
-      container.appendChild(picker.element);
+      const { picker } = mountPicker();
 
-      await Promise.resolve();
-      await Promise.resolve();
+      await flush();
 
-      const empty = picker.element.querySelector(".gp-empty");
-      expect(empty).not.toBeNull();
-      expect(empty!.textContent).toBe("No GIFs found");
+      expectNoGifsFound(picker);
       picker.destroy();
     });
 
     it("shows empty state when searchGifs returns empty array", async () => {
       vi.mocked(searchGifs).mockResolvedValue(lastPage([]));
 
-      const { picker } = makePicker();
-      container.appendChild(picker.element);
+      const { picker } = mountPicker();
 
       // Flush initial trending load
-      await Promise.resolve();
-      await Promise.resolve();
+      await flush();
 
       // Type a query and wait for debounce + resolution
       const input = picker.element.querySelector(".gp-search") as HTMLInputElement;
-      input.value = "xyzzy";
-      input.dispatchEvent(new Event("input"));
+      typeInto(input, "xyzzy");
       vi.advanceTimersByTime(300);
 
-      await Promise.resolve();
-      await Promise.resolve();
+      await flush();
 
-      const empty = picker.element.querySelector(".gp-empty");
-      expect(empty).not.toBeNull();
-      expect(empty!.textContent).toBe("No GIFs found");
+      expectNoGifsFound(picker);
       picker.destroy();
     });
 
     it("does not show empty state when gifs are present", async () => {
-      const { picker } = makePicker();
-      container.appendChild(picker.element);
+      const { picker } = mountPicker();
 
-      await Promise.resolve();
-      await Promise.resolve();
+      await flush();
 
       // Should have .gp-grid, not .gp-empty
       expect(picker.element.querySelector(".gp-grid")).not.toBeNull();
@@ -556,16 +551,13 @@ describe("GifPicker", () => {
       vi.mocked(getTrendingGifs).mockResolvedValue(lastPage(TRENDING_GIFS));
       vi.mocked(searchGifs).mockReturnValue(new Promise(() => {}));
 
-      const { picker } = makePicker();
-      container.appendChild(picker.element);
+      const { picker } = mountPicker();
 
       // Flush initial trending
-      await Promise.resolve();
-      await Promise.resolve();
+      await flush();
 
       const input = picker.element.querySelector(".gp-search") as HTMLInputElement;
-      input.value = "cats";
-      input.dispatchEvent(new Event("input"));
+      typeInto(input, "cats");
       vi.advanceTimersByTime(300);
       // Do NOT await — the search promise never resolves
 
@@ -576,11 +568,9 @@ describe("GifPicker", () => {
     });
 
     it("replaces loading indicator with grid when fetch completes", async () => {
-      const { picker } = makePicker();
-      container.appendChild(picker.element);
+      const { picker } = mountPicker();
 
-      await Promise.resolve();
-      await Promise.resolve();
+      await flush();
 
       // Loading should be gone, grid present
       expect(picker.element.querySelector(".gp-loading")).toBeNull();
@@ -595,11 +585,9 @@ describe("GifPicker", () => {
     it("shows a typed failure line with a bounded retry, not the raw error", async () => {
       vi.mocked(getTrendingGifs).mockRejectedValue(new Error("Network error"));
 
-      const { picker } = makePicker();
-      container.appendChild(picker.element);
+      const { picker } = mountPicker();
 
-      await Promise.resolve();
-      await Promise.resolve();
+      await flush();
       await Promise.resolve(); // extra tick for rejection path
 
       // The transient state must not look like the empty-results state.
@@ -616,16 +604,13 @@ describe("GifPicker", () => {
         .mockRejectedValueOnce(new Error("Network error"))
         .mockResolvedValue(lastPage(TRENDING_GIFS));
 
-      const { picker } = makePicker();
-      container.appendChild(picker.element);
-      await Promise.resolve();
-      await Promise.resolve();
+      const { picker } = mountPicker();
+      await flush();
       await Promise.resolve();
       const before = vi.mocked(getTrendingGifs).mock.calls.length;
 
       picker.element.querySelector<HTMLButtonElement>(".msg-media-retry")!.click();
-      await Promise.resolve();
-      await Promise.resolve();
+      await flush();
 
       expect(vi.mocked(getTrendingGifs).mock.calls.length).toBeGreaterThan(before);
       expect(picker.element.querySelectorAll(".gp-item").length).toBe(TRENDING_GIFS.length);
@@ -635,11 +620,9 @@ describe("GifPicker", () => {
     it("shows the typed failure for a non-Error rejection too", async () => {
       vi.mocked(getTrendingGifs).mockRejectedValue("oops");
 
-      const { picker } = makePicker();
-      container.appendChild(picker.element);
+      const { picker } = mountPicker();
 
-      await Promise.resolve();
-      await Promise.resolve();
+      await flush();
       await Promise.resolve();
 
       expect(picker.element.querySelector(".msg-media-fallback-text")?.textContent).toBe(
@@ -661,11 +644,9 @@ describe("GifPicker", () => {
     it("shows a calm reason instead of a raw error", async () => {
       vi.mocked(getTrendingGifs).mockRejectedValue(disabledError);
 
-      const { picker } = makePicker();
-      container.appendChild(picker.element);
+      const { picker } = mountPicker();
 
-      await Promise.resolve();
-      await Promise.resolve();
+      await flush();
       await Promise.resolve();
 
       const el = picker.element.querySelector(".gp-empty");
@@ -677,11 +658,9 @@ describe("GifPicker", () => {
     it("marks the picker unavailable and disables the search input", async () => {
       vi.mocked(getTrendingGifs).mockRejectedValue(disabledError);
 
-      const { picker } = makePicker();
-      container.appendChild(picker.element);
+      const { picker } = mountPicker();
 
-      await Promise.resolve();
-      await Promise.resolve();
+      await flush();
       await Promise.resolve();
 
       expect(picker.element.classList.contains("gp-unavailable")).toBe(true);
@@ -694,11 +673,9 @@ describe("GifPicker", () => {
       vi.mocked(getTrendingGifs).mockRejectedValue(disabledError);
       const onUnavailable = vi.fn();
 
-      const { picker } = makePicker({ onUnavailable });
-      container.appendChild(picker.element);
+      const { picker } = mountPicker({ onUnavailable });
 
-      await Promise.resolve();
-      await Promise.resolve();
+      await flush();
       await Promise.resolve();
 
       expect(onUnavailable).toHaveBeenCalledWith(messagingText("gif.disabled"));
@@ -711,11 +688,9 @@ describe("GifPicker", () => {
       );
       const onUnavailable = vi.fn();
 
-      const { picker } = makePicker({ onUnavailable });
-      container.appendChild(picker.element);
+      const { picker } = mountPicker({ onUnavailable });
 
-      await Promise.resolve();
-      await Promise.resolve();
+      await flush();
       await Promise.resolve();
 
       expect(onUnavailable).not.toHaveBeenCalled();
@@ -740,31 +715,25 @@ describe("GifPicker", () => {
         .mockReturnValueOnce(firstPromise) // "ca" — resolves late
         .mockResolvedValueOnce(lastPage(SEARCH_GIFS)); // "cats" — resolves immediately
 
-      const { picker } = makePicker();
-      container.appendChild(picker.element);
+      const { picker } = mountPicker();
 
       // Flush trending
-      await Promise.resolve();
-      await Promise.resolve();
+      await flush();
 
       const input = picker.element.querySelector(".gp-search") as HTMLInputElement;
 
       // First query
-      input.value = "ca";
-      input.dispatchEvent(new Event("input"));
+      typeInto(input, "ca");
       vi.advanceTimersByTime(300);
 
       // Second query fires before first resolves
-      input.value = "cats";
-      input.dispatchEvent(new Event("input"));
+      typeInto(input, "cats");
       vi.advanceTimersByTime(300);
-      await Promise.resolve();
-      await Promise.resolve();
+      await flush();
 
       // Now resolve the stale first request
       resolveFirst(lastPage([makeGif("stale")]));
-      await Promise.resolve();
-      await Promise.resolve();
+      await flush();
 
       // Grid should show SEARCH_GIFS (second request), not the stale result
       const items = picker.element.querySelectorAll(".gp-item");
@@ -786,11 +755,9 @@ describe("GifPicker", () => {
     });
 
     it("gives each item role=option with the gif title as aria-label", async () => {
-      const { picker } = makePicker();
-      container.appendChild(picker.element);
+      const { picker } = mountPicker();
 
-      await Promise.resolve();
-      await Promise.resolve();
+      await flush();
 
       const items = picker.element.querySelectorAll(".gp-item");
       expect(items.length).toBe(TRENDING_GIFS.length);
@@ -802,19 +769,11 @@ describe("GifPicker", () => {
     });
 
     it("aria-label falls back to 'GIF' when the title is empty", async () => {
-      const gifNoTitle: GifResult = {
-        id: "no-title",
-        title: "",
-        url: "https://media.klipy.com/preview/no-title.gif",
-        fullUrl: "https://media.klipy.com/full/no-title.gif",
-      };
-      vi.mocked(getTrendingGifs).mockResolvedValue(lastPage([gifNoTitle]));
+      mockUntitledGif();
 
-      const { picker } = makePicker();
-      container.appendChild(picker.element);
+      const { picker } = mountPicker();
 
-      await Promise.resolve();
-      await Promise.resolve();
+      await flush();
 
       const item = picker.element.querySelector(".gp-item");
       expect(item!.getAttribute("aria-label")).toBe("GIF");
@@ -822,11 +781,9 @@ describe("GifPicker", () => {
     });
 
     it("makes exactly one item tabbable (roving tabindex)", async () => {
-      const { picker } = makePicker();
-      container.appendChild(picker.element);
+      const { picker } = mountPicker();
 
-      await Promise.resolve();
-      await Promise.resolve();
+      await flush();
 
       const items = Array.from(picker.element.querySelectorAll(".gp-item"));
       const tabbable = items.filter((c) => c.getAttribute("tabindex") === "0");
@@ -837,18 +794,14 @@ describe("GifPicker", () => {
     });
 
     it("re-applies the roving tabindex when a search replaces the items", async () => {
-      const { picker } = makePicker();
-      container.appendChild(picker.element);
+      const { picker } = mountPicker();
 
-      await Promise.resolve();
-      await Promise.resolve();
+      await flush();
 
       const input = picker.element.querySelector(".gp-search") as HTMLInputElement;
-      input.value = "cats";
-      input.dispatchEvent(new Event("input"));
+      typeInto(input, "cats");
       vi.advanceTimersByTime(300);
-      await Promise.resolve();
-      await Promise.resolve();
+      await flush();
 
       const items = Array.from(picker.element.querySelectorAll(".gp-item"));
       expect(items.length).toBe(SEARCH_GIFS.length);
@@ -859,11 +812,9 @@ describe("GifPicker", () => {
     });
 
     it("ArrowRight moves focus and the tabbable item to the next gif", async () => {
-      const { picker } = makePicker();
-      container.appendChild(picker.element);
+      const { picker } = mountPicker();
 
-      await Promise.resolve();
-      await Promise.resolve();
+      await flush();
 
       const items = picker.element.querySelectorAll(".gp-item") as NodeListOf<HTMLElement>;
       expect(items.length).toBeGreaterThan(1);
@@ -880,11 +831,9 @@ describe("GifPicker", () => {
     it("Enter on a focused item fires the same onSelect/onClose as click", async () => {
       const onSelect = vi.fn();
       const onClose = vi.fn();
-      const { picker } = makePicker({ onSelect, onClose });
-      container.appendChild(picker.element);
+      const { picker } = mountPicker({ onSelect, onClose });
 
-      await Promise.resolve();
-      await Promise.resolve();
+      await flush();
 
       const firstItem = picker.element.querySelector(".gp-item") as HTMLElement;
       firstItem.focus();
@@ -900,12 +849,10 @@ describe("GifPicker", () => {
 
   describe("destroy()", () => {
     it("clears any pending debounce timer", async () => {
-      const { picker } = makePicker();
-      container.appendChild(picker.element);
+      const { picker } = mountPicker();
 
       const input = picker.element.querySelector(".gp-search") as HTMLInputElement;
-      input.value = "cats";
-      input.dispatchEvent(new Event("input"));
+      typeInto(input, "cats");
 
       // Destroy before debounce fires
       picker.destroy();
@@ -918,11 +865,9 @@ describe("GifPicker", () => {
 
     it("aborts the AbortController so click events no longer fire", async () => {
       const onSelect = vi.fn();
-      const { picker } = makePicker({ onSelect });
-      container.appendChild(picker.element);
+      const { picker } = mountPicker({ onSelect });
 
-      await Promise.resolve();
-      await Promise.resolve();
+      await flush();
 
       picker.destroy();
 
@@ -937,8 +882,7 @@ describe("GifPicker", () => {
 
     it("aborts the AbortController so Escape key no longer calls onClose", () => {
       const onClose = vi.fn();
-      const { picker } = makePicker({ onClose });
-      container.appendChild(picker.element);
+      const { picker } = mountPicker({ onClose });
 
       picker.destroy();
 
@@ -948,16 +892,14 @@ describe("GifPicker", () => {
     });
 
     it("aborts the AbortController so input events no longer fire", async () => {
-      const { picker } = makePicker();
-      container.appendChild(picker.element);
+      const { picker } = mountPicker();
 
       picker.destroy();
       vi.mocked(getTrendingGifs).mockClear();
       vi.mocked(searchGifs).mockClear();
 
       const input = picker.element.querySelector(".gp-search") as HTMLInputElement;
-      input.value = "cats";
-      input.dispatchEvent(new Event("input"));
+      typeInto(input, "cats");
       vi.advanceTimersByTime(300);
       await Promise.resolve();
 
@@ -1011,8 +953,7 @@ describe("GifPicker", () => {
       vi.mocked(getTrendingGifs)
         .mockResolvedValueOnce({ gifs: [makeGif("a"), makeGif("b")], next: "C1" })
         .mockResolvedValueOnce({ gifs: [makeGif("b"), makeGif("c")], next: "" });
-      const { picker } = makePicker();
-      container.appendChild(picker.element);
+      const { picker } = mountPicker();
       await flush();
       expect(itemIds(picker.element)).toEqual(["a", "b"]);
       expect(observed).toHaveLength(1);
@@ -1031,11 +972,9 @@ describe("GifPicker", () => {
       vi.mocked(searchGifs)
         .mockResolvedValueOnce({ gifs: [makeGif("a")], next: "S1" })
         .mockResolvedValueOnce({ gifs: [makeGif("a")], next: "S1" });
-      const { picker } = makePicker();
-      container.appendChild(picker.element);
+      const { picker } = mountPicker();
       const input = picker.element.querySelector(".gp-search") as HTMLInputElement;
-      input.value = "cats";
-      input.dispatchEvent(new Event("input"));
+      typeInto(input, "cats");
       vi.advanceTimersByTime(300);
       await flush();
 
@@ -1049,19 +988,14 @@ describe("GifPicker", () => {
     });
 
     it("ignores a page that resolves after the query changed", async () => {
-      let resolveMore!: (p: GifPage) => void;
-      vi.mocked(getTrendingGifs)
-        .mockResolvedValueOnce({ gifs: [makeGif("a")], next: "C1" })
-        .mockReturnValueOnce(new Promise<GifPage>((r) => (resolveMore = r)));
+      const resolveMore = holdSecondTrendingPage();
       vi.mocked(searchGifs).mockResolvedValue({ gifs: [makeGif("s")], next: "" });
-      const { picker } = makePicker();
-      container.appendChild(picker.element);
+      const { picker } = mountPicker();
       await flush();
 
       fire(); // page 2 of trending is now in flight
       const input = picker.element.querySelector(".gp-search") as HTMLInputElement;
-      input.value = "cats";
-      input.dispatchEvent(new Event("input"));
+      typeInto(input, "cats");
       vi.advanceTimersByTime(300);
       await flush();
       resolveMore({ gifs: [makeGif("late")], next: "C2" });
@@ -1076,8 +1010,7 @@ describe("GifPicker", () => {
         .mockResolvedValueOnce({ gifs: [makeGif("a")], next: "C1" })
         .mockRejectedValueOnce(new Error("offline"))
         .mockResolvedValueOnce({ gifs: [makeGif("b")], next: "" });
-      const { picker } = makePicker();
-      container.appendChild(picker.element);
+      const { picker } = mountPicker();
       await flush();
       const area = picker.element.querySelector(".gp-grid-area")!;
 
@@ -1108,8 +1041,7 @@ describe("GifPicker", () => {
       vi.mocked(getTrendingGifs)
         .mockResolvedValueOnce({ gifs: [makeGif("a")], next: "C1" })
         .mockRejectedValue(new Error("offline"));
-      const { picker } = makePicker();
-      container.appendChild(picker.element);
+      const { picker } = mountPicker();
       await flush();
       const area = picker.element.querySelector(".gp-grid-area")!;
 
@@ -1129,8 +1061,7 @@ describe("GifPicker", () => {
       vi.mocked(getTrendingGifs)
         .mockResolvedValueOnce({ gifs: [makeGif("a")], next: "C1" })
         .mockRejectedValue(new ApiClientError(400, "INVALID_INPUT", "bad"));
-      const { picker } = makePicker();
-      container.appendChild(picker.element);
+      const { picker } = mountPicker();
       await flush();
 
       fire();
@@ -1149,8 +1080,7 @@ describe("GifPicker", () => {
       vi.mocked(getTrendingGifs)
         .mockResolvedValueOnce({ gifs: [], next: "C1" })
         .mockResolvedValueOnce({ gifs: [makeGif("b")], next: "" });
-      const { picker } = makePicker();
-      container.appendChild(picker.element);
+      const { picker } = mountPicker();
       await flush();
       expect(picker.element.querySelector(".gp-empty")).toBeNull();
       expect(observed).toHaveLength(1);
@@ -1166,8 +1096,7 @@ describe("GifPicker", () => {
       vi.mocked(getTrendingGifs)
         .mockResolvedValueOnce({ gifs: [makeGif("a"), makeGif("b")], next: "C1" })
         .mockResolvedValueOnce({ gifs: [makeGif("c")], next: "" });
-      const { picker } = makePicker();
-      container.appendChild(picker.element);
+      const { picker } = mountPicker();
       await flush();
       const cells = () => [...picker.element.querySelectorAll<HTMLElement>(".gp-item")];
       cells()[0]!.setAttribute("tabindex", "-1");
@@ -1181,12 +1110,8 @@ describe("GifPicker", () => {
     });
 
     it("leaves the grid alone when the tab changed while a page was in flight", async () => {
-      let resolveMore!: (p: GifPage) => void;
-      vi.mocked(getTrendingGifs)
-        .mockResolvedValueOnce({ gifs: [makeGif("a")], next: "C1" })
-        .mockReturnValueOnce(new Promise<GifPage>((r) => (resolveMore = r)));
-      const { picker } = makePicker();
-      container.appendChild(picker.element);
+      const resolveMore = holdSecondTrendingPage();
+      const { picker } = mountPicker();
       await flush();
       fire();
       (picker.element.querySelectorAll(".gp-tab")[1] as HTMLElement).click();
@@ -1200,8 +1125,7 @@ describe("GifPicker", () => {
 
     it("does not page on the favorites tab", async () => {
       vi.mocked(getTrendingGifs).mockResolvedValue({ gifs: [makeGif("a")], next: "C1" });
-      const { picker } = makePicker();
-      container.appendChild(picker.element);
+      const { picker } = mountPicker();
       await flush();
       expect(observed).toHaveLength(1);
 
@@ -1251,8 +1175,7 @@ describe("GifPicker", () => {
       const api = favApi([
         { url: TRENDING_GIFS[1]!.fullUrl, preview_url: TRENDING_GIFS[1]!.url, title: "x" },
       ]);
-      const { picker } = makePicker({ api });
-      container.appendChild(picker.element);
+      const { picker } = mountPicker({ api });
       await settle();
       const stars = picker.element.querySelectorAll<HTMLButtonElement>(".gp-item .gp-star");
       expect(stars.length).toBe(TRENDING_GIFS.length);
@@ -1264,8 +1187,7 @@ describe("GifPicker", () => {
     it("clicking a star saves the GIF without sending it", async () => {
       const api = favApi([]);
       const onSelect = vi.fn();
-      const { picker } = makePicker({ api, onSelect });
-      container.appendChild(picker.element);
+      const { picker } = mountPicker({ api, onSelect });
       await settle();
       picker.element.querySelector<HTMLButtonElement>(".gp-item .gp-star")!.click();
       await settle();
@@ -1284,8 +1206,7 @@ describe("GifPicker", () => {
 
     it("the F key on a focused GIF toggles its favorite", async () => {
       const api = favApi([]);
-      const { picker } = makePicker({ api });
-      container.appendChild(picker.element);
+      const { picker } = mountPicker({ api });
       await settle();
       const item = picker.element.querySelector<HTMLElement>(".gp-item")!;
       item.dispatchEvent(new KeyboardEvent("keydown", { key: "f", bubbles: true }));
@@ -1297,8 +1218,7 @@ describe("GifPicker", () => {
     it("the Favorites tab lists saved GIFs newest first and sends one on click", async () => {
       const api = favApi();
       const onSelect = vi.fn();
-      const { picker } = makePicker({ api, onSelect });
-      container.appendChild(picker.element);
+      const { picker } = mountPicker({ api, onSelect });
       await settle();
       const tabs = picker.element.querySelectorAll<HTMLButtonElement>(".gp-tab");
       expect(tabs.length).toBe(2);
@@ -1314,8 +1234,7 @@ describe("GifPicker", () => {
 
     it("unstarring in the Favorites tab removes the GIF from the list", async () => {
       const api = favApi();
-      const { picker } = makePicker({ api });
-      container.appendChild(picker.element);
+      const { picker } = mountPicker({ api });
       await settle();
       picker.element.querySelectorAll<HTMLButtonElement>(".gp-tab")[1]!.click();
       await settle();
@@ -1335,8 +1254,7 @@ describe("GifPicker", () => {
             reject = rej;
           }),
       );
-      const { picker } = makePicker({ api });
-      container.appendChild(picker.element);
+      const { picker } = mountPicker({ api });
       await settle();
       const tab = picker.element.querySelectorAll<HTMLButtonElement>(".gp-tab")[1]!;
       tab.click();
@@ -1350,8 +1268,7 @@ describe("GifPicker", () => {
     });
 
     it("shows an empty state when nothing is saved", async () => {
-      const { picker } = makePicker({ api: favApi([]) });
-      container.appendChild(picker.element);
+      const { picker } = mountPicker({ api: favApi([]) });
       await settle();
       picker.element.querySelectorAll<HTMLButtonElement>(".gp-tab")[1]!.click();
       await settle();
@@ -1363,8 +1280,7 @@ describe("GifPicker", () => {
 
     it("removing the focused favorite moves focus to a neighbouring GIF", async () => {
       const api = favApi();
-      const { picker } = makePicker({ api });
-      container.appendChild(picker.element);
+      const { picker } = mountPicker({ api });
       await settle();
       picker.element.querySelectorAll<HTMLButtonElement>(".gp-tab")[1]!.click();
       await settle();
@@ -1380,8 +1296,7 @@ describe("GifPicker", () => {
 
     it("removing the last favorite moves focus to the Favorites tab", async () => {
       const api = favApi([favs[0]!]);
-      const { picker } = makePicker({ api });
-      container.appendChild(picker.element);
+      const { picker } = mountPicker({ api });
       await settle();
       const tabs = picker.element.querySelectorAll<HTMLButtonElement>(".gp-tab");
       tabs[1]!.click();
@@ -1398,18 +1313,14 @@ describe("GifPicker", () => {
       vi.useFakeTimers();
       try {
         const api = favApi();
-        const { picker } = makePicker({ api });
-        container.appendChild(picker.element);
+        const { picker } = mountPicker({ api });
         await settle();
         const input = picker.element.querySelector<HTMLInputElement>("input")!;
         input.value = "cats";
         input.dispatchEvent(new Event("input", { bubbles: true }));
         picker.element.querySelectorAll<HTMLButtonElement>(".gp-tab")[1]!.click();
         await vi.advanceTimersByTimeAsync(1000);
-        const urls = Array.from(picker.element.querySelectorAll<HTMLElement>(".gp-item")).map(
-          (i) => i.dataset.fullUrl,
-        );
-        expect(urls).toEqual(favs.map((f) => f.url));
+        expect(itemFullUrls(picker)).toEqual(favs.map((f) => f.url));
         picker.destroy();
       } finally {
         vi.useRealTimers();
@@ -1420,18 +1331,14 @@ describe("GifPicker", () => {
       consent.allowed = false;
       try {
         const api = favApi();
-        const { picker } = makePicker({ api });
-        container.appendChild(picker.element);
+        const { picker } = mountPicker({ api });
         await settle();
         const tabs = picker.element.querySelectorAll<HTMLButtonElement>(".gp-tab");
         tabs[1]!.click();
         await settle();
         picker.element.querySelector<HTMLButtonElement>(".gp-consent")!.click();
         await settle();
-        const urls = Array.from(picker.element.querySelectorAll<HTMLElement>(".gp-item")).map(
-          (i) => i.dataset.fullUrl,
-        );
-        expect(urls).toEqual(favs.map((f) => f.url));
+        expect(itemFullUrls(picker)).toEqual(favs.map((f) => f.url));
         const imgs = picker.element.querySelectorAll<HTMLImageElement>(".gp-item .gp-img");
         expect(imgs.length).toBe(favs.length);
         imgs.forEach((img) => expect(img.src).toMatch(/^blob:/));

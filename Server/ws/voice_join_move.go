@@ -35,7 +35,7 @@ func (h *Hub) voiceJoinMoveCall(fctx, ctx context.Context, txn *voiceTxn, c *Cli
 			break
 		}
 	}
-	if from == nil && h.voiceReg.voiceGrace.get(c.userID) == nil {
+	if from == nil && h.voiceHub.reg.voiceGrace.get(c.userID) == nil {
 		return false, false, false, nil, true
 	}
 
@@ -69,7 +69,7 @@ func (h *Hub) voiceJoinMoveCall(fctx, ctx context.Context, txn *voiceTxn, c *Cli
 		// Never for the joining connection's own session: re-joining its own
 		// parked call is not a move.
 		if e.client.tokenHash != c.tokenHash {
-			h.voiceReg.voiceGrace.markMoved(c.userID, e.client.tokenHash, e.snap.chID)
+			h.voiceHub.reg.voiceGrace.markMoved(c.userID, e.client.tokenHash, e.snap.chID)
 		}
 		h.finishVoiceLeaveAnnounce(ctx, txn, e.client, e.snap.chID, e.snap.joinToken, voiceLeaveReasonMoved, e.snap.chID != channelID)
 	}
@@ -97,6 +97,10 @@ func (h *Hub) voiceJoinMoveCall(fctx, ctx context.Context, txn *voiceTxn, c *Cli
 // connection's. The caller holds the user's membership lock, so no stash is set or
 // consumed meanwhile: a moderator move that evicted the call from device A leaves
 // its flags on A, and they must follow the user to whichever device joins next.
+//
+// It also ends a moderator move kept for a parked session (endParkedModMove): the
+// user is joining now, so a later resume of that session must not pull the call
+// away, and the kept flags apply to this join when no connection carries any.
 func (h *Hub) takeUserModFlags(c *Client) (serverMuted, serverDeafened bool, serverMutedBy *int64) {
 	serverMuted, serverDeafened, serverMutedBy = c.voice.takeModFlags()
 	for _, o := range h.clientsOf(c.userID) {
@@ -107,6 +111,9 @@ func (h *Hub) takeUserModFlags(c *Client) (serverMuted, serverDeafened bool, ser
 		if !serverMuted && !serverDeafened && (sm || sd) {
 			serverMuted, serverDeafened, serverMutedBy = sm, sd, sby
 		}
+	}
+	if kept := h.voiceHub.reg.voiceGrace.endParkedModMove(c.userID); !serverMuted && !serverDeafened && (kept.muted || kept.deafened) {
+		serverMuted, serverDeafened, serverMutedBy = kept.muted, kept.deafened, kept.mutedBy
 	}
 	return serverMuted, serverDeafened, serverMutedBy
 }
@@ -122,8 +129,11 @@ const voiceExitWindow = 30 * time.Second
 // which send no moderator frame, so a stamp there is never read. Only moderator
 // paths stamp: a move to another device or an ordinary leave must not make a device
 // the target of a later moderator frame. c == nil is a parked call being torn down:
-// every stamp is cleared and the frame goes nowhere (the "reconnecting" answer).
+// every stamp is cleared and the frame goes nowhere (the "reconnecting" answer),
+// unless the move of a parked call then keeps it for the resume
+// (noteParkedModMove). Any moderator exit supersedes an earlier parked move.
 func (h *Hub) noteModeratorExit(userID int64, c *Client) {
+	h.voiceHub.reg.voiceGrace.dropParkedModMove(userID)
 	for _, o := range h.clientsOf(userID) {
 		if o != c {
 			o.voiceExitAt.Store(0)
@@ -137,10 +147,15 @@ func (h *Hub) noteModeratorExit(userID int64, c *Client) {
 // SendToVoiceDevice delivers msg to the connection of userID that holds their call
 // or just lost it to a moderator (Client.voiceExitAt), and to no other device: a
 // voice_moved frame makes its receiver join the destination, which on the user's
-// other devices would steal the call. It reports false when no connection qualifies
-// (the call was parked, or nothing left it), which the moderator handlers read as
-// "the user was reconnecting".
+// other devices would steal the call. A moderator move that evicted a parked call
+// keeps msg for that session's resume (queueParkedModMoveFrame) and reports true.
+// It reports false when no connection qualifies (the call was parked and not
+// moved, or nothing left it), which the moderator handlers read as "the user was
+// reconnecting".
 func (h *Hub) SendToVoiceDevice(userID int64, msg []byte) bool {
+	if h.voiceHub.reg.voiceGrace.queueParkedModMoveFrame(userID, msg) {
+		return true
+	}
 	var target *Client
 	var latest int64
 	for _, c := range h.clientsOf(userID) {

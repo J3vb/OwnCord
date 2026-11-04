@@ -39,12 +39,20 @@ type ReadPointer struct {
 // unread count in the ready payload.
 const ReadPointerUnreadCap = 100
 
+// channelMaxAnySQL is the newest message id of a channel, deleted or not
+// (idx_messages_channel).
+const channelMaxAnySQL = `SELECT COALESCE(MAX(id), 0) FROM messages WHERE channel_id = ?`
+
+// channelMaxLiveSQL is the newest live message id of a channel
+// (idx_messages_channel_live).
+const channelMaxLiveSQL = `SELECT COALESCE(MAX(id), 0) FROM messages WHERE channel_id = ? AND deleted = 0`
+
 // MoveReadPointer is the one place a reader's pointer moves to anything but
 // "everything": it reads the mention receipts, updates read_states (pointer and
 // a recomputed mention_count) and reads the unread count in a single writer
 // transaction. The writer pool is one connection, so the move is atomic
 // against every mention increment and decrement. The caller (MessageService)
-// holds mentionEmitMu across the call and the frame it sends.
+// holds the channel's mention emit lock across the call and the frame it sends.
 //
 // Rules, with R(p) the live receipts after p from authors the user does not
 // block:
@@ -75,12 +83,15 @@ func (d *DB) MoveReadPointer(ctx context.Context, userID, channelID int64, op Re
 	if err != nil {
 		return ReadPointer{}, err
 	}
+	// Two reads, each a single seek to the end of its index. One combined
+	// MAX(CASE ...) walks every message of the channel to check its deleted
+	// flag, and does so while holding the writer.
 	var maxAny, maxLive int64
-	if err := tx.QueryRowContext(ctx,
-		`SELECT COALESCE(MAX(id), 0), COALESCE(MAX(CASE WHEN deleted = 0 THEN id END), 0)
-		   FROM messages WHERE channel_id = ?`, channelID,
-	).Scan(&maxAny, &maxLive); err != nil {
-		return ReadPointer{}, fmt.Errorf("MoveReadPointer channel bounds: %w", err)
+	if err := tx.QueryRowContext(ctx, channelMaxAnySQL, channelID).Scan(&maxAny); err != nil {
+		return ReadPointer{}, fmt.Errorf("MoveReadPointer newest message: %w", err)
+	}
+	if err := tx.QueryRowContext(ctx, channelMaxLiveSQL, channelID).Scan(&maxLive); err != nil {
+		return ReadPointer{}, fmt.Errorf("MoveReadPointer newest live message: %w", err)
 	}
 
 	newPtr, newCount, err := nextReadPointer(ctx, tx, userID, channelID, op, messageID, oldPtr, oldCount, maxAny, maxLive)

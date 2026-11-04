@@ -1,11 +1,17 @@
 import { describe, it, expect, vi } from "vitest";
 import * as mocks from "../../helpers/settingsOverlayMocks";
 import { createSettingsOverlay } from "../../../src/features/settings/SettingsOverlay";
+import type { SettingsOverlayOptions } from "../../../src/features/settings/SettingsOverlay";
 import { buildMyUploadsTab } from "../../../src/features/uploads/myUploadsTab";
 import { ApiClientError } from "../../../src/lib/api";
 import {
   clickEl,
   defaultOptions,
+  openOverlay,
+  acButton,
+  testId,
+  submitDeleteAccount,
+  fillPasswordForm,
   useSettingsOverlayHarness,
 } from "../../helpers/settingsOverlayHarness";
 
@@ -26,9 +32,7 @@ describe("SettingsOverlay", () => {
   // --- Account tab tests ---
 
   it("shows current username", () => {
-    const overlay = createSettingsOverlay(defaultOptions);
-    overlay.mount(container);
-    overlay.open();
+    const overlay = openOverlay(container);
 
     const acName = container.querySelector(".account-header-name");
     expect(acName?.textContent).toBe("testuser");
@@ -53,9 +57,7 @@ describe("SettingsOverlay", () => {
   });
 
   it("mounts the Log Out prompt inside the settings overlay so it stacks above it", () => {
-    const overlay = createSettingsOverlay(defaultOptions);
-    overlay.mount(container);
-    overlay.open();
+    const overlay = openOverlay(container);
 
     clickEl(container.querySelector(".settings-nav-item.danger"));
     const dialog = document.querySelector("[data-testid='logout-confirm-dialog']");
@@ -65,9 +67,7 @@ describe("SettingsOverlay", () => {
   });
 
   it("Escape with the Log Out prompt open closes only the prompt", () => {
-    const overlay = createSettingsOverlay(defaultOptions);
-    overlay.mount(container);
-    overlay.open();
+    const overlay = openOverlay(container);
 
     clickEl(container.querySelector(".settings-nav-item.danger"));
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
@@ -104,7 +104,7 @@ describe("SettingsOverlay", () => {
       }),
       removeUserUpload: vi.fn().mockResolvedValue(undefined),
     };
-    const overlay = createSettingsOverlay({
+    const overlay = openOverlay(container, {
       ...defaultOptions,
       myUploadsTab: (signal) =>
         buildMyUploadsTab(signal, api, {
@@ -113,8 +113,6 @@ describe("SettingsOverlay", () => {
           thumbnail: () => Promise.resolve(null),
         }),
     });
-    overlay.mount(container);
-    overlay.open();
     const tab = [...container.querySelectorAll<HTMLElement>(".settings-nav-item")].find(
       (b) => b.textContent === "My uploads",
     )!;
@@ -186,18 +184,11 @@ describe("SettingsOverlay", () => {
   });
 
   it("validates password change requires minimum length", () => {
-    const overlay = createSettingsOverlay(defaultOptions);
-    overlay.mount(container);
-    overlay.open();
+    const overlay = openOverlay(container);
 
-    const inputs = container.querySelectorAll("#pw-old, #pw-new, #pw-confirm");
-    (inputs[0] as HTMLInputElement).value = "oldpass123";
-    (inputs[1] as HTMLInputElement).value = "short";
-    (inputs[2] as HTMLInputElement).value = "short";
+    fillPasswordForm(container, "oldpass123", "short", "short");
 
-    const changePwBtn = Array.from(container.querySelectorAll(".ac-btn")).find(
-      (b) => b.textContent === "Change Password",
-    ) as HTMLElement;
+    const changePwBtn = acButton(container, "Change Password");
     changePwBtn.click();
 
     expect(defaultOptions.onChangePassword).not.toHaveBeenCalled();
@@ -206,18 +197,11 @@ describe("SettingsOverlay", () => {
   });
 
   it("validates password confirmation matches", () => {
-    const overlay = createSettingsOverlay(defaultOptions);
-    overlay.mount(container);
-    overlay.open();
+    const overlay = openOverlay(container);
 
-    const inputs = container.querySelectorAll("#pw-old, #pw-new, #pw-confirm");
-    (inputs[0] as HTMLInputElement).value = "oldpass123";
-    (inputs[1] as HTMLInputElement).value = "newpassword123";
-    (inputs[2] as HTMLInputElement).value = "differentpassword";
+    fillPasswordForm(container, "oldpass123", "newpassword123", "differentpassword");
 
-    const changePwBtn = Array.from(container.querySelectorAll(".ac-btn")).find(
-      (b) => b.textContent === "Change Password",
-    ) as HTMLElement;
+    const changePwBtn = acButton(container, "Change Password");
     changePwBtn.click();
 
     expect(defaultOptions.onChangePassword).not.toHaveBeenCalled();
@@ -226,18 +210,11 @@ describe("SettingsOverlay", () => {
   });
 
   it("requires the current password before calling the server", () => {
-    const overlay = createSettingsOverlay(defaultOptions);
-    overlay.mount(container);
-    overlay.open();
+    const overlay = openOverlay(container);
 
-    const inputs = container.querySelectorAll("#pw-old, #pw-new, #pw-confirm");
-    (inputs[0] as HTMLInputElement).value = "";
-    (inputs[1] as HTMLInputElement).value = "newpassword123";
-    (inputs[2] as HTMLInputElement).value = "newpassword123";
+    fillPasswordForm(container, "", "newpassword123", "newpassword123");
 
-    const changePwBtn = Array.from(container.querySelectorAll(".ac-btn")).find(
-      (b) => b.textContent === "Change Password",
-    ) as HTMLElement;
+    const changePwBtn = acButton(container, "Change Password");
     changePwBtn.click();
 
     // An empty current password is a guaranteed 403 — and each one counts
@@ -256,18 +233,11 @@ describe("SettingsOverlay", () => {
           resolveChange = () => resolve(undefined);
         }),
     );
-    const overlay = createSettingsOverlay({ ...defaultOptions, onChangePassword });
-    overlay.mount(container);
-    overlay.open();
+    const overlay = openOverlay(container, { ...defaultOptions, onChangePassword });
 
-    const inputs = container.querySelectorAll("#pw-old, #pw-new, #pw-confirm");
-    (inputs[0] as HTMLInputElement).value = "oldpass123";
-    (inputs[1] as HTMLInputElement).value = "newpassword123";
-    (inputs[2] as HTMLInputElement).value = "newpassword123";
+    fillPasswordForm(container, "oldpass123", "newpassword123", "newpassword123");
 
-    const changePwBtn = Array.from(container.querySelectorAll(".ac-btn")).find(
-      (b) => b.textContent === "Change Password",
-    ) as HTMLButtonElement;
+    const changePwBtn = acButton(container, "Change Password");
     changePwBtn.click();
     expect(changePwBtn.disabled).toBe(true);
     expect(changePwBtn.textContent).toBe("Changing...");
@@ -284,24 +254,107 @@ describe("SettingsOverlay", () => {
     overlay.destroy?.();
   });
 
+  const BOT_TOKEN = {
+    id: 1,
+    label: "bot",
+    created_at: "2026-10-01 10:00:00",
+    last_used: null,
+    expires_at: null,
+  };
+  const revokeRow = (): HTMLElement =>
+    container.querySelector<HTMLElement>('[data-testid="pw-revoke-api-tokens-row"]')!;
+  const revokeBox = (): HTMLInputElement =>
+    container.querySelector<HTMLInputElement>('[data-testid="pw-revoke-api-tokens"]')!;
+  /** Open the overlay on an account whose token list is `onListApiTokens`. */
+  function openWithTokens(onListApiTokens: SettingsOverlayOptions["onListApiTokens"]): {
+    overlay: ReturnType<typeof openOverlay>;
+    onChangePassword: ReturnType<typeof vi.fn>;
+  } {
+    const onChangePassword = vi.fn().mockResolvedValue(undefined);
+    const overlay = openOverlay(container, {
+      ...defaultOptions,
+      onChangePassword,
+      onListApiTokens,
+      onRevokeApiToken: vi.fn().mockResolvedValue(undefined),
+    });
+    return { overlay, onChangePassword };
+  }
+  async function changePassword(from: string, to: string): Promise<void> {
+    fillPasswordForm(container, from, to, to);
+    acButton(container, "Change Password").click();
+  }
+
+  it("revokes API tokens with the password change while the option stays ticked", async () => {
+    const { overlay, onChangePassword } = openWithTokens(vi.fn().mockResolvedValue([BOT_TOKEN]));
+    await vi.waitFor(() => expect(revokeRow().hidden).toBe(false));
+    expect(revokeBox().checked).toBe(true);
+
+    await changePassword("oldpass123", "newpassword123");
+    await vi.waitFor(() => {
+      expect(onChangePassword).toHaveBeenCalledWith("oldpass123", "newpassword123", true);
+    });
+    overlay.destroy?.();
+  });
+
+  it("never re-ticks the option after the user unticked it, even when a refresh lands later", async () => {
+    let releaseRefresh!: (tokens: (typeof BOT_TOKEN)[]) => void;
+    const onListApiTokens = vi
+      .fn()
+      .mockResolvedValueOnce([BOT_TOKEN])
+      .mockImplementation(
+        () =>
+          new Promise<(typeof BOT_TOKEN)[]>((resolve) => {
+            releaseRefresh = resolve;
+          }),
+      );
+    const { overlay, onChangePassword } = openWithTokens(onListApiTokens);
+    await vi.waitFor(() => expect(revokeRow().hidden).toBe(false));
+
+    // A ticked change asks for a refresh, which stays in flight.
+    await changePassword("oldpass123", "newpassword123");
+    await vi.waitFor(() => expect(onListApiTokens.mock.calls.length).toBeGreaterThan(1));
+
+    revokeBox().checked = false;
+    revokeBox().dispatchEvent(new Event("change"));
+    releaseRefresh([BOT_TOKEN]);
+    await vi.waitFor(() => expect(acButton(container, "Change Password").disabled).toBe(false));
+    await Promise.resolve();
+    expect(revokeBox().checked).toBe(false);
+
+    await changePassword("newpassword123", "another-pass1");
+    await vi.waitFor(() => {
+      expect(onChangePassword).toHaveBeenLastCalledWith("newpassword123", "another-pass1", false);
+    });
+    overlay.destroy?.();
+  });
+
+  it("keeps the revoke default when the token list cannot be read", async () => {
+    const { overlay } = openWithTokens(vi.fn().mockRejectedValue(new Error("network down")));
+    await vi.waitFor(() => expect(revokeRow().hidden).toBe(false));
+    expect(revokeBox().checked).toBe(true);
+    overlay.destroy?.();
+  });
+
+  it("sends the revoke default when the form is submitted before the token list loads", async () => {
+    const { overlay, onChangePassword } = openWithTokens(vi.fn(() => new Promise<never>(() => {})));
+    await changePassword("oldpass123", "newpassword123");
+    await vi.waitFor(() => {
+      expect(onChangePassword).toHaveBeenCalledWith("oldpass123", "newpassword123", true);
+    });
+    overlay.destroy?.();
+  });
+
   it("calls onChangePassword and clears inputs on success", async () => {
     const onChangePassword = vi.fn().mockResolvedValue(undefined);
-    const overlay = createSettingsOverlay({ ...defaultOptions, onChangePassword });
-    overlay.mount(container);
-    overlay.open();
+    const overlay = openOverlay(container, { ...defaultOptions, onChangePassword });
 
-    const inputs = container.querySelectorAll("#pw-old, #pw-new, #pw-confirm");
-    (inputs[0] as HTMLInputElement).value = "oldpass123";
-    (inputs[1] as HTMLInputElement).value = "newpassword123";
-    (inputs[2] as HTMLInputElement).value = "newpassword123";
+    const inputs = fillPasswordForm(container, "oldpass123", "newpassword123", "newpassword123");
 
-    const changePwBtn = Array.from(container.querySelectorAll(".ac-btn")).find(
-      (b) => b.textContent === "Change Password",
-    ) as HTMLElement;
+    const changePwBtn = acButton(container, "Change Password");
     changePwBtn.click();
 
     await vi.waitFor(() => {
-      expect(onChangePassword).toHaveBeenCalledWith("oldpass123", "newpassword123");
+      expect(onChangePassword).toHaveBeenCalledWith("oldpass123", "newpassword123", false);
     });
 
     // Inputs should be cleared after success
@@ -322,23 +375,16 @@ describe("SettingsOverlay", () => {
     const warning =
       "password changed, but other sessions could not be revoked; revoke them from the sessions list";
     const onChangePassword = vi.fn().mockResolvedValue({ warning, sessions_revoked: 0 });
-    const overlay = createSettingsOverlay({ ...defaultOptions, onChangePassword });
-    overlay.mount(container);
-    overlay.open();
+    const overlay = openOverlay(container, { ...defaultOptions, onChangePassword });
 
-    const inputs = container.querySelectorAll("#pw-old, #pw-new, #pw-confirm");
-    (inputs[0] as HTMLInputElement).value = "oldpass123";
-    (inputs[1] as HTMLInputElement).value = "newpassword123";
-    (inputs[2] as HTMLInputElement).value = "newpassword123";
-    const changePwBtn = Array.from(container.querySelectorAll(".ac-btn")).find(
-      (b) => b.textContent === "Change Password",
-    ) as HTMLElement;
+    const inputs = fillPasswordForm(container, "oldpass123", "newpassword123", "newpassword123");
+    const changePwBtn = acButton(container, "Change Password");
     changePwBtn.click();
 
     const status = container.querySelector<HTMLElement>('[data-testid="pw-change-status"]');
     expect(status).not.toBeNull();
     await vi.waitFor(() => {
-      expect(onChangePassword).toHaveBeenCalledWith("oldpass123", "newpassword123");
+      expect(onChangePassword).toHaveBeenCalledWith("oldpass123", "newpassword123", false);
       expect(status!.textContent).toBe(warning);
     });
     // B9-23: the warning is the qualified .form-warning class, not an inline
@@ -356,18 +402,11 @@ describe("SettingsOverlay", () => {
 
   it("shows error when password change fails", async () => {
     const onChangePassword = vi.fn().mockRejectedValue(new Error("Incorrect old password"));
-    const overlay = createSettingsOverlay({ ...defaultOptions, onChangePassword });
-    overlay.mount(container);
-    overlay.open();
+    const overlay = openOverlay(container, { ...defaultOptions, onChangePassword });
 
-    const inputs = container.querySelectorAll("#pw-old, #pw-new, #pw-confirm");
-    (inputs[0] as HTMLInputElement).value = "wrongold";
-    (inputs[1] as HTMLInputElement).value = "newpassword123";
-    (inputs[2] as HTMLInputElement).value = "newpassword123";
+    fillPasswordForm(container, "wrongold", "newpassword123", "newpassword123");
 
-    const changePwBtn = Array.from(container.querySelectorAll(".ac-btn")).find(
-      (b) => b.textContent === "Change Password",
-    ) as HTMLElement;
+    const changePwBtn = acButton(container, "Change Password");
     changePwBtn.click();
 
     await vi.waitFor(() => {
@@ -383,9 +422,7 @@ describe("SettingsOverlay", () => {
 
   it("shows error when username update fails", async () => {
     const onUpdateProfile = vi.fn().mockRejectedValue(new Error("Username taken"));
-    const overlay = createSettingsOverlay({ ...defaultOptions, onUpdateProfile });
-    overlay.mount(container);
-    overlay.open();
+    const overlay = openOverlay(container, { ...defaultOptions, onUpdateProfile });
 
     const editBtn = container.querySelector(".account-field-edit") as HTMLElement;
     editBtn.click();
@@ -395,9 +432,7 @@ describe("SettingsOverlay", () => {
     ) as HTMLInputElement;
     editInput.value = "taken-name";
 
-    const saveBtn = Array.from(container.querySelectorAll(".ac-btn")).find(
-      (b) => b.textContent === "Save",
-    ) as HTMLElement;
+    const saveBtn = acButton(container, "Save");
     saveBtn.click();
 
     await vi.waitFor(() => {
@@ -411,16 +446,12 @@ describe("SettingsOverlay", () => {
 
   // WP 3C-9: the rename and display-name inputs carry the new limits.
   function openUsernameEditor(onUpdateProfile = defaultOptions.onUpdateProfile) {
-    const overlay = createSettingsOverlay({ ...defaultOptions, onUpdateProfile });
-    overlay.mount(container);
-    overlay.open();
+    const overlay = openOverlay(container, { ...defaultOptions, onUpdateProfile });
     (container.querySelector(".account-field-edit") as HTMLElement).click();
     const editInput = container.querySelector<HTMLInputElement>(
       '[data-testid="username-edit-input"]',
     )!;
-    const saveBtn = Array.from(container.querySelectorAll(".ac-btn")).find(
-      (b) => b.textContent === "Save",
-    ) as HTMLElement;
+    const saveBtn = acButton(container, "Save");
     const error = container.querySelector<HTMLElement>("#username-edit-error")!;
     return { overlay, editInput, saveBtn, error };
   }
@@ -477,9 +508,7 @@ describe("SettingsOverlay", () => {
 
   it("bounds the display name and does not send one over the limit", async () => {
     const onUpdateProfile = vi.fn().mockResolvedValue(undefined);
-    const overlay = createSettingsOverlay({ ...defaultOptions, onUpdateProfile });
-    overlay.mount(container);
-    overlay.open();
+    const overlay = openOverlay(container, { ...defaultOptions, onUpdateProfile });
     const nameInput = container.querySelector<HTMLInputElement>(
       '[data-testid="display-name-input"]',
     )!;
@@ -501,9 +530,7 @@ describe("SettingsOverlay", () => {
 
   it("sends the display name with runs of spaces collapsed, as the server stores it", async () => {
     const onUpdateProfile = vi.fn().mockResolvedValue(undefined);
-    const overlay = createSettingsOverlay({ ...defaultOptions, onUpdateProfile });
-    overlay.mount(container);
-    overlay.open();
+    const overlay = openOverlay(container, { ...defaultOptions, onUpdateProfile });
     container.querySelector<HTMLInputElement>('[data-testid="display-name-input"]')!.value =
       "  Ada    Lovelace ";
     container.querySelector<HTMLElement>('[data-testid="profile-save-btn"]')!.click();
@@ -522,9 +549,7 @@ describe("SettingsOverlay", () => {
           "display_name must not contain control characters or line breaks",
         ),
       );
-    const overlay = createSettingsOverlay({ ...defaultOptions, onUpdateProfile });
-    overlay.mount(container);
-    overlay.open();
+    const overlay = openOverlay(container, { ...defaultOptions, onUpdateProfile });
     const nameInput = container.querySelector<HTMLInputElement>(
       '[data-testid="display-name-input"]',
     )!;
@@ -545,18 +570,14 @@ describe("SettingsOverlay", () => {
   });
 
   it("Cancel button hides the username edit form", () => {
-    const overlay = createSettingsOverlay(defaultOptions);
-    overlay.mount(container);
-    overlay.open();
+    const overlay = openOverlay(container);
 
     // Open edit form
     const editBtn = container.querySelector(".account-field-edit") as HTMLElement;
     editBtn.click();
 
     // Click cancel
-    const cancelBtn = Array.from(container.querySelectorAll(".ac-btn")).find(
-      (b) => b.textContent === "Cancel",
-    ) as HTMLElement;
+    const cancelBtn = acButton(container, "Cancel");
     cancelBtn.click();
 
     // Edit form should be hidden
@@ -572,18 +593,12 @@ describe("SettingsOverlay", () => {
   // --- Delete account tests ---
 
   it("shows confirmation area when Delete Account is clicked", () => {
-    const overlay = createSettingsOverlay(defaultOptions);
-    overlay.mount(container);
-    overlay.open();
+    const overlay = openOverlay(container);
 
-    const triggerBtn = container.querySelector(
-      "[data-testid='delete-account-trigger']",
-    ) as HTMLElement;
+    const triggerBtn = testId<HTMLElement>(container, "delete-account-trigger");
     expect(triggerBtn).not.toBeNull();
 
-    const confirmArea = container.querySelector(
-      "[data-testid='delete-account-confirm-area']",
-    ) as HTMLElement;
+    const confirmArea = testId<HTMLElement>(container, "delete-account-confirm-area");
     expect(confirmArea.style.display).toBe("none");
 
     triggerBtn.click();
@@ -595,18 +610,12 @@ describe("SettingsOverlay", () => {
   });
 
   it("hides confirmation area when Cancel is clicked", () => {
-    const overlay = createSettingsOverlay(defaultOptions);
-    overlay.mount(container);
-    overlay.open();
+    const overlay = openOverlay(container);
 
-    const triggerBtn = container.querySelector(
-      "[data-testid='delete-account-trigger']",
-    ) as HTMLElement;
+    const triggerBtn = testId<HTMLElement>(container, "delete-account-trigger");
     triggerBtn.click();
 
-    const confirmArea = container.querySelector(
-      "[data-testid='delete-account-confirm-area']",
-    ) as HTMLElement;
+    const confirmArea = testId<HTMLElement>(container, "delete-account-confirm-area");
     expect(confirmArea.style.display).toBe("block");
 
     const cancelBtn = confirmArea.querySelector("button:not(.account-delete-btn)") as HTMLElement;
@@ -621,13 +630,11 @@ describe("SettingsOverlay", () => {
   // B7-15c owner decision: the dialog states immediacy, backups and cached
   // images, and never a retention window — erasure hard-deletes at once.
   it("delete warning discloses immediacy, backups and cached images, and no retention window", () => {
-    const overlay = createSettingsOverlay({
+    const overlay = openOverlay(container, {
       ...defaultOptions,
       getRetentionNotice: () => "By default this server deletes messages after 30 days.",
     });
-    overlay.mount(container);
-    overlay.open();
-    (container.querySelector("[data-testid='delete-account-trigger']") as HTMLElement).click();
+    testId<HTMLElement>(container, "delete-account-trigger").click();
 
     const warning = container.querySelector(
       "[data-testid='delete-account-confirm-area']",
@@ -644,9 +651,7 @@ describe("SettingsOverlay", () => {
 
   it("shows the retention window in its own Account section when the server reported one", () => {
     const notice = "By default this server deletes messages after 30 days.";
-    const overlay = createSettingsOverlay({ ...defaultOptions, getRetentionNotice: () => notice });
-    overlay.mount(container);
-    overlay.open();
+    const overlay = openOverlay(container, { ...defaultOptions, getRetentionNotice: () => notice });
 
     const section = container.querySelector("[data-testid='account-retention']")!;
     expect(section.textContent).toContain(notice);
@@ -665,21 +670,15 @@ describe("SettingsOverlay", () => {
   });
 
   it("shows error when confirming delete without password", () => {
-    const overlay = createSettingsOverlay(defaultOptions);
-    overlay.mount(container);
-    overlay.open();
+    const overlay = openOverlay(container);
 
-    const triggerBtn = container.querySelector(
-      "[data-testid='delete-account-trigger']",
-    ) as HTMLElement;
+    const triggerBtn = testId<HTMLElement>(container, "delete-account-trigger");
     triggerBtn.click();
 
-    const confirmBtn = container.querySelector(
-      "[data-testid='delete-account-confirm']",
-    ) as HTMLElement;
+    const confirmBtn = testId<HTMLElement>(container, "delete-account-confirm");
     confirmBtn.click();
 
-    const errorEl = container.querySelector("[data-testid='delete-account-error']") as HTMLElement;
+    const errorEl = testId<HTMLElement>(container, "delete-account-error");
     expect(errorEl.textContent).toBe("Password is required.");
     expect(defaultOptions.onDeleteAccount).not.toHaveBeenCalled();
 
@@ -687,24 +686,9 @@ describe("SettingsOverlay", () => {
   });
 
   it("calls onDeleteAccount with password on confirm", () => {
-    const overlay = createSettingsOverlay(defaultOptions);
-    overlay.mount(container);
-    overlay.open();
+    const overlay = openOverlay(container);
 
-    const triggerBtn = container.querySelector(
-      "[data-testid='delete-account-trigger']",
-    ) as HTMLElement;
-    triggerBtn.click();
-
-    const passwordInput = container.querySelector(
-      "[data-testid='delete-account-password']",
-    ) as HTMLInputElement;
-    passwordInput.value = "mypassword123";
-
-    const confirmBtn = container.querySelector(
-      "[data-testid='delete-account-confirm']",
-    ) as HTMLButtonElement;
-    confirmBtn.click();
+    submitDeleteAccount(container, "mypassword123");
 
     expect(defaultOptions.onDeleteAccount).toHaveBeenCalledWith("mypassword123");
 
@@ -712,24 +696,9 @@ describe("SettingsOverlay", () => {
   });
 
   it("disables confirm button and shows 'Deleting...' during delete", () => {
-    const overlay = createSettingsOverlay(defaultOptions);
-    overlay.mount(container);
-    overlay.open();
+    const overlay = openOverlay(container);
 
-    const triggerBtn = container.querySelector(
-      "[data-testid='delete-account-trigger']",
-    ) as HTMLElement;
-    triggerBtn.click();
-
-    const passwordInput = container.querySelector(
-      "[data-testid='delete-account-password']",
-    ) as HTMLInputElement;
-    passwordInput.value = "mypassword123";
-
-    const confirmBtn = container.querySelector(
-      "[data-testid='delete-account-confirm']",
-    ) as HTMLButtonElement;
-    confirmBtn.click();
+    const confirmBtn = submitDeleteAccount(container, "mypassword123");
 
     expect(confirmBtn.disabled).toBe(true);
     expect(confirmBtn.textContent).toBe("Deleting...");
@@ -743,31 +712,16 @@ describe("SettingsOverlay", () => {
       onDeleteAccount: vi.fn().mockRejectedValue(new Error("Wrong password")),
     };
 
-    const overlay = createSettingsOverlay(failOptions);
-    overlay.mount(container);
-    overlay.open();
+    const overlay = openOverlay(container, failOptions);
 
-    const triggerBtn = container.querySelector(
-      "[data-testid='delete-account-trigger']",
-    ) as HTMLElement;
-    triggerBtn.click();
-
-    const passwordInput = container.querySelector(
-      "[data-testid='delete-account-password']",
-    ) as HTMLInputElement;
-    passwordInput.value = "wrongpassword";
-
-    const confirmBtn = container.querySelector(
-      "[data-testid='delete-account-confirm']",
-    ) as HTMLButtonElement;
-    confirmBtn.click();
+    const confirmBtn = submitDeleteAccount(container, "wrongpassword");
 
     // Wait for the rejected promise to settle
     await vi.waitFor(() => {
       expect(confirmBtn.disabled).toBe(false);
     });
 
-    const errorEl = container.querySelector("[data-testid='delete-account-error']") as HTMLElement;
+    const errorEl = testId<HTMLElement>(container, "delete-account-error");
     expect(errorEl.textContent).toBe("Wrong password");
     expect(confirmBtn.textContent).toBe("Confirm Delete");
 
@@ -775,24 +729,16 @@ describe("SettingsOverlay", () => {
   });
 
   it("clears password input when reopening confirmation area", () => {
-    const overlay = createSettingsOverlay(defaultOptions);
-    overlay.mount(container);
-    overlay.open();
+    const overlay = openOverlay(container);
 
-    const triggerBtn = container.querySelector(
-      "[data-testid='delete-account-trigger']",
-    ) as HTMLElement;
+    const triggerBtn = testId<HTMLElement>(container, "delete-account-trigger");
     triggerBtn.click();
 
-    const passwordInput = container.querySelector(
-      "[data-testid='delete-account-password']",
-    ) as HTMLInputElement;
+    const passwordInput = testId<HTMLInputElement>(container, "delete-account-password");
     passwordInput.value = "typed-something";
 
     // Cancel and reopen
-    const confirmArea = container.querySelector(
-      "[data-testid='delete-account-confirm-area']",
-    ) as HTMLElement;
+    const confirmArea = testId<HTMLElement>(container, "delete-account-confirm-area");
     const cancelBtn = confirmArea.querySelector("button:not(.account-delete-btn)") as HTMLElement;
     cancelBtn.click();
     triggerBtn.click();

@@ -48,6 +48,7 @@ import {
   handleMemberBan,
   handleMemberJoin,
   handleMemberUpdate,
+  handleMemberUpdateBatch,
   handleNsfwAck,
   handlePresence,
   handlePresenceBatch,
@@ -356,6 +357,7 @@ export function wireDispatcher(
   unsubs.push(ws.on(S.MEMBER_TIMEOUTS, handleMemberTimeouts));
 
   unsubs.push(ws.on(S.MEMBER_UPDATE, handleMemberUpdate));
+  unsubs.push(ws.on(S.MEMBER_UPDATE_BATCH, handleMemberUpdateBatch));
 
   unsubs.push(ws.on(S.ROLES_UPDATE, handleRolesUpdate));
 

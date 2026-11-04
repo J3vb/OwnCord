@@ -26,69 +26,18 @@ import {
   addOptimisticMessage,
   markSendFailed,
 } from "../../src/stores/messages.store";
-import type { ChatMessagePayload, MessageResponse, MessageUser } from "../../src/lib/types";
+import type { MessageResponse, MessageUser } from "../../src/lib/types";
 
-// clearChannelMessages was removed from the store (dead export, zero src
-// callers); tests keep using the identical observable-state write via setState.
-function clearChannelMessages(channelId: number): void {
-  messagesStore.setState((prev) => {
-    const updatedMessages = new Map(prev.messagesByChannel);
-    updatedMessages.delete(channelId);
-    const updatedLoaded = new Set(prev.loadedChannels);
-    updatedLoaded.delete(channelId);
-    const updatedHasMore = new Map(prev.hasMore);
-    updatedHasMore.delete(channelId);
-    const updatedLoadState = new Map(prev.historyLoadState);
-    updatedLoadState.delete(channelId);
-    const updatedDetached = new Set(prev.detachedChannels);
-    updatedDetached.delete(channelId);
-    return {
-      ...prev,
-      messagesByChannel: updatedMessages,
-      loadedChannels: updatedLoaded,
-      hasMore: updatedHasMore,
-      historyLoadState: updatedLoadState,
-      detachedChannels: updatedDetached,
-    };
-  });
-}
+import { clearChannelMessages } from "../helpers/messagesStoreHarness";
+import { buildResponse as response, buildBroadcast as broadcast } from "../helpers/messageFactory";
 
 const USER: MessageUser = { id: 1, username: "alice", avatar: null };
-
-function response(id: number, overrides?: Partial<MessageResponse>): MessageResponse {
-  return {
-    id,
-    channel_id: 1,
-    user: USER,
-    content: `msg ${id}`,
-    reply_to: null,
-    attachments: [],
-    reactions: [],
-    pinned: false,
-    edited_at: null,
-    deleted: false,
-    timestamp: "2026-03-15T09:00:00Z",
-    ...overrides,
-  };
-}
 
 /** An around-window payload: oldest-first, unlike the history endpoint. */
 function ascendingWindow(from: number, to: number): MessageResponse[] {
   const out: MessageResponse[] = [];
   for (let id = from; id <= to; id++) out.push(response(id));
   return out;
-}
-
-function broadcast(id: number): ChatMessagePayload {
-  return {
-    id,
-    channel_id: 1,
-    user: USER,
-    content: `live ${id}`,
-    reply_to: null,
-    attachments: [],
-    timestamp: "2026-03-15T12:00:00Z",
-  } as ChatMessagePayload;
 }
 
 function ids(channelId: number): number[] {

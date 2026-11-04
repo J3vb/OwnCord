@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from "vitest";
+import { usePhone } from "../../helpers/phoneMedia";
 import * as mocks from "../../helpers/channelSidebarMocks";
 import { createChannelSidebar } from "../../../src/components/ChannelSidebar";
 import { channelsStore, setChannels } from "../../../src/stores/channels.store";
@@ -33,13 +34,6 @@ const flush = (): void => {
   channelsStore.flush();
   uiStore.flush();
 };
-
-function usePhone(): void {
-  vi.stubGlobal(
-    "matchMedia",
-    vi.fn((q: string) => ({ matches: q.includes("pointer: coarse") })),
-  );
-}
 
 describe("ChannelSidebar join sheet", () => {
   let container: HTMLDivElement;

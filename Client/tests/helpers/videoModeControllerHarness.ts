@@ -1,5 +1,14 @@
-import { vi } from "vitest";
-import type { VideoModeControllerOptions } from "../../src/pages/main-page/VideoModeController";
+import { beforeEach, vi } from "vitest";
+import {
+  createVideoModeController,
+  type VideoModeControllerOptions,
+} from "../../src/pages/main-page/VideoModeController";
+import {
+  mockGetLocalCameraStream,
+  mockGetLocalScreenshareStream,
+  mockVoiceStoreGetState,
+} from "./videoModeControllerMocks";
+import { createVideoGrid } from "../../src/components/VideoGrid";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -50,4 +59,106 @@ export function makeVoiceState(overrides: Partial<VoiceStateStub> = {}): VoiceSt
     voiceUsers: new Map(),
     ...overrides,
   };
+}
+
+export type StubUser = { userId: number; camera: boolean; screenshare: boolean; username: string };
+
+export function vUser(
+  userId: number,
+  username: string,
+  flags: Partial<Pick<StubUser, "camera" | "screenshare">> = {},
+): StubUser {
+  return { userId, camera: false, screenshare: false, username, ...flags };
+}
+
+export function usersOf(...users: StubUser[]): Map<number, StubUser> {
+  return new Map(users.map((u) => [u.userId, u]));
+}
+
+/** Makes the stubbed voice store report channel 10 holding `users`. */
+export function stubVoiceChannel(
+  users: Map<number, StubUser>,
+  state: Partial<VoiceStateStub> = {},
+): void {
+  mockVoiceStoreGetState.mockReturnValue(
+    makeVoiceState({ currentChannelId: 10, voiceUsers: new Map([[10, users]]), ...state }),
+  );
+}
+
+/** Registers the beforeEach that resets the stubbed voice store and local streams. */
+export function useVideoModeControllerHarness(): void {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockVoiceStoreGetState.mockReturnValue(makeVoiceState());
+    mockGetLocalCameraStream.mockReturnValue(null);
+    mockGetLocalScreenshareStream.mockReturnValue(null);
+  });
+}
+
+/** A controller over fresh slots, chat column and grid unless `over` supplies them. */
+export function setupController(over: Partial<VideoModeControllerOptions> = {}) {
+  const slots = over.slots ?? makeSlots();
+  const chatColumn = over.chatColumn ?? document.createElement("div");
+  const videoGrid = over.videoGrid ?? makeVideoGrid();
+  const ctrl = createVideoModeController({
+    getCurrentUserId: () => 1,
+    ...over,
+    slots,
+    chatColumn,
+    videoGrid,
+  });
+  return { ctrl, slots, chatColumn, videoGrid };
+}
+
+export function makeController(over: Partial<VideoModeControllerOptions> = {}) {
+  return setupController(over).ctrl;
+}
+
+export const callUser = (
+  userId: number,
+  username: string,
+  video: Partial<{ camera: boolean }> = {},
+) => ({
+  userId,
+  username,
+  camera: video.camera ?? false,
+  screenshare: false,
+});
+
+export interface CallGridRig {
+  container: HTMLDivElement;
+  grid: ReturnType<typeof createVideoGrid>;
+  slots: ReturnType<typeof makeSlots>;
+  users: Map<number, ReturnType<typeof callUser>>;
+}
+
+/** Mounts a real video grid for a call between "me" (1) and "bob" (2). */
+export function mountCallGrid(): CallGridRig {
+  // ResizeObserver is not available in JSDOM
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe(): void {}
+      unobserve(): void {}
+      disconnect(): void {}
+    },
+  );
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const grid = createVideoGrid();
+  grid.mount(container);
+  return {
+    container,
+    grid,
+    slots: makeSlots(),
+    users: new Map([
+      [1, callUser(1, "me")],
+      [2, callUser(2, "bob")],
+    ]),
+  };
+}
+
+export function unmountCallGrid(rig: Pick<CallGridRig, "container" | "grid">): void {
+  rig.grid.destroy?.();
+  rig.container.remove();
 }

@@ -8,7 +8,6 @@ import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vite
 
 import { createMessageList } from "@components/MessageList";
 import type { MessageListOptions } from "@components/MessageList";
-import { createMessageInput } from "@components/MessageInput";
 import { messagesStore, type Message } from "@stores/messages.store";
 import { loadEmojiCatalog } from "../../src/features/messaging/emojiCatalog";
 import { clearCustomEmoji, emojiStore, setCustomEmoji } from "../../src/stores/emoji.store";
@@ -21,18 +20,12 @@ import {
   setChannel,
   signInAs,
 } from "../helpers/message-actions-fixtures";
-import { resetMembersState } from "../helpers/storeResets";
+import { resetMembersState, resetMessagesState } from "../helpers/storeResets";
 import "../helpers/resizeObserverStub";
+import { mountMessageInput } from "../helpers/messageInputHarness";
 
 function seed(messages: readonly Message[]): void {
-  messagesStore.setState(() => ({
-    messagesByChannel: new Map([[1, [...messages]]]),
-    pendingSends: new Map(),
-    loadedChannels: new Set(),
-    hasMore: new Map(),
-    historyLoadState: new Map(),
-    detachedChannels: new Set(),
-  }));
+  resetMessagesState({ messagesByChannel: new Map([[1, [...messages]]]) });
 }
 
 /** Replace the stored messages as a store update would, then deliver it. */
@@ -173,13 +166,7 @@ describe("inline message editor", () => {
       mount(messages);
       const composerHost = document.createElement("div");
       document.body.appendChild(composerHost);
-      const composer = createMessageInput({
-        channelId: 1,
-        channelName: "general",
-        onSend: vi.fn(),
-        onTyping: vi.fn(),
-      });
-      composer.mount(composerHost);
+      const { comp: composer } = mountMessageInput(composerHost);
       // The controller's wiring: the newest own, sent message.
       composerHost.addEventListener("edit-last-message", () => {
         const newest = messages.findLast((m) => m.user.id === ME && m.status === "sent");
@@ -201,13 +188,7 @@ describe("inline message editor", () => {
       mount(messages);
       const composerHost = document.createElement("div");
       document.body.appendChild(composerHost);
-      const composer = createMessageInput({
-        channelId: 1,
-        channelName: "general",
-        onSend: vi.fn(),
-        onTyping: vi.fn(),
-      });
-      composer.mount(composerHost);
+      const { comp: composer } = mountMessageInput(composerHost);
       // The controller's wiring (ChannelController's edit-last-message handler).
       composerHost.addEventListener("edit-last-message", () => {
         const newest = messages.findLast(
@@ -542,13 +523,7 @@ describe("inline message editor", () => {
       mount([mine(1), mine(2)]);
       const composerHost = document.createElement("div");
       document.body.appendChild(composerHost);
-      const composer = createMessageInput({
-        channelId: 1,
-        channelName: "general",
-        onSend: vi.fn(),
-        onTyping: vi.fn(),
-      });
-      composer.mount(composerHost);
+      const { comp: composer } = mountMessageInput(composerHost);
       const draft = composerHost.querySelector<HTMLTextAreaElement>(".msg-textarea")!;
       draft.value = "half a thought";
       composer.setReplyTo(7, "alice");

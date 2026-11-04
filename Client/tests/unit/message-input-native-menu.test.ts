@@ -1,23 +1,14 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
 import { createMessageInput } from "@components/MessageInput";
 import { wantsNativeMenu } from "@lib/dom";
-import type { GifApi, GifFavoritesApi } from "@lib/media/gifProvider";
-
-const gifApi: GifApi & GifFavoritesApi = {
-  gifSearch: vi.fn(async () => ({ results: [] })),
-  gifTrending: vi.fn(async () => ({ results: [] })),
-  gifFavorites: vi.fn(async () => ({ favorites: [] })),
-  addGifFavorite: vi.fn(async () => undefined),
-  removeGifFavorite: vi.fn(async () => undefined),
-};
+import { stubGifApi as gifApi } from "../helpers/messageInputHarness";
 
 describe("composer spelling menu", () => {
   let container: HTMLDivElement;
-  beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
+  useMountContainer((mounted) => {
+    container = mounted;
   });
-  afterEach(() => container.remove());
 
   it("composer textarea keeps the native menu and spellcheck", () => {
     const input = createMessageInput({

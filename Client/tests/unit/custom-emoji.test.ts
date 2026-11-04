@@ -4,6 +4,7 @@
  * reaction-pill resolution.
  */
 
+import { makeReactionMessage, reactionOptions } from "../helpers/reactionFixtures";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import * as voiceSession from "../helpers/voiceSessionMock";
 
@@ -39,8 +40,6 @@ import {
   resolveEmoji,
   listCustomEmoji,
 } from "../../src/stores/emoji.store";
-import type { Message } from "../../src/stores/messages.store";
-import type { MessageListOptions } from "../../src/components/MessageList";
 import { setConnectionStatus, uiStore } from "@stores/ui.store";
 
 // Reaction controls lock while the socket is down (3A-3); these tests react online.
@@ -310,33 +309,10 @@ describe("jumbo emoji", () => {
 // Reaction pills
 // ---------------------------------------------------------------------------
 
-function makeMessage(emoji: string): Message {
-  return {
-    id: 1,
-    channelId: 1,
-    userId: 10,
-    username: "alice",
-    avatar: null,
-    content: "hi",
-    timestamp: "2026-01-01T00:00:00Z",
-    editedAt: null,
-    replyTo: null,
-    attachments: [],
-    reactions: [{ emoji, count: 2, me: false }],
-    pending: false,
-    failed: false,
-    pinned: false,
-  } as unknown as Message;
-}
-
-function reactionOptions(): MessageListOptions {
-  return { onReactionClick: vi.fn() } as unknown as MessageListOptions;
-}
-
 describe("reaction pills", () => {
   it("renders the image for a custom-emoji reaction", () => {
     const el = renderReactions(
-      makeMessage(":wave:"),
+      makeReactionMessage(":wave:"),
       reactionOptions(),
       new AbortController().signal,
     );
@@ -348,7 +324,7 @@ describe("reaction pills", () => {
 
   it("falls back to the literal text when the emoji is gone", () => {
     const el = renderReactions(
-      makeMessage(":deleted_one:"),
+      makeReactionMessage(":deleted_one:"),
       reactionOptions(),
       new AbortController().signal,
     );
@@ -358,7 +334,11 @@ describe("reaction pills", () => {
   });
 
   it("leaves a unicode reaction as text", () => {
-    const el = renderReactions(makeMessage("🔥"), reactionOptions(), new AbortController().signal);
+    const el = renderReactions(
+      makeReactionMessage("🔥"),
+      reactionOptions(),
+      new AbortController().signal,
+    );
     const chip = el.querySelector(".reaction-chip");
     expect(chip?.querySelector("img.custom-emoji")).toBeNull();
     expect(chip?.textContent).toContain("🔥");
@@ -366,7 +346,7 @@ describe("reaction pills", () => {
 
   it("still toggles the reaction when it renders as an image", () => {
     const opts = reactionOptions();
-    const el = renderReactions(makeMessage(":wave:"), opts, new AbortController().signal);
+    const el = renderReactions(makeReactionMessage(":wave:"), opts, new AbortController().signal);
     (el.querySelector(".reaction-chip") as HTMLElement).click();
     expect(opts.onReactionClick).toHaveBeenCalledWith(1, ":wave:");
   });

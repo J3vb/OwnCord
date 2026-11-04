@@ -1,4 +1,6 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
+import { addVoiceUser } from "../helpers/voiceUsers";
 import * as voiceSession from "../helpers/voiceSessionMock";
 
 vi.mock("@lib/voice/livekitSession", () => voiceSession.defaults());
@@ -14,7 +16,7 @@ vi.mock("../../src/features/profiles/openUserProfilePopup", () => ({
 import { createChannelSidebar, type ChannelReorderData } from "../../src/components/ChannelSidebar";
 import { setChannels } from "../../src/stores/channels.store";
 import { uiStore } from "../../src/stores/ui.store";
-import { voiceStore, updateVoiceState } from "../../src/stores/voice.store";
+import { voiceStore } from "../../src/stores/voice.store";
 import type { ReadyChannel } from "../../src/lib/types";
 import { signInAs, resetChannelsState } from "../helpers/storeSeeds";
 
@@ -35,19 +37,6 @@ function channels(canModerate: boolean, canMove: boolean = canModerate): ReadyCh
         can_move_voice: canMove,
       }) as ReadyChannel,
   );
-}
-
-function joinVoice(channelId: number, userId: number, username: string): void {
-  updateVoiceState({
-    channel_id: channelId,
-    user_id: userId,
-    username,
-    muted: false,
-    deafened: false,
-    speaking: false,
-    camera: false,
-    screenshare: false,
-  });
 }
 
 /** jsdom lays nothing out: give each voice channel's drop area a band of rows. */
@@ -82,9 +71,9 @@ describe("drag a voice user onto another channel", () => {
     canMove?: boolean,
   ): void {
     setChannels(channels(canModerate, canMove));
-    joinVoice(3, TARGET_ID, "Target");
-    for (const id of alsoInLobby) joinVoice(3, id, `User ${id}`);
-    joinVoice(3, SELF_ID, "Me");
+    addVoiceUser(3, TARGET_ID, "Target");
+    for (const id of alsoInLobby) addVoiceUser(3, id, `User ${id}`);
+    addVoiceUser(3, SELF_ID, "Me");
     sidebar = createChannelSidebar({
       onVoiceJoin: vi.fn(),
       onOpenCall: vi.fn(),
@@ -114,6 +103,16 @@ describe("drag a voice user onto another channel", () => {
     mouse(r, "click", x, y, 0);
   }
 
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => {
+      sidebar.destroy?.();
+      document.querySelectorAll(".voice-user-drag-ghost").forEach((el) => el.remove());
+    },
+  );
+
   beforeEach(() => {
     resetChannelsState();
     voiceStore.setState((prev) => ({ ...prev, currentChannelId: null, voiceUsers: new Map() }));
@@ -122,14 +121,6 @@ describe("drag a voice user onto another channel", () => {
     mockOpenUserProfilePopup.mockClear();
     onMove = vi.fn<(userId: number, toChannelId: number) => void>();
     onReorderChannel = vi.fn<(reorders: readonly ChannelReorderData[]) => void>();
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    sidebar.destroy?.();
-    container.remove();
-    document.querySelectorAll(".voice-user-drag-ghost").forEach((el) => el.remove());
   });
 
   it("does not make rows draggable with only can_moderate_voice", () => {
@@ -241,7 +232,7 @@ describe("drag a voice user onto another channel", () => {
     mount(true);
     mouse(row(TARGET_ID), "mousedown", 10, 310);
     mouse(document, "mousemove", 50, 360);
-    joinVoice(4, 82, "Late");
+    addVoiceUser(4, 82, "Late");
     layOutDropAreas(container);
     mouse(document, "mousemove", 50, 420);
     mouse(document, "mouseup", 50, 420, 0);
@@ -254,7 +245,7 @@ describe("drag a voice user onto another channel", () => {
     mount(true);
     mouse(row(TARGET_ID), "mousedown", 10, 310);
     mouse(document, "mousemove", 50, 420);
-    joinVoice(4, TARGET_ID, "Target");
+    addVoiceUser(4, TARGET_ID, "Target");
     layOutDropAreas(container);
     mouse(document, "mouseup", 50, 520, 0);
     mouse(document, "click", 50, 520, 0);

@@ -3,13 +3,13 @@
  * Covers: valid code submits, invalid code shows error, cancel returns to login.
  */
 import { test, expect } from "./fixtures";
-import { buildTauriMockScript, MOCK_LOGIN_2FA_RESPONSE, MOCK_TOKEN } from "./helpers";
+import { buildTauriMockScript, MOCK_LOGIN_2FA_RESPONSE, MOCK_TOKEN, ROUTE_HEALTH } from "./helpers";
 
 async function mockTotpSuccess(page: import("@playwright/test").Page): Promise<void> {
   await page.addInitScript(
     buildTauriMockScript({
       httpRoutes: [
-        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
+        ROUTE_HEALTH,
         { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_2FA_RESPONSE },
         {
           pattern: "/api/v1/auth/verify-totp",
@@ -26,7 +26,7 @@ async function mockTotpFailure(page: import("@playwright/test").Page): Promise<v
   await page.addInitScript(
     buildTauriMockScript({
       httpRoutes: [
-        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
+        ROUTE_HEALTH,
         { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_2FA_RESPONSE },
         {
           pattern: "/api/v1/auth/verify-totp",

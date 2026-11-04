@@ -4,12 +4,12 @@
 // against a stubbed GET /admin/api/stats in each TLS mode.
 import { describe, it, expect, afterEach } from "vitest";
 import { JSDOM } from "jsdom";
-import { adminPanelHtml } from "../helpers/admin-panel";
+import { adminHtmlWithBridge, bootAdminPanel } from "../helpers/adminPanelFetch";
 
 const BRIDGE = `<script>
 window.__test = { get state(){return state}, renderDashboard: renderDashboard };
 </script>`;
-const ADMIN_HTML = adminPanelHtml().replace("</body>", `${BRIDGE}\n</body>`);
+const ADMIN_HTML = adminHtmlWithBridge(BRIDGE);
 
 interface Bridge {
   state: { me: unknown };
@@ -17,19 +17,9 @@ interface Bridge {
 }
 
 async function dashboard(stats: Record<string, unknown>): Promise<{ dom: JSDOM; host: Element }> {
-  const dom = new JSDOM(ADMIN_HTML, {
-    url: "http://localhost:8080/admin",
-    runScripts: "dangerously",
-    beforeParse(window) {
-      window.fetch = (async (input: string) => {
-        const p = String(input).replace(/^\/admin\/api/, "");
-        const json = p === "/setup/status" ? { needs_setup: false } : p === "/stats" ? stats : {};
-        return { ok: true, status: 200, json: async () => json } as Response;
-      }) as typeof fetch;
-    },
-  });
-  await new Promise((resolve) => dom.window.setTimeout(resolve, 0));
-  const bridge = (dom.window as unknown as { __test: Bridge }).__test;
+  const { dom, bridge } = await bootAdminPanel<Bridge>(ADMIN_HTML, [], (p) => ({
+    json: p === "/stats" ? stats : {},
+  }));
   bridge.state.me = { permissions: 0 };
   const host = dom.window.document.createElement("div");
   host.innerHTML = await bridge.renderDashboard();

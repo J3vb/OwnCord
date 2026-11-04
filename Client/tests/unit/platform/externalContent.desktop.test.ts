@@ -7,16 +7,11 @@ import { vi } from "vitest";
 import type { ExternalContentBroker } from "../../../src/platform/contracts/externalContent";
 import { expectConsole } from "../../helpers/console";
 import { describeExternalContentSuite } from "./externalContent.suite";
+import * as hn from "../../helpers/nativeCoreHarness";
 
-const core: {
-  invoke: ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) | undefined;
-} = { invoke: undefined };
+const core = hn.makeCore();
 
-vi.mock("@tauri-apps/api/core", () => ({
-  get invoke() {
-    return core.invoke;
-  },
-}));
+vi.mock("@tauri-apps/api/core", () => hn.coreMock(core));
 
 const mod = await import("../../../src/platform/desktop/externalContent");
 const desktopBinding: ExternalContentBroker = mod.externalContent;

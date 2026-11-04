@@ -23,6 +23,7 @@ import type { ServerRestartReasonValue } from "../../lib/protocolTypes";
 import { safetyText } from "../../i18n/safety";
 import { connectText } from "../../i18n/connect";
 import { noteJoinSent } from "../voice/joinRequest";
+import { sendOwedVoiceLeave } from "../voice/leaveOwed";
 import { livekitSession, log } from "./dispatchContext";
 import type { DispatchApi, DispatchWs, Payload, ReconnectClock } from "./dispatchContext";
 import type { ConnectionState } from "../../lib/ws";
@@ -41,6 +42,9 @@ export function handleAuthOk(
     clock.lastReconnectHandshakeAt = Date.now();
   }
   clock.hasAuthenticatedBefore = true;
+  // A leave made while the socket was down: send it before anything else, so a
+  // membership this socket took back on resume ends before ready applies.
+  sendOwedVoiceLeave(ws);
   setAuth(
     authStore.getState().token ?? "",
     payload.user,

@@ -280,7 +280,8 @@
 .member-item:hover {
   background: var(--bg-hover);
 }
-.member-item .mi-avatar {
+.member-item .mi-avatar,
+.dm-active-btn .mi-avatar {
   width: 32px;
   height: 32px;
   border-radius: var(--radius-circle);
@@ -297,7 +298,8 @@
    (.status-mobile, set by lib/ui/statusIndicator.ts) keeps the same
    element and colour but takes the phone proportions below. Every status dot
    in the app reads these custom properties the same way. */
-.member-item .mi-status {
+.member-item .mi-status,
+.dm-active-btn .mi-status {
   --sd: 12px;
   --status-ring: var(--bg-secondary);
   position: absolute;

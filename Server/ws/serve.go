@@ -54,7 +54,7 @@ func ServeWS(hub *Hub, allowedOrigins []string, maxConns int) http.HandlerFunc {
 	var pending atomic.Int64
 	return func(w http.ResponseWriter, r *http.Request) {
 		reject := func() {
-			hub.connRejects.Add(1)
+			hub.stats.ConnRejects.Add(1)
 			w.Header().Set("Retry-After", "30")
 			httperr.Write(w, http.StatusServiceUnavailable, httperr.CodeServerBusy, "server at connection capacity")
 		}
@@ -214,7 +214,7 @@ func (h *Hub) refreshUserSnapshot(ctx context.Context, database VisibilityReader
 // member list agrees with the presence broadcast that follows.
 func (h *Hub) applyConnectStatus(ctx context.Context, c *Client) {
 	if c.user.LastSeen == nil {
-		h.presenceRepair.mark(&h.presenceRepair.joins, c.userID, true)
+		h.presenceFeed.repair.mark(&h.presenceFeed.repair.joins, c.userID, true)
 	}
 	status, err := h.presence.StampConnect(ctx, c.userID, c.user.Status)
 	if err != nil {
@@ -243,7 +243,7 @@ func (h *Hub) announceFreshConnect(c *Client) {
 	text, _ := storedCustomStatus(c.user.CustomStatus, c.user.CustomStatusExpiresAt, time.Now())
 	p := pendingPresence{status: c.user.Status, customStatus: text}
 	p.connecting = c
-	if h.presenceRepair.marked(&h.presenceRepair.joins, c.userID) || c.user.Banned {
+	if h.presenceFeed.repair.marked(&h.presenceFeed.repair.joins, c.userID) || c.user.Banned {
 		m := memberPayloadFor(c.user, c.roleName, c.roleIDs)
 		p.member = &m
 	}

@@ -12,7 +12,7 @@ OwnCord is a self-hosted chat platform (beta):
 - `Client/`: Tauri v2 desktop app, a TypeScript frontend (Vite, vanilla TS, no React/Vue) plus a deliberately thin Rust backend (`src-tauri/`) for native APIs.
 - `protocol/schema.json`: the single source of truth for WebSocket message types, generated into both sides.
 
-Prerequisites ([README.md](README.md#prerequisites)):
+Prerequisites ([docs/contributing.md](docs/contributing.md#prerequisites)):
 
 - Go 1.27+, plus a C compiler on PATH for the `-race` tests. On Windows use a MinGW-w64 gcc such as WinLibs. Without a compiler, Go disables cgo and `go test -race` fails with `-race requires cgo`.
 - Node.js 26.x with npm 11.x (`Client/.nvmrc`); a different major fails `npm ci`.
@@ -30,7 +30,7 @@ Read the file for the area you are changing, not all of them:
 | Any code: formatting, lint rules, tests                | [docs/code-style.md](docs/code-style.md)                                                        |
 | Schema, migrations, SQL queries                        | [docs/summaries/database.md](docs/summaries/database.md), then [docs/schema.md](docs/schema.md) |
 | REST routes or WebSocket messages                      | [docs/summaries/api.md](docs/summaries/api.md), then [docs/protocol.md](docs/protocol.md)       |
-| Auth, permissions, secrets, E2EE, input handling       | [SECURITY.md](SECURITY.md)                                                                      |
+| Auth, permissions, secrets, E2EE, input handling       | [docs/security-model.md](docs/security-model.md)                                                |
 | Server or client internals and their component gotchas | [Server/CLAUDE.md](Server/CLAUDE.md), [Client/CLAUDE.md](Client/CLAUDE.md)                      |
 
 Inspect existing code before creating a new component, helper or pattern. OwnCord has established layouts and extraction patterns per component; reuse them rather than introducing a parallel structure. If these files conflict, or a decision you need is missing, ask before making a major assumption.
@@ -78,7 +78,7 @@ Full rules: [docs/summaries/design-system.md](docs/summaries/design-system.md).
 - Never put a password, token, TOTP secret, private key or message body in a log line, an audit-log detail or a commit. Never widen what reaches the webview: it holds the session token and the voice-E2EE identity key by design, but the remembered password stays Rust-side and never returns over IPC.
 - Validate input at every trust boundary, and verify authorization server-side through the owning permission predicate. Never trust a client-side check or a client-supplied role.
 - Never weaken a test-locked security invariant: the authorization chokepoint inventory, the audit-safety assertions, the E2EE staleness and verification guards, the log redaction helpers.
-- Details: [SECURITY.md](SECURITY.md) and [docs/security.md](docs/security.md).
+- Details: [docs/security-model.md](docs/security-model.md) and [docs/security.md](docs/security.md).
 
 ## Commands
 

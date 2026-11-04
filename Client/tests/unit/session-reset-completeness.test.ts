@@ -6,6 +6,8 @@
  * commented EXEMPT list: a registration added in any module fails the
  * completeness test until it gets a probe or an exemption.
  */
+import { makeChannel } from "../helpers/channelFactory";
+import { makeDm } from "../helpers/dmHarness";
 import { hasWaved, markWaved } from "@components/message-list/welcomeRows";
 import {
   claimForwardRequest,
@@ -14,6 +16,7 @@ import {
 import { claimPollRequest, isPollRequest } from "../../src/features/messaging/pollRequests";
 import { pollCardState } from "../../src/components/message-list/pollCard";
 import { withThreadsStore } from "../../src/stores/threadsLoader";
+import { acceptSharesFor, sendShareTo } from "../../src/features/share/shareInbox";
 import { setFocusedThread, threadsStore, upsertThread } from "../../src/stores/threads.store";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -82,6 +85,7 @@ import {
 import { buildBlockedUsersSection } from "../../src/features/safety/BlockedUsers";
 import { createAvatarElement } from "../../src/features/profiles/avatar";
 import { isVoiceMovePending, noteVoiceMoved } from "../../src/features/voice/moveHint";
+import { isVoiceLeaveOwed, noteVoiceLeave } from "../../src/features/voice/leaveOwed";
 import { noteWatchSent, takeWatchRefusal } from "../../src/lib/voice/watchRequest";
 import { getChannelMutesHost, setChannelMutesHost } from "../../src/lib/prefs/channelMutes";
 import {
@@ -116,18 +120,13 @@ const member = {
   status: "online",
 } as unknown as ReadyMember;
 
-const dm = {
+const dm = makeDm({
   channelId: 9,
   recipient: { id: 7, username: "alex", avatar: "", status: "online" },
-  participants: [],
-  name: "",
-  isGroup: false,
-  lastMessageId: null,
   lastMessage: "hi",
-  lastMessageAt: "",
   unreadCount: 3,
   mentionCount: 1,
-} as DmChannel;
+}) as DmChannel;
 
 let roleRevBefore = 0;
 let snapshotRevBefore = 0;
@@ -187,23 +186,7 @@ function unblockButtonFor5(): HTMLButtonElement | null {
   return section.querySelector<HTMLButtonElement>("[data-testid='blocked-user-unblock']");
 }
 
-const mentionChannel: Channel = {
-  id: 77,
-  name: "general",
-  type: "text",
-  category: null,
-  position: 0,
-  unreadCount: 0,
-  mentionCount: 0,
-  lastMessageId: null,
-  canSend: true,
-  topic: "",
-  slowMode: 0,
-  nsfw: false,
-  isPrivate: false,
-  voiceMaxUsers: 0,
-  voiceMaxVideo: 0,
-};
+const mentionChannel: Channel = makeChannel({ id: 77 });
 
 let threadsJobRan = false;
 
@@ -461,6 +444,14 @@ const PROBES: readonly Probe[] = [
     },
   },
   {
+    name: "voice:leave-owed",
+    mutate: () => {
+      noteVoiceLeave();
+      expect(isVoiceLeaveOwed()).toBe(true);
+    },
+    isInitial: () => !isVoiceLeaveOwed(),
+  },
+  {
     name: "voice:move-hint",
     mutate: () => {
       noteVoiceMoved(5);
@@ -582,6 +573,20 @@ const PROBES: readonly Probe[] = [
     isInitial: async () => {
       await vi.dynamicImportSettled();
       return !threadsJobRan;
+    },
+  },
+  {
+    name: "share-inbox",
+    mutate: () => sendShareTo(9_001, { files: [], text: "probe" }),
+    isInitial: () => {
+      let waiting = false;
+      // Taking it consumes the share, so the probe still reads as mutated
+      // only until it has been read once.
+      acceptSharesFor(9_001, () => {
+        waiting = true;
+      })();
+      if (waiting) sendShareTo(9_001, { files: [], text: "probe" });
+      return !waiting;
     },
   },
   {

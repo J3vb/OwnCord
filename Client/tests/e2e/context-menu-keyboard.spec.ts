@@ -13,14 +13,15 @@ import type { Locator, Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
 import {
   buildTauriMockScript,
-  MOCK_LOGIN_RESPONSE,
-  MOCK_MESSAGES,
   MOCK_CHANNELS_WITH_CATEGORIES,
   MOCK_MEMBERS_MULTI_ROLE,
   MOCK_VOICE_STATE,
   navigateToMainPageReady,
   openDmRow,
+  BASE_SESSION_ROUTES,
+  dmChannel,
 } from "./helpers";
+import { captureCalls, getCapturedCalls } from "./support/ipcCapture";
 
 const ONE_TO_ONE_DM_ID = 100;
 
@@ -29,61 +30,14 @@ const CHANNELS_WITH_MOD = MOCK_CHANNELS_WITH_CATEGORIES.map((ch) =>
   ch.id === 10 ? { ...ch, can_moderate_voice: true } : ch,
 );
 
-const DM_CHANNELS = [
-  {
-    channel_id: ONE_TO_ONE_DM_ID,
-    recipient: { id: 2, username: "moderator1", avatar: "", status: "online" },
-    last_message_id: 500,
-    last_message: "Hey there!",
-    last_message_at: "2026-03-15T12:00:00Z",
-    unread_count: 0,
-  },
-];
-
-interface CapturedCall {
-  readonly cmd: string;
-  readonly message?: string;
-  readonly method?: string;
-  readonly url?: string;
-}
-
-/** Installed after the Tauri mock so outgoing writes are observable. */
-function captureScript(): void {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const internals = (window as any).__TAURI_INTERNALS__;
-  const orig = internals.invoke;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (window as any).__capturedCalls = [];
-  internals.invoke = async (cmd: string, args: unknown) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const a = args as any;
-    if (cmd === "ws_send") {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (window as any).__capturedCalls.push({ cmd, message: a?.message });
-    } else if (cmd === "plugin:http|fetch") {
-      const cfg = a?.clientConfig ?? {};
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (window as any).__capturedCalls.push({ cmd, method: cfg.method, url: cfg.url });
-    }
-    return orig(cmd, args);
-  };
-}
-
-async function capturedCalls(page: Page): Promise<CapturedCall[]> {
-  return page.evaluate(() => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return ((window as any).__capturedCalls ?? []) as CapturedCall[];
-  });
-}
+const DM_CHANNELS = [dmChannel(ONE_TO_ONE_DM_ID, { id: 2, username: "moderator1" })];
 
 async function mockSession(page: Page): Promise<void> {
   await page.addInitScript(
     buildTauriMockScript({
-      wrappers: [captureScript],
+      wrappers: [captureCalls],
       httpRoutes: [
-        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-        { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
-        { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
+        ...BASE_SESSION_ROUTES,
         { pattern: "/api/v1/moderation/members", status: 200, body: [] },
         { pattern: "/api/v1/moderation/members/", method: "PATCH", status: 200, body: {} },
         { pattern: "/api/v1/moderation/channels/", method: "PATCH", status: 200, body: {} },
@@ -242,7 +196,7 @@ test.describe("context menus are keyboard-operable (A11Y-01)", () => {
     await page.keyboard.press("Enter");
 
     await expect(async () => {
-      const call = (await capturedCalls(page)).find(
+      const call = (await getCapturedCalls(page)).find(
         (c) => (c.url ?? "").includes("/api/v1/moderation/members/2") && c.method === "PATCH",
       );
       expect(call).toBeDefined();
@@ -313,7 +267,7 @@ test.describe("context menus are keyboard-operable (A11Y-01)", () => {
     await page.keyboard.press("Enter");
 
     await expect(async () => {
-      const call = (await capturedCalls(page)).find(
+      const call = (await getCapturedCalls(page)).find(
         (c) => (c.url ?? "").includes("/api/v1/moderation/channels/") && c.method === "PATCH",
       );
       expect(call).toBeDefined();
@@ -353,7 +307,7 @@ test.describe("context menus are keyboard-operable (A11Y-01)", () => {
     await page.keyboard.press("Enter");
 
     await expect(async () => {
-      const call = (await capturedCalls(page)).find((c) =>
+      const call = (await getCapturedCalls(page)).find((c) =>
         (c.message ?? "").includes("voice_mod_mute"),
       );
       expect(call).toBeDefined();

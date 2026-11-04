@@ -3,7 +3,7 @@
  * switches. The group switches keep their pref keys (a saved setting survives);
  * the per-sound switches are new keys that default on.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const { playNotificationSound } = vi.hoisted(() => ({ playNotificationSound: vi.fn() }));
 
@@ -18,31 +18,17 @@ vi.mock("../../src/platform/desktop", () => ({
 }));
 vi.mock("../../src/lib/media/notificationSound", () => ({ playNotificationSound }));
 
-import { buildNotificationsTab } from "../../src/features/settings/NotificationsTab";
+import { useNotificationsTabHost } from "../helpers/notificationsTabHost";
 import { setChannelMutesHost } from "../../src/lib/prefs/channelMutes";
 
-let container: HTMLDivElement;
-let ac: AbortController;
+const host = useNotificationsTabHost();
+const { build } = host;
 
 beforeEach(() => {
   localStorage.clear();
   playNotificationSound.mockClear();
   setChannelMutesHost(null);
-  container = document.createElement("div");
-  document.body.appendChild(container);
-  ac = new AbortController();
 });
-
-afterEach(() => {
-  ac.abort();
-  container.remove();
-});
-
-function build(): HTMLDivElement {
-  const tab = buildNotificationsTab(ac.signal);
-  container.appendChild(tab);
-  return tab;
-}
 
 function slider(tab: HTMLElement): HTMLInputElement {
   return tab.querySelector<HTMLInputElement>("[data-testid='app-sounds-volume']")!;
@@ -135,7 +121,7 @@ describe("per-sound switches", () => {
       for (const group of ["notificationSounds", "callSounds", "voiceSounds"]) {
         expect(stored(group)).toBeNull();
       }
-      container.replaceChildren();
+      host.container().replaceChildren();
     }
   });
 

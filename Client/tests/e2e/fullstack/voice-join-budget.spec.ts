@@ -20,6 +20,7 @@ import { readFileSync } from "node:fs";
 import type { Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
 import { joinVoice, mediaStats } from "../support/media";
+import { timeJoin } from "./voiceJoin";
 
 test.use({ media: true });
 test.setTimeout(180_000);
@@ -28,23 +29,6 @@ const SAMPLES = 7;
 const { budgetMs } = JSON.parse(
   readFileSync(new URL("../../../voice-join-budget.json", import.meta.url), "utf8"),
 ) as { budgetMs: number };
-
-async function timeJoin(page: Page): Promise<number> {
-  const connected = page.locator(".voice-widget.visible", { hasText: "Voice Connected" });
-  const start = Date.now();
-  await page.locator(".channel-item.voice", { hasText: "voice-one" }).click();
-  await expect
-    .poll(
-      async () => {
-        if ((await connected.count()) === 0) return false;
-        const now = await mediaStats(page);
-        return now.audioEnergy > 0 && now.audioSamples > 0;
-      },
-      { intervals: [50], timeout: 30_000 },
-    )
-    .toBe(true);
-  return Date.now() - start;
-}
 
 /** The client's own join timeline for the join started at `since`, from the
  *  production `__owncord.lkDebug()` introspection (SRE-M2). "Voice Connected"

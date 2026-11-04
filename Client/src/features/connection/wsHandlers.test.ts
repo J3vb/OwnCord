@@ -6,6 +6,7 @@ import {
   rejoinVoiceAfterRestart,
 } from "./wsHandlers";
 import { createReconnectClock } from "./dispatchContext";
+import { clearOwedLeave, noteVoiceLeave } from "../voice/leaveOwed";
 import { authStore } from "../../stores/auth.store";
 import { channelsStore } from "../../stores/channels.store";
 import { messagesStore } from "../../stores/messages.store";
@@ -42,6 +43,21 @@ beforeEach(() => {
 });
 
 describe("handleAuthOk", () => {
+  it("sends a voice leave owed from a leave made while the socket was down, first", () => {
+    resetVoiceStore();
+    joinVoiceChannel(5);
+    noteVoiceLeave();
+    resetVoiceStore();
+    channelsStore.setState((prev) => ({ ...prev, activeChannelId: 42 }));
+    const ws = socketStub();
+    handleAuthOk(ws, createReconnectClock(), { user, server_name: "s", motd: "" });
+    expect(ws.send.mock.calls[0]?.[0]).toEqual({ type: "voice_leave", payload: {} });
+    ws.send.mockClear();
+    handleAuthOk(ws, createReconnectClock(), { user, server_name: "s", motd: "" });
+    expect(ws.send).not.toHaveBeenCalledWith({ type: "voice_leave", payload: {} });
+    clearOwedLeave();
+  });
+
   it("stamps the handshake time only from the second auth_ok on", () => {
     const clock = createReconnectClock();
     const payload = { user, server_name: "s", motd: "" };

@@ -3,6 +3,7 @@
 // first (proving it could fail and pinning today's behaviour), then re-bound
 // it here. The legacy binding is deleted with this commit: its export is gone.
 import { vi } from "vitest";
+import { tauriEventMock } from "../../helpers/tauriEventMock";
 import type { Notifier, NotificationTarget } from "../../../src/platform/contracts/notifications";
 import { describeNotifierSuite } from "./notifier.suite";
 
@@ -23,14 +24,7 @@ vi.mock("@tauri-apps/api/window", () => ({
   getCurrentWindow: () => ({ requestUserAttention }),
 }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
-vi.mock("@tauri-apps/api/event", () => ({
-  listen: (event: string, handler: (e: { payload: unknown }) => void) => {
-    const set = handlers.get(event) ?? new Set();
-    set.add(handler);
-    handlers.set(event, set);
-    return Promise.resolve(() => set.delete(handler));
-  },
-}));
+vi.mock("@tauri-apps/api/event", () => tauriEventMock(handlers));
 
 describeNotifierSuite(async () => {
   for (const mock of [isPermissionGranted, requestPermission, sendNotification]) mock.mockReset();

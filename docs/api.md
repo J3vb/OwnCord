@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 258 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, the browser client portal, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 262 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, the browser client portal, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -120,6 +120,8 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | GET     | `/admin/api/storage/summary`                                         |
 | POST    | `/admin/api/support-bundles/download`                                |
 | POST    | `/admin/api/support-bundles/preview`                                 |
+| GET     | `/admin/api/system/health`                                           |
+| GET     | `/admin/api/system/livekit`                                          |
 | GET     | `/admin/api/system/slow-requests`                                    |
 | GET     | `/admin/api/system/stats`                                            |
 | GET     | `/admin/api/tokens`                                                  |
@@ -252,6 +254,8 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | POST    | `/api/v1/uploads`                                                    |
 | DELETE  | `/api/v1/uploads/{id}`                                               |
 | PATCH   | `/api/v1/users/me/`                                                  |
+| GET     | `/api/v1/users/me/api-tokens`                                        |
+| DELETE  | `/api/v1/users/me/api-tokens/{id}`                                   |
 | DELETE  | `/api/v1/users/me/avatar`                                            |
 | POST    | `/api/v1/users/me/avatar`                                            |
 | DELETE  | `/api/v1/users/me/banner`                                            |
@@ -328,9 +332,11 @@ renamed once shipped, because clients compare it. The common ones:
 | `INVALID_CREDENTIALS`           | 401         | Login/register with bad username/password/invite (generic to prevent enumeration)                                                                                                                                                                                                                                                                                                                                                                                          |
 | `FORBIDDEN`                     | 403         | Insufficient permissions, banned account, or admin IP restriction                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `TIMED_OUT`                     | 403         | The caller has an active moderator timeout and the action is one it refuses (B5-9) — see `POST /api/v1/moderation/users/{id}/timeout` for the full list                                                                                                                                                                                                                                                                                                                    |
+| `TRANSFER_TIMED_OUT`            | 408         | The upload sent no byte for 30 s or ran past its transfer lifetime (`upload.transfer_lifetime_seconds` in server-info); nothing was stored                                                                                                                                                                                                                                                                                                                                 |
 | `NOT_FOUND`                     | 404         | Resource (channel, message, user, invite, file, backup) not found                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `RATE_LIMITED`                  | 429         | Too many requests; `Retry-After` header gives the seconds left until a retry is allowed                                                                                                                                                                                                                                                                                                                                                                                    |
 | `AUTH_BUSY`                     | 429         | The bounded queue for password checks is full, or the request gave up waiting in it; nothing was checked or counted. Login, register and verify-totp set `Retry-After`                                                                                                                                                                                                                                                                                                     |
+| `LOGIN_SESSION_REQUIRED`        | 403         | An account-security route (password, two-factor, recovery codes or kit, sessions, account deletion, publishing a device key) was called with an API token; sign in and use the login session                                                                                                                                                                                                                                                                               |
 | `INVALID_INPUT` / `BAD_REQUEST` | 400         | Missing required fields, invalid query params, a non-positive or non-numeric id in a path (emoji and sticker image routes answer 404 instead), or a file over the upload size limit. A JSON body that does not decode (an empty one included where the body is required) is always `400 INVALID_INPUT` "malformed request body" on the `/api/v1` routes and `400 BAD_REQUEST` "malformed request body" under `/admin/api` and `/api/v1/moderation/members` and `/channels` |
 | `PAYLOAD_TOO_LARGE`             | 413         | A JSON body past its route's size cap (every route that reads JSON, `/admin/api` included), or an upload body padded past its cap, the plugin-install upload included                                                                                                                                                                                                                                                                                                      |
 | `UNSUPPORTED_MEDIA_TYPE`        | 415         | A plugin upload whose file part is labelled as something other than a `.zip`                                                                                                                                                                                                                                                                                                                                                                                               |
@@ -702,7 +708,7 @@ journal (`erasure_jobs`) that survives a restart and is resumed until every
 file is gone. The last admin-class account cannot be erased. Connected
 clients receive `member_ban` and the account's own socket is closed.
 
-**Auth:** Required (Bearer token)
+**Auth:** Required, login session only (an API token gets `403 LOGIN_SESSION_REQUIRED`)
 **Rate limit:** 5 requests/minute per IP. After 3 failed password attempts, the endpoint locks out for 15 minutes per user.
 
 #### Request
@@ -741,7 +747,7 @@ the moment `confirm` succeeds, each once, in place of a TOTP code at
 `POST /api/v1/auth/verify-totp`. Calling `enable` again replaces the set;
 disabling 2FA removes it.
 
-**Auth:** Required
+**Auth:** Required, login session only (an API token gets `403 LOGIN_SESSION_REQUIRED`)
 **Rate limit:** 5 requests/minute per IP
 
 #### Request
@@ -769,7 +775,7 @@ Confirm a pending TOTP enrollment. On success the account's other sessions are
 revoked, and its live WebSocket closes in the same request if it rode one of
 them.
 
-**Auth:** Required
+**Auth:** Required, login session only (an API token gets `403 LOGIN_SESSION_REQUIRED`)
 **Rate limit:** 5 requests/minute per IP
 
 #### Request
@@ -789,7 +795,7 @@ them.
 
 Disable TOTP for the authenticated user. The account's recovery codes are removed with the secret, and its other sessions are revoked; the account's live WebSocket closes in the same request if it rode one of them.
 
-**Auth:** Required
+**Auth:** Required, login session only (an API token gets `403 LOGIN_SESSION_REQUIRED`)
 **Rate limit:** 5 requests/minute per IP
 
 #### Request
@@ -811,7 +817,7 @@ previous set is invalid the moment the new one is stored. Requires 2FA to be
 enabled (`409 CONFLICT` otherwise) and writes a `recovery_codes_regenerated`
 audit row that carries no code.
 
-**Auth:** Required
+**Auth:** Required, login session only (an API token gets `403 LOGIN_SESSION_REQUIRED`)
 **Rate limit:** 5 requests/minute per IP
 
 #### Request
@@ -841,7 +847,7 @@ one. The server stores only an argon2id verifier of the kit secret. With no
 any grouping or case) and the response never echoes it. Writes a
 `recovery_kit_issued` audit row that carries no secret.
 
-**Auth:** Required
+**Auth:** Required, login session only (an API token gets `403 LOGIN_SESSION_REQUIRED`)
 **Rate limit:** 5 requests/minute per IP
 
 #### Request
@@ -891,7 +897,7 @@ Update the authenticated user's profile. Broadcasts a `user_update` WebSocket
 message to all clients on success, carrying the full profile snapshot (the
 event replaces the client's copy rather than patching it).
 
-**Auth:** Required
+**Auth:** Required; a request carrying `identity_public_key` takes a login session (an API token gets `403 LOGIN_SESSION_REQUIRED` and nothing is applied)
 **Rate limit:** 10 requests/minute
 
 #### Request
@@ -1070,9 +1076,11 @@ The same user object `PATCH /api/v1/users/me` returns, with `banner: null`.
 
 Change the authenticated user's password. Verifies the old password, enforces
 password strength, and revokes all _other_ sessions on success. The account's
-live WebSocket closes in the same request if it rode one of them.
+live WebSocket closes in the same request if it rode one of them. With
+`revoke_api_tokens: true` it also revokes every API token of the account;
+absent or `false` leaves the tokens working.
 
-**Auth:** Required
+**Auth:** Required, login session only (an API token gets `403 LOGIN_SESSION_REQUIRED`)
 **Rate limit:** 5 requests/minute, plus a failed-confirmation lockout on
 repeated wrong old passwords
 
@@ -1081,16 +1089,25 @@ repeated wrong old passwords
 ```json
 {
   "old_password": "OldPass!1",
-  "new_password": "NewStr0ng!Pass"
+  "new_password": "NewStr0ng!Pass",
+  "revoke_api_tokens": true
 }
 ```
 
 #### Response 204 No Content
 
 Password changed and other sessions revoked. If the password change committed
-but revoking other sessions failed, the endpoint returns **200 OK** with a
-warning body instead (the new password is in effect — do not retry with the
-old one).
+but revoking other sessions or the requested API tokens failed, the endpoint
+returns **200 OK** with a warning body instead (the new password is in effect —
+do not retry with the old one).
+
+```json
+{
+  "warning": "password changed, but other sessions or API tokens could not be revoked; revoke them from the sessions list",
+  "sessions_revoked": 0,
+  "api_tokens_revoked": 0
+}
+```
 
 #### Errors
 
@@ -1112,11 +1129,11 @@ starts `true` and stays so until the account lists its sessions from
 another device. This listing is that acknowledgement — every row's flag
 clears except the caller's own, so the device that just signed in never
 acknowledges itself, and the response carries the flags as they were before
-it. An API-token principal, which holds no session, acknowledges every row.
+it.
 No push transport exists for the signal; a client that wants it polls this
 route.
 
-**Auth:** Required
+**Auth:** Required, login session only (an API token gets `403 LOGIN_SESSION_REQUIRED`)
 
 #### Response 200 OK
 
@@ -1143,9 +1160,53 @@ route.
 Revoke one of the authenticated user's sessions by ID. The account's live
 WebSocket closes in the same request if it rode that session.
 
-**Auth:** Required
+**Auth:** Required, login session only (an API token gets `403 LOGIN_SESSION_REQUIRED`)
 
 #### Response 204 No Content
+
+---
+
+### GET /api/v1/users/me/api-tokens
+
+List the authenticated user's API tokens that still work, newest first.
+Revoked and expired tokens are left out, and no token value or hash is ever
+returned. `last_used` and `expires_at` are `null` when the token was never
+used or never expires.
+
+**Auth:** Required, login session only (an API token gets `403 LOGIN_SESSION_REQUIRED`)
+
+#### Response 200 OK
+
+```json
+{
+  "tokens": [
+    {
+      "id": 4,
+      "label": "release-bot",
+      "created_at": "2026-10-01 10:00:00",
+      "last_used": null,
+      "expires_at": null
+    }
+  ]
+}
+```
+
+---
+
+### DELETE /api/v1/users/me/api-tokens/{id}
+
+Revoke one of the authenticated user's API tokens. It stops working at once.
+Writes an `api_token_revoke` audit row.
+
+**Auth:** Required, login session only (an API token gets `403 LOGIN_SESSION_REQUIRED`)
+
+#### Response 204 No Content
+
+#### Errors
+
+| Status | Code        | Cause                                                                     |
+| ------ | ----------- | ------------------------------------------------------------------------- |
+| 404    | `NOT_FOUND` | No live token of this account has that id (revoked, expired or not yours) |
 
 ---
 
@@ -1160,7 +1221,7 @@ next 401 as an error. Never touches another account's credentials. Writes a
 anything was revoked. Limited to 5 calls per account per minute
 (`429 RATE_LIMITED`).
 
-**Auth:** Required
+**Auth:** Required, login session only (an API token gets `403 LOGIN_SESSION_REQUIRED`)
 
 #### Response 200 OK
 
@@ -1171,8 +1232,8 @@ anything was revoked. Limited to 5 calls per account per minute
 }
 ```
 
-`current_session_revoked` is `false` only for an API-token principal, which
-holds no session of its own.
+`current_session_revoked` is always `true`: the route takes a login session,
+and that session is among those revoked.
 
 ---
 
@@ -2709,6 +2770,19 @@ Upload a file as multipart form data.
 
 Files are validated against blocked magic bytes (PE executables, ELF binaries, Mach-O binaries, shell scripts). Files are stored with UUID filenames.
 
+**Transfer deadline:** the body may arrive slowly, but not stall. An upload that
+sends no byte for 30 seconds, or runs past its lifetime, is refused with
+`408 TRANSFER_TIMED_OUT` (the connection then closes). The lifetime is the body
+cap at 64 KiB/s, kept between 10 and 60 minutes (about 27 minutes for the 100
+MiB default); `upload.transfer_lifetime_seconds` in
+[`GET /api/v1/server-info`](#get-apiv1server-info) reports it. Avatar, banner
+and group-icon uploads follow the same rules, with at most two in flight per
+user on each of those routes (`429 RATE_LIMITED` beyond that). An upload cut
+because the server is shutting down gets `503 SERVER_SHUTTING_DOWN` instead;
+retry it. A download is held to the same
+idle rule and a lifetime sized from its file; one cut short has no answer to
+give, so its body ends before `Content-Length`.
+
 Before any of its bytes are read, the file name is checked against the server's file-type policy (`upload.blocked_extensions` and `upload.allowed_extensions` in config.yaml, or the owner's saved `upload_blocked_extensions`/`upload_allowed_extensions` settings, which replace them). Matching is case-insensitive and looks only at the final extension, the one Windows opens the file by, so `report.pdf.bat` is refused when `bat` is blocked and `report.bat.pdf` is not; trailing dots and spaces are ignored. A non-empty allowed list means only those final extensions are accepted. A refused name gets `400 BAD_REQUEST` ("upload rejected: blocked file type: .bat"), the same shape as a magic-byte refusal. Allowing an extension never lifts the magic-byte blocks.
 
 #### Voice messages
@@ -4009,19 +4083,22 @@ unauthenticated endpoint (anti-fingerprinting hardening, C-2).
 
 ### GET /api/v1/server-info
 
-Reports server identity, connection compatibility, registration mode and the
-server-default message retention window before sign-in.
+Reports server identity, connection compatibility, registration mode, the
+server-default message retention window and the upload transfer lifetime before
+sign-in.
 
 **Auth:** None
 
-| Field                     | Type    | Meaning                                                                                                                                                 |
-| ------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `name`                    | string  | The operator's server name (`server.name`)                                                                                                              |
-| `protocol_epoch`          | integer | The wire-protocol epoch this server speaks. A client whose epoch differs cannot connect                                                                 |
-| `browser_client_enabled`  | boolean | Whether the operator has opted in to browser-client hosting (`server.browser_client_enabled`)                                                           |
-| `registration_mode`       | string  | `closed`, `invite`, `approval`, or `open`. A missing setting defaults to `invite`; an invalid value fails closed to `closed`                            |
-| `retention`               | object  | Server-default message retention only; channel overrides are not disclosed                                                                              |
-| `retention.messages_days` | integer | Server-default message window in days; `0` means kept indefinitely. Attachments are deleted with their messages; there is no separate attachment window |
+| Field                              | Type    | Meaning                                                                                                                                                               |
+| ---------------------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`                             | string  | The operator's server name (`server.name`)                                                                                                                            |
+| `protocol_epoch`                   | integer | The wire-protocol epoch this server speaks. A client whose epoch differs cannot connect                                                                               |
+| `browser_client_enabled`           | boolean | Whether the operator has opted in to browser-client hosting (`server.browser_client_enabled`)                                                                         |
+| `registration_mode`                | string  | `closed`, `invite`, `approval`, or `open`. A missing setting defaults to `invite`; an invalid value fails closed to `closed`                                          |
+| `retention`                        | object  | Server-default message retention only; channel overrides are not disclosed                                                                                            |
+| `retention.messages_days`          | integer | Server-default message window in days; `0` means kept indefinitely. Attachments are deleted with their messages; there is no separate attachment window               |
+| `upload`                           | object  | Upload limits a client sizes its own bounds from                                                                                                                      |
+| `upload.transfer_lifetime_seconds` | integer | How long an upload may take under the current `upload.max_size_mb` before the server answers `408 TRANSFER_TIMED_OUT`; a client's own transfer bound should be longer |
 
 ```json
 {
@@ -4031,6 +4108,9 @@ server-default message retention window before sign-in.
   "registration_mode": "invite",
   "retention": {
     "messages_days": 0
+  },
+  "upload": {
+    "transfer_lifetime_seconds": 1600
   }
 }
 ```
@@ -4385,7 +4465,7 @@ Authorization is two-layered:
 | `GET/PATCH/DELETE /admin/api/logs/level`                                                                                                             | `VIEW_DIAGNOSTICS` (`ADMINISTRATOR` passes) — the running level and a timed debug boost, SRE-07                                                                                                                                                                                                              |
 | `POST /admin/api/support-bundles/preview`, `POST /admin/api/support-bundles/download`                                                                | `VIEW_DIAGNOSTICS` (`ADMINISTRATOR` passes)                                                                                                                                                                                                                                                                  |
 | `GET /admin/api/attention`                                                                                                                           | `VIEW_DIAGNOSTICS` (`ADMINISTRATOR` passes) — RI-07                                                                                                                                                                                                                                                          |
-| `GET /admin/api/system/stats`, `GET /admin/api/system/slow-requests`                                                                                 | `VIEW_DIAGNOSTICS` (`ADMINISTRATOR` passes)                                                                                                                                                                                                                                                                  |
+| `GET /admin/api/system/stats`, `GET /admin/api/system/livekit`, `GET /admin/api/system/slow-requests`, `GET /admin/api/system/health`                | `VIEW_DIAGNOSTICS` (`ADMINISTRATOR` passes)                                                                                                                                                                                                                                                                  |
 | `/api/v1/admin/plugins…`                                                                                                                             | `ADMINISTRATOR`                                                                                                                                                                                                                                                                                              |
 | `/admin/api/tokens…`, `/admin/api/updates…`                                                                                                          | `/admin/api/tokens…`: Owner role **or** `MANAGE_TOKENS` (`permissions.CanManageTokens`; a holder who is not the owner sees, creates and revokes only their own tokens); `/admin/api/updates…`: Owner role **or** `MANAGE_UPDATES` (`permissions.CanManageUpdates`); `ADMINISTRATOR` passes neither — WP 8.4d |
 | `DELETE /admin/api/backups/{name}`, `POST /admin/api/backups/{name}/restore`, `GET /admin/api/archive`, `POST /admin/api/archive/link`               | Owner role **or** `RESTORE_BACKUPS` (`permissions.CanRestoreBackups`; `ADMINISTRATOR` does not pass); the archive link is re-checked when opened — WP 8.4d                                                                                                                                                   |
@@ -4761,6 +4841,75 @@ space and the cached upload total.
 
 ---
 
+### GET /admin/api/system/livekit
+
+The Dashboard's LiveKit card. The server picks its source by itself and reads it
+every 10 seconds into a 24-hour ring held in memory; this route only reads that
+ring and contacts nothing. When OwnCord runs LiveKit (`source: "managed"`) the
+source is that process and LiveKit's room list. Otherwise it is LiveKit's
+Prometheus page (`source: "metrics"`): `voice.livekit_metrics_url` when set, else
+port 6789 on the host of `voice.livekit_url`.
+
+**Auth:** `VIEW_DIAGNOSTICS` (`ADMINISTRATOR` passes)
+
+**Query:** `window` is `1h` (default), `6h` or `24h`. Anything else is
+`400 BAD_REQUEST`.
+
+#### Response 200 OK
+
+```json
+{
+  "configured": true,
+  "source": "metrics",
+  "status": "ok",
+  "since": 1793385435,
+  "interval_seconds": 10,
+  "window_seconds": 3600,
+  "current": {
+    "t": 1793386035,
+    "cpu": 142.5,
+    "memory": 209715200,
+    "rooms": 1,
+    "participants": 4,
+    "tracks_published": 6,
+    "tracks_subscribed": 18,
+    "bytes_in_per_sec": 250000,
+    "bytes_out_per_sec": 1250000,
+    "cores": 4
+  },
+  "series": []
+}
+```
+
+With voice off the answer is `{"configured": false, "managed": false}`.
+
+- `source` is `managed` (the LiveKit OwnCord runs, read through the operating
+  system and LiveKit's room service) or `metrics` (a stats page).
+- For `managed`, `cpu`, `memory` and `cores` come from the process and the
+  machine (`memory` is resident bytes; `cpu` is not available on macOS),
+  `rooms` and `participants` from LiveKit's room list (`null` while that call
+  fails), and the tracks and traffic figures are always `null`. A restart
+  (a new process id) gives `null` CPU for one sample.
+- `status` is `ok`, `unreachable` (a network error, a timeout after 2 seconds,
+  or an answer other than 200) or `not_set_up` (the page answered but carries
+  no LiveKit figures, for example `livekit.yaml` has no `prometheus: port:`)
+  or, for `managed` only, `restarting` (no LiveKit process runs right now:
+  still starting, or between restarts; the points are gaps).
+  `since` is when the status last changed, in unix seconds.
+- `cpu` is LiveKit's CPU use where 100 is one core, from the change in its CPU
+  counter between two reads. `bytes_in_per_sec` and `bytes_out_per_sec` are
+  packet bytes per second, from the change in the counters. All three are
+  `null` for the first reading, after a read that failed, and when a counter
+  went down because LiveKit restarted.
+- `cores` is how many cores LiveKit may use (its Go runtime's GOMAXPROCS,
+  which follows the container's CPU limit, or the host's cores when there is
+  none); `null` when the page does not report it.
+- A read that failed is a point with every figure `null`. `series` is oldest
+  first, averaged down to at most 360 points; `t` is unix seconds. A restart
+  of OwnCord clears the history.
+
+---
+
 ### GET /admin/api/system/slow-requests
 
 The Dashboard's slow requests card: the ten slowest kinds of request over the
@@ -4799,6 +4948,64 @@ so their time says nothing about slowness.
   call.
 - The hour is twelve 5-minute slots, so a call leaves the list 55 to 60
   minutes after it was made. The counts are in memory: a restart clears them.
+
+---
+
+### GET /admin/api/system/health
+
+The System health page: the support bundle's health snapshot with the
+connection, database and process figures around it. Everything is read in
+process; only `database` touches the database, under a 2 second deadline, so
+a locked or slow database answers that part as `timeout` and the rest still
+returns. Aggregate figures only: no user, channel, address or log text.
+
+**Auth:** `VIEW_DIAGNOSTICS` (`ADMINISTRATOR` passes)
+
+#### Response 200 OK
+
+```json
+{
+  "captured_at": "2026-11-03T19:00:00Z",
+  "snapshot": { "connected_users": 14, "dispatch_alive": true, "goroutines": 211 },
+  "hub": { "connections": 16, "max_connections": 200 },
+  "database": {
+    "status": "ok",
+    "stats": {
+      "file_bytes": 104857600,
+      "wal_bytes": 4194304,
+      "schema_version": "090_attachment_lookup_indexes.sql",
+      "readers_in_use": 1,
+      "readers_open": 3,
+      "readers_max": 8,
+      "reader_wait_count": 0,
+      "reader_wait_ms": 0,
+      "writer_wait_count": 2,
+      "writer_wait_ms": 15.5
+    }
+  },
+  "process": {
+    "uptime_seconds": 183600,
+    "build": { "version": "2.8.0", "go": "go1.27.1", "os": "linux", "arch": "amd64" }
+  },
+  "livekit": { "managed": false },
+  "signals": [{ "id": "db_writer_wait", "label": "Database writer wait", "status": "ok" }]
+}
+```
+
+- `snapshot` is `health.json` from the support bundle, field for field
+  (shortened above). A figure the hub does not report is absent, never `0`.
+- `hub.connections` counts sockets (an account on two devices counts twice);
+  `null` when not reported. `max_connections` is `server.max_ws_connections`,
+  `0` for no limit.
+- `database.status` is `ok`, `timeout` (no answer within 2 s), `unreadable`
+  (the read failed; the error text is not returned) or `not_measured`;
+  `stats` is `null` unless `ok`. Wait counts and times are totals since start.
+- `process.build` is `build.json` from the support bundle.
+- `livekit.managed` is true when OwnCord runs LiveKit itself; its supervisor
+  state is in `snapshot` (`livekit_*`). An external LiveKit's figures are
+  `GET /admin/api/system/livekit` on the Dashboard.
+- `signals` are the attention panel's current signals
+  (`GET /admin/api/attention`), so the page raises no warning of its own.
 
 ---
 
@@ -5684,7 +5891,7 @@ is full; nothing restarts. `409 DATABASE_BUSY` is no longer returned.
 
 Download the full archive: a `VACUUM INTO` snapshot of the database, the data
 directory and `config.yaml` in one zip. What it carries and leaves out is in
-[deployment.md](deployment.md#the-full-archive).
+[Backups and restore](hosting/backups.md#the-full-archive).
 
 The admin panel does not call this route; it asks for a single-use link
 (`POST /admin/api/archive/link`) and opens that, so a large archive streams to
@@ -5939,15 +6146,16 @@ principal that clears the bit still cannot escalate through it.
 - Deleting a role gives the default role to each member it leaves with no
   role (a member who holds another role keeps it and is not moved), re-derives
   every holder's top role in the same transaction, drops the role's `channel_overrides` rows, invalidates the moved members'
-  cached permissions, and broadcasts a `member_update` per member.
+  cached permissions, and broadcasts the moved members' new roles
+  (`member_update` for one, `member_update_batch` frames of up to 64 for several).
 - Names are unique **case-insensitively** (migration `023`), matching the
   case-insensitive lookup the desktop client does. Max 32 characters.
 - Colors are `#rgb` or `#rrggbb`, normalized to uppercase. `""` clears the
   color. Anything else is `400`.
 - Unknown permission bits are masked off rather than rejected.
 - Moving a role (a `position` edit or a reorder) re-derives the top role of
-  every member who holds it next to another role, and sends them a
-  `member_update`.
+  every member who holds it next to another role, and sends their new roles
+  (`member_update` for one, `member_update_batch` for several).
 - Every mutation writes an audit row (`role_create`, `role_update`,
   `role_delete`, `role_reorder`) and broadcasts `roles_update` (see
   `docs/protocol.md`) carrying the full new list.

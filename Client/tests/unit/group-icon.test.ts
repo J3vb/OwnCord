@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { makeDm } from "../helpers/dmHarness";
 
 const fetchImageAsObjectUrl = vi.hoisted(() => vi.fn());
 
@@ -9,7 +10,8 @@ vi.mock("../../src/features/messaging/content/attachments", () => ({
   resolveServerUrl: (url: string) => (url.startsWith("http") ? url : `https://server.test${url}`),
 }));
 
-import { createDmSidebar, buildGroupAvatarStack } from "../../src/components/DmSidebar";
+import { useDmSidebarHost } from "../helpers/dmSidebarHost";
+import { buildGroupAvatarStack } from "../../src/components/DmSidebar";
 import type { DmConversation } from "../../src/components/DmSidebar";
 import {
   cropGroupIcon,
@@ -46,14 +48,19 @@ const flush = async (): Promise<void> => {
 
 beforeEach(() => fetchImageAsObjectUrl.mockReset());
 
+async function mountStackWithIcon() {
+  const host = document.createElement("div");
+  const stack = buildGroupAvatarStack(7, faces, "Crew", "#111", undefined, "/api/v1/files/9");
+  host.appendChild(stack);
+  document.body.appendChild(host);
+  await flush();
+  return { host, stack };
+}
+
 describe("group icon — avatar stack", () => {
   it("shows the icon instead of the faces once it loads", async () => {
     fetchImageAsObjectUrl.mockResolvedValue("blob:icon");
-    const host = document.createElement("div");
-    const stack = buildGroupAvatarStack(7, faces, "Crew", "#111", undefined, "/api/v1/files/9");
-    host.appendChild(stack);
-    document.body.appendChild(host);
-    await flush();
+    const { host, stack } = await mountStackWithIcon();
     expect(fetchImageAsObjectUrl).toHaveBeenCalledWith("https://server.test/api/v1/files/9");
     expect(stack.querySelector("img.dm-avatar-icon-img")?.getAttribute("src")).toBe("blob:icon");
     expect(stack.querySelectorAll(".dm-avatar-face")).toHaveLength(0);
@@ -62,11 +69,7 @@ describe("group icon — avatar stack", () => {
 
   it("falls back to the faces when the icon cannot be fetched", async () => {
     fetchImageAsObjectUrl.mockResolvedValue(null);
-    const host = document.createElement("div");
-    const stack = buildGroupAvatarStack(7, faces, "Crew", "#111", undefined, "/api/v1/files/9");
-    host.appendChild(stack);
-    document.body.appendChild(host);
-    await flush();
+    const { host, stack } = await mountStackWithIcon();
     expect(stack.querySelector("img")).toBeNull();
     expect(stack.querySelectorAll(".dm-avatar-face")).toHaveLength(2);
     host.remove();
@@ -74,11 +77,7 @@ describe("group icon — avatar stack", () => {
 
   it("falls back to the faces when the picture fails to decode", async () => {
     fetchImageAsObjectUrl.mockResolvedValue("blob:bad");
-    const host = document.createElement("div");
-    const stack = buildGroupAvatarStack(7, faces, "Crew", "#111", undefined, "/api/v1/files/9");
-    host.appendChild(stack);
-    document.body.appendChild(host);
-    await flush();
+    const { host, stack } = await mountStackWithIcon();
     stack.querySelector("img")!.dispatchEvent(new Event("error"));
     expect(stack.querySelector("img")).toBeNull();
     expect(stack.querySelectorAll(".dm-avatar-face")).toHaveLength(2);
@@ -96,25 +95,9 @@ describe("group icon — avatar stack", () => {
 
 describe("group icon — DM list row and menu", () => {
   let container: HTMLDivElement;
-  beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
+  const mount = useDmSidebarHost((c) => {
+    container = c;
   });
-  afterEach(() => {
-    container.remove();
-    document.querySelectorAll(".context-menu").forEach((el) => el.remove());
-  });
-
-  function mount(conversations: DmConversation[], opts: Record<string, unknown> = {}) {
-    const sidebar = createDmSidebar({
-      conversations,
-      onSelectConversation: vi.fn(),
-      onNewDm: vi.fn(),
-      ...opts,
-    });
-    sidebar.mount(container);
-    return sidebar;
-  }
 
   function openMenu(): void {
     (container.querySelector(".dm-item") as HTMLElement).dispatchEvent(
@@ -176,20 +159,16 @@ describe("group icon — DM list row and menu", () => {
 describe("group icon — conversation builder", () => {
   it("carries the icon onto the row, and omits an empty one", () => {
     const user = { id: 2, username: "bob", avatar: "", status: "online", displayName: "" };
-    const dm = (icon: string | undefined): DmChannel => ({
-      channelId: 7,
-      recipient: user,
-      participants: [user],
-      name: "Crew",
-      isGroup: true,
-      ownerId: 1,
-      ...(icon !== undefined && { icon }),
-      lastMessageId: null,
-      lastMessage: "",
-      lastMessageAt: "",
-      unreadCount: 0,
-      mentionCount: 0,
-    });
+    const dm = (icon: string | undefined): DmChannel =>
+      makeDm({
+        channelId: 7,
+        recipient: user,
+        participants: [user],
+        name: "Crew",
+        isGroup: true,
+        ownerId: 1,
+        ...(icon !== undefined && { icon }),
+      });
     dmStore.setState(() => ({ channels: [dm("/api/v1/files/1")] }));
     expect(buildDmConversations(null)[0]?.icon).toBe("/api/v1/files/1");
     dmStore.setState(() => ({ channels: [dm("")] }));

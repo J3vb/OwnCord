@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { loggerMock } from "../helpers/loggerMock";
 import { Track } from "livekit-client";
 import { createMicProcessor, GATE_LOOKAHEAD_S } from "../../src/lib/voice/micProcessor";
 import {
@@ -8,9 +9,7 @@ import {
   installFakeAudio,
 } from "../helpers/fakeAudioContext";
 
-vi.mock("@lib/logger", () => ({
-  createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
-}));
+vi.mock("@lib/logger", () => loggerMock());
 
 async function started() {
   const processor = createMicProcessor();

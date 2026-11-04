@@ -41,18 +41,18 @@ func (h *Hub) SeedSeq(seed uint64) {
 // SetEventPersister attaches a persister so broadcasts are also written to the
 // EventStore; nil disables. Safe at any time, including after Run has started.
 func (h *Hub) SetEventPersister(p *EventPersister) {
-	h.eventPersister.Store(p)
+	h.events.eventPersister.Store(p)
 }
 
 // SetEventStore attaches the read-side EventStore for cold-tier reconnect replay,
 // typically the one behind SetEventPersister; nil disables. Safe at any time.
 func (h *Hub) SetEventStore(s EventStore) {
 	if s == nil {
-		h.eventStore.Store(nil)
+		h.events.eventStore.Store(nil)
 		return
 	}
 	var guarded EventStore = purgeGuardedStore{EventStore: s, purge: &h.tombstones}
-	h.eventStore.Store(&guarded)
+	h.events.eventStore.Store(&guarded)
 }
 
 // SetPluginEventSink wires the plugin.EventSink so the hub fans out each sequenced
@@ -60,11 +60,11 @@ func (h *Hub) SetEventStore(s EventStore) {
 // the sink consumes the built hub's broadcaster (sink.SetBroadcaster), so it cannot
 // exist before the hub, unlike the registry (a HubOptions field).
 func (h *Hub) SetPluginEventSink(s *plugin.EventSink) {
-	h.pluginSink.Store(s)
+	h.events.pluginSink.Store(s)
 }
 
 func (h *Hub) dispatchToPlugins(msg []byte) {
-	sink := h.pluginSink.Load()
+	sink := h.events.pluginSink.Load()
 	if sink == nil {
 		return
 	}
@@ -83,7 +83,7 @@ var pluginDispatchHook atomic.Pointer[func(h *Hub, msg []byte)]
 // ReconnectTierStats returns the per-tier resume hit counters (buffer, db, full);
 // the OpenTelemetry meters read the same atomics.
 func (h *Hub) ReconnectTierStats() (buffer, db, full uint64) {
-	return h.reconnectTierBuf.Load(), h.reconnectTierDB.Load(), h.reconnectTierFull.Load()
+	return h.stats.ReconnectTierBuf.Load(), h.stats.ReconnectTierDB.Load(), h.stats.ReconnectTierFull.Load()
 }
 
 // noteRingMiss counts a resume the ring just failed to serve, only when the client is
@@ -93,7 +93,7 @@ func (h *Hub) ReconnectTierStats() (buffer, db, full uint64) {
 // the ring can race a push, which is harmless.
 func (h *Hub) noteRingMiss(lastSeq uint64) {
 	if oldest := h.ReplayBuffer().OldestSeq(); oldest != 0 && lastSeq <= oldest {
-		h.reconnectRingMiss.Add(1)
+		h.stats.ReconnectRingMiss.Add(1)
 	}
 }
 
@@ -102,7 +102,7 @@ func (h *Hub) noteRingMiss(lastSeq uint64) {
 // ReconnectTierStats' db divided by this. A separate method so ReconnectTierStats
 // keeps its admin-interface signature.
 func (h *Hub) ReconnectRingMissCount() uint64 {
-	return h.reconnectRingMiss.Load()
+	return h.stats.ReconnectRingMiss.Load()
 }
 
 // mustFullResync reports whether a client resuming from lastSeq predates the latest
@@ -226,7 +226,7 @@ func (h *Hub) purgeReplay(
 // purgePersisted flushes the persister so every frame sequenced before the
 // tombstones is on disk, then deletes the persisted rows.
 func (h *Hub) purgePersisted(ctx context.Context, deleteRows func(context.Context) (int64, error)) (rows int64, err error) {
-	if p := h.eventPersister.Load(); p != nil {
+	if p := h.events.eventPersister.Load(); p != nil {
 		if err := p.Flush(ctx); err != nil {
 			return 0, fmt.Errorf("purge replay: flush: %w", err)
 		}
@@ -250,7 +250,7 @@ func (h *Hub) purgePersisted(ctx context.Context, deleteRows func(context.Contex
 // hub whose dispatch loop is not running (a test hub, a hub after GracefulStop) has
 // nothing queued to wait for.
 func (h *Hub) awaitDispatch(ctx context.Context) error {
-	if !h.running.Load() || !h.DispatchAlive() {
+	if !h.lifecycle.running.Load() || !h.DispatchAlive() {
 		return nil
 	}
 	done := make(chan struct{})
@@ -300,7 +300,7 @@ func eventNamesMessage(data []byte, ids map[int64]struct{}) bool {
 // nil persister and never blocks the hot path. seq is the hub-assigned counter
 // embedded in payload, so the stored row-seq matches the payload-seq the client tracks.
 func (h *Hub) persistEvent(seq uint64, channelID int64, payload []byte) {
-	p := h.eventPersister.Load()
+	p := h.events.eventPersister.Load()
 	if p == nil {
 		return
 	}

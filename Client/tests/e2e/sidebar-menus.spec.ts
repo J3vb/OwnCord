@@ -19,75 +19,18 @@ import { findUnnamedControls } from "./support/accessibility";
 import {
   buildTauriMockScript,
   mockTauriFullSessionWithVoice,
-  MOCK_LOGIN_RESPONSE,
-  MOCK_MESSAGES,
   MOCK_PINNED_MESSAGES,
   navigateToMainPage,
   navigateToMainPageReady,
   waitForWsReady,
   openDmRow,
+  BASE_SESSION_ROUTES,
+  dmChannel,
+  groupDmChannel,
+  dispatchContextMenu,
+  useLeftMemberList,
 } from "./helpers";
-
-// ---------------------------------------------------------------------------
-// Call capture — records plugin:http|fetch invocations
-// ---------------------------------------------------------------------------
-
-interface CapturedCall {
-  readonly cmd: string;
-  readonly method?: string;
-  readonly url?: string;
-  readonly body?: string | null;
-}
-
-/** Passed as a `wrappers` entry, so it runs after the Tauri mock sets up `invoke`. */
-function captureScript(): void {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const internals = (window as any).__TAURI_INTERNALS__;
-  const orig = internals.invoke;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (window as any).__capturedCalls = [];
-  internals.invoke = async (cmd: string, args: unknown) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const a = args as any;
-    if (cmd === "plugin:http|fetch") {
-      const cfg = a?.clientConfig ?? {};
-      let body: string | null = null;
-      if (Array.isArray(cfg.data)) {
-        try {
-          body = new TextDecoder().decode(new Uint8Array(cfg.data));
-        } catch {
-          body = null;
-        }
-      }
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (window as any).__capturedCalls.push({ cmd, method: cfg.method, url: cfg.url, body });
-    }
-    return orig(cmd, args);
-  };
-}
-
-async function fetchCalls(page: Page): Promise<CapturedCall[]> {
-  return page.evaluate(() => {
-    const calls =
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ((window as any).__capturedCalls ?? []) as CapturedCall[];
-    return calls.filter((c) => c.cmd === "plugin:http|fetch");
-  });
-}
-
-/** Poll until a captured fetch matches, and return it. Avoids racing the async request. */
-async function waitForCall(
-  page: Page,
-  predicate: (call: CapturedCall) => boolean,
-  timeout = 5_000,
-): Promise<CapturedCall> {
-  let found: CapturedCall | undefined;
-  await expect(async () => {
-    found = (await fetchCalls(page)).find(predicate);
-    expect(found).toBeDefined();
-  }).toPass({ timeout });
-  return found!;
-}
+import { captureCalls, fetchCalls, waitForFetchCall } from "./support/ipcCapture";
 
 // ---------------------------------------------------------------------------
 // DM session — one 1:1 (100) and one named group (900)
@@ -103,31 +46,7 @@ const DM_MEMBERS = [
   { id: 4, username: "member2", avatar: "", status: "dnd", role: "member" },
 ];
 
-const DM_CHANNELS = [
-  {
-    channel_id: DM_ONE_TO_ONE_ID,
-    recipient: { id: 2, username: "otheruser", avatar: "", status: "online" },
-    last_message_id: 500,
-    last_message: "Hey there!",
-    last_message_at: "2026-03-15T12:00:00Z",
-    unread_count: 0,
-  },
-  {
-    channel_id: GROUP_DM_ID,
-    recipient: { id: 3, username: "member1", avatar: "", status: "idle" },
-    recipients: [
-      { id: 3, username: "member1", avatar: "", status: "idle" },
-      { id: 4, username: "member2", avatar: "", status: "dnd" },
-    ],
-    name: "Study Group",
-    is_group: true,
-    last_message_id: null,
-    last_message: "Hey everyone",
-    last_message_at: "2026-03-15T12:00:00Z",
-    unread_count: 0,
-    mention_count: 0,
-  },
-];
+const DM_CHANNELS = [dmChannel(DM_ONE_TO_ONE_ID), groupDmChannel(GROUP_DM_ID)];
 
 /** `GET /api/v1/moderation/members` — one live permanent ban for the banned section. */
 const BANNED_USER = {
@@ -143,11 +62,9 @@ const BANNED_USER = {
 async function mockDmSession(page: Page): Promise<void> {
   await page.addInitScript(
     buildTauriMockScript({
-      wrappers: [captureScript],
+      wrappers: [captureCalls],
       httpRoutes: [
-        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-        { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
-        { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
+        ...BASE_SESSION_ROUTES,
         { pattern: "/pins", status: 200, body: MOCK_PINNED_MESSAGES },
         // Group rename: PATCH /api/v1/dms/900. Longer, method-qualified
         // patterns outrank the bare DELETE route in the mock's longest-match sort.
@@ -188,19 +105,7 @@ async function submitLoginAndWait(page: Page): Promise<void> {
  *  real handler builds and positions the menu exactly as a click would (same
  *  approach as admin-moderation.spec.ts). */
 async function openDmRowMenu(page: Page, channelId: number): Promise<void> {
-  const row = page.locator(`.dm-item[data-channel-id="${channelId}"]`);
-  await expect(row).toBeVisible({ timeout: 5_000 });
-  await row.evaluate((el) =>
-    el.dispatchEvent(
-      new MouseEvent("contextmenu", {
-        bubbles: true,
-        cancelable: true,
-        clientX: 640,
-        clientY: 80,
-        button: 2,
-      }),
-    ),
-  );
+  await dispatchContextMenu(page.locator(`.dm-item[data-channel-id="${channelId}"]`));
   await expect(page.locator(".dm-context-menu")).toBeVisible({ timeout: 3_000 });
 }
 
@@ -247,7 +152,7 @@ test.describe("DM sidebar — row context menu", () => {
     await expect(closeItem).toHaveText("Close DM");
     await closeItem.click();
 
-    const call = await waitForCall(
+    const call = await waitForFetchCall(
       page,
       (c) => (c.url ?? "").includes(`/api/v1/dms/${DM_ONE_TO_ONE_ID}`) && c.method === "DELETE",
     );
@@ -282,7 +187,7 @@ test.describe("DM sidebar — row context menu", () => {
 
     await page.locator("[data-testid='dm-leave-confirm']").click();
 
-    const call = await waitForCall(
+    const call = await waitForFetchCall(
       page,
       (c) => (c.url ?? "").includes(`/api/v1/dms/${GROUP_DM_ID}`) && c.method === "DELETE",
     );
@@ -325,7 +230,7 @@ test.describe("DM sidebar — row context menu", () => {
     await page.locator(`[data-testid='dm-close-${DM_ONE_TO_ONE_ID}']`).click();
 
     await expect(page.locator("[data-testid='dm-leave-modal']")).toHaveCount(0);
-    await waitForCall(
+    await waitForFetchCall(
       page,
       (c) => (c.url ?? "").includes(`/api/v1/dms/${DM_ONE_TO_ONE_ID}`) && c.method === "DELETE",
     );
@@ -355,7 +260,7 @@ test.describe("DM sidebar — group rename", () => {
     await input.fill("Book Club");
     await page.locator("[data-testid='prompt-confirm']").click();
 
-    const call = await waitForCall(
+    const call = await waitForFetchCall(
       page,
       (c) => (c.url ?? "").includes(`/api/v1/dms/${GROUP_DM_ID}`) && c.method === "PATCH",
     );
@@ -371,9 +276,7 @@ test.describe("DM sidebar — group rename", () => {
 test.describe("Member list section", () => {
   test.beforeEach(async ({ page }) => {
     // The default moved to the right column in 3C-6c; this is the left section.
-    await page.addInitScript(() => {
-      localStorage.setItem("owncord:settings:memberListLayout", JSON.stringify("left"));
-    });
+    await useLeftMemberList(page);
     await mockDmSession(page);
     await page.goto("/");
     await submitLoginAndWait(page);
@@ -459,7 +362,7 @@ test.describe("Banned members section", () => {
 
     await page.locator("[data-testid='unban-member']").click();
 
-    const call = await waitForCall(
+    const call = await waitForFetchCall(
       page,
       (c) =>
         (c.url ?? "").includes(`/api/v1/moderation/members/${BANNED_USER.id}`) &&
@@ -478,6 +381,16 @@ test.describe("Banned members section", () => {
 // Per-user volume menu on a voice roster row
 // ---------------------------------------------------------------------------
 
+/** Right-clicks the voice roster row of `uid` and returns it with its open volume menu. */
+async function openVolumeMenu(page: Page, uid: number) {
+  const row = page.locator(`.voice-user-item[data-voice-uid='${uid}']`);
+  await expect(row).toBeVisible({ timeout: 5_000 });
+  await row.click({ button: "right" });
+  const menu = page.locator(".user-vol-menu");
+  await expect(menu).toBeVisible({ timeout: 3_000 });
+  return { row, menu, slider: menu.locator("input.settings-slider") };
+}
+
 test.describe("Per-user volume menu", () => {
   test.beforeEach(async ({ page }) => {
     await mockTauriFullSessionWithVoice(page);
@@ -488,12 +401,7 @@ test.describe("Per-user volume menu", () => {
   test("the slider changes the label and the value persists when the menu is reopened", async ({
     page,
   }) => {
-    const row = page.locator(".voice-user-item[data-voice-uid='2']");
-    await expect(row).toBeVisible({ timeout: 5_000 });
-
-    await row.click({ button: "right" });
-    const menu = page.locator(".user-vol-menu");
-    await expect(menu).toBeVisible({ timeout: 3_000 });
+    const { row, menu } = await openVolumeMenu(page, 2);
     await expect(menu.locator(".context-menu-item", { hasText: "moderator1" })).toBeVisible();
     await expect(
       menu.locator(".context-menu-item", { hasText: "User Volume: 100%" }),
@@ -522,13 +430,7 @@ test.describe("Per-user volume menu", () => {
   });
 
   test("Reset Volume returns the slider and label to 100%", async ({ page }) => {
-    const row = page.locator(".voice-user-item[data-voice-uid='3']");
-    await expect(row).toBeVisible({ timeout: 5_000 });
-    await row.click({ button: "right" });
-
-    const menu = page.locator(".user-vol-menu");
-    await expect(menu).toBeVisible({ timeout: 3_000 });
-    const slider = menu.locator("input.settings-slider");
+    const { row, menu, slider } = await openVolumeMenu(page, 3);
     await slider.focus();
     for (let i = 0; i < 5; i++) {
       await slider.press("ArrowLeft");
@@ -555,13 +457,7 @@ test.describe("Per-user volume menu", () => {
   test("the slider goes to 200% and Mute marks the row while keeping the level", async ({
     page,
   }) => {
-    const row = page.locator(".voice-user-item[data-voice-uid='2']");
-    await expect(row).toBeVisible({ timeout: 5_000 });
-    await row.click({ button: "right" });
-
-    const menu = page.locator(".user-vol-menu");
-    await expect(menu).toBeVisible({ timeout: 3_000 });
-    const slider = menu.locator("input.settings-slider");
+    const { row, menu, slider } = await openVolumeMenu(page, 2);
     await slider.focus();
     await slider.press("End");
     await expect(menu.locator(".slider-val")).toHaveText("200%");

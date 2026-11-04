@@ -1,4 +1,7 @@
 import { expect, vi, beforeEach, afterEach } from "vitest";
+import { createSettingsOverlay } from "../../src/features/settings/SettingsOverlay";
+import type { SettingsOverlayOptions } from "../../src/features/settings/SettingsOverlay";
+import { baseOptions } from "./settingsOverlayOptions";
 import * as attachments from "../../src/features/messaging/content/attachments";
 import * as formatting from "@lib/text/formatting";
 import * as media from "../../src/features/messaging/content/media";
@@ -31,28 +34,53 @@ export function getTab(container: HTMLDivElement, index: number): HTMLElement {
   return tab as HTMLElement;
 }
 
-export const defaultOptions = {
-  onClose: vi.fn(),
-  onChangePassword: vi.fn().mockResolvedValue(undefined),
-  onUpdateProfile: vi.fn().mockResolvedValue(undefined),
-  onUploadAvatar: vi.fn().mockResolvedValue("/api/v1/files/test"),
-  onRemoveAvatar: vi.fn().mockResolvedValue(undefined),
-  onLogout: vi.fn(),
-  onDeleteAccount: vi.fn().mockResolvedValue(undefined),
-  onStatusChange: vi.fn(),
-  onEnableTotp: vi.fn().mockResolvedValue({ qr_uri: "otpauth://test", backup_codes: [] }),
-  onConfirmTotp: vi.fn().mockResolvedValue(undefined),
-  onDisableTotp: vi.fn().mockResolvedValue(undefined),
-  onRefreshTotpStatus: vi.fn().mockResolvedValue(undefined),
-  onRegenerateRecoveryCodes: vi.fn().mockResolvedValue([]),
-  onEnrolRecoveryKit: vi.fn().mockResolvedValue({ created_at: "" }),
-  onGetRecoveryKitStatus: vi.fn().mockResolvedValue({ enrolled: false, used_at: null }),
-  onListSessions: vi.fn().mockResolvedValue([]),
-  onRevokeSession: vi.fn().mockResolvedValue(undefined),
-  onRevokeAllSessions: vi
-    .fn()
-    .mockResolvedValue({ sessions_revoked: 0, current_session_revoked: false }),
-};
+export const defaultOptions = baseOptions();
+
+/** Creates, mounts and opens a settings overlay over `container`. */
+export function openOverlay(
+  container: HTMLElement,
+  options: SettingsOverlayOptions = defaultOptions,
+): ReturnType<typeof createSettingsOverlay> {
+  const overlay = createSettingsOverlay(options);
+  overlay.mount(container);
+  overlay.open();
+  return overlay;
+}
+
+/** The account tab button whose text is exactly `label`. */
+export function acButton(container: ParentNode, label: string): HTMLButtonElement {
+  return Array.from(container.querySelectorAll(".ac-btn")).find(
+    (b) => b.textContent === label,
+  ) as HTMLButtonElement;
+}
+
+/** Lookup by `data-testid`; like a bare cast, it yields null-at-runtime when absent. */
+export function testId<T extends Element = HTMLElement>(container: ParentNode, id: string): T {
+  return container.querySelector(`[data-testid='${id}']`) as T;
+}
+
+/** Opens the delete-account prompt, types the password and confirms; returns the confirm button. */
+export function submitDeleteAccount(container: ParentNode, password: string): HTMLButtonElement {
+  testId(container, "delete-account-trigger").click();
+  testId<HTMLInputElement>(container, "delete-account-password").value = password;
+  const confirm = testId<HTMLButtonElement>(container, "delete-account-confirm");
+  confirm.click();
+  return confirm;
+}
+
+/** Fills the change-password form and returns its three inputs in order. */
+export function fillPasswordForm(
+  container: ParentNode,
+  current: string,
+  next: string,
+  confirm: string,
+): NodeListOf<HTMLInputElement> {
+  const inputs = container.querySelectorAll<HTMLInputElement>("#pw-old, #pw-new, #pw-confirm");
+  inputs[0]!.value = current;
+  inputs[1]!.value = next;
+  inputs[2]!.value = confirm;
+  return inputs;
+}
 
 /** Registers the shared beforeEach/afterEach for the SettingsOverlay describes; `bind` receives each fresh container. */
 export function useSettingsOverlayHarness(bind: (el: HTMLDivElement) => void): void {

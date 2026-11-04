@@ -5,8 +5,9 @@ import {
   grantExternalConsent,
   navigateToMainPage,
   waitForWsReady,
-  MOCK_LOGIN_RESPONSE,
   MOCK_PINNED_MESSAGES,
+  ROUTE_HEALTH,
+  ROUTE_LOGIN,
 } from "./helpers";
 
 // Chat scroll-up guard (chat-scroll-perf PRs c, e, f and g). A channel of 600 messages is
@@ -255,8 +256,8 @@ async function seedSession(page: Page, total = TOTAL): Promise<void> {
     buildTauriMockScript({
       wrappers: [pagedHistory],
       httpRoutes: [
-        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-        { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
+        ROUTE_HEALTH,
+        ROUTE_LOGIN,
         { pattern: "/pins", status: 200, body: MOCK_PINNED_MESSAGES },
       ],
       simulateWsFlow: true,

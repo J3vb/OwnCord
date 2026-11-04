@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strconv"
 	"sync"
 	"testing"
 
@@ -217,8 +218,8 @@ func BenchmarkChannelActivityFlush(b *testing.B) {
 
 // BenchmarkReplaySelection is the buffer-tier resume scan: EventsSince over a
 // ring buffer filled to the hub's own capacity (NewEventRingBuffer(1000) in
-// NewHub), from a watermark halfway back — the selection walks all 1000 entries
-// whatever the watermark is, and copies out the 500 above it.
+// NewHub), from a watermark halfway back: the selection finds the first newer
+// entry by binary search and copies out the 500 above it.
 func BenchmarkReplaySelection(b *testing.B) {
 	const size = 1000
 	rb := ws.NewEventRingBuffer(size)
@@ -231,6 +232,29 @@ func BenchmarkReplaySelection(b *testing.B) {
 	for range b.N {
 		if got := rb.EventsSince(size / 2); len(got) != size/2 {
 			b.Fatalf("EventsSince returned %d frames, want %d", len(got), size/2)
+		}
+	}
+}
+
+// BenchmarkReplaySelectionFiltered is the reconnect's filtered ring walk
+// (EventsSinceFilteredContent, run twice per resume, once under the sequencing
+// lock): 1000 content frames over three channels, one of them unreadable,
+// from a watermark halfway back.
+func BenchmarkReplaySelectionFiltered(b *testing.B) {
+	const size = 1000
+	rb := ws.NewEventRingBuffer(size)
+	for i := range size {
+		ch := int64(i%3 + 1)
+		payload := []byte(`{"seq":` + strconv.Itoa(i+1) + `,"type":"chat_message","payload":{"channel_id":` + strconv.FormatInt(ch, 10) + `,"content":"bench"}}`)
+		rb.Push(uint64(i+1), ch, payload) //nolint:gosec // loop index, never negative
+	}
+	allowed := map[int64]bool{1: true, 2: true, 3: true}
+	readable := map[int64]bool{1: true, 2: true}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		if got := rb.EventsSinceFilteredContent(size/2, allowed, readable); len(got) == 0 {
+			b.Fatal("EventsSinceFilteredContent returned no frames")
 		}
 	}
 }

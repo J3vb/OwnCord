@@ -10,6 +10,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { SocketConnection, SocketTransport } from "../../../src/platform/contracts/socket";
 import { describeSocketTransportSuite } from "./socket.suite";
+import * as lm from "../../helpers/loggerMock";
 
 const { invokeMock, listenMock, handlers } = vi.hoisted(() => {
   const registry = new Map<string, Set<(e: { payload: unknown }) => void>>();
@@ -42,9 +43,7 @@ vi.mock("@tauri-apps/api/event", () => ({
     return listenMock;
   },
 }));
-vi.mock("@lib/logger", () => ({
-  createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
-}));
+vi.mock("@lib/logger", () => lm.loggerMock());
 
 const mod = await import("../../../src/platform/desktop/socket");
 

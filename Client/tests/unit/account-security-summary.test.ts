@@ -1,9 +1,8 @@
 // Account tab, settings UX clarity pass: security state first, forms on demand.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { loggerMock } from "../helpers/loggerMock";
 
-vi.mock("@lib/logger", () => ({
-  createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
-}));
+vi.mock("@lib/logger", () => loggerMock());
 
 const mockAuthState = vi.hoisted(() => ({
   user: { id: 1, username: "testuser", totp_enabled: false, display_name: null as string | null },
@@ -18,6 +17,7 @@ vi.mock("@stores/ui.store", () => ({
 
 import { buildAccountTab } from "../../src/features/settings/AccountTab";
 import { clearHost, hostAndroidApp } from "../helpers/androidHost";
+import { makeOverlayOptions } from "../helpers/settingsOverlayOptions";
 
 function session(id: number, current: boolean) {
   return {
@@ -30,29 +30,10 @@ function session(id: number, current: boolean) {
 }
 
 function options(overrides: Record<string, unknown> = {}) {
-  return {
-    onClose: vi.fn(),
-    onChangePassword: vi.fn().mockResolvedValue(undefined),
-    onUpdateProfile: vi.fn().mockResolvedValue(undefined),
-    onUploadAvatar: vi.fn().mockResolvedValue("/api/v1/files/test"),
-    onRemoveAvatar: vi.fn().mockResolvedValue(undefined),
-    onLogout: vi.fn(),
-    onDeleteAccount: vi.fn().mockResolvedValue(undefined),
-    onStatusChange: vi.fn(),
-    onEnableTotp: vi.fn().mockResolvedValue({ qr_uri: "otpauth://test", backup_codes: [] }),
-    onConfirmTotp: vi.fn().mockResolvedValue(undefined),
-    onDisableTotp: vi.fn().mockResolvedValue(undefined),
-    onRefreshTotpStatus: vi.fn().mockResolvedValue(undefined),
-    onRegenerateRecoveryCodes: vi.fn().mockResolvedValue([]),
-    onEnrolRecoveryKit: vi.fn().mockResolvedValue({ created_at: "" }),
-    onGetRecoveryKitStatus: vi.fn().mockResolvedValue({ enrolled: false, used_at: null }),
+  return makeOverlayOptions({
     onListSessions: vi.fn().mockResolvedValue([session(1, true), session(2, false)]),
-    onRevokeSession: vi.fn().mockResolvedValue(undefined),
-    onRevokeAllSessions: vi
-      .fn()
-      .mockResolvedValue({ sessions_revoked: 0, current_session_revoked: false }),
     ...overrides,
-  } as unknown as Parameters<typeof buildAccountTab>[0];
+  }) as unknown as Parameters<typeof buildAccountTab>[0];
 }
 
 /** Only what is on screen: a form not yet opened is hidden or display:none. */
@@ -72,6 +53,20 @@ function accentIn(root: HTMLElement): (string | null)[] {
 
 function sessions(count: number) {
   return Array.from({ length: count }, (_, i) => session(i + 1, i === 0));
+}
+
+/** Gives each test an empty localStorage and an AbortController, and aborts it and removes its pane afterwards. */
+function useFreshPane(bind: (ac: AbortController) => void, current: () => HTMLElement): void {
+  let ac: AbortController;
+  beforeEach(() => {
+    ac = new AbortController();
+    localStorage.clear();
+    bind(ac);
+  });
+  afterEach(() => {
+    ac.abort();
+    current().remove();
+  });
 }
 
 describe("Account tab: security summary", () => {
@@ -257,15 +252,12 @@ describe("Account tab: security summary", () => {
 describe("Account tab: profile strip", () => {
   let ac: AbortController;
   let pane: HTMLDivElement;
-
-  beforeEach(() => {
-    ac = new AbortController();
-    localStorage.clear();
-  });
-  afterEach(() => {
-    ac.abort();
-    pane.remove();
-  });
+  useFreshPane(
+    (a) => {
+      ac = a;
+    },
+    () => pane,
+  );
 
   it("opens avatar, display name, about and username editing from one Edit profile action", () => {
     pane = buildAccountTab(options(), ac.signal);
@@ -324,15 +316,12 @@ describe("Account tab: profile strip", () => {
 describe("Account tab: status and danger zone", () => {
   let ac: AbortController;
   let pane: HTMLDivElement;
-
-  beforeEach(() => {
-    ac = new AbortController();
-    localStorage.clear();
-  });
-  afterEach(() => {
-    ac.abort();
-    pane.remove();
-  });
+  useFreshPane(
+    (a) => {
+      ac = a;
+    },
+    () => pane,
+  );
 
   it("chooses the status from one labelled select that saves and reports the change", () => {
     const opts = options();

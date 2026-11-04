@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vitest";
+import { pressComposingEnter } from "../helpers/keyEvents";
+import { makeDm } from "../helpers/dmHarness";
 import { createQuickSwitcher } from "@components/QuickSwitcher";
 import { channelsStore, setChannels } from "@stores/channels.store";
 import { addDmToChannelsStore } from "@stores/dm.store";
@@ -130,14 +132,7 @@ describe("QuickSwitcher", () => {
   it("keys an IME is composing with do not select, move or close", () => {
     switcher.mount(container);
     const input = container.querySelector(".quick-switcher__input") as HTMLInputElement;
-    input.dispatchEvent(
-      new KeyboardEvent("keydown", {
-        key: "Enter",
-        isComposing: true,
-        bubbles: true,
-        cancelable: true,
-      }),
-    );
+    pressComposingEnter(input);
     input.dispatchEvent(
       new KeyboardEvent("keydown", { key: "ArrowDown", keyCode: 229, bubbles: true }),
     );
@@ -329,18 +324,11 @@ describe("QuickSwitcher", () => {
   });
 
   it("does not duplicate a synthesized DM mirror row", () => {
-    const dm: DmChannel = {
+    const dm: DmChannel = makeDm({
       channelId: 99,
       recipient: { id: 1, username: "bob", avatar: "", status: "online" },
       participants: [{ id: 1, username: "bob", avatar: "", status: "online" }],
-      name: "",
-      isGroup: false,
-      lastMessageId: null,
-      lastMessage: "",
-      lastMessageAt: "",
-      unreadCount: 0,
-      mentionCount: 0,
-    };
+    });
     addDmToChannelsStore(dm);
 
     switcher.mount(container);

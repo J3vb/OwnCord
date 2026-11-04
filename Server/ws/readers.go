@@ -24,11 +24,16 @@ type VisibilityReader interface {
 	GetUserByID(ctx context.Context, id int64) (*db.User, error)
 	GetDMParticipantIDs(ctx context.Context, channelID int64) ([]int64, error)
 	GetUserDMChannelIDs(ctx context.Context, userID int64) ([]int64, error)
-	// HasNSFWAcknowledgement and ListNSFWAcknowledgedUserIDs back the NSFW content
-	// gate (ready's nsfw_acknowledged, replay's readable-set filter, the per-broadcast
-	// audience). Taken live, never cached, and only when a channel is labelled.
+	// HasNSFWAcknowledgement, ListNSFWAcknowledgedUserIDs,
+	// ListNSFWAcknowledgedChannelIDs and ChannelContentGate back the NSFW content gate (ready's
+	// nsfw_acknowledged, replay's readable-set filter and per-frame check, the
+	// per-broadcast audience). Taken live, never cached across handshakes.
 	HasNSFWAcknowledgement(ctx context.Context, userID, channelID int64) (bool, error)
 	ListNSFWAcknowledgedUserIDs(ctx context.Context, channelID int64) ([]int64, error)
+	ListNSFWAcknowledgedChannelIDs(ctx context.Context, userID int64) (map[int64]bool, error)
+	// ChannelContentGate is the per-frame replay check: whether the channel
+	// exists and userID may read its content now, in one point read.
+	ChannelContentGate(ctx context.Context, userID, channelID int64) (found, readable bool, err error)
 	// ListBlockersOf backs the channel_activity flush: users who blocked a message's
 	// author get no mention flag from it.
 	ListBlockersOf(ctx context.Context, blockedID int64) ([]int64, error)

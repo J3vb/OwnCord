@@ -11,7 +11,8 @@
 
 import type { Browser, Page } from "@playwright/test";
 import { test, expect, login } from "./fixtures";
-import { installRealTransport, TUNNEL_TOKEN } from "../support/real-transport";
+import { generalChannel, signIn } from "./serverApi";
+import { installRealTransport, recordTraffic, traffic } from "../support/real-transport";
 import type { TestServer } from "../support/server";
 import { openSettings } from "../helpers";
 
@@ -21,36 +22,9 @@ async function shot(page: Page, name: string): Promise<void> {
   if (EVIDENCE) await page.screenshot({ path: `${EVIDENCE}/${name}.png` });
 }
 
-/** Record every HTTP request and broker invocation the page makes from now on,
- *  with the tunnel's path token removed so lines read as server paths. */
-async function recordTraffic(page: Page): Promise<void> {
-  await page.evaluate((token) => {
-    const w = window as unknown as {
-      __TAURI_INTERNALS__: { invoke: (c: string, a?: Record<string, unknown>) => Promise<unknown> };
-      __traffic: string[];
-    };
-    w.__traffic = [];
-    const inner = w.__TAURI_INTERNALS__.invoke.bind(w.__TAURI_INTERNALS__);
-    w.__TAURI_INTERNALS__.invoke = (command, args = {}) => {
-      if (command === "plugin:http|fetch") {
-        const { method, url } = args.clientConfig as { method: string; url: string };
-        const { pathname, search } = new URL(url);
-        const path = pathname.startsWith(`/${token}/`)
-          ? pathname.slice(token.length + 1)
-          : pathname;
-        w.__traffic.push(`${method} ${path}${search}`);
-      } else if (command.startsWith("external_")) {
-        w.__traffic.push(`broker ${command}`);
-      }
-      return inner(command, args);
-    };
-  }, TUNNEL_TOKEN);
-}
-
 /** Content requests (history, pins, search, attachments) and broker calls for `channelId`. */
 async function contentTraffic(page: Page, channelId: number): Promise<string[]> {
-  const all = await page.evaluate(() => (window as unknown as { __traffic: string[] }).__traffic);
-  return all.filter(
+  return (await traffic(page)).filter(
     (line) =>
       line.startsWith("broker ") ||
       line.includes(`/channels/${channelId}/messages`) ||
@@ -89,12 +63,7 @@ test.describe("NSFW consent gate (real server)", () => {
     server,
   }) => {
     const owner = server.owner!.token;
-    const channels = (await server.api("/api/v1/channels/", undefined, owner)) as {
-      id: number;
-      name: string;
-      type: string;
-    }[];
-    const general = channels.find((c) => c.name === "general" && c.type === "text")!;
+    const general = await generalChannel(server);
     await server.api("/admin/api/channels", { name: "random", type: "text" }, owner);
     await expect(channelItem(bob, "random")).toBeVisible();
 
@@ -119,18 +88,15 @@ test.describe("NSFW consent gate (real server)", () => {
     await expect(gate(alice)).toBeVisible();
 
     // The server itself refuses bob's pre-consent read.
-    const bobLogin = (await server.api("/api/v1/auth/login", {
-      username: "bob",
-      password: "OwnCord-E2E-pass-123!",
-    })) as { token: string };
+    const bobToken = await signIn(server, "bob");
     await expect(
-      server.api(`/api/v1/channels/${general.id}/messages`, undefined, bobLogin.token),
+      server.api(`/api/v1/channels/${general.id}/messages`, undefined, bobToken),
     ).rejects.toThrow(/NSFW_ACKNOWLEDGEMENT_REQUIRED/);
 
     // Alternate entry points behind the gate: pins fetch nothing, and search
     // (server-wide only here) does not surface the labelled channel's text.
     await bob.getByTestId("pin-btn").click();
-    await bob.getByTestId("search-input").focus();
+    await bob.getByTestId("search-input").click();
     await bob.getByTestId("search-overlay-input").fill(secret);
     await expect(bob.locator(".search-overlay")).toBeVisible();
     await bob.waitForTimeout(1_500);
@@ -171,7 +137,7 @@ test.describe("NSFW consent gate (real server)", () => {
     expect(await contentTraffic(bob, general.id)).toEqual([]);
     // Still refused by the server: the failed PUT recorded nothing.
     await expect(
-      server.api(`/api/v1/channels/${general.id}/messages`, undefined, bobLogin.token),
+      server.api(`/api/v1/channels/${general.id}/messages`, undefined, bobToken),
     ).rejects.toThrow(/NSFW_ACKNOWLEDGEMENT_REQUIRED/);
 
     // 4. Accept: content loads only after the server's 204.
@@ -182,9 +148,7 @@ test.describe("NSFW consent gate (real server)", () => {
     // Focus moves from the removed gate button to the new composer.
     await expect(bob.locator("[data-testid='message-input'] textarea")).toBeFocused();
     await shot(bob, "04-accepted");
-    const afterAccept = await bob.evaluate(
-      () => (window as unknown as { __traffic: string[] }).__traffic,
-    );
+    const afterAccept = await traffic(bob);
     const put = afterAccept.findIndex(
       (l) => l.startsWith("PUT") && l.includes("nsfw-acknowledgement"),
     );
@@ -192,7 +156,7 @@ test.describe("NSFW consent gate (real server)", () => {
     expect(put).toBeGreaterThanOrEqual(0);
     expect(firstRead).toBeGreaterThan(put);
     // Control for the gated search above: with consent the same query finds it.
-    await bob.getByTestId("search-input").focus();
+    await bob.getByTestId("search-input").click();
     await bob.getByTestId("search-overlay-input").fill(secret);
     await expect(bob.locator(".search-result-item", { hasText: secret })).toHaveCount(1);
     await shot(bob, "04b-consented-search-finds-it");
@@ -222,7 +186,7 @@ test.describe("NSFW consent gate (real server)", () => {
       await shot(device2.page, "06-revoked-pins-closed");
       expect(await contentTraffic(device2.page, general.id)).toEqual([]);
       await expect(
-        server.api(`/api/v1/channels/${general.id}/messages`, undefined, bobLogin.token),
+        server.api(`/api/v1/channels/${general.id}/messages`, undefined, bobToken),
       ).rejects.toThrow(/NSFW_ACKNOWLEDGEMENT_REQUIRED/);
 
       // 7. Device 1 reconnects (its transport is cut and restored): the
@@ -265,18 +229,8 @@ test.describe("NSFW remote regate focus (real server)", () => {
     server,
   }) => {
     const owner = server.owner!.token;
-    const channels = (await server.api("/api/v1/channels/", undefined, owner)) as {
-      id: number;
-      name: string;
-      type: string;
-    }[];
-    const general = channels.find((c) => c.name === "general" && c.type === "text")!;
-    const bobApi = (
-      (await server.api("/api/v1/auth/login", {
-        username: "bob",
-        password: "OwnCord-E2E-pass-123!",
-      })) as { token: string }
-    ).token;
+    const general = await generalChannel(server);
+    const bobApi = await signIn(server, "bob");
     const composer = bob.locator("[data-testid='message-input'] textarea");
     const withdrawElsewhere = () =>
       server.api(

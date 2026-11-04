@@ -14,8 +14,6 @@ import { test, expect } from "./fixtures";
 import { findUnnamedControls, focusIndicator } from "./support/accessibility";
 import {
   buildTauriMockScript,
-  MOCK_LOGIN_RESPONSE,
-  MOCK_MESSAGES,
   MOCK_PINNED_MESSAGES,
   emitWsMessage,
   navigateToMainPage,
@@ -24,7 +22,11 @@ import {
   parkLiveKitSocket,
   connectVoiceSession,
   openDmRow,
+  BASE_SESSION_ROUTES,
+  dmChannel,
+  thirdDmChannel,
 } from "./helpers";
+import { sentFrames, sentTo, waitForSent } from "./support/invokeLog";
 
 // ---------------------------------------------------------------------------
 // Fixtures — one DM (channel 100) whose recipient has a nickname
@@ -49,31 +51,15 @@ const READY_MEMBERS = [
 ];
 
 const MOCK_DM_CHANNELS = [
-  {
-    channel_id: DM_CHANNEL_ID,
-    recipient: { id: OTHER_USER_ID, username: "otheruser", avatar: "", status: "online" },
-    last_message_id: 500,
-    last_message: "Hey there!",
-    last_message_at: "2026-03-15T12:00:00Z",
-    unread_count: 0,
-  },
-  {
-    channel_id: 101,
-    recipient: { id: 3, username: "thirduser", avatar: "", status: "idle" },
-    last_message_id: 501,
-    last_message: "See you later",
-    last_message_at: "2026-03-15T11:00:00Z",
-    unread_count: 0,
-  },
+  dmChannel(DM_CHANNEL_ID, { id: OTHER_USER_ID, username: "otheruser" }),
+  thirdDmChannel(),
 ];
 
 async function mockSession(page: Page): Promise<void> {
   await page.addInitScript(
     buildTauriMockScript({
       httpRoutes: [
-        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-        { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
-        { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
+        ...BASE_SESSION_ROUTES,
         { pattern: "/pins", status: 200, body: MOCK_PINNED_MESSAGES },
         { pattern: "GET /api/v1/dms", status: 200, body: MOCK_DM_CHANNELS },
       ],
@@ -134,52 +120,6 @@ async function attentionRequests(page: Page): Promise<unknown[]> {
       .filter((e) => e.cmd === "plugin:window|request_user_attention")
       .map((e) => e.args?.value),
   );
-}
-
-// ---------------------------------------------------------------------------
-// Outgoing-frame capture — the mock's own IPC log, no extra init script
-// ---------------------------------------------------------------------------
-
-interface SentFrame {
-  readonly type: string;
-  readonly payload?: Record<string, unknown>;
-}
-
-async function sentFrames(page: Page): Promise<SentFrame[]> {
-  return page.evaluate(() => {
-    const log = (
-      window as unknown as { __invokeLog: Array<{ cmd: string; args?: { message?: string } }> }
-    ).__invokeLog;
-    const frames: Array<{ type: string; payload?: Record<string, unknown> }> = [];
-    for (const entry of log) {
-      if (entry.cmd !== "ws_send") continue;
-      try {
-        frames.push(JSON.parse(entry.args?.message ?? "{}"));
-      } catch {
-        // A frame that is not JSON is not a client WS message; skip it.
-      }
-    }
-    return frames;
-  });
-}
-
-/** Poll until a matching frame has gone out, and return it. */
-async function waitForSent(
-  page: Page,
-  type: string,
-  has: (frame: SentFrame) => boolean = () => true,
-  timeout = 5_000,
-): Promise<SentFrame> {
-  let found: SentFrame | undefined;
-  await expect(async () => {
-    found = (await sentFrames(page)).find((f) => f.type === type && has(f));
-    expect(found).toBeDefined();
-  }).toPass({ timeout });
-  return found!;
-}
-
-function sentTo(page: Page, type: string, channelId: number): Promise<SentFrame> {
-  return waitForSent(page, type, (f) => f.payload?.channel_id === channelId);
 }
 
 // ---------------------------------------------------------------------------
@@ -455,6 +395,40 @@ test.describe("DM calls — starting a call", () => {
     await page.locator(".channel-item", { hasText: "general" }).first().click();
     await expect(page.locator("[data-testid='chat-header-name']")).toHaveText("general");
     await expect(page.locator("[data-testid='call-btn']")).toBeHidden();
+  });
+
+  test("the server rail keeps the DM call one click away from a server's channels", async ({
+    page,
+  }) => {
+    await boot(page);
+    await openDm(page);
+    await page.locator("[data-testid='call-btn']").click();
+    await connectVoiceSession(page);
+    await expect(panel(page)).toBeVisible();
+
+    await page.getByTestId("server-rail-server").click();
+    await page.locator(".channel-item", { hasText: "general" }).first().click();
+    await expect(page.locator("[data-testid='chat-header-name']")).toHaveText("general");
+    await expect(panel(page)).toBeHidden();
+
+    const callIcon = page.getByTestId("server-rail-dm-call");
+    await expect(callIcon).toHaveAttribute("data-channel-id", String(DM_CHANNEL_ID));
+    await expect(callIcon).toHaveAttribute("aria-label", "In a call with otheruser");
+
+    expect(await findUnnamedControls(page.getByTestId("server-rail"))).toEqual([]);
+
+    // Reachable from Home by keyboard, with a visible focus ring, and Enter opens the call.
+    await page.getByTestId("server-rail-home").focus();
+    await page.keyboard.press("Tab");
+    await expect(callIcon).toBeFocused();
+    expect((await focusIndicator(page)).problems).toEqual([]);
+    await page.keyboard.press("Enter");
+    await expect(page.locator("[data-testid='chat-header-name']")).toHaveText("otheruser");
+    await expect(panel(page)).toBeVisible();
+
+    await panel(page).locator("[data-testid='dcp-leave']").click();
+    await waitForSent(page, "voice_leave");
+    await expect(callIcon).toBeHidden();
   });
 
   test("a ring for a DM you are not viewing still raises the banner", async ({ page }) => {

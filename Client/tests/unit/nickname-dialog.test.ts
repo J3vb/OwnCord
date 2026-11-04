@@ -4,6 +4,7 @@
  * the dialog open with the server's message.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { pressComposingEnter } from "../helpers/keyEvents";
 import { openNicknameDialog } from "../../src/features/moderation/NicknameDialog";
 import type { ModalInstance } from "@lib/ui/modalFactory";
 import { ApiClientError, TransportError } from "@lib/api";
@@ -143,14 +144,7 @@ describe("nickname dialog", () => {
     const submit = vi.fn(async () => ({}));
     setup(submit);
     type("Dave");
-    input().dispatchEvent(
-      new KeyboardEvent("keydown", {
-        key: "Enter",
-        isComposing: true,
-        bubbles: true,
-        cancelable: true,
-      }),
-    );
+    pressComposingEnter(input());
     expect(submit).not.toHaveBeenCalled();
     input().dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     await vi.waitFor(() => expect(dialog()).toBeNull());

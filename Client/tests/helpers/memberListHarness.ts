@@ -1,4 +1,4 @@
-import { vi } from "vitest";
+import { afterEach, beforeEach, expect, vi } from "vitest";
 import type { MemberListOptions } from "@components/MemberList";
 import { membersStore } from "@stores/members.store";
 import type { Member } from "@stores/members.store";
@@ -60,12 +60,57 @@ export const testMembers: Member[] = [
   makeMember({ id: 6, username: "Frank", role: "admin", status: "online" as UserStatus }),
 ];
 
-export function defaultOpts(): MemberListOptions {
+export function defaultOpts(currentUserRole = "admin"): MemberListOptions {
   return {
-    currentUserRole: "admin",
+    currentUserRole,
     onKick: vi.fn().mockResolvedValue(undefined),
     onBan: vi.fn().mockResolvedValue(undefined),
     onChangeRole: vi.fn().mockResolvedValue(undefined),
     onToggleBlock: vi.fn().mockResolvedValue(undefined),
   };
+}
+
+/** Right-clicks a member row and lets the lazy menu chunk settle. */
+export async function rightClickMember(container: HTMLElement, id: number): Promise<void> {
+  const row = container.querySelector(`[data-testid="member-${id}"]`) as HTMLElement;
+  row.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
+  await vi.dynamicImportSettled();
+}
+
+/** Top-level item labels; submenu role options share the item class. */
+export function topMenuLabels(menu: HTMLElement): string[] {
+  return Array.from(menu.children)
+    .filter((el) => el.classList.contains("context-menu__item"))
+    .map((el) => el.firstChild?.textContent ?? "");
+}
+
+/**
+ * Fresh store and a container on document.body per test; the list `current`
+ * returns is destroyed and the container removed afterwards. `bind` gets each
+ * new container.
+ */
+export function useMemberListSuite(
+  bind: (container: HTMLDivElement) => void,
+  current: () => { destroy?: () => void } | null | undefined,
+): void {
+  let container: HTMLDivElement;
+  beforeEach(() => {
+    resetStore();
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    bind(container);
+  });
+  afterEach(() => {
+    current()?.destroy?.();
+    container.remove();
+  });
+}
+
+/** Clicks a member row and waits for its profile popup to open. */
+export async function openProfileOf(container: HTMLElement, id: number): Promise<void> {
+  const row = container.querySelector<HTMLElement>(`[data-testid="member-${id}"]`)!;
+  row.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 10, clientY: 10 }));
+  await vi.waitFor(() =>
+    expect(document.querySelector('[data-testid="user-profile-popup"]')).not.toBeNull(),
+  );
 }

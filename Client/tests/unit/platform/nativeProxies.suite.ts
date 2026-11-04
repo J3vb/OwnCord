@@ -1,12 +1,25 @@
 // Behaviour suite for the `ensureHttpProxy` half of the `NativeProxies`
 // contract (`src/platform/contracts/nativeProxies.ts`). The LiveKit half has
 // its own suite, `livekitProxies.suite.ts` (B7-5).
-import { beforeEach, describe, expect, test } from "vitest";
+import { beforeEach, describe, expect, test, type Mock } from "vitest";
 import type { NativeProxies } from "../../../src/platform/contracts/nativeProxies";
 
 export interface NativeControl {
   succeedWith(port: number): void;
   failWith(error: unknown): void;
+}
+
+/** Drives the HTTP tunnel start on a mocked Tauri `invoke`. */
+export function httpNativeControl(invoke: Mock): NativeControl {
+  return {
+    succeedWith(port) {
+      let n = 0;
+      invoke.mockImplementation(() => Promise.resolve({ port: port + n++, token: "tun" }));
+    },
+    failWith(error) {
+      invoke.mockRejectedValue(error);
+    },
+  };
 }
 
 export type NativeProxiesSeam = Pick<NativeProxies, "ensureHttpProxy">;

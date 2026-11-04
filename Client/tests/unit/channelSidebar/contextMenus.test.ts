@@ -1,7 +1,10 @@
-import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from "vitest";
+import { describe, it, expect, vi, type Mock } from "vitest";
 import * as mocks from "../../helpers/channelSidebarMocks";
 import { cascadedDeclaration, varToken } from "../../helpers/app-css";
-import { createChannelSidebar } from "../../../src/components/ChannelSidebar";
+import {
+  createChannelSidebar,
+  type ChannelSidebarOptions,
+} from "../../../src/components/ChannelSidebar";
 import {
   addChannel,
   channelsStore,
@@ -14,11 +17,13 @@ import { uiStore } from "../../../src/stores/ui.store";
 import { voiceStore, updateVoiceState } from "../../../src/stores/voice.store";
 import { Permission, type ReadyChannel, type VoiceStatePayload } from "../../../src/lib/types";
 import {
-  resetStores,
+  rightClick,
+  useWiredSidebarFixture,
   addVoiceUser,
   testChannels,
   voiceModCallbacks,
   setAdminUser,
+  useSidebarScope,
 } from "../../helpers/channelSidebarHarness";
 import { signInAs } from "../../helpers/storeSeeds";
 
@@ -32,60 +37,50 @@ vi.mock("../../../src/features/profiles/openUserProfilePopup", () =>
   mocks.profilesOpenUserProfilePopupMock(),
 );
 
-const { mockGetUserLocalMute, mockOpenUserProfilePopup } = mocks;
+const { mockGetUserLocalMute } = mocks;
 
 describe("ChannelSidebar", () => {
-  let container: HTMLDivElement;
-  let sidebar: ReturnType<typeof createChannelSidebar>;
-  let onVoiceJoin: Mock<(channelId: number) => void>;
-  let onOpenCall: Mock<() => void>;
+  const fx = useWiredSidebarFixture();
 
-  beforeEach(() => {
-    resetStores();
-    mockOpenUserProfilePopup.mockClear();
-    container = document.createElement("div");
-    document.body.appendChild(container);
-    onVoiceJoin = vi.fn<(channelId: number) => void>();
-    onOpenCall = vi.fn<() => void>();
-    sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall });
-  });
+  /** Replace the fixture sidebar with an admin-signed-in one carrying extra callbacks. */
+  const rebuildAsAdmin = (extra: Partial<ChannelSidebarOptions>): void => {
+    fx.sidebar.destroy?.();
+    setAdminUser();
+    fx.sidebar = createChannelSidebar({
+      onVoiceJoin: fx.onVoiceJoin,
+      onOpenCall: fx.onOpenCall,
+      ...extra,
+    });
+  };
 
-  afterEach(() => {
-    sidebar.destroy?.();
-    container.remove();
-    // Clean up any context menus left on document.body
-    document.querySelectorAll(".context-menu").forEach((el) => el.remove());
-    document.querySelectorAll(".user-vol-menu").forEach((el) => el.remove());
-  });
+  /** Rebuilds the sidebar after `arrange` (who is signed in, which roles exist) with a create-channel callback, then mounts it with the test channels. */
+  const remountWithCreate = (arrange: () => void): void => {
+    fx.sidebar.destroy?.();
+    arrange();
+    fx.sidebar = createChannelSidebar({
+      onVoiceJoin: fx.onVoiceJoin,
+      onOpenCall: fx.onOpenCall,
+      onCreateChannel: vi.fn(),
+    });
+    setChannels(testChannels);
+    fx.sidebar.mount(fx.container);
+  };
 
   // ── Context menu for channel edit/delete ──
 
   it("right-click on channel opens context menu with Edit and Delete for admin", () => {
     const onEditChannel = vi.fn();
     const onDeleteChannel = vi.fn();
-    sidebar.destroy?.();
-    setAdminUser();
-    sidebar = createChannelSidebar({
-      onVoiceJoin,
-      onOpenCall,
-      onEditChannel,
-      onDeleteChannel,
-    });
+    rebuildAsAdmin({ onEditChannel, onDeleteChannel });
 
     setChannels(testChannels);
-    sidebar.mount(container);
+    fx.sidebar.mount(fx.container);
 
-    const channelEl = container.querySelector('[data-channel-id="1"]') as HTMLElement;
+    const channelEl = fx.container.querySelector('[data-channel-id="1"]') as HTMLElement;
     expect(channelEl).not.toBeNull();
 
     // Dispatch right-click
-    channelEl.dispatchEvent(
-      new MouseEvent("contextmenu", {
-        bubbles: true,
-        clientX: 100,
-        clientY: 200,
-      }),
-    );
+    rightClick(channelEl);
 
     const ctxMenu = document.querySelector('[data-testid="channel-context-menu"]');
     expect(ctxMenu).not.toBeNull();
@@ -101,25 +96,13 @@ describe("ChannelSidebar", () => {
 
   it("clicking Edit in context menu calls onEditChannel with the correct channel", () => {
     const onEditChannel = vi.fn();
-    sidebar.destroy?.();
-    setAdminUser();
-    sidebar = createChannelSidebar({
-      onVoiceJoin,
-      onOpenCall,
-      onEditChannel,
-    });
+    rebuildAsAdmin({ onEditChannel });
 
     setChannels(testChannels);
-    sidebar.mount(container);
+    fx.sidebar.mount(fx.container);
 
-    const channelEl = container.querySelector('[data-channel-id="1"]') as HTMLElement;
-    channelEl.dispatchEvent(
-      new MouseEvent("contextmenu", {
-        bubbles: true,
-        clientX: 100,
-        clientY: 200,
-      }),
-    );
+    const channelEl = fx.container.querySelector('[data-channel-id="1"]') as HTMLElement;
+    rightClick(channelEl);
 
     const editItem = document.querySelector('[data-testid="ctx-edit-channel"]') as HTMLElement;
     editItem.click();
@@ -132,25 +115,13 @@ describe("ChannelSidebar", () => {
 
   it("clicking Delete in context menu calls onDeleteChannel with the correct channel", () => {
     const onDeleteChannel = vi.fn();
-    sidebar.destroy?.();
-    setAdminUser();
-    sidebar = createChannelSidebar({
-      onVoiceJoin,
-      onOpenCall,
-      onDeleteChannel,
-    });
+    rebuildAsAdmin({ onDeleteChannel });
 
     setChannels(testChannels);
-    sidebar.mount(container);
+    fx.sidebar.mount(fx.container);
 
-    const channelEl = container.querySelector('[data-channel-id="1"]') as HTMLElement;
-    channelEl.dispatchEvent(
-      new MouseEvent("contextmenu", {
-        bubbles: true,
-        clientX: 100,
-        clientY: 200,
-      }),
-    );
+    const channelEl = fx.container.querySelector('[data-channel-id="1"]') as HTMLElement;
+    rightClick(channelEl);
 
     const deleteItem = document.querySelector('[data-testid="ctx-delete-channel"]') as HTMLElement;
     deleteItem.click();
@@ -163,26 +134,20 @@ describe("ChannelSidebar", () => {
   // state), so a non-admin now gets a menu — just without the admin entries.
   it("shows only Mark as Read in the context menu for non-admin users", () => {
     const onEditChannel = vi.fn();
-    sidebar.destroy?.();
+    fx.sidebar.destroy?.();
     // Set a regular member (not admin/owner)
     signInAs({ id: 2, username: "Member", avatar: null, role: "member" });
-    sidebar = createChannelSidebar({
-      onVoiceJoin,
-      onOpenCall,
+    fx.sidebar = createChannelSidebar({
+      onVoiceJoin: fx.onVoiceJoin,
+      onOpenCall: fx.onOpenCall,
       onEditChannel,
     });
 
     setChannels(testChannels);
-    sidebar.mount(container);
+    fx.sidebar.mount(fx.container);
 
-    const channelEl = container.querySelector('[data-channel-id="1"]') as HTMLElement;
-    channelEl.dispatchEvent(
-      new MouseEvent("contextmenu", {
-        bubbles: true,
-        clientX: 100,
-        clientY: 200,
-      }),
-    );
+    const channelEl = fx.container.querySelector('[data-channel-id="1"]') as HTMLElement;
+    rightClick(channelEl);
 
     const ctxMenu = document.querySelector('[data-testid="channel-context-menu"]');
     expect(ctxMenu).not.toBeNull();
@@ -194,26 +159,41 @@ describe("ChannelSidebar", () => {
 
   // ── Purge messages context-menu item ──
 
+  /** Rebuilds the sidebar after `arrange` has set the roles and user, with a purge callback. */
+  function mountPurgeSidebar(
+    arrange: () => void,
+    extra: Partial<ChannelSidebarOptions> = {},
+  ): Mock<(channel: Channel, count: number) => Promise<void>> {
+    const onPurgeChannel = vi.fn<(channel: Channel, count: number) => Promise<void>>(
+      async () => {},
+    );
+    fx.sidebar.destroy?.();
+    arrange();
+    fx.sidebar = createChannelSidebar({
+      onVoiceJoin: fx.onVoiceJoin,
+      onOpenCall: fx.onOpenCall,
+      ...extra,
+      onPurgeChannel,
+    });
+    setChannels(testChannels);
+    fx.sidebar.mount(fx.container);
+    return onPurgeChannel;
+  }
+
   /** Right-click channel 1 and return the opened context menu. */
   function openChannelCtxMenu(): HTMLElement | null {
-    const channelEl = container.querySelector('[data-channel-id="1"]') as HTMLElement;
-    channelEl.dispatchEvent(
-      new MouseEvent("contextmenu", { bubbles: true, clientX: 5, clientY: 5 }),
-    );
+    const channelEl = fx.container.querySelector('[data-channel-id="1"]') as HTMLElement;
+    rightClick(channelEl, 5, 5);
     return document.querySelector('[data-testid="channel-context-menu"]');
   }
 
   it("shows Purge Messages for a role holding MANAGE_MESSAGES", () => {
-    const onPurgeChannel = vi.fn<(channel: Channel, count: number) => Promise<void>>(
-      async () => {},
-    );
-    sidebar.destroy?.();
-    setRoles([{ id: 3, name: "Moderator", color: null, permissions: Permission.MANAGE_MESSAGES }]);
-    signInAs({ id: 3, username: "Mod", avatar: null, role: "moderator" });
-    sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall, onPurgeChannel });
-
-    setChannels(testChannels);
-    sidebar.mount(container);
+    mountPurgeSidebar(() => {
+      setRoles([
+        { id: 3, name: "Moderator", color: null, permissions: Permission.MANAGE_MESSAGES },
+      ]);
+      signInAs({ id: 3, username: "Mod", avatar: null, role: "moderator" });
+    });
 
     // A moderator is not owner/admin, so the menu exists only because of purge.
     expect(openChannelCtxMenu()).not.toBeNull();
@@ -222,36 +202,23 @@ describe("ChannelSidebar", () => {
   });
 
   it("hides Purge Messages for a role without MANAGE_MESSAGES", () => {
-    const onPurgeChannel = vi.fn<(channel: Channel, count: number) => Promise<void>>(
-      async () => {},
+    mountPurgeSidebar(
+      () => {
+        setRoles([{ id: 2, name: "Admin", color: null, permissions: Permission.MANAGE_CHANNELS }]);
+        setAdminUser();
+      },
+      { onEditChannel: vi.fn() },
     );
-    sidebar.destroy?.();
-    setRoles([{ id: 2, name: "Admin", color: null, permissions: Permission.MANAGE_CHANNELS }]);
-    setAdminUser();
-    sidebar = createChannelSidebar({
-      onVoiceJoin,
-      onOpenCall,
-      onEditChannel: vi.fn(),
-      onPurgeChannel,
-    });
-
-    setChannels(testChannels);
-    sidebar.mount(container);
 
     expect(openChannelCtxMenu()).not.toBeNull();
     expect(document.querySelector('[data-testid="ctx-purge-messages"]')).toBeNull();
   });
 
   it("offers Purge Messages once a live role update grants MANAGE_MESSAGES", () => {
-    const onPurgeChannel = vi.fn<(channel: Channel, count: number) => Promise<void>>(
-      async () => {},
-    );
-    sidebar.destroy?.();
-    setRoles([{ id: 3, name: "Moderator", color: null, permissions: 0 }]);
-    signInAs({ id: 3, username: "Mod", avatar: null, role: "moderator" });
-    sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall, onPurgeChannel });
-    setChannels(testChannels);
-    sidebar.mount(container);
+    mountPurgeSidebar(() => {
+      setRoles([{ id: 3, name: "Moderator", color: null, permissions: 0 }]);
+      signInAs({ id: 3, username: "Mod", avatar: null, role: "moderator" });
+    });
     openChannelCtxMenu();
     expect(document.querySelector('[data-testid="ctx-purge-messages"]')).toBeNull();
     document.querySelectorAll(".channel-ctx-menu").forEach((el) => el.remove());
@@ -264,16 +231,10 @@ describe("ChannelSidebar", () => {
   });
 
   it("purge prompt clamps the count and calls onPurgeChannel with the channel", async () => {
-    const onPurgeChannel = vi.fn<(channel: Channel, count: number) => Promise<void>>(
-      async () => {},
-    );
-    sidebar.destroy?.();
-    setRoles([{ id: 2, name: "Admin", color: null, permissions: Permission.ADMINISTRATOR }]);
-    setAdminUser();
-    sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall, onPurgeChannel });
-
-    setChannels(testChannels);
-    sidebar.mount(container);
+    const onPurgeChannel = mountPurgeSidebar(() => {
+      setRoles([{ id: 2, name: "Admin", color: null, permissions: Permission.ADMINISTRATOR }]);
+      setAdminUser();
+    });
     openChannelCtxMenu();
 
     const trigger = document.querySelector('[data-testid="ctx-purge-messages"]') as HTMLElement;
@@ -292,19 +253,13 @@ describe("ChannelSidebar", () => {
   });
 
   it("does not offer purge on a voice channel", () => {
-    const onPurgeChannel = vi.fn<(channel: Channel, count: number) => Promise<void>>(
-      async () => {},
-    );
-    sidebar.destroy?.();
-    setRoles([{ id: 2, name: "Admin", color: null, permissions: Permission.ADMINISTRATOR }]);
-    setAdminUser();
-    sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall, onPurgeChannel });
+    mountPurgeSidebar(() => {
+      setRoles([{ id: 2, name: "Admin", color: null, permissions: Permission.ADMINISTRATOR }]);
+      setAdminUser();
+    });
 
-    setChannels(testChannels);
-    sidebar.mount(container);
-
-    const voiceEl = container.querySelector('[data-channel-id="3"]') as HTMLElement;
-    voiceEl.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 5, clientY: 5 }));
+    const voiceEl = fx.container.querySelector('[data-channel-id="3"]') as HTMLElement;
+    rightClick(voiceEl, 5, 5);
 
     expect(document.querySelector('[data-testid="ctx-purge-messages"]')).toBeNull();
   });
@@ -313,36 +268,24 @@ describe("ChannelSidebar", () => {
 
   it("shows create channel button on category header for admin users", () => {
     const onCreateChannel = vi.fn();
-    sidebar.destroy?.();
-    setAdminUser();
-    sidebar = createChannelSidebar({
-      onVoiceJoin,
-      onOpenCall,
-      onCreateChannel,
-    });
+    rebuildAsAdmin({ onCreateChannel });
 
     setChannels(testChannels);
-    sidebar.mount(container);
+    fx.sidebar.mount(fx.container);
 
-    const addBtn = container.querySelector('[data-testid="create-channel-text-channels"]');
+    const addBtn = fx.container.querySelector('[data-testid="create-channel-text-channels"]');
     expect(addBtn).not.toBeNull();
     expect(addBtn!.textContent).toBe("+");
   });
 
   it("clicking create channel button calls onCreateChannel with the category (id and name)", () => {
     const onCreateChannel = vi.fn();
-    sidebar.destroy?.();
-    setAdminUser();
-    sidebar = createChannelSidebar({
-      onVoiceJoin,
-      onOpenCall,
-      onCreateChannel,
-    });
+    rebuildAsAdmin({ onCreateChannel });
 
     setChannels(testChannels);
-    sidebar.mount(container);
+    fx.sidebar.mount(fx.container);
 
-    const addBtn = container.querySelector(
+    const addBtn = fx.container.querySelector(
       '[data-testid="create-channel-text-channels"]',
     ) as HTMLElement;
     addBtn.click();
@@ -353,60 +296,44 @@ describe("ChannelSidebar", () => {
 
   it("the + of a real category passes its id, and the synthetic Voice group's passes none and a voice hint", () => {
     const onCreateChannel = vi.fn();
-    sidebar.destroy?.();
-    setAdminUser();
-    sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall, onCreateChannel });
+    rebuildAsAdmin({ onCreateChannel });
     setChannels([
       { id: 1, name: "general", type: "text", category: "Chat", category_id: 4, position: 0 },
       { id: 2, name: "lounge", type: "voice", category: null, position: 1 },
     ]);
-    sidebar.mount(container);
+    fx.sidebar.mount(fx.container);
 
-    (container.querySelector('[data-testid="create-channel-chat"]') as HTMLElement).click();
+    (fx.container.querySelector('[data-testid="create-channel-chat"]') as HTMLElement).click();
     expect(onCreateChannel).toHaveBeenLastCalledWith({ id: 4, name: "Chat" });
-    (container.querySelector('[data-testid="create-channel-voice"]') as HTMLElement).click();
+    (fx.container.querySelector('[data-testid="create-channel-voice"]') as HTMLElement).click();
     expect(onCreateChannel).toHaveBeenLastCalledWith({ id: 0, name: "" }, "voice");
   });
 
   it("create channel button does not collapse the category", () => {
     const onCreateChannel = vi.fn();
-    sidebar.destroy?.();
-    setAdminUser();
-    sidebar = createChannelSidebar({
-      onVoiceJoin,
-      onOpenCall,
-      onCreateChannel,
-    });
+    rebuildAsAdmin({ onCreateChannel });
 
     setChannels(testChannels);
-    sidebar.mount(container);
+    fx.sidebar.mount(fx.container);
 
     // All 4 channels visible before click
-    expect(container.querySelectorAll(".channel-item").length).toBe(4);
+    expect(fx.container.querySelectorAll(".channel-item").length).toBe(4);
 
-    const addBtn = container.querySelector(
+    const addBtn = fx.container.querySelector(
       '[data-testid="create-channel-text-channels"]',
     ) as HTMLElement;
     addBtn.click();
 
     // Category should NOT have collapsed (stopPropagation in the handler)
-    expect(container.querySelectorAll(".channel-item").length).toBe(4);
+    expect(fx.container.querySelectorAll(".channel-item").length).toBe(4);
   });
 
   it("does not show create channel button for non-admin users", () => {
-    const onCreateChannel = vi.fn();
-    sidebar.destroy?.();
-    signInAs({ id: 2, username: "Member", avatar: null, role: "member" });
-    sidebar = createChannelSidebar({
-      onVoiceJoin,
-      onOpenCall,
-      onCreateChannel,
+    remountWithCreate(() => {
+      signInAs({ id: 2, username: "Member", avatar: null, role: "member" });
     });
 
-    setChannels(testChannels);
-    sidebar.mount(container);
-
-    const addBtn = container.querySelector(".category-add-btn");
+    const addBtn = fx.container.querySelector(".category-add-btn");
     expect(addBtn).toBeNull();
   });
 
@@ -414,31 +341,25 @@ describe("ChannelSidebar", () => {
   // MANAGE_CHANNELS — which the server now honors on /admin/api/channels — saw
   // no way to create one.
   it("shows create channel button for a role holding MANAGE_CHANNELS", () => {
-    const onCreateChannel = vi.fn();
-    sidebar.destroy?.();
-    setRoles([{ id: 3, name: "Moderator", color: null, permissions: Permission.MANAGE_CHANNELS }]);
-    signInAs({ id: 3, username: "Mod", avatar: null, role: "moderator" });
-    sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall, onCreateChannel });
+    remountWithCreate(() => {
+      setRoles([
+        { id: 3, name: "Moderator", color: null, permissions: Permission.MANAGE_CHANNELS },
+      ]);
+      signInAs({ id: 3, username: "Mod", avatar: null, role: "moderator" });
+    });
 
-    setChannels(testChannels);
-    sidebar.mount(container);
-
-    expect(container.querySelector(".category-add-btn")).not.toBeNull();
+    expect(fx.container.querySelector(".category-add-btn")).not.toBeNull();
   });
 
   it("hides create channel button for a server role without MANAGE_CHANNELS", () => {
-    const onCreateChannel = vi.fn();
-    sidebar.destroy?.();
-    // A role the server DID send, holding no channel bit: the name fallback
-    // must not apply, even for a role called "admin".
-    setRoles([{ id: 2, name: "Admin", color: null, permissions: Permission.SEND_MESSAGES }]);
-    signInAs({ id: 2, username: "Admin", avatar: null, role: "admin" });
-    sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall, onCreateChannel });
+    remountWithCreate(() => {
+      // A role the server DID send, holding no channel bit: the name fallback
+      // must not apply, even for a role called "admin".
+      setRoles([{ id: 2, name: "Admin", color: null, permissions: Permission.SEND_MESSAGES }]);
+      signInAs({ id: 2, username: "Admin", avatar: null, role: "admin" });
+    });
 
-    setChannels(testChannels);
-    sidebar.mount(container);
-
-    expect(container.querySelector(".category-add-btn")).toBeNull();
+    expect(fx.container.querySelector(".category-add-btn")).toBeNull();
   });
 
   // ── Live role-change repaint (OC-0142) ──
@@ -448,16 +369,12 @@ describe("ChannelSidebar", () => {
   // via updateUser) must still cause a repaint without any unrelated event.
 
   it("repaints channel-management affordances when the signed-in user's own role changes", () => {
-    const onCreateChannel = vi.fn();
-    sidebar.destroy?.();
-    signInAs({ id: 2, username: "Member", avatar: null, role: "member" });
-    sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall, onCreateChannel });
-
-    setChannels(testChannels);
-    sidebar.mount(container);
+    remountWithCreate(() => {
+      signInAs({ id: 2, username: "Member", avatar: null, role: "member" });
+    });
 
     // Starts as a plain member: no "+" button.
-    expect(container.querySelector(".category-add-btn")).toBeNull();
+    expect(fx.container.querySelector(".category-add-btn")).toBeNull();
 
     // Promoted to admin (mirrors dispatcher.ts's MEMBER_UPDATE self-branch,
     // which patches authStore via updateUser({ role })) — no channel/voice
@@ -468,21 +385,17 @@ describe("ChannelSidebar", () => {
     }));
     authStore.flush();
 
-    expect(container.querySelector(".category-add-btn")).not.toBeNull();
+    expect(fx.container.querySelector(".category-add-btn")).not.toBeNull();
   });
 
   it("repaints channel-management affordances when the role list's permission mask changes", () => {
-    const onCreateChannel = vi.fn();
-    sidebar.destroy?.();
-    setRoles([{ id: 3, name: "Moderator", color: null, permissions: Permission.SEND_MESSAGES }]);
-    signInAs({ id: 3, username: "Mod", avatar: null, role: "moderator" });
-    sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall, onCreateChannel });
-
-    setChannels(testChannels);
-    sidebar.mount(container);
+    remountWithCreate(() => {
+      setRoles([{ id: 3, name: "Moderator", color: null, permissions: Permission.SEND_MESSAGES }]);
+      signInAs({ id: 3, username: "Mod", avatar: null, role: "moderator" });
+    });
 
     // Moderator role holds no MANAGE_CHANNELS bit yet.
-    expect(container.querySelector(".category-add-btn")).toBeNull();
+    expect(fx.container.querySelector(".category-add-btn")).toBeNull();
 
     // A ROLES_UPDATE grants MANAGE_CHANNELS to the same role (dispatcher.ts's
     // ROLES_UPDATE handler replaces the whole list via setRoles) — again with
@@ -490,7 +403,7 @@ describe("ChannelSidebar", () => {
     setRoles([{ id: 3, name: "Moderator", color: null, permissions: Permission.MANAGE_CHANNELS }]);
     channelsStore.flush();
 
-    expect(container.querySelector(".category-add-btn")).not.toBeNull();
+    expect(fx.container.querySelector(".category-add-btn")).not.toBeNull();
   });
 
   // ── Voice user volume context menu ──
@@ -500,26 +413,11 @@ describe("ChannelSidebar", () => {
     signInAs({ id: 99, username: "Me", avatar: null, role: "member" });
 
     setChannels(testChannels);
-    updateVoiceState({
-      channel_id: 3,
-      user_id: 80,
-      username: "OtherUser",
-      muted: false,
-      deafened: false,
-      speaking: false,
-      camera: false,
-      screenshare: false,
-    });
-    sidebar.mount(container);
+    addVoiceUser(3, 80, "OtherUser");
+    fx.sidebar.mount(fx.container);
 
-    const voiceRow = container.querySelector(".voice-user-item") as HTMLElement;
-    voiceRow.dispatchEvent(
-      new MouseEvent("contextmenu", {
-        bubbles: true,
-        clientX: 150,
-        clientY: 250,
-      }),
-    );
+    const voiceRow = fx.container.querySelector(".voice-user-item") as HTMLElement;
+    rightClick(voiceRow, 150, 250);
     // The menu code loads on its first open (O-6b).
     await vi.dynamicImportSettled();
 
@@ -553,10 +451,14 @@ describe("ChannelSidebar", () => {
       (Permission.MUTE_MEMBERS | Permission.ADMINISTRATOR)) !==
       0,
   ): Promise<HTMLElement | null> {
-    sidebar.destroy?.();
+    fx.sidebar.destroy?.();
     setRoles([{ id: 3, name: "Moderator", color: null, permissions }]);
     signInAs({ id: 99, username: "Mod", avatar: null, role: "moderator" });
-    sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall, onVoiceModerate });
+    fx.sidebar = createChannelSidebar({
+      onVoiceJoin: fx.onVoiceJoin,
+      onOpenCall: fx.onOpenCall,
+      onVoiceModerate,
+    });
 
     setChannels(
       channels.map((ch) =>
@@ -580,9 +482,9 @@ describe("ChannelSidebar", () => {
       screenshare: false,
       ...voiceUser,
     });
-    sidebar.mount(container);
+    fx.sidebar.mount(fx.container);
 
-    const voiceRow = container.querySelector(".voice-user-item") as HTMLElement;
+    const voiceRow = fx.container.querySelector(".voice-user-item") as HTMLElement;
     voiceRow.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
     // The menu code loads on its first open (O-6b).
     await vi.dynamicImportSettled();
@@ -668,7 +570,7 @@ describe("ChannelSidebar", () => {
       ),
     ).not.toBeNull();
     const voice = testChannels.find((ch) => ch.id === 3)!;
-    const row = (): HTMLElement => container.querySelector(".voice-user-item") as HTMLElement;
+    const row = (): HTMLElement => fx.container.querySelector(".voice-user-item") as HTMLElement;
     const reopen = async (): Promise<HTMLElement | null> => {
       row().dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
       await vi.dynamicImportSettled();
@@ -874,21 +776,12 @@ describe("ChannelSidebar", () => {
   });
 
   it("marks a server-muted participant distinctly from a self-muted one", () => {
-    sidebar.destroy?.();
-    sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall });
+    fx.sidebar.destroy?.();
+    fx.sidebar = createChannelSidebar({ onVoiceJoin: fx.onVoiceJoin, onOpenCall: fx.onOpenCall });
     setChannels(testChannels);
-    updateVoiceState({
-      channel_id: 3,
-      user_id: 81,
-      username: "Selfmuted",
-      muted: true,
-      deafened: false,
-      speaking: false,
-      camera: false,
-      screenshare: false,
-    });
-    sidebar.mount(container);
-    expect(container.querySelector(".vu-muted.vu-server-muted")).toBeNull();
+    addVoiceUser(3, 81, "Selfmuted", { muted: true });
+    fx.sidebar.mount(fx.container);
+    expect(fx.container.querySelector(".vu-muted.vu-server-muted")).toBeNull();
 
     updateVoiceState({
       channel_id: 3,
@@ -903,25 +796,25 @@ describe("ChannelSidebar", () => {
     });
     voiceStore.flush();
 
-    const icon = container.querySelector(".vu-muted.vu-server-muted") as HTMLElement;
+    const icon = fx.container.querySelector(".vu-muted.vu-server-muted") as HTMLElement;
     expect(icon).not.toBeNull();
     expect(icon.title).toBe("Muted by a moderator");
   });
 
   it("shows a locally muted participant's icon and redraws on a local Mute change", () => {
-    sidebar.destroy?.();
-    sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall });
+    fx.sidebar.destroy?.();
+    fx.sidebar = createChannelSidebar({ onVoiceJoin: fx.onVoiceJoin, onOpenCall: fx.onOpenCall });
     setChannels(testChannels);
     addVoiceUser(3, 82, "loud");
-    sidebar.mount(container);
-    expect(container.querySelector(".vu-local-muted")).toBeNull();
+    fx.sidebar.mount(fx.container);
+    expect(fx.container.querySelector(".vu-local-muted")).toBeNull();
 
     mockGetUserLocalMute.mockImplementation((id) => id === 82);
     try {
       window.dispatchEvent(
         new CustomEvent("owncord:user-local-mute-changed", { detail: { userId: 82 } }),
       );
-      const icon = container.querySelector(
+      const icon = fx.container.querySelector(
         '.voice-user-item[data-voice-uid="82"] .vu-local-muted',
       ) as HTMLElement;
       expect(icon).not.toBeNull();
@@ -945,8 +838,8 @@ describe("ChannelSidebar", () => {
   });
 
   it("keeps a moderator's mute on the single icon of a self-deafened user", () => {
-    sidebar.destroy?.();
-    sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall });
+    fx.sidebar.destroy?.();
+    fx.sidebar = createChannelSidebar({ onVoiceJoin: fx.onVoiceJoin, onOpenCall: fx.onOpenCall });
     setChannels(testChannels);
     updateVoiceState({
       channel_id: 3,
@@ -959,9 +852,9 @@ describe("ChannelSidebar", () => {
       screenshare: false,
       server_muted: true,
     });
-    sidebar.mount(container);
+    fx.sidebar.mount(fx.container);
 
-    const icons = container.querySelectorAll(".vu-muted");
+    const icons = fx.container.querySelectorAll(".vu-muted");
     expect(icons.length).toBe(1);
     const icon = icons[0] as HTMLElement;
     expect(icon.classList.contains("vu-server-muted")).toBe(true);
@@ -979,16 +872,12 @@ describe("ChannelSidebar channel context menu permissions", () => {
   let container: HTMLDivElement;
   let sidebar: ReturnType<typeof createChannelSidebar>;
 
-  beforeEach(() => {
-    resetStores();
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    sidebar.destroy?.();
-    container.remove();
-    document.querySelectorAll(".context-menu").forEach((el) => el.remove());
+  useSidebarScope({
+    bind: ({ container: c }) => {
+      container = c;
+    },
+    current: () => sidebar,
+    strayElements: ".context-menu",
   });
 
   function mountAs(roleName: string, permissions: number): HTMLElement | null {
@@ -1003,9 +892,7 @@ describe("ChannelSidebar channel context menu permissions", () => {
     setChannels([{ id: 1, name: "general", type: "text", category: "Text Channels", position: 0 }]);
     sidebar.mount(container);
 
-    (container.querySelector('[data-channel-id="1"]') as HTMLElement).dispatchEvent(
-      new MouseEvent("contextmenu", { bubbles: true, clientX: 5, clientY: 5 }),
-    );
+    rightClick(container.querySelector('[data-channel-id="1"]') as HTMLElement, 5, 5);
     return document.querySelector('[data-testid="channel-context-menu"]');
   }
 

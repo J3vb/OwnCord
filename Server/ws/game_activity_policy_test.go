@@ -163,7 +163,7 @@ func TestGameActivityPolicy_OffClearIsNoop(t *testing.T) {
 	}
 }
 
-// The handler check only decides the reply; the flag read under presenceMu
+// The handler check only decides the reply; the flag read under presenceFeed.mu
 // is what keeps a set that raced the sweep from surviving it.
 func TestGameActivityPolicy_ApplyAfterSwitchDropsSet(t *testing.T) {
 	h, _, connect := presenceBatchHub(t)
@@ -172,7 +172,7 @@ func TestGameActivityPolicy_ApplyAfterSwitchDropsSet(t *testing.T) {
 	settle(t, h) // the connect-time presence flush must land before the test reads frames
 	drain(watcher.send)
 
-	h.gameActivity.on.Store(false)
+	h.settings.gameActivity.on.Store(false)
 	h.applyActivity(player, &gameActivity{Name: "Factorio", StartedAt: time.Now().UnixMilli()})
 	if err := h.awaitDispatch(context.Background()); err != nil {
 		t.Fatal(err)
@@ -185,9 +185,9 @@ func TestGameActivityPolicy_ApplyAfterSwitchDropsSet(t *testing.T) {
 	}
 
 	// A clear is always applied.
-	h.gameActivity.on.Store(true)
+	h.settings.gameActivity.on.Store(true)
 	h.applyActivity(player, &gameActivity{Name: "Factorio", StartedAt: time.Now().UnixMilli()})
-	h.gameActivity.on.Store(false)
+	h.settings.gameActivity.on.Store(false)
 	if err := h.awaitDispatch(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -374,7 +374,7 @@ func TestGameActivityPolicy_OnAgainAcceptsSet(t *testing.T) {
 	sendActivity(t, h, player, "Factorio")
 	saveGameActivitySwitch(t, h, database, false)
 	saveGameActivitySwitch(t, h, database, true)
-	if !h.gameActivity.on.Load() {
+	if !h.settings.gameActivity.on.Load() {
 		t.Fatal("flag still off after switching on")
 	}
 	drain(player.send)
@@ -418,13 +418,13 @@ func TestGameActivityPolicy_InitReadsStoredFalse(t *testing.T) {
 		t.Fatal(err)
 	}
 	h := newTestHubWith(t, HubOptions{DB: database})
-	if h.gameActivity.on.Load() {
+	if h.settings.gameActivity.on.Load() {
 		t.Fatal("a stored false did not start the hub off")
 	}
 
 	// No row means on.
 	h2 := newTestHub(t, newTeardownTestDB(t), nil, nil)
-	if !h2.gameActivity.on.Load() {
+	if !h2.settings.gameActivity.on.Load() {
 		t.Fatal("a missing row did not start the hub on")
 	}
 }
@@ -436,7 +436,7 @@ func TestGameActivityPolicy_InitReadErrorFailsClosed(t *testing.T) {
 		DB:       database,
 		Settings: settingsStub{real: service.NewSettingsService(database), err: errors.New("settings read failed")},
 	})
-	if h.gameActivity.on.Load() {
+	if h.settings.gameActivity.on.Load() {
 		t.Fatal("an unreadable setting started the hub on, want fail closed")
 	}
 	out := buf.String()
@@ -454,14 +454,14 @@ func TestGameActivityPolicy_ApplyReadErrorUsesSavedValue(t *testing.T) {
 	stub.err = errors.New("settings read failed")
 
 	h.ApplyGameActivityPolicy(false)
-	if h.gameActivity.on.Load() {
+	if h.settings.gameActivity.on.Load() {
 		t.Fatal("the saved false was not used after a failed re-read")
 	}
 	if !bytes.Contains(buf.Bytes(), []byte("stage=apply")) {
 		t.Fatalf("warn log = %q, want the apply warning", buf.String())
 	}
 	h.ApplyGameActivityPolicy(true)
-	if !h.gameActivity.on.Load() {
+	if !h.settings.gameActivity.on.Load() {
 		t.Fatal("the saved true was not used after a failed re-read")
 	}
 }

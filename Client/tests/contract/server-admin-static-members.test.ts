@@ -9,7 +9,14 @@
 // your rank. Server/admin/members_test.go pins the server half of both.
 import { describe, it, expect, afterEach } from "vitest";
 import { JSDOM } from "jsdom";
-import { adminPanelHtml } from "../helpers/admin-panel";
+import {
+  adminHtmlWithBridge,
+  jsonResponder,
+  loadPanelWithFetch,
+  recordLabelled,
+  scriptedPanelFetch,
+  type SentBody as Sent,
+} from "../helpers/adminPanelFetch";
 
 const BRIDGE = `<script>
 window.__test = {
@@ -18,7 +25,7 @@ window.__test = {
   closeModal: closeModal
 };
 </script>`;
-const ADMIN_HTML = adminPanelHtml().replace("</body>", `${BRIDGE}\n</body>`);
+const ADMIN_HTML = adminHtmlWithBridge(BRIDGE);
 
 const ADMINISTRATOR = 0x40000000;
 const MANAGE_ROLES = 0x1000000;
@@ -26,7 +33,6 @@ const BAN_MEMBERS = 0x80000;
 const MANAGE_NICKNAMES = 0x800000;
 
 type Responder = (path: string, method: string) => unknown;
-type Sent = { call: string; body: unknown };
 
 interface Bridge {
   state: any;
@@ -37,33 +43,10 @@ interface Bridge {
 let dom: JSDOM | undefined;
 
 async function boot(calls: string[], respond: Responder, sent: Sent[] = []) {
-  dom = new JSDOM(ADMIN_HTML, {
-    url: "http://localhost:8080/admin",
-    runScripts: "dangerously",
-    pretendToBeVisual: true,
-    beforeParse(window) {
-      window.fetch = (async (input: string, opts: Record<string, unknown> = {}) => {
-        const method = String((opts.method as string) || "GET").toUpperCase();
-        const p = String(input).replace(/^\/admin\/api/, "");
-        calls.push(`${method} ${p}`);
-        if (typeof opts.body === "string")
-          sent.push({ call: `${method} ${p}`, body: JSON.parse(opts.body) });
-        const out =
-          p === "/setup/status" ? { needs_setup: false } : ((await respond(p, method)) ?? {});
-        // A responder answers a refusal with { __status, body }.
-        const refusal = out as { __status?: number; body?: unknown } | null;
-        const refused = typeof refusal === "object" && refusal !== null && "__status" in refusal;
-        const json = refused ? refusal.body : out;
-        const status = refused ? Number(refusal.__status) : 200;
-        return {
-          ok: !refused,
-          status,
-          json: async () => json,
-          text: async () => JSON.stringify(json),
-        } as Response;
-      }) as typeof fetch;
-    },
-  });
+  dom = loadPanelWithFetch(
+    ADMIN_HTML,
+    scriptedPanelFetch(recordLabelled(calls, sent), jsonResponder(respond)),
+  );
   const settle = (ms = 0) => new Promise((resolve) => dom!.window.setTimeout(resolve, ms));
   await settle();
   calls.length = 0;
@@ -93,6 +76,15 @@ afterEach(() => {
   dom?.window?.close();
   dom = undefined;
 });
+
+/** Clicks Edit on member `id`'s row and returns the dialog it opens. */
+async function openEditUser(env: Awaited<ReturnType<typeof boot>>, id: number) {
+  (
+    env.doc.querySelector(`[data-action="openEditUser"][data-args^="[${id},"]`) as HTMLElement
+  ).click();
+  await env.settle();
+  return env.doc.getElementById("modalInner")!;
+}
 
 describe("Server/admin/static — Members", () => {
   it("searches, filters by role and lists bans on the server, keeping focus in the search box", async () => {
@@ -491,16 +483,6 @@ describe("Server/admin/static — Members", () => {
       role_position: 80,
       is_owner: false,
     };
-    const manage = async (
-      env: Awaited<ReturnType<typeof boot>>,
-      id: number,
-    ): Promise<HTMLElement> => {
-      (
-        env.doc.querySelector(`[data-action="openEditUser"][data-args^="[${id},"]`) as HTMLElement
-      ).click();
-      await env.settle();
-      return env.doc.getElementById("modalInner")!;
-    };
     const chips = (el: Element) =>
       [...el.querySelectorAll(".role-chip .role-chip-name")].map((c) => c.textContent);
 
@@ -519,7 +501,7 @@ describe("Server/admin/static — Members", () => {
       await env.show(ME);
       expect(env.doc.querySelector("tbody tr td.col-role")!.textContent).toBe("Member");
 
-      const body = await manage(env, 4);
+      const body = await openEditUser(env, 4);
       expect(chips(body)).toEqual(["Member"]);
       // Only roles below the actor's own (80) and not already held are offered.
       const sel = body.querySelector("#editRoleSelect") as HTMLSelectElement;
@@ -566,7 +548,7 @@ describe("Server/admin/static — Members", () => {
       await env.show(ME);
       expect(env.doc.querySelector("tbody tr td.col-role")!.textContent).toBe("ModeratorMember");
 
-      let body = await manage(env, 4);
+      let body = await openEditUser(env, 4);
       expect(body.querySelectorAll('[data-action="removeMemberRole"]')).toHaveLength(2);
       (
         body.querySelector('[data-action="removeMemberRole"][data-args="[4,3]"]') as HTMLElement
@@ -591,7 +573,7 @@ describe("Server/admin/static — Members", () => {
         return {};
       });
       await env.show(ME);
-      const body = await manage(env, 4);
+      const body = await openEditUser(env, 4);
       expect(chips(body)).toEqual(["Admin", "Member"]);
       const removers = [...body.querySelectorAll('[data-action="removeMemberRole"]')];
       expect(removers.map((b) => b.getAttribute("data-args"))).toEqual(["[4,4]"]);
@@ -610,16 +592,6 @@ describe("Server/admin/static — Members", () => {
       role_position: 40,
       ...extra,
     });
-    const open = async (
-      env: Awaited<ReturnType<typeof boot>>,
-      id: number,
-    ): Promise<HTMLElement> => {
-      (
-        env.doc.querySelector(`[data-action="openEditUser"][data-args^="[${id},"]`) as HTMLElement
-      ).click();
-      await env.settle();
-      return env.doc.getElementById("modalInner")!;
-    };
     const input = (body: HTMLElement) => body.querySelector("#memberNickInput") as HTMLInputElement;
     const press = async (env: Awaited<ReturnType<typeof boot>>, id: string) => {
       (env.doc.getElementById(id) as HTMLElement).click();
@@ -646,7 +618,7 @@ describe("Server/admin/static — Members", () => {
         return {};
       });
       await env.show({ ...ME, permissions: MANAGE_ROLES });
-      const body = await open(env, 4);
+      const body = await openEditUser(env, 4);
       expect(body.querySelector("#memberNickRo")!.textContent).toBe("Cap");
       expect(body.querySelector("#memberNickInput")).toBeNull();
       expect(body.querySelector('[data-action="saveMemberNickname"]')).toBeNull();
@@ -659,7 +631,7 @@ describe("Server/admin/static — Members", () => {
         return {};
       });
       await env.show(ME);
-      const body = await open(env, 4);
+      const body = await openEditUser(env, 4);
       expect(body.querySelector("#memberNickRo")!.textContent).toBe("Cap");
       expect(body.querySelector('[data-action="saveMemberNickname"]')).toBeNull();
     });
@@ -678,7 +650,7 @@ describe("Server/admin/static — Members", () => {
         sent,
       );
       await env.show(ME);
-      const body = await open(env, 4);
+      const body = await openEditUser(env, 4);
       input(body).value = "  Cap \t  Hook  ";
       await press(env, "memberNickSave");
       expect(sent.filter((x) => x.call === `PUT ${NICK_PATH}`)).toEqual([
@@ -702,7 +674,7 @@ describe("Server/admin/static — Members", () => {
         sent,
       );
       await env.show(ME);
-      const body = await open(env, 4);
+      const body = await openEditUser(env, 4);
       expect(input(body).value).toBe("Cap");
       await press(env, "memberNickReset");
       expect(sent.filter((x) => x.call === `PUT ${NICK_PATH}`)).toEqual([
@@ -725,7 +697,7 @@ describe("Server/admin/static — Members", () => {
         sent,
       );
       await env.show(ME);
-      const body = await open(env, 4);
+      const body = await openEditUser(env, 4);
       // 33 astral characters: 66 UTF-16 units, 33 code points.
       input(body).value = "\u{1F600}".repeat(33);
       await press(env, "memberNickSave");
@@ -749,7 +721,7 @@ describe("Server/admin/static — Members", () => {
         return {};
       });
       await env.show(ME);
-      const body = await open(env, 4);
+      const body = await openEditUser(env, 4);
       input(body).value = "bad";
       await press(env, "memberNickSave");
       const msg = body.querySelector("#memberNickMsg") as HTMLElement;

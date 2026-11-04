@@ -125,3 +125,28 @@ SELECT CAST(COALESCE(dm_owner_id, 0) AS INTEGER) AS owner_id,
        CAST(COALESCE(dm_icon, '') AS TEXT)       AS icon_id
 FROM channels
 WHERE id = ? AND is_group = 1;
+
+-- The history fields of one DM's sidebar row for several of its participants in
+-- one pass: the last message once, unread (capped at 100 like GetUserDMChannels)
+-- and mention counts per participant. A DM ring reopening the DM for its targets
+-- reads this instead of each target's whole open-DM list.
+-- name: GetDMHistoryForParticipants :many
+SELECT
+    dp.user_id                                    AS user_id,
+    lm.id                                         AS last_message_id,
+    COALESCE(lm.content, '')                      AS last_message,
+    COALESCE(lm.timestamp, '')                    AS last_message_at,
+    (SELECT COUNT(*) FROM (SELECT 1 FROM messages mu
+      WHERE mu.channel_id = dp.channel_id AND mu.deleted = 0
+        AND mu.id > COALESCE((SELECT rs.last_message_id FROM read_states rs
+                               WHERE rs.channel_id = dp.channel_id AND rs.user_id = dp.user_id), 0)
+      LIMIT 100)
+    ) AS unread_count,
+    CAST(COALESCE((SELECT rs.mention_count FROM read_states rs
+               WHERE rs.channel_id = dp.channel_id AND rs.user_id = dp.user_id), 0) AS INTEGER) AS mention_count
+FROM dm_participants dp
+LEFT JOIN messages lm    ON lm.id = (
+    SELECT MAX(id) FROM messages WHERE channel_id = dp.channel_id AND deleted = 0
+)
+WHERE dp.channel_id = sqlc.arg('channel_id') AND dp.user_id IN (sqlc.slice('user_ids'))
+ORDER BY dp.user_id ASC;

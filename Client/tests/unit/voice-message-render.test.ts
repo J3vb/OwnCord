@@ -3,15 +3,13 @@
 // carries no empty text line, nothing downloads before the first play, and the
 // upload carries the two voice query params.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as mocks from "../helpers/attachmentsMocks";
 
 const { fetchMock } = vi.hoisted(() => ({ fetchMock: vi.fn() }));
 
-vi.mock("@tauri-apps/plugin-http", () => ({ fetch: fetchMock }));
-vi.mock("@lib/net/httpProxy", () => ({
-  ensureHttpProxy: () => Promise.resolve("http://127.0.0.1:9999"),
-  stopHttpProxy: () => Promise.resolve(),
-}));
-vi.mock("@lib/prefs/mediaVisibility", () => ({ observeMedia: vi.fn() }));
+vi.mock("@tauri-apps/plugin-http", () => mocks.httpPluginMock(fetchMock));
+vi.mock("@lib/net/httpProxy", () => mocks.httpProxyMock());
+vi.mock("@lib/prefs/mediaVisibility", () => mocks.mediaVisibilityMock());
 
 import { renderMessage } from "../../src/components/message-list/renderers";
 import {
@@ -22,7 +20,7 @@ import {
 import { createApiClient } from "../../src/lib/api";
 import { encodeWaveform } from "../../src/features/voice-messages/waveform";
 import { messagesStore, type Message } from "../../src/stores/messages.store";
-import type { MessageListOptions } from "../../src/components/MessageList";
+import { listOpts, makeAttachmentMessage } from "../helpers/attachmentMessages";
 
 const waveform = encodeWaveform(Uint8Array.from({ length: 64 }, (_, i) => i * 4));
 const voice = {
@@ -35,26 +33,9 @@ const voice = {
   waveform,
 };
 
-function makeMessage(content: string, attachments: Message["attachments"]): Message {
-  return {
-    id: 7,
-    channelId: 1,
-    user: { id: 10, username: "Alice", avatar: null },
-    content,
-    replyTo: null,
-    attachments,
-    reactions: [],
-    pinned: false,
-    editedAt: null,
-    deleted: false,
-    timestamp: "2025-01-15T12:30:00Z",
-    status: "sent",
-    correlationId: null,
-    errorCode: null,
-  };
-}
+const makeMessage = (content: string, attachments: Message["attachments"]): Message =>
+  makeAttachmentMessage({ content, attachments });
 
-const opts = { channelId: 1, channelName: "general", currentUserId: 10 } as MessageListOptions;
 const ac = new AbortController();
 
 beforeEach(() => {
@@ -104,13 +85,13 @@ describe("voice message rendering", () => {
   });
 
   it("renders no empty text line for a message that is only a voice message", () => {
-    const el = renderMessage(makeMessage("", [voice]), false, [], opts, ac.signal);
+    const el = renderMessage(makeMessage("", [voice]), false, [], listOpts, ac.signal);
     expect(el.querySelector(".msg-voice")).not.toBeNull();
     expect(el.querySelector(".msg-text")).toBeNull();
   });
 
   it("still renders the text of a voice message that has some", () => {
-    const el = renderMessage(makeMessage("listen", [voice]), false, [], opts, ac.signal);
+    const el = renderMessage(makeMessage("listen", [voice]), false, [], listOpts, ac.signal);
     expect(el.querySelector(".msg-text")?.textContent).toBe("listen");
   });
 });

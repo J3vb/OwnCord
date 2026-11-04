@@ -25,7 +25,7 @@ func TestPurgeReplay_DeleteRunsOutsideSeqMuAndFailsColdReads(t *testing.T) {
 	database := newTeardownTestDB(t)
 	h := newTestHubWith(t, HubOptions{DB: database})
 	h.SetEventStore(database)
-	store := *h.eventStore.Load()
+	store := *h.events.eventStore.Load()
 
 	delivered := make(chan uint64, 1)
 	setReplayPurgeBeforeDelete(t, func() {
@@ -72,7 +72,7 @@ func TestPurgeReplay_FailedDeleteKeepsColdReadsOffUntilRetried(t *testing.T) {
 	database := newTeardownTestDB(t)
 	h := newTestHubWith(t, HubOptions{DB: database})
 	h.SetEventStore(database)
-	store := *h.eventStore.Load()
+	store := *h.events.eventStore.Load()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	setReplayPurgeBeforeDelete(t, cancel)

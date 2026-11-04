@@ -142,6 +142,9 @@ button.msg-thread-chip:hover {
 .thread-panel-btn.danger:hover {
   color: var(--text-danger);
 }
+.thread-panel-more {
+  display: none;
+}
 .thread-panel-rename[hidden],
 .thread-panel-btn[hidden] {
   display: none;
@@ -185,13 +188,30 @@ button.msg-thread-chip:hover {
   }
   .thread-panel-slot.open {
     flex: 1;
+    min-width: 0;
   }
   .thread-panel {
     width: 100%;
+    max-width: 100%;
+    overflow-x: hidden;
     border-left: none;
   }
   .thread-panel-resize {
     display: none;
+  }
+}
+
+/* A phone keeps Close and one actions button, both full touch size. */
+@media (pointer: coarse) and (max-width: 899px), (pointer: coarse) and (max-height: 499px) {
+  .thread-panel-actions > .thread-panel-btn:not(.thread-panel-more, .thread-panel-close) {
+    display: none;
+  }
+  .thread-panel-more:not([hidden]) {
+    display: inline-flex;
+  }
+  .thread-panel-actions > .thread-panel-btn {
+    min-width: 44px;
+    height: 44px;
   }
 }
 

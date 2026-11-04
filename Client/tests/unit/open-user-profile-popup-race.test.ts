@@ -5,29 +5,22 @@
  * a mocked module in flight at once never settle under the test runner.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import * as profileMocks from "../helpers/profilePopupMocks";
 import "@components/UserProfilePopup";
 
 const { bindings } = vi.hoisted(() => ({ bindings: [] as { destroy: () => void }[] }));
-vi.mock("../../src/features/profiles/userNotes", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../src/features/profiles/userNotes")>();
-  return {
-    ...actual,
-    createNoteBinding: (...args: Parameters<typeof actual.createNoteBinding>) => {
-      const binding = actual.createNoteBinding(...args);
-      vi.spyOn(binding, "destroy");
-      bindings.push(binding);
-      return binding;
-    },
-  };
-});
+vi.mock("../../src/features/profiles/userNotes", (importOriginal) =>
+  profileMocks.noteBindingSpyMock(importOriginal, bindings),
+);
 
 import {
   closeUserProfilePopup,
   openUserProfilePopup,
 } from "../../src/features/profiles/openUserProfilePopup";
 import { setNotesContextSource } from "../../src/features/profiles/userNotes";
-import { authStore } from "@stores/auth.store";
 import { membersStore } from "@stores/members.store";
+
+import { signInUserOne, useOfflineNotesContext } from "../helpers/profilePopupFixtures";
 
 const popups = (): HTMLElement[] =>
   Array.from(document.querySelectorAll<HTMLElement>('[data-testid="user-profile-popup"]'));
@@ -38,7 +31,7 @@ const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve,
 describe("profile card opened while another is loading", () => {
   beforeEach(() => {
     bindings.length = 0;
-    authStore.setState((p) => ({ ...p, user: { ...(p.user as object), id: 1 } as never }));
+    signInUserOne();
     membersStore.setState((p) => ({
       ...p,
       members: new Map([
@@ -46,11 +39,7 @@ describe("profile card opened while another is loading", () => {
         [8, { id: 8, username: "cat", avatar: null, role: "member", status: "online" } as never],
       ]),
     }));
-    setNotesContextSource(() => ({
-      api: null,
-      host: "h",
-      sessionSignal: new AbortController().signal,
-    }));
+    useOfflineNotesContext();
   });
 
   afterEach(() => {

@@ -9,6 +9,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { makeDm } from "../helpers/dmHarness";
 import * as voiceSession from "../helpers/voiceSessionMock";
 
 vi.mock("@lib/voice/livekitSession", () => voiceSession.defaults());
@@ -41,11 +42,12 @@ import { ApiClientError } from "@lib/api";
 import type { ApiClient } from "@lib/api";
 import type { MessageResponse, ReadyChannel } from "@lib/types";
 import { expectConsole } from "../helpers/console";
-import { buildMessage } from "../helpers/messageFactory";
+import { buildMessage, buildResponse } from "../helpers/messageFactory";
 import { resetMessagesState, resetMembersState } from "../helpers/storeResets";
 import "../helpers/resizeObserverStub";
 import { useMountContainer } from "../helpers/mountContainer";
 import { signInAs, resetChannelsState } from "../helpers/storeSeeds";
+import { makeListOptions } from "../helpers/messageListHarness";
 
 const CHANNELS: ReadyChannel[] = [
   { id: 1, name: "general", type: "text", category: null, position: 0 },
@@ -71,19 +73,7 @@ function makeMessage(overrides: Partial<Message> & { id: number }): Message {
 }
 
 function response(id: number): MessageResponse {
-  return {
-    id,
-    channel_id: 1,
-    user: { id: 1, username: "alice", avatar: null },
-    content: `msg ${id}`,
-    reply_to: null,
-    attachments: [],
-    reactions: [],
-    pinned: false,
-    edited_at: null,
-    deleted: false,
-    timestamp: "2026-01-15T11:00:00Z",
-  };
+  return buildResponse(id, { timestamp: "2026-01-15T11:00:00Z" });
 }
 
 /** A stand-in ChannelController: only what the jumper actually touches. */
@@ -125,22 +115,38 @@ const immediateFrame = (): Promise<void> => Promise.resolve();
 /** Store notifications are batched via queueMicrotask — let them land. */
 const flushStore = (): Promise<void> => Promise.resolve();
 
+type FakeCtrl = ReturnType<typeof fakeCtrl>["ctrl"];
+
+/** A controller exposing only scrollToMessage, which is all the jumper reads. */
+function minimalCtrl(scrollToMessage: ReturnType<typeof vi.fn>): FakeCtrl {
+  return { currentChannelId: 1, messageList: { scrollToMessage } } as unknown as FakeCtrl;
+}
+
+function jumperFor(ctrl: FakeCtrl | null, getMessagesAround: unknown) {
+  return createMessageJumper({
+    api: fakeApi(getMessagesAround),
+    getChannelCtrl: () => ctrl,
+    nextFrame: immediateFrame,
+  });
+}
+
 beforeEach(() => {
   resetStores();
 });
 
 // ---------------------------------------------------------------------------
 
+/** A jumper over a loaded controller for channel 1 whose around fetch is an untouched spy. */
+function idleJumper() {
+  const { ctrl, scrollToMessage } = fakeCtrl(1);
+  const getMessagesAround = vi.fn();
+  return { jumper: jumperFor(ctrl, getMessagesAround), getMessagesAround, scrollToMessage };
+}
+
 describe("createMessageJumper", () => {
   it("scrolls without fetching when the message is already loaded", async () => {
     setMessages(1, [response(42)], false);
-    const { ctrl, scrollToMessage } = fakeCtrl(1);
-    const getMessagesAround = vi.fn();
-    const jumper = createMessageJumper({
-      api: fakeApi(getMessagesAround),
-      getChannelCtrl: () => ctrl,
-      nextFrame: immediateFrame,
-    });
+    const { jumper, getMessagesAround, scrollToMessage } = idleJumper();
 
     await expect(jumper.jumpTo(1, 42)).resolves.toBe(true);
 
@@ -153,20 +159,13 @@ describe("createMessageJumper", () => {
     // scroll attempt misses, the second lands after the fetch.
     setMessages(1, [response(90)], false);
     const scrollToMessage = vi.fn().mockReturnValueOnce(false).mockReturnValue(true);
-    const ctrl = {
-      currentChannelId: 1,
-      messageList: { scrollToMessage },
-    } as unknown as ReturnType<typeof fakeCtrl>["ctrl"];
+    const ctrl = minimalCtrl(scrollToMessage);
     const getMessagesAround = vi.fn().mockResolvedValue({
       messages: [response(40), response(41), response(42)],
       has_more_before: true,
       has_more_after: true,
     });
-    const jumper = createMessageJumper({
-      api: fakeApi(getMessagesAround),
-      getChannelCtrl: () => ctrl,
-      nextFrame: immediateFrame,
-    });
+    const jumper = jumperFor(ctrl, getMessagesAround);
 
     await expect(jumper.jumpTo(1, 42)).resolves.toBe(true);
 
@@ -184,10 +183,7 @@ describe("createMessageJumper", () => {
   it("opens the channel first when the target lives elsewhere", async () => {
     setMessages(2, [{ ...response(7), channel_id: 2 }], false);
     const scrollToMessage = vi.fn().mockReturnValue(true);
-    const ctrl = {
-      currentChannelId: 1,
-      messageList: { scrollToMessage },
-    } as unknown as ReturnType<typeof fakeCtrl>["ctrl"];
+    const ctrl = minimalCtrl(scrollToMessage);
     const jumper = createMessageJumper({
       api: fakeApi(vi.fn()),
       getChannelCtrl: () => ctrl,
@@ -205,13 +201,7 @@ describe("createMessageJumper", () => {
   });
 
   it("refuses a channel this user cannot see, without calling the API", async () => {
-    const { ctrl } = fakeCtrl(1);
-    const getMessagesAround = vi.fn();
-    const jumper = createMessageJumper({
-      api: fakeApi(getMessagesAround),
-      getChannelCtrl: () => ctrl,
-      nextFrame: immediateFrame,
-    });
+    const { jumper, getMessagesAround } = idleJumper();
 
     await expect(jumper.jumpTo(999, 42)).resolves.toBe(false);
 
@@ -221,17 +211,11 @@ describe("createMessageJumper", () => {
 
   it("reports a deleted or missing message from a 404", async () => {
     const scrollToMessage = vi.fn().mockReturnValue(false);
-    const ctrl = {
-      currentChannelId: 1,
-      messageList: { scrollToMessage },
-    } as unknown as ReturnType<typeof fakeCtrl>["ctrl"];
-    const jumper = createMessageJumper({
-      api: fakeApi(
-        vi.fn().mockRejectedValue(new ApiClientError(404, "NOT_FOUND", "message not found")),
-      ),
-      getChannelCtrl: () => ctrl,
-      nextFrame: immediateFrame,
-    });
+    const ctrl = minimalCtrl(scrollToMessage);
+    const jumper = jumperFor(
+      ctrl,
+      vi.fn().mockRejectedValue(new ApiClientError(404, "NOT_FOUND", "message not found")),
+    );
 
     await expect(jumper.jumpTo(1, 42)).resolves.toBe(false);
 
@@ -243,13 +227,7 @@ describe("createMessageJumper", () => {
   it("says a message the store knows is deleted is gone, without the around fetch", async () => {
     setMessages(1, [response(41), response(42)], false);
     deleteMessage({ channel_id: 1, message_id: 42 });
-    const { ctrl, scrollToMessage } = fakeCtrl(1);
-    const getMessagesAround = vi.fn();
-    const jumper = createMessageJumper({
-      api: fakeApi(getMessagesAround),
-      getChannelCtrl: () => ctrl,
-      nextFrame: immediateFrame,
-    });
+    const { jumper, getMessagesAround, scrollToMessage } = idleJumper();
 
     await expect(jumper.jumpTo(1, 42)).resolves.toBe(false);
 
@@ -261,26 +239,16 @@ describe("createMessageJumper", () => {
   });
 
   it("leaves a gated NSFW channel's refusal to its gate, without a toast", async () => {
-    const ctrl = {
-      currentChannelId: 1,
-      messageList: { scrollToMessage: vi.fn().mockReturnValue(false) },
-    } as unknown as ReturnType<typeof fakeCtrl>["ctrl"];
+    const ctrl = minimalCtrl(vi.fn().mockReturnValue(false));
     const toastsBefore = toastCalls.length;
-    const jumper = createMessageJumper({
-      api: fakeApi(
-        vi
-          .fn()
-          .mockRejectedValue(
-            new ApiClientError(
-              403,
-              "NSFW_ACKNOWLEDGEMENT_REQUIRED",
-              "NSFW_ACKNOWLEDGEMENT_REQUIRED",
-            ),
-          ),
-      ),
-      getChannelCtrl: () => ctrl,
-      nextFrame: immediateFrame,
-    });
+    const jumper = jumperFor(
+      ctrl,
+      vi
+        .fn()
+        .mockRejectedValue(
+          new ApiClientError(403, "NSFW_ACKNOWLEDGEMENT_REQUIRED", "NSFW_ACKNOWLEDGEMENT_REQUIRED"),
+        ),
+    );
 
     await expect(jumper.jumpTo(1, 42)).resolves.toBe(false);
 
@@ -289,15 +257,8 @@ describe("createMessageJumper", () => {
 
   it("surfaces a transport failure without detaching the channel", async () => {
     const scrollToMessage = vi.fn().mockReturnValue(false);
-    const ctrl = {
-      currentChannelId: 1,
-      messageList: { scrollToMessage },
-    } as unknown as ReturnType<typeof fakeCtrl>["ctrl"];
-    const jumper = createMessageJumper({
-      api: fakeApi(vi.fn().mockRejectedValue(new Error("offline"))),
-      getChannelCtrl: () => ctrl,
-      nextFrame: immediateFrame,
-    });
+    const ctrl = minimalCtrl(scrollToMessage);
+    const jumper = jumperFor(ctrl, vi.fn().mockRejectedValue(new Error("offline")));
 
     await expect(jumper.jumpTo(1, 42)).resolves.toBe(false);
     expectConsole("error", /\[message-jump\] Failed to fetch the message window/);
@@ -308,21 +269,15 @@ describe("createMessageJumper", () => {
 
   it("fails loudly when the window comes back without the centre", async () => {
     const scrollToMessage = vi.fn().mockReturnValue(false);
-    const ctrl = {
-      currentChannelId: 1,
-      messageList: { scrollToMessage },
-    } as unknown as ReturnType<typeof fakeCtrl>["ctrl"];
-    const jumper = createMessageJumper({
-      api: fakeApi(
-        vi.fn().mockResolvedValue({
-          messages: [response(1), response(2)],
-          has_more_before: false,
-          has_more_after: false,
-        }),
-      ),
-      getChannelCtrl: () => ctrl,
-      nextFrame: immediateFrame,
-    });
+    const ctrl = minimalCtrl(scrollToMessage);
+    const jumper = jumperFor(
+      ctrl,
+      vi.fn().mockResolvedValue({
+        messages: [response(1), response(2)],
+        has_more_before: false,
+        has_more_after: false,
+      }),
+    );
 
     // Landing silently on a neighbour would look like a successful jump to the
     // wrong message.
@@ -331,11 +286,7 @@ describe("createMessageJumper", () => {
   });
 
   it("gives up quietly with no mounted channel controller", async () => {
-    const jumper = createMessageJumper({
-      api: fakeApi(vi.fn()),
-      getChannelCtrl: () => null,
-      nextFrame: immediateFrame,
-    });
+    const jumper = jumperFor(null, vi.fn());
 
     await expect(jumper.jumpTo(1, 42)).resolves.toBe(false);
   });
@@ -344,10 +295,7 @@ describe("createMessageJumper", () => {
     // Neither jump ever finds the target already loaded, so both go through
     // the fetch path.
     const scrollToMessage = vi.fn().mockReturnValue(false);
-    const ctrl = {
-      currentChannelId: 1,
-      messageList: { scrollToMessage },
-    } as unknown as ReturnType<typeof fakeCtrl>["ctrl"];
+    const ctrl = minimalCtrl(scrollToMessage);
 
     let resolveA: (v: unknown) => void = () => {};
     let resolveB: (v: unknown) => void = () => {};
@@ -356,11 +304,7 @@ describe("createMessageJumper", () => {
       .mockImplementationOnce(() => new Promise((resolve) => (resolveA = resolve)))
       .mockImplementationOnce(() => new Promise((resolve) => (resolveB = resolve)));
 
-    const jumper = createMessageJumper({
-      api: fakeApi(getMessagesAround),
-      getChannelCtrl: () => ctrl,
-      nextFrame: immediateFrame,
-    });
+    const jumper = jumperFor(ctrl, getMessagesAround);
 
     // A (older, target 10) starts and suspends on its fetch; B (newer,
     // target 20) starts right after — both requests are now in flight.
@@ -394,17 +338,10 @@ describe("createMessageJumper", () => {
 
   it("a jump response for a channel the user already left does not install its window", async () => {
     const scrollToMessage = vi.fn().mockReturnValue(false);
-    const ctrl = {
-      currentChannelId: 1,
-      messageList: { scrollToMessage },
-    } as unknown as ReturnType<typeof fakeCtrl>["ctrl"];
+    const ctrl = minimalCtrl(scrollToMessage);
     let resolveAround: (v: unknown) => void = () => {};
     const getMessagesAround = vi.fn(() => new Promise((resolve) => (resolveAround = resolve)));
-    const jumper = createMessageJumper({
-      api: fakeApi(getMessagesAround),
-      getChannelCtrl: () => ctrl,
-      nextFrame: immediateFrame,
-    });
+    const jumper = jumperFor(ctrl, getMessagesAround);
 
     const jump = jumper.jumpTo(1, 42);
     // The user opens another channel before the around-window arrives.
@@ -498,20 +435,7 @@ describe("message-navigation registry", () => {
 
 describe("reply bar jump wiring", () => {
   function renderRow(msg: Message, all: Message[], opts: Partial<MessageListOptions> = {}) {
-    const options = {
-      channelId: 1,
-      channelName: "general",
-      currentUserId: 1,
-      onScrollTop: vi.fn(),
-      onReplyClick: vi.fn(),
-      onEditClick: vi.fn(),
-      onEditSave: vi.fn(() => true),
-      onEmptyEdit: vi.fn(),
-      onDeleteClick: vi.fn(),
-      onReactionClick: vi.fn(),
-      onPinClick: vi.fn(),
-      ...opts,
-    } as MessageListOptions;
+    const options = makeListOptions(opts);
     return renderMessage(msg, false, all, options, new AbortController().signal);
   }
 
@@ -575,31 +499,12 @@ describe("Copy Message Link action", () => {
     });
 
     const msg = makeMessage({ id: 42, channelId: 7 });
-    messagesStore.setState(() => ({
-      messagesByChannel: new Map([[7, [msg]]]),
-      pendingSends: new Map(),
-      loadedChannels: new Set(),
-      hasMore: new Map(),
-      historyLoadState: new Map(),
-      detachedChannels: new Set(),
-    }));
+    resetMessagesState({ messagesByChannel: new Map([[7, [msg]]]) });
     const row = renderMessage(
       msg,
       false,
       [msg],
-      {
-        channelId: 7,
-        channelName: "general",
-        currentUserId: 1,
-        onScrollTop: vi.fn(),
-        onReplyClick: vi.fn(),
-        onEditClick: vi.fn(),
-        onEditSave: vi.fn(() => true),
-        onEmptyEdit: vi.fn(),
-        onDeleteClick: vi.fn(),
-        onReactionClick: vi.fn(),
-        onPinClick: vi.fn(),
-      } as MessageListOptions,
+      makeListOptions({ channelId: 7 }),
       new AbortController().signal,
     );
     document.body.appendChild(row);
@@ -609,19 +514,7 @@ describe("Copy Message Link action", () => {
     const { openMessageMenu } = await import("../../src/components/message-list/messageMenu");
     openMessageMenu({
       msg,
-      opts: {
-        channelId: 7,
-        channelName: "general",
-        currentUserId: 1,
-        onScrollTop: vi.fn(),
-        onReplyClick: vi.fn(),
-        onEditClick: vi.fn(),
-        onEditSave: vi.fn(() => true),
-        onEmptyEdit: vi.fn(),
-        onDeleteClick: vi.fn(),
-        onReactionClick: vi.fn(),
-        onPinClick: vi.fn(),
-      } as MessageListOptions,
+      opts: makeListOptions({ channelId: 7 }),
       x: 1,
       y: 1,
       target: null,
@@ -690,18 +583,11 @@ describe("permalink chips in message content", () => {
 
   it("labels a DM permalink chip with '@', not '#' (F15)", () => {
     setDmChannels([
-      {
+      makeDm({
         channelId: 50,
         recipient: { id: 10, username: "bob", avatar: "", status: "online" },
         participants: [{ id: 10, username: "bob", avatar: "", status: "online" }],
-        name: "",
-        isGroup: false,
-        lastMessageId: null,
-        lastMessage: "",
-        lastMessageAt: "",
-        unreadCount: 0,
-        mentionCount: 0,
-      },
+      }),
     ]);
     container.appendChild(renderMentionSegment("owncord://message/50/99"));
 
@@ -738,35 +624,15 @@ describe("Jump to Present pill", () => {
   let container: HTMLDivElement;
   let list: ReturnType<typeof createMessageList>;
 
-  function baseOptions(overrides: Partial<MessageListOptions> = {}): MessageListOptions {
-    return {
-      channelId: 1,
-      channelName: "general",
-      currentUserId: 1,
-      onScrollTop: vi.fn(),
-      onReplyClick: vi.fn(),
-      onEditClick: vi.fn(),
-      onEditSave: vi.fn(() => true),
-      onEmptyEdit: vi.fn(),
-      onDeleteClick: vi.fn(),
-      onReactionClick: vi.fn(),
-      onPinClick: vi.fn(),
-      ...overrides,
-    } as MessageListOptions;
-  }
-
-  beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    list.destroy?.();
-    container.remove();
-  });
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => list.destroy?.(),
+  );
 
   it("stays hidden while the window is attached to the live tail", () => {
-    list = createMessageList(baseOptions());
+    list = createMessageList(makeListOptions());
     list.mount(container);
 
     const pill = container.querySelector('[data-testid="jump-to-present"]');
@@ -775,7 +641,7 @@ describe("Jump to Present pill", () => {
   });
 
   it("appears when an around-window detaches the channel", async () => {
-    list = createMessageList(baseOptions());
+    list = createMessageList(makeListOptions());
     list.mount(container);
 
     setAroundMessages(1, [response(1), response(2)], true, true);
@@ -788,7 +654,7 @@ describe("Jump to Present pill", () => {
   it("is already visible when mounting into an detached channel", () => {
     setAroundMessages(1, [response(1)], true, true);
 
-    list = createMessageList(baseOptions());
+    list = createMessageList(makeListOptions());
     list.mount(container);
 
     expect(
@@ -797,7 +663,7 @@ describe("Jump to Present pill", () => {
   });
 
   it("hides again once the channel reattaches", async () => {
-    list = createMessageList(baseOptions());
+    list = createMessageList(makeListOptions());
     list.mount(container);
     setAroundMessages(1, [response(1)], true, true);
     await flushStore();
@@ -815,7 +681,7 @@ describe("Jump to Present pill", () => {
 
   it("clicking it asks the controller to reload the tail", async () => {
     const onJumpToPresent = vi.fn();
-    list = createMessageList(baseOptions({ onJumpToPresent }));
+    list = createMessageList(makeListOptions({ onJumpToPresent }));
     list.mount(container);
     setAroundMessages(1, [response(1)], true, true);
     await flushStore();
@@ -826,7 +692,7 @@ describe("Jump to Present pill", () => {
   });
 
   it("tracks only its own channel", async () => {
-    list = createMessageList(baseOptions());
+    list = createMessageList(makeListOptions());
     list.mount(container);
 
     setAroundMessages(2, [response(1)], true, true);

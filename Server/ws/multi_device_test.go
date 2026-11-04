@@ -669,7 +669,7 @@ func (f *mdFix) dropSocket(d *mdDev) {
 
 func (f *mdFix) expectCallGone(identity string, ch int64) {
 	f.t.Helper()
-	if f.hub.voiceReg.voiceGrace.get(f.uid) != nil {
+	if f.hub.voiceHub.reg.voiceGrace.get(f.uid) != nil {
 		f.t.Fatal("the parked grace entry survived")
 	}
 	waitFor(f.t, "voice row to be removed", func() bool { return f.row(f.uid) == nil })
@@ -686,7 +686,7 @@ func TestMultiDevice_BanEndsCallParkedByAnotherDevice(t *testing.T) {
 			a := f.dev("session-a", f.text)
 			token := f.join(a, f.voiceA)
 			f.dropSocket(a)
-			if f.hub.voiceReg.voiceGrace.get(f.uid) == nil {
+			if f.hub.voiceHub.reg.voiceGrace.get(f.uid) == nil {
 				t.Fatal("precondition: A's call should be parked")
 			}
 			b := f.dev("session-b", f.text)
@@ -796,7 +796,7 @@ func TestMultiDevice_MovedNoteDroppedOnFreshConnect(t *testing.T) {
 	if d.index(0, MsgTypeVoiceDisconnected, nil) >= 0 {
 		t.Fatal("a fresh connect was sent the moved notice")
 	}
-	if f.hub.voiceReg.voiceGrace.takeMoved(f.uid, auth.HashToken("session-a")) != 0 {
+	if f.hub.voiceHub.reg.voiceGrace.takeMoved(f.uid, auth.HashToken("session-a")) != 0 {
 		t.Fatal("the note should have been consumed by the fresh connect")
 	}
 }
@@ -806,12 +806,12 @@ func TestMultiDevice_FlushDropsQueuedOfflineForConnectedUser(t *testing.T) {
 	f.dev("session-a", f.text)
 	obs := f.observer(f.text)
 	const gone = int64(99999)
-	f.hub.presenceMu.Lock()
-	f.hub.presenceQueue = map[int64]pendingPresence{
+	f.hub.presenceFeed.mu.Lock()
+	f.hub.presenceFeed.queue = map[int64]pendingPresence{
 		f.uid: {status: db.StatusOffline}, // connected: stale, dropped
 		gone:  {status: db.StatusOffline}, // not connected: broadcast
 	}
-	f.hub.presenceMu.Unlock()
+	f.hub.presenceFeed.mu.Unlock()
 	f.hub.flushPresenceQueue()
 
 	i := obs.await(t, "presence_batch", nil)
@@ -826,6 +826,35 @@ func TestMultiDevice_FlushDropsQueuedOfflineForConnectedUser(t *testing.T) {
 	}
 	if !seen[gone] {
 		t.Fatalf("the offline entry for an unconnected user was dropped: %v", updates)
+	}
+}
+
+// A moderator move of A's parked call is ended by the user joining on device
+// B inside the window: B's join carries the moderator mute, and A's later
+// resume is not sent voice_moved, which would pull the call off B.
+func TestMultiDevice_JoinElsewhereEndsAParkedMove(t *testing.T) {
+	f := newMDFix(t)
+	a := f.dev("session-a", f.text)
+	b := f.dev("session-b", f.text)
+	f.join(a, f.voiceA)
+	f.dropSocket(a)
+	if !f.hub.EvictForModeratorMove(context.Background(), f.uid, f.voiceA, true, false, nil) {
+		t.Fatal("moderator move did not tear down the parked call")
+	}
+	if !f.hub.SendToVoiceDevice(f.uid, buildVoiceMoved(f.voiceB, "", 99)) {
+		t.Fatal("the parked move did not keep its frame")
+	}
+	f.join(b, f.voiceA)
+	if row := f.row(f.uid); row == nil || row.ChannelID != f.voiceA || !row.ServerMuted {
+		t.Fatalf("B's join did not carry the moderator mute: %+v", row)
+	}
+	resumed := f.newConn(f.uid, "session-a", f.text)
+	resumed.lastSeq = 1
+	f.hub.registerNowTest(resumed, map[int64]bool{f.text: true})
+	r := &mdDev{c: resumed}
+	r.settle()
+	if r.index(0, MsgTypeVoiceMoved, nil) >= 0 {
+		t.Fatal("A's resume got voice_moved after the user joined on B")
 	}
 }
 
@@ -865,13 +894,26 @@ func TestMultiDevice_ModeratorFramesReachOnlyTheCallDevice(t *testing.T) {
 		if !f.hub.EvictForModeratorMove(context.Background(), f.uid, f.voiceA, false, false, nil) {
 			t.Fatal("moderator move did not tear down the parked call")
 		}
-		if f.hub.SendToVoiceDevice(f.uid, buildVoiceMoved(f.voiceB, "", 99)) {
-			t.Fatal("a parked call's moderator frame was routed to another device")
+		if !f.hub.SendToVoiceDevice(f.uid, buildVoiceMoved(f.voiceB, "", 99)) {
+			t.Fatal("a parked call's moderator frame was not kept for its session")
 		}
 		b.settle()
 		if b.index(0, MsgTypeVoiceMoved, nil) >= 0 {
 			t.Fatal("device B received voice_moved for A's parked call")
 		}
+		// Another session resuming does not collect A's move; A's resume does.
+		other := f.newConn(f.uid, "session-c", f.text)
+		other.lastSeq = 1
+		f.hub.registerNowTest(other, map[int64]bool{f.text: true})
+		c := &mdDev{c: other}
+		c.settle()
+		if c.index(0, MsgTypeVoiceMoved, nil) >= 0 {
+			t.Fatal("another session's resume collected A's parked move")
+		}
+		resumed := f.newConn(f.uid, "session-a", f.text)
+		resumed.lastSeq = 1
+		f.hub.registerNowTest(resumed, map[int64]bool{f.text: true})
+		(&mdDev{c: resumed}).await(t, MsgTypeVoiceMoved, nil)
 	})
 }
 
@@ -882,7 +924,7 @@ func TestMultiDevice_ParkedCallMovedTellsTheOldSession(t *testing.T) {
 	f.dropSocket(a)
 	b := f.dev("session-b", f.text)
 	f.join(b, f.voiceB)
-	if f.hub.voiceReg.voiceGrace.get(f.uid) != nil {
+	if f.hub.voiceHub.reg.voiceGrace.get(f.uid) != nil {
 		t.Fatal("B's join should have taken the parked call")
 	}
 
@@ -939,7 +981,7 @@ func TestMultiDevice_KickedConnectionKeepsOwnTeardownEvenAfterSessionReconnects(
 		t.Fatal("a kicked connection was treated as displaced, leaving its call to the 60 s sweep")
 	}
 	f.hub.leaveVoiceOnDisconnect(context.Background(), a.c, voiceLeaveReasonDisconnect)
-	if f.hub.voiceReg.voiceGrace.get(f.uid) == nil {
+	if f.hub.voiceHub.reg.voiceGrace.get(f.uid) == nil {
 		t.Fatal("the kicked connection's call was neither parked nor torn down")
 	}
 	_ = token
@@ -959,7 +1001,7 @@ func TestMultiDevice_KickedConnectionKeepsOwnTeardownEvenAfterSessionReconnects(
 // stays.
 func TestMultiDevice_GameAndSongBelongToTheConnectionThatSetThem(t *testing.T) {
 	f := newMDFix(t)
-	f.hub.gameActivity.on.Store(true)
+	f.hub.settings.gameActivity.on.Store(true)
 	a := f.dev("session-a", f.text)
 	a.c.setLivePresence(db.StatusOnline, nil, "")
 	game := &gameActivity{Name: "Chess", StartedAt: 1}
@@ -1078,7 +1120,7 @@ func TestMultiDevice_FullChannelJoinKeepsCallParkedByAnotherDevice(t *testing.T)
 	a := f.dev("session-a", f.text)
 	token := f.join(a, f.voiceA)
 	f.dropSocket(a)
-	if f.hub.voiceReg.voiceGrace.get(f.uid) == nil {
+	if f.hub.voiceHub.reg.voiceGrace.get(f.uid) == nil {
 		t.Fatal("precondition: A's call should be parked")
 	}
 	b := f.dev("session-b", f.text)
@@ -1089,7 +1131,7 @@ func TestMultiDevice_FullChannelJoinKeepsCallParkedByAnotherDevice(t *testing.T)
 	if !b.sawErrorCode(ErrCodeChannelFull) {
 		t.Fatalf("B's join to a full channel was not refused as full; got %s", b.types())
 	}
-	if f.hub.voiceReg.voiceGrace.get(f.uid) == nil {
+	if f.hub.voiceHub.reg.voiceGrace.get(f.uid) == nil {
 		t.Fatal("the refused join ended A's parked call")
 	}
 	if r := f.row(f.uid); r == nil || r.ChannelID != f.voiceA {

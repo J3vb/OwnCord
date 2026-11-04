@@ -11,23 +11,13 @@ import {
   makeMessage,
   makeOpts,
   resetGateStores,
+  seedMessages as seed,
   setChannel,
   signInAs,
 } from "../helpers/message-actions-fixtures";
 import "../helpers/resizeObserverStub";
 
 const UP = "\u{1F44D}";
-
-function seed(messages: Message[]): void {
-  messagesStore.setState(() => ({
-    messagesByChannel: new Map([[1, messages]]),
-    pendingSends: new Map(),
-    loadedChannels: new Set(),
-    hasMore: new Map(),
-    historyLoadState: new Map(),
-    detachedChannels: new Set(),
-  }));
-}
 
 const mine = (over: Partial<Message> = {}): Message =>
   makeMessage({ user: { id: ME, username: "me", avatar: null }, ...over });

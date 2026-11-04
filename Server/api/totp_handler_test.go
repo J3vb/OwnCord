@@ -24,7 +24,7 @@ func TestVerifyTOTP_Success(t *testing.T) {
 	secret, _ := auth.GenerateTOTPSecret()
 	hash, _ := auth.HashPassword("Password1!")
 	uid, _ := database.CreateUser(context.Background(), "totpuser", hash, 4)
-	_ = database.UpdateUserTOTPSecret(context.Background(), uid, &secret)
+	storeSealedTOTP(t, database, uid, secret)
 
 	// Login should return requires_2fa + partial_token.
 	rr := postJSON(t, router, "/api/v1/auth/login", map[string]string{
@@ -72,7 +72,7 @@ func TestVerifyTOTP_InvalidCode(t *testing.T) {
 	secret, _ := auth.GenerateTOTPSecret()
 	hash, _ := auth.HashPassword("Password1!")
 	uid, _ := database.CreateUser(context.Background(), "totpuser2", hash, 4)
-	_ = database.UpdateUserTOTPSecret(context.Background(), uid, &secret)
+	storeSealedTOTP(t, database, uid, secret)
 
 	// Login to get partial token.
 	rr := postJSON(t, router, "/api/v1/auth/login", map[string]string{
@@ -124,7 +124,7 @@ func TestVerifyTOTP_MalformedBody(t *testing.T) {
 	secret, _ := auth.GenerateTOTPSecret()
 	hash, _ := auth.HashPassword("Password1!")
 	uid, _ := database.CreateUser(context.Background(), "totpuser3", hash, 4)
-	_ = database.UpdateUserTOTPSecret(context.Background(), uid, &secret)
+	storeSealedTOTP(t, database, uid, secret)
 
 	rr := postJSON(t, router, "/api/v1/auth/login", map[string]string{
 		"username": "totpuser3",
@@ -156,7 +156,7 @@ func TestVerifyTOTP_ReplayProtection(t *testing.T) {
 	secret, _ := auth.GenerateTOTPSecret()
 	hash, _ := auth.HashPassword("Password1!")
 	uid, _ := database.CreateUser(context.Background(), "totpuser4", hash, 4)
-	_ = database.UpdateUserTOTPSecret(context.Background(), uid, &secret)
+	storeSealedTOTP(t, database, uid, secret)
 
 	code, _ := auth.GenerateTOTPCode(secret, time.Now().UTC())
 
@@ -412,7 +412,7 @@ func TestVerifyTOTP_BannedAfterPasswordStep(t *testing.T) {
 	secret, _ := auth.GenerateTOTPSecret()
 	hash, _ := auth.HashPassword("Password1!")
 	uid, _ := database.CreateUser(context.Background(), "banafterpw", hash, 4)
-	_ = database.UpdateUserTOTPSecret(context.Background(), uid, &secret)
+	storeSealedTOTP(t, database, uid, secret)
 
 	rr := postJSON(t, router, "/api/v1/auth/login", map[string]string{
 		"username": "banafterpw",
@@ -444,7 +444,10 @@ func TestVerifyTOTP_BannedAfterPasswordStep(t *testing.T) {
 	}
 }
 
-func TestConfirmTOTP_APITokenPrincipal_RevokesAllSessions(t *testing.T) {
+// TestTOTP_APITokenPrincipalIsRefused: enabling, confirming and disabling
+// two-factor all take a login session; an API token changes nothing and the
+// account's login session survives.
+func TestTOTP_APITokenPrincipalIsRefused(t *testing.T) {
 	database := newAuthTestDB(t)
 	limiter := auth.NewRateLimiter()
 	router := buildAuthRouter(database, limiter)
@@ -461,70 +464,34 @@ func TestConfirmTOTP_APITokenPrincipal_RevokesAllSessions(t *testing.T) {
 
 	rr := postJSONWithToken(t, router, "/api/v1/users/me/totp/enable", apiTok,
 		map[string]string{"password": "Password1!"})
-	if rr.Code != http.StatusOK {
-		t.Fatalf("enable via API token: status = %d; body = %s", rr.Code, rr.Body.String())
-	}
-	var enableResp map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&enableResp)
-	secret := extractSecretFromURI(t, enableResp["qr_uri"].(string))
-	code, _ := auth.GenerateTOTPCode(secret, time.Now().UTC())
+	wantErr(t, rr, http.StatusForbidden, "LOGIN_SESSION_REQUIRED", "this action requires a login session")
 
-	rr = postJSONWithToken(t, router, "/api/v1/users/me/totp/confirm", apiTok,
-		map[string]string{"password": "Password1!", "code": code})
-	if rr.Code != http.StatusNoContent {
-		t.Fatalf("confirm via API token: status = %d; body = %s", rr.Code, rr.Body.String())
-	}
-
-	// A 2FA change from a sessionless principal must revoke EVERY login
-	// session (keep = 0), mirroring the change-password path — not skip
-	// revocation entirely.
-	if s, _ := database.GetSessionByTokenHash(context.Background(), auth.HashToken(sessionToken)); s != nil {
-		t.Error("login session survived a 2FA enable performed via API token; want all sessions revoked")
-	}
-}
-
-func TestDisableTOTP_APITokenPrincipal_RevokesAllSessions(t *testing.T) {
-	database := newAuthTestDB(t)
-	limiter := auth.NewRateLimiter()
-	router := buildAuthRouter(database, limiter)
-
-	hash, _ := auth.HashPassword("Password1!")
-	uid, _ := database.CreateUser(context.Background(), "apitotp2", hash, 4)
-	apiTok, _ := auth.GenerateToken()
-	if _, err := database.CreateAPIToken(context.Background(), uid, auth.HashToken(apiTok), "ci", nil); err != nil {
-		t.Fatalf("CreateAPIToken: %v", err)
-	}
-
-	// Enable + confirm 2FA via the API token first.
-	rr := postJSONWithToken(t, router, "/api/v1/users/me/totp/enable", apiTok,
+	// Stage a real enrolment through the login session, so confirm has
+	// something to confirm.
+	rr = postJSONWithToken(t, router, "/api/v1/users/me/totp/enable", sessionToken,
 		map[string]string{"password": "Password1!"})
 	if rr.Code != http.StatusOK {
-		t.Fatalf("enable: status = %d; body = %s", rr.Code, rr.Body.String())
+		t.Fatalf("enable via login session: status = %d; body = %s", rr.Code, rr.Body.String())
 	}
 	var enableResp map[string]any
 	_ = json.NewDecoder(rr.Body).Decode(&enableResp)
 	secret := extractSecretFromURI(t, enableResp["qr_uri"].(string))
 	code, _ := auth.GenerateTOTPCode(secret, time.Now().UTC())
+
 	rr = postJSONWithToken(t, router, "/api/v1/users/me/totp/confirm", apiTok,
 		map[string]string{"password": "Password1!", "code": code})
-	if rr.Code != http.StatusNoContent {
-		t.Fatalf("confirm: status = %d; body = %s", rr.Code, rr.Body.String())
-	}
-
-	// A login session created after enrollment must be revoked by the disable.
-	sessionToken, _ := auth.GenerateToken()
-	if _, err := database.CreateSession(context.Background(), uid, auth.HashToken(sessionToken), "test", "127.0.0.1"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
+	wantErr(t, rr, http.StatusForbidden, "LOGIN_SESSION_REQUIRED", "this action requires a login session")
 
 	rr = deleteWithToken(t, router, "/api/v1/users/me/totp", apiTok,
 		map[string]string{"password": "Password1!"})
-	if rr.Code != http.StatusNoContent {
-		t.Fatalf("disable via API token: status = %d; body = %s", rr.Code, rr.Body.String())
-	}
+	wantErr(t, rr, http.StatusForbidden, "LOGIN_SESSION_REQUIRED", "this action requires a login session")
 
-	if s, _ := database.GetSessionByTokenHash(context.Background(), auth.HashToken(sessionToken)); s != nil {
-		t.Error("login session survived a 2FA disable performed via API token; want all sessions revoked")
+	after, _ := database.GetUserByID(context.Background(), user.ID)
+	if after == nil || (after.TOTPSecret != nil && *after.TOTPSecret != "") {
+		t.Error("two-factor turned on through an API token")
+	}
+	if s, _ := database.GetSessionByTokenHash(context.Background(), auth.HashToken(sessionToken)); s == nil {
+		t.Error("login session revoked by a refused API-token call")
 	}
 }
 
@@ -699,4 +666,49 @@ func extractSecretFromURI(t *testing.T, uri string) string {
 		t.Fatalf("no secret param in URI: %s", uri)
 	}
 	return s
+}
+
+// TestVerifyTOTP_UnsealedStoredSecretIsAStoreFailure pins strict decrypt on
+// the sign-in path: a stored secret that is not sealed answers 500, not a
+// wrong-code 401, and charges nothing, so once the row is sealed the same
+// challenge still completes.
+func TestVerifyTOTP_UnsealedStoredSecretIsAStoreFailure(t *testing.T) {
+	database := newAuthTestDB(t)
+	limiter := auth.NewRateLimiter()
+	router := buildAuthRouter(database, limiter)
+
+	secret, _ := auth.GenerateTOTPSecret()
+	hash, _ := auth.HashPassword("Password1!")
+	uid, _ := database.CreateUser(context.Background(), "unsealed", hash, 4)
+	if err := database.UpdateUserTOTPSecret(context.Background(), uid, &secret); err != nil {
+		t.Fatalf("UpdateUserTOTPSecret: %v", err)
+	}
+
+	rr := postJSON(t, router, "/api/v1/auth/login", map[string]string{
+		"username": "unsealed",
+		"password": "Password1!",
+	})
+	var loginResp map[string]any
+	_ = json.NewDecoder(rr.Body).Decode(&loginResp)
+	partialToken, _ := loginResp["partial_token"].(string)
+	if partialToken == "" {
+		t.Fatalf("login gave no partial_token; status %d", rr.Code)
+	}
+
+	for i := range 6 {
+		code, _ := auth.GenerateTOTPCode(secret, time.Now().UTC())
+		rr = postJSONWithToken(t, router, "/api/v1/auth/verify-totp", partialToken,
+			map[string]string{"code": code})
+		if rr.Code != http.StatusInternalServerError {
+			t.Fatalf("verify %d with an unsealed stored secret: status = %d, want 500; body = %s", i, rr.Code, rr.Body.String())
+		}
+	}
+
+	storeSealedTOTP(t, database, uid, secret)
+	code, _ := auth.GenerateTOTPCode(secret, time.Now().UTC())
+	rr = postJSONWithToken(t, router, "/api/v1/auth/verify-totp", partialToken,
+		map[string]string{"code": code})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("verify after sealing: status = %d, want 200; body = %s", rr.Code, rr.Body.String())
+	}
 }

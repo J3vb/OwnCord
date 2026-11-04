@@ -11,9 +11,15 @@ import {
   Responder,
   ADMINISTRATOR,
   boot,
+  bootAsAdmin,
   showShell,
   proposedPreview,
 } from "../../helpers/serverAdminStaticPanelHarness";
+
+const settleWindow = (window: JSDOM["window"]) =>
+  new Promise((resolve) => window.setTimeout(resolve, 0));
+
+const auditPath = (calls: FetchCall[]) => calls.find((c) => c.path.startsWith("/audit-log?"))?.path;
 
 describe("Server/admin/static — panel behaviour", () => {
   let dom: JSDOM | undefined;
@@ -22,6 +28,17 @@ describe("Server/admin/static — panel behaviour", () => {
     dom?.window?.close();
     dom = undefined;
   });
+
+  /** The Audit page rendered into `#content` for an administrator. */
+  async function openAudit(calls: FetchCall[], respond: Responder) {
+    const booted = await bootAsAdmin(calls, respond);
+    dom = booted.dom;
+    const { window } = booted.dom;
+    const doc = window.document;
+    booted.bridge.state.section = "audit";
+    doc.getElementById("content")!.innerHTML = await booted.bridge.renderAudit();
+    return { booted, window, doc };
+  }
 
   // AO-2. The admin CSP is script-src 'self', so the browser refuses an on*=
   // attribute or an inline <script>, and the control it wires silently does
@@ -41,7 +58,6 @@ describe("Server/admin/static — panel behaviour", () => {
       { id: 4, name: "Member", position: 40, permissions: 0, is_default: true },
     ];
     const respond: Responder = (p, method) => {
-      if (p === "/setup/status") return { json: { needs_setup: false } };
       if (p.startsWith("/users?"))
         return {
           json: [{ id: 2, username: "member", role_id: 4, status: "online", banned: false }],
@@ -192,7 +208,6 @@ describe("Server/admin/static — panel behaviour", () => {
       role_id: 4,
     }));
     const respond: Responder = (p) => {
-      if (p === "/setup/status") return { json: { needs_setup: false } };
       if (p.startsWith("/users?")) return { json: users };
       return { json: {} };
     };
@@ -228,20 +243,18 @@ describe("Server/admin/static — panel behaviour", () => {
     const calls: FetchCall[] = [];
     const entries = [{ id: 1, action: "message_delete", actor_id: 1, target_type: "message" }];
     const respond: Responder = (p, _method) => {
-      if (p === "/setup/status") return { json: { needs_setup: false } };
       if (p.startsWith("/audit-log?")) return { json: entries };
       return { json: {} };
     };
-    const booted = await boot(calls, respond);
+    const booted = await bootAsAdmin(calls, respond);
     dom = booted.dom;
-    booted.bridge.state.me = { id: 1, permissions: ADMINISTRATOR, role_position: 100 };
     booted.bridge.state.auditActionFilter = "channel_delete";
 
     const html = await booted.bridge.renderAudit();
     expect(html).toContain('<option value="channel_delete" selected>');
     // Selecting "All Actions" must therefore be a real value change.
     expect(html).toContain('<option value="all" >All Actions</option>');
-    expect(calls.find((c) => c.path.startsWith("/audit-log?"))?.path).toContain("limit=51");
+    expect(auditPath(calls)).toContain("limit=51");
   });
 
   // Each label is written for the target the server records with it: a
@@ -271,7 +284,6 @@ describe("Server/admin/static — panel behaviour", () => {
       ["user_ban", "user", 0, "tok"],
     ];
     const respond: Responder = (p) => {
-      if (p === "/setup/status") return { json: { needs_setup: false } };
       if (p.startsWith("/audit-log?"))
         return {
           json: rowsIn.map(([action, target_type, target_id, subject_token], i) => ({
@@ -288,10 +300,9 @@ describe("Server/admin/static — panel behaviour", () => {
         };
       return { json: {} };
     };
-    const booted = await boot([], respond);
+    const booted = await bootAsAdmin([], respond);
     dom = booted.dom;
     const doc = booted.dom.window.document;
-    booted.bridge.state.me = { id: 1, permissions: ADMINISTRATOR, role_position: 100 };
     booted.bridge.state.section = "audit";
     doc.getElementById("content")!.innerHTML = await booted.bridge.renderAudit();
 
@@ -378,18 +389,14 @@ describe("Server/admin/static — panel behaviour", () => {
   it("hides sign-ins and connections from the dashboard's Recent activity", async () => {
     const calls: FetchCall[] = [];
     const respond: Responder = (p) => {
-      if (p === "/setup/status") return { json: { needs_setup: false } };
       if (p.startsWith("/audit-log?")) return { json: [] };
       return { json: {} };
     };
-    const booted = await boot(calls, respond);
+    const booted = await bootAsAdmin(calls, respond);
     dom = booted.dom;
-    booted.bridge.state.me = { id: 1, permissions: ADMINISTRATOR, role_position: 100 };
 
     await booted.bridge.renderDashboard();
-    expect(calls.find((c) => c.path.startsWith("/audit-log?"))?.path).toBe(
-      "/audit-log?limit=5&offset=0&hide_signins=1",
-    );
+    expect(auditPath(calls)).toBe("/audit-log?limit=5&offset=0&hide_signins=1");
   });
 
   // AO-7. Search and the action filter used to run over the fetched page of
@@ -409,7 +416,6 @@ describe("Server/admin/static — panel behaviour", () => {
       created_at: "2026-09-01 10:00:00",
     });
     const respond: Responder = (p) => {
-      if (p === "/setup/status") return { json: { needs_setup: false } };
       if (p.startsWith("/audit-log?")) {
         const q = new URLSearchParams(p.slice("/audit-log?".length));
         const headers =
@@ -425,12 +431,11 @@ describe("Server/admin/static — panel behaviour", () => {
       }
       return { json: {} };
     };
-    const booted = await boot(calls, respond);
+    const booted = await bootAsAdmin(calls, respond);
     dom = booted.dom;
     const { window } = booted.dom;
     const doc = window.document;
     showShell(booted.dom);
-    booted.bridge.state.me = { id: 1, permissions: ADMINISTRATOR, role_position: 100 };
     booted.bridge.state.section = "audit";
     booted.bridge.state.auditPage = 2;
     doc.getElementById("content")!.innerHTML = await booted.bridge.renderAudit();
@@ -446,7 +451,7 @@ describe("Server/admin/static — panel behaviour", () => {
     expect(calls.some((c) => c.path.startsWith("/audit-log?"))).toBe(false);
     await new Promise((resolve) => window.setTimeout(resolve, 350));
 
-    const fetched = calls.find((c) => c.path.startsWith("/audit-log?"))?.path;
+    const fetched = auditPath(calls);
     expect(fetched).toBe("/audit-log?limit=51&offset=0&q=needle%20%26%20co&hide_signins=1");
     const rows = doc.querySelectorAll("#auditTbody tr.audit-row");
     expect(rows).toHaveLength(1);
@@ -468,8 +473,8 @@ describe("Server/admin/static — panel behaviour", () => {
     ]);
     select.value = "channel_delete";
     select.dispatchEvent(new window.Event("change", { bubbles: true }));
-    await new Promise((resolve) => window.setTimeout(resolve, 0));
-    expect(calls.find((c) => c.path.startsWith("/audit-log?"))?.path).toBe(
+    await settleWindow(window);
+    expect(auditPath(calls)).toBe(
       "/audit-log?limit=51&offset=0&q=needle%20%26%20co&action=channel_delete&hide_signins=1",
     );
   });
@@ -482,7 +487,6 @@ describe("Server/admin/static — panel behaviour", () => {
     const calls: FetchCall[] = [];
     const now = new Date().toISOString();
     const respond: Responder = (p) => {
-      if (p === "/setup/status") return { json: { needs_setup: false } };
       if (p.startsWith("/audit-log?")) {
         return {
           json: [
@@ -522,16 +526,8 @@ describe("Server/admin/static — panel behaviour", () => {
       }
       return { json: {} };
     };
-    const booted = await boot(calls, respond);
-    dom = booted.dom;
-    const { window } = booted.dom;
-    const doc = window.document;
-    booted.bridge.state.me = { id: 1, permissions: ADMINISTRATOR, role_position: 100 };
-    booted.bridge.state.section = "audit";
-    doc.getElementById("content")!.innerHTML = await booted.bridge.renderAudit();
-    expect(calls.find((c) => c.path.startsWith("/audit-log?"))?.path).toBe(
-      "/audit-log?limit=51&offset=0&hide_signins=1",
-    );
+    const { window, doc } = await openAudit(calls, respond);
+    expect(auditPath(calls)).toBe("/audit-log?limit=51&offset=0&hide_signins=1");
 
     const rows = [...doc.querySelectorAll("#auditTbody tr.audit-row")];
     expect(rows.map((r) => r.querySelector(".audit-what")!.textContent)).toEqual([
@@ -552,15 +548,13 @@ describe("Server/admin/static — panel behaviour", () => {
     expect(chip.getAttribute("aria-pressed")).toBe("false");
     calls.length = 0;
     chip.click();
-    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    await settleWindow(window);
     expect(chip.getAttribute("aria-pressed")).toBe("true");
-    expect(calls.find((c) => c.path.startsWith("/audit-log?"))?.path).toBe(
-      "/audit-log?limit=51&offset=0",
-    );
+    expect(auditPath(calls)).toBe("/audit-log?limit=51&offset=0");
 
     // Filtering on a sign-in action shows it even with the chip off.
     chip.click();
-    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    await settleWindow(window);
     calls.length = 0;
     const select = doc.querySelector<HTMLSelectElement>("#auditAction")!;
     expect([...select.options].map((o) => o.textContent)).toEqual([
@@ -570,10 +564,8 @@ describe("Server/admin/static — panel behaviour", () => {
     ]);
     select.value = "user_login";
     select.dispatchEvent(new window.Event("change", { bubbles: true }));
-    await new Promise((resolve) => window.setTimeout(resolve, 0));
-    expect(calls.find((c) => c.path.startsWith("/audit-log?"))?.path).toBe(
-      "/audit-log?limit=51&offset=0&action=user_login",
-    );
+    await settleWindow(window);
+    expect(auditPath(calls)).toBe("/audit-log?limit=51&offset=0&action=user_login");
   });
 
   // A failed page turn used to advance state.auditPage while the old rows
@@ -583,7 +575,6 @@ describe("Server/admin/static — panel behaviour", () => {
     const calls: FetchCall[] = [];
     let fail = false;
     const respond: Responder = (p) => {
-      if (p === "/setup/status") return { json: { needs_setup: false } };
       if (p.startsWith("/audit-log?")) {
         if (fail) return { status: 500, json: { message: "boom" } };
         return {
@@ -592,17 +583,11 @@ describe("Server/admin/static — panel behaviour", () => {
       }
       return { json: {} };
     };
-    const booted = await boot(calls, respond);
-    dom = booted.dom;
-    const { window } = booted.dom;
-    const doc = window.document;
-    booted.bridge.state.me = { id: 1, permissions: ADMINISTRATOR, role_position: 100 };
-    booted.bridge.state.section = "audit";
-    doc.getElementById("content")!.innerHTML = await booted.bridge.renderAudit();
+    const { booted, window, doc } = await openAudit(calls, respond);
 
     fail = true;
     doc.querySelector<HTMLButtonElement>('[data-action="turnAuditPage"][data-args="[1]"]')!.click();
-    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    await settleWindow(window);
     expect(booted.bridge.state.auditPage).toBe(1);
     expect(booted.bridge.state.auditCache).toEqual([]);
     expect(doc.querySelectorAll("#auditTbody tr")).toHaveLength(0);
@@ -611,8 +596,8 @@ describe("Server/admin/static — panel behaviour", () => {
     fail = false;
     calls.length = 0;
     doc.querySelector<HTMLButtonElement>('#auditResults [data-action="reloadAudit"]')!.click();
-    await new Promise((resolve) => window.setTimeout(resolve, 0));
-    expect(calls.find((c) => c.path.startsWith("/audit-log?"))?.path).toContain("offset=50");
+    await settleWindow(window);
+    expect(auditPath(calls)).toContain("offset=50");
     expect(booted.bridge.state.auditPage).toBe(2);
     expect(doc.querySelectorAll("#auditTbody tr.audit-row")).toHaveLength(50);
   });
@@ -624,7 +609,6 @@ describe("Server/admin/static — panel behaviour", () => {
     const calls: FetchCall[] = [];
     let fail = false;
     const respond: Responder = (p) => {
-      if (p === "/setup/status") return { json: { needs_setup: false } };
       if (p.startsWith("/audit-log?")) {
         if (fail) return { status: 500, json: { message: "boom" } };
         return {
@@ -634,13 +618,7 @@ describe("Server/admin/static — panel behaviour", () => {
       }
       return { json: {} };
     };
-    const booted = await boot(calls, respond);
-    dom = booted.dom;
-    const { window } = booted.dom;
-    const doc = window.document;
-    booted.bridge.state.me = { id: 1, permissions: ADMINISTRATOR, role_position: 100 };
-    booted.bridge.state.section = "audit";
-    doc.getElementById("content")!.innerHTML = await booted.bridge.renderAudit();
+    const { booted, window, doc } = await openAudit(calls, respond);
     const select = doc.querySelector<HTMLSelectElement>("#auditAction")!;
     expect([...select.options].map((o) => o.value)).toEqual([
       "all",
@@ -653,10 +631,8 @@ describe("Server/admin/static — panel behaviour", () => {
     search.dispatchEvent(new window.Event("input", { bubbles: true }));
     calls.length = 0;
     doc.querySelector<HTMLButtonElement>('[data-action="turnAuditPage"][data-args="[1]"]')!.click();
-    await new Promise((resolve) => window.setTimeout(resolve, 0));
-    expect(calls.find((c) => c.path.startsWith("/audit-log?"))?.path).toBe(
-      "/audit-log?limit=51&offset=50&q=foo&hide_signins=1",
-    );
+    await settleWindow(window);
+    expect(auditPath(calls)).toBe("/audit-log?limit=51&offset=50&q=foo&hide_signins=1");
 
     fail = true;
     select.value = "channel_delete";
@@ -670,8 +646,8 @@ describe("Server/admin/static — panel behaviour", () => {
     fail = false;
     calls.length = 0;
     doc.querySelector<HTMLButtonElement>('#auditResults [data-action="reloadAudit"]')!.click();
-    await new Promise((resolve) => window.setTimeout(resolve, 0));
-    expect(calls.find((c) => c.path.startsWith("/audit-log?"))?.path).toBe(
+    await settleWindow(window);
+    expect(auditPath(calls)).toBe(
       "/audit-log?limit=51&offset=0&q=foo&action=channel_delete&hide_signins=1",
     );
   });

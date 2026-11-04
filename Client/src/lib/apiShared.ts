@@ -218,6 +218,8 @@ export function serverErrorCopy(code: string, message: string): string | null {
       return connectText("error.lastRole");
     case RestErrorCode.PUSH_DISABLED:
       return connectText("error.pushDisabled");
+    case RestErrorCode.LOGIN_SESSION_REQUIRED:
+      return connectText("error.loginSessionRequired");
     default:
       return null;
   }
@@ -306,6 +308,20 @@ export interface DmPrivacy {
 export interface UserNote {
   readonly user_id: number;
   readonly note: string;
+}
+
+/** One of the caller's live API tokens, from GET /users/me/api-tokens
+ *  (`{tokens: [...]}`). Revoked and expired tokens are not listed. */
+export interface OwnApiToken {
+  readonly id: number;
+  readonly label: string;
+  readonly created_at: string;
+  readonly last_used: string | null;
+  readonly expires_at: string | null;
+}
+
+export interface OwnApiTokensListResponse {
+  readonly tokens: readonly OwnApiToken[];
 }
 
 /** DELETE /users/me/sessions: every session is revoked, the caller's included. */

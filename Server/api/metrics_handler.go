@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/metrics"
-	"github.com/J3vb/OwnCord/Server/ws"
+	"github.com/J3vb/OwnCord/Server/ws/hubstats"
 )
 
 // EventPersisterMetrics is the nested event-persistence block of ServerMetrics.
@@ -50,7 +50,7 @@ type ServerMetrics struct {
 	DispatchLagMs *metrics.Summary `json:"ws_dispatch_lag_ms,omitempty"`
 	ChatAckMs     *metrics.Summary `json:"chat_send_ack_ms,omitempty"`
 	// VoiceJoinMs is each phase of a completed voice join (voice_join_ms).
-	VoiceJoinMs *ws.VoiceJoinPhases `json:"voice_join_ms,omitempty"`
+	VoiceJoinMs *hubstats.VoiceJoinPhases `json:"voice_join_ms,omitempty"`
 
 	// BroadcastQueueDepth is the hub dispatch channel's current depth; the
 	// max-seqMu-hold gauge is the worst single critical-section hold.
@@ -139,11 +139,11 @@ type WindowMetrics struct {
 	Seconds float64 `json:"seconds"`
 	AsOf    string  `json:"as_of"`
 
-	BroadcastMs    *metrics.Summary    `json:"ws_broadcast_ms,omitempty"`
-	DispatchLagMs  *metrics.Summary    `json:"ws_dispatch_lag_ms,omitempty"`
-	ChatAckMs      *metrics.Summary    `json:"chat_send_ack_ms,omitempty"`
-	VoiceJoinMs    *ws.VoiceJoinPhases `json:"voice_join_ms,omitempty"`
-	SeqMuMaxHoldMs float64             `json:"hub_seqmu_max_hold_ms"`
+	BroadcastMs    *metrics.Summary          `json:"ws_broadcast_ms,omitempty"`
+	DispatchLagMs  *metrics.Summary          `json:"ws_dispatch_lag_ms,omitempty"`
+	ChatAckMs      *metrics.Summary          `json:"chat_send_ack_ms,omitempty"`
+	VoiceJoinMs    *hubstats.VoiceJoinPhases `json:"voice_join_ms,omitempty"`
+	SeqMuMaxHoldMs float64                   `json:"hub_seqmu_max_hold_ms"`
 
 	BroadcastDrops               uint64  `json:"broadcast_drops"`
 	TopicSheds                   uint64  `json:"topic_sheds_total"`
@@ -214,7 +214,7 @@ func NewWindowMetrics(s metrics.WindowSnapshot) *WindowMetrics {
 		summary("voice_join_ms.complete"), summary("voice_join_ms.total"),
 	}
 	if !slices.Contains(phases[:], nil) {
-		w.VoiceJoinMs = &ws.VoiceJoinPhases{
+		w.VoiceJoinMs = &hubstats.VoiceJoinPhases{
 			Precheck: *phases[0], Leave: *phases[1], Persist: *phases[2],
 			Token: *phases[3], Complete: *phases[4], Total: *phases[5],
 		}
@@ -254,7 +254,7 @@ type MetricsSources struct {
 	BroadcastMs         func() metrics.Summary
 	DispatchLagMs       func() metrics.Summary
 	ChatAckMs           func() metrics.Summary
-	VoiceJoinMs         func() ws.VoiceJoinPhases
+	VoiceJoinMs         func() hubstats.VoiceJoinPhases
 	BroadcastQueueDepth func() int
 	SeqMuMaxHoldMs      func() float64
 	LiveKitHealth       func(context.Context) (bool, error)
@@ -281,7 +281,7 @@ type MetricsSources struct {
 	// LatencyCounts reads the raw counts of every latency histogram for the
 	// Prometheus exposition (ws.Hub.LatencyCounts); nil leaves the histogram
 	// families out. The JSON endpoint does not use it.
-	LatencyCounts func() ws.LatencyCounts
+	LatencyCounts func() hubstats.LatencyCounts
 }
 
 func handleMetrics(src MetricsSources) http.HandlerFunc {

@@ -203,14 +203,28 @@ func enrolTOTP(t *testing.T, database *db.DB, uid int64) string {
 	if err != nil {
 		t.Fatalf("GenerateTOTPSecret: %v", err)
 	}
+	storeSealedTOTP(t, database, uid, secret)
+	return secret
+}
+
+// sealedTOTP returns secret sealed under the router's key, the only form a
+// stored TOTP secret is read in.
+func sealedTOTP(t *testing.T, secret string) string {
+	t.Helper()
 	enc, err := auth.EncryptTOTPSecret(testTOTPKey, secret)
 	if err != nil {
 		t.Fatalf("EncryptTOTPSecret: %v", err)
 	}
+	return enc
+}
+
+// storeSealedTOTP stores secret for uid sealed, as the confirm handler does.
+func storeSealedTOTP(t *testing.T, database *db.DB, uid int64, secret string) {
+	t.Helper()
+	enc := sealedTOTP(t, secret)
 	if err := database.UpdateUserTOTPSecret(context.Background(), uid, &enc); err != nil {
 		t.Fatalf("UpdateUserTOTPSecret: %v", err)
 	}
-	return secret
 }
 
 func totpCode(t *testing.T, secret string) string {

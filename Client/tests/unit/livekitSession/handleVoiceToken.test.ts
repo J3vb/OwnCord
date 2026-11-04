@@ -7,7 +7,16 @@ import {
   leaveVoiceChannel,
   setVoiceStatus,
 } from "@stores/voice.store";
-import { createDeferred, useLiveKitSessionHarness } from "../../helpers/livekitSessionHarness";
+import {
+  captureDisconnectedHandler,
+  createDeferred,
+  useLiveKitSessionHarness,
+  enterReconnecting,
+  runReconnect,
+  joinWithWs,
+  enterConnected,
+  joinSession,
+} from "../../helpers/livekitSessionHarness";
 
 vi.mock("livekit-client", () => mocks.livekitClientMock());
 vi.mock("@stores/voice.store", () => mocks.voiceStoreMock());
@@ -33,10 +42,7 @@ describe("LiveKitSession", () => {
 
   describe("handleVoiceToken", () => {
     it("connects to LiveKit and sets up voice session", async () => {
-      session.setServerHost("localhost:7880");
-      session.setWsClient({ send: vi.fn() } as any);
-
-      await session.handleVoiceToken("test-token", "/livekit", 1, "ws://localhost:7880", true);
+      await joinSession(session);
 
       expect(mockRoom.connect).toHaveBeenCalledWith("ws://localhost:7880", "test-token", {
         autoSubscribe: false,
@@ -46,10 +52,7 @@ describe("LiveKitSession", () => {
 
     it("publishes no microphone in the AFK channel and keeps the session up", async () => {
       mockVoiceState.inAfkChannel = true;
-      session.setServerHost("localhost:7880");
-      session.setWsClient({ send: vi.fn() } as any);
-
-      await session.handleVoiceToken("test-token", "/livekit", 1, "ws://localhost:7880", true);
+      await joinSession(session);
 
       expect(mockRoom.localParticipant.setMicrophoneEnabled).not.toHaveBeenCalledWith(true);
       expect(mockRoom.disconnect).not.toHaveBeenCalled();
@@ -60,9 +63,7 @@ describe("LiveKitSession", () => {
     it("refuses to unmute in the AFK channel", async () => {
       mockVoiceState.inAfkChannel = true;
       mockVoiceState.localMuted = true;
-      session.setServerHost("localhost:7880");
-      session.setWsClient({ send: vi.fn() } as any);
-      await session.handleVoiceToken("test-token", "/livekit", 1, "ws://localhost:7880", true);
+      await joinSession(session);
       vi.mocked(setLocalMuted).mockClear();
 
       session.setMuted(false);
@@ -517,15 +518,10 @@ describe("LiveKitSession", () => {
       session.setServerHost("localhost:7880");
       session.setWsClient({ send: vi.fn() } as any);
 
-      // Capture the Disconnected handler registered during room creation.
-      let disconnectedHandler: ((reason?: number) => void) | undefined;
-      mockRoom.on.mockImplementation((event: string, handler: any) => {
-        if (event === "disconnected") disconnectedHandler = handler;
-        return mockRoom;
-      });
+      const disconnected = captureDisconnectedHandler();
 
       await session.handleVoiceToken("test-token", "/livekit", 1, "ws://localhost:7880", true);
-      expect(disconnectedHandler).toBeDefined();
+      expect(disconnected()).toBeDefined();
       expect((session as any)._state.type).toBe("connected");
 
       // Isolate the write triggered purely by the unexpected room drop.
@@ -533,7 +529,7 @@ describe("LiveKitSession", () => {
 
       // Fire an unexpected disconnect (non-CLIENT_INITIATED) — this is the primary
       // reconnecting write, from setReconnectAc via handleDisconnected.
-      disconnectedHandler!(/* SERVER_SHUTDOWN */ 1);
+      disconnected()!(/* SERVER_SHUTDOWN */ 1);
 
       expect((session as any)._state.type).toBe("reconnecting");
       expect(setVoiceStatus).toHaveBeenCalledWith("reconnecting");
@@ -584,52 +580,22 @@ describe("LiveKitSession", () => {
     );
 
     it("writes reconnecting, not connected, when the auto-reconnected room is already SDK-reconnecting", async () => {
-      (session as any)._state = {
-        type: "reconnecting",
-        channelId: 7,
-        latestToken: "reconnect-token",
-        lastUrl: "/livekit",
-        lastDirectUrl: "ws://localhost:7880",
-        ac: new AbortController(),
-      };
+      enterReconnecting(session, 7);
       mockRoom.state = "signalReconnecting";
       (setVoiceStatus as any).mockClear();
 
-      const reconnectPromise = (session as any).attemptAutoReconnect(
-        "reconnect-token",
-        "/livekit",
-        7,
-        "ws://localhost:7880",
-        new AbortController().signal,
-      );
-      await vi.advanceTimersByTimeAsync(3100);
-      await reconnectPromise;
+      await runReconnect(session, 7);
 
       expect(statusCalls()).not.toContain("connected");
       expect(statusCalls().at(-1)).toBe("reconnecting");
     });
 
     it("writes connected after a successful auto-reconnect", async () => {
-      (session as any)._state = {
-        type: "reconnecting",
-        channelId: 7,
-        latestToken: "reconnect-token",
-        lastUrl: "/livekit",
-        lastDirectUrl: "ws://localhost:7880",
-        ac: new AbortController(),
-      };
+      enterReconnecting(session, 7);
       (setVoiceStatus as any).mockClear();
 
       const ac = new AbortController();
-      const reconnectPromise = (session as any).attemptAutoReconnect(
-        "reconnect-token",
-        "/livekit",
-        7,
-        "ws://localhost:7880",
-        ac.signal,
-      );
-      await vi.advanceTimersByTimeAsync(3100);
-      await reconnectPromise;
+      await runReconnect(session, 7, { signal: ac.signal });
 
       expect(setVoiceStatus).toHaveBeenCalledWith("connected");
     });
@@ -638,11 +604,7 @@ describe("LiveKitSession", () => {
       session.setServerHost("localhost:7880");
       session.setWsClient({ send: vi.fn() } as any);
 
-      let disconnectedHandler: ((reason?: number) => void) | undefined;
-      mockRoom.on.mockImplementation((event: string, handler: any) => {
-        if (event === "disconnected") disconnectedHandler = handler;
-        return mockRoom;
-      });
+      const disconnected = captureDisconnectedHandler();
 
       // Join channel 1 as key holder.
       await session.handleVoiceToken("test-token", "/livekit", 1, "ws://localhost:7880", true);
@@ -651,7 +613,7 @@ describe("LiveKitSession", () => {
       // The SFU connection drops — auto-reconnect starts, but the WS socket
       // (and thus the sidebar) is unaffected, so the user can still switch
       // voice channels while this is in flight.
-      disconnectedHandler!(/* SERVER_SHUTDOWN */ 1);
+      disconnected()!(/* SERVER_SHUTDOWN */ 1);
       expect((session as any)._state.type).toBe("reconnecting");
 
       // The user switches to channel 2, which already has a lower-uid
@@ -686,14 +648,10 @@ describe("LiveKitSession", () => {
 
   describe("handleVoiceTokenRefresh", () => {
     it("stores the token and restarts the timer", () => {
-      (session as any)._state = {
-        type: "connected",
-        room: mockRoom,
-        channelId: 7,
+      enterConnected(session, 7, {
         latestToken: "old-token",
-        lastUrl: "/livekit",
         lastDirectUrl: "ws://localhost:7880",
-      };
+      });
 
       const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
       session.handleVoiceTokenRefresh("new-token");
@@ -768,12 +726,7 @@ describe("LiveKitSession", () => {
     // refresh fires later than that, any reconnect attempt after the first
     // 5 minutes of a call presents an already-expired token and fails.
     it("refreshes the token before the server's 5-minute TTL expires", async () => {
-      const mockWs = { send: vi.fn() } as any;
-      session.setWsClient(mockWs);
-      session.setServerHost("localhost:7880");
-
-      mockRoom.connect.mockResolvedValue(undefined);
-      await session.handleVoiceToken("token", "/livekit", 1, "ws://localhost:7880", true);
+      const mockWs = await joinWithWs(session);
 
       mockWs.send.mockClear();
 
@@ -786,12 +739,7 @@ describe("LiveKitSession", () => {
     });
 
     it("fires after TOKEN_REFRESH_MS and sends voice_token_refresh WS message", async () => {
-      const mockWs = { send: vi.fn() } as any;
-      session.setWsClient(mockWs);
-      session.setServerHost("localhost:7880");
-
-      mockRoom.connect.mockResolvedValue(undefined);
-      await session.handleVoiceToken("token", "/livekit", 1, "ws://localhost:7880", true);
+      const mockWs = await joinWithWs(session);
 
       mockWs.send.mockClear();
 
@@ -814,14 +762,7 @@ describe("LiveKitSession", () => {
     });
 
     it("handleVoiceTokenRefresh stores valid token and restarts timer", () => {
-      (session as any)._state = {
-        type: "connected",
-        room: mockRoom,
-        channelId: 1,
-        latestToken: "old-token",
-        lastUrl: "/lk",
-        lastDirectUrl: undefined,
-      };
+      enterConnected(session, 1, { latestToken: "old-token", lastUrl: "/lk" });
       session.handleVoiceTokenRefresh("fresh-token");
       expect((session as any)._state.latestToken).toBe("fresh-token");
       // Timer lives on VoiceTokenManager since the refactor. Asserting on the
@@ -831,12 +772,7 @@ describe("LiveKitSession", () => {
     });
 
     it("clearTokenRefreshTimer prevents pending refresh from firing", async () => {
-      const mockWs = { send: vi.fn() } as any;
-      session.setWsClient(mockWs);
-      session.setServerHost("localhost:7880");
-
-      mockRoom.connect.mockResolvedValue(undefined);
-      await session.handleVoiceToken("token", "/livekit", 1, "ws://localhost:7880", true);
+      const mockWs = await joinWithWs(session);
 
       mockWs.send.mockClear();
       (session as any).clearTokenRefreshTimer();
@@ -857,12 +793,7 @@ describe("LiveKitSession", () => {
     // avoid). The post-timeout retry must use the server's rate-limit
     // cadence (60s), not the periodic one (240s).
     it("re-arms at the 60s retry cadence, not the full 4-minute interval, after an unanswered refresh", async () => {
-      const mockWs = { send: vi.fn() } as any;
-      session.setWsClient(mockWs);
-      session.setServerHost("localhost:7880");
-
-      mockRoom.connect.mockResolvedValue(undefined);
-      await session.handleVoiceToken("token", "/livekit", 1, "ws://localhost:7880", true);
+      const mockWs = await joinWithWs(session);
 
       mockWs.send.mockClear();
 
@@ -913,11 +844,7 @@ describe("LiveKitSession", () => {
 
   describe("requestTokenRefresh throttles to the server's 1-per-60s budget", () => {
     it("does not resend voice_token_refresh within 60s of the previous one", async () => {
-      const mockWs = { send: vi.fn() } as any;
-      session.setWsClient(mockWs);
-      session.setServerHost("localhost:7880");
-      mockRoom.connect.mockResolvedValue(undefined);
-      await session.handleVoiceToken("token", "/livekit", 1, "ws://localhost:7880", true);
+      const mockWs = await joinWithWs(session);
 
       mockWs.send.mockClear();
       (session as any).requestTokenRefresh();
@@ -933,11 +860,7 @@ describe("LiveKitSession", () => {
     });
 
     it("allows a refresh again once the 60s budget window has passed", async () => {
-      const mockWs = { send: vi.fn() } as any;
-      session.setWsClient(mockWs);
-      session.setServerHost("localhost:7880");
-      mockRoom.connect.mockResolvedValue(undefined);
-      await session.handleVoiceToken("token", "/livekit", 1, "ws://localhost:7880", true);
+      const mockWs = await joinWithWs(session);
 
       mockWs.send.mockClear();
       (session as any).requestTokenRefresh();
@@ -951,11 +874,7 @@ describe("LiveKitSession", () => {
     });
 
     it("does not throttle a fresh join shortly after leaveVoice resets the budget", async () => {
-      const mockWs = { send: vi.fn() } as any;
-      session.setWsClient(mockWs);
-      session.setServerHost("localhost:7880");
-      mockRoom.connect.mockResolvedValue(undefined);
-      await session.handleVoiceToken("token", "/livekit", 1, "ws://localhost:7880", true);
+      const mockWs = await joinWithWs(session);
 
       (session as any).requestTokenRefresh();
       session.leaveVoice(false);

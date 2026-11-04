@@ -6,8 +6,10 @@ vi.mock("@lib/ui/toast", () => ({ showToast: (...args: unknown[]) => mockShowToa
 import { buildAccountTab } from "../../src/features/settings/AccountTab";
 import { setSessionReplaced } from "@stores/ui.store";
 import type { SettingsOverlayOptions } from "../../src/features/settings/SettingsOverlay";
-import type { SessionInfo } from "@lib/api";
+import { ApiClientError } from "@lib/api";
+import type { OwnApiToken, SessionInfo } from "@lib/api";
 import { signInAs } from "../helpers/storeSeeds";
+import { makeOverlayOptions } from "../helpers/settingsOverlayOptions";
 
 // B7-14: the Account tab lists every signed-in device, signs one out by id,
 // and signs out everywhere behind a confirmation that says this device is
@@ -33,48 +35,38 @@ const OTHER: SessionInfo = {
 };
 
 function makeOptions(overrides?: Partial<SettingsOverlayOptions>): SettingsOverlayOptions {
-  return {
-    onClose: vi.fn(),
-    onChangePassword: vi.fn().mockResolvedValue(undefined),
-    onUpdateProfile: vi.fn().mockResolvedValue(undefined),
+  return makeOverlayOptions({
     onUploadAvatar: vi.fn().mockResolvedValue(""),
-    onRemoveAvatar: vi.fn().mockResolvedValue(undefined),
-    onLogout: vi.fn(),
-    onDeleteAccount: vi.fn().mockResolvedValue(undefined),
-    onStatusChange: vi.fn(),
     onEnableTotp: vi.fn().mockResolvedValue({ qr_uri: "", backup_codes: [] }),
-    onConfirmTotp: vi.fn().mockResolvedValue(undefined),
-    onDisableTotp: vi.fn().mockResolvedValue(undefined),
-    onRefreshTotpStatus: vi.fn().mockResolvedValue(undefined),
-    onRegenerateRecoveryCodes: vi.fn().mockResolvedValue([]),
-    onEnrolRecoveryKit: vi.fn().mockResolvedValue({ created_at: "" }),
-    onGetRecoveryKitStatus: vi.fn().mockResolvedValue({ enrolled: false, used_at: null }),
     onListSessions: vi.fn().mockResolvedValue([OTHER, CURRENT]),
-    onRevokeSession: vi.fn().mockResolvedValue(undefined),
     onRevokeAllSessions: vi
       .fn()
       .mockResolvedValue({ sessions_revoked: 2, current_session_revoked: true }),
     ...overrides,
-  };
+  });
 }
 
-describe("Account tab — devices", () => {
-  let ac: AbortController;
-
+/** Fresh sign-in and abort signal per test; returns the current controller. */
+function useAccountTabHarness(): () => AbortController {
+  let ac = new AbortController();
   beforeEach(() => {
     ac = new AbortController();
     mockShowToast.mockClear();
     setSessionReplaced(false);
     signInAs({ id: 1, username: "alice", avatar: null, role: "member" }, { serverName: "s" });
   });
-
   afterEach(() => {
     ac.abort();
     document.body.replaceChildren();
   });
+  return () => ac;
+}
+
+describe("Account tab — devices", () => {
+  const harness = useAccountTabHarness();
 
   async function render(options: SettingsOverlayOptions): Promise<HTMLElement> {
-    const tab = buildAccountTab(options, ac.signal);
+    const tab = buildAccountTab(options, harness().signal);
     document.body.appendChild(tab);
     await vi.waitFor(() => {
       expect(tab.querySelectorAll('[data-testid="session-row"]').length).toBeGreaterThan(0);
@@ -212,5 +204,131 @@ describe("Account tab — devices", () => {
     );
     expect(rows(tab)[0]!.textContent).toContain("Unknown device");
     expect(rows(tab)[0]!.textContent).toContain("Unknown IP");
+  });
+});
+
+const BOT: OwnApiToken = {
+  id: 4,
+  label: "release-bot",
+  created_at: "2026-10-01 10:00:00",
+  last_used: null,
+  expires_at: null,
+};
+
+describe("Account tab — API tokens", () => {
+  const ac = useAccountTabHarness();
+
+  const tokenRows = (tab: HTMLElement): HTMLElement[] => [
+    ...tab.querySelectorAll<HTMLElement>('[data-testid="api-token-row"]'),
+  ];
+  const section = (tab: HTMLElement): HTMLElement =>
+    tab.querySelector<HTMLElement>('[data-testid="api-tokens-section"]')!;
+  const revokeOption = (tab: HTMLElement): HTMLElement =>
+    tab.querySelector<HTMLElement>('[data-testid="pw-revoke-api-tokens-row"]')!;
+
+  async function renderWith(overrides: Partial<SettingsOverlayOptions>): Promise<HTMLElement> {
+    const tab = buildAccountTab(makeOptions(overrides), ac().signal);
+    document.body.appendChild(tab);
+    await vi.waitFor(() => {
+      expect(tab.querySelectorAll('[data-testid="session-row"]').length).toBeGreaterThan(0);
+    });
+    await Promise.resolve();
+    return tab;
+  }
+
+  it("lists the account's tokens and ticks the revoke option on the password form", async () => {
+    const tab = await renderWith({
+      onListApiTokens: vi.fn().mockResolvedValue([BOT]),
+      onRevokeApiToken: vi.fn().mockResolvedValue(undefined),
+    });
+    await vi.waitFor(() => expect(tokenRows(tab)).toHaveLength(1));
+    expect(section(tab).hidden).toBe(false);
+    expect(tokenRows(tab)[0]!.textContent).toContain("release-bot");
+    expect(tokenRows(tab)[0]!.textContent).toContain("Last used never");
+    expect(revokeOption(tab).hidden).toBe(false);
+    const box = tab.querySelector<HTMLInputElement>('[data-testid="pw-revoke-api-tokens"]')!;
+    expect(box.checked).toBe(true);
+  });
+
+  it("hides the list and the option when the account has no tokens", async () => {
+    const tab = await renderWith({
+      onListApiTokens: vi.fn().mockResolvedValue([]),
+      onRevokeApiToken: vi.fn(),
+    });
+    await Promise.resolve();
+    expect(section(tab).hidden).toBe(true);
+    expect(revokeOption(tab).hidden).toBe(true);
+  });
+
+  it("revokes the chosen token and removes its row", async () => {
+    const onRevokeApiToken = vi.fn().mockResolvedValue(undefined);
+    const tab = await renderWith({
+      onListApiTokens: vi.fn().mockResolvedValue([BOT]),
+      onRevokeApiToken,
+    });
+    await vi.waitFor(() => expect(tokenRows(tab)).toHaveLength(1));
+    tab.querySelector<HTMLButtonElement>('[data-testid="api-token-revoke"]')!.click();
+    expect(onRevokeApiToken).toHaveBeenCalledWith(4);
+    await vi.waitFor(() =>
+      expect(mockShowToast).toHaveBeenCalledWith(
+        "API token revoked. It can no longer be used.",
+        "success",
+      ),
+    );
+    expect(tokenRows(tab)).toHaveLength(0);
+    expect(section(tab).hidden).toBe(true);
+  });
+
+  it("keeps the row gone when the token was already revoked elsewhere", async () => {
+    const tab = await renderWith({
+      onListApiTokens: vi.fn().mockResolvedValue([BOT]),
+      onRevokeApiToken: vi
+        .fn()
+        .mockRejectedValue(new ApiClientError(404, "NOT_FOUND", "no active token with that id")),
+    });
+    await vi.waitFor(() => expect(tokenRows(tab)).toHaveLength(1));
+    tab.querySelector<HTMLButtonElement>('[data-testid="api-token-revoke"]')!.click();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(tokenRows(tab)).toHaveLength(0);
+    expect(mockShowToast).not.toHaveBeenCalledWith(expect.anything(), "error");
+  });
+
+  it("puts the row back when the server refuses the revoke", async () => {
+    const tab = await renderWith({
+      onListApiTokens: vi.fn().mockResolvedValue([BOT]),
+      onRevokeApiToken: vi.fn().mockRejectedValue(new Error("network down")),
+    });
+    await vi.waitFor(() => expect(tokenRows(tab)).toHaveLength(1));
+    tab.querySelector<HTMLButtonElement>('[data-testid="api-token-revoke"]')!.click();
+    await vi.waitFor(() => expect(tokenRows(tab)).toHaveLength(1));
+    expect(section(tab).hidden).toBe(false);
+    expect(mockShowToast).toHaveBeenCalledWith(expect.any(String), "error");
+  });
+
+  it("reloads the token list after a password change that revoked the tokens", async () => {
+    // The password form and the token list each read the list once on build.
+    const onListApiTokens = vi
+      .fn()
+      .mockResolvedValueOnce([BOT])
+      .mockResolvedValueOnce([BOT])
+      .mockResolvedValue([]);
+    const tab = await renderWith({
+      onListApiTokens,
+      onRevokeApiToken: vi.fn().mockResolvedValue(undefined),
+      onChangePassword: vi.fn().mockResolvedValue(undefined),
+    });
+    await vi.waitFor(() => expect(tokenRows(tab)).toHaveLength(1));
+    const inputs = tab.querySelectorAll<HTMLInputElement>("#pw-old, #pw-new, #pw-confirm");
+    inputs[0]!.value = "oldpass123";
+    inputs[1]!.value = "newpassword123";
+    inputs[2]!.value = "newpassword123";
+    const changeBtn = [...tab.querySelectorAll<HTMLButtonElement>("button")].find(
+      (b) => b.textContent === "Change Password",
+    )!;
+    changeBtn.click();
+    await vi.waitFor(() => expect(tokenRows(tab)).toHaveLength(0));
+    expect(section(tab).hidden).toBe(true);
+    await vi.waitFor(() => expect(revokeOption(tab).hidden).toBe(true));
   });
 });

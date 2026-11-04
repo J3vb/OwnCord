@@ -17,8 +17,6 @@ import type { Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
 import {
   buildTauriMockScript,
-  MOCK_LOGIN_RESPONSE,
-  MOCK_MESSAGES,
   MOCK_PINNED_MESSAGES,
   emitWsMessage,
   navigateToMainPage,
@@ -27,7 +25,11 @@ import {
   parkLiveKitSocket,
   connectVoiceSession,
   openDmRow,
+  BASE_SESSION_ROUTES,
+  dmChannel,
+  thirdDmChannel,
 } from "./helpers";
+import { decodeBody, fetchCalls, sentFrames, sentTo, waitForFetch } from "./support/invokeLog";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -60,28 +62,8 @@ const READY_MEMBERS = [
 ];
 
 const DM_CHANNELS = [
-  {
-    channel_id: OTHER_DM,
-    recipient: {
-      id: OTHER_ID,
-      username: "otheruser",
-      display_name: "Otto",
-      avatar: "",
-      status: "online",
-    },
-    last_message_id: 500,
-    last_message: "Hey there!",
-    last_message_at: "2026-03-15T12:00:00Z",
-    unread_count: 0,
-  },
-  {
-    channel_id: THIRD_DM,
-    recipient: { id: THIRD_ID, username: "thirduser", avatar: "", status: "idle" },
-    last_message_id: 501,
-    last_message: "See you later",
-    last_message_at: "2026-03-15T11:00:00Z",
-    unread_count: 0,
-  },
+  dmChannel(OTHER_DM, { id: OTHER_ID, username: "otheruser", display_name: "Otto" }),
+  thirdDmChannel(THIRD_DM),
 ];
 
 const CREATE_DM_RESPONSE = {
@@ -94,9 +76,7 @@ async function mockSession(page: Page): Promise<void> {
   await page.addInitScript(
     buildTauriMockScript({
       httpRoutes: [
-        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-        { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
-        { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
+        ...BASE_SESSION_ROUTES,
         { pattern: "/pins", status: 200, body: MOCK_PINNED_MESSAGES },
         { pattern: "/api/v1/dms", method: "GET", status: 200, body: DM_CHANNELS },
         { pattern: "/api/v1/dms", method: "POST", status: 200, body: CREATE_DM_RESPONSE },
@@ -141,94 +121,6 @@ async function openDmProfile(page: Page): Promise<void> {
   await expect(profileSidebar(page)).toHaveCount(0);
   await page.locator("[data-testid='ch-name-group']").click();
   await expectDmProfileOpen(page);
-}
-
-// ---------------------------------------------------------------------------
-// Outgoing-traffic capture (the mock's own IPC log)
-// ---------------------------------------------------------------------------
-
-interface FetchCall {
-  readonly method: string;
-  readonly url: string;
-  readonly data: number[] | null;
-}
-
-interface InvokeEntry {
-  readonly cmd: string;
-  readonly args?: { readonly clientConfig?: FetchCall; readonly message?: string };
-}
-
-async function fetchCalls(page: Page): Promise<FetchCall[]> {
-  const log = await page.evaluate(
-    () => (window as unknown as { __invokeLog: InvokeEntry[] }).__invokeLog,
-  );
-  const calls: FetchCall[] = [];
-  for (const entry of log) {
-    if (entry.cmd === "plugin:http|fetch" && entry.args?.clientConfig !== undefined) {
-      calls.push(entry.args.clientConfig);
-    }
-  }
-  return calls;
-}
-
-function decodeBody(call: FetchCall): string | null {
-  if (!Array.isArray(call.data)) return null;
-  return new TextDecoder().decode(new Uint8Array(call.data));
-}
-
-/** Poll until a request matching `predicate` has gone out, and return it. */
-async function waitForFetch(
-  page: Page,
-  predicate: (call: FetchCall) => boolean,
-  timeout = 5_000,
-): Promise<FetchCall> {
-  let found: FetchCall | undefined;
-  await expect(async () => {
-    found = (await fetchCalls(page)).find(predicate);
-    expect(found).toBeDefined();
-  }).toPass({ timeout });
-  return found!;
-}
-
-interface SentFrame {
-  readonly type: string;
-  readonly payload?: Record<string, unknown>;
-}
-
-/** Every WS frame the client actually sent, from the mock's own IPC log. */
-async function sentFrames(page: Page): Promise<SentFrame[]> {
-  return page.evaluate(() => {
-    const log = (
-      window as unknown as { __invokeLog: Array<{ cmd: string; args?: { message?: string } }> }
-    ).__invokeLog;
-    const frames: Array<{ type: string; payload?: Record<string, unknown> }> = [];
-    for (const entry of log) {
-      if (entry.cmd !== "ws_send") continue;
-      try {
-        frames.push(JSON.parse(entry.args?.message ?? "{}"));
-      } catch {
-        // Not a JSON client frame; skip.
-      }
-    }
-    return frames;
-  });
-}
-
-/** Poll until a frame of `type` carrying `channelId` has gone out. */
-async function waitForSent(
-  page: Page,
-  type: string,
-  channelId: number,
-  timeout = 5_000,
-): Promise<SentFrame> {
-  let found: SentFrame | undefined;
-  await expect(async () => {
-    found = (await sentFrames(page)).find(
-      (f) => f.type === type && f.payload?.channel_id === channelId,
-    );
-    expect(found).toBeDefined();
-  }).toPass({ timeout });
-  return found!;
 }
 
 // ---------------------------------------------------------------------------
@@ -334,9 +226,9 @@ test.describe("User profile popup — member list", () => {
 
     // ...then joins that DM's voice channel and rings it. Joining is first:
     // the caller must actually be in the room before the ring is truthful.
-    const join = await waitForSent(page, "voice_join", NEW_DM);
+    const join = await sentTo(page, "voice_join", NEW_DM);
     await connectVoiceSession(page);
-    const ring = await waitForSent(page, "call_ring", NEW_DM);
+    const ring = await sentTo(page, "call_ring", NEW_DM);
     expect(ring.payload).toEqual({ channel_id: NEW_DM });
     const frames = await sentFrames(page);
     expect(
@@ -357,9 +249,9 @@ test.describe("User profile popup — member list", () => {
     const createsBefore = (await fetchCalls(page)).filter((c) => c.method === "POST").length;
     await page.locator("[data-testid='upp-call-btn']").click();
 
-    const join = await waitForSent(page, "voice_join", OTHER_DM);
+    const join = await sentTo(page, "voice_join", OTHER_DM);
     await connectVoiceSession(page);
-    const ring = await waitForSent(page, "call_ring", OTHER_DM);
+    const ring = await sentTo(page, "call_ring", OTHER_DM);
     expect(ring.payload).toEqual({ channel_id: OTHER_DM });
     expect(join.type).toBe("voice_join");
     // No new DM was created for an existing conversation.
@@ -397,7 +289,7 @@ test.describe("DM profile sidebar", () => {
     const wsSendCount = () =>
       page.evaluate(
         () =>
-          (window as unknown as { __invokeLog: InvokeEntry[] }).__invokeLog.filter(
+          (window as unknown as { __invokeLog: Array<{ cmd: string }> }).__invokeLog.filter(
             (e) => e.cmd === "ws_send",
           ).length,
       );

@@ -1499,6 +1499,8 @@ ul.md-list-nested {
 }
 .msg-image:hover .gif-play-btn,
 .msg-image:focus-within .gif-play-btn,
+.msg-sticker:hover .gif-play-btn,
+.msg-sticker:focus-within .gif-play-btn,
 .gif-paused .gif-play-btn {
   opacity: 1;
 }
@@ -1586,6 +1588,38 @@ ul.md-list-nested {
 .image-lightbox-close:hover,
 .image-lightbox-action:hover {
   background: var(--scrim-hover);
+}
+/* The Android app's Save and Share, under the image. */
+.image-lightbox-actions {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  z-index: 1;
+}
+.image-lightbox-bar-btn {
+  height: 48px;
+  border-radius: var(--radius-md);
+  border: none;
+  background: var(--scrim);
+  color: var(--on-fill);
+  font: inherit;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  cursor: pointer;
+}
+.image-lightbox-bar-btn[aria-disabled="true"] {
+  opacity: 0.6;
+}
+/* The image stays clear of the bar and the toolbar. */
+.image-lightbox:has(.image-lightbox-actions) img {
+  max-height: calc(100vh - 176px);
 }
 
 .image-lightbox-prev,
@@ -2472,6 +2506,10 @@ ul.md-list-nested {
   width: 160px;
   height: 160px;
   object-fit: contain;
+}
+/* A paused sticker keeps its ▶ button but is not labelled "GIF". */
+.msg-sticker.gif-paused::after {
+  content: none;
 }
 .msg-sticker-deleted {
   display: inline-block;

@@ -41,9 +41,11 @@ export type IconName =
   | "send"
   | "reply"
   | "pencil"
+  | "plus"
   | "trash-2"
   | "file-text"
   | "download"
+  | "share-2"
   | "chevron-down"
   | "chevron-up"
   | "chevron-left"
@@ -90,7 +92,8 @@ export type IconName =
   | "ellipsis"
   | "gamepad-2"
   | "music"
-  | "zap";
+  | "zap"
+  | "chart-column";
 
 // ---------------------------------------------------------------------------
 // SVG inner content (innerHTML) — Lucide 0.x path data
@@ -169,6 +172,7 @@ const ICON_PATHS: Record<IconName, string> = {
   reply: `<polyline points="9 14 4 9 9 4"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/>`,
 
   // Edit pencil
+  plus: `<path d="M5 12h14"/><path d="M12 5v14"/>`,
   pencil: `<path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/>`,
 
   // Trash can
@@ -179,6 +183,7 @@ const ICON_PATHS: Record<IconName, string> = {
 
   // Download arrow
   download: `<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/>`,
+  "share-2": `<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" x2="15.42" y1="13.51" y2="17.49"/><line x1="15.41" x2="8.59" y1="6.51" y2="10.49"/>`,
 
   // Down chevron
   "chevron-down": `<path d="m6 9 6 6 6-6"/>`,
@@ -265,6 +270,9 @@ const ICON_PATHS: Record<IconName, string> = {
 
   // Lightning bolt (auto-login indicator)
   zap: `<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>`,
+
+  // Bar chart: the composer sheet's Poll row
+  "chart-column": `<path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/>`,
 
   // Security shields — E2EE identity verification badges (F3 TOFU voice panel).
   shield: `<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/>`,

@@ -19,8 +19,6 @@ import type { Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
 import {
   buildTauriMockScript,
-  MOCK_LOGIN_RESPONSE,
-  MOCK_MESSAGES,
   MOCK_ROLES,
   MOCK_PINNED_MESSAGES,
   emitWsMessage,
@@ -28,7 +26,11 @@ import {
   navigateToMainPage,
   waitForWsReady,
   openDmRow,
+  BASE_SESSION_ROUTES,
+  openContextMenuOn,
 } from "./helpers";
+import { type SentFrame, sentFrames } from "./support/invokeLog";
+import { captureCalls, fetchCalls } from "./support/ipcCapture";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -99,64 +101,8 @@ const DM_GROUP = {
 // Outgoing-frame capture
 // ---------------------------------------------------------------------------
 
-interface SentFrame {
-  readonly type: string;
-  readonly payload?: Record<string, unknown>;
-}
-
-/** The client's own outgoing WS frames, as recorded by the Tauri mock's IPC log. */
-async function sentFrames(page: Page): Promise<SentFrame[]> {
-  return page.evaluate(() => {
-    const log = (
-      window as unknown as { __invokeLog: Array<{ cmd: string; args?: { message?: string } }> }
-    ).__invokeLog;
-    const frames: Array<{ type: string; payload?: Record<string, unknown> }> = [];
-    for (const entry of log) {
-      if (entry.cmd !== "ws_send") continue;
-      try {
-        frames.push(JSON.parse(entry.args?.message ?? "{}"));
-      } catch {
-        // A non-JSON frame is not a client WS message; skip it.
-      }
-    }
-    return frames;
-  });
-}
-
 async function chatSendFrames(page: Page): Promise<SentFrame[]> {
   return (await sentFrames(page)).filter((f) => f.type === "chat_send");
-}
-
-interface CapturedCall {
-  readonly cmd: string;
-  readonly method?: string;
-  readonly url?: string;
-}
-
-/** Passed as a `wrappers` entry, so it runs after the Tauri mock sets up `invoke`. */
-function captureScript(): void {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const internals = (window as any).__TAURI_INTERNALS__;
-  const orig = internals.invoke;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (window as any).__capturedCalls = [];
-  internals.invoke = async (cmd: string, args: unknown) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const a = args as any;
-    if (cmd === "plugin:http|fetch") {
-      const cfg = a?.clientConfig ?? {};
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (window as any).__capturedCalls.push({ cmd, method: cfg.method, url: cfg.url });
-    }
-    return orig(cmd, args);
-  };
-}
-
-async function fetchCalls(page: Page): Promise<CapturedCall[]> {
-  return page.evaluate(() => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return ((window as any).__capturedCalls ?? []) as CapturedCall[];
-  });
 }
 
 // ---------------------------------------------------------------------------
@@ -242,11 +188,9 @@ interface MockOpts {
 async function boot(page: Page, opts: MockOpts = {}): Promise<void> {
   await page.addInitScript(
     buildTauriMockScript({
-      wrappers: [captureScript],
+      wrappers: [captureCalls],
       httpRoutes: [
-        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-        { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
-        { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
+        ...BASE_SESSION_ROUTES,
         { pattern: "/pins", status: 200, body: MOCK_PINNED_MESSAGES },
         // Ready-time block refresh; the 1:1 block flow writes and clears it.
         { pattern: "/api/v1/blocks/2", method: "PUT", status: 200, body: {} },
@@ -293,27 +237,22 @@ async function sendMessage(page: Page, text: string): Promise<void> {
 /** Open a member row's context menu, positioned at a safe viewport point (the
  *  sidebar rows sit low and a real right-click would put the menu off-screen). */
 async function openMemberMenu(page: Page, userId: number) {
-  const row = page.locator(`[data-testid='member-${userId}']`);
-  await expect(row).toBeVisible({ timeout: 5_000 });
-  await row.evaluate((el) =>
-    el.dispatchEvent(
-      new MouseEvent("contextmenu", {
-        bubbles: true,
-        cancelable: true,
-        clientX: 640,
-        clientY: 80,
-        button: 2,
-      }),
-    ),
-  );
-  const menu = page.locator(".context-menu").first();
-  await expect(menu).toBeVisible({ timeout: 5_000 });
-  return menu;
+  return openContextMenuOn(page, page.locator(`[data-testid='member-${userId}']`));
 }
 
 // ---------------------------------------------------------------------------
 // Permission gating — the server's can_send verdict
 // ---------------------------------------------------------------------------
+
+async function expectBlockSent(page: Page): Promise<void> {
+  await expect
+    .poll(async () =>
+      (await fetchCalls(page)).some(
+        (c) => c.method === "PUT" && (c.url ?? "").includes("/api/v1/blocks/2"),
+      ),
+    )
+    .toBe(true);
+}
 
 test.describe("Composer gating — permission", () => {
   test("can_send:false disables the composer with the permission reason, and a targeted can_send:true re-enables it", async ({
@@ -487,13 +426,7 @@ test.describe("Composer gating — DM blocks", () => {
     await expect(
       page.locator("[data-testid='toast']", { hasText: "Blocked otheruser" }),
     ).toBeVisible({ timeout: 5_000 });
-    await expect
-      .poll(async () =>
-        (await fetchCalls(page)).some(
-          (c) => c.method === "PUT" && (c.url ?? "").includes("/api/v1/blocks/2"),
-        ),
-      )
-      .toBe(true);
+    await expectBlockSent(page);
 
     // Open the DM: the composer is gated by the block, and the reason says who
     // the blocker is.
@@ -546,13 +479,7 @@ test.describe("Composer gating — DM blocks", () => {
     const blockItem = menu.locator("[data-testid='block-toggle']");
     await blockItem.click();
     await blockItem.click();
-    await expect
-      .poll(async () =>
-        (await fetchCalls(page)).some(
-          (c) => c.method === "PUT" && (c.url ?? "").includes("/api/v1/blocks/2"),
-        ),
-      )
-      .toBe(true);
+    await expectBlockSent(page);
 
     // Control: the 1:1 DM with that user IS gated.
     await openDmRow(page);
@@ -567,7 +494,7 @@ test.describe("Composer gating — DM blocks", () => {
       "otheruser, thirduser",
     );
     await expect(textarea(page)).toBeEnabled({ timeout: 5_000 });
-    await expect(textarea(page)).toHaveAttribute("placeholder", "Message #otheruser, thirduser");
+    await expect(textarea(page)).toHaveAttribute("placeholder", "Message otheruser, thirduser");
     await expect(composer(page)).not.toHaveClass(/composer-disabled/);
 
     await sendMessage(page, "group message");

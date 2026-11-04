@@ -87,6 +87,8 @@ by default). A switch hides its button in every open composer at once through
 `onPrefChange`; it only removes the icon, so the emoji and GIF shortcuts still
 open the picker. Switching a button back on never shows one the server or host
 left out (no stickers, polls or voice messages). Send and "+" cannot be hidden.
+Sticker and Poll are tiles in the "+" menu, so their switches add or remove
+the tile; a composer without "+" (a thread's) keeps Sticker in its bar.
 
 > **✓ Implemented (2026-07).** The server sends an authoritative per-channel
 > `can_send` in the ready payload (`ws/serve.go` `channelCanSend`, mirroring
@@ -213,6 +215,20 @@ Usernames are inserted as text nodes — never markup.
 The composer supports file attach with client-side validation and per-item
 upload state (already thorough — `MessageInput.ts`).
 
+**The "+" menu.** The chat bar is "+", the text, GIF, emoji, the mic and
+send; "+" opens a menu of tiles (`features/messaging/attachSheet.ts`). On a
+computer it is a two-wide grid above the bar (`role="menu"`, arrow keys move,
+Escape closes and hands focus back to "+") with Upload, Poll and Sticker. On
+the phone layout it is a bottom sheet with Take photo
+(`accept="image/*" capture="environment"`), Gallery (`accept="image/*,video/*"`,
+several at once), Files (any file, several at once) and Poll; stickers stay a
+tab of the smiley's picker there. Each file tile has its own hidden input; all
+three feed `handlePasteFile()`. With uploads off the file tiles go and "+"
+stays usable for Poll and Sticker; it is disabled only when nothing is left. A
+tile tapped after the composer locked does nothing, and locking it closes an
+open menu. On a phone row the mic and send take turns: the mic shows while
+there is nothing to send, send once there is text or a picked file.
+
 | State      | Presentation                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | selected   | Thumbnail/chip per file                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
@@ -312,8 +328,10 @@ read when it opens, so the bar covers only the visit in progress.
 
 **Explicit mark-as-read (✓ implemented 2026-08):** the channel context menu gains
 **Mark as Read** (disabled when the channel is already read, absent for voice
-channels), and the sidebar's server header gains **Mark All as Read**, which
-appears only while something is unread. Both go through `lib/readState.ts`,
+channels), and the server name menu gains **Mark as Read** for the whole
+server (also Shift+Esc), shown only while a server channel is unread. It is not
+a header icon: an icon that came and went with read state wrapped a long server
+name's header row and moved the channel list under the pointer. Both go through `lib/readState.ts`,
 which sends the `mark_read` WS message and clears the local badges. `mark_read`
 rather than `channel_focus`: focus also rebinds the connection's focused channel,
 which would misroute unread bookkeeping for the channel actually on screen.
@@ -470,7 +488,7 @@ the same signal in future.
 
 ## Source of truth
 
-`src/components/MessageList.ts` (+ `message-list/`), `src/components/MessageInput.ts`,
+`src/components/MessageList.ts` (+ `message-list/`), `src/components/MessageInput.ts` (+ `src/features/messaging/attachSheet.ts`),
 `src/pages/main-page/ChannelController.ts`,
 `src/pages/main-page/MessageController.ts`, `src/pages/main-page/ReactionController.ts`,
 `src/stores/messages.store.ts` (+ its reducers in `src/features/messaging/`), `src/lib/dispatcher.ts`, `src/features/messaging/wsHandlers.ts`, `src/lib/ws.ts`,

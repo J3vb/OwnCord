@@ -32,33 +32,15 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 // The dispatcher pulls in notifications; the voice handlers reach LiveKit and
 // the identity publisher. None is under test here, so each is stubbed the way
 // the unit dispatcher tests stub it.
-vi.mock("@lib/notifications", () => ({
-  notifyIncomingMessage: vi.fn(),
-  notifyMention: vi.fn(),
-  notifyChannelActivity: vi.fn(),
-  cleanupNotificationAudio: vi.fn(),
-}));
-vi.mock("@lib/voice/livekitSession", () => ({
-  handleVoiceToken: vi.fn(async () => {}),
-  handleParticipantLeft: vi.fn(async () => {}),
-  handleE2EEAnnounce: vi.fn(async () => {}),
-  handleE2EEOffer: vi.fn(async () => {}),
-  leaveVoice: vi.fn(),
-  cleanupAll: vi.fn(),
-  isVoiceSessionActive: vi.fn(() => false),
-  isAutoReconnecting: vi.fn(() => false),
-  failPendingRejoin: vi.fn(),
-  setMuted: vi.fn(),
-  setDeafened: vi.fn(),
-  disableCamera: vi.fn(async () => {}),
-  disableScreenshare: vi.fn(async () => {}),
-}));
+vi.mock("@lib/notifications", () => dispatcherMocks.notificationsMock());
+vi.mock("@lib/voice/livekitSession", () => dispatcherMocks.livekitSessionMock());
 vi.mock("@lib/ui/toast", () => ({ showToast: vi.fn() }));
-vi.mock("@lib/net/identity", () => ({ ensureIdentityKeyPublished: vi.fn(async () => true) }));
-vi.mock("@lib/voice/screenShare", () => ({ rollbackPendingVideo: vi.fn(() => undefined) }));
+vi.mock("@lib/net/identity", () => dispatcherMocks.identityMock());
+vi.mock("@lib/voice/screenShare", () => dispatcherMocks.screenShareMock());
 
 vi.spyOn(console, "info").mockImplementation(() => {});
 
+import * as dispatcherMocks from "../helpers/dispatcherMocks";
 import { wireDispatcher } from "../../src/lib/dispatcher";
 import { createMockWsClient } from "../helpers/mock-ws";
 import { expectConsole } from "../helpers/console";
@@ -1181,6 +1163,20 @@ describe("contract: epoch-1 fixtures through the client dispatcher", () => {
   it("moderation-queue: mod_action shows the warning once, with the fixture's reason", async () => {
     vi.mocked(showToast).mockClear();
     await dispatch("moderation-queue", "mod_action", { id: 5300 });
+    expect(safetyStore.getState().notices.map((n) => n.reason)).toEqual(["fixture warning"]);
+    // The notice banner carries it; a toast would repeat the same sentence.
+    expect(vi.mocked(showToast)).not.toHaveBeenCalled();
+  });
+
+  it("moderation-queue: mod_action toasts the warning while settings hides the banner", async () => {
+    vi.mocked(showToast).mockClear();
+    safetyStore.setState((prev) => ({ ...prev, notices: [] }));
+    uiStore.setState((prev) => ({ ...prev, settingsOpen: true }));
+    try {
+      await dispatch("moderation-queue", "mod_action", { id: 5300 });
+    } finally {
+      uiStore.setState((prev) => ({ ...prev, settingsOpen: false }));
+    }
     expect(safetyStore.getState().notices.map((n) => n.reason)).toEqual(["fixture warning"]);
     expect(vi.mocked(showToast)).toHaveBeenCalledWith(
       expect.stringContaining("fixture warning"),

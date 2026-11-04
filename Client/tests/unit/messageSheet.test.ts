@@ -1,14 +1,16 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
 
 import { createMessageList } from "@components/MessageList";
 import type { MessageListOptions } from "@components/MessageList";
-import { messagesStore, type Message } from "@stores/messages.store";
+import type { Message } from "@stores/messages.store";
 import { closeBottomSheet } from "@lib/ui/bottomSheet";
 import {
   ME,
   makeMessage,
   makeOpts,
   resetGateStores,
+  seedMessages as seed,
   setChannel,
   signInAs,
 } from "../helpers/message-actions-fixtures";
@@ -16,17 +18,6 @@ import { resetMembersState } from "../helpers/storeResets";
 import "../helpers/resizeObserverStub";
 
 const SHEET = '[data-testid="message-sheet"]';
-
-function seed(messages: Message[]): void {
-  messagesStore.setState(() => ({
-    messagesByChannel: new Map([[1, messages]]),
-    pendingSends: new Map(),
-    loadedChannels: new Set(),
-    hasMore: new Map(),
-    historyLoadState: new Map(),
-    detachedChannels: new Set(),
-  }));
-}
 
 function mine(over: Partial<Message> = {}): Message {
   return makeMessage({ user: { id: ME, username: "me", avatar: null }, ...over });
@@ -66,6 +57,18 @@ describe("message actions sheet on a phone", () => {
     await vi.waitFor(() => expect(sheet()).not.toBeNull());
   }
 
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => {
+      closeBottomSheet();
+      list?.destroy?.();
+      resetGateStores();
+      vi.unstubAllGlobals();
+    },
+  );
+
   beforeEach(() => {
     vi.stubGlobal("matchMedia", (q: string) => ({ matches: q.includes("pointer: coarse") }));
     resetGateStores();
@@ -73,16 +76,6 @@ describe("message actions sheet on a phone", () => {
     signInAs("member");
     setChannel();
     resetMembersState();
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    closeBottomSheet();
-    list?.destroy?.();
-    container.remove();
-    resetGateStores();
-    vi.unstubAllGlobals();
   });
 
   it("opens the sheet, not the menu, with four large quick reactions and Add Reaction", async () => {

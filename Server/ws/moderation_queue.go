@@ -2,6 +2,7 @@ package ws
 
 import (
 	"context"
+	"time"
 
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
@@ -38,15 +39,9 @@ func buildAppealModQueue(publicID, state string) []byte {
 // (channelID 0: no channel exists to resolve an override against, and
 // CanModerate does not consult one).
 func (h *Hub) moderationAudience(ctx context.Context, exclude ...int64) []int64 {
-	h.mu.RLock()
-	userIDs := make([]int64, 0, len(h.clients))
-	for uid := range h.clients {
-		userIDs = append(userIDs, uid)
-	}
-	h.mu.RUnlock()
-
-	audience := make([]int64, 0, len(userIDs))
-	for _, uid := range userIDs {
+	mods := h.moderators(ctx)
+	audience := mods[:0]
+	for _, uid := range mods {
 		excluded := false
 		for _, ex := range exclude {
 			if ex != 0 && uid == ex {
@@ -54,18 +49,42 @@ func (h *Hub) moderationAudience(ctx context.Context, exclude ...int64) []int64 
 				break
 			}
 		}
-		if excluded {
-			continue
-		}
-		sub, err := h.subjectFor(ctx, uid, 0)
-		if err != nil {
-			continue
-		}
-		if permissions.CanModerate(sub) == nil {
+		if !excluded {
 			audience = append(audience, uid)
 		}
 	}
 	return audience
+}
+
+// moderators is every connected CanModerate holder, memoised like a channel
+// audience (audience_memo.go) under the zero ChannelRef. The returned slice is the
+// caller's own.
+func (h *Hub) moderators(ctx context.Context) []int64 {
+	var key struct{}
+	now := time.Now()
+	permGen, connGen, memo := h.memoGens()
+	if memo {
+		if mods, ok := loadFresh(&h.audience.mods, key, permissions.ChannelRef{}, permGen, connGen, now); ok {
+			return mods
+		}
+	}
+	userIDs, snapGen := h.connectedSnapshot()
+	mods := make([]int64, 0, len(userIDs))
+	failed := false
+	for _, uid := range userIDs {
+		sub, err := h.subjectFor(ctx, uid, 0)
+		if err != nil {
+			failed = true
+			continue
+		}
+		if permissions.CanModerate(sub) == nil {
+			mods = append(mods, uid)
+		}
+	}
+	if memo && !failed {
+		h.storeIfUnchanged(&h.audience.mods, key, permissions.ChannelRef{}, permGen, snapGen, now, mods)
+	}
+	return mods
 }
 
 // BroadcastModQueue notifies every connected moderation-bit holder that

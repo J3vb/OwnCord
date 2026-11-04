@@ -8,6 +8,7 @@ import { MAX_MESSAGE_LEN } from "../../features/messaging/messageLimits";
 import { applyPickedMentions } from "@lib/text/pickedMentions";
 import { idMentionsEnabled, voiceMessagesEnabled } from "@lib/net/serverCapabilities";
 import { composerButtonShown } from "../../features/messaging/composerButtons";
+import { composerPlaceholder } from "../../features/messaging/composerPlaceholder";
 import { messagingText } from "../../i18n/messaging";
 import {
   TYPING_THROTTLE_MS,
@@ -128,10 +129,7 @@ export function createInputComposer(st: InputState, api: InputApi) {
   }
 
   function idlePlaceholder(): string {
-    return (
-      st.options.placeholder ??
-      messagingText("composer.placeholder", { channel: st.options.channelName })
-    );
+    return st.options.placeholder ?? composerPlaceholder("channel", st.options.channelName);
   }
 
   /** Reflect the current disabledReason onto the DOM (textarea + controls). */
@@ -156,8 +154,10 @@ export function createInputComposer(st: InputState, api: InputApi) {
         continue;
       }
       const isAttach = btn.classList.contains("attach-btn");
-      if (isAttach) btn.title = uploadsOff ? messagingText("attach.serverDisabled") : "";
-      if (disabled || (isAttach && uploadsOff)) {
+      // "+" also holds Poll and Sticker, so uploads being off leaves it usable.
+      const attachOff = isAttach && uploadsOff && !st.attachHasActions();
+      if (isAttach) btn.title = attachOff ? messagingText("attach.serverDisabled") : "";
+      if (disabled || attachOff) {
         btn.setAttribute("disabled", "true");
       } else {
         // Likewise for GIFs when this server has no GIF provider configured.
@@ -165,6 +165,8 @@ export function createInputComposer(st: InputState, api: InputApi) {
         btn.removeAttribute("disabled");
       }
     }
+    // A menu opened before the composer closed offers nothing now.
+    if (disabled) st.closeAttachMenu?.();
     if (st.root !== null) {
       st.root.classList.toggle("composer-disabled", disabled);
     }

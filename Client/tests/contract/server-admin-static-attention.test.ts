@@ -4,41 +4,28 @@
 // (RI-07) against a stubbed GET /admin/api/attention.
 import { describe, it, expect, afterEach } from "vitest";
 import { JSDOM } from "jsdom";
-import { adminPanelHtml } from "../helpers/admin-panel";
+import {
+  adminHtmlWithBridge,
+  bootAdminPanel,
+  type FetchCall,
+  type PanelResponder as Responder,
+} from "../helpers/adminPanelFetch";
 
-const ADMIN_HTML_SOURCE = adminPanelHtml();
 const BRIDGE = `<script>
 window.__test = { get state(){return state}, renderDashboard: renderDashboard };
 </script>`;
-const ADMIN_HTML = ADMIN_HTML_SOURCE.replace("</body>", `${BRIDGE}\n</body>`);
+const ADMIN_HTML = adminHtmlWithBridge(BRIDGE);
 
 const ADMINISTRATOR = 0x40000000;
 const MANAGE_CHANNELS = 0x20000;
-
-type Responder = (path: string) => { status?: number; json?: unknown };
 
 interface Bridge {
   state: { me: unknown };
   renderDashboard: () => Promise<string>;
 }
 
-async function boot(paths: string[], respond: Responder): Promise<{ dom: JSDOM; bridge: Bridge }> {
-  const dom = new JSDOM(ADMIN_HTML, {
-    url: "http://localhost:8080/admin",
-    runScripts: "dangerously",
-    beforeParse(window) {
-      window.fetch = (async (input: string) => {
-        const p = String(input).replace(/^\/admin\/api/, "");
-        paths.push(p);
-        const r = p === "/setup/status" ? { json: { needs_setup: false } } : respond(p);
-        const status = r.status ?? 200;
-        return { ok: status < 300, status, json: async () => r.json ?? {} } as Response;
-      }) as typeof fetch;
-    },
-  });
-  await new Promise((resolve) => dom.window.setTimeout(resolve, 0));
-  paths.length = 0;
-  return { dom, bridge: (dom.window as unknown as { __test: Bridge }).__test };
+function boot(calls: FetchCall[], respond: Responder) {
+  return bootAdminPanel<Bridge>(ADMIN_HTML, calls, respond);
 }
 
 // The dashboard: #attentionPanel holds the headline and the warning cards,
@@ -125,12 +112,12 @@ describe("Server/admin/static — attention panel", () => {
   });
 
   it("shows warnings with action, observed times, occurrences and recovery, and unknown apart from healthy", async () => {
-    const paths: string[] = [];
-    const booted = await boot(paths, (p) => (p === "/attention" ? { json: REPORT } : { json: {} }));
+    const calls: FetchCall[] = [];
+    const booted = await boot(calls, (p) => (p === "/attention" ? { json: REPORT } : { json: {} }));
     dom = booted.dom;
     booted.bridge.state.me = { permissions: ADMINISTRATOR };
     const panel = render(dom, await booted.bridge.renderDashboard());
-    expect(paths).toContain("/attention");
+    expect(calls.map((c) => c.path)).toContain("/attention");
 
     expect(panel.querySelector("#attentionPanel #attnTitle")?.textContent).toBe(
       "1 problem needs your attention",
@@ -176,7 +163,7 @@ describe("Server/admin/static — attention panel", () => {
   });
 
   it("says so when nothing is active, and when the server has not evaluated yet", async () => {
-    const paths: string[] = [];
+    const calls: FetchCall[] = [];
     // Unknown signals alone do not need attention: the headline stays
     // normal, they show as a "not measured" chip, not as healthy, and the
     // checks stay shut.
@@ -185,7 +172,7 @@ describe("Server/admin/static — attention panel", () => {
       warnings: [],
       signals: REPORT.signals.map((g) => (g.status === "unknown" ? g : { ...g, status: "ok" })),
     };
-    const booted = await boot(paths, (p) => (p === "/attention" ? { json: report } : { json: {} }));
+    const booted = await boot(calls, (p) => (p === "/attention" ? { json: report } : { json: {} }));
     dom = booted.dom;
     booted.bridge.state.me = { permissions: ADMINISTRATOR };
     let panel = render(dom, await booted.bridge.renderDashboard());
@@ -223,8 +210,8 @@ describe("Server/admin/static — attention panel", () => {
   });
 
   it("reports a failed load instead of an empty panel", async () => {
-    const paths: string[] = [];
-    const booted = await boot(paths, (p) =>
+    const calls: FetchCall[] = [];
+    const booted = await boot(calls, (p) =>
       p === "/attention"
         ? { status: 500, json: { message: "attention service unavailable" } }
         : { json: {} },
@@ -236,12 +223,12 @@ describe("Server/admin/static — attention panel", () => {
   });
 
   it("is not requested without ADMINISTRATOR", async () => {
-    const paths: string[] = [];
-    const booted = await boot(paths, () => ({ json: {} }));
+    const calls: FetchCall[] = [];
+    const booted = await boot(calls, () => ({ json: {} }));
     dom = booted.dom;
     booted.bridge.state.me = { permissions: MANAGE_CHANNELS };
     const html = await booted.bridge.renderDashboard();
-    expect(paths).not.toContain("/attention");
+    expect(calls.map((c) => c.path)).not.toContain("/attention");
     expect(html).not.toContain("attentionPanel");
     expect(html).not.toContain("healthChecks");
   });

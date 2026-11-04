@@ -1,19 +1,18 @@
 import { test, expect } from "./fixtures";
 import {
   buildTauriMockScript,
-  MOCK_LOGIN_RESPONSE,
-  mockTauriFullSession,
   mockTauriFullSessionWithMessages,
   navigateToMainPage,
   navigateToMainPageReady,
   emitWsMessage,
+  ROUTE_HEALTH,
+  ROUTE_LOGIN,
+  startFullSession,
 } from "./helpers";
 
 test.describe("Message List — Structure", () => {
   test("renders messages with author, content, timestamp, and avatar", async ({ page }) => {
-    await mockTauriFullSession(page);
-    await page.goto("/");
-    await navigateToMainPage(page);
+    await startFullSession(page);
 
     const container = page.locator(".messages-container");
     await expect(container).toBeVisible();
@@ -81,9 +80,7 @@ test.describe("Message List — Rich Content", () => {
 
 test.describe("Message List — Real-time", () => {
   test("new message appears via WebSocket", async ({ page }) => {
-    await mockTauriFullSession(page);
-    await page.goto("/");
-    await navigateToMainPage(page);
+    await startFullSession(page);
 
     await expect(page.locator(".message").first()).toBeVisible({ timeout: 10_000 });
     const countBefore = await page.locator(".message").count();
@@ -109,9 +106,7 @@ test.describe("Message List — Real-time", () => {
   });
 
   test("multiple rapid messages all appear in order", async ({ page }) => {
-    await mockTauriFullSession(page);
-    await page.goto("/");
-    await navigateToMainPage(page);
+    await startFullSession(page);
     await expect(page.locator(".message").first()).toBeVisible({ timeout: 10_000 });
 
     for (let i = 0; i < 3; i++) {
@@ -155,8 +150,8 @@ test.describe("Message List — Fast scrolling", () => {
     await page.addInitScript(
       buildTauriMockScript({
         httpRoutes: [
-          { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-          { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
+          ROUTE_HEALTH,
+          ROUTE_LOGIN,
           { pattern: "/messages", status: 200, body: { messages, has_more: false } },
         ],
         simulateWsFlow: true,

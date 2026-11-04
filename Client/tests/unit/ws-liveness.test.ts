@@ -1,28 +1,15 @@
 import { describe, it, expect, vi } from "vitest";
 
-// vi.mock is hoisted per file; the factories resolve to the shared handles
-// exported from ./helpers/ws-mocks (see that module's doc comment).
-vi.mock("@tauri-apps/api/core", async () => ({
-  invoke: (await import("./helpers/ws-mocks")).mockInvoke,
-}));
+import * as wsMocks from "./helpers/ws-mocks";
 
-vi.mock("@tauri-apps/api/event", async () => ({
-  listen: (await import("./helpers/ws-mocks")).mockListen,
-}));
+vi.mock("@tauri-apps/api/core", () => wsMocks.tauriCoreMock());
+vi.mock("@tauri-apps/api/event", () => wsMocks.tauriEventMock());
 
 import { mockInvoke, emitTauriEvent } from "./helpers/ws-mocks";
-import { createWsClient, type ConnectionState } from "../../src/lib/ws";
+import { createWsClient } from "../../src/lib/ws";
 import { expectConsole } from "../helpers/console";
 import { useWsClientFixture } from "../helpers/wsClientFixture";
-
-const AUTH_OK = JSON.stringify({
-  type: "auth_ok",
-  payload: {
-    user: { id: 1, username: "a", avatar: null, role: "admin" },
-    server_name: "S",
-    motd: "",
-  },
-});
+import { wsConnectCalls, trackStates, connectAndAuth } from "../helpers/wsSuiteHarness";
 
 describe("client liveness deadline", () => {
   let client: ReturnType<typeof createWsClient>;
@@ -30,18 +17,10 @@ describe("client liveness deadline", () => {
     client = created;
   });
 
-  async function connectAndAuth(): Promise<void> {
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
-    emitTauriEvent("ws-message", AUTH_OK);
-  }
-
   it("reconnects when no frame arrives within the deadline", async () => {
-    await connectAndAuth();
+    await connectAndAuth(client);
 
-    const states: ConnectionState[] = [];
-    client.onStateChange((s) => states.push(s));
+    const states = trackStates(client);
     mockInvoke.mockClear();
 
     // The app-level heartbeat keeps sending pings, but the half-open socket
@@ -53,15 +32,14 @@ describe("client liveness deadline", () => {
 
     // And the reconnect policy re-dials the socket.
     await vi.advanceTimersByTimeAsync(1_100);
-    const reconnects = mockInvoke.mock.calls.filter((c) => c[0] === "ws_connect");
+    const reconnects = wsConnectCalls();
     expect(reconnects.length).toBeGreaterThanOrEqual(1);
   });
 
   it("stays connected while pongs keep arriving", async () => {
-    await connectAndAuth();
+    await connectAndAuth(client);
 
-    const states: ConnectionState[] = [];
-    client.onStateChange((s) => states.push(s));
+    const states = trackStates(client);
     mockInvoke.mockClear();
 
     await vi.advanceTimersByTimeAsync(30_000);
@@ -74,19 +52,18 @@ describe("client liveness deadline", () => {
     emitTauriEvent("ws-message", JSON.stringify({ type: "pong" }));
 
     expect(states).not.toContain("reconnecting");
-    const reconnects = mockInvoke.mock.calls.filter((c) => c[0] === "ws_connect");
+    const reconnects = wsConnectCalls();
     expect(reconnects).toHaveLength(0);
   });
 
   it("any inbound frame refreshes the deadline", async () => {
-    await connectAndAuth();
+    await connectAndAuth(client);
 
     await vi.advanceTimersByTimeAsync(50_000);
     // A broadcast (not a pong) still proves the socket is delivering bytes.
     emitTauriEvent("ws-message", JSON.stringify({ type: "typing", payload: { channel_id: 1 } }));
 
-    const states: ConnectionState[] = [];
-    client.onStateChange((s) => states.push(s));
+    const states = trackStates(client);
 
     // Past the original deadline, but the frame at t=50s moved it out.
     await vi.advanceTimersByTimeAsync(20_000);
@@ -109,15 +86,14 @@ describe("client liveness deadline", () => {
       return realSetInterval(fn, ms);
     }) as typeof setInterval);
     try {
-      await connectAndAuth();
+      await connectAndAuth(client);
     } finally {
       spy.mockRestore();
     }
     expect(heartbeat).not.toBeNull();
     const fireHeartbeat = (): void => heartbeat?.();
 
-    const states: ConnectionState[] = [];
-    client.onStateChange((s) => states.push(s));
+    const states = trackStates(client);
 
     // Past the deadline with no ping ever sent: silence is not yet evidence.
     await vi.advanceTimersByTimeAsync(90_000);
@@ -140,7 +116,7 @@ describe("client liveness deadline", () => {
   });
 
   it("dial once when a close arrives while the silence deadline also fires", async () => {
-    await connectAndAuth();
+    await connectAndAuth(client);
 
     // The deadline fires and schedules one retry (backoff >= 500ms), then the
     // socket's own close report lands before that retry dials. Both must share
@@ -151,17 +127,17 @@ describe("client liveness deadline", () => {
 
     mockInvoke.mockClear();
     await vi.advanceTimersByTimeAsync(2_000);
-    const reconnects = mockInvoke.mock.calls.filter((c) => c[0] === "ws_connect");
+    const reconnects = wsConnectCalls();
     expect(reconnects).toHaveLength(1);
   });
 
   it("does not arm a reconnect after an intentional disconnect", async () => {
-    await connectAndAuth();
+    await connectAndAuth(client);
     client.disconnect();
     mockInvoke.mockClear();
 
     await vi.advanceTimersByTimeAsync(120_000);
-    const reconnects = mockInvoke.mock.calls.filter((c) => c[0] === "ws_connect");
+    const reconnects = wsConnectCalls();
     expect(reconnects).toHaveLength(0);
   });
 });

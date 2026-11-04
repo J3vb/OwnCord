@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
 import { captureLogs } from "../helpers/log-capture";
 import { expectConsole } from "../helpers/console";
 
@@ -28,15 +29,14 @@ const dialog = (): HTMLElement | null =>
 describe("What's new prompt lifecycle", () => {
   let container: HTMLDivElement;
 
+  useMountContainer((c) => {
+    container = c;
+  });
+
   beforeEach(() => {
     localStorage.clear();
     hoisted.release.current = null;
     hoisted.release.fail = null;
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-  afterEach(() => {
-    container.remove();
   });
 
   it("logs a failed check under its own component and keeps the app running", async () => {

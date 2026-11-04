@@ -8,7 +8,12 @@
 // tests/integration/client-updater-lifecycle.test.ts).
 import { vi } from "vitest";
 import type { AppUpdater } from "../../../src/platform/contracts/updater";
-import { describeAppUpdaterSuite } from "./updater.suite";
+import {
+  describeAppUpdaterSuite,
+  resetUpdaterNatives,
+  updaterNativeControl,
+} from "./updater.suite";
+import * as lm from "../../helpers/loggerMock";
 
 const invoke = vi.fn();
 const relaunch = vi.fn();
@@ -18,46 +23,16 @@ const unlisten = vi.fn();
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 vi.mock("@tauri-apps/plugin-process", () => ({ relaunch }));
 vi.mock("@tauri-apps/api/event", () => ({ listen }));
-vi.mock("@lib/logger", () => ({
-  createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
-}));
+vi.mock("@lib/logger", () => lm.loggerMock());
 
 describeAppUpdaterSuite(async () => {
-  vi.resetModules();
-  invoke.mockReset();
-  relaunch.mockReset().mockResolvedValue(undefined);
-  listen.mockReset().mockResolvedValue(unlisten);
+  resetUpdaterNatives({ invoke, relaunch, listen, unlisten });
 
   const mod = await import("../../../src/platform/desktop/updater");
   const desktopBinding: AppUpdater = mod.updater;
 
   return {
     subject: desktopBinding,
-    native: {
-      checkSucceedsWith(result) {
-        invoke.mockImplementation((cmd: string) =>
-          cmd === "check_client_update" ? Promise.resolve(result) : Promise.reject(new Error(cmd)),
-        );
-      },
-      checkFailsWith(error) {
-        invoke.mockImplementation((cmd: string) =>
-          cmd === "check_client_update" ? Promise.reject(error) : Promise.reject(new Error(cmd)),
-        );
-      },
-      installSucceeds() {
-        invoke.mockImplementation((cmd: string) =>
-          cmd === "download_and_install_update"
-            ? Promise.resolve(undefined)
-            : Promise.reject(new Error(cmd)),
-        );
-      },
-      installFailsWith(error) {
-        invoke.mockImplementation((cmd: string) =>
-          cmd === "download_and_install_update"
-            ? Promise.reject(error)
-            : Promise.reject(new Error(cmd)),
-        );
-      },
-    },
+    native: updaterNativeControl(invoke),
   };
 });

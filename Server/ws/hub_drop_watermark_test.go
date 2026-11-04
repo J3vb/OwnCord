@@ -42,7 +42,7 @@ func TestQueueDrop_MetadataFrameForcesResync(t *testing.T) {
 	if !h.mustFullResync(last) {
 		t.Fatalf("a client that received every frame up to seq %d missed the dropped chat_deleted and must take the full-ready path", last)
 	}
-	if h.queueDrops.applied != h.queueDrops.dropped.Load() {
+	if h.stats.queueDrops.applied != h.stats.queueDrops.dropped.Load() {
 		t.Fatal("the drop must settle once the queue has drained")
 	}
 }

@@ -1,67 +1,33 @@
 // Spoiler attachments in the message list (6.12): covered until revealed, and
 // a covered one cannot be opened in the lightbox by click or keyboard.
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import * as mocks from "../helpers/attachmentsMocks";
 
 const { fetchMock } = vi.hoisted(() => ({ fetchMock: vi.fn() }));
 
-vi.mock("@tauri-apps/plugin-http", () => ({ fetch: fetchMock }));
-vi.mock("@lib/net/httpProxy", () => ({
-  ensureHttpProxy: () => Promise.resolve("http://127.0.0.1:9999"),
-  stopHttpProxy: () => Promise.resolve(),
-}));
-vi.mock("@lib/logger", () => ({
-  createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
-}));
-vi.mock("@lib/icons", () => ({ createIcon: () => document.createElement("span") }));
-vi.mock("@lib/prefs/mediaVisibility", () => ({ observeMedia: vi.fn() }));
+vi.mock("@tauri-apps/plugin-http", () => mocks.httpPluginMock(fetchMock));
+vi.mock("@lib/net/httpProxy", () => mocks.httpProxyMock());
+vi.mock("@lib/logger", () => mocks.loggerMock());
+vi.mock("@lib/icons", () => mocks.iconsMock());
+vi.mock("@lib/prefs/mediaVisibility", () => mocks.mediaVisibilityMock());
 
 import { renderMessage } from "../../src/components/message-list/renderers";
-import {
-  clearAttachmentCaches,
-  closeActiveLightbox,
-  renderAttachment,
-  setServerHost,
-} from "../../src/features/messaging/content/attachments";
+import { renderAttachment } from "../../src/features/messaging/content/attachments";
 import { messagesStore, type Message } from "../../src/stores/messages.store";
-import type { MessageListOptions } from "../../src/components/MessageList";
+import {
+  att,
+  listOpts,
+  makeAttachmentMessage,
+  useImageRowEnv,
+} from "../helpers/attachmentMessages";
 
-const okImage = {
-  ok: true,
-  headers: { get: () => "image/png" },
-  arrayBuffer: () => Promise.resolve(new Uint8Array([1]).buffer),
-};
-const att = (id: string, filename: string, mime: string) => ({
-  id,
-  filename,
-  size: 10,
-  mime,
-  url: `/api/v1/files/${id}`,
-});
+const makeMessage = (attachments: Message["attachments"]): Message =>
+  makeAttachmentMessage({ attachments });
 
-function makeMessage(attachments: Message["attachments"]): Message {
-  return {
-    id: 7,
-    channelId: 1,
-    user: { id: 10, username: "Alice", avatar: null },
-    content: "pics",
-    replyTo: null,
-    attachments,
-    reactions: [],
-    pinned: false,
-    editedAt: null,
-    deleted: false,
-    timestamp: "2025-01-15T12:30:00Z",
-    status: "sent",
-    correlationId: null,
-    errorCode: null,
-  };
-}
-
-const opts = { channelId: 1, channelName: "general", currentUserId: 10 } as MessageListOptions;
 const ac = new AbortController();
 
 async function renderRow(msg: Message, imageCount: number): Promise<HTMLElement> {
-  const el = renderMessage(msg, false, [msg], opts, ac.signal);
+  const el = renderMessage(msg, false, [msg], listOpts, ac.signal);
   document.body.appendChild(el);
   await vi.waitFor(() => {
     expect(el.querySelectorAll(".msg-image img").length).toBe(imageCount);
@@ -71,22 +37,7 @@ async function renderRow(msg: Message, imageCount: number): Promise<HTMLElement>
 
 const lightbox = (): Element | null => document.querySelector(".image-lightbox");
 
-beforeEach(() => {
-  clearAttachmentCaches();
-  fetchMock.mockReset();
-  fetchMock.mockResolvedValue(okImage);
-  let n = 0;
-  URL.createObjectURL = vi.fn(() => `blob:img-${++n}`);
-  URL.revokeObjectURL = vi.fn();
-  setServerHost("localhost:8080");
-  messagesStore.setState((prev) => ({ ...prev, messagesByChannel: new Map() }));
-});
-
-afterEach(() => {
-  closeActiveLightbox();
-  document.body.replaceChildren();
-  setServerHost("");
-});
+useImageRowEnv(fetchMock);
 
 describe("spoiler attachment cover", () => {
   it("covers a lone spoiler image, and it cannot be opened by click, Enter or Space", async () => {

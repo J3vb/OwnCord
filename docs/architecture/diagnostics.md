@@ -40,6 +40,7 @@ BPR-055.)
 | Attention panel                   | Admin panel **Dashboard**, `GET /admin/api/attention` (RI-07)            | `ADMINISTRATOR`                                                                                                      | no — in memory, never exported                                                                                                                                       |
 | Health row                        | Admin panel **Dashboard**, `GET /admin/api/system/stats`                 | `ADMINISTRATOR` or `VIEW_DIAGNOSTICS`                                                                                | no — in memory (24 h of 5 s samples), never exported                                                                                                                 |
 | Slow requests card                | Admin panel **Dashboard**, `GET /admin/api/system/slow-requests`         | `ADMINISTRATOR` or `VIEW_DIAGNOSTICS`                                                                                | no — in memory (1 h, per route pattern), never exported                                                                                                              |
+| System health page                | Admin panel **System health**, `GET /admin/api/system/health`            | `ADMINISTRATOR` or `VIEW_DIAGNOSTICS`                                                                                | no — read on request, never exported                                                                                                                                 |
 | Support bundle                    | Admin panel **Diagnostics**, `/admin/api/support-bundles/*`              | `ADMINISTRATOR` or `VIEW_DIAGNOSTICS`, with a current login session; explicit preview and confirmation               | local download only, never uploaded                                                                                                                                  |
 | Audit log                         | `audit_log` table, admin panel                                           | `VIEW_AUDIT_LOG`                                                                                                     | no                                                                                                                                                                   |
 | Backups                           | `backup.dir` (scheduled and on demand)                                   | the process owner only on disk; over the admin API the owner, or a Manage Backups / Restore Backups holder per route | no                                                                                                                                                                   |
@@ -60,7 +61,7 @@ loaded lazily from the button); there is no Rust command behind it.
 
 | File                       | Contents                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `README.txt`               | what the bundle holds and the verbatim-logs warning below                                                                                                                                                                                                                                                                                                                                                                      |
+| `README.txt`               | what the bundle holds and the redaction note below                                                                                                                                                                                                                                                                                                                                                                             |
 | `app.json`                 | client version, export time, OS (`navigator.platform`) and webview (`navigator.userAgent`); `serverVersion` is always null, since the export makes no server call                                                                                                                                                                                                                                                              |
 | `settings.json`            | an **allowlist** of `owncord:settings:` keys (display, accessibility, notification, voice) and the listed fields of each saved server profile (name, host, username, sign-in options, last connection)                                                                                                                                                                                                                         |
 | `voice-diagnostics.json`   | the voice session state the Diagnostics & logs tab shows, including the join timeline (`voiceJoin`): the per-attempt stage, URL kind, retries, phase and milestone timings, the self-test's per-stage result, and the receive-side decrypt-failure count (SRE-M2)                                                                                                                                                              |
@@ -86,6 +87,29 @@ or hang-up removes the file as it logs its own line. Memory lines count only
 the app's own process: the webview's separate web process is not included, and
 its end is logged as `[exit] webview process ended`.
 
+On Windows the native log says the same, with Windows' own sources:
+
+- `exception_log.rs` installs an unhandled-exception filter that writes one
+  `[crash] unhandled exception` line (code and its plain name, faulting module
+  file name and offset, thread), then hands the exception on so Windows Error
+  Reporting still runs. `OWNCORD_EXCEPTION_LOG=off` leaves it out.
+- `exit_watch.rs` keeps the same `run-<pid>.state` file (working set, peak,
+  committed memory, threads, main-thread and page state) and `[hang]` lines,
+  and logs the Windows build, RAM and WebView2 version at startup.
+- WebView2's helper processes report their failures: the page's renderer, the
+  GPU process, utility processes such as video capture, and the browser
+  process itself. Each gives an `[exit] webview <process> process failed`
+  line with the reason, exit code, service name, failing module and what the
+  user saw. A GPU or capture process restart pauses video or stops the camera,
+  so this is the line to look for next to a frozen webcam.
+- A start that finds a run file from a process that is gone asks the
+  Application event log (`wevtutil`) for an Application Error or Application
+  Hang record of that pid, and copies the exception code, faulting module and
+  version, or that Windows closed the window as not responding. Without a
+  record (End task, sign-out, power loss) it says so; when the event log
+  cannot be read it logs one "not available" line and carries on. Paths are
+  never copied, only module file names.
+
 A settings key that is not on the allowlist never enters the bundle, whatever
 it holds; device ids and the custom status text are left out on purpose. The
 OS keychain, which holds saved passwords and session tokens, is never read.
@@ -93,9 +117,19 @@ OS keychain, which holds saved passwords and session tokens, is never read.
 kit secret, recovery code and TOTP secret in storage and in the profiles, and
 proves none reaches the zip.
 
-**Log lines are exported verbatim.** The client logger does not redact, so the
-bundle does not claim to: the Diagnostics & logs tab and `README.txt` both say the log files
-are unredacted and should be read before the bundle is shared.
+Since format 2 the bundle also carries `manifest.json` (each file's size,
+SHA-256, data classes and values removed, and a report id), `redactions.json`,
+`last-exit.json` (the newest crash or exit line from the native log, read
+back) and the diagnostic event log files under `logs/`. The event log's codes
+and privacy rules, the file list and the redaction rules are specified in
+[client-diagnostics.md](client-diagnostics.md#support-bundle).
+
+**Log lines are redacted by shape.** The client logger does not redact, so the
+bundle does: every file made from the app's data passes through
+`Client/src/lib/diagnostics/redact.ts` (tokens, passwords, keys, cookies,
+recovery secrets, URLs cut to the host, email and IP addresses, home folders).
+Text with no recognisable shape can still be there, so the Diagnostics & logs
+tab and `README.txt` both say to read the bundle before it is shared.
 
 ## Egress inventory
 
@@ -122,10 +156,11 @@ syntactic and correctly refuses to make an exception it cannot see.
 | `updater/updater.go` — `NewUpdater`, `(*Updater).fetchLatestRelease`                                                | manual   | `api.github.com` (`github.owner`/`github.repo`)                                                                                     | an admin's update check, or a client asking `/api/v1/client-update`                                                                         | a release-metadata GET; the optional `github.token` for rate limits                                                                                                                                       |
 | `updater/assets.go` — `(*Updater).fetchBody`                                                                        | manual   | `api.github.com`, `github.com` release assets                                                                                       | the same two actions                                                                                                                        | release metadata and the asset itself; a URL that is not https on a GitHub host is refused, on every redirect hop too                                                                                     |
 | `updater/download.go` — `(*Updater).downloadFile`                                                                   | manual   | `github.com` release assets                                                                                                         | an admin applying an update                                                                                                                 | the pinned, checksum-verified server binary                                                                                                                                                               |
-| `ws/livekit_download.go` — `fetchLimited`, `downloadTo`                                                             | config   | `github.com/livekit/livekit` release assets                                                                                         | `voice.auto_download_livekit` (compiled default `false`; the generated config sets `true`) with `voice.livekit_binary` unset                | the pinned, checksum-verified `livekit-server` binary, once                                                                                                                                               |
-| `ws/livekit_process.go` — `NewLiveKitProcess`, `(*LiveKitProcess).HealthCheck`                                      | config   | `voice.livekit_url` (`ws://localhost:7880` by default; a remote LiveKit when the operator points it there)                          | `voice.livekit_url`                                                                                                                         | health probes of the LiveKit process — loopback under the default, the operator's host otherwise                                                                                                          |
+| `livekitproc/download.go` — `fetchLimited`, `downloadTo`                                                            | config   | `github.com/livekit/livekit` release assets                                                                                         | `voice.auto_download_livekit` (compiled default `false`; the generated config sets `true`) with `voice.livekit_binary` unset                | the pinned, checksum-verified `livekit-server` binary, once                                                                                                                                               |
+| `livekitproc/process.go` — `New`, `(*Process).HealthCheck`                                                          | config   | `voice.livekit_url` (`ws://localhost:7880` by default; a remote LiveKit when the operator points it there)                          | `voice.livekit_url`                                                                                                                         | health probes of the LiveKit process — loopback under the default, the operator's host otherwise                                                                                                          |
 | `ws/livekit.go` — `NewLiveKitClient`                                                                                | config   | `voice.livekit_url` (`ws://localhost:7880` by default; a remote LiveKit when the operator points it there)                          | `voice.livekit_url`                                                                                                                         | the room-service client's calls (remove/get/mute a participant, list participants, list rooms) — loopback under the default, the operator's host otherwise                                                |
 | `api/livekit_proxy.go` — `proxyWebSocket`                                                                           | config   | `voice.livekit_url` (`ws://localhost:7880` by default; a remote LiveKit when the operator points it there)                          | `voice.livekit_url`, and only while a signed-in client holds a voice session                                                                | that client's LiveKit signalling, proxied — it leaves the machine when the URL is remote                                                                                                                  |
+| `lkstats/sampler.go` — `newClient`, `fetchPage`                                                                     | config   | `voice.livekit_metrics_url` (LiveKit's Prometheus page, typically a private Docker address such as `http://livekit:6789/metrics`)   | `voice.livekit_metrics_url` (compiled default empty: no sampler)                                                                            | one GET every 10 s with a 2 s timeout, redirects and proxies off, at most 1 MiB read; the figures feed the admin Dashboard's LiveKit card only                                                            |
 | `safefetch/policy.go` — `New`, `defaultDial`                                                                        | config   | only a destination a caller passed in, and only an address `ClassifyAddr` accepted                                                  | the caller's gate: `gif.api_key`, `plugins.http_allowlist`, `push.dispatch_enabled` with `push.enabled`, or `server.browser_client_enabled` | nothing of its own — the shared client, transport and dialer; `Fetcher.dial` connects to the vetted addresses and to nothing else                                                                         |
 | `safefetch/fetch.go` — `(*Fetcher).roundTrip`                                                                       | config   | the same, one redirect hop at a time                                                                                                | the caller's gate: `gif.api_key`, `plugins.http_allowlist`, `push.dispatch_enabled` with `push.enabled`, or `server.browser_client_enabled` | the GIF proxy's search terms, whatever a plugin asks, or a Web Push message — bounded by the C-09 ceilings below                                                                                          |
 | `service/push_dispatch.go` — `(*PushDispatcher).attemptOne`                                                         | config   | the push service named in each stored subscription's `endpoint`                                                                     | `push.dispatch_enabled` **and** `push.enabled` (both false by default)                                                                      | a Web Push message: an encrypted `{"t":"activity"}` payload (RFC 8291) and a VAPID `Authorization` header — no message text, channel name or sender                                                       |
@@ -175,7 +210,7 @@ it on, the server, not the viewer's browser, fetches the link previews and
 outside images a web viewer opens, the way the desktop app's own broker does
 on the viewer's machine.
 So the compiled defaults still reach nowhere. The policy is written out as a contract in
-[trust-model.md](../trust-model.md#desktop-preview-destination-policy-c-09--contract-for-b7),
+[trust-model.md](trust-model-evidence.md#desktop-preview-destination-policy-c-09--contract-for-b7),
 clauses 2 through 6.
 
 Two things are deliberately **not** in the table. The startup banner used to

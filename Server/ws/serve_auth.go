@@ -94,7 +94,7 @@ func (h *Hub) authenticateConn(parent context.Context, conn *websocket.Conn) (*d
 	// frame so the client's backoff retries. Collapsing the two would log every user
 	// out during a blip.
 	hash := auth.HashToken(p.Token)
-	user, err := h.authn.ResolveSocketPrincipal(ctx, hash)
+	user, err := h.seams.authn.ResolveSocketPrincipal(ctx, hash)
 	switch {
 	case errors.Is(err, service.ErrSessionInvalid):
 		_ = conn.Write(ctx, websocket.MessageText, buildAuthError("invalid token"))
@@ -133,7 +133,7 @@ const sessionIdentityKeyTimeout = 2 * time.Second
 func (h *Hub) recordSessionIdentityKey(ctx context.Context, userID int64, tokenHash, key string) {
 	ctx, cancel := context.WithTimeout(ctx, sessionIdentityKeyTimeout)
 	defer cancel()
-	if err := h.authn.RecordSessionIdentityKey(ctx, tokenHash, key); err != nil {
+	if err := h.seams.authn.RecordSessionIdentityKey(ctx, tokenHash, key); err != nil {
 		slog.Warn("ws auth: recording the session identity key failed", "user_id", userID, "err", err)
 	}
 }
@@ -192,7 +192,7 @@ func (h *Hub) handshakeWriteReady(ctx context.Context, conn *websocket.Conn, p *
 func (h *Hub) upgradeAndAuth(conn *websocket.Conn, r *http.Request) (*Client, uint64, error) {
 	// Resolve the client address through trusted_proxies so handshake logs and the
 	// ws_connect audit row name the client, not the reverse proxy.
-	clientAddr := clientip.Resolve(r, h.trustedProxyNets)
+	clientAddr := clientip.Resolve(r, h.seams.trustedProxyNets)
 	user, tokenHash, hint, err := h.authenticateConn(r.Context(), conn)
 	if err != nil {
 		slog.Warn("ws auth failed", "err", err, "remote", clientAddr)
@@ -228,7 +228,7 @@ func (h *Hub) upgradeAndAuth(conn *websocket.Conn, r *http.Request) (*Client, ui
 	c.roleName = strings.ToLower(role.Name)
 
 	slog.Info("websocket connected", "username", user.Username, "user_id", user.ID, "remote", clientAddr)
-	h.authn.RecordSocketConnect(r.Context(), user.ID, clientAddr)
+	h.seams.authn.RecordSocketConnect(r.Context(), user.ID, clientAddr)
 
 	return c, lastSeq, nil
 }

@@ -12,6 +12,8 @@ import (
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/diskutil"
+	"github.com/J3vb/OwnCord/Server/livekitproc"
+	"github.com/J3vb/OwnCord/Server/lkstats"
 	"github.com/J3vb/OwnCord/Server/plugin"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/storage"
@@ -134,10 +136,38 @@ func StartRuntime(cfg *config.Config, database *db.DB, pluginRegistry *plugin.Re
 
 	return api.Runtime{
 		Hub: hub, Limiter: limiter, Services: svc, VoiceEnabled: voiceEnabled, MetricsWindows: windows,
-		SystemStats: sysstats.NewSampler(),
-		Auth:        authSvc, Storage: in.Storage,
+		SystemStats:  sysstats.NewSampler(),
+		LiveKitStats: liveKitStats(cfg, hub, voiceEnabled),
+		Auth:         authSvc, Storage: in.Storage,
 		Updater: updater.NewUpdater(in.Version, cfg.GitHub.Token, cfg.GitHub.Owner, cfg.GitHub.Repo),
 	}, nil
+}
+
+// liveKitHub is the part of the hub the LiveKit card reads.
+type liveKitHub interface {
+	LiveKitManaged() bool
+	LiveKitPID() (int, bool)
+	LiveKitRoomUsage(ctx context.Context) (rooms, participants int, err error)
+}
+
+// liveKitStats picks the LiveKit card's source (see lkstats.Detect), or nil
+// when voice is off or there is nothing to read. Managed is decided when the
+// hub is built, so it is final before the process starts. An invalid
+// voice.livekit_metrics_url is ignored and the address is guessed instead.
+func liveKitStats(cfg *config.Config, hub liveKitHub, voiceEnabled bool) *lkstats.Sampler {
+	metricsURL := cfg.Voice.LiveKitMetricsURL
+	if metricsURL != "" && !config.ValidMetricsURL(metricsURL) {
+		slog.Warn("config: voice.livekit_metrics_url is not an http(s) URL", "effect", "ignored, the address is guessed from voice.livekit_url")
+		metricsURL = ""
+	}
+	return lkstats.Detect{
+		Voice:      voiceEnabled,
+		Managed:    hub.LiveKitManaged(),
+		MetricsURL: metricsURL,
+		LiveKitURL: cfg.Voice.LiveKitURL,
+		PID:        hub.LiveKitPID,
+		RoomUsage:  hub.LiveKitRoomUsage,
+	}.Pick(slog.Default())
 }
 
 // storageLimits is the two bounds on the upload service: the per-user quota
@@ -159,7 +189,7 @@ func storageLimits(cfg *config.Config) service.StorageLimits {
 // starts the process after the hub holds it. It reports whether voice is
 // configured, which api.Runtime.VoiceEnabled carries to the router for the
 // webhook, LiveKit health and signalling-proxy routes.
-func buildVoice(cfg *config.Config) (*ws.LiveKitClient, *ws.LiveKitProcess, bool) {
+func buildVoice(cfg *config.Config) (*ws.LiveKitClient, *livekitproc.Process, bool) {
 	// Voice is disabled when the client cannot be created.
 	lk, lkErr := ws.NewLiveKitClient(&cfg.Voice)
 	if lkErr != nil {
@@ -170,12 +200,12 @@ func buildVoice(cfg *config.Config) (*ws.LiveKitClient, *ws.LiveKitProcess, bool
 	// Optionally build a companion LiveKit process, from a configured binary
 	// or a checksum-verified auto-download (in the background inside Start).
 	// The hub keeps the process even if Start() later fails: its only consumer
-	// is the voice_join guard (`h.lkProcess != nil && !h.lkProcess.IsRunning()`),
+	// is the voice_join guard (`h.voiceHub.lkProcess != nil && !h.voiceHub.lkProcess.IsRunning()`),
 	// which reads a nil process as "externally managed, don't check", so a
 	// failed launch must fail joins closed rather than wave them through with
 	// no SFU running.
 	if cfg.Voice.LiveKitBinaryPath != "" || cfg.Voice.AutoDownloadLiveKit {
-		return lk, ws.NewLiveKitProcess(&cfg.Voice, &cfg.TLS, cfg.Server.DataDir), true
+		return lk, livekitproc.New(&cfg.Voice, &cfg.TLS, cfg.Server.DataDir), true
 	}
 
 	// No webhook warning here: the generated livekit.yaml sets no `webhook:`

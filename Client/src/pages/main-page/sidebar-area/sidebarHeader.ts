@@ -1,6 +1,6 @@
 /**
- * Sidebar build step: the server header (name, online count, mark-all-read,
- * invite, audit and moderation buttons) and its server menu, then the content
+ * Sidebar build step: the server header (name, online count, invite, audit
+ * and moderation buttons) and its server menu, then the content
  * slot.
  */
 import { createElement, setText } from "@lib/dom";
@@ -9,12 +9,11 @@ import { createIcon } from "@lib/icons";
 import { migrateCollapsedToCategoryIds } from "../../../features/channels/collapsedMigration";
 import { attachServerMenu } from "../ServerMenu";
 import { createInviteManagerController } from "../OverlayManagers";
-import { markAllRead, unreadChannelIds } from "@lib/readState";
+import { markAllRead } from "@lib/readState";
 import { loadCollapsedCategories, openSettings } from "@stores/ui.store";
 import { authStore } from "@stores/auth.store";
 import { membersStore, getOnlineMembers } from "@stores/members.store";
 import { channelsStore, NO_CATEGORY } from "@stores/channels.store";
-import { dmStore } from "@stores/dm.store";
 import { openAdminPanel } from "@lib/adminPanel";
 import { canManageInvites, canModerateMembers, canViewAuditLog } from "@lib/permissions";
 import { trackCurrentView } from "../../../features/navigation/contentView";
@@ -85,51 +84,6 @@ export function mountServerHeader(sc: SidebarScope): void {
 
   // Invite, Audit Log and Moderation: one row of quiet icon buttons.
   sc.headerActions = createElement("div", { class: "sidebar-header-actions" });
-
-  // Mark Server as Read: a server-wide action, so it lives in this header rather
-  // than in ChannelSidebar's own header (hidden here, see sidebar.css). First in
-  // the row so it appearing and disappearing does not move Invite. Shown only
-  // while a server channel is unread (DMs are not part of the server and are
-  // left alone); those badges live in channels.store.
-  sc.markAllBtn = headerAction(
-    shellText("channel.markAllRead"),
-    shellText("channel.markAllRead"),
-    "check",
-    "mark-all-read",
-  );
-
-  sc.markAllBtn.addEventListener("click", () => {
-    // A server-wide action: DMs are not part of the server, so they stay as they are.
-    markAllRead({ includeDms: false });
-  });
-
-  sc.syncMarkAllBtn = (): void => {
-    const show = unreadChannelIds({ includeDms: false }).length > 0;
-    // Hiding the focused button would drop focus to <body>; hand it to the
-    // next header action still shown (Invite, Audit Log, Moderation are each
-    // permission-gated), else to the channel list's roving row, so the next
-    // Tab starts nearby.
-    if (!show && document.activeElement === sc.markAllBtn) {
-      const next =
-        [...sc.headerActions.querySelectorAll<HTMLElement>(".sidebar-header-action")].find(
-          (btn) => btn !== sc.markAllBtn && btn.style.display !== "none",
-        ) ??
-        sc.headerActions
-          .closest(".unified-sidebar")
-          ?.querySelector<HTMLElement>('[data-channel-id][tabindex="0"]');
-      next?.focus();
-    }
-    sc.markAllBtn.style.display = show ? "" : "none";
-  };
-
-  sc.syncMarkAllBtn();
-
-  sc.headerActions.appendChild(sc.markAllBtn);
-
-  sc.unsubscribers.push(
-    channelsStore.subscribeSelector((s) => s.channels, sc.syncMarkAllBtn),
-    dmStore.subscribeSelector((s) => s.channels, sc.syncMarkAllBtn),
-  );
 
   sc.headerInviteCtrl = createInviteManagerController({ api: sc.api, getRoot: sc.getRoot });
 

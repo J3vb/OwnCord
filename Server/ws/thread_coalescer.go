@@ -92,7 +92,7 @@ func (h *Hub) noteThreadChanged(threadID int64) {
 // end of a window. It does nothing once the hub's lifecycle ended or the entry
 // was dropped (a delete, a stop).
 func (h *Hub) fireThreadTimer(threadID int64, e *threadTimer) {
-	if h.life.Err() != nil {
+	if h.lifecycle.ctx.Err() != nil {
 		return
 	}
 	h.mu.Lock()
@@ -124,7 +124,7 @@ func (h *Hub) fireThreadTimer(threadID int64, e *threadTimer) {
 // thread's live timer entry (a delete removes it, forgetThread, before it
 // announces thread_deleted), so no thread_changed follows a thread_deleted.
 func (h *Hub) flushThreadChanged(threadID int64, e *threadTimer) {
-	ctx, cancel := context.WithTimeout(h.life, threadFlushTimeout)
+	ctx, cancel := context.WithTimeout(h.lifecycle.ctx, threadFlushTimeout)
 	defer cancel()
 	t, err := h.threadHub.svc.Get(ctx, threadID)
 	if err != nil {
@@ -284,7 +284,7 @@ func (h *Hub) noteIfThread(channelID int64) {
 	if svc == nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(h.life, threadFlushTimeout)
+	ctx, cancel := context.WithTimeout(h.lifecycle.ctx, threadFlushTimeout)
 	defer cancel()
 	if t, err := svc.Get(ctx, channelID); err == nil && t != nil {
 		h.noteThreadChanged(channelID)

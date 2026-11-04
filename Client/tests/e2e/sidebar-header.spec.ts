@@ -1,5 +1,5 @@
 import { test, expect } from "./fixtures";
-import { mockTauriFullSession, navigateToMainPage } from "./helpers";
+import { startFullSession } from "./helpers";
 
 // ---------------------------------------------------------------------------
 // Tests: Unified Sidebar Header
@@ -15,9 +15,7 @@ import { mockTauriFullSession, navigateToMainPage } from "./helpers";
 
 test.describe("Unified Sidebar Header", () => {
   test.beforeEach(async ({ page }) => {
-    await mockTauriFullSession(page);
-    await page.goto("/");
-    await navigateToMainPage(page);
+    await startFullSession(page);
   });
 
   test("header is visible and the server icon shows the server initials", async ({ page }) => {

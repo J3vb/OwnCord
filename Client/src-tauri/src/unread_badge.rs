@@ -197,7 +197,7 @@ fn render_overlay(label: &str) -> Vec<u8> {
 /// The Unity `LauncherEntry.Update` signal that sets the launcher count of
 /// `<desktop_name>.desktop`; a count of 0 hides it.
 #[cfg(target_os = "linux")]
-fn launcher_entry_update(desktop_name: &str, count: u32) -> dbus::Message {
+fn launcher_entry_update(desktop_name: &str, count: u32) -> Result<dbus::Message, String> {
     use dbus::arg::{PropMap, RefArg, Variant};
 
     let mut props = PropMap::new();
@@ -210,8 +210,7 @@ fn launcher_entry_update(desktop_name: &str, count: u32) -> dbus::Message {
         Variant(Box::new(count > 0) as Box<dyn RefArg>),
     );
     dbus::Message::new_signal("/", "com.canonical.Unity.LauncherEntry", "Update")
-        .expect("static signal names are valid")
-        .append2(format!("application://{desktop_name}.desktop"), props)
+        .map(|msg| msg.append2(format!("application://{desktop_name}.desktop"), props))
 }
 
 /// Send the launcher count over the session bus, once per desktop id. The connection is kept for
@@ -234,11 +233,14 @@ fn send_launcher_count(desktop_names: &[String], count: u32) {
     }
     let Some(conn) = session.as_ref() else { return };
     for desktop_name in desktop_names {
-        if conn
-            .channel()
-            .send(launcher_entry_update(desktop_name, count))
-            .is_err()
-        {
+        let msg = match launcher_entry_update(desktop_name, count) {
+            Ok(msg) => msg,
+            Err(e) => {
+                log::debug!("[badge] cannot build the launcher count signal: {e}");
+                return;
+            }
+        };
+        if conn.channel().send(msg).is_err() {
             log::debug!("[badge] cannot send the launcher count");
             *session = None;
             return;
@@ -365,7 +367,7 @@ mod tests {
         use dbus::arg::{prop_cast, PropMap};
 
         for (count, visible) in [(0, false), (5, true), (12, true)] {
-            let msg = launcher_entry_update("OwnCord", count);
+            let msg = launcher_entry_update("OwnCord", count).unwrap();
             assert_eq!(msg.path().as_deref(), Some("/"));
             assert_eq!(
                 msg.interface().as_deref(),

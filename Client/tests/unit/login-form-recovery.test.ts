@@ -1,30 +1,21 @@
 // B7-15b: the 2FA box takes an emergency recovery code as well as a TOTP
 // code, and the connect page offers account recovery with a kit secret or an
 // owner-issued recovery credential.
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+import * as mocks from "../helpers/connectPageMocks";
+import { useMountContainer } from "../helpers/mountContainer";
 import { createConnectPage } from "../../src/pages/ConnectPage";
-import type { ConnectPageCallbacks, SimpleProfile } from "../../src/pages/ConnectPage";
+import type { ConnectPageCallbacks } from "../../src/pages/ConnectPage";
+import {
+  makeCallbacks as baseCallbacks,
+  testProfiles as profiles,
+} from "../helpers/connectPageHarness";
 
-vi.mock("../../src/lib/net/credentials", () => ({
-  loadCredential: vi.fn().mockResolvedValue(null),
-}));
+vi.mock("../../src/lib/net/credentials", () => mocks.netCredentialsMock());
+vi.mock("../../src/features/settings/SettingsOverlay", () => mocks.settingsOverlayMock());
 
-vi.mock("../../src/features/settings/SettingsOverlay", () => ({
-  createSettingsOverlay: () => ({ mount: vi.fn(), destroy: vi.fn() }),
-}));
-
-function makeCallbacks(overrides: Partial<ConnectPageCallbacks> = {}): ConnectPageCallbacks {
-  return {
-    onLogin: vi.fn().mockResolvedValue(undefined),
-    onLoginWithSavedPassword: vi.fn().mockResolvedValue(undefined),
-    onRegister: vi.fn().mockResolvedValue(undefined),
-    onTotpSubmit: vi.fn().mockResolvedValue(undefined),
-    onRecover: vi.fn().mockResolvedValue(undefined),
-    ...overrides,
-  };
-}
-
-const profiles: SimpleProfile[] = [{ name: "Test Server", host: "localhost:8443" }];
+const makeCallbacks = (overrides: Partial<ConnectPageCallbacks> = {}): ConnectPageCallbacks =>
+  baseCallbacks({ onRecover: vi.fn().mockResolvedValue(undefined), ...overrides });
 const KIT = "K7QF-3M2X-9PLA-ZB5A-QW2E-TT7Y-AAAA-BBBB";
 
 /** What Chromium does to a focused control once it is disabled; jsdom does not. */
@@ -37,11 +28,9 @@ function dropFocusToBody(): void {
 
 describe("LoginForm 2FA box accepts an emergency recovery code", () => {
   let container: HTMLDivElement;
-  beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
+  useMountContainer((mounted) => {
+    container = mounted;
   });
-  afterEach(() => container.remove());
 
   function open(onTotpSubmit = vi.fn().mockResolvedValue(undefined)) {
     const page = createConnectPage(makeCallbacks({ onTotpSubmit }), profiles);
@@ -120,11 +109,9 @@ describe("LoginForm 2FA box accepts an emergency recovery code", () => {
 
 describe("Account recovery from the connect page", () => {
   let container: HTMLDivElement;
-  beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
+  useMountContainer((mounted) => {
+    container = mounted;
   });
-  afterEach(() => container.remove());
 
   async function mountPage(onRecover: ConnectPageCallbacks["onRecover"]) {
     const page = createConnectPage(makeCallbacks({ onRecover }), profiles);

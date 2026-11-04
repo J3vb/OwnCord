@@ -1,670 +1,150 @@
-# Trust model — who can read what
+# Who can read what
 
-This page tells users and operators who can read what on an OwnCord server,
-and what protects it. "The short answer" is written for anyone. The sections
-after it are reference material that points at the code.
-
-**Kind:** reference. **Verified against:** `dev` @ `012d5dbf`, 2026-09-17.
-The backup rows and the E2EE table's citations were re-checked against
-`origin/dev` @ `ac6ffc4e` on 2026-10-13. Citations name symbols first, so a
-moved line does not silently make a row wrong.
-**Satisfies:** BPR-050, BPR-051 (plain disclosure of the operator trust
-model); the C-09 contract for B7; the absence proofs for BPR-040/082/083.
-
-Every claim below points at the code or the test that makes it true, by
-symbol, `path:line` or test name. If a claim and the code disagree, the code
-is right and this document has a bug. Report it like any other bug.
+Plain answers about privacy on an OwnCord server. Every claim here is backed by
+code and tests, listed in the [evidence page](architecture/trust-model-evidence.md).
 
 ## The short answer
 
-**Who can read my messages?**
+| Who                                 | Text chat and files | Voice, video, screen share    |
+| ----------------------------------- | ------------------- | ----------------------------- |
+| You and the people in the channel   | Yes                 | Yes                           |
+| Moderators, in channels they manage | Yes                 | Only if they join the call    |
+| The person who runs the server      | **Yes**             | **No** (end-to-end encrypted) |
+| Your network, or anyone in between  | No (encrypted)      | No                            |
+| Other OwnCord servers               | No                  | No                            |
 
-- **You and everyone in the channel or DM** — that is what a chat server is
-  for.
-- **The person who runs the server** (the _operator_) can read every text
-  message, every file, and every name and timestamp. Text and files are stored
-  on the server in plain form so it can deliver, search, moderate and back
-  them up. Nothing about OwnCord hides stored text or files from the machine
-  they are stored on.
-- **Moderators** can read and delete messages in the channels their role
-  allows.
-- **Nobody in between** — not your network, not a reverse proxy the operator
-  did not set up — because the connection is TLS, **with one window**: on the
-  desktop's very first connection to a server, the app shows the certificate
-  fingerprint and asks you to trust it. It does this for **every** kind of
-  certificate — self-signed or from a public CA — because the desktop pins
-  the fingerprint it sees rather than checking the certificate against the
-  public CA list (`Client/src-tauri/src/ws_proxy.rs`, which connects through
-  `tofu::CaptureVerifier` in `Client/src-tauri/src/tofu.rs`). It cannot know whether that
-  fingerprint is the server's or an attacker's on the path. Compare it with
-  the fingerprint the operator gives you another way (chat elsewhere, a call)
-  before clicking; every later connection is then checked against that pin.
-  One change is accepted without asking: when the pinned certificate was
-  publicly valid for the server's domain and the new one is too — a routine
-  Let's Encrypt or proxy renewal — the app re-pins the new one silently. Any
-  other change (a self-signed certificate, an IP-address server, a certificate
-  that is not publicly valid) still shows the "Certificate Changed" prompt.
-  A public-CA certificate closes the first-use window only for a browser, which trusts
-  its own CA list, and a server run with TLS switched off has no protection
-  on the wire at all (see "Transport").
-- **Voice, video and screen share are different**: they are end-to-end
-  encrypted between the people in the call. The server passes the encrypted
-  media along and never has the key, so an operator who only reads what the
-  server stores or relays cannot listen in. An operator who **changes the
-  server** is a different matter: the server decides who is in a call, and
-  your client accepts any new participant's key the first time it sees it —
-  so a modified server can add a participant it controls and receive the
-  room key. Pinning catches a **known** person's key changing, not a new
-  person appearing. Today, E2EE media is not a defence against an operator
-  who modifies the server (see "What is end-to-end encrypted").
+**If you trust the person who runs the server with your words, OwnCord keeps
+everyone else out. If you do not trust them, do not type there.** There is no
+company behind OwnCord that can see your data: each server is run by one
+person or group.
 
-If the operator is someone you trust with your words, OwnCord is built to keep
-everyone else out. If you do not trust the operator, do not type there.
-OwnCord is one server run by one person or group; there is no company behind
-it that can see your data.
+## Text chat and files
 
-## What the server can read, and why
+The server stores messages, direct messages and files in plain form. It needs
+to, so it can deliver messages to people who were offline, keep history,
+search, moderate and make backups. Direct messages are stored the same way as
+channel messages.
 
-The server sees text and files in the clear. Each reason maps to a feature that
-would not work otherwise.
+What the server never stores in plain form:
 
-| Data                       | Stored as                                                                                                                                                                                                                                  | Why the server needs it in the clear                                                                                                                                                                                                                                                         |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Channel messages           | plain `content` column — `Server/migrations/001_initial_schema.sql:76`; written by `Server/db/queries/sqlite/messages.sql:2`                                                                                                               | **Delivery** to members who were offline (replay), **edit** history, **search**                                                                                                                                                                                                              |
-| Direct messages            | the same table — a DM is a `channels` row of type `dm` (`Server/migrations/009_dm_tables.sql:6`, body read at `Server/db/queries/sqlite/dm.sql:50`)                                                                                        | Same as channels. There is no separate, more private DM store                                                                                                                                                                                                                                |
-| Uploaded files             | the bytes you sent, unchanged, under `upload.storage_dir` — `Server/storage/storage.go:136`, `:157` — plus a scaled preview of a large image in its `thumbs/` subdirectory, removed with the file; served by `Server/api/file_serve.go:22` | **Delivery** with permission checks (`file_serve.go:144`), size caps                                                                                                                                                                                                                         |
-| Search index               | SQLite FTS5 over message text — `Server/migrations/001_initial_schema.sql:87-91`; queried at `Server/db/message_queries.go:385`                                                                                                            | **Search** (`GET /api/v1/search`, `Server/api/channel_handler.go:79`). Test: `TestSearchMessages_FindsMatch`                                                                                                                                                                                 |
-| Names, times, who-is-where | `users`, `messages`, `sessions` rows (`001_initial_schema.sql:37-46`)                                                                                                                                                                      | **Everything** — routing, permissions, unread counts                                                                                                                                                                                                                                         |
-| Backups                    | a full plain copy of the database via `VACUUM INTO` — `Server/db/backup_queries.go` `BackupToSafe`; written to `backup.dir`                                                                                                                | **Backup and restore** (`Server/admin/api.go`, the gated backup routes). The server owner, or a member holding Manage Backups (backups) or Restore Backups (backups and the full archive of the data directory), can download one through a single-use link (`Server/admin/archive_link.go`) |
+- **Passwords**: only a one-way hash.
+- **Sign-in tokens**: only a hash.
+- **Two-factor secrets**: encrypted with a key on the server.
 
-What the server does **not** keep in the clear:
+Message text never goes into the log or the audit log.
 
-- **Passwords** — bcrypt, cost 12: `Server/auth/password.go:38`, `:17`.
-  Test: `Server/auth/password_test.go`.
-- **Session tokens and API tokens** — SHA-256 of the token, never the token:
-  `Server/auth/session.go:21-22`; stored hashed at `Server/api/auth_handler.go:201`
-  and `Server/migrations/018_api_tokens.sql:17` (the `sessions.token` column
-  name is historical; `018_api_tokens.sql:9` says what it holds). Test:
-  `Server/auth/session_test.go`, `Server/auth/resolve_test.go`.
-- **2FA secrets** — encrypted with a server-local AES-256 key
-  (`Server/api/router.go:47`; enrolment encrypts at
-  `Server/api/totp_handler.go:323`). **Exception:** a database from before
-  that encryption landed may still hold plaintext secrets; nothing rewrites
-  them in place. The server returns such a value as-is and logs a warning on
-  every read (`Server/auth/totp_encrypt.go:109-117`). Disabling and
-  re-enabling 2FA on that account stores it encrypted.
-- **Message bodies in logs** — no `slog` call in server code logs `content`;
-  `Server/db/logvalue.go:14`, `:26` and `Server/config/logvalue.go:57` redact
-  hashes and secrets from every log line. Tests:
-  `TestUserSessionRedactedInLogs`, `TestSecretConfigsRedactedInLogs`.
-- **Message bodies in the audit log** — `Server/db/audittest/audittest.go:95`
-  `AssertSafeDetails` fails any audit row whose detail carries a body, token,
-  hash or secret. Tests: `TestAuditCoverage_ServiceMutations`,
-  `TestAuditCoverage_APIMutations`, `TestAuditCoverage_AdminMutations`,
-  `TestAuditCoverage_PluginLifecycle`.
+## Voice, video and screen share
 
-Text chat is **not** end-to-end encrypted, on purpose. The client sends the
-composer string as-is in `chat_send`
-(`Client/src/pages/main-page/ChannelController.ts:259-262`); the only
-cryptography in the client is the voice key exchange (`Client/src/lib/net/e2eeCrypto.ts`,
-`livekitE2EE.ts`, `identity.ts`). This is the hybrid model in BPR-050, the same
-trade Discord makes: server-readable text buys search, moderation, replay and
-backup.
+Calls are **end-to-end encrypted**. The key is made on a participant's computer
+and shared only with the others in the call. The server passes the encrypted
+sound and video along without ever having the key. A new key is made when
+someone leaves, and again from time to time during the call.
 
-## What is end-to-end encrypted
+If the server reports a stream as not encrypted, the app refuses to play it and
+shows the call as **Unsecured**.
 
-Voice, video and screen share. The design is in
-[architecture/voice-e2ee.md](architecture/voice-e2ee.md); the rules and their
-tests:
+What encryption does **not** hide: who is in which call, when, and for how
+long, or who is muted.
 
-| Rule                                                                                                                 | Code                                                                                                                                                                                                                                                                                                                             | Test                                                                                                                                                                                     |
-| -------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| The room key is made on a participant's machine, never on the server                                                 | `Client/src/lib/net/e2eeCrypto.ts` `generateRoomKey` (`:203`, WebCrypto random); called from `Client/src/lib/voice/livekitE2EE.ts` in the key holder's `setupKeyExchange` path and in `features/voice/e2eeEpoch.ts` `rotateRoomKey`                                                                                              | `livekit-e2ee.test.ts` "setupKeyExchange as key holder generates the room key and sends a signed announce"                                                                               |
-| One participant (the **key holder**, lowest user ID) wraps the key for each peer with ECDH + AES-GCM                 | `e2eeCrypto.ts:242` `wrapRoomKey`, `:271` `unwrapRoomKey`                                                                                                                                                                                                                                                                        | `e2eeCrypto.test.ts` "round-trips a room key between two keypairs"                                                                                                                       |
-| Media frames are encrypted before they leave the machine; the SFU (LiveKit) relays ciphertext                        | `Client/src/features/voice/roomLifecycle.ts`: the E2EE worker is created (`:147`) and `setE2EEEnabled(true)` is called on the room `createRoom` built (`:215`)                                                                                                                                                                   | `livekitSession/e2ee.test.ts` "enables E2EE on the room created by createRoom"                                                                                                           |
-| A remote track the media server reports as unencrypted is never subscribed or played, and the call shows "Unsecured" | `Client/src/features/voice/mediaEncryption.ts` `isUnencryptedPublication`, applied in `Client/src/lib/voice/roomEventHandlers.ts` (`refuseUnencrypted`), `features/voice/remoteTracks.ts` `watch` and `lib/voice/audioElements.ts` `applyRemoteAudioSubscriptionState`                                                           | `media.spec.ts` "media published without end-to-end encryption is never played"; `roomEventHandlers/encryptionAndConnection.test.ts` "remote publications without end-to-end encryption" |
-| The server relays wrapped keys as opaque bytes; it checks size and encoding, never decodes                           | `Server/ws/voice_e2ee.go:182-193`, `:225` (copied verbatim), `:239` (delivered only to a member of that voice channel)                                                                                                                                                                                                           | `TestE2EE_Offer_KeyHolderCanSend`, `TestE2EE_Offer_RejectsNonKeyHolder`, `TestE2EE_Offer_TargetChannelCheckAtomicWithLookup`                                                             |
-| The server holds no room key                                                                                         | Absence: the only E2EE state on the server is each client's stored public key and `Hub.voiceKeyHolders` (`voice_e2ee.go` `updateKeyHolder` `:47`, `IsVoiceKeyHolder` `:77`, `getClientE2EEPubKey` `:278`); no decrypt path exists                                                                                                | Pinned by the relay tests above; there is no positive "no key" assertion because there is nothing to assert on                                                                           |
-| Each user has a long-lived identity key; peers pin it on first sight (TOFU) and notify on a change                   | `Client/src/lib/net/identity.ts` `storeIdentityPin` (`:68`), `getIdentityPin` (`:87`); decision in `features/voice/e2eePeerState.ts` `verifyPeerAnnounce` (a changed key that signed the announce is re-pinned with a persistent notice; a pinned peer whose key is missing is blocked; first sight pins via `storeIdentityPin`) | `identity.test.ts` "getIdentityPin reports a store error as 'unavailable', never 'unpinned'"; `livekit-e2ee.test.ts` "marks a first-sight peer 'unverified'…"                            |
-| Accepting a new key re-pins the key the human saw, not a fresh read the server could have swapped                    | `livekitE2EE.ts` `rePinPeerIdentity(userId, verifiedKey)` (`:558`)                                                                                                                                                                                                                                                               | `livekitSession/e2ee.test.ts` "re-pins the verified key, not a store re-read a malicious server mutated (TOCTOU)"                                                                        |
-| When someone leaves, the key holder rotates the key, so the leaver cannot decrypt what comes next                    | `livekitE2EE.ts` `handleParticipantLeft` (`:809`), `e2eeEpoch.ts` `rotateRoomKey` (`:116`)                                                                                                                                                                                                                                       | `livekitSession/e2ee.test.ts` "rotates the room key when a keyed peer leaves while I stay key holder (forward secrecy)"                                                                  |
-| The key also rotates on a timer while the call runs                                                                  | `features/voice/e2eeEpoch.ts` `rotateKeyPeriodically` (`:146`)                                                                                                                                                                                                                                                                   | `livekit-e2ee.test.ts` "arms the periodic rotation timer for the key holder…"                                                                                                            |
-| A reconnect during a rotation gets the current key, not a stale one                                                  | `Server/ws/hub_registry.go` `registerNow` (re-announce of the client's own key on resume, OC-0316; this lived in `hub.go` until `088c7eb7`)                                                                                                                                                                                      | `TestRegisterNow_ReannouncesOwnKeyOnResume`; client `"[OC-0007] confirms the room key after a reconnect re-announce…"`                                                                   |
-| The server still decides **who may join and publish** — E2EE hides content, not membership                           | `Server/ws/livekit.go` `GenerateToken` (`:98`) with per-permission `CanPublishSources` (`liveKitPublishSources`); `Server/ws/voice_join.go` gates the join on `permissions.CanJoinVoice` (`:183`) and batches the per-source bits                                                                                                | `TestE2EE_VoiceToken_IncludesIsKeyHolder`; `Server/ws/voice_moderation_overrides_test.go`                                                                                                |
+**The limit.** The server decides who is in a call. A server owner who
+**changes the server's code** could add a hidden participant and receive the
+call key. The app warns when a known person's key changes, but it cannot spot a
+participant it has never seen before. So encryption protects you from an owner
+who only looks at what the server stores, not from one who rewrites the
+server.
 
-What E2EE does **not** hide from the operator: who is in which voice channel,
-when, for how long, and who is muted or deafened. Those are server state.
+**Checking someone's key.** Each person has a key that the app remembers the
+first time it sees it. If it changes later, you get a notice. Compare the
+safety number with that person another way (in person, a call) to be sure.
+Someone with two devices shows up as a key change when they switch.
 
-The identity-key store is the trust root. On the desktop the private key
-lives beside the session token in the OS keychain, one slot per account per
-server — keychain account `identity:{userId}@{host}`
-(`Client/src/lib/net/identity.ts:7`, `Client/src-tauri/src/credentials.rs` `save_identity_key`;
-`identity:{host}` is the legacy slot that entry was migrated from). Its
-protection is **trust on first use**, and that is the
-limit: the first time your client meets a peer it has no pin, so it accepts
-the public key the server delivers, checks that the announce is signed by
-that key, and pins it (`Client/src/features/voice/e2eePeerState.ts` `verifyPeerAnnounce`,
-the `storeIdentityPin` call). A malicious
-operator who substitutes a key at that first contact is not detected by the
-pin. What the pin catches is any **later** change to a peer you have already
-pinned: the change is accepted once the announce verifies against the new
-key, and the user gets a persistent notice naming the peer and a "key
-changed" roster badge with the new safety number. The call is not held up,
-so an unexpected notice is the cue to compare safety numbers out of band. To close the first-contact window,
-compare identity-key fingerprints out of band (the verification surface in
-[architecture/ux/voice-and-e2ee.md](architecture/ux/voice-and-e2ee.md) §7
-shows them). Pins are **one per account**, keyed `{host}:{userId}`
-(`Client/src/lib/net/identity.ts:11-12`; `features/voice/e2eePeerState.ts:158`, `:258`), while
-identity keys are per install — so a peer's second device shows up as a
-key change of the same account and overwrites the pin, and their first
-device then does the same in turn. Until a stable device identifier exists,
-expect that flip-flop (and its notices) with multi-device peers and verify
-each key out of band.
+## The connection
 
-## Transport
+Everything between the app and the server is encrypted (TLS), unless the owner
+turned TLS off without a proxy in front.
 
-In every `tls.mode` except `off`, everything between client and server is
-TLS; `off` served directly is plaintext, and is only safe behind a
-TLS-terminating reverse proxy the operator controls (its row below). Which
-certificate, and how the client decides to trust it:
+The first time you connect, the desktop app shows the server's certificate
+fingerprint and asks you to trust it. **Compare it with the one the server
+owner gives you another way** before you accept. After that, the app checks
+every connection against it.
 
-| Server `tls.mode` (`Server/config/config.go:332-344`, semantics `Server/auth/tls.go:176-201`) | Certificate                                                                                                                                                                                                                                                                                                                        | Desktop client                                                                                                                                                                                                                                                                     | Browser client (`server.browser_client_enabled`, off by default)            |
-| --------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| `self_signed` (default, `config.go:426`)                                                      | generated on first run                                                                                                                                                                                                                                                                                                             | **TOFU pinning.** First connect shows the fingerprint and asks; the pin is stored (`Client/src-tauri/src/ws_proxy.rs` `accept_cert_fingerprint`, the only writer besides a publicly valid renewal) and every later connection must match (`Client/src-tauri/src/tofu.rs` `decide`) | Must use a publicly trusted or locally installed CA certificate; no pinning |
-| `acme`                                                                                        | Let's Encrypt via `autocert` (`Server/auth/tls.go:262-331`)                                                                                                                                                                                                                                                                        | Pinned the same way                                                                                                                                                                                                                                                                | Trusted by the browser's CA store                                           |
-| `manual`                                                                                      | operator-supplied files                                                                                                                                                                                                                                                                                                            | Pinned the same way                                                                                                                                                                                                                                                                | Trusted if the CA is                                                        |
-| `off`                                                                                         | none. **Served directly, every connection is plaintext HTTP** — passwords, tokens and messages are readable by anyone on the path (`Server/auth/tls.go:179-180`, `Server/internal/app/http.go:49-50`). Nothing in the server enforces a proxy; the operator must put a TLS-terminating reverse proxy in front and expose only that | Pins the proxy's certificate (behind a proxy); it cannot connect to a plaintext `off` server at all, so without a TLS-terminating proxy in front there is nothing to connect to                                                                                                    | Trusted if the proxy's CA is (behind a proxy); plaintext without one        |
+- A normal certificate renewal on a public domain is accepted without asking.
+- Any other change shows a **Certificate Changed** warning. Ask the owner
+  before you accept: it can also mean someone is listening in.
+- The browser client cannot do this check. It trusts whatever the browser
+  trusts, so a server that hosts it needs a proper certificate.
 
-Desktop pinning details, each with its test:
+How owners set this up: [TLS and reverse proxies](hosting/tls-and-proxy.md).
 
-- The pin is the SHA-256 of the leaf certificate (`tofu.rs` `fingerprint_hex`);
-  a mismatch rejects the connection before the auth frame or any WebSocket
-  payload is sent (`tofu::decide`, `tofu::evaluate`). The WebSocket upgrade request itself — path and
-  headers, which carry no credential, since the token travels in the first
-  frame — does reach the peer before the verdict
-  (`Client/src-tauri/src/ws_proxy.rs:175-221`, between the handshake and
-  `tofu::evaluate`).
-  Tests: `decide_first_use_when_no_pin`, `decide_trusted_when_pin_matches`,
-  `decide_mismatch_when_pin_differs`, `capture_verifier_records_leaf_not_intermediate`.
-- First use also rejects: the app shows the fingerprint, and only an explicit
-  accept writes a pin (`tofu.rs:5-14`, `:451` "deciding never writes a
-  pin"). Tests: `valid_fingerprint_is_accepted` and the rejection cases beside
-  it in `ws_proxy.rs`.
-- The first-use prompt is the same in every `tls.mode`: the desktop does
-  not trust a public-CA certificate on first contact — it pins what it sees
-  (`ws_proxy.rs`, `tofu.rs` `CaptureVerifier`). Out-of-band
-  fingerprint comparison is therefore the only first-contact defence on the
-  desktop, whatever certificate the server has.
-- Web-PKI validation (the bundled `webpki-roots` set, not the OS store) is
-  used on the server connection for one decision only: re-pinning a routine
-  renewal. `CaptureVerifier` records whether the leaf validates for the
-  connection's DNS name (never for an IP host), and `tofu::decide` returns
-  `Renewed` only when the stored pin was itself recorded as publicly valid for
-  that host (`cert_web_pki.json`) and the new leaf is publicly valid too;
-  `tofu::evaluate` then writes the new pin. Every other change is a
-  `Mismatch`. Tests: `decide_renews_when_old_and_new_leaf_are_web_pki_valid`,
-  `decide_prompts_when_new_leaf_is_not_web_pki_valid`,
-  `decide_prompts_when_pinned_leaf_was_not_web_pki_valid`,
-  `decide_prompts_when_web_pki_record_is_for_another_leaf`,
-  `capture_verifier_never_marks_an_ip_host_web_pki_valid`. The updater's
-  `HostScopedVerifier` also uses web-PKI, for the GitHub download.
-- The three native tunnels share one TOFU module (`tofu.rs`) and one pin store
-  keyed by `tofu::cert_store_key`. The WebSocket and HTTP tunnels connect
-  through `tofu::CaptureVerifier` and decide after the handshake with
-  `tofu::evaluate`, so first use prompts and pins (`ws_proxy.rs:175,221`,
-  `http_proxy.rs:372,412`); the pooled HTTP path re-uses only a connection
-  whose handshake verified the host's current pin (`http_pool.rs`). The
-  LiveKit tunnel never pins on first use: it requires an existing pin and
-  verifies inside the handshake with `tofu::PinnedVerifier`
-  (`livekit_proxy.rs:386`).
-- The session token travels inside the first WebSocket frame, never in the
-  URL: server `Server/ws/serve_auth.go`, client `Client/src/lib/ws.ts:212`
-  (path only) and `:763` (auth frame). Test: `ws-lifecycle.test.ts`
-  "sends auth message when Rust reports open".
+## On disk
 
-A browser cannot inspect or pin a certificate. The browser adapter (post-beta)
-must require a certificate the browser already trusts and say so, not fake the
-pinning flow — [architecture/platform-contracts.md](architecture/platform-contracts.md)
-§"Hard cases" is the binding statement.
+- **On the server**, the database, files and backups are **not encrypted**.
+  Protect them with file permissions and disk encryption. Treat backups like
+  the database itself.
+- **On your computer**, the app keeps your sign-in and your voice key in the
+  system keychain (Windows Credential Manager or the Linux keyring). If there
+  is no keychain, it uses an encrypted file. Details:
+  [credential-storage.md](credential-storage.md).
 
-## Desktop preview destination policy (C-09) — contract for B7
+## What the server owner can and cannot do
 
-Link previews, avatars and external inline images make the desktop client
-fetch URLs that other users chose. Before B7-16 those fetches were made from
-the renderer through the Tauri HTTP plugin and the webview's own image loading,
-with destination policy applied in TypeScript per call site rather than in
-one place (`Client/src/features/messaging/content/embeds.ts`, `attachments.ts`,
-`media.ts`; `docs/security.md` §"Tauri Capabilities") — which is the C-09
-finding as publicly recorded: the policy is **not centralised at the native
-boundary**, and not every automatic fetch path applies the same checks. The
-B7 platform seam replaces that with
-**one native fetch broker** that owns the whole policy. This is the
-contract B7 implements; it is written here so B7 does not rediscover it.
+**Can:**
 
-The broker MUST:
+- read, search, delete and back up any text or file
+- see who is online, who is in which call, and each session's device and
+  address
+- ban, sign people out, change roles and settings (each is written to the
+  audit log)
 
-1. **Own every automatic remote fetch** — previews, avatars, external images,
-   OG images, and any future automatic media path. Renderer code gets no
-   general-purpose HTTP client.
-2. **Parse in native code** — only the permitted schemes and ports; reject
-   embedded credentials and malformed authorities.
-3. **Resolve, then classify every answer** — all A and AAAA records,
-   normalised (IPv4-mapped IPv6 included). Reject if **any** address is
-   loopback, private, link-local, unspecified, multicast, carrier-grade NAT,
-   documentation, benchmarking, or otherwise non-global. The server side of
-   this is done: `safefetch.ClassifyAddr`
-   (`Server/safefetch/classify.go`) is the whole list, including the
-   documentation ranges (`192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24`,
-   `2001:db8::/32`, `3fff::/20`), the benchmarking ranges (`198.18.0.0/15`,
-   `2001:2::/48`) and the remaining reserved blocks that the old
-   `plugin/host_http.go` `ipAllowed` missed, plus `fec0::/10` and `::/96`.
-   RFC 6052's well-known NAT64 prefix `64:ff9b::/96` is **unwrapped rather
-   than blocked** — the embedded IPv4 address is what a translator delivers
-   to, so that is what gets classified; blocking the prefix would cut an
-   IPv6-only server off from every IPv4 upstream, and allowing it hands over
-   every range the list refuses. An operator-chosen network-specific prefix
-   (RFC 6052 §2.2) is indistinguishable from any other global address and is
-   outside what either implementation can see. The broker uses the same set.
-4. **Connect only to the validated addresses**, keeping the hostname for SNI
-   and certificate checks. No second unconstrained lookup after validation
-   (`Server/safefetch/destination.go`, `(*Fetcher).dial`, is the server-side
-   shape: the vetted addresses ride the request context, and a dial that
-   arrives without them, or for a host they do not name, fails closed).
-5. **Disable automatic redirects.** Follow at most a small fixed number by
-   hand, re-running steps 2–4 on every hop; reject scheme downgrades.
-6. **Bound time, bytes and concurrency** — a total deadline, a streaming byte
-   ceiling enforced while reading (a `Content-Length` header is not a limit),
-   an allowed content-type list, and a cap on concurrent fetches.
-7. **Return a typed minimum** — title, description, dimensions, and the
-   preview image **as bytes or an opaque local handle fetched by the broker
-   under clauses 2–6** — never a remote image URL for the renderer to load
-   itself (a second, un-brokered request would bypass every control above),
-   and never raw status, headers or bodies to message-controlled code.
-8. **Narrow the renderer capability** once the broker owns these requests:
-   the `https://*` entry in `Client/src-tauri/capabilities/default.json` is a
-   URL-pattern control, not a DNS control, and stays only as defence in depth.
+**Cannot:**
 
-Regression coverage B7 owes: names resolving into each blocked class, a public
-name redirecting to a private target, mixed answer sets, CNAME chains, an
-address that changes between validation and connect, and boundary tests for
-the redirect count, deadline, byte ceiling, content types and TLS validity —
-against the real preview, avatar and external-image entry points.
+- listen to a call from what the server stores or relays
+- see your password or reuse a sign-in token from the database
+- swap the key of someone you already know without a notice
+- read your messages on another OwnCord server
 
-**Server side, done in B5-1.** Clauses 2 through 6 are implemented once, in
-`Server/safefetch`, and adopted by both of the server's outbound content
-paths — the GIF proxy (`Server/api/gif_handler.go`) and the plugin `http`
-capability (`Server/plugin/host_http.go`). The `egress-sites` invariant has
-the two rows to match, and the package's own suite is the regression coverage
-listed above, plus a lying `Content-Length`, a decompression bomb, a
-slow-loris body, a redirect loop, a scheme downgrade, a sniffed type
-disagreeing with the declared one, the concurrency cap under `-race`,
-cancellation, residual buffering and offline behaviour.
+**Can, with effort:** someone with full access to the server machine can change
+its code, database or settings. No protection survives that, not even call
+encryption, as explained above.
 
-**Desktop side, done in B7-16.** `Client/src-tauri/src/external_content.rs`
-is the broker, reached through the `ExternalContentBroker` platform contract
-(`Client/src/platform/contracts/externalContent.ts`) and nothing else: link
-previews, YouTube oEmbed titles and thumbnails, inline external images, sent
-GIFs, GIF-picker thumbnails and external avatars all go through it. It admits
-`https` on port 443 only, classifies every resolved answer with the same list
-(`Server/safefetch/testdata/classify_vectors.json` is the corpus both
-languages' suites read, and a Go test forces a vector for every range), dials
-through a resolver that answers only for the vetted host with the vetted
-addresses, follows at most three redirects by hand, and bounds each fetch by
-a deadline, a streaming byte ceiling, a content-type allowlist checked
-against the sniffed type for images, a concurrency cap and a process-wide
-in-flight byte budget. Open Graph and oEmbed are parsed in Rust; the renderer
-receives only title, description, site name, dimensions and an opaque image
-handle, and image bytes as a same-origin `blob:` URL. Its cache is
-byte-weighted and keyed by the server partition, and a page teardown drops
-it. The HTTP plugin's capability now allows only the loopback TOFU proxies
-(clause 8), and the CSP's `img-src` no longer allows `https:`, so an image the
-broker did not fetch cannot load; `connect-src` allows no `https:` or `wss:`
-source either, only loopback. One residual is deliberate: the YouTube player
-is a frame load, which cannot be brokered into bytes, and keeps its fixed host
-(`frame-src`) and sandbox.
+## Lost access
 
-**Viewer consent, B9-8.** The broker bounds _how_ content is fetched; the
-viewer decides _whether_. No broker call and no GIF-proxy query is made until
-the viewer has chosen, once per server profile, "Load automatically on this
-server" or "Ask each time" (a per-item click), after being told the linked
-sites can see their IP address
-(`Client/src/features/content-consent/external.ts`). The check sits in front
-of every broker call in `Client/src/features/messaging/content/attachments.ts`,
-so a render path that forgets to ask still fetches nothing. Turning off a
-Text & Images toggle, or its "Reset external content consent" action, revokes
-every server's choice, drops fetched bytes and late answers, and re-conceals
-rendered items. YouTube playback stays a separate click. The grant is
-separate from NSFW consent and Message Request trust and satisfies neither.
+- Your **recovery kit** gets you back in when your password and devices are
+  gone. The server keeps only a check value, so it cannot show it again. Keep
+  it offline.
+- The **server owner** can issue a one-time recovery code after checking who
+  you are outside OwnCord. Nobody else can reset your password.
+- Five wrong tries lock recovery for 15 minutes.
 
-**Clause 1 and the server's own files.** Attachments, avatars and custom
-emoji hosted by the connected OwnCord server are automatic fetches too, and
-they deliberately do not go through the broker: they keep the cert-pinned
-TOFU proxy (`Client/src-tauri/src/http_proxy.rs`). The two paths have
-opposite trust models. The broker is web-PKI, public addresses only, and
-never carries a credential; the server path trusts a pinned, often
-self-signed certificate, must reach any address the operator chose —
-including the LAN and loopback ranges the broker refuses by design — and
-carries the session bearer token. Merging them would put an "is this the
-server?" branch inside the security core, where one bug either skips
-classification for an attacker-chosen URL or sends the token to one. Two
-native owners make that bug class impossible, so clause 1 is met by the
-broker for content other users named and by `http_proxy.rs` for the server's
-own files, and no renderer call site holds a general-purpose client for
-either.
+## Several devices
 
-Aggregate cross-caller byte budgets and byte-weighted cache eviction are
-deliberately **not** in the server boundary (B5 decision 2): the server's
-outbound surface is one hard-coded host plus a default-empty operator
-allowlist, and the consumer that needs them is B7's broker. `Server/safefetch`
-is shaped so B7 adds them without a rewrite.
+You can be signed in on up to 25 devices. You can see and sign out each one in
+**Settings**, or sign out everywhere. Changing your password signs out every
+other device.
 
-Status: contract (this document, B2-7); server half implemented B5-1, desktop
-broker B7-16, per B5 decisions 1 and 2, the split recorded in the register's
-SEC-03 row (B5-12, 2026-09-05); tracked as C-09 in
-[plans/repo-health-issue-register-2026-08-23.md](plans/repo-health-issue-register-2026-08-23.md).
+## Deleted accounts
 
-## At rest
+Deleting an account removes its messages, files and sign-ins for good, and
+wipes the free space they used. Restoring an old backup does not bring it back:
+the server deletes it again at start-up, as long as the owner restored the
+whole data folder.
 
-| Where                      | What                                                                                            | Protection                                                                                                                                                                                                                                                              |
-| -------------------------- | ----------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Server database            | SQLite file at `database.path`                                                                  | **Not encrypted.** Plain `modernc.org/sqlite` driver, no cipher (`Server/db/db.go:17`, `:219`, DSN pragmas `:62-68`). Filesystem permissions and full-disk encryption are the operator's job                                                                            |
-| Server uploads             | plain files under `upload.storage_dir`                                                          | Same                                                                                                                                                                                                                                                                    |
-| Server backups             | plain database copies under `backup.dir`                                                        | Same — treat the backup directory as the database. A database backup does **not** include uploads; back up `upload.storage_dir` alongside it, or use the owner-only full archive, which includes them                                                                   |
-| Server secrets             | password hashes, token hashes, encrypted TOTP secrets                                           | See "What the server does not keep in the clear" above                                                                                                                                                                                                                  |
-| Desktop session + identity | OS keychain via the `keyring` crate: Windows Credential Manager, macOS Keychain, Secret Service | Every write is read back and verified (`Client/src-tauri/src/secret_store.rs:93`). If the keychain fails the round trip, a sealed file (DPAPI on Windows, ChaCha20-Poly1305 elsewhere) takes over until it works again — [credential-storage.md](credential-storage.md) |
-| Desktop certificate pins   | `certs.json` in the app data dir (`Client/src-tauri/src/constants.rs:2`)                        | Plain file; a user who can edit it can re-pin, which is the same user who can click "trust"                                                                                                                                                                             |
-| Desktop web-PKI record     | `cert_web_pki.json` in the app data dir (`Client/src-tauri/src/constants.rs:7`)                 | Plain file; editing it can only let a certificate that is itself publicly valid for the host replace the pin. Losing it means the next renewal prompts                                                                                                                  |
-| Desktop identity pins      | `identity_pins.json` (`Client/src/lib/net/identity.ts:11-12`)                                   | Plain file; same reasoning. The identity _private_ key is in the keychain, not here                                                                                                                                                                                     |
-
-## What the operator can and cannot do
-
-Can, by design:
-
-- Read, search and delete any text or file on the server; export the text
-  via the database backup. **Uploaded files are not in that backup** — it is
-  `VACUUM INTO` of the SQLite file only (`Server/admin/handlers_backup.go`
-  `handleBackup`, `Server/db/backup_queries.go` `BackupToSafe`). Back up
-  `upload.storage_dir` separately, or a restore loses every attachment. The
-  full archive (owner or Restore Backups holder; `Server/admin/handlers_archive.go`) is one zip of
-  the whole data directory — uploads, key files, erasure markers, TLS
-  material — plus `config.yaml`, with a `VACUUM INTO` snapshot of the
-  database.
-- See who is online, who is in which voice channel, session devices and IPs
-  (`sessions` table, `001_initial_schema.sql:37-46`).
-- Ban, force-logout (`Server/admin/api.go:114`), change roles, and change any
-  setting. Each of these writes an audit row — the list is in
-  [security.md](security.md) §"Audit Logging", and `TestAuditCoverage_*`
-  fails if a new admin mutation ships without one.
-- Install plugins, when the WASM runtime is compiled in and enabled —
-  [architecture/plugins.md](architecture/plugins.md). Off by default
-  (`Server/config/config.go:352`).
-
-Cannot, and the code is what stops them:
-
-- Read a voice, video or screen-share stream from what the server stores
-  or relays (see "What is end-to-end encrypted"). The active attack — a
-  modified server adding a participant it controls — is in the next
-  paragraph, and it works.
-- Recover a password (bcrypt) or a live session token (hashed) from the
-  database.
-- Impersonate a user's E2EE identity to a peer who has already pinned it
-  unnoticed — the peer's client shows a persistent key-changed notice naming
-  that user.
-- Read a user's messages on another OwnCord server: each server is an island
-  (next section).
-
-Can, with effort outside the code — and this is the honest boundary: an
-operator with shell access can edit the binary, the database or the
-configuration. No control in this document survives a hostile operator with
-root on the box, **E2EE media included**. Call membership is
-server-controlled and unauthenticated: a modified server can add a member —
-an invented user id, or a real peer's first contact — with an identity key
-and an ephemeral key the operator holds, the client accepts and pins any
-first-sight identity (`Client/src/features/voice/e2eePeerState.ts` `verifyPeerAnnounce`),
-and the key holder wraps the room key to it (`handleAnnounceInner`, the
-wrap-and-offer branch). Pinning every legitimate peer
-and comparing keys out of band does not close this: pins detect a **known**
-peer's key changing, not an unknown member joining. What E2EE gives today is
-exact and narrower: the server never holds the room key, so an operator who
-**reads** — database, logs, relayed frames, backups — gets nothing, and a
-known peer's key cannot be swapped without a key-changed notice. A defence
-against a modified server needs authenticated membership or the client
-refusing unrecognised participants; neither exists in beta (see "What beta
-does not claim").
-
-## Account recovery
-
-- The recovery kit (`POST /api/v1/users/me/recovery-kit`, B4-5) is 20 random
-  bytes the account holder keeps offline. The server stores an argon2id
-  verifier of it in `recovery_kits` (`Server/db/recovery_kit.go`) and nothing
-  else: it cannot show the secret again, and a database or backup holds no
-  usable kit. The setup wizard can mint the owner's kit at first run — it,
-  too, stores only the verifier and returns the secret once on the finish
-  step — so a fresh install starts with a way back in.
-- Redemption (`POST /api/v1/auth/recover`) replaces the password, revokes
-  every session and API token, spends the kit and writes the audit row in one transaction
-  (`DB.RedeemRecoveryKit`), then issues a session **without** the second
-  factor — by owner decision, since the kit exists for lost devices. Two
-  concurrent redemptions admit at most one; a spent kit never works again.
-- **Who can reset credentials:** the server owner, or a member holding Issue Recovery for members ranked below them, and only this way —
-  `POST /admin/api/users/{id}/recovery-credential` (B4-6) issues a 15-minute,
-  single-use credential after the owner verified the person out of band,
-  recorded as one of four fixed wordings; no free text is accepted, so no
-  note about the person exists anywhere. The server stores the credential's
-  argon2id verifier in `recovery_assists` (`Server/db/recovery_assist.go`)
-  and deletes the row when it is redeemed; a kit recovery withdraws it. No
-  administrator below the owner, and no support path, can reset a password
-  or clear a second factor. What stays unrecoverable: an account whose
-  holder the owner cannot verify, or a lost kit on a server whose owner will
-  not issue a credential.
-- Five failed attempts against an account, or from one address, lock
-  recovery for 15 minutes; the per-account lockout is audited. Every
-  failure reads the same and costs the same compare, so a recovery attempt
-  reveals nothing about whether an account or a kit exists.
-
-## Multi-device sessions
-
-- A user may hold up to 25 sessions; the 26th evicts the oldest
-  (`Server/db/auth_queries.go:237`, `:249-251`).
-- Each session records device, IP, creation, last use and expiry
-  (`001_initial_schema.sql:37-46`), and whether it is an unacknowledged new
-  login: a session created by a login is `unseen` until the account lists
-  its sessions from another device (`033_sessions_unseen.sql`,
-  `UserService.MarkSessionsSeen`; B4-7's new-login signal, REST-only by owner
-  decision 8).
-- Users list and revoke their own sessions: `GET`/`DELETE /api/v1/users/me/sessions`
-  (`Server/api/profile_handler.go:92-93`); revocation is scoped to the calling
-  user (`Server/service/user.go:366`).
-- Sign-out-everywhere: `DELETE /api/v1/users/me/sessions` revokes every
-  session and API token of the calling account, the current one included,
-  and never another account's (`UserService.RevokeAllSessions`, audit
-  `session_revoke_all`; test `TestRevokeAllSessions_OnlyTheCallersAccount`).
-- A password change revokes every other session (`Server/service/user.go:336`).
-- Admin force-logout revokes all of a user's sessions
-  (`Server/admin/api.go:114`; test `TestForceLogout_AuthorizationMatrix`).
-- Voice E2EE identity is per install, but peers keep **one pin per account**
-  (`{host}:{userId}`, `Client/src/lib/net/identity.ts:11-12`): your second device
-  appears to them as a key change that replaces the pin (with a notice), and
-  your first device then does the same. Not per-device pinning.
-
-## What beta does not claim
-
-- **No deniability, no metadata privacy.** The operator sees who talked to
-  whom and when.
-- **No encrypted text.** If that changes it is a new protocol epoch, a new
-  document, and a new trade-off against search, moderation and replay — not a
-  toggle.
-- **No protection against a hostile operator, E2EE media included.** E2EE
-  resists an operator who reads. A modified server controls call membership
-  and can add a participant it holds the keys for; pins do not cover a member
-  that was never a known peer. Authenticated membership is not in beta.
-- **Erasure is not undone by a restore, but the audit trail keeps a
-  token.** Account erasure (B4-9, `Server/db/erasure.go`;
-  `TestHP4_D1_ErasureLeavesNoClass`) hard-deletes every row attributable to
-  the account — the account itself, its messages and their search-index
-  entries, reactions, mentions, uploads and their files, DM state, invites,
-  blocks, credentials, sessions and replay events — in one transaction run
-  with SQLite's `secure_delete` on, and truncates the write-ahead log after
-  it, so the live database file keeps no trace in freed pages or the WAL.
-  A backup taken before the erasure still holds the account; what stops it
-  coming back is the deletion marker (B4-10, `Server/db/markers.go`):
-  `data/erasure/markers.sqlite`, outside the file a restore overwrites,
-  replayed on every start-up before anything serves, so a restored backup
-  is erased again (`TestHP4_D2_RestoreResurrectsAndTheMarkersReapplyTheErasure`)
-  — a marker left pending by a crash included, the last-admin rule set
-  aside (a backup from before the handover to another administrator is
-  erased to the state it had after it, and the log says no administrator
-  remains), and with the id counters raised first to the floors the marker
-  file keeps, so a new account never inherits an erased id. A marker names
-  its subject only as HMAC-SHA256 of the id under
-  `data/erasure.key`, generated beside `totp.key`; the audit rows the
-  subject appeared in keep their action, time and order with that token in
-  place of the id (`audit_log.subject_token` where they were the target,
-  `actor_token` where they acted) — and the same token in the report,
-  report-note, report-event, moderation-action and appeal rows that name them
-  (`Server/db/erasure.go`, `erasureUnlinkPrincipalRows`) — so the rows about
-  one erased subject remain linkable to each other by anyone who may read
-  them, any `VIEW_AUDIT_LOG` holder included, and to the identity only by
-  whoever holds `erasure.key` — the operator (the erasure-key holder, not
-  the voice key holder of the E2EE section) — with two residues the token
-  does not cover: the `erasure_jobs` row names the subject by bare user id
-  and is never pruned (owner decision B6-15/3), so whoever may read it holds
-  the identity without the key, and free text the erased account authored
-  while moderating others (`report_notes.body`, `moderation_actions.reason`,
-  `appeals.decision_note`) is unlinked but not cleared. Two operator duties follow: back up
-  `erasure.key` and the marker file beside the database (a restore with
-  either missing has nothing to replay), and treat the key as the thing that
-  re-identifies an erased account's audit trail.
-- **The browser client does not pin certificates.** It trusts whatever the
-  browser's own certificate check accepts (`Client/src/platform/browser/socket.ts`
-  dials with the page's `WebSocket`, never raises a first-use or mismatch
-  prompt, and `acceptCertificate` refuses), so a server that hosts it needs a publicly
-  trusted or locally installed CA certificate, as the Transport table says.
-- **No stable plugin API** — [architecture/plugins.md](architecture/plugins.md).
+The audit log keeps entries about a deleted account, but without the name.
 
 ## What OwnCord does not have
 
-Stated so the absence is a promise, not an accident (BPR-040, BPR-082,
-BPR-083):
+- **No federation.** Servers never talk to each other.
+- **No directory.** Nobody finds your server unless you give them the address.
+- **No shared accounts.** The same username on two servers is two different
+  people.
+- **No telemetry, no phone-home.** A server on a network without internet
+  works. The few things it connects out for (update checks, the voice server
+  download, the GIF picker, Let's Encrypt) only happen when someone uses them.
+- **No encrypted text chat.** That would cost search, moderation and history.
 
-- **No federation and no cross-server messaging.** Servers never talk to each
-  other. There is no protocol for it and no route that would carry it.
-- **No directory, discovery or public listing.** Nobody can find your server
-  unless you give them the address or an invite link.
-- **No global identity.** An account is a row in one server's database
-  (`users`, `Server/migrations/001_initial_schema.sql`). The same username on
-  two servers is two unrelated people; nothing links them, and a ban, a role or
-  a friend on one means nothing on the other. Even the voice E2EE identity is
-  pinned per host (`Client/src/lib/net/identity.ts:11-12`, key `{host}:{userId}`).
-- **No required external service.** A server on a LAN with no internet works.
-  Every outbound connection it can make is in the next table, each with the
-  condition that triggers it and the control where one exists. Two rows have
-  a condition but no configuration switch: GitHub release metadata (only on
-  request, never on a timer) and LiveKit signalling (only on a voice join,
-  to `voice.livekit_url`).
+## For contributors
 
-The proof is three tests in `Server/api/absence_contract_test.go`, one per
-boundary a new feature has to cross, each failing on the pattern
-`federat|directory|discover|listing` and each with a floor on how much it
-inspected so it cannot pass by looking at nothing:
-
-- `TestAbsenceContract_NoFederationDirectoryOrListingRoutes` — builds the
-  production router with every optional route family on and walks the whole
-  mounted tree, admin and plugin subrouters included. Mounting a `/directory`
-  route makes it red; that run is in the B2-7 evidence block.
-- `TestAbsenceContract_NoFederationDirectoryOrListingWireTypes` — every
-  WebSocket message type in `protocol/schema.json`, both directions.
-- `TestAbsenceContract_NoFederationDirectoryOrListingConfigKeys` — every
-  `yaml` key of `config.Config`, with one allowlisted on-disk path
-  (`plugins.directory`).
-
-What they prove is bounded and stated: they pin **vocabulary at the three
-boundaries**, not semantics. A feature smuggled in under a neutral name would
-pass them. The network boundary is covered differently — by the outbound-host
-table below, which B6 checks against a packet capture — and the review rule is
-the last line of defence: a route, message type or config key that
-legitimately needs one of those words, or any feature that makes the server
-talk to another server, must update this section and that table first.
-
-## Outbound connections the server makes
-
-For B6's network capture: everything the server process reaches out to, from
-a read of every `http.Client`, `net.Dial` and URL literal in non-test server
-code, plus the one companion process the server supervises. Traffic the
-server **serves** — responses on `server.port` to clients it did not initiate —
-is not in the table; the capture filters it by direction. **DNS** is not a
-row either: every hostname below is resolved through the host's configured
-resolver first, so queries to that resolver (and nothing else on port 53)
-are expected and environment-dependent; the capture filters them by
-destination. Anything else on the wire is a finding.
-
-| Host                                                                                                                                                                                   | When                                                                                                                                             | Why                                                                                                                                                                                                                           | Off switch                                                                                                                                                                                                                                                                                                         | Code                                                                                                                               |
-| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `api.github.com`                                                                                                                                                                       | on request to `/api/v1/client-update/…` or the admin update panel; cached 1 h                                                                    | latest-release metadata for client and server updates                                                                                                                                                                         | none needed — never on a timer; `github.owner`/`github.repo` pick the repo                                                                                                                                                                                                                                         | `Server/updater/updater.go:22`, `:224-233`; `Server/api/client_update.go:34`; `Server/admin/update_handlers.go:24`                 |
-| `github.com` (+ `*.githubusercontent.com` on redirect)                                                                                                                                 | admin clicks "update server"                                                                                                                     | download and verify the signed server release                                                                                                                                                                                 | do not click; URL is prefix-checked against the configured repo                                                                                                                                                                                                                                                    | `Server/updater/download.go:21`, `:265-273`; `Server/updater/assets.go:164-174`                                                    |
-| `github.com/livekit/livekit/releases/download` (+ the GitHub asset hosts on redirect, `objects.githubusercontent.com` / `release-assets.githubusercontent.com`, as in the updater row) | startup, only if `voice.auto_download_livekit` and no `voice.livekit_binary`                                                                     | fetch the pinned, checksum-verified `livekit-server` binary ; fetched with `http.DefaultClient`, which follows redirects (`Server/ws/livekit_download.go:271-300`) — the pinned SHA-256 bounds what is accepted, not the host | `voice.auto_download_livekit: false` or set `voice.livekit_binary`                                                                                                                                                                                                                                                 | `Server/ws/livekit_download.go:31`, `:36`, `:272-300`; `Server/ws/livekit_process.go:230`                                          |
-| `api.klipy.com`                                                                                                                                                                        | a user opens the GIF picker                                                                                                                      | GIF search/trending, proxied so the API key stays on the server                                                                                                                                                               | leave `gif.api_key` empty (default) — endpoints answer 503                                                                                                                                                                                                                                                         | `Server/api/gif_handler.go:34`, `:56-62`; `Server/config/config.go:68-76`                                                          |
-| STUN and cloud-metadata endpoints — external-address discovery by the **LiveKit subprocess** the server supervises                                                                     | LiveKit start-up, because the generated config sets `use_external_ip: true` when `voice.node_ip` is empty or `voice.advertise_internal_ip` is on | learn the public address to advertise in ICE candidates                                                                                                                                                                       | not running LiveKit (as below), or setting `voice.node_ip` with `voice.advertise_internal_ip` off, which the generated config then writes in place of `use_external_ip`                                                                                                                                            | `Server/ws/livekit_process.go:175-177`; `Server/config/config.go:207`                                                              |
-| participants' addresses — WebRTC media from the **LiveKit subprocess** the server supervises, UDP 50000–60000 or a single `voice.udp_port`, and TCP 7881                               | a call is in progress                                                                                                                            | encrypted media frames (E2EE); ICE/TURN                                                                                                                                                                                       | not running LiveKit (leave `voice.livekit_binary` unset and `voice.auto_download_livekit: false`) or hosting it elsewhere                                                                                                                                                                                          | `Server/ws/livekit_process.go:119-124` (`udp_port` or `port_range_start`/`end`); ports in `docs/deployment.md` §Firewall and Ports |
-| LiveKit at `voice.livekit_url` (default `ws://localhost:7880`)                                                                                                                         | a user joins voice; health probe of the supervised process                                                                                       | media SFU signalling                                                                                                                                                                                                          | **none today**: empty credentials are replaced by random ones and an empty URL defaults to `ws://localhost:7880` (`Server/config/config.go:645-662`), so a voice join always attempts `voice.livekit_url`; with no LiveKit running the attempt fails on loopback. A real `voice.enabled` switch is a server change | `Server/api/livekit_proxy.go:23-28`; `Server/ws/livekit_process.go:47-52`, `:372-377`                                              |
-| hosts on `plugins.http_allowlist`                                                                                                                                                      | an installed plugin with the `http` capability calls out                                                                                         | plugin feature                                                                                                                                                                                                                | empty by default; plugins off by default (`Server/config/config.go:352`, `:356`)                                                                                                                                                                                                                                   | `Server/plugin/host_http.go:115`, `:169-187`                                                                                       |
-| any `https` host on port 443 a member linked, the image its page names, and the Klipy GIF CDN                                                                                          | a **browser-client** viewer, signed in, opens a link preview, a GIF or an outside image they consented to                                        | the browser client has no native broker, so the server fetches for it and the viewer's address never reaches the linked host                                                                                                  | `server.browser_client_enabled` (off by default)                                                                                                                                                                                                                                                                   | `Server/externalcontent/broker.go`, `Server/api/external_handler.go`                                                               |
-| `acme-v02.api.letsencrypt.org`                                                                                                                                                         | startup and renewal, only when `tls.mode: acme`                                                                                                  | certificate issuance                                                                                                                                                                                                          | any other `tls.mode` (default `self_signed`)                                                                                                                                                                                                                                                                       | `Server/auth/tls.go:262-331`                                                                                                       |
-| operator's OTLP collector (`telemetry.otlp_endpoint`)                                                                                                                                  | startup, only when `telemetry.exporter: otlp`                                                                                                    | traces and metrics to a collector the operator runs                                                                                                                                                                           | `telemetry.exporter: none` (default)                                                                                                                                                                                                                                                                               | `Server/config/config.go:148-166`; `Server/internal/app/telemetry.go:18`                                                           |
-| `127.0.0.1:<port>/health`                                                                                                                                                              | `healthcheck` subcommand (Docker `HEALTHCHECK`)                                                                                                  | liveness probe of itself                                                                                                                                                                                                      | n/a — loopback                                                                                                                                                                                                                                                                                                     | `Server/internal/app/healthcheck.go:24-94`                                                                                         |
-
-Not in the table because it does not exist: analytics, crash reporting,
-telemetry to the project, licence checks, a phone-home of any kind. The only
-`telemetry` package is OpenTelemetry instrumentation whose exporter defaults to
-`none`. The Docker image is distroless with no shell or `curl`
-(`Server/Dockerfile:30`), and no tracked script the **server runs** fetches
-an external host. One build-time exception, outside the server: the release
-workflow's AppImage step downloads `appimagetool` from GitHub
-(`Client/scripts/strip-appimage-bundled-libs.sh:25-26`, invoked by
-`.github/workflows/release.yml`). That runs on the CI runner when a release
-is cut, never on an operator's machine.
-
-Two of the GitHub paths (`updater.go`, `livekit_download.go`) use a plain
-`http.Client` against fixed, prefix-validated GitHub URLs; the Klipy proxy,
-plugin HTTP and the browser client's external-content broker go through `Server/safefetch`, which classifies every resolved
-answer, connects only to the ones it vetted, and bounds time, bytes,
-redirects, content types and concurrency (`Server/safefetch/classify.go`,
-`destination.go`, `body.go`; tests `TestClassifyAddr_*`, `TestFetch_*`).
-
-The **desktop client** reaches, on its own: the server; LiveKit **signalling**
-through the server's `/livekit/*` proxy for remote servers, or **directly** to
-the LiveKit URL the server hands out when the server is local and that URL is
-itself loopback `ws:`/`http:`, on every platform (`Client/src/lib/voice/livekitUrlResolver.ts` `resolve`, `direct_url`); LiveKit **media**
-always directly, to the SFU's advertised ICE endpoints on TCP 7881 and UDP
-50000–60000, or the single `voice.udp_port` when set
-(`Server/ws/livekit_process.go:119-124`; `docs/deployment.md`
-§Firewall and Ports); `www.youtube.com` and `img.youtube.com` for video
-embeds (titles and thumbnails through the external-content broker, the player
-as a `frame-src` iframe on click); the Klipy CDN for GIF media, through the
-broker; for its own updates, the installer download from GitHub release
-assets, under normal web-PKI validation (`tofu::HostScopedVerifier`), once the
-server's `client-update` endpoint has named it; and any URL
-a user posted, for link previews, through the broker. The C-09 contract above
-governs every broker fetch: nothing is fetched through the broker (YouTube,
-Klipy, link previews) until the viewer has given the per-server consent
-described there. The update download is not a broker fetch. It happens only
-after the user accepts an update, and that preference does not gate it.
-
-The **browser client** reaches only the server that served it. Its link
-previews, GIFs and outside images come from the server's external-content
-broker (`Server/externalcontent`, mounted only with
-`server.browser_client_enabled`), which keeps the desktop broker's limits,
-Open Graph rules, opaque image handles (each usable only by the member it was
-minted for) and failure names, under the same per-viewer consent. The linked
-host sees the server's address instead of the viewer's.
-
-## How this document is kept true
-
-- HP-2 question 3 requires every claim above to trace to a test or a code
-  line; the anchors are that trace. Update them when the code moves.
-- The absence proofs (federation, directory) are a test that fails when a
-  matching route appears; see "What OwnCord does not have".
-- BPR-051's exit evidence is one non-developer reading "The short answer" and
-  answering "who can read my messages?" correctly — recorded in the B2-7
-  evidence block of
-  [archive/plans/b2-protocol-trust-compat-2026-08-28.md](archive/plans/b2-protocol-trust-compat-2026-08-28.md).
+Code comments that point to `docs/trust-model.md` for the desktop preview
+destination policy (C-09), the outbound connections table or the at-rest and
+transport tables mean the [evidence page](architecture/trust-model-evidence.md),
+which keeps those sections with their code and test references.

@@ -15,6 +15,7 @@ import (
 	lksdk "github.com/livekit/server-sdk-go/v2"
 
 	"github.com/J3vb/OwnCord/Server/config"
+	"github.com/J3vb/OwnCord/Server/livekitproc"
 )
 
 // tokenTTL is the validity of generated LiveKit access tokens: short (5 min) to
@@ -39,6 +40,9 @@ type LiveKitClient struct {
 	// removed holds identities RemoveParticipant removed, kept removed for
 	// tokenTTL by the hub's watch (voice_removed_watch.go).
 	removed removedIdentities
+
+	// health is the shared, short-lived reachability verdict (livekit_health.go).
+	health liveKitHealthCache
 }
 
 // NewLiveKitClient creates a client from the voice config. It errors if credentials
@@ -55,7 +59,7 @@ func NewLiveKitClient(cfg *config.VoiceConfig) (*LiveKitClient, error) {
 	}
 
 	// The room service client uses the HTTP URL: ws:// becomes http://, wss:// https://.
-	httpURL := wsToHTTP(cfg.LiveKitURL)
+	httpURL := livekitproc.HTTPURL(cfg.LiveKitURL)
 
 	roomSvc := lksdk.NewRoomServiceClient(httpURL, cfg.LiveKitAPIKey, cfg.LiveKitAPISecret)
 
@@ -228,11 +232,34 @@ func (c *LiveKitClient) ListRoomChannelIDs(ctx context.Context) ([]int64, error)
 	return ids, nil
 }
 
+// RoomUsage returns how many rooms the SFU has open and how many participants
+// are in them, counting every room, OwnCord's or not.
+func (c *LiveKitClient) RoomUsage(ctx context.Context) (rooms, participants int, err error) {
+	ctx, cancel := context.WithTimeout(ctx, lkTimeout)
+	defer cancel()
+	resp, err := c.roomSvc.ListRooms(ctx, &livekit.ListRoomsRequest{})
+	if err != nil {
+		return 0, 0, fmt.Errorf("livekit: listing rooms: %w", err)
+	}
+	for _, r := range resp.GetRooms() {
+		participants += int(r.GetNumParticipants())
+	}
+	return len(resp.GetRooms()), participants, nil
+}
+
 // RemoveParticipant forcefully disconnects a participant from a room and
 // keeps that exact identity out of the room until any token minted for it
 // has expired (voice_removed_watch.go).
 func (c *LiveKitClient) RemoveParticipant(ctx context.Context, channelID int64, userID int64, voiceJoinToken string) error {
-	c.removed.record(channelID, userID, voiceJoinToken)
+	c.removed.record(channelID, userID, voiceJoinToken, false)
+	return c.removeIdentity(ctx, channelID, participantIdentity(userID, voiceJoinToken))
+}
+
+// RemoveParticipantAfterOwnLeave is RemoveParticipant for a leave the client asked
+// for itself: the identity is still kept out of the room, on the watch's slower
+// own-leave cadence.
+func (c *LiveKitClient) RemoveParticipantAfterOwnLeave(ctx context.Context, channelID int64, userID int64, voiceJoinToken string) error {
+	c.removed.record(channelID, userID, voiceJoinToken, true)
 	return c.removeIdentity(ctx, channelID, participantIdentity(userID, voiceJoinToken))
 }
 
@@ -267,18 +294,6 @@ func (c *LiveKitClient) HealthCheck(ctx context.Context) (bool, error) {
 	}
 
 	return true, nil
-}
-
-// wsToHTTP converts a WebSocket URL to an HTTP URL.
-func wsToHTTP(wsURL string) string {
-	switch {
-	case len(wsURL) >= 6 && wsURL[:6] == "wss://":
-		return "https://" + wsURL[6:]
-	case len(wsURL) >= 5 && wsURL[:5] == "ws://":
-		return "http://" + wsURL[5:]
-	default:
-		return wsURL
-	}
 }
 
 // loopbackURLOrEmpty returns rawURL when its host is localhost or a loopback

@@ -186,8 +186,9 @@ test.describe("token matrix (thresholds, accent policy)", () => {
 
 test.describe("B9 Q13 role colours as text (role clamp)", () => {
   // Role colours are server-set: MOCK_ROLES paints admins #ff0000 (4.00:1 on
-  // white, 2.84:1 on dark) and moderators #00aaff. A role colour is a name's
-  // colour only at 4.5:1 on every surface, otherwise the name is --text-normal.
+  // white, 2.84:1 on dark) and moderators #00aaff. The clamp moves a role
+  // colour's lightness until the name reads at 4.5:1 where names sit,
+  // including a hovered mentioned row; High Contrast keeps --text-normal.
   const NAMES = ".msg-author, .member-item:not(.offline) .mi-name";
 
   for (const theme of THEMES) {

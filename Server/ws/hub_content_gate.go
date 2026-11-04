@@ -87,8 +87,8 @@ func (h *Hub) contentGateTimeout() time.Duration {
 }
 
 func (h *Hub) lifeCtx() context.Context {
-	if h.life != nil {
-		return h.life
+	if h.lifecycle.ctx != nil {
+		return h.lifecycle.ctx
 	}
 	return context.Background()
 }
@@ -171,7 +171,7 @@ func (h *Hub) issueGate(channelID int64, lane *gateLane) {
 	lane.inFlight = true
 	through := h.gates.ticket
 	life, timeout, results := h.lifeCtx(), h.contentGateTimeout(), h.gates.results
-	h.sweeps.Go(func() {
+	h.lifecycle.sweeps.Go(func() {
 		res := gateResolution{channelID: channelID, through: through, gateResult: h.resolveGateOnce(life, timeout, channelID)}
 		select {
 		case results <- res:

@@ -27,21 +27,15 @@ vi.mock("../../src/features/moderation/BanDialog", () => ({ openBanDialog }));
 
 import { createMemberPanel, type MemberPanelOptions } from "../../src/features/members/memberPanel";
 import { memberPanelUi } from "../../src/pages/main-page/SidebarMemberSection";
-import { authStore } from "../../src/stores/auth.store";
 import { membersStore } from "../../src/stores/members.store";
 import { channelsStore, setRoles } from "../../src/stores/channels.store";
 import { createMemberList } from "@components/MemberList";
 import { Permission } from "../../src/lib/types";
 import { resetMembersState } from "../helpers/storeResets";
+import { signInAsAdmin } from "../helpers/storeSeeds";
 
 function resetStores(): void {
-  authStore.setState(() => ({
-    token: null,
-    user: { id: 1, username: "testuser", role: "admin", avatar: null, totp_enabled: false },
-    serverName: "Test Server",
-    motd: null,
-    isAuthenticated: true,
-  }));
+  signInAsAdmin("testuser", { token: null });
   resetMembersState();
   channelsStore.setState(() => ({
     categories: [],

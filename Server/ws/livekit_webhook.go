@@ -286,7 +286,7 @@ func (h *Hub) webhookLeftCleanupClient(ctx context.Context, txn *voiceTxn, conns
 // handle; no hub lock is held.
 func (h *Hub) webhookLeftDeleteRow(ctx context.Context, txn *voiceTxn, userID, channelID int64, joinToken, stage string) {
 	parked := false
-	if e := h.voiceReg.voiceGrace.get(userID); e != nil {
+	if e := h.voiceHub.reg.voiceGrace.get(userID); e != nil {
 		parked = e.snap.chID == channelID && e.snap.joinToken == joinToken
 	}
 	deleted, dbErr := txn.deleteRow(ctx, channelID, joinToken)

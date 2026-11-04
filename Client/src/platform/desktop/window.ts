@@ -5,6 +5,7 @@
 // and this registry is statically reachable from the entry.
 import type { WindowControl } from "../contracts/window";
 import { createLogger } from "@lib/logger";
+import { noteWebviewZoom } from "./webviewZoom";
 
 const log = createLogger("window");
 
@@ -33,6 +34,7 @@ export const windowControl: WindowControl = {
   async setZoom(scale: number) {
     try {
       await (await import("@tauri-apps/api/webview")).getCurrentWebview().setZoom(scale);
+      noteWebviewZoom(scale);
       return true;
     } catch (err) {
       log.warn("webview zoom failed", { error: String(err) });

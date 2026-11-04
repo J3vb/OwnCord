@@ -10,19 +10,13 @@
 import { vi } from "vitest";
 import type { SettingsStore } from "../../../src/platform/contracts/settings";
 import { describeSettingsStoreSuite } from "./settings.suite";
+import * as hn from "../../helpers/nativeCoreHarness";
+import * as lm from "../../helpers/loggerMock";
 
-const core: {
-  invoke: ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) | undefined;
-} = { invoke: undefined };
+const core = hn.makeCore();
 
-vi.mock("@tauri-apps/api/core", () => ({
-  get invoke() {
-    return core.invoke;
-  },
-}));
-vi.mock("@lib/logger", () => ({
-  createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
-}));
+vi.mock("@tauri-apps/api/core", () => hn.coreMock(core));
+vi.mock("@lib/logger", () => lm.loggerMock());
 
 const mod = await import("../../../src/platform/desktop/settings");
 const desktopBinding: SettingsStore = mod.settings;
@@ -31,16 +25,6 @@ describeSettingsStoreSuite(async () => {
   core.invoke = undefined;
   return {
     subject: desktopBinding,
-    native: {
-      succeedWith(value: unknown) {
-        core.invoke = vi.fn().mockResolvedValue(value);
-      },
-      failWith(error: unknown) {
-        core.invoke = vi.fn().mockRejectedValue(error);
-      },
-      unavailable() {
-        core.invoke = undefined;
-      },
-    },
+    native: hn.nativeControls(core),
   };
 });

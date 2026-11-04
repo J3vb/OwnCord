@@ -1,19 +1,24 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// vi.mock is hoisted per file; the factories resolve to the shared handles
-// exported from ./helpers/ws-mocks (see that module's doc comment).
-vi.mock("@tauri-apps/api/core", async () => ({
-  invoke: (await import("./helpers/ws-mocks")).mockInvoke,
-}));
+import * as wsMocks from "./helpers/ws-mocks";
 
-vi.mock("@tauri-apps/api/event", async () => ({
-  listen: (await import("./helpers/ws-mocks")).mockListen,
-}));
+vi.mock("@tauri-apps/api/core", () => wsMocks.tauriCoreMock());
+vi.mock("@tauri-apps/api/event", () => wsMocks.tauriEventMock());
 
 import { mockInvoke, emitTauriEvent } from "./helpers/ws-mocks";
 import { createWsClient } from "../../src/lib/ws";
 import { expectConsole } from "../helpers/console";
 import { useWsClientFixture } from "../helpers/wsClientFixture";
+import {
+  openSocket,
+  emitAuthOk,
+  dropAndReopen,
+  wsConnectCalls,
+  expectNoReconnectAfterDrop,
+  emitCertMismatch,
+  emitCertFirstUse,
+  rejectWsConnect,
+} from "../helpers/wsSuiteHarness";
 
 describe("cert mismatch blocking", () => {
   let client: ReturnType<typeof createWsClient>;
@@ -22,31 +27,12 @@ describe("cert mismatch blocking", () => {
   });
 
   it("should block reconnect when cert mismatch detected", async () => {
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
+    await openSocket(client);
 
-    emitTauriEvent(
-      "ws-message",
-      JSON.stringify({
-        type: "auth_ok",
-        seq: 1,
-        payload: {
-          user: { id: 1, username: "a", avatar: null, role: "admin" },
-          server_name: "S",
-          motd: "",
-        },
-      }),
-    );
+    emitAuthOk({ seq: 1 });
 
     // Cert mismatch event fires
-    emitTauriEvent("cert-tofu", {
-      host: "localhost:8443",
-      fingerprint: "sha256:NEW",
-      status: "mismatch",
-      message: "Stored: sha256:OLD",
-    });
-    expectConsole("error", /\[ws\] Certificate fingerprint mismatch/);
+    emitCertMismatch("localhost:8443");
 
     expect(client.getState()).toBe("disconnected");
 
@@ -56,7 +42,7 @@ describe("cert mismatch blocking", () => {
     // Wait well beyond normal backoff — should NOT reconnect
     mockInvoke.mockClear();
     await vi.advanceTimersByTimeAsync(60_000);
-    const reconnectCalls = mockInvoke.mock.calls.filter((c) => c[0] === "ws_connect");
+    const reconnectCalls = wsConnectCalls();
     expect(reconnectCalls).toHaveLength(0);
   });
 
@@ -66,40 +52,16 @@ describe("cert mismatch blocking", () => {
     // through tofu::cert_store_key, which strips a trailing ":443". An
     // un-normalized comparison would miss this match and the reconnect loop
     // would keep re-handshaking the untrusted host every backoff interval.
-    client.connect({ host: "example.com:443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
+    await openSocket(client, { host: "example.com:443", token: "t" });
 
-    emitTauriEvent(
-      "ws-message",
-      JSON.stringify({
-        type: "auth_ok",
-        seq: 1,
-        payload: {
-          user: { id: 1, username: "a", avatar: null, role: "admin" },
-          server_name: "S",
-          motd: "",
-        },
-      }),
-    );
+    emitAuthOk({ seq: 1 });
 
     // Rust-normalized event host — no ":443" suffix.
-    emitTauriEvent("cert-tofu", {
-      host: "example.com",
-      fingerprint: "sha256:NEW",
-      status: "mismatch",
-      message: "Stored: sha256:OLD",
-    });
-    expectConsole("error", /\[ws\] Certificate fingerprint mismatch/);
+    emitCertMismatch("example.com");
 
     expect(client.getState()).toBe("disconnected");
 
-    emitTauriEvent("ws-state", "closed");
-
-    mockInvoke.mockClear();
-    await vi.advanceTimersByTimeAsync(60_000);
-    const reconnectCalls = mockInvoke.mock.calls.filter((c) => c[0] === "ws_connect");
-    expect(reconnectCalls).toHaveLength(0);
+    await expectNoReconnectAfterDrop(60_000);
   });
 
   it("blocks reconnect when the profile host's case differs from the Rust proxy's lowercased event host", async () => {
@@ -108,40 +70,16 @@ describe("cert mismatch blocking", () => {
     // case-folds to lowercase before the proxy emits the cert-tofu event.
     // An un-normalized (case-sensitive) comparison here would miss the
     // match and never latch this connection's reconnect loop.
-    client.connect({ host: "Example.COM:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
+    await openSocket(client, { host: "Example.COM:8443", token: "t" });
 
-    emitTauriEvent(
-      "ws-message",
-      JSON.stringify({
-        type: "auth_ok",
-        seq: 1,
-        payload: {
-          user: { id: 1, username: "a", avatar: null, role: "admin" },
-          server_name: "S",
-          motd: "",
-        },
-      }),
-    );
+    emitAuthOk({ seq: 1 });
 
     // Rust-normalized event host — lowercase.
-    emitTauriEvent("cert-tofu", {
-      host: "example.com:8443",
-      fingerprint: "sha256:NEW",
-      status: "mismatch",
-      message: "Stored: sha256:OLD",
-    });
-    expectConsole("error", /\[ws\] Certificate fingerprint mismatch/);
+    emitCertMismatch("example.com:8443");
 
     expect(client.getState()).toBe("disconnected");
 
-    emitTauriEvent("ws-state", "closed");
-
-    mockInvoke.mockClear();
-    await vi.advanceTimersByTimeAsync(60_000);
-    const reconnectCalls = mockInvoke.mock.calls.filter((c) => c[0] === "ws_connect");
-    expect(reconnectCalls).toHaveLength(0);
+    await expectNoReconnectAfterDrop(60_000);
   });
 
   it("blocks reconnect when a bracketed IPv6 profile host meets the Rust proxy's unbracketed event host", async () => {
@@ -153,67 +91,24 @@ describe("cert mismatch blocking", () => {
     // matching unwrap in normalizeHostForCertCompare, this guard never
     // matches for an IPv6 server and the reconnect loop keeps re-handshaking
     // the host whose certificate just changed.
-    client.connect({ host: "[2001:db8::1]", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
+    await openSocket(client, { host: "[2001:db8::1]", token: "t" });
 
-    emitTauriEvent(
-      "ws-message",
-      JSON.stringify({
-        type: "auth_ok",
-        seq: 1,
-        payload: {
-          user: { id: 1, username: "a", avatar: null, role: "admin" },
-          server_name: "S",
-          motd: "",
-        },
-      }),
-    );
+    emitAuthOk({ seq: 1 });
 
     // Rust-normalized event host — brackets stripped by cert_store_key.
-    emitTauriEvent("cert-tofu", {
-      host: "2001:db8::1",
-      fingerprint: "sha256:NEW",
-      status: "mismatch",
-      message: "Stored: sha256:OLD",
-    });
-    expectConsole("error", /\[ws\] Certificate fingerprint mismatch/);
+    emitCertMismatch("2001:db8::1");
 
     expect(client.getState()).toBe("disconnected");
 
-    emitTauriEvent("ws-state", "closed");
-
-    mockInvoke.mockClear();
-    await vi.advanceTimersByTimeAsync(60_000);
-    const reconnectCalls = mockInvoke.mock.calls.filter((c) => c[0] === "ws_connect");
-    expect(reconnectCalls).toHaveLength(0);
+    await expectNoReconnectAfterDrop(60_000);
   });
 
   it("should unblock after acceptCertFingerprint", async () => {
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
+    await openSocket(client);
 
-    emitTauriEvent(
-      "ws-message",
-      JSON.stringify({
-        type: "auth_ok",
-        seq: 1,
-        payload: {
-          user: { id: 1, username: "a", avatar: null, role: "admin" },
-          server_name: "S",
-          motd: "",
-        },
-      }),
-    );
+    emitAuthOk({ seq: 1 });
 
-    emitTauriEvent("cert-tofu", {
-      host: "localhost:8443",
-      fingerprint: "sha256:NEW",
-      status: "mismatch",
-      message: "Stored: sha256:OLD",
-    });
-    expectConsole("error", /\[ws\] Certificate fingerprint mismatch/);
+    emitCertMismatch("localhost:8443");
 
     expect(client.getState()).toBe("disconnected");
 
@@ -237,12 +132,7 @@ describe("cert mismatch blocking", () => {
     client.connect({ host: "localhost:8443", token: "t" });
     await vi.advanceTimersByTimeAsync(10);
 
-    emitTauriEvent("cert-tofu", {
-      host: "localhost:8443",
-      fingerprint: "sha256:NEW",
-      status: "first_use",
-    });
-    expectConsole("warn", /\[ws\] TOFU: first-use certificate/);
+    emitCertFirstUse("localhost:8443");
 
     expect(firstUse).toHaveLength(1);
     expect(mismatch).toHaveLength(0);
@@ -256,12 +146,7 @@ describe("cert mismatch blocking", () => {
     // fires during the connect page's health check, before login.
     await client.startCertListener();
 
-    emitTauriEvent("cert-tofu", {
-      host: "localhost:8443",
-      fingerprint: "sha256:NEW",
-      status: "first_use",
-    });
-    expectConsole("warn", /\[ws\] TOFU: first-use certificate/);
+    emitCertFirstUse("localhost:8443");
 
     expect(firstUse).toHaveLength(1);
   });
@@ -270,22 +155,9 @@ describe("cert mismatch blocking", () => {
     const mismatchEvents: unknown[] = [];
     client.onCertMismatch((evt) => mismatchEvents.push(evt));
 
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
+    await openSocket(client);
 
-    emitTauriEvent(
-      "ws-message",
-      JSON.stringify({
-        type: "auth_ok",
-        seq: 1,
-        payload: {
-          user: { id: 1, username: "a", avatar: null, role: "admin" },
-          server_name: "S",
-          motd: "",
-        },
-      }),
-    );
+    emitAuthOk({ seq: 1 });
 
     // Trigger mismatch
     emitTauriEvent("cert-tofu", {
@@ -307,39 +179,21 @@ describe("cert mismatch blocking", () => {
     mockInvoke.mockClear();
     await vi.advanceTimersByTimeAsync(60_000);
 
-    const reconnects = mockInvoke.mock.calls.filter((c) => c[0] === "ws_connect");
+    const reconnects = wsConnectCalls();
     expect(reconnects).toHaveLength(0);
   });
   it("does not latch or drop state on a mismatch for a different (unrelated) host", async () => {
     const mismatchEvents: unknown[] = [];
     client.onCertMismatch((evt) => mismatchEvents.push(evt));
 
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
-    emitTauriEvent(
-      "ws-message",
-      JSON.stringify({
-        type: "auth_ok",
-        payload: {
-          user: { id: 1, username: "a", avatar: null, role: "admin" },
-          server_name: "S",
-          motd: "",
-        },
-      }),
-    );
+    await openSocket(client);
+    emitAuthOk();
     expect(client.getState()).toBe("connected");
 
     // A rotated cert on a DIFFERENT saved profile (e.g. the connect page's
     // 15s health-check loop probing another server) must not touch this
     // connection at all.
-    emitTauriEvent("cert-tofu", {
-      host: "other.example:8443",
-      fingerprint: "sha256:NEW",
-      status: "mismatch",
-      message: "Stored: sha256:OLD",
-    });
-    expectConsole("error", /\[ws\] Certificate fingerprint mismatch/);
+    emitCertMismatch("other.example:8443");
 
     // Still notified — so a connect-page prompt for that OTHER host works...
     expect(mismatchEvents).toHaveLength(1);
@@ -350,25 +204,13 @@ describe("cert mismatch blocking", () => {
     emitTauriEvent("ws-state", "closed");
     mockInvoke.mockClear();
     await vi.advanceTimersByTimeAsync(2000);
-    const reconnectCalls = mockInvoke.mock.calls.filter((c) => c[0] === "ws_connect");
+    const reconnectCalls = wsConnectCalls();
     expect(reconnectCalls.length).toBeGreaterThan(0);
   });
 
   it("connect() resets certMismatchBlock even when not preceded by disconnect()", async () => {
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
-    emitTauriEvent(
-      "ws-message",
-      JSON.stringify({
-        type: "auth_ok",
-        payload: {
-          user: { id: 1, username: "a", avatar: null, role: "admin" },
-          server_name: "S",
-          motd: "",
-        },
-      }),
-    );
+    await openSocket(client);
+    emitAuthOk();
 
     emitTauriEvent("cert-tofu", {
       host: "localhost:8443",
@@ -383,32 +225,18 @@ describe("cert mismatch blocking", () => {
     // acceptCertFingerprint() (e.g. the suppressed-modal path where a second
     // host's mismatch latched the flag while a first-use modal was open, and
     // the user logs in anyway) — must clear the stale latch itself.
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
+    await openSocket(client);
     emitTauriEvent("ws-state", "closed"); // drop again, still unauthenticated
 
     mockInvoke.mockClear();
     await vi.advanceTimersByTimeAsync(2000);
-    const reconnectCalls = mockInvoke.mock.calls.filter((c) => c[0] === "ws_connect");
+    const reconnectCalls = wsConnectCalls();
     expect(reconnectCalls.length).toBeGreaterThan(0);
   });
 
   it("a mismatch latched while a reconnect is already pending cannot be bypassed by that timer", async () => {
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
-    emitTauriEvent(
-      "ws-message",
-      JSON.stringify({
-        type: "auth_ok",
-        payload: {
-          user: { id: 1, username: "a", avatar: null, role: "admin" },
-          server_name: "S",
-          motd: "",
-        },
-      }),
-    );
+    await openSocket(client);
+    emitAuthOk();
 
     // Socket drops first: a reconnect timer is now armed and counting down.
     emitTauriEvent("ws-state", "closed");
@@ -429,7 +257,7 @@ describe("cert mismatch blocking", () => {
 
     mockInvoke.mockClear();
     await vi.advanceTimersByTimeAsync(10_000);
-    const bypassed = mockInvoke.mock.calls.filter((c) => c[0] === "ws_connect");
+    const bypassed = wsConnectCalls();
     expect(bypassed).toHaveLength(0);
   });
 });
@@ -441,24 +269,18 @@ describe("disconnect() resets reconnectAttempt", () => {
   });
 
   it("resets the backoff exponent so a later session's first retry uses the short delay", async () => {
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
+    await openSocket(client);
 
     // One drop before auth_ok, letting the scheduled retry fire — grows
     // reconnectAttempt to 1 (the next backoff would double to 2s).
-    emitTauriEvent("ws-state", "closed");
-    await vi.advanceTimersByTimeAsync(1000);
-    emitTauriEvent("ws-state", "open");
+    await dropAndReopen(1000);
 
     // Abandon this session mid-backoff (reconnectAttempt is now 1).
     client.disconnect();
 
     // A brand new session — its first handshake also drops before auth_ok.
     mockInvoke.mockClear();
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
+    await openSocket(client);
     emitTauriEvent("ws-state", "closed");
 
     // If reconnectAttempt carried over (still 1) the next backoff would be
@@ -466,7 +288,7 @@ describe("disconnect() resets reconnectAttempt", () => {
     // fired by exactly 1000ms.
     mockInvoke.mockClear();
     await vi.advanceTimersByTimeAsync(1000);
-    const reconnectCalls = mockInvoke.mock.calls.filter((c) => c[0] === "ws_connect");
+    const reconnectCalls = wsConnectCalls();
     expect(reconnectCalls.length).toBeGreaterThan(0);
   });
 });
@@ -582,21 +404,9 @@ describe("cert-tofu non-mismatch statuses", () => {
   });
 
   it("trusted_first_use status does not block reconnect", async () => {
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
+    await openSocket(client);
 
-    emitTauriEvent(
-      "ws-message",
-      JSON.stringify({
-        type: "auth_ok",
-        payload: {
-          user: { id: 1, username: "a", avatar: null, role: "admin" },
-          server_name: "S",
-          motd: "",
-        },
-      }),
-    );
+    emitAuthOk();
 
     // Non-mismatch cert event
     emitTauriEvent("cert-tofu", {
@@ -643,21 +453,9 @@ describe("acceptCertFingerprint edge cases", () => {
   });
 
   it("clears certMismatchBlock so reconnect works again", async () => {
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
+    await openSocket(client);
 
-    emitTauriEvent(
-      "ws-message",
-      JSON.stringify({
-        type: "auth_ok",
-        payload: {
-          user: { id: 1, username: "a", avatar: null, role: "admin" },
-          server_name: "S",
-          motd: "",
-        },
-      }),
-    );
+    emitAuthOk();
 
     // Block with mismatch
     emitTauriEvent("cert-tofu", {
@@ -678,9 +476,7 @@ describe("acceptCertFingerprint edge cases", () => {
   });
 
   it("clears certMismatchBlock when the native accept command rejects", async () => {
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
+    await openSocket(client);
 
     emitTauriEvent("cert-tofu", {
       host: "localhost:8443",
@@ -712,6 +508,11 @@ describe("acceptCertFingerprint edge cases", () => {
   });
 });
 
+const CERT_UNVERIFIED = JSON.stringify({
+  error: "TLS_CERT_UNVERIFIED",
+  message: "the server's certificate could not be verified",
+});
+
 describe("disconnect resets certMismatchBlock", () => {
   let client: ReturnType<typeof createWsClient>;
   useWsClientFixture((created) => {
@@ -724,16 +525,7 @@ describe("disconnect resets certMismatchBlock", () => {
   // rejected `ws_connect`. The client keeps it so the pre-auth deadline can
   // show the certificate copy instead of the generic unreachable one.
   it("records the certificate failure code from a rejected ws_connect", async () => {
-    mockInvoke.mockImplementation((cmd: string) =>
-      cmd === "ws_connect"
-        ? Promise.reject(
-            JSON.stringify({
-              error: "TLS_CERT_UNVERIFIED",
-              message: "the server's certificate could not be verified",
-            }),
-          )
-        : Promise.resolve(undefined),
-    );
+    rejectWsConnect(CERT_UNVERIFIED);
 
     client.connect({ host: "localhost:8443", token: "t" });
     await vi.advanceTimersByTimeAsync(20);
@@ -743,11 +535,7 @@ describe("disconnect resets certMismatchBlock", () => {
   });
 
   it("has no connect failure code for an ordinary dial failure", async () => {
-    mockInvoke.mockImplementation((cmd: string) =>
-      cmd === "ws_connect"
-        ? Promise.reject("ws connect failed: connection refused")
-        : Promise.resolve(undefined),
-    );
+    rejectWsConnect("ws connect failed: connection refused");
 
     client.connect({ host: "localhost:8443", token: "t" });
     await vi.advanceTimersByTimeAsync(20);
@@ -766,16 +554,7 @@ describe("disconnect resets certMismatchBlock", () => {
     // dial. Until that dial reports its own outcome, an in-flight attempt must
     // not be attributed the earlier certificate failure — otherwise the
     // pre-auth deadline shows the wrong copy for a host that is merely slow.
-    mockInvoke.mockImplementation((cmd: string) =>
-      cmd === "ws_connect"
-        ? Promise.reject(
-            JSON.stringify({
-              error: "TLS_CERT_UNVERIFIED",
-              message: "the server's certificate could not be verified",
-            }),
-          )
-        : Promise.resolve(undefined),
-    );
+    rejectWsConnect(CERT_UNVERIFIED);
 
     client.connect({ host: "localhost:8443", token: "t" });
     await vi.advanceTimersByTimeAsync(20);
@@ -791,21 +570,9 @@ describe("disconnect resets certMismatchBlock", () => {
   });
 
   it("clears certMismatchBlock on intentional disconnect", async () => {
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
+    await openSocket(client);
 
-    emitTauriEvent(
-      "ws-message",
-      JSON.stringify({
-        type: "auth_ok",
-        payload: {
-          user: { id: 1, username: "a", avatar: null, role: "admin" },
-          server_name: "S",
-          motd: "",
-        },
-      }),
-    );
+    emitAuthOk();
 
     // Set cert mismatch block
     emitTauriEvent("cert-tofu", {

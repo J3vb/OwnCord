@@ -9,6 +9,7 @@ import {
   MEMBER_OPEN_PREF,
   MEMBER_WIDTH_PREF,
 } from "../../src/features/members/memberLayout";
+import { guarded, settle } from "../helpers/backNav";
 
 /** A controllable `(max-width: 899px)` media query: jsdom has no matchMedia. */
 class FakeMediaQueryList extends EventTarget {
@@ -570,14 +571,6 @@ describe("MemberColumn", () => {
     });
 
     describe("openOverlay and Back", () => {
-      const guarded = (): boolean => {
-        const state: unknown = history.state;
-        return typeof state === "object" && state !== null && "owncordBack" in state;
-      };
-      const settle = async (): Promise<void> => {
-        for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 0));
-      };
-
       afterEach(async () => {
         ctrl?.destroy();
         await settle();
@@ -670,6 +663,30 @@ describe("MemberColumn", () => {
         sideways.matches = false;
         window.dispatchEvent(new Event("resize"));
         expect(ctrl.openOverlay()).toBe(false);
+        expect(ctrl.isOverlayOpen()).toBe(false);
+      });
+
+      it("a phone turned sideways keeps the overlay open", () => {
+        const sideways = { matches: true };
+        vi.stubGlobal(
+          "matchMedia",
+          vi.fn((q: string) => (q.includes("pointer: coarse") ? sideways : mq)),
+        );
+        ctrl = make();
+        expect(ctrl.openOverlay()).toBe(true);
+        // Upright to sideways: past the narrow width, still the phone layout.
+        mq.set(false);
+        window.dispatchEvent(new Event("resize"));
+        expect(ctrl.isOverlayOpen()).toBe(true);
+        expect(column.hidden).toBe(false);
+        expect(guarded()).toBe(true);
+        mq.set(true);
+        window.dispatchEvent(new Event("resize"));
+        expect(ctrl.isOverlayOpen()).toBe(true);
+        // A window that leaves the overlay layout still dismisses it.
+        sideways.matches = false;
+        mq.set(false);
+        window.dispatchEvent(new Event("resize"));
         expect(ctrl.isOverlayOpen()).toBe(false);
       });
 

@@ -9,7 +9,8 @@
  *    everything else stays literal text, byte for byte
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
 import fc from "fast-check";
 
 // The emoji image is behind the session token; stub the authenticated fetch
@@ -82,14 +83,7 @@ beforeEach(() => {
   seedStores();
 });
 
-let container: HTMLDivElement;
-beforeEach(() => {
-  container = document.createElement("div");
-  document.body.appendChild(container);
-});
-afterEach(() => {
-  container.remove();
-});
+useMountContainer(() => {});
 
 const anyString = fc.string({ maxLength: 300 });
 

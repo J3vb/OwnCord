@@ -21,22 +21,12 @@ import type { Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
 import {
   buildTauriMockScript,
-  MOCK_LOGIN_RESPONSE,
-  MOCK_MESSAGES,
-  submitLogin,
-  waitForWsReady,
+  BASE_SESSION_ROUTES,
+  navigateToMainPageReady,
+  dmChannel,
 } from "./helpers";
 
-const DM_CHANNELS = [
-  {
-    channel_id: 100,
-    recipient: { id: 2, username: "otheruser", avatar: "", status: "online" },
-    last_message_id: 500,
-    last_message: "Hey there!",
-    last_message_at: "2026-03-15T12:00:00Z",
-    unread_count: 0,
-  },
-];
+const DM_CHANNELS = [dmChannel(100)];
 
 const REQUESTS = [
   {
@@ -52,9 +42,7 @@ const REQUESTS = [
 test.use({ viewport: { width: 640, height: 400 }, deviceScaleFactor: 1 });
 
 async function signIn(page: Page): Promise<void> {
-  await submitLogin(page);
-  await expect(page.locator("[data-testid='app-layout']")).toBeVisible({ timeout: 15_000 });
-  await waitForWsReady(page);
+  await navigateToMainPageReady(page);
   await expect(page.locator("[data-testid='chat-header-name']")).toHaveText("general");
   // The drawer controller loads on demand and adds its backdrop when it binds
   // the menu button; a press before that is lost.
@@ -104,9 +92,7 @@ test.describe("B9 narrow-width sidebar drawer", () => {
     await page.addInitScript(
       buildTauriMockScript({
         httpRoutes: [
-          { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-          { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
-          { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
+          ...BASE_SESSION_ROUTES,
           { pattern: "/pins", status: 200, body: { messages: [], has_more: false } },
           { pattern: "/api/v1/dm-requests", status: 200, body: { requests: REQUESTS } },
           {

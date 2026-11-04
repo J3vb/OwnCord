@@ -34,6 +34,10 @@ import {
   makeChatPayload,
   makeMessageResponse,
   resetStore,
+  addPendingAndFailedRows,
+  expectOnlySentMessage,
+  expectLoadedPendingFailed,
+  newestFirstPage,
 } from "../../helpers/messagesStoreHarness";
 
 // ---------------------------------------------------------------------------
@@ -260,10 +264,7 @@ describe("messages store", () => {
       // Broadcast arrives before confirmSend; matched by author against the
       // oldest pending row → replaced, not duplicated.
       addMessage(makeChatPayload({ id: 800, user: TEST_USER, content: "race" }));
-      const msgs = getChannelMessages(1);
-      expect(msgs).toHaveLength(1);
-      expect(msgs[0]!.id).toBe(800);
-      expect(msgs[0]!.status).toBe("sent");
+      expectOnlySentMessage(800);
     });
 
     it("reconciles an OFFLINE-failed row when its echo arrives — no duplicate, no dead Retry", () => {
@@ -284,10 +285,7 @@ describe("messages store", () => {
       // replay) arrives with the real id.
       addMessage(makeChatPayload({ id: 900, user: TEST_USER, content: "hi" }));
 
-      const msgs = getChannelMessages(1);
-      expect(msgs).toHaveLength(1);
-      expect(msgs[0]!.id).toBe(900);
-      expect(msgs[0]!.status).toBe("sent");
+      expectOnlySentMessage(900);
     });
 
     it("reconciles an OFFLINE-failed row whose echo comes back sanitized — stripped tags don't defeat the match", () => {
@@ -306,10 +304,7 @@ describe("messages store", () => {
 
       addMessage(makeChatPayload({ id: 900, user: TEST_USER, content: "hello" }));
 
-      const msgs = getChannelMessages(1);
-      expect(msgs).toHaveLength(1);
-      expect(msgs[0]!.id).toBe(900);
-      expect(msgs[0]!.status).toBe("sent");
+      expectOnlySentMessage(900);
     });
 
     it("does not reconcile a server-rejected (non-OFFLINE) failed row into an unrelated broadcast", () => {
@@ -489,10 +484,7 @@ describe("messages store", () => {
 
       invalidateLoadedMessageWindows();
 
-      const msgs = getChannelMessages(1);
-      expect(msgs.map((m) => m.correlationId)).toEqual([null, "c1", "c2"]);
-      expect(msgs[1]!.status).toBe("pending");
-      expect(msgs[2]!.status).toBe("failed");
+      expectLoadedPendingFailed();
     });
 
     it("is a no-op when no channel is loaded", () => {
@@ -567,12 +559,7 @@ describe("messages store", () => {
   // DP-10: a revisit refetches the latest page and reconciles it into the
   // cached window instead of replacing it.
   describe("revisit reconcile", () => {
-    /** Newest-first page of ids [from, to], as the REST API returns it. */
-    function page(from: number, to: number): MessageResponse[] {
-      const out: MessageResponse[] = [];
-      for (let id = to; id >= from; id--) out.push(makeMessageResponse({ id, content: `m${id}` }));
-      return out;
-    }
+    const page = newestFirstPage;
     /** Leave the channel and come back: the invalidate + fetch start the app runs. */
     function revisit(): void {
       invalidateChannelMessageWindow(1);
@@ -765,23 +752,7 @@ describe("messages store", () => {
 
     it("carries pending and failed rows across the reconcile, after the tail", () => {
       setMessages(1, page(1, 50), true);
-      addOptimisticMessage({
-        correlationId: "c1",
-        channelId: 1,
-        user: TEST_USER,
-        content: "in flight",
-        replyTo: null,
-        timestamp: "2026-03-15T10:00:00Z",
-      });
-      addOptimisticMessage({
-        correlationId: "c2",
-        channelId: 1,
-        user: TEST_USER,
-        content: "refused",
-        replyTo: null,
-        timestamp: "2026-03-15T10:00:01Z",
-      });
-      markSendFailed("c2", "SLOW_MODE");
+      addPendingAndFailedRows("SLOW_MODE");
       const cached = getChannelMessages(1);
 
       revisit();
@@ -813,12 +784,7 @@ describe("messages store", () => {
   // P2-T4: a full `ready` keeps every loaded row, and the active channel's
   // refetch splices into its window instead of replacing it.
   describe("full-ready resync splice", () => {
-    /** Newest-first page of ids [from, to], as the REST API returns it. */
-    function page(from: number, to: number): MessageResponse[] {
-      const out: MessageResponse[] = [];
-      for (let id = to; id >= from; id--) out.push(makeMessageResponse({ id, content: `m${id}` }));
-      return out;
-    }
+    const page = newestFirstPage;
     /** Oldest-first around-window of ids [from, to]. */
     function around(from: number, to: number): MessageResponse[] {
       return page(from, to).reverse();
@@ -900,23 +866,7 @@ describe("messages store", () => {
 
     it("carries pending and failed rows through the splice", () => {
       load200();
-      addOptimisticMessage({
-        correlationId: "c1",
-        channelId: 1,
-        user: TEST_USER,
-        content: "in flight",
-        replyTo: null,
-        timestamp: "2026-03-15T10:00:00Z",
-      });
-      addOptimisticMessage({
-        correlationId: "c2",
-        channelId: 1,
-        user: TEST_USER,
-        content: "refused",
-        replyTo: null,
-        timestamp: "2026-03-15T10:00:01Z",
-      });
-      markSendFailed("c2", "OFFLINE");
+      addPendingAndFailedRows("OFFLINE");
 
       resync();
       expect(getChannelMessages(1)).toHaveLength(202);

@@ -1,4 +1,6 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
+import { pressComposingEnter } from "../helpers/keyEvents";
+import { useMountContainer } from "../helpers/mountContainer";
 import { createStatusPicker, type StatusPickerComponent } from "@components/StatusPicker";
 import { MAX_CUSTOM_STATUS_LEN } from "@lib/presence/userStatus";
 
@@ -11,15 +13,12 @@ describe("StatusPicker", () => {
   let container: HTMLDivElement;
   let picker: StatusPickerComponent | null = null;
 
-  beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
+  useMountContainer((c) => {
+    container = c;
   });
-
   afterEach(() => {
     picker?.destroy?.();
     picker = null;
-    container.remove();
   });
 
   function labels(): string[] {
@@ -33,6 +32,20 @@ describe("StatusPicker", () => {
       (el) => el.querySelector(".status-picker-option-label")?.textContent === label,
     );
     (row as HTMLElement).click();
+  }
+
+  /** Mounts a picker showing `current` as its custom status; returns its callback and input. */
+  function mountWithCustomStatus(current: string) {
+    const onCustomStatusChange = vi.fn();
+    picker = createStatusPicker({
+      currentStatus: "online",
+      onStatusChange: vi.fn(),
+      currentCustomStatus: current,
+      onCustomStatusChange,
+    });
+    picker.mount(container);
+    const input = container.querySelector<HTMLInputElement>('[data-testid="custom-status-input"]')!;
+    return { onCustomStatusChange, input };
   }
 
   it("offers Invisible and sends it as its own value", () => {
@@ -70,16 +83,7 @@ describe("StatusPicker", () => {
   });
 
   it("pre-fills the custom status input and commits it on Enter", () => {
-    const onCustomStatusChange = vi.fn();
-    picker = createStatusPicker({
-      currentStatus: "online",
-      onStatusChange: vi.fn(),
-      currentCustomStatus: "shipping",
-      onCustomStatusChange,
-    });
-    picker.mount(container);
-
-    const input = container.querySelector<HTMLInputElement>('[data-testid="custom-status-input"]')!;
+    const { onCustomStatusChange, input } = mountWithCustomStatus("shipping");
     expect(input.value).toBe("shipping");
     // Twice the limit in UTF-16 units, so astral text fits; the limit itself is by character count.
     expect(input.getAttribute("maxlength")).toBe(String(MAX_CUSTOM_STATUS_LEN * 2));
@@ -92,40 +96,15 @@ describe("StatusPicker", () => {
   });
 
   it("Enter that commits an IME candidate does not commit the custom status", () => {
-    const onCustomStatusChange = vi.fn();
-    picker = createStatusPicker({
-      currentStatus: "online",
-      onStatusChange: vi.fn(),
-      currentCustomStatus: "",
-      onCustomStatusChange,
-    });
-    picker.mount(container);
-
-    const input = container.querySelector<HTMLInputElement>('[data-testid="custom-status-input"]')!;
+    const { onCustomStatusChange, input } = mountWithCustomStatus("");
     input.value = "half";
-    input.dispatchEvent(
-      new KeyboardEvent("keydown", {
-        key: "Enter",
-        isComposing: true,
-        bubbles: true,
-        cancelable: true,
-      }),
-    );
+    pressComposingEnter(input);
 
     expect(onCustomStatusChange).not.toHaveBeenCalled();
   });
 
   it("commits on blur and clears with an empty value", () => {
-    const onCustomStatusChange = vi.fn();
-    picker = createStatusPicker({
-      currentStatus: "online",
-      onStatusChange: vi.fn(),
-      currentCustomStatus: "busy",
-      onCustomStatusChange,
-    });
-    picker.mount(container);
-
-    const input = container.querySelector<HTMLInputElement>('[data-testid="custom-status-input"]')!;
+    const { onCustomStatusChange, input } = mountWithCustomStatus("busy");
     input.value = "";
     input.dispatchEvent(new FocusEvent("blur"));
 
@@ -133,16 +112,7 @@ describe("StatusPicker", () => {
   });
 
   it("does not re-send an unchanged value", () => {
-    const onCustomStatusChange = vi.fn();
-    picker = createStatusPicker({
-      currentStatus: "online",
-      onStatusChange: vi.fn(),
-      currentCustomStatus: "busy",
-      onCustomStatusChange,
-    });
-    picker.mount(container);
-
-    const input = container.querySelector<HTMLInputElement>('[data-testid="custom-status-input"]')!;
+    const { onCustomStatusChange, input } = mountWithCustomStatus("busy");
     // Enter then the blur it causes: without the guard this would burn two
     // presence updates against a one-per-ten-seconds limit.
     input.value = "busy";
@@ -153,16 +123,7 @@ describe("StatusPicker", () => {
   });
 
   it("restores the last committed text on Escape", () => {
-    const onCustomStatusChange = vi.fn();
-    picker = createStatusPicker({
-      currentStatus: "online",
-      onStatusChange: vi.fn(),
-      currentCustomStatus: "busy",
-      onCustomStatusChange,
-    });
-    picker.mount(container);
-
-    const input = container.querySelector<HTMLInputElement>('[data-testid="custom-status-input"]')!;
+    const { onCustomStatusChange, input } = mountWithCustomStatus("busy");
     input.value = "half-typed";
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
 

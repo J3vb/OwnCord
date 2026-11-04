@@ -30,8 +30,8 @@ describe("raw-bytes IPC commands", () => {
   const files = readdirSync(dir).filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts"));
   const users = files.filter((f) => rawBytes.test(readFileSync(join(dir, f), "utf8")));
 
-  test("the guard still sees the one raw-bytes consumer", () => {
-    expect(users).toEqual(["externalContent.ts"]);
+  test("the guard still sees the raw-bytes consumers", () => {
+    expect(users).toEqual(["externalContent.ts", "nativeFilesHost.ts"]);
   });
 
   test("every desktop module that invokes a raw-bytes command imports ipcBytes", () => {

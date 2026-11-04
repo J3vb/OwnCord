@@ -20,10 +20,11 @@
 import { test, expect, type Page } from "@playwright/test";
 import {
   buildTauriMockScript,
-  MOCK_LOGIN_RESPONSE,
   MOCK_MESSAGES,
   MOCK_PINNED_MESSAGES,
   navigateToMainPage,
+  ROUTE_HEALTH,
+  ROUTE_LOGIN,
 } from "./helpers";
 
 // ---------------------------------------------------------------------------
@@ -81,8 +82,8 @@ async function mockSessionWithSearch(page: Page, searchResults: unknown): Promis
   await page.addInitScript(
     buildTauriMockScript({
       httpRoutes: [
-        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-        { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
+        ROUTE_HEALTH,
+        ROUTE_LOGIN,
         // Longest patterns first in this list, but buildTauriMockScript sorts by
         // length anyway — the around route must win over the tail route.
         { pattern: "/channels/2/messages/around", status: 200, body: AROUND_CHANNEL_2 },
@@ -157,7 +158,7 @@ test.describe("Search overlay", () => {
     await expect(page.locator(INPUT)).toHaveAttribute("placeholder", "Search messages...");
   });
 
-  test("focusing the chat-header search input opens the overlay", async ({ page }) => {
+  test("clicking the chat-header search input opens the overlay", async ({ page }) => {
     await page.locator("[data-testid='search-input']").click();
     await expect(page.locator(OVERLAY)).toBeVisible();
     await expect(page.locator(INPUT)).toBeFocused();

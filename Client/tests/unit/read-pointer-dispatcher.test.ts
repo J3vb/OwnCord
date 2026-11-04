@@ -4,6 +4,7 @@
  * frame's `read` flag. Server events reach the stores only here.
  */
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest";
+import * as dispatcherMocks from "../helpers/dispatcherMocks";
 import * as voiceSession from "../helpers/voiceSessionMock";
 
 import { wireDispatcher } from "../../src/lib/dispatcher";
@@ -15,8 +16,6 @@ import {
   setChannels,
 } from "../../src/stores/channels.store";
 import { dmStore, addDmToChannelsStore, setDmChannels } from "../../src/stores/dm.store";
-import type { DmChannel } from "../../src/stores/dm.store";
-import { messagesStore } from "../../src/stores/messages.store";
 import {
   leaveChannel,
   noteMessageSeen,
@@ -31,17 +30,13 @@ import {
 import { viewChannel } from "../../src/lib/prefs/lastChannel";
 import { readPointerEnabled } from "../../src/lib/net/serverCapabilities";
 import type { ReadyChannel, ReadyPayload } from "../../src/lib/types";
-import type { Message } from "../../src/stores/messages.store";
+import type { WsErrorCodeValue } from "../../src/lib/protocolTypes";
 import { expectConsole } from "../helpers/console";
 import { resetMessagesState } from "../helpers/storeResets";
 import { resetChannelsState } from "../helpers/storeSeeds";
+import { makeDmRow, pointerMessage, seedLoadedMessages } from "../helpers/readPointerFixtures";
 
-vi.mock("@lib/notifications", () => ({
-  notifyIncomingMessage: vi.fn(),
-  notifyMention: vi.fn(),
-  notifyChannelActivity: vi.fn(),
-  cleanupNotificationAudio: vi.fn(),
-}));
+vi.mock("@lib/notifications", () => dispatcherMocks.notificationsMock());
 vi.mock("@lib/voice/livekitSession", () =>
   voiceSession.withOverrides({
     disableCamera: vi.fn(async () => {}),
@@ -52,16 +47,9 @@ vi.mock("@lib/voice/livekitSession", () =>
 // id. afterEach waits for that import: one still pending when the file ends
 // resolves after the mocks are gone and loads the real module into a torn-down
 // environment.
-vi.mock("@lib/voice/screenShare", () => ({
-  rollbackPendingVideo: vi.fn(() => undefined as "camera" | "screen" | undefined),
-}));
-const mockShowToast = vi.fn();
-vi.mock("@lib/ui/toast", () => ({
-  showToast: (...args: unknown[]) => mockShowToast(...args),
-}));
-vi.mock("@lib/net/identity", () => ({
-  ensureIdentityKeyPublished: vi.fn(async () => true),
-}));
+vi.mock("@lib/voice/screenShare", () => dispatcherMocks.screenShareMock());
+vi.mock("@lib/ui/toast", () => dispatcherMocks.toastMock());
+vi.mock("@lib/net/identity", () => dispatcherMocks.identityMock());
 
 function ch(id: number, unread: number, mentions: number, pointer?: number): ReadyChannel {
   return {
@@ -90,49 +78,6 @@ function ready(
   };
 }
 
-function msg(id: number): Message {
-  return {
-    id,
-    channelId: 1,
-    user: { id: 2, username: "alice", avatar: null },
-    content: `m${id}`,
-    replyTo: null,
-    attachments: [],
-    reactions: [],
-    pinned: false,
-    editedAt: null,
-    deleted: false,
-    timestamp: "2024-01-15T12:00:00Z",
-    status: "sent",
-    correlationId: null,
-    errorCode: null,
-  };
-}
-
-/** Seed a channel's loaded messages directly (setMessages takes server payloads). */
-function setMessages(channelId: number, messages: readonly Message[], _hasMore: boolean): void {
-  messagesStore.setState((prev) => {
-    const next = new Map(prev.messagesByChannel);
-    next.set(channelId, [...messages]);
-    return { ...prev, messagesByChannel: next };
-  });
-}
-
-const dmRow = (over: Partial<DmChannel> = {}): DmChannel => ({
-  channelId: 50,
-  recipient: { id: 7, username: "bob", avatar: "", status: "online" },
-  participants: [],
-  name: "",
-  isGroup: false,
-  lastMessageId: 30,
-  lastReadMessageId: 10,
-  lastMessage: "",
-  lastMessageAt: "",
-  unreadCount: 2,
-  mentionCount: 1,
-  ...over,
-});
-
 const chan = (id: number) => channelsStore.getState().channels.get(id);
 
 // A refused frame makes the voice handlers load screenShare lazily and
@@ -147,13 +92,40 @@ describe("read pointer through the dispatcher", () => {
   let mock: ReturnType<typeof createMockWsClient>;
   /** The mock as the dispatcher's WsClient (it lacks only the debug socket accessor). */
   const ws = (): WsClient => mock as unknown as WsClient;
+  /** The server refuses the frame `id`; the dispatcher logs it. */
+  function refuse(code: WsErrorCodeValue, message: string, id: string): void {
+    mock.simulateMessage("error", { code, message }, id);
+    expectConsole("error", /Server error/);
+  }
+  /** Authenticates, views channel 1 and returns the channel_focus frames both senders sent. */
+  function focusFrames() {
+    mock.simulateMessage("auth_ok", {
+      user: { id: 1, username: "alex", avatar: null, role: "admin" },
+      server_name: "S",
+      motd: "",
+    });
+    viewChannel(1, "text", ws());
+    return mock.getSentMessages().filter((m) => m.type === "channel_focus");
+  }
+  /** Marks message 10 unread on a read-pointer channel, leaving the request pending. */
+  function markUnreadPending(): void {
+    mock.simulateMessage("ready", ready([ch(1, 0, 0, 10)], { read_pointer: true }));
+    setActiveChannel(1);
+    seedLoadedMessages(1, [
+      pointerMessage(8),
+      pointerMessage(9),
+      pointerMessage(10),
+      pointerMessage(11),
+    ]);
+    expect(markMessageUnread(1, 10)).toBe(9);
+  }
   let cleanup: () => void;
   let hasFocus: ReturnType<typeof vi.spyOn>;
   let unreads: Array<[number, number]>;
   let reads: Array<[number, number | undefined]>;
 
   beforeEach(() => {
-    mockShowToast.mockClear();
+    dispatcherMocks.mockShowToast.mockClear();
     hasFocus = vi.spyOn(document, "hasFocus").mockReturnValue(true);
     resetChannelsState();
     dmStore.setState(() => ({ channels: [] }));
@@ -224,13 +196,7 @@ describe("read pointer through the dispatcher", () => {
     it("is false at both senders with the capability", () => {
       mock.simulateMessage("ready", ready([ch(1, 0, 0)], { read_pointer: true }));
       channelsStore.setState((p) => ({ ...p, activeChannelId: 1 }));
-      mock.simulateMessage("auth_ok", {
-        user: { id: 1, username: "alex", avatar: null, role: "admin" },
-        server_name: "S",
-        motd: "",
-      });
-      viewChannel(1, "text", ws());
-      const focus = mock.getSentMessages().filter((m) => m.type === "channel_focus");
+      const focus = focusFrames();
       expect(focus.map((f) => f.payload)).toEqual([
         { channel_id: 1, read: false },
         { channel_id: 1, read: false },
@@ -240,13 +206,7 @@ describe("read pointer through the dispatcher", () => {
     it("is absent without it", () => {
       mock.simulateMessage("ready", ready([ch(1, 0, 0)]));
       channelsStore.setState((p) => ({ ...p, activeChannelId: 1 }));
-      mock.simulateMessage("auth_ok", {
-        user: { id: 1, username: "alex", avatar: null, role: "admin" },
-        server_name: "S",
-        motd: "",
-      });
-      viewChannel(1, "text", ws());
-      const focus = mock.getSentMessages().filter((m) => m.type === "channel_focus");
+      const focus = focusFrames();
       expect(focus.map((f) => f.payload)).toEqual([{ channel_id: 1 }, { channel_id: 1 }]);
     });
   });
@@ -318,8 +278,8 @@ describe("read pointer through the dispatcher", () => {
 
     it("updates a DM in dmStore and in its channelsStore mirror", () => {
       mock.simulateMessage("ready", ready([ch(1, 0, 0, 5)], { read_pointer: true }));
-      setDmChannels([dmRow()]);
-      addDmToChannelsStore(dmRow());
+      setDmChannels([makeDmRow()]);
+      addDmToChannelsStore(makeDmRow());
       mock.simulateMessage("read_state", {
         channel_id: 50,
         last_read_message_id: 25,
@@ -336,7 +296,7 @@ describe("read pointer through the dispatcher", () => {
 
     it("updates a DM that was never opened (no mirror row)", () => {
       mock.simulateMessage("ready", ready([ch(1, 0, 0, 5)], { read_pointer: true }));
-      setDmChannels([dmRow()]);
+      setDmChannels([makeDmRow()]);
       mock.simulateMessage("read_state", {
         channel_id: 50,
         last_read_message_id: 25,
@@ -350,10 +310,7 @@ describe("read pointer through the dispatcher", () => {
 
   describe("a refused mark_unread", () => {
     function pending(): void {
-      mock.simulateMessage("ready", ready([ch(1, 0, 0, 10)], { read_pointer: true }));
-      setActiveChannel(1);
-      setMessages(1, [msg(8), msg(9), msg(10), msg(11)], false);
-      expect(markMessageUnread(1, 10)).toBe(9);
+      markUnreadPending();
       expect(chan(1)?.lastReadMessageId).toBe(9);
     }
 
@@ -366,64 +323,54 @@ describe("read pointer through the dispatcher", () => {
       );
       expectConsole("error", /Server error/);
       expect(chan(1)?.lastReadMessageId).toBe(10);
-      expect(mockShowToast).toHaveBeenCalledTimes(1);
-      expect(mockShowToast.mock.calls[0]?.[0]).toMatch(/Too many Mark Unread/);
+      expect(dispatcherMocks.mockShowToast).toHaveBeenCalledTimes(1);
+      expect(dispatcherMocks.mockShowToast.mock.calls[0]?.[0]).toMatch(/Too many Mark Unread/);
     });
 
     it("restores the pointer and says so on NOT_FOUND", () => {
       pending();
-      mock.simulateMessage("error", { code: "NOT_FOUND", message: "message not found" }, "req-1");
-      expectConsole("error", /Server error/);
+      refuse("NOT_FOUND", "message not found", "req-1");
       expect(chan(1)?.lastReadMessageId).toBe(10);
-      expect(mockShowToast.mock.calls[0]?.[0]).toMatch(/Couldn't mark it unread/);
+      expect(dispatcherMocks.mockShowToast.mock.calls[0]?.[0]).toMatch(/Couldn't mark it unread/);
     });
 
     it("leaves the pointer alone for an error on some other frame", () => {
       pending();
-      mock.simulateMessage("error", { code: "RATE_LIMITED", message: "slow" }, "other-frame");
-      expectConsole("error", /Server error/);
+      refuse("RATE_LIMITED", "slow", "other-frame");
       expect(chan(1)?.lastReadMessageId).toBe(9);
-      expect(mockShowToast.mock.calls.map((c) => String(c[0]))).not.toContain(
+      expect(dispatcherMocks.mockShowToast.mock.calls.map((c) => String(c[0]))).not.toContain(
         expect.stringMatching(/Mark Unread/),
       );
     });
 
     it("ends the request on any other code too, with the general notice", () => {
       pending();
-      mock.simulateMessage("error", { code: "FORBIDDEN", message: "access denied" }, "req-1");
-      expectConsole("error", /Server error/);
+      refuse("FORBIDDEN", "access denied", "req-1");
       expect(chan(1)?.lastReadMessageId).toBe(10);
-      expect(mockShowToast.mock.calls[0]?.[0]).toMatch(/Couldn't mark it unread/);
+      expect(dispatcherMocks.mockShowToast.mock.calls[0]?.[0]).toMatch(/Couldn't mark it unread/);
     });
 
     it("does nothing against a new ready: its pointer wins and no restore or toast fires", () => {
       pending();
       mock.simulateMessage("ready", ready([ch(1, 3, 0, 7)], { read_pointer: true }));
-      mock.simulateMessage("error", { code: "RATE_LIMITED", message: "slow" }, "req-1");
-      expectConsole("error", /Server error/);
+      refuse("RATE_LIMITED", "slow", "req-1");
       expect(chan(1)?.lastReadMessageId).toBe(7);
-      expect(mockShowToast.mock.calls.map((c) => String(c[0])).join("|")).not.toMatch(
-        /Mark Unread|mark it unread/,
-      );
+      expect(
+        dispatcherMocks.mockShowToast.mock.calls.map((c) => String(c[0])).join("|"),
+      ).not.toMatch(/Mark Unread|mark it unread/);
     });
 
     it("does nothing after the connection dropped", () => {
       pending();
       mock.simulateStateChange("connected");
       mock.simulateStateChange("reconnecting");
-      mock.simulateMessage("error", { code: "NOT_FOUND", message: "gone" }, "req-1");
-      expectConsole("error", /Server error/);
+      refuse("NOT_FOUND", "gone", "req-1");
       expect(chan(1)?.lastReadMessageId).toBe(9);
     });
   });
 
   describe("Mark Unread on the channel being read", () => {
-    function pending(): void {
-      mock.simulateMessage("ready", ready([ch(1, 0, 0, 10)], { read_pointer: true }));
-      setActiveChannel(1);
-      setMessages(1, [msg(8), msg(9), msg(10), msg(11)], false);
-      expect(markMessageUnread(1, 10)).toBe(9);
-    }
+    const pending = markUnreadPending;
     const answer = { channel_id: 1, last_read_message_id: 9, unread_count: 2, mention_count: 1 };
 
     it("keeps the counts the server answers with, so a badge is left when the reader leaves", () => {
@@ -471,14 +418,14 @@ describe("read pointer through the dispatcher", () => {
       pending();
       mock.simulateSendFailure("req-1", "OFFLINE");
       expect(chan(1)?.lastReadMessageId).toBe(10);
-      expect(mockShowToast.mock.calls[0]?.[0]).toMatch(/Check your connection/);
+      expect(dispatcherMocks.mockShowToast.mock.calls[0]?.[0]).toMatch(/Check your connection/);
     });
 
     it("ignores a send failure of some other frame", () => {
       pending();
       mock.simulateSendFailure("other", "NETWORK");
       expect(chan(1)?.lastReadMessageId).toBe(9);
-      expect(mockShowToast).not.toHaveBeenCalled();
+      expect(dispatcherMocks.mockShowToast).not.toHaveBeenCalled();
     });
   });
 });

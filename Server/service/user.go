@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -13,24 +12,27 @@ import (
 	"github.com/J3vb/OwnCord/Server/telemetry"
 )
 
-// userStore is what UserService reads and writes. *db.DB satisfies it.
+// userStore is what NewUserService wires: the core's store plus its parts'.
+// *db.DB satisfies it.
 type userStore interface {
+	userCoreStore
+	userSessionStore
+	registrationQueueStore
+}
+
+// userCoreStore is what UserService's profile, status, password and lookup paths
+// read and write.
+type userCoreStore interface {
 	connWritesStore
 	db.Auditor
 	GetUserByID(ctx context.Context, id int64) (*db.User, error)
 	GetUserByUsername(ctx context.Context, username string) (*db.User, error)
-	ListPendingUsers(ctx context.Context, limit, offset int) ([]db.PendingUser, error)
-	ApprovePendingUser(ctx context.Context, userID int64) error
-	DenyPendingUser(ctx context.Context, userID int64) error
 	UpdateUserProfile(ctx context.Context, userID int64, username string, avatar, displayName, about, bannerID, bannerColor *string) error
 	UpdateUserCustomStatus(ctx context.Context, userID int64, customStatus *string) error
 	UpdateUserPassword(ctx context.Context, userID int64, newPasswordHash string) error
 	UpdateUserIdentityKey(ctx context.Context, id int64, key *string) error
 	DeleteOtherSessions(ctx context.Context, userID, keepSessionID int64) (int64, error)
-	SignOutEverywhere(ctx context.Context, userID int64) (sessions, tokens int64, err error)
-	DeleteSessionByID(ctx context.Context, sessionID, userID int64) error
-	ListUserSessions(ctx context.Context, userID int64) ([]db.Session, error)
-	MarkSessionsSeen(ctx context.Context, userID, exceptSessionID int64) (int64, error)
+	RevokeUserAPITokens(ctx context.Context, userID int64) (int64, error)
 	GetRoleByID(ctx context.Context, id int64) (*db.Role, error)
 	// HasActiveTimeout is the indexed per-user lookup (FinalizeTimeoutLift;
 	// PermissionService.Subject reads its mirror).
@@ -41,18 +43,22 @@ type userStore interface {
 
 // UserService handles user profile and session operations.
 type UserService struct {
-	st           userStore
+	*userSessions
+	*registrationQueue
+	st           userCoreStore
 	profileLocks keyedMutex
 	// batch, when set, queues the connection stamps instead of writing them; nil
 	// writes each at once (tests, the admin panel's instance).
 	batch *ConnWrites
-	// welcome greets an approved applicant; nil greets nobody.
-	welcome *WelcomeService
 }
 
 // NewUserService creates a UserService.
 func NewUserService(st userStore) *UserService {
-	return &UserService{st: st}
+	return &UserService{
+		userSessions:      &userSessions{st: st},
+		registrationQueue: &registrationQueue{st: st},
+		st:                st,
+	}
 }
 
 // keyedMutex hands out a per-key lock so unrelated keys never contend. Keyed by
@@ -293,16 +299,19 @@ func (s *UserService) UpdateIdentityKey(ctx context.Context, userID int64, key s
 }
 
 // ChangePasswordResult reports a completed password change. RevokeFailed means
-// the password committed but other sessions could not be revoked: surface it as a
-// warning, never a 5xx, since the old password is already dead and a "failed"
-// answer would walk the user into retrying with it and tripping the lockout.
+// the password committed but other sessions, or the API tokens the caller asked
+// to revoke, could not be revoked: surface it as a warning, never a 5xx, since
+// the old password is already dead and a "failed" answer would walk the user
+// into retrying with it and tripping the lockout.
 type ChangePasswordResult struct {
 	SessionsRevoked int64
+	TokensRevoked   int64
 	RevokeFailed    bool
 }
 
-// ChangePassword updates the user's password and revokes other sessions.
-func (s *UserService) ChangePassword(ctx context.Context, userID int64, newPasswordHash string, keepSessionID int64) (ChangePasswordResult, error) {
+// ChangePassword updates the user's password and revokes other sessions, and
+// every API token of the account too when revokeTokens is set.
+func (s *UserService) ChangePassword(ctx context.Context, userID int64, newPasswordHash string, keepSessionID int64, revokeTokens bool) (ChangePasswordResult, error) {
 	if err := s.st.UpdateUserPassword(ctx, userID, newPasswordHash); err != nil {
 		return ChangePasswordResult{}, fmt.Errorf("%w: failed to update password: %w", ErrInternal, err)
 	}
@@ -324,104 +333,28 @@ func (s *UserService) ChangePassword(ctx context.Context, userID int64, newPassw
 			res.RevokeFailed = true
 		}
 	}
-	db.WriteAudit(tailCtx, s.st, userID, "password_change", "user", userID, "password changed")
+	if revokeTokens {
+		tokens, tokErr := s.st.RevokeUserAPITokens(tailCtx, userID)
+		if tokErr != nil {
+			slog.Error("UserService.ChangePassword RevokeUserAPITokens", "err", tokErr, "user_id", userID)
+			// Same single retry as the sessions above.
+			tokens, tokErr = s.st.RevokeUserAPITokens(tailCtx, userID)
+		}
+		if tokErr != nil {
+			res.RevokeFailed = true
+		} else {
+			res.TokensRevoked = tokens
+		}
+	}
+	detail := "password changed"
+	if res.TokensRevoked > 0 {
+		detail = fmt.Sprintf("password changed (%d API tokens revoked)", res.TokensRevoked)
+	}
+	db.WriteAudit(tailCtx, s.st, userID, "password_change", "user", userID, detail)
 	slog.Info("password changed", "user_id", userID,
-		"sessions_revoked", res.SessionsRevoked, "revoke_failed", res.RevokeFailed)
+		"sessions_revoked", res.SessionsRevoked, "api_tokens_revoked", res.TokensRevoked,
+		"revoke_failed", res.RevokeFailed)
 	return res, nil
-}
-
-// ListPendingRegistrations is the approval queue, oldest first.
-func (s *UserService) ListPendingRegistrations(ctx context.Context, limit, offset int) ([]db.PendingUser, error) {
-	pending, err := s.st.ListPendingUsers(ctx, limit, offset)
-	if err != nil {
-		return nil, fmt.Errorf("%w: failed to list pending registrations: %w", ErrInternal, err)
-	}
-	return pending, nil
-}
-
-// ApproveRegistration unlocks an approval-mode application so the account can
-// sign in. ErrNotFound when the id is not pending.
-func (s *UserService) ApproveRegistration(ctx context.Context, actorID, userID int64) error {
-	if err := s.st.ApprovePendingUser(ctx, userID); err != nil {
-		if errors.Is(err, db.ErrNotFound) {
-			return fmt.Errorf("%w: no pending registration with that id", ErrNotFound)
-		}
-		return fmt.Errorf("%w: failed to approve registration: %w", ErrInternal, err)
-	}
-	db.WriteAudit(context.WithoutCancel(ctx), s.st, actorID, "registration_approve", "user", userID, "application approved")
-	slog.Info("registration approved", "actor_id", actorID, "user_id", userID)
-	// The account is usable now: greet it, best effort.
-	s.welcome.Greet(ctx, userID)
-	return nil
-}
-
-// DenyRegistration refuses an application: the row is anonymised, locked for
-// good and its username released. Only a pending row is touched.
-func (s *UserService) DenyRegistration(ctx context.Context, actorID, userID int64) error {
-	if err := s.st.DenyPendingUser(ctx, userID); err != nil {
-		if errors.Is(err, db.ErrNotFound) {
-			return fmt.Errorf("%w: no pending registration with that id", ErrNotFound)
-		}
-		return fmt.Errorf("%w: failed to deny registration: %w", ErrInternal, err)
-	}
-	db.WriteAudit(context.WithoutCancel(ctx), s.st, actorID, "registration_deny", "user", userID, "application denied")
-	slog.Info("registration denied", "actor_id", actorID, "user_id", userID)
-	return nil
-}
-
-// ListSessions returns all active sessions for a user.
-func (s *UserService) ListSessions(ctx context.Context, userID int64) ([]db.Session, error) {
-	sessions, err := s.st.ListUserSessions(ctx, userID)
-	if err != nil {
-		return nil, fmt.Errorf("%w: failed to list sessions: %w", ErrInternal, err)
-	}
-	return sessions, nil
-}
-
-// MarkSessionsSeen acknowledges the account's unseen logins: every other
-// session's flag clears, the caller's own stays so the new device never
-// acknowledges itself. An API-token principal passes 0 and acknowledges all. No
-// audit row; nothing security-sensitive changes.
-func (s *UserService) MarkSessionsSeen(ctx context.Context, userID, callerSessionID int64) error {
-	if _, err := s.st.MarkSessionsSeen(ctx, userID, callerSessionID); err != nil {
-		return fmt.Errorf("%w: failed to acknowledge sessions: %w", ErrInternal, err)
-	}
-	return nil
-}
-
-// RevokeSession deletes a specific session owned by the user.
-func (s *UserService) RevokeSession(ctx context.Context, userID, sessionID int64) error {
-	if err := s.st.DeleteSessionByID(ctx, sessionID, userID); err != nil {
-		if errors.Is(err, db.ErrNotFound) {
-			return fmt.Errorf("%w: session not found", ErrNotFound)
-		}
-		return fmt.Errorf("%w: failed to revoke session: %w", ErrInternal, err)
-	}
-	// Audit rows must survive a request canceled after the commit.
-	db.WriteAudit(context.WithoutCancel(ctx), s.st, userID, "session_revoke", "session", sessionID, "session revoked")
-	slog.Info("session revoked", "user_id", userID, "session_id", sessionID)
-	return nil
-}
-
-// RevokeAllSessions is sign-out-everywhere: every session, the caller's included,
-// and every API token, so a stolen credential stops working now. Returns the
-// sessions revoked.
-func (s *UserService) RevokeAllSessions(ctx context.Context, userID int64) (int64, error) {
-	n, tokens, err := s.st.SignOutEverywhere(ctx, userID)
-	if err != nil {
-		return 0, fmt.Errorf("%w: failed to revoke sessions: %w", ErrInternal, err)
-	}
-	if n == 0 && tokens == 0 {
-		// Nothing changed, so nothing to audit; a repeat cannot grow the audit log.
-		slog.Debug("sign-out-everywhere found nothing to revoke", "user_id", userID)
-		return 0, nil
-	}
-	// Audit rows must survive a request canceled after the commit. The row names the
-	// account and counts, never a token or device.
-	db.WriteAudit(context.WithoutCancel(ctx), s.st, userID, "session_revoke_all", "user", userID,
-		fmt.Sprintf("signed out everywhere (%d sessions, %d API tokens revoked)", n, tokens))
-	slog.Info("all sessions revoked", "user_id", userID, "sessions_revoked", n, "api_tokens_revoked", tokens)
-	return n, nil
 }
 
 // ServerStats returns the admin dashboard counters. The live connection count is

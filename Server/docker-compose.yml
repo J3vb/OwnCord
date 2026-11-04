@@ -51,6 +51,10 @@ services:
       # The single UDP media port LiveKit is pinned to below, so the admin
       # connectivity report and boot warning name it.
       OWNCORD_VOICE_UDP_PORT: "7882"
+      # LiveKit's own stats page, read over the internal network for the admin
+      # Dashboard's LiveKit card. Port 6789 is enabled by `prometheus:` in
+      # livekit.yaml and is deliberately not published below.
+      OWNCORD_VOICE_LIVEKIT_METRICS_URL: http://livekit:6789/metrics
     volumes:
       # Mount your config.yaml for non-secret settings (server name, TLS, etc.)
       # See the example config at: https://github.com/J3vb/OwnCord#configuration

@@ -1,24 +1,22 @@
 import { test, expect } from "./fixtures";
 import {
   buildTauriMockScript,
-  mockTauriFullSession,
   mockTauriFullSessionWithMessages,
   navigateToMainPage,
   emitWsMessage,
   openSettings,
   switchSettingsTab,
   waitForWsReady,
-  MOCK_LOGIN_RESPONSE,
-  MOCK_MESSAGES,
   MOCK_PINNED_MESSAGES,
   openDmRow,
+  BASE_SESSION_ROUTES,
+  startFullSession,
+  useLeftMemberList,
 } from "./helpers";
 
 test.describe("Member List", () => {
   test.beforeEach(async ({ page }) => {
-    await mockTauriFullSession(page);
-    await page.goto("/");
-    await navigateToMainPage(page);
+    await startFullSession(page);
   });
 
   test("renders members with role groups, avatars, names, and status", async ({ page }) => {
@@ -147,12 +145,8 @@ test.describe("Member List", () => {
 test.describe("Member List — under the channels", () => {
   test.beforeEach(async ({ page }) => {
     // The default moved to the right column in 3C-6c; this is the left layout.
-    await page.addInitScript(() => {
-      localStorage.setItem("owncord:settings:memberListLayout", JSON.stringify("left"));
-    });
-    await mockTauriFullSession(page);
-    await page.goto("/");
-    await navigateToMainPage(page);
+    await useLeftMemberList(page);
+    await startFullSession(page);
   });
 
   test("member list is always visible in sidebar", async ({ page }) => {
@@ -195,9 +189,7 @@ test.describe("Member List — right column (3C-6b)", () => {
     await page.addInitScript(
       buildTauriMockScript({
         httpRoutes: [
-          { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-          { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
-          { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
+          ...BASE_SESSION_ROUTES,
           { pattern: "/pins", status: 200, body: MOCK_PINNED_MESSAGES },
         ],
         simulateWsFlow: true,

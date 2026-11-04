@@ -1,5 +1,5 @@
 import { test, expect } from "./fixtures";
-import { buildTauriMockScript } from "./helpers";
+import { buildTauriMockScript, ROUTE_HEALTH } from "./helpers";
 
 // ---------------------------------------------------------------------------
 // Tests: Settings Overlay from Connect Page
@@ -9,9 +9,7 @@ test.describe("Connect Page — Settings Overlay", () => {
   test.beforeEach(async ({ page }) => {
     await page.addInitScript(
       buildTauriMockScript({
-        httpRoutes: [
-          { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-        ],
+        httpRoutes: [ROUTE_HEALTH],
         simulateWsFlow: false,
       }),
     );

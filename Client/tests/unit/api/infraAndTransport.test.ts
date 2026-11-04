@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import * as mocks from "../../helpers/apiMocks";
 import {
   createApiClient,
@@ -6,10 +6,15 @@ import {
   TransportError,
   errorText,
   serverErrorText,
-  type OnUnauthorized,
 } from "../../../src/lib/api";
 import { expectConsole } from "../../helpers/console";
-import { jsonResponse, errorResponse } from "../../helpers/apiHarness";
+import {
+  jsonResponse,
+  errorResponse,
+  emptyBodyErrorResponse,
+  fetchCallReaders,
+  useDefaultApiClient,
+} from "../../helpers/apiHarness";
 
 vi.mock("@tauri-apps/plugin-http", () => mocks.pluginHttpMock());
 vi.mock("../../../src/lib/net/httpProxy", () => mocks.netHttpProxyMock());
@@ -18,27 +23,13 @@ const { mockFetch } = mocks;
 
 describe("API Client", () => {
   let api: ReturnType<typeof createApiClient>;
-  let onUnauthorized: Mock<OnUnauthorized>;
 
-  beforeEach(() => {
-    mockFetch.mockReset();
-    onUnauthorized = vi.fn<OnUnauthorized>();
-    api = createApiClient({ host: "localhost:8443", token: "test-token" }, onUnauthorized);
+  useDefaultApiClient(mockFetch, (client) => {
+    api = client;
   });
 
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  // ── helpers ──────────────────────────────────────────────
-
-  /** Extract the call args for the Nth fetch invocation. */
-  function fetchCallUrl(n = 0): string {
-    return mockFetch.mock.calls[n]?.[0] as string;
-  }
-  function fetchCallOpts(n = 0): Record<string, unknown> {
-    return mockFetch.mock.calls[n]?.[1] as Record<string, unknown>;
-  }
+  const { url: fetchCallUrl, init } = fetchCallReaders(mockFetch);
+  const fetchCallOpts = (n = 0) => init(n) as Record<string, unknown>;
 
   describe("health endpoint", () => {
     it("getHealth uses custom host when provided", async () => {
@@ -54,13 +45,7 @@ describe("API Client", () => {
     });
 
     it("getHealth throws ApiClientError on non-ok response", async () => {
-      mockFetch.mockResolvedValue({
-        ok: false,
-        status: 503,
-        statusText: "Service Unavailable",
-        json: () => Promise.resolve({}),
-        headers: new Headers(),
-      } as unknown as Response);
+      mockFetch.mockResolvedValue(emptyBodyErrorResponse(503, "Service Unavailable"));
       await expect(api.getHealth()).rejects.toMatchObject({
         status: 503,
         code: "HEALTH_CHECK_FAILED",
@@ -77,13 +62,7 @@ describe("API Client", () => {
 
     it("getHealth clears timeout on failure", async () => {
       const clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout");
-      mockFetch.mockResolvedValue({
-        ok: false,
-        status: 500,
-        statusText: "Error",
-        json: () => Promise.resolve({}),
-        headers: new Headers(),
-      } as unknown as Response);
+      mockFetch.mockResolvedValue(emptyBodyErrorResponse(500, "Error"));
       await expect(api.getHealth()).rejects.toThrow();
       expect(clearTimeoutSpy).toHaveBeenCalled();
       clearTimeoutSpy.mockRestore();
@@ -141,13 +120,7 @@ describe("API Client", () => {
     });
 
     it("getServerInfo throws ApiClientError on non-ok response", async () => {
-      mockFetch.mockResolvedValue({
-        ok: false,
-        status: 503,
-        statusText: "Service Unavailable",
-        json: () => Promise.resolve({}),
-        headers: new Headers(),
-      } as unknown as Response);
+      mockFetch.mockResolvedValue(emptyBodyErrorResponse(503, "Service Unavailable"));
       await expect(api.getServerInfo()).rejects.toMatchObject({
         status: 503,
         code: "SERVER_INFO_FAILED",

@@ -1,9 +1,5 @@
 import { test, expect } from "./fixtures";
-import {
-  mockTauriFullSession,
-  mockTauriFullSessionWithMessages,
-  navigateToMainPage,
-} from "./helpers";
+import { mockTauriFullSessionWithMessages, navigateToMainPage, startFullSession } from "./helpers";
 
 // ---------------------------------------------------------------------------
 // Tests: Quick Switcher (Ctrl+K)
@@ -11,9 +7,7 @@ import {
 
 test.describe("Quick Switcher", () => {
   test.beforeEach(async ({ page }) => {
-    await mockTauriFullSession(page);
-    await page.goto("/");
-    await navigateToMainPage(page);
+    await startFullSession(page);
   });
 
   test("Ctrl+K opens quick switcher", async ({ page }) => {
@@ -29,6 +23,20 @@ test.describe("Quick Switcher", () => {
     const input = page.locator(".quick-switcher__input");
     await expect(input).toBeVisible({ timeout: 3_000 });
     await expect(input).toBeFocused();
+  });
+
+  test("keys typed right after Ctrl+K from the message box reach the switcher", async ({
+    page,
+  }) => {
+    const composer = page.locator("[data-testid='msg-textarea']");
+    await composer.click();
+    await page.keyboard.press("Control+k");
+    await page.keyboard.type("ra");
+
+    const input = page.locator(".quick-switcher__input");
+    await expect(input).toBeFocused({ timeout: 3_000 });
+    await expect(input).toHaveValue("ra");
+    await expect(composer).toHaveValue("");
   });
 
   test("quick switcher shows channel results", async ({ page }) => {
@@ -111,9 +119,7 @@ test.describe("Quick Switcher", () => {
 
 test.describe("Emoji Picker", () => {
   test.beforeEach(async ({ page }) => {
-    await mockTauriFullSession(page);
-    await page.goto("/");
-    await navigateToMainPage(page);
+    await startFullSession(page);
   });
 
   test("emoji button opens emoji picker", async ({ page }) => {
@@ -246,9 +252,7 @@ test.describe("Invite Manager", () => {
 
 test.describe("Pinned Messages", () => {
   test.beforeEach(async ({ page }) => {
-    await mockTauriFullSession(page);
-    await page.goto("/");
-    await navigateToMainPage(page);
+    await startFullSession(page);
   });
 
   test("pin button exists in chat header tools", async ({ page }) => {

@@ -5,23 +5,21 @@
 // the bound. Retries stay at least 15 s apart so one client never spends the
 // per-IP login limit (5 a minute, refused attempts included). A per-IP 429
 // (RATE_LIMITED) is not retried.
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
 import { ApiClientError } from "../../src/lib/api";
-import { createConnectPage } from "../../src/pages/ConnectPage";
-import type { ConnectPageCallbacks, SimpleProfile } from "../../src/pages/ConnectPage";
 import { connectText } from "../../src/i18n/connect";
+import * as mocks from "../helpers/connectPageMocks";
+import {
+  mountPage,
+  savedCredential,
+  testProfiles,
+  type ConnectPageHandle,
+} from "../helpers/connectPageHarness";
 
-const mockLoadCredential = vi.fn().mockResolvedValue(null);
-vi.mock("../../src/lib/net/credentials", () => ({
-  loadCredential: (...args: unknown[]) => mockLoadCredential(...args),
-}));
-
-vi.mock("../../src/features/settings/SettingsOverlay", () => ({
-  createSettingsOverlay: () => ({
-    mount: vi.fn(),
-    destroy: vi.fn(),
-  }),
-}));
+const { mockLoadCredential } = mocks;
+vi.mock("../../src/lib/net/credentials", () => mocks.netCredentialsMock());
+vi.mock("../../src/features/settings/SettingsOverlay", () => mocks.settingsOverlayMock());
 
 const BUSY_MESSAGE = "too many authentication attempts in progress, try again later";
 
@@ -29,33 +27,30 @@ function busy(retryAfterMs?: number): ApiClientError {
   return new ApiClientError(429, "AUTH_BUSY", BUSY_MESSAGE, retryAfterMs);
 }
 
-function makeCallbacks(overrides: Partial<ConnectPageCallbacks> = {}): ConnectPageCallbacks {
-  return {
-    onLogin: vi.fn().mockResolvedValue(undefined),
-    onLoginWithSavedPassword: vi.fn().mockResolvedValue(undefined),
-    onRegister: vi.fn().mockResolvedValue(undefined),
-    onTotpSubmit: vi.fn().mockResolvedValue(undefined),
-    ...overrides,
-  };
-}
-
-const testProfiles: SimpleProfile[] = [{ name: "Test Server", host: "localhost:8443" }];
-
 describe("LoginForm retries a busy server", () => {
   let container: HTMLDivElement;
+
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => {
+      vi.restoreAllMocks();
+      vi.useRealTimers();
+    },
+  );
 
   beforeEach(() => {
     vi.useFakeTimers();
     mockLoadCredential.mockResolvedValue(null);
-    container = document.createElement("div");
-    document.body.appendChild(container);
   });
 
-  afterEach(() => {
-    container.remove();
-    vi.restoreAllMocks();
-    vi.useRealTimers();
-  });
+  async function submitSaved(page: ConnectPageHandle): Promise<void> {
+    (container.querySelector(".server-item") as HTMLElement).click();
+    await vi.waitFor(() => expect(page.isUsingSavedPassword()).toBe(true));
+    const form = container.querySelector(".connect-form") as HTMLFormElement;
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+  }
 
   function submitTyped(): void {
     (container.querySelector("#host") as HTMLInputElement).value = "localhost:8443";
@@ -63,6 +58,13 @@ describe("LoginForm retries a busy server", () => {
     (container.querySelector("#password") as HTMLInputElement).value = "long-enough-password";
     const form = container.querySelector(".connect-form") as HTMLFormElement;
     form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+  }
+
+  function expectSubmitEnabled(): void {
+    const submit = container.querySelector(
+      ".connect-form button[type=submit]",
+    ) as HTMLButtonElement;
+    expect(submit.disabled).toBe(false);
   }
 
   const busyLine = (): HTMLElement => container.querySelector(".auth-busy-retry") as HTMLElement;
@@ -76,8 +78,7 @@ describe("LoginForm retries a busy server", () => {
       .mockRejectedValueOnce(busy(20_000))
       .mockRejectedValueOnce(busy())
       .mockResolvedValueOnce(undefined);
-    const page = createConnectPage(makeCallbacks({ onLogin }), testProfiles);
-    page.mount(container);
+    const page = mountPage(container, { onLogin });
 
     submitTyped();
     await vi.advanceTimersByTimeAsync(0);
@@ -105,8 +106,7 @@ describe("LoginForm retries a busy server", () => {
 
   it("gives up after the retry bound and shows the busy copy", async () => {
     const onLogin = vi.fn().mockRejectedValue(busy(1000));
-    const page = createConnectPage(makeCallbacks({ onLogin }), testProfiles);
-    page.mount(container);
+    const page = mountPage(container, { onLogin });
 
     submitTyped();
     await vi.advanceTimersByTimeAsync(50_000);
@@ -136,8 +136,7 @@ describe("LoginForm retries a busy server", () => {
       .mockImplementationOnce(refuseAfterQueue(34_000))
       .mockImplementationOnce(refuseAfterQueue(5_000))
       .mockResolvedValueOnce(undefined);
-    const page = createConnectPage(makeCallbacks({ onLogin }), testProfiles);
-    page.mount(container);
+    const page = mountPage(container, { onLogin });
 
     submitTyped();
     await vi.advanceTimersByTimeAsync(54_900);
@@ -161,28 +160,20 @@ describe("LoginForm retries a busy server", () => {
       vi.spyOn(Math, "random").mockReturnValue(0);
       const saved = path === "saved";
       if (saved) {
-        mockLoadCredential.mockResolvedValue({
-          username: "saveduser",
-          token: "tok",
-          hasPassword: true,
-        });
+        mockLoadCredential.mockResolvedValue(savedCredential());
       }
       const attempts: number[] = [];
       const refuse = vi.fn(() => {
         attempts.push(Date.now());
         return Promise.reject(busy(retryAfterMs));
       });
-      const page = createConnectPage(
-        makeCallbacks(saved ? { onLoginWithSavedPassword: refuse } : { onLogin: refuse }),
-        testProfiles,
+      const page = mountPage(
+        container,
+        saved ? { onLoginWithSavedPassword: refuse } : { onLogin: refuse },
       );
-      page.mount(container);
 
       if (saved) {
-        (container.querySelector(".server-item") as HTMLElement).click();
-        await vi.waitFor(() => expect(page.isUsingSavedPassword()).toBe(true));
-        const form = container.querySelector(".connect-form") as HTMLFormElement;
-        form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+        await submitSaved(page);
       } else {
         submitTyped();
       }
@@ -202,8 +193,7 @@ describe("LoginForm retries a busy server", () => {
 
   it("Cancel stops retrying and returns to the form", async () => {
     const onLogin = vi.fn().mockRejectedValue(busy(5000));
-    const page = createConnectPage(makeCallbacks({ onLogin }), testProfiles);
-    page.mount(container);
+    const page = mountPage(container, { onLogin });
 
     submitTyped();
     await vi.advanceTimersByTimeAsync(0);
@@ -214,10 +204,7 @@ describe("LoginForm retries a busy server", () => {
     expect(onLogin).toHaveBeenCalledTimes(1);
     expect(busyShown()).toBe(false);
     expect(banner().classList.contains("visible")).toBe(false);
-    const submit = container.querySelector(
-      ".connect-form button[type=submit]",
-    ) as HTMLButtonElement;
-    expect(submit.disabled).toBe(false);
+    expectSubmitEnabled();
 
     page.destroy?.();
   });
@@ -234,8 +221,7 @@ describe("LoginForm retries a busy server", () => {
           }),
       )
       .mockRejectedValue(busy());
-    const page = createConnectPage(makeCallbacks({ onLogin }), testProfiles);
-    page.mount(container);
+    const page = mountPage(container, { onLogin });
 
     submitTyped();
     await vi.advanceTimersByTimeAsync(16_000);
@@ -249,10 +235,7 @@ describe("LoginForm retries a busy server", () => {
 
     expect(onLogin).toHaveBeenCalledTimes(2);
     expect(banner().classList.contains("visible")).toBe(false);
-    const submit = container.querySelector(
-      ".connect-form button[type=submit]",
-    ) as HTMLButtonElement;
-    expect(submit.disabled).toBe(false);
+    expectSubmitEnabled();
 
     page.destroy?.();
   });
@@ -277,11 +260,10 @@ describe("LoginForm retries a busy server", () => {
       }
       onLogin.mockRejectedValue(busy());
       const onAutoLoginCancel = vi.fn(() => refuseInFlight?.(new Error("session ended")));
-      const page = createConnectPage(makeCallbacks({ onLogin, onAutoLoginCancel }), [
+      const page = mountPage(container, { onLogin, onAutoLoginCancel }, [
         ...testProfiles,
         { name: "Other Server", host: "other.example:8443" },
       ]);
-      page.mount(container);
 
       submitTyped();
       await vi.advanceTimersByTimeAsync(inFlight ? 16_000 : 0);
@@ -317,8 +299,7 @@ describe("LoginForm retries a busy server", () => {
       .mockRejectedValue(
         new ApiClientError(429, "RATE_LIMITED", "too many requests, please slow down", 30_000),
       );
-    const page = createConnectPage(makeCallbacks({ onLogin }), testProfiles);
-    page.mount(container);
+    const page = mountPage(container, { onLogin });
 
     submitTyped();
     await vi.advanceTimersByTimeAsync(60_000);
@@ -329,26 +310,15 @@ describe("LoginForm retries a busy server", () => {
   });
 
   it("retries a saved-password login on AUTH_BUSY", async () => {
-    mockLoadCredential.mockResolvedValue({
-      username: "saveduser",
-      token: "tok",
-      hasPassword: true,
-    });
+    mockLoadCredential.mockResolvedValue(savedCredential());
     const onLogin = vi.fn().mockResolvedValue(undefined);
     const onLoginWithSavedPassword = vi
       .fn()
       .mockRejectedValueOnce(busy())
       .mockResolvedValueOnce(undefined);
-    const page = createConnectPage(
-      makeCallbacks({ onLogin, onLoginWithSavedPassword }),
-      testProfiles,
-    );
-    page.mount(container);
+    const page = mountPage(container, { onLogin, onLoginWithSavedPassword });
 
-    (container.querySelector(".server-item") as HTMLElement).click();
-    await vi.waitFor(() => expect(page.isUsingSavedPassword()).toBe(true));
-    const form = container.querySelector(".connect-form") as HTMLFormElement;
-    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    await submitSaved(page);
 
     await vi.advanceTimersByTimeAsync(16_000);
     expect(onLoginWithSavedPassword).toHaveBeenCalledTimes(2);

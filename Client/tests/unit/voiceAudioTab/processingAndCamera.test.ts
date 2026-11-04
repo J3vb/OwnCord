@@ -8,7 +8,13 @@ import {
   FakeAudioWorkletNode,
   installFakeAudio,
 } from "../../helpers/fakeAudioContext";
-import { stubNavigator } from "../../helpers/voiceAudioTabHarness";
+import {
+  fakeAudioStream,
+  stubNavigator,
+  useTabEnv,
+  stubCameraNavigator,
+} from "../../helpers/voiceAudioTabHarness";
+import { mountTab } from "../../helpers/voiceAudioTabMount";
 
 vi.mock("../../../src/platform/desktop/pushToTalk", () => mocks.desktopPushToTalkMock());
 vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
@@ -28,26 +34,14 @@ const {
 // ---------------------------------------------------------------------------
 
 describe("VoiceAudioTab UI structure", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    localStorage.clear();
-    document.body.innerHTML = "";
-    installFakeAudio({ worklets: true });
-  });
-
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
+  useTabEnv();
 
   it("contains audio processing toggles", () => {
     stubNavigator();
-    const ac = new AbortController();
-    const tab = createVoiceAudioTab(ac.signal);
-    const el = tab.build();
-    document.body.appendChild(el);
+    const { ac, el } = mountTab();
 
     const settingRows = el.querySelectorAll(
-      ".setting-row:not([data-testid='auto-sensitivity']):not([data-testid='mic-test']):not([data-testid='auto-play-cameras'])",
+      ".setting-row:not([data-testid='auto-sensitivity']):not([data-testid='mic-test']):not([data-testid='auto-play-cameras']):not([data-testid='mirror-self-camera'])",
     );
     // 4 toggles: echo cancellation, noise suppression, auto gain control, enhanced NS
     expect(settingRows.length).toBe(4);
@@ -56,9 +50,7 @@ describe("VoiceAudioTab UI structure", () => {
 
   it("Automatically play cameras is on by default and saves its choice", () => {
     stubNavigator();
-    const ac = new AbortController();
-    const el = createVoiceAudioTab(ac.signal).build();
-    document.body.appendChild(el);
+    const { ac, el } = mountTab();
 
     const toggle = el.querySelector<HTMLElement>("[data-testid='auto-play-cameras'] .toggle")!;
     expect(toggle.getAttribute("aria-checked")).toBe("true");
@@ -68,16 +60,29 @@ describe("VoiceAudioTab UI structure", () => {
     ac.abort();
   });
 
+  it("Mirror my camera preview is off by default and flips the preview at once", () => {
+    stubNavigator();
+    const { ac, el } = mountTab();
+
+    const toggle = el.querySelector<HTMLElement>("[data-testid='mirror-self-camera'] .toggle")!;
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+    expect(toggle.getAttribute("aria-label")).toBe("Mirror my camera preview");
+    toggle.click();
+    expect(localStorage.getItem("owncord:settings:mirrorSelfCamera")).toBe("true");
+    expect(document.documentElement.classList.contains("mirror-self-camera")).toBe(true);
+    toggle.click();
+    expect(localStorage.getItem("owncord:settings:mirrorSelfCamera")).toBe("false");
+    expect(document.documentElement.classList.contains("mirror-self-camera")).toBe(false);
+    ac.abort();
+  });
+
   it("audio toggle calls reapplyAudioProcessing when changed", () => {
     stubNavigator();
-    const ac = new AbortController();
-    const tab = createVoiceAudioTab(ac.signal);
-    const el = tab.build();
-    document.body.appendChild(el);
+    const { ac, el } = mountTab();
 
     // Toggles are divs with class "toggle" (not buttons)
     const toggleDiv = el.querySelector(
-      ".setting-row:not([data-testid='auto-sensitivity']):not([data-testid='auto-play-cameras']) .toggle",
+      ".setting-row:not([data-testid='auto-sensitivity']):not([data-testid='auto-play-cameras']):not([data-testid='mirror-self-camera']) .toggle",
     ) as HTMLElement;
     expect(toggleDiv).not.toBeNull();
     toggleDiv.click();
@@ -94,8 +99,7 @@ describe("VoiceAudioTab UI structure", () => {
     localStorage.setItem("owncord:settings:noiseSuppression", "false");
     localStorage.setItem("owncord:settings:audioInputDevice", '"mic-2"');
     stubNavigator();
-    const ac = new AbortController();
-    document.body.appendChild(createVoiceAudioTab(ac.signal).build());
+    const { ac } = mountTab();
 
     await vi.waitFor(() =>
       expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledWith({
@@ -115,13 +119,8 @@ describe("VoiceAudioTab UI structure", () => {
   it("reopens the meter's microphone when a processing toggle changes", async () => {
     const stop = vi.fn();
     stubNavigator();
-    vi.mocked(navigator.mediaDevices.getUserMedia).mockResolvedValue({
-      getTracks: () => [{ stop, kind: "audio" }],
-      getAudioTracks: () => [{ stop, kind: "audio" }],
-    } as unknown as MediaStream);
-    const ac = new AbortController();
-    const el = createVoiceAudioTab(ac.signal).build();
-    document.body.appendChild(el);
+    vi.mocked(navigator.mediaDevices.getUserMedia).mockResolvedValue(fakeAudioStream(stop));
+    const { ac, el } = mountTab();
     const audioRequests = () =>
       vi
         .mocked(navigator.mediaDevices.getUserMedia)
@@ -144,9 +143,7 @@ describe("VoiceAudioTab UI structure", () => {
       "fetch",
       vi.fn(async () => ({ arrayBuffer: async () => new ArrayBuffer(8) })),
     );
-    const ac = new AbortController();
-    const el = createVoiceAudioTab(ac.signal).build();
-    document.body.appendChild(el);
+    const { ac, el } = mountTab();
     await vi.waitFor(() =>
       expect(FakeAudioWorkletNode.instances.some((w) => w.name === "vad-processor")).toBe(true),
     );
@@ -167,9 +164,7 @@ describe("VoiceAudioTab UI structure", () => {
 
   it("moves the meter to a newly chosen input device", async () => {
     stubNavigator([{ kind: "audioinput", deviceId: "mic-2", label: "Mic 2" }]);
-    const ac = new AbortController();
-    const el = createVoiceAudioTab(ac.signal).build();
-    document.body.appendChild(el);
+    const { ac, el } = mountTab();
     const inputSelect = el.querySelector<HTMLSelectElement>('select[aria-label="Input Device"]')!;
     await vi.waitFor(() => expect(inputSelect.options.length).toBe(2));
 
@@ -194,10 +189,7 @@ describe("VoiceAudioTab UI structure", () => {
       },
     });
 
-    const ac = new AbortController();
-    const tab = createVoiceAudioTab(ac.signal);
-    const el = tab.build();
-    document.body.appendChild(el);
+    const { ac, el } = mountTab();
 
     await vi.waitFor(() => {
       const inputSelect = el.querySelectorAll("select")[0]!;
@@ -214,10 +206,7 @@ describe("VoiceAudioTab UI structure", () => {
   it("does not start camera preview when no video device is saved", () => {
     stubNavigator();
     // Do NOT set videoInputDevice in localStorage
-    const ac = new AbortController();
-    const tab = createVoiceAudioTab(ac.signal);
-    const el = tab.build();
-    document.body.appendChild(el);
+    const { ac, el } = mountTab();
 
     const preview = el.querySelector("video") as HTMLVideoElement;
     // srcObject is undefined in JSDOM when never assigned (not null)
@@ -227,33 +216,10 @@ describe("VoiceAudioTab UI structure", () => {
 
   it("starts camera preview when a video device is saved", async () => {
     localStorage.setItem("owncord:settings:videoInputDevice", '"cam-1"');
-    const cameraStream = {
-      getTracks: () => [{ stop: vi.fn(), kind: "audio" }],
-      getAudioTracks: () => [{ stop: vi.fn(), kind: "audio" }],
-    } as unknown as MediaStream;
-    const audioStream = {
-      getTracks: () => [{ stop: vi.fn(), kind: "audio" }],
-      getAudioTracks: () => [{ stop: vi.fn(), kind: "audio" }],
-    } as unknown as MediaStream;
+    const cameraStream = fakeAudioStream();
+    stubCameraNavigator({ camera: () => Promise.resolve(cameraStream) });
 
-    vi.stubGlobal("navigator", {
-      mediaDevices: {
-        enumerateDevices: vi
-          .fn()
-          .mockResolvedValue([{ kind: "videoinput", deviceId: "cam-1", label: "Camera 1" }]),
-        getUserMedia: vi.fn().mockImplementation((constraints: MediaStreamConstraints) => {
-          if (constraints.video && constraints.audio === false) {
-            return Promise.resolve(cameraStream);
-          }
-          return Promise.resolve(audioStream);
-        }),
-      },
-    });
-
-    const ac = new AbortController();
-    const tab = createVoiceAudioTab(ac.signal);
-    const el = tab.build();
-    document.body.appendChild(el);
+    const { ac, el } = mountTab();
 
     await vi.waitFor(() => {
       const preview = el.querySelector("video") as HTMLVideoElement;
@@ -263,33 +229,10 @@ describe("VoiceAudioTab UI structure", () => {
   });
 
   it("video select change starts camera preview", async () => {
-    const cameraStream = {
-      getTracks: () => [{ stop: vi.fn(), kind: "audio" }],
-      getAudioTracks: () => [{ stop: vi.fn(), kind: "audio" }],
-    } as unknown as MediaStream;
-    const audioStream = {
-      getTracks: () => [{ stop: vi.fn(), kind: "audio" }],
-      getAudioTracks: () => [{ stop: vi.fn(), kind: "audio" }],
-    } as unknown as MediaStream;
+    const cameraStream = fakeAudioStream();
+    stubCameraNavigator({ camera: () => Promise.resolve(cameraStream) });
 
-    vi.stubGlobal("navigator", {
-      mediaDevices: {
-        enumerateDevices: vi
-          .fn()
-          .mockResolvedValue([{ kind: "videoinput", deviceId: "cam-1", label: "Camera 1" }]),
-        getUserMedia: vi.fn().mockImplementation((constraints: MediaStreamConstraints) => {
-          if (constraints.video && constraints.audio === false) {
-            return Promise.resolve(cameraStream);
-          }
-          return Promise.resolve(audioStream);
-        }),
-      },
-    });
-
-    const ac = new AbortController();
-    const tab = createVoiceAudioTab(ac.signal);
-    const el = tab.build();
-    document.body.appendChild(el);
+    const { ac, el } = mountTab();
 
     // Wait for devices to load
     await vi.waitFor(() => {
@@ -342,9 +285,7 @@ describe("VoiceAudioTab UI structure", () => {
       localStorage.setItem("owncord:settings:videoInputDevice", '"cam-1"');
     });
 
-    const ac = new AbortController();
-    const el = createVoiceAudioTab(ac.signal).build();
-    document.body.appendChild(el);
+    const { ac, el } = mountTab();
     const videoSelect = await vi.waitFor(() => {
       const select = el.querySelector('select[aria-label="Video Device"]') as HTMLSelectElement;
       expect(select.querySelectorAll("option").length).toBeGreaterThan(2);
@@ -363,29 +304,9 @@ describe("VoiceAudioTab UI structure", () => {
 
   it("camera preview shows error when getUserMedia fails", async () => {
     localStorage.setItem("owncord:settings:videoInputDevice", '"cam-1"');
-    const audioStream = {
-      getTracks: () => [{ stop: vi.fn(), kind: "audio" }],
-      getAudioTracks: () => [{ stop: vi.fn(), kind: "audio" }],
-    } as unknown as MediaStream;
+    stubCameraNavigator({ camera: () => Promise.reject(new Error("Camera access denied")) });
 
-    vi.stubGlobal("navigator", {
-      mediaDevices: {
-        enumerateDevices: vi
-          .fn()
-          .mockResolvedValue([{ kind: "videoinput", deviceId: "cam-1", label: "Camera 1" }]),
-        getUserMedia: vi.fn().mockImplementation((constraints: MediaStreamConstraints) => {
-          if (constraints.video && constraints.audio === false) {
-            return Promise.reject(new Error("Camera access denied"));
-          }
-          return Promise.resolve(audioStream);
-        }),
-      },
-    });
-
-    const ac = new AbortController();
-    const tab = createVoiceAudioTab(ac.signal);
-    const el = tab.build();
-    document.body.appendChild(el);
+    const { ac, el } = mountTab();
 
     const label = el.querySelector<HTMLElement>(".camera-preview-label")!;
     await vi.waitFor(() => expect(label.textContent).toBe("Camera access denied"));
@@ -397,27 +318,12 @@ describe("VoiceAudioTab UI structure", () => {
   it("camera preview falls back to Camera unavailable when the error has no message", async () => {
     // An unplugged saved camera rejects with OverconstrainedError, whose message is "".
     localStorage.setItem("owncord:settings:videoInputDevice", '"gone-camera-id"');
-    const audioStream = {
-      getTracks: () => [{ stop: vi.fn(), kind: "audio" }],
-      getAudioTracks: () => [{ stop: vi.fn(), kind: "audio" }],
-    } as unknown as MediaStream;
-
-    vi.stubGlobal("navigator", {
-      mediaDevices: {
-        enumerateDevices: vi.fn().mockResolvedValue([]),
-        getUserMedia: vi.fn().mockImplementation((constraints: MediaStreamConstraints) => {
-          if (constraints.video && constraints.audio === false) {
-            return Promise.reject(Object.assign(new Error(""), { name: "OverconstrainedError" }));
-          }
-          return Promise.resolve(audioStream);
-        }),
-      },
+    stubCameraNavigator({
+      devices: [],
+      camera: () => Promise.reject(Object.assign(new Error(""), { name: "OverconstrainedError" })),
     });
 
-    const ac = new AbortController();
-    const tab = createVoiceAudioTab(ac.signal);
-    const el = tab.build();
-    document.body.appendChild(el);
+    const { ac, el } = mountTab();
 
     const label = el.querySelector<HTMLElement>(".camera-preview-label")!;
     await vi.waitFor(() => expect(label.textContent).toBe("Camera unavailable"));
@@ -429,10 +335,7 @@ describe("VoiceAudioTab UI structure", () => {
   it("sensitivity threshold handle is positioned based on saved sensitivity", () => {
     localStorage.setItem("owncord:settings:voiceSensitivity", "75");
     stubNavigator();
-    const ac = new AbortController();
-    const tab = createVoiceAudioTab(ac.signal);
-    const el = tab.build();
-    document.body.appendChild(el);
+    const { ac, el } = mountTab();
 
     const threshold = el.querySelector(".mic-meter-threshold") as HTMLElement;
     expect(threshold).not.toBeNull();
@@ -445,10 +348,7 @@ describe("VoiceAudioTab UI structure", () => {
     localStorage.setItem("owncord:settings:voiceSensitivity", "50");
     localStorage.setItem("owncord:settings:autoInputSensitivity", "false");
     stubNavigator();
-    const ac = new AbortController();
-    const tab = createVoiceAudioTab(ac.signal);
-    const el = tab.build();
-    document.body.appendChild(el);
+    const { ac, el } = mountTab();
 
     const threshold = el.querySelector(".mic-meter-threshold") as HTMLElement;
     const press = (key: string): void => {
@@ -478,10 +378,7 @@ describe("VoiceAudioTab UI structure", () => {
   it("clicking the meter bar calls setVoiceSensitivity", () => {
     localStorage.setItem("owncord:settings:autoInputSensitivity", "false");
     stubNavigator();
-    const ac = new AbortController();
-    const tab = createVoiceAudioTab(ac.signal);
-    const el = tab.build();
-    document.body.appendChild(el);
+    const { ac, el } = mountTab();
 
     const meterBar = el.querySelector(".mic-meter-bar") as HTMLElement;
     expect(meterBar).not.toBeNull();
@@ -496,10 +393,7 @@ describe("VoiceAudioTab UI structure", () => {
 
   it("stops applying sensitivity after a pointercancel interrupts the drag (v097)", () => {
     stubNavigator();
-    const ac = new AbortController();
-    const tab = createVoiceAudioTab(ac.signal);
-    const el = tab.build();
-    document.body.appendChild(el);
+    const { ac, el } = mountTab();
 
     const threshold = el.querySelector(".mic-meter-threshold") as HTMLElement;
     expect(threshold).not.toBeNull();
@@ -533,10 +427,7 @@ describe("VoiceAudioTab UI structure", () => {
 
   it("applies and persists sensitivity once per drag, on release", () => {
     stubNavigator();
-    const ac = new AbortController();
-    const tab = createVoiceAudioTab(ac.signal);
-    const el = tab.build();
-    document.body.appendChild(el);
+    const { ac, el } = mountTab();
 
     const meterBar = el.querySelector(".mic-meter-bar") as HTMLElement;
     const threshold = el.querySelector(".mic-meter-threshold") as HTMLElement;
@@ -572,10 +463,7 @@ describe("VoiceAudioTab UI structure", () => {
       },
     });
 
-    const ac = new AbortController();
-    const tab = createVoiceAudioTab(ac.signal);
-    const el = tab.build();
-    document.body.appendChild(el);
+    const { ac, el } = mountTab();
 
     // Should not throw — mic meter stays empty, and the pill says why.
     await new Promise((r) => setTimeout(r, 0));
@@ -593,10 +481,7 @@ describe("VoiceAudioTab UI structure", () => {
       { kind: "audioinput", deviceId: "mic-2", label: "Mic 2" },
       { kind: "audiooutput", deviceId: "spk-2", label: "Speaker 2" },
     ]);
-    const ac = new AbortController();
-    const tab = createVoiceAudioTab(ac.signal);
-    const el = tab.build();
-    document.body.appendChild(el);
+    const { ac, el } = mountTab();
 
     await vi.waitFor(() => {
       const selects = el.querySelectorAll("select");
@@ -609,10 +494,7 @@ describe("VoiceAudioTab UI structure", () => {
 
   it("uses device ID fallback label for devices without labels", async () => {
     stubNavigator([{ kind: "audioinput", deviceId: "abcdef12", label: "" }]);
-    const ac = new AbortController();
-    const tab = createVoiceAudioTab(ac.signal);
-    const el = tab.build();
-    document.body.appendChild(el);
+    const { ac, el } = mountTab();
 
     await vi.waitFor(() => {
       const inputSelect = el.querySelectorAll("select")[0]!;
@@ -630,14 +512,8 @@ describe("VoiceAudioTab UI structure", () => {
 
     const stopMicTrack = vi.fn();
     const stopCamTrack = vi.fn();
-    const micStream = {
-      getTracks: () => [{ stop: stopMicTrack, kind: "audio" }],
-      getAudioTracks: () => [{ stop: stopMicTrack, kind: "audio" }],
-    } as unknown as MediaStream;
-    const camStream = {
-      getTracks: () => [{ stop: stopCamTrack, kind: "audio" }],
-      getAudioTracks: () => [{ stop: stopCamTrack, kind: "audio" }],
-    } as unknown as MediaStream;
+    const micStream = fakeAudioStream(stopMicTrack);
+    const camStream = fakeAudioStream(stopCamTrack);
 
     vi.stubGlobal("navigator", {
       mediaDevices: {
@@ -651,10 +527,7 @@ describe("VoiceAudioTab UI structure", () => {
       },
     });
 
-    const ac = new AbortController();
-    const tab = createVoiceAudioTab(ac.signal);
-    const el = tab.build();
-    document.body.appendChild(el);
+    const { ac, el, tab } = mountTab();
     const preview = el.querySelector("video") as HTMLVideoElement;
 
     // Wait for both the mic-monitoring and camera-preview getUserMedia calls to
@@ -696,10 +569,7 @@ describe("VoiceAudioTab UI structure", () => {
       },
     });
 
-    const ac = new AbortController();
-    const tab = createVoiceAudioTab(ac.signal);
-    const el = tab.build();
-    document.body.appendChild(el);
+    const { ac, el, tab } = mountTab();
     const preview = el.querySelector("video") as HTMLVideoElement;
     await vi.waitFor(() => {
       expect(preview.srcObject).toBe(camStream);
@@ -715,10 +585,7 @@ describe("VoiceAudioTab UI structure", () => {
     localStorage.setItem("owncord:settings:streamQuality", '"low"');
     localStorage.setItem("owncord:settings:screenShareQuality", '"source"');
     stubNavigator();
-    const ac = new AbortController();
-    const tab = createVoiceAudioTab(ac.signal);
-    const el = tab.build();
-    document.body.appendChild(el);
+    const { ac, el } = mountTab();
 
     const qualitySelect = el.querySelector(
       'select[aria-label="Camera Quality"]',
@@ -795,9 +662,7 @@ describe("VoiceAudioTab input mode", () => {
   });
 
   function mount(): { el: HTMLElement; ac: AbortController } {
-    const ac = new AbortController();
-    const el = createVoiceAudioTab(ac.signal).build();
-    document.body.appendChild(el);
+    const { ac, el } = mountTab();
     return { el, ac };
   }
   const option = (el: HTMLElement, mode: string): HTMLButtonElement =>
@@ -932,10 +797,7 @@ describe("VoiceAudioTab mic test", () => {
     ac: AbortController;
     tab: ReturnType<typeof createVoiceAudioTab>;
   }> {
-    const ac = new AbortController();
-    const tab = createVoiceAudioTab(ac.signal);
-    const el = tab.build();
-    document.body.appendChild(el);
+    const { ac, el, tab } = mountTab();
     await vi.waitFor(() =>
       expect(FakeAudioWorkletNode.instances.some((w) => w.name === "vad-processor")).toBe(true),
     );

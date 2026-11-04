@@ -30,6 +30,8 @@ import {
   type SessionInfo,
   type SessionsListResponse,
   type RevokeAllSessionsResponse,
+  type OwnApiToken,
+  type OwnApiTokensListResponse,
 } from "./apiShared";
 import type { ApiTransport } from "./apiShared";
 
@@ -178,14 +180,19 @@ export function createAccountApi(t: ApiTransport) {
     changePassword(
       currentPassword: string,
       newPassword: string,
+      revokeApiTokens = false,
       signal?: AbortSignal,
     ): Promise<PartialSuccessResponse | undefined> {
       // 204 on full success; 200 with a warning body when the password
-      // changed but the other sessions could not be revoked.
+      // changed but the other sessions or API tokens could not be revoked.
       return t.request<PartialSuccessResponse | undefined>(
         "PUT",
         "/users/me/password",
-        { old_password: currentPassword, new_password: newPassword },
+        {
+          old_password: currentPassword,
+          new_password: newPassword,
+          revoke_api_tokens: revokeApiTokens,
+        },
         signal,
       );
     },
@@ -475,6 +482,20 @@ export function createAccountApi(t: ApiTransport) {
 
     revokeSession(sessionId: number, signal?: AbortSignal): Promise<void> {
       return t.request<void>("DELETE", `/users/me/sessions/${sessionId}`, undefined, signal);
+    },
+
+    getApiTokens(signal?: AbortSignal): Promise<readonly OwnApiToken[]> {
+      const owner = t.session;
+      return t
+        .request<OwnApiTokensListResponse>("GET", "/users/me/api-tokens", undefined, signal)
+        .then((r) => {
+          owner.assertCurrent();
+          return r.tokens;
+        });
+    },
+
+    revokeApiToken(tokenId: number, signal?: AbortSignal): Promise<void> {
+      return t.request<void>("DELETE", `/users/me/api-tokens/${tokenId}`, undefined, signal);
     },
 
     revokeAllSessions(signal?: AbortSignal): Promise<RevokeAllSessionsResponse> {

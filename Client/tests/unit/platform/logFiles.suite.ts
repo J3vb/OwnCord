@@ -4,7 +4,8 @@
 // `settings/AdvancedTab.ts`) is no-seam — its suite lands with the seam in
 // B7-4, so this suite exercises only the four methods that already have an
 // exported seam in `lib/logPersistence.ts`.
-import { beforeEach, describe, expect, test } from "vitest";
+import { beforeEach, describe, expect, test, type Mock } from "vitest";
+import type { LogEntry } from "../../../src/lib/logger";
 import type { LogFiles } from "../../../src/platform/contracts/logFiles";
 
 export interface NativeControl {
@@ -16,6 +17,64 @@ export interface NativeControl {
   /** The raw line-batches the native filesystem layer has actually received
    *  via a write call so far, in call order. */
   written(): readonly string[];
+}
+
+interface LogFileMocks {
+  appLogDir: Mock;
+  join: Mock;
+  mkdir: Mock;
+  writeTextFile: Mock;
+  readDir: Mock;
+  remove: Mock;
+  exists: Mock;
+}
+
+/** Clears every filesystem mock and gives them the defaults both bindings start from. */
+export function resetLogFileMocks(m: LogFileMocks, extra: Mock[] = []): void {
+  for (const mock of [
+    m.appLogDir,
+    m.join,
+    m.mkdir,
+    m.writeTextFile,
+    m.readDir,
+    m.remove,
+    m.exists,
+    ...extra,
+  ]) {
+    mock.mockReset();
+  }
+  m.join.mockImplementation((base: string, sub: string) => Promise.resolve(`${base}/${sub}`));
+  m.exists.mockResolvedValue(true);
+  m.readDir.mockResolvedValue([]);
+  m.writeTextFile.mockResolvedValue(undefined);
+  m.mkdir.mockResolvedValue(undefined);
+  m.remove.mockResolvedValue(undefined);
+}
+
+/** The suite's `native` control over the mocked filesystem and the logger's listener. */
+export function logFilesNativeControl(
+  m: Pick<LogFileMocks, "appLogDir" | "writeTextFile">,
+  listener: () => ((entry: LogEntry) => void) | null,
+): NativeControl {
+  return {
+    succeedWith() {
+      m.appLogDir.mockResolvedValue("/logs");
+    },
+    unavailable() {
+      m.appLogDir.mockRejectedValue(new Error("not running under the native host"));
+    },
+    logEntry() {
+      listener()?.({
+        timestamp: new Date().toISOString(),
+        level: "info",
+        component: "test",
+        message: "a log entry",
+      });
+    },
+    written() {
+      return m.writeTextFile.mock.calls.map((call) => call[1] as string);
+    },
+  };
 }
 
 export type LogFilesSeam = Pick<LogFiles, "init" | "flush" | "clearPending" | "getDir">;

@@ -4,7 +4,7 @@
  * stay on the message they were reading, and the list must report that
  * message as its reading anchor so a detached window can refetch around it.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 
 import { createMessageList } from "@components/MessageList";
 import type { MessageListOptions } from "@components/MessageList";
@@ -20,25 +20,19 @@ import { readingAnchor } from "../../src/features/messaging/readingAnchor";
 import type { MessageResponse } from "@lib/types";
 import { resetMembersState } from "../helpers/storeResets";
 import "../helpers/resizeObserverStub";
+import { buildResponse, spacedTimestamp } from "../helpers/messageFactory";
+import { stubScrollHeight, makeListOptions } from "../helpers/messageListHarness";
 
 const CHANNEL_ID = 1;
 
 function response(id: number): MessageResponse {
-  return {
-    id,
-    channel_id: CHANNEL_ID,
+  return buildResponse(id, {
     user: { id: 1, username: "Alice", avatar: null },
     content: `Message ${id}`,
-    reply_to: null,
-    attachments: [],
-    reactions: [],
-    pinned: false,
-    edited_at: null,
-    deleted: false,
     // 10 minutes apart on one UTC day: past the 7-minute group window, so no
     // grouping, and no day dividers.
-    timestamp: new Date(Date.UTC(2024, 0, 15, 0, id * 10)).toISOString(),
-  };
+    timestamp: spacedTimestamp(id),
+  });
 }
 
 /** Newest-first page of ids [from, to], as the REST API returns it. */
@@ -52,46 +46,24 @@ describe("MessageList — a full-ready resync keeps the reading position (P2-T4)
   let container: HTMLDivElement;
   let msgList: ReturnType<typeof createMessageList> | null = null;
   let options: MessageListOptions;
-  let scrollHeightDescriptor: PropertyDescriptor | undefined;
+  let restoreScrollHeight: () => void;
 
   beforeEach(() => {
     resetMessagesStore();
     resetMembersState();
     container = document.createElement("div");
     document.body.appendChild(container);
-    options = {
-      channelId: CHANNEL_ID,
-      channelName: "general",
-      currentUserId: 1,
-      onScrollTop: vi.fn(),
-      onReplyClick: vi.fn(),
-      onEditClick: vi.fn(),
-      onEditSave: vi.fn(() => true),
-      onEmptyEdit: vi.fn(),
-      onDeleteClick: vi.fn(),
-      onReactionClick: vi.fn(),
-      onPinClick: vi.fn(),
-    };
+    options = makeListOptions({ channelId: CHANNEL_ID });
     // jsdom lays nothing out, so isNearBottom() would always be true; stub a
     // real gap so it reflects the scrollTop the test sets.
-    scrollHeightDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollHeight");
-    Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
-      configurable: true,
-      get(): number {
-        return 100_000;
-      },
-    });
+    restoreScrollHeight = stubScrollHeight(100_000);
   });
 
   afterEach(() => {
     msgList?.destroy?.();
     msgList = null;
     container.remove();
-    if (scrollHeightDescriptor) {
-      Object.defineProperty(HTMLElement.prototype, "scrollHeight", scrollHeightDescriptor);
-    } else {
-      delete (HTMLElement.prototype as unknown as Record<string, unknown>).scrollHeight;
-    }
+    restoreScrollHeight();
   });
 
   it("keeps the message being read in view across the invalidate and the spliced tail", () => {

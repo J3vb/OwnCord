@@ -100,19 +100,25 @@ platform invoke bindings, including all conditional platform/feature handlers:
 
 | Measure                                                    | Value |
 | ---------------------------------------------------------- | ----- |
-| Files under `Client/src/` importing `@tauri-apps/*`        | 25    |
-| Distinct `invoke` command names called from `Client/src/`  | 95    |
-| `#[tauri::command]` handlers in `Client/src-tauri/`        | 98    |
+| Files under `Client/src/` importing `@tauri-apps/*`        | 27    |
+| Distinct `invoke` command names called from `Client/src/`  | 108   |
+| `#[tauri::command]` handlers in `Client/src-tauri/`        | 111   |
 | TS calls with no matching Rust handler                     | 0     |
 | Uses of the `window.__TAURI__` global                      | 0     |
 | Environment-detection helper (`isDesktop()` or equivalent) | 1     |
-| Files under `Client/src/platform/`                         | 56    |
+| Files under `Client/src/platform/`                         | 60    |
 
-The handler count covers the 98 distinct registrations
+The handler count covers the 110 distinct registrations
 (`Client/src-tauri/src/lib.rs`); `open_devtools` sits behind
-`#[cfg(feature = "devtools")]` and the forty-three `native_voice_*` commands
-behind `#[cfg(target_os = "linux")]`, so a default build (no `devtools`) registers 97 on Linux
-and 54 elsewhere. The one environment-detection helper is
+`#[cfg(feature = "devtools")]`, and the forty-three `native_voice_*` commands
+and the two Linux file commands (`clipboard_files`, `read_staged_file`, for
+files dragged in or copied from the file manager) behind
+`#[cfg(target_os = "linux")]` (`read_staged_file` also on Android, where it
+reads the files another app shared), so a default build (no `devtools`)
+registers 99 on Linux and 54 elsewhere, plus eleven Android-only ones:
+`set_call_service`, `save_file`, `share_file`, `share_text`, `read_staged_file`,
+`take_shared` (`share_in.rs`, the share another app sent to OwnCord) and the
+five notification commands in `android_notifications.rs`. The one environment-detection helper is
 `features/voice/native/platform.ts`'s `isLinuxDesktop()`, a Tauri-host plus
 Linux user-agent check that selects the native voice backend; it is not a
 desktop/browser seam.
@@ -133,9 +139,14 @@ guard. Keep it and the table in sync when changing registrations.
 
 ```text
 accept_cert_fingerprint
+android_clear_notifications
+android_notification_channels
+android_notification_permission
+android_notify
 app_audio_available
 check_client_update
 clear_call_notification
+clipboard_files
 delete_credential
 delete_identity_key
 delete_pending_messages
@@ -198,6 +209,7 @@ native_voice_unpublish_camera
 native_voice_unpublish_screen
 native_voice_unpublish_screen_audio
 native_voice_update_mic_test
+native_voice_use_key_slot
 native_voice_video_codecs
 native_voice_watch_devices
 notify_message
@@ -209,12 +221,17 @@ ptt_polling_supported
 ptt_set_key
 ptt_start
 ptt_stop
+read_staged_file
 save_credential
+save_file
 save_identity_key
 save_pending_messages
 save_settings
+set_call_service
 set_unread_badge
 set_window_pref
+share_file
+share_text
 show_next_launch
 start_app_audio
 start_http_proxy
@@ -224,6 +241,8 @@ stop_http_proxy
 stop_livekit_proxy
 store_identity_pin
 system_idle_ms
+take_notification_tap
+take_shared
 voice_shortcuts_set_keys
 voice_shortcuts_start
 voice_shortcuts_supported
@@ -255,7 +274,26 @@ web build reads nothing and hides the setting. The three Windows per-app share a
 half: they exist on every target and answer "unavailable" off Windows) have their
 caller since WP 6.7b: `src/platform/desktop/appAudio.ts`, behind the `AppAudio`
 contract, a twenty-seventh importer. They still belong in the registration
-inventory.
+inventory. `set_call_service` (Android only, `src-tauri/src/call_service.rs`)
+starts, updates and stops the foreground service that keeps a call's mic and
+camera running while the app is in the background; its caller is
+`src/platform/desktop/callService.ts`, behind the `CallService` contract, and
+the web build does nothing. `save_file`, `share_file` and `share_text` (Android
+only, `src-tauri/src/files.rs`) take a file's bytes as the raw command body and
+save it to the phone's Pictures or Downloads, or open the system share sheet;
+their caller is `src/platform/desktop/androidFiles.ts`, loaded lazily behind the
+`FileSaver` and `ShareSheet` contracts, and the web build has no share sheet.
+The five Android notification commands
+(`src-tauri/src/android_notifications.rs`: `android_notification_channels`,
+`android_notify`, `android_clear_notifications`,
+`android_notification_permission` and `take_notification_tap`, the last one
+handing over the id of the notification the user tapped, which
+tauri-plugin-notification's tap event leaves out) have one caller,
+`src/platform/desktop/androidNotifications.ts`, the Android `Notifier`.
+`take_shared` (Android only, `src-tauri/src/share_in.rs`) hands over a share
+from another app once, its files staged for `read_staged_file`; its caller is
+`src/platform/desktop/androidShareIn.ts`, loaded lazily behind the
+`ShareSheet` contract's `onReceived`.
 
 There is no `window.__TAURI__` access, and the only environment branching is
 the SDK `isTauri` guard in `lib/pendingMessages.ts` (imported, not global), which is

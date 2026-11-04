@@ -21,6 +21,7 @@ import {
   navigateToMainPageReady,
   openSettings,
   switchSettingsTab,
+  startFullSession,
 } from "./helpers";
 import { findUnnamedControls, keyboardReachable } from "./support/accessibility";
 
@@ -190,9 +191,7 @@ test.describe("notification limitations are actionable", () => {
   test("the desktop build says it cannot read the system setting, with no false grant", async ({
     page,
   }) => {
-    await mockTauriFullSession(page);
-    await page.goto("/");
-    await navigateToMainPageReady(page);
+    await startFullSession(page, { ready: true });
     await openSettings(page);
     await switchSettingsTab(page, "Notifications");
 
@@ -207,9 +206,7 @@ test.describe("notification limitations are actionable", () => {
 
   test("the permission row reflows at the 940x500 minimum window", async ({ page }) => {
     await page.setViewportSize({ width: 940, height: 500 });
-    await mockTauriFullSession(page);
-    await page.goto("/");
-    await navigateToMainPageReady(page);
+    await startFullSession(page, { ready: true });
     await openSettings(page);
     await switchSettingsTab(page, "Notifications");
 
@@ -220,38 +217,29 @@ test.describe("notification limitations are actionable", () => {
   });
 });
 
-test.describe("update limitations are actionable", () => {
-  /** Layer an updater mock over the base session. */
-  async function mockUpdater(page: Page, available: boolean, version = "1.2.0"): Promise<void> {
-    await mockTauriFullSession(page);
-    await page.addInitScript(
-      (cfg) => {
-        const t = (
-          window as unknown as {
-            __TAURI_INTERNALS__: { invoke: (c: string, a?: unknown) => Promise<unknown> };
-          }
-        ).__TAURI_INTERNALS__;
-        const orig = t.invoke.bind(t);
-        t.invoke = async (cmd: string, args?: unknown) => {
-          if (cmd === "check_client_update") {
-            return cfg.available
-              ? {
-                  available: true,
-                  version: cfg.version,
-                  body: "release notes",
-                  manual_upgrade: false,
-                }
-              : { available: false, version: null, body: null, manual_upgrade: false };
-          }
-          return orig(cmd, args);
-        };
-      },
-      { available, version },
-    );
-  }
+/** Layer a `check_client_update` answer over the base session. */
+async function mockUpdateCheck(page: Page, result: Record<string, unknown>): Promise<void> {
+  await mockTauriFullSession(page);
+  await page.addInitScript((answer) => {
+    const t = (
+      window as unknown as {
+        __TAURI_INTERNALS__: { invoke: (c: string, a?: unknown) => Promise<unknown> };
+      }
+    ).__TAURI_INTERNALS__;
+    const orig = t.invoke.bind(t);
+    t.invoke = async (cmd: string, args?: unknown) =>
+      cmd === "check_client_update" ? answer : orig(cmd, args);
+  }, result);
+}
 
+test.describe("update limitations are actionable", () => {
   test("an available update is announced once when its banner appears", async ({ page }) => {
-    await mockUpdater(page, true);
+    await mockUpdateCheck(page, {
+      available: true,
+      version: "1.2.0",
+      body: "release notes",
+      manual_upgrade: false,
+    });
     await page.goto("/");
     await navigateToMainPageReady(page);
 
@@ -266,20 +254,11 @@ test.describe("update limitations are actionable", () => {
   test("a manual package install states the limitation with no false update claim", async ({
     page,
   }) => {
-    await mockTauriFullSession(page);
-    await page.addInitScript(() => {
-      const t = (
-        window as unknown as {
-          __TAURI_INTERNALS__: { invoke: (c: string, a?: unknown) => Promise<unknown> };
-        }
-      ).__TAURI_INTERNALS__;
-      const orig = t.invoke.bind(t);
-      t.invoke = async (cmd: string, args?: unknown) => {
-        if (cmd === "check_client_update") {
-          return { available: false, version: null, body: null, manual_upgrade: true };
-        }
-        return orig(cmd, args);
-      };
+    await mockUpdateCheck(page, {
+      available: false,
+      version: null,
+      body: null,
+      manual_upgrade: true,
     });
     await page.goto("/");
     await navigateToMainPageReady(page);

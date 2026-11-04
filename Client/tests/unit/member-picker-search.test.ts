@@ -1,5 +1,6 @@
 // WP 3B-5 (D13): the new-DM picker's search, sort, avatars, status labels and chips.
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
 import { createMemberPickerModal } from "../../src/pages/main-page/MemberPickerModal";
 import { membersStore } from "../../src/stores/members.store";
 import type { Member } from "../../src/stores/members.store";
@@ -43,15 +44,15 @@ describe("member picker search, sort and chips", () => {
   const row = (id: number): HTMLElement =>
     container.querySelector<HTMLElement>(`[data-testid='dm-picker-member-${id}']`)!;
 
-  beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
-    onSelectGroup.mockReset();
-  });
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => component.destroy?.(),
+  );
 
-  afterEach(() => {
-    component.destroy?.();
-    container.remove();
+  beforeEach(() => {
+    onSelectGroup.mockReset();
   });
 
   function mount(): void {

@@ -1,5 +1,6 @@
 import { cascadedDeclaration, hasRule, keyword } from "../helpers/app-css";
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
 import { authStore } from "@stores/auth.store";
 import { membersStore } from "@stores/members.store";
 import { uiStore, setConnectionStatus } from "@stores/ui.store";
@@ -73,20 +74,22 @@ describe("StatusPicker wired to UserBar", () => {
   let container: HTMLDivElement;
   let comp: ReturnType<typeof createUserBar>;
 
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => {
+      comp?.destroy?.();
+      setConnectionStatus("disconnected");
+      resetAuthState();
+    },
+  );
+
   beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
     vi.clearAllMocks();
     localStorage.clear();
     // The picker gates on the store-backed connection status (UX spec §3).
     setConnectionStatus("connected");
-  });
-
-  afterEach(() => {
-    comp?.destroy?.();
-    container.remove();
-    setConnectionStatus("disconnected");
-    resetAuthState();
   });
 
   it("click on status picker dot opens the dropdown", () => {

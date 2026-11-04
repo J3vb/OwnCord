@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/J3vb/OwnCord/Server/lkstats"
 	"github.com/J3vb/OwnCord/Server/metrics"
 	"github.com/J3vb/OwnCord/Server/sysstats"
 	"github.com/J3vb/OwnCord/Server/ws"
@@ -92,6 +93,21 @@ func (a *App) startSystemStats(s *sysstats.Sampler) {
 		case <-done:
 		case <-stepCtx.Done():
 			a.log.Warn("system stats sampler did not stop before the close budget ran out")
+		}
+		return nil
+	})
+}
+
+// startLiveKitStats runs the LiveKit card's sampler the same way.
+func (a *App) startLiveKitStats(s *lkstats.Sampler) {
+	ctx, cancel := context.WithCancel(a.bgCtx)
+	done := s.Run(ctx)
+	a.onClose("livekit-stats", func(stepCtx context.Context) error {
+		cancel()
+		select {
+		case <-done:
+		case <-stepCtx.Done():
+			a.log.Warn("livekit stats sampler did not stop before the close budget ran out")
 		}
 		return nil
 	})

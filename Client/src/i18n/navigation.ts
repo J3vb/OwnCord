@@ -10,5 +10,7 @@ export const navigationText = defineCatalog("navigation", {
   },
   "moderation.title": "Moderation",
   "moderation.entryHint": "Open the Moderation Center",
+  "people.title": "People",
   "view.close": "Close {name}",
+  "view.menu": "Open navigation",
 });

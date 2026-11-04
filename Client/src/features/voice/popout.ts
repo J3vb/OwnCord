@@ -94,9 +94,7 @@ export function openPopoutWindow(opts: PopoutWindowOptions): PopoutWindow | null
     if (content.ownerDocument === doc && content.isConnected) return;
     doc.title = opts.title;
     // The app's theme and styles, so the window looks like the app.
-    for (const attr of document.documentElement.attributes) {
-      doc.documentElement.setAttribute(attr.name, attr.value);
-    }
+    copyRootAttributes();
     for (const sheet of document.head.querySelectorAll("link[rel='stylesheet'], style")) {
       const copy = doc.importNode(sheet, true);
       if (sheet instanceof HTMLLinkElement) copy.setAttribute("href", sheet.href);
@@ -116,6 +114,25 @@ export function openPopoutWindow(opts: PopoutWindowOptions): PopoutWindow | null
     listeners.destroy();
     opts.onClosed(byUser);
   }
+
+  /** The app root's attributes onto the window's root: theme, compact mode,
+   *  the own-camera mirror and the like. */
+  function copyRootAttributes(): void {
+    const root = win!.document.documentElement;
+    for (const name of root.getAttributeNames()) {
+      if (!document.documentElement.hasAttribute(name)) root.removeAttribute(name);
+    }
+    for (const attr of document.documentElement.attributes) {
+      root.setAttribute(attr.name, attr.value);
+    }
+  }
+
+  // A setting changed while the window is open reaches it at once.
+  const rootWatch = new MutationObserver(() => {
+    if (!win.closed) copyRootAttributes();
+  });
+  rootWatch.observe(document.documentElement, { attributes: true });
+  signal.addEventListener("abort", () => rootWatch.disconnect(), { once: true });
 
   win.addEventListener("load", draw, { signal });
   // No orphan windows: the app page going away takes them along.

@@ -1,8 +1,14 @@
-import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vitest";
+import { describe, it, expect, vi, type Mock } from "vitest";
 import * as mocks from "../../helpers/apiMocks";
 import { createApiClient, type OnUnauthorized } from "../../../src/lib/api";
 import { expectConsole } from "../../helpers/console";
-import { jsonResponse, errorResponse, brokenJsonErrorResponse } from "../../helpers/apiHarness";
+import {
+  jsonResponse,
+  errorResponse,
+  brokenJsonErrorResponse,
+  fetchCallReaders,
+  useDefaultApiClient,
+} from "../../helpers/apiHarness";
 
 vi.mock("@tauri-apps/plugin-http", () => mocks.pluginHttpMock());
 vi.mock("../../../src/lib/net/httpProxy", () => mocks.netHttpProxyMock());
@@ -13,25 +19,13 @@ describe("API Client", () => {
   let api: ReturnType<typeof createApiClient>;
   let onUnauthorized: Mock<OnUnauthorized>;
 
-  beforeEach(() => {
-    mockFetch.mockReset();
-    onUnauthorized = vi.fn<OnUnauthorized>();
-    api = createApiClient({ host: "localhost:8443", token: "test-token" }, onUnauthorized);
+  useDefaultApiClient(mockFetch, (client, unauthorized) => {
+    api = client;
+    onUnauthorized = unauthorized;
   });
 
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  // ── helpers ──────────────────────────────────────────────
-
-  /** Extract the call args for the Nth fetch invocation. */
-  function fetchCallUrl(n = 0): string {
-    return mockFetch.mock.calls[n]?.[0] as string;
-  }
-  function fetchCallOpts(n = 0): Record<string, unknown> {
-    return mockFetch.mock.calls[n]?.[1] as Record<string, unknown>;
-  }
+  const { url: fetchCallUrl, init } = fetchCallReaders(mockFetch);
+  const fetchCallOpts = (n = 0) => init(n) as Record<string, unknown>;
 
   describe("config management", () => {
     it("setConfig updates token", async () => {
@@ -166,7 +160,39 @@ describe("API Client", () => {
       const body = JSON.parse(fetchCallOpts().body as string);
       // The server decodes json:"old_password" (Server/api/profile_handler.go),
       // and Go's encoding/json has no alias matching: any other key is a 400.
-      expect(body).toEqual({ old_password: "oldpw", new_password: "newpw" });
+      expect(body).toEqual({
+        old_password: "oldpw",
+        new_password: "newpw",
+        revoke_api_tokens: false,
+      });
+    });
+
+    it("changePassword asks the server to revoke API tokens when told to", async () => {
+      mockFetch.mockResolvedValue(jsonResponse(undefined, 204));
+      await api.changePassword("oldpw", "newpw", true);
+      const body = JSON.parse(fetchCallOpts().body as string);
+      expect(body.revoke_api_tokens).toBe(true);
+    });
+
+    it("getApiTokens unwraps the {tokens: [...]} envelope", async () => {
+      const token = {
+        id: 4,
+        label: "ci",
+        created_at: "2026-11-01 10:00:00",
+        last_used: null,
+        expires_at: null,
+      };
+      mockFetch.mockResolvedValue(jsonResponse({ tokens: [token] }));
+      await expect(api.getApiTokens()).resolves.toEqual([token]);
+      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/users/me/api-tokens");
+      expect(fetchCallOpts().method).toBe("GET");
+    });
+
+    it("revokeApiToken calls DELETE with the token ID", async () => {
+      mockFetch.mockResolvedValue(jsonResponse(undefined, 204));
+      await api.revokeApiToken(4);
+      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/users/me/api-tokens/4");
+      expect(fetchCallOpts().method).toBe("DELETE");
     });
 
     it("changePassword resolves undefined on 204 and hands back the partial-success body on 200", async () => {

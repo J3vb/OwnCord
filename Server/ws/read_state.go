@@ -25,7 +25,7 @@ func buildReadState(channelID int64, rs service.ReadPointer) []byte {
 // NotifyReadState delivers a read_state frame to userID, satisfying
 // service.ReadStateNotifier. It goes through SendToUserLow, the queue
 // mention_count uses, so the two frames cannot reorder, and the service holds
-// mentionEmitMu across the write and this call, so a reader's last frame is
+// the channel's mention emit lock across the write and this call, so a reader's last frame is
 // the latest committed state. Every live connection of the user
 // hears it, so a read on one device clears the badge on the others. A reader with no live connection recovers the
 // pointer from the next ready; nothing is replayed.

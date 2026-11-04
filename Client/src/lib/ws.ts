@@ -10,6 +10,7 @@ import type {
   SocketRetryHint,
 } from "../platform/contracts/socket";
 import { createLogger } from "./logger";
+import { recordEvent } from "./diagnostics/eventSink";
 import { PROTOCOL_EPOCH } from "./protocolTypes";
 import { Disposable } from "./disposable";
 import { isAndroidHost } from "./hostPlatform";
@@ -93,6 +94,12 @@ function clientFeatures(): readonly string[] {
  *  stale event listeners from a previous connection attempt. */
 let wsGeneration = 0;
 
+/** The server's host name for the event log: no port, and nothing for an IP address. */
+function eventHost(host: string): string | null {
+  const name = host.replace(/:\d+$/, "").toLowerCase();
+  return /^[\d.]+$/.test(name) || name.includes(":") ? null : name;
+}
+
 /**
  * Supplies the channel the user currently has open, so the auth frame can
  * declare it on a resume.
@@ -157,6 +164,11 @@ export function createWsClient({
   const transport: SocketConnection = desktop.socket.create();
   let config: WsClientConfig | null = null;
   let state: ConnectionState = "disconnected";
+  // When the current attempt's connect() started, for ws.ready's after_ms.
+  let attemptStartedAt = 0;
+  // The generation whose socket opened last, so its close is tagged with it
+  // even after a disconnect() or a newer connect() moved the counter on.
+  let socketGeneration = 0;
   let reconnectAttempt = 0;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
@@ -375,10 +387,22 @@ export function createWsClient({
   function armWakeListeners(): void {
     if (wakeOwner !== null) return;
     const owner = new Disposable();
-    window.addEventListener("online", onWakeSignal, { signal: owner.signal });
+    // The same two signals go into the diagnostic event log as app facts.
+    window.addEventListener(
+      "online",
+      () => {
+        recordEvent("app.network", { state: "online" });
+        onWakeSignal();
+      },
+      { signal: owner.signal },
+    );
     document.addEventListener(
       "visibilitychange",
-      () => document.visibilityState === "visible" && onWakeSignal(),
+      () => {
+        const visible = document.visibilityState === "visible";
+        recordEvent("app.visibility", { state: visible ? "visible" : "hidden" });
+        if (visible) onWakeSignal();
+      },
       { signal: owner.signal },
     );
     wakeOwner = owner;
@@ -454,6 +478,11 @@ export function createWsClient({
       lastSeq,
     });
     setState("reconnecting");
+    recordEvent("ws.reconnect_scheduled", {
+      generation: wsGeneration,
+      attempt: reconnectAttempt + 1,
+      delay_ms: delay,
+    });
     reconnectTimer = clock.setTimeout(redial, delay);
   }
 
@@ -600,6 +629,10 @@ export function createWsClient({
         lastSeq = 0;
       }
       setState("connected");
+      recordEvent("ws.ready", {
+        generation: wsGeneration,
+        after_ms: attemptStartedAt > 0 ? Date.now() - attemptStartedAt : null,
+      });
       reconnectAttempt = 0;
       pendingWake = false;
       startHeartbeat();
@@ -748,6 +781,8 @@ export function createWsClient({
       lastCseq = 0;
       cancelGapResume();
       connectFailureCode = null;
+      socketGeneration = wsGeneration;
+      recordEvent("ws.open", { generation: wsGeneration });
       log.info("WebSocket open, sending auth", {
         host: config?.host ?? "unknown",
         isReconnect: reconnectAttempt > 0,
@@ -783,7 +818,15 @@ export function createWsClient({
       const attemptSocketId = socketId;
       const attemptGen = wsGeneration;
       void resolveIdentityKey(config.host).then((identityKey) => {
-        if (socketId !== attemptSocketId || wsGeneration !== attemptGen || !proxyOpen) return;
+        if (socketId !== attemptSocketId || wsGeneration !== attemptGen || !proxyOpen) {
+          if (wsGeneration !== attemptGen) {
+            recordEvent("ws.stale_event", {
+              generation: attemptGen,
+              live_generation: wsGeneration,
+            });
+          }
+          return;
+        }
         send({
           type: "auth",
           payload: {
@@ -799,6 +842,16 @@ export function createWsClient({
       // can carry one (a certificate failure today), and a plain close clears
       // it. The pre-auth deadline reads this to name the failure.
       connectFailureCode = retryHint?.errorCode ?? null;
+      recordEvent("ws.closed", {
+        generation: socketGeneration,
+        close_class: intentionalClose
+          ? "normal"
+          : certMismatchBlock
+            ? "policy"
+            : connectFailureCode !== null
+              ? "other"
+              : "abnormal",
+      });
       log.info("WebSocket closed", {
         host: config?.host ?? "unknown",
         intentional: intentionalClose,
@@ -820,6 +873,9 @@ export function createWsClient({
   }
 
   async function connect(cfg: WsClientConfig, takeover = false): Promise<void> {
+    if (state === "connecting" || state === "authenticating") {
+      recordEvent("ws.superseded", { generation: wsGeneration, by_generation: wsGeneration + 1 });
+    }
     wsGeneration++;
     // Captured so a disconnect() landing mid-attempt can be detected on resume
     // — disconnect() bumps wsGeneration too, so a mismatch here means this
@@ -846,6 +902,12 @@ export function createWsClient({
     stopLiveness();
 
     setState("connecting");
+    attemptStartedAt = Date.now();
+    recordEvent("ws.connecting", {
+      generation: gen,
+      attempt: reconnectAttempt,
+      host: eventHost(cfg.host),
+    });
 
     const url = wsUrlFor(cfg.host);
     log.info("WebSocket connecting", {
@@ -865,6 +927,7 @@ export function createWsClient({
       if (gen !== wsGeneration) {
         // A disconnect() (or a newer connect()) landed while the transport was
         // dialling — this failure belongs to a superseded attempt.
+        recordEvent("ws.stale_event", { generation: gen, live_generation: wsGeneration });
         return;
       }
       log.error("Tauri APIs not available, cannot connect WebSocket", err);

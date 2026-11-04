@@ -36,6 +36,7 @@ func (a *App) stages() []stage {
 		{"erasure-markers", a.startErasureMarkers},
 		{"push-vapid-key", a.startPushVAPIDKey},
 		{"totp-key", a.startTOTPKey},
+		{"totp-secrets", a.startTOTPSecrets},
 		{"telemetry", a.startTelemetry},
 		{"plugins", a.startPlugins},
 		{"hub", a.startHub},

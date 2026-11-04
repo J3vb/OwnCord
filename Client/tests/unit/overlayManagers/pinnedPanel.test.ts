@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import type { Mock } from "vitest";
 import * as mocks from "../../helpers/overlayManagersMocks";
 import { setMembers } from "@stores/members.store";
 import { createPinnedMessages } from "@components/PinnedMessages";
@@ -9,10 +8,14 @@ import { membersStore } from "@stores/members.store";
 import { uiStore, setConnectionStatus } from "@stores/ui.store";
 import { mapToPinnedMessage } from "@pages/main-page/OverlayManagers";
 import {
-  openPinnedControllers,
   createPinnedPanelController,
+  firstCallOpts,
+  type JumpToMessageOpts,
   makeMockApi,
+  openPinnedControllers,
+  type UnpinOpts,
 } from "../../helpers/overlayManagersHarness";
+import { guarded, pressBack } from "../../helpers/backNav";
 
 vi.mock("@lib/logger", () => mocks.loggerMock());
 vi.mock("@components/QuickSwitcher", () => mocks.quickSwitcherMock());
@@ -49,15 +52,38 @@ describe("createPinnedPanelController", () => {
     root.remove();
   });
 
+  function newPinned(
+    api: ReturnType<typeof makeMockApi>,
+    channelId: number,
+  ): ReturnType<typeof createPinnedPanelController> {
+    return createPinnedPanelController({
+      api: api as never,
+      getRoot: () => root,
+      getCurrentChannelId: () => channelId,
+    });
+  }
+
+  it("closes on Back on a phone", async () => {
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn(() => ({ matches: true })),
+    );
+    try {
+      const controller = newPinned(makeMockApi(), 42);
+      await controller.open();
+      expect(guarded()).toBe(true);
+      await pressBack();
+      expect(mockPinnedMessagesDestroy).toHaveBeenCalledOnce();
+      expect(guarded()).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("toggles pinned panel open and mounts to root", async () => {
     const api = makeMockApi();
 
-    const controller = createPinnedPanelController({
-      api: api as never,
-      getRoot: () => root,
-
-      getCurrentChannelId: () => 42,
-    });
+    const controller = newPinned(api, 42);
 
     await controller.toggle();
 
@@ -67,11 +93,7 @@ describe("createPinnedPanelController", () => {
 
   it("open() opens a closed panel and never closes or rebuilds an open one", async () => {
     const api = makeMockApi();
-    const controller = createPinnedPanelController({
-      api: api as never,
-      getRoot: () => root,
-      getCurrentChannelId: () => 42,
-    });
+    const controller = newPinned(api, 42);
 
     await controller.open();
     expect(createPinnedMessages).toHaveBeenCalledOnce();
@@ -92,11 +114,7 @@ describe("createPinnedPanelController", () => {
 
   it("concurrent open() calls fetch once", async () => {
     const api = makeMockApi();
-    const controller = createPinnedPanelController({
-      api: api as never,
-      getRoot: () => root,
-      getCurrentChannelId: () => 42,
-    });
+    const controller = newPinned(api, 42);
     await Promise.all([controller.open(), controller.open()]);
     expect(api.getPins).toHaveBeenCalledOnce();
     expect(createPinnedMessages).toHaveBeenCalledOnce();
@@ -104,11 +122,7 @@ describe("createPinnedPanelController", () => {
 
   it("does not open, fetch or toast behind an NSFW consent gate", async () => {
     const api = makeMockApi();
-    const controller = createPinnedPanelController({
-      api: api as never,
-      getRoot: () => root,
-      getCurrentChannelId: () => 99,
-    });
+    const controller = newPinned(api, 99);
 
     await controller.toggle();
 
@@ -147,9 +161,9 @@ describe("createPinnedPanelController", () => {
 
     await controller.toggle();
 
-    const opts = (createPinnedMessages as Mock).mock.calls[0]![0] as {
+    const opts = firstCallOpts<{
       onUnpin?: (msgId: number) => void;
-    };
+    }>(createPinnedMessages);
     expect(opts.onUnpin).toBeUndefined();
   });
 
@@ -169,9 +183,7 @@ describe("createPinnedPanelController", () => {
     await controller.toggle();
 
     // Extract onUnpin callback passed to PinnedMessages
-    const opts = (createPinnedMessages as Mock).mock.calls[0]![0] as {
-      onUnpin: (msgId: number) => void;
-    };
+    const opts = firstCallOpts<UnpinOpts>(createPinnedMessages);
 
     // Call onUnpin — it should handle the error internally
     opts.onUnpin(1);
@@ -198,9 +210,7 @@ describe("createPinnedPanelController", () => {
 
     await controller.toggle();
 
-    const opts = (createPinnedMessages as Mock).mock.calls[0]![0] as {
-      onUnpin: (msgId: number) => void;
-    };
+    const opts = firstCallOpts<UnpinOpts>(createPinnedMessages);
 
     opts.onUnpin(1);
 
@@ -414,9 +424,7 @@ describe("createPinnedPanelController", () => {
 
     await controller.toggle();
 
-    const opts = (createPinnedMessages as Mock).mock.calls[0]![0] as {
-      onJumpToMessage: (msgId: number) => void;
-    };
+    const opts = firstCallOpts<JumpToMessageOpts>(createPinnedMessages);
 
     opts.onJumpToMessage(1);
 
@@ -441,9 +449,7 @@ describe("createPinnedPanelController", () => {
 
     await controller.toggle();
 
-    const opts = (createPinnedMessages as Mock).mock.calls[0]![0] as {
-      onJumpToMessage: (msgId: number) => void;
-    };
+    const opts = firstCallOpts<JumpToMessageOpts>(createPinnedMessages);
 
     opts.onJumpToMessage(999);
 
@@ -460,12 +466,7 @@ describe("createPinnedPanelController", () => {
       getPins: vi.fn().mockRejectedValue(new Error("load failed")),
     });
 
-    const controller = createPinnedPanelController({
-      api: api as never,
-      getRoot: () => root,
-
-      getCurrentChannelId: () => 42,
-    });
+    const controller = newPinned(api, 42);
 
     await controller.toggle();
 
@@ -503,11 +504,7 @@ describe("createPinnedPanelController", () => {
   it("toggle closes panel when already open", async () => {
     const api = makeMockApi();
 
-    const controller = createPinnedPanelController({
-      api: api as never,
-      getRoot: () => root,
-      getCurrentChannelId: () => 42,
-    });
+    const controller = newPinned(api, 42);
 
     await controller.toggle();
     expect(mockPinnedMessagesMount).toHaveBeenCalledOnce();
@@ -520,11 +517,7 @@ describe("createPinnedPanelController", () => {
   it("cleanup closes panel if open", async () => {
     const api = makeMockApi();
 
-    const controller = createPinnedPanelController({
-      api: api as never,
-      getRoot: () => root,
-      getCurrentChannelId: () => 42,
-    });
+    const controller = newPinned(api, 42);
 
     await controller.toggle();
     controller.cleanup();
@@ -539,11 +532,7 @@ describe("createPinnedPanelController", () => {
     });
     const api = makeMockApi({ getPins: vi.fn().mockReturnValue(pending) });
 
-    const controller = createPinnedPanelController({
-      api: api as never,
-      getRoot: () => root,
-      getCurrentChannelId: () => 42,
-    });
+    const controller = newPinned(api, 42);
 
     const first = controller.toggle();
     const second = controller.toggle(); // fires while getPins is still pending
@@ -564,11 +553,7 @@ describe("createPinnedPanelController", () => {
       getPins: vi.fn().mockReturnValueOnce(pending).mockResolvedValue({ messages: [] }),
     });
 
-    const controller = createPinnedPanelController({
-      api: api as never,
-      getRoot: () => root,
-      getCurrentChannelId: () => 42,
-    });
+    const controller = newPinned(api, 42);
 
     const opening = controller.toggle();
     controller.cleanup(); // e.g. the narrow-width drawer opening over it
@@ -608,11 +593,7 @@ describe("createPinnedPanelController", () => {
   it("cleanup is safe when no panel is open", () => {
     const api = makeMockApi();
 
-    const controller = createPinnedPanelController({
-      api: api as never,
-      getRoot: () => root,
-      getCurrentChannelId: () => 42,
-    });
+    const controller = newPinned(api, 42);
 
     // Should not throw
     controller.cleanup();
@@ -631,9 +612,7 @@ describe("createPinnedPanelController", () => {
 
     await controller.toggle();
 
-    const opts = (createPinnedMessages as Mock).mock.calls[0]![0] as {
-      onJumpToMessage: (msgId: number) => void;
-    };
+    const opts = firstCallOpts<JumpToMessageOpts>(createPinnedMessages);
 
     opts.onJumpToMessage(1);
 

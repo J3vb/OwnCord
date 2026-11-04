@@ -9,6 +9,7 @@
  */
 
 import { test, expect, login } from "./fixtures";
+import { openContextMenuOn } from "../helpers";
 import type { TestServer } from "../support/server";
 import type { Page } from "@playwright/test";
 
@@ -32,22 +33,7 @@ const MODERATOR_ROLE_ID = 3;
  * `contextmenu` event the browser would, from a safe point: `MemberList`'s real
  * handler builds and positions the menu exactly as a click there would. */
 async function openMemberMenu(page: Page, userId: number) {
-  const row = page.locator(`[data-testid='member-${userId}']`);
-  await expect(row).toBeVisible({ timeout: 10_000 });
-  await row.evaluate((el) =>
-    el.dispatchEvent(
-      new MouseEvent("contextmenu", {
-        bubbles: true,
-        cancelable: true,
-        clientX: 640,
-        clientY: 80,
-        button: 2,
-      }),
-    ),
-  );
-  const menu = page.locator(".context-menu").first();
-  await expect(menu).toBeVisible({ timeout: 10_000 });
-  return menu;
+  return openContextMenuOn(page, page.locator(`[data-testid='member-${userId}']`), 10_000);
 }
 
 async function listUsers(server: TestServer, token: string): Promise<AdminUser[]> {

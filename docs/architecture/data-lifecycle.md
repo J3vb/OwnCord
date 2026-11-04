@@ -97,7 +97,7 @@ connection with `PRAGMA secure_delete = ON` for its duration (HP-4 decision
 2), restored afterwards, and one `PRAGMA wal_checkpoint(TRUNCATE)` after the
 last commit. Until WP 4.1a the whole half was a single transaction, which held
 every other write behind it for as long as an account's history took to delete
-(about 2.9 s at 100,000 messages, `docs/capacity.md`, "Database waits"). The
+(about 2.9 s at 100,000 messages, [capacity measurements](capacity-measurements.md#database-waits)). The
 stages:
 
 - **Lock** (`db.EraseAccountLock`, one transaction, the point of no return):
@@ -768,7 +768,7 @@ The other rows whose behaviour is _not_ fixed are decided behaviour, not finding
 held back: a missing marker file leaving an install with no erasure history is
 what the plan's question 1 settles on (boot, and log an error naming it), and it
 is written out for the operator in
-[deployment.md](../deployment.md#restore) because that is the page a backup
+[Backups and restore](../hosting/backups.md#restore) because that is the page a backup
 procedure is read from.
 
 ## The private half

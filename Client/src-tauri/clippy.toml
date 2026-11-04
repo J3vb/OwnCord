@@ -4,6 +4,10 @@
 #
 # Std mutexes lock through sync::lock, which recovers a lock a panic poisoned,
 # or sync::lock_checked where a check must fail closed instead.
+# unwrap/expect are denied in Cargo.toml; a failing test should still panic.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+
 disallowed-methods = [
   { path = "std::sync::Mutex::lock", reason = "lock through crate::sync::lock (or lock_checked to fail closed on a poisoned lock)" },
   { path = "std::fs::write", reason = "truncates first; write store files with json_store::write_atomic" },

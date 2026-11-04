@@ -4,81 +4,37 @@
  * waits for the asynchronous popup path to settle before asserting that
  * something did NOT happen.
  */
+import { makePayload } from "../helpers/chatPayload";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import * as voiceSession from "../helpers/voiceSessionMock";
+import * as mocks from "../helpers/notificationsMocks";
+import { makeDm } from "../helpers/dmHarness";
 import {
   notifyChannelActivity,
   notifyIncomingMessage,
   notifyMention,
-  resetNotificationCoalescing,
 } from "../../src/lib/notifications";
 import { channelsStore } from "../../src/stores/channels.store";
 import { dmStore } from "../../src/stores/dm.store";
-import { membersStore } from "../../src/stores/members.store";
 import { messagesStore } from "../../src/stores/messages.store";
 import { setBlockedByMe } from "../../src/stores/blocks.store";
 import { addLogListener, setLogLevel, type LogEntry } from "../../src/lib/logger";
 import type { ChannelActivityEntry, ChatMessagePayload } from "../../src/lib/types";
-import { signInAs } from "../helpers/storeSeeds";
+import {
+  mockOscillator,
+  testPrefs,
+  shouldTauriNotifThrow,
+  sendNotificationMock,
+} from "../helpers/notificationsMocks";
+import { useNotificationsHarness } from "../helpers/notificationsHarness";
 
-const { testPrefs, shouldTauriNotifThrow, sendNotificationMock } = vi.hoisted(() => ({
-  testPrefs: new Map<string, unknown>(),
-  shouldTauriNotifThrow: { value: false },
-  sendNotificationMock: vi.fn(),
-}));
-
-vi.mock("../../src/lib/prefs/preferences", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../src/lib/prefs/preferences")>()),
-  STORAGE_PREFIX: "owncord:settings:",
-  loadPref: (key: string, fallback: unknown) => testPrefs.get(key) ?? fallback,
-  savePref: (key: string, value: unknown) => testPrefs.set(key, value),
-}));
-vi.mock("../../src/lib/voice/livekitSession", () => voiceSession.defaults());
-vi.mock("@tauri-apps/plugin-notification", () => ({
-  isPermissionGranted: vi.fn(() => {
-    if (shouldTauriNotifThrow.value) throw new Error("Tauri not available");
-    return Promise.resolve(true);
-  }),
-  requestPermission: vi.fn().mockResolvedValue("granted"),
-  sendNotification: sendNotificationMock,
-}));
-vi.mock("@tauri-apps/api/core", () => ({
-  invoke: vi.fn((cmd: string, args: { title: string; body: string }) => {
-    if (cmd === "notify_message") sendNotificationMock({ title: args.title, body: args.body });
-    return Promise.resolve();
-  }),
-}));
-vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn().mockResolvedValue(() => {}) }));
-vi.mock("@tauri-apps/api/window", () => ({
-  getCurrentWindow: vi.fn().mockReturnValue({
-    requestUserAttention: vi.fn().mockResolvedValue(undefined),
-  }),
-}));
-
-const oscillator = {
-  connect: vi.fn(),
-  frequency: { setValueAtTime: vi.fn() },
-  start: vi.fn(),
-  stop: vi.fn(),
-};
-const gain = {
-  connect: vi.fn(),
-  gain: { setValueAtTime: vi.fn(), exponentialRampToValueAtTime: vi.fn() },
-};
-class MockAudioContext {
-  readonly currentTime = 0;
-  readonly destination = {};
-  createOscillator() {
-    return oscillator;
-  }
-  createGain() {
-    return gain;
-  }
-  close() {
-    return Promise.resolve();
-  }
-}
-(globalThis as Record<string, unknown>).AudioContext = MockAudioContext;
+vi.mock("../../src/lib/prefs/preferences", (importOriginal) =>
+  mocks.prefsPreferencesMock(importOriginal),
+);
+vi.mock("../../src/lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
+vi.mock("@tauri-apps/plugin-notification", () => mocks.pluginNotificationMock());
+vi.mock("@tauri-apps/api/core", () => mocks.apiCoreMock());
+vi.mock("@tauri-apps/api/event", () => mocks.apiEventMock());
+vi.mock("@tauri-apps/api/window", () => mocks.apiWindowMock());
 
 // The popup body loads the markdown tokenizer lazily; load it once up front so
 // the first case is not slower than the rest.
@@ -87,6 +43,7 @@ const { invoke } = await import("@tauri-apps/api/core");
 const { getCurrentWindow } = await import("@tauri-apps/api/window");
 const flashSpy = getCurrentWindow().requestUserAttention as ReturnType<typeof vi.fn>;
 const popupSpy = invoke as ReturnType<typeof vi.fn>;
+const oscillator = mockOscillator;
 
 function activity(flags: Partial<ChannelActivityEntry> = {}): ChannelActivityEntry {
   return {
@@ -99,18 +56,8 @@ function activity(flags: Partial<ChannelActivityEntry> = {}): ChannelActivityEnt
   };
 }
 
-function message(overrides: Partial<ChatMessagePayload> = {}): ChatMessagePayload {
-  return {
-    id: 7,
-    channel_id: 1,
-    user: { id: 2, username: "TestUser", avatar: null },
-    content: "Hello world",
-    reply_to: null,
-    attachments: [],
-    timestamp: new Date().toISOString(),
-    ...overrides,
-  };
-}
+const message = (overrides: Partial<ChatMessagePayload> = {}): ChatMessagePayload =>
+  makePayload({ id: 7, ...overrides });
 
 interface Alerts {
   readonly popups: number;
@@ -139,68 +86,18 @@ const ENTRY_POINTS: readonly EntryPoint[] = [
 
 function dmChannel(channelId: number) {
   const user = { id: 2, username: "bob", avatar: "", status: "online" };
-  return {
-    channelId,
-    recipient: user,
-    participants: [user],
-    name: "",
-    isGroup: false,
-    lastMessageId: null,
-    lastMessage: "",
-    lastMessageAt: "",
-    unreadCount: 0,
-    mentionCount: 0,
-  };
+  return makeDm({ channelId, recipient: user, participants: [user] });
 }
 
 let hasFocus: ReturnType<typeof vi.spyOn>;
 
+useNotificationsHarness();
+
 beforeEach(() => {
-  testPrefs.clear();
-  testPrefs.set("notificationLevel", "all");
-  resetNotificationCoalescing();
   popupSpy.mockClear();
   flashSpy.mockClear();
   oscillator.start.mockClear();
   shouldTauriNotifThrow.value = false;
-  signInAs(
-    { id: 1, username: "Me", avatar: null, role: "member" },
-    { token: "test", serverName: null },
-  );
-  channelsStore.setState(() => ({
-    categories: [],
-    channels: new Map([
-      [
-        1,
-        {
-          id: 1,
-          name: "general",
-          type: "text" as const,
-          category: null,
-          position: 0,
-          unreadCount: 0,
-          mentionCount: 0,
-          lastMessageId: null,
-          canSend: true,
-          topic: "",
-          slowMode: 0,
-          nsfw: false,
-          isPrivate: false,
-          voiceMaxUsers: 0,
-          voiceMaxVideo: 0,
-        },
-      ],
-    ]),
-    activeChannelId: 1,
-    roles: [],
-  }));
-  dmStore.setState(() => ({ channels: [] }));
-  membersStore.setState(() => ({
-    members: new Map(),
-    typingUsers: new Map(),
-    roleRevision: 0,
-  }));
-  messagesStore.setState((prev) => ({ ...prev, detachedChannels: new Set() }));
   setBlockedByMe([]);
   hasFocus = vi.spyOn(document, "hasFocus").mockReturnValue(false);
 });

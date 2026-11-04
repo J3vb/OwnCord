@@ -365,7 +365,7 @@ func (h *vmHarness) disconnect(m *vmMember, teardown bool) {
 func (h *vmHarness) expireGrace(m *vmMember) {
 	h.step++
 	h.t.Helper()
-	h.hub.leaveParkedVoiceTest(context.Background(), m.userID, h.hub.voiceReg.voiceGrace.take(m.userID), voiceLeaveReasonGraceExpired)
+	h.hub.leaveParkedVoiceTest(context.Background(), m.userID, h.hub.voiceHub.reg.voiceGrace.take(m.userID), voiceLeaveReasonGraceExpired)
 	h.note("expireGrace %s", m.name)
 	h.check()
 }
@@ -623,7 +623,7 @@ func (h *vmHarness) ghostRow() string {
 		if err != nil {
 			h.failf("%s: GetVoiceState: %v", m.name, err)
 		}
-		if row != nil && !h.hub.voiceReg.voiceGrace.has(m.userID, row.ChannelID) {
+		if row != nil && !h.hub.voiceHub.reg.voiceGrace.has(m.userID, row.ChannelID) {
 			return fmt.Sprintf("%s has a voice_states row for ch%d but no live client", m.name, row.ChannelID)
 		}
 	}
@@ -901,7 +901,7 @@ func TestVoiceMembership_GraceWindowReconnect(t *testing.T) {
 	h.join(alice, chA)
 	_, token := alice.c.voice.state()
 	h.disconnect(alice, true)
-	if !h.hub.voiceReg.voiceGrace.has(alice.userID, chA) {
+	if !h.hub.voiceHub.reg.voiceGrace.has(alice.userID, chA) {
 		t.Fatalf("a completed membership was not parked in the grace window")
 	}
 	// The parked row and SFU participant must still be exactly the join's.
@@ -919,7 +919,7 @@ func TestVoiceMembership_GraceWindowReconnect(t *testing.T) {
 	if gotCh, gotToken := alice.c.voice.state(); gotCh != chA || gotToken != token {
 		t.Fatalf("resume inherited %d/%s, want %d/%s", gotCh, gotToken, chA, token)
 	}
-	if h.hub.voiceReg.voiceGrace.has(alice.userID, chA) {
+	if h.hub.voiceHub.reg.voiceGrace.has(alice.userID, chA) {
 		t.Fatalf("the parked entry survived inheritance")
 	}
 	h.leave(alice)
@@ -983,7 +983,7 @@ func TestVoiceMembership_GraceWindowIncompleteJoinsNotParked(t *testing.T) {
 	row, _ := h.db.GetVoiceState(context.Background(), alice.userID)
 	alice.c.setVoiceStateForHarness(chA, row.JoinedAt) // committed, not completed
 	h.disconnect(alice, true)
-	if h.hub.voiceReg.voiceGrace.has(alice.userID, chA) {
+	if h.hub.voiceHub.reg.voiceGrace.has(alice.userID, chA) {
 		t.Fatalf("an incomplete join was parked in the grace window")
 	}
 	if row, err := h.db.GetVoiceState(context.Background(), alice.userID); err != nil || row != nil {
@@ -1035,7 +1035,7 @@ func TestVoiceMembership_GraceWindowHandshakeFailure(t *testing.T) {
 	h.hub.unregisterFailedHandshake(ctx, alice.c)
 	alice.c = nil
 	h.check()
-	if !h.hub.voiceReg.voiceGrace.has(alice.userID, chA) {
+	if !h.hub.voiceHub.reg.voiceGrace.has(alice.userID, chA) {
 		t.Fatalf("a failed resume handshake did not park the inherited call")
 	}
 
@@ -1049,7 +1049,7 @@ func TestVoiceMembership_GraceWindowHandshakeFailure(t *testing.T) {
 	}
 	alice.c = nil
 	h.check()
-	if h.hub.voiceReg.voiceGrace.has(alice.userID, chA) {
+	if h.hub.voiceHub.reg.voiceGrace.has(alice.userID, chA) {
 		t.Fatalf("a session revoked during the handshake parked the call")
 	}
 	if row, err := h.db.GetVoiceState(ctx, alice.userID); err != nil || row != nil {
@@ -1077,7 +1077,7 @@ func TestVoiceMembership_GraceWindowConcurrentEvictNotParked(t *testing.T) {
 	h.hub.leaveVoiceOnDisconnect(ctx, c, voiceLeaveReasonDisconnect)
 	alice.c = nil
 	h.check()
-	if h.hub.voiceReg.voiceGrace.get(alice.userID) != nil {
+	if h.hub.voiceHub.reg.voiceGrace.get(alice.userID) != nil {
 		t.Fatalf("a membership already evicted was parked")
 	}
 }
@@ -1109,14 +1109,14 @@ func TestVoiceMembership_GraceWindowTerminalKickEjects(t *testing.T) {
 			h.check()
 
 			for _, m := range []*vmMember{alice, bob} {
-				if h.hub.voiceReg.voiceGrace.has(m.userID, chA) {
+				if h.hub.voiceHub.reg.voiceGrace.has(m.userID, chA) {
 					t.Fatalf("%s: a terminal kick parked the membership", m.name)
 				}
 				if row, err := h.db.GetVoiceState(context.Background(), m.userID); err != nil || row != nil {
 					t.Fatalf("%s: a terminal kick left a row: row=%v err=%v", m.name, row, err)
 				}
 			}
-			if !h.hub.voiceReg.voiceGrace.has(carol.userID, chA) {
+			if !h.hub.voiceHub.reg.voiceGrace.has(carol.userID, chA) {
 				t.Fatalf("an ordinary drop was not parked")
 			}
 		})
@@ -1164,7 +1164,7 @@ func TestVoiceMembership_GraceWindowRelaunchWithinWindow(t *testing.T) {
 	h.disconnect(alice, true)
 	h.sfu.remove(RoomName(chA), participantIdentity(alice.userID, token))
 	h.hub.HandleWebhookParticipantLeftWithContextForTest(context.Background(), alice.userID, chA, token)
-	if h.hub.voiceReg.voiceGrace.has(alice.userID, chA) {
+	if h.hub.voiceHub.reg.voiceGrace.has(alice.userID, chA) {
 		t.Fatalf("participant_left kept a parked window over a deleted row")
 	}
 	h.check()
@@ -1173,7 +1173,7 @@ func TestVoiceMembership_GraceWindowRelaunchWithinWindow(t *testing.T) {
 	if !h.join(alice, chA) {
 		t.Fatalf("rejoin after relaunch did not complete")
 	}
-	if h.hub.voiceReg.voiceGrace.get(alice.userID) != nil {
+	if h.hub.voiceHub.reg.voiceGrace.get(alice.userID) != nil {
 		t.Fatalf("a parked window survived the relaunch")
 	}
 	h.leave(alice)
@@ -1192,7 +1192,7 @@ func TestVoiceMembership_GraceWindowFreshConnectCancels(t *testing.T) {
 	h.join(alice, chA)
 	h.disconnect(alice, true)
 	h.connect(alice)
-	if h.hub.voiceReg.voiceGrace.get(alice.userID) != nil {
+	if h.hub.voiceHub.reg.voiceGrace.get(alice.userID) != nil {
 		t.Fatalf("a fresh connect left the parked window running")
 	}
 }

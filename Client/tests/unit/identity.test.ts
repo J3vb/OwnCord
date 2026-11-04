@@ -79,6 +79,26 @@ beforeEach(() => {
   resetIdentityKeyPairCache();
 });
 
+/** A keyring that returns whatever identity key was last saved, or nothing before the first save. */
+function mockRoundTrippingKeyring(): void {
+  let savedBlob: string | undefined;
+  invokeMock.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+    if (cmd === "load_identity_key") return Promise.resolve(savedBlob ?? null);
+    if (cmd === "save_identity_key") {
+      savedBlob = args!.key as string;
+      return Promise.resolve(undefined);
+    }
+    return Promise.resolve(undefined);
+  });
+}
+
+function mockEmptyKeyring(): void {
+  invokeMock.mockImplementation((cmd: string) => {
+    if (cmd === "load_identity_key") return Promise.resolve(null);
+    return Promise.resolve(undefined);
+  });
+}
+
 describe("identity keyring wrappers", () => {
   it("saveIdentityKey invokes save_identity_key with { host, key }", async () => {
     invokeMock.mockResolvedValue(undefined);
@@ -235,10 +255,7 @@ describe("identity pin wrappers", () => {
 
 describe("getOrCreateIdentityKeyPair", () => {
   it("generates + saves a fresh keypair on first login (nothing stored)", async () => {
-    invokeMock.mockImplementation((cmd: string) => {
-      if (cmd === "load_identity_key") return Promise.resolve(null);
-      return Promise.resolve(undefined);
-    });
+    mockEmptyKeyring();
 
     const kp = await getOrCreateIdentityKeyPair("chat.example", 1);
     expect(kp.privateKey).toBeDefined();
@@ -301,10 +318,7 @@ describe("getOrCreateIdentityKeyPair", () => {
     // session (signs announces with the private half) each generated their own
     // keypair here — so the published key was never the key that signed, and
     // peers rejected every announce as a forged signature.
-    invokeMock.mockImplementation((cmd: string) => {
-      if (cmd === "load_identity_key") return Promise.resolve(null);
-      return Promise.resolve(undefined);
-    });
+    mockEmptyKeyring();
 
     const [publishPair, signingPair] = await Promise.all([
       getOrCreateIdentityKeyPair("chat.example", 1),
@@ -319,20 +333,14 @@ describe("getOrCreateIdentityKeyPair", () => {
   });
 
   it("keeps the memo per host", async () => {
-    invokeMock.mockImplementation((cmd: string) => {
-      if (cmd === "load_identity_key") return Promise.resolve(null);
-      return Promise.resolve(undefined);
-    });
+    mockEmptyKeyring();
     const a = await getOrCreateIdentityKeyPair("chat.example", 1);
     const b = await getOrCreateIdentityKeyPair("other.example", 1);
     expect(await exportPublicKey(b.publicKey)).not.toBe(await exportPublicKey(a.publicKey));
   });
 
   it("keeps the memo per user id, not just per host — two accounts on the same host never share an identity keypair", async () => {
-    invokeMock.mockImplementation((cmd: string) => {
-      if (cmd === "load_identity_key") return Promise.resolve(null);
-      return Promise.resolve(undefined);
-    });
+    mockEmptyKeyring();
     const userA = await getOrCreateIdentityKeyPair("chat.example", 1);
     const userB = await getOrCreateIdentityKeyPair("chat.example", 2);
     expect(await exportPublicKey(userB.publicKey)).not.toBe(await exportPublicKey(userA.publicKey));
@@ -436,15 +444,7 @@ describe("getOrCreateIdentityKeyPair", () => {
   });
 
   it("stays quiet when the store round-trips the key", async () => {
-    let savedBlob: string | undefined;
-    invokeMock.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
-      if (cmd === "load_identity_key") return Promise.resolve(savedBlob ?? null);
-      if (cmd === "save_identity_key") {
-        savedBlob = args!.key as string;
-        return Promise.resolve(undefined);
-      }
-      return Promise.resolve(undefined);
-    });
+    mockRoundTrippingKeyring();
 
     await getOrCreateIdentityKeyPair("chat.example", 1);
 
@@ -495,10 +495,7 @@ describe("ensureIdentityKeyPublished (login/ready publish flow)", () => {
 
   it("publishes username + identity key when the server copy is absent", async () => {
     // First-login keyring: nothing stored → a fresh keypair is generated.
-    invokeMock.mockImplementation((cmd: string) => {
-      if (cmd === "load_identity_key") return Promise.resolve(null);
-      return Promise.resolve(undefined);
-    });
+    mockEmptyKeyring();
     const updateProfile = vi.fn().mockResolvedValue({});
 
     const published = await ensureIdentityKeyPublished("chat.example", "alex", null, updateProfile);
@@ -517,15 +514,7 @@ describe("ensureIdentityKeyPublished (login/ready publish flow)", () => {
 
   it("no-ops when the server copy already matches the local key (idempotent)", async () => {
     // Keyring persists the generated blob across calls → same public key.
-    let savedBlob: string | undefined;
-    invokeMock.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
-      if (cmd === "load_identity_key") return Promise.resolve(savedBlob ?? null);
-      if (cmd === "save_identity_key") {
-        savedBlob = args!.key as string;
-        return Promise.resolve(undefined);
-      }
-      return Promise.resolve(undefined);
-    });
+    mockRoundTrippingKeyring();
 
     const first = vi.fn().mockResolvedValue({});
     await ensureIdentityKeyPublished("chat.example", "alex", null, first);
@@ -554,10 +543,7 @@ describe("ensureIdentityKeyPublished (login/ready publish flow)", () => {
   });
 
   it("swallows a failing profile update (fire-and-forget, never throws)", async () => {
-    invokeMock.mockImplementation((cmd: string) => {
-      if (cmd === "load_identity_key") return Promise.resolve(null);
-      return Promise.resolve(undefined);
-    });
+    mockEmptyKeyring();
     const updateProfile = vi.fn().mockRejectedValue(new Error("network down"));
     await expect(
       ensureIdentityKeyPublished("chat.example", "alex", null, updateProfile),
@@ -576,10 +562,7 @@ describe("ensureIdentityKeyPublished (login/ready publish flow)", () => {
     // keypair under `host:<realId>`, so the published key and the announce
     // signing key permanently disagree — a false MITM warning for every peer.
     authStore.setState((prev) => ({ ...prev, user: null }));
-    invokeMock.mockImplementation((cmd: string) => {
-      if (cmd === "load_identity_key") return Promise.resolve(null);
-      return Promise.resolve(undefined);
-    });
+    mockEmptyKeyring();
     const updateProfile = vi.fn().mockResolvedValue({});
 
     const published = await ensureIdentityKeyPublished("chat.example", "alex", null, updateProfile);

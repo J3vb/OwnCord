@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
+import { createDeferred as deferred } from "../helpers/deferred";
 import {
   createConfirmModal,
   type ConfirmModalOptions,
@@ -13,20 +14,6 @@ const flush = async (): Promise<void> => {
 const escape = (): void => {
   document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
 };
-
-function deferred(): {
-  promise: Promise<void>;
-  resolve: () => void;
-  reject: (e: unknown) => void;
-} {
-  let resolve!: () => void;
-  let reject!: (e: unknown) => void;
-  const promise = new Promise<void>((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
-}
 
 const opened: { close(): void }[] = [];
 

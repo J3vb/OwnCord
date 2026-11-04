@@ -2,11 +2,15 @@
  * The voice widget loads when the user is first in voice (O-6b). Each test
  * builds a fresh module graph so the widget's import can be held open.
  */
-import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
+import * as mocks from "../helpers/sidebarAreaMocks";
+import { defaultSidebarAreaOpts } from "../helpers/sidebarAreaOpts";
 import * as voiceSession from "../helpers/voiceSessionMock";
+import { makeGate, type ChunkGate } from "../helpers/chunkGate";
 
 const h = vi.hoisted(() => ({
-  gate: null as null | { promise: Promise<void>; open: () => void; fail: () => void },
+  gate: null as null | ChunkGate,
   loads: { value: 0 },
 }));
 
@@ -18,175 +22,34 @@ vi.mock("@lib/voice/livekitSession", () =>
   }),
 );
 
-vi.mock("@lib/logger", () => ({
-  createLogger: () => ({
-    debug: vi.fn(),
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-  }),
-  getLogBuffer: () => [],
-  clearLogBuffer: vi.fn(),
-  addLogListener: () => () => {},
-  setLogLevel: vi.fn(),
-}));
+vi.mock("@lib/logger", () => mocks.loggerMock());
 
-vi.mock("@lib/ui/toast", () => ({
-  showToast: vi.fn(),
-}));
+vi.mock("@lib/ui/toast", () => mocks.uiToastMock());
 
-vi.mock("@lib/presence/profiles", () => ({
-  createProfileManager: vi.fn().mockReturnValue({
-    loadProfiles: vi.fn().mockResolvedValue(undefined),
-    getAll: vi.fn().mockReturnValue([]),
-    store: { getState: () => ({ profiles: [], healthStatuses: new Map() }) },
-  }),
-  createTauriBackend: vi.fn().mockReturnValue({}),
-}));
+vi.mock("@lib/presence/profiles", () => mocks.presenceProfilesMock());
 
-vi.mock("@components/ChannelSidebar", () => ({
-  createChannelSidebar: vi.fn().mockReturnValue({
-    mount: vi.fn(),
-    destroy: vi.fn(),
-  }),
-}));
+vi.mock("@components/ChannelSidebar", () => mocks.channelSidebarMock());
 
-vi.mock("@components/DmSidebar", () => ({
-  createDmSidebar: vi.fn().mockReturnValue({
-    mount: vi.fn(),
-    destroy: vi.fn(),
-    update: vi.fn(),
-  }),
-}));
+vi.mock("@components/DmSidebar", () => mocks.dmSidebarMock());
 
-vi.mock("@components/MemberList", () => ({
-  createMemberList: vi.fn().mockReturnValue({
-    mount: vi.fn(),
-    destroy: vi.fn(),
-  }),
-}));
+vi.mock("@components/MemberList", () => mocks.memberListMock());
 
-vi.mock("@components/UserBar", () => ({
-  createUserBar: vi.fn().mockReturnValue({
-    mount: vi.fn(),
-    destroy: vi.fn(),
-  }),
-}));
+vi.mock("@components/UserBar", () => mocks.userBarMock());
 
-vi.mock("@components/QuickSwitchOverlay", () => ({
-  createQuickSwitchOverlay: vi.fn().mockReturnValue({
-    mount: vi.fn(),
-    destroy: vi.fn(),
-  }),
-}));
+vi.mock("@components/QuickSwitchOverlay", () => mocks.quickSwitchOverlayMock());
 
-const mockOpenUrl = vi.fn(async (_url: string) => {});
-// The opener is the `open_external_url` command; `mockOpenUrl` records its URL.
-vi.mock("@tauri-apps/api/core", () => ({
-  invoke: async (command: string, args?: { url: string }) => {
-    if (command !== "open_external_url") throw new Error(`unexpected invoke ${command}`);
-    return mockOpenUrl(args!.url);
-  },
-}));
+vi.mock("@tauri-apps/api/core", () => mocks.apiCoreMock());
 
-vi.mock("@components/EditChannelModal", () => ({
-  createEditChannelModal: vi.fn().mockReturnValue({
-    mount: vi.fn(),
-    destroy: vi.fn(),
-  }),
-}));
+vi.mock("@components/EditChannelModal", () => mocks.editChannelModalMock());
 
-vi.mock("@components/DeleteChannelModal", () => ({
-  createDeleteChannelModal: vi.fn().mockReturnValue({
-    mount: vi.fn(),
-    destroy: vi.fn(),
-  }),
-}));
+vi.mock("@components/DeleteChannelModal", () => mocks.deleteChannelModalMock());
 
-vi.mock("../../src/pages/main-page/VoiceCallbacks", () => ({
-  createVoiceWidgetCallbacks: vi.fn().mockReturnValue({
-    onDisconnect: vi.fn(),
-    onMuteToggle: vi.fn(),
-    onDeafenToggle: vi.fn(),
-    onCameraToggle: vi.fn(),
-    onScreenshareToggle: vi.fn(),
-  }),
-  createSidebarVoiceCallbacks: vi.fn().mockReturnValue({
-    onVoiceJoin: vi.fn(),
-    onVoiceLeave: vi.fn(),
-  }),
-  createVoiceModerationCallbacks: vi.fn().mockReturnValue({
-    onServerMute: vi.fn(),
-    onServerDeafen: vi.fn(),
-    onMove: vi.fn(),
-    onDisconnect: vi.fn(),
-  }),
-}));
+vi.mock("../../src/pages/main-page/VoiceCallbacks", () => mocks.pageVoiceCallbacksMock());
 
-vi.mock("../../src/pages/main-page/OverlayManagers", () => ({
-  createInviteManagerController: vi.fn().mockReturnValue({
-    open: vi.fn().mockResolvedValue(undefined),
-    cleanup: vi.fn(),
-  }),
-}));
-
-import type { SidebarAreaOptions } from "../../src/pages/main-page/SidebarArea";
-
-function defaultOpts(): SidebarAreaOptions {
-  return {
-    ws: {
-      send: vi.fn(),
-      close: vi.fn(),
-      on: vi.fn(() => vi.fn()),
-      off: vi.fn(),
-    } as unknown as SidebarAreaOptions["ws"],
-    api: {
-      createDm: vi.fn().mockResolvedValue({
-        channel_id: 200,
-        recipient: { id: 20, username: "Bob", avatar: "", status: "online" },
-      }),
-      closeDm: vi.fn().mockResolvedValue(undefined),
-      getInvites: vi.fn().mockResolvedValue([]),
-      createInvite: vi
-        .fn()
-        .mockResolvedValue({ code: "abc", expires_at: "", max_uses: 0, use_count: 0 }),
-      revokeInvite: vi.fn().mockResolvedValue(undefined),
-      adminCreateChannel: vi.fn().mockResolvedValue(undefined),
-      adminUpdateChannel: vi.fn().mockResolvedValue(undefined),
-      adminDeleteChannel: vi.fn().mockResolvedValue(undefined),
-      purgeMessages: vi.fn().mockResolvedValue({ channel_id: 1, ids: [3, 2], count: 2 }),
-      adminKickMember: vi.fn().mockResolvedValue(undefined),
-      adminBanMember: vi.fn().mockResolvedValue(undefined),
-      adminChangeRole: vi.fn().mockResolvedValue(undefined),
-      getConfig: vi.fn().mockReturnValue({ host: "localhost:8080" }),
-    } as unknown as SidebarAreaOptions["api"],
-    limiters: {
-      voice: { tryConsume: vi.fn().mockReturnValue(true) },
-      voiceVideo: { tryConsume: vi.fn().mockReturnValue(true) },
-    } as unknown as SidebarAreaOptions["limiters"],
-    presenceSender: {
-      send: vi.fn(),
-      rollbackRefused: vi.fn(),
-      destroy: vi.fn(),
-    },
-    getRoot: vi.fn().mockReturnValue(document.createElement("div")),
-    getToast: vi.fn().mockReturnValue({ show: vi.fn() }),
-  };
-}
+vi.mock("../../src/pages/main-page/OverlayManagers", () => mocks.pageOverlayManagersMock());
 
 type SidebarModule = typeof import("../../src/pages/main-page/SidebarArea");
 type VoiceStore = typeof import("../../src/stores/voice.store");
-
-function makeGate(): NonNullable<typeof h.gate> {
-  let open!: () => void;
-  let fail!: () => void;
-  const promise = new Promise<void>((resolve, reject) => {
-    open = resolve;
-    fail = () => reject(new Error("chunk load failed"));
-  });
-  promise.catch(() => {});
-  return { promise, open, fail };
-}
 
 describe("SidebarArea voice widget", () => {
   let container: HTMLDivElement;
@@ -200,6 +63,20 @@ describe("SidebarArea voice widget", () => {
     voice = await import("../../src/stores/voice.store");
     toast = await import("@lib/ui/toast");
   });
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => {
+      if (result !== null) {
+        for (const c of result.children) c.destroy?.();
+        for (const unsub of result.unsubscribers) unsub();
+        result = null;
+      }
+      vi.doUnmock("@components/VoiceWidget");
+    },
+  );
+
   beforeEach(() => {
     voice.resetVoiceStore();
     h.gate = makeGate();
@@ -212,21 +89,10 @@ describe("SidebarArea voice widget", () => {
       return await vi.importActual<object>("@components/VoiceWidget");
     });
     vi.mocked(toast.showToast).mockClear();
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-  afterEach(() => {
-    if (result !== null) {
-      for (const c of result.children) c.destroy?.();
-      for (const unsub of result.unsubscribers) unsub();
-      result = null;
-    }
-    container.remove();
-    vi.doUnmock("@components/VoiceWidget");
   });
 
   function build(): void {
-    result = sidebar.createSidebarArea(defaultOpts());
+    result = sidebar.createSidebarArea(defaultSidebarAreaOpts());
     container.appendChild(result.sidebarWrapper);
   }
 

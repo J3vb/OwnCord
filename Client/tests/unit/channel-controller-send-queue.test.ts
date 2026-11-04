@@ -4,6 +4,7 @@
 // run against the real messages store; only the components and the socket are
 // stand-ins.
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest";
+import * as logMock from "../helpers/loggerMock";
 
 const h = vi.hoisted(() => ({
   listOpts: { value: null as any },
@@ -13,9 +14,7 @@ const h = vi.hoisted(() => ({
   restoreDraft: vi.fn(),
 }));
 
-vi.mock("@lib/logger", () => ({
-  createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
-}));
+vi.mock("@lib/logger", () => logMock.loggerMock());
 vi.mock("@components/MessageList", () => ({
   createMessageList: vi.fn((opts: unknown) => {
     h.listOpts.value = opts;
@@ -223,6 +222,48 @@ const onSend = (
 const rows = (channelId = 42) => getChannelMessages(channelId);
 const rowByContent = (content: string, channelId = 42) =>
   rows(channelId).find((m) => m.content === content);
+
+/**
+ * Mounts a 5 s slow-mode channel, queues "files" behind a held upload, sends
+ * "quick" (accepted, so the window opens) and releases the upload: only "quick"
+ * has gone out when this returns, with fake timers on.
+ */
+async function queueFilesBehindOpenSlowMode() {
+  setChannels([
+    {
+      id: 42,
+      name: "general",
+      type: "text",
+      category: null,
+      position: 0,
+      can_send: true,
+      slow_mode: 5,
+    },
+  ] as never);
+  setActiveChannel(42);
+  setRoles([{ id: 4, name: "member", color: null, permissions: 0 }]);
+  channelsStore.flush();
+  const { ctrl, chatSends, fire, opts } = setup();
+
+  ctrl.mountChannel(42, "general", "text");
+  const a = held("a.pdf");
+  onSend("files", [a.item]);
+  await flush();
+
+  // A quick text goes out and is accepted: the server's window starts.
+  onSend("quick");
+  await flush();
+  const sendIndex = opts.ws.send.mock.calls.findIndex(
+    (c) => (c[0] as { type: string }).type === "chat_send",
+  );
+  const quickCid = opts.ws.send.mock.results[sendIndex]!.value as string;
+  fire("chat_send_ok", { message_id: 5, timestamp: "" }, quickCid);
+  vi.useFakeTimers();
+  a.resolve("srv-a");
+  await vi.advanceTimersByTimeAsync(3000);
+  expect(chatSends().map((m) => m.content)).toEqual(["quick"]);
+  return { ctrl, chatSends };
+}
 
 describe("send while uploading (controller)", () => {
   // Load the chunk once, so a test that needs it ready does not race its first import.
@@ -663,39 +704,7 @@ describe("send while uploading (controller)", () => {
   });
 
   it("holds a queued send until a slow-mode window opened by a later text is over", async () => {
-    setChannels([
-      {
-        id: 42,
-        name: "general",
-        type: "text",
-        category: null,
-        position: 0,
-        can_send: true,
-        slow_mode: 5,
-      },
-    ] as never);
-    setActiveChannel(42);
-    setRoles([{ id: 4, name: "member", color: null, permissions: 0 }]);
-    channelsStore.flush();
-    const { ctrl, chatSends, fire, opts } = setup();
-
-    ctrl.mountChannel(42, "general", "text");
-    const a = held("a.pdf");
-    onSend("files", [a.item]);
-    await flush();
-
-    // A quick text goes out and is accepted: the server's window starts.
-    onSend("quick");
-    await flush();
-    const sendIndex = opts.ws.send.mock.calls.findIndex(
-      (c) => (c[0] as { type: string }).type === "chat_send",
-    );
-    const quickCid = opts.ws.send.mock.results[sendIndex]!.value as string;
-    fire("chat_send_ok", { message_id: 5, timestamp: "" }, quickCid);
-    vi.useFakeTimers();
-    a.resolve("srv-a");
-    await vi.advanceTimersByTimeAsync(3000);
-    expect(chatSends().map((m) => m.content)).toEqual(["quick"]);
+    const { ctrl, chatSends } = await queueFilesBehindOpenSlowMode();
 
     await vi.advanceTimersByTimeAsync(2500);
     expect(chatSends().map((m) => m.content)).toEqual(["quick", "files"]);
@@ -703,39 +712,7 @@ describe("send while uploading (controller)", () => {
   });
 
   it("stops holding a queued send when slow mode is turned off", async () => {
-    setChannels([
-      {
-        id: 42,
-        name: "general",
-        type: "text",
-        category: null,
-        position: 0,
-        can_send: true,
-        slow_mode: 5,
-      },
-    ] as never);
-    setActiveChannel(42);
-    setRoles([{ id: 4, name: "member", color: null, permissions: 0 }]);
-    channelsStore.flush();
-    const { ctrl, chatSends, fire, opts } = setup();
-
-    ctrl.mountChannel(42, "general", "text");
-    const a = held("a.pdf");
-    onSend("files", [a.item]);
-    await flush();
-
-    // A quick text goes out and is accepted: the server's window starts.
-    onSend("quick");
-    await flush();
-    const sendIndex = opts.ws.send.mock.calls.findIndex(
-      (c) => (c[0] as { type: string }).type === "chat_send",
-    );
-    const quickCid = opts.ws.send.mock.results[sendIndex]!.value as string;
-    fire("chat_send_ok", { message_id: 5, timestamp: "" }, quickCid);
-    vi.useFakeTimers();
-    a.resolve("srv-a");
-    await vi.advanceTimersByTimeAsync(3000);
-    expect(chatSends().map((m) => m.content)).toEqual(["quick"]);
+    const { ctrl, chatSends } = await queueFilesBehindOpenSlowMode();
 
     setChannels([
       {

@@ -19,6 +19,7 @@ describe("browser platform registry", () => {
         "appMetadata",
         "appProcess",
         "autostart",
+        "callService",
         "credentials",
         "deepLinks",
         "devTools",
@@ -30,6 +31,7 @@ describe("browser platform registry", () => {
         "identity",
         "logFiles",
         "mediaDetector",
+        "nativeFiles",
         "nativeProxies",
         "nativeVoice",
         "notifier",
@@ -37,6 +39,7 @@ describe("browser platform registry", () => {
         "pushToTalk",
         "serverScope",
         "settings",
+        "shareSheet",
         "socket",
         "systemIdle",
         "trayStatus",
@@ -161,6 +164,10 @@ describe("browser platform registry", () => {
     expect(b.mediaDetector.available).toBe(false);
     expect(await b.mediaDetector.detect({ hidden: [] })).toEqual({ state: "none" });
     expect(() => b.trayStatus.onStatusChange(() => undefined)()).not.toThrow();
+    expect(b.callService.update({ active: true, camera: true })).toBeUndefined();
+    // No share sheet in a tab: Share is not offered, and a call refuses.
+    expect(b.shareSheet.available).toBe(false);
+    await expect(b.shareSheet.shareText("x")).rejects.toThrow();
 
     // The four contracts a Settings control sits on say they are unavailable.
     expect(b.updater.available).toBe(false);
@@ -205,6 +212,7 @@ describe("browser platform registry", () => {
     await expect(b.notifier.showMessage("t", "b", target)).resolves.toBeUndefined();
     await expect(b.notifier.showCall("t", "b", target)).resolves.toBeUndefined();
     await expect(b.notifier.clearCall(1)).resolves.toBeUndefined();
+    await expect(b.notifier.clearMessages(1)).resolves.toBeUndefined();
     expect(() => b.notifier.onMessageActivated(() => undefined)()).not.toThrow();
     await expect(b.notifier.flashTaskbar()).resolves.toBeUndefined();
     await expect(b.notifier.requestAttention()).resolves.toBeUndefined();
@@ -244,6 +252,7 @@ describe("browser platform registry", () => {
     const cameraOptions = { ...publish };
     const refusals: readonly (() => Promise<unknown>)[] = [
       () => v.setRoomKey("k"),
+      () => v.useKeySlot(1),
       () => v.clearRoomKey(),
       () => v.connect("wss://x", "t", audio),
       () => v.disconnect(1),

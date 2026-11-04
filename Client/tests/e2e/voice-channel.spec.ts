@@ -8,6 +8,7 @@ import {
   mockTauriFullSessionWithVoice,
   navigateToMainPage,
   joinVoiceChannelByName,
+  expectUserBarToggle,
 } from "./helpers";
 
 test.describe("Voice Channel Items", () => {
@@ -78,25 +79,14 @@ test.describe("Voice Channel Items", () => {
     await joinVoiceChannelByName(page);
     await expect(page.locator(".vw-controls")).toBeVisible({ timeout: 5000 });
 
-    const muteBtn = page.locator(".user-bar button[aria-label='Mute']");
-    const hadActive = await muteBtn.evaluate((el) => el.classList.contains("active-ctrl"));
-    await muteBtn.click();
-
-    // Button should toggle its active-ctrl class
-    const hasActive = await muteBtn.evaluate((el) => el.classList.contains("active-ctrl"));
-    expect(hasActive).not.toBe(hadActive);
+    await expectUserBarToggle(page, "Mute");
   });
 
   test("deafen button toggles active state on click", async ({ page }) => {
     await joinVoiceChannelByName(page);
     await expect(page.locator(".vw-controls")).toBeVisible({ timeout: 5000 });
 
-    const deafenBtn = page.locator(".user-bar button[aria-label='Deafen']");
-    const hadActive = await deafenBtn.evaluate((el) => el.classList.contains("active-ctrl"));
-    await deafenBtn.click();
-
-    const hasActive = await deafenBtn.evaluate((el) => el.classList.contains("active-ctrl"));
-    expect(hasActive).not.toBe(hadActive);
+    await expectUserBarToggle(page, "Deafen");
   });
 
   test("all five voice control buttons are present", async ({ page }) => {

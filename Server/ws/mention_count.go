@@ -2,8 +2,10 @@ package ws
 
 import (
 	"context"
+	"log/slog"
+	"time"
 
-	"github.com/J3vb/OwnCord/Server/permissions"
+	"github.com/J3vb/OwnCord/Server/service"
 )
 
 // mentionCountPayload is the mention_count frame's payload: targeted
@@ -22,16 +24,23 @@ func buildMentionCount(channelID, count int64) []byte {
 	}})
 }
 
+var _ service.MentionCountBatcher = (*Hub)(nil)
+
+// mentionAudienceTimeout bounds the channel and permission reads one badge
+// preparation makes, so a stalled reader pool cannot hold the caller (which may
+// hold a channel's mention emit lock) without end.
+const mentionAudienceTimeout = 5 * time.Second
+
 // NotifyMentionCount delivers a live mention_count frame to userID, satisfying
 // service.MentionCountNotifier. Targeted and unsequenced (SendToUserLow): a
 // disconnected reader recovers the authoritative count on their next ready,
 // so a missed frame costs nothing — exactly the posture of
 // NotifyAppealStatus/NotifyModAction. The count is the sender-side total, not
 // a delta, so a lost or duplicated frame still converges. The service holds
-// one lock across every mention write and this call, so the frames a reader
-// receives arrive in the order the server changed the total (see
-// service.reverseMentionCounts): the last frame always carries the latest
-// committed total, never an overtaken one.
+// the channel's mention emit lock across every mention write and the frame, so
+// the frames a reader receives arrive in the order the server changed the
+// total (see service.reverseMentionCounts): the last frame always carries the
+// latest committed total, never an overtaken one.
 //
 // The frame is skipped when the reader cannot currently see the channel
 // (CanViewChannel: channel READ_MESSAGES with both override layers, or DM
@@ -40,54 +49,109 @@ func buildMentionCount(channelID, count int64) []byte {
 // a badge update for a channel their sidebar no longer lists. The stored count
 // is still corrected; only the live frame is withheld.
 func (h *Hub) NotifyMentionCount(userID, channelID, count int64) {
-	conns := h.clientsOf(userID)
+	if len(h.clientsOf(userID)) == 0 {
+		return
+	}
+	h.PrepareMentionCounts(context.Background(), channelID, []int64{userID})(userID, count)
+}
+
+// PrepareMentionCounts satisfies service.MentionCountBatcher: it resolves, once
+// per flush, which of userIDs may see channelID (the NotifyMentionCount rules)
+// and returns the sender the service calls under the channel's emit lock. The
+// channel is read once, not once per reader and connection, and only connected
+// candidates get a permission check. The verdict is as of the preparation, not
+// the send: a reader whose access is revoked in between can still get this one
+// frame, which names only the channel and a count, and their next ready
+// reconciles it. The sender takes a reader's connections when it runs; a reader
+// the preparation did not cover (not connected then) is checked at send time
+// instead. Call the sender on the goroutine that prepared it (or after a
+// happens-before such as the emit lock): it fills its channel read lazily.
+func (h *Hub) PrepareMentionCounts(ctx context.Context, channelID int64, userIDs []int64) func(userID, count int64) {
+	a := &mentionAudience{h: h, channelID: channelID}
+	if h.db == nil {
+		return a.send
+	}
+	ctx, cancel := context.WithTimeout(ctx, mentionAudienceTimeout)
+	defer cancel()
+	for _, uid := range userIDs {
+		if len(h.clientsOf(uid)) == 0 {
+			continue
+		}
+		if !a.loadChannel(ctx) {
+			break
+		}
+		if a.visible == nil {
+			a.visible = make(map[int64]bool)
+		}
+		a.visible[uid] = a.see(ctx, uid)
+	}
+	if ctx.Err() != nil {
+		// The budget ran out, so later readers' lookups failed and they are withheld.
+		withheld := 0
+		for _, ok := range a.visible {
+			if !ok {
+				withheld++
+			}
+		}
+		slog.Warn("ws: mention badge audience ran out of time, withholding live badges",
+			"channel_id", channelID, "withheld", withheld)
+	}
+	return a.send
+}
+
+// mentionAudience is one prepared badge fan-out for a channel.
+type mentionAudience struct {
+	h         *Hub
+	channelID int64
+	// loaded is set once the channel read ran; see is nil when it failed, which
+	// sends nothing (fails closed).
+	loaded bool
+	// see reports whether a reader may currently see the loaded channel.
+	see func(ctx context.Context, userID int64) bool
+	// forumScoped withholds the frame from sockets without the forums feature.
+	forumScoped bool
+	// visible holds the verdict for each reader prepared ahead of the send.
+	visible map[int64]bool
+}
+
+// loadChannel reads the channel once; false when it is missing or unreadable.
+func (a *mentionAudience) loadChannel(ctx context.Context) bool {
+	if !a.loaded {
+		a.loaded = true
+		ch, err := a.h.readers.Visibility.GetChannel(ctx, a.channelID)
+		if err == nil && ch != nil {
+			a.see = func(ctx context.Context, userID int64) bool { return a.h.canSeeLoadedChannel(ctx, userID, ch) }
+			a.forumScoped = isForumScoped(ctx, a.h.readers.Visibility, ch)
+		}
+	}
+	return a.see != nil
+}
+
+// send delivers userID's frame to each of their live connections that may see it.
+func (a *mentionAudience) send(userID, count int64) {
+	conns := a.h.clientsOf(userID)
 	if len(conns) == 0 {
 		return
 	}
-	if !h.canSeeChannelForMentionCount(userID, channelID) {
+	if a.h.db != nil && !a.mayReceive(userID) {
 		return
 	}
-	frame := buildMentionCount(channelID, count)
+	frame := buildMentionCount(a.channelID, count)
 	for _, c := range conns {
-		if h.db != nil && h.withholdForumPostBadge(c, channelID) {
+		if a.forumScoped && !c.features.forums {
 			continue
 		}
 		c.sendLowMsg(frame)
 	}
 }
 
-// canSeeChannelForMentionCount reports whether userID may currently see
-// channelID, using the same CanViewChannel predicate every channel-visibility
-// path resolves. Fails closed on a channel or subject lookup error. A hub with
-// no database (the bare test fixture) has nothing to resolve against and keeps
-// the pre-existing delivery behavior.
-func (h *Hub) canSeeChannelForMentionCount(userID, channelID int64) bool {
-	if h.db == nil {
-		return true
+// mayReceive is the prepared verdict for userID, or a fresh check for a reader
+// who connected after the preparation.
+func (a *mentionAudience) mayReceive(userID int64) bool {
+	if ok, prepared := a.visible[userID]; prepared {
+		return ok
 	}
-	ctx := context.Background()
-	ch, err := h.readers.Visibility.GetChannel(ctx, channelID)
-	if err != nil || ch == nil {
-		return false
-	}
-	sub, err := channelSubject(ctx, h.readers.Dispatch, h.permChecker, h.perms, userID, ch, false)
-	if err != nil {
-		return false
-	}
-	return permissions.CanViewChannel(sub) == nil
-}
-
-// withholdForumPostBadge reports whether channelID is a forum post and the live
-// socket c did not declare the forums feature: such a client does not know
-// the post, so the live badge frame is withheld (the stored count is not).
-func (h *Hub) withholdForumPostBadge(c *Client, channelID int64) bool {
-	if c == nil || c.features.forums {
-		return false
-	}
-	ctx := context.Background()
-	ch, err := h.readers.Visibility.GetChannel(ctx, channelID)
-	if err != nil {
-		return true
-	}
-	return withholdsForumPost(ctx, h.readers.Visibility, c, ch)
+	ctx, cancel := context.WithTimeout(context.Background(), mentionAudienceTimeout)
+	defer cancel()
+	return a.loadChannel(ctx) && a.see(ctx, userID)
 }

@@ -35,6 +35,7 @@ import type { MessageController } from "./MessageController";
 import { createReactionController } from "./ReactionController";
 import { messagingText } from "../../i18n/messaging";
 import { createPaneResize } from "../../features/panes/paneResize";
+import { isPhoneLayout } from "@lib/ui/bottomSheet";
 
 const log = createLogger("thread-panel-host");
 
@@ -143,7 +144,7 @@ export function createThreadPanelHost(options: ThreadPanelHostOptions): ThreadPa
 
   function open(thread: ThreadInfo, back?: () => HTMLElement | null): void {
     if (openId === thread.id) {
-      panel?.focusComposer();
+      if (!isPhoneLayout()) panel?.focusComposer();
       return;
     }
     // A thread deleted under us stays deleted; and what a live frame told us
@@ -186,7 +187,8 @@ export function createThreadPanelHost(options: ThreadPanelHostOptions): ThreadPa
         });
         panel = next;
         next.mount(slot);
-        next.focusComposer();
+        // On a phone the keyboard waits for a tap on the text box.
+        if (!isPhoneLayout()) next.focusComposer();
       },
       (err: unknown) => {
         log.error("Thread panel failed to load", { error: String(err) });

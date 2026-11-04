@@ -17,6 +17,7 @@ func init() {
 		"handleVoiceJoin: stale voice state persists after leave, aborting switch":                        "handlevoicejoin_stale_voice_state_persists_after_leave",
 		"voice reconcile: ListRooms failed, checking rooms with rows only":                                "voice_reconcile_listrooms_failed",
 		"voice removed watch: ListParticipants failed, retrying next tick":                                "voice_removed_watch_listparticipants_failed",
+		"voice resume check: ListParticipants failed, retrying next tick":                                 "voice_resume_check_listparticipants_failed",
 		"voice removed watch: reading voice state failed, retrying next tick":                             "voice_removed_watch_read_voice_state_failed",
 		"ws voiceModTarget owner movable setting":                                                         "ws_voicemodtarget_owner_movable_setting",
 		"ws voice_join: channel password grant lookup failed, denying":                                    "ws_voice_join_password_grant_lookup_failed",
@@ -37,5 +38,10 @@ func init() {
 		"ws auth: recording the session identity key failed":                                              "ws_auth_record_session_identity_key_failed",
 		"ws voice_e2ee_announce: identity_public_key ignored, not a string":                               "ws_voice_e2ee_announce_identity_key_ignored_not_string",
 		"ws voice_e2ee_announce: identity_public_key ignored, invalid":                                    "ws_voice_e2ee_announce_identity_key_ignored_invalid",
+		"lkstats: LiveKit stats page not reachable":                                                       "lkstats_livekit_stats_not_reachable",
+		"lkstats: LiveKit stats page has no LiveKit metrics":                                              "lkstats_livekit_stats_not_set_up",
+		"lkstats: built-in LiveKit has no running process":                                                "lkstats_builtin_livekit_not_running",
+		"config: voice.livekit_metrics_url is not an http(s) URL":                                         "config_livekit_metrics_url_invalid",
+		"livekit stats sampler did not stop before the close budget ran out":                              "livekit_stats_sampler_stop_timeout",
 	})
 }

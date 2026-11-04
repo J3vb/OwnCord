@@ -1,6 +1,14 @@
+import { afterEach, beforeEach, vi } from "vitest";
 import { LocalAudioTrack, Track } from "livekit-client";
 import type { MicProcessor } from "../../src/lib/voice/micProcessor";
-import { FakeAudioContext, FakeAudioWorkletNode, fakeMediaStreamTrack } from "./fakeAudioContext";
+import {
+  FakeAudioContext,
+  FakeAudioWorkletNode,
+  FakeMediaStream,
+  fakeMediaStreamTrack,
+  installFakeAudio,
+} from "./fakeAudioContext";
+import { logs, prefs } from "./audioPipelineMocks";
 
 export function micTrack(): LocalAudioTrack {
   const track = new LocalAudioTrack(fakeMediaStreamTrack("mic"), undefined, false);
@@ -29,3 +37,28 @@ export function roomWith(track: LocalAudioTrack | undefined) {
 
 export const rnnoise = () =>
   FakeAudioWorkletNode.instances.find((w) => w.name === "rnnoise-processor");
+
+/** Registers the hooks that give a pipeline suite fake audio, a fake microphone and clean prefs. */
+export function useAudioPipelineEnv(): void {
+  beforeEach(() => {
+    prefs.clear();
+    for (const fn of Object.values(logs)) fn.mockClear();
+    installFakeAudio();
+    FakeAudioWorkletNode.instances = [];
+    vi.stubGlobal("AudioWorkletNode", FakeAudioWorkletNode);
+    vi.stubGlobal("navigator", {
+      ...navigator,
+      mediaDevices: {
+        getUserMedia: vi.fn(async () => new FakeMediaStream([fakeMediaStreamTrack("mic-2")])),
+        enumerateDevices: vi.fn(async () => []),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      },
+    });
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+}

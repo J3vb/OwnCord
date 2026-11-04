@@ -46,6 +46,8 @@ You start the server, give your friends an invite code, and that is it.
 | Open ports on my router myself          | [docs/port-forwarding.md](docs/port-forwarding.md)           |
 | Install the desktop app on Linux        | [docs/linux-install.md](docs/linux-install.md)               |
 | Change a server setting                 | [docs/server-configuration.md](docs/server-configuration.md) |
+| Keep my server and members safe         | [docs/security.md](docs/security.md)                         |
+| Know how many people one server holds   | [docs/capacity.md](docs/capacity.md)                         |
 | Know what the beta does not do          | [docs/known-limitations.md](docs/known-limitations.md)       |
 | Build it myself or contribute           | [docs/contributing.md](docs/contributing.md)                 |
 | See how it is built                     | [docs/architecture/](docs/architecture/README.md)            |
@@ -145,8 +147,8 @@ Security policy: [SECURITY.md](SECURITY.md) and [docs/security.md](docs/security
 ## Contributing
 
 Branch from `dev` and open a pull request into `dev`. Setup, building from
-source, running the checks and the release procedure are in
-[docs/contributing.md](docs/contributing.md).
+source and running the checks are in [docs/contributing.md](docs/contributing.md).
+Cutting a release is in [docs/maintainers.md](docs/maintainers.md).
 
 ## License
 

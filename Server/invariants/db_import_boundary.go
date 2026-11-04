@@ -109,7 +109,7 @@ var DBImportAllow = map[string]DBImportEntry{
 	"api/profile_handler.go":          {Disposition: "adapter", Note: "User/Session types in the profile and session response shapes; the services own the calls"},
 	"api/push_handler.go":             {Disposition: "adapter", Note: "db.User type on the context key only; PushService owns every call"},
 	"api/report_handler.go":           {Disposition: "adapter", Note: "db.User from the auth context only; ReportService owns every call"},
-	"api/router.go":                   {Disposition: "boundary", Note: "health probe (PingRead, SQLDb, SQLReaderDB); hub construction left in B3-3", Calls: calls{"PingRead": 1, "SQLDb": 1, "SQLReaderDB": 1}, Hands: calls{"admin.NewHandler": 1}},
+	"api/router.go":                   {Disposition: "boundary", Note: "health probe (PingRead, SQLDb, SQLReaderDB) and the System health page's database card (HealthStats); hub construction left in B3-3", Calls: calls{"HealthStats": 1, "PingRead": 1, "SQLDb": 1, "SQLReaderDB": 1}, Hands: calls{"admin.NewHandler": 1}},
 	// ── auth ──────────────────────────────────────────────────────────────
 	"auth/helpers.go": {Disposition: "adapter", Note: "db.User type in a helper signature"},
 	"auth/resolve.go": {Disposition: "adapter", Note: "Session/APIToken/Role/User types; resolution is injected"},
@@ -129,6 +129,7 @@ var DBImportAllow = map[string]DBImportEntry{
 	"internal/app/maintenance.go": {Disposition: "boundary", Note: "periodic worker: expired sessions, backups, orphan attachments", Calls: calls{"CleanupExpiredSecondFactorState": 1, "DeleteExpiredMessageDeliveryReceipts": 1, "DeleteExpiredSessions": 1, "DeleteOrphanedAttachments": 1, "FindOrphanedVoiceMutes": 1, "RetireModerationActions": 1}, Hands: calls{"admin.MaintainBackups": 1}},
 	"internal/app/persistence.go": {Disposition: "boundary", Note: "event persister, audit writer and the boot seq seed own the handle", Calls: calls{"GetMaxEventSeq": 1, "GetSetting": 1, "SetAuditWriter": 1, "SetSetting": 1, "StoreWSSeqFloorSidecar": 1, "WSSeqFloorSidecar": 1}, Hands: calls{"ws.NewEventPersister": 1, "ws.StartEventPruner": 1}},
 	"internal/app/plugins.go":     {Disposition: "boundary", Note: "passes the handle to the plugin registry as its store; no calls of its own", Hands: calls{"plugin.Config": 1}},
+	"internal/app/totp_seal.go":   {Disposition: "boundary", Note: "hands the handle to the startup pass that seals stored TOTP secrets before anything serves", Hands: calls{"service.SealLegacyTOTPSecrets": 1}},
 	"token_cli.go":                {Disposition: "boundary", Note: "the token CLI opens, migrates and closes its own handle for the bootstrap path; TokenService owns every query", Calls: calls{"Close": 1}, Hands: calls{"service.NewTokenService": 1}},
 	"restore_cli.go":              {Disposition: "boundary", Note: "the restore CLI owns the handle for the offline path: it verifies a backup, takes a pre-restore safety copy, holds the process lock and swaps the file", Calls: calls{"BackupToSafe": 1, "Close": 1}},
 	"config_cli.go":               {Disposition: "boundary", Note: "the config CLI takes the database process lock for the offline overrides reset, so it refuses while a server runs; it reads and writes no database rows"},
@@ -154,7 +155,7 @@ var DBImportAllow = map[string]DBImportEntry{
 	// ids is sequenced after the tombstones and the delete
 	// no longer holds up live delivery.
 	// Routing the delete through the EventStore seam would not be a pure
-	// refactor: h.eventStore is set only when event persistence is enabled,
+	// refactor: h.events.eventStore is set only when event persistence is enabled,
 	// while h.db is set whenever a database exists, so a purge gated on the
 	// seam would skip rows a previous enabled boot persisted — an erasure
 	// regression. The two calls stay direct and are pinned here instead, so

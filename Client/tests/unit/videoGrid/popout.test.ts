@@ -4,15 +4,14 @@ import { cascadedDeclaration, keyword } from "../../helpers/app-css";
 import { expectConsole } from "../../helpers/console";
 import { clearHost, hostAndroidApp } from "../../helpers/androidHost";
 import { registerVideoSurface } from "../../../src/lib/voice/videoSurface";
-import {
-  createVideoGrid,
-  type VideoGridComponent,
-  type TileConfig,
-} from "../../../src/components/VideoGrid";
+import { createVideoGrid, type VideoGridComponent } from "../../../src/components/VideoGrid";
 import {
   fakeStream,
   fakeStreamWithTrack,
   fakePopup,
+  SCREEN_TILE,
+  screenTileConfig,
+  tileLookups,
   makeTileConfig,
   useVideoGridHarness,
 } from "../../helpers/videoGridHarness";
@@ -22,34 +21,19 @@ vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
 
 const { mockMuteScreenshareAudio, mockSetScreenshareAudioVolume, mockShowToast } = mocks;
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
 describe("VideoGrid", () => {
   let container: HTMLDivElement;
   let grid: VideoGridComponent;
 
-  useVideoGridHarness({
-    wired: (c, g) => {
-      container = c;
-      grid = g;
-    },
-    currentGrid: () => grid,
+  const harness = useVideoGridHarness((c, g) => {
+    container = c;
+    grid = g;
   });
 
   describe("pop-out window (Discord-style)", () => {
-    const SCREEN = 2 + 1_000_000;
-    const screenCfg: TileConfig = {
-      isSelf: false,
-      audioUserId: 2,
-      isScreenshare: true,
-      name: "Otto",
-    };
-    const cell = (id: number) =>
-      container.querySelector<HTMLElement>(`.video-cell[data-user-id='${id}']`)!;
-    const control = (id: number, name: string) =>
-      cell(id).querySelector<HTMLButtonElement>(`[data-tile-control='${name}']`)!;
+    const SCREEN = SCREEN_TILE;
+    const screenCfg = screenTileConfig();
+    const { cell, control } = tileLookups(() => container);
     let popup: ReturnType<typeof fakePopup>;
     let open: ReturnType<typeof vi.fn>;
     let requestFullscreen: ReturnType<typeof vi.fn>;
@@ -446,7 +430,7 @@ describe("VideoGrid", () => {
       grid.destroy?.();
       expect(popup.win.close).toHaveBeenCalledTimes(1);
 
-      grid = createVideoGrid();
+      grid = harness.adopt(createVideoGrid());
       grid.mount(container);
       popup = fakePopup();
       grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screenCfg);

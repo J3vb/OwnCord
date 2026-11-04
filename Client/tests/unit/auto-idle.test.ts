@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
   ACTIVITY_THROTTLE_MS,
   AUTO_IDLE_DELAY_MS,
@@ -9,6 +9,7 @@ import {
 } from "@lib/presence/autoIdle";
 import { joinVoiceChannel, leaveVoiceChannel } from "@stores/voice.store";
 import { loadUserStatus, loadUserStatusOrigin, saveUserStatus } from "@lib/presence/userStatus";
+import { useFakeClockAndStorage } from "../helpers/withFakeTimers";
 
 /**
  * Auto-idle. The rule worth locking down is the narrow one: the timer may only
@@ -70,15 +71,10 @@ describe("nextAutoStatus", () => {
 describe("startAutoIdle", () => {
   let controller: AutoIdleController | null = null;
 
-  beforeEach(() => {
-    localStorage.clear();
-    vi.useFakeTimers();
-  });
-
-  afterEach(() => {
+  useFakeClockAndStorage(() => {
     controller?.destroy();
+
     controller = null;
-    vi.useRealTimers();
   });
 
   it("flips a manual Online to Idle after the delay", () => {
@@ -286,15 +282,10 @@ describe("startAutoIdle with an OS idle source", () => {
   // decides when the status goes Idle.
   let controller: AutoIdleController | null = null;
 
-  beforeEach(() => {
-    localStorage.clear();
-    vi.useFakeTimers();
-  });
-
-  afterEach(() => {
+  useFakeClockAndStorage(() => {
     controller?.destroy();
+
     controller = null;
-    vi.useRealTimers();
   });
 
   it("with the platform reporting 2 min OS idle after 10 min without DOM input, status stays Online", async () => {
@@ -481,16 +472,10 @@ describe("startAutoIdle with activity reported from a call", () => {
   // MainPage reports it through notifyActivity; the OS poll must agree.
   let controller: AutoIdleController | null = null;
 
-  beforeEach(() => {
-    localStorage.clear();
-    vi.useFakeTimers();
-  });
-
-  afterEach(() => {
+  useFakeClockAndStorage(() => {
     controller?.destroy();
     controller = null;
     leaveVoiceChannel();
-    vi.useRealTimers();
   });
 
   it("keeps a speaking user online with no input at all", () => {

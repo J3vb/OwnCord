@@ -8,13 +8,12 @@ import { test, expect } from "./fixtures";
 import {
   buildTauriMockScript,
   navigateToMainPageReady,
-  MOCK_LOGIN_RESPONSE,
-  MOCK_MESSAGES,
   MOCK_ROLES,
   MOCK_CHANNELS_WITH_CATEGORIES,
   MOCK_MEMBERS_MULTI_ROLE,
   MOCK_VOICE_STATE,
   voiceWsHandlers,
+  BASE_SESSION_ROUTES,
 } from "./helpers";
 import { Q1, findUnnamedControls, textContrast } from "./support/accessibility";
 
@@ -51,11 +50,7 @@ async function mockVoiceSession(page: Page, verdict: boolean): Promise<void> {
   await page.addInitScript(
     buildTauriMockScript({
       wrappers: [captureScript],
-      httpRoutes: [
-        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-        { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
-        { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
-      ],
+      httpRoutes: [...BASE_SESSION_ROUTES],
       simulateWsFlow: true,
       wsHandlers: voiceWsHandlers(),
       readyOverrides: {

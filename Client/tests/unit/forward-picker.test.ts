@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { makeDm } from "../helpers/dmHarness";
 import { openForwardPicker } from "../../src/components/ForwardPicker";
 import { channelsStore, setRoles, type Channel } from "../../src/stores/channels.store";
 import { authStore } from "../../src/stores/auth.store";
@@ -33,18 +34,7 @@ function channel(id: number, over: Partial<Channel> = {}): Channel {
 
 function dmChannel(channelId: number): DmChannel {
   const user = { id: 7, username: "user7", avatar: "", status: "online" };
-  return {
-    channelId,
-    recipient: user,
-    participants: [user],
-    name: "",
-    isGroup: false,
-    lastMessageId: null,
-    lastMessage: "",
-    lastMessageAt: "",
-    unreadCount: 0,
-    mentionCount: 0,
-  };
+  return makeDm({ channelId, recipient: user, participants: [user] });
 }
 
 interface Sent {

@@ -948,8 +948,8 @@ jobs:
         with:
           node-version: 26
 
-      # Root install only -- prettier is the sole dependency this job needs, and
-      # the client's install is client-check's job.
+      # Root install only -- prettier and jscpd are the dependencies this job
+      # needs, and the client's install is client-check's job.
       - name: Install root dependencies
         run: npm ci
 
@@ -976,6 +976,14 @@ jobs:
       # actionlint file lists from `git ls-files`, never a filesystem glob.
       - name: Formatting, shell and workflow gates
         run: npm run check:hygiene
+
+      # Duplicated lines in Client/tests are a shrink-only share
+      # (docs/code-style.md, "Tests"). jscpd comes from the root install above.
+      - name: Self-test the test duplication ratchet
+        run: node --test scripts/checks/check-test-duplication.test.mjs
+
+      - name: Test duplication must not grow
+        run: node scripts/checks/check-test-duplication.mjs
 
   # RL-19's second half: actionlint validates expression syntax and action
   # inputs, and has no concept of who a trigger admits, what a run can persist,

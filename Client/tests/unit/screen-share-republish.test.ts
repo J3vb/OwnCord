@@ -5,6 +5,7 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createDeferred as deferred } from "../helpers/deferred";
 import { Track } from "livekit-client";
 import type { LocalTrack, LocalVideoTrack, Room } from "livekit-client";
 import type { WsClient } from "@lib/ws";
@@ -54,17 +55,6 @@ function fakeAudio(): LocalTrack {
     mediaStreamTrack: fakeMediaStreamTrack(),
     stop: vi.fn(),
   } as unknown as LocalTrack;
-}
-
-/** A promise settled by hand. */
-function deferred(): { promise: Promise<void>; resolve: () => void; reject: (e: Error) => void } {
-  let resolve!: () => void;
-  let reject!: (e: Error) => void;
-  const promise = new Promise<void>((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
 }
 
 function rig() {
@@ -140,6 +130,28 @@ describe("republishVideo", () => {
       r.publishTrack.mock.invocationCallOrder[0]!,
     );
   });
+
+  it.each([
+    ["h264", "motion", ""],
+    ["vp8", "", "motion"],
+  ])(
+    "gives a share switched to %s its content hint before the publish",
+    async (codec, before, after) => {
+      const r = rig();
+      const { state, video } = liveShare();
+      video.mediaStreamTrack.contentHint = before;
+      let hintAtPublish: string | undefined;
+      r.publishTrack.mockImplementationOnce(async () => {
+        hintAtPublish = video.mediaStreamTrack.contentHint;
+      });
+
+      await expect(republishVideo("screen", state, r.deps, codec as "h264" | "vp8")).resolves.toBe(
+        true,
+      );
+
+      expect(hintAtPublish).toBe(after);
+    },
+  );
 
   it("marks the track again when it republishes as H.264", async () => {
     const r = rig();

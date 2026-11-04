@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { loggerMock } from "../helpers/loggerMock";
 
 // Shared mutable state read lazily by the mock factories below.
 const h = vi.hoisted(() => ({
@@ -13,14 +14,7 @@ const h = vi.hoisted(() => ({
   center: vi.fn(),
 }));
 
-vi.mock("@lib/logger", () => ({
-  createLogger: () => ({
-    debug: vi.fn(),
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-  }),
-}));
+vi.mock("@lib/logger", () => loggerMock());
 
 vi.mock("@tauri-apps/api/window", () => ({
   getCurrentWindow: () => ({

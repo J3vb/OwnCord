@@ -20,7 +20,7 @@ ARG TARGETARCH
 # before the Go sources so a code change never re-downloads it. Pinned per
 # architecture by digest and verified with sha256sum, so the build fails rather
 # than ship an unverified binary. Bump LIVEKIT_VERSION and both digests together
-# with ws.DefaultLiveKitVersion and the livekit image in docker-compose.yml
+# with livekitproc.DefaultVersion and the livekit image in docker-compose.yml
 # (digests: the release's checksums.txt; TestDockerfileBundlesPinnedLiveKit
 # pins the version match).
 ARG LIVEKIT_VERSION=1.13.11

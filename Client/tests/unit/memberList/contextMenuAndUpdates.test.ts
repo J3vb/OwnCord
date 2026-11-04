@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { useMountContainer } from "../../helpers/mountContainer";
 import "../../helpers/memberListMocks";
 import { createMemberList } from "@components/MemberList";
 import type { MemberListOptions } from "@components/MemberList";
@@ -6,18 +7,22 @@ import { membersStore, updatePresence, updateMemberRole } from "@stores/members.
 import type { Member } from "@stores/members.store";
 import { authStore } from "@stores/auth.store";
 import { channelsStore, setRoles, type Channel } from "@stores/channels.store";
-import { resetVoiceStore, updateVoiceState } from "@stores/voice.store";
+import { resetVoiceStore } from "@stores/voice.store";
+import { addVoiceUser } from "../../helpers/voiceUsers";
 import { setMemberTimeouts } from "../../../src/features/moderation/store";
 import { claimComposer } from "../../../src/features/messaging/activeComposer";
 import { Permission } from "../../../src/lib/types";
 import "@components/UserProfilePopup";
 import "@components/AdminActions";
+import { makeChannelRow } from "../../helpers/storeSeeds";
 import {
   resetStore,
   makeMember,
   setTestMembers,
   testMembers,
   defaultOpts,
+  rightClickMember,
+  topMenuLabels,
 } from "../../helpers/memberListHarness";
 
 describe("MemberList full context menu (3C-3)", () => {
@@ -53,16 +58,8 @@ describe("MemberList full context menu (3C-3)", () => {
     setTestMembers(testMembers);
     list = createMemberList({ ...defaultOpts(), ...extra });
     list.mount(container);
-    const row = container.querySelector(`[data-testid="member-${targetId}"]`) as HTMLElement;
-    row.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
-    await vi.dynamicImportSettled();
+    await rightClickMember(container, targetId);
     return document.body.querySelector<HTMLElement>(".context-menu");
-  }
-
-  function topLabels(menu: HTMLElement): string[] {
-    return Array.from(menu.children)
-      .filter((el) => el.classList.contains("context-menu__item"))
-      .map((el) => el.firstChild?.textContent ?? "");
   }
 
   const timeoutOpts = (): Partial<MemberListOptions> => ({
@@ -70,56 +67,32 @@ describe("MemberList full context menu (3C-3)", () => {
     onRemoveTimeout: vi.fn().mockResolvedValue(undefined),
   });
 
-  function makeChannel(id: number, type: Channel["type"]): Channel {
-    return {
-      id,
-      name: `ch-${id}`,
-      type,
-      category: null,
-      topic: "",
-      position: 0,
-      unreadCount: 0,
-      mentionCount: 0,
-      lastMessageId: null,
-      canSend: true,
-      slowMode: 0,
-      nsfw: false,
-      isPrivate: false,
-      voiceMaxUsers: 0,
-      voiceMaxVideo: 0,
-    };
-  }
+  const makeChannel = (id: number, type: Channel["type"]): Channel =>
+    makeChannelRow({ id, name: `ch-${id}`, type });
 
   function putInVoice(userId: number, channelId: number): void {
-    updateVoiceState({
-      channel_id: channelId,
-      user_id: userId,
-      username: `u${userId}`,
-      muted: false,
-      deafened: false,
-      speaking: false,
-      camera: false,
-      screenshare: false,
-    });
+    addVoiceUser(channelId, userId, `u${userId}`);
   }
+
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => {
+      list?.destroy?.();
+      list = null;
+      document.body.querySelectorAll(".context-menu").forEach((el) => el.remove());
+      setMemberTimeouts(undefined);
+      resetVoiceStore();
+      resetStore();
+    },
+  );
 
   beforeEach(() => {
     resetStore();
     seedRanks();
     setMemberTimeouts(undefined);
     resetVoiceStore();
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    list?.destroy?.();
-    list = null;
-    document.body.querySelectorAll(".context-menu").forEach((el) => el.remove());
-    container.remove();
-    setMemberTimeouts(undefined);
-    resetVoiceStore();
-    resetStore();
   });
 
   // (13)
@@ -127,21 +100,21 @@ describe("MemberList full context menu (3C-3)", () => {
     signInAs("Moderator");
     // Member (rank 40) is below the Moderator: Timeout is offered.
     let menu = await openMenu(4, timeoutOpts());
-    expect(topLabels(menu!)).toContain("Timeout");
+    expect(topMenuLabels(menu!)).toContain("Timeout");
     list!.destroy?.();
     menu!.remove();
 
     // Another Moderator (equal rank) is not.
     menu = await openMenu(3, timeoutOpts());
-    expect(topLabels(menu!)).not.toContain("Timeout");
-    expect(topLabels(menu!)).not.toContain("Remove Timeout");
+    expect(topMenuLabels(menu!)).not.toContain("Timeout");
+    expect(topMenuLabels(menu!)).not.toContain("Remove Timeout");
     list!.destroy?.();
     menu!.remove();
 
     // Without the permission bit, even a lower-ranked target gets neither.
     signInAs("Member");
     menu = await openMenu(5, timeoutOpts());
-    expect(topLabels(menu!)).not.toContain("Timeout");
+    expect(topMenuLabels(menu!)).not.toContain("Timeout");
   });
 
   // (14)
@@ -157,7 +130,7 @@ describe("MemberList full context menu (3C-3)", () => {
     signInAs("Moderator");
     setMemberTimeouts(entries);
     const menu = await openMenu(4, timeoutOpts());
-    const labels = topLabels(menu!).filter((l) => l === "Timeout" || l === "Remove Timeout");
+    const labels = topMenuLabels(menu!).filter((l) => l === "Timeout" || l === "Remove Timeout");
     expect(labels).toEqual([...expected]);
   });
 
@@ -184,14 +157,14 @@ describe("MemberList full context menu (3C-3)", () => {
 
     // Not in voice at all.
     let menu = await openMenu(4, { voiceModFor });
-    expect(topLabels(menu!)).not.toContain("Disconnect");
+    expect(topMenuLabels(menu!)).not.toContain("Disconnect");
     list!.destroy?.();
     menu!.remove();
 
     // In a DM call: no voice rows.
     putInVoice(4, 11);
     menu = await openMenu(4, { voiceModFor });
-    expect(topLabels(menu!)).not.toContain("Disconnect");
+    expect(topMenuLabels(menu!)).not.toContain("Disconnect");
     list!.destroy?.();
     menu!.remove();
     expect(voiceModFor).not.toHaveBeenCalled();
@@ -200,13 +173,13 @@ describe("MemberList full context menu (3C-3)", () => {
     resetVoiceStore();
     putInVoice(4, 10);
     menu = await openMenu(4);
-    expect(topLabels(menu!)).not.toContain("Disconnect");
+    expect(topMenuLabels(menu!)).not.toContain("Disconnect");
     list!.destroy?.();
     menu!.remove();
 
     // In a server voice channel with options: the three rows.
     menu = await openMenu(4, { voiceModFor });
-    expect(topLabels(menu!)).toEqual(expect.arrayContaining(voiceLabels));
+    expect(topMenuLabels(menu!)).toEqual(expect.arrayContaining(voiceLabels));
     expect(voiceModFor).toHaveBeenCalledWith(10, expect.objectContaining({ userId: 4 }));
   });
 
@@ -232,7 +205,7 @@ describe("MemberList full context menu (3C-3)", () => {
     try {
       const onMessageUser = vi.fn();
       const menu = await openMenu(4, { onMessageUser });
-      expect(topLabels(menu!)).toEqual(["Profile", "Mention", "Message", "Block"]);
+      expect(topMenuLabels(menu!)).toEqual(["Profile", "Mention", "Message", "Block"]);
       const mention = menu!.querySelector<HTMLElement>('[data-testid="member-menu-mention"]')!;
       expect(mention.getAttribute("aria-disabled")).toBeNull();
       mention.click();

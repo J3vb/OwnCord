@@ -4,9 +4,10 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as voiceSession from "../helpers/voiceSessionMock";
+import { makeGate, type ChunkGate } from "../helpers/chunkGate";
 
 const h = vi.hoisted(() => ({
-  gate: null as null | { promise: Promise<void>; open: () => void; fail: () => void },
+  gate: null as null | ChunkGate,
   loads: { value: 0 },
   calls: [] as string[],
   grids: [] as Array<Record<string, ReturnType<typeof vi.fn>>>,
@@ -37,17 +38,6 @@ import type { LazyVideoGrid } from "../../src/pages/main-page/lazyVideoGrid";
 import type { VideoGridCallbacks, TileConfig } from "../../src/components/VideoGrid";
 
 type LazyModule = typeof import("../../src/pages/main-page/lazyVideoGrid");
-
-function makeGate(): NonNullable<typeof h.gate> {
-  let open!: () => void;
-  let fail!: () => void;
-  const promise = new Promise<void>((resolve, reject) => {
-    open = resolve;
-    fail = () => reject(new Error("chunk load failed"));
-  });
-  promise.catch(() => {});
-  return { promise, open, fail };
-}
 
 function stream(): MediaStream {
   return { getTracks: () => [], getVideoTracks: () => [] } as unknown as MediaStream;

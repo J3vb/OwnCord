@@ -7,12 +7,7 @@
  */
 
 import { test, expect } from "./fixtures";
-import {
-  mockTauriFullSession,
-  navigateToMainPageReady,
-  openSettings,
-  switchSettingsTab,
-} from "./helpers";
+import { openSettings, switchSettingsTab, startFullSession } from "./helpers";
 
 // ---------------------------------------------------------------------------
 // Tests: Theme Switching
@@ -20,9 +15,7 @@ import {
 
 test.describe("Theme Persistence", () => {
   test.beforeEach(async ({ page }) => {
-    await mockTauriFullSession(page);
-    await page.goto("/");
-    await navigateToMainPageReady(page);
+    await startFullSession(page, { ready: true });
     await openSettings(page);
     await switchSettingsTab(page, "Appearance");
   });
@@ -98,9 +91,7 @@ test.describe("Theme Persistence", () => {
 
 test.describe("Accent Color Override", () => {
   test.beforeEach(async ({ page }) => {
-    await mockTauriFullSession(page);
-    await page.goto("/");
-    await navigateToMainPageReady(page);
+    await startFullSession(page, { ready: true });
     await openSettings(page);
     await switchSettingsTab(page, "Appearance");
   });
@@ -155,9 +146,7 @@ test.describe("Accent Color Override", () => {
 
 test.describe("Compact Mode", () => {
   test.beforeEach(async ({ page }) => {
-    await mockTauriFullSession(page);
-    await page.goto("/");
-    await navigateToMainPageReady(page);
+    await startFullSession(page, { ready: true });
     await openSettings(page);
     await switchSettingsTab(page, "Appearance");
   });

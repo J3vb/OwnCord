@@ -288,3 +288,24 @@ const (
 	FileLinkMaxPerCredentialForTest   = fileLinkMaxPerCredential
 	FileLinkRateLimitPerMinuteForTest = fileLinkRateLimitPerMinute
 )
+
+// SetTransferProgressTimeoutForTest shortens the transfer idle rule for the
+// test and restores it afterwards. Tests that use it must not run in parallel.
+func SetTransferProgressTimeoutForTest(t testing.TB, d time.Duration) {
+	t.Helper()
+	old := transferProgressTimeout
+	transferProgressTimeout = d
+	t.Cleanup(func() { transferProgressTimeout = old })
+}
+
+// SetLiveKitProxyDialTimeoutForTest shortens the proxy's backend dial bound and
+// returns the restore.
+func SetLiveKitProxyDialTimeoutForTest(d time.Duration) func() {
+	prev := wsProxyDialTimeout.Swap(int64(d))
+	return func() { wsProxyDialTimeout.Store(prev) }
+}
+
+var (
+	TruncateCloseReasonForTest = truncateCloseReason
+	SendableCloseCodeForTest   = sendableCloseCode
+)

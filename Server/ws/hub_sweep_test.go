@@ -14,7 +14,7 @@ import (
 // shut: while one sweep is still running, further startSweep calls for the
 // same guard must be dropped, and once it finishes the next call runs again.
 func TestStartSweep_NeverRunsConcurrentlyWithItself(t *testing.T) {
-	h := &Hub{life: context.Background()}
+	h := &Hub{lifecycle: hubLifecycle{ctx: context.Background()}}
 
 	var inFlight atomic.Bool
 	var active, maxActive, runs atomic.Int64
@@ -184,9 +184,9 @@ func TestSweepStaleVoiceStates_GhostRemovalReelectsKeyHolder(t *testing.T) {
 	// Simulate the stale-holder precondition from the finding: the ghost is
 	// still recorded as key holder (e.g. from before it dropped out of
 	// h.clients), and the survivor has not yet been elected.
-	h.keyHolderMu.Lock()
-	h.voiceKeyHolders[chID] = ghostUID
-	h.keyHolderMu.Unlock()
+	h.voiceHub.keyHolderMu.Lock()
+	h.voiceHub.keyHolders[chID] = ghostUID
+	h.voiceHub.keyHolderMu.Unlock()
 
 	h.sweepStaleVoiceStates(context.Background())
 

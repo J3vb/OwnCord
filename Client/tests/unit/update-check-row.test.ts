@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { loggerMock } from "../helpers/loggerMock";
 
 const { mockActive, mockInstall, mockInstallState } = vi.hoisted(() => ({
   mockActive: vi.fn(),
@@ -6,9 +7,7 @@ const { mockActive, mockInstall, mockInstallState } = vi.hoisted(() => ({
   mockInstallState: vi.fn(),
 }));
 
-vi.mock("@lib/logger", () => ({
-  createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
-}));
+vi.mock("@lib/logger", () => loggerMock());
 vi.mock("../../src/features/updates/updateChecker", () => ({ getActiveUpdateChecker: mockActive }));
 vi.mock("@lib/net/updater", () => ({
   downloadAndInstallUpdate: mockInstall,

@@ -1,7 +1,8 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
 
 import { createMessageList } from "@components/MessageList";
-import { messagesStore, type Message } from "@stores/messages.store";
+
 import { applyReadyCapabilities, resetServerCapabilities } from "@lib/net/serverCapabilities";
 import { resetThreadsStore } from "@stores/threads.store";
 import {
@@ -11,20 +12,10 @@ import {
   resetGateStores,
   setChannel,
   signInAs,
+  seedMessages as seed,
 } from "../helpers/message-actions-fixtures";
 import { resetMembersState } from "../helpers/storeResets";
 import "../helpers/resizeObserverStub";
-
-function seed(messages: Message[]): void {
-  messagesStore.setState(() => ({
-    messagesByChannel: new Map([[1, messages]]),
-    pendingSends: new Map(),
-    loadedChannels: new Set(),
-    hasMore: new Map(),
-    historyLoadState: new Map(),
-    detachedChannels: new Set(),
-  }));
-}
 
 describe("Create Thread in the message menu", () => {
   let container: HTMLDivElement;
@@ -40,6 +31,19 @@ describe("Create Thread in the message menu", () => {
     return [...document.querySelectorAll<HTMLElement>(".message-context-menu [role='menuitem']")];
   }
 
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => {
+      list?.destroy?.();
+      document.querySelectorAll(".context-menu").forEach((el) => el.remove());
+      resetServerCapabilities();
+      resetThreadsStore();
+      resetGateStores();
+    },
+  );
+
   beforeEach(() => {
     resetGateStores();
     signInAs("member");
@@ -47,16 +51,6 @@ describe("Create Thread in the message menu", () => {
     resetMembersState();
     applyReadyCapabilities({ threads: true });
     onCreate.mockClear();
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-  afterEach(() => {
-    list?.destroy?.();
-    container.remove();
-    document.querySelectorAll(".context-menu").forEach((el) => el.remove());
-    resetServerCapabilities();
-    resetThreadsStore();
-    resetGateStores();
   });
 
   function mount(over = {}): void {

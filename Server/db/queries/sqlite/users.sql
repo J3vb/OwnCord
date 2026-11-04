@@ -59,6 +59,15 @@ UPDATE users SET status = ?, last_seen = datetime('now') WHERE id = ?;
 -- name: UpdateUserTOTPSecret :exec
 UPDATE users SET totp_secret = ? WHERE id = ?;
 
+-- name: ListUserTOTPSecrets :many
+SELECT id, totp_secret FROM users WHERE totp_secret IS NOT NULL ORDER BY id;
+
+-- name: ReplaceUserTOTPSecret :execrows
+-- Compare-and-set: writes only while the row still holds the value read, so a
+-- concurrent enable or disable is never overwritten.
+UPDATE users SET totp_secret = sqlc.arg(new_secret)
+WHERE id = sqlc.arg(id) AND totp_secret = sqlc.arg(old_secret);
+
 -- name: UpdateUserIdentityKey :exec
 UPDATE users SET identity_public_key = ? WHERE id = ?;
 

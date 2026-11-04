@@ -486,10 +486,10 @@ func TestAuthService_DeleteAccountErasesAndBroadcasts(t *testing.T) {
 	svc.UseErasure(shared)
 	svc.UseErasure(nil) // a nil runner is ignored
 
-	if err := svc.DeleteAccount(ctx, Principal{User: user}, "wrong", "203.0.113.9"); !errors.Is(err, ErrIncorrectPassword) {
+	if err := svc.DeleteAccount(ctx, sessionPrincipal(user), "wrong", "203.0.113.9"); !errors.Is(err, ErrIncorrectPassword) {
 		t.Fatalf("wrong password = %v", err)
 	}
-	if err := svc.DeleteAccount(ctx, Principal{User: user}, "correct horse battery", "203.0.113.9"); err != nil {
+	if err := svc.DeleteAccount(ctx, sessionPrincipal(user), "correct horse battery", "203.0.113.9"); err != nil {
 		t.Fatalf("DeleteAccount: %v", err)
 	}
 	if u, _ := database.GetUserByID(ctx, uid); u != nil {
@@ -523,7 +523,7 @@ func TestAuthService_DeleteAccountLastAdminIsRefused(t *testing.T) {
 	}
 	user, _ := database.GetUserByID(ctx, uid)
 	svc := NewAuthService(database, auth.NewRateLimiter(), make([]byte, 32), nil)
-	if err := svc.DeleteAccount(ctx, Principal{User: user}, "correct horse battery", ""); !errors.Is(err, ErrLastAdmin) {
+	if err := svc.DeleteAccount(ctx, sessionPrincipal(user), "correct horse battery", ""); !errors.Is(err, ErrLastAdmin) {
 		t.Fatalf("DeleteAccount(last owner) = %v, want ErrLastAdmin", err)
 	}
 	if u, _ := database.GetUserByID(ctx, uid); u == nil {
@@ -630,7 +630,7 @@ func TestErasureService_HubBroadcastsThenPurges(t *testing.T) {
 	svc := NewAuthService(database, auth.NewRateLimiter(), make([]byte, 32), bcast)
 	svc.UseErasure(shared)
 
-	if err := svc.DeleteAccount(ctx, Principal{User: user}, "correct horse battery", ""); err != nil {
+	if err := svc.DeleteAccount(ctx, sessionPrincipal(user), "correct horse battery", ""); err != nil {
 		t.Fatalf("DeleteAccount: %v", err)
 	}
 	want := fmt.Sprintf("[disconnect:%d ban:%d purge:%d]", uid, uid, uid)
@@ -943,5 +943,61 @@ func TestErasureService_ReplayPurgeIsRetriedFromTheJournal(t *testing.T) {
 	}
 	if jobs, _ := database.ListUnfinishedErasureJobs(ctx); len(jobs) != 0 {
 		t.Errorf("unfinished jobs after the hub-less erasure: %+v", jobs)
+	}
+}
+
+// namingStore runs onBatch after the first multi-name lookup, the way a forward
+// can insert the row for a new file while Reconcile is between its batch
+// lookup and its delete.
+type namingStore struct {
+	*db.DB
+	onBatch func()
+}
+
+func (s *namingStore) ReferencedStoredFiles(ctx context.Context, names []string) (map[string]bool, error) {
+	got, err := s.DB.ReferencedStoredFiles(ctx, names)
+	if len(names) > 1 && s.onBatch != nil {
+		s.onBatch()
+		s.onBatch = nil
+	}
+	return got, err
+}
+
+// A file named by a row after the batch lookup is kept: Reconcile checks each
+// name again right before deleting it.
+func TestErasureService_ReconcileKeepsAFileNamedAfterTheBatchLookup(t *testing.T) {
+	database := newTestDB(t)
+	ctx := context.Background()
+	dir := t.TempDir()
+	uid, err := database.CreateUser(ctx, "reconcile-race", "hash", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-2 * time.Hour)
+	for _, name := range []string{"forwarded", "stranded"} {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(p, old, old); err != nil {
+			t.Fatal(err)
+		}
+	}
+	store := newTestStorage(t, dir)
+	st := &namingStore{DB: database, onBatch: func() {
+		if _, err := database.ExecContext(ctx, `INSERT INTO attachments (id, filename, stored_as, mime_type, size, uploader_id) VALUES ('fwd', 'f', 'forwarded', 'image/png', 1, ?)`, uid); err != nil {
+			t.Error(err)
+		}
+	}}
+	svc := NewErasureService(st)
+	svc.SetFiles(store)
+	if n, err := svc.Reconcile(ctx, store, time.Now().Add(-time.Hour), 100); n != 1 || err != nil {
+		t.Fatalf("Reconcile = %d, %v; want 1 (only the stranded file)", n, err)
+	}
+	if !fileExists(t, filepath.Join(dir, "forwarded")) {
+		t.Error("the file a row named after the batch lookup was removed")
+	}
+	if fileExists(t, filepath.Join(dir, "stranded")) {
+		t.Error("the stranded file was kept")
 	}
 }

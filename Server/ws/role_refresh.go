@@ -14,7 +14,7 @@ import (
 // The handler commits, invalidates the permission cache and makes ONE
 // EnqueueRoleRefresh call; a hub-owned worker (modelled on the channel_activity
 // coalescer) then refreshes each affected user in turn: held topics, the sidebar
-// and affordances, a paced member_update, the timeout views, and one roles_update
+// and affordances, paced member_update_batch frames, the timeout views, and one roles_update
 // for the round. Users whose role did not change receive no redundant channel or
 // timeout frames.
 //
@@ -36,7 +36,7 @@ type RoleRefresh struct {
 	// of an edited role could not be read.
 	AllConnected bool
 	// MemberUpdate lists users whose displayed role name changed: a
-	// member_update (carrying the name read at send time) goes to everyone.
+	// member_update_batch entry (carrying the name read at send time) goes to everyone.
 	MemberUpdate []int64
 	// Roles re-reads the role list and broadcasts roles_update at the end of
 	// the round.
@@ -269,7 +269,8 @@ func (h *Hub) flushRoleRefresh(ctx context.Context) time.Duration {
 // startSweepWorkers starts Run's long-lived workers on h.sweeps, which finishRun
 // joins. Kept out of Run so hub.go stays within its size ceiling.
 func (h *Hub) startSweepWorkers() {
-	h.sweeps.Go(h.runRemovedVoiceWatch)
-	h.sweeps.Go(h.runChannelActivityLife)
-	h.sweeps.Go(h.runRoleRefreshLife)
+	h.lifecycle.sweeps.Go(h.runRemovedVoiceWatch)
+	h.lifecycle.sweeps.Go(h.runVoiceResumeChecksLife)
+	h.lifecycle.sweeps.Go(h.runChannelActivityLife)
+	h.lifecycle.sweeps.Go(h.runRoleRefreshLife)
 }

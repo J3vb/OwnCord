@@ -30,14 +30,14 @@ func drainChan(ch chan []byte, timeout time.Duration) [][]byte {
 // and the locks needed for delivery.
 func newEmitTestHub() *Hub {
 	return &Hub{
-		clients:         make(map[int64][]*Client),
-		broadcast:       make(chan broadcastMsg, 64),
-		clientEvents:    make(chan clientEvent, 32),
-		stop:            make(chan struct{}),
-		pubsub:          NewPubSub(),
-		replayBuf:       NewEventRingBuffer(100),
-		voiceKeyHolders: make(map[int64]int64),
-		limiter:         auth.NewRateLimiter(),
+		clients:      make(map[int64][]*Client),
+		broadcast:    make(chan broadcastMsg, 64),
+		clientEvents: make(chan clientEvent, 32),
+		stop:         make(chan struct{}),
+		pubsub:       NewPubSub(),
+		replayBuf:    NewEventRingBuffer(100),
+		voiceHub:     hubVoice{keyHolders: make(map[int64]int64)},
+		limiter:      auth.NewRateLimiter(),
 	}
 }
 
@@ -151,6 +151,7 @@ func (e stubVoiceChannelEvent) Payload() []byte              { return e.payload 
 
 type stubVoiceChannelGuardedEvent struct {
 	voiceChannelID int64
+	senderUserID   int64
 	targetUserID   int64
 	payload        []byte
 }
@@ -158,6 +159,7 @@ type stubVoiceChannelGuardedEvent struct {
 func (e stubVoiceChannelGuardedEvent) EventType() string            { return "test_voice_guarded" }
 func (e stubVoiceChannelGuardedEvent) deliveryClass() deliveryClass { return classVoiceChannelGuarded }
 func (e stubVoiceChannelGuardedEvent) VoiceChannelID() int64        { return e.voiceChannelID }
+func (e stubVoiceChannelGuardedEvent) SenderUserID() int64          { return e.senderUserID }
 func (e stubVoiceChannelGuardedEvent) TargetUserID() int64          { return e.targetUserID }
 func (e stubVoiceChannelGuardedEvent) Payload() []byte              { return e.payload }
 
@@ -320,8 +322,10 @@ func TestEmitEvents_VoiceChannelEvent(t *testing.T) {
 
 func TestEmitEvents_VoiceChannelGuardedEvent(t *testing.T) {
 	h := newEmitTestHub()
-	// Target is in voice channel 50.
+	// Sender (lowest uid) holds the key in voice channel 50; target is there too.
+	_ = registerEmitTestVoiceClient(h, 1, 0, 50)
 	sendTarget := registerEmitTestVoiceClient(h, 2, 0, 50)
+	h.updateKeyHolder(50)
 	// User 3 is in the same voice channel but is not the target.
 	sendOther := registerEmitTestVoiceClient(h, 3, 0, 50)
 	// User 4 is in a different voice channel.
@@ -330,6 +334,7 @@ func TestEmitEvents_VoiceChannelGuardedEvent(t *testing.T) {
 	payload := []byte(`{"type":"voice_e2ee_offer"}`)
 	events := []Event{stubVoiceChannelGuardedEvent{
 		voiceChannelID: 50,
+		senderUserID:   1,
 		targetUserID:   2,
 		payload:        payload,
 	}}
@@ -353,12 +358,15 @@ func TestEmitEvents_VoiceChannelGuardedEvent(t *testing.T) {
 
 func TestEmitEvents_VoiceChannelGuardedEvent_TargetNotInChannel(t *testing.T) {
 	h := newEmitTestHub()
+	_ = registerEmitTestVoiceClient(h, 1, 0, 50)
+	h.updateKeyHolder(50)
 	// Target is in voice channel 99, but event targets voice channel 50.
 	sendTarget := registerEmitTestVoiceClient(h, 2, 0, 99)
 
 	payload := []byte(`{"type":"voice_e2ee_offer"}`)
 	events := []Event{stubVoiceChannelGuardedEvent{
 		voiceChannelID: 50,
+		senderUserID:   1,
 		targetUserID:   2,
 		payload:        payload,
 	}}

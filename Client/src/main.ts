@@ -28,7 +28,11 @@ import {
   installCustomThemeEscape,
 } from "./features/custom-themes/customTheme";
 import { startZoom } from "./features/zoom/zoomKeys";
-import { migrateAutoInputSensitivity, migrateInputMode } from "@lib/ui/inputMode";
+import {
+  forgetAndroidInputDevice,
+  migrateAutoInputSensitivity,
+  migrateInputMode,
+} from "@lib/ui/inputMode";
 import { migrateVoiceSensitivityScale } from "@lib/voice/gateScale";
 import { configureSession, installLogoutTeardown, voiceSessionLeave } from "./app/session";
 import { createLogger, applyStoredLogLevel } from "@lib/logger";
@@ -67,6 +71,11 @@ installGlobalErrorHandlers();
 // just the in-memory ring. The listener is installed before the first render
 // and back-fills the bootstrap window.
 void initLogPersistence();
+// The diagnostic event log and the app's own lifecycle events, off the startup
+// path; owners that record earlier are queued until it attaches.
+void import("@lib/diagnostics/appEvents")
+  .then((m) => m.startAppEvents(desktop.appMetadata))
+  .catch((e: unknown) => log.warn("Diagnostic event log failed to start", e));
 
 // Apply stored theme/font/compact preferences before first render
 applyStoredAppearance();
@@ -81,6 +90,7 @@ installCustomThemeEscape(new Disposable().signal);
 // from before the decibel slider keeps its gate level.
 migrateAutoInputSensitivity();
 migrateVoiceSensitivityScale();
+forgetAndroidInputDevice();
 
 // Start push-to-talk listener (Rust-side polling, non-consuming), once the
 // input mode is settled: a profile from before Input Mode keeps its PTT key.
@@ -92,6 +102,14 @@ if (isAndroidHost()) {
   void import("./features/voice/talkButton")
     .then((m) => m.startTalkButton(new Disposable().signal))
     .catch((e: unknown) => log.warn("Talk button failed to start", e));
+  // Android silences a background app's mic unless a call service runs.
+  void import("./features/voice/backgroundCall")
+    .then((m) => m.startBackgroundCall(new Disposable().signal))
+    .catch((e: unknown) => log.warn("Background call service failed to start", e));
+  // Pause the camera while the app is in the background, resume on return.
+  void import("./features/voice/backgroundCamera")
+    .then((m) => m.startBackgroundCamera(new Disposable().signal))
+    .catch((e: unknown) => log.warn("Background camera pause failed to start", e));
 }
 
 const appEl = document.getElementById("app");

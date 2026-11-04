@@ -106,6 +106,10 @@ export function createMockWsClient() {
       return state;
     },
 
+    _getWs(): WebSocket | null {
+      return null;
+    },
+
     getConnectFailureCode(): string | null {
       return null;
     },
@@ -131,6 +135,15 @@ export function createMockWsClient() {
           const fn = listener as unknown as (p: unknown, i?: string) => void;
           fn(payload, id);
         }
+      }
+    },
+
+    /** simulateMessage without the payload typing, for fixtures that are partial. */
+    simulate(type: string, payload: unknown, id?: string): void {
+      const typeListeners = listeners.get(type);
+      if (!typeListeners) return;
+      for (const listener of typeListeners) {
+        (listener as unknown as (p: unknown, i?: string) => void)(payload, id);
       }
     },
 

@@ -95,6 +95,9 @@ type updateProfileRequest struct {
 type changePasswordRequest struct {
 	OldPassword string `json:"old_password"`
 	NewPassword string `json:"new_password"`
+	// RevokeAPITokens also revokes every API token of the account. Absent means
+	// false, so a client that predates the field keeps its tokens as before.
+	RevokeAPITokens bool `json:"revoke_api_tokens"`
 }
 
 type sessionResponse struct {
@@ -114,13 +117,27 @@ type sessionsListResponse struct {
 	Sessions []sessionResponse `json:"sessions"`
 }
 
+// ownAPITokenResponse is one of the caller's live API tokens. Never a hash or
+// raw token: only the raw token shown at creation is usable.
+type ownAPITokenResponse struct {
+	ID        int64   `json:"id"`
+	Label     string  `json:"label"`
+	CreatedAt string  `json:"created_at"`
+	LastUsed  *string `json:"last_used"`
+	ExpiresAt *string `json:"expires_at"`
+}
+
+type ownAPITokensListResponse struct {
+	Tokens []ownAPITokenResponse `json:"tokens"`
+}
+
 type ProfileBroadcaster interface {
 	BroadcastUserUpdate(u ws.UserUpdate)
 }
 
 // revokeAllSessionsRateLimitPerMinute bounds DELETE /api/v1/users/me/sessions
-// per account. Every call revokes the caller's own session or API token, so the
-// cap bounds how fast a fresh sign-in can repeat it.
+// per account. Every call revokes the caller's own session, so the cap bounds
+// how fast a fresh sign-in can repeat it.
 const revokeAllSessionsRateLimitPerMinute = 5
 
 // MountProfileRoutes registers the authenticated user profile endpoints;
@@ -140,7 +157,7 @@ func MountProfileRoutes(r chi.Router, svc *service.Services, store FileStore, li
 		r.With(RateLimitMiddleware(limiter, "profile:", profileUpdateRateLimitPerMinute, time.Minute, trustedProxies)).
 			Patch("/", handleUpdateProfile(svc, broadcaster, selfHosts))
 
-		r.With(RateLimitMiddleware(limiter, "pw:", profilePasswordRateLimitPerMinute, time.Minute, trustedProxies)).
+		r.With(requireLoginSession, RateLimitMiddleware(limiter, "pw:", profilePasswordRateLimitPerMinute, time.Minute, trustedProxies)).
 			Put("/password", handleChangePassword(svc, limiter, broadcaster))
 
 		r.With(RateLimitMiddleware(limiter, "profile:", profileUpdateRateLimitPerMinute, time.Minute, trustedProxies)).
@@ -168,12 +185,17 @@ func MountProfileRoutes(r chi.Router, svc *service.Services, store FileStore, li
 				Put("/privacy", handlePutPrivacy(svc.Privacy, broadcaster))
 		}
 
-		r.Get("/sessions", handleListSessions(svc))
+		r.With(requireLoginSession).Get("/sessions", handleListSessions(svc))
 
 		r.With(RateLimitMiddleware(limiter, "own_moderation:", ownModerationRateLimitPerMinute, time.Minute, trustedProxies)).
 			Get("/moderation", handleOwnModeration(svc))
-		r.Delete("/sessions", handleRevokeAllSessions(svc, limiter, broadcaster))
-		r.Delete("/sessions/{id}", handleRevokeSession(svc, broadcaster))
+		r.With(requireLoginSession).Delete("/sessions", handleRevokeAllSessions(svc, limiter, broadcaster))
+		r.With(requireLoginSession).Delete("/sessions/{id}", handleRevokeSession(svc, broadcaster))
+
+		if svc.Tokens != nil {
+			r.With(requireLoginSession).Get("/api-tokens", handleListOwnAPITokens(svc.Tokens))
+			r.With(requireLoginSession).Delete("/api-tokens/{id}", handleRevokeOwnAPIToken(svc.Tokens))
+		}
 	})
 }
 
@@ -276,8 +298,13 @@ func parseUpdateProfileRequest(w http.ResponseWriter, r *http.Request, selfHosts
 	}
 
 	// Validate the identity key before any write so the request is
-	// all-or-nothing.
+	// all-or-nothing. A device key belongs to a login session, so an API token
+	// may edit the profile but not publish one.
 	if req.IdentityPublicKey != nil {
+		if p, _ := principal(r); p.Session == nil {
+			writeLoginSessionRequired(w)
+			return req, false
+		}
 		trimmed := strings.TrimSpace(*req.IdentityPublicKey)
 		if err := service.ValidateIdentityKey(trimmed); err != nil {
 			writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, err.Error())
@@ -422,7 +449,7 @@ func handleChangePassword(svc *service.Services, limiter *auth.RateLimiter, broa
 			keepSessionID = sess.ID
 		}
 
-		res, err := svc.Users.ChangePassword(r.Context(), user.ID, hash, keepSessionID)
+		res, err := svc.Users.ChangePassword(r.Context(), user.ID, hash, keepSessionID, req.RevokeAPITokens)
 		if err != nil {
 			writeServiceError(r.Context(), w, err)
 			return
@@ -434,11 +461,12 @@ func handleChangePassword(svc *service.Services, limiter *auth.RateLimiter, broa
 		}
 		if res.RevokeFailed {
 			// Partial success: the password IS changed; only revoking the other
-			// sessions failed, and a 5xx would tell the user to retry with a
-			// password that no longer works.
+			// sessions or the API tokens failed, and a 5xx would tell the user to
+			// retry with a password that no longer works.
 			writeJSON(w, http.StatusOK, map[string]any{
-				"warning":          "password changed, but other sessions could not be revoked; revoke them from the sessions list",
-				"sessions_revoked": res.SessionsRevoked,
+				"warning":            "password changed, but other sessions or API tokens could not be revoked; revoke them from the sessions list",
+				"sessions_revoked":   res.SessionsRevoked,
+				"api_tokens_revoked": res.TokensRevoked,
 			})
 			return
 		}
@@ -454,8 +482,8 @@ func handleListSessions(svc *service.Services) http.HandlerFunc {
 			return
 		}
 
-		// An API-token principal has a nil session (middleware.go); the list
-		// still works, with no row marked current.
+		// requireLoginSession guarantees a session; the nil check below stays
+		// so the handler never dereferences one it was not given.
 		sess, _ := r.Context().Value(SessionKey).(*db.Session)
 
 		sessions, err := svc.Users.ListSessions(r.Context(), user.ID)
@@ -480,8 +508,7 @@ func handleListSessions(svc *service.Services) http.HandlerFunc {
 		}
 
 		// This listing is the acknowledgement of the response's flags, except
-		// for the caller's own session. An API-token principal has no session
-		// and acknowledges every row.
+		// for the caller's own session.
 		var callerSessionID int64
 		if sess != nil {
 			callerSessionID = sess.ID
@@ -514,6 +541,53 @@ func handleRevokeSession(svc *service.Services, broadcaster ProfileBroadcaster) 
 		}
 		disconnectIfSessionRevoked(broadcaster, user.ID)
 
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// handleListOwnAPITokens lists the caller's live API tokens, so a member can
+// see every credential that acts as them besides their sessions.
+func handleListOwnAPITokens(tokens *service.TokenService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user, ok := requireUser(w, r)
+		if !ok {
+			return
+		}
+		items, err := tokens.ListMine(r.Context(), user.ID)
+		if err != nil {
+			writeServiceError(r.Context(), w, err)
+			return
+		}
+		resp := ownAPITokensListResponse{Tokens: make([]ownAPITokenResponse, 0, len(items))}
+		for _, it := range items {
+			resp.Tokens = append(resp.Tokens, ownAPITokenResponse{
+				ID:        it.ID,
+				Label:     it.Label,
+				CreatedAt: it.CreatedAt,
+				LastUsed:  it.LastUsed,
+				ExpiresAt: it.ExpiresAt,
+			})
+		}
+		writeJSON(w, http.StatusOK, resp)
+	}
+}
+
+// handleRevokeOwnAPIToken revokes one of the caller's API tokens. Any id that
+// is not one of the caller's live tokens is 404.
+func handleRevokeOwnAPIToken(tokens *service.TokenService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user, ok := requireUser(w, r)
+		if !ok {
+			return
+		}
+		id, ok := parseIDParam(w, r, "id")
+		if !ok {
+			return
+		}
+		if err := tokens.RevokeMine(r.Context(), user.ID, id); err != nil {
+			writeServiceError(r.Context(), w, err)
+			return
+		}
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
@@ -553,6 +627,8 @@ func handleRevokeAllSessions(svc *service.Services, limiter *auth.RateLimiter, b
 				d.DisconnectRevokedUser(user.ID)
 			}
 		}
+		// requireLoginSession guarantees sess; the check keeps the handler from
+		// claiming a revoke it was not given.
 		writeJSON(w, http.StatusOK, revokeAllSessionsResponse{
 			SessionsRevoked: n,
 			CurrentRevoked:  sess != nil,
@@ -572,6 +648,7 @@ func handleUploadAvatar(
 	limiter *auth.RateLimiter,
 	broadcaster ProfileBroadcaster,
 ) http.HandlerFunc {
+	slots := newUploadSlots(maxConcurrentImageUploadsPerUser)
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := requireUser(w, r)
 		if !ok {
@@ -582,11 +659,22 @@ func handleUploadAvatar(
 			writeErr(w, http.StatusTooManyRequests, httperr.CodeRateLimited, "avatar upload rate limit exceeded, try again later")
 			return
 		}
+		if !slots.acquire(user.ID) {
+			writeErr(w, http.StatusTooManyRequests, httperr.CodeRateLimited, "avatar upload already in progress, wait for it to finish")
+			return
+		}
+		defer slots.release(user.ID)
 
 		// Bound the body before the multipart parser: the route has MaxBodySize
-		// too, but the parser is what turns an unbounded body into heap.
-		r.Body = http.MaxBytesReader(w, r.Body, avatarMaxBodySize)
+		// too, but the parser is what turns an unbounded body into heap. The
+		// global 30 s ReadTimeout would cut a slow uplink mid-body, so the read
+		// runs under a transfer deadline instead.
+		release := transferBody(w, r, avatarMaxBodySize)
+		defer release()
 		if err := r.ParseMultipartForm(avatarMultipartMemoryLimit); err != nil {
+			if writeTransferTimedOut(w, err, "avatar upload") {
+				return
+			}
 			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "invalid multipart form")
 			return
 		}

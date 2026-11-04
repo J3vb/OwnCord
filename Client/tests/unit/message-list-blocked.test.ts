@@ -28,6 +28,7 @@ import { makeMessage, makeOpts, resetGateStores } from "../helpers/message-actio
 import { resetMessagesState, resetMembersState } from "../helpers/storeResets";
 import "../helpers/resizeObserverStub";
 import { resetChannelsState } from "../helpers/storeSeeds";
+import { setMessagesFlushed, stubElementHeights } from "../helpers/messageListHarness";
 
 const CHANNEL_ID = 1;
 const ALICE = { id: 2, username: "alice", avatar: null };
@@ -54,12 +55,7 @@ function msg(id: number, user: Message["user"] = ALICE, extra: Partial<Message> 
 }
 
 function setMessages(messages: readonly Message[]): void {
-  messagesStore.setState((prev) => {
-    const next = new Map(prev.messagesByChannel);
-    next.set(CHANNEL_ID, [...messages]);
-    return { ...prev, messagesByChannel: next };
-  });
-  messagesStore.flush();
+  setMessagesFlushed(CHANNEL_ID, messages);
 }
 
 function block(...ids: number[]): void {
@@ -267,7 +263,7 @@ describe("MessageList: blocked users' messages", () => {
   describe("read pointer", () => {
     const SCROLL_HEIGHT = 4000;
     const CLIENT_HEIGHT = 500;
-    const saved = new Map<string, PropertyDescriptor | undefined>();
+    let restoreHeights: () => void;
     let marks: Array<[number, number | undefined]>;
     let hasFocus: ReturnType<typeof vi.spyOn>;
 
@@ -277,24 +273,14 @@ describe("MessageList: blocked users' messages", () => {
       setMarkReadSender((c, m) => marks.push([c, m]));
       applyReadyCapabilities({ read_pointer: true });
       setLiveTailInView(CHANNEL_ID, true);
-      for (const [prop, value] of [
-        ["scrollHeight", SCROLL_HEIGHT],
-        ["clientHeight", CLIENT_HEIGHT],
-      ] as const) {
-        saved.set(prop, Object.getOwnPropertyDescriptor(HTMLElement.prototype, prop));
-        Object.defineProperty(HTMLElement.prototype, prop, {
-          configurable: true,
-          get: () => value,
-        });
-      }
+      restoreHeights = stubElementHeights({
+        scrollHeight: SCROLL_HEIGHT,
+        clientHeight: CLIENT_HEIGHT,
+      });
     });
 
     afterEach(() => {
-      for (const [prop, descriptor] of saved) {
-        if (descriptor) Object.defineProperty(HTMLElement.prototype, prop, descriptor);
-        else delete (HTMLElement.prototype as unknown as Record<string, unknown>)[prop];
-      }
-      saved.clear();
+      restoreHeights();
       setMarkReadSender(null);
       resetServerCapabilities();
       resetReadPointerState();
@@ -449,20 +435,11 @@ describe("MessageList: blocked users' messages", () => {
 
   describe("scroll hold on Show and Hide", () => {
     const CLIENT_HEIGHT = 500;
-    const saved = new Map<string, PropertyDescriptor | undefined>();
+    let restoreHeights: () => void;
     let rectSpy: ReturnType<typeof vi.spyOn>;
 
     beforeEach(() => {
-      for (const [prop, value] of [
-        ["scrollHeight", 4000],
-        ["clientHeight", CLIENT_HEIGHT],
-      ] as const) {
-        saved.set(prop, Object.getOwnPropertyDescriptor(HTMLElement.prototype, prop));
-        Object.defineProperty(HTMLElement.prototype, prop, {
-          configurable: true,
-          get: () => value,
-        });
-      }
+      restoreHeights = stubElementHeights({ scrollHeight: 4000, clientHeight: CLIENT_HEIGHT });
       // A one-column layout: 61 px per message, 32 px for anything else.
       rectSpy = vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (
         this: Element,
@@ -495,11 +472,7 @@ describe("MessageList: blocked users' messages", () => {
 
     afterEach(() => {
       rectSpy.mockRestore();
-      for (const [prop, descriptor] of saved) {
-        if (descriptor) Object.defineProperty(HTMLElement.prototype, prop, descriptor);
-        else delete (HTMLElement.prototype as unknown as Record<string, unknown>)[prop];
-      }
-      saved.clear();
+      restoreHeights();
     });
 
     const scroller = (): HTMLDivElement =>

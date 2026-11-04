@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
+import { makeChannel } from "../helpers/channelFactory";
 import * as voiceSession from "../helpers/voiceSessionMock";
 import {
   authStore,
@@ -539,23 +540,7 @@ describe("auth store", () => {
       // every future setChannels call unless the store is reset first.
       channelsStore.setState((prev) => {
         const next = new Map(prev.channels);
-        next.set(999, {
-          id: 999,
-          name: "alice",
-          type: "dm",
-          category: null,
-          topic: "",
-          position: 0,
-          unreadCount: 0,
-          mentionCount: 0,
-          lastMessageId: null,
-          canSend: true,
-          slowMode: 0,
-          nsfw: false,
-          isPrivate: false,
-          voiceMaxUsers: 0,
-          voiceMaxVideo: 0,
-        });
+        next.set(999, makeChannel({ id: 999, name: "alice", type: "dm" }));
         return { ...prev, channels: next };
       });
       expect(channelsStore.getState().channels.has(999)).toBe(true);

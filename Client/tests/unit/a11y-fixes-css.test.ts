@@ -8,18 +8,8 @@
 // (tests/helpers/app-css.ts) rather than the rendered DOM. The e2e specs prove
 // the computed behaviour.
 import type { Declaration } from "lightningcss";
-import { cascadedDeclaration, keyword } from "../helpers/app-css";
+import { cascadedDeclaration, keyword, varToken } from "../helpers/app-css";
 import { describe, it, expect } from "vitest";
-
-/** The custom-property name a declaration reads as a bare `var(--x)`. */
-function varToken(d: ReturnType<typeof cascadedDeclaration>): string | undefined {
-  const v = d?.value as Declaration | undefined;
-  if (v?.property !== "unparsed") return undefined;
-  const tokens = v.value.value;
-  if (tokens.length !== 1) return undefined;
-  const t = tokens[0]!;
-  return t.type === "var" ? t.value.name.ident : undefined;
-}
 
 /** A time declaration's seconds value (`0s` -> 0), or undefined. */
 function seconds(d: ReturnType<typeof cascadedDeclaration>): number | undefined {

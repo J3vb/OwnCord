@@ -20,6 +20,28 @@ function tab(el: Element, shiftKey = false): KeyboardEvent {
   return e;
 }
 
+function plainCells(count: number): HTMLDivElement[] {
+  return Array.from({ length: count }, () => {
+    const cell = document.createElement("div");
+    cell.className = "cell";
+    container.appendChild(cell);
+    return cell;
+  });
+}
+
+/** A focused opener, a sibling fallback, and a dialog with semantics, all in the container. */
+function openFromOpener() {
+  const opener = document.createElement("button");
+  const fallback = document.createElement("button");
+  container.append(opener, fallback);
+  opener.focus();
+
+  const dialog = document.createElement("div");
+  applyDialogSemantics(dialog);
+  container.appendChild(dialog);
+  return { opener, fallback, dialog };
+}
+
 describe("applyDialogSemantics", () => {
   it("stamps role, aria-modal, and tabindex", () => {
     const el = document.createElement("div");
@@ -260,14 +282,7 @@ describe("focusDialog", () => {
   });
 
   it("focuses the fallback when the opener is gone by close time", () => {
-    const opener = document.createElement("button");
-    const fallback = document.createElement("button");
-    container.append(opener, fallback);
-    opener.focus();
-
-    const dialog = document.createElement("div");
-    applyDialogSemantics(dialog);
-    container.appendChild(dialog);
+    const { opener, fallback, dialog } = openFromOpener();
     const restore = focusDialog(dialog, () => fallback);
 
     opener.remove(); // e.g. the dialog deleted the row that opened it
@@ -277,14 +292,7 @@ describe("focusDialog", () => {
   });
 
   it("prefers a still-connected opener over the fallback, and ignores a detached fallback", () => {
-    const opener = document.createElement("button");
-    const fallback = document.createElement("button");
-    container.append(opener, fallback);
-    opener.focus();
-
-    const dialog = document.createElement("div");
-    applyDialogSemantics(dialog);
-    container.appendChild(dialog);
+    const { opener, fallback, dialog } = openFromOpener();
     focusDialog(dialog, () => fallback)();
     expect(document.activeElement).toBe(opener);
 
@@ -332,12 +340,7 @@ describe("focusDialog", () => {
 
 describe("enableRovingNavigation", () => {
   it("moves by row width on ArrowUp/ArrowDown in grid orientation", () => {
-    const cells = Array.from({ length: 16 }, () => {
-      const cell = document.createElement("div");
-      cell.className = "cell";
-      container.appendChild(cell);
-      return cell;
-    });
+    const cells = plainCells(16);
     const ac = new AbortController();
     enableRovingNavigation(container, ".cell", ac.signal, "grid", 4);
     cells[0]!.focus();
@@ -367,12 +370,7 @@ describe("enableRovingNavigation", () => {
   });
 
   it("does not step past the edge of a grid row with ArrowDown", () => {
-    const cells = Array.from({ length: 3 }, () => {
-      const cell = document.createElement("div");
-      cell.className = "cell";
-      container.appendChild(cell);
-      return cell;
-    });
+    const cells = plainCells(3);
     const ac = new AbortController();
     enableRovingNavigation(container, ".cell", ac.signal, "grid", 8);
     cells[0]!.focus();
@@ -427,12 +425,7 @@ describe("enableRovingNavigation", () => {
   });
 
   it("leaves a modified arrow (Alt+↓ steps channels) to the app", () => {
-    const cells = [0, 1].map(() => {
-      const cell = document.createElement("div");
-      cell.className = "cell";
-      container.appendChild(cell);
-      return cell;
-    });
+    const cells = plainCells(2);
     const ac = new AbortController();
     enableRovingNavigation(container, ".cell", ac.signal, "vertical");
     cells[0]!.focus();

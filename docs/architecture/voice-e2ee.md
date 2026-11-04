@@ -80,7 +80,7 @@ encryption is subscribed again.
 Supporting pieces:
 
 - **Server:** `Server/ws/voice_e2ee.go` (relay + key-holder map),
-  `Server/ws/livekit.go` (token minting), `Server/ws/livekit_process.go`
+  `Server/ws/livekit.go` (token minting), `Server/livekitproc/process.go`
   (optional managed `livekit-server` subprocess),
   `Server/ws/livekit_webhook.go` (webhook, checked by its LiveKit JWT and
   limited to `server.livekit_webhook_allowed_cidrs`, which falls back to
@@ -165,6 +165,18 @@ prerequisites — clang >= 21, a prebuilt libwebrtc, and, for the camera, the
 GStreamer `-dev` headers — are documented in
 [contributing.md](../contributing.md#client-tauri-v2); `Client/scripts/linux-webrtc-toolchain.sh`
 installs clang and fetches libwebrtc and the CUDA headers.
+
+The native room connects with separate publish and subscribe peer
+connections (`room_options` in `session.rs`). In the SDK's default
+single-connection mode, our own camera publish or unpublish renegotiates the
+connection the remote videos arrive on, and in the interop video case a
+browser camera subscribed just before the camera cycles now and then kept
+decoding (the receiver's `framesDecoded` climbing at full rate) while no sink
+on the track ever got a frame: a black tile for the rest of the call. That
+happened in 5 of 80 single-connection runs and in none of 105 runs with a
+separate subscriber connection. The SDK only asks for
+stereo Opus in single-connection mode, so the vendored copy adds `stereo=1` to
+the subscriber's answer too (`vendor/livekit/OWNCORD-PATCH.md`).
 
 ### Phase 1: audio
 
@@ -910,14 +922,16 @@ of each processed 10 ms frame against `vadThreshold`, with its ~32 ms attack,
 after a ~500 ms hold there), ~500 ms start-up grace and a 50 ms lookahead
 (`lib/voice/gateScale.ts` holds the slider's decibel scale), and its
 `voiceGate` events drive the local speaking ring as the web detector's
-verdicts do. With automatic sensitivity the web detector also reads RNNoise's
+verdicts do. At either sensitivity, the slider's or the automatic one, the web detector also reads RNNoise's
 per-frame speech probability (the RNNoise worklet's second output, into the
 detector's second input): a frame opens the gate only when it clears the
 level and RNNoise calls it a voice (probability ≥ 0.5), and counts as quiet
 when it drops under the close level or RNNoise stops calling it a voice
 (< 0.15). `MicProcessor` keeps RNNoise running for that verdict while
-Enhanced Noise Suppression is off, with the voice routed around it; the
-manual slider is a pure level gate. A running RNNoise never reports exactly
+Enhanced Noise Suppression is off, with the voice routed around it. A level
+gate alone would pass typing or a fan above the slider's level, and after
+speech the hysteresis and hold would keep it open through them; the verdict
+closes on both. A running RNNoise never reports exactly
 0, so a silent probability input (RNNoise not started, or stopped by a
 processor error) puts the detector back on its level alone rather than
 leaving the gate shut. The native gate follows the same rule with `speech`

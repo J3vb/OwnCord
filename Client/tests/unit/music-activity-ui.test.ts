@@ -1,10 +1,10 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
+import { loggerMock } from "../helpers/loggerMock";
 
 const invoke = vi.hoisted(() => vi.fn());
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
-vi.mock("@lib/logger", () => ({
-  createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
-}));
+vi.mock("@lib/logger", () => loggerMock());
 
 import { createUserProfilePopup } from "@components/UserProfilePopup";
 import { createDmProfileSidebar } from "@components/DmProfileSidebar";
@@ -148,15 +148,16 @@ describe("the song card", () => {
 
 describe("profile card and DM profile sidebar", () => {
   let container: HTMLDivElement;
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => vi.useRealTimers(),
+  );
+
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(NOW);
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-  afterEach(() => {
-    container.remove();
-    vi.useRealTimers();
   });
 
   const user = {
@@ -268,14 +269,12 @@ describe("profile card and DM profile sidebar", () => {
 
 describe("DM list rows", () => {
   let container: HTMLDivElement;
-  beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-  afterEach(() => {
-    container.remove();
-    dmStore.setState(() => ({ channels: [] }));
-  });
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => dmStore.setState(() => ({ channels: [] })),
+  );
 
   const convo = (overrides: Partial<DmConversation> = {}): DmConversation => ({
     channelId: 100,

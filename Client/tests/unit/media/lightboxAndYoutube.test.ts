@@ -11,6 +11,12 @@ import {
   oembedFail,
   createObjectURLMock,
   useMediaHarness,
+  lightboxImg,
+  pressDocKey,
+  stubImgRect,
+  clickImgAt,
+  wheelOn,
+  scaleOf,
 } from "../../helpers/mediaHarness";
 
 vi.mock("../../../src/features/content-consent/external", (importOriginal) =>
@@ -381,7 +387,7 @@ describe("media.ts", () => {
     it("does not close when clicking on the image", () => {
       openImageLightbox("https://example.com/pic.jpg", "Photo");
 
-      const img = document.body.querySelector(".image-lightbox img") as HTMLElement;
+      const img = lightboxImg();
       // Simulate a click where mouse didn't move (dx=0, dy=0)
       img.dispatchEvent(new MouseEvent("mousedown", { clientX: 100, clientY: 100, bubbles: true }));
       img.dispatchEvent(new MouseEvent("click", { clientX: 100, clientY: 100, bubbles: true }));
@@ -393,7 +399,7 @@ describe("media.ts", () => {
     it("closes on Escape key", () => {
       openImageLightbox("https://example.com/pic.jpg", "Photo");
 
-      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      pressDocKey("Escape");
 
       expect(document.body.querySelector(".image-lightbox")).toBeNull();
     });
@@ -401,22 +407,19 @@ describe("media.ts", () => {
     it("zooms in on + key", () => {
       openImageLightbox("https://example.com/pic.jpg", "Photo");
 
-      const img = document.body.querySelector(".image-lightbox img") as HTMLElement;
+      const img = lightboxImg();
 
-      document.dispatchEvent(new KeyboardEvent("keydown", { key: "+", bubbles: true }));
+      pressDocKey("+");
 
       // After zoom, transform should contain scale > 1
       expect(img.style.transform).toContain("scale(");
-      const scaleMatch = img.style.transform.match(/scale\(([^)]+)\)/);
-      expect(scaleMatch).not.toBeNull();
-      const scale = parseFloat(scaleMatch![1]!);
-      expect(scale).toBeGreaterThan(1);
+      expect(scaleOf(img)).toBeGreaterThan(1);
     });
 
     it("leaves the image alone on Ctrl/Cmd zoom keys (those zoom the app)", () => {
       openImageLightbox("https://example.com/pic.jpg", "Photo");
 
-      const img = document.body.querySelector(".image-lightbox img") as HTMLElement;
+      const img = lightboxImg();
       const before = img.style.transform;
       for (const key of ["+", "=", "-", "0"]) {
         document.dispatchEvent(new KeyboardEvent("keydown", { key, ctrlKey: true, bubbles: true }));
@@ -429,40 +432,34 @@ describe("media.ts", () => {
     it("zooms in on = key (same as +)", () => {
       openImageLightbox("https://example.com/pic.jpg", "Photo");
 
-      const img = document.body.querySelector(".image-lightbox img") as HTMLElement;
+      const img = lightboxImg();
 
-      document.dispatchEvent(new KeyboardEvent("keydown", { key: "=", bubbles: true }));
+      pressDocKey("=");
 
-      const scaleMatch = img.style.transform.match(/scale\(([^)]+)\)/);
-      expect(scaleMatch).not.toBeNull();
-      const scale = parseFloat(scaleMatch![1]!);
-      expect(scale).toBeGreaterThan(1);
+      expect(scaleOf(img)).toBeGreaterThan(1);
     });
 
     it("zooms out on - key", () => {
       openImageLightbox("https://example.com/pic.jpg", "Photo");
 
-      const img = document.body.querySelector(".image-lightbox img") as HTMLElement;
+      const img = lightboxImg();
 
-      document.dispatchEvent(new KeyboardEvent("keydown", { key: "-", bubbles: true }));
+      pressDocKey("-");
 
-      const scaleMatch = img.style.transform.match(/scale\(([^)]+)\)/);
-      expect(scaleMatch).not.toBeNull();
-      const scale = parseFloat(scaleMatch![1]!);
-      expect(scale).toBeLessThan(1);
+      expect(scaleOf(img)).toBeLessThan(1);
     });
 
     it("resets zoom on 0 key", () => {
       openImageLightbox("https://example.com/pic.jpg", "Photo");
 
-      const img = document.body.querySelector(".image-lightbox img") as HTMLElement;
+      const img = lightboxImg();
 
       // Zoom in first
-      document.dispatchEvent(new KeyboardEvent("keydown", { key: "+", bubbles: true }));
-      document.dispatchEvent(new KeyboardEvent("keydown", { key: "+", bubbles: true }));
+      pressDocKey("+");
+      pressDocKey("+");
 
       // Reset
-      document.dispatchEvent(new KeyboardEvent("keydown", { key: "0", bubbles: true }));
+      pressDocKey("0");
 
       expect(img.style.transform).toContain("scale(1)");
       expect(img.style.transform).toContain("translate(0px, 0px)");
@@ -471,87 +468,30 @@ describe("media.ts", () => {
     it("toggles zoom on image click (zoom in when not zoomed)", () => {
       openImageLightbox("https://example.com/pic.jpg", "Photo");
 
-      const img = document.body.querySelector(".image-lightbox img") as HTMLElement;
+      const img = lightboxImg();
 
       // Mock getBoundingClientRect for the click zoom calculation
-      vi.spyOn(img, "getBoundingClientRect").mockReturnValue({
-        left: 0,
-        top: 0,
-        width: 400,
-        height: 300,
-        right: 400,
-        bottom: 300,
-        x: 0,
-        y: 0,
-        toJSON: () => ({}),
-      });
+      stubImgRect(img);
 
       // Simulate mousedown then click at same position (no drag)
-      img.dispatchEvent(
-        new MouseEvent("mousedown", {
-          clientX: 200,
-          clientY: 150,
-          bubbles: true,
-          cancelable: true,
-        }),
-      );
-      img.dispatchEvent(
-        new MouseEvent("click", {
-          clientX: 200,
-          clientY: 150,
-          bubbles: true,
-          cancelable: true,
-        }),
-      );
+      clickImgAt(img, 200, 150);
 
       // Should zoom to scale 3
-      const scaleMatch = img.style.transform.match(/scale\(([^)]+)\)/);
-      expect(scaleMatch).not.toBeNull();
-      expect(parseFloat(scaleMatch![1]!)).toBe(3);
+      expect(scaleOf(img)).toBe(3);
     });
 
     it("toggles zoom on image click (zoom out when zoomed in)", () => {
       openImageLightbox("https://example.com/pic.jpg", "Photo");
 
-      const img = document.body.querySelector(".image-lightbox img") as HTMLElement;
+      const img = lightboxImg();
 
-      vi.spyOn(img, "getBoundingClientRect").mockReturnValue({
-        left: 0,
-        top: 0,
-        width: 400,
-        height: 300,
-        right: 400,
-        bottom: 300,
-        x: 0,
-        y: 0,
-        toJSON: () => ({}),
-      });
+      stubImgRect(img);
 
       // Zoom in first
-      img.dispatchEvent(
-        new MouseEvent("mousedown", {
-          clientX: 200,
-          clientY: 150,
-          bubbles: true,
-          cancelable: true,
-        }),
-      );
-      img.dispatchEvent(
-        new MouseEvent("click", { clientX: 200, clientY: 150, bubbles: true, cancelable: true }),
-      );
+      clickImgAt(img, 200, 150);
 
       // Now click again to zoom out (scale > 1.1 so it resets)
-      img.dispatchEvent(
-        new MouseEvent("mousedown", {
-          clientX: 200,
-          clientY: 150,
-          bubbles: true,
-          cancelable: true,
-        }),
-      );
-      img.dispatchEvent(
-        new MouseEvent("click", { clientX: 200, clientY: 150, bubbles: true, cancelable: true }),
-      );
+      clickImgAt(img, 200, 150);
 
       expect(img.style.transform).toContain("scale(1)");
     });
@@ -559,20 +499,10 @@ describe("media.ts", () => {
     it("does not toggle zoom when mouse moves during click (drag gesture)", () => {
       openImageLightbox("https://example.com/pic.jpg", "Photo");
 
-      const img = document.body.querySelector(".image-lightbox img") as HTMLElement;
+      const img = lightboxImg();
 
       // Mousedown at one position, click at another (moved > 5px)
-      img.dispatchEvent(
-        new MouseEvent("mousedown", {
-          clientX: 100,
-          clientY: 100,
-          bubbles: true,
-          cancelable: true,
-        }),
-      );
-      img.dispatchEvent(
-        new MouseEvent("click", { clientX: 120, clientY: 100, bubbles: true, cancelable: true }),
-      );
+      clickImgAt(img, 100, 100, 120);
 
       // Should remain at scale(1) because dx=20 > 5
       expect(img.style.transform).toBe("");
@@ -581,33 +511,13 @@ describe("media.ts", () => {
     it("supports panning when zoomed in", () => {
       openImageLightbox("https://example.com/pic.jpg", "Photo");
 
-      const img = document.body.querySelector(".image-lightbox img") as HTMLElement;
+      const img = lightboxImg();
       const overlay = document.body.querySelector(".image-lightbox") as HTMLElement;
 
-      vi.spyOn(img, "getBoundingClientRect").mockReturnValue({
-        left: 0,
-        top: 0,
-        width: 400,
-        height: 300,
-        right: 400,
-        bottom: 300,
-        x: 0,
-        y: 0,
-        toJSON: () => ({}),
-      });
+      stubImgRect(img);
 
       // Zoom in first
-      img.dispatchEvent(
-        new MouseEvent("mousedown", {
-          clientX: 200,
-          clientY: 150,
-          bubbles: true,
-          cancelable: true,
-        }),
-      );
-      img.dispatchEvent(
-        new MouseEvent("click", { clientX: 200, clientY: 150, bubbles: true, cancelable: true }),
-      );
+      clickImgAt(img, 200, 150);
 
       // Now start panning (mousedown while zoomed)
       img.dispatchEvent(
@@ -644,7 +554,7 @@ describe("media.ts", () => {
 
     it("mousemove does nothing when not dragging", () => {
       openImageLightbox("https://example.com/pic.jpg", "Photo");
-      const img = document.body.querySelector(".image-lightbox img") as HTMLElement;
+      const img = lightboxImg();
 
       // mousemove without prior drag should not alter transform
       document.dispatchEvent(
@@ -656,161 +566,83 @@ describe("media.ts", () => {
     it("handles wheel zoom in", () => {
       openImageLightbox("https://example.com/pic.jpg", "Photo");
 
-      const img = document.body.querySelector(".image-lightbox img") as HTMLElement;
+      const img = lightboxImg();
       const imgWrap = document.body.querySelector(".image-lightbox-wrap") as HTMLElement;
 
-      vi.spyOn(img, "getBoundingClientRect").mockReturnValue({
-        left: 0,
-        top: 0,
-        width: 400,
-        height: 300,
-        right: 400,
-        bottom: 300,
-        x: 0,
-        y: 0,
-        toJSON: () => ({}),
-      });
+      stubImgRect(img);
 
       // Scroll up (negative deltaY = zoom in)
-      const wheelEvent = new WheelEvent("wheel", {
-        deltaY: -100,
-        clientX: 200,
-        clientY: 150,
-        bubbles: true,
-        cancelable: true,
-      });
-      imgWrap.dispatchEvent(wheelEvent);
+      wheelOn(imgWrap, -100);
 
-      const scaleMatch = img.style.transform.match(/scale\(([^)]+)\)/);
-      expect(scaleMatch).not.toBeNull();
-      expect(parseFloat(scaleMatch![1]!)).toBeGreaterThan(1);
+      expect(scaleOf(img)).toBeGreaterThan(1);
     });
 
     it("handles wheel zoom out", () => {
       openImageLightbox("https://example.com/pic.jpg", "Photo");
 
-      const img = document.body.querySelector(".image-lightbox img") as HTMLElement;
+      const img = lightboxImg();
       const imgWrap = document.body.querySelector(".image-lightbox-wrap") as HTMLElement;
 
-      vi.spyOn(img, "getBoundingClientRect").mockReturnValue({
-        left: 0,
-        top: 0,
-        width: 400,
-        height: 300,
-        right: 400,
-        bottom: 300,
-        x: 0,
-        y: 0,
-        toJSON: () => ({}),
-      });
+      stubImgRect(img);
 
       // Scroll down (positive deltaY = zoom out)
-      const wheelEvent = new WheelEvent("wheel", {
-        deltaY: 100,
-        clientX: 200,
-        clientY: 150,
-        bubbles: true,
-        cancelable: true,
-      });
-      imgWrap.dispatchEvent(wheelEvent);
+      wheelOn(imgWrap, 100);
 
-      const scaleMatch = img.style.transform.match(/scale\(([^)]+)\)/);
-      expect(scaleMatch).not.toBeNull();
-      expect(parseFloat(scaleMatch![1]!)).toBeLessThan(1);
+      expect(scaleOf(img)).toBeLessThan(1);
     });
 
     it("clamps wheel zoom to min scale 0.5", () => {
       openImageLightbox("https://example.com/pic.jpg", "Photo");
 
-      const img = document.body.querySelector(".image-lightbox img") as HTMLElement;
+      const img = lightboxImg();
       const imgWrap = document.body.querySelector(".image-lightbox-wrap") as HTMLElement;
 
-      vi.spyOn(img, "getBoundingClientRect").mockReturnValue({
-        left: 0,
-        top: 0,
-        width: 400,
-        height: 300,
-        right: 400,
-        bottom: 300,
-        x: 0,
-        y: 0,
-        toJSON: () => ({}),
-      });
+      stubImgRect(img);
 
       // Zoom out many times
       for (let i = 0; i < 20; i++) {
-        imgWrap.dispatchEvent(
-          new WheelEvent("wheel", {
-            deltaY: 100,
-            clientX: 200,
-            clientY: 150,
-            bubbles: true,
-            cancelable: true,
-          }),
-        );
+        wheelOn(imgWrap, 100);
       }
 
-      const scaleMatch = img.style.transform.match(/scale\(([^)]+)\)/);
-      expect(parseFloat(scaleMatch![1]!)).toBeGreaterThanOrEqual(0.5);
+      expect(scaleOf(img)).toBeGreaterThanOrEqual(0.5);
     });
 
     it("clamps wheel zoom to max scale 10", () => {
       openImageLightbox("https://example.com/pic.jpg", "Photo");
 
-      const img = document.body.querySelector(".image-lightbox img") as HTMLElement;
+      const img = lightboxImg();
       const imgWrap = document.body.querySelector(".image-lightbox-wrap") as HTMLElement;
 
-      vi.spyOn(img, "getBoundingClientRect").mockReturnValue({
-        left: 0,
-        top: 0,
-        width: 400,
-        height: 300,
-        right: 400,
-        bottom: 300,
-        x: 0,
-        y: 0,
-        toJSON: () => ({}),
-      });
+      stubImgRect(img);
 
       // Zoom in many times
       for (let i = 0; i < 50; i++) {
-        imgWrap.dispatchEvent(
-          new WheelEvent("wheel", {
-            deltaY: -100,
-            clientX: 200,
-            clientY: 150,
-            bubbles: true,
-            cancelable: true,
-          }),
-        );
+        wheelOn(imgWrap, -100);
       }
 
-      const scaleMatch = img.style.transform.match(/scale\(([^)]+)\)/);
-      expect(parseFloat(scaleMatch![1]!)).toBeLessThanOrEqual(10);
+      expect(scaleOf(img)).toBeLessThanOrEqual(10);
     });
 
     it("clamps keyboard zoom to max scale 10", () => {
       openImageLightbox("https://example.com/pic.jpg", "Photo");
-      const img = document.body.querySelector(".image-lightbox img") as HTMLElement;
+      const img = lightboxImg();
 
       for (let i = 0; i < 50; i++) {
-        document.dispatchEvent(new KeyboardEvent("keydown", { key: "+", bubbles: true }));
+        pressDocKey("+");
       }
 
-      const scaleMatch = img.style.transform.match(/scale\(([^)]+)\)/);
-      expect(parseFloat(scaleMatch![1]!)).toBeLessThanOrEqual(10);
+      expect(scaleOf(img)).toBeLessThanOrEqual(10);
     });
 
     it("clamps keyboard zoom to min scale 0.5", () => {
       openImageLightbox("https://example.com/pic.jpg", "Photo");
-      const img = document.body.querySelector(".image-lightbox img") as HTMLElement;
+      const img = lightboxImg();
 
       for (let i = 0; i < 50; i++) {
-        document.dispatchEvent(new KeyboardEvent("keydown", { key: "-", bubbles: true }));
+        pressDocKey("-");
       }
 
-      const scaleMatch = img.style.transform.match(/scale\(([^)]+)\)/);
-      expect(parseFloat(scaleMatch![1]!)).toBeGreaterThanOrEqual(0.5);
+      expect(scaleOf(img)).toBeGreaterThanOrEqual(0.5);
     });
 
     it("closes previous lightbox when opening a new one", () => {

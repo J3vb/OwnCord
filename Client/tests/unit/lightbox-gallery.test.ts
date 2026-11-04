@@ -3,6 +3,7 @@
  * (3A-10c): lightbox-gallery.ts, driven through openImageLightbox.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as logMock from "../helpers/loggerMock";
 
 const { fetchMock, saveMock, writeFileMock } = vi.hoisted(() => ({
   fetchMock: vi.fn(),
@@ -17,9 +18,7 @@ vi.mock("@lib/net/httpProxy", () => ({
   ensureHttpProxy: () => Promise.resolve("http://127.0.0.1:9999"),
   stopHttpProxy: () => Promise.resolve(),
 }));
-vi.mock("@lib/logger", () => ({
-  createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
-}));
+vi.mock("@lib/logger", () => logMock.loggerMock());
 vi.mock("@lib/icons", () => ({ createIcon: () => document.createElement("span") }));
 
 import {
@@ -146,6 +145,29 @@ describe("lightbox gallery", () => {
     expect(document.activeElement).toBe(btn("image-lightbox-next"));
     btn("image-lightbox-prev").click();
     expect(counter()).toBe("2 of 3");
+  });
+
+  it("a sideways swipe steps and a swipe down closes", async () => {
+    open(0);
+    await ready();
+    const swipe = (dx: number, dy: number): void => {
+      for (const [type, x, y] of [
+        ["pointerdown", 200, 200],
+        ["pointerup", 200 + dx, 200 + dy],
+      ] as const) {
+        const e = new MouseEvent(type, { clientX: x, clientY: y, bubbles: true });
+        Object.defineProperties(e, { pointerId: { value: 1 }, pointerType: { value: "touch" } });
+        lightboxImg().dispatchEvent(e);
+      }
+    };
+    swipe(-100, 0);
+    expect(counter()).toBe("2 of 3");
+    swipe(100, 0);
+    swipe(100, 0);
+    expect(counter()).toBe("3 of 3");
+    expect(overlay().getAttribute("aria-label")).toBe("c.png");
+    swipe(0, 120);
+    expect(document.querySelector(".image-lightbox")).toBeNull();
   });
 
   it("a step resets zoom and ends a drag, and modifier+arrow or an open menu is ignored", async () => {

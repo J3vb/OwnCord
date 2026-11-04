@@ -9,6 +9,7 @@
  * flight is reported as such so a typed host is not probed twice.
  */
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
+import { createDeferred as deferred, type Deferred } from "../helpers/deferred";
 import { SessionScope } from "@lib/net/sessionScope";
 import type { ApiClient } from "@lib/api";
 import type { ServerInfoResponse } from "@lib/types";
@@ -32,21 +33,6 @@ import {
   serverInfoFor,
   serverInfoProbing,
 } from "../../src/app/serverHealth";
-
-interface Deferred<T> {
-  promise: Promise<T>;
-  resolve: (v: T) => void;
-  reject: (e: unknown) => void;
-}
-function deferred<T>(): Deferred<T> {
-  let resolve!: (v: T) => void;
-  let reject!: (e: unknown) => void;
-  const promise = new Promise<T>((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
-}
 
 const health = { version: "1.2.3", online_users: 4 };
 function info(epoch: number): ServerInfoResponse {

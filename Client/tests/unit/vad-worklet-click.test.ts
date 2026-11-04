@@ -2,10 +2,11 @@
 // any sensitivity, and speech must open it inside the pipeline's lookahead so
 // the start of a word is not cut off. Drives the real public/vad-worklet.js
 // in the 128-sample render quanta the audio thread delivers.
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { FIXTURE_SAMPLE_RATE, placeInRoomTone, readAudioFixture } from "../helpers/wav";
 import { vadThreshold } from "../../src/lib/voice/audioPipeline";
+import { useFakeWorkletHost } from "../helpers/workletHost";
 
 type Message = { type: string; gated?: boolean; value?: number };
 type Processor = {
@@ -23,19 +24,12 @@ describe("voice gate on recorded audio", () => {
   let processorCtor: (new () => Processor) | null = null;
   const registered = new Map<string, new () => Processor>();
 
+  useFakeWorkletHost<Processor>((name, ctor) => {
+    registered.set(name, ctor);
+    if (name === "vad-processor") processorCtor = ctor;
+  });
   beforeEach(() => {
-    vi.resetModules();
     registered.clear();
-    class FakeAudioWorkletProcessor {
-      readonly port = { onmessage: null, postMessage: () => {} };
-    }
-    Object.assign(globalThis, {
-      registerProcessor: (name: string, ctor: new () => Processor) => {
-        registered.set(name, ctor);
-        if (name === "vad-processor") processorCtor = ctor;
-      },
-      AudioWorkletProcessor: FakeAudioWorkletProcessor,
-    });
   });
 
   /** RNNoise's speech probability for each quantum of `input`, as its
@@ -57,11 +51,6 @@ describe("voice gate on recorded audio", () => {
     }
     return out;
   }
-
-  afterEach(() => {
-    delete (globalThis as Record<string, unknown>).registerProcessor;
-    delete (globalThis as Record<string, unknown>).AudioWorkletProcessor;
-  });
 
   /** Run `input` through the gate; every message with the ms it was posted
    *  at. With `speech`, RNNoise's verdict per quantum feeds the gate's second
@@ -127,7 +116,7 @@ describe("voice gate on recorded audio", () => {
     expect(firstOpen!.atMs - onsetMs).toBeLessThan(LOOKAHEAD_MS);
   });
 
-  describe("with RNNoise's verdict (automatic sensitivity)", () => {
+  describe("with RNNoise's verdict (the slider's sensitivity and the automatic one)", () => {
     // The gate levels automatic sensitivity reaches: -40 dBFS over a voice,
     // down to its -55 dBFS floor over suppressed silence.
     it.each([50, 60, 70, 75])(
@@ -156,6 +145,39 @@ describe("voice gate on recorded audio", () => {
       expect(opened(await gate(50, input, await speechProbabilities(input)))).toEqual([]);
     });
 
+    it.each([30, 40, 50])(
+      "typing after speech does not hold the gate open at sensitivity %i, where its level alone would",
+      async (s) => {
+        // A sentence, then a few seconds of typing at full-scale clicks.
+        const click = readAudioFixture("mouse-click.wav");
+        const typing = new Float32Array(Math.round(3 * FIXTURE_SAMPLE_RATE));
+        let seed = 5;
+        for (let at = 0; at < typing.length - click.length;) {
+          seed = (seed * 1664525 + 1013904223) >>> 0;
+          const gain = 2.5 * (0.4 + (seed / 0x100000000) * 0.8);
+          for (let j = 0; j < click.length; j++) typing[at + j]! += click[j]! * gain;
+          at += Math.round((0.06 + (seed / 0x100000000) * 0.16) * FIXTURE_SAMPLE_RATE);
+        }
+        const input = placeInRoomTone(readAudioFixture("speech.wav"), 1, 6);
+        const typingAt = Math.round(2.2 * FIXTURE_SAMPLE_RATE);
+        for (let i = 0; i < typing.length; i++) input[typingAt + i]! += typing[i]!;
+        const typingEndMs = 5200;
+
+        const isOpenAt = (messages: Array<Message & { atMs: number }>, ms: number) =>
+          !(messages.filter((m) => m.type === "gate" && m.atMs <= ms).at(-1)?.gated ?? false);
+        // The level alone: the clicks keep resetting the hold for as long as
+        // the typing lasts.
+        expect(isOpenAt(await gate(s, input), typingEndMs - 100)).toBe(true);
+
+        // With the verdict the gate closes after the hold and stays shut.
+        const messages = await gate(s, input, await speechProbabilities(input));
+        const shutAt = messages.find((m) => m.type === "gate" && m.gated === true && m.atMs > 1000);
+        expect(shutAt).toBeDefined();
+        expect(shutAt!.atMs).toBeLessThan(2200 + 800);
+        expect(opened(messages).filter((m) => m.atMs > shutAt!.atMs)).toEqual([]);
+      },
+    );
+
     it.each([50, 60, 75])("opens for speech within the lookahead at sensitivity %i", async (s) => {
       const speechAtMs = 1500;
       const input = placeInRoomTone(readAudioFixture("speech.wav"), speechAtMs / 1000, 3);
@@ -177,6 +199,12 @@ describe("voice gate on recorded audio", () => {
       const firstOpen = opened(messages)[0];
       expect(firstOpen).toBeDefined();
       expect(firstOpen!.atMs - onsetMs).toBeLessThan(LOOKAHEAD_MS);
+    });
+
+    it("sensitivity 100 (no gate) stays open: the verdict alone never closes it", async () => {
+      const input = placeInRoomTone(new Float32Array(0), 1, 2);
+      const messages = await gate(100, input, await speechProbabilities(input));
+      expect(messages.some((m) => m.type === "gate" && m.gated === true)).toBe(false);
     });
 
     it("the room tone closes the gate even at a sensitivity below its level", async () => {

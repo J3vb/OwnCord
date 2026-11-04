@@ -7,7 +7,7 @@
 // Asserts only what the CALLER receives: no command name, no options shape.
 // What a caller of this seam can observe is the `Response` it gets back (and
 // the error it gets instead), so that is all this suite pins.
-import { beforeEach, describe, expect, test } from "vitest";
+import { beforeEach, describe, expect, test, type Mock } from "vitest";
 import type { HttpClient } from "../../../src/platform/contracts/http";
 
 /** A small control handle the legacy/desktop binding supplies so the suite
@@ -20,6 +20,38 @@ export interface NativeControl {
   failsWith(error: unknown): void;
   /** The URLs the native transport has been asked for, in call order. */
   requested(): readonly string[];
+}
+
+/** A `NativeControl` over a fetch mock; `reset` clears it to a 200 and then runs `afterReset`. */
+export function fetchStub(
+  fetchMock: Mock<(url: string, init?: RequestInit) => Promise<Response>>,
+  afterReset: () => void = () => {},
+): { reset: () => void; native: NativeControl } {
+  const requested: string[] = [];
+  const reset = (): void => {
+    fetchMock.mockReset();
+    requested.length = 0;
+    fetchMock.mockImplementation((url: string) => {
+      requested.push(url);
+      return Promise.resolve(new Response(null, { status: 200 }));
+    });
+    afterReset();
+  };
+  const native: NativeControl = {
+    respondsWith(response) {
+      reset();
+      fetchMock.mockImplementation((url: string) => {
+        requested.push(url);
+        return Promise.resolve(response);
+      });
+    },
+    failsWith(error) {
+      reset();
+      fetchMock.mockRejectedValue(error);
+    },
+    requested: () => [...requested],
+  };
+  return { reset, native };
 }
 
 export interface HttpSubject {

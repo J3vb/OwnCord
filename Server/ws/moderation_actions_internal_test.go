@@ -198,7 +198,7 @@ func TestMuteForTimeout_SFUFailureRollsBackDB(t *testing.T) {
 
 // TestMuteForTimeout_SFUFailureRollsBackDB_SupersedeDuringSFU extends the
 // base case above with round 5's remaining named gap: a supersede landing
-// WHILE A's own SFU call is in flight, still holding h.voiceMod's per-user
+// WHILE A's own SFU call is in flight, still holding h.voiceHub.mod's per-user
 // lock. db.TimeoutUser's ledger write is NOT gated by that lock at all —
 // only the voice half is (moderation_action_queries.go's own doc comment) —
 // so B's supersede genuinely completes while A is still parked. A's SFU
@@ -230,7 +230,7 @@ func TestMuteForTimeout_SFUFailureRollsBackDB_SupersedeDuringSFU(t *testing.T) {
 		t.Fatalf("TimeoutUser(A): %v", err)
 	}
 
-	// Parks A's SFU call — still holding h.voiceMod's per-user lock — until
+	// Parks A's SFU call — still holding h.voiceHub.mod's per-user lock — until
 	// the supersede below has run, then fails it.
 	parked := make(chan struct{})
 	release := make(chan struct{})
@@ -256,7 +256,7 @@ func TestMuteForTimeout_SFUFailureRollsBackDB_SupersedeDuringSFU(t *testing.T) {
 	}
 
 	// B supersedes A while A's SFU call is still in flight, still holding
-	// the lock — the ledger write is not gated by h.voiceMod at all.
+	// the lock — the ledger write is not gated by h.voiceHub.mod at all.
 	actionB, supersededIDs, err := database.TimeoutUser(ctx, uid, actorID, nil, "B", time.Now().Add(time.Hour))
 	if err != nil {
 		t.Fatalf("TimeoutUser(B): %v", err)
@@ -537,7 +537,7 @@ func TestHandleVoiceModMuteV2_ModLessDepsFallsBackToUnlockedWrite(t *testing.T) 
 // partial: TestVoiceModLock_StaleUnmuteNeverClearsAFreshReclaim only ever
 // runs its two paths sequentially, which proves the ownership model's
 // correctness but nothing about whether MuteForTimeout genuinely takes
-// h.voiceMod at all. This parks the target's lock directly, starts
+// h.voiceHub.mod at all. This parks the target's lock directly, starts
 // MuteForTimeout in a goroutine, and asserts it is still blocked a moment
 // later — real contention on the Hub's own lock, not a doc comment's claim.
 func TestMuteForTimeout_ContendsOnTheHubLock(t *testing.T) {
@@ -553,7 +553,7 @@ func TestMuteForTimeout_ContendsOnTheHubLock(t *testing.T) {
 	}
 	actionID := seedTimeoutActionForTest(t, database, uid)
 
-	unlock := h.voiceMod.lock(uid)
+	unlock := h.voiceHub.mod.lock(uid)
 
 	done := make(chan struct{})
 	go func() {
@@ -767,14 +767,14 @@ func TestVoiceModLock_StaleUnmuteNeverClearsAFreshReclaim(t *testing.T) {
 }
 
 // TestVoiceModLock_StaleUnmuteNeverClearsAFreshReclaim_GenuineContention
-// promotes the sequential test above to real contention on h.voiceMod, the
+// promotes the sequential test above to real contention on h.voiceHub.mod, the
 // coordinator's own named gap: TestVoiceModLock_StaleUnmuteNeverClearsAFreshReclaim
 // runs its two calls one after the other on the SAME goroutine, which proves
 // the ownership model's correctness but nothing about whether the two
 // genuinely serialize on the lock rather than merely happening to be invoked
 // in that order. Using TestMuteForTimeout_ContendsOnTheHubLock's parking
 // pattern, this starts the first call in its own goroutine and parks it mid
-// SFU-call (inside MuteParticipant, still holding h.voiceMod's per-user
+// SFU-call (inside MuteParticipant, still holding h.voiceHub.mod's per-user
 // lock) via muteParticipantHookForTest, starts the second call in a second
 // goroutine, and asserts it is STILL BLOCKED a moment later before releasing
 // the first — real contention, not a doc comment's claim — then checks the
@@ -815,7 +815,7 @@ func TestVoiceModLock_StaleUnmuteNeverClearsAFreshReclaim_GenuineContention(t *t
 			actionY := seedTimeoutActionForTest(t, database, uid)
 
 			// From here, the hook parks whichever call reaches MuteParticipant
-			// first — still holding h.voiceMod's per-user lock — until
+			// first — still holding h.voiceHub.mod's per-user lock — until
 			// releaseFirst closes, and logs every SFU call's direction.
 			var sfuMu sync.Mutex
 			var sfuLog []string
@@ -866,7 +866,7 @@ func TestVoiceModLock_StaleUnmuteNeverClearsAFreshReclaim_GenuineContention(t *t
 			}()
 			select {
 			case <-secondDone:
-				t.Fatal("the second call completed while the first still held h.voiceMod mid-SFU-call")
+				t.Fatal("the second call completed while the first still held h.voiceHub.mod mid-SFU-call")
 			case <-time.After(100 * time.Millisecond):
 				// Expected: genuinely blocked on the per-user lock.
 			}

@@ -50,6 +50,7 @@ import { channelsStore } from "../../src/stores/channels.store";
 import { Permission } from "../../src/lib/types";
 import type { MemberListOptions } from "../../src/components/MemberList";
 import { resetMembersState } from "../helpers/storeResets";
+import { signInAsAdmin } from "../helpers/storeSeeds";
 
 interface Harness {
   panel: MemberPanel;
@@ -75,13 +76,7 @@ const ROLES = [
 ];
 
 function resetStores(): void {
-  authStore.setState(() => ({
-    token: null,
-    user: { id: 1, username: "me", role: "admin", avatar: null, totp_enabled: false },
-    serverName: "Test Server",
-    motd: null,
-    isAuthenticated: true,
-  }));
+  signInAsAdmin("me", { token: null });
   resetMembersState();
   channelsStore.setState(() => ({
     categories: [],

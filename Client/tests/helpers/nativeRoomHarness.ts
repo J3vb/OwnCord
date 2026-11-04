@@ -8,13 +8,9 @@ import { desktop } from "../../src/platform/desktop";
 import { NativeScreenAudioTrack } from "../../src/features/voice/native/screenAudioTrack";
 import type { NativeScreenTrack } from "../../src/features/voice/native/screenTrack";
 import { host, track } from "./nativeRoomMocks";
+import { audio, nativeStatsSample } from "./nativeVoiceStats";
 
-export const audio = {
-  echoCancellation: true,
-  noiseSuppression: true,
-  autoGainControl: true,
-  enhancedNoiseSuppression: false,
-};
+export { audio };
 
 export const emit = (envelope: NativeVoiceEnvelope) => {
   for (const h of host.handlers) h(envelope);
@@ -83,32 +79,8 @@ export const publishedCamera = async () => {
 
 export const names = () => host.calls.map(([n]) => n);
 
-export const sample = (over: Partial<NativeVoiceStats> = {}): NativeVoiceStats => ({
-  atMs: 1000,
-  publisher: [
-    {
-      type: "candidate-pair",
-      id: "CP1",
-      currentRoundTripTime: 0.042,
-      bytesSent: 900,
-      bytesReceived: 1200,
-    },
-    { type: "outbound-rtp", id: "OA1", kind: "audio", packetsSent: 100, bytesSent: 4000 },
-    {
-      type: "inbound-rtp",
-      id: "IA1",
-      kind: "audio",
-      packetsReceived: 100,
-      bytesReceived: 3000,
-      packetsLost: 0,
-      jitter: 0.004,
-    },
-  ],
-  subscriber: [],
-  remoteVideo: {},
-  localVideo: {},
-  ...over,
-});
+export const sample = (over: Partial<NativeVoiceStats> = {}): NativeVoiceStats =>
+  nativeStatsSample(0.042, over);
 
 export const getStatsCalls = () => host.calls.filter(([n]) => n === "getStats");
 

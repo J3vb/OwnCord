@@ -29,6 +29,7 @@ func supportConfig(cfg *config.Config) map[string]any {
 		"upload.user_quota_mb":                cfg.Upload.UserQuotaMB,
 		"voice.auto_download_livekit":         cfg.Voice.AutoDownloadLiveKit,
 		"voice.advertise_internal_ip":         cfg.Voice.AdvertiseInternalIP,
+		"voice.livekit_metrics_url_set":       cfg.Voice.LiveKitMetricsURL != "",
 		"voice.quality":                       supportEnum(cfg.Voice.Quality, "low", "medium", "high"),
 		"event_persistence.enabled":           cfg.EventPersistence.Enabled,
 		"event_persistence.retention_hours":   cfg.EventPersistence.RetentionHours,

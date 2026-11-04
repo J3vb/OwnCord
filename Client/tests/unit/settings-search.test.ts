@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
 import * as voiceSession from "../helpers/voiceSessionMock";
 import { createSettingsOverlay } from "../../src/features/settings/SettingsOverlay";
 import { buildMyUploadsTab } from "../../src/features/uploads/myUploadsTab";
@@ -76,29 +77,9 @@ import { gameActivityText } from "../../src/i18n/gameActivity";
 import { listeningDetailsText } from "../../src/i18n/listeningDetails";
 import type { SearchableTab } from "../../src/features/settings/settingsSearch";
 import { clearHost, hostAndroidApp, hostDesktopApp } from "../helpers/androidHost";
+import { baseOptions } from "../helpers/settingsOverlayOptions";
 
-const options = {
-  onClose: vi.fn(),
-  onChangePassword: vi.fn().mockResolvedValue(undefined),
-  onUpdateProfile: vi.fn().mockResolvedValue(undefined),
-  onUploadAvatar: vi.fn().mockResolvedValue("/api/v1/files/test"),
-  onRemoveAvatar: vi.fn().mockResolvedValue(undefined),
-  onLogout: vi.fn(),
-  onDeleteAccount: vi.fn().mockResolvedValue(undefined),
-  onStatusChange: vi.fn(),
-  onEnableTotp: vi.fn().mockResolvedValue({ qr_uri: "otpauth://test", backup_codes: [] }),
-  onConfirmTotp: vi.fn().mockResolvedValue(undefined),
-  onDisableTotp: vi.fn().mockResolvedValue(undefined),
-  onRefreshTotpStatus: vi.fn().mockResolvedValue(undefined),
-  onRegenerateRecoveryCodes: vi.fn().mockResolvedValue([]),
-  onEnrolRecoveryKit: vi.fn().mockResolvedValue({ created_at: "" }),
-  onGetRecoveryKitStatus: vi.fn().mockResolvedValue({ enrolled: false, used_at: null }),
-  onListSessions: vi.fn().mockResolvedValue([]),
-  onRevokeSession: vi.fn().mockResolvedValue(undefined),
-  onRevokeAllSessions: vi
-    .fn()
-    .mockResolvedValue({ sessions_revoked: 0, current_session_revoked: false }),
-};
+const options = baseOptions();
 
 const uploadsApi = {
   getUserStorage: vi.fn().mockResolvedValue({ used_bytes: 1, quota_bytes: 0 }),
@@ -108,25 +89,39 @@ const uploadsApi = {
 
 const TAB_SELECTOR = ".settings-sidebar > button.settings-nav-item[role='tab']";
 
+/** Runs `body` with Element.prototype.scrollIntoView replaced by a spy, then restores it. */
+function withScrollSpy(body: (scroll: ReturnType<typeof vi.fn>) => void): void {
+  const scroll = vi.fn();
+  const original = Element.prototype.scrollIntoView;
+  Element.prototype.scrollIntoView = scroll;
+  try {
+    body(scroll);
+  } finally {
+    Element.prototype.scrollIntoView = original;
+  }
+}
+
 describe("settings search", () => {
   let container: HTMLDivElement;
   let overlay: ReturnType<typeof createSettingsOverlay> | null = null;
 
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => {
+      overlay?.destroy?.();
+      overlay = null;
+    },
+  );
+
   beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
     localStorage.clear();
     vi.clearAllMocks();
     mockAppVersion.mockResolvedValue("1.2.3-test");
     mockAuthState.user = { id: 1, username: "testuser", totp_enabled: false, display_name: null };
     mockUiState.settingsOpen = true;
     mockUiState.settingsTab = null;
-  });
-
-  afterEach(() => {
-    overlay?.destroy?.();
-    overlay = null;
-    container.remove();
   });
 
   function mountOverlay(extra: Partial<Parameters<typeof createSettingsOverlay>[0]> = {}): void {
@@ -362,10 +357,7 @@ describe("settings search", () => {
     });
 
     it("highlights the already-open tab as the query changes and scrolls to the first hit", () => {
-      const scroll = vi.fn();
-      const original = Element.prototype.scrollIntoView;
-      Element.prototype.scrollIntoView = scroll;
-      try {
+      withScrollSpy((scroll) => {
         mountOverlay();
         tabs()
           .find((t) => labelFor(t) === "Appearance")!
@@ -374,9 +366,7 @@ describe("settings search", () => {
         expect(container.querySelector("mark.settings-search-hit")).not.toBeNull();
         expect(scroll).toHaveBeenCalledTimes(1);
         expect(scroll.mock.contexts[0]).toBe(container.querySelector("mark.settings-search-hit"));
-      } finally {
-        Element.prototype.scrollIntoView = original;
-      }
+      });
     });
 
     it("leaves elements with child elements alone and splits repeated hits", () => {
@@ -414,10 +404,7 @@ describe("settings search", () => {
     });
 
     it("scrolls to the first visible hit, skipping hidden rows", () => {
-      const scroll = vi.fn();
-      const original = Element.prototype.scrollIntoView;
-      Element.prototype.scrollIntoView = scroll;
-      try {
+      withScrollSpy((scroll) => {
         mountOverlay();
         tabs()
           .find((t) => labelFor(t) === "Appearance")!
@@ -433,9 +420,7 @@ describe("settings search", () => {
         const target = scroll.mock.contexts[0] as HTMLElement;
         expect(scroll).toHaveBeenCalledTimes(1);
         expect(rows[0]!.contains(target)).toBe(false);
-      } finally {
-        Element.prototype.scrollIntoView = original;
-      }
+      });
     });
 
     it("ignores keys that belong to an IME composition", () => {

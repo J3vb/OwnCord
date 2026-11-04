@@ -1,12 +1,19 @@
 package ws
 
-import "github.com/J3vb/OwnCord/Server/syncutil"
+import (
+	"sort"
+
+	"github.com/J3vb/OwnCord/Server/syncutil"
+)
 
 // eventEntry stores a broadcast event for potential replay.
 type eventEntry struct {
 	seq       uint64
 	channelID int64 // 0 = global broadcast, >0 = channel-scoped
-	data      []byte
+	// contentBearing is contentBearingKinds[type], read once at Push so a
+	// replay walk never re-parses a frame's type.
+	contentBearing bool
+	data           []byte
 }
 
 // EventRingBuffer is a bounded, thread-safe ring buffer for recent broadcast events.
@@ -29,9 +36,15 @@ func NewEventRingBuffer(size int) *EventRingBuffer {
 // Push adds an event to the ring buffer.
 // channelID identifies the channel scope (0 = global broadcast).
 func (rb *EventRingBuffer) Push(seq uint64, channelID int64, data []byte) {
+	rb.pushEntry(seq, channelID, contentBearingKinds[extractEventType(data)], data)
+}
+
+// pushEntry is Push with the content-bearing flag worked out by the caller,
+// so the hub can read a frame's type before it takes the sequencing lock.
+func (rb *EventRingBuffer) pushEntry(seq uint64, channelID int64, contentBearing bool, data []byte) {
 	rb.mu.Lock()
 	defer rb.mu.Unlock()
-	rb.entries[rb.pos] = eventEntry{seq: seq, channelID: channelID, data: data}
+	rb.entries[rb.pos] = eventEntry{seq: seq, channelID: channelID, contentBearing: contentBearing, data: data}
 	rb.pos = (rb.pos + 1) % rb.size
 	if rb.count < rb.size {
 		rb.count++
@@ -119,20 +132,21 @@ func (rb *EventRingBuffer) eventsSince(afterSeq uint64, allowed, readable map[in
 		return nil
 	}
 
-	result := make([][]byte, 0)
-	for i := 0; i < rb.count; i++ {
-		idx := (oldestIdx + i) % rb.size
-		e := rb.entries[idx]
-		if e.seq <= afterSeq {
-			continue
-		}
+	// Seqs rise through the ring, so the first newer entry starts the tail and
+	// its length bounds the result.
+	first := sort.Search(rb.count, func(i int) bool {
+		return rb.entries[(oldestIdx+i)%rb.size].seq > afterSeq
+	})
+	result := make([][]byte, 0, rb.count-first)
+	for i := first; i < rb.count; i++ {
+		e := &rb.entries[(oldestIdx+i)%rb.size]
 		if e.data == nil {
 			// A slot RemoveWhere cleared: the client would ack past a frame
 			// it never saw. Replay cannot cover the range — full ready.
 			return nil
 		}
 		if unfiltered || e.channelID == 0 || (allowed[e.channelID] &&
-			(!contentBearingKinds[extractEventType(e.data)] || readable[e.channelID])) {
+			(!e.contentBearing || readable[e.channelID])) {
 			result = append(result, e.data)
 		}
 	}

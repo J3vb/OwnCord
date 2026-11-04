@@ -18,6 +18,7 @@ import {
   setVoiceStatus,
 } from "@stores/voice.store";
 import { createLogger } from "@lib/logger";
+import { recordEvent } from "@lib/diagnostics/eventSink";
 import { parseUserId } from "../../features/voice/sessionState";
 import { isUnencryptedPublication } from "../../features/voice/mediaEncryption";
 import { detachRoom } from "../../features/voice/releaseRoom";
@@ -578,6 +579,7 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
    */
   const decryptStreaks = new WeakMap<Participant, { start: number; keyInstalls: number }>();
   const handleEncryptionError = (error: Error, participant?: Participant): void => {
+    recordEvent("voice.encryption", { state: "error" });
     // SRE-M2: every receive-side decrypt failure (any error attributed to a
     // remote sender, native or web) counts toward the diagnostics total — a
     // tolerated rotation race is still a dropped frame and the count is what

@@ -135,6 +135,80 @@
   background: var(--bg-modifier-selected);
 }
 
+/* The composer's "+" menu (features/messaging/attachSheet.ts): the file
+   sources, then Poll (and Sticker off the phone) where the server and
+   Settings allow. A sheet on a phone, a small grid above the chat bar elsewhere. */
+.attach-sheet {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  padding: 4px 12px 16px;
+}
+.attach-sheet-tile {
+  min-height: 104px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border: none;
+  border-radius: var(--radius-lg);
+  background: var(--bg-input);
+  color: var(--text-normal);
+  font-size: var(--font-size-md);
+  font-weight: 500;
+}
+.attach-sheet-tile:active {
+  background: var(--bg-modifier-active);
+}
+.attach-sheet-icon {
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--bg-primary);
+  color: var(--text-muted);
+}
+.attach-sheet-icon-camera {
+  color: var(--green);
+}
+.attach-sheet-icon-gallery {
+  color: var(--accent);
+}
+.attach-sheet-icon-poll {
+  color: var(--yellow);
+}
+.attach-sheet-icon-sticker {
+  color: var(--accent);
+}
+.attach-menu {
+  position: absolute;
+  z-index: 90;
+  bottom: 100%;
+  left: 0;
+  margin-bottom: 4px;
+  display: grid;
+  grid-template-columns: repeat(2, 96px);
+  gap: 6px;
+  padding: 8px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+}
+.attach-menu .attach-sheet-tile {
+  min-height: 84px;
+  gap: 8px;
+  background: var(--bg-secondary);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+}
+.attach-menu .attach-sheet-tile:is(:hover, :focus-visible) {
+  background: var(--bg-hover);
+}
+
 /* Menus as sheets (components/menuSheet.ts): the channel and server menus. A
    row can carry a second line, a chevron (it opens a second page) or a check. */
 .menu-sheet-row {
@@ -451,4 +525,15 @@
   .chat-header .ch-tools .search-btn {
     display: flex;
   }
+}
+
+/* The own profile card as a sheet: the sheet draws the frame. */
+.self-profile-sheet .self-profile-card {
+  position: static;
+  width: auto;
+  max-width: none;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
 }

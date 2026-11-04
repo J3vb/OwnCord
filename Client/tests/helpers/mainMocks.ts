@@ -91,6 +91,7 @@ export const capturedConnectCallbacks: {
   onHostSettled?: (host: string) => void;
   onDeleteProfile?: (profileId: string) => void;
   onToggleAutoLogin?: (profileId: string, enabled: boolean) => void;
+  onAutoLoginCancel?: () => void;
 } = {};
 
 // Every connect page main.ts builds, in order. The first is built at startup,

@@ -112,6 +112,9 @@ export const settingsText = defineCatalog("settings", {
   "appearance.customThemes.export": "Export",
   "appearance.customThemes.exportAria": "Export {name} as a .css file",
   "appearance.customThemes.exportFailed": "Could not save the theme file",
+  "appearance.customThemes.share": "Share",
+  "appearance.customThemes.shareAria": "Share {name} as a .css file",
+  "appearance.customThemes.shareFailed": "Could not share the theme file",
   "appearance.customThemes.delete": "Delete",
   "appearance.customThemes.deleteAria": "Delete {name}",
   "appearance.customThemes.deleteTitle": "Delete {name}?",
@@ -214,7 +217,7 @@ export const settingsText = defineCatalog("settings", {
   "images.inline.desc": "Automatically display images, videos, and GIFs inline",
   "images.animateGifs.label": "Animate GIFs",
   "images.animateGifs.desc":
-    "Play GIF animations automatically. When disabled, GIFs show as static images",
+    "Play GIF and sticker animations automatically. When disabled, they show as static images",
 
   "images.animateEmoji.label": "Animate emoji",
   "images.animateEmoji.desc":
@@ -225,13 +228,14 @@ export const settingsText = defineCatalog("settings", {
   "images.chatBar.emoji.desc":
     "Show the emoji button in the chat bar. Ctrl+E still opens the picker",
   "images.chatBar.emoji.desc.android": "Show the emoji button in the chat bar",
-  "images.chatBar.sticker.label": "Show sticker button",
-  "images.chatBar.sticker.desc": "Show the sticker button in the chat bar",
+  "images.chatBar.sticker.label": "Show Sticker in the + menu",
+  "images.chatBar.sticker.desc":
+    "Show the Sticker tile in the + menu. On a phone, stickers stay a tab of the emoji picker",
   "images.chatBar.gif.label": "Show GIF button",
   "images.chatBar.gif.desc": "Show the GIF button in the chat bar. Ctrl+G still opens the picker",
   "images.chatBar.gif.desc.android": "Show the GIF button in the chat bar",
-  "images.chatBar.poll.label": "Show Poll button",
-  "images.chatBar.poll.desc": "Show the Poll button in the chat bar",
+  "images.chatBar.poll.label": "Show Poll in the + menu",
+  "images.chatBar.poll.desc": "Show the Poll tile in the + menu",
   "images.chatBar.voice.label": "Show voice message button",
   "images.chatBar.voice.desc": "Show the microphone button for voice messages in the chat bar",
 
@@ -434,8 +438,14 @@ export const settingsText = defineCatalog("settings", {
   "logs.copyDiagnostics": "Copy Diagnostics",
   "logs.exportBundle": "Export Support Bundle",
   "logs.bundleNote":
-    "Saves a zip of your logs, diagnostics and settings on this computer. Nothing is uploaded. Log lines are not redacted, so read them before sharing.",
+    "Saves a zip of your logs, diagnostics and settings on this computer. Nothing is uploaded. Tokens, links, addresses and other secrets are removed first, but read it before sharing.",
   "logs.bundleSaved": "Support bundle saved.",
+  "logs.eventLog": "Keep a diagnostic event log",
+  "logs.eventLogDesc":
+    "Records what the camera, calls and server connection did in the last 30 minutes, without names, messages or addresses. It stays on this device and goes into the support bundle. Turning it off deletes it.",
+  "logs.shareBundle": "Share Support Bundle",
+  "logs.bundleNoteShare":
+    "Makes a zip of your logs, diagnostics and settings on this phone and opens the share sheet, so you choose where it goes. Tokens, links, addresses and other secrets are removed first, but read it before sharing.",
   "logs.openFolder": "Open Log Folder",
   "logs.openFolderFailed": "Could not open the log folder: {error}",
   "logs.exportFailed": "Export failed: {error}",
@@ -453,7 +463,7 @@ export const settingsText = defineCatalog("settings", {
   "logs.shareMode.motion-balanced": "Smooth motion, balanced",
   "logs.shareMode.motion-framerate": "Smooth motion, keep frame rate",
   "logs.bundleReadme":
-    "OwnCord support bundle\n\nCreated on this computer by the OwnCord desktop client. Nothing was sent to\na server. Contents:\n\n  app.json               client version, OS, webview and when this bundle\n                         was made\n  settings.json          allowlisted display and voice settings, and your saved\n                         servers (name, address, username, sign-in options)\n  voice-diagnostics.json the voice session state shown in Settings >\n                         Diagnostics & logs\n  share-diagnostics.json the recent screen-share stats (only when Record\n                         screen-share details was on and a share was recorded)\n  logs/*.jsonl           the client's log files, copied verbatim\n  logs/owncord-client*.log the native host log (startup, updates, TLS/TOFU and,\n                         on Linux, native voice), copied verbatim and\n                         tail-capped at 2 MB per file\n\nSettings are copied from a fixed allowlist and the OS keychain is not read, so\nno password, session token, recovery kit, recovery code or 2FA secret is taken\nfrom them. The log files are NOT redacted: they are exported exactly as written\nand can contain anything the app logged. Read them before sharing this bundle,\nand share it only with someone you trust.\n",
+    "OwnCord support bundle\n\nCreated on this device by the OwnCord client. Nothing was sent to a server.\nContents:\n\n  manifest.json          every file below with its size, SHA-256 and how many\n                         values were removed from it; a report id; files left\n                         out to keep the bundle under 4 MB\n  redactions.json        how many values each rule removed, per file\n  app.json               client version, OS, webview and when this bundle\n                         was made\n  settings.json          allowlisted display and voice settings, and your saved\n                         servers (name, address, username, sign-in options)\n  voice-diagnostics.json the voice session state shown in Settings >\n                         Diagnostics & logs\n  share-diagnostics.json the recent screen-share stats (only when Record\n                         screen-share details was on and a share was recorded)\n  last-exit.json         how the app's last run ended (crash, killed, normal),\n                         read from the native log\n  logs/*.jsonl           the client's log files\n  logs/events-*.jsonl    the diagnostic event log: what the camera, calls and\n                         server connection did, without names or messages\n  logs/owncord-client*.log the native host log (startup, updates, TLS/TOFU,\n                         crashes and exits), tail-capped at 2 MB per file\n\nSettings are copied from a fixed allowlist and the OS keychain is not read, so\nno password, session token, recovery kit, recovery code or 2FA secret is taken\nfrom them. Every file passes through a redaction step first: tokens, passwords,\nkeys, cookies, recovery codes, links (cut to the server name), email and IP\naddresses, and your home folder name (written as ~) are removed. It looks for\ntheir shape only: a log line can contain anything the app logged in plain\nwords. Read the files before sharing this bundle, and share it only with\nsomeone you trust.\n",
 
   "diagnostics.short.connection": "Server",
   "diagnostics.short.authentication": "Sign-in",
@@ -555,6 +565,10 @@ export const settingsText = defineCatalog("settings", {
   "voiceAudio.gstreamerMissing":
     "Camera support is missing. Install the GStreamer plugins: gstreamer1.0-plugins-good (Ubuntu/Debian), gstreamer1-plugins-good (Fedora) or gst-plugins-good (Arch), then restart OwnCord.",
   "voiceAudio.inputDevice": "Input Device",
+  "voiceAudio.microphone.android": "Microphone",
+  "voiceAudio.microphone.android.desc":
+    "Android picks the mic that matches the output: phone, wired or Bluetooth headset.",
+  "voiceAudio.microphone.android.auto": "Automatic",
   "voiceAudio.default": "Default",
   "voiceAudio.defaultLive": "Default ({device})",
   "voiceAudio.inputVolume": "Input Volume",
@@ -563,6 +577,9 @@ export const settingsText = defineCatalog("settings", {
   "voiceAudio.autoPlayCameras": "Automatically play cameras",
   "voiceAudio.autoPlayCamerasDesc":
     "Others' cameras play as soon as they turn them on. Off, each camera waits for you to click Watch stream.",
+  "voiceAudio.mirrorSelfCamera": "Mirror my camera preview",
+  "voiceAudio.mirrorSelfCameraDesc":
+    "Flips only your own preview, like a mirror. Off, it shows you exactly as others see you. Others always see you the right way round.",
   "voiceAudio.sensitivityValue": "{value} dB",
   "voiceAudio.sensitivityOff": "Off",
   "voiceAudio.outputDevice": "Output Device",

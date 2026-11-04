@@ -368,6 +368,42 @@ func (d *DB) UpdateUserTOTPSecret(ctx context.Context, id int64, secret *string)
 	return nil
 }
 
+// UserTOTPSecret is one stored TOTP secret, exactly as the column holds it.
+type UserTOTPSecret struct {
+	UserID int64
+	Stored string
+}
+
+// ListUserTOTPSecrets returns every non-NULL stored TOTP secret, by user id.
+func (d *DB) ListUserTOTPSecrets(ctx context.Context) ([]UserTOTPSecret, error) {
+	rows, err := d.q.ListUserTOTPSecrets(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("ListUserTOTPSecrets: %w", err)
+	}
+	out := make([]UserTOTPSecret, 0, len(rows))
+	for _, r := range rows {
+		if r.TotpSecret != nil {
+			out = append(out, UserTOTPSecret{UserID: r.ID, Stored: *r.TotpSecret})
+		}
+	}
+	return out, nil
+}
+
+// ReplaceUserTOTPSecret swaps a user's stored TOTP secret from old to next and
+// reports whether it did: false means the row no longer holds old (a
+// concurrent enable or disable won), and nothing was written.
+func (d *DB) ReplaceUserTOTPSecret(ctx context.Context, userID int64, old, next string) (bool, error) {
+	n, err := d.q.ReplaceUserTOTPSecret(ctx, dbgen.ReplaceUserTOTPSecretParams{
+		NewSecret: &next,
+		ID:        userID,
+		OldSecret: &old,
+	})
+	if err != nil {
+		return false, fmt.Errorf("ReplaceUserTOTPSecret: %w", err)
+	}
+	return n == 1, nil
+}
+
 // UpdateUserIdentityKey sets or clears the E2EE identity public key. Last
 // write wins; the service audits key changes so peers can detect a rotation.
 func (d *DB) UpdateUserIdentityKey(ctx context.Context, id int64, key *string) error {

@@ -17,6 +17,7 @@ import { uiStore } from "@stores/ui.store";
 import { showToast } from "@lib/ui/toast";
 import { noteJoinFailed } from "../../features/voice/joinBackoff";
 import { noteJoinSent } from "../../features/voice/joinRequest";
+import { noteVoiceLeave } from "../../features/voice/leaveOwed";
 import { joinBackoffText } from "../../features/voice/joinBackoffText";
 import type { VoiceModerationCallbacks } from "@components/ChannelSidebar";
 import {
@@ -80,6 +81,7 @@ export function createVoiceWidgetCallbacks(
       if (voiceStore.getState().currentChannelId === null) return;
       log.info("Leaving voice channel (widget disconnect)");
       void voiceSessionLeave(false);
+      noteVoiceLeave();
       leaveVoiceChannel();
       if (socketLive()) ws.send({ type: "voice_leave", payload: {} });
     },
@@ -234,6 +236,7 @@ export function createSidebarVoiceCallbacks(ws: WsClient): SidebarVoiceCallbacks
     onVoiceLeave: () => {
       log.info("Leaving voice channel");
       void voiceSessionLeave(false);
+      noteVoiceLeave();
       leaveVoiceChannel();
       if (socketLive()) ws.send({ type: "voice_leave", payload: {} });
     },

@@ -1,22 +1,22 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
 import { createModal, createPromptModal } from "../../src/lib/ui/modalFactory";
 
 describe("createModal", () => {
   let container: HTMLDivElement;
 
-  beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    // Close any modal a test left open, so its document keydown listener does
-    // not outlive the test: Escape is the dismissal every such modal has.
-    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
-    container.remove();
-    // Clean up any stray overlays
-    document.querySelectorAll(".modal-overlay").forEach((el) => el.remove());
-  });
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => {
+      // Close any modal a test left open, so its document keydown listener does
+      // not outlive the test: Escape is the dismissal every such modal has.
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+      // Clean up any stray overlays
+      document.querySelectorAll(".modal-overlay").forEach((el) => el.remove());
+    },
+  );
 
   it("renders with correct structure (overlay > modal > content)", () => {
     const content = document.createElement("div");
@@ -302,17 +302,16 @@ describe("createModal", () => {
 describe("createPromptModal", () => {
   let container: HTMLDivElement;
 
-  beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    // Close any prompt a test left open (see createModal's afterEach).
-    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
-    container.remove();
-    document.querySelectorAll(".modal-overlay").forEach((el) => el.remove());
-  });
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => {
+      // Close any prompt a test left open (see createModal's afterEach).
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+      document.querySelectorAll(".modal-overlay").forEach((el) => el.remove());
+    },
+  );
 
   function getInput(): HTMLInputElement {
     const el = document.querySelector<HTMLInputElement>("[data-testid='prompt-input']");

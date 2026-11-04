@@ -12,7 +12,7 @@ import (
 // unless the actor's top role is the owner's, the target's top role
 // must sit strictly below it, and the owner is never a target. The owner has no
 // such limit. The target may not hold an owner-tier bit the actor lacks. A target with no role is refused, failing closed.
-func (s *AuthService) requireRecoveryTargetBelow(ctx context.Context, actor *db.MemberRoles, targetID int64) error {
+func (s *accountRecovery) requireRecoveryTargetBelow(ctx context.Context, actor *db.MemberRoles, targetID int64) error {
 	actorTop := actor.Top
 	if permissions.IsOwner(actorTop.ID, actorTop.Position) {
 		return nil

@@ -15,6 +15,7 @@ import type { ThreadInfo, ThreadListResponse } from "@lib/types";
 import { createMockWsClient } from "../helpers/mock-ws";
 import { expectConsole } from "../helpers/console";
 import { FORUM, makePost, seedForum } from "../helpers/forum-fixtures";
+import { usePhone } from "../helpers/phoneMedia";
 
 type Page = Pick<ThreadListResponse, "threads" | "has_more" | "next_before">;
 const page = (threads: ThreadInfo[], next = ""): Page => ({
@@ -93,6 +94,7 @@ afterEach(() => {
   root.remove();
   document.body.replaceChildren();
   resetThreadsStore();
+  vi.unstubAllGlobals();
 });
 
 describe("ForumView list", () => {
@@ -152,6 +154,32 @@ describe("ForumView list", () => {
     root.remove();
     mount();
     expect(root.classList.contains("forum-view--feed")).toBe(true);
+  });
+
+  it("starts a phone with the guidelines folded, until the reader opens them", async () => {
+    usePhone();
+    mount();
+    await flush();
+    const toggle = q<HTMLButtonElement>('[data-testid="forum-guidelines-toggle"]');
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(q('[data-testid="forum-guidelines-body"]').hidden).toBe(true);
+    toggle.click();
+    root.remove();
+    mount();
+    await flush();
+    expect(q('[data-testid="forum-guidelines-body"]').hidden).toBe(false);
+  });
+
+  it("shows a stored List and reader layout as List on a phone, and keeps the pick", async () => {
+    localStorage.setItem("owncord:settings:forumLayout", '"split"');
+    usePhone();
+    mount();
+    expect(root.classList.contains("forum-view--list")).toBe(true);
+    expect(root.classList.contains("forum-view--split")).toBe(false);
+    usePhone(false);
+    window.dispatchEvent(new Event("resize"));
+    expect(root.classList.contains("forum-view--split")).toBe(true);
+    expect(localStorage.getItem("owncord:settings:forumLayout")).toBe('"split"');
   });
 
   it("gives each row the author's avatar and a reply count, and marks the open post", async () => {

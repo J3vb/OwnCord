@@ -1,0 +1,90 @@
+/* ── Phone Messages drawer (sidebar-area/sidebarDmPhoneHead.ts) ── */
+#unified-sidebar.phone-messages .unified-sidebar-header,
+#unified-sidebar.phone-messages .sidebar-drawer-search,
+#unified-sidebar.phone-messages .dm-back-header,
+#unified-sidebar.phone-messages .dm-section-label,
+#unified-sidebar.phone-messages [data-testid="dm-people-entry"],
+#unified-sidebar.phone-messages:not(.dm-search-open) .dm-sidebar-header {
+  display: none;
+}
+.dm-phone-head {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 12px 8px;
+  flex-shrink: 0;
+}
+.dm-phone-title {
+  margin: 0;
+  font-size: 22px;
+  color: var(--header-primary);
+}
+.dm-phone-actions {
+  display: flex;
+  gap: 8px;
+}
+.dm-phone-btn {
+  min-width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: 12px;
+  background: var(--bg-input);
+  color: var(--text-normal);
+  font-size: 15px;
+  font-weight: 600;
+}
+.dm-phone-people {
+  flex: 1;
+}
+.dm-phone-plus {
+  background: var(--accent);
+  color: var(--on-fill);
+}
+.dm-phone-btn[aria-expanded="true"] {
+  background: var(--bg-active);
+}
+.dm-active-strip {
+  display: flex;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.dm-active-strip[hidden] {
+  display: none;
+}
+.dm-active-btn {
+  width: 180px;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 10px;
+  border-radius: 14px;
+  background: var(--bg-primary);
+  color: var(--text-muted);
+  text-align: left;
+}
+.dm-active-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  font-size: 12px;
+}
+.dm-active-name,
+.dm-active-line {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.dm-active-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-normal);
+}

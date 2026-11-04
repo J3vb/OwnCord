@@ -98,3 +98,21 @@ func TestLiveKitClient_HealthCheck_Unreachable(t *testing.T) {
 		t.Error("HealthCheck = true against an unreachable server")
 	}
 }
+
+func TestLiveKitClient_RoomUsage(t *testing.T) {
+	client := twirpServer(t, http.StatusOK, &livekit.ListRoomsResponse{Rooms: []*livekit.Room{
+		{Name: "room_1", NumParticipants: 3},
+		{Name: "other", NumParticipants: 2},
+	}})
+	rooms, participants, err := client.RoomUsage(context.Background())
+	if err != nil || rooms != 2 || participants != 5 {
+		t.Errorf("RoomUsage = %d, %d, %v; want 2, 5, nil", rooms, participants, err)
+	}
+}
+
+func TestLiveKitClient_RoomUsage_ServerError(t *testing.T) {
+	client := twirpServer(t, http.StatusInternalServerError, nil)
+	if _, _, err := client.RoomUsage(context.Background()); err == nil {
+		t.Fatal("RoomUsage against a failing server returned nil error")
+	}
+}

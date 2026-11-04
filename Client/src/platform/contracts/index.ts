@@ -12,6 +12,8 @@ export type { PendingMessageStore } from "./pendingMessages";
 export type { SettingsStore } from "./settings";
 export type { LogFiles } from "./logFiles";
 export type { FileSaver } from "./fileSave";
+export type { ShareSheet } from "./shareSheet";
+export type { NativeFiles } from "./nativeFiles";
 export type { NativeProxies } from "./nativeProxies";
 export type { Notifier } from "./notifications";
 export type { WindowControl } from "./window";
@@ -31,6 +33,7 @@ export type { GameDetector } from "./gameDetector";
 export type { MediaDetector } from "./mediaDetector";
 export type { WindowPrefs } from "./windowPrefs";
 export type { AppAudio } from "./appAudio";
+export type { CallService } from "./callService";
 export type { ServerScope } from "./serverScope";
 
 import type { HttpClient } from "./http";
@@ -41,6 +44,7 @@ import type { PendingMessageStore } from "./pendingMessages";
 import type { SettingsStore } from "./settings";
 import type { LogFiles } from "./logFiles";
 import type { FileSaver } from "./fileSave";
+import type { NativeFiles } from "./nativeFiles";
 import type { NativeProxies } from "./nativeProxies";
 import type { Notifier } from "./notifications";
 import type { WindowControl } from "./window";
@@ -60,7 +64,9 @@ import type { GameDetector } from "./gameDetector";
 import type { MediaDetector } from "./mediaDetector";
 import type { WindowPrefs } from "./windowPrefs";
 import type { AppAudio } from "./appAudio";
+import type { CallService } from "./callService";
 import type { ServerScope } from "./serverScope";
+import type { ShareSheet } from "./shareSheet";
 
 /** Every platform capability, one readonly member per contract interface. */
 export interface Platform {
@@ -72,6 +78,7 @@ export interface Platform {
   readonly settings: SettingsStore;
   readonly logFiles: LogFiles;
   readonly fileSaver: FileSaver;
+  readonly nativeFiles: NativeFiles;
   readonly nativeProxies: NativeProxies;
   readonly notifier: Notifier;
   readonly window: WindowControl;
@@ -92,5 +99,7 @@ export interface Platform {
   readonly mediaDetector: MediaDetector;
   readonly windowPrefs: WindowPrefs;
   readonly appAudio: AppAudio;
+  readonly callService: CallService;
   readonly serverScope: ServerScope;
+  readonly shareSheet: ShareSheet;
 }

@@ -18,21 +18,13 @@ import {
   isWindowDetached,
   getChannelMessages,
 } from "@stores/messages.store";
-import { setChannels, setActiveChannel } from "@stores/channels.store";
 import type { MessageResponse } from "@lib/types";
-import { resetMessagesState, resetMembersState } from "../helpers/storeResets";
+import { makeListOptions, resetStoresAndChannels } from "../helpers/messageListHarness";
 import "../helpers/resizeObserverStub";
 
 const CHANNEL_ID = 1;
 let scrollHeight = 100_000;
 const NEAR_BOTTOM = 100_000 - 50;
-
-function resetStores(): void {
-  resetMessagesState();
-  resetMembersState();
-  setChannels([]);
-  setActiveChannel(null);
-}
 
 function response(id: number): MessageResponse {
   return {
@@ -68,25 +60,12 @@ describe("MessageList: paging down from a detached window", () => {
   let root: HTMLDivElement;
 
   beforeEach(() => {
-    resetStores();
+    resetStoresAndChannels();
     scrollHeight = 100_000;
     container = document.createElement("div");
     document.body.appendChild(container);
     onScrollBottom = vi.fn<() => void | Promise<void>>();
-    options = {
-      channelId: CHANNEL_ID,
-      channelName: "general",
-      currentUserId: 1,
-      onScrollTop: vi.fn(),
-      onScrollBottom,
-      onReplyClick: vi.fn(),
-      onEditClick: vi.fn(),
-      onEditSave: vi.fn(() => true),
-      onEmptyEdit: vi.fn(),
-      onDeleteClick: vi.fn(),
-      onReactionClick: vi.fn(),
-      onPinClick: vi.fn(),
-    };
+    options = makeListOptions({ channelId: CHANNEL_ID, onScrollBottom });
     // jsdom lays nothing out (every gap is 0, so "near the bottom" is always
     // true); stub a real scroll height so scrollTop decides.
     scrollHeightDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollHeight");

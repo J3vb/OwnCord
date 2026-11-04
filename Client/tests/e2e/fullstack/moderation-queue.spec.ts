@@ -13,23 +13,18 @@
 
 import type { Page } from "@playwright/test";
 import { test, expect, login } from "./fixtures";
-import { TEST_PASSWORD, type TestServer } from "../support/server";
-
-const MODERATOR_ROLE_ID = 3;
-const MEMBER_ROLE_ID = 4;
-
-async function token(server: TestServer, username: string): Promise<string> {
-  const auth = await server.api("/api/v1/auth/login", { username, password: TEST_PASSWORD });
-  return auth.token as string;
-}
-
-async function register(server: TestServer, username: string): Promise<void> {
-  await server.api("/api/v1/auth/register", {
-    username,
-    password: TEST_PASSWORD,
-    invite_code: server.owner!.invite_code,
-  });
-}
+import {
+  MEMBER_ROLE_ID,
+  MODERATOR_ROLE_ID,
+  channelItem,
+  liveMessageId,
+  register,
+  sendAndSee,
+  setRole,
+  signIn,
+  userIds,
+} from "./serverApi";
+import { type TestServer } from "../support/server";
 
 async function status(server: TestServer, path: string, auth: string, method = "GET") {
   const response = await fetch(`${server.origin}${path}`, {
@@ -37,46 +32,6 @@ async function status(server: TestServer, path: string, auth: string, method = "
     headers: { Authorization: `Bearer ${auth}` },
   });
   return response.status;
-}
-
-async function send(page: Page, text: string, file?: string): Promise<void> {
-  const composer = page.locator("[data-testid='message-input']");
-  if (file !== undefined) {
-    await composer.locator("input[type='file']").setInputFiles({
-      name: file,
-      mimeType: "text/plain",
-      buffer: Buffer.from("synthetic attachment"),
-    });
-    await expect(composer.locator(".attachment-preview-item")).not.toHaveClass(/uploading/);
-  }
-  await composer.locator("textarea").fill(text);
-  await composer.locator("textarea").press("Enter");
-  await expect(page.locator(".msg-text", { hasText: text })).toBeVisible();
-}
-
-const channelItem = (page: Page, name: string) =>
-  page.locator(".channel-item:not(.voice)").filter({ hasText: name });
-
-async function userIds(server: TestServer): Promise<(name: string) => number> {
-  const users = (await server.api("/admin/api/users", undefined, server.owner!.token)) as {
-    id: number;
-    username: string;
-  }[];
-  return (name) => users.find((u) => u.username === name)!.id;
-}
-
-async function setRole(server: TestServer, userId: number, roleId: number): Promise<void> {
-  await server.api(`/admin/api/users/${userId}`, { role_id: roleId }, server.owner!.token, "PATCH");
-}
-
-/** The message with `content` in channel `channelId`, read as the owner. */
-async function messageId(server: TestServer, channelId: number, content: string): Promise<number> {
-  const history = await server.api(
-    `/api/v1/channels/${channelId}/messages`,
-    undefined,
-    server.owner!.token,
-  );
-  return history.messages.find((m: { content: string }) => m.content === content).id as number;
 }
 
 test.describe("Moderation Center (real server)", () => {
@@ -102,15 +57,15 @@ test.describe("Moderation Center (real server)", () => {
     // general, one in random, which is labelled age-restricted afterwards.
     const plain = `synthetic-evidence-${crypto.randomUUID()}`;
     const restricted = `synthetic-restricted-${crypto.randomUUID()}`;
-    await send(alice, plain, "synthetic-notes.txt");
+    await sendAndSee(alice, plain, "synthetic-notes.txt");
     await channelItem(alice, "random").click();
-    await send(alice, restricted);
-    const carol = await token(server, "carol");
+    await sendAndSee(alice, restricted);
+    const carol = await signIn(server, "carol");
     await server.api(
       "/api/v1/reports",
       {
         target_type: "message",
-        target_id: String(await messageId(server, general.id, plain)),
+        target_id: String(await liveMessageId(server, general.id, plain)),
         reason: "harassment",
         detail: "synthetic reporter detail",
       },
@@ -120,7 +75,7 @@ test.describe("Moderation Center (real server)", () => {
       "/api/v1/reports",
       {
         target_type: "message",
-        target_id: String(await messageId(server, random.id, restricted)),
+        target_id: String(await liveMessageId(server, random.id, restricted)),
         reason: "nsfw_unlabelled",
         detail: "",
       },
@@ -135,7 +90,7 @@ test.describe("Moderation Center (real server)", () => {
       sends.push(`${r.method} ${r.path}`);
       return false;
     });
-    const bobToken = await token(server, "bob");
+    const bobToken = await signIn(server, "bob");
 
     // The entry, from the keyboard: the view takes focus on its heading.
     const entry = bob.getByTestId("moderation-btn");
@@ -247,15 +202,15 @@ test.describe("Moderation Center (real server)", () => {
     await register(server, "carol");
     const id = await userIds(server);
     const text = `synthetic-about-alice-${crypto.randomUUID()}`;
-    await send(alice, text);
+    await sendAndSee(alice, text);
     const channels = await server.api("/api/v1/channels/", undefined, server.owner!.token);
     const general = channels.find((c: { name: string }) => c.name === "general");
-    const carol = await token(server, "carol");
+    const carol = await signIn(server, "carol");
     await server.api(
       "/api/v1/reports",
       {
         target_type: "message",
-        target_id: String(await messageId(server, general.id, text)),
+        target_id: String(await liveMessageId(server, general.id, text)),
         reason: "spam",
         detail: "",
       },
@@ -286,6 +241,6 @@ test.describe("Moderation Center (real server)", () => {
     // Bob is a member: no entry, and the server refuses him the queue.
     await expect(bob.getByTestId("audit-log-btn")).toBeHidden();
     await expect(bob.getByTestId("moderation-btn")).toBeHidden();
-    expect(await status(server, "/api/v1/moderation/queue", await token(server, "bob"))).toBe(403);
+    expect(await status(server, "/api/v1/moderation/queue", await signIn(server, "bob"))).toBe(403);
   });
 });

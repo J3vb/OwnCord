@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { makeChannel } from "../helpers/channelFactory";
+import { seedChannelList as seed } from "../helpers/channelListSeed";
 import {
   navigateToChannel,
   onChannelReselect,
@@ -15,27 +17,6 @@ import { voiceStore } from "../../src/stores/voice.store";
 import { muteChannel, invalidateMuteCache } from "../../src/lib/prefs/channelMutes";
 import { setHideMutedChannels } from "../../src/lib/prefs/hideMutedChannels";
 import { resetChannelsState } from "../helpers/storeSeeds";
-
-function makeChannel(overrides: Partial<Channel> = {}): Channel {
-  return {
-    id: 1,
-    name: "general",
-    type: "text",
-    category: null,
-    position: 0,
-    unreadCount: 0,
-    mentionCount: 0,
-    lastMessageId: null,
-    canSend: true,
-    slowMode: 0,
-    topic: "",
-    nsfw: false,
-    isPrivate: false,
-    voiceMaxUsers: 0,
-    voiceMaxVideo: 0,
-    ...overrides,
-  };
-}
 
 function makeDm(overrides: Partial<DmChannel> = {}): DmChannel {
   return {
@@ -210,15 +191,6 @@ describe("channel-navigation", () => {
   });
 
   describe("stepChannel", () => {
-    function seed(channels: Channel[], active: number | null = null): void {
-      channelsStore.setState(() => ({
-        categories: [],
-        channels: new Map(channels.map((c) => [c.id, c])),
-        activeChannelId: active,
-        roles: [],
-      }));
-    }
-
     it("steps to the next and previous channel, wrapping at the ends", () => {
       seed([
         makeChannel({ id: 1, name: "a", position: 0 }),

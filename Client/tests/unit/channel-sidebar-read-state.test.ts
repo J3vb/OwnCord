@@ -4,37 +4,18 @@
  * lives in the unified sidebar header; see sidebar-area-mark-all-read.test.ts.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import * as mocks from "../helpers/sidebarStubMocks";
+import * as stubs from "../helpers/sidebarStubs";
 
-vi.mock("@lib/voice/livekitSession", () => ({ rePinPeerIdentity: vi.fn() }));
-vi.mock("@lib/net/e2eeCrypto", () => ({
-  importIdentityPublicKey: vi.fn(),
-  computeKeyFingerprint: vi.fn(),
-}));
+vi.mock("@lib/voice/livekitSession", () => mocks.rePinOnlySessionMock());
+vi.mock("@lib/net/e2eeCrypto", () => mocks.inertE2eeCryptoMock());
 
 import { createChannelSidebar } from "../../src/components/ChannelSidebar";
 import { channelsStore, setChannels } from "../../src/stores/channels.store";
-import { dmStore } from "../../src/stores/dm.store";
-import { uiStore } from "../../src/stores/ui.store";
-import { voiceStore } from "../../src/stores/voice.store";
 import { setMarkReadSender } from "@lib/readState";
-import type { ReadyChannel } from "../../src/lib/types";
-import { resetMembersState } from "../helpers/storeResets";
-import { signInAs, resetChannelsState } from "../helpers/storeSeeds";
+import { readStateChannels } from "../helpers/sidebarAreaOpts";
 
-const CHANNELS: ReadyChannel[] = [
-  {
-    id: 1,
-    name: "general",
-    type: "text",
-    category: "Text Channels",
-    position: 0,
-    unread_count: 3,
-    mention_count: 1,
-  },
-  { id: 2, name: "random", type: "text", category: "Text Channels", position: 1, unread_count: 0 },
-  { id: 3, name: "lobby", type: "voice", category: "Voice Channels", position: 0 },
-  { id: 4, name: "feedback", type: "forum", category: "Text Channels", position: 2 },
-];
+const CHANNELS = readStateChannels();
 
 describe("ChannelSidebar — mark as read", () => {
   let container: HTMLDivElement;
@@ -44,16 +25,11 @@ describe("ChannelSidebar — mark as read", () => {
   beforeEach(() => {
     sent = [];
     setMarkReadSender((id) => sent.push(id));
-    resetChannelsState();
-    dmStore.setState(() => ({ channels: [] }));
-    resetMembersState();
-    uiStore.setState((prev) => ({ ...prev, collapsedCategories: new Set() }));
-    voiceStore.setState((prev) => ({ ...prev, voiceStates: new Map() }));
-    signInAs({ id: 2, username: "Member", avatar: null, role: "member" });
+    stubs.resetSidebarStoresAsMember();
 
     container = document.createElement("div");
     document.body.appendChild(container);
-    sidebar = createChannelSidebar({ onVoiceJoin: vi.fn(), onOpenCall: vi.fn() });
+    sidebar = stubs.createPlainChannelSidebar();
   });
 
   afterEach(() => {

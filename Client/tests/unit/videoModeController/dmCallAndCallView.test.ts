@@ -7,24 +7,25 @@ import {
   makeVideoGrid,
   VoiceStateStub,
   makeVoiceState,
+  makeController,
+  vUser,
+  useVideoModeControllerHarness,
+  callUser,
+  mountCallGrid,
+  unmountCallGrid,
 } from "../../helpers/videoModeControllerHarness";
 
 vi.mock("@stores/voice.store", () => mocks.voiceStoreMock());
 vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
 
-const { mockVoiceStoreGetState, mockGetLocalCameraStream, mockGetLocalScreenshareStream } = mocks;
+const { mockVoiceStoreGetState, mockGetLocalCameraStream } = mocks;
 
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
 describe("createVideoModeController", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mockVoiceStoreGetState.mockReturnValue(makeVoiceState());
-    mockGetLocalCameraStream.mockReturnValue(null);
-    mockGetLocalScreenshareStream.mockReturnValue(null);
-  });
+  useVideoModeControllerHarness();
 
   // -------------------------------------------------------------------------
   // The DM call panel as the video surface
@@ -58,7 +59,7 @@ describe("createVideoModeController", () => {
       remote = { camera: false, screenshare: false },
     ) {
       const users = new Map([
-        [1, { userId: 1, camera: false, screenshare: false, username: "me" }],
+        [1, vUser(1, "me")],
         [2, { userId: 2, ...remote, username: "otto" }],
       ]);
       mockVoiceStoreGetState.mockReturnValue(
@@ -70,13 +71,7 @@ describe("createVideoModeController", () => {
       inDmCall({}, { camera: false, screenshare: true });
       const { slots, chatArea } = mountedSlots();
       const { host, state } = panelHost();
-      const ctrl = createVideoModeController({
-        slots,
-        chatColumn: document.createElement("div"),
-        videoGrid: makeVideoGrid(),
-        getCurrentUserId: () => 1,
-        panelHost: () => host,
-      });
+      const ctrl = makeController({ slots, panelHost: () => host });
 
       ctrl.checkVideoMode();
 
@@ -97,13 +92,7 @@ describe("createVideoModeController", () => {
       const { slots } = mountedSlots();
       const { host, state } = panelHost();
       const vg = makeVideoGrid();
-      const ctrl = createVideoModeController({
-        slots,
-        chatColumn: document.createElement("div"),
-        videoGrid: vg,
-        getCurrentUserId: () => 1,
-        panelHost: () => host,
-      });
+      const ctrl = makeController({ slots, videoGrid: vg, panelHost: () => host });
 
       ctrl.checkVideoMode();
 
@@ -121,13 +110,7 @@ describe("createVideoModeController", () => {
       inDmCall({ localCamera: true });
       const { slots, chatArea } = mountedSlots();
       const { host } = panelHost({ element: null });
-      const ctrl = createVideoModeController({
-        slots,
-        chatColumn: document.createElement("div"),
-        videoGrid: makeVideoGrid(),
-        getCurrentUserId: () => 1,
-        panelHost: () => host,
-      });
+      const ctrl = makeController({ slots, panelHost: () => host });
 
       ctrl.checkVideoMode();
 
@@ -142,13 +125,7 @@ describe("createVideoModeController", () => {
       inDmCall();
       const { slots, chatArea } = mountedSlots();
       const { host } = panelHost();
-      const ctrl = createVideoModeController({
-        slots,
-        chatColumn: document.createElement("div"),
-        videoGrid: makeVideoGrid(),
-        getCurrentUserId: () => 1,
-        panelHost: () => host,
-      });
+      const ctrl = makeController({ slots, panelHost: () => host });
 
       ctrl.checkVideoMode();
 
@@ -160,13 +137,7 @@ describe("createVideoModeController", () => {
       inDmCall({}, { camera: false, screenshare: true });
       const { slots, chatArea } = mountedSlots();
       const { host, state } = panelHost();
-      const ctrl = createVideoModeController({
-        slots,
-        chatColumn: document.createElement("div"),
-        videoGrid: makeVideoGrid(),
-        getCurrentUserId: () => 1,
-        panelHost: () => host,
-      });
+      const ctrl = makeController({ slots, panelHost: () => host });
       ctrl.checkVideoMode();
       expect(state.element!.contains(slots.videoGridSlot)).toBe(true);
 
@@ -184,13 +155,7 @@ describe("createVideoModeController", () => {
       inDmCall({}, { camera: true, screenshare: false });
       const { slots, chatArea } = mountedSlots();
       const { host } = panelHost();
-      const ctrl = createVideoModeController({
-        slots,
-        chatColumn: document.createElement("div"),
-        videoGrid: makeVideoGrid(),
-        getCurrentUserId: () => 1,
-        panelHost: () => host,
-      });
+      const ctrl = makeController({ slots, panelHost: () => host });
       ctrl.checkVideoMode();
 
       mockVoiceStoreGetState.mockReturnValue(makeVoiceState());
@@ -202,12 +167,7 @@ describe("createVideoModeController", () => {
   });
 
   describe("call view (1B-1)", () => {
-    const user = (userId: number, username: string, video: Partial<{ camera: boolean }> = {}) => ({
-      userId,
-      username,
-      camera: video.camera ?? false,
-      screenshare: false,
-    });
+    const user = callUser;
     let container: HTMLDivElement;
     let grid: ReturnType<typeof createVideoGrid>;
     let slots: ReturnType<typeof makeSlots>;
@@ -230,30 +190,12 @@ describe("createVideoModeController", () => {
     const tileIds = () => avatarTiles().map((t) => t.dataset.personId);
 
     beforeEach(() => {
-      // ResizeObserver is not available in JSDOM
-      vi.stubGlobal(
-        "ResizeObserver",
-        class {
-          observe(): void {}
-          unobserve(): void {}
-          disconnect(): void {}
-        },
-      );
-      container = document.createElement("div");
-      document.body.appendChild(container);
-      grid = createVideoGrid();
-      grid.mount(container);
-      slots = makeSlots();
-      users = new Map([
-        [1, user(1, "me")],
-        [2, user(2, "bob")],
-      ]);
+      ({ container, grid, slots, users } = mountCallGrid());
       setVoice();
     });
 
     afterEach(() => {
-      grid.destroy?.();
-      container.remove();
+      unmountCallGrid({ container, grid });
       vi.unstubAllGlobals();
     });
 
@@ -401,13 +343,7 @@ describe("createVideoModeController", () => {
         element: () => null,
         setActive: vi.fn(),
       };
-      const ctrl = createVideoModeController({
-        slots,
-        chatColumn: document.createElement("div"),
-        videoGrid: vg,
-        getCurrentUserId: () => 1,
-        panelHost: () => host,
-      });
+      const ctrl = makeController({ slots, videoGrid: vg, panelHost: () => host });
       ctrl.openCall();
 
       expect(ctrl.isVideoMode()).toBe(false);

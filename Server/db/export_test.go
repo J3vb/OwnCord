@@ -130,3 +130,16 @@ func ReadStmtCountForTest(d *DB) int {
 	defer d.readStmts.mu.Unlock()
 	return len(d.readStmts.stmts)
 }
+
+// ChannelMaxAnySQLForTest and ChannelMaxLiveSQLForTest are MoveReadPointer's
+// two channel-bound reads, so db_test can pin their query plans.
+const (
+	ChannelMaxAnySQLForTest  = channelMaxAnySQL
+	ChannelMaxLiveSQLForTest = channelMaxLiveSQL
+)
+
+// ReferencedStoredFilesSQLForTest and AttachmentStoredNameInUseSQLForTest are
+// the stored-name lookups, so db_test can pin their query plans.
+func ReferencedStoredFilesSQLForTest(n int) string { return referencedStoredFilesSQL(n) }
+
+const AttachmentStoredNameInUseSQLForTest = attachmentStoredNameInUseSQL

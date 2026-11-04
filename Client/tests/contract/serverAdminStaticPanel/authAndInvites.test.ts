@@ -9,26 +9,38 @@
 // lapsed ban still reads as banned, whether the next-page button lies, what
 // Create Role prefills, and whether "/" is swallowed inside the field it
 // focuses. Server/admin/panel_wiring_test.go greps the same file for the
-import { describe, it, expect, afterEach } from "vitest";
-import { JSDOM } from "jsdom";
+import { describe, it, expect } from "vitest";
 import {
   FetchCall,
   Responder,
   ADMINISTRATOR,
   boot,
+  bootAsAdmin,
   showShell,
   submitForm,
   defaultRespond,
 } from "../../helpers/serverAdminStaticPanelHarness";
 
+/** The Users page rendered over a server that answers with `count` users. */
+async function renderUserPage(count: number) {
+  const calls: FetchCall[] = [];
+  const users = Array.from({ length: count }, (_, i) => ({
+    id: i + 2,
+    username: "u" + (i + 2),
+    role_id: 4,
+    status: "offline",
+    banned: false,
+  }));
+  const respond: Responder = (p, _method) => {
+    if (p.startsWith("/users?")) return { json: users };
+    if (p === "/registrations") return { json: [] };
+    return { json: {} };
+  };
+  const booted = await bootAsAdmin(calls, respond);
+  return { calls, booted, html: await booted.bridge.renderUsers() };
+}
+
 describe("Server/admin/static — panel behaviour", () => {
-  let dom: JSDOM | undefined;
-
-  afterEach(() => {
-    dom?.window?.close();
-    dom = undefined;
-  });
-
   // OC-0350. POST /api/v1/auth/login answers a TOTP account with 200,
   // {partial_token, requires_2fa:true} and NO token. Before the fix the
   // handler assigned d.token (undefined), wrote the string "undefined" into
@@ -36,7 +48,6 @@ describe("Server/admin/static — panel behaviour", () => {
   it("completes a two-factor sign-in through /auth/verify-totp", async () => {
     const calls: FetchCall[] = [];
     const respond: Responder = (p, _method) => {
-      if (p === "/setup/status") return { json: { needs_setup: false } };
       if (p === "/api/v1/auth/login")
         return { json: { requires_2fa: true, partial_token: "PARTIAL-123" } };
       if (p === "/api/v1/auth/verify-totp") return { json: { token: "SESSION-XYZ" } };
@@ -46,7 +57,6 @@ describe("Server/admin/static — panel behaviour", () => {
       return { json: {} };
     };
     const booted = await boot(calls, respond);
-    dom = booted.dom;
     const { window } = booted.dom;
     const doc = window.document;
 
@@ -78,7 +88,6 @@ describe("Server/admin/static — panel behaviour", () => {
   it("keeps the challenge alive after a rejected code, then clears it on Back", async () => {
     const calls: FetchCall[] = [];
     const respond: Responder = (p, _method) => {
-      if (p === "/setup/status") return { json: { needs_setup: false } };
       if (p === "/api/v1/auth/login")
         return { json: { requires_2fa: true, partial_token: "PARTIAL-123" } };
       if (p === "/api/v1/auth/verify-totp")
@@ -86,7 +95,6 @@ describe("Server/admin/static — panel behaviour", () => {
       return { json: {} };
     };
     const booted = await boot(calls, respond);
-    dom = booted.dom;
     const doc = booted.dom.window.document;
 
     (doc.getElementById("loginUser") as HTMLInputElement).value = "owner";
@@ -110,7 +118,6 @@ describe("Server/admin/static — panel behaviour", () => {
   // non-ISO form as local time.
   it("parses a naive SQLite timestamp as UTC, and leaves a zoned one alone", async () => {
     const booted = await boot([], defaultRespond);
-    dom = booted.dom;
     const { utcDate } = booted.bridge;
 
     expect(utcDate("2026-03-19 08:29:41").getTime()).toBe(Date.UTC(2026, 2, 19, 8, 29, 41));
@@ -122,7 +129,6 @@ describe("Server/admin/static — panel behaviour", () => {
   // through fmtLocal: local text, the UTC instant in the tooltip.
   it("renders token timestamps as UTC instants", async () => {
     const respond: Responder = (p) => {
-      if (p === "/setup/status") return { json: { needs_setup: false } };
       if (p === "/tokens")
         return {
           json: [
@@ -138,7 +144,6 @@ describe("Server/admin/static — panel behaviour", () => {
       return { json: {} };
     };
     const booted = await boot([], respond);
-    dom = booted.dom;
     const doc = booted.dom.window.document;
     doc.getElementById("content")!.innerHTML = await booted.bridge.renderTokens();
     const cells = doc.querySelectorAll("tbody tr td");
@@ -152,13 +157,11 @@ describe("Server/admin/static — panel behaviour", () => {
   it("downloads the full archive through a single-use link, never a Blob", async () => {
     const calls: FetchCall[] = [];
     const respond: Responder = (p, method) => {
-      if (p === "/setup/status") return { json: { needs_setup: false } };
       if (p === "/archive/link" && method === "POST")
         return { json: { path: "/admin/api/archive/download?token=TOK-1" } };
       return { json: {} };
     };
     const booted = await boot(calls, respond);
-    dom = booted.dom;
     const { window } = booted.dom;
     booted.bridge.state.me = {
       id: 1,
@@ -185,7 +188,6 @@ describe("Server/admin/static — panel behaviour", () => {
   // is decided lazily everywhere else.
   it("treats a lapsed temporary ban as not banned", async () => {
     const booted = await boot([], defaultRespond);
-    dom = booted.dom;
     const { effectiveBan } = booted.bridge;
 
     expect(effectiveBan({ banned: false })).toBe(false);
@@ -198,25 +200,7 @@ describe("Server/admin/static — panel behaviour", () => {
 
   // OC-0361 and OC-0390 and OC-0364, over one rendered Users page.
   it("does not offer a next page for an exactly-full page, and offers erasure apart from force-logout", async () => {
-    const calls: FetchCall[] = [];
-    const users = Array.from({ length: 50 }, (_, i) => ({
-      id: i + 2,
-      username: "u" + (i + 2),
-      role_id: 4,
-      status: "offline",
-      banned: false,
-    }));
-    const respond: Responder = (p, _method) => {
-      if (p === "/setup/status") return { json: { needs_setup: false } };
-      if (p.startsWith("/users?")) return { json: users };
-      if (p === "/registrations") return { json: [] };
-      return { json: {} };
-    };
-    const booted = await boot(calls, respond);
-    dom = booted.dom;
-    booted.bridge.state.me = { id: 1, permissions: ADMINISTRATOR, role_position: 100 };
-
-    const html = await booted.bridge.renderUsers();
+    const { calls, booted, html } = await renderUserPage(50);
 
     // limit+1, the way MessageService.GetMessages asks.
     const usersCall = calls.find((c) => c.path.startsWith("/users?"));
@@ -245,25 +229,7 @@ describe("Server/admin/static — panel behaviour", () => {
   });
 
   it("offers a next page when an overflow row comes back", async () => {
-    const calls: FetchCall[] = [];
-    const users = Array.from({ length: 51 }, (_, i) => ({
-      id: i + 2,
-      username: "u" + (i + 2),
-      role_id: 4,
-      status: "offline",
-      banned: false,
-    }));
-    const respond: Responder = (p, _method) => {
-      if (p === "/setup/status") return { json: { needs_setup: false } };
-      if (p.startsWith("/users?")) return { json: users };
-      if (p === "/registrations") return { json: [] };
-      return { json: {} };
-    };
-    const booted = await boot(calls, respond);
-    dom = booted.dom;
-    booted.bridge.state.me = { id: 1, permissions: ADMINISTRATOR, role_position: 100 };
-
-    const html = await booted.bridge.renderUsers();
+    const { html } = await renderUserPage(51);
     expect(html).toMatch(
       /<button class="page-btn" {2}data-action="turnUsersPage" data-args="\[1\]"/,
     );
@@ -274,10 +240,8 @@ describe("Server/admin/static — panel behaviour", () => {
   // OC-0367. CreateRole refuses an explicitly requested position that is
   // taken, and the slot below the actor is the one the previous new role got.
   it("prefills Create Role with the highest free position below the actor", async () => {
-    const booted = await boot([], defaultRespond);
-    dom = booted.dom;
+    const booted = await bootAsAdmin([], defaultRespond);
     const doc = booted.dom.window.document;
-    booted.bridge.state.me = { id: 1, permissions: ADMINISTRATOR, role_position: 100 };
     booted.bridge.state.roleList = [
       { id: 1, name: "Owner", position: 100, permissions: 0 },
       { id: 9, name: "Helper", position: 99, permissions: 0 },
@@ -298,7 +262,6 @@ describe("Server/admin/static — panel behaviour", () => {
   it("manages invites and shows a redemption history per code (O1)", async () => {
     const calls: FetchCall[] = [];
     const respond: Responder = (p) => {
-      if (p === "/setup/status") return { json: { needs_setup: false } };
       if (p === "/api/v1/invites/")
         return {
           json: [
@@ -322,11 +285,9 @@ describe("Server/admin/static — panel behaviour", () => {
         };
       return { json: {} };
     };
-    const booted = await boot(calls, respond);
-    dom = booted.dom;
+    const booted = await bootAsAdmin(calls, respond);
     const { window } = booted.dom;
     const doc = window.document;
-    booted.bridge.state.me = { id: 1, permissions: ADMINISTRATOR, role_position: 100 };
 
     // The section renders and lists the invite.
     const html = await booted.bridge.renderInvites();
@@ -383,7 +344,6 @@ describe("Server/admin/static — panel behaviour", () => {
   // existed, including while the caret sat inside that very field.
   it('lets "/" be typed into a text field and still jumps there from outside', async () => {
     const booted = await boot([], defaultRespond);
-    dom = booted.dom;
     const { window } = booted.dom;
     const doc = window.document;
     showShell(booted.dom);

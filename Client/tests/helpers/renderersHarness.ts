@@ -1,5 +1,5 @@
 import { expect, vi, beforeEach, afterEach } from "vitest";
-import { setServerHost } from "../../src/components/message-list/renderers";
+import { renderMessage, setServerHost } from "../../src/components/message-list/renderers";
 import type { Message } from "../../src/stores/messages.store";
 import { membersStore } from "../../src/stores/members.store";
 import { channelsStore, setRoles } from "../../src/stores/channels.store";
@@ -119,4 +119,46 @@ export function useRenderersHarness(bind: (el: HTMLDivElement) => void): void {
     setServerHost("");
     container.remove();
   });
+}
+
+/** Renders `msg` as the only message in `container`; the caller aborts `ac` when done. */
+export function mountMessage(
+  container: HTMLElement,
+  msg: Message,
+  opts: MessageListOptions = makeOpts(),
+): { el: HTMLElement; ac: AbortController } {
+  const ac = new AbortController();
+  const el = renderMessage(msg, false, [msg], opts, ac.signal);
+  container.appendChild(el);
+  return { el, ac };
+}
+
+/** Seed a member with no permissions, so permission-gated actions stay hidden. */
+export function seedPlainMember(): void {
+  setRoles([{ id: 3, name: "member", color: null, permissions: 0 }]);
+  signInAs({ id: 999, username: "Nobody", avatar: null, role: "member" }, { serverName: null });
+}
+
+/** Renders Alice's message for viewer 999, who is not its author. */
+export function mountAsOtherViewer(
+  container: HTMLElement,
+  optsOverrides: Partial<MessageListOptions> = {},
+): { el: HTMLElement; ac: AbortController } {
+  const opts = makeOpts({ currentUserId: 999, ...optsOverrides });
+  const msg = makeMessage({ user: { id: 10, username: "Alice", avatar: null } });
+  return mountMessage(container, msg, opts);
+}
+
+/** Sets the role-colors preference and notifies listeners the way savePref does. */
+export function setRoleColorsPref(value: "true" | "false"): void {
+  localStorage.setItem("owncord:settings:roleColors", value);
+  window.dispatchEvent(new CustomEvent("owncord:pref-change", { detail: { key: "roleColors" } }));
+}
+
+/** Renders a message with `content` as the only message in `container`. */
+export function mountContent(
+  container: HTMLElement,
+  content: string,
+): { el: HTMLElement; ac: AbortController } {
+  return mountMessage(container, makeMessage({ content }));
 }

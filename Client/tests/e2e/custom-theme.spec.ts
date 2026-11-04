@@ -7,10 +7,10 @@
 
 import { test, expect } from "./fixtures";
 import {
-  mockTauriFullSession,
   navigateToMainPageReady,
   openSettings,
   switchSettingsTab,
+  startFullSession,
 } from "./helpers";
 import {
   Q1,
@@ -31,9 +31,7 @@ async function bgTertiary(page: import("@playwright/test").Page): Promise<string
 
 test.describe("Custom themes", () => {
   test.beforeEach(async ({ page }) => {
-    await mockTauriFullSession(page);
-    await page.goto("/");
-    await navigateToMainPageReady(page);
+    await startFullSession(page, { ready: true });
     await openSettings(page);
     await switchSettingsTab(page, "Appearance");
   });
@@ -57,6 +55,21 @@ test.describe("Custom themes", () => {
 
     await page.keyboard.press("Control+Shift+Backspace");
     await expect.poll(() => bgTertiary(page)).toBe(before);
+  });
+
+  test("a theme can be deleted from the list", async ({ page }) => {
+    await page.getByRole("button", { name: "New theme" }).click();
+    await page.getByTestId("custom-theme-name").fill("Plum");
+    await page.getByTestId("custom-theme-css").fill(THEME_CSS);
+    await page.getByTestId("custom-theme-save").click();
+    await page.getByRole("button", { name: "Use Plum" }).click();
+    await expect.poll(() => bgTertiary(page)).toBe("#4a1030");
+
+    await page.getByRole("button", { name: "Delete Plum" }).click();
+    await page.getByTestId("custom-theme-delete-confirm").click();
+    await expect(page.getByTestId("custom-theme-row")).toHaveCount(0);
+    await expect(page.getByTestId("custom-theme-delete-dialog")).toHaveCount(0);
+    await expect.poll(() => bgTertiary(page)).not.toBe("#4a1030");
   });
 
   test("a theme that names an outside file is refused", async ({ page }) => {

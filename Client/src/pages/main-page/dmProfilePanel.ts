@@ -1,19 +1,34 @@
 /**
  * The DM profile side panel and the group DM members panel on the main page:
  * opening, closing and keeping them in step with the active DM.
+ *
+ * On the phone layout the side panel never opens: there is no room beside the
+ * chat. The header button opens the person's profile as the member profile
+ * sheet instead, and the saved preference (a desktop choice) is left alone.
  */
+import { Disposable } from "@lib/disposable";
+import { isPhoneLayout } from "@lib/ui/bottomSheet";
 import { showToast } from "@lib/ui/toast";
 import { shellText } from "../../i18n/shell";
+import { reportEntryText } from "../../i18n/reportEntry";
 import { loadPref, savePref } from "@lib/prefs/preferences";
 import { getActiveChannel } from "@stores/channels.store";
 import { dmStore } from "@stores/dm.store";
 import { membersStore } from "@stores/members.store";
 import { createNotesContext } from "../../features/profiles/userNotes";
+import type { DmProfileSheetDeps } from "./dmProfileSheet";
 import type { GroupMemberPanelController } from "./GroupMemberPanelController";
 import { listeningKey, DM_PROFILE_PREF, buildDmProfileUser } from "./pageShared";
 import type { PageState, PageApi } from "./pageState";
 
-export function createDmProfilePanel(st: PageState, _pg: PageApi) {
+const sheetModule = () => import("./dmProfileSheet");
+const sheetLoadFailed = (): void => showToast(reportEntryText("profileLoadFailed"), "error");
+
+export function createDmProfilePanel(st: PageState, pg: PageApi) {
+  /** Dialogs opened from the phone profile sheet live as long as the page. */
+  const sheetOwner = new Disposable();
+  st.unsubscribers.push(() => sheetOwner.destroy());
+
   /** Run `act` on the group panel controller, loading it first if a group DM
    *  is active (or `force`d by the header toggle). With no controller and no
    *  group on screen there is nothing to sync or close, so nothing loads. */
@@ -61,6 +76,13 @@ export function createDmProfilePanel(st: PageState, _pg: PageApi) {
   function toggleDmProfile(): void {
     if (st.dmProfileSlot === null) return;
 
+    if (isPhoneLayout()) {
+      closeDmProfile();
+      const active = getActiveChannel();
+      if (active !== null && active.type === "dm") openDmProfileSheet(active.id);
+      return;
+    }
+
     // If already open (or loading), close it
     if (st.dmProfileSidebar !== null || st.dmProfileLoad !== null) {
       closeDmProfileByUser();
@@ -93,6 +115,10 @@ export function createDmProfilePanel(st: PageState, _pg: PageApi) {
    * new person on a DM-to-DM switch), a group or a server channel hides it.
    */
   function syncDmProfileToActive(): void {
+    if (isPhoneLayout()) {
+      closeDmProfile();
+      return;
+    }
     const active = getActiveChannel();
     if (active !== null && active.type === "dm" && loadPref<boolean>(DM_PROFILE_PREF, true)) {
       // Already showing: a switch to another 1:1 DM repaints the same panel
@@ -128,7 +154,7 @@ export function createDmProfilePanel(st: PageState, _pg: PageApi) {
     };
     const unsubMembers = membersStore.subscribeSelector(
       (s) =>
-        `${s.members.get(recipientId)?.status ?? ""}|${s.members.get(recipientId)?.mobile === true}|${s.members.get(recipientId)?.activity?.name ?? ""}|${listeningKey(s.members.get(recipientId)?.listening)}`,
+        `${s.members.get(recipientId)?.status ?? ""}|${s.members.get(recipientId)?.mobile === true}|${s.members.get(recipientId)?.activity?.name ?? ""}|${listeningKey(s.members.get(recipientId)?.listening)}|${s.members.get(recipientId)?.customStatus ?? ""}`,
       refresh,
     );
     // A banner change shows without reopening the panel.
@@ -151,6 +177,25 @@ export function createDmProfilePanel(st: PageState, _pg: PageApi) {
   function dmProfileBlockName(fallback: string): string {
     const current = buildDmProfileUser(st.dmProfileChannelId);
     return current?.displayName ?? current?.username ?? fallback;
+  }
+
+  const sheetDeps: DmProfileSheetDeps = {
+    api: st.api,
+    signal: sheetOwner.signal,
+    button: () => st.dmProfileBtn,
+    startCall: () => pg.startCall(),
+  };
+
+  /** The phone's profile: the partner in the member profile sheet. */
+  function openDmProfileSheet(channelId: number): void {
+    void sheetModule().then((m) => m.openDmProfileSheet(sheetDeps, channelId), sheetLoadFailed);
+  }
+
+  function openReport(userId: number, name: string): void {
+    void sheetModule().then(
+      (m) => m.openDmPartnerReport(sheetDeps, userId, name),
+      () => showToast(reportEntryText("reportLoadFailed"), "error"),
+    );
   }
 
   /** Mount the panel for a 1:1 DM; false (nothing opened) for a group or an unknown DM. */
@@ -176,6 +221,8 @@ export function createDmProfilePanel(st: PageState, _pg: PageApi) {
           onClose: () => {
             closeDmProfileByUser();
           },
+          // The panel may have moved to another DM since it opened.
+          onReport: (userId) => openReport(userId, dmProfileBlockName(profileUser.username)),
           onToggleBlock: (userId, block) => {
             void import("../../features/blocks/blockActions").then(
               ({ confirmAndToggleBlock }) =>

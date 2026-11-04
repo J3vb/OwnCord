@@ -10,6 +10,8 @@ import { desktop } from "../platform/desktop";
 import { createRateLimiterSet } from "@lib/net/rateLimiter";
 import { createToastContainer } from "@components/Toast";
 import { initToast, teardownToast, showToast } from "@lib/ui/toast";
+import { onPhoneLayoutChange } from "@lib/ui/bottomSheet";
+import { Disposable } from "@lib/disposable";
 import { onAuthCleared } from "@stores/auth.store";
 import { closeSettings, openSettings, uiStore } from "@stores/ui.store";
 import { loadGlobalShortcutVks } from "@lib/voice/voiceShortcuts";
@@ -380,9 +382,23 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     // logout or server switch does not leave this session's count behind.
     // destroy() sets tornDown before it runs unsubscribers, so a stopper
     // pushed while !tornDown always runs.
+    // With it, the phone's notifications for a channel go once it is read
+    // (its stopper withdraws what is left), and the phone asks once for the
+    // notification permission.
     void import("../features/unread-badge/unreadBadge").then((badge) => {
-      if (!st.tornDown) st.unsubscribers.push(badge.startUnreadBadge(desktop.notifier));
+      if (st.tornDown) return;
+      st.unsubscribers.push(badge.startUnreadBadge(desktop.notifier));
+      st.unsubscribers.push(badge.startNotificationClearing(desktop.notifier));
+      void badge.askNotificationPermissionOnce(desktop.notifier);
     });
+
+    // Shares from other apps (Android): the "Send to" sheet, then the
+    // picked channel's composer.
+    if (desktop.shareSheet.available) {
+      void import("../features/share/shareIn").then((share) => {
+        if (!st.tornDown) st.unsubscribers.push(share.startShareIn(desktop.shareSheet));
+      });
+    }
 
     // Short voice UI sounds on join/leave and mute/deafen. This module
     // statically imports stores the page already pulls in, so it rides the
@@ -392,6 +408,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     // Toast container
     st.toast = createToastContainer();
     st.toast.mount(st.root);
+    st.toast.anchorTo(ms.chatAreaResult.slots.inputSlot);
     st.children.push(st.toast);
     initToast(st.toast);
     mountCalls(st, pg, ms);
@@ -529,6 +546,15 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       pg.syncDmProfileToActive();
       pg.withGroupPanel((ctrl) => ctrl.syncToActive());
     }
+
+    // Turning the device onto the phone layout puts the side panels away;
+    // back on the desktop layout they follow the saved preference again.
+    const layoutWatch = new Disposable();
+    st.unsubscribers.push(() => layoutWatch.destroy());
+    onPhoneLayoutChange(() => {
+      pg.syncDmProfileToActive();
+      pg.withGroupPanel((ctrl) => ctrl.syncToActive());
+    }, layoutWatch.signal);
   }
 
   function destroy(): void {

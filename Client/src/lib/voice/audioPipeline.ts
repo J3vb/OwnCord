@@ -122,9 +122,12 @@ export interface VadDetectorHandlers {
  * and hold (~500 ms), so the settings meter and the live gate open and
  * close alike. `gate` "auto" runs the threshold a margin
  * above the noise floor of the levels the detector reports (lib/voice/noiseFloor.ts),
- * starting at `seed`. With `speech`, "auto" also asks RNNoise whether a frame
- * is a voice (vad-worklet.js's speech gate) once it runs; the fallback has
- * no worklets, so no RNNoise, and gates on the level alone.
+ * starting at `seed`. With `speech`, the gate also asks RNNoise whether a
+ * frame is a voice (vad-worklet.js's speech gate) once it runs, at the
+ * automatic threshold and at the slider's alike; the fallback has no
+ * worklets, so no RNNoise, and gates on the level alone. Stopping leaves
+ * RNNoise running: whoever owns the processor turns it off when no gate
+ * follows (a restart's detector asks for it again at once).
  */
 export function startVadDetector(
   ctx: AudioContext,
@@ -139,22 +142,13 @@ export function startVadDetector(
   let stopped = false;
   let workletNode: AudioWorkletNode | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
-  /** Bumped on every mode change, so a late RNNoise load applies to the
-   *  mode that asked for it. */
-  let speechRequest = 0;
-
-  /** Run RNNoise's verdict for automatic sensitivity, or drop it. The
-   *  worklet is told once RNNoise answers, so the gate never waits on a
-   *  signal that is not there. */
-  const applySpeechGate = (auto: boolean): void => {
+  /** Run RNNoise's verdict for the gate. The worklet is told once RNNoise
+   *  answers, so the gate never waits on a signal that is not there. */
+  const startSpeechGate = (): void => {
     if (speech === undefined) return;
-    const request = ++speechRequest;
-    // The manual slider drops the rule at once; auto adds it once RNNoise runs.
-    // oxlint-disable-next-line require-post-message-target-origin -- MessagePort.postMessage, not Window.postMessage
-    if (!auto) workletNode?.port.postMessage({ type: "speechGate", on: false });
-    speech.setOn(auto).then(
+    speech.setOn(true).then(
       (on) => {
-        if (stopped || request !== speechRequest || !auto || !on) return;
+        if (stopped || !on) return;
         // oxlint-disable-next-line require-post-message-target-origin -- MessagePort.postMessage, not Window.postMessage
         workletNode?.port.postMessage({ type: "speechGate", on: true });
       },
@@ -253,7 +247,7 @@ export function startVadDetector(
       speech?.source.connect(workletNode, 0, 1);
       // oxlint-disable-next-line require-post-message-target-origin -- MessagePort.postMessage, not Window.postMessage
       workletNode.port.postMessage({ type: "config", threshold });
-      applySpeechGate(tracker !== null);
+      startSpeechGate();
       // oxlint-disable-next-line prefer-add-event-listener -- MessagePort does not support addEventListener
       workletNode.port.onmessage = (event: MessageEvent) => {
         if (event.data.type === "gate") handlers.onGate(event.data.gated as boolean);
@@ -270,9 +264,7 @@ export function startVadDetector(
 
   const stop = (): Promise<void> => {
     stopped = true;
-    speechRequest++;
     if (timer !== null) clearTimeout(timer);
-    void speech?.setOn(false).catch((err: unknown) => log.debug("Speech detection stop", err));
     const node = workletNode;
     if (node === null) return Promise.resolve();
     workletNode = null;
@@ -290,7 +282,6 @@ export function startVadDetector(
     setThreshold(next: number | "auto"): void {
       tracker = next === "auto" ? new NoiseFloorTracker(tracker?.threshold) : null;
       threshold = tracker?.threshold ?? (next as number);
-      if (workletNode !== null) applySpeechGate(tracker !== null);
       // oxlint-disable-next-line require-post-message-target-origin -- MessagePort.postMessage, not Window.postMessage
       workletNode?.port.postMessage({ type: "config", threshold });
     },
@@ -642,6 +633,10 @@ export class AudioPipeline {
     const gate = effectiveVoiceGate(this.pttPollingLive());
     if (gate === "off") {
       processor.setLookahead(0);
+      // No gate to ask: RNNoise runs on for Enhanced Noise Suppression only.
+      processor
+        .setSpeechDetection(false)
+        .catch((err: unknown) => log.debug("Speech detection stop", err));
       return;
     }
     processor.setLookahead(GATE_LOOKAHEAD_S);

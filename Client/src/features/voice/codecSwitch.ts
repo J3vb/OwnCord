@@ -21,7 +21,11 @@
  *
  * One more switch is not about viewers: MediaCapabilities can say hardware for
  * H.264 while WebRTC falls back to OpenH264 when the encoder starts (a
- * 3440x1440 frame the GPU refuses). OpenH264 is single-threaded, so the
+ * frame the GPU refuses). A share wider than the encoder's limit is shrunk to
+ * fit before it is published or its source changes (`fitGpuH264Share`), so on
+ * a first publish this is the last resort; after a Change source or Quality
+ * change no new check runs.
+ * OpenH264 is single-threaded, so the
  * share either drops to a few fps or shrinks to a blur to keep up. So a few seconds after an H.264 screen share goes live off Linux,
  * a sender sample names the encoder (once more if it has no name yet); an
  * OpenH264 one, even on only a lower simulcast layer, republishes the share as
@@ -37,12 +41,15 @@ import {
   type ScreenTrackState,
   type VideoTrackDeps,
 } from "../../lib/voice/screenShare";
+import { createLogger } from "@lib/logger";
 import { voiceStore } from "../../stores/voice.store";
 import { pickCommonCodec } from "./decodeCaps";
 import { isLinuxDesktop } from "./native/platform";
 import { channelPeerDecode } from "./peerDecode";
 import type { ShareSenderSample } from "./shareSenderStats";
 import type { PublishCodec } from "./videoCodec";
+
+const log = createLogger("codecSwitch");
 
 /** A switch down waits this long after the pick changes. */
 export const SWITCH_DOWN_MS = 1500;
@@ -200,6 +207,15 @@ export class CodecSwitchController {
       return;
     }
     if (!/openh264/i.test(sample.encoder)) return;
+    // What the encoder was given, so a support bundle says why it refused.
+    log.info("H.264 share fell back to the software encoder, switching to VP8", {
+      encoder: sample.encoder,
+      width: sample.width,
+      height: sample.height,
+      captureFps: sample.captureFps,
+      sentFps: sample.sentFps,
+      limitation: sample.limitation,
+    });
     this.softwareH264Track = track;
     await this.run("screen", this.slots.screen);
   }

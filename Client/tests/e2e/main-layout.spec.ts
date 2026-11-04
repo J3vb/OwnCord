@@ -1,12 +1,9 @@
 import { test, expect } from "./fixtures";
 import {
   buildTauriMockScript,
-  mockTauriFullSession,
-  MOCK_LOGIN_RESPONSE,
-  MOCK_MESSAGES,
-  navigateToMainPage,
-  submitLogin,
-  waitForWsReady,
+  BASE_SESSION_ROUTES,
+  navigateToMainPageReady,
+  startFullSession,
 } from "./helpers";
 
 // ---------------------------------------------------------------------------
@@ -15,9 +12,7 @@ import {
 
 test.describe("Main Page Layout", () => {
   test.beforeEach(async ({ page }) => {
-    await mockTauriFullSession(page);
-    await page.goto("/");
-    await navigateToMainPage(page);
+    await startFullSession(page);
   });
 
   test("app layout has all major sections", async ({ page }) => {
@@ -118,9 +113,7 @@ async function signInFreshProfile(
   await page.addInitScript(
     buildTauriMockScript({
       httpRoutes: [
-        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-        { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
-        { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
+        ...BASE_SESSION_ROUTES,
         { pattern: "/pins", status: 200, body: { messages: [], has_more: false } },
       ],
       simulateWsFlow: true,
@@ -133,9 +126,7 @@ async function signInFreshProfile(
     }, stored);
   }
   await page.goto("/");
-  await submitLogin(page);
-  await expect(page.locator("[data-testid='app-layout']")).toBeVisible({ timeout: 15_000 });
-  await waitForWsReady(page);
+  await navigateToMainPageReady(page);
 }
 
 /**

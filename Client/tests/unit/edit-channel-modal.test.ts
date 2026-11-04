@@ -1,4 +1,5 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
 import {
   createEditChannelModal,
   clampVoiceLimit,
@@ -8,19 +9,39 @@ import {
 } from "@components/EditChannelModal";
 import type { EditChannelModalOptions, EditChannelData } from "@components/EditChannelModal";
 import { channelsStore, setChannels, updateChannel } from "@stores/channels.store";
+import {
+  checkBackdropClickCloses,
+  checkClickCloses,
+  checkCloseButtonLabelled,
+  checkFocusMovesInAndRestores,
+  checkModalSemantics,
+  checkDragSelectKeepsOpen,
+  checkEscapeCancels,
+  checkEscapeIgnoredAfterDestroy,
+  checkEscapeKeepsImeCandidate,
+  checkOverlayRemovedOnDestroy,
+  type MakeDialog,
+} from "../helpers/modalHarness";
 
 describe("EditChannelModal", () => {
   let container: HTMLDivElement;
 
-  beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => {
+      document.querySelectorAll("[data-testid='edit-channel-modal']").forEach((el) => el.remove());
+    },
+  );
 
-  afterEach(() => {
-    container.remove();
-    document.querySelectorAll("[data-testid='edit-channel-modal']").forEach((el) => el.remove());
-  });
+  function saveWithNsfw(): void {
+    (
+      container.querySelector("[data-testid='edit-channel-nsfw-checkbox']") as HTMLInputElement
+    ).checked = true;
+
+    (container.querySelector("[data-testid='edit-channel-submit']") as HTMLButtonElement).click();
+  }
 
   function makeModal(overrides?: Partial<EditChannelModalOptions>) {
     const options: EditChannelModalOptions = {
@@ -43,6 +64,21 @@ describe("EditChannelModal", () => {
     modal.mount(container);
     return { modal, options };
   }
+
+  function submitName(value: string): HTMLButtonElement {
+    const input = container.querySelector(
+      "[data-testid='edit-channel-name-input']",
+    ) as HTMLInputElement;
+    input.value = value;
+    const saveBtn = container.querySelector(
+      "[data-testid='edit-channel-submit']",
+    ) as HTMLButtonElement;
+    saveBtn.click();
+    return saveBtn;
+  }
+
+  const openDialog: MakeDialog = ({ action, onClose }) =>
+    makeModal({ onSave: action, onClose }).modal;
 
   it("renders the modal overlay", () => {
     const { modal } = makeModal();
@@ -69,15 +105,7 @@ describe("EditChannelModal", () => {
   it("shows error when saving with empty name", () => {
     const onSave = vi.fn(async () => {});
     const { modal } = makeModal({ onSave });
-    const input = container.querySelector(
-      "[data-testid='edit-channel-name-input']",
-    ) as HTMLInputElement;
-    input.value = "";
-
-    const saveBtn = container.querySelector(
-      "[data-testid='edit-channel-submit']",
-    ) as HTMLButtonElement;
-    saveBtn.click();
+    submitName("");
 
     const error = container.querySelector("[data-testid='edit-channel-error']");
     expect(error?.textContent).toContain("required");
@@ -88,15 +116,7 @@ describe("EditChannelModal", () => {
   it("calls onSave with updated name", async () => {
     const onSave = vi.fn(async () => {});
     const { modal } = makeModal({ onSave });
-    const input = container.querySelector(
-      "[data-testid='edit-channel-name-input']",
-    ) as HTMLInputElement;
-    input.value = "renamed-channel";
-
-    const saveBtn = container.querySelector(
-      "[data-testid='edit-channel-submit']",
-    ) as HTMLButtonElement;
-    saveBtn.click();
+    submitName("renamed-channel");
 
     await vi.waitFor(() => {
       expect(onSave).toHaveBeenCalledWith({ name: "renamed-channel" });
@@ -200,35 +220,17 @@ describe("EditChannelModal", () => {
     modal.destroy?.();
   });
 
-  it("calls onClose when close button is clicked", () => {
-    const onClose = vi.fn();
-    const { modal } = makeModal({ onClose });
-    const closeBtn = container.querySelector(".modal-close") as HTMLButtonElement;
-    closeBtn.click();
-    expect(onClose).toHaveBeenCalled();
-    modal.destroy?.();
-  });
+  it("calls onClose when close button is clicked", () =>
+    checkClickCloses(openDialog, container, ".modal-close"));
 
-  it("removes overlay on destroy", () => {
-    const { modal } = makeModal();
-    expect(container.querySelector("[data-testid='edit-channel-modal']")).not.toBeNull();
-    modal.destroy?.();
-    expect(container.querySelector("[data-testid='edit-channel-modal']")).toBeNull();
-  });
+  it("removes overlay on destroy", () =>
+    checkOverlayRemovedOnDestroy(openDialog, container, "[data-testid='edit-channel-modal']"));
 
   it("shows error message when onSave rejects with Error", async () => {
     const onSave = vi.fn().mockRejectedValue(new Error("Server error"));
     const { modal } = makeModal({ onSave });
 
-    const input = container.querySelector(
-      "[data-testid='edit-channel-name-input']",
-    ) as HTMLInputElement;
-    input.value = "new-name";
-
-    const saveBtn = container.querySelector(
-      "[data-testid='edit-channel-submit']",
-    ) as HTMLButtonElement;
-    saveBtn.click();
+    const saveBtn = submitName("new-name");
 
     await vi.waitFor(() => {
       const error = container.querySelector("[data-testid='edit-channel-error']");
@@ -246,15 +248,7 @@ describe("EditChannelModal", () => {
     const onSave = vi.fn().mockRejectedValue("unknown");
     const { modal } = makeModal({ onSave });
 
-    const input = container.querySelector(
-      "[data-testid='edit-channel-name-input']",
-    ) as HTMLInputElement;
-    input.value = "new-name";
-
-    const saveBtn = container.querySelector(
-      "[data-testid='edit-channel-submit']",
-    ) as HTMLButtonElement;
-    saveBtn.click();
+    submitName("new-name");
 
     await vi.waitFor(() => {
       const error = container.querySelector("[data-testid='edit-channel-error']");
@@ -274,15 +268,7 @@ describe("EditChannelModal", () => {
     );
     const { modal } = makeModal({ onSave });
 
-    const input = container.querySelector(
-      "[data-testid='edit-channel-name-input']",
-    ) as HTMLInputElement;
-    input.value = "renamed";
-
-    const saveBtn = container.querySelector(
-      "[data-testid='edit-channel-submit']",
-    ) as HTMLButtonElement;
-    saveBtn.click();
+    const saveBtn = submitName("renamed");
 
     expect(saveBtn.hasAttribute("disabled")).toBe(true);
     expect(saveBtn.textContent).toBe("Saving...");
@@ -291,37 +277,14 @@ describe("EditChannelModal", () => {
     modal.destroy?.();
   });
 
-  it("calls onClose when cancel button is clicked", () => {
-    const onClose = vi.fn();
-    const { modal } = makeModal({ onClose });
+  it("calls onClose when cancel button is clicked", () =>
+    checkClickCloses(openDialog, container, ".btn-modal-cancel"));
 
-    const cancelBtn = container.querySelector(".btn-modal-cancel") as HTMLButtonElement;
-    cancelBtn.click();
+  it("calls onClose on backdrop click", () =>
+    checkBackdropClickCloses(openDialog, container, "[data-testid='edit-channel-modal']"));
 
-    expect(onClose).toHaveBeenCalled();
-    modal.destroy?.();
-  });
-
-  it("calls onClose on backdrop click", () => {
-    const onClose = vi.fn();
-    const { modal } = makeModal({ onClose });
-
-    const overlay = container.querySelector("[data-testid='edit-channel-modal']") as HTMLDivElement;
-    overlay.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-
-    expect(onClose).toHaveBeenCalled();
-    modal.destroy?.();
-  });
-
-  it("stays open when a drag-select ends on the backdrop", () => {
-    const onClose = vi.fn();
-    const { modal } = makeModal({ onClose });
-    const overlayEl = container.querySelector("[data-testid='edit-channel-modal']") as HTMLElement;
-    overlayEl.firstElementChild!.dispatchEvent(new Event("pointerdown", { bubbles: true }));
-    overlayEl.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    expect(onClose).not.toHaveBeenCalled();
-    modal.destroy?.();
-  });
+  it("stays open when a drag-select ends on the backdrop", () =>
+    checkDragSelectKeepsOpen(openDialog, container, "[data-testid='edit-channel-modal']"));
 
   it("adds error class to input on empty name validation", () => {
     const onSave = vi.fn(async () => {});
@@ -423,11 +386,7 @@ describe("EditChannelModal", () => {
     it("sends the flag to onSave when set", async () => {
       const onSave = vi.fn(async () => {});
       const { modal } = makeModal({ onSave });
-      (
-        container.querySelector("[data-testid='edit-channel-nsfw-checkbox']") as HTMLInputElement
-      ).checked = true;
-
-      (container.querySelector("[data-testid='edit-channel-submit']") as HTMLButtonElement).click();
+      saveWithNsfw();
 
       await vi.waitFor(() => {
         expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ nsfw: true }));
@@ -524,11 +483,7 @@ describe("EditChannelModal", () => {
         payload = data as unknown as Record<string, unknown>;
       });
       const { modal } = makeModal({ onSave });
-      (
-        container.querySelector("[data-testid='edit-channel-nsfw-checkbox']") as HTMLInputElement
-      ).checked = true;
-
-      (container.querySelector("[data-testid='edit-channel-submit']") as HTMLButtonElement).click();
+      saveWithNsfw();
 
       await vi.waitFor(() => {
         expect(payload).not.toBeNull();
@@ -585,6 +540,20 @@ describe("EditChannelModal", () => {
       (q("edit-channel-name-input") as HTMLInputElement).value = "renamed";
     };
 
+    async function expectRenameOmitsPassword(
+      options: Partial<EditChannelModalOptions>,
+      prepare: () => void = () => {},
+    ): Promise<void> {
+      const onSave = vi.fn(async (_data: EditChannelData) => {});
+      const { modal } = makeModal({ onSave, ...options });
+      prepare();
+      rename();
+      click("edit-channel-submit");
+      await vi.waitFor(() => expect(onSave).toHaveBeenCalled());
+      expect(onSave.mock.calls[0]![0]).not.toHaveProperty("password");
+      modal.destroy?.();
+    }
+
     beforeEach(() => {
       setChannels([{ id: 1, name: "general", type: "voice", category: "Chat", position: 0 }]);
     });
@@ -598,24 +567,13 @@ describe("EditChannelModal", () => {
     });
 
     it("is not offered on a text channel, and a text edit sends no password", async () => {
-      const onSave = vi.fn(async (_data: EditChannelData) => {});
-      const { modal } = makeModal({ onSave, channelType: "text" });
-      expect(q("edit-channel-password-group")).toBeNull();
-      rename();
-      click("edit-channel-submit");
-      await vi.waitFor(() => expect(onSave).toHaveBeenCalled());
-      expect(onSave.mock.calls[0]![0]).not.toHaveProperty("password");
-      modal.destroy?.();
+      await expectRenameOmitsPassword({ channelType: "text" }, () => {
+        expect(q("edit-channel-password-group")).toBeNull();
+      });
     });
 
     it("sends no password when the user left it empty", async () => {
-      const onSave = vi.fn(async (_data: EditChannelData) => {});
-      const { modal } = makeModal({ onSave, channelType: "voice" });
-      rename();
-      click("edit-channel-submit");
-      await vi.waitFor(() => expect(onSave).toHaveBeenCalled());
-      expect(onSave.mock.calls[0]![0]).not.toHaveProperty("password");
-      modal.destroy?.();
+      await expectRenameOmitsPassword({ channelType: "voice" });
     });
 
     it("sets a password on an unprotected channel", async () => {
@@ -654,14 +612,10 @@ describe("EditChannelModal", () => {
     });
 
     it("Change with nothing typed keeps the password", async () => {
-      const onSave = vi.fn(async (_data: EditChannelData) => {});
-      const { modal } = makeModal({ onSave, channelType: "voice", channelPasswordProtected: true });
-      click("edit-channel-password-change");
-      rename();
-      click("edit-channel-submit");
-      await vi.waitFor(() => expect(onSave).toHaveBeenCalled());
-      expect(onSave.mock.calls[0]![0]).not.toHaveProperty("password");
-      modal.destroy?.();
+      await expectRenameOmitsPassword(
+        { channelType: "voice", channelPasswordProtected: true },
+        () => click("edit-channel-password-change"),
+      );
     });
 
     it("Remove sends an empty string, and Keep password takes it back", async () => {
@@ -778,15 +732,8 @@ describe("EditChannelModal", () => {
   // ─── Dialog accessibility contract (DC-13) ─────────────────────────────────
 
   describe("dialog accessibility", () => {
-    it("stamps dialog semantics named by the header title", () => {
-      const { modal } = makeModal();
-      const dialog = container.querySelector(".modal") as HTMLElement;
-      expect(dialog.getAttribute("role")).toBe("dialog");
-      expect(dialog.getAttribute("aria-modal")).toBe("true");
-      expect(dialog.getAttribute("aria-labelledby")).toBe("edit-channel-title");
-      expect(container.querySelector("#edit-channel-title")?.textContent).toBe("Edit Channel");
-      modal.destroy?.();
-    });
+    it("stamps dialog semantics named by the header title", () =>
+      checkModalSemantics(openDialog, container, "edit-channel-title", "Edit Channel"));
 
     it("names each form control by its visible label", () => {
       const { modal } = makeModal({ channelType: "voice" });
@@ -804,62 +751,21 @@ describe("EditChannelModal", () => {
       modal.destroy?.();
     });
 
-    it("labels the icon-only close button", () => {
-      const { modal } = makeModal();
-      const closeBtn = container.querySelector(".modal-close") as HTMLButtonElement;
-      expect(closeBtn.getAttribute("aria-label")).toBe("Close");
-      modal.destroy?.();
-    });
+    it("labels the icon-only close button", () => checkCloseButtonLabelled(openDialog, container));
 
-    it("Escape calls onClose without saving", () => {
-      const onSave = vi.fn(async () => {});
-      const onClose = vi.fn();
-      const { modal } = makeModal({ onSave, onClose });
+    it("Escape calls onClose without saving", () => checkEscapeCancels(openDialog));
 
-      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    it("Escape that cancels an IME candidate keeps it open; a plain Escape still closes", () =>
+      checkEscapeKeepsImeCandidate(openDialog));
 
-      expect(onClose).toHaveBeenCalledTimes(1);
-      expect(onSave).not.toHaveBeenCalled();
-      modal.destroy?.();
-    });
+    it("ignores Escape after destroy", () => checkEscapeIgnoredAfterDestroy(openDialog));
 
-    it("Escape that cancels an IME candidate keeps it open; a plain Escape still closes", () => {
-      const onClose = vi.fn();
-      const { modal } = makeModal({ onClose });
-
-      document.dispatchEvent(
-        new KeyboardEvent("keydown", { key: "Escape", isComposing: true, bubbles: true }),
-      );
-      expect(onClose).not.toHaveBeenCalled();
-      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
-      expect(onClose).toHaveBeenCalledTimes(1);
-      modal.destroy?.();
-    });
-
-    it("ignores Escape after destroy", () => {
-      const onClose = vi.fn();
-      const { modal } = makeModal({ onClose });
-      modal.destroy?.();
-
-      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
-
-      expect(onClose).not.toHaveBeenCalled();
-    });
-
-    it("focuses the name input on open and restores focus on destroy", () => {
-      const trigger = document.createElement("button");
-      container.appendChild(trigger);
-      trigger.focus();
-
-      const { modal } = makeModal();
-      const input = container.querySelector(
+    it("focuses the name input on open and restores focus on destroy", () =>
+      checkFocusMovesInAndRestores(
+        openDialog,
+        container,
         "[data-testid='edit-channel-name-input']",
-      ) as HTMLInputElement;
-      expect(document.activeElement).toBe(input);
-
-      modal.destroy?.();
-      expect(document.activeElement).toBe(trigger);
-    });
+      ));
   });
 
   // ─── Pure helpers ──────────────────────────────────────────────────────────

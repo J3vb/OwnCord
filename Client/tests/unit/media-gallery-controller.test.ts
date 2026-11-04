@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { loggerMock } from "../helpers/loggerMock";
 
 const panel = vi.hoisted(() => ({
   mount: vi.fn(),
@@ -10,9 +11,7 @@ const createChannelMediaGallery = vi.hoisted(() => vi.fn((_opts: unknown) => pan
 
 vi.mock("@components/ChannelMediaGallery", () => ({ createChannelMediaGallery }));
 vi.mock("@lib/ui/toast", () => ({ showToast: vi.fn() }));
-vi.mock("@lib/logger", () => ({
-  createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
-}));
+vi.mock("@lib/logger", () => loggerMock());
 
 import { createMediaGalleryController } from "../../src/pages/main-page/MediaGalleryController";
 import type { ChannelMediaGalleryOptions } from "@components/ChannelMediaGallery";

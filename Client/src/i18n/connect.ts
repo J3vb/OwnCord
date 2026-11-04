@@ -107,6 +107,8 @@ export const connectText = defineCatalog("connect", {
   "login.passwordLabel": "Password",
   "login.rememberPassword": "Remember password",
   "login.autoConnect": "Auto connect",
+  "login.staySignedIn": "Stay signed in",
+  "login.staySignedInHint": "On by default on your phone. Untick on a shared device.",
   "login.inviteLabel": "Invite Code",
   "login.toRegister": "Need an account? Register",
   "login.toLogin": "Already have an account? Login",
@@ -231,6 +233,7 @@ export const connectText = defineCatalog("connect", {
   "error.gifDisabled": "GIF search is not configured on this server.",
   "error.lastRole": "A member must keep at least one role.",
   "error.pushDisabled": "Notifications are not enabled on this server.",
+  "error.loginSessionRequired": "Sign in with your password to change this.",
   "session.passwordRemoveFailed": "Could not remove the saved password — it is still stored",
   "session.credentialsSaveFailed": "Could not save credentials — auto-login won't work",
   "session.savedLoginUnavailable":
@@ -267,6 +270,10 @@ export const connectText = defineCatalog("connect", {
   "notifications.inThread": "{channel} › {thread}",
   "notifications.newIn": "New message in {channel}",
   "notifications.spoiler": "Spoiler",
+  "notifications.androidChannel.messages": "Messages",
+  "notifications.androidChannel.messagesDesc": "Direct messages, mentions and channel messages",
+  "notifications.androidChannel.calls": "Incoming calls",
+  "notifications.androidChannel.callsDesc": "A direct message call ringing",
   "notifications.attachment": {
     one: "sent an attachment",
     other: "sent {count} attachments",

@@ -78,14 +78,26 @@ function toggleUse(theme: CustomTheme, active: boolean): void {
   }
 }
 
+/** Save the theme as a .css file, or in the Android app hand it to the share
+ *  sheet (mail, Drive, a chat), which is how a phone passes a file on. */
 async function exportTheme(theme: CustomTheme): Promise<void> {
+  const share = desktop.shareSheet.available;
   try {
-    const path = await desktop.fileSaver.pickSaveLocation(themeFileName(theme.name));
+    const name = themeFileName(theme.name);
+    const bytes = new TextEncoder().encode(theme.css);
+    if (share) {
+      await desktop.shareSheet.shareFile(name, bytes);
+      return;
+    }
+    const path = await desktop.fileSaver.pickSaveLocation(name);
     if (path === null) return;
-    await desktop.fileSaver.writeFile(path, new TextEncoder().encode(theme.css));
+    await desktop.fileSaver.writeFile(path, bytes);
   } catch (err) {
-    log.error("Export custom theme failed", { error: String(err) });
-    showToast(t("appearance.customThemes.exportFailed"), "error");
+    log.error("Export custom theme failed", { share, error: String(err) });
+    showToast(
+      t(share ? "appearance.customThemes.shareFailed" : "appearance.customThemes.exportFailed"),
+      "error",
+    );
   }
 }
 
@@ -214,25 +226,31 @@ export function buildCustomThemeSection(signal: AbortSignal): HTMLElement {
     render();
   }
 
-  function remove(theme: CustomTheme): void {
-    createConfirmModal({
-      title: t("appearance.customThemes.deleteTitle", { name: theme.name }),
-      body: t("appearance.customThemes.deleteBody"),
-      confirmLabel: t("appearance.customThemes.delete"),
-      cancelLabel: t("appearance.customThemes.cancel"),
-      testId: "custom-theme-delete-dialog",
-      confirmTestId: "custom-theme-delete-confirm",
-      signal,
-      onConfirm: () => {
-        if (!saveCustomThemes(loadCustomThemes().filter((other) => other.id !== theme.id))) {
-          showToast(t("appearance.customThemes.saveFailed"), "error");
-          return;
-        }
-        if (getActiveCustomThemeId() === theme.id) setActiveCustomTheme(null);
-        if (editing === theme.id) closeEditor();
-        render();
+  function remove(theme: CustomTheme, opener: HTMLElement): void {
+    // Mounted in the settings overlay: the body would stack beneath it.
+    const container = opener.closest("[data-testid='settings-overlay']") ?? document.body;
+    createConfirmModal(
+      {
+        title: t("appearance.customThemes.deleteTitle", { name: theme.name }),
+        body: t("appearance.customThemes.deleteBody"),
+        confirmLabel: t("appearance.customThemes.delete"),
+        cancelLabel: t("appearance.customThemes.cancel"),
+        testId: "custom-theme-delete-dialog",
+        confirmTestId: "custom-theme-delete-confirm",
+        signal,
+        fallbackFocus: () => (opener.isConnected ? opener : newBtn),
+        onConfirm: () => {
+          if (!saveCustomThemes(loadCustomThemes().filter((other) => other.id !== theme.id))) {
+            showToast(t("appearance.customThemes.saveFailed"), "error");
+            return;
+          }
+          if (getActiveCustomThemeId() === theme.id) setActiveCustomTheme(null);
+          if (editing === theme.id) closeEditor();
+          render();
+        },
       },
-    });
+      container,
+    );
   }
 
   function render(): void {
@@ -270,6 +288,12 @@ export function buildCustomThemeSection(signal: AbortSignal): HTMLElement {
         signal,
       );
       use.setAttribute("aria-pressed", active ? "true" : "false");
+      const deleteBtn: HTMLButtonElement = button(
+        t("appearance.customThemes.delete"),
+        t("appearance.customThemes.deleteAria", { name: theme.name }),
+        () => remove(theme, deleteBtn),
+        signal,
+      );
       appendChildren(
         row,
         use,
@@ -291,17 +315,21 @@ export function buildCustomThemeSection(signal: AbortSignal): HTMLElement {
           signal,
         ),
         button(
-          t("appearance.customThemes.export"),
-          t("appearance.customThemes.exportAria", { name: theme.name }),
+          t(
+            desktop.shareSheet.available
+              ? "appearance.customThemes.share"
+              : "appearance.customThemes.export",
+          ),
+          t(
+            desktop.shareSheet.available
+              ? "appearance.customThemes.shareAria"
+              : "appearance.customThemes.exportAria",
+            { name: theme.name },
+          ),
           () => void exportTheme(theme),
           signal,
         ),
-        button(
-          t("appearance.customThemes.delete"),
-          t("appearance.customThemes.deleteAria", { name: theme.name }),
-          () => remove(theme),
-          signal,
-        ),
+        deleteBtn,
       );
       list.appendChild(row);
     }

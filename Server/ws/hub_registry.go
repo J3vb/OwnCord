@@ -157,9 +157,12 @@ func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool, txn *voi
 	// A call this session parked and another device then moved away: tell it first,
 	// before any other voice frame, so it clears its local call. Only a resume can
 	// hold the call locally; a fresh connect just drops the note.
-	if ch := h.voiceReg.voiceGrace.takeMoved(c.userID, c.tokenHash); ch != 0 && c.lastSeq > 0 {
+	if ch := h.voiceHub.reg.voiceGrace.takeMoved(c.userID, c.tokenHash); ch != 0 && c.lastSeq > 0 {
 		c.sendMsg(buildVoiceDisconnected(ch, voiceMovedReason))
 	}
+	// A moderator moved this session's parked call: carry the mute and deliver
+	// voice_moved so the client re-joins the destination.
+	h.collectParkedModMove(c)
 
 	// A fresh connect drops the replaced connection's voice state without
 	// transferring it, so that channel lost a participant and the E2EE key holder may
@@ -175,6 +178,9 @@ func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool, txn *voi
 	if inheritedVoiceChID != 0 {
 		h.updateKeyHolder(inheritedVoiceChID)
 	}
+	// A membership a resume took over may name a join that never reached the SFU
+	// (the client gave it up while offline): check it shortly.
+	h.noteResumedVoice(c)
 
 	// Re-sync this connection's E2EE peer-key map. voice_e2ee_announce is an
 	// unsequenced pub/sub frame (bypassing deliverBroadcast and the replay buffer), so

@@ -13,7 +13,7 @@ import {
   saveUserStatus,
 } from "@lib/presence/userStatus";
 import { savePref } from "@lib/prefs/preferences";
-import { resetAuthState } from "../helpers/storeSeeds";
+import { resetAuthState, seedOnlineMember } from "../helpers/storeSeeds";
 
 const HOUR = 60 * 60_000;
 const START = new Date(2026, 9, 17, 10, 0, 0).getTime();
@@ -49,11 +49,7 @@ describe("status timer watcher", () => {
     vi.setSystemTime(START);
     onRevert = vi.fn<(status: UserStatus) => void>();
     setUser();
-    membersStore.setState((p) => ({
-      ...p,
-      members: new Map([[7, { id: 7, username: "alice", status: "online" } as never]]),
-    }));
-    membersStore.flush();
+    seedOnlineMember(7, "alice");
   });
 
   afterEach(() => {

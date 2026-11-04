@@ -6,104 +6,54 @@
  * root.scrollTop untouched, which after the prepend points at completely
  * different (older) content.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 
 import { createMessageList } from "@components/MessageList";
 import type { MessageListOptions } from "@components/MessageList";
 import { messagesStore } from "@stores/messages.store";
 import type { Message } from "@stores/messages.store";
 import { setChannels, setActiveChannel } from "@stores/channels.store";
-import { buildMessage } from "../helpers/messageFactory";
-import { resetMessagesState, resetMembersState } from "../helpers/storeResets";
+import { spacedMessage } from "../helpers/messageFactory";
+import {
+  stubScrollHeight,
+  makeListOptions,
+  resetStoresAndChannels,
+  setHasMore,
+  setMessages,
+} from "../helpers/messageListHarness";
 import "../helpers/resizeObserverStub";
 
 const CHANNEL_ID = 1;
 
-function resetStores(): void {
-  resetMessagesState();
-  resetMembersState();
-  // The unread count a test gives the channel would otherwise leak a NEW
-  // divider into the next test's list.
-  setChannels([]);
-  setActiveChannel(null);
-}
-
 function makeMessage(id: number): Message {
-  return buildMessage(
-    { id },
-    {
-      channelId: CHANNEL_ID,
-      // 10 minutes apart, on the same UTC day, and past GROUP_THRESHOLD_MS
-      // (7 minutes) so shouldGroup never merges two of these rows — every
-      // message renders at its full (ungrouped) height.
-      timestamp: new Date(Date.UTC(2024, 0, 15, 0, id * 10)).toISOString(),
-    },
-  );
-}
-
-function setMessages(messages: readonly Message[]): void {
-  messagesStore.setState((prev) => {
-    const next = new Map(prev.messagesByChannel);
-    next.set(CHANNEL_ID, [...messages]);
-    return { ...prev, messagesByChannel: next };
-  });
-}
-
-function setHasMore(value: boolean): void {
-  messagesStore.setState((prev) => {
-    const next = new Map(prev.hasMore);
-    next.set(CHANNEL_ID, value);
-    return { ...prev, hasMore: next };
-  });
+  return spacedMessage({ id });
 }
 
 describe("MessageList — history prepend keeps the reading position", () => {
   let container: HTMLDivElement;
   let msgList: ReturnType<typeof createMessageList> | null = null;
   let options: MessageListOptions;
-  let scrollHeightDescriptor: PropertyDescriptor | undefined;
+  let restoreScrollHeight: () => void;
 
   beforeEach(() => {
-    resetStores();
+    resetStoresAndChannels();
     container = document.createElement("div");
     document.body.appendChild(container);
-    options = {
-      channelId: CHANNEL_ID,
-      channelName: "general",
-      currentUserId: 1,
-      onScrollTop: vi.fn(),
-      onReplyClick: vi.fn(),
-      onEditClick: vi.fn(),
-      onEditSave: vi.fn(() => true),
-      onEmptyEdit: vi.fn(),
-      onDeleteClick: vi.fn(),
-      onReactionClick: vi.fn(),
-      onPinClick: vi.fn(),
-    };
+    options = makeListOptions({ channelId: CHANNEL_ID });
 
     // jsdom never lays anything out, so scrollHeight/clientHeight are always
     // 0 — which makes isNearBottom() (scrollHeight - scrollTop - clientHeight
     // < 100) unconditionally TRUE regardless of scrollTop, hiding this bug
     // entirely (it only manifests when the reader is scrolled away from the
     // bottom). Stub a real gap so isNearBottom reflects the scrollTop we set.
-    scrollHeightDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollHeight");
-    Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
-      configurable: true,
-      get(): number {
-        return 100_000;
-      },
-    });
+    restoreScrollHeight = stubScrollHeight(100_000);
   });
 
   afterEach(() => {
     msgList?.destroy?.();
     msgList = null;
     container.remove();
-    if (scrollHeightDescriptor) {
-      Object.defineProperty(HTMLElement.prototype, "scrollHeight", scrollHeightDescriptor);
-    } else {
-      delete (HTMLElement.prototype as unknown as Record<string, unknown>).scrollHeight;
-    }
+    restoreScrollHeight();
   });
 
   function mount(): void {
@@ -115,8 +65,8 @@ describe("MessageList — history prepend keeps the reading position", () => {
     // The currently loaded window: 50 messages, ids 51..100 (oldest loaded
     // message is 51).
     const initial = Array.from({ length: 50 }, (_, i) => makeMessage(51 + i));
-    setMessages(initial);
-    setHasMore(true);
+    setMessages(CHANNEL_ID, initial);
+    setHasMore(CHANNEL_ID, true);
     mount();
 
     const root = container.querySelector(".messages-container") as HTMLDivElement;
@@ -133,7 +83,7 @@ describe("MessageList — history prepend keeps the reading position", () => {
     // extension (allMessages[0] changes), so the store subscriber's
     // tryAppendMessages() bails and falls through to renderAll().
     const older = Array.from({ length: 50 }, (_, i) => makeMessage(1 + i));
-    setMessages([...older, ...initial]);
+    setMessages(CHANNEL_ID, [...older, ...initial]);
     messagesStore.flush();
 
     // Message 51 -- what the reader was actually looking at -- must still be
@@ -153,8 +103,8 @@ describe("MessageList — history prepend keeps the reading position", () => {
   // so it moves up with every prepended page: it is no anchor for the reader.
   it("keeps the reading position when the NEW line sits at the top of the window", async () => {
     const initial = Array.from({ length: 50 }, (_, i) => makeMessage(51 + i));
-    setMessages(initial);
-    setHasMore(true);
+    setMessages(CHANNEL_ID, initial);
+    setHasMore(CHANNEL_ID, true);
     setChannels([
       {
         id: CHANNEL_ID,
@@ -177,7 +127,7 @@ describe("MessageList — history prepend keeps the reading position", () => {
     await Promise.resolve();
 
     const older = Array.from({ length: 50 }, (_, i) => makeMessage(1 + i));
-    setMessages([...older, ...initial]);
+    setMessages(CHANNEL_ID, [...older, ...initial]);
     messagesStore.flush();
 
     expect(container.querySelector('[data-testid="message-1"]')).toBeNull();
@@ -204,8 +154,8 @@ describe("MessageList — history prepend keeps the reading position", () => {
     });
     try {
       const initial = Array.from({ length: 50 }, (_, i) => makeMessage(51 + i));
-      setMessages(initial);
-      setHasMore(true);
+      setMessages(CHANNEL_ID, initial);
+      setHasMore(CHANNEL_ID, true);
       mount();
       const root = container.querySelector(".messages-container") as HTMLDivElement;
       // 8px into message 51, the oldest loaded row, right under the day divider.
@@ -214,7 +164,7 @@ describe("MessageList — history prepend keeps the reading position", () => {
       await Promise.resolve();
 
       const older = Array.from({ length: 50 }, (_, i) => makeMessage(1 + i));
-      setMessages([...older, ...initial]);
+      setMessages(CHANNEL_ID, [...older, ...initial]);
       messagesStore.flush();
 
       // Where the anchored row really is: the top spacer plus every rendered

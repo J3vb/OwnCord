@@ -87,7 +87,7 @@ func (h *Hub) emitVoiceChannelGuarded(_ context.Context, _ int64, ev Event) bool
 	if !ok {
 		return false
 	}
-	h.sendToUserIfInVoiceChannel(e.VoiceChannelID(), e.TargetUserID(), e.Payload())
+	h.sendToUserIfInVoiceChannel(e.VoiceChannelID(), e.SenderUserID(), e.TargetUserID(), e.Payload())
 	return true
 }
 
@@ -118,7 +118,7 @@ func (h *Hub) emitPresenceOthers(_ context.Context, _ int64, ev Event) bool {
 	// An invisible user's public presence half: like the visible case it must invalidate
 	// any queued coalescer entry so a stale connect-time presence cannot flush after
 	// and overwrite this fresher status. The drop and broadcast run atomically under
-	// presenceMu (dropQueuedPresenceAndBroadcast) so a racing flush cannot enqueue its
+	// presenceFeed.mu (dropQueuedPresenceAndBroadcast) so a racing flush cannot enqueue its
 	// stale frame after this one.
 	h.dropQueuedPresenceAndBroadcast(e.excludeUserID, func() {
 		// Normal priority, excluding the owner, NOT broadcastExcludeLow. Every other source
@@ -143,10 +143,10 @@ func (h *Hub) emitPresenceSelf(_ context.Context, _ int64, ev Event) bool {
 	// drops the frame and marks the client stale; Client.sendPresenceMsg). SendToUserHigh
 	// would split it across two FIFOs: writePump drains high strictly before normal, so
 	// a newer invisible self-frame on high could land before an older visible-status
-	// frame on normal, leaving the owner's client on a stale status. presenceMu orders
+	// frame on normal, leaving the owner's client on a stale status. presenceFeed.mu orders
 	// the payload choice against a game activity sweep, as in emitPresence.
-	h.presenceMu.Lock()
-	defer h.presenceMu.Unlock()
+	h.presenceFeed.mu.Lock()
+	defer h.presenceFeed.mu.Unlock()
 	payload := h.presencePayloadLocked(e.TargetUserID(), e.Payload(), e.bare)
 	for _, c := range h.clientsOf(e.TargetUserID()) {
 		c.sendPresenceMsg(payload)
@@ -260,9 +260,9 @@ func (h *Hub) emitPresence(_ context.Context, _ int64, ev Event) bool {
 	// could deliver a newer connect/disconnect frame before an older presence_update
 	// in the low queue, leaving the observer stale. A user-chosen presence also
 	// bypasses the coalescer: drop any entry queued for this user and broadcast
-	// atomically under presenceMu (dropQueuedPresenceAndBroadcast), or the pending
+	// atomically under presenceFeed.mu (dropQueuedPresenceAndBroadcast), or the pending
 	// flush (up to 300ms later) could overwrite this fresher status. The frame is chosen
-	// inside the closure under presenceMu: a handler that snapshotted a game before a
+	// inside the closure under presenceFeed.mu: a handler that snapshotted a game before a
 	// switch-off must not re-broadcast it after the sweep cleared it.
 	h.dropQueuedPresenceAndBroadcast(e.userID, func() {
 		h.broadcastPresenceFrame(0, h.presencePayloadLocked(e.userID, e.Payload(), e.bare))
@@ -283,12 +283,12 @@ func (h *Hub) emitBroadcastAll(_ context.Context, _ int64, ev Event) bool {
 // or song the handler snapshotted earlier. bare (the same frame with null game and
 // song) is sent while member activity is off, and also when the live game and song
 // are both already nil: a sweep cleared them after the snapshot, even if the
-// switch was turned back on. The caller holds presenceMu.
+// switch was turned back on. The caller holds presenceFeed.mu.
 func (h *Hub) presencePayloadLocked(userID int64, payload, bare []byte) []byte {
 	if bare == nil {
 		return payload
 	}
-	if !h.gameActivity.on.Load() {
+	if !h.settings.gameActivity.on.Load() {
 		return bare
 	}
 	if mergeLivePresence(h.clientsOf(userID)).noActivity() {

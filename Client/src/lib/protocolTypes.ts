@@ -52,6 +52,7 @@ export const ServerMessageType = {
   VOICE_DISCONNECTED: "voice_disconnected",
   MEMBER_JOIN: "member_join",
   MEMBER_UPDATE: "member_update",
+  MEMBER_UPDATE_BATCH: "member_update_batch", // a role rename or reorder: member_update for up to 64 members in one sequenced global frame
   USER_UPDATE: "user_update",
   MEMBER_BAN: "member_ban",
   ROLES_UPDATE: "roles_update",
@@ -217,6 +218,10 @@ export const RestErrorCode = {
   INVALID_INPUT: "INVALID_INPUT",
   LAST_ROLE: "LAST_ROLE",
   LOCKOUT: "LOCKOUT",
+  // An account-security route (password, two-factor, recovery, sessions,
+  // account deletion, device key) was called with an API token; it takes a
+  // login session.
+  LOGIN_SESSION_REQUIRED: "LOGIN_SESSION_REQUIRED",
   MISSING_ASSETS: "MISSING_ASSETS",
   NOT_FOUND: "NOT_FOUND",
   NOT_NSFW: "NOT_NSFW",
@@ -251,6 +256,7 @@ export const RestErrorCode = {
   STORAGE_QUOTA_EXCEEDED: "STORAGE_QUOTA_EXCEEDED",
   TIMED_OUT: "TIMED_OUT",
   TOTP_ALREADY_ENABLED: "TOTP_ALREADY_ENABLED",
+  TRANSFER_TIMED_OUT: "TRANSFER_TIMED_OUT",
   UNAUTHORIZED: "UNAUTHORIZED",
   // Diagnostics could not be collected, or the export could not be recorded.
   // SERVICE_UNAVAILABLE is the general form.

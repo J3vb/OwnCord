@@ -1,75 +1,29 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
-import * as voiceSession from "../helpers/voiceSessionMock";
+import * as codecMocks from "../helpers/voiceCodecTabMocks";
 
 const isLinuxDesktop = vi.hoisted(() => vi.fn(() => false));
 const supportsVP9 = vi.hoisted(() => vi.fn(() => true));
 
-vi.mock("../../src/features/voice/native/platform", () => ({
-  isLinuxDesktop: () => isLinuxDesktop(),
-  isWindowsDesktop: () => false,
-  isAndroidApp: () => false,
-}));
-const nativeH264 = vi.hoisted(() => ({ value: true }));
+vi.mock("../../src/features/voice/native/platform", () =>
+  codecMocks.nativePlatformMock(() => isLinuxDesktop()),
+);
 const nativeVp9 = vi.hoisted(() => ({ value: false }));
 vi.mock("../../src/features/voice/native/videoCodecs", () => ({
-  nativeVideoCodecs: () =>
-    Promise.resolve({ h264: nativeH264.value, vp9: nativeVp9.value, decode: [] }),
+  nativeVideoCodecs: () => Promise.resolve({ h264: true, vp9: nativeVp9.value, decode: [] }),
 }));
-// The Linux case waits for the codec probe, so the tab outlives the build:
-// keep the native device lists and hot-plug watch off the real desktop host.
-vi.mock("../../src/features/voice/native/devices", () => ({
-  nativeAudioDevices: async () => null,
-  nativeCameraDevices: async () => null,
-  nativeCameraSupport: async () => null,
-  onNativeDevicesChanged: () => null,
-}));
-// The Linux tab starts the meter's capture-only monitor on the host; a call
-// holding the capture stands in for it here.
-vi.mock("../../src/platform/desktop", async (importOriginal) => {
-  const original = await importOriginal<typeof import("../../src/platform/desktop")>();
-  return {
-    ...original,
-    desktop: {
-      ...original.desktop,
-      nativeVoice: {
-        ...original.desktop.nativeVoice,
-        onMicTestEvent: () => () => {},
-        startMicTest: async () => {
-          throw new Error("mic test unavailable during a call");
-        },
-      },
-    },
-  };
-});
+vi.mock("../../src/features/voice/native/devices", () => codecMocks.nativeDevicesMock());
+vi.mock("../../src/platform/desktop", (importOriginal) =>
+  codecMocks.desktopMicTestBusyMock(importOriginal),
+);
 vi.mock("livekit-client", async (importOriginal) => ({
   ...(await importOriginal<typeof import("livekit-client")>()),
   supportsVP9: () => supportsVP9(),
 }));
-vi.mock("../../src/platform/desktop/pushToTalk", () => ({
-  pushToTalk: {
-    supported: async () => true,
-    captureKeyPress: async () => 0,
-    stop: async () => {},
-    updateKey: async () => {},
-  },
-}));
-vi.mock("@lib/voice/livekitSession", () =>
-  voiceSession.withOverrides({
-    reapplyAudioProcessing: vi.fn(),
-  }),
-);
+vi.mock("../../src/platform/desktop/pushToTalk", () => codecMocks.inertPushToTalkMock());
+vi.mock("@lib/voice/livekitSession", () => codecMocks.reapplyAudioSessionMock());
 
-import { createVoiceAudioTab } from "../../src/features/settings/VoiceAudioTab";
 import { installFakeAudio } from "../helpers/fakeAudioContext";
-
-function codecOptions(): string[] {
-  const ac = new AbortController();
-  const el = createVoiceAudioTab(ac.signal).build();
-  const select = el.querySelector('select[aria-label="Video Codec"]') as HTMLSelectElement | null;
-  const values = select === null ? [] : [...select.options].map((o) => o.value);
-  ac.abort();
-  return values;
-}
+import { codecOptions, expectCodecsEventually, shownCodecFor } from "../helpers/voiceCodecTab";
 
 beforeEach(() => {
   localStorage.clear();
@@ -77,14 +31,7 @@ beforeEach(() => {
   nativeVp9.value = false;
   supportsVP9.mockReturnValue(true);
   installFakeAudio({ worklets: true });
-  vi.stubGlobal("navigator", {
-    mediaDevices: {
-      enumerateDevices: vi.fn().mockResolvedValue([]),
-      getUserMedia: vi.fn().mockResolvedValue({ getTracks: () => [], getAudioTracks: () => [] }),
-      addEventListener: () => {},
-      removeEventListener: () => {},
-    },
-  });
+  codecMocks.stubEmptyMediaDevices();
 });
 
 afterEach(() => {
@@ -103,13 +50,7 @@ describe("VoiceAudioTab VP9 entry", () => {
 
   it("never offers VP9 on Linux when the native engine lacks it", async () => {
     isLinuxDesktop.mockReturnValue(true);
-    const ac = new AbortController();
-    const el = createVoiceAudioTab(ac.signal).build();
-    await vi.waitFor(() => {
-      const select = el.querySelector('select[aria-label="Video Codec"]') as HTMLSelectElement;
-      expect([...select.options].map((o) => o.value)).toEqual(["vp8", "h264", "auto"]);
-    });
-    ac.abort();
+    await expectCodecsEventually(["vp8", "h264", "auto"]);
   });
 
   it("offers VP9 on Linux when the native engine has it", async () => {
@@ -117,22 +58,11 @@ describe("VoiceAudioTab VP9 entry", () => {
     nativeVp9.value = true;
     // The webview's own check does not matter on Linux.
     supportsVP9.mockReturnValue(false);
-    const ac = new AbortController();
-    const el = createVoiceAudioTab(ac.signal).build();
-    await vi.waitFor(() => {
-      const select = el.querySelector('select[aria-label="Video Codec"]') as HTMLSelectElement;
-      expect([...select.options].map((o) => o.value)).toEqual(["vp8", "h264", "vp9", "auto"]);
-    });
-    ac.abort();
+    await expectCodecsEventually(["vp8", "h264", "vp9", "auto"]);
   });
 
   it("shows a saved VP9 that is no longer offered as VP8", () => {
     supportsVP9.mockReturnValue(false);
-    localStorage.setItem("owncord:settings:videoCodec", '"vp9"');
-    const ac = new AbortController();
-    const el = createVoiceAudioTab(ac.signal).build();
-    const select = el.querySelector('select[aria-label="Video Codec"]') as HTMLSelectElement;
-    expect(select.value).toBe("vp8");
-    ac.abort();
+    expect(shownCodecFor("vp9")).toBe("vp8");
   });
 });

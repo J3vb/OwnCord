@@ -22,14 +22,13 @@ import { Q1, findUnnamedControls, focusIndicator, textContrast } from "./support
 import {
   buildTauriMockScript,
   emitWsMessage,
-  MOCK_LOGIN_RESPONSE,
-  MOCK_MESSAGES,
   mockTauriFullSessionWithVoice,
   navigateToMainPage,
   parkLiveKitSocket,
-  submitLogin,
   voiceJoinWithTokenHandlers,
   waitForWsReady,
+  BASE_SESSION_ROUTES,
+  navigateToMainPageReady,
 } from "./helpers";
 import { callLog, mountCallGrid } from "./support/callGrid";
 
@@ -110,9 +109,7 @@ for (const profile of PROFILES) {
       await page.addInitScript(
         buildTauriMockScript({
           httpRoutes: [
-            { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-            { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
-            { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
+            ...BASE_SESSION_ROUTES,
             { pattern: "/pins", status: 200, body: { messages: [], has_more: false } },
           ],
           simulateWsFlow: true,
@@ -144,9 +141,7 @@ for (const profile of PROFILES) {
     });
 
     async function signIn(page: Page): Promise<void> {
-      await submitLogin(page);
-      await expect(page.locator("[data-testid='app-layout']")).toBeVisible({ timeout: 15_000 });
-      await waitForWsReady(page);
+      await navigateToMainPageReady(page);
       await expect(page.locator("[data-testid='chat-header-name']")).toHaveText("general");
       await expect(page.locator("[data-testid='sidebar-drawer-backdrop']")).toBeAttached();
     }
@@ -346,14 +341,73 @@ for (const profile of PROFILES) {
     }) => {
       await signIn(page);
       await page.locator("[data-testid='sidebar-toggle']").tap();
+      // As on the desktop, DMs live behind Home, not above the channel list.
+      await expect(drawer(page).locator(".channel-list .channel-item").first()).toBeVisible();
+      const dmSection = drawer(page).locator(".sidebar-dm-section");
+      await expect(dmSection).toHaveCount(1);
+      await expect(dmSection).toBeHidden();
+      await expect(drawer(page).locator(".unified-sidebar-header .server-icon-sm")).toBeHidden();
       const home = rail(page).locator("[data-testid='server-rail-home']");
       await home.tap();
       await expect(home).toHaveAttribute("aria-current", "true");
       await expect(drawer(page)).toHaveClass(/drawer-open/);
+      await expect(drawer(page).getByTestId("dm-phone-head")).toBeVisible();
       // Tapping the connected server's icon goes back to its channels.
       await rail(page).locator("[data-testid='server-rail-server']").first().tap();
       await expect(home).not.toHaveAttribute("aria-current", "true");
       await expect(drawer(page).locator(".channel-list .channel-item").first()).toBeVisible();
+    });
+
+    test("Direct Messages puts People behind the drawer, and its menu button reopens it", async ({
+      page,
+    }) => {
+      await signIn(page);
+      await page.locator("[data-testid='sidebar-toggle']").tap();
+      await rail(page).locator("[data-testid='server-rail-home']").tap();
+      await expect(drawer(page).getByTestId("dm-phone-head")).toBeVisible();
+      await page
+        .locator("[data-testid='sidebar-drawer-backdrop']")
+        .tap({ position: { x: 380, y: 300 } });
+      await expect(drawer(page)).not.toHaveClass(/drawer-open/);
+
+      await expect(page.getByTestId("people-home")).toBeVisible();
+      await expect(page.getByTestId("chat-area")).toBeHidden();
+      // Active now needs the room a phone does not have.
+      await expect(page.getByTestId("people-active")).toBeHidden();
+      await noHorizontalScroll(page);
+      await page.getByTestId("feature-view-menu").tap();
+      await expect(drawer(page)).toHaveClass(/drawer-open/);
+    });
+
+    test("Home turns the drawer into Messages, with search, People and New message", async ({
+      page,
+    }) => {
+      await signIn(page);
+      await page.locator("[data-testid='sidebar-toggle']").tap();
+      await rail(page).locator("[data-testid='server-rail-home']").tap();
+      const head = drawer(page).getByTestId("dm-phone-head");
+      await expect(head.getByRole("heading", { name: "Messages" })).toBeVisible();
+      await expect(drawer(page).locator(".unified-sidebar-header")).toBeHidden();
+      await expect(page.getByTestId("sidebar-drawer-search")).toBeHidden();
+      await expect(page.getByTestId("dm-back-header")).toBeHidden();
+      await expect(page.getByTestId("dm-people-entry")).toBeHidden();
+      await noHorizontalScroll(page);
+
+      const find = drawer(page).locator(".dm-search");
+      await expect(find).toBeHidden();
+      await head.getByTestId("dm-phone-search").tap();
+      await expect(find).toBeFocused();
+      await expect(head.getByTestId("dm-phone-search")).toHaveAttribute("aria-expanded", "true");
+
+      await head.getByTestId("dm-phone-people").tap();
+      await expect(drawer(page)).not.toHaveClass(/drawer-open/);
+      await expect(page.getByTestId("people-home")).toBeVisible();
+
+      // Back on a server, the server header returns.
+      await page.getByTestId("feature-view-menu").tap();
+      await rail(page).locator("[data-testid='server-rail-server']").first().tap();
+      await expect(drawer(page).locator(".unified-sidebar-header")).toBeVisible();
+      await expect(page.getByTestId("dm-phone-head")).toHaveCount(0);
     });
 
     test("the user bar's Switch server button gives way to the rail", async ({ page }) => {
@@ -648,6 +702,47 @@ for (const profile of PROFILES) {
       await noHorizontalScroll(page);
     });
 
+    test("the composer's + opens the attach sheet, and Take photo asks for the camera", async ({
+      page,
+    }) => {
+      await signIn(page);
+      await page.locator(".attach-btn").tap();
+      const sheet = page.locator("[data-testid='attach-sheet']");
+      await expect(sheet).toBeVisible();
+      await expect(sheet.locator(".attach-sheet-tile")).toHaveText([
+        "Take photo",
+        "Gallery",
+        "Files",
+      ]);
+      await noHorizontalScroll(page);
+
+      const chooser = page.waitForEvent("filechooser");
+      await sheet.locator("[data-testid='attach-sheet-camera']").tap();
+      const input = (await chooser).element();
+      expect(await input.getAttribute("accept")).toBe("image/*");
+      expect(await input.getAttribute("capture")).toBe("environment");
+      await expect(sheet).toHaveCount(0);
+    });
+
+    test("the composer row is +, the text, GIF, emoji and send, with room to type", async ({
+      page,
+    }) => {
+      await signIn(page);
+      const row = page.locator(".message-input-box");
+      for (const hidden of [".sticker-btn", ".poll-btn"]) {
+        await expect(row.locator(hidden)).toBeHidden();
+      }
+      for (const shown of [".attach-btn", ".gif-btn", ".emoji-btn", ".send-btn"]) {
+        await expect(row.locator(shown)).toBeVisible();
+      }
+      const text = await row.locator(".msg-textarea").boundingBox();
+      const viewport = page.viewportSize();
+      // Four controls share the row with the text (the mic and send take
+      // turns), so the text keeps at least two fifths of the screen.
+      expect(text?.width ?? 0).toBeGreaterThan((viewport?.width ?? 0) * 0.4);
+      await noHorizontalScroll(page);
+    });
+
     test("a tap on a member opens the profile sheet", async ({ page }) => {
       await signIn(page);
       await page.locator("[data-testid='member-list-toggle']").click();
@@ -936,6 +1031,27 @@ for (const profile of PROFILES) {
 
       await bar.locator("[data-testid='pcb-leave']").tap();
       await expect(bar).toBeHidden();
+
+      // The Android app keeps the call alive in the background with a host
+      // service from join to leave; a phone browser has no host to ask.
+      const callService = (): Promise<Array<{ active: boolean; camera: boolean }>> =>
+        page.evaluate(() =>
+          (
+            window as unknown as {
+              __invokeLog: Array<{ cmd: string; args?: { active: boolean; camera: boolean } }>;
+            }
+          ).__invokeLog
+            .filter((e) => e.cmd === "set_call_service")
+            .map((e) => ({ active: e.args!.active, camera: e.args!.camera })),
+        );
+      const expected =
+        profile.name === "Pixel 7"
+          ? [
+              { active: true, camera: false },
+              { active: false, camera: false },
+            ]
+          : [];
+      await expect.poll(callService).toEqual(expected);
     });
 
     test("the join sheet and the call bar meet the shared accessibility checks", async ({
@@ -1165,9 +1281,7 @@ for (const profile of PROFILES) {
       await page.addInitScript(
         buildTauriMockScript({
           httpRoutes: [
-            { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-            { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
-            { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
+            ...BASE_SESSION_ROUTES,
             { pattern: "/pins", status: 200, body: { messages: [], has_more: false } },
             { pattern: "GET /api/v1/dms", status: 200, body: RING_DM_CHANNELS },
           ],

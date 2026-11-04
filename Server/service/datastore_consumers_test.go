@@ -25,24 +25,32 @@ var storeConsumersAllowed = map[string]bool{
 // shrink lowers the number in the same change, and a growth is argued for in
 // review. Lower one when a service stops calling a method; never raise one to
 // fit a new feature without asking whether the call belongs in another service.
-// MessageService is pinned by part: its write path (st) and the three parts it
-// embeds, each with its own st.
+// A split service is pinned by part: its core (st) and each part it embeds,
+// each with its own st.
 var serviceStoreBaselines = map[reflect.Type]int{
 	reflect.TypeFor[AppealService]():         11,
-	reflect.TypeFor[AuthService]():           55,
+	reflect.TypeFor[AuthService]():           13,
+	reflect.TypeFor[twoFactor]():             9,
+	reflect.TypeFor[accountRecovery]():       11,
 	reflect.TypeFor[BlockService]():          4,
 	reflect.TypeFor[CallLogService]():        13,
-	reflect.TypeFor[ChannelService]():        32,
+	reflect.TypeFor[ChannelService]():        20,
+	reflect.TypeFor[channelOverrides]():      16,
+	reflect.TypeFor[readFocus]():             3,
 	reflect.TypeFor[ConnWrites]():            4,
-	reflect.TypeFor[DMService]():             23,
+	reflect.TypeFor[DMService]():             18,
+	reflect.TypeFor[groupManagement]():       11,
 	reflect.TypeFor[GIFFavoriteService]():    3,
 	reflect.TypeFor[InviteService]():         6,
 	reflect.TypeFor[MessageRequestService](): 7,
-	reflect.TypeFor[MessageService]():        27,
+	reflect.TypeFor[MessageService]():        20,
 	reflect.TypeFor[messageReads]():          17,
 	reflect.TypeFor[mentionState]():          18,
 	reflect.TypeFor[dmDelivery]():            7,
-	reflect.TypeFor[ModerationService]():     24,
+	reflect.TypeFor[messagePins]():           10,
+	reflect.TypeFor[messageRemoval]():        12,
+	reflect.TypeFor[ModerationService]():     20,
+	reflect.TypeFor[moderationHistory]():     4,
 	reflect.TypeFor[NSFWService]():           8,
 	reflect.TypeFor[PermissionService]():     4,
 	reflect.TypeFor[PushDispatcher]():        11,
@@ -53,9 +61,11 @@ var serviceStoreBaselines = map[reflect.Type]int{
 	reflect.TypeFor[SettingsService]():       9,
 	reflect.TypeFor[SetupService]():          9,
 	reflect.TypeFor[ThreadService]():         7,
-	reflect.TypeFor[TokenService]():          7,
+	reflect.TypeFor[TokenService]():          9,
 	reflect.TypeFor[UploadService]():         15,
-	reflect.TypeFor[UserService]():           23,
+	reflect.TypeFor[UserService]():           17,
+	reflect.TypeFor[userSessions]():          5,
+	reflect.TypeFor[registrationQueue]():     4,
 	reflect.TypeFor[VoiceService]():          18,
 	reflect.TypeFor[WelcomeService]():        4,
 }

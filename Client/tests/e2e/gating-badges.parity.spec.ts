@@ -2,12 +2,13 @@ import type { Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
 import {
   buildTauriMockScript,
-  mockTauriFullSession,
   navigateToMainPage,
   navigateToMainPageReady,
   emitWsMessage,
   MOCK_MESSAGES,
   MOCK_PINNED_MESSAGES,
+  ROUTE_HEALTH,
+  startFullSession,
 } from "./helpers";
 
 // ---------------------------------------------------------------------------
@@ -35,7 +36,7 @@ async function mockTauriSessionWithChannels(page: Page, channels: unknown[]): Pr
   await page.addInitScript(
     buildTauriMockScript({
       httpRoutes: [
-        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
+        ROUTE_HEALTH,
         {
           pattern: "/api/v1/auth/login",
           status: 200,
@@ -124,9 +125,7 @@ test.describe("@parity mention badge", () => {
     // Plain MOCK_CHANNELS (1 general, 2 random). Channel 1 is active by
     // default, so a mention delivered to channel 2 exercises the live WS path
     // through dispatcher's highlightsCurrentUser -> incrementMention.
-    await mockTauriFullSession(page);
-    await page.goto("/");
-    await navigateToMainPageReady(page);
+    await startFullSession(page, { ready: true });
 
     const channelTwo = page.locator("[data-testid='channel-2']");
     await expect(channelTwo).not.toHaveClass(/mentioned/);
@@ -162,9 +161,7 @@ test.describe("@parity mention badge", () => {
 
 test.describe("@parity per-channel mute", () => {
   test.beforeEach(async ({ page }) => {
-    await mockTauriFullSession(page);
-    await page.goto("/");
-    await navigateToMainPageReady(page);
+    await startFullSession(page, { ready: true });
   });
 
   test("right-clicking a text channel opens a context menu with a Mute item", async ({ page }) => {

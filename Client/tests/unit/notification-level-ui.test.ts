@@ -2,7 +2,7 @@
  * U1(b): the Notifications tab gains a "Notification level" control
  * (All / Mentions only / Nothing), global, defaulting to Mentions only.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const { mockNotifier } = vi.hoisted(() => ({
   mockNotifier: {
@@ -16,34 +16,19 @@ vi.mock("../../src/platform/desktop", () => ({
   desktop: { notifier: mockNotifier },
 }));
 
-import { buildNotificationsTab } from "../../src/features/settings/NotificationsTab";
+import { useNotificationsTabHost } from "../helpers/notificationsTabHost";
 import { setChannelMutesHost } from "../../src/lib/prefs/channelMutes";
 import {
   getGlobalNotificationLevel,
   setGlobalNotificationLevel,
 } from "@lib/prefs/notificationLevel";
 
-let container: HTMLDivElement;
-let ac: AbortController;
+const { build } = useNotificationsTabHost();
 
 beforeEach(() => {
   localStorage.clear();
   setChannelMutesHost(null);
-  container = document.createElement("div");
-  document.body.appendChild(container);
-  ac = new AbortController();
 });
-
-afterEach(() => {
-  ac.abort();
-  container.remove();
-});
-
-function build(): HTMLDivElement {
-  const tab = buildNotificationsTab(ac.signal);
-  container.appendChild(tab);
-  return tab;
-}
 
 describe("NotificationsTab — notification level", () => {
   it("offers All, Mentions only and Nothing, with Mentions only selected by default", () => {

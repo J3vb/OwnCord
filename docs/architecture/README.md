@@ -23,6 +23,7 @@ truth** list of the files it describes.
 | [client.md](client.md)                                 | D7 Client module map                             | The Tauri client as built: start-up, dispatcher, stores, Rust commands                                                         |
 | [plugins.md](plugins.md)                               | —                                                | The experimental WASM plugin boundary: off twice and compiled out of releases, no API promise, what may and may never move     |
 | [diagnostics.md](diagnostics.md)                       | —                                                | Every diagnostic surface, the list of everything the server sends off the machine, and what a support bundle contains          |
+| [client-diagnostics.md](client-diagnostics.md)         | —                                                | The client diagnostic event codes, the fields each may carry, the caps and the privacy rules                                   |
 | [data-lifecycle.md](data-lifecycle.md)                 | —                                                | Destructive operations (account erasure, deletion, sweeps, backup and restore) with a failure model each, and every data class |
 | [rich-content-inventory.md](rich-content-inventory.md) | —                                                | Every path that fetches content the operator did not choose, and the bounds on each                                            |
 

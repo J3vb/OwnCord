@@ -3,32 +3,12 @@
 // updateTotpOverlay hides the overlay for every non-"totp" state), so the
 // user was dropped back on the login form with no way to re-enter the code.
 import { describe, it, expect, vi } from "vitest";
-import { createConnectPage } from "../../src/pages/ConnectPage";
-import type { ConnectPageCallbacks, SimpleProfile } from "../../src/pages/ConnectPage";
+import * as mocks from "../helpers/connectPageMocks";
+import { mountTotpOverlay } from "../helpers/connectPageHarness";
 import { useMountContainer } from "../helpers/mountContainer";
 
-vi.mock("../../src/lib/net/credentials", () => ({
-  loadCredential: vi.fn().mockResolvedValue(null),
-}));
-
-vi.mock("../../src/features/settings/SettingsOverlay", () => ({
-  createSettingsOverlay: () => ({
-    mount: vi.fn(),
-    destroy: vi.fn(),
-  }),
-}));
-
-function makeCallbacks(overrides: Partial<ConnectPageCallbacks> = {}): ConnectPageCallbacks {
-  return {
-    onLogin: vi.fn().mockResolvedValue(undefined),
-    onLoginWithSavedPassword: vi.fn().mockResolvedValue(undefined),
-    onRegister: vi.fn().mockResolvedValue(undefined),
-    onTotpSubmit: vi.fn().mockResolvedValue(undefined),
-    ...overrides,
-  };
-}
-
-const testProfiles: SimpleProfile[] = [{ name: "Test Server", host: "localhost:8443" }];
+vi.mock("../../src/lib/net/credentials", () => mocks.netCredentialsMock());
+vi.mock("../../src/features/settings/SettingsOverlay", () => mocks.settingsOverlayMock());
 
 describe("LoginForm TOTP retry after a rejected verify", () => {
   let container: HTMLDivElement;
@@ -41,13 +21,9 @@ describe("LoginForm TOTP retry after a rejected verify", () => {
       .fn()
       .mockRejectedValueOnce(new Error("Invalid verification code"))
       .mockResolvedValueOnce(undefined);
-    const page = createConnectPage(makeCallbacks({ onTotpSubmit }), testProfiles);
-    page.mount(container);
-    page.showTotp();
-
-    const totpOverlay = container.querySelector(".totp-overlay") as HTMLDivElement;
-    const totpInput = container.querySelector(".totp-overlay input") as HTMLInputElement;
-    const verifyBtn = container.querySelector(".totp-overlay .btn-primary") as HTMLButtonElement;
+    const { page, totpOverlay, totpInput, verifyBtn } = mountTotpOverlay(container, {
+      onTotpSubmit,
+    });
 
     totpInput.value = "111111";
     verifyBtn.click();

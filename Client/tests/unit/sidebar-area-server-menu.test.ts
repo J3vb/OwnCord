@@ -1,43 +1,21 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import * as voiceSession from "../helpers/voiceSessionMock";
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
+import * as mocks from "../helpers/sidebarAreaMocks";
+import { lightSidebarAreaOpts, resetSidebarStoresAsMember } from "../helpers/sidebarAreaOpts";
 
-vi.mock("@lib/voice/livekitSession", () =>
-  voiceSession.withOverrides({
-    rePinPeerIdentity: vi.fn(),
-  }),
-);
-vi.mock("@lib/net/e2eeCrypto", () => ({
-  importIdentityPublicKey: vi.fn(),
-  computeKeyFingerprint: vi.fn(),
-}));
-vi.mock("@lib/presence/profiles", () => ({
-  createProfileManager: vi.fn().mockReturnValue({
-    loadProfiles: vi.fn().mockResolvedValue(undefined),
-    getAll: vi.fn().mockReturnValue([]),
-    store: { getState: () => ({ profiles: [], healthStatuses: new Map() }) },
-  }),
-  createTauriBackend: vi.fn().mockReturnValue({}),
-}));
-vi.mock("@components/UserBar", () => ({
-  createUserBar: vi.fn().mockReturnValue({ mount: vi.fn(), destroy: vi.fn() }),
-}));
-vi.mock("@components/VoiceWidget", () => ({
-  createVoiceWidget: vi.fn().mockReturnValue({ mount: vi.fn(), destroy: vi.fn() }),
-}));
-vi.mock("@components/MemberList", () => ({
-  createMemberList: vi.fn().mockReturnValue({ mount: vi.fn(), destroy: vi.fn() }),
-}));
-vi.mock("@components/QuickSwitchOverlay", () => ({
-  createQuickSwitchOverlay: vi.fn().mockReturnValue({ mount: vi.fn(), destroy: vi.fn() }),
-}));
+vi.mock("@lib/voice/livekitSession", () => mocks.rePinSessionMock());
+vi.mock("@lib/net/e2eeCrypto", () => mocks.e2eeCryptoMock());
+vi.mock("@lib/presence/profiles", () => mocks.presenceProfilesMock());
+vi.mock("@components/UserBar", () => mocks.userBarMock());
+vi.mock("@components/VoiceWidget", () => mocks.voiceWidgetMock());
+vi.mock("@components/MemberList", () => mocks.memberListMock());
+vi.mock("@components/QuickSwitchOverlay", () => mocks.quickSwitchOverlayMock());
 const { inviteOpen, openAdminPanel, createModal } = vi.hoisted(() => ({
   inviteOpen: vi.fn().mockResolvedValue(undefined),
   openAdminPanel: vi.fn().mockResolvedValue(undefined),
   createModal: vi.fn(),
 }));
-vi.mock("../../src/pages/main-page/OverlayManagers", () => ({
-  createInviteManagerController: vi.fn().mockReturnValue({ open: inviteOpen, cleanup: vi.fn() }),
-}));
+vi.mock("../../src/pages/main-page/OverlayManagers", () => mocks.inviteManagerMock(inviteOpen));
 vi.mock("@lib/adminPanel", () => ({ openAdminPanel }));
 vi.mock("@components/CreateChannelModal", () => ({
   createCreateChannelModal: createModal,
@@ -45,14 +23,11 @@ vi.mock("@components/CreateChannelModal", () => ({
 
 import { createSidebarArea, type SidebarAreaOptions } from "../../src/pages/main-page/SidebarArea";
 import { channelsStore, setChannels } from "../../src/stores/channels.store";
-import { dmStore } from "../../src/stores/dm.store";
 import { authStore } from "../../src/stores/auth.store";
 import { uiStore, closeSettings } from "../../src/stores/ui.store";
 import { setMarkReadSender } from "@lib/readState";
 import { isHideMutedChannels, setHideMutedChannels } from "@lib/prefs/hideMutedChannels";
 import { Permission, type ReadyChannel } from "../../src/lib/types";
-import { resetMembersState } from "../helpers/storeResets";
-import { signInAs, resetChannelsState } from "../helpers/storeSeeds";
 
 const UNREAD: ReadyChannel[] = [
   {
@@ -68,17 +43,7 @@ const UNREAD: ReadyChannel[] = [
 const READ: ReadyChannel[] = [{ ...UNREAD[0]!, unread_count: 0 }];
 
 function opts(): SidebarAreaOptions {
-  return {
-    ws: { send: vi.fn(), close: vi.fn(), on: vi.fn(), off: vi.fn() } as never,
-    api: { getConfig: vi.fn().mockReturnValue({ host: "example.com" }) } as never,
-    limiters: {
-      voice: { tryConsume: vi.fn().mockReturnValue(true) },
-      voiceVideo: { tryConsume: vi.fn().mockReturnValue(true) },
-    } as never,
-    presenceSender: { send: vi.fn(), rollbackRefused: vi.fn(), destroy: vi.fn() },
-    getRoot: vi.fn().mockReturnValue(document.createElement("div")),
-    getToast: vi.fn().mockReturnValue({ show: vi.fn() }),
-  };
+  return lightSidebarAreaOpts("example.com");
 }
 
 /** The signed-in user's role holds exactly `perms`. */
@@ -94,32 +59,26 @@ describe("SidebarArea - server name menu", () => {
   let area: ReturnType<typeof createSidebarArea>;
   let sent: number[];
 
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => {
+      for (const unsub of area.unsubscribers) unsub();
+      document.querySelectorAll(".server-menu").forEach((el) => el.remove());
+      setMarkReadSender(null);
+      closeSettings();
+      localStorage.clear();
+    },
+  );
+
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
     sent = [];
     setMarkReadSender((id) => sent.push(id));
-    resetChannelsState();
-    dmStore.setState(() => ({ channels: [] }));
-    resetMembersState();
-    uiStore.setState((prev) => ({
-      ...prev,
-      collapsedCategories: new Set(),
-      sidebarMode: "channels" as const,
-    }));
-    signInAs({ id: 2, username: "Member", avatar: null, role: "member" });
+    resetSidebarStoresAsMember();
     grant(Permission.SEND_MESSAGES);
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    for (const unsub of area.unsubscribers) unsub();
-    document.querySelectorAll(".server-menu").forEach((el) => el.remove());
-    container.remove();
-    setMarkReadSender(null);
-    closeSettings();
-    localStorage.clear();
   });
 
   function mount(channels: ReadyChannel[] = READ): void {
@@ -436,7 +395,7 @@ describe("SidebarArea - server name menu", () => {
     grant(Permission.ADMINISTRATOR);
     mount(UNREAD);
 
-    for (const id of ["mark-all-read", "invite-btn", "audit-log-btn"]) {
+    for (const id of ["invite-btn", "audit-log-btn"]) {
       expect(
         area.sidebarWrapper.querySelector(`.sidebar-header-actions [data-testid="${id}"]`),
       ).not.toBeNull();

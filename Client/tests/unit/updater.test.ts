@@ -101,6 +101,21 @@ describe("checkForUpdate", () => {
   });
 });
 
+/** Starts an install whose host call stays pending until `finish`, with a subscriber attached. */
+async function startPendingInstall() {
+  const onState = vi.fn();
+  const unsubscribe = subscribeToUpdateInstall(onState);
+  let finish!: () => void;
+  invoke.mockReturnValue(
+    new Promise<void>((resolve) => {
+      finish = resolve;
+    }),
+  );
+  const installation = downloadAndInstallUpdate("https://s.example");
+  await vi.dynamicImportSettled();
+  return { onState, unsubscribe, finish, installation };
+}
+
 // ── downloadAndInstallUpdate ───────────────────────────────────────────────
 
 describe("downloadAndInstallUpdate", () => {
@@ -120,16 +135,7 @@ describe("downloadAndInstallUpdate", () => {
   });
 
   it("forwards progress events to subscribers and remembers it for new subscribers", async () => {
-    const onState = vi.fn();
-    const unsubscribe = subscribeToUpdateInstall(onState);
-    let finish!: () => void;
-    invoke.mockReturnValue(
-      new Promise<void>((resolve) => {
-        finish = resolve;
-      }),
-    );
-    const installation = downloadAndInstallUpdate("https://s.example");
-    await vi.dynamicImportSettled();
+    const { onState, unsubscribe, finish, installation } = await startPendingInstall();
 
     const handler = listen.mock.calls[0]?.[1] as (e: {
       payload: { received: number; total?: number | null };
@@ -156,16 +162,7 @@ describe("downloadAndInstallUpdate", () => {
   });
 
   it("normalises a missing total to null", async () => {
-    const onState = vi.fn();
-    const unsubscribe = subscribeToUpdateInstall(onState);
-    let finish!: () => void;
-    invoke.mockReturnValue(
-      new Promise<void>((resolve) => {
-        finish = resolve;
-      }),
-    );
-    const installation = downloadAndInstallUpdate("https://s.example");
-    await vi.dynamicImportSettled();
+    const { onState, unsubscribe, finish, installation } = await startPendingInstall();
 
     const handler = listen.mock.calls[0]?.[1] as (e: {
       payload: { received: number; total?: number | null };
@@ -277,16 +274,7 @@ describe("downloadAndInstallUpdate", () => {
   });
 
   it("update-installing moves the state to installing", async () => {
-    const state = vi.fn();
-    const unsubscribe = subscribeToUpdateInstall(state);
-    let finish!: () => void;
-    invoke.mockReturnValue(
-      new Promise<void>((resolve) => {
-        finish = resolve;
-      }),
-    );
-    const installation = downloadAndInstallUpdate("https://s.example");
-    await vi.dynamicImportSettled();
+    const { onState: state, unsubscribe, finish, installation } = await startPendingInstall();
 
     const installing = listen.mock.calls.find((call) => call[0] === "update-installing");
     expect(installing).toBeDefined();

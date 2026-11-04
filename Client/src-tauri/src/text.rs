@@ -224,6 +224,10 @@ mod tests {
             ("http_pool.rs", include_str!("http_pool.rs")),
             ("shortcuts.rs", include_str!("shortcuts.rs")),
             ("portal_shortcuts.rs", include_str!("portal_shortcuts.rs")),
+            (
+                "portal_shortcuts/dbus_bus.rs",
+                include_str!("portal_shortcuts/dbus_bus.rs"),
+            ),
         ];
         let quoted = [
             TRAY_SHOW_HIDE,

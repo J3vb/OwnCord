@@ -42,7 +42,7 @@ import {
 } from "../../lib/voice/screenShare";
 import { bumpLocalShareRev } from "../../stores/voice.store";
 import { isLinuxDesktop } from "./native/platform";
-import { setH264GpuProfiles } from "../../lib/voice/h264Profile";
+import { fitGpuH264Share, gpuH264SizeCap, setH264GpuProfiles } from "../../lib/voice/h264Profile";
 import { h264GpuPublish } from "./videoCodec";
 import {
   startAppShareAudio,
@@ -50,6 +50,7 @@ import {
   type AppShareAudio,
 } from "../../lib/voice/appAudioShare";
 import { voiceText } from "../../i18n/voice";
+import { applyScreenShareContentHint } from "../../lib/voice/videoPresets";
 
 const log = createLogger("screenShare");
 
@@ -125,7 +126,8 @@ export async function changeScreenshareSource(
   let swapped = false;
   let appShare: AppShareAudio | null = null;
   try {
-    fresh = await createLocalScreenTracks(getScreenShareCaptureOptions(live.quality, live.fps));
+    const captureOptions = getScreenShareCaptureOptions(live.quality, live.fps);
+    fresh = await createLocalScreenTracks(captureOptions);
     const freshVideo = fresh.find((t) => t.kind === Track.Kind.Video);
     if (
       superseded(state, deps, live) ||
@@ -134,6 +136,19 @@ export async function changeScreenshareSource(
     ) {
       for (const t of fresh) t.stop();
       return;
+    }
+    applyScreenShareContentHint(
+      freshVideo.mediaStreamTrack,
+      captureOptions,
+      state.published ?? "vp8",
+    );
+    // A window swapped for a wide screen must still fit the GPU encoder.
+    if (h264GpuPublish(state.published ?? "vp8")) {
+      await fitGpuH264Share(freshVideo);
+      if (superseded(state, deps, live)) {
+        for (const t of fresh) t.stop();
+        return;
+      }
     }
     let freshAudio: LocalTrack | undefined = fresh.find((t) => t.kind === Track.Kind.Audio);
     const oldAudio = live.tracks.find((t) => t.kind === Track.Kind.Audio);
@@ -348,7 +363,9 @@ export async function setScreenshareQuality(
     const fps = live.fps;
     const frameRate = getEffectiveScreenShareFps(quality, fps);
     const maxBitrate = getScreenShareMaxBitrate(quality, fps);
-    const size = SCREENSHARE_PRESETS[quality].resolution;
+    const preset = SCREENSHARE_PRESETS[quality].resolution;
+    // Source on a GPU H.264 share keeps the encoder's size limit.
+    const size = h264GpuPublish(state.published ?? "vp8") ? gpuH264SizeCap(preset) : preset;
     const mst = live.video.mediaStreamTrack;
     await mst.applyConstraints(
       size === undefined

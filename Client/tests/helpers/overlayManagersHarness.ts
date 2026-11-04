@@ -1,4 +1,4 @@
-import { vi } from "vitest";
+import { vi, type Mock } from "vitest";
 import { createPinnedPanelController as createPinnedPanelControllerRaw } from "@pages/main-page/OverlayManagers";
 
 // ---------------------------------------------------------------------------
@@ -44,3 +44,22 @@ export function makeMockApi(overrides: Record<string, unknown> = {}) {
     ...overrides,
   };
 }
+
+/** The options object the first call of a mocked component factory received. */
+export function firstCallOpts<T>(factory: unknown): T {
+  return (factory as Mock).mock.calls[0]![0] as T;
+}
+
+export type JumpToMessageOpts = { onJumpToMessage: (msgId: number) => void };
+export type SelectChannelOpts = { onSelectChannel: (channelId: number) => void };
+export type SelectResultOpts = {
+  onSelectResult: (result: { channel_id: number; message_id: number }) => void;
+};
+export type RevokeInviteOpts = { onRevokeInvite: (code: string) => Promise<void> };
+export type UnpinOpts = { onUnpin: (msgId: number) => void };
+export type SearchQueryOpts = {
+  onSearch: (query: string, chId: number | undefined, signal?: AbortSignal) => Promise<unknown[]>;
+};
+export type InviteListOpts = { invites: Array<{ code: string }> };
+export type FeaturedCodeOpts = { featuredCode: string };
+export type CopyLinkOpts = { onCopyLink: (code: string) => void };

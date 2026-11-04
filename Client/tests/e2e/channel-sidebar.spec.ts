@@ -1,9 +1,5 @@
 import { test, expect } from "./fixtures";
-import {
-  mockTauriFullSession,
-  mockTauriFullSessionWithMessages,
-  navigateToMainPage,
-} from "./helpers";
+import { mockTauriFullSessionWithMessages, navigateToMainPage, startFullSession } from "./helpers";
 
 // ---------------------------------------------------------------------------
 // Tests: Channel Sidebar
@@ -11,9 +7,7 @@ import {
 
 test.describe("Channel Sidebar", () => {
   test.beforeEach(async ({ page }) => {
-    await mockTauriFullSession(page);
-    await page.goto("/");
-    await navigateToMainPage(page);
+    await startFullSession(page);
   });
 
   test("sidebar is visible after login", async ({ page }) => {

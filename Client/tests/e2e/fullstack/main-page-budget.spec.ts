@@ -12,25 +12,13 @@
  */
 import { readFileSync } from "node:fs";
 import type { Page } from "@playwright/test";
-import { test as base, expect } from "./fixtures";
-import { startTestServer, TEST_PASSWORD, type TestServer } from "../support/server";
+import { expect } from "./fixtures";
+import { generalId, relaxedAuthTest } from "./serverApi";
+import { TEST_PASSWORD, type TestServer } from "../support/server";
 import { rawSocket } from "../support/raw-socket";
 
 // Seven sign-ins in a row are more than one IP gets a minute.
-const test = base.extend({
-  // eslint-disable-next-line no-empty-pattern -- Playwright requires the destructuring form
-  server: async ({}, use, info) => {
-    const server = await startTestServer({
-      env: { ...process.env, OWNCORD_SECURITY_AUTH_RATE_LIMIT_MULTIPLIER: "10" },
-    });
-    try {
-      await use(server);
-    } finally {
-      await info.attach("server-log", { body: server.log(), contentType: "text/plain" });
-      await server.close();
-    }
-  },
-});
+const test = relaxedAuthTest;
 
 test.setTimeout(180_000);
 
@@ -72,14 +60,6 @@ function installProbe(): void {
     );
   });
   observer.observe(document, { childList: true, subtree: true });
-}
-
-async function generalId(server: TestServer): Promise<number> {
-  const channels = await server.api("/api/v1/channels/", undefined, server.owner!.token);
-  return channels.find(
-    (channel: { name: string; type: string }) =>
-      channel.name === "general" && channel.type === "text",
-  ).id;
 }
 
 async function timeSignIn(page: Page, server: TestServer): Promise<number> {

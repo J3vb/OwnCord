@@ -51,7 +51,7 @@ need, such as your LAN.
   choice.
 - **Do not set `tls.mode: off`** for tailnet-only access. The desktop app only
   connects over `wss://`. So `off` works only behind an HTTPS reverse proxy
-  ([deployment.md](deployment.md#tls-off)).
+  ([TLS and reverse proxies](hosting/tls-and-proxy.md#behind-a-reverse-proxy-off)).
 
 ## Voice and video over Tailscale
 

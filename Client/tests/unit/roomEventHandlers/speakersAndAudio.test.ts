@@ -21,6 +21,26 @@ useRoomEventHandlersHarness();
 
 // ── handleActiveSpeakersChanged ────────────────────────────────────────────
 
+function seedVoiceUsers(channelId: number, userIds: number[]): void {
+  voiceStore.setState((prev) => {
+    const users = new Map<number, VoiceUser>(
+      userIds.map((id) => [
+        id,
+        {
+          userId: id,
+          username: `u${id}`,
+          muted: false,
+          deafened: false,
+          speaking: false,
+          camera: false,
+          screenshare: false,
+        },
+      ]),
+    );
+    return { ...prev, currentChannelId: channelId, voiceUsers: new Map([[channelId, users]]) };
+  });
+}
+
 describe("handleActiveSpeakersChanged", () => {
   /** A remote participant in the room, microphone published and unmuted. */
   function join(h: Harness, identity: string, sid = `PA_${identity}`): RemoteParticipant {
@@ -33,26 +53,6 @@ describe("handleActiveSpeakersChanged", () => {
     } as unknown as RemoteParticipant;
     h.room.remoteParticipants.set(identity, p);
     return p;
-  }
-
-  function seedVoiceUsers(channelId: number, userIds: number[]): void {
-    voiceStore.setState((prev) => {
-      const users = new Map<number, VoiceUser>(
-        userIds.map((id) => [
-          id,
-          {
-            userId: id,
-            username: `u${id}`,
-            muted: false,
-            deafened: false,
-            speaking: false,
-            camera: false,
-            screenshare: false,
-          },
-        ]),
-      );
-      return { ...prev, currentChannelId: channelId, voiceUsers: new Map([[channelId, users]]) };
-    });
   }
 
   const speaking = () => voiceStore.getState().voiceUsers.get(12)?.get(7)?.speaking;
@@ -360,25 +360,7 @@ describe("published speaker lists", () => {
     return p;
   }
 
-  function seed(userIds: number[]): void {
-    voiceStore.setState((prev) => {
-      const users = new Map<number, VoiceUser>(
-        userIds.map((id) => [
-          id,
-          {
-            userId: id,
-            username: `u${id}`,
-            muted: false,
-            deafened: false,
-            speaking: false,
-            camera: false,
-            screenshare: false,
-          },
-        ]),
-      );
-      return { ...prev, currentChannelId: 12, voiceUsers: new Map([[12, users]]) };
-    });
-  }
+  const seed = (userIds: number[]): void => seedVoiceUsers(12, userIds);
 
   const speaking = (id: number) => voiceStore.getState().voiceUsers.get(12)?.get(id)?.speaking;
   const lastPublished = () => vi.mocked(setSpeakers).mock.calls.at(-1)?.[0];

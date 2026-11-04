@@ -8,7 +8,11 @@ import {
   capturedMessageListOpts,
   capturedMessageInputOpts,
 } from "../../helpers/channelControllerMocks";
-import { makeOpts, useChannelControllerHarness } from "../../helpers/channelControllerHarness";
+import {
+  makeOpts,
+  mountController,
+  useChannelControllerHarness,
+} from "../../helpers/channelControllerHarness";
 
 vi.mock("@lib/logger", () => mocks.loggerMock());
 vi.mock("@lib/dom", () => mocks.domMock());
@@ -146,9 +150,7 @@ describe("createChannelController", () => {
     });
 
     it("drops a restored reply target that no longer exists", () => {
-      const opts = makeOpts();
-      const ctrl = createChannelController(opts);
-      ctrl.mountChannel(42, "general");
+      const { ctrl } = mountController();
 
       mockGetDraft.mockReturnValue({
         content: "reply draft",
@@ -185,9 +187,7 @@ describe("createChannelController", () => {
     });
 
     it("restores the pre-edit draft after a channel switch mid-edit", () => {
-      const opts = makeOpts();
-      const ctrl = createChannelController(opts);
-      ctrl.mountChannel(42, "general");
+      const { ctrl } = mountController();
 
       // While an edit is in progress the composer reports the draft the edit
       // displaced (not the edit text), so switching away and back keeps it.
@@ -443,9 +443,7 @@ describe("createChannelController", () => {
       mockGetChannelMessages.mockReturnValue([
         { id: 5, content: "mine", user: { id: 1, username: "me" } },
       ]);
-      const opts = makeOpts();
-      const ctrl = createChannelController(opts);
-      ctrl.mountChannel(42, "general");
+      const { opts, ctrl } = mountController();
 
       capturedMessageListOpts!.onEmptyEdit(5);
       expect(document.querySelector("[data-testid='msg-delete-modal']")).not.toBeNull();
@@ -464,9 +462,7 @@ describe("createChannelController", () => {
     });
 
     it("Cancel leaves the edit open and deletes nothing", () => {
-      const opts = makeOpts();
-      const ctrl = createChannelController(opts);
-      ctrl.mountChannel(42, "general");
+      const { opts, ctrl } = mountController();
       capturedMessageListOpts!.onEmptyEdit(5);
       (document.querySelector("[data-testid='msg-delete-cancel']") as HTMLButtonElement).click();
       expect(mockCancelEdit).not.toHaveBeenCalled();

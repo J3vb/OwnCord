@@ -15,12 +15,11 @@ import {
   buildTauriMockScript,
   emitWsEvent,
   emitWsMessage,
-  MOCK_LOGIN_RESPONSE,
-  MOCK_MESSAGES,
-  submitLogin,
-  waitForWsReady,
   openDmRow,
   openHome,
+  BASE_SESSION_ROUTES,
+  navigateToMainPageReady,
+  dmChannel,
 } from "./helpers";
 import {
   findUnnamedControls,
@@ -60,16 +59,7 @@ const REQUESTS = [
   },
 ];
 
-const DM_CHANNELS = [
-  {
-    channel_id: 100,
-    recipient: { id: 2, username: "otheruser", avatar: "", status: "online" },
-    last_message_id: 500,
-    last_message: "Hey there!",
-    last_message_at: "2026-03-15T12:00:00Z",
-    unread_count: 0,
-  },
-];
+const DM_CHANNELS = [dmChannel(100)];
 
 type Route = { pattern: string; status: number; body: unknown; method?: string };
 
@@ -84,9 +74,7 @@ function mockScript(decisions: readonly Route[] = []): string {
   return buildTauriMockScript({
     httpRoutes: [
       ...decisions,
-      { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-      { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
-      { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
+      ...BASE_SESSION_ROUTES,
       { pattern: "/api/v1/dm-requests", status: 200, body: { requests: REQUESTS } },
     ],
     simulateWsFlow: true,
@@ -95,9 +83,7 @@ function mockScript(decisions: readonly Route[] = []): string {
 }
 
 async function signIn(page: Page): Promise<void> {
-  await submitLogin(page);
-  await expect(page.locator("[data-testid='app-layout']")).toBeVisible({ timeout: 15_000 });
-  await waitForWsReady(page);
+  await navigateToMainPageReady(page);
   await expect(page.locator("[data-testid='chat-header-name']")).toHaveText("general");
 }
 

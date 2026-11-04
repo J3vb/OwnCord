@@ -4,6 +4,7 @@
  * peer's own verification entry, and with none there is no badge at all.
  */
 
+import { makeVoiceUser as user } from "../helpers/voiceUsers";
 import { describe, it, expect } from "vitest";
 import {
   channelVoiceUsers,
@@ -28,21 +29,6 @@ import { assertNoStoreReads } from "../helpers/storeReadGuard";
 
 const SELF = 1;
 const PEER = 2;
-
-function user(userId: number, over: Partial<VoiceUser> = {}): VoiceUser {
-  return {
-    userId,
-    username: `user${userId}`,
-    muted: false,
-    deafened: false,
-    speaking: false,
-    camera: false,
-    screenshare: false,
-    serverMuted: false,
-    serverDeafened: false,
-    ...over,
-  };
-}
 
 function verification(
   userId: number,

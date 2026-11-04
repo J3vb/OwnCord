@@ -14,12 +14,14 @@ import {
   setMentionCount,
   setNsfwAcknowledged,
   noteChannelMessage,
+  firstTextInSidebarOrder,
+  readyChannelMap,
 } from "../../stores/channels.store";
 import {
   setMembers,
   addMember,
   removeMember,
-  updateMemberRole,
+  updateMemberRoles,
   updateMemberProfile,
   updatePresence,
   applyPresenceBatch,
@@ -42,7 +44,6 @@ import { setStickers, stickersStore } from "../../stores/stickers.store";
 import { uiStore } from "../../stores/ui.store";
 import { getChannelMessages, markStickersDeleted } from "../../stores/messages.store";
 import {
-  isTextLikeChannel,
   type ChannelActivityEntry,
   type ReadyActivity,
   type ReadyListening,
@@ -93,41 +94,6 @@ export function applyReadyChannels(payload: Payload<"ready">): void {
   setMembers(payload.members);
 }
 
-/** The first text-like channel in sidebar order (D7): uncategorized rows
- *  first, then categories by (category_position, category_id), each by
- *  (position, id). An older server without category ids sorts by position. */
-type ReadyChannel = Payload<"ready">["channels"][number];
-
-function sidebarSortKey(ch: ReadyChannel): number[] {
-  const cat = ch.category_id ?? 0;
-  return cat === 0
-    ? [0, 0, 0, ch.position, ch.id]
-    : [1, ch.category_position ?? 0, cat, ch.position, ch.id];
-}
-
-function sortsBefore(a: number[], b: number[]): boolean {
-  for (let i = 0; i < a.length; i++) {
-    const x = a[i] ?? 0;
-    const y = b[i] ?? 0;
-    if (x !== y) return x < y;
-  }
-  return false;
-}
-
-function firstTextInSidebarOrder(channels: Payload<"ready">["channels"]): ReadyChannel | undefined {
-  let best: ReadyChannel | undefined;
-  let bestKey: number[] = [];
-  for (const ch of channels) {
-    if (!isTextLikeChannel(ch)) continue;
-    const k = sidebarSortKey(ch);
-    if (best === undefined || sortsBefore(k, bestKey)) {
-      best = ch;
-      bestKey = k;
-    }
-  }
-  return best;
-}
-
 /**
  * The active-channel slice of `ready`: auto-select, or clear a channel that is
  * gone. Returns the channel markReadyActiveChannelRead should mark read.
@@ -162,7 +128,7 @@ export function applyReadyActiveChannel(payload: Payload<"ready">): number | nul
     if (rememberedVisible) {
       setActiveChannel(remembered, { clearUnread: false });
     } else {
-      const firstText = firstTextInSidebarOrder(payload.channels);
+      const firstText = firstTextInSidebarOrder(readyChannelMap(payload.channels));
       if (firstText !== undefined) {
         setActiveChannel(firstText.id, { clearUnread: false });
       }
@@ -704,12 +670,8 @@ export function handleChannelDelete(payload: Payload<"channel_delete">): void {
   const activeId = channelsStore.select((s) => s.activeChannelId);
   removeChannel(payload.id);
   if (payload.id === activeId) {
-    const remaining = channelsStore.select((s) => s.channels);
-    const sorted = [...remaining.values()]
-      .filter((ch) => isTextLikeChannel(ch))
-      .toSorted((a, b) => a.position - b.position);
-    const firstTextId = sorted.length > 0 ? sorted[0]!.id : null;
-    setActiveChannel(firstTextId);
+    const firstText = firstTextInSidebarOrder(channelsStore.getState().channels);
+    setActiveChannel(firstText?.id ?? null);
     // The redirect alone reads as the app spontaneously changing channels;
     // say why (ux/channels-members-dms §1.2).
     showToast(connectText("app.channelDeleted"), "info");
@@ -729,7 +691,18 @@ export function handleMemberBan(payload: Payload<"member_ban">): void {
 
 export function handleMemberUpdate(payload: Payload<"member_update">): void {
   log.info("Member role updated", { userId: payload.user_id, role: payload.role });
-  updateMemberRole(payload.user_id, payload.role, payload.role_ids);
+  applyMemberUpdates([payload]);
+}
+
+/** A role rename, delete or reorder: member_update for several members at once. */
+export function handleMemberUpdateBatch(payload: Payload<"member_update_batch">): void {
+  const members = payload.members ?? [];
+  log.info("Member roles updated", { count: members.length });
+  applyMemberUpdates(members);
+}
+
+function applyMemberUpdates(entries: readonly Payload<"member_update">[]): void {
+  updateMemberRoles(entries.map((e) => ({ userId: e.user_id, role: e.role, roleIds: e.role_ids })));
 
   // Keep authStore in sync when the signed-in user's own role changed —
   // every permission gate (canManageChannels, canViewAuditLog, ...) reads
@@ -737,7 +710,9 @@ export function handleMemberUpdate(payload: Payload<"member_update">): void {
   // demotion of the current user would leave every affordance stale until
   // the socket reconnects (mirrors the USER_UPDATE self-branch below).
   const me = authStore.getState().user;
-  if (me && payload.user_id === me.id) {
+  if (!me) return;
+  const payload = entries.findLast((e) => e.user_id === me.id);
+  if (payload !== undefined) {
     // role_ids rides along so the held-role gates follow the echo too.
     // An absent list drops the old one, as updateMemberRole does.
     const { role_ids: _old, ...withoutIds } = me;
@@ -818,9 +793,9 @@ export function handleUserUpdate(payload: Payload<"user_update">): void {
         ...currentUser,
         username: payload.username,
         avatar: payload.avatar,
-        display_name: payload.display_name,
-        about: payload.about,
-        // Absent (an older server) keeps the stored banner; null clears it.
+        // Absent (an older or partial frame) keeps the stored value; null clears it.
+        ...(payload.display_name === undefined ? {} : { display_name: payload.display_name }),
+        ...(payload.about === undefined ? {} : { about: payload.about }),
         ...(payload.banner === undefined ? {} : { banner: payload.banner }),
         ...(payload.banner_color === undefined ? {} : { banner_color: payload.banner_color }),
       },

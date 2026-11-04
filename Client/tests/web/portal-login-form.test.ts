@@ -3,7 +3,8 @@
  * Runs in the `web` project, where `__OWNCORD_WEB__` is true and the platform
  * registry is the browser one.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
 
 vi.hoisted(() => {
   vi.stubGlobal("isSecureContext", true);
@@ -15,26 +16,13 @@ vi.mock("../../src/features/settings/SettingsOverlay", () => ({
 import { createConnectPage } from "../../src/pages/ConnectPage";
 import type { ConnectPageCallbacks } from "../../src/pages/ConnectPage";
 import { portalText } from "../../src/i18n/portal";
+import { makeCallbacks } from "../helpers/connectPageHarness";
 
 const HOST = location.host;
 
-function makeCallbacks(overrides: Partial<ConnectPageCallbacks> = {}): ConnectPageCallbacks {
-  return {
-    onLogin: vi.fn().mockResolvedValue(undefined),
-    onLoginWithSavedPassword: vi.fn().mockResolvedValue(undefined),
-    onRegister: vi.fn().mockResolvedValue(undefined),
-    onTotpSubmit: vi.fn().mockResolvedValue(undefined),
-    ...overrides,
-  };
-}
-
 let container: HTMLDivElement;
-beforeEach(() => {
-  container = document.createElement("div");
-  document.body.appendChild(container);
-});
-afterEach(() => {
-  container.remove();
+useMountContainer((c) => {
+  container = c;
 });
 
 function mountPortal(overrides: Partial<ConnectPageCallbacks> = {}) {

@@ -1,7 +1,8 @@
 // 3A-3: several files from the picker, the drag-over overlay, the character
 // counter and long pastes, Enter on an emptied edit, no typing signal while
 // editing, and the draft hooks the controller saves from.
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
 
 vi.mock("@components/EmojiPicker", () => ({
   createEmojiPicker: () => ({ element: document.createElement("div"), destroy: vi.fn() }),
@@ -57,14 +58,12 @@ describe("composer polish (3A-3)", () => {
     textarea().dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
   };
 
-  beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-  afterEach(() => {
-    vi.useRealTimers();
-    container.remove();
-  });
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => vi.useRealTimers(),
+  );
 
   it("lets the picker choose several files and uploads each of them", async () => {
     const onUploadFile = upload();

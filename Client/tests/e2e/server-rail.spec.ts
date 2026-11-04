@@ -5,15 +5,9 @@
  */
 import type { Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
-import { mockTauriFullSession, navigateToMainPageReady } from "./helpers";
-import {
-  Q1,
-  findUnnamedControls,
-  focusIndicator,
-  keyboardReachable,
-  setAppearance,
-  textContrast,
-} from "./support/accessibility";
+import { mockTauriFullSession, navigateToMainPageReady, startFullSession } from "./helpers";
+import { findUnnamedControls, keyboardReachable, setAppearance } from "./support/accessibility";
+import { contrastMatrix } from "./support/a11yHarness";
 
 const rail = (page: Page) => page.getByRole("navigation", { name: "Servers" });
 const home = (page: Page) => page.getByTestId("server-rail-home");
@@ -21,9 +15,7 @@ const joinDialog = (page: Page) => page.getByTestId("server-rail-join-dialog");
 
 test.describe("Server rail", () => {
   test("Home opens DMs and the connected server returns to its channels", async ({ page }) => {
-    await mockTauriFullSession(page);
-    await page.goto("/");
-    await navigateToMainPageReady(page);
+    await startFullSession(page, { ready: true });
     await expect(rail(page)).toBeVisible();
     // The rail replaces the sidebar's DM section and the user bar's switch button.
     await expect(page.locator(".sidebar-dm-section")).toBeHidden();
@@ -38,9 +30,7 @@ test.describe("Server rail", () => {
   });
 
   test("the invite dialog is reachable by keyboard and explains a bad link", async ({ page }) => {
-    await mockTauriFullSession(page);
-    await page.goto("/");
-    await navigateToMainPageReady(page);
+    await startFullSession(page, { ready: true });
     const join = page.getByTestId("server-rail-join");
     expect(await keyboardReachable(page, join)).toBe(true);
     await page.keyboard.press("Enter");
@@ -58,9 +48,7 @@ test.describe("Server rail", () => {
   test("the first icon's selected ring and hover lift are not clipped at the top", async ({
     page,
   }) => {
-    await mockTauriFullSession(page);
-    await page.goto("/");
-    await navigateToMainPageReady(page);
+    await startFullSession(page, { ready: true });
     await home(page).click();
     await home(page).hover();
     const room = await home(page).evaluate((btn) => {
@@ -82,47 +70,33 @@ test.describe("Server rail", () => {
 });
 
 test.describe("Server rail — Q1 accessibility", () => {
-  for (const theme of ["dark", "neon-glow", "midnight", "light"] as const) {
-    for (const highContrast of [false, true]) {
-      test(`${theme}${highContrast ? " + High Contrast" : ""}: names, focus and contrast`, async ({
-        page,
-      }, testInfo) => {
-        await mockTauriFullSession(page);
-        await page.goto("/");
-        await setAppearance(page, { theme, highContrast, accent: null });
-        await navigateToMainPageReady(page);
-        await expect(rail(page)).toBeVisible();
+  for (const c of contrastMatrix({
+    title: "names, focus and contrast",
+    attachName: (theme, hc) => `server-rail-contrast-${theme}-hc-${hc}.json`,
+    boot: async (page, prefs) => {
+      await mockTauriFullSession(page);
+      await page.goto("/");
+      await setAppearance(page, prefs);
+      await navigateToMainPageReady(page);
+      await expect(rail(page)).toBeVisible();
+    },
+    scenario: async (page, { measure, ring }) => {
+      expect(await findUnnamedControls(rail(page))).toEqual([]);
 
-        const measured: Record<string, number> = {};
-        const failures: string[] = [];
-        expect(await findUnnamedControls(rail(page))).toEqual([]);
+      await measure("home", home(page));
 
-        const homeText = (await textContrast(home(page))).ratio;
-        measured["home"] = Number(homeText.toFixed(2));
-        if (homeText < Q1.text) failures.push(`home ${homeText.toFixed(2)} < ${Q1.text}`);
+      expect(await keyboardReachable(page, home(page))).toBe(true);
+      await ring("home");
 
-        expect(await keyboardReachable(page, home(page))).toBe(true);
-        const ring = await focusIndicator(page);
-        measured["focus home"] = Number(ring.ratio.toFixed(2));
-        for (const p of ring.problems) failures.push(`focus home: ${p}`);
-
-        await page.getByTestId("server-rail-join").click();
-        await expect(joinDialog(page)).toBeVisible();
-        expect(await findUnnamedControls(joinDialog(page))).toEqual([]);
-        for (const name of ["Cancel", "Continue"]) {
-          const button = joinDialog(page).getByRole("button", { name });
-          const ratio = (await textContrast(button)).ratio;
-          measured[name] = Number(ratio.toFixed(2));
-          if (ratio < Q1.text) failures.push(`${name} ${ratio.toFixed(2)} < ${Q1.text}`);
-        }
-        await page.keyboard.press("Escape");
-
-        await testInfo.attach(`server-rail-contrast-${theme}-hc-${highContrast}.json`, {
-          body: JSON.stringify(measured, null, 2),
-          contentType: "application/json",
-        });
-        expect(failures).toEqual([]);
-      });
-    }
+      await page.getByTestId("server-rail-join").click();
+      await expect(joinDialog(page)).toBeVisible();
+      expect(await findUnnamedControls(joinDialog(page))).toEqual([]);
+      for (const name of ["Cancel", "Continue"]) {
+        await measure(name, joinDialog(page).getByRole("button", { name }));
+      }
+      await page.keyboard.press("Escape");
+    },
+  })) {
+    test(c.title, c.run);
   }
 });

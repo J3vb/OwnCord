@@ -2,11 +2,17 @@
  * Local support bundle: a zip the user saves through
  * the OS dialog. Nothing is uploaded and no server is called.
  *
- * Contents are an allowlist: the persisted log files, the voice diagnostics,
- * the settings keys named in `SETTINGS_ALLOWLIST`, and the listed fields of
- * each saved server profile. Passwords and tokens live in the OS keychain,
- * which this module never reads. Log lines are copied verbatim — the logger
- * does not redact — and both the bundle's README and the Logs tab say so.
+ * Contents are an allowlist: the persisted log files (with the diagnostic
+ * event files beside them), the native log, the voice diagnostics, the
+ * settings keys named in `SETTINGS_ALLOWLIST`, and the listed fields of each
+ * saved server profile. Passwords and tokens live in the OS keychain, which
+ * this module never reads.
+ *
+ * Every item made from those sources goes through `redactText` on its way into
+ * the zip (`finishItems` is the one path), and the counts per rule become
+ * `redactions.json`. `manifest.json` lists each item with its size, SHA-256
+ * and data classes, and the whole bundle is kept under `BUNDLE_CAP_BYTES` by
+ * dropping the oldest log lines first.
  *
  * Loaded lazily from the Logs tab button, so none of it is on the startup path.
  * It has no runtime import on purpose: a startup module imported from this
@@ -17,6 +23,9 @@
 import type { Platform } from "../platform/contracts";
 import { settingsText } from "../i18n/settings";
 import { readStored } from "./prefs/preferences";
+import { findLastExit } from "./diagnostics/lastExit";
+import { REDACTION_RULES, redactText, type RedactionCounts } from "./diagnostics/redact";
+import { sha256Hex } from "./diagnostics/sha256";
 
 export const SETTINGS_PREFIX = "owncord:settings:";
 
@@ -193,10 +202,6 @@ export interface SupportBundleSources {
   readonly now: Date;
 }
 
-function json(value: unknown): Uint8Array {
-  return new TextEncoder().encode(JSON.stringify(value, null, 2) + "\n");
-}
-
 function allowlistedSettings(storage: Pick<Storage, "getItem">): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const key of SETTINGS_ALLOWLIST) {
@@ -225,57 +230,235 @@ function allowlistedProfiles(profiles: unknown): Record<string, unknown>[] {
   });
 }
 
+/** The bundle's format: 2 added the manifest, redaction and last exit. */
+export const BUNDLE_FORMAT = 2;
+
+/** The largest bundle written; the oldest log lines go first past it. */
+export const BUNDLE_CAP_BYTES = 4 * 1024 * 1024;
+
+/** Room kept under the cap for the manifest, the report and zip headers. */
+const RESERVED_BYTES = 64 * 1024;
+
+type Group = "logs" | "events" | "native";
+
+interface SourceItem {
+  readonly name: string;
+  readonly text: string;
+  /** Data-lifecycle classes the item can touch (data-lifecycle.md). */
+  readonly classes: readonly number[];
+  /** Log-like items that may be trimmed, oldest first within the group. */
+  readonly group?: Group;
+}
+
+interface FinishedItem {
+  readonly name: string;
+  data: Uint8Array;
+  readonly classes: readonly number[];
+  readonly group?: Group;
+  readonly counts: RedactionCounts;
+  trimmedBytes: number;
+}
+
+export interface BundleManifestItem {
+  readonly name: string;
+  readonly byte_size: number;
+  readonly sha256: string;
+  readonly data_classes: readonly number[];
+  readonly redactions: number;
+  readonly trimmed_bytes?: number;
+}
+
+export interface BundleManifest {
+  readonly format: number;
+  readonly report_id: string;
+  readonly app_version: string;
+  readonly created_at: string;
+  readonly cap_bytes: number;
+  readonly items: readonly BundleManifestItem[];
+  readonly omitted: readonly { readonly name: string; readonly byte_size: number }[];
+  readonly redaction_rules: readonly string[];
+}
+
+function reportId(): string {
+  const bytes = new Uint8Array(8);
+  globalThis.crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function total(counts: RedactionCounts): number {
+  return Object.values(counts).reduce((n, c) => n + c, 0);
+}
+
+/**
+ * Redact every item, then trim the log groups until the bundle fits the cap.
+ * The largest group gives first, from the start of its oldest file, at a line
+ * boundary (a file cut to nothing is dropped): the newest lines, where the
+ * incident is, stay whole. Returns the kept items and the files dropped.
+ */
+function finishItems(
+  items: readonly SourceItem[],
+  cap: number,
+): { kept: FinishedItem[]; omitted: { name: string; byte_size: number }[] } {
+  const encoder = new TextEncoder();
+  const kept: FinishedItem[] = items.map((item) => {
+    const redacted = redactText(item.text);
+    return {
+      name: item.name,
+      data: encoder.encode(redacted.text),
+      classes: item.classes,
+      ...(item.group === undefined ? {} : { group: item.group }),
+      counts: redacted.counts,
+      trimmedBytes: 0,
+    };
+  });
+  const omitted: { name: string; byte_size: number }[] = [];
+  const size = (): number => kept.reduce((n, item) => n + item.data.length, 0);
+  let over = size() - cap;
+  while (over > 0) {
+    const groups = new Map<Group, FinishedItem[]>();
+    for (const item of kept) {
+      if (item.group === undefined || item.data.length === 0) continue;
+      groups.set(item.group, [...(groups.get(item.group) ?? []), item]);
+    }
+    let largest: FinishedItem[] | undefined;
+    let largestBytes = 0;
+    for (const members of groups.values()) {
+      const bytes = members.reduce((n, item) => n + item.data.length, 0);
+      if (bytes > largestBytes) {
+        largest = members;
+        largestBytes = bytes;
+      }
+    }
+    if (largest === undefined) break;
+    const oldest = largest[0]!;
+    const newline = over >= oldest.data.length ? -1 : oldest.data.indexOf(0x0a, over - 1);
+    if (newline === -1 || newline + 1 >= oldest.data.length) {
+      kept.splice(kept.indexOf(oldest), 1);
+      omitted.push({ name: oldest.name, byte_size: oldest.data.length });
+    } else {
+      oldest.trimmedBytes += newline + 1;
+      oldest.data = oldest.data.slice(newline + 1);
+    }
+    over = size() - cap;
+  }
+  return { kept, omitted };
+}
+
+function text(value: unknown): string {
+  return JSON.stringify(value, null, 2) + "\n";
+}
+
+function describe(item: Omit<FinishedItem, "group">): BundleManifestItem {
+  return {
+    name: item.name,
+    byte_size: item.data.length,
+    sha256: sha256Hex(item.data),
+    data_classes: item.classes,
+    redactions: total(item.counts),
+    ...(item.trimmedBytes > 0 ? { trimmed_bytes: item.trimmedBytes } : {}),
+  };
+}
+
 /** Assemble the bundle's zip bytes from already-read sources. */
 export function buildSupportBundle(src: SupportBundleSources): Uint8Array {
-  const encoder = new TextEncoder();
+  const reversedNative = [...src.nativeLogs].toReversed();
+  const items: SourceItem[] = [
+    { name: "README.txt", text: settingsText("logs.bundleReadme"), classes: [] },
+    {
+      name: "app.json",
+      text: text({
+        version: src.appVersion,
+        exportedAt: src.now.toISOString(),
+        os: src.environment.platform,
+        userAgent: src.environment.userAgent,
+        serverVersion: null,
+        serverVersionNote: "not collected (bundle makes no server call, decision 7)",
+      }),
+      classes: [],
+    },
+    {
+      name: "settings.json",
+      text: text({
+        settings: allowlistedSettings(src.storage),
+        profiles: allowlistedProfiles(src.profiles),
+      }),
+      classes: [1],
+    },
+    { name: "voice-diagnostics.json", text: text(src.voiceDiagnostics), classes: [] },
+    ...(src.shareDiagnostics === undefined || src.shareDiagnostics === null
+      ? []
+      : [{ name: "share-diagnostics.json", text: text(src.shareDiagnostics), classes: [] }]),
+    { name: "last-exit.json", text: text(findLastExit(src.nativeLogs)), classes: [] },
+    ...src.logs.map((file): SourceItem =>
+      file.name.startsWith("events-")
+        ? { name: `logs/${file.name}`, text: file.text, classes: [1, 19], group: "events" }
+        : { name: `logs/${file.name}`, text: file.text, classes: [1], group: "logs" },
+    ),
+    // Newest first as read; the trim wants the oldest first.
+    ...reversedNative.map((file): SourceItem => ({
+      name: `logs/${file.name}`,
+      text: file.text,
+      classes: [],
+      group: "native",
+    })),
+  ];
+  const { kept, omitted } = finishItems(items, BUNDLE_CAP_BYTES - RESERVED_BYTES);
+  // Back in the order the sources came: native logs newest first again.
+  const ordered = [
+    ...kept.filter((item) => item.group !== "native"),
+    ...kept.filter((item) => item.group === "native").toReversed(),
+  ];
+
+  const redactions = ordered.flatMap((item) =>
+    REDACTION_RULES.filter((rule) => (item.counts[rule] ?? 0) > 0).map((rule) => ({
+      item: item.name,
+      rule,
+      count: item.counts[rule]!,
+    })),
+  );
+  const report = new TextEncoder().encode(text({ redactions }));
+  const manifest: BundleManifest = {
+    format: BUNDLE_FORMAT,
+    report_id: reportId(),
+    app_version: redactText(src.appVersion).text,
+    created_at: src.now.toISOString(),
+    cap_bytes: BUNDLE_CAP_BYTES,
+    items: [
+      describe({ name: "redactions.json", data: report, classes: [], counts: {}, trimmedBytes: 0 }),
+      ...ordered.map(describe),
+    ],
+    omitted,
+    redaction_rules: REDACTION_RULES,
+  };
+  const [readme, ...rest] = ordered;
   return zipStore(
     [
-      { name: "README.txt", data: encoder.encode(settingsText("logs.bundleReadme")) },
-      {
-        name: "app.json",
-        data: json({
-          version: src.appVersion,
-          exportedAt: src.now.toISOString(),
-          os: src.environment.platform,
-          userAgent: src.environment.userAgent,
-          serverVersion: null,
-          serverVersionNote: "not collected (bundle makes no server call, decision 7)",
-        }),
-      },
-      {
-        name: "settings.json",
-        data: json({
-          settings: allowlistedSettings(src.storage),
-          profiles: allowlistedProfiles(src.profiles),
-        }),
-      },
-      { name: "voice-diagnostics.json", data: json(src.voiceDiagnostics) },
-      ...(src.shareDiagnostics === undefined || src.shareDiagnostics === null
-        ? []
-        : [{ name: "share-diagnostics.json", data: json(src.shareDiagnostics) }]),
-      ...src.logs.map((file) => ({ name: `logs/${file.name}`, data: encoder.encode(file.text) })),
-      ...src.nativeLogs.map((file) => ({
-        name: `logs/${file.name}`,
-        data: encoder.encode(file.text),
-      })),
+      { name: readme!.name, data: readme!.data },
+      { name: "manifest.json", data: new TextEncoder().encode(text(manifest)) },
+      { name: "redactions.json", data: report },
+      ...rest.map((item) => ({ name: item.name, data: item.data })),
     ],
     src.now,
   );
 }
 
 /**
- * Ask where to save, then read the sources and write the bundle there.
+ * Ask where to save, then read the sources and write the bundle there. Where
+ * the host has a share sheet (the Android app) the bundle goes to it instead,
+ * so the user sends it straight to mail or Drive.
  * Resolves false when the user cancels the dialog; nothing is read then.
  */
 export async function exportSupportBundle(
-  desktop: Pick<Platform, "fileSaver" | "appMetadata" | "logFiles" | "settings">,
+  desktop: Pick<Platform, "fileSaver" | "appMetadata" | "logFiles" | "settings" | "shareSheet">,
   voiceDiagnostics: unknown,
   shareDiagnostics?: unknown,
 ): Promise<boolean> {
   const now = new Date();
   const stamp = now.toISOString().slice(0, 19).replace(/[:T]/g, "-");
-  const path = await desktop.fileSaver.pickSaveLocation(`owncord-support-${stamp}.zip`);
-  if (path === null) return false;
+  const name = `owncord-support-${stamp}.zip`;
+  const share = desktop.shareSheet.available;
+  const path = share ? null : await desktop.fileSaver.pickSaveLocation(name);
+  if (!share && path === null) return false;
   const [appVersion, logs, nativeLogs, snapshot] = await Promise.all([
     desktop.appMetadata.getVersion().catch(() => "unknown"),
     desktop.logFiles.readAll(),
@@ -296,6 +479,7 @@ export async function exportSupportBundle(
     shareDiagnostics,
     now,
   });
-  await desktop.fileSaver.writeFile(path, bundle);
+  if (path === null) await desktop.shareSheet.shareFile(name, bundle);
+  else await desktop.fileSaver.writeFile(path, bundle);
   return true;
 }

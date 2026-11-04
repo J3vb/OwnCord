@@ -65,7 +65,7 @@ func recoverWith(svc *AuthService, username, secret, ip string) (*AuthResult, er
 func TestRecoveryKit_EnrolRecoverRotate(t *testing.T) {
 	ctx := context.Background()
 	svc, user, logs := newKitService(t, true)
-	p := Principal{User: user}
+	p := sessionPrincipal(user)
 
 	status, err := svc.RecoveryKitStatus(ctx, p)
 	if err != nil || status.Enrolled {
@@ -85,7 +85,7 @@ func TestRecoveryKit_EnrolRecoverRotate(t *testing.T) {
 	if status, _ := svc.RecoveryKitStatus(ctx, p); !status.Enrolled {
 		t.Fatal("status after enrolment says not enrolled")
 	}
-	kit, _ := svc.st.GetRecoveryKit(ctx, user.ID)
+	kit, _ := svc.accountRecovery.st.GetRecoveryKit(ctx, user.ID)
 	if kit == nil || strings.Contains(kit.Verifier, canonical) || !strings.HasPrefix(kit.Verifier, "$argon2id$") {
 		t.Fatalf("stored verifier = %q, want an argon2id verifier that does not contain the secret", kit.Verifier)
 	}
@@ -114,13 +114,13 @@ func TestRecoveryKit_EnrolRecoverRotate(t *testing.T) {
 		t.Fatalf("spent kit = %v, want the uniform refusal", err)
 	}
 	fresh, _ := svc.st.GetUserByID(ctx, user.ID)
-	again, err := svc.EnrolRecoveryKit(ctx, Principal{User: fresh}, "Recovered-Pass2!", "")
+	again, err := svc.EnrolRecoveryKit(ctx, sessionPrincipal(fresh), "Recovered-Pass2!", "")
 	if err != nil || again.Secret == issue.Secret {
 		t.Fatalf("re-enrolment = %+v, %v; want a different secret", again, err)
 	}
 
 	// Hygiene: neither secret nor verifier reaches the log or the audit rows.
-	verifierNow, _ := svc.st.GetRecoveryKit(ctx, user.ID)
+	verifierNow, _ := svc.accountRecovery.st.GetRecoveryKit(ctx, user.ID)
 	for _, leak := range []string{issue.Secret, canonical, kit.Verifier, again.Secret, verifierNow.Verifier} {
 		if strings.Contains(logs.String(), leak) {
 			t.Fatalf("the log contains recovery material: %q", leak)
@@ -191,7 +191,7 @@ func TestRecoveryKit_DisconnectsLiveSocketOnRedeem(t *testing.T) {
 
 	disc := &recordingRecoveryDisconnector{}
 	svc := NewAuthService(database, auth.NewRateLimiter(), make([]byte, 32), disc)
-	issue, err := svc.EnrolRecoveryKit(ctx, Principal{User: user}, kitPassword, "")
+	issue, err := svc.EnrolRecoveryKit(ctx, sessionPrincipal(user), kitPassword, "")
 	if err != nil {
 		t.Fatalf("EnrolRecoveryKit: %v", err)
 	}
@@ -211,7 +211,7 @@ func TestRecoveryKit_DisconnectsLiveSocketOnRedeem(t *testing.T) {
 func TestRecoveryKit_ClientGeneratedSecret(t *testing.T) {
 	ctx := context.Background()
 	svc, user, _ := newKitService(t, false)
-	p := Principal{User: user}
+	p := sessionPrincipal(user)
 	if _, err := svc.EnrolRecoveryKit(ctx, p, kitPassword, "too-short"); !errors.Is(err, ErrBadRequest) {
 		t.Fatalf("malformed client secret = %v, want ErrBadRequest", err)
 	}
@@ -231,7 +231,7 @@ func TestRecoveryKit_ClientGeneratedSecret(t *testing.T) {
 func TestRecoveryKit_UniformRefusalsAndLockout(t *testing.T) {
 	ctx := context.Background()
 	svc, user, _ := newKitService(t, false)
-	issue, err := svc.EnrolRecoveryKit(ctx, Principal{User: user}, kitPassword, "")
+	issue, err := svc.EnrolRecoveryKit(ctx, sessionPrincipal(user), kitPassword, "")
 	if err != nil {
 		t.Fatalf("EnrolRecoveryKit: %v", err)
 	}
@@ -254,7 +254,7 @@ func TestRecoveryKit_UniformRefusalsAndLockout(t *testing.T) {
 	if err := svc.st.(*db.DB).QueryRowContext(ctx, `SELECT COUNT(*) FROM audit_log WHERE action = 'recovery_kit_locked' AND actor_id = ?`, user.ID).Scan(&locked); err != nil || locked != 1 {
 		t.Fatalf("recovery_kit_locked rows = %d, %v; want 1", locked, err)
 	}
-	kit, _ := svc.st.GetRecoveryKit(ctx, user.ID)
+	kit, _ := svc.accountRecovery.st.GetRecoveryKit(ctx, user.ID)
 	if kit.UsedAt != nil {
 		t.Fatal("a refused attempt spent the kit")
 	}
@@ -263,7 +263,7 @@ func TestRecoveryKit_UniformRefusalsAndLockout(t *testing.T) {
 func TestRecoveryKit_ConcurrentRedemptionAdmitsOne(t *testing.T) {
 	ctx := context.Background()
 	svc, user, _ := newKitService(t, false)
-	issue, err := svc.EnrolRecoveryKit(ctx, Principal{User: user}, kitPassword, "")
+	issue, err := svc.EnrolRecoveryKit(ctx, sessionPrincipal(user), kitPassword, "")
 	if err != nil {
 		t.Fatalf("EnrolRecoveryKit: %v", err)
 	}
@@ -297,7 +297,7 @@ func TestRecoveryKit_ConcurrentRedemptionAdmitsOne(t *testing.T) {
 func TestRecoveryKit_AdmissionBudgetRefusesWithoutWork(t *testing.T) {
 	ctx := context.Background()
 	svc, user, _ := newKitService(t, false)
-	issue, err := svc.EnrolRecoveryKit(ctx, Principal{User: user}, kitPassword, "")
+	issue, err := svc.EnrolRecoveryKit(ctx, sessionPrincipal(user), kitPassword, "")
 	if err != nil {
 		t.Fatalf("EnrolRecoveryKit: %v", err)
 	}
@@ -310,7 +310,7 @@ func TestRecoveryKit_AdmissionBudgetRefusesWithoutWork(t *testing.T) {
 		t.Fatalf("with the budget held = %v, want ErrAuthBusy", err)
 	}
 	release()
-	kit, _ := svc.st.GetRecoveryKit(ctx, user.ID)
+	kit, _ := svc.accountRecovery.st.GetRecoveryKit(ctx, user.ID)
 	if kit.UsedAt != nil {
 		t.Fatal("a refused attempt spent the kit")
 	}
@@ -324,7 +324,7 @@ func TestRecoveryKit_AdmissionBudgetRefusesWithoutWork(t *testing.T) {
 func TestRecoveryKit_AdmissionRefusalChargesNoAttempt(t *testing.T) {
 	ctx := context.Background()
 	svc, user, _ := newKitService(t, false)
-	issue, err := svc.EnrolRecoveryKit(ctx, Principal{User: user}, kitPassword, "")
+	issue, err := svc.EnrolRecoveryKit(ctx, sessionPrincipal(user), kitPassword, "")
 	if err != nil {
 		t.Fatalf("EnrolRecoveryKit: %v", err)
 	}

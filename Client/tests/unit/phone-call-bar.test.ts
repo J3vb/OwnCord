@@ -1,4 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { usePhone } from "../helpers/phoneMedia";
+import { makeDm } from "../helpers/dmHarness";
+import { addVoiceUser } from "../helpers/voiceUsers";
 import { createPhoneCallBar, type PhoneCallBar } from "../../src/components/PhoneCallBar";
 import {
   channelsStore,
@@ -14,7 +17,6 @@ import {
   setListenOnly,
   setLocalMuted,
   setVoiceStatus,
-  updateVoiceState,
   voiceStore,
 } from "../../src/stores/voice.store";
 import { membersStore, resetMembersStore } from "../../src/stores/members.store";
@@ -23,30 +25,10 @@ const VOICE = 10;
 const DM = 20;
 
 function dm(): DmChannel {
-  return {
+  return makeDm({
     channelId: DM,
     recipient: { id: 7, username: "bob", avatar: "", status: "online" },
     participants: [{ id: 7, username: "bob", avatar: "", status: "online" }],
-    name: "",
-    isGroup: false,
-    lastMessageId: null,
-    lastMessage: "",
-    lastMessageAt: "",
-    unreadCount: 0,
-    mentionCount: 0,
-  };
-}
-
-function addPerson(channelId: number, userId: number, username: string): void {
-  updateVoiceState({
-    channel_id: channelId,
-    user_id: userId,
-    username,
-    muted: false,
-    deafened: false,
-    speaking: false,
-    camera: false,
-    screenshare: false,
   });
 }
 
@@ -55,13 +37,6 @@ function flush(): void {
   channelsStore.flush();
   dmStore.flush();
   membersStore.flush();
-}
-
-function usePhone(on: boolean): void {
-  vi.stubGlobal(
-    "matchMedia",
-    vi.fn((q: string) => ({ matches: on && q.includes("pointer: coarse") })),
-  );
 }
 
 describe("PhoneCallBar", () => {
@@ -231,8 +206,8 @@ describe("PhoneCallBar", () => {
   describe("what it says", () => {
     it("names the channel and counts the people with the time in the call", () => {
       mountBar();
-      addPerson(VOICE, 1, "alice");
-      addPerson(VOICE, 2, "bob");
+      addVoiceUser(VOICE, 1, "alice");
+      addVoiceUser(VOICE, 2, "bob");
       joinCall();
       expect(q("pcb-name").textContent).toBe("Voice Chat");
       expect(detail()).toBe("2 people · 00:00");
@@ -248,7 +223,7 @@ describe("PhoneCallBar", () => {
     it("shows at most three avatars", () => {
       mountBar();
       for (const [i, name] of ["alice", "bob", "carol", "dave"].entries()) {
-        addPerson(VOICE, i + 1, name);
+        addVoiceUser(VOICE, i + 1, name);
       }
       joinCall();
       expect(host.querySelectorAll(".pcb-avatar").length).toBe(3);

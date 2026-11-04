@@ -1,18 +1,16 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
+
+import { avatarAttachmentsMock } from "../helpers/avatarAttachmentsMock";
 
 const fetchImageAsObjectUrl = vi.hoisted(() => vi.fn());
 
 // Only the network fetch is stubbed -- isSafeUrl/resolveServerUrl are
 // reimplemented (not mocked away) so the raw-src-vs-authenticated-fetch
 // distinction this suite exercises stays honest. Mirrors tests/unit/avatar.test.ts.
-vi.mock("../../src/features/messaging/content/attachments", () => ({
-  fetchImageAsObjectUrl,
-  // No cached bytes: every avatar here is a still picture (WP 8.7).
-  cachedImageBytes: () => null,
-  recoverEvictedImage: () => {},
-  isSafeUrl: (url: string) => url.startsWith("https://") || url.startsWith("http://"),
-  resolveServerUrl: (url: string) => (url.startsWith("http") ? url : `https://server.test${url}`),
-}));
+vi.mock("../../src/features/messaging/content/attachments", () =>
+  avatarAttachmentsMock(fetchImageAsObjectUrl),
+);
 
 import { createDmProfileSidebar } from "../../src/components/DmProfileSidebar";
 import type { DmProfileData, DmProfileSidebarOptions } from "../../src/components/DmProfileSidebar";
@@ -80,14 +78,21 @@ describe("DmProfileSidebar banner", () => {
 describe("DmProfileSidebar", () => {
   let container: HTMLDivElement;
 
-  beforeEach(() => {
-    fetchImageAsObjectUrl.mockReset();
-    container = document.createElement("div");
-    document.body.appendChild(container);
+  function readNote(user: DmProfileData, host: string): string {
+    const sidebar = createDmProfileSidebar(makeOptions({ user, host }));
+    sidebar.mount(container);
+    const note = container.querySelector('[data-testid="dps-note"]') as HTMLTextAreaElement;
+    const { value } = note;
+    sidebar.destroy?.();
+    return value;
+  }
+
+  useMountContainer((c) => {
+    container = c;
   });
 
-  afterEach(() => {
-    container.remove();
+  beforeEach(() => {
+    fetchImageAsObjectUrl.mockReset();
   });
 
   // -------------------------------------------------------------------------
@@ -357,11 +362,7 @@ describe("DmProfileSidebar", () => {
     );
 
     // The unrelated user 5 on a different server sees no note.
-    const sidebarB = createDmProfileSidebar(makeOptions({ user, host: "b.example.com" }));
-    sidebarB.mount(container);
-    const noteElB = container.querySelector('[data-testid="dps-note"]') as HTMLTextAreaElement;
-    expect(noteElB.value).toBe("");
-    sidebarB.destroy?.();
+    expect(readNote(user, "b.example.com")).toBe("");
 
     localStorage.removeItem("owncord:dm-note:a.example.com:5");
   });
@@ -431,28 +432,16 @@ describe("DmProfileSidebar", () => {
     localStorage.setItem("owncord:dm-note:42", "Pre-existing note");
 
     try {
-      const sidebarA = createDmProfileSidebar(makeOptions({ user, host: "a.example.com" }));
-      sidebarA.mount(container);
-      const noteElA = container.querySelector('[data-testid="dps-note"]') as HTMLTextAreaElement;
-      expect(noteElA.value).toBe("Pre-existing note");
-      sidebarA.destroy?.();
+      expect(readNote(user, "a.example.com")).toBe("Pre-existing note");
 
       // Migrated under server A's key and consumed at the legacy one.
       expect(localStorage.getItem("owncord:dm-note:a.example.com:42")).toBe("Pre-existing note");
       expect(localStorage.getItem("owncord:dm-note:42")).toBeNull();
 
-      const sidebarB = createDmProfileSidebar(makeOptions({ user, host: "b.example.com" }));
-      sidebarB.mount(container);
-      const noteElB = container.querySelector('[data-testid="dps-note"]') as HTMLTextAreaElement;
-      expect(noteElB.value).toBe("");
-      sidebarB.destroy?.();
+      expect(readNote(user, "b.example.com")).toBe("");
 
       // Reopening server A still finds its migrated note.
-      const sidebarA2 = createDmProfileSidebar(makeOptions({ user, host: "a.example.com" }));
-      sidebarA2.mount(container);
-      const noteElA2 = container.querySelector('[data-testid="dps-note"]') as HTMLTextAreaElement;
-      expect(noteElA2.value).toBe("Pre-existing note");
-      sidebarA2.destroy?.();
+      expect(readNote(user, "a.example.com")).toBe("Pre-existing note");
     } finally {
       localStorage.removeItem("owncord:dm-note:42");
       localStorage.removeItem("owncord:dm-note:a.example.com:42");
@@ -480,11 +469,7 @@ describe("DmProfileSidebar", () => {
     });
 
     try {
-      const sidebarA = createDmProfileSidebar(makeOptions({ user, host: "a.example.com" }));
-      sidebarA.mount(container);
-      const noteElA = container.querySelector('[data-testid="dps-note"]') as HTMLTextAreaElement;
-      expect(noteElA.value).toBe("Pre-existing note");
-      sidebarA.destroy?.();
+      expect(readNote(user, "a.example.com")).toBe("Pre-existing note");
       expect(localStorage.getItem("owncord:dm-note:a.example.com:42")).toBeNull();
       expect(localStorage.getItem("owncord:dm-note:42")).toBe("Pre-existing note");
       expect(localStorage.getItem("owncord:legacy-claim:owncord:dm-note:42")).toBe(
@@ -493,21 +478,13 @@ describe("DmProfileSidebar", () => {
 
       // The failed copy is bound to server A: the unrelated user 42 on
       // server B sees no note and leaves the retained one alone.
-      const sidebarB = createDmProfileSidebar(makeOptions({ user, host: "b.example.com" }));
-      sidebarB.mount(container);
-      const noteElB = container.querySelector('[data-testid="dps-note"]') as HTMLTextAreaElement;
-      expect(noteElB.value).toBe("");
-      sidebarB.destroy?.();
+      expect(readNote(user, "b.example.com")).toBe("");
       expect(localStorage.getItem("owncord:dm-note:b.example.com:42")).toBeNull();
       expect(localStorage.getItem("owncord:dm-note:42")).toBe("Pre-existing note");
 
       // Quota relieved: server A's next open completes the migration.
       setItem.mockRestore();
-      const sidebarA2 = createDmProfileSidebar(makeOptions({ user, host: "a.example.com" }));
-      sidebarA2.mount(container);
-      const noteElA2 = container.querySelector('[data-testid="dps-note"]') as HTMLTextAreaElement;
-      expect(noteElA2.value).toBe("Pre-existing note");
-      sidebarA2.destroy?.();
+      expect(readNote(user, "a.example.com")).toBe("Pre-existing note");
       expect(localStorage.getItem("owncord:dm-note:a.example.com:42")).toBe("Pre-existing note");
       expect(localStorage.getItem("owncord:dm-note:42")).toBeNull();
       expect(localStorage.getItem("owncord:legacy-claim:owncord:dm-note:42")).toBeNull();
@@ -673,5 +650,48 @@ describe("DmProfileSidebar", () => {
       expect(getUserNote).toHaveBeenCalledWith(7, expect.any(AbortSignal));
       sidebar.destroy?.();
     });
+  });
+});
+
+describe("DmProfileSidebar identity lines and Report", () => {
+  let container: HTMLDivElement;
+  beforeEach(() => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+  });
+  afterEach(() => container.remove());
+  const text = (id: string): string =>
+    container.querySelector<HTMLElement>(`[data-testid="${id}"]`)?.textContent ?? "";
+
+  it("shows @username only under a nickname, and the custom status, live", () => {
+    const sidebar = createDmProfileSidebar(makeOptions());
+    sidebar.mount(container);
+    expect(text("dps-handle")).toBe("");
+    expect(text("dps-custom-status")).toBe("");
+
+    sidebar.update(makeUser({ displayName: "Ally", customStatus: "brb" }));
+    expect(text("dps-username")).toBe("Ally");
+    expect(text("dps-handle")).toBe("@Alice");
+    expect(text("dps-custom-status")).toBe("brb");
+
+    sidebar.update(makeUser());
+    expect(text("dps-handle")).toBe("");
+    expect(text("dps-custom-status")).toBe("");
+    sidebar.destroy?.();
+  });
+
+  it("Report asks the owner with the person shown now; no handler, no button", () => {
+    const onReport = vi.fn();
+    const sidebar = createDmProfileSidebar(makeOptions({ onReport }));
+    sidebar.mount(container);
+    sidebar.update(makeUser({ id: 2, username: "Bob" }));
+    container.querySelector<HTMLElement>('[data-testid="dps-report-btn"]')!.click();
+    expect(onReport).toHaveBeenCalledWith(2);
+    sidebar.destroy?.();
+
+    const plain = createDmProfileSidebar(makeOptions());
+    plain.mount(container);
+    expect(container.querySelector('[data-testid="dps-report-btn"]')).toBeNull();
+    plain.destroy?.();
   });
 });

@@ -5,9 +5,9 @@ import (
 	"log/slog"
 )
 
-// keepSessionID is the session a 2FA state change keeps alive. An
-// API-token principal has a nil session; keep=0 matches no row, so every
-// login session is revoked — same semantics as change-password.
+// keepSessionID is the session a 2FA state change keeps alive. The 2FA
+// methods refuse a principal without a session before they get here; a nil
+// session still maps to keep=0, which matches no row, so nothing is kept.
 func keepSessionID(p Principal) int64 {
 	if p.Session != nil {
 		return p.Session.ID
@@ -22,7 +22,7 @@ func keepSessionID(p Principal) int64 {
 // contention); if the retry also fails, revoked reports what did succeed and
 // failed is true so the caller can report a partial success instead of
 // silently claiming the other sessions were revoked when they were not.
-func (s *AuthService) revokeOtherSessionsAfterAuthChange(ctx context.Context, userID, keepSessionID int64, action string) (revoked int64, failed bool) {
+func (s *twoFactor) revokeOtherSessionsAfterAuthChange(ctx context.Context, userID, keepSessionID int64, action string) (revoked int64, failed bool) {
 	revoked, err := s.st.DeleteOtherSessions(ctx, userID, keepSessionID)
 	if err != nil {
 		slog.Error("DeleteOtherSessions after "+action, "err", err, "user_id", userID)

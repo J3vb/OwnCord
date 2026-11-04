@@ -6,18 +6,13 @@
 import { vi } from "vitest";
 import type { SettingsStore } from "../../../src/platform/contracts/settings";
 import { describeSettingsStoreSuite } from "./settings.suite";
+import * as hn from "../../helpers/nativeCoreHarness";
 
 // A getter export so each `await import("@tauri-apps/api/core")` inside
 // createTauriBackend() re-reads the live value below.
-const core: {
-  invoke: ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) | undefined;
-} = { invoke: undefined };
+const core = hn.makeCore();
 
-vi.mock("@tauri-apps/api/core", () => ({
-  get invoke() {
-    return core.invoke;
-  },
-}));
+vi.mock("@tauri-apps/api/core", () => hn.coreMock(core));
 vi.mock("@tauri-apps/plugin-http", () => ({ fetch: vi.fn() }));
 vi.mock("@lib/net/httpProxy", () => ({ ensureHttpProxy: vi.fn() }));
 
@@ -28,16 +23,6 @@ describeSettingsStoreSuite(async () => {
   core.invoke = undefined;
   return {
     subject: legacy,
-    native: {
-      succeedWith(value: unknown) {
-        core.invoke = vi.fn().mockResolvedValue(value);
-      },
-      failWith(error: unknown) {
-        core.invoke = vi.fn().mockRejectedValue(error);
-      },
-      unavailable() {
-        core.invoke = undefined;
-      },
-    },
+    native: hn.nativeControls(core),
   };
 });

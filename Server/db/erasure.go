@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
 	"github.com/J3vb/OwnCord/Server/permissions"
@@ -219,8 +220,8 @@ var erasureStatements = []struct {
 // lookup goes through $.payload: state frames carry user_id, message frames the
 // author as user.id, chat frames the mentioned ids under mentions, call log
 // rows the joiners under call.participants, group add/remove rows
-// group_event.target_user_id, a relayed E2EE offer from_user_id, and a
-// presence_batch updates[].user_id. ws.eventNamesUser is the same rule over
+// group_event.target_user_id, a relayed E2EE offer from_user_id, a
+// presence_batch updates[].user_id and a member_update_batch members[].user_id. ws.eventNamesUser is the same rule over
 // the ring buffer's bytes; the two must stay in step.
 const EventNamesUserPredicate = `(json_extract(payload, '$.payload.user_id') = ?1
 	 OR json_extract(payload, '$.payload.user.id') = ?1
@@ -229,7 +230,8 @@ const EventNamesUserPredicate = `(json_extract(payload, '$.payload.user_id') = ?
 	 OR EXISTS (SELECT 1 FROM json_each(payload, '$.payload.mentions') WHERE json_each.value = ?1)
 	 OR EXISTS (SELECT 1 FROM json_each(payload, '$.payload.call.participants') WHERE json_each.value = ?1)
 	 OR json_extract(payload, '$.payload.group_event.target_user_id') = ?1
-	 OR EXISTS (SELECT 1 FROM json_each(payload, '$.payload.updates') WHERE json_extract(json_each.value, '$.user_id') = ?1))`
+	 OR EXISTS (SELECT 1 FROM json_each(payload, '$.payload.updates') WHERE json_extract(json_each.value, '$.user_id') = ?1)
+	 OR EXISTS (SELECT 1 FROM json_each(payload, '$.payload.members') WHERE json_extract(json_each.value, '$.user_id') = ?1))`
 
 // DeleteEventsForUser removes every persisted replay event naming userID. It
 // runs again after the member_ban broadcast and persister flush so nothing
@@ -466,6 +468,17 @@ func (d *DB) CompleteErasureJob(ctx context.Context, id int64, filesRemoved int)
 	return nil
 }
 
+// referencedStoredFilesSQL is ReferencedStoredFiles' lookup for n names: the
+// n placeholders repeated once per table, each table searched by its own name
+// column (attachments through idx_attachments_stored_as).
+func referencedStoredFilesSQL(n int) string {
+	in := strings.TrimSuffix(strings.Repeat("?,", n), ",")
+	// G202: `in` is "?" placeholders only; every name is bound by the caller.
+	return `SELECT stored_as FROM attachments WHERE stored_as IN (` + in + `)` + //nolint:gosec
+		` UNION SELECT filename FROM emoji WHERE filename IN (` + in + `)` +
+		` UNION SELECT filename FROM stickers WHERE filename IN (` + in + `)`
+}
+
 // ReferencedStoredFiles reports which of names are still referenced by a row
 // (an attachment's stored_as, an emoji or sticker filename) for storage
 // reconciliation: a file no row names is stranded and may be removed.
@@ -475,20 +488,11 @@ func (d *DB) ReferencedStoredFiles(ctx context.Context, names []string) (map[str
 	for start := 0; start < len(names); start += chunk {
 		end := min(start+chunk, len(names))
 		batch := names[start:end]
-		placeholders := make([]byte, 0, 2*len(batch))
 		args := make([]any, 0, len(batch))
-		for i, n := range batch {
-			if i > 0 {
-				placeholders = append(placeholders, ',')
-			}
-			placeholders = append(placeholders, '?')
+		for _, n := range batch {
 			args = append(args, n)
 		}
-		in := string(placeholders)
-		// G202: `in` is "?" placeholders only; every name is bound below.
-		query := `SELECT stored_as FROM attachments WHERE stored_as IN (` + in + `)` + //nolint:gosec
-			` UNION SELECT filename FROM emoji WHERE filename IN (` + in + `)` +
-			` UNION SELECT filename FROM stickers WHERE filename IN (` + in + `)`
+		query := referencedStoredFilesSQL(len(batch))
 		all := make([]any, 0, 3*len(args))
 		all = append(all, args...)
 		all = append(all, args...)

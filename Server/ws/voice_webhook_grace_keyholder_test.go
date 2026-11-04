@@ -77,7 +77,7 @@ func (r *graceRoom) park(t *testing.T) {
 	txn := r.h.begin(r.uid)
 	r.h.disconnectVoice(context.Background(), txn, r.c, "test")
 	txn.end()
-	if !r.h.voiceReg.voiceGrace.has(r.uid, r.chID) {
+	if !r.h.voiceHub.reg.voiceGrace.has(r.uid, r.chID) {
 		t.Fatal("pre-condition: the membership should be parked")
 	}
 	if !r.h.IsVoiceKeyHolder(r.chID, r.uid) {
@@ -114,7 +114,7 @@ func TestWebhookParticipantLeft_ParkedKeyHolderReelects(t *testing.T) {
 	if !r.h.IsVoiceKeyHolder(r.chID, r.otherUID) {
 		t.Error("the remaining member was not elected key holder")
 	}
-	if r.h.voiceReg.voiceGrace.get(r.uid) != nil {
+	if r.h.voiceHub.reg.voiceGrace.get(r.uid) != nil {
 		t.Error("the grace entry survived the webhook")
 	}
 	if row, err := r.h.voice.State(context.Background(), r.uid); err != nil || row != nil {
@@ -134,7 +134,7 @@ func TestWebhookParticipantLeft_ParkedNonHolderKeepsHolder(t *testing.T) {
 	txn := r.h.begin(r.otherUID)
 	r.h.disconnectVoice(context.Background(), txn, r.other, "test")
 	txn.end()
-	if !r.h.voiceReg.voiceGrace.has(r.otherUID, r.chID) {
+	if !r.h.voiceHub.reg.voiceGrace.has(r.otherUID, r.chID) {
 		t.Fatal("pre-condition: the non-holder should be parked")
 	}
 
@@ -143,7 +143,7 @@ func TestWebhookParticipantLeft_ParkedNonHolderKeepsHolder(t *testing.T) {
 	if !r.h.IsVoiceKeyHolder(r.chID, r.uid) {
 		t.Error("removing a parked non-holder moved the key holder")
 	}
-	if r.h.voiceReg.voiceGrace.get(r.otherUID) != nil {
+	if r.h.voiceHub.reg.voiceGrace.get(r.otherUID) != nil {
 		t.Error("the grace entry survived the webhook")
 	}
 	if row, err := r.h.voice.State(context.Background(), r.otherUID); err != nil || row != nil {
@@ -164,13 +164,13 @@ func TestWebhookParticipantLeft_ParkedLastMemberEmptiesChannel(t *testing.T) {
 
 	f.h.HandleWebhookParticipantLeftForTest(f.uid, f.chID, tok)
 
-	f.h.keyHolderMu.RLock()
-	_, named := f.h.voiceKeyHolders[f.chID]
-	f.h.keyHolderMu.RUnlock()
+	f.h.voiceHub.keyHolderMu.RLock()
+	_, named := f.h.voiceHub.keyHolders[f.chID]
+	f.h.voiceHub.keyHolderMu.RUnlock()
 	if named {
 		t.Error("an empty channel still has a key holder entry")
 	}
-	if f.h.voiceReg.voiceGrace.get(f.uid) != nil {
+	if f.h.voiceHub.reg.voiceGrace.get(f.uid) != nil {
 		t.Error("the grace entry survived the webhook")
 	}
 }
@@ -186,7 +186,7 @@ func TestWebhookParticipantLeft_StaleTokenKeepsParkedHolder(t *testing.T) {
 	if !r.h.IsVoiceKeyHolder(r.chID, r.uid) {
 		t.Error("a stale-token leave demoted the parked key holder")
 	}
-	if !r.h.voiceReg.voiceGrace.has(r.uid, r.chID) {
+	if !r.h.voiceHub.reg.voiceGrace.has(r.uid, r.chID) {
 		t.Error("a stale-token leave dropped the grace entry")
 	}
 	if row, err := r.h.voice.State(context.Background(), r.uid); err != nil || row == nil || row.JoinedAt != r.parkedTok {
@@ -227,7 +227,7 @@ func TestWebhookParticipantLeft_RacingGraceResumeIsConsistent(t *testing.T) {
 		if (row != nil) != (slotCh != 0) {
 			t.Fatalf("inconsistent outcome: row=%+v slot channel=%d", row, slotCh)
 		}
-		if r.h.voiceReg.voiceGrace.get(r.uid) != nil {
+		if r.h.voiceHub.reg.voiceGrace.get(r.uid) != nil {
 			t.Fatal("a grace entry outlived both the webhook and the resume")
 		}
 		if slotCh == 0 && r.h.IsVoiceKeyHolder(r.chID, r.uid) {

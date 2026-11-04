@@ -8,13 +8,12 @@
 // fresh module instance.
 import { vi } from "vitest";
 import type { LiveKitProxiesSeam } from "./livekitProxies.suite";
-import { describeLiveKitProxiesSuite } from "./livekitProxies.suite";
+import { describeLiveKitProxiesSuite, livekitNativeControl } from "./livekitProxies.suite";
+import * as lm from "../../helpers/loggerMock";
 
 const invoke = vi.fn();
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
-vi.mock("@lib/logger", () => ({
-  createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
-}));
+vi.mock("@lib/logger", () => lm.loggerMock());
 
 describeLiveKitProxiesSuite(async () => {
   vi.resetModules();
@@ -28,19 +27,6 @@ describeLiveKitProxiesSuite(async () => {
   };
   return {
     subject: legacy,
-    native: {
-      succeedWith(port: number) {
-        invoke.mockImplementation((cmd: string) =>
-          cmd === "start_livekit_proxy"
-            ? Promise.resolve({ port, token: "tun" })
-            : Promise.resolve(undefined),
-        );
-      },
-      failWith(error: unknown) {
-        invoke.mockImplementation((cmd: string) =>
-          cmd === "start_livekit_proxy" ? Promise.reject(error) : Promise.resolve(undefined),
-        );
-      },
-    },
+    native: livekitNativeControl(invoke),
   };
 });

@@ -66,7 +66,7 @@ func (s *voiceRejoinBlockState) clear(userID int64) {
 
 // BlockVoiceRejoin records a moderator removal of userID from channelID.
 func (h *Hub) BlockVoiceRejoin(userID, channelID int64) {
-	h.voiceRejoinBlocks.block(userID, channelID)
+	h.voiceHub.rejoinBlocks.block(userID, channelID)
 }
 
 // voiceRejoinBlocker lets the moderation handlers record a removal. Like

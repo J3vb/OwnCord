@@ -32,7 +32,7 @@ func (h *Hub) touchSession(ctx context.Context, c *Client) {
 	if !due {
 		return
 	}
-	if err := h.authn.TouchSession(ctx, c.tokenHash); err != nil {
+	if err := h.seams.authn.TouchSession(ctx, c.tokenHash); err != nil {
 		slog.Warn("failed to touch session", "user_id", c.userID, "err", err)
 	}
 }

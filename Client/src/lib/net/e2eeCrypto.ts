@@ -15,6 +15,7 @@
  */
 
 import { createLogger } from "@lib/logger";
+import type { KeyPlacement } from "./keyPlacement";
 
 const log = createLogger("e2eeCrypto");
 
@@ -215,19 +216,35 @@ export function roomKeyToBase64(key: Uint8Array): string {
  *  `0x01 ‖ epoch (u64 big-endian)` to the GCM ciphertext and binds that same
  *  epoch as additional data, so a peer can tell a fresh room key from a
  *  superseded one and the relay cannot alter the epoch unnoticed.
+ *  v2 (`0x02 ‖ epoch ‖ slot (u8) ‖ flags (u8)`) also says which key slot the
+ *  key goes in and whether the receiver stages it there (decrypt only) and
+ *  starts sending with it a moment later (flag bit 0). It goes only to a peer
+ *  that announced `key_slots`; every other peer gets v1, which means slot 0,
+ *  used at once.
  *  Blobs with no header are the pre-epoch format: unwrap still accepts them
  *  for holders on the old build, reporting `epoch: null`. */
 const OFFER_FORMAT_V1 = 0x01;
+const OFFER_FORMAT_V2 = 0x02;
 const OFFER_HEADER_BYTES = 9;
+const OFFER_HEADER_V2_BYTES = 11;
+const OFFER_FLAG_STAGE = 0x01;
 
-function encodeOfferEpoch(epoch: number): Uint8Array<ArrayBuffer> {
+function encodeOfferHeader(epoch: number, placement?: KeyPlacement): Uint8Array<ArrayBuffer> {
   if (!Number.isSafeInteger(epoch) || epoch < 0) {
     // i18n-exempt: internal E2EE protocol guard, never rendered
     throw new Error("E2EE: offer epoch must be a non-negative safe integer");
   }
-  const header = new Uint8Array(OFFER_HEADER_BYTES);
-  header[0] = OFFER_FORMAT_V1;
+  if (placement === undefined) {
+    const header = new Uint8Array(OFFER_HEADER_BYTES);
+    header[0] = OFFER_FORMAT_V1;
+    new DataView(header.buffer).setBigUint64(1, BigInt(epoch));
+    return header;
+  }
+  const header = new Uint8Array(OFFER_HEADER_V2_BYTES);
+  header[0] = OFFER_FORMAT_V2;
   new DataView(header.buffer).setBigUint64(1, BigInt(epoch));
+  header[9] = placement.slot;
+  header[10] = placement.stage ? OFFER_FLAG_STAGE : 0;
   return header;
 }
 
@@ -244,8 +261,9 @@ export async function wrapRoomKey(
   peerPublicKey: CryptoKey,
   roomKey: Uint8Array,
   epoch: number,
+  placement?: KeyPlacement,
 ): Promise<{ encryptedKey: string; iv: string }> {
-  const header = encodeOfferEpoch(epoch);
+  const header = encodeOfferHeader(epoch, placement);
   const wrapKey = await deriveWrappingKey(myPrivateKey, peerPublicKey);
   const iv = crypto.getRandomValues(new Uint8Array(12)); // 96-bit GCM nonce
 
@@ -255,9 +273,9 @@ export async function wrapRoomKey(
     roomKey as Uint8Array<ArrayBuffer>,
   );
 
-  const blob = new Uint8Array(OFFER_HEADER_BYTES + ciphertext.byteLength);
+  const blob = new Uint8Array(header.byteLength + ciphertext.byteLength);
   blob.set(header, 0);
-  blob.set(new Uint8Array(ciphertext), OFFER_HEADER_BYTES);
+  blob.set(new Uint8Array(ciphertext), header.byteLength);
   return { encryptedKey: uint8ToBase64(blob), iv: uint8ToBase64(iv) };
 }
 
@@ -266,14 +284,15 @@ export async function wrapRoomKey(
  *
  * Same ECDH + HKDF derivation as wrapRoomKey, but on the receiver's side.
  * Returns the epoch the holder bound into the blob, or null for a legacy
- * (pre-epoch) blob.
+ * (pre-epoch) blob, and the key's placement for a v2 blob (undefined for any
+ * older one, which means LEGACY_PLACEMENT).
  */
 export async function unwrapRoomKey(
   myPrivateKey: CryptoKey,
   peerPublicKey: CryptoKey,
   encryptedKeyBase64: string,
   ivBase64: string,
-): Promise<{ roomKey: Uint8Array; epoch: number | null }> {
+): Promise<{ roomKey: Uint8Array; epoch: number | null; placement?: KeyPlacement }> {
   const wrapKey = await deriveWrappingKey(myPrivateKey, peerPublicKey);
   const iv = base64ToUint8(ivBase64);
   const blob = base64ToUint8(encryptedKeyBase64);
@@ -287,22 +306,41 @@ export async function unwrapRoomKey(
     return { roomKey: new Uint8Array(plaintext), epoch: null };
   }
 
-  if (blob.byteLength < OFFER_HEADER_BYTES || blob[0] !== OFFER_FORMAT_V1) {
+  const headerBytes =
+    blob[0] === OFFER_FORMAT_V1
+      ? OFFER_HEADER_BYTES
+      : blob[0] === OFFER_FORMAT_V2
+        ? OFFER_HEADER_V2_BYTES
+        : 0;
+  if (headerBytes === 0 || blob.byteLength < headerBytes) {
     // i18n-exempt: internal E2EE protocol guard, never rendered
     throw new Error("E2EE: unknown wrapped-key format");
   }
-  const header = blob.subarray(0, OFFER_HEADER_BYTES);
-  const epochBig = new DataView(blob.buffer, blob.byteOffset, OFFER_HEADER_BYTES).getBigUint64(1);
+  const header = blob.subarray(0, headerBytes);
+  const epochBig = new DataView(blob.buffer, blob.byteOffset, headerBytes).getBigUint64(1);
   if (epochBig > BigInt(Number.MAX_SAFE_INTEGER)) {
     // i18n-exempt: internal E2EE protocol guard, never rendered
     throw new Error("E2EE: offer epoch out of range");
   }
+  let placement: KeyPlacement | undefined;
+  if (headerBytes === OFFER_HEADER_V2_BYTES) {
+    const slot = header[9];
+    const flags = header[10] ?? 0;
+    if ((slot !== 0 && slot !== 1) || (flags & ~OFFER_FLAG_STAGE) !== 0) {
+      // i18n-exempt: internal E2EE protocol guard, never rendered
+      throw new Error("E2EE: offer key slot out of range");
+    }
+    placement = { slot, stage: (flags & OFFER_FLAG_STAGE) !== 0 };
+  }
   const plaintext = await crypto.subtle.decrypt(
     { name: "AES-GCM", iv, additionalData: header },
     wrapKey,
-    blob.subarray(OFFER_HEADER_BYTES),
+    blob.subarray(headerBytes),
   );
-  return { roomKey: new Uint8Array(plaintext), epoch: Number(epochBig) };
+  const roomKey = new Uint8Array(plaintext);
+  return placement === undefined
+    ? { roomKey, epoch: Number(epochBig) }
+    : { roomKey, epoch: Number(epochBig), placement };
 }
 
 // ── Internal helpers ────────────────────────────────────────────────────────

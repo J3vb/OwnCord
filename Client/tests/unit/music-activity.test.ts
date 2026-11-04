@@ -18,6 +18,7 @@ import {
   withPlayerHidden,
 } from "@lib/prefs/musicActivityPrefs";
 import type { ConnectionState } from "@lib/ws";
+import { fakeActivityWs } from "../helpers/fakeActivityWs";
 import type { MediaPrefs, MediaReading } from "../../src/platform/contracts/mediaDetector";
 
 /**
@@ -58,40 +59,7 @@ interface Sent {
 }
 
 function fakeWs(initial: ConnectionState = "connected") {
-  let state: ConnectionState = initial;
-  let nextId = 1;
-  const sent: Sent[] = [];
-  const stateListeners = new Set<(s: ConnectionState) => void>();
-  const readyListeners = new Set<() => void>();
-  const ws = {
-    getState: () => state,
-    send: vi.fn((msg: { type: string; payload: { listening: Sent["listening"] } }) => {
-      expect(msg.type).toBe("listening_update");
-      const id = `id-${nextId++}`;
-      sent.push({ id, listening: msg.payload.listening });
-      return id;
-    }),
-    onStateChange: (fn: (s: ConnectionState) => void) => {
-      stateListeners.add(fn);
-      return () => stateListeners.delete(fn);
-    },
-    on: (type: string, fn: () => void) => {
-      expect(type).toBe("ready");
-      readyListeners.add(fn);
-      return () => readyListeners.delete(fn);
-    },
-  };
-  return {
-    ws: ws as never,
-    sent,
-    setState(next: ConnectionState): void {
-      state = next;
-      for (const fn of stateListeners) fn(next);
-    },
-    ready(): void {
-      for (const fn of readyListeners) fn();
-    },
-  };
+  return fakeActivityWs<Sent["listening"]>("listening_update", "listening", initial);
 }
 
 /** Let promise continuations run. */

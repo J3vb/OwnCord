@@ -5,6 +5,7 @@
 // each path that used to put the raw capture track on the sender, and checks
 // that the sender only ever received the processor's gated output.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { loggerMock } from "../helpers/loggerMock";
 import { LocalAudioTrack, Track } from "livekit-client";
 import { createMicProcessor, type MicProcessor } from "../../src/lib/voice/micProcessor";
 import { AudioPipeline } from "../../src/lib/voice/audioPipeline";
@@ -15,9 +16,7 @@ import {
   installFakeAudio,
 } from "../helpers/fakeAudioContext";
 
-vi.mock("@lib/logger", () => ({
-  createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
-}));
+vi.mock("@lib/logger", () => loggerMock());
 
 let captures = 0;
 function stubCapture(): void {

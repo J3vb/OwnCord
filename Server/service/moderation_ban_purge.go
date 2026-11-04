@@ -92,7 +92,7 @@ func (s *ModerationService) AuthorizeBanPurge(ctx context.Context, actorID, targ
 // banned. It repeats the authorization checks and requires the target to be
 // banned now, so it is never a purge without a ban.
 // Lock order: banPurgeSem is taken before any other lock and never while one is
-// held; mentionEmitMu and the database writer are taken inside it. No hub lock.
+// held; the channel mention emit lock and the database writer are taken inside it. No hub lock.
 func (s *ModerationService) PurgeAfterBan(ctx context.Context, actorID, targetID int64, window time.Duration) BanPurgeResult {
 	if window <= 0 || window > banPurgeMaxWindow {
 		return BanPurgeResult{Err: fmt.Errorf("%w: invalid purge window", ErrBadRequest)}
@@ -153,7 +153,7 @@ func (s *ModerationService) PurgeAfterBan(ctx context.Context, actorID, targetID
 // when actorID holds READ_MESSAGES and MANAGE_MESSAGES there; a lookup error skips
 // it. It returns every committed batch even when it stops early (complete false at
 // the row cap, context end, or a store error returned as err).
-func (s *MessageService) purgeUserMessagesSince(ctx context.Context, actorID, userID int64, since string, maxRows int) (batches []BanPurgeBatch, complete bool, err error) {
+func (s *messageRemoval) purgeUserMessagesSince(ctx context.Context, actorID, userID int64, since string, maxRows int) (batches []BanPurgeBatch, complete bool, err error) {
 	channels, err := s.st.ListUserMessageChannelsSince(ctx, userID, since)
 	if err != nil {
 		slog.Error("ModerationService.PurgeAfterBan list channels", "err", err, "target_id", userID)
@@ -171,7 +171,7 @@ func (s *MessageService) purgeUserMessagesSince(ctx context.Context, actorID, us
 
 		// Flush queued mention-badge increments before the batches commit and the reversal
 		// below runs, as PurgeMessages does.
-		s.flushChannelMentionCounts(context.WithoutCancel(ctx), chID)
+		s.mentions.flushChannelMentionCounts(context.WithoutCancel(ctx), chID)
 
 		for {
 			remaining := maxRows - total
@@ -188,7 +188,7 @@ func (s *MessageService) purgeUserMessagesSince(ctx context.Context, actorID, us
 				return batches, false, fmt.Errorf("%w: failed to purge messages", ErrInternal)
 			}
 			if len(ids) > 0 {
-				if mcErr := s.reverseMentionCounts(context.WithoutCancel(ctx), chID, ids); mcErr != nil {
+				if mcErr := s.mentions.reverseMentionCounts(context.WithoutCancel(ctx), chID, ids); mcErr != nil {
 					slog.Error("ModerationService.PurgeAfterBan DecrementMentionCounts", "err", mcErr, "channel_id", chID)
 				}
 				batches = append(batches, BanPurgeBatch{ChannelID: chID, MessageIDs: ids})
@@ -204,7 +204,7 @@ func (s *MessageService) purgeUserMessagesSince(ctx context.Context, actorID, us
 
 // canModerateDelete reports whether actorID may delete others' messages in
 // chID under the message delete policy; a lookup error counts as no.
-func (s *MessageService) canModerateDelete(ctx context.Context, actorID, chID int64) bool {
+func (s *messageRemoval) canModerateDelete(ctx context.Context, actorID, chID int64) bool {
 	subj, err := s.perms.Subject(ctx, actorID, chID)
 	if err != nil {
 		slog.Debug("ban purge: channel skipped", "channel_id", chID, "lookup_failed", true)

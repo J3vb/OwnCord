@@ -13,11 +13,13 @@ import {
 } from "../../src/stores/voice.store";
 import { channelsStore } from "../../src/stores/channels.store";
 import { dmStore, type DmChannel } from "../../src/stores/dm.store";
+import { dmRecipient, makeDm } from "./dmHarness";
+import { voiceUser } from "./voiceUsers";
 import { membersStore } from "../../src/stores/members.store";
 import { authStore } from "../../src/stores/auth.store";
 import { setConnectionStatus } from "../../src/stores/ui.store";
 import type { RingState } from "../../src/lib/voice/callRing";
-import { signInAs } from "./storeSeeds";
+import { makeChannelRow, signInAs } from "./storeSeeds";
 
 export const SELF = 1;
 
@@ -25,30 +27,13 @@ export const OTTO = 2;
 
 export const DM = 100;
 
-export const dm = (overrides: Partial<DmChannel> = {}): DmChannel => ({
-  channelId: DM,
-  recipient: { id: OTTO, username: "otheruser", avatar: "", status: "online" },
-  participants: [{ id: OTTO, username: "otheruser", avatar: "", status: "online" }],
-  name: "",
-  isGroup: false,
-  lastMessageId: null,
-  lastMessage: "",
-  lastMessageAt: "",
-  unreadCount: 0,
-  mentionCount: 0,
-  ...overrides,
-});
+export const dm = (overrides: Partial<DmChannel> = {}): DmChannel => {
+  const other = dmRecipient(OTTO, "otheruser");
+  return makeDm({ channelId: DM, recipient: other, participants: [other], ...overrides });
+};
 
-export const vu = (userId: number, extra: Partial<VoiceUser> = {}): VoiceUser => ({
-  userId,
-  username: userId === SELF ? "me" : "otheruser",
-  muted: false,
-  deafened: false,
-  speaking: false,
-  camera: false,
-  screenshare: false,
-  ...extra,
-});
+export const vu = (userId: number, extra: Partial<VoiceUser> = {}): VoiceUser =>
+  voiceUser(userId, { username: userId === SELF ? "me" : "otheruser", ...extra });
 
 export const CARA = 3;
 
@@ -160,28 +145,7 @@ beforeEach(() => {
   dmStore.setState(() => ({ channels: [dm()] }));
   channelsStore.setState(() => ({
     categories: [],
-    channels: new Map([
-      [
-        7,
-        {
-          id: 7,
-          name: "Lobby",
-          type: "voice" as const,
-          category: null,
-          topic: "",
-          position: 0,
-          unreadCount: 0,
-          mentionCount: 0,
-          lastMessageId: null,
-          canSend: true,
-          slowMode: 0,
-          nsfw: false,
-          isPrivate: false,
-          voiceMaxUsers: 0,
-          voiceMaxVideo: 0,
-        },
-      ],
-    ]),
+    channels: new Map([[7, makeChannelRow({ id: 7, name: "Lobby", type: "voice" })]]),
     activeChannelId: DM,
     roles: [],
   }));

@@ -117,7 +117,7 @@
 .sidebar-content-inner .channel-sidebar-header {
   display: none;
 }
-/* Mark Server as Read, Invite, Audit Log and Moderation: one row of quiet icon buttons on the
+/* Invite, Audit Log and Moderation: one row of quiet icon buttons on the
    header's trailing edge, beside the name or, when both do not fit, on a row
    of their own under it. The row never splits. */
 .sidebar-header-actions {

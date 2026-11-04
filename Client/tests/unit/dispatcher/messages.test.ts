@@ -1,6 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
 import * as dispatcherMocks from "../../helpers/dispatcherMocks";
-import { wireDispatcher } from "../../../src/lib/dispatcher";
 import { expectConsole } from "../../helpers/console";
 import { authStore } from "../../../src/stores/auth.store";
 import { channelsStore } from "../../../src/stores/channels.store";
@@ -18,7 +17,16 @@ import {
   loadReactionUsers,
   setReactionUsersFetcher,
 } from "../../../src/features/messaging/reactionUsers";
-import { useDispatcherHarness, type DispatcherMock } from "../../helpers/dispatcherHarness";
+import {
+  useDispatcherHarness,
+  setMeUser,
+  channelRow,
+  seedChannels,
+  patchAuth,
+  chatMessageEvent,
+  mock,
+  replaceDispatcher,
+} from "../../helpers/dispatcherHarness";
 
 vi.mock("@lib/notifications", () => dispatcherMocks.notificationsMock());
 vi.mock("@lib/voice/livekitSession", () => dispatcherMocks.livekitSessionMock());
@@ -30,27 +38,31 @@ vi.mock("../../../src/features/connection/dispatchContext", async (importOrigina
 );
 
 describe("WS Dispatcher", () => {
-  let cleanup: () => void;
-  let mock: DispatcherMock;
+  useDispatcherHarness();
 
-  useDispatcherHarness({
-    wired: (m, c) => {
-      mock = m;
-      cleanup = c;
-    },
-    currentCleanup: () => cleanup,
-  });
+  function bobPostsInChannel5(content: string, extra: Record<string, unknown> = {}): void {
+    mock.dispatch(
+      "chat_message",
+      chatMessageEvent({
+        id: 200,
+        channel_id: 5,
+        user: { id: 2, username: "bob", avatar: null },
+        content,
+        ...extra,
+      }),
+    );
+  }
 
   it("wires chat_message to messages store", () => {
-    mock.dispatch("chat_message", {
-      id: 100,
-      channel_id: 1,
-      user: { id: 1, username: "alex", avatar: null },
-      content: "Hello world",
-      reply_to: null,
-      attachments: [],
-      timestamp: "2026-03-15T10:00:00Z",
-    });
+    mock.dispatch(
+      "chat_message",
+      chatMessageEvent({
+        id: 100,
+        channel_id: 1,
+        user: { id: 1, username: "alex", avatar: null },
+        content: "Hello world",
+      }),
+    );
 
     const msgs = messagesStore.getState().messagesByChannel.get(1);
     expect(msgs).toHaveLength(1);
@@ -59,37 +71,9 @@ describe("WS Dispatcher", () => {
 
   it("wires chat_message to increment unread for non-active channel", () => {
     // Set up a channel first
-    channelsStore.setState((prev) => {
-      const ch = new Map(prev.channels);
-      ch.set(5, {
-        id: 5,
-        name: "off-topic",
-        type: "text" as const,
-        category: null,
-        position: 0,
-        unreadCount: 0,
-        mentionCount: 0,
-        lastMessageId: null,
-        canSend: true,
-        topic: "",
-        slowMode: 0,
-        nsfw: false,
-        isPrivate: false,
-        voiceMaxUsers: 0,
-        voiceMaxVideo: 0,
-      });
-      return { ...prev, channels: ch, activeChannelId: 1 }; // active is channel 1
-    });
+    seedChannels([channelRow({ id: 5, name: "off-topic" })], { activeChannelId: 1 });
 
-    mock.dispatch("chat_message", {
-      id: 200,
-      channel_id: 5, // different from active
-      user: { id: 2, username: "bob", avatar: null },
-      content: "ping",
-      reply_to: null,
-      attachments: [],
-      timestamp: "2026-03-15T10:00:00Z",
-    });
+    bobPostsInChannel5("ping");
 
     const ch = channelsStore.getState().channels.get(5);
     expect(ch?.unreadCount).toBe(1);
@@ -101,43 +85,22 @@ describe("WS Dispatcher", () => {
   // advanced to its id) AND redelivered as a queued chat_message once the
   // socket drains — the channel path had no replay guard at all.
   it("does not double-count a channel unread/mention whose id is already reflected in lastMessageId", () => {
-    authStore.setState((prev) => ({
-      ...prev,
-      user: { id: 5, username: "me", avatar: null, role: "member" },
-    }));
-    channelsStore.setState((prev) => {
-      const ch = new Map(prev.channels);
-      ch.set(5, {
-        id: 5,
-        name: "off-topic",
-        type: "text" as const,
-        category: null,
-        position: 0,
-        unreadCount: 1,
-        mentionCount: 1,
-        lastMessageId: 200, // already reflects message 200 via `ready`
-        canSend: true,
-        topic: "",
-        slowMode: 0,
-        nsfw: false,
-        isPrivate: false,
-        voiceMaxUsers: 0,
-        voiceMaxVideo: 0,
-      });
-      return { ...prev, channels: ch, activeChannelId: 1 }; // active is channel 1
-    });
+    setMeUser();
+    seedChannels(
+      [
+        channelRow({
+          id: 5,
+          name: "off-topic",
+          unreadCount: 1,
+          mentionCount: 1,
+          lastMessageId: 200,
+        }),
+      ],
+      { activeChannelId: 1 },
+    );
 
     // The same message redelivered as a queued chat_message.
-    mock.dispatch("chat_message", {
-      id: 200,
-      channel_id: 5,
-      user: { id: 2, username: "bob", avatar: null },
-      content: "hey @me",
-      mentions: [5],
-      reply_to: null,
-      attachments: [],
-      timestamp: "2026-03-15T10:00:00Z",
-    });
+    bobPostsInChannel5("hey @me", { mentions: [5] });
 
     const ch = channelsStore.getState().channels.get(5);
     expect(ch?.unreadCount).toBe(1);
@@ -153,40 +116,12 @@ describe("WS Dispatcher", () => {
   // reads back-history leaves no row AND no badge — nothing records it ever
   // arrived.
   it("wires chat_message to increment unread for the active channel when its window is detached", () => {
-    channelsStore.setState((prev) => {
-      const ch = new Map(prev.channels);
-      ch.set(5, {
-        id: 5,
-        name: "general",
-        type: "text" as const,
-        category: null,
-        position: 0,
-        unreadCount: 0,
-        mentionCount: 0,
-        lastMessageId: null,
-        canSend: true,
-        topic: "",
-        slowMode: 0,
-        nsfw: false,
-        isPrivate: false,
-        voiceMaxUsers: 0,
-        voiceMaxVideo: 0,
-      });
-      return { ...prev, channels: ch, activeChannelId: 5 }; // channel 5 IS active...
-    });
+    seedChannels([channelRow({ id: 5, name: "general" })], { activeChannelId: 5 });
     // ...but its loaded window is detached from the live tail (viewing
     // back-history via a jump).
     messagesStore.setState((prev) => ({ ...prev, detachedChannels: new Set([5]) }));
 
-    mock.dispatch("chat_message", {
-      id: 200,
-      channel_id: 5,
-      user: { id: 2, username: "bob", avatar: null },
-      content: "ping",
-      reply_to: null,
-      attachments: [],
-      timestamp: "2026-03-15T10:00:00Z",
-    });
+    bobPostsInChannel5("ping");
 
     const ch = channelsStore.getState().channels.get(5);
     expect(ch?.unreadCount).toBe(1);
@@ -212,27 +147,23 @@ describe("WS Dispatcher", () => {
   });
 
   it("fetches the authoritative row after a deduplicated send ack", async () => {
-    cleanup();
     const getMessagesAround = vi.fn().mockResolvedValue({
       messages: [
-        {
+        chatMessageEvent({
           id: 501,
           channel_id: 1,
           user: { id: 1, username: "alex", avatar: null },
           content: "edited on the server",
-          reply_to: null,
-          attachments: [],
           reactions: [],
           pinned: false,
           edited_at: "2026-03-15T10:05:00Z",
           deleted: false,
-          timestamp: "2026-03-15T10:00:00Z",
-        },
+        }),
       ],
       has_more_before: false,
       has_more_after: false,
     });
-    cleanup = wireDispatcher(mock.ws, {
+    replaceDispatcher({
       listBlocks: vi.fn().mockResolvedValue({ blocked_user_ids: [] }),
       getMessagesAround,
     });
@@ -265,20 +196,16 @@ describe("WS Dispatcher", () => {
   });
 
   it("does not let a stale reconcile overwrite a frame that landed while it was in flight", async () => {
-    cleanup();
-    const staleRow = {
+    const staleRow = chatMessageEvent({
       id: 501,
       channel_id: 1,
       user: { id: 1, username: "alex", avatar: null },
       content: "read before the delete",
-      reply_to: null,
-      attachments: [],
       reactions: [],
       pinned: false,
       edited_at: null,
       deleted: false,
-      timestamp: "2026-03-15T10:00:00Z",
-    };
+    });
     let release: (resp: unknown) => void = () => {};
     const getMessagesAround = vi
       .fn()
@@ -286,7 +213,7 @@ describe("WS Dispatcher", () => {
       .mockImplementationOnce(() => new Promise((resolve) => (release = resolve)))
       // The retry is what the server answers for a message that is now gone.
       .mockRejectedValueOnce(new Error("404"));
-    cleanup = wireDispatcher(mock.ws, {
+    replaceDispatcher({
       listBlocks: vi.fn().mockResolvedValue({ blocked_user_ids: [] }),
       getMessagesAround,
     });
@@ -318,13 +245,12 @@ describe("WS Dispatcher", () => {
   });
 
   it("does not refetch history for an ordinary send ack", async () => {
-    cleanup();
     const getMessagesAround = vi.fn().mockResolvedValue({
       messages: [],
       has_more_before: false,
       has_more_after: false,
     });
-    cleanup = wireDispatcher(mock.ws, {
+    replaceDispatcher({
       listBlocks: vi.fn().mockResolvedValue({ blocked_user_ids: [] }),
       getMessagesAround,
     });
@@ -377,15 +303,15 @@ describe("WS Dispatcher", () => {
   });
 
   it("rolls back every pending optimistic reaction toggle when the connection drops", () => {
-    mock.dispatch("chat_message", {
-      id: 900,
-      channel_id: 1,
-      user: { id: 1, username: "alex", avatar: null },
-      content: "react to me",
-      reply_to: null,
-      attachments: [],
-      timestamp: "2026-03-15T10:00:00Z",
-    });
+    mock.dispatch(
+      "chat_message",
+      chatMessageEvent({
+        id: 900,
+        channel_id: 1,
+        user: { id: 1, username: "alex", avatar: null },
+        content: "react to me",
+      }),
+    );
 
     addOptimisticReaction("corr-react-drop", {
       channelId: 1,
@@ -411,15 +337,15 @@ describe("WS Dispatcher", () => {
 
   it("wires chat_edited to messages store", () => {
     // First add a message
-    mock.dispatch("chat_message", {
-      id: 100,
-      channel_id: 1,
-      user: { id: 1, username: "alex", avatar: null },
-      content: "original",
-      reply_to: null,
-      attachments: [],
-      timestamp: "2026-03-15T10:00:00Z",
-    });
+    mock.dispatch(
+      "chat_message",
+      chatMessageEvent({
+        id: 100,
+        channel_id: 1,
+        user: { id: 1, username: "alex", avatar: null },
+        content: "original",
+      }),
+    );
 
     mock.dispatch("chat_edited", {
       message_id: 100,
@@ -435,15 +361,15 @@ describe("WS Dispatcher", () => {
   });
 
   it("wires chat_deleted to messages store", () => {
-    mock.dispatch("chat_message", {
-      id: 100,
-      channel_id: 1,
-      user: { id: 1, username: "alex", avatar: null },
-      content: "doomed",
-      reply_to: null,
-      attachments: [],
-      timestamp: "2026-03-15T10:00:00Z",
-    });
+    mock.dispatch(
+      "chat_message",
+      chatMessageEvent({
+        id: 100,
+        channel_id: 1,
+        user: { id: 1, username: "alex", avatar: null },
+        content: "doomed",
+      }),
+    );
 
     mock.dispatch("chat_deleted", { message_id: 100, channel_id: 1 });
 
@@ -478,15 +404,15 @@ describe("WS Dispatcher", () => {
   });
 
   it("ignores chat_bulk_deleted for an unloaded channel and an empty id list", () => {
-    mock.dispatch("chat_message", {
-      id: 200,
-      channel_id: 1,
-      user: { id: 1, username: "alex", avatar: null },
-      content: "keep",
-      reply_to: null,
-      attachments: [],
-      timestamp: "2026-03-15T10:00:00Z",
-    });
+    mock.dispatch(
+      "chat_message",
+      chatMessageEvent({
+        id: 200,
+        channel_id: 1,
+        user: { id: 1, username: "alex", avatar: null },
+        content: "keep",
+      }),
+    );
     const before = messagesStore.getState().messagesByChannel;
 
     mock.dispatch("chat_bulk_deleted", { channel_id: 99, ids: [1, 2, 3] });
@@ -505,21 +431,18 @@ describe("WS Dispatcher", () => {
 
   it("wires reaction_update to messages store", () => {
     // Seed current user
-    authStore.setState((prev) => ({
-      ...prev,
-      user: { id: 1, username: "alex", avatar: null, role: "admin" },
-    }));
+    patchAuth({ user: { id: 1, username: "alex", avatar: null, role: "admin" } });
 
-    mock.dispatch("chat_message", {
-      id: 200,
-      channel_id: 1,
-      user: { id: 2, username: "bob", avatar: null },
-      content: "react to me",
-      reply_to: null,
-      attachments: [],
-      reactions: [],
-      timestamp: "2026-03-15T10:00:00Z",
-    });
+    mock.dispatch(
+      "chat_message",
+      chatMessageEvent({
+        id: 200,
+        channel_id: 1,
+        user: { id: 2, username: "bob", avatar: null },
+        content: "react to me",
+        reactions: [],
+      }),
+    );
 
     mock.dispatch("reaction_update", {
       message_id: 200,
@@ -591,42 +514,19 @@ describe("WS Dispatcher", () => {
   });
 
   it("does not increment unread for own messages", () => {
-    authStore.setState((prev) => ({
-      ...prev,
-      user: { id: 1, username: "alex", avatar: null, role: "admin" },
-    }));
+    patchAuth({ user: { id: 1, username: "alex", avatar: null, role: "admin" } });
 
-    channelsStore.setState((prev) => {
-      const ch = new Map(prev.channels);
-      ch.set(5, {
-        id: 5,
-        name: "other-ch",
-        type: "text" as const,
-        category: null,
-        position: 0,
-        unreadCount: 0,
-        mentionCount: 0,
-        lastMessageId: null,
-        canSend: true,
-        topic: "",
-        slowMode: 0,
-        nsfw: false,
-        isPrivate: false,
-        voiceMaxUsers: 0,
-        voiceMaxVideo: 0,
-      });
-      return { ...prev, channels: ch, activeChannelId: 1 };
-    });
+    seedChannels([channelRow({ id: 5, name: "other-ch" })], { activeChannelId: 1 });
 
-    mock.dispatch("chat_message", {
-      id: 300,
-      channel_id: 5,
-      user: { id: 1, username: "alex", avatar: null },
-      content: "my own message",
-      reply_to: null,
-      attachments: [],
-      timestamp: "2026-03-15T10:00:00Z",
-    });
+    mock.dispatch(
+      "chat_message",
+      chatMessageEvent({
+        id: 300,
+        channel_id: 5,
+        user: { id: 1, username: "alex", avatar: null },
+        content: "my own message",
+      }),
+    );
 
     expect(channelsStore.getState().channels.get(5)?.unreadCount).toBe(0);
   });

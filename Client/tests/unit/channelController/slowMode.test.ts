@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { fakeTimersTest } from "../../helpers/fakeTimersTest";
 import * as mocks from "../../helpers/channelControllerMocks";
 import { createChannelController } from "../../../src/pages/main-page/ChannelController";
 import type { ChannelControllerOptions } from "../../../src/pages/main-page/ChannelController";
@@ -12,7 +13,12 @@ import {
   addChannel,
 } from "@stores/channels.store";
 import { capturedMessageInputOpts } from "../../helpers/channelControllerMocks";
-import { makeOpts, useChannelControllerHarness } from "../../helpers/channelControllerHarness";
+import {
+  makeOpts,
+  mountController,
+  mountControllerWithSendIds,
+  useChannelControllerHarness,
+} from "../../helpers/channelControllerHarness";
 
 vi.mock("@lib/logger", () => mocks.loggerMock());
 vi.mock("@lib/dom", () => mocks.domMock());
@@ -38,6 +44,14 @@ vi.mock("../../../src/pages/main-page/ThreadPanelHost", () => mocks.pageThreadPa
 const { mockSetDisabled, mockSetSendGate, mockSetSlowModeNote, mockRole, membersStoreSubscribers } =
   mocks;
 
+/** Pull the newest ws.on handler the controller registered for an event. */
+function wsHandler(opts: ChannelControllerOptions, event: string): (payload: never) => void {
+  const calls = (opts.ws.on as ReturnType<typeof vi.fn>).mock.calls;
+  const entry = calls.findLast((c) => c[0] === event);
+  expect(entry).toBeDefined();
+  return entry![1] as (payload: never) => void;
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -46,14 +60,6 @@ describe("createChannelController", () => {
   useChannelControllerHarness();
 
   describe("slow mode", () => {
-    /** Pull a ws.on handler registered by the controller. */
-    function wsHandler(opts: ChannelControllerOptions, event: string): (payload: never) => void {
-      const calls = (opts.ws.on as ReturnType<typeof vi.fn>).mock.calls;
-      const entry = calls.findLast((c) => c[0] === event);
-      expect(entry).toBeDefined();
-      return entry![1] as (payload: never) => void;
-    }
-
     function seedChannel(slowMode: number): void {
       setChannels([
         {
@@ -69,19 +75,25 @@ describe("createChannelController", () => {
       setActiveChannel(42);
     }
 
+    function mountSeeded(slowMode: number): {
+      opts: ChannelControllerOptions;
+      ctrl: ReturnType<typeof createChannelController>;
+    } {
+      seedChannel(slowMode);
+      const { opts, ctrl } = mountController();
+      return { opts, ctrl };
+    }
+
     beforeEach(() => {
       mockRole.value = "member";
       setRoles([{ id: 4, name: "member", color: null, permissions: 0 }]);
       setConnectionStatus("connected");
     });
 
-    it("gates only the send for the cooldown, leaving the draft editable (#12)", () => {
-      vi.useFakeTimers();
-      try {
-        seedChannel(5);
-        const opts = makeOpts();
-        const ctrl = createChannelController(opts);
-        ctrl.mountChannel(42, "general");
+    it(
+      "gates only the send for the cooldown, leaving the draft editable (#12)",
+      fakeTimersTest(() => {
+        const { opts } = mountSeeded(5);
         expect(mockSetSendGate).toHaveBeenLastCalledWith(null);
 
         wsHandler(opts, "chat_send_ok")({} as never);
@@ -94,16 +106,11 @@ describe("createChannelController", () => {
 
         vi.advanceTimersByTime(2000);
         expect(mockSetSendGate).toHaveBeenLastCalledWith(null);
-      } finally {
-        vi.useRealTimers();
-      }
-    });
+      }),
+    );
 
     it("leaves the composer alone in a channel without slow mode", () => {
-      seedChannel(0);
-      const opts = makeOpts();
-      const ctrl = createChannelController(opts);
-      ctrl.mountChannel(42, "general");
+      const { opts } = mountSeeded(0);
 
       wsHandler(opts, "chat_send_ok")({} as never);
 
@@ -111,21 +118,15 @@ describe("createChannelController", () => {
     });
 
     it("does not charge slow mode again for a deduplicated receipt", () => {
-      seedChannel(30);
-      const opts = makeOpts();
-      const ctrl = createChannelController(opts);
-      ctrl.mountChannel(42, "general");
+      const { opts } = mountSeeded(30);
       wsHandler(opts, "chat_send_ok")({ deduplicated: true } as never);
       expect(mockSetSendGate).toHaveBeenLastCalledWith(null);
     });
 
-    it("restarts the cooldown when the server refuses with SLOW_MODE", () => {
-      vi.useFakeTimers();
-      try {
-        seedChannel(10);
-        const opts = makeOpts();
-        const ctrl = createChannelController(opts);
-        ctrl.mountChannel(42, "general");
+    it(
+      "restarts the cooldown when the server refuses with SLOW_MODE",
+      fakeTimersTest(() => {
+        const { opts } = mountSeeded(10);
 
         wsHandler(opts, "error")({ code: "SLOW_MODE", message: "slow mode" } as never);
         expect(mockSetSendGate).toHaveBeenLastCalledWith("Slow mode — 10s");
@@ -135,18 +136,14 @@ describe("createChannelController", () => {
         mockSetSendGate.mockClear();
         wsHandler(opts, "error")({ code: "FORBIDDEN", message: "nope" } as never);
         expect(mockSetSendGate).not.toHaveBeenCalledWith(expect.stringContaining("Slow mode"));
-      } finally {
-        vi.useRealTimers();
-      }
-    });
+      }),
+    );
 
     it("does not gate a moderator, who bypasses slow mode server-side", () => {
       seedChannel(5);
       mockRole.value = "moderator";
       setRoles([{ id: 3, name: "moderator", color: null, permissions: 0x10000 }]);
-      const opts = makeOpts();
-      const ctrl = createChannelController(opts);
-      ctrl.mountChannel(42, "general");
+      const { opts } = mountController();
 
       wsHandler(opts, "chat_send_ok")({} as never);
 
@@ -177,11 +174,7 @@ describe("createChannelController", () => {
         },
       ]);
       setActiveChannel(42);
-      const opts = makeOpts();
-      let n = 0;
-      (opts.ws.send as ReturnType<typeof vi.fn>).mockImplementation(() => `cid-${++n}`);
-      const ctrl = createChannelController(opts);
-      ctrl.mountChannel(42, "general");
+      const { opts, ctrl } = mountControllerWithSendIds();
 
       // cid-1 is channel_focus; the chat_send in A gets cid-2. The ack for it
       // does not arrive before the user switches away.
@@ -203,13 +196,10 @@ describe("createChannelController", () => {
       expect(mockSetSendGate).not.toHaveBeenCalledWith(expect.stringContaining("Slow mode"));
     });
 
-    it("stops the countdown when the channel unmounts", () => {
-      vi.useFakeTimers();
-      try {
-        seedChannel(5);
-        const opts = makeOpts();
-        const ctrl = createChannelController(opts);
-        ctrl.mountChannel(42, "general");
+    it(
+      "stops the countdown when the channel unmounts",
+      fakeTimersTest(() => {
+        const { opts, ctrl } = mountSeeded(5);
         wsHandler(opts, "chat_send_ok")({} as never);
 
         ctrl.destroyChannel();
@@ -217,10 +207,8 @@ describe("createChannelController", () => {
         vi.advanceTimersByTime(5000);
 
         expect(mockSetSendGate).not.toHaveBeenCalled();
-      } finally {
-        vi.useRealTimers();
-      }
-    });
+      }),
+    );
   });
 
   describe("slow-mode note up front (3A-4)", () => {
@@ -240,10 +228,15 @@ describe("createChannelController", () => {
       setActiveChannel(42);
     }
 
-    it("shows the note before any send, without gating the send", () => {
-      seed(5);
+    function mountSeed(slowMode: number): ReturnType<typeof createChannelController> {
+      seed(slowMode);
       const ctrl = createChannelController(makeOpts());
       ctrl.mountChannel(42, "general");
+      return ctrl;
+    }
+
+    it("shows the note before any send, without gating the send", () => {
+      const ctrl = mountSeed(5);
 
       expect(mockSetSlowModeNote).toHaveBeenLastCalledWith("Slow mode is on: one message every 5s");
       expect(mockSetSendGate).not.toHaveBeenCalledWith(expect.stringContaining("Slow mode"));
@@ -251,9 +244,7 @@ describe("createChannelController", () => {
     });
 
     it("hides the note when slow mode is 0", () => {
-      seed(0);
-      const ctrl = createChannelController(makeOpts());
-      ctrl.mountChannel(42, "general");
+      const ctrl = mountSeed(0);
 
       expect(mockSetSlowModeNote).toHaveBeenLastCalledWith(null);
       ctrl.destroyChannel();
@@ -285,9 +276,7 @@ describe("createChannelController", () => {
     });
 
     it("follows a channel switch", () => {
-      seed(5);
-      const ctrl = createChannelController(makeOpts());
-      ctrl.mountChannel(42, "general");
+      const ctrl = mountSeed(5);
       expect(mockSetSlowModeNote).toHaveBeenLastCalledWith("Slow mode is on: one message every 5s");
 
       setActiveChannel(43);
@@ -297,9 +286,7 @@ describe("createChannelController", () => {
     });
 
     it("updates when slow mode changes through channel_create or channel_update", () => {
-      seed(0);
-      const ctrl = createChannelController(makeOpts());
-      ctrl.mountChannel(42, "general");
+      const ctrl = mountSeed(0);
       expect(mockSetSlowModeNote).toHaveBeenLastCalledWith(null);
 
       addChannel({ ...base, id: 42, name: "general", slow_mode: 10 });
@@ -316,14 +303,6 @@ describe("createChannelController", () => {
   });
 
   describe("slow mode across channel switches", () => {
-    function wsHandler(opts: ChannelControllerOptions, event: string): (payload: never) => void {
-      const calls = (opts.ws.on as ReturnType<typeof vi.fn>).mock.calls;
-      // The newest registration belongs to the channel mounted last.
-      const entry = [...calls].reverse().find((c) => c[0] === event);
-      expect(entry).toBeDefined();
-      return entry![1] as (payload: never) => void;
-    }
-
     function seedTwoChannels(): void {
       const base = { type: "text", category: null, position: 0, can_send: true } as const;
       setChannels([
@@ -331,6 +310,13 @@ describe("createChannelController", () => {
         { ...base, id: 43, name: "other", slow_mode: 0 },
       ]);
       setActiveChannel(42);
+    }
+
+    function mountAndAck(): { ctrl: ReturnType<typeof createChannelController> } {
+      seedTwoChannels();
+      const { opts, ctrl } = mountController();
+      wsHandler(opts, "chat_send_ok")({} as never);
+      return { ctrl };
     }
 
     function switchTo(ctrl: ReturnType<typeof createChannelController>, id: 42 | 43): void {
@@ -344,14 +330,10 @@ describe("createChannelController", () => {
       setConnectionStatus("connected");
     });
 
-    it("re-arms the countdown on return and clears the gate only at the deadline", () => {
-      vi.useFakeTimers();
-      try {
-        seedTwoChannels();
-        const opts = makeOpts();
-        const ctrl = createChannelController(opts);
-        ctrl.mountChannel(42, "general");
-        wsHandler(opts, "chat_send_ok")({} as never);
+    it(
+      "re-arms the countdown on return and clears the gate only at the deadline",
+      fakeTimersTest(() => {
+        const { ctrl } = mountAndAck();
         expect(mockSetSendGate).toHaveBeenLastCalledWith("Slow mode — 30s");
 
         switchTo(ctrl, 43);
@@ -371,19 +353,13 @@ describe("createChannelController", () => {
         mockSetSendGate.mockClear();
         vi.advanceTimersByTime(1000);
         expect(mockSetSendGate).toHaveBeenLastCalledWith(null);
-      } finally {
-        vi.useRealTimers();
-      }
-    });
+      }),
+    );
 
-    it("follows an admin lowering slow mode while the user was away", () => {
-      vi.useFakeTimers();
-      try {
-        seedTwoChannels();
-        const opts = makeOpts();
-        const ctrl = createChannelController(opts);
-        ctrl.mountChannel(42, "general");
-        wsHandler(opts, "chat_send_ok")({} as never);
+    it(
+      "follows an admin lowering slow mode while the user was away",
+      fakeTimersTest(() => {
+        const { ctrl } = mountAndAck();
 
         switchTo(ctrl, 43);
         updateChannel({ id: 42, slow_mode: 5 });
@@ -394,19 +370,13 @@ describe("createChannelController", () => {
 
         expect(mockSetSendGate).toHaveBeenLastCalledWith(null);
         expect(mockSetSendGate).not.toHaveBeenCalledWith(expect.stringContaining("Slow mode"));
-      } finally {
-        vi.useRealTimers();
-      }
-    });
+      }),
+    );
 
-    it("follows an admin raising slow mode while the user was away", () => {
-      vi.useFakeTimers();
-      try {
-        seedTwoChannels();
-        const opts = makeOpts();
-        const ctrl = createChannelController(opts);
-        ctrl.mountChannel(42, "general");
-        wsHandler(opts, "chat_send_ok")({} as never);
+    it(
+      "follows an admin raising slow mode while the user was away",
+      fakeTimersTest(() => {
+        const { ctrl } = mountAndAck();
 
         switchTo(ctrl, 43);
         updateChannel({ id: 42, slow_mode: 60 });
@@ -415,19 +385,13 @@ describe("createChannelController", () => {
         switchTo(ctrl, 42);
 
         expect(mockSetSendGate).toHaveBeenLastCalledWith("Slow mode — 54s");
-      } finally {
-        vi.useRealTimers();
-      }
-    });
+      }),
+    );
 
-    it("drops the cooldown when slow mode is switched off while the user was away", () => {
-      vi.useFakeTimers();
-      try {
-        seedTwoChannels();
-        const opts = makeOpts();
-        const ctrl = createChannelController(opts);
-        ctrl.mountChannel(42, "general");
-        wsHandler(opts, "chat_send_ok")({} as never);
+    it(
+      "drops the cooldown when slow mode is switched off while the user was away",
+      fakeTimersTest(() => {
+        const { ctrl } = mountAndAck();
 
         switchTo(ctrl, 43);
         updateChannel({ id: 42, slow_mode: 0 });
@@ -437,20 +401,14 @@ describe("createChannelController", () => {
 
         expect(mockSetSendGate).toHaveBeenLastCalledWith(null);
         expect(mockSetSendGate).not.toHaveBeenCalledWith(expect.stringContaining("Slow mode"));
-      } finally {
-        vi.useRealTimers();
-      }
-    });
+      }),
+    );
 
-    it("records a late acknowledgement against the channel it was sent to", () => {
-      vi.useFakeTimers();
-      try {
+    it(
+      "records a late acknowledgement against the channel it was sent to",
+      fakeTimersTest(() => {
         seedTwoChannels();
-        const opts = makeOpts();
-        let n = 0;
-        (opts.ws.send as ReturnType<typeof vi.fn>).mockImplementation(() => `cid-${++n}`);
-        const ctrl = createChannelController(opts);
-        ctrl.mountChannel(42, "general");
+        const { opts, ctrl } = mountControllerWithSendIds();
         // cid-1 is channel_focus; the send in channel 42 gets cid-2 and is
         // not acknowledged before the user switches away.
         capturedMessageInputOpts.onSend("hello", null, [], []);
@@ -463,20 +421,14 @@ describe("createChannelController", () => {
         vi.advanceTimersByTime(5000);
         switchTo(ctrl, 42);
         expect(mockSetSendGate).toHaveBeenLastCalledWith("Slow mode — 25s");
-      } finally {
-        vi.useRealTimers();
-      }
-    });
+      }),
+    );
 
-    it("bases a late acknowledgement's cooldown on when the message was sent", () => {
-      vi.useFakeTimers();
-      try {
+    it(
+      "bases a late acknowledgement's cooldown on when the message was sent",
+      fakeTimersTest(() => {
         seedTwoChannels();
-        const opts = makeOpts();
-        let n = 0;
-        (opts.ws.send as ReturnType<typeof vi.fn>).mockImplementation(() => `cid-${++n}`);
-        const ctrl = createChannelController(opts);
-        ctrl.mountChannel(42, "general");
+        const { opts, ctrl } = mountControllerWithSendIds();
         capturedMessageInputOpts.onSend("hello", null, [], []);
         switchTo(ctrl, 43);
 
@@ -486,19 +438,13 @@ describe("createChannelController", () => {
         switchTo(ctrl, 42);
 
         expect(mockSetSendGate).toHaveBeenLastCalledWith("Slow mode — 10s");
-      } finally {
-        vi.useRealTimers();
-      }
-    });
+      }),
+    );
 
-    it("keeps the send time past the observed window so a later increase still gates", () => {
-      vi.useFakeTimers();
-      try {
-        seedTwoChannels();
-        const opts = makeOpts();
-        const ctrl = createChannelController(opts);
-        ctrl.mountChannel(42, "general");
-        wsHandler(opts, "chat_send_ok")({} as never);
+    it(
+      "keeps the send time past the observed window so a later increase still gates",
+      fakeTimersTest(() => {
+        const { ctrl } = mountAndAck();
 
         // The 30 s window passes while the channel stays mounted.
         vi.advanceTimersByTime(31_000);
@@ -510,19 +456,13 @@ describe("createChannelController", () => {
 
         // The server still holds the send, so 60 s from it leaves 20 s.
         expect(mockSetSendGate).toHaveBeenLastCalledWith("Slow mode — 20s");
-      } finally {
-        vi.useRealTimers();
-      }
-    });
+      }),
+    );
 
-    it("keeps the send time through a temporary slow-mode reduction", () => {
-      vi.useFakeTimers();
-      try {
-        seedTwoChannels();
-        const opts = makeOpts();
-        const ctrl = createChannelController(opts);
-        ctrl.mountChannel(42, "general");
-        wsHandler(opts, "chat_send_ok")({} as never);
+    it(
+      "keeps the send time through a temporary slow-mode reduction",
+      fakeTimersTest(() => {
+        const { ctrl } = mountAndAck();
 
         switchTo(ctrl, 43);
         updateChannel({ id: 42, slow_mode: 5 });
@@ -540,19 +480,13 @@ describe("createChannelController", () => {
         vi.advanceTimersByTime(2000);
         switchTo(ctrl, 42);
         expect(mockSetSendGate).toHaveBeenLastCalledWith("Slow mode — 18s");
-      } finally {
-        vi.useRealTimers();
-      }
-    });
+      }),
+    );
 
-    it("does not re-arm once the cooldown has expired", () => {
-      vi.useFakeTimers();
-      try {
-        seedTwoChannels();
-        const opts = makeOpts();
-        const ctrl = createChannelController(opts);
-        ctrl.mountChannel(42, "general");
-        wsHandler(opts, "chat_send_ok")({} as never);
+    it(
+      "does not re-arm once the cooldown has expired",
+      fakeTimersTest(() => {
+        const { ctrl } = mountAndAck();
 
         switchTo(ctrl, 43);
         vi.advanceTimersByTime(31_000);
@@ -565,19 +499,13 @@ describe("createChannelController", () => {
         mockSetSendGate.mockClear();
         vi.advanceTimersByTime(5000);
         expect(mockSetSendGate).not.toHaveBeenCalledWith(expect.stringContaining("Slow mode"));
-      } finally {
-        vi.useRealTimers();
-      }
-    });
+      }),
+    );
 
-    it("stops the re-armed ticker when the channel unmounts again", () => {
-      vi.useFakeTimers();
-      try {
-        seedTwoChannels();
-        const opts = makeOpts();
-        const ctrl = createChannelController(opts);
-        ctrl.mountChannel(42, "general");
-        wsHandler(opts, "chat_send_ok")({} as never);
+    it(
+      "stops the re-armed ticker when the channel unmounts again",
+      fakeTimersTest(() => {
+        const { ctrl } = mountAndAck();
         switchTo(ctrl, 43);
         switchTo(ctrl, 42);
 
@@ -586,14 +514,12 @@ describe("createChannelController", () => {
         vi.advanceTimersByTime(5000);
 
         expect(mockSetSendGate).not.toHaveBeenCalled();
-      } finally {
-        vi.useRealTimers();
-      }
-    });
+      }),
+    );
 
-    it("does not carry a cooldown across a fresh controller (new session)", () => {
-      vi.useFakeTimers();
-      try {
+    it(
+      "does not carry a cooldown across a fresh controller (new session)",
+      fakeTimersTest(() => {
         seedTwoChannels();
         const first = makeOpts();
         const ctrl = createChannelController(first);
@@ -606,9 +532,7 @@ describe("createChannelController", () => {
         next.mountChannel(42, "general");
 
         expect(mockSetSendGate).toHaveBeenLastCalledWith(null);
-      } finally {
-        vi.useRealTimers();
-      }
-    });
+      }),
+    );
   });
 });

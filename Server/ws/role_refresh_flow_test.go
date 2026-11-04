@@ -258,7 +258,7 @@ func TestRoleRefresh_MemberUpdatesPacedInOrder(t *testing.T) {
 			t.Errorf("observer %d received member_updates out of order or incomplete (%d of %d)", obs, len(got), m)
 		}
 	}
-	if d := f.hub.broadcastDrops.Load(); d != 0 {
+	if d := f.hub.stats.BroadcastDrops.Load(); d != 0 {
 		t.Errorf("broadcastDrops = %d, want 0 with the updates paced", d)
 	}
 }
@@ -573,7 +573,7 @@ func TestRoleRefresh_FirstChunkLeavesRoomForConcurrentDispatch(t *testing.T) {
 	if f.hub.ClientForTest(u) != c {
 		t.Error("the client was closed while the worker and dispatch both pushed")
 	}
-	if n := f.hub.bpQueueDisconnects.Load(); n != 0 {
+	if n := f.hub.stats.BPQueueDisconnects.Load(); n != 0 {
 		t.Errorf("bpQueueDisconnects = %d, want 0", n)
 	}
 }

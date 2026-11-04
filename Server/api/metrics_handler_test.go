@@ -9,10 +9,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+
 	"github.com/J3vb/OwnCord/Server/api"
 	"github.com/J3vb/OwnCord/Server/metrics"
-	"github.com/J3vb/OwnCord/Server/ws"
-	"github.com/go-chi/chi/v5"
+	"github.com/J3vb/OwnCord/Server/ws/hubstats"
 )
 
 // buildMetricsRouter creates a chi router with the metrics endpoint behind AdminIPRestrict.
@@ -29,8 +30,8 @@ func buildMetricsRouter(allowedCIDRs []string) http.Handler {
 			},
 			DispatchLagMs: func() metrics.Summary { return metrics.Summary{Count: 4, P95: 50, Max: 90} },
 			ChatAckMs:     func() metrics.Summary { return metrics.Summary{Count: 8, P95: 12, Max: 30} },
-			VoiceJoinMs: func() ws.VoiceJoinPhases {
-				return ws.VoiceJoinPhases{Token: metrics.Summary{Count: 2, P95: 20}, Total: metrics.Summary{Count: 2, P95: 50}}
+			VoiceJoinMs: func() hubstats.VoiceJoinPhases {
+				return hubstats.VoiceJoinPhases{Token: metrics.Summary{Count: 2, P95: 20}, Total: metrics.Summary{Count: 2, P95: 50}}
 			},
 			BroadcastQueueDepth: func() int { return 7 },
 			SeqMuMaxHoldMs:      func() float64 { return 210 },

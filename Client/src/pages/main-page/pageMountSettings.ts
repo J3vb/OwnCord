@@ -6,7 +6,7 @@ import { ApiClientError, errorText } from "@lib/api";
 import { createSettingsOverlay } from "../../features/settings/SettingsOverlay";
 import { showToast, showChangeOutcomeToast } from "@lib/ui/toast";
 import { accountText as account } from "../../i18n/account";
-import { logout } from "@lib/net/logout";
+import { logout } from "../../features/connection/logout";
 import { authStore, clearAuth, updateUser } from "@stores/auth.store";
 import { closeSettings, uiStore } from "@stores/ui.store";
 import {
@@ -34,9 +34,9 @@ export function mountSettings(st: PageState, pg: PageApi, ms: MountScope): void 
   ms.settingsOverlay = createSettingsOverlay({
     onClose: () => closeSettings(),
     fallbackFocus: ms.focusReachable,
-    onChangePassword: async (oldPassword, newPassword) => {
+    onChangePassword: async (oldPassword, newPassword, revokeApiTokens) => {
       try {
-        const outcome = await st.api.changePassword(oldPassword, newPassword);
+        const outcome = await st.api.changePassword(oldPassword, newPassword, revokeApiTokens);
         showChangeOutcomeToast(outcome, account("toast.passwordChanged"));
         // The form shows the same outcome inline, so a partial success is
         // never a green "changed successfully" beside the warning toast.
@@ -213,6 +213,8 @@ export function mountSettings(st: PageState, pg: PageApi, ms: MountScope): void 
     onStatusChange: (status) => pg.applyPresence(status),
     onListSessions: () => st.api.getSessions(),
     onRevokeSession: (id) => st.api.revokeSession(id),
+    onListApiTokens: () => st.api.getApiTokens(),
+    onRevokeApiToken: (id) => st.api.revokeApiToken(id),
     onRevokeAllSessions: async () => {
       const result = await st.api.revokeAllSessions();
       // The token died with the response: leave for the connect page now

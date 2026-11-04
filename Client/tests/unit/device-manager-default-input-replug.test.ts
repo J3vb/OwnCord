@@ -10,6 +10,7 @@
 // device (deviceManager.ts:166-192). Settings keep showing "Default"; the call
 // keeps sending the webcam mic until the user switches devices by hand.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { loggerMock } from "../helpers/loggerMock";
 
 const { mockLoadPref, mockSavePref } = vi.hoisted(() => ({
   mockLoadPref: vi.fn((_key: string, defaultVal: unknown) => defaultVal),
@@ -19,9 +20,7 @@ vi.mock("@lib/prefs/preferences", () => ({
   loadPref: (key: string, defaultVal: unknown) => mockLoadPref(key, defaultVal),
   savePref: (key: string, val: unknown) => mockSavePref(key, val),
 }));
-vi.mock("@lib/logger", () => ({
-  createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
-}));
+vi.mock("@lib/logger", () => loggerMock());
 const mockGetLocalDevices = vi.fn();
 vi.mock("livekit-client", () => ({
   Track: { Source: { Microphone: "microphone" } },

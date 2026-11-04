@@ -7,44 +7,24 @@ import { setDeveloperMode } from "../helpers/message-actions-fixtures";
 import type { ChannelAccess } from "../../src/features/channels/channelRow.view";
 import type { Channel } from "@stores/channels.store";
 import { signInAs } from "../helpers/storeSeeds";
+import { makeChannel } from "../helpers/channelFactory";
+import { contextMenuAt4, useChannelMenuHost } from "../helpers/channelMenuHost";
 
-function channel(id: number, position: number): Channel {
-  return {
-    id,
-    name: `ch-${id}`,
-    type: "text",
-    category: null,
-    position,
-    unreadCount: 0,
-    mentionCount: 0,
-    lastMessageId: null,
-    canSend: true,
-    slowMode: 0,
-    topic: "",
-    nsfw: false,
-    isPrivate: false,
-    voiceMaxUsers: 0,
-    voiceMaxVideo: 0,
-  };
-}
+const channel = (id: number, position: number): Channel =>
+  makeChannel({ id, name: `ch-${id}`, position });
 
 let container: HTMLDivElement;
 let ac: AbortController;
+useChannelMenuHost((c, a) => {
+  container = c;
+  ac = a;
+});
 
 beforeEach(() => {
   signInAs(
     { id: 1, username: "tester", avatar: null, role: "owner" },
     { token: "t", serverName: "s", motd: "" },
   );
-  container = document.createElement("div");
-  document.body.appendChild(container);
-  ac = new AbortController();
-});
-
-afterEach(() => {
-  ac.abort();
-  container.remove();
-  document.querySelectorAll(".channel-ctx-menu").forEach((el) => el.remove());
 });
 
 function openMove(
@@ -71,7 +51,7 @@ function openMove(
     rows,
     onReorder,
   );
-  el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 4, clientY: 4 }));
+  contextMenuAt4(el);
 }
 
 describe("channel context menu - Move Up / Move Down", () => {
@@ -140,7 +120,7 @@ describe("channel context menu - injected access", () => {
       vi.fn(),
       access,
     );
-    el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 4, clientY: 4 }));
+    contextMenuAt4(el);
     const shown = new Set<string>();
     for (const id of ids) {
       if (document.querySelector(`[data-testid="${id}"]`) !== null) shown.add(id);
@@ -189,7 +169,7 @@ describe("channel context menu - Developer Mode Copy Channel ID", () => {
     const el = document.createElement("div");
     container.appendChild(el);
     attachChannelContextMenu(el, target, ac.signal, ac.signal);
-    el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 4, clientY: 4 }));
+    contextMenuAt4(el);
   }
   const item = (): HTMLElement | null =>
     document.querySelector<HTMLElement>('[data-testid="ctx-copy-channel-id"]');

@@ -10,6 +10,7 @@
  * state, and the link is never logged.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import * as mocks from "../helpers/attachmentsMocks";
 
 const { fetchMock, createObjectURLMock, playMock, logMock } = vi.hoisted(() => ({
   fetchMock: vi.fn(),
@@ -18,11 +19,10 @@ const { fetchMock, createObjectURLMock, playMock, logMock } = vi.hoisted(() => (
   logMock: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
-vi.mock("@tauri-apps/plugin-http", () => ({ fetch: fetchMock }));
-vi.mock("@lib/net/httpProxy", () => ({
-  ensureHttpProxy: () => Promise.resolve("http://127.0.0.1:9999/proxytoken"),
-  stopHttpProxy: () => Promise.resolve(),
-}));
+vi.mock("@tauri-apps/plugin-http", () => mocks.httpPluginMock(fetchMock));
+vi.mock("@lib/net/httpProxy", () =>
+  mocks.httpProxyMock(() => Promise.resolve("http://127.0.0.1:9999/proxytoken")),
+);
 vi.mock("@lib/logger", () => ({ createLogger: () => logMock }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ save: vi.fn() }));
 vi.mock("@tauri-apps/plugin-fs", () => ({ writeFile: vi.fn() }));
@@ -33,12 +33,9 @@ vi.mock("@lib/icons", () => ({
     return el;
   },
 }));
-vi.mock("@lib/prefs/mediaVisibility", () => ({ observeMedia: vi.fn() }));
-vi.mock("../../src/features/messaging/content/media", () => ({ openImageLightbox: vi.fn() }));
-vi.mock("@stores/auth.store", () => ({
-  getToken: () => "session-token",
-  authStore: { getState: () => ({ uploadPolicy: null }) },
-}));
+vi.mock("@lib/prefs/mediaVisibility", () => mocks.mediaVisibilityMock());
+vi.mock("../../src/features/messaging/content/media", () => mocks.contentMediaMock());
+vi.mock("@stores/auth.store", () => mocks.authStoreMock(() => "session-token"));
 
 import {
   clearAttachmentCaches,
@@ -129,12 +126,20 @@ beforeEach(() => {
   document.body.innerHTML = "";
 });
 
+function srcContains(media: HTMLMediaElement, part: string): Promise<void> {
+  return vi.waitFor(() => expect(media.src).toContain(part));
+}
+
+function playButtonShown(row: HTMLElement): Promise<void> {
+  return vi.waitFor(() => expect(row.querySelector(".msg-media-play")).not.toBeNull());
+}
+
 describe("video streams from a file link", () => {
   it("mints a link on render and uses it as the player source", async () => {
     serve([linkResponse("tok1")]);
     const { el, video } = mount();
 
-    await vi.waitFor(() => expect(video.src).toContain("link=tok1"));
+    await srcContains(video, "link=tok1");
     expect(video.src).toBe(`${ORIGIN}/api/v1/files/a1?link=tok1`);
     expect(video.getAttribute("preload")).toBe("metadata");
     expect(video.controls).toBe(true);
@@ -153,9 +158,9 @@ describe("video streams from a file link", () => {
   it("reuses a held link when the same clip is rendered again", async () => {
     serve([linkResponse("tok1")]);
     const first = mount();
-    await vi.waitFor(() => expect(first.video.src).toContain("link=tok1"));
+    await srcContains(first.video, "link=tok1");
     const second = mount();
-    await vi.waitFor(() => expect(second.video.src).toContain("link=tok1"));
+    await srcContains(second.video, "link=tok1");
     expect(posts()).toHaveLength(1);
   });
 
@@ -163,33 +168,33 @@ describe("video streams from a file link", () => {
     serve([linkResponse("tok1")]);
     const a = mount();
     const b = mount();
-    await vi.waitFor(() => expect(a.video.src).toContain("link=tok1"));
-    await vi.waitFor(() => expect(b.video.src).toContain("link=tok1"));
+    await srcContains(a.video, "link=tok1");
+    await srcContains(b.video, "link=tok1");
     expect(posts()).toHaveLength(1);
   });
 
   it("replaces a link that is within five minutes of expiring", async () => {
     serve([linkResponse("old", 4 * 60 * 1000), linkResponse("new")]);
     const first = mount();
-    await vi.waitFor(() => expect(first.video.src).toContain("link=old"));
+    await srcContains(first.video, "link=old");
     const second = mount();
-    await vi.waitFor(() => expect(second.video.src).toContain("link=new"));
+    await srcContains(second.video, "link=new");
     expect(posts()).toHaveLength(2);
   });
 
   it("asks again after the attachment caches are cleared", async () => {
     serve([linkResponse("tok1"), linkResponse("tok2")]);
     const first = mount();
-    await vi.waitFor(() => expect(first.video.src).toContain("link=tok1"));
+    await srcContains(first.video, "link=tok1");
     clearAttachmentCaches();
     const second = mount();
-    await vi.waitFor(() => expect(second.video.src).toContain("link=tok2"));
+    await srcContains(second.video, "link=tok2");
   });
 
   it("never writes the link or its URL to the log", async () => {
     serve([linkResponse("secret-tok"), { ok: false, status: 401 }]);
     const { video } = mount();
-    await vi.waitFor(() => expect(video.src).toContain("secret-tok"));
+    await srcContains(video, "secret-tok");
     failVideo(video, 4);
     await vi.waitFor(() => expect(posts()).toHaveLength(2));
     const logged = JSON.stringify(Object.values(logMock).flatMap((fn) => fn.mock.calls));
@@ -202,11 +207,11 @@ describe("a link that stops working", () => {
   it("is replaced once, and the clip retries from the fresh link", async () => {
     serve([linkResponse("tok1"), linkResponse("tok2")]);
     const { el, video } = mount();
-    await vi.waitFor(() => expect(video.src).toContain("link=tok1"));
+    await srcContains(video, "link=tok1");
 
     failVideo(video, 4);
 
-    await vi.waitFor(() => expect(video.src).toContain("link=tok2"));
+    await srcContains(video, "link=tok2");
     expect(posts()).toHaveLength(2);
     expect(el.querySelector(".msg-media-play")).toBeNull();
     expect(document.querySelector(".msg-file")).toBeNull();
@@ -215,13 +220,13 @@ describe("a link that stops working", () => {
   it("falls back to the play button when the fresh link fails too, and stops", async () => {
     serve([linkResponse("tok1"), linkResponse("tok2")]);
     const { el, video } = mount();
-    await vi.waitFor(() => expect(video.src).toContain("link=tok1"));
+    await srcContains(video, "link=tok1");
     failVideo(video, 4);
-    await vi.waitFor(() => expect(video.src).toContain("link=tok2"));
+    await srcContains(video, "link=tok2");
 
     failVideo(video, 4);
 
-    await vi.waitFor(() => expect(el.querySelector(".msg-media-play")).not.toBeNull());
+    await playButtonShown(el);
     expect(video.getAttribute("src")).toBeNull();
     expect(video.controls).toBe(false);
     // Nothing downloads until the viewer presses play (the clip can be 100 MB).
@@ -237,10 +242,10 @@ describe("a link that stops working", () => {
   it("does not loop when the session is gone: one re-mint, then the play button", async () => {
     serve([linkResponse("tok1"), { ok: false, status: 401 }]);
     const { el, video } = mount();
-    await vi.waitFor(() => expect(video.src).toContain("link=tok1"));
+    await srcContains(video, "link=tok1");
 
     failVideo(video, 4);
-    await vi.waitFor(() => expect(el.querySelector(".msg-media-play")).not.toBeNull());
+    await playButtonShown(el);
     failVideo(video, 4);
     failVideo(video, 2);
     await new Promise((r) => setTimeout(r, 0));
@@ -259,7 +264,7 @@ describe("a link that stops working", () => {
   it("calls a clip the engine could not decode unplayable, without asking for a link again", async () => {
     serve([linkResponse("tok1"), linkResponse("tok2")]);
     const { video } = mount();
-    await vi.waitFor(() => expect(video.src).toContain("link=tok1"));
+    await srcContains(video, "link=tok1");
 
     failVideo(video, 3);
 
@@ -272,13 +277,13 @@ describe("a link that stops working", () => {
   it("calls a clip unplayable when the blob path cannot decode it either", async () => {
     serve([linkResponse("tok1"), { ok: false, status: 403 }]);
     const { el, video } = mount();
-    await vi.waitFor(() => expect(video.src).toContain("link=tok1"));
+    await srcContains(video, "link=tok1");
     failVideo(video, 4);
-    await vi.waitFor(() => expect(el.querySelector(".msg-media-play")).not.toBeNull());
+    await playButtonShown(el);
     serve([{ ok: false, status: 403 }]);
 
     (el.querySelector(".msg-media-play") as HTMLButtonElement).click();
-    await vi.waitFor(() => expect(video.src).toContain("blob:mock-1"));
+    await srcContains(video, "blob:mock-1");
     failVideo(video, 4);
 
     expect(document.querySelector("video")).toBeNull();
@@ -291,11 +296,11 @@ describe("link recovery details", () => {
     const load = vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => {});
     serve([linkResponse("tok1"), { ok: false, status: 401 }]);
     const { el, video } = mount();
-    await vi.waitFor(() => expect(video.src).toContain("link=tok1"));
+    await srcContains(video, "link=tok1");
     load.mockClear();
 
     failVideo(video, 4);
-    await vi.waitFor(() => expect(el.querySelector(".msg-media-play")).not.toBeNull());
+    await playButtonShown(el);
 
     expect(load).toHaveBeenCalled();
     load.mockRestore();
@@ -313,14 +318,14 @@ describe("link recovery details", () => {
     });
     const a = mount();
     const b = mount();
-    await vi.waitFor(() => expect(a.video.src).toContain("link=tok1"));
-    await vi.waitFor(() => expect(b.video.src).toContain("link=tok1"));
+    await srcContains(a.video, "link=tok1");
+    await srcContains(b.video, "link=tok1");
 
     failVideo(a.video, 4);
     await vi.waitFor(() => expect(posts()).toHaveLength(2));
     failVideo(b.video, 4);
 
-    await vi.waitFor(() => expect(b.video.src).toContain("link=tok3"));
+    await srcContains(b.video, "link=tok3");
     expect(posts()).toHaveLength(3);
     resolveSecond(linkResponse("tok2"));
   });
@@ -328,7 +333,7 @@ describe("link recovery details", () => {
   it("gives a picture-less clip's audio row the same recovery", async () => {
     serve([linkResponse("tok1"), linkResponse("tok2")]);
     const { video } = mount();
-    await vi.waitFor(() => expect(video.src).toContain("link=tok1"));
+    await srcContains(video, "link=tok1");
 
     video.dispatchEvent(new Event("loadedmetadata")); // no picture: audio row
     const row = document.querySelector(".msg-audio") as HTMLElement;
@@ -336,7 +341,7 @@ describe("link recovery details", () => {
     expect(audio.src).toContain("link=tok1");
 
     audio.dispatchEvent(new Event("error"));
-    await vi.waitFor(() => expect(audio.src).toContain("link=tok2"));
+    await srcContains(audio, "link=tok2");
     expect(posts()).toHaveLength(2);
 
     audio.dispatchEvent(new Event("error"));
@@ -348,13 +353,13 @@ describe("link recovery details", () => {
   it("falls back to the play button when the audio row cannot get a fresh link", async () => {
     serve([linkResponse("tok1"), { ok: false, status: 401 }]);
     const { video } = mount();
-    await vi.waitFor(() => expect(video.src).toContain("link=tok1"));
+    await srcContains(video, "link=tok1");
     video.dispatchEvent(new Event("loadedmetadata"));
     const row = document.querySelector(".msg-audio") as HTMLElement;
 
     (row.querySelector("audio") as HTMLAudioElement).dispatchEvent(new Event("error"));
 
-    await vi.waitFor(() => expect(row.querySelector(".msg-media-play")).not.toBeNull());
+    await playButtonShown(row);
     expect((row.querySelector("audio") as HTMLAudioElement).hidden).toBe(true);
   });
 });
@@ -364,7 +369,7 @@ describe("a server without file links", () => {
     serve([{ ok: false, status }]);
     const { el, video } = mount();
 
-    await vi.waitFor(() => expect(el.querySelector(".msg-media-play")).not.toBeNull());
+    await playButtonShown(el);
     expect(video.getAttribute("src")).toBeNull();
     expect(video.controls).toBe(false);
     expect(el.querySelector(".msg-media-play")?.getAttribute("aria-label")).toBe("Play clip.mp4");
@@ -386,7 +391,7 @@ describe("a server without file links", () => {
     await vi.waitFor(() => expect(first.el.querySelector(".msg-media-play")).not.toBeNull());
     serve([linkResponse("tok1")]);
     const second = mount();
-    await vi.waitFor(() => expect(second.video.src).toContain("link=tok1"));
+    await srcContains(second.video, "link=tok1");
     expect(posts()).toHaveLength(2);
   });
 
@@ -399,7 +404,7 @@ describe("a server without file links", () => {
         : new Promise((resolve) => (release = resolve)),
     );
     const { el, video } = mount();
-    await vi.waitFor(() => expect(el.querySelector(".msg-media-play")).not.toBeNull());
+    await playButtonShown(el);
     const button = el.querySelector(".msg-media-play") as HTMLButtonElement;
 
     button.click();
@@ -412,7 +417,7 @@ describe("a server without file links", () => {
 
     await vi.waitFor(() => expect(gets()).toHaveLength(1));
     release(fileBytes);
-    await vi.waitFor(() => expect(video.src).toContain("blob:mock-1"));
+    await srcContains(video, "blob:mock-1");
     expect(el.hasAttribute("aria-busy")).toBe(false);
     expect(el.querySelector(".msg-media-play")).toBeNull();
     expect(video.controls).toBe(true);
@@ -421,7 +426,7 @@ describe("a server without file links", () => {
   it("clears the loading state when the download fails, so play can be pressed again", async () => {
     serve([{ ok: false, status: 404 }]);
     const { el } = mount();
-    await vi.waitFor(() => expect(el.querySelector(".msg-media-play")).not.toBeNull());
+    await playButtonShown(el);
     fetchMock.mockImplementation(() => Promise.resolve({ ok: false, status: 500 }));
     const button = el.querySelector(".msg-media-play") as HTMLButtonElement;
 

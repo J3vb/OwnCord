@@ -82,7 +82,7 @@ var sweepTailTimeout = 15 * time.Second
 
 func (h *Hub) sweepTailCtx(ctx context.Context) (context.Context, context.CancelFunc) {
 	tail, cancel := context.WithTimeout(context.WithoutCancel(ctx), sweepTailTimeout)
-	stop := context.AfterFunc(h.life, cancel)
+	stop := context.AfterFunc(h.lifecycle.ctx, cancel)
 	return tail, func() {
 		stop()
 		cancel()
@@ -98,8 +98,8 @@ func (h *Hub) startSweep(inFlight *atomic.Bool, sweep func(context.Context)) {
 	if !inFlight.CompareAndSwap(false, true) {
 		return
 	}
-	ctx, cancel := context.WithTimeout(h.life, sweepTimeout)
-	h.sweeps.Go(func() {
+	ctx, cancel := context.WithTimeout(h.lifecycle.ctx, sweepTimeout)
+	h.lifecycle.sweeps.Go(func() {
 		defer inFlight.Store(false)
 		defer cancel()
 		sweep(ctx)
@@ -149,7 +149,7 @@ func (h *Hub) sweepRevokedSessions(ctx context.Context) {
 	for i, c := range snapshot {
 		hashes[i] = c.tokenHash
 	}
-	verdicts, err := h.authn.SweepSessions(ctx, hashes)
+	verdicts, err := h.seams.authn.SweepSessions(ctx, hashes)
 	if err != nil {
 		// A failed batch lookup says nothing about any session; kicking everyone on a
 		// transient DB error would be a mass disconnect. Skip; the next tick retries.
@@ -196,7 +196,7 @@ func (h *Hub) DisconnectIfSessionRevoked(userID int64) {
 	if len(conns) == 0 {
 		return
 	}
-	verdicts, err := h.authn.SweepSessions(context.Background(), hashes)
+	verdicts, err := h.seams.authn.SweepSessions(context.Background(), hashes)
 	if err != nil {
 		slog.Warn("session sweep: batch session lookup failed", "user_id", userID, "err", err)
 		return
@@ -243,7 +243,7 @@ func (h *Hub) sweepStaleVoiceStates(ctx context.Context) {
 	// classified it stale, but it is deliberately held for a resuming socket. Skip
 	// the parked (user, channel) pairs; the grace timer owns their teardown. Snapshot
 	// first so no grace lock is held while deleting rows.
-	parked := h.voiceReg.voiceGrace.snapshot()
+	parked := h.voiceHub.reg.voiceGrace.snapshot()
 
 	for _, s := range stale {
 		if ctx.Err() != nil {
@@ -283,7 +283,7 @@ func (h *Hub) sweepStaleVoiceEntry(ctx context.Context, userID, channelID int64,
 	}
 	// A socket that dropped after the snapshot may have parked this membership in the
 	// grace window; the grace timer owns it now.
-	if h.voiceReg.voiceGrace.has(userID, channelID) {
+	if h.voiceHub.reg.voiceGrace.has(userID, channelID) {
 		return false
 	}
 
@@ -419,7 +419,7 @@ func (h *Hub) CleanupVoiceForChannel(channelID int64) {
 
 	// Re-elect the key holder now that the room is torn down, as every removal path
 	// does. All client voice states for the channel were cleared, so this deletes the
-	// voiceKeyHolders entry (otherwise it lived for the process lifetime). No locks
+	// voiceHub.keyHolders entry (otherwise it lived for the process lifetime). No locks
 	// are held, as updateKeyHolder requires.
 	h.updateKeyHolder(channelID)
 }

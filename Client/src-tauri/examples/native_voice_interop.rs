@@ -342,6 +342,95 @@ mod linux {
                 last = tokio::time::Instant::now();
             }
         }
+        emit(
+            serde_json::json!({ "event": { "type": "videoWatchEnd", "identity": identity, "frames": frames } }),
+        );
+    }
+
+    /// The receiver's own counters for one remote video, once a second, so a
+    /// run where no frame reaches the frame socket says whether packets
+    /// arrived, whole frames were assembled, the decoder ran, and how many
+    /// keyframe requests went out.
+    async fn receive_stats(identity: String, track: RemoteVideoTrack) {
+        loop {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            let Ok(stats) = track.get_stats().await else {
+                continue;
+            };
+            for s in stats {
+                if let livekit::webrtc::stats::RtcStats::InboundRtp(s) = s {
+                    emit(serde_json::json!({ "event": {
+                        "type": "videoStats",
+                        "identity": identity,
+                        "packets": s.received.packets_received,
+                        "lost": s.received.packets_lost,
+                        "framesReceived": s.inbound.frames_received,
+                        "framesDecoded": s.inbound.frames_decoded,
+                        "keyFramesDecoded": s.inbound.key_frames_decoded,
+                        "framesDropped": s.inbound.frames_dropped,
+                        "pli": s.inbound.pli_count,
+                        "fir": s.inbound.fir_count,
+                        "nack": s.inbound.nack_count,
+                        "width": s.inbound.frame_width,
+                        "decoder": s.inbound.decoder_implementation,
+                    }}));
+                }
+            }
+        }
+    }
+
+    /// The Opus fmtp this side negotiated for one remote audio track, once
+    /// its first packets have a codec: `stereo=1` there is what lets the
+    /// decoder keep a stereo track's two channels apart.
+    async fn audio_codec(identity: String, track: RemoteAudioTrack) {
+        for _ in 0..20 {
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            let Ok(stats) = track.get_stats().await else {
+                continue;
+            };
+            let codec_id = stats.iter().find_map(|s| match s {
+                livekit::webrtc::stats::RtcStats::InboundRtp(s) => Some(s.stream.codec_id.clone()),
+                _ => None,
+            });
+            let Some(codec_id) = codec_id.filter(|id| !id.is_empty()) else {
+                continue;
+            };
+            let fmtp = stats.iter().find_map(|s| match s {
+                livekit::webrtc::stats::RtcStats::Codec(c) if c.rtc.id == codec_id => {
+                    Some(c.codec.sdp_fmtp_line.clone())
+                }
+                _ => None,
+            });
+            if let Some(fmtp) = fmtp {
+                emit(
+                    serde_json::json!({ "event": { "type": "audioCodec", "identity": identity, "fmtp": fmtp } }),
+                );
+                return;
+            }
+        }
+    }
+
+    /// The thread count once it has held still for a second (at most 6 s).
+    /// The receive threads for a remote video start with its first frames,
+    /// which can land just after the baseline moment; reading too early
+    /// charges them to the cycles measured from it.
+    async fn settled_threads() -> usize {
+        let mut last = process_threads();
+        let mut still = 0;
+        for _ in 0..24 {
+            tokio::time::sleep(Duration::from_millis(250)).await;
+            let now = process_threads();
+            if now == last {
+                still += 1;
+                if still >= 4 {
+                    break;
+                }
+            } else {
+                still = 0;
+                last = now;
+            }
+        }
+        last
     }
 
     /// Open file descriptors: sockets, pipes and device handles a capture or
@@ -549,7 +638,7 @@ mod linux {
                 // baseline.
                 await_camera_bound(&mut room_events, &mut pending_events, &camera_sid).await?;
                 emit(
-                    serde_json::json!({ "event": { "type": "threads", "phase": "camera-before", "count": process_threads() } }),
+                    serde_json::json!({ "event": { "type": "threads", "phase": "camera-before", "count": settled_threads().await } }),
                 );
                 for _ in 0..camera_cycles {
                     // Toggle as the app does: unpublish, stop the capture,
@@ -729,11 +818,13 @@ mod linux {
                         if let Some(v) = volume {
                             session.set_volume(participant.identity().as_str(), v);
                         }
+                        meters.push(tokio::spawn(audio_codec(participant.identity().to_string(), track.clone())));
                         meters.push(tokio::spawn(meter(participant.identity().to_string(), track)));
                     }
-                    Some(RoomEvent::TrackSubscribed { track: RemoteTrack::Video(_), publication, participant }) => {
+                    Some(RoomEvent::TrackSubscribed { track: RemoteTrack::Video(track), publication, participant }) => {
                         let url = format!("{frames_url}/remote/{}", publication.sid());
                         meters.push(tokio::spawn(watch(participant.identity().to_string(), url)));
+                        meters.push(tokio::spawn(receive_stats(participant.identity().to_string(), track)));
                     }
                     Some(_) => {}
                     None => break,
@@ -767,10 +858,16 @@ mod linux {
 
 #[cfg(target_os = "linux")]
 fn main() {
-    let rt = tokio::runtime::Builder::new_multi_thread()
+    let rt = match tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
-        .expect("tokio runtime");
+    {
+        Ok(rt) => rt,
+        Err(e) => {
+            eprintln!("native_voice_interop: cannot start the tokio runtime: {e}");
+            std::process::exit(1);
+        }
+    };
     if let Err(e) = rt.block_on(linux::run()) {
         eprintln!("native_voice_interop: {e}");
         std::process::exit(1);

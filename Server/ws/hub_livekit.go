@@ -3,6 +3,8 @@ package ws
 import (
 	"context"
 	"fmt"
+
+	"github.com/J3vb/OwnCord/Server/livekitproc"
 )
 
 // GenerateToken delegates to the LiveKit client. Returns an error if LiveKit
@@ -23,11 +25,20 @@ func (h *Hub) URL() string {
 	return h.livekit.URL()
 }
 
-// LiveKitHealthCheck probes the LiveKit server for connectivity.
-// It tries the SDK client first (ListRooms), and falls back to an HTTP probe
-// if a managed process is configured. Returns false with a reason if LiveKit
+// LiveKitHealthCheck reports whether the LiveKit server answers a room listing,
+// from a verdict at most 5 s old shared with voice_join, metrics, diagnostics and
+// /health (one probe in flight at a time). Returns false with a reason if LiveKit
 // is not configured or unreachable.
 func (h *Hub) LiveKitHealthCheck(ctx context.Context) (bool, error) {
+	if h.livekit == nil {
+		return false, fmt.Errorf("not configured")
+	}
+	return h.livekit.CachedHealthCheck(ctx)
+}
+
+// LiveKitHealthProbe is LiveKitHealthCheck without the cache: one room listing now.
+// Only the operator's explicit /api/v1/livekit/health probe uses it.
+func (h *Hub) LiveKitHealthProbe(ctx context.Context) (bool, error) {
 	if h.livekit == nil {
 		return false, fmt.Errorf("not configured")
 	}
@@ -38,16 +49,34 @@ func (h *Hub) LiveKitHealthCheck(ctx context.Context) (bool, error) {
 // (running, restart count, gave-up). Managed is false when LiveKit is
 // externally managed (no companion), which callers must read as "don't
 // check" rather than "down". Reading it probes nothing.
-func (h *Hub) LiveKitProcessStatus() LiveKitProcessStatus {
-	if h.lkProcess == nil {
-		return LiveKitProcessStatus{}
+func (h *Hub) LiveKitProcessStatus() livekitproc.Status {
+	if h.voiceHub.lkProcess == nil {
+		return livekitproc.Status{}
 	}
-	return h.lkProcess.Status()
+	return h.voiceHub.lkProcess.Status()
+}
+
+// LiveKitPID returns the supervised companion's process id; ok is false when
+// LiveKit is not managed or no process is running right now.
+func (h *Hub) LiveKitPID() (int, bool) {
+	if h.voiceHub.lkProcess == nil {
+		return 0, false
+	}
+	return h.voiceHub.lkProcess.PID()
+}
+
+// LiveKitRoomUsage returns the open room and participant counts from LiveKit's
+// room service.
+func (h *Hub) LiveKitRoomUsage(ctx context.Context) (rooms, participants int, err error) {
+	if h.livekit == nil {
+		return 0, 0, fmt.Errorf("not configured")
+	}
+	return h.livekit.RoomUsage(ctx)
 }
 
 // LiveKitManaged reports whether OwnCord supervises the companion process.
 func (h *Hub) LiveKitManaged() bool {
-	return h.lkProcess != nil
+	return h.voiceHub.lkProcess != nil
 }
 
 // The LiveKit process manager arrives via HubOptions.LiveKitProcess;

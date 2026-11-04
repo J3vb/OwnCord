@@ -17,7 +17,11 @@ import {
   setDeafened as boundSetDeafened,
   cleanupAll as boundCleanupAll,
 } from "../../../src/lib/voice/livekitSession";
-import { useLiveKitSessionHarness } from "../../helpers/livekitSessionHarness";
+import {
+  useLiveKitSessionHarness,
+  stubPrefs,
+  joinSession,
+} from "../../helpers/livekitSessionHarness";
 
 vi.mock("livekit-client", () => mocks.livekitClientMock());
 vi.mock("@stores/voice.store", () => mocks.voiceStoreMock());
@@ -29,7 +33,7 @@ vi.mock("@lib/voice/noiseSuppression", () => mocks.voiceNoiseSuppressionMock());
 vi.mock("@lib/net/e2eeCrypto", () => mocks.netE2eeCryptoMock());
 vi.mock("@lib/net/identity", () => mocks.netIdentityMock());
 
-const { mockRoom, mockLoadPref, mockSavePref } = mocks;
+const { mockRoom, mockSavePref } = mocks;
 
 describe("getRoomForStats (pre-refactor lock)", () => {
   it("returns null when no session is active", () => {
@@ -359,9 +363,7 @@ describe("LiveKitSession", () => {
     });
 
     it("reflects a setOutputVolume change instead of the app-startup value", async () => {
-      session.setServerHost("localhost:7880");
-      session.setWsClient({ send: vi.fn() } as any);
-      await session.handleVoiceToken("test-token", "/livekit", 1, "ws://localhost:7880", true);
+      await joinSession(session);
 
       session.setOutputVolume(40);
 
@@ -370,9 +372,7 @@ describe("LiveKitSession", () => {
     });
 
     it("carries your share's sender stats while you share, and none after", async () => {
-      session.setServerHost("localhost:7880");
-      session.setWsClient({ send: vi.fn() } as any);
-      await session.handleVoiceToken("test-token", "/livekit", 1, "ws://localhost:7880", true);
+      await joinSession(session);
       expect(session.getSessionDebugInfo().screenShareSender).toBeNull();
 
       const sample = { sentFps: 61, limitation: "cpu", encoder: "libvpx" };
@@ -400,13 +400,9 @@ describe("LiveKitSession", () => {
     });
 
     it("records the share timeline while enabled and keeps it after leaving (plan 2b)", async () => {
-      mockLoadPref.mockImplementation((key: string, defaultVal: unknown) =>
-        key === "shareDiagnosticsV2" ? true : defaultVal,
-      );
+      stubPrefs({ shareDiagnosticsV2: true });
       try {
-        session.setServerHost("localhost:7880");
-        session.setWsClient({ send: vi.fn() } as any);
-        await session.handleVoiceToken("test-token", "/livekit", 1, "ws://localhost:7880", true);
+        await joinSession(session);
         const sharePublication = {
           track: {
             mediaStreamTrack: {},
@@ -428,14 +424,12 @@ describe("LiveKitSession", () => {
         // Polling stopped, but the timeline is still there for the bundle.
         expect(session.getShareDiagnostics()?.samples).toHaveLength(1);
       } finally {
-        mockLoadPref.mockImplementation((_key: string, defaultVal: unknown) => defaultVal);
+        stubPrefs();
       }
     });
 
     it("drops a sender stats read that outlived its share", async () => {
-      session.setServerHost("localhost:7880");
-      session.setWsClient({ send: vi.fn() } as any);
-      await session.handleVoiceToken("test-token", "/livekit", 1, "ws://localhost:7880", true);
+      await joinSession(session);
 
       let resolveStats: (layers: unknown[]) => void = () => {};
       const oldShare = {

@@ -1,6 +1,6 @@
 import { test, expect } from "./fixtures";
 import type { Page } from "@playwright/test";
-import { mockTauriConnect, mockTauriFullSession, navigateToMainPage } from "./helpers";
+import { mockTauriConnect, startFullSession } from "./helpers";
 
 // ---------------------------------------------------------------------------
 // Tests: TOFU certificate ceremony (first-use confirmation + mismatch warning)
@@ -104,9 +104,7 @@ test.describe("Cert TOFU — first use", () => {
 
 test.describe("Cert TOFU — mismatch", () => {
   test.beforeEach(async ({ page }) => {
-    await mockTauriFullSession(page);
-    await page.goto("/");
-    await navigateToMainPage(page);
+    await startFullSession(page);
   });
 
   test("mismatch event shows the warning with previous and current fingerprints", async ({

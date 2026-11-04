@@ -12,6 +12,8 @@
 //   - screen share captures natively through the shared enable/disable
 //     path, and a capture the desktop ends stops the share.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import * as logMock from "../helpers/loggerMock";
+import * as mocks from "../helpers/livekitSessionMocks";
 import type { NativeVoiceEnvelope } from "../../src/platform/contracts/nativeVoice";
 
 const mockVoiceState = vi.hoisted(() => ({
@@ -36,7 +38,7 @@ vi.mock("../../src/features/voice/native/platform", async (importOriginal) => ({
   isLinuxDesktop: () => true,
 }));
 
-const webKeyProvider = vi.hoisted(() => ({ setKey: vi.fn(), removeAllListeners: vi.fn() }));
+const webKeyProvider = vi.hoisted(() => ({ setKey: vi.fn() }));
 vi.mock("livekit-client", () => ({
   // installLivekitLogging runs when livekitSession loads.
   LogLevel: { warn: 3, error: 4 },
@@ -91,28 +93,10 @@ vi.mock("@stores/voice.store", () => ({
     subscribe: vi.fn(),
     subscribeSelector: vi.fn(() => () => {}),
   },
-  setLocalMuted: vi.fn(),
-  setLocalDeafened: vi.fn(),
-  setLocalCamera: vi.fn(),
-  setLocalScreenshare: vi.fn(),
-  bumpLocalShareRev: vi.fn(),
-  setPttGated: vi.fn(),
+  ...mocks.voiceStoreActionStubs(),
   setPttPollingLive: vi.fn(),
   isPttPollingLive: vi.fn(() => false),
   onPttPollingLiveChange: vi.fn(() => () => {}),
-  setSpeakers: vi.fn(),
-  leaveVoiceChannel: vi.fn(),
-  setListenOnly: vi.fn(),
-  setShareDenied: vi.fn(),
-  setLocalGateSpeaking: vi.fn(),
-  restateSelfVoiceState: vi.fn(),
-  setVoiceStatus: vi.fn(),
-  setPeerVerification: vi.fn(),
-  clearPeerVerification: vi.fn(),
-  clearPeerVerifications: vi.fn(),
-  setLocalSessionFingerprint: vi.fn(),
-  setLocalSafetyNumber: vi.fn(),
-  setEncryptionDegraded: vi.fn(),
 }));
 
 const host = vi.hoisted(() => ({
@@ -237,9 +221,7 @@ vi.mock("@lib/prefs/preferences", async (importOriginal) => ({
   loadPref: (key: string, defaultVal: unknown) => (prefs.has(key) ? prefs.get(key) : defaultVal),
   savePref: (key: string, value: unknown) => prefs.set(key, value),
 }));
-vi.mock("@lib/logger", () => ({
-  createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
-}));
+vi.mock("@lib/logger", () => logMock.loggerMock());
 vi.mock("@lib/voice/noiseSuppression", () => ({ createRNNoiseProcessor: vi.fn() }));
 vi.mock("@lib/net/e2eeCrypto", () => ({
   generateECDHKeyPair: vi.fn(async () => ({ publicKey: {}, privateKey: {} })),
@@ -265,6 +247,7 @@ globalThis.Worker = vi.fn(function () {
 }) as unknown as typeof Worker;
 
 import { LiveKitSession } from "../../src/lib/voice/livekitSession";
+import { vadThreshold } from "../../src/lib/voice/gateScale";
 import { setVoiceStatus, setListenOnly } from "@stores/voice.store";
 import { channelsStore } from "@stores/channels.store";
 import { nativeCounters } from "../../src/features/voice/native/counters";
@@ -354,7 +337,7 @@ describe("LiveKitSession on the Linux native backend", () => {
       ],
     ]);
     expect(host.commands[2]).toEqual(["setPttGated", [1, false]]);
-    // Automatic sensitivity (the default) also asks RNNoise's verdict.
+    // The gate (automatic sensitivity, the default) also asks RNNoise's verdict.
     expect(host.commands[3]).toEqual(["setVoiceGate", [1, 0.05, false, true]]);
     expect(host.commands[4]).toEqual(["setMicrophone", [1, true]]);
     expect(webKeyProvider.setKey).not.toHaveBeenCalled();
@@ -369,6 +352,14 @@ describe("LiveKitSession on the Linux native backend", () => {
     expect(session.getSessionDebugInfo()).toMatchObject({
       native: { rust: { rooms: 1, localTracks: 1, threads: 41 } },
     });
+  });
+
+  it("a sensitivity set by hand also asks RNNoise's verdict", async () => {
+    prefs.set("autoInputSensitivity", false);
+    prefs.set("voiceSensitivity", 40);
+    await session.handleVoiceToken("tok", "/livekit", 1, undefined, true);
+    const gate = host.commands.find(([name]) => name === "setVoiceGate");
+    expect(gate).toEqual(["setVoiceGate", [1, vadThreshold(40), false, true]]);
   });
 
   it("publishes no microphone when joining the AFK channel and keeps the session up", async () => {

@@ -1,5 +1,9 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
+import { makeDm } from "../helpers/dmHarness";
+import { voiceUser } from "../helpers/voiceUsers";
 import * as voiceSession from "../helpers/voiceSessionMock";
+import * as voiceWidget from "../helpers/voiceWidgetHarness";
 
 // Must mock before imports
 const mockRetryMicPermission = vi.fn().mockResolvedValue(undefined);
@@ -30,27 +34,7 @@ vi.mock("@lib/voice/livekitSession", () =>
   }),
 );
 
-vi.mock("@lib/voice/connectionStats", () => ({
-  createConnectionStatsPoller: vi.fn().mockReturnValue({
-    start: vi.fn(),
-    stop: vi.fn(),
-    getStats: vi.fn().mockReturnValue({
-      rtt: 0,
-      quality: "excellent",
-      outRate: 0,
-      inRate: 0,
-      outPackets: 0,
-      inPackets: 0,
-      totalUp: 0,
-      totalDown: 0,
-      available: true,
-    }),
-    onUpdate: vi.fn().mockReturnValue(() => {}),
-    onQualityChanged: vi.fn().mockReturnValue(() => {}),
-  }),
-  formatBytes: vi.fn((v: number) => `${v} B`),
-  formatRateCompact: vi.fn((v: number) => `${v} B/s`),
-}));
+vi.mock("@lib/voice/connectionStats", () => voiceWidget.connectionStatsMock(true));
 
 import { createVoiceWidget } from "../../src/components/VoiceWidget";
 import { createConnectionStatsPoller } from "@lib/voice/connectionStats";
@@ -60,27 +44,9 @@ import { dmStore } from "../../src/stores/dm.store";
 import { uiStore, setConnectionStatus } from "../../src/stores/ui.store";
 import type { VoiceUser } from "../../src/stores/voice.store";
 import { loadPref, savePref } from "../../src/lib/prefs/preferences";
-import { resetMembersState } from "../helpers/storeResets";
-import { resetChannelsState } from "../helpers/storeSeeds";
 
 function resetStores(): void {
-  voiceStore.setState(() => ({
-    currentChannelId: null,
-    voiceUsers: new Map(),
-    voiceConfigs: new Map(),
-    localMuted: false,
-    localDeafened: false,
-    localCamera: false,
-    localScreenshare: false,
-    joinedAt: null,
-    listenOnly: false,
-    voiceStatus: "idle",
-  }));
-  resetChannelsState();
-  resetMembersState();
-  // Voice controls freeze when the socket is down; keep it live by default so
-  // the interaction tests below operate on enabled controls.
-  setConnectionStatus("connected");
+  voiceWidget.resetVoiceWidgetStores();
 }
 
 function setVoiceStatus(status: VoiceStatus): void {
@@ -103,27 +69,74 @@ function setVoiceChannel(channelId: number, users: VoiceUser[]): void {
   }));
 }
 
+type WidgetOptions = Parameters<typeof createVoiceWidget>[0];
+
+function seedVoiceLobby(id = 1, voiceMaxVideo = 0): void {
+  channelsStore.setState((prev) => {
+    const channels = new Map(prev.channels);
+    channels.set(id, {
+      id,
+      name: "Voice Lobby",
+      type: "voice",
+      category: null,
+      position: 0,
+      unreadCount: 0,
+      mentionCount: 0,
+      lastMessageId: null,
+      canSend: true,
+      topic: "",
+      slowMode: 0,
+      nsfw: false,
+      isPrivate: false,
+      voiceMaxUsers: 0,
+      voiceMaxVideo,
+    });
+    return { ...prev, channels };
+  });
+}
+
 describe("VoiceWidget", () => {
   let container: HTMLDivElement;
+
+  useMountContainer((c) => {
+    container = c;
+  });
 
   beforeEach(() => {
     resetStores();
     mockRetryMicPermission.mockClear();
-    container = document.createElement("div");
-    document.body.appendChild(container);
   });
 
-  afterEach(() => {
-    container.remove();
-  });
-
-  it("renders hidden when not connected to a voice channel", () => {
+  function mountVoiceWidget(
+    handlers: Partial<WidgetOptions> = {},
+  ): ReturnType<typeof createVoiceWidget> {
     const widget = createVoiceWidget({
       onDisconnect: vi.fn(),
       onCameraToggle: vi.fn(),
       onScreenshareToggle: vi.fn(),
+      ...handlers,
     });
     widget.mount(container);
+    return widget;
+  }
+
+  function mountListenOnly(): ReturnType<typeof mountVoiceWidget> {
+    setVoiceChannel(1, []);
+    voiceStore.setState((prev) => ({ ...prev, listenOnly: true }));
+    return mountVoiceWidget();
+  }
+
+  async function mountStreamCard() {
+    setVoiceChannel(1, []);
+    voiceStore.setState((prev) => ({ ...prev, localScreenshare: true }));
+    const widget = mountVoiceWidget();
+    await vi.dynamicImportSettled();
+    const card = container.querySelector<HTMLElement>('[data-testid="vw-stream-card"]')!;
+    return { widget, card };
+  }
+
+  it("renders hidden when not connected to a voice channel", () => {
+    const widget = mountVoiceWidget();
 
     const root = container.querySelector('[data-testid="voice-widget"]');
     expect(root).not.toBeNull();
@@ -133,36 +146,11 @@ describe("VoiceWidget", () => {
   });
 
   it("shows visible when connected to a voice channel", () => {
-    channelsStore.setState((prev) => {
-      const channels = new Map(prev.channels);
-      channels.set(1, {
-        id: 1,
-        name: "Voice Lobby",
-        type: "voice",
-        category: null,
-        position: 0,
-        unreadCount: 0,
-        mentionCount: 0,
-        lastMessageId: null,
-        canSend: true,
-        topic: "",
-        slowMode: 0,
-        nsfw: false,
-        isPrivate: false,
-        voiceMaxUsers: 0,
-        voiceMaxVideo: 0,
-      });
-      return { ...prev, channels };
-    });
+    seedVoiceLobby(1);
 
     setVoiceChannel(1, []);
 
-    const widget = createVoiceWidget({
-      onDisconnect: vi.fn(),
-      onCameraToggle: vi.fn(),
-      onScreenshareToggle: vi.fn(),
-    });
-    widget.mount(container);
+    const widget = mountVoiceWidget();
 
     const root = container.querySelector('[data-testid="voice-widget"]');
     expect(root!.classList.contains("visible")).toBe(true);
@@ -171,36 +159,11 @@ describe("VoiceWidget", () => {
   });
 
   it("displays channel name", () => {
-    channelsStore.setState((prev) => {
-      const channels = new Map(prev.channels);
-      channels.set(1, {
-        id: 1,
-        name: "Voice Lobby",
-        type: "voice",
-        category: null,
-        position: 0,
-        unreadCount: 0,
-        mentionCount: 0,
-        lastMessageId: null,
-        canSend: true,
-        topic: "",
-        slowMode: 0,
-        nsfw: false,
-        isPrivate: false,
-        voiceMaxUsers: 0,
-        voiceMaxVideo: 0,
-      });
-      return { ...prev, channels };
-    });
+    seedVoiceLobby(1);
 
     setVoiceChannel(1, []);
 
-    const widget = createVoiceWidget({
-      onDisconnect: vi.fn(),
-      onCameraToggle: vi.fn(),
-      onScreenshareToggle: vi.fn(),
-    });
-    widget.mount(container);
+    const widget = mountVoiceWidget();
 
     const channelName = container.querySelector(".vw-channel");
     expect(channelName?.textContent).toBe("Voice Lobby");
@@ -209,46 +172,11 @@ describe("VoiceWidget", () => {
   });
 
   it("does not render voice users (users only shown in sidebar)", () => {
-    channelsStore.setState((prev) => {
-      const channels = new Map(prev.channels);
-      channels.set(1, {
-        id: 1,
-        name: "Voice Lobby",
-        type: "voice",
-        category: null,
-        position: 0,
-        unreadCount: 0,
-        mentionCount: 0,
-        lastMessageId: null,
-        canSend: true,
-        topic: "",
-        slowMode: 0,
-        nsfw: false,
-        isPrivate: false,
-        voiceMaxUsers: 0,
-        voiceMaxVideo: 0,
-      });
-      return { ...prev, channels };
-    });
+    seedVoiceLobby(1);
 
-    setVoiceChannel(1, [
-      {
-        userId: 10,
-        username: "Alice",
-        muted: false,
-        deafened: false,
-        speaking: false,
-        camera: false,
-        screenshare: false,
-      },
-    ]);
+    setVoiceChannel(1, [voiceUser(10, { username: "Alice" })]);
 
-    const widget = createVoiceWidget({
-      onDisconnect: vi.fn(),
-      onCameraToggle: vi.fn(),
-      onScreenshareToggle: vi.fn(),
-    });
-    widget.mount(container);
+    const widget = mountVoiceWidget();
 
     const userItems = container.querySelectorAll(".voice-user-item");
     expect(userItems.length).toBe(0);
@@ -259,12 +187,7 @@ describe("VoiceWidget", () => {
   it("has no mute or deafen button: they live in the user panel", () => {
     setVoiceChannel(1, []);
 
-    const widget = createVoiceWidget({
-      onDisconnect: vi.fn(),
-      onCameraToggle: vi.fn(),
-      onScreenshareToggle: vi.fn(),
-    });
-    widget.mount(container);
+    const widget = mountVoiceWidget();
 
     expect(container.querySelector('[aria-label="Disconnect"]')).not.toBeNull();
     expect(container.querySelector('[aria-label="Mute"]')).toBeNull();
@@ -277,12 +200,7 @@ describe("VoiceWidget", () => {
     const onDisconnect = vi.fn();
     setVoiceChannel(1, []);
 
-    const widget = createVoiceWidget({
-      onDisconnect,
-      onCameraToggle: vi.fn(),
-      onScreenshareToggle: vi.fn(),
-    });
-    widget.mount(container);
+    const widget = mountVoiceWidget({ onDisconnect });
 
     const disconnectBtn = container.querySelector('[aria-label="Disconnect"]') as HTMLButtonElement;
     expect(disconnectBtn).not.toBeNull();
@@ -296,12 +214,7 @@ describe("VoiceWidget", () => {
     setVoiceChannel(1, []);
     voiceStore.setState((prev) => ({ ...prev, localScreenshare: true }));
 
-    const widget = createVoiceWidget({
-      onDisconnect: vi.fn(),
-      onCameraToggle: vi.fn(),
-      onScreenshareToggle: vi.fn(),
-    });
-    widget.mount(container);
+    const widget = mountVoiceWidget();
 
     const screenshareBtn = container.querySelector(
       '[aria-label="Screenshare"]',
@@ -316,12 +229,7 @@ describe("VoiceWidget", () => {
   it("shows a stream card while sharing: source, Change source, Quality, Stop", async () => {
     setVoiceChannel(1, []);
     const onScreenshareToggle = vi.fn();
-    const widget = createVoiceWidget({
-      onDisconnect: vi.fn(),
-      onCameraToggle: vi.fn(),
-      onScreenshareToggle,
-    });
-    widget.mount(container);
+    const widget = mountVoiceWidget({ onScreenshareToggle });
     const card = () => container.querySelector<HTMLElement>('[data-testid="vw-stream-card"]');
     await vi.dynamicImportSettled();
     expect(card()).toBeNull();
@@ -353,16 +261,7 @@ describe("VoiceWidget", () => {
   it("the stream card offers only Stop where the share cannot change", async () => {
     mockShareQuality.mockReturnValueOnce(null);
     mockCanChange.mockReturnValueOnce(false);
-    setVoiceChannel(1, []);
-    voiceStore.setState((prev) => ({ ...prev, localScreenshare: true }));
-    const widget = createVoiceWidget({
-      onDisconnect: vi.fn(),
-      onCameraToggle: vi.fn(),
-      onScreenshareToggle: vi.fn(),
-    });
-    widget.mount(container);
-    await vi.dynamicImportSettled();
-    const card = container.querySelector<HTMLElement>('[data-testid="vw-stream-card"]')!;
+    const { widget, card } = await mountStreamCard();
     expect(card.querySelector<HTMLElement>('[data-testid="vw-stream-change"]')!.hidden).toBe(true);
     expect(card.querySelector<HTMLElement>('[data-testid="vw-stream-quality"]')!.hidden).toBe(true);
     expect(card.querySelector<HTMLElement>('[data-testid="vw-stream-stop"]')!.hidden).toBe(false);
@@ -372,16 +271,7 @@ describe("VoiceWidget", () => {
   it("the stream card offers Change source without Quality on a Linux share", async () => {
     mockShareQuality.mockReturnValueOnce(null);
     mockCanChange.mockReturnValueOnce(true);
-    setVoiceChannel(1, []);
-    voiceStore.setState((prev) => ({ ...prev, localScreenshare: true }));
-    const widget = createVoiceWidget({
-      onDisconnect: vi.fn(),
-      onCameraToggle: vi.fn(),
-      onScreenshareToggle: vi.fn(),
-    });
-    widget.mount(container);
-    await vi.dynamicImportSettled();
-    const card = container.querySelector<HTMLElement>('[data-testid="vw-stream-card"]')!;
+    const { widget, card } = await mountStreamCard();
     expect(card.querySelector<HTMLElement>('[data-testid="vw-stream-change"]')!.hidden).toBe(false);
     expect(card.querySelector<HTMLElement>('[data-testid="vw-stream-quality"]')!.hidden).toBe(true);
     widget.destroy?.();
@@ -395,12 +285,7 @@ describe("VoiceWidget", () => {
     setVoiceChannel(1, []);
     voiceStore.setState((prev) => ({ ...prev, localScreenshare: true }));
     voiceStore.flush();
-    const widget = createVoiceWidget({
-      onDisconnect: vi.fn(),
-      onCameraToggle: vi.fn(),
-      onScreenshareToggle: vi.fn(),
-    });
-    widget.mount(container);
+    const widget = mountVoiceWidget();
     await vi.dynamicImportSettled();
     const quality = container.querySelector<HTMLSelectElement>(
       '[data-testid="vw-stream-quality"]',
@@ -419,12 +304,7 @@ describe("VoiceWidget", () => {
   });
 
   it("cleans up on destroy", () => {
-    const widget = createVoiceWidget({
-      onDisconnect: vi.fn(),
-      onCameraToggle: vi.fn(),
-      onScreenshareToggle: vi.fn(),
-    });
-    widget.mount(container);
+    const widget = mountVoiceWidget();
 
     const root = container.querySelector('[data-testid="voice-widget"]');
     expect(root).not.toBeNull();
@@ -437,12 +317,7 @@ describe("VoiceWidget", () => {
     const onCameraToggle = vi.fn();
     setVoiceChannel(1, []);
 
-    const widget = createVoiceWidget({
-      onDisconnect: vi.fn(),
-      onCameraToggle,
-      onScreenshareToggle: vi.fn(),
-    });
-    widget.mount(container);
+    const widget = mountVoiceWidget({ onCameraToggle });
 
     const cameraBtn = container.querySelector('[aria-label="Camera"]') as HTMLButtonElement;
     expect(cameraBtn).not.toBeNull();
@@ -456,12 +331,7 @@ describe("VoiceWidget", () => {
     const onScreenshareToggle = vi.fn();
     setVoiceChannel(1, []);
 
-    const widget = createVoiceWidget({
-      onDisconnect: vi.fn(),
-      onCameraToggle: vi.fn(),
-      onScreenshareToggle,
-    });
-    widget.mount(container);
+    const widget = mountVoiceWidget({ onScreenshareToggle });
 
     const shareBtn = container.querySelector('[aria-label="Screenshare"]') as HTMLButtonElement;
     expect(shareBtn).not.toBeNull();
@@ -475,12 +345,7 @@ describe("VoiceWidget", () => {
     setVoiceChannel(1, []);
     voiceStore.setState((prev) => ({ ...prev, localCamera: true }));
 
-    const widget = createVoiceWidget({
-      onDisconnect: vi.fn(),
-      onCameraToggle: vi.fn(),
-      onScreenshareToggle: vi.fn(),
-    });
-    widget.mount(container);
+    const widget = mountVoiceWidget();
 
     const cameraBtn = container.querySelector('[aria-label="Camera"]') as HTMLButtonElement;
     expect(cameraBtn.classList.contains("active-ctrl")).toBe(true);
@@ -492,29 +357,15 @@ describe("VoiceWidget", () => {
   it("links the call's name back to the call, for a DM and a guild channel alike", () => {
     dmStore.setState(() => ({
       channels: [
-        {
-          channelId: 100,
+        makeDm({
           recipient: { id: 2, username: "otto", avatar: "", status: "online" },
           participants: [{ id: 2, username: "otto", avatar: "", status: "online" }],
-          name: "",
-          isGroup: false,
-          lastMessageId: null,
-          lastMessage: "",
-          lastMessageAt: "",
-          unreadCount: 0,
-          mentionCount: 0,
-        },
+        }),
       ],
     }));
     setVoiceChannel(100, []);
     const onOpenCall = vi.fn();
-    const widget = createVoiceWidget({
-      onDisconnect: vi.fn(),
-      onCameraToggle: vi.fn(),
-      onScreenshareToggle: vi.fn(),
-      onOpenCall,
-    });
-    widget.mount(container);
+    const widget = mountVoiceWidget({ onOpenCall });
 
     const link = container.querySelector<HTMLButtonElement>("[data-testid='vw-channel-link']");
     expect(link?.textContent).toBe("otto");
@@ -528,27 +379,7 @@ describe("VoiceWidget", () => {
     expect(container.querySelector("[data-testid='vw-channel-link']")).toBeNull();
 
     // A guild voice channel links too: it opens that channel's call view.
-    channelsStore.setState((prev) => {
-      const channels = new Map(prev.channels);
-      channels.set(5, {
-        id: 5,
-        name: "Voice Lobby",
-        type: "voice",
-        category: null,
-        position: 0,
-        unreadCount: 0,
-        mentionCount: 0,
-        lastMessageId: null,
-        canSend: true,
-        topic: "",
-        slowMode: 0,
-        nsfw: false,
-        isPrivate: false,
-        voiceMaxUsers: 0,
-        voiceMaxVideo: 0,
-      });
-      return { ...prev, channels };
-    });
+    seedVoiceLobby(5);
     setVoiceChannel(5, []);
     voiceStore.flush();
     const guildLink = container.querySelector<HTMLButtonElement>("[data-testid='vw-channel-link']");
@@ -563,12 +394,7 @@ describe("VoiceWidget", () => {
 
   it("keeps the call's name as plain text when nothing can open the call", () => {
     setVoiceChannel(999, []);
-    const widget = createVoiceWidget({
-      onDisconnect: vi.fn(),
-      onCameraToggle: vi.fn(),
-      onScreenshareToggle: vi.fn(),
-    });
-    widget.mount(container);
+    const widget = mountVoiceWidget();
     expect(container.querySelector("[data-testid='vw-channel-link']")).toBeNull();
     expect(container.querySelectorAll(".vw-channel")).toHaveLength(1);
 
@@ -578,12 +404,7 @@ describe("VoiceWidget", () => {
 
   it("says what the camera and share buttons do next in their tooltips", () => {
     setVoiceChannel(1, []);
-    const widget = createVoiceWidget({
-      onDisconnect: vi.fn(),
-      onCameraToggle: vi.fn(),
-      onScreenshareToggle: vi.fn(),
-    });
-    widget.mount(container);
+    const widget = mountVoiceWidget();
     const cameraBtn = container.querySelector('[aria-label="Camera"]') as HTMLButtonElement;
     const shareBtn = container.querySelector('[aria-label="Screenshare"]') as HTMLButtonElement;
     expect(cameraBtn.title).toBe("Turn on camera");
@@ -604,43 +425,11 @@ describe("VoiceWidget", () => {
   });
 
   it("disables share with a reason when the grant leaves it out or the video limit is used up", () => {
-    channelsStore.setState((prev) => {
-      const channels = new Map(prev.channels);
-      channels.set(1, {
-        id: 1,
-        name: "Voice Lobby",
-        type: "voice",
-        category: null,
-        position: 0,
-        unreadCount: 0,
-        mentionCount: 0,
-        lastMessageId: null,
-        canSend: true,
-        topic: "",
-        slowMode: 0,
-        nsfw: false,
-        isPrivate: false,
-        voiceMaxUsers: 0,
-        voiceMaxVideo: 2,
-      });
-      return { ...prev, channels };
-    });
-    const user = (userId: number, camera: boolean, screenshare: boolean): VoiceUser => ({
-      userId,
-      username: `u${userId}`,
-      muted: false,
-      deafened: false,
-      speaking: false,
-      camera,
-      screenshare,
-    });
+    seedVoiceLobby(1, 2);
+    const user = (userId: number, camera: boolean, screenshare: boolean): VoiceUser =>
+      voiceUser(userId, { camera, screenshare });
     setVoiceChannel(1, [user(1, false, false), user(2, true, false)]);
-    const widget = createVoiceWidget({
-      onDisconnect: vi.fn(),
-      onCameraToggle: vi.fn(),
-      onScreenshareToggle: vi.fn(),
-    });
-    widget.mount(container);
+    const widget = mountVoiceWidget();
     const shareBtn = container.querySelector('[aria-label="Screenshare"]') as HTMLButtonElement;
     expect(shareBtn.disabled).toBe(false);
 
@@ -668,12 +457,7 @@ describe("VoiceWidget", () => {
     // Don't add channel to channelsStore
     setVoiceChannel(999, []);
 
-    const widget = createVoiceWidget({
-      onDisconnect: vi.fn(),
-      onCameraToggle: vi.fn(),
-      onScreenshareToggle: vi.fn(),
-    });
-    widget.mount(container);
+    const widget = mountVoiceWidget();
 
     const channelName = container.querySelector(".vw-channel");
     expect(channelName?.textContent).toBe("Voice Channel");
@@ -682,15 +466,7 @@ describe("VoiceWidget", () => {
   });
 
   it("shows 'Grant Microphone' button when in listen-only mode", () => {
-    setVoiceChannel(1, []);
-    voiceStore.setState((prev) => ({ ...prev, listenOnly: true }));
-
-    const widget = createVoiceWidget({
-      onDisconnect: vi.fn(),
-      onCameraToggle: vi.fn(),
-      onScreenshareToggle: vi.fn(),
-    });
-    widget.mount(container);
+    const widget = mountListenOnly();
 
     const grantBtn = container.querySelector(".vw-grant-mic") as HTMLButtonElement;
     expect(grantBtn).not.toBeNull();
@@ -704,12 +480,7 @@ describe("VoiceWidget", () => {
     setVoiceChannel(1, []);
     voiceStore.setState((prev) => ({ ...prev, listenOnly: false }));
 
-    const widget = createVoiceWidget({
-      onDisconnect: vi.fn(),
-      onCameraToggle: vi.fn(),
-      onScreenshareToggle: vi.fn(),
-    });
-    widget.mount(container);
+    const widget = mountVoiceWidget();
 
     const grantBtn = container.querySelector(".vw-grant-mic") as HTMLButtonElement;
     expect(grantBtn.style.display).toBe("none");
@@ -718,15 +489,7 @@ describe("VoiceWidget", () => {
   });
 
   it("shows an actionable mic notice in listen-only mode and hides it otherwise", () => {
-    setVoiceChannel(1, []);
-    voiceStore.setState((prev) => ({ ...prev, listenOnly: true }));
-
-    const widget = createVoiceWidget({
-      onDisconnect: vi.fn(),
-      onCameraToggle: vi.fn(),
-      onScreenshareToggle: vi.fn(),
-    });
-    widget.mount(container);
+    const widget = mountListenOnly();
 
     const notice = container.querySelector("[data-testid='vw-mic-notice']") as HTMLDivElement;
     expect(notice.getAttribute("role")).toBe("status");
@@ -748,15 +511,7 @@ describe("VoiceWidget", () => {
   });
 
   it("stops promising a permission grant once a retry leaves the mic unavailable", async () => {
-    setVoiceChannel(1, []);
-    voiceStore.setState((prev) => ({ ...prev, listenOnly: true }));
-
-    const widget = createVoiceWidget({
-      onDisconnect: vi.fn(),
-      onCameraToggle: vi.fn(),
-      onScreenshareToggle: vi.fn(),
-    });
-    widget.mount(container);
+    const widget = mountListenOnly();
 
     const notice = container.querySelector("[data-testid='vw-mic-notice']") as HTMLDivElement;
     expect(notice.textContent).toContain("Grant microphone access");
@@ -775,15 +530,7 @@ describe("VoiceWidget", () => {
   });
 
   it("clicking 'Grant Microphone' calls retryMicPermission", async () => {
-    setVoiceChannel(1, []);
-    voiceStore.setState((prev) => ({ ...prev, listenOnly: true }));
-
-    const widget = createVoiceWidget({
-      onDisconnect: vi.fn(),
-      onCameraToggle: vi.fn(),
-      onScreenshareToggle: vi.fn(),
-    });
-    widget.mount(container);
+    const widget = mountListenOnly();
 
     const grantBtn = container.querySelector(".vw-grant-mic") as HTMLButtonElement;
     grantBtn.click();
@@ -801,12 +548,7 @@ describe("VoiceWidget", () => {
   it("displays stats pane toggle on signal icon click", () => {
     setVoiceChannel(1, []);
 
-    const widget = createVoiceWidget({
-      onDisconnect: vi.fn(),
-      onCameraToggle: vi.fn(),
-      onScreenshareToggle: vi.fn(),
-    });
-    widget.mount(container);
+    const widget = mountVoiceWidget();
 
     const statsPane = container.querySelector(".vw-stats") as HTMLDivElement;
     expect(statsPane).not.toBeNull();
@@ -827,31 +569,10 @@ describe("VoiceWidget", () => {
 
   it("renders the signal readout as unavailable, not a false green, when no stats sample arrives", () => {
     const poller = createConnectionStatsPoller as unknown as ReturnType<typeof vi.fn>;
-    poller.mockReturnValueOnce({
-      start: vi.fn(),
-      stop: vi.fn(),
-      getStats: vi.fn().mockReturnValue({
-        rtt: 0,
-        quality: "excellent",
-        outRate: 0,
-        inRate: 0,
-        outPackets: 0,
-        inPackets: 0,
-        totalUp: 0,
-        totalDown: 0,
-        available: false,
-      }),
-      onUpdate: vi.fn().mockReturnValue(() => {}),
-      onQualityChanged: vi.fn().mockReturnValue(() => {}),
-    });
+    poller.mockReturnValueOnce(voiceWidget.statsPoller(false));
     setVoiceChannel(1, []);
 
-    const widget = createVoiceWidget({
-      onDisconnect: vi.fn(),
-      onCameraToggle: vi.fn(),
-      onScreenshareToggle: vi.fn(),
-    });
-    widget.mount(container);
+    const widget = mountVoiceWidget();
 
     const signalWrap = container.querySelector(".vw-signal") as HTMLButtonElement;
     expect(signalWrap.classList.contains("vw-signal--unavailable")).toBe(true);
@@ -863,12 +584,7 @@ describe("VoiceWidget", () => {
   it("displays elapsed timer element with initial 00:00", () => {
     setVoiceChannel(1, []);
 
-    const widget = createVoiceWidget({
-      onDisconnect: vi.fn(),
-      onCameraToggle: vi.fn(),
-      onScreenshareToggle: vi.fn(),
-    });
-    widget.mount(container);
+    const widget = mountVoiceWidget();
 
     const timerEl = container.querySelector(".vw-timer");
     expect(timerEl).not.toBeNull();
@@ -882,12 +598,7 @@ describe("VoiceWidget", () => {
   it("hides widget and stops timer when voice channel is left", () => {
     setVoiceChannel(1, []);
 
-    const widget = createVoiceWidget({
-      onDisconnect: vi.fn(),
-      onCameraToggle: vi.fn(),
-      onScreenshareToggle: vi.fn(),
-    });
-    widget.mount(container);
+    const widget = mountVoiceWidget();
 
     const root = container.querySelector('[data-testid="voice-widget"]') as HTMLDivElement;
     expect(root.classList.contains("visible")).toBe(true);
@@ -904,12 +615,7 @@ describe("VoiceWidget", () => {
   it("contains transport stats labels (Upload, Download, Session)", () => {
     setVoiceChannel(1, []);
 
-    const widget = createVoiceWidget({
-      onDisconnect: vi.fn(),
-      onCameraToggle: vi.fn(),
-      onScreenshareToggle: vi.fn(),
-    });
-    widget.mount(container);
+    const widget = mountVoiceWidget();
 
     const statsPane = container.querySelector(".vw-stats") as HTMLDivElement;
     expect(statsPane.getAttribute("aria-label")).toBe("Transport Statistics");
@@ -925,12 +631,7 @@ describe("VoiceWidget", () => {
   it("shows 'Connecting…' during the joining phase, no secured badge", () => {
     setVoiceChannel(1, []);
 
-    const widget = createVoiceWidget({
-      onDisconnect: vi.fn(),
-      onCameraToggle: vi.fn(),
-      onScreenshareToggle: vi.fn(),
-    });
-    widget.mount(container);
+    const widget = mountVoiceWidget();
 
     setVoiceStatus("joining");
 
@@ -945,12 +646,7 @@ describe("VoiceWidget", () => {
   it("shows 'Securing…' while E2EE key exchange runs, no secured badge yet", () => {
     setVoiceChannel(1, []);
 
-    const widget = createVoiceWidget({
-      onDisconnect: vi.fn(),
-      onCameraToggle: vi.fn(),
-      onScreenshareToggle: vi.fn(),
-    });
-    widget.mount(container);
+    const widget = mountVoiceWidget();
 
     setVoiceStatus("securing");
 
@@ -966,12 +662,7 @@ describe("VoiceWidget", () => {
   it("shows a persistent secured indicator once connected", () => {
     setVoiceChannel(1, []);
 
-    const widget = createVoiceWidget({
-      onDisconnect: vi.fn(),
-      onCameraToggle: vi.fn(),
-      onScreenshareToggle: vi.fn(),
-    });
-    widget.mount(container);
+    const widget = mountVoiceWidget();
 
     setVoiceStatus("connected");
 
@@ -991,12 +682,7 @@ describe("VoiceWidget", () => {
   it("shows a not-secured warning instead of the Secured badge once encryption degrades", () => {
     setVoiceChannel(1, []);
 
-    const widget = createVoiceWidget({
-      onDisconnect: vi.fn(),
-      onCameraToggle: vi.fn(),
-      onScreenshareToggle: vi.fn(),
-    });
-    widget.mount(container);
+    const widget = mountVoiceWidget();
 
     setVoiceStatus("connected");
     const secured = container.querySelector('[data-testid="vw-secured"]') as HTMLElement;
@@ -1016,12 +702,7 @@ describe("VoiceWidget", () => {
   it("shows 'Reconnecting voice…' during a voice reconnect", () => {
     setVoiceChannel(1, []);
 
-    const widget = createVoiceWidget({
-      onDisconnect: vi.fn(),
-      onCameraToggle: vi.fn(),
-      onScreenshareToggle: vi.fn(),
-    });
-    widget.mount(container);
+    const widget = mountVoiceWidget();
 
     setVoiceStatus("reconnecting");
 
@@ -1039,12 +720,7 @@ describe("VoiceWidget", () => {
   it("keeps local hangup available while freezing WS controls during reconnect", () => {
     setVoiceChannel(1, []);
     const onDisconnect = vi.fn();
-    const widget = createVoiceWidget({
-      onDisconnect,
-      onCameraToggle: vi.fn(),
-      onScreenshareToggle: vi.fn(),
-    });
-    widget.mount(container);
+    const widget = mountVoiceWidget({ onDisconnect });
 
     setConnectionStatus("reconnecting");
     uiStore.flush();
@@ -1063,12 +739,7 @@ describe("VoiceWidget", () => {
   it("shows 'Not connected' reason while the WS socket is disconnected", () => {
     setVoiceChannel(1, []);
 
-    const widget = createVoiceWidget({
-      onDisconnect: vi.fn(),
-      onCameraToggle: vi.fn(),
-      onScreenshareToggle: vi.fn(),
-    });
-    widget.mount(container);
+    const widget = mountVoiceWidget();
 
     setConnectionStatus("disconnected");
     uiStore.flush();
@@ -1083,12 +754,7 @@ describe("VoiceWidget", () => {
   it("re-enables voice controls when the WS socket reconnects", () => {
     setVoiceChannel(1, []);
 
-    const widget = createVoiceWidget({
-      onDisconnect: vi.fn(),
-      onCameraToggle: vi.fn(),
-      onScreenshareToggle: vi.fn(),
-    });
-    widget.mount(container);
+    const widget = mountVoiceWidget();
 
     setConnectionStatus("reconnecting");
     uiStore.flush();
@@ -1108,12 +774,7 @@ describe("VoiceWidget", () => {
   it("disables camera and screen share until the join has connected", () => {
     setVoiceChannel(1, []);
     setVoiceStatus("joining");
-    const widget = createVoiceWidget({
-      onDisconnect: vi.fn(),
-      onCameraToggle: vi.fn(),
-      onScreenshareToggle: vi.fn(),
-    });
-    widget.mount(container);
+    const widget = mountVoiceWidget();
     const cameraBtn = container.querySelector('[aria-label="Camera"]') as HTMLButtonElement;
     expect(cameraBtn.disabled).toBe(true);
     expect(cameraBtn.title).toBe("Connecting…");
@@ -1141,12 +802,7 @@ describe("VoiceWidget", () => {
         }),
     );
 
-    const widget = createVoiceWidget({
-      onDisconnect: vi.fn(),
-      onCameraToggle: vi.fn(),
-      onScreenshareToggle: vi.fn(),
-    });
-    widget.mount(container);
+    const widget = mountVoiceWidget();
 
     const grantBtn = container.querySelector(".vw-grant-mic") as HTMLButtonElement;
     grantBtn.click();
@@ -1180,22 +836,17 @@ describe("VoiceWidget", () => {
       mockReapplyEnhanced.mockClear();
     });
 
-    function mountWidget(): {
+    function mountWithButton(): {
       widget: ReturnType<typeof createVoiceWidget>;
       btn: HTMLButtonElement;
     } {
-      const widget = createVoiceWidget({
-        onDisconnect: vi.fn(),
-        onCameraToggle: vi.fn(),
-        onScreenshareToggle: vi.fn(),
-      });
-      widget.mount(container);
+      const widget = mountVoiceWidget();
       const btn = container.querySelector<HTMLButtonElement>('[data-testid="vw-ns"]')!;
       return { widget, btn };
     }
 
     it("flips the Enhanced Noise Suppression pref and re-routes the live mic", () => {
-      const { widget, btn } = mountWidget();
+      const { widget, btn } = mountWithButton();
       expect(btn.getAttribute("aria-label")).toBe("Enhanced Noise Suppression");
       expect(btn.getAttribute("aria-pressed")).toBe("false");
 
@@ -1213,12 +864,12 @@ describe("VoiceWidget", () => {
     });
 
     it("labels the button the same on Linux native as elsewhere: it applies live", () => {
-      const { widget, btn: other } = mountWidget();
+      const { widget, btn: other } = mountWithButton();
       const label = other.getAttribute("aria-label");
       widget.destroy?.();
       mockIsLinuxDesktop.mockReturnValue(true);
       try {
-        const { widget: linux, btn } = mountWidget();
+        const { widget: linux, btn } = mountWithButton();
         expect(btn.getAttribute("aria-label")).toBe(label);
         expect(label).not.toMatch(/next time you join/);
         linux.destroy?.();
@@ -1229,7 +880,7 @@ describe("VoiceWidget", () => {
 
     it("starts from the saved pref and follows a change made in Settings", () => {
       savePref("enhancedNoiseSuppression", true);
-      const { widget, btn } = mountWidget();
+      const { widget, btn } = mountWithButton();
       expect(btn.getAttribute("aria-pressed")).toBe("true");
 
       savePref("enhancedNoiseSuppression", false);

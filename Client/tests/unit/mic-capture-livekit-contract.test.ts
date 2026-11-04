@@ -11,6 +11,7 @@
 // request, or leaving and rejoining changes the voice while every visible
 // setting stays the same.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { loggerMock } from "../helpers/loggerMock";
 import { createLocalTracks, LocalAudioTrack } from "livekit-client";
 import { micCaptureOptions, micProcessingOptions } from "../../src/lib/voice/audioPipeline";
 import { savePref } from "../../src/lib/prefs/preferences";
@@ -20,9 +21,7 @@ import {
   installFakeAudio,
 } from "../helpers/fakeAudioContext";
 
-vi.mock("@lib/logger", () => ({
-  createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
-}));
+vi.mock("@lib/logger", () => loggerMock());
 
 /** Every getUserMedia request the SDK made, in order. */
 let requests: MediaStreamConstraints[] = [];

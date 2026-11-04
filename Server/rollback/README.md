@@ -9,7 +9,7 @@ rehearsal that tests them.
 never undoes them. Undoing one is something you do yourself, with these files,
 against a stopped server, after taking a backup. For a normal rollback after a
 bad upgrade, use the archive procedure in
-[Rolling back](../../docs/deployment.md#rolling-back) instead.
+[Rolling back](../../docs/hosting/upgrades.md#going-back-a-version) instead.
 
 The scripts were written together with their migrations, not made up during
 an incident. `TestMigrationRollbackRehearsalOnAlphaSnapshot`
@@ -76,6 +76,7 @@ at the top of each file before you run it.
 
 | Reversal                             | What it costs                                                                                                                                                                                                                                                                                                                            |
 | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `090_attachment_lookup_indexes`      | Nothing is lost: the three indexes are dropped and the stored-name lookups, the orphan sweep and the newest-first upload list scan again.                                                                                                                                                                                                |
 | `089_messages_live_index`            | Nothing is lost: the index is dropped and the unread counts read each message row again.                                                                                                                                                                                                                                                 |
 | `087_discord_import`                 | The import job records, each imported message's Discord author name and the pending-channel flag are dropped, and a channel still being built is deleted. Imported messages stay, owned by the hidden import account, which an older binary already keeps out of its member lists.                                                       |
 | `086_channel_password`               | Every voice channel password and every remembered grant is dropped. A channel that had a password opens to anyone the role rules let in. Channels and permissions are untouched.                                                                                                                                                         |

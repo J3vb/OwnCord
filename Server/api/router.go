@@ -16,9 +16,11 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/admin"
 	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/clientip"
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/diskutil"
+	"github.com/J3vb/OwnCord/Server/lkstats"
 	"github.com/J3vb/OwnCord/Server/metrics"
 	"github.com/J3vb/OwnCord/Server/netclass"
 	"github.com/J3vb/OwnCord/Server/permissions"
@@ -63,6 +65,9 @@ type Runtime struct {
 	// health row. The app starts and stops it beside MetricsWindows. Nil
 	// leaves those figures null.
 	SystemStats *sysstats.Sampler
+	// LiveKitStats reads LiveKit's stats page for the Dashboard's LiveKit
+	// card; nil when voice.livekit_metrics_url is not set.
+	LiveKitStats *lkstats.Sampler
 	// Auth is the account service, built by StartRuntime over the hub (its
 	// AuthBroadcaster) and shared with the erasure runner. NewRouter only mounts
 	// it.
@@ -101,7 +106,7 @@ func warnOnServerConfig(cfg *config.Config) {
 
 // warnOnVoiceNodeIP warns about a voice.node_ip that remote clients cannot route
 // to. It is written into livekit.yaml as the external address LiveKit advertises
-// in ICE candidates, and livekit_process.go validates it only for YAML-unsafe
+// in ICE candidates, and livekitproc/process.go validates it only for YAML-unsafe
 // characters. A private, CGNAT or loopback address fails invisibly: joins
 // succeed (signalling uses OwnCord's own port) but no media arrives.
 // It warns and never refuses: a LAN-only or tailnet-only deployment may
@@ -151,7 +156,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// restarts.
 	limiter := rt.Limiter
 
-	mountPublicV1(r, cfg, healthHandler, routerServerInfoDeps(rt.Services))
+	mountPublicV1(r, cfg, healthHandler, rt.Services)
 
 	// Service layer, built by internal/app alongside the hub, which holds the
 	// same instance.
@@ -240,7 +245,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 
 	u := rt.Updater
 	adminHandler := admin.NewHandler(database, ver, hub, u, logBuf, cfg.Server.AllowedOrigins, svc.Permissions, svc,
-		adminSetupOptions(cfg, rt, newDiscordImporter(database, svc, hub, store, rt), database.TotalAttachmentBytes, slowRoutes))
+		withSystemDatabase(adminSetupOptions(cfg, rt, newDiscordImporter(database, svc, hub, store, rt), database.TotalAttachmentBytes, slowRoutes), database))
 	// The client's member actions, reachable without the /admin prefix (see
 	// admin.NewMemberAPI). Deliberately outside the admin CIDR gate below: they
 	// accept only a session or API token issued by this server, plus the
@@ -348,7 +353,7 @@ func routerMiddleware(r chi.Router, cfg *config.Config, slow *metrics.SlowRoutes
 	r.Use(setRequestIDHeader) // echo request ID into response header
 	// NOTE: middleware.RealIP is intentionally omitted — trusting X-Real-IP from
 	// any source allows IP spoofing for rate-limit bypass. IP header trust is now
-	// handled explicitly in clientIPWithProxies using the trusted_proxies config.
+	// handled explicitly in clientip.Resolve using the trusted_proxies config.
 	// OpenTelemetry HTTP tracing; a no-op when telemetry is disabled or the otel
 	// tag is unset. Mounted ahead of recoverer, which snapshots the trace id
 	// before dispatch: the span must exist for the panic record to carry
@@ -535,11 +540,11 @@ const (
 // mountPublicV1 registers the unauthenticated /api/v1 routes. Each must be
 // declared in publicSurface (auth_posture_test.go) and must keep build identity
 // (version, build, commit) off it.
-func mountPublicV1(r chi.Router, cfg *config.Config, healthHandler http.HandlerFunc, infoDeps serverInfoDeps) {
+func mountPublicV1(r chi.Router, cfg *config.Config, healthHandler http.HandlerFunc, svc *service.Services) {
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Get("/health", healthHandler)
-		r.Get("/info", handleInfo(cfg, infoDeps))
-		r.Get("/server-info", handleServerInfo(cfg, infoDeps))
+		r.Get("/info", handleInfo(cfg, svc))
+		r.Get("/server-info", handleServerInfo(cfg, svc))
 	})
 }
 
@@ -608,7 +613,7 @@ func runHealthChecks(ctx context.Context, deps healthDeps) (status, reason strin
 	return "ok", ""
 }
 
-func handleInfo(cfg *config.Config, deps serverInfoDeps) http.HandlerFunc {
+func handleInfo(cfg *config.Config, svc *service.Services) http.HandlerFunc {
 	var mu syncutil.Mutex
 	var cachedAt time.Time
 	cachedName := cfg.Server.Name
@@ -616,7 +621,7 @@ func handleInfo(cfg *config.Config, deps serverInfoDeps) http.HandlerFunc {
 		mu.Lock()
 		if time.Since(cachedAt) >= serverInfoCacheTTL {
 			ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), serverInfoReadTimeout)
-			name, err := liveServerName(ctx, cfg, deps)
+			name, err := liveServerName(ctx, cfg, svc)
 			cancel()
 			if err != nil {
 				slog.Error("failed to read server info", "error", err)
@@ -638,7 +643,7 @@ type livekitHealthResponse struct {
 
 func handleLiveKitHealth(hub *ws.Hub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		ok, err := hub.LiveKitHealthCheck(r.Context())
+		ok, err := hub.LiveKitHealthProbe(r.Context())
 		if ok {
 			writeJSON(w, http.StatusOK, livekitHealthResponse{
 				Status:           "ok",
@@ -748,7 +753,7 @@ func recoverer(next http.Handler) http.Handler {
 // slow (nil skips it) with the request's route pattern and time, leaving out
 // the routes the request deadline exempts: they stream or hold a connection
 // open, so their time says nothing about slowness.
-// clientIPWithProxies resolves client_ip through trusted_proxies so
+// clientip.Resolve resolves client_ip through trusted_proxies so
 // reverse-proxy deployments log the real client; proxyNets is parsed once at
 // construction, never on the request path.
 func requestLogger(proxyNets []*net.IPNet, slow *metrics.SlowRoutes) func(http.Handler) http.Handler {
@@ -773,7 +778,7 @@ func requestLogger(proxyNets []*net.IPNet, slow *metrics.SlowRoutes) func(http.H
 				"status", status,
 				"duration_ms", elapsed.Milliseconds(),
 				"bytes", ww.BytesWritten(),
-				"client_ip", clientIPWithProxies(r, proxyNets),
+				"client_ip", clientip.Resolve(r, proxyNets),
 			}
 			if reqID != "" {
 				attrs = append(attrs, "req_id", reqID)
@@ -798,4 +803,21 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	if err := json.NewEncoder(w).Encode(v); err != nil {
 		slog.Error("writeJSON: failed to encode response", "error", err)
 	}
+}
+
+// withSystemDatabase gives the admin System health page its database card.
+func withSystemDatabase(opts admin.SetupOptions, database *db.DB) admin.SetupOptions {
+	opts.System.Database = func(ctx context.Context) (admin.SystemDatabase, error) {
+		st, err := database.HealthStats(ctx)
+		if err != nil {
+			return admin.SystemDatabase{}, fmt.Errorf("system health database: %w", err)
+		}
+		return admin.SystemDatabase{
+			FileBytes: st.FileBytes, WALBytes: st.WALBytes, SchemaVersion: st.SchemaVersion,
+			ReadersInUse: st.ReadersInUse, ReadersOpen: st.ReadersOpen, ReadersMax: st.ReadersMax,
+			ReaderWaitCount: st.ReaderWaitCount, ReaderWaitMs: st.ReaderWaitMs,
+			WriterWaitCount: st.WriterWaitCount, WriterWaitMs: st.WriterWaitMs,
+		}, nil
+	}
+	return opts
 }

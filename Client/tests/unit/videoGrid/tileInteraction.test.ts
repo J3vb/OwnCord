@@ -1,7 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as mocks from "../../helpers/videoGridMocks";
 import { type VideoGridComponent, type TileConfig } from "../../../src/components/VideoGrid";
-import { fakeStream, useVideoGridHarness } from "../../helpers/videoGridHarness";
+import {
+  fakeStream,
+  SCREEN_TILE,
+  screenTileConfig,
+  tileLookups,
+  useVideoGridHarness,
+} from "../../helpers/videoGridHarness";
 
 vi.mock("@lib/ui/toast", () => mocks.uiToastMock());
 vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
@@ -16,29 +22,19 @@ const {
   mockSetUserLocalMute,
 } = mocks;
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
 describe("VideoGrid", () => {
   let container: HTMLDivElement;
   let grid: VideoGridComponent;
 
-  useVideoGridHarness({
-    wired: (c, g) => {
-      container = c;
-      grid = g;
-    },
-    currentGrid: () => grid,
+  useVideoGridHarness((c, g) => {
+    container = c;
+    grid = g;
   });
 
   describe("tile interaction and labelling (PR 3)", () => {
-    const SCREEN = 2 + 1_000_000;
+    const SCREEN = SCREEN_TILE;
     const screen = (overrides: Partial<TileConfig> = {}): TileConfig => ({
-      isSelf: false,
-      audioUserId: 2,
-      isScreenshare: true,
-      name: "Otto",
+      ...screenTileConfig(),
       ...overrides,
     });
     const camera = (overrides: Partial<TileConfig> = {}): TileConfig => ({
@@ -48,8 +44,17 @@ describe("VideoGrid", () => {
       name: "Sam",
       ...overrides,
     });
-    const cell = (id: number) =>
-      container.querySelector<HTMLElement>(`.video-cell[data-user-id='${id}']`)!;
+    const { cell } = tileLookups(() => container);
+    const openTileMenu = async (id: number): Promise<HTMLElement> => {
+      cell(id).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+      await vi.dynamicImportSettled();
+      return document.querySelector<HTMLElement>(".video-tile-menu")!;
+    };
+    const setMenuVoice = (menu: HTMLElement, value: string): void => {
+      const voice = menu.querySelector<HTMLInputElement>("[data-menu-volume='voice']")!;
+      voice.value = value;
+      voice.dispatchEvent(new Event("input"));
+    };
     const select = (id: number) => cell(id).querySelector<HTMLButtonElement>(".video-cell-select")!;
 
     it("makes each tile a named button that opens it in focus view", () => {
@@ -261,15 +266,8 @@ describe("VideoGrid", () => {
     it("raising the menu's voice slider clears that user's Mute", async () => {
       mockGetUserLocalMute.mockReturnValue(true);
       grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screen());
-      cell(SCREEN).dispatchEvent(
-        new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
-      );
-      await vi.dynamicImportSettled();
-
-      const menu = document.querySelector<HTMLElement>(".video-tile-menu")!;
-      const voice = menu.querySelector<HTMLInputElement>("[data-menu-volume='voice']")!;
-      voice.value = "120";
-      voice.dispatchEvent(new Event("input"));
+      const menu = await openTileMenu(SCREEN);
+      setMenuVoice(menu, "120");
 
       expect(mockSetUserVolume).toHaveBeenCalledWith(2, 120);
       expect(mockSetUserLocalMute).toHaveBeenLastCalledWith(2, false);
@@ -281,12 +279,7 @@ describe("VideoGrid", () => {
       mockGetScreenshareAudioMuted.mockReturnValue(true);
       mockGetScreenshareAudioVolume.mockReturnValue(0);
       grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screen());
-      cell(SCREEN).dispatchEvent(
-        new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
-      );
-      await vi.dynamicImportSettled();
-
-      const menu = document.querySelector<HTMLElement>(".video-tile-menu")!;
+      const menu = await openTileMenu(SCREEN);
       const unmute = [...menu.querySelectorAll<HTMLElement>("[role='menuitem']")].find(
         (m) => m.textContent === "Unmute stream",
       )!;
@@ -472,15 +465,8 @@ describe("VideoGrid", () => {
       const otto = { audioUserId: 2, name: "Otto" };
       grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screen());
       grid.addStream(2, "Otto", fakeStream(), camera(otto));
-      cell(SCREEN).dispatchEvent(
-        new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
-      );
-      await vi.dynamicImportSettled();
-
-      const menu = document.querySelector<HTMLElement>(".video-tile-menu")!;
-      const voice = menu.querySelector<HTMLInputElement>("[data-menu-volume='voice']")!;
-      voice.value = "70";
-      voice.dispatchEvent(new Event("input"));
+      const menu = await openTileMenu(SCREEN);
+      setMenuVoice(menu, "70");
 
       expect(cell(2).querySelector("output")!.textContent).toBe("70%");
       // The screen-share tile's own slider is the stream volume, not the voice.
@@ -503,11 +489,7 @@ describe("VideoGrid", () => {
         "Ottilie stream volume",
       );
 
-      cell(SCREEN).dispatchEvent(
-        new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
-      );
-      await vi.dynamicImportSettled();
-      const menu = document.querySelector<HTMLElement>(".video-tile-menu")!;
+      const menu = await openTileMenu(SCREEN);
       expect(menu.getAttribute("aria-label")).toBe("Ottilie");
       expect(menu.querySelector("[data-menu-volume='voice']")!.getAttribute("aria-label")).toBe(
         "Ottilie voice volume",

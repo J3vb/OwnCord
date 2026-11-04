@@ -1,57 +1,24 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import * as mocks from "../helpers/attachmentsMocks";
 
-const { fetchMock, getTokenMock, ensureHttpProxyMock, brokerImageMock } = vi.hoisted(() => ({
-  fetchMock: vi.fn<any>(),
-  getTokenMock: vi.fn<any>(),
-  ensureHttpProxyMock: vi.fn<any>(),
-  brokerImageMock: vi.fn<any>(),
-}));
-
-// B9-8: this suite exercises content the viewer has already consented to;
-// the consent gate itself is proven in src/features/content-consent/external.test.ts.
-vi.mock("../../src/features/content-consent/external", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../src/features/content-consent/external")>()),
-  externalAllowed: () => true,
-}));
-
-vi.mock("../../src/platform/desktop/externalContent", () => ({
-  externalContent: { preview: vi.fn(), image: brokerImageMock },
-}));
-
-vi.mock("@tauri-apps/plugin-http", () => ({
-  fetch: fetchMock,
-}));
-
-vi.mock("@lib/net/httpProxy", () => ({
-  ensureHttpProxy: ensureHttpProxyMock,
-}));
-
-vi.mock("@stores/auth.store", () => ({
-  getToken: getTokenMock,
-  authStore: { getState: () => ({ uploadPolicy: null }) },
-}));
-
-vi.mock("@lib/logger", () => ({
-  createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
-}));
-
-vi.mock("@tauri-apps/plugin-dialog", () => ({ save: vi.fn() }));
-vi.mock("@tauri-apps/plugin-fs", () => ({ writeFile: vi.fn() }));
-vi.mock("@lib/icons", () => ({ createIcon: () => document.createElement("span") }));
-vi.mock("@lib/prefs/mediaVisibility", () => ({ observeMedia: vi.fn() }));
-vi.mock("../../src/features/messaging/content/media", () => ({ openImageLightbox: vi.fn() }));
+vi.mock("@tauri-apps/plugin-http", () => mocks.httpPluginMock(mocks.fetchMock));
+vi.mock("@lib/net/httpProxy", () => mocks.httpProxyMock(mocks.ensureHttpProxyMock));
+vi.mock("@stores/auth.store", () => mocks.authStoreMock(mocks.getTokenMock));
+vi.mock("@lib/logger", () => mocks.loggerMock());
+vi.mock("@tauri-apps/plugin-dialog", () => mocks.dialogMock());
+vi.mock("@tauri-apps/plugin-fs", () => mocks.fsMock());
+vi.mock("@lib/icons", () => mocks.iconsMock());
+vi.mock("@lib/prefs/mediaVisibility", () => mocks.mediaVisibilityMock());
+vi.mock("../../src/features/messaging/content/media", () => mocks.contentMediaMock());
+vi.mock("../../src/features/content-consent/external", (importOriginal) =>
+  mocks.consentExternalMock(importOriginal),
+);
+vi.mock("../../src/platform/desktop/externalContent", () =>
+  mocks.externalContentMock(vi.fn(), mocks.brokerImageMock),
+);
 
 // No-op IndexedDB so fetchImageAsObjectUrl falls through to the network path.
-vi.stubGlobal("indexedDB", {
-  open: () => {
-    const req: Record<string, unknown> = { onsuccess: null, onerror: null, onupgradeneeded: null };
-    Promise.resolve().then(() => {
-      const fn = req.onerror as ((ev: Event) => void) | null;
-      fn?.(new Event("error"));
-    });
-    return req;
-  },
-});
+vi.stubGlobal("indexedDB", mocks.failingIndexedDb());
 
 import {
   clearAttachmentCaches,
@@ -64,27 +31,25 @@ import {
 URL.createObjectURL = vi.fn(() => "blob:test-image");
 URL.revokeObjectURL = vi.fn();
 
-function imageResponse() {
-  return {
-    ok: true,
-    headers: { get: () => "image/png" },
-    arrayBuffer: vi.fn().mockResolvedValue(Uint8Array.from([1, 2, 3]).buffer),
-  };
-}
+const {
+  fetchMock,
+  getTokenMock,
+  ensureHttpProxyMock,
+  arrangeServerImage,
+  resetServerMocks,
+  imageResponse,
+} = mocks;
+const { brokerImageMock } = mocks;
 
 describe("attachment fetch authentication", () => {
   beforeEach(() => {
-    fetchMock.mockReset();
-    getTokenMock.mockReset();
-    ensureHttpProxyMock.mockReset();
+    resetServerMocks();
     clearAttachmentCaches();
     setServerHost("chat.example.com");
   });
 
   it("sends the bearer token through the TOFU proxy for server-hosted files", async () => {
-    getTokenMock.mockReturnValue("session-token");
-    ensureHttpProxyMock.mockResolvedValue("http://127.0.0.1:49812");
-    fetchMock.mockResolvedValue(imageResponse());
+    arrangeServerImage("session-token");
 
     const result = await fetchImageAsObjectUrl("https://chat.example.com/api/v1/files/abc-123");
 
@@ -96,9 +61,7 @@ describe("attachment fetch authentication", () => {
   });
 
   it("omits the Authorization header when no session token exists", async () => {
-    getTokenMock.mockReturnValue(null);
-    ensureHttpProxyMock.mockResolvedValue("http://127.0.0.1:49812");
-    fetchMock.mockResolvedValue(imageResponse());
+    arrangeServerImage(null);
 
     await fetchImageAsObjectUrl("https://chat.example.com/api/v1/files/abc-456");
 
@@ -112,9 +75,7 @@ describe("attachment fetch authentication", () => {
     // request to an arbitrary path on the server's own origin. Only the
     // server-generated content routes (files, emoji and stickers) carry
     // the bearer token.
-    getTokenMock.mockReturnValue("session-token");
-    ensureHttpProxyMock.mockResolvedValue("http://127.0.0.1:49812");
-    fetchMock.mockResolvedValue(imageResponse());
+    arrangeServerImage("session-token");
 
     await fetchImageAsObjectUrl("https://chat.example.com/admin/api/stats");
 
@@ -124,9 +85,7 @@ describe("attachment fetch authentication", () => {
   });
 
   it("still attaches the token to the server emoji content route", async () => {
-    getTokenMock.mockReturnValue("session-token");
-    ensureHttpProxyMock.mockResolvedValue("http://127.0.0.1:49812");
-    fetchMock.mockResolvedValue(imageResponse());
+    arrangeServerImage("session-token");
 
     await fetchImageAsObjectUrl("https://chat.example.com/api/v1/emoji/1/image");
 
@@ -138,9 +97,7 @@ describe("attachment fetch authentication", () => {
   it("attaches the token to the server sticker image route", async () => {
     // The sticker image route needs a session like the emoji one; without the
     // token it answers 401 and every sticker shows as deleted.
-    getTokenMock.mockReturnValue("session-token");
-    ensureHttpProxyMock.mockResolvedValue("http://127.0.0.1:49812");
-    fetchMock.mockResolvedValue(imageResponse());
+    arrangeServerImage("session-token");
 
     const result = await fetchImageAsObjectUrl("https://chat.example.com/api/v1/stickers/7/image");
 
@@ -170,9 +127,7 @@ describe("attachment fetch authentication", () => {
 
   it("still routes through the TOFU proxy with a bearer token when the host is stored with an explicit :443", async () => {
     setServerHost("chat.example.com:443");
-    getTokenMock.mockReturnValue("session-token");
-    ensureHttpProxyMock.mockResolvedValue("http://127.0.0.1:49812");
-    fetchMock.mockResolvedValue(imageResponse());
+    arrangeServerImage("session-token");
 
     const result = await fetchImageAsObjectUrl("https://chat.example.com/api/v1/files/abc-789");
 

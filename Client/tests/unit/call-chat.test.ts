@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { usePhone } from "../helpers/phoneMedia";
 import {
   channelsStore,
   resetChannelsStore,
@@ -330,10 +331,7 @@ describe("callChat", () => {
 
     describe("on a phone", () => {
       beforeEach(() => {
-        vi.stubGlobal(
-          "matchMedia",
-          vi.fn((q: string) => ({ matches: q.includes("pointer: coarse") })),
-        );
+        usePhone();
       });
       afterEach(() => {
         vi.unstubAllGlobals();

@@ -6,7 +6,6 @@
 // (room key, epoch, rotation), e2eePeerState (peer keys and TOFU pin
 // verification), e2eeWorker (the key provider and its write queue) and
 // e2eeOffer (receiving and sending room-key offers).
-import { ExternalE2EEKeyProvider } from "livekit-client";
 import type { WsClient } from "@lib/ws";
 import {
   generateECDHKeyPair,
@@ -16,6 +15,7 @@ import {
   wrapRoomKey,
   computeRawKeyFingerprint,
 } from "@lib/net/e2eeCrypto";
+import { LEGACY_PLACEMENT, type KeyPlacement } from "@lib/net/keyPlacement";
 import { storeIdentityPin } from "@lib/net/identity";
 import { authStore } from "@stores/auth.store";
 import {
@@ -59,14 +59,15 @@ export class E2EEManager {
     this._identity.ecdhKeyPair = value;
   }
   /** Room key, epoch, offer high-water marks and rotation. See e2eeEpoch.ts. */
-  private _epoch = new E2EEEpoch({
+  private _epoch: E2EEEpoch = new E2EEEpoch({
     isKeyHolder: () => this._isKeyHolder,
     getChannelId: () => this._channelId,
     getCurrentChannelId: () => this.deps.getCurrentChannelId(),
     getSessionGeneration: () => this._sessionGeneration,
     getEcdhKeyPair: () => this._ecdhKeyPair,
     getPeerPublicKeys: () => this._peerPublicKeys,
-    applyRoomKey: (roomKey) => this._worker.applyRoomKey(roomKey),
+    applyRoomKey: (roomKey, placement) => this._worker.applyRoomKey(roomKey, undefined, placement),
+    rotationPlacement: () => this.rotationPlacement(),
     distributeRoomKey: (keypair, roomKey, peers) =>
       this._offers.distributeRoomKey(keypair, roomKey, peers),
   });
@@ -136,17 +137,26 @@ export class E2EEManager {
   }
   /** The key provider the Room E2EE workers read from, and its write queue.
    *  See e2eeWorker.ts. */
-  private _worker = new E2EEWorker({
+  private _worker: E2EEWorker = new E2EEWorker({
     getSessionGeneration: () => this._sessionGeneration,
     getRoomKey: () => this._roomKey,
     onKeyInstalled: () => this.deps.onRoomKeyInstalled?.(),
+    getRoomKeyPlacement: () => this._epoch.roomKeyPlacement,
   });
-  /** E2EE key provider — shared across Room instances. */
-  get keyProvider(): ExternalE2EEKeyProvider {
+  /** The current Room's E2EE key provider. */
+  get keyProvider(): E2EEWorker["keyProvider"] {
     return this._worker.keyProvider;
   }
+  /** A fresh key provider for a new Room. See e2eeWorker.ts. */
+  newKeyProvider(): E2EEWorker["keyProvider"] {
+    return this._worker.newKeyProvider();
+  }
+  /** Drop the ended call's key provider. See e2eeWorker.ts. */
+  releaseKeyProvider(): void {
+    this._worker.releaseKeyProvider();
+  }
   /** Receiving, applying, wrapping and pacing voice_e2ee_offer. See e2eeOffer.ts. */
-  private _offers = new E2EEOffer({
+  private _offers: E2EEOffer = new E2EEOffer({
     getWs: () => this.deps.getWs(),
     getAnnounceChain: () => this._announceChain,
     peerAttemptIsCurrent: (userId) => this._peers.peerAttemptIsCurrent(userId),
@@ -158,7 +168,13 @@ export class E2EEManager {
     setRoomKey: (roomKey) => {
       this._roomKey = roomKey;
     },
-    applyRoomKey: (roomKey, isCurrent) => this._worker.applyRoomKey(roomKey, isCurrent),
+    applyRoomKey: (roomKey, isCurrent, placement) =>
+      this._worker.applyRoomKey(roomKey, isCurrent, placement),
+    setRoomKeyPlacement: (placement) => {
+      this._epoch.roomKeyPlacement = placement;
+    },
+    offerPlacement: (peerId) =>
+      this.peerHasKeySlots(peerId) ? this._epoch.roomKeyPlacement : undefined,
     isKeyHolder: () => this._isKeyHolder,
     setKeyHolder: (value) => {
       this._isKeyHolder = value;
@@ -194,6 +210,24 @@ export class E2EEManager {
   private _sessionGeneration = 0;
 
   constructor(private deps: E2EEDeps) {}
+
+  // --- Key slots ---
+
+  /** Whether `userId`'s announce said it stages keys in their own slot. */
+  private peerHasKeySlots(userId: number): boolean {
+    return voiceStore.getState().peerKeySlots?.has(userId) ?? false;
+  }
+
+  /** Where a rotated room key goes. With every peer on key slots it is staged
+   *  in the slot nobody sends with, so no frame is ever encrypted with a key a
+   *  peer lacks; any older peer keeps everyone on slot 0, swapped at once. */
+  private rotationPlacement(): KeyPlacement {
+    const peers = [...this._peerPublicKeys.keys()];
+    if (peers.length === 0 || !peers.every((id) => this.peerHasKeySlots(id))) {
+      return LEGACY_PLACEMENT;
+    }
+    return { slot: this._worker.sendSlot === 0 ? 1 : 0, stage: true };
+  }
 
   // --- Internal state accessors (used by LiveKitSession's test-compat proxies) ---
 
@@ -310,6 +344,7 @@ export class E2EEManager {
       // holder joins an ongoing call.
       this._e2eeEpoch++;
       this._roomKey = generateRoomKey();
+      this._epoch.roomKeyPlacement = LEGACY_PLACEMENT;
       await this._worker.applyCurrentRoomKey(() => this._sessionGeneration === myGeneration);
       if (this._sessionGeneration !== myGeneration) return false;
       log.info("E2EE: key holder — generated room key", { channelId });
@@ -823,6 +858,22 @@ export class E2EEManager {
           userId,
           myUserId,
         });
+      } else if (
+        this._isKeyHolder &&
+        currentRoomKey &&
+        keypair &&
+        !this.peerHasKeySlots(userId) &&
+        this._epoch.roomKeyPlacement.slot !== 0
+      ) {
+        // An older client only knows slot 0, and the call is sending on slot
+        // 1: offering it this key would have it send on slot 0 with a key the
+        // others hold in slot 1. A rotation moves everyone to a new key in
+        // slot 0 at once (rotationPlacement sees the older peer) and offers
+        // it to this peer with the rest.
+        log.info("E2EE: an older client joined while on key slot 1 — rotating to slot 0", {
+          userId,
+        });
+        this._epoch.requestRotation();
       } else if (this._isKeyHolder && currentRoomKey && keypair) {
         // Capture epoch before the wrap await — a rotation racing this
         // announce already added the peer to _peerPublicKeys before we got
@@ -830,11 +881,16 @@ export class E2EEManager {
         // happened, ship this pre-rotation wrap and the receiver's
         // strictly-ordered _offerChain ends up on the dead key.
         const epochBefore = this._e2eeEpoch;
+        // A peer joining or coming back mid-call uses the key at once, in the
+        // slot the call has it in.
         const { encryptedKey, iv } = await wrapRoomKey(
           keypair.privateKey,
           peerKey,
           currentRoomKey,
           epochBefore,
+          this.peerHasKeySlots(userId)
+            ? { slot: this._epoch.roomKeyPlacement.slot, stage: false }
+            : undefined,
         );
         // Discard if either the epoch advanced (a rotation landed during the
         // wrap) OR the keypair no longer matches (a concurrent
@@ -1110,7 +1166,9 @@ export class E2EEManager {
     this._announceChain = Promise.resolve();
     this._ecdhKeyPair = null;
     this._roomKey = null;
+    this._epoch.roomKeyPlacement = LEGACY_PLACEMENT;
     this._worker.clearRoomKey();
+    this._worker.resetSlots();
     this._peerPublicKeys.clear();
     this._peerGenerations.clear();
     this._retiredPeerKeys.clear();

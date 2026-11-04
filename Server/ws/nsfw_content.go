@@ -113,6 +113,7 @@ var contentBearingKinds = map[string]bool{
 	MsgTypeVoiceDisconnected:   false,
 	MsgTypeMemberJoin:          false,
 	MsgTypeMemberUpdate:        false,
+	MsgTypeMemberUpdateBatch:   false,
 	MsgTypeUserUpdate:          false,
 	MsgTypeMemberBan:           false,
 	MsgTypeRolesUpdate:         false,
@@ -154,31 +155,22 @@ var reconnectFrameReadableRaceHook func(userID, channelID int64)
 // about to be written, never a batch snapshot and never reused for another frame:
 // reconnectWriteReplay calls it before each content-bearing handshakeWrite, so a
 // revoke or unlabel between two frames of one replay is honoured by the very next
-// frame. A lookup failure fails closed (not readable) and reports confirmed=false so
+// frame. The label and the consent come from one point read. A lookup failure fails closed (not readable) and reports confirmed=false so
 // the caller can mark the frame lost: re-checking live exists to distrust a stale
 // "yes", so an error must not fall back to one.
 func (h *Hub) frameReadableNow(ctx context.Context, userID, channelID int64) (readable, confirmed bool) {
-	ch, err := h.readers.Visibility.GetChannel(ctx, channelID)
+	found, ok, err := h.readers.Visibility.ChannelContentGate(ctx, userID, channelID)
 	if err != nil {
-		slog.Warn("ws: frameReadableNow GetChannel failed, dropping frame",
+		slog.Warn("ws: frameReadableNow ChannelContentGate failed, dropping frame",
 			"channel_id", channelID, "err", err)
 		return false, false
 	}
-	if ch == nil {
+	if !found {
 		// A missing channel is unknown, not "not labelled": fail closed as channelNSFWFilter
 		// does, rather than trust a frame whose channel cannot be confirmed. A deleted
 		// channel's frame is not owed.
 		slog.Warn("ws: frameReadableNow found no such channel, dropping frame", "channel_id", channelID)
 		return false, true
-	}
-	if !ch.NSFW {
-		return true, true
-	}
-	ok, ackErr := h.readers.Visibility.HasNSFWAcknowledgement(ctx, userID, channelID)
-	if ackErr != nil {
-		slog.Warn("ws: frameReadableNow HasNSFWAcknowledgement failed, dropping frame",
-			"channel_id", channelID, "err", ackErr)
-		return false, false
 	}
 	return ok, true
 }

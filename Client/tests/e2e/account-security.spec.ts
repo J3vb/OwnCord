@@ -13,54 +13,18 @@ import { test, expect } from "./fixtures";
 import {
   buildTauriMockScript,
   MOCK_AUTH_OK,
-  MOCK_LOGIN_RESPONSE,
-  MOCK_MESSAGES,
-  MOCK_PINNED_MESSAGES,
   navigateToMainPage,
   openSettings,
+  ROUTE_HEALTH,
+  ROUTE_LOGIN,
+  ROUTE_MESSAGES,
+  ROUTE_PINS,
 } from "./helpers";
+import { type FetchCall, decodeBody, fetchCalls, waitForFetch } from "./support/invokeLog";
 
 // ---------------------------------------------------------------------------
 // Outgoing-request capture (the mock's own IPC log, no extra init script)
 // ---------------------------------------------------------------------------
-
-interface FetchCall {
-  readonly method: string;
-  readonly url: string;
-  readonly data: number[] | null;
-  readonly headers: [string, string][];
-}
-
-async function fetchCalls(page: Page): Promise<FetchCall[]> {
-  return page.evaluate(() =>
-    (
-      window as unknown as {
-        __invokeLog: Array<{ cmd: string; args?: { clientConfig?: FetchCall } }>;
-      }
-    ).__invokeLog
-      .filter((e) => e.cmd === "plugin:http|fetch")
-      .map((e) => e.args?.clientConfig as FetchCall),
-  );
-}
-
-/** Poll until a request matching `predicate` has been sent. */
-async function waitForFetch(
-  page: Page,
-  predicate: (call: FetchCall) => boolean,
-  timeout = 5_000,
-): Promise<FetchCall> {
-  let found: FetchCall | undefined;
-  await expect(async () => {
-    found = (await fetchCalls(page)).find(predicate);
-    expect(found).toBeDefined();
-  }).toPass({ timeout });
-  return found!;
-}
-
-function decodeBody(call: FetchCall): string | null {
-  if (!Array.isArray(call.data)) return null;
-  return new TextDecoder().decode(new Uint8Array(call.data));
-}
 
 function requestTo(method: string, pathSuffix: string) {
   return (call: FetchCall): boolean =>
@@ -93,15 +57,6 @@ async function waitForProfilePatch(
 // ---------------------------------------------------------------------------
 // Routes + fixtures
 // ---------------------------------------------------------------------------
-
-const ROUTE_HEALTH = {
-  pattern: "/api/v1/health",
-  status: 200,
-  body: { status: "ok", version: "1.0.0" },
-};
-const ROUTE_LOGIN = { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE };
-const ROUTE_MESSAGES = { pattern: "/messages", status: 200, body: MOCK_MESSAGES };
-const ROUTE_PINS = { pattern: "/pins", status: 200, body: MOCK_PINNED_MESSAGES };
 
 /** The signed-in profile this suite starts from (`GET /auth/me` answers this). */
 function meRoute(totpEnabled: boolean) {

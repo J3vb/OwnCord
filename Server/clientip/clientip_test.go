@@ -6,7 +6,7 @@ package clientip
 // address). api/middleware.go now delegates to it and its own clientip_test.go
 // still pins the behaviour end to end.
 //
-// The security model is unchanged from api's clientIPWithProxies:
+// The security model is unchanged from the copy that used to live in api:
 //   - Always parse the connecting address from r.RemoteAddr.
 //   - Only honour X-Real-IP/X-Forwarded-For when the connecting address
 //     matches a trusted network, so a client cannot forge its IP.
@@ -144,6 +144,35 @@ func TestRateKey(t *testing.T) {
 	for _, tc := range cases {
 		if got := RateKey(tc.in); got != tc.want {
 			t.Errorf("RateKey(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+// TestFirstCatchAll pins which trusted-proxy entries count as covering every
+// address: a zero-length prefix in either family and the IPv4-mapped form that
+// matches every IPv4 client. Short but partial prefixes and unparsable entries
+// do not count.
+func TestFirstCatchAll(t *testing.T) {
+	cases := []struct {
+		cidrs []string
+		want  string
+		found bool
+	}{
+		{[]string{"0.0.0.0/0"}, "0.0.0.0/0", true},
+		{[]string{"::/0"}, "::/0", true},
+		{[]string{"10.0.0.2/32", "::ffff:0.0.0.0/96"}, "::ffff:0.0.0.0/96", true},
+		{[]string{"::ffff:0:0/96"}, "::ffff:0:0/96", true},
+		{[]string{"192.0.2.9/0"}, "192.0.2.9/0", true},
+		{[]string{"0.0.0.0/1", "128.0.0.0/1"}, "", false},
+		{[]string{"::/1", "::/80", "::ffff:0.0.0.0/97"}, "", false},
+		{[]string{"10.0.0.0/8", "fd00::/8"}, "", false},
+		{[]string{"not-a-cidr", " 0.0.0.0/0"}, "", false},
+		{nil, "", false},
+	}
+	for _, tc := range cases {
+		got, found := FirstCatchAll(tc.cidrs)
+		if got != tc.want || found != tc.found {
+			t.Errorf("FirstCatchAll(%q) = %q, %v; want %q, %v", tc.cidrs, got, found, tc.want, tc.found)
 		}
 	}
 }

@@ -6,7 +6,7 @@ import {
   bindImageMenu,
   closeActiveLightbox,
 } from "../../src/features/messaging/content/attachments";
-import { messagesStore, type Message } from "@stores/messages.store";
+import type { Message } from "@stores/messages.store";
 import { setConnectionStatus } from "@stores/ui.store";
 import { setActiveTimeout } from "../../src/features/safety/store";
 import {
@@ -18,22 +18,13 @@ import {
   setChannel,
   setDeveloperMode,
   signInAs,
+  seedMessages as seed,
 } from "../helpers/message-actions-fixtures";
 import { resetMembersState } from "../helpers/storeResets";
 import "../helpers/resizeObserverStub";
+import { desktop } from "../../src/platform/desktop";
 
 const MENU = ".message-context-menu";
-
-function seed(messages: Message[]): void {
-  messagesStore.setState(() => ({
-    messagesByChannel: new Map([[1, messages]]),
-    pendingSends: new Map(),
-    loadedChannels: new Set(),
-    hasMore: new Map(),
-    historyLoadState: new Map(),
-    detachedChannels: new Set(),
-  }));
-}
 
 function mine(over: Partial<Message> = {}): Message {
   return makeMessage({ user: { id: ME, username: "me", avatar: null }, ...over });
@@ -52,6 +43,8 @@ function rightClick(target: Element, init: MouseEventInit = {}): MouseEvent {
 }
 
 const menu = (): HTMLElement | null => document.querySelector<HTMLElement>(MENU);
+const sheet = (): HTMLElement | null =>
+  document.querySelector<HTMLElement>('[data-testid="message-sheet"]');
 
 function items(): HTMLElement[] {
   return [...document.querySelectorAll<HTMLElement>(`${MENU} [role="menuitem"]`)];
@@ -328,6 +321,65 @@ describe("message right-click menu", () => {
     // Off the link the same message has no link rows.
     await open(text());
     expect(names()).not.toContain("Copy Link");
+  });
+
+  describe("on a phone", () => {
+    const sheetItem = (testId: string): HTMLElement | null =>
+      sheet()?.querySelector<HTMLElement>(`[data-testid="${testId}"]`) ?? null;
+    async function press(target: Element): Promise<void> {
+      rightClick(target);
+      await vi.waitFor(() => expect(sheet()).not.toBeNull());
+    }
+
+    beforeEach(() => {
+      vi.stubGlobal("matchMedia", (q: string) => ({ matches: q.includes("pointer: coarse") }));
+    });
+    afterEach(() => {
+      sheet()?.remove();
+      document
+        .querySelectorAll(".bottom-sheet, .bottom-sheet-backdrop")
+        .forEach((el) => el.remove());
+      vi.unstubAllGlobals();
+    });
+
+    it("a message with one link offers it wherever the row is pressed", async () => {
+      mount([
+        makeMessage({ content: "see <https://example.com/page> and <https://example.com/page>" }),
+      ]);
+      await press(text());
+      expect(sheetItem("msg-menu-open-link")).not.toBeNull();
+      expect(sheetItem("msg-menu-copy-message-link")).not.toBeNull();
+      sheetItem("msg-menu-copy-link")!.click();
+      expect(writeText).toHaveBeenCalledWith("https://example.com/page");
+    });
+
+    it("offers Share in the Android app and hands the text to the share sheet", async () => {
+      vi.spyOn(desktop.shareSheet, "available", "get").mockReturnValue(true);
+      const share = vi.spyOn(desktop.shareSheet, "shareText").mockResolvedValue(undefined);
+      mount([makeMessage({ content: "release notes <https://example.com/2.7>" })]);
+      await press(text());
+      sheetItem("msg-menu-share")!.click();
+      expect(share).toHaveBeenCalledWith("release notes <https://example.com/2.7>");
+    });
+
+    it("offers no Share where the host has no share sheet", async () => {
+      vi.spyOn(desktop.shareSheet, "available", "get").mockReturnValue(false);
+      mount([makeMessage({ content: "hello" })]);
+      await press(text());
+      expect(sheetItem("msg-menu-copy-text")).not.toBeNull();
+      expect(sheetItem("msg-menu-share")).toBeNull();
+    });
+
+    it("a message with two different links offers only the one pressed", async () => {
+      mount([makeMessage({ content: "<https://a.example/> or <https://b.example/>" })]);
+      await press(text());
+      expect(sheetItem("msg-menu-copy-link")).toBeNull();
+      sheet()?.remove();
+      const second = text().querySelectorAll<HTMLAnchorElement>('a[href^="http"]')[1]!;
+      await press(second);
+      sheetItem("msg-menu-copy-link")!.click();
+      expect(writeText).toHaveBeenCalledWith(second.getAttribute("href"));
+    });
   });
 
   it("image right-click opens the image menu, not this one", async () => {

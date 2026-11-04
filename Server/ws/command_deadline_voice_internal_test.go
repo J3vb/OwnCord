@@ -36,7 +36,7 @@ func (s stallingVoiceStore) ReserveCamera(ctx context.Context, userID, channelID
 // stallVoiceDeps swaps the Voice dependency of typ's registered handler.
 func stallVoiceDeps(t *testing.T, h *Hub, typ string, stall time.Duration) {
 	t.Helper()
-	entry, ok := h.registry.handlersV2[typ]
+	entry, ok := h.seams.registry.handlersV2[typ]
 	if !ok {
 		t.Fatalf("%s not registered", typ)
 	}
@@ -46,7 +46,7 @@ func stallVoiceDeps(t *testing.T, h *Hub, typ string, stall time.Duration) {
 	}
 	d.Voice = stallingVoiceStore{VoiceStore: d.Voice, stall: stall}
 	entry.deps = d
-	h.registry.handlersV2[typ] = entry
+	h.seams.registry.handlersV2[typ] = entry
 }
 
 // drainFrames returns the (type, payload) of every frame queued on c.

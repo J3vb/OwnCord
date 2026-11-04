@@ -84,7 +84,7 @@ func (h *Hub) handleVoiceJoinFrame(fctx, ctx context.Context, c *Client, payload
 
 	if h.voiceJoinComplete(ctx, txn, c, ch, channelID, state, reqID) {
 		h.voice.NoteJoinCompleted(channelID, c.userID)
-		h.latency.voiceJoin.observe(start, precheckDone, leaveDone, persistDone, tokenDone, time.Now())
+		h.stats.latency.ObserveVoiceJoin(start, precheckDone, leaveDone, persistDone, tokenDone, time.Now())
 	}
 }
 
@@ -127,8 +127,8 @@ func (h *Hub) voiceJoinPrecheck(ctx context.Context, c *Client, payload json.Raw
 	}
 	_ = json.Unmarshal(payload, &intent) // parseCallChannelID already accepted it; a non-bool reads as false
 	if intent.UserInitiated {
-		h.voiceRejoinBlocks.clear(c.userID)
-	} else if h.voiceRejoinBlocks.blocked(c.userID, channelID) {
+		h.voiceHub.rejoinBlocks.clear(c.userID)
+	} else if h.voiceHub.rejoinBlocks.blocked(c.userID, channelID) {
 		c.sendMsg(buildErrorMsgWithID(ErrCodeForbidden, voiceRejoinRefusal, reqID))
 		return 0, nil, 0, false
 	}
@@ -185,7 +185,7 @@ func (h *Hub) voiceJoinPrecheck(ctx context.Context, c *Client, payload json.Raw
 	}
 
 	// Reject when the companion LiveKit process gave up (crashed repeatedly).
-	if h.lkProcess != nil && !h.lkProcess.IsRunning() {
+	if h.voiceHub.lkProcess != nil && !h.voiceHub.lkProcess.IsRunning() {
 		slog.Warn("handleVoiceJoin: LiveKit process not running", "user_id", c.userID)
 		c.sendMsg(buildErrorMsgWithID(ErrCodeVoiceError, "voice is temporarily unavailable — LiveKit is not running", reqID))
 		return 0, nil, 0, false
@@ -193,10 +193,11 @@ func (h *Hub) voiceJoinPrecheck(ctx context.Context, c *Client, payload json.Raw
 
 	// With no supervised companion LiveKit is externally managed and the check above
 	// no-ops. Probe reachability before minting: a credential for an unreachable SFU
-	// makes the client fail confusingly with no server-side explanation. ListRooms
-	// bounds itself at 3s.
-	if h.lkProcess == nil {
-		if healthy, err := h.livekit.HealthCheck(ctx); !healthy || err != nil {
+	// makes the client fail confusingly with no server-side explanation. The verdict
+	// is shared and at most 5 s old, so a burst of joins costs one ListRooms (bounded
+	// at 3 s), not one each.
+	if h.voiceHub.lkProcess == nil {
+		if healthy, err := h.livekit.CachedHealthCheck(ctx); !healthy || err != nil {
 			slog.Warn("handleVoiceJoin: external LiveKit unreachable", "user_id", c.userID, "err", err)
 			voiceJoinFail(ctx, c, reqID, errors.Join(err, errVoiceJoinUnhealthy), ErrCodeVoiceError, "voice is temporarily unavailable — LiveKit is not reachable")
 			return 0, nil, 0, false
@@ -463,8 +464,8 @@ func (h *Hub) voiceJoinComplete(ctx context.Context, txn *voiceTxn, c *Client, c
 	h.sendVoicePeerKeys(c, channelID)
 	h.sendVoicePeerWatching(c, channelID)
 
-	// h.defaultVoiceQuality (voice.quality config) is the only source; no per-channel override exists.
-	quality := h.defaultVoiceQuality
+	// h.voiceHub.defaultQuality (voice.quality config) is the only source; no per-channel override exists.
+	quality := h.voiceHub.defaultQuality
 	maxUsers := ch.VoiceMaxUsers
 	bitrate := qualityBitrate(quality)
 	c.sendMsg(buildVoiceConfig(channelID, quality, bitrate, maxUsers))

@@ -1,5 +1,5 @@
 import { test, expect } from "./fixtures";
-import { mockTauriFullSession, navigateToMainPage, emitWsMessage } from "./helpers";
+import { emitWsMessage, startFullSession } from "./helpers";
 
 // ---------------------------------------------------------------------------
 // Tests: Typing Indicator
@@ -7,9 +7,7 @@ import { mockTauriFullSession, navigateToMainPage, emitWsMessage } from "./helpe
 
 test.describe("Typing Indicator", () => {
   test.beforeEach(async ({ page }) => {
-    await mockTauriFullSession(page);
-    await page.goto("/");
-    await navigateToMainPage(page);
+    await startFullSession(page);
   });
 
   test("typing indicator slot exists", async ({ page }) => {

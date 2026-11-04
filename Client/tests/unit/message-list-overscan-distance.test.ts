@@ -19,56 +19,28 @@ globalThis.ResizeObserver = class {
   }
 } as unknown as typeof ResizeObserver;
 
-const { fetchImageAsObjectUrlMock } = vi.hoisted(() => ({
-  fetchImageAsObjectUrlMock: vi.fn(() => Promise.resolve("data:image/png;base64,AAAA")),
-}));
-vi.mock("../../src/features/messaging/content/attachments", async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import("../../src/features/messaging/content/attachments")>();
-  return { ...actual, fetchImageAsObjectUrl: fetchImageAsObjectUrlMock };
-});
+import * as mocks from "../helpers/messageListMocks";
+vi.mock("../../src/features/messaging/content/attachments", (importOriginal) =>
+  mocks.listAttachmentsMock(importOriginal),
+);
 
-const { observeMediaMock, discardMediaMock } = vi.hoisted(() => ({
-  observeMediaMock: vi.fn(),
-  discardMediaMock: vi.fn(),
-}));
-vi.mock("../../src/features/content-consent/external", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../src/features/content-consent/external")>()),
-  externalAllowed: () => true,
-}));
-vi.mock("@lib/prefs/mediaVisibility", () => ({
-  observeMedia: observeMediaMock,
-  discardMedia: discardMediaMock,
-}));
+vi.mock("../../src/features/content-consent/external", (importOriginal) =>
+  mocks.consentedExternalMock(importOriginal),
+);
+vi.mock("@lib/prefs/mediaVisibility", () => mocks.mediaVisibilityMock());
 
 import { createMessageList } from "@components/MessageList";
 import type { MessageListOptions } from "@components/MessageList";
-import { messagesStore } from "@stores/messages.store";
 import type { Message } from "@stores/messages.store";
-import { buildMessage } from "../helpers/messageFactory";
-import { resetMessagesState, resetMembersState } from "../helpers/storeResets";
+import {
+  makeListOptions,
+  makeMessage,
+  nextFrame,
+  resetStores,
+  setMessages,
+} from "../helpers/messageListHarness";
 
 const ROW_H = 61;
-
-function resetStores(): void {
-  resetMessagesState();
-  resetMembersState();
-}
-
-function makeMessage(overrides: Partial<Message> & { id: number }): Message {
-  return buildMessage(overrides);
-}
-
-function setMessages(channelId: number, messages: Message[]): void {
-  messagesStore.setState((prev) => {
-    const next = new Map(prev.messagesByChannel);
-    next.set(channelId, messages);
-    return { ...prev, messagesByChannel: next };
-  });
-}
-
-const nextFrame = (): Promise<void> =>
-  new Promise((resolve) => requestAnimationFrame(() => resolve()));
 
 const nextFrame2 = nextFrame;
 
@@ -103,19 +75,7 @@ describe("MessageList overscan by distance", () => {
     container = document.createElement("div");
     document.body.appendChild(container);
     setMessages(1, build(variant));
-    msgList = createMessageList({
-      channelId: 1,
-      channelName: "general",
-      currentUserId: 1,
-      onScrollTop: vi.fn(),
-      onReplyClick: vi.fn(),
-      onEditClick: vi.fn(),
-      onEditSave: vi.fn(() => true),
-      onEmptyEdit: vi.fn(),
-      onDeleteClick: vi.fn(),
-      onReactionClick: vi.fn(),
-      onPinClick: vi.fn(),
-    } satisfies MessageListOptions);
+    msgList = createMessageList(makeListOptions() satisfies MessageListOptions);
     root = null as unknown as HTMLDivElement;
     // clientHeight must be set before the first window is computed.
     const proto = HTMLElement.prototype;

@@ -8,6 +8,7 @@
 // module reaches them only through E2EEOfferHost.
 import type { WsClient } from "../../lib/ws";
 import { wrapRoomKey, unwrapRoomKey } from "../../lib/net/e2eeCrypto";
+import { LEGACY_PLACEMENT, type KeyPlacement } from "../../lib/net/keyPlacement";
 import { createLogger } from "../../lib/logger";
 import { markJoinMilestone } from "../../lib/voice/voiceJoinTrace";
 
@@ -27,7 +28,17 @@ export interface E2EEOfferHost {
   getPeerOfferEpochs(): Map<number, number>;
   getRoomKey(): Uint8Array | null;
   setRoomKey(roomKey: Uint8Array | null): void;
-  applyRoomKey(roomKey: Uint8Array, isCurrent: () => boolean): Promise<boolean>;
+  applyRoomKey(
+    roomKey: Uint8Array,
+    isCurrent: () => boolean,
+    placement: KeyPlacement,
+  ): Promise<boolean>;
+  /** Record where the room key went (for re-offers and rotations). */
+  setRoomKeyPlacement?(placement: KeyPlacement): void;
+  /** The placement a peer's offer of the current room key carries: the
+   *  key's own for a peer on key slots, undefined (the v1 format) for any
+   *  other. */
+  offerPlacement?(peerId: number): KeyPlacement | undefined;
   isKeyHolder(): boolean;
   setKeyHolder(value: boolean): void;
   clearKeyRotationTimer(): void;
@@ -84,8 +95,12 @@ export class E2EEOffer {
   private peerAttemptIsCurrent(userId: number): () => boolean {
     return this.host.peerAttemptIsCurrent(userId);
   }
-  private applyRoomKey(roomKey: Uint8Array, isCurrent: () => boolean): Promise<boolean> {
-    return this.host.applyRoomKey(roomKey, isCurrent);
+  private applyRoomKey(
+    roomKey: Uint8Array,
+    isCurrent: () => boolean,
+    placement: KeyPlacement,
+  ): Promise<boolean> {
+    return this.host.applyRoomKey(roomKey, isCurrent, placement);
   }
   private clearKeyRotationTimer(): void {
     this.host.clearKeyRotationTimer();
@@ -164,12 +179,11 @@ export class E2EEOffer {
       // unwrap, the epoch will have advanced and we discard this stale result.
       const epochBefore = this._e2eeEpoch;
 
-      const { roomKey: unwrapped, epoch } = await unwrapRoomKey(
-        keypair.privateKey,
-        peerKey,
-        encryptedKeyBase64,
-        ivBase64,
-      );
+      const {
+        roomKey: unwrapped,
+        epoch,
+        placement: offered,
+      } = await unwrapRoomKey(keypair.privateKey, peerKey, encryptedKeyBase64, ivBase64);
 
       // Discard if either the epoch advanced (a rotation landed during
       // unwrap) OR the keypair no longer matches (clearState() ran and a new
@@ -209,9 +223,22 @@ export class E2EEOffer {
         this._peerOfferEpochs.set(fromUserId, epoch);
       }
 
+      // A first key has nothing to switch from: use it at once.
+      const placement: KeyPlacement =
+        offered === undefined
+          ? LEGACY_PLACEMENT
+          : this._roomKey === null
+            ? { slot: offered.slot, stage: false }
+            : offered;
       this._roomKey = unwrapped;
-      if (!(await this.applyRoomKey(unwrapped, isCurrent))) return;
-      log.info("E2EE: room key received and applied", { fromUserId, epoch });
+      this.host.setRoomKeyPlacement?.(placement);
+      if (!(await this.applyRoomKey(unwrapped, isCurrent, placement))) return;
+      log.info("E2EE: room key received and applied", {
+        fromUserId,
+        epoch,
+        slot: placement.slot,
+        staged: placement.stage,
+      });
       markJoinMilestone("e2ee room key applied");
 
       // Re-check after the setKey await too: the guard above only covers the
@@ -368,6 +395,7 @@ export class E2EEOffer {
         peerKey,
         roomKey,
         this._e2eeEpoch,
+        this.host.offerPlacement?.(peerId),
       );
       if (this._ecdhKeyPair !== keypair || this._roomKey !== roomKey) {
         log.info("E2EE: discarding stale room-key offer (keypair/room key changed during wrap)", {

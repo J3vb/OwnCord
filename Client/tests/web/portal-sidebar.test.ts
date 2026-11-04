@@ -4,7 +4,8 @@
  * has nothing to switch to on a single-server page, is never reached. Runs in
  * the `web` project, where `__OWNCORD_WEB__` is true.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
 
 vi.hoisted(() => {
   vi.stubGlobal("isSecureContext", true);
@@ -12,7 +13,7 @@ vi.hoisted(() => {
 vi.mock("@lib/logger", () => ({
   createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
-vi.mock("@lib/net/logout", () => ({ logout: vi.fn() }));
+vi.mock("../../src/features/connection/logout", () => ({ logout: vi.fn() }));
 vi.mock("@lib/voice/livekitSession", () => ({}));
 vi.mock("@components/QuickSwitchOverlay", () => ({
   createQuickSwitchOverlay: vi.fn().mockReturnValue({ mount: vi.fn(), destroy: vi.fn() }),
@@ -29,7 +30,7 @@ vi.mock("@components/MemberList", () => ({
 
 import { createSidebarArea, type SidebarAreaOptions } from "../../src/pages/main-page/SidebarArea";
 import { createQuickSwitchOverlay } from "@components/QuickSwitchOverlay";
-import { logout } from "@lib/net/logout";
+import { logout } from "../../src/features/connection/logout";
 import { authStore } from "../../src/stores/auth.store";
 import { shellText } from "../../src/i18n/shell";
 import { portalText } from "../../src/i18n/portal";
@@ -49,6 +50,13 @@ function options(api: object): SidebarAreaOptions {
 }
 
 let container: HTMLDivElement;
+useMountContainer(
+  (c) => {
+    container = c;
+  },
+  () => vi.clearAllMocks(),
+);
+
 beforeEach(() => {
   authStore.setState(() => ({
     token: "t",
@@ -57,12 +65,6 @@ beforeEach(() => {
     motd: null,
     isAuthenticated: true,
   }));
-  container = document.createElement("div");
-  document.body.appendChild(container);
-});
-afterEach(() => {
-  container.remove();
-  vi.clearAllMocks();
 });
 
 describe("portal user bar", () => {

@@ -1,7 +1,6 @@
 package api_test
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/json"
@@ -262,6 +261,20 @@ func TestAPIV1ServerInfoReturnsNameEpochAndBrowserFlag(t *testing.T) {
 		t.Errorf("registration_mode = %v, want invite", got)
 	}
 	assertServerInfoRetention(t, body, 0)
+}
+
+// TestAPIV1ServerInfoReportsUploadTransferLifetime: the client sizes its own
+// transfer bound from this field, so it must be present and match the lifetime
+// the upload route enforces (the 100 MiB default body cap at 64 KiB/s).
+func TestAPIV1ServerInfoReportsUploadTransferLifetime(t *testing.T) {
+	body := serverInfoBody(t, setupRouter(t))
+	upload, ok := body["upload"].(map[string]any)
+	if !ok {
+		t.Fatalf("upload = %#v, want an object", body["upload"])
+	}
+	if len(upload) != 1 || upload["transfer_lifetime_seconds"] != float64(1600) {
+		t.Errorf("upload = %#v, want only transfer_lifetime_seconds: 1600", upload)
+	}
 }
 
 func assertServerInfoRetention(t *testing.T, body map[string]any, days int) {
@@ -606,7 +619,7 @@ func TestWarnOnServerConfig_NonGlobalNodeIP(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			var buf bytes.Buffer
+			var buf lockedBuffer
 			prev := slog.Default()
 			slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
 			t.Cleanup(func() { slog.SetDefault(prev) })
@@ -629,7 +642,7 @@ func TestWarnOnServerConfig_NonGlobalNodeIP(t *testing.T) {
 // TestWarnOnServerConfig_NodeIPSilentWhenVoiceIsOff — an unused key is not a
 // misconfiguration, and a warning an operator cannot act on is noise.
 func TestWarnOnServerConfig_NodeIPSilentWhenVoiceIsOff(t *testing.T) {
-	var buf bytes.Buffer
+	var buf lockedBuffer
 	prev := slog.Default()
 	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
 	t.Cleanup(func() { slog.SetDefault(prev) })
@@ -657,7 +670,7 @@ func TestWarnOnServerConfig_NodeIPIgnoredWithAdvertiseInternalIP(t *testing.T) {
 		{"pin alone", false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			var buf bytes.Buffer
+			var buf lockedBuffer
 			prev := slog.Default()
 			slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
 			t.Cleanup(func() { slog.SetDefault(prev) })
@@ -683,7 +696,7 @@ func TestWarnOnServerConfig_NodeIPIgnoredWithAdvertiseInternalIP(t *testing.T) {
 // warnings fire with it off, and the banner's address qualifier does not take
 // the config at all. A later edit that moves either behind the flag fails here.
 func TestReachabilityWarningsAreNotGatedByTheFlag(t *testing.T) {
-	var buf bytes.Buffer
+	var buf lockedBuffer
 	prev := slog.Default()
 	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
 	t.Cleanup(func() { slog.SetDefault(prev) })
@@ -746,7 +759,7 @@ func TestWarnOnServerConfig_AdminPeerAddress(t *testing.T) {
 				}
 			}
 			api.SetRouteTablePathForTest(t, routes)
-			var buf bytes.Buffer
+			var buf lockedBuffer
 			prev := slog.Default()
 			slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
 			t.Cleanup(func() { slog.SetDefault(prev) })
@@ -801,7 +814,7 @@ func TestWarnOnBrowserClient(t *testing.T) {
 		{"on, bundled, self-signed", true, true, "self_signed", false, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			var buf bytes.Buffer
+			var buf lockedBuffer
 			prev := slog.Default()
 			slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
 			t.Cleanup(func() { slog.SetDefault(prev) })

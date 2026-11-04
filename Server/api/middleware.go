@@ -90,6 +90,31 @@ func requireUser(w http.ResponseWriter, r *http.Request) (*db.User, bool) {
 	return user, true
 }
 
+// requireLoginSession admits only a principal that holds a login session; an
+// API-token principal gets 403 LOGIN_SESSION_REQUIRED. It guards the
+// account-security routes (password, two-factor, recovery, sessions, account
+// deletion) and mounts after AuthMiddleware.
+func requireLoginSession(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p, ok := principal(r)
+		if !ok {
+			writeNotAuthenticated(w)
+			return
+		}
+		if p.Session == nil {
+			writeLoginSessionRequired(w)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// writeLoginSessionRequired answers a request that needs a login session but
+// carried an API token.
+func writeLoginSessionRequired(w http.ResponseWriter) {
+	writeErr(w, http.StatusForbidden, httperr.CodeLoginSessionRequired, service.ErrLoginSessionRequired.Error())
+}
+
 // backgroundWriteTimeout bounds AuthMiddleware's session writes that run when
 // no connection-writes batch is installed (the expired-session delete and the
 // API-token touch), so a wedged DB cannot hold a request forever. A var so tests can shorten it.
@@ -246,7 +271,7 @@ func RateLimitMiddleware(limiter *auth.RateLimiter, prefix string, limit int, wi
 	proxyNets := parseCIDRList(proxies) // parse once at construction
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ip := clientIPWithProxies(r, proxyNets)
+			ip := clientip.Resolve(r, proxyNets)
 			key := prefix + clientip.RateKey(ip)
 
 			if !limiter.Allow(key, limit, window) {
@@ -267,16 +292,11 @@ func RateLimitMiddleware(limiter *auth.RateLimiter, prefix string, limit int, wi
 
 // clientIP returns the connecting IP from RemoteAddr, ignoring proxy headers;
 // use it for audit and lockout keys where proxy trust is not established, and
-// clientIPWithProxies for rate limiting.
+// clientip.Resolve for rate limiting. The resolution algorithm lives in the
+// clientip package because the WebSocket handshake needs the identical result
+// and ws cannot import api.
 func clientIP(r *http.Request) string {
-	return clientIPWithProxies(r, nil)
-}
-
-// clientIPWithProxies returns the real client IP for rate limiting. The
-// algorithm lives in the clientip package because the WebSocket handshake needs
-// the identical resolution and ws cannot import api.
-func clientIPWithProxies(r *http.Request, trustedNets []*net.IPNet) string {
-	return clientip.Resolve(r, trustedNets)
+	return clientip.Resolve(r, nil)
 }
 
 // parseCIDRList parses CIDR strings, skipping invalid entries with a warning so
@@ -290,10 +310,6 @@ func parseCIDRList(cidrs []string) []*net.IPNet {
 		}
 	}
 	return clientip.ParseCIDRList(cidrs)
-}
-
-func ipInNets(ipStr string, nets []*net.IPNet) bool {
-	return clientip.InNets(ipStr, nets)
 }
 
 // AdminIPRestrict blocks requests from IPs outside the allowed CIDR list with
@@ -314,8 +330,8 @@ func AdminIPRestrict(settingName string, allowedCIDRs, trustedProxyCIDRs []strin
 				return
 			}
 
-			ip := clientIPWithProxies(r, proxyNets)
-			if !ipInNets(ip, allowedNets) {
+			ip := clientip.Resolve(r, proxyNets)
+			if !clientip.InNets(ip, allowedNets) {
 				// Name the setting so a self-hoster can fix it without reading
 				// the source: the default allowlist is private networks only, so
 				// a remote operator is refused until they add their address or
@@ -328,7 +344,7 @@ func AdminIPRestrict(settingName string, allowedCIDRs, trustedProxyCIDRs []strin
 			// A local peer forwarding for someone else while no proxy is
 			// trusted means the allowlist is judging the proxy, not the
 			// client: every client inherits the proxy's private address.
-			// Either header clientIPWithProxies reads marks a proxy.
+			// Either header clientip.Resolve reads marks a proxy.
 			forwarded := r.Header.Get("X-Forwarded-For") != "" || r.Header.Get("X-Real-IP") != ""
 			if len(proxyNets) == 0 && forwarded {
 				if peer := net.ParseIP(ip); peer != nil && (peer.IsLoopback() || peer.IsPrivate()) {

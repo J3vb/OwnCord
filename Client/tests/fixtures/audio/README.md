@@ -5,6 +5,7 @@ Recordings that the click-suppression tests feed through the voice input path:
 - `tests/unit/rnnoise-click-suppression.test.ts`
 - `tests/unit/vad-worklet-click.test.ts`
 - `tests/e2e/fullstack/voice-click.spec.ts`
+- `tests/browser/voice-gate.test.ts`
 
 Both are CC0 (public domain) files from Wikimedia Commons. They were converted
 to 48 kHz mono 16-bit PCM with a standard 44-byte WAV header.

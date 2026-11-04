@@ -10,39 +10,21 @@
  * through the server's dm_request frame, which the transport can drop.
  */
 
-import { randomUUID } from "node:crypto";
 import type { Page } from "@playwright/test";
-import { test as base, expect } from "./fixtures";
-import { startTestServer, TEST_PASSWORD, type TestServer } from "../support/server";
+import { expect } from "./fixtures";
+import {
+  connectSender,
+  openDm,
+  relaxedAuthTest,
+  signIn,
+  userIds,
+  type Frame,
+  type Sender,
+} from "./serverApi";
+import { TEST_PASSWORD, type TestServer } from "../support/server";
 
 // Four senders need more sign-ups and sign-ins than one IP gets a minute.
-const test = base.extend({
-  // eslint-disable-next-line no-empty-pattern -- Playwright requires the destructuring form
-  server: async ({}, use, info) => {
-    const server = await startTestServer({
-      env: { ...process.env, OWNCORD_SECURITY_AUTH_RATE_LIMIT_MULTIPLIER: "10" },
-    });
-    try {
-      await use(server);
-    } finally {
-      await info.attach("server-log", { body: server.log(), contentType: "text/plain" });
-      await server.close();
-    }
-  },
-});
-
-type Frame = { type: string; payload?: Record<string, unknown> };
-
-/** A sender who is not in the browser: a REST token plus its own socket. */
-interface Sender {
-  readonly name: string;
-  readonly token: string;
-  readonly frames: Frame[];
-  /** The DM channel with bob, once the first message is sent. */
-  channelId: number;
-  send(content: string): Promise<Frame>;
-  close(): void;
-}
+const test = relaxedAuthTest;
 
 async function signUp(server: TestServer, name: string): Promise<void> {
   const invite = (await server.api("/api/v1/invites", {}, server.owner!.token)) as { code: string };
@@ -53,64 +35,10 @@ async function signUp(server: TestServer, name: string): Promise<void> {
   });
 }
 
-async function signIn(server: TestServer, name: string): Promise<string> {
-  const r = (await server.api("/api/v1/auth/login", {
-    username: name,
-    password: TEST_PASSWORD,
-  })) as {
-    token: string;
-  };
-  return r.token;
-}
-
-async function connect(server: TestServer, name: string): Promise<Sender> {
-  const token = await signIn(server, name);
-  const socket = new WebSocket(`ws://127.0.0.1:${server.port}/api/v1/ws`);
-  const frames: Frame[] = [];
-  const waiters: Array<{ wants: (f: Frame) => boolean; resolve: (f: Frame) => void }> = [];
-  socket.addEventListener("message", (e) => {
-    const f = JSON.parse(String(e.data)) as Frame;
-    frames.push(f);
-    for (const w of waiters.splice(0)) {
-      if (w.wants(f)) w.resolve(f);
-      else waiters.push(w);
-    }
-  });
-  const next = (wants: (f: Frame) => boolean): Promise<Frame> =>
-    new Promise((resolve) => waiters.push({ wants, resolve }));
-  await new Promise((resolve) => socket.addEventListener("open", resolve, { once: true }));
-  const ready = next((f) => f.type === "ready");
-  socket.send(JSON.stringify({ type: "auth", payload: { token } }));
-  await ready;
-  const sender: Sender = {
-    name,
-    token,
-    frames,
-    channelId: 0,
-    async send(content) {
-      const id = randomUUID();
-      const ok = next((f) => (f as { id?: string }).id === id);
-      socket.send(
-        JSON.stringify({
-          type: "chat_send",
-          id,
-          payload: { channel_id: sender.channelId, content, reply_to: null },
-        }),
-      );
-      return ok;
-    },
-    close: () => socket.close(),
-  };
-  return sender;
-}
-
 /** `name` opens a DM with bob and sends a first message: a request in bob's inbox. */
 async function firstContact(server: TestServer, name: string, bobId: number): Promise<Sender> {
-  const s = await connect(server, name);
-  const dm = (await server.api("/api/v1/dms", { recipient_id: bobId }, s.token)) as {
-    channel_id: number;
-  };
-  s.channelId = dm.channel_id;
+  const s = await connectSender(server, name);
+  await openDm(server, s, bobId);
   const ok = await s.send(`hello bob, this is ${name}`);
   expect(ok.type).toBe("chat_send_ok");
   return s;
@@ -121,14 +49,6 @@ async function senderView(server: TestServer, s: Sender): Promise<string> {
   const dms = await server.api("/api/v1/dms", undefined, s.token);
   const history = await server.api(`/api/v1/channels/${s.channelId}/messages`, undefined, s.token);
   return JSON.stringify({ dms, history });
-}
-
-async function userId(server: TestServer, name: string): Promise<number> {
-  const users = (await server.api("/admin/api/users", undefined, server.owner!.token)) as {
-    id: number;
-    username: string;
-  }[];
-  return users.find((u) => u.username === name)!.id;
 }
 
 const inbox = (page: Page) => page.getByRole("region", { name: "Message Requests" });
@@ -151,7 +71,7 @@ test.describe("Message Request decisions (real server)", () => {
     bob,
     server,
   }, testInfo) => {
-    const bobId = await userId(server, "bob");
+    const bobId = (await userIds(server))("bob");
     for (const name of ["carol", "dave", "erin"]) await signUp(server, name);
     const alice = await firstContact(server, "alice", bobId);
     const carol = await firstContact(server, "carol", bobId);
@@ -223,7 +143,7 @@ test.describe("Message Request decisions (real server)", () => {
       const blocks = (await server.api("/api/v1/blocks", undefined, bobToken)) as {
         blocked_user_ids: number[];
       };
-      expect(blocks.blocked_user_ids).toEqual([await userId(server, "erin")]);
+      expect(blocks.blocked_user_ids).toEqual([(await userIds(server))("erin")]);
       await alice.send("now we can talk");
       await expect(bob.locator(".msg-text", { hasText: "now we can talk" })).toHaveCount(1);
 
@@ -252,7 +172,7 @@ test.describe("Message Request decisions (real server)", () => {
     bobTransport,
     server,
   }) => {
-    const bobId = await userId(server, "bob");
+    const bobId = (await userIds(server))("bob");
     await signUp(server, "carol");
     const alice = await firstContact(server, "alice", bobId);
     const carol = await firstContact(server, "carol", bobId);

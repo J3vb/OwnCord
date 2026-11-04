@@ -1,80 +1,22 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { createMessageList } from "@components/MessageList";
+import { describe, expect, it, vi } from "vitest";
+import type { createMessageList } from "@components/MessageList";
 import { messagesStore } from "@stores/messages.store";
-import type { Message } from "@stores/messages.store";
+import { frames, setRows, useMessageListHost } from "../helpers/browserMessageList";
 import "../../src/styles/app.css";
 
 // jsdom lays nothing out, so the editor growing inside a virtualized row, the
 // height tree re-measuring and the caret staying on screen can only be checked
 // in a real browser (WP 3A-8).
-const ME = 1;
-
-/** Even ids are the signed-in user's, so they can be edited. */
-function message(id: number): Message {
-  return {
-    id,
-    channelId: 1,
-    user: { id: (id % 2) + 1, username: id % 2 === 0 ? "Alice" : "Bob", avatar: null },
-    content: `Message ${id}`,
-    replyTo: null,
-    attachments: [],
-    reactions: [],
-    pinned: false,
-    editedAt: null,
-    deleted: false,
-    timestamp: new Date(Date.UTC(2024, 0, 15, 12, id)).toISOString(),
-    status: "sent",
-    correlationId: null,
-    errorCode: null,
-  };
-}
-
-function setRows(rows: readonly Message[]): void {
-  messagesStore.setState((prev) => ({
-    ...prev,
-    messagesByChannel: new Map([[1, rows]]),
-    hasMore: new Map([[1, false]]),
-  }));
-}
-
-const frames = async (n = 4): Promise<void> => {
-  for (let i = 0; i < n; i++) await new Promise((r) => requestAnimationFrame(r));
-};
-
 describe("MessageList inline editor in a real browser", () => {
-  const style = document.createElement("style");
-  style.textContent = ".messages-region { height: 400px; display: flex; flex-direction: column; }";
-  const host = document.createElement("div");
-
-  afterEach(() => {
-    host.replaceChildren();
-    style.remove();
-    host.remove();
-  });
+  const { host, mountList } = useMessageListHost();
 
   async function mountReadingFromTheMiddle(): Promise<{
     list: ReturnType<typeof createMessageList>;
     root: HTMLElement;
   }> {
-    document.head.appendChild(style);
-    document.body.appendChild(host);
-    setRows(Array.from({ length: 150 }, (_, i) => message(i + 1)));
-    const list = createMessageList({
-      channelId: 1,
-      channelName: "general",
-      currentUserId: ME,
-      onScrollTop: vi.fn(),
-      onReplyClick: vi.fn(),
-      onEditClick: vi.fn(),
-      onEditSave: vi.fn(() => true),
-      onEmptyEdit: vi.fn(),
-      onDeleteClick: vi.fn(),
-      onReactionClick: vi.fn(),
-      onPinClick: vi.fn(),
-    });
-    list.mount(host);
+    const list = mountList();
     const root = host.querySelector<HTMLElement>(".messages-container")!;
-    await frames();
+    await frames(4);
     root.scrollTop = root.scrollHeight / 2;
     root.dispatchEvent(new Event("scroll"));
     // Let the rows' measured heights replace the estimates before anything is read.
@@ -111,7 +53,7 @@ describe("MessageList inline editor in a real browser", () => {
       `[data-testid="msg-edit-input-${id}"]`,
     )!;
     expect(document.activeElement).toBe(textarea);
-    await frames();
+    await frames(4);
 
     // Ten lines, typed at the end, as the reader would.
     textarea.value = Array.from({ length: 10 }, (_, i) => `line ${i + 1}`).join("\n");
@@ -158,7 +100,7 @@ describe("MessageList inline editor in a real browser", () => {
     textarea.dispatchEvent(new Event("input", { bubbles: true }));
     textarea.focus();
     textarea.setSelectionRange(7, 17);
-    await frames();
+    await frames(4);
     const rowBefore = host.querySelector(`[data-testid="message-${id}"]`)!;
     // Opening the editor drew the row again, so the row from before is gone.
     expect(el.isConnected).toBe(false);
@@ -172,7 +114,7 @@ describe("MessageList inline editor in a real browser", () => {
       ),
     );
     await messagesStore.flush();
-    await frames();
+    await frames(4);
 
     const rowAfter = host.querySelector<HTMLElement>(`[data-testid="message-${id}"]`)!;
     expect(rowAfter).not.toBe(rowBefore);

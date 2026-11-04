@@ -31,6 +31,18 @@ function rect(init: Partial<DOMRect>): DOMRect {
 
 const noop = (): void => {};
 
+/** Opens a context menu with one row per letter of `letters` (label = letter, testId = lower-case). */
+async function openMenuWithRows(letters: string): Promise<void> {
+  const { showContextMenu } = await lib();
+  showContextMenu({
+    x: 0,
+    y: 0,
+    signal: ac.signal,
+    items: [...letters].map((l) => ({ label: l, testId: l.toLowerCase(), onClick: noop })),
+  });
+  await settle();
+}
+
 const byId = (id: string, root: ParentNode = document): HTMLElement =>
   root.querySelector<HTMLElement>(`[data-testid="${id}"]`)!;
 
@@ -236,18 +248,7 @@ describe("menu rows and navigation", () => {
   });
 
   it("stays on the last row at the bottom and on the first at the top", async () => {
-    const { showContextMenu } = await lib();
-    showContextMenu({
-      x: 0,
-      y: 0,
-      signal: ac.signal,
-      items: [
-        { label: "A", testId: "a", onClick: noop },
-        { label: "B", testId: "b", onClick: noop },
-        { label: "C", testId: "c", onClick: noop },
-      ],
-    });
-    await settle();
+    await openMenuWithRows("ABC");
     const row = byId;
 
     press(row("a"), "End");
@@ -268,17 +269,7 @@ describe("menu rows and navigation", () => {
   });
 
   it("ignores keys that are not navigation keys", async () => {
-    const { showContextMenu } = await lib();
-    showContextMenu({
-      x: 0,
-      y: 0,
-      signal: ac.signal,
-      items: [
-        { label: "A", testId: "a", onClick: noop },
-        { label: "B", testId: "b", onClick: noop },
-      ],
-    });
-    await settle();
+    await openMenuWithRows("AB");
     const a = document.querySelector<HTMLElement>('[data-testid="a"]')!;
     for (const key of ["a", "Tab", "PageDown", "Shift"]) {
       const event = press(a, key);
@@ -288,18 +279,7 @@ describe("menu rows and navigation", () => {
   });
 
   it("Left and Right do nothing on a row outside a side-by-side group", async () => {
-    const { showContextMenu } = await lib();
-    showContextMenu({
-      x: 0,
-      y: 0,
-      signal: ac.signal,
-      items: [
-        { label: "A", testId: "a", onClick: noop },
-        { label: "B", testId: "b", onClick: noop },
-        { label: "C", testId: "c", onClick: noop },
-      ],
-    });
-    await settle();
+    await openMenuWithRows("ABC");
     const b = document.querySelector<HTMLElement>('[data-testid="b"]')!;
     b.focus();
     for (const key of ["ArrowRight", "ArrowLeft"]) {

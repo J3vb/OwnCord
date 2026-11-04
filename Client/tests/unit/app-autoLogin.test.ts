@@ -10,6 +10,7 @@
  * never replaced by a resume, a server wait ending with its API session.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createDeferred as gate, type Deferred } from "../helpers/deferred";
 import { SessionScope } from "@lib/net/sessionScope";
 import type { ProfileManager } from "@lib/presence/profiles";
 
@@ -68,7 +69,7 @@ const beta: P = {
 };
 
 let profiles: P[];
-let loadGate: { promise: Promise<void>; resolve: () => void; reject: (e: unknown) => void };
+let loadGate: Deferred<void>;
 let loadProfiles: ReturnType<typeof vi.fn>;
 let session: SessionScope;
 let owner: SessionScope;
@@ -89,16 +90,6 @@ let ensureProfileExists: ReturnType<typeof vi.fn>;
 let startup: () => void;
 let cancel: () => void;
 let forgetHost: (host: string) => void;
-
-function gate(): typeof loadGate {
-  let resolve!: () => void;
-  let reject!: (e: unknown) => void;
-  const promise = new Promise<void>((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
-}
 
 async function flush(): Promise<void> {
   for (let i = 0; i < 10; i++) await Promise.resolve();
@@ -302,7 +293,7 @@ describe("resume guards", () => {
     expect(hoisted.startSession).not.toHaveBeenCalled();
   });
 
-  it("drops a credential that arrives after the page left", async () => {
+  async function startWithPendingCredential() {
     const cred = gate();
     hoisted.loadCredential.mockReturnValue(
       cred.promise.then(() => ({ username: "ann", token: "t" })),
@@ -310,6 +301,11 @@ describe("resume guards", () => {
     startup();
     loadGate.resolve();
     await flush();
+    return cred;
+  }
+
+  it("drops a credential that arrives after the page left", async () => {
+    const cred = await startWithPendingCredential();
     owner.dispose();
     cred.resolve();
     await flush();
@@ -319,13 +315,7 @@ describe("resume guards", () => {
   });
 
   it("drops a credential that arrives after a manual login superseded the attempt", async () => {
-    const cred = gate();
-    hoisted.loadCredential.mockReturnValue(
-      cred.promise.then(() => ({ username: "ann", token: "t" })),
-    );
-    startup();
-    loadGate.resolve();
-    await flush();
+    const cred = await startWithPendingCredential();
     api.endSession();
     cred.resolve();
     await flush();
@@ -352,13 +342,7 @@ describe("resume guards", () => {
   });
 
   it("does not sign in when Cancel arrived while the credential loaded", async () => {
-    const cred = gate();
-    hoisted.loadCredential.mockReturnValue(
-      cred.promise.then(() => ({ username: "ann", token: "t" })),
-    );
-    startup();
-    loadGate.resolve();
-    await flush();
+    const cred = await startWithPendingCredential();
     cancel();
     cred.resolve();
     await flush();

@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { makeDm } from "../helpers/dmHarness";
 import {
   applyPresenceBatch,
   membersStore,
@@ -75,18 +76,11 @@ describe("members store: on the phone app", () => {
   it("the dispatcher handlers treat an absent mobile as false and reach the DM list copy", () => {
     setMembers([ALICE]);
     setDmChannels([
-      {
+      makeDm({
         channelId: 9,
         recipient: { id: 1, username: "alice", avatar: "", status: "online" },
         participants: [{ id: 1, username: "alice", avatar: "", status: "online" }],
-        name: "",
-        isGroup: false,
-        lastMessageId: null,
-        lastMessage: "",
-        lastMessageAt: "",
-        unreadCount: 0,
-        mentionCount: 0,
-      },
+      }),
     ]);
     handlePresence({ user_id: 1, status: "online", mobile: true } as Payload<"presence">);
     expect(mobileOf(1)).toBe(true);

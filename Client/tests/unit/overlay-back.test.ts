@@ -4,23 +4,12 @@ import { closeSettings, openSettings, setActiveView, uiStore } from "@stores/ui.
 import { createModal } from "@lib/ui/modalFactory";
 import { closeBottomSheet, openBottomSheet } from "@lib/ui/bottomSheet";
 import { dismissTopDialog, displayedDialogs } from "@lib/ui/dialogOpen";
+import { guarded, pressBack, settle } from "../helpers/backNav";
 
 let phone = true;
 let ac: AbortController;
 let root: HTMLDivElement;
 let closeView: ReturnType<typeof vi.fn>;
-
-async function settle(): Promise<void> {
-  for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 0));
-}
-async function pressBack(): Promise<void> {
-  history.back();
-  await settle();
-}
-const guarded = (): boolean => {
-  const state: unknown = history.state;
-  return typeof state === "object" && state !== null && "owncordBack" in state;
-};
 
 function install(): void {
   installOverlayBack({ signal: ac.signal, root, closeView: closeView as () => void });

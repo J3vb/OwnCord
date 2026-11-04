@@ -621,11 +621,13 @@ func TestVoiceMod_Move_DisconnectsAndSendsVoiceMoved(t *testing.T) {
 	}
 }
 
-// TestVoiceMod_Move_ParkedTargetIsRemovedNotMoved pins a move of a target
-// whose socket dropped and whose membership is parked in the RT-8 grace
-// window: the membership is ejected, but nothing can deliver voice_moved, so
-// the move reports and audits itself as a removal, not a completed move.
-func TestVoiceMod_Move_ParkedTargetIsRemovedNotMoved(t *testing.T) {
+// TestVoiceMod_Move_ParkedTargetIsMoved pins a move of a target whose socket
+// dropped and whose membership is parked in the grace window: the membership
+// is ejected at once and the move is kept for the parking session, so the
+// moderator is told the move succeeded and the audit records a move. The dead
+// socket itself is sent nothing; the resume half is pinned in
+// voice_grace_modmove_test.go.
+func TestVoiceMod_Move_ParkedTargetIsMoved(t *testing.T) {
 	hub, database := newVoiceModHub(t)
 	fromID := seedVoiceChan(t, database, "vc-parked-from")
 	toID := seedVoiceChan(t, database, "vc-parked-to")
@@ -645,19 +647,20 @@ func TestVoiceMod_Move_ParkedTargetIsRemovedNotMoved(t *testing.T) {
 
 	hub.HandleMessageForTest(c, voiceModMoveMsg(target.ID, toID))
 
-	frame, ok := receiveErrorFrame(send, waitTimeout)
-	if !ok || frame.Message != "user was reconnecting; removed from voice instead of moved" {
-		t.Fatalf("moderator response = %+v (ok=%v), want the removed-instead-of-moved error", frame, ok)
+	waitFor(t, waitTimeout, func() bool {
+		return slices.Contains(auditActions(t, database), "voice_mod_move")
+	}, "the parked move to be audited as a move")
+	if frame, ok := receiveErrorFrame(send, 50*time.Millisecond); ok {
+		t.Fatalf("moderator got an error for a parked move: %+v", frame)
 	}
 	if state, err := database.GetVoiceState(context.Background(), target.ID); err != nil || state != nil {
 		t.Fatalf("the parked membership was not ejected: state=%v err=%v", state, err)
 	}
 	if receiveMsgOfType(targetSend, "voice_moved", 50*time.Millisecond) != nil {
-		t.Error("voice_moved was sent to a target that was not moved")
+		t.Error("voice_moved was sent to the dropped socket")
 	}
-	actions := auditActions(t, database)
-	if slices.Contains(actions, "voice_mod_move") || !slices.Contains(actions, "voice_mod_kick") {
-		t.Errorf("audit actions = %v, want a voice_mod_kick and no voice_mod_move", actions)
+	if slices.Contains(auditActions(t, database), "voice_mod_kick") {
+		t.Error("a parked move was audited as a kick")
 	}
 }
 
@@ -1063,9 +1066,10 @@ func TestVoiceMod_Kick_RejoinAllowedOnceTheBlockExpires(t *testing.T) {
 	}, "target to rejoin once the block expired")
 }
 
-// A move that lands as a removal (the target was reconnecting) blocks the
-// rejoin of the channel it was removed from, exactly like a kick.
-func TestVoiceMod_Move_RemovalRefusesRejoin(t *testing.T) {
+// A move of a parked call blocks the rejoin of the channel it was moved out
+// of, exactly like a live move: a fresh connect that never collects the move
+// cannot walk back into the source channel.
+func TestVoiceMod_ParkedMove_RefusesRejoinOfTheSourceChannel(t *testing.T) {
 	hub, database := newVoiceModHub(t)
 	fromID := seedVoiceChan(t, database, "vc-removed-from")
 	toID := seedVoiceChan(t, database, "vc-removed-to")
@@ -1080,9 +1084,9 @@ func TestVoiceMod_Move_RemovalRefusesRejoin(t *testing.T) {
 	hub.Register(c)
 	waitRegistered(t, hub, c)
 	hub.HandleMessageForTest(c, voiceModMoveMsg(target.ID, toID))
-	if _, ok := receiveErrorFrame(send, waitTimeout); !ok {
-		t.Fatal("the move did not report the removal")
-	}
+	waitFor(t, waitTimeout, func() bool {
+		return slices.Contains(auditActions(t, database), "voice_mod_move")
+	}, "the parked move to be audited")
 
 	// The target's socket resumes and its reconnect loop sends voice_join.
 	resumedSend := make(chan []byte, 32)

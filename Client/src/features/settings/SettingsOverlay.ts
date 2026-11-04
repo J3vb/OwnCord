@@ -17,6 +17,7 @@ import type { IconName } from "@lib/icons";
 import type { MountableComponent } from "@lib/text/safeRender";
 import type { PartialSuccessResponse, UserStatus } from "@lib/types";
 import type {
+  OwnApiToken,
   RecoveryKitIssue,
   RecoveryKitStatus,
   RevokeAllSessionsResponse,
@@ -59,14 +60,16 @@ export interface SettingsOverlayOptions {
   /** Where focus goes on close when the opener is gone or cannot take focus. */
   fallbackFocus?(): HTMLElement | null;
   /**
-   * Change the password. Resolves with the server's partial-success body
-   * when the password changed but the other sessions could not be revoked
-   * (its `warning` is the instruction the form must keep showing), or with
-   * `undefined` on a clean success.
+   * Change the password, and revoke every API token of the account too when
+   * `revokeApiTokens` is set. Resolves with the server's partial-success body
+   * when the password changed but the other sessions or tokens could not be
+   * revoked (its `warning` is the instruction the form must keep showing), or
+   * with `undefined` on a clean success.
    */
   onChangePassword(
     oldPassword: string,
     newPassword: string,
+    revokeApiTokens: boolean,
   ): Promise<PartialSuccessResponse | undefined>;
   /**
    * Patch the signed-in user's profile. Every field is optional and omitted
@@ -115,6 +118,11 @@ export interface SettingsOverlayOptions {
   /** Sign out every device, this one included. The page clears local auth
    *  when the response reports the current session revoked. */
   onRevokeAllSessions(): Promise<RevokeAllSessionsResponse>;
+  /** The account's live API tokens (GET /users/me/api-tokens). Omitted: no
+   *  token list and no "also revoke API tokens" option. */
+  onListApiTokens?(): Promise<readonly OwnApiToken[]>;
+  /** Revoke one of the account's API tokens; it stops working at once. */
+  onRevokeApiToken?(id: number): Promise<void>;
   /** When false, the Account tab is hidden (e.g. on the connect page). Defaults to true. */
   isAuthenticated?: boolean;
   /** Builds the Safety tab. Absent until its feature ships, and then no tab shows. */

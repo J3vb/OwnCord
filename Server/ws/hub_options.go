@@ -11,6 +11,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/clientip"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/livekitproc"
 	"github.com/J3vb/OwnCord/Server/permissions"
 	"github.com/J3vb/OwnCord/Server/plugin"
 	"github.com/J3vb/OwnCord/Server/service"
@@ -63,7 +64,7 @@ type HubOptions struct {
 	// requires LiveKit (a process no client can sign tokens for is unusable), and the
 	// voice_join guard reads a non-nil process's IsRunning to fail closed while down.
 	LiveKit        *LiveKitClient
-	LiveKitProcess *LiveKitProcess
+	LiveKitProcess *livekitproc.Process
 
 	// PluginRegistry enables plugin slash-command dispatch; nil disables it. The
 	// plugin event sink consumes the built hub's broadcaster, so it stays the
@@ -168,39 +169,45 @@ func NewHub(opts HubOptions) (*Hub, error) {
 	}
 
 	h := &Hub{
-		clients:             make(map[int64][]*Client),
-		db:                  database,
-		limiter:             limiter,
-		settings:            opts.Settings,
-		readers:             opts.Readers,
-		voice:               opts.Voice,
-		defaultVoiceQuality: defaultVoiceQuality,
-		settingsUpload:      opts.UploadPolicy,
-		uploadFileTypes:     opts.UploadFileTypes,
-		voiceMod:            newUserLocks[lockRankVoiceMod](),
-		presence:            opts.Presence,
-		authn:               opts.Auth,
-		privacy:             opts.ChannelPrivacy,
-		trustedProxyNets:    clientip.ParseCIDRList(opts.TrustedProxies),
-		broadcast:           make(chan broadcastMsg, 1024),
-		clientEvents:        make(chan clientEvent, 64),
-		readyGate:           make(chan struct{}, 2*runtime.GOMAXPROCS(0)),
-		stop:                make(chan struct{}),
-		runDone:             make(chan struct{}),
-		pubsub:              NewPubSub(),
-		replayBuf:           NewEventRingBuffer(ringSize),
-		registry:            reg,
-		permChecker:         permissions.NewChecker(database),
-		settingsName:        "OwnCord Server",
-		settingsMotd:        "Welcome!",
-		voiceKeyHolders:     make(map[int64]int64),
-		fatalFn:             func() { os.Exit(1) },
-		livekit:             opts.LiveKit,
-		lkProcess:           opts.LiveKitProcess,
-		pluginRegistry:      opts.PluginRegistry,
+		clients: make(map[int64][]*Client),
+		db:      database,
+		limiter: limiter,
+		readers: opts.Readers,
+		voice:   opts.Voice,
+		voiceHub: hubVoice{
+			defaultQuality: defaultVoiceQuality, mod: newUserLocks[lockRankVoiceMod](),
+			keyHolders: make(map[int64]int64), lkProcess: opts.LiveKitProcess,
+		},
+		presence:     opts.Presence,
+		broadcast:    make(chan broadcastMsg, 1024),
+		clientEvents: make(chan clientEvent, 64),
+		readyGate:    make(chan struct{}, 2*runtime.GOMAXPROCS(0)),
+		stop:         make(chan struct{}),
+		pubsub:       NewPubSub(),
+		replayBuf:    NewEventRingBuffer(ringSize),
+		permChecker:  permissions.NewChecker(database),
+		settings: hubSettings{
+			reader:          opts.Settings,
+			upload:          opts.UploadPolicy,
+			uploadFileTypes: opts.UploadFileTypes,
+			name:            "OwnCord Server",
+			motd:            "Welcome!",
+		},
+		lifecycle: hubLifecycle{
+			runDone: make(chan struct{}),
+			fatalFn: func() { os.Exit(1) },
+		},
+		livekit: opts.LiveKit,
+		seams: hubSeams{
+			registry:         reg,
+			pluginRegistry:   opts.PluginRegistry,
+			privacy:          opts.ChannelPrivacy,
+			authn:            opts.Auth,
+			trustedProxyNets: clientip.ParseCIDRList(opts.TrustedProxies),
+		},
 	}
 	if opts.ReplayColdLimit > 0 {
-		h.coldReplayLimit = opts.ReplayColdLimit
+		h.events.coldReplayLimit = opts.ReplayColdLimit
 	}
 	h.initLife() // the hub's own lifecycle, ended by closeStop
 	registerPingHandler(reg, PingDeps{Limiter: h.limiter})
@@ -210,7 +217,7 @@ func NewHub(opts HubOptions) (*Hub, error) {
 		LiveStatus: h.LiveStatus,
 		LiveMobile: h.LiveMobile,
 	}
-	presenceDeps := PresenceDeps{Limiter: h.limiter, GameActivityEnabled: h.gameActivity.on.Load}
+	presenceDeps := PresenceDeps{Limiter: h.limiter, GameActivityEnabled: h.settings.gameActivity.on.Load}
 	reactionDeps := ReactionDeps{}
 	callDeps := CallDeps{Limiter: h.limiter}
 	if svc != nil {
@@ -219,7 +226,7 @@ func NewHub(opts HubOptions) (*Hub, error) {
 		presenceDeps.MessageSvc = svc.Messages
 		reactionDeps.MessageSvc = svc.Messages
 		callDeps.DMSvc = svc.DMs
-		h.messageSvc = svc.Messages
+		h.seams.messageSvc = svc.Messages
 		h.perms = svc.Permissions
 		// So @here's offline narrowing can tell a disconnected idle/dnd reader (users.status
 		// keeps their last chosen value) from one still connected, the live-connection rule
@@ -241,7 +248,7 @@ func NewHub(opts HubOptions) (*Hub, error) {
 
 	registerChatHandlers(reg, chatDeps)
 	h.wireThreads(reg, svc)
-	h.focusDeps = presenceDeps
+	h.seams.focusDeps = presenceDeps
 	registerPresenceHandlers(reg, presenceDeps)
 	registerReactionHandlers(reg, reactionDeps)
 	registerCallHandlers(reg, callDeps)
@@ -251,12 +258,12 @@ func NewHub(opts HubOptions) (*Hub, error) {
 		// A nil registry must yield a nil interface, not a typed-nil *plugin.Registry: the
 		// handler's "no plugins loaded" check is an interface comparison.
 		Registry: func() CommandDispatcher {
-			if h.pluginRegistry == nil {
+			if h.seams.pluginRegistry == nil {
 				return nil
 			}
-			return h.pluginRegistry
+			return h.seams.pluginRegistry
 		},
-		MessageSvc: h.messageSvc,
+		MessageSvc: h.seams.messageSvc,
 		Limiter:    h.limiter,
 	})
 	registerVoiceControlsV2(reg, h.voiceDeps())
@@ -278,7 +285,7 @@ func (h *Hub) voiceDeps() VoiceDeps {
 		TokenGen:    h, // Hub delegates to h.livekit at call time
 		KeyHolder:   h,
 		Mod:         h,
-		Settings:    h.settings,
+		Settings:    h.settings.reader,
 	}
 }
 
@@ -286,8 +293,8 @@ func (h *Hub) voiceDeps() VoiceDeps {
 // via HubOptions; the dispatch loop reads replayBuf unlocked, so the ring is sized
 // once, at construction.
 func (h *Hub) maxColdReplayLimit() int {
-	if h.coldReplayLimit > 0 {
-		return h.coldReplayLimit
+	if h.events.coldReplayLimit > 0 {
+		return h.events.coldReplayLimit
 	}
 	return maxColdReplay
 }

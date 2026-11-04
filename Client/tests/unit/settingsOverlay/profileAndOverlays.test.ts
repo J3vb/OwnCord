@@ -1,11 +1,14 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import * as mocks from "../../helpers/settingsOverlayMocks";
 import { createSettingsOverlay } from "../../../src/features/settings/SettingsOverlay";
+import { makeOverlayOptions } from "../../helpers/settingsOverlayOptions";
 import {
   APP_LIFETIME_MODULES,
   clickEl,
   getTab,
   defaultOptions,
+  openOverlay,
+  acButton,
   useSettingsOverlayHarness,
 } from "../../helpers/settingsOverlayHarness";
 
@@ -26,9 +29,7 @@ describe("SettingsOverlay", () => {
   // --- Username validation ---
 
   it("rejects single-character username (min 2)", () => {
-    const overlay = createSettingsOverlay(defaultOptions);
-    overlay.mount(container);
-    overlay.open();
+    const overlay = openOverlay(container);
 
     // Click "Edit" to open username edit form
     const editBtn = container.querySelector(".account-field-edit") as HTMLElement;
@@ -41,9 +42,7 @@ describe("SettingsOverlay", () => {
     editInput.value = "A";
 
     // Click Save
-    const saveBtn = Array.from(container.querySelectorAll(".ac-btn")).find(
-      (b) => b.textContent === "Save",
-    ) as HTMLElement;
+    const saveBtn = acButton(container, "Save");
     saveBtn.click();
 
     // Should NOT call onUpdateProfile
@@ -53,9 +52,7 @@ describe("SettingsOverlay", () => {
   });
 
   it("accepts two-character username (min 2)", () => {
-    const overlay = createSettingsOverlay(defaultOptions);
-    overlay.mount(container);
-    overlay.open();
+    const overlay = openOverlay(container);
 
     const editBtn = container.querySelector(".account-field-edit") as HTMLElement;
     editBtn.click();
@@ -65,9 +62,7 @@ describe("SettingsOverlay", () => {
     ) as HTMLInputElement;
     editInput.value = "AB";
 
-    const saveBtn = Array.from(container.querySelectorAll(".ac-btn")).find(
-      (b) => b.textContent === "Save",
-    ) as HTMLElement;
+    const saveBtn = acButton(container, "Save");
     saveBtn.click();
 
     expect(defaultOptions.onUpdateProfile).toHaveBeenCalledWith({ username: "AB" });
@@ -87,9 +82,7 @@ describe("SettingsOverlay", () => {
       display_name: "Alice Smith",
     };
 
-    const overlay = createSettingsOverlay(defaultOptions);
-    overlay.mount(container);
-    overlay.open();
+    const overlay = openOverlay(container);
 
     // Header starts out showing the display name, not the username.
     const acName = container.querySelector(".account-header-name");
@@ -103,9 +96,7 @@ describe("SettingsOverlay", () => {
     ) as HTMLInputElement;
     editInput.value = "alice2";
 
-    const saveBtn = Array.from(container.querySelectorAll(".ac-btn")).find(
-      (b) => b.textContent === "Save",
-    ) as HTMLElement;
+    const saveBtn = acButton(container, "Save");
     saveBtn.click();
 
     await vi.waitFor(() => {
@@ -127,9 +118,7 @@ describe("SettingsOverlay", () => {
   // server stores it and shows everyone else offline), so the option says what
   // it does instead of borrowing "offline"'s name.
   it("offers Invisible as a status, not Offline", () => {
-    const overlay = createSettingsOverlay(defaultOptions);
-    overlay.mount(container);
-    overlay.open();
+    const overlay = openOverlay(container);
 
     const select = container.querySelector<HTMLSelectElement>("[data-testid='status-select']")!;
     const labels = Array.from(select.options).map((o) => o.textContent);
@@ -142,9 +131,7 @@ describe("SettingsOverlay", () => {
   // The status is a native <select> with a <label>: the browser owns its
   // keyboard handling, so the test drives its change event.
   it("status select is labelled and reports the chosen status", () => {
-    const overlay = createSettingsOverlay(defaultOptions);
-    overlay.mount(container);
-    overlay.open();
+    const overlay = openOverlay(container);
 
     const select = container.querySelector<HTMLSelectElement>("[data-testid='status-select']")!;
     expect(select.tagName).toBe("SELECT");
@@ -321,9 +308,7 @@ describe("SettingsOverlay", () => {
   // so the discarded subtree stays reachable (and live) through the shared
   // AbortController for as long as the overlay itself is mounted.
   it("stops a discarded tab's listeners from firing once the tab is switched away", () => {
-    const overlay = createSettingsOverlay(defaultOptions);
-    overlay.mount(container);
-    overlay.open();
+    const overlay = openOverlay(container);
 
     getTab(container, 1).click(); // Appearance
     const fontSlider = container.querySelector(".settings-slider") as HTMLInputElement;
@@ -558,28 +543,7 @@ describe("SettingsOverlay - mount() with settingsOpen already true", () => {
     const localContainer = document.createElement("div");
     document.body.appendChild(localContainer);
 
-    const overlay = createReopenedOverlay({
-      onClose: vi.fn(),
-      onChangePassword: vi.fn().mockResolvedValue(undefined),
-      onUpdateProfile: vi.fn().mockResolvedValue(undefined),
-      onUploadAvatar: vi.fn().mockResolvedValue("/api/v1/files/test"),
-      onRemoveAvatar: vi.fn().mockResolvedValue(undefined),
-      onLogout: vi.fn(),
-      onDeleteAccount: vi.fn().mockResolvedValue(undefined),
-      onStatusChange: vi.fn(),
-      onEnableTotp: vi.fn().mockResolvedValue({ qr_uri: "otpauth://test", backup_codes: [] }),
-      onConfirmTotp: vi.fn().mockResolvedValue(undefined),
-      onDisableTotp: vi.fn().mockResolvedValue(undefined),
-      onRefreshTotpStatus: vi.fn().mockResolvedValue(undefined),
-      onRegenerateRecoveryCodes: vi.fn().mockResolvedValue([]),
-      onEnrolRecoveryKit: vi.fn().mockResolvedValue({ created_at: "" }),
-      onGetRecoveryKitStatus: vi.fn().mockResolvedValue({ enrolled: false, used_at: null }),
-      onListSessions: vi.fn().mockResolvedValue([]),
-      onRevokeSession: vi.fn().mockResolvedValue(undefined),
-      onRevokeAllSessions: vi
-        .fn()
-        .mockResolvedValue({ sessions_revoked: 0, current_session_revoked: false }),
-    });
+    const overlay = createReopenedOverlay(makeOverlayOptions());
 
     overlay.mount(localContainer);
 

@@ -21,7 +21,7 @@ const syncutilLocksID = "syncutil-locks"
 // around it."
 var syncutilLocks = Rule{
 	ID:    syncutilLocksID,
-	Scope: []string{"ws", "service"},
+	Scope: []string{"ws", "service", "livekitproc"},
 	Check: checkSyncutilLocks,
 }
 

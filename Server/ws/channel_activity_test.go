@@ -372,7 +372,7 @@ func TestChannelActivity_UnsequencedNoLossMark(t *testing.T) {
 
 	seq := atomic.LoadUint64(&f.hub.seq)
 	marks := f.hub.LossMarkCount()
-	drops := f.hub.bpLowDrops.Load()
+	drops := f.hub.stats.BPLowDrops.Load()
 
 	f.send(t, f.author, f.textID, "into a full queue")
 	f.flush()
@@ -386,7 +386,7 @@ func TestChannelActivity_UnsequencedNoLossMark(t *testing.T) {
 	if c.cseq.lossPending.Load() || c.cseq.out != 0 {
 		t.Errorf("cseq state touched: pending=%v out=%d", c.cseq.lossPending.Load(), c.cseq.out)
 	}
-	if got := f.hub.bpLowDrops.Load(); got != drops+1 {
+	if got := f.hub.stats.BPLowDrops.Load(); got != drops+1 {
 		t.Errorf("bpLowDrops = %d, want %d", got, drops+1)
 	}
 	if len(full) != 1 {

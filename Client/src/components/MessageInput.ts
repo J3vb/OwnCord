@@ -7,12 +7,18 @@ import { Disposable } from "@lib/disposable";
 import { isImeCommit } from "@lib/text/ime";
 import { isAndroidApp } from "../features/voice/native/platform";
 import { dialogOpen } from "@lib/ui/dialogOpen";
-import { isPhoneLayout, openBottomSheet, type BottomSheet } from "@lib/ui/bottomSheet";
+import {
+  isPhoneLayout,
+  onPhoneLayoutChange,
+  openBottomSheet,
+  type BottomSheet,
+} from "@lib/ui/bottomSheet";
 import { createElement, appendChildren, setOwnedTimeout } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/text/safeRender";
 import { listCustomEmoji } from "@stores/emoji.store";
 import { claimComposer, focusComposer } from "../features/messaging/activeComposer";
+import { acceptSharesFor } from "../features/share/shareInbox";
 import type { PickedMention } from "@lib/text/pickedMentions";
 import { FORMAT_MARKERS, wrapWithMarker } from "../features/messaging/markdownMarkers";
 import { authStore } from "@stores/auth.store";
@@ -50,6 +56,7 @@ import { createInputComposer } from "./message-input/inputComposer";
 import { createInputSend } from "./message-input/inputSend";
 import { createInputAttachments } from "./message-input/inputAttachments";
 import { createInputDraft } from "./message-input/inputDraft";
+import { createAttachPickers } from "../features/messaging/attachSheet";
 
 export { wrapWithMarker };
 
@@ -271,6 +278,8 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     charCounter: null,
     uploadErrorId: `composer-refusal-${++nextComposerId}`,
     openPicker: null,
+    attachHasActions: () => false,
+    closeAttachMenu: null,
     togglePickerOf: null,
     mentionPopup: null,
     pickedMentions: [],
@@ -342,33 +351,6 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       "+",
     );
 
-    // File picker via attach button
-    if (st.options.onUploadFile !== undefined) {
-      const fileInput = createElement("input", {
-        type: "file",
-        multiple: "",
-        style: "display: none;",
-      });
-      fileInput.addEventListener(
-        "change",
-        () => {
-          // Copied first: clearing the value empties the live FileList.
-          const files = [...(fileInput.files ?? [])];
-          fileInput.value = "";
-          for (const file of files) void api.handlePasteFile(file);
-        },
-        { signal: st.signal },
-      );
-      attachBtn.addEventListener("click", () => fileInput.click(), { signal: st.signal });
-      st.openPicker = () => {
-        if (st.disabledReason !== null || uploadsDisabledByServer()) return;
-        fileInput.click();
-      };
-      st.root?.appendChild(fileInput);
-    } else {
-      attachBtn.setAttribute("disabled", "true");
-      attachBtn.title = messagingText("attach.unavailable");
-    }
     st.textarea = createElement("textarea", {
       class: "msg-textarea",
       placeholder: api.idlePlaceholder(),
@@ -439,6 +421,45 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
         : null;
     micBtn?.appendChild(createIcon("mic", 20));
     micBtn?.setAttribute("hidden", "");
+    const hasPlusMenu = st.options.onUploadFile !== undefined && st.options.noAttach !== true;
+    // "+" opens a menu of tiles: the file sources, then Poll and (off the
+    // phone) Sticker. Their bar buttons stay in the DOM, always hidden, as the
+    // targets the tiles click, so gates and the picker tabs work as before.
+    if (st.options.onUploadFile !== undefined) {
+      const pickers = createAttachPickers({
+        onFile: (file) => void api.handlePasteFile(file),
+        canAttach: () => st.disabledReason === null && !uploadsDisabledByServer(),
+        signal: st.signal,
+        menuHost: () => st.root,
+        actions: [
+          {
+            id: "poll",
+            icon: "chart-column",
+            label: messagingText("attach.poll"),
+            available: () =>
+              pollBtn !== null && st.disabledReason === null && composerButtonShown("poll"),
+            run: () => pollBtn?.click(),
+          },
+          {
+            id: "sticker",
+            icon: "sticker",
+            label: messagingText("attach.sticker"),
+            layout: "desktop",
+            available: () =>
+              stickerBtn !== null && st.disabledReason === null && composerButtonShown("sticker"),
+            run: () => stickerBtn?.click(),
+          },
+        ],
+      });
+      attachBtn.addEventListener("click", () => pickers.open(attachBtn), { signal: st.signal });
+      st.openPicker = pickers.openFiles;
+      st.attachHasActions = pickers.hasActions;
+      st.closeAttachMenu = pickers.close;
+      st.root?.append(...pickers.inputs);
+    } else {
+      attachBtn.setAttribute("disabled", "true");
+      attachBtn.title = messagingText("attach.unavailable");
+    }
     // Register interactive controls so the disabled state can toggle them.
     st.controlButtons.length = 0;
     st.controlButtons.push(sendBtn, emojiBtn, gifBtn);
@@ -540,7 +561,8 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
           pastedFile = true;
           void api.handlePasteFile(file);
         }
-        if (!pastedFile) api.pasteLongTextAsFile(e);
+        if (pastedFile || api.pasteNativeFiles(e)) return;
+        api.pasteLongTextAsFile(e);
       },
       { signal: st.signal },
     );
@@ -618,8 +640,12 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       closing.destroy();
       if (!returnFocus) return;
       const btn = tabButton(tab);
-      // A button the user hid in settings cannot take focus; the textarea can.
+      // A button the user hid in settings (or the phone row left out) cannot
+      // take focus; "+" (where Sticker lives), the phone's one expression
+      // button or the textarea can.
       if (btn !== null && !btn.hidden) btn.focus();
+      else if (tab === "sticker" && hasPlusMenu && !isPhoneLayout()) attachBtn.focus();
+      else if (!emojiBtn.hidden) emojiBtn.focus();
       else st.textarea?.focus();
     }
 
@@ -790,7 +816,13 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       }
     }
 
-    emojiBtn.addEventListener("click", () => toggleTab("emoji"), { signal: st.signal });
+    // On a phone the smiley holds the emoji and sticker tabs: it opens on
+    // the first of them the user keeps.
+    const expressionTab = (): ExpressionTab => {
+      if (!isPhoneLayout() || composerButtonShown("emoji")) return "emoji";
+      return stickerBtn !== null && composerButtonShown("sticker") ? "sticker" : "emoji";
+    };
+    emojiBtn.addEventListener("click", () => toggleTab(expressionTab()), { signal: st.signal });
     gifBtn.addEventListener("click", () => toggleTab("gif"), { signal: st.signal });
     stickerBtn?.addEventListener("click", () => toggleTab("sticker"), { signal: st.signal });
 
@@ -823,15 +855,30 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     if (micBtn !== null) inputBox.appendChild(micBtn);
     appendChildren(inputBox, st.charCounter, sendBtn);
     // Settings → Text & Images can hide each of these; the switch applies live.
+    // Sticker and Poll live in the "+" menu. On a phone the smiley also holds
+    // the sticker tab.
     const applyButtonPrefs = (): void => {
-      emojiBtn.hidden = !composerButtonShown("emoji");
+      const phone = isPhoneLayout();
+      // GIF has its own button; on a phone the smiley also stands for stickers.
+      const anyExpression =
+        composerButtonShown("emoji") || (stickerBtn !== null && composerButtonShown("sticker"));
+      emojiBtn.hidden = phone ? !anyExpression : !composerButtonShown("emoji");
+      const emojiLabel = messagingText(phone ? "expression.label" : "emoji.label");
+      emojiBtn.setAttribute("aria-label", emojiLabel);
+      emojiBtn.title = phone ? emojiLabel : "";
       gifBtn.hidden = !composerButtonShown("gif");
-      if (stickerBtn !== null) stickerBtn.hidden = !composerButtonShown("sticker");
-      if (pollBtn !== null) pollBtn.hidden = !composerButtonShown("poll");
+      // A composer without "+" (a thread's) keeps Sticker in its bar.
+      if (stickerBtn !== null) {
+        stickerBtn.hidden = hasPlusMenu || phone || !composerButtonShown("sticker");
+      }
+      if (pollBtn !== null) pollBtn.hidden = hasPlusMenu || phone || !composerButtonShown("poll");
       api.applyDisabledState();
     };
     applyButtonPrefs();
     onPrefChange(COMPOSER_BUTTON_PREF_KEYS, applyButtonPrefs, st.signal);
+    onPhoneLayoutChange(applyButtonPrefs, st.signal);
+    // The open menu belongs to the old layout; the next "+" opens the new one.
+    onPhoneLayoutChange(() => st.closeAttachMenu?.(), st.signal);
     st.slowModeNoteEl = createElement("div", {
       class: "composer-slow-note",
       "data-testid": "slow-mode-note",
@@ -897,13 +944,21 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     st.releaseComposer?.();
     const mentionTarget = { insertMention: api.insertMentionAtCaret, canMention: api.canTakeText };
     st.releaseComposer = claimComposer(mentionTarget);
+    // A share from another app picked for this chat (features/share).
+    const releaseShares = acceptSharesFor(options.channelId, (share) => {
+      api.restoreDraftText(share.text === "" ? undefined : share.text);
+      void api.handleNativeFiles(share.files);
+    });
+    st.signal.addEventListener("abort", releaseShares, { once: true });
     // With a thread's composer beside this one, a Mention goes where the user is.
     st.root.addEventListener("focusin", () => focusComposer(mentionTarget), {
       signal: st.disposable.signal,
     });
-    // Apply any initial disabled reason before focusing.
+    // Apply any initial disabled reason before focusing. On a phone a focus
+    // raises the keyboard over the chat the user just opened, so it waits for
+    // a tap on the text box.
     api.applyDisabledState();
-    if (st.disabledReason === null) {
+    if (st.disabledReason === null && !isPhoneLayout()) {
       st.textarea.focus();
     }
   }
@@ -947,6 +1002,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     st.uploadErrorEl = null;
     st.charCounter = null;
     st.openPicker = null;
+    st.closeAttachMenu = null;
     st.togglePickerOf = null;
   }
 

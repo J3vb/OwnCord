@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { resetMessagesState } from "../helpers/storeResets";
 
 const { createPopupMock, destroyMock } = vi.hoisted(() => {
   const destroy = vi.fn();
@@ -21,6 +22,7 @@ import { membersStore, updateMemberRole } from "@stores/members.store";
 import type { Member } from "@stores/members.store";
 import { buildMessage } from "../helpers/messageFactory";
 import "../helpers/resizeObserverStub";
+import { makeListOptions } from "../helpers/messageListHarness";
 
 function member(id: number, username: string): Member {
   return { id, username, avatar: null, role: "member", status: "online" };
@@ -62,31 +64,14 @@ describe("MessageList profile popup", () => {
       ]),
       typingUsers: new Map(),
     }));
-    messagesStore.setState(() => ({
+    resetMessagesState({
       messagesByChannel: new Map([
         [1, [makeMessage({ id: 1, content: "hello @nine and @everyone", mentions: [9] })]],
       ]),
-      pendingSends: new Map(),
-      loadedChannels: new Set(),
-      hasMore: new Map(),
-      historyLoadState: new Map(),
-      detachedChannels: new Set(),
-    }));
+    });
     container = document.createElement("div");
     document.body.appendChild(container);
-    const options: MessageListOptions = {
-      channelId: 1,
-      channelName: "general",
-      currentUserId: 1,
-      onScrollTop: vi.fn(),
-      onReplyClick: vi.fn(),
-      onEditClick: vi.fn(),
-      onEditSave: vi.fn(() => true),
-      onEmptyEdit: vi.fn(),
-      onDeleteClick: vi.fn(),
-      onReactionClick: vi.fn(),
-      onPinClick: vi.fn(),
-    };
+    const options: MessageListOptions = makeListOptions();
     list = createMessageList(options);
     list.mount(container);
   });
@@ -130,19 +115,7 @@ describe("MessageList profile popup", () => {
     }));
     list.destroy?.();
     container.replaceChildren();
-    list = createMessageList({
-      channelId: 1,
-      channelName: "general",
-      currentUserId: 1,
-      onScrollTop: vi.fn(),
-      onReplyClick: vi.fn(),
-      onEditClick: vi.fn(),
-      onEditSave: vi.fn(() => true),
-      onEmptyEdit: vi.fn(),
-      onDeleteClick: vi.fn(),
-      onReactionClick: vi.fn(),
-      onPinClick: vi.fn(),
-    });
+    list = createMessageList(makeListOptions());
     list.mount(container);
 
     const chip = container.querySelector<HTMLElement>('a[target="_blank"] .mention');
@@ -168,19 +141,7 @@ describe("MessageList profile popup", () => {
     }));
     list.destroy?.();
     container.replaceChildren();
-    list = createMessageList({
-      channelId: 1,
-      channelName: "general",
-      currentUserId: 1,
-      onScrollTop: vi.fn(),
-      onReplyClick: vi.fn(),
-      onEditClick: vi.fn(),
-      onEditSave: vi.fn(() => true),
-      onEmptyEdit: vi.fn(),
-      onDeleteClick: vi.fn(),
-      onReactionClick: vi.fn(),
-      onPinClick: vi.fn(),
-    });
+    list = createMessageList(makeListOptions());
     list.mount(container);
     const chipOf = (): HTMLElement | null =>
       container.querySelector<HTMLElement>('a[target="_blank"] .mention');
@@ -207,19 +168,7 @@ describe("MessageList profile popup", () => {
     }));
     list.destroy?.();
     container.replaceChildren();
-    list = createMessageList({
-      channelId: 1,
-      channelName: "general",
-      currentUserId: 1,
-      onScrollTop: vi.fn(),
-      onReplyClick: vi.fn(),
-      onEditClick: vi.fn(),
-      onEditSave: vi.fn(() => true),
-      onEmptyEdit: vi.fn(),
-      onDeleteClick: vi.fn(),
-      onReactionClick: vi.fn(),
-      onPinClick: vi.fn(),
-    });
+    list = createMessageList(makeListOptions());
     list.mount(container);
     const link = container.querySelector<HTMLAnchorElement>('a[target="_blank"]');
     // bob is not a member yet, so the label renders as plain text.

@@ -9,7 +9,6 @@ import { initToast, teardownToast } from "@lib/ui/toast";
 import type { ToastContainer } from "@components/Toast";
 import {
   disableScreenshare,
-  enableCamera,
   enableScreenshare,
   voiceStore,
   setScreenSourcePicker,
@@ -17,11 +16,19 @@ import {
   fakeAudioTrack,
   fakeRoom,
   fakeDeps,
+  publishCamera,
+  publishScreen,
+  firstPublishOptions,
+  publishScreenWithAudio,
+  publishedOptions,
+  expectAnnounced,
+  expectNotAnnounced,
   useScreenShareTracksHarness,
 } from "../../helpers/screenShareTracksHarness";
 
 vi.mock("@lib/voice/shareFps", (importOriginal) => mocks.voiceShareFpsMock(importOriginal));
 vi.mock("@lib/voice/h264Profile", () => mocks.voiceH264ProfileMock());
+vi.mock("@lib/voice/shareResolutionRecovery", () => mocks.shareResolutionRecoveryMock());
 vi.mock("../../../src/features/voice/videoCodec", (importOriginal) =>
   mocks.voiceVideoCodecMock(importOriginal),
 );
@@ -36,6 +43,73 @@ useScreenShareTracksHarness();
 // ── enableScreenshare ──────────────────────────────────────────────────────
 
 describe("enableScreenshare", () => {
+  it.each(["legacy", "detail-framerate"])(
+    "applies the %s content hint to the video before publishing",
+    async (policy) => {
+      loadPref.mockImplementation((key: string, fallback: unknown) =>
+        key === "shareMotionPolicy" ? policy : fallback,
+      );
+      const rig = fakeRoom();
+      const video = fakeVideoTrack();
+      const audio = fakeAudioTrack();
+      createLocalScreenTracks.mockResolvedValue([video, audio]);
+      let hintAtPublish: string | undefined;
+      rig.publishTrack.mockImplementation(async (track: LocalTrack) => {
+        if (track === video) hintAtPublish = track.mediaStreamTrack.contentHint;
+      });
+
+      await enableScreenshare({ manualScreenTracks: [] }, fakeDeps(rig.room));
+
+      expect(rig.publishTrack).toHaveBeenCalledWith(video, expect.anything());
+      expect(hintAtPublish).toBe(policy === "legacy" ? "motion" : "detail");
+      expect(audio.mediaStreamTrack.contentHint).toBe("");
+    },
+  );
+
+  it("watches the published video's resolution until the share stops", async () => {
+    mocks.watchShareResolutionRecovery.mockClear();
+    mocks.stopResolutionRecovery.mockClear();
+    const rig = fakeRoom();
+    const video = fakeVideoTrack();
+    createLocalScreenTracks.mockResolvedValue([video]);
+    const state = { manualScreenTracks: [] };
+    const deps = fakeDeps(rig.room);
+
+    await enableScreenshare(state, deps);
+    await vi.dynamicImportSettled();
+
+    expect(mocks.watchShareResolutionRecovery).toHaveBeenCalledExactlyOnceWith(
+      video,
+      "maintain-framerate",
+    );
+    expect(mocks.stopResolutionRecovery).not.toHaveBeenCalled();
+    await disableScreenshare(state, deps);
+    expect(mocks.stopResolutionRecovery).toHaveBeenCalledOnce();
+  });
+
+  it("starts no resolution watcher for a share stopped while it loads", async () => {
+    mocks.watchShareResolutionRecovery.mockClear();
+    const rig = fakeRoom();
+    createLocalScreenTracks.mockResolvedValue([fakeVideoTrack()]);
+    const state = { manualScreenTracks: [] };
+    const deps = fakeDeps(rig.room);
+
+    await enableScreenshare(state, deps);
+    await disableScreenshare(state, deps);
+    await vi.dynamicImportSettled();
+
+    expect(mocks.watchShareResolutionRecovery).not.toHaveBeenCalled();
+  });
+
+  it("still publishes when the browser does not support content hints", async () => {
+    const video = fakeVideoTrack();
+    Reflect.deleteProperty(video.mediaStreamTrack, "contentHint");
+    const rig = await publishScreen([video]);
+
+    expect(rig.publishTrack).toHaveBeenCalledWith(video, expect.anything());
+    expect(video.mediaStreamTrack).not.toHaveProperty("contentHint");
+  });
+
   it("publishes video and audio tracks with the right sources", async () => {
     const rig = fakeRoom();
     const video = fakeVideoTrack();
@@ -53,49 +127,30 @@ describe("enableScreenshare", () => {
       audio,
       expect.objectContaining({ source: Track.Source.ScreenShareAudio }),
     );
-    expect(deps.wsSend).toHaveBeenCalledWith({
-      type: "voice_screenshare",
-      payload: { enabled: true },
-    });
+    expectAnnounced(deps, "voice_screenshare", true);
     expect(voiceStore.getState().localScreenshare).toBe(true);
   });
 
   it("publishes the screen audio as music: no DTX, stereo, music preset", async () => {
-    const rig = fakeRoom();
-    const video = fakeVideoTrack();
-    const audio = fakeAudioTrack();
-    createLocalScreenTracks.mockResolvedValue([video, audio]);
+    const { rig, video, audio } = await publishScreenWithAudio();
 
-    await enableScreenshare({ manualScreenTracks: [] }, fakeDeps(rig.room));
-
-    const audioOpts = rig.publishTrack.mock.calls.find((c) => c[0] === audio)?.[1];
+    const audioOpts = publishedOptions(rig, audio);
     expect(audioOpts).toMatchObject({
       source: Track.Source.ScreenShareAudio,
       dtx: false,
       forceStereo: true,
       audioPreset: AudioPresets.musicHighQualityStereo,
     });
-    const videoOpts = rig.publishTrack.mock.calls.find((c) => c[0] === video)?.[1];
+    const videoOpts = publishedOptions(rig, video);
     expect(videoOpts).not.toHaveProperty("dtx");
     expect(videoOpts).not.toHaveProperty("forceStereo");
   });
 
   it("sets a video encoding on the video track only", async () => {
-    const rig = fakeRoom();
-    const video = fakeVideoTrack();
-    const audio = fakeAudioTrack();
-    createLocalScreenTracks.mockResolvedValue([video, audio]);
+    const { rig, video, audio } = await publishScreenWithAudio();
 
-    await enableScreenshare({ manualScreenTracks: [] }, fakeDeps(rig.room));
-
-    const videoOpts = rig.publishTrack.mock.calls.find((c) => c[0] === video)?.[1] as Record<
-      string,
-      unknown
-    >;
-    const audioOpts = rig.publishTrack.mock.calls.find((c) => c[0] === audio)?.[1] as Record<
-      string,
-      unknown
-    >;
+    const videoOpts = publishedOptions(rig, video) as Record<string, unknown>;
+    const audioOpts = publishedOptions(rig, audio) as Record<string, unknown>;
     // livekit-client reads a screen share's encoding from screenShareEncoding
     // and ignores videoEncoding for that source.
     expect(videoOpts).toHaveProperty("screenShareEncoding");
@@ -103,19 +158,14 @@ describe("enableScreenshare", () => {
   });
 
   it("publishes the default (medium) share as 720p30 with a 720p 15 fps simulcast layer", async () => {
-    const rig = fakeRoom();
-    const video = fakeVideoTrack();
-    const audio = fakeAudioTrack();
-    createLocalScreenTracks.mockResolvedValue([video, audio]);
-
-    await enableScreenshare({ manualScreenTracks: [] }, fakeDeps(rig.room));
+    const { rig, video, audio } = await publishScreenWithAudio();
 
     expect(createLocalScreenTracks).toHaveBeenCalledWith(
       expect.objectContaining({
         resolution: expect.objectContaining({ width: 1280, height: 720, frameRate: 30 }),
       }),
     );
-    const videoOpts = rig.publishTrack.mock.calls.find((c) => c[0] === video)?.[1];
+    const videoOpts = publishedOptions(rig, video);
     expect(videoOpts).toMatchObject({
       source: Track.Source.ScreenShare,
       simulcast: true,
@@ -124,10 +174,7 @@ describe("enableScreenshare", () => {
         { width: 1280, height: 720, encoding: { maxBitrate: 1_200_000, maxFramerate: 15 } },
       ],
     });
-    const audioOpts = rig.publishTrack.mock.calls.find((c) => c[0] === audio)?.[1] as Record<
-      string,
-      unknown
-    >;
+    const audioOpts = publishedOptions(rig, audio) as Record<string, unknown>;
     expect(audioOpts).toMatchObject({ simulcast: false });
     expect(audioOpts).not.toHaveProperty("screenShareSimulcastLayers");
   });
@@ -157,12 +204,9 @@ describe("enableScreenshare", () => {
     loadPref.mockImplementation((key: string) =>
       key === "screenShareQuality" ? "high" : key === "screenShareFps" ? 120 : "",
     );
-    const rig = fakeRoom();
-    createLocalScreenTracks.mockResolvedValue([fakeVideoTrack()]);
+    const rig = await publishScreen([fakeVideoTrack()]);
 
-    await enableScreenshare({ manualScreenTracks: [] }, fakeDeps(rig.room));
-
-    const videoOpts = rig.publishTrack.mock.calls[0]?.[1] as Record<string, unknown>;
+    const videoOpts = firstPublishOptions(rig);
     expect(videoOpts).toMatchObject({
       simulcast: false,
       screenShareEncoding: { maxBitrate: 12_000_000, maxFramerate: 120 },
@@ -175,12 +219,9 @@ describe("enableScreenshare", () => {
     loadPref.mockImplementation((key: string) =>
       key === "screenShareQuality" ? "high" : key === "screenShareFps" ? 120 : "",
     );
-    const rig = fakeRoom();
-    createLocalScreenTracks.mockResolvedValue([fakeVideoTrack()]);
+    const rig = await publishScreen([fakeVideoTrack()]);
 
-    await enableScreenshare({ manualScreenTracks: [] }, fakeDeps(rig.room));
-
-    const videoOpts = rig.publishTrack.mock.calls[0]?.[1] as Record<string, unknown>;
+    const videoOpts = firstPublishOptions(rig);
     expect(videoOpts).toMatchObject({
       screenShareEncoding: { maxFramerate: 60 },
       degradationPreference: "maintain-framerate",
@@ -202,7 +243,7 @@ describe("enableScreenshare", () => {
       expect(rig.publishTrack.mock.calls[0]?.[1]).toMatchObject({
         degradationPreference: "maintain-framerate",
       });
-      const audioOpts = rig.publishTrack.mock.calls.find((c) => c[0] === audio)?.[1];
+      const audioOpts = publishedOptions(rig, audio);
       expect(audioOpts).not.toHaveProperty("degradationPreference");
     }
   });
@@ -215,7 +256,7 @@ describe("enableScreenshare", () => {
 
     await enableScreenshare({ manualScreenTracks: [] }, fakeDeps(rig.room));
 
-    const videoOpts = rig.publishTrack.mock.calls[0]?.[1] as Record<string, unknown>;
+    const videoOpts = firstPublishOptions(rig);
     expect(videoOpts).toMatchObject({ simulcast: false });
     expect(videoOpts).not.toHaveProperty("screenShareSimulcastLayers");
   });
@@ -224,10 +265,7 @@ describe("enableScreenshare", () => {
     loadPref.mockImplementation((key: string) =>
       key === "streamQuality" ? "medium" : key === "screenShareQuality" ? "high" : "",
     );
-    const rig = fakeRoom();
-    createLocalVideoTrack.mockResolvedValue(fakeVideoTrack());
-
-    await enableCamera({ manualCameraTrack: null }, fakeDeps(rig.room));
+    const rig = await publishCamera();
 
     expect(rig.publishTrack.mock.calls[0]?.[1]).toMatchObject({
       videoEncoding: { maxBitrate: 1_700_000 },
@@ -236,10 +274,7 @@ describe("enableScreenshare", () => {
 
   it("adds a 720p simulcast layer to a 1080p camera, so a 1-3 Mbps viewer gets 720p not 360p", async () => {
     loadPref.mockImplementation((key: string) => (key === "streamQuality" ? "high" : ""));
-    const rig = fakeRoom();
-    createLocalVideoTrack.mockResolvedValue(fakeVideoTrack());
-
-    await enableCamera({ manualCameraTrack: null }, fakeDeps(rig.room));
+    const rig = await publishCamera();
 
     const opts = rig.publishTrack.mock.calls[0]?.[1] as {
       videoSimulcastLayers: { width: number; height: number }[];
@@ -252,20 +287,14 @@ describe("enableScreenshare", () => {
 
   it("leaves a 720p camera on the SDK's default layers", async () => {
     loadPref.mockImplementation((key: string) => (key === "streamQuality" ? "medium" : ""));
-    const rig = fakeRoom();
-    createLocalVideoTrack.mockResolvedValue(fakeVideoTrack());
-
-    await enableCamera({ manualCameraTrack: null }, fakeDeps(rig.room));
+    const rig = await publishCamera();
 
     expect(rig.publishTrack.mock.calls[0]?.[1]).not.toHaveProperty("videoSimulcastLayers");
   });
 
   it("defaults the camera to 720p when no quality is saved", async () => {
     loadPref.mockImplementation((_key: string, fallback: unknown) => fallback);
-    const rig = fakeRoom();
-    createLocalVideoTrack.mockResolvedValue(fakeVideoTrack());
-
-    await enableCamera({ manualCameraTrack: null }, fakeDeps(rig.room));
+    await publishCamera();
 
     expect(createLocalVideoTrack.mock.calls[0]?.[0]).toMatchObject({
       resolution: { width: 1280, height: 720 },
@@ -285,10 +314,7 @@ describe("enableScreenshare", () => {
     // Simulate the browser/OS ending the capture without going through the app.
     (video.mediaStreamTrack as unknown as { dispatch: (t: string) => void }).dispatch("ended");
     await vi.waitFor(() => {
-      expect(deps.wsSend).toHaveBeenCalledWith({
-        type: "voice_screenshare",
-        payload: { enabled: false },
-      });
+      expectAnnounced(deps, "voice_screenshare", false);
     });
     expect(voiceStore.getState().localScreenshare).toBe(false);
   });
@@ -492,10 +518,7 @@ describe("enableScreenshare", () => {
     // disable emptied the state, only this attempt can still reach it — and
     // must not announce voice_screenshare(true) after the disable's false.
     expect(rig.publishTrack).toHaveBeenCalledTimes(1);
-    expect(deps.wsSend).not.toHaveBeenCalledWith({
-      type: "voice_screenshare",
-      payload: { enabled: true },
-    });
+    expectNotAnnounced(deps, "voice_screenshare", true);
     expect(rig.unpublishTrack).toHaveBeenCalledWith(video.mediaStreamTrack);
     expect(video.stop).toHaveBeenCalled();
     expect(audio.stop).toHaveBeenCalled();
@@ -553,10 +576,7 @@ describe("disableScreenshare", () => {
 
     expect(video.stop).toHaveBeenCalled();
     expect(rig.setScreenShareEnabled).toHaveBeenCalledWith(false);
-    expect(deps.wsSend).toHaveBeenCalledWith({
-      type: "voice_screenshare",
-      payload: { enabled: false },
-    });
+    expectAnnounced(deps, "voice_screenshare", false);
     expect(voiceStore.getState().localScreenshare).toBe(false);
   });
 
@@ -649,10 +669,7 @@ describe("enableScreenshare quality step", () => {
     await enabling;
 
     expect(createLocalScreenTracks).not.toHaveBeenCalled();
-    expect(deps.wsSend).not.toHaveBeenCalledWith({
-      type: "voice_screenshare",
-      payload: { enabled: true },
-    });
+    expectNotAnnounced(deps, "voice_screenshare", true);
     expect(voiceStore.getState().localScreenshare).toBe(false);
   });
 
@@ -665,6 +682,7 @@ describe("enableScreenshare quality step", () => {
     const createScreenTracks = vi.fn().mockResolvedValue([fakeVideoTrack()]);
     (rig.room.localParticipant as unknown as { createScreenTracks: unknown }).createScreenTracks =
       createScreenTracks;
+    mocks.watchShareResolutionRecovery.mockClear();
 
     try {
       await enableScreenshare({ manualScreenTracks: [] }, fakeDeps(rig.room));
@@ -676,14 +694,14 @@ describe("enableScreenshare quality step", () => {
     expect(picker).not.toHaveBeenCalled();
     expect(createScreenTracks).toHaveBeenCalledTimes(1);
     expect(createLocalScreenTracks).not.toHaveBeenCalled();
+    // The native capture is not a browser source: nothing to recover.
+    await vi.dynamicImportSettled();
+    expect(mocks.watchShareResolutionRecovery).not.toHaveBeenCalled();
   });
 
   it("shares at the saved defaults when the dialog cannot load", async () => {
     setScreenSourcePicker(() => Promise.reject(new Error("chunk failed")));
-    const rig = fakeRoom();
-    createLocalScreenTracks.mockResolvedValue([fakeVideoTrack()]);
-
-    await enableScreenshare({ manualScreenTracks: [] }, fakeDeps(rig.room));
+    await publishScreen([fakeVideoTrack()]);
 
     expectConsole("warn", /Screen share quality step unavailable/);
     expect(createLocalScreenTracks).toHaveBeenCalledWith(

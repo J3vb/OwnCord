@@ -8,89 +8,43 @@ import { createMessageList } from "@components/MessageList";
 import type { MessageListOptions } from "@components/MessageList";
 import { messagesStore, isWindowDetached } from "@stores/messages.store";
 import type { Message } from "@stores/messages.store";
-import { setChannels, setActiveChannel } from "@stores/channels.store";
-import { buildMessage } from "../helpers/messageFactory";
-import { resetMessagesState, resetMembersState } from "../helpers/storeResets";
+import { spacedMessage } from "../helpers/messageFactory";
+import {
+  stubScrollHeight,
+  makeListOptions,
+  resetStoresAndChannels,
+  setMessages,
+} from "../helpers/messageListHarness";
 import "../helpers/resizeObserverStub";
 
 const CHANNEL_ID = 1;
 
-function resetStores(): void {
-  resetMessagesState();
-  resetMembersState();
-  // The unread count a test gives the channel would otherwise leak a NEW
-  // divider into the next test's list.
-  setChannels([]);
-  setActiveChannel(null);
-}
-
 function makeMessage(id: number, userId = 1): Message {
-  return buildMessage(
-    { id },
-    {
-      channelId: CHANNEL_ID,
-      user: { id: userId, username: "Alice", avatar: null },
-      // 10 minutes apart, on the same UTC day, and past GROUP_THRESHOLD_MS
-      // (7 minutes) so shouldGroup never merges two of these rows — every
-      // message renders at its full (ungrouped) height.
-      timestamp: new Date(Date.UTC(2024, 0, 15, 0, id * 10)).toISOString(),
-    },
-  );
-}
-
-function setMessages(messages: readonly Message[]): void {
-  messagesStore.setState((prev) => {
-    const next = new Map(prev.messagesByChannel);
-    next.set(CHANNEL_ID, [...messages]);
-    return { ...prev, messagesByChannel: next };
-  });
+  return spacedMessage({ id }, { user: { id: userId, username: "Alice", avatar: null } });
 }
 
 describe("MessageList: own send scrolls to the bottom (C20)", () => {
   let container: HTMLDivElement;
   let msgList: ReturnType<typeof createMessageList> | null = null;
-  let scrollHeightDescriptor: PropertyDescriptor | undefined;
+  let restoreScrollHeight: () => void;
 
   beforeEach(() => {
-    resetStores();
+    resetStoresAndChannels();
     container = document.createElement("div");
     document.body.appendChild(container);
     // jsdom has no layout: give isNearBottom a real gap to measure.
-    scrollHeightDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollHeight");
-    Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
-      configurable: true,
-      get(): number {
-        return 100_000;
-      },
-    });
+    restoreScrollHeight = stubScrollHeight(100_000);
   });
 
   afterEach(() => {
     msgList?.destroy?.();
     msgList = null;
     container.remove();
-    if (scrollHeightDescriptor) {
-      Object.defineProperty(HTMLElement.prototype, "scrollHeight", scrollHeightDescriptor);
-    } else {
-      delete (HTMLElement.prototype as unknown as Record<string, unknown>).scrollHeight;
-    }
+    restoreScrollHeight();
   });
 
   function mount(extra: Partial<MessageListOptions> = {}): HTMLDivElement {
-    const options: MessageListOptions = {
-      channelId: CHANNEL_ID,
-      channelName: "general",
-      currentUserId: 1,
-      onScrollTop: vi.fn(),
-      onReplyClick: vi.fn(),
-      onEditClick: vi.fn(),
-      onEditSave: vi.fn(() => true),
-      onEmptyEdit: vi.fn(),
-      onDeleteClick: vi.fn(),
-      onReactionClick: vi.fn(),
-      onPinClick: vi.fn(),
-      ...extra,
-    };
+    const options: MessageListOptions = makeListOptions({ channelId: CHANNEL_ID, ...extra });
     msgList = createMessageList(options);
     msgList.mount(container);
     return container.querySelector(".messages-container") as HTMLDivElement;
@@ -120,12 +74,12 @@ describe("MessageList: own send scrolls to the bottom (C20)", () => {
 
   function sendWhileDetached(): { root: HTMLDivElement; around: Message[] } {
     const around = Array.from({ length: 20 }, (_, i) => makeMessage(10 + i));
-    setMessages(around);
+    setMessages(CHANNEL_ID, around);
     setDetached(true);
     const root = mount();
     root.scrollTop = 5_000;
     root.dispatchEvent(new Event("scroll"));
-    setMessages([...around, pendingRow()]);
+    setMessages(CHANNEL_ID, [...around, pendingRow()]);
     messagesStore.flush();
     return { root, around };
   }
@@ -133,25 +87,25 @@ describe("MessageList: own send scrolls to the bottom (C20)", () => {
   const history = (): Message[] => Array.from({ length: 50 }, (_, i) => makeMessage(51 + i));
 
   it("scrolls up two screens, send, and lands at the bottom", () => {
-    setMessages(history());
+    setMessages(CHANNEL_ID, history());
     const root = mount();
     root.scrollTop = 20_000;
     root.dispatchEvent(new Event("scroll"));
     expect(atBottom(root)).toBe(false);
 
-    setMessages([...history(), pendingRow()]);
+    setMessages(CHANNEL_ID, [...history(), pendingRow()]);
     messagesStore.flush();
 
     expect(atBottom(root)).toBe(true);
   });
 
   it("stays scrolled up for someone else's pending-shaped or live row", () => {
-    setMessages(history());
+    setMessages(CHANNEL_ID, history());
     const root = mount();
     root.scrollTop = 20_000;
     root.dispatchEvent(new Event("scroll"));
 
-    setMessages([...history(), makeMessage(101, 2)]);
+    setMessages(CHANNEL_ID, [...history(), makeMessage(101, 2)]);
     messagesStore.flush();
 
     expect(atBottom(root)).toBe(false);
@@ -159,20 +113,20 @@ describe("MessageList: own send scrolls to the bottom (C20)", () => {
 
   it("detached send waits for the live tail, then lands at the bottom with the pending row", () => {
     const around = Array.from({ length: 20 }, (_, i) => makeMessage(10 + i));
-    setMessages(around);
+    setMessages(CHANNEL_ID, around);
     setDetached(true);
     const root = mount();
     root.scrollTop = 5_000;
     root.dispatchEvent(new Event("scroll"));
 
     // performSend reattaches then appends the optimistic row to the old window.
-    setMessages([...around, pendingRow()]);
+    setMessages(CHANNEL_ID, [...around, pendingRow()]);
     messagesStore.flush();
     expect(isWindowDetached(CHANNEL_ID)).toBe(true);
 
     // The tail replaces the window and carries the pending row.
     setDetached(false);
-    setMessages([...history(), pendingRow()]);
+    setMessages(CHANNEL_ID, [...history(), pendingRow()]);
     messagesStore.flush();
 
     expect(atBottom(root)).toBe(true);
@@ -180,14 +134,14 @@ describe("MessageList: own send scrolls to the bottom (C20)", () => {
   });
 
   it("an incoming message right after a send keeps the view at the bottom without a counter", () => {
-    setMessages(history());
+    setMessages(CHANNEL_ID, history());
     const root = mount();
     root.scrollTop = 20_000;
     root.dispatchEvent(new Event("scroll"));
 
-    setMessages([...history(), pendingRow()]);
+    setMessages(CHANNEL_ID, [...history(), pendingRow()]);
     messagesStore.flush();
-    setMessages([...history(), makeMessage(101, 2), pendingRow()]);
+    setMessages(CHANNEL_ID, [...history(), makeMessage(101, 2), pendingRow()]);
     messagesStore.flush();
 
     expect(atBottom(root)).toBe(true);
@@ -207,7 +161,7 @@ describe("MessageList: own send scrolls to the bottom (C20)", () => {
     });
     try {
       const around = Array.from({ length: 20 }, (_, i) => makeMessage(10 + i));
-      setMessages(around);
+      setMessages(CHANNEL_ID, around);
       setDetached(true);
       const onScrollBottom = vi.fn(() => new Promise<void>(() => {}));
       const root = mount({ onScrollBottom });
@@ -216,10 +170,10 @@ describe("MessageList: own send scrolls to the bottom (C20)", () => {
       root.dispatchEvent(new Event("scroll"));
       expect(onScrollBottom).toHaveBeenCalledTimes(1);
 
-      setMessages([...around, pendingRow()]);
+      setMessages(CHANNEL_ID, [...around, pendingRow()]);
       messagesStore.flush();
       setDetached(false);
-      setMessages([...history(), pendingRow()]);
+      setMessages(CHANNEL_ID, [...history(), pendingRow()]);
       messagesStore.flush();
 
       expect(atBottom(root)).toBe(true);
@@ -233,24 +187,24 @@ describe("MessageList: own send scrolls to the bottom (C20)", () => {
   });
 
   it("a send that fails at once still lands at the bottom with its failed row", () => {
-    setMessages(history());
+    setMessages(CHANNEL_ID, history());
     const root = mount();
     root.scrollTop = 20_000;
     root.dispatchEvent(new Event("scroll"));
 
-    setMessages([...history(), pendingRow(1, "failed")]);
+    setMessages(CHANNEL_ID, [...history(), pendingRow(1, "failed")]);
     messagesStore.flush();
 
     expect(atBottom(root)).toBe(true);
   });
 
   it("a recovered draft does not pull the reader down", () => {
-    setMessages(history());
+    setMessages(CHANNEL_ID, history());
     const root = mount();
     root.scrollTop = 20_000;
     root.dispatchEvent(new Event("scroll"));
 
-    setMessages([...history(), pendingRow(1, "failed", "recovered:m-1")]);
+    setMessages(CHANNEL_ID, [...history(), pendingRow(1, "failed", "recovered:m-1")]);
     messagesStore.flush();
 
     expect(atBottom(root)).toBe(false);
@@ -263,7 +217,7 @@ describe("MessageList: own send scrolls to the bottom (C20)", () => {
       const { root } = sendWhileDetached();
       now.mockReturnValue(1_000 + 60_000);
       setDetached(false);
-      setMessages(history());
+      setMessages(CHANNEL_ID, history());
       messagesStore.flush();
 
       expect(atBottom(root)).toBe(false);

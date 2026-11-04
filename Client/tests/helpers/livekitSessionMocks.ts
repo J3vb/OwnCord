@@ -1,4 +1,9 @@
 import { vi } from "vitest";
+import {
+  mockKeyPair,
+  mockIdentityKeyPair,
+  netE2eeCryptoMock as e2eeCryptoMock,
+} from "./livekitE2eeMocks";
 
 export const mockVoiceState = {
   localMuted: false,
@@ -72,15 +77,7 @@ export const { mockLoadPref, mockSavePref } = {
 
 export const mockShowActionToast = vi.fn();
 
-export const mockKeyPair = {
-  publicKey: { type: "public" } as unknown as CryptoKey,
-  privateKey: { type: "private" } as unknown as CryptoKey,
-};
-
-export const mockIdentityKeyPair = {
-  publicKey: { type: "id-public" } as unknown as CryptoKey,
-  privateKey: { type: "id-private" } as unknown as CryptoKey,
-};
+export { mockKeyPair, mockIdentityKeyPair };
 
 // Stub Worker for E2EE web worker (not available in Node/vitest). Instances
 // carry a terminate() mock so worker-lifecycle assertions can observe teardown.
@@ -153,33 +150,15 @@ export function livekitClientMock() {
   };
 }
 
-export function voiceStoreMock() {
+/** The voice-store action stubs every LiveKit session suite needs as plain `vi.fn()`s. */
+export function voiceStoreActionStubs() {
   return {
-    voiceStore: {
-      getState: vi.fn(() => mockVoiceState),
-      get: vi.fn(() => ({})),
-      set: vi.fn(),
-      subscribe: vi.fn(),
-      subscribeSelector: vi.fn(() => () => {}),
-    },
     setLocalMuted: vi.fn(),
     setLocalDeafened: vi.fn(),
     setLocalCamera: vi.fn(),
     setLocalScreenshare: vi.fn(),
     bumpLocalShareRev: vi.fn(),
     setPttGated: vi.fn(),
-    // The PTT-poller-live flag lives in the store (so ptt.ts can write it at
-    // startup without importing the LiveKit SDK), so the mock has to carry real
-    // read/write behaviour rather than a bare vi.fn — restoreLocalVoiceState
-    // reads it back through isPttPollingLive().
-    setPttPollingLive: vi.fn((live: boolean) => {
-      mockPttPollingLive.value = live;
-    }),
-    isPttPollingLive: vi.fn(() => mockPttPollingLive.value),
-    onPttPollingLiveChange: vi.fn((listener: () => void) => {
-      pttPollingListeners.push(listener);
-      return () => {};
-    }),
     setSpeakers: vi.fn(),
     leaveVoiceChannel: vi.fn(),
     setListenOnly: vi.fn(),
@@ -193,6 +172,31 @@ export function voiceStoreMock() {
     setLocalSessionFingerprint: vi.fn(),
     setLocalSafetyNumber: vi.fn(),
     setEncryptionDegraded: vi.fn(),
+  };
+}
+
+export function voiceStoreMock() {
+  return {
+    voiceStore: {
+      getState: vi.fn(() => mockVoiceState),
+      get: vi.fn(() => ({})),
+      set: vi.fn(),
+      subscribe: vi.fn(),
+      subscribeSelector: vi.fn(() => () => {}),
+    },
+    ...voiceStoreActionStubs(),
+    // The PTT-poller-live flag lives in the store (so ptt.ts can write it at
+    // startup without importing the LiveKit SDK), so the mock has to carry real
+    // read/write behaviour rather than a bare vi.fn — restoreLocalVoiceState
+    // reads it back through isPttPollingLive().
+    setPttPollingLive: vi.fn((live: boolean) => {
+      mockPttPollingLive.value = live;
+    }),
+    isPttPollingLive: vi.fn(() => mockPttPollingLive.value),
+    onPttPollingLiveChange: vi.fn((listener: () => void) => {
+      pttPollingListeners.push(listener);
+      return () => {};
+    }),
   };
 }
 
@@ -225,25 +229,7 @@ export function voiceNoiseSuppressionMock() {
   };
 }
 
-export function netE2eeCryptoMock() {
-  return {
-    generateECDHKeyPair: vi.fn(async () => mockKeyPair),
-    exportPublicKey: vi.fn(async () => "bW9ja2VwaGVtZXJhbA=="),
-    importPublicKey: vi.fn(async () => ({ type: "public" }) as unknown as CryptoKey),
-    generateRoomKey: vi.fn(() => new Uint8Array(32)),
-    roomKeyToBase64: vi.fn(() => "mock-room-key-base64"),
-    wrapRoomKey: vi.fn(async () => ({ encryptedKey: "enc", iv: "iv" })),
-    unwrapRoomKey: vi.fn(async () => ({ roomKey: new Uint8Array(32), epoch: 0 })),
-    // F3 TOFU identity signing/verification
-    signEphemeralKey: vi.fn(async () => "mock-signature"),
-    verifyEphemeralKeySignature: vi.fn(async () => true),
-    importIdentityPublicKey: vi.fn(
-      async () => ({ type: "id-public-imported" }) as unknown as CryptoKey,
-    ),
-    computeKeyFingerprint: vi.fn(async () => "AB12 CD34 EF56 7890"),
-    computeRawKeyFingerprint: vi.fn(async () => "5E55 1234 5678 9ABC"),
-  };
-}
+export const netE2eeCryptoMock = e2eeCryptoMock;
 
 // F3 TOFU: identity keyring + peer pin store (Tauri-backed; mocked here).
 export function netIdentityMock() {

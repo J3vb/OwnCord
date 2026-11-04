@@ -61,7 +61,7 @@ import {
   formatMessageTimestamp,
   parseTimestamp,
 } from "@lib/text/formatting";
-import { formatFullDateTime } from "../../features/messaging/discordTimestamp";
+import { formatFullDateTime } from "@lib/text/discordTimestamp";
 import { resolveAuthor, userRoleColorVar } from "@lib/text/formatting";
 import { createAvatarElement, pickAvatarColor } from "../../features/profiles/avatar";
 import { importedAuthorKey } from "../../features/messaging/importedAuthor";

@@ -1,4 +1,5 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
 
 const fetchImageAsObjectUrl = vi.hoisted(() => vi.fn(() => Promise.resolve("blob:thumb")));
 
@@ -77,9 +78,18 @@ describe("ChannelMediaGallery", () => {
 
   const lastQuery = (): ChannelMediaQuery => loadPage.mock.calls.at(-1)![0];
 
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => {
+      panel?.destroy();
+      panel = null;
+      vi.useRealTimers();
+    },
+  );
+
   beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
     loadPage = vi.fn<ChannelMediaGalleryOptions["loadPage"]>();
     loadMonths = vi.fn<ChannelMediaGalleryOptions["loadMonths"]>(() =>
       Promise.resolve({
@@ -91,13 +101,6 @@ describe("ChannelMediaGallery", () => {
       }),
     );
     onJump = vi.fn<(id: number) => void>();
-  });
-
-  afterEach(() => {
-    panel?.destroy();
-    panel = null;
-    container.remove();
-    vi.useRealTimers();
   });
 
   it("groups media by month and jumps to the message on click", async () => {
@@ -376,15 +379,15 @@ describe("ChannelMediaGallery files tab usage line", () => {
   const usage = (): HTMLElement =>
     container.querySelector<HTMLElement>("[data-testid='media-usage']")!;
 
-  beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-  afterEach(() => {
-    panel?.destroy();
-    panel = null;
-    container.remove();
-  });
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => {
+      panel?.destroy();
+      panel = null;
+    },
+  );
 
   it("fetches storage once when Files first opens and links to My uploads", async () => {
     const loadStorage = vi.fn(() => Promise.resolve({ used_bytes: 64, quota_bytes: 100 }));

@@ -22,7 +22,12 @@ export const mockMembers = new Map<number, { identityPublicKey: string | null }>
 
 export const mockVoiceState = {
   voiceUsers: new Map<number, Map<number, unknown>>(),
+  peerKeySlots: new Set<number>(),
 };
+
+export const mockStageKey = vi.fn(async (_key: string, _slot: number) => undefined);
+export const mockUseKey = vi.fn(async (_key: string, _slot: number) => undefined);
+export const mockUseSlot = vi.fn((_slot: number) => true);
 
 export function livekitClientMock() {
   return {
@@ -30,15 +35,21 @@ export function livekitClientMock() {
     ExternalE2EEKeyProvider: vi.fn(function () {
       return {
         setKey: mockSetKey,
+        stageKey: mockStageKey,
+        useKey: mockUseKey,
+        useSlot: mockUseSlot,
         getKeys: vi.fn().mockReturnValue([]),
       };
     }),
   };
 }
 
-export function netE2eeCryptoMock() {
+export function netE2eeCryptoMock(
+  keyPair: typeof mockKeyPair = mockKeyPair,
+  overrides: Record<string, unknown> = {},
+) {
   return {
-    generateECDHKeyPair: vi.fn(async () => mockKeyPair),
+    generateECDHKeyPair: vi.fn(async () => keyPair),
     exportPublicKey: vi.fn(async () => "bW9ja2VwaGVtZXJhbA=="),
     importPublicKey: vi.fn(async () => ({ type: "public" }) as unknown as CryptoKey),
     generateRoomKey: vi.fn(() => new Uint8Array(32)),
@@ -52,6 +63,7 @@ export function netE2eeCryptoMock() {
     ),
     computeKeyFingerprint: vi.fn(async () => "AB12 CD34 EF56 7890"),
     computeRawKeyFingerprint: vi.fn(async () => "5E55 1234 5678 9ABC"),
+    ...overrides,
   };
 }
 
