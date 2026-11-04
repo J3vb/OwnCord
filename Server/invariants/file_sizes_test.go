@@ -87,10 +87,10 @@ func TestFileSizeOverridesAreSane(t *testing.T) {
 	for rel, o := range FileSizeOverrides {
 		lines := lineCountOf(t, root, rel)
 		switch o.Class {
-		case classB3ExitTarget:
+		case classB3ExitTarget, classRegistrationPoint:
 			if o.Ceiling > DefaultFileLimit {
-				t.Errorf("%s: b3-exit-target ceiling %d is looser than the %d default",
-					rel, o.Ceiling, DefaultFileLimit)
+				t.Errorf("%s: %s ceiling %d is looser than the %d default",
+					rel, o.Class, o.Ceiling, DefaultFileLimit)
 			}
 		case classGrandfathered:
 			if o.Ceiling <= DefaultFileLimit {
