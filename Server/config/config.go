@@ -196,7 +196,9 @@ type VoiceConfig struct {
 	LiveKitBinaryPath string `yaml:"livekit_binary"`     // path to livekit-server binary; empty = don't auto-start
 	// LiveKitMetricsURL is the http(s) address of LiveKit's Prometheus page
 	// (livekit.yaml `prometheus: port:`), e.g. http://livekit:6789/metrics. The
-	// admin Dashboard's LiveKit card reads it; empty = off.
+	// admin Dashboard's LiveKit card reads it. Optional: when empty the card
+	// reads the LiveKit OwnCord runs, or tries port 6789 on the host of
+	// voice.livekit_url.
 	LiveKitMetricsURL string `yaml:"livekit_metrics_url"`
 	// AutoDownloadLiveKit downloads a pinned, checksum-verified livekit-server
 	// release into <data_dir>/livekit/ and runs it as the companion process when
@@ -605,7 +607,7 @@ voice:
   # livekit_version: ""            # override the pinned livekit-server version (e.g. "1.13.11")
   # livekit_metrics_url: ""        # LiveKit's stats page for the admin Dashboard card, e.g.
   #                                # "http://livekit:6789/metrics" (needs prometheus: port: 6789
-  #                                # in livekit.yaml); empty = off
+  #                                # in livekit.yaml); optional, empty = found by itself
   # livekit_binary: ""             # path to an existing livekit-server binary; set this to
   #                                # skip auto-download and run your own build
   # node_ip: ""                    # public IP for WebRTC media; empty = auto-detect (pin only if detection fails)

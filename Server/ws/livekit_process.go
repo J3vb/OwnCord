@@ -395,6 +395,17 @@ func (p *LiveKitProcess) IsRunning() bool {
 	return p.cmd != nil && p.cmd.Process != nil
 }
 
+// PID returns the process id of the running companion; ok is false while none
+// runs (not started yet, or between restarts). It only reads.
+func (p *LiveKitProcess) PID() (int, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.cmd == nil || p.cmd.Process == nil {
+		return 0, false
+	}
+	return p.cmd.Process.Pid, true
+}
+
 // HealthCheck probes the LiveKit HTTP endpoint; true if it responds (any status).
 func (p *LiveKitProcess) HealthCheck(ctx context.Context) (bool, error) {
 	httpURL := wsToHTTP(p.cfg.LiveKitURL)

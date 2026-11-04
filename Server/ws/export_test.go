@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"os/exec"
 	"sync/atomic"
 	"time"
@@ -242,6 +243,13 @@ func (p *LiveKitProcess) SetProcessCmdForTest() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.cmd = &exec.Cmd{}
+}
+
+// SetProcessPIDForTest simulates a running companion with the given pid.
+func (p *LiveKitProcess) SetProcessPIDForTest(pid int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.cmd = &exec.Cmd{Process: &os.Process{Pid: pid}}
 }
 
 // SetProcessStoppedForTest sets stopped=true to simulate a stopped process.

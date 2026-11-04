@@ -41,7 +41,7 @@ func newTest(results ...fetchResult) (*Sampler, *fakeClock, *script, *bytes.Buff
 	sc := &script{results: results}
 	var buf bytes.Buffer
 	log := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	return newSampler(sc.fetch, clk.now, log, 100), clk, sc, &buf
+	return newSampler(SourceMetrics, sc.fetch, clk.now, log, 100), clk, sc, &buf
 }
 
 func step(s *Sampler, clk *fakeClock) {
@@ -244,7 +244,7 @@ func TestSampler_TimeoutThenRecover(t *testing.T) {
 	clk := &fakeClock{t: time.Unix(1_800_000_000, 0)}
 	var buf bytes.Buffer
 	log := slog.New(slog.NewTextHandler(&buf, nil))
-	s := newSampler(func(ctx context.Context) fetchResult { return fetchPage(ctx, c, srv.URL, 100*time.Millisecond) }, clk.now, log, 50)
+	s := newSampler(SourceMetrics, func(ctx context.Context) fetchResult { return fetchPage(ctx, c, srv.URL, 100*time.Millisecond) }, clk.now, log, 50)
 	s.sample(context.Background())
 	hang = true
 	step(s, clk)

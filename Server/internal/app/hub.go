@@ -136,24 +136,37 @@ func StartRuntime(cfg *config.Config, database *db.DB, pluginRegistry *plugin.Re
 	return api.Runtime{
 		Hub: hub, Limiter: limiter, Services: svc, VoiceEnabled: voiceEnabled, MetricsWindows: windows,
 		SystemStats:  sysstats.NewSampler(),
-		LiveKitStats: liveKitStats(cfg),
+		LiveKitStats: liveKitStats(cfg, hub, voiceEnabled),
 		Auth:         authSvc, Storage: in.Storage,
 		Updater: updater.NewUpdater(in.Version, cfg.GitHub.Token, cfg.GitHub.Owner, cfg.GitHub.Repo),
 	}, nil
 }
 
-// liveKitStats returns the sampler for LiveKit's stats page, or nil when
-// voice.livekit_metrics_url is empty or not an http(s) URL.
-func liveKitStats(cfg *config.Config) *lkstats.Sampler {
-	raw := cfg.Voice.LiveKitMetricsURL
-	if raw == "" {
-		return nil
+// liveKitHub is the part of the hub the LiveKit card reads.
+type liveKitHub interface {
+	LiveKitManaged() bool
+	LiveKitPID() (int, bool)
+	LiveKitRoomUsage(ctx context.Context) (rooms, participants int, err error)
+}
+
+// liveKitStats picks the LiveKit card's source (see lkstats.Detect), or nil
+// when voice is off or there is nothing to read. Managed is decided when the
+// hub is built, so it is final before the process starts. An invalid
+// voice.livekit_metrics_url is ignored and the address is guessed instead.
+func liveKitStats(cfg *config.Config, hub liveKitHub, voiceEnabled bool) *lkstats.Sampler {
+	metricsURL := cfg.Voice.LiveKitMetricsURL
+	if metricsURL != "" && !config.ValidMetricsURL(metricsURL) {
+		slog.Warn("config: voice.livekit_metrics_url is not an http(s) URL", "effect", "ignored, the address is guessed from voice.livekit_url")
+		metricsURL = ""
 	}
-	if !config.ValidMetricsURL(raw) {
-		slog.Warn("config: voice.livekit_metrics_url is not an http(s) URL", "effect", "the LiveKit card is off")
-		return nil
-	}
-	return lkstats.New(raw, slog.Default())
+	return lkstats.Detect{
+		Voice:      voiceEnabled,
+		Managed:    hub.LiveKitManaged(),
+		MetricsURL: metricsURL,
+		LiveKitURL: cfg.Voice.LiveKitURL,
+		PID:        hub.LiveKitPID,
+		RoomUsage:  hub.LiveKitRoomUsage,
+	}.Pick(slog.Default())
 }
 
 // storageLimits is the two bounds on the upload service: the per-user quota

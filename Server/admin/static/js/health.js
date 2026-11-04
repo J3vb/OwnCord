@@ -95,10 +95,11 @@ function healthRow(){
     +'<div class="section-card-body" id="slowRequests">'+slowRequestsBody(health.slow)+'</div></section>';
 }
 
-/* The LiveKit card: figures read from LiveKit's own stats page by the server.
+/* The LiveKit card: figures read by the server, from LiveKit's own stats page
+   or, when OwnCord runs LiveKit itself (source "managed"), from its process.
    CPU is a share of one core (100% = one core, as docker stats shows it), so
    a busy multi-core LiveKit goes past 100. Bytes per second show as Mbit/s. */
-const LK_HOWTO='Add <code>prometheus: port: 6789</code> to livekit.yaml and set <code>voice.livekit_metrics_url</code>.';
+const LK_HOWTO='Add <code>prometheus: port: 6789</code> to livekit.yaml and restart LiveKit (OwnCord finds it by itself; <code>voice.livekit_metrics_url</code> only if it lives elsewhere).';
 function lkTime(unix){
   return new Date(unix*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
 }
@@ -123,20 +124,27 @@ function livekitBody(d){
       :'<p class="muted">Not set up. To watch a LiveKit that runs on its own: '+LK_HOWTO+'</p>';
   }
   const status=String(d.status||'');
+  const managed=d.source==='managed';
   let line;
-  if(status==='ok')line='<span class="badge badge-green">Reachable</span>';
+  if(managed&&status==='ok')line='<span class="badge badge-green">Running</span> <span class="muted">Built-in LiveKit</span>';
+  else if(managed&&status==='restarting')line='<span class="badge badge-yellow">Not running</span> <span class="muted">Built-in LiveKit is starting or restarting</span>';
+  else if(status==='ok')line='<span class="badge badge-green">Reachable</span>';
   else if(status==='unreachable')line='<span class="badge badge-red">Not reachable</span> <span class="muted">'+(typeof d.since==='number'?'since '+esc(lkTime(d.since)):'')+'</span>';
   else if(status==='not_set_up')line='<span class="badge badge-yellow">Not set up</span> <span class="muted">The stats page has no LiveKit figures. '+LK_HOWTO+'</span>';
   else line='<span class="muted">'+(status?esc(status):HEALTH_DASH)+'</span>';
   const series=d.series||[],cur=d.current||{};
   const mem=series.map(p=>p.memory).filter(v=>typeof v==='number');
   const memHi=mem.length?Math.max(...mem)*1.15:1,memLo=mem.length?Math.min(...mem)*0.85:0;
-  const usage=[lkCount(cur.participants,'participant','participants'),lkCount(cur.tracks_published,'track published','tracks published'),lkCount(cur.tracks_subscribed,'track subscribed','tracks subscribed')];
+  const usage=[lkCount(cur.participants,'participant','participants')];
+  if(typeof cur.tracks_published==='number')usage.push(lkCount(cur.tracks_published,'track published','tracks published'));
+  if(typeof cur.tracks_subscribed==='number')usage.push(lkCount(cur.tracks_subscribed,'track subscribed','tracks subscribed'));
   return'<p class="health-sub lk-status" id="livekitStatus">'+line+'</p><div class="health-row">'
     +healthTile('lkCpu','CPU',healthPct(cur.cpu),(typeof cur.cores==='number'?'of '+lkCount(cur.cores,'core','cores')+' · ':'')+'100% = one core',healthSpark(series,'cpu',0,lkSpace(series,'cpu')),'','')
     +healthTile('lkMemory','Memory',typeof cur.memory==='number'?fmtBytes(cur.memory):HEALTH_DASH,'resident',healthSpark(series,'memory',memLo,memHi),'','')
     +healthTile('lkUsage','Usage',lkCount(cur.rooms,'room','rooms'),esc(usage.join(' · ')),'','','')
-    +healthTile('lkTraffic','Traffic','In '+lkMbit(cur.bytes_in_per_sec),'Out '+lkMbit(cur.bytes_out_per_sec),'','','')
+    +(managed
+      ?healthTile('lkTraffic','Traffic',HEALTH_DASH,'Docker setups only','','','')
+      :healthTile('lkTraffic','Traffic','In '+lkMbit(cur.bytes_in_per_sec),'Out '+lkMbit(cur.bytes_out_per_sec),'','',''))
     +'</div>';
 }
 

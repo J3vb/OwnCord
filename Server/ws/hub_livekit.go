@@ -54,6 +54,24 @@ func (h *Hub) LiveKitProcessStatus() LiveKitProcessStatus {
 	return h.lkProcess.Status()
 }
 
+// LiveKitPID returns the supervised companion's process id; ok is false when
+// LiveKit is not managed or no process is running right now.
+func (h *Hub) LiveKitPID() (int, bool) {
+	if h.lkProcess == nil {
+		return 0, false
+	}
+	return h.lkProcess.PID()
+}
+
+// LiveKitRoomUsage returns the open room and participant counts from LiveKit's
+// room service.
+func (h *Hub) LiveKitRoomUsage(ctx context.Context) (rooms, participants int, err error) {
+	if h.livekit == nil {
+		return 0, 0, fmt.Errorf("not configured")
+	}
+	return h.livekit.RoomUsage(ctx)
+}
+
 // LiveKitManaged reports whether OwnCord supervises the companion process.
 func (h *Hub) LiveKitManaged() bool {
 	return h.lkProcess != nil

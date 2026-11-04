@@ -73,6 +73,15 @@ so only containers on the compose network can reach it. An older `livekit.yaml`
 needs the two `prometheus:` lines added (then `docker compose restart livekit`);
 until then the card says "Not set up".
 
+The card finds its source by itself. When OwnCord runs LiveKit for you
+(`livekit_binary` or `auto_download_livekit`), it reads that process
+directly (CPU, memory, and rooms and participants from LiveKit's room list;
+tracks and traffic show a dash) and shows "Built-in LiveKit". Otherwise it
+uses `voice.livekit_metrics_url` when set, and when not it tries port 6789 on
+the host of `voice.livekit_url` (always plain `http`, since LiveKit serves its stats page without TLS).
+Set `voice.livekit_metrics_url` only when LiveKit's stats page lives somewhere
+else.
+
 **Voice needs your public address.** Keep `use_external_ip: true` in
 `livekit.yaml`. LiveKit looks up your address each time it starts, so after
 your public address changes, run `docker compose restart livekit`. Only on a
