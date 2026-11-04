@@ -49,9 +49,9 @@ use tokio::io::{
     ErrorKind, ReadBuf,
 };
 use tokio::net::TcpStream;
-use tokio::time::{timeout, Duration, Instant};
+use tokio::time::{Duration, Instant};
 
-use crate::proxy_common::header_value;
+use crate::proxy_common::{header_value, until_idle, Activity, ActivityStream};
 
 pub(crate) type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
@@ -301,12 +301,15 @@ where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
     L: AsyncWrite + Unpin,
 {
-    let reusable = timeout(
-        crate::http_proxy::DATA_PHASE_TIMEOUT,
-        relay(&mut stream, head, local),
+    let activity = Activity::new();
+    let mut watched = ActivityStream::new(&mut stream, Arc::clone(&activity));
+    let reusable = until_idle(
+        &activity,
+        crate::http_proxy::DATA_PHASE_IDLE_TIMEOUT,
+        relay(&mut watched, head, local),
     )
     .await
-    .map_err(|_| ExchangeError::fatal("data phase timed out"))??;
+    .map_err(|_| ExchangeError::fatal("data phase idle"))??;
     if reusable {
         pool.checkin(host, fingerprint, stream);
     }

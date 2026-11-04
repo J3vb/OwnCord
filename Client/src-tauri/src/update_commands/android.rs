@@ -73,7 +73,11 @@ struct InstallerResponse {
 /// Kotlin side opens that settings page and this returns
 /// `text::UPDATE_INSTALL_PERMISSION` so the banner can say what to do.
 #[tauri::command]
-pub async fn download_and_install_update(app: AppHandle, server_url: String) -> Result<(), String> {
+pub async fn download_and_install_update(
+    app: AppHandle,
+    server_url: String,
+    expected_version: Option<String>,
+) -> Result<(), String> {
     // Released when this returns: the user can cancel Android's prompt, and
     // the next tap must be able to start again.
     let _guard = InstallGuard::acquire(&UPDATE_IN_PROGRESS)?;
@@ -83,6 +87,7 @@ pub async fn download_and_install_update(app: AppHandle, server_url: String) -> 
         .await
         .map_err(|e| format!("update check failed: {e}"))?
         .ok_or_else(|| "no update available".to_string())?;
+    super::check_announced(expected_version.as_deref(), &update.version)?;
 
     let progress_app = app.clone();
     let mut received: u64 = 0;

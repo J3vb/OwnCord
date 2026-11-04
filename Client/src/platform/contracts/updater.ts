@@ -34,7 +34,7 @@ export interface DownloadProgress {
 
 /** Re-declared, structurally identical to `UpdateFailureReason` (`lib/net/updater.ts`). */
 export type UpdateFailureReason =
-  "cancelled" | "not-authorized" | "android-confirm" | "android-permission";
+  "cancelled" | "not-authorized" | "android-confirm" | "android-permission" | "version-changed";
 
 /** Re-declared, structurally identical to `UpdateInstallState` (`lib/net/updater.ts`). */
 export type UpdateInstallState =
@@ -48,8 +48,9 @@ export type UpdateInstallState =
       /** Why a .deb install did not run, when the system password prompt was
        *  dismissed or could not authorize. On Android: the installer is open
        *  and waits for the user's Install tap (`android-confirm`), or OwnCord
-       *  may not install apps yet (`android-permission`). Absent for every
-       *  other failure. */
+       *  may not install apps yet (`android-permission`). `version-changed`:
+       *  the server now offers a different version from the one shown, and
+       *  nothing was downloaded. Absent for every other failure. */
       readonly reason?: UpdateFailureReason;
     };
 
@@ -58,7 +59,9 @@ export interface AppUpdater {
    *  Settings control for it is not drawn rather than drawn to fail. */
   readonly available: boolean;
   checkForUpdate(serverUrl: string): Promise<UpdateCheckResult>;
-  downloadAndInstallUpdate(serverUrl: string): Promise<void>;
+  /** `expectedVersion` is the version the user was shown; the install refuses
+   *  any other with the `version-changed` reason. */
+  downloadAndInstallUpdate(serverUrl: string, expectedVersion?: string): Promise<void>;
   subscribeToInstall(listener: (state: UpdateInstallState) => void): () => void;
 }
 

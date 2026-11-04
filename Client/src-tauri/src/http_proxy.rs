@@ -48,7 +48,8 @@ use tokio::time::Duration;
 use crate::http_pool::{self, BoxError, ConnPool, Fresh};
 use crate::tofu::{self, TofuOutcome};
 
-/// Tauri-managed state: one running tunnel per remote host.
+/// Tauri-managed state: one running tunnel per remote host, keyed by
+/// `tofu::cert_store_key`.
 pub struct HttpProxyState {
     inner: Mutex<HashMap<String, ProxyEntry>>,
     /// Idle upstream connections shared by every tunnel, keyed by exact host.
@@ -125,10 +126,14 @@ pub async fn start_http_proxy<R: Runtime>(
     remote_host: String,
 ) -> Result<TunnelEndpoint, String> {
     validate_remote_host(&remote_host)?;
+    // Keyed like the pins and the pool, so two spellings of one server (a
+    // typed profile host and a URL-parsed one) share a tunnel. The first
+    // spelling stays the one the tunnel dials.
+    let key = tofu::cert_store_key(&remote_host);
 
     let mut inner = state.inner.lock().await;
 
-    if let Some(entry) = inner.get(&remote_host) {
+    if let Some(entry) = inner.get(&key) {
         debug!(
             "[http_proxy] reusing tunnel on port {} for {}",
             entry.port, remote_host
@@ -153,7 +158,7 @@ pub async fn start_http_proxy<R: Runtime>(
     let conn_app = app.clone();
     let conn_host = remote_host.clone();
     let conn_token = token.clone();
-    let dead_host = remote_host.clone();
+    let dead_host = key.clone();
     spawn_watched(
         "http_proxy",
         tokio::spawn(run_accept_loop(
@@ -188,7 +193,7 @@ pub async fn start_http_proxy<R: Runtime>(
         port, remote_host
     );
     inner.insert(
-        remote_host,
+        key,
         ProxyEntry {
             port,
             token: token.clone(),
@@ -204,9 +209,10 @@ pub async fn stop_http_proxy(
     state: tauri::State<'_, HttpProxyState>,
     remote_host: String,
 ) -> Result<(), String> {
+    let key = tofu::cert_store_key(&remote_host);
     let mut inner = state.inner.lock().await;
-    state.pool.invalidate(&tofu::cert_store_key(&remote_host));
-    if let Some(entry) = inner.remove(&remote_host) {
+    state.pool.invalidate(&key);
+    if let Some(entry) = inner.remove(&key) {
         let _ = entry.shutdown_tx.send(());
         info!("[http_proxy] tunnel stopped for {}", remote_host);
     }
@@ -527,7 +533,7 @@ async fn run_data_phase<R: Runtime>(
     tls: &mut tokio_rustls::client::TlsStream<TcpStream>,
 ) -> std::io::Result<(u64, u64)> {
     let Some(target) = upload_progress_target(request_head) else {
-        return copy_with_deadline(local, tls, DATA_PHASE_TIMEOUT).await;
+        return copy_with_deadline(local, tls, DATA_PHASE_IDLE_TIMEOUT).await;
     };
     let counter = Arc::new(AtomicU64::new(0));
     let mut counted = CountingStream::new(&mut *local, Arc::clone(&counter));
@@ -546,19 +552,21 @@ async fn run_data_phase<R: Runtime>(
             }
         }
     });
-    let result = copy_with_deadline(&mut counted, tls, DATA_PHASE_TIMEOUT).await;
+    let result = copy_with_deadline(&mut counted, tls, DATA_PHASE_IDLE_TIMEOUT).await;
     ticker.abort();
     result
 }
 
-/// Bound for the data-copy phase of a tunneled connection (step 3 above).
-/// The header read, TCP connect, and TLS handshake phases all use a tight
-/// 10s guard, but this phase carries the actual REST body — including
-/// attachment/avatar uploads — so it needs a much more generous bound. 600s
-/// only reclaims a connection that is genuinely stuck (e.g. a remote that
-/// completes the TLS handshake and then neither responds nor closes), not
-/// one that is merely slow.
-pub(crate) const DATA_PHASE_TIMEOUT: Duration = Duration::from_secs(600);
+/// Idle bound for the data-copy phase of a tunneled connection (step 3
+/// above): the connection is reclaimed after this long with no byte moving
+/// either way. The header read, TCP connect, and TLS handshake phases use a
+/// tight 10s guard. This one only reclaims a connection that is genuinely
+/// stuck (a remote that completes the TLS handshake and then neither responds
+/// nor closes). A transfer that is slow but moving is never cut here: the
+/// server ends it at its own transfer lifetime (up to an hour) with a 408 the
+/// webview can explain, and the server abandons a stalled body after 30 s,
+/// well inside this window.
+pub(crate) const DATA_PHASE_IDLE_TIMEOUT: Duration = Duration::from_secs(600);
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -823,5 +831,28 @@ mod tests {
         }
 
         stop_http_proxy(app.state(), host).await.expect("stop");
+    }
+
+    #[tokio::test]
+    async fn two_spellings_of_one_host_share_one_tunnel() {
+        let app = tauri::test::mock_builder()
+            .manage(HttpProxyState::new())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app");
+
+        let typed = start_http_proxy(app.handle().clone(), app.state(), "Chat.Example".into())
+            .await
+            .expect("typed start");
+        let parsed = start_http_proxy(app.handle().clone(), app.state(), "chat.example:443".into())
+            .await
+            .expect("parsed start");
+        assert_eq!(typed, parsed, "one server must get one listener");
+
+        // Stopping by either spelling stops the shared tunnel.
+        stop_http_proxy(app.state(), "chat.example".into())
+            .await
+            .expect("stop");
+        let state: tauri::State<'_, HttpProxyState> = app.state();
+        assert!(state.inner.lock().await.is_empty());
     }
 }

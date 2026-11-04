@@ -88,6 +88,7 @@ function failedText(state: Extract<UpdateInstallState, { status: "failed" }>): s
   if (state.reason === "not-authorized") return connectText("update.notAuthorized");
   if (state.reason === "android-confirm") return connectText("update.androidConfirm");
   if (state.reason === "android-permission") return connectText("update.androidPermission");
+  if (state.reason === "version-changed") return connectText("update.versionChanged");
   return connectText("update.failed");
 }
 
@@ -104,6 +105,8 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
   let dismissedKey: string | null = null;
   /** The offer the banner currently shows. */
   let shownKey: string | null = null;
+  /** The version the install button installs: the one the banner showed. */
+  let offeredVersion: string | undefined;
   let checkTimer: ReturnType<typeof setTimeout> | null = null;
   let unsubscribeInstall: (() => void) | null = null;
   let unsubscribeOutcome: (() => void) | null = null;
@@ -187,6 +190,7 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
 
     banner = createElement("div", { class: "update-banner" });
     shownKey = version;
+    offeredVersion = version;
     const body = buildFrame(banner, "download", connectText("update.ready", { version }));
 
     // The notes live on the About tab's update card, which reads the same offer.
@@ -235,9 +239,19 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
   }
 
   function installUpdate(): void {
-    void downloadAndInstallUpdate(serverUrl).catch((err: unknown) => {
+    void downloadAndInstallUpdate(serverUrl, offeredVersion).catch((err: unknown) => {
       log.error("Update install failed", { error: String(err) });
     });
+  }
+
+  function onInstallState(state: UpdateInstallState): void {
+    renderInstallState(state);
+    // Nothing was downloaded. The banner says so, with Retry and Dismiss, and
+    // a fresh check replaces it with the version the server offers now (the
+    // About tab follows the same offer). A failed check leaves it actionable.
+    if (state.status === "failed" && state.reason === "version-changed") {
+      void checker.checkNow("manual");
+    }
   }
 
   function renderInstallState(state: UpdateInstallState): void {
@@ -322,7 +336,7 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
       "data-testid": "update-announce",
     });
     target.appendChild(liveRegion);
-    unsubscribeInstall = subscribeToUpdateInstall(renderInstallState);
+    unsubscribeInstall = subscribeToUpdateInstall(onInstallState);
     unsubscribeOutcome = checker.onOutcome(handleOutcome);
     if (keepChecking) {
       // A socket that comes back may be an updated server: ask again. Read-only
