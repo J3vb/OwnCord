@@ -15,6 +15,7 @@ import (
 	lksdk "github.com/livekit/server-sdk-go/v2"
 
 	"github.com/J3vb/OwnCord/Server/config"
+	"github.com/J3vb/OwnCord/Server/livekitproc"
 )
 
 // tokenTTL is the validity of generated LiveKit access tokens: short (5 min) to
@@ -58,7 +59,7 @@ func NewLiveKitClient(cfg *config.VoiceConfig) (*LiveKitClient, error) {
 	}
 
 	// The room service client uses the HTTP URL: ws:// becomes http://, wss:// https://.
-	httpURL := wsToHTTP(cfg.LiveKitURL)
+	httpURL := livekitproc.HTTPURL(cfg.LiveKitURL)
 
 	roomSvc := lksdk.NewRoomServiceClient(httpURL, cfg.LiveKitAPIKey, cfg.LiveKitAPISecret)
 
@@ -293,18 +294,6 @@ func (c *LiveKitClient) HealthCheck(ctx context.Context) (bool, error) {
 	}
 
 	return true, nil
-}
-
-// wsToHTTP converts a WebSocket URL to an HTTP URL.
-func wsToHTTP(wsURL string) string {
-	switch {
-	case len(wsURL) >= 6 && wsURL[:6] == "wss://":
-		return "https://" + wsURL[6:]
-	case len(wsURL) >= 5 && wsURL[:5] == "ws://":
-		return "http://" + wsURL[5:]
-	default:
-		return wsURL
-	}
 }
 
 // loopbackURLOrEmpty returns rawURL when its host is localhost or a loopback

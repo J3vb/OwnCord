@@ -1,4 +1,4 @@
-package ws
+package livekitproc
 
 import (
 	"bytes"
@@ -7,11 +7,11 @@ import (
 	"strings"
 )
 
-// LiveKitProcessStatus is the supervisor's local state: whether a companion is
+// Status is the supervisor's local state: whether a companion is
 // running, how many times it restarted after an unexpected exit, and whether
-// it gave up. Reading it probes nothing. Split from livekit_process.go to keep
+// it gave up. Reading it probes nothing. Split from process.go to keep
 // that file within the repository's size limit.
-type LiveKitProcessStatus struct {
+type Status struct {
 	Running  bool
 	Restarts int
 	GaveUp   bool
@@ -19,11 +19,11 @@ type LiveKitProcessStatus struct {
 
 // Status reports the companion's local state. Nil-safe: a nil manager means
 // LiveKit is externally managed, which callers read as "don't check".
-func (p *LiveKitProcess) Status() LiveKitProcessStatus {
+func (p *Process) Status() Status {
 	if p == nil {
-		return LiveKitProcessStatus{}
+		return Status{}
 	}
-	return LiveKitProcessStatus{
+	return Status{
 		Running:  p.IsRunning(),
 		Restarts: int(p.restarts.Load()),
 		GaveUp:   p.gaveUp.Load(),

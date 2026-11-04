@@ -150,7 +150,7 @@ Everything else is the shipped default. The non-defaults are:
 | `voice.advertise_internal_ip`                  | `true`      | See above — single-machine ICE, not a deployment setting                                                           |
 
 The SFU is **livekit-server 1.13.11**, the release the server itself downloads
-(`ws.DefaultLiveKitVersion`). Measuring a different SFU release than the product
+(`livekitproc.DefaultVersion`). Measuring a different SFU release than the product
 ships would measure something no owner ever runs. The qualifying runs recorded
 below predate the 1.13.11 pin and were measured against **1.13.5** or
 **1.13.7**; the blocks name the release each was run on.

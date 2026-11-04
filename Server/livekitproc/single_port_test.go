@@ -1,12 +1,13 @@
-package ws_test
+package livekitproc_test
 
 import (
 	"os"
 	"testing"
 
-	"github.com/J3vb/OwnCord/Server/config"
-	"github.com/J3vb/OwnCord/Server/ws"
 	"go.yaml.in/yaml/v3"
+
+	"github.com/J3vb/OwnCord/Server/config"
+	"github.com/J3vb/OwnCord/Server/livekitproc"
 )
 
 // Single-port UDP (O1, theme 4). LiveKit can carry all WebRTC media on one UDP
@@ -22,7 +23,7 @@ type generatedRTC struct {
 
 func generateFor(t *testing.T, cfg *config.VoiceConfig) generatedRTC {
 	t.Helper()
-	proc := ws.NewLiveKitProcess(cfg, &config.TLSConfig{}, t.TempDir())
+	proc := livekitproc.New(cfg, &config.TLSConfig{}, t.TempDir())
 	cfgPath, err := proc.GenerateConfigForTest()
 	if err != nil {
 		t.Fatalf("generateConfig: %v", err)

@@ -1,6 +1,9 @@
 package ws
 
-import "github.com/J3vb/OwnCord/Server/syncutil"
+import (
+	"github.com/J3vb/OwnCord/Server/livekitproc"
+	"github.com/J3vb/OwnCord/Server/syncutil"
+)
 
 // hubVoice groups the hub's voice registry, reconciler, rejoin blocks,
 // key-holder map, per-user moderation locks and the LiveKit process. It holds
@@ -29,5 +32,5 @@ type hubVoice struct {
 	keyHolderMu syncutil.RankedRW[lockRankHubCache]
 	keyHolders  map[int64]int64
 
-	lkProcess *LiveKitProcess
+	lkProcess *livekitproc.Process
 }

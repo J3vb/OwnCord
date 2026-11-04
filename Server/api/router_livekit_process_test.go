@@ -63,7 +63,7 @@ func TestNewRouter_LiveKitProcessStartFailure_VoiceJoinFailsClosed(t *testing.T)
 			// Non-default, non-empty credentials so NewLiveKitClient succeeds
 			// and hub.SetLiveKit runs (router.go:162) — voice looks
 			// "configured". The colon in the secret is the ordinary
-			// credential character that trips livekit_process.go's unsafeYAML
+			// credential character that trips livekitproc/process.go's unsafeYAML
 			// check inside generateConfig, so proc.Start() fails
 			// synchronously, before any goroutine or network call.
 			LiveKitAPIKey:       "test-livekit-key-oc0019",

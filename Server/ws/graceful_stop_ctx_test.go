@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/livekitproc"
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
@@ -58,11 +59,11 @@ func TestGracefulStopContext_StopsLiveKitAfterSocketsClose(t *testing.T) {
 	h.pubsub.Subscribe(c, TopicGlobal)
 
 	var stopped, noticeQueued, socketClosed bool
-	h.voiceHub.lkProcess = &LiveKitProcess{cancel: func() {
+	h.voiceHub.lkProcess = livekitproc.NewStoppableForTest(func() {
 		stopped = true
 		noticeQueued = len(h.broadcast) > 0
 		socketClosed = c.isSendClosed()
-	}}
+	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()

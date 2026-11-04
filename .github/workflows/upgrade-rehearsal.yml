@@ -77,7 +77,7 @@ permissions:
 
 env:
   # The livekit-server release OwnCord itself downloads
-  # (ws.DefaultLiveKitVersion), same value and same reason as
+  # (livekitproc.DefaultVersion), same value and same reason as
   # load-baseline.yml's: phase S kills what the product would have started, so
   # measuring a different SFU release would measure something no owner runs.
   LIVEKIT_VERSION: "1.13.11"

@@ -5,7 +5,7 @@ package main
 // so this pins the livekit version shared by the files that must agree (the
 // three below, plus the rest listed in TestLiveKitPinsAgreeEverywhere):
 // the Dockerfile's bundled release, docker-compose.yml's separate livekit image
-// and ws.DefaultLiveKitVersion.
+// and livekitproc.DefaultVersion.
 
 import (
 	"fmt"
@@ -18,8 +18,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/J3vb/OwnCord/Server/ws"
 	"go.yaml.in/yaml/v3"
+
+	"github.com/J3vb/OwnCord/Server/livekitproc"
 )
 
 type composeService struct {
@@ -153,8 +154,8 @@ func TestComposeLiveKitKeysFromEnv(t *testing.T) {
 func TestDockerfileBundlesPinnedLiveKit(t *testing.T) {
 	df := readFile(t, "Dockerfile")
 
-	if m := regexp.MustCompile(`(?m)^ARG LIVEKIT_VERSION=(\S+)$`).FindStringSubmatch(df); len(m) < 2 || m[1] != ws.DefaultLiveKitVersion {
-		t.Errorf("Dockerfile LIVEKIT_VERSION must equal ws.DefaultLiveKitVersion %q, got %v", ws.DefaultLiveKitVersion, m)
+	if m := regexp.MustCompile(`(?m)^ARG LIVEKIT_VERSION=(\S+)$`).FindStringSubmatch(df); len(m) < 2 || m[1] != livekitproc.DefaultVersion {
+		t.Errorf("Dockerfile LIVEKIT_VERSION must equal livekitproc.DefaultVersion %q, got %v", livekitproc.DefaultVersion, m)
 	}
 }
 
@@ -171,12 +172,12 @@ func TestComposeKeepsLiveKitSeparate(t *testing.T) {
 		t.Errorf("compose owncord OWNCORD_VOICE_LIVEKIT_BINARY must be empty, got %q (present=%v)", v, ok)
 	}
 	// The separate container must run the same release the image bundles.
-	if got, want := dc.Services["livekit"].Image, "livekit/livekit-server:v"+ws.DefaultLiveKitVersion; got != want {
+	if got, want := dc.Services["livekit"].Image, "livekit/livekit-server:v"+livekitproc.DefaultVersion; got != want {
 		t.Errorf("compose livekit image must be %q, got %q", want, got)
 	}
 }
 
-// TestLiveKitPinsAgreeEverywhere makes ws.DefaultLiveKitVersion the single
+// TestLiveKitPinsAgreeEverywhere makes livekitproc.DefaultVersion the single
 // source of truth for every live copy of the pinned SFU version. A bump that
 // misses one (for example the E2E installer or the load workflow) would leave
 // those suites testing the old SFU with nothing failing. Each entry reads a
@@ -214,8 +215,8 @@ func TestLiveKitPinsAgreeEverywhere(t *testing.T) {
 			continue
 		}
 		for _, m := range matches {
-			if m[1] != ws.DefaultLiveKitVersion {
-				t.Errorf("%s: LiveKit version is %q, expected %q (ws.DefaultLiveKitVersion)", p.file, m[1], ws.DefaultLiveKitVersion)
+			if m[1] != livekitproc.DefaultVersion {
+				t.Errorf("%s: LiveKit version is %q, expected %q (livekitproc.DefaultVersion)", p.file, m[1], livekitproc.DefaultVersion)
 			}
 		}
 	}

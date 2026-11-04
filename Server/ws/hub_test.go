@@ -12,6 +12,7 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/livekitproc"
 	"github.com/J3vb/OwnCord/Server/migrations"
 	"github.com/J3vb/OwnCord/Server/permissions"
 	"github.com/J3vb/OwnCord/Server/service"
@@ -1077,7 +1078,7 @@ func TestHub_LiveKitProcessRequiresClient(t *testing.T) {
 	_, err := ws.NewHub(ws.HubOptions{
 		DB:             database,
 		Limiter:        auth.NewRateLimiter(),
-		LiveKitProcess: &ws.LiveKitProcess{},
+		LiveKitProcess: &livekitproc.Process{},
 	})
 	if err == nil {
 		t.Fatal("NewHub must refuse LiveKitProcess without LiveKit")

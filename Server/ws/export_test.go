@@ -8,15 +8,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net/http"
-	"os"
-	"os/exec"
 	"sync/atomic"
 	"time"
 
+	"github.com/livekit/protocol/livekit"
+
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
-	"github.com/livekit/protocol/livekit"
 )
 
 // SetVoiceRejoinBlockWindowForTest shrinks the moderator-removal rejoin block
@@ -227,38 +225,6 @@ func LeaveVoiceChannelWithRetryForTest(h *Hub, userID int64, channelID int64, jo
 
 // ─── livekit process/webhook helpers ───────────────────────────────────────
 
-// GenerateConfigForTest exposes LiveKitProcess.generateConfig for external tests.
-func (p *LiveKitProcess) GenerateConfigForTest() (string, error) {
-	return p.generateConfig()
-}
-
-// HTTPTransportForTest exposes the health-check client's transport so tests can
-// assert it does not share http.DefaultTransport's connection pool.
-func (p *LiveKitProcess) HTTPTransportForTest() http.RoundTripper {
-	return p.httpClient.Transport
-}
-
-// SetProcessCmdForTest sets cmd to a non-nil value to simulate "already running".
-func (p *LiveKitProcess) SetProcessCmdForTest() {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.cmd = &exec.Cmd{}
-}
-
-// SetProcessPIDForTest simulates a running companion with the given pid.
-func (p *LiveKitProcess) SetProcessPIDForTest(pid int) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.cmd = &exec.Cmd{Process: &os.Process{Pid: pid}}
-}
-
-// SetProcessStoppedForTest sets stopped=true to simulate a stopped process.
-func (p *LiveKitProcess) SetProcessStoppedForTest() {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.stopped = true
-}
-
 // NewHubForTest creates a minimal Hub with no DB for webhook testing. limiter
 // is real (not nil): deliverBroadcast's channel-scoped path consults it for
 // the topic rate limit unconditionally.
@@ -434,11 +400,6 @@ func ParseParticipantIdentityForTest(identity string) (int64, string, error) {
 // ParseRoomChannelIDForTest exposes parseRoomChannelID for external tests.
 func ParseRoomChannelIDForTest(roomName string) (int64, error) {
 	return parseRoomChannelID(roomName)
-}
-
-// WsToHTTPForTest exposes wsToHTTP for external tests.
-func WsToHTTPForTest(wsURL string) string {
-	return wsToHTTP(wsURL)
 }
 
 // RegisterNowForTest exposes registerNow for external tests so clients are

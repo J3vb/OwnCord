@@ -1,6 +1,6 @@
 //go:build linux
 
-package ws
+package livekitproc
 
 import (
 	"os"
@@ -10,7 +10,7 @@ import (
 // liveKitSysProcAttr asks the kernel to SIGKILL the companion livekit-server
 // if this process dies without running its own teardown (kill -9, OOM kill,
 // a wedged shutdown force-exited by the restart backstop). The normal stop
-// path is still LiveKitProcess.Stop via hub.GracefulStop — this only closes
+// path is still Process.Stop via hub.GracefulStop — this only closes
 // the hole where an orphaned livekit-server keeps TCP 7880 and the UDP media
 // range bound, crash-looping the successor's LiveKit until someone kills the
 // orphan by hand.

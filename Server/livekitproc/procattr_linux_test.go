@@ -1,6 +1,6 @@
 //go:build linux
 
-package ws
+package livekitproc
 
 import (
 	"syscall"

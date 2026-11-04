@@ -1,7 +1,4 @@
-// Package ws also provides the LiveKit companion process manager: LiveKitProcess
-// runs a livekit-server binary alongside chatserver, auto-generates a minimal
-// livekit.yaml, starts it, monitors health and restarts on crash.
-package ws
+package livekitproc
 
 import (
 	"context"
@@ -19,8 +16,8 @@ import (
 	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
-// LiveKitProcess manages the companion livekit-server binary.
-type LiveKitProcess struct {
+// Process manages the companion livekit-server binary.
+type Process struct {
 	cfg        *config.VoiceConfig
 	tlsCfg     *config.TLSConfig
 	dataDir    string
@@ -40,13 +37,13 @@ type LiveKitProcess struct {
 	loopDone chan struct{} // closed when runLoop exits entirely
 }
 
-// LiveKitProcessStatus and the companion log writer live in livekit_process_log.go.
+// Status and the companion log writer live in process_log.go.
 
-// NewLiveKitProcess creates a process manager without starting it (call Start).
+// New creates a process manager without starting it (call Start).
 // tlsCfg reuses OwnCord's certs for LiveKit TLS (avoids mixed-content blocks in
 // WebView2).
-func NewLiveKitProcess(cfg *config.VoiceConfig, tlsCfg *config.TLSConfig, dataDir string) *LiveKitProcess {
-	return &LiveKitProcess{
+func New(cfg *config.VoiceConfig, tlsCfg *config.TLSConfig, dataDir string) *Process {
+	return &Process{
 		cfg:     cfg,
 		tlsCfg:  tlsCfg,
 		dataDir: dataDir,
@@ -73,7 +70,7 @@ var liveKitStopGrace = 5 * time.Second
 // generateConfig writes a minimal livekit.yaml. An existing file lacking the
 // auto-generated marker is user-managed and left untouched so operators can set
 // LiveKit options OwnCord does not model (ips.includes, interfaces, stun_servers).
-func (p *LiveKitProcess) generateConfig() (string, error) {
+func (p *Process) generateConfig() (string, error) {
 	cfgPath := filepath.Join(p.dataDir, "livekit.yaml")
 
 	if existing, err := os.ReadFile(cfgPath); err == nil {
@@ -187,7 +184,7 @@ func rtcAddressLines(cfg *config.VoiceConfig) (string, error) {
 // auto-download disabled it is a no-op (LiveKit is externally managed). With
 // auto-download the binary is fetched and checksum-verified in the background, so
 // startup never blocks on it.
-func (p *LiveKitProcess) Start() error {
+func (p *Process) Start() error {
 	if p.cfg.LiveKitBinaryPath == "" && !p.cfg.AutoDownloadLiveKit {
 		slog.Info("livekit: no binary path configured, assuming externally managed")
 		return nil
@@ -244,7 +241,7 @@ func (p *LiveKitProcess) Start() error {
 
 // resolveBinary downloads (or reuses a cached copy of) the pinned release, retrying
 // so a transient network hiccup at boot does not disable voice until restart.
-func (p *LiveKitProcess) resolveBinary(ctx context.Context) (string, error) {
+func (p *Process) resolveBinary(ctx context.Context) (string, error) {
 	const (
 		attempts   = 3
 		retryDelay = 15 * time.Second
@@ -260,7 +257,7 @@ func (p *LiveKitProcess) resolveBinary(ctx context.Context) (string, error) {
 			}
 		}
 		attemptCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
-		path, err := EnsureLiveKitBinary(attemptCtx, p.dataDir, p.cfg.LiveKitVersion)
+		path, err := EnsureBinary(attemptCtx, p.dataDir, p.cfg.LiveKitVersion)
 		cancel()
 		if err == nil {
 			return path, nil
@@ -273,7 +270,7 @@ func (p *LiveKitProcess) resolveBinary(ctx context.Context) (string, error) {
 // runLoop starts and restarts the process until stopped or cancelled, with
 // exponential backoff (3s doubling to 60s), stopping after 10 consecutive rapid
 // failures (exit within 30 seconds). loopDone is closed by the Start goroutine.
-func (p *LiveKitProcess) runLoop(ctx context.Context, cfgPath, binPath string) {
+func (p *Process) runLoop(ctx context.Context, cfgPath, binPath string) {
 	const (
 		baseDelay   = 3 * time.Second
 		maxDelay    = 60 * time.Second
@@ -389,7 +386,7 @@ func newLiveKitCmd(ctx context.Context, cfgPath, binPath string) *exec.Cmd {
 	return cmd
 }
 
-func (p *LiveKitProcess) IsRunning() bool {
+func (p *Process) IsRunning() bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.cmd != nil && p.cmd.Process != nil
@@ -397,7 +394,7 @@ func (p *LiveKitProcess) IsRunning() bool {
 
 // PID returns the process id of the running companion; ok is false while none
 // runs (not started yet, or between restarts). It only reads.
-func (p *LiveKitProcess) PID() (int, bool) {
+func (p *Process) PID() (int, bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.cmd == nil || p.cmd.Process == nil {
@@ -407,8 +404,8 @@ func (p *LiveKitProcess) PID() (int, bool) {
 }
 
 // HealthCheck probes the LiveKit HTTP endpoint; true if it responds (any status).
-func (p *LiveKitProcess) HealthCheck(ctx context.Context) (bool, error) {
-	httpURL := wsToHTTP(p.cfg.LiveKitURL)
+func (p *Process) HealthCheck(ctx context.Context) (bool, error) {
+	httpURL := HTTPURL(p.cfg.LiveKitURL)
 
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
@@ -432,7 +429,7 @@ func (p *LiveKitProcess) HealthCheck(ctx context.Context) (bool, error) {
 // terminates immediately. Only runLoop calls cmd.Wait and every concurrent Stop
 // joins that completion. Returning without reaping would let an updater launch over
 // its bound ports.
-func (p *LiveKitProcess) Stop() {
+func (p *Process) Stop() {
 	p.mu.Lock()
 	p.stopped = true
 	cancel := p.cancel
@@ -455,4 +452,22 @@ func (p *LiveKitProcess) Stop() {
 	if loopDone != nil {
 		<-loopDone
 	}
+}
+
+// HTTPURL converts a WebSocket URL to an HTTP URL; any other URL is returned as is.
+func HTTPURL(wsURL string) string {
+	switch {
+	case len(wsURL) >= 6 && wsURL[:6] == "wss://":
+		return "https://" + wsURL[6:]
+	case len(wsURL) >= 5 && wsURL[:5] == "ws://":
+		return "http://" + wsURL[5:]
+	default:
+		return wsURL
+	}
+}
+
+// NewStoppableForTest returns a Process that looks started and runs onStop when
+// Stop cancels it, so the hub's teardown order can be tested without a binary.
+func NewStoppableForTest(onStop func()) *Process {
+	return &Process{cancel: onStop}
 }

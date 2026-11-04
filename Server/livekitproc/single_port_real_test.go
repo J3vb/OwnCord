@@ -1,4 +1,4 @@
-package ws_test
+package livekitproc_test
 
 import (
 	"context"
@@ -7,12 +7,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/J3vb/OwnCord/Server/config"
-	"github.com/J3vb/OwnCord/Server/ws"
 	"github.com/livekit/protocol/auth"
 	lksdk "github.com/livekit/server-sdk-go/v2"
 	"github.com/pion/webrtc/v4"
 	"github.com/pion/webrtc/v4/pkg/media"
+
+	"github.com/J3vb/OwnCord/Server/config"
+	"github.com/J3vb/OwnCord/Server/livekitproc"
 )
 
 // This is the real-SFU proof for single-port UDP (O1): OwnCord's *generated*
@@ -67,7 +68,7 @@ func runVoiceOverGeneratedConfig(t *testing.T, cfg *config.VoiceConfig, binary s
 	dataDir := t.TempDir()
 	cfg.LiveKitBinaryPath = binary
 	cfg.LiveKitURL = "ws://127.0.0.1:7880"
-	proc := ws.NewLiveKitProcess(cfg, &config.TLSConfig{}, dataDir)
+	proc := livekitproc.New(cfg, &config.TLSConfig{}, dataDir)
 
 	if err := proc.Start(); err != nil {
 		t.Fatalf("starting livekit: %v", err)

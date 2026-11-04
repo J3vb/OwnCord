@@ -11,6 +11,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/clientip"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/livekitproc"
 	"github.com/J3vb/OwnCord/Server/permissions"
 	"github.com/J3vb/OwnCord/Server/plugin"
 	"github.com/J3vb/OwnCord/Server/service"
@@ -63,7 +64,7 @@ type HubOptions struct {
 	// requires LiveKit (a process no client can sign tokens for is unusable), and the
 	// voice_join guard reads a non-nil process's IsRunning to fail closed while down.
 	LiveKit        *LiveKitClient
-	LiveKitProcess *LiveKitProcess
+	LiveKitProcess *livekitproc.Process
 
 	// PluginRegistry enables plugin slash-command dispatch; nil disables it. The
 	// plugin event sink consumes the built hub's broadcaster, so it stays the
