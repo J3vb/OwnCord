@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/db"
-	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
 // mentionQueueSize bounds pending jobs. Past it, later jobs are dropped and
@@ -80,30 +79,32 @@ type mentionWorker struct {
 	// dropped counts jobs refused because the queue was full or the worker stopped.
 	dropped atomic.Uint64
 
-	// notify delivers one live mention_count frame to a reader whose badge a flush
-	// raised. Captured from MessageService.NotifyMentionCount at start-up; nil for a
-	// directly-constructed worker or no hub, which skips notification.
-	notify func(userID, channelID, count int64)
+	// prepare resolves which of a flush's recipients may get a live mention_count
+	// frame and returns the sender, before the channel's emit lock is taken.
+	// Captured from the service at start-up; nil for a directly-constructed worker
+	// or no hub, which skips notification.
+	prepare mentionSendPrep
 
-	// emitMu serializes a mention write with the mention_count frame it emits, so each
-	// frame reflects a later commit than the one before. The coalesced flush and a
-	// removal path's synchronous reverse both hold it. Without it an increment
-	// committed on the worker loop and a decrement on the request goroutine push
-	// absolute totals from independent emitters, so a delete inside the coalesce
-	// window could be overtaken by an older total and leave the badge stale-low until
-	// the next ready. StartMentionWorker points this at mentionState's lock so the
-	// inline fallback and removal paths share it.
-	emitMu *syncutil.Mutex
+	// emitLocks serializes a mention write with the mention_count frames it emits,
+	// per channel, so each frame reflects a later commit than the one before. The
+	// coalesced flush and a removal path's synchronous reverse both hold the
+	// channel's lock. Without it an increment committed on the worker loop and a
+	// decrement on the request goroutine push absolute totals from independent
+	// emitters, so a delete inside the coalesce window could be overtaken by an
+	// older total and leave the badge stale-low until the next ready.
+	// StartMentionWorker points this at mentionState's locks so the inline
+	// fallback, the removal paths and the read-pointer moves share them.
+	emitLocks *mentionEmitLocks
 }
 
 func newMentionWorker(st mentionBatchStore) *mentionWorker {
 	return &mentionWorker{
-		st:       st,
-		queue:    make(chan mentionJob, mentionQueueSize),
-		stop:     make(chan struct{}),
-		done:     make(chan struct{}),
-		flushReq: make(chan mentionFlushReq),
-		emitMu:   &syncutil.Mutex{},
+		st:        st,
+		queue:     make(chan mentionJob, mentionQueueSize),
+		stop:      make(chan struct{}),
+		done:      make(chan struct{}),
+		flushReq:  make(chan mentionFlushReq),
+		emitLocks: &mentionEmitLocks{},
 	}
 }
 
@@ -314,38 +315,63 @@ func (w *mentionWorker) flush(ctx context.Context, jobs []mentionJob) {
 		byChannel[job.channelID] = append(byChannel[job.channelID], entries...)
 	}
 	for channelID, entries := range byChannel {
-		// Hold emitMu across the write and its frames so commit order matches frame order
-		// against a concurrent removal decrement (see emitMu).
-		w.emitMu.Lock()
-		bumped, err := w.st.IncrementMentionCountsBatch(ctx, channelID, entries)
-		if err != nil {
-			w.emitMu.Unlock()
-			slog.Error("mention worker: flush IncrementMentionCountsBatch", "err", err, "channel_id", channelID)
-			continue
-		}
-		w.notifyBumped(channelID, bumped)
-		w.emitMu.Unlock()
+		w.flushChannelEntries(ctx, channelID, entries)
 	}
 }
 
-// notifyBumped pushes one mention_count frame per reader whose badge the flush
-// raised; a nil notifier is a no-op.
-func (w *mentionWorker) notifyBumped(channelID int64, bumped map[int64]int64) {
-	emitMentionBumped(w.notify, channelID, bumped)
+// flushChannelEntries writes one channel's entries and pushes their frames. The
+// audience is resolved first, outside the lock (one channel read per flush, not
+// per reader); the channel's emit lock then covers only the write and the frame
+// enqueue, so commit order matches frame order against a concurrent removal
+// decrement or read-pointer move on the same channel (see emitLocks).
+func (w *mentionWorker) flushChannelEntries(ctx context.Context, channelID int64, entries []db.MentionBatchEntry) {
+	var send func(userID, count int64)
+	if w.prepare != nil {
+		send = w.prepare(ctx, channelID, entryUserIDs(entries))
+	}
+	mu := w.emitLocks.forChannel(channelID)
+	mu.Lock()
+	defer mu.Unlock()
+	bumped, err := w.st.IncrementMentionCountsBatch(ctx, channelID, entries)
+	if err != nil {
+		slog.Error("mention worker: flush IncrementMentionCountsBatch", "err", err, "channel_id", channelID)
+		return
+	}
+	emitMentionBumped(send, bumped)
+}
+
+// entryUserIDs lists every recipient named in entries once, sorted: the
+// candidates a flush may raise a badge for.
+func entryUserIDs(entries []db.MentionBatchEntry) []int64 {
+	n := 0
+	for _, e := range entries {
+		n += len(e.UserIDs)
+	}
+	ids := make([]int64, 0, n)
+	for _, e := range entries {
+		ids = append(ids, e.UserIDs...)
+	}
+	slices.Sort(ids)
+	return slices.Compact(ids)
+}
+
+// bumpedUserIDs lists a write's changed readers, sorted.
+func bumpedUserIDs(bumped map[int64]int64) []int64 {
+	ids := make([]int64, 0, len(bumped))
+	for uid := range bumped {
+		ids = append(ids, uid)
+	}
+	slices.Sort(ids)
+	return ids
 }
 
 // emitMentionBumped pushes one frame per bumped reader in sorted order so tests'
-// recorded calls do not depend on map order. A nil n is a no-op.
-func emitMentionBumped(n func(userID, channelID, count int64), channelID int64, bumped map[int64]int64) {
-	if n == nil || len(bumped) == 0 {
+// recorded calls do not depend on map order. A nil send is a no-op.
+func emitMentionBumped(send func(userID, count int64), bumped map[int64]int64) {
+	if send == nil || len(bumped) == 0 {
 		return
 	}
-	userIDs := make([]int64, 0, len(bumped))
-	for uid := range bumped {
-		userIDs = append(userIDs, uid)
-	}
-	slices.Sort(userIDs)
-	for _, uid := range userIDs {
-		n(uid, channelID, bumped[uid])
+	for _, uid := range bumpedUserIDs(bumped) {
+		send(uid, bumped[uid])
 	}
 }

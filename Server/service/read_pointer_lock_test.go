@@ -9,7 +9,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// MoveReadPointer waits for mentionEmitMu only until its context ends: a
+// MoveReadPointer waits for the channel's emit lock only until its context ends: a
 // holder stalled on a long-lived context must not park the caller past its
 // deadline, and the abandoned wait must not leave the lock taken.
 func TestMoveReadPointer_LockWaitHonoursContext(t *testing.T) {
@@ -22,10 +22,10 @@ func TestMoveReadPointer_LockWaitHonoursContext(t *testing.T) {
 	held := make(chan struct{})
 	go func() {
 		defer close(held)
-		svc.mentionEmitMu.Lock()
+		svc.mentionEmitLocks.forChannel(10).Lock()
 		close(locked)
 		<-release
-		svc.mentionEmitMu.Unlock()
+		svc.mentionEmitLocks.forChannel(10).Unlock()
 	}()
 	<-locked
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)

@@ -282,3 +282,14 @@ func joinDenial(err error) ClientError {
 // TODO: replace `deps any` with generics (HandlerV2[D any]) for compile-time deps
 // wiring; needs reworking the registry map.
 type HandlerV2 func(ctx context.Context, cmd Command, info ClientInfo, deps any) Result
+
+// canSeeLoadedChannel reports whether userID may currently see ch, using the
+// same CanViewChannel predicate every channel-visibility path resolves. Fails
+// closed on a subject lookup error.
+func (h *Hub) canSeeLoadedChannel(ctx context.Context, userID int64, ch *db.Channel) bool {
+	sub, err := channelSubject(ctx, h.readers.Dispatch, h.permChecker, h.perms, userID, ch, false)
+	if err != nil {
+		return false
+	}
+	return permissions.CanViewChannel(sub) == nil
+}

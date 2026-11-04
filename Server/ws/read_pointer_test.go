@@ -334,7 +334,7 @@ func TestChannelActivity_PartialReadKeepsLaterHints(t *testing.T) {
 }
 
 // The reader's last frame must equal the database whatever the interleaving of
-// a mention increment (which sends mention_count under mentionEmitMu) and a
+// a mention increment (which sends mention_count under the channel's emit lock) and a
 // backward move (which sends read_state under the same lock).
 func TestReadState_OrderedWithMentionWorker(t *testing.T) {
 	t.Parallel()

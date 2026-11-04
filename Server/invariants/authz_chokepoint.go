@@ -157,7 +157,7 @@ var AuthzResidueAllow = map[string]AuthzResidueEntry{
 	// The one multi-call row: one EffectivePerms for the layer's mask, then
 	// HasAdmin twice — once to keep an administrator role in, once in the
 	// read test.
-	"service.(*mentionState).mentionReaders": {classBulkReaderWalk, "per-role layer walk over every role that can read the channel", calls{"EffectivePerms": 1, "HasAdmin": 2}},
+	"service.(*mentionState).readingRoles": {classBulkReaderWalk, "per-role layer walk over every role that can read the channel", calls{"EffectivePerms": 1, "HasAdmin": 2}},
 
 	// ws.voiceModTarget and service.(*ModerationService).actorCanModerateVoiceFor's
 	// own base-bit-rejection rows are GONE:

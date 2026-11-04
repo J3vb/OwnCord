@@ -52,7 +52,7 @@ const channelMaxLiveSQL = `SELECT COALESCE(MAX(id), 0) FROM messages WHERE chann
 // a recomputed mention_count) and reads the unread count in a single writer
 // transaction. The writer pool is one connection, so the move is atomic
 // against every mention increment and decrement. The caller (MessageService)
-// holds mentionEmitMu across the call and the frame it sends.
+// holds the channel's mention emit lock across the call and the frame it sends.
 //
 // Rules, with R(p) the live receipts after p from authors the user does not
 // block:

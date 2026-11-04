@@ -5,7 +5,6 @@ import (
 	"sync/atomic"
 
 	"github.com/J3vb/OwnCord/Server/db"
-	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
 // mentionStateStore is what mentionState reads and writes. *db.DB satisfies it.
@@ -26,14 +25,14 @@ type mentionStateStore interface {
 	GetReadState(ctx context.Context, userID, channelID int64) (lastMessageID, mentionCount int64, found bool, err error)
 	GetLatestMessageID(ctx context.Context, channelID int64) (int64, error)
 	// MoveReadPointer moves a reader's pointer and recomputes mention_count from the
-	// receipts in one writer transaction. The caller holds mentionEmitMu across it and
-	// the frame it sends.
+	// receipts in one writer transaction. The caller holds the channel's mention emit
+	// lock across it and the frame it sends.
 	MoveReadPointer(ctx context.Context, userID, channelID int64, op db.ReadPointerOp, messageID int64) (db.ReadPointer, error)
 }
 
 // mentionState resolves who a message mentions and owns every mention_count
 // and read-pointer write, together with the frame each one emits. The two stay
-// in one part because they share mentionEmitMu.
+// in one part because they share mentionEmitLocks.
 type mentionState struct {
 	st    mentionStateStore
 	perms *PermissionService
@@ -49,13 +48,14 @@ type mentionState struct {
 	// for each reader whose badge a mention raised. Nil (tests, no hub) pushes
 	// nothing; NewHub installs the hub-backed one.
 	mentionNotifier MentionCountNotifier
-	// mentionEmitMu serializes each mention_count write with the frame it emits, so
-	// frame order matches commit order across the worker flush and the removal paths.
-	// Held across write, notify and visibility check; job resolution stays outside.
-	// See mentionWorker.emitMu and reverseMentionCounts.
-	mentionEmitMu syncutil.Mutex
+	// mentionEmitLocks serializes each mention_count write with the frame it emits,
+	// per channel, so a channel's frame order matches its commit order across the
+	// worker flush and the removal paths. Held across write and frame enqueue; job
+	// resolution and the worker's visibility reads stay outside. See
+	// mentionWorker.emitLocks and reverseMentionCounts.
+	mentionEmitLocks mentionEmitLocks
 	// readStateNotifier delivers the read_state frame MoveReadPointer sends under
-	// mentionEmitMu; nil leaves it off.
+	// the channel's mention emit lock; nil leaves it off.
 	readStateNotifier ReadStateNotifier
 	// mentionWorker is the single bounded worker owning every mention-badge write.
 	// Nil until the composition root starts it (app.startHub); then SendMessage
@@ -78,11 +78,9 @@ func (s *mentionState) StartMentionWorker(ctx context.Context) func(context.Cont
 	w := newMentionWorker(s.st)
 	// Share the write+emit lock with the removal paths so a coalesced increment
 	// flush cannot be overtaken by an older decrement frame, or vice versa.
-	w.emitMu = &s.mentionEmitMu
+	w.emitLocks = &s.mentionEmitLocks
 	// NewHub installed the hook before this runs; nil means no hub and no pushes.
-	if s.mentionNotifier != nil {
-		w.notify = s.mentionNotifier.NotifyMentionCount
-	}
+	w.prepare = s.mentionSendPreparer()
 	// Start before publishing: run sets started synchronously, so a sender seeing
 	// the worker never observes it as not-started and drops a job.
 	w.run(ctx)
