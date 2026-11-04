@@ -7,10 +7,12 @@
  * channel's). A thread is never in `channelsStore`, so the pieces that read a
  * channel row (send permission, the moderator verdict) read the parent's.
  *
- * Sending is text only and optimistic, the same shape as the channel
- * composer's: the dispatcher's `chat_send_ok` / error handlers settle the row
- * by its correlation id. Attachments, typing frames and draft stashing are not
- * wired here; a closed panel drops its unsent text.
+ * Sending is optimistic, the same shape as the channel composer's: the
+ * dispatcher's `chat_send_ok` / error handlers settle the row by its
+ * correlation id. Files upload as in a channel (paste, drop, the + menu); a
+ * send with uploads still running waits for them (threadSendQueue). Typing
+ * frames and draft stashing are not wired here; a closed panel drops its
+ * unsent text and files.
  *
  * Loaded on first use (ThreadPanelHost), so none of this is in the startup
  * closure.
@@ -30,7 +32,9 @@ import { readableRoleColor } from "@lib/prefs/themes";
 import type { MountableComponent } from "@lib/text/safeRender";
 import type { WsClient } from "@lib/ws";
 import type { ApiClient } from "@lib/api";
-import type { MessageUser } from "@lib/types";
+import type { MessageUser, VoiceUploadMeta } from "@lib/types";
+import { WsErrorCode } from "@lib/protocolTypes";
+import { createLogger } from "@lib/logger";
 import {
   newClientMessageId,
   pendingMessageRetryFloor,
@@ -64,7 +68,12 @@ import {
   THREAD_NAME_MAX,
 } from "../features/threads/threadCommands";
 import { createMessageList, type MessageListComponent } from "./MessageList";
-import { createMessageInput, type MessageInputComponent } from "./MessageInput";
+import {
+  createMessageInput,
+  type MessageInputComponent,
+  type SentAttachment,
+} from "./MessageInput";
+import { createThreadSendQueue } from "../features/threads/threadSendQueue";
 import { createArchiveIcon } from "./message-list/threadChip";
 import { renderMessageContent } from "../features/messaging/content/contentParser";
 import { createAvatarElement, pickAvatarColor } from "../features/profiles/avatar";
@@ -104,9 +113,13 @@ interface SendDraft {
   readonly replyTo: number | null;
   readonly replyPing: boolean;
   readonly clientMessageId: string | undefined;
+  /** The uploaded files it carried, kept so a retry posts them again. */
+  readonly attachments: readonly SentAttachment[];
   /** A sticker send, kept so a retry posts the same sticker. */
   readonly sticker?: { readonly id: number; readonly name: string };
 }
+
+const log = createLogger("thread-panel");
 
 const userId = (): number => authStore.getState().user?.id ?? 0;
 
@@ -494,6 +507,7 @@ export function createThreadPanel(options: ThreadPanelOptions): ThreadPanelCompo
     content: string,
     replyTo: number | null,
     replyPing: boolean,
+    files: readonly SentAttachment[],
     existingClientMessageId?: string,
     sticker?: { readonly id: number; readonly name: string },
   ): void {
@@ -516,6 +530,7 @@ export function createThreadPanel(options: ThreadPanelOptions): ThreadPanelCompo
       replyTo,
       replyPing,
       clientMessageId,
+      attachments: files,
       ...(sticker === undefined ? {} : { sticker }),
     };
     const live = sticker === undefined ? null : findSticker(sticker.id);
@@ -546,7 +561,7 @@ export function createThreadPanel(options: ThreadPanelOptions): ThreadPanelCompo
         ...(sticker === undefined ? {} : { sticker_id: sticker.id }),
         reply_to: replyTo,
         ...(replyTo === null ? {} : { reply_ping: replyPing }),
-        attachments: [],
+        attachments: files.map((f) => f.id),
         ...(clientMessageId ? { client_message_id: clientMessageId } : {}),
       },
     });
@@ -563,11 +578,78 @@ export function createThreadPanel(options: ThreadPanelOptions): ThreadPanelCompo
   }
 
   function retrySend(correlationId: string): void {
+    if (queue.retry(correlationId)) return;
     const draft = drafts.get(correlationId);
     if (draft === undefined) return;
     drafts.delete(correlationId);
     removeOptimistic(correlationId);
-    sendText(draft.content, draft.replyTo, draft.replyPing, draft.clientMessageId, draft.sticker);
+    sendText(
+      draft.content,
+      draft.replyTo,
+      draft.replyPing,
+      draft.attachments,
+      draft.clientMessageId,
+      draft.sticker,
+    );
+  }
+
+  // ── Uploads ───────────────────────────────────────────────────────────────
+
+  async function uploadFile(
+    file: File,
+    uploadSignal?: AbortSignal,
+    onProgress?: (fraction: number) => void,
+    voice?: VoiceUploadMeta,
+  ): Promise<{ id: string; url: string; filename: string }> {
+    try {
+      const result = await api.uploadFile(file, uploadSignal, onProgress, voice);
+      return { id: result.id, url: result.url, filename: result.filename };
+    } catch (err) {
+      // The composer reports a failure inline; a cancel is not one.
+      if (uploadSignal?.aborted !== true) log.error("File upload failed", { error: String(err) });
+      throw err;
+    }
+  }
+
+  const queue = createThreadSendQueue({
+    threadId,
+    signal,
+    currentUser,
+    upload: uploadFile,
+    discard: (id) => void api.discardUpload(id).catch(() => {}),
+    putBack: (files) => messageInput?.restoreUnsent(files, "skipped"),
+    dispatch: (content, replyTo, replyPing, files) => {
+      const live =
+        replyTo === null ||
+        getChannelMessages(threadId).some((m) => m.id === replyTo && m.deleted !== true);
+      sendText(content, live ? replyTo : null, live && replyPing, files);
+    },
+  });
+
+  /** Files a send did not carry go back into the composer. */
+  function watchUnsentFiles(): void {
+    disposable.addCleanup(
+      ws.on("chat_send_ok", (payload, correlationId) => {
+        const draft = correlationId === undefined ? undefined : drafts.get(correlationId);
+        if (draft === undefined || draft.attachments.length === 0) return;
+        const skipped = new Set(payload.skipped_attachment_ids ?? []);
+        const unsent = draft.attachments.filter((a) => skipped.has(a.id));
+        if (unsent.length > 0) messageInput?.restoreUnsent(unsent, "skipped");
+      }),
+    );
+    disposable.addCleanup(
+      ws.on("error", (payload, correlationId) => {
+        if (payload.code !== WsErrorCode.ATTACHMENTS_UNAVAILABLE || correlationId === undefined) {
+          return;
+        }
+        const draft = drafts.get(correlationId);
+        if (draft === undefined) return;
+        // Nothing was stored and the dispatcher drops the row; a Retry with
+        // the same ids would fail the same way.
+        drafts.delete(correlationId);
+        messageInput?.restoreUnsent(draft.attachments, "unavailable");
+      }),
+    );
   }
 
   // ── Composer state ────────────────────────────────────────────────────────
@@ -691,7 +773,9 @@ export function createThreadPanel(options: ThreadPanelOptions): ThreadPanelCompo
         });
       },
       onRetry: retrySend,
+      renderUploadStrip: queue.renderUploadStrip,
       onDeleteDraft: (correlationId) => {
+        if (queue.remove(correlationId)) return;
         drafts.delete(correlationId);
         removeOptimistic(correlationId);
       },
@@ -703,16 +787,20 @@ export function createThreadPanel(options: ThreadPanelOptions): ThreadPanelCompo
       channelId: threadId,
       channelName: t?.name ?? "",
       gifApi: api,
-      onSend: (content, replyTo, _attachments, _files, replyPing) => {
-        sendText(content, replyTo, replyPing);
+      onSend: (content, replyTo, _attachments, files, replyPing, queued) => {
+        if (queued === undefined) sendText(content, replyTo, replyPing, files);
+        else queue.enqueue(content, replyTo, replyPing, queued);
       },
       onSendSticker: (sticker, replyTo, replyPing) => {
-        sendText("", replyTo, replyPing, undefined, sticker);
+        sendText("", replyTo, replyPing, [], undefined, sticker);
       },
+      onUploadFile: uploadFile,
+      onDiscardUpload: (id) => api.discardUpload(id),
       onTyping: () => {},
       placeholder: threadsText("composer.placeholder"),
-      noAttach: true,
+      dropZone: ".thread-panel",
     });
+    watchUnsentFiles();
     messageInput.mount(inputSlot);
 
     paintHeader();
