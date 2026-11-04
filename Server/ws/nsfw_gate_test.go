@@ -501,8 +501,8 @@ func TestReconnect_RevokeBetweenTwoFramesOfTheSameReplayDropsOnlyTheLaterOnes(t 
 			}
 		case 4:
 			// Codex round 4, item C: the channel is gone entirely by the time
-			// the fourth frame's check runs — frameReadableNow's GetChannel
-			// returns (nil, nil), which must be treated exactly like a
+			// the fourth frame's check runs — frameReadableNow's ChannelContentGate
+			// finds no row, which must be treated exactly like a
 			// lookup error (deny), not like "not labelled" (allow).
 			if _, err := database.ExecContext(context.Background(), `DELETE FROM channels WHERE id = ?`, chID); err != nil {
 				t.Errorf("delete channel (in race hook): %v", err)
@@ -532,7 +532,7 @@ func TestReconnect_RevokeBetweenTwoFramesOfTheSameReplayDropsOnlyTheLaterOnes(t 
 			"(second=%v, third=%v) through — the recheck is not truly per-frame", sawSecond, sawThird)
 	}
 	if sawFourth {
-		t.Fatal("a frame for a channel that no longer exists was still delivered — a nil channel from frameReadableNow's GetChannel must deny, not allow")
+		t.Fatal("a frame for a channel that no longer exists was still delivered — a missing channel in frameReadableNow's ChannelContentGate must deny, not allow")
 	}
 	if frameChecks < 4 {
 		t.Fatalf("race hook fired %d times, want 4 (one per content-bearing frame) — the test didn't exercise what it claims", frameChecks)

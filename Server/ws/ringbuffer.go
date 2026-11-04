@@ -36,7 +36,12 @@ func NewEventRingBuffer(size int) *EventRingBuffer {
 // Push adds an event to the ring buffer.
 // channelID identifies the channel scope (0 = global broadcast).
 func (rb *EventRingBuffer) Push(seq uint64, channelID int64, data []byte) {
-	contentBearing := contentBearingKinds[extractEventType(data)]
+	rb.pushEntry(seq, channelID, contentBearingKinds[extractEventType(data)], data)
+}
+
+// pushEntry is Push with the content-bearing flag worked out by the caller,
+// so the hub can read a frame's type before it takes the sequencing lock.
+func (rb *EventRingBuffer) pushEntry(seq uint64, channelID int64, contentBearing bool, data []byte) {
 	rb.mu.Lock()
 	defer rb.mu.Unlock()
 	rb.entries[rb.pos] = eventEntry{seq: seq, channelID: channelID, contentBearing: contentBearing, data: data}
