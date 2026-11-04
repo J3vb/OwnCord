@@ -78,7 +78,7 @@ The card finds its source by itself. When OwnCord runs LiveKit for you
 directly (CPU, memory, and rooms and participants from LiveKit's room list;
 tracks and traffic show a dash) and shows "Built-in LiveKit". Otherwise it
 uses `voice.livekit_metrics_url` when set, and when not it tries port 6789 on
-the host of `voice.livekit_url` (`ws` becomes `http`, `wss` becomes `https`).
+the host of `voice.livekit_url` (always plain `http`, since LiveKit serves its stats page without TLS).
 Set `voice.livekit_metrics_url` only when LiveKit's stats page lives somewhere
 else.
 

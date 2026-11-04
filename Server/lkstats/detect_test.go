@@ -12,10 +12,10 @@ func TestDeriveURL(t *testing.T) {
 		ok   bool
 	}{
 		{"ws://livekit:7880", "http://livekit:6789/metrics", true},
-		{"wss://lk.example.com", "https://lk.example.com:6789/metrics", true},
-		{"wss://lk.example.com:443", "https://lk.example.com:6789/metrics", true},
+		{"wss://lk.example.com", "http://lk.example.com:6789/metrics", true},
+		{"wss://lk.example.com:443", "http://lk.example.com:6789/metrics", true},
 		{"http://10.0.0.5:7880", "http://10.0.0.5:6789/metrics", true},
-		{"https://lk.example.com", "https://lk.example.com:6789/metrics", true},
+		{"https://lk.example.com", "http://lk.example.com:6789/metrics", true},
 		{"ws://[::1]:7880", "http://[::1]:6789/metrics", true},
 		{"ws://localhost:7880/rtc/path?x=1", "http://localhost:6789/metrics", true},
 		{"", "", false},

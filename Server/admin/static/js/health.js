@@ -127,7 +127,7 @@ function livekitBody(d){
   const managed=d.source==='managed';
   let line;
   if(managed&&status==='ok')line='<span class="badge badge-green">Running</span> <span class="muted">Built-in LiveKit</span>';
-  else if(managed&&status==='restarting')line='<span class="badge badge-yellow">Restarting</span> <span class="muted">Built-in LiveKit</span>';
+  else if(managed&&status==='restarting')line='<span class="badge badge-yellow">Not running</span> <span class="muted">Built-in LiveKit is starting or restarting</span>';
   else if(status==='ok')line='<span class="badge badge-green">Reachable</span>';
   else if(status==='unreachable')line='<span class="badge badge-red">Not reachable</span> <span class="muted">'+(typeof d.since==='number'?'since '+esc(lkTime(d.since)):'')+'</span>';
   else if(status==='not_set_up')line='<span class="badge badge-yellow">Not set up</span> <span class="muted">The stats page has no LiveKit figures. '+LK_HOWTO+'</span>';

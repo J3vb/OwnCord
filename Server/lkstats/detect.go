@@ -48,21 +48,18 @@ func (d Detect) Pick(log *slog.Logger) *Sampler {
 }
 
 // DeriveURL guesses LiveKit's stats page from its signalling address: the same
-// host on port 6789, ws as http and wss as https.
+// host on port 6789, always over plain http: LiveKit serves that page without
+// TLS even when its signalling address uses wss.
 func DeriveURL(liveKitURL string) (string, bool) {
 	u, err := url.Parse(liveKitURL)
 	if err != nil || u.Hostname() == "" {
 		return "", false
 	}
-	var scheme string
 	switch u.Scheme {
-	case "ws", "http":
-		scheme = "http"
-	case "wss", "https":
-		scheme = "https"
+	case "ws", "http", "wss", "https":
 	default:
 		return "", false
 	}
-	guess := url.URL{Scheme: scheme, Host: net.JoinHostPort(u.Hostname(), derivedPort), Path: "/metrics"}
+	guess := url.URL{Scheme: "http", Host: net.JoinHostPort(u.Hostname(), derivedPort), Path: "/metrics"}
 	return guess.String(), true
 }

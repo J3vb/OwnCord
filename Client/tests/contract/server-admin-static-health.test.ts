@@ -577,7 +577,7 @@ describe("Server/admin/static — Dashboard health row", () => {
           series: [],
         }),
       );
-      expect(body(host).querySelector(".badge")?.textContent).toBe("Restarting");
+      expect(body(host).querySelector(".badge")?.textContent).toBe("Not running");
       expect(body(host).querySelector(".badge")?.className).toContain("badge-yellow");
       expect(body(host).querySelector("#livekitStatus")?.textContent).toContain("Built-in LiveKit");
       expect(text(host, "lkCpu", "health-value")).toBe("–");
