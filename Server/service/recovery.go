@@ -355,17 +355,18 @@ func (s *accountRecovery) completeRecovery(ctx context.Context, in RecoverInput,
 		}
 	}
 
+	// Re-read first, so a failed read never leaves an unused session row behind.
+	fresh, err := s.st.GetUserByID(ctx, user.ID)
+	if err != nil || fresh == nil {
+		slog.Error("recovery: re-reading the user after redeem failed", "err", err, "user_id", user.ID)
+		return nil, ErrRecoveredSignInRequired
+	}
 	token, err := issueSession(ctx, s.st, user.ID, in.Device, in.IP)
 	if err != nil {
 		slog.Error("recovery: session issue failed after redeem", "err", err, "user_id", user.ID)
 		if errors.Is(err, db.ErrAccountErasing) {
 			return nil, ErrBanned
 		}
-		return nil, ErrRecoveredSignInRequired
-	}
-	fresh, err := s.st.GetUserByID(ctx, user.ID)
-	if err != nil || fresh == nil {
-		slog.Error("recovery: re-reading the user after redeem failed", "err", err, "user_id", user.ID)
 		return nil, ErrRecoveredSignInRequired
 	}
 	slog.Info("account recovered", "via", via, "user_id", user.ID, "ip", in.IP, "sessions_revoked", revoked)
