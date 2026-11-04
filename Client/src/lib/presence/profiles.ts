@@ -8,6 +8,7 @@
 
 import { createStore, type Store } from "../store";
 import { ensureHttpProxy } from "../net/httpProxy";
+import { statusForLatency } from "./latency";
 import { desktop } from "../../platform/desktop";
 import type { SettingsStore, SettingsSnapshot } from "../../platform/contracts/settings";
 
@@ -17,7 +18,6 @@ import type { SettingsStore, SettingsSnapshot } from "../../platform/contracts/s
 
 const CURRENT_SCHEMA_VERSION = 1;
 const HEALTH_TIMEOUT_MS = 3000;
-const SLOW_THRESHOLD_MS = 1500;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -302,7 +302,7 @@ export function createProfileManager(backend: SettingsStore, fetchFn?: FetchFn):
       const body = (await res.json()) as { version?: string; online_users?: number };
       const version = typeof body.version === "string" ? body.version : null;
       const onlineUsers = typeof body.online_users === "number" ? body.online_users : null;
-      const status = elapsed > SLOW_THRESHOLD_MS ? "slow" : "online";
+      const status = statusForLatency(elapsed);
 
       return { status, latencyMs: elapsed, version, onlineUsers };
     } catch {

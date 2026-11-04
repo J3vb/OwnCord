@@ -248,9 +248,9 @@ describe("health checks", () => {
     expect(host.ensureHttpProxy).not.toHaveBeenCalled();
   });
 
-  it("calls a slow answer slow only past 1500 ms", async () => {
+  it("calls an answer slow from 500 ms, the connect page's one cut-off", async () => {
     vi.useFakeTimers();
-    let latency = 1500;
+    let latency = 499;
     const fetchFn = vi.fn(() => {
       vi.advanceTimersByTime(latency);
       return Promise.resolve(ok());
@@ -258,10 +258,10 @@ describe("health checks", () => {
     const m = createProfileManager(memoryBackend(), fetchFn);
     const a = m.addProfile(A);
     const exact = await m.checkHealth(a.id);
-    expect(exact).toMatchObject({ status: "online", latencyMs: 1500 });
-    latency = 1501;
+    expect(exact).toMatchObject({ status: "online", latencyMs: 499 });
+    latency = 500;
     const over = await m.checkHealth(a.id);
-    expect(over).toMatchObject({ status: "slow", latencyMs: 1501 });
+    expect(over).toMatchObject({ status: "slow", latencyMs: 500 });
   });
 
   it("gives up after three seconds and cleans its timer up after an answer", async () => {

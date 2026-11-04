@@ -2,8 +2,8 @@
 // recovery actions of a page that failed to render, and the connect page's
 // two hooks (the health refresh and the invite apply) with the invite link
 // that arrived before the page mounted. Moved out of main.ts verbatim; the
-// free variables (api, ws, the #app element, the profile manager, the 401
-// handler) arrive through configureRouter(). Like session.ts it is module
+// free variables (api, ws, the #app element, the profile manager) arrive
+// through configureRouter(). Like session.ts it is module
 // functions plus one configure call, with no class or factory object: object
 // keys survive minification and this runs in the startup chunk. Nothing here
 // runs at import time: main.ts calls configureRouter() before anything that
@@ -31,7 +31,6 @@ let api: ApiClient;
 let ws: WsClient;
 let appEl: HTMLElement;
 let profileManager: ProfileManager;
-let handleUnauthorized: () => void;
 
 // The active page. `currentPage` further down holds the mounted page
 // *component*, so the page id needs its own name.
@@ -63,13 +62,11 @@ export function configureRouter(
   wsClient: WsClient,
   appElement: HTMLElement,
   profiles: ProfileManager,
-  unauthorized: () => void,
 ): void {
   api = apiClient;
   ws = wsClient;
   appEl = appElement;
   profileManager = profiles;
-  handleUnauthorized = unauthorized;
 }
 
 /** The id of the page that is showing (or about to). */
@@ -203,7 +200,6 @@ async function renderPage(pageId: PageId): Promise<void> {
       profileManager,
       appEl,
       renderRecovery,
-      handleUnauthorized,
       () => {
         const pending = pendingInviteLink;
         pendingInviteLink = null;

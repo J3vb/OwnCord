@@ -122,13 +122,12 @@ if (!appEl) {
 // → src-tauri/src/http_proxy.rs), which pins the server certificate to the same
 // trust-on-first-use fingerprint as the WS proxy. No cert is ever blindly
 // accepted; the bearer token never rides an unpinned TLS connection.
-/** Shared 401 handling, named so the saved-password relay path can run the
- *  same side effect `api.ts` runs for an ordinary request. */
+/** The API client's 401 sink: a live session's token was refused. */
 function handleUnauthorized(): void {
   log.warn("Session expired (401), clearing auth");
-  // A 401 on a request made before any session existed (e.g. a failed login
-  // attempt) is not a session "expiring" — the login form's own catch block
-  // already surfaces that failure. Only warn about a session that was live.
+  // A 401 on a request made before any session existed is not a session
+  // "expiring" (the sign-in calls skip this sink, so a refused password never
+  // gets here). Only warn about a session that was live.
   if (authStore.getState().isAuthenticated) {
     setTransientError(connectText("session.expired"));
   }
@@ -166,7 +165,7 @@ void registerSessionReset(
 // transition (the connected overlay below) stays on ws.onStateChange.
 wireConnectionStatus(ws);
 const profileManager = createProfileManager(createTauriBackend());
-configureRouter(api, ws, appEl, profileManager, handleUnauthorized);
+configureRouter(api, ws, appEl, profileManager);
 configureSession(api, ws, appEl, activePageId, navigate);
 configureServerHealth(api);
 

@@ -605,23 +605,17 @@ describe("ServerPanel", () => {
       expect(latency?.textContent?.toLowerCase()).not.toContain("ping");
     });
 
-    it("applies warn class for moderate latency (100-500ms)", () => {
+    it("colours the text with the dot's cut-off: good below 500 ms, warn from it", () => {
       const panel = mountPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
+      const latency = (): Element | null => container.querySelector(".srv-latency");
 
       panel.updateHealthStatus("localhost:8443", {
-        status: "slow",
-        latencyMs: 250,
+        status: "online",
+        latencyMs: 499,
         version: "1.0.0",
         onlineUsers: 1,
       });
-
-      const latency = container.querySelector(".srv-latency");
-      expect(latency?.textContent).toBe("250ms response time");
-      expect(latency?.className).toBe("srv-latency warn");
-    });
-
-    it("applies bad class for high latency (>500ms)", () => {
-      const panel = mountPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
+      expect(latency()?.className).toBe("srv-latency good");
 
       panel.updateHealthStatus("localhost:8443", {
         status: "slow",
@@ -629,10 +623,8 @@ describe("ServerPanel", () => {
         version: "1.0.0",
         onlineUsers: 0,
       });
-
-      const latency = container.querySelector(".srv-latency");
-      expect(latency?.textContent).toBe("750ms response time");
-      expect(latency?.className).toBe("srv-latency bad");
+      expect(latency()?.textContent).toBe("750ms response time");
+      expect(latency()?.className).toBe("srv-latency warn");
     });
 
     it("clears latency text when latencyMs is null", () => {

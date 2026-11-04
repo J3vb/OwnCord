@@ -21,6 +21,7 @@ const hoisted = vi.hoisted(() => ({
   page: {} as Record<string, ReturnType<typeof vi.fn>>,
   notifiers: [] as Array<{ mount: ReturnType<typeof vi.fn>; destroy: ReturnType<typeof vi.fn> }>,
   startSession: vi.fn(),
+  inFlight: false,
   runHealthChecks: vi.fn(),
   ensureProfileExists: vi.fn(),
   persistProfiles: vi.fn(),
@@ -68,6 +69,7 @@ vi.mock("../../src/app/serverHealth", () => ({
 }));
 vi.mock("../../src/app/session", () => ({
   abandonInFlight: vi.fn(),
+  sessionInFlight: () => hoisted.inFlight,
   startSession: hoisted.startSession,
 }));
 
@@ -121,7 +123,6 @@ function mount(takePendingInvite: () => { code: string; host?: string } | null =
     profileManager as unknown as ProfileManager,
     appEl,
     recovery,
-    vi.fn(),
     takePendingInvite,
   );
   mounted.push(route[0]);
@@ -136,6 +137,7 @@ beforeEach(() => {
   hoisted.page["getRememberPassword"]!.mockReturnValue(false);
   hoisted.page["getAutoConnect"]!.mockReturnValue(false);
   api.getSession.mockReturnValue({ assertCurrent: vi.fn() });
+  hoisted.inFlight = false;
   setUpdateRequiredHost(null);
 });
 
@@ -233,6 +235,17 @@ describe("renderConnect", () => {
   });
 
   describe("health interval", () => {
+    it("skips its ticks while a sign-in is in flight", () => {
+      vi.useFakeTimers();
+      mount();
+      hoisted.inFlight = true;
+      vi.advanceTimersByTime(30_000);
+      expect(hoisted.runHealthChecks).not.toHaveBeenCalled();
+      hoisted.inFlight = false;
+      vi.advanceTimersByTime(15_000);
+      expect(hoisted.runHealthChecks).toHaveBeenCalledTimes(1);
+    });
+
     it("re-checks every 15 s and stops once the route is destroyed", () => {
       vi.useFakeTimers();
       const [page] = mount();

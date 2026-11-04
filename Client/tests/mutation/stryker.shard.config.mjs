@@ -240,6 +240,7 @@ export const shards = {
     "src/lib/text/formatting.ts",
     "src/lib/prefs/lastChannel.ts",
     "src/lib/presence/profiles.ts",
+    "src/lib/presence/latency.ts",
     "src/lib/net/reconcile.ts",
     "src/lib/ui/select.ts",
     "src/lib/text/timeFormat.ts",

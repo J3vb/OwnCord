@@ -6,6 +6,7 @@ import { isImeCommit } from "@lib/text/ime";
 import { createElement, setText, appendChildren, clearChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { createModal } from "@lib/ui/modalFactory";
+import { statusForLatency } from "@lib/presence/latency";
 import type { Compatibility, HealthStatus, ServerProfile } from "@lib/presence/profiles";
 import { loadCredential } from "@lib/net/credentials";
 import { isValidHost } from "@lib/net/hostValidation";
@@ -378,11 +379,11 @@ export function createServerPanel(
       // Update status dot
       els.dot.className = `srv-status-dot ${status.status}`;
 
-      // Update latency badge
+      // Update latency badge: the same cut-off as the dot, so the two agree
       if (status.latencyMs !== null) {
         const ms = status.latencyMs;
         setText(els.latency, connectText("servers.latency", { ms }));
-        els.latency.className = `srv-latency ${ms < 100 ? "good" : ms < 500 ? "warn" : "bad"}`;
+        els.latency.className = `srv-latency ${statusForLatency(ms) === "online" ? "good" : "warn"}`;
       } else {
         setText(els.latency, "");
         els.latency.className = "srv-latency";

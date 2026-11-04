@@ -40,7 +40,7 @@ beforeEach(() => {
     getAutoConnectProfile: () => undefined,
     loadProfiles: async () => undefined,
   } as unknown as ProfileManager;
-  configureRouter(api, {} as WsClient, appEl, profiles, vi.fn());
+  configureRouter(api, {} as WsClient, appEl, profiles);
 });
 
 afterEach(() => {
