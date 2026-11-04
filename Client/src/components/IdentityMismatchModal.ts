@@ -76,6 +76,10 @@ export function createIdentityMismatchModal(
     const desc = createElement("div", { class: "cert-desc" });
     setText(desc, shellText("identity.description"));
 
+    // Trusting adds a key; it never replaces the ones trusted before.
+    const note = createElement("div", { class: "cert-desc identity-accept-note" });
+    setText(note, shellText("identity.acceptNote"));
+
     const details = createElement("div", { class: "cert-details" });
     details.appendChild(buildRow(shellText("identity.participant"), username, false));
     // Only when the new key's fingerprint is available — a null one would render
@@ -84,7 +88,7 @@ export function createIdentityMismatchModal(
       details.appendChild(buildRow(shellText("identity.newKey"), fingerprint, true));
     }
 
-    appendChildren(body, warning, certTitle, desc, details);
+    appendChildren(body, warning, certTitle, desc, note, details);
 
     const footer = createElement("div", { class: "modal-footer" });
 

@@ -72,6 +72,7 @@ export function netIdentityMock() {
     getOrCreateIdentityKeyPair: vi.fn(async () => mockIdentityKeyPair),
     getIdentityPin: vi.fn(async () => ({ status: "unpinned" })),
     storeIdentityPin: vi.fn(async () => "stored"),
+    forgetIdentityPin: vi.fn(async () => "forgotten"),
   };
 }
 

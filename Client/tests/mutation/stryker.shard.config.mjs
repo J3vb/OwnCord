@@ -78,6 +78,7 @@ export const shards = {
     "src/features/voice/mediaEncryption.ts",
     "src/features/voice/decodeCaps.ts",
     "src/features/voice/peerVerification.ts",
+    "src/features/voice/trustedKeysPanel.ts",
     "src/features/voice/uiSounds.ts",
     "src/features/voice/moveHint.ts",
     "src/features/voice/leaveOwed.ts",

@@ -13,6 +13,7 @@ import { getOrCreateIdentityKeyPair, getIdentityPin } from "@lib/net/identity";
 import { authStore } from "@stores/auth.store";
 import {
   PEER_ID,
+  OFFER_RECEIVER,
   newManager,
   roundTripPeerKeys,
   restorePeerKeyMocks,
@@ -20,14 +21,6 @@ import {
   sendsOfType,
   stallNextWrap,
 } from "../../helpers/livekitE2eeHarness";
-
-/** The key holder is the lowest user id in the call, so an offer from PEER_ID
- *  (42) reaches a user with a higher id. */
-const OFFER_RECEIVER = 100;
-
-beforeEach(() => {
-  mocks.mockSelf.id = 1;
-});
 
 vi.mock("livekit-client", () => mocks.livekitClientMock());
 vi.mock("@lib/net/e2eeCrypto", () => mocks.netE2eeCryptoMock());

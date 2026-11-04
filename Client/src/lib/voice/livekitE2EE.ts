@@ -14,7 +14,6 @@ import {
   generateRoomKey,
   wrapRoomKey,
   computeRawKeyFingerprint,
-  type OfferBinding,
 } from "@lib/net/e2eeCrypto";
 import { LEGACY_PLACEMENT, type KeyPlacement } from "@lib/net/keyPlacement";
 import { storeIdentityPin } from "@lib/net/identity";
@@ -177,7 +176,7 @@ export class E2EEManager {
     offerPlacement: (peerId) =>
       this.peerHasKeySlots(peerId) ? this._epoch.roomKeyPlacement : undefined,
     getMyUserId: () => authStore.getState().user?.id ?? 0,
-    offerBinding: (peerId) => this.offerBinding(peerId),
+    offerBinding: (peerId) => this._peers.offerBinding(peerId),
     isKeyHolder: () => this._isKeyHolder,
     setKeyHolder: (value) => {
       this._isKeyHolder = value;
@@ -219,16 +218,6 @@ export class E2EEManager {
   /** Whether `userId`'s announce said it stages keys in their own slot. */
   private peerHasKeySlots(userId: number): boolean {
     return voiceStore.getState().peerKeySlots?.has(userId) ?? false;
-  }
-
-  /** The direction a v3 offer to `peerId` binds, for a peer that announced
-   *  `bound_offers`; undefined sends it an older format. */
-  private offerBinding(peerId: number): OfferBinding | undefined {
-    const myUserId = authStore.getState().user?.id ?? 0;
-    if (myUserId === 0 || !(voiceStore.getState().peerBoundOffers?.has(peerId) ?? false)) {
-      return undefined;
-    }
-    return { senderId: myUserId, recipientId: peerId };
   }
 
   /** Where a rotated room key goes. With every peer on key slots it is staged
@@ -705,6 +694,8 @@ export class E2EEManager {
     return this.applyAnnounce(userId, publicKeyBase64, signatureBase64, identityKeyBase64);
   }
 
+  readonly peerKeys: Pick<E2EEPeerState, "trustedKeys" | "forgetKey"> = this._peers;
+
   /** Identity key from the peer's current announce (see E2EEPeerState). */
   peerAnnouncedIdentityKey(userId: number): string | null {
     return this._peers.announcedIdentityKey(userId);
@@ -858,11 +849,8 @@ export class E2EEManager {
       // on every token refresh. So a stale holder's _isKeyHolder can outlive
       // its actual election. A peer announcing with a LOWER user id than
       // ours proves exactly that: the server would never have elected us
-      // while they're connected, so wrapping and offering the room key here
-      // would only earn a NOT_KEY_HOLDER refusal (surfaced to the user as a
-      // spurious error toast) after wasting the wrap. Stand down here — same
-      // as handleOfferInner does on accepting the real holder's offer —
-      // instead of emitting a doomed offer.
+      // while they're connected, so an offer would only earn a NOT_KEY_HOLDER
+      // refusal and an error toast. Stand down instead, as handleOfferInner does.
       const myUserId = authStore.getState().user?.id ?? 0;
       if (this._isKeyHolder && myUserId !== 0 && userId < myUserId) {
         this._isKeyHolder = false;
@@ -904,7 +892,7 @@ export class E2EEManager {
           this.peerHasKeySlots(userId)
             ? { slot: this._epoch.roomKeyPlacement.slot, stage: false }
             : undefined,
-          this.offerBinding(userId),
+          this._peers.offerBinding(userId),
         );
         // Discard if either the epoch advanced (a rotation landed during the
         // wrap) OR the keypair no longer matches (a concurrent

@@ -10,15 +10,13 @@ import {
   generateECDHKeyPair,
 } from "@lib/net/e2eeCrypto";
 import { getOrCreateIdentityKeyPair, storeIdentityPin } from "@lib/net/identity";
-import { PEER_ID, newManager, sendsOfType, stallNextWrap } from "../../helpers/livekitE2eeHarness";
-
-/** The key holder is the lowest user id in the call, so an offer from PEER_ID
- *  (42) reaches a user with a higher id. */
-const OFFER_RECEIVER = 100;
-
-beforeEach(() => {
-  mocks.mockSelf.id = 1;
-});
+import {
+  PEER_ID,
+  OFFER_RECEIVER,
+  newManager,
+  sendsOfType,
+  stallNextWrap,
+} from "../../helpers/livekitE2eeHarness";
 
 vi.mock("livekit-client", () => mocks.livekitClientMock());
 vi.mock("@lib/net/e2eeCrypto", () => mocks.netE2eeCryptoMock());

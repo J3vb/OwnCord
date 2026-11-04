@@ -12,10 +12,17 @@ import {
   computeKeyFingerprint,
   computeRawKeyFingerprint,
 } from "../../lib/net/e2eeCrypto";
-import { getIdentityPin, storeIdentityPin } from "../../lib/net/identity";
+import {
+  forgetIdentityPin,
+  getIdentityPin,
+  storeIdentityPin,
+  type ForgetIdentityPinResult,
+} from "../../lib/net/identity";
+import type { OfferBinding } from "../../lib/net/e2eeCrypto";
+import { authStore } from "../../stores/auth.store";
 import { trustedPins } from "../../lib/net/identityPins";
 import { memberDisplayName, membersStore } from "../../stores/members.store";
-import { setPeerVerification } from "../../stores/voice.store";
+import { setPeerVerification, voiceStore } from "../../stores/voice.store";
 import { createLogger } from "../../lib/logger";
 import { showToast } from "../../lib/ui/toast";
 import { voiceText } from "../../i18n/voice";
@@ -150,6 +157,37 @@ export class E2EEPeerState {
    *  been seen this call. */
   announcedIdentityKey(userId: number): string | null {
     return this._announcedIdentityKeys.get(userId) ?? null;
+  }
+
+  /** The direction a v3 offer to `peerId` binds, for a peer that announced
+   *  `bound_offers`; undefined sends it an older format. */
+  offerBinding(peerId: number): OfferBinding | undefined {
+    const myUserId = authStore.getState().user?.id ?? 0;
+    if (myUserId === 0 || !(voiceStore.getState().peerBoundOffers?.has(peerId) ?? false)) {
+      return undefined;
+    }
+    return { senderId: myUserId, recipientId: peerId };
+  }
+
+  /** Every identity key trusted for a peer, oldest first; empty when none is
+   *  pinned, null when there is no server or the pin store cannot be read. */
+  async trustedKeys(userId: number): Promise<readonly string[] | null> {
+    const host = this.deps.getServerHost();
+    if (!host) return null;
+    const lookup = await getIdentityPin(host, String(userId));
+    if (lookup.status === "unavailable") return null;
+    return lookup.status === "pinned" ? trustedPins(lookup) : [];
+  }
+
+  /** Stop trusting one of a peer's identity keys. The key their current
+   *  announce uses is kept: auto-trust would add it straight back. */
+  async forgetKey(userId: number, key: string): Promise<ForgetIdentityPinResult> {
+    const host = this.deps.getServerHost();
+    if (!host) return "failed";
+    const keep = this.announcedIdentityKey(userId);
+    const result = await forgetIdentityPin(host, String(userId), key, keep);
+    if (result === "forgotten") log.info("E2EE: forgot a trusted peer identity key", { userId });
+    return result;
   }
   get keyChangedPeers(): Map<number, string> {
     return this._keyChangedPeers;
@@ -370,7 +408,7 @@ export class E2EEPeerState {
       }
       const member = membersStore.getState().members.get(userId);
       showToast(
-        voiceText("identity.newDevice", {
+        voiceText("identity.keyChanged", {
           name: member ? memberDisplayName(member) : String(userId),
         }),
         "warning",
