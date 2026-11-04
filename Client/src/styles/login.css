@@ -722,6 +722,25 @@
   font-size: var(--font-size-sm);
   margin-top: 6px;
 }
+/* A failed load or save in place: the message, then Retry on the same row
+   (lib/ui/inlineError.ts). Empty, it takes no room. */
+.inline-error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.inline-error.shown {
+  margin: 8px 0;
+}
+.inline-error-text {
+  margin: 0;
+  color: var(--text-danger);
+  font-size: var(--font-size-sm);
+}
+.inline-error-retry.ac-btn {
+  margin-left: 0;
+}
 
 /* Password field */
 .password-wrapper {
@@ -1175,6 +1194,17 @@
 }
 .btn-modal-save:hover {
   background: var(--accent-hover);
+}
+.btn-modal-save:disabled {
+  background: var(--border-strong);
+  color: var(--text-faint);
+  cursor: not-allowed;
+}
+.modal-prompt-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
 }
 .modal-danger-text {
   font-size: var(--font-size-md);

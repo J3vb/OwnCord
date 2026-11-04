@@ -110,7 +110,7 @@ describe("member picker add mode", () => {
     open({ onAdd });
     q("dm-picker-member-3")!.click();
     q("dm-picker-create")!.click();
-    document.querySelector<HTMLElement>(".btn-secondary")!.click();
+    document.querySelector<HTMLElement>(".btn-modal-cancel")!.click();
     fail("This group is full");
     await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith("This group is full", "error"));
   });

@@ -406,6 +406,11 @@
   color: var(--text-faint);
   font-size: var(--font-size-sm);
 }
+/* Before consent the grid is hidden: the one button sits in the middle of the
+   panel, not at the top of an empty one. */
+.gp-consent {
+  margin: auto;
+}
 
 .gp-no-favorites .gp-tabs,
 .gp-no-favorites .gp-star {
@@ -552,6 +557,14 @@
   text-align: center;
   color: var(--text-faint);
   font-size: var(--font-size-sm);
+}
+/* An empty or no-match panel centres its message in the tall body. */
+.sp-body:has(> .sp-empty) {
+  display: flex;
+  flex-direction: column;
+}
+.sp-body > .sp-empty {
+  margin: auto 0;
 }
 .sp-empty-hint {
   margin-top: 8px;

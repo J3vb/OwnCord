@@ -198,7 +198,7 @@
       "openUserProfilePopup > (anonymous)": [20]
     },
     "features/settings/AppearanceTab.ts": {
-      "buildAppearanceTab": [17]
+      "buildAppearanceTab": [16]
     },
     "features/settings/KeybindsTab.ts": {
       "buildKeybindsTab > renderPortal": [20]
