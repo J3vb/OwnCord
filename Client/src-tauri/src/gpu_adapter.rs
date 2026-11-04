@@ -140,9 +140,9 @@ pub fn resolve(saved: &SavedChoice, cards: &[GpuCard]) -> Resolution {
 }
 
 /// The only place the flag text is built. Chromium reads the two LUID halves
-/// as `<high>,<low>`.
+/// as decimal numbers, `<high>,<low>`.
 pub fn luid_flag(luid: Luid) -> String {
-    format!("--use-adapter-luid={:x},{:x}", luid.high as u32, luid.low)
+    format!("--use-adapter-luid={},{}", luid.high, luid.low)
 }
 
 /// Rank by dedicated memory, largest first. Used when Windows cannot say
@@ -546,14 +546,14 @@ mod tests {
     }
 
     #[test]
-    fn luid_is_formatted_as_high_comma_low_in_hex() {
+    fn luid_is_formatted_as_decimal_high_comma_low() {
         let flag = luid_flag(Luid {
             high: 0,
             low: 0xABCD,
         });
-        assert_eq!(flag, "--use-adapter-luid=0,abcd");
+        assert_eq!(flag, "--use-adapter-luid=0,43981");
         let flag = luid_flag(Luid { high: -1, low: 7 });
-        assert_eq!(flag, "--use-adapter-luid=ffffffff,7");
+        assert_eq!(flag, "--use-adapter-luid=-1,7");
     }
 
     #[test]
