@@ -182,6 +182,23 @@ func TestAudienceMemo_ChannelFlagChangeIsNotReused(t *testing.T) {
 	}
 }
 
+// Entries for channels nobody asks about again (a deleted thread) are dropped
+// once they are too old to be reused.
+func TestAudienceMemo_OldEntriesArePruned(t *testing.T) {
+	f := newAudienceFixture(t, 1)
+	ctx := context.Background()
+	_ = f.hub.channelReadAudience(ctx, f.chID)
+	key := audienceMemoKey{channelID: f.chID}
+	f.hub.pruneChannelAudiences(time.Now())
+	if _, found := f.hub.audience.channels.Load(key); !found {
+		t.Fatal("a fresh entry was pruned")
+	}
+	f.hub.pruneChannelAudiences(time.Now().Add(audienceMemoMaxAge))
+	if _, found := f.hub.audience.channels.Load(key); found {
+		t.Fatal("an entry too old to be reused was kept")
+	}
+}
+
 func TestModerators_MemoisedAndRoleChangeSeen(t *testing.T) {
 	f := newAudienceFixture(t, 2)
 	ctx := context.Background()

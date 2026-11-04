@@ -3,6 +3,7 @@ package ws
 import (
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/permissions"
@@ -24,7 +25,14 @@ const audienceMemoMaxAge = 10 * time.Second
 type audienceMemo struct {
 	channels sync.Map // audienceMemoKey -> *audienceMemoEntry
 	mods     sync.Map // struct{} -> *audienceMemoEntry
+	// stores counts channel stores; every audienceMemoPruneEvery-th one drops the
+	// entries too old to be reused, so a deleted channel or thread does not keep
+	// its entry for the life of the process.
+	stores atomic.Uint64
 }
+
+// audienceMemoPruneEvery is how many channel stores pass between prunes.
+const audienceMemoPruneEvery = 256
 
 type audienceMemoKey struct {
 	channelID      int64
@@ -76,6 +84,19 @@ func (h *Hub) storeIfUnchanged(m *sync.Map, key any, ref permissions.ChannelRef,
 	m.Store(key, &audienceMemoEntry{
 		ref: ref, permGen: permGen, connGen: connGen, at: at,
 		audience: slices.Clip(slices.Clone(audience)),
+	})
+	if m == &h.audience.channels && h.audience.stores.Add(1)%audienceMemoPruneEvery == 0 {
+		h.pruneChannelAudiences(at)
+	}
+}
+
+// pruneChannelAudiences drops every channel entry too old to be reused at now.
+func (h *Hub) pruneChannelAudiences(now time.Time) {
+	h.audience.channels.Range(func(key, v any) bool {
+		if e, _ := v.(*audienceMemoEntry); e == nil || now.Sub(e.at) >= audienceMemoMaxAge {
+			h.audience.channels.CompareAndDelete(key, v)
+		}
+		return true
 	})
 }
 
