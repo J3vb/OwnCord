@@ -212,7 +212,7 @@ describe("fuzz entry-point inventory", () => {
   it("lists every webview decoder in exactly one table", () => {
     const listed = { ...clientCovered, ...clientGaps, ...clientTrusted };
     expect(overlaps(clientCovered, clientGaps, clientTrusted)).toEqual([]);
-    expect([...decoders].filter((k) => !(k in listed)).sort()).toEqual([]);
+    expect([...decoders].filter((k) => !(k in listed)).toSorted()).toEqual([]);
     expect(
       Object.keys(listed)
         .filter((k) => !decoders.has(k))
@@ -223,7 +223,7 @@ describe("fuzz entry-point inventory", () => {
   it("lists every text-taking Tauri command in exactly one table", () => {
     const listed = { ...commandGaps, ...commandPassThrough };
     expect(overlaps(commandGaps, commandPassThrough)).toEqual([]);
-    expect([...commands].filter((k) => !(k in listed)).sort()).toEqual([]);
+    expect([...commands].filter((k) => !(k in listed)).toSorted()).toEqual([]);
     expect(
       Object.keys(listed)
         .filter((k) => !commands.has(k))
