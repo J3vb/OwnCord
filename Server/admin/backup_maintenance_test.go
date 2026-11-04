@@ -434,7 +434,6 @@ func TestPruneSafetyCopies_ProtectsThroughSymlink(t *testing.T) {
 // safety copy is the state before a restore or a migration, so it neither
 // postpones the next scheduled backup nor counts as the last backup.
 func TestBackupHistory_IgnoresSafetyCopies(t *testing.T) {
-	ctx := context.Background()
 	write := func(t *testing.T, dir, name string, age time.Duration) string {
 		t.Helper()
 		p := filepath.Join(dir, name)
@@ -484,7 +483,7 @@ func TestBackupHistory_IgnoresSafetyCopies(t *testing.T) {
 		write(t, dir, "chatserver_old.db", 30*time.Hour)
 		write(t, dir, "pre_restore_fresh.db", time.Minute)
 		write(t, dir, "pre_migrate_fresh.db", time.Minute)
-		if err := admin.MaintainBackups(ctx, database, service.NewSettingsService(database), dir); err != nil {
+		if err := admin.MaintainBackups(context.Background(), database, service.NewSettingsService(database), dir); err != nil {
 			t.Fatalf("MaintainBackups: %v", err)
 		}
 		scheduled := 0
@@ -506,7 +505,7 @@ func TestBackupHistory_IgnoresSafetyCopies(t *testing.T) {
 		write(t, dir, "chatserver_a.db", 30*24*time.Hour)
 		write(t, dir, "chatserver_b.db", 20*24*time.Hour)
 		write(t, dir, "pre_restore_new.db", time.Hour)
-		if err := admin.MaintainBackups(ctx, database, service.NewSettingsService(database), dir); err != nil {
+		if err := admin.MaintainBackups(context.Background(), database, service.NewSettingsService(database), dir); err != nil {
 			t.Fatalf("MaintainBackups: %v", err)
 		}
 		got := listBackupFiles(t, dir)
