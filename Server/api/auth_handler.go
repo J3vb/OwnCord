@@ -331,6 +331,8 @@ func writeAuthError(ctx context.Context, w http.ResponseWriter, err error) {
 		status, code = http.StatusForbidden, httperr.CodeLoginSessionRequired
 	case errors.Is(err, service.ErrConflict):
 		status, code = http.StatusConflict, httperr.CodeConflict
+	case errors.Is(err, service.ErrRecoveredSignInRequired):
+		status, code = http.StatusInternalServerError, httperr.CodeRecoveredSignInRequired
 	case errors.Is(err, service.ErrAuthBusy):
 		writeAuthBusy(w, err)
 		return

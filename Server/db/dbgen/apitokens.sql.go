@@ -118,7 +118,7 @@ SELECT t.id, t.user_id, COALESCE(u.username, '') AS username, t.label,
        t.created_at, t.last_used_at, t.expires_at, t.revoked_at
 FROM api_tokens t
 LEFT JOIN users u ON u.id = t.user_id
-ORDER BY t.id DESC
+ORDER BY (t.revoked_at IS NOT NULL), t.id DESC
 LIMIT 200
 `
 
@@ -134,7 +134,8 @@ type ListAPITokensRow struct {
 }
 
 // Admin/CLI listing. Never selects token_hash (unrecoverable; only the raw
-// token shown at creation is usable).
+// token shown at creation is usable). Unrevoked rows sort first so the cap
+// drops old revoked rows, never a token that may still work.
 func (q *Queries) ListAPITokens(ctx context.Context) ([]ListAPITokensRow, error) {
 	rows, err := q.db.QueryContext(ctx, listAPITokens)
 	if err != nil {
@@ -144,6 +145,62 @@ func (q *Queries) ListAPITokens(ctx context.Context) ([]ListAPITokensRow, error)
 	items := []ListAPITokensRow{}
 	for rows.Next() {
 		var i ListAPITokensRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.Username,
+			&i.Label,
+			&i.CreatedAt,
+			&i.LastUsedAt,
+			&i.ExpiresAt,
+			&i.RevokedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAPITokensByUser = `-- name: ListAPITokensByUser :many
+SELECT t.id, t.user_id, COALESCE(u.username, '') AS username, t.label,
+       t.created_at, t.last_used_at, t.expires_at, t.revoked_at
+FROM api_tokens t
+LEFT JOIN users u ON u.id = t.user_id
+WHERE t.user_id = ?
+ORDER BY (t.revoked_at IS NOT NULL), t.id DESC
+LIMIT 200
+`
+
+type ListAPITokensByUserRow struct {
+	ID         int64   `json:"id"`
+	UserID     int64   `json:"userId"`
+	Username   string  `json:"username"`
+	Label      string  `json:"label"`
+	CreatedAt  string  `json:"createdAt"`
+	LastUsedAt *string `json:"lastUsedAt"`
+	ExpiresAt  *string `json:"expiresAt"`
+	RevokedAt  *string `json:"revokedAt"`
+}
+
+// The admin listing for a token holder who is not the owner: only that
+// account's rows, so other accounts' tokens never push its own out of the cap.
+// Same columns and order as ListAPITokens.
+func (q *Queries) ListAPITokensByUser(ctx context.Context, userID int64) ([]ListAPITokensByUserRow, error) {
+	rows, err := q.db.QueryContext(ctx, listAPITokensByUser, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAPITokensByUserRow{}
+	for rows.Next() {
+		var i ListAPITokensByUserRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.UserID,
