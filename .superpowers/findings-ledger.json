@@ -12769,6 +12769,29 @@
       "hunt": "server-review-2026-11-03",
       "finder": "claude",
       "fixedDate": "2026-11-04"
+    },
+    {
+      "id": "OC-0553",
+      "title": "A token holder who is not the owner lost sight of their own API token past 200 newer rows",
+      "file": "Server/service/token.go",
+      "line": 188,
+      "severity": "low",
+      "why": "The admin token screen for a MANAGE_TOKENS holder filtered the server-wide 200-row token page by user, revoked rows included. Once 200 newer tokens existed (bots and CI rotate them), the holder saw an empty list and could not revoke a token they still held.",
+      "repro": "Holder mints one token, the owner then mints and revokes 201: ListFor(holder) returned nothing and RevokeFor refused the holder's own id. After the fix the holder's token is listed and revoked.",
+      "evidence": "Server/service/token_test.go (TestTokenService_OwnTokensSurviveTheListCap).",
+      "suggestedFix": "Read the holder's rows with a per-account query and revoke with the account-scoped revoke; sort unrevoked rows first so the cap drops old revoked ones.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/service/token_test.go",
+        "revertProof": "fail (holder's token missing from the list)"
+      },
+      "lens": "api-authz",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-03",
+      "hunt": "server-review-2026-11-03",
+      "finder": "claude",
+      "fixedDate": "2026-11-04"
     }
   ]
 }
