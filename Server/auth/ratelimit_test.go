@@ -2,6 +2,8 @@ package auth_test
 
 import (
 	"context"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -397,5 +399,49 @@ func TestRateLimiter_RetryAfter_Lockout(t *testing.T) {
 	got := rl.RetryAfter("retryLocked", 5, time.Minute)
 	if got <= 59*time.Minute || got > time.Hour {
 		t.Errorf("RetryAfter(locked out) = %v, want the lockout remainder (~1h)", got)
+	}
+}
+
+func TestRateLimiter_ReserveRefundGivesTheSlotBack(t *testing.T) {
+	rl := auth.NewRateLimiter()
+	const key, limit = "reserve-key", 2
+	first, ok := rl.Reserve(key, limit, time.Minute)
+	if !ok {
+		t.Fatal("first reservation refused")
+	}
+	if _, ok := rl.Reserve(key, limit, time.Minute); !ok {
+		t.Fatal("second reservation refused")
+	}
+	if refund, ok := rl.Reserve(key, limit, time.Minute); ok {
+		t.Fatal("a reservation past the limit was granted")
+	} else {
+		refund() // a refused reservation's refund is a no-op
+	}
+	first()
+	first() // idempotent: one refund, one slot
+	if !rl.Allow(key, limit, time.Minute) {
+		t.Fatal("the refunded slot did not come back")
+	}
+	if rl.Check(key, limit, time.Minute) {
+		t.Fatal("a second refund call freed another slot")
+	}
+}
+
+// Concurrent reservations never exceed the limit, whatever is refunded later.
+func TestRateLimiter_ReserveHoldsTheLimitUnderConcurrency(t *testing.T) {
+	rl := auth.NewRateLimiter()
+	const key, limit, callers = "reserve-race", 5, 50
+	var granted atomic.Int64
+	var wg sync.WaitGroup
+	for range callers {
+		wg.Go(func() {
+			if _, ok := rl.Reserve(key, limit, time.Minute); ok {
+				granted.Add(1)
+			}
+		})
+	}
+	wg.Wait()
+	if granted.Load() != limit {
+		t.Fatalf("%d reservations granted, want %d", granted.Load(), limit)
 	}
 }

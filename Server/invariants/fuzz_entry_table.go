@@ -90,6 +90,9 @@ var FuzzEntryPoints = map[string]FuzzEntry{
 	"service/discordimport.imageSize":    {Source: "Discord export images", Targets: []string{"service/discordimport.FuzzImageSize"}},
 
 	"plugin.(*Registry).InstallFromZip": {Source: "plugin archive", Targets: []string{"plugin.FuzzInstallFromZip"}},
+
+	"internal/archivebin.FromTarGz": {Source: "downloaded release and LiveKit archives", Targets: []string{"internal/archivebin.FuzzFromTarGz"}},
+	"internal/archivebin.FromZip":   {Source: "downloaded LiveKit archive", Targets: []string{"internal/archivebin.FuzzFromZip"}},
 }
 
 // FuzzGaps are outside-input functions with no fuzz target yet. This table
@@ -128,13 +131,10 @@ var FuzzGaps = map[string]FuzzGap{
 	"updater.(*Updater).fetchLatestRelease":    {Source: "GitHub release API response"},
 	"updater.(*Updater).VerifyReleaseManifest": {Source: "downloaded release manifest"},
 	"updater.(*Updater).ReleaseProtocolEpoch":  {Source: "downloaded release manifest"},
-	"updater.extractChatserverFromTarGz":       {Source: "downloaded release archive"},
-	"livekitproc.extractLiveKitFromTarGz":      {Source: "downloaded LiveKit archive"},
-	"livekitproc.extractLiveKitFromZip":        {Source: "downloaded LiveKit archive"},
 }
 
 // fuzzGapCeiling is len(FuzzGaps). It only goes down.
-const fuzzGapCeiling = 32
+const fuzzGapCeiling = 29
 
 // FuzzTrustedDecodes decode bytes this server wrote itself (its database, its
 // own frames and files) or files the operator owns. Each value says why the
