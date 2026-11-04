@@ -193,10 +193,11 @@ func (h *Hub) voiceJoinPrecheck(ctx context.Context, c *Client, payload json.Raw
 
 	// With no supervised companion LiveKit is externally managed and the check above
 	// no-ops. Probe reachability before minting: a credential for an unreachable SFU
-	// makes the client fail confusingly with no server-side explanation. ListRooms
-	// bounds itself at 3s.
+	// makes the client fail confusingly with no server-side explanation. The verdict
+	// is shared and at most 5 s old, so a burst of joins costs one ListRooms (bounded
+	// at 3 s), not one each.
 	if h.lkProcess == nil {
-		if healthy, err := h.livekit.HealthCheck(ctx); !healthy || err != nil {
+		if healthy, err := h.livekit.CachedHealthCheck(ctx); !healthy || err != nil {
 			slog.Warn("handleVoiceJoin: external LiveKit unreachable", "user_id", c.userID, "err", err)
 			voiceJoinFail(ctx, c, reqID, errors.Join(err, errVoiceJoinUnhealthy), ErrCodeVoiceError, "voice is temporarily unavailable — LiveKit is not reachable")
 			return 0, nil, 0, false

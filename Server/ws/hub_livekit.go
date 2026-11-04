@@ -23,11 +23,20 @@ func (h *Hub) URL() string {
 	return h.livekit.URL()
 }
 
-// LiveKitHealthCheck probes the LiveKit server for connectivity.
-// It tries the SDK client first (ListRooms), and falls back to an HTTP probe
-// if a managed process is configured. Returns false with a reason if LiveKit
+// LiveKitHealthCheck reports whether the LiveKit server answers a room listing,
+// from a verdict at most 5 s old shared with voice_join, metrics, diagnostics and
+// /health (one probe in flight at a time). Returns false with a reason if LiveKit
 // is not configured or unreachable.
 func (h *Hub) LiveKitHealthCheck(ctx context.Context) (bool, error) {
+	if h.livekit == nil {
+		return false, fmt.Errorf("not configured")
+	}
+	return h.livekit.CachedHealthCheck(ctx)
+}
+
+// LiveKitHealthProbe is LiveKitHealthCheck without the cache: one room listing now.
+// Only the operator's explicit /api/v1/livekit/health probe uses it.
+func (h *Hub) LiveKitHealthProbe(ctx context.Context) (bool, error) {
 	if h.livekit == nil {
 		return false, fmt.Errorf("not configured")
 	}

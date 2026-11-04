@@ -95,7 +95,8 @@
 //	9     voiceGraceState.mu         voice_grace.go:54        leaf
 //	9     voiceReconcileState.mu     voice_reconcile.go:42    leaf
 //	9     voiceRejoinBlockState.mu   voice_rejoin_block.go:34 leaf
-//	9     removedIdentities.mu       voice_removed_watch.go:35 leaf
+//	9     removedIdentities.mu       voice_removed_watch.go:48 leaf
+//	9     liveKitHealthCache.mu      livekit_health.go:21     leaf
 //	9     voiceResumeChecks.mu       voice_resume_check.go:57 leaf
 //	9     presenceRepairState.mu     hub_presence.go:92       leaf
 //	9     queueDropState.mu          hub_stats.go:140         leaf

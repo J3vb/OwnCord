@@ -125,7 +125,18 @@ func (h *Hub) finishVoiceLeaveAnnounce(ctx context.Context, txn *voiceTxn, c *Cl
 	// E2EE keys are managed client-side via ECDH: remaining clients rotate the room key
 	// when a participant leaves; the server has no key material to clear.
 
-	h.removeLiveKitParticipantAsync(ctx, oldChID, c.userID, oldJoinToken, "handleVoiceLeave")
+	h.removeLiveKitParticipantAsyncFor(ctx, oldChID, c.userID, oldJoinToken, "handleVoiceLeave", voiceLeaveIsOwn(reason))
+}
+
+// voiceLeaveIsOwn reports whether reason is a leave the client asked for itself, so
+// the removed-identity watch checks it on its slower cadence. A dropped socket, a
+// call another device took over and every server-driven eviction are not.
+func voiceLeaveIsOwn(reason string) bool {
+	switch reason {
+	case voiceLeaveReasonClient, voiceLeaveReasonSwitch, VoiceLeaveReasonDMLeave:
+		return true
+	}
+	return false
 }
 
 // removeLiveKitParticipantAsync removes one exact LiveKit participant (best-effort)
@@ -139,6 +150,12 @@ func (h *Hub) finishVoiceLeaveAnnounce(ctx context.Context, txn *voiceTxn, c *Cl
 // from cancellation (values kept); shutdown cancels and joins it through the hub's
 // background group, and the call is bounded by lkTimeout.
 func (h *Hub) removeLiveKitParticipantAsync(ctx context.Context, channelID, userID int64, joinToken, caller string) {
+	h.removeLiveKitParticipantAsyncFor(ctx, channelID, userID, joinToken, caller, false)
+}
+
+// removeLiveKitParticipantAsyncFor is removeLiveKitParticipantAsync; ownLeave marks a
+// leave the client asked for itself (RemoveParticipantAfterOwnLeave).
+func (h *Hub) removeLiveKitParticipantAsyncFor(ctx context.Context, channelID, userID int64, joinToken, caller string, ownLeave bool) {
 	if h.livekit == nil {
 		return
 	}
@@ -155,7 +172,11 @@ func (h *Hub) removeLiveKitParticipantAsync(ctx context.Context, channelID, user
 		}
 		lkCtx, cancel := context.WithTimeout(jobCtx, lkTimeout)
 		defer cancel()
-		if err := h.livekit.RemoveParticipant(lkCtx, channelID, userID, joinToken); err != nil {
+		remove := h.livekit.RemoveParticipant
+		if ownLeave {
+			remove = h.livekit.RemoveParticipantAfterOwnLeave
+		}
+		if err := remove(lkCtx, channelID, userID, joinToken); err != nil {
 			slog.Warn("RemoveParticipant failed (may already be gone)",
 				"caller", caller, "err", err, "user_id", userID, "channel_id", channelID)
 		}

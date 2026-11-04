@@ -218,7 +218,7 @@ membership row.
 | Revoked-session sweep         | every 30 s, plus a check every 10 messages per connection, plus an immediate check for one account (`DisconnectIfSessionRevoked`) after a password or 2FA change or a session revoke |
 | Stale-voice-state sweep       | every 60 s                                                                                                                                                                           |
 | LiveKit membership reconciler | every 60 s (`voice_reconcile.go`; see [livekit-setup.md](../livekit-setup.md))                                                                                                       |
-| Removed-participant watch     | every 2 s, only while an SFU identity the server removed is still within its token lifetime (`voice_removed_watch.go`)                                                               |
+| Removed-participant watch     | every 2 s (every 10 s for a leave the client asked for), only while an SFU identity the server removed is still within its token lifetime (`voice_removed_watch.go`)                 |
 | Channel-activity worker       | coalesces unread hints for unfocused readable channels; leading-edge 1 s window (`channel_activity.go`, WP 2B-2)                                                                     |
 | Role-refresh worker           | fans a committed role change out per affected user, off the request goroutine; coalesces pending users (`role_refresh.go`, WP 4.4b, see below)                                       |
 | Panic containment             | on the run loop: 3 panics in 60 s, or one Windows memory fault (SRE-08), stops the hub and exits the process                                                                         |

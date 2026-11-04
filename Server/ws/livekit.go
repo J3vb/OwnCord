@@ -39,6 +39,9 @@ type LiveKitClient struct {
 	// removed holds identities RemoveParticipant removed, kept removed for
 	// tokenTTL by the hub's watch (voice_removed_watch.go).
 	removed removedIdentities
+
+	// health is the shared, short-lived reachability verdict (livekit_health.go).
+	health liveKitHealthCache
 }
 
 // NewLiveKitClient creates a client from the voice config. It errors if credentials
@@ -232,7 +235,15 @@ func (c *LiveKitClient) ListRoomChannelIDs(ctx context.Context) ([]int64, error)
 // keeps that exact identity out of the room until any token minted for it
 // has expired (voice_removed_watch.go).
 func (c *LiveKitClient) RemoveParticipant(ctx context.Context, channelID int64, userID int64, voiceJoinToken string) error {
-	c.removed.record(channelID, userID, voiceJoinToken)
+	c.removed.record(channelID, userID, voiceJoinToken, false)
+	return c.removeIdentity(ctx, channelID, participantIdentity(userID, voiceJoinToken))
+}
+
+// RemoveParticipantAfterOwnLeave is RemoveParticipant for a leave the client asked
+// for itself: the identity is still kept out of the room, on the watch's slower
+// own-leave cadence.
+func (c *LiveKitClient) RemoveParticipantAfterOwnLeave(ctx context.Context, channelID int64, userID int64, voiceJoinToken string) error {
+	c.removed.record(channelID, userID, voiceJoinToken, true)
 	return c.removeIdentity(ctx, channelID, participantIdentity(userID, voiceJoinToken))
 }
 
