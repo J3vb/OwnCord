@@ -10,6 +10,7 @@ const srcDir = path.resolve(__dirname, "../../src");
 
 const lineCaps: Record<string, number> = {
   "lib/dispatcher.ts": 341,
+  "pages/MainPage.ts": 482,
 };
 
 /** Subscriptions written in the dispatcher: the ordered auth_ok, ready and
