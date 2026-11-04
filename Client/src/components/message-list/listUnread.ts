@@ -1,6 +1,7 @@
 /**
  * Unread state in the message list: the NEW line, the unread bar, marking read
- * as rows are seen, and Mark Unread.
+ * as rows are seen, Mark Unread, and where a visit opens (the NEW line, or the
+ * spot the reader left a channel with nothing new).
  */
 import { isWindowDetached } from "@stores/messages.store";
 import { isReadSurface } from "@stores/threads.store";
@@ -20,6 +21,7 @@ import {
 } from "@lib/readState";
 import { readPointerEnabled } from "@lib/net/serverCapabilities";
 import { markMessageUnread } from "./markUnread";
+import { rememberReadingPosition } from "./readingPositions";
 import { UNREAD_BAR_CLEARANCE, type ScrollMetrics, readMetrics } from "./listShared";
 import type { ListState, ListApi } from "./listState";
 
@@ -38,6 +40,49 @@ export function createListUnread(st: ListState, api: ListApi) {
     }
     api.updateScrollToBottomBtn();
     return true;
+  }
+
+  /** Put the view back where the reader left this channel. False when there is
+   *  nothing owed or its row is no longer loaded (the caller goes to the bottom). */
+  function restoreReadingPositionIfReady(): boolean {
+    const pos = st.restorePosition;
+    // Hidden, the scroller cannot move: the resize observer places it once shown.
+    if (pos === null || st.root === null || st.root.clientHeight === 0) return false;
+    // The window has not landed yet: a later settle places it.
+    if (st.virtualItems.length === 0) return false;
+    st.restorePosition = null;
+    const idx = st.virtualItems.findIndex(
+      (item) => item.kind === "message" && item.message.id === pos.messageId,
+    );
+    if (idx === -1) return false;
+    // Rows between here and the top are estimates until rendered, so settle
+    // against their measured heights, as the NEW divider does.
+    for (let pass = 0; pass < 3; pass++) {
+      if (!api.placeIndex(idx, pos.offset)) break;
+    }
+    api.updateScrollToBottomBtn();
+    return true;
+  }
+
+  /** Record where the reader is leaving this list, or forget it at the bottom. */
+  function rememberReadingPositionNow(): void {
+    // Hidden, the scroller reads 0: keep nothing rather than the top of history.
+    if (st.root === null || st.root.clientHeight === 0) return;
+    const channelId = st.options.channelId;
+    if (isWindowDetached(channelId) || api.isNearBottom()) {
+      rememberReadingPosition(channelId, null);
+      return;
+    }
+    const idx = api.topMessageIndex();
+    const item = st.virtualItems[idx];
+    if (item?.kind !== "message") {
+      rememberReadingPosition(channelId, null);
+      return;
+    }
+    rememberReadingPosition(channelId, {
+      messageId: item.message.id,
+      offset: st.root.scrollTop - api.offsetBefore(idx),
+    });
   }
 
   /** The bar shows while the visit has unread it has not dismissed. */
@@ -100,6 +145,7 @@ export function createListUnread(st: ListState, api: ListApi) {
   function settleUnreadNav(): void {
     // Only while the reader is still at the bottom the mount left them at.
     if (st.openAtDividerPending && api.isNearBottom()) openAtDividerIfReady();
+    if (st.restorePosition !== null && api.isNearBottom()) restoreReadingPositionIfReady();
     updateUnreadBar();
     markReadIfSeen();
   }
@@ -246,6 +292,8 @@ export function createListUnread(st: ListState, api: ListApi) {
 
   return {
     openAtDividerIfReady,
+    restoreReadingPositionIfReady,
+    rememberReadingPositionNow,
     updateUnreadBar,
     dismissUnreadBar,
     markReadAndJumpToPresent,

@@ -140,6 +140,9 @@ export function createListWindow(st: ListState, api: ListApi) {
       editor,
     );
     st.rowOwners.set(el, owner);
+    if (item.message.id === st.replyTargetId && el.classList.contains("message")) {
+      el.classList.add("reply-target");
+    }
     return el;
   }
 

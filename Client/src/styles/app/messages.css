@@ -484,6 +484,13 @@
 .message.mentioned:hover {
   background: color-mix(in srgb, var(--yellow) 12%, transparent);
 }
+/* The row the open reply bar answers: the mention row's shape in the accent
+   colour, so it reads as "this one" without looking like a ping. */
+.message.reply-target,
+.message.reply-target:hover {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
 
 /* #channel links inside message text */
 .channel-mention {

@@ -296,18 +296,10 @@ button.msg-thread-chip:hover {
   overflow: hidden;
 }
 
-/* The panel composer: one line, and a locked one shows no controls or focus ring. */
+/* The panel composer: one line (a locked one is styled in composer.css). */
 .thread-panel .msg-textarea::placeholder {
   white-space: nowrap;
   text-overflow: ellipsis;
-}
-.thread-panel .composer-disabled :is(.emoji-btn, .gif-btn, .send-btn) {
-  display: none;
-}
-.thread-panel .composer-disabled .message-input-box:has(.msg-textarea:focus-visible),
-.thread-panel .composer-disabled .msg-textarea:focus-visible {
-  outline: none;
-  box-shadow: none;
 }
 
 /* The panel's Follow / Following toggle (WP 6.9c): a text button among the icons. */
