@@ -960,6 +960,7 @@
   gap: 4px;
   flex-wrap: wrap;
   margin-top: 4px;
+  user-select: none;
 }
 .reaction-chip {
   display: flex;
@@ -2316,6 +2317,7 @@ ul.md-list-nested {
   transition: opacity 0.1s ease;
   box-shadow: var(--shadow-sm);
   z-index: 5;
+  user-select: none;
 }
 /* Only a real pointer hovers: a touch screen's tap leaves a sticky :hover
    behind, and there a message's actions live in the long-press menu. */
