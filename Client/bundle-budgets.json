@@ -29,7 +29,7 @@
     "SettingsOverlay": {
       "budget": 51500,
       "lazy": true,
-      "note": "The Settings overlay, loaded when Settings first opens."
+      "note": "The Settings overlay, loaded when Settings first opens. 51250 -> 51500: the profile popup helper split out for the complexity baseline (51253 B)."
     },
     "AdminActions": {
       "budget": 4000,

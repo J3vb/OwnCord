@@ -553,6 +553,13 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     // A pass that may build rows (a resized viewport, a jump settling, the NEW
     // divider still to place) resizes the observed content itself, so it waits
     // for the next frame instead of looping the observer.
+    const firstRowStartingInView = (scrollTop: number, clientHeight: number): number => {
+      const idx = api.offsetToIndex(scrollTop);
+      const startsAbove = api.offsetBefore(idx) < scrollTop;
+      const nextInView =
+        idx + 1 < st.renderedEnd && api.offsetBefore(idx + 1) < scrollTop + clientHeight;
+      return startsAbove && nextInView ? idx + 1 : idx;
+    };
     const resizePass = (): void => {
       if (st.root === null || st.contentContainer === null) return;
       // The text estimates wrap at the list's width: when it changes, the
@@ -587,14 +594,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       // inside it (an image box settling below its header) would then move
       // every row the reader is looking at.
       const { scrollTop, clientHeight } = readMetrics(st.root);
-      let anchorIdx = api.offsetToIndex(scrollTop);
-      if (
-        api.offsetBefore(anchorIdx) < scrollTop &&
-        anchorIdx + 1 < st.renderedEnd &&
-        api.offsetBefore(anchorIdx + 1) < scrollTop + clientHeight
-      ) {
-        anchorIdx++;
-      }
+      const anchorIdx = firstRowStartingInView(scrollTop, clientHeight);
       const anchorOffset = scrollTop - api.offsetBefore(anchorIdx);
 
       // The anchor above was read against the old estimates; the restore
@@ -694,6 +694,22 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
         },
       ),
     );
+    /** Rows after `prevLast` landed below a reader scrolled up: count them for the pill. */
+    const countArrivalsBelow = (prevLast: number): void => {
+      // Older ids (a prepend) and the reader's own rows never count.
+      for (const m of st.allMessages) {
+        if (m.id <= prevLast || m.user.id === st.options.currentUserId) continue;
+        st.newBelowCount++;
+        const mentionInfo = {
+          mentions: m.mentions,
+          mentionsEveryone: m.mentionsEveryone,
+          mentionRoles: m.mentionRoles,
+        };
+        if (!m.deleted && highlightsCurrentUser(m.content, mentionInfo)) {
+          st.mentionsBelowCount++;
+        }
+      }
+    };
     st.unsubscribers.push(
       messagesStore.subscribeSelector(
         // Scoped to the mounted channel so updates to OTHER channels (their
@@ -718,21 +734,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
           // Only an append counts: a window swap drops the previous last row.
           const appended =
             firstLive || (prevLast > 0 && st.allMessages.some((m) => m.id === prevLast));
-          if (!wasBottom && appended && !st.loadingNewer) {
-            // Older ids (a prepend) and the reader's own rows never count.
-            for (const m of st.allMessages) {
-              if (m.id <= prevLast || m.user.id === st.options.currentUserId) continue;
-              st.newBelowCount++;
-              const mentionInfo = {
-                mentions: m.mentions,
-                mentionsEveryone: m.mentionsEveryone,
-                mentionRoles: m.mentionRoles,
-              };
-              if (!m.deleted && highlightsCurrentUser(m.content, mentionInfo)) {
-                st.mentionsBelowCount++;
-              }
-            }
-          }
+          if (!wasBottom && appended && !st.loadingNewer) countArrivalsBelow(prevLast);
           // The page kept the reader in place: the live-tail flag now describes
           // that spot, not the one before the page landed.
           if (st.loadingNewer) setLiveTailInView(st.options.channelId, api.isNearBottom());

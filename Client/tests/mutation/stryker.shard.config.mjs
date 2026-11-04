@@ -310,6 +310,7 @@ export const shards = {
     "src/features/messaging/threadResume.ts",
     "src/features/threads/threadCommands.ts",
     "src/features/threads/threadNavigation.ts",
+    "src/features/threads/threadSendQueue.ts",
     "src/features/messaging/slashCommands.ts",
     "src/lib/logger.ts",
     "src/lib/logPersistence.ts",
