@@ -11,40 +11,13 @@
 
 import { appendChildren, createElement, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import { applyStatusIndicator } from "@lib/ui/statusIndicator";
-import { authStore } from "@stores/auth.store";
-import { blocksStore } from "@stores/blocks.store";
 import { channelsStore } from "@stores/channels.store";
 import { membersStore } from "@stores/members.store";
 import { voiceStore } from "@stores/voice.store";
 import { peopleHomeText as t } from "../../i18n/peopleHome";
 import type { FeatureViewContext } from "../navigation/destinations";
-import { createAvatarElement, pickAvatarColor } from "../profiles/avatar";
-import {
-  activeNow,
-  peopleRows,
-  type ActiveModel,
-  type PeopleScope,
-  type PeopleTab,
-  type PersonModel,
-} from "./model";
-
-function avatarFor(person: PersonModel): HTMLElement {
-  const avatar = createAvatarElement(
-    { username: person.username, avatar: person.avatar },
-    {
-      className: "mi-avatar",
-      background: pickAvatarColor(person.username),
-      decorative: true,
-      deferUntilVisible: true,
-    },
-  );
-  const dot = createElement("div", { class: "mi-status" });
-  dot.setAttribute("aria-label", applyStatusIndicator(dot, person.status, person.mobile));
-  dot.setAttribute("role", "img");
-  avatar.appendChild(dot);
-  return avatar;
-}
+import { activeNow, peopleRows, type ActiveModel, type PeopleTab, type PersonModel } from "./model";
+import { peopleScope, personAvatar, watchPeople } from "./shared";
 
 function textBlock(person: PersonModel, lines: readonly string[]): HTMLElement {
   const wrap = createElement("div", { class: "mi-text" });
@@ -63,13 +36,6 @@ function textBlock(person: PersonModel, lines: readonly string[]): HTMLElement {
     wrap.appendChild(el);
   });
   return wrap;
-}
-
-function scope(): PeopleScope {
-  return {
-    selfId: authStore.getState().user?.id ?? null,
-    blocked: blocksStore.getState().blockedByMe,
-  };
 }
 
 export function renderPeopleHome(root: HTMLElement, ctx: FeatureViewContext): void {
@@ -171,7 +137,7 @@ export function renderPeopleHome(root: HTMLElement, ctx: FeatureViewContext): vo
     });
     // The whole row opens the DM, as on Discord; the button is its keyboard stop.
     li.addEventListener("click", () => ctx.messageUser?.(person.id));
-    appendChildren(li, avatarFor(person), textBlock(person, [person.line]), msg);
+    appendChildren(li, personAvatar(person), textBlock(person, [person.line]), msg);
     return li;
   }
 
@@ -195,7 +161,7 @@ export function renderPeopleHome(root: HTMLElement, ctx: FeatureViewContext): vo
       lines.push(t("active.voice", { channel: person.voiceChannel }));
     const shown: PersonModel = { ...person, lineIcon: person.game !== null ? "gamepad-2" : null };
     li.addEventListener("click", () => ctx.messageUser?.(person.id));
-    appendChildren(li, avatarFor(shown), textBlock(shown, lines));
+    appendChildren(li, personAvatar(shown), textBlock(shown, lines));
     return li;
   }
 
@@ -210,7 +176,7 @@ export function renderPeopleHome(root: HTMLElement, ctx: FeatureViewContext): vo
     for (const [id, btn] of tabButtons) btn.setAttribute("aria-pressed", String(id === tab));
 
     const members = membersStore.getState().members;
-    const sc = scope();
+    const sc = peopleScope();
     const rows = peopleRows(members.values(), sc, tab, query);
     setText(
       count,
@@ -248,17 +214,6 @@ export function renderPeopleHome(root: HTMLElement, ctx: FeatureViewContext): vo
     }
   }
 
-  const unsubs = [
-    membersStore.subscribeSelector((s) => s.members, render),
-    blocksStore.subscribeSelector((s) => s.blockedByMe, render),
-    channelsStore.subscribeSelector((s) => s.channels, render),
-    // Who sits in which channel only: a speaking tick replaces voiceUsers too.
-    voiceStore.subscribeSelector(
-      (s) =>
-        [...s.voiceUsers].map(([id, users]) => `${id}:${[...users.keys()].join(",")}`).join(";"),
-      render,
-    ),
-  ];
-  signal.addEventListener("abort", () => unsubs.forEach((u) => u()), { once: true });
+  watchPeople(render, signal);
   render();
 }

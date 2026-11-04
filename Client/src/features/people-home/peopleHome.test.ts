@@ -1,5 +1,5 @@
 // The People view: who it lists, Active now, and that a live update keeps the
-// search text and the focused Message button.
+// search text and the focused Message button. Also the phone's Active now strip.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@lib/logger", () => ({
@@ -15,6 +15,7 @@ import { membersStore, type Member } from "@stores/members.store";
 import { voiceStore, type VoiceUser } from "@stores/voice.store";
 import { activeNow, peopleRows } from "./model";
 import { renderPeopleHome } from "./PeopleHome";
+import { renderActiveStrip } from "./activeStrip";
 
 const ME = 1;
 
@@ -268,5 +269,73 @@ describe("the view", () => {
     root.querySelector<HTMLButtonElement>("[data-testid='people-message-2']")?.focus();
     setRoster(member(ME, "me", "online"), member(2, "amy", "offline"));
     expect(document.activeElement?.getAttribute("data-testid")).toBe("people-search");
+  });
+});
+
+describe("the phone Active now strip", () => {
+  let strip: HTMLUListElement;
+  let owner: AbortController;
+  const onOpen = vi.fn();
+
+  function cardIds(): string[] {
+    return [...strip.querySelectorAll<HTMLElement>("[data-active-id]")].map(
+      (b) => b.dataset["activeId"] ?? "",
+    );
+  }
+
+  beforeEach(() => {
+    document.body.replaceChildren();
+    channelsStore.setState((prev) => ({
+      ...prev,
+      channels: new Map([[10, voiceChannel(10, "Lounge", "voice")]]),
+    }));
+    voiceStore.setState((prev) => ({ ...prev, voiceUsers: new Map() }));
+    setRoster(member(ME, "me", "online"), member(2, "amy", "online"), member(3, "bob", "online"));
+    strip = document.createElement("ul");
+    document.body.appendChild(strip);
+    owner = new AbortController();
+    renderActiveStrip(strip, { signal: owner.signal, onOpen });
+  });
+
+  afterEach(() => {
+    owner.abort();
+    onOpen.mockReset();
+  });
+
+  it("hides while nobody plays or sits in voice", () => {
+    expect(strip.hidden).toBe(true);
+    expect(cardIds()).toEqual([]);
+  });
+
+  it("shows a game and a voice seat, and a tap opens that DM", () => {
+    setRoster(
+      member(ME, "me", "online"),
+      member(2, "amy", "online"),
+      member(3, "bob", "online", { activity: { name: "Chess", startedAt: 0 } }),
+    );
+    voiceStore.setState((prev) => ({ ...prev, voiceUsers: new Map([[10, inVoice(2)]]) }));
+    flush();
+    expect(strip.hidden).toBe(false);
+    expect(cardIds()).toEqual(["2", "3"]);
+    const amy = strip.querySelector<HTMLButtonElement>("[data-testid='dm-active-2']")!;
+    expect(amy.textContent).toContain("In Lounge");
+    expect(strip.querySelector("[data-testid='dm-active-3']")?.textContent).toContain(
+      "Playing Chess",
+    );
+    amy.click();
+    expect(onOpen).toHaveBeenCalledWith(2);
+  });
+
+  it("keeps focus on a card through an update and stops after its owner goes", () => {
+    voiceStore.setState((prev) => ({ ...prev, voiceUsers: new Map([[10, inVoice(2, 3)]]) }));
+    flush();
+    strip.querySelector<HTMLButtonElement>("[data-testid='dm-active-3']")?.focus();
+    setRoster(member(ME, "me", "online"), member(2, "amy", "idle"), member(3, "bob", "online"));
+    expect(document.activeElement?.getAttribute("data-testid")).toBe("dm-active-3");
+
+    owner.abort();
+    voiceStore.setState((prev) => ({ ...prev, voiceUsers: new Map() }));
+    flush();
+    expect(cardIds()).toEqual(["2", "3"]);
   });
 });

@@ -41,6 +41,7 @@ export type IconName =
   | "send"
   | "reply"
   | "pencil"
+  | "plus"
   | "trash-2"
   | "file-text"
   | "download"
@@ -171,6 +172,7 @@ const ICON_PATHS: Record<IconName, string> = {
   reply: `<polyline points="9 14 4 9 9 4"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/>`,
 
   // Edit pencil
+  plus: `<path d="M5 12h14"/><path d="M12 5v14"/>`,
   pencil: `<path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/>`,
 
   // Trash can

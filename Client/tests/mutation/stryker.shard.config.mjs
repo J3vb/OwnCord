@@ -452,6 +452,9 @@ export const shards = {
     "src/features/people-home/model.ts",
     "src/features/people-home/PeopleHome.ts",
     "src/features/people-home/view.ts",
+    "src/features/people-home/shared.ts",
+    "src/features/people-home/activeStrip.ts",
+    "src/features/people-home/phoneHead.ts",
   ],
   "safety-moderation-5": [
     "src/features/uploads/myUploadsTab.ts",
