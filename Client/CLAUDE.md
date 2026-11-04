@@ -94,6 +94,13 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   (`tests/unit/layer-baseline.test.ts` fails on a stale entry): when you remove
   one, delete its entry and lower the cap in that test. The rank list and the
   alias map are in the rule's header in `eslint-rules.js`.
+- **No new function over complexity 15 or nesting depth 4**
+  (`local/complexity-ratchet`, `local/max-depth-ratchet`, errors on
+  `src/**/*.ts` except tests). Functions over the limit before the cap are
+  listed in `scripts/complexity-baseline.json` and may not grow. When you
+  simplify one, run `node scripts/complexity-baseline.mjs --update` and lower
+  the caps in `tests/unit/complexity-baseline.test.ts`; after a rename or move,
+  re-key its entry by hand. Split a function rather than adding an entry.
 - `src/` has **no import cycles**: `npm run lint:cycles` (oxlint `import/no-cycle`)
   runs at `--max-warnings=0`, so a new cycle fails `npm run lint`. When a
   lower-level module has to trigger a higher one, invert the edge rather than
