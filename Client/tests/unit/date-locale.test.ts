@@ -94,4 +94,14 @@ describe("locale fallback", () => {
     useLanguage("de-DE");
     expect(formatFullDate(OLD)).toBe("1. November 2020");
   });
+
+  it("re-derives the default clock when the language changes", () => {
+    useLanguage("en-US");
+    expect(getTimeFormat()).toBe("12h");
+    vi.spyOn(navigator, "language", "get").mockReturnValue("nl-BE");
+    expect(getTimeFormat()).toBe("24h");
+    storeTimeFormat("12h");
+    vi.spyOn(navigator, "language", "get").mockReturnValue("de-DE");
+    expect(getTimeFormat()).toBe("12h");
+  });
 });

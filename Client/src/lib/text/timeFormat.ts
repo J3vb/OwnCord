@@ -53,19 +53,31 @@ export function localeTimeFormat(locale: string = dateLocale()): TimeFormat {
   return hourCycle === "h11" || hourCycle === "h12" ? "12h" : "24h";
 }
 
+// The stored choice, or the locale default when nothing is stored. A default
+// remembers the language it came from, so a language change re-derives it.
+let current: TimeFormat | null = null;
+let defaultLanguage: string | null = null;
+
 function readTimeFormat(): TimeFormat {
-  const fallback = localeTimeFormat();
-  const raw = loadPref<TimeFormat>(TIME_FORMAT_KEY, fallback);
-  return (TIME_FORMATS as readonly string[]).includes(raw) ? raw : fallback;
+  // A string fallback: loadPref rejects a stored value whose type differs from it.
+  const raw = loadPref<string>(TIME_FORMAT_KEY, "");
+  const stored = TIME_FORMATS.find((format) => format === raw);
+  if (stored !== undefined) {
+    defaultLanguage = null;
+    return stored;
+  }
+  defaultLanguage = dateLocale();
+  return localeTimeFormat(defaultLanguage);
 }
 
 // Lazily read on first use, not at import: this module sits under
 // `i18n/format.ts`, which tests import with a mocked `@lib/prefs/preferences`, and a
 // module-load read would run before that test's mock state is initialized.
-let current: TimeFormat | null = null;
-
 export function getTimeFormat(): TimeFormat {
-  return (current ??= readTimeFormat());
+  if (current === null || (defaultLanguage !== null && defaultLanguage !== dateLocale())) {
+    current = readTimeFormat();
+  }
+  return current;
 }
 
 /** Re-read the pref from storage after a `owncord:pref-change` for this key. */
@@ -75,5 +87,6 @@ export function refreshTimeFormat(): void {
 
 export function saveTimeFormat(value: TimeFormat): void {
   current = value;
+  defaultLanguage = null;
   savePref(TIME_FORMAT_KEY, value);
 }
