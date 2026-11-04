@@ -20,6 +20,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/diskutil"
+	"github.com/J3vb/OwnCord/Server/lkstats"
 	"github.com/J3vb/OwnCord/Server/metrics"
 	"github.com/J3vb/OwnCord/Server/netclass"
 	"github.com/J3vb/OwnCord/Server/permissions"
@@ -64,6 +65,9 @@ type Runtime struct {
 	// health row. The app starts and stops it beside MetricsWindows. Nil
 	// leaves those figures null.
 	SystemStats *sysstats.Sampler
+	// LiveKitStats reads LiveKit's stats page for the Dashboard's LiveKit
+	// card; nil when voice.livekit_metrics_url is not set.
+	LiveKitStats *lkstats.Sampler
 	// Auth is the account service, built by StartRuntime over the hub (its
 	// AuthBroadcaster) and shared with the erasure runner. NewRouter only mounts
 	// it.

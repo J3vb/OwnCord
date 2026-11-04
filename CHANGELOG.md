@@ -57,6 +57,7 @@ and only when it changes something a contributor or fork holder must do
 
 ### Added
 
+- The admin Dashboard has a LiveKit card for setups where LiveKit runs as its own container (the Docker compose stack): whether it is reachable, its CPU (100% is one core) and memory with one-hour lines, and rooms, participants, tracks and traffic. If LiveKit stops answering, the card says "Not reachable since" the time. The compose file turns it on; with your own setup, add `prometheus: port: 6789` to `livekit.yaml` and set `voice.livekit_metrics_url`. Shown to admins with View Diagnostics.
 - **Settings → Account → Signed-in devices** now also lists your API tokens (label, created, last used) with a Revoke button each. Changing your password offers "Also revoke my API tokens", ticked by default when you have any. `docs/security.md` now spells out what a password change, account recovery and sign-out-everywhere each end.
 - On Android, your camera now pauses while the app is in the background, so others see your avatar instead of a frozen picture, and turns back on when you return.
 - On Android, OwnCord is now in the share menu of other apps. Share photos, videos, files or a link to it, pick a channel or DM in the "Send to" sheet, and they wait in that chat's message box for you to press Send.

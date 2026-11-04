@@ -5,14 +5,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/admin"
+	"github.com/J3vb/OwnCord/Server/lkstats"
 	"github.com/J3vb/OwnCord/Server/metrics"
 	"github.com/J3vb/OwnCord/Server/sysstats"
+	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 type systemStats struct {
@@ -187,4 +191,127 @@ func TestAdminAPI_SlowRequests(t *testing.T) {
 	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"routes":[]`) {
 		t.Errorf("no tracker: status %d body %s, want 200 with an empty list", w.Code, w.Body.String())
 	}
+}
+
+type managedHub struct {
+	*mockHub
+	managed bool
+}
+
+func (h managedHub) LiveKitManaged() bool                          { return h.managed }
+func (h managedHub) LiveKitProcessStatus() ws.LiveKitProcessStatus { return ws.LiveKitProcessStatus{} }
+
+type systemLiveKit struct {
+	Configured      bool   `json:"configured"`
+	Managed         *bool  `json:"managed"`
+	Status          string `json:"status"`
+	Since           *int64 `json:"since"`
+	IntervalSeconds int    `json:"interval_seconds"`
+	WindowSeconds   int    `json:"window_seconds"`
+	Current         *struct {
+		Memory       *uint64 `json:"memory"`
+		Rooms        *int    `json:"rooms"`
+		Participants *int    `json:"participants"`
+	} `json:"current"`
+	Series []json.RawMessage `json:"series"`
+}
+
+func getSystemLiveKit(t *testing.T, handler http.Handler, token, query string) (int, systemLiveKit) {
+	t.Helper()
+	w := doRequest(t, handler, http.MethodGet, "/system/livekit"+query, token, nil)
+	var s systemLiveKit
+	if w.Code == http.StatusOK {
+		if err := json.Unmarshal(w.Body.Bytes(), &s); err != nil {
+			t.Fatalf("decode: %v; body %s", err, w.Body.String())
+		}
+	}
+	return w.Code, s
+}
+
+// GET /system/livekit answers configured:false (with whether OwnCord runs its
+// own LiveKit) when no stats page is set, and the sampler's status and history
+// when one is.
+func TestAdminAPI_SystemLiveKit(t *testing.T) {
+	database := openAdminTestDB(t)
+	ownerToken := createAdminUser(t, database)
+
+	t.Run("not configured", func(t *testing.T) {
+		for _, managed := range []bool{false, true} {
+			handler := admin.NewAdminAPI(database, "1.0.0", managedHub{&mockHub{}, managed}, nil, nil, nil, nil, newTestServices(database), admin.SetupOptions{})
+			code, s := getSystemLiveKit(t, handler, ownerToken, "")
+			if code != http.StatusOK || s.Configured || s.Managed == nil || *s.Managed != managed || s.Current != nil {
+				t.Errorf("managed=%v: code %d body %+v", managed, code, s)
+			}
+		}
+		handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database), admin.SetupOptions{})
+		if _, s := getSystemLiveKit(t, handler, ownerToken, ""); s.Configured || s.Managed == nil || *s.Managed {
+			t.Errorf("a hub without LiveKit is not managed: %+v", s)
+		}
+	})
+
+	run := func(t *testing.T, url string) http.Handler {
+		t.Helper()
+		sampler := lkstats.New(url, slog.New(slog.DiscardHandler))
+		ctx, cancel := context.WithCancel(t.Context())
+		done := sampler.Run(ctx)
+		t.Cleanup(func() { cancel(); <-done })
+		return admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database), admin.SetupOptions{
+			System: admin.SystemSources{LiveKit: sampler},
+		})
+	}
+	waitStatus := func(t *testing.T, h http.Handler, want string) systemLiveKit {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Second)
+		for {
+			_, s := getSystemLiveKit(t, h, ownerToken, "")
+			if s.Status == want {
+				return s
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("status = %q, want %q", s.Status, want)
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+
+	t.Run("ok", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			fmt.Fprint(w, "process_cpu_seconds_total 5\nprocess_resident_memory_bytes 1000\nlivekit_room_total 2\nlivekit_participant_total 6\n")
+		}))
+		defer srv.Close()
+		h := run(t, srv.URL)
+		s := waitStatus(t, h, "ok")
+		if !s.Configured || s.Managed != nil || s.IntervalSeconds != 10 || s.WindowSeconds != 3600 || s.Since == nil {
+			t.Errorf("header = %+v", s)
+		}
+		if s.Current == nil || *s.Current.Rooms != 2 || *s.Current.Participants != 6 || *s.Current.Memory != 1000 || len(s.Series) != 1 {
+			t.Errorf("current = %+v, series %d", s.Current, len(s.Series))
+		}
+		if _, s := getSystemLiveKit(t, h, ownerToken, "?window=24h"); s.WindowSeconds != 86400 {
+			t.Errorf("window_seconds = %d", s.WindowSeconds)
+		}
+		if code, _ := getSystemLiveKit(t, h, ownerToken, "?window=7d"); code != http.StatusBadRequest {
+			t.Errorf("window=7d status = %d, want 400", code)
+		}
+		_, modToken := createRoleUser(t, database, 10, "Moderator", moderatorMask, 60, "lkmod")
+		if code, _ := getSystemLiveKit(t, h, modToken, ""); code != http.StatusForbidden {
+			t.Errorf("moderator status = %d, want 403", code)
+		}
+	})
+
+	t.Run("page without metrics", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { fmt.Fprint(w, "<html>hi</html>") }))
+		defer srv.Close()
+		s := waitStatus(t, run(t, srv.URL), "not_set_up")
+		if s.Current == nil || s.Current.Rooms != nil {
+			t.Errorf("not set up has an empty current: %+v", s.Current)
+		}
+	})
+
+	t.Run("unreachable", func(t *testing.T) {
+		srv := httptest.NewServer(http.NotFoundHandler())
+		url := srv.URL
+		srv.Close()
+		waitStatus(t, run(t, url), "unreachable")
+	})
 }

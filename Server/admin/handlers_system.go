@@ -8,6 +8,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/J3vb/OwnCord/Server/httperr"
+	"github.com/J3vb/OwnCord/Server/lkstats"
 	"github.com/J3vb/OwnCord/Server/metrics"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/sysstats"
@@ -19,6 +20,9 @@ import (
 type SystemSources struct {
 	// Sampler holds the CPU and memory history; the app runs it.
 	Sampler *sysstats.Sampler
+	// LiveKit reads LiveKit's stats page for GET /system/livekit; nil when
+	// voice.livekit_metrics_url is not set.
+	LiveKit *lkstats.Sampler
 	// DiskSpace reads free and total bytes on the data volume.
 	DiskSpace func() (free, total uint64, err error)
 	// DiskMinFree is server.min_free_disk_mb in bytes; below it uploads are
@@ -38,11 +42,12 @@ type SystemSources struct {
 	MaxWSConnections int
 }
 
-// mountSystemRoutes mounts the Dashboard health row, the slow requests card
+// mountSystemRoutes mounts the Dashboard health row, the LiveKit and slow requests cards
 // and the System health page: server health detail, so View Diagnostics like
 // the attention panel.
 func mountSystemRoutes(r chi.Router, gates *gateRegistry, src SystemSources, hub HubBroadcaster, attention *service.AttentionService, version string) {
 	gates.route(r, gateViewDiagnostics, http.MethodGet, "/system/stats", handleGetSystemStats(src, hub))
+	gates.route(r, gateViewDiagnostics, http.MethodGet, "/system/livekit", handleGetSystemLiveKit(src, hub))
 	gates.route(r, gateViewDiagnostics, http.MethodGet, "/system/slow-requests", handleGetSlowRequests(src))
 	gates.route(r, gateViewDiagnostics, http.MethodGet, "/system/health", handleGetSystemHealth(src, hub, attention, version, time.Now))
 }
@@ -155,5 +160,60 @@ func handleGetSlowRequests(src SystemSources) http.HandlerFunc {
 			WindowSeconds: int(metrics.SlowRouteWindow / time.Second),
 			Routes:        src.SlowRoutes.Slowest(slowRequestsLimit),
 		})
+	}
+}
+
+type systemLiveKitResponse struct {
+	Configured bool `json:"configured"`
+	// Managed is set only when not configured: whether OwnCord runs its own
+	// LiveKit, which has no separate stats page to read.
+	Managed         *bool  `json:"managed,omitempty"`
+	Status          string `json:"status,omitempty"`
+	Since           *int64 `json:"since,omitempty"`
+	IntervalSeconds int    `json:"interval_seconds,omitempty"`
+	WindowSeconds   int    `json:"window_seconds,omitempty"`
+	// Current is the newest sample, null before the first one.
+	Current *lkstats.Point  `json:"current,omitempty"`
+	Series  []lkstats.Point `json:"series,omitempty"`
+}
+
+// handleGetSystemLiveKit serves the Dashboard's LiveKit card: the status of
+// the last read of LiveKit's stats page and the history over ?window= (1h, 6h
+// or 24h; 1h when absent). It reads the sampler's ring and contacts nothing.
+func handleGetSystemLiveKit(src SystemSources, hub HubBroadcaster) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		key := r.URL.Query().Get("window")
+		if key == "" {
+			key = "1h"
+		}
+		window, ok := systemWindows[key]
+		if !ok {
+			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "window must be 1h, 6h or 24h")
+			return
+		}
+		if src.LiveKit == nil {
+			managed := false
+			if v, ok := hub.(supportHubVoice); ok {
+				managed = v.LiveKitManaged()
+			}
+			writeJSON(w, http.StatusOK, systemLiveKitResponse{Managed: &managed})
+			return
+		}
+		snap := src.LiveKit.Snapshot(window, systemMaxPoints)
+		resp := systemLiveKitResponse{
+			Configured:      true,
+			Status:          string(snap.Status),
+			IntervalSeconds: int(lkstats.Interval / time.Second),
+			WindowSeconds:   int(window / time.Second),
+			Series:          snap.Points,
+		}
+		if !snap.Since.IsZero() {
+			since := snap.Since.Unix()
+			resp.Since = &since
+		}
+		if snap.OK {
+			resp.Current = &snap.Latest
+		}
+		writeJSON(w, http.StatusOK, resp)
 	}
 }

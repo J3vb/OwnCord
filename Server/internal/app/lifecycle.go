@@ -294,6 +294,9 @@ func (a *App) startHub() error {
 	if rt.SystemStats != nil {
 		a.startSystemStats(rt.SystemStats)
 	}
+	if rt.LiveKitStats != nil {
+		a.startLiveKitStats(rt.LiveKitStats)
+	}
 	// Mention badges' single bounded worker. Its close step flushes every
 	// queued job and joins the loop, and the reverse walk runs it before the
 	// database closes, so a coalesced window is never lost at shutdown. The

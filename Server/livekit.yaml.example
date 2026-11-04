@@ -40,6 +40,13 @@ rtc:
 #   urls:
 #     - https://chat.example.com/api/v1/livekit/webhook
 
+# LiveKit's stats page, which OwnCord reads for the admin Dashboard's LiveKit
+# card (docker-compose.yml points it at http://livekit:6789/metrics). It is only
+# reachable inside the Docker network because the port is not published; keep it
+# that way.
+prometheus:
+  port: 6789
+
 # Speaking-ring detection. These match what OwnCord writes for its own
 # generated config; LiveKit's defaults (400ms interval, 2 smoothing intervals,
 # active_level 35) light the ring late and only for loud speech.

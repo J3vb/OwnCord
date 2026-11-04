@@ -46,6 +46,7 @@ func adminSetupOptions(cfg *config.Config, rt Runtime, importer admin.DiscordImp
 		LogHistoryDir: cfg.LogHistoryDir(),
 		System: admin.SystemSources{
 			Sampler:     rt.SystemStats,
+			LiveKit:     rt.LiveKitStats,
 			DiskSpace:   func() (uint64, uint64, error) { return diskutil.Space(cfg.Server.DataDir) },
 			DiskMinFree: cfg.Server.MinFreeDiskBytes(),
 			UploadBytes: uploadBytes,

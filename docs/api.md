@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 261 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, the browser client portal, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 262 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, the browser client portal, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -121,6 +121,7 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | POST    | `/admin/api/support-bundles/download`                                |
 | POST    | `/admin/api/support-bundles/preview`                                 |
 | GET     | `/admin/api/system/health`                                           |
+| GET     | `/admin/api/system/livekit`                                          |
 | GET     | `/admin/api/system/slow-requests`                                    |
 | GET     | `/admin/api/system/stats`                                            |
 | GET     | `/admin/api/tokens`                                                  |
@@ -4464,7 +4465,7 @@ Authorization is two-layered:
 | `GET/PATCH/DELETE /admin/api/logs/level`                                                                                                             | `VIEW_DIAGNOSTICS` (`ADMINISTRATOR` passes) — the running level and a timed debug boost, SRE-07                                                                                                                                                                                                              |
 | `POST /admin/api/support-bundles/preview`, `POST /admin/api/support-bundles/download`                                                                | `VIEW_DIAGNOSTICS` (`ADMINISTRATOR` passes)                                                                                                                                                                                                                                                                  |
 | `GET /admin/api/attention`                                                                                                                           | `VIEW_DIAGNOSTICS` (`ADMINISTRATOR` passes) — RI-07                                                                                                                                                                                                                                                          |
-| `GET /admin/api/system/stats`, `GET /admin/api/system/slow-requests`, `GET /admin/api/system/health`                                                 | `VIEW_DIAGNOSTICS` (`ADMINISTRATOR` passes)                                                                                                                                                                                                                                                                  |
+| `GET /admin/api/system/stats`, `GET /admin/api/system/livekit`, `GET /admin/api/system/slow-requests`, `GET /admin/api/system/health`                | `VIEW_DIAGNOSTICS` (`ADMINISTRATOR` passes)                                                                                                                                                                                                                                                                  |
 | `/api/v1/admin/plugins…`                                                                                                                             | `ADMINISTRATOR`                                                                                                                                                                                                                                                                                              |
 | `/admin/api/tokens…`, `/admin/api/updates…`                                                                                                          | `/admin/api/tokens…`: Owner role **or** `MANAGE_TOKENS` (`permissions.CanManageTokens`; a holder who is not the owner sees, creates and revokes only their own tokens); `/admin/api/updates…`: Owner role **or** `MANAGE_UPDATES` (`permissions.CanManageUpdates`); `ADMINISTRATOR` passes neither — WP 8.4d |
 | `DELETE /admin/api/backups/{name}`, `POST /admin/api/backups/{name}/restore`, `GET /admin/api/archive`, `POST /admin/api/archive/link`               | Owner role **or** `RESTORE_BACKUPS` (`permissions.CanRestoreBackups`; `ADMINISTRATOR` does not pass); the archive link is re-checked when opened — WP 8.4d                                                                                                                                                   |
@@ -4837,6 +4838,65 @@ space and the cached upload total.
 - `disk.low` is `free` below `server.min_free_disk_mb` (`min_free`, bytes),
   where uploads are refused; it is `null` when that floor is `0` or `free` is
   unknown. `uploads` is every upload's size summed.
+
+---
+
+### GET /admin/api/system/livekit
+
+The Dashboard's LiveKit card, for a LiveKit that runs as its own container. The
+server reads LiveKit's Prometheus page (`voice.livekit_metrics_url`) every 10
+seconds into a 24-hour ring held in memory; this route only reads that ring and
+contacts nothing.
+
+**Auth:** `VIEW_DIAGNOSTICS` (`ADMINISTRATOR` passes)
+
+**Query:** `window` is `1h` (default), `6h` or `24h`. Anything else is
+`400 BAD_REQUEST`.
+
+#### Response 200 OK
+
+```json
+{
+  "configured": true,
+  "status": "ok",
+  "since": 1793385435,
+  "interval_seconds": 10,
+  "window_seconds": 3600,
+  "current": {
+    "t": 1793386035,
+    "cpu": 142.5,
+    "memory": 209715200,
+    "rooms": 1,
+    "participants": 4,
+    "tracks_published": 6,
+    "tracks_subscribed": 18,
+    "bytes_in_per_sec": 250000,
+    "bytes_out_per_sec": 1250000,
+    "cores": 4
+  },
+  "series": []
+}
+```
+
+Without `voice.livekit_metrics_url` the answer is
+`{"configured": false, "managed": false}`; `managed` is `true` when OwnCord
+runs its own LiveKit, which has no separate stats page.
+
+- `status` is `ok`, `unreachable` (a network error, a timeout after 2 seconds,
+  or an answer other than 200) or `not_set_up` (the page answered but carries
+  no LiveKit figures, for example `livekit.yaml` has no `prometheus: port:`).
+  `since` is when the status last changed, in unix seconds.
+- `cpu` is LiveKit's CPU use where 100 is one core, from the change in its CPU
+  counter between two reads. `bytes_in_per_sec` and `bytes_out_per_sec` are
+  packet bytes per second, from the change in the counters. All three are
+  `null` for the first reading, after a read that failed, and when a counter
+  went down because LiveKit restarted.
+- `cores` is how many cores LiveKit may use (its Go runtime's GOMAXPROCS,
+  which follows the container's CPU limit, or the host's cores when there is
+  none); `null` when the page does not report it.
+- A read that failed is a point with every figure `null`. `series` is oldest
+  first, averaged down to at most 360 points; `t` is unix seconds. A restart
+  of OwnCord clears the history.
 
 ---
 
