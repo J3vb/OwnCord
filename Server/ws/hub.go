@@ -4,7 +4,6 @@ package ws
 import (
 	"context"
 	"log/slog"
-	"net"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -12,7 +11,6 @@ import (
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
-	"github.com/J3vb/OwnCord/Server/plugin"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/stackutil"
 	"github.com/J3vb/OwnCord/Server/syncutil"
@@ -40,7 +38,6 @@ type Hub struct {
 	stopUsers   []int64
 	livekit     *LiveKitClient
 	lkProcess   *LiveKitProcess
-	registry    *HandlerRegistry
 	permChecker *permissions.Checker
 	// perms is the cached permission service. Nil in bare test hubs, where every use
 	// falls back to the live permChecker. Revocation stays prompt because each
@@ -52,15 +49,7 @@ type Hub struct {
 	connGen atomic.Uint64
 	// audience memoises channel read audiences and the moderator set (audience_memo.go).
 	audience audienceMemo
-	// focusDeps is the presence handlers' dependency set; the deferred-focus drain
-	// goroutine (focus_defer.go) reuses its limiter and channel service so it meters
-	// and authorises like handleChannelFocusV2. ChannelSvc is nil in bare test hubs.
-	focusDeps PresenceDeps
-	// messageSvc gates plugin broadcasts through the same posting policy as a real
-	// send (permissions, DM membership, blocks). Nil only in bare test hubs; the gate
-	// then fails closed.
-	messageSvc *service.MessageService
-	pubsub     *PubSub // topic-based pub/sub for O(subscribers) broadcast
+	pubsub   *PubSub // topic-based pub/sub for O(subscribers) broadcast
 
 	restartGate restartNoticeGate // dedupes BroadcastServerRestart
 
@@ -74,14 +63,10 @@ type Hub struct {
 	// latency is the shipped in-process metrics surface; the zero value is usable.
 	latency hubLatencyMetrics
 
-	// Event persistence; nil means ring buffer only. Atomic because internal/app wires
-	// these one lifecycle stage after Run has started, and Run reads them on the
-	// broadcast/replay paths.
-	eventPersister atomic.Pointer[EventPersister]
-	eventStore     atomic.Pointer[EventStore] // read path for cold-tier replay
-
-	pluginRegistry *plugin.Registry                 // slash-command dispatch; nil = no plugins; HubOptions field
-	pluginSink     atomic.Pointer[plugin.EventSink] // hub→plugin event fan-out; nil = no plugins
+	// seams are the services and policy sources the hub calls out to.
+	seams hubSeams
+	// events is the persistence, replay and plugin fan-out tier.
+	events hubEventTier
 
 	// running flips when Run starts; tests read it via RunningForTest to wait for the
 	// dispatch loop.
@@ -121,9 +106,6 @@ type Hub struct {
 
 	connRejects atomic.Uint64 // upgrades refused by the max_ws_connections guardrail (ServeWS)
 	readyGate   chan struct{} // one slot per concurrent fresh-connect ready build (admitReady)
-
-	// coldReplayLimit caps persisted-event replay per reconnect; 0 = maxColdReplay.
-	coldReplayLimit int
 
 	// In-flight guards for the DB-heavy sweeps (startSweep): a tick arriving while the
 	// previous sweep runs is skipped, not stacked.
@@ -167,22 +149,9 @@ type Hub struct {
 	// readers are the hub's remaining read seams (readers.go).
 	readers HubReaders
 
-	// privacy is the channel-level private flag source (nil: nothing private).
-	privacy ChannelPrivacy
-
 	// presence is the connection lifecycle's two writes (PresenceStamper): the status a
 	// session comes online as, and the offline stamp when its last pump exits. Required.
 	presence PresenceStamper
-
-	// authn is the auth family's service (SocketAuthenticator): bearer-token
-	// resolution, the sweep's session verdicts and the connect audit row. Required.
-	authn SocketAuthenticator
-
-	// trustedProxyNets is server.trusted_proxies parsed once: the handshake resolves
-	// the client address for its log line and ws_connect audit row through it, so a
-	// reverse-proxy deployment records the client, not the proxy hop. Empty means
-	// RemoteAddr is used and a client-supplied header is ignored.
-	trustedProxyNets []*net.IPNet
 
 	// voice is the voice family's service (VoiceStore): every voice_states read and
 	// write. Required: a nil store would fail on the first join rather than at

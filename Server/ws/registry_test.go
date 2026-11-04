@@ -209,7 +209,7 @@ func TestAllV2Types_SmokeDispatch(t *testing.T) {
 		t.Fatalf("Migrate: %v", err)
 	}
 	limiter := auth.NewRateLimiter()
-	r := newTestHub(t, database, limiter, service.New(database, limiter)).registry
+	r := newTestHub(t, database, limiter, service.New(database, limiter)).seams.registry
 
 	// Minimal command for each V2 type — just needs Type() and UserID().
 	cmds := map[string]Command{

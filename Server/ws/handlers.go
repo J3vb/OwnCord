@@ -108,7 +108,7 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 		c.sendMsg(buildErrorMsgWithID(ErrCodeRequestTimeout, "the server is busy, try again", env.ID))
 		return
 	}
-	result, dispatched := h.registry.DispatchV2(dispatchCtx, cmd, info)
+	result, dispatched := h.seams.registry.DispatchV2(dispatchCtx, cmd, info)
 	if !dispatched {
 		// A registered constructor with no V2 handler is a wiring bug
 		// (TestEveryConstructorHasV2Handler guards it).

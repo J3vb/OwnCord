@@ -374,7 +374,7 @@ func (h *Hub) deliverGated(bm broadcastMsg, g gateResult) {
 		// Plugin fan-out is captured here and called after seqMu is released, on this same
 		// dispatch goroutine, so sink order equals seq order. A plugin has no NSFW
 		// acknowledgement, so a labelled channel's content never reaches the sink.
-		if h.pluginSink.Load() != nil && !labelled {
+		if h.events.pluginSink.Load() != nil && !labelled {
 			pluginMsg = msg
 		}
 

@@ -179,9 +179,6 @@ func NewHub(opts HubOptions) (*Hub, error) {
 		uploadFileTypes:     opts.UploadFileTypes,
 		voiceMod:            newUserLocks[lockRankVoiceMod](),
 		presence:            opts.Presence,
-		authn:               opts.Auth,
-		privacy:             opts.ChannelPrivacy,
-		trustedProxyNets:    clientip.ParseCIDRList(opts.TrustedProxies),
 		broadcast:           make(chan broadcastMsg, 1024),
 		clientEvents:        make(chan clientEvent, 64),
 		readyGate:           make(chan struct{}, 2*runtime.GOMAXPROCS(0)),
@@ -189,7 +186,6 @@ func NewHub(opts HubOptions) (*Hub, error) {
 		runDone:             make(chan struct{}),
 		pubsub:              NewPubSub(),
 		replayBuf:           NewEventRingBuffer(ringSize),
-		registry:            reg,
 		permChecker:         permissions.NewChecker(database),
 		settingsName:        "OwnCord Server",
 		settingsMotd:        "Welcome!",
@@ -197,10 +193,16 @@ func NewHub(opts HubOptions) (*Hub, error) {
 		fatalFn:             func() { os.Exit(1) },
 		livekit:             opts.LiveKit,
 		lkProcess:           opts.LiveKitProcess,
-		pluginRegistry:      opts.PluginRegistry,
+		seams: hubSeams{
+			registry:         reg,
+			pluginRegistry:   opts.PluginRegistry,
+			privacy:          opts.ChannelPrivacy,
+			authn:            opts.Auth,
+			trustedProxyNets: clientip.ParseCIDRList(opts.TrustedProxies),
+		},
 	}
 	if opts.ReplayColdLimit > 0 {
-		h.coldReplayLimit = opts.ReplayColdLimit
+		h.events.coldReplayLimit = opts.ReplayColdLimit
 	}
 	h.initLife() // the hub's own lifecycle, ended by closeStop
 	registerPingHandler(reg, PingDeps{Limiter: h.limiter})
@@ -219,7 +221,7 @@ func NewHub(opts HubOptions) (*Hub, error) {
 		presenceDeps.MessageSvc = svc.Messages
 		reactionDeps.MessageSvc = svc.Messages
 		callDeps.DMSvc = svc.DMs
-		h.messageSvc = svc.Messages
+		h.seams.messageSvc = svc.Messages
 		h.perms = svc.Permissions
 		// So @here's offline narrowing can tell a disconnected idle/dnd reader (users.status
 		// keeps their last chosen value) from one still connected, the live-connection rule
@@ -241,7 +243,7 @@ func NewHub(opts HubOptions) (*Hub, error) {
 
 	registerChatHandlers(reg, chatDeps)
 	h.wireThreads(reg, svc)
-	h.focusDeps = presenceDeps
+	h.seams.focusDeps = presenceDeps
 	registerPresenceHandlers(reg, presenceDeps)
 	registerReactionHandlers(reg, reactionDeps)
 	registerCallHandlers(reg, callDeps)
@@ -251,12 +253,12 @@ func NewHub(opts HubOptions) (*Hub, error) {
 		// A nil registry must yield a nil interface, not a typed-nil *plugin.Registry: the
 		// handler's "no plugins loaded" check is an interface comparison.
 		Registry: func() CommandDispatcher {
-			if h.pluginRegistry == nil {
+			if h.seams.pluginRegistry == nil {
 				return nil
 			}
-			return h.pluginRegistry
+			return h.seams.pluginRegistry
 		},
-		MessageSvc: h.messageSvc,
+		MessageSvc: h.seams.messageSvc,
 		Limiter:    h.limiter,
 	})
 	registerVoiceControlsV2(reg, h.voiceDeps())
@@ -286,8 +288,8 @@ func (h *Hub) voiceDeps() VoiceDeps {
 // via HubOptions; the dispatch loop reads replayBuf unlocked, so the ring is sized
 // once, at construction.
 func (h *Hub) maxColdReplayLimit() int {
-	if h.coldReplayLimit > 0 {
-		return h.coldReplayLimit
+	if h.events.coldReplayLimit > 0 {
+		return h.events.coldReplayLimit
 	}
 	return maxColdReplay
 }

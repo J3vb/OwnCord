@@ -279,7 +279,7 @@ func (h *Hub) BuildAuthOKForTest(user *db.User, roleName string) []byte {
 // counts synchronously instead of on a background goroutine, so a test can read
 // the counts deterministically right after driving a chat_send through the hub.
 func (h *Hub) RunMentionCountsInlineForTest() {
-	h.messageSvc.RunBackgroundInlineForTest()
+	h.seams.messageSvc.RunBackgroundInlineForTest()
 }
 
 // BuildReadyForTest exposes Hub.buildReady for external tests.
@@ -777,18 +777,18 @@ func CommandDeadlineExemptTypesForTest() []string {
 
 // RegisteredTypesForTest returns every V2-registered message type.
 func (h *Hub) RegisteredTypesForTest() []string {
-	return h.registry.RegisteredV2Types()
+	return h.seams.registry.RegisteredV2Types()
 }
 
 // ReplaceHandlerForTest swaps typ's registered V2 handler for fn, keeping the
 // deps. The type must already be registered.
 func (h *Hub) ReplaceHandlerForTest(typ string, fn func(ctx context.Context) Result) {
-	entry, ok := h.registry.handlersV2[typ]
+	entry, ok := h.seams.registry.handlersV2[typ]
 	if !ok {
 		panic("ReplaceHandlerForTest: type not registered: " + typ)
 	}
 	entry.handler = func(ctx context.Context, _ Command, _ ClientInfo, _ any) Result { return fn(ctx) }
-	h.registry.handlersV2[typ] = entry
+	h.seams.registry.handlersV2[typ] = entry
 }
 
 // handleVoiceJoin runs a voice join with ctx as both the frame and connection
