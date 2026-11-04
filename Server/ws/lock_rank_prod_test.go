@@ -15,12 +15,12 @@ func TestRank_ZeroValueUsable(t *testing.T) {
 	c := &Client{}
 
 	for _, l := range []sync.Locker{
-		&h.mu, &h.seqMu, &h.settingsMu, &h.keyHolderMu, &h.presenceMu,
-		&h.uploadPolicyMu, &h.timeoutView.mu, &h.tombstones.mu, &c.focusMu, &c.mu,
+		&h.mu, &h.seqMu, &h.settings.mu, &h.keyHolderMu, &h.presenceMu,
+		&h.settings.uploadPolicyMu, &h.timeoutView.mu, &h.tombstones.mu, &c.focusMu, &c.mu,
 	} {
 		lockOnce(l)
 	}
-	for _, l := range []rLocker{&h.mu, &h.settingsMu, &h.keyHolderMu, &h.tombstones.mu} {
+	for _, l := range []rLocker{&h.mu, &h.settings.mu, &h.keyHolderMu, &h.tombstones.mu} {
 		rlockOnce(l)
 	}
 	// Nested, outermost first, as a path takes them.

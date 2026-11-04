@@ -288,7 +288,7 @@ func (h *Hub) presencePayloadLocked(userID int64, payload, bare []byte) []byte {
 	if bare == nil {
 		return payload
 	}
-	if !h.gameActivity.on.Load() {
+	if !h.settings.gameActivity.on.Load() {
 		return bare
 	}
 	if mergeLivePresence(h.clientsOf(userID)).noActivity() {

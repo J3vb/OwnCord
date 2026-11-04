@@ -196,7 +196,7 @@ func handleListeningUpdateV2(ctx context.Context, cmd Command, info ClientInfo, 
 func (h *Hub) applyListening(c *Client, next *listeningActivity) {
 	h.presenceMu.Lock()
 	defer h.presenceMu.Unlock()
-	if next != nil && !h.gameActivity.on.Load() {
+	if next != nil && !h.settings.gameActivity.on.Load() {
 		return
 	}
 	h.applyListeningLocked(c, next)

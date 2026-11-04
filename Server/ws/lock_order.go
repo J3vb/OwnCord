@@ -50,7 +50,7 @@
 //	rank  lock                       declared                 taken under it
 //	1 S   userLockEntry.mu           voice_registry.go:45     DB, broadcasts, seqMu (replay.go:438-441); never a
 //	      (voiceRegistry.voiceMember) user_locks.go:44         LiveKit RPC
-//	2 S   userLockEntry.mu           hub.go:122               DB and LiveKit RPC (user_locks.go:9-17); never a
+//	2 S   userLockEntry.mu           hub.go:121               DB and LiveKit RPC (user_locks.go:9-17); never a
 //	      (Hub.voiceMod)             user_locks.go:44         membership path
 //	3 S   replayPurgeState.mu RW     hub_tombstones.go:53     seqMu (hub_events.go:210), then the persister
 //	      (Hub.tombstones)                                    Flush and the DB delete (hub_events.go:218-235).
@@ -61,17 +61,17 @@
 //	3 S   roleRefreshState.flushMu   role_refresh.go:74       DB reads, then roleRefreshState.mu, then Hub.mu,
 //	                                                          PubSub.mu, timeoutViewState.mu and Client.mu one
 //	                                                          at a time (role_refresh.go:24-30)
-//	3 S   Hub.uploadPolicyMu         hub.go:129               a DB read, then Hub.settingsMu, then Hub.mu (R),
+//	3 S   hubSettings.uploadPolicyMu hub_settings.go:213      a DB read, then hubSettings.mu, then Hub.mu (R),
 //	                                                          then Client.mu (hub_settings.go:93-113)
-//	3 S   gameActivityState.mu       hub_settings.go:128      a DB read, then Hub.presenceMu (the game activity
-//	      (Hub.gameActivity)                                  sweep), Hub.mu (R), then Client.mu
+//	3 S   gameActivityState.mu       hub_settings.go:116      a DB read, then Hub.presenceMu (the game activity
+//	      (hubSettings.gameActivity)                          sweep), Hub.mu (R), then Client.mu
 //	                                                          (hub_settings.go)
 //	3 S   Client.focusMu             client.go:86             Client.mu, PubSub.mu, DB reads (focus_defer.go:21,
 //	                                                          focus_defer.go:132, handlers.go:281-325)
 //	3 S   admissionMu (local)        serve.go:62              Hub.mu (R) via ClientCount (serve.go:73,83)
 //	4     timeoutViewState.mu        member_timeouts_       Hub.mu (R), Client.mu
 //	      (Hub.timeoutView)          delivery.go:23
-//	4     Hub.presenceMu             hub.go:136               the caller's closure, which only enqueues
+//	4     Hub.presenceMu             hub.go:128               the caller's closure, which only enqueues
 //	                                                          (hub_presence.go:211-216), Hub.mu (R), Client.mu,
 //	                                                          presenceRepairState.mu, queueDropState.mu
 //	5     Hub.seqMu                  hub.go:52                Hub.keyHolderMu (a resume's registerNow ->
@@ -80,9 +80,9 @@
 //	                                                          294-299,354; registerNow, hub_registry.go:89),
 //	                                                          EventRingBuffer.mu, presenceRepairState.mu,
 //	                                                          queueDropState.mu, and the leaves below
-//	6     Hub.keyHolderMu RW         hub.go:133               Hub.mu (R), voiceSlot.voiceMu
+//	6     Hub.keyHolderMu RW         hub.go:125               Hub.mu (R), voiceSlot.voiceMu
 //	                                                          (voice_e2ee.go:44-60)
-//	6     Hub.settingsMu RW          hub.go:124               a DB read under the write lock
+//	6     hubSettings.mu RW          hub_settings.go:207      a DB read under the write lock
 //	                                                          (hub_settings.go:27-35); see the exceptions
 //	7     Hub.mu RW                  hub.go:24                PubSub.mu, Client.mu, voiceSlot.voiceMu,
 //	                                                          voiceGraceState.mu (hub_registry.go:60-162,
@@ -112,11 +112,11 @@
 //
 // Locks of one rank are not ordered against each other, so the checker
 // forbids nesting any two of them, two instances of one lock included.
-// Hub.uploadPolicyMu (3) taking Hub.settingsMu (6) is not such a pair.
+// hubSettings.uploadPolicyMu (3) taking hubSettings.mu (6) is not such a pair.
 //
 // # Known exceptions to the rule
 //
-//   - Hub.settingsMu is held for writing across a DB read (hub_settings.go:27-35).
+//   - hubSettings.mu is held for writing across a DB read (hub_settings.go:27-35).
 //     It is the one state lock that does I/O. The read is bounded by a context.
 //   - slog on a non-error path under a lock: Hub.seqMu and Hub.mu in registerNow
 //     (hub_registry.go:100), Client.mu on overflow (client.go:195,303), and
@@ -151,7 +151,7 @@ type (
 	lockRankSerialiser  struct{} // the rank-3 serialisers
 	lockRankFeed        struct{} // timeoutViewState.mu, Hub.presenceMu
 	lockRankSeq         struct{} // Hub.seqMu
-	lockRankHubCache    struct{} // Hub.keyHolderMu, Hub.settingsMu
+	lockRankHubCache    struct{} // Hub.keyHolderMu, hubSettings.mu
 	lockRankHub         struct{} // Hub.mu
 	lockRankPubSub      struct{} // PubSub.mu
 	lockRankLeaf        struct{} // the leaves

@@ -26,7 +26,7 @@ func lastPresenceFrame(d *mdDev, uid int64) map[string]any {
 // stays, re-sends the user's presence: idle, no game, no song (vault #148).
 func TestMultiDevice_ClosingTheActiveDeviceRebroadcastsPresence(t *testing.T) {
 	f := newMDFix(t)
-	f.hub.gameActivity.on.Store(true)
+	f.hub.settings.gameActivity.on.Store(true)
 	a := f.dev("session-a", f.text)
 	a.c.setLivePresence(db.StatusOnline, nil, "")
 	f.hub.applyActivity(a.c, &gameActivity{Name: "Chess", StartedAt: 1})
@@ -73,7 +73,7 @@ func TestMultiDevice_ClosingAnUnseenDeviceSendsNothing(t *testing.T) {
 func TestMultiDevice_ClosingADeviceWhileInvisibleTellsOnlyTheUser(t *testing.T) {
 	t.Parallel()
 	f := newMDFix(t)
-	f.hub.gameActivity.on.Store(true)
+	f.hub.settings.gameActivity.on.Store(true)
 	a := f.dev("session-a", f.text)
 	a.c.setLivePresence(db.StatusInvisible, nil, "")
 	f.hub.applyActivity(a.c, &gameActivity{Name: "Chess", StartedAt: 1})
@@ -102,7 +102,7 @@ func TestMultiDevice_ClosingADeviceWhileInvisibleTellsOnlyTheUser(t *testing.T) 
 // before its read loop ends; its teardown still re-sends the presence.
 func TestMultiDevice_KickingTheActiveDeviceRebroadcastsPresence(t *testing.T) {
 	f := newMDFix(t)
-	f.hub.gameActivity.on.Store(true)
+	f.hub.settings.gameActivity.on.Store(true)
 	a := f.dev("session-a", f.text)
 	a.c.setLivePresence(db.StatusOnline, nil, "")
 	f.hub.applyActivity(a.c, &gameActivity{Name: "Chess", StartedAt: 1})

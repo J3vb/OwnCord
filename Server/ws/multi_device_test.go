@@ -1001,7 +1001,7 @@ func TestMultiDevice_KickedConnectionKeepsOwnTeardownEvenAfterSessionReconnects(
 // stays.
 func TestMultiDevice_GameAndSongBelongToTheConnectionThatSetThem(t *testing.T) {
 	f := newMDFix(t)
-	f.hub.gameActivity.on.Store(true)
+	f.hub.settings.gameActivity.on.Store(true)
 	a := f.dev("session-a", f.text)
 	a.c.setLivePresence(db.StatusOnline, nil, "")
 	game := &gameActivity{Name: "Chess", StartedAt: 1}

@@ -58,7 +58,7 @@ func (h *Hub) buildAuthOK(ctx context.Context, user *db.User, roleName string, r
 			"upload_policy": h.cachedUploadPolicy(ctx),
 			// The runtime game activity switch. A resume gets no ready and the unsequenced
 			// game_activity_policy frame is not replayed, so every auth_ok restores it.
-			"game_activity_policy": gameActivityPolicyPayload{Enabled: h.gameActivity.on.Load()},
+			"game_activity_policy": gameActivityPolicyPayload{Enabled: h.settings.gameActivity.on.Load()},
 		},
 	})
 }
@@ -409,7 +409,7 @@ func (h *Hub) readReady(ctx context.Context, database ReadySnapshotReader, userI
 	return &readyFields{
 		head: readyHead{
 			Activities:   readyActivities(live, userID),
-			Capabilities: readyCapabilities(retryFloorMS, h.threadHub.svc != nil, h.threadHub.svc != nil, h.gameActivity.on.Load()),
+			Capabilities: readyCapabilities(retryFloorMS, h.threadHub.svc != nil, h.threadHub.svc != nil, h.settings.gameActivity.on.Load()),
 			Categories:   categories,
 			Channels:     channelPayloads,
 			DMChannels:   dmChannels,
