@@ -47,63 +47,127 @@ and only when it changes something a contributor or fork holder must do
 
 ## Unreleased
 
-### Changed
+## v2.8.0
 
-- With your own LiveKit server (not the bundled one), joining voice no longer waits on a fresh LiveKit check every time, and metrics scrapes and the diagnostics card no longer ask LiveKit on every request. One check is shared for 5 seconds (1 second after a failure); `/api/v1/livekit/health` still checks live.
-- The server no longer starts when `server.trusted_proxies` holds an entry that covers every address (such as `0.0.0.0/0` or `::/0`); the error names the entry. List only your reverse proxy's own address. The admin panel refuses the same values.
-- Clicking the channel topic in the header no longer opens a popup, and the topic no longer looks clickable. A long, cut-off topic still shows in full when you hover over it.
-- Renaming, deleting or reordering a role that many members hold now sends every app one update per 64 members instead of one per member, so a big server no longer floods everyone's connection. An app older than this version shows the old role name on those members until it reconnects.
-- On a big server, marking a channel read and the live mention badges no longer wait on activity in other channels, and a message that mentions a few people only checks those people instead of the whole member list.
-- Account-security actions now need a normal sign-in: an API token can no longer change the password, turn two-factor on or off, issue recovery codes or a recovery kit, list or sign out sessions, delete the account or publish a device key (it gets `403 LOGIN_SESSION_REQUIRED`). Bots and scripts that read, post or edit the profile keep working.
+**OwnCord 2.8** (the ninth public beta) makes the Android app feel at home on a phone: share photos and files to OwnCord from other apps, notifications while the app is open, a People page with Active now, swipes in the image viewer, and calls that keep running in the background with the camera pausing cleanly. Admins get a **System health** page and a **LiveKit card** on the Dashboard, and the support bundle now removes private details before you share it. Calls no longer freeze when the call key changes.
+
+It is still a **beta and a hobby project**: don't use it for anything sensitive. Update the server and the desktop app together, and **update the app on every device you use** (the call-key fix needs everyone in a call on 2.8). **This release changes the database.** The server upgrades it on first start and keeps a safety copy first; you cannot go back to 2.7 without restoring that copy. **Check `server.trusted_proxies`** before you update: an entry that covers every address (such as `0.0.0.0/0`) now stops the server from starting.
+
+### Highlights
+
+- **Share to OwnCord** on Android: send photos, videos, files or a link from any app to a channel or DM.
+- **Phone notifications** for DMs and mentions while the app is open, and calls that keep running in the background.
+- **People page**: Home with no conversation open shows who is online and who is playing or in voice.
+- **The "+" menu** in the message box: Upload, Poll and Sticker on a computer; Take photo, Gallery, Files and Poll on a phone.
+- **Smooth calls**: cameras and screen shares no longer freeze every five minutes, and a VP8 share on a slow link stays smooth.
+- **Your camera the right way round**: your own preview shows you as others see you, with a switch to mirror it.
+- **Admin System health page and LiveKit card**: connections, database, voice, the server process and LiveKit on one screen.
+- **Safer support bundles**: tokens, passwords, links, emails, IP addresses and your home folder are removed before saving.
 
 ### Added
 
-- The admin Dashboard has a LiveKit card for setups where LiveKit runs as its own container (the Docker compose stack): whether it is reachable, its CPU (100% is one core) and memory with one-hour lines, and rooms, participants, tracks and traffic. If LiveKit stops answering, the card says "Not reachable since" the time. The compose file turns it on; with your own setup, add `prometheus: port: 6789` to `livekit.yaml` and restart LiveKit. Shown to admins with View Diagnostics.
-- The LiveKit card now finds its LiveKit by itself and also covers the LiveKit OwnCord runs for you: it shows "Built-in LiveKit" with its CPU, memory, rooms and participants (tracks and traffic show a dash, they need the Docker setup). If LiveKit runs elsewhere, OwnCord tries port 6789 on the host in `voice.livekit_url`; `voice.livekit_metrics_url` is only needed when the page lives somewhere else.
-- **Settings → Account → Signed-in devices** now also lists your API tokens (label, created, last used) with a Revoke button each. Changing your password offers "Also revoke my API tokens", ticked by default when you have any. `docs/security.md` now spells out what a password change, account recovery and sign-out-everywhere each end.
-- On Android, your camera now pauses while the app is in the background, so others see your avatar instead of a frozen picture, and turns back on when you return.
-- On Android, OwnCord is now in the share menu of other apps. Share photos, videos, files or a link to it, pick a channel or DM in the "Send to" sheet, and they wait in that chat's message box for you to press Send.
-- Your own camera (call tiles, pop-out and the settings preview) now shows you exactly as others see you, with your right hand on the right; before, it was always mirrored. A new "Mirror my camera preview" switch in Voice & Video (off by default) brings the mirror back. Others always see you the right way round.
-- While you are in a DM call, that person's avatar stays in the server rail under Home with a green call badge, so you can see the call and get back to it in one click from any server.
-- On a phone, the "+" in the message box now opens a sheet with Take photo, Gallery and Files, so you can take a photo with the camera and send it straight away, or pick several photos and videos from the gallery.
-- The "+" in the message box now opens a menu of tiles: Upload, Poll and Sticker on a computer, and Take photo, Gallery, Files and Poll on a phone. The Poll and Sticker buttons left the chat bar for it; GIF, emoji and the voice message mic stay. On a phone the mic and send take turns, so the text box keeps its room.
-- The DM profile panel on a computer now also shows the person's @username (under a nickname) and custom status, and has a Report button.
-- Admin panel: a new **System health** page (Operations, for anyone with View Diagnostics) shows connections, message-delivery timings, the database (file and log size, schema, reader and writer waits), voice and the server process on one page, refreshed every 5 seconds. Each card lists the Dashboard warnings that belong to it, and **Copy for support** copies the same health figures a support bundle carries. If the database does not answer within 2 seconds its card says so and the rest of the page still loads.
-- The support bundle (Settings → Diagnostics & logs) now removes tokens, passwords, keys, cookies, recovery codes, links (cut to the server name), email and IP addresses and your home folder name from every file before saving, and lists what it removed. It also says how the app's last run ended (`last-exit.json`), lists every file with its size and checksum (`manifest.json`), and stays under 4 MB by dropping the oldest log lines first. Still read it before you share it: words typed in plain text cannot be recognised.
-- On Linux, after the app closes unexpectedly, the next start adds what the system recorded about it (the crash report from `coredumpctl` and the kernel's crash line, where the system keeps them) to the app's log, so a support bundle shows what crashed. Nothing extra needs to be installed; without those tools it is skipped. The log also notes whether the camera or a screen share was running.
-- On Windows, the app's log (and so the support bundle) now says why the last run ended: a crash names the error and the file it happened in, a run that Windows closed as not responding or that was ended in Task Manager shows up on the next start with its last memory and freeze state, and a crash or restart of WebView2's page, graphics or camera process is logged with what it caused. Nothing is sent anywhere; it stays in the log until you save a support bundle.
-- On Android 11 and newer, the next start adds to the app's log how the previous run ended (crash, killed for memory, not responding, stopped by you or by the system). The log also notes an app crash, the web view's page process going away, the call keeping alive in the background, and the app moving to the background and back, so a support bundle shows what happened. No message text, links or names are written.
+**Android**
+
+- OwnCord is in the share menu of other apps. Share photos, videos, files or a link to it, pick a channel or DM in the "Send to" sheet, and they wait in that chat's message box for you to press Send.
+- A DM or mention raises an Android notification while the app is open on another channel, as on the desktop. A tap opens the message; reading the channel, here or on another device, removes it.
+- Save and Share for images and files: saves go to Pictures/OwnCord or Downloads with a note saying where, and Share opens the phone's share sheet (image viewer, image and message menus, theme export, support bundle).
+- Your camera pauses while the app is in the background, so others see your avatar instead of a frozen picture, and turns back on when you return.
+- A call shows an "In a call" notification and keeps your mic, sound and camera running in the background until you leave.
+- A Bluetooth headset's mic joins the call (Android asks once), and Voice & Video shows "Microphone: Automatic" instead of a device list that did not apply on a phone.
+
+**Phones and touch screens**
+
+- Home with no conversation open shows a **People** page: Online and All tabs, a search, a Message button per person and an **Active now** column of people playing a game or in a server voice channel. A "People" entry at the top of the DM list reopens it; the phone drawer has it too.
+- The image viewer: swipe left or right for the next or previous image, swipe up or down to close. Zoomed in, one finger still moves the picture.
+- The message box on a phone is "+", the text, the smiley and Send. The smiley opens emoji, GIFs and stickers; "+" opens Take photo, Gallery, Files and Poll, so you can take a photo and send it straight away. DMs say "Message `@name`".
+- On a phone, a long-press on a message with one web link offers Copy Link and Open Link, wherever you pressed.
+- On a phone, your own profile card, the poll composer and the quick switcher open as sheets that fit the screen. The thread panel and the forum view fit the screen too, with their extra actions in a bottom sheet.
+
+**Desktop UI**
+
+- The "+" in the message box opens a menu of tiles: Upload, Poll and Sticker. The Poll and Sticker buttons left the chat bar for it; GIF, emoji and the voice message mic stay.
+- While you are in a DM call, that person's avatar stays in the server rail under Home with a green call badge, so you can get back to the call in one click from any server.
+- The DM profile panel also shows the person's `@username` (under a nickname) and custom status, and has a Report button.
+- Animated stickers pause like GIFs: they follow "Animate GIFs", stop after 10 seconds or when they scroll away, and play again on hover, a tap or their play button.
+- A new "Mirror my camera preview" switch in Voice & Video (off by default) mirrors your own camera preview.
+
+**Accounts**
+
+- **Settings → Account → Signed-in devices** also lists your API tokens (label, created, last used) with a Revoke button each. Changing your password offers "Also revoke my API tokens", ticked by default when you have any.
+
+**Diagnostics and support**
+
+- The support bundle (Settings → Diagnostics & logs) removes tokens, passwords, keys, cookies, recovery codes, links (cut to the server name), email and IP addresses and your home folder name from every file before saving, and lists what it removed. It also says how the app's last run ended, lists every file with its size and checksum, and stays under 4 MB. Still read it before you share it: words typed in plain text cannot be recognised.
+- On Windows, the app's log says why the last run ended: a crash names the error and file, a run Windows closed as not responding or that was ended in Task Manager shows up on the next start, and a crash of WebView2's page, graphics or camera process is logged.
+- On Linux, after the app closes unexpectedly, the next start adds what the system recorded about it (from `coredumpctl` and the kernel) to the app's log, and notes whether the camera or a screen share was running.
+- On Android 11 and newer, the next start logs how the previous run ended (crash, killed for memory, not responding, stopped), and the log notes app crashes and moving to the background and back. No message text, links or names are written.
+- Nothing is sent anywhere: all of this stays in the log until you save a support bundle.
+
+**Server admin panel**
+
+- A new **System health** page (Operations, for anyone with View Diagnostics) shows connections, message-delivery timings, the database (file and log size, schema, reader and writer waits), voice and the server process on one page, refreshed every 5 seconds. Each card lists the Dashboard warnings that belong to it, and **Copy for support** copies the same figures a support bundle carries.
+- The Dashboard has a **LiveKit card**: whether LiveKit is reachable, its CPU and memory with one-hour lines, and rooms, participants, tracks and traffic. It finds LiveKit by itself, covers the LiveKit OwnCord runs for you ("Built-in LiveKit"), and says "Not reachable since" when it stops answering. With your own LiveKit, add `prometheus: port: 6789` to `livekit.yaml`; `voice.livekit_metrics_url` is only needed when that page lives elsewhere.
+
+### Changed
+
+- **`server.trusted_proxies`**: the server no longer starts when an entry covers every address (such as `0.0.0.0/0` or `::/0`); the error names the entry. List only your reverse proxy's own address. The admin panel refuses the same values.
+- Account-security actions need a normal sign-in: an API token can no longer change the password, turn two-factor on or off, issue recovery codes or a recovery kit, list or sign out sessions, delete the account or publish a device key (it gets `403 LOGIN_SESSION_REQUIRED`). Bots and scripts that read, post or edit the profile keep working.
+- Your own camera (call tiles, pop-out and the settings preview) shows you exactly as others see you; before, it was always mirrored. The new switch brings the mirror back.
+- The channel topic in the header is plain text again: no popup, and a long topic shows in full when you hover over it.
+- Toasts sit just above the message box at a readable width, and move out of the way of the settings window, dialogs and phone sheets.
+- On a phone, switching channels or opening a thread no longer pops up the keyboard; tap the text box when you want to type. The phone drawer reaches DMs through Home in the rail only.
+- Renaming, deleting or reordering a role that many members hold sends one update per 64 members instead of one per member, so a big server no longer floods everyone's connection. An app older than 2.8 shows the old role name on those members until it reconnects.
+- On a big server, marking a channel read and live mention badges no longer wait on other channels, and a message that mentions a few people only checks those people.
+- With your own LiveKit server, joining voice no longer waits on a fresh LiveKit check every time; one check is shared for 5 seconds.
 
 ### Fixed
 
-- When the voice server closed a call's connection with a reason (for example after a removal), the app was told it was a normal close and could keep trying to reconnect. The voice server's own close reason now reaches the app, and a voice server that never answers no longer holds the connection attempt open.
-- The first letters typed right after clicking Search or pressing Ctrl+K landed in the message box. They now go into the search or the quick switcher. Tabbing through the channel header no longer opens Search; click it, press Enter on it or start typing.
-- In calls, cameras and screen shares could freeze for a few seconds every five minutes (each time the call's encryption key changed) and when someone left. A new key now reaches everyone before anyone sends with it, so the picture keeps going. Needs the server and every client in the call on this version; otherwise calls behave as before.
-- Role colours show again on names. A colour that is hard to read on the theme (for example pure red or blurple on Dark) used to turn the name plain white or black; now it keeps its colour and only gets lighter or darker until it reads well. With High Contrast on, a colour that does not read stays plain text as before.
-- On Linux, someone else's camera could stay black for the whole call when it started just as you turned your own camera on or off. It now shows as soon as it arrives.
-- Android: the app icon's "OC" logo ran off the edges of the home-screen icon. It now sits inside the icon shape on every launcher, and Android 13+ themed icons show a single-colour OC.
-- Android: a cold start signed you out unless you had ticked "Remember password", and signing in to a second server signed you out of the first. The sign-in page now has one "Stay signed in" box, ticked by default, that keeps each server's sign-in; untick it on a shared phone.
-- Android: calls stopped (no mic, then no sound) once the app went to the background or the screen turned off. A call now shows an "In a call" notification and keeps your mic, sound and camera running in the background until you leave.
-- In a call, turning your camera on and back off no longer leaves your tile showing the first letter of your name instead of your profile picture. This happened in DM calls and, in some cases, in voice channels.
-- On Linux, dragging files from the file manager into a channel, or pasting files you copied there (Ctrl+V), attached nothing. Both now attach the files, as on Windows.
-- A moderator moving someone whose connection had just dropped (a short Wi-Fi blip) ended their call instead of moving it, and lost any server mute. When their app reconnects within a few seconds it now lands in the new channel, still muted if a moderator had muted them.
-- In a call, someone joining just as the call key was being handed out could make two people hand out keys at once, so the call changed keys twice. The server now passes on a key only from whoever holds the key role at that moment.
-- Windows: sharing a screen wider than 3840 pixels (such as a 5120x1440 monitor) at Source with 60 fps, or switching a live share to Source, switched the share to the software encoder and then to VP8. It now goes out slightly smaller (3840x1080 for a 5120x1440 screen) and stays on the graphics card's H.264 encoder.
-- Leaving voice while the connection to the server was dropping could leave you listed in the voice channel for everyone for up to two minutes, counting toward the channel's user limit. The app now sends the leave as soon as it reconnects, and the server ends a resumed call that never reached the voice server after about 30 seconds.
-- On a phone, a DM call took about half the screen for two avatars and left a few lines of chat. The call now fills the screen like a server call; Back or Collapse turns it into a call bar with Mute and Leave above the chat, and opening the DM again brings the call back.
-- On a phone, opening a DM opened the desktop profile panel (or a group's member list) beside the chat and squeezed the chat to a sliver. The chat now gets the whole screen: the profile button opens the person's profile sheet (with @username, custom status, roles, Call, Report and Block), and a group's member button opens the list over the chat, which Back closes.
-- A VP8 screen share on a slow uplink kept full resolution and dropped to about one frame per second. It now gets smaller and stays smooth, also after Change source. Once the connection recovers, any screen share that got smaller grows back to full size after a short hitch; before, it stayed small until you shared again.
-- Voice Activity with the sensitivity slider set by hand let typing, a fan or breathing through, and after you spoke it stayed open through them. The slider now also asks the noise filter whether it hears a voice, as automatic sensitivity already did.
+**Voice and video**
 
-- Clicking a channel right after a new message arrived sometimes opened the channel below it: a Mark Server as Read icon appeared in the header and pushed the channel list down. The icon is gone, so the list no longer moves; Mark as Read stays in the server name menu and on Shift+Esc.
-- A forwarded file could, rarely, lose its contents to the server's 15-minute storage cleanup in the moment before the forward was saved, and then show as missing. The cleanup now leaves it alone.
-- An upload that stalled for 30 seconds was cut with no answer, so it looked like the server was down. The server now answers `408 TRANSFER_TIMED_OUT`, and its time limit grows with the upload limit (about 27 minutes at 100 MB, up to an hour; the desktop app still stops at 10 minutes for now). Avatar, banner and group-icon uploads no longer fail on a slow link after 30 seconds.
+- Cameras and screen shares could freeze for a few seconds every five minutes (each time the call key changed) and when someone left. A new key now reaches everyone before anyone sends with it. Needs the server and everyone in the call on 2.8.
+- Someone joining just as the call key was handed out could make the call change keys twice. The server now passes on a key only from whoever holds the key role at that moment.
+- A VP8 screen share on a slow uplink dropped to about one frame per second. It now gets smaller and stays smooth, and grows back to full size once the connection recovers.
+- Windows: sharing a screen wider than 3840 pixels at Source and 60 fps fell back to the software encoder and then VP8. It now goes out slightly smaller and stays on the graphics card's H.264 encoder.
+- Leaving voice while the connection was dropping could leave you listed in the channel for up to two minutes. The leave is sent as soon as the app reconnects, and the server ends a resumed call that never reached the voice server after about 30 seconds.
+- A moderator moving someone whose connection had just dropped ended their call and lost any server mute. They now land in the new channel when they reconnect, still muted.
+- When the voice server closed a call with a reason, the app could keep trying to reconnect. The reason now reaches the app, and a voice server that never answers no longer holds the attempt open.
+- Voice Activity with the slider set by hand let typing, a fan or breathing through. The slider now also asks the noise filter whether it hears a voice.
+- On Linux, someone else's camera could stay black for the whole call when it started as you turned your own camera on or off.
+- Turning your camera on and off again no longer leaves your tile showing your initial instead of your profile picture.
+- On a phone, a DM call took half the screen. It now fills the screen like a server call; Back or Collapse turns it into a call bar with Mute and Leave.
+
+**Messages and files**
+
+- The first letters typed right after clicking Search or pressing Ctrl+K landed in the message box. They now go into the search or the quick switcher.
+- Custom emoji in messages loaded before the emoji set showed as `:shortcode:` text until you reopened the channel. They now redraw once the set arrives.
+- An upload that stalled for 30 seconds was cut with no answer. The server now answers `408 TRANSFER_TIMED_OUT`, and its time limit grows with the upload limit (about 27 minutes at 100 MB). Avatar, banner and group-icon uploads no longer fail on a slow link.
+- A forwarded file could, rarely, be removed by the storage cleanup just before the forward was saved.
+- On Linux, dragging files from the file manager or pasting copied files attached nothing. Both now work, as on Windows.
+
+**Desktop UI**
+
+- Role colours show again on names. A colour that is hard to read on the theme keeps its colour and only gets lighter or darker until it reads well.
+- Clicking a channel right after a message arrived sometimes opened the channel below it. The Mark Server as Read icon that pushed the list down is gone; Mark as Read stays in the server name menu and on Shift+Esc.
+- After deleting a channel or closing a DM, the app could land in the last category. It now lands on the first channel the sidebar shows, and closing a DM opens the conversation with the newest message.
+- Deleting a custom theme did nothing because its confirm opened behind the settings window. It now opens on top.
+
+**Phones and touch screens**
+
+- Tapping a link in the Android app did nothing. Links now open in the phone's browser.
+- Opening a DM on a phone squeezed the chat beside the desktop profile panel. The chat gets the whole screen; the profile opens as a sheet and a group's members as a list that Back closes.
+- On a phone, Back now closes search, pinned messages and the thread list before it opens the drawer.
+- Android: a cold start signed you out unless "Remember password" was ticked, and signing in to a second server signed you out of the first. One "Stay signed in" box, ticked by default, keeps each server's sign-in.
+- Android: the app icon's logo ran off the edges of the home-screen icon; Android 13+ themed icons now show a single-colour logo.
 
 ### Under the hood
 
-- `GET /api/v1/server-info` now reports `upload.transfer_lifetime_seconds`, so a client can wait longer than the server before giving up on an upload.
-- Database change 090: three indexes for attachment lookups. The first start after the update builds them, which takes a little longer on a large database.
-- The storage cleanup, the admin Storage page's leftover scan and the orphaned-upload sweep look files up by index: about 19 s down to 0.3 s per pass at 100,000 files, so the leftover scan no longer answers "server busy" on a big upload folder.
+- Database change 090: three indexes for attachment lookups. The first start after the update builds them, which takes a little longer on a large database. The storage cleanup and the admin Storage page's leftover scan are about 60 times faster at 100,000 files.
+- `GET /api/v1/server-info` reports `upload.transfer_lifetime_seconds`.
+- Two-factor secrets are always stored encrypted; the first start encrypts any older ones. Recovery codes are drawn evenly from their alphabet; existing codes keep working.
+- The Android app's own data is left out of cloud backup and device transfer.
+- Faster server paths: reconnect replay, a channel's read audience worked out once per change, mark-read in two index reads, and the thread list back on the reader pool.
+- The server's big service stores and the WebSocket hub are split into smaller parts, and the LiveKit process supervisor and hub statistics moved into their own packages. The owner guides, security, capacity and contributing pages were rewritten as short, plain pages.
+- More shared test setup, nightly test shards sized from measured cost, and Rust files capped at 1,500 lines.
 
 ## v2.7.0
 
