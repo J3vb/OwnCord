@@ -866,3 +866,41 @@ func TestReportQueries_CloseReportRefusesAnErasedModerator(t *testing.T) {
 		t.Fatalf("events = %+v, want created then closed/no_action by the moderator", events)
 	}
 }
+
+// ListReportLinks resolves several ids in one read, keyed by internal id; an
+// id with no row is absent and an empty list reads nothing.
+func TestListReportLinks_ResolvesManyInOneRead(t *testing.T) {
+	database := openMigratedMemory(t)
+	ctx := context.Background()
+	reporter := seedUser(t, database, "rl-reporter")
+	subjectA := seedUser(t, database, "rl-subject-a")
+	subjectB := seedUser(t, database, "rl-subject-b")
+
+	idA := fileReport(t, database, reporter, subjectA, "user", "a", nil, "spam", "")
+	idB := fileReport(t, database, reporter, subjectB, "user", "b", nil, "spam", "")
+	repA, err := database.GetReport(ctx, idA)
+	if err != nil {
+		t.Fatalf("GetReport(a): %v", err)
+	}
+	repB, err := database.GetReport(ctx, idB)
+	if err != nil {
+		t.Fatalf("GetReport(b): %v", err)
+	}
+
+	links, err := database.ListReportLinks(ctx, []int64{idA, idB, idA, idB + 1000})
+	if err != nil {
+		t.Fatalf("ListReportLinks: %v", err)
+	}
+	want := map[int64]db.ReportLink{
+		idA: {PublicID: repA.PublicID, SubjectID: subjectA},
+		idB: {PublicID: repB.PublicID, SubjectID: subjectB},
+	}
+	if !reflect.DeepEqual(links, want) {
+		t.Fatalf("ListReportLinks = %+v, want %+v", links, want)
+	}
+
+	empty, err := database.ListReportLinks(ctx, nil)
+	if err != nil || len(empty) != 0 {
+		t.Fatalf("ListReportLinks(nil) = %v, %v; want empty, nil", empty, err)
+	}
+}

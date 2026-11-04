@@ -7,7 +7,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// OC-0250: UpdateProfile (and UpdateIdentityKey) commit their write, then
+// OC-0250: UpdateProfile commits its write (the identity key included), then
 // re-read the row with the *request* context to build the return value that
 // the caller broadcasts to every other client. If that request context is
 // canceled between the commit and the re-read — the most reachable trigger
@@ -35,8 +35,8 @@ func (c *cancelOnCommitStore) UpdateUserProfile(ctx context.Context, userID int6
 	return err
 }
 
-func (c *cancelOnCommitStore) UpdateUserIdentityKey(ctx context.Context, id int64, key *string) error {
-	err := c.Store.UpdateUserIdentityKey(ctx, id, key)
+func (c *cancelOnCommitStore) UpdateUserProfileAndIdentityKey(ctx context.Context, userID int64, username string, avatar, displayName, about, bannerID, bannerColor *string, identityKey string) error {
+	err := c.Store.UpdateUserProfileAndIdentityKey(ctx, userID, username, avatar, displayName, about, bannerID, bannerColor, identityKey)
 	if err == nil {
 		c.cancel()
 	}
@@ -85,7 +85,7 @@ func TestUpdateProfile_SurvivesRequestCancelAfterCommit(t *testing.T) {
 	}
 }
 
-func TestUpdateIdentityKey_SurvivesRequestCancelAfterCommit(t *testing.T) {
+func TestUpdateProfileWithIdentityKey_SurvivesRequestCancelAfterCommit(t *testing.T) {
 	database := newTestDB(t)
 	seedUser(t, database, &db.User{ID: 1, Username: "alice", PasswordHash: "h"})
 
@@ -95,12 +95,12 @@ func TestUpdateIdentityKey_SurvivesRequestCancelAfterCommit(t *testing.T) {
 	svc := NewUserService(store)
 
 	key := "identity-key-bytes"
-	u, err := svc.UpdateIdentityKey(ctx, 1, key)
+	u, err := svc.UpdateProfile(ctx, 1, ProfilePatch{IdentityKey: &key})
 	if err != nil {
-		t.Fatalf("UpdateIdentityKey returned %v after the request ctx was canceled post-commit; "+
+		t.Fatalf("UpdateProfile with a key returned %v after the request ctx was canceled post-commit; "+
 			"the write already committed, so this must still succeed and report the new row", err)
 	}
 	if u == nil || u.IdentityPublicKey == nil || *u.IdentityPublicKey != key {
-		t.Fatalf("UpdateIdentityKey returned user %+v, want identity key %q", u, key)
+		t.Fatalf("UpdateProfile returned user %+v, want identity key %q", u, key)
 	}
 }

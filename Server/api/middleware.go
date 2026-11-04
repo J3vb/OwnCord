@@ -290,15 +290,6 @@ func RateLimitMiddleware(limiter *auth.RateLimiter, prefix string, limit int, wi
 	}
 }
 
-// clientIP returns the connecting IP from RemoteAddr, ignoring proxy headers;
-// use it for audit and lockout keys where proxy trust is not established, and
-// clientip.Resolve for rate limiting. The resolution algorithm lives in the
-// clientip package because the WebSocket handshake needs the identical result
-// and ws cannot import api.
-func clientIP(r *http.Request) string {
-	return clientip.Resolve(r, nil)
-}
-
 // parseCIDRList parses CIDR strings, skipping invalid entries with a warning so
 // a misconfigured entry cannot take the server down. Call it at construction,
 // never per request.
