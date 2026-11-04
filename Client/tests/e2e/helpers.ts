@@ -995,6 +995,8 @@ export function buildTauriMockScript(opts: {
         // Auto-idle's OS idle poll (DP-33): null is "the OS cannot say", so the
         // mocked app keeps the in-window idle timer it had before the poll.
         if (cmd === "system_idle_ms") return null;
+        // The OS region: unknown, so dates follow the browser language.
+        if (cmd === "system_region_locale") return null;
         // The game scan (WP 8.3): no game is running in the mocked app.
         if (cmd === "detect_game") return null;
         // The song read (WP 8.10): nothing is playing in the mocked app.

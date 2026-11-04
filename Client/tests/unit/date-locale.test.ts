@@ -5,7 +5,13 @@ import {
   formatMessageTimestamp,
 } from "../../src/lib/text/formatting";
 import { formatFullDateTime } from "../../src/lib/text/discordTimestamp";
-import { dateLocale, getTimeFormat, localeTimeFormat } from "../../src/lib/text/timeFormat";
+import {
+  dateLocale,
+  getTimeFormat,
+  localeTimeFormat,
+  saveDateFormat,
+  setSystemDateLocale,
+} from "../../src/lib/text/timeFormat";
 
 /**
  * Dates and times follow the device language (navigator.language), with the
@@ -27,6 +33,9 @@ function storeTimeFormat(value: "12h" | "24h"): void {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  setSystemDateLocale(null);
+  saveDateFormat("auto");
+  localStorage.removeItem("owncord:settings:dateFormat");
   localStorage.removeItem(PREF_KEY);
   window.dispatchEvent(new CustomEvent("owncord:pref-change", { detail: { key: "timeFormat" } }));
 });
@@ -103,5 +112,38 @@ describe("locale fallback", () => {
     storeTimeFormat("12h");
     vi.spyOn(navigator, "language", "get").mockReturnValue("de-DE");
     expect(getTimeFormat()).toBe("12h");
+  });
+});
+
+describe("the OS region and the date format choice", () => {
+  it("prefers the OS region over the display language on Automatic", () => {
+    useLanguage("en-US");
+    setSystemDateLocale("nl-BE");
+    expect(dateLocale()).toBe("nl-BE");
+    expect(getTimeFormat()).toBe("24h");
+    expect(formatMessageTimestamp(OLD)).toBe("01/11/2020 14:05");
+  });
+
+  it("ignores a malformed OS region", () => {
+    useLanguage("de-DE");
+    setSystemDateLocale("not a locale");
+    expect(dateLocale()).toBe("de-DE");
+  });
+
+  it.each([
+    ["us", "11/01/2020 2:05 PM", "November 1, 2020"],
+    ["dayFirst", "01/11/2020 14:05", "1 November 2020"],
+    ["iso", "2020-11-01 14:05", "November 1, 2020"],
+  ] as const)("pins %s over the OS region", (format, timestamp, fullDate) => {
+    setSystemDateLocale("de-DE");
+    saveDateFormat(format);
+    expect(formatMessageTimestamp(OLD)).toBe(timestamp);
+    expect(formatFullDate(OLD)).toBe(fullDate);
+  });
+
+  it("keeps a stored clock over a pinned date format's default", () => {
+    storeTimeFormat("12h");
+    saveDateFormat("iso");
+    expect(formatMessageTimestamp(OLD)).toBe("2020-11-01 2:05 p.m.");
   });
 });

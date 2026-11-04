@@ -911,7 +911,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     // Switching the 12h/24h clock preference relabels the rendered rows in
     // place, the same way midnight does. Owned by disposable.signal, so the
     // listener dies with the component.
-    onPrefChange(["timeFormat"], api.relabelRenderedTimes, st.disposable.signal);
+    onPrefChange(["timeFormat", "dateFormat"], api.relabelRenderedTimes, st.disposable.signal);
     // A phone shows the clock alone in the header, so a rotation or resize that
     // crosses the phone layout rewrites the rendered times too.
     onPhoneLayoutChange(api.relabelRenderedTimes, st.disposable.signal);

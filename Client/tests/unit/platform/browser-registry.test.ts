@@ -42,6 +42,7 @@ describe("browser platform registry", () => {
         "shareSheet",
         "socket",
         "systemIdle",
+        "systemRegion",
         "trayStatus",
         "updater",
         "urlOpener",
@@ -157,6 +158,7 @@ describe("browser platform registry", () => {
       vi.unstubAllGlobals();
     }
     expect(await b.systemIdle.idleMs()).toBeNull();
+    expect(await b.systemRegion.localeTag()).toBeNull();
     // The web build scans nothing: no game, and the setting stays hidden.
     expect(b.gameDetector.available).toBe(false);
     expect(await b.gameDetector.detect()).toBeNull();

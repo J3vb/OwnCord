@@ -101,8 +101,8 @@ platform invoke bindings, including all conditional platform/feature handlers:
 | Measure                                                    | Value |
 | ---------------------------------------------------------- | ----- |
 | Files under `Client/src/` importing `@tauri-apps/*`        | 27    |
-| Distinct `invoke` command names called from `Client/src/`  | 108   |
-| `#[tauri::command]` handlers in `Client/src-tauri/`        | 111   |
+| Distinct `invoke` command names called from `Client/src/`  | 109   |
+| `#[tauri::command]` handlers in `Client/src-tauri/`        | 112   |
 | TS calls with no matching Rust handler                     | 0     |
 | Uses of the `window.__TAURI__` global                      | 0     |
 | Environment-detection helper (`isDesktop()` or equivalent) | 1     |
@@ -241,6 +241,7 @@ stop_http_proxy
 stop_livekit_proxy
 store_identity_pin
 system_idle_ms
+system_region_locale
 take_notification_tap
 take_shared
 voice_shortcuts_set_keys
@@ -332,6 +333,7 @@ native surface itself lives only in `platform/desktop/`.
 | App metadata      | `settings/AboutTab.ts`                                                                                | `api/app`                                                                                                                                             | build-time constant                                         |
 | Dev tools         | `main.ts`, `settings/AdvancedTab.ts`                                                                  | `api/core` (`open_devtools`)                                                                                                                          | unsupported — the browser has its own devtools already      |
 | System idle       | `pages/MainPage.ts` (for `lib/presence/autoIdle.ts`)                                                  | `api/core` (`system_idle_ms`)                                                                                                                         | unsupported — answers `null`; in-page activity decides      |
+| System region     | `main.ts` (for `lib/text/timeFormat.ts`)                                                              | `api/core` (`system_region_locale`)                                                                                                                   | unsupported — answers `null`; dates use the page language   |
 | Game activity     | `pages/MainPage.ts` (for `lib/presence/gameActivity.ts`), `settings/GameActivityRows.ts`              | `api/core` (`detect_game`, `list_running_programs`)                                                                                                   | unsupported — answers `null`; the setting is hidden         |
 
 **Media devices are not on this map, deliberately.** No generic `@tauri-apps`

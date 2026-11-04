@@ -32,6 +32,7 @@ import { settings } from "./settings";
 import { shareSheet } from "./shareSheet";
 import { socket } from "./socket";
 import { systemIdle } from "./systemIdle";
+import { systemRegion } from "./systemRegion";
 import { gameDetector } from "./gameDetector";
 import { mediaDetector } from "./mediaDetector";
 import { trayStatus } from "./trayStatus";
@@ -70,6 +71,7 @@ export const desktop: Platform = {
   shareSheet,
   socket,
   systemIdle,
+  systemRegion,
   trayStatus,
   updater,
   urlOpener,

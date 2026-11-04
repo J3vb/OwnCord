@@ -86,6 +86,8 @@ export const SETTINGS_SEARCH_INDEX: Readonly<Record<SearchableTab, () => readonl
     s("appearance.compactMode"),
     s("appearance.timeFormat"),
     s("appearance.timeFormat.desc"),
+    s("appearance.dateFormat"),
+    s("appearance.dateFormat.desc"),
     ...desktopOnly(s("appearance.memberLayout"), s("appearance.memberLayout.desc")),
     s("appearance.accentColor"),
     s("appearance.accentNote"),

@@ -7,7 +7,7 @@ import { channelsStore } from "@stores/channels.store";
 import { membersStore } from "@stores/members.store";
 import type { Message } from "@stores/messages.store";
 import { loadPref, onPrefChange } from "@lib/prefs/preferences";
-import { getTimeFormat, refreshTimeFormat } from "@lib/text/timeFormat";
+import { getTimeFormat, refreshDateFormat, refreshTimeFormat } from "@lib/text/timeFormat";
 import { formatDate } from "../../i18n/format";
 import { setOwnedTimeout } from "@lib/dom";
 import { messageStatusText } from "../../i18n/messageStatus";
@@ -178,8 +178,9 @@ export function shouldGroup(prev: Message, curr: Message): boolean {
 
 /** Cached value of the roleColors preference. Invalidated on pref change. */
 let roleColorsEnabled = loadPref<boolean>("roleColors", true);
-onPrefChange(["roleColors", "timeFormat"], (key) => {
+onPrefChange(["roleColors", "timeFormat", "dateFormat"], (key) => {
   if (key === "roleColors") roleColorsEnabled = loadPref<boolean>("roleColors", true);
+  else if (key === "dateFormat") refreshDateFormat();
   else refreshTimeFormat();
 });
 
