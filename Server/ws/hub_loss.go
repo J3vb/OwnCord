@@ -6,12 +6,12 @@ import "context"
 // enqueue dropped on a full broadcast queue, or one a content gate withheld
 // because the gate could not be read. Replay cannot fill it, so every
 // connected recipient is marked: its user's next resume takes the full ready
-// (presenceRepair.users), and its socket's next cseq skips one, so a client
+// (presenceFeed.repair.users), and its socket's next cseq skips one, so a client
 // that stays connected sees the gap and resumes.
 //
 // Lock order: markLoss runs on the dispatch goroutine under seqMu and takes
 // h.mu (read) or ps.mu (read), releasing each before marking.
-// presenceRepair.mu and queueDropState.mu are leaves. No client mu is taken.
+// presenceFeed.repair.mu and queueDropState.mu are leaves. No client mu is taken.
 
 // queueDropRouteCap bounds the drop routes kept between two dispatches; past
 // it the pending drops are marked as one global loss.

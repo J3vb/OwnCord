@@ -55,15 +55,15 @@
 //	3 S   replayPurgeState.mu RW     hub_tombstones.go:53     seqMu (hub_events.go:210), then the persister
 //	      (Hub.tombstones)                                    Flush and the DB delete (hub_events.go:218-235).
 //	                                                          Cold reads only TryRLock (eventstore.go:46-62)
-//	3 S   activityState.flushMu      channel_activity.go:105  DB reads under activityFlushTimeout, then
+//	3 S   activityState.flushMu      channel_activity.go:103  DB reads under activityFlushTimeout, then
 //	                                                          activityState.mu, then Hub.mu, PubSub.mu and
 //	                                                          Client.mu one at a time
-//	3 S   roleRefreshState.flushMu   role_refresh.go:74       DB reads, then roleRefreshState.mu, then Hub.mu,
+//	3 S   roleRefreshState.flushMu   role_refresh.go:71       DB reads, then roleRefreshState.mu, then Hub.mu,
 //	                                                          PubSub.mu, timeoutViewState.mu and Client.mu one
 //	                                                          at a time (role_refresh.go:24-30)
 //	3 S   hubSettings.uploadPolicyMu hub_settings.go:213      a DB read, then hubSettings.mu, then Hub.mu (R),
 //	                                                          then Client.mu (hub_settings.go:93-113)
-//	3 S   gameActivityState.mu       hub_settings.go:116      a DB read, then Hub.presenceMu (the game activity
+//	3 S   gameActivityState.mu       hub_settings.go:116      a DB read, then presenceFeedState.mu (the game activity
 //	      (hubSettings.gameActivity)                          sweep), Hub.mu (R), then Client.mu
 //	                                                          (hub_settings.go)
 //	3 S   Client.focusMu             client.go:86             Client.mu, PubSub.mu, DB reads (focus_defer.go:21,
@@ -71,8 +71,8 @@
 //	3 S   admissionMu (local)        serve.go:62              Hub.mu (R) via ClientCount (serve.go:73,83)
 //	4     timeoutViewState.mu        member_timeouts_       Hub.mu (R), Client.mu
 //	      (Hub.timeoutView)          delivery.go:23
-//	4     Hub.presenceMu             hub.go:110               the caller's closure, which only enqueues
-//	                                                          (hub_presence.go:211-216), Hub.mu (R), Client.mu,
+//	4     presenceFeedState.mu       hub_presence_state.go:12 the caller's closure, which only enqueues
+//	                                                          (hub_presence.go:240-245), Hub.mu (R), Client.mu,
 //	                                                          presenceRepairState.mu, queueDropState.mu
 //	5     Hub.seqMu                  hub.go:51                hubVoice.keyHolderMu (a resume's registerNow ->
 //	                                                          updateKeyHolder, hub_registry.go:174,179), Hub.mu,
@@ -98,12 +98,12 @@
 //	9     removedIdentities.mu       voice_removed_watch.go:48 leaf
 //	9     liveKitHealthCache.mu      livekit_health.go:21     leaf
 //	9     voiceResumeChecks.mu       voice_resume_check.go:57 leaf
-//	9     presenceRepairState.mu     hub_presence.go:92       leaf
+//	9     presenceRepairState.mu     hub_presence.go:96       leaf
 //	9     queueDropState.mu          hub_stats.go:140         leaf
 //	9     EventRingBuffer.mu RW      ringbuffer.go:14         leaf
 //	9     memberCache.mu             serve_ready_members_cache.go:33  leaf
-//	9     activityState.mu           channel_activity.go:95   leaf
-//	9     roleRefreshState.mu        role_refresh.go:66       leaf; may be taken under Hub.seqMu
+//	9     activityState.mu           channel_activity.go:93   leaf
+//	9     roleRefreshState.mu        role_refresh.go:63       leaf; may be taken under Hub.seqMu
 //	9     restartNoticeGate.mu       restart_notice.go:16     leaf
 //	9     userLocks.mu               user_locks.go:34         leaf, but see userLocks.tryLock below
 //	-     LiveKitProcess.mu          livekit_process.go:37    unranked: independent subsystem
@@ -149,7 +149,7 @@ type (
 	lockRankVoiceMember struct{} // userLockEntry.mu of voiceRegistry.voiceMember
 	lockRankVoiceMod    struct{} // userLockEntry.mu of hubVoice.mod
 	lockRankSerialiser  struct{} // the rank-3 serialisers
-	lockRankFeed        struct{} // timeoutViewState.mu, Hub.presenceMu
+	lockRankFeed        struct{} // timeoutViewState.mu, presenceFeedState.mu
 	lockRankSeq         struct{} // Hub.seqMu
 	lockRankHubCache    struct{} // hubVoice.keyHolderMu, hubSettings.mu
 	lockRankHub         struct{} // Hub.mu

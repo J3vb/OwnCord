@@ -806,12 +806,12 @@ func TestMultiDevice_FlushDropsQueuedOfflineForConnectedUser(t *testing.T) {
 	f.dev("session-a", f.text)
 	obs := f.observer(f.text)
 	const gone = int64(99999)
-	f.hub.presenceMu.Lock()
-	f.hub.presenceQueue = map[int64]pendingPresence{
+	f.hub.presenceFeed.mu.Lock()
+	f.hub.presenceFeed.queue = map[int64]pendingPresence{
 		f.uid: {status: db.StatusOffline}, // connected: stale, dropped
 		gone:  {status: db.StatusOffline}, // not connected: broadcast
 	}
-	f.hub.presenceMu.Unlock()
+	f.hub.presenceFeed.mu.Unlock()
 	f.hub.flushPresenceQueue()
 
 	i := obs.await(t, "presence_batch", nil)

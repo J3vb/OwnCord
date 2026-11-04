@@ -110,7 +110,7 @@ func (h *Hub) BroadcastUploadPolicy() {
 // serialiser that orders its saves.
 type gameActivityState struct {
 	// on is written only under mu, and once when the hub is built; read
-	// lock-free by the handler, ready and auth_ok, and under presenceMu by
+	// lock-free by the handler, ready and auth_ok, and under presenceFeed.mu by
 	// applyActivity and the presence emitters.
 	on atomic.Bool
 	mu syncutil.Ranked[lockRankSerialiser] // orders ApplyGameActivityPolicy's saves
@@ -146,13 +146,13 @@ func (h *Hub) initGameActivityPolicy() {
 //
 // Saves are serialised end to end (gameActivity.mu) and the value is re-read under
 // it, so two close together leave the hub on the database's last one. The flag is
-// stored before the sweep takes presenceMu: a set reaching applyActivity after the
+// stored before the sweep takes presenceFeed.mu: a set reaching applyActivity after the
 // sweep sees false and is dropped, and one that got there first is cleared by the
-// sweep, whose frame has the higher seq. The policy frame goes out after presenceMu
+// sweep, whose frame has the higher seq. The policy frame goes out after presenceFeed.mu
 // is released, unsequenced and straight to each client (like upload_policy), since
 // auth_ok carries the same value on every connect and resume.
 //
-// Lock order: gameActivity.mu, then the settings read, then presenceMu, then Hub.mu
+// Lock order: gameActivity.mu, then the settings read, then presenceFeed.mu, then Hub.mu
 // (read), then the client leaves. The read runs against Background with its own
 // bound (the HubBroadcaster interface carries no context).
 func (h *Hub) ApplyGameActivityPolicy(saved bool) {
@@ -178,11 +178,11 @@ func (h *Hub) ApplyGameActivityPolicy(saved bool) {
 // clearAllGameActivity clears every connection's shown game and song through the
 // ordinary clear path (swapActivityLocked): sequenced presence for a visible user,
 // the user's own frame only for an invisible one, and a queued connect entry
-// superseded. presenceMu is held across the sweep so no set or older presence frame
+// superseded. presenceFeed.mu is held across the sweep so no set or older presence frame
 // lands between two clears; nothing under it does I/O.
 func (h *Hub) clearAllGameActivity() {
-	h.presenceMu.Lock()
-	defer h.presenceMu.Unlock()
+	h.presenceFeed.mu.Lock()
+	defer h.presenceFeed.mu.Unlock()
 	for _, c := range h.clientSnapshot() {
 		h.clearActivityAndListeningLocked(c)
 	}

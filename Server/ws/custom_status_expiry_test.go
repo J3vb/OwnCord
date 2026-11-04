@@ -137,9 +137,9 @@ func TestCustomStatusExpired_SupersededTagIsNoop(t *testing.T) {
 	if p := c.livePresence(); p.customStatus == nil || *p.customStatus != "new" {
 		t.Fatalf("live presence = %+v, want the newer status untouched", p)
 	}
-	h.presenceMu.Lock()
-	_, queued := h.presenceQueue[7]
-	h.presenceMu.Unlock()
+	h.presenceFeed.mu.Lock()
+	_, queued := h.presenceFeed.queue[7]
+	h.presenceFeed.mu.Unlock()
 	if !queued {
 		t.Fatal("a stale clear dropped the queued connect presence")
 	}
@@ -151,13 +151,13 @@ func TestCustomStatusExpired_SupersededTagIsNoop(t *testing.T) {
 
 // queuePresenceNoTimer fills the coalescer without arming its flush timer.
 func (h *Hub) queuePresenceNoTimer(userID int64, p pendingPresence) {
-	h.presenceMu.Lock()
-	defer h.presenceMu.Unlock()
-	if h.presenceQueue == nil {
-		h.presenceQueue = make(map[int64]pendingPresence)
+	h.presenceFeed.mu.Lock()
+	defer h.presenceFeed.mu.Unlock()
+	if h.presenceFeed.queue == nil {
+		h.presenceFeed.queue = make(map[int64]pendingPresence)
 	}
-	h.presenceQueue[userID] = p
-	h.presenceFlushArmed = true
+	h.presenceFeed.queue[userID] = p
+	h.presenceFeed.flushArmed = true
 }
 
 // A set landing in the same instant as the old status's expiry: whichever side
@@ -239,7 +239,7 @@ func TestCustomStatusExpired_RaceWithPresenceUpdate(t *testing.T) {
 }
 
 // A same-account reconnect that replaces the client between the expirer's
-// lookup and presenceMu must not let the detached client's matching tag send a
+// lookup and presenceFeed.mu must not let the detached client's matching tag send a
 // null over the replacement's own status.
 func TestCustomStatusExpired_ReplacedClientIsNoop(t *testing.T) {
 	old := newExpiryClient(db.StatusOnline, "old", "2026-10-15T12:00:00Z")

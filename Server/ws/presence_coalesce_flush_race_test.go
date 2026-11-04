@@ -2,7 +2,7 @@ package ws
 
 // presence_coalesce_flush_race_test.go — regression test for OC-0005.
 //
-// flushPresenceQueue snapshots h.presenceQueue and releases presenceMu
+// flushPresenceQueue snapshots h.presenceFeed.queue and releases presenceFeed.mu
 // BEFORE broadcasting the snapshotted entries. dropQueuedPresence (the guard
 // EmitEvents uses to stop a stale connect/disconnect presence from
 // clobbering a fresher user-chosen status) only deletes from the LIVE map,
@@ -49,10 +49,10 @@ func TestFlushPresenceQueue_ConcurrentDirectPresenceOrdersLast(t *testing.T) {
 	// presenceFlushRaceHook happens to be installed at that later moment,
 	// which is exactly the kind of cross-run interference this test must not
 	// introduce.
-	h.presenceMu.Lock()
-	h.presenceQueue = map[int64]pendingPresence{42: {status: "online"}}
-	h.presenceFlushArmed = true
-	h.presenceMu.Unlock()
+	h.presenceFeed.mu.Lock()
+	h.presenceFeed.queue = map[int64]pendingPresence{42: {status: "online"}}
+	h.presenceFeed.flushArmed = true
+	h.presenceFeed.mu.Unlock()
 
 	raced := make(chan struct{})
 	var hookRan bool
@@ -71,7 +71,7 @@ func TestFlushPresenceQueue_ConcurrentDirectPresenceOrdersLast(t *testing.T) {
 		hookRan = true
 		// Simulate EmitEvents' direct presence branch racing in exactly
 		// here: after flushPresenceQueue has snapshotted (and, currently,
-		// released presenceMu for) the queue, but before it has broadcast
+		// released presenceFeed.mu for) the queue, but before it has broadcast
 		// the stale entry.
 		go func() {
 			h.EmitEvents(context.Background(), presenceEvents(42, "dnd", nil, nil, nil, false))
@@ -80,7 +80,7 @@ func TestFlushPresenceQueue_ConcurrentDirectPresenceOrdersLast(t *testing.T) {
 		// Give the goroutine room to actually run: with the bug this lets
 		// it complete its (unsynchronized) broadcast well before flush's
 		// own loop runs; with the fix in place the goroutine instead blocks
-		// on presenceMu until this function returns and releases it, so the
+		// on presenceFeed.mu until this function returns and releases it, so the
 		// sleep costs nothing extra there either way.
 		time.Sleep(20 * time.Millisecond)
 	}

@@ -16,7 +16,7 @@ import (
 //
 // Lock order: timeoutView.mu, then h.mu (read-locked only, to read the live
 // client map), then Client.mu (sendMsg). timeoutView.mu is never taken with
-// h.mu, h.seqMu or h.presenceMu held, and nothing under it does I/O:
+// h.mu, h.seqMu or h.presenceFeed.mu held, and nothing under it does I/O:
 // permission verdicts are resolved before it is taken, and sendMsg only
 // queues.
 type timeoutViewState struct {

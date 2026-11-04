@@ -15,7 +15,7 @@ func TestRank_ZeroValueUsable(t *testing.T) {
 	c := &Client{}
 
 	for _, l := range []sync.Locker{
-		&h.mu, &h.seqMu, &h.settings.mu, &h.voiceHub.keyHolderMu, &h.presenceMu,
+		&h.mu, &h.seqMu, &h.settings.mu, &h.voiceHub.keyHolderMu, &h.presenceFeed.mu,
 		&h.settings.uploadPolicyMu, &h.timeoutView.mu, &h.tombstones.mu, &c.focusMu, &c.mu,
 	} {
 		lockOnce(l)

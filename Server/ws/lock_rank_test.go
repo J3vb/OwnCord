@@ -58,7 +58,7 @@ func TestRank_AllowsOutermostFirst(t *testing.T) {
 		unlockMember := h.voiceHub.reg.voiceMember.lock(1) // 1
 		unlockMod := h.voiceHub.mod.lock(1)                // 2
 		h.tombstones.mu.Lock()                             // 3
-		h.presenceMu.Lock()                                // 4
+		h.presenceFeed.mu.Lock()                           // 4
 		h.seqMu.Lock()                                     // 5
 		h.voiceHub.keyHolderMu.RLock()                     // 6
 		h.mu.RLock()                                       // 7
@@ -68,7 +68,7 @@ func TestRank_AllowsOutermostFirst(t *testing.T) {
 		h.mu.RUnlock()
 		h.voiceHub.keyHolderMu.RUnlock()
 		h.seqMu.Unlock()
-		h.presenceMu.Unlock()
+		h.presenceFeed.mu.Unlock()
 		h.tombstones.mu.Unlock()
 		unlockMod()
 		unlockMember()

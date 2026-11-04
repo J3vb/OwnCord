@@ -17,9 +17,9 @@ func TestEmitEvents_DirectPresenceDropsQueuedEntry(t *testing.T) {
 
 	// Simulate connect: queue the connect-time presence.
 	h.QueuePresence(7, "online", nil)
-	h.presenceMu.Lock()
-	_, queued := h.presenceQueue[7]
-	h.presenceMu.Unlock()
+	h.presenceFeed.mu.Lock()
+	_, queued := h.presenceFeed.queue[7]
+	h.presenceFeed.mu.Unlock()
 	if !queued {
 		t.Fatal("QueuePresence did not queue the entry")
 	}
@@ -27,9 +27,9 @@ func TestEmitEvents_DirectPresenceDropsQueuedEntry(t *testing.T) {
 	// The user immediately sets a status via presence_update (visible path).
 	h.EmitEvents(context.Background(), presenceEvents(7, "dnd", nil, nil, nil, false))
 
-	h.presenceMu.Lock()
-	_, stillQueued := h.presenceQueue[7]
-	h.presenceMu.Unlock()
+	h.presenceFeed.mu.Lock()
+	_, stillQueued := h.presenceFeed.queue[7]
+	h.presenceFeed.mu.Unlock()
 	if stillQueued {
 		t.Fatal("direct presence broadcast left the stale queued entry; flush would overwrite the fresh status")
 	}
@@ -37,9 +37,9 @@ func TestEmitEvents_DirectPresenceDropsQueuedEntry(t *testing.T) {
 	// The invisible path must drop it too (public half rides PresenceOthersEvent).
 	h.QueuePresence(7, "online", nil)
 	h.EmitEvents(context.Background(), presenceEvents(7, "invisible", nil, nil, nil, false))
-	h.presenceMu.Lock()
-	_, stillQueued = h.presenceQueue[7]
-	h.presenceMu.Unlock()
+	h.presenceFeed.mu.Lock()
+	_, stillQueued = h.presenceFeed.queue[7]
+	h.presenceFeed.mu.Unlock()
 	if stillQueued {
 		t.Fatal("invisible presence broadcast left the stale queued entry")
 	}
@@ -47,9 +47,9 @@ func TestEmitEvents_DirectPresenceDropsQueuedEntry(t *testing.T) {
 	// Other users' queued entries are untouched.
 	h.QueuePresence(8, "online", nil)
 	h.EmitEvents(context.Background(), presenceEvents(7, "idle", nil, nil, nil, false))
-	h.presenceMu.Lock()
-	_, otherKept := h.presenceQueue[8]
-	h.presenceMu.Unlock()
+	h.presenceFeed.mu.Lock()
+	_, otherKept := h.presenceFeed.queue[8]
+	h.presenceFeed.mu.Unlock()
 	if !otherKept {
 		t.Fatal("dropQueuedPresence removed an unrelated user's entry")
 	}
