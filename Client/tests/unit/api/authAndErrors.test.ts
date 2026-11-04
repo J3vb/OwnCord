@@ -155,6 +155,16 @@ describe("API Client", () => {
       expect(onUnauthorized).toHaveBeenCalledTimes(1);
     });
 
+    it.each([
+      ["login", () => api.login("u", "wrong")],
+      ["recoverAccount", () => api.recoverAccount("u", "BAD-SECRET", "N3w-Pass!")],
+    ])("%s keeps a refused credential (401) a form error", async (_name, call) => {
+      mockFetch.mockResolvedValue(errorResponse(401, "INVALID_CREDENTIALS", "invalid credentials"));
+      await expect(call()).rejects.toMatchObject({ status: 401 });
+      expectConsole("warn", /\[api\] API error/);
+      expect(onUnauthorized).not.toHaveBeenCalled();
+    });
+
     it("does not call onUnauthorized on other errors", async () => {
       mockFetch.mockResolvedValue(errorResponse(500, "SERVER_ERROR", "Internal error"));
       await expect(api.getMe()).rejects.toThrow();
@@ -511,14 +521,15 @@ describe("API Client", () => {
       expect(result.token).toBe("full-token");
     });
 
-    it("throws ApiClientError on 401 and calls onUnauthorized", async () => {
+    it("throws ApiClientError on 401 without running the session-expiry sink", async () => {
+      // A wrong code is a form error: no session exists yet to expire.
       mockFetch.mockResolvedValue(errorResponse(401, "INVALID_TOTP", "Bad code"));
       await expect(api.verifyTotp("000000", "pt")).rejects.toMatchObject({
         status: 401,
         code: "INVALID_TOTP",
       });
       expectConsole("warn", /\[api\] API error/);
-      expect(onUnauthorized).toHaveBeenCalledTimes(1);
+      expect(onUnauthorized).not.toHaveBeenCalled();
     });
 
     it("throws ApiClientError on non-ok non-401", async () => {

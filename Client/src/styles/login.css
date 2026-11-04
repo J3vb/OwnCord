@@ -314,20 +314,16 @@
 }
 
 /* Latency badge — wraps between words so "{ms}ms response time" stays inside
-   the row at large or expanded text. */
+   the row at large or expanded text. Its colour follows the status dot. */
 .srv-latency {
   font-size: var(--font-size-xxs);
   color: var(--text-micro);
-  font-family: var(--font-mono);
 }
 .srv-latency.good {
   color: var(--green);
 }
 .srv-latency.warn {
   color: var(--yellow);
-}
-.srv-latency.bad {
-  color: var(--text-danger);
 }
 .srv-compat-badge.client-older,
 .srv-compat-badge.server-older {
@@ -1090,6 +1086,11 @@
   color: var(--text-link);
   text-decoration: underline;
 }
+/* The sign-in form's recovery entry reads as a link, like the register toggle. */
+.form-recover-link {
+  color: var(--text-link);
+  text-align: left;
+}
 
 /* ═══════════════════════════════════════════
    MODALS (shared)
@@ -1415,9 +1416,11 @@
   display: none;
 }
 
-/* Narrow window: the saved servers stack above a full-width form and the
-   page scrolls instead of clipping. */
-@media (max-width: 800px) {
+/* Narrow window, or a phone either way up: the saved servers stack above a
+   full-width form and the page scrolls instead of clipping. */
+@media (max-width: 800px),
+  (pointer: coarse) and (max-width: 899px),
+  (pointer: coarse) and (max-height: 499px) {
   .connect-page {
     flex-direction: column;
     overflow-y: auto;
@@ -1485,6 +1488,29 @@
     right: 20px;
     width: 44px;
     height: 44px;
+  }
+  /* One brand block: the server card above already shows the logo and name,
+     so the form keeps only its subtitle, as a header row with the gear. */
+  .connect-page:has(.server-panel) .form-logo {
+    display: flex;
+    align-items: center;
+    min-height: 44px;
+    margin-bottom: 12px;
+    padding-right: 52px;
+    text-align: left;
+  }
+  .connect-page:has(.server-panel) .form-logo .oc-logo,
+  .connect-page:has(.server-panel) .form-logo h1 {
+    display: none;
+  }
+  .connect-page:has(.server-panel) .form-logo p {
+    margin-top: 0;
+    font-weight: 600;
+    color: var(--header-primary);
+  }
+  .connect-page:has(.server-panel) .settings-gear {
+    top: 20px;
+    right: 16px;
   }
 }
 
@@ -1690,7 +1716,9 @@
 }
 
 /* Phone: the saved servers fold down to the selected one. */
-@media (max-width: 600px) {
+@media (max-width: 600px),
+  (pointer: coarse) and (max-width: 899px),
+  (pointer: coarse) and (max-height: 499px) {
   .server-panel-toggle {
     display: flex;
     align-items: center;

@@ -7,7 +7,6 @@
 // the health refresh and the invite hook) are returned as a tuple. Nothing
 // here runs at import time.
 
-import { ApiClientError } from "@lib/api";
 import type { ApiClient } from "@lib/api";
 import { deleteCredential, loginWithSavedPassword, parseRelayedLogin } from "@lib/net/credentials";
 import { createLogger } from "@lib/logger";
@@ -28,7 +27,8 @@ import { connectText } from "../i18n/connect";
 import { createAutoLogin } from "./autoLogin";
 import { createConnectProfiles } from "./connectProfiles";
 import { probeServerInfo, runHealthChecks, serverInfoFor, serverInfoProbing } from "./serverHealth";
-import { abandonInFlight, startSession } from "./session";
+import { scheduleHealthChecks } from "./healthSchedule";
+import { abandonInFlight, signInPending, startSession } from "./session";
 
 const log = createLogger("main");
 
@@ -46,7 +46,6 @@ export function renderConnect(
   profileManager: ProfileManager,
   appEl: HTMLElement,
   renderRecovery: RenderRecovery,
-  handleUnauthorized: () => void,
   takePendingInvite: () => { code: string; host?: string } | null,
 ): readonly [
   { destroy(): void },
@@ -149,19 +148,9 @@ export function renderConnect(
           throw new Error(connectText("session.savedLoginUnavailable"));
         }
         // The relayed body is the same AuthResponse shape api.login returns,
-        // so from here the flow is literally the typed-password one.
-        let result;
-        try {
-          result = parseRelayedLogin(relayed);
-        } catch (err) {
-          // Run the same side effect `api.ts` runs for a 401 on any other
-          // request, so the two login paths cannot diverge on session state.
-          if (err instanceof ApiClientError && err.status === 401) {
-            handleUnauthorized();
-          }
-          throw err;
-        }
-        completeLogin(host, username, result);
+        // so from here the flow is literally the typed-password one: a
+        // refused credential throws to the form and touches no session state.
+        completeLogin(host, username, parseRelayedLogin(relayed));
       },
       async onRegister(host, username, password, inviteCode) {
         api.endSession();
@@ -339,15 +328,17 @@ export function renderConnect(
   const unsubUpdateRequired = uiStore.subscribeSelector((s) => s.updateRequiredHost, offerUpdate);
   offerUpdate(uiStore.getState().updateRequiredHost);
 
-  // Periodic health check — re-run every 15s so offline servers update when they come back
-  const healthCheckInterval = setInterval(() => {
-    runHealthChecks(connectPage, getProfileList(), pageOwner);
-  }, 15_000);
+  // Periodic health check, so offline servers update when they come back.
+  // Paused while hidden or signing in; the page scope stops it.
+  scheduleHealthChecks(
+    pageOwner.signal,
+    () => runHealthChecks(connectPage, getProfileList(), pageOwner),
+    signInPending,
+  );
 
-  pageOwner.addCleanup(() => clearInterval(healthCheckInterval));
   pageOwner.addCleanup(unsubUpdateRequired);
   // Page-owned checks and listeners cannot update a later connect screen: the
-  // scope's cleanups clear the health interval and the store subscription, and
+  // scope's signal stops the health schedule, its cleanup drops the store subscription, and
   // destroy also tears down the update notifier and the page.
   const page = {
     destroy(): void {

@@ -76,7 +76,7 @@ beforeEach(() => {
 
 /** The take-once accessor main.ts gave the most recent renderConnect call. */
 const lastTakePendingInvite = (): (() => PendingInvite) =>
-  hoisted.renderConnectCalls.at(-1)![5] as () => PendingInvite;
+  hoisted.renderConnectCalls.at(-1)![4] as () => PendingInvite;
 
 describe("main.ts wiring of the connect route", () => {
   it("mounts the connect page at startup", () => {

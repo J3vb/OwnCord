@@ -23,7 +23,7 @@ import {
 import { wireDispatcher } from "@lib/dispatcher";
 import { setIdentityKeyProvider } from "@lib/ws";
 import { setLastChannelHost } from "@lib/prefs/lastChannel";
-import { authStore } from "@stores/auth.store";
+import { authStore, clearAuth } from "@stores/auth.store";
 import { setTransientError } from "@stores/ui.store";
 import { leaveVoiceChannel } from "@stores/voice.store";
 import { createConnectedOverlay } from "@components/ConnectedOverlay";
@@ -34,6 +34,7 @@ import {
   deleteCredential,
   createUserUpdateCredentialSaver,
 } from "@lib/net/credentials";
+import type { SessionScope } from "@lib/net/sessionScope";
 import { connectText } from "../i18n/connect";
 import type { PageId } from "./context";
 
@@ -54,6 +55,16 @@ let sessionCleanup: (() => void) | null = null;
 let connectedOverlay: ConnectedOverlayControl | null = null;
 let lastConnectHost = "";
 let lastConnectToken = "";
+// Whether the session in flight is still signing in: dialing or behind the
+// connected overlay. False once `ready` arrives, or once the first dial ends
+// without auth_ok (an auth_error leaves the user on the form, still targeted).
+let signingIn = false;
+
+/**
+ * How long the connected overlay waits for `ready` after auth_ok (restarted
+ * on every reconnect) before it gives up and returns to the connect page.
+ */
+export const READY_TIMEOUT_MS = 30_000;
 
 /**
  * Hands the controller the services and the router's two operations it works
@@ -93,6 +104,11 @@ export function sessionTarget(): { host: string; token: string } | null {
 /** Whether a session has been started and not yet torn down (post-auth wiring ran). */
 export function sessionInFlight(): boolean {
   return lastConnectHost !== "";
+}
+
+/** Whether a sign-in is dialing or waiting for `ready`, so the connect page is covered or busy. */
+export function signInPending(): boolean {
+  return lastConnectHost !== "" && signingIn;
 }
 
 /**
@@ -152,6 +168,7 @@ export function startSession(
   authStore.setState((prev) => ({ ...prev, token }));
   lastConnectHost = host;
   lastConnectToken = token;
+  signingIn = true;
   // Scope the last-channel store to this server before the dispatcher
   // wires, so the first `ready` (which restores it) reads the right key.
   // It has to be here, not MainPage: the first ready arrives before MainPage
@@ -338,6 +355,7 @@ export function startSession(
       // (a certificate re-dial after a mismatch).
       clearPreauthDeadline();
       unsubState();
+      if (owner.isCurrent()) signingIn = false;
     }
   });
   sessionUnsubs.push(unsubState);
@@ -351,6 +369,7 @@ export function startSession(
   // sidesteps the race instead of racing it.
   const unsubAuthOk = ws.on("auth_ok", (payload) => {
     unsubAuthOk();
+    signingIn = true;
     // Ensure exactly one overlay exists at a time.
     connectedOverlay?.destroy();
     connectedOverlay = createConnectedOverlay({
@@ -376,11 +395,19 @@ export function startSession(
     appEl.appendChild(connectedOverlay.element);
     connectedOverlay.show();
 
+    const readyDeadline = startReadyDeadline(owner, host);
+    const unsubReconnect = ws.onStateChange((wsState) => {
+      if (wsState === "connected") readyDeadline.restart();
+    });
+
     const unsubReady = ws.on("ready", () => {
       unsubReady();
+      unsubReconnect();
+      readyDeadline.clear();
+      signingIn = false;
       connectedOverlay?.markReady();
     });
-    sessionUnsubs.push(unsubReady);
+    sessionUnsubs.push(unsubReady, unsubReconnect, readyDeadline.clear);
   });
   sessionUnsubs.push(unsubAuthOk);
 
@@ -389,6 +416,42 @@ export function startSession(
     sessionUnsubs.length = 0;
   };
   owner.addCleanup(sessionCleanup);
+}
+
+/**
+ * The connected overlay has no Cancel, and the main page cannot mount without
+ * `ready`: a server that signs the user in but stalls building `ready` (or a
+ * proxy that drops the large frame) would hold it forever. Give up after
+ * READY_TIMEOUT_MS, restarted on each reconnect while it is still waiting,
+ * and tear the session down the way the invite link does, keeping the stored
+ * sign-in for the next try.
+ */
+function startReadyDeadline(owner: SessionScope, host: string): { restart(): void; clear(): void } {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const clear = (): void => {
+    if (timer !== null) clearTimeout(timer);
+    timer = null;
+  };
+  const giveUp = (): void => {
+    timer = null;
+    if (!owner.isCurrent()) return;
+    log.warn("Server did not send ready in time", { host, timeoutMs: READY_TIMEOUT_MS });
+    api.endSession();
+    abandonInFlight();
+    if (authStore.getState().isAuthenticated) clearAuth();
+    setTransientError(connectText("session.readyTimeout"));
+  };
+  const arm = (): void => {
+    clear();
+    timer = setTimeout(giveUp, READY_TIMEOUT_MS);
+  };
+  arm();
+  return {
+    restart: () => {
+      if (timer !== null) arm();
+    },
+    clear,
+  };
 }
 
 /** Handle logout / disconnect. App-lifetime: never unsubscribed. */

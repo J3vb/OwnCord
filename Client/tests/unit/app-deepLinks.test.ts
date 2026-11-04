@@ -84,7 +84,7 @@ const getConfig = vi.fn(() => ({ host: "current.example" }));
 const USER = { id: 1, username: "alex", avatar: null, role: "member" } as const;
 
 const lastTakePendingInvite = (): (() => PendingInvite) =>
-  hoisted.renderConnect.mock.lastCall![5] as () => PendingInvite;
+  hoisted.renderConnect.mock.lastCall![4] as () => PendingInvite;
 
 /** Lets a lazy import and the promise chain after it settle. */
 async function settle(): Promise<void> {
@@ -119,7 +119,6 @@ beforeEach(async () => {
     {} as WsClient,
     document.getElementById("app")!,
     {} as ProfileManager,
-    vi.fn(),
   );
   // The logout subscriber navigates to connect once clearAuth runs on main.
   hoisted.clearAuth.mockImplementation(() => {
