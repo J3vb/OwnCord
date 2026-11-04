@@ -56,6 +56,8 @@ import {
   getCameraQuality,
   getEffectiveScreenShareFps,
   getScreenShareCaptureOptions,
+  applyScreenShareContentHint,
+  screenShareDegradation,
   getScreenShareFps,
   getScreenShareMaxBitrate,
   getScreenShareQuality,
@@ -409,6 +411,8 @@ export async function disableCamera(state: CameraTrackState, deps: VideoTrackDep
 export interface ScreenTrackState extends GenerationGuarded {
   manualScreenTracks: LocalTrack[];
   screenTrackEndedCleanup?: () => void;
+  /** Stops the published share's resolution-recovery watcher. */
+  stopResolutionRecovery?: () => void;
   /** The live share's quality, set once it is published: Change source and
    *  Quality act on a share only while it is set. On Linux it is the quality
    *  the native picker chose, and the track changes it itself. */
@@ -512,6 +516,8 @@ export function watchScreenEnded(
 
 export function stopManualScreenTracks(state: ScreenTrackState, room: Room | null): void {
   state.screenTrackEndedCleanup?.();
+  state.stopResolutionRecovery?.();
+  state.stopResolutionRecovery = undefined;
   // Every stop path ends here: the app's sound and the host capture go too.
   const appAudio = state.appAudio;
   state.appAudio = undefined;
@@ -590,12 +596,13 @@ export async function enableScreenshare(
   let removeEndedListener: (() => void) | undefined;
   try {
     stopManualScreenTracks(state, room);
+    const captureOptions = getScreenShareCaptureOptions(quality, fps);
     // Linux captures in the native backend (no getDisplayMedia behind a
     // WebRTC-less webview): its room's picker-and-capture stands in and sets
     // the capture from the picker's per-share quality.
     const screenTracks = isLinuxDesktop()
       ? await room.localParticipant.createScreenTracks()
-      : await createLocalScreenTracks(getScreenShareCaptureOptions(quality, fps));
+      : await createLocalScreenTracks(captureOptions);
     if ((state.generation ?? 0) !== generation) {
       // A disableScreenshare ran to completion while the OS picker was still
       // up — it already reset localScreenshare and sent voice_screenshare
@@ -625,6 +632,8 @@ export async function enableScreenshare(
             channelPeerDecode,
           );
     const videoCodec = choice.codec;
+    if (videoTrack !== undefined && !isLinuxDesktop())
+      applyScreenShareContentHint(videoTrack.mediaStreamTrack, captureOptions, videoCodec);
     if (videoTrack !== undefined && h264GpuPublish(videoCodec)) {
       await fitGpuH264Share(videoTrack);
     }
@@ -638,12 +647,13 @@ export async function enableScreenshare(
     }
     if (videoTrack !== undefined)
       setH264GpuProfiles(videoTrack.mediaStreamTrack, h264GpuPublish(videoCodec));
+    const videoOptions = screenVideoPublishOptions(videoCodec, quality, fps);
     for (const track of screenTracks) {
       const isVideo = track.kind === Track.Kind.Video;
       // oxlint-disable-next-line no-await-in-loop -- tracks must be published sequentially to maintain correct order
       await room.localParticipant.publishTrack(track, {
         ...(isVideo
-          ? screenVideoPublishOptions(videoCodec, quality, fps)
+          ? videoOptions
           : {
               source: Track.Source.ScreenShareAudio,
               simulcast: false,
@@ -693,6 +703,23 @@ export async function enableScreenshare(
         removeEndedListener?.();
         return;
       }
+    }
+    // The web capture never grows back after a bandwidth dip on its own; the
+    // Linux native capture is not a browser source. Loaded once the share is
+    // up, and only if this share is still the live one by then.
+    if (videoTrack !== undefined && !isLinuxDesktop()) {
+      const preference = videoOptions.degradationPreference ?? screenShareDegradation();
+      void import("./shareResolutionRecovery")
+        .then(({ watchShareResolutionRecovery }) => {
+          if ((state.generation ?? 0) !== generation || state.manualScreenTracks !== screenTracks)
+            return;
+          state.stopResolutionRecovery?.();
+          state.stopResolutionRecovery = watchShareResolutionRecovery(
+            videoTrack as LocalVideoTrack,
+            preference,
+          );
+        })
+        .catch((err: unknown) => log.warn("Share resolution recovery unavailable", err));
     }
     const sendId = ws.send({ type: "voice_screenshare", payload: { enabled: true } });
     registerPendingVideoEnable(sendId, "screen");
@@ -848,6 +875,15 @@ export async function republishVideo(
     // A stop between the two awaits already unpublished and stopped the track
     // and sent its `false`: publishing now would resurrect it.
     if (stale()) return false;
+    if (kind === "screen" && !isLinuxDesktop())
+      applyScreenShareContentHint(
+        track.mediaStreamTrack,
+        getScreenShareCaptureOptions(
+          quality,
+          (state as ScreenTrackState).fps ?? getScreenShareFps(),
+        ),
+        codec,
+      );
     setH264GpuProfiles(track.mediaStreamTrack, h264GpuPublish(codec));
     await room.localParticipant.publishTrack(track, options);
     if (stale()) {

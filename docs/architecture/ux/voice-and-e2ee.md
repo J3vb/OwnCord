@@ -222,7 +222,11 @@ opens the picker and swaps the new capture under the published track
 (`features/voice/screenshareChange.ts`), so viewers keep watching and the
 server hears no `voice_screenshare`; cancelling the picker changes nothing.
 Quality re-sizes the running capture for this share only (the Settings default
-stays). On Linux the native capture picks in its own dialog, so the card has
+stays). On a slow uplink a web-path share gets smaller and keeps its frame
+rate; once the bandwidth is back, `lib/voice/shareResolutionRecovery.ts`
+restarts WebRTC's adaptation (Chromium's capturer never grows the source back
+by itself), so the share returns to full size after a hitch of a second or two,
+at most once per 30 s. On Linux the native capture picks in its own dialog, so the card has
 Stop sharing only. In a DM call, focus view stays inside the call panel and the
 chat remains visible below it. **Full screen** (the button, F, or a
 double-click) puts the tile in HTML full screen and the window with it

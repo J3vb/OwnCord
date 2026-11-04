@@ -27,6 +27,10 @@ vi.mock("livekit-client", (importOriginal) =>
 vi.mock("@tauri-apps/api/core", () => shareRig.tauriInvokeMock(invoke));
 vi.mock("../../src/lib/voice/appAudioTrack", () => shareRig.appAudioTrackMock(openAppAudio));
 vi.mock("@lib/prefs/preferences", () => shareRig.fallbackPrefsMock());
+// The resolution watcher's poll is not under test here.
+vi.mock("@lib/voice/shareResolutionRecovery", () => ({
+  watchShareResolutionRecovery: () => () => {},
+}));
 
 const { disableScreenshare, enableScreenshare, stopManualScreenTracks } =
   await import("@lib/voice/screenShare");

@@ -35,6 +35,7 @@ import {
 
 vi.mock("@lib/voice/shareFps", (importOriginal) => mocks.voiceShareFpsMock(importOriginal));
 vi.mock("@lib/voice/h264Profile", () => mocks.voiceH264ProfileMock());
+vi.mock("@lib/voice/shareResolutionRecovery", () => mocks.shareResolutionRecoveryMock());
 vi.mock("../../../src/features/voice/videoCodec", (importOriginal) =>
   mocks.voiceVideoCodecMock(importOriginal),
 );
@@ -433,6 +434,17 @@ describe("video codec", () => {
     expect(videoOpts).toMatchObject({ videoCodec: "h264" });
     const audioOpts = publishedOptions(rig, audio);
     expect(audioOpts).not.toHaveProperty("videoCodec");
+  });
+
+  it.each([
+    ["vp8", "motion"],
+    ["h264", ""],
+  ])("gives a %s share's video the %j hint before it publishes", async (codec, hint) => {
+    prefs({ videoCodec: codec, screenShareQuality: "high" });
+    const { rig, video } = await publishScreenWithAudio();
+
+    expect(publishedOptions(rig, video)).toMatchObject({ videoCodec: codec });
+    expect(video.mediaStreamTrack.contentHint).toBe(hint);
   });
 
   it("on Auto probes the camera at its captured size, 30 fps and preset bitrate", async () => {

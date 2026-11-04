@@ -57,6 +57,7 @@ function mst(id: string): FakeMst {
   const track = {
     id,
     readyState: "live",
+    contentHint: "",
     stop: vi.fn(),
     applyConstraints: vi.fn().mockResolvedValue(undefined),
     clone: () => mst(`${id}-clone`),
@@ -159,6 +160,46 @@ beforeEach(() => {
 });
 
 describe("changeScreenshareSource", () => {
+  it("applies the motion hint before replacing a VP8 source", async () => {
+    const rig = setup(true);
+    rig.state.published = "vp8";
+    const [video, audio] = picked(true);
+    let hintAtReplace: string | undefined;
+    rig.video.replaceTrack.mockImplementationOnce(async (next) => {
+      hintAtReplace = next.contentHint;
+      rig.video.mediaStreamTrack = next;
+      return rig.video;
+    });
+
+    await changeScreenshareSource(rig.state, rig.deps);
+
+    expect(rig.video.replaceTrack).toHaveBeenCalledWith(video!.mediaStreamTrack, expect.anything());
+    expect(hintAtReplace).toBe("motion");
+    expect(audio!.mediaStreamTrack.contentHint).toBe("");
+  });
+
+  it("leaves an H.264 source at the browser's default hint", async () => {
+    const rig = setup(true);
+    rig.state.published = "h264";
+    const [video] = picked(true);
+
+    await changeScreenshareSource(rig.state, rig.deps);
+
+    expect(rig.video.replaceTrack).toHaveBeenCalledWith(video!.mediaStreamTrack, expect.anything());
+    expect(video!.mediaStreamTrack.contentHint).toBe("");
+  });
+
+  it("replaces a source that does not support content hints", async () => {
+    const rig = setup(false);
+    const [video] = picked(false);
+    Reflect.deleteProperty(video!.mediaStreamTrack, "contentHint");
+
+    await changeScreenshareSource(rig.state, rig.deps);
+
+    expect(rig.video.replaceTrack).toHaveBeenCalled();
+    expect(video!.mediaStreamTrack).not.toHaveProperty("contentHint");
+  });
+
   it("carries an H.264 share's GPU profiles over to the new capture", async () => {
     const logs = captureLogs();
     setH264GpuProfiles.mockClear();

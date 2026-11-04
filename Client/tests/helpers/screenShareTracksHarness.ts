@@ -45,6 +45,7 @@ export function fakeMediaStreamTrack(): MediaStreamTrack {
   const listeners = new Map<string, EventListener>();
   return {
     readyState: "live",
+    contentHint: "",
     addEventListener: (type: string, cb: EventListener) => listeners.set(type, cb),
     removeEventListener: (type: string, cb: EventListener) => {
       if (listeners.get(type) === cb) listeners.delete(type);

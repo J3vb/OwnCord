@@ -131,6 +131,28 @@ describe("republishVideo", () => {
     );
   });
 
+  it.each([
+    ["h264", "motion", ""],
+    ["vp8", "", "motion"],
+  ])(
+    "gives a share switched to %s its content hint before the publish",
+    async (codec, before, after) => {
+      const r = rig();
+      const { state, video } = liveShare();
+      video.mediaStreamTrack.contentHint = before;
+      let hintAtPublish: string | undefined;
+      r.publishTrack.mockImplementationOnce(async () => {
+        hintAtPublish = video.mediaStreamTrack.contentHint;
+      });
+
+      await expect(republishVideo("screen", state, r.deps, codec as "h264" | "vp8")).resolves.toBe(
+        true,
+      );
+
+      expect(hintAtPublish).toBe(after);
+    },
+  );
+
   it("marks the track again when it republishes as H.264", async () => {
     const r = rig();
     const { state, video } = liveCamera();

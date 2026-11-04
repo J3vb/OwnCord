@@ -42,9 +42,9 @@
       "note": "The Tauri window API (@tauri-apps/api/window), imported on demand by the desktop shell."
     },
     "screenShare": {
-      "budget": 8000,
+      "budget": 8200,
       "lazy": true,
-      "note": "Screen share, the peer codec pick and the H.264 profile hook, shared by camera and share. Not in the startup closure."
+      "note": "Screen share, the peer codec pick and the H.264 profile hook, shared by camera and share. Not in the startup closure. 8000 -> 8200 for the captured track's content hint and the lazy resolution-recovery hook (7917 -> 8088 B); the recovery watcher itself is its own chunk."
     }
   },
   "forbidEmbeddedWasm": {
