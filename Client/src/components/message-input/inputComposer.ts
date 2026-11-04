@@ -132,6 +132,28 @@ export function createInputComposer(st: InputState, api: InputApi) {
     return st.options.placeholder ?? composerPlaceholder("channel", st.options.channelName);
   }
 
+  /** One composer button's disabled and hidden state. */
+  function applyButtonState(btn: HTMLElement, disabled: boolean, uploadsOff: boolean): void {
+    // The mic needs what "+" needs (an upload) and a server that keeps the clip's metadata.
+    if (btn.classList.contains("mic-btn")) {
+      btn.hidden = uploadsOff || !voiceMessagesEnabled() || !composerButtonShown("voice");
+      if (disabled) btn.setAttribute("disabled", "true");
+      else btn.removeAttribute("disabled");
+      return;
+    }
+    const isAttach = btn.classList.contains("attach-btn");
+    // "+" also holds Poll and Sticker, so uploads being off leaves it usable.
+    const attachOff = isAttach && uploadsOff && !st.attachHasActions();
+    if (isAttach) btn.title = attachOff ? messagingText("attach.serverDisabled") : "";
+    if (disabled || attachOff) {
+      btn.setAttribute("disabled", "true");
+      return;
+    }
+    // Likewise for GIFs when this server has no GIF provider configured.
+    if (btn.classList.contains("gif-btn") && st.gifUnavailable) return;
+    btn.removeAttribute("disabled");
+  }
+
   /** Reflect the current disabledReason onto the DOM (textarea + controls). */
   function applyDisabledState(): void {
     if (st.textarea === null) return;
@@ -149,26 +171,7 @@ export function createInputComposer(st: InputState, api: InputApi) {
     if (disabled) st.textarea.title = st.disabledReason!;
     else st.textarea.removeAttribute("title");
     const uploadsOff = uploadsDisabledByServer();
-    for (const btn of st.controlButtons) {
-      // The mic needs what "+" needs (an upload) and a server that keeps the clip's metadata.
-      if (btn.classList.contains("mic-btn")) {
-        btn.hidden = uploadsOff || !voiceMessagesEnabled() || !composerButtonShown("voice");
-        if (disabled) btn.setAttribute("disabled", "true");
-        else btn.removeAttribute("disabled");
-        continue;
-      }
-      const isAttach = btn.classList.contains("attach-btn");
-      // "+" also holds Poll and Sticker, so uploads being off leaves it usable.
-      const attachOff = isAttach && uploadsOff && !st.attachHasActions();
-      if (isAttach) btn.title = attachOff ? messagingText("attach.serverDisabled") : "";
-      if (disabled || attachOff) {
-        btn.setAttribute("disabled", "true");
-      } else {
-        // Likewise for GIFs when this server has no GIF provider configured.
-        if (btn.classList.contains("gif-btn") && st.gifUnavailable) continue;
-        btn.removeAttribute("disabled");
-      }
-    }
+    for (const btn of st.controlButtons) applyButtonState(btn, disabled, uploadsOff);
     // A menu opened before the composer closed offers nothing now.
     if (disabled) st.closeAttachMenu?.();
     if (st.root !== null) {
