@@ -47,6 +47,7 @@ export const connectText = defineCatalog("connect", {
     "Tap Install in the Android prompt to finish the update. Closed it? Tap Retry.",
   "update.androidPermission":
     "Allow OwnCord to install apps on the settings page that opened, then tap Retry.",
+  "update.versionChanged": "A newer update was published. Showing it now.",
 
   "voice.disconnected": "You were disconnected from voice",
   "voice.afkChannelFallback": "the AFK channel",

@@ -52,8 +52,9 @@ function notifyInstallListener(
   }
 }
 
-/** The backend's stable error prefixes for a .deb install that did not run
- *  (`src-tauri/src/text.rs`): the password prompt dismissed, or no permission. */
+/** The backend's stable error prefixes for an install that did not run
+ *  (`src-tauri/src/text.rs`): the password prompt dismissed, no permission, or
+ *  a server that now offers another version than the one shown. */
 const FAILURE_REASONS = new Map<string, UpdateFailureReason>([
   // i18n-exempt: backend error code (text.rs), mapped to catalog text by the notifier
   ["update cancelled", "cancelled"],
@@ -61,6 +62,8 @@ const FAILURE_REASONS = new Map<string, UpdateFailureReason>([
   ["update not authorized", "not-authorized"],
   // i18n-exempt: backend error code (text.rs), mapped to catalog text by the notifier
   ["update install permission needed", "android-permission"],
+  // i18n-exempt: backend error code (text.rs), mapped to catalog text by the notifier
+  ["update version changed", "version-changed"],
 ]);
 
 /** Check if a newer client version is available on the connected server. */
@@ -86,7 +89,7 @@ async function checkForUpdate(serverUrl: string): Promise<UpdateCheckResult> {
  * All callers join the same operation, even across page changes. Reserve it
  * before registering the progress listener, which is itself asynchronous.
  */
-function downloadAndInstallUpdate(serverUrl: string): Promise<void> {
+function downloadAndInstallUpdate(serverUrl: string, expectedVersion?: string): Promise<void> {
   if (installation !== null) return installation;
 
   installation = Promise.resolve().then(async () => {
@@ -114,7 +117,10 @@ function downloadAndInstallUpdate(serverUrl: string): Promise<void> {
         unlistenHandedOff = await listen("update-installer-opened", () => {
           handedOff = true;
         });
-        await invoke("download_and_install_update", { serverUrl });
+        await invoke(
+          "download_and_install_update",
+          expectedVersion === undefined ? { serverUrl } : { serverUrl, expectedVersion },
+        );
         installed = true;
       } finally {
         unlistenHandedOff?.();

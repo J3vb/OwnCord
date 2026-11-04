@@ -104,6 +104,8 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
   let dismissedKey: string | null = null;
   /** The offer the banner currently shows. */
   let shownKey: string | null = null;
+  /** The version the install button installs: the one the banner showed. */
+  let offeredVersion: string | undefined;
   let checkTimer: ReturnType<typeof setTimeout> | null = null;
   let unsubscribeInstall: (() => void) | null = null;
   let unsubscribeOutcome: (() => void) | null = null;
@@ -187,6 +189,7 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
 
     banner = createElement("div", { class: "update-banner" });
     shownKey = version;
+    offeredVersion = version;
     const body = buildFrame(banner, "download", connectText("update.ready", { version }));
 
     // The notes live on the About tab's update card, which reads the same offer.
@@ -235,9 +238,22 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
   }
 
   function installUpdate(): void {
-    void downloadAndInstallUpdate(serverUrl).catch((err: unknown) => {
+    void downloadAndInstallUpdate(serverUrl, offeredVersion).catch((err: unknown) => {
       log.error("Update install failed", { error: String(err) });
     });
+  }
+
+  function onInstallState(state: UpdateInstallState): void {
+    if (state.status !== "failed" || state.reason !== "version-changed") {
+      renderInstallState(state);
+      return;
+    }
+    // Nothing was downloaded. Ask again so the banner (and the About tab)
+    // show the version the server offers now, with its notes.
+    installState = state;
+    removeBanner();
+    announce(connectText("update.versionChanged"));
+    void checker.checkNow("manual");
   }
 
   function renderInstallState(state: UpdateInstallState): void {
@@ -322,7 +338,7 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
       "data-testid": "update-announce",
     });
     target.appendChild(liveRegion);
-    unsubscribeInstall = subscribeToUpdateInstall(renderInstallState);
+    unsubscribeInstall = subscribeToUpdateInstall(onInstallState);
     unsubscribeOutcome = checker.onOutcome(handleOutcome);
     if (keepChecking) {
       // A socket that comes back may be an updated server: ask again. Read-only

@@ -50,6 +50,8 @@ and only when it changes something a contributor or fork holder must do
 ### Changed
 
 - The admin Live log no longer fills with the panel's own request lines, and a viewer that falls behind sees how many lines were skipped.
+- Desktop: an upload that keeps moving is no longer cut by the app after 10 minutes; only the server's own transfer limit ends it.
+- Desktop: the update button installs only the version the banner showed. If a newer one was published meanwhile, the banner shows that one instead.
 
 ### Added
 

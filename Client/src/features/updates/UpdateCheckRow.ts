@@ -121,7 +121,7 @@ export function buildUpdateCheckRow(signal: AbortSignal): HTMLDivElement {
         installBtn.addEventListener(
           "click",
           () => {
-            void downloadAndInstallUpdate(serverUrl).catch((err: unknown) => {
+            void downloadAndInstallUpdate(serverUrl, outcome.version).catch((err: unknown) => {
               log.error("Update install failed", { error: String(err) });
             });
           },

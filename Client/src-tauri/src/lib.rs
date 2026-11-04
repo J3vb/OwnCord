@@ -550,12 +550,14 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         let prefs = app.state::<window_prefs::WindowPrefs>();
         // Always consumed, so the marker never outlives one launch.
         let show_next = window_prefs::take_show_next_launch(app.handle());
-        window_prefs::should_start_hidden(
+        let hidden = window_prefs::should_start_hidden(
             show_next,
             window_prefs::launched_minimized(),
             prefs.start_minimized(),
             window_prefs::tray_available,
-        )
+        );
+        window_prefs::warm_tray_probe(prefs.minimize_to_tray());
+        hidden
     };
     // Graphics card for video (gpu_adapter.rs): decided before the window
     // exists, because WebView2 picks its card when it starts.

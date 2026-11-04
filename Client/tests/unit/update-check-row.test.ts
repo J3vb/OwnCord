@@ -78,7 +78,7 @@ describe("Settings → Check for updates", () => {
     expect(status()).toBe("Update v2.0.0 available");
 
     (row.querySelector(".update-check-install") as HTMLButtonElement).click();
-    expect(mockInstall).toHaveBeenCalledWith("https://s.example");
+    expect(mockInstall).toHaveBeenCalledWith("https://s.example", "2.0.0");
   });
 
   it("does not offer the install again once an install already succeeded and only a restart is pending", async () => {

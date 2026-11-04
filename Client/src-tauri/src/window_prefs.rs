@@ -113,8 +113,10 @@ pub fn set_show_next_launch<R: Runtime>(app: &AppHandle<R>, on: bool) {
     }
 }
 
-/// The frontend calls this just before `relaunch()`.
-#[tauri::command]
+/// The frontend calls this just before `relaunch()`. Async, like the
+/// settings commands in `commands.rs`: the save is a write, fsync and rename,
+/// which must not stall the UI thread.
+#[tauri::command(async)]
 pub fn show_next_launch(app: AppHandle) {
     set_show_next_launch(&app, true);
 }
@@ -129,15 +131,34 @@ pub fn launched_minimized() -> bool {
 /// On Linux the icon needs a StatusNotifier host on the session bus, which
 /// plain GNOME does not run: without one the icon is invisible, so hiding the
 /// window would strand the app.
+///
+/// The Linux answer is probed once per run and remembered: the probe is a
+/// blocking bus call (up to 500 ms per name on a slow bus), and the close
+/// handler that asks runs on the UI thread.
 pub fn tray_available() -> bool {
     #[cfg(target_os = "linux")]
     {
-        linux_tray_host_present()
+        static PRESENT: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        *PRESENT.get_or_init(linux_tray_host_present)
     }
     #[cfg(not(target_os = "linux"))]
     {
         true
     }
+}
+
+/// Ask the tray question on a worker thread now, so the first close click
+/// reads the remembered answer instead of waiting on the bus. Only when the
+/// close button can hide the window: otherwise nothing asks.
+pub fn warm_tray_probe(minimize_to_tray: bool) {
+    #[cfg(target_os = "linux")]
+    {
+        if minimize_to_tray {
+            drop(tauri::async_runtime::spawn_blocking(tray_available));
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = minimize_to_tray;
 }
 
 #[cfg(target_os = "linux")]
@@ -210,7 +231,7 @@ pub fn on_close_requested<R: Runtime>(
         window.label(),
         prefs.minimize_to_tray(),
         // Asked only when the preference is on, so a user who turned it off
-        // never pays for the bus call.
+        // never pays for the bus call; after the first ask it is remembered.
         prefs.minimize_to_tray() && tray_available(),
         crate::update_commands::installer_launching(),
     );
@@ -293,8 +314,8 @@ pub fn get_window_prefs(prefs: State<'_, WindowPrefs>) -> WindowPrefsDto {
 
 /// Persist one preference, then publish it to the live state. The disk write
 /// goes first: a failed save leaves the running app, the shared store and the
-/// file in agreement.
-#[tauri::command]
+/// file in agreement. Async for the same reason as `show_next_launch`.
+#[tauri::command(async)]
 pub fn set_window_pref(
     app: AppHandle,
     prefs: State<'_, WindowPrefs>,
@@ -317,7 +338,10 @@ pub fn set_window_pref(
         return Err(format!("failed to persist settings: {e}"));
     }
     match pref {
-        WindowPref::MinimizeToTray => prefs.minimize_to_tray.store(enabled, Ordering::Relaxed),
+        WindowPref::MinimizeToTray => {
+            prefs.minimize_to_tray.store(enabled, Ordering::Relaxed);
+            warm_tray_probe(enabled);
+        }
         WindowPref::StartMinimized => prefs.start_minimized.store(enabled, Ordering::Relaxed),
     }
     Ok(())
