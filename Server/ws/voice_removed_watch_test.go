@@ -34,7 +34,7 @@ func waitRemoved(t *testing.T, h *vmHarness, chID int64, identity string) {
 
 func (h *vmHarness) watchTick() {
 	h.t.Helper()
-	h.hub.enforceRemovedVoiceIdentities(context.Background())
+	h.hub.enforceRemovedVoiceIdentities(context.Background(), true)
 }
 
 // TestVoiceRemovedWatch_RemovesReturningIdentity: after a moderator removal,
@@ -137,11 +137,11 @@ func TestVoiceRemovedWatch_ExpiresAfterTokenTTL(t *testing.T) {
 // names the user, not one join, so it is never remembered.
 func TestRemovedIdentities_SkipsLegacyIdentity(t *testing.T) {
 	var s removedIdentities
-	s.record(1, 2, "")
+	s.record(1, 2, "", false)
 	if s.pending() {
 		t.Fatal("legacy identity without a join token was remembered")
 	}
-	s.record(1, 2, "tok")
+	s.record(1, 2, "tok", false)
 	if !s.pending() {
 		t.Fatal("identity with a join token was not remembered")
 	}
@@ -153,11 +153,11 @@ func TestRemovedIdentities_RecordExtendsExpiry(t *testing.T) {
 	start := time.Now()
 	now := start
 	s := removedIdentities{now: func() time.Time { return now }}
-	s.record(1, 2, "tok")
+	s.record(1, 2, "tok", false)
 	now = start.Add(tokenTTL - time.Second)
-	s.record(1, 2, "tok")
+	s.record(1, 2, "tok", false)
 	now = start.Add(tokenTTL + time.Second)
-	if len(s.snapshot()) != 1 {
+	if len(s.snapshot(true)) != 1 {
 		t.Fatal("a repeat removal did not restart the entry's tokenTTL window")
 	}
 }
@@ -170,7 +170,7 @@ func TestVoiceRemovedWatch_KeepsLiveMembership(t *testing.T) {
 	chID, identity := joinedIdentity(t, h, alice, "watch-live")
 	_, token := alice.c.voice.state()
 
-	h.hub.livekit.removed.record(chID, alice.userID, token)
+	h.hub.livekit.removed.record(chID, alice.userID, token, false)
 	h.watchTick()
 	if !h.sfu.has(RoomName(chID), identity) {
 		t.Fatalf("watch removed live membership %q", identity)
@@ -212,7 +212,7 @@ func TestVoiceRemovedWatch_StoredRowAloneDoesNotKeepIdentity(t *testing.T) {
 	_, token := alice.c.voice.state()
 
 	alice.c.voice.setState(0, "")
-	h.hub.livekit.removed.record(chID, alice.userID, token)
+	h.hub.livekit.removed.record(chID, alice.userID, token, false)
 	h.watchTick()
 	if h.sfu.has(RoomName(chID), identity) {
 		t.Fatalf("a stored row kept %q in the room after its connection left", identity)
@@ -227,13 +227,13 @@ func TestRemovedIdentities_MintExtendsExpiry(t *testing.T) {
 	lk := &LiveKitClient{apiKey: "test-key", apiSecret: "test-secret-at-least-32-bytes-long"}
 	lk.removed.now = func() time.Time { return now }
 
-	lk.removed.record(7, 42, "tok")
+	lk.removed.record(7, 42, "tok", false)
 	now = start.Add(tokenTTL - time.Second)
 	if _, err := lk.GenerateToken(42, "u", 7, "tok", true, false, false); err != nil {
 		t.Fatalf("GenerateToken: %v", err)
 	}
 	now = start.Add(tokenTTL + time.Second)
-	if len(lk.removed.snapshot()) != 1 {
+	if len(lk.removed.snapshot(true)) != 1 {
 		t.Fatal("a token minted for a remembered identity did not restart its window")
 	}
 }
@@ -246,5 +246,63 @@ func TestRemovedIdentities_MintLeavesOthersAlone(t *testing.T) {
 	}
 	if lk.removed.pending() {
 		t.Fatal("minting a token remembered an identity nobody removed")
+	}
+}
+
+// TestVoiceRemovedWatch_OwnLeaveCheckedOnSlowCadence: after the client's own
+// voice_leave the identity is skipped by an ordinary tick and still removed by
+// the own-leave tick, so a rejoin with the old token does not stay in the room.
+func TestVoiceRemovedWatch_OwnLeaveCheckedOnSlowCadence(t *testing.T) {
+	h := newVMHarness(t, 1)
+	alice := h.members[0]
+	chID, identity := joinedIdentity(t, h, alice, "watch-own-leave")
+
+	h.leave(alice)
+	waitRemoved(t, h, chID, identity)
+
+	h.sfu.add(RoomName(chID), identity)
+	h.hub.enforceRemovedVoiceIdentities(context.Background(), false)
+	if !h.sfu.has(RoomName(chID), identity) {
+		t.Fatal("an ordinary tick checked an own-leave identity")
+	}
+	h.hub.enforceRemovedVoiceIdentities(context.Background(), true)
+	if h.sfu.has(RoomName(chID), identity) {
+		t.Fatalf("own-leave identity %q still in the room after the own-leave tick", identity)
+	}
+}
+
+// TestRemovedIdentities_ForcedRemovalStaysOnFastCadence: an own-leave record
+// never downgrades an identity a forced removal already recorded, while a forced
+// removal upgrades an own-leave one.
+func TestRemovedIdentities_ForcedRemovalStaysOnFastCadence(t *testing.T) {
+	var s removedIdentities
+	s.record(1, 2, "forced", false)
+	s.record(1, 2, "forced", true)
+	s.record(1, 3, "own", true)
+	got := s.snapshot(false)[1]
+	if _, ok := got[participantIdentity(2, "forced")]; !ok {
+		t.Fatal("an own-leave record moved a forced removal to the slow cadence")
+	}
+	if _, ok := got[participantIdentity(3, "own")]; ok {
+		t.Fatal("an own-leave identity was listed on an ordinary tick")
+	}
+	s.record(1, 3, "own", false)
+	if _, ok := s.snapshot(false)[1][participantIdentity(3, "own")]; !ok {
+		t.Fatal("a forced removal did not move an own-leave identity to the fast cadence")
+	}
+}
+
+func TestVoiceLeaveIsOwn(t *testing.T) {
+	own := map[string]bool{
+		voiceLeaveReasonClient: true, voiceLeaveReasonSwitch: true, VoiceLeaveReasonDMLeave: true,
+		voiceLeaveReasonMoved: false, voiceLeaveReasonDisconnect: false, voiceLeaveReasonHandshake: false,
+		voiceLeaveReasonModerator: false, VoiceLeaveReasonDMRemoved: false, VoiceLeaveReasonBlocked: false,
+		voiceLeaveReasonTokenRefresh: false, voiceLeaveReasonRevoked: false, voiceLeaveReasonReconciled: false,
+		voiceLeaveReasonGraceExpired: false, voiceLeaveReasonAFK: false, voiceLeaveReasonUnconfirmed: false,
+	}
+	for reason, want := range own {
+		if got := voiceLeaveIsOwn(reason); got != want {
+			t.Errorf("voiceLeaveIsOwn(%q) = %v, want %v", reason, got, want)
+		}
 	}
 }

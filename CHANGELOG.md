@@ -49,6 +49,7 @@ and only when it changes something a contributor or fork holder must do
 
 ### Changed
 
+- With your own LiveKit server (not the bundled one), joining voice no longer waits on a fresh LiveKit check every time, and metrics scrapes and the diagnostics card no longer ask LiveKit on every request. One check is shared for 5 seconds (1 second after a failure); `/api/v1/livekit/health` still checks live.
 - The server no longer starts when `server.trusted_proxies` holds an entry that covers every address (such as `0.0.0.0/0` or `::/0`); the error names the entry. List only your reverse proxy's own address. The admin panel refuses the same values.
 - Clicking the channel topic in the header no longer opens a popup, and the topic no longer looks clickable. A long, cut-off topic still shows in full when you hover over it.
 - Renaming, deleting or reordering a role that many members hold now sends every app one update per 64 members instead of one per member, so a big server no longer floods everyone's connection. An app older than this version shows the old role name on those members until it reconnects.
@@ -74,6 +75,7 @@ and only when it changes something a contributor or fork holder must do
 
 ### Fixed
 
+- When the voice server closed a call's connection with a reason (for example after a removal), the app was told it was a normal close and could keep trying to reconnect. The voice server's own close reason now reaches the app, and a voice server that never answers no longer holds the connection attempt open.
 - The first letters typed right after clicking Search or pressing Ctrl+K landed in the message box. They now go into the search or the quick switcher. Tabbing through the channel header no longer opens Search; click it, press Enter on it or start typing.
 - In calls, cameras and screen shares could freeze for a few seconds every five minutes (each time the call's encryption key changed) and when someone left. A new key now reaches everyone before anyone sends with it, so the picture keeps going. Needs the server and every client in the call on this version; otherwise calls behave as before.
 - Role colours show again on names. A colour that is hard to read on the theme (for example pure red or blurple on Dark) used to turn the name plain white or black; now it keeps its colour and only gets lighter or darker until it reads well. With High Contrast on, a colour that does not read stays plain text as before.

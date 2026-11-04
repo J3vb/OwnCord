@@ -37,31 +37,40 @@ func (s *DMService) OpenForRing(ctx context.Context, channelID int64, targets []
 			continue
 		}
 		if ok {
-			summary = s.withHistory(ctx, pid, channelID, summary)
 			reopened = append(reopened, RingReopen{UserID: pid, Summary: summary})
 		}
 	}
+	s.withHistory(ctx, channelID, reopened)
 	return reopened
 }
 
 // withHistory fills in what DMSummaryFor leaves at zero (last message, unread and
-// mention counts) from the user's open-DM list. A ring sends no chat frame to
-// repair a bare row, so the reopen carries it. On a failed read the bare summary
-// still announces the DM.
-func (s *DMService) withHistory(ctx context.Context, userID, channelID int64, summary db.DMChannelInfo) db.DMChannelInfo {
-	open, err := s.st.GetUserDMChannels(ctx, userID)
+// mention counts) for every reopen, from one read for the channel. A ring sends no
+// chat frame to repair a bare row, so the reopen carries it. On a failed read the
+// bare summaries still announce the DM.
+func (s *DMService) withHistory(ctx context.Context, channelID int64, reopened []RingReopen) {
+	if len(reopened) == 0 {
+		return
+	}
+	ids := make([]int64, len(reopened))
+	for i := range reopened {
+		ids[i] = reopened[i].UserID
+	}
+	history, err := s.st.GetDMHistoryForParticipants(ctx, channelID, ids)
 	if err != nil {
-		slog.Warn("DMService.OpenForRing history", "err", err, "recipient_id", userID, "channel_id", channelID)
-		return summary
+		slog.Warn("DMService.OpenForRing history", "err", err, "channel_id", channelID)
+		return
 	}
-	for i := range open {
-		if open[i].ChannelID == channelID {
-			summary.LastMessageID = open[i].LastMessageID
-			summary.LastMessage = open[i].LastMessage
-			summary.LastMessageAt = open[i].LastMessageAt
-			summary.UnreadCount = open[i].UnreadCount
-			summary.MentionCount = open[i].MentionCount
+	for i := range reopened {
+		h, ok := history[reopened[i].UserID]
+		if !ok {
+			continue
 		}
+		sum := &reopened[i].Summary
+		sum.LastMessageID = h.LastMessageID
+		sum.LastMessage = h.LastMessage
+		sum.LastMessageAt = h.LastMessageAt
+		sum.UnreadCount = h.UnreadCount
+		sum.MentionCount = h.MentionCount
 	}
-	return summary
 }

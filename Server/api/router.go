@@ -643,7 +643,7 @@ type livekitHealthResponse struct {
 
 func handleLiveKitHealth(hub *ws.Hub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		ok, err := hub.LiveKitHealthCheck(r.Context())
+		ok, err := hub.LiveKitHealthProbe(r.Context())
 		if ok {
 			writeJSON(w, http.StatusOK, livekitHealthResponse{
 				Status:           "ok",

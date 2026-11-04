@@ -21,6 +21,7 @@ type dmCoreStore interface {
 	GetOrCreateDMChannelGated(ctx context.Context, callerID, recipientID int64) (ch *db.Channel, created, recipientOpened bool, accepted *db.MessageRequest, err error)
 	FindDMChannelIDBetween(ctx context.Context, user1ID, user2ID int64) (int64, bool, error)
 	GetUserDMChannels(ctx context.Context, userID int64) ([]db.DMChannelInfo, error)
+	GetDMHistoryForParticipants(ctx context.Context, channelID int64, userIDs []int64) (map[int64]db.DMHistory, error)
 	OpenDMIfParticipant(ctx context.Context, userID, channelID int64) (bool, error)
 	CloseDM(ctx context.Context, userID, channelID int64) error
 	IsDMParticipant(ctx context.Context, userID, channelID int64) (bool, error)

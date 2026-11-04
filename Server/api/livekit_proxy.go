@@ -2,12 +2,16 @@ package api
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"strings"
+	"sync/atomic"
+	"time"
+	"unicode/utf8"
 
 	"github.com/coder/websocket"
 
@@ -179,7 +183,12 @@ func proxyWebSocket(w http.ResponseWriter, r *http.Request, target *url.URL) {
 		backendHeader = http.Header{"Authorization": {authz}}
 	}
 
-	backConn, dialResp, err := websocket.Dial(r.Context(), backendURL.String(), &websocket.DialOptions{
+	// The dial has its own bound: a hung SFU must not hold the handler for as
+	// long as the client keeps the front socket open. It bounds the handshake
+	// only; the open connection outlives it.
+	dialCtx, cancelDial := context.WithTimeout(r.Context(), time.Duration(wsProxyDialTimeout.Load()))
+	defer cancelDial()
+	backConn, dialResp, err := websocket.Dial(dialCtx, backendURL.String(), &websocket.DialOptions{
 		HTTPHeader:   backendHeader,
 		Subprotocols: r.Header.Values("Sec-WebSocket-Protocol"),
 	})
@@ -251,6 +260,16 @@ func proxyWebSocket(w http.ResponseWriter, r *http.Request, target *url.URL) {
 // (typically < 10 KB).
 const wsProxyMaxMessageSize = 256 * 1024
 
+// wsProxyDialTimeout bounds the backend WebSocket handshake (10 s). Atomic so a
+// test can shorten it.
+var wsProxyDialTimeout atomic.Int64
+
+func init() { wsProxyDialTimeout.Store(int64(10 * time.Second)) }
+
+// wsCloseReasonMax is the longest close reason that fits a close frame (125-byte
+// control payload minus the 2-byte code).
+const wsCloseReasonMax = 123
+
 // copyWS copies messages from src to dst until an error or context cancellation.
 // The read limit on src (wsProxyMaxMessageSize) prevents memory exhaustion via
 // oversized frames.
@@ -258,6 +277,7 @@ func copyWS(ctx context.Context, dst, src *websocket.Conn) error {
 	for {
 		msgType, reader, err := src.Reader(ctx)
 		if err != nil {
+			forwardClose(dst, err)
 			return err
 		}
 		writer, err := dst.Writer(ctx, msgType)
@@ -271,4 +291,38 @@ func copyWS(ctx context.Context, dst, src *websocket.Conn) error {
 			return closeErr
 		}
 	}
+}
+
+// forwardClose relays the close frame one leg received to the other leg, so the
+// LiveKit SDK sees the SFU's own code (for example the one that tells it not to
+// reconnect) and the SFU sees the client's. An error that is not a close frame,
+// or a code that may not be sent on the wire, leaves the deferred normal close.
+func forwardClose(dst *websocket.Conn, err error) {
+	ce, ok := errors.AsType[websocket.CloseError](err)
+	if !ok || !sendableCloseCode(ce.Code) {
+		return
+	}
+	_ = dst.Close(ce.Code, truncateCloseReason(ce.Reason)) //nolint:errcheck // best-effort; the other leg may already be gone
+}
+
+// sendableCloseCode reports whether code may appear in a close frame (RFC 6455
+// section 7.4): the defined range minus the reserved and local-only codes, and
+// the registered and private ranges.
+func sendableCloseCode(code websocket.StatusCode) bool {
+	if code == 1004 || code == websocket.StatusNoStatusRcvd || code == websocket.StatusAbnormalClosure || code == websocket.StatusTLSHandshake {
+		return false
+	}
+	return (code >= websocket.StatusNormalClosure && code <= websocket.StatusBadGateway) || (code >= 3000 && code <= 4999)
+}
+
+// truncateCloseReason cuts reason to wsCloseReasonMax bytes on a rune boundary.
+func truncateCloseReason(reason string) string {
+	if len(reason) <= wsCloseReasonMax {
+		return reason
+	}
+	cut := wsCloseReasonMax
+	for cut > 0 && !utf8.RuneStart(reason[cut]) {
+		cut--
+	}
+	return reason[:cut]
 }

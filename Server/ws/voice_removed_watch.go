@@ -7,6 +7,12 @@ package ws
 // is remembered a short tick lists those rooms and removes the identity again
 // if it is present. Identities carry the join token, so a fresh join (a new
 // token) is never affected.
+//
+// A leave the client asked for itself (voice_leave, a channel switch, leaving a
+// group DM) is the common case and the client has discarded that session, so its
+// identity is checked only every voiceOwnLeaveWatchEvery ticks. It is still
+// checked: the token stays valid until it lapses, and a rejoin with it would put
+// the user in the room with no voice_states row.
 
 import (
 	"context"
@@ -19,6 +25,10 @@ import (
 // voiceRemovedWatchInterval is how often remembered identities are checked.
 const voiceRemovedWatchInterval = 2 * time.Second
 
+// voiceOwnLeaveWatchEvery is how many ticks apart identities removed after the
+// client's own leave are checked (every 10 s at the 2 s interval).
+const voiceOwnLeaveWatchEvery = 5
+
 // voiceRemovedWatchTimeout bounds one watch tick.
 const voiceRemovedWatchTimeout = 10 * time.Second
 
@@ -27,6 +37,9 @@ type removedIdentity struct {
 	userID    int64
 	token     string
 	until     time.Time
+	// ownLeave marks a removal after the client's own leave: checked on the
+	// slower cadence. A later forced removal of the same identity clears it.
+	ownLeave bool
 }
 
 // removedIdentities is the identity -> removal record set. Entries expire
@@ -47,7 +60,7 @@ func (s *removedIdentities) clock() time.Time {
 // record remembers one removed identity for tokenTTL from now; a repeat
 // removal restarts that window. A legacy identity with no join token names the
 // user rather than one join, so it is not recorded.
-func (s *removedIdentities) record(channelID, userID int64, token string) {
+func (s *removedIdentities) record(channelID, userID int64, token string, ownLeave bool) {
 	if token == "" {
 		return
 	}
@@ -56,7 +69,11 @@ func (s *removedIdentities) record(channelID, userID int64, token string) {
 	if s.entries == nil {
 		s.entries = map[string]removedIdentity{}
 	}
-	s.entries[participantIdentity(userID, token)] = removedIdentity{channelID: channelID, userID: userID, token: token, until: s.clock().Add(tokenTTL)}
+	id := participantIdentity(userID, token)
+	if prev, ok := s.entries[id]; ok && !prev.ownLeave {
+		ownLeave = false
+	}
+	s.entries[id] = removedIdentity{channelID: channelID, userID: userID, token: token, until: s.clock().Add(tokenTTL), ownLeave: ownLeave}
 }
 
 // extend restarts the window of an identity that is still remembered. Called
@@ -79,8 +96,9 @@ func (s *removedIdentities) pending() bool {
 	return len(s.entries) > 0
 }
 
-// snapshot drops expired entries and returns the rest grouped by channel.
-func (s *removedIdentities) snapshot() map[int64]map[string]removedIdentity {
+// snapshot drops expired entries and returns the rest grouped by channel; own-leave
+// entries only when includeOwnLeave is set.
+func (s *removedIdentities) snapshot(includeOwnLeave bool) map[int64]map[string]removedIdentity {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := s.clock()
@@ -88,6 +106,9 @@ func (s *removedIdentities) snapshot() map[int64]map[string]removedIdentity {
 	for id, e := range s.entries {
 		if !now.Before(e.until) {
 			delete(s.entries, id)
+			continue
+		}
+		if e.ownLeave && !includeOwnLeave {
 			continue
 		}
 		if out[e.channelID] == nil {
@@ -111,24 +132,26 @@ func (h *Hub) runRemovedVoiceWatch() {
 	}
 	ticker := time.NewTicker(voiceRemovedWatchInterval)
 	defer ticker.Stop()
+	tick := 0
 	for {
 		select {
 		case <-h.stop:
 			return
 		case <-ticker.C:
+			tick++
 			if !h.livekit.removed.pending() {
 				continue
 			}
 			// Each tick is bounded and ends early when the hub stops.
 			ctx, cancel := context.WithTimeout(life, voiceRemovedWatchTimeout)
-			h.enforceRemovedVoiceIdentities(ctx)
+			h.enforceRemovedVoiceIdentities(ctx, tick%voiceOwnLeaveWatchEvery == 0)
 			cancel()
 		}
 	}
 }
 
-func (h *Hub) enforceRemovedVoiceIdentities(ctx context.Context) {
-	for channelID, removed := range h.livekit.removed.snapshot() {
+func (h *Hub) enforceRemovedVoiceIdentities(ctx context.Context, includeOwnLeave bool) {
+	for channelID, removed := range h.livekit.removed.snapshot(includeOwnLeave) {
 		if ctx.Err() != nil {
 			return
 		}

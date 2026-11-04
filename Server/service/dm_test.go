@@ -553,3 +553,84 @@ func TestOpenDMIfParticipant_RefusesNonParticipant(t *testing.T) {
 		t.Errorf("OpenDMIfParticipant(participant, closed) = %v, %v; want true, nil", opened, err)
 	}
 }
+
+// A group ring reopening the DM for several targets fills each reopen's own
+// unread and mention counts from one read, matching the sidebar list.
+func TestOpenForRing_GroupReopensCarryPerTargetHistory(t *testing.T) {
+	database, _ := newDMFixture(t)
+	ctx := context.Background()
+	seedUser(t, database, &db.User{ID: 3, Username: "carol"})
+	seedDMParticipant(t, database, 50, 3)
+	ids := seedPurgeMessages(t, database, 50, 3)
+	if err := database.UpdateReadState(ctx, 3, 50, ids[0]); err != nil {
+		t.Fatalf("UpdateReadState: %v", err)
+	}
+	if err := database.IncrementMentionCounts(ctx, 50, ids[2], []int64{2}); err != nil {
+		t.Fatalf("IncrementMentionCounts: %v", err)
+	}
+	for _, uid := range []int64{2, 3} {
+		if err := database.CloseDM(ctx, uid, 50); err != nil {
+			t.Fatalf("CloseDM: %v", err)
+		}
+	}
+	calls := &countingHistoryStore{DB: database}
+	svc := NewDMService(calls, NewPermissionService(database, permissions.NewChecker(database)))
+
+	got := svc.OpenForRing(ctx, 50, []int64{2, 3})
+	if len(got) != 2 {
+		t.Fatalf("OpenForRing = %+v, want two reopens", got)
+	}
+	if calls.history != 1 || calls.lists != 0 {
+		t.Errorf("history reads = %d, open-DM list reads = %d; want 1 and 0", calls.history, calls.lists)
+	}
+	for _, r := range got {
+		open, err := database.GetUserDMChannels(ctx, r.UserID)
+		if err != nil || len(open) != 1 {
+			t.Fatalf("GetUserDMChannels(%d) = %v, %v", r.UserID, open, err)
+		}
+		want := open[0]
+		if r.Summary.LastMessageID == nil || *r.Summary.LastMessageID != *want.LastMessageID ||
+			r.Summary.LastMessage != want.LastMessage || r.Summary.LastMessageAt != want.LastMessageAt ||
+			r.Summary.UnreadCount != want.UnreadCount || r.Summary.MentionCount != want.MentionCount {
+			t.Errorf("user %d reopen = %+v, sidebar row = %+v", r.UserID, r.Summary, want)
+		}
+	}
+	if got[0].Summary.UnreadCount == got[1].Summary.UnreadCount {
+		t.Errorf("both targets got unread %d; the fixture gives them different counts", got[0].Summary.UnreadCount)
+	}
+}
+
+// A failed history read still announces every reopen, with bare summaries.
+func TestOpenForRing_HistoryFailureKeepsBareReopens(t *testing.T) {
+	database, _ := newDMFixture(t)
+	ctx := context.Background()
+	seedPurgeMessages(t, database, 50, 1)
+	if err := database.CloseDM(ctx, 2, 50); err != nil {
+		t.Fatalf("CloseDM: %v", err)
+	}
+	svc := NewDMService(&countingHistoryStore{DB: database, fail: true}, NewPermissionService(database, permissions.NewChecker(database)))
+
+	got := svc.OpenForRing(ctx, 50, []int64{2})
+	if len(got) != 1 || got[0].Summary.ChannelID != 50 || got[0].Summary.LastMessageID != nil {
+		t.Fatalf("OpenForRing = %+v, want one bare reopen", got)
+	}
+}
+
+type countingHistoryStore struct {
+	*db.DB
+	fail           bool
+	history, lists int
+}
+
+func (s *countingHistoryStore) GetDMHistoryForParticipants(ctx context.Context, channelID int64, userIDs []int64) (map[int64]db.DMHistory, error) {
+	s.history++
+	if s.fail {
+		return nil, errors.New("simulated history failure")
+	}
+	return s.DB.GetDMHistoryForParticipants(ctx, channelID, userIDs)
+}
+
+func (s *countingHistoryStore) GetUserDMChannels(ctx context.Context, userID int64) ([]db.DMChannelInfo, error) {
+	s.lists++
+	return s.DB.GetUserDMChannels(ctx, userID)
+}
