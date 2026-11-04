@@ -36,9 +36,10 @@ export const CALL_BAR_SPACE = 56;
  *  query). */
 export const CALL_BAR_SPACE_PHONE = 104;
 
-/** A call view this narrow has no room for the view toggles beside the control
- *  bar: they stack above it (`.video-grid--views-above`). */
-export const VIEWS_ABOVE_PX = 680;
+/** A call view this narrow (its border box: 680 px inside the grid's 8 px
+ *  padding) has no room for the view toggles beside the control bar: they
+ *  stack above it (`.video-grid--views-above`). */
+export const VIEWS_ABOVE_PX = 696;
 
 /** The room below the tiles when the toggles stack above the control bar. */
 export const CALL_BAR_SPACE_VIEWS_ABOVE = 96;

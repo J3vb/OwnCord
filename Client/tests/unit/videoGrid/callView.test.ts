@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { usePhone } from "../../helpers/phoneMedia";
 import * as mocks from "../../helpers/videoGridMocks";
 import { cascadedDeclaration } from "../../helpers/app-css";
 import { expectConsole } from "../../helpers/console";
@@ -822,6 +823,24 @@ describe("VideoGrid", () => {
           );
         } finally {
           container.remove();
+        }
+      });
+
+      it("on a phone, Hide my camera puts focus on View options", async () => {
+        usePhone(true);
+        document.body.appendChild(container);
+        try {
+          grid.setCallbacks({ callControls: controls() });
+          grid.setExitVisible(true);
+          grid.addStream(SELF, "Me (You)", fakeStream(), self());
+          await openMenu(SELF);
+          item("hide-self").click();
+          expect(document.activeElement).toBe(
+            container.querySelector("[data-call-control='views']"),
+          );
+        } finally {
+          container.remove();
+          vi.unstubAllGlobals();
         }
       });
 

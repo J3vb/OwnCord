@@ -81,5 +81,7 @@ describe("the phone call view's one round control row", () => {
   it("keeps every control 44 px", () => {
     expect(declared(phoneRule(".video-fs-btn"), "width")).toContain(FORTY_FOUR);
     expect(declared(phoneRule(".video-fs-btn"), "height")).toContain(FORTY_FOUR);
+    // Leave stays a pill, and seven controls still fit a 360 px screen.
+    expect(declared(phoneRule(".video-fs-btn--leave"), "width")).toContain('"value":56');
   });
 });

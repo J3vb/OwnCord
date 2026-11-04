@@ -500,11 +500,14 @@ export function createGridStreams(st: GridState, api: GridApi) {
   function selfMenuOptions(x: number, y: number, tileId: number, entry: CellEntry) {
     const onCamera = st.callbacks.callControls?.onCameraToggle;
     // A hidden full-screen tile would leave a blank screen; focus goes to
-    // the toggle that brings the tile back.
+    // the toggle that brings the tile back (on a phone, View options).
     const hide = (): void => {
       if (api.isFullscreen(tileId)) api.leaveFullscreen();
       api.setView("selfCamera", false);
-      st.viewBar?.querySelector<HTMLElement>("[data-view-toggle='selfCamera']")?.focus();
+      const back = isPhoneLayout()
+        ? st.callBar?.querySelector<HTMLElement>("[data-call-control='views']")
+        : st.viewBar?.querySelector<HTMLElement>("[data-view-toggle='selfCamera']");
+      back?.focus();
     };
     return {
       x,

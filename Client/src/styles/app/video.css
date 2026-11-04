@@ -741,6 +741,9 @@ video[hidden] + .video-surface {
     width: 44px;
     height: 44px;
   }
+  .video-fs-btn--leave {
+    width: 56px;
+  }
   .video-fs-btn--device,
   .video-grid .video-grid__views {
     display: none;
