@@ -160,7 +160,7 @@ func TestVoiceMembership_ParkedMoveExpiresWithWindow(t *testing.T) {
 	if !h.hub.EvictForModeratorMove(context.Background(), alice.userID, chA, true, false, nil) {
 		t.Fatalf("move missed the parked call")
 	}
-	g := &h.hub.voiceReg.voiceGrace
+	g := &h.hub.voiceHub.reg.voiceGrace
 	g.mu.Lock()
 	g.modMoves[alice.userID].at = time.Now().Add(-2 * time.Minute)
 	g.mu.Unlock()

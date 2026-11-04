@@ -162,7 +162,7 @@ ended is first held for 15 s so a resuming socket can take it over
 
 ### Voice membership
 
-`voiceRegistry` owns voice membership in memory. It is the field `Hub.voiceReg`.
+`voiceRegistry` owns voice membership in memory. It is the field `Hub.voiceHub.reg`.
 It holds the per-user membership lock and the 15 s reconnect grace window. Each
 connection keeps its own slot in `Client.voice` (channel, join token, completed
 flag, E2EE announce and any moderator mute stash). The durable half is the
@@ -199,7 +199,7 @@ destination with the mute intact. A fresh connect drops the kept move, and
 the user's next `voice_join` on any device ends it (carrying its flags), so a
 later resume never pulls a call off another device.
 
-At shutdown the hub calls `voiceReg.close()`. It stops every grace timer and
+At shutdown the hub calls `voiceHub.reg.close()`. It stops every grace timer and
 leaves the rows for the next boot to wipe. Reads need no handle:
 `c.voice.channel()` and `c.voice.state()` take only the slot's own mutex.
 

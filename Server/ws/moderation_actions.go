@@ -196,7 +196,7 @@ func (h *Hub) RefreshUserChannels(userID int64) {
 // re-resolving the target's state, which could by then be an unauthorized
 // channel or a rejoin.
 //
-// The DB transition and SFU call run under the per-user lock (voiceMod) shared
+// The DB transition and SFU call run under the per-user lock (voiceHub.mod) shared
 // with UnmuteForTimeout and the manual voice-mod-mute endpoint, so a late unmute
 // racing this call runs both its steps before the other starts either. If the SFU
 // call fails after a genuine DB transition, the DB is rolled back under the same
@@ -218,7 +218,7 @@ func (h *Hub) MuteForTimeout(ctx context.Context, userID, channelID, actionID in
 	if h.voice == nil {
 		return false, false
 	}
-	unlock := h.voiceMod.lock(userID)
+	unlock := h.voiceHub.mod.lock(userID)
 	defer unlock()
 
 	matched, transitioned, err := h.voice.MuteForTimeoutSession(ctx, userID, channelID, actionID, joinedAt, supersededIDs)
@@ -258,7 +258,7 @@ func (h *Hub) UnmuteForTimeout(ctx context.Context, userID int64, actionIDs []in
 	if h.voice == nil || len(actionIDs) == 0 {
 		return false
 	}
-	unlock := h.voiceMod.lock(userID)
+	unlock := h.voiceHub.mod.lock(userID)
 	defer unlock()
 
 	channelID, joinedAt, matched, err := h.voice.ClearServerMuteOwnedBy(ctx, userID, actionIDs)

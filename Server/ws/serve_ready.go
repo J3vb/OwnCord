@@ -576,7 +576,7 @@ func (h *Hub) freshConnectCleanStaleVoice(ctx context.Context, txn *voiceTxn, c 
 	// with no row). Any other fresh connect or mismatched grace entry means the call
 	// is over: stop the window so its timer cannot re-run finishVoiceLeave over a
 	// cleaned row.
-	if c.lastSeq > 0 && h.voiceReg.voiceGrace.has(c.userID, vs.ChannelID) {
+	if c.lastSeq > 0 && h.voiceHub.reg.voiceGrace.has(c.userID, vs.ChannelID) {
 		slog.Info("ws fresh connect: keeping graced voice state",
 			"user_id", c.userID, "channel_id", vs.ChannelID)
 		return

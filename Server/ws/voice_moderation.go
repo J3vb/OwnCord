@@ -448,7 +448,7 @@ var muteParticipantHookForTest func(ctx context.Context, channelID, userID int64
 
 // MuteParticipant reconciles the target's publication permissions at the SFU.
 // Reads h.livekit at call time so SetLiveKit's late wiring is picked up. Callers
-// hold voiceMod across their state write and this permission update.
+// hold voiceHub.mod across their state write and this permission update.
 func (h *Hub) MuteParticipant(ctx context.Context, channelID, userID int64, voiceJoinToken string, muted bool) error {
 	if muteParticipantHookForTest != nil {
 		return muteParticipantHookForTest(ctx, channelID, userID, voiceJoinToken, muted)
@@ -466,7 +466,7 @@ func (h *Hub) MuteParticipant(ctx context.Context, channelID, userID int64, voic
 // An SFU failure is returned as errVoiceMediaPending; the persisted desired state
 // is retained for retry and periodic reconciliation.
 func (h *Hub) SetServerMuteLocked(ctx context.Context, userID, channelID int64, muted bool) (matched bool, joinedAt string, err error) {
-	unlock := h.voiceMod.lock(userID)
+	unlock := h.voiceHub.mod.lock(userID)
 	defer unlock()
 
 	matched, err = h.voice.SetServerMute(ctx, userID, channelID, muted)
@@ -539,7 +539,7 @@ func (h *Hub) SetPendingVoiceModFlags(userID int64, serverMuted, serverDeafened 
 	if !serverMuted && !serverDeafened {
 		// A clear also forgets a move kept for a parked session: the move it
 		// belonged to did not complete.
-		h.voiceReg.voiceGrace.dropParkedModMove(userID)
+		h.voiceHub.reg.voiceGrace.dropParkedModMove(userID)
 	}
 	// The stash rides the connection holding the call: its eviction and the target's
 	// re-join consume it.

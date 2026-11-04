@@ -27,7 +27,7 @@ func holdJoinAfterCommit(t *testing.T, h *vmHarness, m *vmMember) (held <-chan s
 				return
 			default:
 			}
-			if h.hub.voiceReg.voiceMember.refsForTest(m.userID) >= 2 {
+			if h.hub.voiceHub.reg.voiceMember.refsForTest(m.userID) >= 2 {
 				return
 			}
 			if time.Now().After(deadline) {

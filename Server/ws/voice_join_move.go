@@ -35,7 +35,7 @@ func (h *Hub) voiceJoinMoveCall(fctx, ctx context.Context, txn *voiceTxn, c *Cli
 			break
 		}
 	}
-	if from == nil && h.voiceReg.voiceGrace.get(c.userID) == nil {
+	if from == nil && h.voiceHub.reg.voiceGrace.get(c.userID) == nil {
 		return false, false, false, nil, true
 	}
 
@@ -69,7 +69,7 @@ func (h *Hub) voiceJoinMoveCall(fctx, ctx context.Context, txn *voiceTxn, c *Cli
 		// Never for the joining connection's own session: re-joining its own
 		// parked call is not a move.
 		if e.client.tokenHash != c.tokenHash {
-			h.voiceReg.voiceGrace.markMoved(c.userID, e.client.tokenHash, e.snap.chID)
+			h.voiceHub.reg.voiceGrace.markMoved(c.userID, e.client.tokenHash, e.snap.chID)
 		}
 		h.finishVoiceLeaveAnnounce(ctx, txn, e.client, e.snap.chID, e.snap.joinToken, voiceLeaveReasonMoved, e.snap.chID != channelID)
 	}
@@ -112,7 +112,7 @@ func (h *Hub) takeUserModFlags(c *Client) (serverMuted, serverDeafened bool, ser
 			serverMuted, serverDeafened, serverMutedBy = sm, sd, sby
 		}
 	}
-	if kept := h.voiceReg.voiceGrace.endParkedModMove(c.userID); !serverMuted && !serverDeafened && (kept.muted || kept.deafened) {
+	if kept := h.voiceHub.reg.voiceGrace.endParkedModMove(c.userID); !serverMuted && !serverDeafened && (kept.muted || kept.deafened) {
 		serverMuted, serverDeafened, serverMutedBy = kept.muted, kept.deafened, kept.mutedBy
 	}
 	return serverMuted, serverDeafened, serverMutedBy
@@ -133,7 +133,7 @@ const voiceExitWindow = 30 * time.Second
 // unless the move of a parked call then keeps it for the resume
 // (noteParkedModMove). Any moderator exit supersedes an earlier parked move.
 func (h *Hub) noteModeratorExit(userID int64, c *Client) {
-	h.voiceReg.voiceGrace.dropParkedModMove(userID)
+	h.voiceHub.reg.voiceGrace.dropParkedModMove(userID)
 	for _, o := range h.clientsOf(userID) {
 		if o != c {
 			o.voiceExitAt.Store(0)
@@ -153,7 +153,7 @@ func (h *Hub) noteModeratorExit(userID int64, c *Client) {
 // moved, or nothing left it), which the moderator handlers read as "the user was
 // reconnecting".
 func (h *Hub) SendToVoiceDevice(userID int64, msg []byte) bool {
-	if h.voiceReg.voiceGrace.queueParkedModMoveFrame(userID, msg) {
+	if h.voiceHub.reg.voiceGrace.queueParkedModMoveFrame(userID, msg) {
 		return true
 	}
 	var target *Client

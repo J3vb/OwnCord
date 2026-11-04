@@ -34,7 +34,6 @@ type Hub struct {
 	// stopUsers: see StoppedUserIDs. Guarded by mu.
 	stopUsers   []int64
 	livekit     *LiveKitClient
-	lkProcess   *LiveKitProcess
 	permChecker *permissions.Checker
 	// perms is the cached permission service. Nil in bare test hubs, where every use
 	// falls back to the live permChecker. Revocation stays prompt because each
@@ -68,13 +67,12 @@ type Hub struct {
 
 	readyGate chan struct{} // one slot per concurrent fresh-connect ready build (admitReady)
 
-	voiceReconcile voiceReconcileState // polling reconciler (voice_reconcile.go)
+	// voiceHub is the voice family's registry, reconciler, key-holder state and locks (hub_voice_state.go).
+	voiceHub hubVoice
+
 	// voiceResumeChecks are the SFU checks of memberships resumed sockets took over
 	// (voice_resume_check.go).
 	voiceResumeChecks voiceResumeChecks
-	voiceReg          voiceRegistry // voice membership lock and grace window (voice_registry.go)
-
-	voiceRejoinBlocks voiceRejoinBlockState // voice_rejoin_block.go
 
 	// Sequence watermark of the last channel-visibility change or content shed:
 	// neither reaches a client via replay, so a client resuming from a seq at or
@@ -108,22 +106,6 @@ type Hub struct {
 	// construction.
 	voice VoiceStore
 
-	// defaultVoiceQuality is the operator-configured voice.quality
-	// (HubOptions.VoiceQuality), used by voiceJoinComplete. Always one of
-	// voiceQualities' keys (NewHub normalizes it). Set once, never mutated
-	// (voice.quality is startup-only), so no mutex guards it.
-	defaultVoiceQuality string
-
-	// voiceMod is the per-target-user lock serializing a voice-moderation DB
-	// transition with its paired LiveKit call (user_locks.go). Always non-nil (made in
-	// NewHub): without it the timeout path and the manual voice-mute endpoint could
-	// interleave.
-	voiceMod *userLocks[lockRankVoiceMod]
-
-	// voiceKeyHolders maps channelID to the current key holder (the connected
-	// participant with the lowest userID). Protected by keyHolderMu.
-	keyHolderMu     syncutil.RankedRW[lockRankHubCache]
-	voiceKeyHolders map[int64]int64
 	// Presence coalescer (QueuePresence): latest presence per user, flush armed. Guarded by presenceMu.
 	presenceMu         syncutil.Ranked[lockRankFeed]
 	presenceQueue      map[int64]pendingPresence
@@ -233,8 +215,8 @@ func (h *Hub) Run() {
 // concurrently with GracefulStopContext; deliberately does not wait on hub/client
 // teardown so the restart backstop can use it too.
 func (h *Hub) StopLiveKit() {
-	if h.lkProcess != nil {
-		h.lkProcess.Stop()
+	if h.voiceHub.lkProcess != nil {
+		h.voiceHub.lkProcess.Stop()
 	}
 }
 
@@ -271,7 +253,7 @@ func (h *Hub) GracefulStopContext(ctx context.Context, reason RestartReason) {
 		h.closeClientsForStop()
 
 		// Voice reconnect grace timers stop; a late readPump park arms none.
-		h.voiceReg.close()
+		h.voiceHub.reg.close()
 
 		// Stop LiveKit after the sockets so clients see a close rather than a dead room.
 		// The voice rows stay for the next boot's wipe.

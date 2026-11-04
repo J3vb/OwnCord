@@ -6,9 +6,9 @@ package api_test
 // LiveKitProcess.Start() fails synchronously (e.g. generateConfig rejects an
 // operator-chosen credential containing a YAML-unsafe character), NewRouter
 // must still register the process with the hub so the voice_join guard in
-// ws/voice_join.go — `if h.lkProcess != nil && !h.lkProcess.IsRunning()` —
+// ws/voice_join.go — `if h.voiceHub.lkProcess != nil && !h.voiceHub.lkProcess.IsRunning()` —
 // fails CLOSED. Before the fix, router.go skipped hub.SetLiveKitProcess on
-// the Start() error path, leaving h.lkProcess nil, which reads as "LiveKit
+// the Start() error path, leaving h.voiceHub.lkProcess nil, which reads as "LiveKit
 // is externally managed" and lets voice_join proceed with no SFU running at
 // all: a voice_states row gets persisted, a LiveKit JWT gets minted, and
 // voice_state fans out to every client for a room nothing is serving.
@@ -143,7 +143,7 @@ func TestNewRouter_LiveKitProcessStartFailure_VoiceJoinFailsClosed(t *testing.T)
 	if lastFrame["type"] != "error" {
 		t.Fatalf("voice_join with a LiveKit process that failed to start must be rejected, got type=%v frame=%v — "+
 			"router.go must register the LiveKitProcess with the hub even when proc.Start() fails, "+
-			"so ws/voice_join.go's `h.lkProcess != nil && !h.lkProcess.IsRunning()` guard can fail closed "+
+			"so ws/voice_join.go's `h.voiceHub.lkProcess != nil && !h.voiceHub.lkProcess.IsRunning()` guard can fail closed "+
 			"instead of reading a dropped process as \"externally managed, don't check\"",
 			lastFrame["type"], lastFrame)
 	}

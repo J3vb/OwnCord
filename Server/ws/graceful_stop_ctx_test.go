@@ -58,7 +58,7 @@ func TestGracefulStopContext_StopsLiveKitAfterSocketsClose(t *testing.T) {
 	h.pubsub.Subscribe(c, TopicGlobal)
 
 	var stopped, noticeQueued, socketClosed bool
-	h.lkProcess = &LiveKitProcess{cancel: func() {
+	h.voiceHub.lkProcess = &LiveKitProcess{cancel: func() {
 		stopped = true
 		noticeQueued = len(h.broadcast) > 0
 		socketClosed = c.isSendClosed()

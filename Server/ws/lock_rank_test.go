@@ -51,22 +51,22 @@ func wantBothStacks(t *testing.T, report, acquiring, held, test string) {
 }
 
 func TestRank_AllowsOutermostFirst(t *testing.T) {
-	h := &Hub{voiceMod: newUserLocks[lockRankVoiceMod]()}
+	h := &Hub{voiceHub: hubVoice{mod: newUserLocks[lockRankVoiceMod]()}}
 	ps := &PubSub{}
 	c := &Client{}
 	if r := rankPanic(t, func() {
-		unlockMember := h.voiceReg.voiceMember.lock(1) // 1
-		unlockMod := h.voiceMod.lock(1)                // 2
-		h.tombstones.mu.Lock()                         // 3
-		h.presenceMu.Lock()                            // 4
-		h.seqMu.Lock()                                 // 5
-		h.keyHolderMu.RLock()                          // 6
-		h.mu.RLock()                                   // 7
-		ps.mu.RLock()                                  // 8
-		lockOnce(&c.mu)                                // 9
+		unlockMember := h.voiceHub.reg.voiceMember.lock(1) // 1
+		unlockMod := h.voiceHub.mod.lock(1)                // 2
+		h.tombstones.mu.Lock()                             // 3
+		h.presenceMu.Lock()                                // 4
+		h.seqMu.Lock()                                     // 5
+		h.voiceHub.keyHolderMu.RLock()                     // 6
+		h.mu.RLock()                                       // 7
+		ps.mu.RLock()                                      // 8
+		lockOnce(&c.mu)                                    // 9
 		ps.mu.RUnlock()
 		h.mu.RUnlock()
-		h.keyHolderMu.RUnlock()
+		h.voiceHub.keyHolderMu.RUnlock()
 		h.seqMu.Unlock()
 		h.presenceMu.Unlock()
 		h.tombstones.mu.Unlock()
@@ -76,7 +76,7 @@ func TestRank_AllowsOutermostFirst(t *testing.T) {
 		t.Fatalf("the documented order panicked:\n%s", r)
 	}
 	// Released in order, the outermost lock is free to take again.
-	if r := rankPanic(t, func() { h.voiceReg.voiceMember.lock(1)() }); r != "" {
+	if r := rankPanic(t, func() { h.voiceHub.reg.voiceMember.lock(1)() }); r != "" {
 		t.Fatalf("a lock taken after every hold was released panicked:\n%s", r)
 	}
 }
@@ -91,7 +91,7 @@ func TestRank_PanicsOnInversion(t *testing.T) {
 	wantBothStacks(t, r, "lockRankHub (rank 7)", "lockRankLeaf (rank 9)", "TestRank_PanicsOnInversion")
 
 	h.seqMu.Lock()
-	r = rankPanic(t, func() { h.voiceReg.voiceMember.lock(1)() })
+	r = rankPanic(t, func() { h.voiceHub.reg.voiceMember.lock(1)() })
 	h.seqMu.Unlock()
 	wantBothStacks(t, r, "lockRankVoiceMember (rank 1)", "lockRankSeq (rank 5)", "TestRank_PanicsOnInversion")
 
@@ -126,7 +126,7 @@ func TestRank_PanicsOnTwoOfSameRank(t *testing.T) {
 }
 
 func TestRank_TryLockNotFlagged(t *testing.T) {
-	h := &Hub{voiceMod: newUserLocks[lockRankVoiceMod]()}
+	h := &Hub{voiceHub: hubVoice{mod: newUserLocks[lockRankVoiceMod]()}}
 	c := &Client{}
 
 	// A cold read's TryRLock of the tombstones (rank 3) under seqMu (5)
@@ -160,7 +160,7 @@ func TestRank_TryLockNotFlagged(t *testing.T) {
 	var unlock func()
 	if r := rankPanic(t, func() {
 		var ok bool
-		if unlock, ok = h.voiceMod.tryLock(1); !ok {
+		if unlock, ok = h.voiceHub.mod.tryLock(1); !ok {
 			t.Error("tryLock of an idle user failed")
 		}
 	}); r != "" {

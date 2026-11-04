@@ -127,8 +127,8 @@ func (h *Hub) voiceJoinPrecheck(ctx context.Context, c *Client, payload json.Raw
 	}
 	_ = json.Unmarshal(payload, &intent) // parseCallChannelID already accepted it; a non-bool reads as false
 	if intent.UserInitiated {
-		h.voiceRejoinBlocks.clear(c.userID)
-	} else if h.voiceRejoinBlocks.blocked(c.userID, channelID) {
+		h.voiceHub.rejoinBlocks.clear(c.userID)
+	} else if h.voiceHub.rejoinBlocks.blocked(c.userID, channelID) {
 		c.sendMsg(buildErrorMsgWithID(ErrCodeForbidden, voiceRejoinRefusal, reqID))
 		return 0, nil, 0, false
 	}
@@ -185,7 +185,7 @@ func (h *Hub) voiceJoinPrecheck(ctx context.Context, c *Client, payload json.Raw
 	}
 
 	// Reject when the companion LiveKit process gave up (crashed repeatedly).
-	if h.lkProcess != nil && !h.lkProcess.IsRunning() {
+	if h.voiceHub.lkProcess != nil && !h.voiceHub.lkProcess.IsRunning() {
 		slog.Warn("handleVoiceJoin: LiveKit process not running", "user_id", c.userID)
 		c.sendMsg(buildErrorMsgWithID(ErrCodeVoiceError, "voice is temporarily unavailable — LiveKit is not running", reqID))
 		return 0, nil, 0, false
@@ -196,7 +196,7 @@ func (h *Hub) voiceJoinPrecheck(ctx context.Context, c *Client, payload json.Raw
 	// makes the client fail confusingly with no server-side explanation. The verdict
 	// is shared and at most 5 s old, so a burst of joins costs one ListRooms (bounded
 	// at 3 s), not one each.
-	if h.lkProcess == nil {
+	if h.voiceHub.lkProcess == nil {
 		if healthy, err := h.livekit.CachedHealthCheck(ctx); !healthy || err != nil {
 			slog.Warn("handleVoiceJoin: external LiveKit unreachable", "user_id", c.userID, "err", err)
 			voiceJoinFail(ctx, c, reqID, errors.Join(err, errVoiceJoinUnhealthy), ErrCodeVoiceError, "voice is temporarily unavailable — LiveKit is not reachable")
@@ -464,8 +464,8 @@ func (h *Hub) voiceJoinComplete(ctx context.Context, txn *voiceTxn, c *Client, c
 	h.sendVoicePeerKeys(c, channelID)
 	h.sendVoicePeerWatching(c, channelID)
 
-	// h.defaultVoiceQuality (voice.quality config) is the only source; no per-channel override exists.
-	quality := h.defaultVoiceQuality
+	// h.voiceHub.defaultQuality (voice.quality config) is the only source; no per-channel override exists.
+	quality := h.voiceHub.defaultQuality
 	maxUsers := ch.VoiceMaxUsers
 	bitrate := qualityBitrate(quality)
 	c.sendMsg(buildVoiceConfig(channelID, quality, bitrate, maxUsers))

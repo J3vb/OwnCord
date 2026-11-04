@@ -50,8 +50,8 @@
 //	rank  lock                       declared                 taken under it
 //	1 S   userLockEntry.mu           voice_registry.go:45     DB, broadcasts, seqMu (replay.go:438-441); never a
 //	      (voiceRegistry.voiceMember) user_locks.go:44         LiveKit RPC
-//	2 S   userLockEntry.mu           hub.go:121               DB and LiveKit RPC (user_locks.go:9-17); never a
-//	      (Hub.voiceMod)             user_locks.go:44         membership path
+//	2 S   userLockEntry.mu           hub_voice_state.go:25    DB and LiveKit RPC (user_locks.go:9-17); never a
+//	      (hubVoice.mod)             user_locks.go:44         membership path
 //	3 S   replayPurgeState.mu RW     hub_tombstones.go:53     seqMu (hub_events.go:210), then the persister
 //	      (Hub.tombstones)                                    Flush and the DB delete (hub_events.go:218-235).
 //	                                                          Cold reads only TryRLock (eventstore.go:46-62)
@@ -71,16 +71,16 @@
 //	3 S   admissionMu (local)        serve.go:62              Hub.mu (R) via ClientCount (serve.go:73,83)
 //	4     timeoutViewState.mu        member_timeouts_       Hub.mu (R), Client.mu
 //	      (Hub.timeoutView)          delivery.go:23
-//	4     Hub.presenceMu             hub.go:128               the caller's closure, which only enqueues
+//	4     Hub.presenceMu             hub.go:110               the caller's closure, which only enqueues
 //	                                                          (hub_presence.go:211-216), Hub.mu (R), Client.mu,
 //	                                                          presenceRepairState.mu, queueDropState.mu
-//	5     Hub.seqMu                  hub.go:52                Hub.keyHolderMu (a resume's registerNow ->
-//	                                                          updateKeyHolder, hub_registry.go:177,182), Hub.mu,
+//	5     Hub.seqMu                  hub.go:51                hubVoice.keyHolderMu (a resume's registerNow ->
+//	                                                          updateKeyHolder, hub_registry.go:174,179), Hub.mu,
 //	                                                          PubSub.mu, Client.mu (SendToUser, hub_broadcast.go:
 //	                                                          294-299,354; registerNow, hub_registry.go:89),
 //	                                                          EventRingBuffer.mu, presenceRepairState.mu,
 //	                                                          queueDropState.mu, and the leaves below
-//	6     Hub.keyHolderMu RW         hub.go:125               Hub.mu (R), voiceSlot.voiceMu
+//	6     hubVoice.keyHolderMu RW    hub_voice_state.go:29    Hub.mu (R), voiceSlot.voiceMu
 //	                                                          (voice_e2ee.go:44-60)
 //	6     hubSettings.mu RW          hub_settings.go:207      a DB read under the write lock
 //	                                                          (hub_settings.go:27-35); see the exceptions
@@ -133,9 +133,9 @@
 //
 // The whole -tags deadlock suite, run with the checker reporting instead of
 // panicking, found one out-of-order acquire and no production one: a test
-// (TestSweepAFK_SkipsMemberWithModerationInFlight) held voiceMod on the
+// (TestSweepAFK_SkipsMemberWithModerationInFlight) held hubVoice.mod on the
 // goroutine that then ran the AFK sweep, which takes voiceMember. In
-// production the moderator is another goroutine; the test now holds voiceMod
+// production the moderator is another goroutine; the test now holds hubVoice.mod
 // on one too. The checker sees only the paths the suite runs: a Client.mu
 // holder calling back into the hub on an untested path would still go unseen.
 
@@ -147,11 +147,11 @@ package ws
 // a literal.
 type (
 	lockRankVoiceMember struct{} // userLockEntry.mu of voiceRegistry.voiceMember
-	lockRankVoiceMod    struct{} // userLockEntry.mu of Hub.voiceMod
+	lockRankVoiceMod    struct{} // userLockEntry.mu of hubVoice.mod
 	lockRankSerialiser  struct{} // the rank-3 serialisers
 	lockRankFeed        struct{} // timeoutViewState.mu, Hub.presenceMu
 	lockRankSeq         struct{} // Hub.seqMu
-	lockRankHubCache    struct{} // Hub.keyHolderMu, hubSettings.mu
+	lockRankHubCache    struct{} // hubVoice.keyHolderMu, hubSettings.mu
 	lockRankHub         struct{} // Hub.mu
 	lockRankPubSub      struct{} // PubSub.mu
 	lockRankLeaf        struct{} // the leaves

@@ -152,8 +152,8 @@ func TestRegisterNow_AnotherSessionGraced_StaysParked(t *testing.T) {
 	parked := NewTestClient(h, 1, make(chan []byte, 8))
 	parked.tokenHash = "session-a"
 	entry := &voiceGraceEntry{client: parked, snap: slotSnap{chID: 7, joinToken: "jt", completed: true}}
-	h.voiceReg.voiceGrace.put(1, entry, func() {})
-	t.Cleanup(func() { h.voiceReg.voiceGrace.take(1) })
+	h.voiceHub.reg.voiceGrace.put(1, entry, func() {})
+	t.Cleanup(func() { h.voiceHub.reg.voiceGrace.take(1) })
 
 	other := NewTestClient(h, 1, make(chan []byte, 8))
 	other.tokenHash = "session-b"
@@ -163,7 +163,7 @@ func TestRegisterNow_AnotherSessionGraced_StaysParked(t *testing.T) {
 	if !h.isRegistered(other) {
 		t.Fatal("the new device was not registered")
 	}
-	if h.voiceReg.voiceGrace.get(1) != entry {
+	if h.voiceHub.reg.voiceGrace.get(1) != entry {
 		t.Fatal("the new device took the other session's parked call")
 	}
 	if got := other.voice.channel(); got != 0 {
@@ -179,13 +179,13 @@ func TestRegisterNow_FreshConnectAnotherSession_KeepsParkedEntry(t *testing.T) {
 	parked := NewTestClient(h, 1, make(chan []byte, 8))
 	parked.tokenHash = "session-a"
 	entry := &voiceGraceEntry{client: parked, snap: slotSnap{chID: 7, joinToken: "jt", completed: true}}
-	h.voiceReg.voiceGrace.put(1, entry, func() {})
-	t.Cleanup(func() { h.voiceReg.voiceGrace.take(1) })
+	h.voiceHub.reg.voiceGrace.put(1, entry, func() {})
+	t.Cleanup(func() { h.voiceHub.reg.voiceGrace.take(1) })
 
 	other := NewTestClient(h, 1, make(chan []byte, 8))
 	other.tokenHash = "session-b"
 	h.registerNowTest(other, nil)
-	if h.voiceReg.voiceGrace.get(1) != entry {
+	if h.voiceHub.reg.voiceGrace.get(1) != entry {
 		t.Fatal("a fresh connect on another device discarded the parked call")
 	}
 }
@@ -196,7 +196,7 @@ func TestRegisterNow_SameSessionGraced_Inherits(t *testing.T) {
 
 	parked := NewTestClient(h, 1, make(chan []byte, 8))
 	parked.tokenHash = "session-a"
-	h.voiceReg.voiceGrace.put(1, &voiceGraceEntry{client: parked, snap: slotSnap{chID: 7, joinToken: "jt", completed: true}}, func() {})
+	h.voiceHub.reg.voiceGrace.put(1, &voiceGraceEntry{client: parked, snap: slotSnap{chID: 7, joinToken: "jt", completed: true}}, func() {})
 
 	resume := NewTestClient(h, 1, make(chan []byte, 8))
 	resume.tokenHash = "session-a"

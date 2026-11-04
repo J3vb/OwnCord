@@ -254,7 +254,7 @@ func TestVoiceResumeCheck_DroppedAgainLeavesParked(t *testing.T) {
 	h.hub.checkResumedVoice(context.Background())
 	clk.advance(voiceResumeConfirmGap)
 	h.hub.checkResumedVoice(context.Background())
-	if !h.hub.voiceReg.voiceGrace.has(alice.userID, chID) {
+	if !h.hub.voiceHub.reg.voiceGrace.has(alice.userID, chID) {
 		t.Fatal("resume check tore down a membership parked again")
 	}
 	h.expireGrace(alice)

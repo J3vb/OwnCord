@@ -120,7 +120,7 @@ func (s *voiceGraceState) takeParkedModMove(c *Client) *parkedModMove {
 // moderator moved: it stashes the moderator flags on c for its re-join and
 // delivers the frames the move sent. The caller holds c's membership lock.
 func (h *Hub) collectParkedModMove(c *Client) {
-	m := h.voiceReg.voiceGrace.takeParkedModMove(c)
+	m := h.voiceHub.reg.voiceGrace.takeParkedModMove(c)
 	if m == nil {
 		return
 	}

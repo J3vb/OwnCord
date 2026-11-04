@@ -95,7 +95,7 @@ func (h *Hub) reconcileVoiceMembership(ctx context.Context) {
 		byRoom[row.ChannelID] = append(byRoom[row.ChannelID], voiceMembership{row.UserID, row.JoinedAt})
 		live[id] = struct{}{}
 	}
-	h.voiceReconcile.prune(live)
+	h.voiceHub.reconcile.prune(live)
 	// Also visit rooms no row names: a sole member removed from voice leaves a room
 	// with no rows, and a participant there (a replayed, still-valid token) is an
 	// orphan too. A failure only narrows this tick to rooms with rows.
@@ -135,12 +135,12 @@ func (h *Hub) reconcileVoiceMembership(ctx context.Context) {
 			id := participantIdentity(row.userID, row.joinedAt)
 			expected[id] = struct{}{}
 			if _, ok := present[id]; ok {
-				h.voiceReconcile.clear(id)
+				h.voiceHub.reconcile.clear(id)
 				continue
 			}
-			if h.voiceReconcile.miss(id) >= voiceReconcileGraceTicks {
+			if h.voiceHub.reconcile.miss(id) >= voiceReconcileGraceTicks {
 				h.reconcileReap(ctx, channelID, row.userID, row.joinedAt)
-				h.voiceReconcile.clear(id)
+				h.voiceHub.reconcile.clear(id)
 			}
 		}
 

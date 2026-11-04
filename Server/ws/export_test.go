@@ -267,7 +267,7 @@ func NewHubForTest() *Hub {
 		clients:  make(map[int64][]*Client),
 		pubsub:   NewPubSub(),
 		limiter:  auth.NewRateLimiter(),
-		voiceMod: newUserLocks[lockRankVoiceMod](),
+		voiceHub: hubVoice{mod: newUserLocks[lockRankVoiceMod]()},
 	}
 }
 

@@ -34,7 +34,7 @@ type voiceTxn struct {
 // Release with end, normally `defer txn.end()`. Callers hold none of the locks to
 // the right of voiceMember in the order (voice_registry.go).
 func (h *Hub) begin(userID int64) *voiceTxn {
-	return &voiceTxn{h: h, userID: userID, unlock: h.voiceReg.voiceMember.lock(userID)}
+	return &voiceTxn{h: h, userID: userID, unlock: h.voiceHub.reg.voiceMember.lock(userID)}
 }
 
 // heldTxn returns a lock-free handle. Its one production caller is onClientEvent:
@@ -147,7 +147,7 @@ func (t *voiceTxn) clearExact(c *Client, chID int64, token string) bool {
 // one join instance, which is why leaveVoiceChannelWithRetry may run it after the
 // lock is released.
 func (t *voiceTxn) deleteRow(ctx context.Context, chID int64, joinedAt string) (bool, error) {
-	return t.h.voiceReg.deleteJoinRow(ctx, t.h, t.userID, chID, joinedAt)
+	return t.h.voiceHub.reg.deleteJoinRow(ctx, t.h, t.userID, chID, joinedAt)
 }
 
 // deleteJoinRow is deleteRow without the handle. Safe without the member lock
@@ -170,13 +170,13 @@ func (r *voiceRegistry) deleteJoinRow(ctx context.Context, h *Hub, userID, chID 
 // the member lock keeps a resuming socket's inherit and the expiry teardown from
 // both running (expireVoiceGrace's takeForExpiry).
 func (t *voiceTxn) takeParked(chID int64) *voiceGraceEntry {
-	return t.h.voiceReg.voiceGrace.takeJoin(t.userID, chID, "")
+	return t.h.voiceHub.reg.voiceGrace.takeJoin(t.userID, chID, "")
 }
 
 // takeParkedOfSession is takeParked limited to an entry tokenHash's session parked:
 // a device reloading discards its own parked call, never another device's.
 func (t *voiceTxn) takeParkedOfSession(tokenHash string) *voiceGraceEntry {
-	g := &t.h.voiceReg.voiceGrace
+	g := &t.h.voiceHub.reg.voiceGrace
 	if e := g.get(t.userID); e == nil || e.client.tokenHash != tokenHash {
 		return nil
 	}

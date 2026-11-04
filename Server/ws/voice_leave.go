@@ -244,7 +244,7 @@ func leaveVoiceChannelWithRetry(ctx context.Context, txn *voiceTxn, channelID in
 				delay *= 2
 
 				attemptCtx, cancel := context.WithTimeout(retryCtx, attemptTimeout)
-				_, retryErr := h.voiceReg.deleteJoinRow(attemptCtx, h, userID, channelID, joinToken)
+				_, retryErr := h.voiceHub.reg.deleteJoinRow(attemptCtx, h, userID, channelID, joinToken)
 				cancel()
 				if retryErr != nil {
 					if retryCtx.Err() != nil {

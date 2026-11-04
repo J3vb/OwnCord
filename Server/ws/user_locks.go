@@ -8,7 +8,7 @@ import (
 
 // userLocks is a refcounted per-user lock. The hub keeps two instances:
 //
-//   - voiceMod serializes a voice-moderation DB transition with its paired LiveKit
+//   - voiceHub.mod serializes a voice-moderation DB transition with its paired LiveKit
 //     call, for BOTH the timeout path (muteForTimeout/unmuteForTimeout) and the
 //     manual voice-mod-mute endpoint. Whichever caller takes the lock for a userID
 //     runs its DB write AND its SFU call before the other can start either half, so
@@ -16,12 +16,12 @@ import (
 //     other, and an SFU-failure rollback runs against the DB state its own mute
 //     produced. It is held across a LiveKit RPC.
 //   - voiceMember serializes every change to a user's voice membership. It lives in
-//     voiceRegistry; the lock order for both is in lock_order.go. voiceMod comes
-//     right after voiceMember, and a path holding voiceMod never calls a membership
+//     voiceRegistry; the lock order for both is in lock_order.go. voiceHub.mod comes
+//     right after voiceMember, and a path holding voiceHub.mod never calls a membership
 //     path.
 //
 // R is the rank the instance's entries carry (lock_order.go): voiceMember and
-// voiceMod are the same type with different ranks, so the deadlock build
+// voiceHub.mod are the same type with different ranks, so the deadlock build
 // tells them apart. The map's own mu is a leaf whatever R is.
 //
 // Entries are reference-counted and evicted once nobody holds or waits on them, so
@@ -46,7 +46,7 @@ func newUserLocks[R syncutil.LockRank]() *userLocks[R] {
 }
 
 // lock acquires the per-userID lock, blocking until held, and returns a
-// func that releases it — `defer h.voiceMod.lock(userID)()`.
+// func that releases it — `defer h.voiceHub.mod.lock(userID)()`.
 func (v *userLocks[R]) lock(userID int64) func() {
 	v.mu.Lock()
 	if v.locks == nil {

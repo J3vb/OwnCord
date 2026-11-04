@@ -187,7 +187,7 @@ func (h *Hub) voiceHeldByOtherSession(c *Client, channelID int64) bool {
 			return true
 		}
 	}
-	if e := h.voiceReg.voiceGrace.get(c.userID); e != nil && e.client.tokenHash != c.tokenHash && e.snap.chID == channelID {
+	if e := h.voiceHub.reg.voiceGrace.get(c.userID); e != nil && e.client.tokenHash != c.tokenHash && e.snap.chID == channelID {
 		return true
 	}
 	return false
