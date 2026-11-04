@@ -15,6 +15,7 @@ import { authorityChannelId, threadsStore } from "@stores/threads.store";
 import { refreshThreadChips } from "./message-list/threadChip";
 import { safetyStore } from "../features/safety/store";
 import { registerReadingAnchor } from "../features/messaging/readingAnchor";
+import { takeReadingPosition } from "./message-list/readingPositions";
 import { openUserProfilePopup } from "../features/profiles/openUserProfilePopup";
 import { uiStore } from "@stores/ui.store";
 import { renderUnreadBar, refreshConnectionControls } from "./message-list/renderers";
@@ -29,6 +30,7 @@ import { canManageMessages } from "@lib/permissions";
 import { onPhoneLayoutChange } from "@lib/ui/bottomSheet";
 import { channelsStore, getPointerOnOpen, getUnreadOnOpen } from "@stores/channels.store";
 import { UNREAD_COUNT_CAP, atEachMidnight } from "@lib/text/formatting";
+import { highlightsCurrentUser } from "@lib/text/mentions";
 import type { VirtualItemMessage } from "./message-list/virtualItems";
 import type { PollOutcome } from "../features/messaging/pollSend";
 import { messagingText } from "../i18n/messaging";
@@ -154,6 +156,8 @@ export type MessageListComponent = MountableComponent & {
   cancelEdit(): void;
   /** True while an inline editor is open (or loading) in this list. */
   isEditing(): boolean;
+  /** Tint the row the composer's reply bar answers; null clears it. */
+  setReplyTarget(messageId: number | null): void;
 };
 
 /** A `:shortcode:` in the text or a reaction: the row may hold a custom emoji. */
@@ -199,8 +203,11 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     unreadAnnouncer: null,
     unreadBarDismissed: false,
     openAtDividerPending: false,
+    restorePosition: null,
     scrollToBottomCount: null,
     newBelowCount: 0,
+    mentionsBelowCount: 0,
+    replyTargetId: null,
     jumpToPresentPill: null,
     renderedStart: 0,
     renderedEnd: 0,
@@ -602,8 +609,11 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
 
       // Restore scroll position using anchor
       if (atBottom) {
-        // A list mounted while hidden still owes the reader its NEW divider.
-        if (!api.openAtDividerIfReady()) api.scrollToBottom();
+        // A list mounted while hidden still owes the reader its NEW divider
+        // or the spot they left.
+        if (!api.openAtDividerIfReady() && !api.restoreReadingPositionIfReady()) {
+          api.scrollToBottom();
+        }
       } else {
         api.setScrollTop(api.offsetBefore(anchorIdx) + anchorOffset);
       }
@@ -619,7 +629,8 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       const buildsRows =
         st.root.clientHeight !== st.lastViewportHeight ||
         api.activeJumpIndex() !== -1 ||
-        st.openAtDividerPending;
+        st.openAtDividerPending ||
+        st.restorePosition !== null;
       if (!buildsRows) {
         if (st.resizeRafId === 0) resizePass();
         return;
@@ -639,14 +650,19 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     if (st.root.clientWidth > 0) st.estimateWidth = st.root.clientWidth;
 
     st.openAtDividerPending = st.unreadOnOpen > 0;
+    // Taken either way, so a position from before unread arrived is not reused later.
+    const lastPosition = takeReadingPosition(st.options.channelId);
+    st.restorePosition =
+      st.unreadOnOpen === 0 && !isWindowDetached(st.options.channelId) ? lastPosition : null;
     api.renderAll();
     // Fetch the inline editor chunk once the list is up, so ArrowUp opens at once.
     setOwnedTimeout(st.disposable.signal, preloadInlineEdit, 0);
     api.updateJumpToPresentPill();
-    const openedAtDivider = api.openAtDividerIfReady();
+    const openedAtDivider = api.openAtDividerIfReady() || api.restoreReadingPositionIfReady();
     api.updateUnreadBar();
     // A deferred divider still moves the view later, so only the bottom
-    // scrolls are skipped when the open already landed on it.
+    // scrolls are skipped when the open already landed on it (or on the
+    // spot the reader left).
     if (!openedAtDivider) api.scrollToBottom();
     setLiveTailInView(st.options.channelId, api.isNearBottom());
     const initialScrollRaf = requestAnimationFrame(() => {
@@ -705,7 +721,16 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
           if (!wasBottom && appended && !st.loadingNewer) {
             // Older ids (a prepend) and the reader's own rows never count.
             for (const m of st.allMessages) {
-              if (m.id > prevLast && m.user.id !== st.options.currentUserId) st.newBelowCount++;
+              if (m.id <= prevLast || m.user.id === st.options.currentUserId) continue;
+              st.newBelowCount++;
+              const mentionInfo = {
+                mentions: m.mentions,
+                mentionsEveryone: m.mentionsEveryone,
+                mentionRoles: m.mentionRoles,
+              };
+              if (!m.deleted && highlightsCurrentUser(m.content, mentionInfo)) {
+                st.mentionsBelowCount++;
+              }
             }
           }
           // The page kept the reader in place: the live-tail flag now describes
@@ -921,7 +946,20 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     onPrefChange(["roleColors"], api.refreshAuthorRows, st.disposable.signal);
   }
 
+  function setReplyTarget(messageId: number | null): void {
+    st.replyTargetId = messageId;
+    if (st.contentContainer === null) return;
+    for (const el of st.contentContainer.querySelectorAll(".message.reply-target")) {
+      el.classList.remove("reply-target");
+    }
+    if (messageId === null) return;
+    st.contentContainer
+      .querySelector(`.message[data-testid="message-${messageId}"]`)
+      ?.classList.add("reply-target");
+  }
+
   function destroy(): void {
+    api.rememberReadingPositionNow();
     if (st.resizeObserver !== null) {
       st.resizeObserver.disconnect();
       st.resizeObserver = null;
@@ -979,6 +1017,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     st.unreadAnnouncer = null;
     st.scrollToBottomCount = null;
     st.newBelowCount = 0;
+    st.mentionsBelowCount = 0;
     st.jumpToPresentPill = null;
     st.olderLoadingRow = null;
     st.olderFailedRow = null;
@@ -993,5 +1032,6 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     startEdit: api.startEdit,
     cancelEdit: api.cancelEdit,
     isEditing: api.isEditing,
+    setReplyTarget,
   };
 }

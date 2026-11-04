@@ -144,6 +144,10 @@ export function createInputComposer(st: InputState, api: InputApi) {
     st.textarea.readOnly = disabled;
     st.textarea.setAttribute("aria-disabled", String(disabled));
     st.textarea.placeholder = disabled ? st.disabledReason! : idlePlaceholder();
+    // The box shows the reason on one line; a long one is ellipsized, so the
+    // whole reason is one hover away.
+    if (disabled) st.textarea.title = st.disabledReason!;
+    else st.textarea.removeAttribute("title");
     const uploadsOff = uploadsDisabledByServer();
     for (const btn of st.controlButtons) {
       // The mic needs what "+" needs (an upload) and a server that keeps the clip's metadata.
@@ -216,6 +220,7 @@ export function createInputComposer(st: InputState, api: InputApi) {
   ): void {
     st.state = { replyTo: { messageId, username, ...opts } };
     showReplyBar();
+    st.options.onReplyTargetChange?.(messageId);
     st.textarea?.focus();
     st.options.onDraftChange?.();
   }
@@ -223,6 +228,7 @@ export function createInputComposer(st: InputState, api: InputApi) {
   function clearReply(): void {
     st.state = { ...st.state, replyTo: null };
     hideReplyBar();
+    st.options.onReplyTargetChange?.(null);
     st.options.onDraftChange?.();
   }
 

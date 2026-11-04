@@ -7,6 +7,7 @@ import type { VirtualItem } from "./virtualItems";
 import type { FenwickTree } from "./fenwick";
 import type { ScrollMetrics } from "./listShared";
 import type { MessageListOptions } from "../MessageList";
+import type { ReadingPosition } from "./readingPositions";
 
 export interface ListState {
   readonly options: MessageListOptions;
@@ -64,9 +65,16 @@ export interface ListState {
   unreadBarDismissed: boolean;
   /** The visit still owes the reader a jump to the NEW divider (cleared on first use). */
   openAtDividerPending: boolean;
+  /** Where the reader left this channel last time, owed to a visit with no NEW
+   *  divider (cleared on first use). */
+  restorePosition: ReadingPosition | null;
   scrollToBottomCount: HTMLSpanElement | null;
   /** Messages from others that landed below the view since the reader scrolled up. */
   newBelowCount: number;
+  /** How many of those mention the reader: the pill turns to the mention colour. */
+  mentionsBelowCount: number;
+  /** The message the composer's reply bar answers; its row is tinted. */
+  replyTargetId: number | null;
   jumpToPresentPill: HTMLButtonElement | null;
   renderedStart: number;
   renderedEnd: number;
@@ -276,6 +284,8 @@ export interface ListApi {
   toggleBlockedRun(firstId: number): void;
   revealIndex(idx: number, flash: boolean, recentre?: boolean): boolean;
   openAtDividerIfReady(): boolean;
+  restoreReadingPositionIfReady(): boolean;
+  rememberReadingPositionNow(): void;
   updateUnreadBar(): void;
   dismissUnreadBar(): void;
   markReadAndJumpToPresent(): void;

@@ -91,6 +91,7 @@ function fakeCtrl(channelId: number | null, scrollResult = true) {
         startEdit: vi.fn(),
         cancelEdit: vi.fn(),
         isEditing: vi.fn(),
+        setReplyTarget: vi.fn(),
       },
       mountChannel: vi.fn(),
       destroyChannel: vi.fn(),
