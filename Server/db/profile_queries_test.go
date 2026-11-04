@@ -2,7 +2,10 @@ package db_test
 
 import (
 	"context"
+	"errors"
 	"testing"
+
+	"github.com/J3vb/OwnCord/Server/db"
 )
 
 // ─── UpdateUserProfile tests ─────────────────────────────────────────────────
@@ -329,5 +332,42 @@ func TestMarkSessionsSeen_AcknowledgesEveryLoginButTheCallers(t *testing.T) {
 	}
 	if !sess.Unseen {
 		t.Error("GetSessionByTokenHash dropped the unseen flag")
+	}
+}
+
+// The profile and the identity key commit together: a username clash fails
+// the whole write, so the key is not published either; a clean write stores
+// both.
+func TestUpdateUserProfileAndIdentityKey_AllOrNothing(t *testing.T) {
+	database := openMigratedMemory(t)
+	ctx := context.Background()
+	uid := seedUser(t, database, "pk-alice")
+	seedUser(t, database, "pk-bob")
+
+	err := database.UpdateUserProfileAndIdentityKey(ctx, uid, "pk-bob", nil, nil, nil, nil, nil, "key-one")
+	if !db.IsUniqueConstraintError(err) {
+		t.Fatalf("clash err = %v, want a unique constraint error", err)
+	}
+	u, err := database.GetUserByID(ctx, uid)
+	if err != nil {
+		t.Fatalf("GetUserByID: %v", err)
+	}
+	if u.Username != "pk-alice" || u.IdentityPublicKey != nil {
+		t.Fatalf("after the failed write: username %q, key %v; want unchanged and no key", u.Username, u.IdentityPublicKey)
+	}
+
+	if err := database.UpdateUserProfileAndIdentityKey(ctx, uid, "pk-alice2", nil, nil, nil, nil, nil, "key-two"); err != nil {
+		t.Fatalf("UpdateUserProfileAndIdentityKey: %v", err)
+	}
+	u, err = database.GetUserByID(ctx, uid)
+	if err != nil {
+		t.Fatalf("GetUserByID: %v", err)
+	}
+	if u.Username != "pk-alice2" || u.IdentityPublicKey == nil || *u.IdentityPublicKey != "key-two" {
+		t.Fatalf("after the write: username %q, key %v; want both stored", u.Username, u.IdentityPublicKey)
+	}
+
+	if err := database.UpdateUserProfileAndIdentityKey(ctx, 999999, "ghost", nil, nil, nil, nil, nil, "k"); !errors.Is(err, db.ErrNotFound) {
+		t.Fatalf("missing user err = %v, want ErrNotFound", err)
 	}
 }

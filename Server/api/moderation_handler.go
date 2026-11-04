@@ -51,7 +51,7 @@ type moderationActionResponse struct {
 }
 
 // moderationActionResponses maps a ledger slice to the wire shape, resolving
-// each row's internal report_id to its public one — the sequential
+// every row's internal report_id to its public one in a single read — the sequential
 // id never reaches a response. viewerID authorizes each row's report link
 // individually through the report's own confidentiality guard:
 // a moderator who is the SUBJECT of a report linked from their own
@@ -59,6 +59,13 @@ type moderationActionResponse struct {
 // they still hold MODERATE_MEMBERS — the id is simply omitted (the rest of
 // the row still renders) rather than the whole read failing.
 func moderationActionResponses(ctx context.Context, svc *service.Services, viewerID int64, rows []db.ModerationAction) []moderationActionResponse {
+	reportIDs := make([]int64, 0, len(rows))
+	for i := range rows {
+		if rows[i].ReportID != nil {
+			reportIDs = append(reportIDs, *rows[i].ReportID)
+		}
+	}
+	visible := svc.Reports.VisibleReportPublicIDs(ctx, viewerID, reportIDs)
 	out := make([]moderationActionResponse, 0, len(rows))
 	for i := range rows {
 		r := &rows[i]
@@ -68,7 +75,7 @@ func moderationActionResponses(ctx context.Context, svc *service.Services, viewe
 			LiftedBy: r.LiftedBy, CreatedAt: r.CreatedAt,
 		}
 		if r.ReportID != nil {
-			if pub, ok := svc.Reports.VisibleReportPublicID(ctx, viewerID, *r.ReportID); ok {
+			if pub, ok := visible[*r.ReportID]; ok {
 				resp.ReportID = &pub
 			}
 		}

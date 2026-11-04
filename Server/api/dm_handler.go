@@ -333,7 +333,7 @@ func handleRenameGroupDM(svc *service.Services, broadcaster DMBroadcaster, limit
 		}
 
 		var req renameDMRequest
-		if !decodeJSON(w, r, &req) {
+		if !decodeGroupBody(w, r, &req) {
 			return
 		}
 

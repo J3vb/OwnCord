@@ -47,6 +47,14 @@ func normalizeCRSMode(mode string) string {
 	}
 }
 
+// wafRequestBodyLimit is both engines' inspect buffer: the global body cap
+// (MaxBodySizeUnless), which is also the largest JSON body a non-exempt route
+// reads, since the admin routes and several api routes rely on that cap
+// alone. A smaller buffer would either 413 those routes in the inline engine
+// or let the CRS engine skip the tail of their bodies. Every route with a
+// larger cap is exempt from body access in both engines.
+const wafRequestBodyLimit = defaultMaxBodySize
+
 // newCRSWAF builds a second Coraza engine with the embedded OWASP Core Rule Set,
 // kept apart from the inline-rules engine so those rules keep their test-pinned
 // blocking behavior in every CRS mode. Detection-only is the default because
@@ -114,18 +122,18 @@ func newCRSWAF(paranoiaLevel int, block bool, onMatch func(types.MatchedRule)) (
 				# inline engine), so don't pay for response body buffering.
 				SecResponseBodyAccess Off
 
-				# Body limits: match the app's 1 MiB non-upload cap (see
-				# MaxBodySizeUnless / config.MaxMessageBytes) instead of the
-				# recommended-config 12.5 MiB, and never reject on size —
-				# request size enforcement belongs to the app middleware, not
-				# the CRS layer. Uploads are excluded from body access above.
-				SecRequestBodyLimit 1048576
+				# Body limits: match the app's non-upload cap (see
+				# wafRequestBodyLimit) instead of the recommended-config
+				# 12.5 MiB, and never reject on size — request size
+				# enforcement belongs to the app middleware, not the CRS
+				# layer. Uploads are excluded from body access above.
+				SecRequestBodyLimit %d
 				SecRequestBodyLimitAction ProcessPartial
 
 				# Match logging goes through the error callback into slog;
 				# don't also emit native audit log records.
 				SecAuditEngine Off
-			`, paranoiaLevel, engine)),
+			`, paranoiaLevel, engine, wafRequestBodyLimit)),
 	)
 }
 
@@ -222,7 +230,7 @@ func wafInlineEngine(paranoiaLevel int) (coraza.WAF, error) {
 				SecRuleEngine On
 				SecRequestBodyAccess On
 				SecResponseBodyAccess Off
-				SecRequestBodyLimit 1048576
+				SecRequestBodyLimit %d
 
 				# Paranoia level
 				SecAction "id:900000,phase:1,pass,t:none,nolog,setvar:tx.blocking_paranoia_level=%d"
@@ -255,8 +263,9 @@ func wafInlineEngine(paranoiaLevel int) (coraza.WAF, error) {
 				SecRule ARGUMENTS_LIMIT_REACHED "@eq 1" \
 					"id:900011,phase:2,deny,status:403,log,msg:'Argument limit exceeded'"
 
-				# Exclude WebSocket upgrade and health endpoints from body inspection
-				SecRule REQUEST_URI "@streq /ws" "id:900001,phase:1,pass,nolog,ctl:ruleRemoveById=942100;941100;932100"
+				# Exclude the health endpoint from body inspection. The WebSocket
+				# upgrade (/api/v1/ws) needs no exclusion: it carries no body and
+				# no query arguments, so these rules have nothing there to match.
 				SecRule REQUEST_URI "@streq /api/v1/health" "id:900002,phase:1,pass,nolog,ctl:ruleRemoveById=942100;941100;932100"
 
 				# Exclude file upload endpoint from body inspection (binary content)
@@ -274,7 +283,7 @@ func wafInlineEngine(paranoiaLevel int) (coraza.WAF, error) {
 				SecRule REQUEST_URI "@beginsWith /admin/api/discord-imports/upload" "id:900008,phase:1,pass,nolog,ctl:requestBodyAccess=Off"
 				SecRule REQUEST_METHOD "@streq POST" "id:900006,phase:1,pass,nolog,chain"
 					SecRule REQUEST_URI "@rx ^/api/v1/dms/[0-9]+/icon([?]|$)" "ctl:requestBodyAccess=Off"
-			`, paranoiaLevel)),
+			`, wafRequestBodyLimit, paranoiaLevel)),
 	)
 }
 

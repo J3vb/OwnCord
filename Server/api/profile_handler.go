@@ -333,27 +333,11 @@ func handleUpdateProfile(svc *service.Services, broadcaster ProfileBroadcaster, 
 			DisplayName: req.DisplayName,
 			About:       req.About,
 			BannerColor: req.BannerColor,
+			IdentityKey: req.IdentityPublicKey,
 		})
 		if err != nil {
 			writeServiceError(r.Context(), w, err)
 			return
-		}
-
-		if req.IdentityPublicKey != nil {
-			// Captured separately rather than reassigned into updated: on
-			// failure updated still holds the committed profile snapshot, which
-			// can still be broadcast.
-			withKey, keyErr := svc.Users.UpdateIdentityKey(r.Context(), user.ID, *req.IdentityPublicKey)
-			if keyErr != nil {
-				// The username/avatar/display_name/about write already
-				// committed; only the identity key failed. Broadcasting the
-				// committed half keeps other clients in sync even though this
-				// request reports failure.
-				broadcastUserUpdate(broadcaster, updated)
-				writeServiceError(r.Context(), w, keyErr)
-				return
-			}
-			updated = withKey
 		}
 
 		broadcastUserUpdate(broadcaster, updated)
@@ -495,7 +479,11 @@ func handleListSessions(svc *service.Services) http.HandlerFunc {
 		resp := sessionsListResponse{
 			Sessions: make([]sessionResponse, 0, len(sessions)),
 		}
+		ackPending := false
 		for _, s := range sessions {
+			if s.Unseen && (sess == nil || s.ID != sess.ID) {
+				ackPending = true
+			}
 			resp.Sessions = append(resp.Sessions, sessionResponse{
 				ID:        s.ID,
 				Device:    s.Device,
@@ -508,15 +496,18 @@ func handleListSessions(svc *service.Services) http.HandlerFunc {
 		}
 
 		// This listing is the acknowledgement of the response's flags, except
-		// for the caller's own session.
-		var callerSessionID int64
-		if sess != nil {
-			callerSessionID = sess.ID
-		}
-		if err := svc.Users.MarkSessionsSeen(r.Context(), user.ID, callerSessionID); err != nil {
-			// A failed "seen" write must not discard a successfully built list:
-			// return it and log the write failure rather than 500.
-			slog.WarnContext(r.Context(), "list sessions: failed to mark seen", "err", err)
+		// for the caller's own session. With nothing to acknowledge the GET
+		// stays a pure read and never takes the writer.
+		if ackPending {
+			var callerSessionID int64
+			if sess != nil {
+				callerSessionID = sess.ID
+			}
+			if err := svc.Users.MarkSessionsSeen(r.Context(), user.ID, callerSessionID); err != nil {
+				// A failed "seen" write must not discard a successfully built list:
+				// return it and log the write failure rather than 500.
+				slog.WarnContext(r.Context(), "list sessions: failed to mark seen", "err", err)
+			}
 		}
 
 		writeJSON(w, http.StatusOK, resp)

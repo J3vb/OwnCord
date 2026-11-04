@@ -7,6 +7,7 @@ package dbgen
 
 import (
 	"context"
+	"strings"
 )
 
 const assignReport = `-- name: AssignReport :execrows
@@ -364,6 +365,54 @@ func (q *Queries) ListReportEvidence(ctx context.Context, reportID int64) ([]Rep
 			&i.Attachments,
 			&i.CapturedAt,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listReportLinksByIDs = `-- name: ListReportLinksByIDs :many
+SELECT id, public_id, subject_id
+  FROM reports
+ WHERE id IN (/*SLICE:ids*/?)
+`
+
+type ListReportLinksByIDsRow struct {
+	ID        int64  `json:"id"`
+	PublicID  string `json:"publicId"`
+	SubjectID int64  `json:"subjectId"`
+}
+
+// The public id and subject of each listed report, in one read, so a
+// moderation action list resolves its report links without a query per row.
+// The caller applies the subject guard: a report about the viewer stays hidden.
+func (q *Queries) ListReportLinksByIDs(ctx context.Context, ids []int64) ([]ListReportLinksByIDsRow, error) {
+	query := listReportLinksByIDs
+	var queryParams []interface{}
+	if len(ids) > 0 {
+		for _, v := range ids {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:ids*/?", strings.Repeat(",?", len(ids))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:ids*/?", "NULL", 1)
+	}
+	rows, err := q.db.QueryContext(ctx, query, queryParams...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListReportLinksByIDsRow{}
+	for rows.Next() {
+		var i ListReportLinksByIDsRow
+		if err := rows.Scan(&i.ID, &i.PublicID, &i.SubjectID); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
