@@ -90,8 +90,9 @@ type Hub struct {
 	// are dropped, plus the purge/cold-read lock (hub_tombstones.go).
 	tombstones replayPurgeState
 
-	// settings is the cache avoiding per-connection DB queries for server_name/motd,
-	// with its read seam and the upload-policy and game activity state (hub_settings.go).
+	// settings is the cache avoiding per-connection DB queries for server_name/motd
+	// (hubsettings.Cache, which also holds the read seam), plus the upload-policy
+	// and game activity state (hub_settings.go).
 	settings hubSettings
 
 	// readers are the hub's remaining read seams (readers.go).

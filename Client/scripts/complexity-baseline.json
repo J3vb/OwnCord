@@ -1,0 +1,452 @@
+{
+  "complexity": {
+    "app/autoLogin.ts": {
+      "createAutoLogin > resumeStoredSession": [18],
+      "createAutoLogin > startup > (anonymous)": [17]
+    },
+    "app/session.ts": {
+      "startSession": [17]
+    },
+    "components/AdminActions.ts": {
+      "buildMemberMenu": [38]
+    },
+    "components/ChannelMediaGallery.ts": {
+      "createChannelMediaGallery > loadMore": [18]
+    },
+    "components/ChannelSidebar.ts": {
+      "buildVoiceModOptions": [16],
+      "createChannelSidebar > drawChannels > reconcileRows": [16]
+    },
+    "components/DmSidebar.ts": {
+      "convoSignature": [18],
+      "renderDmItem": [16]
+    },
+    "components/EditChannelModal.ts": {
+      "createEditChannelModal > mount": [17]
+    },
+    "components/EmojiPicker.ts": {
+      "createEmojiPicker > renderAllCategories": [16]
+    },
+    "components/MemberList.ts": {
+      "createMemberItem > openContextMenu": [22],
+      "createMemberList > runFrame": [18]
+    },
+    "components/MessageInput.ts": {
+      "createMessageInput > mount": [31],
+      "createMessageInput > mount > (anonymous)": [31]
+    },
+    "components/MessageList.ts": {
+      "createMessageList > mount > (anonymous)": [21]
+    },
+    "components/PhoneCallBar.ts": {
+      "createPhoneCallBar > update": [19]
+    },
+    "components/SelfProfileCard.ts": {
+      "createSelfProfileCard > open > (anonymous)": [25]
+    },
+    "components/ThreadListPopover.ts": {
+      "openThreadListPopover > loadNext": [16]
+    },
+    "components/ThreadPanel.ts": {
+      "createThreadPanel > sendText": [18]
+    },
+    "components/UpdateNotifier.ts": {
+      "createUpdateNotifier > renderInstallState": [19]
+    },
+    "components/UserProfilePopup.ts": {
+      "createUserProfilePopup > mount": [37],
+      "createUserProfilePopup > mount > renderChips": [17]
+    },
+    "components/VoiceWidget.ts": {
+      "createVoiceWidget > render": [34],
+      "createVoiceWidget > updateSignalIcon": [17]
+    },
+    "components/channel-sidebar/categoryMenu.ts": {
+      "attachCategoryContextMenu > buildCategoryMenu": [16]
+    },
+    "components/channel-sidebar/channelSheet.ts": {
+      "channelSheetItems": [19]
+    },
+    "components/channel-sidebar/contextMenu.ts": {
+      "attachChannelContextMenu": [23],
+      "attachChannelContextMenu > buildChannelMenu": [36]
+    },
+    "components/channel-sidebar/dragReorder.ts": {
+      "planDrop": [32]
+    },
+    "components/dmContextMenu.ts": {
+      "openDmContextMenu": [30]
+    },
+    "components/message-input/inputComposer.ts": {
+      "createInputComposer > applyDisabledState": [22]
+    },
+    "components/message-input/inputDraft.ts": {
+      "createInputDraft > restoreDraft": [16]
+    },
+    "components/message-input/inputSend.ts": {
+      "createInputSend > handleSend": [20]
+    },
+    "components/message-list/listRender.ts": {
+      "createListRender > patchRows": [64],
+      "createListRender > renderAll": [36]
+    },
+    "components/message-list/listWindow.ts": {
+      "createListWindow > measureRendered": [16],
+      "createListWindow > renderWindow": [35],
+      "createListWindow > resolveNewDividerIndex": [17]
+    },
+    "components/message-list/messageActions.ts": {
+      "messageActionGates": [29]
+    },
+    "components/message-list/messageMenu.ts": {
+      "buildItems": [43]
+    },
+    "components/message-list/pollCard.ts": {
+      "renderPollCard > draw": [27]
+    },
+    "components/message-list/renderers.ts": {
+      "renderMessage": [59],
+      "renderReplyRef": [22]
+    },
+    "components/message-list/virtualItems.ts": {
+      "estimateItemHeight": [16]
+    },
+    "components/video-grid/gridCallBar.ts": {
+      "createGridCallBar > drawCallState": [27]
+    },
+    "components/video-grid/gridLayout.ts": {
+      "createGridLayout > rebuildFocusLayout": [21]
+    },
+    "components/video-grid/gridStreams.ts": {
+      "createGridStreams > addStream": [68],
+      "createGridStreams > dropTile": [16]
+    },
+    "features/channels/voiceRow.view.ts": {
+      "patchVoiceChannelChrome": [25]
+    },
+    "features/dialogs/confirmModal.ts": {
+      "createConfirmModal": [19]
+    },
+    "features/direct-messages/DmCallPanel.ts": {
+      "createDmCallPanel > rebuild": [25],
+      "createDmCallPanel > refresh": [54]
+    },
+    "features/direct-messages/DmCallViewModel.ts": {
+      "deriveCallView": [16],
+      "resolvePerson": [16]
+    },
+    "features/forums/ForumView.ts": {
+      "renderForumView > loadMore": [19],
+      "renderForumView > paintList": [25]
+    },
+    "features/forums/NewPostDialog.ts": {
+      "openNewPostDialog": [17],
+      "openNewPostDialog > (anonymous)": [17]
+    },
+    "features/members/memberModel.ts": {
+      "updateModel": [21]
+    },
+    "features/message-requests/Inbox.ts": {
+      "renderInbox > render": [23]
+    },
+    "features/messaging/content/attachmentCache.ts": {
+      "requestFileLink": [16]
+    },
+    "features/messaging/content/attachments.ts": {
+      "renderAttachmentContent": [18]
+    },
+    "features/messaging/content/contentParser.ts": {
+      "renderMentionSegment": [31],
+      "resyncMentions": [25]
+    },
+    "features/messaging/content/imageViewer.ts": {
+      "openImageLightbox": [19],
+      "openImageLightbox > onKey": [17]
+    },
+    "features/messaging/content/syntaxHighlight.ts": {
+      "applySgr": [18]
+    },
+    "features/messaging/forwardTargets.ts": {
+      "listForwardTargets": [21]
+    },
+    "features/messaging/historyWindows.ts": {
+      "reduceSetAroundMessages": [20],
+      "reduceSetMessages": [30]
+    },
+    "features/messaging/slashCommands.ts": {
+      "splitPieces": [16]
+    },
+    "features/messaging/wsHandlers.ts": {
+      "handleChatMessage": [26],
+      "handleMessagingError": [22]
+    },
+    "features/moderation/ActionForms.ts": {
+      "buildActionForms": [19]
+    },
+    "features/moderation/AppealDetail.ts": {
+      "buildAppealDetail": [26]
+    },
+    "features/moderation/AppealQueue.ts": {
+      "renderAppeals > showDetail": [16]
+    },
+    "features/moderation/Queue.ts": {
+      "renderReports > loadList > (anonymous)": [16],
+      "renderReports > showDetail": [25]
+    },
+    "features/people-home/PeopleHome.ts": {
+      "renderPeopleHome > render": [17]
+    },
+    "features/profiles/openUserProfilePopup.ts": {
+      "openUserProfilePopup": [21],
+      "openUserProfilePopup > (anonymous)": [20]
+    },
+    "features/settings/AppearanceTab.ts": {
+      "buildAppearanceTab": [18]
+    },
+    "features/settings/KeybindsTab.ts": {
+      "buildKeybindsTab > renderPortal": [20]
+    },
+    "features/settings/SettingsOverlay.ts": {
+      "createSettingsOverlay > mount": [19],
+      "createSettingsOverlay > mount > (anonymous)": [18]
+    },
+    "features/settings/voice-audio/voiceDevicesPreview.ts": {
+      "mountDevicesAndPreview > (anonymous)": [17],
+      "mountDevicesAndPreview > populateDevices": [25]
+    },
+    "features/settings/voice-audio/voiceMicTest.ts": {
+      "mountMicTest > startNativeTest": [24]
+    },
+    "features/settings/voice-audio/voiceOutputVideo.ts": {
+      "mountOutputAndVideo > codecGroup": [17]
+    },
+    "features/voice-messages/recorder.ts": {
+      "createVoiceRecorder > openStream": [21],
+      "createVoiceRecorder > start": [23]
+    },
+    "features/voice-messages/voiceComposer.ts": {
+      "createVoiceComposer > submit": [16],
+      "createVoiceComposer > upload": [21]
+    },
+    "features/voice/e2eeOffer.ts": {
+      "E2EEOffer > handleOfferInner": [22]
+    },
+    "features/voice/e2eePeerState.ts": {
+      "E2EEPeerState > verifyPeerAnnounce": [33]
+    },
+    "features/voice/joinOrchestration.ts": {
+      "JoinOrchestration > connectAndSetup": [57],
+      "JoinOrchestration > handleVoiceToken": [17]
+    },
+    "features/voice/localVoiceRestore.ts": {
+      "restoreLocalVoiceState": [19]
+    },
+    "features/voice/mediaControl.ts": {
+      "MediaControl > doSwitchVideoDevice": [22]
+    },
+    "features/voice/native/nativeRoom.ts": {
+      "NativeRoom > apply": [44]
+    },
+    "features/voice/screenshareChange.ts": {
+      "changeScreenshareSource": [39]
+    },
+    "features/voice/uiSounds.ts": {
+      "startVoiceUiSounds > (anonymous)": [28]
+    },
+    "features/voice/videoCodec.ts": {
+      "resolvePreferredCodec": [17]
+    },
+    "features/voice/voiceStatusText.ts": {
+      "micControlState": [20]
+    },
+    "features/voice/wsHandlers.ts": {
+      "enforceModeratorAudioState": [19]
+    },
+    "lib/api.ts": {
+      "createApiClient > doFetch": [30]
+    },
+    "lib/apiShared.ts": {
+      "authSliceCopy": [28],
+      "serverErrorCopy": [25]
+    },
+    "lib/diagnostics/eventLog.ts": {
+      "checkValue": [25]
+    },
+    "lib/net/connectionDiagnostics.ts": {
+      "runConnectionDiagnostics": [29]
+    },
+    "lib/net/reconcile.ts": {
+      "reconcileKeyed": [31]
+    },
+    "lib/notifications.ts": {
+      "notifyChannelActivity": [36],
+      "notifyIncomingMessage": [30],
+      "notifyMention": [19]
+    },
+    "lib/prefs/gameActivityPrefs.ts": {
+      "parseGamePrefs": [21]
+    },
+    "lib/prefs/keybinds.ts": {
+      "isReserved": [37]
+    },
+    "lib/prefs/serverRailLayout.ts": {
+      "parseLayout": [16]
+    },
+    "lib/presence/gameActivity.ts": {
+      "startGameActivity > poll": [24]
+    },
+    "lib/presence/musicActivity.ts": {
+      "startMusicActivity > poll": [19]
+    },
+    "lib/presence/presence.ts": {
+      "createPresenceSender > send": [24]
+    },
+    "lib/store.ts": {
+      "shallowEqual": [25]
+    },
+    "lib/text/markdown.ts": {
+      "parseInline": [23]
+    },
+    "lib/text/nameLimits.ts": {
+      "checkNewUsername": [21]
+    },
+    "lib/ui/a11y.ts": {
+      "enableRovingNavigation > (anonymous)": [28]
+    },
+    "lib/ui/contextMenu.ts": {
+      "enableMenuKeyboard > (anonymous)": [29]
+    },
+    "lib/ui/imageCrop.ts": {
+      "cropImage": [19]
+    },
+    "lib/voice/connectionStats.ts": {
+      "createConnectionStatsPoller > sampleCamera": [17],
+      "extractMetrics > (anonymous)": [24]
+    },
+    "lib/voice/deviceManager.ts": {
+      "DeviceManager > handleDeviceChange": [50]
+    },
+    "lib/voice/livekitE2EE.ts": {
+      "E2EEManager > handleAnnounceInner": [29],
+      "E2EEManager > handleParticipantLeft": [32],
+      "E2EEManager > setupKeyExchange": [27]
+    },
+    "lib/voice/livekitReconnect.ts": {
+      "attemptAutoReconnect": [35]
+    },
+    "lib/voice/micProcessor.ts": {
+      "createMicProcessor > route": [17]
+    },
+    "lib/voice/noiseFloor.ts": {
+      "NoiseFloorTracker > push": [16]
+    },
+    "lib/voice/screenShare.ts": {
+      "enableCamera": [32],
+      "enableScreenshare": [57],
+      "republishVideo": [22]
+    },
+    "lib/voice/shareResolutionRecovery.ts": {
+      "readingFromStats": [17]
+    },
+    "lib/ws.ts": {
+      "createWsClient > handleMessage": [28],
+      "createWsClient > handleTransportState": [23]
+    },
+    "pages/connect-page/login-form/loginFormDom.ts": {
+      "createLoginFormDom > buildFormPanel": [19]
+    },
+    "pages/connect-page/login-form/loginFormSubmit.ts": {
+      "createLoginFormSubmit > handleFormSubmit": [21],
+      "createLoginFormSubmit > validateForm": [16]
+    },
+    "pages/main-page/ChannelController.ts": {
+      "createChannelController > destroyChannel": [21],
+      "createChannelController > mountChannel": [18]
+    },
+    "pages/main-page/GlobalKeybinds.ts": {
+      "attachGlobalKeybinds > dispatchRebindable": [34],
+      "attachGlobalKeybinds > handlePlainKey": [17],
+      "attachGlobalKeybinds > handler": [47],
+      "attachGlobalKeybinds > onEscape": [16]
+    },
+    "pages/main-page/MemberColumn.ts": {
+      "createMemberColumn > sync": [16]
+    },
+    "pages/main-page/MessageController.ts": {
+      "createMessageController > loadMessages": [26]
+    },
+    "pages/main-page/MessageJump.ts": {
+      "createMessageJumper > jumpTo": [18]
+    },
+    "pages/main-page/OverlayManagers.ts": {
+      "createAsyncOverlayController > open": [16]
+    },
+    "pages/main-page/VideoModeController.ts": {
+      "createVideoModeController > checkVideoMode": [44]
+    },
+    "pages/main-page/channel/channelMountComposer.ts": {
+      "mountComposerGating > (anonymous)": [21]
+    },
+    "pages/main-page/channel/channelMountSend.ts": {
+      "mountSendPipeline > performSend": [26],
+      "mountSendPipeline > retrySend": [17]
+    },
+    "pages/main-page/pageMountCalls.ts": {
+      "mountCalls > (anonymous)": [17],
+      "mountCalls > onChange": [17],
+      "mountVideo > (anonymous)": [46]
+    },
+    "pages/main-page/pageShared.ts": {
+      "buildDmProfileUser": [24]
+    },
+    "pages/main-page/sidebar-area/sidebarChannels.ts": {
+      "mountChannelSidebar > buildChannelSidebar > onEditChannel > (anonymous)": [20],
+      "mountChannelSidebar > buildChannelSidebar > onReorderChannel > (anonymous) > (anonymous)": [
+        16
+      ]
+    },
+    "pages/main-page/sidebar-area/sidebarContent.ts": {
+      "mountMembersAndMode > mountSidebarContent": [17]
+    },
+    "platform/desktop/pushToTalkService.ts": {
+      "startBinding": [19]
+    },
+    "stores/channels.store.ts": {
+      "addChannel > (anonymous)": [45],
+      "readyChannelMap": [17],
+      "updateChannel > (anonymous)": [17]
+    },
+    "stores/voice.store.ts": {
+      "restateSelfVoiceState": [20]
+    }
+  },
+  "depth": {
+    "components/message-list/listRender.ts": {
+      "createListRender > renderAll": [5, 5]
+    },
+    "features/messaging/content/attachmentCache.ts": {
+      "fetchImageBlob": [5]
+    },
+    "features/messaging/emojiCatalog.ts": {
+      "emojiForShortcode": [5, 5]
+    },
+    "features/voice-messages/recorder.ts": {
+      "createVoiceRecorder > openStream": [5]
+    },
+    "features/voice/joinOrchestration.ts": {
+      "JoinOrchestration > connectAndSetup": [6, 5, 5, 5]
+    },
+    "features/voice/mediaControl.ts": {
+      "MediaControl > doSwitchVideoDevice": [5]
+    },
+    "lib/text/markdown.ts": {
+      "parseInline": [5]
+    },
+    "lib/voice/livekitE2EE.ts": {
+      "E2EEManager > handleParticipantLeft": [5]
+    },
+    "pages/main-page/pageMountCalls.ts": {
+      "mountVideo > (anonymous)": [6, 6, 5, 5, 5, 5]
+    }
+  }
+}

@@ -21,16 +21,19 @@ package ws
 // removeLiveKitParticipantAsync. A goroutine holds at most one user's lock and never
 // takes it while holding any lock to its right. The hub dispatch goroutine never
 // takes it. A path holding voiceHub.mod never calls a membership path.
-// voiceSlot.voiceMu, voiceGrace.mu and voiceReconcileState.mu are leaves: no I/O, no
-// other lock. voiceHub.mod is described in user_locks.go.
+// voiceSlot.voiceMu, voiceGrace.mu and the voicestate rejoin and reconcile locks are leaves: no I/O, no
+// other lock. voiceHub.mod is described in voicestate/userlocks.go.
 
-import "github.com/J3vb/OwnCord/Server/syncutil"
+import (
+	"github.com/J3vb/OwnCord/Server/syncutil"
+	"github.com/J3vb/OwnCord/Server/ws/voicestate"
+)
 
 // voiceRegistry is the hub's in-memory voice membership: the per-user lock and the
 // reconnect grace window. Zero values are ready to use.
 type voiceRegistry struct {
-	voiceMember userLocks[lockRankVoiceMember] // per-user voice membership lock (Hub.begin)
-	voiceGrace  voiceGraceState                // reconnect grace window (voice_grace.go)
+	voiceMember voicestate.UserLocks[lockRankVoiceMember] // per-user voice membership lock (Hub.begin)
+	voiceGrace  voiceGraceState                           // reconnect grace window (voice_grace.go)
 }
 
 // close ends the registry at shutdown: it stops every grace timer and drops parked

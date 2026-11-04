@@ -109,6 +109,9 @@ export interface MessageInputOptions {
   ) => void;
   /** The draft's text or reply changed; read it back with peekDraft(). */
   readonly onDraftChange?: () => void;
+  /** The message the reply bar answers changed (null: the bar closed), so the
+   *  list can mark that row. */
+  readonly onReplyTargetChange?: (messageId: number | null) => void;
   /** Initial disabled reason (e.g. read-only / no-permission / offline). */
   readonly disabledReason?: string | null;
   /** Replaces the "Message #channel" placeholder (a text-only thread composer). */

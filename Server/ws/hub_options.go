@@ -15,7 +15,8 @@ import (
 	"github.com/J3vb/OwnCord/Server/permissions"
 	"github.com/J3vb/OwnCord/Server/plugin"
 	"github.com/J3vb/OwnCord/Server/service"
-	"github.com/J3vb/OwnCord/Server/storage"
+	"github.com/J3vb/OwnCord/Server/ws/hubsettings"
+	"github.com/J3vb/OwnCord/Server/ws/voicestate"
 )
 
 // HubOptions carries everything a Hub needs before Run starts. What is mutable
@@ -96,24 +97,10 @@ type HubOptions struct {
 }
 
 // UploadPolicy is what a client needs to refuse a doomed upload before sending it.
-// The upload route stays authoritative; this is only a pre-check.
-type UploadPolicy struct {
-	// MaxUploadBytes is upload.max_size_mb in bytes; 0 means uploads are disabled.
-	MaxUploadBytes int64 `json:"max_upload_bytes"`
-	// BlockedExtensions and AllowedExtensions are the file-type policy in force
-	// (storage.FileTypePolicy): a blocked final extension is refused; a non-empty
-	// allowed list is allow-only mode.
-	BlockedExtensions []string `json:"blocked_extensions,omitempty"`
-	AllowedExtensions []string `json:"allowed_extensions,omitempty"`
-	// Thumbnails reports that GET /api/v1/files/{id}/thumb exists, so a client asks for an
-	// inline image's thumbnail instead of the original.
-	Thumbnails bool `json:"thumbnails,omitempty"`
-}
+type UploadPolicy = hubsettings.UploadPolicy
 
 // UploadFileTypes reads the upload file-type policy in force; service.UploadService satisfies it.
-type UploadFileTypes interface {
-	FileTypePolicy(ctx context.Context) (storage.FileTypePolicy, error)
-}
+type UploadFileTypes = hubsettings.FileTypes
 
 // validateHubOptions is NewHub's required-collaborator gate, split out to keep the
 // constructor within the function-length lint bound.
@@ -175,7 +162,7 @@ func NewHub(opts HubOptions) (*Hub, error) {
 		readers: opts.Readers,
 		voice:   opts.Voice,
 		voiceHub: hubVoice{
-			defaultQuality: defaultVoiceQuality, mod: newUserLocks[lockRankVoiceMod](),
+			defaultQuality: defaultVoiceQuality, mod: voicestate.NewUserLocks[lockRankVoiceMod](),
 			keyHolders: make(map[int64]int64), lkProcess: opts.LiveKitProcess,
 		},
 		presence:     opts.Presence,
@@ -187,11 +174,7 @@ func NewHub(opts HubOptions) (*Hub, error) {
 		replayBuf:    NewEventRingBuffer(ringSize),
 		permChecker:  permissions.NewChecker(database),
 		settings: hubSettings{
-			reader:          opts.Settings,
-			upload:          opts.UploadPolicy,
-			uploadFileTypes: opts.UploadFileTypes,
-			name:            "OwnCord Server",
-			motd:            "Welcome!",
+			cache: hubsettings.New(opts.Settings, opts.UploadFileTypes, opts.UploadPolicy),
 		},
 		lifecycle: hubLifecycle{
 			runDone: make(chan struct{}),
@@ -268,7 +251,7 @@ func NewHub(opts HubOptions) (*Hub, error) {
 	})
 	registerVoiceControlsV2(reg, h.voiceDeps())
 
-	h.refreshSettingsLocked(context.Background())
+	h.settings.cache.Refresh(context.Background())
 	h.initGameActivityPolicy()
 	return h, nil
 }
@@ -285,7 +268,7 @@ func (h *Hub) voiceDeps() VoiceDeps {
 		TokenGen:    h, // Hub delegates to h.livekit at call time
 		KeyHolder:   h,
 		Mod:         h,
-		Settings:    h.settings.reader,
+		Settings:    h.settings.cache.Reader(),
 	}
 }
 

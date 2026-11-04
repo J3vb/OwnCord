@@ -805,6 +805,7 @@ export function createThreadPanel(options: ThreadPanelOptions): ThreadPanelCompo
       onUploadFile: uploadFile,
       onDiscardUpload: (id) => api.discardUpload(id),
       onTyping: () => {},
+      onReplyTargetChange: (messageId) => messageList?.setReplyTarget(messageId),
       placeholder: threadsText("composer.placeholder"),
       dropZone: ".thread-panel",
     });

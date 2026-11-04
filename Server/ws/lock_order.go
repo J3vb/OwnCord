@@ -51,10 +51,10 @@
 // too. Continuation lines are indented past the tab and are not read.
 //
 //	rank  lock                       declared                 taken under it
-//	1 S   userLockEntry.mu           voice_registry.go:45     DB, broadcasts, seqMu (replay.go:438-441); never a
-//	      (voiceRegistry.voiceMember) user_locks.go:44         LiveKit RPC
-//	2 S   userLockEntry.mu           hub_voice_state.go:25    DB and LiveKit RPC (user_locks.go:9-17); never a
-//	      (hubVoice.mod)             user_locks.go:44         membership path
+//	1 S   voicestate.userLockEntry.mu voice_registry.go:35    DB, broadcasts, seqMu (replay.go:438-441); never a
+//	      (voiceRegistry.voiceMember) voicestate/userlocks.go:39 LiveKit RPC
+//	2 S   voicestate.userLockEntry.mu hub_voice_state.go:29   DB and LiveKit RPC (voicestate/userlocks.go:10-16);
+//	      (hubVoice.mod)             voicestate/userlocks.go:39 never a membership path
 //	3 S   replayPurgeState.mu RW     hub_tombstones.go:53     seqMu (hub_events.go:210), then the persister
 //	      (Hub.tombstones)                                    Flush and the DB delete (hub_events.go:218-235).
 //	                                                          Cold reads only TryRLock (eventstore.go:46-62)
@@ -64,9 +64,9 @@
 //	3 S   roleRefreshState.flushMu   role_refresh.go:71       DB reads, then roleRefreshState.mu, then Hub.mu,
 //	                                                          PubSub.mu, timeoutViewState.mu and Client.mu one
 //	                                                          at a time (role_refresh.go:24-30)
-//	3 S   hubSettings.uploadPolicyMu hub_settings.go:213      a DB read, then hubSettings.mu, then Hub.mu (R),
-//	                                                          then Client.mu (hub_settings.go:93-113)
-//	3 S   gameActivityState.mu       hub_settings.go:116      a DB read, then presenceFeedState.mu (the game activity
+//	3 S   hubSettings.uploadPolicyMu hub_settings.go:162      a DB read, then hubsettings.Cache.mu, then Hub.mu (R),
+//	                                                          then Client.mu (hub_settings.go:46-64)
+//	3 S   gameActivityState.mu       hub_settings.go:72       a DB read, then presenceFeedState.mu (the game activity
 //	      (hubSettings.gameActivity)                          sweep), Hub.mu (R), then Client.mu
 //	                                                          (hub_settings.go)
 //	3 S   Client.focusMu             client.go:86             Client.mu, PubSub.mu, DB reads (focus_defer.go:21,
@@ -83,10 +83,10 @@
 //	                                                          294-299,354; registerNow, hub_registry.go:89),
 //	                                                          EventRingBuffer.mu, presenceRepairState.mu,
 //	                                                          queueDropState.mu, and the leaves below
-//	6     hubVoice.keyHolderMu RW    hub_voice_state.go:29    Hub.mu (R), voiceSlot.voiceMu
+//	6     hubVoice.keyHolderMu RW    hub_voice_state.go:33    Hub.mu (R), voiceSlot.voiceMu
 //	                                                          (voice_e2ee.go:44-60)
-//	6     hubSettings.mu RW          hub_settings.go:207      a DB read under the write lock
-//	                                                          (hub_settings.go:27-35); see the exceptions
+//	6     hubsettings.Cache.mu RW    hubsettings/cache.go:55  a DB read under the write lock
+//	      (hubSettings.cache)                                 (hubsettings/cache.go:104-123); see the exceptions
 //	7     Hub.mu RW                  hub.go:24                PubSub.mu, Client.mu, voiceSlot.voiceMu,
 //	                                                          voiceGraceState.mu (hub_registry.go:60-162,
 //	                                                          hub_stats.go:329-355, voice_e2ee.go:268-288)
@@ -96,8 +96,8 @@
 //	9     Client.mu                  client.go:81             leaf: nothing is taken under it
 //	9     voiceSlot.voiceMu          voice_registry.go:78     leaf
 //	9     voiceGraceState.mu         voice_grace.go:54        leaf
-//	9     voiceReconcileState.mu     voice_reconcile.go:42    leaf
-//	9     voiceRejoinBlockState.mu   voice_rejoin_block.go:34 leaf
+//	9     voicestate.ReconcileMisses.mu voicestate/reconcile.go:12 leaf
+//	9     voicestate.RejoinBlocks.mu voicestate/rejoin.go:20  leaf
 //	9     removedIdentities.mu       voice_removed_watch.go:48 leaf
 //	9     liveKitHealthCache.mu      livekit_health.go:21     leaf
 //	9     voiceResumeChecks.mu       voice_resume_check.go:57 leaf
@@ -108,24 +108,24 @@
 //	9     activityState.mu           channel_activity.go:93   leaf
 //	9     roleRefreshState.mu        role_refresh.go:63       leaf; may be taken under Hub.seqMu
 //	9     restartNoticeGate.mu       restart_notice.go:16     leaf
-//	9     userLocks.mu               user_locks.go:34         leaf, but see userLocks.tryLock below
+//	9     voicestate.UserLocks.mu    voicestate/userlocks.go:29 leaf, but see UserLocks.TryLock below
 //
 // hubLifecycle.background (hub_lifecycle.go:41) is a syncutil.Group, not a mutex, so it has no row.
 //
 // Locks of one rank are not ordered against each other, so the checker
 // forbids nesting any two of them, two instances of one lock included.
-// hubSettings.uploadPolicyMu (3) taking hubSettings.mu (6) is not such a pair.
+// hubSettings.uploadPolicyMu (3) taking hubsettings.Cache.mu (6) is not such a pair.
 //
 // # Known exceptions to the rule
 //
-//   - hubSettings.mu is held for writing across a DB read (hub_settings.go:27-35).
+//   - hubsettings.Cache.mu is held for writing across a DB read (hubsettings/cache.go:104-123).
 //     It is the one state lock that does I/O. The read is bounded by a context.
 //   - slog on a non-error path under a lock: Hub.seqMu and Hub.mu in registerNow
 //     (hub_registry.go:100), Client.mu on overflow (client.go:195,303), and
 //     Hub.seqMu in expireReplayTombstones and dropsForTombstones
 //     (hub_tombstones.go:169,188,192).
-//   - userLocks.mu is a leaf except in userLocks.tryLock (user_locks.go), which
-//     takes a new userLockEntry.mu while holding it. The entry is private until
+//   - voicestate.UserLocks.mu is a leaf except in UserLocks.TryLock
+//     (voicestate/userlocks.go:69), which takes a new userLockEntry.mu while holding it. The entry is private until
 //     it is inserted, so the acquisition is a TryLock that cannot fail, and the
 //     rank check never flags a try.
 //   - Hub.persistEvent under Hub.seqMu (hub_events.go:305) is a non-blocking

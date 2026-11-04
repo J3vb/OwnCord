@@ -138,8 +138,9 @@ func TestRoleRefresh_StopJoinsWorkerAndDropsPending(t *testing.T) {
 	}
 }
 
-// A client that does not drain between chunks is kicked, never sent BANNED.
-func TestRoleRefresh_SlowClientIsKickedNotBanned(t *testing.T) {
+// A client that does not drain between chunks stays connected and is sent to a
+// resync (never kicked, never sent BANNED).
+func TestRoleRefresh_SlowClientIsResyncedNotKicked(t *testing.T) {
 	f := newRRFixture(t, false)
 	u := f.addUser("rr-slow", rrModRole, 0)
 	send := make(chan []byte, 128)
@@ -157,12 +158,15 @@ func TestRoleRefresh_SlowClientIsKickedNotBanned(t *testing.T) {
 	f.hub.EnqueueRoleRefresh(RoleRefresh{Visibility: []int64{u}})
 	f.hub.flushRoleRefresh(context.Background())
 
-	if f.hub.ClientForTest(u) != nil {
-		t.Error("the slow client is still registered, want it kicked")
+	if f.hub.ClientForTest(u) == nil {
+		t.Error("the slow client was removed, want it kept and marked to resync")
 	}
-	for fr := range send {
-		if strings.Contains(string(fr), "BANNED") {
-			t.Fatalf("a kicked client was sent BANNED: %s", fr)
+	if !c.cseq.lossPending.Load() {
+		t.Error("the slow client carries no pending loss, so it would never resync")
+	}
+	for len(send) > 0 {
+		if fr := <-send; strings.Contains(string(fr), "BANNED") {
+			t.Fatalf("a slow client was sent BANNED: %s", fr)
 		}
 	}
 }
@@ -575,5 +579,83 @@ func TestRoleRefresh_FirstChunkLeavesRoomForConcurrentDispatch(t *testing.T) {
 	}
 	if n := f.hub.stats.BPQueueDisconnects.Load(); n != 0 {
 		t.Errorf("bpQueueDisconnects = %d, want 0", n)
+	}
+}
+
+// Ten clients whose queues never drain: the round takes about one drain wait for
+// all of them, removes none, and leaves every one marked to resync.
+func TestRoleRefresh_ManySlowClientsWaitTogetherAndResync(t *testing.T) {
+	f := newRRFixture(t, false)
+	const n = 10
+	ids := make([]int64, 0, n)
+	clients := make([]*Client, 0, n)
+	for i := range n {
+		u := f.addUser(fmt.Sprintf("rr-many-slow-%d", i), rrModRole, 0)
+		send := make(chan []byte, sendBufSize)
+		c := NewTestClientWithUser(f.hub, f.clients[u].user, 0, send)
+		f.hub.mu.Lock()
+		f.hub.clients[u] = []*Client{c}
+		f.hub.mu.Unlock()
+		for range sendBufSize - 10 { // above the first chunk's room: it never drains
+			send <- []byte(`{"type":"filler"}`)
+		}
+		ids, clients = append(ids, u), append(clients, c)
+	}
+	oldWait := roleRefreshDrainWait
+	roleRefreshDrainWait = 400 * time.Millisecond
+	t.Cleanup(func() { roleRefreshDrainWait = oldWait })
+
+	start := time.Now()
+	f.hub.EnqueueRoleRefresh(RoleRefresh{Visibility: ids})
+	f.hub.flushRoleRefresh(context.Background())
+	if took := time.Since(start); took > 3*roleRefreshDrainWait {
+		t.Errorf("round took %v for %d slow clients, want about one drain wait (%v)", took, n, roleRefreshDrainWait)
+	}
+	for i, u := range ids {
+		if f.hub.ClientForTest(u) == nil {
+			t.Errorf("client %d was removed", i)
+		}
+		if !clients[i].cseq.lossPending.Load() {
+			t.Errorf("client %d carries no pending loss", i)
+		}
+	}
+}
+
+// A client that drains within the wait gets its frames and no resync mark.
+func TestRoleRefresh_ClientDrainingWithinWaitReceivesFrames(t *testing.T) {
+	f := newRRFixture(t, false)
+	u := f.addUser("rr-drains", rrModRole, 0)
+	send := make(chan []byte, sendBufSize)
+	c := NewTestClientWithUser(f.hub, f.clients[u].user, 0, send)
+	f.hub.mu.Lock()
+	f.hub.clients[u] = []*Client{c}
+	f.hub.mu.Unlock()
+	for range sendBufSize - 10 {
+		send <- []byte(`{"type":"filler"}`)
+	}
+	oldWait := roleRefreshDrainWait
+	roleRefreshDrainWait = 3 * time.Second
+	t.Cleanup(func() { roleRefreshDrainWait = oldWait })
+	go func() { // the link catches up after a second
+		time.Sleep(time.Second)
+		for range sendBufSize - 20 {
+			<-send
+		}
+	}()
+
+	f.hub.EnqueueRoleRefresh(RoleRefresh{Visibility: []int64{u}})
+	f.hub.flushRoleRefresh(context.Background())
+
+	if c.cseq.lossPending.Load() {
+		t.Error("a client that drained in time was marked to resync")
+	}
+	creates := 0
+	for len(send) > 0 {
+		if strings.Contains(string(<-send), "channel_create") {
+			creates++
+		}
+	}
+	if creates == 0 {
+		t.Error("the draining client received no sidebar frames")
 	}
 }

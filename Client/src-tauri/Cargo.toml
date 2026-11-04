@@ -176,6 +176,9 @@ windows = { version = "0.58", features = [
     "Media_Control",
     "Foundation",
     "Foundation_Collections",
+    # Graphics card for video (gpu_adapter.rs): DXGI adapter enumeration.
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
 ] }
 # DPAPI (CryptProtectData/CryptUnprotectData) for the last-resort credential
 # fallback in secret_store, and the window lookup that hides WebView2's

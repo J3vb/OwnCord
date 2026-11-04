@@ -23,52 +23,12 @@ package ws
 import (
 	"context"
 	"log/slog"
-
-	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
 // voiceReconcileGraceTicks is how many consecutive ticks a participant may be absent
 // from the SFU before its membership is reaped; two ticks tolerate a media blip or an
 // in-flight join.
 const voiceReconcileGraceTicks = 2
-
-// voiceReconcileState is the reconciler's cross-tick memory: consecutive ticks an
-// exact SFU identity (user + join token) has been missing. Keyed by identity so a
-// rejoin starts a fresh count, and a member who left voice has its entry pruned.
-type voiceReconcileState struct {
-	mu      syncutil.Ranked[lockRankLeaf]
-	missing map[string]int
-}
-
-// miss records one absent tick for identity and returns the new count.
-func (s *voiceReconcileState) miss(identity string) int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.missing == nil {
-		s.missing = map[string]int{}
-	}
-	s.missing[identity]++
-	return s.missing[identity]
-}
-
-// clear forgets identity (it was seen this tick, or has been reaped).
-func (s *voiceReconcileState) clear(identity string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	delete(s.missing, identity)
-}
-
-// prune drops counters whose identity no longer belongs to any voice_states row, so
-// a member who left voice does not leak an entry for the process lifetime.
-func (s *voiceReconcileState) prune(live map[string]struct{}) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for id := range s.missing {
-		if _, ok := live[id]; !ok {
-			delete(s.missing, id)
-		}
-	}
-}
 
 // reconcileVoiceMembership is the polling reconciler's entry point, run from
 // the hub's voice-reconcile ticker through startSweep.
@@ -95,7 +55,7 @@ func (h *Hub) reconcileVoiceMembership(ctx context.Context) {
 		byRoom[row.ChannelID] = append(byRoom[row.ChannelID], voiceMembership{row.UserID, row.JoinedAt})
 		live[id] = struct{}{}
 	}
-	h.voiceHub.reconcile.prune(live)
+	h.voiceHub.reconcile.Prune(live)
 	// Also visit rooms no row names: a sole member removed from voice leaves a room
 	// with no rows, and a participant there (a replayed, still-valid token) is an
 	// orphan too. A failure only narrows this tick to rooms with rows.
@@ -135,12 +95,12 @@ func (h *Hub) reconcileVoiceMembership(ctx context.Context) {
 			id := participantIdentity(row.userID, row.joinedAt)
 			expected[id] = struct{}{}
 			if _, ok := present[id]; ok {
-				h.voiceHub.reconcile.clear(id)
+				h.voiceHub.reconcile.Clear(id)
 				continue
 			}
-			if h.voiceHub.reconcile.miss(id) >= voiceReconcileGraceTicks {
+			if h.voiceHub.reconcile.Miss(id) >= voiceReconcileGraceTicks {
 				h.reconcileReap(ctx, channelID, row.userID, row.joinedAt)
-				h.voiceHub.reconcile.clear(id)
+				h.voiceHub.reconcile.Clear(id)
 			}
 		}
 

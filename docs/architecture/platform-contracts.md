@@ -101,21 +101,21 @@ platform invoke bindings, including all conditional platform/feature handlers:
 | Measure                                                    | Value |
 | ---------------------------------------------------------- | ----- |
 | Files under `Client/src/` importing `@tauri-apps/*`        | 27    |
-| Distinct `invoke` command names called from `Client/src/`  | 108   |
-| `#[tauri::command]` handlers in `Client/src-tauri/`        | 111   |
+| Distinct `invoke` command names called from `Client/src/`  | 110   |
+| `#[tauri::command]` handlers in `Client/src-tauri/`        | 113   |
 | TS calls with no matching Rust handler                     | 0     |
 | Uses of the `window.__TAURI__` global                      | 0     |
 | Environment-detection helper (`isDesktop()` or equivalent) | 1     |
-| Files under `Client/src/platform/`                         | 60    |
+| Files under `Client/src/platform/`                         | 62    |
 
-The handler count covers the 110 distinct registrations
+The handler count covers the 112 distinct registrations
 (`Client/src-tauri/src/lib.rs`); `open_devtools` sits behind
 `#[cfg(feature = "devtools")]`, and the forty-three `native_voice_*` commands
 and the two Linux file commands (`clipboard_files`, `read_staged_file`, for
 files dragged in or copied from the file manager) behind
 `#[cfg(target_os = "linux")]` (`read_staged_file` also on Android, where it
 reads the files another app shared), so a default build (no `devtools`)
-registers 99 on Linux and 54 elsewhere, plus eleven Android-only ones:
+registers 101 on Linux and 56 elsewhere, plus eleven Android-only ones:
 `set_call_service`, `save_file`, `share_file`, `share_text`, `read_staged_file`,
 `take_shared` (`share_in.rs`, the share another app sent to OwnCord) and the
 five notification commands in `android_notifications.rs`. The one environment-detection helper is
@@ -157,6 +157,7 @@ external_image
 external_preview
 frontend_ready
 get_cert_fingerprint
+get_gpu_adapters
 get_identity_pin
 get_settings
 get_window_prefs
@@ -228,6 +229,7 @@ save_identity_key
 save_pending_messages
 save_settings
 set_call_service
+set_gpu_adapter
 set_unread_badge
 set_window_pref
 share_file

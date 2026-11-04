@@ -15,6 +15,7 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/ws/voicestate"
 )
 
 // SetVoiceRejoinBlockWindowForTest shrinks the moderator-removal rejoin block
@@ -233,7 +234,7 @@ func NewHubForTest() *Hub {
 		clients:  make(map[int64][]*Client),
 		pubsub:   NewPubSub(),
 		limiter:  auth.NewRateLimiter(),
-		voiceHub: hubVoice{mod: newUserLocks[lockRankVoiceMod]()},
+		voiceHub: hubVoice{mod: voicestate.NewUserLocks[lockRankVoiceMod]()},
 	}
 }
 
@@ -375,9 +376,7 @@ func PeekClientPendingModFlagsForTest(c *Client) (serverMuted, serverDeafened bo
 // ExpireSettingsCacheForTest forces the settings cache to appear stale so that
 // the next call to getCachedSettings triggers a DB refresh.
 func (h *Hub) ExpireSettingsCacheForTest() {
-	h.settings.mu.Lock()
-	defer h.settings.mu.Unlock()
-	h.settings.lastUpdate = time.Time{} // zero time — always older than any TTL
+	h.settings.cache.Expire()
 }
 
 // BuildJSONForTest exposes buildJSON for external tests.
