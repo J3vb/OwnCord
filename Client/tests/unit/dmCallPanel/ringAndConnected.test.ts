@@ -7,7 +7,10 @@ import {
   clearPeerVerification,
   type VoiceUser,
 } from "../../../src/stores/voice.store";
-import { openIdentityMismatchModal } from "../../../src/features/voice/peerVerification";
+import {
+  openIdentityMismatchModal,
+  openTrustedKeysPanel,
+} from "../../../src/features/voice/peerVerification";
 import {
   membersStore,
   updateMemberProfile,
@@ -526,8 +529,17 @@ describe("DmCallPanel — peer identity verification", () => {
     expect(badge.title).toBe(
       "Same key as before · Safety number: 1234 5678 · Compare it with them to confirm it is them",
     );
-    expect(badge.tagName).toBe("SPAN");
+    expect(badge.tagName).toBe("BUTTON");
     expect(shield(root, SELF)).toBeNull();
+    badge.click();
+    expect(openTrustedKeysPanel).toHaveBeenCalledWith(
+      OTTO,
+      "Otto",
+      false,
+      expect.any(AbortSignal),
+      expect.any(Function),
+    );
+    expect(openIdentityMismatchModal).not.toHaveBeenCalled();
   });
 
   it("a blocked peer shows a red shield whose button opens the re-trust prompt", () => {

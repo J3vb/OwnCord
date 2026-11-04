@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { useMountContainer } from "../helpers/mountContainer";
 import { buildAppearanceTab } from "../../src/features/settings/AppearanceTab";
-import { refreshTimeFormat } from "@lib/text/timeFormat";
+import { refreshTimeFormat, refreshDateFormat, getDateFormat } from "@lib/text/timeFormat";
 
 const { mockGetActiveThemeName, mockRestoreTheme } = vi.hoisted(() => ({
   mockGetActiveThemeName: vi.fn(() => "neon-glow"),
@@ -502,6 +502,33 @@ describe("AppearanceTab — Accessibility", () => {
       .querySelector('[data-testid="time-format"]')!
       .querySelector("[aria-checked='true']") as HTMLElement;
     expect(selected.dataset["value"]).toBe("24h");
+  });
+
+  // --- Date format ---
+
+  it("defaults Date Format to Automatic, and a pinned order moves the clock default", () => {
+    try {
+      const section = buildAppearanceTab(ac.signal);
+      container.appendChild(section);
+      const group = container.querySelector('[data-testid="date-format"]')!;
+      expect(group.getAttribute("role")).toBe("radiogroup");
+      expect((group.querySelector("[aria-checked='true']") as HTMLElement).dataset["value"]).toBe(
+        "auto",
+      );
+
+      (container.querySelector('[data-testid="date-format-dayFirst"]') as HTMLElement).click();
+
+      expect(localStorage.getItem("owncord:settings:dateFormat")).toBe('"dayFirst"');
+      expect(getDateFormat()).toBe("dayFirst");
+      // No clock was chosen, so the 24-hour default of a day-first date follows.
+      const clock = container
+        .querySelector('[data-testid="time-format"]')!
+        .querySelector("[aria-checked='true']") as HTMLElement;
+      expect(clock.dataset["value"]).toBe("24h");
+    } finally {
+      localStorage.removeItem("owncord:settings:dateFormat");
+      refreshDateFormat();
+    }
   });
 });
 

@@ -67,6 +67,7 @@ mod portal_shortcuts;
 pub mod native_voice;
 mod proxy_common;
 mod ptt;
+mod region;
 mod secret_store;
 #[cfg(any(target_os = "android", test))]
 mod share_in;
@@ -352,6 +353,7 @@ pub fn run() {
             external_content::external_preview,
             external_content::external_image,
             idle::system_idle_ms,
+            region::system_region_locale,
             game_activity::detect_game,
             game_activity::list_running_programs,
             media_activity::detect_media,

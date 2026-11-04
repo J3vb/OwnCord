@@ -827,3 +827,76 @@ body:has(.modal-overlay, .settings-overlay:where(.open)) .toast-container {
   bottom: 70px;
   z-index: 5;
 }
+
+/* Trusted voice keys for one peer (opened from their identity shield). */
+.tk-modal {
+  width: min(440px, calc(100vw - 32px));
+}
+.tk-intro,
+.tk-footnote {
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+.tk-footnote {
+  font-size: var(--font-size-xs);
+  color: var(--text-faint);
+  margin-top: 12px;
+}
+.tk-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+.tk-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+}
+.tk-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.tk-fingerprint {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  color: var(--text-normal);
+  word-break: break-all;
+}
+.tk-tag {
+  font-size: var(--font-size-xs);
+  color: var(--text-faint);
+}
+.tk-tag.current {
+  color: var(--green);
+}
+.tk-tag.changed {
+  color: var(--yellow);
+}
+.tk-forget {
+  flex-shrink: 0;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--bg-active);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--red);
+  font-size: var(--font-size-sm);
+}
+.tk-forget:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+.tk-forget:disabled {
+  opacity: 0.6;
+}
+.tk-empty {
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+}

@@ -15,7 +15,7 @@
 import { createLogger } from "../logger";
 import { desktop } from "../../platform/desktop";
 import type { StoreIdentityPinResult } from "../../platform/contracts/identityStore";
-import { decodePinSlot, encodePinSlot, withPin } from "./identityPins";
+import { decodePinSlot, encodePinSlot, withPin, withoutPin } from "./identityPins";
 import {
   exportIdentityKeyPair,
   exportPublicKey,
@@ -121,6 +121,41 @@ export async function storeIdentityPin(
     const next = withPin(keys, pin);
     if (existing.status === "pinned" && next === keys) return "stored";
     return desktop.identity.storePin(host, userId, encodePinSlot(next));
+  });
+}
+
+/** What forgetIdentityPin did: removed the key (or it was not there), kept
+ *  it because it is `keep` or the only key left, or could not read or write
+ *  the slot. */
+export type ForgetIdentityPinResult = "forgotten" | "kept" | "failed";
+
+/**
+ * Stop trusting one of a peer's keys. `keep` (the key in use in the call, if
+ * any) is never removed, and neither is the last key: the pin store has no
+ * delete, and an emptied slot would only be re-pinned on the next announce.
+ * Serialized with storeIdentityPin on the same slot, so a key added at the
+ * same moment is not lost.
+ */
+export async function forgetIdentityPin(
+  host: string,
+  userId: string,
+  key: string,
+  keep: string | null,
+): Promise<ForgetIdentityPinResult> {
+  return serialized(`${host}:${userId}`, async () => {
+    const existing = await desktop.identity.getPin(host, userId);
+    if (existing.status === "unavailable") return "failed";
+    if (existing.status === "unpinned") return "forgotten";
+    const keys = decodePinSlot(existing.pin);
+    if (keys === null) {
+      log.error("Failed to forget identity pin", { host, userId });
+      return "failed";
+    }
+    const next = withoutPin(keys, key);
+    if (next === keys) return "forgotten";
+    if (key === keep || next.length === 0) return "kept";
+    const stored = await desktop.identity.storePin(host, userId, encodePinSlot(next));
+    return stored === "failed" ? "failed" : "forgotten";
   });
 }
 

@@ -34,7 +34,7 @@ Open **Settings** (Ctrl+,) and pick a tab.
 - **Theme**: dark, midnight, light, neon glow, or **Sync with computer** to
   follow your system's light or dark setting.
 - **Compact Mode** fits more messages on screen.
-- **Time Format**: 12-hour or 24-hour clocks.
+- **Time Format**: 12-hour or 24-hour clocks. Until you pick one, the clock and the date order follow the device language.
 
 **Keybinds** lets you change many shortcuts, set push to talk, and set global
 mute and deafen keys that work while another app has focus.

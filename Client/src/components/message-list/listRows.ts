@@ -18,6 +18,7 @@ import { resolveDisplayName } from "@lib/ui/avatar";
 import { channelsStore } from "@stores/channels.store";
 import {
   formatClockTime,
+  formatFullDate,
   formatMessageTimestamp,
   resolveAuthor,
   userRoleColorVar,
@@ -38,6 +39,11 @@ export function createListRows(st: ListState, api: ListApi) {
     const children = st.contentContainer.children;
     for (let i = 0; i < children.length; i++) {
       const item = st.virtualItems[st.renderedStart + i];
+      if (item?.kind === "divider") {
+        const date = children[i]!.querySelector(".msg-day-divider .date");
+        if (date !== null) date.textContent = formatFullDate(item.timestamp);
+        continue;
+      }
       if (item?.kind !== "message") continue;
       const el = children[i] as HTMLElement;
       // A reply's quoted author can change even when the row's own author did
@@ -129,6 +135,11 @@ export function createListRows(st: ListState, api: ListApi) {
     const children = st.contentContainer.children;
     for (let i = 0; i < children.length; i++) {
       const item = st.virtualItems[st.renderedStart + i];
+      if (item?.kind === "divider") {
+        const date = children[i]!.querySelector(".msg-day-divider .date");
+        if (date !== null) date.textContent = formatFullDate(item.timestamp);
+        continue;
+      }
       if (item?.kind !== "message") continue;
       for (const el of children[i]!.querySelectorAll(".msg-time")) {
         el.textContent = messageHeaderTime(item.message.timestamp);

@@ -6,6 +6,7 @@ import "@styles/login.css";
 import "@styles/app.css";
 import "@styles/theme-neon-glow.css";
 
+import { setSystemDateLocale } from "@lib/text/timeFormat";
 import { installGlobalErrorHandlers } from "@lib/text/safeRender";
 import { createApiClient } from "@lib/api";
 import { Disposable } from "@lib/disposable";
@@ -74,7 +75,7 @@ void initLogPersistence();
 // The diagnostic event log and the app's own lifecycle events, off the startup
 // path; owners that record earlier are queued until it attaches.
 void import("@lib/diagnostics/appEvents")
-  .then((m) => m.startAppEvents(desktop.appMetadata))
+  .then((m) => m.startAppEvents(desktop.appMetadata, desktop.logFiles))
   .catch((e: unknown) => log.warn("Diagnostic event log failed to start", e));
 
 // Apply stored theme/font/compact preferences before first render
@@ -96,6 +97,9 @@ forgetAndroidInputDevice();
 // input mode is settled: a profile from before Input Mode keeps its PTT key.
 migrateInputMode();
 void desktop.pushToTalk.init();
+// Dates follow the OS regional format where the host can read it (Windows
+// reports only its display language to the webview).
+void desktop.systemRegion.localeTag().then(setSystemDateLocale);
 // The Android app has no key to hold: its Push to Talk trigger is the
 // on-screen talk button, loaded on first use.
 if (isAndroidHost()) {

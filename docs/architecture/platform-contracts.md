@@ -101,21 +101,21 @@ platform invoke bindings, including all conditional platform/feature handlers:
 | Measure                                                    | Value |
 | ---------------------------------------------------------- | ----- |
 | Files under `Client/src/` importing `@tauri-apps/*`        | 27    |
-| Distinct `invoke` command names called from `Client/src/`  | 110   |
-| `#[tauri::command]` handlers in `Client/src-tauri/`        | 113   |
+| Distinct `invoke` command names called from `Client/src/`  | 111   |
+| `#[tauri::command]` handlers in `Client/src-tauri/`        | 114   |
 | TS calls with no matching Rust handler                     | 0     |
 | Uses of the `window.__TAURI__` global                      | 0     |
 | Environment-detection helper (`isDesktop()` or equivalent) | 1     |
 | Files under `Client/src/platform/`                         | 62    |
 
-The handler count covers the 112 distinct registrations
+The handler count covers the 113 distinct registrations
 (`Client/src-tauri/src/lib.rs`); `open_devtools` sits behind
 `#[cfg(feature = "devtools")]`, and the forty-three `native_voice_*` commands
 and the two Linux file commands (`clipboard_files`, `read_staged_file`, for
 files dragged in or copied from the file manager) behind
 `#[cfg(target_os = "linux")]` (`read_staged_file` also on Android, where it
 reads the files another app shared), so a default build (no `devtools`)
-registers 101 on Linux and 56 elsewhere, plus eleven Android-only ones:
+registers 102 on Linux and 57 elsewhere, plus eleven Android-only ones:
 `set_call_service`, `save_file`, `share_file`, `share_text`, `read_staged_file`,
 `take_shared` (`share_in.rs`, the share another app sent to OwnCord) and the
 five notification commands in `android_notifications.rs`. The one environment-detection helper is
@@ -243,6 +243,7 @@ stop_http_proxy
 stop_livekit_proxy
 store_identity_pin
 system_idle_ms
+system_region_locale
 take_notification_tap
 take_shared
 voice_shortcuts_set_keys
@@ -334,6 +335,7 @@ native surface itself lives only in `platform/desktop/`.
 | App metadata      | `settings/AboutTab.ts`                                                                                | `api/app`                                                                                                                                             | build-time constant                                         |
 | Dev tools         | `main.ts`, `settings/AdvancedTab.ts`                                                                  | `api/core` (`open_devtools`)                                                                                                                          | unsupported — the browser has its own devtools already      |
 | System idle       | `pages/MainPage.ts` (for `lib/presence/autoIdle.ts`)                                                  | `api/core` (`system_idle_ms`)                                                                                                                         | unsupported — answers `null`; in-page activity decides      |
+| System region     | `main.ts` (for `lib/text/timeFormat.ts`)                                                              | `api/core` (`system_region_locale`)                                                                                                                   | unsupported — answers `null`; dates use the page language   |
 | Game activity     | `pages/MainPage.ts` (for `lib/presence/gameActivity.ts`), `settings/GameActivityRows.ts`              | `api/core` (`detect_game`, `list_running_programs`)                                                                                                   | unsupported — answers `null`; the setting is hidden         |
 
 **Media devices are not on this map, deliberately.** No generic `@tauri-apps`

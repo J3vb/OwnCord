@@ -78,11 +78,11 @@ import {
   threadsStoreInUse,
   withThreadsStore,
 } from "../../stores/threadsLoader";
-import type { DispatchApi, Payload } from "../connection/dispatchContext";
-import { log } from "../connection/dispatchContext";
+import type { DispatchApi, Payload, WsRoute } from "../connection/dispatchContext";
+import { log, route } from "../connection/dispatchContext";
 import { connectText } from "../../i18n/connect";
 import { registerSessionReset } from "../../lib/net/sessionRegistry";
-import { WsErrorCode } from "@lib/protocolTypes";
+import { WsErrorCode, ServerMessageType as S } from "@lib/protocolTypes";
 
 /** The channel/role/member snapshot of `ready`. */
 export function applyReadyChannels(payload: Payload<"ready">): void {
@@ -804,3 +804,26 @@ export function handleUserUpdate(payload: Payload<"user_update">): void {
     );
   }
 }
+
+// Channels, members, presence, emoji and the read pointer.
+export const wsRoutes: readonly WsRoute[] = [
+  route(S.PRESENCE, () => handlePresence),
+  route(S.PRESENCE_BATCH, () => handlePresenceBatch),
+  route(S.CHANNEL_CREATE, () => handleChannelCreate),
+  route(S.CHANNEL_UPDATE, () => handleChannelUpdate),
+  route(S.CHANNEL_CATEGORIES, () => handleChannelCategories),
+  route(S.CHANNEL_DELETE, () => handleChannelDelete),
+  route(S.NSFW_ACK, () => handleNsfwAck),
+  route(S.MENTION_COUNT, () => handleMentionCount),
+  route(S.READ_STATE, () => handleReadState),
+  route(S.CHANNEL_ACTIVITY, () => handleChannelActivity),
+  route(S.MEMBER_JOIN, () => handleMemberJoin),
+  route(S.MEMBER_BAN, () => handleMemberBan),
+  route(S.MEMBER_UPDATE, () => handleMemberUpdate),
+  route(S.MEMBER_UPDATE_BATCH, () => handleMemberUpdateBatch),
+  route(S.ROLES_UPDATE, () => handleRolesUpdate),
+  route(S.EMOJI_UPDATE, () => handleEmojiUpdate),
+  route(S.STICKER_UPDATE, () => handleStickerUpdate),
+  route(S.GAME_ACTIVITY_POLICY, () => handleGameActivityPolicy),
+  route(S.USER_UPDATE, () => handleUserUpdate),
+];

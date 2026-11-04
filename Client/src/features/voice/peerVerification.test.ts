@@ -72,13 +72,13 @@ describe("verifyPresentation", () => {
     expect(verifyPresentation(verification("changed", "99887"))).toEqual({
       icon: "shield-alert",
       color: "var(--yellow, #f0b232)",
-      title: shellText("identity.newDevice", { safetyNumber: "99887" }),
+      title: shellText("identity.keyChanged", { safetyNumber: "99887" }),
     });
   });
 
   it("shows a new device whose number is unknown with an empty number", () => {
     expect(verifyPresentation(verification("changed")).title).toBe(
-      shellText("identity.newDevice", { safetyNumber: "" }),
+      shellText("identity.keyChanged", { safetyNumber: "" }),
     );
   });
 

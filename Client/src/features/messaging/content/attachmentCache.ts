@@ -249,14 +249,19 @@ export function isExternalUrl(url: string): boolean {
   }
 }
 
+/** Image types the server scales into a bounded preview. A server too old to
+ *  scale a WebP answers its /thumb with the file itself. */
+const SCALED_IMAGE_MIMES: ReadonlySet<string> = new Set(["image/jpeg", "image/png", "image/webp"]);
+
 /** The server's bounded preview of an image file, or the file itself
  *  on a server that does not advertise thumbnails or for a type the server
- *  passes through unchanged (only JPEG and PNG are scaled). A HEIC, HEIF or
- *  TIFF always takes the preview: the file itself is not an image to a webview. */
+ *  passes through unchanged (only JPEG, PNG and WebP are scaled). A HEIC, HEIF
+ *  or TIFF always takes the preview: the file itself is not an image to a
+ *  webview. */
 export function thumbnailUrl(fileUrl: string, mime: string): string {
   if (
     authStore.getState().uploadPolicy?.thumbnails !== true ||
-    (mime !== "image/jpeg" && mime !== "image/png" && !isConvertedImageMime(mime)) ||
+    (!SCALED_IMAGE_MIMES.has(mime) && !isConvertedImageMime(mime)) ||
     !isServerUrl(fileUrl)
   ) {
     return fileUrl;

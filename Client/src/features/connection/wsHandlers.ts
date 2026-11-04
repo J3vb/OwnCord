@@ -24,10 +24,10 @@ import { safetyText } from "../../i18n/safety";
 import { connectText } from "../../i18n/connect";
 import { noteJoinSent } from "../voice/joinRequest";
 import { sendOwedVoiceLeave } from "../voice/leaveOwed";
-import { livekitSession, log } from "./dispatchContext";
-import type { DispatchApi, DispatchWs, Payload, ReconnectClock } from "./dispatchContext";
+import { livekitSession, log, route } from "./dispatchContext";
+import type { DispatchApi, DispatchWs, Payload, ReconnectClock, WsRoute } from "./dispatchContext";
 import type { ConnectionState } from "../../lib/ws";
-import { WsErrorCode } from "@lib/protocolTypes";
+import { WsErrorCode, ServerMessageType as S } from "@lib/protocolTypes";
 
 /** A join still in flight restates itself when it connects; an error frame
  *  for a send made before then would roll that join back. */
@@ -261,3 +261,10 @@ export function handleConnectionError(ws: DispatchWs, payload: Payload<"error">)
 export function handleUploadPolicy(payload: Payload<"upload_policy">): void {
   setUploadFileTypes(payload.blocked_extensions ?? [], payload.allowed_extensions ?? []);
 }
+
+// The connection events with no ordering against other features.
+export const wsRoutes: readonly WsRoute[] = [
+  route(S.AUTH_ERROR, (c) => (p) => handleAuthError(c.api, p)),
+  route(S.UPLOAD_POLICY, () => handleUploadPolicy),
+  route(S.SERVER_RESTART, (c) => (p) => handleServerRestart(c.clock, p)),
+];

@@ -9,12 +9,14 @@ import (
 	"time"
 )
 
-// cacheEntry is one cached result: a preview or an image's bytes.
+// cacheEntry is one cached result: a preview, an image's bytes, or the
+// failure a fetch ended in.
 type cacheEntry struct {
 	key     string
 	preview previewData
 	image   []byte
 	media   string
+	failure Failure
 	size    int64
 	expires time.Time
 }
@@ -57,9 +59,15 @@ func (c *resultCache) get(key string) (*cacheEntry, bool) {
 	return entry, true
 }
 
-// put stores entry, evicting least recently used entries until the cache is
-// back under its byte limit. An entry larger than the whole limit is not kept.
+// put stores entry for the cache's TTL, evicting least recently used entries
+// until the cache is back under its byte limit. An entry larger than the whole
+// limit is not kept.
 func (c *resultCache) put(entry *cacheEntry) {
+	c.putFor(entry, c.ttl)
+}
+
+// putFor is put with its own time-to-live.
+func (c *resultCache) putFor(entry *cacheEntry, ttl time.Duration) {
 	if entry.size > c.limit {
 		return
 	}
@@ -68,7 +76,7 @@ func (c *resultCache) put(entry *cacheEntry) {
 	if el, ok := c.entries[entry.key]; ok {
 		c.removeLocked(el)
 	}
-	entry.expires = c.now().Add(c.ttl)
+	entry.expires = c.now().Add(ttl)
 	c.entries[entry.key] = c.order.PushFront(entry)
 	c.bytes += entry.size
 	for c.bytes > c.limit {

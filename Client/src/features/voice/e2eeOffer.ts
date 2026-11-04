@@ -7,7 +7,7 @@
 // peer set and room key stay owned by E2EEManager and its other modules; this
 // module reaches them only through E2EEOfferHost.
 import type { WsClient } from "../../lib/ws";
-import { wrapRoomKey, unwrapRoomKey } from "../../lib/net/e2eeCrypto";
+import { wrapRoomKey, unwrapRoomKey, type OfferBinding } from "../../lib/net/e2eeCrypto";
 import { LEGACY_PLACEMENT, type KeyPlacement } from "../../lib/net/keyPlacement";
 import { createLogger } from "../../lib/logger";
 import { markJoinMilestone } from "../../lib/voice/voiceJoinTrace";
@@ -39,6 +39,11 @@ export interface E2EEOfferHost {
    *  key's own for a peer on key slots, undefined (the v1 format) for any
    *  other. */
   offerPlacement?(peerId: number): KeyPlacement | undefined;
+  /** The signed-in user's id; 0 when there is none yet. */
+  getMyUserId(): number;
+  /** The sender and recipient a v3 offer to this peer binds: set for a peer
+   *  that announced `bound_offers`, undefined (an older format) otherwise. */
+  offerBinding?(peerId: number): OfferBinding | undefined;
   isKeyHolder(): boolean;
   setKeyHolder(value: boolean): void;
   clearKeyRotationTimer(): void;
@@ -155,6 +160,35 @@ export class E2EEOffer {
     return run;
   }
 
+  /** What an offer from `fromUserId` needs before it is unwrapped, or null to drop it. */
+  private offerInputs(
+    fromUserId: number,
+  ): { peerKey: CryptoKey; keypair: CryptoKeyPair; myUserId: number } | null {
+    const peerKey = this._peerPublicKeys.get(fromUserId);
+    if (!peerKey) {
+      log.warn("E2EE: received offer from unknown peer", { fromUserId });
+      return null;
+    }
+    const keypair = this._ecdhKeyPair;
+    if (!keypair) {
+      log.warn("E2EE: received offer but no ECDH keypair");
+      return null;
+    }
+    // The server elects the lowest user id in the call as key holder, so
+    // while we hold the key a real offer can only come from a lower id (one
+    // that has just been elected over us). An offer from a higher id is not
+    // from the holder: drop it before it can change our key or role.
+    const myUserId = this.host.getMyUserId();
+    if (this._isKeyHolder && myUserId !== 0 && fromUserId >= myUserId) {
+      log.warn("E2EE: ignoring offer from a peer that cannot be the key holder", {
+        fromUserId,
+        myUserId,
+      });
+      return null;
+    }
+    return { peerKey, keypair, myUserId };
+  }
+
   private async handleOfferInner(
     fromUserId: number,
     encryptedKeyBase64: string,
@@ -162,16 +196,9 @@ export class E2EEOffer {
     isCurrent: () => boolean,
   ): Promise<void> {
     try {
-      const peerKey = this._peerPublicKeys.get(fromUserId);
-      if (!peerKey) {
-        log.warn("E2EE: received offer from unknown peer", { fromUserId });
-        return;
-      }
-      const keypair = this._ecdhKeyPair;
-      if (!keypair) {
-        log.warn("E2EE: received offer but no ECDH keypair");
-        return;
-      }
+      const inputs = this.offerInputs(fromUserId);
+      if (inputs === null) return;
+      const { peerKey, keypair, myUserId } = inputs;
 
       markJoinMilestone("e2ee key holder offer received");
 
@@ -183,7 +210,10 @@ export class E2EEOffer {
         roomKey: unwrapped,
         epoch,
         placement: offered,
-      } = await unwrapRoomKey(keypair.privateKey, peerKey, encryptedKeyBase64, ivBase64);
+      } = await unwrapRoomKey(keypair.privateKey, peerKey, encryptedKeyBase64, ivBase64, {
+        senderId: fromUserId,
+        recipientId: myUserId,
+      });
 
       // Discard if either the epoch advanced (a rotation landed during
       // unwrap) OR the keypair no longer matches (clearState() ran and a new
@@ -396,6 +426,7 @@ export class E2EEOffer {
         roomKey,
         this._e2eeEpoch,
         this.host.offerPlacement?.(peerId),
+        this.host.offerBinding?.(peerId),
       );
       if (this._ecdhKeyPair !== keypair || this._roomKey !== roomKey) {
         log.info("E2EE: discarding stale room-key offer (keypair/room key changed during wrap)", {

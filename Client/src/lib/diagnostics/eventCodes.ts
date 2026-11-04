@@ -136,12 +136,8 @@ const TOKEN = { type: "token" } as const;
 const HASH = { type: "hash" } as const;
 
 const WS = "src/lib/ws.ts";
-const MEDIA = "src/features/voice/mediaControl.ts";
-const DEVICES = "src/lib/voice/deviceManager.ts";
 const ROOM_EVENTS = "src/lib/voice/roomEventHandlers.ts";
-const LIFECYCLE = "src/features/voice/roomLifecycle.ts";
 const SCREEN = "src/lib/voice/screenShare.ts";
-const MAIN = "src/main.ts";
 const EXIT_WATCH = "src-tauri/src/exit_watch.rs";
 const CRASH_LOG = "src-tauri/src/crash_log.rs";
 const EXCEPTION_LOG = "src-tauri/src/exception_log.rs";
@@ -155,6 +151,7 @@ const APP_EVENTS = "src/lib/diagnostics/appEvents.ts";
 const VOICE_LOG = "src/lib/voice/voiceEventLog.ts";
 const WATCHDOG = "src/lib/voice/cameraStallWatchdog.ts";
 const DIAGNOSTICS = "src/lib/voice/livekitDiagnostics.ts";
+const SCREEN_CHANGE = "src/features/voice/screenshareChange.ts";
 
 const CAMERA_STATS = {
   frames_sent: INT,
@@ -178,10 +175,9 @@ export const EVENT_CODES = {
       webview_version: { type: "version" },
     },
   },
-  "app.suspended": { label: "Computer went to sleep", owners: [MAIN], dataClasses: [], fields: {} }, // i18n-exempt: support bundle text, never shown in the app
   "app.resumed": {
     label: "Computer woke up", // i18n-exempt: support bundle text, never shown in the app
-    owners: [MAIN],
+    owners: [WS],
     dataClasses: [],
     fields: { asleep_ms: MS },
   },
@@ -200,7 +196,7 @@ export const EVENT_CODES = {
 
   "native.crash": {
     label: "App crashed last time", // i18n-exempt: support bundle text, never shown in the app
-    owners: [CRASH_LOG, EXCEPTION_LOG, SYSTEM_CRASH, ANDROID_CRASH, ANDROID_EXITS],
+    owners: [APP_EVENTS, CRASH_LOG, EXCEPTION_LOG, SYSTEM_CRASH, ANDROID_CRASH, ANDROID_EXITS],
     dataClasses: [],
     fields: {
       platform: PLATFORMS,
@@ -215,7 +211,7 @@ export const EVENT_CODES = {
   },
   "native.exit": {
     label: "How the last run ended", // i18n-exempt: support bundle text, never shown in the app
-    owners: [EXIT_WATCH, ANDROID_EXITS],
+    owners: [APP_EVENTS, EXIT_WATCH, ANDROID_EXITS],
     dataClasses: [],
     fields: {
       platform: PLATFORMS,
@@ -237,21 +233,9 @@ export const EVENT_CODES = {
       hang_ms: MS,
     },
   },
-  "native.hang": {
-    label: "App stopped answering", // i18n-exempt: support bundle text, never shown in the app
-    owners: [EXIT_WATCH],
-    dataClasses: [],
-    fields: { thread: { type: "enum", values: ["main", "webview"] }, duration_ms: MS },
-  },
-  "native.hang_recovered": {
-    label: "App answered again", // i18n-exempt: support bundle text, never shown in the app
-    owners: [EXIT_WATCH],
-    dataClasses: [],
-    fields: { thread: { type: "enum", values: ["main", "webview"] }, duration_ms: MS },
-  },
   "native.webview_process_failed": {
     label: "A webview helper process failed", // i18n-exempt: support bundle text, never shown in the app
-    owners: [EXIT_WATCH, ANDROID_WEBVIEW],
+    owners: [APP_EVENTS, EXIT_WATCH, ANDROID_WEBVIEW],
     dataClasses: [],
     fields: {
       process: { type: "enum", values: ["browser", "renderer", "gpu", "utility", "unknown"] },
@@ -285,7 +269,7 @@ export const EVENT_CODES = {
   },
   "camera.device_changed": {
     label: "Camera device changed", // i18n-exempt: support bundle text, never shown in the app
-    owners: [DEVICES],
+    owners: [VOICE_LOG],
     dataClasses: [],
     fields: { device: HASH },
   },
@@ -340,7 +324,7 @@ export const EVENT_CODES = {
   },
   "mic.device_changed": {
     label: "Microphone device changed", // i18n-exempt: support bundle text, never shown in the app
-    owners: [DEVICES],
+    owners: [VOICE_LOG],
     dataClasses: [],
     fields: { device: HASH },
   },
@@ -371,13 +355,13 @@ export const EVENT_CODES = {
   },
   "track.replaced": {
     label: "Track replaced", // i18n-exempt: support bundle text, never shown in the app
-    owners: [MEDIA],
+    owners: [VOICE_LOG, SCREEN_CHANGE],
     dataClasses: [],
     fields: { source: SOURCES },
   },
   "track.layers_changed": {
     label: "Simulcast layers turned on or off", // i18n-exempt: support bundle text, never shown in the app
-    owners: [ROOM_EVENTS],
+    owners: [WATCHDOG],
     dataClasses: [],
     fields: { source: SOURCES, active_layers: INT },
   },
@@ -402,7 +386,7 @@ export const EVENT_CODES = {
 
   "share.started": {
     label: "Screen share started", // i18n-exempt: support bundle text, never shown in the app
-    owners: [SCREEN],
+    owners: [VOICE_LOG],
     dataClasses: [],
     fields: {
       surface: { type: "enum", values: ["monitor", "window", "browser", "unknown"] },
@@ -414,7 +398,7 @@ export const EVENT_CODES = {
   },
   "share.stopped": {
     label: "Screen share stopped", // i18n-exempt: support bundle text, never shown in the app
-    owners: [SCREEN],
+    owners: [VOICE_LOG],
     dataClasses: [],
     fields: { reason: STOP_REASONS },
   },
@@ -426,7 +410,7 @@ export const EVENT_CODES = {
   },
   "share.source_changed": {
     label: "Screen share source changed", // i18n-exempt: support bundle text, never shown in the app
-    owners: [SCREEN],
+    owners: [SCREEN_CHANGE],
     dataClasses: [],
     fields: { surface: { type: "enum", values: ["monitor", "window", "browser", "unknown"] } },
   },
@@ -439,7 +423,7 @@ export const EVENT_CODES = {
   },
   "voice.left": {
     label: "Left the voice channel", // i18n-exempt: support bundle text, never shown in the app
-    owners: [LIFECYCLE],
+    owners: [VOICE_LOG],
     dataClasses: [19],
     fields: { channel: { type: "pseudonym" } },
   },
@@ -493,7 +477,7 @@ export const EVENT_CODES = {
 
   "ice.state": {
     label: "Media connection state changed", // i18n-exempt: support bundle text, never shown in the app
-    owners: [ROOM_EVENTS],
+    owners: [DIAGNOSTICS],
     dataClasses: [],
     fields: {
       transport: { type: "enum", values: ["publisher", "subscriber"] },

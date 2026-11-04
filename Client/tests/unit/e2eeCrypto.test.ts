@@ -217,6 +217,89 @@ describe("e2eeCrypto", () => {
       expect(unwrapped.placement).toEqual({ slot: 1, stage: true });
     });
 
+    it("binds a v3 blob to its sender and recipient", async () => {
+      const { alice, bob, roomKey } = await twoParties();
+      const aliceToBob = { senderId: 3, recipientId: 8 };
+      const { encryptedKey, iv } = await wrapRoomKey(
+        alice.privateKey,
+        bob.publicKey,
+        roomKey,
+        5,
+        { slot: 1, stage: true },
+        aliceToBob,
+      );
+      const bytes = fromB64(encryptedKey);
+      expect(Array.from(bytes.subarray(0, 11))).toEqual([3, 0, 0, 0, 0, 0, 0, 0, 5, 1, 1]);
+      expect(bytes.byteLength).toBe(11 + 48);
+
+      const unwrapped = await unwrapRoomKey(
+        bob.privateKey,
+        alice.publicKey,
+        encryptedKey,
+        iv,
+        aliceToBob,
+      );
+      expect(unwrapped.roomKey).toEqual(roomKey);
+      expect(unwrapped.epoch).toBe(5);
+      expect(unwrapped.placement).toEqual({ slot: 1, stage: true });
+
+      // The sender's own blob handed back as if it came from the recipient.
+      await expect(
+        unwrapRoomKey(alice.privateKey, bob.publicKey, encryptedKey, iv, {
+          senderId: 8,
+          recipientId: 3,
+        }),
+      ).rejects.toThrow();
+      // Another recipient id.
+      await expect(
+        unwrapRoomKey(bob.privateKey, alice.publicKey, encryptedKey, iv, {
+          senderId: 3,
+          recipientId: 9,
+        }),
+      ).rejects.toThrow();
+      await expect(
+        unwrapRoomKey(bob.privateKey, alice.publicKey, encryptedKey, iv),
+      ).rejects.toThrow("E2EE: bound offer without sender and recipient");
+    });
+
+    it("gives a v3 blob without a placement slot 0, used at once", async () => {
+      const { alice, bob, roomKey } = await twoParties();
+      const ids = { senderId: 1, recipientId: 2 };
+      const { encryptedKey, iv } = await wrapRoomKey(
+        alice.privateKey,
+        bob.publicKey,
+        roomKey,
+        1,
+        undefined,
+        ids,
+      );
+      const unwrapped = await unwrapRoomKey(bob.privateKey, alice.publicKey, encryptedKey, iv, ids);
+      expect(unwrapped.placement).toEqual({ slot: 0, stage: false });
+    });
+
+    it("still unwraps an older format when the direction is given", async () => {
+      const { alice, bob, roomKey } = await twoParties();
+      const { encryptedKey, iv } = await wrapRoomKey(alice.privateKey, bob.publicKey, roomKey, 4, {
+        slot: 0,
+        stage: false,
+      });
+      const unwrapped = await unwrapRoomKey(bob.privateKey, alice.publicKey, encryptedKey, iv, {
+        senderId: 1,
+        recipientId: 2,
+      });
+      expect(unwrapped.roomKey).toEqual(roomKey);
+    });
+
+    it("refuses a bound offer for a user id that is not a positive safe integer", async () => {
+      const { alice, bob, roomKey } = await twoParties();
+      await expect(
+        wrapRoomKey(alice.privateKey, bob.publicKey, roomKey, 1, undefined, {
+          senderId: 0,
+          recipientId: 2,
+        }),
+      ).rejects.toThrow("E2EE: offer user id must be a positive safe integer");
+    });
+
     it("reports no placement for a v1 blob", async () => {
       const { alice, bob, roomKey } = await twoParties();
       const { encryptedKey, iv } = await wrapRoomKey(alice.privateKey, bob.publicKey, roomKey, 2);

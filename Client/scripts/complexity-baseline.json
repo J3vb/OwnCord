@@ -198,7 +198,7 @@
       "openUserProfilePopup > (anonymous)": [20]
     },
     "features/settings/AppearanceTab.ts": {
-      "buildAppearanceTab": [18]
+      "buildAppearanceTab": [17]
     },
     "features/settings/KeybindsTab.ts": {
       "buildKeybindsTab > renderPortal": [20]
@@ -226,7 +226,7 @@
       "createVoiceComposer > upload": [21]
     },
     "features/voice/e2eeOffer.ts": {
-      "E2EEOffer > handleOfferInner": [22]
+      "E2EEOffer > handleOfferInner": [21]
     },
     "features/voice/e2eePeerState.ts": {
       "E2EEPeerState > verifyPeerAnnounce": [33]

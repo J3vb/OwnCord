@@ -15,6 +15,7 @@ import {
   restateSelfVoiceState,
   setPeerVideoDecode,
   setPeerKeySlots,
+  setPeerBoundOffers,
   setPeerWatching,
   noteWatchingResync,
   clearPeerWatching,
@@ -34,16 +35,16 @@ import { noteVoiceMoved, noteAfkMove, takeAfkMove, clearAfkMove } from "./moveHi
 import { settleVoiceLeave } from "./leaveOwed";
 import { channelsStore } from "../../stores/channels.store";
 import { membersStore, memberDisplayName } from "../../stores/members.store";
-import { livekitSession, cancelVoiceRejoin } from "../connection/dispatchContext";
+import { livekitSession, cancelVoiceRejoin, log, route } from "../connection/dispatchContext";
 import type {
   DispatchApi,
   DispatchWs,
   Payload,
   ReconnectClock,
+  WsRoute,
 } from "../connection/dispatchContext";
-import { log } from "../connection/dispatchContext";
 import { connectText } from "../../i18n/connect";
-import { WsErrorCode } from "@lib/protocolTypes";
+import { WsErrorCode, ServerMessageType as S } from "@lib/protocolTypes";
 
 /**
  * Honor a moderator's mute/deafen locally. Mute is also enforced at the SFU,
@@ -216,6 +217,7 @@ export function snapshotReadyVoice(): (ws: DispatchWs, payload: Payload<"ready">
       for (const uid of left) {
         setPeerVideoDecode(uid, undefined);
         setPeerKeySlots(uid, false);
+        setPeerBoundOffers(uid, false);
       }
       void livekitSession().then(
         ({ handleParticipantLeft, reconcileVideoFlags, resendWatching }) => {
@@ -426,6 +428,7 @@ export function handleVoiceLeave(payload: Payload<"voice_leave">, clock: Reconne
   // A rejoin may come from another client; its own announce restates the list.
   setPeerVideoDecode(payload.user_id, undefined);
   setPeerKeySlots(payload.user_id, false);
+  setPeerBoundOffers(payload.user_id, false);
   void livekitSession().then(({ handleParticipantLeft, leaveVoice, isAutoReconnecting }) => {
     if (sameChannel) void handleParticipantLeft(payload.user_id);
     if (shouldTeardownSession && !isAutoReconnecting()) {
@@ -480,6 +483,7 @@ export function handleVoiceE2eeAnnounce(payload: Payload<"voice_e2ee_announce">)
   }
   try {
     setPeerKeySlots(payload.user_id, payload.key_slots === true);
+    setPeerBoundOffers(payload.user_id, payload.bound_offers === true);
   } catch (err) {
     log.warn("voice_e2ee_announce: could not record key_slots", err);
   }
@@ -700,3 +704,16 @@ export function rollbackVideoOnError(id: string | undefined): void {
     });
   }
 }
+
+// Voice state, moves, tokens and the client-side E2EE key exchange.
+export const wsRoutes: readonly WsRoute[] = [
+  route(S.VOICE_STATE, (c) => (p) => handleVoiceState(c.ws, p)),
+  route(S.VOICE_MOVED, (c) => (p) => handleVoiceMoved(c.ws, p, c.clock)),
+  route(S.VOICE_DISCONNECTED, (c) => (p) => handleVoiceDisconnected(p, c.clock)),
+  route(S.VOICE_LEAVE, (c) => (p) => handleVoiceLeave(p, c.clock)),
+  route(S.VOICE_CONFIG, () => handleVoiceConfig),
+  route(S.VOICE_TOKEN, () => handleVoiceTokenFrame),
+  route(S.VOICE_E2EE_ANNOUNCE, () => handleVoiceE2eeAnnounce),
+  route(S.VOICE_E2EE_OFFER, () => handleVoiceE2eeOffer),
+  route(S.VOICE_WATCHING, () => handleVoiceWatching),
+];
