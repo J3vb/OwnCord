@@ -12,6 +12,14 @@ import {
 import { getOrCreateIdentityKeyPair, storeIdentityPin } from "@lib/net/identity";
 import { PEER_ID, newManager, sendsOfType, stallNextWrap } from "../../helpers/livekitE2eeHarness";
 
+/** The key holder is the lowest user id in the call, so an offer from PEER_ID
+ *  (42) reaches a user with a higher id. */
+const OFFER_RECEIVER = 100;
+
+beforeEach(() => {
+  mocks.mockSelf.id = 1;
+});
+
 vi.mock("livekit-client", () => mocks.livekitClientMock());
 vi.mock("@lib/net/e2eeCrypto", () => mocks.netE2eeCryptoMock());
 vi.mock("@lib/net/identity", () => mocks.netIdentityMock());
@@ -69,6 +77,7 @@ describe("E2EEManager", () => {
     await vi.waitFor(() => {
       expect(sendsOfType(ws, "voice_e2ee_announce").length).toBeGreaterThan(0);
     });
+    mocks.mockSelf.id = OFFER_RECEIVER;
     await mgr.handleOffer(PEER_ID, "enc", "iv");
     await expect(setupPromise).resolves.toBe(true);
 
@@ -220,6 +229,7 @@ describe("E2EEManager", () => {
     await vi.waitFor(() => {
       expect(sendsOfType(ws, "voice_e2ee_announce").length).toBeGreaterThan(0);
     });
+    mocks.mockSelf.id = OFFER_RECEIVER;
     await mgr.handleOffer(PEER_ID, "enc", "iv");
 
     await expect(setupPromise).resolves.toBe(true);
@@ -286,6 +296,7 @@ describe("E2EEManager", () => {
       .mockResolvedValueOnce({ roomKey: new Uint8Array(32).fill(2), epoch: 0 });
     vi.mocked(roomKeyToBase64).mockImplementation((k: Uint8Array) => `key-${k[0]}`);
     try {
+      mocks.mockSelf.id = OFFER_RECEIVER;
       const first = mgr.handleOffer(PEER_ID, "enc1", "iv1");
       const second = mgr.handleOffer(PEER_ID, "enc2", "iv2");
       releaseFirst();
@@ -307,6 +318,7 @@ describe("E2EEManager", () => {
     // A lower-userID participant then joined; the server re-elected them and
     // they sent us the room key. Accepting an offer proves they are the
     // server-authoritative holder (the server gates offers on IsVoiceKeyHolder).
+    mocks.mockSelf.id = OFFER_RECEIVER;
     await mgr.handleOffer(PEER_ID, "enc", "iv");
     const epochAfterOffer = mgr.epoch;
     ws.send.mockClear();
@@ -336,6 +348,7 @@ describe("E2EEManager", () => {
     expect(mgr.peerPublicKeys.has(PEER_ID)).toBe(true);
 
     mockSetKey.mockClear();
+    mocks.mockSelf.id = OFFER_RECEIVER;
     await mgr.handleOffer(PEER_ID, "enc", "iv");
     expect(mockSetKey).toHaveBeenCalledWith("mock-room-key-base64");
   });
@@ -392,7 +405,9 @@ describe("E2EEManager", () => {
     // While that rotation is in flight, an offer from the "real" elected
     // holder arrives and stands us down (handleOfferInner clears
     // _isKeyHolder but not _rotatingKey).
+    mocks.mockSelf.id = OFFER_RECEIVER;
     await mgr.handleOffer(PEER_ID, "enc", "iv");
+    mocks.mockSelf.id = 1; // back to the lowest id, so a leave re-elects us
 
     // The new holder immediately leaves — we are re-elected. This must not
     // be a silent no-op just because a rotation is still in flight.
@@ -446,6 +461,7 @@ describe("E2EEManager", () => {
       releaseUnwrap = resolve;
     });
     vi.mocked(unwrapRoomKey).mockReturnValueOnce(stalledUnwrap);
+    mocks.mockSelf.id = OFFER_RECEIVER;
     const offerPromise = mgr.handleOffer(PEER_ID, "enc-old", "iv-old");
     await vi.waitFor(() => expect(unwrapRoomKey).toHaveBeenCalled());
 
@@ -508,6 +524,7 @@ describe("E2EEManager", () => {
 
     // A corrupt/undecryptable offer arrives — handleOfferInner's catch
     // rejects the wait.
+    mocks.mockSelf.id = OFFER_RECEIVER;
     await mgr.handleOffer(PEER_ID, "enc-bad", "iv-bad");
 
     // The retry must re-announce and give a FRESH window — a second, valid
@@ -607,6 +624,7 @@ describe("E2EEManager", () => {
     // A corrupt offer rejects A's still-pending roomKeyPromise via its
     // rejector — the only field B's (key-holder) setup never touches.
     vi.mocked(unwrapRoomKey).mockRejectedValueOnce(new Error("bad offer"));
+    mocks.mockSelf.id = OFFER_RECEIVER;
     await mgr.handleOffer(PEER_ID, "enc-bad", "iv-bad");
 
     // A must give up instead of re-announcing its dead ephemeral key over
@@ -651,6 +669,7 @@ describe("E2EEManager key slots", () => {
       expect.anything(),
       mgr.epoch,
       { slot: 1, stage: true },
+      undefined,
     );
   });
 
@@ -697,6 +716,7 @@ describe("E2EEManager key slots", () => {
       expect.anything(),
       mgr.epoch,
       { slot: 1, stage: false },
+      undefined,
     );
   });
 });

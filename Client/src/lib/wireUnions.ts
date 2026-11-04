@@ -216,6 +216,8 @@ export type ClientMessage =
       video_decode?: readonly string[];
       /** The sender stages each new room key in its own slot. */
       key_slots?: boolean;
+      /** The sender unwraps offers that bind sender and recipient. */
+      bound_offers?: boolean;
     }> & {
       readonly type: "voice_e2ee_announce";
     })

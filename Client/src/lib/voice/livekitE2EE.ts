@@ -14,6 +14,7 @@ import {
   generateRoomKey,
   wrapRoomKey,
   computeRawKeyFingerprint,
+  type OfferBinding,
 } from "@lib/net/e2eeCrypto";
 import { LEGACY_PLACEMENT, type KeyPlacement } from "@lib/net/keyPlacement";
 import { storeIdentityPin } from "@lib/net/identity";
@@ -175,6 +176,8 @@ export class E2EEManager {
     },
     offerPlacement: (peerId) =>
       this.peerHasKeySlots(peerId) ? this._epoch.roomKeyPlacement : undefined,
+    getMyUserId: () => authStore.getState().user?.id ?? 0,
+    offerBinding: (peerId) => this.offerBinding(peerId),
     isKeyHolder: () => this._isKeyHolder,
     setKeyHolder: (value) => {
       this._isKeyHolder = value;
@@ -216,6 +219,16 @@ export class E2EEManager {
   /** Whether `userId`'s announce said it stages keys in their own slot. */
   private peerHasKeySlots(userId: number): boolean {
     return voiceStore.getState().peerKeySlots?.has(userId) ?? false;
+  }
+
+  /** The direction a v3 offer to `peerId` binds, for a peer that announced
+   *  `bound_offers`; undefined sends it an older format. */
+  private offerBinding(peerId: number): OfferBinding | undefined {
+    const myUserId = authStore.getState().user?.id ?? 0;
+    if (myUserId === 0 || !(voiceStore.getState().peerBoundOffers?.has(peerId) ?? false)) {
+      return undefined;
+    }
+    return { senderId: myUserId, recipientId: peerId };
   }
 
   /** Where a rotated room key goes. With every peer on key slots it is staged
@@ -891,6 +904,7 @@ export class E2EEManager {
           this.peerHasKeySlots(userId)
             ? { slot: this._epoch.roomKeyPlacement.slot, stage: false }
             : undefined,
+          this.offerBinding(userId),
         );
         // Discard if either the epoch advanced (a rotation landed during the
         // wrap) OR the keypair no longer matches (a concurrent

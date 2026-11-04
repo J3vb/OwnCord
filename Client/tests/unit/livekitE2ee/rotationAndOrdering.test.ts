@@ -21,6 +21,14 @@ import {
   stallNextWrap,
 } from "../../helpers/livekitE2eeHarness";
 
+/** The key holder is the lowest user id in the call, so an offer from PEER_ID
+ *  (42) reaches a user with a higher id. */
+const OFFER_RECEIVER = 100;
+
+beforeEach(() => {
+  mocks.mockSelf.id = 1;
+});
+
 vi.mock("livekit-client", () => mocks.livekitClientMock());
 vi.mock("@lib/net/e2eeCrypto", () => mocks.netE2eeCryptoMock());
 vi.mock("@lib/net/identity", () => mocks.netIdentityMock());
@@ -198,8 +206,10 @@ describe("E2EEManager", () => {
 
     // A lower-userID peer's offer stands us down (mirrors the "stops
     // rotating" test above), so the next participant-left re-elects us.
+    mocks.mockSelf.id = OFFER_RECEIVER;
     await mgr.handleOffer(PEER_ID, "enc", "iv");
     expect(mgr.rotatingKey).toBe(false);
+    mocks.mockSelf.id = 1; // back to the lowest id, so a leave re-elects us
 
     // Stall the first peer's wrap in the become-holder redistribution loop.
     // (wrapRoomKey was already called twice above, wrapping for each peer's
@@ -534,6 +544,7 @@ describe("E2EEManager", () => {
     });
     mockSetKey.mockClear();
     mockSetKey.mockImplementationOnce(() => stalledSetKey);
+    mocks.mockSelf.id = OFFER_RECEIVER;
     const offerPromise = mgr.handleOffer(PEER_ID, "enc", "iv");
     await vi.waitFor(() => expect(mockSetKey).toHaveBeenCalled());
 
@@ -632,6 +643,7 @@ describe("E2EEManager", () => {
     // before the (simulated) disconnect.
     await mgr.setupKeyExchange(true, 1);
     await mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig"); // peer key known, so the offer below is accepted
+    mocks.mockSelf.id = OFFER_RECEIVER;
     await mgr.handleOffer(PEER_ID, "enc", "iv"); // stands us down — now a non-holder
     ws.send.mockClear();
 
@@ -676,6 +688,7 @@ describe("E2EEManager", () => {
 
     // The offer is dispatched immediately behind the announce, before the
     // announce has stored the peer's ECDH key.
+    mocks.mockSelf.id = OFFER_RECEIVER;
     const offerPromise = mgr.handleOffer(PEER_ID, "enc", "iv");
 
     releasePin({ status: "unpinned" });
@@ -705,6 +718,7 @@ describe("E2EEManager", () => {
       expect(sendsOfType(ws, "voice_e2ee_announce")).toHaveLength(1);
 
       await mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig");
+      mocks.mockSelf.id = OFFER_RECEIVER;
       await mgr.handleOffer(PEER_ID, "enc", "iv");
       expect(mgr.peerPublicKeys.has(PEER_ID)).toBe(false);
       expect(unwrapRoomKey).not.toHaveBeenCalled();

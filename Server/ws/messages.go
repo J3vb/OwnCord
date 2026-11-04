@@ -273,6 +273,8 @@ type voiceE2EEAnnounceBroadcast struct {
 	IdentityPublicKey string `json:"identity_public_key,omitempty"`
 	// KeySlots is the sender's key_slots flag, omitted when false.
 	KeySlots bool `json:"key_slots,omitempty"`
+	// BoundOffers is the sender's bound_offers flag, omitted when false.
+	BoundOffers bool `json:"bound_offers,omitempty"`
 }
 
 // voiceE2EEOfferRelay is the server-to-client relay with from_user_id.
@@ -655,6 +657,7 @@ func buildVoiceE2EEAnnounce(userID int64, a e2eeAnnounce) []byte {
 			VideoDecode:       a.videoDecode,
 			IdentityPublicKey: a.identityKey,
 			KeySlots:          a.keySlots,
+			BoundOffers:       a.boundOffers,
 		},
 	})
 }

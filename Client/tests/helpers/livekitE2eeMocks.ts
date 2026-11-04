@@ -75,9 +75,13 @@ export function netIdentityMock() {
   };
 }
 
+/** The signed-in user's id. A test that receives the key holder's offer sets
+ *  it above the holder's id: the server elects the lowest id as holder. */
+export const mockSelf = { id: 1 };
+
 export function authStoreMock() {
   return {
-    authStore: { getState: vi.fn(() => ({ user: { id: 1 } })) },
+    authStore: { getState: vi.fn(() => ({ user: { id: mockSelf.id } })) },
   };
 }
 

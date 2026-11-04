@@ -31,6 +31,14 @@ import {
   stallNextIdentityPin,
 } from "../../helpers/livekitE2eeHarness";
 
+/** The key holder is the lowest user id in the call, so an offer from PEER_ID
+ *  (42) reaches a user with a higher id. */
+const OFFER_RECEIVER = 100;
+
+beforeEach(() => {
+  mocks.mockSelf.id = 1;
+});
+
 vi.mock("livekit-client", () => mocks.livekitClientMock());
 vi.mock("@lib/net/e2eeCrypto", () => mocks.netE2eeCryptoMock());
 vi.mock("@lib/net/identity", () => mocks.netIdentityMock());
@@ -82,6 +90,7 @@ describe("E2EEManager", () => {
       expect.anything(),
       mgr.epoch,
       undefined,
+      undefined,
     );
 
     await mgr.rotateKeyPeriodically();
@@ -91,6 +100,7 @@ describe("E2EEManager", () => {
       expect.anything(),
       mgr.epoch,
       undefined,
+      undefined,
     );
   });
 
@@ -98,6 +108,7 @@ describe("E2EEManager", () => {
     const { mgr } = await holderWithPeer();
     try {
       unwrapAt(3, 3);
+      mocks.mockSelf.id = OFFER_RECEIVER;
       await mgr.handleOffer(PEER_ID, "enc3", "iv3");
       expect(mockSetKey).toHaveBeenLastCalledWith("key-3");
 
@@ -114,6 +125,7 @@ describe("E2EEManager", () => {
     const { mgr } = await holderWithPeer();
     try {
       unwrapAt(3, 3);
+      mocks.mockSelf.id = OFFER_RECEIVER;
       await mgr.handleOffer(PEER_ID, "enc3", "iv3");
       unwrapAt(3, 4);
       await mgr.handleOffer(PEER_ID, "enc3b", "iv3b");
@@ -128,6 +140,7 @@ describe("E2EEManager", () => {
     roundTripPeerKeys();
     try {
       unwrapAt(5, 5);
+      mocks.mockSelf.id = OFFER_RECEIVER;
       await mgr.handleOffer(PEER_ID, "enc5", "iv5");
       expect(mockSetKey).toHaveBeenLastCalledWith("key-5");
 
@@ -146,6 +159,7 @@ describe("E2EEManager", () => {
     const { mgr } = await holderWithPeer();
     try {
       unwrapAt(null, 7);
+      mocks.mockSelf.id = OFFER_RECEIVER;
       await mgr.handleOffer(PEER_ID, "legacy", "iv");
       expect(mockSetKey).toHaveBeenLastCalledWith("key-7");
     } finally {
@@ -310,6 +324,7 @@ describe("E2EEManager", () => {
     const { ws, mgr } = newManager();
     await mgr.setupKeyExchange(true, 1);
     await mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig");
+    mocks.mockSelf.id = OFFER_RECEIVER;
     await mgr.handleOffer(PEER_ID, "enc", "iv"); // stands us down — now a non-holder with a key
     ws.send.mockClear();
 
@@ -341,6 +356,7 @@ describe("E2EEManager", () => {
 
     try {
       unwrapAt(5, 5);
+      mocks.mockSelf.id = OFFER_RECEIVER;
       await mgr.handleOffer(PEER_ID, "enc5", "iv5");
       expect(mockSetKey).toHaveBeenLastCalledWith("key-5");
 
@@ -371,7 +387,9 @@ describe("E2EEManager", () => {
       expect(mgr.epoch).toBe(0);
       expect(sendsOfType(ws, "voice_e2ee_offer")).toHaveLength(0);
     } finally {
-      vi.mocked(authStore.getState).mockImplementation(() => ({ user: { id: 1 } }) as never);
+      vi.mocked(authStore.getState).mockImplementation(
+        () => ({ user: { id: mocks.mockSelf.id } }) as never,
+      );
     }
   });
 
@@ -568,7 +586,9 @@ describe("E2EEManager", () => {
 
       expect(sendsOfType(ws, "voice_e2ee_offer")).toHaveLength(0);
     } finally {
-      vi.mocked(authStore.getState).mockImplementation(() => ({ user: { id: 1 } }) as never);
+      vi.mocked(authStore.getState).mockImplementation(
+        () => ({ user: { id: mocks.mockSelf.id } }) as never,
+      );
     }
   });
 });
@@ -724,7 +744,9 @@ describe("E2EE operation ownership", () => {
     mockSetKey.mockResolvedValue(undefined);
     vi.mocked(getIdentityPin).mockResolvedValue({ status: "unpinned" });
     vi.mocked(getOrCreateIdentityKeyPair).mockResolvedValue(mockIdentityKeyPair);
-    vi.mocked(authStore.getState).mockReturnValue({ user: { id: 1 } } as never);
+    vi.mocked(authStore.getState).mockImplementation(
+      () => ({ user: { id: mocks.mockSelf.id } }) as never,
+    );
     mockMembers.clear();
     mockMembers.set(PEER_ID, { identityPublicKey: "peer-identity-b64" });
     mockVoiceState.voiceUsers.clear();
@@ -760,6 +782,7 @@ describe("E2EE operation ownership", () => {
             };
           }),
       );
+      mocks.mockSelf.id = OFFER_RECEIVER;
       const offer = mgr.handleOffer(PEER_ID, "enc", "iv");
       await vi.waitFor(() => expect(finishImport).toBeDefined());
       mgr.clearState();
@@ -842,6 +865,7 @@ describe("E2EE operation ownership", () => {
       const rotation = mgr.rotateKeyPeriodically();
       await vi.waitFor(() => expect(finishImport).toBeDefined());
       vi.mocked(unwrapRoomKey).mockResolvedValueOnce({ roomKey: offeredKey, epoch: 8 });
+      mocks.mockSelf.id = OFFER_RECEIVER;
       const offer = mgr.handleOffer(PEER_ID, "enc", "iv");
       await vi.waitFor(() =>
         expect((mgr as unknown as { _roomKey: Uint8Array })._roomKey).toBe(offeredKey),
@@ -924,6 +948,7 @@ describe("E2EE operation ownership", () => {
       const releasePin = stallNextIdentityPin();
       const announce = mgr.handleAnnounce(PEER_ID, "Zmlyc3Q=", "sig");
       await vi.waitFor(() => expect(getIdentityPin).toHaveBeenCalledTimes(1));
+      mocks.mockSelf.id = OFFER_RECEIVER;
       const offer = mgr.handleOffer(PEER_ID, "enc", "iv");
       mgr.clearState();
       await mgr.setupKeyExchange(true, 2);

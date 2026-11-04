@@ -21,7 +21,7 @@ vi.mock("../../lib/logger", () => ({
   },
 }));
 
-import { wrapRoomKey, unwrapRoomKey } from "../../lib/net/e2eeCrypto";
+import { wrapRoomKey, unwrapRoomKey, type OfferBinding } from "../../lib/net/e2eeCrypto";
 import { E2EEOffer } from "./e2eeOffer";
 import type { KeyPlacement } from "../../lib/net/keyPlacement";
 
@@ -39,6 +39,7 @@ function setup() {
     offerEpochs: new Map<number, number>(),
     roomKey: null as Uint8Array | null,
     keyHolder: false,
+    myUserId: 5,
     resolver: null as (() => void) | null,
     rejector: null as ((err: Error) => void) | null,
   };
@@ -60,6 +61,8 @@ function setup() {
     ),
     setRoomKeyPlacement: vi.fn((_placement: KeyPlacement) => {}),
     offerPlacement: vi.fn((_peerId: number): KeyPlacement | undefined => undefined),
+    getMyUserId: () => state.myUserId,
+    offerBinding: vi.fn((_peerId: number): OfferBinding | undefined => undefined),
     isKeyHolder: () => state.keyHolder,
     setKeyHolder: (value: boolean) => {
       state.keyHolder = value;
@@ -167,6 +170,38 @@ describe("E2EEOffer.handleOffer", () => {
     await offers.handleOffer(HOLDER, "enc", "iv");
     expect(state.keyHolder).toBe(false);
     expect(host.clearKeyRotationTimer).toHaveBeenCalledTimes(1);
+  });
+
+  it("as key holder, ignores an offer from a peer whose user id is not below ours", async () => {
+    const { state, host, offers } = setup();
+    state.keyHolder = true;
+    state.peers.set(7, {} as CryptoKey);
+    state.myUserId = 7;
+    await offers.handleOffer(7, "enc", "iv");
+    state.myUserId = 3;
+    await offers.handleOffer(7, "enc", "iv");
+    expect(unwrapRoomKey).not.toHaveBeenCalled();
+    expect(state.keyHolder).toBe(true);
+    expect(host.clearKeyRotationTimer).not.toHaveBeenCalled();
+    expect(state.roomKey).toBeNull();
+  });
+
+  it("as key holder, stands down for an offer from a lower user id", async () => {
+    const { state, host, offers } = setup();
+    state.keyHolder = true;
+    state.myUserId = 5;
+    await offers.handleOffer(HOLDER, "enc", "iv");
+    expect(state.keyHolder).toBe(false);
+    expect(host.clearKeyRotationTimer).toHaveBeenCalledTimes(1);
+  });
+
+  it("unwraps with the direction the offer arrived in", async () => {
+    const { offers } = setup();
+    await offers.handleOffer(HOLDER, "enc", "iv");
+    expect(unwrapRoomKey).toHaveBeenCalledWith(expect.anything(), expect.anything(), "enc", "iv", {
+      senderId: HOLDER,
+      recipientId: 5,
+    });
   });
 
   it("ignores an offer from an unknown peer or without a keypair", async () => {
