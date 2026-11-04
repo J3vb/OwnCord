@@ -18,8 +18,9 @@ import type { DmChannel } from "../../stores/dm.store";
 import { clearChannelVoiceUsers } from "../../stores/voice.store";
 import { blocksStore, setBlockedByMe, clearBlockedByThem } from "../../stores/blocks.store";
 import type { DmChannelPayload } from "../../lib/types";
-import type { DispatchApi, Payload } from "../connection/dispatchContext";
-import { log } from "../connection/dispatchContext";
+import type { DispatchApi, Payload, WsRoute } from "../connection/dispatchContext";
+import { log, route } from "../connection/dispatchContext";
+import { ServerMessageType as S } from "@lib/protocolTypes";
 
 /** Map one DM participant from the wire shape to the store's. */
 function mapDmUser(u: DmChannelPayload["recipient"]): DmChannel["recipient"] {
@@ -198,3 +199,8 @@ function mostRecentDm(channels: readonly DmChannel[]): DmChannel | undefined {
   }
   return best;
 }
+
+export const wsRoutes: readonly WsRoute[] = [
+  route(S.DM_CHANNEL_OPEN, () => handleDmChannelOpen),
+  route(S.DM_CHANNEL_CLOSE, () => handleDmChannelClose),
+];
