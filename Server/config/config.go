@@ -247,7 +247,9 @@ type ServerConfig struct {
 	ReachabilityReportEnabled bool `yaml:"reachability_report_enabled"`
 	// MinFreeDiskMB is the one definition of "low disk": the headroom in MiB
 	// below which the startup banner logs an error, /health reports degraded and
-	// uploads are refused with 507. Default 256; 0 disables the floor.
+	// uploads are refused with 507. Every backup copy (scheduled, manual,
+	// pre-migration, pre-restore) must also leave this much free. Default 256;
+	// 0 disables the floor.
 	MinFreeDiskMB    int `yaml:"min_free_disk_mb"`
 	WAFParanoiaLevel int `yaml:"waf_paranoia_level"` // OWASP CRS paranoia level 1-4 (default: 2)
 	// WAFCRSMode selects the OWASP Core Rule Set mode when the WAF is enabled:

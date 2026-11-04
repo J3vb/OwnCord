@@ -85,7 +85,7 @@ func serveArchive(w http.ResponseWriter, r *http.Request, database *db.DB, opts 
 	defer func() { _ = os.RemoveAll(work) }()
 
 	zipPath, err := buildArchive(ctx, database, opts, paths, work)
-	if errors.Is(err, errArchiveNoSpace) {
+	if errors.Is(err, errArchiveNoSpace) || errors.Is(err, db.ErrBackupNoSpace) {
 		writeErr(w, http.StatusInsufficientStorage, httperr.CodeStorageLowDisk, err.Error())
 		return
 	}

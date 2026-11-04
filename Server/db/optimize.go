@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -41,12 +42,12 @@ func (d *DB) Optimize(ctx context.Context) error {
 	return nil
 }
 
-// StartOptimizer runs Optimize every interval until ctx is cancelled. A
-// failure is logged, not fatal; the next tick tries again. The returned
-// channel closes once the goroutine has exited, so shutdown can order it
-// before Close. A non-positive interval uses OptimizeInterval.
+// StartOptimizer runs Optimize and a passive WAL checkpoint every interval
+// until ctx is cancelled. A failure is logged, not fatal; the next tick tries
+// again. The returned channel closes once the goroutine has exited, so
+// shutdown can order it before Close. A non-positive interval uses OptimizeInterval.
 func (d *DB) StartOptimizer(ctx context.Context, interval time.Duration) <-chan struct{} {
-	return runOptimizeLoop(ctx, interval, d.Optimize, d.closed.Load)
+	return runOptimizeLoop(ctx, interval, d.optimizeTick, d.closed.Load)
 }
 
 // runOptimizeLoop is StartOptimizer's loop with the work and the closed check
@@ -80,3 +81,31 @@ func runOptimizeLoop(ctx context.Context, interval time.Duration, run func(conte
 // statsCacheTTL is how long the whole-table aggregates read by the metrics
 // scrape and the admin dashboard are reused.
 const statsCacheTTL = 60 * time.Second
+
+// CheckpointWAL runs one wal_checkpoint(PASSIVE) on a reader connection. It
+// copies what it can into the main file without waiting on readers or the
+// writer, so the next write can restart the log from the start and
+// journal_size_limit can truncate it. SQLite's own auto-checkpoint rarely gets
+// that chance under a steady read load. A no-op on an in-memory database or
+// once Close has been called.
+func (d *DB) CheckpointWAL(ctx context.Context) error {
+	if d.closed.Load() || d.walPath == "" {
+		return nil
+	}
+	conn, err := d.reader.Conn(ctx)
+	if err != nil {
+		return fmt.Errorf("wal checkpoint: acquiring reader connection: %w", err)
+	}
+	defer func() { _ = conn.Close() }()
+	var busy, logFrames, checkpointed int
+	if err := conn.QueryRowContext(ctx, "PRAGMA wal_checkpoint(PASSIVE)").Scan(&busy, &logFrames, &checkpointed); err != nil {
+		return fmt.Errorf("wal checkpoint: %w", err)
+	}
+	return nil
+}
+
+// optimizeTick is one optimizer tick: refresh planner statistics, then give
+// the WAL a chance to restart. Both run even if the first fails.
+func (d *DB) optimizeTick(ctx context.Context) error {
+	return errors.Join(d.Optimize(ctx), d.CheckpointWAL(ctx))
+}

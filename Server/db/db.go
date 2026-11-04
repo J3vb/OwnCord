@@ -61,8 +61,13 @@ type DB struct {
 	plainMemory bool
 
 	// walPath is "<path>-wal" for a file-backed database, empty for an
-	// in-memory one. WALBytes stats it; nothing else reads it.
+	// in-memory one. WALBytes and the backup space check stat it.
 	walPath string
+
+	// backupSpace is what BackupToSafe checks free space against: the reserve
+	// kept free (server.min_free_disk_mb) and the free-space reader. Nil means
+	// no reserve and diskutil.FreeBytes. See backup_space.go.
+	backupSpace atomic.Pointer[backupSpace]
 
 	// lockRelease drops the single-process advisory lock taken by openFile.
 	// Nil for in-memory databases and when the lock mechanism is unavailable.
@@ -113,7 +118,10 @@ const filePragmas = "_pragma=busy_timeout(5000)" + // wait up to 5s for the writ
 	"&_pragma=synchronous(NORMAL)" + // performance tuning, safe with WAL
 	"&_pragma=temp_store(MEMORY)" +
 	"&_pragma=mmap_size(268435456)" +
-	"&_pragma=cache_size(-64000)"
+	"&_pragma=cache_size(-64000)" +
+	// Cap the WAL at 64 MiB: a restart truncates it to this size instead of
+	// keeping the high-water mark of the busiest hour forever.
+	"&_pragma=journal_size_limit(67108864)"
 
 // isMemoryPath reports whether path names an in-memory database
 // (":memory:", "file::memory:" or any URI carrying mode=memory).

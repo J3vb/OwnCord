@@ -411,7 +411,7 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 			r.Put("/afk-channel", handlePutAFKChannel(channels, hub))
 			r.Get("/config", handleGetConfigFacts(setupOpts.RunningCfg))
 		})
-		mountBackupRoutes(r, gates, backups, database, setupOpts, paths)
+		mountBackupRoutes(r, gates, backups, database, svc.Attention, setupOpts, paths)
 		gates.route(r, gateManageUpdates, http.MethodGet, "/updates", handleCheckUpdate(u))
 		gates.route(r, gateManageUpdates, http.MethodPost, "/updates/apply", handleApplyUpdate(database, u, hub, version, setupOpts.Background, setupOpts.Shutdown))
 	})
@@ -440,8 +440,8 @@ func mountDiscordImportRoutes(r chi.Router, imp *discordImportAPI) {
 // The backup schedule and retention stay Owner-only, as settings
 // keys. They share the one backupPaths this API resolved from its
 // SetupOptions, so no handler reads a directory from process-wide state.
-func mountBackupRoutes(r chi.Router, gates *gateRegistry, backups *backupGate, database *db.DB, setupOpts SetupOptions, paths backupPaths) {
-	gates.route(r, gateManageBackups, http.MethodPost, "/backup", handleBackup(database, paths, backups))
+func mountBackupRoutes(r chi.Router, gates *gateRegistry, backups *backupGate, database *db.DB, attention *service.AttentionService, setupOpts SetupOptions, paths backupPaths) {
+	gates.route(r, gateManageBackups, http.MethodPost, "/backup", handleBackup(database, paths, backups, attention))
 	gates.route(r, gateListBackups, http.MethodGet, "/backups", handleListBackups(paths))
 	gates.route(r, gateRestoreBackups, http.MethodDelete, "/backups/{name}", handleDeleteBackup(database, paths))
 	gates.route(r, gateRestoreBackups, http.MethodPost, "/backups/{name}/restore", handleRestoreBackup(database, paths, backups))

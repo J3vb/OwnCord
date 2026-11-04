@@ -94,6 +94,12 @@ func (d *DB) BackupToSafe(ctx context.Context, path, safeRoot string) error {
 		return fmt.Errorf("BackupToSafe: checking destination %q: %w", absClean, statErr)
 	}
 
+	// Refuse before the temp exists, so a short volume gets a message naming the
+	// numbers and no file at all, rather than a copy that fills the disk.
+	if err := d.checkBackupSpace(filepath.Dir(absClean)); err != nil {
+		return err
+	}
+
 	// A unique temp beside the destination: the same directory keeps the rename
 	// atomic and the path under safeRoot, ".tmp" keeps it out of "*.db" scans, and
 	// the unique name keeps same-second backups from sharing a file. VACUUM INTO
