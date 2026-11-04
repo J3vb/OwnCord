@@ -141,6 +141,7 @@ func (h *Hub) BroadcastChannelUpdate(ch *db.Channel) {
 // the channel's content still waiting on its gate, so a client never sees a
 // message for a channel it already removed.
 func (h *Hub) BroadcastChannelDelete(channelID int64) {
+	h.forgetChannelAudience(channelID)
 	h.enqueue(broadcastMsg{msg: buildChannelDelete(channelID), laneChannelID: channelID}, "global message")
 }
 

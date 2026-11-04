@@ -47,6 +47,11 @@ type Hub struct {
 	// mutation site invalidates synchronously (InvalidateUser on role change,
 	// InvalidateAll on channel-override change); the cache TTL is a backstop.
 	perms *service.PermissionService
+	// connGen moves whenever a connection is added or removed (under mu), so a
+	// memoised audience can tell the connected set changed (audience_memo.go).
+	connGen atomic.Uint64
+	// audience memoises channel read audiences and the moderator set (audience_memo.go).
+	audience audienceMemo
 	// focusDeps is the presence handlers' dependency set; the deferred-focus drain
 	// goroutine (focus_defer.go) reuses its limiter and channel service so it meters
 	// and authorises like handleChannelFocusV2. ChannelSvc is nil in bare test hubs.
