@@ -622,6 +622,14 @@ export const settingsText = defineCatalog("settings", {
     "H.264 from Intel graphics cannot be played by viewers yet. Auto avoids it.",
   "voiceAudio.videoCodec.auto":
     "Auto (default: H.264 when your graphics card can encode it, otherwise VP8)",
+  "voiceAudio.gpuAdapter": "Graphics card for video",
+  "voiceAudio.gpuAdapterDesc":
+    "Used to draw, play and encode video. Auto picks the high performance card. Applies after a restart.",
+  "voiceAudio.gpuAdapter.auto": "Auto (recommended)",
+  "voiceAudio.gpuAdapterNotFound": "Saved card not found, using Auto.",
+  "voiceAudio.gpuAdapterReset": "OwnCord could not start on the chosen card and went back to Auto.",
+  "voiceAudio.gpuAdapterRestart": "Restart to apply",
+  "voiceAudio.gpuAdapterNotSaved": "Could not save the choice.",
   "voiceAudio.videoDevice": "Video Device",
   "voiceAudio.kind.microphone": "Microphone",
   "voiceAudio.kind.speaker": "Speaker",
