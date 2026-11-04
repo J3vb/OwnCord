@@ -2,11 +2,11 @@
  * The phone's Messages drawer (features/people-home/phoneHead.ts draws it).
  * While it is mounted the sidebar carries `phone-messages`, which hides the
  * server header and the desktop DM controls the head replaces
- * (app/dm-phone.css). Phone layout only, checked each time DM mode mounts.
+ * (app/dm-phone.css). Phone layout only.
  */
 import { createElement } from "@lib/dom";
 import { Disposable } from "@lib/disposable";
-import { isPhoneLayout } from "@lib/ui/bottomSheet";
+import { isPhoneLayout, onPhoneLayoutChange } from "@lib/ui/bottomSheet";
 import { trackCurrentView } from "../../../features/navigation/contentView";
 import { handleCreateDm } from "../SidebarDmHelpers";
 import type { SidebarScope } from "./sidebarScope";
@@ -16,9 +16,13 @@ const SEARCH_OPEN = "dm-search-open";
 
 /** Mount the head at the top of the DM content; its teardown goes on `unsubs`. */
 export function mountDmPhoneHead(sc: SidebarScope, unsubs: Array<() => void>): void {
-  if (!isPhoneLayout()) return;
   const owner = new Disposable();
   const { signal } = owner;
+  unsubs.push(() => owner.destroy());
+  // A rotation or resize across the phone breakpoint redraws DM mode, so the
+  // head comes or goes with the layout.
+  onPhoneLayoutChange(() => sc.mountSidebarContent("dms"), signal);
+  if (!isPhoneLayout()) return;
   const wrapper = sc.sidebarWrapper;
   const head = createElement("div", { class: "dm-phone-head", "data-testid": "dm-phone-head" });
   sc.contentSlot.appendChild(head);
@@ -50,11 +54,13 @@ export function mountDmPhoneHead(sc: SidebarScope, unsubs: Array<() => void>): v
       });
     },
     // Without the head the old DM controls come back: the drawer still works.
-    () => wrapper.classList.remove(MODE_CLASS),
+    () => {
+      wrapper.classList.remove(MODE_CLASS);
+      head.remove();
+    },
   );
 
   unsubs.push(() => {
-    owner.destroy();
     wrapper.classList.remove(MODE_CLASS, SEARCH_OPEN);
     head.remove();
   });

@@ -235,7 +235,7 @@ export function createSidebarDrawer(opts: SidebarDrawerOptions): SidebarDrawer {
     if (
       target instanceof Element &&
       target.closest(
-        "[data-channel-id], [data-testid='dm-entry'], [data-testid='dm-people-entry'], [data-testid='dm-phone-people'], [data-testid^='dm-active-']",
+        "[data-channel-id], [data-testid='dm-entry'], [data-testid='dm-people-entry'], [data-testid='dm-phone-people'], [data-active-id]",
       )
     )
       closeDrawer("destination");
