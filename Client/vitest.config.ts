@@ -60,7 +60,6 @@ const NODE_PROCESS_FILES = [
   "tests/unit/artifact-updater-restart.test.ts",
   "tests/unit/artifact-webview2-policy.test.ts",
   "tests/unit/layer-baseline.test.ts",
-  "tests/unit/lifecycle-ownership.test.ts",
   "tests/unit/lifecycle-probe.test.ts",
   "tests/unit/main/linksAndRecovery.test.ts",
   "tests/unit/native-artifacts.test.ts",
@@ -69,8 +68,6 @@ const NODE_PROCESS_FILES = [
   "tests/unit/platform/browser-registry.test.ts",
   "tests/unit/platform/socket.browser.test.ts",
   "tests/unit/playwright-devserver-v8-flag.test.ts",
-  "tests/unit/process-nonloopback.test.ts",
-  "tests/unit/soak-console-errors.test.ts",
   "tests/unit/web-build.test.ts",
 ];
 
