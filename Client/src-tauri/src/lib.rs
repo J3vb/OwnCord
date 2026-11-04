@@ -69,6 +69,8 @@ mod secret_store;
 #[cfg(any(target_os = "android", test))]
 mod share_in;
 mod shortcuts;
+#[cfg(target_os = "linux")]
+mod stderr_capture;
 mod sync;
 #[cfg(any(target_os = "linux", windows))]
 mod system_crash_report;
