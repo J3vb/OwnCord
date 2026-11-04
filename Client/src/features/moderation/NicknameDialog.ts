@@ -104,7 +104,7 @@ export function openNicknameDialog(options: NicknameDialogOptions): ModalInstanc
   );
   const save = createElement(
     "button",
-    { class: "btn-primary", type: "button", "data-testid": "nickname-save" },
+    { class: "btn-modal-save", type: "button", "data-testid": "nickname-save" },
     t("nicknameDialog.save"),
   );
   footer.append(reset, cancel, save);

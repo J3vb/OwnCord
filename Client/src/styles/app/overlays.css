@@ -423,9 +423,6 @@ body:has(.modal-overlay, .settings-overlay:where(.open)) .toast-container {
   color: var(--header-primary);
   font-size: var(--font-size-lg);
 }
-.safety-tab .safety-retry {
-  margin: 8px 0 0;
-}
 .safety-history {
   margin: 8px 0 0;
   padding: 0;

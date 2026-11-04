@@ -8,6 +8,7 @@
 
 import type { OwnModerationAction } from "@lib/api";
 import { createElement, setText } from "@lib/dom";
+import { createInlineError } from "@lib/ui/inlineError";
 import { formatUntil, formatWhen, safetyText as t } from "../../i18n/safety";
 import { createAppealsSection, replaceKeepingFocus, type AppealsApi } from "./Appeals";
 import { refreshOwnModeration, safetyStore, serverNow, serverTime } from "./store";
@@ -84,12 +85,12 @@ export function renderSafetyTab(
   standing.append(standingIcon, standingText);
   const restrictions = createElement("p", { class: "setting-desc" });
   const historyStatusEl = createElement("p", { class: "setting-desc", role: "status" });
-  const retry = createElement(
-    "button",
-    { type: "button", class: "ac-btn safety-retry" },
-    t("tab.retry"),
-  );
-  retry.addEventListener("click", () => refreshOwnModeration(), { signal });
+  const failure = createInlineError({
+    retryLabel: t("tab.retry"),
+    onRetry: () => refreshOwnModeration(),
+    signal,
+    testId: "safety-history-error",
+  });
   const list = createElement("ul", { class: "safety-history", "aria-label": t("tab.history") });
   const historyHeading = createElement(
     "h3",
@@ -106,7 +107,7 @@ export function renderSafetyTab(
     historyHeading,
     historyHint,
     historyStatusEl,
-    retry,
+    failure.el,
     list,
     appeals.root,
   );
@@ -126,9 +127,11 @@ export function renderSafetyTab(
     );
     // Empty or unread history is one line; the hint is for reading rows.
     historyHint.hidden = history === null || history.length === 0 || historyFailed;
-    retry.hidden = !historyFailed;
+    if (historyFailed) failure.show(t("tab.loadFailed"));
+    else failure.clear();
+    // The failure has its own line with Retry; this one is loading or empty.
     let status = "";
-    if (historyFailed) status = t("tab.loadFailed");
+    if (historyFailed) status = "";
     else if (history === null) status = t("tab.loading");
     else if (history.length === 0) status = t("tab.empty");
     setText(historyStatusEl, status);

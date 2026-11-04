@@ -243,6 +243,7 @@ export const shards = {
     "src/lib/presence/latency.ts",
     "src/lib/net/reconcile.ts",
     "src/lib/ui/select.ts",
+    "src/lib/ui/inlineError.ts",
     "src/lib/text/timeFormat.ts",
     "src/features/whats-new/WhatsNewDialog.ts",
     "src/features/whats-new/whatsNewPrompt.ts",

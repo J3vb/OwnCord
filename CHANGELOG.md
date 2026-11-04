@@ -49,6 +49,8 @@ and only when it changes something a contributor or fork holder must do
 
 ### Changed
 
+- In-app dialogs (join with an invite link, rename prompts, new DM picker, nickname, new thread) use the same Save and Cancel buttons as Create Channel.
+- Privacy & Safety shows a failed load the same way in every section: the message in red with Retry beside it.
 - The admin Live log no longer fills with the panel's own request lines, and a viewer that falls behind sees how many lines were skipped.
 
 ### Added

@@ -21,6 +21,7 @@ import {
   type OwnModerationAction,
 } from "@lib/api";
 import { createElement, setText } from "@lib/dom";
+import { createInlineError } from "@lib/ui/inlineError";
 import { appealsText as at } from "../../i18n/appeals";
 import { formatWhen, safetyText as t } from "../../i18n/safety";
 import { refreshOwnModeration, safetyStore } from "./store";
@@ -93,12 +94,12 @@ export function createAppealsSection(api: AppealsApi | null, signal: AbortSignal
     at("appeals.heading"),
   );
   const status = createElement("p", { class: "setting-desc", role: "status" });
-  const retry = createElement(
-    "button",
-    { type: "button", class: "ac-btn safety-retry" },
-    t("tab.retry"),
-  );
-  retry.addEventListener("click", () => refreshOwnModeration(), { signal });
+  const failure = createInlineError({
+    retryLabel: t("tab.retry"),
+    onRetry: () => refreshOwnModeration(),
+    signal,
+    testId: "safety-appeals-error",
+  });
   const list = createElement("ul", {
     class: "safety-history safety-appeals-list",
     "aria-label": at("appeals.list"),
@@ -158,7 +159,7 @@ export function createAppealsSection(api: AppealsApi | null, signal: AbortSignal
     createElement("p", { class: "setting-desc" }, at("appeals.hint")),
     createElement("p", { class: "setting-desc" }, t("appeals.unavailable")),
   );
-  root.append(heading, rules.details, panel, status, retry, list, announcer);
+  root.append(heading, rules.details, panel, status, failure.el, list, announcer);
 
   let open: Panel | null = null;
   let pending = false;
@@ -354,9 +355,11 @@ export function createAppealsSection(api: AppealsApi | null, signal: AbortSignal
 
   function render(): void {
     const { appeals, appealsFailed } = safetyStore.getState();
-    retry.hidden = !appealsFailed;
+    if (appealsFailed) failure.show(at("appeals.loadFailed"));
+    else failure.clear();
+    // The failure has its own line with Retry; this one is loading or empty.
     let text = "";
-    if (appealsFailed) text = at("appeals.loadFailed");
+    if (appealsFailed) text = "";
     else if (appeals === null) text = at("appeals.loading");
     else if (appeals.length === 0) text = at("appeals.empty");
     setText(status, text);

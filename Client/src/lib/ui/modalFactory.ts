@@ -273,21 +273,20 @@ export function createPromptModal(
         });
   if (hint !== null) content.appendChild(hint.el);
 
-  const row = createElement("div", {
-    style: "display:flex;gap:8px;margin-top:12px;",
-  });
-  const confirm = createElement(
-    "button",
-    { class: "btn btn-primary", style: "flex:1;", "data-testid": "prompt-confirm" },
-    options.confirmLabel ?? connectText("modal.save"),
-  );
+  // The same Cancel / Save pair, in the same order, as every other dialog.
+  const row = createElement("div", { class: "modal-prompt-actions" });
   const cancel = createElement(
     "button",
-    { class: "btn btn-secondary", style: "flex:1;", "data-testid": "prompt-cancel" },
+    { class: "btn-modal-cancel", type: "button", "data-testid": "prompt-cancel" },
     connectText("common.cancel"),
   );
-  row.appendChild(confirm);
+  const confirm = createElement(
+    "button",
+    { class: "btn-modal-save", type: "button", "data-testid": "prompt-confirm" },
+    options.confirmLabel ?? connectText("modal.save"),
+  );
   row.appendChild(cancel);
+  row.appendChild(confirm);
   content.appendChild(row);
 
   let closed = false;

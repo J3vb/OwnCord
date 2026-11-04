@@ -121,7 +121,7 @@ export function openCreateThreadDialog(options: CreateThreadDialogOptions): void
   );
   const submit = createElement(
     "button",
-    { class: "btn-primary", type: "submit", "data-testid": "create-thread-submit" },
+    { class: "btn-modal-save", type: "submit", "data-testid": "create-thread-submit" },
     threadsText("create.submit"),
   );
   footer.append(cancel, submit);
