@@ -498,6 +498,12 @@
       "binding": "eventBuffer",
       "category": "transient",
       "reason": "Event lines waiting for the next debounced disk write, like the log buffer beside it"
+    },
+    {
+      "file": "lib/diagnostics/appEvents.ts",
+      "binding": "lastExitTimer",
+      "category": "app-lifetime",
+      "reason": "One delayed read of the native log per app start, copying how the previous run ended; nothing per-server"
     }
   ]
 }
