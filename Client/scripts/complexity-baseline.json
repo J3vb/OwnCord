@@ -36,7 +36,7 @@
       "createMessageInput > mount > (anonymous)": [31]
     },
     "components/MessageList.ts": {
-      "createMessageList > mount > (anonymous)": [21]
+      "createMessageList > mount > (anonymous)": [18]
     },
     "components/PhoneCallBar.ts": {
       "createPhoneCallBar > update": [19]
@@ -54,7 +54,7 @@
       "createUpdateNotifier > renderInstallState": [19]
     },
     "components/UserProfilePopup.ts": {
-      "createUserProfilePopup > mount": [37],
+      "createUserProfilePopup > mount": [33],
       "createUserProfilePopup > mount > renderChips": [17]
     },
     "components/VoiceWidget.ts": {
@@ -76,9 +76,6 @@
     },
     "components/dmContextMenu.ts": {
       "openDmContextMenu": [30]
-    },
-    "components/message-input/inputComposer.ts": {
-      "createInputComposer > applyDisabledState": [22]
     },
     "components/message-input/inputDraft.ts": {
       "createInputDraft > restoreDraft": [16]
@@ -207,7 +204,7 @@
       "buildKeybindsTab > renderPortal": [20]
     },
     "features/settings/SettingsOverlay.ts": {
-      "createSettingsOverlay > mount": [19],
+      "createSettingsOverlay > mount": [17],
       "createSettingsOverlay > mount > (anonymous)": [18]
     },
     "features/settings/voice-audio/voiceDevicesPreview.ts": {

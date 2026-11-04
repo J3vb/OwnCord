@@ -76,6 +76,12 @@ const api = {
   gifSearch: vi.fn(async () => ({ results: [] })),
   gifTrending: vi.fn(async () => ({ results: [] })),
   gifFavorites: vi.fn(async () => ({ favorites: [] })),
+  uploadFile: vi.fn(async (file: File) => ({
+    id: `up-${file.name}`,
+    url: "/f",
+    filename: file.name,
+  })),
+  discardUpload: vi.fn(async () => {}),
 } as unknown as ApiClient;
 const reactions = { handleReaction: vi.fn(), destroy: vi.fn() };
 const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
@@ -164,11 +170,11 @@ describe("ThreadPanel", () => {
     panel.destroy?.();
   });
 
-  it("has a one-line text-only composer: short placeholder, no attach button", async () => {
+  it("has a composer with a short placeholder and an attach button", async () => {
     const panel = mountPanel();
     await flush();
     expect(textarea().placeholder).toBe("Reply in thread");
-    expect(container.querySelector(".attach-btn")).toBeNull();
+    expect(container.querySelector(".attach-btn")).not.toBeNull();
     panel.destroy?.();
   });
 
@@ -884,5 +890,116 @@ describe("ThreadPanel follow toggle", () => {
     follow().click();
     expect(ws.getSentMessages().some((m) => m.type === "thread_follow")).toBe(false);
     expect(toast).toHaveBeenCalledWith(expect.any(String), "error");
+  });
+});
+
+describe("files in a thread", () => {
+  const sends = (): { id: string; payload: Record<string, unknown> }[] =>
+    (
+      ws.getSentMessages() as unknown as {
+        type: string;
+        id: string;
+        payload: Record<string, unknown>;
+      }[]
+    ).filter((m) => m.type === "chat_send");
+  const chips = (): number => container.querySelectorAll(".attachment-preview-item").length;
+
+  function pasteScreenshot(name = "shot.png"): Event {
+    const file = new File(["png"], name, { type: "image/png" });
+    const ev = new Event("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(ev, "clipboardData", {
+      value: { items: [{ kind: "file", getAsFile: () => file }], getData: () => "" },
+    });
+    textarea().dispatchEvent(ev);
+    return ev;
+  }
+  const pressEnter = (): void => {
+    textarea().dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  };
+
+  beforeEach(() => {
+    setConnectionStatus("connected");
+    vi.mocked(api.uploadFile).mockClear();
+  });
+
+  it("uploads a pasted screenshot and sends it into the thread", async () => {
+    mountPanel();
+    await flush();
+    expect(pasteScreenshot().defaultPrevented).toBe(true);
+    await vi.waitFor(() => expect(api.uploadFile).toHaveBeenCalledTimes(1));
+    await flush();
+    pressEnter();
+    expect(sends()[0]?.payload).toMatchObject({ channel_id: THREAD, attachments: ["up-shot.png"] });
+  });
+
+  it("holds a send until its screenshot has uploaded", async () => {
+    let land: (v: Awaited<ReturnType<ApiClient["uploadFile"]>>) => void = () => {};
+    vi.mocked(api.uploadFile).mockImplementationOnce(
+      () => new Promise((resolve) => (land = resolve)),
+    );
+    mountPanel();
+    await flush();
+    pasteScreenshot();
+    await vi.waitFor(() => expect(api.uploadFile).toHaveBeenCalledTimes(1));
+    textarea().value = "look";
+    pressEnter();
+    await vi.dynamicImportSettled();
+    expect(sends()).toHaveLength(0);
+    land({ id: "up-late", url: "/f", filename: "shot.png", size: 3, mime: "image/png" });
+    await vi.waitFor(() =>
+      expect(sends()[0]?.payload).toMatchObject({ content: "look", attachments: ["up-late"] }),
+    );
+  });
+
+  it("leaves no uploading row behind when the panel closes mid-upload", async () => {
+    vi.mocked(api.uploadFile).mockImplementationOnce(() => new Promise(() => {}));
+    const panel = mountPanel();
+    await flush();
+    pasteScreenshot();
+    await vi.waitFor(() => expect(api.uploadFile).toHaveBeenCalledTimes(1));
+    pressEnter();
+    const uploading = (): boolean =>
+      (messagesStore.getState().messagesByChannel.get(THREAD) ?? []).some(
+        (m) => m.status === "uploading",
+      );
+    await vi.waitFor(() => expect(uploading()).toBe(true));
+    panel.destroy?.();
+    expect(uploading()).toBe(false);
+  });
+
+  it("puts a file the server skipped back into the composer", async () => {
+    mountPanel();
+    await flush();
+    pasteScreenshot();
+    await vi.waitFor(() => expect(api.uploadFile).toHaveBeenCalledTimes(1));
+    await flush();
+    pressEnter();
+    expect(chips()).toBe(0);
+    const send = sends()[0]!;
+    ws.simulate(
+      "chat_send_ok",
+      { message_id: 500, timestamp: "", skipped_attachment_ids: ["up-shot.png"] },
+      send.id,
+    );
+    expect(chips()).toBe(1);
+  });
+
+  it("takes files dropped on the thread panel and leaves the channel's drops alone", async () => {
+    mountPanel();
+    await flush();
+    const drop = (target: Element): void => {
+      const ev = new Event("drop", { bubbles: true, cancelable: true });
+      const file = new File(["x"], "dropped.png", { type: "image/png" });
+      Object.defineProperty(ev, "dataTransfer", { value: { types: ["Files"], files: [file] } });
+      target.dispatchEvent(ev);
+    };
+    const outside = document.createElement("div");
+    outside.className = "messages-slot";
+    document.body.appendChild(outside);
+    drop(outside);
+    await flush();
+    expect(api.uploadFile).not.toHaveBeenCalled();
+    drop(q('[data-testid="thread-panel-messages"]'));
+    await vi.waitFor(() => expect(api.uploadFile).toHaveBeenCalledTimes(1));
   });
 });
