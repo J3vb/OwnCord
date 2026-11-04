@@ -238,7 +238,7 @@ func (m *maintenance) tick(ctx context.Context) bool {
 func (m *maintenance) runStep(ctx context.Context, step maintenanceStep) error {
 	err := step.run(ctx)
 	m.attention.RecordJob(step.job, err, time.Now())
-	if step.job == service.AttentionBackupJob {
+	if step.job == service.AttentionBackupJob && ctx.Err() == nil {
 		m.attention.RefreshBackup(ctx, time.Now())
 	}
 	// A step cut short by shutdown cancelling its context is not a failure.

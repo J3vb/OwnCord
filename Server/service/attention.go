@@ -338,7 +338,6 @@ func (s *AttentionService) read(ctx context.Context) attentionReadings {
 	if s.src.DispatchAlive != nil {
 		r.dispatchAlive = s.src.DispatchAlive()
 	}
-	s.readBackup(ctx, &r)
 	if s.src.VoiceHealth != nil {
 		v := s.src.VoiceHealth(ctx)
 		r.voice = &v
@@ -347,6 +346,10 @@ func (s *AttentionService) read(ctx context.Context) attentionReadings {
 		r.certMode, r.cert = s.src.Certificate()
 		r.certMeasured = true
 	}
+	// Last, after the voice probe that can block: a 'Backup now' refresh that
+	// lands while this sample is still reading must not be overwritten by an
+	// older backup reading.
+	s.readBackup(ctx, &r)
 	return r
 }
 
