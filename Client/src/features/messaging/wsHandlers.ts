@@ -73,12 +73,7 @@ import { WsErrorCode, ServerMessageType as S } from "@lib/protocolTypes";
 const REPLAY_GATE_WINDOW_MS = 5_000;
 
 // Thread frames: the dispatcher reaches them through this module.
-export {
-  applyReadyThreads,
-  handleThreadDeleted,
-  handleThreadFollow,
-  handleThreadState,
-} from "./threadFrames";
+export { applyReadyThreads } from "./threadFrames";
 export { resumeThreadFocus } from "../../stores/threadsLoader";
 
 export function handleChatMessage(clock: ReconnectClock, payload: Payload<"chat_message">): void {
