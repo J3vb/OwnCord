@@ -10,6 +10,7 @@ func init() {
 		"forum post attachments lookup":                                            "forum_post_attachments_lookup_failed",
 		"forum post channel lookup":                                                "forum_post_channel_lookup_failed",
 		"ws: forum post check could not read the parent, withholding":              "ws_forum_post_check_failed",
+		"ws: mention badge audience ran out of time, withholding live badges":      "ws_mention_badge_audience_timeout",
 		"ws handleReconnect: dropForumChannels failed, falling back to full ready": "ws_reconnect_drop_forum_channels_failed",
 	})
 }

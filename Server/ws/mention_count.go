@@ -2,6 +2,7 @@ package ws
 
 import (
 	"context"
+	"log/slog"
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/service"
@@ -55,13 +56,16 @@ func (h *Hub) NotifyMentionCount(userID, channelID, count int64) {
 }
 
 // PrepareMentionCounts satisfies service.MentionCountBatcher: it resolves, once
-// per flush, which of userIDs may get a live mention_count frame for channelID
-// (the NotifyMentionCount rules), and returns the sender the service calls under
-// the channel's emit lock. The channel is read once, not once per reader and
-// connection, and only connected candidates get a permission check. The sender
-// takes a reader's connections when it runs; a reader the preparation did not
-// cover (not connected then) is checked at send time instead. The sender is
-// called from one goroutine at a time.
+// per flush, which of userIDs may see channelID (the NotifyMentionCount rules)
+// and returns the sender the service calls under the channel's emit lock. The
+// channel is read once, not once per reader and connection, and only connected
+// candidates get a permission check. The verdict is as of the preparation, not
+// the send: a reader whose access is revoked in between can still get this one
+// frame, which names only the channel and a count, and their next ready
+// reconciles it. The sender takes a reader's connections when it runs; a reader
+// the preparation did not cover (not connected then) is checked at send time
+// instead. Call the sender on the goroutine that prepared it (or after a
+// happens-before such as the emit lock): it fills its channel read lazily.
 func (h *Hub) PrepareMentionCounts(ctx context.Context, channelID int64, userIDs []int64) func(userID, count int64) {
 	a := &mentionAudience{h: h, channelID: channelID}
 	if h.db == nil {
@@ -80,6 +84,17 @@ func (h *Hub) PrepareMentionCounts(ctx context.Context, channelID int64, userIDs
 			a.visible = make(map[int64]bool)
 		}
 		a.visible[uid] = a.see(ctx, uid)
+	}
+	if ctx.Err() != nil {
+		// The budget ran out, so later readers' lookups failed and they are withheld.
+		withheld := 0
+		for _, ok := range a.visible {
+			if !ok {
+				withheld++
+			}
+		}
+		slog.Warn("ws: mention badge audience ran out of time, withholding live badges",
+			"channel_id", channelID, "withheld", withheld)
 	}
 	return a.send
 }

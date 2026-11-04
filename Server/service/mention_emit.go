@@ -29,7 +29,8 @@ type MentionCountBatcher interface {
 	// PrepareMentionCounts decides which of userIDs may get a live mention_count
 	// frame for channelID and returns the function that sends one. The sender
 	// takes a reader's connections at call time and checks a reader the
-	// preparation did not cover (a later connection) on its own.
+	// preparation did not cover (a later connection) on its own. Call it on the
+	// goroutine that prepared it, or after a happens-before such as the emit lock.
 	PrepareMentionCounts(ctx context.Context, channelID int64, userIDs []int64) func(userID, count int64)
 }
 
