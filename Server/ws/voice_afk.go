@@ -200,7 +200,7 @@ func (h *Hub) afkMoveAllowed(ctx context.Context, afk *db.Channel, cand afkCandi
 // (Hub.mu (R) in clientsOf, PubSub.mu, voiceSlot.voiceMu) and the DB read, plus a
 // TRY-lock of voiceHub.mod, which follows voiceMember in the documented order. It is
 // never waited for: a blocking take under voiceMember would sit behind a LiveKit
-// RPC (user_locks.go). Held across the flag read and the row delete, it stops a
+// RPC (voicestate/userlocks.go). Held across the flag read and the row delete, it stops a
 // moderator mute committing between the two and being lost; when moderation is in
 // flight the candidate is skipped and the next tick retries. No audit row: the move
 // is the server's, not a moderator's.
@@ -240,7 +240,7 @@ func (h *Hub) afkEvict(ctx context.Context, c *Client, fromCh int64, idleSince t
 	if p := c.presence.Load(); p == nil || p.status != db.StatusIdle || !p.idleSince.Equal(idleSince) {
 		return false
 	}
-	unlockMod, ok := h.voiceHub.mod.tryLock(c.userID)
+	unlockMod, ok := h.voiceHub.mod.TryLock(c.userID)
 	if !ok {
 		return false
 	}

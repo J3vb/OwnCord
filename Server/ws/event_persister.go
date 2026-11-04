@@ -221,6 +221,10 @@ func (p *EventPersister) Stats() (persisted, dropped, flushes, errs uint64) {
 	return p.persisted.Load(), p.dropped.Load(), p.flushes.Load(), p.errors.Load()
 }
 
+// persisterFinalFlushTimeout bounds the flush that follows the owner context's
+// cancellation.
+const persisterFinalFlushTimeout = 2 * time.Second
+
 func (p *EventPersister) run(ctx context.Context) {
 	defer close(p.done)
 	tick := time.NewTicker(p.flushEvery)
@@ -241,7 +245,10 @@ func (p *EventPersister) run(ctx context.Context) {
 
 	batch := make([]pendingEvent, 0, p.batchSize)
 	rows := make([]db.PersistedEvent, 0, p.batchSize)
-	flush := func() {
+	// flushWith writes the batch on fctx. Normal flushes use the owner context; the
+	// final one after that context ends uses a detached, bounded one, because a
+	// cancelled context makes the store reject the statement outright.
+	flushWith := func(fctx context.Context) {
 		if len(batch) == 0 {
 			return
 		}
@@ -257,19 +264,20 @@ func (p *EventPersister) run(ctx context.Context) {
 		}
 		// One transaction per flush. PersistEvents is best-effort: on tx failure it
 		// retries per-row so one bad event does not drop the batch.
-		persisted, err := p.store.PersistEvents(ctx, rows)
+		persisted, err := p.store.PersistEvents(fctx, rows)
 		if persisted > 0 {
 			p.persisted.Add(uint64(persisted))
-			metrics.WSEventsPersisted.Add(ctx, int64(persisted))
+			metrics.WSEventsPersisted.Add(fctx, int64(persisted))
 		}
 		if failed := len(batch) - persisted; failed > 0 {
 			p.errors.Add(uint64(failed)) //nolint:gosec // failed is non-negative
-			metrics.WSEventsPersistErrors.Add(ctx, int64(failed))
+			metrics.WSEventsPersistErrors.Add(fctx, int64(failed))
 			slog.Warn("event persister: flush lost events",
 				"failed", failed, "batch", len(batch), "err", err)
 		}
 		batch = batch[:0]
 	}
+	flush := func() { flushWith(ctx) }
 
 	for {
 		select {
@@ -294,7 +302,12 @@ func (p *EventPersister) run(ctx context.Context) {
 				}
 			}
 		case <-ctx.Done():
-			flush()
+			// The owner went away with events still accepted: write what is queued on a
+			// context that outlives the cancellation, bounded so shutdown stays short.
+			fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), persisterFinalFlushTimeout)
+			batch = p.drainQueued(batch)
+			flushWith(fctx)
+			cancel()
 			return
 		case evt := <-p.queue:
 			batch = append(batch, evt)

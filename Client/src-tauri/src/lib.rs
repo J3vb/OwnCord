@@ -33,6 +33,8 @@ mod file_transfer;
 #[cfg(any(target_os = "android", test))]
 mod files;
 mod game_activity;
+#[cfg(desktop)]
+mod gpu_adapter;
 mod http_pool;
 mod http_proxy;
 mod idle;
@@ -280,6 +282,10 @@ pub fn run() {
             window_prefs::set_window_pref,
             #[cfg(desktop)]
             window_prefs::show_next_launch,
+            #[cfg(desktop)]
+            gpu_adapter::get_gpu_adapters,
+            #[cfg(desktop)]
+            gpu_adapter::set_gpu_adapter,
             commands::get_settings,
             commands::save_settings,
             commands::get_cert_fingerprint,
@@ -549,7 +555,23 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             window_prefs::tray_available,
         )
     };
+    // Graphics card for video (gpu_adapter.rs): decided before the window
+    // exists, because WebView2 picks its card when it starts.
+    #[cfg(desktop)]
+    #[cfg_attr(not(windows), allow(unused_variables))]
+    let gpu_flag = gpu_adapter::prepare(app.handle());
     if let Some(config) = app.config().app.windows.first().cloned() {
+        #[cfg(windows)]
+        let config = {
+            let mut config = config;
+            if let Some(flag) = &gpu_flag {
+                config.additional_browser_args = Some(gpu_adapter::append_browser_arg(
+                    config.additional_browser_args.as_deref(),
+                    flag,
+                ));
+            }
+            config
+        };
         // WebKitGTK gives a drop only the file manager's uri-list, so on
         // Linux the host takes drops and reads the files (file_transfer.rs).
         // WebView2 hands the page real files, so Windows keeps it off.

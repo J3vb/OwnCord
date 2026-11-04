@@ -78,20 +78,36 @@ export function createListScroll(st: ListState, api: ListApi) {
   function updateScrollToBottomBtn(m?: ScrollMetrics): void {
     if (st.scrollToBottomBtn === null) return;
     const near = isNearBottom(SCROLL_BOTTOM_THRESHOLD, m);
-    if (near) st.newBelowCount = 0;
-    const key = `${near ? 1 : 0}:${st.newBelowCount}`;
+    if (near) {
+      st.newBelowCount = 0;
+      st.mentionsBelowCount = 0;
+    }
+    const mentions = st.mentionsBelowCount;
+    const key = `${near ? 1 : 0}:${st.newBelowCount}:${mentions}`;
     if (key === st.btnShownKey) return;
     st.btnShownKey = key;
     st.scrollToBottomBtn.classList.toggle("visible", !near);
     if (st.scrollToBottomCount === null) return;
-    const shown = formatBadgeCount(st.newBelowCount);
+    // A waiting mention takes the badge, in the sidebar's mention red: the
+    // number is the mentions, as a channel's badge counts them.
+    const shown = formatBadgeCount(mentions > 0 ? mentions : st.newBelowCount);
     st.scrollToBottomCount.hidden = st.newBelowCount === 0;
     st.scrollToBottomCount.textContent = st.newBelowCount === 0 ? "" : shown;
+    st.scrollToBottomCount.classList.toggle("mention", mentions > 0);
     st.scrollToBottomBtn.setAttribute(
       "aria-label",
       st.newBelowCount === 0
         ? messagingText("scrollToBottom")
-        : messagingText("scrollToBottomNew", { count: st.newBelowCount, shown }),
+        : mentions > 0
+          ? messagingText("scrollToBottomMentions", {
+              count: mentions,
+              shown,
+              total: formatBadgeCount(st.newBelowCount),
+            })
+          : messagingText("scrollToBottomNew", {
+              count: st.newBelowCount,
+              shown: formatBadgeCount(st.newBelowCount),
+            }),
     );
   }
 
@@ -241,6 +257,8 @@ export function createListScroll(st: ListState, api: ListApi) {
 
   function scrollToMessage(messageId: number): boolean {
     if (st.root === null) return false;
+    // A jump replaces any spot the visit still owed the reader.
+    st.restorePosition = null;
     const idx = st.virtualItems.findIndex(
       (item) => item.kind === "message" && item.message.id === messageId,
     );

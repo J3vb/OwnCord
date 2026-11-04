@@ -1,5 +1,5 @@
 {
-  "nextId": 548,
+  "nextId": 551,
   "findings": [
     {
       "id": "OC-0001",
@@ -12654,6 +12654,75 @@
       "lens": "ws-voice",
       "finder": "claude",
       "fixedDate": "2026-11-03"
+    },
+    {
+      "id": "OC-0548",
+      "title": "A topic-limit shed of a content frame left connected subscribers with no sign they missed it",
+      "file": "Server/ws/hub_stats.go",
+      "line": 68,
+      "severity": "low",
+      "why": "A shed content frame consumed no seq, so replay could never carry it. The shed moved the visibility watermark, which only helps a client that reconnects; a client that stayed connected saw no cseq gap and kept a stale message list or reaction count until an unrelated resync. The unconfirmed-gate path a few lines below already marked the subscribers.",
+      "repro": "Subscribe two clients to channels 5 and 6; deliver 101 content frames for channel 5 inside one limiter window. The 101st is shed: before the fix the channel-5 subscriber had no loss mark and no presence resync pending.",
+      "evidence": "Server/ws/hub_loss_shed_test.go (TestTopicShed_ContentFrameMarksSubscribersAndBumpsWatermark).",
+      "suggestedFix": "On a content shed call markLoss for the channel's subscribers beside the watermark bump; keep a metadata shed a plain drop.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/ws/hub_loss_shed_test.go",
+        "revertProof": "fail (without the mark the channel-5 subscriber has no lossPending after the shed)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-03",
+      "hunt": "server-review-2026-11-03",
+      "lens": "ws-hub",
+      "finder": "claude",
+      "fixedDate": "2026-11-04"
+    },
+    {
+      "id": "OC-0549",
+      "title": "A failed permission lookup silently left a user out of a recipient-addressed channel frame",
+      "file": "Server/ws/hub_visibility.go",
+      "line": 104,
+      "severity": "low",
+      "why": "channelReadAudienceFor skipped a user whose permission subject could not be read. The frame is addressed by recipients, so replay skipped that user too: their voice participant list or channel sidebar stayed stale until something else forced a resync.",
+      "repro": "Three connected users, GetMemberRoles failing for one; broadcast a channel-scoped voice_state through channelReadAudience. Before the fix the failed user was neither delivered to nor marked for a resync.",
+      "evidence": "Server/ws/hub_loss_shed_test.go (TestChannelReadAudience_UnresolvedUserIsMarkedForResync).",
+      "suggestedFix": "Record the unresolved users as a recipients loss route so the next dispatch marks their sockets; keep the audience unmemoised for that frame.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/ws/hub_loss_shed_test.go",
+        "revertProof": "fail (the user whose lookup failed is not marked)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-03",
+      "hunt": "server-review-2026-11-03",
+      "lens": "ws-hub",
+      "finder": "claude",
+      "fixedDate": "2026-11-04"
+    },
+    {
+      "id": "OC-0550",
+      "title": "The event persister's final flush ran on the already-cancelled owner context",
+      "file": "Server/ws/event_persister.go",
+      "line": 304,
+      "severity": "low",
+      "why": "The ctx.Done branch flushed with the cancelled context, so the store rejected the statement and up to a batch of accepted events was counted as lost. The app avoided it only by calling Stop before cancelling, an order nothing wrote down.",
+      "repro": "Enqueue five events, cancel the persister's context before a tick fires, wait for done. Before the fix the store held zero rows.",
+      "evidence": "Server/ws/event_persister_test.go (TestEventPersister_OwnerCancelFlushesQueuedEvents).",
+      "suggestedFix": "Flush on a detached, 2 s bounded context and drain the queue first, as the Stop branch does.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/ws/event_persister_test.go",
+        "revertProof": "fail (0 rows, want 5)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-03",
+      "hunt": "server-review-2026-11-03",
+      "lens": "ws-hub",
+      "finder": "claude",
+      "fixedDate": "2026-11-04"
     }
   ]
 }

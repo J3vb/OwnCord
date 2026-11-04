@@ -3,6 +3,7 @@ package ws
 import (
 	"github.com/J3vb/OwnCord/Server/livekitproc"
 	"github.com/J3vb/OwnCord/Server/syncutil"
+	"github.com/J3vb/OwnCord/Server/ws/voicestate"
 )
 
 // hubVoice groups the hub's voice registry, reconciler, rejoin blocks,
@@ -10,10 +11,10 @@ import (
 // ranked locks, keyHolderMu and mod (see lock_order.go), and must never be
 // copied.
 type hubVoice struct {
-	reconcile voiceReconcileState // polling reconciler (voice_reconcile.go)
-	reg       voiceRegistry       // voice membership lock and grace window (voice_registry.go)
+	reconcile voicestate.ReconcileMisses // polling reconciler (voice_reconcile.go)
+	reg       voiceRegistry              // voice membership lock and grace window (voice_registry.go)
 
-	rejoinBlocks voiceRejoinBlockState // voice_rejoin_block.go
+	rejoinBlocks voicestate.RejoinBlocks // voice_rejoin_block.go
 
 	// defaultQuality is the operator-configured voice.quality
 	// (HubOptions.VoiceQuality), used by voiceJoinComplete. Always one of
@@ -22,10 +23,10 @@ type hubVoice struct {
 	defaultQuality string
 
 	// mod is the per-target-user lock serializing a voice-moderation DB
-	// transition with its paired LiveKit call (user_locks.go). Always non-nil (made in
+	// transition with its paired LiveKit call (voicestate/userlocks.go). Always non-nil (made in
 	// NewHub): without it the timeout path and the manual voice-mute endpoint could
 	// interleave.
-	mod *userLocks[lockRankVoiceMod]
+	mod *voicestate.UserLocks[lockRankVoiceMod]
 
 	// keyHolders maps channelID to the current key holder (the connected
 	// participant with the lowest userID). Protected by keyHolderMu.

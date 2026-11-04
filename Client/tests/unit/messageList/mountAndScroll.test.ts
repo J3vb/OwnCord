@@ -101,6 +101,38 @@ describe("MessageList", () => {
     expect(w.container.querySelector(".channel-welcome")).not.toBeNull();
   });
 
+  it("tints the row the reply bar answers, and only that row", () => {
+    setMessages(1, [
+      makeMessage({ id: 1, content: "First" }),
+      makeMessage({ id: 2, content: "Second" }),
+    ]);
+    w.msgList.mount(w.container);
+    const tinted = () =>
+      [...w.container.querySelectorAll<HTMLElement>(".reply-target")].map(
+        (el) => el.dataset.testid,
+      );
+
+    w.msgList.setReplyTarget(2);
+    expect(tinted()).toEqual(["message-2"]);
+    w.msgList.setReplyTarget(1);
+    expect(tinted()).toEqual(["message-1"]);
+    w.msgList.setReplyTarget(null);
+    expect(tinted()).toEqual([]);
+  });
+
+  it("keeps the reply tint on a row drawn again after the target was set", () => {
+    setMessages(1, [makeMessage({ id: 1, content: "First" })]);
+    w.msgList.mount(w.container);
+    w.msgList.setReplyTarget(1);
+
+    setMessages(1, [makeMessage({ id: 1, content: "First, edited" })]);
+    messagesStore.flush();
+
+    const row = w.container.querySelector<HTMLElement>('[data-testid="message-1"]')!;
+    expect(row.textContent).toContain("First, edited");
+    expect(row.classList.contains("reply-target")).toBe(true);
+  });
+
   it("destroy removes DOM and cleans up", () => {
     w.msgList.mount(w.container);
     expect(w.container.querySelector(".messages-container")).not.toBeNull();

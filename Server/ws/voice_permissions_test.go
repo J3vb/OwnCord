@@ -163,7 +163,7 @@ func TestVoicePermissions_SweepSkipsConcurrentModeration(t *testing.T) {
 	c := NewTestClient(h, 1, make(chan []byte, 8))
 	c.voice.setState(100, state.JoinedAt)
 	h.clients[1] = []*Client{c}
-	unlock := h.voiceHub.mod.lock(1)
+	unlock := h.voiceHub.mod.Lock(1)
 	finished := make(chan struct{})
 	go func() {
 		h.sweepStaleVoiceEvictRevoked(ctx)

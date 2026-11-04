@@ -109,12 +109,18 @@ export interface MessageInputOptions {
   ) => void;
   /** The draft's text or reply changed; read it back with peekDraft(). */
   readonly onDraftChange?: () => void;
+  /** The message the reply bar answers changed (null: the bar closed), so the
+   *  list can mark that row. */
+  readonly onReplyTargetChange?: (messageId: number | null) => void;
   /** Initial disabled reason (e.g. read-only / no-permission / offline). */
   readonly disabledReason?: string | null;
   /** Replaces the "Message #channel" placeholder (a text-only thread composer). */
   readonly placeholder?: string;
-  /** Leave the "+" attach button out (a text-only thread composer). */
+  /** Leave the "+" attach button out (a text-only composer). */
   readonly noAttach?: boolean;
+  /** Where a file dragged in from the OS is taken, and the area the drop
+   *  overlay covers; by default the channel view. */
+  readonly dropZone?: string;
 }
 
 /** A file a send carried, kept so one the server did not attach can go back
@@ -578,7 +584,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
           if (dt === null || !dt.types.includes("Files")) return;
           const target = e.target;
           if (!(target instanceof Element)) return;
-          if (target.closest(DROP_SLOTS) === null) return;
+          if (target.closest(st.options.dropZone ?? DROP_SLOTS) === null) return;
           if (dialogOpen()) return;
           e.preventDefault();
           for (const file of dt.files) void api.handlePasteFile(file);

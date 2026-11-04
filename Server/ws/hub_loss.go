@@ -46,6 +46,16 @@ func (h *Hub) markLoss(r lossRoute) {
 	h.stats.queueDrops.lossMarks.Add(uint64(len(clients)))
 }
 
+// markClientLoss marks one connection as having missed frames: its user's next
+// resume takes the full ready and its socket's next cseq skips one, so a client
+// that stays connected resumes. Safe from any goroutine (an atomic and a leaf
+// lock), for a producer that knows exactly whom it did not reach.
+func (h *Hub) markClientLoss(c *Client) {
+	h.setPresenceResync(c.userID, c.tokenHash, true)
+	c.cseq.lossPending.Store(true)
+	h.stats.queueDrops.lossMarks.Add(1)
+}
+
 // noteDropRoute keeps a dropped frame's audience for the dispatch goroutine
 // to mark (markDroppedRoutes). Runs on the producer. Presence frames are left
 // out: flushPresenceQueue repairs a lost batch with a snapshot, and a gap
