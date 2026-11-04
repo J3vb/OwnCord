@@ -125,7 +125,7 @@ func TestPresenceHerd_500ConnectsInOneSecond_NoKicks(t *testing.T) {
 		t.Fatalf("awaitDispatch: %v", err)
 	}
 
-	if got := h.stats.bpQueueDisconnects.Load(); got != 0 {
+	if got := h.stats.BPQueueDisconnects.Load(); got != 0 {
 		t.Fatalf("backpressure_queue_disconnects = %d, want 0", got)
 	}
 	for i, c := range clients {

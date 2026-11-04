@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/api"
-	"github.com/J3vb/OwnCord/Server/ws"
+	"github.com/J3vb/OwnCord/Server/ws/hubstats"
 )
 
 // jsonKeys returns the json tag names of struct type t.
@@ -31,7 +31,7 @@ func TestHub_WindowSourcesNamesMatchJSON(t *testing.T) {
 
 	windowKeys := jsonKeys(reflect.TypeFor[api.WindowMetrics]())
 	topKeys := jsonKeys(reflect.TypeFor[api.ServerMetrics]())
-	phaseKeys := jsonKeys(reflect.TypeFor[ws.VoiceJoinPhases]())
+	phaseKeys := jsonKeys(reflect.TypeFor[hubstats.VoiceJoinPhases]())
 
 	seen := map[string]bool{}
 	claim := func(name string) {

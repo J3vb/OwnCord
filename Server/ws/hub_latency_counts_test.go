@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/api"
-	"github.com/J3vb/OwnCord/Server/ws"
+	"github.com/J3vb/OwnCord/Server/ws/hubstats"
 )
 
 // TestHub_LatencyCountsNamesMatchJSON pins that LatencyCounts is keyed by the
@@ -19,7 +19,7 @@ func TestHub_LatencyCountsNamesMatchJSON(t *testing.T) {
 	counts := hub.LatencyCounts()
 
 	topKeys := jsonKeys(reflect.TypeFor[api.ServerMetrics]())
-	phaseKeys := jsonKeys(reflect.TypeFor[ws.VoiceJoinPhases]())
+	phaseKeys := jsonKeys(reflect.TypeFor[hubstats.VoiceJoinPhases]())
 
 	want := make([]string, 0, 3+len(phaseKeys))
 	want = append(want, "ws_broadcast_ms", "ws_dispatch_lag_ms", "chat_send_ack_ms")

@@ -8,58 +8,8 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/metrics"
 	"github.com/J3vb/OwnCord/Server/syncutil"
+	"github.com/J3vb/OwnCord/Server/ws/hubstats"
 )
-
-// hubLatencyMetrics is the shipped in-process metrics surface. The zero value is
-// usable, so NewHub needs no initializer. Unlike the OpenTelemetry instruments in
-// Server/telemetry (compiled only under -tags otel), these exist in every build,
-// including the untagged release and Docker builds.
-type hubLatencyMetrics struct {
-	// broadcast is enqueue to fanout-done: time queued behind other broadcasts plus delivery.
-	broadcast metrics.Histogram
-	// dispatchLag is enqueue to dispatch-start: how long a frame waited for the single
-	// dispatch goroutine; the direct signal for a contended loop.
-	dispatchLag metrics.Histogram
-	// chatAck is chat_send receipt to its chat_send_ok being queued: the in-server
-	// round trip, compared against k6's client-side figure.
-	chatAck metrics.Histogram
-	// seqMuHold is the longest single hold of the broadcast-sequence mutex, in ms.
-	seqMuHold metrics.MaxGauge
-	// topicSheds counts channel frames the topic limiter dropped before a seq was
-	// assigned (distinct from broadcastDrops, the hub-wide queue).
-	topicSheds atomic.Uint64
-	// voiceJoin is voice_join_ms: each phase of a completed voice join.
-	voiceJoin voiceJoinMetrics
-}
-
-// voiceJoinMetrics times the phases of handleVoiceJoin for joins that reach the
-// joiner; a refused or rolled-back join records nothing, so every phase shares
-// one count.
-type voiceJoinMetrics struct {
-	precheck, leave, persist, token, complete, total metrics.Histogram
-}
-
-// observe records one completed join from the timestamps taken as each phase ended.
-func (m *voiceJoinMetrics) observe(start, precheckDone, leaveDone, persistDone, tokenDone, completeDone time.Time) {
-	ms := func(from, to time.Time) float64 { return float64(to.Sub(from)) / float64(time.Millisecond) }
-	m.precheck.Observe(ms(start, precheckDone))
-	m.leave.Observe(ms(precheckDone, leaveDone))
-	m.persist.Observe(ms(leaveDone, persistDone))
-	m.token.Observe(ms(persistDone, tokenDone))
-	m.complete.Observe(ms(tokenDone, completeDone))
-	m.total.Observe(ms(start, completeDone))
-}
-
-// VoiceJoinPhases is the voice_join_ms snapshot: precheck, leave (previous channel
-// on a switch), persist, token, complete and total.
-type VoiceJoinPhases struct {
-	Precheck metrics.Summary `json:"precheck"`
-	Leave    metrics.Summary `json:"leave"`
-	Persist  metrics.Summary `json:"persist"`
-	Token    metrics.Summary `json:"token"`
-	Complete metrics.Summary `json:"complete"`
-	Total    metrics.Summary `json:"total"`
-}
 
 // observeSeqMuHold records how long the current seqMu critical section was held,
 // in milliseconds. Call it as:
@@ -74,23 +24,17 @@ type VoiceJoinPhases struct {
 // seqMu section feeds hub_seqmu_max_hold_ms through this. It is a deferred method
 // call, not a returned closure, so the hot path allocates nothing.
 func (h *Hub) observeSeqMuHold(start time.Time) {
-	h.stats.latency.seqMuHold.Observe(float64(time.Since(start)) / float64(time.Millisecond))
+	h.stats.latency.ObserveSeqMuHold(start)
 }
 
 // observeDispatchLag records enqueue to dispatch-start in ms; a zero enqueuedAt is skipped.
 func (h *Hub) observeDispatchLag(enqueuedAt time.Time) {
-	if enqueuedAt.IsZero() {
-		return
-	}
-	h.stats.latency.dispatchLag.Observe(float64(time.Since(enqueuedAt)) / float64(time.Millisecond))
+	h.stats.latency.ObserveDispatchLag(enqueuedAt)
 }
 
 // recordBroadcastLatency records enqueue to fanout-done in ms; a zero enqueuedAt is skipped.
 func (h *Hub) recordBroadcastLatency(enqueuedAt time.Time) {
-	if enqueuedAt.IsZero() {
-		return
-	}
-	h.stats.latency.broadcast.Observe(float64(time.Since(enqueuedAt)) / float64(time.Millisecond))
+	h.stats.latency.ObserveBroadcast(enqueuedAt)
 }
 
 // allowTopicFrame reports whether bm, a channel-scoped broadcast, may proceed under
@@ -119,7 +63,7 @@ func (h *Hub) allowTopicFrame(bm broadcastMsg) bool {
 	if h.limiter.Allow(key, topicRateLimitPerSecond, time.Duration(topicRateWindow.Load())) {
 		return true
 	}
-	h.stats.latency.topicSheds.Add(1)
+	h.stats.latency.CountTopicShed()
 	if bm.nsfwChannelID != 0 {
 		h.bumpVisibilityWatermark()
 		slog.Warn("hub: topic rate limit shed a content frame, forcing resync on reconnect",
@@ -151,7 +95,7 @@ type queueDropState struct {
 // message on screen). A presence snapshot request is the exception: it carries no
 // frame and flushPresenceQueue retries it.
 func (h *Hub) recordQueueDrop(bm broadcastMsg, kind string) {
-	h.stats.broadcastDrops.Add(1)
+	h.stats.BroadcastDrops.Add(1)
 	h.noteDropRoute(bm)
 	if !bm.presenceSnapshot {
 		h.stats.queueDrops.dropped.Add(1)
@@ -212,79 +156,44 @@ var mustFullResyncMidReadRaceHook func()
 func (h *Hub) BroadcastQueueDepth() int { return len(h.broadcast) }
 
 // SeqMuMaxHoldMs is the longest single seqMu hold observed since start.
-func (h *Hub) SeqMuMaxHoldMs() float64 { return h.stats.latency.seqMuHold.Millis() }
+func (h *Hub) SeqMuMaxHoldMs() float64 { return h.stats.latency.SeqMuMaxHoldMs() }
 
 // TopicShedCount is the cumulative channel frames dropped by the topic limiter
 // before a sequence number was assigned.
-func (h *Hub) TopicShedCount() uint64 { return h.stats.latency.topicSheds.Load() }
+func (h *Hub) TopicShedCount() uint64 { return h.stats.latency.TopicSheds() }
 
 // BroadcastMs returns the current enqueue-to-fanout-done latency distribution.
-func (h *Hub) BroadcastMs() metrics.Summary { return h.stats.latency.broadcast.Snapshot() }
+func (h *Hub) BroadcastMs() metrics.Summary { return h.stats.latency.BroadcastMs() }
 
 // DispatchLagMs returns the current enqueue-to-dispatch lag distribution.
-func (h *Hub) DispatchLagMs() metrics.Summary { return h.stats.latency.dispatchLag.Snapshot() }
+func (h *Hub) DispatchLagMs() metrics.Summary { return h.stats.latency.DispatchLagMs() }
 
 // ChatAckMs returns the current chat send-to-ack latency distribution.
-func (h *Hub) ChatAckMs() metrics.Summary { return h.stats.latency.chatAck.Snapshot() }
+func (h *Hub) ChatAckMs() metrics.Summary { return h.stats.latency.ChatAckMs() }
 
 // VoiceJoinMs returns the per-phase voice join distributions.
-func (h *Hub) VoiceJoinMs() VoiceJoinPhases {
-	v := &h.stats.latency.voiceJoin
-	return VoiceJoinPhases{
-		Precheck: v.precheck.Snapshot(),
-		Leave:    v.leave.Snapshot(),
-		Persist:  v.persist.Snapshot(),
-		Token:    v.token.Snapshot(),
-		Complete: v.complete.Snapshot(),
-		Total:    v.total.Snapshot(),
-	}
-}
-
-// LatencyCounts holds the raw cumulative counts of every shipped latency
-// histogram keyed by JSON name ("ws_broadcast_ms", "ws_dispatch_lag_ms",
-// "chat_send_ack_ms", "voice_join_ms.<phase>"), as WindowSources registers them.
-type LatencyCounts map[string]metrics.Counts
+func (h *Hub) VoiceJoinMs() hubstats.VoiceJoinPhases { return h.stats.latency.VoiceJoinMs() }
 
 // LatencyCounts reads every histogram's raw counts: atomic loads, no hub lock.
-func (h *Hub) LatencyCounts() LatencyCounts {
-	hists, _, _ := h.WindowSources()
-	out := make(LatencyCounts, len(hists))
-	for _, nh := range hists {
-		out[nh.Name] = nh.H.Counts()
-	}
-	return out
-}
+func (h *Hub) LatencyCounts() hubstats.LatencyCounts { return h.stats.latency.Counts() }
 
 // WindowSources lists every figure the windowed metrics block samples; names are the
 // JSON keys under /api/v1/metrics "windows". Every counter is an atomic load, so
 // the sampler takes no hub lock. The slices are fresh and point at the hub's own
 // histograms.
 func (h *Hub) WindowSources() ([]metrics.NamedHistogram, []metrics.NamedMaxGauge, []metrics.NamedCounter) {
-	v := &h.stats.latency.voiceJoin
-	hists := []metrics.NamedHistogram{
-		{Name: "ws_broadcast_ms", H: &h.stats.latency.broadcast},
-		{Name: "ws_dispatch_lag_ms", H: &h.stats.latency.dispatchLag},
-		{Name: "chat_send_ack_ms", H: &h.stats.latency.chatAck},
-		{Name: "voice_join_ms.precheck", H: &v.precheck},
-		{Name: "voice_join_ms.leave", H: &v.leave},
-		{Name: "voice_join_ms.persist", H: &v.persist},
-		{Name: "voice_join_ms.token", H: &v.token},
-		{Name: "voice_join_ms.complete", H: &v.complete},
-		{Name: "voice_join_ms.total", H: &v.total},
-	}
-	gauges := []metrics.NamedMaxGauge{
-		{Name: "hub_seqmu_max_hold_ms", G: &h.stats.latency.seqMuHold},
-	}
+	hists := h.stats.latency.Histograms()
+	gauges := h.stats.latency.Gauges()
 	counters := []metrics.NamedCounter{
 		{Name: "broadcast_drops", Read: h.BroadcastDropCount},
 		{Name: "topic_sheds_total", Read: h.TopicShedCount},
-		{Name: "reconnect_tier_buffer", Read: h.stats.reconnectTierBuf.Load},
-		{Name: "reconnect_tier_db", Read: h.stats.reconnectTierDB.Load},
-		{Name: "reconnect_tier_full", Read: h.stats.reconnectTierFull.Load},
-		{Name: "reconnect_ring_misses", Read: h.stats.reconnectRingMiss.Load},
-		{Name: "backpressure_queue_disconnects", Read: h.stats.bpQueueDisconnects.Load},
-		{Name: "backpressure_high_fallbacks", Read: h.stats.bpHighFallbacks.Load},
-		{Name: "backpressure_low_drops", Read: h.stats.bpLowDrops.Load},
+		{Name: "reconnect_tier_buffer", Read: h.stats.ReconnectTierBuf.Load},
+		{Name: "reconnect_tier_db", Read: h.stats.ReconnectTierDB.Load},
+		{Name: "reconnect_tier_full", Read: h.stats.ReconnectTierFull.Load},
+		{Name: "reconnect_ring_misses", Read: h.stats.ReconnectRingMiss.Load},
+		{Name: "backpressure_queue_disconnects", Read: h.stats.BPQueueDisconnects.Load},
+		{Name: "backpressure_high_fallbacks", Read: h.stats.BPHighFallbacks.Load},
+		{Name: "backpressure_low_drops", Read: h.stats.BPLowDrops.Load},
 		{Name: "backpressure_presence_drops", Read: h.PresenceDropCount},
 		{Name: "delivery_loss_marks", Read: h.LossMarkCount},
 		{Name: "ws_conn_rejects", Read: h.ConnRejectCount},
@@ -314,7 +223,7 @@ func (h *Hub) UserCount() int {
 // BroadcastDropCount returns the cumulative messages dropped on a full broadcast
 // channel. Safe from any goroutine.
 func (h *Hub) BroadcastDropCount() uint64 {
-	return h.stats.broadcastDrops.Load()
+	return h.stats.BroadcastDrops.Load()
 }
 
 // DispatchAlive reports whether the dispatch loop is running: true before Run
@@ -328,7 +237,7 @@ func (h *Hub) DispatchAlive() bool {
 // closed on send-buffer overflow, high-priority sends that fell back to the normal
 // buffer, and low-priority messages dropped. Safe from any goroutine.
 func (h *Hub) BackpressureStats() (queueDisconnects, highFallbacks, lowDrops uint64) {
-	return h.stats.bpQueueDisconnects.Load(), h.stats.bpHighFallbacks.Load(), h.stats.bpLowDrops.Load()
+	return h.stats.BPQueueDisconnects.Load(), h.stats.BPHighFallbacks.Load(), h.stats.BPLowDrops.Load()
 }
 
 // PresenceDropCount is the process-lifetime count of presence frames dropped on a
@@ -339,12 +248,12 @@ func (h *Hub) PresenceDropCount() uint64 { return h.presenceFeed.repair.drops.Lo
 // drops, topic-limiter sheds and send-queue overflow disconnects. Low-priority
 // drops are excluded (they lose nothing); a topic shed loses a sequenced frame.
 func (h *Hub) DeliveryDropCount() uint64 {
-	return h.stats.broadcastDrops.Load() + h.stats.latency.topicSheds.Load() + h.stats.bpQueueDisconnects.Load()
+	return h.stats.BroadcastDrops.Load() + h.stats.latency.TopicSheds() + h.stats.BPQueueDisconnects.Load()
 }
 
 // ConnRejectCount returns upgrade requests refused by the max_ws_connections guardrail.
 func (h *Hub) ConnRejectCount() uint64 {
-	return h.stats.connRejects.Load()
+	return h.stats.ConnRejects.Load()
 }
 
 // EventPersisterStats returns the persister's lifetime counters; ok is false when
@@ -372,23 +281,9 @@ func init() { topicRateWindow.Store(int64(time.Second)) }
 // hubStats groups the hub's drop, backpressure, reject, reconnect-tier and latency
 // counters. It holds atomics and a mutex, so it must not be copied.
 type hubStats struct {
-	broadcastDrops atomic.Uint64  // counts messages dropped due to full broadcast channel
-	queueDrops     queueDropState // frames the full broadcast queue dropped
+	hubstats.Counters
+	queueDrops queueDropState // frames the full broadcast queue dropped
 
 	// latency is the shipped in-process metrics surface; the zero value is usable.
-	latency hubLatencyMetrics
-
-	// Aggregate backpressure counters: the per-client msgsDropped is read once at
-	// disconnect and lost; these survive as process totals for the metrics endpoint.
-	bpQueueDisconnects atomic.Uint64 // clients disconnected because send (or high+send) overflowed
-	bpHighFallbacks    atomic.Uint64 // high-priority sends that fell back to the normal buffer
-	bpLowDrops         atomic.Uint64 // low-priority messages silently dropped on overflow
-
-	connRejects atomic.Uint64 // upgrades refused by the max_ws_connections guardrail (ServeWS)
-
-	// Reconnection tier metrics, incremented per resume.
-	reconnectTierBuf  atomic.Uint64
-	reconnectTierDB   atomic.Uint64
-	reconnectTierFull atomic.Uint64
-	reconnectRingMiss atomic.Uint64 // resumes behind the ring (see noteRingMiss); usually ends in db or full
+	latency hubstats.Latency
 }

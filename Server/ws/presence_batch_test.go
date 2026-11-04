@@ -225,8 +225,8 @@ func TestPresenceHerd_WindowWithNewMemberKicksNoSlowClient(t *testing.T) {
 	}
 	settle(t, h)
 
-	if slow.isSendClosed() || h.stats.bpQueueDisconnects.Load() != 0 {
-		t.Fatalf("a herd window with a new member kicked a slow client (disconnects = %d)", h.stats.bpQueueDisconnects.Load())
+	if slow.isSendClosed() || h.stats.BPQueueDisconnects.Load() != 0 {
+		t.Fatalf("a herd window with a new member kicked a slow client (disconnects = %d)", h.stats.BPQueueDisconnects.Load())
 	}
 	if !slow.presenceStale.Load() {
 		t.Fatal("the slow client's batch was not dropped as presence")
@@ -348,7 +348,7 @@ func TestPresenceFrame_FullQueueDropsAndMarksStale_ContentFrameStillCloses(t *te
 	if slow.isSendClosed() {
 		t.Fatal("a presence frame into a full queue closed the client")
 	}
-	if got := h.stats.bpQueueDisconnects.Load(); got != 0 {
+	if got := h.stats.BPQueueDisconnects.Load(); got != 0 {
 		t.Fatalf("backpressure_queue_disconnects = %d, want 0", got)
 	}
 	if !slow.presenceStale.Load() {
