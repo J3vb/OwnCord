@@ -94,6 +94,18 @@ describe("server menu on a phone", () => {
     await settleHistory();
   });
 
+  it("starts on the first row without the keyboard focus ring", async () => {
+    const focus = vi.spyOn(HTMLElement.prototype, "focus");
+    await tap();
+    const first = sheet()!.querySelector<HTMLElement>(".menu-sheet-row")!;
+    expect(document.activeElement).toBe(first);
+    const call = focus.mock.calls[focus.mock.contexts.indexOf(first)];
+    expect(call).toEqual([{ focusVisible: false }]);
+    focus.mockRestore();
+    closeBottomSheet();
+    await settleHistory();
+  });
+
   it("keeps the popover menu off a phone", async () => {
     phone = false;
     await tap();

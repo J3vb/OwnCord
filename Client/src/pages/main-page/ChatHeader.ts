@@ -44,6 +44,9 @@ export interface ChatHeaderRefs {
   /** The channel's media gallery. Shown only for a text channel on a server
    *  with `channel_media`; `setChatHeaderMedia` is its only writer. */
   readonly mediaBtn?: HTMLButtonElement;
+  /** The lock after a password-protected channel's name, as in the sidebar.
+   *  `setChatHeaderLock` is its only writer. */
+  readonly lockEl?: HTMLSpanElement;
   /** Holds the DM partner's avatar (or a group's stack) in place of the "@". */
   readonly avatarEl: HTMLSpanElement;
   /**
@@ -139,7 +142,17 @@ export function buildChatHeader(opts: ChatHeaderOptions): {
   }
   const avatarEl = createElement("span", { class: "ch-avatar", "data-testid": "ch-avatar" });
   avatarEl.style.display = "none";
-  appendChildren(nameGroup, hash, avatarEl, nameEl);
+  const lockLabel = shellText("channel.passwordProtected");
+  const lockEl = createElement("span", {
+    class: "ch-header-lock",
+    role: "img",
+    "aria-label": lockLabel,
+    "data-testid": "chat-header-lock",
+  });
+  lockEl.title = lockLabel;
+  lockEl.appendChild(createIcon("lock", 14));
+  lockEl.hidden = true;
+  appendChildren(nameGroup, hash, avatarEl, nameEl, lockEl);
 
   const divider = createElement("div", { class: "ch-divider" });
   const topicEl = createElement(
@@ -332,6 +345,7 @@ export function buildChatHeader(opts: ChatHeaderOptions): {
       threadsBtn,
       mediaBtn,
       avatarEl,
+      lockEl,
       sidebarToggle,
       nameGroupEl: nameGroup,
     },
@@ -363,6 +377,11 @@ export function setChatHeaderChannelType(
     delete refs.hashEl.dataset["channelType"];
     setText(refs.hashEl, "#");
   }
+}
+
+/** Show the lock after the name while the channel asks for a password. */
+export function setChatHeaderLock(refs: ChatHeaderRefs, locked: boolean): void {
+  if (refs.lockEl !== undefined) refs.lockEl.hidden = !locked;
 }
 
 /** Show the Threads button for a text channel on a server that has threads. */
@@ -427,6 +446,7 @@ export function updateChatHeaderForDm(refs: ChatHeaderRefs, recipient: ChatHeade
     refs.avatarEl.replaceChildren(...(avatar !== null ? [avatar] : []));
     refs.avatarEl.style.display = avatar !== null ? "" : "none";
     refs.nameGroupEl.dataset["dmGroup"] = recipient.isGroup === true ? "true" : "false";
+    setChatHeaderLock(refs, false);
     setText(refs.nameEl, recipient.username);
     setChatHeaderTopic(refs, "");
     setText(refs.topicEl, recipient.status);

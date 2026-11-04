@@ -546,6 +546,20 @@ body:has(.modal-overlay, .settings-overlay:where(.open)) .toast-container {
   overflow-y: auto;
   border-top: 1px solid var(--border);
 }
+/* Phones, either way up: a sheet pinned to the top, like the quick switcher,
+   with the results filling the height that is left. */
+@media (pointer: coarse) and (max-width: 899px), (pointer: coarse) and (max-height: 499px) {
+  .search-overlay {
+    padding-top: env(safe-area-inset-top);
+  }
+  .search-overlay-box {
+    width: 100%;
+    border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+  }
+  .search-overlay-results {
+    max-height: calc(100dvh - 160px - env(safe-area-inset-top));
+  }
+}
 .search-overlay-load-more {
   display: block;
   width: 100%;

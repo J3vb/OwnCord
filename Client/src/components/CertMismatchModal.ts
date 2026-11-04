@@ -114,6 +114,8 @@ export function createCertMismatchModal(options: CertMismatchModalOptions): Moun
 
     container.appendChild(overlay);
     restoreFocus = focusDialog(modal);
+    // Start on the safe choice, not the close X: Enter right away declines.
+    rejectBtn.focus();
   }
 
   function destroy(): void {
@@ -221,6 +223,8 @@ export function createCertFirstUseModal(options: CertFirstUseModalOptions): Moun
 
     container.appendChild(overlay);
     restoreFocus = focusDialog(modal);
+    // Start on the safe choice, not the close X: Enter right away declines.
+    rejectBtn.focus();
   }
 
   function destroy(): void {
