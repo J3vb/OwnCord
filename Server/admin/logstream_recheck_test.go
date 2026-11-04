@@ -57,8 +57,10 @@ func TestThrottledCheck_FalseIsPermanent(t *testing.T) {
 		t.Fatal("check returned true after the underlying check failed")
 	}
 	clock.advance(time.Hour)
-	if check() || check() {
-		t.Fatal("check returned true after it had already denied")
+	for range 2 {
+		if check() {
+			t.Fatal("check returned true after it had already denied")
+		}
 	}
 	if calls != 1 {
 		t.Fatalf("underlying check called %d times, want 1", calls)
