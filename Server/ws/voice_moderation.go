@@ -466,7 +466,7 @@ func (h *Hub) MuteParticipant(ctx context.Context, channelID, userID int64, voic
 // An SFU failure is returned as errVoiceMediaPending; the persisted desired state
 // is retained for retry and periodic reconciliation.
 func (h *Hub) SetServerMuteLocked(ctx context.Context, userID, channelID int64, muted bool) (matched bool, joinedAt string, err error) {
-	unlock := h.voiceHub.mod.lock(userID)
+	unlock := h.voiceHub.mod.Lock(userID)
 	defer unlock()
 
 	matched, err = h.voice.SetServerMute(ctx, userID, channelID, muted)

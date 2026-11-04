@@ -296,13 +296,11 @@ button.msg-thread-chip:hover {
   overflow: hidden;
 }
 
-/* The panel composer: one line, and a locked one shows no controls or focus ring. */
+/* The panel composer: one line, and a locked one shows no focus ring (its
+   buttons are hidden by composer.css). */
 .thread-panel .msg-textarea::placeholder {
   white-space: nowrap;
   text-overflow: ellipsis;
-}
-.thread-panel .composer-disabled :is(.emoji-btn, .gif-btn, .send-btn) {
-  display: none;
 }
 .thread-panel .composer-disabled .message-input-box:has(.msg-textarea:focus-visible),
 .thread-panel .composer-disabled .msg-textarea:focus-visible {

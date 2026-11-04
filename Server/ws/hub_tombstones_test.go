@@ -333,3 +333,69 @@ func TestTombstone_DropsFrameNamingErasedGroupTarget(t *testing.T) {
 		t.Error("a group_add frame that does not name the erased user was dropped")
 	}
 }
+
+// An ordinary chat frame is parsed for tombstoned ids before seqMu is taken, so
+// the sequencing lock is held for set lookups only.
+func TestTombstones_OrdinaryFrameIsNotParsedUnderSeqMu(t *testing.T) {
+	h := newEmitTestHub()
+	h.seqMu.Lock()
+	h.tombstones.add(&h.tombstones.users, 0, 1000)
+	h.seqMu.Unlock()
+
+	before := h.tombstones.lockedParses.Load()
+	for range 5 {
+		h.deliverBroadcast(broadcastMsg{channelID: 5, msg: []byte(`{"type":"chat_message","payload":{"id":1,"user":{"id":3}}}`)})
+	}
+	if got := h.tombstones.lockedParses.Load() - before; got != 0 {
+		t.Fatalf("frames parsed under seqMu = %d, want 0", got)
+	}
+	if atomic.LoadUint64(&h.seq) != 5 {
+		t.Fatalf("seq = %d, want 5 frames sequenced", atomic.LoadUint64(&h.seq))
+	}
+	// A frame naming the erased user is still dropped by the pre-lock parse.
+	h.deliverBroadcast(broadcastMsg{channelID: 5, msg: []byte(`{"type":"chat_message","payload":{"id":2,"user":{"id":1000}}}`)})
+	if atomic.LoadUint64(&h.seq) != 5 {
+		t.Fatal("a frame naming an erased user was sequenced")
+	}
+}
+
+// The live count follows add and expire.
+func TestTombstones_LiveCountFollowsBatches(t *testing.T) {
+	h := newEmitTestHub()
+	now := time.Now()
+	h.tombstones.now = func() time.Time { return now }
+	h.seqMu.Lock()
+	h.tombstones.add(&h.tombstones.users, 1, 7)
+	h.tombstones.add(&h.tombstones.messages, 2, 9)
+	h.seqMu.Unlock()
+	if got := h.tombstones.live.Load(); got != 2 {
+		t.Fatalf("live = %d, want 2", got)
+	}
+	now = now.Add(2 * tombstoneMinAge)
+	h.seqMu.Lock()
+	h.tombstones.expire(1<<20, 0)
+	h.seqMu.Unlock()
+	if got := h.tombstones.live.Load(); got != 0 {
+		t.Fatalf("live after expiry = %d, want 0", got)
+	}
+}
+
+// A tombstone installed after deliverGated's lock-free check and before it takes
+// seqMu still drops the frame: the lock re-checks and parses there.
+func TestTombstones_InstalledAfterLockFreeCheckStillDrops(t *testing.T) {
+	h := newEmitTestHub()
+	deliverGatedBeforeSeqMuHook = func() {
+		h.seqMu.Lock()
+		h.tombstones.add(&h.tombstones.users, 0, 1000)
+		h.seqMu.Unlock()
+	}
+	t.Cleanup(func() { deliverGatedBeforeSeqMuHook = nil })
+
+	h.deliverBroadcast(broadcastMsg{channelID: 5, msg: []byte(`{"type":"chat_message","payload":{"id":1,"user":{"id":1000}}}`)})
+	if atomic.LoadUint64(&h.seq) != 0 {
+		t.Fatal("a frame naming a user erased just before the lock was sequenced")
+	}
+	if h.tombstones.lockedParses.Load() != 1 {
+		t.Fatalf("locked parses = %d, want 1", h.tombstones.lockedParses.Load())
+	}
+}

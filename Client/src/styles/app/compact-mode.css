@@ -2,7 +2,9 @@
 /* Compact mode changes the message list only (like Discord); the shell keeps its size. */
 /* Messages: hide avatars, inline timestamp + author, tighter spacing */
 .compact-mode .message {
-  padding: 2px 16px 2px 40px;
+  /* The gutter holds the avatar on a first row and the clock time on a grouped
+     row, wide enough for "12:59 PM" so the time never runs into the text. */
+  padding: 2px 16px 2px 72px;
   min-height: 20px;
   margin-top: 4px;
 }
@@ -15,7 +17,7 @@
   height: 24px;
   font-size: 10px;
   top: 2px;
-  left: 8px;
+  left: 40px;
 }
 .compact-mode .message.grouped .msg-avatar {
   display: none;
@@ -25,6 +27,9 @@
 }
 .compact-mode .message.grouped .msg-hover-time {
   display: block;
+  left: 0;
+  width: 64px;
+  text-align: right;
 }
 .compact-mode .message .msg-header {
   display: flex;
@@ -42,6 +47,15 @@
 .compact-mode .message .msg-text {
   line-height: 1.25;
   font-size: var(--font-size-sm);
+}
+.compact-mode .message .msg-text-jumbo {
+  font-size: 32px;
+  line-height: 1.15;
+}
+.compact-mode .message .msg-text-jumbo .custom-emoji {
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
 }
 .compact-mode .message .msg-time {
   display: none;

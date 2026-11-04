@@ -197,6 +197,18 @@ func (h *Hub) channelReadAudienceDM(ctx context.Context, channelID int64, userID
 	return audience
 }
 
+// Budget of one RefreshChannelVisibility walk: a base plus a share per connected
+// client, capped. Vars so tests can shrink them.
+var (
+	channelVisibilityBaseBudget      = 5 * time.Second
+	channelVisibilityPerClientBudget = 2 * time.Millisecond
+	channelVisibilityMaxBudget       = 30 * time.Second
+)
+
+func channelVisibilityBudget(clients int) time.Duration {
+	return min(channelVisibilityBaseBudget+time.Duration(clients)*channelVisibilityPerClientBudget, channelVisibilityMaxBudget)
+}
+
 // RefreshChannelVisibility re-evaluates which connected clients may see ch after
 // a channel_overrides change and sends targeted channel_create / channel_delete so
 // sidebars converge without a reconnect. Clients losing visibility are also
@@ -222,8 +234,11 @@ func (h *Hub) RefreshChannelVisibility(ch *db.Channel) {
 	h.mu.RUnlock()
 
 	// Called via the admin HubBroadcaster interface, which carries no context; the
-	// re-sync must complete regardless of the triggering request.
-	ctx := context.Background()
+	// re-sync must complete regardless of the triggering request, but not without
+	// bound: a stalled permission read would hold the request and keep every reconnect
+	// on a full ready for as long as the walk lasts.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(context.Background()), channelVisibilityBudget(len(clients)))
+	defer cancel()
 	private := h.channelIsPrivate(ctx, ch.ID, ch.Type)
 
 	// Visibility is CanViewChannel (shared with buildReady / REST ListVisibleChannels),
@@ -237,11 +252,17 @@ func (h *Hub) RefreshChannelVisibility(ch *db.Channel) {
 	// Not memoised per role: channel_user_overrides is the last resolution layer, so
 	// two members of one role can disagree, which is exactly what a per-user override
 	// edit creates.
-	for _, c := range clients {
+	for i, c := range clients {
 		if c.user == nil {
 			continue
 		}
 		sub, err := h.subjectFor(ctx, c.user.ID, ch.ID)
+		if ctx.Err() != nil {
+			// Out of time: this client and the rest were not judged. Their sidebar may be
+			// stale, so move the watermark and send each to a resync.
+			h.markVisibilityWalkTimedOut(ch.ID, clients[i:])
+			return
+		}
 		if err != nil {
 			slog.Warn("hub: RefreshChannelVisibility could not resolve permissions, revoking",
 				"user_id", c.user.ID, "channel_id", ch.ID, "err", err)
@@ -273,6 +294,12 @@ func (h *Hub) RefreshChannelVisibility(ch *db.Channel) {
 			// Idempotent add that also refreshes metadata. Addressed per client so it carries
 			// this recipient's own affordance verdicts, which a permission change just made diverge.
 			live.sendMsg(buildChannelCreateFor(ch, private, h.refreshChannelVisibilityAffordances(ctx, ch, c.user.ID)))
+			if ctx.Err() != nil {
+				// The affordances may have failed closed on the expiry; this client's frame
+				// is not trustworthy either.
+				h.markVisibilityWalkTimedOut(ch.ID, clients[i:])
+				return
+			}
 			continue
 		}
 		live.sendMsg(buildChannelDelete(ch.ID))
@@ -284,6 +311,26 @@ func (h *Hub) RefreshChannelVisibility(ch *db.Channel) {
 		live.mu.Unlock()
 		h.revokeHeldThread(ctx, live, ch.ID)
 	}
+}
+
+// markVisibilityWalkTimedOut handles a RefreshChannelVisibility walk that ran out
+// of time with unreached still unjudged: it moves the visibility watermark so a
+// resume across the change takes the full ready, and marks each unreached live
+// client so it resyncs by its next sequenced frame.
+func (h *Hub) markVisibilityWalkTimedOut(channelID int64, unreached []*Client) {
+	h.bumpVisibilityWatermark()
+	n := 0
+	for _, c := range unreached {
+		if c.user == nil {
+			continue
+		}
+		if live := h.sessionClient(c.userID, c.tokenHash); live != nil {
+			h.markClientLoss(live)
+			n++
+		}
+	}
+	slog.Warn("hub: RefreshChannelVisibility timed out, unreached clients marked for resync",
+		"channel_id", channelID, "unreached", n)
 }
 
 // refreshChannelVisibilityAffordances recomputes the five affordance verdicts the

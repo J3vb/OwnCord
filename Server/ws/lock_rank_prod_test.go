@@ -40,12 +40,12 @@ func TestRank_ZeroValueUsable(t *testing.T) {
 	}
 	h.tombstones.mu.Unlock()
 
-	unlock := h.voiceHub.reg.voiceMember.lock(7)
-	if _, ok := h.voiceHub.reg.voiceMember.tryLock(7); ok {
+	unlock := h.voiceHub.reg.voiceMember.Lock(7)
+	if _, ok := h.voiceHub.reg.voiceMember.TryLock(7); ok {
 		t.Fatal("tryLock succeeded on a user whose lock is held")
 	}
 	unlock()
-	unlockTry, ok := h.voiceHub.reg.voiceMember.tryLock(7)
+	unlockTry, ok := h.voiceHub.reg.voiceMember.TryLock(7)
 	if !ok {
 		t.Fatal("tryLock of an idle user failed on a zero-value userLocks")
 	}
@@ -54,7 +54,7 @@ func TestRank_ZeroValueUsable(t *testing.T) {
 	}
 	c.mu.Unlock()
 	unlockTry()
-	if n := h.voiceHub.reg.voiceMember.refsForTest(7); n != 0 {
+	if n := h.voiceHub.reg.voiceMember.Refs(7); n != 0 {
 		t.Fatalf("refs = %d after every holder released, want 0", n)
 	}
 }

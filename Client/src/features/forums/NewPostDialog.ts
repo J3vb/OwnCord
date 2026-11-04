@@ -351,6 +351,23 @@ export function openNewPostDialog(options: NewPostDialogOptions): void {
     },
     { signal: owner.signal },
   );
+  // A pasted screenshot or copied file attaches; pasted text stays text.
+  messageInput.addEventListener(
+    "paste",
+    (e: ClipboardEvent) => {
+      if (uploadsOff) return;
+      const files: File[] = [];
+      for (const item of e.clipboardData?.items ?? []) {
+        if (item.kind !== "file") continue;
+        const file = item.getAsFile();
+        if (file !== null) files.push(file);
+      }
+      if (files.length === 0) return;
+      e.preventDefault();
+      addFiles(files);
+    },
+    { signal: owner.signal },
+  );
   form.append(attachBtn, fileInput, chipList);
 
   let errorField: ErrorField | null = null;

@@ -51,10 +51,10 @@
 // too. Continuation lines are indented past the tab and are not read.
 //
 //	rank  lock                       declared                 taken under it
-//	1 S   userLockEntry.mu           voice_registry.go:45     DB, broadcasts, seqMu (replay.go:438-441); never a
-//	      (voiceRegistry.voiceMember) user_locks.go:44         LiveKit RPC
-//	2 S   userLockEntry.mu           hub_voice_state.go:25    DB and LiveKit RPC (user_locks.go:9-17); never a
-//	      (hubVoice.mod)             user_locks.go:44         membership path
+//	1 S   voicestate.userLockEntry.mu voice_registry.go:35    DB, broadcasts, seqMu (replay.go:438-441); never a
+//	      (voiceRegistry.voiceMember) voicestate/userlocks.go:39 LiveKit RPC
+//	2 S   voicestate.userLockEntry.mu hub_voice_state.go:29   DB and LiveKit RPC (voicestate/userlocks.go:10-16);
+//	      (hubVoice.mod)             voicestate/userlocks.go:39 never a membership path
 //	3 S   replayPurgeState.mu RW     hub_tombstones.go:53     seqMu (hub_events.go:210), then the persister
 //	      (Hub.tombstones)                                    Flush and the DB delete (hub_events.go:218-235).
 //	                                                          Cold reads only TryRLock (eventstore.go:46-62)
@@ -83,7 +83,7 @@
 //	                                                          294-299,354; registerNow, hub_registry.go:89),
 //	                                                          EventRingBuffer.mu, presenceRepairState.mu,
 //	                                                          queueDropState.mu, and the leaves below
-//	6     hubVoice.keyHolderMu RW    hub_voice_state.go:29    Hub.mu (R), voiceSlot.voiceMu
+//	6     hubVoice.keyHolderMu RW    hub_voice_state.go:33    Hub.mu (R), voiceSlot.voiceMu
 //	                                                          (voice_e2ee.go:44-60)
 //	6     hubsettings.Cache.mu RW    hubsettings/cache.go:55  a DB read under the write lock
 //	      (hubSettings.cache)                                 (hubsettings/cache.go:104-123); see the exceptions
@@ -96,8 +96,8 @@
 //	9     Client.mu                  client.go:81             leaf: nothing is taken under it
 //	9     voiceSlot.voiceMu          voice_registry.go:78     leaf
 //	9     voiceGraceState.mu         voice_grace.go:54        leaf
-//	9     voiceReconcileState.mu     voice_reconcile.go:42    leaf
-//	9     voiceRejoinBlockState.mu   voice_rejoin_block.go:34 leaf
+//	9     voicestate.ReconcileMisses.mu voicestate/reconcile.go:12 leaf
+//	9     voicestate.RejoinBlocks.mu voicestate/rejoin.go:20  leaf
 //	9     removedIdentities.mu       voice_removed_watch.go:48 leaf
 //	9     liveKitHealthCache.mu      livekit_health.go:21     leaf
 //	9     voiceResumeChecks.mu       voice_resume_check.go:57 leaf
@@ -108,7 +108,7 @@
 //	9     activityState.mu           channel_activity.go:93   leaf
 //	9     roleRefreshState.mu        role_refresh.go:63       leaf; may be taken under Hub.seqMu
 //	9     restartNoticeGate.mu       restart_notice.go:16     leaf
-//	9     userLocks.mu               user_locks.go:34         leaf, but see userLocks.tryLock below
+//	9     voicestate.UserLocks.mu    voicestate/userlocks.go:29 leaf, but see UserLocks.TryLock below
 //
 // hubLifecycle.background (hub_lifecycle.go:41) is a syncutil.Group, not a mutex, so it has no row.
 //
@@ -124,8 +124,8 @@
 //     (hub_registry.go:100), Client.mu on overflow (client.go:195,303), and
 //     Hub.seqMu in expireReplayTombstones and dropsForTombstones
 //     (hub_tombstones.go:169,188,192).
-//   - userLocks.mu is a leaf except in userLocks.tryLock (user_locks.go), which
-//     takes a new userLockEntry.mu while holding it. The entry is private until
+//   - voicestate.UserLocks.mu is a leaf except in UserLocks.TryLock
+//     (voicestate/userlocks.go:69), which takes a new userLockEntry.mu while holding it. The entry is private until
 //     it is inserted, so the acquisition is a TryLock that cannot fail, and the
 //     rank check never flags a try.
 //   - Hub.persistEvent under Hub.seqMu (hub_events.go:305) is a non-blocking
