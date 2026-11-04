@@ -123,7 +123,7 @@ type RingBuffer struct {
 	// INFO/DEBUG burst longer than all cannot evict a failure from the
 	// support bundle.
 	warn        logRing
-	subscribers map[*chan LogEntry]struct{}
+	subscribers map[*logSubscriber]struct{}
 	streamsEnd  chan struct{} // closed by EndStreams
 	endOnce     sync.Once
 	// history, when set, also gets every entry, for the saved log files.
@@ -135,7 +135,7 @@ func NewRingBuffer(capacity int) *RingBuffer {
 	return &RingBuffer{
 		all:         logRing{entries: make([]LogEntry, capacity)},
 		warn:        logRing{entries: make([]LogEntry, supportEventsMax)},
-		subscribers: make(map[*chan LogEntry]struct{}),
+		subscribers: make(map[*logSubscriber]struct{}),
 		streamsEnd:  make(chan struct{}),
 	}
 }
@@ -168,12 +168,8 @@ func (rb *RingBuffer) Write(entry LogEntry) {
 		rb.warn.push(entry)
 	}
 
-	for chp := range rb.subscribers {
-		select {
-		case *chp <- entry:
-		default:
-			// Slow subscriber — drop to avoid blocking.
-		}
+	for sub := range rb.subscribers {
+		sub.deliver(entry)
 	}
 }
 
@@ -228,13 +224,12 @@ func (rb *RingBuffer) Subscribe() (<-chan LogEntry, func()) {
 // subscribeLocked is Subscribe's body, callable by callers that already hold
 // rb.mu.
 func (rb *RingBuffer) subscribeLocked() (<-chan LogEntry, func()) {
-	ch := make(chan LogEntry, 64)
-	chp := &ch
-	rb.subscribers[chp] = struct{}{}
+	sub := &logSubscriber{ch: make(chan LogEntry, 64)}
+	rb.subscribers[sub] = struct{}{}
 
-	return ch, func() {
+	return sub.ch, func() {
 		rb.mu.Lock()
-		delete(rb.subscribers, chp)
+		delete(rb.subscribers, sub)
 		rb.mu.Unlock()
 	}
 }
@@ -442,9 +437,11 @@ func categorizeSource(r slog.Record) string {
 
 // logStreamAuthorize runs the log stream's authentication prologue: it redeems
 // the single-use ticket, resolves the principal behind it, and returns the
-// re-check closure the stream must call before every write. It writes the error
-// response itself and reports false when the caller must stop.
-func logStreamAuthorize(w http.ResponseWriter, r *http.Request, database *db.DB) (func() bool, bool) {
+// re-check closure the stream calls to confirm the viewer still has access. It
+// writes the error response itself and reports false when the caller must stop.
+// onResolve, when set, is called each time the closure resolves the principal
+// (tests count those; production passes nil).
+func logStreamAuthorize(w http.ResponseWriter, r *http.Request, database *db.DB, onResolve func()) (func() bool, bool) {
 	// Authenticate via single-use ticket.
 	ticket := r.URL.Query().Get("ticket")
 	entry, ok := logTickets.redeem(ticket)
@@ -463,6 +460,9 @@ func logStreamAuthorize(w http.ResponseWriter, r *http.Request, database *db.DB)
 		return nil, false
 	}
 	principalStillAuthorized := func() bool {
+		if onResolve != nil {
+			onResolve()
+		}
 		current, currentRole, _, resolveErr := auth.ResolveTokenHash(ctx, database, entry.tokenHash)
 		if resolveErr != nil || current == nil || currentRole == nil {
 			return false
@@ -514,11 +514,21 @@ func writeBackfill(w http.ResponseWriter, flusher http.Flusher, backfill []LogEn
 // Auth is via query param ?ticket= — a short-lived single-use ticket obtained
 // from POST /admin/api/logs/ticket (which requires normal admin auth).
 func handleLogStream(database *db.DB, ringBuf *RingBuffer) http.HandlerFunc {
+	return handleLogStreamWith(database, ringBuf, logStreamHooks{})
+}
+
+func handleLogStreamWith(database *db.DB, ringBuf *RingBuffer, hooks logStreamHooks) http.HandlerFunc {
+	now := hooks.now
+	if now == nil {
+		now = time.Now
+	}
 	return func(w http.ResponseWriter, r *http.Request) {
-		principalStillAuthorized, ok := logStreamAuthorize(w, r, database)
+		principalStillAuthorized, ok := logStreamAuthorize(w, r, database, hooks.onResolve)
 		if !ok {
 			return
 		}
+		// Live lines re-check at most once per logStreamRecheckEvery.
+		liveStillAuthorized := throttledCheck(principalStillAuthorized, logStreamRecheckEvery, now)
 		ctx := r.Context()
 
 		// Check that we can flush (required for SSE).
@@ -567,7 +577,7 @@ func handleLogStream(database *db.DB, ringBuf *RingBuffer) http.HandlerFunc {
 		for {
 			select {
 			case entry := <-ch:
-				if !principalStillAuthorized() {
+				if !liveStillAuthorized() {
 					return
 				}
 				if data, err := json.Marshal(entry); err == nil {

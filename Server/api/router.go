@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/admin"
@@ -749,7 +750,10 @@ func recoverer(next http.Handler) http.Handler {
 	})
 }
 
-// requestLogger logs every HTTP request; health checks at Debug. It also feeds
+// requestLogger logs every HTTP request. Health checks and successful admin
+// panel requests (the panel polls its own API, so those lines would bury real
+// events in the Live log) go to Debug; 4xx stays at Warn and 5xx at Error even
+// under the admin prefix. It also feeds
 // slow (nil skips it) with the request's route pattern and time, leaving out
 // the routes the request deadline exempts: they stream or hold a connection
 // open, so their time says nothing about slowness.
@@ -785,6 +789,8 @@ func requestLogger(proxyNets []*net.IPNet, slow *metrics.SlowRoutes) func(http.H
 			}
 			switch {
 			case path == "/health" || path == "/api/v1/health":
+				slog.Debug("http request", attrs...)
+			case status < 400 && strings.HasPrefix(path, "/admin/api/"):
 				slog.Debug("http request", attrs...)
 			case status >= 500:
 				slog.Error("http request", attrs...)
