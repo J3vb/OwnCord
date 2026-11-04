@@ -250,8 +250,8 @@ func rankList(set map[int]bool) string {
 }
 
 // genericRanks maps each generic type of ws to the ranks it is instantiated
-// with: directly (userLocks[lockRankVoiceMod]), or through another generic
-// that passes its own type parameter on (userLocks[R] holds userLockEntry[R]).
+// with: directly (voicestate.UserLocks[lockRankVoiceMod]), or through another generic
+// that passes its own type parameter on (UserLocks[R] holds userLockEntry[R]).
 func genericRanks(files []*ast.File, fset *token.FileSet, rankOf map[string]int) map[string]map[int]bool {
 	generic := make(map[string]bool)
 	for _, f := range files {

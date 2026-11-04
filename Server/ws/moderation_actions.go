@@ -218,7 +218,7 @@ func (h *Hub) MuteForTimeout(ctx context.Context, userID, channelID, actionID in
 	if h.voice == nil {
 		return false, false
 	}
-	unlock := h.voiceHub.mod.lock(userID)
+	unlock := h.voiceHub.mod.Lock(userID)
 	defer unlock()
 
 	matched, transitioned, err := h.voice.MuteForTimeoutSession(ctx, userID, channelID, actionID, joinedAt, supersededIDs)
@@ -258,7 +258,7 @@ func (h *Hub) UnmuteForTimeout(ctx context.Context, userID int64, actionIDs []in
 	if h.voice == nil || len(actionIDs) == 0 {
 		return false
 	}
-	unlock := h.voiceHub.mod.lock(userID)
+	unlock := h.voiceHub.mod.Lock(userID)
 	defer unlock()
 
 	channelID, joinedAt, matched, err := h.voice.ClearServerMuteOwnedBy(ctx, userID, actionIDs)

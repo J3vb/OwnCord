@@ -16,6 +16,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/plugin"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/ws/hubsettings"
+	"github.com/J3vb/OwnCord/Server/ws/voicestate"
 )
 
 // HubOptions carries everything a Hub needs before Run starts. What is mutable
@@ -161,7 +162,7 @@ func NewHub(opts HubOptions) (*Hub, error) {
 		readers: opts.Readers,
 		voice:   opts.Voice,
 		voiceHub: hubVoice{
-			defaultQuality: defaultVoiceQuality, mod: newUserLocks[lockRankVoiceMod](),
+			defaultQuality: defaultVoiceQuality, mod: voicestate.NewUserLocks[lockRankVoiceMod](),
 			keyHolders: make(map[int64]int64), lkProcess: opts.LiveKitProcess,
 		},
 		presence:     opts.Presence,
