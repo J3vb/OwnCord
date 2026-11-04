@@ -83,7 +83,7 @@ var pluginDispatchHook atomic.Pointer[func(h *Hub, msg []byte)]
 // ReconnectTierStats returns the per-tier resume hit counters (buffer, db, full);
 // the OpenTelemetry meters read the same atomics.
 func (h *Hub) ReconnectTierStats() (buffer, db, full uint64) {
-	return h.stats.reconnectTierBuf.Load(), h.stats.reconnectTierDB.Load(), h.stats.reconnectTierFull.Load()
+	return h.stats.ReconnectTierBuf.Load(), h.stats.ReconnectTierDB.Load(), h.stats.ReconnectTierFull.Load()
 }
 
 // noteRingMiss counts a resume the ring just failed to serve, only when the client is
@@ -93,7 +93,7 @@ func (h *Hub) ReconnectTierStats() (buffer, db, full uint64) {
 // the ring can race a push, which is harmless.
 func (h *Hub) noteRingMiss(lastSeq uint64) {
 	if oldest := h.ReplayBuffer().OldestSeq(); oldest != 0 && lastSeq <= oldest {
-		h.stats.reconnectRingMiss.Add(1)
+		h.stats.ReconnectRingMiss.Add(1)
 	}
 }
 
@@ -102,7 +102,7 @@ func (h *Hub) noteRingMiss(lastSeq uint64) {
 // ReconnectTierStats' db divided by this. A separate method so ReconnectTierStats
 // keeps its admin-interface signature.
 func (h *Hub) ReconnectRingMissCount() uint64 {
-	return h.stats.reconnectRingMiss.Load()
+	return h.stats.ReconnectRingMiss.Load()
 }
 
 // mustFullResync reports whether a client resuming from lastSeq predates the latest

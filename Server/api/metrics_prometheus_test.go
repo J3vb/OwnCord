@@ -14,11 +14,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+
 	"github.com/J3vb/OwnCord/Server/api"
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/metrics"
-	"github.com/J3vb/OwnCord/Server/ws"
-	"github.com/go-chi/chi/v5"
+	"github.com/J3vb/OwnCord/Server/ws/hubstats"
 )
 
 // promWindowFixture is a fake sampler answering both windows with different
@@ -269,9 +270,9 @@ func promFamily(fams []*promFam, name string) *promFam {
 // every latency histogram, so every family has a source.
 func fullPromSources() api.MetricsSources {
 	src := fullMetricsSources()
-	src.VoiceJoinMs = func() ws.VoiceJoinPhases {
+	src.VoiceJoinMs = func() hubstats.VoiceJoinPhases {
 		s := func(max float64) metrics.Summary { return metrics.Summary{Count: 2, P50: 1, P95: 2, P99: 3, Max: max} }
-		return ws.VoiceJoinPhases{Precheck: s(1), Leave: s(2), Persist: s(3), Token: s(4), Complete: s(5), Total: s(6)}
+		return hubstats.VoiceJoinPhases{Precheck: s(1), Leave: s(2), Persist: s(3), Token: s(4), Complete: s(5), Total: s(6)}
 	}
 	src.Windows = promWindowFixture
 	src.LatencyCounts = fullLatencyCounts
@@ -281,8 +282,8 @@ func fullPromSources() api.MetricsSources {
 // fullLatencyCounts has one histogram per name the hub reports, each holding
 // exactly as many observations as the JSON summary of the same name, so the
 // _count series can be compared with the JSON count.
-func fullLatencyCounts() ws.LatencyCounts {
-	counts := ws.LatencyCounts{}
+func fullLatencyCounts() hubstats.LatencyCounts {
+	counts := hubstats.LatencyCounts{}
 	for name, n := range map[string]int{
 		"ws_broadcast_ms": 10, "ws_dispatch_lag_ms": 4, "chat_send_ack_ms": 8,
 		"voice_join_ms.precheck": 2, "voice_join_ms.leave": 2, "voice_join_ms.persist": 2,
@@ -518,8 +519,8 @@ func TestPrometheusMetrics_MatchesJSON(t *testing.T) {
 // every scrape).
 func TestPrometheusMetrics_ScrapeRacingObservations(t *testing.T) {
 	var h metrics.Histogram
-	src := api.MetricsSources{LatencyCounts: func() ws.LatencyCounts {
-		return ws.LatencyCounts{"ws_broadcast_ms": h.Counts()}
+	src := api.MetricsSources{LatencyCounts: func() hubstats.LatencyCounts {
+		return hubstats.LatencyCounts{"ws_broadcast_ms": h.Counts()}
 	}}
 
 	ctx, cancel := context.WithCancel(context.Background())

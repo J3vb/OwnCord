@@ -49,7 +49,7 @@ func (h *Hub) handleReconnect(
 
 	events, replaySource, persistedTail, maxPersistedSeq := h.reconnectSelectReplay(ctx, c, lastSeq, allowedChannelIDs, nsfwReadableChannelIDs)
 	if events == nil {
-		h.stats.reconnectTierFull.Add(1)
+		h.stats.ReconnectTierFull.Add(1)
 		telemetry.NewAppMetrics().WSReconnectTierTotal.Add(ctx, 1, telemetry.String("tier", "full"))
 		return false, false
 	}
@@ -110,9 +110,9 @@ func (h *Hub) handleReconnect(
 	// writing it (frameReadableNow).
 	switch replaySource {
 	case "buffer":
-		h.stats.reconnectTierBuf.Add(1)
+		h.stats.ReconnectTierBuf.Add(1)
 	case "db":
-		h.stats.reconnectTierDB.Add(1)
+		h.stats.ReconnectTierDB.Add(1)
 	}
 	telemetry.NewAppMetrics().WSReconnectTierTotal.Add(ctx, 1, telemetry.String("tier", replaySource))
 
@@ -166,7 +166,7 @@ func (h *Hub) reconnectPrecheck(
 	if h.mustFullResync(lastSeq) || h.presenceResyncPending(c.userID, c.tokenHash) {
 		slog.Info("ws replay skipped (resync watermark at or past last_seq, or presence dropped), sending full ready",
 			"user_id", c.userID, "last_seq", lastSeq)
-		h.stats.reconnectTierFull.Add(1)
+		h.stats.ReconnectTierFull.Add(1)
 		telemetry.NewAppMetrics().WSReconnectTierTotal.Add(ctx, 1, telemetry.String("tier", "full"))
 		return nil, nil, false
 	}
@@ -357,7 +357,7 @@ func (h *Hub) reconnectRegister(
 			h.seqMu.Unlock()
 			slog.Warn("ws handleReconnect: buffer window closed just before registration, forcing full ready",
 				"user_id", c.userID, "last_seq", lastSeq)
-			h.stats.reconnectTierFull.Add(1)
+			h.stats.ReconnectTierFull.Add(1)
 			telemetry.NewAppMetrics().WSReconnectTierTotal.Add(ctx, 1, telemetry.String("tier", "full"))
 			return nil, false
 		}
@@ -373,7 +373,7 @@ func (h *Hub) reconnectRegister(
 			h.seqMu.Unlock()
 			slog.Warn("ws handleReconnect: ring buffer cannot cover the post-flush tail just before registration, forcing full ready",
 				"user_id", c.userID, "max_persisted_seq", maxPersistedSeq)
-			h.stats.reconnectTierFull.Add(1)
+			h.stats.ReconnectTierFull.Add(1)
 			telemetry.NewAppMetrics().WSReconnectTierTotal.Add(ctx, 1, telemetry.String("tier", "full"))
 			return nil, false
 		}
@@ -392,7 +392,7 @@ func (h *Hub) reconnectRegister(
 		h.seqMu.Unlock()
 		slog.Warn("ws handleReconnect: resync watermark moved during handshake, forcing full ready",
 			"user_id", c.userID, "last_seq", lastSeq)
-		h.stats.reconnectTierFull.Add(1)
+		h.stats.ReconnectTierFull.Add(1)
 		telemetry.NewAppMetrics().WSReconnectTierTotal.Add(ctx, 1, telemetry.String("tier", "full"))
 		return nil, false
 	}

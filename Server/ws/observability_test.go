@@ -41,7 +41,7 @@ func TestBackpressureStats_CountsPerPolicy(t *testing.T) {
 	if !c.isSendClosed() {
 		t.Error("client should be disconnected after high+normal overflow")
 	}
-	h.stats.broadcastDrops.Add(1)
+	h.stats.BroadcastDrops.Add(1)
 	if got := h.DeliveryDropCount(); got != 2 {
 		t.Errorf("DeliveryDropCount = %d, want 2 (one broadcast drop plus one queue disconnect, no low-priority drop)", got)
 	}

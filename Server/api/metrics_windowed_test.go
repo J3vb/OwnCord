@@ -13,7 +13,7 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/api"
 	"github.com/J3vb/OwnCord/Server/metrics"
-	"github.com/J3vb/OwnCord/Server/ws"
+	"github.com/J3vb/OwnCord/Server/ws/hubstats"
 )
 
 func fullMetricsSources() api.MetricsSources {
@@ -25,7 +25,7 @@ func fullMetricsSources() api.MetricsSources {
 		BroadcastMs:         func() metrics.Summary { return metrics.Summary{Count: 10, P50: 2, P95: 5, P99: 10, Max: 20} },
 		DispatchLagMs:       func() metrics.Summary { return metrics.Summary{Count: 4, P95: 50, Max: 90} },
 		ChatAckMs:           func() metrics.Summary { return metrics.Summary{Count: 8, P95: 12, Max: 30} },
-		VoiceJoinMs:         func() ws.VoiceJoinPhases { return ws.VoiceJoinPhases{Total: metrics.Summary{Count: 2}} },
+		VoiceJoinMs:         func() hubstats.VoiceJoinPhases { return hubstats.VoiceJoinPhases{Total: metrics.Summary{Count: 2}} },
 		BroadcastQueueDepth: func() int { return 7 },
 		SeqMuMaxHoldMs:      func() float64 { return 210 },
 		LiveKitHealth:       func(context.Context) (bool, error) { return true, nil },

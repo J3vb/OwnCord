@@ -4,7 +4,7 @@ import (
 	"net/http"
 
 	"github.com/J3vb/OwnCord/Server/metrics"
-	"github.com/J3vb/OwnCord/Server/ws"
+	"github.com/J3vb/OwnCord/Server/ws/hubstats"
 )
 
 // The Prometheus exposition of GET /api/v1/metrics/prometheus. It is
@@ -26,7 +26,7 @@ var promVoicePhases = [...]string{"precheck", "leave", "persist", "token", "comp
 func handlePrometheusMetrics(src MetricsSources) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		m := collectMetrics(r.Context(), src)
-		var counts ws.LatencyCounts
+		var counts hubstats.LatencyCounts
 		if src.LatencyCounts != nil {
 			counts = src.LatencyCounts()
 		}
@@ -67,7 +67,7 @@ func boolGauge(b bool) float64 {
 // encodePrometheus renders m, and the raw histogram counts, as text. A family
 // whose source is absent (no LiveKit probe, no event persister, no disk
 // reading, no histogram counts) is left out, as the JSON leaves the key out.
-func encodePrometheus(m *ServerMetrics, counts ws.LatencyCounts) []byte {
+func encodePrometheus(m *ServerMetrics, counts hubstats.LatencyCounts) []byte {
 	var e promEncoder
 	const (
 		counter = metrics.PromCounter
@@ -148,7 +148,7 @@ func encodePrometheus(m *ServerMetrics, counts ws.LatencyCounts) []byte {
 
 // encodePromHistograms writes the latency histogram families from the raw
 // counts. A histogram missing from counts is skipped.
-func encodePromHistograms(e *promEncoder, counts ws.LatencyCounts) {
+func encodePromHistograms(e *promEncoder, counts hubstats.LatencyCounts) {
 	for _, h := range []struct{ family, key, help string }{
 		{"owncord_ws_broadcast_seconds", "ws_broadcast_ms", "Time from a frame being queued to its fan-out finishing."},
 		{"owncord_ws_dispatch_lag_seconds", "ws_dispatch_lag_ms", "Time a frame waited for the dispatch goroutine."},
@@ -186,7 +186,7 @@ func encodePromLatencyMax(e *promEncoder, m *ServerMetrics) {
 		ms             float64
 	}
 	var out []maxSample
-	add := func(window string, broadcast, dispatch, ack *metrics.Summary, voice *ws.VoiceJoinPhases, seqMuMs float64) {
+	add := func(window string, broadcast, dispatch, ack *metrics.Summary, voice *hubstats.VoiceJoinPhases, seqMuMs float64) {
 		if broadcast != nil {
 			out = append(out, maxSample{"ws_broadcast", window, broadcast.Max})
 		}
