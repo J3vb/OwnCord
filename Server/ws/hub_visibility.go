@@ -63,17 +63,15 @@ func (h *Hub) channelReadAudienceImpl(ctx context.Context, channelID int64, igno
 // already read, so a caller that also needs the row pays one GetChannel. A nil ch
 // is the bare test hub with no database: the role scan runs without a channel ref.
 func (h *Hub) channelReadAudienceFor(ctx context.Context, channelID int64, ch *db.Channel, ignoreArchived bool) []int64 {
-	h.mu.RLock()
-	userIDs := h.connectedUserIDsLocked()
-	h.mu.RUnlock()
-
 	// A DM carries no channel_overrides rows, so every connected user with base
 	// READ_MESSAGES would pass the role scan and a private DM call's voice events
 	// would reach the whole server. Resolve the DM's participants intersected with
 	// the connected set instead (the IsDMParticipant rule hasChannelAccess uses).
+	// Membership is read live, so a DM is never memoised.
 	var ref permissions.ChannelRef
 	if ch != nil {
 		if ch.Type == "dm" {
+			userIDs, _ := h.connectedSnapshot()
 			return h.channelReadAudienceDM(ctx, channelID, userIDs)
 		}
 		ref = channelRef(ch)
@@ -86,19 +84,35 @@ func (h *Hub) channelReadAudienceFor(ctx context.Context, channelID int64, ch *d
 		}
 	}
 
+	key := audienceMemoKey{channelID: channelID, ignoreArchived: ignoreArchived}
+	now := time.Now()
+	permGen, connGen, memo := h.memoGens()
+	if memo {
+		if audience, ok := loadFresh(&h.audience.channels, key, ref, permGen, connGen, now); ok {
+			return audience
+		}
+	}
+	userIDs, snapGen := h.connectedSnapshot()
+
 	// Resolved per user, not memoised per role: channel_user_overrides is the last
 	// layer of resolution, so two members of one role can disagree about a channel.
-	// An unresolvable user is left out.
+	// An unresolvable user is left out, and the result is then not memoised so the
+	// next frame asks again.
 	audience := make([]int64, 0, len(userIDs))
+	failed := false
 	for _, uid := range userIDs {
 		sub, err := h.subjectFor(ctx, uid, channelID)
 		if err != nil {
+			failed = true
 			continue
 		}
 		sub.Channel = ref
 		if permissions.CanViewChannel(sub) == nil {
 			audience = append(audience, uid)
 		}
+	}
+	if memo && !failed {
+		h.storeIfUnchanged(&h.audience.channels, key, ref, permGen, snapGen, now, audience)
 	}
 	return audience
 }

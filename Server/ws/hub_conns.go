@@ -110,6 +110,7 @@ func (h *Hub) addClientLocked(c *Client) {
 	next := make([]*Client, len(old), len(old)+1)
 	copy(next, old)
 	h.clients[c.userID] = append(next, c)
+	h.connGen.Add(1)
 }
 
 // removeClientLocked drops c from its user's connections, reporting whether it
@@ -121,6 +122,7 @@ func (h *Hub) removeClientLocked(c *Client) bool {
 		if e != c {
 			continue
 		}
+		h.connGen.Add(1)
 		if len(old) == 1 {
 			delete(h.clients, c.userID)
 			return true
