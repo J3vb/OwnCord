@@ -174,31 +174,6 @@
   }
 }
 
-/* Status picker: the custom-status input sits below the four options. */
-.status-picker-divider {
-  height: 1px;
-  background: var(--border);
-  margin: 4px 0;
-}
-.status-picker-custom {
-  padding: 6px 8px;
-}
-.status-picker-custom-input {
-  width: 100%;
-  box-sizing: border-box;
-  background: var(--bg-input);
-  border: 1px solid var(--border-control);
-  border-radius: var(--radius-sm);
-  color: var(--text-normal);
-  font-size: var(--font-size-sm);
-  padding: 6px 8px;
-}
-/* The base --focus-ring outline is the ring (A11Y-03): a 1px border-colour
-   swap is not a >=2px/3:1 replacement. */
-.status-picker-custom-input:focus {
-  border-color: var(--focus-ring);
-}
-
 /* Account tab: the avatar uploader opens first in the profile editor. */
 .account-avatar-upload {
   margin: 12px 0 4px;

@@ -51,8 +51,10 @@ export interface UiState {
   readonly settingsTabSeq?: number;
 }
 
-/** Settings tabs another surface may open directly. */
-export type SettingsTabRequest = "Account" | "Safety" | "My uploads" | "About" | "Notifications";
+/** Settings tabs another surface may open directly. "Profile" is the Account
+ *  tab with its profile editor open and the display name focused. */
+export type SettingsTabRequest =
+  "Account" | "Profile" | "Safety" | "My uploads" | "About" | "Notifications";
 
 /**
  * The one `ui.store` fact a protocol-epoch refusal leaves behind:

@@ -267,8 +267,8 @@ the leave exit, because installing this client cannot resolve that refusal.
 The tray icon (`src-tauri/src/tray.rs`) is a parallel presence/window surface:
 **Show/Hide** toggles the main window, a **Status** submenu
 (Online / Idle / Do Not Disturb / Offline) emits a `status-change` event that
-the TS side applies through the same presence path as the user-bar picker
-(`lib/presence/userStatus.ts` / `components/StatusPicker.ts`), **Mute / Unmute** and
+the TS side applies through the same presence path as the user bar's status
+menu (`lib/presence/userStatus.ts` / `components/UserBar.ts`), **Mute / Unmute** and
 **Deafen / Undeafen** emit the `voice-shortcut` event that the global
 Ctrl+Shift+<key> poller (`src-tauri/src/shortcuts.rs`, rebindable from the
 Keybinds tab) also emits,
