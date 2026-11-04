@@ -156,6 +156,10 @@ func (h *Hub) BroadcastChannelDelete(channelID int64) {
 // deterministically.
 var refreshChannelVisibilityRaceHook func(userID int64)
 
+// deliverGatedBeforeSeqMuHook, when non-nil, runs in deliverGated after the work
+// done ahead of seqMu and before the lock is taken (test-only, nil in production).
+var deliverGatedBeforeSeqMuHook func()
+
 // BroadcastRolesUpdate sends the full role list to every connected client.
 // Unfiltered: the list is already in every ready payload.
 func (h *Hub) BroadcastRolesUpdate(roles []*db.Role) {
@@ -322,6 +326,16 @@ func (h *Hub) deliverGated(bm broadcastMsg, g gateResult) {
 	// The limiter key depends on bm alone, so it is built before the lock.
 	limiterKey := topicLimiterKey(bm)
 
+	// A frame that is final before the lock is parsed for tombstoned ids here too. A
+	// presence or member window is built under the lock and keeps the in-lock parse.
+	var preRefs *preParsedRefs
+	if bm.presence == nil && bm.members == nil {
+		preRefs = h.parseRefsBeforeLock(bm.msg)
+	}
+	if deliverGatedBeforeSeqMuHook != nil {
+		deliverGatedBeforeSeqMuHook()
+	}
+
 	// The channel-broadcast debug log is emitted after seqMu is released so a slow
 	// sink never extends the critical section that serializes every broadcast.
 	seq, delivered, channelSend, pluginMsg := func() (seq uint64, delivered int, channelSend bool, pluginMsg []byte) {
@@ -357,7 +371,7 @@ func (h *Hub) deliverGated(bm broadcastMsg, g gateResult) {
 
 		// A frame naming an erased user, produced by a request that read its rows before
 		// the erasure and reached the hub after the purge, must not be sequenced.
-		if h.dropsForTombstones(bm.msg) {
+		if h.dropsForTombstonesWith(bm.msg, preRefs) {
 			return 0, 0, false, nil
 		}
 
