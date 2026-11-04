@@ -17,6 +17,7 @@ import type { MountableComponent } from "@lib/text/safeRender";
 import type { ForgetIdentityPinResult } from "@lib/net/identity";
 import { computeKeyFingerprint, importIdentityPublicKey } from "@lib/net/e2eeCrypto";
 import { shellText } from "../../i18n/shell";
+import { trustedKeysText as t } from "../../i18n/trustedKeys";
 
 const log = createLogger("trusted-keys");
 
@@ -61,19 +62,11 @@ export function createTrustedKeysPanel(options: TrustedKeysPanelOptions): Mounta
     if (id !== renderId || list === null || disposable.signal.aborted) return;
     list.replaceChildren();
     if (keys === null || shown === null) {
-      list.appendChild(
-        createElement("div", { class: "tk-empty" }, shellText("identity.keysUnavailable")),
-      );
+      list.appendChild(createElement("div", { class: "tk-empty" }, t("unavailable")));
       return;
     }
     if (keys.length === 0) {
-      list.appendChild(
-        createElement(
-          "div",
-          { class: "tk-empty" },
-          shellText("identity.keysNone", { name: username }),
-        ),
-      );
+      list.appendChild(createElement("div", { class: "tk-empty" }, t("none", { name: username })));
       return;
     }
     const inCall = options.keyInCall();
@@ -81,49 +74,54 @@ export function createTrustedKeysPanel(options: TrustedKeysPanelOptions): Mounta
     // Newest first: the key in use is usually the newest.
     for (let i = keys.length - 1; i >= 0; i--) {
       const key = keys[i] as string;
-      const fingerprint = shown[i] ?? shellText("common.unknown");
       const isInCall = key === inCall;
-      const row = createElement("div", { class: "tk-row" });
-      const text = createElement("div", { class: "tk-text" });
-      const fp = createElement("span", { class: "tk-fingerprint" }, fingerprint);
-      const tag = createElement(
-        "span",
-        { class: isInCall ? (options.changed ? "tk-tag changed" : "tk-tag current") : "tk-tag" },
-        isInCall
-          ? shellText(options.changed ? "identity.keyInCallChanged" : "identity.keyInCall")
-          : shellText("identity.keyOlder"),
-      );
-      appendChildren(text, fp, tag);
-      row.appendChild(text);
-      if (!isInCall && canForgetAny) {
-        const forget = createElement("button", {
-          type: "button",
-          class: "tk-forget",
-          "aria-label": shellText("identity.forgetLabel", { fingerprint }),
-        });
-        setText(forget, shellText("identity.forget"));
-        forget.addEventListener(
-          "click",
-          () => {
-            forget.disabled = true;
-            void options
-              .forget(key)
-              .then((result) => {
-                if (result === "failed") showToast(shellText("identity.forgetFailed"), "error");
-                return render();
-              })
-              .catch((err: unknown) => {
-                log.error("E2EE: failed to forget a trusted key", err);
-                showToast(shellText("identity.forgetFailed"), "error");
-                forget.disabled = false;
-              });
-          },
-          { signal: disposable.signal },
-        );
-        row.appendChild(forget);
-      }
+      const fingerprint = shown[i] ?? shellText("common.unknown");
+      const row = buildRow(fingerprint, isInCall);
+      if (!isInCall && canForgetAny) row.appendChild(forgetButton(key, fingerprint));
       list.appendChild(row);
     }
+  }
+
+  function buildRow(fingerprint: string, isInCall: boolean): HTMLDivElement {
+    const row = createElement("div", { class: "tk-row" });
+    const text = createElement("div", { class: "tk-text" });
+    const fp = createElement("span", { class: "tk-fingerprint" }, fingerprint);
+    const tag = createElement(
+      "span",
+      { class: isInCall ? (options.changed ? "tk-tag changed" : "tk-tag current") : "tk-tag" },
+      isInCall ? t(options.changed ? "keyInCallChanged" : "keyInCall") : t("keyOlder"),
+    );
+    appendChildren(text, fp, tag);
+    row.appendChild(text);
+    return row;
+  }
+
+  function forgetButton(key: string, fingerprint: string): HTMLButtonElement {
+    const forget = createElement("button", {
+      type: "button",
+      class: "tk-forget",
+      "aria-label": t("forgetLabel", { fingerprint }),
+    });
+    setText(forget, t("forget"));
+    forget.addEventListener(
+      "click",
+      () => {
+        forget.disabled = true;
+        void options
+          .forget(key)
+          .then((result) => {
+            if (result === "failed") showToast(t("forgetFailed"), "error");
+            return render();
+          })
+          .catch((err: unknown) => {
+            log.error("E2EE: failed to forget a trusted key", err);
+            showToast(t("forgetFailed"), "error");
+            forget.disabled = false;
+          });
+      },
+      { signal: disposable.signal },
+    );
+    return forget;
   }
 
   function mount(container: Element): void {
@@ -133,11 +131,7 @@ export function createTrustedKeysPanel(options: TrustedKeysPanelOptions): Mounta
     trapFocus(modal, disposable.signal);
 
     const header = createElement("div", { class: "modal-header" });
-    const title = createElement(
-      "h3",
-      { id: "trusted-keys-title" },
-      shellText("identity.keysTitle", { name: username }),
-    );
+    const title = createElement("h3", { id: "trusted-keys-title" }, t("title", { name: username }));
     const closeBtn = createElement("button", {
       class: "modal-close",
       type: "button",
@@ -148,22 +142,14 @@ export function createTrustedKeysPanel(options: TrustedKeysPanelOptions): Mounta
     appendChildren(header, title, closeBtn);
 
     const body = createElement("div", { class: "modal-body" });
-    const intro = createElement(
-      "div",
-      { class: "tk-intro" },
-      shellText("identity.keysIntro", { name: username }),
-    );
+    const intro = createElement("div", { class: "tk-intro" }, t("intro", { name: username }));
     list = createElement("div", { class: "tk-list", "aria-live": "polite" });
-    const footnote = createElement(
-      "div",
-      { class: "tk-footnote" },
-      shellText("identity.keysFootnote"),
-    );
+    const footnote = createElement("div", { class: "tk-footnote" }, t("footnote"));
     appendChildren(body, intro, list, footnote);
 
     const footer = createElement("div", { class: "modal-footer" });
     const done = createElement("button", { class: "btn-primary", type: "button" });
-    setText(done, shellText("identity.done"));
+    setText(done, t("done"));
     done.addEventListener("click", onClose, { signal: disposable.signal });
     footer.appendChild(done);
 

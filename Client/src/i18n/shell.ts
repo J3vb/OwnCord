@@ -194,20 +194,6 @@ export const shellText = defineCatalog("shell", {
   "identity.accept": "Trust this key as well",
   "identity.acceptNote":
     "Trusting adds this key. Keys you trusted for them before stay trusted. You can forget old keys from their shield.",
-  "identity.keysTitle": "Keys you trust for {name}",
-  "identity.keysIntro":
-    "One key per device. Compare the safety number with {name}, in person or over another app, to confirm it is them.",
-  "identity.keyInCall": "In this call",
-  "identity.keyInCallChanged": "In this call · key changed, not yet confirmed",
-  "identity.keyOlder": "Older key",
-  "identity.forget": "Forget this key",
-  "identity.forgetLabel": "Forget key {fingerprint}",
-  "identity.keysFootnote":
-    "A device that comes back with a forgotten key shows as “Key changed, not yet confirmed” again. The key in this call can't be forgotten.",
-  "identity.keysNone": "No saved keys for {name} yet.",
-  "identity.keysUnavailable": "Couldn't read the saved keys. Try again.",
-  "identity.forgetFailed": "Couldn't forget that key. Try again.",
-  "identity.done": "Done",
   "identity.rePinFailed":
     "Couldn't save the new security key — the participant stays blocked. Try again.",
 

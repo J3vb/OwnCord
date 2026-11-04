@@ -160,6 +160,35 @@ export class E2EEOffer {
     return run;
   }
 
+  /** What an offer from `fromUserId` needs before it is unwrapped, or null to drop it. */
+  private offerInputs(
+    fromUserId: number,
+  ): { peerKey: CryptoKey; keypair: CryptoKeyPair; myUserId: number } | null {
+    const peerKey = this._peerPublicKeys.get(fromUserId);
+    if (!peerKey) {
+      log.warn("E2EE: received offer from unknown peer", { fromUserId });
+      return null;
+    }
+    const keypair = this._ecdhKeyPair;
+    if (!keypair) {
+      log.warn("E2EE: received offer but no ECDH keypair");
+      return null;
+    }
+    // The server elects the lowest user id in the call as key holder, so
+    // while we hold the key a real offer can only come from a lower id (one
+    // that has just been elected over us). An offer from a higher id is not
+    // from the holder: drop it before it can change our key or role.
+    const myUserId = this.host.getMyUserId();
+    if (this._isKeyHolder && myUserId !== 0 && fromUserId >= myUserId) {
+      log.warn("E2EE: ignoring offer from a peer that cannot be the key holder", {
+        fromUserId,
+        myUserId,
+      });
+      return null;
+    }
+    return { peerKey, keypair, myUserId };
+  }
+
   private async handleOfferInner(
     fromUserId: number,
     encryptedKeyBase64: string,
@@ -167,29 +196,9 @@ export class E2EEOffer {
     isCurrent: () => boolean,
   ): Promise<void> {
     try {
-      const peerKey = this._peerPublicKeys.get(fromUserId);
-      if (!peerKey) {
-        log.warn("E2EE: received offer from unknown peer", { fromUserId });
-        return;
-      }
-      const keypair = this._ecdhKeyPair;
-      if (!keypair) {
-        log.warn("E2EE: received offer but no ECDH keypair");
-        return;
-      }
-
-      // The server elects the lowest user id in the call as key holder, so
-      // while we hold the key a real offer can only come from a lower id (one
-      // that has just been elected over us). An offer from a higher id is not
-      // from the holder: drop it before it can change our key or role.
-      const myUserId = this.host.getMyUserId();
-      if (this._isKeyHolder && myUserId !== 0 && fromUserId >= myUserId) {
-        log.warn("E2EE: ignoring offer from a peer that cannot be the key holder", {
-          fromUserId,
-          myUserId,
-        });
-        return;
-      }
+      const inputs = this.offerInputs(fromUserId);
+      if (inputs === null) return;
+      const { peerKey, keypair, myUserId } = inputs;
 
       markJoinMilestone("e2ee key holder offer received");
 
@@ -201,13 +210,10 @@ export class E2EEOffer {
         roomKey: unwrapped,
         epoch,
         placement: offered,
-      } = await unwrapRoomKey(
-        keypair.privateKey,
-        peerKey,
-        encryptedKeyBase64,
-        ivBase64,
-        myUserId !== 0 ? { senderId: fromUserId, recipientId: myUserId } : undefined,
-      );
+      } = await unwrapRoomKey(keypair.privateKey, peerKey, encryptedKeyBase64, ivBase64, {
+        senderId: fromUserId,
+        recipientId: myUserId,
+      });
 
       // Discard if either the epoch advanced (a rotation landed during
       // unwrap) OR the keypair no longer matches (clearState() ran and a new

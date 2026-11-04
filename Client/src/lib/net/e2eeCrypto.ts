@@ -345,6 +345,24 @@ export async function unwrapRoomKey(
     return { roomKey: new Uint8Array(plaintext), epoch: null };
   }
 
+  const { header, epoch, placement } = parseOfferHeader(blob);
+  const plaintext = await crypto.subtle.decrypt(
+    { name: "AES-GCM", iv, additionalData: header },
+    wrapKey,
+    blob.subarray(header.byteLength),
+  );
+  const roomKey = new Uint8Array(plaintext);
+  return placement === undefined ? { roomKey, epoch } : { roomKey, epoch, placement };
+}
+
+// ── Internal helpers ────────────────────────────────────────────────────────
+
+/** A v1/v2/v3 offer's header (all of it GCM additional data), epoch and placement. */
+function parseOfferHeader(blob: Uint8Array<ArrayBuffer>): {
+  header: Uint8Array<ArrayBuffer>;
+  epoch: number;
+  placement?: KeyPlacement;
+} {
   const headerBytes =
     blob[0] === OFFER_FORMAT_V1
       ? OFFER_HEADER_BYTES
@@ -371,18 +389,10 @@ export async function unwrapRoomKey(
     }
     placement = { slot, stage: (flags & OFFER_FLAG_STAGE) !== 0 };
   }
-  const plaintext = await crypto.subtle.decrypt(
-    { name: "AES-GCM", iv, additionalData: header },
-    wrapKey,
-    blob.subarray(headerBytes),
-  );
-  const roomKey = new Uint8Array(plaintext);
   return placement === undefined
-    ? { roomKey, epoch: Number(epochBig) }
-    : { roomKey, epoch: Number(epochBig), placement };
+    ? { header, epoch: Number(epochBig) }
+    : { header, epoch: Number(epochBig), placement };
 }
-
-// ── Internal helpers ────────────────────────────────────────────────────────
 
 /** HKDF info for a v3 offer: label ‖ sender id (u64 BE) ‖ recipient id (u64 BE).
  *  Fixed-width ids keep the encoding unambiguous. */
