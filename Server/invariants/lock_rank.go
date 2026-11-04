@@ -6,6 +6,7 @@ import (
 	"go/parser"
 	"go/token"
 	"io/fs"
+	"path"
 	"sort"
 	"strconv"
 	"strings"
@@ -20,9 +21,11 @@ const lockRankID = "lock-rank"
 //
 // lock-inventory proves every lock has a row. It cannot tell whether the rank
 // a row gives is the rank the lock carries: a ranked lock is a
-// syncutil.Ranked[R] or RankedRW[R], R is a rank type declared in
-// lock_order.go with a Rank method, and the deadlock build panics on an
-// acquire out of that order (syncutil/ranked_deadlock.go). This rule fails:
+// syncutil.Ranked[R] or RankedRW[R], R is a rank type of ws/lockrank with a
+// Rank method (lock_order.go names each one for ws through an alias), and the
+// deadlock build panics on an acquire out of that order
+// (syncutil/ranked_deadlock.go). Locks in packages under ws/ are held to the
+// same table. This rule fails:
 //
 //   - a table that is not in rank order (outermost first, unranked rows last);
 //   - a rank type whose Rank method does not return an integer literal, or a
@@ -60,6 +63,7 @@ func checkLockRanks(files map[string][]byte) []Violation {
 	var rows []lockRow
 	parsed := make([]*ast.File, 0, len(paths))
 	rankOf := make(map[string]int)
+	aliases := make(map[string]string) // ws name -> lockrank.Name
 	for _, p := range paths {
 		f, err := parser.ParseFile(fset, p, files[p], parser.ParseComments)
 		if err != nil {
@@ -67,14 +71,23 @@ func checkLockRanks(files map[string][]byte) []Violation {
 			continue
 		}
 		parsed = append(parsed, f)
-		if p == lockOrderFile {
+		switch {
+		case p == lockOrderFile:
 			rows = lockTableRows(f, fset)
-			out = append(out, rankMethods(f, fset, rankOf)...)
+			out = append(out, rankMethods(f, fset, p, "", rankOf)...)
+			rankAliases(f, aliases)
+		case path.Dir(p) == lockRankDir:
+			out = append(out, rankMethods(f, fset, p, "lockrank.", rankOf)...)
 		}
 		decls = append(decls, lockDecls(f, fset, p)...)
 	}
 	if rows == nil {
 		return out // lock-inventory reports a missing or empty table
+	}
+	for local, target := range aliases {
+		if n, ok := rankOf[target]; ok {
+			rankOf[local] = n
+		}
 	}
 
 	out = append(out, rankTableOrder(rows)...)
@@ -82,7 +95,7 @@ func checkLockRanks(files map[string][]byte) []Violation {
 	for _, r := range rows {
 		byName[r.name] = append(byName[r.name], r)
 	}
-	inst := genericRanks(parsed, rankOf)
+	inst := genericRanks(parsed, fset, rankOf)
 	for _, d := range decls {
 		rs, ok := byName[d.name]
 		if !ok {
@@ -95,8 +108,9 @@ func checkLockRanks(files map[string][]byte) []Violation {
 	return out
 }
 
-// rankMethods reads `func (T) Rank() int { return N }` from lock_order.go.
-func rankMethods(f *ast.File, fset *token.FileSet, rankOf map[string]int) []Violation {
+// rankMethods reads `func (T) Rank() int { return N }` from file p (ws/lockrank,
+// or lock_order.go itself), recording T under qual+T.
+func rankMethods(f *ast.File, fset *token.FileSet, p, qual string, rankOf map[string]int) []Violation {
 	var out []Violation
 	for _, decl := range f.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
@@ -109,13 +123,35 @@ func rankMethods(f *ast.File, fset *token.FileSet, rankOf map[string]int) []Viol
 		}
 		n, ok := literalReturn(fn)
 		if !ok {
-			out = append(out, Violation{Rule: lockRankID, File: lockOrderFile, Line: fset.Position(fn.Pos()).Line,
+			out = append(out, Violation{Rule: lockRankID, File: p, Line: fset.Position(fn.Pos()).Line,
 				Msg: fmt.Sprintf("%s.Rank must be `return <integer literal>`, so the table can be checked against it", recv.Name)})
 			continue
 		}
-		rankOf[recv.Name] = n
+		rankOf[qual+recv.Name] = n
 	}
 	return out
+}
+
+// rankAliases reads `type lockRankX = lockrank.X` from lock_order.go: the ws
+// names of the shared rank types.
+func rankAliases(f *ast.File, aliases map[string]string) {
+	for _, decl := range f.Decls {
+		gd, ok := decl.(*ast.GenDecl)
+		if !ok || gd.Tok != token.TYPE {
+			continue
+		}
+		for _, spec := range gd.Specs {
+			ts, ok := spec.(*ast.TypeSpec)
+			if !ok || !ts.Assign.IsValid() {
+				continue
+			}
+			if sel, ok := ts.Type.(*ast.SelectorExpr); ok {
+				if x, ok := sel.X.(*ast.Ident); ok && x.Name == "lockrank" {
+					aliases[ts.Name.Name] = "lockrank." + sel.Sel.Name
+				}
+			}
+		}
+	}
 }
 
 func literalReturn(fn *ast.FuncDecl) (int, bool) {
@@ -216,12 +252,13 @@ func rankList(set map[int]bool) string {
 // genericRanks maps each generic type of ws to the ranks it is instantiated
 // with: directly (userLocks[lockRankVoiceMod]), or through another generic
 // that passes its own type parameter on (userLocks[R] holds userLockEntry[R]).
-func genericRanks(files []*ast.File, rankOf map[string]int) map[string]map[int]bool {
+func genericRanks(files []*ast.File, fset *token.FileSet, rankOf map[string]int) map[string]map[int]bool {
 	generic := make(map[string]bool)
 	for _, f := range files {
+		qual := lockQualifier(fset.Position(f.Package).Filename)
 		ast.Inspect(f, func(n ast.Node) bool {
 			if ts, ok := n.(*ast.TypeSpec); ok && ts.TypeParams != nil {
-				generic[ts.Name.Name] = true
+				generic[qual+ts.Name.Name] = true
 			}
 			return true
 		})
@@ -229,22 +266,29 @@ func genericRanks(files []*ast.File, rankOf map[string]int) map[string]map[int]b
 	inst := make(map[string]map[int]bool)
 	passes := make(map[string][]string) // enclosing generic -> generics it passes its parameter to
 	for _, f := range files {
+		qual := lockQualifier(fset.Position(f.Package).Filename)
 		for _, u := range genericUnits(f) {
-			owner, params := u.owner, u.params
+			owner, params := qual+u.owner, u.params
 			ast.Inspect(u.node, func(n ast.Node) bool {
 				ix, ok := n.(*ast.IndexExpr)
 				if !ok {
 					return true
 				}
-				g, ok1 := ix.X.(*ast.Ident)
-				arg, ok2 := ix.Index.(*ast.Ident)
-				if !ok1 || !ok2 || !generic[g.Name] {
+				g := lockTypeName(ix.X, qual)
+				if !generic[g] {
 					return true
 				}
-				if n, ok := rankOf[arg.Name]; ok {
-					addRank(inst, g.Name, n)
-				} else if params[arg.Name] && g.Name != owner {
-					passes[owner] = append(passes[owner], g.Name)
+				switch arg := ix.Index.(type) {
+				case *ast.Ident:
+					if n, ok := rankOf[qual+arg.Name]; ok {
+						addRank(inst, g, n)
+					} else if params[arg.Name] && g != owner {
+						passes[owner] = append(passes[owner], g)
+					}
+				case *ast.SelectorExpr:
+					if n, ok := rankOf[lockTypeName(arg, qual)]; ok {
+						addRank(inst, g, n)
+					}
 				}
 				return true
 			})
@@ -264,6 +308,20 @@ func genericRanks(files []*ast.File, rankOf map[string]int) map[string]map[int]b
 		}
 	}
 	return inst
+}
+
+// lockTypeName names a type expression as lock names do: a bare identifier
+// with the file's qualifier, pkg.Name as written. Anything else is "".
+func lockTypeName(e ast.Expr, qual string) string {
+	switch t := e.(type) {
+	case *ast.Ident:
+		return qual + t.Name
+	case *ast.SelectorExpr:
+		if x, ok := t.X.(*ast.Ident); ok {
+			return x.Name + "." + t.Sel.Name
+		}
+	}
+	return ""
 }
 
 func addRank(inst map[string]map[int]bool, g string, n int) {

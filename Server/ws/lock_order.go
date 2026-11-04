@@ -2,9 +2,11 @@
 // owns. Other files carry local fragments of it; where one disagrees with this
 // block, this block wins and the fragment is the bug. The order is read from
 // the code at the paths cited, and checked two ways. Each ranked lock is a
-// syncutil.Ranked[R] or RankedRW[R] whose R is one of the rank types at the
-// end of this file; the lock-rank invariant (invariants/lock_rank.go) holds
-// the table's rank column to those types. Under -tags deadlock every acquire
+// syncutil.Ranked[R] or RankedRW[R] whose R is one of the rank types of
+// ws/lockrank (aliased at the end of this file for use inside ws), so packages
+// under ws/ rank their locks with the same types. The lock-rank invariant
+// (invariants/lock_rank.go) holds the table's rank column to those types,
+// for ws and its packages alike. Under -tags deadlock every acquire
 // is checked against the ranks its goroutine already holds, and one whose
 // rank is not greater than all of them panics with both stacks
 // (syncutil/ranked_deadlock.go). go-deadlock runs underneath as before.
@@ -34,7 +36,8 @@
 //
 // # Ranks (outermost first)
 //
-// Lock names are Type.field, the Go declaration. A lock reached through a
+// Lock names are Type.field, the Go declaration; a lock in a package under
+// ws/ is pkg.Type.field. A lock reached through a
 // named field of another type says so in the "how" column. Line numbers were
 // read at origin/dev f4a359e8 and are cites, not contracts. The table runs in
 // rank order, unranked rows last; the lock-rank invariant fails it otherwise.
@@ -140,28 +143,20 @@
 
 package ws
 
-// Rank types, one per rank of the table. Each is the R of the
-// syncutil.Ranked[R] or RankedRW[R] that declares a lock of that rank; the
-// lock-rank invariant reads the literal each Rank method returns, so keep it
-// a literal.
-type (
-	lockRankVoiceMember struct{} // userLockEntry.mu of voiceRegistry.voiceMember
-	lockRankVoiceMod    struct{} // userLockEntry.mu of hubVoice.mod
-	lockRankSerialiser  struct{} // the rank-3 serialisers
-	lockRankFeed        struct{} // timeoutViewState.mu, presenceFeedState.mu
-	lockRankSeq         struct{} // Hub.seqMu
-	lockRankHubCache    struct{} // hubVoice.keyHolderMu, hubSettings.mu
-	lockRankHub         struct{} // Hub.mu
-	lockRankPubSub      struct{} // PubSub.mu
-	lockRankLeaf        struct{} // the leaves
-)
+import "github.com/J3vb/OwnCord/Server/ws/lockrank"
 
-func (lockRankVoiceMember) Rank() int { return 1 }
-func (lockRankVoiceMod) Rank() int    { return 2 }
-func (lockRankSerialiser) Rank() int  { return 3 }
-func (lockRankFeed) Rank() int        { return 4 }
-func (lockRankSeq) Rank() int         { return 5 }
-func (lockRankHubCache) Rank() int    { return 6 }
-func (lockRankHub) Rank() int         { return 7 }
-func (lockRankPubSub) Rank() int      { return 8 }
-func (lockRankLeaf) Rank() int        { return 9 }
+// Rank types, one per rank of the table, named for use inside ws. They are
+// aliases of ws/lockrank's, where the Rank methods live, so a subpackage of ws
+// can declare a ranked lock with the same type (lockrank.HubCache is
+// lockRankHubCache).
+type (
+	lockRankVoiceMember = lockrank.VoiceMember
+	lockRankVoiceMod    = lockrank.VoiceMod
+	lockRankSerialiser  = lockrank.Serialiser
+	lockRankFeed        = lockrank.Feed
+	lockRankSeq         = lockrank.Seq
+	lockRankHubCache    = lockrank.HubCache
+	lockRankHub         = lockrank.Hub
+	lockRankPubSub      = lockrank.PubSub
+	lockRankLeaf        = lockrank.Leaf
+)
