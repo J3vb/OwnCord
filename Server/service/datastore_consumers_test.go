@@ -38,7 +38,7 @@ var serviceStoreBaselines = map[reflect.Type]int{
 	reflect.TypeFor[channelOverrides]():      16,
 	reflect.TypeFor[readFocus]():             3,
 	reflect.TypeFor[ConnWrites]():            4,
-	reflect.TypeFor[DMService]():             17,
+	reflect.TypeFor[DMService]():             18,
 	reflect.TypeFor[groupManagement]():       11,
 	reflect.TypeFor[GIFFavoriteService]():    3,
 	reflect.TypeFor[InviteService]():         6,
