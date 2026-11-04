@@ -83,6 +83,7 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
     }));
     vi.doMock("../../../src/platform/desktop", () => ({
       desktop: {
+        gpuAdapter: { available: false },
         nativeVoice: {
           startCameraPreview: (...args: unknown[]) => startCameraPreview(...args) as unknown,
           stopCameraPreview: (...args: unknown[]) => stopCameraPreview(...args) as unknown,

@@ -32,7 +32,7 @@ func TestVoiceSlot_ZeroValueIsNotInVoice(t *testing.T) {
 	}
 
 	var r voiceRegistry
-	r.voiceMember.lock(1)()
+	r.voiceMember.Lock(1)()
 	if r.voiceGrace.get(1) != nil || r.voiceGrace.has(1, 0) || len(r.voiceGrace.snapshot()) != 0 {
 		t.Fatal("zero registry has a parked membership")
 	}

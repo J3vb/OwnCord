@@ -898,6 +898,9 @@ jobs:
       - name: Self-test the CI cost report
         run: node --test scripts/ci/ci-cost-report.test.mjs
 
+      - name: Self-test the nightly fuzz runner
+        run: node --test scripts/ci/fuzz-ci.test.mjs
+
       # RL-07. FINDINGS.md is not tracked, so it cannot drift -- but L-07 also
       # asks that the rendering be reproducible and that CI reject a generation
       # failure. Rendering twice and comparing tests both: the render must

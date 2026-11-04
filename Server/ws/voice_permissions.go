@@ -15,13 +15,13 @@ var errVoiceMediaPending = errors.New("voice media update pending")
 // The channel and join token identify the session that requested this work;
 // a newer membership is never followed by an older permission update.
 func (h *Hub) syncVoiceParticipantPermissions(ctx context.Context, userID, channelID int64, joinToken string) error {
-	unlock := h.voiceHub.mod.lock(userID)
+	unlock := h.voiceHub.mod.Lock(userID)
 	defer unlock()
 	return h.updateVoiceParticipantPermissions(ctx, userID, channelID, joinToken)
 }
 
 func (h *Hub) trySyncVoiceParticipantPermissions(ctx context.Context, userID, channelID int64, joinToken string) error {
-	unlock, acquired := h.voiceHub.mod.tryLock(userID)
+	unlock, acquired := h.voiceHub.mod.TryLock(userID)
 	if !acquired {
 		return nil
 	}

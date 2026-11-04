@@ -66,9 +66,15 @@ impl FrontendReady {
 
 /// Called by the frontend once its UI is up.
 #[tauri::command]
-pub fn frontend_ready(state: tauri::State<'_, FrontendReady>) {
+pub fn frontend_ready(app: tauri::AppHandle, state: tauri::State<'_, FrontendReady>) {
     if let Some(elapsed) = state.mark_ready() {
         log::info!("[startup] frontend ready after {} ms", elapsed.as_millis());
+        // The page loaded on the chosen graphics card: the crash guard's
+        // marker is no longer needed.
+        #[cfg(desktop)]
+        crate::gpu_adapter::clear_pending(&app);
+        #[cfg(not(desktop))]
+        let _ = app;
     }
 }
 

@@ -58,6 +58,7 @@ const MOVED_NOT_MUTATED = [
   "src/features/settings/pttControls.ts",
   "src/features/settings/settingsSearch.ts",
   "src/features/settings/voice-audio/voiceDevicesPreview.ts",
+  "src/features/settings/voice-audio/voiceGpuAdapter.ts",
   "src/features/settings/voice-audio/voiceMeterToggles.ts",
   "src/features/settings/voice-audio/voiceMicControls.ts",
   "src/features/settings/voice-audio/voiceMicTest.ts",

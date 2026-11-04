@@ -30,6 +30,10 @@ export const messagingText = defineCatalog("messaging", {
     one: "Scroll to bottom, {shown} new message",
     other: "Scroll to bottom, {shown} new messages",
   },
+  scrollToBottomMentions: {
+    one: "Scroll to bottom, {total} new, {shown} mentions you",
+    other: "Scroll to bottom, {total} new, {shown} mention you",
+  },
 
   "reply.replyingTo": "Replying to {username}",
   "reply.pingOn": "@ ON",

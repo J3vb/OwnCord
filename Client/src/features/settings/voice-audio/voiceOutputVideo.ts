@@ -22,6 +22,7 @@ import {
 } from "../../voice/videoCodec";
 import { settingsText as t } from "../../../i18n/settings";
 import { micTestVolume } from "./voiceTabShared";
+import { mountGpuAdapterRow } from "./voiceGpuAdapter";
 import type { VoiceTabScope } from "./voiceTabScope";
 
 export function mountOutputAndVideo(sc: VoiceTabScope): void {
@@ -355,4 +356,8 @@ export function mountOutputAndVideo(sc: VoiceTabScope): void {
   } else if (!sc.android) {
     sc.cameraCard.append(...sc.codecGroup(true));
   }
+
+  // WebView2 picks its graphics card at start. The row mounts on the
+  // Windows desktop app only.
+  mountGpuAdapterRow(sc.cameraCard, sc.signal);
 }

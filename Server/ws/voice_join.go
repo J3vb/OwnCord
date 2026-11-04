@@ -127,8 +127,8 @@ func (h *Hub) voiceJoinPrecheck(ctx context.Context, c *Client, payload json.Raw
 	}
 	_ = json.Unmarshal(payload, &intent) // parseCallChannelID already accepted it; a non-bool reads as false
 	if intent.UserInitiated {
-		h.voiceHub.rejoinBlocks.clear(c.userID)
-	} else if h.voiceHub.rejoinBlocks.blocked(c.userID, channelID) {
+		h.voiceHub.rejoinBlocks.Clear(c.userID)
+	} else if h.voiceHub.rejoinBlocks.Blocked(c.userID, channelID) {
 		c.sendMsg(buildErrorMsgWithID(ErrCodeForbidden, voiceRejoinRefusal, reqID))
 		return 0, nil, 0, false
 	}

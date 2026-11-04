@@ -10,6 +10,10 @@ import { makeChannel } from "../helpers/channelFactory";
 import { makeDm } from "../helpers/dmHarness";
 import { hasWaved, markWaved } from "@components/message-list/welcomeRows";
 import {
+  rememberReadingPosition,
+  takeReadingPosition,
+} from "@components/message-list/readingPositions";
+import {
   claimForwardRequest,
   isForwardRequest,
 } from "../../src/features/messaging/forwardRequests";
@@ -195,6 +199,11 @@ const PROBES: readonly Probe[] = [
     name: "welcomeRows:waved",
     mutate: () => markWaved(77),
     isInitial: () => !hasWaved(77),
+  },
+  {
+    name: "readingPositions:byChannel",
+    mutate: () => rememberReadingPosition(77, { messageId: 5, offset: 12 }),
+    isInitial: () => takeReadingPosition(77) === null,
   },
   {
     name: "voice:store",

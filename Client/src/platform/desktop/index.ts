@@ -39,6 +39,7 @@ import { updater } from "./updater";
 import { urlOpener } from "./urlOpener";
 import { windowControl } from "./window";
 import { windowPrefs } from "./windowPrefs";
+import { gpuAdapter } from "./gpuAdapter";
 import type { Platform } from "../contracts";
 
 export const desktop: Platform = {
@@ -75,4 +76,5 @@ export const desktop: Platform = {
   urlOpener,
   window: windowControl,
   windowPrefs,
+  gpuAdapter,
 };

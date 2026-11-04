@@ -92,6 +92,7 @@ export function mountComposer(st: ChannelState, cc: ChannelApi, ms: MountScope):
       }
     },
     onDraftChange: cc.scheduleDraftSave,
+    onReplyTargetChange: (messageId) => st.messageList?.setReplyTarget(messageId),
     onCreatePoll: () => {
       import("../../../components/PollComposer").then(
         ({ openPollComposer }) => {
