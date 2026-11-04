@@ -47,12 +47,12 @@ func readProcessAt(p linuxPaths, pid int) (ProcessReading, bool) {
 // 14, 15 and 22 of /proc/<pid>/stat). comm, field 2, may hold spaces and
 // parentheses, so fields are counted from after the last ')'.
 func parsePidStat(text string) (cpuTicks, start uint64, ok bool) {
-	i := strings.LastIndexByte(text, ')')
-	if i < 0 {
+	_, rest, found := strings.CutLast(text, ")")
+	if !found {
 		return 0, 0, false
 	}
 	// f[0] is field 3 (state), so field n is f[n-3].
-	f := strings.Fields(text[i+1:])
+	f := strings.Fields(rest)
 	if len(f) < 20 {
 		return 0, 0, false
 	}
