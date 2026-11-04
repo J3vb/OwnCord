@@ -229,6 +229,9 @@ export const shards = {
     "src/lib/diagnostics/eventSink.ts",
     "src/lib/diagnostics/identifiers.ts",
     "src/lib/diagnostics/appEvents.ts",
+    "src/lib/diagnostics/redact.ts",
+    "src/lib/diagnostics/lastExit.ts",
+    "src/lib/diagnostics/sha256.ts",
   ],
   "lib-rest-2": [
     "src/lib/presence/autoIdle.ts",

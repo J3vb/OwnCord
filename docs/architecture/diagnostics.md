@@ -61,7 +61,7 @@ loaded lazily from the button); there is no Rust command behind it.
 
 | File                       | Contents                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `README.txt`               | what the bundle holds and the verbatim-logs warning below                                                                                                                                                                                                                                                                                                                                                                      |
+| `README.txt`               | what the bundle holds and the redaction note below                                                                                                                                                                                                                                                                                                                                                                             |
 | `app.json`                 | client version, export time, OS (`navigator.platform`) and webview (`navigator.userAgent`); `serverVersion` is always null, since the export makes no server call                                                                                                                                                                                                                                                              |
 | `settings.json`            | an **allowlist** of `owncord:settings:` keys (display, accessibility, notification, voice) and the listed fields of each saved server profile (name, host, username, sign-in options, last connection)                                                                                                                                                                                                                         |
 | `voice-diagnostics.json`   | the voice session state the Diagnostics & logs tab shows, including the join timeline (`voiceJoin`): the per-attempt stage, URL kind, retries, phase and milestone timings, the self-test's per-stage result, and the receive-side decrypt-failure count (SRE-M2)                                                                                                                                                              |
@@ -117,12 +117,19 @@ OS keychain, which holds saved passwords and session tokens, is never read.
 kit secret, recovery code and TOTP secret in storage and in the profiles, and
 proves none reaches the zip.
 
-The diagnostic event log that will join this bundle, its event codes and its
-privacy rules are specified in [client-diagnostics.md](client-diagnostics.md).
+Since format 2 the bundle also carries `manifest.json` (each file's size,
+SHA-256, data classes and values removed, and a report id), `redactions.json`,
+`last-exit.json` (the newest crash or exit line from the native log, read
+back) and the diagnostic event log files under `logs/`. The event log's codes
+and privacy rules, the file list and the redaction rules are specified in
+[client-diagnostics.md](client-diagnostics.md#support-bundle).
 
-**Log lines are exported verbatim.** The client logger does not redact, so the
-bundle does not claim to: the Diagnostics & logs tab and `README.txt` both say the log files
-are unredacted and should be read before the bundle is shared.
+**Log lines are redacted by shape.** The client logger does not redact, so the
+bundle does: every file made from the app's data passes through
+`Client/src/lib/diagnostics/redact.ts` (tokens, passwords, keys, cookies,
+recovery secrets, URLs cut to the host, email and IP addresses, home folders).
+Text with no recognisable shape can still be there, so the Diagnostics & logs
+tab and `README.txt` both say to read the bundle before it is shared.
 
 ## Egress inventory
 

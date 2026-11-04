@@ -106,6 +106,44 @@ browser client keeps the log in memory only, and its bundle gets
 A setting, **Keep a diagnostic event log** (on by default), clears and stops
 it.
 
+## Support bundle
+
+The support bundle (Settings → Diagnostics & logs → Export Support Bundle) is
+the only way the event log and the native crash and exit lines leave the
+device: the user saves the zip, nothing is uploaded. Built by
+`Client/src/lib/supportBundle.ts`, format 2:
+
+| File                                       | What it holds                                                                                                                                                                                                    |
+| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `manifest.json`                            | Format, a random report id, app version, time and the size cap; per file its byte size, SHA-256, data classes ([data-lifecycle.md](data-lifecycle.md)), values removed and bytes trimmed; the files left out     |
+| `redactions.json`                          | Values removed per file and rule                                                                                                                                                                                 |
+| `last-exit.json`                           | How the newest earlier run ended (`crash`, `exit` or `normal`, with `kind`, `code` and `module` as in `native.crash` and `native.exit`), read from the native log lines; plus the newest webview process failure |
+| `logs/events-*.jsonl`                      | The event log files (desktop and Android), or `events-memory.jsonl` (browser)                                                                                                                                    |
+| `logs/*.jsonl`, `logs/owncord-client*.log` | The client and native logs                                                                                                                                                                                       |
+
+**Redaction.** Every file made from the app's data goes through
+`Client/src/lib/diagnostics/redact.ts` before it is zipped; only the manifest
+and the redaction report, which the bundle writes itself, skip it. The rules
+look for shapes, each also in its JSON-escaped and URL-encoded forms and
+across a wrapped line: a value whose name says it is secret (`token`,
+`password`, `secret`, `api_key`, `cookie`, `invite`, …), bearer and JWT tokens,
+`Authorization` and `Cookie` headers (to the end of the line or string),
+recovery kit secrets and recovery codes, hex strings of 48 characters or more
+(a session token is 64), URLs (cut to scheme and host; the app's own asset
+URLs keep their path for stack traces), email addresses, IPv4 and IPv6
+addresses (loopback kept), and home folders (written as `~`). Text with no
+shape, such as a typed message, cannot be found this way: keeping it out of
+the logs stays the logger's and the event log's job, and the README tells the
+user to read the bundle before sharing it. `redact.test.ts` holds the corpus
+of fake secrets; `support-bundle.test.ts` plants shaped values in every source
+and checks that no file carries one.
+
+**Size.** The bundle stays under 4 MB. Past it, the largest group of logs
+(client logs, event files, native logs) gives way first, from the start of
+its oldest file and at a line boundary, so the newest lines of every group,
+where the incident is, stay whole. A file cut to nothing is listed under
+`omitted` in the manifest.
+
 ## Camera stall threshold
 
 The camera counts as **stalled** when `framesSent` stays flat for **2 s** or
