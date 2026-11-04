@@ -93,7 +93,7 @@ func (h *Hub) drainFocusOnce(ctx context.Context, c *Client) bool {
 	}
 	c.mu.Unlock()
 
-	d := h.focusDeps
+	d := h.seams.focusDeps
 	if d.ChannelSvc == nil {
 		c.mu.Lock()
 		c.pendingFocusChID = 0

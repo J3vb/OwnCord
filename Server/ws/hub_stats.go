@@ -350,7 +350,7 @@ func (h *Hub) ConnRejectCount() uint64 {
 // EventPersisterStats returns the persister's lifetime counters; ok is false when
 // persistence is disabled.
 func (h *Hub) EventPersisterStats() (persisted, dropped, flushes, errs uint64, ok bool) {
-	p := h.eventPersister.Load()
+	p := h.events.eventPersister.Load()
 	if p == nil {
 		return 0, 0, 0, 0, false
 	}

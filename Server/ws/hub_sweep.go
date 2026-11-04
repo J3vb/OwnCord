@@ -149,7 +149,7 @@ func (h *Hub) sweepRevokedSessions(ctx context.Context) {
 	for i, c := range snapshot {
 		hashes[i] = c.tokenHash
 	}
-	verdicts, err := h.authn.SweepSessions(ctx, hashes)
+	verdicts, err := h.seams.authn.SweepSessions(ctx, hashes)
 	if err != nil {
 		// A failed batch lookup says nothing about any session; kicking everyone on a
 		// transient DB error would be a mass disconnect. Skip; the next tick retries.
@@ -196,7 +196,7 @@ func (h *Hub) DisconnectIfSessionRevoked(userID int64) {
 	if len(conns) == 0 {
 		return
 	}
-	verdicts, err := h.authn.SweepSessions(context.Background(), hashes)
+	verdicts, err := h.seams.authn.SweepSessions(context.Background(), hashes)
 	if err != nil {
 		slog.Warn("session sweep: batch session lookup failed", "user_id", userID, "err", err)
 		return

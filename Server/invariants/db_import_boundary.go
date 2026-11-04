@@ -155,7 +155,7 @@ var DBImportAllow = map[string]DBImportEntry{
 	// ids is sequenced after the tombstones and the delete
 	// no longer holds up live delivery.
 	// Routing the delete through the EventStore seam would not be a pure
-	// refactor: h.eventStore is set only when event persistence is enabled,
+	// refactor: h.events.eventStore is set only when event persistence is enabled,
 	// while h.db is set whenever a database exists, so a purge gated on the
 	// seam would skip rows a previous enabled boot persisted — an erasure
 	// regression. The two calls stay direct and are pinned here instead, so

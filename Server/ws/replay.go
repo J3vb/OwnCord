@@ -221,7 +221,7 @@ func (h *Hub) reconnectSelectReplay(
 	}
 	h.noteRingMiss(lastSeq)
 	// Try cold-tier replay from the EventStore before forcing a full ready.
-	if esp := h.eventStore.Load(); esp != nil {
+	if esp := h.events.eventStore.Load(); esp != nil {
 		es := *esp
 		channelIDs := make([]int64, 0, len(allowedChannelIDs))
 		for cid := range allowedChannelIDs {
@@ -486,7 +486,7 @@ func (h *Hub) liveVoiceEventsSince(ctx context.Context, afterSeq uint64, chID in
 	return liveVoiceEventsSinceCore(
 		func() [][]byte { return h.ReplayBuffer().EventsSinceFiltered(afterSeq, only) },
 		func() [][]byte {
-			esp := h.eventStore.Load()
+			esp := h.events.eventStore.Load()
 			if esp == nil {
 				return nil
 			}
@@ -537,7 +537,7 @@ func (h *Hub) liveVoiceEventsSinceForUser(ctx context.Context, afterSeq uint64, 
 	return liveVoiceEventsSinceCore(
 		func() [][]byte { return h.ReplayBuffer().EventsSince(afterSeq) },
 		func() [][]byte {
-			esp := h.eventStore.Load()
+			esp := h.events.eventStore.Load()
 			if esp == nil {
 				return nil
 			}

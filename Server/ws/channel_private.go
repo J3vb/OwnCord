@@ -18,10 +18,10 @@ import (
 
 // privacySnapshot reads the snapshot once for a ready build or a fan-out loop.
 func (h *Hub) privacySnapshot(ctx context.Context) service.ChannelPrivacySnapshot {
-	if h.privacy == nil {
+	if h.seams.privacy == nil {
 		return service.ChannelPrivacySnapshot{}
 	}
-	snap, err := h.privacy.Snapshot(ctx)
+	snap, err := h.seams.privacy.Snapshot(ctx)
 	if err != nil {
 		slog.Debug("hub: channel privacy snapshot unavailable, sending private=false", "err", err)
 		return service.ChannelPrivacySnapshot{}
@@ -33,10 +33,10 @@ func (h *Hub) privacySnapshot(ctx context.Context) service.ChannelPrivacySnapsho
 // reads. A DM is never private. A read racing an override edit sees the old or
 // the new row; the refresh frame that edit triggers corrects it.
 func (h *Hub) channelIsPrivate(ctx context.Context, channelID int64, chanType string) bool {
-	if h.privacy == nil || chanType == "dm" {
+	if h.seams.privacy == nil || chanType == "dm" {
 		return false
 	}
-	private, err := h.privacy.ChannelIsPrivate(ctx, channelID)
+	private, err := h.seams.privacy.ChannelIsPrivate(ctx, channelID)
 	if err != nil {
 		slog.Debug("hub: channelIsPrivate read failed, sending private=false", "channel_id", channelID, "err", err)
 		return false
