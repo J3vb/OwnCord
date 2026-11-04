@@ -88,6 +88,7 @@ function failedText(state: Extract<UpdateInstallState, { status: "failed" }>): s
   if (state.reason === "not-authorized") return connectText("update.notAuthorized");
   if (state.reason === "android-confirm") return connectText("update.androidConfirm");
   if (state.reason === "android-permission") return connectText("update.androidPermission");
+  if (state.reason === "version-changed") return connectText("update.versionChanged");
   return connectText("update.failed");
 }
 
@@ -244,16 +245,13 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
   }
 
   function onInstallState(state: UpdateInstallState): void {
-    if (state.status !== "failed" || state.reason !== "version-changed") {
-      renderInstallState(state);
-      return;
+    renderInstallState(state);
+    // Nothing was downloaded. The banner says so, with Retry and Dismiss, and
+    // a fresh check replaces it with the version the server offers now (the
+    // About tab follows the same offer). A failed check leaves it actionable.
+    if (state.status === "failed" && state.reason === "version-changed") {
+      void checker.checkNow("manual");
     }
-    // Nothing was downloaded. Ask again so the banner (and the About tab)
-    // show the version the server offers now, with its notes. The banner
-    // stays until the answer replaces it, so a failed check strands nothing.
-    installState = state;
-    announce(connectText("update.versionChanged"));
-    void checker.checkNow("manual");
   }
 
   function renderInstallState(state: UpdateInstallState): void {

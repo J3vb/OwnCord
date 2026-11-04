@@ -252,6 +252,26 @@ describe("createUpdateNotifier download progress", () => {
     notifier.destroy?.();
   });
 
+  it("a version change whose recheck fails leaves Retry and Dismiss", async () => {
+    const notifier = await mountWithAvailableUpdate();
+    mockCheckForUpdate.mockResolvedValue({
+      available: false,
+      version: null,
+      body: null,
+      manual_upgrade: false,
+      failed: true,
+    });
+    onInstallState({ status: "downloading", progress: null });
+    onInstallState({ status: "failed", restartRequired: false, reason: "version-changed" });
+    onInstallState({ status: "idle" });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(bannerText()).toBe("A newer update was published. Checking for it now.");
+    expect(host.querySelector(".update-banner-install")?.textContent).toBe("Retry");
+    expect(host.querySelector(".update-banner-later")).not.toBeNull();
+    notifier.destroy?.();
+  });
+
   it("a version change since the banner checks again and shows the new version", async () => {
     const notifier = await mountWithAvailableUpdate();
     mockCheckForUpdate.mockResolvedValue({ available: true, version: "1.2.1", body: "" });
