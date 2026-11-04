@@ -491,6 +491,63 @@ details.disclose > summary {
 .account-security {
   margin-top: var(--space-6);
 }
+/* Two-factor enrolment: QR on white (scanners need dark on light), the key, the link. */
+.totp-setup-label {
+  color: var(--text-muted);
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+.totp-qr,
+.totp-key {
+  margin-bottom: 12px;
+}
+.totp-qr-code {
+  width: 180px;
+  max-width: 100%;
+  background: #fff;
+  border-radius: var(--radius-md);
+  line-height: 0;
+}
+.totp-qr-code svg {
+  width: 100%;
+  height: auto;
+}
+.totp-key-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.totp-key-value,
+.totp-link-value {
+  background: var(--bg-active);
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+  user-select: all;
+  overflow-wrap: anywhere;
+}
+.totp-key-value {
+  font-size: 14px;
+  letter-spacing: 0.05em;
+}
+.totp-key-row .ac-btn {
+  margin-left: 0;
+}
+.totp-link {
+  margin-bottom: 12px;
+}
+details.totp-link > summary {
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+.totp-link-value {
+  display: block;
+  margin-top: 8px;
+  font-size: 12px;
+}
 /* Section headings in a pane read at 4.5:1 (the generic h3 uses --text-faint). */
 .settings-content h3.setting-group-title,
 .settings-content h3.safety-heading {
