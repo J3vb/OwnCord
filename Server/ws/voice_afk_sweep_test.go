@@ -326,7 +326,7 @@ func TestSweepAFK_ParkedConnectionUntouched(t *testing.T) {
 	if r.rowChannel(a) != r.room {
 		t.Fatal("a parked membership's row was removed")
 	}
-	if got := r.hub.voiceReg.voiceGrace.snapshot()[a.userID]; got != r.room {
+	if got := r.hub.voiceHub.reg.voiceGrace.snapshot()[a.userID]; got != r.room {
 		t.Fatalf("parked entry = ch%d, want ch%d", got, r.room)
 	}
 	if stashed(c) {
@@ -511,7 +511,7 @@ func TestSweepAFK_SkipsMemberWithModerationInFlight(t *testing.T) {
 	// the goroutine that holds voiceMod would take voiceMember under it, which
 	// the lock order (and the deadlock build's rank check) forbids.
 	held := make(chan func())
-	go func() { held <- r.hub.voiceMod.lock(a.userID) }()
+	go func() { held <- r.hub.voiceHub.mod.lock(a.userID) }()
 	unlock := <-held
 	r.sweep()
 	unlock()

@@ -98,10 +98,10 @@ func TestFailedHandshake_TearsDownTransferredVoiceSession(t *testing.T) {
 	// parks the completed session for a redial, so the teardown below is the
 	// one the grace window's expiry runs.
 	h.unregisterFailedHandshake(ctx, newClient)
-	if !h.voiceReg.voiceGrace.has(userID, vcID) {
+	if !h.voiceHub.reg.voiceGrace.has(userID, vcID) {
 		t.Fatal("a failed handshake did not park the transferred session in the grace window")
 	}
-	h.leaveParkedVoiceTest(ctx, userID, h.voiceReg.voiceGrace.take(userID), voiceLeaveReasonGraceExpired)
+	h.leaveParkedVoiceTest(ctx, userID, h.voiceHub.reg.voiceGrace.take(userID), voiceLeaveReasonGraceExpired)
 
 	if after, err := database.GetVoiceState(ctx, userID); err != nil {
 		t.Fatalf("GetVoiceState after teardown: %v", err)

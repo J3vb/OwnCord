@@ -184,9 +184,9 @@ func TestSweepStaleVoiceStates_GhostRemovalReelectsKeyHolder(t *testing.T) {
 	// Simulate the stale-holder precondition from the finding: the ghost is
 	// still recorded as key holder (e.g. from before it dropped out of
 	// h.clients), and the survivor has not yet been elected.
-	h.keyHolderMu.Lock()
-	h.voiceKeyHolders[chID] = ghostUID
-	h.keyHolderMu.Unlock()
+	h.voiceHub.keyHolderMu.Lock()
+	h.voiceHub.keyHolders[chID] = ghostUID
+	h.voiceHub.keyHolderMu.Unlock()
 
 	h.sweepStaleVoiceStates(context.Background())
 

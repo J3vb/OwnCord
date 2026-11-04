@@ -48,19 +48,19 @@ func (h *Hub) LiveKitHealthProbe(ctx context.Context) (bool, error) {
 // externally managed (no companion), which callers must read as "don't
 // check" rather than "down". Reading it probes nothing.
 func (h *Hub) LiveKitProcessStatus() LiveKitProcessStatus {
-	if h.lkProcess == nil {
+	if h.voiceHub.lkProcess == nil {
 		return LiveKitProcessStatus{}
 	}
-	return h.lkProcess.Status()
+	return h.voiceHub.lkProcess.Status()
 }
 
 // LiveKitPID returns the supervised companion's process id; ok is false when
 // LiveKit is not managed or no process is running right now.
 func (h *Hub) LiveKitPID() (int, bool) {
-	if h.lkProcess == nil {
+	if h.voiceHub.lkProcess == nil {
 		return 0, false
 	}
-	return h.lkProcess.PID()
+	return h.voiceHub.lkProcess.PID()
 }
 
 // LiveKitRoomUsage returns the open room and participant counts from LiveKit's
@@ -74,7 +74,7 @@ func (h *Hub) LiveKitRoomUsage(ctx context.Context) (rooms, participants int, er
 
 // LiveKitManaged reports whether OwnCord supervises the companion process.
 func (h *Hub) LiveKitManaged() bool {
-	return h.lkProcess != nil
+	return h.voiceHub.lkProcess != nil
 }
 
 // The LiveKit process manager arrives via HubOptions.LiveKitProcess;

@@ -30,14 +30,14 @@ func drainChan(ch chan []byte, timeout time.Duration) [][]byte {
 // and the locks needed for delivery.
 func newEmitTestHub() *Hub {
 	return &Hub{
-		clients:         make(map[int64][]*Client),
-		broadcast:       make(chan broadcastMsg, 64),
-		clientEvents:    make(chan clientEvent, 32),
-		stop:            make(chan struct{}),
-		pubsub:          NewPubSub(),
-		replayBuf:       NewEventRingBuffer(100),
-		voiceKeyHolders: make(map[int64]int64),
-		limiter:         auth.NewRateLimiter(),
+		clients:      make(map[int64][]*Client),
+		broadcast:    make(chan broadcastMsg, 64),
+		clientEvents: make(chan clientEvent, 32),
+		stop:         make(chan struct{}),
+		pubsub:       NewPubSub(),
+		replayBuf:    NewEventRingBuffer(100),
+		voiceHub:     hubVoice{keyHolders: make(map[int64]int64)},
+		limiter:      auth.NewRateLimiter(),
 	}
 }
 

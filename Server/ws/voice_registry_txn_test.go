@@ -99,7 +99,7 @@ func TestVoiceRegistry_WebhookLeftRacingSameChannelRejoin(t *testing.T) {
 		defer close(done)
 		f.h.HandleWebhookParticipantLeftForTest(f.uid, f.chID, oldToken)
 	}()
-	waitFor(t, "webhook queued on the member lock", func() bool { return f.h.voiceReg.voiceMember.refsForTest(f.uid) >= 2 })
+	waitFor(t, "webhook queued on the member lock", func() bool { return f.h.voiceHub.reg.voiceMember.refsForTest(f.uid) >= 2 })
 
 	txn.clear(f.c)
 	if _, err := txn.deleteRow(ctx, f.chID, oldToken); err != nil {
@@ -173,8 +173,8 @@ func TestVoiceRegistry_DeleteRowErrorDropsGraceKeepsRow(t *testing.T) {
 	token := f.join(t)
 
 	// Park the membership as a dropped socket would.
-	f.h.voiceReg.voiceGrace.put(f.uid, &voiceGraceEntry{client: f.c, snap: slotSnap{chID: f.chID, joinToken: token}}, func() {})
-	t.Cleanup(func() { f.h.voiceReg.voiceGrace.take(f.uid) })
+	f.h.voiceHub.reg.voiceGrace.put(f.uid, &voiceGraceEntry{client: f.c, snap: slotSnap{chID: f.chID, joinToken: token}}, func() {})
+	t.Cleanup(func() { f.h.voiceHub.reg.voiceGrace.take(f.uid) })
 
 	f.h.voice = failingLeaveStore{VoiceStore: real, err: errBoom}
 	txn := f.h.begin(f.uid)
@@ -187,7 +187,7 @@ func TestVoiceRegistry_DeleteRowErrorDropsGraceKeepsRow(t *testing.T) {
 	if deleted {
 		t.Error("deleteRow reported a delete that failed")
 	}
-	if f.h.voiceReg.voiceGrace.get(f.uid) != nil {
+	if f.h.voiceHub.reg.voiceGrace.get(f.uid) != nil {
 		t.Error("a failed delete kept the grace entry")
 	}
 	row, rowErr := real.State(context.Background(), f.uid)

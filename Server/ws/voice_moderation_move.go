@@ -59,7 +59,7 @@ func (h *Hub) EvictForModeratorMove(ctx context.Context, userID, channelID int64
 		if !h.leaveParkedVoice(ctx, txn, e, voiceLeaveReasonModerator) {
 			return false
 		}
-		h.voiceReg.voiceGrace.noteParkedModMove(userID, e.client.tokenHash,
+		h.voiceHub.reg.voiceGrace.noteParkedModMove(userID, e.client.tokenHash,
 			modFlagStash{muted: serverMuted, deafened: serverDeafened, mutedBy: serverMutedBy})
 		return true
 	}

@@ -38,12 +38,12 @@ func validateBase64Loose(s string) error {
 
 // updateKeyHolder records the connected client with the lowest userID in channelID
 // as key holder, deleting the entry if none remain. Must NOT be called while h.mu
-// or h.keyHolderMu is held. Lock order: keyHolderMu (write) then h.mu (read);
+// or h.voiceHub.keyHolderMu is held. Lock order: keyHolderMu (write) then h.mu (read);
 // holding keyHolderMu across the scan and write stops two concurrent calls
 // overwriting each other with a stale result.
 func (h *Hub) updateKeyHolder(channelID int64) {
-	h.keyHolderMu.Lock()
-	defer h.keyHolderMu.Unlock()
+	h.voiceHub.keyHolderMu.Lock()
+	defer h.voiceHub.keyHolderMu.Unlock()
 
 	h.mu.RLock()
 	var minUserID int64
@@ -59,9 +59,9 @@ func (h *Hub) updateKeyHolder(channelID int64) {
 	h.mu.RUnlock()
 
 	if found {
-		h.voiceKeyHolders[channelID] = minUserID
+		h.voiceHub.keyHolders[channelID] = minUserID
 	} else {
-		delete(h.voiceKeyHolders, channelID)
+		delete(h.voiceHub.keyHolders, channelID)
 	}
 }
 
@@ -69,9 +69,9 @@ func (h *Hub) updateKeyHolder(channelID int64) {
 // (KeyHolderChecker). Offer delivery checks the holder again under the same lock
 // as the membership check; see sendToUserIfInVoiceChannel.
 func (h *Hub) IsVoiceKeyHolder(channelID, userID int64) bool {
-	h.keyHolderMu.RLock()
-	kh, ok := h.voiceKeyHolders[channelID]
-	h.keyHolderMu.RUnlock()
+	h.voiceHub.keyHolderMu.RLock()
+	kh, ok := h.voiceHub.keyHolders[channelID]
+	h.voiceHub.keyHolderMu.RUnlock()
 	return ok && kh == userID
 }
 
@@ -294,9 +294,9 @@ func (h *Hub) sendToUserIfInVoiceChannel(voiceChannelID, senderUserID, targetUse
 // false only when the sender no longer holds the key, so that drop is logged after
 // the locks are released.
 func (h *Hub) relayKeyOffer(voiceChannelID, senderUserID, targetUserID int64, msg []byte) bool {
-	h.keyHolderMu.RLock()
-	defer h.keyHolderMu.RUnlock()
-	if kh, ok := h.voiceKeyHolders[voiceChannelID]; !ok || kh != senderUserID {
+	h.voiceHub.keyHolderMu.RLock()
+	defer h.voiceHub.keyHolderMu.RUnlock()
+	if kh, ok := h.voiceHub.keyHolders[voiceChannelID]; !ok || kh != senderUserID {
 		return false
 	}
 

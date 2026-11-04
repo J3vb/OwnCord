@@ -199,7 +199,7 @@ func buildVoice(cfg *config.Config) (*ws.LiveKitClient, *ws.LiveKitProcess, bool
 	// Optionally build a companion LiveKit process, from a configured binary
 	// or a checksum-verified auto-download (in the background inside Start).
 	// The hub keeps the process even if Start() later fails: its only consumer
-	// is the voice_join guard (`h.lkProcess != nil && !h.lkProcess.IsRunning()`),
+	// is the voice_join guard (`h.voiceHub.lkProcess != nil && !h.voiceHub.lkProcess.IsRunning()`),
 	// which reads a nil process as "externally managed, don't check", so a
 	// failed launch must fail joins closed rather than wave them through with
 	// no SFU running.

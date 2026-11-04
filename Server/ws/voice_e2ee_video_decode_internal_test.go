@@ -153,8 +153,8 @@ func TestVoiceGrace_CarriesVideoDecode(t *testing.T) {
 	c1.setE2EEAnnounce(e2eeAnnounce{key: "user-pub", sig: "user-sig", videoDecode: want})
 
 	h.leaveVoiceOnDisconnect(t.Context(), c1, voiceLeaveReasonDisconnect)
-	t.Cleanup(func() { h.voiceReg.voiceGrace.take(1) })
-	if h.voiceReg.voiceGrace.get(1) == nil {
+	t.Cleanup(func() { h.voiceHub.reg.voiceGrace.take(1) })
+	if h.voiceHub.reg.voiceGrace.get(1) == nil {
 		t.Fatal("membership was not parked in the grace window")
 	}
 	if got := c1.getE2EEAnnounce(); got.key != "" || got.videoDecode != nil {

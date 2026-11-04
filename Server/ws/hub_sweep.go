@@ -243,7 +243,7 @@ func (h *Hub) sweepStaleVoiceStates(ctx context.Context) {
 	// classified it stale, but it is deliberately held for a resuming socket. Skip
 	// the parked (user, channel) pairs; the grace timer owns their teardown. Snapshot
 	// first so no grace lock is held while deleting rows.
-	parked := h.voiceReg.voiceGrace.snapshot()
+	parked := h.voiceHub.reg.voiceGrace.snapshot()
 
 	for _, s := range stale {
 		if ctx.Err() != nil {
@@ -283,7 +283,7 @@ func (h *Hub) sweepStaleVoiceEntry(ctx context.Context, userID, channelID int64,
 	}
 	// A socket that dropped after the snapshot may have parked this membership in the
 	// grace window; the grace timer owns it now.
-	if h.voiceReg.voiceGrace.has(userID, channelID) {
+	if h.voiceHub.reg.voiceGrace.has(userID, channelID) {
 		return false
 	}
 
@@ -419,7 +419,7 @@ func (h *Hub) CleanupVoiceForChannel(channelID int64) {
 
 	// Re-elect the key holder now that the room is torn down, as every removal path
 	// does. All client voice states for the channel were cleared, so this deletes the
-	// voiceKeyHolders entry (otherwise it lived for the process lifetime). No locks
+	// voiceHub.keyHolders entry (otherwise it lived for the process lifetime). No locks
 	// are held, as updateKeyHolder requires.
 	h.updateKeyHolder(channelID)
 }
