@@ -99,11 +99,11 @@ func (h *Hub) channelReadAudienceFor(ctx context.Context, channelID int64, ch *d
 	// An unresolvable user is left out, and the result is then not memoised so the
 	// next frame asks again.
 	audience := make([]int64, 0, len(userIDs))
-	failed := false
+	var unresolved []int64
 	for _, uid := range userIDs {
 		sub, err := h.subjectFor(ctx, uid, channelID)
 		if err != nil {
-			failed = true
+			unresolved = append(unresolved, uid)
 			continue
 		}
 		sub.Channel = ref
@@ -111,7 +111,15 @@ func (h *Hub) channelReadAudienceFor(ctx context.Context, channelID int64, ch *d
 			audience = append(audience, uid)
 		}
 	}
-	if memo && !failed {
+	if len(unresolved) > 0 {
+		// A user left out for a failed lookup would never learn of the frame (it is
+		// recipient-addressed, so replay skips it too): mark them lost so their
+		// sockets resync at the next dispatch.
+		h.noteRecipientsLoss(unresolved)
+		slog.Warn("hub: channelReadAudience could not resolve users, marking them for resync",
+			"channel_id", channelID, "users", len(unresolved))
+	}
+	if memo && len(unresolved) == 0 {
 		h.storeIfUnchanged(&h.audience.channels, key, ref, permGen, snapGen, now, audience)
 	}
 	return audience

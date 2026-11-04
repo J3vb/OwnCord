@@ -443,6 +443,7 @@ var supportEventCodes = map[string]string{ //nolint:gosec // G101: false positiv
 	"ws: buildReady ListNSFWAcknowledgedChannelIDs failed, reporting unacknowledged":               "ws_buildready_listnsfwacknowledgedchannelids_failed",
 	"ws: channelNSFWFilter GetChannel failed, denying all recipients":                              "ws_channelnsfwfilter_getchannel_failed",
 	"ws: channelNSFWFilter ListNSFWAcknowledgedUserIDs failed, denying":                            "ws_channelnsfwfilter_listnsfwacknowledgeduserids_failed",
+	"hub: channelReadAudience could not resolve users, marking them for resync":                    "hub_channelreadaudience_unresolved_users_marked",
 	"ws: channelReadAudience GetChannel failed, denying":                                           "ws_channelreadaudience_getchannel_failed_denying",
 	"ws: channelReadAudience GetDMParticipantIDs failed, denying":                                  "ws_channelreadaudience_getdmparticipantids_failed",
 	"ws: client high+normal buffers full, closing connection":                                      "ws_client_high_normal_buffers_full",

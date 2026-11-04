@@ -65,6 +65,25 @@ func (h *Hub) noteDropRoute(bm broadcastMsg) {
 	q.routesPending.Store(true)
 }
 
+// noteRecipientsLoss keeps a loss route for users a producer could not resolve
+// (channelReadAudienceFor: a permission lookup failed, so the user was left out
+// of a frame addressed by recipients). Same list, cap and overflow handling as
+// noteDropRoute; the next dispatch marks them under seqMu.
+func (h *Hub) noteRecipientsLoss(userIDs []int64) {
+	if len(userIDs) == 0 {
+		return
+	}
+	q := &h.stats.queueDrops
+	q.mu.Lock()
+	if len(q.routes) < queueDropRouteCap {
+		q.routes = append(q.routes, lossRoute{recipients: userIDs})
+	} else {
+		q.routesOverflow = true
+	}
+	q.mu.Unlock()
+	q.routesPending.Store(true)
+}
+
 // markDroppedRoutes marks the audiences noteDropRoute kept. Dispatch
 // goroutine, under seqMu. A full ready covers a loss from any position, so
 // marking need not wait for the drop to settle into the watermark.
