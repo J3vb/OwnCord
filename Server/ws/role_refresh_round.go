@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/permissions"
@@ -20,8 +21,11 @@ var (
 	roleRefreshChunk = 64
 	// roleRefreshDrainWait is how long the worker waits for a client's queue to fall to
 	// its threshold (room for two chunks before the first, a quarter of capacity
-	// between chunks) before kicking it.
-	roleRefreshDrainWait = 500 * time.Millisecond
+	// between chunks) before giving up on it and sending it to a resync.
+	roleRefreshDrainWait = 2 * time.Second
+	// roleRefreshSendConcurrency bounds how many users' sends (and so drain waits) run
+	// at once in a round.
+	roleRefreshSendConcurrency = 16
 	// memberUpdateBatch is how many members one member_update_batch frame carries;
 	// after each frame the worker waits for dispatch, then pauses memberUpdatePause.
 	memberUpdateBatch = 64
@@ -184,15 +188,25 @@ func (h *Hub) refreshUsersWith(ctx context.Context, ids []int64, done func(int64
 		}
 		sends = append(sends, userSend{uid: uid, frames: frames})
 	}
-	for _, us := range sends {
+	// A slow client costs a drain wait. Users go in groups so a round over many slow
+	// clients takes about one wait per group, not one per client; each group is joined
+	// before the next starts.
+	for start := 0; start < len(sends); start += roleRefreshSendConcurrency {
 		if ctx.Err() != nil {
 			return
 		}
-		if g := h.roleRefresh.sendGate.Load(); g != nil {
-			(*g)(us.uid)
+		group := sends[start:min(start+roleRefreshSendConcurrency, len(sends))]
+		var wg sync.WaitGroup
+		for _, us := range group {
+			h.goJoined(ctx, &wg, func(ctx context.Context) {
+				if g := h.roleRefresh.sendGate.Load(); g != nil {
+					(*g)(us.uid)
+				}
+				h.sendRoleRefreshFrames(ctx, us.uid, us.frames)
+				settle(us.uid)
+			})
 		}
-		h.sendRoleRefreshFrames(ctx, us.uid, us.frames)
-		settle(us.uid)
+		wg.Wait()
 	}
 }
 
@@ -345,11 +359,40 @@ func (h *Hub) roleRefreshVerdicts(ctx context.Context, uid int64, rc *roleChanne
 
 // sendRoleRefreshFrames queues frames in chunks to each of uid's live connections,
 // waiting between chunks for its queue to drain. A client that does not drain in
-// time is kicked (never BANNED) and converges on a full ready; the user's other
-// devices are unaffected.
+// time is not disconnected: it is marked to resync, which hands it a full ready
+// that carries the role state, and the rest of its frames are skipped. A dead
+// socket is the write deadline's to close. The user's other devices are unaffected.
 func (h *Hub) sendRoleRefreshFrames(ctx context.Context, uid int64, frames []roleFrame) {
-	for _, snap := range h.clientsOf(uid) {
-		h.sendRoleRefreshFramesTo(ctx, snap, frames)
+	snaps := h.clientsOf(uid)
+	if len(snaps) == 1 {
+		h.sendRoleRefreshFramesTo(ctx, snaps[0], frames)
+		return
+	}
+	// A user's devices drain independently, so their waits overlap.
+	var wg sync.WaitGroup
+	for _, snap := range snaps {
+		h.goJoined(ctx, &wg, func(ctx context.Context) {
+			h.sendRoleRefreshFramesTo(ctx, snap, frames)
+		})
+	}
+	wg.Wait()
+}
+
+// goJoined runs fn on the hub's background group and counts it in wg, which the
+// caller waits on. fn's context ends with ctx or with the group's shutdown. A
+// group that no longer admits work runs nothing.
+func (h *Hub) goJoined(ctx context.Context, wg *sync.WaitGroup, fn func(context.Context)) {
+	wg.Add(1)
+	admitted := h.lifecycle.background.Go(ctx, func(jobCtx context.Context) {
+		defer wg.Done()
+		runCtx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		stop := context.AfterFunc(jobCtx, cancel)
+		defer stop()
+		fn(runCtx)
+	})
+	if !admitted {
+		wg.Done()
 	}
 }
 
@@ -370,7 +413,8 @@ func (h *Hub) sendRoleRefreshFramesTo(ctx context.Context, snap *Client, frames 
 		}
 		if !waitSendDrain(ctx, live, limit) {
 			if ctx.Err() == nil {
-				h.kickClient(live)
+				slog.Info("hub: role refresh client did not drain, marked to resync", "user_id", live.userID)
+				h.markClientLoss(live)
 			}
 			return
 		}

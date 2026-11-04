@@ -54,6 +54,13 @@ type replayPurgeState struct {
 	batches  []tombstoneBatch
 	now      func() time.Time
 
+	// live is len(batches), kept so the sequencing path can ask whether any tombstone
+	// exists without taking seqMu. Written under seqMu with batches, read lock-free.
+	live atomic.Int64
+	// lockedParses counts frames parsed under seqMu because they could not be parsed
+	// before it (a window built under the lock, or a tombstone installed in between).
+	lockedParses atomic.Uint64
+
 	unfinishedUsers    map[int64]struct{}
 	unfinishedMessages map[int64]struct{}
 }
@@ -119,6 +126,7 @@ func (t *replayPurgeState) add(set *map[int64]uint64, seq uint64, ids ...int64) 
 		(*set)[id] = seq
 	}
 	t.batches = append(t.batches, tombstoneBatch{seq: seq, at: t.clock(), set: *set, ids: slices.Clone(ids)})
+	t.live.Add(1)
 }
 
 // expire pops every batch that is older than tombstoneMinAge and more than
@@ -139,6 +147,7 @@ func (t *replayPurgeState) expire(seq, horizon uint64) (expired int) {
 		}
 		t.batches[0] = tombstoneBatch{}
 		t.batches = t.batches[1:]
+		t.live.Add(-1)
 	}
 	if len(t.batches) == 0 {
 		t.batches = nil
@@ -167,19 +176,50 @@ func (h *Hub) expireReplayTombstones() {
 	}
 }
 
+// preParsedRefs is a frame's refs parsed before seqMu was taken.
+type preParsedRefs struct {
+	refs frameRefs
+	ok   bool
+}
+
+// parseRefsBeforeLock parses msg ahead of the sequencing lock when a tombstone
+// exists, so the lock is held for set lookups only. It returns nil when there is
+// nothing to check; dropsForTombstonesWith then parses under the lock if a
+// tombstone has appeared since. Runs without seqMu.
+func (h *Hub) parseRefsBeforeLock(msg []byte) *preParsedRefs {
+	if h.tombstones.live.Load() == 0 {
+		return nil
+	}
+	refs, ok := parseFrameRefs(msg)
+	return &preParsedRefs{refs: refs, ok: ok}
+}
+
 // dropsForTombstones reports whether msg names an erased user or a message a
 // retention sweep removed, and so must not be sequenced: a producer that read the
 // rows before the purge can still hand the hub a frame after it. The frame is parsed
 // once however many tombstones; with none it parses nothing. Caller holds seqMu.
 func (h *Hub) dropsForTombstones(msg []byte) bool {
+	return h.dropsForTombstonesWith(msg, nil)
+}
+
+// dropsForTombstonesWith is dropsForTombstones with the refs of msg, when the
+// caller parsed them before taking seqMu. Without them (nil) it parses here. The
+// emptiness is judged under the lock either way, so a tombstone installed after
+// the caller's check still drops the frame. Caller holds seqMu.
+func (h *Hub) dropsForTombstonesWith(msg []byte, pre *preParsedRefs) bool {
 	t := &h.tombstones
 	if len(t.users) == 0 && len(t.messages) == 0 {
 		return false
 	}
-	refs, ok := parseFrameRefs(msg)
-	if !ok {
+	if pre == nil {
+		t.lockedParses.Add(1)
+		refs, ok := parseFrameRefs(msg)
+		pre = &preParsedRefs{refs: refs, ok: ok}
+	}
+	if !pre.ok {
 		return false
 	}
+	refs := &pre.refs
 	if uid, hit := refs.userIn(t.users); hit {
 		slog.Info("hub: dropped a frame naming an erased user", "user_id", uid)
 		return true
