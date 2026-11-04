@@ -55,6 +55,10 @@ let sessionCleanup: (() => void) | null = null;
 let connectedOverlay: ConnectedOverlayControl | null = null;
 let lastConnectHost = "";
 let lastConnectToken = "";
+// Whether the session in flight is still signing in: dialing or behind the
+// connected overlay. False once `ready` arrives, or once the first dial ends
+// without auth_ok (an auth_error leaves the user on the form, still targeted).
+let signingIn = false;
 
 /**
  * How long the connected overlay waits for `ready` after auth_ok (restarted
@@ -100,6 +104,11 @@ export function sessionTarget(): { host: string; token: string } | null {
 /** Whether a session has been started and not yet torn down (post-auth wiring ran). */
 export function sessionInFlight(): boolean {
   return lastConnectHost !== "";
+}
+
+/** Whether a sign-in is dialing or waiting for `ready`, so the connect page is covered or busy. */
+export function signInPending(): boolean {
+  return lastConnectHost !== "" && signingIn;
 }
 
 /**
@@ -159,6 +168,7 @@ export function startSession(
   authStore.setState((prev) => ({ ...prev, token }));
   lastConnectHost = host;
   lastConnectToken = token;
+  signingIn = true;
   // Scope the last-channel store to this server before the dispatcher
   // wires, so the first `ready` (which restores it) reads the right key.
   // It has to be here, not MainPage: the first ready arrives before MainPage
@@ -345,6 +355,7 @@ export function startSession(
       // (a certificate re-dial after a mismatch).
       clearPreauthDeadline();
       unsubState();
+      if (owner.isCurrent()) signingIn = false;
     }
   });
   sessionUnsubs.push(unsubState);
@@ -358,6 +369,7 @@ export function startSession(
   // sidesteps the race instead of racing it.
   const unsubAuthOk = ws.on("auth_ok", (payload) => {
     unsubAuthOk();
+    signingIn = true;
     // Ensure exactly one overlay exists at a time.
     connectedOverlay?.destroy();
     connectedOverlay = createConnectedOverlay({
@@ -392,6 +404,7 @@ export function startSession(
       unsubReady();
       unsubReconnect();
       readyDeadline.clear();
+      signingIn = false;
       connectedOverlay?.markReady();
     });
     sessionUnsubs.push(unsubReady, unsubReconnect, readyDeadline.clear);

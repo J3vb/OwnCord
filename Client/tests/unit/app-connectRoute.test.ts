@@ -69,7 +69,7 @@ vi.mock("../../src/app/serverHealth", () => ({
 }));
 vi.mock("../../src/app/session", () => ({
   abandonInFlight: vi.fn(),
-  sessionInFlight: () => hoisted.inFlight,
+  signInPending: () => hoisted.inFlight,
   startSession: hoisted.startSession,
 }));
 

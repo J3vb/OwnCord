@@ -28,7 +28,7 @@ import { createAutoLogin } from "./autoLogin";
 import { createConnectProfiles } from "./connectProfiles";
 import { probeServerInfo, runHealthChecks, serverInfoFor, serverInfoProbing } from "./serverHealth";
 import { scheduleHealthChecks } from "./healthSchedule";
-import { abandonInFlight, sessionInFlight, startSession } from "./session";
+import { abandonInFlight, signInPending, startSession } from "./session";
 
 const log = createLogger("main");
 
@@ -333,7 +333,7 @@ export function renderConnect(
   scheduleHealthChecks(
     pageOwner.signal,
     () => runHealthChecks(connectPage, getProfileList(), pageOwner),
-    sessionInFlight,
+    signInPending,
   );
 
   pageOwner.addCleanup(unsubUpdateRequired);

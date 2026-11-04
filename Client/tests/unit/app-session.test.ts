@@ -92,6 +92,7 @@ import {
   READY_TIMEOUT_MS,
   sessionInFlight,
   sessionTarget,
+  signInPending,
   startSession,
 } from "../../src/app/session";
 import type { PageId } from "../../src/app/context";
@@ -310,6 +311,38 @@ describe("ready deadline", () => {
     await vi.advanceTimersByTimeAsync(READY_TIMEOUT_MS + 1);
     expect(sessionInFlight()).toBe(true);
     expect(overlays[0]!.destroyed).toBe(false);
+  });
+});
+
+describe("signInPending", () => {
+  it("holds from the dial until ready", async () => {
+    expect(signInPending()).toBe(false);
+    startSession("a.example:8443", "tok-a", "casey");
+    expect(signInPending()).toBe(true);
+    await authOk();
+    expect(signInPending()).toBe(true);
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "ready",
+        payload: { channels: [], members: [], voice_states: [], roles: [] },
+      }),
+    );
+    expect(signInPending()).toBe(false);
+    expect(sessionInFlight()).toBe(true);
+  });
+
+  it("ends when the first dial is refused, though the target is kept", async () => {
+    startSession("a.example:8443", "tok-a", "casey");
+    await vi.advanceTimersByTimeAsync(0);
+    emitTauriEvent("ws-state", "open");
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({ type: "auth_error", payload: { message: "invalid token" } }),
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sessionInFlight()).toBe(true);
+    expect(signInPending()).toBe(false);
   });
 });
 
