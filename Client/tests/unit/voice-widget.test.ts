@@ -354,6 +354,28 @@ describe("VoiceWidget", () => {
     widget.destroy?.();
   });
 
+  it("swaps the camera and share icons only when they change, not on every tick", () => {
+    setVoiceChannel(1, []);
+    const widget = mountVoiceWidget();
+    const icon = (label: string) =>
+      container.querySelector(`[aria-label="${label}"] svg`) as SVGElement;
+    const camera = icon("Camera");
+    const share = icon("Screenshare");
+
+    voiceStore.setState((prev) => ({ ...prev, voiceStatus: "connected" }));
+    voiceStore.flush();
+    expect(icon("Camera")).toBe(camera);
+    expect(icon("Screenshare")).toBe(share);
+
+    voiceStore.setState((prev) => ({ ...prev, localCamera: true }));
+    voiceStore.flush();
+    expect(icon("Camera").getAttribute("data-icon")).toBe("camera-off");
+    expect(container.querySelectorAll('[aria-label="Camera"] svg')).toHaveLength(1);
+    expect(icon("Screenshare")).toBe(share);
+
+    widget.destroy?.();
+  });
+
   it("links the call's name back to the call, for a DM and a guild channel alike", () => {
     dmStore.setState(() => ({
       channels: [

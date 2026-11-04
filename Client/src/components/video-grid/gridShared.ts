@@ -31,9 +31,18 @@ export const VIEW_RESIZE_MS = 150;
  *  (`.video-grid--call`'s extra bottom padding). */
 export const CALL_BAR_SPACE = 56;
 
-/** The same on a phone, where the view toggles ride above a taller control row
- *  (`.video-grid--call` in the phone media query). */
+/** The same on a phone: a taller control row, with room above it for the
+ *  Android app's hold-to-talk button (`.video-grid--call` in the phone media
+ *  query). */
 export const CALL_BAR_SPACE_PHONE = 104;
+
+/** A call view this narrow (its border box: 680 px inside the grid's 8 px
+ *  padding) has no room for the view toggles beside the control bar: they
+ *  stack above it (`.video-grid--views-above`). */
+export const VIEWS_ABOVE_PX = 696;
+
+/** The room below the tiles when the toggles stack above the control bar. */
+export const CALL_BAR_SPACE_VIEWS_ABOVE = 96;
 
 /** The call view's saved view toggles: pref key and default. */
 export const VIEW_PREFS = {

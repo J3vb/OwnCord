@@ -81,8 +81,36 @@ describe("VideoGrid on a phone", () => {
     it("holds mic, deafen, camera, chat and a Leave, with no share button", () => {
       usePhone(true);
       setup(vi.fn());
-      expect(callControls(callBar())).toEqual(["mute", "deafen", "camera", "chat", "leave"]);
+      expect(callControls(callBar())).toEqual([
+        "mute",
+        "deafen",
+        "camera",
+        "views",
+        "chat",
+        "leave",
+      ]);
       expect(callBar().querySelector("[data-call-control='share']")).toBeNull();
+    });
+
+    it("View options lists the view toggles in a menu instead of square buttons", () => {
+      usePhone(true);
+      setup(vi.fn());
+      const views = callBar().querySelector<HTMLButtonElement>("[data-call-control='views']")!;
+      expect(views.getAttribute("aria-haspopup")).toBe("menu");
+      views.click();
+      const row = (key: string) =>
+        document.querySelector<HTMLElement>(`[data-testid='view-menu-${key}']`);
+      expect(row("nonVideo")!.getAttribute("aria-checked")).toBe("true");
+      expect(row("selfCamera")!.getAttribute("aria-checked")).toBe("true");
+      // The strip only means something in focus view.
+      expect(row("strip")).toBeNull();
+
+      row("selfCamera")!.click();
+      expect(localStorage.getItem("owncord:settings:callShowSelfCamera")).toBe("false");
+      expect(row("selfCamera")).toBeNull();
+      views.click();
+      expect(row("selfCamera")!.getAttribute("aria-checked")).toBe("false");
+      expect(row("nonVideo")!.getAttribute("aria-checked")).toBe("true");
     });
 
     it("Chat goes back to the text channel and Leave ends the call", () => {

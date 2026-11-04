@@ -11,6 +11,8 @@ import { beginPhoneFullscreen } from "../../features/voice/phoneFullscreen";
 import {
   CALL_BAR_SPACE,
   CALL_BAR_SPACE_PHONE,
+  CALL_BAR_SPACE_VIEWS_ABOVE,
+  VIEWS_ABOVE_PX,
   log,
   computeGridLayout,
   isShown,
@@ -28,14 +30,23 @@ export function createGridLayout(st: GridState, api: GridApi) {
 
   /** Apply JS-calculated tile sizes to all grid-mode cells. */
   function applyGridSizes(): void {
-    const tiles = shownTiles();
-    if (st.root === null || st.focusedTileId !== null || tiles.length === 0) return;
-
+    if (st.root === null) return;
     const { width: cw, height: ch } = st.root.getBoundingClientRect();
+    const viewsAbove = st.callBar !== null && !isPhoneLayout() && cw > 0 && cw <= VIEWS_ABOVE_PX;
+    st.root.classList.toggle("video-grid--views-above", viewsAbove);
+
+    const tiles = shownTiles();
+    if (st.focusedTileId !== null || tiles.length === 0) return;
     if (cw === 0 || ch === 0) return;
 
     const barSpace =
-      st.callBar === null ? 0 : isPhoneLayout() ? CALL_BAR_SPACE_PHONE : CALL_BAR_SPACE;
+      st.callBar === null
+        ? 0
+        : isPhoneLayout()
+          ? CALL_BAR_SPACE_PHONE
+          : viewsAbove
+            ? CALL_BAR_SPACE_VIEWS_ABOVE
+            : CALL_BAR_SPACE;
     const layout = computeGridLayout(cw, ch - barSpace, tiles.length);
 
     for (const el of tiles) {

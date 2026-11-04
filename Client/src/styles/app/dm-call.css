@@ -76,19 +76,6 @@
 .dcp-status--bad {
   color: var(--text-danger);
 }
-.dcp-secured {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  color: var(--text-positive);
-  font-weight: 600;
-}
-.dcp-secured[hidden] {
-  display: none;
-}
-.dcp-secured--degraded {
-  color: var(--text-danger);
-}
 .dcp-timer {
   font-variant-numeric: tabular-nums;
 }
