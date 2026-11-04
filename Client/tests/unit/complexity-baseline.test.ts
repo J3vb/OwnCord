@@ -119,13 +119,14 @@ describe("compareSections", () => {
   });
 });
 
+const branches = (n: number) =>
+  Array.from({ length: n }, (_, i) => `if (a === ${i}) n++;`).join("\n");
+
 describe("the ratchet rules", () => {
   const ruleTester = new RuleTester({
     languageOptions: { ecmaVersion: 2022, sourceType: "module" },
   });
   const filename = path.join(srcDir, "lib/fixture.ts");
-  const branches = (n: number) =>
-    Array.from({ length: n }, (_, i) => `if (a === ${i}) n++;`).join("\n");
   // Complexity 1 + 4 branches = 5.
   const complex = `function f(a) { let n = 0; ${branches(4)} return n; }`;
   const nested = `function g(a) { if (a) { if (a) { if (a) { n++; } } } }`;
