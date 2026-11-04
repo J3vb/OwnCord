@@ -92,7 +92,7 @@ func (s *ModerationService) AuthorizeBanPurge(ctx context.Context, actorID, targ
 // banned. It repeats the authorization checks and requires the target to be
 // banned now, so it is never a purge without a ban.
 // Lock order: banPurgeSem is taken before any other lock and never while one is
-// held; mentionEmitMu and the database writer are taken inside it. No hub lock.
+// held; the channel mention emit lock and the database writer are taken inside it. No hub lock.
 func (s *ModerationService) PurgeAfterBan(ctx context.Context, actorID, targetID int64, window time.Duration) BanPurgeResult {
 	if window <= 0 || window > banPurgeMaxWindow {
 		return BanPurgeResult{Err: fmt.Errorf("%w: invalid purge window", ErrBadRequest)}

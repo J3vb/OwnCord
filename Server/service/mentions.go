@@ -201,7 +201,14 @@ func (s *mentionState) mentionEntries(ctx context.Context, channelID, msgID, aut
 	}
 	reach := MentionIDSet(set.reachIDs())
 
-	readers, err := s.mentionReaders(ctx, channelID, isDM, participantIDs)
+	var readers []db.MentionTarget
+	var err error
+	if !isDM && !set.Everyone && len(set.RoleUserIDs) == 0 {
+		// Only named users can be reached, so read just them instead of every reader.
+		readers, err = s.mentionReadersAmong(ctx, channelID, set.UserIDs)
+	} else {
+		readers, err = s.mentionReaders(ctx, channelID, isDM, participantIDs)
+	}
 	if err != nil {
 		slog.Error("MessageService.applyMentionCounts readers", "err", err, "channel_id", channelID)
 		return nil
@@ -263,13 +270,62 @@ func (s *mentionState) mentionReaders(ctx context.Context, channelID int64, isDM
 		return targets, nil
 	}
 
-	roles, err := s.st.ListRoles(ctx)
+	readRoles, adminRoles, err := s.readingRoles(ctx, channelID)
 	if err != nil {
 		return nil, err
 	}
-	overrides, err := s.st.GetChannelOverrides(ctx, channelID)
+	targets, err := s.st.ListMentionTargetsByRoles(ctx, readRoles)
 	if err != nil {
 		return nil, err
+	}
+	return s.applyUserOverridesToReaders(ctx, channelID, targets, adminRoles, nil)
+}
+
+// mentionReadersAmong is mentionReaders for a message that can reach only the
+// named userIDs (no @everyone, @here or role mention): it reads those users and
+// applies the same role, channel override and per-user override rules to them,
+// so the result is mentionReaders' list filtered to userIDs without walking
+// every member who holds a reading role.
+func (s *mentionState) mentionReadersAmong(ctx context.Context, channelID int64, userIDs []int64) ([]db.MentionTarget, error) {
+	if len(userIDs) == 0 {
+		return nil, nil
+	}
+	readRoles, adminRoles, err := s.readingRoles(ctx, channelID)
+	if err != nil {
+		return nil, err
+	}
+	ids := slices.Clone(userIDs)
+	slices.Sort(ids)
+	candidates, err := s.st.ListMentionTargetsByUserIDs(ctx, slices.Compact(ids))
+	if err != nil {
+		return nil, err
+	}
+	reads := make(map[int64]bool, len(readRoles))
+	for _, id := range readRoles {
+		reads[id] = true
+	}
+	byID := make(map[int64]db.MentionTarget, len(candidates))
+	targets := make([]db.MentionTarget, 0, len(candidates))
+	for _, t := range candidates {
+		byID[t.UserID] = t
+		if slices.ContainsFunc(t.RoleIDs, func(id int64) bool { return reads[id] }) {
+			targets = append(targets, t)
+		}
+	}
+	return s.applyUserOverridesToReaders(ctx, channelID, targets, adminRoles, byID)
+}
+
+// readingRoles resolves each role with its own channel override and returns the
+// roles that read the channel (ADMINISTRATOR always reads) and the roles that hold
+// ADMINISTRATOR.
+func (s *mentionState) readingRoles(ctx context.Context, channelID int64) ([]int64, map[int64]bool, error) {
+	roles, err := s.st.ListRoles(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	overrides, err := s.st.GetChannelOverrides(ctx, channelID)
+	if err != nil {
+		return nil, nil, err
 	}
 
 	readRoles := make([]int64, 0, len(roles))
@@ -287,11 +343,7 @@ func (s *mentionState) mentionReaders(ctx context.Context, channelID int64, isDM
 			readRoles = append(readRoles, r.ID)
 		}
 	}
-	targets, err := s.st.ListMentionTargetsByRoles(ctx, readRoles)
-	if err != nil {
-		return nil, err
-	}
-	return s.applyUserOverridesToReaders(ctx, channelID, targets, adminRoles)
+	return readRoles, adminRoles, nil
 }
 
 // holdsAdminRole reports whether any role the target holds has ADMINISTRATOR; a
@@ -311,8 +363,12 @@ func holdsAdminRole(t db.MentionTarget, adminRoles map[int64]bool) bool {
 //   - a user ALLOW adds a member their role excluded.
 //
 // A user allow beats a user deny on the same bit, as permissions.EffectiveChannelPerms.
+//
+// among, when non-nil, is the only users a grant may add, already read (the
+// direct-mention path); nil lets a grant add any user and reads them here.
 func (s *mentionState) applyUserOverridesToReaders(
 	ctx context.Context, channelID int64, targets []db.MentionTarget, adminRoles map[int64]bool,
+	among map[int64]db.MentionTarget,
 ) ([]db.MentionTarget, error) {
 	userOv, err := s.st.GetChannelUserOverrides(ctx, channelID)
 	if err != nil {
@@ -349,11 +405,19 @@ func (s *mentionState) applyUserOverridesToReaders(
 			missing = append(missing, uid)
 		}
 	}
+	// Sorted so the fan-out (and its tests) do not depend on map order.
+	slices.Sort(missing)
+	if among != nil {
+		for _, uid := range missing {
+			if t, ok := among[uid]; ok {
+				kept = append(kept, t)
+			}
+		}
+		return kept, nil
+	}
 	if len(missing) == 0 {
 		return kept, nil
 	}
-	// Sorted so the fan-out (and its tests) do not depend on map order.
-	slices.Sort(missing)
 	added, err := s.st.ListMentionTargetsByUserIDs(ctx, missing)
 	if err != nil {
 		return nil, err

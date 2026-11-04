@@ -36,15 +36,15 @@ func (s *MessageService) SetReadStateNotifier(n ReadStateNotifier) {
 }
 
 // MoveReadPointer moves userID's read pointer in channelID and tells them the
-// result. It lives on mentionState because that part owns mentionEmitMu.
+// result. It lives on mentionState because that part owns mentionEmitLocks.
 // Admission is channel_focus's (admitReadState) except that a thread is admitted
 // too (admitReadPointer): a missing channel is ErrNotFound, lost access or an
 // archived channel ErrForbidden. messageID must be positive for db.ReadUpTo and
 // db.MarkUnread (ErrBadRequest otherwise); db.ReadAtLatest ignores it. For
 // db.MarkUnread a message that is not a live message of the channel is ErrNotFound
 // (still wrapping db.ErrNotFound).
-// Lock order: mentionEmitMu, then the database writer, then the hub's per-client
-// send, as reverseMentionCounts already does. It is held across the write and the
+// Lock order: the channel's mention emit lock, then the database writer, then the
+// hub's per-client send, as reverseMentionCounts already does. It is held across the write and the
 // frame so a mention_count frame from the worker or a removal cannot overtake this
 // read_state frame and the last frame matches the committed row. Never taken under
 // a hub lock; the caller runs on the read goroutine. On failure no frame is sent.
@@ -69,17 +69,18 @@ func (s *mentionState) MoveReadPointer(ctx context.Context, userID, channelID in
 	// The lock wait honours ctx: the mention worker holds it across a write on its own
 	// lifecycle context, so a stalled write there must end this call at the caller's
 	// deadline instead of parking the read goroutine.
-	if err := syncutil.LockContext(ctx, &s.mentionEmitMu); err != nil {
+	mu := s.mentionEmitLocks.forChannel(channelID)
+	if err := syncutil.LockContext(ctx, mu); err != nil {
 		return db.ReadPointer{}, fmt.Errorf("move read pointer: %w", err)
 	}
-	defer s.mentionEmitMu.Unlock()
+	defer mu.Unlock()
 
 	// Read-at-latest fires on every refocus and "Mark as Read" click, and a
 	// transaction occupies the single writer even when it changes nothing. As in
 	// HandleChannelFocus: when the reader pool shows the pointer at the newest live
 	// message and no mentions, answer from those reads without a transaction. A failed
 	// read falls through to the write, the load-bearing half. The check runs under
-	// mentionEmitMu like the write, so no increment can commit between the reads and
+	// the channel's emit lock like the write, so no increment can commit between the reads and
 	// the frame.
 	if op == db.ReadAtLatest {
 		if rs, ok := s.readAtLatestIsCurrent(ctx, userID, channelID); ok {
