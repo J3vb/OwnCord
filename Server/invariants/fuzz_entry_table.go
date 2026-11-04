@@ -79,6 +79,17 @@ var FuzzEntryPoints = map[string]FuzzEntry{
 	"plugin.validateRelativePath": {Source: "plugin manifest paths", Targets: []string{"plugin.FuzzValidateRelativePath"}, Manual: true},
 	"storage.sanitizeFilename":    {Source: "upload filename", Targets: []string{"storage.FuzzSanitizeFilename"}, Manual: true},
 	"storage.ValidateFileType":    {Source: "upload bytes", Targets: []string{"storage.FuzzValidateFileType"}, Manual: true},
+
+	"externalcontent.parseOGTags":   {Source: "fetched web pages (link previews)", Targets: []string{"externalcontent.FuzzParseOGTags"}},
+	"externalcontent.parseOEmbed":   {Source: "fetched oEmbed responses", Targets: []string{"externalcontent.FuzzParseOEmbed"}},
+	"safefetch.(*Fetcher).readBody": {Source: "fetched response bodies (gzip)", Targets: []string{"safefetch.FuzzReadBody"}},
+	"safefetch.ClassifyAddr":        {Source: "addresses resolved from user-supplied URLs", Targets: []string{"safefetch.FuzzClassifyAddr"}, Manual: true},
+
+	"service/discordimport.Decode":       {Source: "Discord export JSON", Targets: []string{"service/discordimport.FuzzDecode"}},
+	"service/discordimport.NewZipExport": {Source: "Discord export archive", Targets: []string{"service/discordimport.FuzzNewZipExport"}},
+	"service/discordimport.imageSize":    {Source: "Discord export images", Targets: []string{"service/discordimport.FuzzImageSize"}},
+
+	"plugin.(*Registry).InstallFromZip": {Source: "plugin archive", Targets: []string{"plugin.FuzzInstallFromZip"}},
 }
 
 // FuzzGaps are outside-input functions with no fuzz target yet. This table
@@ -110,19 +121,9 @@ var FuzzGaps = map[string]FuzzGap{
 	"ws.authIdentityKey":          {Source: "WebSocket auth frame"},
 	"ws.(*Hub).voiceJoinPrecheck": {Source: "voice_join payload"},
 
-	"externalcontent.parseOGTags":   {Source: "fetched web pages (link previews)"},
-	"externalcontent.parseOEmbed":   {Source: "fetched oEmbed responses"},
-	"safefetch.(*Fetcher).readBody": {Source: "fetched response bodies (gzip)"},
-	"safefetch.ClassifyAddr":        {Source: "addresses resolved from user-supplied URLs", Manual: true},
-
-	"service/discordimport.Decode":       {Source: "Discord export JSON"},
-	"service/discordimport.NewZipExport": {Source: "Discord export archive"},
-	"service/discordimport.imageSize":    {Source: "Discord export images"},
-
-	"plugin.ParseManifest":              {Source: "plugin manifest"},
-	"plugin.(*Registry).InstallFromZip": {Source: "plugin archive"},
-	"plugin.(*Registry).invokeCommand":  {Source: "plugin output"},
-	"plugin.listExportedCommands":       {Source: "plugin output"},
+	"plugin.ParseManifest":             {Source: "plugin manifest"},
+	"plugin.(*Registry).invokeCommand": {Source: "plugin output"},
+	"plugin.listExportedCommands":      {Source: "plugin output"},
 
 	"updater.(*Updater).fetchLatestRelease":    {Source: "GitHub release API response"},
 	"updater.(*Updater).VerifyReleaseManifest": {Source: "downloaded release manifest"},
@@ -133,7 +134,7 @@ var FuzzGaps = map[string]FuzzGap{
 }
 
 // fuzzGapCeiling is len(FuzzGaps). It only goes down.
-const fuzzGapCeiling = 40
+const fuzzGapCeiling = 32
 
 // FuzzTrustedDecodes decode bytes this server wrote itself (its database, its
 // own frames and files) or files the operator owns. Each value says why the
