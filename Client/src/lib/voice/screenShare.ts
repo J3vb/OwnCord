@@ -23,6 +23,7 @@ import {
 import { loadPref } from "@lib/prefs/preferences";
 import { fitGpuH264Share, setH264GpuProfiles } from "@lib/voice/h264Profile";
 import { createLogger } from "@lib/logger";
+import { recordEvent } from "@lib/diagnostics/eventSink";
 import { showToast } from "@lib/ui/toast";
 import {
   isLinuxDesktop,
@@ -501,6 +502,7 @@ export function watchScreenEnded(
       return;
     }
     log.info("Screen track ended externally (OS stop-sharing)");
+    recordEvent("share.ended");
     void disableScreenshare(state, deps);
   };
   const cleanup = (): void => {

@@ -180,6 +180,8 @@ export function createWsClient({
   // Armed on auth_ok; kept through the reconnect loop and released on
   // an intentional or certificate-blocked close, or disconnect().
   let wakeOwner: Disposable | null = null;
+  // When app.resumed was last recorded, so one suspend is recorded once.
+  let lastResumeRecordedAt: number | null = null;
   // When a wake signal last cut a reconnect backoff short.
   let lastWakeKickAt = -Infinity;
   // U4: the last time the app could observe the clock running: a parsed
@@ -309,6 +311,7 @@ export function createWsClient({
     lastActivityAt = Date.now();
     if (gap > WAKE_GAP_MS) {
       pendingWake = true;
+      noteResumed(gap);
       onWake();
     } else if (proxyOpen) {
       try {
@@ -449,7 +452,18 @@ export function createWsClient({
     const now = Date.now();
     const gap = now - lastActivityAt;
     lastActivityAt = now;
-    return gap > WAKE_GAP_MS;
+    if (gap <= WAKE_GAP_MS) return false;
+    noteResumed(gap);
+    return true;
+  }
+
+  // The heartbeat and the reconnect point can both see the same suspend; a
+  // gap the last record already covers is the same sleep, recorded once.
+  function noteResumed(gap: number): void {
+    const now = Date.now();
+    if (lastResumeRecordedAt !== null && now - lastResumeRecordedAt < gap) return;
+    lastResumeRecordedAt = now;
+    recordEvent("app.resumed", { asleep_ms: gap });
   }
 
   function scheduleReconnect(retryAfterMs?: number): void {

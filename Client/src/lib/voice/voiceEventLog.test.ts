@@ -69,6 +69,8 @@ describe("voice event log", () => {
     expect(seen.map((e) => e.code)).toEqual([
       "track.published",
       "camera.started",
+      "camera.device_changed",
+      "track.replaced",
       "camera.started",
       "camera.muted",
     ]);
@@ -76,6 +78,54 @@ describe("voice event log", () => {
     expect(devices[0]).toMatch(/^[0-9a-f]{8}$/);
     expect(devices[1]).not.toBe(devices[0]);
     expect(JSON.stringify(seen)).not.toContain("cam-a");
+  });
+
+  it("does not call turning the camera back on a device change", () => {
+    const { room, onRoom, fire } = fakeRoom();
+    attachVoiceEventLog(room, onRoom as never);
+    const track = fakeTrack(new FakeMedia("cam-a"));
+    fire(RoomEvent.LocalTrackPublished, { source: "camera", trackSid: "TR_1", track });
+    track.mediaStreamTrack = new FakeMedia("cam-a") as unknown as MediaStreamTrack;
+    track.emit("restarted");
+    expect(seen.map((e) => e.code)).not.toContain("camera.device_changed");
+    expect(seen.map((e) => e.code)).not.toContain("track.replaced");
+  });
+
+  it("records a screen share's start and one stop per publication", () => {
+    const { room, onRoom, fire } = fakeRoom();
+    attachVoiceEventLog(room, onRoom as never);
+    const media = new FakeMedia("screen") as FakeMedia & { getSettings(): MediaTrackSettings };
+    const settings = media.getSettings();
+    media.getSettings = () => ({ ...settings, displaySurface: "window" });
+    const pub = { source: "screen_share", trackSid: "TR_9", track: fakeTrack(media) };
+    fire(RoomEvent.LocalTrackPublished, pub);
+    fire(RoomEvent.LocalTrackUnpublished, pub);
+    fire(RoomEvent.LocalTrackUnpublished, pub);
+
+    expect(seen.filter((e) => e.code.startsWith("share.")).map((e) => e.code)).toEqual([
+      "share.started",
+      "share.stopped",
+    ]);
+    expect(seen.find((e) => e.code === "share.started")?.fields).toEqual({
+      surface: "window",
+      width: 1280,
+      height: 720,
+      fps: 30,
+    });
+  });
+
+  it("records leaving only when this client ended the call", () => {
+    const left = (reason: number): number => {
+      const { room, onRoom, fire } = fakeRoom();
+      (room as { name?: string }).name = "voice-7";
+      attachVoiceEventLog(room, onRoom as never);
+      seen.length = 0;
+      fire(RoomEvent.Disconnected, reason);
+      return seen.filter((e) => e.code === "voice.left").length;
+    };
+    expect(left(1)).toBe(1);
+    expect(left(0)).toBe(0);
+    expect(JSON.stringify(seen)).not.toContain("voice-7");
   });
 
   it("releases the track listeners when the room disconnects without app listeners", () => {

@@ -166,14 +166,22 @@ records the gap.
 
 ## Who emits what
 
-Not every code has an emitter yet. Native crash and exit codes come with the
-Windows and Android crash work; `app.suspended`, `app.resumed`, the
-device-change, screen-share, `track.replaced`, `track.layers_changed`,
-`voice.left` and `ice.state` codes are reserved for later. `app.visibility` and
-`app.network` come from the WebSocket client's wake listeners, so they are
-recorded while signed in, and only the network coming back (`online`). The catalogue test
-checks that a listed emitter really records the code, and keeps this list in
-`eventCodes.test.ts` (`NOT_EMITTED_YET`).
+Every code has an emitter; the catalogue test checks that each listed `.ts`
+emitter really records its code. `app.visibility` and `app.network` come from
+the WebSocket client's wake listeners, so they are recorded while signed in,
+and only the network coming back (`online`). `app.resumed` comes from the same
+client's sleep check (the wall clock jumping past the wake threshold), once per
+sleep: the app cannot record anything while the computer sleeps, so there is no
+"going to sleep" event. Hangs and recoveries stay in the native log as
+`[hang]` lines, which the bundle carries.
+
+Screen shares: `share.started` and `share.stopped` follow the share's
+publication (`voiceEventLog.ts`); `share.ended` is the browser or OS ending the
+capture (its "Stop sharing" bar); `share.source_changed` and `track.replaced`
+are a Change source that swapped the capture under the same publication. A
+publication the log did not see start gets no stop, so leaving voice never
+records a second one. `track.layers_changed` comes from the camera watchdog
+when the number of active camera layers moves; 0 means nobody watches.
 
 The log starts lazily after the first render (`appEvents.ts`). Events an owner
 records before then wait in `eventSink.ts` (at most 200), so `ws.ts` and the
@@ -184,8 +192,12 @@ events come from the camera owner, WebSocket events from `ws.ts` (each tagged
 with its connection-attempt generation, so an event from an old attempt is
 recorded as such and never touches the live connection), voice events from the
 room event handlers. Native crash and exit facts are written to the native log
-by the Rust or Android code on the next start, and the client copies the
-newest one into the log as `native.crash` or `native.exit`.
+by the Rust or Android code on the next start. Ten seconds after the app
+starts, `appEvents.ts` reads the native log back and copies the newest ending
+into the event log as `native.crash` or `native.exit`, and the newest webview
+process failure as `native.webview_process_failed`. The lines it copied are
+remembered, so a later start that finds the same newest line does not copy it
+again.
 
 ### Android lines
 
@@ -214,20 +226,17 @@ twice across two starts.
 | Code             | Label                          | Fields                                                                                                                       | Emitted by                         |
 | ---------------- | ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
 | `app.started`    | App started                    | `app_version` (version)<br>`platform` (windows / linux / macos / android / browser / unknown)<br>`webview_version` (version) | `src/lib/diagnostics/appEvents.ts` |
-| `app.suspended`  | Computer went to sleep         | none                                                                                                                         | `src/main.ts`                      |
-| `app.resumed`    | Computer woke up               | `asleep_ms` (ms)                                                                                                             | `src/main.ts`                      |
+| `app.resumed`    | Computer woke up               | `asleep_ms` (ms)                                                                                                             | `src/lib/ws.ts`                    |
 | `app.visibility` | Window shown or hidden         | `state` (visible / hidden / minimized / restored)                                                                            | `src/lib/ws.ts`                    |
 | `app.network`    | Network went online or offline | `state` (online / offline)                                                                                                   | `src/lib/ws.ts`                    |
 
 ### `native`
 
-| Code                            | Label                           | Fields                                                                                                                                                                                                                                  | Emitted by                                                                                                                                                              |
-| ------------------------------- | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `native.crash`                  | App crashed last time           | `platform` (windows / linux / macos / android / browser / unknown)<br>`kind` (signal / exception / panic / x_error / jvm / native / unknown)<br>`code` (token)<br>`module` (token)<br>`age_ms` (ms)                                     | `src-tauri/src/crash_log.rs`<br>`src-tauri/src/exception_log.rs`<br>`src-tauri/src/system_crash_report.rs`<br>`android …/NativeLog.kt`<br>`android …/ExitInfoPlugin.kt` |
-| `native.exit`                   | How the last run ended          | `platform` (windows / linux / macos / android / browser / unknown)<br>`kind` (normal / signal / unclean / anr / low_memory / killed_by_user / killed_by_system / unknown)<br>`last_seen_ms` (ms)<br>`memory_mb` (int)<br>`hang_ms` (ms) | `src-tauri/src/exit_watch.rs`<br>`android …/ExitInfoPlugin.kt`                                                                                                          |
-| `native.hang`                   | App stopped answering           | `thread` (main / webview)<br>`duration_ms` (ms)                                                                                                                                                                                         | `src-tauri/src/exit_watch.rs`                                                                                                                                           |
-| `native.hang_recovered`         | App answered again              | `thread` (main / webview)<br>`duration_ms` (ms)                                                                                                                                                                                         | `src-tauri/src/exit_watch.rs`                                                                                                                                           |
-| `native.webview_process_failed` | A webview helper process failed | `process` (browser / renderer / gpu / utility / unknown)<br>`reason` (exited / crashed / unresponsive / killed / out_of_memory / unknown)                                                                                               | `src-tauri/src/exit_watch.rs`<br>`android …/RenderGoneClient.kt`                                                                                                        |
+| Code                            | Label                           | Fields                                                                                                                                                                                                                                  | Emitted by                                                                                                                                                                                                    |
+| ------------------------------- | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `native.crash`                  | App crashed last time           | `platform` (windows / linux / macos / android / browser / unknown)<br>`kind` (signal / exception / panic / x_error / jvm / native / unknown)<br>`code` (token)<br>`module` (token)<br>`age_ms` (ms)                                     | `src/lib/diagnostics/appEvents.ts`<br>`src-tauri/src/crash_log.rs`<br>`src-tauri/src/exception_log.rs`<br>`src-tauri/src/system_crash_report.rs`<br>`android …/NativeLog.kt`<br>`android …/ExitInfoPlugin.kt` |
+| `native.exit`                   | How the last run ended          | `platform` (windows / linux / macos / android / browser / unknown)<br>`kind` (normal / signal / unclean / anr / low_memory / killed_by_user / killed_by_system / unknown)<br>`last_seen_ms` (ms)<br>`memory_mb` (int)<br>`hang_ms` (ms) | `src/lib/diagnostics/appEvents.ts`<br>`src-tauri/src/exit_watch.rs`<br>`android …/ExitInfoPlugin.kt`                                                                                                          |
+| `native.webview_process_failed` | A webview helper process failed | `process` (browser / renderer / gpu / utility / unknown)<br>`reason` (exited / crashed / unresponsive / killed / out_of_memory / unknown)                                                                                               | `src/lib/diagnostics/appEvents.ts`<br>`src-tauri/src/exit_watch.rs`<br>`android …/RenderGoneClient.kt`                                                                                                        |
 
 ### `camera`
 
@@ -235,7 +244,7 @@ twice across two starts.
 | ------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------- |
 | `camera.started`          | Camera started                 | `device` (hash)<br>`width` (int)<br>`height` (int)<br>`fps` (int)<br>`requested_width` (int)<br>`requested_height` (int)<br>`requested_fps` (int)<br>`facing` (user / environment / unknown)                                         | `src/lib/voice/voiceEventLog.ts`       |
 | `camera.stopped`          | Camera stopped                 | `reason` (user / ended / error / left_voice / replaced / unknown)                                                                                                                                                                    | `src/lib/voice/voiceEventLog.ts`       |
-| `camera.device_changed`   | Camera device changed          | `device` (hash)                                                                                                                                                                                                                      | `src/lib/voice/deviceManager.ts`       |
+| `camera.device_changed`   | Camera device changed          | `device` (hash)                                                                                                                                                                                                                      | `src/lib/voice/voiceEventLog.ts`       |
 | `camera.ended`            | Browser ended the camera track | none                                                                                                                                                                                                                                 | `src/lib/voice/voiceEventLog.ts`       |
 | `camera.muted`            | Camera track muted             | `by` (browser / user)                                                                                                                                                                                                                | `src/lib/voice/voiceEventLog.ts`       |
 | `camera.unmuted`          | Camera track unmuted           | `by` (browser / user)                                                                                                                                                                                                                | `src/lib/voice/voiceEventLog.ts`       |
@@ -249,47 +258,47 @@ twice across two starts.
 | ---------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------ | -------------------------------- |
 | `mic.started`          | Microphone started                 | `device` (hash)<br>`sample_rate` (int)                                                                 | `src/lib/voice/voiceEventLog.ts` |
 | `mic.stopped`          | Microphone stopped                 | `reason` (user / ended / error / left_voice / replaced / unknown)                                      | `src/lib/voice/voiceEventLog.ts` |
-| `mic.device_changed`   | Microphone device changed          | `device` (hash)                                                                                        | `src/lib/voice/deviceManager.ts` |
+| `mic.device_changed`   | Microphone device changed          | `device` (hash)                                                                                        | `src/lib/voice/voiceEventLog.ts` |
 | `mic.ended`            | Browser ended the microphone track | none                                                                                                   | `src/lib/voice/voiceEventLog.ts` |
 | `mic.permission_error` | Microphone could not open          | `error` (not_allowed / not_found / not_readable / overconstrained / abort / security / type / unknown) | `src/lib/voice/voiceEventLog.ts` |
 
 ### `track`
 
-| Code                        | Label                             | Fields                                                                                                                                            | Emitted by                           |
-| --------------------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
-| `track.published`           | Track published                   | `source` (camera / microphone / screen_share / screen_share_audio / unknown)<br>`codec` (token)<br>`simulcast` (bool)                             | `src/lib/voice/voiceEventLog.ts`     |
-| `track.unpublished`         | Track unpublished                 | `source` (camera / microphone / screen_share / screen_share_audio / unknown)<br>`reason` (user / ended / error / left_voice / replaced / unknown) | `src/lib/voice/voiceEventLog.ts`     |
-| `track.replaced`            | Track replaced                    | `source` (camera / microphone / screen_share / screen_share_audio / unknown)                                                                      | `src/features/voice/mediaControl.ts` |
-| `track.layers_changed`      | Simulcast layers turned on or off | `source` (camera / microphone / screen_share / screen_share_audio / unknown)<br>`active_layers` (int)                                             | `src/lib/voice/roomEventHandlers.ts` |
-| `track.subscribed`          | Started receiving a track         | `source` (camera / microphone / screen_share / screen_share_audio / unknown)<br>`participant` (pseudonym)                                         | `src/lib/voice/voiceEventLog.ts`     |
-| `track.unsubscribed`        | Stopped receiving a track         | `source` (camera / microphone / screen_share / screen_share_audio / unknown)<br>`participant` (pseudonym)                                         | `src/lib/voice/voiceEventLog.ts`     |
-| `track.subscription_failed` | Could not receive a track         | `participant` (pseudonym)                                                                                                                         | `src/lib/voice/voiceEventLog.ts`     |
+| Code                        | Label                             | Fields                                                                                                                                            | Emitted by                                                                    |
+| --------------------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `track.published`           | Track published                   | `source` (camera / microphone / screen_share / screen_share_audio / unknown)<br>`codec` (token)<br>`simulcast` (bool)                             | `src/lib/voice/voiceEventLog.ts`                                              |
+| `track.unpublished`         | Track unpublished                 | `source` (camera / microphone / screen_share / screen_share_audio / unknown)<br>`reason` (user / ended / error / left_voice / replaced / unknown) | `src/lib/voice/voiceEventLog.ts`                                              |
+| `track.replaced`            | Track replaced                    | `source` (camera / microphone / screen_share / screen_share_audio / unknown)                                                                      | `src/lib/voice/voiceEventLog.ts`<br>`src/features/voice/screenshareChange.ts` |
+| `track.layers_changed`      | Simulcast layers turned on or off | `source` (camera / microphone / screen_share / screen_share_audio / unknown)<br>`active_layers` (int)                                             | `src/lib/voice/cameraStallWatchdog.ts`                                        |
+| `track.subscribed`          | Started receiving a track         | `source` (camera / microphone / screen_share / screen_share_audio / unknown)<br>`participant` (pseudonym)                                         | `src/lib/voice/voiceEventLog.ts`                                              |
+| `track.unsubscribed`        | Stopped receiving a track         | `source` (camera / microphone / screen_share / screen_share_audio / unknown)<br>`participant` (pseudonym)                                         | `src/lib/voice/voiceEventLog.ts`                                              |
+| `track.subscription_failed` | Could not receive a track         | `participant` (pseudonym)                                                                                                                         | `src/lib/voice/voiceEventLog.ts`                                              |
 
 ### `share`
 
-| Code                   | Label                          | Fields                                                                                                                | Emitted by                     |
-| ---------------------- | ------------------------------ | --------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
-| `share.started`        | Screen share started           | `surface` (monitor / window / browser / unknown)<br>`width` (int)<br>`height` (int)<br>`fps` (int)<br>`native` (bool) | `src/lib/voice/screenShare.ts` |
-| `share.stopped`        | Screen share stopped           | `reason` (user / ended / error / left_voice / replaced / unknown)                                                     | `src/lib/voice/screenShare.ts` |
-| `share.ended`          | Browser ended the screen share | none                                                                                                                  | `src/lib/voice/screenShare.ts` |
-| `share.source_changed` | Screen share source changed    | `surface` (monitor / window / browser / unknown)                                                                      | `src/lib/voice/screenShare.ts` |
+| Code                   | Label                          | Fields                                                                                                                | Emitted by                                |
+| ---------------------- | ------------------------------ | --------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
+| `share.started`        | Screen share started           | `surface` (monitor / window / browser / unknown)<br>`width` (int)<br>`height` (int)<br>`fps` (int)<br>`native` (bool) | `src/lib/voice/voiceEventLog.ts`          |
+| `share.stopped`        | Screen share stopped           | `reason` (user / ended / error / left_voice / replaced / unknown)                                                     | `src/lib/voice/voiceEventLog.ts`          |
+| `share.ended`          | Browser ended the screen share | none                                                                                                                  | `src/lib/voice/screenShare.ts`            |
+| `share.source_changed` | Screen share source changed    | `surface` (monitor / window / browser / unknown)                                                                      | `src/features/voice/screenshareChange.ts` |
 
 ### `voice`
 
-| Code                 | Label                   | Fields                                                                                                                                                                                                                                                                                                               | Emitted by                            |
-| -------------------- | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- |
-| `voice.joined`       | Joined a voice channel  | `channel` (pseudonym)<br>`native` (bool)<br>`after_ms` (ms)                                                                                                                                                                                                                                                          | `src/lib/voice/voiceEventLog.ts`      |
-| `voice.left`         | Left the voice channel  | `channel` (pseudonym)                                                                                                                                                                                                                                                                                                | `src/features/voice/roomLifecycle.ts` |
-| `voice.reconnecting` | Voice is reconnecting   | `attempt` (int)<br>`kind` (signal / media / full)                                                                                                                                                                                                                                                                    | `src/lib/voice/voiceEventLog.ts`      |
-| `voice.reconnected`  | Voice reconnected       | `after_ms` (ms)                                                                                                                                                                                                                                                                                                      | `src/lib/voice/voiceEventLog.ts`      |
-| `voice.disconnected` | Voice disconnected      | `reason` (unknown_reason / client_initiated / duplicate_identity / server_shutdown / participant_removed / room_deleted / state_mismatch / join_failure / migration / signal_close / room_closed / user_unavailable / user_rejected / sip_trunk_failure / connection_timeout / media_failure)<br>`unexpected` (bool) | `src/lib/voice/voiceEventLog.ts`      |
-| `voice.encryption`   | Call encryption changed | `state` (on / off / error)                                                                                                                                                                                                                                                                                           | `src/lib/voice/roomEventHandlers.ts`  |
+| Code                 | Label                   | Fields                                                                                                                                                                                                                                                                                                               | Emitted by                           |
+| -------------------- | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
+| `voice.joined`       | Joined a voice channel  | `channel` (pseudonym)<br>`native` (bool)<br>`after_ms` (ms)                                                                                                                                                                                                                                                          | `src/lib/voice/voiceEventLog.ts`     |
+| `voice.left`         | Left the voice channel  | `channel` (pseudonym)                                                                                                                                                                                                                                                                                                | `src/lib/voice/voiceEventLog.ts`     |
+| `voice.reconnecting` | Voice is reconnecting   | `attempt` (int)<br>`kind` (signal / media / full)                                                                                                                                                                                                                                                                    | `src/lib/voice/voiceEventLog.ts`     |
+| `voice.reconnected`  | Voice reconnected       | `after_ms` (ms)                                                                                                                                                                                                                                                                                                      | `src/lib/voice/voiceEventLog.ts`     |
+| `voice.disconnected` | Voice disconnected      | `reason` (unknown_reason / client_initiated / duplicate_identity / server_shutdown / participant_removed / room_deleted / state_mismatch / join_failure / migration / signal_close / room_closed / user_unavailable / user_rejected / sip_trunk_failure / connection_timeout / media_failure)<br>`unexpected` (bool) | `src/lib/voice/voiceEventLog.ts`     |
+| `voice.encryption`   | Call encryption changed | `state` (on / off / error)                                                                                                                                                                                                                                                                                           | `src/lib/voice/roomEventHandlers.ts` |
 
 ### `ice`
 
 | Code        | Label                          | Fields                                                                                                                                                    | Emitted by                            |
 | ----------- | ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- |
-| `ice.state` | Media connection state changed | `transport` (publisher / subscriber)<br>`state` (new / checking / connected / completed / failed / disconnected / closed)                                 | `src/lib/voice/roomEventHandlers.ts`  |
+| `ice.state` | Media connection state changed | `transport` (publisher / subscriber)<br>`state` (new / checking / connected / completed / failed / disconnected / closed)                                 | `src/lib/voice/livekitDiagnostics.ts` |
 | `ice.route` | Media route chosen             | `local_type` (host / srflx / prflx / relay / unknown)<br>`remote_type` (host / srflx / prflx / relay / unknown)<br>`protocol` (udp / tcp / tls / unknown) | `src/lib/voice/livekitDiagnostics.ts` |
 
 ### `ws`
@@ -309,44 +318,6 @@ twice across two starts.
 | Code             | Label                   | Fields                                 | Emitted by                        |
 | ---------------- | ----------------------- | -------------------------------------- | --------------------------------- |
 | `events.dropped` | Similar events left out | `dropped_code` (code)<br>`count` (int) | `src/lib/diagnostics/eventLog.ts` |
-
-## Reading a client support bundle
-
-A short order that finds most problems fast:
-
-1. **`manifest.json`**: the app version, when the bundle was made, and which
-   files were trimmed or left out to stay under 4 MB. A trimmed file lost its
-   oldest lines, never its newest.
-2. **`last-exit.json`**: how the newest earlier run ended. `outcome` is
-   `crash`, `exit` or `normal`; `kind`, `code` and `module` say how (a signal,
-   a Windows exception code with the faulting module, an Android exit reason).
-   `lastWebviewFailure` is the newest webview helper process that failed: a GPU
-   or video-capture process restart there explains a camera that froze and
-   came back.
-3. **`logs/events-*.jsonl`**: one event per line, `{"t": <ms since epoch>,
-"code": "...", ...fields}`, oldest first. Find the user's time of trouble
-   and read around it:
-   - a frozen webcam shows as `camera.stalled` then `camera.resumed` with
-     `gap_ms`; `quality_limitation`, `encoder` and `hardware_encoder` say
-     whether the encoder was starved (`cpu`, `bandwidth`) or the camera stopped
-     delivering frames;
-   - a dropped call shows as `voice.reconnecting` / `voice.reconnected`, or
-     `voice.disconnected` with a `reason`;
-   - a lost server connection shows as `ws.closed` with `close_code` and
-     `close_class`, then `ws.reconnect_scheduled` and `ws.ready`. Compare the
-     `generation` numbers: an event with an older generation than the live
-     one belongs to a connection that was already replaced;
-   - `events.dropped` means a code fired more than 30 times a minute; the
-     count says how many were left out.
-4. **`logs/owncord-client*.log`**: the native log. Search for `[crash]`,
-   `[exit]`, `[hang]` and `[resource]` lines near the same time (the native
-   log stamps UTC).
-5. **`logs/*.jsonl`** (the client log) and `voice-diagnostics.json` for the
-   detail behind an event.
-
-Pseudonyms (`u1`, `c2`) and device hashes are new for every bundle, so they
-match within one bundle only. `redactions.json` says how many values each rule
-removed; a `[redacted]`, `[email]`, `[ip]`, `[hex]`, `[jwt]` or `~` in a line is that rule at work, not a bug.
 
 ## Adding a code
 
