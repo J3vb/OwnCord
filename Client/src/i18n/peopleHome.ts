@@ -17,5 +17,8 @@ export const peopleHomeText = defineCatalog("peopleHome", {
   "active.empty":
     "It's quiet for now. When someone plays a game or joins voice, they show up here.",
   "active.voice": "In {channel}",
+  "phone.title": "Messages",
+  "phone.search": "Search messages",
+  "phone.new": "New message",
   loadFailed: "The People view could not load. Try again.",
 });

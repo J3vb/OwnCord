@@ -351,7 +351,7 @@ for (const profile of PROFILES) {
       await home.tap();
       await expect(home).toHaveAttribute("aria-current", "true");
       await expect(drawer(page)).toHaveClass(/drawer-open/);
-      await expect(drawer(page).locator(".dm-sidebar-header")).toBeVisible();
+      await expect(drawer(page).getByTestId("dm-phone-head")).toBeVisible();
       // Tapping the connected server's icon goes back to its channels.
       await rail(page).locator("[data-testid='server-rail-server']").first().tap();
       await expect(home).not.toHaveAttribute("aria-current", "true");
@@ -364,7 +364,7 @@ for (const profile of PROFILES) {
       await signIn(page);
       await page.locator("[data-testid='sidebar-toggle']").tap();
       await rail(page).locator("[data-testid='server-rail-home']").tap();
-      await expect(drawer(page).locator(".dm-sidebar-header")).toBeVisible();
+      await expect(drawer(page).getByTestId("dm-phone-head")).toBeVisible();
       await page
         .locator("[data-testid='sidebar-drawer-backdrop']")
         .tap({ position: { x: 380, y: 300 } });
@@ -377,6 +377,37 @@ for (const profile of PROFILES) {
       await noHorizontalScroll(page);
       await page.getByTestId("feature-view-menu").tap();
       await expect(drawer(page)).toHaveClass(/drawer-open/);
+    });
+
+    test("Home turns the drawer into Messages, with search, People and New message", async ({
+      page,
+    }) => {
+      await signIn(page);
+      await page.locator("[data-testid='sidebar-toggle']").tap();
+      await rail(page).locator("[data-testid='server-rail-home']").tap();
+      const head = drawer(page).getByTestId("dm-phone-head");
+      await expect(head.getByRole("heading", { name: "Messages" })).toBeVisible();
+      await expect(drawer(page).locator(".unified-sidebar-header")).toBeHidden();
+      await expect(page.getByTestId("sidebar-drawer-search")).toBeHidden();
+      await expect(page.getByTestId("dm-back-header")).toBeHidden();
+      await expect(page.getByTestId("dm-people-entry")).toBeHidden();
+      await noHorizontalScroll(page);
+
+      const find = drawer(page).locator(".dm-search");
+      await expect(find).toBeHidden();
+      await head.getByTestId("dm-phone-search").tap();
+      await expect(find).toBeFocused();
+      await expect(head.getByTestId("dm-phone-search")).toHaveAttribute("aria-expanded", "true");
+
+      await head.getByTestId("dm-phone-people").tap();
+      await expect(drawer(page)).not.toHaveClass(/drawer-open/);
+      await expect(page.getByTestId("people-home")).toBeVisible();
+
+      // Back on a server, the server header returns.
+      await page.getByTestId("feature-view-menu").tap();
+      await rail(page).locator("[data-testid='server-rail-server']").first().tap();
+      await expect(drawer(page).locator(".unified-sidebar-header")).toBeVisible();
+      await expect(page.getByTestId("dm-phone-head")).toHaveCount(0);
     });
 
     test("the user bar's Switch server button gives way to the rail", async ({ page }) => {

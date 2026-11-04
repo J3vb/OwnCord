@@ -19,6 +19,7 @@ import { voiceStore } from "@stores/voice.store";
 import { trackCurrentView } from "../../../features/navigation/contentView";
 import { navigationText } from "../../../i18n/navigation";
 import { dmConversations } from "./sidebarShared";
+import { mountDmPhoneHead } from "./sidebarDmPhoneHead";
 import type { SidebarScope } from "./sidebarScope";
 
 export function mountMembersAndMode(sc: SidebarScope): void {
@@ -139,6 +140,7 @@ export function mountMembersAndMode(sc: SidebarScope): void {
     } else {
       // "Message Requests (N)" at the top of DM mode. N is the
       // pending-request count and is never folded into unread.
+      mountDmPhoneHead(sc, sc.channelModeUnsubs);
       const requests = sc.opts.destinations?.requests;
       const section = createElement("div", { class: "dm-requests-section" });
       if (sc.opts.destinations?.people !== undefined) {
