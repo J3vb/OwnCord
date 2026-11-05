@@ -4,7 +4,7 @@ import { userEvent } from "vitest/browser";
 import "../../src/styles/tokens.css";
 import "../../src/styles/base.css";
 import "../../src/styles/app.css";
-import { createMemberList, type MemberListComponent } from "@components/MemberList";
+import { createMemberList, type MemberListComponent } from "../../src/features/members/MemberList";
 import "@components/AdminActions";
 import { membersStore, setMembers, updatePresence } from "@stores/members.store";
 import { setRoles } from "@stores/channels.store";

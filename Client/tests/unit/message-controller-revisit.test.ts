@@ -12,7 +12,7 @@ vi.mock("@lib/logger", () => loggerMock());
 
 import { createMessageController } from "../../src/pages/main-page/MessageController";
 import type { MessageControllerOptions } from "../../src/pages/main-page/MessageController";
-import { createMessageList } from "@components/MessageList";
+import { createMessageList } from "../../src/features/messaging/MessageList";
 import { makeListOptions } from "../helpers/messageListHarness";
 import {
   getChannelMessages,

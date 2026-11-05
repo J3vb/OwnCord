@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createMemberContextMenu } from "@components/AdminActions";
 import { setDeveloperMode } from "../helpers/message-actions-fixtures";
 import type { MemberContextMenuOptions } from "@components/AdminActions";
-import type { VoiceModMenuOptions } from "@components/channel-sidebar/volumeMenu";
+import type { VoiceModMenuOptions } from "../../src/features/channels/sidebar/volumeMenu";
 import { useMountContainer } from "../helpers/mountContainer";
 
 const moderationNoops = () => ({

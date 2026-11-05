@@ -32,13 +32,13 @@
       "reason": "Projection of threads.store, which publishes the empty view from its own registered reset; it holds nothing until that store has loaded"
     },
     {
-      "file": "components/ChannelSidebar.ts",
+      "file": "features/channels/ChannelSidebar.ts",
       "binding": "volumeMenuAttempts",
       "category": "dom-owned",
       "reason": "WeakMap keyed by the sidebar's lifetime AbortSignal; entries go with the destroyed sidebar"
     },
     {
-      "file": "components/channel-sidebar/dragReorder.ts",
+      "file": "features/channels/sidebar/dragReorder.ts",
       "binding": "listenerOwners",
       "category": "dom-owned",
       "reason": "AbortSignals of mounted sidebars; removed when the sidebar's signal aborts"
@@ -68,25 +68,25 @@
       "reason": "Key is message id + editedAt + content, and the cache is cleared on MessageList destroy (clearContentParseCache)"
     },
     {
-      "file": "components/message-list/quickReactions.ts",
+      "file": "features/messaging/message-list/quickReactions.ts",
       "binding": "passCache",
       "category": "pure-cache",
       "reason": "Derived from the emoji and preferences, not from server data"
     },
     {
-      "file": "components/message-list/reactionTooltip.ts",
+      "file": "features/messaging/message-list/reactionTooltip.ts",
       "binding": "hoverStates",
       "category": "dom-owned",
       "reason": "WeakMap keyed by live elements or their AbortSignal"
     },
     {
-      "file": "components/message-list/reactionTooltip.ts",
+      "file": "features/messaging/message-list/reactionTooltip.ts",
       "binding": "hoveringChips",
       "category": "dom-owned",
       "reason": "WeakMap keyed by live elements or their AbortSignal"
     },
     {
-      "file": "components/message-list/reactions.ts",
+      "file": "features/messaging/message-list/reactions.ts",
       "binding": "defaultTitles",
       "category": "dom-owned",
       "reason": "WeakMap keyed by live elements"

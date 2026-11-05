@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, vi } from "vitest";
 import type { Mock } from "vitest";
-import { createMessageInput } from "@components/MessageInput";
-import type { MessageInputOptions } from "@components/MessageInput";
+import { createMessageInput } from "../../src/features/messaging/MessageInput";
+import type { MessageInputOptions } from "../../src/features/messaging/MessageInput";
 
 /**
  * Gives each test a mounted composer for channel 1 in a fresh container, and

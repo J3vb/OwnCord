@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useMountContainer } from "../helpers/mountContainer";
 
-import { createMessageList } from "@components/MessageList";
+import { createMessageList } from "../../src/features/messaging/MessageList";
 
 import { applyReadyCapabilities, resetServerCapabilities } from "@lib/net/serverCapabilities";
 import { resetThreadsStore } from "@stores/threads.store";

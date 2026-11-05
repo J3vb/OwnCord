@@ -1,5 +1,5 @@
 import { vi } from "vitest";
-import { createChannelSidebar } from "../../src/components/ChannelSidebar";
+import { createChannelSidebar } from "../../src/features/channels/ChannelSidebar";
 import { dmStore } from "../../src/stores/dm.store";
 import { uiStore } from "../../src/stores/ui.store";
 import { voiceStore } from "../../src/stores/voice.store";

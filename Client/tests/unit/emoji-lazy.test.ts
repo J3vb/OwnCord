@@ -11,7 +11,7 @@ import * as voiceSession from "../helpers/voiceSessionMock";
 vi.mock("@lib/voice/livekitSession", () => voiceSession.defaults());
 
 import { createEmojiPicker } from "@components/EmojiPicker";
-import { createMessageInput } from "@components/MessageInput";
+import { createMessageInput } from "../../src/features/messaging/MessageInput";
 import { emojiCatalog, loadEmojiCatalog } from "../../src/features/messaging/emojiCatalog";
 
 describe("lazy emoji data", () => {

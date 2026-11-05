@@ -13,8 +13,8 @@ import {
   filterMentionSuggestions,
   MAX_MENTION_SUGGESTIONS,
 } from "../../src/components/MentionAutocomplete";
-import { createMessageInput } from "../../src/components/MessageInput";
-import type { MessageInputOptions } from "../../src/components/MessageInput";
+import { createMessageInput } from "../../src/features/messaging/MessageInput";
+import type { MessageInputOptions } from "../../src/features/messaging/MessageInput";
 import { membersStore } from "../../src/stores/members.store";
 import { authStore } from "../../src/stores/auth.store";
 import { channelsStore, setRoles } from "../../src/stores/channels.store";

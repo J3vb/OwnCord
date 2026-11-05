@@ -4,7 +4,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useMountContainer } from "../helpers/mountContainer";
 import { resetComposerServer, useFullComposerServer } from "../helpers/composerSheets";
-import { createMessageInput } from "@components/MessageInput";
+import { createMessageInput } from "../../src/features/messaging/MessageInput";
 import { savePref } from "@lib/prefs/preferences";
 import { applyReadyCapabilities } from "@lib/net/serverCapabilities";
 import {

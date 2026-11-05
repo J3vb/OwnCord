@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, vi, type Mock } from "vitest";
-import type { MessageListOptions } from "../../src/components/MessageList";
+import type { MessageListOptions } from "../../src/features/messaging/MessageList";
 import {
   clearAttachmentCaches,
   closeActiveLightbox,

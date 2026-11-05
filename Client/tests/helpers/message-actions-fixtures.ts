@@ -1,7 +1,7 @@
 // Shared fixtures for the message action gates and the message right-click
 // menu tests: a sent message, list options with spy callbacks, a channel with
 // the server's permission verdicts, and a signed-in role.
-import type { MessageListOptions } from "../../src/components/MessageList";
+import type { MessageListOptions } from "../../src/features/messaging/MessageList";
 import { authStore } from "../../src/stores/auth.store";
 import { channelsStore, setRoles, type Channel } from "../../src/stores/channels.store";
 import { type Message } from "../../src/stores/messages.store";

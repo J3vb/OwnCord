@@ -28,7 +28,7 @@ import {
   setServerHost,
   type LightboxGallery,
 } from "../../src/features/messaging/content/attachments";
-import { closeImageMenu } from "../../src/components/message-list/imageMenu";
+import { closeImageMenu } from "../../src/features/messaging/message-list/imageMenu";
 
 const BASE = "https://myserver.local:8443/api/v1/files";
 const items = ["a", "b", "c"].map((n) => ({

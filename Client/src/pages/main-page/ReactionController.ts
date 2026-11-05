@@ -10,7 +10,7 @@ import {
   atReactionLimit,
   channelCanReact,
   reactionLockReason,
-} from "@components/message-list/reactions";
+} from "../../features/messaging/message-list/reactions";
 import { addOptimisticReaction, getChannelMessages } from "@stores/messages.store";
 import { listCustomEmoji } from "@stores/emoji.store";
 import type { WsClient } from "@lib/ws";

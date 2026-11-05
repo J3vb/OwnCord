@@ -10,7 +10,10 @@ import * as mocks from "../helpers/messageInputMocks";
 vi.mock("@components/EmojiPicker", () => mocks.emojiPickerMock());
 vi.mock("@components/GifPicker", () => mocks.gifPickerMock());
 
-import { createMessageInput, type MessageInputOptions } from "@components/MessageInput";
+import {
+  createMessageInput,
+  type MessageInputOptions,
+} from "../../src/features/messaging/MessageInput";
 import { stubGifApi as gifApi } from "../helpers/messageInputHarness";
 
 function options(): MessageInputOptions {

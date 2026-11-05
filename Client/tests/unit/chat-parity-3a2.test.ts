@@ -13,7 +13,7 @@ import {
   MAX_CHANNEL_SUGGESTIONS,
 } from "../../src/components/ChannelAutocomplete";
 import { useMountedComposer } from "../helpers/composerFixture";
-import type { MessageInputOptions } from "../../src/components/MessageInput";
+import type { MessageInputOptions } from "../../src/features/messaging/MessageInput";
 import {
   relabelInlineTimestamps,
   renderMessageContent,

@@ -7,7 +7,7 @@ vi.mock("@lib/net/e2eeCrypto", () => ({
   computeKeyFingerprint: vi.fn(),
 }));
 
-import { createChannelSidebar } from "../../src/components/ChannelSidebar";
+import { createChannelSidebar } from "../../src/features/channels/ChannelSidebar";
 import {
   categoryGroups,
   channelsStore,

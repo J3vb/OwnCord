@@ -4,7 +4,7 @@
  * and member list use.
  */
 
-import { buildVoiceModOptions } from "@components/ChannelSidebar";
+import { buildVoiceModOptions } from "../../features/channels/ChannelSidebar";
 import { Disposable } from "@lib/disposable";
 import type { VideoGridCallbacks } from "@components/VideoGrid";
 import { channelsStore } from "@stores/channels.store";

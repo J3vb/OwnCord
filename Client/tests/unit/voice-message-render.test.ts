@@ -11,7 +11,7 @@ vi.mock("@tauri-apps/plugin-http", () => mocks.httpPluginMock(fetchMock));
 vi.mock("@lib/net/httpProxy", () => mocks.httpProxyMock());
 vi.mock("@lib/prefs/mediaVisibility", () => mocks.mediaVisibilityMock());
 
-import { renderMessage } from "../../src/components/message-list/renderers";
+import { renderMessage } from "../../src/features/messaging/message-list/renderers";
 import {
   clearAttachmentCaches,
   renderAttachment,

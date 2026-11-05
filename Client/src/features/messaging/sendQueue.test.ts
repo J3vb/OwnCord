@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Disposable } from "../../lib/disposable";
-import type { DraftUpload, SentAttachment } from "../../components/MessageInput";
+import type { DraftUpload, SentAttachment } from "./MessageInput";
 import { messagesStore } from "../../stores/messages.store";
 import { ATTACHMENT_TTL_MS } from "./attachmentTtl";
 import {

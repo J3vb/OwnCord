@@ -12,7 +12,7 @@ vi.mock("../../src/features/messaging/content/attachments", async (importOrigina
   fetchImageAsObjectUrl: vi.fn(async () => "blob:sticker"),
 }));
 
-import { createMessageList } from "@components/MessageList";
+import { createMessageList } from "../../src/features/messaging/MessageList";
 import { messagesStore, markStickersDeleted } from "@stores/messages.store";
 import { buildMinuteMessage } from "../helpers/messageFactory";
 import {

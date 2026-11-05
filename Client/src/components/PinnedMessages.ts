@@ -17,7 +17,7 @@ import {
   createImportedAvatar,
   createImportedName,
   createImportedTag,
-} from "./message-list/importedAuthor";
+} from "../features/messaging/message-list/importedAuthor";
 
 export interface PinnedMessage {
   readonly id: number;

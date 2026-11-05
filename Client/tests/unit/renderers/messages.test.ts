@@ -8,7 +8,7 @@ import {
   renderDayDivider,
   renderMessage,
   renderMentions,
-} from "../../../src/components/message-list/renderers";
+} from "../../../src/features/messaging/message-list/renderers";
 import {
   clearReactionUsersCache,
   setReactionUsersFetcher,

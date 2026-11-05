@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { messageActionGates } from "../../src/components/message-list/messageActions";
-import { renderMessage } from "../../src/components/message-list/renderers";
+import { messageActionGates } from "../../src/features/messaging/message-list/messageActions";
+import { renderMessage } from "../../src/features/messaging/message-list/renderers";
 import {
   refreshThreadChips,
   threadAgoLabel,
   threadCountLabel,
-} from "../../src/components/message-list/threadChip";
+} from "../../src/features/messaging/message-list/threadChip";
 import {
   applyReadyCapabilities,
   resetServerCapabilities,

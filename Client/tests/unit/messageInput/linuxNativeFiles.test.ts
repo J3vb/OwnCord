@@ -33,8 +33,11 @@ vi.mock("@components/GifPicker", () => ({
   createGifPicker: () => ({ element: document.createElement("div"), destroy: vi.fn() }),
 }));
 
-import { createMessageInput, type MessageInputOptions } from "@components/MessageInput";
-import { looksLikeFileList } from "@components/message-input/inputAttachments";
+import {
+  createMessageInput,
+  type MessageInputOptions,
+} from "../../../src/features/messaging/MessageInput";
+import { looksLikeFileList } from "../../../src/features/messaging/composer/inputAttachments";
 
 function nativeFile(
   name: string,

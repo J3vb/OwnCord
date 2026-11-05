@@ -2,7 +2,7 @@
  * Bookkeeping for sends, edits and deletes in flight: slow-mode windows,
  * tracked frames, send timers and reply targets.
  */
-import type { ReplyTarget } from "@components/MessageInput";
+import type { ReplyTarget } from "../../../features/messaging/MessageInput";
 import type { ImportedAuthor } from "@lib/types";
 import { importedName } from "../../../features/messaging/importedAuthor";
 import { messagingText } from "../../../i18n/messaging";

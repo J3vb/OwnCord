@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, type Mock } from "vitest";
 import { fakeTimersTest } from "../../helpers/fakeTimersTest";
 import * as mocks from "../../helpers/messageListMocks";
-import { createMessageList } from "@components/MessageList";
+import { createMessageList } from "../../../src/features/messaging/MessageList";
 import { messagesStore } from "@stores/messages.store";
 import type { Message } from "@stores/messages.store";
 import {

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, vi, type Mock } from "vitest";
-import { createChannelSidebar } from "../../src/components/ChannelSidebar";
+import { createChannelSidebar } from "../../src/features/channels/ChannelSidebar";
 import { mockOpenUserProfilePopup } from "./channelSidebarMocks";
 import { authStore } from "../../src/stores/auth.store";
 import { voiceStore } from "../../src/stores/voice.store";

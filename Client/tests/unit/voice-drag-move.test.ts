@@ -13,7 +13,10 @@ vi.mock("../../src/features/profiles/openUserProfilePopup", () => ({
   closeUserProfilePopup: vi.fn(),
 }));
 
-import { createChannelSidebar, type ChannelReorderData } from "../../src/components/ChannelSidebar";
+import {
+  createChannelSidebar,
+  type ChannelReorderData,
+} from "../../src/features/channels/ChannelSidebar";
 import { setChannels } from "../../src/stores/channels.store";
 import { uiStore } from "../../src/stores/ui.store";
 import { voiceStore } from "../../src/stores/voice.store";

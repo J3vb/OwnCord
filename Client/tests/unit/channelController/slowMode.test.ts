@@ -22,8 +22,8 @@ import {
 
 vi.mock("@lib/logger", () => mocks.loggerMock());
 vi.mock("@lib/dom", () => mocks.domMock());
-vi.mock("@components/MessageList", () => mocks.messageListMock());
-vi.mock("@components/MessageInput", () => mocks.messageInputMock());
+vi.mock("../../../src/features/messaging/MessageList", () => mocks.messageListMock());
+vi.mock("../../../src/features/messaging/MessageInput", () => mocks.messageInputMock());
 vi.mock("@components/NsfwGate", () => mocks.nsfwGateMock());
 vi.mock("@components/TypingIndicator", () => mocks.typingIndicatorMock());
 vi.mock("@lib/readState", () => mocks.readStateMock());

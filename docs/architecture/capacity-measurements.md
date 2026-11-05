@@ -691,7 +691,7 @@ writer carries it. This profile uses the idle-heavy model the owner chose
   - The send carries a `client_message_id`, as the desktop client's does, so
     every message also writes its delivery receipt.
   - It is preceded by `typing_start` at most once per 3 s. That is the
-    client's own throttle (`Client/src/components/MessageInput.ts`), and no
+    client's own throttle (`Client/src/features/messaging/MessageInput.ts`), and no
     one else types.
 - **Presence only on a status flip.** Each user flips once per 10 minutes,
   as `Client/src/lib/presence/presence.ts` sends `presence_update` only on a change.

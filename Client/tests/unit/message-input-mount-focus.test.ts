@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useMountContainer } from "../helpers/mountContainer";
-import { createMessageInput } from "@components/MessageInput";
+import { createMessageInput } from "../../src/features/messaging/MessageInput";
 import { stubGifApi as gifApi } from "../helpers/messageInputHarness";
 
 function mountComposer(container: HTMLElement): ReturnType<typeof createMessageInput> {

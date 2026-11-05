@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import * as mocks from "../../helpers/messageInputMocks";
-import { createMessageInput } from "@components/MessageInput";
+import { createMessageInput } from "../../../src/features/messaging/MessageInput";
 import {
   makeOptions,
   mountMessageInput,

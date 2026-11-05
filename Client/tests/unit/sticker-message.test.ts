@@ -22,9 +22,9 @@ vi.mock("../../src/features/messaging/emojiStill", async (importOriginal) => {
   return { ...actual, showStillFrame: showStill };
 });
 
-import { renderMessage } from "@components/message-list/renderers";
-import { messageActionGates } from "@components/message-list/messageActions";
-import { stickerReplyPreview } from "@components/message-list/sticker";
+import { renderMessage } from "../../src/features/messaging/message-list/renderers";
+import { messageActionGates } from "../../src/features/messaging/message-list/messageActions";
+import { stickerReplyPreview } from "../../src/features/messaging/message-list/sticker";
 import { savePref } from "@lib/prefs/preferences";
 import type { Message } from "@stores/messages.store";
 import {

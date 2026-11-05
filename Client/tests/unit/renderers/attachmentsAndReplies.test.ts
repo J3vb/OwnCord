@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import * as mocks from "../../helpers/renderersMocks";
-import { renderMessage } from "../../../src/components/message-list/renderers";
+import { renderMessage } from "../../../src/features/messaging/message-list/renderers";
 import { savePref } from "../../../src/lib/prefs/preferences";
 import {
   createObjectURLMock,

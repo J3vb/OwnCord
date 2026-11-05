@@ -4,11 +4,11 @@
  */
 import { createElement } from "@lib/dom";
 import { createConfirmModal } from "../../../features/dialogs/confirmModal";
-import { createMessageList } from "@components/MessageList";
+import { createMessageList } from "../../../features/messaging/MessageList";
 import { bindGifFavoritesApi } from "@stores/gifFavorites.store";
 import { setInlineImageDecorator } from "../../../features/messaging/content/media";
-import { WAVE_CONTENT } from "@components/message-list/welcomeRows";
-import { gifFavoriteStar } from "@components/message-list/gifFavoriteStar";
+import { WAVE_CONTENT } from "../../../features/messaging/message-list/welcomeRows";
+import { gifFavoriteStar } from "../../../features/messaging/message-list/gifFavoriteStar";
 import { endPoll, votePoll } from "../../../features/messaging/pollSend";
 import {
   messagesStore,

@@ -1,7 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-import { messageActionGates } from "../../src/components/message-list/messageActions";
-import { openMessageMenu, closeMessageMenu } from "../../src/components/message-list/messageMenu";
+import { messageActionGates } from "../../src/features/messaging/message-list/messageActions";
+import {
+  openMessageMenu,
+  closeMessageMenu,
+} from "../../src/features/messaging/message-list/messageMenu";
 import {
   applyReadyCapabilities,
   resetServerCapabilities,

@@ -12,7 +12,7 @@ globalThis.ResizeObserver = class {
   }
 } as unknown as typeof ResizeObserver;
 
-import { createMessageList } from "@components/MessageList";
+import { createMessageList } from "../../src/features/messaging/MessageList";
 import type { Message } from "@stores/messages.store";
 import { buildMessage } from "../helpers/messageFactory";
 import { resetMembersState, resetMessagesState } from "../helpers/storeResets";

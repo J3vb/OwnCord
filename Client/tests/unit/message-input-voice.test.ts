@@ -9,7 +9,10 @@ import * as mocks from "../helpers/messageInputMocks";
 vi.mock("@components/EmojiPicker", () => mocks.emojiPickerMock());
 vi.mock("@components/GifPicker", () => mocks.gifPickerMock());
 
-import { createMessageInput, type MessageInputOptions } from "@components/MessageInput";
+import {
+  createMessageInput,
+  type MessageInputOptions,
+} from "../../src/features/messaging/MessageInput";
 import { applyReadyCapabilities, resetServerCapabilities } from "@lib/net/serverCapabilities";
 import type { VoiceUploadMeta } from "@lib/types";
 import { ATTACHMENT_TTL_MS } from "../../src/features/messaging/attachmentTtl";

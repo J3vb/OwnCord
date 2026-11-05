@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { createMemberList } from "@components/MemberList";
-import type { MemberListOptions } from "@components/MemberList";
+import { createMemberList } from "../../../src/features/members/MemberList";
+import type { MemberListOptions } from "../../../src/features/members/MemberList";
 import { membersStore, updatePresence, updateMemberRole } from "@stores/members.store";
 import type { Member } from "@stores/members.store";
 import { authStore } from "@stores/auth.store";

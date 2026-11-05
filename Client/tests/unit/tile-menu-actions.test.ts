@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const mockBuildVoiceModOptions = vi.hoisted(() => vi.fn((..._args: unknown[]) => "mod-options"));
 const mockOpenProfile = vi.hoisted(() => vi.fn());
 
-vi.mock("@components/ChannelSidebar", () => ({
+vi.mock("../../src/features/channels/ChannelSidebar", () => ({
   buildVoiceModOptions: (...args: unknown[]) => mockBuildVoiceModOptions(...args),
 }));
 vi.mock("../../src/features/profiles/openUserProfilePopup", () => ({

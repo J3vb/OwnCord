@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, type Mock } from "vitest";
 import * as mocks from "../../helpers/channelSidebarMocks";
-import { createChannelSidebar } from "../../../src/components/ChannelSidebar";
+import { createChannelSidebar } from "../../../src/features/channels/ChannelSidebar";
 import {
   addChannel,
   channelsStore,

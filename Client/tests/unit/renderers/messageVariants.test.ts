@@ -5,7 +5,7 @@
  */
 import { describe, it, expect, vi } from "vitest";
 import * as mocks from "../../helpers/renderersMocks";
-import { renderMessage } from "../../../src/components/message-list/renderers";
+import { renderMessage } from "../../../src/features/messaging/message-list/renderers";
 import { upsertThread, resetThreadsStore } from "../../../src/stores/threads.store";
 import { makeThread } from "../../helpers/thread-fixtures";
 import {
@@ -15,7 +15,7 @@ import {
   mountMessage,
 } from "../../helpers/renderersHarness";
 import type { Message } from "../../../src/stores/messages.store";
-import type { MessageRenderOptions } from "../../../src/components/message-list/renderers";
+import type { MessageRenderOptions } from "../../../src/features/messaging/message-list/renderers";
 
 vi.mock("../../../src/features/content-consent/external", (importOriginal) =>
   mocks.consentExternalMock(importOriginal),

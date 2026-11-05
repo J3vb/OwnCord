@@ -1,6 +1,6 @@
 import { defineCatalog } from "./format";
 
-/** The poll card (components/message-list/pollCard.ts). Its own catalog so the copy loads with the message list, not with the startup closure. */
+/** The poll card (features/messaging/message-list/pollCard.ts). Its own catalog so the copy loads with the message list, not with the startup closure. */
 export const pollCardText = defineCatalog("pollCard", {
   "card.label": "Poll: {question}",
   "hint.single": "Select one answer",

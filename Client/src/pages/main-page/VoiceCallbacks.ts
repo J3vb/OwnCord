@@ -19,7 +19,7 @@ import { noteJoinFailed } from "../../features/voice/joinBackoff";
 import { noteJoinSent } from "../../features/voice/joinRequest";
 import { noteVoiceLeave } from "../../features/voice/leaveOwed";
 import { joinBackoffText } from "../../features/voice/joinBackoffText";
-import type { VoiceModerationCallbacks } from "@components/ChannelSidebar";
+import type { VoiceModerationCallbacks } from "../../features/channels/ChannelSidebar";
 import {
   leaveVoice as voiceSessionLeave,
   setMuted as voiceSessionSetMuted,

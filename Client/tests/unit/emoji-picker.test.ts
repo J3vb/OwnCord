@@ -12,7 +12,7 @@ import {
 import { useMountContainer } from "../helpers/mountContainer";
 import { pressComposingEnter } from "../helpers/keyEvents";
 import { createEmojiPicker } from "@components/EmojiPicker";
-import { quickReactionEmoji } from "@components/message-list/quickReactions";
+import { quickReactionEmoji } from "../../src/features/messaging/message-list/quickReactions";
 import type { EmojiPickerOptions } from "@components/EmojiPicker";
 import { emojiStore, setCustomEmoji, clearCustomEmoji } from "@stores/emoji.store";
 import { expectConsole } from "../helpers/console";

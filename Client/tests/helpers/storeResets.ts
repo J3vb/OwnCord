@@ -1,6 +1,6 @@
 import { messagesStore, type MessagesState } from "@stores/messages.store";
 import { membersStore } from "@stores/members.store";
-import { clearReadingPositions } from "@components/message-list/readingPositions";
+import { clearReadingPositions } from "../../src/features/messaging/message-list/readingPositions";
 
 /** Empty every message, pending send and history flag, and the reading
  *  positions kept for them, as a fresh session starts. */

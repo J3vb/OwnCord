@@ -26,7 +26,7 @@ import type { WsClient } from "../../src/lib/ws";
 import {
   markMessageUnread,
   setMarkUnreadSender,
-} from "../../src/components/message-list/markUnread";
+} from "../../src/features/messaging/message-list/markUnread";
 import { viewChannel } from "../../src/lib/prefs/lastChannel";
 import { readPointerEnabled } from "../../src/lib/net/serverCapabilities";
 import type { ReadyChannel, ReadyPayload } from "../../src/lib/types";

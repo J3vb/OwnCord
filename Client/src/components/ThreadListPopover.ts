@@ -19,7 +19,11 @@ import type { ApiClient } from "@lib/api";
 import { errorText } from "@lib/api";
 import type { ThreadInfo } from "@lib/types";
 import { adoptThreadSnapshots } from "@stores/threads.store";
-import { createArchiveIcon, threadAgoLabel, threadCountLabel } from "./message-list/threadChip";
+import {
+  createArchiveIcon,
+  threadAgoLabel,
+  threadCountLabel,
+} from "../features/messaging/message-list/threadChip";
 import { threadsText } from "../i18n/threads";
 
 const PAGE_SIZE = 25;

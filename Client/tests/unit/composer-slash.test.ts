@@ -10,7 +10,10 @@ vi.mock("@components/GifPicker", () => ({
   createGifPicker: () => ({ element: document.createElement("div"), destroy: vi.fn() }),
 }));
 
-import { createMessageInput, type MessageInputOptions } from "@components/MessageInput";
+import {
+  createMessageInput,
+  type MessageInputOptions,
+} from "../../src/features/messaging/MessageInput";
 
 describe("composer slash commands (3A-10a)", () => {
   let container: HTMLDivElement;

@@ -15,7 +15,7 @@ import type { ExternalImageSource } from "../../../platform/contracts/externalCo
 import { mediaControlsText } from "../../../i18n/mediaControls";
 import { messageStatusText } from "../../../i18n/messageStatus";
 import { fileTransferText } from "../../../i18n/fileTransfer";
-import type { ImageMenuTarget } from "../../../components/message-list/imageMenu";
+import type { ImageMenuTarget } from "../message-list/imageMenu";
 import {
   fetchExternalImage,
   fetchImageAsObjectUrl,
@@ -137,12 +137,12 @@ export async function downloadFile(
 
 // -- Image menu ---------------------------------------------------------------
 
-type ImageMenuModule = typeof import("../../../components/message-list/imageMenu");
+type ImageMenuModule = typeof import("../message-list/imageMenu");
 /** Set once the lazy menu module has loaded, so teardown can close its menu. */
 let imageMenuModule: ImageMenuModule | null = null;
 
 function loadImageMenu(): Promise<ImageMenuModule> {
-  return import("../../../components/message-list/imageMenu").then((m) => {
+  return import("../message-list/imageMenu").then((m) => {
     imageMenuModule = m;
     return m;
   });
@@ -504,7 +504,7 @@ export function openImageLightbox(
       shownImageUrl,
       close,
     };
-    import("../../../components/message-list/lightboxGallery").then(
+    import("../message-list/lightboxGallery").then(
       (m) => {
         if (!disposable.signal.aborted) m.attachLightboxGallery(gallery, handle);
       },

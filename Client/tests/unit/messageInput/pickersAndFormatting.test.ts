@@ -4,7 +4,7 @@ import {
   createMessageInput,
   wrapWithMarker,
   type MessageInputOptions,
-} from "@components/MessageInput";
+} from "../../../src/features/messaging/MessageInput";
 import { canMention, mentionInComposer } from "../../../src/features/messaging/activeComposer";
 import { lastEmojiPickerOptions, lastGifPickerOptions } from "../../helpers/messageInputMocks";
 import {

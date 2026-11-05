@@ -26,7 +26,7 @@ import {
   appendVoiceModeration,
   createLocalMuteItem,
   type VoiceModMenuOptions,
-} from "../channel-sidebar/volumeMenu";
+} from "../../features/channels/sidebar/volumeMenu";
 import { voiceText as t } from "../../i18n/voice";
 import { isAndroidApp } from "../../features/voice/native/platform";
 

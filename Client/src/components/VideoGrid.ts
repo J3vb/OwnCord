@@ -11,7 +11,7 @@ import { syncVideoSurface } from "@lib/voice/videoSurface";
 import type { MountableComponent } from "@lib/text/safeRender";
 import { voiceText } from "../i18n/voice";
 import type { StreamInfo } from "./video-grid/streamInfo";
-import type { VoiceModMenuOptions } from "./channel-sidebar/volumeMenu";
+import type { VoiceModMenuOptions } from "../features/channels/sidebar/volumeMenu";
 import type { StreamSample, VideoView } from "../features/voice/remoteTracks";
 import type { ShareSenderSample } from "../features/voice/shareSenderStats";
 import type { CellEntry } from "./video-grid/gridShared";

@@ -11,7 +11,10 @@ vi.mock("@components/GifPicker", () => ({
   createGifPicker: () => ({ element: document.createElement("div"), destroy: vi.fn() }),
 }));
 
-import { createMessageInput, type MessageInputOptions } from "@components/MessageInput";
+import {
+  createMessageInput,
+  type MessageInputOptions,
+} from "../../src/features/messaging/MessageInput";
 
 function makeOptions(overrides: Partial<MessageInputOptions> = {}): MessageInputOptions {
   return {

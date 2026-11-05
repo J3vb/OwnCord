@@ -1,5 +1,5 @@
 import { afterEach } from "vitest";
-import { createMessageList } from "@components/MessageList";
+import { createMessageList } from "../../src/features/messaging/MessageList";
 import { messagesStore } from "@stores/messages.store";
 import type { Message } from "@stores/messages.store";
 import { makeOpts } from "./message-actions-fixtures";
