@@ -14,12 +14,25 @@ WHERE token_hash = ?
 
 -- name: ListAPITokens :many
 -- Admin/CLI listing. Never selects token_hash (unrecoverable; only the raw
--- token shown at creation is usable).
+-- token shown at creation is usable). Unrevoked rows sort first so the cap
+-- drops old revoked rows, never a token that may still work.
 SELECT t.id, t.user_id, COALESCE(u.username, '') AS username, t.label,
        t.created_at, t.last_used_at, t.expires_at, t.revoked_at
 FROM api_tokens t
 LEFT JOIN users u ON u.id = t.user_id
-ORDER BY t.id DESC
+ORDER BY (t.revoked_at IS NOT NULL), t.id DESC
+LIMIT 200;
+
+-- name: ListAPITokensByUser :many
+-- The admin listing for a token holder who is not the owner: only that
+-- account's rows, so other accounts' tokens never push its own out of the cap.
+-- Same columns and order as ListAPITokens.
+SELECT t.id, t.user_id, COALESCE(u.username, '') AS username, t.label,
+       t.created_at, t.last_used_at, t.expires_at, t.revoked_at
+FROM api_tokens t
+LEFT JOIN users u ON u.id = t.user_id
+WHERE t.user_id = ?
+ORDER BY (t.revoked_at IS NOT NULL), t.id DESC
 LIMIT 200;
 
 -- name: RevokeAPIToken :execresult

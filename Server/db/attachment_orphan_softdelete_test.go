@@ -94,3 +94,38 @@ func TestDeleteOrphanedAttachments_DoesNotReclaimAttachmentOfLiveMessage(t *test
 		t.Fatalf("attachment row of a live message must survive the sweep (att=%v err=%v)", att, err)
 	}
 }
+
+// Each half of the sweep reads its own cutoff: a staged upload and a deleted
+// message's file of the same age go on different schedules.
+func TestDeleteOrphanedAttachmentsBefore_EachHalfHasItsOwnCutoff(t *testing.T) {
+	ctx := context.Background()
+	database := openMigratedMemory(t)
+	userID := seedUser(t, database, "two-cutoffs")
+	chID := seedChannel(t, database, "two-cutoffs-channel")
+	for _, id := range []string{"att-staged", "att-deleted"} {
+		if err := database.CreateAttachment(ctx, id, userID, id+".txt", "stored-"+id, "text/plain", 100, nil, nil); err != nil {
+			t.Fatalf("CreateAttachment %s: %v", id, err)
+		}
+	}
+	msgID, err := database.CreateMessage(ctx, chID, userID, "with attachment", nil)
+	if err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+	if n, err := database.LinkAttachmentsToMessage(ctx, msgID, userID, []string{"att-deleted"}); err != nil || len(n) != 1 {
+		t.Fatalf("LinkAttachmentsToMessage: n=%d err=%v", len(n), err)
+	}
+	if err := database.DeleteMessage(ctx, msgID, userID, false); err != nil {
+		t.Fatalf("DeleteMessage: %v", err)
+	}
+	past := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
+	future := time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	files, err := database.DeleteOrphanedAttachmentsBefore(ctx, past, future)
+	if err != nil || len(files) != 1 || files[0] != "stored-att-deleted" {
+		t.Fatalf("deleted half only: files=%v err=%v, want [stored-att-deleted]", files, err)
+	}
+	files, err = database.DeleteOrphanedAttachmentsBefore(ctx, future, past)
+	if err != nil || len(files) != 1 || files[0] != "stored-att-staged" {
+		t.Fatalf("unlinked half only: files=%v err=%v, want [stored-att-staged]", files, err)
+	}
+}

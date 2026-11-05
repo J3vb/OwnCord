@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -346,5 +347,44 @@ func TestTokenService_OwnTokensOnly(t *testing.T) {
 	}
 	if err := svc.RevokeOwn(ctx, 2, mine1.ID); !errors.Is(err, ErrNotFound) {
 		t.Errorf("second RevokeOwn = %v, want ErrNotFound", err)
+	}
+}
+
+// A holder's own tokens stay listable and revocable however many rows other
+// accounts add, and a live token outranks newer revoked ones in every listing.
+func TestTokenService_OwnTokensSurviveTheListCap(t *testing.T) {
+	svc, database, ctx := tokenFixture(t)
+	seedTokenUser(t, database, 1, "owner", permissions.OwnerRoleID)
+	seedTokenUser(t, database, 2, "holder", permissions.MemberRoleID)
+	holder, _ := database.GetUserByID(ctx, 2)
+
+	mine, err := svc.CreateOwn(ctx, holder, "", "old-bot", 0)
+	if err != nil {
+		t.Fatalf("CreateOwn: %v", err)
+	}
+	for i := range 201 {
+		tok, err := svc.Create(ctx, 1, "", fmt.Sprintf("ci-%d", i), 0)
+		if err != nil {
+			t.Fatalf("Create %d: %v", i, err)
+		}
+		if err := svc.Revoke(ctx, 1, tok.ID); err != nil {
+			t.Fatalf("Revoke %d: %v", i, err)
+		}
+	}
+
+	own, err := svc.ListFor(ctx, 2, false)
+	if err != nil || len(own) != 1 || own[0].ID != mine.ID || own[0].Username != "holder" {
+		t.Fatalf("ListFor(holder) = %+v, %v; want only the holder's token", own, err)
+	}
+	all, err := svc.ListFor(ctx, 1, true)
+	if err != nil || len(all) != 200 || all[0].ID != mine.ID {
+		t.Fatalf("ListFor(owner) = %d rows, first %+v, %v; want 200 with the live token first", len(all), all[0], err)
+	}
+	if err := svc.RevokeFor(ctx, 2, mine.ID, false); err != nil {
+		t.Fatalf("RevokeFor(holder, own token): %v", err)
+	}
+	own, _ = svc.ListOwn(ctx, 2)
+	if len(own) != 1 || own[0].RevokedAt == nil {
+		t.Fatalf("ListOwn after revoke = %+v, want the token shown as revoked", own)
 	}
 }

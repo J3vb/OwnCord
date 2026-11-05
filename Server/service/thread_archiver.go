@@ -27,10 +27,14 @@ type ThreadNotifier interface {
 
 // ThreadArchiver archives idle threads: one goroutine (Run) sleeps until the
 // earliest open thread falls due (capped at expirerMaxSleep), archives every due
-// thread and tells the notifier. Correctness does not depend on it: a late flag
+// thread and tells the notifier. Wake makes it re-read the earliest due time when
+// a thread can fall due sooner than the planned wake-up (a shorter idle period).
+// A create or a post only moves a due time later, at least an hour out, which the
+// capped sleep always reaches in time, so neither wakes it. Correctness does not depend on it: a late flag
 // only keeps a thread showing active longer, and a post reopens an archived thread.
 type ThreadArchiver struct {
-	st threadArchiveStore
+	st   threadArchiveStore
+	wake chan struct{} // size 1: an idle period was shortened
 
 	mu       syncutil.Mutex
 	notifier ThreadNotifier
@@ -47,7 +51,8 @@ type ThreadArchiver struct {
 // checked for threadArchiveStore, so it takes any value.
 func NewThreadArchiver(st any) *ThreadArchiver {
 	a := &ThreadArchiver{
-		now: time.Now, slack: expirerSlack, maxSleep: expirerMaxSleep, retryAfter: expirerRetryAfterError,
+		wake: make(chan struct{}, 1),
+		now:  time.Now, slack: expirerSlack, maxSleep: expirerMaxSleep, retryAfter: expirerRetryAfterError,
 	}
 	if ts, ok := st.(threadArchiveStore); ok {
 		a.st = ts
@@ -60,6 +65,15 @@ func (a *ThreadArchiver) SetNotifier(n ThreadNotifier) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.notifier = n
+}
+
+// Wake makes Run re-read the earliest due time. It never blocks: a wake already
+// pending covers this one.
+func (a *ThreadArchiver) Wake() {
+	select {
+	case a.wake <- struct{}{}:
+	default:
+	}
 }
 
 // Sweep archives every due thread once and returns the first error. The boot
@@ -108,6 +122,8 @@ func (a *ThreadArchiver) Run(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
+		case <-a.wake:
+			continue
 		case <-timer.C:
 		}
 		if failed {

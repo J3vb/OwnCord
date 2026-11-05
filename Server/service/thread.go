@@ -77,7 +77,14 @@ type ThreadService struct {
 	ts      ThreadStore
 	perms   *PermissionService
 	limiter *auth.RateLimiter
+	// archiveWake tells the archiver an idle period changed; nil when unwired.
+	archiveWake func()
 }
+
+// SetArchiveWake installs the callback a committed idle-period change calls, so
+// the archiver re-reads the earliest due time. The composition root wires it
+// before serving.
+func (s *ThreadService) SetArchiveWake(wake func()) { s.archiveWake = wake }
 
 // NewThreadService creates a ThreadService over the ThreadStore slice of st.
 func NewThreadService(st threadServiceStore, perms *PermissionService, limiter *auth.RateLimiter) *ThreadService {
@@ -311,6 +318,9 @@ func (s *ThreadService) Update(ctx context.Context, p UpdateThreadParams) (*db.T
 	out, err := ts.UpdateThread(ctx, p.ThreadID, patch, isMod)
 	if err != nil {
 		return nil, mapThreadErr(err)
+	}
+	if patch.AutoArchiveMinutes != nil && s.archiveWake != nil {
+		s.archiveWake()
 	}
 	return out, nil
 }

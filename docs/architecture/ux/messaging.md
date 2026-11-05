@@ -71,7 +71,8 @@ stashed and the edit text itself is dropped (restored outside edit mode it
 would send as a duplicate); cancelling or sending an edit also restores that
 displaced draft (P1-08). A reply whose target was deleted meanwhile is
 dropped, and a staged upload older than
-`DRAFT_ATTACHMENT_TTL_MS` (50 min, under the server's ~1 h unlinked-attachment
+`attachmentTtlMs()` (five sixths of the `staged_lifetime_seconds` auth_ok
+advertises, 20 h on a current server; 50 min on an older server with a ~1 h
 sweep) is dropped with an "attach it again" notice. Gating the composer
 (offline, no permission) uses `aria-disabled` + `readOnly` rather
 than the `disabled` attribute, so a mid-sentence caret is never dropped to

@@ -76,7 +76,7 @@ export interface InputState {
   slashPopup: SlashAutocompleteComponent | null;
   /** Pending attachment IDs to send with the next message. `upload` is set
    *  exactly while the upload is in flight: Send then queues the message behind
-   *  it (3A-9), while a chip past ATTACHMENT_TTL_MS still blocks Send, see
+   *  it (3A-9), while a chip past attachmentTtlMs() still blocks Send, see
    *  refreshStale. Destroying its owner cancels that upload when the user
    *  removes the preview, and it is detached once the upload succeeds. A `Disposable` rather than a raw AbortController
    *  keeps the upload token in the lifecycle primitives, matching
@@ -87,10 +87,10 @@ export interface InputState {
     readonly previewEl: HTMLDivElement;
     upload?: DraftUpload;
     uploadedAt?: number;
-    /** The picked file, kept so a chip past ATTACHMENT_TTL_MS can re-upload.
+    /** The picked file, kept so a chip past attachmentTtlMs() can re-upload.
      *  Absent on chips restored from an older draft. */
     file?: File;
-    /** Past ATTACHMENT_TTL_MS with no file to re-upload from. */
+    /** Past attachmentTtlMs() with no file to re-upload from. */
     expired?: boolean;
     /** Put back after a send did not carry it; cleared by a fresh upload. */
     unsent?: boolean;

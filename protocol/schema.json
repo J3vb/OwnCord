@@ -465,6 +465,12 @@
       { "wire": "PREVIEW_EXPIRED", "go": "CodePreviewExpired", "ts": "PREVIEW_EXPIRED" },
       { "wire": "PUSH_DISABLED", "go": "CodePushDisabled", "ts": "PUSH_DISABLED" },
       { "wire": "RATE_LIMITED", "go": "CodeRateLimited", "ts": "RATE_LIMITED" },
+      {
+        "wire": "RECOVERED_SIGN_IN_REQUIRED",
+        "go": "CodeRecoveredSignInRequired",
+        "ts": "RECOVERED_SIGN_IN_REQUIRED",
+        "note": "Account recovery set the new password and spent the recovery secret, but no session could be started; sign in with the new password instead of retrying the recovery."
+      },
       { "wire": "RESTART_PENDING", "go": "CodeRestartPending", "ts": "RESTART_PENDING" },
       { "wire": "REVERSAL_FAILED", "go": "CodeReversalFailed", "ts": "REVERSAL_FAILED" },
       { "wire": "ROLE_CONFLICT", "go": "CodeRoleConflict", "ts": "ROLE_CONFLICT" },

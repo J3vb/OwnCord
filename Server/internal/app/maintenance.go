@@ -295,19 +295,24 @@ func (m *maintenance) maintainBackups(ctx context.Context) error {
 	return admin.MaintainBackups(ctx, m.database, m.settings, admin.ResolveBackupDir(m.backupDir))
 }
 
+// deletedAttachmentGrace is how long a deleted message's files stay on disk
+// before the orphan sweep removes them; they are not served meanwhile.
+const deletedAttachmentGrace = time.Hour
+
 // sweepOrphans cleans up orphaned attachments (uploaded but never linked to a
-// message). It is skipped with no file storage: the row delete is atomic (see
-// db/attachment_queries.go), so the returned stored_as names, the only handle
+// message) older than service.StagedUploadLifetime, and the files of deleted
+// messages after deletedAttachmentGrace. It is skipped with no file storage:
+// the row delete is atomic (see db/attachment_queries.go), so the returned stored_as names, the only handle
 // on the blobs, would be discarded and the files stranded. Leaving the rows
 // keeps them reclaimable once storage is available.
 func (m *maintenance) sweepOrphans(ctx context.Context) error {
 	if m.files == nil {
 		return nil
 	}
-	cutoff := time.Now().Add(-1 * time.Hour)
+	now := time.Now()
 	// On an error the names of rows already deleted still come back: their
 	// files are removed before the error is reported.
-	orphanFiles, err := m.database.DeleteOrphanedAttachments(ctx, cutoff)
+	orphanFiles, err := m.database.DeleteOrphanedAttachmentsBefore(ctx, now.Add(-service.StagedUploadLifetime), now.Add(-deletedAttachmentGrace))
 	// Best-effort file cleanup.
 	for _, filename := range orphanFiles {
 		if delErr := m.files.Delete(filename); delErr != nil {

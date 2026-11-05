@@ -61,11 +61,15 @@ const (
 	CodePreviewExpired              Code = "PREVIEW_EXPIRED"
 	CodePushDisabled                Code = "PUSH_DISABLED"
 	CodeRateLimited                 Code = "RATE_LIMITED"
-	CodeRestartPending              Code = "RESTART_PENDING"
-	CodeReversalFailed              Code = "REVERSAL_FAILED"
-	CodeRoleConflict                Code = "ROLE_CONFLICT"
-	CodeSchemaTooNew                Code = "SCHEMA_TOO_NEW"
-	CodeSelfReview                  Code = "SELF_REVIEW"
+	// Account recovery set the new password and spent the recovery secret, but no
+	// session could be started; sign in with the new password instead of retrying
+	// the recovery.
+	CodeRecoveredSignInRequired Code = "RECOVERED_SIGN_IN_REQUIRED"
+	CodeRestartPending          Code = "RESTART_PENDING"
+	CodeReversalFailed          Code = "REVERSAL_FAILED"
+	CodeRoleConflict            Code = "ROLE_CONFLICT"
+	CodeSchemaTooNew            Code = "SCHEMA_TOO_NEW"
+	CodeSelfReview              Code = "SELF_REVIEW"
 	// The WebSocket upgrade was refused at connection capacity. Same wire value
 	// as the WS error code.
 	CodeServerBusy Code = "SERVER_BUSY"

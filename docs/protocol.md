@@ -254,7 +254,8 @@ connection or a call parked in the voice grace window.
     "upload_policy": {
       "max_upload_bytes": 104857600,
       "blocked_extensions": ["bat", "cmd", "ps1", "vbs", "js", "hta"],
-      "thumbnails": true
+      "thumbnails": true,
+      "staged_lifetime_seconds": 86400
     },
     "game_activity_policy": { "enabled": true }
   }
@@ -326,6 +327,14 @@ opened. It is omitted by older servers, and clients then show the full file.
 A `image/heic`, `image/heif` or `image/tiff` attachment has no image a client
 can show except that route's JPEG, so a client without `thumbnails` shows it as
 a file to download.
+
+`staged_lifetime_seconds` is how long the server keeps an upload that no
+message names (24 hours) before the maintenance sweep deletes it. A composer
+holding an upload id longer than that, less a margin, uploads the file again
+instead of sending the old id. Older servers omit it and sweep after an hour;
+clients then trust an upload id for 50 minutes. A send whose id is already gone
+still succeeds without that file and lists it in the ack's
+`skipped_attachment_ids`.
 
 ### Step 3: Failure -- auth_error
 
@@ -2633,7 +2642,8 @@ reconnect; auth_ok carries the same lists from then on.
 ```
 
 Both fields are always arrays, `[]` when emptied, and replace the lists
-auth_ok gave; `max_upload_bytes` and `thumbnails` keep their auth_ok values.
+auth_ok gave; `max_upload_bytes`, `thumbnails` and `staged_lifetime_seconds`
+keep their auth_ok values.
 Two empty lists allow every extension, though the content blocks still refuse
 executables. Unfiltered: the lists are already in every client's auth_ok.
 
