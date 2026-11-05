@@ -3,7 +3,7 @@
  * Extracted from MainPage to reduce god-object coupling and enable unit testing.
  */
 
-import { voiceStore, type VoiceUser } from "@stores/voice.store";
+import { voiceStore, type VoiceState, type VoiceUser } from "@stores/voice.store";
 import { membersStore, memberDisplayName } from "@stores/members.store";
 import {
   getLocalCameraStream,
@@ -87,6 +87,18 @@ export interface VideoModeController {
 
 /** The split needs room for the 360px chat column and a usable grid. */
 export const CALL_CHAT_STACK_BELOW_PX = 720;
+
+/** Prefer the member's display name (same identity every other surface
+ *  shows for a rename — see ChannelSidebar.ts's voice roster) over the
+ *  frozen voice-roster username. */
+function selfName(
+  currentUserId: number,
+  channelUsers: ReadonlyMap<number, VoiceUser>,
+): string | undefined {
+  const member = membersStore.getState().members.get(currentUserId);
+  const me = channelUsers.get(currentUserId);
+  return (member !== undefined ? memberDisplayName(member) : "") || me?.username;
+}
 
 export function createVideoModeController(opts: VideoModeControllerOptions): VideoModeController {
   const { slots, videoGrid, getCurrentUserId } = opts;
@@ -259,21 +271,120 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
     closeVideoGrid();
   }
 
+  /** Clear stale remote tiles on ANY change of channel — a real leave
+   *  (channelId -> null) and a direct A -> B switch both need it, since
+   *  VoiceCallbacks.onVoiceJoin moves currentChannelId straight from the
+   *  old channel to the new one without ever passing through null.
+   *  currentChannelId stays unchanged across auto-reconnect, so this does
+   *  not fire on reconnect. */
+  function followChannelChange(channelId: number | null): void {
+    if (channelId === lastChannelId) return;
+    if (lastChannelId !== null) videoGrid.clearStreams();
+    lastChannelId = channelId;
+  }
+
+  /** Check both voice store state AND whether the grid has tiles, because
+   *  LiveKit track delivery can race ahead of the WS voice_state update. */
+  function anyVideoOn(voice: VoiceState, channelUsers: ReadonlyMap<number, VoiceUser>): boolean {
+    if (voice.localCamera || voice.localScreenshare) return true;
+    for (const user of channelUsers.values()) {
+      if (user.camera || user.screenshare) return true;
+    }
+    return videoGrid.hasStreams();
+  }
+
+  function routeToHost(host: VideoPanelHost | null, channelId: number, videoOn: boolean): void {
+    const panel = host !== null && host.ownsCall(channelId) ? host : null;
+    if (panel === null) {
+      returnFromPanel();
+      tellHost(host, false);
+      return;
+    }
+    // The DM's own call: the panel shows every stream, remote ones too,
+    // with the chat still in view. Collapsed, it shows none and the chat
+    // is never covered.
+    callOpen = false;
+    // The panel gives the grid its own people.
+    peopleGiven = false;
+    closeVideoGrid();
+    tellHost(panel, videoOn);
+    const el = videoOn ? panel.element() : null;
+    if (el !== null) hostInPanel(el);
+    else returnFromPanel();
+  }
+
+  /** Manage local self-view tile — only add once, skip if already showing. */
+  function syncSelfCameraTile(
+    on: boolean,
+    currentUserId: number,
+    myName: string | undefined,
+  ): void {
+    if (!on) {
+      videoGrid.removeStream(currentUserId);
+      localTileAdded = false;
+      return;
+    }
+    // A camera switch puts a new capture under the same publication: draw
+    // the tile again so it shows the live track, not the stopped one.
+    if (localTileAdded && getLocalCameraStream()?.getVideoTracks()[0]?.id !== localCameraTrackId) {
+      videoGrid.removeStream(currentUserId);
+      localTileAdded = false;
+    }
+    if (localTileAdded) return;
+    const localStream = getLocalCameraStream();
+    if (localStream === null) return;
+    videoGrid.addStream(
+      currentUserId,
+      myName ? shellText("tile.nameYou", { name: myName }) : shellText("tile.you"),
+      localStream,
+      {
+        isSelf: true,
+        audioUserId: currentUserId,
+        isScreenshare: false,
+      },
+    );
+    localTileAdded = true;
+    localCameraTrackId = localStream.getVideoTracks()[0]?.id;
+  }
+
+  /** Manage local screenshare self-view tile. */
+  function syncSelfShareTile(on: boolean, currentUserId: number, myName: string | undefined): void {
+    const screenshareUserId = currentUserId + SCREENSHARE_TILE_ID_OFFSET;
+    if (!on) {
+      videoGrid.removeStream(screenshareUserId);
+      localScreenshareTileAdded = false;
+      return;
+    }
+    // A changed source is a new capture: draw the tile again.
+    if (
+      localScreenshareTileAdded &&
+      getLocalScreenshareStream()?.getVideoTracks()[0]?.id !== localShareTrackId
+    ) {
+      videoGrid.removeStream(screenshareUserId);
+      localScreenshareTileAdded = false;
+    }
+    if (localScreenshareTileAdded) return;
+    const localStream = getLocalScreenshareStream();
+    if (localStream === null) return;
+    videoGrid.addStream(
+      screenshareUserId,
+      myName ? shellText("tile.nameScreen", { name: myName }) : shellText("tile.yourScreen"),
+      localStream,
+      {
+        isSelf: true,
+        audioUserId: currentUserId,
+        isScreenshare: true,
+        hasAudio: hasLocalScreenshareAudio(),
+      },
+    );
+    localScreenshareTileAdded = true;
+    localShareTrackId = localStream.getVideoTracks()[0]?.id;
+  }
+
   function checkVideoMode(): void {
     const voice = voiceStore.getState();
     const channelId = voice.currentChannelId;
-    // Clear stale remote tiles on ANY change of channel — a real leave
-    // (channelId -> null) and a direct A -> B switch both need it, since
-    // VoiceCallbacks.onVoiceJoin moves currentChannelId straight from the
-    // old channel to the new one without ever passing through null.
-    // currentChannelId stays unchanged across auto-reconnect, so this does
-    // not fire on reconnect.
-    if (channelId !== lastChannelId) {
-      if (lastChannelId !== null) {
-        videoGrid.clearStreams();
-      }
-      lastChannelId = channelId;
-    }
+    followChannelChange(channelId);
     const host = opts.panelHost?.() ?? null;
     if (channelId === null) {
       callOpen = false;
@@ -293,40 +404,10 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
       return;
     }
 
-    // Check if any camera or screenshare is active.
-    // Check both voice store state AND whether the grid has tiles, because
-    // LiveKit track delivery can race ahead of the WS voice_state update.
-    let anyVideoOn = voice.localCamera || voice.localScreenshare;
-    if (!anyVideoOn) {
-      for (const user of channelUsers.values()) {
-        if (user.camera || user.screenshare) {
-          anyVideoOn = true;
-          break;
-        }
-      }
-    }
-    if (!anyVideoOn) {
-      anyVideoOn = videoGrid.hasStreams();
-    }
-    const panel = host !== null && host.ownsCall(channelId) ? host : null;
-    if (panel !== null) {
-      // The DM's own call: the panel shows every stream, remote ones too,
-      // with the chat still in view. Collapsed, it shows none and the chat
-      // is never covered.
-      callOpen = false;
-      // The panel gives the grid its own people.
-      peopleGiven = false;
-      closeVideoGrid();
-      tellHost(panel, anyVideoOn);
-      const el = anyVideoOn ? panel.element() : null;
-      if (el !== null) hostInPanel(el);
-      else returnFromPanel();
-    } else {
-      returnFromPanel();
-      tellHost(host, false);
-    }
+    const videoOn = anyVideoOn(voice, channelUsers);
+    routeToHost(host, channelId, videoOn);
     // Auto-close video grid when no streams remain, unless it is the call view
-    if (!anyVideoOn && !callOpen) {
+    if (!videoOn && !callOpen) {
       closeVideoGrid();
     }
     // No video opens the grid on its own, your own camera or share included:
@@ -334,79 +415,10 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
 
     if (videoMode) givePeople(channelUsers);
 
-    // Manage local self-view tile — only add once, skip if already showing
     const currentUserId = getCurrentUserId();
-    // Prefer the member's display name (same identity every other surface
-    // shows for a rename — see ChannelSidebar.ts's voice roster) over the
-    // frozen voice-roster username.
-    const member = membersStore.getState().members.get(currentUserId);
-    const me = channelUsers.get(currentUserId);
-    const myName = (member !== undefined ? memberDisplayName(member) : "") || me?.username;
-    if (voice.localCamera) {
-      // A camera switch puts a new capture under the same publication: draw
-      // the tile again so it shows the live track, not the stopped one.
-      if (
-        localTileAdded &&
-        getLocalCameraStream()?.getVideoTracks()[0]?.id !== localCameraTrackId
-      ) {
-        videoGrid.removeStream(currentUserId);
-        localTileAdded = false;
-      }
-      if (!localTileAdded) {
-        const localStream = getLocalCameraStream();
-        if (localStream !== null) {
-          videoGrid.addStream(
-            currentUserId,
-            myName ? shellText("tile.nameYou", { name: myName }) : shellText("tile.you"),
-            localStream,
-            {
-              isSelf: true,
-              audioUserId: currentUserId,
-              isScreenshare: false,
-            },
-          );
-          localTileAdded = true;
-          localCameraTrackId = localStream.getVideoTracks()[0]?.id;
-        }
-      }
-    } else {
-      videoGrid.removeStream(currentUserId);
-      localTileAdded = false;
-    }
-
-    // Manage local screenshare self-view tile
-    const screenshareUserId = currentUserId + SCREENSHARE_TILE_ID_OFFSET;
-    if (voice.localScreenshare) {
-      // A changed source is a new capture: draw the tile again.
-      if (
-        localScreenshareTileAdded &&
-        getLocalScreenshareStream()?.getVideoTracks()[0]?.id !== localShareTrackId
-      ) {
-        videoGrid.removeStream(screenshareUserId);
-        localScreenshareTileAdded = false;
-      }
-      if (!localScreenshareTileAdded) {
-        const localStream = getLocalScreenshareStream();
-        if (localStream !== null) {
-          videoGrid.addStream(
-            screenshareUserId,
-            myName ? shellText("tile.nameScreen", { name: myName }) : shellText("tile.yourScreen"),
-            localStream,
-            {
-              isSelf: true,
-              audioUserId: currentUserId,
-              isScreenshare: true,
-              hasAudio: hasLocalScreenshareAudio(),
-            },
-          );
-          localScreenshareTileAdded = true;
-          localShareTrackId = localStream.getVideoTracks()[0]?.id;
-        }
-      }
-    } else {
-      videoGrid.removeStream(screenshareUserId);
-      localScreenshareTileAdded = false;
-    }
+    const myName = selfName(currentUserId, channelUsers);
+    syncSelfCameraTile(voice.localCamera, currentUserId, myName);
+    syncSelfShareTile(voice.localScreenshare, currentUserId, myName);
 
     // Remote video tiles are managed exclusively by the onRemoteVideo /
     // onRemoteVideoRemoved callbacks (driven by LiveKit TrackSubscribed /

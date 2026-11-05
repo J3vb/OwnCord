@@ -13,10 +13,6 @@
     "components/ChannelMediaGallery.ts": {
       "createChannelMediaGallery > loadMore": [18]
     },
-    "features/channels/ChannelSidebar.ts": {
-      "buildVoiceModOptions": [16],
-      "createChannelSidebar > drawChannels > reconcileRows": [16]
-    },
     "components/DmSidebar.ts": {
       "convoSignature": [18],
       "renderDmItem": [16]
@@ -26,13 +22,6 @@
     },
     "components/EmojiPicker.ts": {
       "createEmojiPicker > renderAllCategories": [16]
-    },
-    "features/members/MemberList.ts": {
-      "createMemberItem > openContextMenu": [22],
-      "createMemberList > runFrame": [18]
-    },
-    "features/messaging/MessageList.ts": {
-      "createMessageList > mount > (anonymous)": [18]
     },
     "components/PhoneCallBar.ts": {
       "createPhoneCallBar > update": [19]
@@ -57,6 +46,23 @@
       "createVoiceWidget > render": [34],
       "createVoiceWidget > updateSignalIcon": [17]
     },
+    "components/dmContextMenu.ts": {
+      "openDmContextMenu": [30]
+    },
+    "components/video-grid/gridCallBar.ts": {
+      "createGridCallBar > drawCallState": [25]
+    },
+    "components/video-grid/gridLayout.ts": {
+      "createGridLayout > rebuildFocusLayout": [21]
+    },
+    "components/video-grid/gridStreams.ts": {
+      "createGridStreams > addStream": [68],
+      "createGridStreams > dropTile": [16]
+    },
+    "features/channels/ChannelSidebar.ts": {
+      "buildVoiceModOptions": [16],
+      "createChannelSidebar > drawChannels > reconcileRows": [16]
+    },
     "features/channels/sidebar/categoryMenu.ts": {
       "attachCategoryContextMenu > buildCategoryMenu": [16]
     },
@@ -69,36 +75,6 @@
     },
     "features/channels/sidebar/dragReorder.ts": {
       "planDrop": [32]
-    },
-    "components/dmContextMenu.ts": {
-      "openDmContextMenu": [30]
-    },
-    "features/messaging/composer/inputDraft.ts": {
-      "createInputDraft > restoreDraft": [16]
-    },
-    "features/messaging/composer/inputSend.ts": {
-      "createInputSend > handleSend": [20]
-    },
-    "features/messaging/message-list/listWindow.ts": {
-      "createListWindow > measureRendered": [16],
-      "createListWindow > renderWindow": [35],
-      "createListWindow > resolveNewDividerIndex": [17]
-    },
-    "features/messaging/message-list/pollCard.ts": {
-      "renderPollCard > draw": [27]
-    },
-    "features/messaging/message-list/virtualItems.ts": {
-      "estimateItemHeight": [16]
-    },
-    "components/video-grid/gridCallBar.ts": {
-      "createGridCallBar > drawCallState": [25]
-    },
-    "components/video-grid/gridLayout.ts": {
-      "createGridLayout > rebuildFocusLayout": [21]
-    },
-    "components/video-grid/gridStreams.ts": {
-      "createGridStreams > addStream": [68],
-      "createGridStreams > dropTile": [16]
     },
     "features/channels/voiceRow.view.ts": {
       "patchVoiceChannelChrome": [25]
@@ -122,11 +98,24 @@
       "openNewPostDialog": [17],
       "openNewPostDialog > (anonymous)": [17]
     },
+    "features/members/MemberList.ts": {
+      "createMemberItem > openContextMenu": [22],
+      "createMemberList > runFrame": [18]
+    },
     "features/members/memberModel.ts": {
       "updateModel": [21]
     },
     "features/message-requests/Inbox.ts": {
       "renderInbox > render": [23]
+    },
+    "features/messaging/MessageList.ts": {
+      "createMessageList > mount > (anonymous)": [18]
+    },
+    "features/messaging/composer/inputDraft.ts": {
+      "createInputDraft > restoreDraft": [16]
+    },
+    "features/messaging/composer/inputSend.ts": {
+      "createInputSend > handleSend": [20]
     },
     "features/messaging/content/attachmentCache.ts": {
       "requestFileLink": [16]
@@ -147,6 +136,17 @@
     "features/messaging/historyWindows.ts": {
       "reduceSetAroundMessages": [20],
       "reduceSetMessages": [30]
+    },
+    "features/messaging/message-list/listWindow.ts": {
+      "createListWindow > measureRendered": [16],
+      "createListWindow > renderWindow": [35],
+      "createListWindow > resolveNewDividerIndex": [17]
+    },
+    "features/messaging/message-list/pollCard.ts": {
+      "renderPollCard > draw": [27]
+    },
+    "features/messaging/message-list/virtualItems.ts": {
+      "estimateItemHeight": [16]
     },
     "features/messaging/slashCommands.ts": {
       "splitPieces": [16]
@@ -354,9 +354,6 @@
     },
     "pages/main-page/OverlayManagers.ts": {
       "createAsyncOverlayController > open": [16]
-    },
-    "pages/main-page/VideoModeController.ts": {
-      "createVideoModeController > checkVideoMode": [44]
     },
     "pages/main-page/channel/channelMountComposer.ts": {
       "mountComposerGating > (anonymous)": [21]
