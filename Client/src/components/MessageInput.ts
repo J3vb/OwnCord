@@ -4,59 +4,34 @@
  */
 
 import { Disposable } from "@lib/disposable";
-import { isImeCommit } from "@lib/text/ime";
-import { isAndroidApp } from "../features/voice/native/platform";
-import { dialogOpen } from "@lib/ui/dialogOpen";
-import {
-  isPhoneLayout,
-  onPhoneLayoutChange,
-  openBottomSheet,
-  type BottomSheet,
-} from "@lib/ui/bottomSheet";
-import { createElement, appendChildren, setOwnedTimeout } from "@lib/dom";
-import { createIcon } from "@lib/icons";
+import { isPhoneLayout, onPhoneLayoutChange } from "@lib/ui/bottomSheet";
+import { createElement, appendChildren } from "@lib/dom";
 import type { MountableComponent } from "@lib/text/safeRender";
-import { listCustomEmoji } from "@stores/emoji.store";
 import { claimComposer, focusComposer } from "../features/messaging/activeComposer";
 import { acceptSharesFor } from "../features/share/shareInbox";
 import type { PickedMention } from "@lib/text/pickedMentions";
-import { FORMAT_MARKERS, wrapWithMarker } from "../features/messaging/markdownMarkers";
-import { authStore } from "@stores/auth.store";
-import { pollsEnabled, stickersEnabled } from "@lib/net/serverCapabilities";
+import { wrapWithMarker } from "../features/messaging/markdownMarkers";
 import { onPrefChange } from "@lib/prefs/preferences";
-import {
-  COMPOSER_BUTTON_PREF_KEYS,
-  composerButtonShown,
-} from "../features/messaging/composerButtons";
-import { currentUserRoleHasPermission } from "@lib/permissions";
-import { Permission, type VoiceUploadMeta } from "@lib/types";
-import {
-  createExpressionPopup,
-  type ExpressionPanel,
-  type ExpressionPopup,
-  type ExpressionTab,
-} from "@components/ExpressionPopup";
-import { voiceMessagesText } from "../i18n/voiceMessages";
-import { messagingText } from "../i18n/messaging";
-import { stickersText } from "../i18n/stickers";
+import { COMPOSER_BUTTON_PREF_KEYS } from "../features/messaging/composerButtons";
+import type { VoiceUploadMeta } from "@lib/types";
 import type { GifApi, GifFavoritesApi } from "@lib/media/gifProvider";
-import {
-  emojiPickerScreen,
-  gifPickerScreen,
-  stickerPickerScreen,
-  SEND_DEBOUNCE_MS,
-  uploadsDisabledByServer,
-  DROP_SLOTS,
-  CARET_MOVE_KEYS,
-  markGifUnavailable,
-} from "./message-input/inputShared";
 import type { InputState, InputApi } from "./message-input/inputState";
 import { createInputAutocomplete } from "./message-input/inputAutocomplete";
 import { createInputComposer } from "./message-input/inputComposer";
 import { createInputSend } from "./message-input/inputSend";
 import { createInputAttachments } from "./message-input/inputAttachments";
 import { createInputDraft } from "./message-input/inputDraft";
-import { createAttachPickers } from "../features/messaging/attachSheet";
+import { wireCaretEvents, wireFileDrop, wireTextareaInput } from "./message-input/inputEvents";
+import { wireExpressionPopup } from "./message-input/inputPopups";
+import {
+  applyButtonPrefs,
+  buildReplyBar,
+  createComposerButtons,
+  createComposerTextarea,
+  registerControls,
+  wirePlusMenu,
+  wireVoiceMic,
+} from "./message-input/inputWidgets";
 
 export { wrapWithMarker };
 
@@ -314,538 +289,28 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
   );
 
   function mount(container: Element): void {
-    st.root = createElement("div", { class: "message-input-wrap", "data-testid": "message-input" });
-
-    st.replyBar = createElement("div", { class: "reply-bar" });
-    const replyInner = createElement("div", { class: "reply-bar-inner" });
-    st.replyText = createElement("strong", {});
-    replyInner.appendChild(st.replyText);
-    st.replyPingBtn = createElement("button", {
-      class: "reply-ping",
-      type: "button",
-      "data-testid": "reply-ping",
-      title: messagingText("reply.pingLabel"),
-      "aria-label": messagingText("reply.pingLabel"),
+    const root = createElement("div", {
+      class: "message-input-wrap",
+      "data-testid": "message-input",
     });
-    st.replyPingBtn.addEventListener(
-      "click",
-      () => {
-        if (st.state.replyTo === null) return;
-        st.state = { ...st.state, replyTo: { ...st.state.replyTo, ping: !api.replyPing() } };
-        api.showReplyBar();
-        st.options.onDraftChange?.();
-        st.textarea?.focus();
-      },
-      { signal: st.signal },
-    );
-    replyInner.appendChild(st.replyPingBtn);
-    const replyClose = createElement("button", {
-      class: "reply-close",
-      "aria-label": messagingText("reply.cancel"),
-    });
-    replyClose.appendChild(createIcon("x", 14));
-    replyClose.addEventListener("click", api.clearReply, { signal: st.signal });
-    replyInner.appendChild(replyClose);
-    st.replyBar.appendChild(replyInner);
-
-    st.attachmentPreviewBar = createElement("div", { class: "attachment-preview-bar" });
+    st.root = root;
+    const replyBar = buildReplyBar(st, api);
+    const previewBar = createElement("div", { class: "attachment-preview-bar" });
+    st.attachmentPreviewBar = previewBar;
 
     const inputBox = createElement("div", { class: "message-input-box" });
-    const attachBtn = createElement(
-      "button",
-      { class: "input-btn attach-btn", "aria-label": messagingText("attach.label") },
-      "+",
-    );
+    const textarea = createComposerTextarea(api);
+    st.textarea = textarea;
+    const buttons = createComposerButtons(st);
+    const { attachBtn, emojiBtn, gifBtn, stickerBtn, pollBtn, sendBtn, micBtn } = buttons;
+    wirePlusMenu(st, api, buttons);
+    registerControls(st, api, buttons);
 
-    st.textarea = createElement("textarea", {
-      class: "msg-textarea",
-      placeholder: api.idlePlaceholder(),
-      rows: "1",
-      "data-testid": "msg-textarea",
-      // The Android app's Enter key adds a line; the send button sends.
-      ...(isAndroidApp() ? { enterkeyhint: "enter" } : {}),
-    });
-    const emojiBtn = createElement("button", {
-      class: "input-btn emoji-btn",
-      "aria-label": messagingText("emoji.label"),
-    });
-    emojiBtn.appendChild(createIcon("smile", 20));
-    const gifBtn = createElement(
-      "button",
-      { class: "input-btn gif-btn", "aria-label": messagingText("gif.button") },
-      messagingText("gif.button"),
-    );
-    if (st.gifUnavailable) {
-      markGifUnavailable(gifBtn, messagingText("gif.disabled"));
-    }
-    // The Sticker button: only where the host can send one and the server has stickers.
-    const sendSticker = st.options.onSendSticker;
-    const stickerBtn =
-      sendSticker !== undefined && stickersEnabled()
-        ? createElement("button", {
-            class: "input-btn sticker-btn",
-            type: "button",
-            title: stickersText("button.label"),
-            "aria-label": stickersText("button.label"),
-            "data-testid": "sticker-btn",
-          })
-        : null;
-    stickerBtn?.appendChild(createIcon("sticker", 20));
-    // The Poll button: only where the host can open the dialog and the server has polls.
-    const createPoll = st.options.onCreatePoll;
-    const pollBtn =
-      createPoll !== undefined && pollsEnabled()
-        ? createElement(
-            "button",
-            {
-              class: "input-btn poll-btn",
-              type: "button",
-              title: messagingText("poll.buttonTitle"),
-              "aria-label": messagingText("poll.buttonTitle"),
-              "data-testid": "poll-btn",
-            },
-            messagingText("poll.button"),
-          )
-        : null;
-    pollBtn?.addEventListener("click", () => createPoll?.(), { signal: st.signal });
-    const sendBtn = createElement("button", {
-      class: "input-btn send-btn",
-      "aria-label": messagingText("send.label"),
-      "data-testid": "send-btn",
-    });
-    sendBtn.appendChild(createIcon("send", 20));
-    // The mic: where the composer can upload at all, unless a text-only composer.
-    const micBtn =
-      st.options.onUploadFile !== undefined && st.options.noAttach !== true
-        ? createElement("button", {
-            class: "input-btn mic-btn",
-            type: "button",
-            title: voiceMessagesText("mic.label"),
-            "aria-label": voiceMessagesText("mic.label"),
-            "data-testid": "voice-mic-btn",
-          })
-        : null;
-    micBtn?.appendChild(createIcon("mic", 20));
-    micBtn?.setAttribute("hidden", "");
-    const hasPlusMenu = st.options.onUploadFile !== undefined && st.options.noAttach !== true;
-    // "+" opens a menu of tiles: the file sources, then Poll and (off the
-    // phone) Sticker. Their bar buttons stay in the DOM, always hidden, as the
-    // targets the tiles click, so gates and the picker tabs work as before.
-    if (st.options.onUploadFile !== undefined) {
-      const pickers = createAttachPickers({
-        onFile: (file) => void api.handlePasteFile(file),
-        canAttach: () => st.disabledReason === null && !uploadsDisabledByServer(),
-        signal: st.signal,
-        menuHost: () => st.root,
-        actions: [
-          {
-            id: "poll",
-            icon: "chart-column",
-            label: messagingText("attach.poll"),
-            available: () =>
-              pollBtn !== null && st.disabledReason === null && composerButtonShown("poll"),
-            run: () => pollBtn?.click(),
-          },
-          {
-            id: "sticker",
-            icon: "sticker",
-            label: messagingText("attach.sticker"),
-            layout: "desktop",
-            available: () =>
-              stickerBtn !== null && st.disabledReason === null && composerButtonShown("sticker"),
-            run: () => stickerBtn?.click(),
-          },
-        ],
-      });
-      attachBtn.addEventListener("click", () => pickers.open(attachBtn), { signal: st.signal });
-      st.openPicker = pickers.openFiles;
-      st.attachHasActions = pickers.hasActions;
-      st.closeAttachMenu = pickers.close;
-      st.root?.append(...pickers.inputs);
-    } else {
-      attachBtn.setAttribute("disabled", "true");
-      attachBtn.title = messagingText("attach.unavailable");
-    }
-    // Register interactive controls so the disabled state can toggle them.
-    st.controlButtons.length = 0;
-    st.controlButtons.push(sendBtn, emojiBtn, gifBtn);
-    if (stickerBtn !== null) st.controlButtons.push(stickerBtn);
-    if (pollBtn !== null) st.controlButtons.push(pollBtn);
-    if (micBtn !== null) st.controlButtons.push(micBtn);
-    if (st.options.onUploadFile !== undefined) {
-      st.controlButtons.push(attachBtn);
-      st.disposable.onStoreChange(
-        authStore,
-        (s) => s.uploadPolicy?.max_upload_bytes,
-        () => api.applyDisabledState(),
-      );
-    }
-
-    st.textarea.addEventListener(
-      "input",
-      () => {
-        api.autoResizeOnInput();
-        api.maybeEmitTyping();
-        // A cleared draft forgets what was picked into it.
-        if (st.textarea?.value === "") st.pickedMentions = [];
-        api.syncAutocomplete();
-        // An edit is the user acting on the refusal, so the line goes away.
-        api.clearUploadError();
-      },
-      { signal: st.signal },
-    );
-    st.textarea.addEventListener(
-      "keydown",
-      (e: KeyboardEvent) => {
-        // Whichever popup is open owns navigation keys, so Enter completes the
-        // token instead of sending a half-typed message.
-        if (st.slashPopup?.handleKeydown(e) === true) return;
-        if (st.mentionPopup?.handleKeydown(e) === true) return;
-        if (st.channelPopup?.handleKeydown(e) === true) return;
-        if (st.emojiPopup?.handleKeydown(e) === true) return;
-
-        // Ctrl+B / Ctrl+I / Ctrl+U wrap the selection in markdown markers.
-        // The composer owns Ctrl+U while it has focus, so the propagation stop
-        // is load-bearing: without it the global upload shortcut would fire on
-        // top of the underline.
-        if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey) {
-          const marker = FORMAT_MARKERS[e.key.toLowerCase()];
-          if (marker !== undefined) {
-            e.preventDefault();
-            e.stopPropagation();
-            api.applyFormatting(marker);
-            return;
-          }
-        }
-
-        if (e.key === "Enter" && !e.shiftKey) {
-          // A CJK IME commits the current candidate on Enter, firing keydown
-          // with isComposing true (or the legacy keyCode 229). Sending here
-          // would ship the raw composition text instead of the committed word.
-          if (isImeCommit(e)) return;
-          // On the Android app Enter adds a new line, and the send button sends.
-          if (isAndroidApp()) return;
-          e.preventDefault();
-          api.handleSend();
-        }
-        // An Escape that cancels something is used up: the app-wide Escape
-        // (mark the channel read) leaves a prevented key alone.
-        if (e.key === "Escape" && !isImeCommit(e)) {
-          if (st.state.replyTo !== null) {
-            e.preventDefault();
-            api.clearReply();
-          }
-        }
-        if (
-          e.key === "ArrowUp" &&
-          !(e.shiftKey || e.altKey || e.ctrlKey || e.metaKey || e.isComposing) &&
-          st.disabledReason === null &&
-          st.textarea !== null &&
-          st.textarea.value.length === 0
-        ) {
-          // The browser's own ArrowUp would move the caret in the (empty)
-          // composer as the inline editor takes focus.
-          e.preventDefault();
-          st.root?.dispatchEvent(new CustomEvent("edit-last-message", { bubbles: true }));
-        }
-      },
-      { signal: st.signal },
-    );
-
-    // Clipboard paste: detect images/files
-    st.textarea.addEventListener(
-      "paste",
-      (e: ClipboardEvent) => {
-        const items = e.clipboardData?.items;
-        if (items === undefined) return;
-        let pastedFile = false;
-        for (const item of items) {
-          if (item.kind !== "file") continue;
-          const file = item.getAsFile();
-          if (file === null) continue;
-          e.preventDefault();
-          pastedFile = true;
-          void api.handlePasteFile(file);
-        }
-        if (pastedFile || api.pasteNativeFiles(e)) return;
-        api.pasteLongTextAsFile(e);
-      },
-      { signal: st.signal },
-    );
-
-    // Files dragged in from the OS: accepted over the channel view only, and
-    // never while an overlay covers it. Other drops are left to the app-wide
-    // fileDropGuard, which cancels them without uploading.
-    if (st.options.onUploadFile !== undefined) {
-      document.addEventListener(
-        "drop",
-        (e: DragEvent) => {
-          const dt = e.dataTransfer;
-          if (dt === null || !dt.types.includes("Files")) return;
-          const target = e.target;
-          if (!(target instanceof Element)) return;
-          if (target.closest(st.options.dropZone ?? DROP_SLOTS) === null) return;
-          if (dialogOpen()) return;
-          e.preventDefault();
-          for (const file of dt.files) void api.handlePasteFile(file);
-        },
-        { signal: st.signal },
-      );
-      api.wireDropOverlay(container);
-    }
-
-    // Caret moves that aren't typing (click, arrow/Home/End keys, blur) also
-    // decide the popup's fate — without this, completing a mention/emoji
-    // after moving the caret away with the keyboard splices at a stale offset.
-    st.textarea.addEventListener("click", api.syncAutocomplete, { signal: st.signal });
-    st.textarea.addEventListener(
-      "keyup",
-      (e: KeyboardEvent) => {
-        if (CARET_MOVE_KEYS.has(e.key)) api.syncAutocomplete();
-      },
-      { signal: st.signal },
-    );
-    st.textarea.addEventListener(
-      "blur",
-      () => {
-        api.closeSlashPopup();
-        api.closeMentionPopup();
-        api.closeChannelPopup();
-        api.closeEmojiPopup();
-      },
-      { signal: st.signal },
-    );
-
+    wireTextareaInput(st, api, textarea);
+    if (st.options.onUploadFile !== undefined) wireFileDrop(st, api, container);
+    wireCaretEvents(st, api, textarea);
     sendBtn.addEventListener("click", api.handleSend, { signal: st.signal });
-
-    // The GIF, sticker and emoji buttons share one tabbed popup. Each
-    // button opens it on its own tab; the active tab's button closes it.
-    let popup: ExpressionPopup | null = null;
-    // One outside-click owner for the open popup, destroyed when it closes.
-    let popupDismiss: Disposable | null = null;
-    // On a phone the popup lives in a bottom sheet instead, which owns dismissal.
-    let popupSheet: BottomSheet | null = null;
-
-    function tabButton(tab: ExpressionTab): HTMLButtonElement | null {
-      if (tab === "gif") return gifBtn;
-      return tab === "sticker" ? stickerBtn : emojiBtn;
-    }
-
-    /** Close the popup (a no-op when closed). Escape hands focus back to the button of the tab it was on. */
-    function closePopup(returnFocus = false): void {
-      const closing = popup;
-      if (closing === null) return;
-      const tab = closing.activeTab();
-      popup = null;
-      popupDismiss?.destroy();
-      popupDismiss = null;
-      const sheet = popupSheet;
-      popupSheet = null;
-      sheet?.close();
-      closing.element.remove();
-      closing.destroy();
-      if (!returnFocus) return;
-      const btn = tabButton(tab);
-      // A button the user hid in settings (or the phone row left out) cannot
-      // take focus; "+" (where Sticker lives), the phone's one expression
-      // button or the textarea can.
-      if (btn !== null && !btn.hidden) btn.focus();
-      else if (tab === "sticker" && hasPlusMenu && !isPhoneLayout()) attachBtn.focus();
-      else if (!emojiBtn.hidden) emojiBtn.focus();
-      else st.textarea?.focus();
-    }
-
-    function handlePopupClickOutside(e: MouseEvent): void {
-      if (popup === null) return;
-      const target = e.target as Node;
-      if ((target as Element).closest?.(".modal-overlay")) return;
-      if (popup.element.contains(target)) return;
-      for (const tab of ["gif", "sticker", "emoji"] as const) {
-        const btn = tabButton(tab);
-        if (btn !== null && (target === btn || btn.contains(target))) return;
-      }
-      closePopup();
-    }
-
-    /** Send a picked sticker at once, under the same gates as a GIF. */
-    function sendPickedSticker(sticker: { readonly id: number; readonly name: string }): void {
-      const refusal = st.disabledReason ?? st.sendGateReason;
-      if (refusal !== null) {
-        api.showUploadError(refusal);
-        return;
-      }
-      const now = Date.now();
-      if (now - st.lastSendTime < SEND_DEBOUNCE_MS) return;
-      st.lastSendTime = now;
-      st.options.onSendSticker?.(sticker, st.state.replyTo?.messageId ?? null, api.replyPing());
-      api.clearReply();
-    }
-
-    /** Build the picker for a tab, loading its code on first use. */
-    async function buildPanel(tab: ExpressionTab): Promise<ExpressionPanel | null> {
-      const wanted = (): boolean => popup === null || popup.activeTab() === tab;
-      if (tab === "emoji") {
-        const screen = await emojiPickerScreen.load(wanted);
-        if (screen === null) return null;
-        return screen.createEmojiPicker({
-          // Read the set at open time, not at mount: an emoji_update while the
-          // composer is alive must be in the next picker the user opens.
-          customEmoji: listCustomEmoji(),
-          onSelect: (emoji: string, select) => {
-            const keepOpen = select?.keepOpen === true;
-            if (st.textarea !== null) {
-              const start = st.textarea.selectionStart;
-              const end = st.textarea.selectionEnd;
-              const before = st.textarea.value.slice(0, start);
-              const after = st.textarea.value.slice(end);
-              st.textarea.value = before + emoji + after;
-              st.textarea.selectionStart = st.textarea.selectionEnd = start + emoji.length;
-              // Shift-pick keeps focus in the picker so the next pick lands at
-              // the caret just advanced.
-              if (!keepOpen) st.textarea.focus();
-            }
-            if (!keepOpen) closePopup();
-          },
-          onClose: () => closePopup(true),
-        });
-      }
-      if (tab === "sticker") {
-        const screen = await stickerPickerScreen.load(wanted);
-        if (screen === null) return null;
-        return screen.createStickerPicker({
-          canManage: currentUserRoleHasPermission(Permission.MANAGE_SERVER),
-          onSelect: (sticker) => {
-            sendPickedSticker(sticker);
-            closePopup();
-          },
-          onClose: () => closePopup(true),
-        });
-      }
-      const gifApi = st.options.gifApi;
-      if (gifApi === undefined) return null;
-      const screen = await gifPickerScreen.load(wanted);
-      if (screen === null) return null;
-      return screen.createGifPicker({
-        api: gifApi,
-        onUnavailable: (reason: string) => {
-          st.gifUnavailable = true;
-          markGifUnavailable(gifBtn, reason);
-        },
-        onSelect: (gifUrl: string) => {
-          // Send the GIF directly instead of routing it through the textarea
-          // (handleSend's read of textarea.value): that overwrote — and
-          // discarded — whatever draft the user had typed, and on slow
-          // mode / mid-upload / debounced sends left the raw GIF URL sitting
-          // in the composer instead of the draft. Guarded by the same
-          // refusal/debounce checks as a normal send; an in-progress
-          // edit and any typed draft are left untouched.
-          const refusal = st.disabledReason ?? st.sendGateReason;
-          if (refusal !== null) {
-            api.showUploadError(refusal);
-          } else {
-            const now = Date.now();
-            if (now - st.lastSendTime >= SEND_DEBOUNCE_MS) {
-              st.lastSendTime = now;
-              st.options.onSend(
-                gifUrl,
-                st.state.replyTo?.messageId ?? null,
-                [],
-                [],
-                api.replyPing(),
-              );
-              api.clearReply();
-            }
-          }
-          closePopup();
-        },
-        onClose: () => closePopup(true),
-      });
-    }
-
-    function openPopup(tab: ExpressionTab): void {
-      // The tabs on offer: no GIF tab where GIFs are off, no sticker tab where
-      // the server has none.
-      const tabs: ExpressionTab[] = [];
-      if (st.options.gifApi !== undefined && !st.gifUnavailable) tabs.push("gif");
-      if (stickerBtn !== null) tabs.push("sticker");
-      tabs.push("emoji");
-      if (!tabs.includes(tab)) return;
-      const opened = createExpressionPopup({
-        tabs,
-        initial: tab,
-        mountPanel: buildPanel,
-        onClose: () => closePopup(true),
-      });
-      popup = opened;
-      if (isPhoneLayout()) {
-        opened.element.classList.add("in-sheet");
-        const sheet = openBottomSheet({
-          label: stickersText("popup.label"),
-          content: opened.element,
-          size: "tall",
-          className: "picker-sheet",
-          testId: "expression-sheet",
-          focusFirst: false,
-          signal: st.signal,
-          onClosed: () => {
-            if (popupSheet === sheet) closePopup();
-          },
-        });
-        popupSheet = sheet;
-        opened.element.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.focus();
-        return;
-      }
-      st.root?.appendChild(opened.element);
-      // Focus starts inside the popup, so Escape closes it even before the
-      // lazy picker has mounted and moved focus to its search box.
-      opened.element.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.focus();
-      const dismiss = new Disposable();
-      popupDismiss = dismiss;
-      // Defer so the click that opened the popup doesn't immediately close it.
-      setOwnedTimeout(
-        dismiss.signal,
-        () =>
-          document.addEventListener("mousedown", handlePopupClickOutside, {
-            signal: dismiss.signal,
-          }),
-        0,
-      );
-    }
-
-    function toggleTab(tab: ExpressionTab): void {
-      if (popup === null) {
-        openPopup(tab);
-      } else if (popup.activeTab() === tab) {
-        closePopup();
-      } else {
-        popup.showTab(tab);
-      }
-    }
-
-    // On a phone the smiley holds the emoji and sticker tabs: it opens on
-    // the first of them the user keeps.
-    const expressionTab = (): ExpressionTab => {
-      if (!isPhoneLayout() || composerButtonShown("emoji")) return "emoji";
-      return stickerBtn !== null && composerButtonShown("sticker") ? "sticker" : "emoji";
-    };
-    emojiBtn.addEventListener("click", () => toggleTab(expressionTab()), { signal: st.signal });
-    gifBtn.addEventListener("click", () => toggleTab("gif"), { signal: st.signal });
-    stickerBtn?.addEventListener("click", () => toggleTab("sticker"), { signal: st.signal });
-
-    st.togglePickerOf = (kind) => {
-      const btn = tabButton(kind);
-      if (btn === null || btn.disabled) return;
-      toggleTab(kind);
-    };
-
-    // Store picker cleanup for destroy()
-    st.cleanupPickers = () => {
-      closePopup();
-      api.closeSlashPopup();
-      api.closeMentionPopup();
-      api.closeChannelPopup();
-      api.closeEmojiPopup();
-    };
+    wireExpressionPopup(st, api, buttons);
 
     st.charCounter = createElement("span", {
       class: "char-counter",
@@ -854,99 +319,38 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     st.charCounter.hidden = true;
     if (st.options.noAttach !== true) inputBox.appendChild(attachBtn);
     // Emoji, sticker, GIF: the sticker button sits between the other two.
-    appendChildren(inputBox, st.textarea, emojiBtn);
+    appendChildren(inputBox, textarea, emojiBtn);
     if (stickerBtn !== null) inputBox.appendChild(stickerBtn);
     inputBox.appendChild(gifBtn);
     if (pollBtn !== null) inputBox.appendChild(pollBtn);
     if (micBtn !== null) inputBox.appendChild(micBtn);
     appendChildren(inputBox, st.charCounter, sendBtn);
-    // Settings → Text & Images can hide each of these; the switch applies live.
-    // Sticker and Poll live in the "+" menu. On a phone the smiley also holds
-    // the sticker tab.
-    const applyButtonPrefs = (): void => {
-      const phone = isPhoneLayout();
-      // GIF has its own button; on a phone the smiley also stands for stickers.
-      const anyExpression =
-        composerButtonShown("emoji") || (stickerBtn !== null && composerButtonShown("sticker"));
-      emojiBtn.hidden = phone ? !anyExpression : !composerButtonShown("emoji");
-      const emojiLabel = messagingText(phone ? "expression.label" : "emoji.label");
-      emojiBtn.setAttribute("aria-label", emojiLabel);
-      emojiBtn.title = phone ? emojiLabel : "";
-      gifBtn.hidden = !composerButtonShown("gif");
-      // A composer without "+" (a thread's) keeps Sticker in its bar.
-      if (stickerBtn !== null) {
-        stickerBtn.hidden = hasPlusMenu || phone || !composerButtonShown("sticker");
-      }
-      if (pollBtn !== null) pollBtn.hidden = hasPlusMenu || phone || !composerButtonShown("poll");
-      api.applyDisabledState();
-    };
-    applyButtonPrefs();
-    onPrefChange(COMPOSER_BUTTON_PREF_KEYS, applyButtonPrefs, st.signal);
-    onPhoneLayoutChange(applyButtonPrefs, st.signal);
+    const refreshButtons = (): void => applyButtonPrefs(st, api, buttons);
+    refreshButtons();
+    onPrefChange(COMPOSER_BUTTON_PREF_KEYS, refreshButtons, st.signal);
+    onPhoneLayoutChange(refreshButtons, st.signal);
     // The open menu belongs to the old layout; the next "+" opens the new one.
     onPhoneLayoutChange(() => st.closeAttachMenu?.(), st.signal);
-    st.slowModeNoteEl = createElement("div", {
+    const slowNote = createElement("div", {
       class: "composer-slow-note",
       "data-testid": "slow-mode-note",
     });
-    appendChildren(st.root, st.replyBar, st.attachmentPreviewBar, inputBox, st.slowModeNoteEl);
+    st.slowModeNoteEl = slowNote;
+    appendChildren(root, replyBar, previewBar, inputBox, slowNote);
     const upload = st.options.onUploadFile;
-    if (micBtn !== null && upload !== undefined) {
-      const voiceHost = st.root;
-      // The recorder and its bar load on the first mic click, so they stay out of the app chunk.
-      let voiceLoading = false;
-      const startVoice = async (): Promise<void> => {
-        if (st.voice === null) {
-          if (voiceLoading) return;
-          voiceLoading = true;
-          let mod: typeof import("../features/voice-messages/voiceComposer");
-          try {
-            mod = await import("../features/voice-messages/voiceComposer");
-          } catch {
-            voiceLoading = false;
-            if (!st.signal.aborted) api.showUploadError(voiceMessagesText("error.failed"));
-            return;
-          }
-          voiceLoading = false;
-          // The composer was destroyed while the code loaded.
-          if (st.signal.aborted) return;
-          st.voice ??= mod.createVoiceComposer({
-            host: voiceHost,
-            before: inputBox,
-            root: voiceHost,
-            signal: st.signal,
-            upload: (file, meta, uploadSignal) => upload(file, uploadSignal, undefined, meta),
-            ...(st.options.onDiscardUpload === undefined
-              ? {}
-              : { discardUpload: st.options.onDiscardUpload }),
-            send: (attachment) => {
-              // A message of its own: no text, the reply stays (as on Discord).
-              st.options.onSend(
-                "",
-                st.state.replyTo?.messageId ?? null,
-                [attachment.id],
-                [attachment],
-                api.replyPing(),
-              );
-              api.clearReply();
-            },
-            gate: () =>
-              st.disabledReason ??
-              st.sendGateReason ??
-              (uploadsDisabledByServer() ? messagingText("attach.serverDisabled") : null),
-            onError: api.showUploadError,
-            onClearError: api.clearUploadError,
-            onActiveChange: (active) => {
-              if (!active) st.textarea?.focus();
-            },
-          });
-        }
-        st.voice.start();
-      };
-      micBtn.addEventListener("click", () => void startVoice(), { signal: st.signal });
-    }
+    if (micBtn !== null && upload !== undefined) wireVoiceMic(st, api, micBtn, upload, inputBox);
     api.applySlowModeNote();
-    container.appendChild(st.root);
+    container.appendChild(root);
+    claimForMentions();
+    // Apply any initial disabled reason before focusing. On a phone a focus
+    // raises the keyboard over the chat the user just opened, so it waits for
+    // a tap on the text box.
+    api.applyDisabledState();
+    if (st.disabledReason === null && !isPhoneLayout()) textarea.focus();
+  }
+
+  /** Makes this the composer a Mention goes to, and accepts shares for its chat. */
+  function claimForMentions(): void {
     st.releaseComposer?.();
     const mentionTarget = { insertMention: api.insertMentionAtCaret, canMention: api.canTakeText };
     st.releaseComposer = claimComposer(mentionTarget);
@@ -957,16 +361,9 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     });
     st.signal.addEventListener("abort", releaseShares, { once: true });
     // With a thread's composer beside this one, a Mention goes where the user is.
-    st.root.addEventListener("focusin", () => focusComposer(mentionTarget), {
+    st.root?.addEventListener("focusin", () => focusComposer(mentionTarget), {
       signal: st.disposable.signal,
     });
-    // Apply any initial disabled reason before focusing. On a phone a focus
-    // raises the keyboard over the chat the user just opened, so it waits for
-    // a tap on the text box.
-    api.applyDisabledState();
-    if (st.disabledReason === null && !isPhoneLayout()) {
-      st.textarea.focus();
-    }
   }
 
   function destroy(): void {

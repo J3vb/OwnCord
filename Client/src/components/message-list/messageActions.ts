@@ -75,6 +75,50 @@ function createThreadAllowed(msg: Message, opts: MessageListOptions): boolean {
   return channel?.type === "text" && channel.canSend && threadOfMessage(msg) === undefined;
 }
 
+/** Edit: mine, and a kind of message the server will edit. A forward is a
+ *  snapshot, a poll is what people voted on and a sticker has no text: the
+ *  server refuses to edit any of them. */
+function canEdit(msg: Message, on: boolean, own: boolean): boolean {
+  return (
+    on && own && msg.forward === undefined && msg.poll === undefined && msg.sticker === undefined
+  );
+}
+
+/** A forward would copy only the poll's fallback text and drop the voting, so
+ *  the server refuses it. A sticker message cannot be forwarded either. */
+function canForward(msg: Message, opts: MessageListOptions, on: boolean): boolean {
+  return (
+    on && opts.onForwardClick !== undefined && msg.poll === undefined && msg.sticker === undefined
+  );
+}
+
+/** An imported message has no account behind it to report. */
+function canReport(msg: Message, opts: MessageListOptions, on: boolean, own: boolean): boolean {
+  return on && opts.onReportClick !== undefined && !own && msg.importedAuthor === undefined;
+}
+
+/** Pin and delete follow the channel's per-channel verdict, which a thread
+ *  answers through its parent. */
+function moderationRights(
+  msg: Message,
+  opts: MessageListOptions,
+  deletable: boolean,
+  own: boolean,
+): { canPin: boolean; canDelete: boolean } {
+  const channel = channelsStore.getState().channels.get(authorityChannelId(msg.channelId));
+  const isDm = opts.channelType === "dm";
+  return {
+    // The server gates SetMessagePinned on MANAGE_MESSAGES for a channel, but any
+    // DM participant may pin, so offering it to a plain member is a broken
+    // affordance. In a channel it follows the server's per-channel verdict (an
+    // override can grant or deny it), falling back to the role on an older server.
+    canPin: isDm || channelBitOrRole(channel?.canPin),
+    // Own message (always), or someone else's where the channel allows it. A DM
+    // never lets anyone delete the other participant's messages.
+    canDelete: deletable && (own || (!isDm && channelBitOrRole(channel?.canDeleteOthers))),
+  };
+}
+
 export function messageActionGates(msg: Message, opts: MessageListOptions): MessageActionGates {
   const sent = isActionableMessage(msg);
   // A server row (call log, group event) is read-only: only Copy ID (developer mode) applies.
@@ -82,42 +126,18 @@ export function messageActionGates(msg: Message, opts: MessageListOptions): Mess
   const on = sent && !isServerRowKind(msg.kind);
   const deletable = on || (sent && (isPinRowKind(msg.kind) || isWelcomeRowKind(msg.kind)));
   const own = msg.user.id === opts.currentUserId;
-  // A thread has no roles or overrides of its own: its parent answers.
-  const channel = channelsStore.getState().channels.get(authorityChannelId(msg.channelId));
-  const isDm = opts.channelType === "dm";
-  // The server gates SetMessagePinned on MANAGE_MESSAGES for a channel, but any
-  // DM participant may pin, so offering it to a plain member is a broken
-  // affordance. In a channel it follows the server's per-channel verdict (an
-  // override can grant or deny it), falling back to the role on an older server.
-  const canPin = isDm || channelBitOrRole(channel?.canPin);
-  // Own message (always), or someone else's where the channel allows it. A DM
-  // never lets anyone delete the other participant's messages.
-  const canDelete = deletable && (own || (!isDm && channelBitOrRole(channel?.canDeleteOthers)));
+  const { canPin, canDelete } = moderationRights(msg, opts, deletable, own);
   return {
     react: gate(on, on ? reactionLockReason(channelCanReact(msg.channelId)) : null),
-    // A forward is a snapshot, a poll is what people voted on and a sticker has no text: the server refuses to edit any of them.
-    edit: gate(
-      on && own && msg.forward === undefined && msg.poll === undefined && msg.sticker === undefined,
-    ),
-    // A forward would copy only the poll's fallback text and drop the voting, so the server refuses it.
-    // A sticker message cannot be forwarded either.
-    forward: gate(
-      on &&
-        opts.onForwardClick !== undefined &&
-        msg.poll === undefined &&
-        msg.sticker === undefined,
-      on ? deleteLockReason() : null,
-    ),
+    edit: gate(canEdit(msg, on, own)),
+    forward: gate(canForward(msg, opts, on), on ? deleteLockReason() : null),
     createThread: gate(
       on && opts.onCreateThreadClick !== undefined && createThreadAllowed(msg, opts),
       on ? deleteLockReason() : null,
     ),
     pin: gate(on && canPin),
     delete: gate(canDelete, canDelete ? deleteLockReason() : null),
-    // An imported message has no account behind it to report.
-    report: gate(
-      on && opts.onReportClick !== undefined && !own && msg.importedAuthor === undefined,
-    ),
+    report: gate(canReport(msg, opts, on, own)),
     copyId: gate(sent && isDeveloperMode()),
   };
 }

@@ -31,10 +31,6 @@
       "createMemberItem > openContextMenu": [22],
       "createMemberList > runFrame": [18]
     },
-    "components/MessageInput.ts": {
-      "createMessageInput > mount": [31],
-      "createMessageInput > mount > (anonymous)": [31]
-    },
     "components/MessageList.ts": {
       "createMessageList > mount > (anonymous)": [18]
     },
@@ -88,12 +84,6 @@
       "createListWindow > renderWindow": [35],
       "createListWindow > resolveNewDividerIndex": [17]
     },
-    "components/message-list/messageActions.ts": {
-      "messageActionGates": [29]
-    },
-    "components/message-list/messageMenu.ts": {
-      "buildItems": [43]
-    },
     "components/message-list/pollCard.ts": {
       "renderPollCard > draw": [27]
     },
@@ -143,10 +133,6 @@
     },
     "features/messaging/content/attachments.ts": {
       "renderAttachmentContent": [18]
-    },
-    "features/messaging/content/contentParser.ts": {
-      "renderMentionSegment": [31],
-      "resyncMentions": [25]
     },
     "features/messaging/content/imageViewer.ts": {
       "openImageLightbox": [19],

@@ -583,37 +583,24 @@ function buildInviteLinkNode(url: string): HTMLSpanElement | null {
   return chip;
 }
 
-/**
- * Render @mentions, #channel links and message permalinks within a text
- * segment (no http URLs). Tokens that resolve to nothing are left as plain text.
- */
-export function renderMentionSegment(text: string, info?: MentionInfo): DocumentFragment {
-  const matches: TokenMatch[] = [];
-
-  for (const match of text.matchAll(MESSAGE_LINK_REGEX)) {
+/** Add a token for every match of `regex` that `build` turns into a node. */
+function collectTokens(
+  text: string,
+  regex: RegExp,
+  build: (match: RegExpMatchArray) => Node | null,
+  out: TokenMatch[],
+): void {
+  for (const match of text.matchAll(regex)) {
     const idx = match.index;
     if (idx === undefined) continue;
-    const node = buildMessageLinkNode(match[0]);
-    if (node !== null) matches.push({ start: idx, end: idx + match[0].length, node });
+    const node = build(match);
+    if (node !== null) out.push({ start: idx, end: idx + match[0].length, node });
   }
+}
 
-  for (const match of text.matchAll(INVITE_LINK_REGEX)) {
-    const idx = match.index;
-    if (idx === undefined) continue;
-    const node = buildInviteLinkNode(match[0]);
-    if (node !== null) matches.push({ start: idx, end: idx + match[0].length, node });
-  }
-
-  for (const regex of [ID_MENTION_REGEX, ROLE_MENTION_REGEX]) {
-    for (const match of text.matchAll(regex)) {
-      const idx = match.index;
-      const node = idx === undefined ? null : buildIdMentionNode(match[0], info);
-      if (idx !== undefined && node !== null) {
-        matches.push({ start: idx, end: idx + match[0].length, node });
-      }
-    }
-  }
-
+/** Add a token for each `@name` that resolves; the leading character the
+ *  regex matched through is not part of the token. */
+function collectMentionTokens(text: string, info: MentionInfo | undefined, out: TokenMatch[]) {
   for (const match of text.matchAll(MENTION_TOKEN_REGEX)) {
     const idx = match.index;
     const lead = match[1];
@@ -622,9 +609,12 @@ export function renderMentionSegment(text: string, info?: MentionInfo): Document
     if (match[3] === "@") continue; // address-shaped, e.g. "@bob@example.com"
     const start = idx + lead.length;
     const node = buildMentionNode(`@${token}`, token, info);
-    if (node !== null) matches.push({ start, end: start + token.length + 1, node });
+    if (node !== null) out.push({ start, end: start + token.length + 1, node });
   }
+}
 
+/** Add a chip for each `#channel` that exists. */
+function collectChannelTokens(text: string, out: TokenMatch[]): void {
   for (const match of text.matchAll(CHANNEL_TOKEN_REGEX)) {
     const idx = match.index;
     const lead = match[1];
@@ -632,20 +622,12 @@ export function renderMentionSegment(text: string, info?: MentionInfo): Document
     if (idx === undefined || lead === undefined || name === undefined) continue;
     const start = idx + lead.length;
     const node = buildChannelNode(name);
-    if (node !== null) matches.push({ start, end: start + name.length + 1, node });
+    if (node !== null) out.push({ start, end: start + name.length + 1, node });
   }
+}
 
-  // `:shortcode:` custom emoji. This runs on prose segments only — code spans
-  // never reach here (appendInline renders them verbatim) and fenced blocks are
-  // split off before any of this, so a shortcode inside code stays code.
-  for (const match of text.matchAll(EMOJI_TOKEN_REGEX)) {
-    const idx = match.index;
-    const shortcode = match[1];
-    if (idx === undefined || shortcode === undefined) continue;
-    const node = buildCustomEmojiNode(shortcode);
-    if (node !== null) matches.push({ start: idx, end: idx + match[0].length, node });
-  }
-
+/** The text with each token's node in place of its span, in source order. */
+function fragmentFromTokens(text: string, matches: TokenMatch[]): DocumentFragment {
   const fragment = document.createDocumentFragment();
   matches.sort((a, b) => a.start - b.start);
   let lastIndex = 0;
@@ -661,6 +643,31 @@ export function renderMentionSegment(text: string, info?: MentionInfo): Document
     fragment.appendChild(document.createTextNode(text.slice(lastIndex)));
   }
   return fragment;
+}
+
+/**
+ * Render @mentions, #channel links and message permalinks within a text
+ * segment (no http URLs). Tokens that resolve to nothing are left as plain text.
+ */
+export function renderMentionSegment(text: string, info?: MentionInfo): DocumentFragment {
+  const matches: TokenMatch[] = [];
+  collectTokens(text, MESSAGE_LINK_REGEX, (m) => buildMessageLinkNode(m[0]), matches);
+  collectTokens(text, INVITE_LINK_REGEX, (m) => buildInviteLinkNode(m[0]), matches);
+  for (const regex of [ID_MENTION_REGEX, ROLE_MENTION_REGEX]) {
+    collectTokens(text, regex, (m) => buildIdMentionNode(m[0], info), matches);
+  }
+  collectMentionTokens(text, info, matches);
+  collectChannelTokens(text, matches);
+  // `:shortcode:` custom emoji. This runs on prose segments only — code spans
+  // never reach here (appendInline renders them verbatim) and fenced blocks are
+  // split off before any of this, so a shortcode inside code stays code.
+  collectTokens(
+    text,
+    EMOJI_TOKEN_REGEX,
+    (m) => (m[1] === undefined ? null : buildCustomEmojiNode(m[1])),
+    matches,
+  );
+  return fragmentFromTokens(text, matches);
 }
 
 /** Elements whose text is never mention-highlighted at render time, so the
@@ -689,27 +696,8 @@ function sameMention(a: HTMLElement, b: HTMLElement): boolean {
  */
 function wrapResolvedMentions(text: string, info?: MentionInfo): DocumentFragment | null {
   const matches: TokenMatch[] = [];
-  for (const match of text.matchAll(MENTION_TOKEN_REGEX)) {
-    const idx = match.index;
-    const lead = match[1];
-    const token = match[2];
-    if (idx === undefined || lead === undefined || token === undefined) continue;
-    if (match[3] === "@") continue;
-    const start = idx + lead.length;
-    const node = buildMentionNode(`@${token}`, token, info);
-    if (node !== null) matches.push({ start, end: start + token.length + 1, node });
-  }
-  if (matches.length === 0) return null;
-  const fragment = document.createDocumentFragment();
-  let last = 0;
-  for (const m of matches) {
-    if (m.start < last) continue;
-    if (m.start > last) fragment.appendChild(document.createTextNode(text.slice(last, m.start)));
-    fragment.appendChild(m.node);
-    last = m.end;
-  }
-  if (last < text.length) fragment.appendChild(document.createTextNode(text.slice(last)));
-  return fragment;
+  collectMentionTokens(text, info, matches);
+  return matches.length === 0 ? null : fragmentFromTokens(text, matches);
 }
 
 /**
@@ -727,50 +715,67 @@ export function resyncMentions(root: ParentNode, info?: MentionInfo): void {
     // querySelectorAll returns a static list, so replacing a span as we go does
     // not disturb the walk.
     for (const span of content.querySelectorAll<HTMLElement>(".mention, .mention-plain")) {
-      // The typed token lives in data-mention; the text may be a display name.
-      const raw = span.dataset["mention"] ?? span.textContent ?? "";
-      const token = raw.startsWith("@") ? raw.slice(1) : raw;
-      // An id token always rebuilds to a pill or its plain stand-in, so a
-      // rename, a role rename, recolour or deletion, or a member leaving or
-      // returning shows at once (MessageList resyncs on member and role changes).
-      const replacement = buildIdMentionNode(raw, info) ?? buildMentionNode(raw, token, info);
-      // A mention that labels a masked link stays plain link content when it is
-      // rebuilt, as at first render (buildMaskedLink).
-      if (replacement !== null && span.closest("a.msg-link.masked") !== null) {
-        stripMentionControl(replacement);
-      }
-      if (replacement !== null && sameMention(span, replacement)) {
-        if (span.textContent !== replacement.textContent) {
-          setText(span, replacement.textContent ?? raw);
-        }
-        if (replacement.title === "") span.removeAttribute("title");
-        else span.title = replacement.title;
-        continue;
-      }
-      span.replaceWith(replacement ?? document.createTextNode(raw));
+      refreshMentionSpan(span, info);
     }
+    for (const textNode of proseTextNodes(content)) wrapTextNodeMentions(textNode, info);
+  }
+}
 
-    const walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT);
-    const textNodes: Text[] = [];
-    for (let n = walker.nextNode(); n !== null; n = walker.nextNode()) {
-      textNodes.push(n as Text);
-    }
-    for (const textNode of textNodes) {
-      if (textNode.nodeValue?.includes("@") !== true) continue;
-      const parent = textNode.parentElement;
-      if (parent === null || parent.closest(MENTION_OPAQUE_SELECTOR) !== null) continue;
-      const wrapped = wrapResolvedMentions(textNode.nodeValue ?? "", info);
-      if (wrapped === null) continue;
-      // A token in a masked link's label that resolves only now stays plain
-      // link content too, or a click on it would open a profile, not the link.
-      if (parent.closest("a.msg-link.masked") !== null) {
-        for (const chip of wrapped.querySelectorAll<HTMLElement>(".mention")) {
-          stripMentionControl(chip);
-        }
-      }
-      textNode.replaceWith(wrapped);
+/** Rebuild one rendered mention against the live stores: keep it when it is
+ *  unchanged (refreshing its text and title), else swap it for the new pill or
+ *  the plain text it now reads as. */
+function refreshMentionSpan(span: HTMLElement, info?: MentionInfo): void {
+  // The typed token lives in data-mention; the text may be a display name.
+  const raw = span.dataset["mention"] ?? span.textContent ?? "";
+  const token = raw.startsWith("@") ? raw.slice(1) : raw;
+  // An id token always rebuilds to a pill or its plain stand-in, so a
+  // rename, a role rename, recolour or deletion, or a member leaving or
+  // returning shows at once (MessageList resyncs on member and role changes).
+  const replacement = buildIdMentionNode(raw, info) ?? buildMentionNode(raw, token, info);
+  if (replacement === null) {
+    span.replaceWith(document.createTextNode(raw));
+    return;
+  }
+  // A mention that labels a masked link stays plain link content when it is
+  // rebuilt, as at first render (buildMaskedLink).
+  if (span.closest("a.msg-link.masked") !== null) stripMentionControl(replacement);
+  if (!sameMention(span, replacement)) {
+    span.replaceWith(replacement);
+    return;
+  }
+  if (span.textContent !== replacement.textContent) {
+    setText(span, replacement.textContent ?? raw);
+  }
+  if (replacement.title === "") span.removeAttribute("title");
+  else span.title = replacement.title;
+}
+
+/** Every text node under `content`, collected up front so wrapping one does
+ *  not disturb the walk. */
+function proseTextNodes(content: Element): Text[] {
+  const walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT);
+  const textNodes: Text[] = [];
+  for (let n = walker.nextNode(); n !== null; n = walker.nextNode()) {
+    textNodes.push(n as Text);
+  }
+  return textNodes;
+}
+
+/** Wrap the @tokens in a plain text node that resolve now. */
+function wrapTextNodeMentions(textNode: Text, info?: MentionInfo): void {
+  if (textNode.nodeValue?.includes("@") !== true) return;
+  const parent = textNode.parentElement;
+  if (parent === null || parent.closest(MENTION_OPAQUE_SELECTOR) !== null) return;
+  const wrapped = wrapResolvedMentions(textNode.nodeValue ?? "", info);
+  if (wrapped === null) return;
+  // A token in a masked link's label that resolves only now stays plain
+  // link content too, or a click on it would open a profile, not the link.
+  if (parent.closest("a.msg-link.masked") !== null) {
+    for (const chip of wrapped.querySelectorAll<HTMLElement>(".mention")) {
+      stripMentionControl(chip);
     }
   }
+  textNode.replaceWith(wrapped);
 }
 
 // -- Parsed content (the parse cache's payload) -------------------------------

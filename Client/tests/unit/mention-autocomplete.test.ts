@@ -509,6 +509,18 @@ describe("composer integration", () => {
     expect(ta.value).toBe("hey @Alan  world");
   });
 
+  it("Escape with the popup open closes it and leaves the reply in place", () => {
+    seedMembers(["aaron", "alice"]);
+    input.setReplyTo(5, "alice");
+    type("hello @a");
+    expect(popupEl()).not.toBeNull();
+    press("Escape");
+    expect(popupEl()).toBeNull();
+    expect(container.querySelector(".reply-bar")?.classList.contains("visible")).toBe(true);
+    press("Escape");
+    expect(container.querySelector(".reply-bar")?.classList.contains("visible")).toBe(false);
+  });
+
   it("lets Enter send once the popup is closed", () => {
     type("hey @al");
     press("Escape");
