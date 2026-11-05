@@ -9,8 +9,8 @@ import {
   type Room,
   type LocalVideoTrack,
   type LocalTrack,
+  type TrackPublishOptions,
   Track,
-  createLocalVideoTrack,
   createLocalScreenTracks,
 } from "livekit-client";
 import type { WsClient } from "@lib/ws";
@@ -37,6 +37,14 @@ import {
   readSenderSample,
 } from "../../features/voice/shareSenderStats";
 import { nativeCameraSupport } from "../../features/voice/native/devices";
+import {
+  createCameraTrack,
+  hasCameraTracks,
+  pickWebShareQuality,
+  sharePublishOptions,
+  stopTracks,
+  type ShareSettings,
+} from "./videoCapture";
 import { voiceText } from "../../i18n/voice";
 import { channelPeerDecode } from "../../features/voice/peerDecode";
 import {
@@ -45,12 +53,8 @@ import {
   h264GpuPublish,
   type CodecChoice,
 } from "../../features/voice/videoCodec";
+import { getScreenSourcePicker } from "../../features/voice/native/screenPickerSlot";
 import {
-  type ScreenSourcePicker,
-  getScreenSourcePicker,
-} from "../../features/voice/native/screenPickerSlot";
-import {
-  CAMERA_PRESETS,
   CAMERA_PUBLISH_BITRATES,
   cameraMaxFramerate,
   cameraPublishOptions,
@@ -173,25 +177,6 @@ export interface CameraTrackState extends GenerationGuarded {
   published?: PublishCodec;
 }
 
-/** The native camera publication surface `NativeRoom` adds to
- *  `localParticipant`, reached through a cast because the shared modules see
- *  livekit-client's `Room`. Captures in the host so it survives a hidden
- *  window; the returned track is a `NativeCameraTrack`. */
-interface NativeCameraParticipant {
-  createCameraTracks(options: {
-    source?: string;
-    simulcast?: boolean;
-    resolution?: { width: number; height: number };
-    videoEncoding?: { maxBitrate: number; maxFramerate?: number };
-  }): Promise<NativeCameraTrack[]>;
-}
-
-function hasCameraTracks(
-  participant: Room["localParticipant"],
-): participant is Room["localParticipant"] & NativeCameraParticipant {
-  return typeof (participant as Partial<NativeCameraParticipant>).createCameraTracks === "function";
-}
-
 /** Unpublishing can reject later during WebRTC renegotiation. Track cleanup
  *  must proceed immediately and contain that asynchronous failure too. Takes
  *  any track with a `mediaStreamTrack` (browser `LocalTrack` or a native
@@ -223,6 +208,111 @@ export function stopManualCameraTrack(state: CameraTrackState, room: Room | null
   track.stop();
 }
 
+/** Linux captures in the backend, which needs GStreamer's camera elements:
+ *  without them no capture can ever start, so name the missing support
+ *  rather than failing later with a generic "no camera". False when the
+ *  enable stops here. */
+function nativeCameraReady(
+  state: CameraTrackState,
+  generation: number,
+  deps: VideoTrackDeps,
+  support: Awaited<ReturnType<typeof nativeCameraSupport>>,
+): boolean {
+  if ((state.generation ?? 0) !== generation) return false;
+  if (support !== null && !support.available) {
+    log.warn("Cannot enable camera: native camera support is missing", support.missing);
+    deps.onError(voiceText("share.gstreamerMissing"));
+    setLocalCamera(false);
+    return false;
+  }
+  return true;
+}
+
+/** The `ended` listener is per-track and self-scoped: it acts only while
+ *  this track is still the reported camera, independent of any other stop
+ *  path. Returns its remover. */
+function watchCameraEnded(
+  state: CameraTrackState,
+  deps: VideoTrackDeps,
+  videoTrack: LocalVideoTrack,
+  generation: number,
+  room: Room,
+  ws: WsClient,
+): () => void {
+  const onEnded = (): void => {
+    if (
+      (state.generation ?? 0) !== generation ||
+      state.manualCameraTrack !== videoTrack ||
+      deps.getRoom() !== room ||
+      deps.getWs() !== ws
+    ) {
+      return;
+    }
+    log.info("Camera track ended externally (device unplugged)");
+    void disableCamera(state, deps);
+  };
+  state.onCameraEnded = onEnded;
+  videoTrack.mediaStreamTrack.addEventListener("ended", onEnded, { once: true });
+  return (): void => {
+    videoTrack.mediaStreamTrack.removeEventListener("ended", onEnded);
+  };
+}
+
+/** Tell the server the camera is on, and record what went out. */
+function announceCamera(
+  state: CameraTrackState,
+  ws: WsClient,
+  deps: VideoTrackDeps,
+  videoTrack: LocalVideoTrack,
+  quality: StreamQuality,
+  choice: CodecChoice,
+): void {
+  const sendId = ws.send({ type: "voice_camera", payload: { enabled: true } });
+  registerPendingVideoEnable(sendId, "camera");
+  state.announced = videoTrack;
+  state.quality = quality;
+  state.preferred = choice.preferred;
+  state.published = choice.codec;
+  deps.reapplyAudioPipeline();
+  log.info("Camera enabled", {
+    quality,
+    maxBitrate: CAMERA_PUBLISH_BITRATES[quality],
+    codec: choice.codec,
+  });
+}
+
+function failCameraEnable(
+  state: CameraTrackState,
+  generation: number,
+  deps: VideoTrackDeps,
+  err: unknown,
+): void {
+  if ((state.generation ?? 0) !== generation) {
+    // A disableCamera (and possibly a newer enableCamera) already ran to
+    // completion while this attempt's device acquisition/publish was in
+    // flight. This attempt's own track, if any, was already released by
+    // that disable — touching shared state now would stop/clear a live
+    // track that belongs to a newer, successful enable.
+    log.warn("Superseded camera enable failed — leaving newer attempt's state alone", err);
+    return;
+  }
+  // Stop the created track to release the camera if publish failed.
+  if (state.manualCameraTrack !== null) {
+    state.manualCameraTrack.stop();
+    state.manualCameraTrack = null;
+  }
+  state.announced = undefined;
+  setLocalCamera(false);
+  log.error("Failed to enable camera", err);
+  if (err instanceof DOMException && err.name === "NotAllowedError") {
+    deps.onError(voiceText("share.cameraDenied"));
+  } else if (err instanceof DOMException && err.name === "NotFoundError") {
+    deps.onError(voiceText("share.noCamera"));
+  } else {
+    deps.onError(voiceText("share.cameraFailed"));
+  }
+}
+
 export async function enableCamera(state: CameraTrackState, deps: VideoTrackDeps): Promise<void> {
   const room = deps.getRoom();
   const ws = deps.getWs();
@@ -232,52 +322,21 @@ export async function enableCamera(state: CameraTrackState, deps: VideoTrackDeps
     return;
   }
   const generation = state.generation ?? 0;
+  const stale = (): boolean => (state.generation ?? 0) !== generation;
   setLocalCamera(true);
   const quality = getCameraQuality();
   let cameraEndedCleanup: (() => void) | undefined;
   try {
-    // Linux captures in the backend, which needs GStreamer's camera elements:
-    // without them no capture can ever start, so name the missing support
-    // rather than failing later with a generic "no camera".
-    if (hasCameraTracks(room.localParticipant)) {
-      const support = await nativeCameraSupport();
-      if ((state.generation ?? 0) !== generation) {
-        return;
-      }
-      if (support !== null && !support.available) {
-        log.warn("Cannot enable camera: native camera support is missing", support.missing);
-        deps.onError(voiceText("share.gstreamerMissing"));
-        setLocalCamera(false);
-        return;
-      }
+    if (
+      hasCameraTracks(room.localParticipant) &&
+      !nativeCameraReady(state, generation, deps, await nativeCameraSupport())
+    ) {
+      return;
     }
     const savedVideoDevice = loadPref<string>("videoInputDevice", "");
     stopManualCameraTrack(state, room);
-    // Linux captures in the native backend (WebKitGTK freezes a hidden page's
-    // <video>, which stalled the webview pump): the room's `createCameraTracks`
-    // stands in for `createLocalVideoTrack` and its track previews the host
-    // capture over the frame socket. Windows and macOS keep the web path. The
-    // cast is the same seam the native room crosses: `NativeCameraTrack` is
-    // structurally the `LocalVideoTrack` slice this function uses.
-    const videoTrack = (
-      hasCameraTracks(room.localParticipant)
-        ? (
-            await room.localParticipant.createCameraTracks({
-              source: Track.Source.Camera,
-              simulcast: quality !== "source",
-              ...(quality === "source" ? {} : { resolution: CAMERA_PRESETS[quality].resolution }),
-              videoEncoding: {
-                maxBitrate: CAMERA_PUBLISH_BITRATES[quality],
-                maxFramerate: quality === "low" ? 15 : 30,
-              },
-            })
-          )[0]!
-        : await createLocalVideoTrack({
-            ...CAMERA_PRESETS[quality],
-            ...(savedVideoDevice ? { deviceId: savedVideoDevice } : {}),
-          })
-    ) as LocalVideoTrack;
-    if ((state.generation ?? 0) !== generation) {
+    const videoTrack = await createCameraTrack(room, quality, savedVideoDevice);
+    if (stale()) {
       // A disableCamera ran to completion while getUserMedia was pending —
       // it already reset localCamera and sent voice_camera(false).
       // Publishing now would resurrect a track the user just turned off.
@@ -285,27 +344,8 @@ export async function enableCamera(state: CameraTrackState, deps: VideoTrackDeps
       return;
     }
     state.manualCameraTrack = videoTrack;
-    // The `ended` listener is per-track and self-scoped: it acts only while
-    // this track is still the reported camera, independent of any other stop
-    // path.
-    const onEnded = (): void => {
-      if (
-        (state.generation ?? 0) !== generation ||
-        state.manualCameraTrack !== videoTrack ||
-        deps.getRoom() !== room ||
-        deps.getWs() !== ws
-      ) {
-        return;
-      }
-      log.info("Camera track ended externally (device unplugged)");
-      void disableCamera(state, deps);
-    };
-    const removeEndedListener = (): void => {
-      videoTrack.mediaStreamTrack.removeEventListener("ended", onEnded);
-    };
+    const removeEndedListener = watchCameraEnded(state, deps, videoTrack, generation, room, ws);
     cameraEndedCleanup = removeEndedListener;
-    state.onCameraEnded = onEnded;
-    videoTrack.mediaStreamTrack.addEventListener("ended", onEnded, { once: true });
     if (videoTrack.mediaStreamTrack.readyState === "ended") {
       await disableCamera(state, deps);
       return;
@@ -317,7 +357,7 @@ export async function enableCamera(state: CameraTrackState, deps: VideoTrackDeps
       channelPeerDecode,
     );
     const videoCodec = choice.codec;
-    if ((state.generation ?? 0) !== generation || state.manualCameraTrack !== videoTrack) {
+    if (stale() || state.manualCameraTrack !== videoTrack) {
       // A disableCamera (or the track unplugging) ran to completion while
       // Auto's probe was pending: it already stopped this track and sent
       // voice_camera(false). Nothing is published yet, so just let go.
@@ -327,7 +367,7 @@ export async function enableCamera(state: CameraTrackState, deps: VideoTrackDeps
     }
     setH264GpuProfiles(videoTrack.mediaStreamTrack, h264GpuPublish(videoCodec));
     await room.localParticipant.publishTrack(videoTrack, cameraPublishOptions(videoCodec, quality));
-    if ((state.generation ?? 0) !== generation || state.manualCameraTrack !== videoTrack) {
+    if (stale() || state.manualCameraTrack !== videoTrack) {
       // A disableCamera (or the track unplugging) ran to completion while
       // publishTrack was in flight — it already reset localCamera, stopped the
       // track and sent voice_camera(false). The publish may have landed after
@@ -340,44 +380,10 @@ export async function enableCamera(state: CameraTrackState, deps: VideoTrackDeps
       if (state.manualCameraTrack === videoTrack) state.manualCameraTrack = null;
       return;
     }
-    const sendId = ws.send({ type: "voice_camera", payload: { enabled: true } });
-    registerPendingVideoEnable(sendId, "camera");
-    state.announced = videoTrack;
-    state.quality = quality;
-    state.preferred = choice.preferred;
-    state.published = videoCodec;
-    deps.reapplyAudioPipeline();
-    log.info("Camera enabled", {
-      quality,
-      maxBitrate: CAMERA_PUBLISH_BITRATES[quality],
-      codec: videoCodec,
-    });
+    announceCamera(state, ws, deps, videoTrack, quality, choice);
   } catch (err) {
     cameraEndedCleanup?.();
-    if ((state.generation ?? 0) !== generation) {
-      // A disableCamera (and possibly a newer enableCamera) already ran to
-      // completion while this attempt's device acquisition/publish was in
-      // flight. This attempt's own track, if any, was already released by
-      // that disable — touching shared state now would stop/clear a live
-      // track that belongs to a newer, successful enable.
-      log.warn("Superseded camera enable failed — leaving newer attempt's state alone", err);
-      return;
-    }
-    // Stop the created track to release the camera if publish failed.
-    if (state.manualCameraTrack !== null) {
-      state.manualCameraTrack.stop();
-      state.manualCameraTrack = null;
-    }
-    state.announced = undefined;
-    setLocalCamera(false);
-    log.error("Failed to enable camera", err);
-    if (err instanceof DOMException && err.name === "NotAllowedError") {
-      deps.onError(voiceText("share.cameraDenied"));
-    } else if (err instanceof DOMException && err.name === "NotFoundError") {
-      deps.onError(voiceText("share.noCamera"));
-    } else {
-      deps.onError(voiceText("share.cameraFailed"));
-    }
+    failCameraEnable(state, generation, deps, err);
   }
 }
 
@@ -538,28 +544,328 @@ export function stopManualScreenTracks(state: ScreenTrackState, room: Room | nul
   }
 }
 
-/** The web path's quality step before the OS picker: the saved
- *  defaults, overridden for this share by the dialog. Null when it was closed. */
-async function pickWebShareQuality(
-  showPicker: ScreenSourcePicker,
-  quality: StreamQuality,
-  fps: number,
-): Promise<{ quality: StreamQuality; fps: number; appAudio: boolean } | null> {
-  try {
-    const pick = await showPicker({
-      sources: [],
-      portal: false,
-      osPicker: true,
-      defaultQuality: quality,
-      defaultFps: fps,
+/** The web picker's answer. Null when the enable stops here: a stop came
+ *  first, or the dialog closed before Go Live (nothing was captured or
+ *  announced). */
+function acceptSharePick(
+  state: ScreenTrackState,
+  generation: number,
+  pick: Awaited<ReturnType<typeof pickWebShareQuality>>,
+): ShareSettings | null {
+  if ((state.generation ?? 0) !== generation) return null;
+  if (pick === null) {
+    setLocalScreenshare(false);
+    return null;
+  }
+  return { quality: pick.quality, fps: pick.fps, appAudioOn: pick.appAudio };
+}
+
+/** A disableScreenshare ran to completion while a publish was in flight —
+ *  it already reset localScreenshare, sent voice_screenshare(false) and
+ *  emptied state.manualScreenTracks, so the tracks still held by this
+ *  attempt are unreachable from any later disable. Undo every one of them
+ *  (a publish may have landed after the disable's unpublish). */
+function undoSupersededShare(
+  state: ScreenTrackState,
+  room: Room,
+  screenTracks: LocalTrack[],
+): void {
+  for (const t of screenTracks) {
+    unpublishManualTrack(room, t);
+    t.stop();
+  }
+  if (state.manualScreenTracks === screenTracks) state.manualScreenTracks = [];
+}
+
+/** Windows web path: a shared window gets its app's sound. A stop or newer
+ *  share meanwhile has released everything it made. */
+function publishShareAppAudio(
+  state: ScreenTrackState,
+  room: Room,
+  screenTracks: LocalTrack[],
+  videoTrack: LocalTrack,
+  generation: number,
+): Promise<"done" | "stale"> {
+  return import("./appAudioShare")
+    .then((m) =>
+      m.publishAppAudio(state, room, screenTracks, videoTrack, generation, {
+        ...SCREENSHARE_AUDIO_PUBLISH,
+        source: Track.Source.ScreenShareAudio,
+        simulcast: false,
+      }),
+    )
+    .catch((err: unknown) => {
+      log.warn("App audio unavailable; the video share goes on", err);
+      return "done" as const;
     });
-    return pick === null
-      ? null
-      : { quality: pick.quality, fps: pick.fps, appAudio: pick.audio === true };
+}
+
+/** The web capture never grows back after a bandwidth dip on its own; the
+ *  Linux native capture is not a browser source. Loaded once the share is
+ *  up, and only if this share is still the live one by then. */
+function startShareRecovery(
+  state: ScreenTrackState,
+  videoTrack: LocalTrack | undefined,
+  screenTracks: LocalTrack[],
+  videoOptions: TrackPublishOptions,
+  generation: number,
+): void {
+  if (videoTrack === undefined || isLinuxDesktop()) return;
+  const preference = videoOptions.degradationPreference ?? screenShareDegradation();
+  void import("./shareResolutionRecovery")
+    .then(({ watchShareResolutionRecovery }) => {
+      if ((state.generation ?? 0) !== generation || state.manualScreenTracks !== screenTracks)
+        return;
+      state.stopResolutionRecovery?.();
+      state.stopResolutionRecovery = watchShareResolutionRecovery(
+        videoTrack as LocalVideoTrack,
+        preference,
+      );
+    })
+    .catch((err: unknown) => log.warn("Share resolution recovery unavailable", err));
+}
+
+/** Tell the server the share is on, and record what went out. */
+function announceShare(
+  state: ScreenTrackState,
+  ws: WsClient,
+  deps: VideoTrackDeps,
+  videoTrack: LocalTrack | undefined,
+  choice: CodecChoice,
+  sent: { quality: StreamQuality; fps: number; effectiveFps: number; maxBitrate: number },
+): void {
+  const sendId = ws.send({ type: "voice_screenshare", payload: { enabled: true } });
+  registerPendingVideoEnable(sendId, "screen");
+  state.announced = videoTrack;
+  state.preferred = choice.preferred;
+  state.published = choice.codec;
+  // The Linux native capture carries the quality and frame rate its own
+  // picker chose, not the saved prefs.
+  const nativeQuality = isLinuxDesktop() ? qualityOf(videoTrack) : null;
+  if (nativeQuality !== null) {
+    state.quality = nativeQuality.quality;
+    state.fps = nativeQuality.fps;
+  } else if (!isLinuxDesktop()) {
+    state.quality = sent.quality;
+    state.fps = sent.fps;
+  }
+  bumpLocalShareRev();
+  deps.reapplyAudioPipeline();
+  // The Linux native track carries the dialog's per-share encoding, which
+  // replaces the saved prefs.
+  const picked = (
+    videoTrack as { publishEncoding?: { maxBitrate: number; maxFramerate: number } } | undefined
+  )?.publishEncoding;
+  log.info(
+    "Screenshare enabled",
+    picked !== undefined
+      ? { fps: picked.maxFramerate, maxBitrate: picked.maxBitrate, codec: choice.codec }
+      : {
+          quality: sent.quality,
+          fps: sent.effectiveFps,
+          maxBitrate: sent.maxBitrate,
+          codec: choice.codec,
+        },
+  );
+}
+
+function failShareEnable(
+  state: ScreenTrackState,
+  room: Room,
+  generation: number,
+  deps: VideoTrackDeps,
+  err: unknown,
+): void {
+  if ((state.generation ?? 0) !== generation) {
+    // A disableScreenshare (and possibly a newer enableScreenshare) already
+    // ran to completion while this attempt's capture/publish was in
+    // flight. This attempt's own tracks, if any, were already released by
+    // that disable — calling stopManualScreenTracks now would unpublish
+    // and stop tracks that belong to a newer, successful enable.
+    log.warn("Superseded screenshare enable failed — leaving newer attempt's state alone", err);
+    return;
+  }
+  // Release every created
+  // track, not just stop() it — a track already published before a later
+  // one in the batch fails (all quality presets request audio alongside
+  // video) needs unpublishing too, or it stays orphaned in the room:
+  // track.stop() is programmatic and never fires the DOM "ended" event, so
+  // LiveKit's ended-driven auto-unpublish never runs. stopManualScreenTracks
+  // does both and no-ops when nothing was created.
+  stopManualScreenTracks(state, room);
+  setLocalScreenshare(false);
+  log.error("Failed to enable screenshare", err);
+  if (err instanceof DOMException && err.name === "NotAllowedError") {
+    // The user closed the picker: not a failure and not a denial — stay
+    // silent rather than reporting "permission denied" (polish #10).
+    // The desktop portal cannot say whether the user cancelled or a
+    // permission refused, so that case gets a soft notice covering both.
+    if (err.message === PORTAL_NOT_STARTED) showToast(voiceText("share.screenNotStarted"), "info");
+    else if (err.message !== PICKER_DISMISSED) deps.onError(voiceText("share.screenDenied"));
+  } else {
+    deps.onError(voiceText("share.screenFailed"));
+  }
+}
+
+/** What a share captured: its tracks, the video among them, and the
+ *  capture options it asked for. */
+interface CapturedShare {
+  screenTracks: LocalTrack[];
+  videoTrack: LocalTrack | undefined;
+  captureOptions: ReturnType<typeof getScreenShareCaptureOptions>;
+}
+
+/** Capture the share and watch for the OS ending it. Null when the enable
+ *  stops here: a stop came first, or the capture already ended. */
+async function captureShare(
+  state: ScreenTrackState,
+  deps: VideoTrackDeps,
+  room: Room,
+  settings: ShareSettings,
+  generation: number,
+  ended: { remove?: () => void },
+): Promise<CapturedShare | null> {
+  stopManualScreenTracks(state, room);
+  const captureOptions = getScreenShareCaptureOptions(settings.quality, settings.fps);
+  // Linux captures in the native backend (no getDisplayMedia behind a
+  // WebRTC-less webview): its room's picker-and-capture stands in and sets
+  // the capture from the picker's per-share quality.
+  const screenTracks = isLinuxDesktop()
+    ? await room.localParticipant.createScreenTracks()
+    : await createLocalScreenTracks(captureOptions);
+  if ((state.generation ?? 0) !== generation) {
+    // A disableScreenshare ran to completion while the OS picker was still
+    // up — it already reset localScreenshare and sent voice_screenshare
+    // (false). Publishing now would resurrect a share the user just ended.
+    stopTracks(screenTracks);
+    return null;
+  }
+  state.manualScreenTracks = screenTracks;
+  // The OS may stop capture while a publication is still awaiting the
+  // server. Observe it before publishing, so remaining tracks (including
+  // screen audio) cannot start after the user has already stopped sharing.
+  const videoTrack = screenTracks.find((t) => t.kind === Track.Kind.Video);
+  if (videoTrack !== undefined) {
+    ended.remove = watchScreenEnded(state, deps, videoTrack, screenTracks, generation);
+    if (videoTrack.mediaStreamTrack.readyState === "ended") {
+      await disableScreenshare(state, deps);
+      return null;
+    }
+  }
+  return { screenTracks, videoTrack, captureOptions };
+}
+
+/** Pick the share's codec, then shape the capture for it. */
+async function prepareShareCodec(
+  captured: CapturedShare,
+  effectiveFps: number,
+  maxBitrate: number,
+): Promise<CodecChoice> {
+  const { videoTrack, captureOptions } = captured;
+  if (videoTrack === undefined) return { preferred: "vp8", codec: "vp8" };
+  const choice = await resolveCodecChoice(
+    videoTrack.mediaStreamTrack,
+    effectiveFps,
+    maxBitrate,
+    channelPeerDecode,
+  );
+  if (!isLinuxDesktop())
+    applyScreenShareContentHint(videoTrack.mediaStreamTrack, captureOptions, choice.codec);
+  if (h264GpuPublish(choice.codec)) {
+    await fitGpuH264Share(videoTrack);
+  }
+  return choice;
+}
+
+/** Publish the tracks in order. False when a stop landed meanwhile; this
+ *  attempt's tracks are then undone. */
+async function publishShareTracks(
+  state: ScreenTrackState,
+  room: Room,
+  screenTracks: LocalTrack[],
+  videoOptions: TrackPublishOptions,
+  generation: number,
+  ended: { remove?: () => void },
+): Promise<boolean> {
+  for (const track of screenTracks) {
+    // oxlint-disable-next-line no-await-in-loop -- tracks must be published sequentially to maintain correct order
+    await room.localParticipant.publishTrack(track, sharePublishOptions(track, videoOptions));
+    if ((state.generation ?? 0) !== generation) {
+      ended.remove?.();
+      // Stay silent: announcing voice_screenshare(true) now would
+      // override the disable's final word on the server.
+      undoSupersededShare(state, room, screenTracks);
+      return false;
+    }
+  }
+  return true;
+}
+
+function wantsAppAudio(
+  appAudioOn: boolean,
+  videoTrack: LocalTrack | undefined,
+  screenTracks: LocalTrack[],
+): videoTrack is LocalTrack {
+  return (
+    appAudioOn &&
+    videoTrack !== undefined &&
+    !isLinuxDesktop() &&
+    !screenTracks.some((t) => t.kind === Track.Kind.Audio)
+  );
+}
+
+/** Capture, publish and announce the share at `settings`. */
+async function startShare(
+  state: ScreenTrackState,
+  deps: VideoTrackDeps,
+  room: Room,
+  ws: WsClient,
+  settings: ShareSettings,
+  generation: number,
+): Promise<void> {
+  const { quality, fps, appAudioOn } = settings;
+  const stale = (): boolean => (state.generation ?? 0) !== generation;
+  const effectiveFps = getEffectiveScreenShareFps(quality, fps);
+  const maxBitrate = getScreenShareMaxBitrate(quality, fps);
+  const ended: { remove?: () => void } = {};
+  try {
+    const captured = await captureShare(state, deps, room, settings, generation, ended);
+    if (captured === null) return;
+    const { screenTracks, videoTrack } = captured;
+    const choice = await prepareShareCodec(captured, effectiveFps, maxBitrate);
+    if (stale() || state.manualScreenTracks !== screenTracks) {
+      // A disableScreenshare (or the OS stop-sharing button) ran to
+      // completion while Auto's probe or the GPU fit was pending: it already stopped these
+      // tracks and sent voice_screenshare(false). Nothing is published yet.
+      ended.remove?.();
+      stopTracks(screenTracks);
+      return;
+    }
+    if (videoTrack !== undefined)
+      setH264GpuProfiles(videoTrack.mediaStreamTrack, h264GpuPublish(choice.codec));
+    const videoOptions = screenVideoPublishOptions(choice.codec, quality, fps);
+    if (!(await publishShareTracks(state, room, screenTracks, videoOptions, generation, ended)))
+      return;
+    // The publish step resolves a tick after its own check: a stop in that
+    // tick has released the tracks, and nothing may be announced.
+    if (stale()) {
+      ended.remove?.();
+      undoSupersededShare(state, room, screenTracks);
+      return;
+    }
+    state.appAudioOn = appAudioOn;
+    if (wantsAppAudio(appAudioOn, videoTrack, screenTracks)) {
+      const outcome = await publishShareAppAudio(state, room, screenTracks, videoTrack, generation);
+      if (outcome === "stale" || stale()) {
+        ended.remove?.();
+        return;
+      }
+    }
+    startShareRecovery(state, videoTrack, screenTracks, videoOptions, generation);
+    announceShare(state, ws, deps, videoTrack, choice, { quality, fps, effectiveFps, maxBitrate });
   } catch (err) {
-    // The dialog's chunk failed to load: share at the defaults rather than not at all.
-    log.warn("Screen share quality step unavailable", err);
-    return { quality, fps, appAudio: false };
+    ended.remove?.();
+    failShareEnable(state, room, generation, deps, err);
   }
 }
 
@@ -576,214 +882,21 @@ export async function enableScreenshare(
   }
   setLocalScreenshare(true);
   const generation = state.generation ?? 0;
-  let quality = getScreenShareQuality();
-  let fps = getScreenShareFps();
-  let appAudioOn = false;
+  let settings: ShareSettings = {
+    quality: getScreenShareQuality(),
+    fps: getScreenShareFps(),
+    appAudioOn: false,
+  };
   // Linux picks inside its own capture; a headless run (no dialog registered)
   // keeps the saved defaults.
   const showPicker = isLinuxDesktop() ? null : getScreenSourcePicker();
   if (showPicker !== null) {
-    const pick = await pickWebShareQuality(showPicker, quality, fps);
-    if ((state.generation ?? 0) !== generation) return;
-    if (pick === null) {
-      // Closed before Go Live: nothing was captured or announced.
-      setLocalScreenshare(false);
-      return;
-    }
-    ({ quality, fps } = pick);
-    appAudioOn = pick.appAudio;
+    const pick = await pickWebShareQuality(showPicker, settings.quality, settings.fps);
+    const accepted = acceptSharePick(state, generation, pick);
+    if (accepted === null) return;
+    settings = accepted;
   }
-  const effectiveFps = getEffectiveScreenShareFps(quality, fps);
-  const maxBitrate = getScreenShareMaxBitrate(quality, fps);
-  let removeEndedListener: (() => void) | undefined;
-  try {
-    stopManualScreenTracks(state, room);
-    const captureOptions = getScreenShareCaptureOptions(quality, fps);
-    // Linux captures in the native backend (no getDisplayMedia behind a
-    // WebRTC-less webview): its room's picker-and-capture stands in and sets
-    // the capture from the picker's per-share quality.
-    const screenTracks = isLinuxDesktop()
-      ? await room.localParticipant.createScreenTracks()
-      : await createLocalScreenTracks(captureOptions);
-    if ((state.generation ?? 0) !== generation) {
-      // A disableScreenshare ran to completion while the OS picker was still
-      // up — it already reset localScreenshare and sent voice_screenshare
-      // (false). Publishing now would resurrect a share the user just ended.
-      for (const t of screenTracks) t.stop();
-      return;
-    }
-    state.manualScreenTracks = screenTracks;
-    // The OS may stop capture while a publication is still awaiting the
-    // server. Observe it before publishing, so remaining tracks (including
-    // screen audio) cannot start after the user has already stopped sharing.
-    const videoTrack = screenTracks.find((t) => t.kind === Track.Kind.Video);
-    if (videoTrack !== undefined) {
-      removeEndedListener = watchScreenEnded(state, deps, videoTrack, screenTracks, generation);
-      if (videoTrack.mediaStreamTrack.readyState === "ended") {
-        await disableScreenshare(state, deps);
-        return;
-      }
-    }
-    const choice: CodecChoice =
-      videoTrack === undefined
-        ? { preferred: "vp8", codec: "vp8" }
-        : await resolveCodecChoice(
-            videoTrack.mediaStreamTrack,
-            effectiveFps,
-            maxBitrate,
-            channelPeerDecode,
-          );
-    const videoCodec = choice.codec;
-    if (videoTrack !== undefined && !isLinuxDesktop())
-      applyScreenShareContentHint(videoTrack.mediaStreamTrack, captureOptions, videoCodec);
-    if (videoTrack !== undefined && h264GpuPublish(videoCodec)) {
-      await fitGpuH264Share(videoTrack);
-    }
-    if ((state.generation ?? 0) !== generation || state.manualScreenTracks !== screenTracks) {
-      // A disableScreenshare (or the OS stop-sharing button) ran to
-      // completion while Auto's probe or the GPU fit was pending: it already stopped these
-      // tracks and sent voice_screenshare(false). Nothing is published yet.
-      removeEndedListener?.();
-      for (const t of screenTracks) t.stop();
-      return;
-    }
-    if (videoTrack !== undefined)
-      setH264GpuProfiles(videoTrack.mediaStreamTrack, h264GpuPublish(videoCodec));
-    const videoOptions = screenVideoPublishOptions(videoCodec, quality, fps);
-    for (const track of screenTracks) {
-      const isVideo = track.kind === Track.Kind.Video;
-      // oxlint-disable-next-line no-await-in-loop -- tracks must be published sequentially to maintain correct order
-      await room.localParticipant.publishTrack(track, {
-        ...(isVideo
-          ? videoOptions
-          : {
-              source: Track.Source.ScreenShareAudio,
-              simulcast: false,
-              ...SCREENSHARE_AUDIO_PUBLISH,
-            }),
-      });
-      if ((state.generation ?? 0) !== generation) {
-        removeEndedListener?.();
-        // A disableScreenshare ran to completion while that publish was in
-        // flight — it already reset localScreenshare, sent voice_screenshare
-        // (false) and emptied state.manualScreenTracks, so the tracks still
-        // held by this attempt are unreachable from any later disable. Undo
-        // every one of them here (a publish may have landed after the
-        // disable's unpublish), and stay silent: announcing
-        // voice_screenshare(true) now would override the disable's final
-        // word on the server.
-        for (const t of screenTracks) {
-          unpublishManualTrack(room, t);
-          t.stop();
-        }
-        if (state.manualScreenTracks === screenTracks) state.manualScreenTracks = [];
-        return;
-      }
-    }
-    state.appAudioOn = appAudioOn;
-    if (
-      appAudioOn &&
-      videoTrack !== undefined &&
-      !isLinuxDesktop() &&
-      !screenTracks.some((t) => t.kind === Track.Kind.Audio)
-    ) {
-      // Windows web path: a shared window gets its app's sound. A
-      // stop or newer share meanwhile has released everything it made.
-      const outcome = await import("./appAudioShare")
-        .then((m) =>
-          m.publishAppAudio(state, room, screenTracks, videoTrack, generation, {
-            ...SCREENSHARE_AUDIO_PUBLISH,
-            source: Track.Source.ScreenShareAudio,
-            simulcast: false,
-          }),
-        )
-        .catch((err: unknown) => {
-          log.warn("App audio unavailable; the video share goes on", err);
-          return "done" as const;
-        });
-      if (outcome === "stale" || (state.generation ?? 0) !== generation) {
-        removeEndedListener?.();
-        return;
-      }
-    }
-    // The web capture never grows back after a bandwidth dip on its own; the
-    // Linux native capture is not a browser source. Loaded once the share is
-    // up, and only if this share is still the live one by then.
-    if (videoTrack !== undefined && !isLinuxDesktop()) {
-      const preference = videoOptions.degradationPreference ?? screenShareDegradation();
-      void import("./shareResolutionRecovery")
-        .then(({ watchShareResolutionRecovery }) => {
-          if ((state.generation ?? 0) !== generation || state.manualScreenTracks !== screenTracks)
-            return;
-          state.stopResolutionRecovery?.();
-          state.stopResolutionRecovery = watchShareResolutionRecovery(
-            videoTrack as LocalVideoTrack,
-            preference,
-          );
-        })
-        .catch((err: unknown) => log.warn("Share resolution recovery unavailable", err));
-    }
-    const sendId = ws.send({ type: "voice_screenshare", payload: { enabled: true } });
-    registerPendingVideoEnable(sendId, "screen");
-    state.announced = videoTrack;
-    state.preferred = choice.preferred;
-    state.published = videoCodec;
-    // The Linux native capture carries the quality and frame rate its own
-    // picker chose, not the saved prefs.
-    const nativeQuality = isLinuxDesktop() ? qualityOf(videoTrack) : null;
-    if (nativeQuality !== null) {
-      state.quality = nativeQuality.quality;
-      state.fps = nativeQuality.fps;
-    } else if (!isLinuxDesktop()) {
-      state.quality = quality;
-      state.fps = fps;
-    }
-    bumpLocalShareRev();
-    deps.reapplyAudioPipeline();
-    // The Linux native track carries the dialog's per-share encoding, which
-    // replaces the saved prefs.
-    const picked = (
-      videoTrack as { publishEncoding?: { maxBitrate: number; maxFramerate: number } } | undefined
-    )?.publishEncoding;
-    log.info(
-      "Screenshare enabled",
-      picked !== undefined
-        ? { fps: picked.maxFramerate, maxBitrate: picked.maxBitrate, codec: videoCodec }
-        : { quality, fps: effectiveFps, maxBitrate, codec: videoCodec },
-    );
-  } catch (err) {
-    removeEndedListener?.();
-    if ((state.generation ?? 0) !== generation) {
-      // A disableScreenshare (and possibly a newer enableScreenshare) already
-      // ran to completion while this attempt's capture/publish was in
-      // flight. This attempt's own tracks, if any, were already released by
-      // that disable — calling stopManualScreenTracks now would unpublish
-      // and stop tracks that belong to a newer, successful enable.
-      log.warn("Superseded screenshare enable failed — leaving newer attempt's state alone", err);
-      return;
-    }
-    // Release every created
-    // track, not just stop() it — a track already published before a later
-    // one in the batch fails (all quality presets request audio alongside
-    // video) needs unpublishing too, or it stays orphaned in the room:
-    // track.stop() is programmatic and never fires the DOM "ended" event, so
-    // LiveKit's ended-driven auto-unpublish never runs. stopManualScreenTracks
-    // does both and no-ops when nothing was created.
-    stopManualScreenTracks(state, room);
-    setLocalScreenshare(false);
-    log.error("Failed to enable screenshare", err);
-    if (err instanceof DOMException && err.name === "NotAllowedError") {
-      // The user closed the picker: not a failure and not a denial — stay
-      // silent rather than reporting "permission denied" (polish #10).
-      // The desktop portal cannot say whether the user cancelled or a
-      // permission refused, so that case gets a soft notice covering both.
-      if (err.message === PORTAL_NOT_STARTED)
-        showToast(voiceText("share.screenNotStarted"), "info");
-      else if (err.message !== PICKER_DISMISSED) deps.onError(voiceText("share.screenDenied"));
-    } else {
-      deps.onError(voiceText("share.screenFailed"));
-    }
-  }
+  await startShare(state, deps, room, ws, settings, generation);
 }
 
 export async function disableScreenshare(
@@ -813,6 +926,67 @@ export async function disableScreenshare(
 // ---------------------------------------------------------------------------
 // Live codec switch
 // ---------------------------------------------------------------------------
+
+/** The live video a republish acts on, with its quality: null while it is
+ *  starting, stopping or not on, or (a share) while a Change source or
+ *  Quality change runs. */
+function republishTarget(
+  kind: "camera" | "screen",
+  state: CameraTrackState | ScreenTrackState,
+): { track: LocalTrack; quality: StreamQuality } | null {
+  const live =
+    kind === "camera"
+      ? liveCameraVideo(state as CameraTrackState)
+      : liveShareVideo(state as ScreenTrackState);
+  if (live === null || live.quality === undefined) return null;
+  if (kind === "screen" && (state as ScreenTrackState).changing === true) return null;
+  return { track: live.track, quality: live.quality };
+}
+
+/** The publish options a republish keeps, but for the codec. */
+function republishOptions(
+  kind: "camera" | "screen",
+  state: CameraTrackState | ScreenTrackState,
+  codec: PublishCodec,
+  quality: StreamQuality,
+): TrackPublishOptions {
+  return kind === "camera"
+    ? cameraPublishOptions(codec, quality)
+    : screenVideoPublishOptions(
+        codec,
+        quality,
+        (state as ScreenTrackState).fps ?? getScreenShareFps(),
+      );
+}
+
+function hintShareRepublish(
+  state: ScreenTrackState,
+  track: LocalTrack,
+  quality: StreamQuality,
+  codec: PublishCodec,
+): void {
+  if (isLinuxDesktop()) return;
+  applyScreenShareContentHint(
+    track.mediaStreamTrack,
+    getScreenShareCaptureOptions(quality, state.fps ?? getScreenShareFps()),
+    codec,
+  );
+}
+
+/** A failed republish takes the normal disable path, so no half state is left. */
+async function failRepublish(
+  kind: "camera" | "screen",
+  state: CameraTrackState | ScreenTrackState,
+  deps: VideoTrackDeps,
+): Promise<void> {
+  if (kind === "camera") {
+    await disableCamera(state as CameraTrackState, deps);
+    deps.onError(voiceText("share.cameraFailed"));
+  } else {
+    await disableScreenshare(state as ScreenTrackState, deps);
+    deps.onError(voiceText("share.screenFailed"));
+  }
+}
 
 /** Publish the live camera or share video again with `codec`, on the same
  *  capture. livekit-client 2.22.3 cannot change a published codec in place and
@@ -847,12 +1021,8 @@ export async function republishVideo(
 ): Promise<boolean> {
   const room = deps.getRoom();
   const ws = deps.getWs();
-  const live =
-    kind === "camera"
-      ? liveCameraVideo(state as CameraTrackState)
-      : liveShareVideo(state as ScreenTrackState);
-  if (room === null || ws === null || live === null || live.quality === undefined) return false;
-  if (kind === "screen" && (state as ScreenTrackState).changing === true) return false;
+  const live = republishTarget(kind, state);
+  if (room === null || ws === null || live === null) return false;
   const { track, quality } = live;
   const generation = state.generation ?? 0;
   const stale = (): boolean =>
@@ -862,14 +1032,7 @@ export async function republishVideo(
     (kind === "camera"
       ? (state as CameraTrackState).manualCameraTrack !== track
       : (state as ScreenTrackState).announced !== track);
-  const options =
-    kind === "camera"
-      ? cameraPublishOptions(codec, quality)
-      : screenVideoPublishOptions(
-          codec,
-          quality,
-          (state as ScreenTrackState).fps ?? getScreenShareFps(),
-        );
+  const options = republishOptions(kind, state, codec, quality);
   // A Change source or Quality change must not start under the republish.
   if (kind === "screen") (state as ScreenTrackState).changing = true;
   try {
@@ -877,15 +1040,7 @@ export async function republishVideo(
     // A stop between the two awaits already unpublished and stopped the track
     // and sent its `false`: publishing now would resurrect it.
     if (stale()) return false;
-    if (kind === "screen" && !isLinuxDesktop())
-      applyScreenShareContentHint(
-        track.mediaStreamTrack,
-        getScreenShareCaptureOptions(
-          quality,
-          (state as ScreenTrackState).fps ?? getScreenShareFps(),
-        ),
-        codec,
-      );
+    if (kind === "screen") hintShareRepublish(state as ScreenTrackState, track, quality, codec);
     setH264GpuProfiles(track.mediaStreamTrack, h264GpuPublish(codec));
     await room.localParticipant.publishTrack(track, options);
     if (stale()) {
@@ -905,13 +1060,7 @@ export async function republishVideo(
       return false;
     }
     log.error("Failed to republish with a new codec", { kind, codec, err });
-    if (kind === "camera") {
-      await disableCamera(state as CameraTrackState, deps);
-      deps.onError(voiceText("share.cameraFailed"));
-    } else {
-      await disableScreenshare(state as ScreenTrackState, deps);
-      deps.onError(voiceText("share.screenFailed"));
-    }
+    await failRepublish(kind, state, deps);
     return false;
   } finally {
     if (kind === "screen") (state as ScreenTrackState).changing = false;

@@ -44,6 +44,7 @@ export const shards = {
     "src/features/voice/native/videoCodecs.ts",
     "src/features/voice/slotKeyProvider.ts",
     "src/lib/voice/screenShare.ts",
+    "src/lib/voice/videoCapture.ts",
   ],
   "livekit-4": [
     "src/features/voice/joinBackoff.ts",
