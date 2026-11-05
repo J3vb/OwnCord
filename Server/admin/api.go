@@ -287,7 +287,8 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 	// Per-router so tests that build hundreds of routers never share restart
 	// state; a real restart replaces the process and clears it anyway.
 	configPending := new(atomic.Bool)
-	bundles := newSupportBundles(service.NewDiagnosticsService(database), version, setupOpts.RunningCfg, logBuf, hub)
+	diagnostics := service.NewDiagnosticsService(database)
+	bundles := newSupportBundles(diagnostics, version, setupOpts.RunningCfg, logBuf, hub)
 
 	// Setup endpoints — unauthenticated. The gate is the durable
 	// settings.setup_completed flag (migration 043), read inside the
@@ -352,7 +353,7 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 		mountSystemRoutes(r, gates, setupOpts.System, hub, svc.Attention, version)
 		// Waking the voice server after it stopped restarting is gated like the
 		// server restart button.
-		gates.route(r, gateManageConfig, http.MethodPost, "/system/livekit/restart", handleRestartLiveKit(database, hub))
+		gates.route(r, gateManageConfig, http.MethodPost, "/system/livekit/restart", handleRestartLiveKit(diagnostics, hub))
 		mountUserRoutes(r, gates, svc, hub, mod)
 		// The approval-mode registration queue: deciding who joins
 		// is server management, not moderation of existing members.

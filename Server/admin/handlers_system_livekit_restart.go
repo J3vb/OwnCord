@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/httperr"
 )
 
@@ -16,10 +15,15 @@ type liveKitRestarter interface {
 	RestartLiveKit() bool
 }
 
+// voiceRestartAuditor records an accepted press (service.DiagnosticsService).
+type voiceRestartAuditor interface {
+	RecordVoiceServerRestart(ctx context.Context, actor int64)
+}
+
 // handleRestartLiveKit is POST /system/livekit/restart: the System health
 // page's "Restart voice server" button. It only wakes a supervisor that stopped
 // its quick restarts, so it can never kill a running voice server.
-func handleRestartLiveKit(database *db.DB, hub HubBroadcaster) http.HandlerFunc {
+func handleRestartLiveKit(audit voiceRestartAuditor, hub HubBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		lk, ok := hub.(liveKitRestarter)
 		if !ok || !lk.LiveKitManaged() {
@@ -30,7 +34,7 @@ func handleRestartLiveKit(database *db.DB, hub HubBroadcaster) http.HandlerFunc 
 			writeErr(w, http.StatusConflict, httperr.CodeConflict, "The voice server has not stopped restarting, so there is nothing to restart.")
 			return
 		}
-		db.WriteAudit(context.WithoutCancel(r.Context()), database, actorFromContext(r), "voice_server_restart_requested", "server", 0, "manual")
+		audit.RecordVoiceServerRestart(context.WithoutCancel(r.Context()), actorFromContext(r))
 		writeJSON(w, http.StatusAccepted, map[string]bool{"restarting": true})
 	}
 }
