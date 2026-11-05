@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import fc from "fast-check";
 
 vi.mock("../../lib/net/e2eeCrypto", () => ({
   wrapRoomKey: vi.fn(async (_priv: unknown, _peer: unknown, key: Uint8Array, epoch: number) => ({
@@ -708,4 +709,61 @@ describe("E2EEOffer log tag", () => {
   it("logs under the shared E2EE tag, as before it was split out of the manager", () => {
     expect(logTags).toContain("livekitE2EE");
   });
+});
+
+describe("E2EEOffer with arbitrary offer text", () => {
+  const PROPERTY_TIMEOUT_MS = 30_000;
+
+  it(
+    "never rejects or installs a key for a bad offer, and still applies a good one after",
+    async () => {
+      const real = await vi.importActual<typeof import("../../lib/net/e2eeCrypto")>(
+        "../../lib/net/e2eeCrypto",
+      );
+      vi.mocked(unwrapRoomKey).mockImplementation(real.unwrapRoomKey);
+      const [holderPair, myPair] = await Promise.all([
+        real.generateECDHKeyPair(),
+        real.generateECDHKeyPair(),
+      ]);
+      const binding = { senderId: HOLDER, recipientId: 5 };
+      const goodKey = new Uint8Array(32).fill(9);
+      const good = await real.wrapRoomKey(
+        holderPair.privateKey,
+        myPair.publicKey,
+        goodKey,
+        4,
+        { slot: 0, stage: false },
+        binding,
+      );
+      const text = fc.oneof(
+        fc.string(),
+        fc.uint8Array({ maxLength: 80 }).map((b) => btoa(String.fromCharCode(...b))),
+        fc.constant(good.encryptedKey),
+        fc.constant(good.iv),
+      );
+      await fc.assert(
+        fc.asyncProperty(text, text, async (encryptedKey, iv) => {
+          fc.pre(encryptedKey !== good.encryptedKey || iv !== good.iv);
+          const { state, host, offers } = setup();
+          state.keypair = myPair;
+          state.peers.set(HOLDER, holderPair.publicKey);
+          const rejected: Error[] = [];
+          state.rejector = (err) => rejected.push(err);
+          state.resolver = () => {};
+
+          await expect(offers.handleOffer(HOLDER, encryptedKey, iv)).resolves.toBeUndefined();
+          expect(host.applyRoomKey).not.toHaveBeenCalled();
+          expect(state.roomKey).toBeNull();
+          expect(rejected).toHaveLength(1);
+          expect(rejected[0]).toBeInstanceOf(Error);
+
+          await offers.handleOffer(HOLDER, good.encryptedKey, good.iv);
+          expect(state.roomKey).toEqual(goodKey);
+          expect(host.applyRoomKey).toHaveBeenCalledTimes(1);
+        }),
+        { numRuns: 50 },
+      );
+    },
+    PROPERTY_TIMEOUT_MS,
+  );
 });
