@@ -232,6 +232,48 @@ jobs:
       # No fuzz output/corpus artifact: this repository is public. A generated
       # reproducer is committed only with its fix (Server/Makefile policy).
 
+  rust-fuzz:
+    name: Nightly Rust fuzzing (client parsers)
+    runs-on: ubuntu-latest
+    # Every cargo-fuzz target in Client/src-tauri/crates/owncord-parse/fuzz at
+    # FUZZ_SECONDS each, plus a cold build of the small parser crate.
+    timeout-minutes: 20
+    env:
+      FUZZ_SECONDS: "60"
+      # cargo-fuzz needs nightly for the sanitizer flags; pinned so a broken
+      # nightly cannot turn the job red on its own.
+      FUZZ_TOOLCHAIN: nightly-2026-10-20
+      CARGO_FUZZ_VERSION: 0.13.1
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: dev
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: ${{ env.FUZZ_TOOLCHAIN }}
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --version "$CARGO_FUZZ_VERSION" --locked
+      - name: Fuzz every target
+        working-directory: Client/src-tauri/crates/owncord-parse/fuzz
+        run: |
+          targets=$(cargo +"$FUZZ_TOOLCHAIN" fuzz list)
+          if [ -z "$targets" ]; then
+            echo "::error::cargo fuzz list found no targets"
+            exit 1
+          fi
+          count=0
+          for target in $targets; do
+            echo "::group::$target"
+            cargo +"$FUZZ_TOOLCHAIN" fuzz run "$target" -- \
+              -max_total_time="$FUZZ_SECONDS" -max_len=4096 -rss_limit_mb=2048
+            echo "::endgroup::"
+            count=$((count + 1))
+          done
+          echo "Rust fuzzing: $count targets, ${FUZZ_SECONDS} s each, $((count * FUZZ_SECONDS / 60)) min total." >> "$GITHUB_STEP_SUMMARY"
+      # No corpus or crash artifact, as for the Go targets: this repository is
+      # public. A reproducer is committed only with its fix.
+
   query-benchmarks:
     # The read-path benchmarks on a synthetic 400k-message database, run at dev
     # and at the ref in Server/testdata/bench/query-baseline.json, alternating on

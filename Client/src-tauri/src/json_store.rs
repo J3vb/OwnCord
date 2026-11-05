@@ -21,6 +21,7 @@
 //! earlier versions load unchanged.
 
 use crate::constants::{CERTS_STORE, IDENTITY_PINS_STORE};
+use owncord_parse::store::parse_map;
 use serde_json::{Map, Value};
 use std::collections::HashMap;
 use std::fs;
@@ -138,14 +139,6 @@ fn load(path: &Path, fail_closed: bool) -> Result<JsonStore, String> {
         path: path.to_path_buf(),
         map: Mutex::new(map),
     })
-}
-
-fn parse_map(bytes: &[u8]) -> Result<Map<String, Value>, String> {
-    match serde_json::from_slice(bytes) {
-        Ok(Value::Object(map)) => Ok(map),
-        Ok(_) => Err("not a JSON object".into()),
-        Err(e) => Err(e.to_string()),
-    }
 }
 
 /// Copy an unreadable store aside so the next save cannot destroy it.

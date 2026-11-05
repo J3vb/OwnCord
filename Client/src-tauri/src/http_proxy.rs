@@ -110,11 +110,13 @@ impl HttpProxyState {
 }
 
 use crate::proxy_common::{
-    connect_tls_over, content_length, copy_with_deadline, dial_tcp, header_value,
-    random_tunnel_token, read_request_headers, resolve_remote_target, rewrite_headers,
-    run_accept_loop, spawn_watched, strip_tunnel_token, validate_remote_host, CountingStream,
-    TunnelEndpoint, FORBIDDEN_RESPONSE,
+    connect_tls_over, copy_with_deadline, dial_tcp, random_tunnel_token, read_request_headers,
+    resolve_remote_target, run_accept_loop, spawn_watched, strip_tunnel_token,
+    validate_remote_host, CountingStream, TunnelEndpoint, FORBIDDEN_RESPONSE,
 };
+#[cfg(test)]
+use owncord_parse::proxy::MAX_UPLOAD_PROGRESS_ID_LEN;
+use owncord_parse::proxy::{rewrite_request_headers, upload_progress_target};
 
 /// Start (or reuse) a local HTTP→TLS tunnel for `remote_host` and return its
 /// loopback port and path token. The webview sends its REST traffic to
@@ -227,35 +229,6 @@ pub async fn stop_http_proxy(
 // ---------------------------------------------------------------------------
 // Proxy internals
 // ---------------------------------------------------------------------------
-
-/// Rewrite a request's headers: replace Host with the real remote host and
-/// set exactly one `Connection: {connection}`. The one-shot path passes
-/// `close`, so the upstream connection ends with the response; the pooled
-/// path passes `keep-alive`. Either way the webview sends one request per
-/// loopback connection (its response says `Connection: close`), so every
-/// request is read and rewritten here, never passed through unread.
-/// `raw` must end with the "\r\n\r\n" header terminator.
-fn rewrite_request_headers(raw: &[u8], remote_host: &str, connection: &str) -> String {
-    let mut modified = rewrite_headers(&String::from_utf8_lossy(raw), |line| {
-        let lower = line.to_ascii_lowercase();
-        if lower.starts_with("host:") {
-            Some(format!("Host: {remote_host}"))
-        } else if lower.starts_with("connection:") {
-            Some(format!("Connection: {connection}"))
-        } else {
-            None
-        }
-    });
-    // `read_request_headers` only returns once it has seen the terminator, so
-    // it survives the line split; the `insert_at` below depends on it.
-    debug_assert!(modified.ends_with("\r\n\r\n"));
-    // If the client never sent a Connection header, inject one.
-    if !modified.to_ascii_lowercase().contains("\r\nconnection:") {
-        let insert_at = modified.len() - 2; // before final CRLF
-        modified.insert_str(insert_at, &format!("Connection: {connection}\r\n"));
-    }
-    modified
-}
 
 /// The upstream side of a tunnel: one TLS connection to the real server.
 type TlsConn = tokio_rustls::client::TlsStream<TcpStream>;
@@ -482,31 +455,6 @@ async fn connect_verified<R: Runtime>(
             Ok(Fresh::Rejected(mismatch_msg.into()))
         }
     }
-}
-
-/// The upload an in-flight request belongs to: the webview-generated
-/// correlation id plus the request's declared body length. Both must be
-/// present for the proxy to report progress; every other request takes the
-/// plain copy path with no extra work.
-struct UploadTarget {
-    id: String,
-    total: u64,
-}
-
-/// Bound on the correlation id the webview sends, so a malformed request head
-/// cannot make the proxy hold or re-emit an unbounded value.
-const MAX_UPLOAD_PROGRESS_ID_LEN: usize = 128;
-
-fn upload_progress_target(raw: &[u8]) -> Option<UploadTarget> {
-    let id = header_value(raw, "x-upload-id")?;
-    if id.is_empty() || id.len() > MAX_UPLOAD_PROGRESS_ID_LEN {
-        return None;
-    }
-    let total = content_length(raw)?;
-    if total == 0 {
-        return None;
-    }
-    Some(UploadTarget { id, total })
 }
 
 /// Emit one `upload-progress` event. The payload shape is the webview's

@@ -29,6 +29,7 @@ export const LOCKFILES = [
   "Server/go.mod",
   "Client/package-lock.json",
   "Client/src-tauri/Cargo.lock",
+  "Client/src-tauri/crates/owncord-parse/fuzz/Cargo.lock",
   "tools/mcp-introspect/package-lock.json",
   "package-lock.json",
 ];

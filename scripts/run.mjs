@@ -186,7 +186,13 @@ const CHECK_CLIENT = [
 const CHECK_RUST = [
   step("cargo", ["fmt", "--all", "--", "--check"], "Client/src-tauri"),
   step("cargo", ["test", "--lib"], "Client/src-tauri"),
+  step("cargo", ["test", "-p", "owncord-parse"], "Client/src-tauri"),
   step("cargo", ["clippy", "--all-targets", "--", "-D", "warnings"], "Client/src-tauri"),
+  step(
+    "cargo",
+    ["clippy", "-p", "owncord-parse", "--all-targets", "--", "-D", "warnings"],
+    "Client/src-tauri",
+  ),
 ];
 
 // RL-07. FINDINGS.md is not tracked, so there is no committed rendering to
