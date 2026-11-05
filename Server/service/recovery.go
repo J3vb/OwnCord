@@ -35,7 +35,11 @@ var (
 	ErrRecoveryKitMalformed = &authError{ErrBadRequest, "recovery kit secret must be 32 base32 characters"}
 	ErrRecoveryLockedOut    = &authError{ErrRateLimited, "recovery temporarily locked due to too many failed attempts"}
 	ErrRecoveryFailed       = &authError{ErrInternal, "recovery failed — please try again"}
-	ErrRecoveryKitFailed    = &authError{ErrInternal, "failed to issue the recovery kit"}
+	// ErrRecoveredSignInRequired: the redeem committed (new password set, secret
+	// spent) but no session could be started. A retry would hit the spent secret,
+	// so the holder is sent to sign in instead.
+	ErrRecoveredSignInRequired = &authError{ErrInternal, "your password was reset, but signing you in failed; sign in with your new password"}
+	ErrRecoveryKitFailed       = &authError{ErrInternal, "failed to issue the recovery kit"}
 )
 
 // The owner-issued recovery credential: short-lived, single-use, issued by the
@@ -351,16 +355,19 @@ func (s *accountRecovery) completeRecovery(ctx context.Context, in RecoverInput,
 		}
 	}
 
-	token, err := issueSession(ctx, s.st, user.ID, in.Device, in.IP)
-	if err != nil {
-		// The recovery committed; the user signs in with the new password.
-		slog.Error("recovery: session issue failed after redeem", "err", err, "user_id", user.ID)
-		return nil, ErrRecoveryFailed
-	}
+	// Re-read first, so a failed read never leaves an unused session row behind.
 	fresh, err := s.st.GetUserByID(ctx, user.ID)
 	if err != nil || fresh == nil {
 		slog.Error("recovery: re-reading the user after redeem failed", "err", err, "user_id", user.ID)
-		return nil, ErrRecoveryFailed
+		return nil, ErrRecoveredSignInRequired
+	}
+	token, err := issueSession(ctx, s.st, user.ID, in.Device, in.IP)
+	if err != nil {
+		slog.Error("recovery: session issue failed after redeem", "err", err, "user_id", user.ID)
+		if errors.Is(err, db.ErrAccountErasing) {
+			return nil, ErrBanned
+		}
+		return nil, ErrRecoveredSignInRequired
 	}
 	slog.Info("account recovered", "via", via, "user_id", user.ID, "ip", in.IP, "sessions_revoked", revoked)
 	return &AuthResult{Token: token, User: fresh}, nil
@@ -450,7 +457,7 @@ func (s *accountRecovery) IssueRecoveryAssist(ctx context.Context, actorID, targ
 		slog.Error("recovery assist: UpsertRecoveryAssist failed", "err", err, "user_id", target.ID)
 		return nil, ErrRecoveryAssistFailed
 	}
-	db.WriteAudit(ctx, s.st, actor.ID, "recovery_assist_issued", "user", target.ID,
+	db.WriteAudit(context.WithoutCancel(ctx), s.st, actor.ID, "recovery_assist_issued", "user", target.ID,
 		"verification: "+verification+"; single use, expires in 15 minutes")
 	slog.Info("recovery credential issued", "user_id", target.ID, "actor_id", actor.ID, "verification", verification)
 	return &RecoveryAssistIssue{

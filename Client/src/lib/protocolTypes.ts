@@ -233,6 +233,10 @@ export const RestErrorCode = {
   PREVIEW_EXPIRED: "PREVIEW_EXPIRED",
   PUSH_DISABLED: "PUSH_DISABLED",
   RATE_LIMITED: "RATE_LIMITED",
+  // Account recovery set the new password and spent the recovery secret, but
+  // no session could be started; sign in with the new password instead of
+  // retrying the recovery.
+  RECOVERED_SIGN_IN_REQUIRED: "RECOVERED_SIGN_IN_REQUIRED",
   RESTART_PENDING: "RESTART_PENDING",
   REVERSAL_FAILED: "REVERSAL_FAILED",
   ROLE_CONFLICT: "ROLE_CONFLICT",

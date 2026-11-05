@@ -233,7 +233,7 @@ func TestAuthRefusals_LogTheCauseOnce(t *testing.T) {
 				})
 				return err
 			}},
-		{"recovery_fresh_user", "GetUserByID", true, ErrRecoveryFailed,
+		{"recovery_fresh_user", "GetUserByID", true, ErrRecoveredSignInRequired,
 			func(t *testing.T, f *authCauseFixture) error {
 				issue, err := f.svc.EnrolRecoveryKit(ctx, sessionPrincipal(f.user), causeLogPassword, "")
 				if err != nil {

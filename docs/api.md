@@ -509,13 +509,14 @@ The login shape: `token` and `user`, `requires_2fa` false.
 
 #### Errors
 
-| Status | Code                  | Cause                                                       |
-| ------ | --------------------- | ----------------------------------------------------------- |
-| 400    | `INVALID_INPUT`       | A field missing, or a weak new password                     |
-| 401    | `INVALID_CREDENTIALS` | Unknown account, no live kit or credential, or wrong secret |
-| 403    | `FORBIDDEN`           | The account is banned                                       |
-| 429    | `RATE_LIMITED`        | Recovery lockout                                            |
-| 429    | `AUTH_BUSY`           | The admission budget is full                                |
+| Status | Code                         | Cause                                                                                                                  |
+| ------ | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| 400    | `INVALID_INPUT`              | A field missing, or a weak new password                                                                                |
+| 401    | `INVALID_CREDENTIALS`        | Unknown account, no live kit or credential, or wrong secret                                                            |
+| 403    | `FORBIDDEN`                  | The account is banned                                                                                                  |
+| 429    | `RATE_LIMITED`               | Recovery lockout                                                                                                       |
+| 429    | `AUTH_BUSY`                  | The admission budget is full                                                                                           |
+| 500    | `RECOVERED_SIGN_IN_REQUIRED` | The recovery committed (new password set, secret spent) but no session could be started; sign in with the new password |
 
 ---
 
