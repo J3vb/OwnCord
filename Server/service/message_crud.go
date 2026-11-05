@@ -293,31 +293,9 @@ func (s *MessageService) EditMessage(ctx context.Context, userID, msgID int64, r
 		return nil, err
 	}
 
-	msg, err := s.st.GetMessage(ctx, msgID)
+	msg, ch, err := s.loadEditTarget(ctx, msgID)
 	if err != nil {
-		return nil, fmt.Errorf("%w: edit message: load: %w", ErrInternal, err)
-	}
-	if msg == nil {
-		return nil, fmt.Errorf("%w: cannot edit this message", ErrForbidden)
-	}
-	if msg.Deleted {
-		return nil, fmt.Errorf("%w: cannot edit this message", ErrDeletedMessage)
-	}
-	// Call log and group event rows are written only by the server.
-	if msg.Kind != db.MessageKindUser {
-		return nil, fmt.Errorf("%w: cannot edit this message", ErrForbidden)
-	}
-
-	// Fail closed: a lookup failure must not fall through with chanType="", which
-	// routes into the non-DM permission branch. That branch passes on the base role
-	// mask alone (no per-channel override exists for a DM), skipping the
-	// DM-participant check and RequireDMReachable.
-	ch, chErr := s.st.GetChannel(ctx, msg.ChannelID)
-	if chErr != nil {
-		return nil, fmt.Errorf("%w: edit message: load channel: %w", ErrInternal, chErr)
-	}
-	if ch == nil {
-		return nil, fmt.Errorf("%w: cannot edit this message", ErrForbidden)
+		return nil, err
 	}
 	chanType := ch.Type
 	isDM := chanType == "dm"
@@ -390,6 +368,38 @@ func (s *MessageService) EditMessage(ctx context.Context, userID, msgID int64, r
 
 	slog.Debug("message edited", "user_id", userID, "msg_id", msgID, "channel_id", msg.ChannelID)
 	return result, nil
+}
+
+// loadEditTarget reads the message and its channel for an edit. A store failure
+// is internal; a missing, deleted or server-written message is refused.
+func (s *MessageService) loadEditTarget(ctx context.Context, msgID int64) (*db.Message, *db.Channel, error) {
+	msg, err := s.st.GetMessage(ctx, msgID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("%w: edit message: load: %w", ErrInternal, err)
+	}
+	if msg == nil {
+		return nil, nil, fmt.Errorf("%w: cannot edit this message", ErrForbidden)
+	}
+	if msg.Deleted {
+		return nil, nil, fmt.Errorf("%w: cannot edit this message", ErrDeletedMessage)
+	}
+	// Call log and group event rows are written only by the server.
+	if msg.Kind != db.MessageKindUser {
+		return nil, nil, fmt.Errorf("%w: cannot edit this message", ErrForbidden)
+	}
+
+	// Fail closed: a lookup failure must not fall through with chanType="", which
+	// routes into the non-DM permission branch. That branch passes on the base role
+	// mask alone (no per-channel override exists for a DM), skipping the
+	// DM-participant check and RequireDMReachable.
+	ch, chErr := s.st.GetChannel(ctx, msg.ChannelID)
+	if chErr != nil {
+		return nil, nil, fmt.Errorf("%w: edit message: load channel: %w", ErrInternal, chErr)
+	}
+	if ch == nil {
+		return nil, nil, fmt.Errorf("%w: cannot edit this message", ErrForbidden)
+	}
+	return msg, ch, nil
 }
 
 // editMessageCheckAccess gates an edit through the send predicate

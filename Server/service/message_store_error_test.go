@@ -126,7 +126,7 @@ func TestSoftDeleteRow_StoreRefusalStaysForbidden(t *testing.T) {
 	}
 	// The store's own ownership check (a non-moderator deleting another's row)
 	// is a refusal, not a failure.
-	err = plain.messageRemoval.softDeleteRow(ctx, sent.MessageID, 2, false, 1, nil, "", false)
+	err = plain.softDeleteRow(ctx, sent.MessageID, 2, false, 1, nil, "", false)
 	if !errors.Is(err, ErrForbidden) || errors.Is(err, ErrInternal) {
 		t.Fatalf("softDeleteRow by a non-owner: err = %v, want ErrForbidden", err)
 	}
