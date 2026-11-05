@@ -26,6 +26,13 @@ unused_unsafe = "warn"
 unwrap_used = "deny"
 expect_used = "deny"
 
+# The app plus the small crate of pure parsers it depends on (property-tested
+# and fuzzed on its own). The fuzz crate has its own lock file and nightly
+# toolchain, so it stays out.
+[workspace]
+members = [".", "crates/owncord-parse"]
+exclude = ["crates/owncord-parse/fuzz"]
+
 [lib]
 name = "owncord_client_lib"
 crate-type = ["lib", "cdylib", "staticlib"]
@@ -41,6 +48,7 @@ devtools = ["tauri/devtools"]
 e2e-auto-confirm = []
 
 [dependencies]
+owncord-parse = { path = "crates/owncord-parse" }
 tauri = { version = "2.12", features = ["tray-icon"] }
 tauri-plugin-notification = "2"
 serde = { version = "1", features = ["derive"] }

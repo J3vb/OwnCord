@@ -54,13 +54,47 @@ const clientTrusted: Record<string, string> = {
   "settings.load": "this client's browser settings",
 };
 
+const parseTests = "src-tauri/crates/owncord-parse/tests";
+const fuzzTargets = "src-tauri/crates/owncord-parse/fuzz/fuzz_targets";
+
+/** Tauri commands whose text goes through a pure parser with proptest properties or a cargo-fuzz target. */
+const commandCovered: Record<string, Covered> = {
+  save_settings: {
+    source: "JSON value from the webview, loaded back from the store file",
+    targets: [`${parseTests}/store_properties.rs`, `${fuzzTargets}/pin_inputs.rs`],
+  },
+  get_cert_fingerprint: {
+    source: "host",
+    targets: [`${parseTests}/pins_properties.rs`, `${fuzzTargets}/pin_inputs.rs`],
+  },
+  accept_cert_fingerprint: {
+    source: "host and fingerprint",
+    targets: [`${parseTests}/pins_properties.rs`, `${fuzzTargets}/pin_inputs.rs`],
+  },
+  store_identity_pin: {
+    source: "host, user id and pin",
+    targets: [`${parseTests}/pins_properties.rs`, `${fuzzTargets}/pin_inputs.rs`],
+  },
+  get_identity_pin: {
+    source: "host and user id",
+    targets: [`${parseTests}/pins_properties.rs`, `${fuzzTargets}/pin_inputs.rs`],
+  },
+  start_http_proxy: {
+    source: "server host, then every request head through the tunnel",
+    targets: [`${parseTests}/proxy_properties.rs`, `${fuzzTargets}/http_request_head.rs`],
+  },
+  stop_http_proxy: {
+    source: "server host",
+    targets: [`${parseTests}/pins_properties.rs`, `${fuzzTargets}/pin_inputs.rs`],
+  },
+  start_livekit_proxy: {
+    source: "server host, then every request head through the tunnel",
+    targets: [`${parseTests}/proxy_properties.rs`, `${fuzzTargets}/livekit_request_head.rs`],
+  },
+};
+
 /** Tauri commands whose text the native side parses or acts on, with no fuzz or property target yet. */
 const commandGaps: Record<string, string> = {
-  save_settings: "JSON value from the webview",
-  get_cert_fingerprint: "host",
-  store_identity_pin: "host, user id and pin",
-  get_identity_pin: "host and user id",
-  accept_cert_fingerprint: "host and fingerprint",
   save_credential: "host and credential text",
   load_credential: "host",
   delete_credential: "host",
@@ -74,9 +108,6 @@ const commandGaps: Record<string, string> = {
   external_preview: "URL from message content",
   external_image: "URL from message content",
   open_external_url: "URL from message content",
-  start_http_proxy: "server host",
-  stop_http_proxy: "server host",
-  start_livekit_proxy: "server host",
   ws_connect: "server URL",
   ws_send: "outgoing frame text",
   native_voice_connect: "LiveKit URL and token from the server",
@@ -84,7 +115,7 @@ const commandGaps: Record<string, string> = {
   check_client_update: "server URL",
   download_and_install_update: "server URL",
 };
-const commandGapCeiling = 27;
+const commandGapCeiling = 19;
 
 /** Tauri commands that hand their text on as an opaque id, label or message body. */
 const commandPassThrough: Record<string, string> = {
@@ -222,8 +253,8 @@ describe("fuzz entry-point inventory", () => {
   });
 
   it("lists every text-taking Tauri command in exactly one table", () => {
-    const listed = { ...commandGaps, ...commandPassThrough };
-    expect(overlaps(commandGaps, commandPassThrough)).toEqual([]);
+    const listed = { ...commandCovered, ...commandGaps, ...commandPassThrough };
+    expect(overlaps(commandCovered, commandGaps, commandPassThrough)).toEqual([]);
     expect([...commands].filter((k) => !(k in listed)).toSorted()).toEqual([]);
     expect(
       Object.keys(listed)
@@ -239,6 +270,17 @@ describe("fuzz entry-point inventory", () => {
         const file = path.join(clientRoot, target);
         expect(existsSync(file), `${key}: ${target}`).toBe(true);
         expect(readFileSync(file, "utf8"), `${key}: ${target}`).toMatch(/fc\.(assert|property)/);
+      }
+    }
+  });
+
+  it("names Rust targets that exist and use proptest or cargo-fuzz", () => {
+    for (const [key, entry] of Object.entries(commandCovered)) {
+      expect(entry.targets.length, key).toBeGreaterThan(0);
+      for (const target of entry.targets) {
+        const file = path.join(clientRoot, target);
+        expect(existsSync(file), `${key}: ${target}`).toBe(true);
+        expect(readFileSync(file, "utf8"), `${key}: ${target}`).toMatch(/proptest!|fuzz_target!/);
       }
     }
   });

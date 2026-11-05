@@ -22,48 +22,11 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 
-/// Reject remote_host values that could inject headers or are not plausible
-/// host:port strings.
-pub(crate) fn validate_remote_host(remote_host: &str) -> Result<(), String> {
-    if remote_host.is_empty() || remote_host.len() > 260 {
-        return Err("remote_host is empty or too long".into());
-    }
-    if remote_host.contains('\r') || remote_host.contains('\n') || remote_host.contains('\0') {
-        return Err("remote_host contains invalid characters".into());
-    }
-    if !remote_host
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':' | '[' | ']'))
-    {
-        return Err("remote_host contains unexpected characters".into());
-    }
-    Ok(())
-}
-
-/// Bracket-aware split of a `remote_host` string into (hostname, port).
-/// Defaults to port 443 (standard HTTPS) when none is specified.
-///
-/// A leading `[` consumes up to the matching `]` as the hostname, so a
-/// bracketed IPv6 literal parses correctly whether or not it copies an
-/// explicit port (`[::1]`, `[::1]:8443`). Without brackets, a single
-/// trailing colon is a `host:port` split — but a *bare* (unbracketed) IPv6
-/// literal contains more than one colon, and RFC 3986 gives it no way to
-/// carry a port without brackets, so that case is returned whole with the
-/// default port instead of being mis-split on its last colon.
-pub(crate) fn split_host_port(remote_host: &str) -> Result<(&str, &str), String> {
-    if let Some(rest) = remote_host.strip_prefix('[') {
-        let (host, tail) = rest
-            .split_once(']')
-            .ok_or_else(|| format!("unterminated '[' in remote_host '{remote_host}'"))?;
-        let port = tail.strip_prefix(':').unwrap_or("443");
-        Ok((host, port))
-    } else {
-        match remote_host.rsplit_once(':') {
-            Some((host, port)) if !host.contains(':') => Ok((host, port)),
-            _ => Ok((remote_host, "443")),
-        }
-    }
-}
+#[cfg(test)]
+use owncord_parse::proxy::content_length;
+pub(crate) use owncord_parse::proxy::{
+    header_value, split_host_port, strip_tunnel_token, validate_remote_host,
+};
 
 /// Derive the TLS `ServerName` (SNI) and the TCP dial target from a
 /// `remote_host` string.
@@ -294,34 +257,6 @@ impl<A: AsyncWrite + Unpin> AsyncWrite for ActivityStream<A> {
     }
 }
 
-/// The value of a request header, matched case-insensitively, from the raw
-/// request head (`read_request_headers` output, ending in `\r\n\r\n`).
-///
-/// The request line (first line) is skipped: a request target may contain a
-/// colon, so only lines after it are split on the first colon. Surrounding
-/// whitespace is trimmed the way an HTTP field value is.
-pub(crate) fn header_value(raw: &[u8], name: &str) -> Option<String> {
-    let text = String::from_utf8_lossy(raw);
-    for line in text.split("\r\n").skip(1) {
-        if line.is_empty() {
-            continue;
-        }
-        let Some((field, value)) = line.split_once(':') else {
-            continue;
-        };
-        if field.trim().eq_ignore_ascii_case(name) {
-            return Some(value.trim().to_string());
-        }
-    }
-    None
-}
-
-/// The request body length declared by `Content-Length`, if it is a valid
-/// non-negative integer. Absent for a chunked or bodyless request.
-pub(crate) fn content_length(raw: &[u8]) -> Option<u64> {
-    header_value(raw, "content-length")?.parse::<u64>().ok()
-}
-
 /// Wraps a stream so every byte *read* from it is added to `read_bytes`;
 /// writes pass through untouched. `http_proxy` uses this to report upload
 /// progress while `copy_bidirectional` moves the request body, without
@@ -444,28 +379,6 @@ pub(crate) async fn run_accept_loop<C, Fut, D, DFut>(
     }
 }
 
-/// Rewrite the header lines of an HTTP request with `rewrite`; every line it
-/// returns `None` for is passed through byte-for-byte.
-///
-/// The plain `split("\r\n")` / re-join round-trips the trailing `\r\n\r\n`
-/// terminator exactly, so the request the remote server sees stays well-formed.
-pub(crate) fn rewrite_headers(
-    request: &str,
-    mut rewrite: impl FnMut(&str) -> Option<String>,
-) -> String {
-    let mut modified = String::with_capacity(request.len() + 128);
-    for (i, line) in request.split("\r\n").enumerate() {
-        if i > 0 {
-            modified.push_str("\r\n");
-        }
-        match rewrite(line) {
-            Some(replacement) => modified.push_str(&replacement),
-            None => modified.push_str(line),
-        }
-    }
-    modified
-}
-
 /// A tunnel's loopback address and the path token every request through it
 /// must start with. Returned to the webview by `start_http_proxy` and
 /// `start_livekit_proxy`; the client puts `/{token}` in front of each path.
@@ -483,36 +396,6 @@ pub(crate) fn random_tunnel_token() -> Result<String, String> {
         .fill(&mut bytes)
         .map_err(|_| "no system randomness for the tunnel token".to_string())?;
     Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
-}
-
-fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
-}
-
-/// Check that a request's target starts with `/{token}/` and return the
-/// request head with that prefix removed. `None` when the request line is
-/// malformed or the token is missing or wrong.
-pub(crate) fn strip_tunnel_token(head: &[u8], token: &str) -> Option<Vec<u8>> {
-    let line_end = head.windows(2).position(|w| w == b"\r\n")?;
-    let line = &head[..line_end];
-    let method_end = line.iter().position(|&b| b == b' ')?;
-    let target_start = method_end + 1;
-    let target_len = line[target_start..].iter().position(|&b| b == b' ')?;
-    let target = &line[target_start..target_start + target_len];
-
-    let rest = target.strip_prefix(b"/")?;
-    let slash = rest.iter().position(|&b| b == b'/')?;
-    if !constant_time_eq(&rest[..slash], token.as_bytes()) {
-        return None;
-    }
-    let stripped = &rest[slash..];
-
-    let mut out = Vec::with_capacity(head.len());
-    out.extend_from_slice(&line[..target_start]);
-    out.extend_from_slice(stripped);
-    out.extend_from_slice(&line[target_start + target_len..]);
-    out.extend_from_slice(&head[line_end..]);
-    Some(out)
 }
 
 /// The response for a request that does not carry the tunnel's token.
