@@ -42,6 +42,9 @@ type UploadPolicy struct {
 	// Thumbnails reports that GET /api/v1/files/{id}/thumb exists, so a client asks for an
 	// inline image's thumbnail instead of the original.
 	Thumbnails bool `json:"thumbnails,omitempty"`
+	// StagedLifetimeSeconds is how long an upload no message names is kept, so a
+	// composer re-uploads a file it has held longer instead of sending a dead id.
+	StagedLifetimeSeconds int64 `json:"staged_lifetime_seconds,omitempty"`
 }
 
 // Cache holds the cached values under one ranked lock (see ws/lock_order.go).

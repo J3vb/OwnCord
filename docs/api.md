@@ -2825,7 +2825,7 @@ Send both or neither; with neither the upload is an ordinary one, exactly as bef
 
 Withdraw a file you uploaded and never sent. The file and its row are deleted
 and its size stops counting against `upload.user_quota_mb` at once, instead of
-when the hourly sweep of unsent uploads removes it. The client calls this when
+when the sweep of unsent uploads removes it a day after upload. The client calls this when
 you remove an attachment from the composer, and before it re-uploads one that
 has been waiting too long.
 

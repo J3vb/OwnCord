@@ -53,6 +53,8 @@ export interface UploadPolicy {
   readonly allowed_extensions?: readonly string[];
   /** The server serves an image's bounded preview at /api/v1/files/{id}/thumb. */
   readonly thumbnails?: boolean;
+  /** How long the server keeps an upload no message names; absent on older servers. */
+  readonly staged_lifetime_seconds?: number;
 }
 
 export interface AuthErrorPayload {

@@ -3,7 +3,7 @@
  * attachments.
  */
 import { createElement } from "@lib/dom";
-import { ATTACHMENT_TTL_MS } from "../../features/messaging/attachmentTtl";
+import { attachmentTtlMs } from "../../features/messaging/attachmentTtl";
 import { messagingText } from "../../i18n/messaging";
 import { MAX_ATTACHMENTS } from "./inputShared";
 import type { InputState, InputApi } from "./inputState";
@@ -63,7 +63,7 @@ export function createInputDraft(st: InputState, api: InputApi) {
     }
     const now = Date.now();
     const live = draft.attachments.filter(
-      (a) => a.unsent === true || a.file !== undefined || now - a.uploadedAt < ATTACHMENT_TTL_MS,
+      (a) => a.unsent === true || a.file !== undefined || now - a.uploadedAt < attachmentTtlMs(),
     );
     const unsent = live.filter((a) => a.unsent === true);
     for (const att of live) {
