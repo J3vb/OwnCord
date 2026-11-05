@@ -351,8 +351,6 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 		// The Dashboard health row and the System health page: the same
 		// server health detail as the attention panel.
 		mountSystemRoutes(r, gates, setupOpts.System, hub, svc.Attention, version)
-		// Waking the voice server after it stopped restarting is gated like the
-		// server restart button.
 		gates.route(r, gateManageConfig, http.MethodPost, "/system/livekit/restart", handleRestartLiveKit(diagnostics, hub))
 		mountUserRoutes(r, gates, svc, hub, mod)
 		// The approval-mode registration queue: deciding who joins

@@ -21,8 +21,9 @@ type voiceRestartAuditor interface {
 }
 
 // handleRestartLiveKit is POST /system/livekit/restart: the System health
-// page's "Restart voice server" button. It only wakes a supervisor that stopped
-// its quick restarts, so it can never kill a running voice server.
+// page's "Restart voice server" button, gated like POST /restart. It only
+// wakes a supervisor that stopped its quick restarts, so it can never kill a
+// running voice server.
 func handleRestartLiveKit(audit voiceRestartAuditor, hub HubBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		lk, ok := hub.(liveKitRestarter)
