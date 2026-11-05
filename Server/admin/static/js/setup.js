@@ -295,7 +295,7 @@ function beginRestartWait(url,autoFollow){
 
 document.getElementById('wizardForm').addEventListener('submit',e=>{e.preventDefault();wizNext()});
 document.getElementById('setupContinueBtn').onclick=()=>{enterApp().catch(()=>showOverlay('loginOverlay'))};
-function copyCode(id){navigator.clipboard.writeText(document.getElementById(id).textContent).then(()=>showToast('Copied!','info')).catch(()=>showToast('Copy failed','error'))}
+function copyCode(id){navigator.clipboard.writeText(document.getElementById(id).textContent).then(()=>showToast('Copied!','info')).catch(()=>showToast('Copy failed','warning'))}
 
 /* ═══ Sign-in ═══ */
 /* Server auth errors are terse lower-case codes ("invalid credentials");

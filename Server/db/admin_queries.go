@@ -448,6 +448,7 @@ func (d *DB) SearchAuditLog(ctx context.Context, action, query string, hideSigni
 			Action:       r.Action,
 			TargetType:   r.TargetType,
 			TargetID:     r.TargetID,
+			TargetName:   r.TargetName,
 			Detail:       r.Detail,
 			SubjectToken: r.SubjectToken,
 			ActorToken:   r.ActorToken,

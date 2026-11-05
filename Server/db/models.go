@@ -384,25 +384,6 @@ type UserWithRole struct {
 	RoleIDs []int64
 }
 
-// AuditEntry represents a single row from the audit_log table joined with the
-// actor's username.
-type AuditEntry struct {
-	ID         int64  `json:"id"`
-	ActorID    int64  `json:"actor_id"`
-	ActorName  string `json:"actor_name"`
-	Action     string `json:"action"`
-	TargetType string `json:"target_type"`
-	TargetID   int64  `json:"target_id"`
-	Detail     string `json:"detail"`
-	// SubjectToken is the deletion-marker token of an erased subject the row
-	// targeted, set by the erasure on rows that lost their target id and on its
-	// own rows. ActorToken is the same for an erased actor, so a row naming two
-	// erased subjects keeps both. Both are empty otherwise.
-	SubjectToken string `json:"subject_token,omitempty"`
-	ActorToken   string `json:"actor_token,omitempty"`
-	CreatedAt    string `json:"created_at"`
-}
-
 // Emoji is a row of the emoji table: one server-wide custom emoji. StoredAs
 // is the storage-layer UUID the bytes live under (legacy column `filename`),
 // never shown to a user nor derived from the uploader's input. Shortcode is

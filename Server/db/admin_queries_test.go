@@ -1190,3 +1190,70 @@ func TestBackupToSafe_DoesNotDeleteExistingFileOnCollision(t *testing.T) {
 		t.Errorf("pre-existing backup file was modified: got %q, want %q", got, want)
 	}
 }
+
+// The listing names each target by its current name for the kinds that have
+// one, and leaves the name empty for a target that is gone or has none (an
+// invite's code never shows).
+func TestGetAuditLog_TargetName(t *testing.T) {
+	database := openMigratedMemory(t)
+	ctx := context.Background()
+	exec := func(q string, args ...any) int64 {
+		t.Helper()
+		res, err := database.ExecContext(ctx, q, args...)
+		if err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+		id, err := res.LastInsertId()
+		if err != nil {
+			t.Fatalf("LastInsertId: %v", err)
+		}
+		return id
+	}
+	actor, err := database.CreateUser(ctx, "auditnamer", "hash", 1)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	target, err := database.CreateUser(ctx, "alice", "hash", 4)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	role := exec(`INSERT INTO roles (name, permissions, position, is_default) VALUES ('Helpers', 0, 5, 0)`)
+	channel := exec(`INSERT INTO channels (name, type) VALUES ('general-chat', 'text')`)
+	category := exec(`INSERT INTO channel_categories (name) VALUES ('Games')`)
+	emoji := exec(`INSERT INTO emoji (shortcode, filename, uploaded_by) VALUES ('wave', 'f', ?)`, actor)
+	sticker := exec(`INSERT INTO stickers (name, filename, mime_type, uploaded_by) VALUES ('Party', 'f', 'image/png', ?)`, actor)
+
+	rows := []struct {
+		kind string
+		id   int64
+		want string
+	}{
+		{"user", target, "alice"},
+		{"role", role, "Helpers"},
+		{"channel", channel, "general-chat"},
+		{"category", category, "Games"},
+		{"emoji", emoji, ""},
+		{"sticker", sticker, ""},
+		{"role", role + 1000, ""},
+		{"invite", 1, ""},
+		{"server", 0, ""},
+	}
+	for _, r := range rows {
+		if err := database.LogAudit(ctx, actor, "probe_"+r.kind, r.kind, r.id, ""); err != nil {
+			t.Fatalf("LogAudit: %v", err)
+		}
+	}
+	entries, err := database.GetAuditLog(ctx, 50, 0)
+	if err != nil {
+		t.Fatalf("GetAuditLog: %v", err)
+	}
+	if len(entries) != len(rows) {
+		t.Fatalf("GetAuditLog = %d entries, want %d", len(entries), len(rows))
+	}
+	for i, r := range rows {
+		got := entries[len(entries)-1-i]
+		if got.TargetType != r.kind || got.TargetID != r.id || got.TargetName != r.want {
+			t.Errorf("row %d = %s #%d %q, want %s #%d %q", i, got.TargetType, got.TargetID, got.TargetName, r.kind, r.id, r.want)
+		}
+	}
+}

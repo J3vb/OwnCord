@@ -71,10 +71,10 @@ function paintSystemHealth(){
 /* The same health snapshot the support bundle carries as health.json. */
 function copySystemHealth(){
   const d=sysHealth.data;
-  if(!d||!d.snapshot){showToast('Nothing to copy yet','error');return}
+  if(!d||!d.snapshot){showToast('Nothing to copy yet','warning');return}
   const text=JSON.stringify({captured_at:d.captured_at,health:d.snapshot,database:d.database,build:d.process&&d.process.build},null,2);
-  try{navigator.clipboard.writeText(text).then(()=>showToast('Copied','info')).catch(()=>showToast('Copy failed','error'))}
-  catch(e){showToast('Copy failed','error')}
+  try{navigator.clipboard.writeText(text).then(()=>showToast('Copied','info')).catch(()=>showToast('Copy failed','warning'))}
+  catch(e){showToast('Copy failed','warning')}
 }
 
 function sysNum(v){return typeof v==='number'?v.toLocaleString():SYS_DASH}

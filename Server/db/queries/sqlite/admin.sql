@@ -57,8 +57,18 @@ VALUES (?, ?, ?, ?, ?, ?, ?);
 -- target type or detail. instr, not LIKE, so the caller's text carries no
 -- wildcards to escape. A non-zero hide_signins drops the sign-in and
 -- connection rows (user_login, ws_connect) that dominate a quiet server's log.
+-- target_name is the target's current name for the kinds that have one, read
+-- by primary key, and empty when the target is gone or has no name (an
+-- invite's code is never shown here).
 SELECT a.id, a.actor_id, COALESCE(u.username, '') AS actor_name, a.action,
-       a.target_type, a.target_id, a.detail, COALESCE(a.subject_token, '') AS subject_token,
+       a.target_type, a.target_id,
+       CAST(COALESCE(CASE a.target_type
+         WHEN 'user' THEN (SELECT tu.username FROM users tu WHERE tu.id = a.target_id)
+         WHEN 'role' THEN (SELECT tr.name FROM roles tr WHERE tr.id = a.target_id)
+         WHEN 'channel' THEN (SELECT tc.name FROM channels tc WHERE tc.id = a.target_id)
+         WHEN 'category' THEN (SELECT tk.name FROM channel_categories tk WHERE tk.id = a.target_id)
+       END, '') AS TEXT) AS target_name,
+       a.detail, COALESCE(a.subject_token, '') AS subject_token,
        COALESCE(a.actor_token, '') AS actor_token, a.created_at
 FROM audit_log a
 LEFT JOIN users u ON u.id = a.actor_id
