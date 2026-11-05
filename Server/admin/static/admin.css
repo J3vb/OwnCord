@@ -331,6 +331,7 @@ input,select,textarea{font-family:inherit;border:none}
 .toast.success{background:var(--green);color:var(--on-warning)}
 .toast.error{background:var(--danger-fill);color:var(--on-fill)}
 .toast.info{background:var(--accent);color:var(--on-accent)}
+.toast.warning{background:var(--yellow);color:var(--on-warning)}
 .toast .toast-close{margin-left:4px;background:transparent;color:inherit;font-size:16px;line-height:1;opacity:.8;cursor:pointer}
 .toast .toast-close:hover{opacity:1}
 @keyframes toastIn{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}

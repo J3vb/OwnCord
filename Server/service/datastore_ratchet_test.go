@@ -71,8 +71,10 @@ const (
 	// count.
 	// WP 8.9 gives AttachmentInfo two voice message tags and moves it into
 	// db/attachment_model.go (models.go hit its line limit), so its tags
-	// leave the count: 128 to 121. Any further tag fails.
-	modelsJSONTagBaseline = 121
+	// leave the count: 128 to 121. AuditEntry gains target_name and moves
+	// into db/audit_model.go, so its ten tags leave the count: 121 to 111.
+	// Any further tag fails.
+	modelsJSONTagBaseline = 111
 
 	// storeFullSurfaceBaseline is the compiler's own method count for Store,
 	// promoted methods from the cross-package embeds included. It closes the

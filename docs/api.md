@@ -5463,10 +5463,16 @@ an array of:
   "action": "user_ban",
   "target_type": "user",
   "target_id": 7,
+  "target_name": "spammer",
   "detail": "spam",
   "created_at": "2026-08-04T12:00:00Z"
 }
 ```
+
+`target_name` is the target's name as it is now, read when the log is listed,
+for a user, role, channel or category target. It is omitted when the
+target is gone or is of another kind (an invite, an emoji, the server);
+`detail` keeps the name the target had when the row was written.
 
 Rows about an erased account (B4-10) carry the deletion marker's token in
 place of the id — `"subject_token"` where the erased account was the target,

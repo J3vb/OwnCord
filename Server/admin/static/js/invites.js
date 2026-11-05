@@ -93,7 +93,7 @@ async function copyInvite(code){
 async function copyInviteText(code){
   if(!code)return;
   try{await navigator.clipboard.writeText(code);showToast('Invite code copied')}
-  catch(e){showToast('Couldn\u2019t copy the invite code — copy it manually','error')}
+  catch(e){showToast('Couldn\u2019t copy the invite code — copy it manually','warning')}
 }
 
 function revokeInvite(code){
