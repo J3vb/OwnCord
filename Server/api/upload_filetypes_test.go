@@ -146,6 +146,7 @@ func TestNewRouter_FirstAuthOKCarriesConfigFileTypes(t *testing.T) {
 				BlockedExtensions []string `json:"blocked_extensions"`
 				AllowedExtensions []string `json:"allowed_extensions"`
 				Thumbnails        bool     `json:"thumbnails"`
+				StagedLifetime    int64    `json:"staged_lifetime_seconds"`
 			} `json:"upload_policy"`
 		} `json:"payload"`
 	}
@@ -162,5 +163,8 @@ func TestNewRouter_FirstAuthOKCarriesConfigFileTypes(t *testing.T) {
 	// P4-08: the client asks for /thumb only when the server says it serves it.
 	if !authOK.Payload.UploadPolicy.Thumbnails {
 		t.Errorf("auth_ok upload_policy.thumbnails = false, want true; raw=%s", msg)
+	}
+	if got := authOK.Payload.UploadPolicy.StagedLifetime; got != int64(service.StagedUploadLifetime/time.Second) {
+		t.Errorf("auth_ok upload_policy.staged_lifetime_seconds = %d, want %d; raw=%s", got, int64(service.StagedUploadLifetime/time.Second), msg)
 	}
 }

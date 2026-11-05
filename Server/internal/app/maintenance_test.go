@@ -257,8 +257,8 @@ func TestMaintenance_TickReturnsBytesTheOrphanSweepFreed(t *testing.T) {
 	if err := svc.Uploads.Record(ctx, service.AttachmentRecord{ID: "orphan-1", UploaderID: 10, Filename: "o.bin", MimeType: "application/octet-stream", Size: 6}, res); err != nil {
 		t.Fatal(err)
 	}
-	// Never attached, and older than the sweep's one-hour grace.
-	old := time.Now().Add(-2 * time.Hour).UTC().Format("2006-01-02 15:04:05")
+	// Never attached, and older than the sweep's grace.
+	old := time.Now().Add(-25 * time.Hour).UTC().Format("2006-01-02 15:04:05")
 	if _, err := database.ExecContext(ctx, `UPDATE attachments SET uploaded_at = ? WHERE id = 'orphan-1'`, old); err != nil {
 		t.Fatal(err)
 	}
@@ -291,6 +291,61 @@ func TestMaintenance_TickReturnsBytesTheOrphanSweepFreed(t *testing.T) {
 	}
 	if used, _ := fresh.Uploads.StorageUsed(ctx, 10); used != 0 {
 		t.Fatalf("phantom charge after the restart recount = %d, want 0", used)
+	}
+}
+
+// A staged upload keeps its file through a long draft and goes once it is past
+// the grace: 2 h old survives a tick, 25 h old is swept.
+func TestMaintenance_OrphanSweepKeepsADayOfStagedUploads(t *testing.T) {
+	database := newMaintenanceTestDB(t)
+	ctx := context.Background()
+	if _, err := database.ExecContext(ctx, `INSERT INTO users (id, username, password, role_id) VALUES (10, 'alice', 'x', 4)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.ExecContext(ctx, `UPDATE settings SET value = 'off' WHERE key = 'backup_schedule'`); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	cfg := &config.Config{Upload: config.UploadConfig{StorageDir: dir, MaxSizeMB: 1}}
+	svc := service.New(database, auth.NewRateLimiter())
+	svc.Uploads.SetStorageLimits(service.StorageLimits{Dir: dir})
+
+	stage := func(id string, age time.Duration) {
+		t.Helper()
+		res, err := svc.Uploads.Reserve(ctx, 10, 6)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, id), []byte("6bytes"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := svc.Uploads.Record(ctx, service.AttachmentRecord{ID: id, UploaderID: 10, Filename: id + ".bin", MimeType: "application/octet-stream", Size: 6}, res); err != nil {
+			t.Fatal(err)
+		}
+		at := time.Now().Add(-age).UTC().Format("2006-01-02 15:04:05")
+		if _, err := database.ExecContext(ctx, `UPDATE attachments SET uploaded_at = ? WHERE id = ?`, at, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stage("draft-2h", 2*time.Hour)
+	stage("draft-25h", 25*time.Hour)
+
+	m := newMaintenanceWithStorage(t, cfg, database, svc)
+	if failed := m.tick(ctx); failed {
+		t.Fatal("tick reported a failed step")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "draft-2h")); err != nil {
+		t.Fatalf("a 2 h old staged upload lost its file: %v", err)
+	}
+	var kept int
+	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM attachments WHERE id = 'draft-2h'`).Scan(&kept); err != nil || kept != 1 {
+		t.Fatalf("2 h old row count = %d (%v), want 1", kept, err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "draft-25h")); !os.IsNotExist(err) {
+		t.Fatalf("a 25 h old staged upload is still on disk: %v", err)
+	}
+	if used, _ := svc.Uploads.StorageUsed(ctx, 10); used != 6 {
+		t.Fatalf("counter after the tick = %d, want 6: the kept draft stays charged", used)
 	}
 }
 

@@ -54,7 +54,8 @@ func (d *DB) GetActiveAPIToken(ctx context.Context, tokenHash string) (*APIToken
 	return apiTokenFromGen(t), nil
 }
 
-// ListAPITokens returns all API tokens (newest first, capped), without hashes.
+// ListAPITokens returns all API tokens (unrevoked first, then newest first,
+// capped), without hashes.
 func (d *DB) ListAPITokens(ctx context.Context) ([]APITokenListItem, error) {
 	rows, err := d.q.ListAPITokens(ctx)
 	if err != nil {
@@ -62,18 +63,35 @@ func (d *DB) ListAPITokens(ctx context.Context) ([]APITokenListItem, error) {
 	}
 	out := make([]APITokenListItem, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, APITokenListItem{
-			ID:        r.ID,
-			UserID:    r.UserID,
-			Username:  r.Username,
-			Label:     r.Label,
-			CreatedAt: r.CreatedAt,
-			LastUsed:  r.LastUsedAt,
-			ExpiresAt: r.ExpiresAt,
-			RevokedAt: r.RevokedAt,
-		})
+		out = append(out, apiTokenListItem(r.ID, r.UserID, r.Username, r.Label, r.CreatedAt, r.LastUsedAt, r.ExpiresAt, r.RevokedAt))
 	}
 	return out, nil
+}
+
+// ListAPITokensByUser is ListAPITokens for one account's tokens only.
+func (d *DB) ListAPITokensByUser(ctx context.Context, userID int64) ([]APITokenListItem, error) {
+	rows, err := d.q.ListAPITokensByUser(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("ListAPITokensByUser: %w", err)
+	}
+	out := make([]APITokenListItem, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, apiTokenListItem(r.ID, r.UserID, r.Username, r.Label, r.CreatedAt, r.LastUsedAt, r.ExpiresAt, r.RevokedAt))
+	}
+	return out, nil
+}
+
+func apiTokenListItem(id, userID int64, username, label, createdAt string, lastUsed, expiresAt, revokedAt *string) APITokenListItem {
+	return APITokenListItem{
+		ID:        id,
+		UserID:    userID,
+		Username:  username,
+		Label:     label,
+		CreatedAt: createdAt,
+		LastUsed:  lastUsed,
+		ExpiresAt: expiresAt,
+		RevokedAt: revokedAt,
+	}
 }
 
 // RevokeAPIToken marks the token with the given ID revoked and returns the

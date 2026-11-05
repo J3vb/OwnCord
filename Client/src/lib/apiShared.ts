@@ -156,6 +156,29 @@ function authSliceCopy(message: string): string | null {
   }
 }
 
+/** Codes whose copy never depends on the server's message. */
+const FIXED_ERROR_COPY = new Map<string, Parameters<typeof connectText>[0]>([
+  // The desktop HTTP tunnel reports a refused certificate or a failed TLS
+  // handshake with this distinct code (http_pool.rs's cert_error_response)
+  // rather than a bare 502, so the two failure classes stay distinguishable.
+  [TLS_CERT_CODE, "error.tlsFailed"],
+  [RestErrorCode.AUTH_BUSY, "error.authBusy"],
+  [RestErrorCode.NOT_FOUND, "error.notFound"],
+  [WsErrorCode.BANNED, "error.banned"],
+  [RestErrorCode.SERVICE_UNAVAILABLE, "error.unavailable"],
+  [RestErrorCode.SERVER_SHUTTING_DOWN, "error.unavailable"],
+  [RestErrorCode.BAD_GATEWAY, "error.unavailable"],
+  // The server's transfer lifetime ended a slow upload (or its body stalled).
+  [RestErrorCode.TRANSFER_TIMED_OUT, "error.transferTimedOut"],
+  [RestErrorCode.STORAGE_QUOTA_EXCEEDED, "error.storageQuota"],
+  [RestErrorCode.STORAGE_LOW_DISK, "error.storageLowDisk"],
+  [RestErrorCode.STORAGE_ERROR, "error.storageError"],
+  [RestErrorCode.GIF_DISABLED, "error.gifDisabled"],
+  [RestErrorCode.LAST_ROLE, "error.lastRole"],
+  [RestErrorCode.PUSH_DISABLED, "error.pushDisabled"],
+  [RestErrorCode.LOGIN_SESSION_REQUIRED, "error.loginSessionRequired"],
+]);
+
 const PERMISSION_REFUSAL =
   /\bmissing\b.*\bpermission\b|insufficient permissions|permission required$|role required$|^access denied$/i;
 
@@ -177,16 +200,11 @@ const PERMISSION_REFUSAL =
  * caller's fallback.
  */
 export function serverErrorCopy(code: string, message: string): string | null {
+  const fixed = FIXED_ERROR_COPY.get(code);
+  if (fixed !== undefined) return connectText(fixed);
   switch (code) {
-    // The desktop HTTP tunnel reports a refused certificate or a failed TLS
-    // handshake with this distinct code (http_pool.rs's cert_error_response)
-    // rather than a bare 502, so the two failure classes stay distinguishable.
-    case TLS_CERT_CODE:
-      return connectText("error.tlsFailed");
     case RestErrorCode.RATE_LIMITED:
       return authSliceCopy(message) ?? connectText("error.rateLimited");
-    case RestErrorCode.AUTH_BUSY:
-      return connectText("error.authBusy");
     case WsErrorCode.INTERNAL:
     case RestErrorCode.INTERNAL_ERROR:
       return authSliceCopy(message);
@@ -196,30 +214,9 @@ export function serverErrorCopy(code: string, message: string): string | null {
     case RestErrorCode.FORBIDDEN:
       if (message === "your account has been suspended") return connectText("error.banned");
       return PERMISSION_REFUSAL.test(message) ? connectText("error.forbidden") : null;
-    case RestErrorCode.NOT_FOUND:
-      return connectText("error.notFound");
     // The server's per-frame deadline; nothing was applied.
     case WsErrorCode.REQUEST_TIMEOUT:
       return messageStatusText("send.requestTimeout");
-    case WsErrorCode.BANNED:
-      return connectText("error.banned");
-    case RestErrorCode.SERVICE_UNAVAILABLE:
-    case RestErrorCode.BAD_GATEWAY:
-      return connectText("error.unavailable");
-    case RestErrorCode.STORAGE_QUOTA_EXCEEDED:
-      return connectText("error.storageQuota");
-    case RestErrorCode.STORAGE_LOW_DISK:
-      return connectText("error.storageLowDisk");
-    case RestErrorCode.STORAGE_ERROR:
-      return connectText("error.storageError");
-    case RestErrorCode.GIF_DISABLED:
-      return connectText("error.gifDisabled");
-    case RestErrorCode.LAST_ROLE:
-      return connectText("error.lastRole");
-    case RestErrorCode.PUSH_DISABLED:
-      return connectText("error.pushDisabled");
-    case RestErrorCode.LOGIN_SESSION_REQUIRED:
-      return connectText("error.loginSessionRequired");
     default:
       return null;
   }

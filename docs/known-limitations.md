@@ -59,6 +59,11 @@ the [trust model](trust-model.md).
   the admin panel. The desktop app is the main client.
 - **A `.deb` install updates itself only if it can ask for your password.** On a
   bare window manager with no password prompt, install the new `.deb` by hand.
+- **An upload has a time limit.** The server gives each upload enough time for
+  the largest allowed file on a slow link (at least 10 minutes, at most an
+  hour). An upload still running then is stopped, and the app says it took too
+  long for this connection. An upload that stops moving for 30 seconds is
+  stopped too.
 
 ### Linux
 

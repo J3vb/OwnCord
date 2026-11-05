@@ -196,3 +196,36 @@ func TestRecoveryKitStatusRoute_StoreFaultYieldsAGenericBody(t *testing.T) {
 		t.Errorf("body = %v, want INTERNAL_ERROR / internal error", body)
 	}
 }
+
+// A recovery that committed but could not start a session answers its own
+// code and tells the holder to sign in, not the generic "try again".
+func TestRecoverRoute_SessionIssueFailureAfterCommitSaysSignIn(t *testing.T) {
+	database := newAuthTestDB(t)
+	router := buildAuthRouter(database, auth.NewRateLimiter())
+	uid := seedUser(t, database, "kitsignin", "KitSignInPass1!", 4)
+	token := issueSessionToken(t, database, uid)
+	rr := postJSONWithToken(t, router, "/api/v1/users/me/recovery-kit", token, map[string]string{"password": "KitSignInPass1!"})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("enrolment = %d; body = %s", rr.Code, rr.Body.String())
+	}
+	var issue struct {
+		KitSecret string `json:"kit_secret"`
+	}
+	_ = json.NewDecoder(rr.Body).Decode(&issue)
+	if _, err := database.ExecContext(context.Background(),
+		`CREATE TRIGGER fail_session_insert BEFORE INSERT ON sessions BEGIN SELECT RAISE(ABORT, 'session store down'); END`); err != nil {
+		t.Fatalf("create trigger: %v", err)
+	}
+
+	rr = postJSON(t, router, "/api/v1/auth/recover", map[string]string{"username": "kitsignin", "kit_secret": issue.KitSecret, "new_password": "N3w-Str0ng!Pass"})
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500; body = %s", rr.Code, rr.Body.String())
+	}
+	var body map[string]string
+	if err := json.NewDecoder(rr.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body["error"] != "RECOVERED_SIGN_IN_REQUIRED" || !strings.Contains(body["message"], "sign in with your new password") {
+		t.Errorf("body = %v, want RECOVERED_SIGN_IN_REQUIRED with the sign-in hint", body)
+	}
+}

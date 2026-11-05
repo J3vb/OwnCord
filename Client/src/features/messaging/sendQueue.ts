@@ -11,7 +11,7 @@ import { Disposable } from "../../lib/disposable";
 import { createElement } from "../../lib/dom";
 import type { DraftUpload, SentAttachment } from "../../components/MessageInput";
 import { sendQueueText } from "../../i18n/sendQueue";
-import { ATTACHMENT_TTL_MS } from "./attachmentTtl";
+import { attachmentTtlMs } from "./attachmentTtl";
 
 /** One file of a queued send, in chip order. */
 export interface QueuedItem {
@@ -69,7 +69,7 @@ const CANCELLED = "upload cancelled";
 const isFresh = (item: QueuedItem, now: number): boolean =>
   item.id !== undefined &&
   item.uploadedAt !== undefined &&
-  now - item.uploadedAt < ATTACHMENT_TTL_MS;
+  now - item.uploadedAt < attachmentTtlMs();
 
 function notify(entry: QueuedSend, item: QueuedItem, fraction: number): void {
   const index = entry.items.indexOf(item);

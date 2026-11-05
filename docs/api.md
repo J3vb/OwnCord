@@ -509,13 +509,14 @@ The login shape: `token` and `user`, `requires_2fa` false.
 
 #### Errors
 
-| Status | Code                  | Cause                                                       |
-| ------ | --------------------- | ----------------------------------------------------------- |
-| 400    | `INVALID_INPUT`       | A field missing, or a weak new password                     |
-| 401    | `INVALID_CREDENTIALS` | Unknown account, no live kit or credential, or wrong secret |
-| 403    | `FORBIDDEN`           | The account is banned                                       |
-| 429    | `RATE_LIMITED`        | Recovery lockout                                            |
-| 429    | `AUTH_BUSY`           | The admission budget is full                                |
+| Status | Code                         | Cause                                                                                                                  |
+| ------ | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| 400    | `INVALID_INPUT`              | A field missing, or a weak new password                                                                                |
+| 401    | `INVALID_CREDENTIALS`        | Unknown account, no live kit or credential, or wrong secret                                                            |
+| 403    | `FORBIDDEN`                  | The account is banned                                                                                                  |
+| 429    | `RATE_LIMITED`               | Recovery lockout                                                                                                       |
+| 429    | `AUTH_BUSY`                  | The admission budget is full                                                                                           |
+| 500    | `RECOVERED_SIGN_IN_REQUIRED` | The recovery committed (new password set, secret spent) but no session could be started; sign in with the new password |
 
 ---
 
@@ -2825,7 +2826,7 @@ Send both or neither; with neither the upload is an ordinary one, exactly as bef
 
 Withdraw a file you uploaded and never sent. The file and its row are deleted
 and its size stops counting against `upload.user_quota_mb` at once, instead of
-when the hourly sweep of unsent uploads removes it. The client calls this when
+when the sweep of unsent uploads removes it a day after upload. The client calls this when
 you remove an attachment from the composer, and before it re-uploads one that
 has been waiting too long.
 

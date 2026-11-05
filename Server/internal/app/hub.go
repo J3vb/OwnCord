@@ -82,7 +82,11 @@ func StartRuntime(cfg *config.Config, database *db.DB, pluginRegistry *plugin.Re
 		// restart.
 		VoiceQuality: cfg.Voice.Quality,
 		// auth_ok's upload_policy: the composer's pre-check.
-		UploadPolicy:    ws.UploadPolicy{MaxUploadBytes: int64(cfg.Upload.MaxSizeMB) << 20, Thumbnails: true},
+		UploadPolicy: ws.UploadPolicy{
+			MaxUploadBytes:        int64(cfg.Upload.MaxSizeMB) << 20,
+			Thumbnails:            true,
+			StagedLifetimeSeconds: int64(service.StagedUploadLifetime / time.Second),
+		},
 		UploadFileTypes: svc.Uploads,
 		// server.trusted_proxies: the handshake log and the ws_connect audit
 		// row resolve the client address through it.

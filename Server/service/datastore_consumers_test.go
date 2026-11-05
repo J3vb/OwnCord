@@ -61,7 +61,7 @@ var serviceStoreBaselines = map[reflect.Type]int{
 	reflect.TypeFor[SettingsService]():       9,
 	reflect.TypeFor[SetupService]():          9,
 	reflect.TypeFor[ThreadService]():         7,
-	reflect.TypeFor[TokenService]():          9,
+	reflect.TypeFor[TokenService]():          10,
 	reflect.TypeFor[UploadService]():         15,
 	reflect.TypeFor[UserService]():           17,
 	reflect.TypeFor[userSessions]():          5,

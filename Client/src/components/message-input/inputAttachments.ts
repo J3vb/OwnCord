@@ -8,7 +8,7 @@ import { desktop } from "../../platform/desktop";
 import { createElement, appendChildren, setOwnedTimeout } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { errorText } from "@lib/api";
-import { ATTACHMENT_TTL_MS } from "../../features/messaging/attachmentTtl";
+import { attachmentTtlMs } from "../../features/messaging/attachmentTtl";
 import { toggleSpoilerFilename } from "../../features/messaging/spoilerAttachment";
 import { authStore } from "@stores/auth.store";
 import { messagingText } from "../../i18n/messaging";
@@ -176,7 +176,7 @@ export function createInputAttachments(st: InputState, api: InputApi) {
   }
 
   function isStale(a: (typeof st.pendingAttachments)[number]): boolean {
-    return a.uploadedAt !== undefined && Date.now() - a.uploadedAt >= ATTACHMENT_TTL_MS;
+    return a.uploadedAt !== undefined && Date.now() - a.uploadedAt >= attachmentTtlMs();
   }
 
   /** Re-upload a stale chip from its file, or mark it expired when there is none. */
@@ -193,7 +193,7 @@ export function createInputAttachments(st: InputState, api: InputApi) {
     a.previewEl.title = messagingText("attach.expired");
   }
 
-  /** Mark a chip with no file expired once it reaches ATTACHMENT_TTL_MS. A
+  /** Mark a chip with no file expired once it reaches attachmentTtlMs(). A
    *  chip that has its file waits for Send to re-upload it, so an idle
    *  composer never uploads in the background. */
   function scheduleExpiry(a: (typeof st.pendingAttachments)[number]): void {
@@ -203,7 +203,7 @@ export function createInputAttachments(st: InputState, api: InputApi) {
       () => {
         if (st.pendingAttachments.includes(a)) refreshStale(a);
       },
-      Math.max(0, a.uploadedAt + ATTACHMENT_TTL_MS - Date.now()),
+      Math.max(0, a.uploadedAt + attachmentTtlMs() - Date.now()),
     );
   }
 

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"slices"
 	"strings"
 	"time"
 
@@ -25,6 +24,7 @@ type tokenStore interface {
 	GetOwnerUser(ctx context.Context) (*db.User, error)
 	CreateAPIToken(ctx context.Context, userID int64, tokenHash, label string, expiresAt *time.Time) (int64, error)
 	ListAPITokens(ctx context.Context) ([]db.APITokenListItem, error)
+	ListAPITokensByUser(ctx context.Context, userID int64) ([]db.APITokenListItem, error)
 	RevokeAPIToken(ctx context.Context, id int64) (int64, error)
 	RevokeAPITokenByLabel(ctx context.Context, label string) (int64, error)
 	ListUserActiveAPITokens(ctx context.Context, userID int64) ([]db.APITokenListItem, error)
@@ -185,37 +185,24 @@ func (s *TokenService) CreateOwn(ctx context.Context, actor *db.User, username, 
 	return s.mint(ctx, actor.ID, actor, label, lifetime)
 }
 
-// ListOwn is List restricted to the tokens bound to userID.
+// ListOwn is List restricted to the tokens bound to userID. It reads only that
+// account's rows, so tokens other accounts mint never push its own out of the cap.
 func (s *TokenService) ListOwn(ctx context.Context, userID int64) ([]db.APITokenListItem, error) {
-	all, err := s.List(ctx)
+	tokens, err := s.st.ListAPITokensByUser(ctx, userID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: failed to list tokens: %w", ErrInternal, err)
 	}
-	own := make([]db.APITokenListItem, 0, len(all))
-	for _, it := range all {
-		if it.UserID == userID {
-			own = append(own, it)
-		}
-	}
-	return own, nil
+	return tokens, nil
 }
 
 // RevokeOwn is Revoke restricted to the actor's tokens. Someone else's token is
 // ErrNotFound, same as a missing id, so a holder cannot probe token ids.
 func (s *TokenService) RevokeOwn(ctx context.Context, actorID, id int64) error {
-	own, err := s.ListOwn(ctx, actorID)
-	if err != nil {
-		return err
-	}
-	if !slices.ContainsFunc(own, func(it db.APITokenListItem) bool { return it.ID == id }) {
-		return fmt.Errorf("no active token with that id%.0w", ErrNotFound)
-	}
-	return s.Revoke(ctx, actorID, id)
+	return s.RevokeMine(ctx, actorID, id)
 }
 
 // ListMine lists the account's own tokens that still work, for its Sessions
-// screen. Unlike ListOwn it reads only that account's rows, so the admin list's
-// cap never hides one, and it leaves out revoked and expired tokens.
+// screen. Unlike ListOwn it leaves out revoked and expired tokens.
 func (s *TokenService) ListMine(ctx context.Context, userID int64) ([]db.APITokenListItem, error) {
 	tokens, err := s.st.ListUserActiveAPITokens(ctx, userID)
 	if err != nil {
