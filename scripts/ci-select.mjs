@@ -220,6 +220,8 @@ const DEPS_FILES = new Set([
   "Client/package-lock.json",
   "Client/src-tauri/Cargo.toml",
   "Client/src-tauri/Cargo.lock",
+  "Client/src-tauri/crates/owncord-parse/fuzz/Cargo.toml",
+  "Client/src-tauri/crates/owncord-parse/fuzz/Cargo.lock",
   "tools/mcp-introspect/package.json",
   "tools/mcp-introspect/package-lock.json",
   "osv-scanner.toml", // the scan's ignore baseline

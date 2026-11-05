@@ -31,6 +31,17 @@ fn recase(s: &str, mask: u64) -> String {
         .collect()
 }
 
+/// One of three leaf fingerprints, so a stored pin, a recorded web-PKI pin
+/// and the leaf just seen often match and every outcome of the decision is
+/// reached, not only first use and mismatch.
+fn leaf() -> impl Strategy<Value = String> {
+    prop::sample::select(vec![
+        "AA:01".to_string(),
+        "BB:02".to_string(),
+        "CC:03".to_string(),
+    ])
+}
+
 fn fingerprint_of(bytes: &[u8]) -> String {
     bytes
         .iter()
@@ -121,9 +132,9 @@ proptest! {
 
     #[test]
     fn the_trust_decision_follows_the_pin(
-        stored in proptest::option::of("[A-F0-9:]{4,8}"),
-        recorded in proptest::option::of("[A-F0-9:]{4,8}"),
-        fingerprint in "[A-F0-9:]{4,8}",
+        stored in proptest::option::of(leaf()),
+        recorded in proptest::option::of(leaf()),
+        fingerprint in leaf(),
         web_pki_valid in any::<bool>(),
     ) {
         let current = Observed { fingerprint: fingerprint.clone(), web_pki_valid };
@@ -147,9 +158,9 @@ proptest! {
 
     #[test]
     fn a_changed_leaf_is_only_accepted_on_a_vouched_public_renewal(
-        stored in "[A-F0-9]{8}",
-        fingerprint in "[A-F0-9]{8}",
-        recorded in proptest::option::of("[A-F0-9]{8}"),
+        stored in leaf(),
+        fingerprint in leaf(),
+        recorded in proptest::option::of(leaf()),
         web_pki_valid in any::<bool>(),
     ) {
         prop_assume!(stored != fingerprint);
