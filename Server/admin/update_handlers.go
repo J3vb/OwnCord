@@ -141,18 +141,19 @@ func handleApplyUpdate(database *db.DB, u *updater.Updater, hub HubBroadcaster, 
 			writeErr(w, http.StatusServiceUnavailable, httperr.CodeUpdateUnavailable, "update checking is not configured")
 			return
 		}
-		// A source build would be replaced by the release binary, which is
-		// almost never what someone running from source wants.
-		if u.DevelopmentBuild() {
-			writeErr(w, http.StatusConflict, httperr.CodeDevelopmentBuild,
-				"this is a development build; updates are not applied automatically, build or install the release by hand")
-			return
-		}
 
 		// Refuse a begun shutdown up front: before any outbound call, slot claim
 		// or long download, while the database is surely open.
 		if stop.stopping() {
 			refuseApplyShuttingDown(w)
+			return
+		}
+
+		// A source build would be replaced by the release binary, which is
+		// almost never what someone running from source wants.
+		if u.DevelopmentBuild() {
+			writeErr(w, http.StatusConflict, httperr.CodeDevelopmentBuild,
+				"this is a development build; updates are not applied automatically, build or install the release by hand")
 			return
 		}
 
