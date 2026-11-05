@@ -293,7 +293,7 @@ func (s *MessageService) EditMessage(ctx context.Context, userID, msgID int64, r
 		return nil, err
 	}
 
-	msg, ch, err := s.loadEditTarget(ctx, msgID)
+	_, ch, err := s.loadEditTarget(ctx, msgID)
 	if err != nil {
 		return nil, err
 	}
@@ -310,7 +310,7 @@ func (s *MessageService) EditMessage(ctx context.Context, userID, msgID int64, r
 
 	// EditMessage checks ownership itself and returns the row via RETURNING, so
 	// edited_at arrives with the write.
-	msg, err = s.st.EditMessage(ctx, msgID, userID, content)
+	msg, err := s.st.EditMessage(ctx, msgID, userID, content)
 	if err != nil && !errors.Is(err, db.ErrNotFound) && !errors.Is(err, db.ErrForbidden) {
 		// A store failure (busy database, spent deadline, I/O) is not a refusal:
 		// it is logged and answered INTERNAL, or REQUEST_TIMEOUT for a spent frame.
