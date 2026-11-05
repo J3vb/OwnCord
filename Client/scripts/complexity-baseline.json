@@ -55,10 +55,6 @@
     "components/video-grid/gridLayout.ts": {
       "createGridLayout > rebuildFocusLayout": [21]
     },
-    "components/video-grid/gridStreams.ts": {
-      "createGridStreams > addStream": [68],
-      "createGridStreams > dropTile": [16]
-    },
     "features/channels/ChannelSidebar.ts": {
       "buildVoiceModOptions": [16],
       "createChannelSidebar > drawChannels > reconcileRows": [16]
