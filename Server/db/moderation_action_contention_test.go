@@ -96,25 +96,17 @@ func runBanUserWithActionConcurrentRoleChangeCannotPreempt(t *testing.T, setHook
 	close(release)
 
 	outcome := <-banDone
-	if err := <-roleChangeErr; err != nil {
-		t.Fatalf("concurrent role change: %v", err)
-	}
+	mustDo(t, "concurrent role change", <-roleChangeErr)
 	if outcome.err != nil {
 		t.Fatalf("BanUserWithAction: want success (the concurrent role change could not have landed before this "+
 			"transaction's own rank check ran), got %v", outcome.err)
 	}
 
-	target, err := database.GetUserByID(ctx, memberID)
-	if err != nil {
-		t.Fatalf("GetUserByID: %v", err)
-	}
+	target := mustGetUserByID(t, database, memberID)
 	if !target.Banned {
 		t.Fatal("BanUserWithAction reported success but the target is not banned")
 	}
-	rows, err := database.ListModerationActionsForTarget(ctx, memberID)
-	if err != nil {
-		t.Fatalf("ListModerationActionsForTarget: %v", err)
-	}
+	rows := mustListModerationActionsForTarget(t, database, memberID)
 	found := false
 	for i := range rows {
 		if rows[i].ID == outcome.id && rows[i].Kind == "ban" {
@@ -164,9 +156,7 @@ func TestBanUserWithAction_RankCheckSeesAPromotionThatLandedBeforeBeginTx(t *tes
 	// The promotion runs on a connection nothing is holding yet (the hook
 	// above blocks BanUserWithAction before it ever calls BeginTx) and
 	// fully commits before the ban's own transaction opens.
-	if err := database.UpdateUserRole(ctx, memberID, 1); err != nil {
-		t.Fatalf("promote member: %v", err)
-	}
+	mustDo(t, "promote member", database.UpdateUserRole(ctx, memberID, 1))
 	close(promoted)
 
 	banErr := <-banDone
@@ -174,17 +164,11 @@ func TestBanUserWithAction_RankCheckSeesAPromotionThatLandedBeforeBeginTx(t *tes
 		t.Fatalf("BanUserWithAction: want db.ErrOutranked (the rank check must see the already-committed promotion), got %v", banErr)
 	}
 
-	target, err := database.GetUserByID(ctx, memberID)
-	if err != nil {
-		t.Fatalf("GetUserByID: %v", err)
-	}
+	target := mustGetUserByID(t, database, memberID)
 	if target.Banned {
 		t.Fatal("a refused ban left the target banned — the effect did not roll back")
 	}
-	rows, err := database.ListModerationActionsForTarget(ctx, memberID)
-	if err != nil {
-		t.Fatalf("ListModerationActionsForTarget: %v", err)
-	}
+	rows := mustListModerationActionsForTarget(t, database, memberID)
 	if len(rows) != 0 {
 		t.Fatalf("a refused ban left %d ledger row(s) — refused must mean nothing landed", len(rows))
 	}

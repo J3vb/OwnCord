@@ -21,15 +21,10 @@ func nicknameFixtureDB(t *testing.T) (database *db.DB, mod, member int64) {
 	t.Helper()
 	database = openMigratedMemory(t)
 	ctx := context.Background()
-	role, err := database.CreateRole(ctx, "nick-mod", nil, permissions.ManageNicknames, 80, false, false)
-	if err != nil {
-		t.Fatalf("CreateRole: %v", err)
-	}
+	role := mustCreateRole(t, database, "nick-mod", nil, permissions.ManageNicknames, 80, false, false)
 	mod = seedUser(t, database, "nick-mod")
 	member = seedUser(t, database, "nick-member")
-	if err := database.UpdateUserRole(ctx, mod, role.ID); err != nil {
-		t.Fatalf("UpdateUserRole: %v", err)
-	}
+	mustDo(t, "UpdateUserRole", database.UpdateUserRole(ctx, mod, role.ID))
 	return database, mod, member
 }
 

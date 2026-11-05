@@ -35,9 +35,7 @@ func TestGetAttachmentByID_Found(t *testing.T) {
 	}
 
 	att, err := database.GetAttachmentByID(context.Background(), "att-001")
-	if err != nil {
-		t.Fatalf("GetAttachmentByID: %v", err)
-	}
+	mustDo(t, "GetAttachmentByID", err)
 	if att.ID != "att-001" {
 		t.Errorf("ID = %q, want 'att-001'", att.ID)
 	}
@@ -61,9 +59,7 @@ func TestLinkAttachmentsToMessage_Empty(t *testing.T) {
 	database := openMigratedMemory(t)
 
 	n, err := database.LinkAttachmentsToMessage(context.Background(), 1, 1, nil)
-	if err != nil {
-		t.Fatalf("LinkAttachmentsToMessage(nil): %v", err)
-	}
+	mustDo(t, "LinkAttachmentsToMessage(nil)", err)
 	if len(n) != 0 {
 		t.Errorf("expected 0 linked, got %v", n)
 	}
@@ -88,9 +84,7 @@ func TestLinkAttachmentsToMessage_LinksUnlinked(t *testing.T) {
 	}
 
 	n, err := database.LinkAttachmentsToMessage(context.Background(), msgID, userID, []string{"att-a", "att-b"})
-	if err != nil {
-		t.Fatalf("LinkAttachmentsToMessage: %v", err)
-	}
+	mustDo(t, "LinkAttachmentsToMessage", err)
 	if len(n) != 2 {
 		t.Errorf("expected 2 linked, got %v", n)
 	}
@@ -117,9 +111,7 @@ func TestLinkAttachmentsToMessage_SkipsAlreadyLinked(t *testing.T) {
 
 	// Try to re-link to a different message — should skip (WHERE message_id IS NULL).
 	n, err := database.LinkAttachmentsToMessage(context.Background(), msg2, userID, []string{"att-linked"})
-	if err != nil {
-		t.Fatalf("LinkAttachmentsToMessage: %v", err)
-	}
+	mustDo(t, "LinkAttachmentsToMessage", err)
 	if len(n) != 0 {
 		t.Errorf("expected 0 rows (already linked), got %v", n)
 	}
@@ -136,12 +128,8 @@ func TestLinkAttachmentsToMessage_OwnershipGuard(t *testing.T) {
 	chID := seedChannel(t, database, "att-owner-ch")
 	msgID, _ := database.CreateMessage(context.Background(), chID, owner, "attachment carrier", nil)
 
-	if err := database.CreateAttachment(context.Background(), "att-owned", owner, "o.txt", "s-o.txt", "text/plain", 1, nil, nil); err != nil {
-		t.Fatalf("CreateAttachment att-owned: %v", err)
-	}
-	if err := database.CreateAttachment(context.Background(), "att-foreign", other, "f.txt", "s-f.txt", "text/plain", 1, nil, nil); err != nil {
-		t.Fatalf("CreateAttachment att-foreign: %v", err)
-	}
+	mustDo(t, "CreateAttachment att-owned", database.CreateAttachment(context.Background(), "att-owned", owner, "o.txt", "s-o.txt", "text/plain", 1, nil, nil))
+	mustDo(t, "CreateAttachment att-foreign", database.CreateAttachment(context.Background(), "att-foreign", other, "f.txt", "s-f.txt", "text/plain", 1, nil, nil))
 	// Legacy row from before uploader tracking: uploader_id IS NULL.
 	if _, err := database.ExecContext(context.Background(),
 		`INSERT INTO attachments (id, filename, stored_as, mime_type, size)
@@ -181,9 +169,7 @@ func TestLinkAttachmentsToMessage_SkipsLiveAvatar(t *testing.T) {
 	chID := seedChannel(t, database, "avatar-owner-ch")
 	msgID, _ := database.CreateMessage(context.Background(), chID, owner, "attachment carrier", nil)
 
-	if err := database.CreateAttachment(context.Background(), "att-avatar", owner, "a.png", "s-a.png", "image/png", 1, nil, nil); err != nil {
-		t.Fatalf("CreateAttachment att-avatar: %v", err)
-	}
+	mustDo(t, "CreateAttachment att-avatar", database.CreateAttachment(context.Background(), "att-avatar", owner, "a.png", "s-a.png", "image/png", 1, nil, nil))
 	if _, err := database.ExecContext(context.Background(),
 		`UPDATE users SET avatar = ? WHERE id = ?`,
 		"/api/v1/files/att-avatar", owner,
@@ -192,9 +178,7 @@ func TestLinkAttachmentsToMessage_SkipsLiveAvatar(t *testing.T) {
 	}
 
 	n, err := database.LinkAttachmentsToMessage(context.Background(), msgID, owner, []string{"att-avatar"})
-	if err != nil {
-		t.Fatalf("LinkAttachmentsToMessage: %v", err)
-	}
+	mustDo(t, "LinkAttachmentsToMessage", err)
 	if len(n) != 0 {
 		t.Errorf("expected 0 rows linked (live avatar must be skipped), got %v", n)
 	}
@@ -246,9 +230,7 @@ func TestGetAttachmentsByMessageIDs_Empty(t *testing.T) {
 	database := openMigratedMemory(t)
 
 	result, err := database.GetAttachmentsByMessageIDs(context.Background(), nil)
-	if err != nil {
-		t.Fatalf("GetAttachmentsByMessageIDs(nil): %v", err)
-	}
+	mustDo(t, "GetAttachmentsByMessageIDs(nil)", err)
 	if len(result) != 0 {
 		t.Errorf("expected empty map, got %d entries", len(result))
 	}
@@ -281,9 +263,7 @@ func TestGetAttachmentsByMessageIDs_GroupsByMessage(t *testing.T) {
 	}
 
 	result, err := database.GetAttachmentsByMessageIDs(context.Background(), []int64{msg1, msg2})
-	if err != nil {
-		t.Fatalf("GetAttachmentsByMessageIDs: %v", err)
-	}
+	mustDo(t, "GetAttachmentsByMessageIDs", err)
 	if len(result[msg1]) != 2 {
 		t.Errorf("msg1 attachments = %d, want 2", len(result[msg1]))
 	}

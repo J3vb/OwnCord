@@ -2,7 +2,6 @@ package admin_test
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"testing"
 
@@ -39,19 +38,14 @@ func TestSetup_SessionCreationFailureDoesNotOrphanOwner(t *testing.T) {
 		"password": "SecurePass123!",
 	})
 
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("POST /setup with a broken sessions table = %d, want 201 (the owner account must still be usable); body=%s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusCreated)
 
-	var resp struct {
+	resp := decodeBody[struct {
 		UserID     int64    `json:"user_id"`
 		Username   string   `json:"username"`
 		InviteCode string   `json:"invite_code"`
 		Warnings   []string `json:"warnings"`
-	}
-	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	}](t, rr)
 	if resp.UserID == 0 {
 		t.Error("user_id is 0: owner account was not reported as created")
 	}
@@ -89,19 +83,14 @@ func TestSetup_InviteCreationFailureDoesNotOrphanOwner(t *testing.T) {
 		"password": "SecurePass123!",
 	})
 
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("POST /setup with a broken invites table = %d, want 201 (the owner account must still be usable); body=%s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusCreated)
 
-	var resp struct {
+	resp := decodeBody[struct {
 		Token      string   `json:"token"`
 		UserID     int64    `json:"user_id"`
 		InviteCode string   `json:"invite_code"`
 		Warnings   []string `json:"warnings"`
-	}
-	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	}](t, rr)
 	if resp.UserID == 0 {
 		t.Error("user_id is 0: owner account was not reported as created")
 	}

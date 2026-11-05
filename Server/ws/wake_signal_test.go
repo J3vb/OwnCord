@@ -69,19 +69,27 @@ func dialAndAuthWake(t *testing.T, ctx context.Context, srvURL, token string, la
 	return conn
 }
 
+// connectDeviceA is a regular (non-wake) first device taken through auth_ok
+// and ready.
+func connectDeviceA(t *testing.T, ctx context.Context, srvURL, token string) *websocket.Conn {
+	t.Helper()
+	conn := dialAndAuthWake(t, ctx, srvURL, token, 0, false)
+	if typ, _ := readFrameType(t, ctx, conn); typ != MsgTypeAuthOK {
+		t.Fatalf("device A: expected auth_ok, got %v", typ)
+	}
+	if typ, _ := readFrameType(t, ctx, conn); typ != MsgTypeReady {
+		t.Fatalf("device A: expected ready, got %v", typ)
+	}
+	return conn
+}
+
 // A wake reconnect while another device is connected is accepted and the
 // other device's connection is not displaced: both stay registered.
 func TestWakeReconnect_AnotherDeviceActive_CoexistsWithoutDisplacing(t *testing.T) {
 	hub, uid, srvURL, tokenA, tokenB := wakeFixture(t)
 	ctx := context.Background()
 
-	connA := dialAndAuthWake(t, ctx, srvURL, tokenA, 0, false)
-	if typ, _ := readFrameType(t, ctx, connA); typ != MsgTypeAuthOK {
-		t.Fatalf("device A: expected auth_ok, got %v", typ)
-	}
-	if typ, _ := readFrameType(t, ctx, connA); typ != MsgTypeReady {
-		t.Fatalf("device A: expected ready, got %v", typ)
-	}
+	connectDeviceA(t, ctx, srvURL, tokenA)
 
 	connB := dialAndAuthWake(t, ctx, srvURL, tokenB, 0, true)
 	if typ, _ := readFrameType(t, ctx, connB); typ != MsgTypeAuthOK {
@@ -115,13 +123,7 @@ func TestWakeReconnect_SameSessionStaleSocket_Connects(t *testing.T) {
 	hub, uid, srvURL, tokenA, _ := wakeFixture(t)
 	ctx := context.Background()
 
-	connA := dialAndAuthWake(t, ctx, srvURL, tokenA, 0, false)
-	if typ, _ := readFrameType(t, ctx, connA); typ != MsgTypeAuthOK {
-		t.Fatalf("device A: expected auth_ok, got %v", typ)
-	}
-	if typ, _ := readFrameType(t, ctx, connA); typ != MsgTypeReady {
-		t.Fatalf("device A: expected ready, got %v", typ)
-	}
+	connectDeviceA(t, ctx, srvURL, tokenA)
 
 	// Same token, mark wake: its own session, not another device.
 	connA2 := dialAndAuthWake(t, ctx, srvURL, tokenA, 0, true)
@@ -139,13 +141,7 @@ func TestNormalConnect_AnotherDevice_Coexists(t *testing.T) {
 	hub, uid, srvURL, tokenA, tokenB := wakeFixture(t)
 	ctx := context.Background()
 
-	connA := dialAndAuthWake(t, ctx, srvURL, tokenA, 0, false)
-	if typ, _ := readFrameType(t, ctx, connA); typ != MsgTypeAuthOK {
-		t.Fatalf("device A: expected auth_ok, got %v", typ)
-	}
-	if typ, _ := readFrameType(t, ctx, connA); typ != MsgTypeReady {
-		t.Fatalf("device A: expected ready, got %v", typ)
-	}
+	connA := connectDeviceA(t, ctx, srvURL, tokenA)
 
 	connB := dialAndAuthWake(t, ctx, srvURL, tokenB, 0, false)
 	if typ, _ := readFrameType(t, ctx, connB); typ != MsgTypeAuthOK {
@@ -181,13 +177,7 @@ func TestWakeReconnect_Resume_AnotherDeviceActive_Resumes(t *testing.T) {
 	hub, uid, srvURL, tokenA, tokenB := wakeFixture(t)
 	ctx := context.Background()
 
-	connA := dialAndAuthWake(t, ctx, srvURL, tokenA, 0, false)
-	if typ, _ := readFrameType(t, ctx, connA); typ != MsgTypeAuthOK {
-		t.Fatalf("device A: expected auth_ok, got %v", typ)
-	}
-	if typ, _ := readFrameType(t, ctx, connA); typ != MsgTypeReady {
-		t.Fatalf("device A: expected ready, got %v", typ)
-	}
+	connectDeviceA(t, ctx, srvURL, tokenA)
 	// Give the ring a sequenced frame to resume from.
 	hub.BroadcastToAll([]byte(`{"type":"server_notice","payload":{}}`))
 	deadline := time.Now().Add(5 * time.Second)

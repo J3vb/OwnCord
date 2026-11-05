@@ -1,7 +1,6 @@
 package api_test
 
 import (
-	"bytes"
 	"context"
 	"crypto/ecdh"
 	"crypto/rand"
@@ -78,51 +77,22 @@ func validSubscribeBody(endpoint string) pushSubscribeBody {
 
 func pushDo(t *testing.T, router http.Handler, method, path, token string, body any) *httptest.ResponseRecorder {
 	t.Helper()
-	var reader *bytes.Reader
-	if body != nil {
-		raw, err := json.Marshal(body)
-		if err != nil {
-			t.Fatalf("marshal body: %v", err)
-		}
-		reader = bytes.NewReader(raw)
-	} else {
-		reader = bytes.NewReader(nil)
-	}
-	req := httptest.NewRequest(method, path, reader)
-	req.Header.Set("Content-Type", "application/json")
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
-	return rr
+	return doAPIJSON(t, router, method, path, token, body)
 }
 
 // ─── Lifecycle ───────────────────────────────────────────────────────────────
 
 func TestPushSubscriptions_LifecycleCreateListRevoke(t *testing.T) {
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("db.Migrate: %v", err)
-	}
+	database := openMigratedDB(t)
 	router, _ := buildPushRouter(t, database, true)
 	userID := mintUser(t, database, "push-lifecycle")
 	token, _ := mintSession(t, database, userID)
 
 	rr := pushDo(t, router, http.MethodPost, "/api/v1/push/subscriptions", token, validSubscribeBody("https://push.example.com/sub/abc"))
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("subscribe status = %d, body %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusCreated)
 
 	rr = pushDo(t, router, http.MethodGet, "/api/v1/push/subscriptions", token, nil)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("list status = %d, body %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 	body := rr.Body.String()
 	if !strings.Contains(body, "endpoint_host") {
 		t.Errorf("list response missing endpoint_host: %s", body)
@@ -144,9 +114,7 @@ func TestPushSubscriptions_LifecycleCreateListRevoke(t *testing.T) {
 	id := listed.Subscriptions[0].ID
 
 	rr = pushDo(t, router, http.MethodDelete, "/api/v1/push/subscriptions/"+itoa(id), token, nil)
-	if rr.Code != http.StatusNoContent {
-		t.Fatalf("delete status = %d, body %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusNoContent)
 
 	rr = pushDo(t, router, http.MethodGet, "/api/v1/push/subscriptions", token, nil)
 	if err := json.Unmarshal(rr.Body.Bytes(), &listed); err != nil || len(listed.Subscriptions) != 0 {
@@ -155,14 +123,7 @@ func TestPushSubscriptions_LifecycleCreateListRevoke(t *testing.T) {
 }
 
 func TestPushSubscriptions_VisibleOnlyToOwner(t *testing.T) {
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("db.Migrate: %v", err)
-	}
+	database := openMigratedDB(t)
 	router, _ := buildPushRouter(t, database, true)
 
 	userA := mintUser(t, database, "push-owner-a")
@@ -171,15 +132,10 @@ func TestPushSubscriptions_VisibleOnlyToOwner(t *testing.T) {
 	tokenB, _ := mintSession(t, database, userB)
 
 	rr := pushDo(t, router, http.MethodPost, "/api/v1/push/subscriptions", tokenA, validSubscribeBody("https://push.example.com/sub/owner-a"))
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("subscribe status = %d, body %s", rr.Code, rr.Body.String())
-	}
-	var created struct {
+	requireStatus(t, rr, http.StatusCreated)
+	created := decodeBody[struct {
 		ID int64 `json:"id"`
-	}
-	if err := json.Unmarshal(rr.Body.Bytes(), &created); err != nil {
-		t.Fatalf("decode subscribe response: %v", err)
-	}
+	}](t, rr)
 
 	rr = pushDo(t, router, http.MethodGet, "/api/v1/push/subscriptions", tokenB, nil)
 	var listed struct {
@@ -206,22 +162,13 @@ func TestPushSubscriptions_VisibleOnlyToOwner(t *testing.T) {
 }
 
 func TestPushSubscriptions_DisabledIs503AfterAuthAndWritesNothing(t *testing.T) {
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("db.Migrate: %v", err)
-	}
+	database := openMigratedDB(t)
 	router, _ := buildPushRouter(t, database, false)
 	userID := mintUser(t, database, "push-disabled")
 	token, _ := mintSession(t, database, userID)
 
 	rr := pushDo(t, router, http.MethodGet, "/api/v1/push/subscriptions", "", nil)
-	if rr.Code != http.StatusUnauthorized {
-		t.Fatalf("anonymous request = %d, want 401 (auth must run before the disabled check)", rr.Code)
-	}
+	requireStatus(t, rr, http.StatusUnauthorized)
 
 	rr = pushDo(t, router, http.MethodPost, "/api/v1/push/subscriptions", token, validSubscribeBody("https://push.example.com/sub/disabled"))
 	if rr.Code != http.StatusServiceUnavailable || decodeErr(t, rr).Error != "PUSH_DISABLED" {
@@ -240,14 +187,7 @@ func TestPushSubscriptions_DisabledIs503AfterAuthAndWritesNothing(t *testing.T) 
 // ─── Validation ──────────────────────────────────────────────────────────────
 
 func TestPushSubscriptions_RejectsMalformed(t *testing.T) {
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("db.Migrate: %v", err)
-	}
+	database := openMigratedDB(t)
 	router, _ := buildPushRouter(t, database, true)
 	userID := mintUser(t, database, "push-malformed")
 	token, _ := mintSession(t, database, userID)
@@ -310,14 +250,7 @@ func TestPushSubscriptions_RejectsMalformed(t *testing.T) {
 // ─── Refresh and cap ─────────────────────────────────────────────────────────
 
 func TestPushSubscriptions_RefreshIsAnUpsert(t *testing.T) {
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("db.Migrate: %v", err)
-	}
+	database := openMigratedDB(t)
 	router, _ := buildPushRouter(t, database, true)
 	userID := mintUser(t, database, "push-refresh")
 	token, _ := mintSession(t, database, userID)
@@ -325,15 +258,10 @@ func TestPushSubscriptions_RefreshIsAnUpsert(t *testing.T) {
 
 	body := validSubscribeBody("https://push.example.com/sub/refresh")
 	rr := pushDo(t, router, http.MethodPost, "/api/v1/push/subscriptions", token, body)
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("first subscribe = %d %s", rr.Code, rr.Body.String())
-	}
-	var first struct {
+	requireStatus(t, rr, http.StatusCreated)
+	first := decodeBody[struct {
 		ID int64 `json:"id"`
-	}
-	if err := json.Unmarshal(rr.Body.Bytes(), &first); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	}](t, rr)
 	if _, err := database.ExecContext(ctx, `UPDATE push_subscriptions SET last_seen_at = datetime('now', '-1 day') WHERE id = ?`, first.ID); err != nil {
 		t.Fatalf("backdating: %v", err)
 	}
@@ -343,15 +271,10 @@ func TestPushSubscriptions_RefreshIsAnUpsert(t *testing.T) {
 	}
 
 	rr = pushDo(t, router, http.MethodPost, "/api/v1/push/subscriptions", token, body)
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("second subscribe = %d %s", rr.Code, rr.Body.String())
-	}
-	var second struct {
+	requireStatus(t, rr, http.StatusCreated)
+	second := decodeBody[struct {
 		ID int64 `json:"id"`
-	}
-	if err := json.Unmarshal(rr.Body.Bytes(), &second); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	}](t, rr)
 	if second.ID != first.ID {
 		t.Fatalf("second subscribe id = %d, want the same row %d", second.ID, first.ID)
 	}
@@ -380,14 +303,7 @@ func TestPushSubscriptions_RefreshIsAnUpsert(t *testing.T) {
 }
 
 func TestPushSubscriptions_DeviceCapEvictsOldest(t *testing.T) {
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("db.Migrate: %v", err)
-	}
+	database := openMigratedDB(t)
 	router, _ := buildPushRouter(t, database, true)
 	userID := mintUser(t, database, "push-cap")
 	token, _ := mintSession(t, database, userID)
@@ -412,9 +328,7 @@ func TestPushSubscriptions_DeviceCapEvictsOldest(t *testing.T) {
 
 	// The 11th subscription triggers the cap; it is the newest of all.
 	rr := pushDo(t, router, http.MethodPost, "/api/v1/push/subscriptions", token, validSubscribeBody(endpoint(10)))
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("11th subscribe = %d %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusCreated)
 
 	var n int
 	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM push_subscriptions WHERE user_id = ?`, userID).Scan(&n); err != nil {
@@ -435,29 +349,17 @@ func TestPushSubscriptions_DeviceCapEvictsOldest(t *testing.T) {
 // ─── VAPID ───────────────────────────────────────────────────────────────────
 
 func TestPushVAPID_ReturnsTheRunningKey(t *testing.T) {
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("db.Migrate: %v", err)
-	}
+	database := openMigratedDB(t)
 	router, push := buildPushRouter(t, database, true)
 	userID := mintUser(t, database, "push-vapid")
 	token, _ := mintSession(t, database, userID)
 
 	rr := pushDo(t, router, http.MethodGet, "/api/v1/push/vapid", token, nil)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("GET /vapid = %d %s", rr.Code, rr.Body.String())
-	}
-	var resp struct {
+	requireStatus(t, rr, http.StatusOK)
+	resp := decodeBody[struct {
 		PublicKey string `json:"public_key"`
 		KeyID     string `json:"key_id"`
-	}
-	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	}](t, rr)
 	raw, err := base64.RawURLEncoding.DecodeString(resp.PublicKey)
 	if err != nil {
 		t.Fatalf("public_key is not raw-url-base64: %v", err)

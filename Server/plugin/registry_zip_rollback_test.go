@@ -50,20 +50,14 @@ func TestRegistry_InstallFromZip_UpgradeFailureDoesNotDestroyOldVersion(t *testi
 	store := &failNthInstallStore{DB: realStore, failAt: 2, err: context.Canceled}
 
 	r, err := NewRegistry(Config{Directory: dir, Store: store})
-	if err != nil {
-		t.Fatalf("NewRegistry: %v", err)
-	}
+	mustDo(t, "NewRegistry", err)
 	t.Cleanup(func() { _ = r.Close(context.Background()) })
 
 	ctx := context.Background()
 	writePluginDir(t, dir, "foo", simpleManifest("foo"))
 	v1Path := filepath.Join(dir, "foo", "foo.wasm")
-	if err := os.WriteFile(v1Path, []byte("v1-marker"), 0o600); err != nil {
-		t.Fatalf("write v1 marker: %v", err)
-	}
-	if err := r.LoadAll(ctx); err != nil {
-		t.Fatalf("LoadAll: %v", err)
-	}
+	mustDo(t, "write v1 marker", os.WriteFile(v1Path, []byte("v1-marker"), 0o600))
+	mustDo(t, "LoadAll", r.LoadAll(ctx))
 
 	zipBytes := buildZip(t, map[string]string{
 		"plugin.json": simpleManifest("foo"),

@@ -43,9 +43,7 @@ func TestAdminAPI_PatchRole_MemberLookupFailureBlanketInvalidates(t *testing.T) 
 	w := doRequest(t, handler, http.MethodPatch, "/roles/3", token, map[string]any{
 		"permissions": permissions.ReadMessages,
 	})
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 	if inv.invalidateAllN == 0 {
 		t.Fatalf("permissions changed but the member lookup failed and nothing was blanket-invalidated (InvalidateAll=0, per-user=%v) — the members keep their revoked grants until the cache TTL", inv.invalidateUserIDs)
 	}

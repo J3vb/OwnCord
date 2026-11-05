@@ -14,13 +14,9 @@ func TestChannelCategories_CreateRenameDeleteRoundTrip(t *testing.T) {
 	ctx := context.Background()
 
 	a, err := database.CreateChannelCategory(ctx, "Games")
-	if err != nil {
-		t.Fatalf("create: %v", err)
-	}
+	mustDo(t, "create", err)
 	b, err := database.CreateChannelCategory(ctx, "Voice")
-	if err != nil {
-		t.Fatalf("create: %v", err)
-	}
+	mustDo(t, "create", err)
 	if a.Position != 0 || b.Position != 1 {
 		t.Fatalf("positions = %d, %d; want appended 0, 1", a.Position, b.Position)
 	}
@@ -33,20 +29,14 @@ func TestChannelCategories_CreateRenameDeleteRoundTrip(t *testing.T) {
 	if err := database.RenameChannelCategory(ctx, 999, "x"); !errors.Is(err, db.ErrNotFound) {
 		t.Fatalf("rename missing: err = %v, want ErrNotFound", err)
 	}
-	if err := database.RenameChannelCategory(ctx, a.ID, "GAMES"); err != nil {
-		t.Fatalf("case-only rename of itself: %v", err)
-	}
+	mustDo(t, "case-only rename of itself", database.RenameChannelCategory(ctx, a.ID, "GAMES"))
 	if err := database.DeleteChannelCategory(ctx, 999); !errors.Is(err, db.ErrNotFound) {
 		t.Fatalf("delete missing: err = %v, want ErrNotFound", err)
 	}
 
 	id, err := database.CreateChannelIn(ctx, db.NewChannel{Name: "arena", Type: "text", CategoryID: a.ID})
-	if err != nil {
-		t.Fatalf("CreateChannelIn: %v", err)
-	}
-	if err := database.DeleteChannelCategory(ctx, a.ID); err != nil {
-		t.Fatalf("delete: %v", err)
-	}
+	mustDo(t, "CreateChannelIn", err)
+	mustDo(t, "delete", database.DeleteChannelCategory(ctx, a.ID))
 	ch, err := database.GetChannel(ctx, id)
 	if err != nil || ch == nil {
 		t.Fatalf("the channel did not survive its category: %v", err)
@@ -71,9 +61,7 @@ func TestChannelCategories_ReorderRefusesAStaleSetAndWritesNothing(t *testing.T)
 	}
 	order := func() []int64 {
 		cats, err := database.ListChannelCategories(ctx)
-		if err != nil {
-			t.Fatalf("list: %v", err)
-		}
+		mustDo(t, "list", err)
 		out := make([]int64, len(cats))
 		for i := range cats {
 			out[i] = cats[i].ID
@@ -93,9 +81,7 @@ func TestChannelCategories_ReorderRefusesAStaleSetAndWritesNothing(t *testing.T)
 			t.Fatalf("%s: a refused reorder wrote, order is now %v", name, got)
 		}
 	}
-	if err := database.ReorderChannelCategories(ctx, []int64{ids[2], ids[0], ids[1]}); err != nil {
-		t.Fatalf("valid reorder: %v", err)
-	}
+	mustDo(t, "valid reorder", database.ReorderChannelCategories(ctx, []int64{ids[2], ids[0], ids[1]}))
 	if got := order(); got[0] != ids[2] || got[1] != ids[0] || got[2] != ids[1] {
 		t.Fatalf("order after a valid reorder = %v", got)
 	}
@@ -110,9 +96,7 @@ func TestChannelCategories_ConcurrentReordersLeaveAPermutation(t *testing.T) {
 	ids := make([]int64, 0, 4)
 	for _, n := range []string{"A", "B", "C", "D"} {
 		c, err := database.CreateChannelCategory(ctx, n)
-		if err != nil {
-			t.Fatal(err)
-		}
+		mustDo(t, "CreateChannelCategory", err)
 		ids = append(ids, c.ID)
 	}
 	var wg sync.WaitGroup
@@ -125,9 +109,7 @@ func TestChannelCategories_ConcurrentReordersLeaveAPermutation(t *testing.T) {
 	}
 	wg.Wait()
 	cats, err := database.ListChannelCategories(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "ListChannelCategories", err)
 	seen := map[int]bool{}
 	for _, c := range cats {
 		if c.Position < 0 || c.Position >= len(cats) || seen[c.Position] {
@@ -143,9 +125,7 @@ func TestChannelCategories_RenameRacingResolveOrCreate(t *testing.T) {
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	games, err := database.CreateChannelCategory(ctx, "Games")
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateChannelCategory", err)
 
 	var wg sync.WaitGroup
 	wg.Go(func() {
@@ -172,9 +152,7 @@ func TestChannelCategories_RenameRacingResolveOrCreate(t *testing.T) {
 	wg.Wait()
 
 	cats, err := database.ListChannelCategories(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "ListChannelCategories", err)
 	// Every name resolves to the one row, or to a fresh row when the rename had
 	// moved the row off that name. Never two rows with one name.
 	seen := map[string]bool{}
@@ -189,9 +167,7 @@ func TestChannelCategories_RenameRacingResolveOrCreate(t *testing.T) {
 		seen[key] = true
 	}
 	chs, err := database.ListChannels(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "ListChannels", err)
 	for _, ch := range chs {
 		if ch.CategoryID == 0 || ch.Category == "" {
 			t.Fatalf("channel %q lost its category: %+v", ch.Name, ch)
@@ -209,10 +185,7 @@ func TestChannelCategories_UnknownCategoryIDWritesNothing(t *testing.T) {
 	if len(chs) != 0 {
 		t.Fatalf("a refused create left %d channel(s)", len(chs))
 	}
-	id, err := database.CreateChannel(ctx, "ok", "text", "", "", 0)
-	if err != nil {
-		t.Fatal(err)
-	}
+	id := mustCreateChannel(t, database, "ok", "text", "", "", 0)
 	if err := database.AdminUpdateChannel(ctx, id, db.ChannelUpdate{Name: "ok", CategoryID: 42}); !errors.Is(err, db.ErrNotFound) {
 		t.Fatalf("update into a missing category: err = %v, want ErrNotFound", err)
 	}
@@ -248,22 +221,14 @@ func TestChannelCategories_IfExistsFallsBackToNone(t *testing.T) {
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	cat, err := database.CreateChannelCategory(ctx, "Doomed")
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateChannelCategory", err)
 	id, err := database.CreateChannelIn(ctx, db.NewChannel{Name: "a", Type: "text", CategoryID: cat.ID})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := database.DeleteChannelCategory(ctx, cat.ID); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateChannelIn", err)
+	mustDo(t, "DeleteChannelCategory", database.DeleteChannelCategory(ctx, cat.ID))
 	if err := database.AdminUpdateChannel(ctx, id, db.ChannelUpdate{Name: "a", CategoryID: cat.ID}); !errors.Is(err, db.ErrNotFound) {
 		t.Fatalf("vanished category: err = %v, want ErrNotFound", err)
 	}
-	if err := database.AdminUpdateChannel(ctx, id, db.ChannelUpdate{Name: "a", CategoryID: cat.ID, CategoryIfExists: true}); err != nil {
-		t.Fatalf("with CategoryIfExists: %v", err)
-	}
+	mustDo(t, "with CategoryIfExists", database.AdminUpdateChannel(ctx, id, db.ChannelUpdate{Name: "a", CategoryID: cat.ID, CategoryIfExists: true}))
 	if ch, _ := database.GetChannel(ctx, id); ch == nil || ch.CategoryID != 0 {
 		t.Fatalf("channel = %+v, want uncategorized", ch)
 	}

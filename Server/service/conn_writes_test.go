@@ -58,22 +58,16 @@ func TestConnWrites_ThousandTouchesAreOneWriterStatement(t *testing.T) {
 	ctx := context.Background()
 
 	for i := range 1000 {
-		if err := sessions.TouchSession(ctx, fmt.Sprintf("token-%d", i)); err != nil {
-			t.Fatalf("TouchSession: %v", err)
-		}
+		mustDo(t, "TouchSession", sessions.TouchSession(ctx, fmt.Sprintf("token-%d", i)))
 	}
 	if spy.touchCalls != 0 {
 		t.Fatalf("touches wrote %d statements before the flush, want 0", spy.touchCalls)
 	}
-	if err := w.Flush(ctx); err != nil {
-		t.Fatalf("Flush: %v", err)
-	}
+	mustDo(t, "Flush", w.Flush(ctx))
 	if spy.touchCalls != 1 || len(spy.touched) != 1000 {
 		t.Fatalf("flush = %d statements over %d sessions, want 1 over 1000", spy.touchCalls, len(spy.touched))
 	}
-	if err := w.Flush(ctx); err != nil {
-		t.Fatalf("second Flush: %v", err)
-	}
+	mustDo(t, "second Flush", w.Flush(ctx))
 	if spy.touchCalls != 1 {
 		t.Fatalf("an empty flush wrote a statement (%d total), want none", spy.touchCalls)
 	}
@@ -86,9 +80,7 @@ func TestConnWrites_FlushedTouchSlidesTheSession(t *testing.T) {
 	database, _, w, sessions, _ := newBatchedServices(t)
 	ctx := context.Background()
 	seedUser(t, database, &db.User{ID: 1, Username: "pinger"})
-	if _, err := database.CreateSession(ctx, 1, "tok", "dev", "127.0.0.1"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
+	mustCreateSession(t, database, 1, "tok", "dev", "127.0.0.1")
 	if _, err := database.ExecContext(ctx,
 		`UPDATE sessions SET last_used = datetime('now', '-2 days'), expires_at = ? WHERE token = 'tok'`,
 		time.Now().UTC().Add(24*time.Hour).Format("2006-01-02T15:04:05Z")); err != nil {
@@ -96,12 +88,8 @@ func TestConnWrites_FlushedTouchSlidesTheSession(t *testing.T) {
 	}
 
 	lastPing := time.Now()
-	if err := sessions.TouchSession(ctx, "tok"); err != nil {
-		t.Fatalf("TouchSession: %v", err)
-	}
-	if err := w.Flush(ctx); err != nil {
-		t.Fatalf("Flush: %v", err)
-	}
+	mustDo(t, "TouchSession", sessions.TouchSession(ctx, "tok"))
+	mustDo(t, "Flush", w.Flush(ctx))
 
 	var lastUsed, expiresAt string
 	if err := database.QueryRowContext(ctx,
@@ -131,21 +119,15 @@ func TestConnWrites_TouchQueuedBeforeExpiryNeverRevives(t *testing.T) {
 	database, _, w, sessions, _ := newBatchedServices(t)
 	ctx := context.Background()
 	seedUser(t, database, &db.User{ID: 1, Username: "edge"})
-	if _, err := database.CreateSession(ctx, 1, "tok", "dev", "127.0.0.1"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
+	mustCreateSession(t, database, 1, "tok", "dev", "127.0.0.1")
 
-	if err := sessions.TouchSession(ctx, "tok"); err != nil {
-		t.Fatalf("TouchSession: %v", err)
-	}
+	mustDo(t, "TouchSession", sessions.TouchSession(ctx, "tok"))
 	lapsed := time.Now().UTC().Add(-time.Second).Format("2006-01-02T15:04:05Z")
 	if _, err := database.ExecContext(ctx,
 		`UPDATE sessions SET expires_at = ? WHERE token = 'tok'`, lapsed); err != nil {
 		t.Fatalf("expire session: %v", err)
 	}
-	if err := w.Flush(ctx); err != nil {
-		t.Fatalf("Flush: %v", err)
-	}
+	mustDo(t, "Flush", w.Flush(ctx))
 
 	var expiresAt string
 	if err := database.QueryRowContext(ctx,
@@ -181,9 +163,7 @@ func TestConnWrites_StampsCoalescePerUser(t *testing.T) {
 	if spy.stampCalls != 0 {
 		t.Fatalf("stamps wrote %d statements before the flush, want 0", spy.stampCalls)
 	}
-	if err := w.Flush(ctx); err != nil {
-		t.Fatalf("Flush: %v", err)
-	}
+	mustDo(t, "Flush", w.Flush(ctx))
 	if spy.stampCalls != 1 {
 		t.Fatalf("flush made %d stamp calls, want 1", spy.stampCalls)
 	}
@@ -206,12 +186,8 @@ func TestConnWrites_PendingConnectKeepsANewerChoice(t *testing.T) {
 	seedUser(t, database, &db.User{ID: 1, Username: "quick", Status: db.StatusOffline})
 
 	_, _ = users.StampConnect(ctx, 1, db.StatusOffline)
-	if err := database.UpdateUserStatus(ctx, 1, db.StatusDND); err != nil {
-		t.Fatalf("UpdateUserStatus: %v", err)
-	}
-	if err := w.Flush(ctx); err != nil {
-		t.Fatalf("Flush: %v", err)
-	}
+	mustDo(t, "UpdateUserStatus", database.UpdateUserStatus(ctx, 1, db.StatusDND))
+	mustDo(t, "Flush", w.Flush(ctx))
 	u, _ := database.GetUserByID(ctx, 1)
 	if u.Status != db.StatusDND {
 		t.Fatalf("status = %q, want the dnd chosen after the connect", u.Status)
@@ -229,9 +205,7 @@ func TestConnWrites_CrashLeftoversAreResetOnBoot(t *testing.T) {
 
 	_, _ = users.StampConnect(ctx, 1, db.StatusOffline)
 	_, _ = users.StampConnect(ctx, 2, db.StatusDND)
-	if err := w.Flush(ctx); err != nil {
-		t.Fatalf("Flush: %v", err)
-	}
+	mustDo(t, "Flush", w.Flush(ctx))
 	// Both disconnect, then the process dies before the next flush.
 	_ = users.StampDisconnect(ctx, 1)
 	_ = users.StampDisconnect(ctx, 2)
@@ -239,9 +213,7 @@ func TestConnWrites_CrashLeftoversAreResetOnBoot(t *testing.T) {
 	if u, _ := database.GetUserByID(ctx, 1); u.Status != db.StatusOnline {
 		t.Fatalf("status before boot = %q, want the stale online the crash left", u.Status)
 	}
-	if err := database.ResetAllUserStatuses(ctx); err != nil {
-		t.Fatalf("ResetAllUserStatuses: %v", err)
-	}
+	mustDo(t, "ResetAllUserStatuses", database.ResetAllUserStatuses(ctx))
 	for id, want := range map[int64]string{1: db.StatusOffline, 2: db.StatusDND} {
 		if u, _ := database.GetUserByID(ctx, id); u.Status != want {
 			t.Errorf("user %d status after boot = %q, want %q", id, u.Status, want)
@@ -256,9 +228,7 @@ func TestConnWrites_FailedFlushRetriesAndKeepsNewerStamps(t *testing.T) {
 	ctx := context.Background()
 	seedUser(t, database, &db.User{ID: 1, Username: "retry", Status: db.StatusOffline})
 	seedUser(t, database, &db.User{ID: 2, Username: "newer", Status: db.StatusOffline})
-	if _, err := database.CreateSession(ctx, 1, "tok", "dev", "127.0.0.1"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
+	mustCreateSession(t, database, 1, "tok", "dev", "127.0.0.1")
 
 	_, _ = users.StampConnect(ctx, 1, db.StatusOffline)
 	_, _ = users.StampConnect(ctx, 2, db.StatusOffline)
@@ -272,9 +242,7 @@ func TestConnWrites_FailedFlushRetriesAndKeepsNewerStamps(t *testing.T) {
 
 	spy.failStamps, spy.failTouches = false, false
 	spy.touched = nil
-	if err := w.Flush(ctx); err != nil {
-		t.Fatalf("retry Flush: %v", err)
-	}
+	mustDo(t, "retry Flush", w.Flush(ctx))
 	if u, _ := database.GetUserByID(ctx, 1); u.Status != db.StatusOnline {
 		t.Errorf("user 1 status = %q, want the retried online", u.Status)
 	}
@@ -321,9 +289,7 @@ func TestConnWrites_PresenceUpdateDropsPendingConnect(t *testing.T) {
 	if _, err := channels.HandlePresenceUpdate(ctx, 1, db.StatusOffline, nil, nil, nil); err != nil {
 		t.Fatalf("HandlePresenceUpdate: %v", err)
 	}
-	if err := w.Flush(ctx); err != nil {
-		t.Fatalf("Flush: %v", err)
-	}
+	mustDo(t, "Flush", w.Flush(ctx))
 	u, _ := database.GetUserByID(ctx, 1)
 	if u.Status != db.StatusOffline {
 		t.Fatalf("status = %q, want the offline chosen after the connect", u.Status)

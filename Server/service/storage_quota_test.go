@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -32,13 +33,9 @@ import (
 func TestReserve_NotBlockedByAConcurrentBackup(t *testing.T) {
 	dir := t.TempDir()
 	database, err := db.Open(filepath.Join(dir, "quota.db"))
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
+	mustDo(t, "db.Open", err)
 	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("db.Migrate: %v", err)
-	}
+	mustDo(t, "db.Migrate", db.Migrate(database))
 	seedUser(t, database, &db.User{ID: quotaTestUser, Username: "quota_user", RoleID: 4})
 	svc := NewUploadService(database, NewPermissionService(database, permissions.NewChecker(database)))
 	svc.SetStorageLimits(StorageLimits{Dir: t.TempDir(), FreeBytes: func(string) (uint64, error) {
@@ -47,24 +44,9 @@ func TestReserve_NotBlockedByAConcurrentBackup(t *testing.T) {
 	ctx := context.Background()
 
 	backupDir := filepath.Join(dir, "backups")
-	if err := os.MkdirAll(backupDir, 0o750); err != nil {
-		t.Fatalf("MkdirAll: %v", err)
-	}
+	mustDo(t, "MkdirAll", os.MkdirAll(backupDir, 0o750))
 
-	// The seam the backup parks on: it signals reached once it holds the
-	// connection its VACUUM will use, then blocks until the test releases it.
-	parked := make(chan struct{})
-	release := make(chan struct{})
-	var releaseOnce sync.Once
-	releaseBackup := func() { releaseOnce.Do(func() { close(release) }) }
-	t.Cleanup(func() {
-		releaseBackup()
-		db.BackupVACUUMPreExecHook = nil
-	})
-	db.BackupVACUUMPreExecHook = func() {
-		close(parked)
-		<-release
-	}
+	parked, releaseBackup := parkBackupVACUUM(t)
 
 	done := make(chan error, 1)
 	go func() {
@@ -93,9 +75,7 @@ func TestReserve_NotBlockedByAConcurrentBackup(t *testing.T) {
 
 	select {
 	case err := <-reserveDone:
-		if err != nil {
-			t.Fatalf("Reserve during backup: %v", err)
-		}
+		mustDo(t, "Reserve during backup", err)
 	case <-time.After(10 * time.Second):
 		t.Fatal("Reserve did not complete while the backup was held at its VACUUM; the upload charge is queuing behind the backup")
 	}
@@ -107,4 +87,29 @@ func TestReserve_NotBlockedByAConcurrentBackup(t *testing.T) {
 	if got := used(t, svc, quotaTestUser); got != 0 {
 		t.Fatalf("counter = %d after Reserve and Release, want 0", got)
 	}
+}
+
+// parkBackupVACUUM parks the next backup at its VACUUM seam: parked closes
+// once the backup holds its connection, and it stays blocked until
+// releaseBackup is called (or the test ends).
+func parkBackupVACUUM(t *testing.T) (parked chan struct{}, releaseBackup func()) {
+	t.Helper()
+	parked = make(chan struct{})
+	var gate sync.WaitGroup
+	gate.Add(1)
+	var released atomic.Bool
+	releaseBackup = func() {
+		if released.CompareAndSwap(false, true) {
+			gate.Done()
+		}
+	}
+	t.Cleanup(func() {
+		releaseBackup()
+		db.BackupVACUUMPreExecHook = nil
+	})
+	db.BackupVACUUMPreExecHook = func() {
+		close(parked)
+		gate.Wait()
+	}
+	return parked, releaseBackup
 }

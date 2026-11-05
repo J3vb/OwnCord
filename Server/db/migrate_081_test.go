@@ -14,9 +14,7 @@ const bit14 = int64(0x4000)
 func migratedAt080(t *testing.T) *db.DB {
 	t.Helper()
 	database := openMemory(t)
-	if err := db.MigrateFS(database, migrationsUpTo(t, "081_")); err != nil {
-		t.Fatalf("MigrateFS up to 080: %v", err)
-	}
+	mustDo(t, "MigrateFS up to 080", db.MigrateFS(database, migrationsUpTo(t, "081_")))
 	return database
 }
 
@@ -28,9 +26,7 @@ func TestMigration081_DefaultRolesLoseTheUnusedBit(t *testing.T) {
 		}
 	}
 	before := map[int64]int64{2: rolePerms(t, database, 2), 3: rolePerms(t, database, 3), 4: rolePerms(t, database, 4)}
-	if err := db.MigrateFS(database, migrationsUpTo(t, "082_")); err != nil {
-		t.Fatalf("Migrate 081: %v", err)
-	}
+	mustDo(t, "Migrate 081", db.MigrateFS(database, migrationsUpTo(t, "082_")))
 	for id, was := range before {
 		if got, want := rolePerms(t, database, id), was&^bit14; got != want {
 			t.Errorf("role %d = %#x, want %#x (only bit 14 cleared)", id, got, want)
@@ -57,9 +53,7 @@ func TestMigration081_CustomRoles(t *testing.T) {
 	// A role at the owner position is left alone.
 	exec(`INSERT INTO roles (id, name, permissions, position) VALUES (11, 'Co-owner', ?, 100)`, bit14|0x3)
 
-	if err := db.MigrateFS(database, migrationsUpTo(t, "082_")); err != nil {
-		t.Fatalf("Migrate 081: %v", err)
-	}
+	mustDo(t, "Migrate 081", db.MigrateFS(database, migrationsUpTo(t, "082_")))
 	if got, want := rolePerms(t, database, 10), muteMembers|bit13|0x3; got != want {
 		t.Errorf("Stray = %#x, want %#x (bit 14 cleared, bit 13 untouched)", got, want)
 	}

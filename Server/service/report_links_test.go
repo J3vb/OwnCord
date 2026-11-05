@@ -17,17 +17,10 @@ func TestVisibleReportPublicIDs_GuardsTheSubjectInOneRead(t *testing.T) {
 	}
 
 	aboutViewer, err := svc.File(ctx, FileReportParams{ReporterID: 10, TargetType: TargetUser, TargetID: "11", Reason: "harassment"})
-	if err != nil {
-		t.Fatalf("File(about viewer): %v", err)
-	}
+	mustDo(t, "File(about viewer)", err)
 	aboutOther, err := svc.File(ctx, FileReportParams{ReporterID: 10, TargetType: TargetUser, TargetID: "12", Reason: "harassment"})
-	if err != nil {
-		t.Fatalf("File(about other): %v", err)
-	}
-	other, err := database.GetReport(ctx, aboutOther)
-	if err != nil {
-		t.Fatalf("GetReport: %v", err)
-	}
+	mustDo(t, "File(about other)", err)
+	other := mustGetReport(t, database, aboutOther)
 
 	ids := []int64{aboutViewer, aboutOther, aboutOther, aboutOther + 1000}
 	want := map[int64]string{aboutOther: other.PublicID}

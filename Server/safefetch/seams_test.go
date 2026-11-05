@@ -29,9 +29,7 @@ var seamFields = []string{"Classify", "Resolve", "Dial", "TLSConfig"}
 // the fix: the shape of the expression no longer matters.
 func TestProductionPolicyShape(t *testing.T) {
 	root, err := filepath.Abs("..")
-	if err != nil {
-		t.Fatalf("Abs: %v", err)
-	}
+	mustDo(t, "Abs", err)
 	for _, file := range policyFiles(t, root) {
 		checkPolicyFile(t, file.rel, file.f)
 	}

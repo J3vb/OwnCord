@@ -27,9 +27,7 @@ func TestVoice_EnableCameraIfUnderLimit_ReEnableIdempotentAtCap(t *testing.T) {
 
 	// Same user, camera row already 1, still the only stream in the room.
 	ok, err = database.EnableCameraIfUnderLimit(context.Background(), u1, chanID, 1)
-	if err != nil {
-		t.Fatalf("re-enable: %v", err)
-	}
+	mustDo(t, "re-enable", err)
 	if !ok {
 		t.Error("re-enable at the cap was refused against the requester's own camera row")
 	}
@@ -47,9 +45,7 @@ func TestVoice_EnableCameraIfUnderLimit_OtherUserStillRefusedAtCap(t *testing.T)
 		t.Fatalf("u1 enable: ok=%v err=%v, want true", ok, err)
 	}
 	ok, err := database.EnableCameraIfUnderLimit(context.Background(), u2, chanID, 1)
-	if err != nil {
-		t.Fatalf("u2 enable: %v", err)
-	}
+	mustDo(t, "u2 enable", err)
 	if ok {
 		t.Error("a new publisher was admitted past the video cap")
 	}
@@ -66,9 +62,7 @@ func TestVoice_EnableCameraIfUnderLimit_OwnScreenshareStillCounts(t *testing.T) 
 	}
 	// The camera would be a SECOND stream from this user; the cap is 1.
 	ok, err := database.EnableCameraIfUnderLimit(context.Background(), u1, chanID, 1)
-	if err != nil {
-		t.Fatalf("camera enable: %v", err)
-	}
+	mustDo(t, "camera enable", err)
 	if ok {
 		t.Error("own screenshare must still count toward the cap when enabling the camera")
 	}
@@ -84,9 +78,7 @@ func TestVoice_EnableScreenshareIfUnderLimit_ReEnableIdempotentAtCap(t *testing.
 		t.Fatalf("first enable: ok=%v err=%v, want true", ok, err)
 	}
 	ok, err := database.EnableScreenshareIfUnderLimit(context.Background(), u1, chanID, 1)
-	if err != nil {
-		t.Fatalf("re-enable: %v", err)
-	}
+	mustDo(t, "re-enable", err)
 	if !ok {
 		t.Error("screenshare re-enable at the cap was refused against the requester's own row")
 	}

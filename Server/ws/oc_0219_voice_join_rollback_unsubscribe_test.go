@@ -57,9 +57,7 @@ func TestVoiceJoin_GetChannelVoiceStatesError_UnsubscribesVoiceTopic(t *testing.
 	var hookRan bool
 	voiceJoinPostTokenRaceHook = func(client *Client) {
 		hookRan = true
-		if _, err := database.ExecContext(context.Background(), `ALTER TABLE users RENAME TO users_bak_0219`); err != nil {
-			t.Fatalf("hook: rename users: %v", err)
-		}
+		mustExec(t, database, `ALTER TABLE users RENAME TO users_bak_0219`)
 	}
 	defer func() { voiceJoinPostTokenRaceHook = nil }()
 

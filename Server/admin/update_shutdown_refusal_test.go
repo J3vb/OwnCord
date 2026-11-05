@@ -42,8 +42,7 @@ func assertShuttingDown(t *testing.T, h http.Handler, token string) {
 	admin.ResetRestartState()
 	t.Cleanup(admin.ResetRestartState)
 	w := doRequest(t, h, http.MethodPost, "/updates/apply", token, nil)
-	var resp map[string]string
-	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	resp := decodeBody[map[string]string](t, w)
 	if w.Code != http.StatusServiceUnavailable || resp["error"] != "SHUTTING_DOWN" {
 		t.Fatalf("status = %d, body = %s; want 503 SHUTTING_DOWN, refused before any download", w.Code, w.Body.String())
 	}

@@ -16,18 +16,12 @@ func TestOpenShared_WorksWhileServerHoldsLock(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "shared.db")
 
 	server, err := db.Open(path) // takes the process lock
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
+	mustDo(t, "Open", err)
 	t.Cleanup(func() { _ = server.Close() })
 
 	cli, err := db.OpenShared(path) // must not block on or steal the lock
-	if err != nil {
-		t.Fatalf("OpenShared while lock held: %v", err)
-	}
+	mustDo(t, "OpenShared while lock held", err)
 	defer cli.Close() //nolint:errcheck
 
-	if err := cli.PingRead(context.Background()); err != nil {
-		t.Fatalf("PingRead on shared handle: %v", err)
-	}
+	mustDo(t, "PingRead on shared handle", cli.PingRead(context.Background()))
 }

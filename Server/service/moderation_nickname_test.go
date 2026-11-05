@@ -52,9 +52,7 @@ func newNicknameFixture(t *testing.T) *nicknameFixture {
 		seedUser(t, database, &db.User{ID: userID, Username: fmt.Sprintf("u%d", userID), Status: "offline"})
 		seedUserRole(t, database, userID, roleID)
 	}
-	if err := database.AddUserRole(context.Background(), nickMulti, 7); err != nil {
-		t.Fatalf("AddUserRole: %v", err)
-	}
+	mustDo(t, "AddUserRole", database.AddUserRole(context.Background(), nickMulti, 7))
 	perms := NewPermissionService(database, permissions.NewChecker(database))
 	mod := NewModerationService(database, perms)
 	users := NewUserService(database)
@@ -262,9 +260,7 @@ func TestSetNickname_MultiRole_BitFromLowerHeldRole(t *testing.T) {
 	// User 7's top role (senior, 70) has no bit; the lower held role (nick, 20)
 	// does. The bit comes from the OR of held roles, rank from the top role.
 	u, err := f.mod.SetNickname(ctx, nickMulti, nickMember, new("Via Lower Role"))
-	if err != nil {
-		t.Fatalf("SetNickname: %v", err)
-	}
+	mustDo(t, "SetNickname", err)
 	if derefOr(u.DisplayName, "") != "Via Lower Role" {
 		t.Fatalf("nickname = %v", u.DisplayName)
 	}
@@ -273,9 +269,7 @@ func TestSetNickname_MultiRole_BitFromLowerHeldRole(t *testing.T) {
 		t.Fatalf("higher target: want ErrForbidden, got %v", err)
 	}
 	// Dropping the lower role takes the bit with it.
-	if err := f.database.RemoveUserRole(ctx, nickMulti, 7); err != nil {
-		t.Fatalf("RemoveUserRole: %v", err)
-	}
+	mustDo(t, "RemoveUserRole", f.database.RemoveUserRole(ctx, nickMulti, 7))
 	f.mod.perms.InvalidateUser(nickMulti)
 	if _, err := f.mod.SetNickname(ctx, nickMulti, nickMember, new("y")); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("after dropping the role: want ErrForbidden, got %v", err)

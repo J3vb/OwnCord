@@ -15,18 +15,10 @@ import (
 
 func TestRejectSymlinksUnderClean(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "regular.txt"), []byte("ok"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Mkdir(filepath.Join(dir, "subdir"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "subdir", "nested.txt"), []byte("ok"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := rejectSymlinksUnder(dir); err != nil {
-		t.Fatalf("clean directory should pass, got: %v", err)
-	}
+	mustDo(t, "WriteFile", os.WriteFile(filepath.Join(dir, "regular.txt"), []byte("ok"), 0o644))
+	mustDo(t, "Mkdir", os.Mkdir(filepath.Join(dir, "subdir"), 0o755))
+	mustDo(t, "WriteFile", os.WriteFile(filepath.Join(dir, "subdir", "nested.txt"), []byte("ok"), 0o644))
+	mustDo(t, "clean directory should pass, got", rejectSymlinksUnder(dir))
 }
 
 func TestRejectSymlinksUnderFindsSymlink(t *testing.T) {
@@ -34,9 +26,7 @@ func TestRejectSymlinksUnderFindsSymlink(t *testing.T) {
 		t.Skip("symlink creation requires elevated privileges on Windows")
 	}
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "regular.txt"), []byte("ok"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "WriteFile", os.WriteFile(filepath.Join(dir, "regular.txt"), []byte("ok"), 0o644))
 	// Create an evil symlink pointing at /etc/passwd.
 	link := filepath.Join(dir, "evil.html")
 	if err := os.Symlink("/etc/passwd", link); err != nil {
@@ -53,9 +43,7 @@ func TestRejectSymlinksUnderFindsNestedSymlink(t *testing.T) {
 	}
 	dir := t.TempDir()
 	sub := filepath.Join(dir, "assets")
-	if err := os.MkdirAll(sub, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "MkdirAll", os.MkdirAll(sub, 0o755))
 	link := filepath.Join(sub, "leak")
 	if err := os.Symlink("/etc/passwd", link); err != nil {
 		t.Skipf("symlink creation failed: %v", err)
@@ -73,26 +61,16 @@ func TestScanPluginDirectory_SkipsBadPluginButReturnsGood(t *testing.T) {
 
 	// Good plugin: valid plugin.json + matching .wasm entrypoint.
 	goodDir := filepath.Join(root, "hello")
-	if err := os.MkdirAll(goodDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "MkdirAll", os.MkdirAll(goodDir, 0o755))
 	goodManifest := []byte(`{"name":"hello","version":"1.0.0","entrypoint":"hello.wasm"}`)
-	if err := os.WriteFile(filepath.Join(goodDir, "plugin.json"), goodManifest, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(goodDir, "hello.wasm"), []byte("\x00asm"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "WriteFile", os.WriteFile(filepath.Join(goodDir, "plugin.json"), goodManifest, 0o644))
+	mustDo(t, "WriteFile", os.WriteFile(filepath.Join(goodDir, "hello.wasm"), []byte("\x00asm"), 0o644))
 
 	// Broken plugin: malformed JSON (trailing comma).
 	brokenDir := filepath.Join(root, "broken")
-	if err := os.MkdirAll(brokenDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "MkdirAll", os.MkdirAll(brokenDir, 0o755))
 	brokenManifest := []byte(`{"name":"broken","version":"1.0.0","entrypoint":"broken.wasm",}`)
-	if err := os.WriteFile(filepath.Join(brokenDir, "plugin.json"), brokenManifest, 0o644); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "WriteFile", os.WriteFile(filepath.Join(brokenDir, "plugin.json"), brokenManifest, 0o644))
 
 	found, err := scanPluginDirectory(root)
 	if err == nil {
@@ -112,24 +90,18 @@ func TestScanPluginDirectoryRejectsSymlinkEntrypoint(t *testing.T) {
 	}
 	root := t.TempDir()
 	pluginDir := filepath.Join(root, "evil")
-	if err := os.MkdirAll(pluginDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "MkdirAll", os.MkdirAll(pluginDir, 0o755))
 	// Manifest claims hello.wasm; we'll make hello.wasm a symlink.
 	manifest := []byte(`{
 		"name": "evil",
 		"version": "0.1.0",
 		"entrypoint": "hello.wasm"
 	}`)
-	if err := os.WriteFile(filepath.Join(pluginDir, "plugin.json"), manifest, 0o644); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "WriteFile", os.WriteFile(filepath.Join(pluginDir, "plugin.json"), manifest, 0o644))
 	// Create a real target then symlink to it (so the target exists; the
 	// symlink itself is what we want to reject).
 	target := filepath.Join(root, "target.bin")
-	if err := os.WriteFile(target, []byte("\x00asm"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "WriteFile", os.WriteFile(target, []byte("\x00asm"), 0o644))
 	if err := os.Symlink(target, filepath.Join(pluginDir, "hello.wasm")); err != nil {
 		t.Skipf("symlink creation failed: %v", err)
 	}

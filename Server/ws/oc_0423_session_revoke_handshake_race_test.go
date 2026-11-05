@@ -21,14 +21,92 @@ package ws
 import (
 	"context"
 	"encoding/json"
-	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/coder/websocket"
 
 	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/db"
 )
+
+// sawFrameBeforeClose runs a reader on conn until the server ends the
+// connection and reports whether a frame of type want arrived. A real client
+// always keeps a reader running; without one, a graceful Close on the server
+// side would block on the close handshake it never gets a reply to.
+func sawFrameBeforeClose(t *testing.T, conn *websocket.Conn, want string) bool {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	frameTypes := make(chan string, 8)
+	go func() {
+		defer close(frameTypes)
+		for {
+			readCtx, readCancel := context.WithTimeout(ctx, 3*time.Second)
+			_, msg, readErr := conn.Read(readCtx)
+			readCancel()
+			if readErr != nil {
+				return
+			}
+			var parsed struct {
+				Type string `json:"type"`
+			}
+			_ = json.Unmarshal(msg, &parsed)
+			frameTypes <- parsed.Type
+		}
+	}()
+
+	saw := false
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case typ, ok := <-frameTypes:
+			if !ok {
+				return saw
+			}
+			if typ == want {
+				saw = true
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for the handshake to conclude")
+		}
+	}
+}
+
+// requireNotLiveRegistered waits until uid has no live registered client: it
+// either never stayed registered past the revocation or was registered and
+// immediately kicked. failure is the message when a live client remains.
+func requireNotLiveRegistered(t *testing.T, hub *Hub, uid int64, failure string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		hub.mu.RLock()
+		c := hub.newestLocked(uid)
+		hub.mu.RUnlock()
+		if c == nil || c.isSendClosed() {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal(failure)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// seedRevocableSession creates a session on uid's account and returns its
+// token and stored hash.
+func seedRevocableSession(t *testing.T, database *db.DB, uid int64) (token, tokenHash string) {
+	t.Helper()
+	token, err := auth.GenerateToken()
+	if err != nil {
+		t.Fatalf("GenerateToken: %v", err)
+	}
+	tokenHash = auth.HashToken(token)
+	if _, err := database.CreateSession(context.Background(), uid, tokenHash, "test-device", "127.0.0.1"); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	return token, tokenHash
+}
 
 // TestFreshConnect_SessionRevokedDuringHandshake_DisconnectsSocket pins
 // OC-0423 on the fresh-connect path (serve_ready.go's handleFreshConnect).
@@ -44,18 +122,10 @@ func TestFreshConnect_SessionRevokedDuringHandshake_DisconnectsSocket(t *testing
 	ctx := context.Background()
 	uid := seedHarvestVoiceUser(t, database, "session-revoke-race-user")
 
-	token, err := auth.GenerateToken()
-	if err != nil {
-		t.Fatalf("GenerateToken: %v", err)
-	}
-	tokenHash := auth.HashToken(token)
-	if _, err := database.CreateSession(ctx, uid, tokenHash, "test-device", "127.0.0.1"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
+	token, tokenHash := seedRevocableSession(t, database, uid)
 
-	hub := newTestHub(t, database, auth.NewRateLimiter(), nil)
-	go hub.Run()
-	defer hub.Stop()
+	rig := newServeRigOn(t, database, nil)
+	hub := rig.hub
 
 	var hookRan bool
 	freshConnectPreRegisterRaceHook = func() {
@@ -77,52 +147,13 @@ func TestFreshConnect_SessionRevokedDuringHandshake_DisconnectsSocket(t *testing
 	}
 	defer func() { freshConnectPreRegisterRaceHook = nil }()
 
-	srv := httptest.NewServer(ServeWS(hub, []string{"*"}, 0))
-	defer srv.Close()
-
-	conn := dialAndAuth(t, ctx, srv.URL, token, 0, 0)
+	conn := dialAndAuth(t, ctx, rig.srv.URL, token, 0, 0)
 	defer func() { _ = conn.CloseNow() }()
-
-	// A real client always keeps a reader running; without one, a graceful
-	// Close on the server side (as the fix performs) would block on the
-	// close handshake it never gets a reply to.
-	frameTypes := make(chan string, 4)
-	go func() {
-		for {
-			readCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-			_, msg, readErr := conn.Read(readCtx)
-			cancel()
-			if readErr != nil {
-				close(frameTypes)
-				return
-			}
-			var parsed struct {
-				Type string `json:"type"`
-			}
-			_ = json.Unmarshal(msg, &parsed)
-			frameTypes <- parsed.Type
-		}
-	}()
 
 	// Drain whatever frames arrive (there must be no ready payload: a
 	// revoked session must never be served one) and wait for the read loop
 	// to end, one way or another.
-	sawReady := false
-	deadline := time.After(5 * time.Second)
-drain:
-	for {
-		select {
-		case typ, ok := <-frameTypes:
-			if !ok {
-				break drain
-			}
-			if typ == MsgTypeReady {
-				sawReady = true
-			}
-		case <-deadline:
-			t.Fatal("timed out waiting for the handshake to conclude")
-		}
-	}
+	sawReady := sawFrameBeforeClose(t, conn, MsgTypeReady)
 
 	if !hookRan {
 		t.Fatal("freshConnectPreRegisterRaceHook never fired — not exercising the race window")
@@ -135,25 +166,10 @@ drain:
 	// end up as a live, registered, fully authorized client — the whole
 	// point of DisconnectRevokedUser is that a revoked session's socket
 	// does not outlive the revocation.
-	deadline2 := time.Now().Add(2 * time.Second)
-	for {
-		hub.mu.RLock()
-		c := hub.newestLocked(uid)
-		stillRegistered := c != nil
-		hub.mu.RUnlock()
-		if !stillRegistered {
-			return // fixed: never stayed registered past the revocation
-		}
-		if c.isSendClosed() {
-			return // fixed: registered then immediately kicked
-		}
-		if time.Now().After(deadline2) {
-			t.Fatal("a socket authenticated on a revoked session is live and fully registered in h.clients " +
-				"after the handshake completed — DisconnectRevokedUser's whole purpose (drop the connection " +
-				"rather than wait for the sweep) was defeated by the in-flight handshake")
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	requireNotLiveRegistered(t, hub, uid,
+		"a socket authenticated on a revoked session is live and fully registered in h.clients "+
+			"after the handshake completed — DisconnectRevokedUser's whole purpose (drop the connection "+
+			"rather than wait for the sweep) was defeated by the in-flight handshake")
 }
 
 // TestReconnect_SessionRevokedDuringHandshake_DisconnectsSocket pins OC-0423
@@ -173,26 +189,15 @@ func TestReconnect_SessionRevokedDuringHandshake_DisconnectsSocket(t *testing.T)
 	uid := seedHarvestVoiceUser(t, database, "session-revoke-reconnect-user")
 	chID := mustCreateTextChannel(t, database, "session-revoke-reconnect-channel")
 
-	token, err := auth.GenerateToken()
-	if err != nil {
-		t.Fatalf("GenerateToken: %v", err)
-	}
-	tokenHash := auth.HashToken(token)
-	if _, err := database.CreateSession(ctx, uid, tokenHash, "test-device", "127.0.0.1"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
+	token, tokenHash := seedRevocableSession(t, database, uid)
 
-	hub := newTestHub(t, database, auth.NewRateLimiter(), nil)
-	go hub.Run()
-	defer hub.Stop()
+	rig := newServeRigOn(t, database, nil)
+	hub := rig.hub
 
 	// Bracket last_seq so the resume takes the buffer tier and reaches
 	// reconnectRegister, where the hook fires — same setup as
 	// TestFreshConnectFallback_RoleReassignMidReconnect_ResolvesFreshRole.
-	rb := hub.ReplayBuffer()
-	rb.Push(98, chID, []byte(`{"seq":98,"type":"chat_message","payload":{}}`))
-	rb.Push(99, chID, []byte(`{"seq":99,"type":"chat_message","payload":{}}`))
-	rb.Push(100, chID, []byte(`{"seq":100,"type":"chat_message","payload":{}}`))
+	pushReplayWindow(hub, chID)
 	hub.SeedSeq(100)
 
 	var hookRan bool
@@ -224,50 +229,13 @@ func TestReconnect_SessionRevokedDuringHandshake_DisconnectsSocket(t *testing.T)
 		}
 	}()
 
-	srv := httptest.NewServer(ServeWS(hub, []string{"*"}, 0))
-	defer srv.Close()
-
-	conn := dialAndAuth(t, ctx, srv.URL, token, 99, chID)
-	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
-
-	frameTypes := make(chan string, 8)
-	go func() {
-		for {
-			readCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-			_, msg, readErr := conn.Read(readCtx)
-			cancel()
-			if readErr != nil {
-				close(frameTypes)
-				return
-			}
-			var parsed struct {
-				Type string `json:"type"`
-			}
-			_ = json.Unmarshal(msg, &parsed)
-			frameTypes <- parsed.Type
-		}
-	}()
+	conn := rig.dialAuth(t, ctx, token, 99, chID)
 
 	// Unlike a fresh connect, a successful resume never sends a "ready"
 	// payload — auth_ok (replay_source != "none") IS the fully-authorized
 	// confirmation for this path, so that is the frame that must not go out
 	// for a session revoked during the handshake.
-	sawAuthOK := false
-	deadline := time.After(5 * time.Second)
-drain:
-	for {
-		select {
-		case typ, ok := <-frameTypes:
-			if !ok {
-				break drain
-			}
-			if typ == MsgTypeAuthOK {
-				sawAuthOK = true
-			}
-		case <-deadline:
-			t.Fatal("timed out waiting for the handshake to conclude")
-		}
-	}
+	sawAuthOK := sawFrameBeforeClose(t, conn, MsgTypeAuthOK)
 
 	if !hookRan {
 		t.Fatal("handleReconnectPostCheckPreRegisterRaceHook never fired — not exercising the race window")
@@ -277,22 +245,7 @@ drain:
 			"revoked during the reconnect handshake")
 	}
 
-	deadline2 := time.Now().Add(2 * time.Second)
-	for {
-		hub.mu.RLock()
-		c := hub.newestLocked(uid)
-		stillRegistered := c != nil
-		hub.mu.RUnlock()
-		if !stillRegistered {
-			return
-		}
-		if c.isSendClosed() {
-			return
-		}
-		if time.Now().After(deadline2) {
-			t.Fatal("a resumed socket authenticated on a revoked session is live and fully registered in " +
-				"h.clients after the reconnect handshake completed")
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	requireNotLiveRegistered(t, hub, uid,
+		"a resumed socket authenticated on a revoked session is live and fully registered in "+
+			"h.clients after the reconnect handshake completed")
 }

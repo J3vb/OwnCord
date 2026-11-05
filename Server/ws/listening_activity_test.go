@@ -92,15 +92,8 @@ func TestListeningUpdate_Parse(t *testing.T) {
 		{"payload not an object", `[]`, true, ListeningUpdateCmd{}},
 	}
 	for _, tc := range cases {
-		cmd, err := ctor(1, "", json.RawMessage(tc.payload))
-		if tc.wantErr {
-			if err == nil {
-				t.Errorf("%s: parsed, want an error", tc.name)
-			}
-			continue
-		}
-		if err != nil {
-			t.Errorf("%s: %v", tc.name, err)
+		cmd, ok := parseCase(t, ctor, tc.name, tc.payload, tc.wantErr)
+		if !ok {
 			continue
 		}
 		got := cmd.(ListeningUpdateCmd)

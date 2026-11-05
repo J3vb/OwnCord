@@ -13,43 +13,27 @@ func TestChannelUserOverride_UpsertGetDelete(t *testing.T) {
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 
-	chID, err := database.CreateChannel(ctx, "secret", "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
-	uid, err := database.CreateUser(ctx, "alice", "hash", int(permissions.MemberRoleID))
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	chID := mustCreateChannel(t, database, "secret", "text", "", "", 0)
+	uid := mustCreateUser(t, database, "alice", "hash", int(permissions.MemberRoleID))
 
 	// No row yet — a missing override is (0, 0), not an error.
 	allow, deny, err := database.GetUserChannelPermissions(ctx, chID, uid)
-	if err != nil {
-		t.Fatalf("GetUserChannelPermissions (absent): %v", err)
-	}
+	mustDo(t, "GetUserChannelPermissions (absent)", err)
 	if allow != 0 || deny != 0 {
 		t.Errorf("absent override = (%#x, %#x), want (0, 0)", allow, deny)
 	}
 
-	if err := database.UpsertChannelUserOverride(ctx, chID, uid, permissions.ReadMessages, permissions.SendMessages); err != nil {
-		t.Fatalf("UpsertChannelUserOverride: %v", err)
-	}
+	mustDo(t, "UpsertChannelUserOverride", database.UpsertChannelUserOverride(ctx, chID, uid, permissions.ReadMessages, permissions.SendMessages))
 	allow, deny, err = database.GetUserChannelPermissions(ctx, chID, uid)
-	if err != nil {
-		t.Fatalf("GetUserChannelPermissions: %v", err)
-	}
+	mustDo(t, "GetUserChannelPermissions", err)
 	if allow != permissions.ReadMessages || deny != permissions.SendMessages {
 		t.Errorf("override = (%#x, %#x)", allow, deny)
 	}
 
 	// Upsert replaces rather than duplicating.
-	if err := database.UpsertChannelUserOverride(ctx, chID, uid, 0, permissions.ReadMessages); err != nil {
-		t.Fatalf("UpsertChannelUserOverride (update): %v", err)
-	}
+	mustDo(t, "UpsertChannelUserOverride (update)", database.UpsertChannelUserOverride(ctx, chID, uid, 0, permissions.ReadMessages))
 	rows, err := database.ListChannelUserOverrides(ctx, chID)
-	if err != nil {
-		t.Fatalf("ListChannelUserOverrides: %v", err)
-	}
+	mustDo(t, "ListChannelUserOverrides", err)
 	if len(rows) != 1 {
 		t.Fatalf("rows = %d, want 1", len(rows))
 	}
@@ -57,20 +41,14 @@ func TestChannelUserOverride_UpsertGetDelete(t *testing.T) {
 		t.Errorf("listed row = %+v", rows[0])
 	}
 
-	if err := database.DeleteChannelUserOverride(ctx, chID, uid); err != nil {
-		t.Fatalf("DeleteChannelUserOverride: %v", err)
-	}
+	mustDo(t, "DeleteChannelUserOverride", database.DeleteChannelUserOverride(ctx, chID, uid))
 	rows, err = database.ListChannelUserOverrides(ctx, chID)
-	if err != nil {
-		t.Fatalf("ListChannelUserOverrides after delete: %v", err)
-	}
+	mustDo(t, "ListChannelUserOverrides after delete", err)
 	if len(rows) != 0 {
 		t.Errorf("rows after delete = %d, want 0", len(rows))
 	}
 	// Deleting again is a no-op.
-	if err := database.DeleteChannelUserOverride(ctx, chID, uid); err != nil {
-		t.Fatalf("second DeleteChannelUserOverride: %v", err)
-	}
+	mustDo(t, "second DeleteChannelUserOverride", database.DeleteChannelUserOverride(ctx, chID, uid))
 }
 
 // GetMemberGrants is the single merged fetch every visibility site uses.
@@ -80,40 +58,18 @@ func TestGetMemberGrants_MergesBothLayers(t *testing.T) {
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 
-	roleOnly, err := database.CreateChannel(ctx, "role-only", "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
-	userOnly, err := database.CreateChannel(ctx, "user-only", "text", "", "", 1)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
-	both, err := database.CreateChannel(ctx, "both", "text", "", "", 2)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
-	uid, err := database.CreateUser(ctx, "bob", "hash", int(permissions.MemberRoleID))
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	roleOnly := mustCreateChannel(t, database, "role-only", "text", "", "", 0)
+	userOnly := mustCreateChannel(t, database, "user-only", "text", "", "", 1)
+	both := mustCreateChannel(t, database, "both", "text", "", "", 2)
+	uid := mustCreateUser(t, database, "bob", "hash", int(permissions.MemberRoleID))
 
-	if err := database.UpsertChannelOverride(ctx, roleOnly, permissions.MemberRoleID, 0, permissions.ReadMessages); err != nil {
-		t.Fatalf("UpsertChannelOverride: %v", err)
-	}
-	if err := database.UpsertChannelUserOverride(ctx, userOnly, uid, permissions.SendMessages, 0); err != nil {
-		t.Fatalf("UpsertChannelUserOverride: %v", err)
-	}
-	if err := database.UpsertChannelOverride(ctx, both, permissions.MemberRoleID, permissions.AttachFiles, 0); err != nil {
-		t.Fatalf("UpsertChannelOverride both: %v", err)
-	}
-	if err := database.UpsertChannelUserOverride(ctx, both, uid, 0, permissions.AttachFiles); err != nil {
-		t.Fatalf("UpsertChannelUserOverride both: %v", err)
-	}
+	mustDo(t, "UpsertChannelOverride", database.UpsertChannelOverride(ctx, roleOnly, permissions.MemberRoleID, 0, permissions.ReadMessages))
+	mustDo(t, "UpsertChannelUserOverride", database.UpsertChannelUserOverride(ctx, userOnly, uid, permissions.SendMessages, 0))
+	mustDo(t, "UpsertChannelOverride both", database.UpsertChannelOverride(ctx, both, permissions.MemberRoleID, permissions.AttachFiles, 0))
+	mustDo(t, "UpsertChannelUserOverride both", database.UpsertChannelUserOverride(ctx, both, uid, 0, permissions.AttachFiles))
 
 	grants, err := database.GetMemberGrants(ctx, uid)
-	if err != nil {
-		t.Fatalf("GetMemberGrants: %v", err)
-	}
+	mustDo(t, "GetMemberGrants", err)
 	merged := grants.Overrides
 	if grants.Layers != nil {
 		t.Errorf("a one-role member carries no per-role layers, got %+v", grants.Layers)
@@ -129,14 +85,9 @@ func TestGetMemberGrants_MergesBothLayers(t *testing.T) {
 	}
 
 	// A different member of the same role sees the role layer only.
-	other, err := database.CreateUser(ctx, "carol", "hash", int(permissions.MemberRoleID))
-	if err != nil {
-		t.Fatalf("CreateUser carol: %v", err)
-	}
+	other := mustCreateUser(t, database, "carol", "hash", int(permissions.MemberRoleID))
 	otherGrants, err := database.GetMemberGrants(ctx, other)
-	if err != nil {
-		t.Fatalf("GetMemberGrants carol: %v", err)
-	}
+	mustDo(t, "GetMemberGrants carol", err)
 	otherMerged := otherGrants.Overrides
 	if got := otherMerged[userOnly]; got.UserAllow != 0 {
 		t.Errorf("carol picked up bob's user override: %+v", got)
@@ -153,25 +104,13 @@ func TestChannelUserOverride_CascadesOnChannelDelete(t *testing.T) {
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 
-	chID, err := database.CreateChannel(ctx, "doomed", "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
-	uid, err := database.CreateUser(ctx, "dave", "hash", int(permissions.MemberRoleID))
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	if err := database.UpsertChannelUserOverride(ctx, chID, uid, permissions.ReadMessages, 0); err != nil {
-		t.Fatalf("UpsertChannelUserOverride: %v", err)
-	}
-	if err := database.DeleteChannel(ctx, chID); err != nil {
-		t.Fatalf("DeleteChannel: %v", err)
-	}
+	chID := mustCreateChannel(t, database, "doomed", "text", "", "", 0)
+	uid := mustCreateUser(t, database, "dave", "hash", int(permissions.MemberRoleID))
+	mustDo(t, "UpsertChannelUserOverride", database.UpsertChannelUserOverride(ctx, chID, uid, permissions.ReadMessages, 0))
+	mustDo(t, "DeleteChannel", database.DeleteChannel(ctx, chID))
 
 	byUser, err := database.GetAllChannelPermissionsForUser(ctx, uid)
-	if err != nil {
-		t.Fatalf("GetAllChannelPermissionsForUser: %v", err)
-	}
+	mustDo(t, "GetAllChannelPermissionsForUser", err)
 	if len(byUser) != 0 {
 		t.Errorf("override survived channel delete: %+v", byUser)
 	}
@@ -181,29 +120,14 @@ func TestGetChannelUserOverrides_ByChannel(t *testing.T) {
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 
-	chID, err := database.CreateChannel(ctx, "listing", "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
-	a, err := database.CreateUser(ctx, "aaa", "hash", int(permissions.MemberRoleID))
-	if err != nil {
-		t.Fatalf("CreateUser aaa: %v", err)
-	}
-	b, err := database.CreateUser(ctx, "bbb", "hash", int(permissions.MemberRoleID))
-	if err != nil {
-		t.Fatalf("CreateUser bbb: %v", err)
-	}
-	if err := database.UpsertChannelUserOverride(ctx, chID, a, permissions.ReadMessages, 0); err != nil {
-		t.Fatalf("UpsertChannelUserOverride a: %v", err)
-	}
-	if err := database.UpsertChannelUserOverride(ctx, chID, b, 0, permissions.ReadMessages); err != nil {
-		t.Fatalf("UpsertChannelUserOverride b: %v", err)
-	}
+	chID := mustCreateChannel(t, database, "listing", "text", "", "", 0)
+	a := mustCreateUser(t, database, "aaa", "hash", int(permissions.MemberRoleID))
+	b := mustCreateUser(t, database, "bbb", "hash", int(permissions.MemberRoleID))
+	mustDo(t, "UpsertChannelUserOverride a", database.UpsertChannelUserOverride(ctx, chID, a, permissions.ReadMessages, 0))
+	mustDo(t, "UpsertChannelUserOverride b", database.UpsertChannelUserOverride(ctx, chID, b, 0, permissions.ReadMessages))
 
 	byUser, err := database.GetChannelUserOverrides(ctx, chID)
-	if err != nil {
-		t.Fatalf("GetChannelUserOverrides: %v", err)
-	}
+	mustDo(t, "GetChannelUserOverrides", err)
 	if len(byUser) != 2 {
 		t.Fatalf("entries = %d, want 2", len(byUser))
 	}

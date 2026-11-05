@@ -76,12 +76,9 @@ func TestEditMessage_RefusedInArchivedChannel(t *testing.T) {
 	svc, database := newTestMessageService(t)
 	ctx := context.Background()
 
-	sent, err := svc.SendMessage(ctx, SendMessageParams{
+	sent := mustSendMessage(ctx, t, svc, SendMessageParams{
 		ChannelID: 10, UserID: 1, Username: "alice", RoleName: "member", Content: "original",
 	})
-	if err != nil {
-		t.Fatalf("send: %v", err)
-	}
 
 	if _, err := database.ExecContext(ctx,
 		`UPDATE channels SET archived = 1 WHERE id = 10`); err != nil {
@@ -108,12 +105,9 @@ func TestAddReaction_RefusedInArchivedChannel(t *testing.T) {
 	svc, database := newTestMessageService(t)
 	ctx := context.Background()
 
-	sent, err := svc.SendMessage(ctx, SendMessageParams{
+	sent := mustSendMessage(ctx, t, svc, SendMessageParams{
 		ChannelID: 10, UserID: 1, Username: "alice", RoleName: "member", Content: "react to me",
 	})
-	if err != nil {
-		t.Fatalf("send: %v", err)
-	}
 
 	if _, err := database.ExecContext(ctx,
 		`UPDATE channels SET archived = 1 WHERE id = 10`); err != nil {
@@ -125,9 +119,7 @@ func TestAddReaction_RefusedInArchivedChannel(t *testing.T) {
 	}
 
 	reactors, err := database.GetReactionUsers(ctx, sent.MessageID, "👍", db.MaxReactionUsers)
-	if err != nil {
-		t.Fatalf("GetReactionUsers: %v", err)
-	}
+	mustDo(t, "GetReactionUsers", err)
 	if len(reactors) != 0 {
 		t.Fatalf("reaction must not persist against an archived channel, got %d reactors", len(reactors))
 	}
@@ -139,12 +131,9 @@ func TestSetMessagePinned_RefusedInArchivedChannel(t *testing.T) {
 	svc, database := newPurgeService(t) // seeds user 2 with MANAGE_MESSAGES on channel 10
 	ctx := context.Background()
 
-	sent, err := svc.SendMessage(ctx, SendMessageParams{
+	sent := mustSendMessage(ctx, t, svc, SendMessageParams{
 		ChannelID: 10, UserID: 1, Username: "alice", RoleName: "member", Content: "pin me",
 	})
-	if err != nil {
-		t.Fatalf("send: %v", err)
-	}
 
 	if _, err := database.ExecContext(ctx,
 		`UPDATE channels SET archived = 1 WHERE id = 10`); err != nil {
@@ -156,9 +145,7 @@ func TestSetMessagePinned_RefusedInArchivedChannel(t *testing.T) {
 	}
 
 	pinned, err := database.GetPinnedMessages(ctx, 10, 2)
-	if err != nil {
-		t.Fatalf("GetPinnedMessages: %v", err)
-	}
+	mustDo(t, "GetPinnedMessages", err)
 	if len(pinned) != 0 {
 		t.Fatalf("pin must not persist against an archived channel, got %d pinned", len(pinned))
 	}

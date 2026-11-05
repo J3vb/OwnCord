@@ -44,9 +44,7 @@ func TestDMService_CreateDM_AllowsLapsedTemporaryBan(t *testing.T) {
 
 	svc := NewDMService(database, NewPermissionService(database, permissions.NewChecker(database)))
 	result, err := svc.CreateDM(context.Background(), 1, 2)
-	if err != nil {
-		t.Fatalf("CreateDM to a user with a lapsed temporary ban: %v", err)
-	}
+	mustDo(t, "CreateDM to a user with a lapsed temporary ban", err)
 	if result.Channel == nil {
 		t.Fatal("expected a DM channel to be created")
 	}
@@ -175,9 +173,7 @@ func TestDMService_RenameGroupDM_OversizedNameRejectedBeforeSanitizing(t *testin
 	svc := NewDMService(database, NewPermissionService(database, permissions.NewChecker(database)))
 
 	created, err := svc.CreateGroupDM(context.Background(), 1, []int64{2, 3}, "")
-	if err != nil {
-		t.Fatalf("setup CreateGroupDM: %v", err)
-	}
+	mustDo(t, "setup CreateGroupDM", err)
 
 	huge := "&" + strings.Repeat("amp;", 4000) + "lt;"
 
@@ -213,9 +209,7 @@ func TestS03_GroupDMNameCountsRunesNotBytes(t *testing.T) {
 	svc := NewDMService(database, NewPermissionService(database, permissions.NewChecker(database)))
 
 	created, err := svc.CreateGroupDM(context.Background(), 1, []int64{2, 3}, "")
-	if err != nil {
-		t.Fatalf("setup CreateGroupDM: %v", err)
-	}
+	mustDo(t, "setup CreateGroupDM", err)
 
 	name100 := strings.Repeat("é", 100)
 	if _, err = svc.RenameGroupDM(context.Background(), 1, created.Channel.ID, name100); err != nil {
@@ -320,17 +314,13 @@ func TestDMService_DMSummaryFor_RecipientOfflineWhenDisconnected(t *testing.T) {
 
 	svc := NewDMService(database, NewPermissionService(database, permissions.NewChecker(database)))
 	created, err := svc.CreateDM(context.Background(), 1, 2)
-	if err != nil {
-		t.Fatalf("setup CreateDM: %v", err)
-	}
+	mustDo(t, "setup CreateDM", err)
 
 	// Bob chose "dnd" and then signed out — nobody holds a live connection.
 	svc.SetLiveStatusLookup(func(int64) string { return "" })
 
 	summary, err := svc.DMSummaryFor(context.Background(), 1, created.Channel.ID)
-	if err != nil {
-		t.Fatalf("DMSummaryFor: %v", err)
-	}
+	mustDo(t, "DMSummaryFor", err)
 	if summary.Recipient.Status != db.StatusOffline {
 		t.Errorf("Recipient.Status = %q, want %q (bob has no live connection, so his saved %q must not leak through)",
 			summary.Recipient.Status, db.StatusOffline, db.StatusDND)
@@ -353,9 +343,7 @@ func TestDMService_ListDMs_RecipientOfflineWhenDisconnected(t *testing.T) {
 	svc.SetLiveStatusLookup(func(int64) string { return "" })
 
 	dms, err := svc.ListDMs(context.Background(), 1)
-	if err != nil {
-		t.Fatalf("ListDMs: %v", err)
-	}
+	mustDo(t, "ListDMs", err)
 	if len(dms) != 1 {
 		t.Fatalf("ListDMs: got %d channels, want 1", len(dms))
 	}
@@ -380,9 +368,7 @@ func TestDMService_CreateGroupDM_ParticipantOfflineWhenDisconnected(t *testing.T
 	})
 
 	result, err := svc.CreateGroupDM(context.Background(), 1, []int64{2, 3}, "")
-	if err != nil {
-		t.Fatalf("CreateGroupDM: %v", err)
-	}
+	mustDo(t, "CreateGroupDM", err)
 
 	var bobStatus string
 	found := false
@@ -412,22 +398,13 @@ func TestDMService_ListDMs_CarriesMentionCount(t *testing.T) {
 	seedUser(t, database, &db.User{ID: 2, Username: "bob", Status: "online"})
 
 	ch, _, err := database.GetOrCreateDMChannel(context.Background(), 1, 2)
-	if err != nil {
-		t.Fatalf("GetOrCreateDMChannel: %v", err)
-	}
-	msgID, err := database.CreateMessage(context.Background(), ch.ID, 1, "hi @bob", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
-	if err := database.IncrementMentionCounts(context.Background(), ch.ID, msgID, []int64{2}); err != nil {
-		t.Fatalf("IncrementMentionCounts: %v", err)
-	}
+	mustDo(t, "GetOrCreateDMChannel", err)
+	msgID := mustCreateMessage(t, database, ch.ID, 1, "hi @bob", nil)
+	mustDo(t, "IncrementMentionCounts", database.IncrementMentionCounts(context.Background(), ch.ID, msgID, []int64{2}))
 
 	svc := NewDMService(database, NewPermissionService(database, permissions.NewChecker(database)))
 	dms, err := svc.ListDMs(context.Background(), 2)
-	if err != nil {
-		t.Fatalf("ListDMs: %v", err)
-	}
+	mustDo(t, "ListDMs", err)
 	if len(dms) != 1 {
 		t.Fatalf("ListDMs: got %d channels, want 1", len(dms))
 	}
@@ -485,18 +462,14 @@ func (s *failingParticipantsStore) GetDMParticipants(ctx context.Context, channe
 func TestOpenForRing_SummaryFailureLeavesDMClosed(t *testing.T) {
 	database, _ := newDMFixture(t)
 	ctx := context.Background()
-	if err := database.CloseDM(ctx, 2, 50); err != nil {
-		t.Fatalf("CloseDM: %v", err)
-	}
+	mustDo(t, "CloseDM", database.CloseDM(ctx, 2, 50))
 	svc := NewDMService(&failingParticipantsStore{DB: database}, NewPermissionService(database, permissions.NewChecker(database)))
 
 	if got := svc.OpenForRing(ctx, 50, []int64{2}); len(got) != 0 {
 		t.Fatalf("OpenForRing = %v, want nothing when the summary cannot be built", got)
 	}
 	open, err := database.GetUserDMChannels(ctx, 2)
-	if err != nil {
-		t.Fatalf("GetUserDMChannels: %v", err)
-	}
+	mustDo(t, "GetUserDMChannels", err)
 	if len(open) != 0 {
 		t.Errorf("the DM was reopened without a notification: %v", open)
 	}
@@ -515,9 +488,7 @@ func TestOpenForRing_SummaryCarriesHistoryMetadata(t *testing.T) {
 	database, _ := newDMFixture(t)
 	ctx := context.Background()
 	ids := seedPurgeMessages(t, database, 50, 2)
-	if err := database.CloseDM(ctx, 2, 50); err != nil {
-		t.Fatalf("CloseDM: %v", err)
-	}
+	mustDo(t, "CloseDM", database.CloseDM(ctx, 2, 50))
 	svc := NewDMService(database, NewPermissionService(database, permissions.NewChecker(database)))
 
 	got := svc.OpenForRing(ctx, 50, []int64{2})
@@ -546,9 +517,7 @@ func TestOpenDMIfParticipant_RefusesNonParticipant(t *testing.T) {
 		t.Errorf("a non-participant got the DM in their open list: %v", open)
 	}
 
-	if err := database.CloseDM(ctx, 2, 50); err != nil {
-		t.Fatalf("CloseDM: %v", err)
-	}
+	mustDo(t, "CloseDM", database.CloseDM(ctx, 2, 50))
 	if opened, err := database.OpenDMIfParticipant(ctx, 2, 50); err != nil || !opened {
 		t.Errorf("OpenDMIfParticipant(participant, closed) = %v, %v; want true, nil", opened, err)
 	}
@@ -562,16 +531,10 @@ func TestOpenForRing_GroupReopensCarryPerTargetHistory(t *testing.T) {
 	seedUser(t, database, &db.User{ID: 3, Username: "carol"})
 	seedDMParticipant(t, database, 50, 3)
 	ids := seedPurgeMessages(t, database, 50, 3)
-	if err := database.UpdateReadState(ctx, 3, 50, ids[0]); err != nil {
-		t.Fatalf("UpdateReadState: %v", err)
-	}
-	if err := database.IncrementMentionCounts(ctx, 50, ids[2], []int64{2}); err != nil {
-		t.Fatalf("IncrementMentionCounts: %v", err)
-	}
+	mustDo(t, "UpdateReadState", database.UpdateReadState(ctx, 3, 50, ids[0]))
+	mustDo(t, "IncrementMentionCounts", database.IncrementMentionCounts(ctx, 50, ids[2], []int64{2}))
 	for _, uid := range []int64{2, 3} {
-		if err := database.CloseDM(ctx, uid, 50); err != nil {
-			t.Fatalf("CloseDM: %v", err)
-		}
+		mustDo(t, "CloseDM", database.CloseDM(ctx, uid, 50))
 	}
 	calls := &countingHistoryStore{DB: database}
 	svc := NewDMService(calls, NewPermissionService(database, permissions.NewChecker(database)))
@@ -605,9 +568,7 @@ func TestOpenForRing_HistoryFailureKeepsBareReopens(t *testing.T) {
 	database, _ := newDMFixture(t)
 	ctx := context.Background()
 	seedPurgeMessages(t, database, 50, 1)
-	if err := database.CloseDM(ctx, 2, 50); err != nil {
-		t.Fatalf("CloseDM: %v", err)
-	}
+	mustDo(t, "CloseDM", database.CloseDM(ctx, 2, 50))
 	svc := NewDMService(&countingHistoryStore{DB: database, fail: true}, NewPermissionService(database, permissions.NewChecker(database)))
 
 	got := svc.OpenForRing(ctx, 50, []int64{2})

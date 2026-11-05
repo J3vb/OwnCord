@@ -27,9 +27,7 @@ func (f *forwardFixture) createPoll(p PollCreateParams) (*SendMessageResult, err
 func mustCreatePoll(t *testing.T, f *forwardFixture, p PollCreateParams) *SendMessageResult {
 	t.Helper()
 	res, err := f.createPoll(p)
-	if err != nil {
-		t.Fatalf("CreatePoll: %v", err)
-	}
+	mustDo(t, "CreatePoll", err)
 	return res
 }
 
@@ -187,9 +185,7 @@ func TestCreatePoll_GatesAreSendGates(t *testing.T) {
 				`INSERT INTO moderation_actions (kind, target_id, expires_at) VALUES ('timeout', ?, '2999-01-01 00:00:00')`, fwdBob); err != nil {
 				t.Fatal(err)
 			}
-			if err := f.perms.RefreshTimeouts(ctx); err != nil {
-				t.Fatal(err)
-			}
+			mustDo(t, "RefreshTimeouts", f.perms.RefreshTimeouts(ctx))
 			return fwdDstChan
 		}, ErrTimedOut, false},
 	}
@@ -354,10 +350,7 @@ func TestForward_PollRefused(t *testing.T) {
 	}
 	// The read gate comes first, so the refusal leaks nothing about a poll in
 	// a channel the forwarder cannot read.
-	hiddenID, err := f.database.CreateMessage(context.Background(), fwdLockedChan, fwdAlice, "secret poll", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	hiddenID := mustCreateMessage(t, f.database, fwdLockedChan, fwdAlice, "secret poll", nil)
 	if _, err := f.database.ExecContext(context.Background(),
 		`INSERT INTO polls (message_id, question, expires_at) VALUES (?, 'q', '2999-01-01T00:00:00Z')`, hiddenID); err != nil {
 		t.Fatal(err)

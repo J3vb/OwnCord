@@ -193,9 +193,7 @@ func TestNoAutomaticTelemetry_Capture(t *testing.T) {
 		t.Fatalf("websocket.Dial: %v", err)
 	}
 	authFrame, _ := json.Marshal(map[string]any{"type": "auth", "payload": map[string]any{"token": login.Token}})
-	if err := conn.Write(dialCtx, websocket.MessageText, authFrame); err != nil {
-		t.Fatalf("write auth: %v", err)
-	}
+	mustDo(t, "write auth", conn.Write(dialCtx, websocket.MessageText, authFrame))
 	for i := range 2 { // auth_ok, ready
 		if _, _, err := conn.Read(dialCtx); err != nil {
 			t.Fatalf("read frame %d after auth: %v", i, err)
@@ -204,9 +202,7 @@ func TestNoAutomaticTelemetry_Capture(t *testing.T) {
 	sendFrame, _ := json.Marshal(map[string]any{"type": "chat_send", "payload": map[string]any{
 		"channel_id": channels[0].ID, "content": "captured message",
 	}})
-	if err := conn.Write(dialCtx, websocket.MessageText, sendFrame); err != nil {
-		t.Fatalf("write chat_send: %v", err)
-	}
+	mustDo(t, "write chat_send", conn.Write(dialCtx, websocket.MessageText, sendFrame))
 	if _, _, err := conn.Read(dialCtx); err != nil {
 		t.Fatalf("read the send's reply: %v", err)
 	}
@@ -216,18 +212,14 @@ func TestNoAutomaticTelemetry_Capture(t *testing.T) {
 	var body bytes.Buffer
 	mw := multipart.NewWriter(&body)
 	part, err := mw.CreateFormFile("file", "note.txt")
-	if err != nil {
-		t.Fatalf("CreateFormFile: %v", err)
-	}
+	mustDo(t, "CreateFormFile", err)
 	_, _ = part.Write([]byte("captured upload"))
 	_ = mw.Close()
 	req, _ := http.NewRequest(http.MethodPost, base+"/api/v1/uploads", &body)
 	req.Header.Set("Authorization", "Bearer "+login.Token)
 	req.Header.Set("Content-Type", mw.FormDataContentType())
 	upResp, err := client.Do(req)
-	if err != nil {
-		t.Fatalf("upload: %v", err)
-	}
+	mustDo(t, "upload", err)
 	_, _ = io.Copy(io.Discard, upResp.Body)
 	_ = upResp.Body.Close()
 	if upResp.StatusCode != http.StatusCreated && upResp.StatusCode != http.StatusOK {
@@ -236,9 +228,7 @@ func TestNoAutomaticTelemetry_Capture(t *testing.T) {
 
 	// Idle, then shut down.
 	time.Sleep(1500 * time.Millisecond)
-	if err := stopServer(); err != nil {
-		t.Fatalf("Run: %v", err)
-	}
+	mustDo(t, "Run", stopServer())
 
 	dials, lookups := rec.snapshot()
 	for _, d := range dials {
@@ -277,9 +267,7 @@ func openRegistration(t *testing.T, client *http.Client, base, ownerToken string
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+ownerToken)
 		resp, err := client.Do(req)
-		if err != nil {
-			t.Fatalf("PATCH settings: %v", err)
-		}
+		mustDo(t, "PATCH settings", err)
 		_, _ = io.Copy(io.Discard, resp.Body)
 		_ = resp.Body.Close()
 		if resp.StatusCode == http.StatusOK {

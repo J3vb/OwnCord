@@ -17,9 +17,7 @@ func contentOf(id int64) string { return fmt.Sprintf("added %d", id) }
 func memberIDs(t *testing.T, database *db.DB, channelID int64) []int64 {
 	t.Helper()
 	ids, err := database.GetDMParticipantIDs(context.Background(), channelID)
-	if err != nil {
-		t.Fatalf("GetDMParticipantIDs: %v", err)
-	}
+	mustDo(t, "GetDMParticipantIDs", err)
 	slices.Sort(ids)
 	return ids
 }
@@ -41,9 +39,7 @@ func TestAddGroupDMMembers_InsertsMembersRowsAndOpenState(t *testing.T) {
 	erin := seedUser(t, f.database, "erin")
 
 	change, err := f.database.AddGroupDMMembers(ctx, f.group, f.bob, []int64{dave, erin}, contentOf)
-	if err != nil {
-		t.Fatalf("AddGroupDMMembers: %v", err)
-	}
+	mustDo(t, "AddGroupDMMembers", err)
 	if want := []int64{f.alice, f.bob, f.carol, dave, erin}; !slices.Equal(change.MemberIDs, want) {
 		t.Errorf("MemberIDs = %v, want %v", change.MemberIDs, want)
 	}
@@ -76,9 +72,7 @@ func TestAddGroupDMMembers_SkipsExistingMembers(t *testing.T) {
 	f := newGroupRowFixture(t)
 	dave := seedUser(t, f.database, "dave")
 	change, err := f.database.AddGroupDMMembers(context.Background(), f.group, f.alice, []int64{f.carol, dave, dave}, contentOf)
-	if err != nil {
-		t.Fatalf("AddGroupDMMembers: %v", err)
-	}
+	mustDo(t, "AddGroupDMMembers", err)
 	if len(change.Rows) != 1 || change.Rows[0].TargetUserID != dave {
 		t.Errorf("rows = %+v, want exactly one row for dave", change.Rows)
 	}
@@ -103,9 +97,7 @@ func TestAddGroupDMMembers_NonMemberAndOneToOneRefused(t *testing.T) {
 		t.Errorf("non-member add err = %v, want ErrNotFound", err)
 	}
 	dm, _, err := f.database.GetOrCreateDMChannel(ctx, f.alice, f.bob)
-	if err != nil {
-		t.Fatalf("GetOrCreateDMChannel: %v", err)
-	}
+	mustDo(t, "GetOrCreateDMChannel", err)
 	if _, err := f.database.AddGroupDMMembers(ctx, dm.ID, f.alice, []int64{dave}, contentOf); !errors.Is(err, db.ErrNotFound) {
 		t.Errorf("1:1 add err = %v, want ErrNotFound", err)
 	}
@@ -122,9 +114,7 @@ func TestAddGroupDMMembers_CapCountsInsideTx(t *testing.T) {
 		members = append(members, seedUser(t, database, fmt.Sprintf("m%d", i)))
 	}
 	ch, err := database.CreateGroupDMChannel(ctx, "Full soon", members[0], members)
-	if err != nil {
-		t.Fatalf("CreateGroupDMChannel: %v", err)
-	}
+	mustDo(t, "CreateGroupDMChannel", err)
 	const racers = 20
 	candidates := make([]int64, racers)
 	for i := range candidates {
@@ -200,9 +190,7 @@ func TestRemoveGroupDMMember_OwnerOnly(t *testing.T) {
 	}
 
 	change, err := f.database.RemoveGroupDMMember(ctx, f.group, f.alice, f.carol, "alice removed carol")
-	if err != nil {
-		t.Fatalf("owner remove: %v", err)
-	}
+	mustDo(t, "owner remove", err)
 	if want := []int64{f.alice, f.bob}; !slices.Equal(change.MemberIDs, want) {
 		t.Errorf("MemberIDs = %v, want %v", change.MemberIDs, want)
 	}
@@ -357,9 +345,7 @@ func TestTransferGroupDMOwner_OwnerOnlyAndTargetMustBeMember(t *testing.T) {
 	}
 
 	members, err := f.database.TransferGroupDMOwner(ctx, f.group, f.alice, f.carol)
-	if err != nil {
-		t.Fatalf("TransferGroupDMOwner: %v", err)
-	}
+	mustDo(t, "TransferGroupDMOwner", err)
 	if got := ownerOf(t, f.database, f.group); got != f.carol {
 		t.Errorf("owner = %d, want carol", got)
 	}
@@ -380,9 +366,7 @@ func TestTransferGroupDMOwner_OwnerOnlyAndTargetMustBeMember(t *testing.T) {
 func TestSetGroupDMName_WritesRow(t *testing.T) {
 	f := newGroupRowFixture(t)
 	change, err := f.database.SetGroupDMName(context.Background(), f.group, f.bob, "Raid night", "bob renamed it")
-	if err != nil {
-		t.Fatalf("SetGroupDMName: %v", err)
-	}
+	mustDo(t, "SetGroupDMName", err)
 	if len(change.Rows) != 1 {
 		t.Fatalf("rows = %d, want 1", len(change.Rows))
 	}
@@ -403,9 +387,7 @@ func TestSetGroupDMName_UnchangedNameNoRow(t *testing.T) {
 	f := newGroupRowFixture(t)
 	ctx := context.Background()
 	change, err := f.database.SetGroupDMName(ctx, f.group, f.bob, "Crew", "same")
-	if err != nil {
-		t.Fatalf("SetGroupDMName: %v", err)
-	}
+	mustDo(t, "SetGroupDMName", err)
 	if len(change.Rows) != 0 {
 		t.Errorf("an unchanged name wrote rows: %+v", change.Rows)
 	}
@@ -417,9 +399,7 @@ func TestSetGroupDMName_UnchangedNameNoRow(t *testing.T) {
 func TestSetGroupDMName_ClearWritesEmptyName(t *testing.T) {
 	f := newGroupRowFixture(t)
 	change, err := f.database.SetGroupDMName(context.Background(), f.group, f.alice, "", "alice cleared it")
-	if err != nil {
-		t.Fatalf("SetGroupDMName: %v", err)
-	}
+	mustDo(t, "SetGroupDMName", err)
 	if len(change.Rows) != 1 || change.Rows[0].Name == nil || *change.Rows[0].Name != "" {
 		t.Fatalf("rows = %+v, want one rename row with an empty name", change.Rows)
 	}
@@ -446,9 +426,7 @@ func TestLeaveGroupDM_WritesLeaveRowAndDeletesReadState(t *testing.T) {
 		t.Fatalf("seed read state: %v", err)
 	}
 	res, err := f.database.LeaveGroupDM(ctx, f.bob, f.group, "bob left")
-	if err != nil {
-		t.Fatalf("LeaveGroupDM: %v", err)
-	}
+	mustDo(t, "LeaveGroupDM", err)
 	if res.Deleted || res.Row == nil || res.Row.Kind != db.MessageKindGroupLeave || res.Row.AuthorID != f.bob || res.Row.Content != "bob left" {
 		t.Fatalf("result = %+v", res)
 	}
@@ -489,9 +467,7 @@ func TestLeaveGroupDM_LastLeaverWritesNoRow(t *testing.T) {
 
 func banUser(t *testing.T, database *db.DB, id int64, expires *time.Time) {
 	t.Helper()
-	if err := database.BanUser(context.Background(), id, "test", expires); err != nil {
-		t.Fatalf("BanUser: %v", err)
-	}
+	mustDo(t, "BanUser", database.BanUser(context.Background(), id, "test", expires))
 }
 
 func TestLeaveGroupDM_HandOffSkipsBannedMember(t *testing.T) {
@@ -552,9 +528,7 @@ func TestAddGroupDMMembers_BlockedPairRefusedInsideTx(t *testing.T) {
 	frank := seedUser(t, f.database, "frank")
 
 	// A current member blocked dave before the add.
-	if err := f.database.BlockUser(ctx, f.carol, dave); err != nil {
-		t.Fatalf("BlockUser: %v", err)
-	}
+	mustDo(t, "BlockUser", f.database.BlockUser(ctx, f.carol, dave))
 	if _, err := f.database.AddGroupDMMembers(ctx, f.group, f.alice, []int64{dave}, contentOf); !errors.Is(err, db.ErrGroupDMBlockedPair) {
 		t.Fatalf("add of a user a member blocked = %v, want ErrGroupDMBlockedPair", err)
 	}
@@ -563,16 +537,12 @@ func TestAddGroupDMMembers_BlockedPairRefusedInsideTx(t *testing.T) {
 	if _, err := f.database.AddGroupDMMembers(ctx, f.group, f.alice, []int64{erin}, contentOf); err != nil {
 		t.Fatalf("add erin: %v", err)
 	}
-	if err := f.database.BlockUser(ctx, erin, frank); err != nil {
-		t.Fatalf("BlockUser: %v", err)
-	}
+	mustDo(t, "BlockUser", f.database.BlockUser(ctx, erin, frank))
 	if _, err := f.database.AddGroupDMMembers(ctx, f.group, f.bob, []int64{frank}, contentOf); !errors.Is(err, db.ErrGroupDMBlockedPair) {
 		t.Fatalf("add of a user the new member blocked = %v, want ErrGroupDMBlockedPair", err)
 	}
 	// Two new people who block each other, in the other direction.
-	if err := f.database.BlockUser(ctx, frank, dave); err != nil {
-		t.Fatalf("BlockUser: %v", err)
-	}
+	mustDo(t, "BlockUser", f.database.BlockUser(ctx, frank, dave))
 	if _, err := f.database.AddGroupDMMembers(ctx, f.group, f.bob, []int64{frank, dave}, contentOf); !errors.Is(err, db.ErrGroupDMBlockedPair) {
 		t.Fatalf("add of a blocked pair = %v, want ErrGroupDMBlockedPair", err)
 	}

@@ -105,9 +105,7 @@ func TestManageBackups_HolderCanCreateListAndDownload(t *testing.T) {
 				t.Fatalf("GET /backups = %d, want 200 listing the backup; body: %s", w.Code, w.Body.String())
 			}
 			w = doRequest(t, f.api, http.MethodPost, "/backups/"+backupsPermFile+"/link", token, map[string]any{})
-			if w.Code != http.StatusOK {
-				t.Fatalf("POST link = %d, want 200; body: %s", w.Code, w.Body.String())
-			}
+			requireStatus(t, w, http.StatusOK)
 			dl := openLinkNoAuth(f.api, linkPath(t, w.Body.Bytes()))
 			if dl.Code != http.StatusOK || dl.Body.String() != "backup bytes" {
 				t.Fatalf("redeem = %d %q, want 200 with the file", dl.Code, dl.Body.String())
@@ -170,9 +168,7 @@ func TestManageBackups_LinkRevalidatedOnRedeem(t *testing.T) {
 	issue := func(t *testing.T, f backupsPermFixture) string {
 		t.Helper()
 		w := doRequest(t, f.api, http.MethodPost, "/backups/"+backupsPermFile+"/link", f.holder, map[string]any{})
-		if w.Code != http.StatusOK {
-			t.Fatalf("holder POST link = %d; body: %s", w.Code, w.Body.String())
-		}
+		requireStatus(t, w, http.StatusOK)
 		return linkPath(t, w.Body.Bytes())
 	}
 	t.Run("bit removed from the role", func(t *testing.T) {
@@ -244,9 +240,7 @@ func TestManageBackups_LinkIssueAudited(t *testing.T) {
 	f := newBackupsPermFixture(t)
 	rec := audittest.Install(t, f.database)
 	w := doRequest(t, f.api, http.MethodPost, "/backups/"+backupsPermFile+"/link", f.holder, map[string]any{})
-	if w.Code != http.StatusOK {
-		t.Fatalf("POST link = %d; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 	token := mustQueryToken(t, linkPath(t, w.Body.Bytes()))
 	e := rec.Wait(t, "backup_link")
 	if e.ActorID != f.holderID || !strings.Contains(e.Detail, backupsPermFile) || strings.Contains(e.Detail, token) {
@@ -292,9 +286,7 @@ func TestManageBackups_SingleFlight(t *testing.T) {
 	}
 	close(release)
 	wg.Wait()
-	if first.Code != http.StatusOK {
-		t.Fatalf("first POST /backup = %d, want 200; body: %s", first.Code, first.Body.String())
-	}
+	requireStatus(t, first, http.StatusOK)
 	admin.SetBackupHoldForTest(f.api, nil)
 	// A second timestamp-named file needs a later second; the guard is what is under test.
 	if w := doRequest(t, f.api, http.MethodPost, "/backup", f.owner, nil); w.Code == http.StatusConflict {

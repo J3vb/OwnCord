@@ -39,9 +39,7 @@ func newQuotaFixture(t *testing.T, quota int64, minFree uint64, free func(string
 func used(t *testing.T, svc *UploadService, userID int64) int64 {
 	t.Helper()
 	n, err := svc.StorageUsed(context.Background(), userID)
-	if err != nil {
-		t.Fatalf("StorageUsed: %v", err)
-	}
+	mustDo(t, "StorageUsed", err)
 	return n
 }
 
@@ -122,9 +120,7 @@ func TestReserve_ExactlyAtQuotaAdmitsOnePastRefuses(t *testing.T) {
 	svc, _ := newQuotaFixture(t, 100, 0, nil)
 	ctx := context.Background()
 	res, err := svc.Reserve(ctx, quotaTestUser, 100)
-	if err != nil {
-		t.Fatalf("exactly-at-quota refused: %v", err)
-	}
+	mustDo(t, "exactly-at-quota refused", err)
 	commitWithRow(t, svc, res, "full", quotaTestUser, 100)
 	if _, err := svc.Reserve(ctx, quotaTestUser, 1); !errors.Is(err, ErrQuotaExceeded) {
 		t.Fatalf("one byte past quota: got %v, want ErrQuotaExceeded", err)
@@ -215,9 +211,7 @@ func TestReserve_FreeBelowFloorWithReservationOutstandingRefuses(t *testing.T) {
 	svc, _ := newQuotaFixture(t, 0, 256<<20, func(string) (uint64, error) { return free.Load(), nil })
 	ctx := context.Background()
 	held, err := svc.Reserve(ctx, quotaTestUser, 200<<20)
-	if err != nil {
-		t.Fatalf("first reservation with 600 MiB free: %v", err)
-	}
+	mustDo(t, "first reservation with 600 MiB free", err)
 	defer held.Release(ctx)
 	free.Store(100 << 20) // the volume filled underneath us
 	if _, err := svc.Reserve(ctx, 2, 1); !errors.Is(err, ErrLowDisk) {
@@ -248,9 +242,7 @@ func TestReserve_ReleaseReturnsTheCharge(t *testing.T) {
 	svc, _ := newQuotaFixture(t, 100, 0, nil)
 	ctx := context.Background()
 	res, err := svc.Reserve(ctx, quotaTestUser, 60)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Reserve", err)
 	res.Release(ctx)
 	res.Release(ctx)
 	if got := used(t, svc, quotaTestUser); got != 0 {
@@ -292,9 +284,7 @@ func TestRecount_KeepsInFlightBytes(t *testing.T) {
 	svc, _ := newQuotaFixture(t, 0, 0, nil)
 	ctx := context.Background()
 	res, err := svc.Reserve(ctx, quotaTestUser, 500)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Reserve", err)
 	if _, err := svc.RecountStorage(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -345,17 +335,13 @@ func TestRecount_ReturnsBytesAfterErasure(t *testing.T) {
 	svc, database := newQuotaFixture(t, 0, 0, nil)
 	ctx := context.Background()
 	res, err := svc.Reserve(ctx, quotaTestUser, 300)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Reserve", err)
 	commitWithRow(t, svc, res, "att-1", quotaTestUser, 300)
 	if _, err := database.EraseAccount(ctx, quotaTestUser, ""); err != nil {
 		t.Fatalf("EraseAccount: %v", err)
 	}
 	var rows int
-	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM user_storage WHERE user_id = ?`, quotaTestUser).Scan(&rows); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "QueryRowContext", database.QueryRowContext(ctx, `SELECT COUNT(*) FROM user_storage WHERE user_id = ?`, quotaTestUser).Scan(&rows))
 	if rows != 0 {
 		t.Fatalf("user_storage row survived the erasure")
 	}
@@ -370,14 +356,10 @@ func TestRecount_ReturnsBytesAfterRetention(t *testing.T) {
 	svc, database := newQuotaFixture(t, 0, 0, nil)
 	ctx := context.Background()
 	keep, err := svc.Reserve(ctx, quotaTestUser, 200)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Reserve", err)
 	commitWithRow(t, svc, keep, "att-keep", quotaTestUser, 200)
 	old, err := svc.Reserve(ctx, quotaTestUser, 500)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Reserve", err)
 	commitWithRow(t, svc, old, "att-old", quotaTestUser, 500)
 	// What the sweep does to the rows, in miniature.
 	if _, err := database.ExecContext(ctx, `DELETE FROM attachments WHERE id = 'att-old'`); err != nil {
@@ -401,9 +383,7 @@ func TestReserve_ARefusalRecountsBeforeAnswering(t *testing.T) {
 	svc, database := newQuotaFixture(t, 1000, 0, nil)
 	ctx := context.Background()
 	res, err := svc.Reserve(ctx, quotaTestUser, 1000)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Reserve", err)
 	commitWithRow(t, svc, res, "att-1", quotaTestUser, 1000)
 	if _, err := svc.Reserve(ctx, quotaTestUser, 1); !errors.Is(err, ErrQuotaExceeded) {
 		t.Fatalf("full quota admitted: %v", err)
@@ -464,9 +444,7 @@ func TestReserveHeadroom_EmojiIsBoundedAndFloorOnly(t *testing.T) {
 	}
 	svc.SetStorageLimits(StorageLimits{UserQuotaBytes: 10, FreeBytes: func(string) (uint64, error) { return 100 << 20, nil }})
 	res, err := svc.ReserveHeadroom(context.Background(), 11)
-	if err != nil {
-		t.Fatalf("emoji bytes charged against a quota they are excluded from: %v", err)
-	}
+	mustDo(t, "emoji bytes charged against a quota they are excluded from", err)
 	res.Commit()
 	if got := used(t, svc, quotaTestUser); got != 0 {
 		t.Fatalf("counter = %d after an emoji write, want 0", got)
@@ -522,9 +500,7 @@ func TestResize_LowersTheChargeToTheBytesWritten(t *testing.T) {
 	svc, _ := newQuotaFixture(t, 0, 0, nil)
 	ctx := context.Background()
 	res, err := svc.Reserve(ctx, quotaTestUser, 1<<20) // the envelope
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Reserve", err)
 	if err := res.Resize(ctx, 1024); err != nil { // the true size
 		t.Fatalf("Resize: %v", err)
 	}
@@ -533,9 +509,7 @@ func TestResize_LowersTheChargeToTheBytesWritten(t *testing.T) {
 	}
 	// Safe to call twice: a repeat with the same true size is a no-op, not a
 	// second return of the same bytes.
-	if err := res.Resize(ctx, 1024); err != nil {
-		t.Fatalf("second Resize: %v", err)
-	}
+	mustDo(t, "second Resize", res.Resize(ctx, 1024))
 	if got := used(t, svc, quotaTestUser); got != 1024 {
 		t.Fatalf("counter = %d after a repeated Resize, want 1024 (idempotent)", got)
 	}
@@ -554,9 +528,7 @@ func TestResize_NeverRaisesACharge(t *testing.T) {
 	svc, _ := newQuotaFixture(t, 0, 0, nil)
 	ctx := context.Background()
 	res, err := svc.Reserve(ctx, quotaTestUser, 1024)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Reserve", err)
 	if err := res.Resize(ctx, 2048); err != nil { // above r.bytes
 		t.Fatalf("Resize above the envelope: %v", err)
 	}
@@ -574,12 +546,8 @@ func TestResize_NeverRaisesACharge(t *testing.T) {
 	// A headroom-only reservation charges no counter (userID 0); Resize on
 	// one must not create a charge either.
 	hres, err := svc.ReserveHeadroom(ctx, 1<<20)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := hres.Resize(ctx, 100); err != nil {
-		t.Fatalf("Resize on a headroom reservation: %v", err)
-	}
+	mustDo(t, "ReserveHeadroom", err)
+	mustDo(t, "Resize on a headroom reservation", hres.Resize(ctx, 100))
 	if got := used(t, svc, 0); got != 0 {
 		t.Fatalf("counter = %d after resizing a headroom reservation, want 0", got)
 	}
@@ -595,9 +563,7 @@ func TestRecount_RepairsAnEnvelopeSizedChargeAfterRestart(t *testing.T) {
 	svc, database := newQuotaFixture(t, 0, 0, nil)
 	ctx := context.Background()
 	res, err := svc.Reserve(ctx, quotaTestUser, 1<<20) // the envelope
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Reserve", err)
 	res.Landed()
 	commitWithRow(t, svc, res, "att-1", quotaTestUser, 4096) // the true, much smaller size — Resize never ran
 	if got := used(t, svc, quotaTestUser); got != 1<<20 {
@@ -617,18 +583,12 @@ func TestUploadUnrecord_RemovesUnlinkedRowAndRecountsCounter(t *testing.T) {
 	ctx := context.Background()
 	seedCountedAttachment(t, database, "kept", quotaTestUser, 30)
 	res, err := svc.Reserve(ctx, quotaTestUser, 70)
-	if err != nil {
-		t.Fatalf("Reserve: %v", err)
-	}
-	if err := svc.Record(ctx, AttachmentRecord{ID: "gone", UploaderID: quotaTestUser, Filename: "a.png", MimeType: "image/png", Size: 70}, res); err != nil {
-		t.Fatalf("Record: %v", err)
-	}
+	mustDo(t, "Reserve", err)
+	mustDo(t, "Record", svc.Record(ctx, AttachmentRecord{ID: "gone", UploaderID: quotaTestUser, Filename: "a.png", MimeType: "image/png", Size: 70}, res))
 	if got := used(t, svc, quotaTestUser); got != 100 {
 		t.Fatalf("used after Record = %d, want 100", got)
 	}
-	if err := svc.Unrecord(ctx, "gone", quotaTestUser); err != nil {
-		t.Fatalf("Unrecord: %v", err)
-	}
+	mustDo(t, "Unrecord", svc.Unrecord(ctx, "gone", quotaTestUser))
 	if row, _ := database.GetAttachmentByID(ctx, "gone"); row != nil {
 		t.Errorf("row still present after Unrecord: %+v", row)
 	}

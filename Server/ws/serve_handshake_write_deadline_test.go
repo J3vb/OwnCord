@@ -90,17 +90,8 @@ func TestServeWS_HandshakeWrite_TimesOutOnStalledPeer(t *testing.T) {
 	}
 
 	// Seed the connecting user's own session.
-	userID, err := database.CreateUser(context.Background(), "stalled-peer-user", "hash", 1)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	token, err := auth.GenerateToken()
-	if err != nil {
-		t.Fatalf("GenerateToken: %v", err)
-	}
-	if _, err := database.CreateSession(context.Background(), userID, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
+	userID := mustCreateUser(t, database, "stalled-peer-user", 1)
+	token := seedSessionToken(t, database, userID)
 
 	handler := ws.ServeWS(hub, []string{"*"}, 0)
 

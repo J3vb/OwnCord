@@ -16,23 +16,13 @@ import (
 // 2 Admin, 4 Member.
 func openMigratedAdminDB(t *testing.T) *db.DB {
 	t.Helper()
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("db.Migrate: %v", err)
-	}
+	database := openMigratedDB(t)
 	return database
 }
 
 func sessionFor(t *testing.T, database *db.DB, username string, roleID int) (int64, string) {
 	t.Helper()
-	uid, err := database.CreateUser(context.Background(), username, "$2a$12$placeholder", roleID)
-	if err != nil {
-		t.Fatalf("CreateUser(%s): %v", username, err)
-	}
+	uid := mustCreateUser(t, database, username, "$2a$12$placeholder", roleID)
 	token := "erase-token-" + username + "-" + t.Name()
 	if _, err := database.CreateSession(context.Background(), uid, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
 		t.Fatalf("CreateSession: %v", err)
@@ -50,9 +40,7 @@ func TestAdminAPI_DeleteUser_ErasesTheAccount(t *testing.T) {
 	targetID, _ := sessionFor(t, database, "erase-target", 4)
 
 	w := doRequest(t, handler, http.MethodDelete, "/users/"+itoa(targetID), ownerToken, nil)
-	if w.Code != http.StatusNoContent {
-		t.Fatalf("status = %d, want 204; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusNoContent)
 	if u, _ := database.GetUserByID(context.Background(), targetID); u != nil {
 		t.Error("target row survived the erasure")
 	}
@@ -67,9 +55,7 @@ func TestAdminAPI_DeleteUser_ErasesTheAccount(t *testing.T) {
 
 	// Gone means 404 on a repeat.
 	w = doRequest(t, handler, http.MethodDelete, "/users/"+itoa(targetID), ownerToken, nil)
-	if w.Code != http.StatusNotFound {
-		t.Errorf("repeat status = %d, want 404", w.Code)
-	}
+	expectStatus(t, w, http.StatusNotFound)
 }
 
 func TestAdminAPI_DeleteUser_Refusals(t *testing.T) {
@@ -117,9 +103,7 @@ func TestAdminAPI_DeleteUser_NoModerationServiceFailsClosed(t *testing.T) {
 	targetID, _ := sessionFor(t, database, "closed-target", 4)
 
 	w := doRequest(t, handler, http.MethodDelete, "/users/"+itoa(targetID), ownerToken, nil)
-	if w.Code != http.StatusInternalServerError {
-		t.Errorf("status = %d, want 500", w.Code)
-	}
+	expectStatus(t, w, http.StatusInternalServerError)
 	if u, _ := database.GetUserByID(context.Background(), targetID); u == nil {
 		t.Error("target erased without a moderation service")
 	}

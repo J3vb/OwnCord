@@ -16,23 +16,17 @@ func TestCreateUserWithInvite_RecordsRedemption(t *testing.T) {
 
 	creator, _ := database.CreateUser(ctx, "invite-record-creator", "hash", 2)
 	code, err := database.CreateInvite(ctx, creator, 5, nil)
-	if err != nil {
-		t.Fatalf("CreateInvite: %v", err)
-	}
+	mustDo(t, "CreateInvite", err)
 
 	uid, err := database.CreateUserWithInvite(ctx, "recorded-redeemer", "hash", 4, code, "sess-recorded", "test", "127.0.0.1")
-	if err != nil {
-		t.Fatalf("CreateUserWithInvite: %v", err)
-	}
+	mustDo(t, "CreateUserWithInvite", err)
 
 	inv, err := database.GetInvite(ctx, code)
 	if err != nil || inv == nil {
 		t.Fatalf("GetInvite: %v", err)
 	}
 	reds, err := database.ListInviteRedemptions(ctx, inv.ID, 50)
-	if err != nil {
-		t.Fatalf("ListInviteRedemptions: %v", err)
-	}
+	mustDo(t, "ListInviteRedemptions", err)
 	if len(reds) != 1 {
 		t.Fatalf("redemptions = %d, want 1", len(reds))
 	}
@@ -57,9 +51,7 @@ func TestCreateUserWithInvite_FailedRedemptionRecordsNothing(t *testing.T) {
 		t.Fatal("expected CreateUserWithInvite to fail for a missing code")
 	}
 	var n int
-	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM invite_redemptions`).Scan(&n); err != nil {
-		t.Fatalf("count redemptions: %v", err)
-	}
+	mustDo(t, "count redemptions", database.QueryRowContext(ctx, `SELECT COUNT(*) FROM invite_redemptions`).Scan(&n))
 	if n != 0 {
 		t.Errorf("redemption rows = %d, want 0 after a failed registration", n)
 	}
@@ -74,9 +66,7 @@ func TestEraseAccount_ClearsInviteRedemptionLink(t *testing.T) {
 	creator, _ := database.CreateUser(ctx, "erase-invite-creator", "hash", 2)
 	code, _ := database.CreateInvite(ctx, creator, 5, nil)
 	redeemer, err := database.CreateUserWithInvite(ctx, "erase-redeemer", "hash", 4, code, "sess-erase-redeemer", "test", "127.0.0.1")
-	if err != nil {
-		t.Fatalf("CreateUserWithInvite: %v", err)
-	}
+	mustDo(t, "CreateUserWithInvite", err)
 
 	if _, err := database.EraseAccount(ctx, redeemer, ""); err != nil {
 		t.Fatalf("EraseAccount: %v", err)
@@ -98,9 +88,7 @@ func TestEraseAccount_ClearsInviteRedemptionLink(t *testing.T) {
 	}
 
 	inv2, err := database.TakeInventory(ctx, redeemer, "erase-redeemer")
-	if err != nil {
-		t.Fatalf("TakeInventory: %v", err)
-	}
+	mustDo(t, "TakeInventory", err)
 	if got := inv2["15b invite redemptions"]; got != 0 {
 		t.Errorf("inventory class 15b = %d, want 0", got)
 	}

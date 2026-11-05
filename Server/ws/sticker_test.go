@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/service"
-	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 // ─── sticker_update ──────────────────────────────────────────────────────────
@@ -19,10 +18,7 @@ func TestBroadcastStickerUpdate_CarriesNameEmojiAndURL(t *testing.T) {
 	defer hub.Stop()
 
 	user := seedOwnerUser(t, database, "sticker-owner")
-	send := make(chan []byte, 16)
-	client := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(client)
-	waitRegistered(t, hub, client)
+	_, send := connectClient(t, hub, user, 0, 16)
 
 	wave := "👋"
 	hub.BroadcastStickerUpdate([]*service.Sticker{
@@ -67,10 +63,7 @@ func TestBroadcastStickerUpdate_EmptySetIsAnArray(t *testing.T) {
 	defer hub.Stop()
 
 	user := seedOwnerUser(t, database, "sticker-empty-owner")
-	send := make(chan []byte, 16)
-	client := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(client)
-	waitRegistered(t, hub, client)
+	_, send := connectClient(t, hub, user, 0, 16)
 
 	hub.BroadcastStickerUpdate(nil)
 	msg := drainForMsgType(t, send, "sticker_update")

@@ -25,22 +25,49 @@ import (
 // point. The db package's own copy is test-only there and not importable.
 func migrationsUpTo(t *testing.T, cutoff string) fstest.MapFS {
 	t.Helper()
-	entries, err := fs.ReadDir(migrations.FS, ".")
-	if err != nil {
-		t.Fatalf("ReadDir: %v", err)
-	}
+	names, err := fs.Glob(migrations.FS, "*.sql")
+	mustDo(t, "Glob", err)
 	out := fstest.MapFS{}
-	for _, e := range entries {
-		if e.Name() >= cutoff {
-			continue
+	for _, name := range names {
+		if name >= cutoff {
+			break
 		}
-		data, err := fs.ReadFile(migrations.FS, e.Name())
-		if err != nil {
-			t.Fatalf("ReadFile(%s): %v", e.Name(), err)
-		}
-		out[e.Name()] = &fstest.MapFile{Data: data}
+		data, err := fs.ReadFile(migrations.FS, name)
+		mustDo(t, "ReadFile "+name, err)
+		out[name] = &fstest.MapFile{Data: data}
 	}
 	return out
+}
+
+// seedSchemaBefore creates a database at dbPath carrying only the migrations
+// that sort before cutoff, then closes it: the on-disk state of a server one
+// upgrade away from a schema move.
+func seedSchemaBefore(t *testing.T, dbPath, cutoff string) {
+	t.Helper()
+	seed, err := db.Open(dbPath)
+	mustDo(t, "Open seed", err)
+	if err := db.MigrateFS(seed, migrationsUpTo(t, cutoff)); err != nil {
+		t.Fatalf("MigrateFS(<%s): %v", cutoff, err)
+	}
+	mustDo(t, "Close seed", seed.Close())
+}
+
+// openDatabaseFile opens the database file at dbPath, closing it with the test.
+func openDatabaseFile(t *testing.T, dbPath string) *db.DB {
+	t.Helper()
+	database, err := db.Open(dbPath)
+	mustDo(t, "Open", err)
+	t.Cleanup(func() { _ = database.Close() })
+	return database
+}
+
+// backupConfig points a config at the database file and backup directory
+// initDatabase's pre-migration backup reads and writes.
+func backupConfig(dbPath, backupDir string) *config.Config {
+	return &config.Config{
+		Database: config.DatabaseConfig{Path: dbPath},
+		Backup:   config.BackupConfig{Dir: backupDir},
+	}
 }
 
 // onlyBackup returns the single pre-migration backup in dir, failing when
@@ -76,43 +103,26 @@ func TestInitDatabase_BacksUpBeforeApplyingPendingMigrations(t *testing.T) {
 	// Build a real database at a partial schema point, with a row, and close
 	// it — the state of a server one `pull` away from a schema move.
 	seed, err := db.Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open seed: %v", err)
-	}
-	if err := db.MigrateFS(seed, migrationsUpTo(t, "020_")); err != nil {
-		t.Fatalf("MigrateFS(<020): %v", err)
-	}
+	mustDo(t, "Open seed", err)
+	mustDo(t, "MigrateFS(<020)", db.MigrateFS(seed, migrationsUpTo(t, "020_")))
 	if _, err := seed.CreateUser(context.Background(), "pre-migrate-owner", "hash", 4); err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
-	if err := seed.Close(); err != nil {
-		t.Fatalf("Close seed: %v", err)
-	}
+	mustDo(t, "Close seed", seed.Close())
 
-	database, err := db.Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
+	database := openDatabaseFile(t, dbPath)
 
-	cfg := &config.Config{
-		Database: config.DatabaseConfig{Path: dbPath},
-		Backup:   config.BackupConfig{Dir: backupDir},
-	}
+	cfg := backupConfig(dbPath, backupDir)
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	rc := NewRestartCoordinator(time.Hour, nil)
 
-	if err := initDatabase(log, cfg, database, rc); err != nil {
-		t.Fatalf("initDatabase: %v", err)
-	}
+	mustDo(t, "initDatabase", initDatabase(log, cfg, database, rc))
 
 	backup := onlyBackup(t, backupDir)
 	if base := filepath.Base(backup); !strings.HasPrefix(base, admin.PreMigrateBackupPrefix) {
 		t.Fatalf("backup %q does not carry the %q prefix", base, admin.PreMigrateBackupPrefix)
 	}
-	if err := db.CheckBackupIntegrity(context.Background(), backup); err != nil {
-		t.Fatalf("pre-migration backup failed integrity_check: %v", err)
-	}
+	mustDo(t, "pre-migration backup failed integrity_check", db.CheckBackupIntegrity(context.Background(), backup))
 
 	// The copy must predate the migration: its schema_versions must not name
 	// any migration the boot applied.
@@ -136,35 +146,17 @@ func TestInitDatabase_UpgradeAfterRollbackTakesFreshBackup(t *testing.T) {
 	archive := filepath.Join(dir, "archive.db")
 	backupDir := filepath.Join(dir, "backups")
 
-	seed, err := db.Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open seed: %v", err)
-	}
-	if err := db.MigrateFS(seed, migrationsUpTo(t, "020_")); err != nil {
-		t.Fatalf("MigrateFS(<020): %v", err)
-	}
-	if err := seed.Close(); err != nil {
-		t.Fatalf("Close seed: %v", err)
-	}
+	seedSchemaBefore(t, dbPath, "020_")
 	copyFile(t, dbPath, archive)
 
-	cfg := &config.Config{
-		Database: config.DatabaseConfig{Path: dbPath},
-		Backup:   config.BackupConfig{Dir: backupDir},
-	}
+	cfg := backupConfig(dbPath, backupDir)
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	boot := func() {
 		t.Helper()
 		database, err := db.Open(dbPath)
-		if err != nil {
-			t.Fatalf("Open: %v", err)
-		}
-		if err := initDatabase(log, cfg, database, NewRestartCoordinator(time.Hour, nil)); err != nil {
-			t.Fatalf("initDatabase: %v", err)
-		}
-		if err := database.Close(); err != nil {
-			t.Fatalf("Close: %v", err)
-		}
+		mustDo(t, "Open", err)
+		mustDo(t, "initDatabase", initDatabase(log, cfg, database, NewRestartCoordinator(time.Hour, nil)))
+		mustDo(t, "Close", database.Close())
 	}
 
 	boot()
@@ -178,22 +170,16 @@ func TestInitDatabase_UpgradeAfterRollbackTakesFreshBackup(t *testing.T) {
 	}
 	copyFile(t, archive, dbPath)
 	old, err := db.Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open rolled-back: %v", err)
-	}
+	mustDo(t, "Open rolled-back", err)
 	if _, err := old.CreateUser(context.Background(), "rollback-era-user", "hash", 4); err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
-	if err := old.Close(); err != nil {
-		t.Fatalf("Close rolled-back: %v", err)
-	}
+	mustDo(t, "Close rolled-back", old.Close())
 
 	boot()
 
 	entries, err := os.ReadDir(backupDir)
-	if err != nil {
-		t.Fatalf("ReadDir: %v", err)
-	}
+	mustDo(t, "ReadDir", err)
 	if len(entries) != 2 {
 		t.Fatalf("backup dir holds %d files, want the earlier copy plus a fresh one", len(entries))
 	}
@@ -226,16 +212,7 @@ func TestInitDatabase_CrashLoopReusesPreMigrationBackup(t *testing.T) {
 	dbPath := filepath.Join(dir, "chatserver.db")
 	backupDir := filepath.Join(dir, "backups")
 
-	seed, err := db.Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open seed: %v", err)
-	}
-	if err := db.MigrateFS(seed, migrationsUpTo(t, "021_")); err != nil {
-		t.Fatalf("MigrateFS(<021): %v", err)
-	}
-	if err := seed.Close(); err != nil {
-		t.Fatalf("Close seed: %v", err)
-	}
+	seedSchemaBefore(t, dbPath, "021_")
 	// Migration 021 alters this table, so it now fails on every boot.
 	conn, err := sql.Open("sqlite", "file:"+filepath.ToSlash(dbPath))
 	if err != nil {
@@ -248,10 +225,7 @@ func TestInitDatabase_CrashLoopReusesPreMigrationBackup(t *testing.T) {
 		t.Fatalf("close %s: %v", dbPath, err)
 	}
 
-	cfg := &config.Config{
-		Database: config.DatabaseConfig{Path: dbPath},
-		Backup:   config.BackupConfig{Dir: backupDir},
-	}
+	cfg := backupConfig(dbPath, backupDir)
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	for i := range 3 {
 		database, err := db.Open(dbPath)
@@ -304,32 +278,17 @@ func TestInitDatabase_NoBackupWhenNothingIsPending(t *testing.T) {
 	backupDir := filepath.Join(dir, "backups")
 
 	seed, err := db.Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open seed: %v", err)
-	}
-	if err := db.Migrate(seed); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
-	if err := seed.Close(); err != nil {
-		t.Fatalf("Close seed: %v", err)
-	}
+	mustDo(t, "Open seed", err)
+	mustDo(t, "Migrate", db.Migrate(seed))
+	mustDo(t, "Close seed", seed.Close())
 
-	database, err := db.Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
+	database := openDatabaseFile(t, dbPath)
 
-	cfg := &config.Config{
-		Database: config.DatabaseConfig{Path: dbPath},
-		Backup:   config.BackupConfig{Dir: backupDir},
-	}
+	cfg := backupConfig(dbPath, backupDir)
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	rc := NewRestartCoordinator(time.Hour, nil)
 
-	if err := initDatabase(log, cfg, database, rc); err != nil {
-		t.Fatalf("initDatabase: %v", err)
-	}
+	mustDo(t, "initDatabase", initDatabase(log, cfg, database, rc))
 
 	if entries, err := os.ReadDir(backupDir); err == nil && len(entries) > 0 {
 		t.Fatalf("a boot with no pending migrations wrote %d backup file(s)", len(entries))
@@ -345,28 +304,13 @@ func TestInitDatabase_RefusesToBootWhenBackupCannotBeWritten(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "chatserver.db")
 
-	seed, err := db.Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open seed: %v", err)
-	}
-	if err := db.MigrateFS(seed, migrationsUpTo(t, "020_")); err != nil {
-		t.Fatalf("MigrateFS(<020): %v", err)
-	}
-	if err := seed.Close(); err != nil {
-		t.Fatalf("Close seed: %v", err)
-	}
+	seedSchemaBefore(t, dbPath, "020_")
 
-	database, err := db.Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
+	database := openDatabaseFile(t, dbPath)
 
 	// A file where the backup directory should be.
 	blocker := filepath.Join(dir, "blocker")
-	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "WriteFile", os.WriteFile(blocker, []byte("x"), 0o600))
 
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	rc := NewRestartCoordinator(time.Hour, nil)
@@ -413,16 +357,7 @@ func upgradeRounds(t *testing.T, rounds int) (backupDir string, names []string, 
 	archive := filepath.Join(dir, "archive.db")
 	backupDir = filepath.Join(dir, "backups")
 
-	seed, err := db.Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open seed: %v", err)
-	}
-	if err := db.MigrateFS(seed, migrationsUpTo(t, "020_")); err != nil {
-		t.Fatalf("MigrateFS(<020): %v", err)
-	}
-	if err := seed.Close(); err != nil {
-		t.Fatalf("Close seed: %v", err)
-	}
+	seedSchemaBefore(t, dbPath, "020_")
 	copyFile(t, dbPath, archive)
 
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -433,25 +368,19 @@ func upgradeRounds(t *testing.T, rounds int) (backupDir string, names []string, 
 		}
 		copyFile(t, archive, dbPath)
 		d, err := db.Open(dbPath)
-		if err != nil {
-			t.Fatalf("Open: %v", err)
-		}
+		mustDo(t, "Open", err)
 		if _, err := d.CreateUser(context.Background(), "user-"+string(rune('a'+i)), "hash", 4); err != nil {
 			t.Fatalf("CreateUser: %v", err)
 		}
 		name, bErr := backupBeforePendingMigrations(log, d, dbPath, backupDir)
-		if err := d.Close(); err != nil {
-			t.Fatalf("Close: %v", err)
-		}
+		mustDo(t, "Close", d.Close())
 		lastErr = bErr
 		if bErr != nil {
 			return backupDir, names, lastErr
 		}
 		names = append(names, name)
 		ts := base.Add(time.Duration(i) * time.Hour)
-		if err := os.Chtimes(filepath.Join(backupDir, name), ts, ts); err != nil {
-			t.Fatalf("Chtimes: %v", err)
-		}
+		mustDo(t, "Chtimes", os.Chtimes(filepath.Join(backupDir, name), ts, ts))
 	}
 	return backupDir, names, lastErr
 }
@@ -460,13 +389,9 @@ func upgradeRounds(t *testing.T, rounds int) (backupDir string, names []string, 
 // newest three pre_migrate_ copies, the newest included.
 func TestPreMigrationBackup_PrunesOlderCopies(t *testing.T) {
 	backupDir, names, err := upgradeRounds(t, 4)
-	if err != nil {
-		t.Fatalf("upgrade: %v", err)
-	}
+	mustDo(t, "upgrade", err)
 	entries, err := os.ReadDir(backupDir)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "ReadDir", err)
 	if len(entries) != admin.SafetyCopiesKept {
 		t.Fatalf("backup dir holds %d files, want %d", len(entries), admin.SafetyCopiesKept)
 	}
@@ -483,9 +408,7 @@ func TestPreMigrationBackup_PrunesOlderCopies(t *testing.T) {
 func TestPreMigrationBackup_PruneFailureStillBoots(t *testing.T) {
 	defer admin.SetRemoveSafetyCopyForTest(func(string) error { return errors.New("injected remove failure") })()
 	backupDir, names, err := upgradeRounds(t, 4)
-	if err != nil {
-		t.Fatalf("a prune failure refused the boot: %v", err)
-	}
+	mustDo(t, "a prune failure refused the boot", err)
 	if len(names) != 4 {
 		t.Fatalf("names = %v, want 4 copies written", names)
 	}

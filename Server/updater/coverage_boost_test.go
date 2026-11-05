@@ -127,9 +127,7 @@ func TestFetchTextAsset_Success(t *testing.T) {
 
 	u := newTestUpdater(srv.URL, "1.0.0")
 	text, err := u.FetchTextAsset(context.Background(), srv.URL+"/sig.txt")
-	if err != nil {
-		t.Fatalf("FetchTextAsset: %v", err)
-	}
+	mustDo(t, "FetchTextAsset", err)
 	if text != "dW50cnVzdGVkIGNvbW1lbnQ=" {
 		t.Errorf("text = %q, want 'dW50cnVzdGVkIGNvbW1lbnQ='", text)
 	}
@@ -281,9 +279,7 @@ func TestCheckForUpdate_IncludesAssetsList(t *testing.T) {
 
 	u := newTestUpdater(srv.URL, "1.0.0")
 	info, err := u.CheckForUpdate(context.Background())
-	if err != nil {
-		t.Fatalf("CheckForUpdate: %v", err)
-	}
+	mustDo(t, "CheckForUpdate", err)
 	if len(info.Assets) != 3 {
 		t.Errorf("expected 3 assets, got %d", len(info.Assets))
 	}
@@ -305,9 +301,7 @@ func TestDownloadFile_SendsTokenToGitHub(t *testing.T) {
 
 	dest := t.TempDir() + "/download.bin"
 	err := u.downloadFile(context.Background(), srv.URL+"/file", dest)
-	if err != nil {
-		t.Fatalf("downloadFile: %v", err)
-	}
+	mustDo(t, "downloadFile", err)
 	if gotAuth != "token my-secret-token" {
 		t.Errorf("Authorization = %q, want 'token my-secret-token'", gotAuth)
 	}
@@ -327,9 +321,7 @@ func TestDownloadFile_NoTokenToExternalHost(t *testing.T) {
 
 	dest := t.TempDir() + "/download2.bin"
 	err := u.downloadFile(context.Background(), srv.URL+"/file", dest)
-	if err != nil {
-		t.Fatalf("downloadFile: %v", err)
-	}
+	mustDo(t, "downloadFile", err)
 	if gotAuth != "" {
 		t.Errorf("expected no Authorization header for external host, got %q", gotAuth)
 	}
@@ -342,9 +334,7 @@ func TestParseChecksumFile_SingleSpace(t *testing.T) {
 	data := []byte("abc123 chatserver.exe\n")
 	u := NewUpdater("1.0.0", "", "J3vb", "OwnCord")
 	hash, err := u.ParseChecksumFile(data, "chatserver.exe")
-	if err != nil {
-		t.Fatalf("ParseChecksumFile single space: %v", err)
-	}
+	mustDo(t, "ParseChecksumFile single space", err)
 	if hash != "abc123" {
 		t.Errorf("hash = %q, want 'abc123'", hash)
 	}
@@ -354,9 +344,7 @@ func TestParseChecksumFile_EmptyLines(t *testing.T) {
 	data := []byte("\n\nabc123  chatserver.exe\n\n")
 	u := NewUpdater("1.0.0", "", "J3vb", "OwnCord")
 	hash, err := u.ParseChecksumFile(data, "chatserver.exe")
-	if err != nil {
-		t.Fatalf("ParseChecksumFile with empty lines: %v", err)
-	}
+	mustDo(t, "ParseChecksumFile with empty lines", err)
 	if hash != "abc123" {
 		t.Errorf("hash = %q, want 'abc123'", hash)
 	}

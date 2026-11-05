@@ -12,26 +12,27 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
+// openBackupSourceDB opens an unmigrated file-backed database in a fresh
+// temp dir and returns the dir, for tests that choose their own schema.
+func openBackupSourceDB(t *testing.T) (*db.DB, string) {
+	t.Helper()
+	tmpDir := t.TempDir()
+	database, err := db.Open(filepath.Join(tmpDir, "source.db"))
+	mustDo(t, "db.Open", err)
+	t.Cleanup(func() { _ = database.Close() })
+	return database, tmpDir
+}
+
 // newBackupTestDB opens a file-backed database suitable for VACUUM INTO tests.
 // VACUUM INTO requires a file-backed source database; :memory: produces an
 // empty-but-valid backup file which is sufficient for validation tests.
 func newBackupFileDB(t *testing.T) (*db.DB, string) {
 	t.Helper()
-	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "source.db")
-
-	database, err := db.Open(dbPath)
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-
+	database, tmpDir := openBackupSourceDB(t)
 	migrFS := fstest.MapFS{
 		"001_schema.sql": {Data: adminTestSchema},
 	}
-	if err := db.MigrateFS(database, migrFS); err != nil {
-		t.Fatalf("MigrateFS: %v", err)
-	}
+	mustDo(t, "MigrateFS", db.MigrateFS(database, migrFS))
 	return database, tmpDir
 }
 
@@ -42,18 +43,12 @@ func TestBackupToSafe_ValidPath(t *testing.T) {
 	database, tmpDir := newBackupFileDB(t)
 
 	backupDir := filepath.Join(tmpDir, "backups")
-	if err := os.MkdirAll(backupDir, 0o755); err != nil {
-		t.Fatalf("MkdirAll: %v", err)
-	}
+	mustDo(t, "MkdirAll", os.MkdirAll(backupDir, 0o755))
 	backupPath := filepath.Join(backupDir, "chatserver_20260315_120000.db")
-	if err := database.BackupToSafe(context.Background(), backupPath, backupDir); err != nil {
-		t.Fatalf("BackupToSafe() with valid path returned error: %v", err)
-	}
+	mustDo(t, "BackupToSafe() with valid path returned error", database.BackupToSafe(context.Background(), backupPath, backupDir))
 
 	info, err := os.Stat(backupPath)
-	if err != nil {
-		t.Fatalf("backup file does not exist after BackupToSafe: %v", err)
-	}
+	mustDo(t, "backup file does not exist after BackupToSafe", err)
 	if info.Size() == 0 {
 		t.Error("backup file is empty, expected non-empty SQLite file")
 	}
@@ -65,9 +60,7 @@ func TestBackupToSafe_RejectsPathOutsideRoot(t *testing.T) {
 	database, tmpDir := newBackupFileDB(t)
 
 	backupDir := filepath.Join(tmpDir, "backups")
-	if err := os.MkdirAll(backupDir, 0o755); err != nil {
-		t.Fatalf("MkdirAll: %v", err)
-	}
+	mustDo(t, "MkdirAll", os.MkdirAll(backupDir, 0o755))
 	// Try to write outside backupDir
 	escapePath := filepath.Join(tmpDir, "escaped.db")
 	err := database.BackupToSafe(context.Background(), escapePath, backupDir)
@@ -82,9 +75,7 @@ func TestBackupToSafe_RejectsSingleQuote(t *testing.T) {
 	database, tmpDir := newBackupFileDB(t)
 
 	backupDir := filepath.Join(tmpDir, "backups")
-	if err := os.MkdirAll(backupDir, 0o755); err != nil {
-		t.Fatalf("MkdirAll: %v", err)
-	}
+	mustDo(t, "MkdirAll", os.MkdirAll(backupDir, 0o755))
 	malicious := filepath.Join(backupDir, "evil'.db")
 	err := database.BackupToSafe(context.Background(), malicious, backupDir)
 	if err == nil {
@@ -97,9 +88,7 @@ func TestBackupToSafe_RejectsSemicolon(t *testing.T) {
 	database, tmpDir := newBackupFileDB(t)
 
 	backupDir := filepath.Join(tmpDir, "backups")
-	if err := os.MkdirAll(backupDir, 0o755); err != nil {
-		t.Fatalf("MkdirAll: %v", err)
-	}
+	mustDo(t, "MkdirAll", os.MkdirAll(backupDir, 0o755))
 	malicious := filepath.Join(backupDir, "evil;drop.db")
 	err := database.BackupToSafe(context.Background(), malicious, backupDir)
 	if err == nil {
@@ -112,9 +101,7 @@ func TestBackupToSafe_RejectsSQLComment(t *testing.T) {
 	database, tmpDir := newBackupFileDB(t)
 
 	backupDir := filepath.Join(tmpDir, "backups")
-	if err := os.MkdirAll(backupDir, 0o755); err != nil {
-		t.Fatalf("MkdirAll: %v", err)
-	}
+	mustDo(t, "MkdirAll", os.MkdirAll(backupDir, 0o755))
 	malicious := filepath.Join(backupDir, "evil--comment.db")
 	err := database.BackupToSafe(context.Background(), malicious, backupDir)
 	if err == nil {
@@ -127,9 +114,7 @@ func TestBackupToSafe_RejectsNullByte(t *testing.T) {
 	database, tmpDir := newBackupFileDB(t)
 
 	backupDir := filepath.Join(tmpDir, "backups")
-	if err := os.MkdirAll(backupDir, 0o755); err != nil {
-		t.Fatalf("MkdirAll: %v", err)
-	}
+	mustDo(t, "MkdirAll", os.MkdirAll(backupDir, 0o755))
 	malicious := filepath.Join(backupDir, "evil\x00.db") //nolint:gocritic // intentional null byte for security test
 	err := database.BackupToSafe(context.Background(), malicious, backupDir)
 	if err == nil {
@@ -144,13 +129,9 @@ func TestBackupToSafe_ErrorKeepsPreexistingFile(t *testing.T) {
 	database, tmpDir := newBackupFileDB(t)
 
 	backupDir := filepath.Join(tmpDir, "backups")
-	if err := os.MkdirAll(backupDir, 0o755); err != nil {
-		t.Fatalf("MkdirAll: %v", err)
-	}
+	mustDo(t, "MkdirAll", os.MkdirAll(backupDir, 0o755))
 	existing := filepath.Join(backupDir, "keep_me.db")
-	if err := os.WriteFile(existing, []byte("precious"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "WriteFile", os.WriteFile(existing, []byte("precious"), 0o600))
 
 	// VACUUM INTO refuses an existing destination.
 	if err := database.BackupToSafe(context.Background(), existing, backupDir); err == nil {
@@ -168,21 +149,13 @@ func TestCheckBackupIntegrity_ValidAndCorrupt(t *testing.T) {
 	database, tmpDir := newBackupFileDB(t)
 
 	backupDir := filepath.Join(tmpDir, "backups")
-	if err := os.MkdirAll(backupDir, 0o755); err != nil {
-		t.Fatalf("MkdirAll: %v", err)
-	}
+	mustDo(t, "MkdirAll", os.MkdirAll(backupDir, 0o755))
 	good := filepath.Join(backupDir, "good.db")
-	if err := database.BackupToSafe(context.Background(), good, backupDir); err != nil {
-		t.Fatalf("BackupToSafe: %v", err)
-	}
-	if err := db.CheckBackupIntegrity(context.Background(), good); err != nil {
-		t.Fatalf("CheckBackupIntegrity on a fresh backup: %v", err)
-	}
+	mustDo(t, "BackupToSafe", database.BackupToSafe(context.Background(), good, backupDir))
+	mustDo(t, "CheckBackupIntegrity on a fresh backup", db.CheckBackupIntegrity(context.Background(), good))
 
 	bad := filepath.Join(backupDir, "bad.db")
-	if err := os.WriteFile(bad, []byte("this is not a sqlite database at all"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "WriteFile", os.WriteFile(bad, []byte("this is not a sqlite database at all"), 0o600))
 	if err := db.CheckBackupIntegrity(context.Background(), bad); err == nil {
 		t.Fatal("CheckBackupIntegrity accepted a garbage file")
 	}
@@ -199,38 +172,24 @@ func TestCheckBackupIntegrity_ValidAndCorrupt(t *testing.T) {
 func TestBackupChecks_URIMetacharactersInPath(t *testing.T) {
 	database, tmpDir := newBackupFileDB(t)
 	backupDir := filepath.Join(tmpDir, "backups")
-	if err := os.MkdirAll(backupDir, 0o755); err != nil {
-		t.Fatalf("MkdirAll: %v", err)
-	}
+	mustDo(t, "MkdirAll", os.MkdirAll(backupDir, 0o755))
 	plain := filepath.Join(backupDir, "plain.db")
-	if err := database.BackupToSafe(context.Background(), plain, backupDir); err != nil {
-		t.Fatalf("BackupToSafe: %v", err)
-	}
+	mustDo(t, "BackupToSafe", database.BackupToSafe(context.Background(), plain, backupDir))
 	wantAhead, err := db.CheckBackupSchemaAhead(context.Background(), plain)
-	if err != nil {
-		t.Fatalf("CheckBackupSchemaAhead on the plain name: %v", err)
-	}
+	mustDo(t, "CheckBackupSchemaAhead on the plain name", err)
 	data, err := os.ReadFile(plain)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "ReadFile", err)
 
 	oddDir := filepath.Join(tmpDir, "odd")
-	if err := os.MkdirAll(oddDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "MkdirAll", os.MkdirAll(oddDir, 0o755))
 	name := "chat#2%41"
 	if runtime.GOOS != "windows" {
 		name += "?x"
 	}
 	good := filepath.Join(oddDir, name+".db")
 	bad := filepath.Join(oddDir, name+"-bad.db")
-	if err := os.WriteFile(good, data, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(bad, []byte("this is not a sqlite database at all"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "WriteFile", os.WriteFile(good, data, 0o600))
+	mustDo(t, "WriteFile", os.WriteFile(bad, []byte("this is not a sqlite database at all"), 0o600))
 
 	if err := db.CheckBackupIntegrity(context.Background(), good); err != nil {
 		t.Fatalf("CheckBackupIntegrity on %q: %v", good, err)
@@ -244,9 +203,7 @@ func TestBackupChecks_URIMetacharactersInPath(t *testing.T) {
 	}
 
 	entries, err := os.ReadDir(oddDir)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "ReadDir", err)
 	for _, e := range entries {
 		if n := e.Name(); n != filepath.Base(good) && n != filepath.Base(bad) {
 			t.Errorf("the checks created a stray file %q", n)
@@ -260,9 +217,7 @@ func TestBackupToSafe_RejectsDoubleQuote(t *testing.T) {
 	database, tmpDir := newBackupFileDB(t)
 
 	backupDir := filepath.Join(tmpDir, "backups")
-	if err := os.MkdirAll(backupDir, 0o755); err != nil {
-		t.Fatalf("MkdirAll: %v", err)
-	}
+	mustDo(t, "MkdirAll", os.MkdirAll(backupDir, 0o755))
 	malicious := filepath.Join(backupDir, `evil".db`)
 	err := database.BackupToSafe(context.Background(), malicious, backupDir)
 	if err == nil {
@@ -307,13 +262,9 @@ func TestBackupToSafe_ParentIsAFileFails(t *testing.T) {
 	database, tmpDir := newBackupFileDB(t)
 
 	backupDir := filepath.Join(tmpDir, "backups")
-	if err := os.MkdirAll(backupDir, 0o755); err != nil {
-		t.Fatalf("MkdirAll: %v", err)
-	}
+	mustDo(t, "MkdirAll", os.MkdirAll(backupDir, 0o755))
 	blocker := filepath.Join(backupDir, "blocker")
-	if err := os.WriteFile(blocker, []byte("not a directory"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "WriteFile", os.WriteFile(blocker, []byte("not a directory"), 0o600))
 	if err := database.BackupToSafe(context.Background(), filepath.Join(blocker, "b.db"), backupDir); err == nil {
 		t.Fatal("BackupToSafe under a regular file should fail")
 	}

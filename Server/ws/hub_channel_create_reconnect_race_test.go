@@ -27,10 +27,7 @@ func TestBroadcastChannelCreate_ReconnectDuringFanoutForcesFullResync(t *testing
 	if err != nil || ch == nil {
 		t.Fatalf("GetChannel: %v", err)
 	}
-	user, err := database.GetUserByID(ctx, uid)
-	if err != nil || user == nil {
-		t.Fatalf("GetUserByID: %v", err)
-	}
+	user := mustGetUser(t, database, uid)
 
 	h := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	h.RegisterNowForTest(NewTestClientWithUser(h, user, 0, make(chan []byte, 8)))

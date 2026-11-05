@@ -22,14 +22,10 @@ func receiptMessageIDs(t *testing.T, database *db.DB, userID, channelID int64) [
 	var ids []int64
 	for rows.Next() {
 		var id int64
-		if err := rows.Scan(&id); err != nil {
-			t.Fatalf("scan: %v", err)
-		}
+		mustDo(t, "scan", rows.Scan(&id))
 		ids = append(ids, id)
 	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("rows: %v", err)
-	}
+	mustDo(t, "rows", rows.Err())
 	return ids
 }
 
@@ -39,14 +35,10 @@ func TestMigration063_MentionReceiptsSchema(t *testing.T) {
 
 	var pkCols []string
 	rows, err := database.QueryContext(ctx, `SELECT name FROM pragma_table_info('mention_receipts') WHERE pk > 0 ORDER BY pk`)
-	if err != nil {
-		t.Fatalf("table_info: %v", err)
-	}
+	mustDo(t, "table_info", err)
 	for rows.Next() {
 		var n string
-		if err := rows.Scan(&n); err != nil {
-			t.Fatalf("scan: %v", err)
-		}
+		mustDo(t, "scan", rows.Scan(&n))
 		pkCols = append(pkCols, n)
 	}
 	rows.Close() //nolint:errcheck // test read path
@@ -64,14 +56,8 @@ func TestMigration063_MentionReceiptsSchema(t *testing.T) {
 	alice := seedUser(t, database, "alice")
 	bob := seedUser(t, database, "bob")
 	ch := seedChannelRawSQL(t, database, "general")
-	m1, err := database.CreateMessage(ctx, ch, alice, "one", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
-	m2, err := database.CreateMessage(ctx, ch, alice, "two", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	m1 := mustCreateMessage(t, database, ch, alice, "one", nil)
+	m2 := mustCreateMessage(t, database, ch, alice, "two", nil)
 	for _, id := range []int64{m1, m2} {
 		if _, err := database.ExecContext(ctx,
 			`INSERT INTO mention_receipts (user_id, channel_id, message_id) VALUES (?, ?, ?)`, bob, ch, id); err != nil {
@@ -98,9 +84,7 @@ func TestMigration063_MentionReceiptsSchema(t *testing.T) {
 
 func TestMigration063_BackfillOnlyBadgedRows(t *testing.T) {
 	database := openMemory(t)
-	if err := db.MigrateFS(database, migrationsBefore(t, "063")); err != nil {
-		t.Fatalf("migrate to 062: %v", err)
-	}
+	mustDo(t, "migrate to 062", db.MigrateFS(database, migrationsBefore(t, "063")))
 	ctx := context.Background()
 	reader := seedUser(t, database, "reader")
 	idle := seedUser(t, database, "idle")
@@ -138,9 +122,7 @@ func TestMigration063_BackfillOnlyBadgedRows(t *testing.T) {
 		}
 	}
 
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("migrate to head: %v", err)
-	}
+	mustDo(t, "migrate to head", db.Migrate(database))
 	if got, want := receiptMessageIDs(t, database, reader, ch), []int64{direct, everyone}; !slices.Equal(got, want) {
 		t.Errorf("reader receipts = %v, want %v (direct and @everyone after the pointer only)", got, want)
 	}
@@ -156,14 +138,8 @@ func TestIncrementMentionCountsBatch_ReceiptOnlyForAdmitted(t *testing.T) {
 	fresh := seedUser(t, database, "fresh")
 	guarded := seedUser(t, database, "guarded")
 	ch := seedChannelRawSQL(t, database, "general")
-	live, err := database.CreateMessage(ctx, ch, author, "live", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
-	dead, err := database.CreateMessage(ctx, ch, author, "dead", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	live := mustCreateMessage(t, database, ch, author, "live", nil)
+	dead := mustCreateMessage(t, database, ch, author, "dead", nil)
 	if _, err := database.ExecContext(ctx, `UPDATE messages SET deleted = 1 WHERE id = ?`, dead); err != nil {
 		t.Fatalf("soft delete: %v", err)
 	}
@@ -198,13 +174,8 @@ func TestMentionReceipts_CascadeOnMessageHardDelete(t *testing.T) {
 	author := seedUser(t, database, "author")
 	reader := seedUser(t, database, "reader")
 	ch := seedChannelRawSQL(t, database, "general")
-	m, err := database.CreateMessageWithMentions(ctx, ch, author, "hi @reader", nil, []int64{reader}, 0, false, nil)
-	if err != nil {
-		t.Fatalf("CreateMessageWithMentions: %v", err)
-	}
-	if err := database.IncrementMentionCounts(ctx, ch, m.ID, []int64{reader}); err != nil {
-		t.Fatalf("IncrementMentionCounts: %v", err)
-	}
+	m := mustCreateMessageWithMentions(t, database, ch, author, "hi @reader", nil, []int64{reader}, 0, false, nil)
+	mustDo(t, "IncrementMentionCounts", database.IncrementMentionCounts(ctx, ch, m.ID, []int64{reader}))
 	if got := receiptMessageIDs(t, database, reader, ch); !slices.Equal(got, []int64{m.ID}) {
 		t.Fatalf("receipts before delete = %v, want [%d]", got, m.ID)
 	}
@@ -223,14 +194,10 @@ func TestEraseAccount_RemovesRecipientReceipts(t *testing.T) {
 	bystander := seedUser(t, database, "bystander")
 	var msgs []int64
 	rows, err := database.QueryContext(ctx, `SELECT id FROM messages WHERE channel_id = ? ORDER BY id`, sub.channel)
-	if err != nil {
-		t.Fatalf("list messages: %v", err)
-	}
+	mustDo(t, "list messages", err)
 	for rows.Next() {
 		var id int64
-		if err := rows.Scan(&id); err != nil {
-			t.Fatalf("scan: %v", err)
-		}
+		mustDo(t, "scan", rows.Scan(&id))
 		msgs = append(msgs, id)
 	}
 	rows.Close() //nolint:errcheck // test read path
@@ -243,9 +210,7 @@ func TestEraseAccount_RemovesRecipientReceipts(t *testing.T) {
 		}
 	}
 	before, err := database.TakeInventory(ctx, sub.id, sub.username)
-	if err != nil {
-		t.Fatalf("TakeInventory: %v", err)
-	}
+	mustDo(t, "TakeInventory", err)
 	if before["11a mention receipts"] == 0 {
 		t.Fatal("fixture holds no receipts for the subject")
 	}
@@ -253,9 +218,7 @@ func TestEraseAccount_RemovesRecipientReceipts(t *testing.T) {
 		t.Fatalf("EraseAccount: %v", err)
 	}
 	after, err := database.TakeInventory(ctx, sub.id, sub.username)
-	if err != nil {
-		t.Fatalf("TakeInventory: %v", err)
-	}
+	mustDo(t, "TakeInventory", err)
 	if after["11a mention receipts"] != 0 {
 		t.Errorf("subject receipts after erasure = %d, want 0", after["11a mention receipts"])
 	}

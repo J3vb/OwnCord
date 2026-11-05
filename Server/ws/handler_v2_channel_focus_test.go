@@ -2,7 +2,6 @@ package ws
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/auth"
@@ -28,10 +27,7 @@ func newFocusTestDeps(t *testing.T) (PresenceDeps, int64, int64) {
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
-	chID, err := database.CreateChannel(context.Background(), "focus-chan", "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
+	chID := mustCreateChannel(t, database, "focus-chan", "text")
 
 	st := database
 	svc := service.New(st, auth.NewRateLimiter())
@@ -120,17 +116,7 @@ func TestChannelFocusV2_NoPermission_ReturnsForbidden(t *testing.T) {
 
 	result := handleChannelFocusV2(context.Background(), cmd, info, deps)
 
-	if result.Error == nil {
-		t.Fatal("expected FORBIDDEN error for denied permission")
-	}
-	var ce ClientError
-	ok := errors.As(result.Error, &ce)
-	if !ok {
-		t.Fatalf("expected ClientError, got %T", result.Error)
-	}
-	if ce.Code != ErrCodeForbidden {
-		t.Errorf("expected code %q, got %q", ErrCodeForbidden, ce.Code)
-	}
+	requireClientErrorCode(t, result.Error, ErrCodeForbidden, "expected FORBIDDEN error for denied permission")
 }
 
 func TestChannelFocusV2_RateLimited_Defers(t *testing.T) {

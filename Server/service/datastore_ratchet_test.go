@@ -233,27 +233,10 @@ func readServerFile(t *testing.T, rel string) string {
 }
 
 func TestStoreMethodRatchet(t *testing.T) {
-	entries, err := os.ReadDir(".")
-	if err != nil {
-		t.Fatalf("read service dir: %v", err)
-	}
-	sources := map[string]string{}
-	for _, e := range entries {
-		name := e.Name()
-		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
-			continue
-		}
-		b, err := os.ReadFile(name)
-		if err != nil {
-			t.Fatalf("read %s: %v", name, err)
-		}
-		sources[name] = string(b)
-	}
+	sources := serviceSources(t)
 
 	got, err := measureInterface("Store", sources)
-	if err != nil {
-		t.Fatalf("measure Store: %v", err)
-	}
+	mustDo(t, "measure Store", err)
 
 	for _, c := range got.crossPackage {
 		if _, ok := storeCrossPackageEmbeds[c]; !ok {
@@ -284,9 +267,7 @@ func TestStoreMethodRatchet(t *testing.T) {
 
 func TestModelsJSONTagRatchet(t *testing.T) {
 	got, err := countJSONTags(readServerFile(t, "db/models.go"))
-	if err != nil {
-		t.Fatalf("count tags: %v", err)
-	}
+	mustDo(t, "count tags", err)
 	if got != modelsJSONTagBaseline {
 		t.Errorf("db/models.go has %d json: tags, pinned at %d. New REST response types live in api or service, not db/models.go; if tags were removed, set modelsJSONTagBaseline to %d", got, modelsJSONTagBaseline, got)
 	}
@@ -374,12 +355,28 @@ func TestCountJSONTags(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := countJSONTags(tc.src)
-			if err != nil {
-				t.Fatalf("countJSONTags: %v", err)
-			}
+			mustDo(t, "countJSONTags", err)
 			if got != tc.want {
 				t.Fatalf("tags = %d, want %d", got, tc.want)
 			}
 		})
 	}
+}
+
+// serviceSources reads this package's non-test Go files, keyed by file name.
+func serviceSources(t *testing.T) map[string]string {
+	t.Helper()
+	entries, err := os.ReadDir(".")
+	mustDo(t, "read service dir", err)
+	sources := map[string]string{}
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		b, err := os.ReadFile(name)
+		mustDo(t, "read "+name, err)
+		sources[name] = string(b)
+	}
+	return sources
 }

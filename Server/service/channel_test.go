@@ -16,12 +16,7 @@ import (
 // denied. The listing must error instead of leaking the denied channel.
 func TestListVisibleChannels_OverrideFetchErrorFailsClosed(t *testing.T) {
 	database := newTestDB(t)
-	seedRole(t, database, &db.Role{
-		ID:          permissions.MemberRoleID,
-		Name:        "member",
-		Permissions: permissions.SendMessages | permissions.ReadMessages | permissions.AddReactions,
-		Position:    1,
-	})
+	seedMemberRole(t, database, permissions.SendMessages|permissions.ReadMessages|permissions.AddReactions)
 	seedUserRole(t, database, 1, permissions.MemberRoleID)
 	seedChannel(t, database, &db.Channel{ID: 10, Name: "secret", Type: "text"})
 	seedChannelOverride(t, database, permissions.MemberRoleID, 10, 0, permissions.ReadMessages)
@@ -53,12 +48,7 @@ func TestListVisibleChannels_OverrideFetchErrorFailsClosed(t *testing.T) {
 func TestHandleChannelFocus_RefusedInArchivedChannel(t *testing.T) {
 	ctx := context.Background()
 	database := newTestDB(t)
-	seedRole(t, database, &db.Role{
-		ID:          permissions.MemberRoleID,
-		Name:        "member",
-		Permissions: permissions.SendMessages | permissions.ReadMessages,
-		Position:    1,
-	})
+	seedMemberRole(t, database, permissions.SendMessages|permissions.ReadMessages)
 	seedUserRole(t, database, 1, permissions.MemberRoleID)
 	seedChannel(t, database, &db.Channel{ID: 10, Name: "general", Type: "text"})
 
@@ -107,19 +97,7 @@ func TestHandleChannelFocus_DMExemptFromArchiveGate(t *testing.T) {
 // best-effort, so the refusal is a silent nil rather than an error.
 func TestHandleTyping_BlockedInDMEmitsNothing(t *testing.T) {
 	database := newTestDB(t)
-	seedRole(t, database, &db.Role{
-		ID:          permissions.MemberRoleID,
-		Name:        "member",
-		Permissions: permissions.SendMessages | permissions.ReadMessages,
-		Position:    1,
-	})
-	seedUser(t, database, &db.User{ID: 1, Username: "alice"})
-	seedUser(t, database, &db.User{ID: 2, Username: "bob"})
-	seedUserRole(t, database, 1, permissions.MemberRoleID)
-	seedUserRole(t, database, 2, permissions.MemberRoleID)
-	seedChannel(t, database, &db.Channel{ID: 50, Name: "dm-1-2", Type: "dm"})
-	seedDMParticipant(t, database, 50, 1)
-	seedDMParticipant(t, database, 50, 2)
+	seedAliceBobDM(t, database, permissions.SendMessages|permissions.ReadMessages)
 
 	svc := NewChannelService(database, NewPermissionService(database, permissions.NewChecker(database)))
 
@@ -165,12 +143,7 @@ func (c *countingLimiter) Allow(key string, limit int, window time.Duration) boo
 // real (user, channel) pairs.
 func TestHandleTyping_NoRateLimitKeyForNonexistentChannel(t *testing.T) {
 	database := newTestDB(t)
-	seedRole(t, database, &db.Role{
-		ID:          permissions.MemberRoleID,
-		Name:        "member",
-		Permissions: permissions.SendMessages | permissions.ReadMessages,
-		Position:    1,
-	})
+	seedMemberRole(t, database, permissions.SendMessages|permissions.ReadMessages)
 	seedUser(t, database, &db.User{ID: 1, Username: "alice"})
 	seedUserRole(t, database, 1, permissions.MemberRoleID)
 	// Deliberately do NOT seed channel 999999 — it must not exist.

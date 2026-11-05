@@ -13,9 +13,7 @@ import (
 // The approval queue (B4-1): list, approve, deny — each decision once.
 func TestAdminAPI_Registrations_ListApproveDeny(t *testing.T) {
 	ctx := context.Background()
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	database, handler, token := newAdminHarness(t)
 	first, err := database.CreatePendingUser(ctx, "applicant-one", "hash", 3, 100)
 	if err != nil {
 		t.Fatalf("CreatePendingUser: %v", err)
@@ -26,13 +24,8 @@ func TestAdminAPI_Registrations_ListApproveDeny(t *testing.T) {
 	}
 
 	w := doRequest(t, handler, http.MethodGet, "/registrations", token, nil)
-	if w.Code != http.StatusOK {
-		t.Fatalf("list status = %d; body = %s", w.Code, w.Body.String())
-	}
-	var queue []map[string]any
-	if err := json.NewDecoder(w.Body).Decode(&queue); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	requireStatus(t, w, http.StatusOK)
+	queue := decodeBody[[]map[string]any](t, w)
 	if len(queue) != 2 || queue[0]["username"] != "applicant-one" || queue[1]["username"] != "applicant-two" {
 		t.Fatalf("queue = %v, want the two applications oldest first", queue)
 	}

@@ -147,10 +147,7 @@ func TestDMPrivacy_EditReactPinRingVoiceRefused(t *testing.T) {
 		alice := seedMemberUser(t, database, "dmprivrefresh-alice")
 		bob := seedMemberUser(t, database, "dmprivrefresh-bob")
 		dmID := untrustedDMChannel(t, database, alice.ID, bob.ID)
-		send := make(chan []byte, 32)
-		c := ws.NewTestClientWithUser(hub, alice, 0, send)
-		hub.Register(c)
-		waitRegistered(t, hub, c)
+		c, send := connectClient(t, hub, alice, 0, 32)
 
 		hub.HandleMessageForTest(c, voiceJoinMsg(dmID))
 		if !hasVoiceToken(t, drainChanTimeout(send, 50*time.Millisecond)) {
@@ -244,13 +241,8 @@ func TestDMPrivacy_GroupDMUnaffected(t *testing.T) {
 		}
 	}
 
-	sendAlice := make(chan []byte, 64)
-	sendBob := make(chan []byte, 64)
-	cAlice := ws.NewTestClientWithUser(hub, alice, chID, sendAlice)
-	cBob := ws.NewTestClientWithUser(hub, bob, chID, sendBob)
-	hub.Register(cAlice)
-	hub.Register(cBob)
-	waitRegistered(t, hub, cBob)
+	cAlice, sendAlice := connectClient(t, hub, alice, chID, 64)
+	cBob, sendBob := connectClient(t, hub, bob, chID, 64)
 
 	hub.HandleMessageForTest(cAlice, dmChatSendMsg(chID, "to the group"))
 	if dmWaitMsgType(sendBob, "chat_message", waitTimeout) == nil {

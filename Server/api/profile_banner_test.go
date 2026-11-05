@@ -41,9 +41,7 @@ func doProfileImageUpload(t *testing.T, router http.Handler, path, token, filena
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
+	rr := serveLocal(router, req)
 	return rr
 }
 
@@ -99,9 +97,7 @@ func TestUploadBanner_StoresAndSetsBannerID(t *testing.T) {
 	token := uploadCreateToken(t, database, "banner_owner", 4)
 
 	rr := doBannerUpload(t, router, token, "b.png", makePNGBytes(t, 640, 256))
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("status = %d; body = %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusCreated)
 	id := uploadedID(t, rr)
 	u, err := database.GetUserByUsername(context.Background(), "banner_owner")
 	if err != nil || u == nil {
@@ -126,9 +122,7 @@ func TestUploadBanner_QuotaCharged(t *testing.T) {
 	body := makePNGBytes(t, 300, 120)
 
 	rr := doBannerUpload(t, router, token, "b.png", body)
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("status = %d; body = %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusCreated)
 	var used int64
 	if err := database.QueryRowContext(context.Background(), `SELECT COALESCE(SUM(bytes_used), 0) FROM user_storage`).Scan(&used); err != nil {
 		t.Fatalf("user_storage: %v", err)
@@ -180,9 +174,7 @@ func TestUploadBanner_KeepsConcurrentRename(t *testing.T) {
 	}
 
 	rr := doBannerUpload(t, router, token, "b.png", makePNGBytes(t, 64, 32))
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("status = %d; body = %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusCreated)
 	after, _ := database.GetUserByID(ctx, u.ID)
 	if after.Username != "banner_new_name" || after.About == nil || *after.About != about {
 		t.Errorf("username/about = %q/%v, want the concurrent edit kept", after.Username, after.About)
@@ -201,27 +193,16 @@ func TestDeleteBanner_ClearsAndBroadcastsNull(t *testing.T) {
 	peerToken := uploadCreateToken(t, database, "bdel_peer", 4)
 
 	up := doBannerUpload(t, router, ownerToken, "b.png", makePNGBytes(t, 64, 32))
-	if up.Code != http.StatusCreated {
-		t.Fatalf("upload status = %d; body = %s", up.Code, up.Body.String())
-	}
+	requireStatus(t, up, http.StatusCreated)
 	id := uploadedID(t, up)
 	if got := doServeFile(t, router, id, peerToken, nil); got.Code != http.StatusOK {
 		t.Fatalf("peer fetch before delete = %d, want 200", got.Code)
 	}
 	spy.got = nil
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/users/me/banner", nil)
-	req.Header.Set("Authorization", "Bearer "+ownerToken)
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body = %s", rr.Code, rr.Body.String())
-	}
-	var body map[string]any
-	if err := json.NewDecoder(rr.Body).Decode(&body); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	rr := doAPI(t, router, http.MethodDelete, "/api/v1/users/me/banner", ownerToken, nil)
+	requireStatus(t, rr, http.StatusOK)
+	body := decodeBody[map[string]any](t, rr)
 	if v, ok := body["banner"]; !ok || v != nil {
 		t.Errorf("response banner = %v (present %v), want null", v, ok)
 	}
@@ -249,11 +230,8 @@ func TestPatchBannerColor_ValidatesAndClears(t *testing.T) {
 	}
 
 	rr := patch("  #ABCDEF ")
-	if rr.Code != http.StatusOK {
-		t.Fatalf("set status = %d; body = %s", rr.Code, rr.Body.String())
-	}
-	var body map[string]any
-	_ = json.Unmarshal(rr.Body.Bytes(), &body)
+	requireStatus(t, rr, http.StatusOK)
+	body := decodeBody[map[string]any](t, rr)
 	if body["banner_color"] != "#abcdef" {
 		t.Errorf("response banner_color = %v, want lower-cased #abcdef", body["banner_color"])
 	}
@@ -276,9 +254,7 @@ func TestPatchBannerColor_ValidatesAndClears(t *testing.T) {
 		t.Fatalf("stored colour = %v, want #fa0 (refusals must not move it)", u.BannerColor)
 	}
 	rr = patch("")
-	if rr.Code != http.StatusOK {
-		t.Fatalf("clear status = %d", rr.Code)
-	}
+	requireStatus(t, rr, http.StatusOK)
 	u, _ = database.GetUserByUsername(context.Background(), "color_user")
 	if u.BannerColor != nil {
 		t.Errorf("colour after clear = %q, want NULL", *u.BannerColor)
@@ -305,11 +281,8 @@ func TestPatchProfile_IgnoresBannerURL(t *testing.T) {
 		"banner_id": "11111111-1111-1111-1111-111111111111",
 		"bannerId":  "x",
 	})
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d; body = %s", rr.Code, rr.Body.String())
-	}
-	var body map[string]any
-	_ = json.Unmarshal(rr.Body.Bytes(), &body)
+	requireStatus(t, rr, http.StatusOK)
+	body := decodeBody[map[string]any](t, rr)
 	if body["banner"] != nil {
 		t.Errorf("response banner = %v, want null", body["banner"])
 	}

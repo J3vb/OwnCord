@@ -8,7 +8,6 @@ package api
 
 import (
 	"bytes"
-	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -24,17 +23,14 @@ func loggedRequestThroughProxy(t *testing.T, req *http.Request, proxyNets []*net
 	t.Helper()
 
 	var logs bytes.Buffer
-	prev := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
-	t.Cleanup(func() { slog.SetDefault(prev) })
+	captureDebugLogs(t, &logs)
 
 	h := boundRequestID(middleware.RequestID(setRequestIDHeader(requestLogger(proxyNets, nil)(
 		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusOK)
 		})))))
 
-	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, req)
+	serveRequest(h, req)
 	return logs.String()
 }
 

@@ -33,22 +33,13 @@ func (s *lostClaimStore) GetUserByID(ctx context.Context, id int64) (*db.User, e
 func TestVerifyTOTP_LostClaimReleasesTheCode(t *testing.T) {
 	ctx := context.Background()
 	database := newTestDB(t)
-	uid, err := database.CreateUser(ctx, "racer", "$2a$12$x", 4)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	uid := mustCreateUser(t, database, "racer", "$2a$12$x", 4)
 	secret, err := auth.GenerateTOTPSecret()
-	if err != nil {
-		t.Fatalf("GenerateTOTPSecret: %v", err)
-	}
+	mustDo(t, "GenerateTOTPSecret", err)
 	key := make([]byte, 32)
 	enc, err := auth.EncryptTOTPSecret(key, secret)
-	if err != nil {
-		t.Fatalf("EncryptTOTPSecret: %v", err)
-	}
-	if err := database.UpdateUserTOTPSecret(ctx, uid, &enc); err != nil {
-		t.Fatalf("UpdateUserTOTPSecret: %v", err)
-	}
+	mustDo(t, "EncryptTOTPSecret", err)
+	mustDo(t, "UpdateUserTOTPSecret", database.UpdateUserTOTPSecret(ctx, uid, &enc))
 
 	var (
 		svc   *AuthService
@@ -57,13 +48,9 @@ func TestVerifyTOTP_LostClaimReleasesTheCode(t *testing.T) {
 	st := &lostClaimStore{Store: database, beforeUserRead: func() { svc.partial.Consume(ctx, token) }}
 	svc = NewAuthService(st, auth.NewRateLimiter(), key, nil)
 	token, err = svc.partial.Issue(ctx, uid, "device", "203.0.113.9")
-	if err != nil {
-		t.Fatalf("Issue: %v", err)
-	}
+	mustDo(t, "Issue", err)
 	code, err := auth.GenerateTOTPCode(secret, time.Now().UTC())
-	if err != nil {
-		t.Fatalf("GenerateTOTPCode: %v", err)
-	}
+	mustDo(t, "GenerateTOTPCode", err)
 
 	if _, err := svc.VerifyTOTP(ctx, token, code); !errors.Is(err, ErrTOTPChallengeInvalid) {
 		t.Fatalf("VerifyTOTP error = %v, want ErrTOTPChallengeInvalid (the claim lost)", err)

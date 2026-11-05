@@ -127,9 +127,7 @@ func TestHashPassword_UnicodePassword(t *testing.T) {
 	// Unicode passwords should hash and verify correctly.
 	pw := "Pässwörd™日本語"
 	hash, err := auth.HashPassword(pw)
-	if err != nil {
-		t.Fatalf("HashPassword(unicode) error: %v", err)
-	}
+	mustDo(t, "HashPassword(unicode) error", err)
 	if !auth.CheckPassword(hash, pw) {
 		t.Error("CheckPassword() = false for correct unicode password")
 	}

@@ -14,9 +14,7 @@ func TestGetMessagesAfter_AscendingPagesToTheNewest(t *testing.T) {
 	ids := seedAroundHistory(t, database, 10, 12)
 
 	page, hasMore, err := svc.GetMessagesAfter(context.Background(), 1, 10, ids[2], 4)
-	if err != nil {
-		t.Fatalf("GetMessagesAfter: %v", err)
-	}
+	mustDo(t, "GetMessagesAfter", err)
 	got := make([]int64, 0, len(page))
 	for _, m := range page {
 		got = append(got, m.ID)
@@ -30,9 +28,7 @@ func TestGetMessagesAfter_AscendingPagesToTheNewest(t *testing.T) {
 
 	// The last page ends exactly at the newest message: has_more false.
 	page, hasMore, err = svc.GetMessagesAfter(context.Background(), 1, 10, ids[7], 4)
-	if err != nil {
-		t.Fatalf("GetMessagesAfter(last): %v", err)
-	}
+	mustDo(t, "GetMessagesAfter(last)", err)
 	if len(page) != 4 || page[len(page)-1].ID != ids[11] || hasMore {
 		t.Errorf("last page = %d rows, hasMore = %v; want 4 rows ending at %d, no more", len(page), hasMore, ids[11])
 	}
@@ -49,9 +45,7 @@ func TestGetMessagesAfter_ClampsLimit(t *testing.T) {
 	ids := seedAroundHistory(t, database, 10, 130)
 
 	page, hasMore, err := svc.GetMessagesAfter(context.Background(), 1, 10, ids[0], 1000)
-	if err != nil {
-		t.Fatalf("GetMessagesAfter: %v", err)
-	}
+	mustDo(t, "GetMessagesAfter", err)
 	if len(page) != 100 || !hasMore {
 		t.Errorf("page = %d rows, hasMore = %v; want 100 rows and more", len(page), hasMore)
 	}

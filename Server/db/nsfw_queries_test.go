@@ -40,17 +40,13 @@ func TestAcknowledgeNSFW_RevokeAndHasNSFWAcknowledgement(t *testing.T) {
 		t.Fatalf("AcknowledgeNSFW (second time): %v", err)
 	}
 
-	if err := database.RevokeNSFW(ctx, uid, chID); err != nil {
-		t.Fatalf("RevokeNSFW: %v", err)
-	}
+	mustDo(t, "RevokeNSFW", database.RevokeNSFW(ctx, uid, chID))
 	if ok, err := database.HasNSFWAcknowledgement(ctx, uid, chID); err != nil || ok {
 		t.Fatalf("HasNSFWAcknowledgement after revoke = (%v, %v), want (false, nil)", ok, err)
 	}
 
 	// Revoking a row that does not exist is a no-op, not an error.
-	if err := database.RevokeNSFW(ctx, uid, chID); err != nil {
-		t.Fatalf("RevokeNSFW (already gone): %v", err)
-	}
+	mustDo(t, "RevokeNSFW (already gone)", database.RevokeNSFW(ctx, uid, chID))
 }
 
 func TestListNSFWAcknowledgedUserIDs(t *testing.T) {
@@ -74,9 +70,7 @@ func TestListNSFWAcknowledgedUserIDs(t *testing.T) {
 	}
 
 	got, err := database.ListNSFWAcknowledgedUserIDs(ctx, chID)
-	if err != nil {
-		t.Fatalf("ListNSFWAcknowledgedUserIDs: %v", err)
-	}
+	mustDo(t, "ListNSFWAcknowledgedUserIDs", err)
 	want := map[int64]bool{alice: true, bob: true}
 	if len(got) != len(want) {
 		t.Fatalf("ListNSFWAcknowledgedUserIDs = %v, want exactly %v", got, want)
@@ -88,9 +82,7 @@ func TestListNSFWAcknowledgedUserIDs(t *testing.T) {
 	}
 
 	empty, err := database.ListNSFWAcknowledgedUserIDs(ctx, other+1000)
-	if err != nil {
-		t.Fatalf("ListNSFWAcknowledgedUserIDs(unknown channel): %v", err)
-	}
+	mustDo(t, "ListNSFWAcknowledgedUserIDs(unknown channel)", err)
 	if len(empty) != 0 {
 		t.Errorf("ListNSFWAcknowledgedUserIDs(unknown channel) = %v, want empty", empty)
 	}
@@ -110,9 +102,7 @@ func TestDeleteNSFWAcknowledgementsForChannel(t *testing.T) {
 		t.Fatalf("AcknowledgeNSFW(other): %v", err)
 	}
 
-	if err := database.DeleteNSFWAcknowledgementsForChannel(ctx, chID); err != nil {
-		t.Fatalf("DeleteNSFWAcknowledgementsForChannel: %v", err)
-	}
+	mustDo(t, "DeleteNSFWAcknowledgementsForChannel", database.DeleteNSFWAcknowledgementsForChannel(ctx, chID))
 
 	if ok, err := database.HasNSFWAcknowledgement(ctx, alice, chID); err != nil || ok {
 		t.Fatalf("HasNSFWAcknowledgement(chID) after clear = (%v, %v), want (false, nil)", ok, err)
@@ -136,9 +126,7 @@ func TestNSFW_ChannelDeletionCascades(t *testing.T) {
 		t.Fatalf("AcknowledgeNSFW: %v", err)
 	}
 
-	if err := database.AdminDeleteChannel(ctx, chID); err != nil {
-		t.Fatalf("AdminDeleteChannel: %v", err)
-	}
+	mustDo(t, "AdminDeleteChannel", database.AdminDeleteChannel(ctx, chID))
 
 	var n int
 	if err := database.QueryRowContext(ctx,
@@ -170,9 +158,7 @@ func TestNSFW_NewSessionInheritsTheAcknowledgement(t *testing.T) {
 	}
 
 	// "Logout": the first session goes away entirely.
-	if err := database.DeleteSession(ctx, "hash-first-device"); err != nil {
-		t.Fatalf("DeleteSession: %v", err)
-	}
+	mustDo(t, "DeleteSession", database.DeleteSession(ctx, "hash-first-device"))
 
 	// "Log in again": a brand-new session for the same user, no relation to
 	// the first one.
@@ -258,9 +244,7 @@ func TestChannelContentGateAndAcknowledgedChannelIDs(t *testing.T) {
 		t.Fatalf("ListNSFWAcknowledgedChannelIDs = (%v, %v), want only %d", acked, err, labelled)
 	}
 
-	if err := database.RevokeNSFW(ctx, uid, labelled); err != nil {
-		t.Fatalf("RevokeNSFW: %v", err)
-	}
+	mustDo(t, "RevokeNSFW", database.RevokeNSFW(ctx, uid, labelled))
 	if found, readable := gate(labelled); !found || readable {
 		t.Errorf("after revoke = (%v, %v), want not readable", found, readable)
 	}

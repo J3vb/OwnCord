@@ -49,12 +49,7 @@ func (s errGetChannelStore) GetChannel(ctx context.Context, id int64) (*db.Chann
 // fanned out as a channel event instead of a DM event.
 func TestHandleReaction_ChannelLookupErrorFailsClosed(t *testing.T) {
 	database := newTestDB(t)
-	seedRole(t, database, &db.Role{
-		ID:          permissions.MemberRoleID,
-		Name:        "member",
-		Permissions: permissions.SendMessages | permissions.ReadMessages | permissions.AddReactions,
-		Position:    1,
-	})
+	seedMemberRole(t, database, permissions.SendMessages|permissions.ReadMessages|permissions.AddReactions)
 	seedUser(t, database, &db.User{ID: 1, Username: "alice"})
 	seedUser(t, database, &db.User{ID: 2, Username: "bob"})
 	seedUser(t, database, &db.User{ID: 3, Username: "mallory"})
@@ -65,13 +60,8 @@ func TestHandleReaction_ChannelLookupErrorFailsClosed(t *testing.T) {
 	permSvc := NewPermissionService(database, permissions.NewChecker(database))
 
 	ch, _, err := database.GetOrCreateDMChannel(context.Background(), 1, 2)
-	if err != nil {
-		t.Fatalf("GetOrCreateDMChannel: %v", err)
-	}
-	msgID, err := database.CreateMessage(context.Background(), ch.ID, 1, "just us", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	mustDo(t, "GetOrCreateDMChannel", err)
+	msgID := mustCreateMessage(t, database, ch.ID, 1, "just us", nil)
 
 	failingStore := errGetChannelStore{DB: database, failChannelID: ch.ID}
 	svc := NewMessageService(failingStore, permSvc, nil)
@@ -83,10 +73,7 @@ func TestHandleReaction_ChannelLookupErrorFailsClosed(t *testing.T) {
 		t.Fatal("AddReaction must fail when GetChannel errors mid-request, not fall open into the non-DM branch")
 	}
 
-	counts, err := database.GetReactions(context.Background(), msgID)
-	if err != nil {
-		t.Fatalf("GetReactions: %v", err)
-	}
+	counts := mustGetReactions(t, database, msgID)
 	if len(counts) != 0 {
 		t.Fatalf("reaction must not be committed for a non-participant when the DM channel lookup failed, got %d reaction rows", len(counts))
 	}
@@ -102,29 +89,14 @@ func TestHandleReaction_ChannelLookupErrorFailsClosed(t *testing.T) {
 // mutating and fail the whole request on error.
 func TestHandleReaction_DMParticipantFetchErrorFailsClosed(t *testing.T) {
 	database := newTestDB(t)
-	seedRole(t, database, &db.Role{
-		ID:          permissions.MemberRoleID,
-		Name:        "member",
-		Permissions: permissions.SendMessages | permissions.ReadMessages | permissions.AddReactions,
-		Position:    1,
-	})
-	seedUser(t, database, &db.User{ID: 1, Username: "alice"})
-	seedUser(t, database, &db.User{ID: 2, Username: "bob"})
-	seedUserRole(t, database, 1, permissions.MemberRoleID)
-	seedUserRole(t, database, 2, permissions.MemberRoleID)
-	seedChannel(t, database, &db.Channel{ID: 50, Name: "dm-1-2", Type: "dm"})
-	seedDMParticipant(t, database, 50, 1)
-	seedDMParticipant(t, database, 50, 2)
+	seedAliceBobDM(t, database, permissions.SendMessages|permissions.ReadMessages|permissions.AddReactions)
 
 	permSvc := NewPermissionService(database, permissions.NewChecker(database))
 	realSvc := NewMessageService(database, permSvc, nil)
 
-	sent, err := realSvc.SendMessage(context.Background(), SendMessageParams{
+	sent := mustSendMessage(context.Background(), t, realSvc, SendMessageParams{
 		ChannelID: 50, UserID: 1, Username: "alice", Content: "hi bob",
 	})
-	if err != nil {
-		t.Fatalf("send: %v", err)
-	}
 
 	failingStore := errDMParticipantsStore{DB: database}
 	svc := NewMessageService(failingStore, permSvc, nil)
@@ -133,10 +105,7 @@ func TestHandleReaction_DMParticipantFetchErrorFailsClosed(t *testing.T) {
 		t.Fatal("AddReaction must fail when GetDMParticipantIDs errors, not silently drop the fan-out")
 	}
 
-	counts, err := database.GetReactions(context.Background(), sent.MessageID)
-	if err != nil {
-		t.Fatalf("GetReactions: %v", err)
-	}
+	counts := mustGetReactions(t, database, sent.MessageID)
 	if len(counts) != 0 {
 		t.Fatalf("reaction must not be committed when its fan-out cannot be resolved, got %d reaction rows", len(counts))
 	}
@@ -181,15 +150,11 @@ func TestAddReaction_CapReturnsReactionLimit(t *testing.T) {
 	ctx := context.Background()
 
 	dm, _, err := database.GetOrCreateDMChannel(ctx, 1, 2)
-	if err != nil {
-		t.Fatalf("GetOrCreateDMChannel: %v", err)
-	}
+	mustDo(t, "GetOrCreateDMChannel", err)
 	for name, channelID := range map[string]int64{"channel": 10, "dm": dm.ID} {
 		t.Run(name, func(t *testing.T) {
 			msgID, err := database.CreateMessage(ctx, channelID, 1, "react to me", nil)
-			if err != nil {
-				t.Fatalf("CreateMessage: %v", err)
-			}
+			mustDo(t, "CreateMessage", err)
 			reactWith(ctx, t, database, msgID, db.MaxDistinctReactions)
 
 			_, err = svc.AddReaction(ctx, 2, msgID, "new")
@@ -210,10 +175,7 @@ func TestAddReaction_CapReturnsReactionLimit(t *testing.T) {
 func TestAddReaction_LegacyOverCapUntouched(t *testing.T) {
 	svc, database := newTestMessageService(t)
 	ctx := context.Background()
-	msgID, err := database.CreateMessage(ctx, 10, 1, "legacy", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	msgID := mustCreateMessage(t, database, 10, 1, "legacy", nil)
 	reactWith(ctx, t, database, msgID, 22)
 	seedUser(t, database, &db.User{ID: 2, Username: "bob"})
 	seedUserRole(t, database, 2, permissions.MemberRoleID)
@@ -227,10 +189,7 @@ func TestAddReaction_LegacyOverCapUntouched(t *testing.T) {
 	if _, err := svc.AddReaction(ctx, 2, msgID, "brand-new"); !errors.Is(err, ErrReactionLimit) {
 		t.Errorf("a new emoji on an over-cap message = %v, want ErrReactionLimit", err)
 	}
-	counts, err := database.GetReactions(ctx, msgID)
-	if err != nil {
-		t.Fatalf("GetReactions: %v", err)
-	}
+	counts := mustGetReactions(t, database, msgID)
 	// 22 seeded, one removed, one added to an existing emoji, nothing deleted.
 	if len(counts) != 21 {
 		t.Errorf("distinct emoji = %d, want 21 (nothing else deleted)", len(counts))

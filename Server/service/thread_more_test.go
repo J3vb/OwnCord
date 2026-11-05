@@ -43,23 +43,7 @@ func TestThreadService_WithoutThreadStorageAnswersInternal(t *testing.T) {
 	f := newThreadFixture(t)
 	// A Store that is not a ThreadStore leaves the service without storage.
 	svc := &ThreadService{st: f.database, perms: f.perms, limiter: auth.NewRateLimiter()}
-	name := "x"
-	checks := map[string]func() error{
-		"create": func() error {
-			_, _, err := svc.Create(bg(), CreateThreadParams{UserID: thrOwner, ChannelID: thrParent, MessageID: 1, Name: "a"})
-			return err
-		},
-		"update": func() error {
-			_, err := svc.Update(bg(), UpdateThreadParams{UserID: thrOwner, ThreadID: 1, Name: &name})
-			return err
-		},
-		"delete": func() error { _, err := svc.Delete(bg(), thrMod, 1); return err },
-		"get":    func() error { _, err := svc.Get(bg(), 1); return err },
-		"list": func() error {
-			_, _, _, err := svc.List(bg(), thrOwner, thrParent, ThreadListParams{}, ThreadCursor{}, 5)
-			return err
-		},
-	}
+	checks := threadOperations(svc)
 	for op, call := range checks {
 		if err := call(); !errors.Is(err, ErrInternal) {
 			t.Errorf("%s without storage = %v, want ErrInternal", op, err)
@@ -74,23 +58,7 @@ func TestThreadService_StoreFailuresAreInternalNotLeaked(t *testing.T) {
 	f := newThreadFixture(t)
 	secret := errors.New("disk exploded: /var/secret/path")
 	svc := &ThreadService{st: f.database, ts: failingThreadStore{secret}, perms: f.perms, limiter: auth.NewRateLimiter()}
-	name := "x"
-	checks := map[string]func() error{
-		"create": func() error {
-			_, _, err := svc.Create(bg(), CreateThreadParams{UserID: thrOwner, ChannelID: thrParent, MessageID: 1, Name: "a"})
-			return err
-		},
-		"update": func() error {
-			_, err := svc.Update(bg(), UpdateThreadParams{UserID: thrOwner, ThreadID: 1, Name: &name})
-			return err
-		},
-		"delete": func() error { _, err := svc.Delete(bg(), thrMod, 1); return err },
-		"get":    func() error { _, err := svc.Get(bg(), 1); return err },
-		"list": func() error {
-			_, _, _, err := svc.List(bg(), thrOwner, thrParent, ThreadListParams{}, ThreadCursor{}, 5)
-			return err
-		},
-	}
+	checks := threadOperations(svc)
 	for op, call := range checks {
 		if err := call(); !errors.Is(err, ErrInternal) || !errors.Is(err, secret) {
 			t.Errorf("%s with a failing store = %v, want ErrInternal wrapping the cause", op, err)
@@ -403,9 +371,7 @@ func TestThreadArchiver_SweepDrainsFullBatchesAndSurfacesErrors(t *testing.T) {
 	a := fastArchiver(st)
 	rec := &threadRecorder{}
 	a.SetNotifier(rec)
-	if err := a.Sweep(bg()); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Sweep", a.Sweep(bg()))
 	if st.sweeps() != 2 || len(rec.got()) != threadArchiveBatch+1 {
 		t.Errorf("sweeps %d, notified %d, want 2 and %d", st.sweeps(), len(rec.got()), threadArchiveBatch+1)
 	}
@@ -529,5 +495,27 @@ func TestThreadCursorFor_CreatedSortIsIDOnly(t *testing.T) {
 	}
 	if _, err := ParseThreadCursorFor(ThreadSortActivity, "42"); !errors.Is(err, ErrBadRequest) {
 		t.Errorf("a created cursor must not parse under activity: %v", err)
+	}
+}
+
+// threadOperations is one call per ThreadService entry point, keyed by
+// operation name, for tests that expect every one to fail the same way.
+func threadOperations(svc *ThreadService) map[string]func() error {
+	name := "x"
+	return map[string]func() error{
+		"create": func() error {
+			_, _, err := svc.Create(bg(), CreateThreadParams{UserID: thrOwner, ChannelID: thrParent, MessageID: 1, Name: "a"})
+			return err
+		},
+		"update": func() error {
+			_, err := svc.Update(bg(), UpdateThreadParams{UserID: thrOwner, ThreadID: 1, Name: &name})
+			return err
+		},
+		"delete": func() error { _, err := svc.Delete(bg(), thrMod, 1); return err },
+		"get":    func() error { _, err := svc.Get(bg(), 1); return err },
+		"list": func() error {
+			_, _, _, err := svc.List(bg(), thrOwner, thrParent, ThreadListParams{}, ThreadCursor{}, 5)
+			return err
+		},
 	}
 }

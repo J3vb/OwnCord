@@ -24,28 +24,17 @@ func newKitService(t *testing.T, totp bool) (*AuthService, *db.User, *bytes.Buff
 	ctx := context.Background()
 	database := newTestDB(t)
 	hash, err := auth.HashPassword(kitPassword)
-	if err != nil {
-		t.Fatalf("HashPassword: %v", err)
-	}
-	uid, err := database.CreateUser(ctx, "kitholder", hash, 4)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	mustDo(t, "HashPassword", err)
+	uid := mustCreateUser(t, database, "kitholder", hash, 4)
 	key := make([]byte, 32)
 	if totp {
 		secret, _ := auth.GenerateTOTPSecret()
 		enc, err := auth.EncryptTOTPSecret(key, secret)
-		if err != nil {
-			t.Fatalf("EncryptTOTPSecret: %v", err)
-		}
-		if err := database.UpdateUserTOTPSecret(ctx, uid, &enc); err != nil {
-			t.Fatalf("UpdateUserTOTPSecret: %v", err)
-		}
+		mustDo(t, "EncryptTOTPSecret", err)
+		mustDo(t, "UpdateUserTOTPSecret", database.UpdateUserTOTPSecret(ctx, uid, &enc))
 	}
 	for _, dev := range []string{"laptop", "phone"} {
-		if _, err := database.CreateSession(ctx, uid, "tok-"+dev, dev, "10.0.0.1"); err != nil {
-			t.Fatalf("CreateSession: %v", err)
-		}
+		mustCreateSession(t, database, uid, "tok-"+dev, dev, "10.0.0.1")
 	}
 	user, _ := database.GetUserByID(ctx, uid)
 
@@ -75,9 +64,7 @@ func TestRecoveryKit_EnrolRecoverRotate(t *testing.T) {
 		t.Fatalf("enrol with a wrong password = %v, want the password refusal", err)
 	}
 	issue, err := svc.EnrolRecoveryKit(ctx, p, kitPassword, "")
-	if err != nil {
-		t.Fatalf("EnrolRecoveryKit: %v", err)
-	}
+	mustDo(t, "EnrolRecoveryKit", err)
 	if issue.Secret == "" || issue.CreatedAt == "" {
 		t.Fatalf("issue = %+v, want the secret handed out once", issue)
 	}
@@ -93,9 +80,7 @@ func TestRecoveryKit_EnrolRecoverRotate(t *testing.T) {
 	// Recovery: signs in without the second factor (the account has TOTP),
 	// replaces the password, revokes every session, spends the kit.
 	res, err := recoverWith(svc, "kitholder", issue.Secret, "203.0.113.5")
-	if err != nil {
-		t.Fatalf("RecoverWithKit: %v", err)
-	}
+	mustDo(t, "RecoverWithKit", err)
 	if res.Token == "" || res.Requires2FA {
 		t.Fatalf("recovery result = %+v, want a session without a 2FA challenge", res)
 	}
@@ -127,16 +112,12 @@ func TestRecoveryKit_EnrolRecoverRotate(t *testing.T) {
 		}
 	}
 	rows, err := svc.st.(*db.DB).QueryContext(ctx, `SELECT action, detail FROM audit_log WHERE actor_id = ?`, user.ID)
-	if err != nil {
-		t.Fatalf("query audit: %v", err)
-	}
+	mustDo(t, "query audit", err)
 	defer rows.Close() //nolint:errcheck
 	actions := map[string]bool{}
 	for rows.Next() {
 		var action, detail string
-		if err := rows.Scan(&action, &detail); err != nil {
-			t.Fatalf("scan: %v", err)
-		}
+		mustDo(t, "scan", rows.Scan(&action, &detail))
 		actions[action] = true
 		for _, leak := range []string{issue.Secret, canonical, kit.Verifier} {
 			if strings.Contains(detail, leak) {
@@ -177,24 +158,15 @@ func TestRecoveryKit_DisconnectsLiveSocketOnRedeem(t *testing.T) {
 	ctx := context.Background()
 	database := newTestDB(t)
 	hash, err := auth.HashPassword(kitPassword)
-	if err != nil {
-		t.Fatalf("HashPassword: %v", err)
-	}
-	uid, err := database.CreateUser(ctx, "kitholder", hash, 4)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	if _, err := database.CreateSession(ctx, uid, "tok-laptop", "laptop", "10.0.0.1"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
+	mustDo(t, "HashPassword", err)
+	uid := mustCreateUser(t, database, "kitholder", hash, 4)
+	mustCreateSession(t, database, uid, "tok-laptop", "laptop", "10.0.0.1")
 	user, _ := database.GetUserByID(ctx, uid)
 
 	disc := &recordingRecoveryDisconnector{}
 	svc := NewAuthService(database, auth.NewRateLimiter(), make([]byte, 32), disc)
 	issue, err := svc.EnrolRecoveryKit(ctx, sessionPrincipal(user), kitPassword, "")
-	if err != nil {
-		t.Fatalf("EnrolRecoveryKit: %v", err)
-	}
+	mustDo(t, "EnrolRecoveryKit", err)
 
 	if _, err := recoverWith(svc, "kitholder", issue.Secret, "203.0.113.5"); err != nil {
 		t.Fatalf("RecoverWithKit: %v", err)
@@ -217,9 +189,7 @@ func TestRecoveryKit_ClientGeneratedSecret(t *testing.T) {
 	}
 	shown, _, _ := auth.GenerateRecoveryKitSecret()
 	issue, err := svc.EnrolRecoveryKit(ctx, p, kitPassword, strings.ToLower(shown))
-	if err != nil {
-		t.Fatalf("EnrolRecoveryKit(client secret): %v", err)
-	}
+	mustDo(t, "EnrolRecoveryKit(client secret)", err)
 	if issue.Secret != "" {
 		t.Fatal("a client-generated secret was echoed back")
 	}
@@ -232,9 +202,7 @@ func TestRecoveryKit_UniformRefusalsAndLockout(t *testing.T) {
 	ctx := context.Background()
 	svc, user, _ := newKitService(t, false)
 	issue, err := svc.EnrolRecoveryKit(ctx, sessionPrincipal(user), kitPassword, "")
-	if err != nil {
-		t.Fatalf("EnrolRecoveryKit: %v", err)
-	}
+	mustDo(t, "EnrolRecoveryKit", err)
 	wrong, _, _ := auth.GenerateRecoveryKitSecret()
 	if _, err := recoverWith(svc, "nobody", wrong, "203.0.113.9"); !errors.Is(err, ErrUnauthorized) {
 		t.Fatalf("unknown account = %v, want the uniform refusal", err)
@@ -264,31 +232,8 @@ func TestRecoveryKit_ConcurrentRedemptionAdmitsOne(t *testing.T) {
 	ctx := context.Background()
 	svc, user, _ := newKitService(t, false)
 	issue, err := svc.EnrolRecoveryKit(ctx, sessionPrincipal(user), kitPassword, "")
-	if err != nil {
-		t.Fatalf("EnrolRecoveryKit: %v", err)
-	}
-	const racers = 4
-	results := make(chan error, racers)
-	var wg sync.WaitGroup
-	for i := range racers {
-		wg.Go(func() {
-			_, err := recoverWith(svc, "kitholder", issue.Secret, fmt.Sprintf("203.0.113.%d", 50+i))
-			results <- err
-		})
-	}
-	wg.Wait()
-	close(results)
-	ok := 0
-	for err := range results {
-		if err == nil {
-			ok++
-		} else if !errors.Is(err, ErrUnauthorized) && !errors.Is(err, ErrRateLimited) {
-			t.Errorf("unexpected outcome: %v", err)
-		}
-	}
-	if ok != 1 {
-		t.Fatalf("%d redemptions succeeded, want exactly 1", ok)
-	}
+	mustDo(t, "EnrolRecoveryKit", err)
+	raceKitRedemptions(t, svc, "kitholder", issue.Secret, 50)
 	if sessions, _ := svc.st.(*db.DB).ListUserSessions(ctx, user.ID); len(sessions) != 1 {
 		t.Fatalf("sessions = %d, want the one winner's", len(sessions))
 	}
@@ -298,9 +243,7 @@ func TestRecoveryKit_AdmissionBudgetRefusesWithoutWork(t *testing.T) {
 	ctx := context.Background()
 	svc, user, _ := newKitService(t, false)
 	issue, err := svc.EnrolRecoveryKit(ctx, sessionPrincipal(user), kitPassword, "")
-	if err != nil {
-		t.Fatalf("EnrolRecoveryKit: %v", err)
-	}
+	mustDo(t, "EnrolRecoveryKit", err)
 	svc.limiter.SetAdmissionBudget(1)
 	release, admitted := svc.limiter.Admission().TryAcquire()
 	if !admitted {
@@ -325,9 +268,7 @@ func TestRecoveryKit_AdmissionRefusalChargesNoAttempt(t *testing.T) {
 	ctx := context.Background()
 	svc, user, _ := newKitService(t, false)
 	issue, err := svc.EnrolRecoveryKit(ctx, sessionPrincipal(user), kitPassword, "")
-	if err != nil {
-		t.Fatalf("EnrolRecoveryKit: %v", err)
-	}
+	mustDo(t, "EnrolRecoveryKit", err)
 	svc.limiter.SetAdmissionBudget(1)
 	release, admitted := svc.limiter.Admission().TryAcquire()
 	if !admitted {
@@ -341,5 +282,33 @@ func TestRecoveryKit_AdmissionRefusalChargesNoAttempt(t *testing.T) {
 	release()
 	if _, err := recoverWith(svc, "kitholder", issue.Secret, "203.0.113.90"); err != nil {
 		t.Fatalf("recover after the busy period = %v, want success (the refusals must not have counted)", err)
+	}
+}
+
+// raceKitRedemptions has four callers redeem one credential at once and
+// requires exactly one to win, the rest refused uniformly or rate limited.
+func raceKitRedemptions(t *testing.T, svc *AuthService, username, credential string, ipBase int) {
+	t.Helper()
+	const racers = 4
+	results := make(chan error, racers)
+	var wg sync.WaitGroup
+	for i := range racers {
+		wg.Go(func() {
+			_, err := recoverWith(svc, username, credential, fmt.Sprintf("203.0.113.%d", ipBase+i))
+			results <- err
+		})
+	}
+	wg.Wait()
+	close(results)
+	ok := 0
+	for err := range results {
+		if err == nil {
+			ok++
+		} else if !errors.Is(err, ErrUnauthorized) && !errors.Is(err, ErrRateLimited) {
+			t.Errorf("unexpected outcome: %v", err)
+		}
+	}
+	if ok != 1 {
+		t.Fatalf("%d redemptions succeeded, want exactly 1", ok)
 	}
 }

@@ -26,9 +26,7 @@ func newGroupRowFixture(t *testing.T) groupRowFixture {
 	bob := seedUser(t, database, "bob")
 	carol := seedUser(t, database, "carol")
 	ch, err := database.CreateGroupDMChannel(context.Background(), "Crew", alice, []int64{alice, bob, carol})
-	if err != nil {
-		t.Fatalf("CreateGroupDMChannel: %v", err)
-	}
+	mustDo(t, "CreateGroupDMChannel", err)
 	return groupRowFixture{database: database, alice: alice, bob: bob, carol: carol, group: ch.ID}
 }
 
@@ -54,9 +52,7 @@ func (f groupRowFixture) insertGroupRow(t *testing.T, author, kind int64, conten
 func ownerOf(t *testing.T, database *db.DB, channelID int64) int64 {
 	t.Helper()
 	owner, _, err := database.GetGroupDMMeta(context.Background(), channelID)
-	if err != nil {
-		t.Fatalf("GetGroupDMMeta: %v", err)
-	}
+	mustDo(t, "GetGroupDMMeta", err)
 	return owner
 }
 
@@ -66,9 +62,7 @@ func ownerOf(t *testing.T, database *db.DB, channelID int64) int64 {
 func migrate064(t *testing.T) (database *db.DB, a, b, c int64) {
 	t.Helper()
 	database = openMemory(t)
-	if err := db.MigrateFS(database, migrationsBefore(t, "065")); err != nil {
-		t.Fatalf("migrate to 064: %v", err)
-	}
+	mustDo(t, "migrate to 064", db.MigrateFS(database, migrationsBefore(t, "065")))
 	return database, seedUser(t, database, "ua"), seedUser(t, database, "ub"), seedUser(t, database, "uc")
 }
 
@@ -105,9 +99,7 @@ func TestMigration065_BackfillsOwnerFromOldestMemberMessage(t *testing.T) {
 	rawMessage(t, database, ch, gone)
 	rawMessage(t, database, ch, c)
 	rawMessage(t, database, ch, a)
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("Migrate to head: %v", err)
-	}
+	mustDo(t, "Migrate to head", db.Migrate(database))
 	if got := ownerOf(t, database, ch); got != c {
 		t.Errorf("owner = %d, want %d (oldest surviving member message)", got, c)
 	}
@@ -116,9 +108,7 @@ func TestMigration065_BackfillsOwnerFromOldestMemberMessage(t *testing.T) {
 func TestMigration065_FallsBackToLowestMember(t *testing.T) {
 	database, a, b, c := migrate064(t)
 	ch := rawGroup(t, database, 1, c, b, a)
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("Migrate to head: %v", err)
-	}
+	mustDo(t, "Migrate to head", db.Migrate(database))
 	if got := ownerOf(t, database, ch); got != a {
 		t.Errorf("owner = %d, want %d (lowest member id, no messages)", got, a)
 	}
@@ -128,9 +118,7 @@ func TestMigration065_OneToOneHasNoOwner(t *testing.T) {
 	database, a, b, _ := migrate064(t)
 	ch := rawGroup(t, database, 0, a, b)
 	rawMessage(t, database, ch, a)
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("Migrate to head: %v", err)
-	}
+	mustDo(t, "Migrate to head", db.Migrate(database))
 	if got := count(t, database, `SELECT COUNT(*) FROM channels WHERE id = ? AND dm_owner_id IS NULL`, ch); got != 1 {
 		t.Errorf("1:1 DM has an owner")
 	}
@@ -199,13 +187,9 @@ func TestGetUserDMChannels_CarriesOwner(t *testing.T) {
 	f := newGroupRowFixture(t)
 	ctx := context.Background()
 	dm, _, err := f.database.GetOrCreateDMChannel(ctx, f.alice, f.bob)
-	if err != nil {
-		t.Fatalf("GetOrCreateDMChannel: %v", err)
-	}
+	mustDo(t, "GetOrCreateDMChannel", err)
 	dms, err := f.database.GetUserDMChannels(ctx, f.bob)
-	if err != nil {
-		t.Fatalf("GetUserDMChannels: %v", err)
-	}
+	mustDo(t, "GetUserDMChannels", err)
 	seen := 0
 	for _, d := range dms {
 		raw, _ := json.Marshal(d)
@@ -235,9 +219,7 @@ func TestMessagesForAPI_GroupRowCarriesKindAndGroupEvent(t *testing.T) {
 	f := newGroupRowFixture(t)
 	ctx := context.Background()
 	plain, err := f.database.CreateMessage(ctx, f.group, f.bob, "hi", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	mustDo(t, "CreateMessage", err)
 	name := "Raid night"
 	empty := ""
 	add := f.insertGroupRow(t, f.alice, db.MessageKindGroupAdd, "Alice added Carol to the group.", &f.carol, nil, 0)
@@ -249,9 +231,7 @@ func TestMessagesForAPI_GroupRowCarriesKindAndGroupEvent(t *testing.T) {
 	iconSet := f.insertGroupRow(t, f.alice, db.MessageKindGroupIcon, "icon set", nil, nil, 0)
 
 	msgs, err := f.database.GetMessagesForAPI(ctx, f.group, 0, 20, f.alice)
-	if err != nil {
-		t.Fatalf("GetMessagesForAPI: %v", err)
-	}
+	mustDo(t, "GetMessagesForAPI", err)
 	wire := map[int64]string{}
 	kinds := map[int64]string{}
 	for _, m := range msgs {
@@ -325,13 +305,9 @@ func TestSearch_ExcludesGroupRows(t *testing.T) {
 	ctx := context.Background()
 	f.insertGroupRow(t, f.alice, db.MessageKindGroupLeave, "zebra left the group", nil, nil, 0)
 	ordinary, err := f.database.CreateMessage(ctx, f.group, f.bob, "zebra message", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	mustDo(t, "CreateMessage", err)
 	got, err := f.database.SearchMessagesInChannels(ctx, "zebra", []int64{f.group}, db.SearchPage{Limit: 10})
-	if err != nil {
-		t.Fatalf("search: %v", err)
-	}
+	mustDo(t, "search", err)
 	if len(got) != 1 || got[0].MessageID != ordinary {
 		t.Errorf("hits = %+v, want only message %d", got, ordinary)
 	}
@@ -342,13 +318,9 @@ func TestGetReferencedMessages_GroupRowIsSystem(t *testing.T) {
 	ctx := context.Background()
 	row := f.insertGroupRow(t, f.alice, db.MessageKindGroupLeave, "Alice left the group.", nil, nil, 0)
 	plain, err := f.database.CreateMessage(ctx, f.group, f.bob, "hi", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	mustDo(t, "CreateMessage", err)
 	refs, err := f.database.GetReferencedMessages(ctx, f.group, []int64{row, plain})
-	if err != nil {
-		t.Fatalf("GetReferencedMessages: %v", err)
-	}
+	mustDo(t, "GetReferencedMessages", err)
 	if refs[row] == nil || !refs[row].IsSystem {
 		t.Errorf("group row ref = %+v, want IsSystem", refs[row])
 	}

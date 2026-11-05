@@ -25,17 +25,8 @@ func TestResumeAfterRestartTakesNoAdmissionSlot(t *testing.T) {
 	database := newTeardownTestDB(t)
 	ctx := context.Background()
 
-	userID, err := database.CreateUser(ctx, "restart-token-user", "hash", 1)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	token, err := auth.GenerateToken()
-	if err != nil {
-		t.Fatalf("GenerateToken: %v", err)
-	}
-	if _, err := database.CreateSession(ctx, userID, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
+	userID := mustCreateUser(t, database, "restart-token-user", 1)
+	token := seedSessionToken(t, database, userID)
 
 	limiter := auth.NewRateLimiter()
 	limiter.SetAdmissionBudget(1)

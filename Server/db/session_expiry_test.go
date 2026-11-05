@@ -17,13 +17,9 @@ import (
 // supporting index exists.
 func TestDeleteExpiredSessions_SargableFormat(t *testing.T) {
 	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
+	mustDo(t, "db.Open", err)
 	t.Cleanup(func() { _ = database.Close() })
-	if err := db.MigrateFS(database, migrations.FS); err != nil {
-		t.Fatalf("MigrateFS: %v", err)
-	}
+	mustDo(t, "MigrateFS", db.MigrateFS(database, migrations.FS))
 	ctx := context.Background()
 
 	if _, err := database.ExecContext(ctx,
@@ -46,26 +42,18 @@ func TestDeleteExpiredSessions_SargableFormat(t *testing.T) {
 	// to model a post-migration database.
 	insert("legacy_live", time.Now().UTC().Add(2*time.Hour).Format("2006-01-02T15:04:05Z"))
 
-	if err := database.DeleteExpiredSessions(ctx); err != nil {
-		t.Fatalf("DeleteExpiredSessions: %v", err)
-	}
+	mustDo(t, "DeleteExpiredSessions", database.DeleteExpiredSessions(ctx))
 
 	var tokens []string
 	rows, err := database.QueryContext(ctx, `SELECT token FROM sessions ORDER BY token`)
-	if err != nil {
-		t.Fatalf("query sessions: %v", err)
-	}
+	mustDo(t, "query sessions", err)
 	defer rows.Close() //nolint:errcheck
 	for rows.Next() {
 		var tok string
-		if err := rows.Scan(&tok); err != nil {
-			t.Fatal(err)
-		}
+		mustDo(t, "Scan", rows.Scan(&tok))
 		tokens = append(tokens, tok)
 	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Err", rows.Err())
 	if len(tokens) != 2 || tokens[0] != "legacy_live" || tokens[1] != "live" {
 		t.Fatalf("surviving sessions = %v, want [legacy_live live]", tokens)
 	}
@@ -89,9 +77,7 @@ func TestMigration031_NormalizesLegacyFormats(t *testing.T) {
 	database := openMemory(t)
 	ctx := context.Background()
 
-	if err := db.MigrateFS(database, migrationsUpTo(t, "031_")); err != nil {
-		t.Fatalf("MigrateFS building pre-031 schema: %v", err)
-	}
+	mustDo(t, "MigrateFS building pre-031 schema", db.MigrateFS(database, migrationsUpTo(t, "031_")))
 	var idx int
 	if err := database.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_sessions_expires_at'`).Scan(&idx); err != nil {
@@ -118,9 +104,7 @@ func TestMigration031_NormalizesLegacyFormats(t *testing.T) {
 	}
 
 	// Only 031 is left to apply, so any change below is its doing.
-	if err := db.MigrateFS(database, migrations.FS); err != nil {
-		t.Fatalf("MigrateFS applying 031: %v", err)
-	}
+	mustDo(t, "MigrateFS applying 031", db.MigrateFS(database, migrations.FS))
 
 	for _, tc := range cases {
 		var got string
@@ -177,9 +161,7 @@ func TestTouchSession_SlidesIdleExpiry(t *testing.T) {
 	database := openMigratedMemory(t)
 	seedAgedSession(t, database, "active", 29*24*time.Hour, time.Now().Add(24*time.Hour))
 
-	if err := database.TouchSessions(context.Background(), []string{"active"}); err != nil {
-		t.Fatalf("TouchSessions: %v", err)
-	}
+	mustDo(t, "TouchSessions", database.TouchSessions(context.Background(), []string{"active"}))
 
 	got := parseExpiry(t, sessionExpiresAt(t, database, "active"))
 	want := time.Now().UTC().Add(30 * 24 * time.Hour)
@@ -196,9 +178,7 @@ func TestTouchSession_NeverRevivesExpired(t *testing.T) {
 	seedAgedSession(t, database, "lapsed", 31*24*time.Hour, time.Now().Add(-time.Hour))
 	before := sessionExpiresAt(t, database, "lapsed")
 
-	if err := database.TouchSessions(context.Background(), []string{"lapsed"}); err != nil {
-		t.Fatalf("TouchSessions: %v", err)
-	}
+	mustDo(t, "TouchSessions", database.TouchSessions(context.Background(), []string{"lapsed"}))
 
 	after := sessionExpiresAt(t, database, "lapsed")
 	if after != before {
@@ -253,9 +233,7 @@ func TestTouchSessions_OneBatchSlidesEveryLiveSession(t *testing.T) {
 	before := sessionExpiresAt(t, database, "lapsed")
 	tokens = append(tokens, "lapsed", "no-such-token")
 
-	if err := database.TouchSessions(context.Background(), tokens); err != nil {
-		t.Fatalf("TouchSessions: %v", err)
-	}
+	mustDo(t, "TouchSessions", database.TouchSessions(context.Background(), tokens))
 
 	want := time.Now().UTC().Add(30 * 24 * time.Hour)
 	for _, tok := range []string{"live-0", "live-999", "live-1000", "live-1199"} {

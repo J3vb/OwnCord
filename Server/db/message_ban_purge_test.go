@@ -28,9 +28,7 @@ func TestPurgeUserChannelMessagesSince_OnlyAuthorAndWindow(t *testing.T) {
 	otherChannel := seedStamped(t, database, otherCh, target, "elsewhere", banPurgeStamp(time.Hour))
 
 	ids, err := database.PurgeUserChannelMessagesSince(ctx, ch, target, banPurgeStamp(24*time.Hour), 100)
-	if err != nil {
-		t.Fatalf("PurgeUserChannelMessagesSince: %v", err)
-	}
+	mustDo(t, "PurgeUserChannelMessagesSince", err)
 	if !slices.Equal(ids, []int64{inWindow}) {
 		t.Fatalf("purged ids = %v, want [%d]", ids, inWindow)
 	}
@@ -55,9 +53,7 @@ func TestPurgeUserChannelMessagesSince_SkipsAlreadyDeleted(t *testing.T) {
 	}
 
 	ids, err := database.PurgeUserChannelMessagesSince(ctx, ch, target, banPurgeStamp(24*time.Hour), 100)
-	if err != nil {
-		t.Fatalf("PurgeUserChannelMessagesSince: %v", err)
-	}
+	mustDo(t, "PurgeUserChannelMessagesSince", err)
 	if !slices.Equal(ids, []int64{live}) {
 		t.Fatalf("purged ids = %v, want [%d] (a pre-deleted id must not be returned)", ids, live)
 	}
@@ -79,9 +75,7 @@ func TestPurgeUserChannelMessagesSince_LimitBatches(t *testing.T) {
 	sizes := make([]int, 0, 4)
 	for range 4 {
 		ids, err := database.PurgeUserChannelMessagesSince(ctx, ch, target, banPurgeStamp(time.Hour), 100)
-		if err != nil {
-			t.Fatalf("PurgeUserChannelMessagesSince: %v", err)
-		}
+		mustDo(t, "PurgeUserChannelMessagesSince", err)
 		sizes = append(sizes, len(ids))
 		if !slices.IsSortedFunc(ids, func(a, b int64) int { return int(b - a) }) {
 			t.Errorf("batch ids not newest first: %v", ids)
@@ -104,14 +98,8 @@ func TestListUserMessageChannelsSince_ExcludesDMGroupDMArchived(t *testing.T) {
 	text := seedChannel(t, database, "bp-text")
 	archived := seedChannel(t, database, "bp-archived")
 	oldOnly := seedChannel(t, database, "bp-old")
-	dm, err := database.CreateChannel(ctx, "bp-dm", "dm", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel(dm): %v", err)
-	}
-	groupDM, err := database.CreateChannel(ctx, "bp-group", "dm", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel(group dm): %v", err)
-	}
+	dm := mustCreateChannel(t, database, "bp-dm", "dm", "", "", 0)
+	groupDM := mustCreateChannel(t, database, "bp-group", "dm", "", "", 0)
 	if _, err := database.ExecContext(ctx, `UPDATE channels SET archived = 1 WHERE id = ?`, archived); err != nil {
 		t.Fatalf("archive: %v", err)
 	}
@@ -128,9 +116,7 @@ func TestListUserMessageChannelsSince_ExcludesDMGroupDMArchived(t *testing.T) {
 	}
 
 	got, err := database.ListUserMessageChannelsSince(ctx, target, banPurgeStamp(24*time.Hour))
-	if err != nil {
-		t.Fatalf("ListUserMessageChannelsSince: %v", err)
-	}
+	mustDo(t, "ListUserMessageChannelsSince", err)
 	if !slices.Equal(got, []int64{text}) {
 		t.Fatalf("channels = %v, want only the live text channel [%d]", got, text)
 	}
@@ -151,9 +137,7 @@ func TestBanPurge_HiddenFromSearchPinsAndUnread(t *testing.T) {
 	search := func() []int64 {
 		t.Helper()
 		rs, err := database.SearchMessagesFiltered(ctx, db.SearchQuery{Text: "findme", ChannelIDs: []int64{ch}}, db.SearchPage{Limit: 50})
-		if err != nil {
-			t.Fatalf("SearchMessagesFiltered: %v", err)
-		}
+		mustDo(t, "SearchMessagesFiltered", err)
 		ids := resultIDs(rs)
 		slices.Sort(ids)
 		return ids
@@ -189,13 +173,8 @@ func TestRecordRemovalAction_WritesOneRowTargetingTheAuthor(t *testing.T) {
 	database, ownerID, memberID := newModerationActionsTestDB(t)
 	ctx := context.Background()
 
-	if err := database.RecordRemovalAction(ctx, memberID, ownerID, "3 messages removed with ban"); err != nil {
-		t.Fatalf("RecordRemovalAction: %v", err)
-	}
-	rows, err := database.ListModerationActionsForTarget(ctx, memberID)
-	if err != nil {
-		t.Fatalf("ListModerationActionsForTarget: %v", err)
-	}
+	mustDo(t, "RecordRemovalAction", database.RecordRemovalAction(ctx, memberID, ownerID, "3 messages removed with ban"))
+	rows := mustListModerationActionsForTarget(t, database, memberID)
 	if len(rows) != 1 || rows[0].Kind != "removal" || rows[0].Reason != "3 messages removed with ban" {
 		t.Fatalf("rows = %+v, want one removal row with the reason", rows)
 	}

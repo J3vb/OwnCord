@@ -17,16 +17,11 @@ func TestSetupStatus_NeedsSetup(t *testing.T) {
 	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestServices(database))
 
 	rr := doRequest(t, handler, "GET", "/setup/status", "", nil)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("GET /setup/status = %d, want 200", rr.Code)
-	}
+	requireStatus(t, rr, http.StatusOK)
 
-	var resp struct {
+	resp := decodeBody[struct {
 		NeedsSetup bool `json:"needs_setup"`
-	}
-	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	}](t, rr)
 	if !resp.NeedsSetup {
 		t.Error("needs_setup = false, want true (no users)")
 	}
@@ -38,16 +33,11 @@ func TestSetupStatus_NoSetupNeeded(t *testing.T) {
 	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestServices(database))
 
 	rr := doRequest(t, handler, "GET", "/setup/status", "", nil)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("GET /setup/status = %d, want 200", rr.Code)
-	}
+	requireStatus(t, rr, http.StatusOK)
 
-	var resp struct {
+	resp := decodeBody[struct {
 		NeedsSetup bool `json:"needs_setup"`
-	}
-	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	}](t, rr)
 	if resp.NeedsSetup {
 		t.Error("needs_setup = true, want false (user exists)")
 	}
@@ -62,19 +52,14 @@ func TestSetup_CreatesOwner(t *testing.T) {
 		"password": "SecurePass123!",
 	})
 
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("POST /setup = %d, want 201; body=%s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusCreated)
 
-	var resp struct {
+	resp := decodeBody[struct {
 		Token      string `json:"token"`
 		UserID     int64  `json:"user_id"`
 		Username   string `json:"username"`
 		InviteCode string `json:"invite_code"`
-	}
-	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	}](t, rr)
 	if resp.Token == "" {
 		t.Error("token is empty")
 	}
@@ -118,9 +103,7 @@ func TestSetup_UsernameNotHTMLEscaped(t *testing.T) {
 		"username": "O'Brien",
 		"password": "SecurePass123!",
 	})
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("POST /setup = %d, want 400; body=%s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusBadRequest)
 	for _, name := range []string{"O'Brien", "O&#39;Brien"} {
 		stored, err := database.GetUserByUsername(context.Background(), name)
 		if err == nil && stored != nil {
@@ -138,18 +121,14 @@ func TestSetup_BlockedAfterFirstUser(t *testing.T) {
 		"username": "owner1",
 		"password": "SecurePass123!",
 	})
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("first setup = %d, want 201; body=%s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusCreated)
 
 	// Second setup is blocked.
 	rr2 := doRequest(t, handler, "POST", "/setup", "", map[string]string{
 		"username": "hacker",
 		"password": "EvilPass456!",
 	})
-	if rr2.Code != http.StatusForbidden {
-		t.Errorf("second setup = %d, want 403", rr2.Code)
-	}
+	expectStatus(t, rr2, http.StatusForbidden)
 }
 
 func TestSetup_WeakPassword(t *testing.T) {
@@ -160,9 +139,7 @@ func TestSetup_WeakPassword(t *testing.T) {
 		"username": "admin",
 		"password": "short",
 	})
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("weak password = %d, want 400; body=%s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusBadRequest)
 }
 
 func TestSetup_MissingFields(t *testing.T) {
@@ -173,9 +150,7 @@ func TestSetup_MissingFields(t *testing.T) {
 		"username": "",
 		"password": "",
 	})
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("missing fields = %d, want 400", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusBadRequest)
 }
 
 // TestSetup_ConcurrentRace fires many parallel setup requests at a fresh
@@ -250,9 +225,7 @@ func TestSetup_SameOriginAllowedWithEmptyAllowlist(t *testing.T) {
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
 
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("POST /setup with same-origin Origin = %d, want 201; body: %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusCreated)
 }
 
 func TestSetup_ForeignOriginStillBlocked(t *testing.T) {
@@ -270,9 +243,7 @@ func TestSetup_ForeignOriginStillBlocked(t *testing.T) {
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
 
-	if rr.Code != http.StatusForbidden {
-		t.Fatalf("POST /setup from a foreign origin = %d, want 403", rr.Code)
-	}
+	requireStatus(t, rr, http.StatusForbidden)
 
 	count, err := database.UserCount(context.Background())
 	if err != nil {

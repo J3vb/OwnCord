@@ -33,6 +33,29 @@ CREATE TABLE IF NOT EXISTS audit_log (
 );
 `)...)
 
+// newVoiceModScene builds the usual moderation fixture: one voice channel, an
+// Admin actor and a Member target, all named after tag.
+func newVoiceModScene(t *testing.T, tag string) (*ws.Hub, *db.DB, int64, *db.User, *db.User) {
+	t.Helper()
+	hub, database := newVoiceModHub(t)
+	chanID := seedVoiceChan(t, database, "vc-"+tag)
+	actor := seedVoiceUserWithRole(t, database, "admin-"+tag, 2)
+	target := seedVoiceUserWithRole(t, database, "member-"+tag, 4)
+	return hub, database, chanID, actor, target
+}
+
+// newVoiceModMoveScene is newVoiceModScene with a source and a destination
+// channel for move tests.
+func newVoiceModMoveScene(t *testing.T, tag string) (*ws.Hub, *db.DB, int64, int64, *db.User, *db.User) {
+	t.Helper()
+	hub, database := newVoiceModHub(t)
+	fromID := seedVoiceChan(t, database, "vc-"+tag+"-from")
+	toID := seedVoiceChan(t, database, "vc-"+tag+"-to")
+	actor := seedVoiceUserWithRole(t, database, "admin-"+tag, 2)
+	target := seedVoiceUserWithRole(t, database, "member-"+tag, 4)
+	return hub, database, fromID, toID, actor, target
+}
+
 // newVoiceModHub mirrors newVoiceHub but on the audit-capable schema.
 func newVoiceModHub(t *testing.T) (*ws.Hub, *db.DB) {
 	t.Helper()
@@ -81,58 +104,36 @@ func newVoiceModHubWithLimiter(t *testing.T, limiter *auth.RateLimiter) (*ws.Hub
 // holds neither, which is what the denial cases below rely on.
 func seedVoiceUserWithRole(t *testing.T, database *db.DB, username string, roleID int) *db.User {
 	t.Helper()
-	if _, err := database.CreateUser(context.Background(), username, "hash", roleID); err != nil {
-		t.Fatalf("seedVoiceUserWithRole CreateUser: %v", err)
-	}
-	user, err := database.GetUserByUsername(context.Background(), username)
-	if err != nil || user == nil {
-		t.Fatalf("seedVoiceUserWithRole GetUserByUsername: %v", err)
-	}
-	return user
+	return seedUserWithRole(t, database, username, roleID)
 }
 
 // joinVoice registers a client for user and puts them in chanID via voice_join,
 // returning the client and its send channel drained of the join traffic.
 func joinVoice(t *testing.T, hub *ws.Hub, user *db.User, chanID int64) (*ws.Client, chan []byte) {
 	t.Helper()
-	send := make(chan []byte, 32)
-	c := ws.NewTestClientWithUser(hub, user, chanID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, chanID, 32)
 	hub.HandleMessageForTest(c, voiceJoinMsg(chanID))
 	drainChanTimeout(send, 30*time.Millisecond)
 	return c, send
 }
 
 func voiceModMuteMsg(channelID, userID int64, muted bool) []byte {
-	raw, _ := json.Marshal(map[string]any{
-		"type":    "voice_mod_mute",
-		"payload": map[string]any{"channel_id": channelID, "user_id": userID, "muted": muted},
-	})
+	raw := envelope("voice_mod_mute", map[string]any{"channel_id": channelID, "user_id": userID, "muted": muted})
 	return raw
 }
 
 func voiceModDeafenMsg(channelID, userID int64, deafened bool) []byte {
-	raw, _ := json.Marshal(map[string]any{
-		"type":    "voice_mod_deafen",
-		"payload": map[string]any{"channel_id": channelID, "user_id": userID, "deafened": deafened},
-	})
+	raw := envelope("voice_mod_deafen", map[string]any{"channel_id": channelID, "user_id": userID, "deafened": deafened})
 	return raw
 }
 
 func voiceModMoveMsg(userID, toChannelID int64) []byte {
-	raw, _ := json.Marshal(map[string]any{
-		"type":    "voice_mod_move",
-		"payload": map[string]any{"user_id": userID, "to_channel_id": toChannelID},
-	})
+	raw := envelope("voice_mod_move", map[string]any{"user_id": userID, "to_channel_id": toChannelID})
 	return raw
 }
 
 func voiceModKickMsg(userID int64) []byte {
-	raw, _ := json.Marshal(map[string]any{
-		"type":    "voice_mod_kick",
-		"payload": map[string]any{"user_id": userID},
-	})
+	raw := envelope("voice_mod_kick", map[string]any{"user_id": userID})
 	return raw
 }
 
@@ -204,20 +205,14 @@ func TestVoiceMod_Mute_WithoutMutePermission_CannotProbeVoicePresence(t *testing
 	notInVoice := seedVoiceUserWithRole(t, database, "target-not-in-voice-probe", 4)
 	joinVoice(t, hub, inVoice, chanID)
 
-	send1 := make(chan []byte, 16)
-	c1 := ws.NewTestClientWithUser(hub, actor, chanID, send1)
-	hub.Register(c1)
-	waitRegistered(t, hub, c1)
+	c1, send1 := connectClient(t, hub, actor, chanID, 16)
 	hub.HandleMessageForTest(c1, voiceModMuteMsg(chanID, inVoice.ID, true))
 	gotInVoice, ok := receiveErrorFrame(send1, waitTimeout)
 	if !ok {
 		t.Fatal("no error frame for a target in voice")
 	}
 
-	send2 := make(chan []byte, 16)
-	c2 := ws.NewTestClientWithUser(hub, actor, chanID, send2)
-	hub.Register(c2)
-	waitRegistered(t, hub, c2)
+	c2, send2 := connectClient(t, hub, actor, chanID, 16)
 	hub.HandleMessageForTest(c2, voiceModMuteMsg(chanID, notInVoice.ID, true))
 	gotNotInVoice, ok := receiveErrorFrame(send2, waitTimeout)
 	if !ok {
@@ -234,10 +229,7 @@ func TestVoiceMod_Mute_WithoutMutePermission_CannotProbeVoicePresence(t *testing
 	// Contrast: a holder (has MUTE_MEMBERS, outranks the target) DOES learn
 	// "not in voice" — the probe is closed only for a non-holder.
 	holder := seedVoiceUserWithRole(t, database, "admin-holder-probe", 2)
-	send3 := make(chan []byte, 16)
-	c3 := ws.NewTestClientWithUser(hub, holder, chanID, send3)
-	hub.Register(c3)
-	waitRegistered(t, hub, c3)
+	c3, send3 := connectClient(t, hub, holder, chanID, 16)
 	hub.HandleMessageForTest(c3, voiceModMuteMsg(chanID, notInVoice.ID, true))
 	gotHolder, ok := receiveErrorFrame(send3, waitTimeout)
 	if !ok {
@@ -259,14 +251,11 @@ func TestVoiceMod_Mute_WithoutMutePermission_Forbidden(t *testing.T) {
 
 	joinVoice(t, hub, target, chanID)
 
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, actor, chanID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, actor, chanID, 16)
 
 	hub.HandleMessageForTest(c, voiceModMuteMsg(chanID, target.ID, true))
 
-	if code := receiveErrorCode(send, waitTimeout); code != "FORBIDDEN" {
+	if code := drainForErrorCode(send, waitTimeout); code != "FORBIDDEN" {
 		t.Fatalf("error code = %q, want FORBIDDEN", code)
 	}
 	state, _ := database.GetVoiceState(context.Background(), target.ID)
@@ -283,14 +272,11 @@ func TestVoiceMod_Mute_TargetOutranksActor_Forbidden(t *testing.T) {
 
 	joinVoice(t, hub, target, chanID)
 
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, actor, chanID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, actor, chanID, 16)
 
 	hub.HandleMessageForTest(c, voiceModMuteMsg(chanID, target.ID, true))
 
-	if code := receiveErrorCode(send, waitTimeout); code != "FORBIDDEN" {
+	if code := drainForErrorCode(send, waitTimeout); code != "FORBIDDEN" {
 		t.Fatalf("error code = %q, want FORBIDDEN", code)
 	}
 	state, _ := database.GetVoiceState(context.Background(), target.ID)
@@ -300,19 +286,13 @@ func TestVoiceMod_Mute_TargetOutranksActor_Forbidden(t *testing.T) {
 }
 
 func TestVoiceMod_Mute_TargetNotInVoice_VoiceError(t *testing.T) {
-	hub, database := newVoiceModHub(t)
-	chanID := seedVoiceChan(t, database, "vc-absent")
-	actor := seedVoiceUserWithRole(t, database, "admin-absent", 2)
-	target := seedVoiceUserWithRole(t, database, "member-absent", 4)
+	hub, _, chanID, actor, target := newVoiceModScene(t, "absent")
 
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, actor, chanID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, actor, chanID, 16)
 
 	hub.HandleMessageForTest(c, voiceModMuteMsg(chanID, target.ID, true))
 
-	if code := receiveErrorCode(send, waitTimeout); code != "VOICE_ERROR" {
+	if code := drainForErrorCode(send, waitTimeout); code != "VOICE_ERROR" {
 		t.Fatalf("error code = %q, want VOICE_ERROR", code)
 	}
 }
@@ -326,14 +306,11 @@ func TestVoiceMod_Mute_WrongChannel_VoiceError(t *testing.T) {
 
 	joinVoice(t, hub, target, chanA)
 
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, actor, chanA, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, actor, chanA, 16)
 
 	hub.HandleMessageForTest(c, voiceModMuteMsg(chanB, target.ID, true))
 
-	if code := receiveErrorCode(send, waitTimeout); code != "VOICE_ERROR" {
+	if code := drainForErrorCode(send, waitTimeout); code != "VOICE_ERROR" {
 		t.Fatalf("error code = %q, want VOICE_ERROR", code)
 	}
 }
@@ -346,7 +323,7 @@ func TestVoiceMod_Kick_Self_BadRequest(t *testing.T) {
 	c, send := joinVoice(t, hub, actor, chanID)
 	hub.HandleMessageForTest(c, voiceModKickMsg(actor.ID))
 
-	if code := receiveErrorCode(send, waitTimeout); code != "BAD_REQUEST" {
+	if code := drainForErrorCode(send, waitTimeout); code != "BAD_REQUEST" {
 		t.Fatalf("error code = %q, want BAD_REQUEST", code)
 	}
 }
@@ -365,14 +342,11 @@ func TestVoiceMod_Mute_TargetInDMCallActorNotParticipant_VoiceError(t *testing.T
 
 	joinVoice(t, hub, bob, dmID)
 
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, mallory, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, mallory, 0, 16)
 
 	hub.HandleMessageForTest(c, voiceModMuteMsg(dmID, bob.ID, true))
 
-	if code := receiveErrorCode(send, waitTimeout); code != "VOICE_ERROR" {
+	if code := drainForErrorCode(send, waitTimeout); code != "VOICE_ERROR" {
 		t.Fatalf("error code = %q, want VOICE_ERROR (must not disclose the DM call via FORBIDDEN)", code)
 	}
 	state, _ := database.GetVoiceState(context.Background(), bob.ID)
@@ -391,10 +365,7 @@ func TestVoiceMod_Mute_TargetInDMCallActorIsParticipant_Allowed(t *testing.T) {
 
 	joinVoice(t, hub, member, dmID)
 
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, admin, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, _ := connectClient(t, hub, admin, 0, 16)
 
 	hub.HandleMessageForTest(c, voiceModMuteMsg(dmID, member.ID, true))
 
@@ -407,17 +378,11 @@ func TestVoiceMod_Mute_TargetInDMCallActorIsParticipant_Allowed(t *testing.T) {
 // ─── happy paths ──────────────────────────────────────────────────────────────
 
 func TestVoiceMod_Mute_SetsServerMutedAndBroadcasts(t *testing.T) {
-	hub, database := newVoiceModHub(t)
-	chanID := seedVoiceChan(t, database, "vc-mute")
-	actor := seedVoiceUserWithRole(t, database, "admin-mute", 2)
-	target := seedVoiceUserWithRole(t, database, "member-mute", 4)
+	hub, database, chanID, actor, target := newVoiceModScene(t, "mute")
 
 	_, targetSend := joinVoice(t, hub, target, chanID)
 
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, actor, chanID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, _ := connectClient(t, hub, actor, chanID, 16)
 
 	hub.HandleMessageForTest(c, voiceModMuteMsg(chanID, target.ID, true))
 
@@ -446,17 +411,11 @@ func TestVoiceMod_Mute_SetsServerMutedAndBroadcasts(t *testing.T) {
 }
 
 func TestVoiceMod_Mute_Clear_LeavesSelfMuteAlone(t *testing.T) {
-	hub, database := newVoiceModHub(t)
-	chanID := seedVoiceChan(t, database, "vc-unmute")
-	actor := seedVoiceUserWithRole(t, database, "admin-unmute", 2)
-	target := seedVoiceUserWithRole(t, database, "member-unmute", 4)
+	hub, database, chanID, actor, target := newVoiceModScene(t, "unmute")
 
 	joinVoice(t, hub, target, chanID)
 
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, actor, chanID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, _ := connectClient(t, hub, actor, chanID, 16)
 
 	hub.HandleMessageForTest(c, voiceModMuteMsg(chanID, target.ID, true))
 	hub.HandleMessageForTest(c, voiceModMuteMsg(chanID, target.ID, false))
@@ -474,17 +433,11 @@ func TestVoiceMod_Mute_Clear_LeavesSelfMuteAlone(t *testing.T) {
 }
 
 func TestVoiceMod_Deafen_SetsServerDeafenedAndMutes(t *testing.T) {
-	hub, database := newVoiceModHub(t)
-	chanID := seedVoiceChan(t, database, "vc-deafen")
-	actor := seedVoiceUserWithRole(t, database, "admin-deafen", 2)
-	target := seedVoiceUserWithRole(t, database, "member-deafen", 4)
+	hub, database, chanID, actor, target := newVoiceModScene(t, "deafen")
 
 	_, targetSend := joinVoice(t, hub, target, chanID)
 
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, actor, chanID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, _ := connectClient(t, hub, actor, chanID, 16)
 
 	hub.HandleMessageForTest(c, voiceModDeafenMsg(chanID, target.ID, true))
 
@@ -514,17 +467,11 @@ func TestVoiceMod_Deafen_SetsServerDeafenedAndMutes(t *testing.T) {
 // Lifting a server deafen must also lift the mute it implied, or the target
 // stays SFU-muted (and refused their own unmute) after the deafen is gone.
 func TestVoiceMod_Deafen_ClearingRestoresSelfUnmute(t *testing.T) {
-	hub, database := newVoiceModHub(t)
-	chanID := seedVoiceChan(t, database, "vc-undeafen")
-	actor := seedVoiceUserWithRole(t, database, "admin-undeafen", 2)
-	target := seedVoiceUserWithRole(t, database, "member-undeafen", 4)
+	hub, database, chanID, actor, target := newVoiceModScene(t, "undeafen")
 
 	targetClient, targetSend := joinVoice(t, hub, target, chanID)
 
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, actor, chanID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, _ := connectClient(t, hub, actor, chanID, 16)
 
 	// Server-deafen the target: implies a server mute too.
 	hub.HandleMessageForTest(c, voiceModDeafenMsg(chanID, target.ID, true))
@@ -555,30 +502,21 @@ func TestVoiceMod_Deafen_ClearingRestoresSelfUnmute(t *testing.T) {
 
 	// The target must now be able to self-unmute without SERVER_MUTED.
 	hub.HandleMessageForTest(targetClient, voiceMuteMsg(false))
-	if code := receiveErrorCode(targetSend, 200*time.Millisecond); code != "" {
+	if code := drainForErrorCode(targetSend, 200*time.Millisecond); code != "" {
 		t.Fatalf("self-unmute refused with %q after deafen was cleared, want no error", code)
 	}
 }
 
 func TestVoiceMod_Kick_RemovesFromVoiceAndNotifiesTarget(t *testing.T) {
-	hub, database := newVoiceModHub(t)
-	chanID := seedVoiceChan(t, database, "vc-kick")
-	actor := seedVoiceUserWithRole(t, database, "admin-kick", 2)
-	target := seedVoiceUserWithRole(t, database, "member-kick", 4)
+	hub, database, chanID, actor, target := newVoiceModScene(t, "kick")
 
 	_, targetSend := joinVoice(t, hub, target, chanID)
 
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, actor, chanID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, _ := connectClient(t, hub, actor, chanID, 16)
 
 	hub.HandleMessageForTest(c, voiceModKickMsg(target.ID))
 
-	waitFor(t, waitTimeout, func() bool {
-		state, err := database.GetVoiceState(context.Background(), target.ID)
-		return err == nil && state == nil
-	}, "target's voice_states row to be deleted")
+	waitVoiceStateGone(t, database, target.ID, "target's voice_states row to be deleted")
 
 	if receiveMsgOfType(targetSend, "voice_disconnected", waitTimeout) == nil {
 		t.Error("target did not receive voice_disconnected")
@@ -589,18 +527,11 @@ func TestVoiceMod_Kick_RemovesFromVoiceAndNotifiesTarget(t *testing.T) {
 }
 
 func TestVoiceMod_Move_DisconnectsAndSendsVoiceMoved(t *testing.T) {
-	hub, database := newVoiceModHub(t)
-	fromID := seedVoiceChan(t, database, "vc-move-from")
-	toID := seedVoiceChan(t, database, "vc-move-to")
-	actor := seedVoiceUserWithRole(t, database, "admin-move", 2)
-	target := seedVoiceUserWithRole(t, database, "member-move", 4)
+	hub, database, fromID, toID, actor, target := newVoiceModMoveScene(t, "move")
 
 	_, targetSend := joinVoice(t, hub, target, fromID)
 
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, actor, fromID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, _ := connectClient(t, hub, actor, fromID, 16)
 
 	hub.HandleMessageForTest(c, voiceModMoveMsg(target.ID, toID))
 
@@ -611,10 +542,7 @@ func TestVoiceMod_Move_DisconnectsAndSendsVoiceMoved(t *testing.T) {
 	if int64(payload["to_channel_id"].(float64)) != toID {
 		t.Errorf("to_channel_id = %v, want %d", payload["to_channel_id"], toID)
 	}
-	waitFor(t, waitTimeout, func() bool {
-		state, err := database.GetVoiceState(context.Background(), target.ID)
-		return err == nil && state == nil
-	}, "target to be removed from the old channel pending re-join")
+	waitVoiceStateGone(t, database, target.ID, "target to be removed from the old channel pending re-join")
 
 	if !slices.Contains(auditActions(t, database), "voice_mod_move") {
 		t.Error("voice_mod_move audit entry missing")
@@ -628,11 +556,7 @@ func TestVoiceMod_Move_DisconnectsAndSendsVoiceMoved(t *testing.T) {
 // socket itself is sent nothing; the resume half is pinned in
 // voice_grace_modmove_test.go.
 func TestVoiceMod_Move_ParkedTargetIsMoved(t *testing.T) {
-	hub, database := newVoiceModHub(t)
-	fromID := seedVoiceChan(t, database, "vc-parked-from")
-	toID := seedVoiceChan(t, database, "vc-parked-to")
-	actor := seedVoiceUserWithRole(t, database, "admin-parked", 2)
-	target := seedVoiceUserWithRole(t, database, "member-parked", 4)
+	hub, database, fromID, toID, actor, target := newVoiceModMoveScene(t, "parked")
 
 	targetClient, targetSend := joinVoice(t, hub, target, fromID)
 	hub.DropSocketForTest(targetClient)
@@ -640,10 +564,7 @@ func TestVoiceMod_Move_ParkedTargetIsMoved(t *testing.T) {
 		t.Fatalf("precondition: the dropped target's membership was not parked: state=%v err=%v", state, err)
 	}
 
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, actor, fromID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, actor, fromID, 16)
 
 	hub.HandleMessageForTest(c, voiceModMoveMsg(target.ID, toID))
 
@@ -674,11 +595,7 @@ func TestVoiceMod_Move_ParkedTargetIsMoved(t *testing.T) {
 // server_muted/server_deafened must not be silently lifted by the very move
 // the moderator asked for.
 func TestVoiceMod_Move_PreservesServerMute(t *testing.T) {
-	hub, database := newVoiceModHub(t)
-	fromID := seedVoiceChan(t, database, "vc-move-mute-from")
-	toID := seedVoiceChan(t, database, "vc-move-mute-to")
-	actor := seedVoiceUserWithRole(t, database, "admin-move-mute", 2)
-	target := seedVoiceUserWithRole(t, database, "member-move-mute", 4)
+	hub, database, fromID, toID, actor, target := newVoiceModMoveScene(t, "move-mute")
 
 	targetClient, targetSend := joinVoice(t, hub, target, fromID)
 
@@ -689,20 +606,14 @@ func TestVoiceMod_Move_PreservesServerMute(t *testing.T) {
 		t.Fatalf("SetVoiceServerDeafen: %v", err)
 	}
 
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, actor, fromID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, _ := connectClient(t, hub, actor, fromID, 16)
 
 	hub.HandleMessageForTest(c, voiceModMoveMsg(target.ID, toID))
 
 	if receiveMsgOfType(targetSend, "voice_moved", waitTimeout) == nil {
 		t.Fatal("target did not receive voice_moved")
 	}
-	waitFor(t, waitTimeout, func() bool {
-		state, err := database.GetVoiceState(context.Background(), target.ID)
-		return err == nil && state == nil
-	}, "target to be removed from the old channel pending re-join")
+	waitVoiceStateGone(t, database, target.ID, "target to be removed from the old channel pending re-join")
 
 	// Simulate the target's client answering voice_moved with a plain
 	// voice_join to the destination.
@@ -726,23 +637,17 @@ func TestVoiceMod_Move_PreservesServerMute(t *testing.T) {
 func TestVoiceMod_Move_TextChannelDestination_BadRequest(t *testing.T) {
 	hub, database := newVoiceModHub(t)
 	fromID := seedVoiceChan(t, database, "vc-move-bad")
-	textID, err := database.CreateChannel(context.Background(), "general-move", "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
+	textID := mustCreateChannel(t, database, "general-move", "text")
 	actor := seedVoiceUserWithRole(t, database, "admin-move-bad", 2)
 	target := seedVoiceUserWithRole(t, database, "member-move-bad", 4)
 
 	joinVoice(t, hub, target, fromID)
 
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, actor, fromID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, actor, fromID, 16)
 
 	hub.HandleMessageForTest(c, voiceModMoveMsg(target.ID, textID))
 
-	if code := receiveErrorCode(send, waitTimeout); code != "BAD_REQUEST" {
+	if code := drainForErrorCode(send, waitTimeout); code != "BAD_REQUEST" {
 		t.Fatalf("error code = %q, want BAD_REQUEST", code)
 	}
 	state, _ := database.GetVoiceState(context.Background(), target.ID)
@@ -773,14 +678,11 @@ func TestVoiceMod_Move_ArchivedDestination_BadRequest(t *testing.T) {
 
 	joinVoice(t, hub, target, fromID)
 
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, actor, fromID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, actor, fromID, 16)
 
 	hub.HandleMessageForTest(c, voiceModMoveMsg(target.ID, toID))
 
-	if code := receiveErrorCode(send, waitTimeout); code != "BAD_REQUEST" {
+	if code := drainForErrorCode(send, waitTimeout); code != "BAD_REQUEST" {
 		t.Fatalf("error code = %q, want BAD_REQUEST", code)
 	}
 	state, err := database.GetVoiceState(context.Background(), target.ID)
@@ -800,11 +702,7 @@ func TestVoiceMod_Move_ArchivedDestination_BadRequest(t *testing.T) {
 // could not join themselves. The actor keeps MUTE_MEMBERS and still outranks
 // the target, so only the target's missing CONNECT_VOICE can refuse this.
 func TestVoiceMod_Move_TargetCannotConnectToDestination_Forbidden(t *testing.T) {
-	hub, database := newVoiceModHub(t)
-	fromID := seedVoiceChan(t, database, "vc-move-noconnect-from")
-	toID := seedVoiceChan(t, database, "vc-move-noconnect-to")
-	actor := seedVoiceUserWithRole(t, database, "admin-move-noconnect", 2)
-	target := seedVoiceUserWithRole(t, database, "member-move-noconnect", 4)
+	hub, database, fromID, toID, actor, target := newVoiceModMoveScene(t, "move-noconnect")
 
 	// Destination denies CONNECT_VOICE to the target's role (Member, id 4).
 	if err := database.UpsertChannelOverride(
@@ -815,14 +713,11 @@ func TestVoiceMod_Move_TargetCannotConnectToDestination_Forbidden(t *testing.T) 
 
 	_, targetSend := joinVoice(t, hub, target, fromID)
 
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, actor, fromID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, actor, fromID, 16)
 
 	hub.HandleMessageForTest(c, voiceModMoveMsg(target.ID, toID))
 
-	if code := receiveErrorCode(send, waitTimeout); code != "FORBIDDEN" {
+	if code := drainForErrorCode(send, waitTimeout); code != "FORBIDDEN" {
 		t.Fatalf("error code = %q, want FORBIDDEN", code)
 	}
 	if payload := receiveMsgOfType(targetSend, "voice_moved", 100*time.Millisecond); payload != nil {
@@ -866,14 +761,11 @@ func TestVoiceMod_Kick_EvictionIsScopedToAuthorizedChannel(t *testing.T) {
 	targetClient, _ := joinVoice(t, hub, target, chanA)
 	ws.SetClientVoiceStateForTest(targetClient, chanB, "join-token-b")
 
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, actor, chanA, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, actor, chanA, 16)
 
 	hub.HandleMessageForTest(c, voiceModKickMsg(target.ID))
 
-	if code := receiveErrorCode(send, waitTimeout); code != "VOICE_ERROR" {
+	if code := drainForErrorCode(send, waitTimeout); code != "VOICE_ERROR" {
 		t.Fatalf("error code = %q, want VOICE_ERROR", code)
 	}
 	if got := ws.GetClientVoiceChIDForTest(targetClient); got != chanB {
@@ -913,14 +805,11 @@ func TestVoiceMod_Move_RefusedMoveClearsPendingModStash(t *testing.T) {
 	// thing the eviction below reads — already names chanB.
 	ws.SetClientVoiceStateForTest(targetClient, chanB, "join-token-b")
 
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, actor, chanA, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, actor, chanA, 16)
 
 	hub.HandleMessageForTest(c, voiceModMoveMsg(target.ID, chanC))
 
-	if code := receiveErrorCode(send, waitTimeout); code != "VOICE_ERROR" {
+	if code := drainForErrorCode(send, waitTimeout); code != "VOICE_ERROR" {
 		t.Fatalf("error code = %q, want VOICE_ERROR (move must refuse when the target left the authorized channel)", code)
 	}
 	if gotMuted, gotDeafened := ws.PeekClientPendingModFlagsForTest(targetClient); gotMuted || gotDeafened {
@@ -933,23 +822,17 @@ func TestVoiceMod_Move_RefusedMoveClearsPendingModStash(t *testing.T) {
 // ─── self-service controls under a server mute ───────────────────────────────
 
 func TestVoiceMute_SelfUnmuteWhileServerMuted_Refused(t *testing.T) {
-	hub, database := newVoiceModHub(t)
-	chanID := seedVoiceChan(t, database, "vc-selfunmute")
-	actor := seedVoiceUserWithRole(t, database, "admin-selfunmute", 2)
-	target := seedVoiceUserWithRole(t, database, "member-selfunmute", 4)
+	hub, database, chanID, actor, target := newVoiceModScene(t, "selfunmute")
 
 	targetClient, targetSend := joinVoice(t, hub, target, chanID)
 
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, actor, chanID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, _ := connectClient(t, hub, actor, chanID, 16)
 	hub.HandleMessageForTest(c, voiceModMuteMsg(chanID, target.ID, true))
 	drainChanTimeout(targetSend, 30*time.Millisecond)
 
 	hub.HandleMessageForTest(targetClient, voiceMuteMsg(false))
 
-	if code := receiveErrorCode(targetSend, waitTimeout); code != "SERVER_MUTED" {
+	if code := drainForErrorCode(targetSend, waitTimeout); code != "SERVER_MUTED" {
 		t.Fatalf("error code = %q, want SERVER_MUTED", code)
 	}
 	state, _ := database.GetVoiceState(context.Background(), target.ID)
@@ -959,45 +842,33 @@ func TestVoiceMute_SelfUnmuteWhileServerMuted_Refused(t *testing.T) {
 }
 
 func TestVoiceDeafen_SelfUndeafenWhileServerDeafened_Refused(t *testing.T) {
-	hub, database := newVoiceModHub(t)
-	chanID := seedVoiceChan(t, database, "vc-selfundeaf")
-	actor := seedVoiceUserWithRole(t, database, "admin-selfundeaf", 2)
-	target := seedVoiceUserWithRole(t, database, "member-selfundeaf", 4)
+	hub, _, chanID, actor, target := newVoiceModScene(t, "selfundeaf")
 
 	targetClient, targetSend := joinVoice(t, hub, target, chanID)
 
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, actor, chanID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, _ := connectClient(t, hub, actor, chanID, 16)
 	hub.HandleMessageForTest(c, voiceModDeafenMsg(chanID, target.ID, true))
 	drainChanTimeout(targetSend, 30*time.Millisecond)
 
 	hub.HandleMessageForTest(targetClient, voiceDeafenMsg(false))
 
-	if code := receiveErrorCode(targetSend, waitTimeout); code != "SERVER_DEAFENED" {
+	if code := drainForErrorCode(targetSend, waitTimeout); code != "SERVER_DEAFENED" {
 		t.Fatalf("error code = %q, want SERVER_DEAFENED", code)
 	}
 }
 
 func TestVoiceMute_SelfMuteWhileServerMuted_Allowed(t *testing.T) {
-	hub, database := newVoiceModHub(t)
-	chanID := seedVoiceChan(t, database, "vc-selfmute-ok")
-	actor := seedVoiceUserWithRole(t, database, "admin-selfmute-ok", 2)
-	target := seedVoiceUserWithRole(t, database, "member-selfmute-ok", 4)
+	hub, _, chanID, actor, target := newVoiceModScene(t, "selfmute-ok")
 
 	targetClient, targetSend := joinVoice(t, hub, target, chanID)
 
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, actor, chanID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, _ := connectClient(t, hub, actor, chanID, 16)
 	hub.HandleMessageForTest(c, voiceModMuteMsg(chanID, target.ID, true))
 	drainChanTimeout(targetSend, 30*time.Millisecond)
 
 	hub.HandleMessageForTest(targetClient, voiceMuteMsg(true))
 
-	if code := receiveErrorCode(targetSend, 200*time.Millisecond); code != "" {
+	if code := drainForErrorCode(targetSend, 200*time.Millisecond); code != "" {
 		t.Fatalf("self-mute refused with %q, want no error", code)
 	}
 }
@@ -1007,15 +878,9 @@ func TestVoiceMute_SelfMuteWhileServerMuted_Allowed(t *testing.T) {
 func kickFromVoice(t *testing.T, hub *ws.Hub, database *db.DB, chanID int64, target *db.User) {
 	t.Helper()
 	actor := seedVoiceUserWithRole(t, database, "admin-"+target.Username, 2)
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, actor, chanID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, _ := connectClient(t, hub, actor, chanID, 16)
 	hub.HandleMessageForTest(c, voiceModKickMsg(target.ID))
-	waitFor(t, waitTimeout, func() bool {
-		state, err := database.GetVoiceState(context.Background(), target.ID)
-		return err == nil && state == nil
-	}, "target's voice_states row to be deleted")
+	waitVoiceStateGone(t, database, target.ID, "target's voice_states row to be deleted")
 }
 
 // P2-T5: a client whose voice was reconnecting when it was kicked answers the
@@ -1042,10 +907,7 @@ func TestVoiceMod_Kick_RefusesRejoinOfThatChannel(t *testing.T) {
 
 	// Only that channel is refused.
 	hub.HandleMessageForTest(targetClient, voiceJoinMsg(otherID))
-	waitFor(t, waitTimeout, func() bool {
-		state, err := database.GetVoiceState(context.Background(), target.ID)
-		return err == nil && state != nil && state.ChannelID == otherID
-	}, "target to join another channel")
+	waitVoiceStateIn(t, database, target.ID, otherID, "target to join another channel")
 }
 
 func TestVoiceMod_Kick_RejoinAllowedOnceTheBlockExpires(t *testing.T) {
@@ -1060,39 +922,26 @@ func TestVoiceMod_Kick_RejoinAllowedOnceTheBlockExpires(t *testing.T) {
 	drainChanTimeout(targetSend, 30*time.Millisecond)
 
 	hub.HandleMessageForTest(targetClient, voiceJoinMsg(chanID))
-	waitFor(t, waitTimeout, func() bool {
-		state, err := database.GetVoiceState(context.Background(), target.ID)
-		return err == nil && state != nil && state.ChannelID == chanID
-	}, "target to rejoin once the block expired")
+	waitVoiceStateIn(t, database, target.ID, chanID, "target to rejoin once the block expired")
 }
 
 // A move of a parked call blocks the rejoin of the channel it was moved out
 // of, exactly like a live move: a fresh connect that never collects the move
 // cannot walk back into the source channel.
 func TestVoiceMod_ParkedMove_RefusesRejoinOfTheSourceChannel(t *testing.T) {
-	hub, database := newVoiceModHub(t)
-	fromID := seedVoiceChan(t, database, "vc-removed-from")
-	toID := seedVoiceChan(t, database, "vc-removed-to")
-	actor := seedVoiceUserWithRole(t, database, "admin-removed", 2)
-	target := seedVoiceUserWithRole(t, database, "member-removed", 4)
+	hub, database, fromID, toID, actor, target := newVoiceModMoveScene(t, "removed")
 
 	targetClient, _ := joinVoice(t, hub, target, fromID)
 	hub.DropSocketForTest(targetClient)
 
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, actor, fromID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, _ := connectClient(t, hub, actor, fromID, 16)
 	hub.HandleMessageForTest(c, voiceModMoveMsg(target.ID, toID))
 	waitFor(t, waitTimeout, func() bool {
 		return slices.Contains(auditActions(t, database), "voice_mod_move")
 	}, "the parked move to be audited")
 
 	// The target's socket resumes and its reconnect loop sends voice_join.
-	resumedSend := make(chan []byte, 32)
-	resumed := ws.NewTestClientWithUser(hub, target, fromID, resumedSend)
-	hub.Register(resumed)
-	waitRegistered(t, hub, resumed)
+	resumed, resumedSend := connectClient(t, hub, target, fromID, 32)
 	hub.HandleMessageForTest(resumed, voiceJoinMsg(fromID))
 	frame, ok := receiveErrorFrame(resumedSend, waitTimeout)
 	if !ok || frame.Message != "You were removed from this voice channel" {
@@ -1104,26 +953,16 @@ func TestVoiceMod_ParkedMove_RefusesRejoinOfTheSourceChannel(t *testing.T) {
 // move blocks the rejoin of the channel the target was moved out of; the
 // destination the client joins in answer stays open.
 func TestVoiceMod_Move_RefusesRejoinOfTheSourceChannel(t *testing.T) {
-	hub, database := newVoiceModHub(t)
-	fromID := seedVoiceChan(t, database, "vc-moved-from")
-	toID := seedVoiceChan(t, database, "vc-moved-to")
-	actor := seedVoiceUserWithRole(t, database, "admin-moved", 2)
-	target := seedVoiceUserWithRole(t, database, "member-moved", 4)
+	hub, database, fromID, toID, actor, target := newVoiceModMoveScene(t, "moved")
 
 	targetClient, targetSend := joinVoice(t, hub, target, fromID)
 
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, actor, fromID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, _ := connectClient(t, hub, actor, fromID, 16)
 	hub.HandleMessageForTest(c, voiceModMoveMsg(target.ID, toID))
 	if receiveMsgOfType(targetSend, "voice_moved", waitTimeout) == nil {
 		t.Fatal("target did not receive voice_moved")
 	}
-	waitFor(t, waitTimeout, func() bool {
-		state, err := database.GetVoiceState(context.Background(), target.ID)
-		return err == nil && state == nil
-	}, "target to be removed from the source channel")
+	waitVoiceStateGone(t, database, target.ID, "target to be removed from the source channel")
 	drainChanTimeout(targetSend, 30*time.Millisecond)
 
 	hub.HandleMessageForTest(targetClient, voiceJoinMsg(fromID))
@@ -1134,19 +973,13 @@ func TestVoiceMod_Move_RefusesRejoinOfTheSourceChannel(t *testing.T) {
 	}
 
 	hub.HandleMessageForTest(targetClient, voiceJoinMsg(toID))
-	waitFor(t, waitTimeout, func() bool {
-		state, err := database.GetVoiceState(context.Background(), target.ID)
-		return err == nil && state != nil && state.ChannelID == toID
-	}, "target to join the destination")
+	waitVoiceStateIn(t, database, target.ID, toID, "target to join the destination")
 }
 
 // userJoinMsg is voice_join as the client sends it for the user's own click
 // (VoiceCallbacks.onVoiceJoin), which a moderator's rejoin block does not refuse.
 func userJoinMsg(channelID int64) []byte {
-	raw, _ := json.Marshal(map[string]any{
-		"type":    "voice_join",
-		"payload": map[string]any{"channel_id": channelID, "user_initiated": true},
-	})
+	raw := envelope("voice_join", map[string]any{"channel_id": channelID, "user_initiated": true})
 	return raw
 }
 
@@ -1155,19 +988,13 @@ func userJoinMsg(channelID int64) []byte {
 func moveAndAnswer(t *testing.T, hub *ws.Hub, database *db.DB, targetClient *ws.Client, targetSend chan []byte, target *db.User, fromID, toID int64) {
 	t.Helper()
 	actor := seedVoiceUserWithRole(t, database, "admin-"+target.Username, 2)
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, actor, fromID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, _ := connectClient(t, hub, actor, fromID, 16)
 	hub.HandleMessageForTest(c, voiceModMoveMsg(target.ID, toID))
 	if receiveMsgOfType(targetSend, "voice_moved", waitTimeout) == nil {
 		t.Fatal("target did not receive voice_moved")
 	}
 	hub.HandleMessageForTest(targetClient, voiceJoinMsg(toID))
-	waitFor(t, waitTimeout, func() bool {
-		state, err := database.GetVoiceState(context.Background(), target.ID)
-		return err == nil && state != nil && state.ChannelID == toID
-	}, "target to join the destination")
+	waitVoiceStateIn(t, database, target.ID, toID, "target to join the destination")
 	drainChanTimeout(targetSend, 30*time.Millisecond)
 }
 
@@ -1183,10 +1010,7 @@ func TestVoiceMod_Move_UserCanRejoinTheSourceChannel(t *testing.T) {
 	moveAndAnswer(t, hub, database, targetClient, targetSend, target, fromID, toID)
 
 	hub.HandleMessageForTest(targetClient, userJoinMsg(fromID))
-	waitFor(t, waitTimeout, func() bool {
-		state, err := database.GetVoiceState(context.Background(), target.ID)
-		return err == nil && state != nil && state.ChannelID == fromID
-	}, "target to rejoin the source channel themselves")
+	waitVoiceStateIn(t, database, target.ID, fromID, "target to rejoin the source channel themselves")
 }
 
 // The same holds after a moderator disconnect from voice.
@@ -1200,10 +1024,7 @@ func TestVoiceMod_Kick_UserCanRejoinThatChannel(t *testing.T) {
 	drainChanTimeout(targetSend, 30*time.Millisecond)
 
 	hub.HandleMessageForTest(targetClient, userJoinMsg(chanID))
-	waitFor(t, waitTimeout, func() bool {
-		state, err := database.GetVoiceState(context.Background(), target.ID)
-		return err == nil && state != nil && state.ChannelID == chanID
-	}, "target to rejoin the channel themselves")
+	waitVoiceStateIn(t, database, target.ID, chanID, "target to rejoin the channel themselves")
 }
 
 // The user's own rejoin skips only the moderator's rejoin block: a channel
@@ -1242,19 +1063,10 @@ func TestVoiceMod_Move_UserRejoinClearsTheBlock(t *testing.T) {
 	targetClient, targetSend := joinVoice(t, hub, target, fromID)
 	moveAndAnswer(t, hub, database, targetClient, targetSend, target, fromID, toID)
 	hub.HandleMessageForTest(targetClient, userJoinMsg(fromID))
-	waitFor(t, waitTimeout, func() bool {
-		state, err := database.GetVoiceState(context.Background(), target.ID)
-		return err == nil && state != nil && state.ChannelID == fromID
-	}, "target to rejoin the source channel themselves")
+	waitVoiceStateIn(t, database, target.ID, fromID, "target to rejoin the source channel themselves")
 	hub.HandleMessageForTest(targetClient, voiceLeaveMsg())
-	waitFor(t, waitTimeout, func() bool {
-		state, err := database.GetVoiceState(context.Background(), target.ID)
-		return err == nil && state == nil
-	}, "target to leave")
+	waitVoiceStateGone(t, database, target.ID, "target to leave")
 
 	hub.HandleMessageForTest(targetClient, voiceJoinMsg(fromID))
-	waitFor(t, waitTimeout, func() bool {
-		state, err := database.GetVoiceState(context.Background(), target.ID)
-		return err == nil && state != nil && state.ChannelID == fromID
-	}, "an automatic rejoin of the channel the user chose")
+	waitVoiceStateIn(t, database, target.ID, fromID, "an automatic rejoin of the channel the user chose")
 }

@@ -35,14 +35,7 @@ func captureLogs(t *testing.T, fn func()) string {
 // depends on (D3 removed the store abstraction).
 func openPersisterTestDB(t *testing.T) *db.DB {
 	t.Helper()
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("db.Migrate: %v", err)
-	}
+	database := newTeardownTestDB(t)
 	return database
 }
 

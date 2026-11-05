@@ -14,7 +14,6 @@ package ws_test
 
 import (
 	"context"
-	"encoding/json"
 	"testing"
 )
 
@@ -40,17 +39,12 @@ func TestBuildReady_IncludesOwnVoiceStateAfterDMClosed(t *testing.T) {
 	// Viewer joins the DM's voice channel, then closes the DM from the
 	// sidebar -- mirroring CloseDM's non-group branch, which only removes
 	// the caller's dm_open_state row and performs no voice eviction.
-	if err := database.JoinVoiceChannel(context.Background(), viewer.ID, dmChannelID); err != nil {
-		t.Fatalf("JoinVoiceChannel: %v", err)
-	}
+	mustJoinVoice(t, database, viewer.ID, dmChannelID)
 	if err := database.CloseDM(context.Background(), viewer.ID, dmChannelID); err != nil {
 		t.Fatalf("CloseDM: %v", err)
 	}
 
-	msg, err := hub.BuildReadyWithRoleForTest(database, viewer.ID, viewerRole)
-	if err != nil {
-		t.Fatalf("BuildReadyWithRoleForTest: %v", err)
-	}
+	msg := mustBuildReadyWithRole(t, hub, database, viewer.ID, viewerRole)
 
 	var env struct {
 		Payload struct {
@@ -60,9 +54,7 @@ func TestBuildReady_IncludesOwnVoiceStateAfterDMClosed(t *testing.T) {
 			} `json:"voice_states"`
 		} `json:"payload"`
 	}
-	if err := json.Unmarshal(msg, &env); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	mustUnmarshal(t, msg, &env)
 
 	found := false
 	for _, vs := range env.Payload.VoiceStates {

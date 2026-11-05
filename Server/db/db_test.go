@@ -22,9 +22,7 @@ import (
 func openMemory(t *testing.T) *db.DB {
 	t.Helper()
 	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("Open(':memory:') error: %v", err)
-	}
+	mustDo(t, "Open(':memory:') error", err)
 	t.Cleanup(func() { _ = database.Close() })
 	return database
 }
@@ -38,9 +36,7 @@ func newSchemaTestDB(t *testing.T, schema []byte) *db.DB {
 	migrFS := fstest.MapFS{
 		"001_schema.sql": {Data: schema},
 	}
-	if err := db.MigrateFS(database, migrFS); err != nil {
-		t.Fatalf("MigrateFS: %v", err)
-	}
+	mustDo(t, "MigrateFS", db.MigrateFS(database, migrFS))
 	return database
 }
 
@@ -56,9 +52,7 @@ func TestOpenCreatesFile(t *testing.T) {
 	dbPath := filepath.Join(tmpDir, "test.db")
 
 	database, err := db.Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open() error: %v", err)
-	}
+	mustDo(t, "Open() error", err)
 	defer database.Close() //nolint:errcheck
 
 	if _, statErr := os.Stat(dbPath); os.IsNotExist(statErr) {
@@ -79,9 +73,7 @@ func TestWALModeEnabled(t *testing.T) {
 
 	var journalMode string
 	err := database.QueryRowContext(context.Background(), "PRAGMA journal_mode;").Scan(&journalMode)
-	if err != nil {
-		t.Fatalf("PRAGMA journal_mode query error: %v", err)
-	}
+	mustDo(t, "PRAGMA journal_mode query error", err)
 	// In-memory databases return "memory" even when WAL is requested,
 	// because WAL is not supported for in-memory DBs. File DBs return "wal".
 	// Accept both for in-memory test; the file-based test verifies WAL properly.
@@ -95,15 +87,11 @@ func TestWALModeEnabledOnFile(t *testing.T) {
 	dbPath := filepath.Join(tmpDir, "wal_test.db")
 
 	database, err := db.Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open() error: %v", err)
-	}
+	mustDo(t, "Open() error", err)
 	defer database.Close() //nolint:errcheck
 
 	var journalMode string
-	if err := database.QueryRowContext(context.Background(), "PRAGMA journal_mode;").Scan(&journalMode); err != nil {
-		t.Fatalf("PRAGMA journal_mode query error: %v", err)
-	}
+	mustDo(t, "PRAGMA journal_mode query error", database.QueryRowContext(context.Background(), "PRAGMA journal_mode;").Scan(&journalMode))
 	if journalMode != "wal" {
 		t.Errorf("journal_mode = %q, want 'wal'", journalMode)
 	}
@@ -113,9 +101,7 @@ func TestForeignKeysEnabled(t *testing.T) {
 	database := openMemory(t)
 
 	var fkEnabled int
-	if err := database.QueryRowContext(context.Background(), "PRAGMA foreign_keys;").Scan(&fkEnabled); err != nil {
-		t.Fatalf("PRAGMA foreign_keys query error: %v", err)
-	}
+	mustDo(t, "PRAGMA foreign_keys query error", database.QueryRowContext(context.Background(), "PRAGMA foreign_keys;").Scan(&fkEnabled))
 	if fkEnabled != 1 {
 		t.Errorf("foreign_keys = %d, want 1 (enabled)", fkEnabled)
 	}
@@ -124,9 +110,7 @@ func TestForeignKeysEnabled(t *testing.T) {
 func TestMigrateCreatesAllTables(t *testing.T) {
 	database := openMemory(t)
 
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("Migrate() error: %v", err)
-	}
+	mustDo(t, "Migrate() error", db.Migrate(database))
 
 	expectedTables := []string{
 		"users", "sessions", "roles", "channels", "channel_overrides",
@@ -153,9 +137,7 @@ func TestMigrateCreatesAllTables(t *testing.T) {
 func TestMigrateCreatesFTSTable(t *testing.T) {
 	database := openMemory(t)
 
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("Migrate() error: %v", err)
-	}
+	mustDo(t, "Migrate() error", db.Migrate(database))
 
 	var name string
 	err := database.QueryRowContext(context.Background(),
@@ -172,25 +154,17 @@ func TestMigrateIsIdempotent(t *testing.T) {
 	database := openMemory(t)
 
 	// Run migration twice — should not error.
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("Migrate() first run error: %v", err)
-	}
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("Migrate() second run error: %v", err)
-	}
+	mustDo(t, "Migrate() first run error", db.Migrate(database))
+	mustDo(t, "Migrate() second run error", db.Migrate(database))
 }
 
 func TestMigrateInsertsDefaultRoles(t *testing.T) {
 	database := openMemory(t)
 
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("Migrate() error: %v", err)
-	}
+	mustDo(t, "Migrate() error", db.Migrate(database))
 
 	var count int
-	if err := database.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM roles").Scan(&count); err != nil {
-		t.Fatalf("COUNT roles error: %v", err)
-	}
+	mustDo(t, "COUNT roles error", database.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM roles").Scan(&count))
 	if count < 4 {
 		t.Errorf("expected at least 4 default roles, got %d", count)
 	}
@@ -199,24 +173,18 @@ func TestMigrateInsertsDefaultRoles(t *testing.T) {
 func TestMigrateInsertsDefaultSettings(t *testing.T) {
 	database := openMemory(t)
 
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("Migrate() error: %v", err)
-	}
+	mustDo(t, "Migrate() error", db.Migrate(database))
 
 	// A fresh install (no users when the migrations run) is invite-only
 	// (B4-1, BPR-041), and the pre-mode boolean is gone.
 	var value string
 	err := database.QueryRowContext(context.Background(), "SELECT value FROM settings WHERE key='registration_mode'").Scan(&value)
-	if err != nil {
-		t.Fatalf("settings query error: %v", err)
-	}
+	mustDo(t, "settings query error", err)
 	if value != "invite" {
 		t.Errorf("registration_mode = %q, want 'invite'", value)
 	}
 	var stale int
-	if err := database.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM settings WHERE key='registration_open'").Scan(&stale); err != nil {
-		t.Fatalf("settings query error: %v", err)
-	}
+	mustDo(t, "settings query error", database.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM settings WHERE key='registration_open'").Scan(&stale))
 	if stale != 0 {
 		t.Errorf("registration_open row still present after migration 034")
 	}
@@ -225,9 +193,7 @@ func TestMigrateInsertsDefaultSettings(t *testing.T) {
 func TestMigrateCreatesIndexes(t *testing.T) {
 	database := openMemory(t)
 
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("Migrate() error: %v", err)
-	}
+	mustDo(t, "Migrate() error", db.Migrate(database))
 
 	expectedIndexes := []string{
 		"idx_messages_channel",
@@ -279,9 +245,7 @@ func TestMigrateCreatesIndexes(t *testing.T) {
 func TestMigrateCreatesAuditActionIndex(t *testing.T) {
 	database := openMemory(t)
 
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("Migrate() error: %v", err)
-	}
+	mustDo(t, "Migrate() error", db.Migrate(database))
 
 	// The Dashboard's action filter runs SELECT DISTINCT action FROM audit_log,
 	// and the log grows without bound (one ws_connect row per handshake). The
@@ -301,9 +265,7 @@ func TestMigrateCreatesAuditActionIndex(t *testing.T) {
 func TestMigrateScopesFTSUpdateTriggerToContent(t *testing.T) {
 	database := openMemory(t)
 
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("Migrate() error: %v", err)
-	}
+	mustDo(t, "Migrate() error", db.Migrate(database))
 
 	// Migration 019 recreates messages_au as AFTER UPDATE OF content, so
 	// pin/soft-delete updates stop paying for a full FTS reindex. The trigger
@@ -323,9 +285,7 @@ func TestMigrateScopesFTSUpdateTriggerToContent(t *testing.T) {
 
 func TestCloseIdempotent(t *testing.T) {
 	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("Open error: %v", err)
-	}
+	mustDo(t, "Open error", err)
 
 	if err := database.Close(); err != nil {
 		t.Errorf("Close() first call error: %v", err)
@@ -335,16 +295,12 @@ func TestCloseIdempotent(t *testing.T) {
 func TestQueryRow(t *testing.T) {
 	database := openMemory(t)
 
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("Migrate() error: %v", err)
-	}
+	mustDo(t, "Migrate() error", db.Migrate(database))
 
 	// Verify we can run a simple query via the exposed DB.
 	var schemaVersion string
 	err := database.QueryRowContext(context.Background(), "SELECT value FROM settings WHERE key='schema_version'").Scan(&schemaVersion)
-	if err != nil {
-		t.Fatalf("QueryRow error: %v", err)
-	}
+	mustDo(t, "QueryRow error", err)
 	if schemaVersion == "" {
 		t.Error("schema_version should not be empty")
 	}
@@ -353,20 +309,14 @@ func TestQueryRow(t *testing.T) {
 func TestExec(t *testing.T) {
 	database := openMemory(t)
 
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("Migrate() error: %v", err)
-	}
+	mustDo(t, "Migrate() error", db.Migrate(database))
 
 	// Insert a settings row using Exec.
 	_, err := database.ExecContext(context.Background(), "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", "test_key", "test_val")
-	if err != nil {
-		t.Fatalf("Exec() error: %v", err)
-	}
+	mustDo(t, "Exec() error", err)
 
 	var val string
-	if err := database.QueryRowContext(context.Background(), "SELECT value FROM settings WHERE key='test_key'").Scan(&val); err != nil {
-		t.Fatalf("QueryRow after Exec error: %v", err)
-	}
+	mustDo(t, "QueryRow after Exec error", database.QueryRowContext(context.Background(), "SELECT value FROM settings WHERE key='test_key'").Scan(&val))
 	if val != "test_val" {
 		t.Errorf("value = %q, want 'test_val'", val)
 	}
@@ -375,23 +325,17 @@ func TestExec(t *testing.T) {
 func TestQuery(t *testing.T) {
 	database := openMemory(t)
 
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("Migrate() error: %v", err)
-	}
+	mustDo(t, "Migrate() error", db.Migrate(database))
 
 	rows, err := database.QueryContext(context.Background(), "SELECT key FROM settings")
-	if err != nil {
-		t.Fatalf("Query() error: %v", err)
-	}
+	mustDo(t, "Query() error", err)
 	defer rows.Close() //nolint:errcheck
 
 	var count int
 	for rows.Next() {
 		count++
 		var key string
-		if err := rows.Scan(&key); err != nil {
-			t.Fatalf("rows.Scan error: %v", err)
-		}
+		mustDo(t, "rows.Scan error", rows.Scan(&key))
 	}
 	if count == 0 {
 		t.Error("Query() returned no rows from settings table")
@@ -401,14 +345,10 @@ func TestQuery(t *testing.T) {
 func TestBegin(t *testing.T) {
 	database := openMemory(t)
 
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("Migrate() error: %v", err)
-	}
+	mustDo(t, "Migrate() error", db.Migrate(database))
 
 	tx, err := database.BeginTx(context.Background(), nil)
-	if err != nil {
-		t.Fatalf("Begin() error: %v", err)
-	}
+	mustDo(t, "Begin() error", err)
 
 	_, err = tx.Exec("INSERT OR REPLACE INTO settings (key, value) VALUES ('tx_key', 'tx_val')")
 	if err != nil {
@@ -416,9 +356,7 @@ func TestBegin(t *testing.T) {
 		t.Fatalf("tx.Exec error: %v", err)
 	}
 
-	if err := tx.Rollback(); err != nil {
-		t.Fatalf("tx.Rollback error: %v", err)
-	}
+	mustDo(t, "tx.Rollback error", tx.Rollback())
 
 	// After rollback, tx_key should not exist.
 	var val string
@@ -524,9 +462,7 @@ func TestMigrateFSSkipsNonSQL(t *testing.T) {
 		},
 	}
 
-	if err := db.MigrateFS(database, mixedFS); err != nil {
-		t.Fatalf("MigrateFS() error: %v", err)
-	}
+	mustDo(t, "MigrateFS() error", db.MigrateFS(database, mixedFS))
 
 	// The table from the .sql file should exist.
 	var name string
@@ -551,14 +487,10 @@ func TestMigrateWALAndFKOnFile(t *testing.T) {
 	dbPath := filepath.Join(tmpDir, "migrate_test.db")
 
 	database, err := db.Open(dbPath)
-	if err != nil {
-		t.Fatalf("Open() error: %v", err)
-	}
+	mustDo(t, "Open() error", err)
 	defer database.Close() //nolint:errcheck
 
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("Migrate() error: %v", err)
-	}
+	mustDo(t, "Migrate() error", db.Migrate(database))
 
 	// Tables should exist.
 	var name string
@@ -582,9 +514,7 @@ func captureSlog(t *testing.T, fn func()) string {
 
 func TestMigrate_LogsAnalyzeThenOptimize(t *testing.T) {
 	database, err := db.Open(filepath.Join(t.TempDir(), "boot.db"))
-	if err != nil {
-		t.Fatalf("Open() error: %v", err)
-	}
+	mustDo(t, "Open() error", err)
 	defer database.Close() //nolint:errcheck
 	for i, want := range []string{"db: analyze done", "db: optimize done"} {
 		out := captureSlog(t, func() {
@@ -603,9 +533,7 @@ func TestMigrateFS_LogsEachMigrationWithDuration(t *testing.T) {
 	first := fstest.MapFS{
 		"001_a.sql": &fstest.MapFile{Data: []byte("CREATE TABLE wp43c_a (id INTEGER);")},
 	}
-	if err := db.MigrateFS(database, first); err != nil {
-		t.Fatalf("seed MigrateFS: %v", err)
-	}
+	mustDo(t, "seed MigrateFS", db.MigrateFS(database, first))
 
 	both := fstest.MapFS{
 		"001_a.sql": first["001_a.sql"],
@@ -613,9 +541,7 @@ func TestMigrateFS_LogsEachMigrationWithDuration(t *testing.T) {
 		"003_c.sql": &fstest.MapFile{Data: []byte("CREATE TABLE wp43c_c (id INTEGER);")},
 	}
 	out := captureSlog(t, func() {
-		if err := db.MigrateFS(database, both); err != nil {
-			t.Fatalf("MigrateFS: %v", err)
-		}
+		mustDo(t, "MigrateFS", db.MigrateFS(database, both))
 	})
 	if strings.Contains(out, "001_a.sql") {
 		t.Errorf("already-applied file logged:\n%s", out)
@@ -631,9 +557,7 @@ func TestMigrateFS_LogsEachMigrationWithDuration(t *testing.T) {
 
 	// Nothing left to apply: no per-file lines and no summary.
 	out = captureSlog(t, func() {
-		if err := db.MigrateFS(database, both); err != nil {
-			t.Fatalf("idempotent MigrateFS: %v", err)
-		}
+		mustDo(t, "idempotent MigrateFS", db.MigrateFS(database, both))
 	})
 	if strings.Contains(out, "db: migration") {
 		t.Errorf("no-op boot logged migration lines:\n%s", out)
@@ -665,9 +589,7 @@ func TestWALBytes_FileBackedGrowsAndInMemoryIsZero(t *testing.T) {
 	}
 
 	database, err := db.Open(filepath.Join(t.TempDir(), "wal.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
+	mustDo(t, "Open", err)
 	t.Cleanup(func() { _ = database.Close() })
 	ctx := context.Background()
 	if _, err := database.ExecContext(ctx, "PRAGMA wal_autocheckpoint = 0"); err != nil {
@@ -677,18 +599,14 @@ func TestWALBytes_FileBackedGrowsAndInMemoryIsZero(t *testing.T) {
 		t.Fatalf("create: %v", err)
 	}
 	before, err := database.WALBytes()
-	if err != nil {
-		t.Fatalf("WALBytes: %v", err)
-	}
+	mustDo(t, "WALBytes", err)
 	for range 50 {
 		if _, err := database.ExecContext(ctx, "INSERT INTO wal_probe (v) VALUES (zeroblob(8192))"); err != nil {
 			t.Fatalf("insert: %v", err)
 		}
 	}
 	after, err := database.WALBytes()
-	if err != nil {
-		t.Fatalf("WALBytes after writes: %v", err)
-	}
+	mustDo(t, "WALBytes after writes", err)
 	if after <= before || after < 50*8192 {
 		t.Errorf("WAL did not grow: before=%d after=%d", before, after)
 	}
@@ -696,9 +614,7 @@ func TestWALBytes_FileBackedGrowsAndInMemoryIsZero(t *testing.T) {
 
 func TestWALBytes_MissingFileIsZero(t *testing.T) {
 	database, err := db.Open(filepath.Join(t.TempDir(), "gone.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
+	mustDo(t, "Open", err)
 	t.Cleanup(func() { _ = database.Close() })
 	if _, err := database.ExecContext(context.Background(), "PRAGMA wal_checkpoint(TRUNCATE)"); err != nil {
 		t.Fatalf("checkpoint: %v", err)
@@ -707,9 +623,7 @@ func TestWALBytes_MissingFileIsZero(t *testing.T) {
 		t.Errorf("truncated WAL: WALBytes = %d, %v; want 0, nil", n, err)
 	}
 	// Closing the last connection deletes the WAL file: missing is 0, nil.
-	if err := database.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
+	mustDo(t, "Close", database.Close())
 	if n, err := database.WALBytes(); n != 0 || err != nil {
 		t.Errorf("missing WAL: WALBytes = %d, %v; want 0, nil", n, err)
 	}

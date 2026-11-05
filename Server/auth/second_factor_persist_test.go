@@ -19,12 +19,8 @@ import (
 func persistedDB(t *testing.T) *db.DB {
 	t.Helper()
 	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("db.Migrate: %v", err)
-	}
+	mustDo(t, "db.Open", err)
+	mustDo(t, "db.Migrate", db.Migrate(database))
 	t.Cleanup(func() { _ = database.Close() })
 	// Every row references users(id): mint the accounts the tests use.
 	for _, name := range []string{"alice", "bob"} {
@@ -49,18 +45,14 @@ func TestPartialAuthStore_SurvivesRestart(t *testing.T) {
 
 	before := auth.NewPartialAuthStore(time.Minute).WithPersister(database)
 	token, err := before.Issue(ctx, 1, "desktop", "203.0.113.9")
-	if err != nil {
-		t.Fatalf("Issue: %v", err)
-	}
+	mustDo(t, "Issue", err)
 	if !before.RegisterFailure(ctx, token, 5) {
 		t.Fatal("RegisterFailure killed the challenge on the first failure")
 	}
 
 	// The row must carry the digest, never the token.
 	var stored string
-	if err := database.QueryRowContext(ctx, `SELECT token_hash FROM partial_auth_challenges`).Scan(&stored); err != nil {
-		t.Fatalf("read row: %v", err)
-	}
+	mustDo(t, "read row", database.QueryRowContext(ctx, `SELECT token_hash FROM partial_auth_challenges`).Scan(&stored))
 	if stored == token || stored != auth.HashToken(token) {
 		t.Fatalf("stored token_hash = %q, want the SHA-256 digest of the token and never the token", stored)
 	}
@@ -93,9 +85,7 @@ func TestPartialAuthStore_RestoreAndExhaustionPersist(t *testing.T) {
 
 	store := auth.NewPartialAuthStore(time.Minute).WithPersister(database)
 	token, err := store.Issue(ctx, 1, "d", "ip")
-	if err != nil {
-		t.Fatalf("Issue: %v", err)
-	}
+	mustDo(t, "Issue", err)
 	claimed, ok := store.Consume(ctx, token)
 	if !ok {
 		t.Fatal("Consume failed")
@@ -140,13 +130,9 @@ func TestRegisterFailure_AfterConsumeDoesNotResurrect(t *testing.T) {
 
 	store := auth.NewPartialAuthStore(time.Minute).WithPersister(database)
 	token, err := store.Issue(ctx, 1, "d", "ip")
-	if err != nil {
-		t.Fatalf("Issue: %v", err)
-	}
+	mustDo(t, "Issue", err)
 	userID, device, ip, failures, expiresAt, _, err := database.GetPartialAuth(ctx, auth.HashToken(token))
-	if err != nil {
-		t.Fatalf("GetPartialAuth: %v", err)
-	}
+	mustDo(t, "GetPartialAuth", err)
 	stale := auth.NewPartialAuthStore(time.Minute).WithPersister(&staleReadPersister{
 		DB: database, userID: userID, device: device, ip: ip, failures: failures, expiresAt: expiresAt,
 	})
@@ -172,14 +158,10 @@ func TestPendingTOTPStore_SurvivesRestartSealed(t *testing.T) {
 	const secret = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"
 
 	before := auth.NewPendingTOTPStore(time.Minute).WithPersister(database, key)
-	if err := before.Put(ctx, 1, secret); err != nil {
-		t.Fatalf("Put: %v", err)
-	}
+	mustDo(t, "Put", before.Put(ctx, 1, secret))
 
 	var sealed string
-	if err := database.QueryRowContext(ctx, `SELECT secret_enc FROM pending_totp_enrollments WHERE user_id = 1`).Scan(&sealed); err != nil {
-		t.Fatalf("read row: %v", err)
-	}
+	mustDo(t, "read row", database.QueryRowContext(ctx, `SELECT secret_enc FROM pending_totp_enrollments WHERE user_id = 1`).Scan(&sealed))
 	if sealed == secret {
 		t.Fatal("the pending enrolment secret was persisted in the clear")
 	}
@@ -206,9 +188,7 @@ func TestUsedTOTPCodeStore_ReplayRejectedAcrossRestart(t *testing.T) {
 		t.Fatal("first use refused")
 	}
 	var stored string
-	if err := database.QueryRowContext(ctx, `SELECT code_hash FROM totp_used_codes WHERE user_id = 1`).Scan(&stored); err != nil {
-		t.Fatalf("read row: %v", err)
-	}
+	mustDo(t, "read row", database.QueryRowContext(ctx, `SELECT code_hash FROM totp_used_codes WHERE user_id = 1`).Scan(&stored))
 	if stored == "123456" || stored == "1:123456" {
 		t.Fatalf("the used code was persisted in the clear: %q", stored)
 	}
@@ -232,15 +212,9 @@ func TestCleanupExpiredSecondFactorState(t *testing.T) {
 	past := time.Now().Add(-time.Hour)
 	future := time.Now().Add(time.Hour)
 
-	if err := database.UpsertPartialAuth(ctx, "old-challenge", 1, "", "", 0, past); err != nil {
-		t.Fatal(err)
-	}
-	if err := database.UpsertPartialAuth(ctx, "live-challenge", 1, "", "", 0, future); err != nil {
-		t.Fatal(err)
-	}
-	if err := database.UpsertPendingTOTP(ctx, 1, "sealed", past); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "UpsertPartialAuth", database.UpsertPartialAuth(ctx, "old-challenge", 1, "", "", 0, past))
+	mustDo(t, "UpsertPartialAuth", database.UpsertPartialAuth(ctx, "live-challenge", 1, "", "", 0, future))
+	mustDo(t, "UpsertPendingTOTP", database.UpsertPendingTOTP(ctx, 1, "sealed", past))
 	if _, err := database.InsertUsedTOTPCode(ctx, 1, "old-code", past); err != nil {
 		t.Fatal(err)
 	}
@@ -248,9 +222,7 @@ func TestCleanupExpiredSecondFactorState(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := database.CleanupExpiredSecondFactorState(ctx); err != nil {
-		t.Fatalf("cleanup: %v", err)
-	}
+	mustDo(t, "cleanup", database.CleanupExpiredSecondFactorState(ctx))
 	count := func(q string) int {
 		var n int
 		if err := database.QueryRowContext(ctx, q).Scan(&n); err != nil {
@@ -331,9 +303,7 @@ func TestSecondFactorStores_FailClosedWhenPersisterFails(t *testing.T) {
 
 func TestRecoveryCodes_GenerateNormalizeMatch(t *testing.T) {
 	codes, hashes, err := auth.GenerateRecoveryCodes()
-	if err != nil {
-		t.Fatalf("GenerateRecoveryCodes: %v", err)
-	}
+	mustDo(t, "GenerateRecoveryCodes", err)
 	if len(codes) != 10 || len(hashes) != 10 {
 		t.Fatalf("got %d codes / %d hashes, want 10 / 10", len(codes), len(hashes))
 	}

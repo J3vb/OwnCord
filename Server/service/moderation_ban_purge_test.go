@@ -40,10 +40,7 @@ func banPurgeFixture(t *testing.T) *moderationActionsFixture {
 func banPurgeMsg(t *testing.T, database *db.DB, channelID, userID int64, age time.Duration) int64 {
 	t.Helper()
 	ctx := context.Background()
-	id, err := database.CreateMessage(ctx, channelID, userID, "m", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	id := mustCreateMessage(t, database, channelID, userID, "m", nil)
 	ts := time.Now().UTC().Add(-age).Format(dbtime.SQLiteLayout)
 	if _, err := database.ExecContext(ctx, `UPDATE messages SET timestamp = ? WHERE id = ?`, ts, id); err != nil {
 		t.Fatalf("stamp message: %v", err)
@@ -373,22 +370,16 @@ func TestPurgeAfterBan_ReversesMentionBadges(t *testing.T) {
 	if _, err := f.database.ReplaceMessageMentions(ctx, before, []int64{fixtureMember}, false, nil); err != nil {
 		t.Fatalf("ReplaceMessageMentions(before): %v", err)
 	}
-	if err := f.database.IncrementMentionCounts(ctx, fixtureChannel, before, []int64{fixtureMember}); err != nil {
-		t.Fatalf("IncrementMentionCounts(before): %v", err)
-	}
+	mustDo(t, "IncrementMentionCounts(before)", f.database.IncrementMentionCounts(ctx, fixtureChannel, before, []int64{fixtureMember}))
 	spam := banPurgeMsg(t, f.database, fixtureChannel, fixtureMember2, time.Minute)
 	if _, err := f.database.ReplaceMessageMentions(ctx, spam, []int64{fixtureMember}, false, nil); err != nil {
 		t.Fatalf("ReplaceMessageMentions(spam): %v", err)
 	}
-	if err := f.database.IncrementMentionCounts(ctx, fixtureChannel, spam, []int64{fixtureMember}); err != nil {
-		t.Fatalf("IncrementMentionCounts(spam): %v", err)
-	}
+	mustDo(t, "IncrementMentionCounts(spam)", f.database.IncrementMentionCounts(ctx, fixtureChannel, spam, []int64{fixtureMember}))
 	mentions := func() int {
 		t.Helper()
 		counts, err := f.database.GetChannelUnreadCounts(ctx, fixtureMember)
-		if err != nil {
-			t.Fatalf("GetChannelUnreadCounts: %v", err)
-		}
+		mustDo(t, "GetChannelUnreadCounts", err)
 		return counts[fixtureChannel].MentionCount
 	}
 	if got := mentions(); got != 2 {
@@ -553,9 +544,7 @@ func TestPurgeAfterBan_ChecksAfterSemaphoreWait(t *testing.T) {
 	done := make(chan BanPurgeResult, 1)
 	go func() { done <- f.mod.PurgeAfterBan(context.Background(), fixtureMod, fixtureMember2, time.Hour) }()
 	time.Sleep(20 * time.Millisecond)
-	if err := f.database.UnbanUser(context.Background(), fixtureMember2); err != nil {
-		t.Fatalf("UnbanUser: %v", err)
-	}
+	mustDo(t, "UnbanUser", f.database.UnbanUser(context.Background(), fixtureMember2))
 	<-f.mod.banPurgeSem
 
 	res := <-done

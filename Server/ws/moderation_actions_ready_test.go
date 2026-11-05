@@ -2,7 +2,6 @@ package ws_test
 
 import (
 	"context"
-	"encoding/json"
 	"testing"
 )
 
@@ -38,14 +37,9 @@ func TestWarning_ReadyCarriesUnacknowledgedNotices(t *testing.T) {
 		t.Fatalf("WarnUser: %v", err)
 	}
 
-	raw, err := hub.BuildReadyWithRoleForTest(database, targetUID, targetRole)
-	if err != nil {
-		t.Fatalf("BuildReadyWithRoleForTest: %v", err)
-	}
+	raw := mustBuildReadyWithRole(t, hub, database, targetUID, targetRole)
 	var payload readyNoticesPayload
-	if err := json.Unmarshal(raw, &payload); err != nil {
-		t.Fatalf("unmarshal ready: %v", err)
-	}
+	mustUnmarshal(t, raw, &payload)
 	if len(payload.Payload.Notices) != 1 {
 		t.Fatalf("notices = %+v, want exactly 1", payload.Payload.Notices)
 	}
@@ -57,14 +51,9 @@ func TestWarning_ReadyCarriesUnacknowledgedNotices(t *testing.T) {
 		t.Fatalf("AcknowledgeWarning: ok=%v err=%v", ok, err)
 	}
 
-	raw2, err := hub.BuildReadyWithRoleForTest(database, targetUID, targetRole)
-	if err != nil {
-		t.Fatalf("BuildReadyWithRoleForTest after ack: %v", err)
-	}
+	raw2 := mustBuildReadyWithRole(t, hub, database, targetUID, targetRole)
 	var payload2 readyNoticesPayload
-	if err := json.Unmarshal(raw2, &payload2); err != nil {
-		t.Fatalf("unmarshal ready after ack: %v", err)
-	}
+	mustUnmarshal(t, raw2, &payload2)
 	if len(payload2.Payload.Notices) != 0 {
 		t.Fatalf("notices after acknowledgement = %+v, want none", payload2.Payload.Notices)
 	}

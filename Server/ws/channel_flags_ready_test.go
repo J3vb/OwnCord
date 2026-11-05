@@ -2,7 +2,6 @@ package ws_test
 
 import (
 	"context"
-	"encoding/json"
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/db"
@@ -21,10 +20,7 @@ func TestBuildReady_CarriesChannelFeatureFlags(t *testing.T) {
 		t.Fatalf("GetRoleByID: %v", err)
 	}
 
-	plainID, err := database.CreateChannel(context.Background(), "general", "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
+	plainID := mustCreateChannel(t, database, "general", "text")
 	loungeID, err := database.CreateChannel(context.Background(), "lounge", "voice", "", "", 1)
 	if err != nil {
 		t.Fatalf("CreateChannel: %v", err)
@@ -40,18 +36,13 @@ func TestBuildReady_CarriesChannelFeatureFlags(t *testing.T) {
 		t.Fatalf("AdminUpdateChannel: %v", err)
 	}
 
-	msg, err := hub.BuildReadyWithRoleForTest(database, user.ID, role)
-	if err != nil {
-		t.Fatalf("BuildReadyWithRoleForTest: %v", err)
-	}
+	msg := mustBuildReadyWithRole(t, hub, database, user.ID, role)
 	var env struct {
 		Payload struct {
 			Channels []map[string]any `json:"channels"`
 		} `json:"payload"`
 	}
-	if err := json.Unmarshal(msg, &env); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	mustUnmarshal(t, msg, &env)
 
 	byID := make(map[float64]map[string]any, len(env.Payload.Channels))
 	for _, ch := range env.Payload.Channels {

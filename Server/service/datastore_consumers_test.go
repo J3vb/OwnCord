@@ -5,7 +5,6 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"os"
 	"reflect"
 	"sort"
 	"strings"
@@ -202,26 +201,9 @@ func recvName(e ast.Expr) string {
 }
 
 func TestStoreConsumers(t *testing.T) {
-	entries, err := os.ReadDir(".")
-	if err != nil {
-		t.Fatalf("read service dir: %v", err)
-	}
-	sources := map[string]string{}
-	for _, e := range entries {
-		name := e.Name()
-		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
-			continue
-		}
-		b, err := os.ReadFile(name)
-		if err != nil {
-			t.Fatalf("read %s: %v", name, err)
-		}
-		sources[name] = string(b)
-	}
+	sources := serviceSources(t)
 	got, err := findStoreConsumers(sources)
-	if err != nil {
-		t.Fatalf("find consumers: %v", err)
-	}
+	mustDo(t, "find consumers", err)
 	seen := map[string]bool{}
 	for _, c := range got {
 		seen[c] = true
@@ -285,9 +267,7 @@ func TestFindStoreConsumers(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := findStoreConsumers(map[string]string{"s.go": tc.src})
-			if err != nil {
-				t.Fatalf("findStoreConsumers: %v", err)
-			}
+			mustDo(t, "findStoreConsumers", err)
 			if strings.Join(got, ",") != strings.Join(tc.want, ",") {
 				t.Fatalf("consumers = %v, want %v", got, tc.want)
 			}

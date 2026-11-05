@@ -90,9 +90,7 @@ func TestConfigOverrides_GetListsEditableKeysOnly(t *testing.T) {
 	token := createAdminUser(t, f.database)
 
 	w := doRequest(t, f.handler, http.MethodGet, "/config/settings", token, nil)
-	if w.Code != http.StatusOK {
-		t.Fatalf("GET /config/settings = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 	for _, secret := range []string{cfgOvGIFKey, cfgOvGitHubToken, cfgOvLKSecret} {
 		if strings.Contains(w.Body.String(), secret) {
 			t.Fatalf("GET /config/settings leaked a secret value: %s", w.Body.String())
@@ -185,9 +183,7 @@ func TestConfigOverrides_PatchSavesAndMarksRestartPending(t *testing.T) {
 
 	w := doRequest(t, f.handler, http.MethodPatch, "/config/settings", token,
 		map[string]any{"logging.level": "debug", "server.max_ws_connections": 250})
-	if w.Code != http.StatusOK {
-		t.Fatalf("PATCH = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 	resp := decodeConfigOverrides(t, w.Body.Bytes())
 	if !resp.RestartPending {
 		t.Error("restart_pending = false after a saved change")
@@ -216,9 +212,7 @@ func TestConfigOverrides_PatchSavesAndMarksRestartPending(t *testing.T) {
 
 	// null resets the key to its config.yaml value.
 	w = doRequest(t, f.handler, http.MethodPatch, "/config/settings", token, map[string]any{"logging.level": nil})
-	if w.Code != http.StatusOK {
-		t.Fatalf("PATCH reset = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 	saved, _ = config.ReadOverrides(config.OverridesPath(f.dataDir))
 	if _, ok := saved["logging.level"]; ok {
 		t.Errorf("overrides file still has logging.level after a null PATCH: %v", saved)
@@ -314,9 +308,7 @@ func TestConfigOverrides_PatchIsAuditedWithoutValues(t *testing.T) {
 
 	const contact = "ops-person@example.com"
 	w := doRequest(t, f.handler, http.MethodPatch, "/config/settings", token, map[string]any{"push.contact": contact})
-	if w.Code != http.StatusOK {
-		t.Fatalf("PATCH = %d; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 	entry := rec.Wait(t, "config_override_change")
 	if !strings.Contains(entry.Detail, "push.contact") {
 		t.Errorf("audit detail %q does not name the key", entry.Detail)
@@ -333,9 +325,7 @@ func TestConfigOverrides_RestartNow(t *testing.T) {
 		t.Fatalf("PATCH = %d; body: %s", w.Code, w.Body.String())
 	}
 	w := doRequest(t, f.handler, http.MethodPost, "/restart", token, nil)
-	if w.Code != http.StatusAccepted {
-		t.Fatalf("POST /restart = %d, want 202; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusAccepted)
 	if reason := <-f.restarts; reason != "config_change" {
 		t.Errorf("restart reason = %q, want config_change", reason)
 	}
@@ -359,9 +349,7 @@ func TestConfigOverrides_RestartWithNothingPendingIsManual(t *testing.T) {
 	rec := audittest.Install(t, f.database)
 
 	w := doRequest(t, f.handler, http.MethodPost, "/restart", token, nil)
-	if w.Code != http.StatusAccepted {
-		t.Fatalf("POST /restart = %d, want 202; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusAccepted)
 	if reason := <-f.restarts; reason != "manual" {
 		t.Errorf("restart reason = %q, want manual", reason)
 	}
@@ -409,15 +397,10 @@ func TestConfigOverrides_ReportsRestartHandoff(t *testing.T) {
 			token := createAdminUser(t, f.database)
 
 			w := doRequest(t, f.handler, http.MethodGet, "/config/settings", token, nil)
-			if w.Code != http.StatusOK {
-				t.Fatalf("GET /config/settings = %d; body: %s", w.Code, w.Body.String())
-			}
-			var resp struct {
+			requireStatus(t, w, http.StatusOK)
+			resp := decodeBody[struct {
 				RestartHandoff string `json:"restart_handoff"`
-			}
-			if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-				t.Fatalf("unmarshal: %v", err)
-			}
+			}](t, w)
 			if resp.RestartHandoff != tc.want {
 				t.Errorf("restart_handoff = %q, want %q", resp.RestartHandoff, tc.want)
 			}
@@ -433,10 +416,8 @@ func TestConfigOverrides_RowsCarrySettingCopy(t *testing.T) {
 	token := createAdminUser(t, f.database)
 
 	w := doRequest(t, f.handler, http.MethodGet, "/config/settings", token, nil)
-	if w.Code != http.StatusOK {
-		t.Fatalf("GET /config/settings = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
-	var resp struct {
+	requireStatus(t, w, http.StatusOK)
+	resp := decodeBody[struct {
 		Settings []struct {
 			Key         string `json:"key"`
 			Label       string `json:"label"`
@@ -444,10 +425,7 @@ func TestConfigOverrides_RowsCarrySettingCopy(t *testing.T) {
 			Recommended string `json:"recommended"`
 			Effect      string `json:"effect"`
 		} `json:"settings"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	}](t, w)
 	if len(resp.Settings) == 0 {
 		t.Fatal("no settings rows")
 	}

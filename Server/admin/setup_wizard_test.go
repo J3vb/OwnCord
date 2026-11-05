@@ -84,20 +84,15 @@ func TestSetupWizard_FullFlow(t *testing.T) {
 			"voice_auto_download": true,
 		},
 	})
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("POST /setup = %d, want 201; body=%s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusCreated)
 
-	var resp struct {
+	resp := decodeBody[struct {
 		Token           string   `json:"token"`
 		InviteCode      string   `json:"invite_code"`
 		RestartRequired bool     `json:"restart_required"`
 		RestartURL      string   `json:"restart_url"`
 		Warnings        []string `json:"warnings"`
-	}
-	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	}](t, rr)
 	if resp.Token == "" || resp.InviteCode == "" {
 		t.Error("token/invite_code missing — account creation should be unchanged")
 	}
@@ -189,17 +184,12 @@ func TestSetupWizard_NoRestartWhenValuesMatchRunning(t *testing.T) {
 			"voice_quality":      "medium",
 		},
 	})
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("POST /setup = %d, want 201; body=%s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusCreated)
 
-	var resp struct {
+	resp := decodeBody[struct {
 		RestartRequired bool   `json:"restart_required"`
 		RestartURL      string `json:"restart_url"`
-	}
-	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	}](t, rr)
 	if resp.RestartRequired {
 		t.Error("restart_required = true, want false (no startup-only value changed)")
 	}
@@ -245,9 +235,7 @@ func TestSetupWizard_IdentityFieldsStoredRawNotEscaped(t *testing.T) {
 			"motd":        `Say "hi" & relax`,
 		},
 	})
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("POST /setup = %d, want 201; body=%s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusCreated)
 
 	if got, want := getSetting(t, database, "server_name"), "Bob's Place"; got != want {
 		t.Errorf("server_name = %q, want %q (stored HTML-escaped instead of raw)", got, want)
@@ -284,9 +272,7 @@ func TestSetupWizard_InvalidValuesRejectBeforeAccountCreation(t *testing.T) {
 				"password": "SecurePass123!",
 				"wizard":   wizard,
 			})
-			if rr.Code != http.StatusBadRequest {
-				t.Fatalf("status = %d, want 400; body=%s", rr.Code, rr.Body.String())
-			}
+			requireStatus(t, rr, http.StatusBadRequest)
 			count, err := database.UserCount(context.Background())
 			if err != nil {
 				t.Fatalf("UserCount: %v", err)
@@ -313,18 +299,13 @@ func TestSetupWizard_ConfigWriteFailureWarnsButCreatesAccount(t *testing.T) {
 		"password": "SecurePass123!",
 		"wizard":   map[string]any{"port": 9000},
 	})
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("POST /setup = %d, want 201 despite config failure; body=%s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusCreated)
 
-	var resp struct {
+	resp := decodeBody[struct {
 		Token           string   `json:"token"`
 		RestartRequired bool     `json:"restart_required"`
 		Warnings        []string `json:"warnings"`
-	}
-	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	}](t, rr)
 	if resp.Token == "" {
 		t.Error("token missing — the account must still be created")
 	}
@@ -359,17 +340,12 @@ func TestSetupWizard_LegacyPayloadUnchangedBehaviour(t *testing.T) {
 		"username": "owner",
 		"password": "SecurePass123!",
 	})
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("legacy POST /setup = %d, want 201; body=%s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusCreated)
 
-	var resp struct {
+	resp := decodeBody[struct {
 		RestartRequired bool     `json:"restart_required"`
 		Warnings        []string `json:"warnings"`
-	}
-	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	}](t, rr)
 	if resp.RestartRequired || len(resp.Warnings) != 0 {
 		t.Error("legacy payload must not trigger restarts or warnings")
 	}
@@ -390,10 +366,8 @@ func TestSetupStatus_DefaultsOnlyPreSetupAndSecretFree(t *testing.T) {
 	handler := wizardHandler(t, database, cfgPath, restarted)
 
 	rr := doRequest(t, handler, "GET", "/setup/status", "", nil)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("GET /setup/status = %d, want 200", rr.Code)
-	}
-	var resp struct {
+	requireStatus(t, rr, http.StatusOK)
+	resp := decodeBody[struct {
 		NeedsSetup bool `json:"needs_setup"`
 		Defaults   *struct {
 			ServerName      string `json:"server_name"`
@@ -403,10 +377,7 @@ func TestSetupStatus_DefaultsOnlyPreSetupAndSecretFree(t *testing.T) {
 			UploadMaxSizeMB int    `json:"upload_max_size_mb"`
 			VoiceQuality    string `json:"voice_quality"`
 		} `json:"defaults"`
-	}
-	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	}](t, rr)
 	if !resp.NeedsSetup || resp.Defaults == nil {
 		t.Fatalf("pre-setup status should carry defaults; body=%s", rr.Body.String())
 	}
@@ -434,9 +405,7 @@ func TestSetupStatus_DefaultsOnlyPreSetupAndSecretFree(t *testing.T) {
 	rr2 := doRequest(t, handler, "POST", "/setup", "", map[string]string{
 		"username": "owner", "password": "SecurePass123!",
 	})
-	if rr2.Code != http.StatusCreated {
-		t.Fatalf("setup = %d, want 201", rr2.Code)
-	}
+	requireStatus(t, rr2, http.StatusCreated)
 	rr3 := doRequest(t, handler, "GET", "/setup/status", "", nil)
 	if !strings.Contains(rr3.Body.String(), `"needs_setup":false`) {
 		t.Errorf("post-setup status = %s, want needs_setup false", rr3.Body.String())
@@ -466,9 +435,7 @@ func TestSetupWizard_ForeignOriginBlocked(t *testing.T) {
 	req.Header.Set("Origin", "https://evil.example")
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
-	if rr.Code != http.StatusForbidden {
-		t.Fatalf("wizard POST from foreign origin = %d, want 403", rr.Code)
-	}
+	requireStatus(t, rr, http.StatusForbidden)
 	if _, err := os.Stat(cfgPath); !os.IsNotExist(err) {
 		t.Error("config file written from a cross-origin request")
 	}
@@ -496,16 +463,11 @@ func TestSetupWizard_RecoveryKit(t *testing.T) {
 				body["wizard"] = wizard
 			}
 			rr := doRequest(t, handler, "POST", "/setup", "", body)
-			if rr.Code != http.StatusCreated {
-				t.Fatalf("POST /setup = %d, want 201; body=%s", rr.Code, rr.Body.String())
-			}
-			var resp struct {
+			requireStatus(t, rr, http.StatusCreated)
+			resp := decodeBody[struct {
 				UserID            int64  `json:"user_id"`
 				RecoveryKitSecret string `json:"recovery_kit_secret"`
-			}
-			if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
-				t.Fatalf("unmarshal: %v", err)
-			}
+			}](t, rr)
 			if resp.RecoveryKitSecret == "" {
 				t.Fatal("recovery_kit_secret missing from the setup response")
 			}
@@ -532,16 +494,11 @@ func TestSetupWizard_RecoveryKitTurnedOff(t *testing.T) {
 		"password": "SecurePass123!",
 		"wizard":   map[string]any{"recovery_kit": false},
 	})
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("POST /setup = %d, want 201; body=%s", rr.Code, rr.Body.String())
-	}
-	var resp struct {
+	requireStatus(t, rr, http.StatusCreated)
+	resp := decodeBody[struct {
 		UserID            int64  `json:"user_id"`
 		RecoveryKitSecret string `json:"recovery_kit_secret"`
-	}
-	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	}](t, rr)
 	if resp.RecoveryKitSecret != "" {
 		t.Errorf("a kit was issued though the wizard turned it off: %q", resp.RecoveryKitSecret)
 	}

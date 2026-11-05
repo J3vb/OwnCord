@@ -1,7 +1,6 @@
 package api_test
 
 import (
-	"encoding/json"
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
@@ -14,7 +13,6 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/api"
 	"github.com/J3vb/OwnCord/Server/config"
-	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/internal/app"
 	"github.com/go-chi/chi/v5"
 )
@@ -223,14 +221,7 @@ func TestBrowserHostingPosture_DefaultServesNoBrowserClientAsset(t *testing.T) {
 func enabledBrowserHostingRouter(t *testing.T, bundle fs.FS) http.Handler {
 	t.Helper()
 
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open error: %v", err)
-	}
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("db.Migrate error: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
+	database := openMigratedDB(t)
 
 	dir := t.TempDir()
 	cfg := &config.Config{
@@ -286,15 +277,9 @@ func TestBrowserHostingPosture_EnabledMountsExactlyPortalRoutes(t *testing.T) {
 			h := enabledBrowserHostingRouter(t, tc.bundle)
 
 			req := httptest.NewRequest(http.MethodGet, "/api/v1/server-info", nil)
-			rec := httptest.NewRecorder()
-			h.ServeHTTP(rec, req)
-			if rec.Code != http.StatusOK {
-				t.Fatalf("GET /api/v1/server-info status = %d, want 200", rec.Code)
-			}
-			var body map[string]any
-			if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
-				t.Fatalf("JSON decode error: %v", err)
-			}
+			rec := serveRequest(h, req)
+			requireStatus(t, rec, http.StatusOK)
+			body := decodeBody[map[string]any](t, rec)
 			if body["browser_client_enabled"] != true {
 				t.Errorf("browser_client_enabled = %v, want true — the endpoint must report the owner's setting",
 					body["browser_client_enabled"])

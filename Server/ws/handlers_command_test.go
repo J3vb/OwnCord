@@ -25,22 +25,17 @@ func TestChatCommand_NoRegistry_ReturnsError(t *testing.T) {
 	hub.Register(c)
 	defer hub.Unregister(c)
 
-	raw, _ := json.Marshal(map[string]any{
-		"type": "chat_command",
-		"payload": map[string]any{
-			"channel_id": int64(1),
-			"command":    "/hello",
-			"args":       []string{},
-		},
+	raw := envelope("chat_command", map[string]any{
+		"channel_id": int64(1),
+		"command":    "/hello",
+		"args":       []string{},
 	})
 	hub.HandleMessageForTest(c, raw)
 
 	select {
 	case msg := <-send:
 		var env map[string]any
-		if err := json.Unmarshal(msg, &env); err != nil {
-			t.Fatalf("unmarshal: %v", err)
-		}
+		mustUnmarshal(t, msg, &env)
 		if env["type"] != "error" {
 			t.Fatalf("expected type=error, got %v; raw=%s", env["type"], msg)
 		}
@@ -63,13 +58,10 @@ func TestChatCommand_UnknownCommand_ReturnsError(t *testing.T) {
 	hub.Register(c)
 	defer hub.Unregister(c)
 
-	raw, _ := json.Marshal(map[string]any{
-		"type": "chat_command",
-		"payload": map[string]any{
-			"channel_id": int64(1),
-			"command":    "/notexist",
-			"args":       []string{},
-		},
+	raw := envelope("chat_command", map[string]any{
+		"channel_id": int64(1),
+		"command":    "/notexist",
+		"args":       []string{},
 	})
 	hub.HandleMessageForTest(c, raw)
 
@@ -128,22 +120,17 @@ func TestChatCommand_RateLimited_ReturnsError(t *testing.T) {
 
 	sawRateLimited := false
 	for i := range 20 {
-		raw, _ := json.Marshal(map[string]any{
-			"type": "chat_command",
-			"payload": map[string]any{
-				"channel_id": int64(1),
-				"command":    "/notexist",
-				"args":       []string{},
-			},
+		raw := envelope("chat_command", map[string]any{
+			"channel_id": int64(1),
+			"command":    "/notexist",
+			"args":       []string{},
 		})
 		hub.HandleMessageForTest(c, raw)
 
 		select {
 		case msg := <-send:
 			var env map[string]any
-			if err := json.Unmarshal(msg, &env); err != nil {
-				t.Fatalf("unmarshal: %v", err)
-			}
+			mustUnmarshal(t, msg, &env)
 			payload, _ := env["payload"].(map[string]any)
 			if payload != nil && payload["code"] == "RATE_LIMITED" {
 				sawRateLimited = true

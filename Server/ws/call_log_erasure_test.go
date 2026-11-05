@@ -15,14 +15,7 @@ import (
 // row, which names its target under group_event.target_user_id, and a
 // member_update_batch, which names each member under members[].user_id.
 func TestEventNamesUser_RingAndSQLPredicateAgree(t *testing.T) {
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("db.Migrate: %v", err)
-	}
+	database := openMigratedDB(t)
 	ctx := context.Background()
 	const uid, other = 42, 43
 	frames := []struct {

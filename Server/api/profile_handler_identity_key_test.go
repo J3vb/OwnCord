@@ -49,9 +49,7 @@ func TestUpdateProfile_IdentityKeyFailureLeavesProfileUnchanged(t *testing.T) {
 		"username":            "renamedidentitykeyuser",
 		"identity_public_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
 	})
-	if rr.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want 500; body = %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusInternalServerError)
 
 	if user, _ := database.GetUserByUsername(context.Background(), "renamedidentitykeyuser"); user != nil {
 		t.Fatal("the username change committed even though the identity key write failed")
@@ -81,9 +79,7 @@ func TestUpdateProfile_IdentityKeyCommitsWithProfile(t *testing.T) {
 		"username":            "identitykeyok2",
 		"identity_public_key": key,
 	})
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body = %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 
 	user, err := database.GetUserByUsername(context.Background(), "identitykeyok2")
 	if err != nil || user == nil {

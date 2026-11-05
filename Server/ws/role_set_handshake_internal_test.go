@@ -7,13 +7,11 @@ package ws
 
 import (
 	"context"
-	"net/http/httptest"
 	"slices"
 	"testing"
 
-	"github.com/coder/websocket"
-
 	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/db"
 )
 
 // topOnlyRoleID outranks the harvest voice role and grants nothing, so a member
@@ -24,15 +22,8 @@ func TestRefreshUserSnapshot_TracksHeldRoleSet(t *testing.T) {
 	database := newHarvestVoiceDB(t)
 	ctx := context.Background()
 	uid := seedHarvestVoiceUser(t, database, "refresh-set-user")
-	user, err := database.GetUserByID(ctx, uid)
-	if err != nil || user == nil {
-		t.Fatalf("GetUserByID: %v", err)
-	}
-	if _, err := database.ExecContext(ctx,
-		`INSERT INTO roles (id, name, color, permissions, position, is_default)
-		 VALUES (?, 'harvest-top', NULL, 0, 99, 0)`, topOnlyRoleID); err != nil {
-		t.Fatalf("seed top role: %v", err)
-	}
+	user := mustGetUser(t, database, uid)
+	seedTopOnlyRole(t, database)
 
 	hub := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	c := newClient(hub, nil, user, "", 0, ctx)
@@ -73,40 +64,40 @@ func TestSameRoleSet(t *testing.T) {
 	}
 }
 
+// seedTopOnlyRole inserts the permission-less top role.
+func seedTopOnlyRole(t *testing.T, database *db.DB) {
+	t.Helper()
+	if _, err := database.ExecContext(context.Background(),
+		`INSERT INTO roles (id, name, color, permissions, position, is_default)
+		 VALUES (?, 'harvest-top', NULL, 0, 99, 0)`, topOnlyRoleID); err != nil {
+		t.Fatalf("seed top role: %v", err)
+	}
+}
+
+// topRoleRaceRig seeds a member holding the voice role and, below it, the top
+// role, with a text channel and a session, on a running server.
+func topRoleRaceRig(t *testing.T, name string) (rig *serveRig, uid, chID int64, token string) {
+	t.Helper()
+	database := newHarvestVoiceDB(t)
+	uid = seedHarvestVoiceUser(t, database, name+"-user")
+	chID = mustCreateTextChannel(t, database, name+"-channel")
+	seedTopOnlyRole(t, database)
+	if err := database.AddUserRole(context.Background(), uid, topOnlyRoleID); err != nil {
+		t.Fatalf("AddUserRole: %v", err)
+	}
+	token = seedSessionToken(t, database, uid)
+	return newServeRigOn(t, database, nil), uid, chID, token
+}
+
 // Removing a role that is not the member's top role in the window between the
 // handshake's reads and registerNow leaves the users.role_id mirror unmoved.
 // The post-register recheck must still catch it and release the channel only
 // that role granted.
 func TestFreshConnectFallback_NonTopRoleRemovedPreRegister_RevokesChannel(t *testing.T) {
-	database := newHarvestVoiceDB(t)
-	ctx := context.Background()
-	uid := seedHarvestVoiceUser(t, database, "role-set-late-user")
-	chID := mustCreateTextChannel(t, database, "role-set-late-channel")
-	if _, err := database.ExecContext(ctx,
-		`INSERT INTO roles (id, name, color, permissions, position, is_default)
-		 VALUES (?, 'harvest-top', NULL, 0, 99, 0)`, topOnlyRoleID); err != nil {
-		t.Fatalf("seed top role: %v", err)
-	}
-	if err := database.AddUserRole(ctx, uid, topOnlyRoleID); err != nil {
-		t.Fatalf("AddUserRole: %v", err)
-	}
+	rig, uid, chID, token := topRoleRaceRig(t, "role-set-late")
+	hub, database, ctx := rig.hub, rig.db, context.Background()
 
-	token, err := auth.GenerateToken()
-	if err != nil {
-		t.Fatalf("GenerateToken: %v", err)
-	}
-	if _, err := database.CreateSession(ctx, uid, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
-
-	hub := newTestHub(t, database, auth.NewRateLimiter(), nil)
-	go hub.Run()
-	defer hub.Stop()
-
-	rb := hub.ReplayBuffer()
-	rb.Push(98, chID, []byte(`{"seq":98,"type":"chat_message","payload":{}}`))
-	rb.Push(99, chID, []byte(`{"seq":99,"type":"chat_message","payload":{}}`))
-	rb.Push(100, chID, []byte(`{"seq":100,"type":"chat_message","payload":{}}`))
+	pushReplayWindow(hub, chID)
 	hub.SeedSeq(100)
 
 	// Force the full-ready fallback without touching roles, so the auth-hint
@@ -127,17 +118,9 @@ func TestFreshConnectFallback_NonTopRoleRemovedPreRegister_RevokesChannel(t *tes
 	}
 	defer func() { freshConnectPreRegisterRaceHook = nil }()
 
-	srv := httptest.NewServer(ServeWS(hub, []string{"*"}, 0))
-	defer srv.Close()
-	conn := dialAndAuth(t, ctx, srv.URL, token, 99, chID)
-	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
-
-	if typ, _ := readFrameType(t, ctx, conn); typ != MsgTypeAuthOK {
-		t.Fatalf("expected auth_ok, got %v", typ)
-	}
-	if typ, _ := readFrameType(t, ctx, conn); typ != MsgTypeReady {
-		t.Fatalf("expected ready (forced fallback), got %v", typ)
-	}
+	conn := rig.dialAuth(t, ctx, token, 99, chID)
+	expectFrame(t, ctx, conn, MsgTypeAuthOK, "")
+	expectFrame(t, ctx, conn, MsgTypeReady, " (forced fallback)")
 	if !hookRan {
 		t.Fatal("freshConnectPreRegisterRaceHook never fired")
 	}
@@ -154,36 +137,11 @@ func TestFreshConnectFallback_NonTopRoleRemovedPreRegister_RevokesChannel(t *tes
 // path's revoke pass) can stop the resume from committing to the old
 // permissions. The client must end up without the channel.
 func TestReconnectReplay_NonTopRoleRemovedPreRegister_DoesNotKeepChannel(t *testing.T) {
-	database := newHarvestVoiceDB(t)
-	ctx := context.Background()
-	uid := seedHarvestVoiceUser(t, database, "role-set-replay-user")
-	chID := mustCreateTextChannel(t, database, "role-set-replay-channel")
-	if _, err := database.ExecContext(ctx,
-		`INSERT INTO roles (id, name, color, permissions, position, is_default)
-		 VALUES (?, 'harvest-top', NULL, 0, 99, 0)`, topOnlyRoleID); err != nil {
-		t.Fatalf("seed top role: %v", err)
-	}
-	if err := database.AddUserRole(ctx, uid, topOnlyRoleID); err != nil {
-		t.Fatalf("AddUserRole: %v", err)
-	}
-
-	token, err := auth.GenerateToken()
-	if err != nil {
-		t.Fatalf("GenerateToken: %v", err)
-	}
-	if _, err := database.CreateSession(ctx, uid, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
-
-	hub := newTestHub(t, database, auth.NewRateLimiter(), nil)
-	go hub.Run()
-	defer hub.Stop()
+	rig, uid, chID, token := topRoleRaceRig(t, "role-set-replay")
+	hub, database, ctx := rig.hub, rig.db, context.Background()
 
 	// Bracket last_seq (99) inside the buffer so the replay tier is used.
-	rb := hub.ReplayBuffer()
-	rb.Push(98, chID, []byte(`{"seq":98,"type":"chat_message","payload":{}}`))
-	rb.Push(99, chID, []byte(`{"seq":99,"type":"chat_message","payload":{}}`))
-	rb.Push(100, chID, []byte(`{"seq":100,"type":"chat_message","payload":{}}`))
+	pushReplayWindow(hub, chID)
 	hub.SeedSeq(100)
 
 	var hookRan bool
@@ -201,17 +159,9 @@ func TestReconnectReplay_NonTopRoleRemovedPreRegister_DoesNotKeepChannel(t *test
 	}
 	defer func() { handleReconnectPreSeqMuRaceHook = nil }()
 
-	srv := httptest.NewServer(ServeWS(hub, []string{"*"}, 0))
-	defer srv.Close()
-	conn := dialAndAuth(t, ctx, srv.URL, token, 99, chID)
-	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
-
-	if typ, _ := readFrameType(t, ctx, conn); typ != MsgTypeAuthOK {
-		t.Fatalf("expected auth_ok, got %v", typ)
-	}
-	if typ, _ := readFrameType(t, ctx, conn); typ != MsgTypeReady {
-		t.Fatalf("expected ready (the watermark bump forces the full fallback), got %v", typ)
-	}
+	conn := rig.dialAuth(t, ctx, token, 99, chID)
+	expectFrame(t, ctx, conn, MsgTypeAuthOK, "")
+	expectFrame(t, ctx, conn, MsgTypeReady, " (the watermark bump forces the full fallback)")
 	if !hookRan {
 		t.Fatal("handleReconnectPreSeqMuRaceHook never fired: the replay tier was not reached")
 	}

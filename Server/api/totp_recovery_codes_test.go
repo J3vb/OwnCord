@@ -30,16 +30,11 @@ func enrolWithCodes(t *testing.T, router http.Handler, token string) totpEnrolme
 	t.Helper()
 	rr := postJSONWithToken(t, router, "/api/v1/users/me/totp/enable", token,
 		map[string]string{"password": recoveryTestPassword})
-	if rr.Code != http.StatusOK {
-		t.Fatalf("enable: status = %d; body = %s", rr.Code, rr.Body.String())
-	}
-	var enable struct {
+	requireStatus(t, rr, http.StatusOK)
+	enable := decodeBody[struct {
 		QRURI       string   `json:"qr_uri"`
 		BackupCodes []string `json:"backup_codes"`
-	}
-	if err := json.Unmarshal(rr.Body.Bytes(), &enable); err != nil {
-		t.Fatalf("decode enable: %v", err)
-	}
+	}](t, rr)
 	uri, err := url.Parse(enable.QRURI)
 	if err != nil {
 		t.Fatalf("parse otpauth URI: %v", err)
@@ -51,9 +46,7 @@ func enrolWithCodes(t *testing.T, router http.Handler, token string) totpEnrolme
 	}
 	rr = postJSONWithToken(t, router, "/api/v1/users/me/totp/confirm", token,
 		map[string]string{"password": recoveryTestPassword, "code": code})
-	if rr.Code != http.StatusNoContent {
-		t.Fatalf("confirm: status = %d; body = %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusNoContent)
 	return totpEnrolment{secret: secret, codes: enable.BackupCodes, confirmCode: code}
 }
 
@@ -63,16 +56,11 @@ func challenge(t *testing.T, router http.Handler, username string) string {
 	rr := postJSON(t, router, "/api/v1/auth/login", map[string]string{
 		"username": username, "password": recoveryTestPassword,
 	})
-	if rr.Code != http.StatusOK {
-		t.Fatalf("login: status = %d; body = %s", rr.Code, rr.Body.String())
-	}
-	var resp struct {
+	requireStatus(t, rr, http.StatusOK)
+	resp := decodeBody[struct {
 		PartialToken string `json:"partial_token"`
 		Requires2FA  bool   `json:"requires_2fa"`
-	}
-	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode login: %v", err)
-	}
+	}](t, rr)
 	if !resp.Requires2FA || resp.PartialToken == "" {
 		t.Fatalf("login did not issue a challenge: %s", rr.Body.String())
 	}
@@ -147,20 +135,13 @@ func TestRecoveryCodes_EndToEnd(t *testing.T) {
 	// stops working, a new one works.
 	rr := postJSONWithToken(t, router, "/api/v1/users/me/totp/recovery-codes", token,
 		map[string]string{"password": "wrong"})
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("regenerate with a wrong password: status = %d; body = %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusBadRequest)
 	rr = postJSONWithToken(t, router, "/api/v1/users/me/totp/recovery-codes", token,
 		map[string]string{"password": recoveryTestPassword})
-	if rr.Code != http.StatusOK {
-		t.Fatalf("regenerate: status = %d; body = %s", rr.Code, rr.Body.String())
-	}
-	var regen struct {
+	requireStatus(t, rr, http.StatusOK)
+	regen := decodeBody[struct {
 		BackupCodes []string `json:"backup_codes"`
-	}
-	if err := json.Unmarshal(rr.Body.Bytes(), &regen); err != nil {
-		t.Fatalf("decode regenerate: %v", err)
-	}
+	}](t, rr)
 	if len(regen.BackupCodes) != 10 || regen.BackupCodes[0] == enr.codes[1] {
 		t.Fatalf("regenerate returned %d codes (first %q), want a fresh set of 10", len(regen.BackupCodes), regen.BackupCodes[0])
 	}
@@ -174,9 +155,7 @@ func TestRecoveryCodes_EndToEnd(t *testing.T) {
 
 	// Disabling 2FA removes the codes.
 	rr = deleteWithToken(t, router, "/api/v1/users/me/totp", token, map[string]string{"password": recoveryTestPassword})
-	if rr.Code != http.StatusNoContent {
-		t.Fatalf("disable: status = %d; body = %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusNoContent)
 	var left int
 	if err := database.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM totp_recovery_codes`).Scan(&left); err != nil {
 		t.Fatalf("count codes: %v", err)
@@ -193,11 +172,8 @@ func TestRecoveryCodes_RegenerateRequiresTOTP(t *testing.T) {
 
 	rr := postJSONWithToken(t, router, "/api/v1/users/me/totp/recovery-codes", token,
 		map[string]string{"password": recoveryTestPassword})
-	if rr.Code != http.StatusConflict {
-		t.Fatalf("regenerate without 2FA: status = %d; body = %s", rr.Code, rr.Body.String())
-	}
-	var body map[string]any
-	_ = json.Unmarshal(rr.Body.Bytes(), &body)
+	requireStatus(t, rr, http.StatusConflict)
+	body := decodeBody[map[string]any](t, rr)
 	if body["error"] != "CONFLICT" {
 		t.Fatalf("error = %v, want CONFLICT", body["error"])
 	}

@@ -2,7 +2,6 @@ package api_test
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"testing"
@@ -52,9 +51,7 @@ func TestCreateGroupDM_BumpsVisibilityWatermark(t *testing.T) {
 	rr := dmPost(t, router, "/api/v1/dms/group", tokens[0], map[string]any{
 		"recipient_ids": []int64{2, 3},
 	})
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("create group dm: %d %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusCreated)
 
 	if bc.markCalls < 1 {
 		t.Fatalf("MarkVisibilityChanged calls = %d, want at least 1", bc.markCalls)
@@ -74,15 +71,11 @@ func TestLeaveGroupDM_EvictsLeaverFromVoice(t *testing.T) {
 		dmCreateToken(t, database, "carol", 4),
 	}
 
-	group := decodeDMInfo(t, dmPost(t, router, "/api/v1/dms/group", tokens[0], map[string]any{
-		"recipient_ids": []int64{2, 3},
-	}))
+	group := createGroupDM(t, router, tokens[0])
 	bc.evictCalls = nil
 
 	rr := dmDelete(t, router, fmt.Sprintf("/api/v1/dms/%d", group.ChannelID), tokens[1])
-	if rr.Code != http.StatusNoContent {
-		t.Fatalf("leave: %d %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusNoContent)
 
 	want := evictCall{2, group.ChannelID, ws.VoiceLeaveReasonDMLeave}
 	if len(bc.evictCalls) != 1 || bc.evictCalls[0] != want {
@@ -101,10 +94,9 @@ func TestCloseDM_OneToOneDoesNotEvictVoice(t *testing.T) {
 		dmCreateToken(t, database, "bob", 4),
 	}
 	rr := dmPost(t, router, "/api/v1/dms", tokens[0], map[string]any{"recipient_id": 2})
-	var created struct {
+	created := decodeBody[struct {
 		ChannelID int64 `json:"channel_id"`
-	}
-	_ = json.Unmarshal(rr.Body.Bytes(), &created)
+	}](t, rr)
 
 	if delRR := dmDelete(t, router, fmt.Sprintf("/api/v1/dms/%d", created.ChannelID), tokens[0]); delRR.Code != http.StatusNoContent {
 		t.Fatalf("close: %d", delRR.Code)
@@ -128,10 +120,9 @@ func TestBlockUser_EvictsBlockedUserFromSharedDMVoice(t *testing.T) {
 		dmCreateToken(t, database, "bob", 4),
 	}
 	rr := dmPost(t, router, "/api/v1/dms", tokens[0], map[string]any{"recipient_id": 2})
-	var created struct {
+	created := decodeBody[struct {
 		ChannelID int64 `json:"channel_id"`
-	}
-	_ = json.Unmarshal(rr.Body.Bytes(), &created)
+	}](t, rr)
 	bc.evictCalls = nil
 
 	if blockRR := dmPut(t, router, "/api/v1/blocks/2", tokens[0]); blockRR.Code != http.StatusOK {

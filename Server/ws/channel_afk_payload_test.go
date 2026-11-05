@@ -18,14 +18,22 @@ func TestChannelPayload_CarriesAFK(t *testing.T) {
 		{ID: 2, Name: "general", Type: "voice"},
 	}
 
+	requireFlagOnEveryChannelPayload(t, "afk", channels)
+}
+
+// requireFlagOnEveryChannelPayload checks that field is present, never
+// omitted for false, on the ready snapshot and on the channel_create and
+// channel_update broadcasts: true for channels[0] and false for channels[1].
+func requireFlagOnEveryChannelPayload(t *testing.T, field string, channels []db.Channel) {
+	t.Helper()
 	ready := readyChannelPayloads(channels, permissions.MemberGrants{}, nil, nil, false, service.ChannelPrivacySnapshot{})
 	for i, want := range []bool{true, false} {
-		got, present := ready[i]["afk"]
+		got, present := ready[i][field]
 		if !present {
-			t.Fatalf("ready channel %d omits afk", channels[i].ID)
+			t.Fatalf("ready channel %d omits %s", channels[i].ID, field)
 		}
 		if got != want {
-			t.Errorf("ready channel %d afk = %v, want %v", channels[i].ID, got, want)
+			t.Errorf("ready channel %d %s = %v, want %v", channels[i].ID, field, got, want)
 		}
 	}
 
@@ -40,12 +48,12 @@ func TestChannelPayload_CarriesAFK(t *testing.T) {
 			if err := json.Unmarshal(build(&channels[i]), &env); err != nil {
 				t.Fatalf("%s: %v", name, err)
 			}
-			got, present := env.Payload["afk"]
+			got, present := env.Payload[field]
 			if !present {
-				t.Fatalf("%s for channel %d omits afk", name, channels[i].ID)
+				t.Fatalf("%s for channel %d omits %s", name, channels[i].ID, field)
 			}
 			if got != want {
-				t.Errorf("%s for channel %d afk = %v, want %v", name, channels[i].ID, got, want)
+				t.Errorf("%s for channel %d %s = %v, want %v", name, channels[i].ID, field, got, want)
 			}
 		}
 	}

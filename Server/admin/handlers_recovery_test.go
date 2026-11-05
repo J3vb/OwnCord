@@ -18,10 +18,7 @@ import (
 // seedUserInRole creates a user in the given role and returns a bearer token.
 func seedUserInRole(t *testing.T, database *db.DB, name string, roleID int) (int64, string) {
 	t.Helper()
-	uid, err := database.CreateUser(context.Background(), name, "$2a$12$placeholder", roleID)
-	if err != nil {
-		t.Fatalf("CreateUser %s: %v", name, err)
-	}
+	uid := mustCreateUser(t, database, name, "$2a$12$placeholder", roleID)
 	token := "test-token-" + name + "-" + t.Name()
 	if _, err := database.CreateSession(context.Background(), uid, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
 		t.Fatalf("CreateSession: %v", err)
@@ -81,18 +78,13 @@ func TestAdminAPI_RecoveryCredential_OwnerOnlyIssueAndRedeem(t *testing.T) {
 		t.Fatalf("unknown target = %d, want 404; body = %s", w.Code, w.Body.String())
 	}
 	w := doRequest(t, handler, http.MethodPost, path, ownerToken, body)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("issue = %d; body = %s", w.Code, w.Body.String())
-	}
-	var issue struct {
+	requireStatus(t, w, http.StatusCreated)
+	issue := decodeBody[struct {
 		Credential   string `json:"credential"`
 		ExpiresAt    string `json:"expires_at"`
 		Username     string `json:"username"`
 		Verification string `json:"verification"`
-	}
-	if err := json.NewDecoder(w.Body).Decode(&issue); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	}](t, w)
 	if len(strings.Split(issue.Credential, "-")) != 6 || issue.Username != "locked-out" || issue.Verification != "in_person" {
 		t.Fatalf("issue = %+v, want six groups for the target", issue)
 	}
@@ -141,9 +133,7 @@ func TestAdminAPI_RecoveryCredential_AdmissionRefusalIsAuthBusy(t *testing.T) {
 
 	w := doRequest(t, handler, http.MethodPost, "/users/"+itoa(target)+"/recovery-credential", ownerToken,
 		map[string]string{"verification": "in_person"})
-	if w.Code != http.StatusTooManyRequests {
-		t.Fatalf("issue over budget = %d, want 429; body = %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusTooManyRequests)
 	var body struct {
 		Error string `json:"error"`
 	}

@@ -2,7 +2,6 @@ package api_test
 
 import (
 	"bytes"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -43,10 +42,8 @@ func TestJSONBodyRoutes_ShareOneReplyForTheSameBadBody(t *testing.T) {
 			req := httptest.NewRequest(rt.method, rt.path, bytes.NewBufferString(b.body))
 			req.Header.Set("Authorization", "Bearer "+token)
 			req.Header.Set("Content-Type", "application/json")
-			rr := httptest.NewRecorder()
-			router.ServeHTTP(rr, req)
-			var got struct{ Error, Message string }
-			_ = json.Unmarshal(rr.Body.Bytes(), &got)
+			rr := serveRequest(router, req)
+			got := decodeBody[struct{ Error, Message string }](t, rr)
 			if rr.Code != b.status || got.Error != b.code || got.Message != b.msg {
 				t.Errorf("%s %s, %s body: %d %q %q, want %d %q %q",
 					rt.method, rt.path, b.name, rr.Code, got.Error, got.Message, b.status, b.code, b.msg)

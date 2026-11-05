@@ -262,9 +262,7 @@ func TestMentionWorker_NotifiesOnlyReadersGainingABadge(t *testing.T) {
 	res := sendAs(t, svc, 1, "@bob @carol hello")
 	// Bob reads the message before the coalesce window flushes, so his bump
 	// is guarded away; carol stays behind and gains the badge.
-	if err := database.UpdateReadState(ctx, 2, 10, res.MessageID); err != nil {
-		t.Fatalf("UpdateReadState: %v", err)
-	}
+	mustDo(t, "UpdateReadState", database.UpdateReadState(ctx, 2, 10, res.MessageID))
 
 	svc.mentionWorkerForSend().flushNow(context.Background())
 
@@ -369,9 +367,7 @@ func TestMentionWorker_BoundsGoroutinesUnderBurst(t *testing.T) {
 	wg.Wait()
 	close(errs)
 	for err := range errs {
-		if err != nil {
-			t.Fatalf("SendMessage: %v", err)
-		}
+		mustDo(t, "SendMessage", err)
 	}
 
 	// The workers above are joined; only the worker plus its loop may remain.
@@ -453,13 +449,8 @@ func TestMentionWorker_DeleteBeforeFlushPreservesPriorBadge(t *testing.T) {
 
 	// m0 gives bob a real, unread badge. It is a real row so the liveness guard
 	// admits its increment.
-	m0, err := database.CreateMessage(context.Background(), 10, 3, "hey @bob earlier", nil)
-	if err != nil {
-		t.Fatalf("seed m0: %v", err)
-	}
-	if err := svc.st.(*db.DB).IncrementMentionCounts(context.Background(), 10, m0, []int64{2}); err != nil {
-		t.Fatalf("seed increment: %v", err)
-	}
+	m0 := mustCreateMessage(t, database, 10, 3, "hey @bob earlier", nil)
+	mustDo(t, "seed increment", svc.st.(*db.DB).IncrementMentionCounts(context.Background(), 10, m0, []int64{2}))
 	if got := mentionCount(t, database, 2); got != 1 {
 		t.Fatalf("setup: bob mention_count = %d, want 1", got)
 	}
@@ -491,13 +482,8 @@ func TestMentionWorker_PurgeBeforeFlushPreservesPriorBadge(t *testing.T) {
 	defer stop(context.Background())
 
 	// m0 gives bob a real badge.
-	m0, err := database.CreateMessage(context.Background(), 10, 3, "hey @bob earlier", nil)
-	if err != nil {
-		t.Fatalf("seed m0: %v", err)
-	}
-	if err := svc.st.(*db.DB).IncrementMentionCounts(context.Background(), 10, m0, []int64{2}); err != nil {
-		t.Fatalf("seed increment: %v", err)
-	}
+	m0 := mustCreateMessage(t, database, 10, 3, "hey @bob earlier", nil)
+	mustDo(t, "seed increment", svc.st.(*db.DB).IncrementMentionCounts(context.Background(), 10, m0, []int64{2}))
 
 	// m mentions bob; queued, then purged before its increment lands. Purge
 	// only the newest message so m0 survives and its genuine badge is the one

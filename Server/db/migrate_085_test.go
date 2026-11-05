@@ -13,9 +13,7 @@ import (
 func TestMigration085_SessionIdentityKey(t *testing.T) {
 	database := openMemory(t)
 	ctx := context.Background()
-	if err := db.MigrateFS(database, migrationsUpTo(t, "085_")); err != nil {
-		t.Fatalf("MigrateFS up to 084: %v", err)
-	}
+	mustDo(t, "MigrateFS up to 084", db.MigrateFS(database, migrationsUpTo(t, "085_")))
 	if columnExists(t, database, "sessions", "identity_public_key") {
 		t.Fatal("sessions.identity_public_key exists before 085; the test no longer exercises the migration")
 	}
@@ -28,9 +26,7 @@ func TestMigration085_SessionIdentityKey(t *testing.T) {
 		t.Fatalf("insert pre-085 session: %v", err)
 	}
 
-	if err := db.MigrateFS(database, migrationsUpTo(t, "086_")); err != nil {
-		t.Fatalf("Migrate 085: %v", err)
-	}
+	mustDo(t, "Migrate 085", db.MigrateFS(database, migrationsUpTo(t, "086_")))
 	if !columnExists(t, database, "sessions", "identity_public_key") {
 		t.Fatal("sessions.identity_public_key missing after 085")
 	}
@@ -50,9 +46,7 @@ func TestMigration085_SessionIdentityKey(t *testing.T) {
 		`INSERT INTO sessions (user_id, token, expires_at) VALUES (1, 'other', '2099-01-01T00:00:00Z')`); err != nil {
 		t.Fatalf("insert second session: %v", err)
 	}
-	if err := database.SetSessionIdentityKey(ctx, "old", "S0VZ"); err != nil {
-		t.Fatalf("SetSessionIdentityKey: %v", err)
-	}
+	mustDo(t, "SetSessionIdentityKey", database.SetSessionIdentityKey(ctx, "old", "S0VZ"))
 	if k := read("old"); k == nil || *k != "S0VZ" {
 		t.Fatalf("stored key = %v, want S0VZ", k)
 	}
@@ -60,13 +54,9 @@ func TestMigration085_SessionIdentityKey(t *testing.T) {
 		t.Fatal("SetSessionIdentityKey touched a different session")
 	}
 	// Last write wins, and an unknown token is not an error.
-	if err := database.SetSessionIdentityKey(ctx, "old", "S0VZMg=="); err != nil {
-		t.Fatalf("second write: %v", err)
-	}
+	mustDo(t, "second write", database.SetSessionIdentityKey(ctx, "old", "S0VZMg=="))
 	if k := read("old"); k == nil || *k != "S0VZMg==" {
 		t.Fatalf("stored key after rewrite = %v", k)
 	}
-	if err := database.SetSessionIdentityKey(ctx, "gone", "S0VZ"); err != nil {
-		t.Fatalf("unknown token: %v", err)
-	}
+	mustDo(t, "unknown token", database.SetSessionIdentityKey(ctx, "gone", "S0VZ"))
 }

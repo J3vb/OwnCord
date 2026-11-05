@@ -73,15 +73,6 @@ func mustUserID(t *testing.T, database *db.DB, username string) int64 {
 	return u.ID
 }
 
-func decodeJSON[T any](t *testing.T, body []byte) T {
-	t.Helper()
-	var v T
-	if err := json.Unmarshal(body, &v); err != nil {
-		t.Fatalf("decode %s: %v", body, err)
-	}
-	return v
-}
-
 // TestDMRequestHandler_ListPending_ReturnsShapeWithPreview proves GET / lists
 // the pending request with the sender's profile and a preview of the held
 // message.
@@ -101,9 +92,7 @@ func TestDMRequestHandler_ListPending_ReturnsShapeWithPreview(t *testing.T) {
 	}
 
 	rr := dmGet(t, router, "/api/v1/dm-requests", recipientTok)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("GET /dm-requests = %d, body=%s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 	var body struct {
 		Requests []struct {
 			ID        int64 `json:"id"`
@@ -176,9 +165,7 @@ func TestDMRequestHandler_Accept_OpensChannelAndNotifies(t *testing.T) {
 	reqID := sendResult.RequestCreatedFor[0].ID
 
 	rr := dmPost(t, router, fmt.Sprintf("/api/v1/dm-requests/%d/accept", reqID), recipientTok, map[string]any{})
-	if rr.Code != http.StatusOK {
-		t.Fatalf("accept = %d, body=%s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 	resp := decodeJSON[struct {
 		ID        int64  `json:"id"`
 		State     string `json:"state"`
@@ -240,9 +227,7 @@ func TestDMRequestHandler_TransitionThenTransitionAgainIsConflict(t *testing.T) 
 		t.Fatalf("first ignore = %d, body=%s", rr.Code, rr.Body.String())
 	}
 	rr := dmPost(t, router, path, recipientTok, map[string]any{})
-	if rr.Code != http.StatusConflict {
-		t.Fatalf("second ignore = %d, want 409, body=%s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusConflict)
 }
 
 // TestDMRequestHandler_TransitionByNonRecipientIsNotFound: neither the
@@ -264,9 +249,7 @@ func TestDMRequestHandler_TransitionByNonRecipientIsNotFound(t *testing.T) {
 
 	for _, tok := range []string{senderTok, thirdTok} {
 		rr := dmPost(t, router, path, tok, map[string]any{})
-		if rr.Code != http.StatusNotFound {
-			t.Errorf("ignore by a non-recipient = %d, want 404, body=%s", rr.Code, rr.Body.String())
-		}
+		expectStatus(t, rr, http.StatusNotFound)
 	}
 }
 
@@ -287,9 +270,7 @@ func TestDMRequestHandler_Block_BlocksTheSenderAndTransitions(t *testing.T) {
 	reqID := sendResult.RequestCreatedFor[0].ID
 
 	rr := dmPost(t, router, fmt.Sprintf("/api/v1/dm-requests/%d/block", reqID), recipientTok, map[string]any{})
-	if rr.Code != http.StatusOK {
-		t.Fatalf("block = %d, body=%s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 	resp := decodeJSON[struct {
 		State string `json:"state"`
 	}](t, rr.Body.Bytes())
@@ -323,9 +304,7 @@ func TestDMRequestHandler_Block_EvictsSenderFromSharedDMVoice(t *testing.T) {
 	bc.evictCalls = nil
 
 	rr := dmPost(t, router, fmt.Sprintf("/api/v1/dm-requests/%d/block", reqID), recipientTok, map[string]any{})
-	if rr.Code != http.StatusOK {
-		t.Fatalf("block = %d, body=%s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 
 	if len(bc.evictCalls) != 1 || bc.evictCalls[0].userID != senderID || bc.evictCalls[0].channelID != channelID {
 		t.Fatalf("DisconnectFromVoiceInChannel calls = %+v, want exactly one for user=%d channel=%d",
@@ -375,9 +354,7 @@ func TestDMRequestHandler_Block_EvictsEvenWhenTransitionLosesRace(t *testing.T) 
 	api.MountDMRequestRoutes(r, svc, bc)
 
 	rr := dmPost(t, r, fmt.Sprintf("/api/v1/dm-requests/%d/block", reqID), recipientTok, map[string]any{})
-	if rr.Code != http.StatusConflict {
-		t.Fatalf("block = %d, want 409 (the race already decided the row); body=%s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusConflict)
 
 	if len(bc.evictCalls) != 1 || bc.evictCalls[0].userID != senderID || bc.evictCalls[0].channelID != channelID {
 		t.Fatalf("DisconnectFromVoiceInChannel calls = %+v, want exactly one for user=%d channel=%d despite the 409",

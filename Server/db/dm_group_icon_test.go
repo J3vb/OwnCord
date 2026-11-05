@@ -20,9 +20,7 @@ func seedIconAttachment(t *testing.T, database *db.DB, id string, uploader int64
 func iconOf(t *testing.T, database *db.DB, channelID int64) string {
 	t.Helper()
 	_, icon, err := database.GetGroupDMMeta(context.Background(), channelID)
-	if err != nil {
-		t.Fatalf("GetGroupDMMeta: %v", err)
-	}
+	mustDo(t, "GetGroupDMMeta", err)
 	return icon
 }
 
@@ -32,9 +30,7 @@ func TestSetGroupDMIcon_WritesIconAndOneRow(t *testing.T) {
 	seedIconAttachment(t, f.database, "icon-a", f.bob)
 
 	change, err := f.database.SetGroupDMIcon(ctx, f.group, f.bob, new("icon-a"), "bob changed the group icon.")
-	if err != nil {
-		t.Fatalf("SetGroupDMIcon: %v", err)
-	}
+	mustDo(t, "SetGroupDMIcon", err)
 	if got := iconOf(t, f.database, f.group); got != "icon-a" {
 		t.Errorf("dm_icon = %q, want icon-a", got)
 	}
@@ -61,9 +57,7 @@ func TestSetGroupDMIcon_ClearWritesRowOnlyWhenIconSet(t *testing.T) {
 	ctx := context.Background()
 
 	change, err := f.database.SetGroupDMIcon(ctx, f.group, f.alice, nil, "cleared")
-	if err != nil {
-		t.Fatalf("clear with no icon: %v", err)
-	}
+	mustDo(t, "clear with no icon", err)
 	if len(change.Rows) != 0 || count(t, f.database, `SELECT COUNT(*) FROM messages WHERE channel_id = ? AND kind = 6`, f.group) != 0 {
 		t.Fatalf("clearing a group with no icon wrote a row: %+v", change.Rows)
 	}
@@ -73,9 +67,7 @@ func TestSetGroupDMIcon_ClearWritesRowOnlyWhenIconSet(t *testing.T) {
 		t.Fatalf("set: %v", err)
 	}
 	change, err = f.database.SetGroupDMIcon(ctx, f.group, f.carol, nil, "cleared")
-	if err != nil {
-		t.Fatalf("clear: %v", err)
-	}
+	mustDo(t, "clear", err)
 	if len(change.Rows) != 1 || !change.Rows[0].IconRemoved || iconOf(t, f.database, f.group) != "" {
 		t.Errorf("clear = %+v, icon %q, want one icon_removed row and no icon", change.Rows, iconOf(t, f.database, f.group))
 	}
@@ -94,9 +86,7 @@ func TestSetGroupDMIcon_NonMemberAndOneToOneAreNotFound(t *testing.T) {
 		t.Errorf("non-member err = %v, want ErrNotFound", err)
 	}
 	dm, _, err := f.database.GetOrCreateDMChannel(ctx, f.alice, f.bob)
-	if err != nil {
-		t.Fatalf("GetOrCreateDMChannel: %v", err)
-	}
+	mustDo(t, "GetOrCreateDMChannel", err)
 	if _, err = f.database.SetGroupDMIcon(ctx, dm.ID, f.alice, new("icon-a"), "x"); !errors.Is(err, db.ErrNotFound) {
 		t.Errorf("1:1 err = %v, want ErrNotFound", err)
 	}
@@ -133,9 +123,7 @@ func TestIsGroupDMIconForUser_MembersOfTheLiveIconOnly(t *testing.T) {
 	is := func(file string, user int64) bool {
 		t.Helper()
 		ok, err := f.database.IsGroupDMIconForUser(ctx, file, user)
-		if err != nil {
-			t.Fatalf("IsGroupDMIconForUser: %v", err)
-		}
+		mustDo(t, "IsGroupDMIconForUser", err)
 		return ok
 	}
 	if !is("icon-a", f.bob) {
@@ -169,9 +157,7 @@ func TestGetUserDMChannels_CarriesIconURL(t *testing.T) {
 		t.Fatalf("set: %v", err)
 	}
 	dms, err := f.database.GetUserDMChannels(ctx, f.bob)
-	if err != nil {
-		t.Fatalf("GetUserDMChannels: %v", err)
-	}
+	mustDo(t, "GetUserDMChannels", err)
 	if len(dms) != 1 || dms[0].Icon != "/api/v1/files/icon-a" {
 		t.Errorf("icon = %+v, want /api/v1/files/icon-a", dms)
 	}
@@ -195,9 +181,7 @@ func TestOrphanSweep_KeepsLiveGroupIcon(t *testing.T) {
 		}
 	}
 	swept, err := f.database.DeleteOrphanedAttachments(ctx, time.Now().Add(time.Hour))
-	if err != nil {
-		t.Fatalf("DeleteOrphanedAttachments: %v", err)
-	}
+	mustDo(t, "DeleteOrphanedAttachments", err)
 	got := map[string]bool{}
 	for _, s := range swept {
 		got[s] = true
@@ -236,9 +220,7 @@ func TestLinkAttachments_SkipsLiveGroupIcon(t *testing.T) {
 		t.Fatalf("set: %v", err)
 	}
 	msgID, err := f.database.CreateMessage(ctx, f.group, f.bob, "carrier", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	mustDo(t, "CreateMessage", err)
 	linked, err := f.database.LinkAttachmentsToMessage(ctx, msgID, f.bob, []string{"icon-live"})
 	if err != nil || len(linked) != 0 {
 		t.Errorf("link = %v, %v; want the live icon skipped", linked, err)

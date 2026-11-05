@@ -60,9 +60,7 @@ func TestBuildJSON_UnmarshalableValue_ReturnsFallback(t *testing.T) {
 		t.Fatalf("fallback output is not valid JSON: %s", out)
 	}
 	var m map[string]string
-	if err := json.Unmarshal(out, &m); err != nil {
-		t.Fatalf("unmarshal fallback: %v", err)
-	}
+	mustUnmarshal(t, out, &m)
 	if m["type"] != "error" {
 		t.Errorf("fallback type = %q, want error", m["type"])
 	}
@@ -85,10 +83,7 @@ func TestGracefulStop_WithClientsHavingVoiceState(t *testing.T) {
 	hub, database := newCoverageHub(t)
 
 	user := seedCoverageOwner(t, database, "graceful-voice-user")
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, _ := connectClient(t, hub, user, 0, 16)
 
 	// Set voice channel ID on the client to simulate voice state.
 	ws.SetClientVoiceChID(c, 42)
@@ -140,10 +135,7 @@ func cancelledContext() context.Context {
 func TestHandleMessage_Ping_ReturnsPong(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "ping-user")
-	send := make(chan []byte, 4)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, 0, 4)
 
 	raw, _ := json.Marshal(map[string]any{"type": "ping"})
 	// The pong reply is sent synchronously by handleMessage.
@@ -152,9 +144,7 @@ func TestHandleMessage_Ping_ReturnsPong(t *testing.T) {
 	select {
 	case msg := <-send:
 		var env map[string]any
-		if err := json.Unmarshal(msg, &env); err != nil {
-			t.Fatalf("unmarshal: %v", err)
-		}
+		mustUnmarshal(t, msg, &env)
 		if env["type"] != "pong" {
 			t.Errorf("type = %q, want pong", env["type"])
 		}
@@ -174,21 +164,13 @@ func TestBuildReady_VoiceChannelWithParticipants(t *testing.T) {
 	}
 
 	// Create a voice channel.
-	vcID, err := database.CreateChannel(context.Background(), "voice-room", "voice", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel voice: %v", err)
-	}
+	vcID := mustCreateChannel(t, database, "voice-room", "voice")
 
 	// Create another user and join them to voice.
 	other := seedCoverageOwner(t, database, "ready-voice-other")
-	if err := database.JoinVoiceChannel(context.Background(), other.ID, vcID); err != nil {
-		t.Fatalf("JoinVoiceChannel: %v", err)
-	}
+	mustJoinVoice(t, database, other.ID, vcID)
 
-	msg, err := hub.BuildReadyWithRoleForTest(database, user.ID, role)
-	if err != nil {
-		t.Fatalf("BuildReadyWithRoleForTest: %v", err)
-	}
+	msg := mustBuildReadyWithRole(t, hub, database, user.ID, role)
 
 	var env struct {
 		Payload struct {
@@ -198,9 +180,7 @@ func TestBuildReady_VoiceChannelWithParticipants(t *testing.T) {
 			} `json:"voice_states"`
 		} `json:"payload"`
 	}
-	if err := json.Unmarshal(msg, &env); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	mustUnmarshal(t, msg, &env)
 	if len(env.Payload.VoiceStates) != 1 {
 		t.Errorf("voice_states count = %d, want 1", len(env.Payload.VoiceStates))
 	}
@@ -224,19 +204,14 @@ func TestBuildReady_MultipleChannelTypes(t *testing.T) {
 		t.Fatalf("CreateChannel voice: %v", err)
 	}
 
-	msg, err := hub.BuildReadyWithRoleForTest(database, user.ID, role)
-	if err != nil {
-		t.Fatalf("BuildReadyWithRoleForTest: %v", err)
-	}
+	msg := mustBuildReadyWithRole(t, hub, database, user.ID, role)
 
 	var env struct {
 		Payload struct {
 			Channels []map[string]any `json:"channels"`
 		} `json:"payload"`
 	}
-	if err := json.Unmarshal(msg, &env); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	mustUnmarshal(t, msg, &env)
 	if len(env.Payload.Channels) != 2 {
 		t.Errorf("channels count = %d, want 2", len(env.Payload.Channels))
 	}
@@ -256,16 +231,10 @@ func TestBuildReady_MultipleChannelTypes(t *testing.T) {
 func TestHandleChannelFocus_InvalidChannelID(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "cf-bad-chid")
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, 0, 16)
 
-	raw, _ := json.Marshal(map[string]any{
-		"type": "channel_focus",
-		"payload": map[string]any{
-			"channel_id": "not-a-number",
-		},
+	raw := envelope("channel_focus", map[string]any{
+		"channel_id": "not-a-number",
 	})
 	hub.HandleMessageForTest(c, raw)
 
@@ -280,16 +249,10 @@ func TestHandleChannelFocus_ValidChannel(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "cf-valid")
 	chID := seedTestChannel(t, database, "cf-valid-chan")
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, 0, 16)
 
-	raw, _ := json.Marshal(map[string]any{
-		"type": "channel_focus",
-		"payload": map[string]any{
-			"channel_id": chID,
-		},
+	raw := envelope("channel_focus", map[string]any{
+		"channel_id": chID,
 	})
 	hub.HandleMessageForTest(c, raw)
 
@@ -305,16 +268,10 @@ func TestHandleChannelFocus_ValidChannel(t *testing.T) {
 func TestHandlePresence_InvalidStatus(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "pres-bad-status")
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, 0, 16)
 
-	raw, _ := json.Marshal(map[string]any{
-		"type": "presence_update",
-		"payload": map[string]any{
-			"status": "afk", // not a protocol status (invisible IS one since phase 6)
-		},
+	raw := envelope("presence_update", map[string]any{
+		"status": "afk", // not a protocol status (invisible IS one since phase 6)
 	})
 	hub.HandleMessageForTest(c, raw)
 
@@ -327,15 +284,9 @@ func TestHandlePresence_InvalidStatus(t *testing.T) {
 func TestHandlePresence_InvalidPayload(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "pres-bad-payload")
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, 0, 16)
 
-	raw, _ := json.Marshal(map[string]any{
-		"type":    "presence_update",
-		"payload": "not-an-object",
-	})
+	raw := envelope("presence_update", "not-an-object")
 	hub.HandleMessageForTest(c, raw)
 
 	code := drainForErrorCode(send, 200*time.Millisecond)
@@ -349,16 +300,10 @@ func TestHandlePresence_InvalidPayload(t *testing.T) {
 func TestHandleTyping_InvalidChannelID(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "typing-bad-chid")
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, 0, 16)
 
-	raw, _ := json.Marshal(map[string]any{
-		"type": "typing_start",
-		"payload": map[string]any{
-			"channel_id": -1,
-		},
+	raw := envelope("typing_start", map[string]any{
+		"channel_id": -1,
 	})
 	hub.HandleMessageForTest(c, raw)
 
@@ -396,10 +341,7 @@ func TestSendToUser_FullBuffer_ReturnsFalse(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "send-full-user")
 	// Create a send channel with buffer size 1.
-	send := make(chan []byte, 1)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	_, send := connectClient(t, hub, user, 0, 1)
 
 	// Fill the buffer.
 	send <- []byte(`{"type":"filler"}`)
@@ -416,35 +358,19 @@ func TestSendToUser_FullBuffer_ReturnsFalse(t *testing.T) {
 func TestHandleChatSend_WithAttachments_NoPermission(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	// Use a member user.
-	_, err := database.CreateUser(context.Background(), "attach-noperm-user", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	user, err := database.GetUserByUsername(context.Background(), "attach-noperm-user")
-	if err != nil || user == nil {
-		t.Fatalf("GetUserByUsername: %v", err)
-	}
+	user := seedUserWithRole(t, database, "attach-noperm-user", 4)
 
 	chID := seedTestChannel(t, database, "attach-noperm-chan")
 
 	// Deny ATTACH_FILES (0x0020) on this channel for Member role (id=4).
-	_, err = database.ExecContext(context.Background(), "INSERT INTO channel_overrides (channel_id, role_id, allow, deny) VALUES (?, 4, 0, 32)", chID)
-	if err != nil {
-		t.Fatalf("INSERT channel_overrides: %v", err)
-	}
+	mustExec(t, database, "INSERT INTO channel_overrides (channel_id, role_id, allow, deny) VALUES (?, 4, 0, 32)", chID)
 
-	send := make(chan []byte, 32)
-	c := ws.NewTestClientWithUser(hub, user, chID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, chID, 32)
 
-	raw, _ := json.Marshal(map[string]any{
-		"type": "chat_send",
-		"payload": map[string]any{
-			"channel_id":  chID,
-			"content":     "msg with attachment",
-			"attachments": []string{"att-id-1"},
-		},
+	raw := envelope("chat_send", map[string]any{
+		"channel_id":  chID,
+		"content":     "msg with attachment",
+		"attachments": []string{"att-id-1"},
 	})
 	hub.HandleMessageForTest(c, raw)
 
@@ -458,10 +384,7 @@ func TestHandleChatSend_WithAttachments_Success(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "attach-ok-user")
 	chID := seedTestChannel(t, database, "attach-ok-chan")
-	send := make(chan []byte, 32)
-	c := ws.NewTestClientWithUser(hub, user, chID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, chID, 32)
 
 	raw, _ := json.Marshal(map[string]any{
 		"type": "chat_send",
@@ -476,15 +399,7 @@ func TestHandleChatSend_WithAttachments_Success(t *testing.T) {
 
 	// Should still succeed (attachments that don't exist are silently skipped).
 	msgs := drainChanTimeout(send, 300*time.Millisecond)
-	found := false
-	for _, msg := range msgs {
-		var env map[string]any
-		if json.Unmarshal(msg, &env) == nil && env["type"] == "chat_send_ok" {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if !containsFrameType(msgs, "chat_send_ok") {
 		t.Error("expected chat_send_ok even with nonexistent attachment IDs")
 	}
 }
@@ -501,12 +416,9 @@ func TestChatSend_NilUser_DeniesPermission(t *testing.T) {
 	waitRegistered(t, hub, c)
 
 	// Try to send a chat message — should get FORBIDDEN due to nil user.
-	raw, _ := json.Marshal(map[string]any{
-		"type": "chat_send",
-		"payload": map[string]any{
-			"channel_id": chID,
-			"content":    "should fail",
-		},
+	raw := envelope("chat_send", map[string]any{
+		"channel_id": chID,
+		"content":    "should fail",
 	})
 	hub.HandleMessageForTest(c, raw)
 
@@ -522,10 +434,7 @@ func TestDeliverBroadcast_FullBuffer_DropsMessage(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "bcast-full-user")
 	// Create a tiny send buffer.
-	send := make(chan []byte, 1)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, 0, 1)
 
 	// Fill the buffer.
 	send <- []byte(`{"type":"filler"}`)
@@ -551,14 +460,8 @@ func TestBuildAuthOK_NonNilAvatar(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "authok-avatar-user")
 	// Set a non-nil avatar.
-	_, err := database.ExecContext(context.Background(), "UPDATE users SET avatar = 'https://example.com/pic.png' WHERE id = ?", user.ID)
-	if err != nil {
-		t.Fatalf("UPDATE avatar: %v", err)
-	}
-	user, err = database.GetUserByUsername(context.Background(), "authok-avatar-user")
-	if err != nil || user == nil {
-		t.Fatalf("GetUserByUsername: %v", err)
-	}
+	mustExec(t, database, "UPDATE users SET avatar = 'https://example.com/pic.png' WHERE id = ?", user.ID)
+	user = mustGetUser(t, database, user.ID)
 
 	msg := hub.BuildAuthOKForTest(user, "owner")
 	var env struct {
@@ -568,9 +471,7 @@ func TestBuildAuthOK_NonNilAvatar(t *testing.T) {
 			} `json:"user"`
 		} `json:"payload"`
 	}
-	if err := json.Unmarshal(msg, &env); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	mustUnmarshal(t, msg, &env)
 	if env.Payload.User.Avatar != "https://example.com/pic.png" {
 		t.Errorf("avatar = %q, want https://example.com/pic.png", env.Payload.User.Avatar)
 	}

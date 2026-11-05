@@ -43,10 +43,7 @@ func (f *forwardFixture) moderator(t *testing.T) {
 func (f *forwardFixture) rawPoll(t *testing.T, channel, author int64, multi bool) int64 {
 	t.Helper()
 	ctx := context.Background()
-	id, err := f.database.CreateMessage(ctx, channel, author, "📊 raw\n- a\n- b", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	id := mustCreateMessage(t, f.database, channel, author, "📊 raw\n- a\n- b", nil)
 	m := 0
 	if multi {
 		m = 1
@@ -87,9 +84,7 @@ func TestVotePoll_ReplaceSetAndRemove(t *testing.T) {
 	poll := mustCreatePoll(t, f, f.pollParams(fwdBob, fwdDstChan))
 
 	r, err := f.vote(fwdCarol, poll.MessageID, 1)
-	if err != nil {
-		t.Fatalf("vote: %v", err)
-	}
+	mustDo(t, "vote", err)
 	u := r.Update
 	if u == nil || u.MessageID != poll.MessageID || u.ChannelID != fwdDstChan || u.Version != 1 || r.Version != 1 ||
 		u.TotalVoters != 1 || countFor(u, 1) != 1 || countFor(u, 2) != 0 || u.Ended || u.EndedAt != nil ||
@@ -178,9 +173,7 @@ func TestVotePoll_DeletedAndUnknownAreNotFound(t *testing.T) {
 		t.Errorf("unknown message: err = %v, want ErrNotFound", err)
 	}
 	plain, err := f.svc.SendMessage(context.Background(), SendMessageParams{ChannelID: fwdDstChan, UserID: fwdBob, Username: "bob", Content: "no poll here"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "SendMessage", err)
 	if _, err := f.vote(fwdCarol, plain.MessageID, 1); !errors.Is(err, ErrNotFound) {
 		t.Errorf("a message that is not a poll: err = %v, want ErrNotFound", err)
 	}
@@ -260,9 +253,7 @@ func TestVotePoll_ArchivedBlockedAndTimedOut(t *testing.T) {
 		`INSERT INTO moderation_actions (kind, target_id, expires_at) VALUES ('timeout', ?, '2999-01-01 00:00:00')`, fwdBob); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.perms.RefreshTimeouts(ctx); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "RefreshTimeouts", f.perms.RefreshTimeouts(ctx))
 	open := f.rawPoll(t, fwdDstChan, fwdAlice, false)
 	if _, err := f.vote(fwdBob, open, 1); !errors.Is(err, ErrTimedOut) {
 		t.Errorf("a timed-out voter: err = %v, want ErrTimedOut", err)
@@ -337,9 +328,7 @@ func TestEndPoll_AuthorModeratorStranger(t *testing.T) {
 		t.Errorf("ending in an archived channel: err = %v, want ErrForbidden", err)
 	}
 	plain, err := f.svc.SendMessage(context.Background(), SendMessageParams{ChannelID: fwdDstChan, UserID: fwdBob, Username: "bob", Content: "plain"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "SendMessage", err)
 	if _, err := f.end(fwdBob, plain.MessageID); !errors.Is(err, ErrNotFound) {
 		t.Errorf("ending a message that is not a poll: err = %v, want ErrNotFound", err)
 	}
@@ -353,9 +342,7 @@ func TestEndPoll_TimedOutAuthorMayEnd(t *testing.T) {
 		`INSERT INTO moderation_actions (kind, target_id, expires_at) VALUES ('timeout', ?, '2999-01-01 00:00:00')`, fwdBob); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.perms.RefreshTimeouts(ctx); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "RefreshTimeouts", f.perms.RefreshTimeouts(ctx))
 	if _, err := f.end(fwdBob, poll.MessageID); err != nil {
 		t.Errorf("a timed-out author ending their own poll, as they may delete it: %v", err)
 	}

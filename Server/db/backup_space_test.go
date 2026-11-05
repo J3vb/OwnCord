@@ -18,9 +18,7 @@ import (
 func TestBackupToSafe_RefusesWhenShortOfSpace(t *testing.T) {
 	database, tmpDir := newBackupFileDB(t)
 	backupDir := filepath.Join(tmpDir, "backups")
-	if err := os.MkdirAll(backupDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "MkdirAll", os.MkdirAll(backupDir, 0o755))
 	const reserve = 256 << 20
 	var free uint64 = 10 << 20
 	var freeErr error
@@ -47,14 +45,10 @@ func TestBackupToSafe_RefusesWhenShortOfSpace(t *testing.T) {
 	}
 
 	free = reserve + 64<<20
-	if err := database.BackupToSafe(context.Background(), filepath.Join(backupDir, "roomy.db"), backupDir); err != nil {
-		t.Fatalf("BackupToSafe with room: %v", err)
-	}
+	mustDo(t, "BackupToSafe with room", database.BackupToSafe(context.Background(), filepath.Join(backupDir, "roomy.db"), backupDir))
 
 	free, freeErr = 0, fmt.Errorf("statfs: %w", errors.ErrUnsupported)
-	if err := database.BackupToSafe(context.Background(), filepath.Join(backupDir, "unknown.db"), backupDir); err != nil {
-		t.Fatalf("BackupToSafe with unreadable free space: %v", err)
-	}
+	mustDo(t, "BackupToSafe with unreadable free space", database.BackupToSafe(context.Background(), filepath.Join(backupDir, "unknown.db"), backupDir))
 }
 
 // The default (no reserve set) still refuses a copy that cannot fit, and an
@@ -62,21 +56,15 @@ func TestBackupToSafe_RefusesWhenShortOfSpace(t *testing.T) {
 func TestBackupToSafe_SpaceCheckDefaultsAndMemory(t *testing.T) {
 	database, tmpDir := newBackupFileDB(t)
 	backupDir := filepath.Join(tmpDir, "backups")
-	if err := os.MkdirAll(backupDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "MkdirAll", os.MkdirAll(backupDir, 0o755))
 	database.SetBackupFreeBytesForTest(0, func(string) (uint64, error) { return 0, nil })
 	if err := database.BackupToSafe(context.Background(), filepath.Join(backupDir, "a.db"), backupDir); !errors.Is(err, db.ErrBackupNoSpace) {
 		t.Fatalf("BackupToSafe on a full volume = %v, want ErrBackupNoSpace", err)
 	}
 
 	mem, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Open", err)
 	defer mem.Close() //nolint:errcheck
 	mem.SetBackupFreeBytesForTest(1<<40, func(string) (uint64, error) { return 0, nil })
-	if err := mem.BackupToSafe(context.Background(), filepath.Join(backupDir, "mem.db"), backupDir); err != nil {
-		t.Fatalf("in-memory BackupToSafe: %v", err)
-	}
+	mustDo(t, "in-memory BackupToSafe", mem.BackupToSafe(context.Background(), filepath.Join(backupDir, "mem.db"), backupDir))
 }

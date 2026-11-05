@@ -13,7 +13,6 @@ package ws_test
 
 import (
 	"context"
-	"encoding/json"
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/db"
@@ -40,9 +39,7 @@ func dmChannelStatusFor(t *testing.T, raw []byte, otherID int64) (recipientStatu
 			} `json:"dm_channels"`
 		} `json:"payload"`
 	}
-	if err := json.Unmarshal(raw, &env); err != nil {
-		t.Fatalf("unmarshal ready: %v", err)
-	}
+	mustUnmarshal(t, raw, &env)
 	for _, dm := range env.Payload.DMChannels {
 		if dm.Recipient.ID == otherID {
 			recipientStatus = dm.Recipient.Status
@@ -85,10 +82,7 @@ func TestBuildReady_DMChannelsHidesDisconnectedRecipientStatus(t *testing.T) {
 
 	// Only the viewer has a live connection; absent is never registered, so
 	// they must render offline everywhere in this ready payload.
-	msg, err := hub.BuildReadyWithRoleForTest(database, viewer.ID, viewerRole)
-	if err != nil {
-		t.Fatalf("BuildReadyWithRoleForTest: %v", err)
-	}
+	msg := mustBuildReadyWithRole(t, hub, database, viewer.ID, viewerRole)
 
 	recipientStatus, recipientsStatus, found := dmChannelStatusFor(t, msg, absent.ID)
 	if !found {

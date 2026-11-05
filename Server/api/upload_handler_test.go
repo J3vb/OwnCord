@@ -22,7 +22,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"testing/fstest"
 
 	"github.com/J3vb/OwnCord/Server/api"
 	"github.com/J3vb/OwnCord/Server/auth"
@@ -43,89 +42,7 @@ func testUploadSvc(database *db.DB) *service.UploadService {
 
 // ─── schema for upload tests ─────────────────────────────────────────────────
 
-var uploadTestSchema = []byte(`
-CREATE TABLE IF NOT EXISTS roles (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    name        TEXT    NOT NULL UNIQUE,
-    color       TEXT,
-    permissions INTEGER NOT NULL DEFAULT 0,
-    position    INTEGER NOT NULL DEFAULT 0,
-    is_default  INTEGER NOT NULL DEFAULT 0,
-    hoist       INTEGER NOT NULL DEFAULT 0,
-    mentionable INTEGER NOT NULL DEFAULT 0
-);
-INSERT OR IGNORE INTO roles (id, name, color, permissions, position, is_default) VALUES
-    (1, 'Owner',     '#E74C3C', 2147483647, 100, 0),
-    (2, 'Admin',     '#F39C12', 1073741823,  80, 0),
-    (3, 'Moderator', '#3498DB', 1048575,     60, 0),
-    (4, 'Member',    NULL,      1635,     40, 1);
-
-CREATE TABLE IF NOT EXISTS users (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    username    TEXT    NOT NULL UNIQUE COLLATE NOCASE,
-    password    TEXT    NOT NULL,
-    avatar      TEXT,
-    role_id     INTEGER NOT NULL DEFAULT 4 REFERENCES roles(id),
-    totp_secret TEXT,
-    status      TEXT    NOT NULL DEFAULT 'offline',
-    created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
-    last_seen   TEXT,
-    banned      INTEGER NOT NULL DEFAULT 0,
-    ban_reason  TEXT,
-    ban_expires TEXT,
-    registration_status TEXT NOT NULL DEFAULT 'active',
-    identity_public_key TEXT,
-    display_name TEXT,
-    about TEXT,
-    custom_status TEXT,
-    custom_status_expires_at TEXT,
-    banner_id TEXT,
-    banner_color TEXT
-);
-CREATE TABLE IF NOT EXISTS user_roles (
-    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    role_id INTEGER NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
-    PRIMARY KEY (user_id, role_id)
-) WITHOUT ROWID;
-
-CREATE TRIGGER IF NOT EXISTS user_roles_on_user_insert AFTER INSERT ON users
-BEGIN
-    INSERT OR IGNORE INTO user_roles (user_id, role_id)
-    SELECT NEW.id, r.id FROM roles r WHERE r.id = NEW.role_id;
-END;
-
-CREATE TABLE IF NOT EXISTS erasure_jobs (
-    id      INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    state   TEXT    NOT NULL
-);
-CREATE TABLE IF NOT EXISTS sessions (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    token      TEXT    NOT NULL UNIQUE,
-    device     TEXT,
-    ip_address TEXT,
-    created_at TEXT    NOT NULL DEFAULT (datetime('now')),
-    last_used  TEXT    NOT NULL DEFAULT (datetime('now')),
-    expires_at TEXT    NOT NULL,
-    unseen     INTEGER NOT NULL DEFAULT 0
-);
-CREATE TABLE IF NOT EXISTS recovery_kits (
-    user_id    INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-    verifier   TEXT    NOT NULL,
-    created_at TEXT    NOT NULL,
-    used_at    TEXT
-);
-CREATE TABLE IF NOT EXISTS recovery_assists (
-    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-    verifier TEXT NOT NULL,
-    issued_by INTEGER NOT NULL,
-    verification TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    expires_at TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token);
-
+var uploadTestSchema = []byte(schemaAccounts + `
 -- AuthMiddleware falls through to an API-token lookup whenever a bearer
 -- token matches no session (auth.ResolveTokenHash), so this table must exist
 -- even in upload-only fixtures — otherwise an ordinary "no such session"
@@ -141,29 +58,6 @@ CREATE TABLE IF NOT EXISTS api_tokens (
     expires_at   TEXT,
     revoked_at   TEXT
 );
-
-CREATE TABLE IF NOT EXISTS channel_categories (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    name       TEXT    NOT NULL,
-    position   INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT    NOT NULL DEFAULT (datetime('now'))
-);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_channel_categories_name ON channel_categories(name COLLATE NOCASE);
-CREATE TABLE IF NOT EXISTS category_overrides (
-    category_id INTEGER NOT NULL REFERENCES channel_categories(id) ON DELETE CASCADE,
-    role_id     INTEGER NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
-    allow       INTEGER NOT NULL DEFAULT 0,
-    deny        INTEGER NOT NULL DEFAULT 0,
-    UNIQUE(category_id, role_id)
-);
-CREATE TABLE IF NOT EXISTS category_user_overrides (
-    category_id INTEGER NOT NULL REFERENCES channel_categories(id) ON DELETE CASCADE,
-    user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    allow       INTEGER NOT NULL DEFAULT 0,
-    deny        INTEGER NOT NULL DEFAULT 0,
-    UNIQUE(category_id, user_id)
-);
-
 CREATE TABLE IF NOT EXISTS channels (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
     name           TEXT    NOT NULL,
@@ -209,38 +103,6 @@ CREATE TABLE IF NOT EXISTS messages (
     pinned_at  TEXT,
     kind       INTEGER NOT NULL DEFAULT 0
 );
-CREATE TABLE IF NOT EXISTS message_import_authors (
-    message_id      INTEGER PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
-    discord_user_id TEXT NOT NULL,
-    name            TEXT NOT NULL,
-    color           TEXT
-);
-CREATE TABLE IF NOT EXISTS import_jobs (
-    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
-    channel_id         INTEGER REFERENCES channels(id) ON DELETE SET NULL,
-    created_by         INTEGER REFERENCES users(id) ON DELETE SET NULL,
-    source_name        TEXT    NOT NULL DEFAULT '',
-    discord_channel_id TEXT    NOT NULL DEFAULT '',
-    status             TEXT    NOT NULL DEFAULT 'running',
-    total              INTEGER NOT NULL DEFAULT 0,
-    imported           INTEGER NOT NULL DEFAULT 0,
-    skipped            INTEGER NOT NULL DEFAULT 0,
-    skipped_attachments INTEGER NOT NULL DEFAULT 0,
-    error              TEXT,
-    created_at         TEXT    NOT NULL DEFAULT (datetime('now')),
-    finished_at        TEXT
-);
-CREATE TABLE IF NOT EXISTS message_mentions (
-    message_id        INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
-    mentioned_user_id INTEGER NOT NULL REFERENCES users(id)    ON DELETE CASCADE,
-    PRIMARY KEY (message_id, mentioned_user_id)
-);
-CREATE TABLE IF NOT EXISTS message_role_mentions (
-    message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
-    role_id    INTEGER NOT NULL,
-    PRIMARY KEY (message_id, role_id)
-);
-
 CREATE TABLE IF NOT EXISTS attachments (
     id          TEXT    PRIMARY KEY,
     message_id  INTEGER,
@@ -276,15 +138,6 @@ CREATE TABLE IF NOT EXISTS channel_overrides (
     deny       INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (channel_id, role_id)
 );
-
-CREATE TABLE IF NOT EXISTS channel_user_overrides (
-    channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
-    user_id    INTEGER NOT NULL REFERENCES users(id)    ON DELETE CASCADE,
-    allow      INTEGER NOT NULL DEFAULT 0,
-    deny       INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (channel_id, user_id)
-);
-
 CREATE TABLE IF NOT EXISTS settings (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -298,16 +151,7 @@ INSERT OR IGNORE INTO settings (key, value) VALUES
 
 func newUploadTestDB(t *testing.T) *db.DB {
 	t.Helper()
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	migrFS := fstest.MapFS{"001_schema.sql": {Data: uploadTestSchema}}
-	if err := db.MigrateFS(database, migrFS); err != nil {
-		t.Fatalf("MigrateFS: %v", err)
-	}
-	return database
+	return openSchemaDB(t, uploadTestSchema)
 }
 
 func newUploadTestStorage(t *testing.T) *storage.Storage {
@@ -339,21 +183,7 @@ func buildUploadRouterWithLimiter(database *db.DB, store *storage.Storage, limit
 // uploadCreateToken creates a user+session and returns the plaintext token.
 func uploadCreateToken(t *testing.T, database *db.DB, username string, roleID int) string {
 	t.Helper()
-	_, err := database.CreateUser(context.Background(), username, "$2a$12$fake", roleID)
-	if err != nil {
-		t.Fatalf("CreateUser %q: %v", username, err)
-	}
-	token := "upload-test-token-" + username
-	hash := auth.HashToken(token)
-	_, err = database.ExecContext(context.Background(),
-		`INSERT INTO sessions (user_id, token, device, ip_address, expires_at)
-		 SELECT id, ?, 'test', '127.0.0.1', '2099-01-01T00:00:00Z' FROM users WHERE username = ?`,
-		hash, username,
-	)
-	if err != nil {
-		t.Fatalf("insert session for %q: %v", username, err)
-	}
-	return token
+	return createUserToken(t, database, "upload-test-token-", username, roleID)
 }
 
 // makeMultipartFile builds a multipart form body with a single "file" field.
@@ -429,9 +259,7 @@ func doUpload(t *testing.T, router http.Handler, token, fieldName, filename stri
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
+	rr := serveLocal(router, req)
 	return rr
 }
 
@@ -444,9 +272,7 @@ func doServeFile(t *testing.T, router http.Handler, fileID, token string, header
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
+	rr := serveLocal(router, req)
 	return rr
 }
 
@@ -463,9 +289,7 @@ func TestUpload_RoutesAreMounted(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/uploads", body)
 	req.Header.Set("Content-Type", contentType)
 	req.Header.Set("Authorization", "Bearer "+token)
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
+	rr := serveLocal(router, req)
 	if rr.Code == http.StatusNotFound || rr.Code == http.StatusMethodNotAllowed {
 		t.Errorf("POST /api/v1/uploads returned %d, route not mounted", rr.Code)
 	}
@@ -473,8 +297,7 @@ func TestUpload_RoutesAreMounted(t *testing.T) {
 	// GET /api/v1/files/{id} should not return 405 (401 or 404 are valid).
 	req2 := httptest.NewRequest(http.MethodGet, "/api/v1/files/some-id", nil)
 	req2.RemoteAddr = "127.0.0.1:9999"
-	rr2 := httptest.NewRecorder()
-	router.ServeHTTP(rr2, req2)
+	rr2 := serveRequest(router, req2)
 	if rr2.Code == http.StatusMethodNotAllowed {
 		t.Errorf("GET /api/v1/files/{id} returned 405, route not mounted")
 	}
@@ -491,14 +314,9 @@ func TestUpload_Success_TextFile(t *testing.T) {
 	content := []byte("hello world this is a text file with enough bytes for detection")
 	rr := doUpload(t, router, token, "file", "notes.txt", content)
 
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want 201; body: %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusCreated)
 
-	var resp map[string]any
-	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
+	resp := decodeBody[map[string]any](t, rr)
 	if resp["filename"] != "notes.txt" {
 		t.Errorf("filename = %v, want notes.txt", resp["filename"])
 	}
@@ -534,14 +352,9 @@ func TestUpload_Success_PNGImage(t *testing.T) {
 	pngData := makePNGBytes(t, 16, 8)
 	rr := doUpload(t, router, token, "file", "image.png", pngData)
 
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want 201; body: %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusCreated)
 
-	var resp map[string]any
-	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
+	resp := decodeBody[map[string]any](t, rr)
 	if resp["mime"] != "image/png" {
 		t.Errorf("mime = %v, want image/png", resp["mime"])
 	}
@@ -566,9 +379,7 @@ func TestUpload_Unauthenticated(t *testing.T) {
 	router := buildUploadRouter(database, store, nil)
 
 	rr := doUpload(t, router, "", "file", "test.txt", []byte("hello"))
-	if rr.Code != http.StatusUnauthorized {
-		t.Errorf("status = %d, want 401", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusUnauthorized)
 }
 
 func TestUpload_InvalidToken(t *testing.T) {
@@ -577,9 +388,7 @@ func TestUpload_InvalidToken(t *testing.T) {
 	router := buildUploadRouter(database, store, nil)
 
 	rr := doUpload(t, router, "invalid-token-123", "file", "test.txt", []byte("hello"))
-	if rr.Code != http.StatusUnauthorized {
-		t.Errorf("status = %d, want 401", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusUnauthorized)
 }
 
 func TestUpload_MissingFileField(t *testing.T) {
@@ -590,14 +399,9 @@ func TestUpload_MissingFileField(t *testing.T) {
 
 	// Upload with wrong field name "attachment" instead of "file".
 	rr := doUpload(t, router, token, "attachment", "test.txt", []byte("hello world"))
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want 400; body: %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusBadRequest)
 
-	var resp map[string]any
-	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
+	resp := decodeBody[map[string]any](t, rr)
 	if resp["message"] != "missing file field" {
 		t.Errorf("message = %v, want 'missing file field'", resp["message"])
 	}
@@ -613,13 +417,9 @@ func TestUpload_InvalidMultipartForm(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/uploads", bytes.NewReader([]byte("not multipart")))
 	req.Header.Set("Content-Type", "multipart/form-data; boundary=nonexistent")
 	req.Header.Set("Authorization", "Bearer "+token)
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
+	rr := serveLocal(router, req)
 
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want 400; body: %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusBadRequest)
 }
 
 func TestUpload_BlockedFileType_Executable(t *testing.T) {
@@ -632,14 +432,9 @@ func TestUpload_BlockedFileType_Executable(t *testing.T) {
 	exeContent := append([]byte("MZ"), make([]byte, 100)...)
 	rr := doUpload(t, router, token, "file", "malware.exe", exeContent)
 
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want 400; body: %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusBadRequest)
 
-	var resp map[string]any
-	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
+	resp := decodeBody[map[string]any](t, rr)
 	msg, _ := resp["message"].(string)
 	if msg == "" {
 		t.Error("expected non-empty error message for blocked file type")
@@ -656,9 +451,7 @@ func TestUpload_BlockedFileType_ShellScript(t *testing.T) {
 	shContent := []byte("#!/bin/bash\necho hello\n")
 	rr := doUpload(t, router, token, "file", "script.sh", shContent)
 
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want 400; body: %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusBadRequest)
 }
 
 func TestUpload_BlockedFileType_ELF(t *testing.T) {
@@ -671,9 +464,7 @@ func TestUpload_BlockedFileType_ELF(t *testing.T) {
 	elfContent := append([]byte("\x7fELF"), make([]byte, 100)...)
 	rr := doUpload(t, router, token, "file", "binary", elfContent)
 
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want 400; body: %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusBadRequest)
 }
 
 func TestUpload_RateLimitedAfterBurst(t *testing.T) {
@@ -687,28 +478,19 @@ func TestUpload_RateLimitedAfterBurst(t *testing.T) {
 
 	for range 10 {
 		rr := doUpload(t, router, token, "file", "burst.txt", content)
-		if rr.Code != http.StatusCreated {
-			t.Fatalf("pre-limit upload status = %d, want 201; body: %s", rr.Code, rr.Body.String())
-		}
+		requireStatus(t, rr, http.StatusCreated)
 	}
 
 	rr := doUpload(t, router, token, "file", "burst.txt", content)
-	if rr.Code != http.StatusTooManyRequests {
-		t.Fatalf("rate-limited upload status = %d, want 429; body: %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusTooManyRequests)
 
-	var resp map[string]any
-	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode rate-limit response: %v", err)
-	}
+	resp := decodeBody[map[string]any](t, rr)
 	if resp["error"] != "RATE_LIMITED" {
 		t.Errorf("error = %v, want RATE_LIMITED", resp["error"])
 	}
 
 	rr = doUpload(t, router, otherToken, "file", "burst.txt", content)
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("other user upload status = %d, want 201; body: %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusCreated)
 }
 
 func TestUpload_OversizedFileRejected(t *testing.T) {
@@ -723,20 +505,43 @@ func TestUpload_OversizedFileRejected(t *testing.T) {
 	content := bytes.Repeat([]byte("a"), (1<<20)+1)
 
 	rr := doUpload(t, router, token, "file", "too-large.txt", content)
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("oversized upload status = %d, want 400; body: %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusBadRequest)
 
-	var resp map[string]any
-	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode oversized response: %v", err)
-	}
+	resp := decodeBody[map[string]any](t, rr)
 	message, _ := resp["message"].(string)
 	if !strings.Contains(message, "file exceeds maximum size") {
 		t.Fatalf("message = %q, want size rejection", message)
 	}
 	if resp["error"] != "BAD_REQUEST" {
 		t.Errorf("error = %v, want BAD_REQUEST", resp["error"])
+	}
+}
+
+// breakStorageDir removes the storage directory out from under an
+// already-constructed Storage so Save's os.Create fails — what a disk-full,
+// permission-change or read-only-mount failure looks like to a handler.
+func breakStorageDir(t *testing.T, dir string) {
+	t.Helper()
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatalf("RemoveAll: %v", err)
+	}
+}
+
+// requireStorageErrorHidesPath checks a failed upload answers 507 without
+// echoing the server's absolute storage path or any filesystem path.
+func requireStorageErrorHidesPath(t *testing.T, rr *httptest.ResponseRecorder, dir string) {
+	t.Helper()
+	// Server-side filesystem failures are 507 (storage.ErrIO) so they are
+	// distinguishable from bad uploads; the no-leak contract is unchanged.
+	requireStatus(t, rr, http.StatusInsufficientStorage)
+
+	resp := decodeBody[map[string]any](t, rr)
+	message, _ := resp["message"].(string)
+	if strings.Contains(message, dir) {
+		t.Fatalf("response message leaks the absolute storage path: %q", message)
+	}
+	if strings.ContainsAny(message, `/\`) {
+		t.Fatalf("response message looks like it contains a filesystem path: %q", message)
 	}
 }
 
@@ -756,33 +561,11 @@ func TestUpload_StorageErrorDoesNotLeakPath(t *testing.T) {
 	router := buildUploadRouter(database, store, nil)
 	token := uploadCreateToken(t, database, "leakuser", 1)
 
-	// Remove the storage directory out from under the already-constructed
-	// Storage so Save's os.Create fails — this is what a disk-full,
-	// permission-change, or read-only-mount failure looks like from the
-	// handler's point of view: a storage-layer error surfaces at Save time.
-	if err := os.RemoveAll(dir); err != nil {
-		t.Fatalf("RemoveAll: %v", err)
-	}
+	breakStorageDir(t, dir)
 
 	content := []byte("content that will fail to persist because the storage dir is gone")
 	rr := doUpload(t, router, token, "file", "leaktest.txt", content)
-	// Server-side filesystem failures are 507 (storage.ErrIO) so they are
-	// distinguishable from bad uploads; the no-leak contract is unchanged.
-	if rr.Code != http.StatusInsufficientStorage {
-		t.Fatalf("status = %d, want 507; body: %s", rr.Code, rr.Body.String())
-	}
-
-	var resp map[string]any
-	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	message, _ := resp["message"].(string)
-	if strings.Contains(message, dir) {
-		t.Fatalf("response message leaks the absolute storage path: %q", message)
-	}
-	if strings.ContainsAny(message, `/\`) {
-		t.Fatalf("response message looks like it contains a filesystem path: %q", message)
-	}
+	requireStorageErrorHidesPath(t, rr, dir)
 }
 
 func TestUpload_DBCreateAttachmentFailureDeletesStoredFile(t *testing.T) {
@@ -801,14 +584,9 @@ func TestUpload_DBCreateAttachmentFailureDeletesStoredFile(t *testing.T) {
 
 	content := []byte("content that will save to disk before attachment insert fails")
 	rr := doUpload(t, router, token, "file", "cleanup.txt", content)
-	if rr.Code != http.StatusInternalServerError {
-		t.Fatalf("upload status = %d, want 500; body: %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusInternalServerError)
 
-	var resp map[string]any
-	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode db failure response: %v", err)
-	}
+	resp := decodeBody[map[string]any](t, rr)
 	if resp["error"] != "INTERNAL_ERROR" {
 		t.Errorf("error = %v, want INTERNAL_ERROR", resp["error"])
 	}
@@ -830,14 +608,9 @@ func TestUpload_SanitizesReservedFilenameToUnnamed(t *testing.T) {
 	content := []byte("content for reserved filename sanitization")
 
 	rr := doUpload(t, router, token, "file", ".", content)
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want 201; body: %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusCreated)
 
-	var resp map[string]any
-	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
+	resp := decodeBody[map[string]any](t, rr)
 	if resp["filename"] != "unnamed" {
 		t.Fatalf("filename = %v, want unnamed", resp["filename"])
 	}
@@ -898,13 +671,8 @@ func TestUpload_StripsBidiOverrideAndForeignSeparator(t *testing.T) {
 			token := uploadCreateToken(t, database, "bidi"+strings.ReplaceAll(tc.name, " ", ""), 1)
 
 			rr := doUpload(t, router, token, "file", tc.upload, []byte("@echo off\r\n"))
-			if rr.Code != http.StatusCreated {
-				t.Fatalf("status = %d, want 201; body: %s", rr.Code, rr.Body.String())
-			}
-			var resp map[string]any
-			if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
-				t.Fatalf("decode response: %v", err)
-			}
+			requireStatus(t, rr, http.StatusCreated)
+			resp := decodeBody[map[string]any](t, rr)
 			got, _ := resp["filename"].(string)
 			if got != tc.wantName {
 				t.Errorf("filename = %q, want %q", got, tc.wantName)
@@ -934,12 +702,9 @@ func TestUpload_SuccessfulUploadCreatesDBRecord(t *testing.T) {
 	content := []byte("some file content for database record verification test")
 	rr := doUpload(t, router, token, "file", "dbtest.txt", content)
 
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want 201; body: %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusCreated)
 
-	var resp map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	resp := decodeBody[map[string]any](t, rr)
 
 	fileID := resp["id"].(string)
 	att, err := database.GetAttachmentByID(context.Background(), fileID)
@@ -970,14 +735,9 @@ func TestUpload_ResponseFields(t *testing.T) {
 	content := []byte("response field validation content data")
 	rr := doUpload(t, router, token, "file", "fields.dat", content)
 
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want 201; body: %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusCreated)
 
-	var resp map[string]any
-	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	resp := decodeBody[map[string]any](t, rr)
 
 	// All required fields should be present.
 	requiredFields := []string{"id", "filename", "size", "mime", "url"}
@@ -1015,19 +775,14 @@ func TestServeFile_Success(t *testing.T) {
 	// Upload a file first.
 	content := []byte("served file content with enough bytes for mime detection")
 	rr := doUpload(t, router, token, "file", "served.txt", content)
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("upload status = %d, want 201; body: %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusCreated)
 
-	var uploadResp map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&uploadResp)
+	uploadResp := decodeBody[map[string]any](t, rr)
 	fileID := uploadResp["id"].(string)
 
 	// Serve the file (uploader is also the requester — allowed for unlinked files).
 	rr2 := doServeFile(t, router, fileID, token, nil)
-	if rr2.Code != http.StatusOK {
-		t.Fatalf("serve status = %d, want 200; body: %s", rr2.Code, rr2.Body.String())
-	}
+	requireStatus(t, rr2, http.StatusOK)
 
 	// Verify content type header is set.
 	ct := rr2.Header().Get("Content-Type")
@@ -1057,18 +812,13 @@ func TestServeFile_Success_PNG(t *testing.T) {
 
 	pngData := makePNGBytes(t, 4, 4)
 	rr := doUpload(t, router, token, "file", "icon.png", pngData)
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("upload status = %d, want 201; body: %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusCreated)
 
-	var uploadResp map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&uploadResp)
+	uploadResp := decodeBody[map[string]any](t, rr)
 	fileID := uploadResp["id"].(string)
 
 	rr2 := doServeFile(t, router, fileID, token, nil)
-	if rr2.Code != http.StatusOK {
-		t.Fatalf("serve status = %d, want 200", rr2.Code)
-	}
+	requireStatus(t, rr2, http.StatusOK)
 
 	ct := rr2.Header().Get("Content-Type")
 	if ct != "image/png" {
@@ -1083,9 +833,7 @@ func TestServeFile_NotFound(t *testing.T) {
 	token := uploadCreateToken(t, database, "notfounduser", 1)
 
 	rr := doServeFile(t, router, "nonexistent-uuid-12345", token, nil)
-	if rr.Code != http.StatusNotFound {
-		t.Errorf("status = %d, want 404", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusNotFound)
 }
 
 func TestServeFile_EmptyID(t *testing.T) {
@@ -1095,13 +843,9 @@ func TestServeFile_EmptyID(t *testing.T) {
 
 	// Request to /api/v1/files/ with no ID should 404 (chi won't match the route).
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/files/", nil)
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
+	rr := serveLocal(router, req)
 
-	if rr.Code != http.StatusNotFound {
-		t.Errorf("status = %d, want 404", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusNotFound)
 }
 
 func TestServeFile_CORS_MatchingOrigin(t *testing.T) {
@@ -1113,20 +857,15 @@ func TestServeFile_CORS_MatchingOrigin(t *testing.T) {
 	// Upload a file.
 	content := []byte("cors test file content with sufficient length for detection")
 	rr := doUpload(t, router, token, "file", "cors.txt", content)
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("upload: %d; body: %s", rr.Code, rr.Body.String())
-	}
-	var uploadResp map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&uploadResp)
+	requireStatus(t, rr, http.StatusCreated)
+	uploadResp := decodeBody[map[string]any](t, rr)
 	fileID := uploadResp["id"].(string)
 
 	// Serve with matching origin.
 	rr2 := doServeFile(t, router, fileID, token, map[string]string{
 		"Origin": "https://app.example.com",
 	})
-	if rr2.Code != http.StatusOK {
-		t.Fatalf("serve status = %d, want 200", rr2.Code)
-	}
+	requireStatus(t, rr2, http.StatusOK)
 	acao := rr2.Header().Get("Access-Control-Allow-Origin")
 	if acao != "https://app.example.com" {
 		t.Errorf("ACAO = %q, want https://app.example.com", acao)
@@ -1141,19 +880,14 @@ func TestServeFile_CORS_NonMatchingOrigin(t *testing.T) {
 
 	content := []byte("cors non-matching test file content with sufficient length")
 	rr := doUpload(t, router, token, "file", "cors2.txt", content)
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("upload: %d", rr.Code)
-	}
-	var uploadResp map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&uploadResp)
+	requireStatus(t, rr, http.StatusCreated)
+	uploadResp := decodeBody[map[string]any](t, rr)
 	fileID := uploadResp["id"].(string)
 
 	rr2 := doServeFile(t, router, fileID, token, map[string]string{
 		"Origin": "https://evil.example.com",
 	})
-	if rr2.Code != http.StatusOK {
-		t.Fatalf("serve status = %d, want 200", rr2.Code)
-	}
+	requireStatus(t, rr2, http.StatusOK)
 	acao := rr2.Header().Get("Access-Control-Allow-Origin")
 	if acao != "" {
 		t.Errorf("ACAO should be empty for non-matching origin, got %q", acao)
@@ -1168,19 +902,14 @@ func TestServeFile_CORS_WildcardOrigin(t *testing.T) {
 
 	content := []byte("wildcard cors test file content with sufficient length")
 	rr := doUpload(t, router, token, "file", "wild.txt", content)
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("upload: %d", rr.Code)
-	}
-	var uploadResp map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&uploadResp)
+	requireStatus(t, rr, http.StatusCreated)
+	uploadResp := decodeBody[map[string]any](t, rr)
 	fileID := uploadResp["id"].(string)
 
 	rr2 := doServeFile(t, router, fileID, token, map[string]string{
 		"Origin": "https://anything.example.com",
 	})
-	if rr2.Code != http.StatusOK {
-		t.Fatalf("serve status = %d, want 200", rr2.Code)
-	}
+	requireStatus(t, rr2, http.StatusOK)
 	acao := rr2.Header().Get("Access-Control-Allow-Origin")
 	if acao != "https://anything.example.com" {
 		t.Errorf("ACAO = %q, want https://anything.example.com for wildcard", acao)
@@ -1195,18 +924,13 @@ func TestServeFile_CORS_NoOriginHeader(t *testing.T) {
 
 	content := []byte("no origin header test file content with sufficient length")
 	rr := doUpload(t, router, token, "file", "noorigin.txt", content)
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("upload: %d", rr.Code)
-	}
-	var uploadResp map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&uploadResp)
+	requireStatus(t, rr, http.StatusCreated)
+	uploadResp := decodeBody[map[string]any](t, rr)
 	fileID := uploadResp["id"].(string)
 
 	// No Origin header — CORS headers should not be set.
 	rr2 := doServeFile(t, router, fileID, token, nil)
-	if rr2.Code != http.StatusOK {
-		t.Fatalf("serve status = %d, want 200", rr2.Code)
-	}
+	requireStatus(t, rr2, http.StatusOK)
 	acao := rr2.Header().Get("Access-Control-Allow-Origin")
 	if acao != "" {
 		t.Errorf("ACAO should be empty when no Origin sent, got %q", acao)
@@ -1221,9 +945,7 @@ func TestServeFile_DBRecordMissing_ReturnsNotFound(t *testing.T) {
 
 	// No file uploaded — DB has no record.
 	rr := doServeFile(t, router, "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", token, nil)
-	if rr.Code != http.StatusNotFound {
-		t.Errorf("status = %d, want 404", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusNotFound)
 }
 
 func TestServeFile_StorageFileMissing_ReturnsNotFound(t *testing.T) {
@@ -1235,11 +957,8 @@ func TestServeFile_StorageFileMissing_ReturnsNotFound(t *testing.T) {
 	// Upload a file, then delete it from storage.
 	content := []byte("file that will be deleted from storage backend")
 	rr := doUpload(t, router, token, "file", "vanish.txt", content)
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("upload: %d; body: %s", rr.Code, rr.Body.String())
-	}
-	var uploadResp map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&uploadResp)
+	requireStatus(t, rr, http.StatusCreated)
+	uploadResp := decodeBody[map[string]any](t, rr)
 	fileID := uploadResp["id"].(string)
 
 	// Delete the file from storage directly.
@@ -1249,9 +968,7 @@ func TestServeFile_StorageFileMissing_ReturnsNotFound(t *testing.T) {
 
 	// Serve should return 404 because the file is missing from disk.
 	rr2 := doServeFile(t, router, fileID, token, nil)
-	if rr2.Code != http.StatusNotFound {
-		t.Errorf("status = %d, want 404 for missing storage file", rr2.Code)
-	}
+	expectStatus(t, rr2, http.StatusNotFound)
 }
 
 // ─── Table-driven tests for blocked file types ──────────────────────────────
@@ -1294,25 +1011,16 @@ func TestUpload_ThenServe_RoundTrip(t *testing.T) {
 
 	content := []byte("round trip test content for full upload and serve cycle")
 	rr := doUpload(t, router, token, "file", "roundtrip.txt", content)
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("upload: %d; body: %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusCreated)
 
-	var uploadResp map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&uploadResp)
+	uploadResp := decodeBody[map[string]any](t, rr)
 	fileID := uploadResp["id"].(string)
 	url := uploadResp["url"].(string)
 
 	// Serve using the URL from the upload response.
-	req := httptest.NewRequest(http.MethodGet, url, nil)
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr2 := httptest.NewRecorder()
-	router.ServeHTTP(rr2, req)
+	rr2 := doAPI(t, router, http.MethodGet, url, token, nil)
 
-	if rr2.Code != http.StatusOK {
-		t.Fatalf("serve status = %d, want 200", rr2.Code)
-	}
+	requireStatus(t, rr2, http.StatusOK)
 
 	// Verify the served content matches what was uploaded.
 	servedBody := rr2.Body.Bytes()
@@ -1331,23 +1039,14 @@ func TestUpload_ThenServe_PNG_RoundTrip(t *testing.T) {
 
 	pngData := makePNGBytes(t, 32, 32)
 	rr := doUpload(t, router, token, "file", "test.png", pngData)
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("upload: %d; body: %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusCreated)
 
-	var uploadResp map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&uploadResp)
+	uploadResp := decodeBody[map[string]any](t, rr)
 	url := uploadResp["url"].(string)
 
-	req := httptest.NewRequest(http.MethodGet, url, nil)
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr2 := httptest.NewRecorder()
-	router.ServeHTTP(rr2, req)
+	rr2 := doAPI(t, router, http.MethodGet, url, token, nil)
 
-	if rr2.Code != http.StatusOK {
-		t.Fatalf("serve: %d", rr2.Code)
-	}
+	requireStatus(t, rr2, http.StatusOK)
 	if rr2.Header().Get("Content-Type") != "image/png" {
 		t.Errorf("Content-Type = %q, want image/png", rr2.Header().Get("Content-Type"))
 	}
@@ -1369,18 +1068,13 @@ func TestServeFile_Unauthenticated_Returns401(t *testing.T) {
 	// Upload a file.
 	content := []byte("private file content for unauthenticated access test")
 	rr := doUpload(t, router, token, "file", "private.txt", content)
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("upload: %d; body: %s", rr.Code, rr.Body.String())
-	}
-	var resp map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	requireStatus(t, rr, http.StatusCreated)
+	resp := decodeBody[map[string]any](t, rr)
 	fileID := resp["id"].(string)
 
 	// Request without auth token.
 	rr2 := doServeFile(t, router, fileID, "", nil)
-	if rr2.Code != http.StatusUnauthorized {
-		t.Errorf("status = %d, want 401 for unauthenticated file request", rr2.Code)
-	}
+	expectStatus(t, rr2, http.StatusUnauthorized)
 }
 
 func TestServeFile_UnlinkedFile_UploaderCanAccess(t *testing.T) {
@@ -1391,18 +1085,13 @@ func TestServeFile_UnlinkedFile_UploaderCanAccess(t *testing.T) {
 
 	content := []byte("file owned by uploader for ownership access test")
 	rr := doUpload(t, router, token, "file", "mine.txt", content)
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("upload: %d; body: %s", rr.Code, rr.Body.String())
-	}
-	var resp map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	requireStatus(t, rr, http.StatusCreated)
+	resp := decodeBody[map[string]any](t, rr)
 	fileID := resp["id"].(string)
 
 	// Uploader can access their own unlinked file.
 	rr2 := doServeFile(t, router, fileID, token, nil)
-	if rr2.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200 for uploader accessing own file", rr2.Code)
-	}
+	expectStatus(t, rr2, http.StatusOK)
 }
 
 func TestServeFile_UnlinkedFile_OtherUserForbidden(t *testing.T) {
@@ -1414,18 +1103,13 @@ func TestServeFile_UnlinkedFile_OtherUserForbidden(t *testing.T) {
 
 	content := []byte("private file content for other-user forbidden test")
 	rr := doUpload(t, router, uploaderToken, "file", "secret.txt", content)
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("upload: %d; body: %s", rr.Code, rr.Body.String())
-	}
-	var resp map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	requireStatus(t, rr, http.StatusCreated)
+	resp := decodeBody[map[string]any](t, rr)
 	fileID := resp["id"].(string)
 
 	// Other user cannot access unlinked file.
 	rr2 := doServeFile(t, router, fileID, otherToken, nil)
-	if rr2.Code != http.StatusForbidden {
-		t.Errorf("status = %d, want 403 for other user accessing unlinked file", rr2.Code)
-	}
+	expectStatus(t, rr2, http.StatusForbidden)
 }
 
 func TestServeFile_AdminCannotReadAnotherUsersUnlinkedFile(t *testing.T) {
@@ -1437,17 +1121,12 @@ func TestServeFile_AdminCannotReadAnotherUsersUnlinkedFile(t *testing.T) {
 
 	content := []byte("file for admin unlinked test content with sufficient bytes")
 	rr := doUpload(t, router, uploaderToken, "file", "restricted.txt", content)
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("upload: %d; body: %s", rr.Code, rr.Body.String())
-	}
-	var resp map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	requireStatus(t, rr, http.StatusCreated)
+	resp := decodeBody[map[string]any](t, rr)
 	fileID := resp["id"].(string)
 
 	rr2 := doServeFile(t, router, fileID, adminToken, nil)
-	if rr2.Code != http.StatusForbidden {
-		t.Errorf("status = %d, want 403 for admin reading another user's unlinked file", rr2.Code)
-	}
+	expectStatus(t, rr2, http.StatusForbidden)
 }
 
 func TestServeFile_LinkedToGuildChannel_MemberWithPerm(t *testing.T) {
@@ -1459,11 +1138,8 @@ func TestServeFile_LinkedToGuildChannel_MemberWithPerm(t *testing.T) {
 	// Upload a file.
 	content := []byte("guild channel attachment content for permission test")
 	rr := doUpload(t, router, token, "file", "guild.txt", content)
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("upload: %d; body: %s", rr.Code, rr.Body.String())
-	}
-	var resp map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	requireStatus(t, rr, http.StatusCreated)
+	resp := decodeBody[map[string]any](t, rr)
 	fileID := resp["id"].(string)
 
 	// Create a guild channel and link the attachment via a message.
@@ -1487,9 +1163,7 @@ func TestServeFile_LinkedToGuildChannel_MemberWithPerm(t *testing.T) {
 
 	// Member with ReadMessages should be able to access.
 	rr2 := doServeFile(t, router, fileID, token, nil)
-	if rr2.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200 for guild member with READ_MESSAGES", rr2.Code)
-	}
+	expectStatus(t, rr2, http.StatusOK)
 }
 
 func TestServeFile_LinkedToGuildChannel_MemberWithoutPerm(t *testing.T) {
@@ -1502,11 +1176,8 @@ func TestServeFile_LinkedToGuildChannel_MemberWithoutPerm(t *testing.T) {
 	// Upload a file.
 	content := []byte("guild channel attachment content for denied permission test")
 	rr := doUpload(t, router, uploaderToken, "file", "restricted.txt", content)
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("upload: %d; body: %s", rr.Code, rr.Body.String())
-	}
-	var resp map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	requireStatus(t, rr, http.StatusCreated)
+	resp := decodeBody[map[string]any](t, rr)
 	fileID := resp["id"].(string)
 
 	// Create channel and link.
@@ -1534,9 +1205,7 @@ func TestServeFile_LinkedToGuildChannel_MemberWithoutPerm(t *testing.T) {
 
 	// Member without ReadMessages should get 403.
 	rr2 := doServeFile(t, router, fileID, memberToken, nil)
-	if rr2.Code != http.StatusForbidden {
-		t.Errorf("status = %d, want 403 for guild member without READ_MESSAGES", rr2.Code)
-	}
+	expectStatus(t, rr2, http.StatusForbidden)
 }
 
 func TestServeFile_LinkedToDM_ParticipantAllowed(t *testing.T) {
@@ -1549,11 +1218,8 @@ func TestServeFile_LinkedToDM_ParticipantAllowed(t *testing.T) {
 	// Upload a file.
 	content := []byte("dm attachment content for participant access test")
 	rr := doUpload(t, router, token1, "file", "dm.txt", content)
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("upload: %d; body: %s", rr.Code, rr.Body.String())
-	}
-	var resp map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	requireStatus(t, rr, http.StatusCreated)
+	resp := decodeBody[map[string]any](t, rr)
 	fileID := resp["id"].(string)
 
 	// Create DM channel, add participants, link attachment.
@@ -1571,9 +1237,7 @@ func TestServeFile_LinkedToDM_ParticipantAllowed(t *testing.T) {
 
 	// DM participant can access.
 	rr2 := doServeFile(t, router, fileID, token1, nil)
-	if rr2.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200 for DM participant", rr2.Code)
-	}
+	expectStatus(t, rr2, http.StatusOK)
 }
 
 func TestServeFile_LinkedToDM_NonParticipantForbidden(t *testing.T) {
@@ -1587,11 +1251,8 @@ func TestServeFile_LinkedToDM_NonParticipantForbidden(t *testing.T) {
 	// Upload a file.
 	content := []byte("dm attachment content for non-participant forbidden test")
 	rr := doUpload(t, router, token1, "file", "dmsecret.txt", content)
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("upload: %d; body: %s", rr.Code, rr.Body.String())
-	}
-	var resp map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	requireStatus(t, rr, http.StatusCreated)
+	resp := decodeBody[map[string]any](t, rr)
 	fileID := resp["id"].(string)
 
 	// Create DM channel with two participants (not the outsider).
@@ -1609,9 +1270,7 @@ func TestServeFile_LinkedToDM_NonParticipantForbidden(t *testing.T) {
 
 	// Non-participant gets 403.
 	rr2 := doServeFile(t, router, fileID, outsiderToken, nil)
-	if rr2.Code != http.StatusForbidden {
-		t.Errorf("status = %d, want 403 for DM non-participant", rr2.Code)
-	}
+	expectStatus(t, rr2, http.StatusForbidden)
 }
 
 // OC-0112: the admin bypass in handleServeFile must not cover the DM
@@ -1630,11 +1289,8 @@ func TestServeFile_LinkedToDM_AdminNonParticipantForbidden(t *testing.T) {
 	// Upload a file.
 	content := []byte("dm attachment content for admin non-participant forbidden test")
 	rr := doUpload(t, router, token1, "file", "dmadminsecret.txt", content)
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("upload: %d; body: %s", rr.Code, rr.Body.String())
-	}
-	var resp map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	requireStatus(t, rr, http.StatusCreated)
+	resp := decodeBody[map[string]any](t, rr)
 	fileID := resp["id"].(string)
 
 	// Create DM channel with two participants (not the admin).
@@ -1652,9 +1308,7 @@ func TestServeFile_LinkedToDM_AdminNonParticipantForbidden(t *testing.T) {
 
 	// Admin who is not a DM participant must still be denied.
 	rr2 := doServeFile(t, router, fileID, adminToken, nil)
-	if rr2.Code != http.StatusForbidden {
-		t.Errorf("status = %d, want 403 for admin who is not a DM participant", rr2.Code)
-	}
+	expectStatus(t, rr2, http.StatusForbidden)
 }
 
 // ─── GET /api/v1/files/{id}/thumb (P4-08) ───────────────────────────────────
@@ -1665,9 +1319,7 @@ func doServeThumb(t *testing.T, router http.Handler, fileID, token string) *http
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
+	rr := serveLocal(router, req)
 	return rr
 }
 
@@ -1751,9 +1403,7 @@ func TestServeThumb_PNGFitsTheBox(t *testing.T) {
 	id := uploadForThumb(t, router, token, "big.png", encodePNG(t, solidImage(4000, 3000)))
 
 	rr := doServeThumb(t, router, id, token)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("thumb: %d; body: %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 	if ct := rr.Header().Get("Content-Type"); ct != "image/png" {
 		t.Errorf("Content-Type = %q, want image/png", ct)
 	}
@@ -2094,9 +1744,7 @@ func rawUpload(t *testing.T, h *quotaHarness, contentType string, body io.Reader
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/uploads", body)
 	req.Header.Set("Content-Type", contentType)
 	req.Header.Set("Authorization", "Bearer "+h.token)
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	h.router.ServeHTTP(rr, req)
+	rr := serveLocal(h.router, req)
 	return rr
 }
 
@@ -2182,11 +1830,8 @@ func TestUpload_SniffsQuickTimeAsVideo(t *testing.T) {
 	token := uploadCreateToken(t, database, "movuser", 1)
 
 	rr := doUpload(t, router, token, "file", "clip.mov", quickTimeHeader())
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("upload status = %d, want 201; body: %s", rr.Code, rr.Body.String())
-	}
-	var resp map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	requireStatus(t, rr, http.StatusCreated)
+	resp := decodeBody[map[string]any](t, rr)
 	if resp["mime"] != "video/quicktime" {
 		t.Errorf("mime = %v, want video/quicktime", resp["mime"])
 	}
@@ -2202,11 +1847,8 @@ func TestServeFile_VideoHonoursRangeWithItsContentType(t *testing.T) {
 
 	content := quickTimeHeader()
 	rr := doUpload(t, router, token, "file", "clip.mov", content)
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("upload status = %d, want 201; body: %s", rr.Code, rr.Body.String())
-	}
-	var uploadResp map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&uploadResp)
+	requireStatus(t, rr, http.StatusCreated)
+	uploadResp := decodeBody[map[string]any](t, rr)
 	fileID := uploadResp["id"].(string)
 
 	rr2 := doServeFile(t, router, fileID, token, map[string]string{"Range": "bytes=4-11"})

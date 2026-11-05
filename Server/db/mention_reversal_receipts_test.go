@@ -13,13 +13,8 @@ import (
 func countedMention(t *testing.T, database *db.DB, author int64, content string, readers []int64) int64 {
 	t.Helper()
 	ctx := context.Background()
-	msg, err := database.CreateMessageWithMentions(ctx, 1, author, content, nil, readers, 0, false, nil)
-	if err != nil {
-		t.Fatalf("CreateMessageWithMentions: %v", err)
-	}
-	if err := database.IncrementMentionCounts(ctx, 1, msg.ID, readers); err != nil {
-		t.Fatalf("IncrementMentionCounts: %v", err)
-	}
+	msg := mustCreateMessageWithMentions(t, database, 1, author, content, nil, readers, 0, false, nil)
+	mustDo(t, "IncrementMentionCounts", database.IncrementMentionCounts(ctx, 1, msg.ID, readers))
 	return msg.ID
 }
 
@@ -28,22 +23,16 @@ func countedMention(t *testing.T, database *db.DB, author int64, content string,
 func deleteAndReverse(t *testing.T, database *db.DB, msgID int64) map[int64]int64 {
 	t.Helper()
 	ctx := context.Background()
-	if err := database.DeleteMessage(ctx, msgID, 1, false); err != nil {
-		t.Fatalf("DeleteMessage: %v", err)
-	}
+	mustDo(t, "DeleteMessage", database.DeleteMessage(ctx, msgID, 1, false))
 	lowered, err := database.DecrementMentionCounts(ctx, 1, []int64{msgID})
-	if err != nil {
-		t.Fatalf("DecrementMentionCounts: %v", err)
-	}
+	mustDo(t, "DecrementMentionCounts", err)
 	return lowered
 }
 
 func mentionCount(t *testing.T, database *db.DB, userID int64) int {
 	t.Helper()
 	n, err := database.GetMentionCount(context.Background(), userID, 1)
-	if err != nil {
-		t.Fatalf("GetMentionCount: %v", err)
-	}
+	mustDo(t, "GetMentionCount", err)
 	return n
 }
 
@@ -100,13 +89,8 @@ func TestDecrementMentionCounts_ReversesEveryoneBadge(t *testing.T) {
 	seedMentionFixture(t, database)
 	ctx := context.Background()
 
-	msg, err := database.CreateMessageWithMentions(ctx, 1, 1, "@everyone lunch", nil, nil, 0, true, nil)
-	if err != nil {
-		t.Fatalf("CreateMessageWithMentions: %v", err)
-	}
-	if err := database.IncrementMentionCounts(ctx, 1, msg.ID, []int64{2, 3}); err != nil {
-		t.Fatalf("IncrementMentionCounts: %v", err)
-	}
+	msg := mustCreateMessageWithMentions(t, database, 1, 1, "@everyone lunch", nil, nil, 0, true, nil)
+	mustDo(t, "IncrementMentionCounts", database.IncrementMentionCounts(ctx, 1, msg.ID, []int64{2, 3}))
 
 	lowered := deleteAndReverse(t, database, msg.ID)
 	if len(lowered) != 2 {
@@ -134,9 +118,7 @@ func TestDecrementMentionCounts_RepeatLowersNothing(t *testing.T) {
 		t.Errorf("receipts after reversal = %v, still holds %d", ids, first)
 	}
 	lowered, err := database.DecrementMentionCounts(ctx, 1, []int64{first})
-	if err != nil {
-		t.Fatalf("DecrementMentionCounts (repeat): %v", err)
-	}
+	mustDo(t, "DecrementMentionCounts (repeat)", err)
 	if len(lowered) != 0 {
 		t.Errorf("repeat lowered = %v, want none", lowered)
 	}
@@ -155,10 +137,7 @@ func TestDecrementMentionCounts_BackfilledReceiptNeedsDirectMention(t *testing.T
 	ctx := context.Background()
 
 	countedMention(t, database, 3, "@bob real", []int64{2})
-	here, err := database.CreateMessageWithMentions(ctx, 1, 1, "@here old", nil, nil, 0, true, nil)
-	if err != nil {
-		t.Fatalf("CreateMessageWithMentions: %v", err)
-	}
+	here := mustCreateMessageWithMentions(t, database, 1, 1, "@here old", nil, nil, 0, true, nil)
 	if _, err := database.ExecContext(ctx,
 		`UPDATE messages SET timestamp = '2020-01-01 00:00:00' WHERE id = ?`, here.ID); err != nil {
 		t.Fatalf("age message: %v", err)

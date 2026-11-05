@@ -36,9 +36,7 @@ func newRPFixture(t *testing.T, n int) *rpFixture {
 func (f *rpFixture) newMessage(t *testing.T) int64 {
 	t.Helper()
 	id, err := f.database.CreateMessage(context.Background(), f.ch, f.author, "m", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	mustDo(t, "CreateMessage", err)
 	return id
 }
 
@@ -64,9 +62,7 @@ func (f *rpFixture) move(t *testing.T, op db.ReadPointerOp, msgID int64) db.Read
 func (f *rpFixture) row(t *testing.T) (ptr, count int64, found bool) {
 	t.Helper()
 	ptr, count, found, err := f.database.GetReadState(context.Background(), f.reader, f.ch)
-	if err != nil {
-		t.Fatalf("GetReadState: %v", err)
-	}
+	mustDo(t, "GetReadState", err)
 	return ptr, count, found
 }
 
@@ -127,13 +123,9 @@ func TestMoveReadPointer_AtLatestMatchesMarkChannelReadAtLatest(t *testing.T) {
 	f.exec(t, `UPDATE messages SET deleted = 1 WHERE id = ?`, f.msgs[3])
 
 	wantRP(t, f.move(t, db.ReadAtLatest, 0), f.msgs[2], 0, 0)
-	if err := f.database.MarkChannelReadAtLatest(context.Background(), other, f.ch); err != nil {
-		t.Fatalf("MarkChannelReadAtLatest: %v", err)
-	}
+	mustDo(t, "MarkChannelReadAtLatest", f.database.MarkChannelReadAtLatest(context.Background(), other, f.ch))
 	wantPtr, wantCount, _, err := f.database.GetReadState(context.Background(), other, f.ch)
-	if err != nil {
-		t.Fatalf("GetReadState: %v", err)
-	}
+	mustDo(t, "GetReadState", err)
 	if ptr, count, _ := f.row(t); ptr != wantPtr || count != wantCount {
 		t.Errorf("MoveReadPointer row = (%d,%d), MarkChannelReadAtLatest row = (%d,%d)", ptr, count, wantPtr, wantCount)
 	}
@@ -167,9 +159,7 @@ func TestMoveReadPointer_UnreadDeletedOrForeignMessageNotFound(t *testing.T) {
 	f.move(t, db.ReadAtLatest, 0)
 	otherCh := seedChannel(t, f.database, "rp-other-ch")
 	foreign, err := f.database.CreateMessage(context.Background(), otherCh, f.author, "elsewhere", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	mustDo(t, "CreateMessage", err)
 	f.exec(t, `UPDATE messages SET deleted = 1 WHERE id = ?`, f.msgs[2])
 
 	for name, id := range map[string]int64{"deleted": f.msgs[2], "foreign": foreign, "missing": 1 << 40} {
@@ -282,9 +272,7 @@ func TestMoveReadPointer_BlockedAuthorReceiptsNotCounted(t *testing.T) {
 	f := newRPFixture(t, 3)
 	f.mention(t, f.msgs[2])
 	f.move(t, db.ReadAtLatest, 0)
-	if err := f.database.BlockUser(context.Background(), f.reader, f.author); err != nil {
-		t.Fatalf("BlockUser: %v", err)
-	}
+	mustDo(t, "BlockUser", f.database.BlockUser(context.Background(), f.reader, f.author))
 	wantRP(t, f.move(t, db.MarkUnread, f.msgs[1]), f.msgs[0], 2, 0)
 }
 

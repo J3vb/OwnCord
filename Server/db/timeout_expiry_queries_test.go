@@ -11,14 +11,8 @@ import (
 func TestListActiveTimeoutExpiries_OnlyActive(t *testing.T) {
 	database, ownerID, activeID := newModerationActionsTestDB(t)
 	ctx := context.Background()
-	liftedID, err := database.CreateUser(ctx, "liftedmember", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser(lifted): %v", err)
-	}
-	expiredID, err := database.CreateUser(ctx, "expiredmember", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser(expired): %v", err)
-	}
+	liftedID := mustCreateUser(t, database, "liftedmember", "hash", 4)
+	expiredID := mustCreateUser(t, database, "expiredmember", "hash", 4)
 
 	expires := time.Now().Add(time.Hour).UTC().Truncate(time.Second)
 	if _, _, err := database.TimeoutUser(ctx, activeID, ownerID, nil, "active", expires); err != nil {
@@ -35,9 +29,7 @@ func TestListActiveTimeoutExpiries_OnlyActive(t *testing.T) {
 	}
 
 	got, err := database.ListActiveTimeoutExpiries(ctx)
-	if err != nil {
-		t.Fatalf("ListActiveTimeoutExpiries: %v", err)
-	}
+	mustDo(t, "ListActiveTimeoutExpiries", err)
 	if len(got) != 1 {
 		t.Fatalf("ListActiveTimeoutExpiries returned %d rows, want 1: %+v", len(got), got)
 	}

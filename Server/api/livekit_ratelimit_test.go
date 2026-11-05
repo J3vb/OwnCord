@@ -61,8 +61,7 @@ func TestRateLimitMiddlewareWithPrefix_SeparatesLiveKitBucket(t *testing.T) {
 	firstLiveKit := httptest.NewRequest(http.MethodGet, "/livekit/rtc", nil)
 	firstLiveKit.RemoteAddr = "127.0.0.1:9999"
 	firstLiveKit.Header.Set("X-Forwarded-For", "198.51.100.10")
-	firstLiveKitRec := httptest.NewRecorder()
-	livekit.ServeHTTP(firstLiveKitRec, firstLiveKit)
+	firstLiveKitRec := serveRequest(livekit, firstLiveKit)
 	if firstLiveKitRec.Code != http.StatusOK {
 		t.Fatalf("first livekit request status = %d, want 200", firstLiveKitRec.Code)
 	}
@@ -70,8 +69,7 @@ func TestRateLimitMiddlewareWithPrefix_SeparatesLiveKitBucket(t *testing.T) {
 	defaultReq := httptest.NewRequest(http.MethodGet, "/api/v1/auth/login", nil)
 	defaultReq.RemoteAddr = "127.0.0.1:9999"
 	defaultReq.Header.Set("X-Forwarded-For", "198.51.100.10")
-	defaultRec := httptest.NewRecorder()
-	defaultRoute.ServeHTTP(defaultRec, defaultReq)
+	defaultRec := serveRequest(defaultRoute, defaultReq)
 	if defaultRec.Code != http.StatusOK {
 		t.Fatalf("default route should not share the livekit bucket, got %d", defaultRec.Code)
 	}
@@ -79,8 +77,7 @@ func TestRateLimitMiddlewareWithPrefix_SeparatesLiveKitBucket(t *testing.T) {
 	secondLiveKit := httptest.NewRequest(http.MethodGet, "/livekit/rtc", nil)
 	secondLiveKit.RemoteAddr = "127.0.0.1:9999"
 	secondLiveKit.Header.Set("X-Forwarded-For", "198.51.100.10")
-	secondLiveKitRec := httptest.NewRecorder()
-	livekit.ServeHTTP(secondLiveKitRec, secondLiveKit)
+	secondLiveKitRec := serveRequest(livekit, secondLiveKit)
 	if secondLiveKitRec.Code != http.StatusTooManyRequests {
 		t.Fatalf("second livekit request status = %d, want 429", secondLiveKitRec.Code)
 	}
@@ -88,8 +85,7 @@ func TestRateLimitMiddlewareWithPrefix_SeparatesLiveKitBucket(t *testing.T) {
 	differentClient := httptest.NewRequest(http.MethodGet, "/livekit/rtc", nil)
 	differentClient.RemoteAddr = "127.0.0.1:9999"
 	differentClient.Header.Set("X-Forwarded-For", "198.51.100.11")
-	differentClientRec := httptest.NewRecorder()
-	livekit.ServeHTTP(differentClientRec, differentClient)
+	differentClientRec := serveRequest(livekit, differentClient)
 	if differentClientRec.Code != http.StatusOK {
 		t.Fatalf("different forwarded client should have a separate livekit bucket, got %d", differentClientRec.Code)
 	}

@@ -32,14 +32,8 @@ func seedEraseSubject(t *testing.T, database *db.DB) eraseSubject {
 			t.Fatalf("%s: %v", query, err)
 		}
 	}
-	msg, err := database.CreateMessageWithMentions(ctx, chID, uid, "hello @other-user needleword", nil, []int64{other}, 0, false, nil)
-	if err != nil {
-		t.Fatalf("CreateMessageWithMentions: %v", err)
-	}
-	otherMsg, err := database.CreateMessageWithMentions(ctx, chID, other, "hi @Subject_User", nil, []int64{uid}, 0, false, nil)
-	if err != nil {
-		t.Fatalf("CreateMessageWithMentions(other): %v", err)
-	}
+	msg := mustCreateMessageWithMentions(t, database, chID, uid, "hello @other-user needleword", nil, []int64{other}, 0, false, nil)
+	otherMsg := mustCreateMessageWithMentions(t, database, chID, other, "hi @Subject_User", nil, []int64{uid}, 0, false, nil)
 	// Retry receipts name their sender even after message deletion. Populate
 	// both owners so the inventory proves removal and unrelated preservation.
 	exec(`INSERT INTO message_delivery_receipts
@@ -48,9 +42,7 @@ func seedEraseSubject(t *testing.T, database *db.DB) eraseSubject {
 		       unixepoch('now') * 1000 + 86400000
 		FROM messages WHERE id IN (?, ?)`, msg.ID, otherMsg.ID)
 	dm, _, err := database.GetOrCreateDMChannel(ctx, uid, other)
-	if err != nil {
-		t.Fatalf("GetOrCreateDMChannel: %v", err)
-	}
+	mustDo(t, "GetOrCreateDMChannel", err)
 	exec(`INSERT OR IGNORE INTO dm_open_state (user_id, channel_id) VALUES (?, ?)`, uid, dm.ID)
 	exec(`INSERT OR IGNORE INTO dm_open_state (user_id, channel_id) VALUES (?, ?)`, other, dm.ID)
 	exec(`INSERT INTO sessions (user_id, token, expires_at) VALUES (?, 'tok-subject', datetime('now', '+1 day'))`, uid)
@@ -68,10 +60,7 @@ func seedEraseSubject(t *testing.T, database *db.DB) eraseSubject {
 	// A poll (migration 073, WP 6.9b) another user posted: the subject and a
 	// bystander each hold a vote, so class 10a is proved non-empty and the
 	// bystander's vote must survive the subject's erasure.
-	pollMsg, err := database.CreateMessageWithMentions(ctx, chID, other, "poll fallback", nil, nil, 0, false, nil)
-	if err != nil {
-		t.Fatalf("CreateMessageWithMentions(poll): %v", err)
-	}
+	pollMsg := mustCreateMessageWithMentions(t, database, chID, other, "poll fallback", nil, nil, 0, false, nil)
 	exec(`INSERT INTO polls (message_id, question, expires_at) VALUES (?, 'q', '2999-01-01T00:00:00Z')`, pollMsg.ID)
 	exec(`INSERT INTO poll_answers (message_id, answer_id, text) VALUES (?1, 1, 'a'), (?1, 2, 'b')`, pollMsg.ID)
 	exec(`INSERT INTO poll_votes (message_id, answer_id, user_id) VALUES (?1, 1, ?2), (?1, 2, ?3)`, pollMsg.ID, uid, third)
@@ -225,9 +214,7 @@ func eraseEveryInventoryClassIsZero(t *testing.T) {
 	// row another member authored naming the subject, so classes 11c and 14e
 	// are proved non-empty too.
 	grp, err := database.CreateGroupDMChannel(ctx, "", sub.id, []int64{sub.id, sub.other, caller})
-	if err != nil {
-		t.Fatalf("seed group DM: %v", err)
-	}
+	mustDo(t, "seed group DM", err)
 	res, err := database.ExecContext(ctx,
 		`INSERT INTO messages (channel_id, user_id, content, kind) VALUES (?, ?, 'added', 2)`, grp.ID, caller)
 	if err != nil {
@@ -254,9 +241,7 @@ func eraseEveryInventoryClassIsZero(t *testing.T) {
 		}
 	}
 	before, err := database.TakeInventory(ctx, sub.id, sub.username)
-	if err != nil {
-		t.Fatalf("TakeInventory: %v", err)
-	}
+	mustDo(t, "TakeInventory", err)
 	for _, c := range db.SubjectInventory {
 		if c.Key == "7 login attempts" || c.Key == "21 audit rows" {
 			continue
@@ -267,13 +252,9 @@ func eraseEveryInventoryClassIsZero(t *testing.T) {
 	}
 
 	job, err := database.EraseAccount(ctx, sub.id, "")
-	if err != nil {
-		t.Fatalf("EraseAccount: %v", err)
-	}
+	mustDo(t, "EraseAccount", err)
 	after, err := database.TakeInventory(ctx, sub.id, sub.username)
-	if err != nil {
-		t.Fatalf("TakeInventory: %v", err)
-	}
+	mustDo(t, "TakeInventory", err)
 	for _, c := range db.SubjectInventory {
 		if after[c.Key] != 0 {
 			t.Errorf("%s after erasure = %d, want 0", c.Key, after[c.Key])
@@ -472,16 +453,12 @@ func TestReport_SubjectErasureKeepsTheOutcomeRow(t *testing.T) {
 	// HP-5 review widening: the surviving row carries no content of any
 	// kind, including a note about the subject the subject never even saw.
 	var notesLeft int
-	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM report_notes WHERE report_id = 950`).Scan(&notesLeft); err != nil {
-		t.Fatalf("count report_notes: %v", err)
-	}
+	mustDo(t, "count report_notes", database.QueryRowContext(ctx, `SELECT COUNT(*) FROM report_notes WHERE report_id = 950`).Scan(&notesLeft))
 	if notesLeft != 0 {
 		t.Errorf("report_notes about the erased subject = %d, want 0", notesLeft)
 	}
 	var n int
-	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM reports WHERE subject_token = ?`, "marker-tok-subject").Scan(&n); err != nil {
-		t.Fatalf("count by subject_token: %v", err)
-	}
+	mustDo(t, "count by subject_token", database.QueryRowContext(ctx, `SELECT COUNT(*) FROM reports WHERE subject_token = ?`, "marker-tok-subject").Scan(&n))
 	if n != 1 {
 		t.Fatalf("reports with subject_token = %d, want 1 -- the negative control: an implementation that deletes the row fails this", n)
 	}
@@ -524,9 +501,7 @@ func TestReport_SubjectErasureKeepsExactlyTheOutcomeColumns(t *testing.T) {
 		t.Fatalf("backdate updated_at: %v", err)
 	}
 	var createdBefore string
-	if err := database.QueryRowContext(ctx, `SELECT created_at FROM reports WHERE id = 970`).Scan(&createdBefore); err != nil {
-		t.Fatalf("read created_at before erasure: %v", err)
-	}
+	mustDo(t, "read created_at before erasure", database.QueryRowContext(ctx, `SELECT created_at FROM reports WHERE id = 970`).Scan(&createdBefore))
 	if _, err := database.EraseAccount(ctx, subject, "marker-tok-columns"); err != nil {
 		t.Fatalf("EraseAccount(subject): %v", err)
 	}
@@ -645,24 +620,18 @@ func TestReport_ModeratorErasureUnlinksNotesAndAssignment(t *testing.T) {
 		t.Fatalf("EraseAccount(moderator): %v", err)
 	}
 	var assigneeID int64
-	if err := database.QueryRowContext(ctx, `SELECT assignee_id FROM reports WHERE id = 970`).Scan(&assigneeID); err != nil {
-		t.Fatalf("read assignee: %v", err)
-	}
+	mustDo(t, "read assignee", database.QueryRowContext(ctx, `SELECT assignee_id FROM reports WHERE id = 970`).Scan(&assigneeID))
 	if assigneeID != 0 {
 		t.Errorf("assignee_id after moderator erasure = %d, want 0", assigneeID)
 	}
 	var authorID int64
 	var authorToken sql.NullString
-	if err := database.QueryRowContext(ctx, `SELECT author_id, author_token FROM report_notes WHERE report_id = 970`).Scan(&authorID, &authorToken); err != nil {
-		t.Fatalf("read note author: %v", err)
-	}
+	mustDo(t, "read note author", database.QueryRowContext(ctx, `SELECT author_id, author_token FROM report_notes WHERE report_id = 970`).Scan(&authorID, &authorToken))
 	if authorID != 0 || !authorToken.Valid || authorToken.String != "marker-tok-mod" {
 		t.Errorf("note author after moderator erasure = id=%d token=%v, want id 0 and the marker token", authorID, authorToken)
 	}
 	var reporterID, subjectID int64
-	if err := database.QueryRowContext(ctx, `SELECT reporter_id, subject_id FROM reports WHERE id = 970`).Scan(&reporterID, &subjectID); err != nil {
-		t.Fatalf("read report principals: %v", err)
-	}
+	mustDo(t, "read report principals", database.QueryRowContext(ctx, `SELECT reporter_id, subject_id FROM reports WHERE id = 970`).Scan(&reporterID, &subjectID))
 	if reporterID != reporter || subjectID != subject {
 		t.Errorf("reporter/subject changed by an unrelated moderator's erasure: reporter=%d (want %d) subject=%d (want %d)",
 			reporterID, reporter, subjectID, subject)
@@ -674,36 +643,24 @@ func TestEraseAccount_JobIsListedUntilCompleted(t *testing.T) {
 	ctx := context.Background()
 	sub := seedEraseSubject(t, database)
 	job, err := database.EraseAccount(ctx, sub.id, "")
-	if err != nil {
-		t.Fatalf("EraseAccount: %v", err)
-	}
+	mustDo(t, "EraseAccount", err)
 
 	jobs, err := database.ListUnfinishedErasureJobs(ctx)
-	if err != nil {
-		t.Fatalf("ListUnfinishedErasureJobs: %v", err)
-	}
+	mustDo(t, "ListUnfinishedErasureJobs", err)
 	if len(jobs) != 1 || jobs[0].ID != job.ID || jobs[0].State != db.ErasureStateDBDone || len(jobs[0].Files) != 2 {
 		t.Fatalf("unfinished jobs = %+v, want the one just written with 2 files", jobs)
 	}
 
-	if err := database.RecordErasureJobAttempt(ctx, job.ID, 1, "remove stored-a.png: EIO"); err != nil {
-		t.Fatalf("RecordErasureJobAttempt: %v", err)
-	}
+	mustDo(t, "RecordErasureJobAttempt", database.RecordErasureJobAttempt(ctx, job.ID, 1, "remove stored-a.png: EIO"))
 	got, err := database.GetErasureJob(ctx, job.ID)
-	if err != nil {
-		t.Fatalf("GetErasureJob: %v", err)
-	}
+	mustDo(t, "GetErasureJob", err)
 	if got.Attempts != 1 || got.FilesRemoved != 1 || got.LastError == "" || got.State != db.ErasureStateDBDone {
 		t.Errorf("after a failed attempt: %+v", got)
 	}
 
-	if err := database.CompleteErasureJob(ctx, job.ID, 2); err != nil {
-		t.Fatalf("CompleteErasureJob: %v", err)
-	}
+	mustDo(t, "CompleteErasureJob", database.CompleteErasureJob(ctx, job.ID, 2))
 	got, err = database.GetErasureJob(ctx, job.ID)
-	if err != nil {
-		t.Fatalf("GetErasureJob: %v", err)
-	}
+	mustDo(t, "GetErasureJob", err)
 	if got.State != db.ErasureStateDone || got.FilesRemoved != 2 || got.LastError != "" || got.Attempts != 2 {
 		t.Errorf("after completion: %+v", got)
 	}
@@ -711,9 +668,7 @@ func TestEraseAccount_JobIsListedUntilCompleted(t *testing.T) {
 	if jobs, err := database.ListUnfinishedErasureJobs(ctx); err != nil || len(jobs) != 1 {
 		t.Errorf("unfinished jobs with the purge outstanding = %v, %v; want the job", jobs, err)
 	}
-	if err := database.MarkErasureJobReplayPurged(ctx, job.ID); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "MarkErasureJobReplayPurged", database.MarkErasureJobReplayPurged(ctx, job.ID))
 	jobs, err = database.ListUnfinishedErasureJobs(ctx)
 	if err != nil || len(jobs) != 0 {
 		t.Errorf("unfinished jobs after completion and purge = %v, %v; want none", jobs, err)
@@ -731,9 +686,7 @@ func TestEraseAccount_FailingStatementRollsBackEverything(t *testing.T) {
 	ctx := context.Background()
 	sub := seedEraseSubject(t, database)
 	before, err := database.TakeInventory(ctx, sub.id, sub.username)
-	if err != nil {
-		t.Fatalf("TakeInventory: %v", err)
-	}
+	mustDo(t, "TakeInventory", err)
 	if _, err := database.ExecContext(ctx,
 		`CREATE TRIGGER fault_full BEFORE INSERT ON erasure_jobs BEGIN SELECT RAISE(FAIL, 'database or disk is full'); END`); err != nil {
 		t.Fatalf("install fault: %v", err)
@@ -748,9 +701,7 @@ func TestEraseAccount_FailingStatementRollsBackEverything(t *testing.T) {
 	}
 
 	after, err := database.TakeInventory(ctx, sub.id, sub.username)
-	if err != nil {
-		t.Fatalf("TakeInventory: %v", err)
-	}
+	mustDo(t, "TakeInventory", err)
 	for _, c := range db.SubjectInventory {
 		if after[c.Key] != before[c.Key] {
 			t.Errorf("%s: %d before, %d after the rolled-back erasure", c.Key, before[c.Key], after[c.Key])
@@ -788,9 +739,7 @@ func TestEraseAccount_SoleAccountAssetsAreDeleted(t *testing.T) {
 		t.Fatalf("seed sticker: %v", err)
 	}
 	job, err := database.EraseAccount(ctx, uid, "")
-	if err != nil {
-		t.Fatalf("EraseAccount: %v", err)
-	}
+	mustDo(t, "EraseAccount", err)
 	var left int
 	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM emoji`).Scan(&left); err != nil || left != 0 {
 		t.Errorf("assets left = %d (%v), want 0", left, err)
@@ -818,9 +767,7 @@ func TestEraseAccount_LockoutSuffixIsExact(t *testing.T) {
 		t.Fatalf("EraseAccount: %v", err)
 	}
 	rows, err := database.QueryContext(ctx, `SELECT key FROM rate_lockouts ORDER BY key`)
-	if err != nil {
-		t.Fatalf("list lockouts: %v", err)
-	}
+	mustDo(t, "list lockouts", err)
 	defer rows.Close()
 	var left []string
 	for rows.Next() {
@@ -854,9 +801,7 @@ func TestReferencedStoredFiles(t *testing.T) {
 		names = append(names, fmt.Sprintf("unknown-%d", i))
 	}
 	got, err := database.ReferencedStoredFiles(ctx, names)
-	if err != nil {
-		t.Fatalf("ReferencedStoredFiles: %v", err)
-	}
+	mustDo(t, "ReferencedStoredFiles", err)
 	if len(got) != 3 || !got["stored-att"] || !got["stored-emoji"] || !got["stored-sticker"] {
 		t.Errorf("referenced = %v, want the three named by rows", got)
 	}
@@ -901,16 +846,12 @@ func TestDeleteEventsForUser_MatchesEveryEnvelopeShape(t *testing.T) {
 		}
 	}
 	var before int
-	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE `+db.EventNamesUserPredicate, uid).Scan(&before); err != nil {
-		t.Fatalf("count: %v", err)
-	}
+	mustDo(t, "count", database.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE `+db.EventNamesUserPredicate, uid).Scan(&before))
 	if before != 8 {
 		t.Errorf("predicate matched %d rows, want 8", before)
 	}
 	n, err := database.DeleteEventsForUser(ctx, uid)
-	if err != nil {
-		t.Fatalf("DeleteEventsForUser: %v", err)
-	}
+	mustDo(t, "DeleteEventsForUser", err)
 	if n != 8 {
 		t.Errorf("deleted %d rows, want 8", n)
 	}
@@ -935,18 +876,14 @@ func TestEraseAccount_UnlinksAuditHistory(t *testing.T) {
 		{ActorID: sub.other, Action: "user_login", TargetType: "user", TargetID: sub.other, Detail: "from 198.51.100.7"},
 	}
 	for _, r := range rows {
-		if err := database.LogAuditEntry(ctx, r); err != nil {
-			t.Fatal(err)
-		}
+		mustDo(t, "LogAuditEntry", database.LogAuditEntry(ctx, r))
 	}
 	const token = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 	if _, err := database.EraseAccount(ctx, sub.id, token); err != nil {
 		t.Fatalf("EraseAccount: %v", err)
 	}
 	got, err := database.GetAuditLog(ctx, 50, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "GetAuditLog", err)
 	byAction := map[string][]db.AuditEntry{}
 	for _, e := range got {
 		byAction[e.Action] = append(byAction[e.Action], e)
@@ -984,9 +921,7 @@ func TestEraseAccount_UnlinksAuditHistory(t *testing.T) {
 	}
 	// Erasing without a marker store unlinks without a token.
 	other2 := seedUser(t, database, "second-subject")
-	if err := database.LogAuditEntry(ctx, db.AuditEntry{ActorID: other2, Action: "user_login", TargetType: "user", TargetID: other2, Detail: "x"}); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "LogAuditEntry", database.LogAuditEntry(ctx, db.AuditEntry{ActorID: other2, Action: "user_login", TargetType: "user", TargetID: other2, Detail: "x"}))
 	if _, err := database.EraseAccount(ctx, other2, ""); err != nil {
 		t.Fatal(err)
 	}
@@ -1013,9 +948,7 @@ func TestEraseAccount_TwoErasedPrincipalsKeepBothTokens(t *testing.T) {
 		{ActorID: a, Action: "user_ban", TargetType: "user", TargetID: b, Detail: "spam by principal-b"},
 		{ActorID: b, Action: "user_kick", TargetType: "user", TargetID: a, Detail: "retaliation"},
 	} {
-		if err := database.LogAuditEntry(ctx, r); err != nil {
-			t.Fatal(err)
-		}
+		mustDo(t, "LogAuditEntry", database.LogAuditEntry(ctx, r))
 	}
 	const tokA, tokB = "aaaa", "bbbb"
 	if _, err := database.EraseAccount(ctx, b, tokB); err != nil {
@@ -1025,9 +958,7 @@ func TestEraseAccount_TwoErasedPrincipalsKeepBothTokens(t *testing.T) {
 		t.Fatalf("EraseAccount(a): %v", err)
 	}
 	got, err := database.GetAuditLog(ctx, 50, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "GetAuditLog", err)
 	seen := 0
 	for _, e := range got {
 		switch e.Action {
@@ -1063,19 +994,13 @@ func TestErasureJob_ListedUntilReplayPurged(t *testing.T) {
 	ctx := context.Background()
 	sub := seedEraseSubject(t, database)
 	job, err := database.EraseAccount(ctx, sub.id, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := database.CompleteErasureJob(ctx, job.ID, len(job.Files)); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "EraseAccount", err)
+	mustDo(t, "CompleteErasureJob", database.CompleteErasureJob(ctx, job.ID, len(job.Files)))
 	jobs, err := database.ListUnfinishedErasureJobs(ctx)
 	if err != nil || len(jobs) != 1 || jobs[0].ReplayPurged || jobs[0].State != db.ErasureStateDone {
 		t.Fatalf("a done but unpurged job is not listed: %+v, %v", jobs, err)
 	}
-	if err := database.MarkErasureJobReplayPurged(ctx, job.ID); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "MarkErasureJobReplayPurged", database.MarkErasureJobReplayPurged(ctx, job.ID))
 	if jobs, _ := database.ListUnfinishedErasureJobs(ctx); len(jobs) != 0 {
 		t.Errorf("a purged, done job is still listed: %+v", jobs)
 	}
@@ -1120,10 +1045,7 @@ func TestEraseAccount_PollVotesBumpVersion(t *testing.T) {
 		database := openMigratedMemory(t)
 		sub := seedEraseSubject(t, database)
 		ctx := context.Background()
-		m, err := database.CreateMessageWithMentions(ctx, sub.channel, sub.other, "second poll", nil, nil, 0, false, nil)
-		if err != nil {
-			t.Fatalf("CreateMessageWithMentions: %v", err)
-		}
+		m := mustCreateMessageWithMentions(t, database, sub.channel, sub.other, "second poll", nil, nil, 0, false, nil)
 		for _, q := range []string{
 			`INSERT INTO polls (message_id, question, expires_at) VALUES (?1, 'q2', '2999-01-01T00:00:00Z')`,
 			`INSERT INTO poll_answers (message_id, answer_id, text) VALUES (?1, 1, 'a'), (?1, 2, 'b')`,

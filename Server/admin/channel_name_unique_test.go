@@ -34,14 +34,11 @@ func TestCreateChannel_DuplicateNameConflicts(t *testing.T) {
 
 	w := doRequest(t, handler, http.MethodPost, "/channels", token,
 		map[string]any{"name": "general", "type": "text", "category": "Chat"})
-	if w.Code != http.StatusConflict {
-		t.Fatalf("duplicate create = %d, want 409; body: %s", w.Code, w.Body.String())
-	}
-	var resp struct {
+	requireStatus(t, w, http.StatusConflict)
+	resp := decodeBody[struct {
 		Error   string `json:"error"`
 		Message string `json:"message"`
-	}
-	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	}](t, w)
 	if !strings.Contains(resp.Message, "already exists") {
 		t.Errorf("message = %q, want it to say the name already exists", resp.Message)
 	}
@@ -59,17 +56,11 @@ func TestPatchChannel_RenameToDuplicateConflicts(t *testing.T) {
 	other := createChannelID(t, handler, token, "random", "text", "Chat")
 
 	w := doRequest(t, handler, http.MethodPatch, "/channels/"+itoa(other), token, map[string]any{"name": "GENERAL"})
-	if w.Code != http.StatusConflict {
-		t.Fatalf("rename onto a sibling = %d, want 409; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusConflict)
 	w = doRequest(t, handler, http.MethodPatch, "/channels/"+itoa(other), token, map[string]any{"category": "Other", "name": "general"})
-	if w.Code != http.StatusOK {
-		t.Errorf("rename into another category = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	expectStatus(t, w, http.StatusOK)
 	w = doRequest(t, handler, http.MethodPatch, "/channels/"+itoa(other), token, map[string]any{"name": "General"})
-	if w.Code != http.StatusOK {
-		t.Errorf("case-only rename of itself = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	expectStatus(t, w, http.StatusOK)
 }
 
 // TestPatchChannel_ExistingDuplicatesStayEditable: rows that already share a
@@ -86,7 +77,5 @@ func TestPatchChannel_ExistingDuplicatesStayEditable(t *testing.T) {
 		t.Fatal(err)
 	}
 	w := doRequest(t, handler, http.MethodPatch, "/channels/"+itoa(second), token, map[string]any{"topic": "still editable"})
-	if w.Code != http.StatusOK {
-		t.Errorf("topic edit on a pre-existing duplicate = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	expectStatus(t, w, http.StatusOK)
 }

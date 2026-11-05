@@ -56,10 +56,7 @@ func TestAdminAFKRoute_RequiresManageServer(t *testing.T) {
 // changes nothing broadcasts nothing.
 func TestSetAFKChannel_SwitchClearsPreviousAndBroadcastsBoth(t *testing.T) {
 	ctx := context.Background()
-	database := openAdminTestDB(t)
-	hub := &mockHub{}
-	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	database, hub, handler, token := newAdminHarnessWithHub(t)
 	a, _ := database.AdminCreateChannel(ctx, "lounge", "voice", "", "", 0)
 	b, _ := database.AdminCreateChannel(ctx, "parking", "voice", "", "", 1)
 

@@ -134,9 +134,7 @@ func TestChannelReadAudience_GetChannelErrorDeniesEveryone(t *testing.T) {
 
 	// Make exactly GetChannel fail; roles and channel_overrides keep
 	// resolving, so the role scan would still return this user.
-	if _, err := database.ExecContext(ctx, `ALTER TABLE channels RENAME TO channels_offline`); err != nil {
-		t.Fatalf("rename channels: %v", err)
-	}
+	mustExec(t, database, `ALTER TABLE channels RENAME TO channels_offline`)
 
 	if got := h.channelReadAudience(ctx, chID); len(got) != 0 {
 		t.Errorf("channelReadAudience resolved %v for an unreadable channel row — an unresolvable channel must deny, not fall through to the role scan", got)
@@ -171,9 +169,7 @@ func TestChannelReadAudience_DMParticipantsErrorDeniesEveryone(t *testing.T) {
 
 	// Make exactly GetDMParticipantIDs fail; the channels row still resolves
 	// as type "dm", so the resolver reaches the DM branch and nothing else.
-	if _, err := database.ExecContext(ctx, `ALTER TABLE dm_participants RENAME TO dm_participants_offline`); err != nil {
-		t.Fatalf("rename dm_participants: %v", err)
-	}
+	mustExec(t, database, `ALTER TABLE dm_participants RENAME TO dm_participants_offline`)
 
 	if got := h.channelReadAudience(ctx, dm.ID); len(got) != 0 {
 		t.Errorf("channelReadAudience resolved %v for a DM whose participant list could not be read — an unresolvable DM must deny", got)

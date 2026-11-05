@@ -50,14 +50,10 @@ func TestPushDispatch_Condition6_WithdrawnAuthorityGovernsEveryAttempt(t *testin
 			if err != nil || len(rows) != 1 {
 				t.Fatalf("List(%d) = %v, %v; want the one subscription", withdrawn, rows, err)
 			}
-			if err := f.push.Revoke(ctx, withdrawn, rows[0].ID); err != nil {
-				t.Fatalf("Revoke: %v", err)
-			}
+			mustDo(t, "Revoke", f.push.Revoke(ctx, withdrawn, rows[0].ID))
 		},
 		"recipient blocks author": func(t *testing.T, ctx context.Context, f *pushDispatchFixture) {
-			if err := NewBlockService(f.database).BlockUser(ctx, withdrawn, author); err != nil {
-				t.Fatalf("BlockUser: %v", err)
-			}
+			mustDo(t, "BlockUser", NewBlockService(f.database).BlockUser(ctx, withdrawn, author))
 		},
 	}
 	// withdrawAfter is how many attempts the withdrawn recipient has already

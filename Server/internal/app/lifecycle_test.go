@@ -2,24 +2,18 @@ package app
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
-	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
-	"github.com/coder/websocket"
 	"go.uber.org/goleak"
 
 	"github.com/J3vb/OwnCord/Server/admin"
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/config"
-	"github.com/J3vb/OwnCord/Server/db"
-	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/ws"
 )
 
@@ -62,9 +56,7 @@ func TestRun_ServeErrorReturn_StopsHubDispatchGoroutine(t *testing.T) {
 	// calling it, this goroutine is still alive here.
 	// Pooled keep-alive connections of outbound clients sit on the shared default transport.
 	http.DefaultTransport.(*http.Transport).CloseIdleConnections()
-	if err := goleak.Find(leakOpt); err != nil {
-		t.Fatalf("hub dispatch goroutine (and, in production, its LiveKit process) leaked after Run returned early: %v", err)
-	}
+	mustDo(t, "hub dispatch goroutine (and, in production, its LiveKit process) leaked after Run returned early", goleak.Find(leakOpt))
 }
 
 // TestSeedHubReplayState_ForcesFullResyncForOfflineClient pins OC-0204:
@@ -86,14 +78,7 @@ func TestRun_ServeErrorReturn_StopsHubDispatchGoroutine(t *testing.T) {
 // (the persisted run 501..520 is contiguous and complete), silently proving
 // the bug: a resume that must be forced full sails through unforced.
 func TestSeedHubReplayState_ForcesFullResyncForOfflineClient(t *testing.T) {
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	defer database.Close() //nolint:errcheck
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("db.Migrate: %v", err)
-	}
+	database := newMaintenanceTestDB(t)
 
 	ctx := context.Background()
 
@@ -107,24 +92,10 @@ func TestSeedHubReplayState_ForcesFullResyncForOfflineClient(t *testing.T) {
 		}
 	}
 
-	userID, err := database.CreateUser(ctx, "seed-replay-user", "hash", 1)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	token, err := auth.GenerateToken()
-	if err != nil {
-		t.Fatalf("GenerateToken: %v", err)
-	}
-	if _, err := database.CreateSession(ctx, userID, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
+	token := seedSessionToken(ctx, t, database, "seed-replay-user")
 
 	limiter := auth.NewRateLimiter()
-	hub, hubErr := ws.NewHub(ws.HubOptions{DB: database, Limiter: limiter, Settings: service.NewSettingsService(database), Readers: ws.DBReaders(database), Voice: service.NewVoiceService(database), Presence: service.NewUserService(database), Auth: service.NewSessionService(database)})
-	if hubErr != nil {
-		t.Fatalf("ws.NewHub: %v", hubErr)
-	}
-	go hub.Run()
+	hub := startTestHub(t, database, limiter)
 	defer hub.Stop()
 
 	// The exact startup call Run makes once event persistence is enabled —
@@ -134,40 +105,10 @@ func TestSeedHubReplayState_ForcesFullResyncForOfflineClient(t *testing.T) {
 	seedHubReplayState(ctx, hub, database, log)
 	hub.SetEventStore(database)
 
-	handler := ws.ServeWS(hub, []string{"*"}, 0)
-	srv := httptest.NewServer(handler)
-	defer srv.Close()
-
-	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
-	dialCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-
-	conn, dialResp, dialErr := websocket.Dial(dialCtx, wsURL, nil)
-	if dialResp != nil && dialResp.Body != nil {
-		_ = dialResp.Body.Close()
-	}
-	if dialErr != nil {
-		t.Fatalf("websocket.Dial: %v", dialErr)
-	}
-	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
-
 	// last_seq=500 predates the restored max (520): a client whose sidebar
 	// missed a targeted visibility change while offline must be forced onto
 	// the full-ready path to converge.
-	authMsg := map[string]any{
-		"type": "auth",
-		"payload": map[string]any{
-			"token":    token,
-			"last_seq": uint64(500),
-		},
-	}
-	raw, _ := json.Marshal(authMsg)
-	if err := conn.Write(dialCtx, websocket.MessageText, raw); err != nil {
-		t.Fatalf("write auth: %v", err)
-	}
-	if _, _, err := conn.Read(dialCtx); err != nil {
-		t.Fatalf("read handshake response: %v", err)
-	}
+	resumeWithLastSeq(ctx, t, hub, token, uint64(500))
 
 	bufTier, dbTier, fullTier := hub.ReconnectTierStats()
 	if fullTier != 1 {
@@ -237,30 +178,13 @@ func waitForRingBufferNewestAtLeast(t *testing.T, hub *ws.Hub, target uint64) {
 // path; before the fix it silently resolves via the ordinary buffer tier
 // instead.
 func TestRunStartEventPersistence_DisabledMode_StaleLastSeqForcesFullResync(t *testing.T) {
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	defer database.Close() //nolint:errcheck
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("db.Migrate: %v", err)
-	}
+	database := newMaintenanceTestDB(t)
 
 	ctx := context.Background()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	cfg := &config.Config{EventPersistence: config.EventPersistenceConfig{Enabled: false}}
 
-	userID, err := database.CreateUser(ctx, "oc-0210-user", "hash", 1)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	token, err := auth.GenerateToken()
-	if err != nil {
-		t.Fatalf("GenerateToken: %v", err)
-	}
-	if _, err := database.CreateSession(ctx, userID, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
+	token := seedSessionToken(ctx, t, database, "oc-0210-user")
 
 	limiter := auth.NewRateLimiter()
 
@@ -268,11 +192,7 @@ func TestRunStartEventPersistence_DisabledMode_StaleLastSeqForcesFullResync(t *t
 	// last_seq ends up as whatever the 40th broadcast's real seq turns out to
 	// be — captured dynamically so this test holds regardless of what value
 	// scheme is in effect (raw 1..N pre-fix, or a seeded floor post-fix). ---
-	hubOld, hubErr := ws.NewHub(ws.HubOptions{DB: database, Limiter: limiter, Settings: service.NewSettingsService(database), Readers: ws.DBReaders(database), Voice: service.NewVoiceService(database), Presence: service.NewUserService(database), Auth: service.NewSessionService(database)})
-	if hubErr != nil {
-		t.Fatalf("ws.NewHub: %v", hubErr)
-	}
-	go hubOld.Run()
+	hubOld := startTestHub(t, database, limiter)
 	if persister, prunerDone := startEventPersister(ctx, log, cfg, hubOld, database); persister != nil || prunerDone != nil {
 		t.Fatalf("startEventPersister with Enabled=false: want (nil, nil), got (%v, %v)", persister, prunerDone)
 	}
@@ -286,11 +206,7 @@ func TestRunStartEventPersistence_DisabledMode_StaleLastSeqForcesFullResync(t *t
 
 	// --- Restart: hub B is a brand-new process-equivalent hub, same disabled
 	// config, same (in-memory but never touched by persistence) database. ---
-	hubNew, hubErr := ws.NewHub(ws.HubOptions{DB: database, Limiter: limiter, Settings: service.NewSettingsService(database), Readers: ws.DBReaders(database), Voice: service.NewVoiceService(database), Presence: service.NewUserService(database), Auth: service.NewSessionService(database)})
-	if hubErr != nil {
-		t.Fatalf("ws.NewHub: %v", hubErr)
-	}
-	go hubNew.Run()
+	hubNew := startTestHub(t, database, limiter)
 	defer hubNew.Stop()
 	if persister, prunerDone := startEventPersister(ctx, log, cfg, hubNew, database); persister != nil || prunerDone != nil {
 		t.Fatalf("startEventPersister with Enabled=false: want (nil, nil), got (%v, %v)", persister, prunerDone)
@@ -310,40 +226,10 @@ func TestRunStartEventPersistence_DisabledMode_StaleLastSeqForcesFullResync(t *t
 		t.Fatalf("test setup invariant broken: hub B's epoch (reached %d) never overtook the stale watermark (%d)", newTargetSeq, staleLastSeq)
 	}
 
-	handler := ws.ServeWS(hubNew, []string{"*"}, 0)
-	srv := httptest.NewServer(handler)
-	defer srv.Close()
-
-	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
-	dialCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-
-	conn, dialResp, dialErr := websocket.Dial(dialCtx, wsURL, nil)
-	if dialResp != nil && dialResp.Body != nil {
-		_ = dialResp.Body.Close()
-	}
-	if dialErr != nil {
-		t.Fatalf("websocket.Dial: %v", dialErr)
-	}
-	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
-
 	// staleLastSeq is a watermark from hub A's epoch. It sits inside hub B's
 	// own live ring window, but nothing about it describes hub B's history —
 	// it must not be served by ordinary replay.
-	authMsg := map[string]any{
-		"type": "auth",
-		"payload": map[string]any{
-			"token":    token,
-			"last_seq": staleLastSeq,
-		},
-	}
-	raw, _ := json.Marshal(authMsg)
-	if err := conn.Write(dialCtx, websocket.MessageText, raw); err != nil {
-		t.Fatalf("write auth: %v", err)
-	}
-	if _, _, err := conn.Read(dialCtx); err != nil {
-		t.Fatalf("read handshake response: %v", err)
-	}
+	resumeWithLastSeq(ctx, t, hubNew, token, staleLastSeq)
 
 	bufTier, dbTier, fullTier := hubNew.ReconnectTierStats()
 	if fullTier != 1 {

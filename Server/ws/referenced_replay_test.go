@@ -43,10 +43,7 @@ func TestChatSend_ReplayCopyOmitsReferencedSnippet(t *testing.T) {
 	hub.Register(c)
 	waitRegistered(t, hub, c)
 
-	raw, _ := json.Marshal(map[string]any{
-		"type":    "chat_send",
-		"payload": map[string]any{"channel_id": chID, "content": "the reply", "reply_to": parentID},
-	})
+	raw := envelope("chat_send", map[string]any{"channel_id": chID, "content": "the reply", "reply_to": parentID})
 	hub.HandleMessageForTest(c, raw)
 
 	deadline := time.Now().Add(2 * time.Second)
@@ -89,15 +86,9 @@ func TestChatSend_BroadcastCarriesImportedAuthorOfParent(t *testing.T) {
 		`INSERT INTO message_import_authors (message_id, discord_user_id, name, color) VALUES (?, '42', 'Ann', NULL)`, parentID); err != nil {
 		t.Fatal(err)
 	}
-	send := make(chan []byte, 32)
-	c := ws.NewTestClientWithUser(hub, user, chID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, chID, 32)
 
-	raw, _ := json.Marshal(map[string]any{
-		"type":    "chat_send",
-		"payload": map[string]any{"channel_id": chID, "content": "reply", "reply_to": parentID},
-	})
+	raw := envelope("chat_send", map[string]any{"channel_id": chID, "content": "reply", "reply_to": parentID})
 	hub.HandleMessageForTest(c, raw)
 
 	timer := time.NewTimer(time.Second)

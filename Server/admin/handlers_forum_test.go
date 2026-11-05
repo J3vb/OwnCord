@@ -138,9 +138,7 @@ func TestForumSettings_RequireManageChannels(t *testing.T) {
 	_, member := sessionFor(t, f.database, "plainmember", 4)
 	w := doRequest(t, f.handler, http.MethodPut, "/channels/"+itoa(id)+"/forum", member,
 		map[string]any{"default_auto_archive_minutes": 60, "tags": []map[string]any{{"name": "x"}}})
-	if w.Code != http.StatusForbidden {
-		t.Errorf("a member: status %d, want 403", w.Code)
-	}
+	expectStatus(t, w, http.StatusForbidden)
 	if got := f.channel(id).Forum; len(got.Tags) != 0 {
 		t.Errorf("a refused request changed the forum: %+v", got)
 	}
@@ -153,9 +151,7 @@ func TestForumSettings_ServedOnTheClientMount(t *testing.T) {
 	handler := admin.NewChannelAPI(newTestServices(f.database), f.hub)
 	w := doRequest(t, handler, http.MethodPut, "/"+itoa(id)+"/forum", f.admin,
 		map[string]any{"default_auto_archive_minutes": 10080, "require_tag": true, "tags": []map[string]any{{"name": "x"}}})
-	if w.Code != http.StatusOK {
-		t.Fatalf("status %d, body %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 	if got := f.channel(id).Forum; !got.RequireTag || got.DefaultAutoArchiveMinutes != 10080 || len(got.Tags) != 1 {
 		t.Errorf("stored forum = %+v", got)
 	}

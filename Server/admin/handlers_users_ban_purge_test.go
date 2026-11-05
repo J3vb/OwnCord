@@ -137,9 +137,7 @@ func TestPatchUser_BanWithDeleteSeconds_BanThenBulkDeletePerChannel(t *testing.T
 		"ban_reason":             "spam",
 		"delete_message_seconds": 3600,
 	})
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 	body := decodePatchBody(t, w.Body.Bytes())
 	if deleted, complete := purgeField(t, body); deleted != 3 || !complete {
 		t.Fatalf("purge = {deleted:%d complete:%v}, want {3 true}", deleted, complete)
@@ -248,9 +246,7 @@ func TestPatchUser_DeleteSecondsWithoutManageMessages_403_NotBanned(t *testing.T
 		"banned":                 true,
 		"delete_message_seconds": 3600,
 	})
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusForbidden)
 	if e.banned(t, targetID) {
 		t.Fatal("target was banned by a refused request")
 	}
@@ -263,9 +259,7 @@ func TestPatchUser_DeleteSecondsWithoutManageMessages_403_NotBanned(t *testing.T
 
 	// The same moderator can still ban without asking for the deletion.
 	w = doRequest(t, e.handler, http.MethodPatch, "/users/"+itoa(targetID), modToken, map[string]any{"banned": true})
-	if w.Code != http.StatusOK {
-		t.Fatalf("plain ban: status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 }
 
 func TestPatchUser_DeleteSecondsRateLimited_429_NotBanned(t *testing.T) {
@@ -282,9 +276,7 @@ func TestPatchUser_DeleteSecondsRateLimited_429_NotBanned(t *testing.T) {
 	// independent of timing.
 	e.limiter.Lockout(context.Background(), auth.Key("ban_purge", ownerID), time.Hour)
 	w := doRequest(t, e.handler, http.MethodPatch, "/users/"+itoa(secondID), ownerToken, body)
-	if w.Code != http.StatusTooManyRequests {
-		t.Fatalf("second: status = %d, want 429; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusTooManyRequests)
 	if e.banned(t, secondID) {
 		t.Error("the rate-limited request banned its target")
 	}
@@ -307,9 +299,7 @@ func TestPatchUser_BanWithoutDeleteSeconds_ResponseUnchanged(t *testing.T) {
 		{zeroID, map[string]any{"banned": true, "delete_message_seconds": 0}},
 	} {
 		w := doRequest(t, e.handler, http.MethodPatch, "/users/"+itoa(tc.id), ownerToken, tc.body)
-		if w.Code != http.StatusOK {
-			t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
-		}
+		requireStatus(t, w, http.StatusOK)
 		got := decodePatchBody(t, w.Body.Bytes())
 		if _, has := got["purge"]; has {
 			t.Errorf("response has a purge member: %v", got)
@@ -348,9 +338,7 @@ func TestMemberAPI_BanWithDeleteSeconds(t *testing.T) {
 		"banned":                 true,
 		"delete_message_seconds": 86400,
 	})
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 	if deleted, complete := purgeField(t, decodePatchBody(t, w.Body.Bytes())); deleted != 2 || !complete {
 		t.Fatalf("purge = {deleted:%d complete:%v}, want {2 true}", deleted, complete)
 	}
@@ -379,9 +367,7 @@ func TestPatchUser_DeleteSecondsOnAlreadyBannedTarget_SkipsSecondBanWrite(t *tes
 
 	w := doRequest(t, e.handler, http.MethodPatch, "/users/"+itoa(targetID), ownerToken,
 		map[string]any{"banned": true, "ban_reason": "spam"})
-	if w.Code != http.StatusOK {
-		t.Fatalf("ban: status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 	if banRows() != 1 {
 		t.Fatalf("ban ledger rows = %d, want 1", banRows())
 	}
@@ -390,9 +376,7 @@ func TestPatchUser_DeleteSecondsOnAlreadyBannedTarget_SkipsSecondBanWrite(t *tes
 	m1 := e.message(t, ch, targetID, "late one")
 	w = doRequest(t, e.handler, http.MethodPatch, "/users/"+itoa(targetID), adminToken,
 		map[string]any{"banned": true, "ban_reason": "spam", "delete_message_seconds": 3600})
-	if w.Code != http.StatusOK {
-		t.Fatalf("retry: status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 	if deleted, complete := purgeField(t, decodePatchBody(t, w.Body.Bytes())); deleted != 1 || !complete {
 		t.Fatalf("retry purge = {deleted:%d complete:%v}, want {1 true}", deleted, complete)
 	}
@@ -414,9 +398,7 @@ func TestPatchUser_DeleteSecondsOnAlreadyBannedTarget_SkipsSecondBanWrite(t *tes
 	e.message(t, ch, targetID, "another")
 	w = doRequest(t, e.handler, http.MethodPatch, "/users/"+itoa(targetID), ownerToken,
 		map[string]any{"banned": true, "ban_reason": "harassment", "delete_message_seconds": 3600})
-	if w.Code != http.StatusOK {
-		t.Fatalf("changed retry: status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 	if banRows() != 2 {
 		t.Errorf("ban ledger rows = %d, want 2 after the reason changed", banRows())
 	}
@@ -442,9 +424,7 @@ func TestPatchUser_InvalidBanFieldsDoNotSpendPurgeToken(t *testing.T) {
 
 	w := doRequest(t, e.handler, http.MethodPatch, "/users/"+itoa(targetID), ownerToken,
 		map[string]any{"banned": true, "ban_duration_hours": 24, "delete_message_seconds": 60})
-	if w.Code != http.StatusOK {
-		t.Fatalf("corrected request: status = %d, want 200 (the 400s must not spend the rate-limit token); body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 }
 
 func TestPatchUser_PartialPurge_ReportsIncompleteThenContinues(t *testing.T) {
@@ -464,9 +444,7 @@ func TestPatchUser_PartialPurge_ReportsIncompleteThenContinues(t *testing.T) {
 	body := map[string]any{"banned": true, "ban_reason": "spam", "delete_message_seconds": 3600}
 
 	w := doRequest(t, e.handler, http.MethodPatch, "/users/"+itoa(targetID), ownerToken, body)
-	if w.Code != http.StatusOK {
-		t.Fatalf("first: status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 	if deleted, complete := purgeField(t, decodePatchBody(t, w.Body.Bytes())); deleted != 2 || complete {
 		t.Fatalf("first purge = {deleted:%d complete:%v}, want {2 false}", deleted, complete)
 	}
@@ -479,9 +457,7 @@ func TestPatchUser_PartialPurge_ReportsIncompleteThenContinues(t *testing.T) {
 	}
 
 	w = doRequest(t, e.handler, http.MethodPatch, "/users/"+itoa(targetID), adminToken, body)
-	if w.Code != http.StatusOK {
-		t.Fatalf("repeat: status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 	if deleted, complete := purgeField(t, decodePatchBody(t, w.Body.Bytes())); deleted != 1 || !complete {
 		t.Fatalf("repeat purge = {deleted:%d complete:%v}, want {1 true}", deleted, complete)
 	}

@@ -46,9 +46,7 @@ func TestCreateDM_Success_NotifiesRecipient(t *testing.T) {
 	rr := dmPost(t, router, "/api/v1/dms", tokenAlice, map[string]any{
 		"recipient_id": bob.ID,
 	})
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("CreateDM: status = %d, want 201; body = %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusCreated)
 
 	var gotOpenForBob bool
 	for _, m := range broadcaster.sent {
@@ -91,9 +89,7 @@ func TestCreateDM_Untrusted_DoesNotNotifyRecipientOrOpenTheirSide(t *testing.T) 
 	rr := dmPost(t, router, "/api/v1/dms", tokenAlice, map[string]any{
 		"recipient_id": bob.ID,
 	})
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("CreateDM: status = %d, want 201; body = %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusCreated)
 	for _, m := range broadcaster.sent {
 		if m.UserID == bob.ID {
 			t.Errorf("untrusted recipient got a broadcast at creation time: %s", m.Msg)

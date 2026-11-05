@@ -19,19 +19,11 @@ import (
 func enableTestPlugin(t *testing.T, reg *Registry, mem PluginStore, cmd string) *Instance {
 	t.Helper()
 	ctx := context.Background()
-	if err := reg.LoadAll(ctx); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "LoadAll", reg.LoadAll(ctx))
 	rows, _ := mem.ListPlugins(ctx)
-	if err := reg.EnablePlugin(ctx, rows[0].ID); err != nil {
-		t.Fatalf("EnablePlugin: %v", err)
-	}
-	reg.mu.RLock()
-	inst := reg.plugins[rows[0].ID]
-	reg.mu.RUnlock()
-	if err := reg.RegisterCommand(cmd, inst); err != nil {
-		t.Fatalf("RegisterCommand: %v", err)
-	}
+	mustDo(t, "EnablePlugin", reg.EnablePlugin(ctx, rows[0].ID))
+	inst := reg.instance(rows[0].ID)
+	mustDo(t, "RegisterCommand", reg.RegisterCommand(cmd, inst))
 	return inst
 }
 
@@ -70,9 +62,7 @@ func TestWazeroOverrunReusesCompiledModule(t *testing.T) {
 	writeTestPlugin(t, dir, "spinner", manifest, spinWASM)
 	reg, mem := newWazeroTestRegistry(t, dir)
 	enableTestPlugin(t, reg, mem, "spin")
-	if err := os.Remove(filepath.Join(dir, "spinner", "hello.wasm")); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Remove", os.Remove(filepath.Join(dir, "spinner", "hello.wasm")))
 
 	ctx := context.Background()
 	result, _ := reg.DispatchCommand(ctx, 1, 2, "spin", []string{strings.Repeat("x", 200)})
@@ -167,9 +157,7 @@ func TestWazeroListCommandsRunsUnderBudget(t *testing.T) {
 	// Backstop only: without the budget the guest spins until this expires.
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	if err := reg.LoadAll(ctx); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "LoadAll", reg.LoadAll(ctx))
 	rows, _ := mem.ListPlugins(ctx)
 	start := time.Now()
 	err := reg.EnablePlugin(ctx, rows[0].ID)
@@ -180,9 +168,7 @@ func TestWazeroListCommandsRunsUnderBudget(t *testing.T) {
 	if err == nil {
 		t.Fatal("EnablePlugin must fail when list_commands overruns its budget")
 	}
-	reg.mu.RLock()
-	inst := reg.plugins[rows[0].ID]
-	reg.mu.RUnlock()
+	inst := reg.instance(rows[0].ID)
 	if inst.module != nil {
 		t.Fatal("a module closed by the budget must not stay installed")
 	}

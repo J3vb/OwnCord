@@ -43,9 +43,7 @@ func TestIsMessageDeleted_ReportsTheFlagAndTheRow(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			deleted, found, err := database.IsMessageDeleted(ctx, tc.id)
-			if err != nil {
-				t.Fatalf("IsMessageDeleted: %v", err)
-			}
+			mustDo(t, "IsMessageDeleted", err)
 			if deleted != tc.wantDeleted || found != tc.wantFound {
 				t.Errorf("IsMessageDeleted(%d) = (deleted=%v, found=%v), want (%v, %v)",
 					tc.id, deleted, found, tc.wantDeleted, tc.wantFound)

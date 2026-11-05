@@ -59,9 +59,21 @@ func TestRegisterNow_ResyncsPeerE2EEKeyOnResume(t *testing.T) {
 	hub.clients[userID] = []*Client{old}
 	hub.mu.Unlock()
 
-	// The resuming connection: lastSeq > 0 marks this as a network reconnect
-	// (registerNow only transfers voice state on this path) rather than a
-	// fresh login.
+	_, newSend := resumeVoiceClient(t, hub, userID, chanID)
+
+	gotAnnounce := drainedE2EEAnnounce(t, newSend, peerID, peer.voice.e2ee.key)
+	if !gotAnnounce {
+		t.Error("resumed client never received the peer's stored ECDH public key (voice_e2ee_announce) on reconnect — " +
+			"OC-0276: the server's only relay of an existing participant's key runs on a fresh voice_join, never on a resume")
+	}
+}
+
+// resumeVoiceClient registers a resuming connection for userID and requires
+// that the live voice membership moved onto it.
+func resumeVoiceClient(t *testing.T, hub *Hub, userID, chanID int64) (*Client, chan []byte) {
+	t.Helper()
+	// lastSeq > 0 marks a network reconnect (registerNow only transfers voice
+	// state on this path) rather than a fresh login.
 	newSend := make(chan []byte, 8)
 	newC := &Client{userID: userID, send: newSend, sendHigh: newSend, sendLow: newSend, lastSeq: 1}
 
@@ -70,10 +82,16 @@ func TestRegisterNow_ResyncsPeerE2EEKeyOnResume(t *testing.T) {
 	if got := newC.voice.channel(); got != chanID {
 		t.Fatalf("precondition failed: resumed client's voice state was not transferred, got channel %d want %d", got, chanID)
 	}
+	return newC, newSend
+}
 
-	close(newSend)
-	var gotAnnounce bool
-	for msg := range newSend {
+// drainedE2EEAnnounce closes send and reports whether it carried an E2EE
+// announce for userID with the given public key.
+func drainedE2EEAnnounce(t *testing.T, send chan []byte, userID int64, publicKey string) bool {
+	t.Helper()
+	close(send)
+	var found bool
+	for msg := range send {
 		var env struct {
 			Type    string `json:"type"`
 			Payload struct {
@@ -82,14 +100,11 @@ func TestRegisterNow_ResyncsPeerE2EEKeyOnResume(t *testing.T) {
 			} `json:"payload"`
 		}
 		if err := json.Unmarshal(msg, &env); err != nil {
-			t.Fatalf("unmarshal message sent to resumed client: %v (raw=%s)", err, msg)
+			t.Fatalf("unmarshal message sent to client: %v (raw=%s)", err, msg)
 		}
-		if env.Type == MsgTypeVoiceE2EEAnnounceBC && env.Payload.UserID == peerID && env.Payload.PublicKey == peer.voice.e2ee.key {
-			gotAnnounce = true
+		if env.Type == MsgTypeVoiceE2EEAnnounceBC && env.Payload.UserID == userID && env.Payload.PublicKey == publicKey {
+			found = true
 		}
 	}
-	if !gotAnnounce {
-		t.Error("resumed client never received the peer's stored ECDH public key (voice_e2ee_announce) on reconnect — " +
-			"OC-0276: the server's only relay of an existing participant's key runs on a fresh voice_join, never on a resume")
-	}
+	return found
 }

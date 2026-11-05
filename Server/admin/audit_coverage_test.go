@@ -2,7 +2,6 @@ package admin_test
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -34,10 +33,7 @@ func TestAuditCoverage_AdminMutations(t *testing.T) {
 		handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, &mockPermInvalidator{},
 			newTestServices(database), opts...)
 		token := createAdminUser(t, database)
-		chID, err := database.CreateChannel(context.Background(), "secret", "text", "", "", 0)
-		if err != nil {
-			t.Fatalf("CreateChannel: %v", err)
-		}
+		chID := mustCreateChannel(t, database, "secret", "text")
 		return handler, database, token, chID
 	}
 	rows := []struct {
@@ -47,20 +43,14 @@ func TestAuditCoverage_AdminMutations(t *testing.T) {
 	}{
 		{"recovery credential issued", "recovery_assist_issued", func(t *testing.T) (*audittest.Recorder, []string) {
 			handler, database, token, _ := fixture(t)
-			target, err := database.CreateUser(context.Background(), "locked-out", "hash", 3)
-			if err != nil {
-				t.Fatalf("CreateUser: %v", err)
-			}
+			target := mustCreateUser(t, database, "locked-out", "hash", 3)
 			rec := audittest.Install(t, database)
 			w := doRequest(t, handler, http.MethodPost, "/users/"+itoa(target)+"/recovery-credential", token,
 				map[string]any{"verification": "in_person"})
-			if w.Code != http.StatusCreated {
-				t.Fatalf("status = %d; body = %s", w.Code, w.Body.String())
-			}
-			var issue struct {
+			requireStatus(t, w, http.StatusCreated)
+			issue := decodeBody[struct {
 				Credential string `json:"credential"`
-			}
-			_ = json.NewDecoder(w.Body).Decode(&issue)
+			}](t, w)
 			stored, _ := database.GetRecoveryAssist(context.Background(), target)
 			return rec, []string{issue.Credential, stored.Verifier}
 		}},
@@ -69,9 +59,7 @@ func TestAuditCoverage_AdminMutations(t *testing.T) {
 			rec := audittest.Install(t, database)
 			w := doRequest(t, handler, http.MethodPut, "/channels/"+itoa(chID)+"/permissions/3", token,
 				map[string]any{"allow": 0, "deny": permissions.ReadMessages})
-			if w.Code != http.StatusOK {
-				t.Fatalf("status = %d; body = %s", w.Code, w.Body.String())
-			}
+			requireStatus(t, w, http.StatusOK)
 			return rec, nil
 		}},
 		{"channel role perms clear", "channel_perms_clear", func(t *testing.T) (*audittest.Recorder, []string) {
@@ -93,9 +81,7 @@ func TestAuditCoverage_AdminMutations(t *testing.T) {
 			rec := audittest.Install(t, database)
 			w := doRequest(t, handler, http.MethodPut, "/channels/"+itoa(chID)+"/user-permissions/"+itoa(target), token,
 				map[string]any{"allow": permissions.ReadMessages, "deny": permissions.SendMessages})
-			if w.Code != http.StatusOK {
-				t.Fatalf("status = %d; body = %s", w.Code, w.Body.String())
-			}
+			requireStatus(t, w, http.StatusOK)
 			return rec, nil
 		}},
 		{"channel user perms clear", "channel_user_perms_clear", func(t *testing.T) (*audittest.Recorder, []string) {
@@ -117,27 +103,21 @@ func TestAuditCoverage_AdminMutations(t *testing.T) {
 			rec := audittest.Install(t, database)
 			w := doRequest(t, handler, http.MethodPost, "/tokens", token,
 				map[string]any{"label": "ci bot", "username": "adminuser"})
-			if w.Code != http.StatusCreated {
-				t.Fatalf("status = %d; body = %s", w.Code, w.Body.String())
-			}
-			var resp struct {
+			requireStatus(t, w, http.StatusCreated)
+			resp := decodeBody[struct {
 				Token string `json:"token"`
-			}
-			_ = json.Unmarshal(w.Body.Bytes(), &resp)
+			}](t, w)
 			return rec, []string{resp.Token, token}
 		}},
 		{"api token revoke", "api_token_revoke", func(t *testing.T) (*audittest.Recorder, []string) {
 			handler, database, token, _ := fixture(t)
 			w := doRequest(t, handler, http.MethodPost, "/tokens", token,
 				map[string]any{"label": "ci bot", "username": "adminuser"})
-			if w.Code != http.StatusCreated {
-				t.Fatalf("seed token: status = %d; body = %s", w.Code, w.Body.String())
-			}
-			var resp struct {
+			requireStatus(t, w, http.StatusCreated)
+			resp := decodeBody[struct {
 				ID    int64  `json:"id"`
 				Token string `json:"token"`
-			}
-			_ = json.Unmarshal(w.Body.Bytes(), &resp)
+			}](t, w)
 			rec := audittest.Install(t, database)
 			if w := doRequest(t, handler, http.MethodDelete, "/tokens/"+itoa(resp.ID), token, nil); w.Code != http.StatusNoContent {
 				t.Fatalf("status = %d; body = %s", w.Code, w.Body.String())
@@ -149,9 +129,7 @@ func TestAuditCoverage_AdminMutations(t *testing.T) {
 			rec := audittest.Install(t, database)
 			w := doRequest(t, handler, http.MethodPatch, "/settings", token,
 				map[string]string{"motd": "welcome 4d0d1405"})
-			if w.Code != http.StatusOK {
-				t.Fatalf("status = %d; body = %s", w.Code, w.Body.String())
-			}
+			requireStatus(t, w, http.StatusOK)
 			return rec, []string{"welcome 4d0d1405", token}
 		}},
 		{"registration mode change", "registration_mode_change", func(t *testing.T) (*audittest.Recorder, []string) {
@@ -159,18 +137,14 @@ func TestAuditCoverage_AdminMutations(t *testing.T) {
 			rec := audittest.Install(t, database)
 			w := doRequest(t, handler, http.MethodPatch, "/settings", token,
 				map[string]string{"registration_mode": "closed"})
-			if w.Code != http.StatusOK {
-				t.Fatalf("status = %d; body = %s", w.Code, w.Body.String())
-			}
+			requireStatus(t, w, http.StatusOK)
 			return rec, []string{token}
 		}},
 		{"backup archive download", "backup_archive", func(t *testing.T) (*audittest.Recorder, []string) {
 			f := newArchiveFixture(t)
 			rec := audittest.Install(t, f.database)
 			w := doRequest(t, f.handler, http.MethodGet, "/archive", f.token, nil)
-			if w.Code != http.StatusOK {
-				t.Fatalf("status = %d; body = %s", w.Code, w.Body.String())
-			}
+			requireStatus(t, w, http.StatusOK)
 			return rec, nil
 		}},
 		{"backup link issued", "backup_link", func(t *testing.T) (*audittest.Recorder, []string) {
@@ -181,13 +155,10 @@ func TestAuditCoverage_AdminMutations(t *testing.T) {
 			handler, database, token, _ := fixture(t, admin.SetupOptions{BackupDir: dir})
 			rec := audittest.Install(t, database)
 			w := doRequest(t, handler, http.MethodPost, "/backups/b.db/link", token, map[string]any{})
-			if w.Code != http.StatusOK {
-				t.Fatalf("status = %d; body = %s", w.Code, w.Body.String())
-			}
-			var link struct {
+			requireStatus(t, w, http.StatusOK)
+			link := decodeBody[struct {
 				Path string `json:"path"`
-			}
-			_ = json.Unmarshal(w.Body.Bytes(), &link)
+			}](t, w)
 			u, _ := url.Parse(link.Path)
 			return rec, []string{token, u.Query().Get("token")}
 		}},
@@ -195,13 +166,10 @@ func TestAuditCoverage_AdminMutations(t *testing.T) {
 			handler, database, token, _ := fixture(t, admin.SetupOptions{BackupDir: t.TempDir()})
 			rec := audittest.Install(t, database)
 			w := doRequest(t, handler, http.MethodPost, "/archive/link", token, map[string]any{})
-			if w.Code != http.StatusOK {
-				t.Fatalf("status = %d; body = %s", w.Code, w.Body.String())
-			}
-			var link struct {
+			requireStatus(t, w, http.StatusOK)
+			link := decodeBody[struct {
 				Path string `json:"path"`
-			}
-			_ = json.Unmarshal(w.Body.Bytes(), &link)
+			}](t, w)
 			u, _ := url.Parse(link.Path)
 			return rec, []string{token, u.Query().Get("token")}
 		}},
@@ -213,19 +181,14 @@ func TestAuditCoverage_AdminMutations(t *testing.T) {
 			handler, database, token, _ := fixture(t, admin.SetupOptions{BackupDir: dir})
 			rec := audittest.Install(t, database)
 			w := doRequest(t, handler, http.MethodPost, "/backups/b.db/link", token, map[string]any{})
-			if w.Code != http.StatusOK {
-				t.Fatalf("status = %d; body = %s", w.Code, w.Body.String())
-			}
-			var link struct {
+			requireStatus(t, w, http.StatusOK)
+			link := decodeBody[struct {
 				Path string `json:"path"`
-			}
-			_ = json.Unmarshal(w.Body.Bytes(), &link)
+			}](t, w)
 			req := httptest.NewRequest(http.MethodGet, strings.TrimPrefix(link.Path, "/admin/api"), nil)
 			dl := httptest.NewRecorder()
 			handler.ServeHTTP(dl, req)
-			if dl.Code != http.StatusOK {
-				t.Fatalf("download status = %d; body = %s", dl.Code, dl.Body.String())
-			}
+			requireStatus(t, dl, http.StatusOK)
 			u, _ := url.Parse(link.Path)
 			return rec, []string{token, u.Query().Get("token")}
 		}},
@@ -234,9 +197,7 @@ func TestAuditCoverage_AdminMutations(t *testing.T) {
 			rec := audittest.Install(t, database)
 			w := doRequest(t, handler, http.MethodPatch, "/logs/level", token,
 				map[string]any{"level": "debug", "duration_seconds": 900})
-			if w.Code != http.StatusOK {
-				t.Fatalf("status = %d; body = %s", w.Code, w.Body.String())
-			}
+			requireStatus(t, w, http.StatusOK)
 			return rec, []string{token}
 		}},
 		{"log level reverted", "log_level_reverted", func(t *testing.T) (*audittest.Recorder, []string) {
@@ -258,13 +219,10 @@ func TestAuditCoverage_AdminMutations(t *testing.T) {
 				"password": password,
 				"wizard":   map[string]any{"server_name": "Audit Server"},
 			})
-			if w.Code != http.StatusCreated {
-				t.Fatalf("status = %d; body = %s", w.Code, w.Body.String())
-			}
-			var resp struct {
+			requireStatus(t, w, http.StatusCreated)
+			resp := decodeBody[struct {
 				Token string `json:"token"`
-			}
-			_ = json.Unmarshal(w.Body.Bytes(), &resp)
+			}](t, w)
 			return rec, []string{password, resp.Token}
 		}},
 	}

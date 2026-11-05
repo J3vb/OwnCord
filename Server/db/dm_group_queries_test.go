@@ -25,9 +25,7 @@ func TestCreateGroupDMChannel_OpensForEveryone(t *testing.T) {
 	ctx := context.Background()
 
 	ch, err := database.CreateGroupDMChannel(ctx, "Crew", 1, []int64{1, 2, 3})
-	if err != nil {
-		t.Fatalf("CreateGroupDMChannel: %v", err)
-	}
+	mustDo(t, "CreateGroupDMChannel", err)
 	if ch.Name != "Crew" {
 		t.Errorf("expected name Crew, got %q", ch.Name)
 	}
@@ -73,17 +71,13 @@ func TestGetOrCreateDMChannel_IgnoresShrunkGroup(t *testing.T) {
 	ctx := context.Background()
 
 	group, err := database.CreateGroupDMChannel(ctx, "Shrinking", 1, []int64{1, 2, 3})
-	if err != nil {
-		t.Fatalf("CreateGroupDMChannel: %v", err)
-	}
+	mustDo(t, "CreateGroupDMChannel", err)
 	if _, err = database.LeaveGroupDM(ctx, 3, group.ID, "left"); err != nil {
 		t.Fatalf("LeaveGroupDM: %v", err)
 	}
 
 	ch, created, err := database.GetOrCreateDMChannel(ctx, 1, 2)
-	if err != nil {
-		t.Fatalf("GetOrCreateDMChannel: %v", err)
-	}
+	mustDo(t, "GetOrCreateDMChannel", err)
 	if !created {
 		t.Error("expected a brand-new 1:1 DM, not a reused channel")
 	}
@@ -97,9 +91,7 @@ func TestLeaveGroupDM_DeletesChannelOnLastLeave(t *testing.T) {
 	ctx := context.Background()
 
 	group, err := database.CreateGroupDMChannel(ctx, "Ephemeral", 1, []int64{1, 2, 3})
-	if err != nil {
-		t.Fatalf("CreateGroupDMChannel: %v", err)
-	}
+	mustDo(t, "CreateGroupDMChannel", err)
 
 	for i, uid := range []int64{1, 2, 3} {
 		res, leaveErr := database.LeaveGroupDM(ctx, uid, group.ID, "left")
@@ -112,10 +104,7 @@ func TestLeaveGroupDM_DeletesChannelOnLastLeave(t *testing.T) {
 		}
 	}
 
-	ch, err := database.GetChannel(ctx, group.ID)
-	if err != nil {
-		t.Fatalf("GetChannel: %v", err)
-	}
+	ch := mustGetChannel(t, database, group.ID)
 	if ch != nil {
 		t.Error("channel survived the last participant leaving")
 	}
@@ -132,14 +121,9 @@ func TestLeaveGroupDM_LastLeavePreservesAttachmentsForReclaim(t *testing.T) {
 	ctx := context.Background()
 
 	group, err := database.CreateGroupDMChannel(ctx, "Ephemeral", 1, []int64{1, 2, 3})
-	if err != nil {
-		t.Fatalf("CreateGroupDMChannel: %v", err)
-	}
+	mustDo(t, "CreateGroupDMChannel", err)
 
-	msgID, err := database.CreateMessage(ctx, group.ID, 1, "look at this", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	msgID := mustCreateMessage(t, database, group.ID, 1, "look at this", nil)
 	if _, err := database.ExecContext(ctx,
 		`INSERT INTO attachments (id, filename, stored_as, mime_type, size, uploader_id)
 		 VALUES (?, ?, ?, ?, ?, ?)`,
@@ -157,18 +141,13 @@ func TestLeaveGroupDM_LastLeavePreservesAttachmentsForReclaim(t *testing.T) {
 		}
 	}
 
-	ch, err := database.GetChannel(ctx, group.ID)
-	if err != nil {
-		t.Fatalf("GetChannel: %v", err)
-	}
+	ch := mustGetChannel(t, database, group.ID)
 	if ch != nil {
 		t.Error("channel survived the last participant leaving")
 	}
 
 	att, err := database.GetAttachmentByID(ctx, "att-leave-1")
-	if err != nil {
-		t.Fatalf("GetAttachmentByID: %v", err)
-	}
+	mustDo(t, "GetAttachmentByID", err)
 	if att == nil {
 		t.Fatal("attachment row was destroyed by the channel-delete cascade; want it unlinked and preserved for the orphan sweep")
 	}
@@ -184,17 +163,11 @@ func TestGetDMParticipants_CollapsesInvisible(t *testing.T) {
 	ctx := context.Background()
 
 	group, err := database.CreateGroupDMChannel(ctx, "Ghosts", 1, []int64{1, 2, 3})
-	if err != nil {
-		t.Fatalf("CreateGroupDMChannel: %v", err)
-	}
-	if err := database.UpdateUserStatus(ctx, 2, db.StatusInvisible); err != nil {
-		t.Fatalf("UpdateUserStatus: %v", err)
-	}
+	mustDo(t, "CreateGroupDMChannel", err)
+	mustDo(t, "UpdateUserStatus", database.UpdateUserStatus(ctx, 2, db.StatusInvisible))
 
 	others, err := database.GetDMParticipants(ctx, group.ID, 1)
-	if err != nil {
-		t.Fatalf("GetDMParticipants: %v", err)
-	}
+	mustDo(t, "GetDMParticipants", err)
 	for _, p := range others {
 		if p.ID == 2 && p.Status != db.StatusOffline {
 			t.Errorf("invisible user leaked as %q to another participant", p.Status)
@@ -202,9 +175,7 @@ func TestGetDMParticipants_CollapsesInvisible(t *testing.T) {
 	}
 
 	self, err := database.GetDMParticipants(ctx, group.ID, 2)
-	if err != nil {
-		t.Fatalf("GetDMParticipants: %v", err)
-	}
+	mustDo(t, "GetDMParticipants", err)
 	for _, p := range self {
 		if p.ID == 2 && p.Status != db.StatusInvisible {
 			t.Errorf("the owner of an invisible status sees %q, want invisible", p.Status)
@@ -258,13 +229,9 @@ func TestNewDMChannelInfo_OmitsLastRead(t *testing.T) {
 		t.Fatalf("LastReadMessageID = %v, want nil", *info.LastReadMessageID)
 	}
 	raw, err := json.Marshal(info)
-	if err != nil {
-		t.Fatalf("Marshal: %v", err)
-	}
+	mustDo(t, "Marshal", err)
 	var m map[string]any
-	if err := json.Unmarshal(raw, &m); err != nil {
-		t.Fatalf("Unmarshal: %v", err)
-	}
+	mustDo(t, "Unmarshal", json.Unmarshal(raw, &m))
 	if _, present := m["last_read_message_id"]; present {
 		t.Errorf("last_read_message_id must be omitted when unset: %s", raw)
 	}

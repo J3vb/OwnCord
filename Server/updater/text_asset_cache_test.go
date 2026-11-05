@@ -95,9 +95,7 @@ func TestFetchTextAssetCachedCachesFailures(t *testing.T) {
 
 	fail.Store(false)
 	content, err := u.FetchTextAssetCached(context.Background(), url)
-	if err != nil {
-		t.Fatalf("after negative-cache expiry: unexpected error: %v", err)
-	}
+	mustDo(t, "after negative-cache expiry: unexpected error", err)
 	if content != "asset-body" {
 		t.Fatalf("content = %q, want %q", content, "asset-body")
 	}
@@ -148,9 +146,7 @@ func TestFetchTextAssetCachedServesFromCache(t *testing.T) {
 
 	for range 3 {
 		content, err := u.FetchTextAssetCached(context.Background(), url)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		mustDo(t, "unexpected error", err)
 		if content != "asset-body" {
 			t.Fatalf("content = %q, want %q", content, "asset-body")
 		}

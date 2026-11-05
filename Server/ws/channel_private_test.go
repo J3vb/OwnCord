@@ -3,7 +3,6 @@ package ws_test
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"testing"
 
@@ -23,9 +22,7 @@ func readyChannelsByID(t *testing.T, raw []byte) map[int64]map[string]any {
 			Channels []map[string]any `json:"channels"`
 		} `json:"payload"`
 	}
-	if err := json.Unmarshal(raw, &env); err != nil {
-		t.Fatalf("unmarshal ready: %v", err)
-	}
+	mustUnmarshal(t, raw, &env)
 	out := make(map[int64]map[string]any, len(env.Payload.Channels))
 	for _, ch := range env.Payload.Channels {
 		id, ok := ch["id"].(float64)
@@ -50,10 +47,7 @@ func readyFor(t *testing.T, hub *ws.Hub, database *db.DB, userID int64) []byte {
 	if err != nil || owner == nil {
 		t.Fatalf("GetRoleByID: %v", err)
 	}
-	raw, err := hub.BuildReadyWithRoleForTest(database, userID, owner)
-	if err != nil {
-		t.Fatalf("BuildReadyWithRoleForTest: %v", err)
-	}
+	raw := mustBuildReadyWithRole(t, hub, database, userID, owner)
 	return raw
 }
 

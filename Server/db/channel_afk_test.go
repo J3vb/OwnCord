@@ -15,14 +15,8 @@ func TestMigration068_AFKUniqueIndex(t *testing.T) {
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 
-	a, err := database.CreateChannel(ctx, "afk-a", "voice", "", "", 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	b, err := database.CreateChannel(ctx, "afk-b", "voice", "", "", 1)
-	if err != nil {
-		t.Fatal(err)
-	}
+	a := mustCreateChannel(t, database, "afk-a", "voice", "", "", 0)
+	b := mustCreateChannel(t, database, "afk-b", "voice", "", "", 1)
 	if ch, err := database.GetChannel(ctx, a); err != nil || ch == nil || ch.AFK {
 		t.Fatalf("a new channel must start unflagged: ch=%+v err=%v", ch, err)
 	}

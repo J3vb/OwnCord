@@ -22,9 +22,7 @@ func fakeCompanion(t *testing.T) (dir, bin string) {
 		bin = filepath.Join(dir, "fake-livekit.bat")
 		content = "@if exist \"%~dp0ok\" ping -n 30 127.0.0.1 > nul\r\n@exit /b 1\r\n"
 	}
-	if err := os.WriteFile(bin, []byte(content), 0o700); err != nil {
-		t.Fatalf("write fake binary: %v", err)
-	}
+	mustDo(t, "write fake binary", os.WriteFile(bin, []byte(content), 0o700))
 	return dir, bin
 }
 
@@ -40,9 +38,7 @@ func startRecoveryProcess(t *testing.T, tm restartTiming) (p *Process, dir strin
 	prevGrace := liveKitStopGrace
 	liveKitStopGrace = 100 * time.Millisecond
 	t.Cleanup(func() { liveKitStopGrace = prevGrace })
-	if err := p.Start(); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Start", p.Start())
 	t.Cleanup(p.Stop)
 	return p, dir
 }
@@ -95,9 +91,7 @@ func TestRecovery_SlowTierAttemptThatStartsClearsGaveUp(t *testing.T) {
 	p, dir := startRecoveryProcess(t, quickTiming(2, 50*time.Millisecond))
 	waitFor(t, "gave up", func() bool { return gaveUpWaiting(p) })
 
-	if err := os.WriteFile(filepath.Join(dir, "ok"), nil, 0o600); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "WriteFile", os.WriteFile(filepath.Join(dir, "ok"), nil, 0o600))
 	waitFor(t, "a running companion", func() bool { s := p.Status(); return s.Running && !s.GaveUp })
 	if s := p.Status(); !s.NextRetryAt.IsZero() {
 		t.Errorf("next retry %v still set while running", s.NextRetryAt)

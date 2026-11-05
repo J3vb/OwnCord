@@ -15,18 +15,14 @@ import (
 func mirrorRoleID(t *testing.T, database *db.DB, userID int64) int64 {
 	t.Helper()
 	var id int64
-	if err := database.QueryRowContext(context.Background(), `SELECT role_id FROM users WHERE id = ?`, userID).Scan(&id); err != nil {
-		t.Fatalf("read users.role_id: %v", err)
-	}
+	mustDo(t, "read users.role_id", database.QueryRowContext(context.Background(), `SELECT role_id FROM users WHERE id = ?`, userID).Scan(&id))
 	return id
 }
 
 func heldRoleIDs(t *testing.T, database *db.DB, userID int64) []int64 {
 	t.Helper()
 	m, err := database.GetMemberRoles(context.Background(), userID)
-	if err != nil {
-		t.Fatalf("GetMemberRoles: %v", err)
-	}
+	mustDo(t, "GetMemberRoles", err)
 	if m == nil {
 		return nil
 	}
@@ -40,20 +36,13 @@ func heldRoleIDs(t *testing.T, database *db.DB, userID int64) []int64 {
 func TestUpdateUserRole_ReplacesEveryRoleAndMirrors(t *testing.T) {
 	database := openMigratedMemory(t)
 	ctx := context.Background()
-	uid, err := database.CreateUser(ctx, "multi", "hash", int(permissions.MemberRoleID))
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	if err := database.AddUserRole(ctx, uid, 3); err != nil {
-		t.Fatalf("AddUserRole: %v", err)
-	}
+	uid := mustCreateUser(t, database, "multi", "hash", int(permissions.MemberRoleID))
+	mustDo(t, "AddUserRole", database.AddUserRole(ctx, uid, 3))
 	if got := mirrorRoleID(t, database, uid); got != 3 {
 		t.Fatalf("mirror after adding Moderator = %d, want 3 (the top role)", got)
 	}
 
-	if err := database.UpdateUserRole(ctx, uid, 2); err != nil {
-		t.Fatalf("UpdateUserRole: %v", err)
-	}
+	mustDo(t, "UpdateUserRole", database.UpdateUserRole(ctx, uid, 2))
 	if got := heldRoleIDs(t, database, uid); !slices.Equal(got, []int64{2}) {
 		t.Fatalf("held roles after replace = %v, want [2]", got)
 	}
@@ -62,9 +51,7 @@ func TestUpdateUserRole_ReplacesEveryRoleAndMirrors(t *testing.T) {
 	}
 
 	// A lower role replaces a higher one (the mirror follows, never ratchets).
-	if err := database.UpdateUserRole(ctx, uid, 4); err != nil {
-		t.Fatalf("UpdateUserRole down: %v", err)
-	}
+	mustDo(t, "UpdateUserRole down", database.UpdateUserRole(ctx, uid, 4))
 	if got := mirrorRoleID(t, database, uid); got != 4 || !slices.Equal(heldRoleIDs(t, database, uid), []int64{4}) {
 		t.Fatalf("after demotion mirror = %d, held = %v", got, heldRoleIDs(t, database, uid))
 	}
@@ -76,32 +63,17 @@ func TestDeleteRoleReassigning_KeepsOtherRolesAndMirrors(t *testing.T) {
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 
-	custom, err := database.CreateRole(ctx, "Custom", nil, permissions.ReadMessages, 70, false, false)
-	if err != nil {
-		t.Fatalf("CreateRole: %v", err)
-	}
-	only, err := database.CreateUser(ctx, "only-custom", "hash", int(permissions.MemberRoleID))
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	if err := database.UpdateUserRole(ctx, only, custom.ID); err != nil {
-		t.Fatalf("UpdateUserRole: %v", err)
-	}
-	both, err := database.CreateUser(ctx, "custom-and-mod", "hash", 3)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	if err := database.AddUserRole(ctx, both, custom.ID); err != nil {
-		t.Fatalf("AddUserRole: %v", err)
-	}
+	custom := mustCreateRole(t, database, "Custom", nil, permissions.ReadMessages, 70, false, false)
+	only := mustCreateUser(t, database, "only-custom", "hash", int(permissions.MemberRoleID))
+	mustDo(t, "UpdateUserRole", database.UpdateUserRole(ctx, only, custom.ID))
+	both := mustCreateUser(t, database, "custom-and-mod", "hash", 3)
+	mustDo(t, "AddUserRole", database.AddUserRole(ctx, both, custom.ID))
 	if got := mirrorRoleID(t, database, both); got != custom.ID {
 		t.Fatalf("precondition: mirror = %d, want the higher Custom role %d", got, custom.ID)
 	}
 
 	moved, err := database.DeleteRoleReassigning(ctx, custom.ID, permissions.MemberRoleID)
-	if err != nil {
-		t.Fatalf("DeleteRoleReassigning: %v", err)
-	}
+	mustDo(t, "DeleteRoleReassigning", err)
 	slices.Sort(moved)
 	if !slices.Equal(moved, []int64{only, both}) {
 		t.Fatalf("returned holders = %v, want [%d %d]", moved, only, both)
@@ -128,25 +100,14 @@ func TestGetMemberGrants_TwoRolesCarryLayersOnlyWhereARoleHasAnOverride(t *testi
 	private, _ := database.CreateChannel(ctx, "private", "text", "", "", 0)
 	plain, _ := database.CreateChannel(ctx, "plain", "text", "", "", 1)
 	userOnly, _ := database.CreateChannel(ctx, "user-only", "text", "", "", 2)
-	uid, err := database.CreateUser(ctx, "two-roles", "hash", int(permissions.MemberRoleID))
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	if err := database.AddUserRole(ctx, uid, 3); err != nil {
-		t.Fatalf("AddUserRole: %v", err)
-	}
+	uid := mustCreateUser(t, database, "two-roles", "hash", int(permissions.MemberRoleID))
+	mustDo(t, "AddUserRole", database.AddUserRole(ctx, uid, 3))
 	// Private channels are marked by denying READ to the default role.
-	if err := database.UpsertChannelOverride(ctx, private, permissions.MemberRoleID, 0, permissions.ReadMessages); err != nil {
-		t.Fatalf("UpsertChannelOverride: %v", err)
-	}
-	if err := database.UpsertChannelUserOverride(ctx, userOnly, uid, permissions.AttachFiles, 0); err != nil {
-		t.Fatalf("UpsertChannelUserOverride: %v", err)
-	}
+	mustDo(t, "UpsertChannelOverride", database.UpsertChannelOverride(ctx, private, permissions.MemberRoleID, 0, permissions.ReadMessages))
+	mustDo(t, "UpsertChannelUserOverride", database.UpsertChannelUserOverride(ctx, userOnly, uid, permissions.AttachFiles, 0))
 
 	g, err := database.GetMemberGrants(ctx, uid)
-	if err != nil {
-		t.Fatalf("GetMemberGrants: %v", err)
-	}
+	mustDo(t, "GetMemberGrants", err)
 	roles, _ := database.GetMemberRoles(ctx, uid)
 	if g.Perms != roles.Perms {
 		t.Errorf("Perms = %#x, want the OR of held masks %#x", g.Perms, roles.Perms)
@@ -195,17 +156,9 @@ func TestLastAdminGuard_AdminInLowerRole(t *testing.T) {
 	ctx := context.Background()
 	// A high-ranked role with no administrator bit; the Admin role (80) sits
 	// below it, so the account's mirror names the non-admin role.
-	top, err := database.CreateRole(ctx, "Overlord", nil, permissions.ReadMessages, 95, false, false)
-	if err != nil {
-		t.Fatalf("CreateRole: %v", err)
-	}
-	uid, err := database.CreateUser(ctx, "hidden-admin", "hash", int(permissions.AdminRoleID))
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	if err := database.AddUserRole(ctx, uid, top.ID); err != nil {
-		t.Fatalf("AddUserRole: %v", err)
-	}
+	top := mustCreateRole(t, database, "Overlord", nil, permissions.ReadMessages, 95, false, false)
+	uid := mustCreateUser(t, database, "hidden-admin", "hash", int(permissions.AdminRoleID))
+	mustDo(t, "AddUserRole", database.AddUserRole(ctx, uid, top.ID))
 	if got := mirrorRoleID(t, database, uid); got != top.ID {
 		t.Fatalf("precondition: mirror = %d, want the non-admin top role", got)
 	}
@@ -224,13 +177,8 @@ func TestDeciderAuthority_ORsHeldMasks(t *testing.T) {
 	database, ownerID, modID, memberID, member2ID := newAppealQueriesTestDB(t)
 	ctx := context.Background()
 
-	helper, err := database.CreateRole(ctx, "Helper", nil, permissions.ModerateMembers, 10, false, false)
-	if err != nil {
-		t.Fatalf("CreateRole: %v", err)
-	}
-	if err := database.AddUserRole(ctx, member2ID, helper.ID); err != nil {
-		t.Fatalf("AddUserRole: %v", err)
-	}
+	helper := mustCreateRole(t, database, "Helper", nil, permissions.ModerateMembers, 10, false, false)
+	mustDo(t, "AddUserRole", database.AddUserRole(ctx, member2ID, helper.ID))
 	if got := mirrorRoleID(t, database, member2ID); got != permissions.MemberRoleID {
 		t.Fatalf("precondition: mirror = %d, want Member (the Helper role ranks below it)", got)
 	}
@@ -241,14 +189,8 @@ func TestDeciderAuthority_ORsHeldMasks(t *testing.T) {
 		t.Fatalf("CountEligibleModerators = %d, %v; want 2 (mod and the Helper holder)", n, err)
 	}
 
-	actionID, err := database.WarnUser(ctx, memberID, ownerID, nil, "x")
-	if err != nil {
-		t.Fatalf("WarnUser: %v", err)
-	}
-	appealID, err := database.InsertAppeal(ctx, "pub-two-role-decider", actionID, memberID, "please")
-	if err != nil {
-		t.Fatalf("InsertAppeal: %v", err)
-	}
+	actionID := mustWarn(t, database, memberID, ownerID, "x")
+	appealID := mustInsertAppeal(t, database, "pub-two-role-decider", actionID, memberID, "please")
 	action, _ := database.GetModerationAction(ctx, actionID)
 	reversal := db.AppealedAction{ID: action.ID, Kind: action.Kind, TargetID: action.TargetID}
 	result, _, _, err := database.DecideAppealTx(ctx, appealID, "open", 0, "upheld", member2ID, "ok",
@@ -266,18 +208,14 @@ func TestRolePosition_UsesTopRole(t *testing.T) {
 	actor, _ := database.CreateUser(ctx, "actor", "hash", int(permissions.MemberRoleID))
 	target, _ := database.CreateUser(ctx, "target", "hash", 3) // Moderator, position 60
 	// Admin (80) is added to the actor; Member (40) stays held.
-	if err := database.AddUserRole(ctx, actor, permissions.AdminRoleID); err != nil {
-		t.Fatalf("AddUserRole: %v", err)
-	}
+	mustDo(t, "AddUserRole", database.AddUserRole(ctx, actor, permissions.AdminRoleID))
 	// The actor outranks the Moderator target through the Admin role...
 	if _, err := database.BanUserWithAction(ctx, target, "r", nil, actor, nil); err != nil {
 		t.Fatalf("BanUserWithAction by an actor whose TOP role (Admin) outranks the target: %v", err)
 	}
 	// ...but not once the Admin role is gone and only Member remains.
 	other, _ := database.CreateUser(ctx, "other", "hash", 3)
-	if err := database.RemoveUserRole(ctx, actor, permissions.AdminRoleID); err != nil {
-		t.Fatalf("RemoveUserRole: %v", err)
-	}
+	mustDo(t, "RemoveUserRole", database.RemoveUserRole(ctx, actor, permissions.AdminRoleID))
 	if _, err := database.BanUserWithAction(ctx, other, "r", nil, actor, nil); !errors.Is(err, db.ErrOutranked) {
 		t.Fatalf("BanUserWithAction after losing the top role = %v, want ErrOutranked", err)
 	}
@@ -288,10 +226,7 @@ func TestRolePosition_UsesTopRole(t *testing.T) {
 func TestLastAdminGuard_ZeroRoleRowsFallsBackToMirror(t *testing.T) {
 	database := openMigratedMemory(t)
 	ctx := context.Background()
-	uid, err := database.CreateUser(ctx, "rowless-admin", "hash", int(permissions.AdminRoleID))
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	uid := mustCreateUser(t, database, "rowless-admin", "hash", int(permissions.AdminRoleID))
 	execAll(t, database, `DELETE FROM user_roles WHERE user_id = `+strconv.FormatInt(uid, 10))
 	if err := eraseAccount(ctx, database, uid); !errors.Is(err, db.ErrLastAdmin) {
 		t.Fatalf("DeleteAccount(last admin with no user_roles row) = %v, want ErrLastAdmin", err)
@@ -307,16 +242,12 @@ func TestListMentionTargetsByRoles_TwoRoleHolderListedOnce(t *testing.T) {
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	uid, _ := database.CreateUser(ctx, "two", "hash", int(permissions.MemberRoleID))
-	if err := database.AddUserRole(ctx, uid, 3); err != nil {
-		t.Fatalf("AddUserRole: %v", err)
-	}
+	mustDo(t, "AddUserRole", database.AddUserRole(ctx, uid, 3))
 	// The Moderator role (3) outranks Member, so it is the member's top role and
 	// the users.role_id mirror. Asking for the LOWER role (Member) proves the
 	// lookup reads user_roles and not the mirror.
 	got, err := database.ListMentionTargetsByRoles(ctx, []int64{permissions.MemberRoleID})
-	if err != nil {
-		t.Fatalf("ListMentionTargetsByRoles: %v", err)
-	}
+	mustDo(t, "ListMentionTargetsByRoles", err)
 	if len(got) != 1 || got[0].UserID != uid {
 		t.Fatalf("targets = %+v, want the two-role holder exactly once", got)
 	}
@@ -335,9 +266,7 @@ func TestListUserIDsByRole_ReadsEveryHolder(t *testing.T) {
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	uid, _ := database.CreateUser(ctx, "holder", "hash", int(permissions.MemberRoleID))
-	if err := database.AddUserRole(ctx, uid, 3); err != nil {
-		t.Fatalf("AddUserRole: %v", err)
-	}
+	mustDo(t, "AddUserRole", database.AddUserRole(ctx, uid, 3))
 	ids, err := database.ListUserIDsByRole(ctx, permissions.MemberRoleID)
 	if err != nil || !slices.Contains(ids, uid) {
 		t.Fatalf("ListUserIDsByRole(Member) = %v, %v; want the holder whose top role is Moderator", ids, err)
@@ -380,10 +309,7 @@ func TestMemberRoles_EffectiveTopIdentityORMask(t *testing.T) {
 // before the transaction starts.
 func TestRoleWriters_CancelledContextChangesNothing(t *testing.T) {
 	database := openMigratedMemory(t)
-	uid, err := database.CreateUser(context.Background(), "cancelled", "hash", int(permissions.MemberRoleID))
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	uid := mustCreateUser(t, database, "cancelled", "hash", int(permissions.MemberRoleID))
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 

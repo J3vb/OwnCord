@@ -55,15 +55,7 @@ func (w *sseProbe) Flush() {}
 func newLogStreamTestDB(t *testing.T) *db.DB {
 	t.Helper()
 
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("db.Migrate: %v", err)
-	}
+	database := openMigratedDB(t)
 
 	return database
 }
@@ -84,62 +76,18 @@ func TestHandleLogStream_BackfillStopsAfterSessionRevocation(t *testing.T) {
 	database := newLogStreamTestDB(t)
 	logBuf := fillRing(3*backfillChunk, "2026-03-29T10:00:00Z")
 
-	userID, err := database.CreateUser(context.Background(), "owner", "hash", 1)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	_, _, tokenHash := ownerSession(t, database)
 
-	token, err := auth.GenerateToken()
-	if err != nil {
-		t.Fatalf("GenerateToken: %v", err)
-	}
-	tokenHash := auth.HashToken(token)
-	if _, err := database.CreateSession(context.Background(), userID, tokenHash, "test", "127.0.0.1"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
-
-	ticket, err := logTickets.issue(tokenHash)
-	if err != nil {
-		t.Fatalf("issue ticket: %v", err)
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	req := httptest.NewRequest(http.MethodGet, "/logs/stream?ticket="+ticket, nil).WithContext(ctx)
-	writer := &sseProbe{
-		header: make(http.Header),
-		onData: func(n int) {
-			switch n {
-			case 1:
-				_ = database.DeleteSession(context.Background(), tokenHash)
-			case 2:
-				cancel()
-			}
-		},
-	}
-
-	handleLogStream(database, logBuf).ServeHTTP(writer, req)
-
-	if writer.statusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body = %s", writer.statusCode, writer.buffer.String())
-	}
-	if writer.writeCount != 1 {
-		t.Fatalf("expected backfill to stop after the first chunk once the session was revoked, wrote %d chunks", writer.writeCount)
-	}
-	if got := bytes.Count(writer.buffer.Bytes(), []byte("data: ")); got != backfillChunk {
-		t.Fatalf("expected exactly one chunk of %d entries before the revocation cut the stream, got %d", backfillChunk, got)
-	}
+	requireBackfillStopsAfterRevoke(t, database, logBuf, tokenHash, "session", func() {
+		_ = database.DeleteSession(context.Background(), tokenHash)
+	})
 }
 
 func TestHandleLogStream_BackfillStopsAfterAPITokenRevocation(t *testing.T) {
 	database := newLogStreamTestDB(t)
 	logBuf := fillRing(3*backfillChunk, "2026-07-31T10:00:00Z")
 
-	userID, err := database.CreateUser(context.Background(), "owner", "hash", 1)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	userID := mustCreateUser(t, database, "owner", "hash", 1)
 
 	token, err := auth.GenerateToken()
 	if err != nil {
@@ -151,38 +99,9 @@ func TestHandleLogStream_BackfillStopsAfterAPITokenRevocation(t *testing.T) {
 		t.Fatalf("CreateAPIToken: %v", err)
 	}
 
-	ticket, err := logTickets.issue(tokenHash)
-	if err != nil {
-		t.Fatalf("issue ticket: %v", err)
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	req := httptest.NewRequest(http.MethodGet, "/logs/stream?ticket="+ticket, nil).WithContext(ctx)
-	writer := &sseProbe{
-		header: make(http.Header),
-		onData: func(n int) {
-			switch n {
-			case 1:
-				_, _ = database.RevokeAPIToken(context.Background(), tokenID)
-			case 2:
-				cancel()
-			}
-		},
-	}
-
-	handleLogStream(database, logBuf).ServeHTTP(writer, req)
-
-	if writer.statusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body = %s", writer.statusCode, writer.buffer.String())
-	}
-	if writer.writeCount != 1 {
-		t.Fatalf("expected backfill to stop after the first chunk once the API token was revoked, wrote %d chunks", writer.writeCount)
-	}
-	if got := bytes.Count(writer.buffer.Bytes(), []byte("data: ")); got != backfillChunk {
-		t.Fatalf("expected exactly one chunk of %d entries before the revocation cut the stream, got %d", backfillChunk, got)
-	}
+	requireBackfillStopsAfterRevoke(t, database, logBuf, tokenHash, "API token", func() {
+		_, _ = database.RevokeAPIToken(context.Background(), tokenID)
+	})
 }
 
 // TestHandleLogStream_SurvivesServerWriteTimeout pins the bug described in
@@ -201,18 +120,7 @@ func TestHandleLogStream_SurvivesServerWriteTimeout(t *testing.T) {
 	database := newLogStreamTestDB(t)
 	logBuf := NewRingBuffer(64)
 
-	userID, err := database.CreateUser(context.Background(), "owner", "hash", 1)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	token, err := auth.GenerateToken()
-	if err != nil {
-		t.Fatalf("GenerateToken: %v", err)
-	}
-	tokenHash := auth.HashToken(token)
-	if _, err := database.CreateSession(context.Background(), userID, tokenHash, "test", "127.0.0.1"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
+	_, _, tokenHash := ownerSession(t, database)
 
 	ticket, err := logTickets.issue(tokenHash)
 	if err != nil {
@@ -278,18 +186,7 @@ func TestHandleLogStream_EndsWhenTheServerShutsDown(t *testing.T) {
 	database := newLogStreamTestDB(t)
 	logBuf := NewRingBuffer(64)
 
-	userID, err := database.CreateUser(context.Background(), "owner", "hash", 1)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	token, err := auth.GenerateToken()
-	if err != nil {
-		t.Fatalf("GenerateToken: %v", err)
-	}
-	tokenHash := auth.HashToken(token)
-	if _, err := database.CreateSession(context.Background(), userID, tokenHash, "test", "127.0.0.1"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
+	_, _, tokenHash := ownerSession(t, database)
 	ticket, err := logTickets.issue(tokenHash)
 	if err != nil {
 		t.Fatalf("issue ticket: %v", err)
@@ -319,5 +216,43 @@ func TestHandleLogStream_EndsWhenTheServerShutsDown(t *testing.T) {
 	}
 	if elapsed := time.Since(started); elapsed > 2*time.Second {
 		t.Fatalf("Shutdown took %v with a log stream open, want it to end the stream at once", elapsed)
+	}
+}
+
+// requireBackfillStopsAfterRevoke streams a backfill, runs revoke once the
+// first chunk is out, and requires the stream to end before the second.
+func requireBackfillStopsAfterRevoke(t *testing.T, database *db.DB, logBuf *RingBuffer, tokenHash, what string, revoke func()) {
+	t.Helper()
+	ticket, err := logTickets.issue(tokenHash)
+	if err != nil {
+		t.Fatalf("issue ticket: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	req := httptest.NewRequest(http.MethodGet, "/logs/stream?ticket="+ticket, nil).WithContext(ctx)
+	writer := &sseProbe{
+		header: make(http.Header),
+		onData: func(n int) {
+			switch n {
+			case 1:
+				revoke()
+			case 2:
+				cancel()
+			}
+		},
+	}
+
+	handleLogStream(database, logBuf).ServeHTTP(writer, req)
+
+	if writer.statusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", writer.statusCode, writer.buffer.String())
+	}
+	if writer.writeCount != 1 {
+		t.Fatalf("expected backfill to stop after the first chunk once the %s was revoked, wrote %d chunks", what, writer.writeCount)
+	}
+	if got := bytes.Count(writer.buffer.Bytes(), []byte("data: ")); got != backfillChunk {
+		t.Fatalf("expected exactly one chunk of %d entries before the revocation cut the stream, got %d", backfillChunk, got)
 	}
 }

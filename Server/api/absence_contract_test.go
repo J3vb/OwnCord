@@ -11,10 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/J3vb/OwnCord/Server/api"
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/db"
-	"github.com/J3vb/OwnCord/Server/internal/app"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -51,14 +49,7 @@ func fullRouterWithDB(t *testing.T) (http.Handler, *db.DB) {
 func fullRouterWithConfig(t *testing.T, mutate func(*config.Config)) (http.Handler, *db.DB) {
 	t.Helper()
 
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open error: %v", err)
-	}
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("db.Migrate error: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
+	database := openMigratedDB(t)
 
 	dir := t.TempDir()
 	cfg := &config.Config{
@@ -76,12 +67,7 @@ func fullRouterWithConfig(t *testing.T, mutate func(*config.Config)) (http.Handl
 		mutate(cfg)
 	}
 
-	rt, rtErr := app.StartRuntime(cfg, database, nil, testRuntimeInputs(cfg))
-	if rtErr != nil {
-		t.Fatalf("app.StartRuntime: %v", rtErr)
-	}
-	handler, cleanup := api.NewRouter(cfg, database, "test", nil, nil, rt)
-	t.Cleanup(cleanup)
+	handler, _ := startRouter(t, cfg, database)
 	return handler, database
 }
 

@@ -13,19 +13,11 @@ import (
 // seedReactionFixture creates users 1..n and a message from user 1.
 func seedReactionFixture(t *testing.T, database *db.DB, users int) int64 {
 	t.Helper()
-	ctx := context.Background()
 	for i := range users {
-		if _, err := database.CreateUser(ctx, "reactor"+strconv.Itoa(i), "hash", 4); err != nil {
-			t.Fatalf("CreateUser: %v", err)
-		}
+		mustCreateUser(t, database, "reactor"+strconv.Itoa(i), "hash", 4)
 	}
-	if _, err := database.CreateChannel(ctx, "general", "text", "", "", 0); err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
-	msgID, err := database.CreateMessage(ctx, 1, 1, "hello", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	mustCreateChannel(t, database, "general", "text", "", "", 0)
+	msgID := mustCreateMessage(t, database, 1, 1, "hello", nil)
 	return msgID
 }
 
@@ -59,9 +51,7 @@ func TestAddReaction_AllowsExistingEmojiAtCap(t *testing.T) {
 	msgID := seedReactionFixture(t, database, 2)
 	fillDistinct(t, database, msgID, db.MaxDistinctReactions)
 
-	if err := database.AddReaction(context.Background(), msgID, 2, "e3"); err != nil {
-		t.Fatalf("AddReaction(existing emoji) at cap: %v", err)
-	}
+	mustDo(t, "AddReaction(existing emoji) at cap", database.AddReaction(context.Background(), msgID, 2, "e3"))
 }
 
 func TestAddReaction_DuplicateStillConflictAtCap(t *testing.T) {
@@ -90,9 +80,7 @@ func TestAddReaction_CountsDistinctNotRows(t *testing.T) {
 			}
 		}
 	}
-	if err := database.AddReaction(ctx, msgID, 1, "twentieth"); err != nil {
-		t.Fatalf("the 20th distinct emoji was refused: %v", err)
-	}
+	mustDo(t, "the 20th distinct emoji was refused", database.AddReaction(ctx, msgID, 1, "twentieth"))
 	if err := database.AddReaction(ctx, msgID, 1, "twenty-first"); !errors.Is(err, db.ErrReactionLimit) {
 		t.Fatalf("the 21st distinct emoji = %v, want ErrReactionLimit", err)
 	}

@@ -55,9 +55,7 @@ func TestThreadPermissionsAreParents(t *testing.T) {
 	// The live Checker reads the same answer from the store.
 	ck := permissions.NewChecker(database)
 	held, err := database.GetMemberRoles(ctx, 2)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "GetMemberRoles", err)
 	if ck.HasChannelPerm(ctx, held.Held(), 2, 21, permissions.ReadMessages) {
 		t.Error("Checker: bob's user deny on the parent does not reach its thread")
 	}
@@ -119,9 +117,7 @@ func TestLockedThreadRefusesMembers(t *testing.T) {
 		t.Fatal(err)
 	}
 	sub, err := channelSubject(ctx, database, permSvc, 1, ch, false)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "channelSubject", err)
 	if err := permissions.CanSendMessage(sub); !errors.Is(err, permissions.ErrThreadLocked) {
 		t.Errorf("CanSendMessage in a locked thread = %v, want ErrThreadLocked", err)
 	}
@@ -131,9 +127,7 @@ func TestLockedThreadRefusesMembers(t *testing.T) {
 	seedChannelUserOverride(t, database, 1, 10, permissions.ManageMessages, 0)
 	permSvc.InvalidateAll()
 	sub, err = channelSubject(ctx, database, permSvc, 1, ch, false)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "channelSubject", err)
 	if err := permissions.CanSendMessage(sub); err != nil {
 		t.Errorf("a moderator cannot post in a locked thread: %v", err)
 	}

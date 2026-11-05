@@ -53,10 +53,7 @@ type roleMutation struct {
 
 func roleMutations(t *testing.T, database *db.DB) []roleMutation {
 	t.Helper()
-	uid, err := database.CreateUser(context.Background(), "fanout-target", "$2a$12$placeholder", 3)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	uid := mustCreateUser(t, database, "fanout-target", "$2a$12$placeholder", 3)
 	// A role with one holder, for the delete row.
 	if _, err := database.ExecContext(context.Background(),
 		`INSERT INTO roles (id, name, permissions, position, is_default) VALUES (9, 'fanout-del', 0, 10, 0)`); err != nil {
@@ -172,9 +169,7 @@ func TestAdminAPI_PatchRole_UnreadableHoldersRefreshesAllConnected(t *testing.T)
 	w := doRequest(t, handler, http.MethodPatch, "/roles/3", token, map[string]any{
 		"permissions": permissions.ReadMessages, "name": "Renamed",
 	})
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 	if inv.invalidateAllN == 0 {
 		t.Error("the unreadable holder list must drop every cached mask")
 	}
@@ -223,15 +218,10 @@ func TestAdminAPI_PatchUserRole_HandlerReturnsBeforeFanOut(t *testing.T) {
 	})
 	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, nil, newTestServicesFor(database, hub, nil))
 	token := createAdminUser(t, database)
-	uid, err := database.CreateUser(context.Background(), "gated-target", "$2a$12$placeholder", 3)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	uid := mustCreateUser(t, database, "gated-target", "$2a$12$placeholder", 3)
 
 	w := doRequest(t, handler, http.MethodPatch, "/users/"+itoa(uid), token, map[string]any{"role_id": 2})
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 	// The response is out while the round has not completed.
 	select {
 	case <-entered:

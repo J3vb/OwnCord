@@ -45,31 +45,21 @@ func TestReconnectReplay_ReadsPerHandshake(t *testing.T) {
 	database := newTeardownTestDB(t)
 	ctx := context.Background()
 
-	userID, err := database.CreateUser(ctx, "replay-count-user", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	userID := mustCreateUser(t, database, "replay-count-user", 4)
 	var chans [3]int64
+	var err error
 	for i, name := range []string{"plain", "labelled-acked", "labelled-unacked"} {
 		if chans[i], err = database.CreateChannel(ctx, name, "text", "", "", 0); err != nil {
 			t.Fatalf("CreateChannel(%s): %v", name, err)
 		}
 	}
 	for _, id := range chans[1:] {
-		if _, err := database.ExecContext(ctx, `UPDATE channels SET nsfw = 1 WHERE id = ?`, id); err != nil {
-			t.Fatalf("label channel: %v", err)
-		}
+		mustExec(t, database, `UPDATE channels SET nsfw = 1 WHERE id = ?`, id)
 	}
 	if _, err := database.AcknowledgeNSFW(ctx, userID, chans[1]); err != nil {
 		t.Fatalf("AcknowledgeNSFW: %v", err)
 	}
-	token, err := auth.GenerateToken()
-	if err != nil {
-		t.Fatalf("GenerateToken: %v", err)
-	}
-	if _, err := database.CreateSession(ctx, userID, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
+	token := seedSessionToken(t, database, userID)
 
 	reader := &countingVisibilityReader{VisibilityReader: database}
 	hub := newTestHubWith(t, HubOptions{

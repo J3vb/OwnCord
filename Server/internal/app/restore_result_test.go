@@ -16,9 +16,7 @@ import (
 func countRestoreAudits(t *testing.T, database *db.DB, action string) int {
 	t.Helper()
 	rows, err := database.GetAuditLog(context.Background(), 50, 0)
-	if err != nil {
-		t.Fatalf("GetAuditLog: %v", err)
-	}
+	mustDo(t, "GetAuditLog", err)
 	n := 0
 	for i := range rows {
 		if rows[i].Action == action {
@@ -38,33 +36,17 @@ func TestInitDatabase_RecordsRestoreResult(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	first, err := db.Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := db.Migrate(first); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Dir(backup), 0o750); err != nil {
-		t.Fatal(err)
-	}
-	if err := first.BackupToSafe(context.Background(), backup, filepath.Dir(backup)); err != nil {
-		t.Fatal(err)
-	}
-	if err := db.StageRestore(context.Background(), path, backup, db.StagedRestoreMarker{Backup: "chatserver_x.db", ActorID: 0}); err != nil {
-		t.Fatal(err)
-	}
-	if err := first.Close(); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Open", err)
+	mustDo(t, "Migrate", db.Migrate(first))
+	mustDo(t, "MkdirAll", os.MkdirAll(filepath.Dir(backup), 0o750))
+	mustDo(t, "BackupToSafe", first.BackupToSafe(context.Background(), backup, filepath.Dir(backup)))
+	mustDo(t, "StageRestore", db.StageRestore(context.Background(), path, backup, db.StagedRestoreMarker{Backup: "chatserver_x.db", ActorID: 0}))
+	mustDo(t, "Close", first.Close())
 
 	database, err := db.Open(path) // the next boot: applies the staged copy
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Open", err)
 	defer database.Close() //nolint:errcheck
-	if err := db.Migrate(database); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Migrate", db.Migrate(database))
 
 	outcome := recordRestoreResult(log, path, database)
 	if !outcome.Recorded || outcome.Status != db.RestoreStatusApplied || outcome.Backup != "chatserver_x.db" {
@@ -99,9 +81,7 @@ func TestInitDatabase_RecordsRestoreResult(t *testing.T) {
 func TestRecordRestoreResult_NoRestorePending(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Open", err)
 	defer database.Close() //nolint:errcheck
 	if out := recordRestoreResult(log, ":memory:", database); out.Recorded {
 		t.Fatalf("outcome = %+v, want none", out)

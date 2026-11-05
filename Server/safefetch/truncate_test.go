@@ -2,7 +2,6 @@ package safefetch
 
 import (
 	"bytes"
-	"compress/gzip"
 	"net/http"
 	"sync/atomic"
 	"testing"
@@ -30,9 +29,7 @@ func TestFetch_TruncateKeepsThePrefixOfAnEndlessBody(t *testing.T) {
 		p.Truncate = true
 	})
 	resp, err := get(f, srv.URL)
-	if err != nil {
-		t.Fatalf("Fetch: %v", err)
-	}
+	mustDo(t, "Fetch", err)
 	if len(resp.Body) != 16<<10 {
 		t.Fatalf("body is %d bytes, want the %d-byte prefix", len(resp.Body), 16<<10)
 	}
@@ -43,18 +40,7 @@ func TestFetch_TruncateKeepsThePrefixOfAnEndlessBody(t *testing.T) {
 
 // A gzip bomb under Truncate inflates only as far as the ceiling.
 func TestFetch_TruncateStopsInflatingAtTheCeiling(t *testing.T) {
-	var buf bytes.Buffer
-	zw := gzip.NewWriter(&buf)
-	chunk := bytes.Repeat([]byte("B"), 64<<10)
-	for range 256 {
-		if _, err := zw.Write(chunk); err != nil {
-			t.Fatalf("gzip write: %v", err)
-		}
-	}
-	if err := zw.Close(); err != nil {
-		t.Fatalf("gzip close: %v", err)
-	}
-	bomb := buf.Bytes()
+	bomb := gzipRepeated(t, bytes.Repeat([]byte("B"), 64<<10), 256)
 	srv := stub(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
 		w.Header().Set("Content-Encoding", "gzip")
@@ -66,9 +52,7 @@ func TestFetch_TruncateStopsInflatingAtTheCeiling(t *testing.T) {
 		p.Truncate = true
 	})
 	resp, err := get(f, srv.URL)
-	if err != nil {
-		t.Fatalf("Fetch: %v", err)
-	}
+	mustDo(t, "Fetch", err)
 	if len(resp.Body) != 8<<10 || resp.Header.Get("Content-Length") != "8192" {
 		t.Fatalf("body %d bytes, Content-Length %q; want the 8192-byte prefix", len(resp.Body), resp.Header.Get("Content-Length"))
 	}
@@ -82,9 +66,7 @@ func TestFetch_TruncateLeavesAShortBodyWhole(t *testing.T) {
 	})
 	f := newFetcher(t, srv, func(p *Policy) { p.Truncate = true })
 	resp, err := get(f, srv.URL)
-	if err != nil {
-		t.Fatalf("Fetch: %v", err)
-	}
+	mustDo(t, "Fetch", err)
 	if string(resp.Body) != `{"ok":true}` {
 		t.Fatalf("body = %q", resp.Body)
 	}

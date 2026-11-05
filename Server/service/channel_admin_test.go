@@ -26,9 +26,7 @@ func TestChannelMeta_NameCountsRunesNotBytes(t *testing.T) {
 	// runes; a byte-counting bound would reject it.
 	name100 := strings.Repeat("é", 100)
 	meta, err := cleanChannelMeta(name100, "", "")
-	if err != nil {
-		t.Fatalf("100-rune multibyte name rejected: %v", err)
-	}
+	mustDo(t, "100-rune multibyte name rejected", err)
 	if meta.Name != name100 {
 		t.Fatalf("name mangled: %q", meta.Name)
 	}
@@ -51,9 +49,7 @@ func TestChannelMeta_TopicAndCategoryBounds(t *testing.T) {
 
 func TestChannelMeta_SanitizesAndTrimsLikeEverySidebarField(t *testing.T) {
 	meta, err := cleanChannelMeta("  <b>general</b>  ", " topic <i>x</i> ", "  Chat  ")
-	if err != nil {
-		t.Fatalf("cleanChannelMeta: %v", err)
-	}
+	mustDo(t, "cleanChannelMeta", err)
 	if meta.Name != "general" {
 		t.Errorf("name = %q, want %q", meta.Name, "general")
 	}
@@ -114,9 +110,7 @@ func TestAdminCreateChannel_DefaultsTypeValidatesAndAudits(t *testing.T) {
 	svc, database := newChannelAdminService(t)
 
 	ch, _, err := svc.AdminCreateChannel(context.Background(), 7, AdminChannelCreate{Name: " lounge "}, nil)
-	if err != nil {
-		t.Fatalf("AdminCreateChannel: %v", err)
-	}
+	mustDo(t, "AdminCreateChannel", err)
 	if ch.Type != "text" || ch.Name != "lounge" {
 		t.Fatalf("created %q/%q, want lounge/text", ch.Name, ch.Type)
 	}
@@ -132,10 +126,7 @@ func TestAdminCreateChannel_DefaultsTypeValidatesAndAudits(t *testing.T) {
 		t.Fatalf("forum created as %q with settings %v, want a forum carrying its settings", forum.Type, forum.Forum)
 	}
 
-	entries, err := database.GetAuditLog(context.Background(), 10, 0)
-	if err != nil {
-		t.Fatalf("GetAuditLog: %v", err)
-	}
+	entries := mustGetAuditLog(t, database, 10, 0)
 	found := false
 	for _, e := range entries {
 		if e.Action == "channel_create" && e.ActorID == 7 {
@@ -207,20 +198,14 @@ func TestAdminChannel_DuplicateNameIsConflict(t *testing.T) {
 	svc, _ := newChannelAdminService(t)
 	ctx := context.Background()
 	first, _, err := svc.AdminCreateChannel(ctx, 1, AdminChannelCreate{Name: "Lobby", Type: "text", Category: "Chat"}, nil)
-	if err != nil {
-		t.Fatalf("create: %v", err)
-	}
+	mustDo(t, "create", err)
 	if _, _, err := svc.AdminCreateChannel(ctx, 1, AdminChannelCreate{Name: "LOBBY", Type: "text", Category: "Chat"}, nil); !errors.Is(err, ErrConflict) {
 		t.Fatalf("duplicate create: err = %v, want ErrConflict", err)
 	}
 	second, _, err := svc.AdminCreateChannel(ctx, 1, AdminChannelCreate{Name: "lobby", Type: "voice", Category: "Chat"}, nil)
-	if err != nil {
-		t.Fatalf("same name, other type: %v", err)
-	}
+	mustDo(t, "same name, other type", err)
 	third, _, err := svc.AdminCreateChannel(ctx, 1, AdminChannelCreate{Name: "hall", Type: "text", Category: "Chat"}, nil)
-	if err != nil {
-		t.Fatalf("create: %v", err)
-	}
+	mustDo(t, "create", err)
 	if _, _, err := svc.AdminUpdateChannel(ctx, 1, third, AdminChannelUpdate{Name: "lobby", Category: new("Chat")}, nil); !errors.Is(err, ErrConflict) {
 		t.Fatalf("rename onto a sibling: err = %v, want ErrConflict", err)
 	}

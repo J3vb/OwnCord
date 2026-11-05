@@ -431,10 +431,7 @@ func openAdminTestDB(t *testing.T) *db.DB {
 func createAdminUser(t *testing.T, database *db.DB) string {
 	t.Helper()
 	// Owner role has permissions = 2147483647 (includes ADMINISTRATOR bit 0x40000000)
-	uid, err := database.CreateUser(context.Background(), "adminuser", "$2a$12$placeholder", 1)
-	if err != nil {
-		t.Fatalf("CreateUser admin: %v", err)
-	}
+	uid := mustCreateUser(t, database, "adminuser", "$2a$12$placeholder", 1)
 
 	token := "test-admin-token-" + t.Name()
 	tokenHash := auth.HashToken(token)
@@ -448,10 +445,7 @@ func createAdminUser(t *testing.T, database *db.DB) string {
 func createMemberUser(t *testing.T, database *db.DB) string {
 	t.Helper()
 	// Member role (id=3) has limited permissions, not ADMINISTRATOR
-	uid, err := database.CreateUser(context.Background(), "memberuser", "$2a$12$placeholder", 3)
-	if err != nil {
-		t.Fatalf("CreateUser member: %v", err)
-	}
+	uid := mustCreateUser(t, database, "memberuser", "$2a$12$placeholder", 3)
 
 	token := "test-member-token-" + t.Name()
 	tokenHash := auth.HashToken(token)
@@ -488,20 +482,13 @@ func doRequest(t *testing.T, handler http.Handler, method, path, token string, b
 // ─── GET /admin/api/stats ─────────────────────────────────────────────────────
 
 func TestAdminAPI_Stats_OK(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	_, handler, token := newAdminHarness(t)
 
 	w := doRequest(t, handler, http.MethodGet, "/stats", token, nil)
 
-	if w.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	expectStatus(t, w, http.StatusOK)
 
-	var stats map[string]any
-	if err := json.Unmarshal(w.Body.Bytes(), &stats); err != nil {
-		t.Fatalf("unmarshal stats: %v", err)
-	}
+	stats := decodeBody[map[string]any](t, w)
 	if _, ok := stats["user_count"]; !ok {
 		t.Error("response missing 'user_count'")
 	}
@@ -516,9 +503,7 @@ func TestAdminAPI_Stats_Unauthenticated(t *testing.T) {
 
 	w := doRequest(t, handler, http.MethodGet, "/stats", "", nil)
 
-	if w.Code != http.StatusUnauthorized {
-		t.Errorf("status = %d, want 401", w.Code)
-	}
+	expectStatus(t, w, http.StatusUnauthorized)
 }
 
 func TestAdminAPI_Stats_Forbidden(t *testing.T) {
@@ -528,28 +513,19 @@ func TestAdminAPI_Stats_Forbidden(t *testing.T) {
 
 	w := doRequest(t, handler, http.MethodGet, "/stats", token, nil)
 
-	if w.Code != http.StatusForbidden {
-		t.Errorf("status = %d, want 403", w.Code)
-	}
+	expectStatus(t, w, http.StatusForbidden)
 }
 
 // ─── GET /admin/api/users ─────────────────────────────────────────────────────
 
 func TestAdminAPI_ListUsers_OK(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	_, handler, token := newAdminHarness(t)
 
 	w := doRequest(t, handler, http.MethodGet, "/users?limit=50&offset=0", token, nil)
 
-	if w.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	expectStatus(t, w, http.StatusOK)
 
-	var users []any
-	if err := json.Unmarshal(w.Body.Bytes(), &users); err != nil {
-		t.Fatalf("unmarshal users: %v", err)
-	}
+	users := decodeBody[[]any](t, w)
 	// At least the admin user we created
 	if len(users) < 1 {
 		t.Error("expected at least 1 user in response")
@@ -557,16 +533,12 @@ func TestAdminAPI_ListUsers_OK(t *testing.T) {
 }
 
 func TestAdminAPI_ListUsers_DefaultPagination(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	_, handler, token := newAdminHarness(t)
 
 	// No query params — should use defaults
 	w := doRequest(t, handler, http.MethodGet, "/users", token, nil)
 
-	if w.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200", w.Code)
-	}
+	expectStatus(t, w, http.StatusOK)
 }
 
 func TestAdminAPI_ListUsers_Unauthenticated(t *testing.T) {
@@ -575,9 +547,7 @@ func TestAdminAPI_ListUsers_Unauthenticated(t *testing.T) {
 
 	w := doRequest(t, handler, http.MethodGet, "/users", "", nil)
 
-	if w.Code != http.StatusUnauthorized {
-		t.Errorf("status = %d, want 401", w.Code)
-	}
+	expectStatus(t, w, http.StatusUnauthorized)
 }
 
 // ─── PATCH /admin/api/users/{id} ─────────────────────────────────────────────
@@ -593,15 +563,10 @@ func TestAdminAPI_PatchUser_BanHierarchy(t *testing.T) {
 	ownerToken := createAdminUser(t, database) // Owner role (pos 100)
 
 	// A second owner-rank user: equal position, cannot be banned.
-	peerUID, err := database.CreateUser(context.Background(), "peerowner", "$2a$12$placeholder", 1)
-	if err != nil {
-		t.Fatalf("CreateUser peerowner: %v", err)
-	}
+	peerUID := mustCreateUser(t, database, "peerowner", "$2a$12$placeholder", 1)
 	w := doRequest(t, handler, http.MethodPatch, "/users/"+itoa(peerUID), ownerToken,
 		map[string]any{"banned": true})
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("equal-rank ban: status = %d, want 403; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusForbidden)
 	if u, _ := database.GetUserByID(context.Background(), peerUID); u.Banned {
 		t.Fatal("equal-rank target must not be banned")
 	}
@@ -614,10 +579,7 @@ func TestAdminAPI_PatchUser_BanHierarchy(t *testing.T) {
 	); err != nil {
 		t.Fatalf("inserting junior admin role: %v", err)
 	}
-	juniorUID, err := database.CreateUser(context.Background(), "junioradmin", "$2a$12$placeholder", 9)
-	if err != nil {
-		t.Fatalf("CreateUser junioradmin: %v", err)
-	}
+	juniorUID := mustCreateUser(t, database, "junioradmin", "$2a$12$placeholder", 9)
 	juniorToken := "junior-token-" + t.Name()
 	if _, err := database.CreateSession(context.Background(), juniorUID, auth.HashToken(juniorToken), "test", "127.0.0.1"); err != nil {
 		t.Fatalf("CreateSession junior: %v", err)
@@ -628,35 +590,26 @@ func TestAdminAPI_PatchUser_BanHierarchy(t *testing.T) {
 	}
 	w = doRequest(t, handler, http.MethodPatch, "/users/"+itoa(ownerUser.ID), juniorToken,
 		map[string]any{"banned": true})
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("junior bans owner: status = %d, want 403; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusForbidden)
 	if u, _ := database.GetUserByID(context.Background(), ownerUser.ID); u.Banned {
 		t.Fatal("owner must not be banned by a lower rank")
 	}
 
 	// Downward ban still works: junior admin (pos 50) bans a member (pos 40).
-	memberUID, err := database.CreateUser(context.Background(), "banme", "$2a$12$placeholder", 3)
-	if err != nil {
-		t.Fatalf("CreateUser banme: %v", err)
-	}
+	memberUID := mustCreateUser(t, database, "banme", "$2a$12$placeholder", 3)
 	w = doRequest(t, handler, http.MethodPatch, "/users/"+itoa(memberUID), juniorToken,
 		map[string]any{"banned": true, "ban_reason": "spam"})
-	if w.Code != http.StatusOK {
-		t.Fatalf("junior bans member: status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 	if u, _ := database.GetUserByID(context.Background(), memberUID); !u.Banned {
 		t.Fatal("member should be banned by higher-ranked actor")
 	}
 }
 
 func TestAdminAPI_PatchUser_BanUser(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	database, handler, token := newAdminHarness(t)
 
 	// Create a target user
-	targetUID, _ := database.CreateUser(context.Background(), "target", "hash", 3)
+	targetUID := mustCreateUser(t, database, "target", "hash", 3)
 
 	body := map[string]any{
 		"banned":     true,
@@ -664,9 +617,7 @@ func TestAdminAPI_PatchUser_BanUser(t *testing.T) {
 	}
 	w := doRequest(t, handler, http.MethodPatch, "/users/"+itoa(targetUID), token, body)
 
-	if w.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	expectStatus(t, w, http.StatusOK)
 
 	// Verify user is banned in DB
 	user, err := database.GetUserByID(context.Background(), targetUID)
@@ -679,20 +630,16 @@ func TestAdminAPI_PatchUser_BanUser(t *testing.T) {
 }
 
 func TestAdminAPI_PatchUser_ChangeRole(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	database, handler, token := newAdminHarness(t)
 
-	targetUID, _ := database.CreateUser(context.Background(), "rolechange", "hash", 3)
+	targetUID := mustCreateUser(t, database, "rolechange", "hash", 3)
 
 	body := map[string]any{
 		"role_id": float64(2),
 	}
 	w := doRequest(t, handler, http.MethodPatch, "/users/"+itoa(targetUID), token, body)
 
-	if w.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	expectStatus(t, w, http.StatusOK)
 
 	user, _ := database.GetUserByID(context.Background(), targetUID)
 	if user.RoleID != 2 {
@@ -701,45 +648,33 @@ func TestAdminAPI_PatchUser_ChangeRole(t *testing.T) {
 }
 
 func TestAdminAPI_PatchUser_NotFound(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	_, handler, token := newAdminHarness(t)
 
 	body := map[string]any{"banned": true}
 	w := doRequest(t, handler, http.MethodPatch, "/users/99999", token, body)
 
-	if w.Code != http.StatusNotFound {
-		t.Errorf("status = %d, want 404", w.Code)
-	}
+	expectStatus(t, w, http.StatusNotFound)
 }
 
 func TestAdminAPI_PatchUser_InvalidID(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	_, handler, token := newAdminHarness(t)
 
 	w := doRequest(t, handler, http.MethodPatch, "/users/abc", token, nil)
 
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want 400", w.Code)
-	}
+	expectStatus(t, w, http.StatusBadRequest)
 }
 
 // ─── DELETE /admin/api/users/{id}/sessions ────────────────────────────────────
 
 func TestAdminAPI_ForceLogout_OK(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	database, handler, token := newAdminHarness(t)
 
-	targetUID, _ := database.CreateUser(context.Background(), "logoutme", "hash", 3)
+	targetUID := mustCreateUser(t, database, "logoutme", "hash", 3)
 	_, _ = database.CreateSession(context.Background(), targetUID, "victim-token-hash", "web", "1.2.3.4")
 
 	w := doRequest(t, handler, http.MethodDelete, "/users/"+itoa(targetUID)+"/sessions", token, nil)
 
-	if w.Code != http.StatusNoContent {
-		t.Errorf("status = %d, want 204", w.Code)
-	}
+	expectStatus(t, w, http.StatusNoContent)
 
 	sessions, _ := database.GetUserSessions(context.Background(), targetUID)
 	if len(sessions) != 0 {
@@ -753,30 +688,21 @@ func TestAdminAPI_ForceLogout_Unauthenticated(t *testing.T) {
 
 	w := doRequest(t, handler, http.MethodDelete, "/users/1/sessions", "", nil)
 
-	if w.Code != http.StatusUnauthorized {
-		t.Errorf("status = %d, want 401", w.Code)
-	}
+	expectStatus(t, w, http.StatusUnauthorized)
 }
 
 // ─── GET /admin/api/channels ──────────────────────────────────────────────────
 
 func TestAdminAPI_ListChannels_OK(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	database, handler, token := newAdminHarness(t)
 
 	_, _ = database.AdminCreateChannel(context.Background(), "general", "text", "", "", 0)
 
 	w := doRequest(t, handler, http.MethodGet, "/channels", token, nil)
 
-	if w.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	expectStatus(t, w, http.StatusOK)
 
-	var channels []any
-	if err := json.Unmarshal(w.Body.Bytes(), &channels); err != nil {
-		t.Fatalf("unmarshal channels: %v", err)
-	}
+	channels := decodeBody[[]any](t, w)
 	if len(channels) != 1 {
 		t.Errorf("expected 1 channel, got %d", len(channels))
 	}
@@ -785,9 +711,7 @@ func TestAdminAPI_ListChannels_OK(t *testing.T) {
 // ─── POST /admin/api/channels ─────────────────────────────────────────────────
 
 func TestAdminAPI_CreateChannel_OK(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	_, handler, token := newAdminHarness(t)
 
 	body := map[string]any{
 		"name":     "new-channel",
@@ -798,40 +722,29 @@ func TestAdminAPI_CreateChannel_OK(t *testing.T) {
 	}
 	w := doRequest(t, handler, http.MethodPost, "/channels", token, body)
 
-	if w.Code != http.StatusCreated {
-		t.Errorf("status = %d, want 201; body: %s", w.Code, w.Body.String())
-	}
+	expectStatus(t, w, http.StatusCreated)
 
-	var resp map[string]any
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal response: %v", err)
-	}
+	resp := decodeBody[map[string]any](t, w)
 	if _, ok := resp["id"]; !ok {
 		t.Error("response missing 'id'")
 	}
 }
 
 func TestAdminAPI_CreateChannel_MissingName(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	_, handler, token := newAdminHarness(t)
 
 	body := map[string]any{
 		"type": "text",
 	}
 	w := doRequest(t, handler, http.MethodPost, "/channels", token, body)
 
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want 400", w.Code)
-	}
+	expectStatus(t, w, http.StatusBadRequest)
 }
 
 // ─── PATCH /admin/api/channels/{id} ──────────────────────────────────────────
 
 func TestAdminAPI_UpdateChannel_OK(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	database, handler, token := newAdminHarness(t)
 
 	chID, _ := database.AdminCreateChannel(context.Background(), "old", "text", "", "", 0)
 
@@ -844,38 +757,28 @@ func TestAdminAPI_UpdateChannel_OK(t *testing.T) {
 	}
 	w := doRequest(t, handler, http.MethodPatch, "/channels/"+itoa(chID), token, body)
 
-	if w.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	expectStatus(t, w, http.StatusOK)
 }
 
 func TestAdminAPI_UpdateChannel_NotFound(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	_, handler, token := newAdminHarness(t)
 
 	body := map[string]any{"name": "x"}
 	w := doRequest(t, handler, http.MethodPatch, "/channels/99999", token, body)
 
-	if w.Code != http.StatusNotFound {
-		t.Errorf("status = %d, want 404", w.Code)
-	}
+	expectStatus(t, w, http.StatusNotFound)
 }
 
 // ─── DELETE /admin/api/channels/{id} ─────────────────────────────────────────
 
 func TestAdminAPI_DeleteChannel_OK(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	database, handler, token := newAdminHarness(t)
 
 	chID, _ := database.AdminCreateChannel(context.Background(), "del-me", "text", "", "", 0)
 
 	w := doRequest(t, handler, http.MethodDelete, "/channels/"+itoa(chID), token, nil)
 
-	if w.Code != http.StatusNoContent {
-		t.Errorf("status = %d, want 204", w.Code)
-	}
+	expectStatus(t, w, http.StatusNoContent)
 }
 
 // Deleting a channel must evict its voice participants BEFORE the DB row goes
@@ -884,10 +787,7 @@ func TestAdminAPI_DeleteChannel_OK(t *testing.T) {
 // in the room — participants would keep their client voice state, voice-topic
 // subscription, and LiveKit session forever, with no voice_leave broadcast.
 func TestAdminAPI_DeleteChannel_CleansVoiceBeforeDBDelete(t *testing.T) {
-	database := openAdminTestDB(t)
-	hub := &mockHub{}
-	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	database, hub, handler, token := newAdminHarnessWithHub(t)
 
 	// The minimal admin schema has no voice_states; create it with the real
 	// FK cascade — the cascade IS the hazard: it wipes the rows the cleanup
@@ -909,7 +809,7 @@ func TestAdminAPI_DeleteChannel_CleansVoiceBeforeDBDelete(t *testing.T) {
 	}
 
 	chID, _ := database.AdminCreateChannel(context.Background(), "del-voice", "voice", "", "", 0)
-	uid, _ := database.CreateUser(context.Background(), "del-voice-user", "hash", 1)
+	uid := mustCreateUser(t, database, "del-voice-user", "hash", 1)
 	if err := database.JoinVoiceChannel(context.Background(), uid, chID); err != nil {
 		t.Fatalf("JoinVoiceChannel: %v", err)
 	}
@@ -924,9 +824,7 @@ func TestAdminAPI_DeleteChannel_CleansVoiceBeforeDBDelete(t *testing.T) {
 	}
 
 	w := doRequest(t, handler, http.MethodDelete, "/channels/"+itoa(chID), token, nil)
-	if w.Code != http.StatusNoContent {
-		t.Fatalf("status = %d, want 204; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusNoContent)
 
 	if len(hub.voiceCleanupIDs) != 1 || hub.voiceCleanupIDs[0] != chID {
 		t.Fatalf("CleanupVoiceForChannel calls = %v, want exactly [%d]", hub.voiceCleanupIDs, chID)
@@ -947,10 +845,7 @@ func TestAdminAPI_DeleteChannel_CleansVoiceBeforeDBDelete(t *testing.T) {
 // (ws/voice_join.go) refuses any concurrent join that reads the channel row
 // during cleanup.
 func TestAdminAPI_DeleteChannel_ArchivesBeforeVoiceCleanup(t *testing.T) {
-	database := openAdminTestDB(t)
-	hub := &mockHub{}
-	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	database, hub, handler, token := newAdminHarnessWithHub(t)
 
 	chID, _ := database.AdminCreateChannel(context.Background(), "del-race", "voice", "", "", 0)
 
@@ -964,9 +859,7 @@ func TestAdminAPI_DeleteChannel_ArchivesBeforeVoiceCleanup(t *testing.T) {
 	}
 
 	w := doRequest(t, handler, http.MethodDelete, "/channels/"+itoa(chID), token, nil)
-	if w.Code != http.StatusNoContent {
-		t.Fatalf("status = %d, want 204; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusNoContent)
 
 	if !archivedAtCleanup {
 		t.Errorf("channel.Archived at CleanupVoiceForChannel time = false, want true — a concurrent voice_join would not be refused by the archived gate")
@@ -974,55 +867,39 @@ func TestAdminAPI_DeleteChannel_ArchivesBeforeVoiceCleanup(t *testing.T) {
 }
 
 func TestAdminAPI_DeleteChannel_NotFound(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	_, handler, token := newAdminHarness(t)
 
 	w := doRequest(t, handler, http.MethodDelete, "/channels/99999", token, nil)
 
-	if w.Code != http.StatusNotFound {
-		t.Errorf("status = %d, want 404", w.Code)
-	}
+	expectStatus(t, w, http.StatusNotFound)
 }
 
 // ─── GET /admin/api/audit-log ─────────────────────────────────────────────────
 
 func TestAdminAPI_AuditLog_OK(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	database, handler, token := newAdminHarness(t)
 
-	uid, _ := database.CreateUser(context.Background(), "actor", "hash", 1)
+	uid := mustCreateUser(t, database, "actor", "hash", 1)
 	_ = database.LogAudit(context.Background(), uid, "TEST_ACTION", "user", uid, "detail")
 
 	w := doRequest(t, handler, http.MethodGet, "/audit-log?limit=10&offset=0", token, nil)
 
-	if w.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	expectStatus(t, w, http.StatusOK)
 
-	var entries []any
-	if err := json.Unmarshal(w.Body.Bytes(), &entries); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	entries := decodeBody[[]any](t, w)
 	if len(entries) != 1 {
 		t.Errorf("expected 1 entry, got %d", len(entries))
 	}
 }
 
 func TestAdminAPI_AuditLog_Empty(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	_, handler, token := newAdminHarness(t)
 
 	w := doRequest(t, handler, http.MethodGet, "/audit-log", token, nil)
 
-	if w.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200", w.Code)
-	}
+	expectStatus(t, w, http.StatusOK)
 
-	var entries []any
-	_ = json.Unmarshal(w.Body.Bytes(), &entries)
+	entries := decodeBody[[]any](t, w)
 	if len(entries) != 0 {
 		t.Errorf("expected 0 entries, got %d", len(entries))
 	}
@@ -1031,20 +908,13 @@ func TestAdminAPI_AuditLog_Empty(t *testing.T) {
 // ─── GET /admin/api/settings ──────────────────────────────────────────────────
 
 func TestAdminAPI_GetSettings_OK(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	_, handler, token := newAdminHarness(t)
 
 	w := doRequest(t, handler, http.MethodGet, "/settings", token, nil)
 
-	if w.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	expectStatus(t, w, http.StatusOK)
 
-	var settings map[string]string
-	if err := json.Unmarshal(w.Body.Bytes(), &settings); err != nil {
-		t.Fatalf("unmarshal settings: %v", err)
-	}
+	settings := decodeBody[map[string]string](t, w)
 	if _, ok := settings["server_name"]; !ok {
 		t.Error("response missing 'server_name'")
 	}
@@ -1061,13 +931,8 @@ func TestAdminAPI_GetConfigFacts_ReportsRunningConfig(t *testing.T) {
 	token := createAdminUser(t, database)
 
 	w := doRequest(t, handler, http.MethodGet, "/config", token, nil)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
-	var got map[string]any
-	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	requireStatus(t, w, http.StatusOK)
+	got := decodeBody[map[string]any](t, w)
 	if got["upload_max_size_mb"] != float64(64) || got["voice_quality"] != "low" {
 		t.Errorf("config facts = %v, want upload_max_size_mb 64 and voice_quality low", got)
 	}
@@ -1093,19 +958,14 @@ func TestAdminAPI_GetConfigFacts_EffectiveConfigMasksSecrets(t *testing.T) {
 	token := createAdminUser(t, database)
 
 	w := doRequest(t, handler, http.MethodGet, "/config", token, nil)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 	body := w.Body.String()
 	for _, secret := range []string{"klipy-secret", "ghp_secret", "secret", `"key"`} {
 		if strings.Contains(body, secret) {
 			t.Fatalf("config facts leak %q: %s", secret, body)
 		}
 	}
-	var got map[string]any
-	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	got := decodeBody[map[string]any](t, w)
 	if got["server_port"] != float64(8443) || got["tls_mode"] != "acme" || got["tls_domain"] != "chat.example" {
 		t.Errorf("config facts = %v", got)
 	}
@@ -1142,13 +1002,8 @@ func TestAdminAPI_GetConfigFacts_PathsAndURLsAdminOnly(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			w := doRequest(t, handler, http.MethodGet, "/config", tc.token, nil)
-			if w.Code != http.StatusOK {
-				t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
-			}
-			var got map[string]any
-			if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
-				t.Fatalf("unmarshal: %v", err)
-			}
+			requireStatus(t, w, http.StatusOK)
+			got := decodeBody[map[string]any](t, w)
 			if got["server_port"] != float64(8443) || got["tls_mode"] != "acme" {
 				t.Errorf("config facts = %v, want the non-sensitive rows", got)
 			}
@@ -1181,13 +1036,8 @@ func TestAdminAPI_GetConfigFacts_ReportsRunningLogLevel(t *testing.T) {
 			token := createAdminUser(t, database)
 
 			w := doRequest(t, handler, http.MethodGet, "/config", token, nil)
-			if w.Code != http.StatusOK {
-				t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
-			}
-			var got map[string]any
-			if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
-				t.Fatalf("unmarshal: %v", err)
-			}
+			requireStatus(t, w, http.StatusOK)
+			got := decodeBody[map[string]any](t, w)
 			if got["logging_level"] != tc.want {
 				t.Errorf("logging_level = %v, want %q", got["logging_level"], tc.want)
 			}
@@ -1196,9 +1046,7 @@ func TestAdminAPI_GetConfigFacts_ReportsRunningLogLevel(t *testing.T) {
 }
 
 func TestAdminAPI_GetConfigFacts_WithoutRunningConfig(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	_, handler, token := newAdminHarness(t)
 
 	if w := doRequest(t, handler, http.MethodGet, "/config", token, nil); w.Code != http.StatusServiceUnavailable {
 		t.Errorf("status = %d, want 503; body: %s", w.Code, w.Body.String())
@@ -1221,13 +1069,8 @@ func TestAdminAPI_LogLevel_ReadAndSet(t *testing.T) {
 	token := createAdminUser(t, database)
 
 	w := doRequest(t, handler, http.MethodGet, "/logs/level", token, nil)
-	if w.Code != http.StatusOK {
-		t.Fatalf("GET status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
-	var got map[string]any
-	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	requireStatus(t, w, http.StatusOK)
+	got := decodeBody[map[string]any](t, w)
 	if got["level"] != "info" || got["base_level"] != "info" {
 		t.Errorf("GET = %v, want level and base_level info", got)
 	}
@@ -1236,9 +1079,7 @@ func TestAdminAPI_LogLevel_ReadAndSet(t *testing.T) {
 	}
 
 	w = doRequest(t, handler, http.MethodPatch, "/logs/level", token, map[string]any{"level": "debug", "duration_seconds": 900})
-	if w.Code != http.StatusOK {
-		t.Fatalf("PATCH status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 	if lv.Level() != slog.LevelDebug {
 		t.Fatalf("level = %v after PATCH, want debug", lv.Level())
 	}
@@ -1298,16 +1139,11 @@ func TestAdminAPI_LogLevel_DeleteRevertsToBase(t *testing.T) {
 		t.Fatalf("PATCH status = %d; body: %s", w.Code, w.Body.String())
 	}
 	w := doRequest(t, handler, http.MethodDelete, "/logs/level", token, nil)
-	if w.Code != http.StatusOK {
-		t.Fatalf("DELETE status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 	if lv.Level() != slog.LevelWarn {
 		t.Fatalf("level = %v after DELETE, want the base warn", lv.Level())
 	}
-	var got map[string]any
-	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	got := decodeBody[map[string]any](t, w)
 	if got["level"] != "warn" || got["base_level"] != "warn" {
 		t.Errorf("DELETE response = %v, want level and base_level warn", got)
 	}
@@ -1317,9 +1153,7 @@ func TestAdminAPI_LogLevel_DeleteRevertsToBase(t *testing.T) {
 }
 
 func TestAdminAPI_LogLevel_WithoutController(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	_, handler, token := newAdminHarness(t)
 
 	if w := doRequest(t, handler, http.MethodGet, "/logs/level", token, nil); w.Code != http.StatusServiceUnavailable {
 		t.Errorf("GET status = %d, want 503", w.Code)
@@ -1335,9 +1169,7 @@ func TestAdminAPI_LogLevel_WithoutController(t *testing.T) {
 // ─── PATCH /admin/api/settings ────────────────────────────────────────────────
 
 func TestAdminAPI_PatchSettings_OK(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	database, handler, token := newAdminHarness(t)
 
 	body := map[string]string{
 		"server_name": "Updated Server",
@@ -1345,9 +1177,7 @@ func TestAdminAPI_PatchSettings_OK(t *testing.T) {
 	}
 	w := doRequest(t, handler, http.MethodPatch, "/settings", token, body)
 
-	if w.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	expectStatus(t, w, http.StatusOK)
 
 	// Verify the change was persisted
 	val, err := database.GetSetting(context.Background(), "server_name")
@@ -1360,18 +1190,14 @@ func TestAdminAPI_PatchSettings_OK(t *testing.T) {
 }
 
 func TestAdminAPI_PatchSettings_InvalidBody(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	_, handler, token := newAdminHarness(t)
 
 	req := httptest.NewRequest(http.MethodPatch, "/settings", bytes.NewReader([]byte("not-json")))
 	req.Header.Set("Authorization", "Bearer "+token)
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want 400", w.Code)
-	}
+	expectStatus(t, w, http.StatusBadRequest)
 }
 
 // ─── POST /admin/api/backup ───────────────────────────────────────────────────
@@ -1381,16 +1207,14 @@ func TestAdminAPI_Backup_RequiresOwner(t *testing.T) {
 	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
 
 	// Admin (role 2) can authenticate but is not Owner (role 1, position 100)
-	adminUID, _ := database.CreateUser(context.Background(), "adminonly", "hash", 2)
+	adminUID := mustCreateUser(t, database, "adminonly", "hash", 2)
 	token := "admin-only-token"
 	_, _ = database.CreateSession(context.Background(), adminUID, auth.HashToken(token), "test", "127.0.0.1")
 
 	w := doRequest(t, handler, http.MethodPost, "/backup", token, nil)
 
 	// Should be forbidden — not Owner role
-	if w.Code != http.StatusForbidden {
-		t.Errorf("status = %d, want 403", w.Code)
-	}
+	expectStatus(t, w, http.StatusForbidden)
 }
 
 func TestAdminAPI_Backup_Unauthenticated(t *testing.T) {
@@ -1399,9 +1223,7 @@ func TestAdminAPI_Backup_Unauthenticated(t *testing.T) {
 
 	w := doRequest(t, handler, http.MethodPost, "/backup", "", nil)
 
-	if w.Code != http.StatusUnauthorized {
-		t.Errorf("status = %d, want 401", w.Code)
-	}
+	expectStatus(t, w, http.StatusUnauthorized)
 }
 
 // ─── Task 0.3: actor stored in context ───────────────────────────────────────
@@ -1411,19 +1233,15 @@ func TestAdminAPI_Backup_Unauthenticated(t *testing.T) {
 // a redundant DB lookup). We exercise this through the PATCH /users/{id} path
 // which logs an audit entry containing the actor_id.
 func TestAdminAPI_ActorFromContext_AuditEntry(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	database, handler, token := newAdminHarness(t)
 
 	// Create a target user to act on.
-	targetUID, _ := database.CreateUser(context.Background(), "ctxtarget", "hash", 3)
+	targetUID := mustCreateUser(t, database, "ctxtarget", "hash", 3)
 
 	body := map[string]any{"banned": true, "ban_reason": "context test"}
 	w := doRequest(t, handler, http.MethodPatch, "/users/"+itoa(targetUID), token, body)
 
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 
 	// The audit log should have a non-zero actor_id showing the actor was
 	// resolved (not 0, which would indicate a failed context lookup).
@@ -1445,18 +1263,14 @@ func TestAdminAPI_ActorFromContext_AuditEntry(t *testing.T) {
 // TestAdminAPI_ActorFromContext_ForceLogout exercises actorFromContext via the
 // DELETE /users/{id}/sessions path.
 func TestAdminAPI_ActorFromContext_ForceLogout(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	database, handler, token := newAdminHarness(t)
 
-	targetUID, _ := database.CreateUser(context.Background(), "logoutctx", "hash", 3)
+	targetUID := mustCreateUser(t, database, "logoutctx", "hash", 3)
 	_, _ = database.CreateSession(context.Background(), targetUID, "victim-hash-ctx", "web", "1.2.3.4")
 
 	w := doRequest(t, handler, http.MethodDelete, "/users/"+itoa(targetUID)+"/sessions", token, nil)
 
-	if w.Code != http.StatusNoContent {
-		t.Fatalf("status = %d, want 204; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusNoContent)
 
 	entries, err := database.GetAuditLog(context.Background(), 10, 0)
 	if err != nil {
@@ -1477,23 +1291,16 @@ func TestAdminAPI_ActorFromContext_ForceLogout(t *testing.T) {
 // TestAdminAPI_PatchSettings_RejectsUnknownKey verifies that an unknown key
 // returns 400 without writing anything to the database.
 func TestAdminAPI_PatchSettings_RejectsUnknownKey(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	_, handler, token := newAdminHarness(t)
 
 	body := map[string]string{
 		"unknown_key": "should be rejected",
 	}
 	w := doRequest(t, handler, http.MethodPatch, "/settings", token, body)
 
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want 400; body: %s", w.Code, w.Body.String())
-	}
+	expectStatus(t, w, http.StatusBadRequest)
 
-	var resp map[string]string
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal error response: %v", err)
-	}
+	resp := decodeBody[map[string]string](t, w)
 	// The error message must name the offending key so the caller knows what to fix.
 	if msg, ok := resp["message"]; !ok || msg == "" {
 		t.Error("response should include a non-empty 'message' field")
@@ -1503,9 +1310,7 @@ func TestAdminAPI_PatchSettings_RejectsUnknownKey(t *testing.T) {
 // TestAdminAPI_PatchSettings_RejectsMixedKeys verifies that a payload
 // containing both valid and invalid keys is rejected entirely (no partial write).
 func TestAdminAPI_PatchSettings_RejectsMixedKeys(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	database, handler, token := newAdminHarness(t)
 
 	body := map[string]string{
 		"server_name":  "valid",
@@ -1513,9 +1318,7 @@ func TestAdminAPI_PatchSettings_RejectsMixedKeys(t *testing.T) {
 	}
 	w := doRequest(t, handler, http.MethodPatch, "/settings", token, body)
 
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want 400; body: %s", w.Code, w.Body.String())
-	}
+	expectStatus(t, w, http.StatusBadRequest)
 
 	// The valid key must NOT have been written because the request was rejected.
 	val, err := database.GetSetting(context.Background(), "server_name")
@@ -1572,22 +1375,16 @@ func TestAdminAPI_PatchSettings_AcceptsAllWhitelistedKeys(t *testing.T) {
 // TestAdminAPI_PatchSettings_EmptyPayloadIsOK verifies that an empty map
 // (no-op update) is accepted and returns the current settings.
 func TestAdminAPI_PatchSettings_EmptyPayloadIsOK(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	_, handler, token := newAdminHarness(t)
 
 	body := map[string]string{}
 	w := doRequest(t, handler, http.MethodPatch, "/settings", token, body)
 
-	if w.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	expectStatus(t, w, http.StatusOK)
 }
 
 func TestAdminAPI_PatchSettings_RejectsRequire2FAWhenUsersNotEnrolled(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	_, handler, token := newAdminHarness(t)
 
 	body := map[string]string{
 		"registration_mode": "closed",
@@ -1595,15 +1392,11 @@ func TestAdminAPI_PatchSettings_RejectsRequire2FAWhenUsersNotEnrolled(t *testing
 	}
 	w := doRequest(t, handler, http.MethodPatch, "/settings", token, body)
 
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusBadRequest)
 }
 
 func TestAdminAPI_PatchSettings_AllowsRequire2FAWhenAllUsersEnrolledAndRegistrationClosed(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	database, handler, token := newAdminHarness(t)
 
 	if _, err := database.ExecContext(context.Background(), `UPDATE users SET totp_secret = ? WHERE id = 1`, "JBSWY3DPEHPK3PXP"); err != nil {
 		t.Fatalf("enroll admin user: %v", err)
@@ -1615,24 +1408,18 @@ func TestAdminAPI_PatchSettings_AllowsRequire2FAWhenAllUsersEnrolledAndRegistrat
 	}
 	w := doRequest(t, handler, http.MethodPatch, "/settings", token, body)
 
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 }
 
 func TestAdminAPI_PatchSettings_RejectsInvalidBooleanValue(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	_, handler, token := newAdminHarness(t)
 
 	body := map[string]string{
 		"require_2fa": "banana",
 	}
 	w := doRequest(t, handler, http.MethodPatch, "/settings", token, body)
 
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusBadRequest)
 }
 
 // TestAdminAPI_PatchSettings_UnrelatedKeyNotBlockedByRequire2FAGate verifies
@@ -1643,9 +1430,7 @@ func TestAdminAPI_PatchSettings_RejectsInvalidBooleanValue(t *testing.T) {
 // value, which is still "true", so validateRequire2FAUpdate must not
 // re-run the enrollment count for a key nobody asked to change).
 func TestAdminAPI_PatchSettings_UnrelatedKeyNotBlockedByRequire2FAGate(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	database, handler, token := newAdminHarness(t)
 
 	// Enroll the admin so the initial require_2fa enable succeeds.
 	if _, err := database.ExecContext(context.Background(), `UPDATE users SET totp_secret = ? WHERE id = 1`, "JBSWY3DPEHPK3PXP"); err != nil {
@@ -1657,9 +1442,7 @@ func TestAdminAPI_PatchSettings_UnrelatedKeyNotBlockedByRequire2FAGate(t *testin
 		"require_2fa":       "true",
 	}
 	w := doRequest(t, handler, http.MethodPatch, "/settings", token, enableBody)
-	if w.Code != http.StatusOK {
-		t.Fatalf("enabling require_2fa: status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 
 	// A user without TOTP now exists (e.g. created after the gate closed, or
 	// unbanned once a temporary ban lapsed) — CountUsersWithoutTOTP is now > 0.
@@ -1671,9 +1454,7 @@ func TestAdminAPI_PatchSettings_UnrelatedKeyNotBlockedByRequire2FAGate(t *testin
 	// succeed and actually write the change.
 	motdBody := map[string]string{"motd": "Back online"}
 	w = doRequest(t, handler, http.MethodPatch, "/settings", token, motdBody)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 
 	val, err := database.GetSetting(context.Background(), "motd")
 	if err != nil {
@@ -1689,18 +1470,14 @@ func TestAdminAPI_PatchSettings_UnrelatedKeyNotBlockedByRequire2FAGate(t *testin
 // TestAdminAPI_ListUsers_NoPasswordHash verifies that GET /users does not
 // expose the PasswordHash field in any returned user object.
 func TestAdminAPI_ListUsers_NoPasswordHash(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	database, handler, token := newAdminHarness(t)
 
 	// Create a second user so the list is non-trivial.
 	_, _ = database.CreateUser(context.Background(), "plainuser", "supersecretbcrypthash", 3)
 
 	w := doRequest(t, handler, http.MethodGet, "/users", token, nil)
 
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 
 	body := w.Body.String()
 	// The raw bcrypt hash must never appear in the response.
@@ -1716,15 +1493,11 @@ func TestAdminAPI_ListUsers_NoPasswordHash(t *testing.T) {
 // TestAdminAPI_ListUsers_NoTOTPSecret verifies that GET /users does not
 // expose the TOTPSecret field.
 func TestAdminAPI_ListUsers_NoTOTPSecret(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	_, handler, token := newAdminHarness(t)
 
 	w := doRequest(t, handler, http.MethodGet, "/users", token, nil)
 
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 
 	body := w.Body.String()
 	if strings.Contains(body, "totp_secret") || strings.Contains(body, "TOTPSecret") {
@@ -1735,20 +1508,13 @@ func TestAdminAPI_ListUsers_NoTOTPSecret(t *testing.T) {
 // TestAdminAPI_ListUsers_PublicFieldsPresent verifies that safe public fields
 // are still present after the sensitive-field removal.
 func TestAdminAPI_ListUsers_PublicFieldsPresent(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	_, handler, token := newAdminHarness(t)
 
 	w := doRequest(t, handler, http.MethodGet, "/users", token, nil)
 
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 
-	var users []map[string]any
-	if err := json.Unmarshal(w.Body.Bytes(), &users); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	users := decodeBody[[]map[string]any](t, w)
 	if len(users) == 0 {
 		t.Fatal("expected at least one user")
 	}
@@ -1764,11 +1530,9 @@ func TestAdminAPI_ListUsers_PublicFieldsPresent(t *testing.T) {
 // TestAdminAPI_PatchUser_NoPasswordHash verifies that PATCH /users/{id} does
 // not expose PasswordHash in the returned user object.
 func TestAdminAPI_PatchUser_NoPasswordHash(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	database, handler, token := newAdminHarness(t)
 
-	targetUID, _ := database.CreateUser(context.Background(), "patchvictim", "topsecretbcrypt", 3)
+	targetUID := mustCreateUser(t, database, "patchvictim", "topsecretbcrypt", 3)
 
 	body := map[string]any{
 		"banned":     true,
@@ -1776,9 +1540,7 @@ func TestAdminAPI_PatchUser_NoPasswordHash(t *testing.T) {
 	}
 	w := doRequest(t, handler, http.MethodPatch, "/users/"+itoa(targetUID), token, body)
 
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 
 	respBody := w.Body.String()
 	if strings.Contains(respBody, "topsecretbcrypt") {
@@ -1792,19 +1554,15 @@ func TestAdminAPI_PatchUser_NoPasswordHash(t *testing.T) {
 // TestAdminAPI_PatchUser_NoTOTPSecret verifies that PATCH /users/{id} does
 // not expose TOTPSecret in the returned user object.
 func TestAdminAPI_PatchUser_NoTOTPSecret(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	database, handler, token := newAdminHarness(t)
 
-	targetUID, _ := database.CreateUser(context.Background(), "patchtotp", "hash", 3)
+	targetUID := mustCreateUser(t, database, "patchtotp", "hash", 3)
 
 	w := doRequest(t, handler, http.MethodPatch, "/users/"+itoa(targetUID), token, map[string]any{
 		"banned": false,
 	})
 
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 
 	respBody := w.Body.String()
 	if strings.Contains(respBody, "totp_secret") || strings.Contains(respBody, "TOTPSecret") {
@@ -1966,10 +1724,7 @@ func (m *mockHub) UserCount() int {
 }
 
 func TestAdminAPI_CreateChannel_BroadcastsChannelCreate(t *testing.T) {
-	database := openAdminTestDB(t)
-	hub := &mockHub{}
-	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	_, hub, handler, token := newAdminHarnessWithHub(t)
 
 	body := map[string]any{
 		"name": "broadcast-test",
@@ -1977,9 +1732,7 @@ func TestAdminAPI_CreateChannel_BroadcastsChannelCreate(t *testing.T) {
 	}
 	w := doRequest(t, handler, http.MethodPost, "/channels", token, body)
 
-	if w.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want 201; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusCreated)
 	if len(hub.channelCreates) != 1 {
 		t.Fatalf("BroadcastChannelCreate called %d times, want 1", len(hub.channelCreates))
 	}
@@ -1997,25 +1750,18 @@ func TestAdminAPI_CreateChannel_NilHubDoesNotPanic(t *testing.T) {
 	body := map[string]any{"name": "safe-channel", "type": "text"}
 	w := doRequest(t, handler, http.MethodPost, "/channels", token, body)
 
-	if w.Code != http.StatusCreated {
-		t.Errorf("status = %d, want 201", w.Code)
-	}
+	expectStatus(t, w, http.StatusCreated)
 }
 
 func TestAdminAPI_UpdateChannel_BroadcastsChannelUpdate(t *testing.T) {
-	database := openAdminTestDB(t)
-	hub := &mockHub{}
-	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	database, hub, handler, token := newAdminHarnessWithHub(t)
 
 	chID, _ := database.AdminCreateChannel(context.Background(), "before", "text", "", "", 0)
 
 	body := map[string]any{"name": "after"}
 	w := doRequest(t, handler, http.MethodPatch, "/channels/"+itoa(chID), token, body)
 
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 	if len(hub.channelUpdates) != 1 {
 		t.Fatalf("BroadcastChannelUpdate called %d times, want 1", len(hub.channelUpdates))
 	}
@@ -2025,32 +1771,23 @@ func TestAdminAPI_UpdateChannel_BroadcastsChannelUpdate(t *testing.T) {
 }
 
 func TestAdminAPI_UpdateChannel_NilHubDoesNotPanic(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	database, handler, token := newAdminHarnessNoHub(t)
 
 	chID, _ := database.AdminCreateChannel(context.Background(), "patchme", "text", "", "", 0)
 	body := map[string]any{"name": "patched"}
 	w := doRequest(t, handler, http.MethodPatch, "/channels/"+itoa(chID), token, body)
 
-	if w.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200", w.Code)
-	}
+	expectStatus(t, w, http.StatusOK)
 }
 
 func TestAdminAPI_DeleteChannel_BroadcastsChannelDelete(t *testing.T) {
-	database := openAdminTestDB(t)
-	hub := &mockHub{}
-	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	database, hub, handler, token := newAdminHarnessWithHub(t)
 
 	chID, _ := database.AdminCreateChannel(context.Background(), "delete-me", "text", "", "", 0)
 
 	w := doRequest(t, handler, http.MethodDelete, "/channels/"+itoa(chID), token, nil)
 
-	if w.Code != http.StatusNoContent {
-		t.Fatalf("status = %d, want 204; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusNoContent)
 	if len(hub.channelDeleteIDs) != 1 {
 		t.Fatalf("BroadcastChannelDelete called %d times, want 1", len(hub.channelDeleteIDs))
 	}
@@ -2060,16 +1797,12 @@ func TestAdminAPI_DeleteChannel_BroadcastsChannelDelete(t *testing.T) {
 }
 
 func TestAdminAPI_DeleteChannel_NilHubDoesNotPanic(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	database, handler, token := newAdminHarnessNoHub(t)
 
 	chID, _ := database.AdminCreateChannel(context.Background(), "del-no-hub", "text", "", "", 0)
 	w := doRequest(t, handler, http.MethodDelete, "/channels/"+itoa(chID), token, nil)
 
-	if w.Code != http.StatusNoContent {
-		t.Errorf("status = %d, want 204", w.Code)
-	}
+	expectStatus(t, w, http.StatusNoContent)
 }
 
 // OC-0010: handleDeleteChannel commits archived=1 as its own transaction and
@@ -2088,10 +1821,7 @@ func TestAdminAPI_DeleteChannel_NilHubDoesNotPanic(t *testing.T) {
 // timing. The fix must make the delete tolerate a caller cancellation that
 // arrives after the archive has already committed.
 func TestAdminAPI_DeleteChannel_SurvivesContextCancelAfterArchiveCommits(t *testing.T) {
-	database := openAdminTestDB(t)
-	hub := &mockHub{}
-	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	database, hub, handler, token := newAdminHarnessWithHub(t)
 
 	chID, _ := database.AdminCreateChannel(context.Background(), "del-cancel-race", "text", "", "", 0)
 
@@ -2109,9 +1839,7 @@ func TestAdminAPI_DeleteChannel_SurvivesContextCancelAfterArchiveCommits(t *test
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
-	if w.Code != http.StatusNoContent {
-		t.Fatalf("status = %d, want 204 (delete must survive a caller cancellation that arrives after the archive already committed); body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusNoContent)
 
 	ch, err := database.GetChannel(context.Background(), chID)
 	if err != nil {
@@ -2134,14 +1862,9 @@ func TestAdminAPI_CreateAPIToken_OK(t *testing.T) {
 	token := createAdminUser(t, database) // Owner role
 
 	w := doRequest(t, handler, http.MethodPost, "/tokens", token, map[string]any{"label": "ci-bot"})
-	if w.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want 201; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusCreated)
 
-	var resp map[string]any
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	resp := decodeBody[map[string]any](t, w)
 	raw, _ := resp["token"].(string)
 	if raw == "" {
 		t.Fatal("response missing raw token")
@@ -2159,14 +1882,10 @@ func TestAdminAPI_CreateAPIToken_OK(t *testing.T) {
 }
 
 func TestAdminAPI_CreateAPIToken_MissingLabel(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	_, handler, token := newAdminHarness(t)
 
 	w := doRequest(t, handler, http.MethodPost, "/tokens", token, map[string]any{"label": "  "})
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want 400; body: %s", w.Code, w.Body.String())
-	}
+	expectStatus(t, w, http.StatusBadRequest)
 }
 
 // TestAdminAPI_CreateAPIToken_NegativeExpiresHours pins OC-0145: a caller that
@@ -2174,14 +1893,10 @@ func TestAdminAPI_CreateAPIToken_MissingLabel(t *testing.T) {
 // receive a permanent one. The `> 0` check in handleCreateAPIToken sends any
 // negative value down the nil-expiresAt ("never expires") branch.
 func TestAdminAPI_CreateAPIToken_NegativeExpiresHours(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	database, handler, token := newAdminHarness(t)
 
 	w := doRequest(t, handler, http.MethodPost, "/tokens", token, map[string]any{"label": "neg-hours", "expires_hours": -1})
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusBadRequest)
 
 	tokens, _ := database.ListAPITokens(context.Background())
 	for _, tok := range tokens {
@@ -2195,14 +1910,10 @@ func TestAdminAPI_CreateAPIToken_NegativeExpiresHours(t *testing.T) {
 // huge expires_hours must not silently overflow time.Duration into a past
 // timestamp and hand back a token that 401s on first use.
 func TestAdminAPI_CreateAPIToken_HugeExpiresHours(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	database, handler, token := newAdminHarness(t)
 
 	w := doRequest(t, handler, http.MethodPost, "/tokens", token, map[string]any{"label": "huge-hours", "expires_hours": 3000000})
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusBadRequest)
 
 	tokens, _ := database.ListAPITokens(context.Background())
 	for _, tok := range tokens {
@@ -2213,9 +1924,7 @@ func TestAdminAPI_CreateAPIToken_HugeExpiresHours(t *testing.T) {
 }
 
 func TestAdminAPI_ListAPITokens_OK(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	database, handler, token := newAdminHarness(t)
 
 	hash := auth.HashToken("raw-secret-value")
 	if _, err := database.CreateAPIToken(context.Background(), 1, hash, "seeded", nil); err != nil {
@@ -2223,16 +1932,11 @@ func TestAdminAPI_ListAPITokens_OK(t *testing.T) {
 	}
 
 	w := doRequest(t, handler, http.MethodGet, "/tokens", token, nil)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 	if strings.Contains(w.Body.String(), hash) {
 		t.Error("GET /tokens leaked the token hash")
 	}
-	var tokens []map[string]any
-	if err := json.Unmarshal(w.Body.Bytes(), &tokens); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	tokens := decodeBody[[]map[string]any](t, w)
 	if len(tokens) != 1 {
 		t.Fatalf("expected 1 token, got %d", len(tokens))
 	}
@@ -2242,9 +1946,7 @@ func TestAdminAPI_ListAPITokens_OK(t *testing.T) {
 }
 
 func TestAdminAPI_RevokeAPIToken_OK(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	database, handler, token := newAdminHarness(t)
 
 	hash := auth.HashToken("revoke-me")
 	id, err := database.CreateAPIToken(context.Background(), 1, hash, "doomed", nil)
@@ -2253,9 +1955,7 @@ func TestAdminAPI_RevokeAPIToken_OK(t *testing.T) {
 	}
 
 	w := doRequest(t, handler, http.MethodDelete, "/tokens/"+itoa(id), token, nil)
-	if w.Code != http.StatusNoContent {
-		t.Fatalf("status = %d, want 204; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusNoContent)
 	// A revoked token must no longer authenticate.
 	active, _ := database.GetActiveAPIToken(context.Background(), hash)
 	if active != nil {
@@ -2264,14 +1964,10 @@ func TestAdminAPI_RevokeAPIToken_OK(t *testing.T) {
 }
 
 func TestAdminAPI_RevokeAPIToken_NotFound(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	_, handler, token := newAdminHarness(t)
 
 	w := doRequest(t, handler, http.MethodDelete, "/tokens/99999", token, nil)
-	if w.Code != http.StatusNotFound {
-		t.Errorf("status = %d, want 404", w.Code)
-	}
+	expectStatus(t, w, http.StatusNotFound)
 }
 
 // TestAdminAPI_Tokens_RequiresOwner locks the Owner gate: a non-Owner admin can
@@ -2281,14 +1977,12 @@ func TestAdminAPI_Tokens_RequiresOwner(t *testing.T) {
 	database := openAdminTestDB(t)
 	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
 
-	adminUID, _ := database.CreateUser(context.Background(), "adminonly", "hash", 2) // Admin, not Owner
+	adminUID := mustCreateUser(t, database, "adminonly", "hash", 2)
 	token := "admin-only-token"
 	_, _ = database.CreateSession(context.Background(), adminUID, auth.HashToken(token), "test", "127.0.0.1")
 
 	w := doRequest(t, handler, http.MethodPost, "/tokens", token, map[string]any{"label": "nope"})
-	if w.Code != http.StatusForbidden {
-		t.Errorf("status = %d, want 403; body: %s", w.Code, w.Body.String())
-	}
+	expectStatus(t, w, http.StatusForbidden)
 }
 
 func TestAdminAPI_Tokens_Unauthenticated(t *testing.T) {
@@ -2296,9 +1990,7 @@ func TestAdminAPI_Tokens_Unauthenticated(t *testing.T) {
 	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
 
 	w := doRequest(t, handler, http.MethodGet, "/tokens", "", nil)
-	if w.Code != http.StatusUnauthorized {
-		t.Errorf("status = %d, want 401", w.Code)
-	}
+	expectStatus(t, w, http.StatusUnauthorized)
 }
 
 // ─── helpers ─────────────────────────────────────────────────────────────────

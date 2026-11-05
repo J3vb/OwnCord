@@ -24,15 +24,11 @@ func TestAPIToken_CreateGetRevoke(t *testing.T) {
 	uid := seedTokenUser(t, database, "owner", 1)
 
 	id, err := database.CreateAPIToken(ctx, uid, "hash_active", "ci-bot", nil)
-	if err != nil {
-		t.Fatalf("CreateAPIToken: %v", err)
-	}
+	mustDo(t, "CreateAPIToken", err)
 
 	// Active token resolves.
 	tok, err := database.GetActiveAPIToken(ctx, "hash_active")
-	if err != nil {
-		t.Fatalf("GetActiveAPIToken: %v", err)
-	}
+	mustDo(t, "GetActiveAPIToken", err)
 	if tok == nil {
 		t.Fatal("expected active token, got nil")
 	}
@@ -42,16 +38,12 @@ func TestAPIToken_CreateGetRevoke(t *testing.T) {
 
 	// After revocation it no longer resolves.
 	n, err := database.RevokeAPIToken(ctx, id)
-	if err != nil {
-		t.Fatalf("RevokeAPIToken: %v", err)
-	}
+	mustDo(t, "RevokeAPIToken", err)
 	if n != 1 {
 		t.Fatalf("RevokeAPIToken affected %d rows, want 1", n)
 	}
 	tok, err = database.GetActiveAPIToken(ctx, "hash_active")
-	if err != nil {
-		t.Fatalf("GetActiveAPIToken after revoke: %v", err)
-	}
+	mustDo(t, "GetActiveAPIToken after revoke", err)
 	if tok != nil {
 		t.Fatal("revoked token must not resolve")
 	}
@@ -108,14 +100,10 @@ func TestAPIToken_TouchAndList(t *testing.T) {
 		t.Fatalf("CreateAPIToken: %v", err)
 	}
 
-	if err := database.TouchAPIToken(ctx, "hash_touch"); err != nil {
-		t.Fatalf("TouchAPIToken: %v", err)
-	}
+	mustDo(t, "TouchAPIToken", database.TouchAPIToken(ctx, "hash_touch"))
 
 	list, err := database.ListAPITokens(ctx)
-	if err != nil {
-		t.Fatalf("ListAPITokens: %v", err)
-	}
+	mustDo(t, "ListAPITokens", err)
 	if len(list) != 1 {
 		t.Fatalf("ListAPITokens returned %d, want 1", len(list))
 	}
@@ -137,9 +125,7 @@ func TestAPIToken_RevokeByLabel(t *testing.T) {
 	}
 
 	n, err := database.RevokeAPITokenByLabel(ctx, "mcp")
-	if err != nil {
-		t.Fatalf("RevokeAPITokenByLabel: %v", err)
-	}
+	mustDo(t, "RevokeAPITokenByLabel", err)
 	if n != 1 {
 		t.Fatalf("RevokeAPITokenByLabel affected %d rows, want 1", n)
 	}
@@ -155,9 +141,7 @@ func TestGetOwnerUser(t *testing.T) {
 
 	// No users yet → nil, nil.
 	u, err := database.GetOwnerUser(ctx)
-	if err != nil {
-		t.Fatalf("GetOwnerUser (empty): %v", err)
-	}
+	mustDo(t, "GetOwnerUser (empty)", err)
 	if u != nil {
 		t.Fatalf("GetOwnerUser on empty DB = %+v, want nil", u)
 	}
@@ -167,9 +151,7 @@ func TestGetOwnerUser(t *testing.T) {
 	ownerID := seedTokenUser(t, database, "owner", 1)
 
 	u, err = database.GetOwnerUser(ctx)
-	if err != nil {
-		t.Fatalf("GetOwnerUser: %v", err)
-	}
+	mustDo(t, "GetOwnerUser", err)
 	if u == nil || u.ID != ownerID {
 		t.Fatalf("GetOwnerUser = %+v, want owner id %d", u, ownerID)
 	}
@@ -186,14 +168,10 @@ func TestGetOwnerUser_SkipsBannedOwner(t *testing.T) {
 	bannedOwnerID := seedTokenUser(t, database, "deleted-owner", 1)
 	adminID := seedTokenUser(t, database, "live-admin", 2)
 
-	if err := database.BanUser(ctx, bannedOwnerID, "account deleted", nil); err != nil {
-		t.Fatalf("BanUser: %v", err)
-	}
+	mustDo(t, "BanUser", database.BanUser(ctx, bannedOwnerID, "account deleted", nil))
 
 	u, err := database.GetOwnerUser(ctx)
-	if err != nil {
-		t.Fatalf("GetOwnerUser: %v", err)
-	}
+	mustDo(t, "GetOwnerUser", err)
 	if u == nil {
 		t.Fatal("GetOwnerUser = nil, want the live admin")
 	}
@@ -233,9 +211,7 @@ func TestGetOwnerUser_LapsedTempBanStaysEligible(t *testing.T) {
 			}
 
 			u, err := database.GetOwnerUser(ctx)
-			if err != nil {
-				t.Fatalf("GetOwnerUser: %v", err)
-			}
+			mustDo(t, "GetOwnerUser", err)
 			if u == nil {
 				t.Fatal("GetOwnerUser = nil, want a user")
 			}

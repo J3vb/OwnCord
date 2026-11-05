@@ -44,14 +44,10 @@ func TestAuthServiceUseErasureReachesDeleteAccount(t *testing.T) {
 	database := newTestDB(t)
 	ctx := context.Background()
 	dir := t.TempDir()
-	uid, _ := seedErasureMember(t, database, dir)
+	uid, _ := seedErasureMember(ctx, t, database, dir)
 	hash, err := auth.HashPassword("correct horse battery")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := database.UpdateUserPassword(ctx, uid, hash); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "HashPassword", err)
+	mustDo(t, "UpdateUserPassword", database.UpdateUserPassword(ctx, uid, hash))
 	user, err := database.GetUserByID(ctx, uid)
 	if err != nil || user == nil {
 		t.Fatalf("GetUserByID: %v", err)
@@ -70,9 +66,7 @@ func TestAuthServiceUseErasureReachesDeleteAccount(t *testing.T) {
 		t.Fatal("UseWelcome did not install the welcome service")
 	}
 
-	if err := svc.DeleteAccount(ctx, sessionPrincipal(user), "correct horse battery", "203.0.113.9"); err != nil {
-		t.Fatalf("DeleteAccount: %v", err)
-	}
+	mustDo(t, "DeleteAccount", svc.DeleteAccount(ctx, sessionPrincipal(user), "correct horse battery", "203.0.113.9"))
 	var tokened int
 	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM audit_log WHERE action = 'account_deleted' AND subject_token IS NOT NULL AND subject_token <> ''`).Scan(&tokened); err != nil || tokened != 1 {
 		t.Errorf("account_deleted rows carrying the subject token = %d (%v), want 1", tokened, err)

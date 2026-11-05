@@ -12,10 +12,7 @@ import (
 func seedRecoveringUser(t *testing.T, database *db.DB, name string) int64 {
 	t.Helper()
 	ctx := context.Background()
-	uid, err := database.CreateUser(ctx, name, "oldhash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	uid := mustCreateUser(t, database, name, "oldhash", 4)
 	for _, dev := range []string{"laptop", "phone"} {
 		if _, err := database.CreateSession(ctx, uid, "tok-"+name+"-"+dev, dev, "10.0.0.1"); err != nil {
 			t.Fatalf("CreateSession: %v", err)
@@ -31,17 +28,13 @@ func TestRecoveryAssist_IssueReplacesAndRedeemConsumes(t *testing.T) {
 	if a, err := database.GetRecoveryAssist(ctx, uid); err != nil || a != nil {
 		t.Fatalf("GetRecoveryAssist before issuance = %+v, %v; want nil", a, err)
 	}
-	if err := database.UpsertRecoveryAssist(ctx, uid, "$argon2id$first", 1, "in_person", time.Now().Add(15*time.Minute)); err != nil {
-		t.Fatalf("UpsertRecoveryAssist: %v", err)
-	}
+	mustDo(t, "UpsertRecoveryAssist", database.UpsertRecoveryAssist(ctx, uid, "$argon2id$first", 1, "in_person", time.Now().Add(15*time.Minute)))
 	a, _ := database.GetRecoveryAssist(ctx, uid)
 	if a == nil || a.Verifier != "$argon2id$first" || a.IssuedBy != 1 || a.Verification != "in_person" || !a.Live(time.Now()) {
 		t.Fatalf("credential = %+v, want the issued, live one", a)
 	}
 	// A second issuance replaces the first.
-	if err := database.UpsertRecoveryAssist(ctx, uid, "$argon2id$second", 1, "voice_call", time.Now().Add(15*time.Minute)); err != nil {
-		t.Fatalf("UpsertRecoveryAssist (replace): %v", err)
-	}
+	mustDo(t, "UpsertRecoveryAssist (replace)", database.UpsertRecoveryAssist(ctx, uid, "$argon2id$second", 1, "voice_call", time.Now().Add(15*time.Minute)))
 	if a, _ = database.GetRecoveryAssist(ctx, uid); a == nil || a.Verifier != "$argon2id$second" || a.Verification != "voice_call" {
 		t.Fatalf("credential after replacement = %+v", a)
 	}
@@ -77,9 +70,7 @@ func TestRedeemRecoveryAssist_RefusesAnExpiredCredential(t *testing.T) {
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	uid := seedRecoveringUser(t, database, "late")
-	if err := database.UpsertRecoveryAssist(ctx, uid, "$argon2id$v", 1, "in_person", time.Now().Add(-time.Minute)); err != nil {
-		t.Fatalf("UpsertRecoveryAssist: %v", err)
-	}
+	mustDo(t, "UpsertRecoveryAssist", database.UpsertRecoveryAssist(ctx, uid, "$argon2id$v", 1, "in_person", time.Now().Add(-time.Minute)))
 	if a, _ := database.GetRecoveryAssist(ctx, uid); a == nil || a.Live(time.Now()) {
 		t.Fatalf("credential = %+v, want present but expired", a)
 	}
@@ -102,9 +93,7 @@ func TestRedeemRecoveryAssist_RollsBackAsAWhole(t *testing.T) {
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	uid := seedRecoveringUser(t, database, "unlucky")
-	if err := database.UpsertRecoveryAssist(ctx, uid, "$argon2id$v", 1, "in_person", time.Now().Add(15*time.Minute)); err != nil {
-		t.Fatalf("UpsertRecoveryAssist: %v", err)
-	}
+	mustDo(t, "UpsertRecoveryAssist", database.UpsertRecoveryAssist(ctx, uid, "$argon2id$v", 1, "in_person", time.Now().Add(15*time.Minute)))
 	if _, err := database.ExecContext(ctx,
 		"CREATE TRIGGER fault_delete_sessions BEFORE DELETE ON sessions BEGIN SELECT RAISE(FAIL, 'injected fault'); END"); err != nil {
 		t.Fatalf("install fault: %v", err)
@@ -133,12 +122,8 @@ func TestRedeemRecoveryKit_WithdrawsTheOutstandingCredential(t *testing.T) {
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	uid := seedRecoveringUser(t, database, "both")
-	if err := database.UpsertRecoveryKit(ctx, uid, "$argon2id$kit"); err != nil {
-		t.Fatalf("UpsertRecoveryKit: %v", err)
-	}
-	if err := database.UpsertRecoveryAssist(ctx, uid, "$argon2id$assist", 1, "in_person", time.Now().Add(15*time.Minute)); err != nil {
-		t.Fatalf("UpsertRecoveryAssist: %v", err)
-	}
+	mustDo(t, "UpsertRecoveryKit", database.UpsertRecoveryKit(ctx, uid, "$argon2id$kit"))
+	mustDo(t, "UpsertRecoveryAssist", database.UpsertRecoveryAssist(ctx, uid, "$argon2id$assist", 1, "in_person", time.Now().Add(15*time.Minute)))
 	if _, err := database.RedeemRecoveryKit(ctx, uid, "$argon2id$kit", "newhash", "recovery_kit_used", "by kit"); err != nil {
 		t.Fatalf("RedeemRecoveryKit: %v", err)
 	}
@@ -150,13 +135,9 @@ func TestRedeemRecoveryKit_WithdrawsTheOutstandingCredential(t *testing.T) {
 func TestEraseAccount_PurgesTheRecoveryCredential(t *testing.T) {
 	database := openMigratedMemory(t)
 	ctx := context.Background()
-	if _, err := database.CreateUser(ctx, "owner", "hash", 1); err != nil {
-		t.Fatalf("CreateUser(owner): %v", err)
-	}
+	mustCreateUser(t, database, "owner", "hash", 1)
 	uid, _ := database.CreateUser(ctx, "leaving", "hash", 4)
-	if err := database.UpsertRecoveryAssist(ctx, uid, "$argon2id$v", 1, "in_person", time.Now().Add(15*time.Minute)); err != nil {
-		t.Fatalf("UpsertRecoveryAssist: %v", err)
-	}
+	mustDo(t, "UpsertRecoveryAssist", database.UpsertRecoveryAssist(ctx, uid, "$argon2id$v", 1, "in_person", time.Now().Add(15*time.Minute)))
 	if _, err := database.EraseAccount(ctx, uid, ""); err != nil {
 		t.Fatalf("EraseAccount: %v", err)
 	}
@@ -169,12 +150,8 @@ func TestDeleteRecoveryAssist_WithdrawsTheCredential(t *testing.T) {
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	uid := seedRecoveringUser(t, database, "withdrawn")
-	if err := database.UpsertRecoveryAssist(ctx, uid, "$argon2id$v", 1, "in_person", time.Now().Add(15*time.Minute)); err != nil {
-		t.Fatalf("UpsertRecoveryAssist: %v", err)
-	}
-	if err := database.DeleteRecoveryAssist(ctx, uid); err != nil {
-		t.Fatalf("DeleteRecoveryAssist: %v", err)
-	}
+	mustDo(t, "UpsertRecoveryAssist", database.UpsertRecoveryAssist(ctx, uid, "$argon2id$v", 1, "in_person", time.Now().Add(15*time.Minute)))
+	mustDo(t, "DeleteRecoveryAssist", database.DeleteRecoveryAssist(ctx, uid))
 	if a, _ := database.GetRecoveryAssist(ctx, uid); a != nil {
 		t.Fatalf("credential after withdrawal = %+v, want none", a)
 	}
@@ -191,12 +168,8 @@ func TestDeleteRecoveryKit_RemovesTheKit(t *testing.T) {
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	uid, _ := database.CreateUser(ctx, "rotating", "hash", 4)
-	if err := database.UpsertRecoveryKit(ctx, uid, "$argon2id$v"); err != nil {
-		t.Fatalf("UpsertRecoveryKit: %v", err)
-	}
-	if err := database.DeleteRecoveryKit(ctx, uid); err != nil {
-		t.Fatalf("DeleteRecoveryKit: %v", err)
-	}
+	mustDo(t, "UpsertRecoveryKit", database.UpsertRecoveryKit(ctx, uid, "$argon2id$v"))
+	mustDo(t, "DeleteRecoveryKit", database.DeleteRecoveryKit(ctx, uid))
 	if kit, _ := database.GetRecoveryKit(ctx, uid); kit != nil {
 		t.Fatalf("kit after deletion = %+v, want none", kit)
 	}
@@ -212,14 +185,10 @@ func TestRedeemRecoveryAssist_OnlyConsumesTheCredentialItVerified(t *testing.T) 
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	uid := seedRecoveringUser(t, database, "reissued")
-	if err := database.UpsertRecoveryAssist(ctx, uid, "$argon2id$old", 1, "in_person", time.Now().Add(15*time.Minute)); err != nil {
-		t.Fatalf("UpsertRecoveryAssist: %v", err)
-	}
+	mustDo(t, "UpsertRecoveryAssist", database.UpsertRecoveryAssist(ctx, uid, "$argon2id$old", 1, "in_person", time.Now().Add(15*time.Minute)))
 	// The owner re-issues after the old credential was compared but before
 	// its redeem ran.
-	if err := database.UpsertRecoveryAssist(ctx, uid, "$argon2id$new", 1, "in_person", time.Now().Add(15*time.Minute)); err != nil {
-		t.Fatalf("UpsertRecoveryAssist (replacement): %v", err)
-	}
+	mustDo(t, "UpsertRecoveryAssist (replacement)", database.UpsertRecoveryAssist(ctx, uid, "$argon2id$new", 1, "in_person", time.Now().Add(15*time.Minute)))
 	if _, err := database.RedeemRecoveryAssist(ctx, uid, "$argon2id$old", "newhash", "recovery_assist_used", "stale"); !errors.Is(err, db.ErrRecoveryAssistSpent) {
 		t.Fatalf("redeem with the replaced credential = %v, want ErrRecoveryAssistSpent", err)
 	}

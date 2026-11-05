@@ -22,10 +22,7 @@ import (
 // moveActor registers a connected client for actor in chanID.
 func moveActor(t *testing.T, hub *ws.Hub, actor *db.User, chanID int64) (*ws.Client, chan []byte) {
 	t.Helper()
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, actor, chanID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, actor, chanID, 16)
 	return c, send
 }
 
@@ -420,7 +417,7 @@ func TestVoiceMod_Move_PerTargetLimit_OnlyForRankBypass(t *testing.T) {
 	c, send := moveActor(t, hub, actor, fromID)
 
 	hub.HandleMessageForTest(c, voiceModMoveMsg(higher.ID, toID))
-	if code := receiveErrorCode(send, waitTimeout); code != "RATE_LIMITED" {
+	if code := drainForErrorCode(send, waitTimeout); code != "RATE_LIMITED" {
 		t.Fatalf("bypass move code = %q, want RATE_LIMITED", code)
 	}
 	if payload := receiveMsgOfType(higherSend, "voice_moved", 100*time.Millisecond); payload != nil {
@@ -449,7 +446,7 @@ func TestVoiceMod_Move_PerTargetLimit_AppliesToEqualRank(t *testing.T) {
 	c, send := moveActor(t, hub, actor, fromID)
 	hub.HandleMessageForTest(c, voiceModMoveMsg(peer.ID, toID))
 
-	if code := receiveErrorCode(send, waitTimeout); code != "RATE_LIMITED" {
+	if code := drainForErrorCode(send, waitTimeout); code != "RATE_LIMITED" {
 		t.Fatalf("equal-rank move code = %q, want RATE_LIMITED", code)
 	}
 	if payload := receiveMsgOfType(peerSend, "voice_moved", 100*time.Millisecond); payload != nil {

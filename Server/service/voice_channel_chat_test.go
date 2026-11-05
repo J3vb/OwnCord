@@ -47,9 +47,7 @@ func voiceChatSend(svc *MessageService, userID int64, content string, attachment
 
 func TestVoiceChannelChat_SendRequiresSendMessages(t *testing.T) {
 	svc, _, _ := newVoiceChatFixture(t)
-	if err := voiceChatSend(svc, 1, "hello"); err != nil {
-		t.Fatalf("member send into a voice channel: %v", err)
-	}
+	mustDo(t, "member send into a voice channel", voiceChatSend(svc, 1, "hello"))
 	if err := voiceChatSend(svc, vcChatReadOnly, "hello"); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("read-only member send = %v, want ErrForbidden", err)
 	}
@@ -59,9 +57,7 @@ func TestVoiceChannelChat_SendRequiresSendMessages(t *testing.T) {
 // every send above and here is from someone who is not in the call.
 func TestVoiceChannelChat_NotJoinedMayReadAndSend(t *testing.T) {
 	svc, chans, _ := newVoiceChatFixture(t)
-	if err := voiceChatSend(svc, 1, "from outside the call"); err != nil {
-		t.Fatalf("send from outside the call: %v", err)
-	}
+	mustDo(t, "send from outside the call", voiceChatSend(svc, 1, "from outside the call"))
 	if _, err := chans.AdmitChannelFocus(context.Background(), 1, vcChatChannel); err != nil {
 		t.Fatalf("focus from outside the call: %v", err)
 	}
@@ -86,21 +82,15 @@ func TestVoiceChannelChat_AttachRequiresAttachFiles(t *testing.T) {
 	if err := voiceChatSend(svc, 1, "with a file", "upload-1"); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("attach without ATTACH_FILES = %v, want ErrForbidden", err)
 	}
-	if err := voiceChatSend(svc, vcChatAttacher, "with a file", "upload-1"); err != nil {
-		t.Fatalf("attach with ATTACH_FILES: %v", err)
-	}
+	mustDo(t, "attach with ATTACH_FILES", voiceChatSend(svc, vcChatAttacher, "with a file", "upload-1"))
 }
 
 func TestVoiceChannelChat_SlowModeApplies(t *testing.T) {
 	_, _, database := newVoiceChatFixture(t)
-	if err := database.SetChannelSlowMode(context.Background(), vcChatChannel, 3600); err != nil {
-		t.Fatalf("SetChannelSlowMode: %v", err)
-	}
+	mustDo(t, "SetChannelSlowMode", database.SetChannelSlowMode(context.Background(), vcChatChannel, 3600))
 	permSvc := NewPermissionService(database, permissions.NewChecker(database))
 	svc := NewMessageService(database, permSvc, auth.NewRateLimiter())
-	if err := voiceChatSend(svc, 1, "first"); err != nil {
-		t.Fatalf("first send: %v", err)
-	}
+	mustDo(t, "first send", voiceChatSend(svc, 1, "first"))
 	if err := voiceChatSend(svc, 1, "second"); !errors.Is(err, ErrSlowMode) {
 		t.Fatalf("second send inside the window = %v, want ErrSlowMode", err)
 	}
@@ -113,9 +103,7 @@ func TestVoiceChannelChat_SlowModeApplies(t *testing.T) {
 func TestVoiceChannelChat_TimedOutCannotSend(t *testing.T) {
 	svc, chans, database := newVoiceChatFixture(t)
 	ctx := context.Background()
-	if _, err := database.CreateMessage(ctx, vcChatChannel, vcChatTarget, "before the timeout", nil); err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	mustCreateMessage(t, database, vcChatChannel, vcChatTarget, "before the timeout", nil)
 	if _, _, err := database.TimeoutUser(ctx, vcChatTarget, vcChatModerator, nil, "cool off", time.Now().Add(time.Hour)); err != nil {
 		t.Fatalf("TimeoutUser: %v", err)
 	}

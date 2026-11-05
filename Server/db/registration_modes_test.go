@@ -19,9 +19,7 @@ import (
 func migrationsBefore(t *testing.T, stop string) fstest.MapFS {
 	t.Helper()
 	entries, err := fs.ReadDir(migrations.FS, ".")
-	if err != nil {
-		t.Fatalf("ReadDir: %v", err)
-	}
+	mustDo(t, "ReadDir", err)
 	out := fstest.MapFS{}
 	for _, e := range entries {
 		if e.Name() >= stop {
@@ -57,9 +55,7 @@ func TestMigration034_MapsRegistrationOpenWithoutOpening(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			database := openMemory(t)
-			if err := db.MigrateFS(database, migrationsBefore(t, "034_")); err != nil {
-				t.Fatalf("migrate to 033: %v", err)
-			}
+			mustDo(t, "migrate to 033", db.MigrateFS(database, migrationsBefore(t, "034_")))
 			ctx := context.Background()
 			if _, err := database.ExecContext(ctx, `DELETE FROM settings WHERE key = 'registration_open'`); err != nil {
 				t.Fatalf("clear seed: %v", err)
@@ -70,19 +66,13 @@ func TestMigration034_MapsRegistrationOpenWithoutOpening(t *testing.T) {
 				}
 			}
 			if tc.users {
-				if _, err := database.CreateUser(ctx, "owner", "hash", 1); err != nil {
-					t.Fatalf("CreateUser: %v", err)
-				}
+				mustCreateUser(t, database, "owner", "hash", 1)
 			}
 
-			if err := db.Migrate(database); err != nil {
-				t.Fatalf("migrate to head: %v", err)
-			}
+			mustDo(t, "migrate to head", db.Migrate(database))
 
 			mode, err := database.GetSetting(ctx, "registration_mode")
-			if err != nil {
-				t.Fatalf("GetSetting(registration_mode): %v", err)
-			}
+			mustDo(t, "GetSetting(registration_mode)", err)
 			if mode != tc.wantMode {
 				t.Errorf("registration_mode = %q, want %q", mode, tc.wantMode)
 			}
@@ -99,22 +89,16 @@ func TestMigration034_MapsRegistrationOpenWithoutOpening(t *testing.T) {
 func TestPendingUsers_HeldOutsideTheRosterUntilDecided(t *testing.T) {
 	database := openMigratedMemory(t)
 	ctx := context.Background()
-	if _, err := database.CreateUser(ctx, "member", "hash", 4); err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	mustCreateUser(t, database, "member", "hash", 4)
 	pendingID, err := database.CreatePendingUser(ctx, "applicant", "hash", 4, 100)
-	if err != nil {
-		t.Fatalf("CreatePendingUser: %v", err)
-	}
+	mustDo(t, "CreatePendingUser", err)
 
 	u, err := database.GetUserByID(ctx, pendingID)
 	if err != nil || u == nil || !u.PendingApproval() {
 		t.Fatalf("GetUserByID = %+v, %v; want a pending user", u, err)
 	}
 	members, err := database.ListMembers(ctx)
-	if err != nil {
-		t.Fatalf("ListMembers: %v", err)
-	}
+	mustDo(t, "ListMembers", err)
 	for _, m := range members {
 		if m.ID == pendingID {
 			t.Error("a pending application appears in the member roster")
@@ -132,9 +116,7 @@ func TestPendingUsers_HeldOutsideTheRosterUntilDecided(t *testing.T) {
 	}
 
 	// Approving makes it an ordinary account; a second decision finds nothing.
-	if err := database.ApprovePendingUser(ctx, pendingID); err != nil {
-		t.Fatalf("ApprovePendingUser: %v", err)
-	}
+	mustDo(t, "ApprovePendingUser", database.ApprovePendingUser(ctx, pendingID))
 	if err := database.ApprovePendingUser(ctx, pendingID); !errors.Is(err, db.ErrNotFound) {
 		t.Errorf("second approve = %v, want ErrNotFound", err)
 	}
@@ -156,12 +138,8 @@ func TestPendingUsers_HeldOutsideTheRosterUntilDecided(t *testing.T) {
 
 	// Denying anonymises and locks the row for good and releases the name.
 	deniedID, err := database.CreatePendingUser(ctx, "denied", "hash", 4, 100)
-	if err != nil {
-		t.Fatalf("CreatePendingUser: %v", err)
-	}
-	if err := database.DenyPendingUser(ctx, deniedID); err != nil {
-		t.Fatalf("DenyPendingUser: %v", err)
-	}
+	mustDo(t, "CreatePendingUser", err)
+	mustDo(t, "DenyPendingUser", database.DenyPendingUser(ctx, deniedID))
 	u, _ = database.GetUserByID(ctx, deniedID)
 	if u == nil || u.RegistrationStatus != db.RegistrationDenied || u.Username == "denied" || u.PasswordHash != "" {
 		t.Fatalf("denied row = %+v, want anonymised and marked denied", u)
@@ -182,9 +160,7 @@ func TestCreateUserWithSession_CommitsBothOrNeither(t *testing.T) {
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	uid, err := database.CreateUserWithSession(ctx, "opened", "hash", 4, "sess-opened", "test", "127.0.0.1")
-	if err != nil {
-		t.Fatalf("CreateUserWithSession: %v", err)
-	}
+	mustDo(t, "CreateUserWithSession", err)
 	sess, err := database.GetSessionByTokenHash(ctx, "sess-opened")
 	if err != nil || sess == nil || sess.UserID != uid {
 		t.Fatalf("session = %+v, %v; want one for user %d", sess, err, uid)
@@ -259,15 +235,9 @@ func TestDenyPendingUser_FallsBackWhenTheDeniedNameIsTaken(t *testing.T) {
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	id, err := database.CreatePendingUser(ctx, "applicant", "hash", 4, 100)
-	if err != nil {
-		t.Fatalf("CreatePendingUser: %v", err)
-	}
-	if _, err := database.CreateUser(ctx, fmt.Sprintf("[denied-%d]", id), "hash", 4); err != nil {
-		t.Fatalf("CreateUser(squatter): %v", err)
-	}
-	if err := database.DenyPendingUser(ctx, id); err != nil {
-		t.Fatalf("DenyPendingUser with the anonymised name taken: %v", err)
-	}
+	mustDo(t, "CreatePendingUser", err)
+	mustCreateUser(t, database, fmt.Sprintf("[denied-%d]", id), "hash", 4)
+	mustDo(t, "DenyPendingUser with the anonymised name taken", database.DenyPendingUser(ctx, id))
 	u, _ := database.GetUserByID(ctx, id)
 	if u == nil || !strings.HasPrefix(u.Username, fmt.Sprintf("[denied-%d-", id)) || u.RegistrationStatus != "denied" {
 		t.Fatalf("denied row = %+v, want a suffixed [denied-%d-…] name with status denied", u, id)

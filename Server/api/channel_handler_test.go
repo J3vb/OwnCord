@@ -2,14 +2,12 @@ package api_test
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"slices"
 	"strings"
 	"testing"
-	"testing/fstest"
 
 	"github.com/J3vb/OwnCord/Server/api"
 	"github.com/J3vb/OwnCord/Server/auth"
@@ -20,111 +18,7 @@ import (
 
 // ─── schema for channel tests ─────────────────────────────────────────────────
 
-var channelTestSchema = []byte(`
-CREATE TABLE IF NOT EXISTS roles (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    name        TEXT    NOT NULL UNIQUE,
-    color       TEXT,
-    permissions INTEGER NOT NULL DEFAULT 0,
-    position    INTEGER NOT NULL DEFAULT 0,
-    is_default  INTEGER NOT NULL DEFAULT 0,
-    hoist       INTEGER NOT NULL DEFAULT 0,
-    mentionable INTEGER NOT NULL DEFAULT 0
-);
-INSERT OR IGNORE INTO roles (id, name, color, permissions, position, is_default) VALUES
-    (1, 'Owner',     '#E74C3C', 2147483647, 100, 0),
-    (2, 'Admin',     '#F39C12', 1073741823,  80, 0),
-    (3, 'Moderator', '#3498DB', 1048575,     60, 0),
-    (4, 'Member',    NULL,      1635,     40, 1);
-
-CREATE TABLE IF NOT EXISTS users (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    username    TEXT    NOT NULL UNIQUE COLLATE NOCASE,
-    password    TEXT    NOT NULL,
-    avatar      TEXT,
-    role_id     INTEGER NOT NULL DEFAULT 4 REFERENCES roles(id),
-    totp_secret TEXT,
-    status      TEXT    NOT NULL DEFAULT 'offline',
-    created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
-    last_seen   TEXT,
-    banned      INTEGER NOT NULL DEFAULT 0,
-    ban_reason  TEXT,
-    ban_expires TEXT,
-    registration_status TEXT NOT NULL DEFAULT 'active',
-    identity_public_key TEXT,
-    display_name TEXT,
-    about TEXT,
-    custom_status TEXT,
-    custom_status_expires_at TEXT,
-    banner_id TEXT,
-    banner_color TEXT
-);
-CREATE TABLE IF NOT EXISTS user_roles (
-    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    role_id INTEGER NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
-    PRIMARY KEY (user_id, role_id)
-) WITHOUT ROWID;
-
-CREATE TRIGGER IF NOT EXISTS user_roles_on_user_insert AFTER INSERT ON users
-BEGIN
-    INSERT OR IGNORE INTO user_roles (user_id, role_id)
-    SELECT NEW.id, r.id FROM roles r WHERE r.id = NEW.role_id;
-END;
-
-CREATE TABLE IF NOT EXISTS erasure_jobs (
-    id      INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    state   TEXT    NOT NULL
-);
-CREATE TABLE IF NOT EXISTS sessions (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    token      TEXT    NOT NULL UNIQUE,
-    device     TEXT,
-    ip_address TEXT,
-    created_at TEXT    NOT NULL DEFAULT (datetime('now')),
-    last_used  TEXT    NOT NULL DEFAULT (datetime('now')),
-    expires_at TEXT    NOT NULL,
-    unseen     INTEGER NOT NULL DEFAULT 0
-);
-CREATE TABLE IF NOT EXISTS recovery_kits (
-    user_id    INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-    verifier   TEXT    NOT NULL,
-    created_at TEXT    NOT NULL,
-    used_at    TEXT
-);
-CREATE TABLE IF NOT EXISTS recovery_assists (
-    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-    verifier TEXT NOT NULL,
-    issued_by INTEGER NOT NULL,
-    verification TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    expires_at TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token);
-
-CREATE TABLE IF NOT EXISTS channel_categories (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    name       TEXT    NOT NULL,
-    position   INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT    NOT NULL DEFAULT (datetime('now'))
-);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_channel_categories_name ON channel_categories(name COLLATE NOCASE);
-CREATE TABLE IF NOT EXISTS category_overrides (
-    category_id INTEGER NOT NULL REFERENCES channel_categories(id) ON DELETE CASCADE,
-    role_id     INTEGER NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
-    allow       INTEGER NOT NULL DEFAULT 0,
-    deny        INTEGER NOT NULL DEFAULT 0,
-    UNIQUE(category_id, role_id)
-);
-CREATE TABLE IF NOT EXISTS category_user_overrides (
-    category_id INTEGER NOT NULL REFERENCES channel_categories(id) ON DELETE CASCADE,
-    user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    allow       INTEGER NOT NULL DEFAULT 0,
-    deny        INTEGER NOT NULL DEFAULT 0,
-    UNIQUE(category_id, user_id)
-);
-
+var channelTestSchema = []byte(schemaAccounts + schemaMessaging + schemaPolls + `
 CREATE TABLE IF NOT EXISTS channels (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
     name             TEXT    NOT NULL,
@@ -172,114 +66,13 @@ CREATE TABLE IF NOT EXISTS thread_tags (
     tag_id    INTEGER NOT NULL REFERENCES forum_tags(id) ON DELETE CASCADE,
     PRIMARY KEY (thread_id, tag_id)
 );
-CREATE TABLE IF NOT EXISTS channel_overrides (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
-    role_id    INTEGER NOT NULL REFERENCES roles(id)    ON DELETE CASCADE,
-    allow      INTEGER NOT NULL DEFAULT 0,
-    deny       INTEGER NOT NULL DEFAULT 0,
-    UNIQUE(channel_id, role_id)
-);
-
-CREATE TABLE IF NOT EXISTS channel_user_overrides (
-    channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
-    user_id    INTEGER NOT NULL REFERENCES users(id)    ON DELETE CASCADE,
-    allow      INTEGER NOT NULL DEFAULT 0,
-    deny       INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (channel_id, user_id)
-);
 CREATE TABLE IF NOT EXISTS thread_members (
     thread_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
     user_id   INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     joined_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     PRIMARY KEY (thread_id, user_id)
 ) WITHOUT ROWID;
-CREATE TABLE IF NOT EXISTS messages (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
-    user_id    INTEGER NOT NULL REFERENCES users(id),
-    content    TEXT    NOT NULL,
-    reply_to   INTEGER REFERENCES messages(id) ON DELETE SET NULL,
-    edited_at  TEXT,
-    deleted    INTEGER NOT NULL DEFAULT 0,
-    pinned     INTEGER NOT NULL DEFAULT 0,
-    timestamp  TEXT    NOT NULL DEFAULT (datetime('now')),
-    mentions_everyone INTEGER NOT NULL DEFAULT 0,
-    pinned_at  TEXT,
-    kind       INTEGER NOT NULL DEFAULT 0
-);
-CREATE TABLE IF NOT EXISTS import_jobs (
-    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
-    channel_id         INTEGER REFERENCES channels(id) ON DELETE SET NULL,
-    created_by         INTEGER REFERENCES users(id) ON DELETE SET NULL,
-    source_name        TEXT    NOT NULL DEFAULT '',
-    discord_channel_id TEXT    NOT NULL DEFAULT '',
-    status             TEXT    NOT NULL DEFAULT 'running',
-    total              INTEGER NOT NULL DEFAULT 0,
-    imported           INTEGER NOT NULL DEFAULT 0,
-    skipped            INTEGER NOT NULL DEFAULT 0,
-    skipped_attachments INTEGER NOT NULL DEFAULT 0,
-    error              TEXT,
-    created_at         TEXT    NOT NULL DEFAULT (datetime('now')),
-    finished_at        TEXT
-);
-CREATE TABLE IF NOT EXISTS message_import_authors (
-    message_id      INTEGER PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
-    discord_user_id TEXT NOT NULL,
-    name            TEXT NOT NULL,
-    color           TEXT
-);
-CREATE TABLE IF NOT EXISTS message_mentions (
-    message_id        INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
-    mentioned_user_id INTEGER NOT NULL REFERENCES users(id)    ON DELETE CASCADE,
-    PRIMARY KEY (message_id, mentioned_user_id)
-);
-CREATE TABLE IF NOT EXISTS message_role_mentions (
-    message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
-    role_id    INTEGER NOT NULL,
-    PRIMARY KEY (message_id, role_id)
-);
-
--- History reads look up forward blocks on every page (migration 071).
-CREATE TABLE IF NOT EXISTS message_forwards (
-    message_id        INTEGER PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
-    source_message_id INTEGER REFERENCES messages(id) ON DELETE SET NULL,
-    source_channel_id INTEGER NOT NULL,
-    source_timestamp  TEXT    NOT NULL
-);
-
--- History reads look up poll blocks on every page (migration 073).
-CREATE TABLE IF NOT EXISTS polls (
-    message_id        INTEGER PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
-    question          TEXT    NOT NULL,
-    allow_multiselect INTEGER NOT NULL DEFAULT 0,
-    expires_at        TEXT    NOT NULL,
-    ended_at          TEXT,
-    version           INTEGER NOT NULL DEFAULT 0
-);
-CREATE TABLE IF NOT EXISTS poll_answers (
-    message_id INTEGER NOT NULL REFERENCES polls(message_id) ON DELETE CASCADE,
-    answer_id  INTEGER NOT NULL,
-    text       TEXT    NOT NULL,
-    emoji      TEXT,
-    PRIMARY KEY (message_id, answer_id)
-);
-CREATE TABLE IF NOT EXISTS poll_votes (
-    message_id INTEGER NOT NULL,
-    answer_id  INTEGER NOT NULL,
-    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    PRIMARY KEY (message_id, user_id, answer_id)
-);
-
--- History and search reads look up the sticker block (migration 083).
-CREATE TABLE IF NOT EXISTS message_stickers (
-    message_id INTEGER PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
-    sticker_id INTEGER,
-    name       TEXT NOT NULL
-);
-
 CREATE INDEX IF NOT EXISTS idx_messages_channel ON messages(channel_id, id DESC);
-
 CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
     content,
     content='messages',
@@ -295,34 +88,6 @@ CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE ON messages BEGIN
     INSERT INTO messages_fts(messages_fts, rowid, content) VALUES('delete', old.id, old.content);
     INSERT INTO messages_fts(rowid, content) VALUES (new.id, new.content);
 END;
-
-CREATE TABLE IF NOT EXISTS attachments (
-    id          TEXT    PRIMARY KEY,
-    message_id  INTEGER REFERENCES messages(id) ON DELETE CASCADE,
-    filename    TEXT    NOT NULL,
-    stored_as   TEXT    NOT NULL,
-    mime_type   TEXT    NOT NULL,
-    size        INTEGER NOT NULL,
-    uploaded_at TEXT    NOT NULL DEFAULT (datetime('now')),
-    width       INTEGER,
-    height      INTEGER,
-    duration_ms INTEGER,
-    waveform    TEXT
-);
-CREATE TABLE IF NOT EXISTS reactions (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
-    user_id    INTEGER NOT NULL REFERENCES users(id)    ON DELETE CASCADE,
-    emoji      TEXT    NOT NULL,
-    UNIQUE(message_id, user_id, emoji)
-);
-CREATE TABLE IF NOT EXISTS read_states (
-    user_id         INTEGER NOT NULL REFERENCES users(id)    ON DELETE CASCADE,
-    channel_id      INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
-    last_message_id INTEGER NOT NULL DEFAULT 0,
-    mention_count   INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (user_id, channel_id)
-);
 CREATE TABLE IF NOT EXISTS invites (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     code        TEXT    NOT NULL UNIQUE,
@@ -341,14 +106,7 @@ CREATE TABLE IF NOT EXISTS settings (
 INSERT OR IGNORE INTO settings (key, value) VALUES
     ('server_name', 'OwnCord Server'),
     ('motd', 'Welcome!');
-
-CREATE TABLE IF NOT EXISTS dm_participants (
-    channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
-    user_id    INTEGER NOT NULL REFERENCES users(id)    ON DELETE CASCADE,
-    PRIMARY KEY (channel_id, user_id)
-);
 CREATE INDEX IF NOT EXISTS idx_dm_participants_user ON dm_participants(user_id);
-
 CREATE TABLE IF NOT EXISTS audit_log (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     actor_id    INTEGER NOT NULL DEFAULT 0,
@@ -360,75 +118,13 @@ CREATE TABLE IF NOT EXISTS audit_log (
     actor_token TEXT,
     created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
 );
-
-CREATE TABLE IF NOT EXISTS dm_open_state (
-    user_id    INTEGER NOT NULL REFERENCES users(id)    ON DELETE CASCADE,
-    channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
-    opened_at  TEXT    NOT NULL DEFAULT (datetime('now')),
-    PRIMARY KEY (user_id, channel_id)
-);
-
--- Group DM create reads the recipients' DM privacy, trust rows and the
--- creator's message requests (migrations 046 and 070, WP 6.8d).
-CREATE TABLE IF NOT EXISTS user_privacy (
-    user_id           INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-    allow_member_dms  INTEGER NOT NULL DEFAULT 1 CHECK (allow_member_dms IN (0, 1)),
-    message_requests  INTEGER NOT NULL DEFAULT 1 CHECK (message_requests IN (0, 1)),
-    updated_at        TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
-);
-CREATE TABLE IF NOT EXISTS trusted_senders (
-    recipient_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    sender_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    source       TEXT    NOT NULL CHECK (source IN ('accepted', 'sent_first', 'grandfathered')),
-    created_at   TEXT    NOT NULL DEFAULT (datetime('now')),
-    PRIMARY KEY (recipient_id, sender_id)
-);
-CREATE TABLE IF NOT EXISTS message_requests (
-    id               INTEGER PRIMARY KEY AUTOINCREMENT,
-    sender_id        INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    recipient_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    channel_id       INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
-    first_message_id INTEGER REFERENCES messages(id) ON DELETE SET NULL,
-    state            TEXT    NOT NULL DEFAULT 'pending'
-                     CHECK (state IN ('pending', 'accepted', 'ignored', 'deleted', 'blocked')),
-    created_at       TEXT    NOT NULL DEFAULT (datetime('now')),
-    decided_at       TEXT,
-    UNIQUE (sender_id, recipient_id)
-);
-
--- B5-9: PurgeMessages/DeleteMessage write a removal row here in the same
--- transaction as their effect (PurgeChannelMessagesWithAction/
--- DeleteMessageWithRemoval).
-CREATE TABLE IF NOT EXISTS moderation_actions (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    kind            TEXT    NOT NULL CHECK (kind IN ('warning', 'timeout', 'removal', 'kick', 'ban')),
-    target_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    actor_id        INTEGER NOT NULL DEFAULT 0,
-    actor_token     TEXT,
-    report_id       INTEGER,
-    reason          TEXT    NOT NULL DEFAULT '',
-    expires_at      TEXT,
-    acknowledged_at TEXT,
-    lifted_at       TEXT,
-    lifted_by       INTEGER NOT NULL DEFAULT 0,
-    created_at      TEXT    NOT NULL DEFAULT (datetime('now'))
-);
 `)
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
 func newChannelTestDB(t *testing.T) *db.DB {
 	t.Helper()
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	migrFS := fstest.MapFS{"001_schema.sql": {Data: channelTestSchema}}
-	if err := db.MigrateFS(database, migrFS); err != nil {
-		t.Fatalf("MigrateFS: %v", err)
-	}
-	return database
+	return openSchemaDB(t, channelTestSchema)
 }
 
 func buildChannelRouter(database *db.DB) http.Handler {
@@ -443,33 +139,39 @@ func buildChannelRouter(database *db.DB) http.Handler {
 // chTestCreateToken creates a user+session and returns the plaintext token.
 func chTestCreateToken(t *testing.T, database *db.DB, username string, roleID int) string {
 	t.Helper()
-	_, err := database.CreateUser(context.Background(), username, "$2a$12$fake", roleID)
-	if err != nil {
-		t.Fatalf("CreateUser %q: %v", username, err)
+	return createUserToken(t, database, "chtest-token-", username, roleID)
+}
+
+// newChannelRouterAs mounts the channel routes over database and creates a
+// user with roleID, returning the router and the user's bearer token.
+func newChannelRouterAs(t *testing.T, database *db.DB, username string, roleID int) (http.Handler, string) {
+	t.Helper()
+	return buildChannelRouter(database), chTestCreateToken(t, database, username, roleID)
+}
+
+// newChannelEnvOn is newChannelRouterAs plus the user's row and a channel of
+// the given name and type.
+func newChannelEnvOn(t *testing.T, database *db.DB, username string, roleID int, channelName, chanType string) (http.Handler, string, *db.User, int64) {
+	t.Helper()
+	router, token := newChannelRouterAs(t, database, username, roleID)
+	user, err := database.GetUserByUsername(context.Background(), username)
+	if err != nil || user == nil {
+		t.Fatalf("GetUserByUsername(%s): %v", username, err)
 	}
-	token := "chtest-token-" + username
-	hash := auth.HashToken(token)
-	_, err = database.ExecContext(context.Background(),
-		`INSERT INTO sessions (user_id, token, device, ip_address, expires_at)
-		 SELECT id, ?, 'test', '127.0.0.1', '2099-01-01T00:00:00Z' FROM users WHERE username = ?`,
-		hash, username,
-	)
-	if err != nil {
-		t.Fatalf("insert session for %q: %v", username, err)
-	}
-	return token
+	return router, token, user, mustCreateChannel(t, database, channelName, chanType)
+}
+
+// newChannelEnv is newChannelEnvOn over a fresh channel-schema database.
+func newChannelEnv(t *testing.T, username string, roleID int, channelName, chanType string) (*db.DB, http.Handler, string, *db.User, int64) {
+	t.Helper()
+	database := newChannelTestDB(t)
+	router, token, user, chID := newChannelEnvOn(t, database, username, roleID, channelName, chanType)
+	return database, router, token, user, chID
 }
 
 func chGet(t *testing.T, router http.Handler, path, token string) *httptest.ResponseRecorder {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodGet, path, nil)
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
-	return rr
+	return doAPI(t, router, http.MethodGet, path, token, nil)
 }
 
 // ─── GET /api/v1/channels ─────────────────────────────────────────────────────
@@ -477,22 +179,16 @@ func chGet(t *testing.T, router http.Handler, path, token string) *httptest.Resp
 func TestChannelList_Unauthenticated(t *testing.T) {
 	router := buildChannelRouter(newChannelTestDB(t))
 	rr := chGet(t, router, "/api/v1/channels", "")
-	if rr.Code != http.StatusUnauthorized {
-		t.Errorf("status = %d, want 401", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusUnauthorized)
 }
 
 func TestChannelList_Empty(t *testing.T) {
 	database := newChannelTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "alice", 1)
+	router, token := newChannelRouterAs(t, database, "alice", 1)
 
 	rr := chGet(t, router, "/api/v1/channels", token)
-	if rr.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
-	}
-	var resp []any
-	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	expectStatus(t, rr, http.StatusOK)
+	resp := decodeBody[[]any](t, rr)
 	if len(resp) != 0 {
 		t.Errorf("expected empty array, got %d items", len(resp))
 	}
@@ -500,18 +196,14 @@ func TestChannelList_Empty(t *testing.T) {
 
 func TestChannelList_WithChannels(t *testing.T) {
 	database := newChannelTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "bob", 1)
+	router, token := newChannelRouterAs(t, database, "bob", 1)
 
 	_, _ = database.CreateChannel(context.Background(), "general", "text", "", "", 0)
 	_, _ = database.CreateChannel(context.Background(), "random", "text", "", "", 1)
 
 	rr := chGet(t, router, "/api/v1/channels", token)
-	if rr.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200", rr.Code)
-	}
-	var resp []any
-	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	expectStatus(t, rr, http.StatusOK)
+	resp := decodeBody[[]any](t, rr)
 	if len(resp) != 2 {
 		t.Errorf("expected 2 channels, got %d", len(resp))
 	}
@@ -522,45 +214,33 @@ func TestChannelList_WithChannels(t *testing.T) {
 func TestChannelMessages_Unauthenticated(t *testing.T) {
 	router := buildChannelRouter(newChannelTestDB(t))
 	rr := chGet(t, router, "/api/v1/channels/1/messages", "")
-	if rr.Code != http.StatusUnauthorized {
-		t.Errorf("status = %d, want 401", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusUnauthorized)
 }
 
 func TestChannelMessages_InvalidID(t *testing.T) {
 	database := newChannelTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "carol", 1)
+	router, token := newChannelRouterAs(t, database, "carol", 1)
 
 	rr := chGet(t, router, "/api/v1/channels/abc/messages", token)
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want 400", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusBadRequest)
 }
 
 func TestChannelMessages_ChannelNotFound(t *testing.T) {
 	database := newChannelTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "dave", 1)
+	router, token := newChannelRouterAs(t, database, "dave", 1)
 
 	rr := chGet(t, router, "/api/v1/channels/9999/messages", token)
-	if rr.Code != http.StatusNotFound {
-		t.Errorf("status = %d, want 404", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusNotFound)
 }
 
 func TestChannelMessages_EmptyChannel(t *testing.T) {
 	database := newChannelTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "eve", 1)
-	chID, _ := database.CreateChannel(context.Background(), "general", "text", "", "", 0)
+	router, token := newChannelRouterAs(t, database, "eve", 1)
+	chID := mustCreateChannel(t, database, "general", "text")
 
 	rr := chGet(t, router, fmt.Sprintf("/api/v1/channels/%d/messages", chID), token)
-	if rr.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
-	}
-	var resp map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	expectStatus(t, rr, http.StatusOK)
+	resp := decodeBody[map[string]any](t, rr)
 	msgs, ok := resp["messages"].([]any)
 	if !ok || len(msgs) != 0 {
 		t.Errorf("expected empty messages array, got: %v", resp["messages"])
@@ -568,22 +248,15 @@ func TestChannelMessages_EmptyChannel(t *testing.T) {
 }
 
 func TestChannelMessages_ReturnsMessages(t *testing.T) {
-	database := newChannelTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "frank", 1)
-	user, _ := database.GetUserByUsername(context.Background(), "frank")
-	chID, _ := database.CreateChannel(context.Background(), "ch", "text", "", "", 0)
+	database, router, token, user, chID := newChannelEnv(t, "frank", 1, "ch", "text")
 
 	for i := range 3 {
-		_, _ = database.CreateMessage(context.Background(), chID, user.ID, fmt.Sprintf("msg%d", i), nil)
+		_ = mustCreateMessage(t, database, chID, user.ID, fmt.Sprintf("msg%d", i))
 	}
 
 	rr := chGet(t, router, fmt.Sprintf("/api/v1/channels/%d/messages", chID), token)
-	if rr.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200", rr.Code)
-	}
-	var resp map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	expectStatus(t, rr, http.StatusOK)
+	resp := decodeBody[map[string]any](t, rr)
 	msgs := resp["messages"].([]any)
 	if len(msgs) != 3 {
 		t.Errorf("expected 3 messages, got %d", len(msgs))
@@ -592,56 +265,39 @@ func TestChannelMessages_ReturnsMessages(t *testing.T) {
 
 func TestChannelMessages_LimitCappedAt100(t *testing.T) {
 	database := newChannelTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "grace", 1)
-	chID, _ := database.CreateChannel(context.Background(), "ch", "text", "", "", 0)
+	router, token := newChannelRouterAs(t, database, "grace", 1)
+	chID := mustCreateChannel(t, database, "ch", "text")
 
 	// limit=200 should succeed (capped internally).
 	rr := chGet(t, router, fmt.Sprintf("/api/v1/channels/%d/messages?limit=200", chID), token)
-	if rr.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusOK)
 }
 
 func TestChannelMessages_HasMore(t *testing.T) {
-	database := newChannelTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "henry", 1)
-	user, _ := database.GetUserByUsername(context.Background(), "henry")
-	chID, _ := database.CreateChannel(context.Background(), "ch", "text", "", "", 0)
+	database, router, token, user, chID := newChannelEnv(t, "henry", 1, "ch", "text")
 
 	for i := range 60 {
-		_, _ = database.CreateMessage(context.Background(), chID, user.ID, fmt.Sprintf("m%d", i), nil)
+		_ = mustCreateMessage(t, database, chID, user.ID, fmt.Sprintf("m%d", i))
 	}
 
 	rr := chGet(t, router, fmt.Sprintf("/api/v1/channels/%d/messages?limit=50", chID), token)
-	if rr.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200", rr.Code)
-	}
-	var resp map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	expectStatus(t, rr, http.StatusOK)
+	resp := decodeBody[map[string]any](t, rr)
 	if resp["has_more"] != true {
 		t.Errorf("has_more = %v, want true", resp["has_more"])
 	}
 }
 
 func TestChannelMessages_HasMoreFalse(t *testing.T) {
-	database := newChannelTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "ivan", 1)
-	user, _ := database.GetUserByUsername(context.Background(), "ivan")
-	chID, _ := database.CreateChannel(context.Background(), "ch", "text", "", "", 0)
+	database, router, token, user, chID := newChannelEnv(t, "ivan", 1, "ch", "text")
 
 	for i := range 5 {
-		_, _ = database.CreateMessage(context.Background(), chID, user.ID, fmt.Sprintf("m%d", i), nil)
+		_ = mustCreateMessage(t, database, chID, user.ID, fmt.Sprintf("m%d", i))
 	}
 
 	rr := chGet(t, router, fmt.Sprintf("/api/v1/channels/%d/messages?limit=50", chID), token)
-	if rr.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200", rr.Code)
-	}
-	var resp map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	expectStatus(t, rr, http.StatusOK)
+	resp := decodeBody[map[string]any](t, rr)
 	if resp["has_more"] != false {
 		t.Errorf("has_more = %v, want false", resp["has_more"])
 	}
@@ -652,36 +308,24 @@ func TestChannelMessages_HasMoreFalse(t *testing.T) {
 func TestSearch_Unauthenticated(t *testing.T) {
 	router := buildChannelRouter(newChannelTestDB(t))
 	rr := chGet(t, router, "/api/v1/search?q=hello", "")
-	if rr.Code != http.StatusUnauthorized {
-		t.Errorf("status = %d, want 401", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusUnauthorized)
 }
 
 func TestSearch_MissingQuery(t *testing.T) {
 	database := newChannelTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "julia", 1)
+	router, token := newChannelRouterAs(t, database, "julia", 1)
 
 	rr := chGet(t, router, "/api/v1/search", token)
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want 400", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusBadRequest)
 }
 
 func TestSearch_ReturnsResults(t *testing.T) {
-	database := newChannelTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "kim", 1)
-	user, _ := database.GetUserByUsername(context.Background(), "kim")
-	chID, _ := database.CreateChannel(context.Background(), "searchable", "text", "", "", 0)
-	_, _ = database.CreateMessage(context.Background(), chID, user.ID, "uniqueterm in message", nil)
+	database, router, token, user, chID := newChannelEnv(t, "kim", 1, "searchable", "text")
+	_ = mustCreateMessage(t, database, chID, user.ID, "uniqueterm in message")
 
 	rr := chGet(t, router, "/api/v1/search?q=uniqueterm", token)
-	if rr.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
-	}
-	var resp map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	expectStatus(t, rr, http.StatusOK)
+	resp := decodeBody[map[string]any](t, rr)
 	results, ok := resp["results"].([]any)
 	if !ok || len(results) == 0 {
 		t.Errorf("expected search results, got: %v", resp)
@@ -690,15 +334,11 @@ func TestSearch_ReturnsResults(t *testing.T) {
 
 func TestSearch_NoResults(t *testing.T) {
 	database := newChannelTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "larry", 1)
+	router, token := newChannelRouterAs(t, database, "larry", 1)
 
 	rr := chGet(t, router, "/api/v1/search?q=xyzzynotfound", token)
-	if rr.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200", rr.Code)
-	}
-	var resp map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	expectStatus(t, rr, http.StatusOK)
+	resp := decodeBody[map[string]any](t, rr)
 	results := resp["results"].([]any)
 	if len(results) != 0 {
 		t.Errorf("expected 0 results, got %d", len(results))
@@ -706,117 +346,82 @@ func TestSearch_NoResults(t *testing.T) {
 }
 
 func TestSearch_WithChannelID(t *testing.T) {
-	database := newChannelTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "searchch", 1)
-	user, _ := database.GetUserByUsername(context.Background(), "searchch")
-	chID, _ := database.CreateChannel(context.Background(), "filtered", "text", "", "", 0)
-	_, _ = database.CreateMessage(context.Background(), chID, user.ID, "filtered message here", nil)
+	database, router, token, user, chID := newChannelEnv(t, "searchch", 1, "filtered", "text")
+	_ = mustCreateMessage(t, database, chID, user.ID, "filtered message here")
 
 	rr := chGet(t, router, fmt.Sprintf("/api/v1/search?q=filtered&channel_id=%d", chID), token)
-	if rr.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusOK)
 }
 
 func TestSearch_InvalidChannelID(t *testing.T) {
 	database := newChannelTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "badchid", 1)
+	router, token := newChannelRouterAs(t, database, "badchid", 1)
 
 	rr := chGet(t, router, "/api/v1/search?q=test&channel_id=abc", token)
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want 400", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusBadRequest)
 }
 
 func TestSearch_NegativeChannelID(t *testing.T) {
 	database := newChannelTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "negchid", 1)
+	router, token := newChannelRouterAs(t, database, "negchid", 1)
 
 	rr := chGet(t, router, "/api/v1/search?q=test&channel_id=-1", token)
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want 400", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusBadRequest)
 }
 
 func TestSearch_WithLimit(t *testing.T) {
 	database := newChannelTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "limituser", 1)
+	router, token := newChannelRouterAs(t, database, "limituser", 1)
 
 	rr := chGet(t, router, "/api/v1/search?q=test&limit=5", token)
-	if rr.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusOK)
 }
 
 func TestSearch_InvalidLimit(t *testing.T) {
 	database := newChannelTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "badlimit", 1)
+	router, token := newChannelRouterAs(t, database, "badlimit", 1)
 
 	rr := chGet(t, router, "/api/v1/search?q=test&limit=abc", token)
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want 400", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusBadRequest)
 }
 
 func TestSearch_InvalidFTSQuery(t *testing.T) {
-	database := newChannelTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "badfts", 1)
-	user, _ := database.GetUserByUsername(context.Background(), "badfts")
-	chID, _ := database.CreateChannel(context.Background(), "fts", "text", "", "", 0)
-	_, _ = database.CreateMessage(context.Background(), chID, user.ID, "search seed", nil)
+	database, router, token, user, chID := newChannelEnv(t, "badfts", 1, "fts", "text")
+	_ = mustCreateMessage(t, database, chID, user.ID, "search seed")
 
 	// FTS5 operator characters are now stripped by sanitizeFTSQuery, so a
 	// bare quote becomes an empty query which returns 200 with no results.
 	rr := chGet(t, router, "/api/v1/search?q=%22", token)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 }
 
 func TestSearch_ZeroLimit(t *testing.T) {
 	database := newChannelTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "zerolimit", 1)
+	router, token := newChannelRouterAs(t, database, "zerolimit", 1)
 
 	rr := chGet(t, router, "/api/v1/search?q=test&limit=0", token)
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want 400", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusBadRequest)
 }
 
 func TestSearch_LimitCappedAt100(t *testing.T) {
 	database := newChannelTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "highlimit", 1)
+	router, token := newChannelRouterAs(t, database, "highlimit", 1)
 
 	// limit=200 should be silently capped to 100
 	rr := chGet(t, router, "/api/v1/search?q=test&limit=200", token)
-	if rr.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusOK)
 }
 
 // searchPage decodes a /api/v1/search response into its hit ids and cursor.
 func searchPage(t *testing.T, rr *httptest.ResponseRecorder) (ids []int64, nextBefore *int64) {
 	t.Helper()
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
-	}
-	var resp struct {
+	requireStatus(t, rr, http.StatusOK)
+	resp := decodeBody[struct {
 		Results []struct {
 			MessageID int64 `json:"message_id"`
 		} `json:"results"`
 		NextBefore *int64 `json:"next_before"`
-	}
-	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	}](t, rr)
 	for _, r := range resp.Results {
 		ids = append(ids, r.MessageID)
 	}
@@ -826,11 +431,7 @@ func searchPage(t *testing.T, rr *httptest.ResponseRecorder) (ids []int64, nextB
 // DP-20: sort=recent pages newest first through next_before; every page
 // holds only ids strictly below the cursor it was asked with.
 func TestSearch_SortRecentPagesWithBefore(t *testing.T) {
-	database := newChannelTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "recentpager", 1)
-	user, _ := database.GetUserByUsername(context.Background(), "recentpager")
-	chID, _ := database.CreateChannel(context.Background(), "pager", "text", "", "", 0)
+	database, router, token, user, chID := newChannelEnv(t, "recentpager", 1, "pager", "text")
 	ids := make([]int64, 5)
 	for i := range ids {
 		ids[i], _ = database.CreateMessage(context.Background(), chID, user.ID, "pagerword hit", nil)
@@ -862,8 +463,7 @@ func TestSearch_SortRecentPagesWithBefore(t *testing.T) {
 
 func TestSearch_InvalidSortOrCursor(t *testing.T) {
 	database := newChannelTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "badcursor", 1)
+	router, token := newChannelRouterAs(t, database, "badcursor", 1)
 
 	for _, q := range []string{
 		"sort=newest",
@@ -881,12 +481,8 @@ func TestSearch_InvalidSortOrCursor(t *testing.T) {
 }
 
 func TestSearch_ChannelTypeLookupFailure_FailsClosed(t *testing.T) {
-	database := newChannelTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "searchfailclosed", 1)
-	user, _ := database.GetUserByUsername(context.Background(), "searchfailclosed")
-	chID, _ := database.CreateChannel(context.Background(), "searchable", "text", "", "", 0)
-	_, _ = database.CreateMessage(context.Background(), chID, user.ID, "closedlookupterm", nil)
+	database, router, token, user, chID := newChannelEnv(t, "searchfailclosed", 1, "searchable", "text")
+	_ = mustCreateMessage(t, database, chID, user.ID, "closedlookupterm")
 
 	_, err := database.ExecContext(context.Background(), `ALTER TABLE channels RENAME TO channels_with_type`)
 	if err != nil {
@@ -905,18 +501,12 @@ func TestSearch_ChannelTypeLookupFailure_FailsClosed(t *testing.T) {
 	}
 
 	rr := chGet(t, router, "/api/v1/search?q=closedlookupterm", token)
-	if rr.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want 500; body: %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusInternalServerError)
 }
 
 func TestSearch_ChannelOverrideLookupFailure_ReturnsError(t *testing.T) {
-	database := newChannelTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "searchoverridefail", 4)
-	user, _ := database.GetUserByUsername(context.Background(), "searchoverridefail")
-	chID, _ := database.CreateChannel(context.Background(), "searchable", "text", "", "", 0)
-	_, _ = database.CreateMessage(context.Background(), chID, user.ID, "overridefailterm", nil)
+	database, router, token, user, chID := newChannelEnv(t, "searchoverridefail", 4, "searchable", "text")
+	_ = mustCreateMessage(t, database, chID, user.ID, "overridefailterm")
 
 	_, err := database.ExecContext(context.Background(), `DROP TABLE channel_overrides`)
 	if err != nil {
@@ -924,9 +514,7 @@ func TestSearch_ChannelOverrideLookupFailure_ReturnsError(t *testing.T) {
 	}
 
 	rr := chGet(t, router, "/api/v1/search?q=overridefailterm", token)
-	if rr.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want 500; body: %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusInternalServerError)
 }
 
 func TestSearch_TrustedProxyRateLimitUsesForwardedIP(t *testing.T) {
@@ -941,9 +529,7 @@ func TestSearch_TrustedProxyRateLimitUsesForwardedIP(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/search?q=test", nil)
 		req.Header.Set("Authorization", "Bearer "+token)
 		req.Header.Set("X-Forwarded-For", fmt.Sprintf("198.51.100.%d", i+1))
-		req.RemoteAddr = "127.0.0.1:9999"
-		rr := httptest.NewRecorder()
-		r.ServeHTTP(rr, req)
+		rr := serveLocal(r, req)
 		if rr.Code != http.StatusOK {
 			t.Fatalf("request %d status = %d, want 200; body: %s", i, rr.Code, rr.Body.String())
 		}
@@ -952,22 +538,14 @@ func TestSearch_TrustedProxyRateLimitUsesForwardedIP(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/search?q=test", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("X-Forwarded-For", "198.51.100.200")
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	r.ServeHTTP(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("independent forwarded client should not be throttled by shared proxy IP, got %d", rr.Code)
-	}
+	rr := serveLocal(r, req)
+	requireStatus(t, rr, http.StatusOK)
 }
 
 // ─── Messages — before/after cursor ─────────────────────────────────────────
 
 func TestChannelMessages_BeforeCursor(t *testing.T) {
-	database := newChannelTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "cursoruser", 1)
-	user, _ := database.GetUserByUsername(context.Background(), "cursoruser")
-	chID, _ := database.CreateChannel(context.Background(), "cursor", "text", "", "", 0)
+	database, router, token, user, chID := newChannelEnv(t, "cursoruser", 1, "cursor", "text")
 
 	var lastID int64
 	for i := range 5 {
@@ -975,21 +553,16 @@ func TestChannelMessages_BeforeCursor(t *testing.T) {
 	}
 
 	rr := chGet(t, router, fmt.Sprintf("/api/v1/channels/%d/messages?before=%d", chID, lastID), token)
-	if rr.Code != http.StatusOK {
-		t.Errorf("before cursor status = %d, want 200", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusOK)
 }
 
 func TestChannelMessages_InvalidLimit(t *testing.T) {
 	database := newChannelTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "badlimituser", 1)
-	chID, _ := database.CreateChannel(context.Background(), "lim", "text", "", "", 0)
+	router, token := newChannelRouterAs(t, database, "badlimituser", 1)
+	chID := mustCreateChannel(t, database, "lim", "text")
 
 	rr := chGet(t, router, fmt.Sprintf("/api/v1/channels/%d/messages?limit=abc", chID), token)
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("invalid limit status = %d, want 400", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusBadRequest)
 }
 
 // ─── GET /api/v1/channels/{id}/pins ─────────────────────────────────────────
@@ -1047,9 +620,7 @@ func newPinTestDB(t *testing.T) *db.DB {
 func TestGetPins_Unauthenticated(t *testing.T) {
 	router := buildChannelRouter(newPinTestDB(t))
 	rr := chGet(t, router, "/api/v1/channels/1/pins", "")
-	if rr.Code != http.StatusUnauthorized {
-		t.Errorf("status = %d, want 401", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusUnauthorized)
 }
 
 func TestGetPins_ChannelNotFound(t *testing.T) {
@@ -1058,27 +629,22 @@ func TestGetPins_ChannelNotFound(t *testing.T) {
 	token := chTestCreateToken(t, database, "pinuser1", 1)
 
 	rr := chGet(t, router, "/api/v1/channels/9999/pins", token)
-	if rr.Code != http.StatusNotFound {
-		t.Errorf("status = %d, want 404; body: %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusNotFound)
 }
 
 func TestGetPins_EmptyPins(t *testing.T) {
 	database := newPinTestDB(t)
 	router := buildChannelRouter(database)
 	token := chTestCreateToken(t, database, "pinuser2", 1)
-	chID, _ := database.CreateChannel(context.Background(), "general", "text", "", "", 0)
+	chID := mustCreateChannel(t, database, "general", "text")
 
 	rr := chGet(t, router, fmt.Sprintf("/api/v1/channels/%d/pins", chID), token)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 
-	var resp struct {
+	resp := decodeBody[struct {
 		Messages []any `json:"messages"`
 		HasMore  bool  `json:"has_more"`
-	}
-	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	}](t, rr)
 	if len(resp.Messages) != 0 {
 		t.Errorf("expected 0 pinned messages, got %d", len(resp.Messages))
 	}
@@ -1089,27 +655,21 @@ func TestGetPins_EmptyPins(t *testing.T) {
 
 func TestGetPins_ReturnsPinnedMessages(t *testing.T) {
 	database := newPinTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "pinuser3", 1)
-	user, _ := database.GetUserByUsername(context.Background(), "pinuser3")
-	chID, _ := database.CreateChannel(context.Background(), "general", "text", "", "", 0)
+	router, token, user, chID := newChannelEnvOn(t, database, "pinuser3", 1, "general", "text")
 
-	msgID, _ := database.CreateMessage(context.Background(), chID, user.ID, "pinned message", nil)
+	msgID := mustCreateMessage(t, database, chID, user.ID, "pinned message")
 	if _, err := database.SetMessagePinned(context.Background(), db.SetPinnedParams{MessageID: msgID, Pinned: true, UserID: user.ID}); err != nil {
 		t.Fatalf("SetMessagePinned: %v", err)
 	}
 	// Also create an unpinned message — should not appear.
-	_, _ = database.CreateMessage(context.Background(), chID, user.ID, "not pinned", nil)
+	_ = mustCreateMessage(t, database, chID, user.ID, "not pinned")
 
 	rr := chGet(t, router, fmt.Sprintf("/api/v1/channels/%d/pins", chID), token)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 
-	var resp struct {
+	resp := decodeBody[struct {
 		Messages []any `json:"messages"`
-	}
-	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	}](t, rr)
 	if len(resp.Messages) != 1 {
 		t.Errorf("expected 1 pinned message, got %d", len(resp.Messages))
 	}
@@ -1119,17 +679,11 @@ func TestGetPins_ReturnsPinnedMessages(t *testing.T) {
 // list (has_more false); one more pin is truncated to the cap (has_more true).
 func TestGetPins_HasMoreOnlyPastCap(t *testing.T) {
 	database := newPinTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "pincap", 1)
-	user, _ := database.GetUserByUsername(context.Background(), "pincap")
-	chID, _ := database.CreateChannel(context.Background(), "general", "text", "", "", 0)
+	router, token, user, chID := newChannelEnvOn(t, database, "pincap", 1, "general", "text")
 
 	pin := func() {
 		t.Helper()
-		id, err := database.CreateMessage(context.Background(), chID, user.ID, "pin", nil)
-		if err != nil {
-			t.Fatalf("CreateMessage: %v", err)
-		}
+		id := mustCreateMessage(t, database, chID, user.ID, "pin")
 		if _, err := database.SetMessagePinned(context.Background(), db.SetPinnedParams{MessageID: id, Pinned: true, UserID: 1}); err != nil {
 			t.Fatalf("SetMessagePinned: %v", err)
 		}
@@ -1137,16 +691,11 @@ func TestGetPins_HasMoreOnlyPastCap(t *testing.T) {
 	get := func() (int, bool) {
 		t.Helper()
 		rr := chGet(t, router, fmt.Sprintf("/api/v1/channels/%d/pins", chID), token)
-		if rr.Code != http.StatusOK {
-			t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
-		}
-		var resp struct {
+		requireStatus(t, rr, http.StatusOK)
+		resp := decodeBody[struct {
 			Messages []any `json:"messages"`
 			HasMore  bool  `json:"has_more"`
-		}
-		if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
-			t.Fatalf("decode: %v", err)
-		}
+		}](t, rr)
 		return len(resp.Messages), resp.HasMore
 	}
 
@@ -1179,9 +728,7 @@ func TestGetPins_DMChannel_NonParticipantForbidden(t *testing.T) {
 	dmCh, _, _ := database.GetOrCreateDMChannel(context.Background(), user1.ID, user2.ID)
 
 	rr := chGet(t, router, fmt.Sprintf("/api/v1/channels/%d/pins", dmCh.ID), outsiderToken)
-	if rr.Code != http.StatusNotFound {
-		t.Errorf("status = %d, want 404; body: %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusNotFound)
 }
 
 func TestGetPins_MemberNoReadPermission(t *testing.T) {
@@ -1190,7 +737,7 @@ func TestGetPins_MemberNoReadPermission(t *testing.T) {
 	// Role 4 = Member with permissions 1635 (0x663).
 	// Deny READ_MESSAGES on a specific channel via override.
 	token := chTestCreateToken(t, database, "nopermuser", 4)
-	chID, _ := database.CreateChannel(context.Background(), "restricted", "text", "", "", 0)
+	chID := mustCreateChannel(t, database, "restricted", "text")
 
 	// Deny all permissions for role 4 on this channel.
 	_, _ = database.ExecContext(context.Background(),
@@ -1199,49 +746,28 @@ func TestGetPins_MemberNoReadPermission(t *testing.T) {
 	)
 
 	rr := chGet(t, router, fmt.Sprintf("/api/v1/channels/%d/pins", chID), token)
-	if rr.Code != http.StatusForbidden {
-		t.Errorf("status = %d, want 403; body: %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusForbidden)
 }
 
 // ─── POST/DELETE /api/v1/channels/{id}/pins/{messageId} ─────────────────────
 
 func chPost(t *testing.T, router http.Handler, path, token string) *httptest.ResponseRecorder {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodPost, path, nil)
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
-	return rr
+	return doAPI(t, router, http.MethodPost, path, token, nil)
 }
 
 func chDelete(t *testing.T, router http.Handler, path, token string) *httptest.ResponseRecorder {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodDelete, path, nil)
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
-	return rr
+	return doAPI(t, router, http.MethodDelete, path, token, nil)
 }
 
 func TestSetPinned_PinSuccessfully(t *testing.T) {
 	database := newPinTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "pinner1", 1)
-	user, _ := database.GetUserByUsername(context.Background(), "pinner1")
-	chID, _ := database.CreateChannel(context.Background(), "general", "text", "", "", 0)
-	msgID, _ := database.CreateMessage(context.Background(), chID, user.ID, "pin me", nil)
+	router, token, user, chID := newChannelEnvOn(t, database, "pinner1", 1, "general", "text")
+	msgID := mustCreateMessage(t, database, chID, user.ID, "pin me")
 
 	rr := chPost(t, router, fmt.Sprintf("/api/v1/channels/%d/pins/%d", chID, msgID), token)
-	if rr.Code != http.StatusNoContent {
-		t.Errorf("pin status = %d, want 204; body: %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusNoContent)
 
 	// Verify the message is actually pinned.
 	msg, _ := database.GetMessage(context.Background(), msgID)
@@ -1252,19 +778,14 @@ func TestSetPinned_PinSuccessfully(t *testing.T) {
 
 func TestSetPinned_UnpinSuccessfully(t *testing.T) {
 	database := newPinTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "unpinner1", 1)
-	user, _ := database.GetUserByUsername(context.Background(), "unpinner1")
-	chID, _ := database.CreateChannel(context.Background(), "general", "text", "", "", 0)
-	msgID, _ := database.CreateMessage(context.Background(), chID, user.ID, "unpin me", nil)
+	router, token, user, chID := newChannelEnvOn(t, database, "unpinner1", 1, "general", "text")
+	msgID := mustCreateMessage(t, database, chID, user.ID, "unpin me")
 	if _, err := database.SetMessagePinned(context.Background(), db.SetPinnedParams{MessageID: msgID, Pinned: true, UserID: user.ID}); err != nil {
 		t.Fatalf("SetMessagePinned: %v", err)
 	}
 
 	rr := chDelete(t, router, fmt.Sprintf("/api/v1/channels/%d/pins/%d", chID, msgID), token)
-	if rr.Code != http.StatusNoContent {
-		t.Errorf("unpin status = %d, want 204; body: %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusNoContent)
 
 	msg, _ := database.GetMessage(context.Background(), msgID)
 	if msg.Pinned {
@@ -1276,12 +797,10 @@ func TestSetPinned_MessageNotFound(t *testing.T) {
 	database := newPinTestDB(t)
 	router := buildChannelRouter(database)
 	token := chTestCreateToken(t, database, "pinner2", 1)
-	chID, _ := database.CreateChannel(context.Background(), "general", "text", "", "", 0)
+	chID := mustCreateChannel(t, database, "general", "text")
 
 	rr := chPost(t, router, fmt.Sprintf("/api/v1/channels/%d/pins/9999", chID), token)
-	if rr.Code != http.StatusNotFound {
-		t.Errorf("status = %d, want 404; body: %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusNotFound)
 }
 
 func TestSetPinned_ChannelNotFound(t *testing.T) {
@@ -1290,9 +809,7 @@ func TestSetPinned_ChannelNotFound(t *testing.T) {
 	token := chTestCreateToken(t, database, "pinner3", 1)
 
 	rr := chPost(t, router, "/api/v1/channels/9999/pins/1", token)
-	if rr.Code != http.StatusNotFound {
-		t.Errorf("status = %d, want 404; body: %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusNotFound)
 }
 
 func TestSetPinned_NoPermission(t *testing.T) {
@@ -1301,31 +818,24 @@ func TestSetPinned_NoPermission(t *testing.T) {
 	// Member role (4) has permissions 1635 — does not include MANAGE_MESSAGES (0x2000).
 	token := chTestCreateToken(t, database, "noperm", 4)
 	user, _ := database.GetUserByUsername(context.Background(), "noperm")
-	chID, _ := database.CreateChannel(context.Background(), "general", "text", "", "", 0)
-	msgID, _ := database.CreateMessage(context.Background(), chID, user.ID, "try to pin", nil)
+	chID := mustCreateChannel(t, database, "general", "text")
+	msgID := mustCreateMessage(t, database, chID, user.ID, "try to pin")
 
 	rr := chPost(t, router, fmt.Sprintf("/api/v1/channels/%d/pins/%d", chID, msgID), token)
-	if rr.Code != http.StatusForbidden {
-		t.Errorf("status = %d, want 403; body: %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusForbidden)
 }
 
 func TestSetPinned_Idempotent(t *testing.T) {
 	database := newPinTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "pinner4", 1)
-	user, _ := database.GetUserByUsername(context.Background(), "pinner4")
-	chID, _ := database.CreateChannel(context.Background(), "general", "text", "", "", 0)
-	msgID, _ := database.CreateMessage(context.Background(), chID, user.ID, "already pinned", nil)
+	router, token, user, chID := newChannelEnvOn(t, database, "pinner4", 1, "general", "text")
+	msgID := mustCreateMessage(t, database, chID, user.ID, "already pinned")
 	if _, err := database.SetMessagePinned(context.Background(), db.SetPinnedParams{MessageID: msgID, Pinned: true, UserID: user.ID}); err != nil {
 		t.Fatalf("SetMessagePinned: %v", err)
 	}
 
 	// Pinning again should still succeed (idempotent).
 	rr := chPost(t, router, fmt.Sprintf("/api/v1/channels/%d/pins/%d", chID, msgID), token)
-	if rr.Code != http.StatusNoContent {
-		t.Errorf("idempotent pin status = %d, want 204; body: %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusNoContent)
 }
 
 // ─── POST /api/v1/channels/{id}/messages/purge ──────────────────────────────
@@ -1378,9 +888,7 @@ func chPurge(t *testing.T, router http.Handler, channelID int64, token, body str
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
+	rr := serveLocal(router, req)
 	return rr
 }
 
@@ -1418,14 +926,9 @@ func TestPurgeMessages_ModeratorSucceedsAndBroadcastsOnce(t *testing.T) {
 	chID, ids := seedPurgeChannel(t, database, "purgemod", 5)
 
 	rr := chPurge(t, router, chID, token, `{"limit":3}`)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 
-	var body purgeResponseBody
-	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
+	body := decodeBody[purgeResponseBody](t, rr)
 	if body.Count != 3 || len(body.IDs) != 3 {
 		t.Fatalf("count = %d, ids = %v, want 3 of each", body.Count, body.IDs)
 	}
@@ -1466,9 +969,7 @@ func TestPurgeMessages_MemberForbidden(t *testing.T) {
 	chID, ids := seedPurgeChannel(t, database, "purgemember", 3)
 
 	rr := chPurge(t, router, chID, token, `{"limit":3}`)
-	if rr.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403; body: %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusForbidden)
 	if len(broadcaster.calls) != 0 {
 		t.Errorf("denied purge still broadcast: %v", broadcaster.calls)
 	}
@@ -1484,17 +985,15 @@ func TestPurgeMessages_DMForbidden(t *testing.T) {
 	router, database, broadcaster := buildPurgeRouter(t)
 	token := chTestCreateToken(t, database, "purgedmmod", 1) // Owner — every bit set
 	user, _ := database.GetUserByUsername(context.Background(), "purgedmmod")
-	dmID, _ := database.CreateChannel(context.Background(), "dm", "dm", "", "", 0)
+	dmID := mustCreateChannel(t, database, "dm", "dm")
 	if _, err := database.ExecContext(context.Background(),
 		`INSERT INTO dm_participants (channel_id, user_id) VALUES (?, ?)`, dmID, user.ID); err != nil {
 		t.Fatalf("seed dm participant: %v", err)
 	}
-	msgID, _ := database.CreateMessage(context.Background(), dmID, user.ID, "private", nil)
+	msgID := mustCreateMessage(t, database, dmID, user.ID, "private")
 
 	rr := chPurge(t, router, dmID, token, `{"limit":10}`)
-	if rr.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403 for a DM; body: %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusForbidden)
 	if len(broadcaster.calls) != 0 {
 		t.Errorf("DM purge broadcast: %v", broadcaster.calls)
 	}
@@ -1510,13 +1009,8 @@ func TestPurgeMessages_LimitClampedToHundred(t *testing.T) {
 	chID, _ := seedPurgeChannel(t, database, "purgeclamp", 105)
 
 	rr := chPurge(t, router, chID, token, `{"limit":1000}`)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
-	}
-	var body purgeResponseBody
-	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
+	requireStatus(t, rr, http.StatusOK)
+	body := decodeBody[purgeResponseBody](t, rr)
 	if body.Count != 100 {
 		t.Fatalf("count = %d, want the clamp of 100", body.Count)
 	}
@@ -1539,9 +1033,7 @@ func TestPurgeMessages_BadRequests(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			rr := chPurge(t, router, chID, token, tc.body)
-			if rr.Code != http.StatusBadRequest {
-				t.Errorf("status = %d, want 400; body: %s", rr.Code, rr.Body.String())
-			}
+			expectStatus(t, rr, http.StatusBadRequest)
 		})
 	}
 }
@@ -1552,9 +1044,7 @@ func TestPurgeMessages_Unauthenticated(t *testing.T) {
 	chID, _ := seedPurgeChannel(t, database, "purgeanon", 2)
 
 	rr := chPurge(t, router, chID, "", `{"limit":2}`)
-	if rr.Code != http.StatusUnauthorized {
-		t.Errorf("status = %d, want 401; body: %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusUnauthorized)
 }
 
 func TestPurgeMessages_EmptyChannelDoesNotBroadcast(t *testing.T) {
@@ -1563,13 +1053,8 @@ func TestPurgeMessages_EmptyChannelDoesNotBroadcast(t *testing.T) {
 	chID, _ := seedPurgeChannel(t, database, "purgeempty", 0)
 
 	rr := chPurge(t, router, chID, token, `{"limit":50}`)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
-	}
-	var body purgeResponseBody
-	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
+	requireStatus(t, rr, http.StatusOK)
+	body := decodeBody[purgeResponseBody](t, rr)
 	if body.Count != 0 || body.IDs == nil {
 		t.Errorf("count = %d, ids = %v, want 0 and a non-null array", body.Count, body.IDs)
 	}
@@ -1585,9 +1070,7 @@ func TestPurgeMessages_NilBroadcasterStillPurges(t *testing.T) {
 	chID, ids := seedPurgeChannel(t, database, "purgenilbc", 2)
 
 	rr := chPurge(t, router, chID, token, `{"limit":2}`)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 	for _, id := range ids {
 		msg, _ := database.GetMessage(context.Background(), id)
 		if !msg.Deleted {
@@ -1602,8 +1085,8 @@ func TestHandleSetPinned_EmitsRowOnce(t *testing.T) {
 	router, database, broadcaster := buildPurgeRouter(t)
 	token := chTestCreateToken(t, database, "pinrow", 1)
 	user, _ := database.GetUserByUsername(context.Background(), "pinrow")
-	chID, _ := database.CreateChannel(context.Background(), "pinrows", "text", "", "", 0)
-	msgID, _ := database.CreateMessage(context.Background(), chID, user.ID, "pin me", nil)
+	chID := mustCreateChannel(t, database, "pinrows", "text")
+	msgID := mustCreateMessage(t, database, chID, user.ID, "pin me")
 	path := fmt.Sprintf("/api/v1/channels/%d/pins/%d", chID, msgID)
 
 	if rr := chPost(t, router, path, token); rr.Code != http.StatusNoContent {

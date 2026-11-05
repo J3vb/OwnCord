@@ -50,9 +50,7 @@ func TestPollExpirer_EndsDueAndNotifies(t *testing.T) {
 	}
 	f.expire(t, due.MessageID)
 
-	if err := e.Sweep(context.Background()); err != nil {
-		t.Fatalf("Sweep: %v", err)
-	}
+	mustDo(t, "Sweep", e.Sweep(context.Background()))
 	got := n.snapshot()
 	if len(got) != 1 {
 		t.Fatalf("notified %d times, want once: %+v", len(got), got)
@@ -79,9 +77,7 @@ func TestPollExpirer_DeletedEndedSilently(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.expire(t, poll.MessageID)
-	if err := e.Sweep(context.Background()); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Sweep", e.Sweep(context.Background()))
 	if got := n.snapshot(); len(got) != 0 {
 		t.Errorf("a deleted poll was announced: %+v", got)
 	}
@@ -101,9 +97,7 @@ func TestPollExpirer_BootSweepCatchesUp(t *testing.T) {
 		f.expire(t, p.MessageID)
 	}
 	keep := mustCreatePoll(t, f, f.pollParams(fwdBob, fwdDstChan))
-	if err := e.Sweep(context.Background()); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Sweep", e.Sweep(context.Background()))
 	seen := map[int64]bool{}
 	for _, u := range n.snapshot() {
 		if !u.Ended {

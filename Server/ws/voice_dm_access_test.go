@@ -54,10 +54,7 @@ func TestVoiceJoin_DMNonParticipant_GetsNoTokenAndNoVoiceState(t *testing.T) {
 	mallory := seedMemberUser(t, database, "dmvoice-mallory")
 	dmID := seedDMChannel(t, database, alice.ID, bob.ID)
 
-	send := make(chan []byte, 32)
-	c := ws.NewTestClientWithUser(hub, mallory, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, mallory, 0, 32)
 
 	hub.HandleMessageForTest(c, voiceJoinMsg(dmID))
 
@@ -78,10 +75,7 @@ func TestVoiceJoin_DMParticipant_StillJoins(t *testing.T) {
 	bob := seedMemberUser(t, database, "dmvoice-ok-bob")
 	dmID := seedDMChannel(t, database, alice.ID, bob.ID)
 
-	send := make(chan []byte, 32)
-	c := ws.NewTestClientWithUser(hub, alice, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, alice, 0, 32)
 
 	hub.HandleMessageForTest(c, voiceJoinMsg(dmID))
 
@@ -105,10 +99,7 @@ func TestVoiceTokenRefresh_DMNonParticipant_Refused(t *testing.T) {
 	mallory := seedMemberUser(t, database, "dmrefresh-mallory")
 	dmID := seedDMChannel(t, database, alice.ID, bob.ID)
 
-	send := make(chan []byte, 32)
-	c := ws.NewTestClientWithUser(hub, mallory, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, mallory, 0, 32)
 
 	// Second entry point: the refresh mints a token from the session's own voice
 	// channel id, so it must re-run the same membership check rather than trust
@@ -126,10 +117,7 @@ func TestVoiceTokenRefresh_DMParticipant_StillRefreshes(t *testing.T) {
 	bob := seedMemberUser(t, database, "dmrefresh-ok-bob")
 	dmID := seedDMChannel(t, database, alice.ID, bob.ID)
 
-	send := make(chan []byte, 32)
-	c := ws.NewTestClientWithUser(hub, alice, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, alice, 0, 32)
 
 	hub.HandleMessageForTest(c, voiceJoinMsg(dmID))
 	drainChanTimeout(send, 50*time.Millisecond)
@@ -152,10 +140,7 @@ func TestVoiceJoin_GroupDMParticipant_Joins(t *testing.T) {
 	carol := seedMemberUser(t, database, "grpvoice-carol")
 	chID := seedGroupDM(t, database, "Callers", alice.ID, bob.ID, carol.ID)
 
-	send := make(chan []byte, 32)
-	c := ws.NewTestClientWithUser(hub, carol, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, carol, 0, 32)
 
 	hub.HandleMessageForTest(c, voiceJoinMsg(chID))
 
@@ -184,16 +169,9 @@ func TestVoiceJoin_DMCall_VoiceStateNotLeakedToThirdConnectedUser(t *testing.T) 
 	mallory := seedMemberUser(t, database, "dmleak-mallory") // connected, has READ_MESSAGES, NOT a participant
 	dmID := seedDMChannel(t, database, alice.ID, bob.ID)
 
-	aliceSend := make(chan []byte, 32)
-	bobSend := make(chan []byte, 32)
-	mallorySend := make(chan []byte, 32)
-	aliceClient := ws.NewTestClientWithUser(hub, alice, 0, aliceSend)
-	bobClient := ws.NewTestClientWithUser(hub, bob, 0, bobSend)
-	malloryClient := ws.NewTestClientWithUser(hub, mallory, 0, mallorySend)
-	hub.Register(aliceClient)
-	hub.Register(bobClient)
-	hub.Register(malloryClient)
-	waitRegistered(t, hub, malloryClient)
+	aliceClient, _ := connectClient(t, hub, alice, 0, 32)
+	_, bobSend := connectClient(t, hub, bob, 0, 32)
+	_, mallorySend := connectClient(t, hub, mallory, 0, 32)
 
 	hub.HandleMessageForTest(aliceClient, voiceJoinMsg(dmID))
 
@@ -228,13 +206,8 @@ func TestVoiceJoin_DMCall_VoiceStateNotLeakedToUntrustedRecipient(t *testing.T) 
 	bob := seedMemberUser(t, database, "dmvoiceuntrusted-bob")
 	dmID := untrustedDMChannel(t, database, alice.ID, bob.ID)
 
-	aliceSend := make(chan []byte, 32)
-	bobSend := make(chan []byte, 32)
-	aliceClient := ws.NewTestClientWithUser(hub, alice, 0, aliceSend)
-	bobClient := ws.NewTestClientWithUser(hub, bob, 0, bobSend)
-	hub.Register(aliceClient)
-	hub.Register(bobClient)
-	waitRegistered(t, hub, bobClient)
+	aliceClient, aliceSend := connectClient(t, hub, alice, 0, 32)
+	_, bobSend := connectClient(t, hub, bob, 0, 32)
 
 	hub.HandleMessageForTest(aliceClient, voiceJoinMsg(dmID))
 
@@ -272,10 +245,7 @@ func TestVoiceJoin_DMBlocked_Refused(t *testing.T) {
 		t.Fatalf("BlockUser: %v", err)
 	}
 
-	send := make(chan []byte, 32)
-	c := ws.NewTestClientWithUser(hub, alice, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, alice, 0, 32)
 
 	hub.HandleMessageForTest(c, voiceJoinMsg(dmID))
 
@@ -301,10 +271,7 @@ func TestVoiceTokenRefresh_DMBlocked_Refused(t *testing.T) {
 	bob := seedMemberUser(t, database, "dmblockrefresh-bob")
 	dmID := seedDMChannel(t, database, alice.ID, bob.ID)
 
-	send := make(chan []byte, 32)
-	c := ws.NewTestClientWithUser(hub, alice, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, alice, 0, 32)
 
 	hub.HandleMessageForTest(c, voiceJoinMsg(dmID))
 	drainChanTimeout(send, 50*time.Millisecond)
@@ -326,10 +293,7 @@ func TestVoiceJoin_GroupDMNonParticipant_Refused(t *testing.T) {
 	mallory := seedMemberUser(t, database, "grpvoice-x-mallory")
 	chID := seedGroupDM(t, database, "Callers", alice.ID, bob.ID, carol.ID)
 
-	send := make(chan []byte, 32)
-	c := ws.NewTestClientWithUser(hub, mallory, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, mallory, 0, 32)
 
 	hub.HandleMessageForTest(c, voiceJoinMsg(chID))
 

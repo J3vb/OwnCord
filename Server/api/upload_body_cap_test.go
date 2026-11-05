@@ -43,9 +43,7 @@ func streamedUpload(t *testing.T, router http.Handler, token string, size int64)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/uploads", pr)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	req.Header.Set("Authorization", "Bearer "+token)
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
+	rr := serveLocal(router, req)
 	_ = pr.CloseWithError(io.ErrClosedPipe) // unblock the writer if the handler stopped reading
 	return rr
 }
@@ -69,9 +67,7 @@ func TestUpload_AboveHundredMiBAcceptedWhenConfigured(t *testing.T) {
 	}
 	h := cappedHarness(t, 150)
 	rr := streamedUpload(t, h.router, h.token, 120<<20)
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("120 MB upload under max_size_mb 150: status %d, body %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusCreated)
 }
 
 func TestUpload_OverSmallCapKeepsTheSizeRejection(t *testing.T) {

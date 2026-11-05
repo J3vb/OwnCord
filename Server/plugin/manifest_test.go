@@ -116,9 +116,7 @@ func TestManifestValidateAcceptsMinimal(t *testing.T) {
 		Version:    "0.1.0",
 		Entrypoint: "hello.wasm",
 	}
-	if err := m.Validate(); err != nil {
-		t.Fatalf("expected minimal manifest to validate, got: %v", err)
-	}
+	mustDo(t, "expected minimal manifest to validate, got", m.Validate())
 }
 
 func TestManifestValidateRejectsOversizedVersion(t *testing.T) {

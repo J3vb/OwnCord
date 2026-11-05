@@ -55,13 +55,9 @@ func TestHandlePresenceUpdate_BareStatusReadFailureAbortsBeforeCommit(t *testing
 	seedUser(t, database, &db.User{ID: 1, Username: "ada", PasswordHash: "h"})
 	ctx := context.Background()
 
-	if err := database.UpdateUserStatus(ctx, 1, db.StatusOnline); err != nil {
-		t.Fatalf("seed status: %v", err)
-	}
+	mustDo(t, "seed status", database.UpdateUserStatus(ctx, 1, db.StatusOnline))
 	text := "on call"
-	if err := database.UpdateUserCustomStatus(ctx, 1, &text); err != nil {
-		t.Fatalf("seed custom status: %v", err)
-	}
+	mustDo(t, "seed custom status", database.UpdateUserCustomStatus(ctx, 1, &text))
 
 	fs := &faultyStore{Store: database, failGetUserByID: true}
 	svc := NewChannelService(fs, NewPermissionService(database, permissions.NewChecker(database)))
@@ -101,9 +97,7 @@ func TestHandlePresenceUpdate_CustomStatusIsOneWriterTransaction(t *testing.T) {
 	text := "in a meeting"
 	res, err := svc.HandlePresenceUpdate(ctx, 1, db.StatusDND, &text, nil, nil)
 	got := res.CustomStatus
-	if err != nil {
-		t.Fatalf("HandlePresenceUpdate: %v", err)
-	}
+	mustDo(t, "HandlePresenceUpdate", err)
 	if got == nil || *got != text {
 		t.Fatalf("returned custom status = %v, want %q", got, text)
 	}
@@ -125,9 +119,7 @@ func TestHandlePresenceUpdate_CombinedWriteFailureCommitsNothing(t *testing.T) {
 	ctx := context.Background()
 
 	stored := "on call"
-	if err := database.UpdateUserCustomStatus(ctx, 1, &stored); err != nil {
-		t.Fatalf("seed custom status: %v", err)
-	}
+	mustDo(t, "seed custom status", database.UpdateUserCustomStatus(ctx, 1, &stored))
 
 	fs := &faultyStore{Store: database, failUpdateUserPresence: true}
 	svc := NewChannelService(fs, NewPermissionService(database, permissions.NewChecker(database)))

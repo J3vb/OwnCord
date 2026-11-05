@@ -1,11 +1,74 @@
 package admin
 
 import (
+	"context"
+	"encoding/json"
 	"math"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/db"
 )
+
+// openMigratedDB opens an in-memory database with the full migration set.
+func openMigratedDB(t *testing.T) *db.DB {
+	t.Helper()
+	database, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatalf("db.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	if err := db.Migrate(database); err != nil {
+		t.Fatalf("db.Migrate: %v", err)
+	}
+	return database
+}
+
+// ownerSession creates an Owner user with a login session and returns its id,
+// bearer token and the token's hash.
+func ownerSession(t *testing.T, database *db.DB) (userID int64, token, tokenHash string) {
+	t.Helper()
+	userID, err := database.CreateUser(context.Background(), "owner", "hash", 1)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	token, err = auth.GenerateToken()
+	if err != nil {
+		t.Fatalf("GenerateToken: %v", err)
+	}
+	tokenHash = auth.HashToken(token)
+	if _, err := database.CreateSession(context.Background(), userID, tokenHash, "test", "127.0.0.1"); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	return userID, token, tokenHash
+}
+
+// mustCreateUser creates a user with the given password hash and role.
+func mustCreateUser(t *testing.T, database *db.DB, username, passwordHash string, roleID int) int64 {
+	t.Helper()
+	id, err := database.CreateUser(context.Background(), username, passwordHash, roleID)
+	if err != nil {
+		t.Fatalf("CreateUser(%s): %v", username, err)
+	}
+	return id
+}
+
+// soleEntryAttrs requires the ring buffer to hold exactly one entry and
+// returns that entry's attributes decoded from JSON.
+func soleEntryAttrs(t *testing.T, buf *RingBuffer) map[string]any {
+	t.Helper()
+	entries := buf.Snapshot()
+	if len(entries) != 1 {
+		t.Fatalf("ring buffer has %d entries, want 1", len(entries))
+	}
+	var attrs map[string]any
+	if err := json.Unmarshal([]byte(entries[0].Attrs), &attrs); err != nil {
+		t.Fatalf("unmarshal attrs %q: %v", entries[0].Attrs, err)
+	}
+	return attrs
+}
 
 // queryInt's result-set cap belongs to limit parameters only. Clamping offset
 // with the same cap means the audit log and user list can never page past row

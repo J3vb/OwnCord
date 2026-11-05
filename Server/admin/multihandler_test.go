@@ -90,15 +90,7 @@ func TestMultiHandler_WithAttrs(t *testing.T) {
 
 	logger.With("user_id", 42).Info("with attrs", "extra", "yes")
 
-	entries := buf.Snapshot()
-	if len(entries) != 1 {
-		t.Fatalf("ring buffer has %d entries, want 1", len(entries))
-	}
-
-	var attrs map[string]any
-	if err := json.Unmarshal([]byte(entries[0].Attrs), &attrs); err != nil {
-		t.Fatalf("unmarshal attrs %q: %v", entries[0].Attrs, err)
-	}
+	attrs := soleEntryAttrs(t, buf)
 	// Both the WithAttrs-supplied attr and the per-record attr must survive.
 	if _, ok := attrs["user_id"]; !ok {
 		t.Errorf("attrs = %v, want user_id from WithAttrs", attrs)
@@ -133,15 +125,7 @@ func TestMultiHandler_WithGroup(t *testing.T) {
 
 	logger.WithGroup("req").Info("grouped", "id", "abc")
 
-	entries := buf.Snapshot()
-	if len(entries) != 1 {
-		t.Fatalf("ring buffer has %d entries, want 1", len(entries))
-	}
-
-	var attrs map[string]any
-	if err := json.Unmarshal([]byte(entries[0].Attrs), &attrs); err != nil {
-		t.Fatalf("unmarshal attrs %q: %v", entries[0].Attrs, err)
-	}
+	attrs := soleEntryAttrs(t, buf)
 	if attrs["req.id"] != "abc" {
 		t.Errorf("attrs = %v, want the group-qualified key req.id", attrs)
 	}
@@ -335,19 +319,11 @@ func TestMultiHandler_ErrorAttr_RecordLevel(t *testing.T) {
 	logger.Error("failed to issue log stream ticket",
 		"err", fmt.Errorf("generating ticket: %w", errors.New("boom")))
 
-	entries := buf.Snapshot()
-	if len(entries) != 1 {
-		t.Fatalf("ring buffer has %d entries, want 1", len(entries))
-	}
-
-	var attrs map[string]any
-	if err := json.Unmarshal([]byte(entries[0].Attrs), &attrs); err != nil {
-		t.Fatalf("unmarshal attrs %q: %v", entries[0].Attrs, err)
-	}
+	attrs := soleEntryAttrs(t, buf)
 	got, _ := attrs["err"].(string)
 	if got != "generating ticket: boom" {
-		t.Errorf("attrs[err] = %#v, want the error string %q (got attrs %q)",
-			attrs["err"], "generating ticket: boom", entries[0].Attrs)
+		t.Errorf("attrs[err] = %#v, want the error string %q (got attrs %v)",
+			attrs["err"], "generating ticket: boom", attrs)
 	}
 }
 
@@ -356,19 +332,11 @@ func TestMultiHandler_ErrorAttr_WithAttrsLevel(t *testing.T) {
 
 	logger.With("err", errors.New("boom")).Error("failed")
 
-	entries := buf.Snapshot()
-	if len(entries) != 1 {
-		t.Fatalf("ring buffer has %d entries, want 1", len(entries))
-	}
-
-	var attrs map[string]any
-	if err := json.Unmarshal([]byte(entries[0].Attrs), &attrs); err != nil {
-		t.Fatalf("unmarshal attrs %q: %v", entries[0].Attrs, err)
-	}
+	attrs := soleEntryAttrs(t, buf)
 	got, _ := attrs["err"].(string)
 	if got != "boom" {
-		t.Errorf("attrs[err] = %#v, want the error string %q (got attrs %q)",
-			attrs["err"], "boom", entries[0].Attrs)
+		t.Errorf("attrs[err] = %#v, want the error string %q (got attrs %v)",
+			attrs["err"], "boom", attrs)
 	}
 }
 

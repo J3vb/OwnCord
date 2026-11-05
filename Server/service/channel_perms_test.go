@@ -21,9 +21,7 @@ func seedOverrideFixture(t *testing.T) (*ChannelService, *db.DB, *db.Role, *db.R
 	svc := NewChannelService(database, NewPermissionService(database, permissions.NewChecker(database)))
 	seedChannel(t, database, &db.Channel{ID: 60, Name: "guarded", Type: "text"})
 	ch, err := svc.ResolveGuildChannel(context.Background(), 60)
-	if err != nil {
-		t.Fatalf("ResolveGuildChannel: %v", err)
-	}
+	mustDo(t, "ResolveGuildChannel", err)
 	// Actor: a mid-rank moderator WITHOUT ADMINISTRATOR; target: a lower role.
 	mod := &db.Role{ID: 21, Name: "chan-mod", Position: 50,
 		Permissions: permissions.ManageChannels | permissions.ReadMessages}
@@ -70,9 +68,7 @@ func TestDeleteRoleOverride_ZeroMaskUnionGuard(t *testing.T) {
 	// MANAGE_SERVER deny as an admin would, then have the non-admin actor
 	// try to clear it — the union guard must refuse.
 	svc, database, mod, low, ch := seedOverrideFixture(t)
-	if err := database.UpsertChannelOverride(context.Background(), ch.ID, low.ID, 0, permissions.ManageServer); err != nil {
-		t.Fatalf("seed override: %v", err)
-	}
+	mustDo(t, "seed override", database.UpsertChannelOverride(context.Background(), ch.ID, low.ID, 0, permissions.ManageServer))
 	if _, err := svc.DeleteRoleOverride(context.Background(), 7, mod, ch, low.ID); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("err = %v, want ErrForbidden (clearing a foreign deny is a grant)", err)
 	}
@@ -104,9 +100,7 @@ func TestUserOverride_HierarchyAndAudit(t *testing.T) {
 	seedUserRole(t, database, 32, 1) // Owner role, position 100
 
 	res, err := svc.PutUserOverride(context.Background(), 7, mod, ch, 31, permissions.ReadMessages, 0)
-	if err != nil {
-		t.Fatalf("PutUserOverride: %v", err)
-	}
+	mustDo(t, "PutUserOverride", err)
 	if len(res.AffectedUsers) != 1 || res.AffectedUsers[0] != 31 {
 		t.Fatalf("affected = %v, want the one target", res.AffectedUsers)
 	}
@@ -144,9 +138,7 @@ func TestChannelPermissions_ListsRolesAndOnlyOverriddenUsers(t *testing.T) {
 		t.Fatalf("PutUserOverride: %v", err)
 	}
 	roles, users, err := svc.ChannelPermissions(context.Background(), ch.ID)
-	if err != nil {
-		t.Fatalf("ChannelPermissions: %v", err)
-	}
+	mustDo(t, "ChannelPermissions", err)
 	if len(roles) == 0 {
 		t.Fatal("expected every role listed")
 	}

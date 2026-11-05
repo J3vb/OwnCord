@@ -30,10 +30,7 @@ func TestBroadcastAppealQueue_ReachesConnectedModeratorsOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateUser(member): %v", err)
 	}
-	appellantID, err := database.CreateUser(ctx, "aq-appellant", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser(appellant): %v", err)
-	}
+	appellantID := mustCreateUser(t, database, "aq-appellant", 4)
 	actionID, err := database.WarnUser(ctx, appellantID, modID, nil, "x")
 	if err != nil {
 		t.Fatalf("WarnUser: %v", err)
@@ -75,19 +72,10 @@ func TestBroadcastAppealQueue_ExcludesTheAppellant(t *testing.T) {
 	ctx := context.Background()
 	// Role 1 (Owner/Administrator) so WarnUser's outrank check passes
 	// against an appellant who is a same-rank Moderator (role 3).
-	actingModID, err := database.CreateUser(ctx, "aq-acting-mod", "hash", 1)
-	if err != nil {
-		t.Fatalf("CreateUser(acting mod): %v", err)
-	}
+	actingModID := mustCreateUser(t, database, "aq-acting-mod", 1)
 	// The appellant independently holds MODERATE_MEMBERS too.
-	appellantModID, err := database.CreateUser(ctx, "aq-appellant-mod", "hash", 3)
-	if err != nil {
-		t.Fatalf("CreateUser(appellant mod): %v", err)
-	}
-	otherModID, err := database.CreateUser(ctx, "aq-other-mod", "hash", 3)
-	if err != nil {
-		t.Fatalf("CreateUser(other mod): %v", err)
-	}
+	appellantModID := mustCreateUser(t, database, "aq-appellant-mod", 3)
+	otherModID := mustCreateUser(t, database, "aq-other-mod", 3)
 	actionID, err := database.WarnUser(ctx, appellantModID, actingModID, nil, "x")
 	if err != nil {
 		t.Fatalf("WarnUser: %v", err)
@@ -129,10 +117,7 @@ func TestBroadcastAppealQueue_ExcludesTheAppellant(t *testing.T) {
 func TestBroadcastAppealQueue_UnknownAppealIDIsANoOp(t *testing.T) {
 	database := openReportTestDB(t)
 	ctx := context.Background()
-	modID, err := database.CreateUser(ctx, "aq-mod-2", "hash", 3)
-	if err != nil {
-		t.Fatalf("CreateUser(mod): %v", err)
-	}
+	modID := mustCreateUser(t, database, "aq-mod-2", 3)
 
 	limiter := auth.NewRateLimiter()
 	svc := service.New(database, limiter)

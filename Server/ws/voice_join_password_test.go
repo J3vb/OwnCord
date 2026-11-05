@@ -22,14 +22,7 @@ const joinPasswordSecret = "correct horse"
 // rate-limit cases.
 func newPasswordHub(t *testing.T) (*ws.Hub, *db.DB, *auth.RateLimiter) {
 	t.Helper()
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	database := openMigratedDB(t)
 	limiter := auth.NewRateLimiter()
 	hub := newTestHubWith(t, ws.HubOptions{DB: database, Limiter: limiter, LiveKit: healthyLiveKitClient(t)})
 	go hub.Run()
@@ -63,19 +56,13 @@ func unprotectVoiceChannel(t *testing.T, database *db.DB, chanID int64) {
 }
 
 func voiceJoinPasswordMsg(channelID int64, password string) []byte {
-	raw, _ := json.Marshal(map[string]any{
-		"type":    "voice_join",
-		"payload": map[string]any{"channel_id": channelID, "password": password},
-	})
+	raw := envelope("voice_join", map[string]any{"channel_id": channelID, "password": password})
 	return raw
 }
 
 func connectPasswordClient(t *testing.T, hub *ws.Hub, user *db.User, chanID int64) (*ws.Client, chan []byte) {
 	t.Helper()
-	send := make(chan []byte, 64)
-	c := ws.NewTestClientWithUser(hub, user, chanID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, chanID, 64)
 	return c, send
 }
 
@@ -334,7 +321,7 @@ func TestVoiceJoinPassword_ModeratorMoveIntoProtectedChannel(t *testing.T) {
 	}
 	ac, asend := connectPasswordClient(t, hub, actor, fromID)
 	hub.HandleMessageForTest(ac, voiceModMoveMsg(target.ID, toID))
-	if code := receiveErrorCode(asend, 100*time.Millisecond); code != "" {
+	if code := drainForErrorCode(asend, 100*time.Millisecond); code != "" {
 		t.Fatalf("move answered %q", code)
 	}
 
@@ -516,7 +503,7 @@ func TestVoiceJoinPassword_FailedModeratorMoveStoresNoGrant(t *testing.T) {
 	ac, asend := connectPasswordClient(t, hub, actor, fromID)
 
 	hub.HandleMessageForTest(ac, voiceModMoveMsg(target.ID, toID))
-	if code := receiveErrorCode(asend, 200*time.Millisecond); code != "VOICE_ERROR" {
+	if code := drainForErrorCode(asend, 200*time.Millisecond); code != "VOICE_ERROR" {
 		t.Fatalf("move answered %q, want VOICE_ERROR", code)
 	}
 	if hasGrant(t, database, toID, target.ID) {

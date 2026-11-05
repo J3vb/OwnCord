@@ -27,13 +27,8 @@ func TestAppeal_OverturnBanRebroadcastsMemberUnban(t *testing.T) {
 	f := newAppealFixture(t)
 	ctx := context.Background()
 
-	if err := f.mod.BanUser(ctx, fixtureMod, fixtureMember, "spam", nil); err != nil {
-		t.Fatalf("BanUser: %v", err)
-	}
-	rows, err := f.database.ListModerationActionsForTarget(ctx, fixtureMember)
-	if err != nil {
-		t.Fatalf("ListModerationActionsForTarget: %v", err)
-	}
+	mustDo(t, "BanUser", f.mod.BanUser(ctx, fixtureMod, fixtureMember, "spam", nil))
+	rows := mustListModerationActionsForTarget(t, f.database, fixtureMember)
 	var actionID int64
 	for _, r := range rows {
 		if r.Kind == "ban" {
@@ -44,16 +39,12 @@ func TestAppeal_OverturnBanRebroadcastsMemberUnban(t *testing.T) {
 		t.Fatal("no ban ledger row found")
 	}
 	publicID, err := f.appeals.Submit(ctx, fixtureMember, actionID, "please")
-	if err != nil {
-		t.Fatalf("Submit: %v", err)
-	}
+	mustDo(t, "Submit", err)
 
 	broadcaster := &recordingUnbanBroadcaster{}
 	f.appeals.SetUnbanBroadcaster(broadcaster)
 
-	if err := f.appeals.Decide(ctx, fixturePeerMod, publicID, "overturned", "fine"); err != nil {
-		t.Fatalf("Decide: %v", err)
-	}
+	mustDo(t, "Decide", f.appeals.Decide(ctx, fixturePeerMod, publicID, "overturned", "fine"))
 	if len(broadcaster.unbanned) != 1 || broadcaster.unbanned[0] != fixtureMember {
 		t.Fatalf("BroadcastMemberUnban calls = %v, want exactly [%d]", broadcaster.unbanned, fixtureMember)
 	}
@@ -65,13 +56,8 @@ func TestAppeal_UpholdBanDoesNotBroadcastUnban(t *testing.T) {
 	f := newAppealFixture(t)
 	ctx := context.Background()
 
-	if err := f.mod.BanUser(ctx, fixtureMod, fixtureMember, "spam", nil); err != nil {
-		t.Fatalf("BanUser: %v", err)
-	}
-	rows, err := f.database.ListModerationActionsForTarget(ctx, fixtureMember)
-	if err != nil {
-		t.Fatalf("ListModerationActionsForTarget: %v", err)
-	}
+	mustDo(t, "BanUser", f.mod.BanUser(ctx, fixtureMod, fixtureMember, "spam", nil))
+	rows := mustListModerationActionsForTarget(t, f.database, fixtureMember)
 	var actionID int64
 	for _, r := range rows {
 		if r.Kind == "ban" {
@@ -79,16 +65,12 @@ func TestAppeal_UpholdBanDoesNotBroadcastUnban(t *testing.T) {
 		}
 	}
 	publicID, err := f.appeals.Submit(ctx, fixtureMember, actionID, "please")
-	if err != nil {
-		t.Fatalf("Submit: %v", err)
-	}
+	mustDo(t, "Submit", err)
 
 	broadcaster := &recordingUnbanBroadcaster{}
 	f.appeals.SetUnbanBroadcaster(broadcaster)
 
-	if err := f.appeals.Decide(ctx, fixturePeerMod, publicID, "upheld", "no"); err != nil {
-		t.Fatalf("Decide: %v", err)
-	}
+	mustDo(t, "Decide", f.appeals.Decide(ctx, fixturePeerMod, publicID, "upheld", "no"))
 	if len(broadcaster.unbanned) != 0 {
 		t.Fatalf("BroadcastMemberUnban calls = %v, want none — the ban was upheld", broadcaster.unbanned)
 	}
@@ -101,13 +83,8 @@ func TestAppeal_OverturnRebanDoesNotBroadcastUnban(t *testing.T) {
 	f := newAppealFixture(t)
 	ctx := context.Background()
 
-	if err := f.mod.BanUser(ctx, fixtureMod, fixtureMember, "first", nil); err != nil {
-		t.Fatalf("BanUser(first): %v", err)
-	}
-	rows, err := f.database.ListModerationActionsForTarget(ctx, fixtureMember)
-	if err != nil {
-		t.Fatalf("ListModerationActionsForTarget: %v", err)
-	}
+	mustDo(t, "BanUser(first)", f.mod.BanUser(ctx, fixtureMod, fixtureMember, "first", nil))
+	rows := mustListModerationActionsForTarget(t, f.database, fixtureMember)
 	var firstBanID int64
 	for _, r := range rows {
 		if r.Kind == "ban" && firstBanID == 0 {
@@ -115,26 +92,15 @@ func TestAppeal_OverturnRebanDoesNotBroadcastUnban(t *testing.T) {
 		}
 	}
 	publicID, err := f.appeals.Submit(ctx, fixtureMember, firstBanID, "please")
-	if err != nil {
-		t.Fatalf("Submit: %v", err)
-	}
-	if err := f.mod.UnbanUser(ctx, fixtureMod, fixtureMember); err != nil {
-		t.Fatalf("UnbanUser: %v", err)
-	}
-	if err := f.mod.BanUser(ctx, fixtureMod, fixtureMember, "second", nil); err != nil {
-		t.Fatalf("BanUser(second): %v", err)
-	}
+	mustDo(t, "Submit", err)
+	mustDo(t, "UnbanUser", f.mod.UnbanUser(ctx, fixtureMod, fixtureMember))
+	mustDo(t, "BanUser(second)", f.mod.BanUser(ctx, fixtureMod, fixtureMember, "second", nil))
 
 	broadcaster := &recordingUnbanBroadcaster{}
 	f.appeals.SetUnbanBroadcaster(broadcaster)
 
-	if err := f.appeals.Decide(ctx, fixturePeerMod, publicID, "overturned", "fine"); err != nil {
-		t.Fatalf("Decide: %v", err)
-	}
-	target, err := f.database.GetUserByID(ctx, fixtureMember)
-	if err != nil {
-		t.Fatalf("GetUserByID: %v", err)
-	}
+	mustDo(t, "Decide", f.appeals.Decide(ctx, fixturePeerMod, publicID, "overturned", "fine"))
+	target := mustGetUserByID(t, f.database, fixtureMember)
 	if !target.Banned {
 		t.Fatal("target unbanned after overturning the FIRST ban — the re-ban should still govern")
 	}
@@ -150,20 +116,14 @@ func TestAppeal_OverturnTimeoutDoesNotBroadcastUnban(t *testing.T) {
 	ctx := context.Background()
 
 	result, err := f.mod.Timeout(ctx, fixtureMod, fixtureMember, "cool off", time.Hour, nil)
-	if err != nil {
-		t.Fatalf("Timeout: %v", err)
-	}
+	mustDo(t, "Timeout", err)
 	publicID, err := f.appeals.Submit(ctx, fixtureMember, result.ID, "please")
-	if err != nil {
-		t.Fatalf("Submit: %v", err)
-	}
+	mustDo(t, "Submit", err)
 
 	broadcaster := &recordingUnbanBroadcaster{}
 	f.appeals.SetUnbanBroadcaster(broadcaster)
 
-	if err := f.appeals.Decide(ctx, fixturePeerMod, publicID, "overturned", "fine"); err != nil {
-		t.Fatalf("Decide: %v", err)
-	}
+	mustDo(t, "Decide", f.appeals.Decide(ctx, fixturePeerMod, publicID, "overturned", "fine"))
 	if len(broadcaster.unbanned) != 0 {
 		t.Fatalf("BroadcastMemberUnban calls = %v, want none — a timeout has no ban half", broadcaster.unbanned)
 	}

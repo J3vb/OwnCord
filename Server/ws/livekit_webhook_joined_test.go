@@ -57,9 +57,7 @@ func TestWebhook_ParticipantJoined_StaleTokenFlagged(t *testing.T) {
 	user := seedVoiceOwner(t, database, "joined-stale-user")
 	chanID := seedVoiceChan(t, database, "joined-stale-ch")
 
-	if err := database.JoinVoiceChannel(context.Background(), user.ID, chanID); err != nil {
-		t.Fatalf("JoinVoiceChannel: %v", err)
-	}
+	mustJoinVoice(t, database, user.ID, chanID)
 
 	logs := captureLogs(t)
 
@@ -80,9 +78,7 @@ func TestWebhook_ParticipantJoined_ValidJoinAccepted(t *testing.T) {
 	user := seedVoiceOwner(t, database, "joined-valid-user")
 	chanID := seedVoiceChan(t, database, "joined-valid-ch")
 
-	if err := database.JoinVoiceChannel(context.Background(), user.ID, chanID); err != nil {
-		t.Fatalf("JoinVoiceChannel: %v", err)
-	}
+	mustJoinVoice(t, database, user.ID, chanID)
 	state, err := database.GetVoiceState(context.Background(), user.ID)
 	if err != nil || state == nil {
 		t.Fatalf("GetVoiceState: %v (nil=%v)", err, state == nil)
@@ -117,9 +113,7 @@ func TestWebhook_ParticipantJoined_TransientReadErrorDoesNotEvict(t *testing.T) 
 	user := seedVoiceOwner(t, database, "joined-dberr-user")
 	chanID := seedVoiceChan(t, database, "joined-dberr-ch")
 
-	if err := database.JoinVoiceChannel(context.Background(), user.ID, chanID); err != nil {
-		t.Fatalf("JoinVoiceChannel: %v", err)
-	}
+	mustJoinVoice(t, database, user.ID, chanID)
 
 	// Fault-inject exactly the GetVoiceState read: renaming the table out from
 	// under the query makes it return a genuine DB error instead of the
@@ -185,9 +179,7 @@ func TestWebhook_ParticipantJoined_WrongChannelFlagged(t *testing.T) {
 	joined := seedVoiceChan(t, database, "joined-wrongch-a")
 	other := seedVoiceChan(t, database, "joined-wrongch-b")
 
-	if err := database.JoinVoiceChannel(context.Background(), user.ID, joined); err != nil {
-		t.Fatalf("JoinVoiceChannel: %v", err)
-	}
+	mustJoinVoice(t, database, user.ID, joined)
 	state, err := database.GetVoiceState(context.Background(), user.ID)
 	if err != nil || state == nil {
 		t.Fatalf("GetVoiceState: %v", err)

@@ -6,7 +6,6 @@ package api_test
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -32,17 +31,9 @@ func TestCreateInvite_MalformedJSON(t *testing.T) {
 
 	token := loginAndGetToken(t, router, database, "malformedinvite", 2)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/invites",
-		bytes.NewReader([]byte(`{invalid json`)))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
+	rr := doAPIRawJSON(t, router, http.MethodPost, "/api/v1/invites", token, `{invalid json`)
 
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("CreateInvite malformed JSON: status = %d, want 400; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusBadRequest)
 }
 
 func TestCreateInvite_WithExpiration(t *testing.T) {
@@ -57,12 +48,9 @@ func TestCreateInvite_WithExpiration(t *testing.T) {
 		"expires_in_hours": 24,
 	})
 
-	if rr.Code != http.StatusCreated {
-		t.Errorf("CreateInvite with expiry: status = %d, want 201; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusCreated)
 
-	var resp map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	resp := decodeBody[map[string]any](t, rr)
 	if resp["expires_at"] == nil {
 		t.Error("CreateInvite with expiry: expected expires_at to be set")
 	}
@@ -71,103 +59,64 @@ func TestCreateInvite_WithExpiration(t *testing.T) {
 // ─── handleEnableTOTP: already enabled ──────────────────────────────────────
 
 func TestEnableTOTP_AlreadyEnabled(t *testing.T) {
-	database := newAuthTestDB(t)
-	limiter := auth.NewRateLimiter()
-	router := buildAuthRouter(database, limiter)
+	database, _, router := newAuthEnv(t)
 
 	token := loginAndGetToken(t, router, database, "alreadytotp", 4)
 
 	// Enable TOTP first.
 	rr := postJSONWithToken(t, router, "/api/v1/users/me/totp/enable", token,
 		map[string]string{"password": "Password1!"})
-	if rr.Code != http.StatusOK {
-		t.Fatalf("enable: status = %d; body = %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 
-	var enableResp map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&enableResp)
+	enableResp := decodeBody[map[string]any](t, rr)
 	secret := extractSecretFromURI(t, enableResp["qr_uri"].(string))
 
 	// Confirm TOTP.
 	code, _ := auth.GenerateTOTPCode(secret, time.Now().UTC())
 	rr = postJSONWithToken(t, router, "/api/v1/users/me/totp/confirm", token,
 		map[string]string{"password": "Password1!", "code": code})
-	if rr.Code != http.StatusNoContent {
-		t.Fatalf("confirm: status = %d; body = %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusNoContent)
 
 	// Try enabling again — should get 409 Conflict.
 	rr = postJSONWithToken(t, router, "/api/v1/users/me/totp/enable", token,
 		map[string]string{"password": "Password1!"})
-	if rr.Code != http.StatusConflict {
-		t.Errorf("enable-totp already enabled: status = %d, want 409; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusConflict)
 }
 
 // ─── handleEnableTOTP: malformed body ───────────────────────────────────────
 
 func TestEnableTOTP_MalformedBody(t *testing.T) {
-	database := newAuthTestDB(t)
-	limiter := auth.NewRateLimiter()
-	router := buildAuthRouter(database, limiter)
+	database, _, router := newAuthEnv(t)
 
 	token := loginAndGetToken(t, router, database, "enablemalformed", 4)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/users/me/totp/enable",
-		bytes.NewReader([]byte(`{invalid`)))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
+	rr := doAPIRawJSON(t, router, http.MethodPost, "/api/v1/users/me/totp/enable", token, `{invalid`)
 
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("enable-totp malformed body: status = %d, want 400; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusBadRequest)
 }
 
 // ─── handleConfirmTOTP: malformed body ──────────────────────────────────────
 
 func TestConfirmTOTP_MalformedBody(t *testing.T) {
-	database := newAuthTestDB(t)
-	limiter := auth.NewRateLimiter()
-	router := buildAuthRouter(database, limiter)
+	database, _, router := newAuthEnv(t)
 
 	token := loginAndGetToken(t, router, database, "confirmmalformed", 4)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/users/me/totp/confirm",
-		bytes.NewReader([]byte(`{invalid`)))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
+	rr := doAPIRawJSON(t, router, http.MethodPost, "/api/v1/users/me/totp/confirm", token, `{invalid`)
 
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("confirm-totp malformed body: status = %d, want 400; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusBadRequest)
 }
 
 // ─── handleDisableTOTP: malformed body ──────────────────────────────────────
 
 func TestDisableTOTP_MalformedBody(t *testing.T) {
-	database := newAuthTestDB(t)
-	limiter := auth.NewRateLimiter()
-	router := buildAuthRouter(database, limiter)
+	database, _, router := newAuthEnv(t)
 
 	token := loginAndGetToken(t, router, database, "disablemalformed", 4)
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/users/me/totp",
-		bytes.NewReader([]byte(`{invalid`)))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
+	rr := doAPIRawJSON(t, router, http.MethodDelete, "/api/v1/users/me/totp", token, `{invalid`)
 
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("disable-totp malformed body: status = %d, want 400; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusBadRequest)
 }
 
 // ─── handleUpdateProfile: malformed body ────────────────────────────────────
@@ -177,17 +126,9 @@ func TestUpdateProfile_MalformedBody(t *testing.T) {
 	router := buildProfileRouter(database)
 	token := profileCreateToken(t, database, "profilemalformed", 4)
 
-	req := httptest.NewRequest(http.MethodPatch, "/api/v1/users/me",
-		bytes.NewReader([]byte(`{invalid`)))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
+	rr := doAPIRawJSON(t, router, http.MethodPatch, "/api/v1/users/me", token, `{invalid`)
 
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("UpdateProfile malformed: status = %d, want 400; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusBadRequest)
 }
 
 // ─── handleUpdateProfile: invalid username (too short/long or special chars) ─
@@ -201,9 +142,7 @@ func TestUpdateProfile_InvalidUsername(t *testing.T) {
 	rr := patchJSON(t, router, "/api/v1/users/me", token, map[string]string{
 		"username": "   ",
 	})
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("UpdateProfile spaces-only: status = %d, want 400", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusBadRequest)
 
 	// Username that is too short (single char) — might fail ValidateUsername.
 	rr = patchJSON(t, router, "/api/v1/users/me", token, map[string]string{
@@ -230,9 +169,7 @@ func TestUpdateProfile_WithAvatar(t *testing.T) {
 		"username": "avataruser2",
 		"avatar":   avatar,
 	})
-	if rr.Code != http.StatusOK {
-		t.Errorf("UpdateProfile with avatar: status = %d, want 200; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusOK)
 }
 
 func TestUpdateProfile_NullAvatar(t *testing.T) {
@@ -244,9 +181,7 @@ func TestUpdateProfile_NullAvatar(t *testing.T) {
 		"username": "nullavuser2",
 		"avatar":   nil,
 	})
-	if rr.Code != http.StatusOK {
-		t.Errorf("UpdateProfile null avatar: status = %d, want 200; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusOK)
 }
 
 // ─── handleChangePassword: malformed body ───────────────────────────────────
@@ -256,17 +191,9 @@ func TestChangePassword_MalformedBody(t *testing.T) {
 	router := buildProfileRouter(database)
 	token := profileCreateToken(t, database, "chpwmalformed", 4)
 
-	req := httptest.NewRequest(http.MethodPut, "/api/v1/users/me/password",
-		bytes.NewReader([]byte(`{invalid`)))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
+	rr := doAPIRawJSON(t, router, http.MethodPut, "/api/v1/users/me/password", token, `{invalid`)
 
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("ChangePassword malformed: status = %d, want 400; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusBadRequest)
 }
 
 // ─── handleChangePassword: missing fields ───────────────────────────────────
@@ -280,9 +207,7 @@ func TestChangePassword_MissingOldPassword(t *testing.T) {
 		"old_password": "",
 		"new_password": "newSecure2",
 	})
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("ChangePassword missing old: status = %d, want 400; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusBadRequest)
 }
 
 func TestChangePassword_MissingNewPassword(t *testing.T) {
@@ -294,9 +219,7 @@ func TestChangePassword_MissingNewPassword(t *testing.T) {
 		"old_password": "securePass1",
 		"new_password": "",
 	})
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("ChangePassword missing new: status = %d, want 400; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusBadRequest)
 }
 
 // ─── handleRevokeSession: invalid ID format ─────────────────────────────────
@@ -307,9 +230,7 @@ func TestRevokeSession_InvalidID(t *testing.T) {
 	token := profileCreateToken(t, database, "revokebadfmt", 4)
 
 	rr := profileDelete(t, router, "/api/v1/users/me/sessions/abc", token)
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("RevokeSession bad ID: status = %d, want 400; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusBadRequest)
 }
 
 func TestRevokeSession_NegativeID(t *testing.T) {
@@ -332,15 +253,11 @@ func TestLiveKitHealth_OK(t *testing.T) {
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/health/livekit", nil)
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
+	rr := serveRequest(handler, req)
 
-	if rr.Code != http.StatusOK {
-		t.Errorf("LiveKitHealth OK: status = %d, want 200; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusOK)
 
-	var resp map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	resp := decodeBody[map[string]any](t, rr)
 	if resp["status"] != "ok" {
 		t.Errorf("LiveKitHealth OK: status = %v, want 'ok'", resp["status"])
 	}
@@ -355,15 +272,11 @@ func TestLiveKitHealth_Degraded_WithError(t *testing.T) {
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/health/livekit", nil)
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
+	rr := serveRequest(handler, req)
 
-	if rr.Code != http.StatusServiceUnavailable {
-		t.Errorf("LiveKitHealth degraded: status = %d, want 503; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusServiceUnavailable)
 
-	var resp map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	resp := decodeBody[map[string]any](t, rr)
 	if resp["status"] != "degraded" {
 		t.Errorf("LiveKitHealth degraded: status = %v, want 'degraded'", resp["status"])
 	}
@@ -378,15 +291,11 @@ func TestLiveKitHealth_Degraded_NilError(t *testing.T) {
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/health/livekit", nil)
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
+	rr := serveRequest(handler, req)
 
-	if rr.Code != http.StatusServiceUnavailable {
-		t.Errorf("LiveKitHealth nil error: status = %d, want 503", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusServiceUnavailable)
 
-	var resp map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	resp := decodeBody[map[string]any](t, rr)
 	if resp["error"] != "unknown" {
 		t.Errorf("LiveKitHealth nil error: error = %v, want 'unknown'", resp["error"])
 	}
@@ -399,13 +308,9 @@ func TestListSessions_BadToken(t *testing.T) {
 	router := buildProfileRouter(database)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/users/me/sessions", nil)
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
+	rr := serveLocal(router, req)
 
-	if rr.Code != http.StatusUnauthorized {
-		t.Errorf("ListSessions no token: status = %d, want 401", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusUnauthorized)
 }
 
 // ─── handleRevokeSession: unauthenticated ───────────────────────────────────
@@ -415,9 +320,7 @@ func TestRevokeSession_Unauthorized(t *testing.T) {
 	router := buildProfileRouter(database)
 
 	rr := profileDelete(t, router, "/api/v1/users/me/sessions/1", "badtoken")
-	if rr.Code != http.StatusUnauthorized {
-		t.Errorf("RevokeSession unauthorized: status = %d, want 401", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusUnauthorized)
 }
 
 // ─── handleChangePassword: unauthorized ─────────────────────────────────────
@@ -430,9 +333,7 @@ func TestChangePassword_Unauthorized(t *testing.T) {
 		"old_password": "securePass1",
 		"new_password": "newSecure2",
 	})
-	if rr.Code != http.StatusUnauthorized {
-		t.Errorf("ChangePassword unauthorized: status = %d, want 401", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusUnauthorized)
 }
 
 // ─── handleUpdateProfile: unauthorized ──────────────────────────────────────
@@ -444,13 +345,9 @@ func TestUpdateProfile_NoToken(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPatch, "/api/v1/users/me",
 		bytes.NewReader([]byte(`{"username":"hack"}`)))
 	req.Header.Set("Content-Type", "application/json")
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
+	rr := serveLocal(router, req)
 
-	if rr.Code != http.StatusUnauthorized {
-		t.Errorf("UpdateProfile no token: status = %d, want 401", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusUnauthorized)
 }
 
 // ─── handleListInvites: member forbidden ────────────────────────────────────
@@ -462,15 +359,9 @@ func TestListInvites_MemberForbidden(t *testing.T) {
 
 	token := loginAndGetToken(t, router, database, "listmember", 4)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/invites", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
+	rr := doAPI(t, router, http.MethodGet, "/api/v1/invites", token, nil)
 
-	if rr.Code != http.StatusForbidden {
-		t.Errorf("ListInvites member: status = %d, want 403", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusForbidden)
 }
 
 // ─── handleCloseDM: broadcaster returns false (user not connected) ──────────
@@ -494,18 +385,13 @@ func TestCloseDM_BroadcasterUserOffline(t *testing.T) {
 	rr := dmPost(t, router, "/api/v1/dms", tokenAlice, map[string]any{
 		"recipient_id": bob.ID,
 	})
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("setup: status = %d", rr.Code)
-	}
-	var createResp map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&createResp)
+	requireStatus(t, rr, http.StatusCreated)
+	createResp := decodeBody[map[string]any](t, rr)
 	channelID := createResp["channel_id"]
 
 	// Close — broadcaster returns false (user offline).
 	rr2 := dmDelete(t, router, fmt.Sprintf("/api/v1/dms/%v", channelID), tokenAlice)
-	if rr2.Code != http.StatusNoContent {
-		t.Errorf("CloseDM offline: status = %d, want 204; body = %s", rr2.Code, rr2.Body.String())
-	}
+	expectStatus(t, rr2, http.StatusNoContent)
 }
 
 // ─── handleSearch / isInvalidSearchQueryError coverage ──────────────────────
@@ -514,8 +400,7 @@ func TestCloseDM_BroadcasterUserOffline(t *testing.T) {
 
 func TestSearch_EmptyQuery(t *testing.T) {
 	database := newChannelTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "searchempty", 1)
+	router, token := newChannelRouterAs(t, database, "searchempty", 1)
 
 	rr := chGet(t, router, "/api/v1/search?q=", token)
 	// Empty query should return 400 or 200 with empty results.
@@ -526,8 +411,7 @@ func TestSearch_EmptyQuery(t *testing.T) {
 
 func TestSearch_SpecialCharacters(t *testing.T) {
 	database := newChannelTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "searchspecial", 1)
+	router, token := newChannelRouterAs(t, database, "searchspecial", 1)
 
 	// These queries may trigger FTS5 syntax errors which isInvalidSearchQueryError handles.
 	queries := []string{
@@ -553,22 +437,17 @@ func TestListChannels_Unauthorized(t *testing.T) {
 	router := buildChannelRouter(database)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/channels", nil)
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
+	rr := serveLocal(router, req)
 
-	if rr.Code != http.StatusUnauthorized {
-		t.Errorf("ListChannels no auth: status = %d, want 401", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusUnauthorized)
 }
 
 // ─── handleGetMessages: edge cases ──────────────────────────────────────────
 
 func TestGetMessages_InvalidLimit(t *testing.T) {
 	database := newChannelTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "msglimit", 1)
-	chID, _ := database.CreateChannel(context.Background(), "limit-ch", "text", "", "", 0)
+	router, token := newChannelRouterAs(t, database, "msglimit", 1)
+	chID := mustCreateChannel(t, database, "limit-ch", "text")
 
 	// Negative limit.
 	rr := chGet(t, router, fmt.Sprintf("/api/v1/channels/%d/messages?limit=-1", chID), token)
@@ -578,44 +457,33 @@ func TestGetMessages_InvalidLimit(t *testing.T) {
 
 	// Limit > 100.
 	rr = chGet(t, router, fmt.Sprintf("/api/v1/channels/%d/messages?limit=999", chID), token)
-	if rr.Code != http.StatusOK {
-		t.Errorf("GetMessages limit=999: status = %d, want 200", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusOK)
 
 	// With before parameter.
 	rr = chGet(t, router, fmt.Sprintf("/api/v1/channels/%d/messages?before=999999", chID), token)
-	if rr.Code != http.StatusOK {
-		t.Errorf("GetMessages with before: status = %d, want 200", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusOK)
 }
 
 // ─── handleGetPins: basic and unauthorized ──────────────────────────────────
 
 func TestGetPins_Success(t *testing.T) {
 	database := newChannelTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "pinuser", 1)
-	chID, _ := database.CreateChannel(context.Background(), "pin-ch", "text", "", "", 0)
+	router, token := newChannelRouterAs(t, database, "pinuser", 1)
+	chID := mustCreateChannel(t, database, "pin-ch", "text")
 
 	rr := chGet(t, router, fmt.Sprintf("/api/v1/channels/%d/pins", chID), token)
-	if rr.Code != http.StatusOK {
-		t.Errorf("GetPins: status = %d, want 200; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusOK)
 }
 
 func TestGetPins_Unauthorized(t *testing.T) {
 	database := newChannelTestDB(t)
 	router := buildChannelRouter(database)
-	chID, _ := database.CreateChannel(context.Background(), "pin-unauth-ch", "text", "", "", 0)
+	chID := mustCreateChannel(t, database, "pin-unauth-ch", "text")
 
 	req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/channels/%d/pins", chID), nil)
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
+	rr := serveLocal(router, req)
 
-	if rr.Code != http.StatusUnauthorized {
-		t.Errorf("GetPins unauthorized: status = %d, want 401", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusUnauthorized)
 }
 
 // ─── handleSetPinned: unauthorized and invalid ──────────────────────────────
@@ -623,19 +491,15 @@ func TestGetPins_Unauthorized(t *testing.T) {
 func TestSetPinned_Unauthorized(t *testing.T) {
 	database := newChannelTestDB(t)
 	router := buildChannelRouter(database)
-	chID, _ := database.CreateChannel(context.Background(), "setpin-ch", "text", "", "", 0)
+	chID := mustCreateChannel(t, database, "setpin-ch", "text")
 
 	req := httptest.NewRequest(http.MethodPut,
 		fmt.Sprintf("/api/v1/channels/%d/messages/1/pin", chID),
 		bytes.NewReader([]byte(`{"pinned":true}`)))
 	req.Header.Set("Content-Type", "application/json")
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
+	rr := serveLocal(router, req)
 
-	if rr.Code != http.StatusUnauthorized {
-		t.Errorf("SetPinned unauthorized: status = %d, want 401", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusUnauthorized)
 }
 
 // ─── writeJSON: verify JSON encoding corner case ────────────────────────────
@@ -647,8 +511,7 @@ func TestWriteJSON_BasicSuccess(t *testing.T) {
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
+	rr := serveRequest(handler, req)
 
 	if ct := rr.Header().Get("Content-Type"); !strings.Contains(ct, "application/json") {
 		t.Errorf("writeJSON Content-Type = %q, want application/json", ct)
@@ -678,29 +541,16 @@ func TestRevokeInvite_AlreadyRevoked(t *testing.T) {
 
 	// Create invite.
 	rr := postJSONWithToken(t, router, "/api/v1/invites", token, map[string]any{})
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("setup: status = %d", rr.Code)
-	}
-	var created map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&created)
+	requireStatus(t, rr, http.StatusCreated)
+	created := decodeBody[map[string]any](t, rr)
 	code := created["code"].(string)
 
 	// Revoke it once.
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/invites/"+code, nil)
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr2 := httptest.NewRecorder()
-	router.ServeHTTP(rr2, req)
-	if rr2.Code != http.StatusNoContent {
-		t.Fatalf("first revoke: status = %d", rr2.Code)
-	}
+	rr2 := doAPI(t, router, http.MethodDelete, "/api/v1/invites/"+code, token, nil)
+	requireStatus(t, rr2, http.StatusNoContent)
 
 	// Revoke it again — should still succeed (idempotent) or return error.
-	req = httptest.NewRequest(http.MethodDelete, "/api/v1/invites/"+code, nil)
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr3 := httptest.NewRecorder()
-	router.ServeHTTP(rr3, req)
+	rr3 := doAPI(t, router, http.MethodDelete, "/api/v1/invites/"+code, token, nil)
 	// Should not be 500.
 	if rr3.Code >= 500 {
 		t.Errorf("RevokeInvite already revoked: unexpected 5xx = %d; body = %s", rr3.Code, rr3.Body.String())
@@ -719,14 +569,11 @@ func TestListSessions_MultipleSessions(t *testing.T) {
 	_, _ = database.CreateSession(context.Background(), user.ID, auth.HashToken("extra-token"), "Chrome", "1.2.3.4")
 
 	rr := getWithToken(t, router, "/api/v1/users/me/sessions", token)
-	if rr.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusOK)
 
-	var resp struct {
+	resp := decodeBody[struct {
 		Sessions []map[string]any `json:"sessions"`
-	}
-	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	}](t, rr)
 	if len(resp.Sessions) < 2 {
 		t.Errorf("expected >= 2 sessions, got %d", len(resp.Sessions))
 	}
@@ -739,9 +586,7 @@ func TestListDMs_InvalidToken(t *testing.T) {
 	router := buildDMRouter(database, nil)
 
 	rr := dmGet(t, router, "/api/v1/dms", "invalid-token-xxx")
-	if rr.Code != http.StatusUnauthorized {
-		t.Errorf("ListDMs invalid token: status = %d, want 401", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusUnauthorized)
 }
 
 // ─── buildAuthRouter with profile routes for combined testing ───────────────
@@ -768,17 +613,13 @@ func TestCombinedRouter_ProfileAndInvites(t *testing.T) {
 	rr := patchJSON(t, router, "/api/v1/users/me", token, map[string]string{
 		"username": "combined_newname",
 	})
-	if rr.Code != http.StatusOK {
-		t.Errorf("Combined profile: status = %d, want 200; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusOK)
 
 	// Create invite.
 	rr = postJSONWithToken(t, router, "/api/v1/invites", token, map[string]any{
 		"max_uses": 5,
 	})
-	if rr.Code != http.StatusCreated {
-		t.Errorf("Combined invite: status = %d, want 201; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusCreated)
 }
 
 // ─── handleSetPinned: message not found ─────────────────────────────────────
@@ -787,12 +628,10 @@ func TestSetPinned_MessageNotFound_Push(t *testing.T) {
 	database := newPinTestDB(t)
 	router := buildChannelRouter(database)
 	token := chTestCreateToken(t, database, "pinmissmsg", 1)
-	chID, _ := database.CreateChannel(context.Background(), "pinmiss-ch", "text", "", "", 0)
+	chID := mustCreateChannel(t, database, "pinmiss-ch", "text")
 
 	rr := chPost(t, router, fmt.Sprintf("/api/v1/channels/%d/pins/%d", chID, 99999), token)
-	if rr.Code != http.StatusNotFound {
-		t.Errorf("SetPinned missing message: status = %d, want 404; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusNotFound)
 }
 
 func TestSetPinned_ChannelNotFound_Push(t *testing.T) {
@@ -801,9 +640,7 @@ func TestSetPinned_ChannelNotFound_Push(t *testing.T) {
 	token := chTestCreateToken(t, database, "pinmissch", 1)
 
 	rr := chPost(t, router, "/api/v1/channels/99999/pins/1", token)
-	if rr.Code != http.StatusNotFound {
-		t.Errorf("SetPinned missing channel: status = %d, want 404; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusNotFound)
 }
 
 func TestSetPinned_InvalidChannelID(t *testing.T) {
@@ -812,52 +649,38 @@ func TestSetPinned_InvalidChannelID(t *testing.T) {
 	token := chTestCreateToken(t, database, "pinbadid", 1)
 
 	rr := chPost(t, router, "/api/v1/channels/abc/pins/1", token)
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("SetPinned bad channel ID: status = %d, want 400; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusBadRequest)
 }
 
 func TestSetPinned_InvalidMessageID(t *testing.T) {
 	database := newPinTestDB(t)
 	router := buildChannelRouter(database)
 	token := chTestCreateToken(t, database, "pinbadmsg", 1)
-	chID, _ := database.CreateChannel(context.Background(), "badmsgid-ch", "text", "", "", 0)
+	chID := mustCreateChannel(t, database, "badmsgid-ch", "text")
 
 	rr := chPost(t, router, fmt.Sprintf("/api/v1/channels/%d/pins/abc", chID), token)
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("SetPinned bad message ID: status = %d, want 400; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusBadRequest)
 }
 
 func TestUnpin_Success(t *testing.T) {
 	database := newPinTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "unpinner", 1)
-	user, _ := database.GetUserByUsername(context.Background(), "unpinner")
-	chID, _ := database.CreateChannel(context.Background(), "unpin-ch", "text", "", "", 0)
-	msgID, _ := database.CreateMessage(context.Background(), chID, user.ID, "to unpin", nil)
+	router, token, user, chID := newChannelEnvOn(t, database, "unpinner", 1, "unpin-ch", "text")
+	msgID := mustCreateMessage(t, database, chID, user.ID, "to unpin")
 	if _, err := database.SetMessagePinned(context.Background(), db.SetPinnedParams{MessageID: msgID, Pinned: true, UserID: user.ID}); err != nil {
 		t.Fatalf("SetMessagePinned: %v", err)
 	}
 
 	rr := chDelete(t, router, fmt.Sprintf("/api/v1/channels/%d/pins/%d", chID, msgID), token)
-	if rr.Code != http.StatusNoContent {
-		t.Errorf("Unpin: status = %d, want 204; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusNoContent)
 }
 
 func TestSetPinned_MemberForbidden(t *testing.T) {
 	database := newPinTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "pinmember", 4)
-	user, _ := database.GetUserByUsername(context.Background(), "pinmember")
-	chID, _ := database.CreateChannel(context.Background(), "pinforbid-ch", "text", "", "", 0)
-	msgID, _ := database.CreateMessage(context.Background(), chID, user.ID, "cant pin", nil)
+	router, token, user, chID := newChannelEnvOn(t, database, "pinmember", 4, "pinforbid-ch", "text")
+	msgID := mustCreateMessage(t, database, chID, user.ID, "cant pin")
 
 	rr := chPost(t, router, fmt.Sprintf("/api/v1/channels/%d/pins/%d", chID, msgID), token)
-	if rr.Code != http.StatusForbidden {
-		t.Errorf("SetPinned member: status = %d, want 403; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusForbidden)
 }
 
 func TestSetPinned_WrongChannel(t *testing.T) {
@@ -865,15 +688,13 @@ func TestSetPinned_WrongChannel(t *testing.T) {
 	router := buildChannelRouter(database)
 	token := chTestCreateToken(t, database, "pinwrongch", 1)
 	user, _ := database.GetUserByUsername(context.Background(), "pinwrongch")
-	chID1, _ := database.CreateChannel(context.Background(), "pin-ch1", "text", "", "", 0)
-	chID2, _ := database.CreateChannel(context.Background(), "pin-ch2", "text", "", "", 0)
-	msgID, _ := database.CreateMessage(context.Background(), chID1, user.ID, "wrong channel", nil)
+	chID1 := mustCreateChannel(t, database, "pin-ch1", "text")
+	chID2 := mustCreateChannel(t, database, "pin-ch2", "text")
+	msgID := mustCreateMessage(t, database, chID1, user.ID, "wrong channel")
 
 	// Try to pin a message from chID1 using chID2.
 	rr := chPost(t, router, fmt.Sprintf("/api/v1/channels/%d/pins/%d", chID2, msgID), token)
-	if rr.Code != http.StatusNotFound {
-		t.Errorf("SetPinned wrong channel: status = %d, want 404; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusNotFound)
 }
 
 // ─── handleSetPinned: DM channel pin ────────────────────────────────────────
@@ -887,12 +708,10 @@ func TestSetPinned_DMChannel_ParticipantSuccess(t *testing.T) {
 	bob, _ := database.GetUserByUsername(context.Background(), "dmpin_bob")
 
 	dmCh, _, _ := database.GetOrCreateDMChannel(context.Background(), alice.ID, bob.ID)
-	msgID, _ := database.CreateMessage(context.Background(), dmCh.ID, alice.ID, "pin this dm msg", nil)
+	msgID := mustCreateMessage(t, database, dmCh.ID, alice.ID, "pin this dm msg")
 
 	rr := chPost(t, router, fmt.Sprintf("/api/v1/channels/%d/pins/%d", dmCh.ID, msgID), tokenAlice)
-	if rr.Code != http.StatusNoContent {
-		t.Errorf("SetPinned DM participant: status = %d, want 204; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusNoContent)
 }
 
 func TestSetPinned_DMChannel_NonParticipantForbidden(t *testing.T) {
@@ -905,94 +724,68 @@ func TestSetPinned_DMChannel_NonParticipantForbidden(t *testing.T) {
 	bob, _ := database.GetUserByUsername(context.Background(), "dmpinforbid_bob")
 
 	dmCh, _, _ := database.GetOrCreateDMChannel(context.Background(), alice.ID, bob.ID)
-	msgID, _ := database.CreateMessage(context.Background(), dmCh.ID, alice.ID, "secret msg", nil)
+	msgID := mustCreateMessage(t, database, dmCh.ID, alice.ID, "secret msg")
 
 	rr := chPost(t, router, fmt.Sprintf("/api/v1/channels/%d/pins/%d", dmCh.ID, msgID), tokenCharlie)
-	if rr.Code != http.StatusNotFound {
-		t.Errorf("SetPinned DM non-participant: status = %d, want 404; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusNotFound)
 }
 
 // ─── handleSearch: with channel_id filter ───────────────────────────────────
 
 func TestSearch_WithChannelID_Push(t *testing.T) {
-	database := newChannelTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "searchch", 1)
-	user, _ := database.GetUserByUsername(context.Background(), "searchch")
-	chID, _ := database.CreateChannel(context.Background(), "search-ch1", "text", "", "", 0)
-	_, _ = database.CreateMessage(context.Background(), chID, user.ID, "findable in channel", nil)
+	database, router, token, user, chID := newChannelEnv(t, "searchch", 1, "search-ch1", "text")
+	_ = mustCreateMessage(t, database, chID, user.ID, "findable in channel")
 
 	rr := chGet(t, router, fmt.Sprintf("/api/v1/search?q=findable&channel_id=%d", chID), token)
-	if rr.Code != http.StatusOK {
-		t.Errorf("Search with channel_id: status = %d, want 200; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusOK)
 }
 
 func TestSearch_WithInvalidChannelID(t *testing.T) {
 	database := newChannelTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "searchbadch", 1)
+	router, token := newChannelRouterAs(t, database, "searchbadch", 1)
 
 	rr := chGet(t, router, "/api/v1/search?q=test&channel_id=abc", token)
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("Search invalid channel_id: status = %d, want 400; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusBadRequest)
 }
 
 func TestSearch_WithNonexistentChannelID(t *testing.T) {
 	database := newChannelTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "searchmissch", 1)
+	router, token := newChannelRouterAs(t, database, "searchmissch", 1)
 
 	rr := chGet(t, router, "/api/v1/search?q=test&channel_id=99999", token)
-	if rr.Code != http.StatusNotFound {
-		t.Errorf("Search nonexistent channel: status = %d, want 404; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusNotFound)
 }
 
 func TestSearch_WithLimit_Push(t *testing.T) {
 	database := newChannelTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "searchlimit", 1)
+	router, token := newChannelRouterAs(t, database, "searchlimit", 1)
 
 	rr := chGet(t, router, "/api/v1/search?q=test&limit=10", token)
-	if rr.Code != http.StatusOK {
-		t.Errorf("Search with limit: status = %d, want 200; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusOK)
 }
 
 func TestSearch_WithInvalidLimit(t *testing.T) {
 	database := newChannelTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "searchbadlimit", 1)
+	router, token := newChannelRouterAs(t, database, "searchbadlimit", 1)
 
 	rr := chGet(t, router, "/api/v1/search?q=test&limit=abc", token)
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("Search invalid limit: status = %d, want 400; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusBadRequest)
 }
 
 func TestSearch_WithNegativeLimit(t *testing.T) {
 	database := newChannelTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "searchneglimit", 1)
+	router, token := newChannelRouterAs(t, database, "searchneglimit", 1)
 
 	rr := chGet(t, router, "/api/v1/search?q=test&limit=-1", token)
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("Search negative limit: status = %d, want 400; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusBadRequest)
 }
 
 func TestSearch_WithOverMaxLimit(t *testing.T) {
 	database := newChannelTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "searchmaxlimit", 1)
+	router, token := newChannelRouterAs(t, database, "searchmaxlimit", 1)
 
 	rr := chGet(t, router, "/api/v1/search?q=test&limit=999", token)
-	if rr.Code != http.StatusOK {
-		t.Errorf("Search over max limit: status = %d, want 200; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusOK)
 }
 
 func TestSearch_Unauthorized(t *testing.T) {
@@ -1000,89 +793,65 @@ func TestSearch_Unauthorized(t *testing.T) {
 	router := buildChannelRouter(database)
 
 	rr := chGet(t, router, "/api/v1/search?q=test", "")
-	if rr.Code != http.StatusUnauthorized {
-		t.Errorf("Search unauthorized: status = %d, want 401; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusUnauthorized)
 }
 
 // ─── handleGetMessages: more edge cases ─────────────────────────────────────
 
 func TestGetMessages_ChannelNotFound(t *testing.T) {
 	database := newChannelTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "msgnotfound", 1)
+	router, token := newChannelRouterAs(t, database, "msgnotfound", 1)
 
 	rr := chGet(t, router, "/api/v1/channels/99999/messages", token)
-	if rr.Code != http.StatusNotFound {
-		t.Errorf("GetMessages channel not found: status = %d, want 404; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusNotFound)
 }
 
 func TestGetMessages_InvalidChannelID(t *testing.T) {
 	database := newChannelTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "msgbadid", 1)
+	router, token := newChannelRouterAs(t, database, "msgbadid", 1)
 
 	rr := chGet(t, router, "/api/v1/channels/abc/messages", token)
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("GetMessages bad channel ID: status = %d, want 400; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusBadRequest)
 }
 
 func TestGetMessages_WithBeforeParam(t *testing.T) {
-	database := newChannelTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "msgbefore", 1)
-	user, _ := database.GetUserByUsername(context.Background(), "msgbefore")
-	chID, _ := database.CreateChannel(context.Background(), "before-ch", "text", "", "", 0)
-	_, _ = database.CreateMessage(context.Background(), chID, user.ID, "msg one", nil)
-	msgID2, _ := database.CreateMessage(context.Background(), chID, user.ID, "msg two", nil)
+	database, router, token, user, chID := newChannelEnv(t, "msgbefore", 1, "before-ch", "text")
+	_ = mustCreateMessage(t, database, chID, user.ID, "msg one")
+	msgID2 := mustCreateMessage(t, database, chID, user.ID, "msg two")
 
 	rr := chGet(t, router, fmt.Sprintf("/api/v1/channels/%d/messages?before=%d", chID, msgID2), token)
-	if rr.Code != http.StatusOK {
-		t.Errorf("GetMessages before: status = %d, want 200; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusOK)
 }
 
 func TestGetMessages_WithCustomLimit(t *testing.T) {
 	database := newChannelTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "msglimitcust", 1)
-	chID, _ := database.CreateChannel(context.Background(), "limitch", "text", "", "", 0)
+	router, token := newChannelRouterAs(t, database, "msglimitcust", 1)
+	chID := mustCreateChannel(t, database, "limitch", "text")
 
 	rr := chGet(t, router, fmt.Sprintf("/api/v1/channels/%d/messages?limit=5", chID), token)
-	if rr.Code != http.StatusOK {
-		t.Errorf("GetMessages custom limit: status = %d, want 200; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusOK)
 }
 
 // ─── handleListChannels: member role filtering ──────────────────────────────
 
 func TestListChannels_MemberRole(t *testing.T) {
 	database := newChannelTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "memberchanlist", 4)
+	router, token := newChannelRouterAs(t, database, "memberchanlist", 4)
 	_, _ = database.CreateChannel(context.Background(), "visible-ch", "text", "", "", 0)
 
 	rr := chGet(t, router, "/api/v1/channels", token)
-	if rr.Code != http.StatusOK {
-		t.Errorf("ListChannels member: status = %d, want 200; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusOK)
 }
 
 func TestListChannels_AdminSeesAll(t *testing.T) {
 	database := newChannelTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "adminchanlist", 2)
+	router, token := newChannelRouterAs(t, database, "adminchanlist", 2)
 	_, _ = database.CreateChannel(context.Background(), "admin-visible-ch", "text", "", "", 0)
 
 	rr := chGet(t, router, "/api/v1/channels", token)
-	if rr.Code != http.StatusOK {
-		t.Errorf("ListChannels admin: status = %d, want 200; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusOK)
 
-	var resp []any
-	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	resp := decodeBody[[]any](t, rr)
 	if len(resp) < 1 {
 		t.Errorf("Admin should see at least 1 channel, got %d", len(resp))
 	}
@@ -1102,9 +871,7 @@ func TestGetMessages_DMChannel_NonParticipant(t *testing.T) {
 	dmCh, _, _ := database.GetOrCreateDMChannel(context.Background(), alice.ID, bob.ID)
 
 	rr := chGet(t, router, fmt.Sprintf("/api/v1/channels/%d/messages", dmCh.ID), tokenCharlie)
-	if rr.Code != http.StatusNotFound {
-		t.Errorf("GetMessages DM non-participant: status = %d, want 404; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusNotFound)
 }
 
 func TestGetMessages_DMChannel_ParticipantSuccess(t *testing.T) {
@@ -1118,9 +885,7 @@ func TestGetMessages_DMChannel_ParticipantSuccess(t *testing.T) {
 	dmCh, _, _ := database.GetOrCreateDMChannel(context.Background(), alice.ID, bob.ID)
 
 	rr := chGet(t, router, fmt.Sprintf("/api/v1/channels/%d/messages", dmCh.ID), tokenAlice)
-	if rr.Code != http.StatusOK {
-		t.Errorf("GetMessages DM participant: status = %d, want 200; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusOK)
 }
 
 // ─── handleSearch: DM channel search ────────────────────────────────────────
@@ -1137,28 +902,22 @@ func TestSearch_DMChannelFilter_NonParticipant(t *testing.T) {
 	dmCh, _, _ := database.GetOrCreateDMChannel(context.Background(), alice.ID, bob.ID)
 
 	rr := chGet(t, router, fmt.Sprintf("/api/v1/search?q=test&channel_id=%d", dmCh.ID), tokenCharlie)
-	if rr.Code != http.StatusForbidden {
-		t.Errorf("Search DM non-participant: status = %d, want 403; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusForbidden)
 }
 
 func TestSearch_NegativeChannelID_Push(t *testing.T) {
 	database := newChannelTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "searchnegch", 1)
+	router, token := newChannelRouterAs(t, database, "searchnegch", 1)
 
 	rr := chGet(t, router, "/api/v1/search?q=test&channel_id=-1", token)
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("Search negative channel_id: status = %d, want 400; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusBadRequest)
 }
 
 // ─── RateLimitMiddleware "search:" bucket: coverage via multiple rapid requests ─
 
 func TestSearch_RateLimit(t *testing.T) {
 	database := newChannelTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "searchrl", 1)
+	router, token := newChannelRouterAs(t, database, "searchrl", 1)
 
 	// Make many rapid search requests to trigger rate limiting.
 	var lastCode int

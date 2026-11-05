@@ -16,9 +16,7 @@ func TestMigrate_072BackfillsCategoriesFromFreeText(t *testing.T) {
 	database := openMemory(t)
 	ctx := context.Background()
 
-	if err := db.MigrateFS(database, migrationsUpTo(t, "072_")); err != nil {
-		t.Fatalf("MigrateFS() building pre-072 schema: %v", err)
-	}
+	mustDo(t, "MigrateFS() building pre-072 schema", db.MigrateFS(database, migrationsUpTo(t, "072_")))
 	if !columnExists(t, database, "channels", "category") || columnExists(t, database, "channels", "category_id") {
 		t.Fatal("the pre-072 schema should have channels.category and no category_id")
 	}
@@ -50,14 +48,10 @@ func TestMigrate_072BackfillsCategoriesFromFreeText(t *testing.T) {
 		}
 	}
 
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("Migrate() applying 072: %v", err)
-	}
+	mustDo(t, "Migrate() applying 072", db.Migrate(database))
 
 	cats, err := database.ListChannelCategories(ctx)
-	if err != nil {
-		t.Fatalf("ListChannelCategories: %v", err)
-	}
+	mustDo(t, "ListChannelCategories", err)
 	want := []struct {
 		name     string
 		position int
@@ -113,15 +107,11 @@ func TestMigrate_072BackfillsCategoriesFromFreeText(t *testing.T) {
 func TestMigrate_072WithNoCategorizedChannels(t *testing.T) {
 	database := openMemory(t)
 	ctx := context.Background()
-	if err := db.MigrateFS(database, migrationsUpTo(t, "072_")); err != nil {
-		t.Fatalf("pre-072: %v", err)
-	}
+	mustDo(t, "pre-072", db.MigrateFS(database, migrationsUpTo(t, "072_")))
 	if _, err := database.ExecContext(ctx, `INSERT INTO channels (name, type) VALUES ('general', 'text')`); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	mustDo(t, "Migrate", db.Migrate(database))
 	cats, err := database.ListChannelCategories(ctx)
 	if err != nil || len(cats) != 0 {
 		t.Fatalf("categories = %+v, err %v; want none", cats, err)

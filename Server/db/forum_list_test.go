@@ -99,13 +99,9 @@ func TestListThreadsBy_TagFilterAnyOfAndForeignTag(t *testing.T) {
 	}
 	// A tag of another forum, and an id that is no tag, are unknown.
 	other, err := f.db.CreateChannel(ctx, "other", "forum", "", "", 2)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateChannel", err)
 	foreign, err := f.db.ReplaceForumSettings(ctx, other, db.ForumSettingsWrite{DefaultAutoArchiveMinutes: 4320, Tags: []db.ForumTagWrite{{Name: "x"}}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "ReplaceForumSettings", err)
 	for _, bad := range []int64{foreign[0].ID, 987654} {
 		if _, err := f.db.ListThreadsBy(ctx, f.forum, false, db.ThreadListOptions{TagIDs: []int64{bad}}, db.ThreadCursor{}, 10); !errors.Is(err, db.ErrForumTagUnknown) {
 			t.Errorf("tag %d: err = %v, want ErrForumTagUnknown", bad, err)
@@ -131,9 +127,7 @@ func TestListThreadsBy_PagingAcrossIdenticalActivitySeconds(t *testing.T) {
 			after := db.ThreadCursor{}
 			for range 10 {
 				rows, err := f.db.ListThreadsBy(ctx, f.forum, false, db.ThreadListOptions{Sort: sort, TagIDs: tags}, after, 2)
-				if err != nil {
-					t.Fatal(err)
-				}
+				mustDo(t, "ListThreadsBy", err)
 				if len(rows) == 0 {
 					break
 				}

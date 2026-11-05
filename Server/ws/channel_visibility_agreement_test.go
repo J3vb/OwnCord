@@ -8,7 +8,6 @@ package ws_test
 
 import (
 	"context"
-	"encoding/json"
 	"slices"
 	"testing"
 
@@ -20,14 +19,39 @@ import (
 
 func seedVisibilityUser(t *testing.T, database *db.DB, username string, roleID int) *db.User {
 	t.Helper()
-	if _, err := database.CreateUser(context.Background(), username, "hash", roleID); err != nil {
-		t.Fatalf("CreateUser(%s): %v", username, err)
+	return seedUserWithRole(t, database, username, roleID)
+}
+
+// restVisibleSet is the REST view: the channels ListVisibleChannels returns.
+func restVisibleSet(t *testing.T, svc *service.Services, userID int64) map[int64]bool {
+	t.Helper()
+	chans, err := svc.Channels.ListVisibleChannels(context.Background(), userID)
+	if err != nil {
+		t.Fatalf("ListVisibleChannels: %v", err)
 	}
-	user, err := database.GetUserByUsername(context.Background(), username)
-	if err != nil || user == nil {
-		t.Fatalf("GetUserByUsername(%s): %v", username, err)
+	set := make(map[int64]bool, len(chans))
+	for i := range chans {
+		set[chans[i].ID] = true
 	}
-	return user
+	return set
+}
+
+// readyChannelSet is the ws view: the channel ids in a ready frame.
+func readyChannelSet(t *testing.T, readyRaw []byte) map[int64]bool {
+	t.Helper()
+	var ready struct {
+		Payload struct {
+			Channels []struct {
+				ID int64 `json:"id"`
+			} `json:"channels"`
+		} `json:"payload"`
+	}
+	mustUnmarshal(t, readyRaw, &ready)
+	set := make(map[int64]bool, len(ready.Payload.Channels))
+	for _, ch := range ready.Payload.Channels {
+		set[ch.ID] = true
+	}
+	return set
 }
 
 func idSet(ids []int64) map[int64]bool {
@@ -54,10 +78,7 @@ func TestChannelVisibility_RESTWSAgreement(t *testing.T) {
 	svc := service.New(database, limiter)
 
 	// Seed one channel of each server type plus a dm channel (never visible).
-	textID, err := database.CreateChannel(context.Background(), "general", "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel text: %v", err)
-	}
+	textID := mustCreateChannel(t, database, "general", "text")
 	annID, err := database.CreateChannel(context.Background(), "announce", "announcement", "", "", 1)
 	if err != nil {
 		t.Fatalf("CreateChannel announcement: %v", err)
@@ -109,34 +130,10 @@ func TestChannelVisibility_RESTWSAgreement(t *testing.T) {
 			}
 
 			// 1) REST: ListVisibleChannels.
-			restChans, err := svc.Channels.ListVisibleChannels(context.Background(), user.ID)
-			if err != nil {
-				t.Fatalf("ListVisibleChannels: %v", err)
-			}
-			restSet := make(map[int64]bool, len(restChans))
-			for i := range restChans {
-				restSet[restChans[i].ID] = true
-			}
+			restSet := restVisibleSet(t, svc, user.ID)
 
 			// 2) WS ready payload: buildReady's channel list.
-			readyRaw, err := hub.BuildReadyWithRoleForTest(database, user.ID, role)
-			if err != nil {
-				t.Fatalf("BuildReadyWithRoleForTest: %v", err)
-			}
-			var ready struct {
-				Payload struct {
-					Channels []struct {
-						ID int64 `json:"id"`
-					} `json:"channels"`
-				} `json:"payload"`
-			}
-			if err := json.Unmarshal(readyRaw, &ready); err != nil {
-				t.Fatalf("unmarshal ready: %v", err)
-			}
-			readySet := make(map[int64]bool, len(ready.Payload.Channels))
-			for _, ch := range ready.Payload.Channels {
-				readySet[ch.ID] = true
-			}
+			readySet := readyChannelSet(t, mustBuildReadyWithRole(t, hub, database, user.ID, role))
 
 			// 3) Reconnect replay filtering: computeAllowedChannels, minus DMs.
 			allowed, err := hub.ComputeAllowedChannelsForTest(database, user)
@@ -179,10 +176,7 @@ func TestChannelVisibility_UserOverrideAgreement(t *testing.T) {
 	hub := newTestHubDeps(t, database, limiter, nil)
 	svc := service.New(database, limiter)
 
-	openID, err := database.CreateChannel(context.Background(), "open", "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel open: %v", err)
-	}
+	openID := mustCreateChannel(t, database, "open", "text")
 	lockedID, err := database.CreateChannel(context.Background(), "locked", "text", "", "", 1)
 	if err != nil {
 		t.Fatalf("CreateChannel locked: %v", err)
@@ -225,33 +219,9 @@ func TestChannelVisibility_UserOverrideAgreement(t *testing.T) {
 				t.Fatalf("GetRoleByID: %v", err)
 			}
 
-			restChans, err := svc.Channels.ListVisibleChannels(context.Background(), tc.user.ID)
-			if err != nil {
-				t.Fatalf("ListVisibleChannels: %v", err)
-			}
-			restSet := make(map[int64]bool, len(restChans))
-			for i := range restChans {
-				restSet[restChans[i].ID] = true
-			}
+			restSet := restVisibleSet(t, svc, tc.user.ID)
 
-			readyRaw, err := hub.BuildReadyWithRoleForTest(database, tc.user.ID, role)
-			if err != nil {
-				t.Fatalf("BuildReadyWithRoleForTest: %v", err)
-			}
-			var ready struct {
-				Payload struct {
-					Channels []struct {
-						ID int64 `json:"id"`
-					} `json:"channels"`
-				} `json:"payload"`
-			}
-			if err := json.Unmarshal(readyRaw, &ready); err != nil {
-				t.Fatalf("unmarshal ready: %v", err)
-			}
-			readySet := make(map[int64]bool, len(ready.Payload.Channels))
-			for _, ch := range ready.Payload.Channels {
-				readySet[ch.ID] = true
-			}
+			readySet := readyChannelSet(t, mustBuildReadyWithRole(t, hub, database, tc.user.ID, role))
 
 			allowed, err := hub.ComputeAllowedChannelsForTest(database, tc.user)
 			if err != nil {

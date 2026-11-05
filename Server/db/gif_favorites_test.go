@@ -12,9 +12,7 @@ import (
 func gifFavUser(t *testing.T, d *db.DB, name string) int64 {
 	t.Helper()
 	uid, err := d.CreateUser(context.Background(), name, "x", 4)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	mustDo(t, "CreateUser", err)
 	return uid
 }
 
@@ -30,16 +28,12 @@ func TestGIFFavorites_AddListRemoveNewestFirst(t *testing.T) {
 		}
 	}
 	got, err := d.ListGIFFavorites(ctx, uid)
-	if err != nil {
-		t.Fatalf("list: %v", err)
-	}
+	mustDo(t, "list", err)
 	if len(got) != 3 || got[0].Title != "c" || got[2].Title != "a" {
 		t.Fatalf("want newest first c,b,a; got %+v", got)
 	}
 
-	if err := d.RemoveGIFFavorite(ctx, uid, "https://media.klipy.com/b.gif"); err != nil {
-		t.Fatalf("remove: %v", err)
-	}
+	mustDo(t, "remove", d.RemoveGIFFavorite(ctx, uid, "https://media.klipy.com/b.gif"))
 	got, _ = d.ListGIFFavorites(ctx, uid)
 	if len(got) != 2 {
 		t.Fatalf("after remove: %d rows, want 2", len(got))
@@ -52,19 +46,13 @@ func TestGIFFavorites_AddIsIdempotentAndPerUser(t *testing.T) {
 	a, b := gifFavUser(t, d, "alice"), gifFavUser(t, d, "bob")
 	f := db.GIFFavorite{URL: "https://media.klipy.com/a.gif", PreviewURL: "https://media.klipy.com/a_t.gif"}
 	for range 2 {
-		if err := d.AddGIFFavorite(ctx, a, f); err != nil {
-			t.Fatalf("add: %v", err)
-		}
+		mustDo(t, "add", d.AddGIFFavorite(ctx, a, f))
 	}
-	if err := d.AddGIFFavorite(ctx, b, f); err != nil {
-		t.Fatalf("add other user: %v", err)
-	}
+	mustDo(t, "add other user", d.AddGIFFavorite(ctx, b, f))
 	if got, _ := d.ListGIFFavorites(ctx, a); len(got) != 1 {
 		t.Errorf("alice has %d, want 1", len(got))
 	}
-	if err := d.RemoveGIFFavorite(ctx, a, f.URL); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "RemoveGIFFavorite", d.RemoveGIFFavorite(ctx, a, f.URL))
 	if got, _ := d.ListGIFFavorites(ctx, b); len(got) != 1 {
 		t.Errorf("bob lost his favorite when alice removed hers")
 	}
@@ -85,7 +73,5 @@ func TestGIFFavorites_CapRefusesNewButAllowsExisting(t *testing.T) {
 		t.Fatalf("over cap err = %v, want ErrGIFFavoritesFull", err)
 	}
 	again := db.GIFFavorite{URL: "https://media.klipy.com/0.gif", PreviewURL: "https://media.klipy.com/0.gif"}
-	if err := d.AddGIFFavorite(ctx, uid, again); err != nil {
-		t.Fatalf("re-adding an existing favorite at the cap must succeed: %v", err)
-	}
+	mustDo(t, "re-adding an existing favorite at the cap must succeed", d.AddGIFFavorite(ctx, uid, again))
 }

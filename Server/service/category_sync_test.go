@@ -61,9 +61,7 @@ func TestCreateInCategory_CopiesTheTemplateAndStartsSynced(t *testing.T) {
 	// not blocked by a MANAGE_SERVER deny in the template.
 	rec, inval := f.watch()
 	ch, _, err := f.svc.AdminCreateChannel(ctx, 7, AdminChannelCreate{Name: "fresh", CategoryID: f.cat.ID}, nil)
-	if err != nil {
-		t.Fatalf("create by an actor lacking template bits: %v", err)
-	}
+	mustDo(t, "create by an actor lacking template bits", err)
 	if !f.synced(t, ch) {
 		t.Error("a channel created in a category must start synced")
 	}
@@ -85,9 +83,7 @@ func TestCreateInCategory_CopiesTheTemplateAndStartsSynced(t *testing.T) {
 
 	// The legacy category string resolves to the same category.
 	legacy, _, err := f.svc.AdminCreateChannel(ctx, 7, AdminChannelCreate{Name: "legacy", Category: "games"}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "AdminCreateChannel", err)
 	if !f.synced(t, legacy) {
 		t.Error("a channel created through the legacy name must start synced")
 	}
@@ -97,9 +93,7 @@ func TestCreateInCategory_CopiesTheTemplateAndStartsSynced(t *testing.T) {
 
 	// No category, no template, not synced.
 	plain, _, err := f.svc.AdminCreateChannel(ctx, 7, AdminChannelCreate{Name: "plain"}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "AdminCreateChannel", err)
 	if f.synced(t, plain) {
 		t.Error("an uncategorized channel is never synced")
 	}
@@ -133,9 +127,7 @@ func TestDirectOverrideEditUnsyncs(t *testing.T) {
 			if !f.synced(t, f.a) {
 				t.Fatal("fixture channel should start synced")
 			}
-			if err := step(f, f.a); err != nil {
-				t.Fatal(err)
-			}
+			mustDo(t, "step", step(f, f.a))
 			if f.synced(t, f.a) {
 				t.Error("a direct override edit must unsync the channel")
 			}
@@ -151,9 +143,7 @@ func TestMoveChannel_KeepsOverridesAndUnsyncsUnlessAskedToSync(t *testing.T) {
 	ctx := context.Background()
 	f.seedTemplate(t)
 	otherChange, err := f.svc.CreateCategory(ctx, 1, "Music")
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateCategory", err)
 	other := otherChange.Category
 	// Music's template differs: ATTACH_FILES allow for the same role.
 	if _, err := f.svc.PutCategoryRoleOverride(ctx, 7, f.admin, other.ID, f.low.ID, permissions.AttachFiles, 0); err != nil {
@@ -165,9 +155,7 @@ func TestMoveChannel_KeepsOverridesAndUnsyncsUnlessAskedToSync(t *testing.T) {
 	seedUserRole(t, f.database, 31, f.low.ID)
 	rec, inval := f.watch()
 	moved, _, err := f.svc.AdminUpdateChannel(ctx, 7, f.a, moveTo(f.a, other.ID, false, f.mod), nil)
-	if err != nil {
-		t.Fatalf("move: %v", err)
-	}
+	mustDo(t, "move", err)
 	if moved.CategoryID != other.ID {
 		t.Fatalf("category = %d, want %d", moved.CategoryID, other.ID)
 	}
@@ -204,9 +192,7 @@ func TestMoveChannel_KeepsOverridesAndUnsyncsUnlessAskedToSync(t *testing.T) {
 		t.Errorf("a refused sync must neither invalidate nor notify, invalidations = %+v, events = %+v", inval, rec.events)
 	}
 	back, _, err := f.svc.AdminUpdateChannel(ctx, 7, moved, moveTo(moved, f.cat.ID, true, f.admin), nil)
-	if err != nil {
-		t.Fatalf("admin sync move: %v", err)
-	}
+	mustDo(t, "admin sync move", err)
 	if back.CategoryID != f.cat.ID || !f.synced(t, f.a) {
 		t.Error("sync_permissions must move and mark the channel synced")
 	}
@@ -267,9 +253,7 @@ func TestSyncChannelPermissions_ReplacesRowsWithTheTemplate(t *testing.T) {
 
 	rec, inval := f.watch()
 	effect, err := f.svc.SyncChannelPermissions(ctx, 7, f.admin, f.b)
-	if err != nil {
-		t.Fatalf("SyncChannelPermissions: %v", err)
-	}
+	mustDo(t, "SyncChannelPermissions", err)
 	if allow, deny := f.channelRow(t, f.b, f.low.ID); allow != permissions.ReadMessages || deny != permissions.ManageServer {
 		t.Errorf("row = (%#x,%#x), want the template's", allow, deny)
 	}
@@ -287,9 +271,7 @@ func TestSyncChannelPermissions_ReplacesRowsWithTheTemplate(t *testing.T) {
 	}
 
 	plain, _, err := f.svc.AdminCreateChannel(ctx, 7, AdminChannelCreate{Name: "plain"}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "AdminCreateChannel", err)
 	if _, err := f.svc.SyncChannelPermissions(ctx, 7, f.admin, plain); !errors.Is(err, ErrBadRequest) {
 		t.Errorf("uncategorized sync: err = %v, want ErrBadRequest", err)
 	}
@@ -321,9 +303,7 @@ func TestSyncChannelPermissions_RowsChangedUnderTheCheckAreRefused(t *testing.T)
 	ctx := context.Background()
 	refused := error(nil)
 	guard, err := f.svc.prepareSync(ctx, f.mod, f.b.ID, f.cat.ID, &refused)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "prepareSync", err)
 	// A role row appears after the check and before the write.
 	if _, err := f.database.ExecContext(ctx,
 		`INSERT INTO channel_overrides (channel_id, role_id, allow, deny) VALUES (?, ?, 1, 0)`, f.b.ID, f.low.ID); err != nil {
@@ -370,9 +350,7 @@ func TestAdminListChannelsSynced_ReportsTheFlag(t *testing.T) {
 		t.Fatal(err)
 	}
 	list, err := f.svc.AdminListChannelsSynced(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "AdminListChannelsSynced", err)
 	got := map[int64]bool{}
 	for _, c := range list {
 		got[c.ID] = c.PermissionsSynced

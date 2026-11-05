@@ -86,9 +86,7 @@ func TestRevokeAllSessions_DisconnectsTheAccountsLiveSockets(t *testing.T) {
 	}
 
 	rr := profileDelete(t, router, "/api/v1/users/me/sessions", token)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body = %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 	if n, current := decodeRevokeAll(t, rr.Body.Bytes()); n != 2 || !current {
 		t.Fatalf("revoked = %d, current = %v; want 2 and true", n, current)
 	}

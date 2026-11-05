@@ -2,7 +2,6 @@ package api_test
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -28,7 +27,7 @@ func buildInviteRouter(database *db.DB, limiter *auth.RateLimiter) http.Handler 
 func loginAndGetToken(t *testing.T, _ http.Handler, database *db.DB, username string, roleID int) string {
 	t.Helper()
 	hash, _ := auth.HashPassword("Password1!")
-	uid, _ := database.CreateUser(context.Background(), username, hash, roleID)
+	uid := mustCreateUser(t, database, username, hash, roleID)
 	token, _ := auth.GenerateToken()
 	_, _ = database.CreateSession(context.Background(), uid, auth.HashToken(token), "test", "127.0.0.1")
 	return token
@@ -49,12 +48,9 @@ func TestCreateInvite_Success(t *testing.T) {
 		"expires_in_hours": 48,
 	})
 
-	if rr.Code != http.StatusCreated {
-		t.Errorf("CreateInvite status = %d, want 201; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusCreated)
 
-	var resp map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	resp := decodeBody[map[string]any](t, rr)
 	if resp["code"] == nil {
 		t.Error("CreateInvite response missing code")
 	}
@@ -69,9 +65,7 @@ func TestCreateInvite_Unauthorized(t *testing.T) {
 		"max_uses": 5,
 	})
 
-	if rr.Code != http.StatusUnauthorized {
-		t.Errorf("CreateInvite no auth status = %d, want 401", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusUnauthorized)
 }
 
 func TestCreateInvite_MemberForbidden(t *testing.T) {
@@ -86,9 +80,7 @@ func TestCreateInvite_MemberForbidden(t *testing.T) {
 		"max_uses": 1,
 	})
 
-	if rr.Code != http.StatusForbidden {
-		t.Errorf("CreateInvite member status = %d, want 403", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusForbidden)
 }
 
 // TestCreateInvite_ChannelAllowOverrideDoesNotGrant pins the scope boundary of
@@ -120,9 +112,7 @@ func TestCreateInvite_ChannelAllowOverrideDoesNotGrant(t *testing.T) {
 		"max_uses": 1,
 	})
 
-	if rr.Code != http.StatusForbidden {
-		t.Errorf("CreateInvite with channel allow override status = %d, want 403", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusForbidden)
 }
 
 func TestCreateInvite_Unlimited(t *testing.T) {
@@ -134,9 +124,7 @@ func TestCreateInvite_Unlimited(t *testing.T) {
 
 	rr := postJSONWithToken(t, router, "/api/v1/invites", token, map[string]any{})
 
-	if rr.Code != http.StatusCreated {
-		t.Errorf("CreateInvite unlimited status = %d, want 201", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusCreated)
 }
 
 func TestCreateInvite_EmptyBody(t *testing.T) {
@@ -148,18 +136,11 @@ func TestCreateInvite_EmptyBody(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/invites", http.NoBody)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+token)
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
+	rr := serveLocal(router, req)
 
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("CreateInvite empty body status = %d, want 201; body = %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusCreated)
 
-	var resp map[string]any
-	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
+	resp := decodeBody[map[string]any](t, rr)
 	if resp["max_uses"] != nil {
 		t.Errorf("max_uses = %v, want nil", resp["max_uses"])
 	}
@@ -182,14 +163,9 @@ func TestCreateInvite_CreateInviteFailure(t *testing.T) {
 	}
 
 	rr := postJSONWithToken(t, router, "/api/v1/invites", token, map[string]any{})
-	if rr.Code != http.StatusInternalServerError {
-		t.Fatalf("CreateInvite create failure status = %d, want 500; body = %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusInternalServerError)
 
-	var resp map[string]any
-	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
+	resp := decodeBody[map[string]any](t, rr)
 	if resp["message"] != "an internal error occurred" {
 		t.Errorf("message = %v, want an internal error occurred", resp["message"])
 	}
@@ -212,14 +188,9 @@ func TestCreateInvite_GetInviteFailure(t *testing.T) {
 	}
 
 	rr := postJSONWithToken(t, router, "/api/v1/invites", token, map[string]any{})
-	if rr.Code != http.StatusInternalServerError {
-		t.Fatalf("CreateInvite get failure status = %d, want 500; body = %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusInternalServerError)
 
-	var resp map[string]any
-	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
+	resp := decodeBody[map[string]any](t, rr)
 	if resp["message"] != "an internal error occurred" {
 		t.Errorf("message = %v, want an internal error occurred", resp["message"])
 	}
@@ -241,18 +212,11 @@ func TestListInvites_Success(t *testing.T) {
 	postJSONWithToken(t, router, "/api/v1/invites", token, map[string]any{"max_uses": 1})
 	postJSONWithToken(t, router, "/api/v1/invites", token, map[string]any{"max_uses": 5})
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/invites", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
+	rr := doAPI(t, router, http.MethodGet, "/api/v1/invites", token, nil)
 
-	if rr.Code != http.StatusOK {
-		t.Errorf("ListInvites status = %d, want 200; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusOK)
 
-	var resp []any
-	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	resp := decodeBody[[]any](t, rr)
 	if len(resp) < 2 {
 		t.Errorf("ListInvites returned %d items, want >= 2", len(resp))
 	}
@@ -264,13 +228,9 @@ func TestListInvites_Unauthorized(t *testing.T) {
 	router := buildInviteRouter(database, limiter)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/invites", nil)
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
+	rr := serveLocal(router, req)
 
-	if rr.Code != http.StatusUnauthorized {
-		t.Errorf("ListInvites no auth status = %d, want 401", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusUnauthorized)
 }
 
 func TestListInvites_EmptyArray(t *testing.T) {
@@ -279,20 +239,11 @@ func TestListInvites_EmptyArray(t *testing.T) {
 	router := buildInviteRouter(database, limiter)
 	token := loginAndGetToken(t, router, database, "emptyinvitelist", 2)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/invites", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
+	rr := doAPI(t, router, http.MethodGet, "/api/v1/invites", token, nil)
 
-	if rr.Code != http.StatusOK {
-		t.Fatalf("ListInvites empty status = %d, want 200; body = %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 
-	var resp []any
-	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
+	resp := decodeBody[[]any](t, rr)
 	if len(resp) != 0 {
 		t.Fatalf("ListInvites empty returned %d items, want 0", len(resp))
 	}
@@ -309,11 +260,8 @@ func TestRevokeInvite_Success(t *testing.T) {
 
 	// Create invite via API.
 	rr := postJSONWithToken(t, router, "/api/v1/invites", token, map[string]any{})
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("Create invite for revoke test: status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-	var created map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&created)
+	requireStatus(t, rr, http.StatusCreated)
+	created := decodeBody[map[string]any](t, rr)
 	codeVal, ok := created["code"]
 	if !ok || codeVal == nil {
 		t.Fatalf("Create invite response missing code field; body parsed as %v", created)
@@ -321,15 +269,9 @@ func TestRevokeInvite_Success(t *testing.T) {
 	code := codeVal.(string)
 
 	// Revoke it.
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/invites/"+code, nil)
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr2 := httptest.NewRecorder()
-	router.ServeHTTP(rr2, req)
+	rr2 := doAPI(t, router, http.MethodDelete, "/api/v1/invites/"+code, token, nil)
 
-	if rr2.Code != http.StatusNoContent {
-		t.Errorf("RevokeInvite status = %d, want 204; body = %s", rr2.Code, rr2.Body.String())
-	}
+	expectStatus(t, rr2, http.StatusNoContent)
 
 	// Verify invite is revoked.
 	inv, _ := database.GetInvite(context.Background(), code)
@@ -345,15 +287,9 @@ func TestRevokeInvite_NotFound(t *testing.T) {
 
 	token := loginAndGetToken(t, router, database, "revoker2", 2)
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/invites/doesnotexist", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
+	rr := doAPI(t, router, http.MethodDelete, "/api/v1/invites/doesnotexist", token, nil)
 
-	if rr.Code != http.StatusNotFound {
-		t.Errorf("RevokeInvite not found status = %d, want 404", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusNotFound)
 }
 
 func TestRevokeInvite_MemberForbidden(t *testing.T) {
@@ -366,20 +302,13 @@ func TestRevokeInvite_MemberForbidden(t *testing.T) {
 
 	// Admin creates invite.
 	rr := postJSONWithToken(t, router, "/api/v1/invites", adminToken, map[string]any{})
-	var created map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&created)
+	created := decodeBody[map[string]any](t, rr)
 	code := created["code"].(string)
 
 	// Member tries to revoke.
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/invites/"+code, nil)
-	req.Header.Set("Authorization", "Bearer "+memberToken)
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr2 := httptest.NewRecorder()
-	router.ServeHTTP(rr2, req)
+	rr2 := doAPI(t, router, http.MethodDelete, "/api/v1/invites/"+code, memberToken, nil)
 
-	if rr2.Code != http.StatusForbidden {
-		t.Errorf("RevokeInvite member status = %d, want 403", rr2.Code)
-	}
+	expectStatus(t, rr2, http.StatusForbidden)
 }
 
 func TestRevokeInvite_RevokeFailure(t *testing.T) {
@@ -389,13 +318,8 @@ func TestRevokeInvite_RevokeFailure(t *testing.T) {
 	token := loginAndGetToken(t, router, database, "revokefailure", 2)
 
 	rr := postJSONWithToken(t, router, "/api/v1/invites", token, map[string]any{})
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("setup create invite: status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-	var created map[string]any
-	if err := json.NewDecoder(rr.Body).Decode(&created); err != nil {
-		t.Fatalf("decode create response: %v", err)
-	}
+	requireStatus(t, rr, http.StatusCreated)
+	created := decodeBody[map[string]any](t, rr)
 	code := created["code"].(string)
 
 	if _, err := database.ExecContext(context.Background(), `
@@ -408,20 +332,11 @@ func TestRevokeInvite_RevokeFailure(t *testing.T) {
 		t.Fatalf("create trigger: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/invites/"+code, nil)
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr2 := httptest.NewRecorder()
-	router.ServeHTTP(rr2, req)
+	rr2 := doAPI(t, router, http.MethodDelete, "/api/v1/invites/"+code, token, nil)
 
-	if rr2.Code != http.StatusInternalServerError {
-		t.Fatalf("RevokeInvite failure status = %d, want 500; body = %s", rr2.Code, rr2.Body.String())
-	}
+	requireStatus(t, rr2, http.StatusInternalServerError)
 
-	var resp map[string]any
-	if err := json.NewDecoder(rr2.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode revoke failure response: %v", err)
-	}
+	resp := decodeBody[map[string]any](t, rr2)
 	if resp["message"] != "an internal error occurred" {
 		t.Errorf("message = %v, want an internal error occurred", resp["message"])
 	}
@@ -438,11 +353,8 @@ func TestListInvites_IncludesRevokedAndActive(t *testing.T) {
 
 	// Create and revoke one invite.
 	rr := postJSONWithToken(t, router, "/api/v1/invites", token, map[string]any{})
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("Create invite for list test: status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-	var created map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&created)
+	requireStatus(t, rr, http.StatusCreated)
+	created := decodeBody[map[string]any](t, rr)
 	code := created["code"].(string)
 
 	delReq := httptest.NewRequest(http.MethodDelete, "/api/v1/invites/"+code, nil)
@@ -455,13 +367,7 @@ func TestListInvites_IncludesRevokedAndActive(t *testing.T) {
 	postJSONWithToken(t, router, "/api/v1/invites", token, map[string]any{})
 
 	// List should include both.
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/invites", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr2 := httptest.NewRecorder()
-	router.ServeHTTP(rr2, req)
+	rr2 := doAPI(t, router, http.MethodGet, "/api/v1/invites", token, nil)
 
-	if rr2.Code != http.StatusOK {
-		t.Errorf("ListInvites status = %d, want 200", rr2.Code)
-	}
+	expectStatus(t, rr2, http.StatusOK)
 }

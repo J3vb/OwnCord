@@ -48,9 +48,7 @@ func supportTestDB(t *testing.T) *db.DB {
 func previewBundle(t *testing.T, handler http.Handler, token string) bundlePreview {
 	t.Helper()
 	w := doRequest(t, handler, http.MethodPost, "/support-bundles/preview", token, map[string]any{})
-	if w.Code != http.StatusOK {
-		t.Fatalf("preview: %d %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 	if w.Header().Get("Cache-Control") != "no-store" {
 		t.Fatal("preview must not be cached")
 	}
@@ -131,9 +129,7 @@ func TestSupportBundle_FrozenReviewedBytesExcludePlantedSecrets(t *testing.T) {
 		t.Fatal(err)
 	}
 	w := doRequest(t, handler, http.MethodPost, "/support-bundles/download", token, map[string]string{"preview_id": p.ID, "sha256": p.SHA256})
-	if w.Code != http.StatusOK {
-		t.Fatalf("download: %d %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 	if len(w.Body.Bytes()) != p.ByteSize || bundleHash(w.Body.Bytes()) != p.SHA256 {
 		t.Fatal("download changed after preview")
 	}
@@ -214,9 +210,7 @@ func TestSupportBundle_FrozenReviewedBytesExcludePlantedSecrets(t *testing.T) {
 		t.Fatalf("export audit count %d", count)
 	}
 	w = doRequest(t, handler, http.MethodPost, "/support-bundles/download", token, map[string]string{"preview_id": p.ID, "sha256": p.SHA256})
-	if w.Code != http.StatusGone {
-		t.Fatalf("replayed download accepted: %d", w.Code)
-	}
+	requireStatus(t, w, http.StatusGone)
 }
 
 func TestSupportBundle_AuthorizationSessionBindingAndForbiddenSelection(t *testing.T) {
@@ -231,9 +225,7 @@ func TestSupportBundle_AuthorizationSessionBindingAndForbiddenSelection(t *testi
 		}
 	}
 	w := doRequest(t, handler, http.MethodPost, "/support-bundles/preview", "", map[string]any{})
-	if w.Code != http.StatusUnauthorized {
-		t.Fatalf("anonymous admitted: %d", w.Code)
-	}
+	requireStatus(t, w, http.StatusUnauthorized)
 	for _, field := range []string{"items", "include_messages", "include_credentials", "include_addresses"} {
 		w = doRequest(t, handler, http.MethodPost, "/support-bundles/preview", token, map[string]any{field: true})
 		if w.Code != http.StatusBadRequest {
@@ -249,9 +241,7 @@ func TestSupportBundle_AuthorizationSessionBindingAndForbiddenSelection(t *testi
 		t.Fatal(err)
 	}
 	w = doRequest(t, handler, http.MethodPost, "/support-bundles/preview", apiToken, map[string]any{})
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("API token admitted: %d", w.Code)
-	}
+	requireStatus(t, w, http.StatusForbidden)
 	p := previewBundle(t, handler, token)
 	second := "second-owner-session"
 	if _, err := database.CreateSession(context.Background(), owner.ID, auth.HashToken(second), "test", "127.0.0.1"); err != nil {
@@ -259,18 +249,14 @@ func TestSupportBundle_AuthorizationSessionBindingAndForbiddenSelection(t *testi
 	}
 	for _, attempt := range []struct{ token, hash string }{{second, p.SHA256}, {token, "wrong-hash"}} {
 		w = doRequest(t, handler, http.MethodPost, "/support-bundles/download", attempt.token, map[string]string{"preview_id": p.ID, "sha256": attempt.hash})
-		if w.Code != http.StatusGone {
-			t.Fatalf("different session/hash accepted: %d", w.Code)
-		}
+		requireStatus(t, w, http.StatusGone)
 	}
 	// Permission changes apply between preview and confirmation.
 	if err := database.UpdateUserRole(context.Background(), owner.ID, 4); err != nil {
 		t.Fatal(err)
 	}
 	w = doRequest(t, handler, http.MethodPost, "/support-bundles/download", token, map[string]string{"preview_id": p.ID, "sha256": p.SHA256})
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("revoked administrator admitted: %d", w.Code)
-	}
+	requireStatus(t, w, http.StatusForbidden)
 }
 
 func TestSupportBundle_AuditFailurePreventsDownload(t *testing.T) {
@@ -296,7 +282,5 @@ func TestSupportBundle_AdministratorDoesNotNeedOwnerRole(t *testing.T) {
 	handler := admin.NewAdminAPI(database, "1.2.3", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
 	p := previewBundle(t, handler, token)
 	w := doRequest(t, handler, http.MethodPost, "/support-bundles/download", token, map[string]string{"preview_id": p.ID, "sha256": p.SHA256})
-	if w.Code != http.StatusOK {
-		t.Fatalf("administrator refused: %d %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 }

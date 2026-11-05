@@ -3,7 +3,6 @@ package api_test
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -51,13 +50,8 @@ func getMetrics(t *testing.T, src api.MetricsSources) map[string]any {
 	t.Helper()
 	rr := httptest.NewRecorder()
 	api.HandleMetricsForTest(src).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/v1/metrics", nil))
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d; body: %s", rr.Code, rr.Body.String())
-	}
-	var resp map[string]any
-	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	requireStatus(t, rr, http.StatusOK)
+	resp := decodeBody[map[string]any](t, rr)
 	return resp
 }
 

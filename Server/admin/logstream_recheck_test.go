@@ -71,10 +71,7 @@ func TestThrottledCheck_FalseIsPermanent(t *testing.T) {
 // token hash and a ticket for the log stream.
 func streamSessionTicket(t *testing.T, database *db.DB) (tokenHash, ticket string) {
 	t.Helper()
-	userID, err := database.CreateUser(context.Background(), "owner", "hash", 1)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	userID := mustCreateUser(t, database, "owner", "hash", 1)
 	token, err := auth.GenerateToken()
 	if err != nil {
 		t.Fatalf("GenerateToken: %v", err)

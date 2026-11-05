@@ -7,7 +7,6 @@ package admin_test
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"reflect"
 	"regexp"
@@ -43,10 +42,7 @@ func createRoleUser(t *testing.T, database *db.DB, roleID int64, name string, pe
 	); err != nil {
 		t.Fatalf("seed role %s: %v", name, err)
 	}
-	uid, err := database.CreateUser(context.Background(), username, "$2a$12$placeholder", int(roleID))
-	if err != nil {
-		t.Fatalf("CreateUser %s: %v", username, err)
-	}
+	uid := mustCreateUser(t, database, username, "$2a$12$placeholder", int(roleID))
 	token := username + "-token-" + t.Name()
 	if _, err := database.CreateSession(context.Background(), uid, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
 		t.Fatalf("CreateSession %s: %v", username, err)
@@ -96,13 +92,8 @@ func TestChannelRoutes_ModeratorAllowed(t *testing.T) {
 		t.Fatalf("GET /channels = %d, want 200; body: %s", w.Code, w.Body.String())
 	}
 	w := doRequest(t, handler, http.MethodPost, "/channels", token, map[string]any{"name": "mod-made", "type": "text"})
-	if w.Code != http.StatusCreated {
-		t.Fatalf("POST /channels = %d, want 201; body: %s", w.Code, w.Body.String())
-	}
-	var created db.Channel
-	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
-		t.Fatalf("unmarshal channel: %v", err)
-	}
+	requireStatus(t, w, http.StatusCreated)
+	created := decodeBody[db.Channel](t, w)
 	if w := doRequest(t, handler, http.MethodPatch, "/channels/"+itoa(created.ID), token,
 		map[string]any{"name": "mod-renamed"}); w.Code != http.StatusOK {
 		t.Errorf("PATCH /channels = %d, want 200; body: %s", w.Code, w.Body.String())
@@ -123,13 +114,11 @@ func TestChannelRoutes_ModeratorAllowed(t *testing.T) {
 // banning out of a Moderator's reach entirely.
 func TestPatchUserBan_ModeratorAllowed(t *testing.T) {
 	handler, database, token := newModeratorHandler(t)
-	targetUID, _ := database.CreateUser(context.Background(), "spammer", "hash", 3)
+	targetUID := mustCreateUser(t, database, "spammer", "hash", 3)
 
 	w := doRequest(t, handler, http.MethodPatch, "/users/"+itoa(targetUID), token,
 		map[string]any{"banned": true, "ban_reason": "spam"})
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 	user, _ := database.GetUserByID(context.Background(), targetUID)
 	if !user.Banned {
 		t.Error("target should be banned")
@@ -582,15 +571,13 @@ func TestForceLogout_RequiresKickMembers(t *testing.T) {
 	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
 	_, token := createRoleUser(t, database, 14, "ChannelMod", permissions.ManageChannels, 60, "chanmoduser")
 
-	targetUID, _ := database.CreateUser(context.Background(), "victim", "hash", 3)
+	targetUID := mustCreateUser(t, database, "victim", "hash", 3)
 	if _, err := database.CreateSession(context.Background(), targetUID, "victim-hash-perm", "web", "1.2.3.4"); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
 	w := doRequest(t, handler, http.MethodDelete, "/users/"+itoa(targetUID)+"/sessions", token, nil)
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusForbidden)
 	sessions, _ := database.GetUserSessions(context.Background(), targetUID)
 	if len(sessions) != 1 {
 		t.Errorf("sessions = %d, want 1 (refused call must not cut sessions)", len(sessions))
@@ -603,10 +590,7 @@ func TestForceLogout_HierarchyEnforced(t *testing.T) {
 	_, token := createRoleUser(t, database, 10, "Moderator", moderatorMask, 60, "moduser")
 
 	// Owner (role 1, position 100) outranks the moderator.
-	ownerUID, err := database.CreateUser(context.Background(), "theowner", "hash", 1)
-	if err != nil {
-		t.Fatalf("CreateUser owner: %v", err)
-	}
+	ownerUID := mustCreateUser(t, database, "theowner", "hash", 1)
 	if _, err := database.CreateSession(context.Background(), ownerUID, "owner-hash-hier", "web", "1.2.3.4"); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
@@ -620,7 +604,7 @@ func TestForceLogout_HierarchyEnforced(t *testing.T) {
 	}
 
 	// A lower-ranked member is fair game.
-	memberUID, _ := database.CreateUser(context.Background(), "amember", "hash", 3)
+	memberUID := mustCreateUser(t, database, "amember", "hash", 3)
 	if _, err := database.CreateSession(context.Background(), memberUID, "member-hash-hier", "web", "1.2.3.4"); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
@@ -636,12 +620,10 @@ func TestPatchUserRole_RequiresManageRoles(t *testing.T) {
 	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
 	// The seeded Moderator mask stops at bit 19 — no MANAGE_ROLES (bit 24).
 	_, token := createRoleUser(t, database, 10, "Moderator", moderatorMask, 60, "moduser")
-	targetUID, _ := database.CreateUser(context.Background(), "promoteme", "hash", 3)
+	targetUID := mustCreateUser(t, database, "promoteme", "hash", 3)
 
 	w := doRequest(t, handler, http.MethodPatch, "/users/"+itoa(targetUID), token, map[string]any{"role_id": 2})
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusForbidden)
 	user, _ := database.GetUserByID(context.Background(), targetUID)
 	if user.RoleID != 3 {
 		t.Errorf("role_id = %d, want 3 (unchanged)", user.RoleID)
@@ -653,13 +635,11 @@ func TestPatchUserRole_CannotPromoteToOwner(t *testing.T) {
 	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
 	// Role 2 "Admin" (position 80) holds MANAGE_ROLES but is below Owner.
 	_, token := createRoleUser(t, database, 2, "Admin", 0x3FFFFFFF, 80, "adminuser2")
-	targetUID, _ := database.CreateUser(context.Background(), "wannabeowner", "hash", 3)
+	targetUID := mustCreateUser(t, database, "wannabeowner", "hash", 3)
 
 	w := doRequest(t, handler, http.MethodPatch, "/users/"+itoa(targetUID), token,
 		map[string]any{"role_id": permissions.OwnerRoleID})
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusForbidden)
 	user, _ := database.GetUserByID(context.Background(), targetUID)
 	if user.RoleID != 3 {
 		t.Errorf("role_id = %d, want 3 (unchanged)", user.RoleID)
@@ -671,15 +651,10 @@ func TestPatchUserRole_ModeratorCannotDemoteAdmin(t *testing.T) {
 	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
 	// A moderator that does hold MANAGE_ROLES still cannot touch a higher rank.
 	_, token := createRoleUser(t, database, 10, "Moderator", moderatorMask|permissions.ManageRoles, 60, "moduser")
-	adminUID, err := database.CreateUser(context.Background(), "sitting-admin", "hash", 2)
-	if err != nil {
-		t.Fatalf("CreateUser admin: %v", err)
-	}
+	adminUID := mustCreateUser(t, database, "sitting-admin", "hash", 2)
 
 	w := doRequest(t, handler, http.MethodPatch, "/users/"+itoa(adminUID), token, map[string]any{"role_id": 3})
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusForbidden)
 	user, _ := database.GetUserByID(context.Background(), adminUID)
 	if user.RoleID != 2 {
 		t.Errorf("role_id = %d, want 2 (unchanged)", user.RoleID)
@@ -721,10 +696,8 @@ func TestGetMe_ReportsCallerPermissions(t *testing.T) {
 	handler, _, token := newModeratorHandler(t)
 
 	w := doRequest(t, handler, http.MethodGet, "/me", token, nil)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
-	var me struct {
+	requireStatus(t, w, http.StatusOK)
+	me := decodeBody[struct {
 		Username     string `json:"username"`
 		RoleName     string `json:"role_name"`
 		RolePosition int    `json:"role_position"`
@@ -732,10 +705,7 @@ func TestGetMe_ReportsCallerPermissions(t *testing.T) {
 		IsOwner      bool   `json:"is_owner"`
 		ServerName   string `json:"server_name"`
 		Version      string `json:"version"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &me); err != nil {
-		t.Fatalf("unmarshal me: %v", err)
-	}
+	}](t, w)
 	if me.ServerName != "Test Server" {
 		t.Errorf("server_name = %q, want the seeded setting", me.ServerName)
 	}
@@ -757,30 +727,21 @@ func TestGetMe_Unauthenticated(t *testing.T) {
 	handler, _, _ := newModeratorHandler(t)
 
 	w := doRequest(t, handler, http.MethodGet, "/me", "", nil)
-	if w.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401", w.Code)
-	}
+	requireStatus(t, w, http.StatusUnauthorized)
 	if strings.Contains(w.Body.String(), "1.0.0") {
 		t.Errorf("unauthenticated body leaks the build version: %s", w.Body.String())
 	}
 }
 
 func TestGetMe_OwnerFlagged(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	_, handler, token := newAdminHarness(t)
 
 	w := doRequest(t, handler, http.MethodGet, "/me", token, nil)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
-	var me struct {
+	requireStatus(t, w, http.StatusOK)
+	me := decodeBody[struct {
 		IsOwner bool   `json:"is_owner"`
 		Version string `json:"version"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &me); err != nil {
-		t.Fatalf("unmarshal me: %v", err)
-	}
+	}](t, w)
 	if !me.IsOwner {
 		t.Error("is_owner = false for the Owner role")
 	}

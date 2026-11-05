@@ -53,14 +53,7 @@ func externalRouter(t *testing.T, database *db.DB, srv *httptest.Server) http.Ha
 
 func externalGET(t *testing.T, router http.Handler, path, token string) *httptest.ResponseRecorder {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodGet, path, nil)
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
-	return rr
+	return doAPI(t, router, http.MethodGet, path, token, nil)
 }
 
 func externalStub(t *testing.T) *httptest.Server {
@@ -98,22 +91,17 @@ func TestExternalContent_PreviewThenImageByHandle(t *testing.T) {
 	router := externalRouter(t, database, srv)
 
 	rr := externalGET(t, router, "/api/v1/external/preview?url="+url.QueryEscape(srv.URL+"/page"), token)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("preview status = %d (%s)", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 	if cc := rr.Header().Get("Cache-Control"); cc != "no-store" {
 		t.Errorf("preview Cache-Control = %q, want no-store", cc)
 	}
-	var preview struct {
+	preview := decodeBody[struct {
 		OK    bool `json:"ok"`
 		Value struct {
 			Title *string `json:"title"`
 			Image *string `json:"image"`
 		} `json:"value"`
-	}
-	if err := json.Unmarshal(rr.Body.Bytes(), &preview); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	}](t, rr)
 	if !preview.OK || preview.Value.Title == nil || *preview.Value.Title != "Hello" || preview.Value.Image == nil {
 		t.Fatalf("preview = %s", rr.Body.String())
 	}

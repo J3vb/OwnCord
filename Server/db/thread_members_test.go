@@ -11,18 +11,14 @@ import (
 func followers(t *testing.T, d *db.DB, thread int64) []int64 {
 	t.Helper()
 	ids, err := d.ListThreadFollowers(context.Background(), thread)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "ListThreadFollowers", err)
 	return ids
 }
 
 func seedThreadUser(t *testing.T, d *db.DB, name string) int64 {
 	t.Helper()
 	id, err := d.CreateUser(context.Background(), name, "hash", 4)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateUser", err)
 	return id
 }
 
@@ -42,18 +38,14 @@ func TestThreadPost_JoinsAuthorAndDirectMentionsOnly(t *testing.T) {
 				t.Helper()
 				if path == "mentions" {
 					m, err := f.db.CreateMessageWithMentions(context.Background(), f.thread, author, "hi", nil, mentioned, 0, everyone, nil)
-					if err != nil {
-						t.Fatal(err)
-					}
+					mustDo(t, "CreateMessageWithMentions", err)
 					return m
 				}
 				p := storageDeliveryParams(author, f.thread)
 				p.ClientMessageID = "m-" + t.Name() + string(rune('a'+len(followers(t, f.db, f.thread))))
 				p.MentionedUserIDs, p.MentionsEveryone = mentioned, everyone
 				got, err := f.db.CreateMessageDelivery(context.Background(), p)
-				if err != nil {
-					t.Fatal(err)
-				}
+				mustDo(t, "CreateMessageDelivery", err)
 				return got.Message
 			}
 
@@ -86,9 +78,7 @@ func TestThreadPost_JoinsAuthorAndDirectMentionsOnly(t *testing.T) {
 func TestThreadPost_InAnOrdinaryChannelJoinsNobody(t *testing.T) {
 	f := newThreadFixture(t)
 	m, err := f.db.CreateMessageWithMentions(context.Background(), f.parent, f.user, "hi", nil, []int64{f.user}, 0, false, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateMessageWithMentions", err)
 	if m.ThreadJoined != nil {
 		t.Fatalf("ThreadJoined = %v, want nil outside a thread", m.ThreadJoined)
 	}
@@ -143,9 +133,7 @@ func TestThreadMembers_CascadeOnThreadAndUserDelete(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := f.exec(t, `DELETE FROM users WHERE id = ?`, bob); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "exec", f.exec(t, `DELETE FROM users WHERE id = ?`, bob))
 	if got := followers(t, f.db, f.thread); !slices.Equal(got, []int64{f.user}) {
 		t.Fatalf("followers after user delete = %v, want [%d]", got, f.user)
 	}
@@ -162,13 +150,9 @@ func TestCreateThread_JoinsTheOwner(t *testing.T) {
 	ctx := context.Background()
 	owner := seedThreadUser(t, d, "owner")
 	parent, err := d.CreateChannel(ctx, "general", "text", "", "", 0)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateChannel", err)
 	starter, err := d.CreateMessage(ctx, parent, owner, "start", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateMessage", err)
 	info, created, err := d.CreateThread(ctx, db.NewThread{
 		ParentID: parent, StarterMessageID: starter, OwnerID: owner, Name: "t", AutoArchiveMinutes: 1440,
 	})
@@ -188,15 +172,11 @@ func TestListFollowedThreads_OpenOnlyWithReadPosition(t *testing.T) {
 		t.Fatal(err)
 	}
 	first, err := f.db.CreateMessageWithMentions(ctx, f.thread, f.user, "one", nil, nil, 0, false, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateMessageWithMentions", err)
 	if _, err := f.db.CreateMessageWithMentions(ctx, f.thread, f.user, "two", nil, []int64{bob}, 0, false, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.exec(t, `INSERT INTO read_states (user_id, channel_id, last_message_id, mention_count) VALUES (?, ?, ?, 3)`, bob, f.thread, first.ID); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "exec", f.exec(t, `INSERT INTO read_states (user_id, channel_id, last_message_id, mention_count) VALUES (?, ?, ?, 3)`, bob, f.thread, first.ID))
 	got, err := f.db.ListFollowedThreads(ctx, bob)
 	if err != nil || len(got) != 1 {
 		t.Fatalf("ListFollowedThreads = %v, %v", got, err)
@@ -205,9 +185,7 @@ func TestListFollowedThreads_OpenOnlyWithReadPosition(t *testing.T) {
 	if g.Thread.ID != f.thread || g.UnreadCount != 1 || g.MentionCount != 3 || g.LastReadMessageID != first.ID || g.LastMessageID <= first.ID {
 		t.Fatalf("row = %+v", g)
 	}
-	if err := f.exec(t, `UPDATE channels SET thread_archived = 1 WHERE id = ?`, f.thread); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "exec", f.exec(t, `UPDATE channels SET thread_archived = 1 WHERE id = ?`, f.thread))
 	if got, err := f.db.ListFollowedThreads(ctx, bob); err != nil || len(got) != 0 {
 		t.Fatalf("archived thread listed: %v, %v", got, err)
 	}

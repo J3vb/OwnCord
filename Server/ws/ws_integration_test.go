@@ -8,36 +8,59 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"slices"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/coder/websocket"
 
-	"github.com/J3vb/OwnCord/Server/auth"
-	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/ws"
 )
+
+// expectAuthErrorOrClose sends first as the opening frame and accepts either
+// an auth_error reply or the server closing the connection.
+func (r *wsRig) expectAuthErrorOrClose(t *testing.T, first []byte) {
+	t.Helper()
+	ctx := testCtx(t, 5*time.Second)
+	conn := r.dial(t, ctx)
+	writeRawFrame(t, ctx, conn, first)
+	_, raw, readErr := conn.Read(ctx)
+	if readErr != nil {
+		return
+	}
+	var msg map[string]any
+	if err := json.Unmarshal(raw, &msg); err == nil && msg["type"] != "auth_error" {
+		t.Errorf("expected auth_error, got type=%q", msg["type"])
+	}
+}
+
+// readUntilType reads up to maxFrames frames from conn and reports whether one
+// has the given type; read errors end the search.
+func readUntilType(ctx context.Context, conn *websocket.Conn, typ string, maxFrames int, perRead time.Duration) bool {
+	for range maxFrames {
+		readCtx, cancel := context.WithTimeout(ctx, perRead)
+		_, raw, err := conn.Read(readCtx)
+		cancel()
+		if err != nil {
+			return false
+		}
+		var m map[string]any
+		if json.Unmarshal(raw, &m) == nil && m["type"] == typ {
+			return true
+		}
+	}
+	return false
+}
 
 // ─── ServeWS / authenticateConn happy path ────────────────────────────────────
 
 // TestServeWS_InvalidUpgrade verifies that a plain HTTP GET (non-WS) returns
 // a non-101 status without panicking.
 func TestServeWS_InvalidUpgrade_ReturnsError(t *testing.T) {
-	database := openServeTestDB(t)
-	limiter := auth.NewRateLimiter()
-	hub := newTestHubDeps(t, database, limiter, nil)
-	go hub.Run()
-	defer hub.Stop()
-
-	handler := ws.ServeWS(hub, []string{"*"}, 0)
-	srv := httptest.NewServer(handler)
-	defer srv.Close()
+	rig := newWSRig(t)
 
 	// Plain GET without WebSocket upgrade headers should fail gracefully.
-	resp, err := http.Get(srv.URL)
+	resp, err := http.Get(rig.srv.URL)
 	if err != nil {
 		t.Fatalf("http.Get: %v", err)
 	}
@@ -54,27 +77,8 @@ func TestServeWS_InvalidUpgrade_ReturnsError(t *testing.T) {
 // TestAuthenticateConn_NoAuthMessage verifies that a connection that closes
 // immediately (without sending auth) causes the server to close it gracefully.
 func TestAuthenticateConn_NoAuthMessage_ServerClosesConn(t *testing.T) {
-	database := openServeTestDB(t)
-	limiter := auth.NewRateLimiter()
-	hub := newTestHubDeps(t, database, limiter, nil)
-	go hub.Run()
-	defer hub.Stop()
-
-	handler := ws.ServeWS(hub, []string{"*"}, 0)
-	srv := httptest.NewServer(handler)
-	defer srv.Close()
-
-	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	conn, dialResp, err := websocket.Dial(ctx, wsURL, nil)
-	if dialResp != nil && dialResp.Body != nil {
-		defer dialResp.Body.Close() //nolint:errcheck // test cleanup
-	}
-	if err != nil {
-		t.Fatalf("websocket.Dial: %v", err)
-	}
+	rig := newWSRig(t)
+	conn := rig.dial(t, testCtx(t, 5*time.Second))
 
 	// Close without sending auth — the server's authDeadline (10s) will fire,
 	// but closing immediately should cause a read error on the server side.
@@ -85,200 +89,39 @@ func TestAuthenticateConn_NoAuthMessage_ServerClosesConn(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	// Hub should have no clients registered.
-	if hub.ClientCount() != 0 {
-		t.Errorf("ClientCount = %d after unauthenticated connection, want 0", hub.ClientCount())
+	if rig.hub.ClientCount() != 0 {
+		t.Errorf("ClientCount = %d after unauthenticated connection, want 0", rig.hub.ClientCount())
 	}
 }
 
 // TestAuthenticateConn_InvalidJSON verifies that sending invalid JSON as the
 // first message causes the server to send an auth_error and close.
 func TestAuthenticateConn_InvalidJSON_ReceivesAuthError(t *testing.T) {
-	database := openServeTestDB(t)
-	limiter := auth.NewRateLimiter()
-	hub := newTestHubDeps(t, database, limiter, nil)
-	go hub.Run()
-	defer hub.Stop()
-
-	handler := ws.ServeWS(hub, []string{"*"}, 0)
-	srv := httptest.NewServer(handler)
-	defer srv.Close()
-
-	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	conn, dialResp2, err := websocket.Dial(ctx, wsURL, nil)
-	if dialResp2 != nil && dialResp2.Body != nil {
-		defer dialResp2.Body.Close() //nolint:errcheck // test cleanup
-	}
-	if err != nil {
-		t.Fatalf("websocket.Dial: %v", err)
-	}
-	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
-
-	// Send invalid JSON as first message.
-	if err := conn.Write(ctx, websocket.MessageText, []byte("NOT JSON")); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-
-	// Server should respond with auth_error.
-	_, raw, readErr := conn.Read(ctx)
-	if readErr != nil {
-		// Server may close connection — also acceptable.
-		return
-	}
-	var msg map[string]any
-	if err := json.Unmarshal(raw, &msg); err == nil {
-		if msg["type"] == "auth_error" {
-			return // expected
-		}
-		t.Errorf("expected auth_error, got type=%q", msg["type"])
-	}
+	newWSRig(t).expectAuthErrorOrClose(t, []byte("NOT JSON"))
 }
 
 // TestAuthenticateConn_WrongMessageType verifies that sending a non-auth
 // first message causes the server to send an auth_error.
 func TestAuthenticateConn_WrongMessageType_ReceivesAuthError(t *testing.T) {
-	database := openServeTestDB(t)
-	limiter := auth.NewRateLimiter()
-	hub := newTestHubDeps(t, database, limiter, nil)
-	go hub.Run()
-	defer hub.Stop()
-
-	handler := ws.ServeWS(hub, []string{"*"}, 0)
-	srv := httptest.NewServer(handler)
-	defer srv.Close()
-
-	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	conn, resp, err := websocket.Dial(ctx, wsURL, nil)
-	if resp != nil && resp.Body != nil {
-		defer resp.Body.Close()
-	}
-	if err != nil {
-		t.Fatalf("websocket.Dial: %v", err)
-	}
-	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
-
-	// Send a chat_send instead of auth.
-	wrongMsg := map[string]any{
+	raw := mustMarshal(t, map[string]any{
 		"type":    "chat_send",
 		"payload": map[string]string{"content": "hello"},
-	}
-	raw, _ := json.Marshal(wrongMsg)
-	if err := conn.Write(ctx, websocket.MessageText, raw); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-
-	_, respRaw, readErr := conn.Read(ctx)
-	if readErr != nil {
-		return // server closed — acceptable
-	}
-	var msg map[string]any
-	if err := json.Unmarshal(respRaw, &msg); err == nil {
-		if msg["type"] == "auth_error" {
-			return // expected
-		}
-		t.Errorf("expected auth_error, got type=%q", msg["type"])
-	}
+	})
+	newWSRig(t).expectAuthErrorOrClose(t, raw)
 }
 
 // TestAuthenticateConn_MissingToken verifies that an auth message without
 // a token field receives an auth_error.
 func TestAuthenticateConn_MissingToken_ReceivesAuthError(t *testing.T) {
-	database := openServeTestDB(t)
-	limiter := auth.NewRateLimiter()
-	hub := newTestHubDeps(t, database, limiter, nil)
-	go hub.Run()
-	defer hub.Stop()
-
-	handler := ws.ServeWS(hub, []string{"*"}, 0)
-	srv := httptest.NewServer(handler)
-	defer srv.Close()
-
-	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	conn, resp, err := websocket.Dial(ctx, wsURL, nil)
-	if resp != nil && resp.Body != nil {
-		defer resp.Body.Close()
-	}
-	if err != nil {
-		t.Fatalf("websocket.Dial: %v", err)
-	}
-	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
-
-	authMsg := map[string]any{
-		"type":    "auth",
-		"payload": map[string]string{}, // no token field
-	}
-	raw, _ := json.Marshal(authMsg)
-	if err := conn.Write(ctx, websocket.MessageText, raw); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-
-	_, respRaw, readErr := conn.Read(ctx)
-	if readErr != nil {
-		return
-	}
-	var msg map[string]any
-	if err := json.Unmarshal(respRaw, &msg); err == nil {
-		if msg["type"] == "auth_error" {
-			return
-		}
-		t.Errorf("expected auth_error, got type=%q", msg["type"])
-	}
+	raw := mustMarshal(t, authFrame(map[string]any{})) // no token field
+	newWSRig(t).expectAuthErrorOrClose(t, raw)
 }
 
 // TestAuthenticateConn_InvalidToken verifies that an auth message with a
 // non-existent token receives an auth_error.
 func TestAuthenticateConn_InvalidToken_ReceivesAuthError(t *testing.T) {
-	database := openServeTestDB(t)
-	limiter := auth.NewRateLimiter()
-	hub := newTestHubDeps(t, database, limiter, nil)
-	go hub.Run()
-	defer hub.Stop()
-
-	handler := ws.ServeWS(hub, []string{"*"}, 0)
-	srv := httptest.NewServer(handler)
-	defer srv.Close()
-
-	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	conn, resp, err := websocket.Dial(ctx, wsURL, nil)
-	if resp != nil && resp.Body != nil {
-		defer resp.Body.Close()
-	}
-	if err != nil {
-		t.Fatalf("websocket.Dial: %v", err)
-	}
-	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
-
-	authMsg := map[string]any{
-		"type":    "auth",
-		"payload": map[string]string{"token": "totally-invalid-token-xyz"},
-	}
-	raw, _ := json.Marshal(authMsg)
-	if err := conn.Write(ctx, websocket.MessageText, raw); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-
-	_, respRaw, readErr := conn.Read(ctx)
-	if readErr != nil {
-		return
-	}
-	var msg map[string]any
-	if err := json.Unmarshal(respRaw, &msg); err == nil {
-		if msg["type"] == "auth_error" {
-			return
-		}
-		t.Errorf("expected auth_error, got type=%q", msg["type"])
-	}
+	raw := mustMarshal(t, authFrame(map[string]any{"token": "totally-invalid-token-xyz"}))
+	newWSRig(t).expectAuthErrorOrClose(t, raw)
 }
 
 // TestAuthenticateConn_SessionLookupDBError_NotTerminal verifies OC-0196: a
@@ -292,40 +135,11 @@ func TestAuthenticateConn_InvalidToken_ReceivesAuthError(t *testing.T) {
 // row is perfectly valid. A DB error must surface as a non-terminal error
 // frame instead, so the client's normal backoff/reconnect logic retries.
 func TestAuthenticateConn_SessionLookupDBError_NotTerminal(t *testing.T) {
-	database := openServeTestDB(t)
-	limiter := auth.NewRateLimiter()
-	hub := newTestHubDeps(t, database, limiter, nil)
-	go hub.Run()
-	defer hub.Stop()
+	rig := newWSRig(t)
+	_, token := rig.seedUser(t, "db-hiccup-user", 1)
 
-	userID, err := database.CreateUser(context.Background(), "db-hiccup-user", "hash", 1)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	token, err := auth.GenerateToken()
-	if err != nil {
-		t.Fatalf("GenerateToken: %v", err)
-	}
-	if _, err := database.CreateSession(context.Background(), userID, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
-
-	handler := ws.ServeWS(hub, []string{"*"}, 0)
-	srv := httptest.NewServer(handler)
-	defer srv.Close()
-
-	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	conn, resp, err := websocket.Dial(ctx, wsURL, nil)
-	if resp != nil && resp.Body != nil {
-		defer resp.Body.Close()
-	}
-	if err != nil {
-		t.Fatalf("websocket.Dial: %v", err)
-	}
-	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
+	ctx := testCtx(t, 5*time.Second)
+	conn := rig.dial(t, ctx)
 
 	// Simulate a transient DB outage AFTER the session/token above were
 	// written successfully: close the database so the next query
@@ -333,27 +147,12 @@ func TestAuthenticateConn_SessionLookupDBError_NotTerminal(t *testing.T) {
 	// returns a genuine driver error instead of (nil, nil). The session row
 	// itself remains logically valid — this models momentary SQLite reader
 	// contention (WAL checkpoint, backup, busy_timeout), not a bad token.
-	if err := database.Close(); err != nil {
+	if err := rig.db.Close(); err != nil {
 		t.Fatalf("database.Close: %v", err)
 	}
 
-	authMsg := map[string]any{
-		"type":    "auth",
-		"payload": map[string]string{"token": token},
-	}
-	raw, _ := json.Marshal(authMsg)
-	if err := conn.Write(ctx, websocket.MessageText, raw); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-
-	_, respRaw, readErr := conn.Read(ctx)
-	if readErr != nil {
-		t.Fatalf("read: %v", readErr)
-	}
-	var msg map[string]any
-	if err := json.Unmarshal(respRaw, &msg); err != nil {
-		t.Fatalf("unmarshal response: %v", err)
-	}
+	writeFrame(t, ctx, conn, authFrame(map[string]any{"token": token}))
+	msg := readFrame(t, ctx, conn)
 	if msg["type"] == ws.MsgTypeAuthError {
 		t.Errorf("got terminal %q frame for a transient DB error — the client "+
 			"treats this as non-recoverable and clears stored credentials; a DB "+
@@ -367,83 +166,24 @@ func TestAuthenticateConn_SessionLookupDBError_NotTerminal(t *testing.T) {
 // TestServeWS_ValidAuth_FullHandshake verifies the complete happy path:
 // valid token → auth_ok + ready received, client counted in hub.
 func TestServeWS_ValidAuth_FullHandshake(t *testing.T) {
-	database := openServeTestDB(t)
-	limiter := auth.NewRateLimiter()
-	hub := newTestHubDeps(t, database, limiter, nil)
-	go hub.Run()
-	defer hub.Stop()
+	rig := newWSRig(t)
+	_, token := rig.seedUser(t, "ws-handshake-user", 1)
 
-	// Seed user and session.
-	userID, err := database.CreateUser(context.Background(), "ws-handshake-user", "hash", 1)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	token, err := auth.GenerateToken()
-	if err != nil {
-		t.Fatalf("GenerateToken: %v", err)
-	}
-	tokenHash := auth.HashToken(token)
-	if _, err := database.CreateSession(context.Background(), userID, tokenHash, "test", "127.0.0.1"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
+	ctx := testCtx(t, 10*time.Second)
+	conn := rig.dial(t, ctx)
+	writeFrame(t, ctx, conn, authFrame(map[string]any{"token": token}))
 
-	handler := ws.ServeWS(hub, []string{"*"}, 0)
-	srv := httptest.NewServer(handler)
-	defer srv.Close()
-
-	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	conn, resp, err := websocket.Dial(ctx, wsURL, nil)
-	if resp != nil && resp.Body != nil {
-		defer resp.Body.Close()
+	if got := readFrame(t, ctx, conn)["type"]; got != "auth_ok" {
+		t.Errorf("first response type = %q, want auth_ok", got)
 	}
-	if err != nil {
-		t.Fatalf("websocket.Dial: %v", err)
-	}
-	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
-
-	// Send auth.
-	authMsg := map[string]any{
-		"type":    "auth",
-		"payload": map[string]string{"token": token},
-	}
-	raw, _ := json.Marshal(authMsg)
-	if err := conn.Write(ctx, websocket.MessageText, raw); err != nil {
-		t.Fatalf("write auth: %v", err)
-	}
-
-	// Expect auth_ok.
-	_, respRaw, err := conn.Read(ctx)
-	if err != nil {
-		t.Fatalf("read auth_ok: %v", err)
-	}
-	var authOK map[string]any
-	if err := json.Unmarshal(respRaw, &authOK); err != nil {
-		t.Fatalf("unmarshal auth_ok: %v", err)
-	}
-	if authOK["type"] != "auth_ok" {
-		t.Errorf("first response type = %q, want auth_ok", authOK["type"])
-	}
-
-	// Expect ready.
-	_, respRaw2, err := conn.Read(ctx)
-	if err != nil {
-		t.Fatalf("read ready: %v", err)
-	}
-	var readyMsg map[string]any
-	if err := json.Unmarshal(respRaw2, &readyMsg); err != nil {
-		t.Fatalf("unmarshal ready: %v", err)
-	}
-	if readyMsg["type"] != "ready" {
-		t.Errorf("second response type = %q, want ready", readyMsg["type"])
+	if got := readFrame(t, ctx, conn)["type"]; got != "ready" {
+		t.Errorf("second response type = %q, want ready", got)
 	}
 
 	// Registration happens before the ready frame is written (serve.go), so
 	// having read ready implies the client is registered.
-	if hub.ClientCount() != 1 {
-		t.Errorf("ClientCount = %d after successful auth, want 1", hub.ClientCount())
+	if rig.hub.ClientCount() != 1 {
+		t.Errorf("ClientCount = %d after successful auth, want 1", rig.hub.ClientCount())
 	}
 }
 
@@ -451,72 +191,19 @@ func TestServeWS_ValidAuth_FullHandshake(t *testing.T) {
 // client that drops immediately after sending auth does not remain registered
 // or stuck online.
 func TestServeWS_ImmediateDisconnect_DoesNotLeaveGhostClient(t *testing.T) {
-	database := openServeTestDB(t)
-	limiter := auth.NewRateLimiter()
-	hub := newTestHubDeps(t, database, limiter, nil)
-	go hub.Run()
-	defer hub.Stop()
+	rig := newWSRig(t)
+	userID, token := rig.seedUser(t, "abruptclose", 4)
 
-	userID, err := database.CreateUser(context.Background(), "abruptclose", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	token := "abrupt-close-token"
-	tokenHash := auth.HashToken(token)
-	if _, err := database.CreateSession(context.Background(), userID, tokenHash, "test", "127.0.0.1"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
-
-	handler := ws.ServeWS(hub, []string{"*"}, 0)
-	srv := httptest.NewServer(handler)
-	defer srv.Close()
-
-	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	conn, resp, err := websocket.Dial(ctx, wsURL, nil)
-	if resp != nil && resp.Body != nil {
-		defer resp.Body.Close()
-	}
-	if err != nil {
-		t.Fatalf("websocket.Dial: %v", err)
-	}
-	defer conn.CloseNow() //nolint:errcheck
-
-	authMsg := map[string]any{
-		"type":    "auth",
-		"payload": map[string]string{"token": token},
-	}
-	raw, err := json.Marshal(authMsg)
-	if err != nil {
-		t.Fatalf("marshal auth: %v", err)
-	}
-	if err := conn.Write(ctx, websocket.MessageText, raw); err != nil {
-		t.Fatalf("write auth: %v", err)
-	}
+	ctx := testCtx(t, 5*time.Second)
+	conn := rig.dial(t, ctx)
+	writeFrame(t, ctx, conn, authFrame(map[string]any{"token": token}))
 	_ = conn.CloseNow()
 
-	deadline := time.Now().Add(2 * time.Second)
-	cleanedUp := false
-	for time.Now().Before(deadline) {
-		user, getErr := database.GetUserByID(context.Background(), userID)
-		if getErr != nil {
-			t.Fatalf("GetUserByID: %v", getErr)
-		}
-		if hub.ClientCount() == 0 && user.Status == "offline" {
-			cleanedUp = true
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-
-	if !cleanedUp {
-		user, getErr := database.GetUserByID(context.Background(), userID)
-		if getErr != nil {
-			t.Fatalf("GetUserByID final: %v", getErr)
-		}
-		t.Fatalf("immediate disconnect left stale state: client_count=%d user_status=%q", hub.ClientCount(), user.Status)
+	n, status, ok := rig.pollStatus(t, userID, func(n int, status string) bool {
+		return n == 0 && status == "offline"
+	})
+	if !ok {
+		t.Fatalf("immediate disconnect left stale state: client_count=%d user_status=%q", n, status)
 	}
 }
 
@@ -524,218 +211,51 @@ func TestServeWS_ImmediateDisconnect_DoesNotLeaveGhostClient(t *testing.T) {
 // existing connection does not broadcast or persist a false offline state for
 // the still-connected replacement session.
 func TestServeWS_DuplicateLogin_KeepsUserOnline(t *testing.T) {
-	database := openServeTestDB(t)
-	limiter := auth.NewRateLimiter()
-	hub := newTestHubDeps(t, database, limiter, nil)
-	go hub.Run()
-	defer hub.Stop()
+	rig := newWSRig(t)
+	userID, token := rig.seedUser(t, "ws-reconnect-user", 1)
 
-	userID, err := database.CreateUser(context.Background(), "ws-reconnect-user", "hash", 1)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
+	ctx := testCtx(t, 10*time.Second)
+	rig.dialAuthed(t, ctx, token, 0)
+	rig.dialAuthed(t, ctx, token, 0)
+
+	n, status, ok := rig.pollStatus(t, userID, func(n int, status string) bool {
+		return n == 1 && status == "online"
+	})
+	if !ok {
+		t.Fatalf("duplicate login left wrong state: client_count=%d user_status=%q", n, status)
 	}
-	token, err := auth.GenerateToken()
-	if err != nil {
-		t.Fatalf("GenerateToken: %v", err)
-	}
-	tokenHash := auth.HashToken(token)
-	if _, err := database.CreateSession(context.Background(), userID, tokenHash, "test", "127.0.0.1"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
-
-	handler := ws.ServeWS(hub, []string{"*"}, 0)
-	srv := httptest.NewServer(handler)
-	defer srv.Close()
-
-	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	dialAndAuth := func() *websocket.Conn {
-		conn, dialResp, dialErr := websocket.Dial(ctx, wsURL, nil)
-		if dialResp != nil && dialResp.Body != nil {
-			dialResp.Body.Close()
-		}
-		if dialErr != nil {
-			t.Fatalf("websocket.Dial: %v", dialErr)
-		}
-		authMsg := map[string]any{
-			"type":    "auth",
-			"payload": map[string]string{"token": token},
-		}
-		raw, marshalErr := json.Marshal(authMsg)
-		if marshalErr != nil {
-			t.Fatalf("marshal auth: %v", marshalErr)
-		}
-		if writeErr := conn.Write(ctx, websocket.MessageText, raw); writeErr != nil {
-			t.Fatalf("write auth: %v", writeErr)
-		}
-		for i := range 2 {
-			if _, _, readErr := conn.Read(ctx); readErr != nil {
-				t.Fatalf("read handshake message %d: %v", i, readErr)
-			}
-		}
-		return conn
-	}
-
-	conn1 := dialAndAuth()
-	defer func() { _ = conn1.Close(websocket.StatusNormalClosure, "") }()
-	conn2 := dialAndAuth()
-	defer func() { _ = conn2.Close(websocket.StatusNormalClosure, "") }()
-
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		user, getErr := database.GetUserByID(context.Background(), userID)
-		if getErr != nil {
-			t.Fatalf("GetUserByID: %v", getErr)
-		}
-		if hub.ClientCount() == 1 && user.Status == "online" {
-			return
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-
-	user, getErr := database.GetUserByID(context.Background(), userID)
-	if getErr != nil {
-		t.Fatalf("GetUserByID final: %v", getErr)
-	}
-	t.Fatalf("duplicate login left wrong state: client_count=%d user_status=%q", hub.ClientCount(), user.Status)
 }
 
 // TestServeWS_Reconnect_PreservesVoiceState verifies that replacing a
 // connection via network reconnect (last_seq > 0) preserves voice state:
 // no voice_leave broadcast, voiceChID transferred, DB row intact.
 func TestServeWS_Reconnect_PreservesVoiceState(t *testing.T) {
-	database := openServeTestDB(t)
-	limiter := auth.NewRateLimiter()
-	hub := newTestHubDeps(t, database, limiter, nil)
-	go hub.Run()
-	defer hub.Stop()
+	rig := newWSRig(t)
+	userID, token := rig.seedUser(t, "ws-voice-reconnect", 1)
+	chID := rig.voiceChannel(t, "voice-reconnect")
+	ctx := testCtx(t, 10*time.Second)
 
-	userID, err := database.CreateUser(context.Background(), "ws-voice-reconnect", "hash", 1)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	token, err := auth.GenerateToken()
-	if err != nil {
-		t.Fatalf("GenerateToken: %v", err)
-	}
-	tokenHash := auth.HashToken(token)
-	if _, err := database.CreateSession(context.Background(), userID, tokenHash, "test", "127.0.0.1"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
-
-	// Create a voice channel.
-	chID, err := database.CreateChannel(context.Background(), "voice-reconnect", "voice", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
-
-	handler := ws.ServeWS(hub, []string{"*"}, 0)
-	srv := httptest.NewServer(handler)
-	defer srv.Close()
-
-	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	dialAndAuth := func(lastSeq uint64) *websocket.Conn {
-		t.Helper()
-		conn, dialResp, dialErr := websocket.Dial(ctx, wsURL, nil)
-		if dialResp != nil && dialResp.Body != nil {
-			dialResp.Body.Close()
-		}
-		if dialErr != nil {
-			t.Fatalf("websocket.Dial: %v", dialErr)
-		}
-		authMsg := map[string]any{
-			"type":    "auth",
-			"payload": map[string]any{"token": token, "last_seq": lastSeq},
-		}
-		raw, marshalErr := json.Marshal(authMsg)
-		if marshalErr != nil {
-			t.Fatalf("marshal auth: %v", marshalErr)
-		}
-		if writeErr := conn.Write(ctx, websocket.MessageText, raw); writeErr != nil {
-			t.Fatalf("write auth: %v", writeErr)
-		}
-		// Read auth_ok + ready
-		for i := range 2 {
-			if _, _, readErr := conn.Read(ctx); readErr != nil {
-				t.Fatalf("read handshake message %d: %v", i, readErr)
-			}
-		}
-		return conn
-	}
-
-	// First connection: fresh
-	conn1 := dialAndAuth(0)
-	defer func() { _ = conn1.Close(websocket.StatusNormalClosure, "") }()
-
-	var originalClient *ws.Client
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		originalClient = hub.ClientForTest(userID)
-		if originalClient != nil {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	if originalClient == nil {
-		t.Fatal("expected first client to be registered")
-	}
+	rig.dialAuthed(t, ctx, token, 0)
+	originalClient := rig.waitHubClient(t, userID, "first client to be registered", func(*ws.Client) bool { return true })
 
 	// Simulate voice join AFTER conn1 is established — both in-memory and DB.
 	// (Setting it before conn1 would cause serve.go's fresh-connect cleanup
 	// to delete the DB row during conn1's handshake.)
-	if err := database.JoinVoiceChannel(context.Background(), userID, chID); err != nil {
-		t.Fatalf("JoinVoiceChannel: %v", err)
-	}
-	vsBeforeReconnect, err := database.GetVoiceState(context.Background(), userID)
-	if err != nil {
-		t.Fatalf("GetVoiceState(before reconnect): %v", err)
-	}
-	if vsBeforeReconnect == nil {
-		t.Fatal("expected voice state row after JoinVoiceChannel")
-	}
-	ws.SetClientVoiceStateForTest(originalClient, chID, vsBeforeReconnect.JoinedAt)
+	rig.enterVoice(t, userID, chID, originalClient)
 
 	// Second connection: reconnect (lastSeq > oldestSeq) — voice state should transfer.
 	// Use lastSeq=2 because conn1's join produces at least 2 broadcasts
 	// (member_join seq=1, presence seq=2), and afterSeq must be > oldestSeq
 	// for EventsSince to return a replay instead of nil (BUG-085).
-	conn2 := dialAndAuth(2)
-	defer func() { _ = conn2.Close(websocket.StatusNormalClosure, "") }()
+	conn2 := rig.dialAuthed(t, ctx, token, 2)
 
-	var replacementClient *ws.Client
-	deadline = time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		replacementClient = hub.ClientForTest(userID)
-		if replacementClient != nil && ws.GetClientVoiceChIDForTest(replacementClient) == chID {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	if replacementClient == nil {
-		t.Fatal("expected replacement client to be registered")
-	}
-
-	// Assert: voiceChID transferred
+	replacementClient := rig.waitHubClient(t, userID, "replacement client with transferred voice state", func(c *ws.Client) bool {
+		return ws.GetClientVoiceChIDForTest(c) == chID
+	})
 	if got := ws.GetClientVoiceChIDForTest(replacementClient); got != chID {
 		t.Fatalf("replacement client voiceChID = %d, want %d", got, chID)
 	}
-
-	// Assert: DB row still intact
-	vs, vsErr := database.GetVoiceState(context.Background(), userID)
-	if vsErr != nil {
-		t.Fatalf("GetVoiceState: %v", vsErr)
-	}
-	if vs == nil {
-		t.Fatal("reconnect: DB voice_state row was deleted, expected it to be preserved")
-	}
-	if vs.ChannelID != chID {
-		t.Fatalf("reconnect: DB voice_state channel_id = %d, want %d", vs.ChannelID, chID)
-	}
+	rig.requireVoiceRow(t, userID, chID, "reconnect")
 
 	// Assert: no voice_leave broadcast
 	readDeadline := time.Now().Add(400 * time.Millisecond)
@@ -766,129 +286,31 @@ func TestServeWS_Reconnect_PreservesVoiceState(t *testing.T) {
 // otherwise the user is "in voice" on the hub only: voice_join bounces off
 // ALREADY_JOINED and sweepStaleVoiceStates never heals memory-without-row.
 func TestServeWS_ReplayFallback_PreservesVoiceState(t *testing.T) {
-	database := openServeTestDB(t)
-	limiter := auth.NewRateLimiter()
-	hub := newTestHubDeps(t, database, limiter, nil)
-	go hub.Run()
-	defer hub.Stop()
-
-	userID, err := database.CreateUser(context.Background(), "ws-voice-fallback", "hash", 1)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	token, err := auth.GenerateToken()
-	if err != nil {
-		t.Fatalf("GenerateToken: %v", err)
-	}
-	tokenHash := auth.HashToken(token)
-	if _, err := database.CreateSession(context.Background(), userID, tokenHash, "test", "127.0.0.1"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
-
-	chID, err := database.CreateChannel(context.Background(), "voice-fallback", "voice", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
-
-	handler := ws.ServeWS(hub, []string{"*"}, 0)
-	srv := httptest.NewServer(handler)
-	defer srv.Close()
-
-	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	dialAndAuth := func(lastSeq uint64) *websocket.Conn {
-		t.Helper()
-		conn, dialResp, dialErr := websocket.Dial(ctx, wsURL, nil)
-		if dialResp != nil && dialResp.Body != nil {
-			dialResp.Body.Close()
-		}
-		if dialErr != nil {
-			t.Fatalf("websocket.Dial: %v", dialErr)
-		}
-		authMsg := map[string]any{
-			"type":    "auth",
-			"payload": map[string]any{"token": token, "last_seq": lastSeq},
-		}
-		raw, marshalErr := json.Marshal(authMsg)
-		if marshalErr != nil {
-			t.Fatalf("marshal auth: %v", marshalErr)
-		}
-		if writeErr := conn.Write(ctx, websocket.MessageText, raw); writeErr != nil {
-			t.Fatalf("write auth: %v", writeErr)
-		}
-		for i := range 2 {
-			if _, _, readErr := conn.Read(ctx); readErr != nil {
-				t.Fatalf("read handshake message %d: %v", i, readErr)
-			}
-		}
-		return conn
-	}
+	rig := newWSRig(t)
+	userID, token := rig.seedUser(t, "ws-voice-fallback", 1)
+	chID := rig.voiceChannel(t, "voice-fallback")
+	ctx := testCtx(t, 10*time.Second)
 
 	// First connection: fresh, then put the user in voice (DB + in-memory).
-	conn1 := dialAndAuth(0)
-	defer func() { _ = conn1.Close(websocket.StatusNormalClosure, "") }()
-
-	var originalClient *ws.Client
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		originalClient = hub.ClientForTest(userID)
-		if originalClient != nil {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	if originalClient == nil {
-		t.Fatal("expected first client to be registered")
-	}
-
-	if err := database.JoinVoiceChannel(context.Background(), userID, chID); err != nil {
-		t.Fatalf("JoinVoiceChannel: %v", err)
-	}
-	vsBefore, err := database.GetVoiceState(context.Background(), userID)
-	if err != nil {
-		t.Fatalf("GetVoiceState(before reconnect): %v", err)
-	}
-	if vsBefore == nil {
-		t.Fatal("expected voice state row after JoinVoiceChannel")
-	}
-	ws.SetClientVoiceStateForTest(originalClient, chID, vsBefore.JoinedAt)
+	rig.dialAuthed(t, ctx, token, 0)
+	originalClient := rig.waitHubClient(t, userID, "first client to be registered", func(*ws.Client) bool { return true })
+	rig.enterVoice(t, userID, chID, originalClient)
 
 	// Second connection: last_seq far ahead of anything the buffer holds —
 	// replay fails, handleFreshConnect runs with lastSeq > 0, and registerNow
 	// transfers the old connection's voice state.
-	conn2 := dialAndAuth(999)
-	defer func() { _ = conn2.Close(websocket.StatusNormalClosure, "") }()
+	rig.dialAuthed(t, ctx, token, 999)
 
-	var replacementClient *ws.Client
-	deadline = time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		replacementClient = hub.ClientForTest(userID)
-		if replacementClient != nil && replacementClient != originalClient {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	if replacementClient == nil || replacementClient == originalClient {
-		t.Fatal("expected replacement client to be registered")
-	}
+	replacementClient := rig.waitHubClient(t, userID, "replacement client to be registered", func(c *ws.Client) bool {
+		return c != originalClient
+	})
 
 	// The transferred in-memory state and the DB row must stay consistent:
 	// either both present (transfer honored) or both gone — never memory-only.
 	if got := ws.GetClientVoiceChIDForTest(replacementClient); got != chID {
 		t.Fatalf("replacement client voiceChID = %d, want %d", got, chID)
 	}
-	vs, vsErr := database.GetVoiceState(context.Background(), userID)
-	if vsErr != nil {
-		t.Fatalf("GetVoiceState: %v", vsErr)
-	}
-	if vs == nil {
-		t.Fatal("replay fallback: DB voice_state row was deleted while registerNow transferred the in-memory state")
-	}
-	if vs.ChannelID != chID {
-		t.Fatalf("replay fallback: DB voice_state channel_id = %d, want %d", vs.ChannelID, chID)
-	}
+	rig.requireVoiceRow(t, userID, chID, "replay fallback")
 }
 
 // TestServeWS_Reconnect_AuthorizedVoiceClientKeepsChannelStream verifies the
@@ -897,135 +319,42 @@ func TestServeWS_ReplayFallback_PreservesVoiceState(t *testing.T) {
 // may read the channel they are in voice on keeps live message delivery without
 // re-sending channel_focus (the desktop client does not re-send it on auth_ok).
 func TestServeWS_Reconnect_AuthorizedVoiceClientKeepsChannelStream(t *testing.T) {
-	database := openServeTestDB(t)
-	limiter := auth.NewRateLimiter()
-	hub := newTestHubDeps(t, database, limiter, nil)
-	go hub.Run()
-	defer hub.Stop()
-
+	rig := newWSRig(t)
 	// roleID 1 = Owner: holds READ_MESSAGES on every channel.
-	userID, err := database.CreateUser(context.Background(), "ws-voice-read-allowed", "hash", 1)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	token, err := auth.GenerateToken()
-	if err != nil {
-		t.Fatalf("GenerateToken: %v", err)
-	}
-	tokenHash := auth.HashToken(token)
-	if _, err := database.CreateSession(context.Background(), userID, tokenHash, "test", "127.0.0.1"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
-
-	chID, err := database.CreateChannel(context.Background(), "voice-read-allowed", "text", "", "", 0)
+	userID, token := rig.seedUser(t, "ws-voice-read-allowed", 1)
+	chID, err := rig.db.CreateChannel(context.Background(), "voice-read-allowed", "text", "", "", 0)
 	if err != nil {
 		t.Fatalf("CreateChannel: %v", err)
 	}
+	ctx := testCtx(t, 10*time.Second)
 
-	handler := ws.ServeWS(hub, []string{"*"}, 0)
-	srv := httptest.NewServer(handler)
-	defer srv.Close()
-
-	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	dialAndAuth := func(lastSeq uint64) *websocket.Conn {
-		t.Helper()
-		conn, dialResp, dialErr := websocket.Dial(ctx, wsURL, nil)
-		if dialResp != nil && dialResp.Body != nil {
-			dialResp.Body.Close()
-		}
-		if dialErr != nil {
-			t.Fatalf("websocket.Dial: %v", dialErr)
-		}
-		authMsg := map[string]any{
-			"type":    "auth",
-			"payload": map[string]any{"token": token, "last_seq": lastSeq},
-		}
-		raw, marshalErr := json.Marshal(authMsg)
-		if marshalErr != nil {
-			t.Fatalf("marshal auth: %v", marshalErr)
-		}
-		if writeErr := conn.Write(ctx, websocket.MessageText, raw); writeErr != nil {
-			t.Fatalf("write auth: %v", writeErr)
-		}
-		// Read auth_ok + first following message.
-		for i := range 2 {
-			if _, _, readErr := conn.Read(ctx); readErr != nil {
-				t.Fatalf("read handshake message %d: %v", i, readErr)
-			}
-		}
-		return conn
-	}
-
-	conn1 := dialAndAuth(0)
-	defer func() { _ = conn1.Close(websocket.StatusNormalClosure, "") }()
-
-	var originalClient *ws.Client
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		originalClient = hub.ClientForTest(userID)
-		if originalClient != nil {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	if originalClient == nil {
-		t.Fatal("expected first client to be registered")
-	}
+	rig.dialAuthed(t, ctx, token, 0)
+	originalClient := rig.waitHubClient(t, userID, "first client to be registered", func(*ws.Client) bool { return true })
 
 	// Join voice on the channel AFTER conn1 is established (see the
 	// PreservesVoiceState test: setting it earlier is cleaned up on connect).
-	if err := database.JoinVoiceChannel(context.Background(), userID, chID); err != nil {
-		t.Fatalf("JoinVoiceChannel: %v", err)
-	}
-	vs, err := database.GetVoiceState(context.Background(), userID)
-	if err != nil || vs == nil {
-		t.Fatalf("GetVoiceState: %v", err)
-	}
-	ws.SetClientVoiceStateForTest(originalClient, chID, vs.JoinedAt)
+	rig.enterVoice(t, userID, chID, originalClient)
 
 	// Reconnect (lastSeq > 0) — voice state transfers to the replacement client,
 	// which has no focused channel of its own.
-	conn2 := dialAndAuth(2)
-	defer func() { _ = conn2.Close(websocket.StatusNormalClosure, "") }()
+	conn2 := rig.dialAuthed(t, ctx, token, 2)
 
-	var replacementClient *ws.Client
-	deadline = time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		replacementClient = hub.ClientForTest(userID)
-		if replacementClient != nil && ws.GetClientVoiceChIDForTest(replacementClient) == chID {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	if replacementClient == nil || ws.GetClientVoiceChIDForTest(replacementClient) != chID {
-		t.Fatal("expected replacement client with transferred voice state")
-	}
+	rig.waitHubClient(t, userID, "replacement client with transferred voice state", func(c *ws.Client) bool {
+		return ws.GetClientVoiceChIDForTest(c) == chID
+	})
 	// The topic subscription lands just after the client enters the hub map.
 	waitFor(t, waitTimeout, func() bool {
-		return slices.Contains(hub.PubSubForTest().TopicsForUser(userID), ws.ChannelTopic(chID))
+		return slices.Contains(rig.hub.PubSubForTest().TopicsForUser(userID), ws.ChannelTopic(chID))
 	}, "reconnected client to be resubscribed to the voice channel topic")
 
-	hub.BroadcastToChannel(chID, []byte(`{"type":"chat_message","payload":{"content":"still-visible"}}`))
+	rig.hub.BroadcastToChannel(chID, []byte(`{"type":"chat_message","payload":{"content":"still-visible"}}`))
 
 	readDeadline := time.Now().Add(3 * time.Second)
 	for {
 		if time.Now().After(readDeadline) {
 			t.Fatal("authorized voice client stopped receiving the channel message stream after reconnect")
 		}
-		readCtx, readCancel := context.WithTimeout(ctx, 500*time.Millisecond)
-		_, raw, readErr := conn2.Read(readCtx)
-		readCancel()
-		if readErr != nil {
-			continue
-		}
-		var msg map[string]any
-		if err := json.Unmarshal(raw, &msg); err != nil {
-			continue
-		}
-		if msg["type"] == "chat_message" {
+		if readUntilType(ctx, conn2, "chat_message", 1, 500*time.Millisecond) {
 			return
 		}
 	}
@@ -1038,180 +367,41 @@ func TestServeWS_Reconnect_AuthorizedVoiceClientKeepsChannelStream(t *testing.T)
 //  3. sets replacement client voiceChID = 0
 //  4. broadcasts exactly one voice_leave visible to an observer client
 func TestServeWS_FreshReconnect_CleansStaleVoiceState(t *testing.T) {
-	database := openServeTestDB(t)
-	limiter := auth.NewRateLimiter()
-	hub := newTestHubDeps(t, database, limiter, nil)
-	go hub.Run()
-	defer hub.Stop()
-
-	// Create two users: the voice user who F5-reloads, and an observer.
-	userID, err := database.CreateUser(context.Background(), "ws-voice-f5", "hash", 1)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	token, err := auth.GenerateToken()
-	if err != nil {
-		t.Fatalf("GenerateToken: %v", err)
-	}
-	tokenHash := auth.HashToken(token)
-	if _, err := database.CreateSession(context.Background(), userID, tokenHash, "test", "127.0.0.1"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
-
-	observerID, err := database.CreateUser(context.Background(), "ws-observer", "hash", 1)
-	if err != nil {
-		t.Fatalf("CreateUser (observer): %v", err)
-	}
-	obsToken, err := auth.GenerateToken()
-	if err != nil {
-		t.Fatalf("GenerateToken (observer): %v", err)
-	}
-	obsTokenHash := auth.HashToken(obsToken)
-	if _, err := database.CreateSession(context.Background(), observerID, obsTokenHash, "test", "127.0.0.1"); err != nil {
-		t.Fatalf("CreateSession (observer): %v", err)
-	}
-
-	// Create a voice channel for the user to be "in".
-	chID, err := database.CreateChannel(context.Background(), "voice-test", "voice", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
-
-	handler := ws.ServeWS(hub, []string{"*"}, 0)
-	srv := httptest.NewServer(handler)
-	defer srv.Close()
-
-	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	dialAndAuthFresh := func(tok string) *websocket.Conn {
-		t.Helper()
-		conn, dialResp, dialErr := websocket.Dial(ctx, wsURL, nil)
-		if dialResp != nil && dialResp.Body != nil {
-			dialResp.Body.Close()
-		}
-		if dialErr != nil {
-			t.Fatalf("websocket.Dial: %v", dialErr)
-		}
-		authMsg := map[string]any{
-			"type":    "auth",
-			"payload": map[string]string{"token": tok},
-		}
-		raw, marshalErr := json.Marshal(authMsg)
-		if marshalErr != nil {
-			t.Fatalf("marshal auth: %v", marshalErr)
-		}
-		if writeErr := conn.Write(ctx, websocket.MessageText, raw); writeErr != nil {
-			t.Fatalf("write auth: %v", writeErr)
-		}
-		// Read auth_ok + ready
-		for i := range 2 {
-			if _, _, readErr := conn.Read(ctx); readErr != nil {
-				t.Fatalf("read handshake message %d: %v", i, readErr)
-			}
-		}
-		return conn
-	}
-
-	// dialAndReadReady dials, authenticates with lastSeq=0, and returns the
-	// conn plus the parsed ready payload so the caller can inspect voice_states.
-	dialAndReadReady := func(tok string) (*websocket.Conn, map[string]any) {
-		t.Helper()
-		conn, dialResp, dialErr := websocket.Dial(ctx, wsURL, nil)
-		if dialResp != nil && dialResp.Body != nil {
-			dialResp.Body.Close()
-		}
-		if dialErr != nil {
-			t.Fatalf("websocket.Dial: %v", dialErr)
-		}
-		authMsg := map[string]any{
-			"type":    "auth",
-			"payload": map[string]string{"token": tok},
-		}
-		raw, marshalErr := json.Marshal(authMsg)
-		if marshalErr != nil {
-			t.Fatalf("marshal auth: %v", marshalErr)
-		}
-		if writeErr := conn.Write(ctx, websocket.MessageText, raw); writeErr != nil {
-			t.Fatalf("write auth: %v", writeErr)
-		}
-		// Read auth_ok (skip it)
-		if _, _, readErr := conn.Read(ctx); readErr != nil {
-			t.Fatalf("read auth_ok: %v", readErr)
-		}
-		// Read ready — parse it
-		_, readyRaw, readErr := conn.Read(ctx)
-		if readErr != nil {
-			t.Fatalf("read ready: %v", readErr)
-		}
-		var readyMsg map[string]any
-		if err := json.Unmarshal(readyRaw, &readyMsg); err != nil {
-			t.Fatalf("unmarshal ready: %v", err)
-		}
-		return conn, readyMsg
-	}
+	rig := newWSRig(t)
+	// The voice user who F5-reloads, and an observer.
+	userID, token := rig.seedUser(t, "ws-voice-f5", 1)
+	_, obsToken := rig.seedUser(t, "ws-observer", 1)
+	chID := rig.voiceChannel(t, "voice-test")
+	ctx := testCtx(t, 10*time.Second)
 
 	// First connection: user joins voice
-	conn1 := dialAndAuthFresh(token)
-	defer func() { _ = conn1.Close(websocket.StatusNormalClosure, "") }()
-
-	var originalClient *ws.Client
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		originalClient = hub.ClientForTest(userID)
-		if originalClient != nil {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	if originalClient == nil {
-		t.Fatal("expected first client to be registered")
-	}
-
-	// Simulate voice join — both in-memory and DB
-	if err := database.JoinVoiceChannel(context.Background(), userID, chID); err != nil {
-		t.Fatalf("JoinVoiceChannel: %v", err)
-	}
-	vsBeforeReload, err := database.GetVoiceState(context.Background(), userID)
-	if err != nil {
-		t.Fatalf("GetVoiceState(before reload): %v", err)
-	}
-	if vsBeforeReload == nil {
-		t.Fatal("expected voice state row after JoinVoiceChannel")
-	}
-	ws.SetClientVoiceStateForTest(originalClient, chID, vsBeforeReload.JoinedAt)
+	rig.dialAuthed(t, ctx, token, 0)
+	originalClient := rig.waitHubClient(t, userID, "first client to be registered", func(*ws.Client) bool { return true })
+	rig.enterVoice(t, userID, chID, originalClient)
 
 	// Connect the observer (will receive broadcasts).
 	// Do NOT drain the observer — github.com/coder/websocket closes the conn
 	// when a Read context expires. Instead, collect all messages below
 	// and filter for voice_leave in the assertion.
-	obsConn := dialAndAuthFresh(obsToken)
-	defer func() { _ = obsConn.Close(websocket.StatusNormalClosure, "") }()
+	obsConn := rig.dialAuthed(t, ctx, obsToken, 0)
 
 	// F5 reload: fresh connection (lastSeq = 0)
-	conn2, readyMsg := dialAndReadReady(token)
-	defer func() { _ = conn2.Close(websocket.StatusNormalClosure, "") }()
+	_, readyMsg := rig.dialReady(t, ctx, token, 0)
 
 	// The replacement registers before its ready frame is written; wait for
 	// the hub's client map to show the swap. Broadcast propagation is covered
 	// by the observer read loop's own timeout below.
-	waitFor(t, waitTimeout, func() bool {
-		c := hub.ClientForTest(userID)
-		return c != nil && c != originalClient
-	}, "replacement client to take over in the hub")
+	replacementClient := rig.waitHubClient(t, userID, "replacement client to take over in the hub", func(c *ws.Client) bool {
+		return c != originalClient
+	})
 
 	// Assert 1: replacement client voiceChID == 0
-	replacementClient := hub.ClientForTest(userID)
-	if replacementClient == nil {
-		t.Fatal("expected replacement client to be registered")
-	}
 	if got := ws.GetClientVoiceChIDForTest(replacementClient); got != 0 {
 		t.Fatalf("fresh reconnect: replacement client voiceChID = %d, want 0", got)
 	}
 
 	// Assert 2: DB voice row is gone
-	vs, vsErr := database.GetVoiceState(context.Background(), userID)
+	vs, vsErr := rig.db.GetVoiceState(context.Background(), userID)
 	if vsErr != nil {
 		t.Fatalf("GetVoiceState: %v", vsErr)
 	}
@@ -1266,92 +456,18 @@ func TestServeWS_FreshReconnect_CleansStaleVoiceState(t *testing.T) {
 // TestServeWS_writePump_MessageDelivered verifies that messages queued on the
 // hub are written through writePump to the connected client.
 func TestServeWS_writePump_MessageDelivered(t *testing.T) {
-	database := openServeTestDB(t)
-	limiter := auth.NewRateLimiter()
-	hub := newTestHubDeps(t, database, limiter, nil)
-	go hub.Run()
-	defer hub.Stop()
-
-	// Seed user and session.
-	userID, err := database.CreateUser(context.Background(), "ws-pump-user", "hash", 1)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	token, err := auth.GenerateToken()
-	if err != nil {
-		t.Fatalf("GenerateToken: %v", err)
-	}
-	tokenHash := auth.HashToken(token)
-	if _, err := database.CreateSession(context.Background(), userID, tokenHash, "test", "127.0.0.1"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
-
-	handler := ws.ServeWS(hub, []string{"*"}, 0)
-	srv := httptest.NewServer(handler)
-	defer srv.Close()
-
-	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	conn, resp, err := websocket.Dial(ctx, wsURL, nil)
-	if resp != nil && resp.Body != nil {
-		defer resp.Body.Close()
-	}
-	if err != nil {
-		t.Fatalf("websocket.Dial: %v", err)
-	}
-	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
-
-	// Authenticate.
-	authMsg := map[string]any{
-		"type":    "auth",
-		"payload": map[string]string{"token": token},
-	}
-	raw, _ := json.Marshal(authMsg)
-	_ = conn.Write(ctx, websocket.MessageText, raw)
-
-	// Drain auth_ok and ready.
-	for range 2 {
-		_, _, err := conn.Read(ctx)
-		if err != nil {
-			t.Fatalf("drain initial messages: %v", err)
-		}
-	}
+	rig := newWSRig(t)
+	_, token := rig.seedUser(t, "ws-pump-user", 1)
+	ctx := testCtx(t, 10*time.Second)
+	conn := rig.dialAuthed(t, ctx, token, 0)
 
 	// Having read ready implies registration completed (serve.go registers
 	// before writing ready) — broadcast immediately.
-	hub.BroadcastServerRestart("test", 0)
+	rig.hub.BroadcastServerRestart("test", 0)
 
-	// The client should receive the broadcast via writePump.
-	readCtx, readCancel := context.WithTimeout(ctx, 2*time.Second)
-	defer readCancel()
-	_, broadcastRaw, err := conn.Read(readCtx)
-	if err != nil {
-		t.Fatalf("read broadcast: %v", err)
-	}
-	var bcast map[string]any
-	if err := json.Unmarshal(broadcastRaw, &bcast); err != nil {
-		t.Fatalf("unmarshal broadcast: %v", err)
-	}
-	// May receive member_join or presence first; drain until server_restart found.
-	found := bcast["type"] == "server_restart"
-	if !found {
-		// Drain a few more messages.
-		for i := 0; i < 5 && !found; i++ {
-			rCtx, rCancel := context.WithTimeout(ctx, 500*time.Millisecond)
-			_, raw2, err2 := conn.Read(rCtx)
-			rCancel()
-			if err2 != nil {
-				break
-			}
-			var m map[string]any
-			if json.Unmarshal(raw2, &m) == nil && m["type"] == "server_restart" {
-				found = true
-			}
-		}
-	}
-	if !found {
+	// The client may receive member_join or presence first; read until
+	// server_restart is found.
+	if !readUntilType(ctx, conn, "server_restart", 6, 2*time.Second) {
 		t.Error("did not receive server_restart broadcast via writePump")
 	}
 }
@@ -1360,103 +476,31 @@ func TestServeWS_writePump_MessageDelivered(t *testing.T) {
 // through the real WebSocket upgrade path: Client A sends chat_send, Client B
 // receives chat_message via the hub broadcast.
 func TestIntegration_MessageRoundTrip(t *testing.T) {
-	database := openServeTestDB(t)
-	limiter := auth.NewRateLimiter()
-	st := database
-	svc := service.New(st, limiter)
-	hub := newTestHubDeps(t, database, limiter, svc)
-	go hub.Run()
-	defer hub.Stop()
-
-	// Seed two users with sessions.
-	userIDA, err := database.CreateUser(context.Background(), "roundtrip-a", "hash", 1)
-	if err != nil {
-		t.Fatalf("CreateUser A: %v", err)
-	}
-	tokenA, err := auth.GenerateToken()
-	if err != nil {
-		t.Fatalf("GenerateToken A: %v", err)
-	}
-	if _, err := database.CreateSession(context.Background(), userIDA, auth.HashToken(tokenA), "test", "127.0.0.1"); err != nil {
-		t.Fatalf("CreateSession A: %v", err)
-	}
-
-	userIDB, err := database.CreateUser(context.Background(), "roundtrip-b", "hash", 1)
-	if err != nil {
-		t.Fatalf("CreateUser B: %v", err)
-	}
-	tokenB, err := auth.GenerateToken()
-	if err != nil {
-		t.Fatalf("GenerateToken B: %v", err)
-	}
-	if _, err := database.CreateSession(context.Background(), userIDB, auth.HashToken(tokenB), "test", "127.0.0.1"); err != nil {
-		t.Fatalf("CreateSession B: %v", err)
-	}
-
-	// Create a text channel for the chat.
-	chID, err := database.CreateChannel(context.Background(), "integration-chat", "text", "", "", 0)
+	rig := newWSRigWithServices(t)
+	_, tokenA := rig.seedUser(t, "roundtrip-a", 1)
+	userIDB, tokenB := rig.seedUser(t, "roundtrip-b", 1)
+	chID, err := rig.db.CreateChannel(context.Background(), "integration-chat", "text", "", "", 0)
 	if err != nil {
 		t.Fatalf("CreateChannel: %v", err)
 	}
 
-	handler := ws.ServeWS(hub, []string{"*"}, 0)
-	srv := httptest.NewServer(handler)
-	defer srv.Close()
-	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
-
-	// --- Helper: connect and authenticate a WebSocket client ---
-	connectAndAuth := func(label, token string) *websocket.Conn {
-		t.Helper()
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		conn, dialResp, dialErr := websocket.Dial(ctx, wsURL, nil)
-		if dialResp != nil && dialResp.Body != nil {
-			dialResp.Body.Close()
-		}
-		if dialErr != nil {
-			t.Fatalf("%s dial: %v", label, dialErr)
-		}
-		authMsg, _ := json.Marshal(map[string]any{
-			"type":    "auth",
-			"payload": map[string]string{"token": token},
-		})
-		if writeErr := conn.Write(ctx, websocket.MessageText, authMsg); writeErr != nil {
-			t.Fatalf("%s write auth: %v", label, writeErr)
-		}
-		// Drain auth_ok + ready.
-		for i := range 2 {
-			if _, _, readErr := conn.Read(ctx); readErr != nil {
-				t.Fatalf("%s drain initial msg %d: %v", label, i, readErr)
-			}
-		}
-		return conn
-	}
-
-	connA := connectAndAuth("clientA", tokenA)
-	defer func() { _ = connA.Close(websocket.StatusNormalClosure, "") }()
-
-	connB := connectAndAuth("clientB", tokenB)
-	defer func() { _ = connB.Close(websocket.StatusNormalClosure, "") }()
-
+	ctx := testCtx(t, 10*time.Second)
 	// Both clients have read their ready frames, so both are registered
 	// (serve.go registers before writing ready).
+	connA := rig.dialAuthed(t, ctx, tokenA, 0)
+	connB := rig.dialAuthed(t, ctx, tokenB, 0)
 
 	// Client B focuses on the channel so it receives channel-scoped broadcasts.
-	focusMsg, _ := json.Marshal(map[string]any{
+	writeFrame(t, ctx, connB, map[string]any{
 		"type":    "channel_focus",
 		"payload": map[string]any{"channel_id": chID},
 	})
-	ctxB, cancelB := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancelB()
-	if err := connB.Write(ctxB, websocket.MessageText, focusMsg); err != nil {
-		t.Fatalf("clientB write channel_focus: %v", err)
-	}
 	waitFor(t, waitTimeout, func() bool {
-		return slices.Contains(hub.PubSubForTest().TopicsForUser(userIDB), ws.ChannelTopic(chID))
+		return slices.Contains(rig.hub.PubSubForTest().TopicsForUser(userIDB), ws.ChannelTopic(chID))
 	}, "clientB channel_focus subscription to land")
 
 	// Client A sends a chat message.
-	chatSend, _ := json.Marshal(map[string]any{
+	writeFrame(t, ctx, connA, map[string]any{
 		"type": "chat_send",
 		"id":   "req-1",
 		"payload": map[string]any{
@@ -1464,43 +508,30 @@ func TestIntegration_MessageRoundTrip(t *testing.T) {
 			"content":    "hello from A",
 		},
 	})
-	ctxA, cancelA := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancelA()
-	if err := connA.Write(ctxA, websocket.MessageText, chatSend); err != nil {
-		t.Fatalf("clientA write chat_send: %v", err)
-	}
 
 	// Client B should receive a chat_message broadcast.
 	// Drain a few messages (member_join, presence, etc.) until we find chat_message.
 	found := false
-	readCtx, readCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer readCancel()
 	for i := 0; i < 15 && !found; i++ {
-		_, raw, readErr := connB.Read(readCtx)
-		if readErr != nil {
-			t.Fatalf("clientB read: %v", readErr)
-		}
-		var env map[string]any
-		if json.Unmarshal(raw, &env) != nil {
+		env := readFrame(t, ctx, connB)
+		if env["type"] != "chat_message" {
 			continue
 		}
-		if env["type"] == "chat_message" {
-			payload, _ := env["payload"].(map[string]any)
-			if payload == nil {
-				t.Fatal("chat_message has nil payload")
-			}
-			if payload["content"] != "hello from A" {
-				t.Errorf("content = %q, want 'hello from A'", payload["content"])
-			}
-			user, _ := payload["user"].(map[string]any)
-			if user == nil {
-				t.Fatal("chat_message missing user")
-			}
-			if user["username"] != "roundtrip-a" {
-				t.Errorf("username = %q, want 'roundtrip-a'", user["username"])
-			}
-			found = true
+		payload, _ := env["payload"].(map[string]any)
+		if payload == nil {
+			t.Fatal("chat_message has nil payload")
 		}
+		if payload["content"] != "hello from A" {
+			t.Errorf("content = %q, want 'hello from A'", payload["content"])
+		}
+		user, _ := payload["user"].(map[string]any)
+		if user == nil {
+			t.Fatal("chat_message missing user")
+		}
+		if user["username"] != "roundtrip-a" {
+			t.Errorf("username = %q, want 'roundtrip-a'", user["username"])
+		}
+		found = true
 	}
 	if !found {
 		t.Error("clientB never received chat_message from clientA")
@@ -1510,62 +541,14 @@ func TestIntegration_MessageRoundTrip(t *testing.T) {
 // TestIntegration_SequenceNumbers verifies that broadcast messages delivered via
 // the real WebSocket path carry a monotonically increasing `seq` field.
 func TestIntegration_SequenceNumbers(t *testing.T) {
-	database := openServeTestDB(t)
-	limiter := auth.NewRateLimiter()
-	hub := newTestHubDeps(t, database, limiter, nil)
-	go hub.Run()
-	defer hub.Stop()
-
-	userID, err := database.CreateUser(context.Background(), "seq-user", "hash", 1)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	token, err := auth.GenerateToken()
-	if err != nil {
-		t.Fatalf("GenerateToken: %v", err)
-	}
-	if _, err := database.CreateSession(context.Background(), userID, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
-
-	handler := ws.ServeWS(hub, []string{"*"}, 0)
-	srv := httptest.NewServer(handler)
-	defer srv.Close()
-	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	conn, resp, err := websocket.Dial(ctx, wsURL, nil)
-	if resp != nil && resp.Body != nil {
-		defer resp.Body.Close()
-	}
-	if err != nil {
-		t.Fatalf("websocket.Dial: %v", err)
-	}
-	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
-
-	// Authenticate.
-	authMsg, _ := json.Marshal(map[string]any{
-		"type":    "auth",
-		"payload": map[string]string{"token": token},
-	})
-	if err := conn.Write(ctx, websocket.MessageText, authMsg); err != nil {
-		t.Fatalf("write auth: %v", err)
-	}
-	// Drain auth_ok and ready (these are direct writes, not broadcasts).
-	for i := range 2 {
-		if _, _, err := conn.Read(ctx); err != nil {
-			t.Fatalf("drain msg %d: %v", i, err)
-		}
-	}
-
-	// Having read ready implies registration completed (serve.go registers
-	// before writing ready).
+	rig := newWSRig(t)
+	_, token := rig.seedUser(t, "seq-user", 1)
+	ctx := testCtx(t, 10*time.Second)
+	conn := rig.dialAuthed(t, ctx, token, 0)
 
 	// Trigger two broadcasts.
-	hub.BroadcastServerRestart("test-seq-1", 10)
-	hub.BroadcastServerRestart("test-seq-2", 20)
+	rig.hub.BroadcastServerRestart("test-seq-1", 10)
+	rig.hub.BroadcastServerRestart("test-seq-2", 20)
 
 	// Collect broadcast messages — they must carry monotonically increasing seq.
 	var seqs []float64
@@ -1602,55 +585,16 @@ func TestIntegration_SequenceNumbers(t *testing.T) {
 
 // TestServeWS_BannedUser_ReceivesError verifies that a banned user cannot connect.
 func TestServeWS_BannedUser_ReceivesError(t *testing.T) {
-	database := openServeTestDB(t)
-	limiter := auth.NewRateLimiter()
-	hub := newTestHubDeps(t, database, limiter, nil)
-	go hub.Run()
-	defer hub.Stop()
-
-	// Seed user, then ban them.
-	userID, err := database.CreateUser(context.Background(), "ws-banned-user", "hash", 1)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	token, err := auth.GenerateToken()
-	if err != nil {
-		t.Fatalf("GenerateToken: %v", err)
-	}
-	tokenHash := auth.HashToken(token)
-	if _, err := database.CreateSession(context.Background(), userID, tokenHash, "test", "127.0.0.1"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
+	rig := newWSRig(t)
+	userID, token := rig.seedUser(t, "ws-banned-user", 1)
 	// Ban the user permanently.
-	if err := database.BanUser(context.Background(), userID, "test ban", nil); err != nil {
+	if err := rig.db.BanUser(context.Background(), userID, "test ban", nil); err != nil {
 		t.Fatalf("BanUser: %v", err)
 	}
 
-	handler := ws.ServeWS(hub, []string{"*"}, 0)
-	srv := httptest.NewServer(handler)
-	defer srv.Close()
-
-	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	conn, resp, err := websocket.Dial(ctx, wsURL, nil)
-	if resp != nil && resp.Body != nil {
-		defer resp.Body.Close()
-	}
-	if err != nil {
-		t.Fatalf("websocket.Dial: %v", err)
-	}
-	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
-
-	authMsg := map[string]any{
-		"type":    "auth",
-		"payload": map[string]string{"token": token},
-	}
-	raw, _ := json.Marshal(authMsg)
-	if err := conn.Write(ctx, websocket.MessageText, raw); err != nil {
-		t.Fatalf("write auth: %v", err)
-	}
+	ctx := testCtx(t, 5*time.Second)
+	conn := rig.dial(t, ctx)
+	writeFrame(t, ctx, conn, authFrame(map[string]any{"token": token}))
 
 	_, respRaw, readErr := conn.Read(ctx)
 	if readErr != nil {

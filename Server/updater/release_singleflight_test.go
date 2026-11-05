@@ -23,9 +23,7 @@ func TestCheckForUpdateCoalescesConcurrentMisses(t *testing.T) {
 	mux.HandleFunc("/repos/J3vb/OwnCord/releases/latest", func(w http.ResponseWriter, r *http.Request) {
 		hits.Add(1)
 		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(release); err != nil {
-			t.Fatalf("encoding release: %v", err)
-		}
+		mustDo(t, "encoding release", json.NewEncoder(w).Encode(release))
 	})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()

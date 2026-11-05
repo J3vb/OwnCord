@@ -2,7 +2,6 @@ package api_test
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"testing"
 
@@ -51,14 +50,9 @@ func TestCreateDM_RecipientStatus_OfflineWhenDisconnected(t *testing.T) {
 	rr := dmPost(t, r, "/api/v1/dms", tokenAlice, map[string]any{
 		"recipient_id": bob.ID,
 	})
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("CreateDM: status = %d, want 201; body = %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusCreated)
 
-	var resp map[string]any
-	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
+	resp := decodeBody[map[string]any](t, rr)
 	recipient, ok := resp["recipient"].(map[string]any)
 	if !ok {
 		t.Fatalf("recipient missing from response: %v", resp)

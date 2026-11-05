@@ -18,12 +18,7 @@ import (
 func newTestMessageService(t *testing.T) (*MessageService, *db.DB) {
 	t.Helper()
 	database := newTestDB(t)
-	seedRole(t, database, &db.Role{
-		ID:          permissions.MemberRoleID,
-		Name:        "member",
-		Permissions: permissions.SendMessages | permissions.ReadMessages | permissions.AddReactions,
-		Position:    1,
-	})
+	seedMemberRole(t, database, permissions.SendMessages|permissions.ReadMessages|permissions.AddReactions)
 	seedUser(t, database, &db.User{ID: 1, Username: "alice", Status: "online"})
 	seedUserRole(t, database, 1, permissions.MemberRoleID)
 	seedChannel(t, database, &db.Channel{ID: 10, Name: "general", Type: "text"})
@@ -37,16 +32,13 @@ func newTestMessageService(t *testing.T) (*MessageService, *db.DB) {
 func TestSendMessage_Valid(t *testing.T) {
 	svc, _ := newTestMessageService(t)
 
-	result, err := svc.SendMessage(context.Background(), SendMessageParams{
+	result := mustSendMessage(context.Background(), t, svc, SendMessageParams{
 		ChannelID: 10,
 		UserID:    1,
 		Username:  "alice",
 		RoleName:  "member",
 		Content:   "hello world",
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
 	if result.MessageID <= 0 {
 		t.Fatal("expected positive message ID")
 	}
@@ -63,23 +55,10 @@ func TestSendMessage_Valid(t *testing.T) {
 // a DM — the old broadcast gate's DM branch skipped the block check entirely.
 func TestCanPost_DMBlockEnforced(t *testing.T) {
 	database := newTestDB(t)
-	seedRole(t, database, &db.Role{
-		ID: permissions.MemberRoleID, Name: "member",
-		Permissions: permissions.SendMessages | permissions.ReadMessages, Position: 1,
-	})
-	seedUser(t, database, &db.User{ID: 1, Username: "alice"})
-	seedUser(t, database, &db.User{ID: 2, Username: "bob"})
-	seedUserRole(t, database, 1, permissions.MemberRoleID)
-	seedUserRole(t, database, 2, permissions.MemberRoleID)
-	seedChannel(t, database, &db.Channel{ID: 50, Name: "dm-1-2", Type: "dm"})
-	seedDMParticipant(t, database, 50, 1)
-	seedDMParticipant(t, database, 50, 2)
-	checker := permissions.NewChecker(database)
-	svc := NewMessageService(database, NewPermissionService(database, checker), nil)
+	seedAliceBobDM(t, database, permissions.SendMessages|permissions.ReadMessages)
+	svc := newMessageServiceOn(database)
 
-	if err := svc.CanPost(context.Background(), 1, 50); err != nil {
-		t.Fatalf("unblocked DM participant should be allowed: %v", err)
-	}
+	mustDo(t, "unblocked DM participant should be allowed", svc.CanPost(context.Background(), 1, 50))
 	seedBlock(t, database, 2, 1) // bob blocks alice
 	if err := svc.CanPost(context.Background(), 1, 50); !errors.Is(err, ErrBlocked) {
 		t.Fatalf("blocked user must be refused: got %v", err)
@@ -96,15 +75,11 @@ func TestCanPost_DMBlockEnforced(t *testing.T) {
 // READ|SEND via the cached checker.
 func TestCanPost_ChannelPermissionRequired(t *testing.T) {
 	database := newTestDB(t)
-	seedRole(t, database, &db.Role{
-		ID: permissions.MemberRoleID, Name: "member",
-		Permissions: permissions.ReadMessages, Position: 1, // no SendMessages
-	})
+	seedMemberRole(t, database, permissions.ReadMessages)
 	seedUser(t, database, &db.User{ID: 1, Username: "alice"})
 	seedUserRole(t, database, 1, permissions.MemberRoleID)
 	seedChannel(t, database, &db.Channel{ID: 10, Name: "general", Type: "text"})
-	checker := permissions.NewChecker(database)
-	svc := NewMessageService(database, NewPermissionService(database, checker), nil)
+	svc := newMessageServiceOn(database)
 
 	if err := svc.CanPost(context.Background(), 1, 10); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("missing SEND_MESSAGES must refuse: got %v", err)
@@ -116,10 +91,7 @@ func TestCanPost_ChannelPermissionRequired(t *testing.T) {
 // READ|SEND. A plain member is refused; a moderator with MANAGE_MESSAGES posts.
 func TestCanPost_AnnouncementRequiresManageMessages(t *testing.T) {
 	database := newTestDB(t)
-	seedRole(t, database, &db.Role{
-		ID: permissions.MemberRoleID, Name: "member",
-		Permissions: permissions.ReadMessages | permissions.SendMessages, Position: 1,
-	})
+	seedMemberRole(t, database, permissions.ReadMessages|permissions.SendMessages)
 	seedRole(t, database, &db.Role{
 		ID: permissions.ModeratorRoleID, Name: "moderator",
 		Permissions: permissions.ReadMessages | permissions.SendMessages | permissions.ManageMessages, Position: 60,
@@ -129,8 +101,7 @@ func TestCanPost_AnnouncementRequiresManageMessages(t *testing.T) {
 	seedUserRole(t, database, 1, permissions.MemberRoleID)
 	seedUserRole(t, database, 2, permissions.ModeratorRoleID)
 	seedChannel(t, database, &db.Channel{ID: 20, Name: "announcements", Type: "announcement"})
-	checker := permissions.NewChecker(database)
-	svc := NewMessageService(database, NewPermissionService(database, checker), nil)
+	svc := newMessageServiceOn(database)
 
 	// Member has READ|SEND but not MANAGE_MESSAGES → refused in an announcement channel.
 	if err := svc.CanPost(context.Background(), 1, 20); !errors.Is(err, ErrForbidden) {
@@ -148,35 +119,17 @@ func TestCanPost_AnnouncementRequiresManageMessages(t *testing.T) {
 // sends — no check-then-link race, and retries cannot hard-fail.
 func TestSendMessage_AttachmentOwnershipAtomic(t *testing.T) {
 	database := newTestDB(t)
-	seedRole(t, database, &db.Role{
-		ID:          permissions.MemberRoleID,
-		Name:        "member",
-		Permissions: permissions.SendMessages | permissions.ReadMessages | permissions.AttachFiles,
-		Position:    1,
-	})
-	seedUser(t, database, &db.User{ID: 1, Username: "alice", Status: "online"})
-	seedUser(t, database, &db.User{ID: 2, Username: "mallory", Status: "online"})
-	seedUserRole(t, database, 1, permissions.MemberRoleID)
-	seedUserRole(t, database, 2, permissions.MemberRoleID)
-	seedChannel(t, database, &db.Channel{ID: 10, Name: "general", Type: "text"})
-	checker := permissions.NewChecker(database)
-	svc := NewMessageService(database, NewPermissionService(database, checker), nil)
+	seedAliceAndMallory(t, database, permissions.SendMessages|permissions.ReadMessages|permissions.AttachFiles)
+	svc := newMessageServiceOn(database)
 
-	if err := database.CreateAttachment(context.Background(), "att-own", 1, "a.png", "s-a.png", "image/png", 10, nil, nil); err != nil {
-		t.Fatal(err)
-	}
-	if err := database.CreateAttachment(context.Background(), "att-foreign", 2, "b.png", "s-b.png", "image/png", 10, nil, nil); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateAttachment", database.CreateAttachment(context.Background(), "att-own", 1, "a.png", "s-a.png", "image/png", 10, nil, nil))
+	mustDo(t, "CreateAttachment", database.CreateAttachment(context.Background(), "att-foreign", 2, "b.png", "s-b.png", "image/png", 10, nil, nil))
 
-	result, err := svc.SendMessage(context.Background(), SendMessageParams{
+	result := mustSendMessage(context.Background(), t, svc, SendMessageParams{
 		ChannelID: 10, UserID: 1, Username: "alice", RoleName: "member",
 		Content:       "with files",
 		AttachmentIDs: []string{"att-own", "att-foreign", "att-missing"},
 	})
-	if err != nil {
-		t.Fatalf("SendMessage: %v", err)
-	}
 	if result.MessageID <= 0 {
 		t.Fatal("message should persist even when some attachments are skipped")
 	}
@@ -191,14 +144,11 @@ func TestSendMessage_AttachmentOwnershipAtomic(t *testing.T) {
 	}
 
 	// A retry naming the now-linked attachment must still send.
-	retry, err := svc.SendMessage(context.Background(), SendMessageParams{
+	retry := mustSendMessage(context.Background(), t, svc, SendMessageParams{
 		ChannelID: 10, UserID: 1, Username: "alice", RoleName: "member",
 		Content:       "retry",
 		AttachmentIDs: []string{"att-own"},
 	})
-	if err != nil {
-		t.Fatalf("retry with already-linked attachment should still send: %v", err)
-	}
 	if retry.MessageID <= 0 {
 		t.Fatal("retry should persist a message")
 	}
@@ -210,23 +160,10 @@ func TestSendMessage_AttachmentOwnershipAtomic(t *testing.T) {
 
 func TestSendMessage_EmptyContentAllAttachmentsSkipped(t *testing.T) {
 	database := newTestDB(t)
-	seedRole(t, database, &db.Role{
-		ID:          permissions.MemberRoleID,
-		Name:        "member",
-		Permissions: permissions.SendMessages | permissions.ReadMessages | permissions.AttachFiles,
-		Position:    1,
-	})
-	seedUser(t, database, &db.User{ID: 1, Username: "alice", Status: "online"})
-	seedUser(t, database, &db.User{ID: 2, Username: "mallory", Status: "online"})
-	seedUserRole(t, database, 1, permissions.MemberRoleID)
-	seedUserRole(t, database, 2, permissions.MemberRoleID)
-	seedChannel(t, database, &db.Channel{ID: 10, Name: "general", Type: "text"})
-	checker := permissions.NewChecker(database)
-	svc := NewMessageService(database, NewPermissionService(database, checker), nil)
+	seedAliceAndMallory(t, database, permissions.SendMessages|permissions.ReadMessages|permissions.AttachFiles)
+	svc := newMessageServiceOn(database)
 
-	if err := database.CreateAttachment(context.Background(), "att-foreign", 2, "b.png", "s-b.png", "image/png", 10, nil, nil); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateAttachment", database.CreateAttachment(context.Background(), "att-foreign", 2, "b.png", "s-b.png", "image/png", 10, nil, nil))
 
 	// Empty content is normally rejected, but sanitizeContent waives that
 	// check whenever attachment ids are requested. Here every requested id
@@ -245,9 +182,7 @@ func TestSendMessage_EmptyContentAllAttachmentsSkipped(t *testing.T) {
 	}
 
 	rows, err := database.GetMessages(context.Background(), 10, 0, 50)
-	if err != nil {
-		t.Fatalf("GetMessages: %v", err)
-	}
+	mustDo(t, "GetMessages", err)
 	if len(rows) != 0 {
 		t.Fatalf("channel history = %d messages, want 0 (blank message must be compensating-deleted, not visible)", len(rows))
 	}
@@ -329,19 +264,12 @@ func TestSendMessage_InvalidChannelID(t *testing.T) {
 func TestSendMessage_NoPermission(t *testing.T) {
 	database := newTestDB(t)
 	// Role with ReadMessages only (no SendMessages).
-	seedRole(t, database, &db.Role{
-		ID:          permissions.MemberRoleID,
-		Name:        "member",
-		Permissions: permissions.ReadMessages,
-		Position:    1,
-	})
+	seedMemberRole(t, database, permissions.ReadMessages)
 	seedUser(t, database, &db.User{ID: 1, Username: "alice"})
 	seedUserRole(t, database, 1, permissions.MemberRoleID)
 	seedChannel(t, database, &db.Channel{ID: 10, Name: "readonly", Type: "text"})
 
-	checker := permissions.NewChecker(database)
-	permSvc := NewPermissionService(database, checker)
-	svc := NewMessageService(database, permSvc, nil)
+	svc := newMessageServiceOn(database)
 
 	_, err := svc.SendMessage(context.Background(), SendMessageParams{
 		ChannelID: 10,
@@ -361,20 +289,15 @@ func TestEditMessage_OwnerCanEdit(t *testing.T) {
 	svc, _ := newTestMessageService(t)
 
 	// Send a message first.
-	result, err := svc.SendMessage(context.Background(), SendMessageParams{
+	result := mustSendMessage(context.Background(), t, svc, SendMessageParams{
 		ChannelID: 10,
 		UserID:    1,
 		Username:  "alice",
 		Content:   "original",
 	})
-	if err != nil {
-		t.Fatalf("send: %v", err)
-	}
 
 	editResult, err := svc.EditMessage(context.Background(), 1, result.MessageID, "edited content")
-	if err != nil {
-		t.Fatalf("edit: %v", err)
-	}
+	mustDo(t, "edit", err)
 	if editResult.Content != "edited content" {
 		t.Fatalf("expected %q, got %q", "edited content", editResult.Content)
 	}
@@ -390,18 +313,15 @@ func TestEditMessage_NonOwnerFails(t *testing.T) {
 	seedUserRole(t, database, 2, permissions.MemberRoleID)
 
 	// User 1 sends a message.
-	result, err := svc.SendMessage(context.Background(), SendMessageParams{
+	result := mustSendMessage(context.Background(), t, svc, SendMessageParams{
 		ChannelID: 10,
 		UserID:    1,
 		Username:  "alice",
 		Content:   "alice's message",
 	})
-	if err != nil {
-		t.Fatalf("send: %v", err)
-	}
 
 	// User 2 tries to edit it.
-	_, err = svc.EditMessage(context.Background(), 2, result.MessageID, "hacked")
+	_, err := svc.EditMessage(context.Background(), 2, result.MessageID, "hacked")
 	if err == nil {
 		t.Fatal("expected error when non-owner edits message")
 	}
@@ -413,17 +333,14 @@ func TestEditMessage_NonOwnerFails(t *testing.T) {
 func TestEditMessage_EmptyContentFails(t *testing.T) {
 	svc, _ := newTestMessageService(t)
 
-	result, err := svc.SendMessage(context.Background(), SendMessageParams{
+	result := mustSendMessage(context.Background(), t, svc, SendMessageParams{
 		ChannelID: 10,
 		UserID:    1,
 		Username:  "alice",
 		Content:   "original",
 	})
-	if err != nil {
-		t.Fatalf("send: %v", err)
-	}
 
-	_, err = svc.EditMessage(context.Background(), 1, result.MessageID, "")
+	_, err := svc.EditMessage(context.Background(), 1, result.MessageID, "")
 	if err == nil {
 		t.Fatal("expected error for empty edit content")
 	}
@@ -442,45 +359,23 @@ func TestEditMessage_EmptyContentFails(t *testing.T) {
 // broadcast they posted while privileged.
 func TestEditMessage_DeniedReadCannotEdit(t *testing.T) {
 	database := newTestDB(t)
-	seedRole(t, database, &db.Role{
-		ID:          permissions.MemberRoleID,
-		Name:        "member",
-		Permissions: permissions.SendMessages | permissions.ReadMessages,
-		Position:    1,
-	})
-	seedRole(t, database, &db.Role{
-		ID:          permissions.ModeratorRoleID,
-		Name:        "moderator",
-		Permissions: permissions.SendMessages | permissions.ReadMessages | permissions.ManageMessages,
-		Position:    10,
-	})
-	seedUser(t, database, &db.User{ID: 1, Username: "alice"})
-	seedUser(t, database, &db.User{ID: 2, Username: "mod_bob"})
-	seedUserRole(t, database, 1, permissions.MemberRoleID)
-	seedUserRole(t, database, 2, permissions.ModeratorRoleID)
+	seedAliceAndModBob(t, database, permissions.SendMessages|permissions.ReadMessages, permissions.SendMessages|permissions.ReadMessages|permissions.ManageMessages)
 	seedChannel(t, database, &db.Channel{ID: 10, Name: "staff-private", Type: "text"})
 	seedChannel(t, database, &db.Channel{ID: 11, Name: "announcements", Type: "announcement"})
 
-	permSvc := NewPermissionService(database, permissions.NewChecker(database))
-	svc := NewMessageService(database, permSvc, nil)
+	svc := newMessageServiceOn(database)
 
-	sent, err := svc.SendMessage(context.Background(), SendMessageParams{
+	sent := mustSendMessage(context.Background(), t, svc, SendMessageParams{
 		ChannelID: 10, UserID: 1, Username: "alice", Content: "private discussion",
 	})
-	if err != nil {
-		t.Fatalf("send: %v", err)
-	}
-	announced, err := svc.SendMessage(context.Background(), SendMessageParams{
+	announced := mustSendMessage(context.Background(), t, svc, SendMessageParams{
 		ChannelID: 11, UserID: 2, Username: "mod_bob", Content: "payroll is on the 1st",
 	})
-	if err != nil {
-		t.Fatalf("send announcement: %v", err)
-	}
 
 	// Admin unchecks "Can access" for the member role: READ_MESSAGES and
 	// CONNECT_VOICE are denied, SEND_MESSAGES survives the deny mask.
 	seedChannelOverride(t, database, permissions.MemberRoleID, 10, 0, permissions.ReadMessages|permissions.ConnectVoice)
-	permSvc.InvalidateChannel(10)
+	svc.perms.InvalidateChannel(10)
 
 	if _, err := svc.EditMessage(context.Background(), 1, sent.MessageID, "payroll moved to http://evil/"); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("author denied READ_MESSAGES must not edit: got %v", err)
@@ -489,7 +384,7 @@ func TestEditMessage_DeniedReadCannotEdit(t *testing.T) {
 	// The moderator is demoted to member: MANAGE_MESSAGES is gone, so the
 	// announcement they authored is no longer theirs to rewrite.
 	seedUserRole(t, database, 2, permissions.MemberRoleID)
-	permSvc.InvalidateUser(2)
+	svc.perms.InvalidateUser(2)
 
 	if _, err := svc.EditMessage(context.Background(), 2, announced.MessageID, "payroll moved to http://evil/"); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("demoted author must not edit an announcement: got %v", err)
@@ -515,20 +410,15 @@ func TestEditMessage_DeniedReadCannotEdit(t *testing.T) {
 func TestDeleteMessage_OwnerCanDelete(t *testing.T) {
 	svc, _ := newTestMessageService(t)
 
-	result, err := svc.SendMessage(context.Background(), SendMessageParams{
+	result := mustSendMessage(context.Background(), t, svc, SendMessageParams{
 		ChannelID: 10,
 		UserID:    1,
 		Username:  "alice",
 		Content:   "delete me",
 	})
-	if err != nil {
-		t.Fatalf("send: %v", err)
-	}
 
 	delResult, err := svc.DeleteMessage(context.Background(), 1, result.MessageID)
-	if err != nil {
-		t.Fatalf("delete: %v", err)
-	}
+	mustDo(t, "delete", err)
 	if delResult.MessageID != result.MessageID {
 		t.Fatalf("expected message ID %d, got %d", result.MessageID, delResult.MessageID)
 	}
@@ -543,18 +433,15 @@ func TestDeleteMessage_NonOwnerWithoutModFails(t *testing.T) {
 	seedUserRole(t, database, 2, permissions.MemberRoleID)
 
 	// User 1 sends.
-	result, err := svc.SendMessage(context.Background(), SendMessageParams{
+	result := mustSendMessage(context.Background(), t, svc, SendMessageParams{
 		ChannelID: 10,
 		UserID:    1,
 		Username:  "alice",
 		Content:   "important message",
 	})
-	if err != nil {
-		t.Fatalf("send: %v", err)
-	}
 
 	// User 2 (no ManageMessages) tries to delete user 1's message.
-	_, err = svc.DeleteMessage(context.Background(), 2, result.MessageID)
+	_, err := svc.DeleteMessage(context.Background(), 2, result.MessageID)
 	if err == nil {
 		t.Fatal("expected error when non-owner without mod perms deletes message")
 	}
@@ -567,44 +454,22 @@ func TestDeleteMessage_ModCanDeleteOthersMessage(t *testing.T) {
 	database := newTestDB(t)
 	// Mod role has ManageMessages + SendMessages + ReadMessages.
 	modPerms := permissions.SendMessages | permissions.ReadMessages | permissions.ManageMessages
-	seedRole(t, database, &db.Role{
-		ID:          permissions.ModeratorRoleID,
-		Name:        "moderator",
-		Permissions: modPerms,
-		Position:    10,
-	})
-	seedRole(t, database, &db.Role{
-		ID:          permissions.MemberRoleID,
-		Name:        "member",
-		Permissions: permissions.SendMessages | permissions.ReadMessages,
-		Position:    1,
-	})
-	seedUser(t, database, &db.User{ID: 1, Username: "alice"})
-	seedUser(t, database, &db.User{ID: 2, Username: "mod_bob"})
-	seedUserRole(t, database, 1, permissions.MemberRoleID)
-	seedUserRole(t, database, 2, permissions.ModeratorRoleID)
+	seedAliceAndModBob(t, database, permissions.SendMessages|permissions.ReadMessages, modPerms)
 	seedChannel(t, database, &db.Channel{ID: 10, Name: "general", Type: "text"})
 
-	checker := permissions.NewChecker(database)
-	permSvc := NewPermissionService(database, checker)
-	svc := NewMessageService(database, permSvc, nil)
+	svc := newMessageServiceOn(database)
 
 	// User 1 sends a message.
-	result, err := svc.SendMessage(context.Background(), SendMessageParams{
+	result := mustSendMessage(context.Background(), t, svc, SendMessageParams{
 		ChannelID: 10,
 		UserID:    1,
 		Username:  "alice",
 		Content:   "rule-breaking content",
 	})
-	if err != nil {
-		t.Fatalf("send: %v", err)
-	}
 
 	// Mod (user 2) deletes it.
 	delResult, err := svc.DeleteMessage(context.Background(), 2, result.MessageID)
-	if err != nil {
-		t.Fatalf("mod delete: %v", err)
-	}
+	mustDo(t, "mod delete", err)
 	if !delResult.IsMod {
 		t.Fatal("expected IsMod to be true for moderator deletion")
 	}
@@ -618,40 +483,21 @@ func TestDeleteMessage_ModCanDeleteOthersMessage(t *testing.T) {
 // message IDs. Mirrors api/channel_authz_test.go's denyReadMessages helper.
 func TestDeleteMessage_DeniedReadCannotDelete(t *testing.T) {
 	database := newTestDB(t)
-	seedRole(t, database, &db.Role{
-		ID:          permissions.ModeratorRoleID,
-		Name:        "moderator",
-		Permissions: permissions.SendMessages | permissions.ReadMessages | permissions.ManageMessages,
-		Position:    10,
-	})
-	seedRole(t, database, &db.Role{
-		ID:          permissions.MemberRoleID,
-		Name:        "member",
-		Permissions: permissions.SendMessages | permissions.ReadMessages,
-		Position:    1,
-	})
-	seedUser(t, database, &db.User{ID: 1, Username: "alice"})
-	seedUser(t, database, &db.User{ID: 2, Username: "mod_bob"})
-	seedUserRole(t, database, 1, permissions.MemberRoleID)
-	seedUserRole(t, database, 2, permissions.ModeratorRoleID)
+	seedAliceAndModBob(t, database, permissions.SendMessages|permissions.ReadMessages, permissions.SendMessages|permissions.ReadMessages|permissions.ManageMessages)
 	seedChannel(t, database, &db.Channel{ID: 10, Name: "staff-private", Type: "text"})
 
-	permSvc := NewPermissionService(database, permissions.NewChecker(database))
-	svc := NewMessageService(database, permSvc, nil)
+	svc := newMessageServiceOn(database)
 
-	sent, err := svc.SendMessage(context.Background(), SendMessageParams{
+	sent := mustSendMessage(context.Background(), t, svc, SendMessageParams{
 		ChannelID: 10, UserID: 1, Username: "alice", Content: "private discussion",
 	})
-	if err != nil {
-		t.Fatalf("send: %v", err)
-	}
 
 	// Admin unchecks "Can access" for both roles: READ_MESSAGES and
 	// CONNECT_VOICE are denied, MANAGE_MESSAGES survives the deny mask.
 	denyPrivate := permissions.ReadMessages | permissions.ConnectVoice
 	seedChannelOverride(t, database, permissions.ModeratorRoleID, 10, 0, denyPrivate)
 	seedChannelOverride(t, database, permissions.MemberRoleID, 10, 0, denyPrivate)
-	permSvc.InvalidateChannel(10)
+	svc.perms.InvalidateChannel(10)
 
 	if _, err := svc.DeleteMessage(context.Background(), 2, sent.MessageID); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("moderator denied READ_MESSAGES must not delete: got %v", err)
@@ -684,15 +530,12 @@ func TestDeleteMessage_InvalidMessageID(t *testing.T) {
 func TestSendMessage_HTMLSanitized(t *testing.T) {
 	svc, _ := newTestMessageService(t)
 
-	result, err := svc.SendMessage(context.Background(), SendMessageParams{
+	result := mustSendMessage(context.Background(), t, svc, SendMessageParams{
 		ChannelID: 10,
 		UserID:    1,
 		Username:  "alice",
 		Content:   `<script>alert("xss")</script>hello`,
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
 	if strings.Contains(result.Content, "<script>") {
 		t.Fatal("expected HTML to be stripped from content")
 	}
@@ -709,33 +552,14 @@ func TestSendMessage_HTMLSanitized(t *testing.T) {
 // members see, and use the success/not-found split as a message-ID oracle.
 func TestSetMessagePinned_DeniedReadCannotPin(t *testing.T) {
 	database := newTestDB(t)
-	seedRole(t, database, &db.Role{
-		ID:          permissions.ModeratorRoleID,
-		Name:        "moderator",
-		Permissions: permissions.SendMessages | permissions.ReadMessages | permissions.ManageMessages,
-		Position:    10,
-	})
-	seedRole(t, database, &db.Role{
-		ID:          permissions.MemberRoleID,
-		Name:        "member",
-		Permissions: permissions.SendMessages | permissions.ReadMessages,
-		Position:    1,
-	})
-	seedUser(t, database, &db.User{ID: 1, Username: "alice"})
-	seedUser(t, database, &db.User{ID: 2, Username: "mod_bob"})
-	seedUserRole(t, database, 1, permissions.MemberRoleID)
-	seedUserRole(t, database, 2, permissions.ModeratorRoleID)
+	seedAliceAndModBob(t, database, permissions.SendMessages|permissions.ReadMessages, permissions.SendMessages|permissions.ReadMessages|permissions.ManageMessages)
 	seedChannel(t, database, &db.Channel{ID: 10, Name: "staff-private", Type: "text"})
 
-	permSvc := NewPermissionService(database, permissions.NewChecker(database))
-	svc := NewMessageService(database, permSvc, nil)
+	svc := newMessageServiceOn(database)
 
-	sent, err := svc.SendMessage(context.Background(), SendMessageParams{
+	sent := mustSendMessage(context.Background(), t, svc, SendMessageParams{
 		ChannelID: 10, UserID: 1, Username: "alice", Content: "announcement",
 	})
-	if err != nil {
-		t.Fatalf("send: %v", err)
-	}
 
 	// While the moderator can still read the channel, pinning works.
 	if _, err := svc.SetMessagePinned(context.Background(), 2, 10, sent.MessageID, true); err != nil {
@@ -744,7 +568,7 @@ func TestSetMessagePinned_DeniedReadCannotPin(t *testing.T) {
 
 	denyPrivate := permissions.ReadMessages | permissions.ConnectVoice
 	seedChannelOverride(t, database, permissions.ModeratorRoleID, 10, 0, denyPrivate)
-	permSvc.InvalidateChannel(10)
+	svc.perms.InvalidateChannel(10)
 
 	if _, err := svc.SetMessagePinned(context.Background(), 2, 10, sent.MessageID, false); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("moderator denied READ_MESSAGES must not unpin: got %v", err)
@@ -757,9 +581,7 @@ func TestSetMessagePinned_DeniedReadCannotPin(t *testing.T) {
 	}
 
 	pinned, err := database.GetPinnedMessages(context.Background(), 10, 1)
-	if err != nil {
-		t.Fatalf("GetPinnedMessages: %v", err)
-	}
+	mustDo(t, "GetPinnedMessages", err)
 	if len(pinned) != 1 {
 		t.Fatalf("pin state must survive the locked-out unpin attempt, got %d pinned", len(pinned))
 	}
@@ -772,29 +594,13 @@ func TestSetMessagePinned_DeniedReadCannotPin(t *testing.T) {
 // arbitrary new text still arrived, and reactions and pins did the same.
 func TestDMBlock_EnforcedOnEveryInteractionSink(t *testing.T) {
 	database := newTestDB(t)
-	seedRole(t, database, &db.Role{
-		ID:          permissions.MemberRoleID,
-		Name:        "member",
-		Permissions: permissions.SendMessages | permissions.ReadMessages | permissions.AddReactions,
-		Position:    1,
-	})
-	seedUser(t, database, &db.User{ID: 1, Username: "alice"})
-	seedUser(t, database, &db.User{ID: 2, Username: "bob"})
-	seedUserRole(t, database, 1, permissions.MemberRoleID)
-	seedUserRole(t, database, 2, permissions.MemberRoleID)
-	seedChannel(t, database, &db.Channel{ID: 50, Name: "dm-1-2", Type: "dm"})
-	seedDMParticipant(t, database, 50, 1)
-	seedDMParticipant(t, database, 50, 2)
+	seedAliceBobDM(t, database, permissions.SendMessages|permissions.ReadMessages|permissions.AddReactions)
 
-	permSvc := NewPermissionService(database, permissions.NewChecker(database))
-	svc := NewMessageService(database, permSvc, nil)
+	svc := newMessageServiceOn(database)
 
-	sent, err := svc.SendMessage(context.Background(), SendMessageParams{
+	sent := mustSendMessage(context.Background(), t, svc, SendMessageParams{
 		ChannelID: 50, UserID: 1, Username: "alice", Content: "hi bob",
 	})
-	if err != nil {
-		t.Fatalf("send before block: %v", err)
-	}
 
 	seedBlock(t, database, 2, 1) // bob blocks alice
 
@@ -841,25 +647,16 @@ func TestDMBlock_EnforcedOnEveryInteractionSink(t *testing.T) {
 // perfectly ordinary not-found as a 500 INTERNAL_ERROR.
 func TestSetMessagePinned_DeletedMessageReturnsNotFound(t *testing.T) {
 	database := newTestDB(t)
-	seedRole(t, database, &db.Role{
-		ID:          permissions.MemberRoleID,
-		Name:        "member",
-		Permissions: permissions.SendMessages | permissions.ReadMessages | permissions.ManageMessages,
-		Position:    1,
-	})
+	seedMemberRole(t, database, permissions.SendMessages|permissions.ReadMessages|permissions.ManageMessages)
 	seedUser(t, database, &db.User{ID: 1, Username: "alice"})
 	seedUserRole(t, database, 1, permissions.MemberRoleID)
 	seedChannel(t, database, &db.Channel{ID: 10, Name: "general", Type: "text"})
 
-	permSvc := NewPermissionService(database, permissions.NewChecker(database))
-	svc := NewMessageService(database, permSvc, nil)
+	svc := newMessageServiceOn(database)
 
-	sent, err := svc.SendMessage(context.Background(), SendMessageParams{
+	sent := mustSendMessage(context.Background(), t, svc, SendMessageParams{
 		ChannelID: 10, UserID: 1, Username: "alice", Content: "will be deleted",
 	})
-	if err != nil {
-		t.Fatalf("send: %v", err)
-	}
 
 	if _, err := svc.SetMessagePinned(context.Background(), 1, 10, sent.MessageID, true); err != nil {
 		t.Fatalf("pin: %v", err)
@@ -869,7 +666,7 @@ func TestSetMessagePinned_DeletedMessageReturnsNotFound(t *testing.T) {
 		t.Fatalf("delete: %v", err)
 	}
 
-	_, err = svc.SetMessagePinned(context.Background(), 1, 10, sent.MessageID, false)
+	_, err := svc.SetMessagePinned(context.Background(), 1, 10, sent.MessageID, false)
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("expected service.ErrNotFound for a soft-deleted message, got %v", err)
 	}
@@ -898,11 +695,7 @@ func newReadOnlyAuthorFixture(t *testing.T) (svc *MessageService, database *db.D
 	seedUser(t, database, &db.User{ID: 6, Username: "mod_bob"})
 	seedUserRole(t, database, 6, permissions.ModeratorRoleID)
 	seedChannel(t, database, &db.Channel{ID: 10, Name: "general", Type: "text"})
-	var err error
-	msgID, err = database.CreateMessage(context.Background(), 10, 5, "written before", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	msgID = mustCreateMessage(t, database, 10, 5, "written before", nil)
 	permSvc := NewPermissionService(database, permissions.NewChecker(database))
 	return NewMessageService(database, permSvc, nil), database, msgID
 }
@@ -910,9 +703,7 @@ func newReadOnlyAuthorFixture(t *testing.T) (svc *MessageService, database *db.D
 func requireDeletedByAuthor(t *testing.T, svc *MessageService, database *db.DB, userID, msgID int64) {
 	t.Helper()
 	res, err := svc.DeleteMessage(context.Background(), userID, msgID)
-	if err != nil {
-		t.Fatalf("DeleteMessage: %v", err)
-	}
+	mustDo(t, "DeleteMessage", err)
 	if res.IsMod {
 		t.Error("IsMod = true: an author's delete must not be a moderation removal")
 	}

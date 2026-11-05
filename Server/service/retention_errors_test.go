@@ -91,12 +91,8 @@ func newRetentionFixture(t *testing.T) *retentionFixture {
 	dir := t.TempDir()
 	owner, _ := database.CreateUser(ctx, "fault-owner", "hash", 1)
 	channel, _ := seedRetentionChannel(t, database, "fault-chan", owner, dir, 1)
-	if err := database.ApplySettings(ctx, map[string]string{db.RetentionDaysKey: "30"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := database.SetChannelRetention(ctx, channel, 7, owner); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "ApplySettings", database.ApplySettings(ctx, map[string]string{db.RetentionDaysKey: "30"}))
+	mustDo(t, "SetChannelRetention", database.SetChannelRetention(ctx, channel, 7, owner))
 	store := &faultRetentionStore{RetentionStore: database, fail: map[string]bool{}}
 	svc := NewRetentionService(store)
 	svc.SetFiles(newTestStorage(t, dir))

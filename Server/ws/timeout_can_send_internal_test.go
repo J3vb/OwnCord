@@ -30,19 +30,9 @@ type timeoutCanSendFixture struct {
 func newTimeoutCanSendFixture(t *testing.T) *timeoutCanSendFixture {
 	t.Helper()
 	database, _ := applyTimeoutMuteTestDB(t)
-	ctx := context.Background()
-	chID, err := database.CreateChannel(ctx, "timeout-text", "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
-	actorID, err := database.CreateUser(ctx, "timeout-mod", "hash", 1)
-	if err != nil {
-		t.Fatalf("CreateUser actor: %v", err)
-	}
-	targetID, err := database.CreateUser(ctx, "timeout-target", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser target: %v", err)
-	}
+	chID := mustCreateChannel(t, database, "timeout-text", "text")
+	actorID := mustCreateUser(t, database, "timeout-mod", 1)
+	targetID := mustCreateUser(t, database, "timeout-target", 4)
 	h := newTestHub(t, database, nil, nil)
 	send := registerEmitTestClient(h, targetID, 0)
 	mod := service.NewModerationService(database, service.NewPermissionService(database, permissions.NewChecker(database)))
@@ -145,22 +135,9 @@ func TestTimeout_RearmedExpiryPushesCanSend(t *testing.T) {
 // client and return, which would leave the resumed client on stale can_send.
 func TestRefreshUserChannels_WaitsForMidHandshakeRegistration(t *testing.T) {
 	database := newTeardownTestDB(t)
-	ctx := context.Background()
-	uid, err := database.CreateUser(ctx, "refresh-race-user", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	chID, err := database.CreateChannel(ctx, "refresh-race-channel", "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
-	token, err := auth.GenerateToken()
-	if err != nil {
-		t.Fatalf("GenerateToken: %v", err)
-	}
-	if _, err := database.CreateSession(ctx, uid, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
+	uid := mustCreateUser(t, database, "refresh-race-user", 4)
+	chID := mustCreateChannel(t, database, "refresh-race-channel", "text")
+	token := seedSessionToken(t, database, uid)
 	hub := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	go hub.Run()
 	t.Cleanup(hub.Stop)

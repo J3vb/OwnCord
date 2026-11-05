@@ -297,9 +297,7 @@ func TestStartHub_MetricsWindowsStopsBeforeHub(t *testing.T) {
 	if hub < 0 || sampler != hub+1 {
 		t.Fatalf("close steps in start order = %v, want metrics-windows registered right after hub", stages)
 	}
-	if err := goleak.Find(leakOpt); err != nil {
-		t.Fatalf("the metrics sampler outlived Run: %v", err)
-	}
+	mustDo(t, "the metrics sampler outlived Run", goleak.Find(leakOpt))
 }
 
 // The sampler is done, not merely cancelled, when the step after it runs.
@@ -326,9 +324,7 @@ func TestStartMetricsWindows_StepJoinsTheSampler(t *testing.T) {
 		t.Fatal("hub step did not run")
 	}
 	// The step returned only once the goroutine exited, so none is left.
-	if err := goleak.Find(leakOpt); err != nil {
-		t.Fatalf("the sampler goroutine is still running after its close step: %v", err)
-	}
+	mustDo(t, "the sampler goroutine is still running after its close step", goleak.Find(leakOpt))
 }
 
 // TestStopHub_JoinsBackgroundJobsAfterDispatchExits pins the 4.5b step: the

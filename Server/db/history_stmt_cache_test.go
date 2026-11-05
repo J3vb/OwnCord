@@ -17,19 +17,11 @@ func TestHistoryPages_StatementCacheStaysSmall(t *testing.T) {
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	userID := seedUser(t, database, "pager")
-	chID, err := database.CreateChannel(ctx, "paged", "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
+	chID := mustCreateChannel(t, database, "paged", "text", "", "", 0)
 	for i := range 120 {
-		id, err := database.CreateMessage(ctx, chID, userID, "row", nil)
-		if err != nil {
-			t.Fatalf("CreateMessage: %v", err)
-		}
+		id := mustCreateMessage(t, database, chID, userID, "row", nil)
 		if i%5 == 0 {
-			if err := database.AddReaction(ctx, id, userID, "👍"); err != nil {
-				t.Fatalf("AddReaction: %v", err)
-			}
+			mustDo(t, "AddReaction", database.AddReaction(ctx, id, userID, "👍"))
 		}
 	}
 	sweep := func() {
@@ -58,23 +50,14 @@ func TestHistoryPages_StatementCacheStaysSmall(t *testing.T) {
 // writer keeps adding rows; run with -race.
 func TestHistoryPages_ConcurrentReadersShareCache(t *testing.T) {
 	database, err := db.Open(filepath.Join(t.TempDir(), "cache.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
+	mustDo(t, "Open", err)
 	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	mustDo(t, "Migrate", db.Migrate(database))
 	ctx := context.Background()
 	userID := seedUser(t, database, "reader")
-	chID, err := database.CreateChannel(ctx, "shared", "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
+	chID := mustCreateChannel(t, database, "shared", "text", "", "", 0)
 	for range 60 {
-		if _, err := database.CreateMessage(ctx, chID, userID, "seed", nil); err != nil {
-			t.Fatalf("CreateMessage: %v", err)
-		}
+		mustCreateMessage(t, database, chID, userID, "seed", nil)
 	}
 
 	var wg sync.WaitGroup

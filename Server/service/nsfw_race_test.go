@@ -17,12 +17,7 @@ func newNSFWRaceFixture(t *testing.T) (ctx context.Context, database *db.DB, nsf
 	t.Helper()
 	ctx = context.Background()
 	database = newTestDB(t)
-	seedRole(t, database, &db.Role{
-		ID:          permissions.MemberRoleID,
-		Name:        "member",
-		Permissions: permissions.SendMessages | permissions.ReadMessages,
-		Position:    1,
-	})
+	seedMemberRole(t, database, permissions.SendMessages|permissions.ReadMessages)
 	seedUserRole(t, database, 1, permissions.MemberRoleID)
 	seedChannel(t, database, &db.Channel{ID: 10, Name: "general", Type: "text"})
 
@@ -100,9 +95,7 @@ func TestNSFWAcknowledge_UnlabelBetweenCheckAndInsertIsNotTrusted(t *testing.T) 
 func TestNSFWAcknowledge_DuplicatePUTRacingARevokeNeverReportsNotLabelled(t *testing.T) {
 	ctx, database, nsfw, _ := newNSFWRaceFixture(t)
 	labelChannel(t, database, 10, true)
-	if err := nsfw.Acknowledge(ctx, 1, 10); err != nil {
-		t.Fatalf("first Acknowledge: %v", err)
-	}
+	mustDo(t, "first Acknowledge", nsfw.Acknowledge(ctx, 1, 10))
 
 	t.Cleanup(func() { db.AcknowledgeNSFWTxRaceHook = nil })
 	var hookRan bool
@@ -126,9 +119,7 @@ func TestNSFWAcknowledge_DuplicatePUTRacingARevokeNeverReportsNotLabelled(t *tes
 
 	// The transaction committed and released the writer — the identical
 	// call, without a deadline, must now succeed.
-	if err := database.RevokeNSFW(ctx, 1, 10); err != nil {
-		t.Fatalf("RevokeNSFW after the transaction released the writer: %v", err)
-	}
+	mustDo(t, "RevokeNSFW after the transaction released the writer", database.RevokeNSFW(ctx, 1, 10))
 }
 
 // TestAdminUpdateChannel_ClearsAcksOnResultingFlagRegardlessOfStaleRead is
@@ -152,9 +143,7 @@ func TestAdminUpdateChannel_ClearsAcksOnResultingFlagRegardlessOfStaleRead(t *te
 	// Concurrently: another admin labels it, and a member acknowledges it —
 	// both land before this edit commits, but after `existing` was read.
 	labelChannel(t, database, 10, true)
-	if err := nsfwSvc.Acknowledge(ctx, 1, 10); err != nil {
-		t.Fatalf("Acknowledge: %v", err)
-	}
+	mustDo(t, "Acknowledge", nsfwSvc.Acknowledge(ctx, 1, 10))
 	if ok, hErr := database.HasNSFWAcknowledgement(ctx, 1, 10); hErr != nil || !ok {
 		t.Fatalf("precondition: acknowledgement not recorded: ok=%v err=%v", ok, hErr)
 	}

@@ -14,10 +14,7 @@ import (
 // react to it with emoji, returning the message id.
 func seedReactedMessage(t *testing.T, svc *MessageService, database *db.DB, emoji string, userIDs ...int64) int64 {
 	t.Helper()
-	msgID, err := database.CreateMessage(context.Background(), 10, 1, "react to me", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	msgID := mustCreateMessage(t, database, 10, 1, "react to me", nil)
 	for _, uid := range userIDs {
 		if _, err := svc.AddReaction(context.Background(), uid, msgID, emoji); err != nil {
 			t.Fatalf("AddReaction(%d): %v", uid, err)
@@ -33,9 +30,7 @@ func TestGetReactionUsers_ReturnsReactors(t *testing.T) {
 	msgID := seedReactedMessage(t, svc, database, "👍", 1, 2)
 
 	users, err := svc.GetReactionUsers(context.Background(), 1, 10, msgID, "👍")
-	if err != nil {
-		t.Fatalf("GetReactionUsers: %v", err)
-	}
+	mustDo(t, "GetReactionUsers", err)
 	if len(users) != 2 {
 		t.Fatalf("len(users) = %d, want 2 (%+v)", len(users), users)
 	}
@@ -51,9 +46,7 @@ func TestGetReactionUsers_EmptyIsNonNil(t *testing.T) {
 	msgID := seedReactedMessage(t, svc, database, "👍", 1)
 
 	users, err := svc.GetReactionUsers(context.Background(), 1, 10, msgID, "🎉")
-	if err != nil {
-		t.Fatalf("GetReactionUsers: %v", err)
-	}
+	mustDo(t, "GetReactionUsers", err)
 	if users == nil {
 		t.Fatal("users = nil, want an empty slice")
 	}
@@ -131,13 +124,8 @@ func TestGetReactionUsers_ForeignDMIsNotFound(t *testing.T) {
 	seedUserRole(t, database, 3, permissions.MemberRoleID)
 
 	ch, _, err := database.GetOrCreateDMChannel(context.Background(), 2, 3)
-	if err != nil {
-		t.Fatalf("GetOrCreateDMChannel: %v", err)
-	}
-	msgID, err := database.CreateMessage(context.Background(), ch.ID, 2, "psst", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	mustDo(t, "GetOrCreateDMChannel", err)
+	msgID := mustCreateMessage(t, database, ch.ID, 2, "psst", nil)
 	if _, err := svc.AddReaction(context.Background(), 3, msgID, "👍"); err != nil {
 		t.Fatalf("AddReaction: %v", err)
 	}
@@ -147,9 +135,7 @@ func TestGetReactionUsers_ForeignDMIsNotFound(t *testing.T) {
 	}
 	// A participant does get the list.
 	users, err := svc.GetReactionUsers(context.Background(), 2, ch.ID, msgID, "👍")
-	if err != nil {
-		t.Fatalf("GetReactionUsers(participant): %v", err)
-	}
+	mustDo(t, "GetReactionUsers(participant)", err)
 	if len(users) != 1 || users[0].Username != "carol" {
 		t.Errorf("users = %+v, want [carol]", users)
 	}
@@ -165,9 +151,7 @@ func TestGetReactionUsers_DeletedMessageIsNotFound(t *testing.T) {
 	svc, database := newTestMessageService(t)
 	msgID := seedReactedMessage(t, svc, database, "👍", 1)
 
-	if err := database.DeleteMessage(context.Background(), msgID, 1, false); err != nil {
-		t.Fatalf("DeleteMessage: %v", err)
-	}
+	mustDo(t, "DeleteMessage", database.DeleteMessage(context.Background(), msgID, 1, false))
 
 	_, err := svc.GetReactionUsers(context.Background(), 1, 10, msgID, "👍")
 	if !errors.Is(err, ErrNotFound) {
@@ -182,10 +166,7 @@ func TestGetReactionUsers_DeletedMessageIsNotFound(t *testing.T) {
 // refused as a reaction.
 func TestReaction_AcceptsLongestCustomShortcode(t *testing.T) {
 	svc, database := newTestMessageService(t)
-	msgID, err := database.CreateMessage(context.Background(), 10, 1, "react to me", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	msgID := mustCreateMessage(t, database, 10, 1, "react to me", nil)
 
 	longest := ":" + strings.Repeat("a", MaxShortcodeLen) + ":"
 	if _, vErr := ValidateShortcode(longest); vErr != nil {

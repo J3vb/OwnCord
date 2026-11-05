@@ -24,7 +24,7 @@ import (
 )
 
 // newTeardownTestDB opens an in-memory database with the full migration set.
-func newTeardownTestDB(t *testing.T) *db.DB {
+func newTeardownTestDB(t testing.TB) *db.DB {
 	t.Helper()
 	database, err := db.Open(":memory:")
 	if err != nil {
@@ -49,17 +49,9 @@ func TestFailedHandshake_TearsDownTransferredVoiceSession(t *testing.T) {
 	database := newTeardownTestDB(t)
 	ctx := context.Background()
 
-	userID, err := database.CreateUser(ctx, "voice-handshake-fail", "hash", 1)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	vcID, err := database.CreateChannel(ctx, "vc-teardown", "voice", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
-	if err := database.JoinVoiceChannel(ctx, userID, vcID); err != nil {
-		t.Fatalf("JoinVoiceChannel: %v", err)
-	}
+	userID := mustCreateUser(t, database, "voice-handshake-fail", 1)
+	vcID := mustCreateChannel(t, database, "vc-teardown", "voice")
+	mustJoinVoice(t, database, userID, vcID)
 	vs, err := database.GetVoiceState(ctx, userID)
 	if err != nil || vs == nil {
 		t.Fatalf("GetVoiceState: %v", err)
@@ -135,10 +127,7 @@ func TestFailedHandshake_OfflineBroadcastDropsStaleCustomStatus(t *testing.T) {
 	database := newTeardownTestDB(t)
 	ctx := context.Background()
 
-	userID, err := database.CreateUser(ctx, "stale-custom-status", "hash", 1)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	userID := mustCreateUser(t, database, "stale-custom-status", 1)
 
 	h := newTestHub(t, database, auth.NewRateLimiter(), nil)
 

@@ -52,28 +52,9 @@ type emojiHarness struct {
 
 func newEmojiHarness(t *testing.T) *emojiHarness {
 	t.Helper()
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("db.Migrate: %v", err)
-	}
+	database := openMigratedDB(t)
 
-	// Pin the exact permission masks the gate tests depend on rather than
-	// inheriting whatever the seeded defaults happen to carry.
-	exec := func(q string, args ...any) {
-		t.Helper()
-		if _, execErr := database.ExecContext(context.Background(), q, args...); execErr != nil {
-			t.Fatalf("exec %q: %v", q, execErr)
-		}
-	}
-	exec(`UPDATE roles SET permissions = ? WHERE id = ?`, permissions.Administrator, permissions.OwnerRoleID)
-	exec(`UPDATE roles SET permissions = ? WHERE id = ?`,
-		permissions.ManageServer|permissions.ReadMessages|permissions.SendMessages, permissions.AdminRoleID)
-	exec(`UPDATE roles SET permissions = ? WHERE id = ?`,
-		permissions.ReadMessages|permissions.SendMessages|permissions.AddReactions, permissions.MemberRoleID)
+	pinGateRoles(t, database)
 
 	store, err := storage.New(t.TempDir(), 10)
 	if err != nil {
@@ -91,9 +72,7 @@ func newEmojiHarness(t *testing.T) *emojiHarness {
 	api.MountEmojiRoutes(r, svc, store, auth.NewRateLimiter(), h.broadcaster)
 	h.router = r
 
-	h.ownerToken = emojiSeedUser(t, database, "owner", int(permissions.OwnerRoleID))
-	h.adminToken = emojiSeedUser(t, database, "admin", int(permissions.AdminRoleID))
-	h.memberToken = emojiSeedUser(t, database, "member", int(permissions.MemberRoleID))
+	h.ownerToken, h.adminToken, h.memberToken = seedGatePrincipals(t, database)
 	return h
 }
 
@@ -101,22 +80,40 @@ func newEmojiHarness(t *testing.T) *emojiHarness {
 // the plaintext bearer token.
 func emojiSeedUser(t *testing.T, database *db.DB, username string, roleID int) string {
 	t.Helper()
-	if _, err := database.CreateUser(context.Background(), username, "$2a$12$fake", roleID); err != nil {
-		t.Fatalf("CreateUser %q: %v", username, err)
-	}
-	token := "emoji-test-token-" + username
-	_, err := database.ExecContext(context.Background(),
-		`INSERT INTO sessions (user_id, token, device, ip_address, expires_at)
-		 SELECT id, ?, 'test', '127.0.0.1', '2099-01-01T00:00:00Z' FROM users WHERE username = ?`,
-		auth.HashToken(token), username)
-	if err != nil {
-		t.Fatalf("insert session for %q: %v", username, err)
-	}
-	return token
+	return createUserToken(t, database, "emoji-test-token-", username, roleID)
 }
 
-func (h *emojiHarness) do(t *testing.T, method, path, token string, body *bytes.Buffer, contentType string) *httptest.ResponseRecorder {
+// pinGateRoles pins the exact permission masks the gate tests depend on rather
+// than inheriting whatever the seeded defaults happen to carry.
+func pinGateRoles(t *testing.T, database *db.DB) {
 	t.Helper()
+	exec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := database.ExecContext(context.Background(), q, args...); err != nil {
+			t.Fatalf("exec %q: %v", q, err)
+		}
+	}
+	exec(`UPDATE roles SET permissions = ? WHERE id = ?`, permissions.Administrator, permissions.OwnerRoleID)
+	exec(`UPDATE roles SET permissions = ? WHERE id = ?`,
+		permissions.ManageServer|permissions.ReadMessages|permissions.SendMessages, permissions.AdminRoleID)
+	exec(`UPDATE roles SET permissions = ? WHERE id = ?`,
+		permissions.ReadMessages|permissions.SendMessages|permissions.AddReactions, permissions.MemberRoleID)
+}
+
+// seedGatePrincipals creates the owner (ADMINISTRATOR), admin (MANAGE_SERVER
+// only) and member (neither) users the gate tests act as, returning their
+// bearer tokens.
+func seedGatePrincipals(t *testing.T, database *db.DB) (owner, admin, member string) {
+	t.Helper()
+	owner = emojiSeedUser(t, database, "owner", int(permissions.OwnerRoleID))
+	admin = emojiSeedUser(t, database, "admin", int(permissions.AdminRoleID))
+	member = emojiSeedUser(t, database, "member", int(permissions.MemberRoleID))
+	return owner, admin, member
+}
+
+// doBody serves one request through router; a non-nil body is sent with
+// contentType.
+func doBody(router http.Handler, method, path, token string, body *bytes.Buffer, contentType string) *httptest.ResponseRecorder {
 	var req *http.Request
 	if body == nil {
 		req = httptest.NewRequest(method, path, nil)
@@ -127,9 +124,12 @@ func (h *emojiHarness) do(t *testing.T, method, path, token string, body *bytes.
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
-	rec := httptest.NewRecorder()
-	h.router.ServeHTTP(rec, req)
-	return rec
+	return serveRequest(router, req)
+}
+
+func (h *emojiHarness) do(t *testing.T, method, path, token string, body *bytes.Buffer, contentType string) *httptest.ResponseRecorder {
+	t.Helper()
+	return doBody(h.router, method, path, token, body, contentType)
 }
 
 // upload POSTs a multipart emoji and returns the recorder.
@@ -212,17 +212,13 @@ func webpVP8LBytes(w, h int) []byte {
 func TestEmojiList_RequiresAuth(t *testing.T) {
 	h := newEmojiHarness(t)
 	rec := h.do(t, http.MethodGet, "/api/v1/emoji", "", nil, "")
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401", rec.Code)
-	}
+	requireStatus(t, rec, http.StatusUnauthorized)
 }
 
 func TestEmojiList_EmptyIsJSONArray(t *testing.T) {
 	h := newEmojiHarness(t)
 	rec := h.do(t, http.MethodGet, "/api/v1/emoji", h.memberToken, nil, "")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (%s)", rec.Code, rec.Body.String())
-	}
+	requireStatus(t, rec, http.StatusOK)
 	if got := strings.TrimSpace(rec.Body.String()); got != "[]" {
 		t.Errorf("body = %q, want []", got)
 	}
@@ -235,9 +231,7 @@ func TestEmojiList_AnyMemberMaySee(t *testing.T) {
 	}
 
 	rec := h.do(t, http.MethodGet, "/api/v1/emoji", h.memberToken, nil, "")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
+	requireStatus(t, rec, http.StatusOK)
 	var list []struct {
 		ID        int64  `json:"id"`
 		Shortcode string `json:"shortcode"`
@@ -262,9 +256,7 @@ func TestEmojiList_AnyMemberMaySee(t *testing.T) {
 func TestEmojiUpload_MemberIsForbidden(t *testing.T) {
 	h := newEmojiHarness(t)
 	rec := h.upload(t, h.memberToken, "wave", pngBytes(t, 64, 64))
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403 (%s)", rec.Code, rec.Body.String())
-	}
+	requireStatus(t, rec, http.StatusForbidden)
 	if len(h.broadcaster.calls) != 0 {
 		t.Errorf("broadcast fired on a refused upload")
 	}
@@ -273,9 +265,7 @@ func TestEmojiUpload_MemberIsForbidden(t *testing.T) {
 func TestEmojiUpload_ManageServerIsEnough(t *testing.T) {
 	h := newEmojiHarness(t)
 	rec := h.upload(t, h.adminToken, "wave", pngBytes(t, 64, 64))
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want 201 (%s)", rec.Code, rec.Body.String())
-	}
+	requireStatus(t, rec, http.StatusCreated)
 	if len(h.broadcaster.calls) != 1 {
 		t.Fatalf("broadcast calls = %d, want 1", len(h.broadcaster.calls))
 	}
@@ -287,9 +277,7 @@ func TestEmojiUpload_ManageServerIsEnough(t *testing.T) {
 func TestEmojiUpload_Unauthenticated(t *testing.T) {
 	h := newEmojiHarness(t)
 	rec := h.upload(t, "", "wave", pngBytes(t, 64, 64))
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401", rec.Code)
-	}
+	requireStatus(t, rec, http.StatusUnauthorized)
 }
 
 // ─── POST validation ─────────────────────────────────────────────────────────
@@ -314,9 +302,7 @@ func TestEmojiUpload_RejectsNonImage(t *testing.T) {
 	h := newEmojiHarness(t)
 	// A plain-text body sniffs as text/plain, which is not in the allowlist.
 	rec := h.upload(t, h.ownerToken, "wave", []byte("this is definitely not an image at all"))
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400 (%s)", rec.Code, rec.Body.String())
-	}
+	requireStatus(t, rec, http.StatusBadRequest)
 	if !strings.Contains(rec.Body.String(), "PNG") {
 		t.Errorf("message = %q, want the format list", rec.Body.String())
 	}
@@ -327,17 +313,13 @@ func TestEmojiUpload_RejectsSVG(t *testing.T) {
 	svg := []byte(`<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16">` +
 		`<script>alert(1)</script></svg>`)
 	rec := h.upload(t, h.ownerToken, "wave", svg)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400 (%s)", rec.Code, rec.Body.String())
-	}
+	requireStatus(t, rec, http.StatusBadRequest)
 }
 
 func TestEmojiUpload_RejectsOversizeDimensions(t *testing.T) {
 	h := newEmojiHarness(t)
 	rec := h.upload(t, h.ownerToken, "toobig", pngBytes(t, 129, 64))
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400 (%s)", rec.Code, rec.Body.String())
-	}
+	requireStatus(t, rec, http.StatusBadRequest)
 	if !strings.Contains(rec.Body.String(), "128x128") {
 		t.Errorf("message = %q, want the pixel cap", rec.Body.String())
 	}
@@ -365,9 +347,7 @@ func TestEmojiUpload_RejectsOversizeFile(t *testing.T) {
 	big := make([]byte, 600<<10)
 	copy(big, pngBytes(t, 128, 128))
 	rec := h.upload(t, h.ownerToken, "huge", big)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400 (%s)", rec.Code, rec.Body.String())
-	}
+	requireStatus(t, rec, http.StatusBadRequest)
 }
 
 func TestEmojiUpload_RejectsBadShortcode(t *testing.T) {
@@ -383,9 +363,7 @@ func TestEmojiUpload_RejectsBadShortcode(t *testing.T) {
 func TestEmojiUpload_MissingFile(t *testing.T) {
 	h := newEmojiHarness(t)
 	rec := h.upload(t, h.ownerToken, "wave", nil)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400 (%s)", rec.Code, rec.Body.String())
-	}
+	requireStatus(t, rec, http.StatusBadRequest)
 }
 
 func TestEmojiUpload_DuplicateShortcodeIsConflict(t *testing.T) {
@@ -394,9 +372,7 @@ func TestEmojiUpload_DuplicateShortcodeIsConflict(t *testing.T) {
 		t.Fatalf("first upload status = %d", rec.Code)
 	}
 	rec := h.upload(t, h.ownerToken, "WAVE", pngBytes(t, 32, 32))
-	if rec.Code != http.StatusConflict {
-		t.Fatalf("status = %d, want 409 (%s)", rec.Code, rec.Body.String())
-	}
+	requireStatus(t, rec, http.StatusConflict)
 	// The losing upload must not leave its bytes behind.
 	list, err := h.database.ListEmoji(context.Background())
 	if err != nil {
@@ -413,21 +389,14 @@ func TestEmojiImage_ServesStoredBytes(t *testing.T) {
 	h := newEmojiHarness(t)
 	content := gifBytes(t, 40, 40)
 	rec := h.upload(t, h.ownerToken, "wave", content)
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("upload status = %d (%s)", rec.Code, rec.Body.String())
-	}
-	var created struct {
+	requireStatus(t, rec, http.StatusCreated)
+	created := decodeBody[struct {
 		ID  int64  `json:"id"`
 		URL string `json:"url"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	}](t, rec)
 
 	got := h.do(t, http.MethodGet, created.URL, h.memberToken, nil, "")
-	if got.Code != http.StatusOK {
-		t.Fatalf("image status = %d, want 200", got.Code)
-	}
+	requireStatus(t, got, http.StatusOK)
 	if ct := got.Header().Get("Content-Type"); ct != "image/gif" {
 		t.Errorf("Content-Type = %q, want image/gif", ct)
 	}
@@ -442,9 +411,7 @@ func TestEmojiImage_ServesStoredBytes(t *testing.T) {
 func TestEmojiImage_RequiresAuth(t *testing.T) {
 	h := newEmojiHarness(t)
 	rec := h.do(t, http.MethodGet, "/api/v1/emoji/1/image", "", nil, "")
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401", rec.Code)
-	}
+	requireStatus(t, rec, http.StatusUnauthorized)
 }
 
 func TestEmojiImage_UnknownIDIs404(t *testing.T) {
@@ -462,25 +429,18 @@ func TestEmojiImage_UnknownIDIs404(t *testing.T) {
 func TestEmojiDelete_RemovesRowFileAndBroadcasts(t *testing.T) {
 	h := newEmojiHarness(t)
 	rec := h.upload(t, h.ownerToken, "wave", pngBytes(t, 32, 32))
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("upload status = %d", rec.Code)
-	}
-	var created struct {
+	requireStatus(t, rec, http.StatusCreated)
+	created := decodeBody[struct {
 		ID  int64  `json:"id"`
 		URL string `json:"url"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	}](t, rec)
 	stored, err := h.database.GetEmoji(context.Background(), created.ID)
 	if err != nil || stored == nil {
 		t.Fatalf("GetEmoji = %v, %v", stored, err)
 	}
 
 	del := h.do(t, http.MethodDelete, fmt.Sprintf("/api/v1/emoji/%d", created.ID), h.ownerToken, nil, "")
-	if del.Code != http.StatusNoContent {
-		t.Fatalf("delete status = %d, want 204 (%s)", del.Code, del.Body.String())
-	}
+	requireStatus(t, del, http.StatusNoContent)
 
 	if row, gErr := h.database.GetEmoji(context.Background(), created.ID); gErr != nil || row != nil {
 		t.Errorf("row still present after delete: %v, %v", row, gErr)
@@ -504,20 +464,13 @@ func TestEmojiDelete_RemovesRowFileAndBroadcasts(t *testing.T) {
 func TestEmojiDelete_MemberIsForbidden(t *testing.T) {
 	h := newEmojiHarness(t)
 	rec := h.upload(t, h.ownerToken, "wave", pngBytes(t, 32, 32))
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("upload status = %d", rec.Code)
-	}
-	var created struct {
+	requireStatus(t, rec, http.StatusCreated)
+	created := decodeBody[struct {
 		ID int64 `json:"id"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	}](t, rec)
 
 	del := h.do(t, http.MethodDelete, fmt.Sprintf("/api/v1/emoji/%d", created.ID), h.memberToken, nil, "")
-	if del.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403 (%s)", del.Code, del.Body.String())
-	}
+	requireStatus(t, del, http.StatusForbidden)
 	if row, err := h.database.GetEmoji(context.Background(), created.ID); err != nil || row == nil {
 		t.Errorf("refused delete removed the row anyway")
 	}
@@ -526,17 +479,13 @@ func TestEmojiDelete_MemberIsForbidden(t *testing.T) {
 func TestEmojiDelete_UnknownIDIs404(t *testing.T) {
 	h := newEmojiHarness(t)
 	rec := h.do(t, http.MethodDelete, "/api/v1/emoji/999", h.ownerToken, nil, "")
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404 (%s)", rec.Code, rec.Body.String())
-	}
+	requireStatus(t, rec, http.StatusNotFound)
 }
 
 func TestEmojiDelete_BadIDIs400(t *testing.T) {
 	h := newEmojiHarness(t)
 	rec := h.do(t, http.MethodDelete, "/api/v1/emoji/not-a-number", h.ownerToken, nil, "")
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400 (%s)", rec.Code, rec.Body.String())
-	}
+	requireStatus(t, rec, http.StatusBadRequest)
 }
 
 // ─── broadcast fan-out must survive request cancellation ────────────────────

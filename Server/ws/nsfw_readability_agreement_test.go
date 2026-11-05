@@ -12,7 +12,6 @@ package ws_test
 
 import (
 	"context"
-	"encoding/json"
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/auth"
@@ -25,10 +24,7 @@ func TestChannelReadability_RESTWSReplayAgreement(t *testing.T) {
 	hub := newTestHubDeps(t, database, limiter, nil)
 	svc := service.New(database, limiter)
 
-	plainID, err := database.CreateChannel(context.Background(), "plain", "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel plain: %v", err)
-	}
+	plainID := mustCreateChannel(t, database, "plain", "text")
 	labelledID, err := database.CreateChannel(context.Background(), "labelled", "text", "", "", 1)
 	if err != nil {
 		t.Fatalf("CreateChannel labelled: %v", err)
@@ -54,10 +50,7 @@ func TestChannelReadability_RESTWSReplayAgreement(t *testing.T) {
 		restSet = idSet(restIDs)
 
 		// 2) WS ready payload: readable iff !nsfw || nsfw_acknowledged.
-		readyRaw, err := hub.BuildReadyWithRoleForTest(database, user.ID, role)
-		if err != nil {
-			t.Fatalf("BuildReadyWithRoleForTest: %v", err)
-		}
+		readyRaw := mustBuildReadyWithRole(t, hub, database, user.ID, role)
 		var ready struct {
 			Payload struct {
 				Channels []struct {
@@ -67,9 +60,7 @@ func TestChannelReadability_RESTWSReplayAgreement(t *testing.T) {
 				} `json:"channels"`
 			} `json:"payload"`
 		}
-		if err := json.Unmarshal(readyRaw, &ready); err != nil {
-			t.Fatalf("unmarshal ready: %v", err)
-		}
+		mustUnmarshal(t, readyRaw, &ready)
 		readySet = map[int64]bool{}
 		for _, ch := range ready.Payload.Channels {
 			if !ch.NSFW || ch.NSFWAcknowledged {

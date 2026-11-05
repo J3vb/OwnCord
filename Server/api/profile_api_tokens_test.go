@@ -2,7 +2,6 @@ package api_test
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"maps"
 	"net/http"
@@ -23,13 +22,8 @@ type ownTokensBody struct {
 func listOwnTokens(t *testing.T, h http.Handler, sessionTok string) ownTokensBody {
 	t.Helper()
 	rr := bearerJSON(t, h, http.MethodGet, "/api/v1/users/me/api-tokens", sessionTok, nil)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("list tokens: status = %d; body = %s", rr.Code, rr.Body.String())
-	}
-	var body ownTokensBody
-	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	requireStatus(t, rr, http.StatusOK)
+	body := decodeBody[ownTokensBody](t, rr)
 	return body
 }
 
@@ -39,10 +33,7 @@ func createPasswordUser(t *testing.T, database *db.DB, name string) int64 {
 	if err != nil {
 		t.Fatalf("HashPassword: %v", err)
 	}
-	uid, err := database.CreateUser(context.Background(), name, hash, 4)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	uid := mustCreateUser(t, database, name, hash, 4)
 	return uid
 }
 
@@ -89,9 +80,7 @@ func TestOwnAPITokens_RevokeOwnTokenOnly(t *testing.T) {
 	ids := listOwnTokens(t, router, issueSessionToken(t, database, bob))
 	bobID := ids.Tokens[0].ID
 	rr := bearerJSON(t, router, http.MethodDelete, fmt.Sprintf("/api/v1/users/me/api-tokens/%d", bobID), sessionTok, nil)
-	if rr.Code != http.StatusNotFound {
-		t.Fatalf("revoking another account's token: status = %d, want 404; body = %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusNotFound)
 	if !tokenWorks(t, database, bobRaw) {
 		t.Fatal("another account's token was revoked")
 	}
@@ -135,9 +124,7 @@ func TestChangePassword_RevokeAPITokensOption(t *testing.T) {
 			body := map[string]any{"old_password": loginSessionTestPassword, "new_password": "Another-Pass2!"}
 			maps.Copy(body, tc.body)
 			rr := bearerJSON(t, router, http.MethodPut, "/api/v1/users/me/password", sessionTok, body)
-			if rr.Code != http.StatusNoContent {
-				t.Fatalf("change password: status = %d, want 204; body = %s", rr.Code, rr.Body.String())
-			}
+			requireStatus(t, rr, http.StatusNoContent)
 			if got := tokenWorks(t, database, raw); got != tc.wantTokens {
 				t.Fatalf("token still works = %v, want %v", got, tc.wantTokens)
 			}

@@ -17,9 +17,7 @@ func TestLogin_LockoutKeyFoldsLikeTheAccountLookup(t *testing.T) {
 	ctx := context.Background()
 	database := newTestDB(t)
 	hash, err := auth.HashPassword("securePass1")
-	if err != nil {
-		t.Fatalf("HashPassword: %v", err)
-	}
+	mustDo(t, "HashPassword", err)
 	// "ärger" and "Ärger" are two rows: NOCASE does not fold Ä/ä.
 	for _, name := range []string{"ärger", "Ärger", "admin"} {
 		if _, err := database.CreateUser(ctx, name, hash, 4); err != nil {
@@ -41,9 +39,7 @@ func TestLogin_LockoutKeyFoldsLikeTheAccountLookup(t *testing.T) {
 	if err := login("ärger", "securePass1", 50); !errors.Is(err, ErrRateLimited) {
 		t.Fatalf("the hammered account is not locked: %v", err)
 	}
-	if err := login("Ärger", "securePass1", 51); err != nil {
-		t.Fatalf("the sibling account shares the lockout bucket (OC-0324): %v", err)
-	}
+	mustDo(t, "the sibling account shares the lockout bucket (OC-0324)", login("Ärger", "securePass1", 51))
 
 	// ASCII case variants of one account keep sharing a bucket.
 	for i := 1; i <= loginUserFailureThreshold+1; i++ {

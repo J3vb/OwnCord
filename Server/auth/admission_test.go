@@ -112,9 +112,7 @@ func TestNewAdmissionBudget_DefaultAndClamp(t *testing.T) {
 
 func TestAdmissionBudget_RefusedWorkRunsNoBcrypt(t *testing.T) {
 	hash, err := auth.HashPassword("correct horse")
-	if err != nil {
-		t.Fatalf("HashPassword: %v", err)
-	}
+	mustDo(t, "HashPassword", err)
 	b := auth.NewAdmissionBudget(1)
 	release, ok := b.TryAcquire()
 	if !ok {

@@ -17,12 +17,8 @@ func TestLogin_LockedOutUsernameStillAdmitsARecentSuccessfulIP(t *testing.T) {
 	ctx := context.Background()
 	database := newTestDB(t)
 	hash, err := auth.HashPassword("securePass1")
-	if err != nil {
-		t.Fatalf("HashPassword: %v", err)
-	}
-	if _, err := database.CreateUser(ctx, "owner", hash, 4); err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	mustDo(t, "HashPassword", err)
+	mustCreateUser(t, database, "owner", hash, 4)
 	svc := NewAuthService(database, auth.NewRateLimiter(), make([]byte, 32), nil)
 
 	const knownIP = "198.51.100.7"

@@ -68,10 +68,7 @@ func TestUpdateProfile_SurvivesPostCommitReReadError(t *testing.T) {
 	}
 
 	// The write itself committed regardless — confirm the DB agrees.
-	stored, err := database.GetUserByID(context.Background(), 1)
-	if err != nil {
-		t.Fatalf("GetUserByID: %v", err)
-	}
+	stored := mustGetUserByID(t, database, 1)
 	if stored.Avatar == nil || *stored.Avatar != avatarURL {
 		t.Fatalf("stored avatar = %v, want %q", stored.Avatar, avatarURL)
 	}

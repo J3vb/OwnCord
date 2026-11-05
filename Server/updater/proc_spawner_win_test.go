@@ -54,9 +54,7 @@ func init() {
 func isolateCoverage(t *testing.T) {
 	t.Helper()
 	dir, err := os.MkdirTemp("", "owncord-spawn-cover")
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "MkdirTemp", err)
 	t.Setenv("GOCOVERDIR", dir)
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 }
@@ -94,17 +92,13 @@ func attachConsole(t *testing.T) {
 func TestSpawnReplacement_ReplacementSharesTheSpawnersConsole(t *testing.T) {
 	attachConsole(t)
 	bin, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Executable", err)
 	report := filepath.Join(t.TempDir(), "report")
 	t.Setenv("OWNCORD_SPAWN_TEST_REPORT", report)
 	isolateCoverage(t)
 	t.Setenv("OWNCORD_SPAWN_TEST_PARENT", strconv.Itoa(os.Getpid()))
 	wait, err := SpawnReplacement(bin, []string{"-test.run=^$"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "SpawnReplacement", err)
 	if got := awaitReport(t, report); got != "shared" {
 		t.Fatalf("replacement console = %s, want the spawner's own console", got)
 	}
@@ -119,16 +113,12 @@ func TestSpawnReplacement_ReplacementSharesTheSpawnersConsole(t *testing.T) {
 func TestSpawnReplacement_WaiterReturnsTheReplacementsExitCode(t *testing.T) {
 	attachConsole(t)
 	bin, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Executable", err)
 	t.Setenv("OWNCORD_SPAWN_TEST_REPORT", filepath.Join(t.TempDir(), "report"))
 	t.Setenv("OWNCORD_SPAWN_TEST_EXIT", "7")
 	isolateCoverage(t)
 	wait, err := SpawnReplacement(bin, []string{"-test.run=^$"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "SpawnReplacement", err)
 	if wait == nil {
 		t.Fatal("SpawnReplacement on a console returned no waiter; the spawner would exit and take the window with it")
 	}
@@ -142,15 +132,11 @@ func TestSpawnReplacement_WaiterReturnsTheReplacementsExitCode(t *testing.T) {
 // LiveKit gets a window of its own that the supervisor keeps respawning.
 func TestStartInNewConsole_ReplacementWritesToItsOwnConsole(t *testing.T) {
 	bin, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Executable", err)
 	report := filepath.Join(t.TempDir(), "report")
 	t.Setenv("OWNCORD_SPAWN_TEST_REPORT", report)
 	isolateCoverage(t)
-	if err := startInNewConsole(bin, []string{"-test.run=^$"}); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "startInNewConsole", startInNewConsole(bin, []string{"-test.run=^$"}))
 	if got := awaitReport(t, report); got != "console" {
 		t.Fatalf("replacement stdout = %s, want its own console", got)
 	}
@@ -159,9 +145,7 @@ func TestStartInNewConsole_ReplacementWritesToItsOwnConsole(t *testing.T) {
 // A redirect such as `chatserver.exe >> server.log` must survive the restart.
 func TestIsConsole_FileIsNotConsole(t *testing.T) {
 	f, err := os.Create(filepath.Join(t.TempDir(), "log"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Create", err)
 	defer f.Close()
 	if isConsole(f) {
 		t.Error("isConsole(regular file) = true, want false")

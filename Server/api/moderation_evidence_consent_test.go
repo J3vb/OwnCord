@@ -217,10 +217,9 @@ func (f *evidenceFixture) expectFile(token string, wantStatus int, wantCode stri
 	if strings.Contains(rr.Body.String(), evidenceFileContent) {
 		f.t.Fatalf("refused file read leaked its bytes: %s", rr.Body.String())
 	}
-	var e struct {
+	e := decodeBody[struct {
 		Error string `json:"error"`
-	}
-	_ = json.Unmarshal(rr.Body.Bytes(), &e)
+	}](f.t, rr)
 	if e.Error != wantCode {
 		f.t.Fatalf("GET file: error %q, want %q", e.Error, wantCode)
 	}

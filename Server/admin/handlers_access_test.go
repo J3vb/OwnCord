@@ -27,9 +27,7 @@ func TestAccessExplainAndPreview_Routes(t *testing.T) {
 	base := "/channels/" + itoa(chID) + "/access/"
 
 	w := doRequest(t, handler, http.MethodGet, base+"explain?user_id="+itoa(target)+"&action=send_message", token, nil)
-	if w.Code != http.StatusOK {
-		t.Fatalf("explain status = %d; body = %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 	var ex service.AccessExplanation
 	if err := json.Unmarshal(w.Body.Bytes(), &ex); err != nil {
 		t.Fatal(err)
@@ -55,9 +53,7 @@ func TestAccessExplainAndPreview_Routes(t *testing.T) {
 
 	w = doRequest(t, handler, http.MethodPost, base+"preview", token,
 		map[string]any{"role_id": 3, "deny": permissions.ReadMessages})
-	if w.Code != http.StatusOK {
-		t.Fatalf("preview status = %d; body = %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 	var pv service.AccessPreview
 	if err := json.Unmarshal(w.Body.Bytes(), &pv); err != nil {
 		t.Fatal(err)
@@ -81,10 +77,7 @@ func TestAccessExplainAndPreview_RequireManageChannels(t *testing.T) {
 	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
 	// VIEW_AUDIT_LOG passes the admin perimeter but not MANAGE_CHANNELS.
 	uid, token := createRoleUser(t, database, 11, "Auditor", permissions.ViewAuditLog, 50, "auditor")
-	chID, err := database.CreateChannel(context.Background(), "general", "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
+	chID := mustCreateChannel(t, database, "general", "text")
 	base := "/channels/" + itoa(chID) + "/access/"
 	if w := doRequest(t, handler, http.MethodGet, base+"explain?user_id="+itoa(uid), token, nil); w.Code != http.StatusForbidden {
 		t.Errorf("explain = %d, want 403", w.Code)
@@ -102,10 +95,7 @@ func TestAccessExplainAndPreview_RefuseHigherRankedMember(t *testing.T) {
 	_, modToken := createRoleUser(t, database, 10, "Moderator", moderatorMask, 60, "mod-explain")
 	seniorID, _ := createRoleUser(t, database, 11, "Senior", permissions.ReadMessages, 80, "senior-explain")
 	lowID, _ := createRoleUser(t, database, 12, "Junior", permissions.ReadMessages, 20, "junior-explain")
-	chID, err := database.CreateChannel(context.Background(), "general", "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
+	chID := mustCreateChannel(t, database, "general", "text")
 	base := "/channels/" + itoa(chID) + "/access/"
 
 	for _, c := range []struct {

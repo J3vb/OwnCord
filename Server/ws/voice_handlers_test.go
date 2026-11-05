@@ -7,7 +7,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"testing/fstest"
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/auth"
@@ -38,19 +37,7 @@ CREATE INDEX IF NOT EXISTS idx_voice_states_channel ON voice_states(channel_id);
 // openVoiceTestDB opens an in-memory DB with the full voice schema.
 func openVoiceTestDB(t *testing.T) *db.DB {
 	t.Helper()
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-
-	migrFS := fstest.MapFS{
-		"001_schema.sql": {Data: voiceSchema},
-	}
-	if err := db.MigrateFS(database, migrFS); err != nil {
-		t.Fatalf("MigrateFS: %v", err)
-	}
-	return database
+	return openSchemaDB(t, voiceSchema)
 }
 
 // newVoiceHub creates a hub+db suitable for voice handler tests.
@@ -95,74 +82,43 @@ func healthyLiveKitClient(t *testing.T) *ws.LiveKitClient {
 // seedVoiceOwner inserts an Owner-role user for permission-passing tests.
 func seedVoiceOwner(t *testing.T, database *db.DB, username string) *db.User {
 	t.Helper()
-	_, err := database.CreateUser(context.Background(), username, "hash", 1) // roleID=1 → Owner
-	if err != nil {
-		t.Fatalf("seedVoiceOwner CreateUser: %v", err)
-	}
-	user, err := database.GetUserByUsername(context.Background(), username)
-	if err != nil || user == nil {
-		t.Fatalf("seedVoiceOwner GetUserByUsername: %v", err)
-	}
-	return user
+	return seedUserWithRole(t, database, username, 1)
 }
 
 // seedVoiceMember creates a user with the default Member role (id 4):
 // CONNECT_VOICE but no MUTE_MEMBERS, so the voice channel cap applies to them.
 func seedVoiceMember(t *testing.T, database *db.DB, username string) *db.User {
 	t.Helper()
-	if _, err := database.CreateUser(context.Background(), username, "hash", int(permissions.MemberRoleID)); err != nil {
-		t.Fatalf("seedVoiceMember CreateUser: %v", err)
-	}
-	user, err := database.GetUserByUsername(context.Background(), username)
-	if err != nil || user == nil {
-		t.Fatalf("seedVoiceMember GetUserByUsername: %v", err)
-	}
-	return user
+	return seedUserWithRole(t, database, username, int(permissions.MemberRoleID))
 }
 
 // seedVoiceChan creates a voice-type channel.
 func seedVoiceChan(t *testing.T, database *db.DB, name string) int64 {
 	t.Helper()
-	id, err := database.CreateChannel(context.Background(), name, "voice", "", "", 0)
-	if err != nil {
-		t.Fatalf("seedVoiceChan: %v", err)
-	}
-	return id
+	return mustCreateChannel(t, database, name, "voice")
 }
 
 // voiceJoinMsg builds a raw voice_join WebSocket message.
 func voiceJoinMsg(channelID int64) []byte {
-	raw, _ := json.Marshal(map[string]any{
-		"type":    "voice_join",
-		"payload": map[string]any{"channel_id": channelID},
-	})
+	raw := envelope("voice_join", map[string]any{"channel_id": channelID})
 	return raw
 }
 
 // voiceLeaveMsg builds a raw voice_leave WebSocket message.
 func voiceLeaveMsg() []byte {
-	raw, _ := json.Marshal(map[string]any{
-		"type":    "voice_leave",
-		"payload": map[string]any{},
-	})
+	raw := envelope("voice_leave", map[string]any{})
 	return raw
 }
 
 // voiceMuteMsg builds a voice_mute message.
 func voiceMuteMsg(muted bool) []byte {
-	raw, _ := json.Marshal(map[string]any{
-		"type":    "voice_mute",
-		"payload": map[string]any{"muted": muted},
-	})
+	raw := envelope("voice_mute", map[string]any{"muted": muted})
 	return raw
 }
 
 // voiceDeafenMsg builds a voice_deafen message.
 func voiceDeafenMsg(deafened bool) []byte {
-	raw, _ := json.Marshal(map[string]any{
-		"type":    "voice_deafen",
-		"payload": map[string]any{"deafened": deafened},
-	})
+	raw := envelope("voice_deafen", map[string]any{"deafened": deafened})
 	return raw
 }
 
@@ -170,9 +126,7 @@ func voiceDeafenMsg(deafened bool) []byte {
 func extractType(t *testing.T, msg []byte) string {
 	t.Helper()
 	var env map[string]any
-	if err := json.Unmarshal(msg, &env); err != nil {
-		t.Fatalf("extractType unmarshal: %v", err)
-	}
+	mustUnmarshal(t, msg, &env)
 	typ, _ := env["type"].(string)
 	return typ
 }
@@ -216,10 +170,7 @@ func TestVoice_Join_SetsStateInDB(t *testing.T) {
 	user := seedVoiceOwner(t, database, "alice")
 	chanID := seedVoiceChan(t, database, "vc-alice")
 
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, _ := connectClient(t, hub, user, 0, 16)
 
 	hub.HandleMessageForTest(c, voiceJoinMsg(chanID))
 
@@ -246,10 +197,7 @@ func TestVoice_Join_BroadcastsVoiceState(t *testing.T) {
 	c2 := ws.NewTestClientWithUser(hub, user2, chanID, send2)
 	hub.Register(c2)
 
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, chanID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, _ := connectClient(t, hub, user, chanID, 16)
 
 	hub.HandleMessageForTest(c, voiceJoinMsg(chanID))
 
@@ -265,10 +213,7 @@ func TestVoice_Join_SendsCurrentStatesToJoiner(t *testing.T) {
 
 	// user1 joins first.
 	user1 := seedVoiceOwner(t, database, "carol1")
-	send1 := make(chan []byte, 16)
-	c1 := ws.NewTestClientWithUser(hub, user1, chanID, send1)
-	hub.Register(c1)
-	waitRegistered(t, hub, c1)
+	c1, send1 := connectClient(t, hub, user1, chanID, 16)
 	hub.HandleMessageForTest(c1, voiceJoinMsg(chanID))
 
 	// Drain send1 to clear join broadcast.
@@ -276,10 +221,7 @@ func TestVoice_Join_SendsCurrentStatesToJoiner(t *testing.T) {
 
 	// user2 joins — should receive voice_state for user1.
 	user2 := seedVoiceOwner(t, database, "carol2")
-	send2 := make(chan []byte, 16)
-	c2 := ws.NewTestClientWithUser(hub, user2, chanID, send2)
-	hub.Register(c2)
-	waitRegistered(t, hub, c2)
+	c2, send2 := connectClient(t, hub, user2, chanID, 16)
 	hub.HandleMessageForTest(c2, voiceJoinMsg(chanID))
 
 	// user2 should have received a voice_state for user1.
@@ -298,15 +240,9 @@ func TestVoice_Join_SendsCurrentStatesToJoiner(t *testing.T) {
 func TestVoice_Join_MissingChannelID_SendsError(t *testing.T) {
 	hub, database := newVoiceHub(t)
 	user := seedVoiceOwner(t, database, "dave")
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, 0, 16)
 
-	badMsg, _ := json.Marshal(map[string]any{
-		"type":    "voice_join",
-		"payload": map[string]any{"channel_id": 0},
-	})
+	badMsg := envelope("voice_join", map[string]any{"channel_id": 0})
 	hub.HandleMessageForTest(c, badMsg)
 
 	msgs := drainChanTimeout(send, 30*time.Millisecond)
@@ -330,19 +266,13 @@ func TestVoice_Join_MissingChannelID_SendsError(t *testing.T) {
 func TestVoice_Join_RejectsNonVoiceChannel(t *testing.T) {
 	hub, database := newVoiceHub(t)
 	user := seedVoiceOwner(t, database, "text-join")
-	chanID, err := database.CreateChannel(context.Background(), "general", "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
+	chanID := mustCreateChannel(t, database, "general", "text")
 
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, 0, 16)
 
 	hub.HandleMessageForTest(c, voiceJoinMsg(chanID))
 
-	if code := receiveErrorCode(send, waitTimeout); code != "BAD_REQUEST" {
+	if code := drainForErrorCode(send, waitTimeout); code != "BAD_REQUEST" {
 		t.Fatalf("error code = %q, want BAD_REQUEST", code)
 	}
 	state, err := database.GetVoiceState(context.Background(), user.ID)
@@ -389,14 +319,11 @@ func TestVoice_Join_ReadDeniedByOverride_Refused(t *testing.T) {
 		t.Fatalf("UpsertChannelOverride: %v", err)
 	}
 
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, 0, 16)
 
 	hub.HandleMessageForTest(c, voiceJoinMsg(chanID))
 
-	if code := receiveErrorCode(send, waitTimeout); code != ws.ErrCodeForbidden {
+	if code := drainForErrorCode(send, waitTimeout); code != ws.ErrCodeForbidden {
 		t.Fatalf("error code = %q, want %q", code, ws.ErrCodeForbidden)
 	}
 	state, err := database.GetVoiceState(context.Background(), user.ID)
@@ -415,10 +342,7 @@ func TestVoice_Leave_ClearsStateInDB(t *testing.T) {
 	user := seedVoiceOwner(t, database, "eve")
 	chanID := seedVoiceChan(t, database, "vc-eve")
 
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, chanID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, _ := connectClient(t, hub, user, chanID, 16)
 
 	hub.HandleMessageForTest(c, voiceJoinMsg(chanID))
 
@@ -444,10 +368,7 @@ func TestVoice_Leave_BroadcastsVoiceLeave(t *testing.T) {
 	c2 := ws.NewTestClientWithUser(hub, user2, chanID, send2)
 	hub.Register(c2)
 
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, chanID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, chanID, 16)
 
 	hub.HandleMessageForTest(c, voiceJoinMsg(chanID))
 	// Consume the join's voice_state broadcast so only the leave remains.
@@ -471,10 +392,7 @@ func TestVoice_Mute_UpdatesStateInDB(t *testing.T) {
 	user := seedVoiceOwner(t, database, "grace")
 	chanID := seedVoiceChan(t, database, "vc-grace")
 
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, chanID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, _ := connectClient(t, hub, user, chanID, 16)
 
 	hub.HandleMessageForTest(c, voiceJoinMsg(chanID))
 
@@ -500,10 +418,7 @@ func TestVoice_Mute_BroadcastsVoiceState(t *testing.T) {
 	c2 := ws.NewTestClientWithUser(hub, user2, chanID, send2)
 	hub.Register(c2)
 
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, chanID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, chanID, 16)
 
 	hub.HandleMessageForTest(c, voiceJoinMsg(chanID))
 	// Consume the join's voice_state broadcast so the next one seen is the mute's.
@@ -528,10 +443,7 @@ func TestVoice_Deafen_UpdatesStateInDB(t *testing.T) {
 	user := seedVoiceOwner(t, database, "iris")
 	chanID := seedVoiceChan(t, database, "vc-iris")
 
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, chanID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, _ := connectClient(t, hub, user, chanID, 16)
 
 	hub.HandleMessageForTest(c, voiceJoinMsg(chanID))
 
@@ -557,10 +469,7 @@ func TestVoice_Deafen_BroadcastsVoiceState(t *testing.T) {
 	c2 := ws.NewTestClientWithUser(hub, user2, chanID, send2)
 	hub.Register(c2)
 
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, chanID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, chanID, 16)
 
 	hub.HandleMessageForTest(c, voiceJoinMsg(chanID))
 	// Consume the join's voice_state broadcast so the next one seen is the deafen's.
@@ -582,10 +491,7 @@ func TestVoice_Deafen_BroadcastsVoiceState(t *testing.T) {
 
 // voiceCameraMsg builds a voice_camera WebSocket message.
 func voiceCameraMsg(enabled bool) []byte {
-	raw, _ := json.Marshal(map[string]any{
-		"type":    "voice_camera",
-		"payload": map[string]any{"enabled": enabled},
-	})
+	raw := envelope("voice_camera", map[string]any{"enabled": enabled})
 	return raw
 }
 
@@ -601,10 +507,7 @@ func TestVoice_Camera_UpdatesState(t *testing.T) {
 	c2 := ws.NewTestClientWithUser(hub, user2, chanID, send2)
 	hub.Register(c2)
 
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, chanID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, chanID, 16)
 
 	// Join voice channel first; consume the join's voice_state broadcast so
 	// the payload check below sees the camera toggle's broadcast.
@@ -662,10 +565,7 @@ func TestVoice_Camera_DisableAllowedAfterPermissionRevoked(t *testing.T) {
 	user := seedVoiceUserWithRole(t, database, "cam-revoked", 100)
 	chanID := seedVoiceChan(t, database, "vc-cam-revoked")
 
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, chanID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, chanID, 16)
 
 	hub.HandleMessageForTest(c, voiceJoinMsg(chanID))
 	drainChanTimeout(send, 30*time.Millisecond)
@@ -760,10 +660,7 @@ func TestVoice_Camera_RateLimit(t *testing.T) {
 	user := seedVoiceOwner(t, database, "cam-ratelimit")
 	chanID := seedVoiceChan(t, database, "vc-cam-ratelimit")
 
-	send := make(chan []byte, 64)
-	c := ws.NewTestClientWithUser(hub, user, chanID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, chanID, 64)
 
 	hub.HandleMessageForTest(c, voiceJoinMsg(chanID))
 	drainChanTimeout(send, 30*time.Millisecond)
@@ -789,10 +686,7 @@ func TestVoice_Camera_RateLimit(t *testing.T) {
 
 // voiceScreenshareMsg builds a voice_screenshare WebSocket message.
 func voiceScreenshareMsg(enabled bool) []byte {
-	raw, _ := json.Marshal(map[string]any{
-		"type":    "voice_screenshare",
-		"payload": map[string]any{"enabled": enabled},
-	})
+	raw := envelope("voice_screenshare", map[string]any{"enabled": enabled})
 	return raw
 }
 
@@ -808,10 +702,7 @@ func TestVoice_Screenshare_UpdatesState(t *testing.T) {
 	c2 := ws.NewTestClientWithUser(hub, user2, chanID, send2)
 	hub.Register(c2)
 
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, chanID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, chanID, 16)
 
 	// Join voice channel first; consume the join's voice_state broadcast so
 	// the payload check below sees the screenshare toggle's broadcast.
@@ -868,10 +759,7 @@ func TestVoice_Screenshare_DisableAllowedAfterPermissionRevoked(t *testing.T) {
 	user := seedVoiceUserWithRole(t, database, "ss-revoked", 200)
 	chanID := seedVoiceChan(t, database, "vc-ss-revoked")
 
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, chanID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, chanID, 16)
 
 	hub.HandleMessageForTest(c, voiceJoinMsg(chanID))
 	drainChanTimeout(send, 30*time.Millisecond)
@@ -944,10 +832,7 @@ func TestVoice_Screenshare_RateLimit(t *testing.T) {
 	user := seedVoiceOwner(t, database, "ss-ratelimit")
 	chanID := seedVoiceChan(t, database, "vc-ss-ratelimit")
 
-	send := make(chan []byte, 64)
-	c := ws.NewTestClientWithUser(hub, user, chanID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, chanID, 64)
 
 	hub.HandleMessageForTest(c, voiceJoinMsg(chanID))
 	drainChanTimeout(send, 30*time.Millisecond)
@@ -976,10 +861,7 @@ func TestVoice_HandleMessage_VoiceCamera_Dispatched(t *testing.T) {
 	user := seedVoiceOwner(t, database, "cam-dispatch")
 	chanID := seedVoiceChan(t, database, "vc-cam-dispatch")
 
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, chanID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, chanID, 16)
 
 	hub.HandleMessageForTest(c, voiceJoinMsg(chanID))
 	drainChanTimeout(send, 30*time.Millisecond)
@@ -1009,10 +891,7 @@ func TestVoice_HandleMessage_VoiceScreenshare_Dispatched(t *testing.T) {
 	user := seedVoiceOwner(t, database, "ss-dispatch")
 	chanID := seedVoiceChan(t, database, "vc-ss-dispatch")
 
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, chanID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, chanID, 16)
 
 	hub.HandleMessageForTest(c, voiceJoinMsg(chanID))
 	drainChanTimeout(send, 30*time.Millisecond)
@@ -1042,10 +921,7 @@ func TestVoice_HandleMessage_VoiceScreenshare_Dispatched(t *testing.T) {
 // seedVoiceChanMaxUsers creates a voice channel with a custom voice_max_users limit.
 func seedVoiceChanMaxUsers(t *testing.T, database *db.DB, name string, maxUsers int) int64 {
 	t.Helper()
-	id, err := database.CreateChannel(context.Background(), name, "voice", "", "", 0)
-	if err != nil {
-		t.Fatalf("seedVoiceChanMaxUsers CreateChannel: %v", err)
-	}
+	id := mustCreateChannel(t, database, name, "voice")
 	if err := database.SetChannelVoiceMaxUsers(context.Background(), id, maxUsers); err != nil {
 		t.Fatalf("seedVoiceChanMaxUsers SetChannelVoiceMaxUsers: %v", err)
 	}
@@ -1059,10 +935,7 @@ func TestVoice_Join_ChannelFull(t *testing.T) {
 	chanID := seedVoiceChanMaxUsers(t, database, "vc-full", 1)
 
 	user1 := seedVoiceOwner(t, database, "full-user1")
-	send1 := make(chan []byte, 32)
-	c1 := ws.NewTestClientWithUser(hub, user1, chanID, send1)
-	hub.Register(c1)
-	waitRegistered(t, hub, c1)
+	c1, send1 := connectClient(t, hub, user1, chanID, 32)
 
 	// First user joins — should succeed.
 	hub.HandleMessageForTest(c1, voiceJoinMsg(chanID))
@@ -1074,10 +947,7 @@ func TestVoice_Join_ChannelFull(t *testing.T) {
 	}
 
 	user2 := seedVoiceMember(t, database, "full-user2")
-	send2 := make(chan []byte, 32)
-	c2 := ws.NewTestClientWithUser(hub, user2, chanID, send2)
-	hub.Register(c2)
-	waitRegistered(t, hub, c2)
+	c2, send2 := connectClient(t, hub, user2, chanID, 32)
 
 	drainChan(send1)
 	drainChan(send2)
@@ -1128,19 +998,13 @@ func TestVoice_Join_SwitchToFullChannel_KeepsOldCall(t *testing.T) {
 
 	// Fill channel B to capacity with a second user.
 	filler := seedVoiceOwner(t, database, "switchfull-filler")
-	fillerSend := make(chan []byte, 32)
-	fillerClient := ws.NewTestClientWithUser(hub, filler, chanB, fillerSend)
-	hub.Register(fillerClient)
-	waitRegistered(t, hub, fillerClient)
+	fillerClient, fillerSend := connectClient(t, hub, filler, chanB, 32)
 	hub.HandleMessageForTest(fillerClient, voiceJoinMsg(chanB))
 	drainChanTimeout(fillerSend, 30*time.Millisecond)
 
 	// The switcher is live in channel A.
 	switcher := seedVoiceMember(t, database, "switchfull-user")
-	send := make(chan []byte, 32)
-	c := ws.NewTestClientWithUser(hub, switcher, chanA, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, switcher, chanA, 32)
 	hub.HandleMessageForTest(c, voiceJoinMsg(chanA))
 	drainChanTimeout(send, 30*time.Millisecond)
 
@@ -1200,10 +1064,7 @@ func TestVoice_Join_SendsVoiceConfig(t *testing.T) {
 	user := seedVoiceOwner(t, database, "cfg-alice")
 	chanID := seedVoiceChan(t, database, "vc-cfg-alice")
 
-	send := make(chan []byte, 32)
-	c := ws.NewTestClientWithUser(hub, user, chanID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, chanID, 32)
 
 	hub.HandleMessageForTest(c, voiceJoinMsg(chanID))
 
@@ -1220,9 +1081,7 @@ func TestVoice_Join_SendsVoiceConfig(t *testing.T) {
 					Bitrate   int    `json:"bitrate"`
 				} `json:"payload"`
 			}
-			if err := json.Unmarshal(msg, &env); err != nil {
-				t.Fatalf("unmarshal voice_config: %v", err)
-			}
+			mustUnmarshal(t, msg, &env)
 			if env.Payload.ChannelID != chanID {
 				t.Errorf("voice_config channel_id = %d, want %d", env.Payload.ChannelID, chanID)
 			}
@@ -1250,10 +1109,7 @@ func TestVoice_Join_SwitchChannel_LeavesOldChannel(t *testing.T) {
 	chanA := seedVoiceChan(t, database, "vc-switch-a")
 	chanB := seedVoiceChan(t, database, "vc-switch-b")
 
-	send := make(chan []byte, 32)
-	c := ws.NewTestClientWithUser(hub, userA, chanA, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, userA, chanA, 32)
 
 	// Join channel A.
 	hub.HandleMessageForTest(c, voiceJoinMsg(chanA))
@@ -1287,10 +1143,7 @@ func TestVoice_Join_SwitchChannel_PreservesServerMute(t *testing.T) {
 	chanA := seedVoiceChan(t, database, "vc-switch-muted-a")
 	chanB := seedVoiceChan(t, database, "vc-switch-muted-b")
 
-	send := make(chan []byte, 32)
-	c := ws.NewTestClientWithUser(hub, user, chanA, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, chanA, 32)
 
 	hub.HandleMessageForTest(c, voiceJoinMsg(chanA))
 	drainChanTimeout(send, 30*time.Millisecond)
@@ -1340,10 +1193,7 @@ func TestVoice_Join_SameChannel_IsIdempotent(t *testing.T) {
 	user := seedVoiceOwner(t, database, "idempotent-join")
 	chanID := seedVoiceChan(t, database, "vc-idempotent")
 
-	send := make(chan []byte, 32)
-	c := ws.NewTestClientWithUser(hub, user, chanID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, chanID, 32)
 
 	hub.HandleMessageForTest(c, voiceJoinMsg(chanID))
 	drainChanTimeout(send, 30*time.Millisecond)
@@ -1383,10 +1233,7 @@ func TestVoice_Join_AbortedSwitch_DoesNotResurrectPhantomSession(t *testing.T) {
 	chanA := seedVoiceChan(t, database, "vc-abort-a")
 	chanB := seedVoiceChan(t, database, "vc-abort-b")
 
-	send := make(chan []byte, 32)
-	c := ws.NewTestClientWithUser(hub, user, chanA, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, chanA, 32)
 
 	// Join channel A normally.
 	hub.HandleMessageForTest(c, voiceJoinMsg(chanA))
@@ -1434,10 +1281,7 @@ func TestVoice_Leave_OnDisconnect(t *testing.T) {
 	user := seedVoiceOwner(t, database, "disco-dave")
 	chanID := seedVoiceChan(t, database, "vc-disco-dave")
 
-	send := make(chan []byte, 32)
-	c := ws.NewTestClientWithUser(hub, user, chanID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, _ := connectClient(t, hub, user, chanID, 32)
 
 	hub.HandleMessageForTest(c, voiceJoinMsg(chanID))
 

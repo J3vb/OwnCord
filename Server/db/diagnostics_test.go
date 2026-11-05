@@ -12,13 +12,9 @@ import (
 
 func TestDiagnostics_ExportsCompiledNamesAndCountsOnly(t *testing.T) {
 	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Open", err)
 	defer database.Close()
-	if err := db.MigrateFS(database, migrations.FS); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "MigrateFS", db.MigrateFS(database, migrations.FS))
 	for _, statement := range []string{
 		`CREATE TABLE secret_table_name(value TEXT DEFAULT 'private-default')`,
 		`INSERT INTO schema_versions(version) VALUES('private-migration-name')`,
@@ -29,13 +25,9 @@ func TestDiagnostics_ExportsCompiledNamesAndCountsOnly(t *testing.T) {
 		}
 	}
 	snapshot, err := database.Diagnostics(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Diagnostics", err)
 	raw, err := json.Marshal(snapshot)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Marshal", err)
 	for _, secret := range []string{"secret_table_name", "private-default", "private-migration-name", "private-user", "private-password"} {
 		if strings.Contains(string(raw), secret) {
 			t.Fatalf("snapshot exposed %s", secret)
@@ -62,13 +54,9 @@ func TestDiagnostics_ExportsCompiledNamesAndCountsOnly(t *testing.T) {
 
 func TestDiagnosticNames_ReturnsUsernamesDisplayNamesAndServerName(t *testing.T) {
 	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Open", err)
 	defer database.Close()
-	if err := db.MigrateFS(database, migrations.FS); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "MigrateFS", db.MigrateFS(database, migrations.FS))
 	for _, statement := range []string{
 		`INSERT INTO users(username,password,role_id,display_name) VALUES('alice','x',4,'Ally Smith')`,
 		`INSERT INTO users(username,password,role_id) VALUES('bob','x',4)`,
@@ -79,9 +67,7 @@ func TestDiagnosticNames_ReturnsUsernamesDisplayNamesAndServerName(t *testing.T)
 		}
 	}
 	names, err := database.DiagnosticNames(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "DiagnosticNames", err)
 	got := strings.Join(names, "|")
 	for _, want := range []string{"alice", "Ally Smith", "bob", "Nas Chat"} {
 		if !strings.Contains(got, want) {

@@ -26,14 +26,7 @@ func buildUserNoteRouter(database *db.DB) http.Handler {
 
 func noteDo(t *testing.T, router http.Handler, method, path, token, body string) *httptest.ResponseRecorder {
 	t.Helper()
-	req := httptest.NewRequest(method, path, strings.NewReader(body))
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
-	return rr
+	return doAPI(t, router, method, path, token, strings.NewReader(body))
 }
 
 func noteBody(t *testing.T, rr *httptest.ResponseRecorder) (int64, string) {
@@ -76,17 +69,13 @@ func TestUserNote_GetMissingIsEmpty(t *testing.T) {
 	router := buildUserNoteRouter(database)
 
 	rr := noteDo(t, router, http.MethodGet, notePath(target), token, "")
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d (%s)", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 	if id, note := noteBody(t, rr); id != target || note != "" {
 		t.Errorf("body = (%d, %q), want (%d, \"\")", id, note, target)
 	}
 	// An id that does not exist reads the same way: GET reveals nothing.
 	rr = noteDo(t, router, http.MethodGet, notePath(987654), token, "")
-	if rr.Code != http.StatusOK {
-		t.Errorf("GET for an unknown id = %d, want 200", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusOK)
 }
 
 func TestUserNote_PutTrimsAndCaps(t *testing.T) {
@@ -282,9 +271,7 @@ func TestUserNote_MaxLengthEscapedBodyAccepted(t *testing.T) {
 		fmt.Fprintf(&esc, `\u%04x\u%04x`, r1, r2)
 	}
 	rr := noteDo(t, router, http.MethodPut, notePath(target), token, `{"note":"`+esc.String()+`"}`)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("256 escaped astral runes status = %d, want 200 (%s)", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 	if _, got := noteBody(t, rr); got != note {
 		t.Errorf("stored note differs from sent note")
 	}

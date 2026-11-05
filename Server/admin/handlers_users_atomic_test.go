@@ -25,19 +25,14 @@ func TestAdminAPI_PatchUser_RefusedRoleChangeDoesNotLeaveBanCommitted(t *testing
 	// for exactly this shape, seeded at position 60 (below Admin's 80).
 	_, modToken := createRoleUser(t, database, 10, "Moderator", moderatorMask, 60, "moduser")
 
-	targetUID, err := database.CreateUser(context.Background(), "atomictarget", "hash", 3) // Member, position 40
-	if err != nil {
-		t.Fatalf("CreateUser target: %v", err)
-	}
+	targetUID := mustCreateUser(t, database, "atomictarget", "hash", 3)
 
 	w := doRequest(t, handler, http.MethodPatch, "/users/"+itoa(targetUID), modToken, map[string]any{
 		"banned":     true,
 		"ban_reason": "spam",
 		"role_id":    2, // Admin role — moderator lacks MANAGE_ROLES to grant it
 	})
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403 (moderator lacks MANAGE_ROLES); body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusForbidden)
 
 	target, err := database.GetUserByID(context.Background(), targetUID)
 	if err != nil {

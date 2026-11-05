@@ -21,6 +21,25 @@ import (
 // Parsing and validation
 // ---------------------------------------------------------------------------
 
+// parseCase runs a command constructor on one table row. It reports ok only
+// when the payload parsed and the row expected it to; a wrong outcome is
+// logged against the row and the caller skips it.
+func parseCase(t *testing.T, ctor func(int64, string, json.RawMessage) (Command, error), name, payload string, wantErr bool) (Command, bool) {
+	t.Helper()
+	cmd, err := ctor(1, "", json.RawMessage(payload))
+	if wantErr {
+		if err == nil {
+			t.Errorf("%s: parsed, want an error", name)
+		}
+		return nil, false
+	}
+	if err != nil {
+		t.Errorf("%s: %v", name, err)
+		return nil, false
+	}
+	return cmd, true
+}
+
 func TestActivityUpdate_Parse(t *testing.T) {
 	ctor, ok := getCommandConstructor(MsgTypeActivityUpdate)
 	if !ok {
@@ -60,15 +79,8 @@ func TestActivityUpdate_Parse(t *testing.T) {
 		{"payload not an object", `[]`, true, false, "", 0},
 	}
 	for _, tc := range cases {
-		cmd, err := ctor(1, "", json.RawMessage(tc.payload))
-		if tc.wantErr {
-			if err == nil {
-				t.Errorf("%s: parsed, want an error", tc.name)
-			}
-			continue
-		}
-		if err != nil {
-			t.Errorf("%s: %v", tc.name, err)
+		cmd, ok := parseCase(t, ctor, tc.name, tc.payload, tc.wantErr)
+		if !ok {
 			continue
 		}
 		got := cmd.(ActivityUpdateCmd)

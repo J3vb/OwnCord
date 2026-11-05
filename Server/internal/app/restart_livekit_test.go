@@ -66,9 +66,7 @@ func waitForRestartCompanion(t *testing.T, path string) restartCompanionListener
 	for {
 		if data, err := os.ReadFile(path); err == nil {
 			var listeners restartCompanionListeners
-			if err := json.Unmarshal(data, &listeners); err != nil {
-				t.Fatal(err)
-			}
+			mustDo(t, "Unmarshal", json.Unmarshal(data, &listeners))
 			return listeners
 		}
 		select {
@@ -86,9 +84,7 @@ func TestAppRun_RestartReleasesManagedCompanionBeforeHandoff(t *testing.T) {
 	port := freePort(t)
 	a := bootTestApp(t, fmt.Sprint(port), "")
 	bin, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Executable", err)
 	t.Setenv("OWNCORD_APP_RESTART_COMPANION", "1")
 	a.cfg.Voice.LiveKitBinaryPath = bin
 	rc := a.deps.Restart
@@ -149,9 +145,7 @@ func TestAppRun_RestartReleasesManagedCompanionBeforeHandoff(t *testing.T) {
 	rc.Request("update")
 	select {
 	case err := <-runErr:
-		if err != nil {
-			t.Fatalf("application restart drain: %v", err)
-		}
+		mustDo(t, "application restart drain", err)
 	case <-time.After(15 * time.Second):
 		t.Fatal("application did not finish its restart drain")
 	}

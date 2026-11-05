@@ -34,9 +34,7 @@ func TestReleaseProtocolEpoch(t *testing.T) {
 		info := UpdateInfo{Latest: "v2.0.0", ManifestURL: srv.URL + "/m.json", ManifestSignatureURL: srv.URL + "/m.json.sig"}
 
 		got, err := u.ReleaseProtocolEpoch(context.Background(), info)
-		if err != nil {
-			t.Fatalf("ReleaseProtocolEpoch: %v", err)
-		}
+		mustDo(t, "ReleaseProtocolEpoch", err)
 		if got != 2 {
 			t.Fatalf("epoch = %d, want 2", got)
 		}

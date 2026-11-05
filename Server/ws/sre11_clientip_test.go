@@ -8,7 +8,6 @@ package ws_test
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -38,13 +37,7 @@ func TestServeWS_TrustedProxy_LogsAndAuditsClientIP(t *testing.T) {
 	defer hub.Stop()
 
 	user := seedServeUser(t, database, "sre11-user")
-	token, err := auth.GenerateToken()
-	if err != nil {
-		t.Fatalf("GenerateToken: %v", err)
-	}
-	if _, err := database.CreateSession(context.Background(), user.ID, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
+	token := seedSessionToken(t, database, user.ID)
 
 	logs := captureSRE11Log(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -161,7 +154,7 @@ func dialThroughTrustedProxy(ctx context.Context, t *testing.T, hub *ws.Hub, tok
 		t.Fatalf("websocket.Dial: %v", dialErr)
 	}
 	t.Cleanup(func() { _ = conn.CloseNow() })
-	raw, _ := json.Marshal(map[string]any{"type": "auth", "payload": map[string]any{"token": token}})
+	raw := envelope("auth", map[string]any{"token": token})
 	if err := conn.Write(ctx, websocket.MessageText, raw); err != nil {
 		t.Fatalf("write auth: %v", err)
 	}

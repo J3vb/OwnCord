@@ -24,8 +24,7 @@ func bearerDo(t *testing.T, h http.Handler, method, path, token string, body []b
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	rec := serveRequest(h, req)
 	return rec.Code, rec.Body.Bytes()
 }
 

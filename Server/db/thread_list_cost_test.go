@@ -16,9 +16,7 @@ func pageAll(t *testing.T, f listFixture, archived bool, opts db.ThreadListOptio
 	after := db.ThreadCursor{}
 	for range 50 {
 		rows, err := f.db.ListThreadsBy(context.Background(), f.forum, archived, opts, after, size)
-		if err != nil {
-			t.Fatal(err)
-		}
+		mustDo(t, "ListThreadsBy", err)
 		if len(rows) == 0 {
 			return all
 		}
@@ -53,9 +51,7 @@ func TestListThreadsBy_RowsCarryCountsAcrossTiesNullActivityTagsAndArchive(t *te
 	post(nullAct, 4)
 	// A deleted message and a non-user message are not counted.
 	id, err := f.db.CreateMessage(ctx, p[2], f.user, "gone", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateMessage", err)
 	f.must(t, `UPDATE messages SET deleted = 1 WHERE id = ?`, id)
 	f.must(t, `INSERT INTO messages (channel_id, user_id, content, kind) VALUES (?, ?, 'call', 1)`, p[1], f.user)
 

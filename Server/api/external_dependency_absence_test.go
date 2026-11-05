@@ -210,14 +210,7 @@ func TestAbsenceContract_NoMailConfigKeyOrRoute(t *testing.T) {
 }
 
 func TestAbsenceContract_NoEmailColumn(t *testing.T) {
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("db.Migrate: %v", err)
-	}
+	database := openMigratedDB(t)
 	tables, hits, err := scanColumns(context.Background(), database.SQLDb())
 	if err != nil {
 		t.Fatalf("scanning schema: %v", err)

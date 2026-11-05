@@ -30,12 +30,7 @@ func (errDMChannelIDsStore) GetUserDMChannelIDs(context.Context, int64) ([]int64
 // (computeAllowedChannels in ws/serve.go) was deliberately hardened against.
 func TestGetAccessibleChannelIDs_DMLookupErrorFailsClosed(t *testing.T) {
 	database := newTestDB(t)
-	seedRole(t, database, &db.Role{
-		ID:          permissions.MemberRoleID,
-		Name:        "member",
-		Permissions: permissions.SendMessages | permissions.ReadMessages,
-		Position:    1,
-	})
+	seedMemberRole(t, database, permissions.SendMessages|permissions.ReadMessages)
 	seedUser(t, database, &db.User{ID: 1, Username: "alice"})
 	seedUserRole(t, database, 1, permissions.MemberRoleID)
 	seedChannel(t, database, &db.Channel{ID: 10, Name: "general", Type: "text"})

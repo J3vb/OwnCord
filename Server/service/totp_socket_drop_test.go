@@ -31,26 +31,17 @@ func TestTOTPChange_ChecksTheAccountsLiveSocket(t *testing.T) {
 	ctx := context.Background()
 	database := secondFactorDB(t)
 	hash, err := auth.HashPassword("correctPass1")
-	if err != nil {
-		t.Fatalf("HashPassword: %v", err)
-	}
-	uid, err := database.CreateUser(ctx, "toggler", hash, 4)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	mustDo(t, "HashPassword", err)
+	uid := mustCreateUser(t, database, "toggler", hash, 4)
 	user, _ := database.GetUserByID(ctx, uid)
-	if _, err := database.CreateSession(ctx, uid, "kept", "laptop", "10.0.0.1"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
+	mustCreateSession(t, database, uid, "kept", "laptop", "10.0.0.1")
 	kept, _ := database.GetSessionByTokenHash(ctx, "kept")
 	p := Principal{User: user, Session: kept}
 
 	spy := &totpDisconnectSpy{}
 	svc := NewAuthService(database, auth.NewRateLimiter(), make([]byte, 32), spy)
 
-	if _, err := database.CreateSession(ctx, uid, "stolen-1", "phone", "10.0.0.2"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
+	mustCreateSession(t, database, uid, "stolen-1", "phone", "10.0.0.2")
 	if _, err := svc.EnableTOTP(ctx, p, "correctPass1"); err != nil {
 		t.Fatalf("EnableTOTP: %v", err)
 	}
@@ -66,9 +57,7 @@ func TestTOTPChange_ChecksTheAccountsLiveSocket(t *testing.T) {
 		t.Fatalf("after enable: checked = %v, want [%d]", spy.checked, uid)
 	}
 
-	if _, err := database.CreateSession(ctx, uid, "stolen-2", "tablet", "10.0.0.3"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
+	mustCreateSession(t, database, uid, "stolen-2", "tablet", "10.0.0.3")
 	if _, err := svc.DisableTOTP(ctx, p, "correctPass1"); err != nil {
 		t.Fatalf("DisableTOTP: %v", err)
 	}

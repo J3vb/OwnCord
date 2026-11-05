@@ -22,36 +22,28 @@ import (
 // TestAdminAPI_PatchUser_CannotModifySelf verifies that an admin cannot patch
 // their own account via the admin panel.
 func TestAdminAPI_PatchUser_CannotModifySelf(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	_, handler, token := newAdminHarness(t)
 
 	// The admin user created by createAdminUser has id=1. We try to patch id=1.
 	body := map[string]any{"banned": true}
 	w := doRequest(t, handler, http.MethodPatch, "/users/1", token, body)
 
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("self-modification status = %d, want 400; body: %s", w.Code, w.Body.String())
-	}
+	expectStatus(t, w, http.StatusBadRequest)
 }
 
 // TestAdminAPI_PatchUser_UnbanUser verifies that setting banned=false on a
 // banned user unbans them and returns 200.
 func TestAdminAPI_PatchUser_UnbanUser(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	database, handler, token := newAdminHarness(t)
 
 	// Create and ban a target user first.
-	targetUID, _ := database.CreateUser(context.Background(), "unbanme", "hash", 3)
+	targetUID := mustCreateUser(t, database, "unbanme", "hash", 3)
 	_ = database.BanUser(context.Background(), targetUID, "test ban", nil)
 
 	body := map[string]any{"banned": false}
 	w := doRequest(t, handler, http.MethodPatch, "/users/"+itoa(targetUID), token, body)
 
-	if w.Code != http.StatusOK {
-		t.Errorf("unban status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	expectStatus(t, w, http.StatusOK)
 
 	// Verify the user is now unbanned.
 	user, _ := database.GetUserByID(context.Background(), targetUID)
@@ -63,18 +55,14 @@ func TestAdminAPI_PatchUser_UnbanUser(t *testing.T) {
 // TestAdminAPI_PatchUser_TempBan verifies that ban_duration_hours stores an
 // expiry so the ban lapses on its own.
 func TestAdminAPI_PatchUser_TempBan(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	database, handler, token := newAdminHarness(t)
 
-	targetUID, _ := database.CreateUser(context.Background(), "tempbanme", "hash", 3)
+	targetUID := mustCreateUser(t, database, "tempbanme", "hash", 3)
 
 	body := map[string]any{"banned": true, "ban_reason": "cooling off", "ban_duration_hours": 24}
 	w := doRequest(t, handler, http.MethodPatch, "/users/"+itoa(targetUID), token, body)
 
-	if w.Code != http.StatusOK {
-		t.Fatalf("temp ban status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 
 	user, _ := database.GetUserByID(context.Background(), targetUID)
 	if !user.Banned {
@@ -87,11 +75,9 @@ func TestAdminAPI_PatchUser_TempBan(t *testing.T) {
 
 // TestAdminAPI_PatchUser_TempBanOutOfRange verifies duration bounds are enforced.
 func TestAdminAPI_PatchUser_TempBanOutOfRange(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	database, handler, token := newAdminHarness(t)
 
-	targetUID, _ := database.CreateUser(context.Background(), "toolongban", "hash", 3)
+	targetUID := mustCreateUser(t, database, "toolongban", "hash", 3)
 
 	for _, hours := range []int{-1, 24*365 + 1} {
 		body := map[string]any{"banned": true, "ban_duration_hours": hours}
@@ -104,21 +90,13 @@ func TestAdminAPI_PatchUser_TempBanOutOfRange(t *testing.T) {
 
 // TestAdminAPI_PatchUser_InvalidBody verifies that a non-JSON body returns 400.
 func TestAdminAPI_PatchUser_InvalidBody(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	database, handler, token := newAdminHarnessNoHub(t)
 
-	targetUID, _ := database.CreateUser(context.Background(), "invalidbody", "hash", 3)
+	targetUID := mustCreateUser(t, database, "invalidbody", "hash", 3)
 
-	req := httptest.NewRequest(http.MethodPatch, "/users/"+itoa(targetUID), bytes.NewReader([]byte("not-json")))
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	handler.ServeHTTP(w, req)
+	w := doRawJSON(t, handler, http.MethodPatch, "/users/"+itoa(targetUID), token, "not-json")
 
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("invalid body status = %d, want 400", w.Code)
-	}
+	expectStatus(t, w, http.StatusBadRequest)
 }
 
 // ─── handleCreateChannel — default type ───────────────────────────────────
@@ -126,9 +104,7 @@ func TestAdminAPI_PatchUser_InvalidBody(t *testing.T) {
 // TestAdminAPI_CreateChannel_DefaultsTypeToText verifies that omitting the
 // "type" field causes the channel to be created with type "text".
 func TestAdminAPI_CreateChannel_DefaultsTypeToText(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	_, handler, token := newAdminHarnessNoHub(t)
 
 	body := map[string]any{
 		"name": "no-type-channel",
@@ -136,14 +112,9 @@ func TestAdminAPI_CreateChannel_DefaultsTypeToText(t *testing.T) {
 	}
 	w := doRequest(t, handler, http.MethodPost, "/channels", token, body)
 
-	if w.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want 201; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusCreated)
 
-	var resp map[string]any
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	resp := decodeBody[map[string]any](t, w)
 	if resp["type"] != "text" {
 		t.Errorf("type = %q, want text", resp["type"])
 	}
@@ -151,19 +122,11 @@ func TestAdminAPI_CreateChannel_DefaultsTypeToText(t *testing.T) {
 
 // TestAdminAPI_CreateChannel_InvalidBody verifies that a malformed body returns 400.
 func TestAdminAPI_CreateChannel_InvalidBody(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	_, handler, token := newAdminHarnessNoHub(t)
 
-	req := httptest.NewRequest(http.MethodPost, "/channels", bytes.NewReader([]byte("not-json")))
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	handler.ServeHTTP(w, req)
+	w := doRawJSON(t, handler, http.MethodPost, "/channels", token, "not-json")
 
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("invalid body status = %d, want 400", w.Code)
-	}
+	expectStatus(t, w, http.StatusBadRequest)
 }
 
 // ─── handleForceLogout — invalid ID ──────────────────────────────────────
@@ -171,15 +134,11 @@ func TestAdminAPI_CreateChannel_InvalidBody(t *testing.T) {
 // TestAdminAPI_ForceLogout_InvalidID verifies that a non-numeric user ID in
 // the URL returns 400.
 func TestAdminAPI_ForceLogout_InvalidID(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	_, handler, token := newAdminHarnessNoHub(t)
 
 	w := doRequest(t, handler, http.MethodDelete, "/users/notanumber/sessions", token, nil)
 
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("invalid ID status = %d, want 400", w.Code)
-	}
+	expectStatus(t, w, http.StatusBadRequest)
 }
 
 // ─── handlePatchChannel — invalid body ────────────────────────────────────
@@ -187,21 +146,13 @@ func TestAdminAPI_ForceLogout_InvalidID(t *testing.T) {
 // TestAdminAPI_PatchChannel_InvalidBody verifies that a malformed PATCH body
 // returns 400.
 func TestAdminAPI_PatchChannel_InvalidBody(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	database, handler, token := newAdminHarnessNoHub(t)
 
 	chID, _ := database.AdminCreateChannel(context.Background(), "malformed", "text", "", "", 0)
 
-	req := httptest.NewRequest(http.MethodPatch, "/channels/"+itoa(chID), bytes.NewReader([]byte("not-json")))
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	handler.ServeHTTP(w, req)
+	w := doRawJSON(t, handler, http.MethodPatch, "/channels/"+itoa(chID), token, "not-json")
 
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("invalid body status = %d, want 400", w.Code)
-	}
+	expectStatus(t, w, http.StatusBadRequest)
 }
 
 // ─── queryInt — cap at 500 ────────────────────────────────────────────────
@@ -209,16 +160,12 @@ func TestAdminAPI_PatchChannel_InvalidBody(t *testing.T) {
 // TestAdminAPI_ListUsers_CapLargeLimit verifies that a limit > 500 is capped
 // to 500 (testing the queryInt cap branch).
 func TestAdminAPI_ListUsers_CapLargeLimit(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	_, handler, token := newAdminHarnessNoHub(t)
 
 	// Passing limit=9999 should be silently capped to 500.
 	w := doRequest(t, handler, http.MethodGet, "/users?limit=9999", token, nil)
 
-	if w.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	expectStatus(t, w, http.StatusOK)
 }
 
 // ─── handleCheckUpdate — nil updater ──────────────────────────────────────
@@ -226,15 +173,11 @@ func TestAdminAPI_ListUsers_CapLargeLimit(t *testing.T) {
 // TestAdminAPI_CheckUpdate_NilUpdater verifies that GET /updates returns 503
 // when no updater is configured.
 func TestAdminAPI_CheckUpdate_NilUpdater(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	_, handler, token := newAdminHarnessNoHub(t)
 
 	w := doRequest(t, handler, http.MethodGet, "/updates", token, nil)
 
-	if w.Code != http.StatusServiceUnavailable {
-		t.Errorf("nil updater GET /updates status = %d, want 503", w.Code)
-	}
+	expectStatus(t, w, http.StatusServiceUnavailable)
 }
 
 // ─── handleDeleteChannel — invalid ID ────────────────────────────────────
@@ -242,15 +185,11 @@ func TestAdminAPI_CheckUpdate_NilUpdater(t *testing.T) {
 // TestAdminAPI_DeleteChannel_InvalidID verifies that a non-numeric channel ID
 // returns 400.
 func TestAdminAPI_DeleteChannel_InvalidID(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	_, handler, token := newAdminHarnessNoHub(t)
 
 	w := doRequest(t, handler, http.MethodDelete, "/channels/notanumber", token, nil)
 
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("invalid ID status = %d, want 400", w.Code)
-	}
+	expectStatus(t, w, http.StatusBadRequest)
 }
 
 // ─── handlePatchChannel — invalid ID ─────────────────────────────────────
@@ -258,28 +197,22 @@ func TestAdminAPI_DeleteChannel_InvalidID(t *testing.T) {
 // TestAdminAPI_PatchChannel_InvalidID verifies that a non-numeric channel ID
 // returns 400.
 func TestAdminAPI_PatchChannel_InvalidID(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	_, handler, token := newAdminHarnessNoHub(t)
 
 	body := map[string]any{"name": "x"}
 	w := doRequest(t, handler, http.MethodPatch, "/channels/abc", token, body)
 
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("invalid ID status = %d, want 400", w.Code)
-	}
+	expectStatus(t, w, http.StatusBadRequest)
 }
 
 // ─── handleGetAuditLog — pagination ───────────────────────────────────────
 
 // TestAdminAPI_AuditLog_Pagination verifies that limit and offset params work.
 func TestAdminAPI_AuditLog_Pagination(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	database, handler, token := newAdminHarnessNoHub(t)
 
 	// Create several audit entries.
-	uid, _ := database.CreateUser(context.Background(), "auditpager", "hash", 1)
+	uid := mustCreateUser(t, database, "auditpager", "hash", 1)
 	for i := range 5 {
 		_ = database.LogAudit(context.Background(), uid, "TEST", "test", int64(i), "")
 	}
@@ -287,14 +220,9 @@ func TestAdminAPI_AuditLog_Pagination(t *testing.T) {
 	// Fetch page 2 with limit=2, offset=2 — should return 2 entries.
 	w := doRequest(t, handler, http.MethodGet, "/audit-log?limit=2&offset=2", token, nil)
 
-	if w.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	expectStatus(t, w, http.StatusOK)
 
-	var entries []any
-	if err := json.Unmarshal(w.Body.Bytes(), &entries); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	entries := decodeBody[[]any](t, w)
 	if len(entries) != 2 {
 		t.Errorf("expected 2 entries with limit=2 offset=2, got %d", len(entries))
 	}
@@ -304,9 +232,7 @@ func TestAdminAPI_AuditLog_Pagination(t *testing.T) {
 // and action narrow the whole log, not just the page the panel fetched, and
 // the pagination limits still apply to the narrowed result.
 func TestAdminAPI_AuditLog_Search(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	database, handler, token := newAdminHarnessNoHub(t)
 	ctx := context.Background()
 
 	uid, _ := database.CreateUser(ctx, "searcher", "hash", 1)
@@ -326,10 +252,7 @@ func TestAdminAPI_AuditLog_Search(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Fatalf("GET /audit-log?%s status = %d, want 200; body: %s", query, w.Code, w.Body.String())
 		}
-		var entries []map[string]any
-		if err := json.Unmarshal(w.Body.Bytes(), &entries); err != nil {
-			t.Fatalf("unmarshal: %v", err)
-		}
+		entries := decodeBody[[]map[string]any](t, w)
 		return entries
 	}
 
@@ -392,9 +315,7 @@ func TestAdminAPI_AuditLog_Search(t *testing.T) {
 	} {
 		t.Run("rejects "+name, func(t *testing.T) {
 			w := doRequest(t, handler, http.MethodGet, "/audit-log?"+query, token, nil)
-			if w.Code != http.StatusBadRequest {
-				t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
-			}
+			requireStatus(t, w, http.StatusBadRequest)
 		})
 	}
 }
@@ -404,20 +325,13 @@ func TestAdminAPI_AuditLog_Search(t *testing.T) {
 // TestAdminAPI_Stats_NilHub verifies that GET /stats works correctly when
 // hub is nil (the OnlineCount field defaults to 0).
 func TestAdminAPI_Stats_NilHub(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	_, handler, token := newAdminHarnessNoHub(t)
 
 	w := doRequest(t, handler, http.MethodGet, "/stats", token, nil)
 
-	if w.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	expectStatus(t, w, http.StatusOK)
 
-	var stats map[string]any
-	if err := json.Unmarshal(w.Body.Bytes(), &stats); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	stats := decodeBody[map[string]any](t, w)
 	// online_count should be 0 when hub is nil
 	if v, ok := stats["online_count"]; ok {
 		if v.(float64) != 0 {
@@ -431,30 +345,22 @@ func TestAdminAPI_Stats_NilHub(t *testing.T) {
 // TestAdminAPI_AuditLog_InvalidLimitParam verifies that a non-numeric limit
 // falls back to the default (testing the queryInt error-fallback branch).
 func TestAdminAPI_AuditLog_InvalidLimitParam(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	_, handler, token := newAdminHarnessNoHub(t)
 
 	w := doRequest(t, handler, http.MethodGet, "/audit-log?limit=notanumber", token, nil)
 
-	if w.Code != http.StatusOK {
-		t.Errorf("invalid limit status = %d, want 200", w.Code)
-	}
+	expectStatus(t, w, http.StatusOK)
 }
 
 // TestAdminAPI_ListUsers_InvalidLimitParam verifies that limit=0 falls back to
 // the default (testing the n < 1 branch of queryInt).
 func TestAdminAPI_ListUsers_InvalidLimitParam(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	_, handler, token := newAdminHarnessNoHub(t)
 
 	// limit=0 triggers the n < 1 fallback in queryInt
 	w := doRequest(t, handler, http.MethodGet, "/users?limit=0", token, nil)
 
-	if w.Code != http.StatusOK {
-		t.Errorf("limit=0 status = %d, want 200", w.Code)
-	}
+	expectStatus(t, w, http.StatusOK)
 }
 
 // ─── PatchUser — nil hub does not panic ─────────────────────────────────────
@@ -463,18 +369,14 @@ func TestAdminAPI_ListUsers_InvalidLimitParam(t *testing.T) {
 // when hub is nil does not panic (exercises the hub != nil guard around
 // BroadcastMemberBan).
 func TestAdminAPI_PatchUser_BanNilHubDoesNotPanic(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	database, handler, token := newAdminHarnessNoHub(t)
 
-	targetUID, _ := database.CreateUser(context.Background(), "ban-nohub", "hash", 3)
+	targetUID := mustCreateUser(t, database, "ban-nohub", "hash", 3)
 
 	body := map[string]any{"banned": true, "ban_reason": "nil hub test"}
 	w := doRequest(t, handler, http.MethodPatch, "/users/"+itoa(targetUID), token, body)
 
-	if w.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	expectStatus(t, w, http.StatusOK)
 
 	// Verify ban was still applied despite nil hub.
 	user, _ := database.GetUserByID(context.Background(), targetUID)
@@ -493,9 +395,7 @@ func TestAdminAPI_LogStreamTicketFlow(t *testing.T) {
 	token := createAdminUser(t, database)
 
 	ticketResp := doRequest(t, handler, http.MethodPost, "/logs/ticket", token, nil)
-	if ticketResp.Code != http.StatusOK {
-		t.Fatalf("POST /logs/ticket status = %d, want 200; body: %s", ticketResp.Code, ticketResp.Body.String())
-	}
+	requireStatus(t, ticketResp, http.StatusOK)
 
 	var payload struct {
 		Ticket string `json:"ticket"`
@@ -559,9 +459,7 @@ func TestAdminAPI_LogStreamTicketFlow(t *testing.T) {
 		t.Fatalf("CreateSession: %v", err)
 	}
 	ticketResp = doRequest(t, handler, http.MethodPost, "/logs/ticket", token, nil)
-	if ticketResp.Code != http.StatusOK {
-		t.Fatalf("POST /logs/ticket after restoring session status = %d, want 200; body: %s", ticketResp.Code, ticketResp.Body.String())
-	}
+	requireStatus(t, ticketResp, http.StatusOK)
 	if err := json.Unmarshal(ticketResp.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("unmarshal restored ticket response: %v", err)
 	}
@@ -583,18 +481,14 @@ func TestAdminAPI_LogStreamTicketFlow(t *testing.T) {
 // user's role when hub is nil does not panic (exercises the hub != nil guard
 // around BroadcastMemberUpdate).
 func TestAdminAPI_PatchUser_RoleChangeNilHubDoesNotPanic(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	database, handler, token := newAdminHarnessNoHub(t)
 
-	targetUID, _ := database.CreateUser(context.Background(), "role-nohub", "hash", 3)
+	targetUID := mustCreateUser(t, database, "role-nohub", "hash", 3)
 
 	body := map[string]any{"role_id": float64(2)}
 	w := doRequest(t, handler, http.MethodPatch, "/users/"+itoa(targetUID), token, body)
 
-	if w.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	expectStatus(t, w, http.StatusOK)
 
 	// Verify role was still changed despite nil hub.
 	user, _ := database.GetUserByID(context.Background(), targetUID)
@@ -608,19 +502,15 @@ func TestAdminAPI_PatchUser_RoleChangeNilHubDoesNotPanic(t *testing.T) {
 // TestAdminAPI_PatchUser_BanWithoutReason verifies that banning a user without
 // providing ban_reason is accepted (reason defaults to empty string).
 func TestAdminAPI_PatchUser_BanWithoutReason(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	database, handler, token := newAdminHarness(t)
 
-	targetUID, _ := database.CreateUser(context.Background(), "banwithout", "hash", 3)
+	targetUID := mustCreateUser(t, database, "banwithout", "hash", 3)
 
 	// No ban_reason in body — the nil check in handlePatchUser uses empty string.
 	body := map[string]any{"banned": true}
 	w := doRequest(t, handler, http.MethodPatch, "/users/"+itoa(targetUID), token, body)
 
-	if w.Code != http.StatusOK {
-		t.Errorf("ban without reason status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	expectStatus(t, w, http.StatusOK)
 }
 
 // ─── PatchUser — role change broadcasts ────────────────────────────────────
@@ -633,14 +523,12 @@ func TestAdminAPI_PatchUser_RoleChangeBroadcast(t *testing.T) {
 	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, nil, newTestServicesFor(database, hub, nil))
 	token := createAdminUser(t, database)
 
-	targetUID, _ := database.CreateUser(context.Background(), "rolebroadcast", "hash", 3)
+	targetUID := mustCreateUser(t, database, "rolebroadcast", "hash", 3)
 
 	body := map[string]any{"role_id": float64(2)}
 	w := doRequest(t, handler, http.MethodPatch, "/users/"+itoa(targetUID), token, body)
 
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 	if !slices.Contains(hub.memberUpdateIDs(), targetUID) {
 		t.Errorf("no member_update enqueued for the user after the role change: %+v", hub.roleRefreshes)
 	}
@@ -656,14 +544,9 @@ func TestAdminAPI_SetupStatus_NeedsSetup(t *testing.T) {
 
 	w := doRequest(t, handler, http.MethodGet, "/setup/status", "", nil)
 
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 
-	var resp map[string]bool
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	resp := decodeBody[map[string]bool](t, w)
 	if !resp["needs_setup"] {
 		t.Error("expected needs_setup=true when no users exist")
 	}
@@ -678,12 +561,9 @@ func TestAdminAPI_SetupStatus_AlreadySetup(t *testing.T) {
 
 	w := doRequest(t, handler, http.MethodGet, "/setup/status", "", nil)
 
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 
-	var resp map[string]bool
-	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	resp := decodeBody[map[string]bool](t, w)
 	if resp["needs_setup"] {
 		t.Error("expected needs_setup=false when users exist")
 	}
@@ -701,14 +581,9 @@ func TestAdminAPI_Setup_Success(t *testing.T) {
 	}
 	w := doRequest(t, handler, http.MethodPost, "/setup", "", body)
 
-	if w.Code != http.StatusCreated {
-		t.Fatalf("setup status = %d, want 201; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusCreated)
 
-	var resp map[string]any
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	resp := decodeBody[map[string]any](t, w)
 	if resp["token"] == nil || resp["token"] == "" {
 		t.Error("expected non-empty token in setup response")
 	}
@@ -734,9 +609,7 @@ func TestAdminAPI_Setup_AlreadyCompleted(t *testing.T) {
 	}
 	w := doRequest(t, handler, http.MethodPost, "/setup", "", body)
 
-	if w.Code != http.StatusForbidden {
-		t.Errorf("setup after completion status = %d, want 403", w.Code)
-	}
+	expectStatus(t, w, http.StatusForbidden)
 }
 
 // TestAdminAPI_Setup_MissingFields verifies that POST /setup with empty
@@ -751,9 +624,7 @@ func TestAdminAPI_Setup_MissingFields(t *testing.T) {
 	}
 	w := doRequest(t, handler, http.MethodPost, "/setup", "", body)
 
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("empty fields status = %d, want 400; body: %s", w.Code, w.Body.String())
-	}
+	expectStatus(t, w, http.StatusBadRequest)
 }
 
 // TestAdminAPI_Setup_WeakPassword verifies that a weak password is rejected.
@@ -767,9 +638,7 @@ func TestAdminAPI_Setup_WeakPassword(t *testing.T) {
 	}
 	w := doRequest(t, handler, http.MethodPost, "/setup", "", body)
 
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("weak password status = %d, want 400; body: %s", w.Code, w.Body.String())
-	}
+	expectStatus(t, w, http.StatusBadRequest)
 }
 
 // TestAdminAPI_Setup_InvalidBody verifies that a non-JSON body returns 400.
@@ -781,9 +650,7 @@ func TestAdminAPI_Setup_InvalidBody(t *testing.T) {
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("invalid body status = %d, want 400", w.Code)
-	}
+	expectStatus(t, w, http.StatusBadRequest)
 }
 
 // TestAdminAPI_AuditLog_HideSignins pins the panel's Sign-ins chip:
@@ -791,9 +658,7 @@ func TestAdminAPI_Setup_InvalidBody(t *testing.T) {
 // before paging; without it, the rows and an action filter for them are
 // untouched.
 func TestAdminAPI_AuditLog_HideSignins(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	database, handler, token := newAdminHarnessNoHub(t)
 	ctx := context.Background()
 
 	uid, _ := database.CreateUser(ctx, "quiet", "hash", 1)
@@ -809,10 +674,7 @@ func TestAdminAPI_AuditLog_HideSignins(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Fatalf("GET /audit-log?%s status = %d, want 200; body: %s", query, w.Code, w.Body.String())
 		}
-		var entries []map[string]any
-		if err := json.Unmarshal(w.Body.Bytes(), &entries); err != nil {
-			t.Fatalf("unmarshal: %v", err)
-		}
+		entries := decodeBody[[]map[string]any](t, w)
 		return entries
 	}
 

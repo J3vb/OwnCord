@@ -17,20 +17,15 @@ import (
 // public redemption that signs the holder in without the second factor.
 func TestRecoveryKitRoutes_EnrolStatusRecover(t *testing.T) {
 	ctx := context.Background()
-	database := newAuthTestDB(t)
-	limiter := auth.NewRateLimiter()
-	router := buildAuthRouter(database, limiter)
+	database, _, router := newAuthEnv(t)
 	uid := seedUser(t, database, "kitholder", "KitHolderPass1!", 4)
 	token := issueSessionToken(t, database, uid)
 	apiToken := issueAPIToken(t, database, uid)
 
 	// Not enrolled yet.
 	rr := getWithToken(t, router, "/api/v1/users/me/recovery-kit", token)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status route = %d; body = %s", rr.Code, rr.Body.String())
-	}
-	var status map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&status)
+	requireStatus(t, rr, http.StatusOK)
+	status := decodeBody[map[string]any](t, rr)
 	if status["enrolled"] != false {
 		t.Fatalf("status before enrolment = %v", status)
 	}
@@ -44,14 +39,11 @@ func TestRecoveryKitRoutes_EnrolStatusRecover(t *testing.T) {
 	}
 
 	rr = postJSONWithToken(t, router, "/api/v1/users/me/recovery-kit", token, map[string]string{"password": "KitHolderPass1!"})
-	if rr.Code != http.StatusOK {
-		t.Fatalf("enrolment = %d; body = %s", rr.Code, rr.Body.String())
-	}
-	var issue struct {
+	requireStatus(t, rr, http.StatusOK)
+	issue := decodeBody[struct {
 		KitSecret string `json:"kit_secret"`
 		CreatedAt string `json:"created_at"`
-	}
-	_ = json.NewDecoder(rr.Body).Decode(&issue)
+	}](t, rr)
 	if issue.KitSecret == "" || issue.CreatedAt == "" {
 		t.Fatalf("issue = %+v, want the secret once", issue)
 	}
@@ -72,11 +64,8 @@ func TestRecoveryKitRoutes_EnrolStatusRecover(t *testing.T) {
 		t.Fatalf("wrong secret = %d, want 401; body = %s", rr.Code, rr.Body.String())
 	}
 	rr = postJSON(t, router, "/api/v1/auth/recover", map[string]string{"username": "kitholder", "kit_secret": issue.KitSecret, "new_password": "Recovered-Pass2!"})
-	if rr.Code != http.StatusOK {
-		t.Fatalf("recovery = %d; body = %s", rr.Code, rr.Body.String())
-	}
-	var recovered map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&recovered)
+	requireStatus(t, rr, http.StatusOK)
+	recovered := decodeBody[map[string]any](t, rr)
 	if recovered["token"] == nil || recovered["requires_2fa"] != false {
 		t.Fatalf("recovery body = %v, want a session token", recovered)
 	}
@@ -131,9 +120,7 @@ func issueAPIToken(t *testing.T, database interface {
 // route, in the credential field, and signs the holder in likewise.
 func TestRecoverRoute_AcceptsAnOwnerIssuedCredential(t *testing.T) {
 	ctx := context.Background()
-	database := newAuthTestDB(t)
-	limiter := auth.NewRateLimiter()
-	router := buildAuthRouter(database, limiter)
+	database, limiter, router := newAuthEnv(t)
 	uid := seedUser(t, database, "assisted", "AssistedPass1!", 4)
 	oldToken := issueSessionToken(t, database, uid)
 	apiToken := issueAPIToken(t, database, uid)
@@ -144,13 +131,9 @@ func TestRecoverRoute_AcceptsAnOwnerIssuedCredential(t *testing.T) {
 	}
 
 	rr := postJSON(t, router, "/api/v1/auth/recover", map[string]string{"username": "assisted", "credential": "XXXX-XXXX-XXXX-XXXX-XXXX-XXXX", "new_password": "N3w-Str0ng!Pass"})
-	if rr.Code != http.StatusUnauthorized {
-		t.Fatalf("wrong credential = %d, want 401; body = %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusUnauthorized)
 	rr = postJSON(t, router, "/api/v1/auth/recover", map[string]string{"username": "assisted", "credential": issue.Credential, "new_password": "N3w-Str0ng!Pass"})
-	if rr.Code != http.StatusOK {
-		t.Fatalf("credential = %d; body = %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 	if rr := getWithToken(t, router, "/api/v1/users/me/recovery-kit", oldToken); rr.Code != http.StatusUnauthorized {
 		t.Fatalf("the old session is still alive: %d", rr.Code)
 	}
@@ -185,13 +168,8 @@ func TestRecoveryKitStatusRoute_StoreFaultYieldsAGenericBody(t *testing.T) {
 	}
 
 	rr := getWithToken(t, router, "/api/v1/users/me/recovery-kit", token)
-	if rr.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want 500; body = %s", rr.Code, rr.Body.String())
-	}
-	var body map[string]string
-	if err := json.NewDecoder(rr.Body).Decode(&body); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	requireStatus(t, rr, http.StatusInternalServerError)
+	body := decodeBody[map[string]string](t, rr)
 	if body["error"] != "INTERNAL_ERROR" || body["message"] != "internal error" {
 		t.Errorf("body = %v, want INTERNAL_ERROR / internal error", body)
 	}
@@ -205,26 +183,18 @@ func TestRecoverRoute_SessionIssueFailureAfterCommitSaysSignIn(t *testing.T) {
 	uid := seedUser(t, database, "kitsignin", "KitSignInPass1!", 4)
 	token := issueSessionToken(t, database, uid)
 	rr := postJSONWithToken(t, router, "/api/v1/users/me/recovery-kit", token, map[string]string{"password": "KitSignInPass1!"})
-	if rr.Code != http.StatusOK {
-		t.Fatalf("enrolment = %d; body = %s", rr.Code, rr.Body.String())
-	}
-	var issue struct {
+	requireStatus(t, rr, http.StatusOK)
+	issue := decodeBody[struct {
 		KitSecret string `json:"kit_secret"`
-	}
-	_ = json.NewDecoder(rr.Body).Decode(&issue)
+	}](t, rr)
 	if _, err := database.ExecContext(context.Background(),
 		`CREATE TRIGGER fail_session_insert BEFORE INSERT ON sessions BEGIN SELECT RAISE(ABORT, 'session store down'); END`); err != nil {
 		t.Fatalf("create trigger: %v", err)
 	}
 
 	rr = postJSON(t, router, "/api/v1/auth/recover", map[string]string{"username": "kitsignin", "kit_secret": issue.KitSecret, "new_password": "N3w-Str0ng!Pass"})
-	if rr.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want 500; body = %s", rr.Code, rr.Body.String())
-	}
-	var body map[string]string
-	if err := json.NewDecoder(rr.Body).Decode(&body); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	requireStatus(t, rr, http.StatusInternalServerError)
+	body := decodeBody[map[string]string](t, rr)
 	if body["error"] != "RECOVERED_SIGN_IN_REQUIRED" || !strings.Contains(body["message"], "sign in with your new password") {
 		t.Errorf("body = %v, want RECOVERED_SIGN_IN_REQUIRED with the sign-in hint", body)
 	}

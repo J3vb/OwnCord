@@ -124,9 +124,7 @@ func (f *iconFixture) uploadTo(t *testing.T, path, user string, content []byte) 
 	req := httptest.NewRequest(http.MethodPost, path, body)
 	req.Header.Set("Content-Type", contentType)
 	req.Header.Set("Authorization", "Bearer "+f.tokens[user])
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	f.router.ServeHTTP(rr, req)
+	rr := serveLocal(f.router, req)
 	return rr
 }
 
@@ -180,9 +178,7 @@ func iconID(t *testing.T, info db.DMChannelInfo) string {
 func TestUploadGroupIcon_SetsIconRowAndRefresh(t *testing.T) {
 	f := newIconFixture(t)
 	rr := f.upload(t, "bob", makePNGBytes(t, 64, 64)) // a member who is not the owner
-	if rr.Code != http.StatusOK {
-		t.Fatalf("upload = %d %s, want 200", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 	info := decodeDMInfo(t, rr)
 	id := iconID(t, info)
 	if f.icon(t) != id {
@@ -288,8 +284,7 @@ func TestUploadGroupIcon_RouteNotMountedWithoutStore(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, f.iconPath(), body)
 	req.Header.Set("Content-Type", contentType)
 	req.Header.Set("Authorization", "Bearer "+f.tokens["bob"])
-	rr := httptest.NewRecorder()
-	r.ServeHTTP(rr, req)
+	rr := serveRequest(r, req)
 	if rr.Code != http.StatusNotFound && rr.Code != http.StatusMethodNotAllowed {
 		t.Errorf("upload without a store = %d, want 404 or 405", rr.Code)
 	}
@@ -309,9 +304,7 @@ func TestUploadGroupIcon_FailedCommitUnrecordsFile(t *testing.T) {
 		}
 	}
 	rr := f.upload(t, "bob", makePNGBytes(t, 32, 32))
-	if rr.Code != http.StatusNotFound {
-		t.Fatalf("upload by a member who just left = %d %s, want 404", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusNotFound)
 	if f.icon(t) != "" {
 		t.Errorf("dm_icon = %q, want none", f.icon(t))
 	}
@@ -359,9 +352,7 @@ func TestUploadGroupIcon_ReplacedWhileUploadInFlight(t *testing.T) {
 	// Carol's bytes are stored but her change has not committed. Bob replaces
 	// the icon in the meantime.
 	rr := f.upload(t, "bob", makePNGBytes(t, 41, 41))
-	if rr.Code != http.StatusOK {
-		t.Fatalf("bob's upload = %d %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 	bobID := iconID(t, decodeDMInfo(t, rr))
 	if f.icon(t) != bobID || f.iconRows(t) != 1 {
 		t.Fatalf("after bob: icon %q rows %d, want bob's icon and one row", f.icon(t), f.iconRows(t))
@@ -369,9 +360,7 @@ func TestUploadGroupIcon_ReplacedWhileUploadInFlight(t *testing.T) {
 
 	close(gate)
 	rr = <-slow
-	if rr.Code != http.StatusOK {
-		t.Fatalf("carol's upload = %d %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 	carolID := iconID(t, decodeDMInfo(t, rr))
 	if carolID == bobID {
 		t.Fatal("test bug: both uploads got one id")
@@ -445,9 +434,7 @@ func TestServeFile_GroupIconReadableByMembersOnly(t *testing.T) {
 func TestDeleteGroupIcon_NoIconNoRow(t *testing.T) {
 	f := newIconFixture(t)
 	rr := f.clear(t, "bob")
-	if rr.Code != http.StatusOK {
-		t.Fatalf("clear with no icon = %d %s, want 200", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 	if info := decodeDMInfo(t, rr); info.Icon != "" || !info.IsGroup {
 		t.Errorf("summary = %+v, want the group with no icon", info)
 	}
@@ -467,9 +454,7 @@ func TestDeleteGroupIcon_ClearsAndFansOut(t *testing.T) {
 	f.bc.reset()
 
 	rr := f.clear(t, "carol")
-	if rr.Code != http.StatusOK {
-		t.Fatalf("clear = %d %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 	if info := decodeDMInfo(t, rr); info.Icon != "" {
 		t.Errorf("summary icon = %q, want none", info.Icon)
 	}

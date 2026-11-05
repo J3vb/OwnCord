@@ -43,10 +43,7 @@ func countBans(hub *recordingErasureHub) int {
 
 func accountGone(t *testing.T, database *db.DB, uid int64) bool {
 	t.Helper()
-	u, err := database.GetUserByID(context.Background(), uid)
-	if err != nil {
-		t.Fatalf("GetUserByID: %v", err)
-	}
+	u := mustGetUserByID(t, database, uid)
 	return u == nil
 }
 
@@ -58,7 +55,7 @@ func TestErasureService_FailureAfterLockResumesOnTick(t *testing.T) {
 	database := newTestDB(t)
 	ctx := context.Background()
 	dir := t.TempDir()
-	uid, files := seedErasureMember(t, database, dir)
+	uid, files := seedErasureMember(ctx, t, database, dir)
 	markers := newTestMarkers(t)
 	hub := &recordingErasureHub{}
 	svc := NewErasureService(database)
@@ -126,11 +123,9 @@ func TestAuthService_DeleteAccountReportsSuccessWhileInProgress(t *testing.T) {
 	database := newTestDB(t)
 	ctx := context.Background()
 	dir := t.TempDir()
-	uid, _ := seedErasureMember(t, database, dir)
+	uid, _ := seedErasureMember(ctx, t, database, dir)
 	hash, _ := auth.HashPassword("correct horse battery")
-	if err := database.UpdateUserPassword(ctx, uid, hash); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "UpdateUserPassword", database.UpdateUserPassword(ctx, uid, hash))
 	user, _ := database.GetUserByID(ctx, uid)
 	shared := NewErasureService(database)
 	shared.SetFiles(newTestStorage(t, dir))
@@ -158,13 +153,9 @@ func TestErasureService_CrashMidErasureCompletesOnRestart(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(t.TempDir(), "main.sqlite")
 	database, err := db.Open(dbPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := db.Migrate(database); err != nil {
-		t.Fatal(err)
-	}
-	uid, files := seedErasureMember(t, database, dir)
+	mustDo(t, "Open", err)
+	mustDo(t, "Migrate", db.Migrate(database))
+	uid, files := seedErasureMember(ctx, t, database, dir)
 	markers := newTestMarkers(t)
 	svc := NewErasureService(database)
 	svc.SetFiles(newTestStorage(t, dir))
@@ -173,9 +164,7 @@ func TestErasureService_CrashMidErasureCompletesOnRestart(t *testing.T) {
 	if err := svc.Erase(ctx, uid); !errors.Is(err, ErrErasureInProgress) {
 		t.Fatalf("Erase = %v, want ErrErasureInProgress", err)
 	}
-	if err := database.Close(); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Close", database.Close())
 
 	reopened := openFileDB(t, dbPath)
 	t.Cleanup(func() { _ = reopened.Close() })
@@ -217,7 +206,7 @@ func TestErasureService_InlineBudgetHandsOffToResume(t *testing.T) {
 	database := newTestDB(t)
 	ctx := context.Background()
 	dir := t.TempDir()
-	uid, files := seedErasureMember(t, database, dir)
+	uid, files := seedErasureMember(ctx, t, database, dir)
 	svc := NewErasureService(database)
 	svc.SetFiles(newTestStorage(t, dir))
 
@@ -256,13 +245,11 @@ func TestErasureService_InFlightUserIsNotDrivenTwice(t *testing.T) {
 	database := newTestDB(t)
 	ctx := context.Background()
 	dir := t.TempDir()
-	uid, _ := seedErasureMember(t, database, dir)
+	uid, _ := seedErasureMember(ctx, t, database, dir)
 	svc := NewErasureService(database)
 	svc.SetFiles(newTestStorage(t, dir))
 	job, err := database.EraseAccountLock(ctx, uid, true)
-	if err != nil {
-		t.Fatalf("EraseAccountLock: %v", err)
-	}
+	mustDo(t, "EraseAccountLock", err)
 	if err := svc.runJob(ctx, job); err == nil {
 		t.Error("runJob accepted a queued job")
 	}
@@ -300,7 +287,7 @@ func TestErasureService_WakeFindsTheUserReleased(t *testing.T) {
 	database := newTestDB(t)
 	ctx, cancel := context.WithCancel(t.Context())
 	dir := t.TempDir()
-	uid, _ := seedErasureMember(t, database, dir)
+	uid, _ := seedErasureMember(ctx, t, database, dir)
 	svc := NewErasureService(database)
 	svc.SetFiles(newTestStorage(t, dir))
 
@@ -361,9 +348,6 @@ func TestErasureService_WakeFindsTheUserReleased(t *testing.T) {
 
 func seedSecondMember(t *testing.T, database *db.DB) (int64, error) {
 	t.Helper()
-	uid, err := database.CreateUser(context.Background(), "second-member", "hash", 4)
-	if err != nil {
-		t.Fatal(err)
-	}
+	uid := mustCreateUser(t, database, "second-member", "hash", 4)
 	return uid, nil
 }

@@ -75,18 +75,14 @@ func startLiveKitTestProcess(t *testing.T, mode string) (*Process, liveKitTestLi
 	t.Helper()
 	t.Setenv("OWNCORD_LIVEKIT_TEST_PROCESS", mode)
 	bin, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Executable", err)
 	dir := t.TempDir()
 	p := New(&config.VoiceConfig{
 		LiveKitAPIKey:     "test-key",
 		LiveKitAPISecret:  "test-secret",
 		LiveKitBinaryPath: bin,
 	}, &config.TLSConfig{}, dir)
-	if err := p.Start(); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Start", p.Start())
 	t.Cleanup(p.Stop)
 	waitForLiveKitTestFile(t, filepath.Join(dir, "listeners.json"))
 	return p, readLiveKitTestListeners(t, dir)
@@ -95,13 +91,9 @@ func startLiveKitTestProcess(t *testing.T, mode string) (*Process, liveKitTestLi
 func readLiveKitTestListeners(t *testing.T, dir string) liveKitTestListeners {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join(dir, "listeners.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "ReadFile", err)
 	var listeners liveKitTestListeners
-	if err := json.Unmarshal(data, &listeners); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Unmarshal", json.Unmarshal(data, &listeners))
 	return listeners
 }
 
@@ -126,14 +118,10 @@ func waitForLiveKitTestFile(t *testing.T, path string) {
 func assertLiveKitPortsReleased(t *testing.T, listeners liveKitTestListeners) {
 	t.Helper()
 	tcp, err := net.Listen("tcp4", listeners.TCP)
-	if err != nil {
-		t.Fatalf("companion still owns TCP listener after Stop: %v", err)
-	}
+	mustDo(t, "companion still owns TCP listener after Stop", err)
 	defer tcp.Close()
 	udp, err := net.ListenPacket("udp4", listeners.UDP)
-	if err != nil {
-		t.Fatalf("companion still owns UDP listener after Stop: %v", err)
-	}
+	mustDo(t, "companion still owns UDP listener after Stop", err)
 	_ = udp.Close()
 }
 
@@ -159,9 +147,7 @@ func TestLiveKitProcess_ConcurrentStopWaitsForExitAndReleasesPorts(t *testing.T)
 			t.Fatal("Stop returned while the companion was still shutting down")
 		default:
 		}
-		if err := os.WriteFile(filepath.Join(p.dataDir, "shutdown-release"), nil, 0o600); err != nil {
-			t.Fatal(err)
-		}
+		mustDo(t, "WriteFile", os.WriteFile(filepath.Join(p.dataDir, "shutdown-release"), nil, 0o600))
 	}
 	select {
 	case <-stopped:
@@ -216,9 +202,7 @@ func TestLiveKitProcess_StopDuringDownloadAndRejectDuplicateStart(t *testing.T) 
 		LiveKitAPIKey:       "test-key",
 		LiveKitAPISecret:    "test-secret",
 	}, &config.TLSConfig{}, t.TempDir())
-	if err := p.Start(); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Start", p.Start())
 	defer p.Stop()
 	select {
 	case <-requested:

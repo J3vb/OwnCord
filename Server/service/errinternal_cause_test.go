@@ -140,8 +140,7 @@ func TestErrInternal_KeepsStoreCause(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
 			database := newTestDB(t)
-			seedRole(t, database, &db.Role{ID: permissions.MemberRoleID, Name: "member",
-				Permissions: permissions.SendMessages | permissions.ReadMessages, Position: 1})
+			seedMemberRole(t, database, permissions.SendMessages|permissions.ReadMessages)
 			seedUser(t, database, &db.User{ID: 1, Username: "alice", PasswordHash: "h"})
 			seedUser(t, database, &db.User{ID: 2, Username: "bob", PasswordHash: "h"})
 			seedUserRole(t, database, 1, permissions.MemberRoleID)

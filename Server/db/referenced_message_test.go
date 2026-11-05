@@ -20,9 +20,7 @@ func TestGetMessagesForAPI_ReferencedMessageSnippet(t *testing.T) {
 	plain, _ := database.CreateMessage(ctx, ch, bob, "no reply", nil)
 
 	msgs, err := database.GetMessagesForAPI(ctx, ch, 0, 50, bob)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "GetMessagesForAPI", err)
 	byID := map[int64]int{}
 	for i, m := range msgs {
 		byID[m.ID] = i
@@ -47,14 +45,10 @@ func TestGetMessagesForAPI_ReferencedMessageRedactedWhenParentDeleted(t *testing
 
 	parent, _ := database.CreateMessage(ctx, ch, alice, "secret", nil)
 	reply, _ := database.CreateMessage(ctx, ch, alice, "re", &parent)
-	if err := database.DeleteMessage(ctx, parent, alice, false); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "DeleteMessage", database.DeleteMessage(ctx, parent, alice, false))
 
 	msgs, err := database.GetMessagesForAPI(ctx, ch, 0, 50, alice)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "GetMessagesForAPI", err)
 	ref := msgs[0].ReferencedMessage
 	if msgs[0].ID != reply || ref == nil || !ref.Deleted || ref.Content != "" || ref.User != nil || ref.HasAttachments {
 		t.Fatalf("deleted parent must be redacted, got %+v", ref)
@@ -72,9 +66,7 @@ func TestGetMessagesForAPI_ReferencedMessageNeverCrossesChannels(t *testing.T) {
 	_, _ = database.CreateMessage(ctx, chB, alice, "re", &parent)
 
 	msgs, err := database.GetMessagesForAPI(ctx, chB, 0, 50, alice)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "GetMessagesForAPI", err)
 	if msgs[0].ReferencedMessage != nil {
 		t.Fatalf("cross-channel reply_to leaked %+v", msgs[0].ReferencedMessage)
 	}

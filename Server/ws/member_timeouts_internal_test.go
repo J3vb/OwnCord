@@ -391,29 +391,11 @@ func TestResume_AcrossTimeout_FullReadyCarriesMemberTimeouts(t *testing.T) {
 	t.Parallel()
 	database := newTeardownTestDB(t)
 	ctx := context.Background()
-	adminID, err := database.CreateUser(ctx, "rs-admin", "hash", 1)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	modID, err := database.CreateUser(ctx, "rs-mod", "hash", 3)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	targetID, err := database.CreateUser(ctx, "rs-target", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	chID, err := database.CreateChannel(ctx, "rs-channel", "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
-	token, err := auth.GenerateToken()
-	if err != nil {
-		t.Fatalf("GenerateToken: %v", err)
-	}
-	if _, err := database.CreateSession(ctx, modID, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
+	adminID := mustCreateUser(t, database, "rs-admin", 1)
+	modID := mustCreateUser(t, database, "rs-mod", 3)
+	targetID := mustCreateUser(t, database, "rs-target", 4)
+	chID := mustCreateChannel(t, database, "rs-channel", "text")
+	token := seedSessionToken(t, database, modID)
 	hub := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	hub.perms = service.NewPermissionService(database, permissions.NewChecker(database))
 	go hub.Run()

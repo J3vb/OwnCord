@@ -59,9 +59,7 @@ func seedMessage(t *testing.T, database *db.DB, channelID, userID int64, deleted
 		t.Fatalf("seedMessage: %v", err)
 	}
 	id, err := res.LastInsertId()
-	if err != nil {
-		t.Fatalf("seedMessage LastInsertId: %v", err)
-	}
+	mustDo(t, "seedMessage LastInsertId", err)
 	return id
 }
 
@@ -113,9 +111,7 @@ func TestUploadResolve_MissingMessageRowFallsThroughToTheACL(t *testing.T) {
 	seedAttachment(t, database, "ghost", &uploader, &ghost)
 
 	aa, err := uploads.Resolve(context.Background(), "ghost")
-	if err != nil {
-		t.Fatalf("Resolve: %v", err)
-	}
+	mustDo(t, "Resolve", err)
 	if aa == nil || aa.ID != "ghost" {
 		t.Fatalf("Resolve returned %+v, want the attachment row", aa)
 	}
@@ -131,9 +127,7 @@ func TestUploadAuthorize_UnlinkedIsPrivateToItsUploader(t *testing.T) {
 		t.Fatalf("Record: %v", err)
 	}
 	aa, err := uploads.Resolve(context.Background(), "priv")
-	if err != nil {
-		t.Fatalf("Resolve: %v", err)
-	}
+	mustDo(t, "Resolve", err)
 
 	if err := uploads.Authorize(context.Background(), aa, &db.User{ID: 1}, nil); err != nil {
 		t.Errorf("uploader was refused its own file: %v", err)
@@ -157,9 +151,7 @@ func TestUploadAuthorize_AvatarIsPublicOnlyWhileInUse(t *testing.T) {
 	uploader := int64(1)
 	seedAttachment(t, database, "face", &uploader, nil)
 	aa, err := uploads.Resolve(context.Background(), "face")
-	if err != nil {
-		t.Fatalf("Resolve: %v", err)
-	}
+	mustDo(t, "Resolve", err)
 
 	if err := uploads.Authorize(context.Background(), aa, &db.User{ID: 2}, nil); err != nil {
 		t.Errorf("avatar in use was refused to another member: %v", err)
@@ -179,9 +171,7 @@ func TestUploadAuthorize_LegacyRowWithNoUploaderIsDenied(t *testing.T) {
 	seedUser(t, database, &db.User{ID: 1})
 	seedAttachment(t, database, "legacy", nil, nil)
 	aa, err := uploads.Resolve(context.Background(), "legacy")
-	if err != nil {
-		t.Fatalf("Resolve: %v", err)
-	}
+	mustDo(t, "Resolve", err)
 
 	if err := uploads.Authorize(context.Background(), aa, &db.User{ID: 1}, nil); !errors.Is(err, ErrForbidden) {
 		t.Errorf("legacy row error = %v, want ErrForbidden", err)
@@ -204,9 +194,7 @@ func TestUploadAuthorize_DMParticipationBindsAdministratorsToo(t *testing.T) {
 	uploader := int64(1)
 	seedAttachment(t, database, "dmfile", &uploader, &msgID)
 	aa, err := uploads.Resolve(context.Background(), "dmfile")
-	if err != nil {
-		t.Fatalf("Resolve: %v", err)
-	}
+	mustDo(t, "Resolve", err)
 
 	if err := uploads.Authorize(context.Background(), aa, &db.User{ID: 2}, nil); err != nil {
 		t.Errorf("the other participant was refused: %v", err)
@@ -237,9 +225,7 @@ func TestUploadAuthorize_GuildChannelNeedsReadMessages(t *testing.T) {
 	uploader := int64(1)
 	seedAttachment(t, database, "guildfile", &uploader, &msgID)
 	aa, err := uploads.Resolve(context.Background(), "guildfile")
-	if err != nil {
-		t.Fatalf("Resolve: %v", err)
-	}
+	mustDo(t, "Resolve", err)
 
 	if err := uploads.Authorize(context.Background(), aa, &db.User{ID: 1}, reader); err != nil {
 		t.Errorf("a reader was refused: %v", err)
@@ -263,13 +249,9 @@ func TestUploadAuthorize_RefusalsAreIndistinguishable(t *testing.T) {
 	seedAttachment(t, database, "priv", &uploader, nil)
 
 	legacy, err := uploads.Resolve(context.Background(), "legacy")
-	if err != nil {
-		t.Fatalf("Resolve(legacy): %v", err)
-	}
+	mustDo(t, "Resolve(legacy)", err)
 	priv, err := uploads.Resolve(context.Background(), "priv")
-	if err != nil {
-		t.Fatalf("Resolve(priv): %v", err)
-	}
+	mustDo(t, "Resolve(priv)", err)
 
 	legacyErr := uploads.Authorize(context.Background(), legacy, &db.User{ID: 2}, nil)
 	privErr := uploads.Authorize(context.Background(), priv, &db.User{ID: 2}, nil)
@@ -331,9 +313,7 @@ func TestUploadAuthorize_NonMemberGetsTheSameRefusalLabelledOrNot(t *testing.T) 
 	uploader := int64(1)
 	seedAttachment(t, database, "plainfile", &uploader, &plainMsg)
 	plainAA, err := uploads.Resolve(context.Background(), "plainfile")
-	if err != nil {
-		t.Fatalf("Resolve(plain): %v", err)
-	}
+	mustDo(t, "Resolve(plain)", err)
 
 	seedChannel(t, database, &db.Channel{ID: 41, Name: "labelled"})
 	if _, err := database.ExecContext(context.Background(),
@@ -343,9 +323,7 @@ func TestUploadAuthorize_NonMemberGetsTheSameRefusalLabelledOrNot(t *testing.T) 
 	labelledMsg := seedMessage(t, database, 41, 1, false)
 	seedAttachment(t, database, "labelledfile", &uploader, &labelledMsg)
 	labelledAA, err := uploads.Resolve(context.Background(), "labelledfile")
-	if err != nil {
-		t.Fatalf("Resolve(labelled): %v", err)
-	}
+	mustDo(t, "Resolve(labelled)", err)
 
 	plainErr := uploads.Authorize(context.Background(), plainAA, &db.User{ID: 2}, nonMember)
 	labelledErr := uploads.Authorize(context.Background(), labelledAA, &db.User{ID: 2}, nonMember)
@@ -385,9 +363,7 @@ func TestUploadAuthorize_AdministratorStillNeedsConsentForALabelledChannel(t *te
 	uploader := int64(1)
 	seedAttachment(t, database, "adminfile", &uploader, &msgID)
 	aa, err := uploads.Resolve(context.Background(), "adminfile")
-	if err != nil {
-		t.Fatalf("Resolve: %v", err)
-	}
+	mustDo(t, "Resolve", err)
 
 	err = uploads.Authorize(context.Background(), aa, &db.User{ID: 3}, admin)
 	if !errors.Is(err, permissions.ErrNSFWUnacknowledged) {
@@ -447,9 +423,7 @@ func TestUploadAuthorize_BannerLookupFailsClosed(t *testing.T) {
 				t.Fatalf("fixture: IsBannerFile = %v, %v; want a live banner", ok, err)
 			}
 			aa, err := uploads.Resolve(context.Background(), "ban")
-			if err != nil {
-				t.Fatalf("Resolve: %v", err)
-			}
+			mustDo(t, "Resolve", err)
 			if err := uploads.Authorize(context.Background(), aa, &db.User{ID: 2}, nil); !errors.Is(err, ErrForbidden) {
 				t.Errorf("non-uploader error = %v, want ErrForbidden", err)
 			}

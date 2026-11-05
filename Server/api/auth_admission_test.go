@@ -44,9 +44,7 @@ func TestLogin_RefusedWhenAuthBudgetExhausted(t *testing.T) {
 	defer cancel()
 	req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/api/v1/auth/login", bytes.NewReader(raw))
 	req.Header.Set("Content-Type", "application/json")
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
+	rr := serveLocal(router, req)
 	wantErr(t, rr, http.StatusTooManyRequests, "AUTH_BUSY", authBusyMessage)
 	if secs, err := strconv.Atoi(rr.Header().Get("Retry-After")); err != nil || secs < 1 {
 		t.Fatalf("Retry-After = %q, want a positive number of seconds", rr.Header().Get("Retry-After"))

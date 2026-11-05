@@ -26,9 +26,7 @@ const refusedReqID = "req-refusal-test-1"
 func newLoggingRegistrationService(ctx context.Context, t *testing.T, mode RegistrationMode) (*AuthService, *bytes.Buffer) {
 	t.Helper()
 	database := newTestDB(t)
-	if err := database.SetSetting(ctx, registrationModeKey, string(mode)); err != nil {
-		t.Fatalf("SetSetting: %v", err)
-	}
+	mustDo(t, "SetSetting", database.SetSetting(ctx, registrationModeKey, string(mode)))
 	logs := &bytes.Buffer{}
 	prev := slog.Default()
 	slog.SetDefault(slog.New(logctx.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug}))))
@@ -67,12 +65,8 @@ func TestRegister_LogsTheRefusalCause(t *testing.T) {
 			name: "invite revoked",
 			setup: func(t *testing.T, svc *AuthService, owner int64) string {
 				code, err := svc.st.(*db.DB).CreateInvite(ctx, owner, 1, nil)
-				if err != nil {
-					t.Fatalf("CreateInvite: %v", err)
-				}
-				if err := svc.st.(*db.DB).RevokeInvite(ctx, code); err != nil {
-					t.Fatalf("RevokeInvite: %v", err)
-				}
+				mustDo(t, "CreateInvite", err)
+				mustDo(t, "RevokeInvite", svc.st.(*db.DB).RevokeInvite(ctx, code))
 				return code
 			},
 			want: "invite revoked",
@@ -81,9 +75,7 @@ func TestRegister_LogsTheRefusalCause(t *testing.T) {
 			name: "invite exhausted",
 			setup: func(t *testing.T, svc *AuthService, owner int64) string {
 				code, err := svc.st.(*db.DB).CreateInvite(ctx, owner, 1, nil)
-				if err != nil {
-					t.Fatalf("CreateInvite: %v", err)
-				}
+				mustDo(t, "CreateInvite", err)
 				if _, err := svc.Register(ctx, RegisterInput{
 					Username: "spent", Password: "securePass1", InviteCode: code, Device: "test", IP: "203.0.113.30",
 				}); err != nil {
@@ -98,9 +90,7 @@ func TestRegister_LogsTheRefusalCause(t *testing.T) {
 			setup: func(t *testing.T, svc *AuthService, owner int64) string {
 				past := time.Now().Add(-time.Hour)
 				code, err := svc.st.(*db.DB).CreateInvite(ctx, owner, 0, &past)
-				if err != nil {
-					t.Fatalf("CreateInvite: %v", err)
-				}
+				mustDo(t, "CreateInvite", err)
 				return code
 			},
 			want: "invite expired",
@@ -109,9 +99,7 @@ func TestRegister_LogsTheRefusalCause(t *testing.T) {
 			name: "username taken",
 			setup: func(t *testing.T, svc *AuthService, owner int64) string {
 				code, err := svc.st.(*db.DB).CreateInvite(ctx, owner, 0, nil) // unlimited
-				if err != nil {
-					t.Fatalf("CreateInvite: %v", err)
-				}
+				mustDo(t, "CreateInvite", err)
 				if _, err := svc.Register(ctx, RegisterInput{
 					Username: "refused-user", Password: "securePass1", InviteCode: code, Device: "test", IP: "203.0.113.31",
 				}); err != nil {
@@ -127,9 +115,7 @@ func TestRegister_LogsTheRefusalCause(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			svc, logs := newLoggingRegistrationService(ctx, t, RegistrationInvite)
 			owner, err := svc.st.(*db.DB).CreateUser(ctx, "owner", "hash", 1)
-			if err != nil {
-				t.Fatalf("CreateUser: %v", err)
-			}
+			mustDo(t, "CreateUser", err)
 			code := tc.setup(t, svc, owner)
 
 			logs.Reset()

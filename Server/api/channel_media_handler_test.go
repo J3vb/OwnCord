@@ -2,7 +2,6 @@ package api_test
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"testing"
@@ -38,14 +37,7 @@ func newMediaRouter(t *testing.T) (*db.DB, http.Handler) {
 
 func newMediaRouterWithServices(t *testing.T) (*db.DB, http.Handler, *service.Services) {
 	t.Helper()
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	database := openMigratedDB(t)
 	r := chi.NewRouter()
 	limiter := auth.NewRateLimiter()
 	svc := service.New(database, limiter)
@@ -87,17 +79,14 @@ func decodeMediaPage(t *testing.T, router http.Handler, path, token string) medi
 	if rr.Code != http.StatusOK {
 		t.Fatalf("GET %s = %d: %s", path, rr.Code, rr.Body.String())
 	}
-	var page mediaPage
-	if err := json.NewDecoder(rr.Body).Decode(&page); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	page := decodeBody[mediaPage](t, rr)
 	return page
 }
 
 func TestChannelMedia_PagesWithCursor(t *testing.T) {
 	database, router := newMediaRouter(t)
 	token := chTestCreateToken(t, database, "media-member", int(permissions.MemberRoleID))
-	ch, _ := database.CreateChannel(context.Background(), "photos", "text", "", "", 0)
+	ch := mustCreateChannel(t, database, "photos", "text")
 	postMedia(t, database, ch, "media-member", "2026-01-01 10:00:00", "one.png")
 	postMedia(t, database, ch, "media-member", "2026-01-02 10:00:00", "two.png", "three.png")
 
@@ -118,7 +107,7 @@ func TestChannelMedia_PagesWithCursor(t *testing.T) {
 func TestChannelMedia_RespectsReadPermission(t *testing.T) {
 	database, router := newMediaRouter(t)
 	token := chTestCreateToken(t, database, "media-denied", int(permissions.MemberRoleID))
-	ch, _ := database.CreateChannel(context.Background(), "secret", "text", "", "", 0)
+	ch := mustCreateChannel(t, database, "secret", "text")
 	postMedia(t, database, ch, "media-denied", "2026-01-01 10:00:00", "hidden.png")
 	denyReadMessages(t, database, ch, permissions.MemberRoleID)
 
@@ -138,7 +127,7 @@ func TestChannelMedia_RespectsReadPermission(t *testing.T) {
 func TestChannelMedia_RejectsBadParameters(t *testing.T) {
 	database, router := newMediaRouter(t)
 	token := chTestCreateToken(t, database, "media-bad", int(permissions.MemberRoleID))
-	ch, _ := database.CreateChannel(context.Background(), "photos", "text", "", "", 0)
+	ch := mustCreateChannel(t, database, "photos", "text")
 	long := make([]byte, service.MediaNameMaxLen+1)
 	for i := range long {
 		long[i] = 'a'
@@ -157,22 +146,17 @@ func TestChannelMedia_RejectsBadParameters(t *testing.T) {
 func TestChannelMedia_MonthsUseTheCallersZone(t *testing.T) {
 	database, router := newMediaRouter(t)
 	token := chTestCreateToken(t, database, "media-tz", int(permissions.MemberRoleID))
-	ch, _ := database.CreateChannel(context.Background(), "photos", "text", "", "", 0)
+	ch := mustCreateChannel(t, database, "photos", "text")
 	// 23:30 UTC on 31 January is already February in Brussels (UTC+1).
 	postMedia(t, database, ch, "media-tz", "2026-01-31 23:30:00", "late.png")
 	postMedia(t, database, ch, "media-tz", "2026-01-15 12:00:00", "mid.png", "mid2.png")
 
 	months := func(tz string) string {
 		rr := chGet(t, router, fmt.Sprintf("/api/v1/channels/%d/media/months?tz=%s", ch, tz), token)
-		if rr.Code != http.StatusOK {
-			t.Fatalf("months = %d: %s", rr.Code, rr.Body.String())
-		}
-		var body struct {
+		requireStatus(t, rr, http.StatusOK)
+		body := decodeBody[struct {
 			Months []service.MediaMonth `json:"months"`
-		}
-		if err := json.NewDecoder(rr.Body).Decode(&body); err != nil {
-			t.Fatalf("decode: %v", err)
-		}
+		}](t, rr)
 		return fmt.Sprint(body.Months)
 	}
 	if got, want := months("UTC"), "[{2026-01 3}]"; got != want {
@@ -194,7 +178,7 @@ func TestChannelMedia_MonthsUseTheCallersZone(t *testing.T) {
 func TestChannelMedia_LostReadMidBrowseStopsPaging(t *testing.T) {
 	database, router, svc := newMediaRouterWithServices(t)
 	token := chTestCreateToken(t, database, "media-revoked", int(permissions.MemberRoleID))
-	ch, _ := database.CreateChannel(context.Background(), "photos", "text", "", "", 0)
+	ch := mustCreateChannel(t, database, "photos", "text")
 	postMedia(t, database, ch, "media-revoked", "2026-01-01 10:00:00", "a.png", "b.png")
 
 	first := decodeMediaPage(t, router, fmt.Sprintf("/api/v1/channels/%d/media?limit=1", ch), token)
@@ -204,7 +188,5 @@ func TestChannelMedia_LostReadMidBrowseStopsPaging(t *testing.T) {
 	denyReadMessages(t, database, ch, permissions.MemberRoleID)
 	svc.Permissions.InvalidateAll() // what the override write path does
 	rr := chGet(t, router, fmt.Sprintf("/api/v1/channels/%d/media?limit=1&cursor=%s", ch, first.NextCursor), token)
-	if rr.Code != http.StatusForbidden {
-		t.Errorf("second page after losing read = %d, want 403", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusForbidden)
 }

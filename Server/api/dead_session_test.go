@@ -33,12 +33,10 @@ func bearerGet(t *testing.T, h http.Handler, path, token string) bearerResult {
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
-	var body struct {
+	rec := serveRequest(h, req)
+	body := decodeBody[struct {
 		Error string `json:"error"`
-	}
-	_ = json.Unmarshal(rec.Body.Bytes(), &body)
+	}](t, rec)
 	return bearerResult{Status: rec.Code, Error: body.Error}
 }
 
@@ -51,10 +49,7 @@ func mintUser(t *testing.T, database *db.DB, username string) int64 {
 	if err != nil {
 		t.Fatalf("hash password: %v", err)
 	}
-	id, err := database.CreateUser(context.Background(), username, hash, int(permissions.MemberRoleID))
-	if err != nil {
-		t.Fatalf("create user %s: %v", username, err)
-	}
+	id := mustCreateUser(t, database, username, hash, int(permissions.MemberRoleID))
 	return id
 }
 
@@ -165,19 +160,13 @@ func mintPartialToken(t *testing.T, handler http.Handler, database *db.DB) strin
 	body, _ := json.Marshal(map[string]string{"username": "posture-totp", "password": "correctPass1"})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("login with 2FA enrolled: %d %s", rec.Code, rec.Body.String())
-	}
-	var resp struct {
+	rec := serveRequest(handler, req)
+	requireStatus(t, rec, http.StatusOK)
+	resp := decodeBody[struct {
 		Requires2FA  bool   `json:"requires_2fa"`
 		PartialToken string `json:"partial_token"`
 		Token        string `json:"token"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode login response: %v", err)
-	}
+	}](t, rec)
 	if !resp.Requires2FA || resp.PartialToken == "" || resp.Token != "" {
 		t.Fatalf("login did not issue a partial-auth challenge: %s", rec.Body.String())
 	}

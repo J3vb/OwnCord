@@ -96,9 +96,7 @@ func TestStartRuntime_OneStorage(t *testing.T) {
 		t.Fatal("OpenStorage returned nil for a writable directory")
 	}
 	rt, err := StartRuntime(cfg, newMaintenanceTestDB(t), nil, RuntimeInputs{Version: "test", Storage: store})
-	if err != nil {
-		t.Fatalf("StartRuntime: %v", err)
-	}
+	mustDo(t, "StartRuntime", err)
 	defer rt.Hub.GracefulStop()
 
 	if rt.Storage != store {
@@ -123,9 +121,7 @@ func TestStartRuntime_OneStorage(t *testing.T) {
 func TestStartRuntime_StorageFailureDegrades(t *testing.T) {
 	cfg := runtimeTestConfig(t)
 	rt, err := StartRuntime(cfg, newMaintenanceTestDB(t), nil, RuntimeInputs{Version: "test"})
-	if err != nil {
-		t.Fatalf("StartRuntime: %v", err)
-	}
+	mustDo(t, "StartRuntime", err)
 	defer rt.Hub.GracefulStop()
 
 	if rt.Storage != nil {

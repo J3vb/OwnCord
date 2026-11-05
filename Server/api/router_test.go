@@ -3,10 +3,8 @@ package api_test
 import (
 	"context"
 	"encoding/binary"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -34,14 +32,7 @@ func setupRouter(t *testing.T) http.Handler {
 func setupRouterWithServices(t *testing.T, configure func(*service.Services, *db.DB)) http.Handler {
 	t.Helper()
 
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open error: %v", err)
-	}
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("db.Migrate error: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
+	database := openMigratedDB(t)
 
 	cfg := &config.Config{
 		Server: config.ServerConfig{
@@ -71,46 +62,32 @@ func TestHealthEndpointReturns200(t *testing.T) {
 	router := setupRouter(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
-	rec := httptest.NewRecorder()
+	rec := serveRequest(router, req)
 
-	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Errorf("GET /health status = %d, want 200", rec.Code)
-	}
+	expectStatus(t, rec, http.StatusOK)
 }
 
 func TestHealthEndpointReturnsJSON(t *testing.T) {
 	router := setupRouter(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
-	rec := httptest.NewRecorder()
-
-	router.ServeHTTP(rec, req)
+	rec := serveRequest(router, req)
 
 	contentType := rec.Header().Get("Content-Type")
 	if !strings.Contains(contentType, "application/json") {
 		t.Errorf("Content-Type = %q, want application/json", contentType)
 	}
 
-	var body map[string]any
-	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
-		t.Fatalf("response body is not valid JSON: %v", err)
-	}
+	_ = decodeBody[map[string]any](t, rec)
 }
 
 func TestHealthEndpointStatusOK(t *testing.T) {
 	router := setupRouter(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
-	rec := httptest.NewRecorder()
+	rec := serveRequest(router, req)
 
-	router.ServeHTTP(rec, req)
-
-	var body map[string]any
-	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
-		t.Fatalf("JSON decode error: %v", err)
-	}
+	body := decodeBody[map[string]any](t, rec)
 
 	if body["status"] != "ok" {
 		t.Errorf("status = %v, want 'ok'", body["status"])
@@ -121,14 +98,9 @@ func TestHealthEndpointOmitsVersion(t *testing.T) {
 	router := setupRouter(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
-	rec := httptest.NewRecorder()
+	rec := serveRequest(router, req)
 
-	router.ServeHTTP(rec, req)
-
-	var body map[string]any
-	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
-		t.Fatalf("JSON decode error: %v", err)
-	}
+	body := decodeBody[map[string]any](t, rec)
 
 	// C-2: Version must NOT be exposed on unauthenticated endpoints.
 	if _, exists := body["version"]; exists {
@@ -140,27 +112,18 @@ func TestAPIV1InfoEndpoint(t *testing.T) {
 	router := setupRouter(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/info", nil)
-	rec := httptest.NewRecorder()
+	rec := serveRequest(router, req)
 
-	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Errorf("GET /api/v1/info status = %d, want 200", rec.Code)
-	}
+	expectStatus(t, rec, http.StatusOK)
 }
 
 func TestAPIV1InfoReturnsServerName(t *testing.T) {
 	router := setupRouter(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/info", nil)
-	rec := httptest.NewRecorder()
+	rec := serveRequest(router, req)
 
-	router.ServeHTTP(rec, req)
-
-	var body map[string]any
-	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
-		t.Fatalf("JSON decode error: %v", err)
-	}
+	body := decodeBody[map[string]any](t, rec)
 
 	if body["name"] != "Test Server" {
 		t.Errorf("name = %v, want 'Test Server'", body["name"])
@@ -177,12 +140,8 @@ func TestAPIV1InfoAndServerInfoReportEditedServerName(t *testing.T) {
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/info", nil)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-	var info map[string]any
-	if err := json.NewDecoder(rec.Body).Decode(&info); err != nil {
-		t.Fatalf("JSON decode error: %v", err)
-	}
+	rec := serveRequest(router, req)
+	info := decodeBody[map[string]any](t, rec)
 	if info["name"] != "Renamed In Admin" {
 		t.Errorf("/info name = %v, want the edited setting", info["name"])
 	}
@@ -206,14 +165,9 @@ func TestAPIV1InfoOmitsVersion(t *testing.T) {
 	router := setupRouter(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/info", nil)
-	rec := httptest.NewRecorder()
+	rec := serveRequest(router, req)
 
-	router.ServeHTTP(rec, req)
-
-	var body map[string]any
-	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
-		t.Fatalf("JSON decode error: %v", err)
-	}
+	body := decodeBody[map[string]any](t, rec)
 
 	// C-2: Version must NOT be exposed to prevent fingerprinting.
 	if _, exists := body["version"]; exists {
@@ -227,16 +181,10 @@ func serverInfoBody(t *testing.T, router http.Handler) map[string]any {
 	t.Helper()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/server-info", nil)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
+	rec := serveRequest(router, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET /api/v1/server-info status = %d, want 200", rec.Code)
-	}
-	var body map[string]any
-	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
-		t.Fatalf("JSON decode error: %v", err)
-	}
+	requireStatus(t, rec, http.StatusOK)
+	body := decodeBody[map[string]any](t, rec)
 	return body
 }
 
@@ -437,9 +385,7 @@ func TestAPIV1ServerInfoConcurrentRequestsShareCache(t *testing.T) {
 	close(start)
 	for range cap(responses) {
 		rec := <-responses
-		if rec.Code != http.StatusOK {
-			t.Errorf("concurrent request status = %d, want 200", rec.Code)
-		}
+		expectStatus(t, rec, http.StatusOK)
 	}
 	if store.registrationReads.Load() != 1 || store.retentionReads.Load() != 1 {
 		t.Fatal("concurrent requests must share one settings read per field")
@@ -460,9 +406,7 @@ func TestAPIV1ServerInfoReadErrors(t *testing.T) {
 			for range 2 {
 				rec := httptest.NewRecorder()
 				router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/server-info", nil))
-				if rec.Code != http.StatusInternalServerError {
-					t.Fatalf("status = %d, want 500", rec.Code)
-				}
+				requireStatus(t, rec, http.StatusInternalServerError)
 				if strings.Contains(rec.Body.String(), readErr.Error()) {
 					t.Fatal("public error response leaked storage details")
 				}
@@ -514,26 +458,14 @@ func TestAPIV1ServerInfoOmitsVersion(t *testing.T) {
 // derived response from a 5 s cache (the healthCacheTTL precedent) rather than
 // re-reading the config per request.
 func TestAPIV1ServerInfoIsCached(t *testing.T) {
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open error: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("db.Migrate error: %v", err)
-	}
+	database := openMigratedDB(t)
 	// cfg is ours, so mutating it between calls proves whether the handler
 	// re-derives the response or serves the cached one.
 	if err := database.SetSetting(t.Context(), "server_name", ""); err != nil {
 		t.Fatalf("blank server_name: %v", err)
 	}
 	cfg := &config.Config{Server: config.ServerConfig{Name: "First Name", Port: 8443}}
-	rt, rtErr := app.StartRuntime(cfg, database, nil, testRuntimeInputs(cfg))
-	if rtErr != nil {
-		t.Fatalf("app.StartRuntime: %v", rtErr)
-	}
-	handler, cleanup := api.NewRouter(cfg, database, "test", nil, nil, rt)
-	t.Cleanup(cleanup)
+	handler, _ := startRouter(t, cfg, database)
 
 	first := serverInfoBody(t, handler)
 	if first["name"] != "First Name" {
@@ -553,22 +485,16 @@ func TestUnknownRouteReturns404(t *testing.T) {
 	router := setupRouter(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/nonexistent", nil)
-	rec := httptest.NewRecorder()
+	rec := serveRequest(router, req)
 
-	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("GET /api/v1/nonexistent status = %d, want 404", rec.Code)
-	}
+	expectStatus(t, rec, http.StatusNotFound)
 }
 
 func TestRequestIDMiddleware(t *testing.T) {
 	router := setupRouter(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
-	rec := httptest.NewRecorder()
-
-	router.ServeHTTP(rec, req)
+	rec := serveRequest(router, req)
 
 	// Request ID header should be set by middleware.
 	requestID := rec.Header().Get("X-Request-Id")
@@ -581,13 +507,9 @@ func TestHealthMethodNotAllowed(t *testing.T) {
 	router := setupRouter(t)
 
 	req := httptest.NewRequest(http.MethodPost, "/health", nil)
-	rec := httptest.NewRecorder()
+	rec := serveRequest(router, req)
 
-	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusMethodNotAllowed {
-		t.Errorf("POST /health status = %d, want 405", rec.Code)
-	}
+	expectStatus(t, rec, http.StatusMethodNotAllowed)
 }
 
 // ─── B6-6: a non-global voice.node_ip fails silently ────────────────────────
@@ -620,9 +542,7 @@ func TestWarnOnServerConfig_NonGlobalNodeIP(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			var buf lockedBuffer
-			prev := slog.Default()
-			slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
-			t.Cleanup(func() { slog.SetDefault(prev) })
+			captureDebugLogs(t, &buf)
 
 			api.WarnOnServerConfigForTest(&config.Config{
 				Voice: config.VoiceConfig{LiveKitURL: "ws://localhost:7880", NodeIP: tc.nodeIP},
@@ -643,9 +563,7 @@ func TestWarnOnServerConfig_NonGlobalNodeIP(t *testing.T) {
 // misconfiguration, and a warning an operator cannot act on is noise.
 func TestWarnOnServerConfig_NodeIPSilentWhenVoiceIsOff(t *testing.T) {
 	var buf lockedBuffer
-	prev := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
-	t.Cleanup(func() { slog.SetDefault(prev) })
+	captureDebugLogs(t, &buf)
 
 	api.WarnOnServerConfigForTest(&config.Config{
 		Voice: config.VoiceConfig{NodeIP: "192.168.1.50"}, // no LiveKitURL
@@ -671,9 +589,7 @@ func TestWarnOnServerConfig_NodeIPIgnoredWithAdvertiseInternalIP(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var buf lockedBuffer
-			prev := slog.Default()
-			slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
-			t.Cleanup(func() { slog.SetDefault(prev) })
+			captureDebugLogs(t, &buf)
 
 			api.WarnOnServerConfigForTest(&config.Config{
 				Voice: config.VoiceConfig{LiveKitURL: "ws://localhost:7880", NodeIP: "93.184.216.34", AdvertiseInternalIP: tc.advertise},
@@ -697,9 +613,7 @@ func TestWarnOnServerConfig_NodeIPIgnoredWithAdvertiseInternalIP(t *testing.T) {
 // the config at all. A later edit that moves either behind the flag fails here.
 func TestReachabilityWarningsAreNotGatedByTheFlag(t *testing.T) {
 	var buf lockedBuffer
-	prev := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
-	t.Cleanup(func() { slog.SetDefault(prev) })
+	captureDebugLogs(t, &buf)
 
 	api.WarnOnServerConfigForTest(&config.Config{
 		Server: config.ServerConfig{ReachabilityReportEnabled: false},
@@ -760,9 +674,7 @@ func TestWarnOnServerConfig_AdminPeerAddress(t *testing.T) {
 			}
 			api.SetRouteTablePathForTest(t, routes)
 			var buf lockedBuffer
-			prev := slog.Default()
-			slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
-			t.Cleanup(func() { slog.SetDefault(prev) })
+			captureDebugLogs(t, &buf)
 
 			api.WarnOnServerConfigForTest(&config.Config{
 				Server: config.ServerConfig{TrustedProxies: tc.trusted, AdminAllowedCIDRs: tc.allowed},
@@ -815,9 +727,7 @@ func TestWarnOnBrowserClient(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var buf lockedBuffer
-			prev := slog.Default()
-			slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
-			t.Cleanup(func() { slog.SetDefault(prev) })
+			captureDebugLogs(t, &buf)
 
 			api.WarnOnBrowserClientForTest(&config.Config{
 				Server: config.ServerConfig{BrowserClientEnabled: tc.enabled},

@@ -46,10 +46,7 @@ func TestRefreshChannelVisibility_ReconnectDuringFanOutActsOnLiveClient(t *testi
 	// GetUserByID+GetRoleByID branch this test targets.
 	h := newTestHub(t, database, auth.NewRateLimiter(), nil)
 
-	user, err := database.GetUserByID(ctx, uid)
-	if err != nil || user == nil {
-		t.Fatalf("GetUserByID: %v", err)
-	}
+	user := mustGetUser(t, database, uid)
 
 	sendA := make(chan []byte, 8)
 	a := NewTestClientWithUser(h, user, chID, sendA)

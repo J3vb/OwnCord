@@ -31,9 +31,7 @@ func TestRegistry_EnablePlugin_ConcurrentDisableDuringActivationWindow(t *testin
 
 	manifestJSON := `{"name":"alpha","version":"1.0.0","entrypoint":"alpha.wasm","permissions":["commands"],"commands":[{"name":"greet"}]}`
 	writePluginDir(t, dir, "alpha", manifestJSON)
-	if err := r.LoadAll(ctx); err != nil {
-		t.Fatalf("LoadAll: %v", err)
-	}
+	mustDo(t, "LoadAll", r.LoadAll(ctx))
 	inst := r.List()[0]
 
 	orig := enablePluginActivate
@@ -44,18 +42,12 @@ func TestRegistry_EnablePlugin_ConcurrentDisableDuringActivationWindow(t *testin
 	// between — exactly the interleaving the finding describes, made
 	// deterministic instead of depending on real compile timing.
 	enablePluginActivate = func(reg *Registry, actCtx context.Context, activatingInst *Instance) error {
-		if err := reg.DisablePlugin(actCtx, activatingInst.ID); err != nil {
-			t.Fatalf("simulated concurrent DisablePlugin: %v", err)
-		}
-		if err := reg.RegisterCommand("greet", activatingInst); err != nil {
-			t.Fatalf("RegisterCommand: %v", err)
-		}
+		mustDo(t, "simulated concurrent DisablePlugin", reg.DisablePlugin(actCtx, activatingInst.ID))
+		mustDo(t, "RegisterCommand", reg.RegisterCommand("greet", activatingInst))
 		return nil
 	}
 
-	if err := r.EnablePlugin(ctx, inst.ID); err != nil {
-		t.Fatalf("EnablePlugin: %v", err)
-	}
+	mustDo(t, "EnablePlugin", r.EnablePlugin(ctx, inst.ID))
 
 	r.mu.RLock()
 	_, bound := r.commands["greet"]
@@ -79,13 +71,9 @@ func TestEnablePlugin_ActivationFailureDropsCommandBindings(t *testing.T) {
 	ctx := context.Background()
 
 	writePluginDir(t, dir, "alpha", `{"name":"alpha","version":"1.0.0","entrypoint":"alpha.wasm","permissions":["commands"],"commands":[{"name":"greet"}]}`)
-	if err := r.LoadAll(ctx); err != nil {
-		t.Fatalf("LoadAll: %v", err)
-	}
+	mustDo(t, "LoadAll", r.LoadAll(ctx))
 	inst := r.List()[0]
-	if err := r.RegisterCommand("greet", inst); err != nil {
-		t.Fatalf("RegisterCommand: %v", err)
-	}
+	mustDo(t, "RegisterCommand", r.RegisterCommand("greet", inst))
 
 	orig := enablePluginActivate
 	t.Cleanup(func() { enablePluginActivate = orig })

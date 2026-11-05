@@ -35,9 +35,7 @@ func newCatPermFixture(t *testing.T) *catPermFixture {
 	seedRole(t, database, f.admin)
 	seedRole(t, database, f.low)
 	change, err := svc.CreateCategory(ctx, 1, "Games")
-	if err != nil {
-		t.Fatalf("CreateCategory: %v", err)
-	}
+	mustDo(t, "CreateCategory", err)
 	f.cat = change.Category
 	f.a = f.newChannel(t, "alpha", f.cat.ID)
 	f.b = f.newChannel(t, "beta", f.cat.ID)
@@ -56,27 +54,21 @@ func (f *catPermFixture) newChannel(t *testing.T, name string, categoryID int64)
 func (f *catPermFixture) synced(t *testing.T, ch *db.Channel) bool {
 	t.Helper()
 	ok, err := f.svc.ChannelPermissionsSynced(context.Background(), ch.ID)
-	if err != nil {
-		t.Fatalf("ChannelPermissionsSynced: %v", err)
-	}
+	mustDo(t, "ChannelPermissionsSynced", err)
 	return ok
 }
 
 func (f *catPermFixture) channelRow(t *testing.T, ch *db.Channel, roleID int64) (int64, int64) {
 	t.Helper()
 	allow, deny, err := f.database.GetChannelPermissions(context.Background(), ch.ID, roleID)
-	if err != nil {
-		t.Fatalf("GetChannelPermissions: %v", err)
-	}
+	mustDo(t, "GetChannelPermissions", err)
 	return allow, deny
 }
 
 func (f *catPermFixture) categoryRow(t *testing.T, roleID int64) (int64, int64) {
 	t.Helper()
 	roles, _, err := f.svc.CategoryPermissions(context.Background(), f.cat.ID)
-	if err != nil {
-		t.Fatalf("CategoryPermissions: %v", err)
-	}
+	mustDo(t, "CategoryPermissions", err)
 	for _, r := range roles {
 		if r.RoleID == roleID {
 			return r.Allow, r.Deny
@@ -88,19 +80,14 @@ func (f *catPermFixture) categoryRow(t *testing.T, roleID int64) (int64, int64) 
 
 func (f *catPermFixture) auditHas(t *testing.T, action string) bool {
 	t.Helper()
-	entries, err := f.database.GetAuditLog(context.Background(), 50, 0)
-	if err != nil {
-		t.Fatalf("GetAuditLog: %v", err)
-	}
+	entries := mustGetAuditLog(t, f.database, 50, 0)
 	return slices.ContainsFunc(entries, func(e db.AuditEntry) bool { return e.Action == action })
 }
 
 func TestCategoryOverride_WritesTemplateAndEverySyncedChannel(t *testing.T) {
 	f := newCatPermFixture(t)
 	res, err := f.svc.PutCategoryRoleOverride(context.Background(), 7, f.mod, f.cat.ID, f.low.ID, permissions.ReadMessages, permissions.SendMessages)
-	if err != nil {
-		t.Fatalf("PutCategoryRoleOverride: %v", err)
-	}
+	mustDo(t, "PutCategoryRoleOverride", err)
 	if len(res.Channels) != 2 {
 		t.Fatalf("touched channels = %d, want both synced channels", len(res.Channels))
 	}
@@ -130,9 +117,7 @@ func TestCategoryOverride_LeavesUnsyncedChannelsAlone(t *testing.T) {
 		t.Fatalf("PutRoleOverride: %v", err)
 	}
 	res, err := f.svc.PutCategoryRoleOverride(ctx, 7, f.mod, f.cat.ID, f.low.ID, permissions.ReadMessages, 0)
-	if err != nil {
-		t.Fatalf("PutCategoryRoleOverride: %v", err)
-	}
+	mustDo(t, "PutCategoryRoleOverride", err)
 	if len(res.Channels) != 1 || res.Channels[0].ID != f.a.ID {
 		t.Fatalf("touched = %+v, want only the synced channel", res.Channels)
 	}
@@ -206,9 +191,7 @@ func TestCategoryOverride_ClearRemovesTemplateAndSyncedRows(t *testing.T) {
 		t.Fatal(err)
 	}
 	res, err := f.svc.DeleteCategoryRoleOverride(ctx, 7, f.mod, f.cat.ID, f.low.ID)
-	if err != nil {
-		t.Fatalf("DeleteCategoryRoleOverride: %v", err)
-	}
+	mustDo(t, "DeleteCategoryRoleOverride", err)
 	if len(res.Channels) != 2 {
 		t.Errorf("touched = %d, want 2", len(res.Channels))
 	}
@@ -254,9 +237,7 @@ func TestCategoryOverride_HierarchyGuards(t *testing.T) {
 		t.Errorf("unknown user: err = %v, want ErrNotFound", err)
 	}
 	res, err := f.svc.PutCategoryUserOverride(ctx, 7, f.mod, f.cat.ID, 31, permissions.ReadMessages, 0)
-	if err != nil {
-		t.Fatalf("lower user: %v", err)
-	}
+	mustDo(t, "lower user", err)
 	if !slices.Equal(res.AffectedUsers, []int64{31}) {
 		t.Errorf("affected = %v, want just the target", res.AffectedUsers)
 	}
@@ -285,9 +266,7 @@ func TestCategoryOverride_InvalidationCoversRoleHolders(t *testing.T) {
 	}
 	other := f.newChannel(t, "gamma", f.cat.ID)
 	res, err := f.svc.PutCategoryRoleOverride(context.Background(), 7, f.mod, f.cat.ID, f.low.ID, 0, permissions.ReadMessages)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "PutCategoryRoleOverride", err)
 	if res.AffectedAll || !slices.Equal(dedupe(res.AffectedUsers), []int64{41, 42}) {
 		t.Errorf("affected = %v all=%v, want the role's holders", res.AffectedUsers, res.AffectedAll)
 	}
@@ -312,9 +291,7 @@ func TestCategoryOverride_InvalidationFailsSafeToFullFlush(t *testing.T) {
 	f := newCatPermFixture(t)
 	svc := NewChannelService(failingHolders{f.database}, NewPermissionService(f.database, nil))
 	res, err := svc.PutCategoryRoleOverride(context.Background(), 7, f.mod, f.cat.ID, f.low.ID, permissions.ReadMessages, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "PutCategoryRoleOverride", err)
 	if !res.AffectedAll {
 		t.Error("an unreadable holder list must widen to a full flush")
 	}
@@ -347,13 +324,9 @@ func TestCategoryPermissions_ListsEveryRoleAndOnlyOverriddenUsers(t *testing.T) 
 		t.Fatal(err)
 	}
 	roles, users, err := f.svc.CategoryPermissions(ctx, f.cat.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CategoryPermissions", err)
 	var all int
-	if err := f.database.QueryRowContext(ctx, `SELECT COUNT(*) FROM roles`).Scan(&all); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "QueryRowContext", f.database.QueryRowContext(ctx, `SELECT COUNT(*) FROM roles`).Scan(&all))
 	if len(roles) != all {
 		t.Errorf("roles = %d, want every role (%d)", len(roles), all)
 	}

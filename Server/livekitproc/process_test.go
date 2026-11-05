@@ -18,14 +18,8 @@ import (
 func TestNewLiveKitProcess(t *testing.T) {
 	t.Parallel()
 
-	cfg := &config.VoiceConfig{
-		LiveKitAPIKey:    "key",
-		LiveKitAPISecret: "secret",
-		LiveKitURL:       "ws://localhost:7880",
-	}
-	tlsCfg := &config.TLSConfig{}
-
-	proc := livekitproc.New(cfg, tlsCfg, t.TempDir())
+	cfg := testVoiceConfig("key", "secret")
+	proc := newProcess(t, cfg)
 	if proc == nil {
 		t.Fatal("expected non-nil Process")
 	}
@@ -40,27 +34,17 @@ func TestLiveKitProcess_Start_NoBinary(t *testing.T) {
 		LiveKitURL:        "ws://localhost:7880",
 		LiveKitBinaryPath: "", // empty → no-op
 	}
-	tlsCfg := &config.TLSConfig{}
-
-	proc := livekitproc.New(cfg, tlsCfg, t.TempDir())
+	proc := newProcess(t, cfg)
 
 	err := proc.Start()
-	if err != nil {
-		t.Fatalf("Start() with empty binary should return nil, got: %v", err)
-	}
+	mustDo(t, "Start() with empty binary should return nil, got", err)
 }
 
 func TestLiveKitProcess_IsRunning_Default(t *testing.T) {
 	t.Parallel()
 
-	cfg := &config.VoiceConfig{
-		LiveKitAPIKey:    "key",
-		LiveKitAPISecret: "secret",
-		LiveKitURL:       "ws://localhost:7880",
-	}
-	tlsCfg := &config.TLSConfig{}
-
-	proc := livekitproc.New(cfg, tlsCfg, t.TempDir())
+	cfg := testVoiceConfig("key", "secret")
+	proc := newProcess(t, cfg)
 
 	if proc.IsRunning() {
 		t.Fatal("expected IsRunning() = false before Start()")
@@ -87,14 +71,8 @@ func TestLiveKitProcess_PID(t *testing.T) {
 func TestLiveKitProcess_Stop_BeforeStart(t *testing.T) {
 	t.Parallel()
 
-	cfg := &config.VoiceConfig{
-		LiveKitAPIKey:    "key",
-		LiveKitAPISecret: "secret",
-		LiveKitURL:       "ws://localhost:7880",
-	}
-	tlsCfg := &config.TLSConfig{}
-
-	proc := livekitproc.New(cfg, tlsCfg, t.TempDir())
+	cfg := testVoiceConfig("key", "secret")
+	proc := newProcess(t, cfg)
 
 	// Stop() before Start() should not panic.
 	proc.Stop()
@@ -112,13 +90,9 @@ func TestGenerateConfig_TunesSpeakerDetection(t *testing.T) {
 		LiveKitAPIKey: "k", LiveKitAPISecret: "s", LiveKitURL: "ws://localhost:7880",
 	}, &config.TLSConfig{}, t.TempDir())
 	cfgPath, err := proc.GenerateConfigForTest()
-	if err != nil {
-		t.Fatalf("generateConfig: %v", err)
-	}
+	mustDo(t, "generateConfig", err)
 	content, err := os.ReadFile(cfgPath)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "ReadFile", err)
 	// LiveKit's defaults (400ms interval, 2 smoothing intervals, active_level 35)
 	// light the speaking ring ~0.8s late and only for loud speech.
 	for _, want := range []string{
@@ -134,24 +108,14 @@ func TestGenerateConfig_WritesYAML(t *testing.T) {
 	t.Parallel()
 
 	dataDir := t.TempDir()
-	cfg := &config.VoiceConfig{
-		LiveKitAPIKey:    "testkey",
-		LiveKitAPISecret: "testsecret",
-		LiveKitURL:       "ws://localhost:7880",
-	}
-	tlsCfg := &config.TLSConfig{}
-
-	proc := livekitproc.New(cfg, tlsCfg, dataDir)
+	cfg := testVoiceConfig("testkey", "testsecret")
+	proc := livekitproc.New(cfg, &config.TLSConfig{}, dataDir)
 
 	cfgPath, err := proc.GenerateConfigForTest()
-	if err != nil {
-		t.Fatalf("generateConfig: %v", err)
-	}
+	mustDo(t, "generateConfig", err)
 
 	content, err := os.ReadFile(cfgPath)
-	if err != nil {
-		t.Fatalf("reading config file: %v", err)
-	}
+	mustDo(t, "reading config file", err)
 
 	got := string(content)
 
@@ -183,19 +147,13 @@ func TestGenerateConfig_WithNodeIP(t *testing.T) {
 		LiveKitURL:       "ws://localhost:7880",
 		NodeIP:           "203.0.113.10",
 	}
-	tlsCfg := &config.TLSConfig{}
-
-	proc := livekitproc.New(cfg, tlsCfg, dataDir)
+	proc := livekitproc.New(cfg, &config.TLSConfig{}, dataDir)
 
 	cfgPath, err := proc.GenerateConfigForTest()
-	if err != nil {
-		t.Fatalf("generateConfig: %v", err)
-	}
+	mustDo(t, "generateConfig", err)
 
 	content, err := os.ReadFile(cfgPath)
-	if err != nil {
-		t.Fatalf("reading config file: %v", err)
-	}
+	mustDo(t, "reading config file", err)
 
 	got := string(content)
 	if !strings.Contains(got, `node_ip: "203.0.113.10"`) {
@@ -231,14 +189,7 @@ func TestGenerateConfig_NodeIPReplacesExternalIP(t *testing.T) {
 				AdvertiseInternalIP: tc.advertiseInternal,
 			}
 			proc := livekitproc.New(cfg, &config.TLSConfig{}, t.TempDir())
-			cfgPath, err := proc.GenerateConfigForTest()
-			if err != nil {
-				t.Fatalf("generateConfig: %v", err)
-			}
-			content, err := os.ReadFile(cfgPath)
-			if err != nil {
-				t.Fatalf("reading config file: %v", err)
-			}
+			_, content := generatedConfig(t, proc)
 			var parsed struct {
 				RTC struct {
 					UseExternalIP bool   `yaml:"use_external_ip"`
@@ -281,8 +232,7 @@ func TestGenerateConfig_UnsafeCredentialChars(t *testing.T) {
 				LiveKitAPISecret: tt.secret,
 				LiveKitURL:       "ws://localhost:7880",
 			}
-			tlsCfg := &config.TLSConfig{}
-			proc := livekitproc.New(cfg, tlsCfg, t.TempDir())
+			proc := newProcess(t, cfg)
 
 			_, err := proc.GenerateConfigForTest()
 			if err == nil {
@@ -351,8 +301,7 @@ func TestGenerateConfig_UnsafeNodeIPChars(t *testing.T) {
 		LiveKitURL:       "ws://localhost:7880",
 		NodeIP:           "192.168.1.1\n  evil: true",
 	}
-	tlsCfg := &config.TLSConfig{}
-	proc := livekitproc.New(cfg, tlsCfg, t.TempDir())
+	proc := newProcess(t, cfg)
 
 	_, err := proc.GenerateConfigForTest()
 	if err == nil {
@@ -372,14 +321,7 @@ func TestGenerateConfig_WithAdvertiseInternalIP(t *testing.T) {
 	}
 	proc := livekitproc.New(cfg, &config.TLSConfig{}, t.TempDir())
 
-	cfgPath, err := proc.GenerateConfigForTest()
-	if err != nil {
-		t.Fatalf("generateConfig: %v", err)
-	}
-	content, err := os.ReadFile(cfgPath)
-	if err != nil {
-		t.Fatalf("reading config file: %v", err)
-	}
+	_, content := generatedConfig(t, proc)
 
 	got := string(content)
 	if !strings.Contains(got, "advertise_internal_ip: true") {
@@ -393,21 +335,10 @@ func TestGenerateConfig_WithAdvertiseInternalIP(t *testing.T) {
 func TestGenerateConfig_DefaultOmitsAdvertiseInternalIP(t *testing.T) {
 	t.Parallel()
 
-	cfg := &config.VoiceConfig{
-		LiveKitAPIKey:    "key1",
-		LiveKitAPISecret: "secret1",
-		LiveKitURL:       "ws://localhost:7880",
-	}
+	cfg := testVoiceConfig("key1", "secret1")
 	proc := livekitproc.New(cfg, &config.TLSConfig{}, t.TempDir())
 
-	cfgPath, err := proc.GenerateConfigForTest()
-	if err != nil {
-		t.Fatalf("generateConfig: %v", err)
-	}
-	content, err := os.ReadFile(cfgPath)
-	if err != nil {
-		t.Fatalf("reading config file: %v", err)
-	}
+	_, content := generatedConfig(t, proc)
 
 	if strings.Contains(string(content), "advertise_internal_ip") {
 		t.Error("config should not contain advertise_internal_ip by default")
@@ -420,29 +351,19 @@ func TestGenerateConfig_PreservesUserManagedFile(t *testing.T) {
 	dataDir := t.TempDir()
 	cfgPath := filepath.Join(dataDir, "livekit.yaml")
 	userContent := "# my custom livekit config\nport: 7880\nrtc:\n  ips:\n    includes: [10.0.0.0/8]\n"
-	if err := os.WriteFile(cfgPath, []byte(userContent), 0o600); err != nil {
-		t.Fatalf("writing user config: %v", err)
-	}
+	mustDo(t, "writing user config", os.WriteFile(cfgPath, []byte(userContent), 0o600))
 
-	cfg := &config.VoiceConfig{
-		LiveKitAPIKey:    "key1",
-		LiveKitAPISecret: "secret1",
-		LiveKitURL:       "ws://localhost:7880",
-	}
+	cfg := testVoiceConfig("key1", "secret1")
 	proc := livekitproc.New(cfg, &config.TLSConfig{}, dataDir)
 
 	gotPath, err := proc.GenerateConfigForTest()
-	if err != nil {
-		t.Fatalf("generateConfig: %v", err)
-	}
+	mustDo(t, "generateConfig", err)
 	if gotPath != cfgPath {
 		t.Errorf("expected path %q, got %q", cfgPath, gotPath)
 	}
 
 	content, err := os.ReadFile(cfgPath)
-	if err != nil {
-		t.Fatalf("reading config file: %v", err)
-	}
+	mustDo(t, "reading config file", err)
 	if string(content) != userContent {
 		t.Errorf("user-managed livekit.yaml was modified.\nWant:\n%s\nGot:\n%s", userContent, content)
 	}
@@ -455,24 +376,16 @@ func TestGenerateConfig_RegeneratesEmptyFile(t *testing.T) {
 	cfgPath := filepath.Join(dataDir, "livekit.yaml")
 	// A zero-byte/whitespace-only file is a truncated leftover, not a
 	// user-managed config — it must be regenerated.
-	if err := os.WriteFile(cfgPath, []byte("  \n"), 0o600); err != nil {
-		t.Fatalf("writing empty config: %v", err)
-	}
+	mustDo(t, "writing empty config", os.WriteFile(cfgPath, []byte("  \n"), 0o600))
 
-	cfg := &config.VoiceConfig{
-		LiveKitAPIKey:    "key1",
-		LiveKitAPISecret: "secret1",
-		LiveKitURL:       "ws://localhost:7880",
-	}
+	cfg := testVoiceConfig("key1", "secret1")
 	proc := livekitproc.New(cfg, &config.TLSConfig{}, dataDir)
 
 	if _, err := proc.GenerateConfigForTest(); err != nil {
 		t.Fatalf("generateConfig: %v", err)
 	}
 	content, err := os.ReadFile(cfgPath)
-	if err != nil {
-		t.Fatalf("reading config file: %v", err)
-	}
+	mustDo(t, "reading config file", err)
 	if !strings.Contains(string(content), `"key1": "secret1"`) {
 		t.Errorf("empty livekit.yaml was not regenerated.\nGot:\n%s", content)
 	}
@@ -484,15 +397,9 @@ func TestGenerateConfig_OverwritesAutoGeneratedFile(t *testing.T) {
 	dataDir := t.TempDir()
 	cfgPath := filepath.Join(dataDir, "livekit.yaml")
 	old := "# Auto-generated by OwnCord — do not edit manually.\nport: 7880\nstale: true\n"
-	if err := os.WriteFile(cfgPath, []byte(old), 0o600); err != nil {
-		t.Fatalf("writing old config: %v", err)
-	}
+	mustDo(t, "writing old config", os.WriteFile(cfgPath, []byte(old), 0o600))
 
-	cfg := &config.VoiceConfig{
-		LiveKitAPIKey:    "key1",
-		LiveKitAPISecret: "secret1",
-		LiveKitURL:       "ws://localhost:7880",
-	}
+	cfg := testVoiceConfig("key1", "secret1")
 	proc := livekitproc.New(cfg, &config.TLSConfig{}, dataDir)
 
 	if _, err := proc.GenerateConfigForTest(); err != nil {
@@ -500,9 +407,7 @@ func TestGenerateConfig_OverwritesAutoGeneratedFile(t *testing.T) {
 	}
 
 	content, err := os.ReadFile(cfgPath)
-	if err != nil {
-		t.Fatalf("reading config file: %v", err)
-	}
+	mustDo(t, "reading config file", err)
 	got := string(content)
 	if strings.Contains(got, "stale: true") {
 		t.Error("auto-generated livekit.yaml was not regenerated")
@@ -521,8 +426,7 @@ func TestStart_AlreadyRunningGuard(t *testing.T) {
 		LiveKitURL:        "ws://localhost:7880",
 		LiveKitBinaryPath: "/nonexistent/livekit-server",
 	}
-	tlsCfg := &config.TLSConfig{}
-	proc := livekitproc.New(cfg, tlsCfg, t.TempDir())
+	proc := newProcess(t, cfg)
 
 	proc.SetProcessCmdForTest()
 
@@ -544,15 +448,12 @@ func TestStart_StoppedGuard(t *testing.T) {
 		LiveKitURL:        "ws://localhost:7880",
 		LiveKitBinaryPath: "/nonexistent/livekit-server",
 	}
-	tlsCfg := &config.TLSConfig{}
-	proc := livekitproc.New(cfg, tlsCfg, t.TempDir())
+	proc := newProcess(t, cfg)
 
 	proc.SetProcessStoppedForTest()
 
 	err := proc.Start()
-	if err != nil {
-		t.Fatalf("Start() on stopped process returned error: %v", err)
-	}
+	mustDo(t, "Start() on stopped process returned error", err)
 
 	proc.Stop()
 	if proc.IsRunning() {
@@ -570,19 +471,10 @@ func TestHealthCheck_Success(t *testing.T) {
 
 	wsURL := "ws://" + srv.Listener.Addr().String()
 
-	cfg := &config.VoiceConfig{
-		LiveKitAPIKey:    "key",
-		LiveKitAPISecret: "secret",
-		LiveKitURL:       wsURL,
-	}
-	tlsCfg := &config.TLSConfig{}
-
-	proc := livekitproc.New(cfg, tlsCfg, t.TempDir())
+	proc := newProcess(t, testVoiceConfigAt(wsURL))
 
 	ok, err := proc.HealthCheck(context.Background())
-	if err != nil {
-		t.Fatalf("HealthCheck: %v", err)
-	}
+	mustDo(t, "HealthCheck", err)
 	if !ok {
 		t.Error("expected HealthCheck to return true")
 	}
@@ -611,14 +503,7 @@ func TestHealthCheckClientOwnsItsTransport(t *testing.T) {
 func TestHealthCheck_ServerDown(t *testing.T) {
 	t.Parallel()
 
-	cfg := &config.VoiceConfig{
-		LiveKitAPIKey:    "key",
-		LiveKitAPISecret: "secret",
-		LiveKitURL:       "ws://127.0.0.1:1",
-	}
-	tlsCfg := &config.TLSConfig{}
-
-	proc := livekitproc.New(cfg, tlsCfg, t.TempDir())
+	proc := newProcess(t, testVoiceConfigAt("ws://127.0.0.1:1"))
 
 	ok, err := proc.HealthCheck(context.Background())
 	if err == nil {
@@ -638,18 +523,10 @@ func TestHealthCheck_NonOKStatus(t *testing.T) {
 	defer srv.Close()
 
 	wsURL := "ws://" + srv.Listener.Addr().String()
-	cfg := &config.VoiceConfig{
-		LiveKitAPIKey:    "key",
-		LiveKitAPISecret: "secret",
-		LiveKitURL:       wsURL,
-	}
-	tlsCfg := &config.TLSConfig{}
-	proc := livekitproc.New(cfg, tlsCfg, t.TempDir())
+	proc := newProcess(t, testVoiceConfigAt(wsURL))
 
 	ok, err := proc.HealthCheck(context.Background())
-	if err != nil {
-		t.Fatalf("HealthCheck: %v", err)
-	}
+	mustDo(t, "HealthCheck", err)
 	if !ok {
 		t.Error("expected HealthCheck to return true even for 500 status")
 	}

@@ -1,14 +1,11 @@
 package api_test
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"testing/fstest"
 
 	"github.com/J3vb/OwnCord/Server/api"
 	"github.com/J3vb/OwnCord/Server/auth"
@@ -21,90 +18,7 @@ import (
 
 // dmTestSchema includes roles, users, sessions, channels, messages, and DM
 // tables needed by DM handler tests.
-var dmTestSchema = []byte(`
-CREATE TABLE IF NOT EXISTS roles (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    name        TEXT    NOT NULL UNIQUE,
-    color       TEXT,
-    permissions INTEGER NOT NULL DEFAULT 0,
-    position    INTEGER NOT NULL DEFAULT 0,
-    is_default  INTEGER NOT NULL DEFAULT 0,
-    hoist       INTEGER NOT NULL DEFAULT 0,
-    mentionable INTEGER NOT NULL DEFAULT 0
-);
-INSERT OR IGNORE INTO roles (id, name, color, permissions, position, is_default) VALUES
-    (1, 'Owner',     '#E74C3C', 2147483647, 100, 0),
-    (2, 'Admin',     '#F39C12', 1073741823,  80, 0),
-    (3, 'Moderator', '#3498DB', 1048575,     60, 0),
-    (4, 'Member',    NULL,      1635,     40, 1);
-
-CREATE TABLE IF NOT EXISTS users (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    username    TEXT    NOT NULL UNIQUE COLLATE NOCASE,
-    password    TEXT    NOT NULL,
-    avatar      TEXT,
-    role_id     INTEGER NOT NULL DEFAULT 4 REFERENCES roles(id),
-    totp_secret TEXT,
-    status      TEXT    NOT NULL DEFAULT 'offline',
-    created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
-    last_seen   TEXT,
-    banned      INTEGER NOT NULL DEFAULT 0,
-    ban_reason  TEXT,
-    ban_expires TEXT,
-    registration_status TEXT NOT NULL DEFAULT 'active',
-    identity_public_key TEXT,
-    display_name TEXT,
-    about TEXT,
-    custom_status TEXT,
-    custom_status_expires_at TEXT,
-    banner_id TEXT,
-    banner_color TEXT
-);
-
-CREATE TABLE IF NOT EXISTS user_roles (
-    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    role_id INTEGER NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
-    PRIMARY KEY (user_id, role_id)
-) WITHOUT ROWID;
-
-CREATE TRIGGER IF NOT EXISTS user_roles_on_user_insert AFTER INSERT ON users
-BEGIN
-    INSERT OR IGNORE INTO user_roles (user_id, role_id)
-    SELECT NEW.id, r.id FROM roles r WHERE r.id = NEW.role_id;
-END;
-
-CREATE TABLE IF NOT EXISTS erasure_jobs (
-    id      INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    state   TEXT    NOT NULL
-);
-CREATE TABLE IF NOT EXISTS sessions (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    token      TEXT    NOT NULL UNIQUE,
-    device     TEXT,
-    ip_address TEXT,
-    created_at TEXT    NOT NULL DEFAULT (datetime('now')),
-    last_used  TEXT    NOT NULL DEFAULT (datetime('now')),
-    expires_at TEXT    NOT NULL,
-    unseen     INTEGER NOT NULL DEFAULT 0
-);
-CREATE TABLE IF NOT EXISTS recovery_kits (
-    user_id    INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-    verifier   TEXT    NOT NULL,
-    created_at TEXT    NOT NULL,
-    used_at    TEXT
-);
-CREATE TABLE IF NOT EXISTS recovery_assists (
-    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-    verifier TEXT NOT NULL,
-    issued_by INTEGER NOT NULL,
-    verification TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    expires_at TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token);
-
+var dmTestSchema = []byte(schemaAccounts + schemaMessaging + schemaPolls + `
 -- AuthMiddleware falls through to an API-token lookup whenever a bearer
 -- token matches no session (auth.ResolveTokenHash), so this table must exist
 -- even in DM-only fixtures — otherwise an ordinary "no such session" lookup
@@ -120,29 +34,6 @@ CREATE TABLE IF NOT EXISTS api_tokens (
     expires_at   TEXT,
     revoked_at   TEXT
 );
-
-CREATE TABLE IF NOT EXISTS channel_categories (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    name       TEXT    NOT NULL,
-    position   INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT    NOT NULL DEFAULT (datetime('now'))
-);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_channel_categories_name ON channel_categories(name COLLATE NOCASE);
-CREATE TABLE IF NOT EXISTS category_overrides (
-    category_id INTEGER NOT NULL REFERENCES channel_categories(id) ON DELETE CASCADE,
-    role_id     INTEGER NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
-    allow       INTEGER NOT NULL DEFAULT 0,
-    deny        INTEGER NOT NULL DEFAULT 0,
-    UNIQUE(category_id, role_id)
-);
-CREATE TABLE IF NOT EXISTS category_user_overrides (
-    category_id INTEGER NOT NULL REFERENCES channel_categories(id) ON DELETE CASCADE,
-    user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    allow       INTEGER NOT NULL DEFAULT 0,
-    deny        INTEGER NOT NULL DEFAULT 0,
-    UNIQUE(category_id, user_id)
-);
-
 CREATE TABLE IF NOT EXISTS channels (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
     name             TEXT    NOT NULL,
@@ -176,163 +67,12 @@ CREATE TABLE IF NOT EXISTS channels (
     dm_owner_id      INTEGER,
     dm_icon      TEXT
 );
-
-CREATE TABLE IF NOT EXISTS messages (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
-    user_id    INTEGER NOT NULL REFERENCES users(id),
-    content    TEXT    NOT NULL,
-    reply_to   INTEGER REFERENCES messages(id) ON DELETE SET NULL,
-    edited_at  TEXT,
-    deleted    INTEGER NOT NULL DEFAULT 0,
-    pinned     INTEGER NOT NULL DEFAULT 0,
-    timestamp  TEXT    NOT NULL DEFAULT (datetime('now')),
-    mentions_everyone INTEGER NOT NULL DEFAULT 0,
-    pinned_at  TEXT,
-    kind       INTEGER NOT NULL DEFAULT 0
-);
-CREATE TABLE IF NOT EXISTS message_import_authors (
-    message_id      INTEGER PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
-    discord_user_id TEXT NOT NULL,
-    name            TEXT NOT NULL,
-    color           TEXT
-);
-CREATE TABLE IF NOT EXISTS import_jobs (
-    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
-    channel_id         INTEGER REFERENCES channels(id) ON DELETE SET NULL,
-    created_by         INTEGER REFERENCES users(id) ON DELETE SET NULL,
-    source_name        TEXT    NOT NULL DEFAULT '',
-    discord_channel_id TEXT    NOT NULL DEFAULT '',
-    status             TEXT    NOT NULL DEFAULT 'running',
-    total              INTEGER NOT NULL DEFAULT 0,
-    imported           INTEGER NOT NULL DEFAULT 0,
-    skipped            INTEGER NOT NULL DEFAULT 0,
-    skipped_attachments INTEGER NOT NULL DEFAULT 0,
-    error              TEXT,
-    created_at         TEXT    NOT NULL DEFAULT (datetime('now')),
-    finished_at        TEXT
-);
 CREATE TABLE IF NOT EXISTS message_group_events (
     message_id     INTEGER PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
     target_user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
     name           TEXT,
     icon_removed   INTEGER NOT NULL DEFAULT 0
 );
-CREATE TABLE IF NOT EXISTS message_mentions (
-    message_id        INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
-    mentioned_user_id INTEGER NOT NULL REFERENCES users(id)    ON DELETE CASCADE,
-    PRIMARY KEY (message_id, mentioned_user_id)
-);
-CREATE TABLE IF NOT EXISTS message_role_mentions (
-    message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
-    role_id    INTEGER NOT NULL,
-    PRIMARY KEY (message_id, role_id)
-);
-CREATE TABLE IF NOT EXISTS message_forwards (
-    message_id        INTEGER PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
-    source_message_id INTEGER REFERENCES messages(id) ON DELETE SET NULL,
-    source_channel_id INTEGER NOT NULL,
-    source_timestamp  TEXT    NOT NULL
-);
-
--- History reads look up poll blocks on every page (migration 073).
-CREATE TABLE IF NOT EXISTS polls (
-    message_id        INTEGER PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
-    question          TEXT    NOT NULL,
-    allow_multiselect INTEGER NOT NULL DEFAULT 0,
-    expires_at        TEXT    NOT NULL,
-    ended_at          TEXT,
-    version           INTEGER NOT NULL DEFAULT 0
-);
-CREATE TABLE IF NOT EXISTS poll_answers (
-    message_id INTEGER NOT NULL REFERENCES polls(message_id) ON DELETE CASCADE,
-    answer_id  INTEGER NOT NULL,
-    text       TEXT    NOT NULL,
-    emoji      TEXT,
-    PRIMARY KEY (message_id, answer_id)
-);
-CREATE TABLE IF NOT EXISTS poll_votes (
-    message_id INTEGER NOT NULL,
-    answer_id  INTEGER NOT NULL,
-    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    PRIMARY KEY (message_id, user_id, answer_id)
-);
-
--- History and search reads look up the sticker block (migration 083).
-CREATE TABLE IF NOT EXISTS message_stickers (
-    message_id INTEGER PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
-    sticker_id INTEGER,
-    name       TEXT NOT NULL
-);
-
--- Needed by GetMessages' permission resolution and reaction enrichment, even
--- for a DM-only test: channelSubject/PermissionService reads channel_overrides
--- unconditionally, and scanAndEnrichMessages always joins reactions.
-CREATE TABLE IF NOT EXISTS channel_overrides (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
-    role_id    INTEGER NOT NULL REFERENCES roles(id)    ON DELETE CASCADE,
-    allow      INTEGER NOT NULL DEFAULT 0,
-    deny       INTEGER NOT NULL DEFAULT 0,
-    UNIQUE(channel_id, role_id)
-);
-CREATE TABLE IF NOT EXISTS channel_user_overrides (
-    channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
-    user_id    INTEGER NOT NULL REFERENCES users(id)    ON DELETE CASCADE,
-    allow      INTEGER NOT NULL DEFAULT 0,
-    deny       INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (channel_id, user_id)
-);
-CREATE TABLE IF NOT EXISTS reactions (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
-    user_id    INTEGER NOT NULL REFERENCES users(id)    ON DELETE CASCADE,
-    emoji      TEXT    NOT NULL,
-    UNIQUE(message_id, user_id, emoji)
-);
-
--- Mirrors migrations/001. Required, not optional decoration: the DM close
--- path (db.LeaveGroupDM) unlinks a channel's attachments before hard-deleting
--- the channel row, because messages.channel_id and attachments.message_id both
--- cascade ON DELETE and the cascade would otherwise destroy the rows the
--- orphan sweep needs to reclaim the files. Without this table the handler
--- answers 500.
-CREATE TABLE IF NOT EXISTS attachments (
-    id          TEXT    PRIMARY KEY,
-    message_id  INTEGER REFERENCES messages(id) ON DELETE CASCADE,
-    filename    TEXT    NOT NULL,
-    stored_as   TEXT    NOT NULL,
-    mime_type   TEXT    NOT NULL,
-    size        INTEGER NOT NULL,
-    uploaded_at TEXT    NOT NULL DEFAULT (datetime('now')),
-    width       INTEGER,
-    height      INTEGER,
-    duration_ms INTEGER,
-    waveform    TEXT
-);
-
-
-CREATE TABLE IF NOT EXISTS dm_participants (
-    channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
-    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    PRIMARY KEY (channel_id, user_id)
-);
-
-CREATE TABLE IF NOT EXISTS dm_open_state (
-    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
-    opened_at  TEXT NOT NULL DEFAULT (datetime('now')),
-    PRIMARY KEY (user_id, channel_id)
-);
-
-CREATE TABLE IF NOT EXISTS read_states (
-    user_id         INTEGER NOT NULL REFERENCES users(id)    ON DELETE CASCADE,
-    channel_id      INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
-    last_message_id INTEGER NOT NULL DEFAULT 0,
-    mention_count   INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (user_id, channel_id)
-);
-
 CREATE TABLE IF NOT EXISTS user_blocks (
     blocker_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     blocked_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -340,75 +80,15 @@ CREATE TABLE IF NOT EXISTS user_blocks (
     PRIMARY KEY (blocker_id, blocked_id),
     CHECK (blocker_id != blocked_id)
 );
-
--- Message requests and trusted senders (migration 046, B5-6): required by
--- every DM send through MessageService now that first contact is gated, not
--- just by dm_request_handler_test.go.
-CREATE TABLE IF NOT EXISTS trusted_senders (
-    recipient_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    sender_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    source       TEXT    NOT NULL CHECK (source IN ('accepted', 'sent_first', 'grandfathered')),
-    created_at   TEXT    NOT NULL DEFAULT (datetime('now')),
-    PRIMARY KEY (recipient_id, sender_id)
-);
-
--- Per-user DM privacy (migration 070, WP 6.8b): read on every 1:1 DM sink.
-CREATE TABLE IF NOT EXISTS user_privacy (
-    user_id           INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-    allow_member_dms  INTEGER NOT NULL DEFAULT 1 CHECK (allow_member_dms IN (0, 1)),
-    message_requests  INTEGER NOT NULL DEFAULT 1 CHECK (message_requests IN (0, 1)),
-    updated_at        TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
-);
-
-CREATE TABLE IF NOT EXISTS message_requests (
-    id               INTEGER PRIMARY KEY AUTOINCREMENT,
-    sender_id        INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    recipient_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    channel_id       INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
-    first_message_id INTEGER REFERENCES messages(id) ON DELETE SET NULL,
-    state            TEXT    NOT NULL DEFAULT 'pending'
-                     CHECK (state IN ('pending', 'accepted', 'ignored', 'deleted', 'blocked')),
-    created_at       TEXT    NOT NULL DEFAULT (datetime('now')),
-    decided_at       TEXT,
-    UNIQUE (sender_id, recipient_id)
-);
 CREATE INDEX IF NOT EXISTS idx_message_requests_recipient_state
     ON message_requests(recipient_id, state);
-
--- Moderation actions (migration 049, B5-9): permissions.Checker.Subject
--- resolves TimedOut from this table for every CanSendMessage check, so it
--- is required by every DM send through MessageService too, not just
--- moderation's own tests.
-CREATE TABLE IF NOT EXISTS moderation_actions (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    kind            TEXT    NOT NULL CHECK (kind IN ('warning', 'timeout', 'removal', 'kick', 'ban')),
-    target_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    actor_id        INTEGER NOT NULL DEFAULT 0,
-    actor_token     TEXT,
-    report_id       INTEGER,
-    reason          TEXT    NOT NULL DEFAULT '',
-    expires_at      TEXT,
-    acknowledged_at TEXT,
-    lifted_at       TEXT,
-    lifted_by       INTEGER NOT NULL DEFAULT 0,
-    created_at      TEXT    NOT NULL DEFAULT (datetime('now'))
-);
 `)
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
 func newDMTestDB(t *testing.T) *db.DB {
 	t.Helper()
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	migrFS := fstest.MapFS{"001_schema.sql": {Data: dmTestSchema}}
-	if err := db.MigrateFS(database, migrFS); err != nil {
-		t.Fatalf("MigrateFS: %v", err)
-	}
-	return database
+	return openSchemaDB(t, dmTestSchema)
 }
 
 // mockBroadcaster implements api.DMBroadcaster for tests.
@@ -429,21 +109,7 @@ func (m *mockBroadcaster) SendToUser(userID int64, msg []byte) bool {
 // dmCreateToken creates a user+session and returns the plaintext token.
 func dmCreateToken(t *testing.T, database *db.DB, username string, roleID int) string {
 	t.Helper()
-	_, err := database.CreateUser(context.Background(), username, "$2a$12$fake", roleID)
-	if err != nil {
-		t.Fatalf("CreateUser %q: %v", username, err)
-	}
-	token := "dmtest-token-" + username
-	hash := auth.HashToken(token)
-	_, err = database.ExecContext(context.Background(),
-		`INSERT INTO sessions (user_id, token, device, ip_address, expires_at)
-		 SELECT id, ?, 'test', '127.0.0.1', '2099-01-01T00:00:00Z' FROM users WHERE username = ?`,
-		hash, username,
-	)
-	if err != nil {
-		t.Fatalf("insert session for %q: %v", username, err)
-	}
-	return token
+	return createUserToken(t, database, "dmtest-token-", username, roleID)
 }
 
 func buildDMRouter(database *db.DB, broadcaster api.DMBroadcaster) http.Handler {
@@ -455,40 +121,17 @@ func buildDMRouter(database *db.DB, broadcaster api.DMBroadcaster) http.Handler 
 
 func dmPost(t *testing.T, router http.Handler, path, token string, body any) *httptest.ResponseRecorder {
 	t.Helper()
-	raw, _ := json.Marshal(body)
-	req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(raw))
-	req.Header.Set("Content-Type", "application/json")
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
-	return rr
+	return doAPIJSON(t, router, http.MethodPost, path, token, body)
 }
 
 func dmGet(t *testing.T, router http.Handler, path, token string) *httptest.ResponseRecorder {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodGet, path, nil)
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
-	return rr
+	return doAPI(t, router, http.MethodGet, path, token, nil)
 }
 
 func dmDelete(t *testing.T, router http.Handler, path, token string) *httptest.ResponseRecorder {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodDelete, path, nil)
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
-	return rr
+	return doAPI(t, router, http.MethodDelete, path, token, nil)
 }
 
 // ─── POST /api/v1/dms (handleCreateDM) ─────────────────────────────────────
@@ -506,12 +149,9 @@ func TestCreateDM_Success_NewDM(t *testing.T) {
 		"recipient_id": bob.ID,
 	})
 
-	if rr.Code != http.StatusCreated {
-		t.Errorf("CreateDM new: status = %d, want 201; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusCreated)
 
-	var resp map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	resp := decodeBody[map[string]any](t, rr)
 	if resp["created"] != true {
 		t.Errorf("CreateDM new: created = %v, want true", resp["created"])
 	}
@@ -537,20 +177,15 @@ func TestCreateDM_Success_ExistingDM(t *testing.T) {
 	rr1 := dmPost(t, router, "/api/v1/dms", tokenAlice, map[string]any{
 		"recipient_id": bob.ID,
 	})
-	if rr1.Code != http.StatusCreated {
-		t.Fatalf("first CreateDM: status = %d, want 201", rr1.Code)
-	}
+	requireStatus(t, rr1, http.StatusCreated)
 
 	// Second call returns the existing one.
 	rr2 := dmPost(t, router, "/api/v1/dms", tokenAlice, map[string]any{
 		"recipient_id": bob.ID,
 	})
-	if rr2.Code != http.StatusOK {
-		t.Errorf("existing CreateDM: status = %d, want 200; body = %s", rr2.Code, rr2.Body.String())
-	}
+	expectStatus(t, rr2, http.StatusOK)
 
-	var resp map[string]any
-	_ = json.NewDecoder(rr2.Body).Decode(&resp)
+	resp := decodeBody[map[string]any](t, rr2)
 	if resp["created"] != false {
 		t.Errorf("existing CreateDM: created = %v, want false", resp["created"])
 	}
@@ -561,16 +196,9 @@ func TestCreateDM_BadRequest_EmptyBody(t *testing.T) {
 	router := buildDMRouter(database, nil)
 	token := dmCreateToken(t, database, "empty_body_user", 4)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/dms", bytes.NewReader([]byte("")))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
+	rr := doAPIRawJSON(t, router, http.MethodPost, "/api/v1/dms", token, "")
 
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("empty body: status = %d, want 400", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusBadRequest)
 }
 
 func TestCreateDM_BadRequest_NegativeRecipientID(t *testing.T) {
@@ -581,9 +209,7 @@ func TestCreateDM_BadRequest_NegativeRecipientID(t *testing.T) {
 	rr := dmPost(t, router, "/api/v1/dms", token, map[string]any{
 		"recipient_id": -1,
 	})
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("negative recipient_id: status = %d, want 400", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusBadRequest)
 }
 
 func TestCreateDM_BadRequest_ZeroRecipientID(t *testing.T) {
@@ -594,9 +220,7 @@ func TestCreateDM_BadRequest_ZeroRecipientID(t *testing.T) {
 	rr := dmPost(t, router, "/api/v1/dms", token, map[string]any{
 		"recipient_id": 0,
 	})
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("zero recipient_id: status = %d, want 400", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusBadRequest)
 }
 
 func TestCreateDM_BadRequest_SelfDM(t *testing.T) {
@@ -608,9 +232,7 @@ func TestCreateDM_BadRequest_SelfDM(t *testing.T) {
 	rr := dmPost(t, router, "/api/v1/dms", token, map[string]any{
 		"recipient_id": self.ID,
 	})
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("self DM: status = %d, want 400; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusBadRequest)
 }
 
 func TestCreateDM_NotFound_RecipientMissing(t *testing.T) {
@@ -621,9 +243,7 @@ func TestCreateDM_NotFound_RecipientMissing(t *testing.T) {
 	rr := dmPost(t, router, "/api/v1/dms", token, map[string]any{
 		"recipient_id": 99999,
 	})
-	if rr.Code != http.StatusNotFound {
-		t.Errorf("missing recipient: status = %d, want 404", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusNotFound)
 }
 
 func TestCreateDM_Unauthorized(t *testing.T) {
@@ -633,9 +253,7 @@ func TestCreateDM_Unauthorized(t *testing.T) {
 	rr := dmPost(t, router, "/api/v1/dms", "", map[string]any{
 		"recipient_id": 1,
 	})
-	if rr.Code != http.StatusUnauthorized {
-		t.Errorf("no auth: status = %d, want 401", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusUnauthorized)
 }
 
 // ─── GET /api/v1/dms (handleListDMs) ────────────────────────────────────────
@@ -653,18 +271,13 @@ func TestListDMs_ReturnsOpenDMs(t *testing.T) {
 	rr1 := dmPost(t, router, "/api/v1/dms", tokenAlice, map[string]any{
 		"recipient_id": bob.ID,
 	})
-	if rr1.Code != http.StatusCreated {
-		t.Fatalf("setup CreateDM: status = %d", rr1.Code)
-	}
+	requireStatus(t, rr1, http.StatusCreated)
 
 	// List DMs.
 	rr := dmGet(t, router, "/api/v1/dms", tokenAlice)
-	if rr.Code != http.StatusOK {
-		t.Errorf("ListDMs: status = %d, want 200; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusOK)
 
-	var resp map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	resp := decodeBody[map[string]any](t, rr)
 	channels, ok := resp["dm_channels"].([]any)
 	if !ok {
 		t.Fatalf("ListDMs: dm_channels not an array: %v", resp)
@@ -680,12 +293,9 @@ func TestListDMs_EmptyArray(t *testing.T) {
 	token := dmCreateToken(t, database, "no_dms_user", 4)
 
 	rr := dmGet(t, router, "/api/v1/dms", token)
-	if rr.Code != http.StatusOK {
-		t.Errorf("ListDMs empty: status = %d, want 200", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusOK)
 
-	var resp map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	resp := decodeBody[map[string]any](t, rr)
 	channels, ok := resp["dm_channels"].([]any)
 	if !ok || len(channels) != 0 {
 		t.Errorf("ListDMs empty: expected empty array, got %v", resp["dm_channels"])
@@ -697,9 +307,7 @@ func TestListDMs_Unauthorized(t *testing.T) {
 	router := buildDMRouter(database, nil)
 
 	rr := dmGet(t, router, "/api/v1/dms", "")
-	if rr.Code != http.StatusUnauthorized {
-		t.Errorf("ListDMs no auth: status = %d, want 401", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusUnauthorized)
 }
 
 // ─── DELETE /api/v1/dms/{channelId} (handleCloseDM) ────────────────────────
@@ -717,18 +325,13 @@ func TestCloseDM_Success(t *testing.T) {
 	rr1 := dmPost(t, router, "/api/v1/dms", tokenAlice, map[string]any{
 		"recipient_id": bob.ID,
 	})
-	if rr1.Code != http.StatusCreated {
-		t.Fatalf("setup CreateDM: status = %d", rr1.Code)
-	}
-	var createResp map[string]any
-	_ = json.NewDecoder(rr1.Body).Decode(&createResp)
+	requireStatus(t, rr1, http.StatusCreated)
+	createResp := decodeBody[map[string]any](t, rr1)
 	channelID := createResp["channel_id"]
 
 	// Close the DM.
 	rr := dmDelete(t, router, fmt.Sprintf("/api/v1/dms/%v", channelID), tokenAlice)
-	if rr.Code != http.StatusNoContent {
-		t.Errorf("CloseDM: status = %d, want 204; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusNoContent)
 
 	// Verify broadcaster was notified.
 	if len(broadcaster.sent) == 0 {
@@ -749,11 +352,8 @@ func TestCloseDM_Success_VerifyRemovedFromList(t *testing.T) {
 	rr1 := dmPost(t, router, "/api/v1/dms", tokenAlice, map[string]any{
 		"recipient_id": bob.ID,
 	})
-	if rr1.Code != http.StatusCreated {
-		t.Fatalf("setup CreateDM: status = %d", rr1.Code)
-	}
-	var createResp map[string]any
-	_ = json.NewDecoder(rr1.Body).Decode(&createResp)
+	requireStatus(t, rr1, http.StatusCreated)
+	createResp := decodeBody[map[string]any](t, rr1)
 	channelID := createResp["channel_id"]
 
 	// Close the DM.
@@ -761,8 +361,7 @@ func TestCloseDM_Success_VerifyRemovedFromList(t *testing.T) {
 
 	// List should be empty for alice now.
 	rr := dmGet(t, router, "/api/v1/dms", tokenAlice)
-	var listResp map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&listResp)
+	listResp := decodeBody[map[string]any](t, rr)
 	channels := listResp["dm_channels"].([]any)
 	if len(channels) != 0 {
 		t.Errorf("CloseDM verify: expected 0 DMs after close, got %d", len(channels))
@@ -783,18 +382,13 @@ func TestCloseDM_Forbidden_NotParticipant(t *testing.T) {
 	rr1 := dmPost(t, router, "/api/v1/dms", tokenAlice, map[string]any{
 		"recipient_id": bob.ID,
 	})
-	if rr1.Code != http.StatusCreated {
-		t.Fatalf("setup CreateDM: status = %d", rr1.Code)
-	}
-	var createResp map[string]any
-	_ = json.NewDecoder(rr1.Body).Decode(&createResp)
+	requireStatus(t, rr1, http.StatusCreated)
+	createResp := decodeBody[map[string]any](t, rr1)
 	channelID := createResp["channel_id"]
 
 	// Charlie (not a participant) tries to close it.
 	rr := dmDelete(t, router, fmt.Sprintf("/api/v1/dms/%v", channelID), tokenCharlie)
-	if rr.Code != http.StatusNotFound {
-		t.Errorf("CloseDM not-found: status = %d, want 404; body = %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusNotFound)
 }
 
 func TestCloseDM_BadRequest_InvalidChannelID(t *testing.T) {
@@ -803,9 +397,7 @@ func TestCloseDM_BadRequest_InvalidChannelID(t *testing.T) {
 	token := dmCreateToken(t, database, "badid_user", 4)
 
 	rr := dmDelete(t, router, "/api/v1/dms/abc", token)
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("CloseDM bad ID: status = %d, want 400", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusBadRequest)
 }
 
 func TestCloseDM_Unauthorized(t *testing.T) {
@@ -813,9 +405,7 @@ func TestCloseDM_Unauthorized(t *testing.T) {
 	router := buildDMRouter(database, nil)
 
 	rr := dmDelete(t, router, "/api/v1/dms/1", "")
-	if rr.Code != http.StatusUnauthorized {
-		t.Errorf("CloseDM no auth: status = %d, want 401", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusUnauthorized)
 }
 
 func TestCloseDM_NilBroadcaster(t *testing.T) {
@@ -830,16 +420,11 @@ func TestCloseDM_NilBroadcaster(t *testing.T) {
 	rr1 := dmPost(t, router, "/api/v1/dms", token, map[string]any{
 		"recipient_id": bob.ID,
 	})
-	if rr1.Code != http.StatusCreated {
-		t.Fatalf("setup: status = %d", rr1.Code)
-	}
-	var createResp map[string]any
-	_ = json.NewDecoder(rr1.Body).Decode(&createResp)
+	requireStatus(t, rr1, http.StatusCreated)
+	createResp := decodeBody[map[string]any](t, rr1)
 	channelID := createResp["channel_id"]
 
 	// Close should still succeed even with nil broadcaster.
 	rr := dmDelete(t, router, fmt.Sprintf("/api/v1/dms/%v", channelID), token)
-	if rr.Code != http.StatusNoContent {
-		t.Errorf("CloseDM nil broadcaster: status = %d, want 204", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusNoContent)
 }

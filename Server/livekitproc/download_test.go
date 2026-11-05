@@ -55,9 +55,7 @@ func TestParseChecksumLine(t *testing.T) {
 	hash := strings.Repeat("ab", 32)
 	data := []byte("# comment\n" + hash + "  livekit_1.13.7_linux_amd64.tar.gz\ndeadbeef  other.txt\n")
 	got, err := parseChecksumLine(data, "livekit_1.13.7_linux_amd64.tar.gz")
-	if err != nil {
-		t.Fatalf("parseChecksumLine: %v", err)
-	}
+	mustDo(t, "parseChecksumLine", err)
 	if got != hash {
 		t.Errorf("hash = %q, want %q", got, hash)
 	}
@@ -83,19 +81,13 @@ func makeTarGz(t *testing.T, binaryContent []byte) []byte {
 		{"LICENSE", []byte("apache 2.0")},
 		{"livekit-server", binaryContent},
 	} {
-		if err := tw.WriteHeader(&tar.Header{Name: f.name, Mode: 0o755, Size: int64(len(f.body)), Typeflag: tar.TypeReg}); err != nil {
-			t.Fatalf("tar header: %v", err)
-		}
+		mustDo(t, "tar header", tw.WriteHeader(&tar.Header{Name: f.name, Mode: 0o755, Size: int64(len(f.body)), Typeflag: tar.TypeReg}))
 		if _, err := tw.Write(f.body); err != nil {
 			t.Fatalf("tar write: %v", err)
 		}
 	}
-	if err := tw.Close(); err != nil {
-		t.Fatalf("tar close: %v", err)
-	}
-	if err := gw.Close(); err != nil {
-		t.Fatalf("gzip close: %v", err)
-	}
+	mustDo(t, "tar close", tw.Close())
+	mustDo(t, "gzip close", gw.Close())
 	return buf.Bytes()
 }
 
@@ -110,25 +102,17 @@ func TestExtractLiveKitFromZip(t *testing.T) {
 		{"livekit-server.exe", []byte("MZ fake windows binary")},
 	} {
 		w, err := zw.Create(f.name)
-		if err != nil {
-			t.Fatalf("zip create: %v", err)
-		}
+		mustDo(t, "zip create", err)
 		if _, err := w.Write(f.body); err != nil {
 			t.Fatalf("zip write: %v", err)
 		}
 	}
-	if err := zw.Close(); err != nil {
-		t.Fatalf("zip close: %v", err)
-	}
+	mustDo(t, "zip close", zw.Close())
 
 	dest := filepath.Join(t.TempDir(), "livekit-server.exe")
-	if err := extractLiveKitFromZip(bytes.NewReader(buf.Bytes()), int64(buf.Len()), dest); err != nil {
-		t.Fatalf("extractLiveKitFromZip: %v", err)
-	}
+	mustDo(t, "extractLiveKitFromZip", extractLiveKitFromZip(bytes.NewReader(buf.Bytes()), int64(buf.Len()), dest))
 	got, err := os.ReadFile(dest)
-	if err != nil {
-		t.Fatalf("reading extracted binary: %v", err)
-	}
+	mustDo(t, "reading extracted binary", err)
 	if string(got) != "MZ fake windows binary" {
 		t.Errorf("extracted content = %q", got)
 	}
@@ -176,24 +160,18 @@ func TestEnsureLiveKitBinary_DownloadsVerifiesAndCaches(t *testing.T) {
 
 	dataDir := t.TempDir()
 	path, err := EnsureBinary(context.Background(), dataDir, version)
-	if err != nil {
-		t.Fatalf("EnsureBinary: %v", err)
-	}
+	mustDo(t, "EnsureBinary", err)
 	want := filepath.Join(dataDir, "livekit", livekitBinaryFilename(version))
 	if path != want {
 		t.Errorf("path = %q, want %q", path, want)
 	}
 	got, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("reading binary: %v", err)
-	}
+	mustDo(t, "reading binary", err)
 	if !bytes.Equal(got, binary) {
 		t.Error("extracted binary content mismatch")
 	}
 	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatalf("stat: %v", err)
-	}
+	mustDo(t, "stat", err)
 	if info.Mode().Perm()&0o100 == 0 {
 		t.Error("binary is not executable")
 	}
@@ -242,13 +220,9 @@ func TestEnsureLiveKitBinary_CleansUpOldVersions(t *testing.T) {
 
 	dataDir := t.TempDir()
 	lkDir := filepath.Join(dataDir, "livekit")
-	if err := os.MkdirAll(lkDir, 0o750); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "MkdirAll", os.MkdirAll(lkDir, 0o750))
 	stale := filepath.Join(lkDir, "livekit-server-1.0.0-old")
-	if err := os.WriteFile(stale, []byte("old"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "WriteFile", os.WriteFile(stale, []byte("old"), 0o600))
 
 	if _, err := EnsureBinary(context.Background(), dataDir, version); err != nil {
 		t.Fatalf("EnsureBinary: %v", err)

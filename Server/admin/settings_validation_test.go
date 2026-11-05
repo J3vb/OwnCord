@@ -2,12 +2,10 @@ package admin_test
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
 
-	"github.com/J3vb/OwnCord/Server/admin"
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
@@ -15,15 +13,12 @@ import (
 // the response and the database, so a refusal can be checked for a write.
 func patchSetting(t *testing.T, key, value string) (int, string, string, *db.DB) {
 	t.Helper()
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	database, handler, token := newAdminHarness(t)
 	w := doRequest(t, handler, http.MethodPatch, "/settings", token, map[string]string{key: value})
-	var resp struct {
+	resp := decodeBody[struct {
 		Error   string `json:"error"`
 		Message string `json:"message"`
-	}
-	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	}](t, w)
 	if w.Code == http.StatusBadRequest && resp.Error != "BAD_REQUEST" {
 		t.Errorf("%s=%q: error code = %q, want BAD_REQUEST like every other invalid setting", key, value, resp.Error)
 	}
@@ -127,14 +122,10 @@ func TestPatchSettings_IdentityLengthLimits(t *testing.T) {
 // TestPatchSettings_InvalidValueWritesNothing: one bad value refuses the
 // whole patch, so the valid key beside it is not applied either.
 func TestPatchSettings_InvalidValueWritesNothing(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	database, handler, token := newAdminHarness(t)
 	w := doRequest(t, handler, http.MethodPatch, "/settings", token,
 		map[string]string{"motd": "fresh", "registration_mode": "bogus"})
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusBadRequest)
 	if got := storedSetting(t, database, "motd"); got == "fresh" {
 		t.Error("motd was applied alongside an invalid registration_mode")
 	}
@@ -143,14 +134,10 @@ func TestPatchSettings_InvalidValueWritesNothing(t *testing.T) {
 // TestPatchSettings_InertKeyWritesNothing: an inert key refuses the whole
 // patch, so the valid key beside it is not applied either.
 func TestPatchSettings_InertKeyWritesNothing(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	database, handler, token := newAdminHarness(t)
 	w := doRequest(t, handler, http.MethodPatch, "/settings", token,
 		map[string]string{"motd": "fresh", "voice_quality": "low"})
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusBadRequest)
 	if got := storedSetting(t, database, "motd"); got == "fresh" {
 		t.Error("motd was applied alongside an inert voice_quality")
 	}

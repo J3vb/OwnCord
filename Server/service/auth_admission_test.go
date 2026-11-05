@@ -38,29 +38,15 @@ func newAdmissionFixture(t *testing.T, budget int) *admissionFixture {
 	ctx := context.Background()
 	database := newTestDB(t)
 	hash, err := auth.HashPassword(admissionPassword)
-	if err != nil {
-		t.Fatalf("HashPassword: %v", err)
-	}
-	plainID, err := database.CreateUser(ctx, "budgeted", hash, 4)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	totpID, err := database.CreateUser(ctx, "budgeted-2fa", hash, 4)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	mustDo(t, "HashPassword", err)
+	plainID := mustCreateUser(t, database, "budgeted", hash, 4)
+	totpID := mustCreateUser(t, database, "budgeted-2fa", hash, 4)
 	secret, err := auth.GenerateTOTPSecret()
-	if err != nil {
-		t.Fatalf("GenerateTOTPSecret: %v", err)
-	}
+	mustDo(t, "GenerateTOTPSecret", err)
 	key := make([]byte, 32)
 	enc, err := auth.EncryptTOTPSecret(key, secret)
-	if err != nil {
-		t.Fatalf("EncryptTOTPSecret: %v", err)
-	}
-	if err := database.UpdateUserTOTPSecret(ctx, totpID, &enc); err != nil {
-		t.Fatalf("UpdateUserTOTPSecret: %v", err)
-	}
+	mustDo(t, "EncryptTOTPSecret", err)
+	mustDo(t, "UpdateUserTOTPSecret", database.UpdateUserTOTPSecret(ctx, totpID, &enc))
 
 	limiter := auth.NewRateLimiter()
 	limiter.SetAdmissionBudget(budget)
@@ -69,13 +55,8 @@ func newAdmissionFixture(t *testing.T, budget int) *admissionFixture {
 	// the production wait.
 	svc.admissionWait = 20 * time.Millisecond
 	partial, err := svc.partial.Issue(ctx, totpID, "device", "203.0.113.9")
-	if err != nil {
-		t.Fatalf("Issue: %v", err)
-	}
-	plain, err := database.GetUserByID(ctx, plainID)
-	if err != nil {
-		t.Fatalf("GetUserByID: %v", err)
-	}
+	mustDo(t, "Issue", err)
+	plain := mustGetUserByID(t, database, plainID)
 	return &admissionFixture{
 		svc: svc, limiter: limiter, database: database,
 		plain: sessionPrincipal(plain), totpUID: totpID, partial: partial,
@@ -332,9 +313,7 @@ func TestLogin_QueuedHonoursAccountChangesMadeDuringTheWait(t *testing.T) {
 				done <- err
 			}()
 			time.Sleep(100 * time.Millisecond)
-			if err := tc.change(ctx, f); err != nil {
-				t.Fatalf("change: %v", err)
-			}
+			mustDo(t, "change", tc.change(ctx, f))
 			release()
 			if err := <-done; !errors.Is(err, tc.want) {
 				t.Fatalf("login queued across the %s: error = %v, want %v", tc.name, err, tc.want)

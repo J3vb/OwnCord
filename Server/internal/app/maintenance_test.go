@@ -23,13 +23,9 @@ import (
 func newMaintenanceTestDB(t *testing.T) *db.DB {
 	t.Helper()
 	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
+	mustDo(t, "db.Open", err)
 	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("db.Migrate: %v", err)
-	}
+	mustDo(t, "db.Migrate", db.Migrate(database))
 	return database
 }
 
@@ -61,20 +57,12 @@ func newReconcileTestFixture(t *testing.T) (database *db.DB, m *maintenance, own
 	ctx := context.Background()
 	var err error
 	ownerID, err = database.CreateUser(ctx, "recon-owner", "hash", 1)
-	if err != nil {
-		t.Fatalf("CreateUser(owner): %v", err)
-	}
+	mustDo(t, "CreateUser(owner)", err)
 	memberID, err = database.CreateUser(ctx, "recon-member", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser(member): %v", err)
-	}
+	mustDo(t, "CreateUser(member)", err)
 	chanID, err = database.CreateChannel(ctx, "recon-vc", "voice", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
-	if err := database.JoinVoiceChannel(ctx, memberID, chanID); err != nil {
-		t.Fatalf("JoinVoiceChannel: %v", err)
-	}
+	mustDo(t, "CreateChannel", err)
+	mustDo(t, "JoinVoiceChannel", database.JoinVoiceChannel(ctx, memberID, chanID))
 	mod := service.NewModerationService(database, nil)
 	mod.SetVoiceMuter(&dbVoiceMuterForTest{database: database})
 	m = &maintenance{log: slog.Default(), database: database, moderation: mod}
@@ -87,35 +75,19 @@ func newReconcileTestFixture(t *testing.T) (database *db.DB, m *maintenance, own
 func TestReconcileOrphanedVoiceMutes_ExpiredTimeoutUnmuted(t *testing.T) {
 	database, m, ownerID, memberID, chanID := newReconcileTestFixture(t)
 	ctx := context.Background()
-	state, err := database.GetVoiceState(ctx, memberID)
-	if err != nil || state == nil {
-		t.Fatalf("GetVoiceState: %v", err)
-	}
 	// Issued (and muted) while still active, exactly like a real timeout —
 	// round 5's Codex review P2 refuses a mute attempt whose OWN action is
 	// already inactive, so the setup must mute FIRST and expire it
 	// afterward, simulating a timeout whose expiry has since passed with
 	// nobody having lifted it.
-	actionID, _, err := database.TimeoutUser(ctx, memberID, ownerID, nil, "cool off", time.Now().Add(time.Hour))
-	if err != nil {
-		t.Fatalf("TimeoutUser: %v", err)
-	}
-	if matched, transitioned, err := database.MuteForTimeoutSession(ctx, memberID, chanID, actionID, state.JoinedAt, nil); err != nil || !matched || !transitioned {
-		t.Fatalf("MuteForTimeoutSession: matched=%v transitioned=%v err=%v", matched, transitioned, err)
-	}
+	actionID := muteMemberViaTimeout(ctx, t, database, ownerID, memberID, chanID)
 	if _, err := database.ExecContext(ctx, `UPDATE moderation_actions SET expires_at = ? WHERE id = ?`,
 		time.Now().Add(-time.Hour).UTC().Format("2006-01-02 15:04:05"), actionID); err != nil {
 		t.Fatalf("backdate expires_at: %v", err)
 	}
 
-	if err := m.reconcileOrphanedVoiceMutes(ctx); err != nil {
-		t.Fatalf("reconcileOrphanedVoiceMutes: %v", err)
-	}
-	final, err := database.GetVoiceState(ctx, memberID)
-	if err != nil || final == nil {
-		t.Fatalf("GetVoiceState (final): %v", err)
-	}
-	if final.ServerMuted {
+	mustDo(t, "reconcileOrphanedVoiceMutes", m.reconcileOrphanedVoiceMutes(ctx))
+	if mustVoiceState(ctx, t, database, memberID).ServerMuted {
 		t.Error("ServerMuted = true, want false: the expired timeout's mute must have been reconciled")
 	}
 }
@@ -130,9 +102,7 @@ func TestReconcileOrphanedVoiceMutes_LeavesManualMuteAlone(t *testing.T) {
 		t.Fatalf("SetVoiceServerMute: matched=%v err=%v", matched, err)
 	}
 
-	if err := m.reconcileOrphanedVoiceMutes(ctx); err != nil {
-		t.Fatalf("reconcileOrphanedVoiceMutes: %v", err)
-	}
+	mustDo(t, "reconcileOrphanedVoiceMutes", m.reconcileOrphanedVoiceMutes(ctx))
 	state, err := database.GetVoiceState(ctx, memberID)
 	if err != nil || state == nil || !state.ServerMuted {
 		t.Fatal("the manual mute must still be in effect after the sweep")
@@ -147,17 +117,7 @@ func TestReconcileOrphanedVoiceMutes_LeavesManualMuteAlone(t *testing.T) {
 func TestReconcileOrphanedVoiceMutes_CrashBetweenLiftAndFinalize(t *testing.T) {
 	database, m, ownerID, memberID, chanID := newReconcileTestFixture(t)
 	ctx := context.Background()
-	state, err := database.GetVoiceState(ctx, memberID)
-	if err != nil || state == nil {
-		t.Fatalf("GetVoiceState: %v", err)
-	}
-	actionID, _, err := database.TimeoutUser(ctx, memberID, ownerID, nil, "cool off", time.Now().Add(time.Hour))
-	if err != nil {
-		t.Fatalf("TimeoutUser: %v", err)
-	}
-	if matched, transitioned, err := database.MuteForTimeoutSession(ctx, memberID, chanID, actionID, state.JoinedAt, nil); err != nil || !matched || !transitioned {
-		t.Fatalf("MuteForTimeoutSession: matched=%v transitioned=%v err=%v", matched, transitioned, err)
-	}
+	muteMemberViaTimeout(ctx, t, database, ownerID, memberID, chanID)
 
 	// The ledger half of the lift commits — and the crash happens right
 	// here, before FinalizeTimeoutLift (the post-commit half) ever runs.
@@ -169,14 +129,8 @@ func TestReconcileOrphanedVoiceMutes_CrashBetweenLiftAndFinalize(t *testing.T) {
 		t.Fatal("test setup broken: the voice half must still show muted immediately after the ledger-only lift")
 	}
 
-	if err := m.reconcileOrphanedVoiceMutes(ctx); err != nil {
-		t.Fatalf("reconcileOrphanedVoiceMutes: %v", err)
-	}
-	final, err := database.GetVoiceState(ctx, memberID)
-	if err != nil || final == nil {
-		t.Fatalf("GetVoiceState (final): %v", err)
-	}
-	if final.ServerMuted {
+	mustDo(t, "reconcileOrphanedVoiceMutes", m.reconcileOrphanedVoiceMutes(ctx))
+	if mustVoiceState(ctx, t, database, memberID).ServerMuted {
 		t.Error("ServerMuted = true, want false: the sweep must repair a crash between the ledger commit and its finalize")
 	}
 }
@@ -232,15 +186,11 @@ func TestMaintenance_TickWithNoServicesSucceeds(t *testing.T) {
 func TestMaintenance_TickReturnsBytesTheOrphanSweepFreed(t *testing.T) {
 	database := newMaintenanceTestDB(t)
 	ctx := context.Background()
-	if _, err := database.ExecContext(ctx, `INSERT INTO users (id, username, password, role_id) VALUES (10, 'alice', 'x', 4)`); err != nil {
-		t.Fatal(err)
-	}
+	mustExec(t, database, `INSERT INTO users (id, username, password, role_id) VALUES (10, 'alice', 'x', 4)`)
 	// Migration 001 schedules a daily backup, and a full tick would write one
 	// under a path relative to this package. Off: this test is about the
 	// storage steps.
-	if _, err := database.ExecContext(ctx, `UPDATE settings SET value = 'off' WHERE key = 'backup_schedule'`); err != nil {
-		t.Fatal(err)
-	}
+	disableScheduledBackup(t, database)
 	dir := t.TempDir()
 	cfg := &config.Config{Upload: config.UploadConfig{StorageDir: dir, MaxSizeMB: 1}}
 	svc := service.New(database, auth.NewRateLimiter())
@@ -248,28 +198,18 @@ func TestMaintenance_TickReturnsBytesTheOrphanSweepFreed(t *testing.T) {
 
 	// An upload as the handler does it: reserve, write, record.
 	res, err := svc.Uploads.Reserve(ctx, 10, 6)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "orphan-1"), []byte("6bytes"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := svc.Uploads.Record(ctx, service.AttachmentRecord{ID: "orphan-1", UploaderID: 10, Filename: "o.bin", MimeType: "application/octet-stream", Size: 6}, res); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Reserve", err)
+	mustDo(t, "WriteFile", os.WriteFile(filepath.Join(dir, "orphan-1"), []byte("6bytes"), 0o600))
+	mustDo(t, "Record", svc.Uploads.Record(ctx, service.AttachmentRecord{ID: "orphan-1", UploaderID: 10, Filename: "o.bin", MimeType: "application/octet-stream", Size: 6}, res))
 	// Never attached, and older than the sweep's grace.
 	old := time.Now().Add(-25 * time.Hour).UTC().Format("2006-01-02 15:04:05")
-	if _, err := database.ExecContext(ctx, `UPDATE attachments SET uploaded_at = ? WHERE id = 'orphan-1'`, old); err != nil {
-		t.Fatal(err)
-	}
+	mustExec(t, database, `UPDATE attachments SET uploaded_at = ? WHERE id = 'orphan-1'`, old)
 	if used, _ := svc.Uploads.StorageUsed(ctx, 10); used != 6 {
 		t.Fatalf("counter before the tick = %d, want 6", used)
 	}
 
 	m := newMaintenanceWithStorage(t, cfg, database, svc)
-	if failed := m.tick(ctx); failed {
-		t.Fatal("tick reported a failed step")
-	}
+	requireCleanTick(ctx, t, m)
 	if _, err := os.Stat(filepath.Join(dir, "orphan-1")); !os.IsNotExist(err) {
 		t.Fatalf("orphan file still on disk after the sweep: %v", err)
 	}
@@ -286,9 +226,7 @@ func TestMaintenance_TickReturnsBytesTheOrphanSweepFreed(t *testing.T) {
 	if used, _ := fresh.Uploads.StorageUsed(ctx, 10); used != 9 {
 		t.Fatalf("phantom charge before the restart recount = %d, want 9 (kept, high side)", used)
 	}
-	if err := newMaintenanceWithStorage(t, cfg, database, fresh).recountStorage(ctx); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "newMaintenanceWithStorage", newMaintenanceWithStorage(t, cfg, database, fresh).recountStorage(ctx))
 	if used, _ := fresh.Uploads.StorageUsed(ctx, 10); used != 0 {
 		t.Fatalf("phantom charge after the restart recount = %d, want 0", used)
 	}
@@ -299,12 +237,8 @@ func TestMaintenance_TickReturnsBytesTheOrphanSweepFreed(t *testing.T) {
 func TestMaintenance_OrphanSweepKeepsADayOfStagedUploads(t *testing.T) {
 	database := newMaintenanceTestDB(t)
 	ctx := context.Background()
-	if _, err := database.ExecContext(ctx, `INSERT INTO users (id, username, password, role_id) VALUES (10, 'alice', 'x', 4)`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := database.ExecContext(ctx, `UPDATE settings SET value = 'off' WHERE key = 'backup_schedule'`); err != nil {
-		t.Fatal(err)
-	}
+	mustExec(t, database, `INSERT INTO users (id, username, password, role_id) VALUES (10, 'alice', 'x', 4)`)
+	disableScheduledBackup(t, database)
 	dir := t.TempDir()
 	cfg := &config.Config{Upload: config.UploadConfig{StorageDir: dir, MaxSizeMB: 1}}
 	svc := service.New(database, auth.NewRateLimiter())
@@ -313,15 +247,9 @@ func TestMaintenance_OrphanSweepKeepsADayOfStagedUploads(t *testing.T) {
 	stage := func(id string, age time.Duration) {
 		t.Helper()
 		res, err := svc.Uploads.Reserve(ctx, 10, 6)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(dir, id), []byte("6bytes"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		if err := svc.Uploads.Record(ctx, service.AttachmentRecord{ID: id, UploaderID: 10, Filename: id + ".bin", MimeType: "application/octet-stream", Size: 6}, res); err != nil {
-			t.Fatal(err)
-		}
+		mustDo(t, "Reserve", err)
+		mustDo(t, "WriteFile", os.WriteFile(filepath.Join(dir, id), []byte("6bytes"), 0o600))
+		mustDo(t, "Record", svc.Uploads.Record(ctx, service.AttachmentRecord{ID: id, UploaderID: 10, Filename: id + ".bin", MimeType: "application/octet-stream", Size: 6}, res))
 		at := time.Now().Add(-age).UTC().Format("2006-01-02 15:04:05")
 		if _, err := database.ExecContext(ctx, `UPDATE attachments SET uploaded_at = ? WHERE id = ?`, at, id); err != nil {
 			t.Fatal(err)
@@ -331,9 +259,7 @@ func TestMaintenance_OrphanSweepKeepsADayOfStagedUploads(t *testing.T) {
 	stage("draft-25h", 25*time.Hour)
 
 	m := newMaintenanceWithStorage(t, cfg, database, svc)
-	if failed := m.tick(ctx); failed {
-		t.Fatal("tick reported a failed step")
-	}
+	requireCleanTick(ctx, t, m)
 	if _, err := os.Stat(filepath.Join(dir, "draft-2h")); err != nil {
 		t.Fatalf("a 2 h old staged upload lost its file: %v", err)
 	}
@@ -378,12 +304,8 @@ func seedAgedClosedReport(t *testing.T, database *db.DB, ctx context.Context, id
 func TestMaintenance_ReportRetentionZeroDaysNeverPrunes(t *testing.T) {
 	database := newMaintenanceTestDB(t)
 	ctx := context.Background()
-	if _, err := database.ExecContext(ctx, `INSERT INTO users (id, username, password, role_id) VALUES (10, 'alice', 'x', 4), (11, 'bob', 'x', 4)`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := database.ExecContext(ctx, `UPDATE settings SET value = 'off' WHERE key = 'backup_schedule'`); err != nil {
-		t.Fatal(err)
-	}
+	mustExec(t, database, `INSERT INTO users (id, username, password, role_id) VALUES (10, 'alice', 'x', 4), (11, 'bob', 'x', 4)`)
+	disableScheduledBackup(t, database)
 	id := seedAgedClosedReport(t, database, ctx, 9001, 400)
 
 	cfg := &config.Config{
@@ -392,24 +314,16 @@ func TestMaintenance_ReportRetentionZeroDaysNeverPrunes(t *testing.T) {
 	}
 	svc := service.New(database, auth.NewRateLimiter())
 	m := newMaintenanceWithStorage(t, cfg, database, svc)
-	if failed := m.tick(ctx); failed {
-		t.Fatal("tick reported a failed step")
-	}
+	requireCleanTick(ctx, t, m)
 
 	var detail string
-	if err := database.QueryRowContext(ctx, `SELECT detail FROM reports WHERE id = ?`, id).Scan(&detail); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "QueryRowContext", database.QueryRowContext(ctx, `SELECT detail FROM reports WHERE id = ?`, id).Scan(&detail))
 	if detail == "" {
 		t.Error("detail was cleared with report_retention_days = 0, want untouched")
 	}
 	var evidenceRows, noteRows int
-	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM report_evidence WHERE report_id = ?`, id).Scan(&evidenceRows); err != nil {
-		t.Fatal(err)
-	}
-	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM report_notes WHERE report_id = ?`, id).Scan(&noteRows); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "QueryRowContext", database.QueryRowContext(ctx, `SELECT COUNT(*) FROM report_evidence WHERE report_id = ?`, id).Scan(&evidenceRows))
+	mustDo(t, "QueryRowContext", database.QueryRowContext(ctx, `SELECT COUNT(*) FROM report_notes WHERE report_id = ?`, id).Scan(&noteRows))
 	if evidenceRows != 1 || noteRows != 1 {
 		t.Errorf("evidence/notes = %d/%d after a report_retention_days=0 tick, want 1/1 (untouched)", evidenceRows, noteRows)
 	}
@@ -424,12 +338,8 @@ func TestMaintenance_ReportRetentionZeroDaysNeverPrunes(t *testing.T) {
 func TestMaintenance_ReportRetentionPrunesOnlyAgedContent(t *testing.T) {
 	database := newMaintenanceTestDB(t)
 	ctx := context.Background()
-	if _, err := database.ExecContext(ctx, `INSERT INTO users (id, username, password, role_id) VALUES (10, 'alice', 'x', 4), (11, 'bob', 'x', 4)`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := database.ExecContext(ctx, `UPDATE settings SET value = 'off' WHERE key = 'backup_schedule'`); err != nil {
-		t.Fatal(err)
-	}
+	mustExec(t, database, `INSERT INTO users (id, username, password, role_id) VALUES (10, 'alice', 'x', 4), (11, 'bob', 'x', 4)`)
+	disableScheduledBackup(t, database)
 	oldID := seedAgedClosedReport(t, database, ctx, 9002, 200)
 	recentID := seedAgedClosedReport(t, database, ctx, 9003, 10)
 
@@ -439,9 +349,7 @@ func TestMaintenance_ReportRetentionPrunesOnlyAgedContent(t *testing.T) {
 	}
 	svc := service.New(database, auth.NewRateLimiter())
 	m := newMaintenanceWithStorage(t, cfg, database, svc)
-	if failed := m.tick(ctx); failed {
-		t.Fatal("tick reported a failed step")
-	}
+	requireCleanTick(ctx, t, m)
 
 	assertReportContent := func(id int64, wantDetail string, wantEvidence, wantNotes int) {
 		t.Helper()
@@ -456,12 +364,8 @@ func TestMaintenance_ReportRetentionPrunesOnlyAgedContent(t *testing.T) {
 			t.Errorf("report %d state/outcome = %q/%q, want resolved/actioned (kept)", id, state, outcome)
 		}
 		var evidenceRows, noteRows int
-		if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM report_evidence WHERE report_id = ?`, id).Scan(&evidenceRows); err != nil {
-			t.Fatal(err)
-		}
-		if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM report_notes WHERE report_id = ?`, id).Scan(&noteRows); err != nil {
-			t.Fatal(err)
-		}
+		mustDo(t, "QueryRowContext", database.QueryRowContext(ctx, `SELECT COUNT(*) FROM report_evidence WHERE report_id = ?`, id).Scan(&evidenceRows))
+		mustDo(t, "QueryRowContext", database.QueryRowContext(ctx, `SELECT COUNT(*) FROM report_notes WHERE report_id = ?`, id).Scan(&noteRows))
 		if evidenceRows != wantEvidence || noteRows != wantNotes {
 			t.Errorf("report %d evidence/notes = %d/%d, want %d/%d", id, evidenceRows, noteRows, wantEvidence, wantNotes)
 		}
@@ -485,9 +389,7 @@ func TestMaintenance_ReportRetentionPrunesOnlyAgedContent(t *testing.T) {
 func TestMaintenance_StartUpSweepRemovesRowsAfterAKeyRotation(t *testing.T) {
 	database := newMaintenanceTestDB(t)
 	ctx := context.Background()
-	if _, err := database.ExecContext(ctx, `INSERT INTO users (id, username, password, role_id) VALUES (10, 'alice', 'x', 4)`); err != nil {
-		t.Fatal(err)
-	}
+	mustExec(t, database, `INSERT INTO users (id, username, password, role_id) VALUES (10, 'alice', 'x', 4)`)
 	// Written under a key that is not the one about to be installed below —
 	// standing in for "a key rotated since this row was created".
 	if _, err := database.ExecContext(ctx,
@@ -497,9 +399,7 @@ func TestMaintenance_StartUpSweepRemovesRowsAfterAKeyRotation(t *testing.T) {
 	}
 
 	priv, err := ecdh.P256().GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "P256", err)
 	cfg := &config.Config{Upload: config.UploadConfig{StorageDir: t.TempDir(), MaxSizeMB: 1}}
 	svc := service.New(database, auth.NewRateLimiter())
 	svc.Push.SetVAPIDKey(priv)
@@ -512,9 +412,7 @@ func TestMaintenance_StartUpSweepRemovesRowsAfterAKeyRotation(t *testing.T) {
 	<-maintenanceDone
 
 	var n int
-	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM push_subscriptions`).Scan(&n); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "QueryRowContext", database.QueryRowContext(ctx, `SELECT COUNT(*) FROM push_subscriptions`).Scan(&n))
 	if n != 0 {
 		t.Fatalf("push_subscriptions after loop()'s start-up sweep = %d, want 0 (the row was under a rotated-away key)", n)
 	}
@@ -575,9 +473,7 @@ func TestMaintenance_LoopResumesAnErasureOnWake(t *testing.T) {
 		t.Fatal(err)
 	}
 	member, err := database.CreateUser(ctx, "wake-member", "x", 4)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateUser", err)
 	cfg := &config.Config{Upload: config.UploadConfig{StorageDir: t.TempDir(), MaxSizeMB: 1}}
 	svc := service.New(database, auth.NewRateLimiter())
 	m := newMaintenanceWithStorage(t, cfg, database, svc)
@@ -599,9 +495,7 @@ func TestMaintenance_LoopResumesAnErasureOnWake(t *testing.T) {
 	deadline := time.Now().Add(10 * time.Second)
 	for {
 		jobs, err := database.ListUnfinishedErasureJobs(ctx)
-		if err != nil {
-			t.Fatal(err)
-		}
+		mustDo(t, "ListUnfinishedErasureJobs", err)
 		if len(jobs) == 0 {
 			break
 		}
@@ -624,9 +518,7 @@ func TestMaintenance_StopEndsAResumedErasureDrain(t *testing.T) {
 		t.Fatal(err)
 	}
 	member, err := database.CreateUser(ctx, "stop-member", "x", 4)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateUser", err)
 	cfg := &config.Config{Upload: config.UploadConfig{StorageDir: t.TempDir(), MaxSizeMB: 1}}
 	m := newMaintenanceWithStorage(t, cfg, database, service.New(database, auth.NewRateLimiter()))
 	stopCtx, stop := context.WithCancel(ctx)

@@ -18,9 +18,7 @@ func TestUploadFileTypePolicy_ConfigUntilSaved(t *testing.T) {
 	uploads.SetStorageLimits(StorageLimits{FileTypes: storage.FileTypePolicy{Blocked: []string{"bat"}, Allowed: []string{}}})
 
 	got, err := uploads.FileTypePolicy(ctx)
-	if err != nil {
-		t.Fatalf("FileTypePolicy: %v", err)
-	}
+	mustDo(t, "FileTypePolicy", err)
 	if !slices.Equal(got.Blocked, []string{"bat"}) || len(got.Allowed) != 0 {
 		t.Fatalf("policy = %+v, want the config lists", got)
 	}
@@ -33,9 +31,7 @@ func TestUploadFileTypePolicy_ConfigUntilSaved(t *testing.T) {
 		t.Fatalf("Patch: %v", err)
 	}
 	got, err = uploads.FileTypePolicy(ctx)
-	if err != nil {
-		t.Fatalf("FileTypePolicy: %v", err)
-	}
+	mustDo(t, "FileTypePolicy", err)
 	if len(got.Blocked) != 0 || !slices.Equal(got.Allowed, []string{"png", "pdf"}) {
 		t.Fatalf("policy = %+v, want the saved lists (an empty saved list included)", got)
 	}
@@ -44,9 +40,7 @@ func TestUploadFileTypePolicy_ConfigUntilSaved(t *testing.T) {
 func TestSettings_UploadExtensionListsNormalized(t *testing.T) {
 	svc, _ := newSettingsService(t)
 	all, err := svc.Patch(context.Background(), 1, map[string]string{UploadBlockedExtensionsKey: " .BAT cmd,,bat "})
-	if err != nil {
-		t.Fatalf("Patch: %v", err)
-	}
+	mustDo(t, "Patch", err)
 	if got := all[UploadBlockedExtensionsKey]; got != "bat,cmd" {
 		t.Errorf("stored %q, want %q", got, "bat,cmd")
 	}

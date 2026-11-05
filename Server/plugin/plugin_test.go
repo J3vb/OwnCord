@@ -26,9 +26,7 @@ func TestParseManifestRoundTrip(t *testing.T) {
 		"resources": {"max_memory_mb": 16, "cpu_budget_ms": 50}
 	}`)
 	m, err := ParseManifest(raw)
-	if err != nil {
-		t.Fatalf("ParseManifest: %v", err)
-	}
+	mustDo(t, "ParseManifest", err)
 	if m.Name != "hello" || m.Version != "0.1.0" {
 		t.Fatalf("unexpected manifest fields: %+v", m)
 	}
@@ -59,9 +57,7 @@ func TestParseManifestRejectsBadEntrypoint(t *testing.T) {
 
 func TestScanPluginDirectoryHandlesMissing(t *testing.T) {
 	got, err := scanPluginDirectory(filepath.Join(t.TempDir(), "does-not-exist"))
-	if err != nil {
-		t.Fatalf("scanPluginDirectory: %v", err)
-	}
+	mustDo(t, "scanPluginDirectory", err)
 	if len(got) != 0 {
 		t.Fatalf("expected empty result, got %d", len(got))
 	}
@@ -70,20 +66,12 @@ func TestScanPluginDirectoryHandlesMissing(t *testing.T) {
 func TestScanPluginDirectoryParsesValidPlugin(t *testing.T) {
 	dir := t.TempDir()
 	pluginDir := filepath.Join(dir, "hello")
-	if err := os.MkdirAll(pluginDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "MkdirAll", os.MkdirAll(pluginDir, 0o755))
 	manifest := `{"name":"hello","version":"0.1.0","entrypoint":"hello.wasm","permissions":["storage"]}`
-	if err := os.WriteFile(filepath.Join(pluginDir, "plugin.json"), []byte(manifest), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(pluginDir, "hello.wasm"), []byte("\x00asm\x01\x00\x00\x00"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "WriteFile", os.WriteFile(filepath.Join(pluginDir, "plugin.json"), []byte(manifest), 0o644))
+	mustDo(t, "WriteFile", os.WriteFile(filepath.Join(pluginDir, "hello.wasm"), []byte("\x00asm\x01\x00\x00\x00"), 0o644))
 	got, err := scanPluginDirectory(dir)
-	if err != nil {
-		t.Fatalf("scanPluginDirectory: %v", err)
-	}
+	mustDo(t, "scanPluginDirectory", err)
 	if len(got) != 1 || got[0].Manifest.Name != "hello" {
 		t.Fatalf("unexpected scan result: %+v", got)
 	}
@@ -100,16 +88,10 @@ func TestRegistryInstallFromDisk(t *testing.T) {
 
 	mem := openPluginTestDB(t)
 	reg, err := NewRegistry(Config{Directory: dir, Store: mem})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := reg.LoadAll(context.Background()); err != nil {
-		t.Fatalf("LoadAll: %v", err)
-	}
+	mustDo(t, "NewRegistry", err)
+	mustDo(t, "LoadAll", reg.LoadAll(context.Background()))
 	rows, err := mem.ListPlugins(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "ListPlugins", err)
 	if len(rows) != 1 || rows[0].Name != "hello" {
 		t.Fatalf("expected hello plugin row, got %+v", rows)
 	}
@@ -118,9 +100,7 @@ func TestRegistryInstallFromDisk(t *testing.T) {
 func TestStorageGatedByCapability(t *testing.T) {
 	mem := openPluginTestDB(t)
 	reg, err := NewRegistry(Config{Store: mem})
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "NewRegistry", err)
 	inst := &Instance{
 		ID:       1,
 		Manifest: &Manifest{Name: "x", Permissions: []string{}},
@@ -133,13 +113,9 @@ func TestStorageGatedByCapability(t *testing.T) {
 	if _, err := mem.InstallPlugin(context.Background(), "x", "0.1", "{}"); err != nil {
 		t.Fatal(err)
 	}
-	if err := reg.StoragePut(context.Background(), inst, "k", []byte("v")); err != nil {
-		t.Fatalf("StoragePut: %v", err)
-	}
+	mustDo(t, "StoragePut", reg.StoragePut(context.Background(), inst, "k", []byte("v")))
 	got, err := reg.StorageGet(context.Background(), inst, "k")
-	if err != nil {
-		t.Fatalf("StorageGet: %v", err)
-	}
+	mustDo(t, "StorageGet", err)
 	if string(got) != "v" {
 		t.Fatalf("expected v, got %q", got)
 	}
@@ -152,34 +128,22 @@ func TestStorageGatedByCapability(t *testing.T) {
 func TestReinstallRebindsCommands(t *testing.T) {
 	mem := openPluginTestDB(t)
 	reg, err := NewRegistry(Config{Directory: t.TempDir(), Store: mem})
-	if err != nil {
-		t.Fatalf("NewRegistry: %v", err)
-	}
+	mustDo(t, "NewRegistry", err)
 	t.Cleanup(func() { _ = reg.Close(context.Background()) })
 
 	ctx := context.Background()
 	manifest, err := ParseManifest([]byte(`{"name":"upgrader","version":"0.1.0","entrypoint":"p.wasm","permissions":["commands"],"commands":[{"name":"greet"}]}`))
-	if err != nil {
-		t.Fatalf("ParseManifest: %v", err)
-	}
-	if err := reg.installFromDisk(ctx, foundPlugin{Manifest: manifest, WASMPath: "p.wasm"}); err != nil {
-		t.Fatalf("install v1: %v", err)
-	}
+	mustDo(t, "ParseManifest", err)
+	mustDo(t, "install v1", reg.installFromDisk(ctx, foundPlugin{Manifest: manifest, WASMPath: "p.wasm"}))
 	reg.mu.RLock()
 	v1 := reg.byName["upgrader"]
 	reg.mu.RUnlock()
-	if err := reg.RegisterCommand("greet", v1); err != nil {
-		t.Fatalf("RegisterCommand v1: %v", err)
-	}
+	mustDo(t, "RegisterCommand v1", reg.RegisterCommand("greet", v1))
 
 	// In-place upgrade: same plugin name, fresh instance.
 	manifest2, err := ParseManifest([]byte(`{"name":"upgrader","version":"0.2.0","entrypoint":"p.wasm","permissions":["commands"],"commands":[{"name":"greet"}]}`))
-	if err != nil {
-		t.Fatalf("ParseManifest v2: %v", err)
-	}
-	if err := reg.installFromDisk(ctx, foundPlugin{Manifest: manifest2, WASMPath: "p.wasm"}); err != nil {
-		t.Fatalf("install v2: %v", err)
-	}
+	mustDo(t, "ParseManifest v2", err)
+	mustDo(t, "install v2", reg.installFromDisk(ctx, foundPlugin{Manifest: manifest2, WASMPath: "p.wasm"}))
 	reg.mu.RLock()
 	v2 := reg.byName["upgrader"]
 	_, stillBound := reg.commands["greet"]
@@ -192,18 +156,12 @@ func TestReinstallRebindsCommands(t *testing.T) {
 	}
 
 	// The upgraded plugin re-binds its own command.
-	if err := reg.RegisterCommand("greet", v2); err != nil {
-		t.Fatalf("RegisterCommand after upgrade: %v", err)
-	}
+	mustDo(t, "RegisterCommand after upgrade", reg.RegisterCommand("greet", v2))
 
 	// A different plugin still cannot hijack an owned command.
 	other, err := ParseManifest([]byte(`{"name":"other","version":"0.1.0","entrypoint":"o.wasm","permissions":["commands"],"commands":[{"name":"greet"}]}`))
-	if err != nil {
-		t.Fatalf("ParseManifest other: %v", err)
-	}
-	if err := reg.installFromDisk(ctx, foundPlugin{Manifest: other, WASMPath: "o.wasm"}); err != nil {
-		t.Fatalf("install other: %v", err)
-	}
+	mustDo(t, "ParseManifest other", err)
+	mustDo(t, "install other", reg.installFromDisk(ctx, foundPlugin{Manifest: other, WASMPath: "o.wasm"}))
 	reg.mu.RLock()
 	otherInst := reg.byName["other"]
 	reg.mu.RUnlock()

@@ -25,24 +25,18 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/coder/websocket"
-
-	"github.com/J3vb/OwnCord/Server/auth"
 )
 
 func TestReconnect_ReplaysOwnVoiceLeaveAfterTeardownWithNoOldClient(t *testing.T) {
 	database := newTeardownTestDB(t)
 	ctx := context.Background()
 
-	userID, err := database.CreateUser(ctx, "voice-teardown-resume-user", "hash", 1)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	userID := mustCreateUser(t, database, "voice-teardown-resume-user", 1)
 	// A role with no permissions at all: VisibleChannelIDs returns nothing, so
 	// the voice room the user was live in cannot be in allowedChannelIDs.
 	noPerms, err := database.CreateRole(ctx, "voice-only-teardown", nil, 0, 1, false, false)
@@ -52,27 +46,14 @@ func TestReconnect_ReplaysOwnVoiceLeaveAfterTeardownWithNoOldClient(t *testing.T
 	if err := database.UpdateUserRole(ctx, userID, noPerms.ID); err != nil {
 		t.Fatalf("UpdateUserRole: %v", err)
 	}
-	user, err := database.GetUserByID(ctx, userID)
-	if err != nil || user == nil {
-		t.Fatalf("GetUserByID: %v", err)
-	}
+	user := mustGetUser(t, database, userID)
 
-	vcID, err := database.CreateChannel(ctx, "vc-teardown-resume", "voice", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
+	vcID := mustCreateChannel(t, database, "vc-teardown-resume", "voice")
 
-	token, err := auth.GenerateToken()
-	if err != nil {
-		t.Fatalf("GenerateToken: %v", err)
-	}
-	if _, err := database.CreateSession(ctx, userID, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
+	token := seedSessionToken(t, database, userID)
 
-	hub := newTestHub(t, database, auth.NewRateLimiter(), nil)
-	go hub.Run()
-	defer hub.Stop()
+	rig := newServeRigOn(t, database, nil)
+	hub := rig.hub
 
 	// Precondition: the room really is outside the READ-gated allowed set, so
 	// the plain replay filter can never deliver its events.
@@ -108,12 +89,9 @@ func TestReconnect_ReplaysOwnVoiceLeaveAfterTeardownWithNoOldClient(t *testing.T
 	pushVoice(101, MsgTypeVoiceState)
 	pushVoice(102, MsgTypeVoiceLeaveBC)
 
-	srv := httptest.NewServer(ServeWS(hub, []string{"*"}, 0))
-	defer srv.Close()
-
 	dialCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	conn, dialResp, dialErr := websocket.Dial(dialCtx, "ws"+strings.TrimPrefix(srv.URL, "http"), nil)
+	conn, dialResp, dialErr := websocket.Dial(dialCtx, "ws"+strings.TrimPrefix(rig.srv.URL, "http"), nil)
 	if dialResp != nil && dialResp.Body != nil {
 		_ = dialResp.Body.Close()
 	}

@@ -18,12 +18,7 @@ import (
 func newMentionFixture(t *testing.T) (*MessageService, *ChannelService, *db.DB) {
 	t.Helper()
 	database := newTestDB(t)
-	seedRole(t, database, &db.Role{
-		ID:          permissions.MemberRoleID,
-		Name:        "member",
-		Permissions: permissions.SendMessages | permissions.ReadMessages,
-		Position:    1,
-	})
+	seedMemberRole(t, database, permissions.SendMessages|permissions.ReadMessages)
 	seedRole(t, database, &db.Role{
 		ID:   permissions.ModeratorRoleID,
 		Name: "moderator",
@@ -152,10 +147,7 @@ func TestSendMessage_ResolvesKnownUsername(t *testing.T) {
 		t.Error("mentions_everyone should be false")
 	}
 
-	stored, err := database.GetMentionsByMessageIDs(context.Background(), []int64{res.MessageID})
-	if err != nil {
-		t.Fatalf("GetMentionsByMessageIDs: %v", err)
-	}
+	stored := mustGetMentionsByMessageIDs(t, database, []int64{res.MessageID})
 	if len(stored[res.MessageID]) != 1 || stored[res.MessageID][0] != 2 {
 		t.Errorf("stored mentions = %v, want [2]", stored[res.MessageID])
 	}
@@ -199,10 +191,7 @@ func TestSendMessage_UnknownWordStaysText(t *testing.T) {
 	if res.Content != "@nobody @bob@example.com hello" {
 		t.Errorf("content was rewritten: %q", res.Content)
 	}
-	stored, err := database.GetMentionsByMessageIDs(context.Background(), []int64{res.MessageID})
-	if err != nil {
-		t.Fatalf("GetMentionsByMessageIDs: %v", err)
-	}
+	stored := mustGetMentionsByMessageIDs(t, database, []int64{res.MessageID})
 	if len(stored) != 0 {
 		t.Errorf("stored mentions = %v, want none", stored)
 	}
@@ -225,10 +214,7 @@ func TestSendMessage_MentionCapped(t *testing.T) {
 	if len(res.Mentions) != maxMentionsPerMessage {
 		t.Fatalf("mentions = %d, want %d", len(res.Mentions), maxMentionsPerMessage)
 	}
-	stored, err := database.GetMentionsByMessageIDs(context.Background(), []int64{res.MessageID})
-	if err != nil {
-		t.Fatalf("GetMentionsByMessageIDs: %v", err)
-	}
+	stored := mustGetMentionsByMessageIDs(t, database, []int64{res.MessageID})
 	if len(stored[res.MessageID]) != maxMentionsPerMessage {
 		t.Errorf("stored = %d, want %d", len(stored[res.MessageID]), maxMentionsPerMessage)
 	}
@@ -314,9 +300,7 @@ func TestSendMessage_MentionsHereDistinguishesHereFromEveryone(t *testing.T) {
 func TestSendMessage_HereSkipsInvisibleUsers(t *testing.T) {
 	svc, _, database := newMentionFixture(t)
 
-	if err := database.UpdateUserStatus(context.Background(), 2, db.StatusInvisible); err != nil {
-		t.Fatalf("UpdateUserStatus(invisible): %v", err)
-	}
+	mustDo(t, "UpdateUserStatus(invisible)", database.UpdateUserStatus(context.Background(), 2, db.StatusInvisible))
 
 	sendAs(t, svc, 4, "@here quick question")
 	if got := mentionCount(t, database, 2); got != 0 {
@@ -342,9 +326,7 @@ func TestSendMessage_HereSkipsDisconnectedIdleDndUsers(t *testing.T) {
 
 	// bob's last chosen status was "dnd" before disconnecting (mirrors what
 	// StampDisconnect leaves behind for a non-"online" status).
-	if err := database.UpdateUserStatus(context.Background(), 2, db.StatusDND); err != nil {
-		t.Fatalf("UpdateUserStatus(dnd): %v", err)
-	}
+	mustDo(t, "UpdateUserStatus(dnd)", database.UpdateUserStatus(context.Background(), 2, db.StatusDND))
 	// bob has no live connection.
 	svc.SetLiveStatusLookup(func(userID int64) string {
 		if userID == 2 {
@@ -372,9 +354,7 @@ func TestSendMessage_HereSkipsDisconnectedIdleDndUsers(t *testing.T) {
 func TestSendMessage_HereReachesConnectedReaderBeforeStampFlush(t *testing.T) {
 	svc, _, database := newMentionFixture(t)
 
-	if err := database.UpdateUserStatus(context.Background(), 2, db.StatusOffline); err != nil {
-		t.Fatalf("UpdateUserStatus(offline): %v", err)
-	}
+	mustDo(t, "UpdateUserStatus(offline)", database.UpdateUserStatus(context.Background(), 2, db.StatusOffline))
 	svc.SetLiveStatusLookup(func(int64) string { return db.StatusOnline })
 
 	sendAs(t, svc, 4, "@here quick question")
@@ -427,9 +407,7 @@ func TestSendMessage_EveryoneHonorsUserOverrides(t *testing.T) {
 	// The role cannot read the channel at all...
 	seedChannelOverride(t, database, permissions.MemberRoleID, 10, 0, permissions.ReadMessages)
 	// ...but bob is individually granted READ back.
-	if err := database.UpsertChannelUserOverride(context.Background(), 10, 2, permissions.ReadMessages, 0); err != nil {
-		t.Fatalf("UpsertChannelUserOverride bob: %v", err)
-	}
+	mustDo(t, "UpsertChannelUserOverride bob", database.UpsertChannelUserOverride(context.Background(), 10, 2, permissions.ReadMessages, 0))
 
 	sendAs(t, svc, 4, "@everyone notice")
 	if got := mentionCount(t, database, 2); got != 1 {
@@ -443,9 +421,7 @@ func TestSendMessage_EveryoneHonorsUserOverrides(t *testing.T) {
 func TestSendMessage_EveryoneSkipsUserDenied(t *testing.T) {
 	svc, _, database := newMentionFixture(t)
 	// carol alone is denied READ on a channel her role can read.
-	if err := database.UpsertChannelUserOverride(context.Background(), 10, 3, 0, permissions.ReadMessages); err != nil {
-		t.Fatalf("UpsertChannelUserOverride carol: %v", err)
-	}
+	mustDo(t, "UpsertChannelUserOverride carol", database.UpsertChannelUserOverride(context.Background(), 10, 3, 0, permissions.ReadMessages))
 
 	sendAs(t, svc, 4, "@everyone notice")
 	if got := mentionCount(t, database, 2); got != 1 {
@@ -460,9 +436,7 @@ func TestSendMessage_EveryoneSkipsUserDenied(t *testing.T) {
 // raise their badge either — mentionReaders is the single gate behind both.
 func TestSendMessage_DirectMentionSkipsUserDenied(t *testing.T) {
 	svc, _, database := newMentionFixture(t)
-	if err := database.UpsertChannelUserOverride(context.Background(), 10, 2, 0, permissions.ReadMessages); err != nil {
-		t.Fatalf("UpsertChannelUserOverride bob: %v", err)
-	}
+	mustDo(t, "UpsertChannelUserOverride bob", database.UpsertChannelUserOverride(context.Background(), 10, 2, 0, permissions.ReadMessages))
 
 	sendAs(t, svc, 1, "@bob ping")
 	if got := mentionCount(t, database, 2); got != 0 {
@@ -477,9 +451,7 @@ func TestSendMessage_DirectMentionSkipsUserDenied(t *testing.T) {
 // implemented internally (loop or map).
 func TestSendMessage_MultipleDirectMentionsResolveIndependently(t *testing.T) {
 	svc, _, database := newMentionFixture(t)
-	if err := database.UpsertChannelUserOverride(context.Background(), 10, 3, 0, permissions.ReadMessages); err != nil {
-		t.Fatalf("UpsertChannelUserOverride carol: %v", err)
-	}
+	mustDo(t, "UpsertChannelUserOverride carol", database.UpsertChannelUserOverride(context.Background(), 10, 3, 0, permissions.ReadMessages))
 
 	sendAs(t, svc, 1, "@bob @carol @mod hi")
 
@@ -653,9 +625,7 @@ func TestPurgeMessages_ClearsMentionCounts(t *testing.T) {
 	}
 
 	purgeResult, err := svc.PurgeMessages(context.Background(), 4, 10, 10, 0)
-	if err != nil {
-		t.Fatalf("PurgeMessages: %v", err)
-	}
+	mustDo(t, "PurgeMessages", err)
 	if len(purgeResult.MessageIDs) != 1 || purgeResult.MessageIDs[0] != res.MessageID {
 		t.Fatalf("purged ids = %v, want [%d]", purgeResult.MessageIDs, res.MessageID)
 	}
@@ -676,17 +646,12 @@ func TestEditMessage_ReplacesMentionsWithoutRecounting(t *testing.T) {
 	}
 
 	edited, err := svc.EditMessage(context.Background(), 1, res.MessageID, "@carol instead")
-	if err != nil {
-		t.Fatalf("EditMessage: %v", err)
-	}
+	mustDo(t, "EditMessage", err)
 	if len(edited.Mentions) != 1 || edited.Mentions[0] != 3 {
 		t.Fatalf("edited mentions = %v, want [3]", edited.Mentions)
 	}
 
-	stored, err := database.GetMentionsByMessageIDs(context.Background(), []int64{res.MessageID})
-	if err != nil {
-		t.Fatalf("GetMentionsByMessageIDs: %v", err)
-	}
+	stored := mustGetMentionsByMessageIDs(t, database, []int64{res.MessageID})
 	if len(stored[res.MessageID]) != 1 || stored[res.MessageID][0] != 3 {
 		t.Errorf("stored mentions = %v, want [3]", stored[res.MessageID])
 	}
@@ -722,10 +687,7 @@ func TestGetChannelUnreadCounts_CarriesMentionCount(t *testing.T) {
 	svc, _, database := newMentionFixture(t)
 
 	sendAs(t, svc, 1, "@bob check the ready payload")
-	counts, err := database.GetChannelUnreadCounts(context.Background(), 2)
-	if err != nil {
-		t.Fatalf("GetChannelUnreadCounts: %v", err)
-	}
+	counts := mustGetChannelUnreadCounts(t, database, 2)
 	got, ok := counts[10]
 	if !ok {
 		t.Fatal("channel 10 missing from unread counts")
@@ -746,12 +708,9 @@ func TestSendMessage_DMMentionsResolve(t *testing.T) {
 	seedDMParticipant(t, database, 50, 1)
 	seedDMParticipant(t, database, 50, 2)
 
-	res, err := svc.SendMessage(context.Background(), SendMessageParams{
+	res := mustSendMessage(context.Background(), t, svc, SendMessageParams{
 		ChannelID: 50, UserID: 1, Username: "alice", Content: "@bob @everyone hi",
 	})
-	if err != nil {
-		t.Fatalf("SendMessage: %v", err)
-	}
 	if len(res.Mentions) != 1 || res.Mentions[0] != 2 {
 		t.Errorf("mentions = %v, want [2]", res.Mentions)
 	}

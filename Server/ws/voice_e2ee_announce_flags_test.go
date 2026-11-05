@@ -3,8 +3,6 @@ package ws_test
 import (
 	"encoding/json"
 	"testing"
-
-	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 // voice_e2ee_announce carries optional capability flags: key_slots (the
@@ -19,7 +17,7 @@ func e2eeAnnounceMsgFlag(publicKey, flag string, value any) []byte {
 	if value != nil {
 		payload[flag] = value
 	}
-	raw, _ := json.Marshal(map[string]any{"type": "voice_e2ee_announce", "payload": payload})
+	raw := envelope("voice_e2ee_announce", payload)
 	return raw
 }
 
@@ -28,9 +26,7 @@ func payloadFlag(t *testing.T, msg []byte, flag string) (bool, bool) {
 	var env struct {
 		Payload map[string]json.RawMessage `json:"payload"`
 	}
-	if err := json.Unmarshal(msg, &env); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	mustUnmarshal(t, msg, &env)
 	raw, ok := env.Payload[flag]
 	if !ok {
 		return false, false
@@ -58,10 +54,7 @@ func TestVoiceE2EEAnnounce_RelaysAndReplaysFlags(t *testing.T) {
 			}
 
 			user3 := seedVoiceOwner(t, database, "flag-relay-user3-"+flag)
-			send3 := make(chan []byte, 32)
-			c3 := ws.NewTestClientWithUser(hub, user3, 0, send3)
-			hub.Register(c3)
-			waitRegistered(t, hub, c3)
+			c3, send3 := connectClient(t, hub, user3, 0, 32)
 			hub.HandleMessageForTest(c3, voiceJoinMsg(chanID))
 			rm := waitMsgOfType(send3, "voice_e2ee_announce", waitTimeout)
 			if rm == nil {

@@ -17,9 +17,7 @@ func seedEmojiUploader(t *testing.T, database *db.DB) int64 {
 		t.Fatalf("seed uploader: %v", err)
 	}
 	id, err := res.LastInsertId()
-	if err != nil {
-		t.Fatalf("LastInsertId: %v", err)
-	}
+	mustDo(t, "LastInsertId", err)
 	return id
 }
 
@@ -33,9 +31,7 @@ func TestEmojiCRUDRoundTrip(t *testing.T) {
 	uploader := seedEmojiUploader(t, database)
 
 	created, err := database.CreateEmoji(ctx, "wave", "uuid-wave", "image/png", uploader)
-	if err != nil {
-		t.Fatalf("CreateEmoji: %v", err)
-	}
+	mustDo(t, "CreateEmoji", err)
 	if created.ID == 0 {
 		t.Fatalf("CreateEmoji returned id 0")
 	}
@@ -63,17 +59,13 @@ func TestEmojiCRUDRoundTrip(t *testing.T) {
 	}
 
 	deleted, err := database.DeleteEmoji(ctx, created.ID)
-	if err != nil {
-		t.Fatalf("DeleteEmoji: %v", err)
-	}
+	mustDo(t, "DeleteEmoji", err)
 	if !deleted {
 		t.Errorf("DeleteEmoji reported no row removed")
 	}
 	// A second delete of the same id must report false rather than pretending.
 	again, err := database.DeleteEmoji(ctx, created.ID)
-	if err != nil {
-		t.Fatalf("second DeleteEmoji: %v", err)
-	}
+	mustDo(t, "second DeleteEmoji", err)
 	if again {
 		t.Errorf("second DeleteEmoji reported a removal")
 	}
@@ -84,17 +76,13 @@ func TestEmojiMissingRowsAreNilNotError(t *testing.T) {
 	ctx := context.Background()
 
 	e, err := database.GetEmoji(ctx, 999)
-	if err != nil {
-		t.Fatalf("GetEmoji(missing): %v", err)
-	}
+	mustDo(t, "GetEmoji(missing)", err)
 	if e != nil {
 		t.Errorf("GetEmoji(missing) = %v, want nil", e)
 	}
 
 	e, err = database.GetEmojiByShortcode(ctx, "nosuch")
-	if err != nil {
-		t.Fatalf("GetEmojiByShortcode(missing): %v", err)
-	}
+	mustDo(t, "GetEmojiByShortcode(missing)", err)
 	if e != nil {
 		t.Errorf("GetEmojiByShortcode(missing) = %v, want nil", e)
 	}
@@ -106,9 +94,7 @@ func TestListEmojiIsOrderedAndEmptySliceWhenNone(t *testing.T) {
 	uploader := seedEmojiUploader(t, database)
 
 	list, err := database.ListEmoji(ctx)
-	if err != nil {
-		t.Fatalf("ListEmoji: %v", err)
-	}
+	mustDo(t, "ListEmoji", err)
 	if list == nil || len(list) != 0 {
 		t.Fatalf("ListEmoji on an empty table = %v, want an empty slice", list)
 	}
@@ -119,9 +105,7 @@ func TestListEmojiIsOrderedAndEmptySliceWhenNone(t *testing.T) {
 		}
 	}
 	list, err = database.ListEmoji(ctx)
-	if err != nil {
-		t.Fatalf("ListEmoji: %v", err)
-	}
+	mustDo(t, "ListEmoji", err)
 	want := []string{"alpha", "mike", "zulu"}
 	if len(list) != len(want) {
 		t.Fatalf("len(list) = %d, want %d", len(list), len(want))
