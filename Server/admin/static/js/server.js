@@ -64,17 +64,12 @@ async function renderSettings(){
   html+=settingsCard('Access & registration',regModeCards(v('registration_mode')||'invite'));
   html+=settingsCard('Security',
     '<div class="setting-row"><div class="setting-info"><div class="setting-name" id="s-require_2fa-name">Require two-factor authentication</div><div class="setting-desc" id="s-require_2fa-desc">Every member must turn on 2FA before they can use the server</div></div><div class="setting-ctrl"><button class="toggle '+(on?'on':'')+'" id="s-require_2fa" role="switch" aria-checked="'+on+'" aria-labelledby="s-require_2fa-name" aria-describedby="s-require_2fa-desc" data-action="toggleSetting"></button></div></div>');
-  html+=await afkCard(v('afk_timeout_seconds')||AFK_TIMEOUT_DEFAULT);
+  html+=await voiceCard(v('afk_timeout_seconds')||AFK_TIMEOUT_DEFAULT,isOwner()?settingNorm(OWNER_MOVABLE_KEY,v(OWNER_MOVABLE_KEY))==='true':null);
   const gameActivityOn=settingNorm(GAME_ACTIVITY_KEY,v(GAME_ACTIVITY_KEY))==='true';
   html+=settingsCard('Member activity (games and music)',
     '<div class="setting-row"><div class="setting-info"><div class="setting-name" id="s-'+GAME_ACTIVITY_KEY+'-name">Show what members are playing and listening to</div><div class="setting-desc" id="s-'+GAME_ACTIVITY_KEY+'-desc">This covers games and music. Turn it off and no one sees what anyone is playing or listening to on this server. Games and songs already shown are cleared at once, and members\' apps stop sending them</div></div><div class="setting-ctrl"><button class="toggle '+(gameActivityOn?'on':'')+'" id="s-'+GAME_ACTIVITY_KEY+'" role="switch" aria-checked="'+gameActivityOn+'" aria-labelledby="s-'+GAME_ACTIVITY_KEY+'-name" aria-describedby="s-'+GAME_ACTIVITY_KEY+'-desc" data-action="toggleSetting"></button></div></div>');
   html+=await welcomeCard(v(WELCOME_KEY));
   const owner=isOwner();
-  if(owner){
-    const movable=settingNorm(OWNER_MOVABLE_KEY,v(OWNER_MOVABLE_KEY))==='true';
-    html+=settingsCard('Voice: moving members',
-      '<div class="setting-row"><div class="setting-info"><div class="setting-name" id="s-'+OWNER_MOVABLE_KEY+'-name">Members with Move Members can move the owner</div><div class="setting-desc" id="s-'+OWNER_MOVABLE_KEY+'-desc">Turn this off and nobody can move the owner between voice channels</div></div><div class="setting-ctrl"><button class="toggle '+(movable?'on':'')+'" id="s-'+OWNER_MOVABLE_KEY+'" role="switch" aria-checked="'+movable+'" aria-labelledby="s-'+OWNER_MOVABLE_KEY+'-name" aria-describedby="s-'+OWNER_MOVABLE_KEY+'-desc" data-action="toggleSetting"></button></div></div>');
-  }
   const extInput=k=>'<input class="form-input" id="s-'+k+'" value="'+esc(v(k).split(',').filter(Boolean).join(', '))+'" aria-describedby="s-'+k+'-desc" data-input-action="markSettingsChanged"'+(owner?'':' disabled')+'>';
   html+=settingsCard('Upload file types',
     '<p class="setting-desc">Executables and scripts that start with a program signature are always refused by their content. These lists refuse files by their last extension, however it is capitalised, so <code>report.pdf.bat</code> is refused for <code>bat</code>. Separate extensions with commas.'+(owner?'':' Only the server owner can change the file types.')+'</p>'
@@ -114,14 +109,16 @@ async function renderSettings(){
   return html;
 }
 
-/* Voice: AFK. The timeout is an ordinary setting and rides the save bar. The
-   channel has its own endpoint, so its select saves on change and reports
-   beside itself; neither save claims the other. GET /channels is Manage
-   Channels, so a Manage Server admin without it sees the select disabled. */
+/* Voice: one card, two parts. AFK: the timeout is an ordinary setting and
+   rides the save bar. The channel has its own endpoint, so its select saves
+   on change and reports beside itself; neither save claims the other. GET
+   /channels is Manage Channels, so a Manage Server admin without it sees the
+   select disabled. Moving members is the owner's own toggle (movable is null
+   for everyone else, and the part is left out). */
 function afkSelect(id,opts,cur,attrs){
   return'<select class="filter-select" id="'+id+'"'+attrs+'>'+opts.map(([val,label])=>'<option value="'+esc(val)+'"'+(val===cur?' selected':'')+'>'+esc(label)+'</option>').join('')+'</select>';
 }
-async function afkCard(timeout){
+async function voiceCard(timeout,movable){
   let channels=null,chErr='';
   try{const r=await api('GET','/channels');if(Array.isArray(r))channels=r}catch(e){chErr=e.message||''}
   const voice=(channels||[]).filter(c=>c.type==='voice');
@@ -134,11 +131,15 @@ async function afkCard(timeout){
     :afkSelect('s-afk_channel',[['','Channels unavailable']],'',' disabled aria-describedby="s-afk_channel-desc"');
   const timeoutSel=afkSelect('s-afk_timeout_seconds',AFK_TIMEOUTS,timeout,' aria-describedby="s-afk_timeout_seconds-desc" data-change-action="markSettingsChanged"');
   const warnings=await afkWarningsHtml(current);
-  return settingsCard('Voice: AFK',
-    settingsRow('afk_channel','AFK channel','Members idle for 10 minutes, then the time below, are moved here and can only listen: no microphone, camera or screen sharing. Only idle members are moved, and anyone who could not join the channel stays where they are. Saves as soon as you choose.'
+  const moving=movable===null?'':'<h4 class="setting-sub">Moving members</h4>'
+    +'<div class="setting-row"><div class="setting-info"><div class="setting-name" id="s-'+OWNER_MOVABLE_KEY+'-name">Members with Move Members can move the owner</div><div class="setting-desc" id="s-'+OWNER_MOVABLE_KEY+'-desc">Turn this off and nobody can move the owner between voice channels</div></div><div class="setting-ctrl"><button class="toggle '+(movable?'on':'')+'" id="s-'+OWNER_MOVABLE_KEY+'" role="switch" aria-checked="'+movable+'" aria-labelledby="s-'+OWNER_MOVABLE_KEY+'-name" aria-describedby="s-'+OWNER_MOVABLE_KEY+'-desc" data-action="toggleSetting"></button></div></div>';
+  return settingsCard('Voice',
+    '<h4 class="setting-sub">Idle members (AFK)</h4>'
+    +settingsRow('afk_channel','AFK channel','Members idle for 10 minutes, then the time below, are moved here and can only listen: no microphone, camera or screen sharing. Only idle members are moved, and anyone who could not join the channel stays where they are. Saves as soon as you choose.'
       ,'<div class="afk-ctrl">'+chSel+'<span class="setting-desc" id="afkChannelState" role="status">'+(channels?'':esc((chErr||'Could not load channels')+' Choosing the AFK channel needs Manage Channels.'))+'</span></div>')
     +'<div id="afkWarnings" aria-live="polite">'+warnings+'</div>'
-    +settingsRow('afk_timeout_seconds','Move after','How long a member must stay idle, on top of the 10 minutes the app waits before marking them idle',timeoutSel));
+    +settingsRow('afk_timeout_seconds','Move after','How long a member must stay idle, on top of the 10 minutes the app waits before marking them idle',timeoutSel)
+    +moving);
 }
 /* Welcome messages: an ordinary setting that rides the save bar. The choices
    are Off and every non-archived text channel; a saved channel that has since
@@ -659,12 +660,19 @@ async function renderUpdates(){
      check found, with one primary action. */
   const cur=info?verLabel(info.current):'an unknown version';
   let tone,title,sub='';
+  const devBuild=!!info&&info.apply_blocked==='development_build';
   if(checkError){tone='critical';title='Could not check for updates';sub=checkError}
+  else if(devBuild){tone='unknown';title='Development build';sub='Running '+esc(cur)+'. Updates are not applied automatically.'+(info.latest?' The latest release is '+esc(verLabel(info.latest))+'.':'')}
   else if(info&&info.update_available){tone='warning';title=esc(verLabel(info.latest))+' is available';sub='You are running '+esc(cur)+'.'+(releaseNotesLink(info,'Release notes')?' '+releaseNotesLink(info,'Release notes'):'')}
   else{tone='ok';title='You are on the latest version';sub='Running '+esc(cur)+'.'}
   let html='<div class="page-title">Updates</div><div class="page-desc">Which version this server runs, and whether a newer one is out.</div>';
   html+='<div class="status-line" id="updateStatus">'+statusIcon(tone)+'<div><div class="status-line-title">'+(checkError?esc(title):title)+'</div><div class="status-line-sub">'+(checkError?esc(sub):sub)+'</div></div></div>';
-  if(info&&info.update_available&&info.can_apply===false){
+  if(devBuild){
+    /* A source build: the server refuses apply (409 DEVELOPMENT_BUILD), as
+       swapping in the release binary is almost never what a developer wants. */
+    html+='<p class="card-note">This server was built from source. To run a release, install it by hand: see Upgrade and Rollback in the deployment guide.</p>';
+    html+='<div class="btn-row"><button class="btn btn-ghost" data-action="renderContent">'+I.refresh+' Check again</button></div>';
+  }else if(info&&info.update_available&&info.can_apply===false){
     /* In-place apply is refused server-side, so say why instead of offering a
        button that can only fail. Containers: the binary is image content
        (503 CONTAINER_DEPLOYMENT). Read-only install folder: the service

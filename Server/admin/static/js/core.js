@@ -600,12 +600,16 @@ const REGISTRATIONS_PAGE=50;
 /* The Members > Pending view over-fetches its first page by one row, so there
    more than REGISTRATIONS_PAGE rows means more; the plain GET cannot tell a
    full page from a longer queue. Later pages leave the badge alone. */
+/* A newer release is news, except on a development build: the server will
+   not apply it there, so neither the nav badge nor the Dashboard strip
+   offers it. */
+function updateOffered(u){return!!u&&!!u.update_available&&u.apply_blocked!=='development_build'}
 function noteBadgeSource(path,data){
   let v;
   const firstPage=/^\/registrations\?limit=\d+&offset=0$/.test(path);
   if((path==='/registrations'||firstPage)&&Array.isArray(data))v=['pending',(firstPage?data.length>REGISTRATIONS_PAGE:data.length>=REGISTRATIONS_PAGE)?REGISTRATIONS_PAGE+'+':data.length];
   else if(path==='/attention'&&data&&Array.isArray(data.warnings))v=['warnings',data.warnings.filter(w=>!w.recovered_at&&!isDismissed('attn:'+w.id,attnSig(w))).length];
-  else if(path==='/updates'&&data&&typeof data==='object')v=['update',!!data.update_available];
+  else if(path==='/updates'&&data&&typeof data==='object')v=['update',updateOffered(data)];
   if(!v||state.badges[v[0]]===v[1])return;
   state.badges[v[0]]=v[1];
   if(document.getElementById('sidebarNav').childElementCount)renderNav();
@@ -692,6 +696,25 @@ function renderContent(){
   }
 }
 
+/* One themed file control for every upload page: the native input is
+   visually hidden but stays focusable and keyboard-operable, a label styled
+   as a button opens it, and the chosen file's name shows beside it.
+   opts.after names an ACTIONS handler to run, as the input, after a choice. */
+function pickFile(id,accept,label,opts){
+  const o=opts||{};
+  return'<span class="file-pick"><input type="file" class="file-pick-input" id="'+esc(id)+'" accept="'+esc(accept)+'"'+(label?' aria-label="'+esc(label)+'"':'')+(o.disabled?' disabled':'')
+    +' data-change-action="filePicked" data-args="'+actArgs(o.after||'')+'">'
+    +'<label class="btn btn-outline file-pick-btn" for="'+esc(id)+'" aria-hidden="true">'+I.upload+' Choose file</label>'
+    +'<span class="file-pick-name" id="'+esc(id)+'Name">No file chosen</span></span>';
+}
+function filePicked(after){
+  const f=this.files&&this.files[0];
+  const name=document.getElementById(this.id+'Name');
+  if(name)name.textContent=f?f.name:'No file chosen';
+  const fn=after&&ACTIONS[after];
+  if(typeof fn==='function')fn.apply(this,[]);
+}
+
 /* ═══ Actions ═══ */
 /* The admin CSP is script-src 'self', so no markup carries an on*= handler.
    A control names its handler instead: data-action runs on click,
@@ -714,7 +737,7 @@ function delegateActions(type,attr){
 delegateActions('click','data-action');
 delegateActions('input','data-input-action');
 delegateActions('change','data-change-action');
-Object.assign(ACTIONS,{closeModal:dismissModal,renderContent,navigateTo,doLogout,dismissToast,openNav,dismissNotice,restoreDismissed,
+Object.assign(ACTIONS,{filePicked,closeModal:dismissModal,renderContent,navigateTo,doLogout,dismissToast,openNav,dismissNotice,restoreDismissed,
   closeNav(){closeNav()},
   toggleUserMenu(){if(isUserMenuOpen())closeUserMenu(true);else openUserMenu()},
   closeModalAndRefresh(){if(dismissModal())renderContent()},

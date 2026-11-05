@@ -6024,8 +6024,12 @@ works, and `apply_blocked` (present only then) says why:
 
 - `container`: a container deployment (detected via `OWNCORD_CONTAINER`, which
   the shipped Dockerfile sets, or the engine marker files). The admin SPA
-  replaces the apply button with an image-upgrade note. This wins when both
-  reasons apply.
+  replaces the apply button with an image-upgrade note. This wins over the
+  other reasons.
+- `development_build`: the server runs a source build (version `dev`, not a
+  semantic version, or a `git describe` string past a tag). The admin SPA
+  shows "Development build" and no apply button, and hides the update badge
+  and the Dashboard strip. This wins over `install_read_only`.
 - `install_read_only`: the service cannot create files in the folder that holds
   its program file. The admin SPA says to install the new release by hand.
 
@@ -6057,6 +6061,7 @@ re-verification against TOCTOU swaps), spawns the new process and shuts down.
 | Status | Code                                                         | Cause                                                                                                                                                       |
 | ------ | ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 503    | `CONTAINER_DEPLOYMENT`                                       | Container deployment — the binary is image content; upgrade by pulling the new image (opt back in with `OWNCORD_CONTAINER=0` if the binary is bind-mounted) |
+| 409    | `DEVELOPMENT_BUILD`                                          | The server runs a development build; a source build is never replaced with a release. Install the release by hand                                           |
 | 503    | `INSTALL_READ_ONLY`                                          | The service cannot write to the folder that holds its program file; checked before any download. Install the new release by hand                            |
 | 503    | `UPDATE_UNAVAILABLE`                                         | Update checking is not configured                                                                                                                           |
 | 503    | `SHUTTING_DOWN`                                              | The server has begun shutting down, so the update was not downloaded or applied (checked before the download and again before the restart countdown starts) |

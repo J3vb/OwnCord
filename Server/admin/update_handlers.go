@@ -33,12 +33,15 @@ var installWritable = func() error {
 const (
 	applyBlockedContainer       = "container"
 	applyBlockedInstallReadOnly = "install_read_only"
+	applyBlockedDevelopment     = "development_build"
 )
 
 // handleCheckUpdate returns the current update status. can_apply tells the
 // admin SPA whether POST /updates/apply is usable in this deployment: false in
-// containers (upgrades are image pulls) and when the service cannot write to
-// its install directory. apply_blocked names which; the container check wins.
+// containers (upgrades are image pulls), for a development build (a source
+// build is never swapped for a release) and when the service cannot write to
+// its install directory. apply_blocked names which; the container check wins,
+// then the development build.
 func handleCheckUpdate(u *updater.Updater) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if u == nil {
@@ -55,6 +58,8 @@ func handleCheckUpdate(u *updater.Updater) http.HandlerFunc {
 		switch {
 		case updater.RunningInContainer():
 			blocked = applyBlockedContainer
+		case u.DevelopmentBuild():
+			blocked = applyBlockedDevelopment
 		case installWritable() != nil:
 			blocked = applyBlockedInstallReadOnly
 		}
@@ -141,6 +146,14 @@ func handleApplyUpdate(database *db.DB, u *updater.Updater, hub HubBroadcaster, 
 		// or long download, while the database is surely open.
 		if stop.stopping() {
 			refuseApplyShuttingDown(w)
+			return
+		}
+
+		// A source build would be replaced by the release binary, which is
+		// almost never what someone running from source wants.
+		if u.DevelopmentBuild() {
+			writeErr(w, http.StatusConflict, httperr.CodeDevelopmentBuild,
+				"this is a development build; updates are not applied automatically, build or install the release by hand")
 			return
 		}
 

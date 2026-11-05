@@ -94,10 +94,9 @@ function paintImportForm(body){
   const file=importEl('div','form-group');
   const fl=importEl('label','form-label','Export file (.json or .zip)');
   fl.htmlFor='discordImportFile';
-  const input=importEl('input','form-input');
-  input.type='file';input.id='discordImportFile';input.accept='.json,.zip';
-  input.disabled=importUI.busy;
-  file.append(fl,input);
+  const pick=importEl('div');
+  pick.innerHTML=pickFile('discordImportFile','.json,.zip','',{disabled:importUI.busy});
+  file.append(fl,pick);
   if(importUI.maxBytes>0)file.appendChild(importEl('div','setting-desc','Up to '+fmtBytes(importUI.maxBytes)+' (upload.import_max_mb).'));
   body.appendChild(file);
 

@@ -39,7 +39,7 @@
       "2339:Property 'tabIndex' does not exist on type 'Element'.": 1,
       "2339:Property 'value' does not exist on type 'Element'.": 2,
       "2339:Property 'value' does not exist on type 'HTMLElement | {}'.": 2,
-      "2339:Property 'value' does not exist on type 'HTMLElement'.": 23,
+      "2339:Property 'value' does not exist on type 'HTMLElement'.": 19,
       "2363:The right-hand side of an arithmetic operation must be of type 'any', 'number', 'bigint' or an enum type.": 2
     },
     "admin/static/js/server.js": {

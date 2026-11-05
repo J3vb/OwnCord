@@ -179,12 +179,12 @@ async function renderDashboard(){
   if(can(PERM.VIEW_DIAGNOSTICS)){
     await startHealthPoll();
     html+=healthRow();
-    try{const a=renderAttention(await api('GET','/attention'),u&&u.update_available&&isDismissed('update',noticeSig(u.latest)));html+=a.head;checks=a.checks}
+    try{const a=renderAttention(await api('GET','/attention'),updateOffered(u)&&isDismissed('update',noticeSig(u.latest)));html+=a.head;checks=a.checks}
     catch(e){html+='<section id="attentionPanel" class="section-card"><div class="section-card-body"><p style="color:var(--text-danger)">Could not load attention state: '+esc(e.message)+'</p><button class="btn btn-ghost" data-action="renderContent">Retry</button></div></section>'}
     html+=slowRequestsCard();
   }
   const updSig=u&&noticeSig(u.latest);
-  if(u&&u.update_available&&!isDismissed('update',updSig))html+='<div class="update-strip">'+I.updates+'<span><strong>'+esc(verLabel(u.latest))+' is available.</strong> <span class="muted">You are running '+esc(verLabel(u.current))+'.</span></span><button class="btn btn-outline" data-action="navigateTo" data-args="'+actArgs('updates')+'">View update</button>'+dismissButton('update',updSig,'update notice')+'</div>';
+  if(updateOffered(u)&&!isDismissed('update',updSig))html+='<div class="update-strip">'+I.updates+'<span><strong>'+esc(verLabel(u.latest))+' is available.</strong> <span class="muted">You are running '+esc(verLabel(u.current))+'.</span></span><button class="btn btn-outline" data-action="navigateTo" data-args="'+actArgs('updates')+'">View update</button>'+dismissButton('update',updSig,'update notice')+'</div>';
   const stat=(label,value)=>'<div class="stat-card"><div class="stat-card-label">'+label+'</div><div class="stat-card-value">'+value+'</div></div>';
   html+='<div class="stat-grid compact">'+stat('Members',s.user_count||0)+stat('Messages',(s.message_count||0).toLocaleString())+stat('Channels',s.channel_count||0)+stat('Database',fmtBytes(s.db_size_bytes||0))+'</div>';
   html+=checks;
@@ -956,7 +956,7 @@ async function renderPlugins(){
   let html='<div class="page-title">Plugins</div><div class="page-desc">Install and manage server plugins</div>';
 
   const install='<div style="display:inline-flex;gap:8px;align-items:center;flex-wrap:wrap">'+
-    '<input type="file" id="pluginFile" aria-label="Plugin package (.zip)" accept=".zip,application/zip" class="form-input" style="max-width:320px;padding:8px" data-change-action="pluginFileChosen">'+
+    pickFile('pluginFile','.zip,application/zip','Plugin package (.zip)',{after:'pluginFileChosen'})+
     '<button class="btn btn-accent" id="pluginInstallBtn" disabled data-action="installPlugin">'+I.upload+' Install</button></div>';
   if(disabled){
     html+='<div class="section-card" style="border-color:var(--yellow)"><div class="section-card-body"><strong style="color:var(--text-warning)">Plugin runtime is disabled on this server.</strong><div style="color:var(--text-muted);font-size:13px;margin-top:4px">Installed plugins are listed below but cannot be installed, enabled, or removed until the runtime is turned on in the server configuration.</div></div></div>';

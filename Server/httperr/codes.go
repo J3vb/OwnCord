@@ -30,15 +30,18 @@ const (
 	CodeConfirmationRequired Code = "CONFIRMATION_REQUIRED"
 	CodeConflict             Code = "CONFLICT"
 	CodeContainerDeployment  Code = "CONTAINER_DEPLOYMENT"
-	CodeDownloadFailed       Code = "DOWNLOAD_FAILED"
-	CodeDuplicateReport      Code = "DUPLICATE_REPORT"
-	CodeEnvOverridden        Code = "ENV_OVERRIDDEN"
-	CodeForbidden            Code = "FORBIDDEN"
-	CodeGIFDisabled          Code = "GIF_DISABLED"
-	CodeGIFFavoritesFull     Code = "GIF_FAVORITES_FULL"
-	CodeGroupDMFull          Code = "GROUP_DM_FULL"
-	CodeInstallFailed        Code = "INSTALL_FAILED"
-	CodeInstallReadOnly      Code = "INSTALL_READ_ONLY"
+	// A source build (version dev or untagged) never replaces itself with a
+	// release.
+	CodeDevelopmentBuild Code = "DEVELOPMENT_BUILD"
+	CodeDownloadFailed   Code = "DOWNLOAD_FAILED"
+	CodeDuplicateReport  Code = "DUPLICATE_REPORT"
+	CodeEnvOverridden    Code = "ENV_OVERRIDDEN"
+	CodeForbidden        Code = "FORBIDDEN"
+	CodeGIFDisabled      Code = "GIF_DISABLED"
+	CodeGIFFavoritesFull Code = "GIF_FAVORITES_FULL"
+	CodeGroupDMFull      Code = "GROUP_DM_FULL"
+	CodeInstallFailed    Code = "INSTALL_FAILED"
+	CodeInstallReadOnly  Code = "INSTALL_READ_ONLY"
 	// REST form of an internal failure; the WebSocket sends INTERNAL for the same
 	// thing.
 	CodeInternalError      Code = "INTERNAL_ERROR"
