@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
 // moderationHistoryStore is what the moderation action history reads and writes.
@@ -72,4 +73,17 @@ func (s *moderationHistory) AcknowledgeWarning(ctx context.Context, userID, acti
 		return fmt.Errorf("%w: notice not found", ErrNotFound)
 	}
 	return nil
+}
+
+// ListActionsForTarget backs GET /api/v1/moderation/users/{id}/actions, gated on
+// MODERATE_MEMBERS like the report queue.
+func (s *ModerationService) ListActionsForTarget(ctx context.Context, actorID, targetID int64) ([]db.ModerationAction, error) {
+	if _, err := s.requirePerm(ctx, actorID, permissions.ModerateMembers); err != nil {
+		return nil, err
+	}
+	rows, err := s.moderationHistory.st.ListModerationActionsForTarget(ctx, targetID)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrInternal, err)
+	}
+	return rows, nil
 }
