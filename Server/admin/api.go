@@ -350,8 +350,7 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 		gates.route(r, gateViewDiagnostics, http.MethodGet, "/attention", handleGetAttention(svc.Attention))
 		// The Dashboard health row and the System health page: the same
 		// server health detail as the attention panel.
-		mountSystemRoutes(r, gates, setupOpts.System, hub, svc.Attention, version)
-		gates.route(r, gateManageConfig, http.MethodPost, "/system/livekit/restart", handleRestartLiveKit(diagnostics, hub))
+		mountSystemRoutes(r, gates, setupOpts.System, hub, svc.Attention, diagnostics, version)
 		mountUserRoutes(r, gates, svc, hub, mod)
 		// The approval-mode registration queue: deciding who joins
 		// is server management, not moderation of existing members.
