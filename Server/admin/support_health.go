@@ -61,6 +61,7 @@ type healthSnapshot struct {
 	LiveKitGaveUp          *bool            `json:"livekit_gave_up,omitempty"`
 	LiveKitHealthy         *bool            `json:"livekit_healthy,omitempty"`
 	LiveKitManaged         *bool            `json:"livekit_managed,omitempty"`
+	LiveKitNextRetryAt     *time.Time       `json:"livekit_next_retry_at,omitempty"`
 	LiveKitRestarts        *int             `json:"livekit_restarts,omitempty"`
 	LowPriorityDrops       *uint64          `json:"low_priority_drops,omitempty"`
 	QueueDisconnects       *uint64          `json:"queue_disconnects,omitempty"`
@@ -108,6 +109,9 @@ func supportHealth(hub HubBroadcaster, at time.Time) healthSnapshot {
 		out.LiveKitHealthy = new(status.Running)
 		out.LiveKitRestarts = new(status.Restarts)
 		out.LiveKitGaveUp = new(status.GaveUp)
+		if !status.NextRetryAt.IsZero() {
+			out.LiveKitNextRetryAt = new(status.NextRetryAt.UTC())
+		}
 	}
 	return out
 }

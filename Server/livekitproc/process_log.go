@@ -5,6 +5,7 @@ import (
 	"context"
 	"log/slog"
 	"strings"
+	"time"
 )
 
 // Status is the supervisor's local state: whether a companion is
@@ -15,6 +16,9 @@ type Status struct {
 	Running  bool
 	Restarts int
 	GaveUp   bool
+	// NextRetryAt is when the slow retry tier tries again; zero unless the
+	// supervisor is waiting there.
+	NextRetryAt time.Time
 }
 
 // Status reports the companion's local state. Nil-safe: a nil manager means
@@ -23,10 +27,17 @@ func (p *Process) Status() Status {
 	if p == nil {
 		return Status{}
 	}
+	p.mu.Lock()
+	running := p.cmd != nil && p.cmd.Process != nil
+	next := p.nextRetry
+	p.mu.Unlock()
 	return Status{
-		Running:  p.IsRunning(),
+		Running:  running,
 		Restarts: int(p.restarts.Load()),
-		GaveUp:   p.gaveUp.Load(),
+		// A slow-tier attempt that is running is not given up: voice works while it
+		// runs. The flag itself stays set until a run proves stable.
+		GaveUp:      p.gaveUp.Load() && !running,
+		NextRetryAt: next,
 	}
 }
 

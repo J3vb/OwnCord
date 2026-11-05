@@ -35,3 +35,9 @@ func (s *DiagnosticsService) RecordBundle(ctx context.Context, actor int64) erro
 	return s.st.LogAudit(ctx, actor, "support_bundle_create", "server", 0,
 		"items: manifest.json, build.json, configuration.json, database.json, health.json, events.json")
 }
+
+// RecordVoiceServerRestart audits an admin's "Restart voice server" press,
+// best-effort: the restart has already been asked for.
+func (s *DiagnosticsService) RecordVoiceServerRestart(ctx context.Context, actor int64) {
+	db.WriteAudit(ctx, s.st, actor, "voice_server_restart_requested", "server", 0, "manual")
+}

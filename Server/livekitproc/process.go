@@ -29,12 +29,22 @@ type Process struct {
 	restarts atomic.Int64
 	gaveUp   atomic.Bool
 
-	mu       syncutil.Mutex
-	cmd      *exec.Cmd
-	cancel   context.CancelFunc
-	stopped  bool
-	runDone  chan struct{} // closed by runLoop when cmd.Wait() returns
-	loopDone chan struct{} // closed when runLoop exits entirely
+	// timing is the restart backoff; New sets the shipped values, tests shorten them.
+	timing restartTiming
+	// kick wakes a loop waiting in the slow retry tier (Restart); one slot, so
+	// extra presses collapse into the one already queued.
+	kick chan struct{}
+
+	mu syncutil.Mutex
+	// nextRetry is when the slow retry tier tries again; zero while runLoop is not
+	// waiting there. Guarded by mu so Restart and the loop agree on whether a wake
+	// can still land.
+	nextRetry time.Time
+	cmd       *exec.Cmd
+	cancel    context.CancelFunc
+	stopped   bool
+	runDone   chan struct{} // closed by runLoop when cmd.Wait() returns
+	loopDone  chan struct{} // closed when runLoop exits entirely
 }
 
 // Status and the companion log writer live in process_log.go.
@@ -47,6 +57,8 @@ func New(cfg *config.VoiceConfig, tlsCfg *config.TLSConfig, dataDir string) *Pro
 		cfg:     cfg,
 		tlsCfg:  tlsCfg,
 		dataDir: dataDir,
+		timing:  defaultRestartTiming,
+		kick:    make(chan struct{}, 1),
 		httpClient: &http.Client{
 			// Own the transport rather than inherit http.DefaultTransport: its pool is shared
 			// process-wide, and httptest.Server.Close closes its idle connections, severing
@@ -268,25 +280,19 @@ func (p *Process) resolveBinary(ctx context.Context) (string, error) {
 }
 
 // runLoop starts and restarts the process until stopped or cancelled, with
-// exponential backoff (3s doubling to 60s), stopping after 10 consecutive rapid
-// failures (exit within 30 seconds). loopDone is closed by the Start goroutine.
+// exponential backoff (3s doubling to 60s). After 10 consecutive rapid failures
+// (exit within 30 seconds) it gives up the fast tier and tries once every 10
+// minutes, or at once when an admin calls Restart. loopDone is closed by the
+// Start goroutine.
 func (p *Process) runLoop(ctx context.Context, cfgPath, binPath string) {
-	const (
-		baseDelay   = 3 * time.Second
-		maxDelay    = 60 * time.Second
-		maxRetries  = 10
-		stableAfter = 30 * time.Second // reset counter if process runs longer than this
-	)
-
+	tm := p.timing
 	rapidFailures := 0
-	delay := baseDelay
+	delay := tm.baseDelay
 
 	for {
 		if ctx.Err() != nil {
 			return
 		}
-
-		cmd := newLiveKitCmd(ctx, cfgPath, binPath)
 
 		slog.Info("livekit: starting process",
 			"binary", binPath,
@@ -294,47 +300,16 @@ func (p *Process) runLoop(ctx context.Context, cfgPath, binPath string) {
 			"rapid_failures", rapidFailures)
 
 		startTime := time.Now()
-		p.mu.Lock()
-		if p.stopped {
-			p.mu.Unlock()
-			return
-		}
-		// Start inside the critical section that publishes p.cmd: Start writes cmd.Process,
-		// which IsRunning and Stop read under p.mu; started after the unlock, that write
-		// races every such read.
-		err := cmd.Start()
-		if err == nil {
-			if jobErr := containLiveKitProcess(cmd.Process); jobErr != nil {
-				slog.Warn("livekit: companion may outlive this process if it exits without shutting down",
-					"error", jobErr)
-			}
-			p.cmd = cmd
-			p.runDone = make(chan struct{})
-		}
-		p.mu.Unlock()
-
-		if err == nil {
-			err = cmd.Wait()
-		}
-
-		p.mu.Lock()
-		p.cmd = nil
-		if p.runDone != nil {
-			close(p.runDone)
-			p.runDone = nil
-		}
-		stopped := p.stopped
-		p.mu.Unlock()
-
-		if stopped || ctx.Err() != nil {
-			slog.Info("livekit: process stopped")
+		live, err := p.runOnce(ctx, cfgPath, binPath)
+		if !live {
 			return
 		}
 
 		// A process that ran for a while was stable: reset backoff.
-		if time.Since(startTime) > stableAfter {
+		if time.Since(startTime) > tm.stableAfter {
 			rapidFailures = 0
-			delay = baseDelay
+			delay = tm.baseDelay
+			p.gaveUp.Store(false)
 		} else {
 			rapidFailures++
 		}
@@ -347,11 +322,20 @@ func (p *Process) runLoop(ctx context.Context, cfgPath, binPath string) {
 				"restart_delay", delay)
 		}
 
-		if rapidFailures >= maxRetries {
-			p.gaveUp.Store(true)
-			slog.Error("livekit: too many rapid failures, giving up",
-				"rapid_failures", rapidFailures)
-			return
+		if rapidFailures >= tm.maxRetries {
+			manual, ok := p.slowRetry(ctx, rapidFailures)
+			if !ok {
+				return
+			}
+			// One more rapid failure after a timed attempt lands back in the slow tier;
+			// an admin's restart gets the whole fast tier again.
+			rapidFailures = tm.maxRetries - 1
+			if manual {
+				rapidFailures = 0
+				p.gaveUp.Store(false)
+			}
+			delay = tm.baseDelay
+			continue
 		}
 
 		select {
@@ -362,8 +346,8 @@ func (p *Process) runLoop(ctx context.Context, cfgPath, binPath string) {
 		}
 
 		delay *= 2
-		if delay > maxDelay {
-			delay = maxDelay
+		if delay > tm.maxDelay {
+			delay = tm.maxDelay
 		}
 	}
 }
@@ -469,5 +453,5 @@ func HTTPURL(wsURL string) string {
 // NewStoppableForTest returns a Process that looks started and runs onStop when
 // Stop cancels it, so the hub's teardown order can be tested without a binary.
 func NewStoppableForTest(onStop func()) *Process {
-	return &Process{cancel: onStop}
+	return &Process{cancel: onStop, kick: make(chan struct{}, 1)}
 }

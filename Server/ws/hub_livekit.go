@@ -56,6 +56,15 @@ func (h *Hub) LiveKitProcessStatus() livekitproc.Status {
 	return h.voiceHub.lkProcess.Status()
 }
 
+// RestartLiveKit wakes a supervisor that stopped restarting the companion; false
+// when there is nothing to restart (running, still retrying, or not managed).
+func (h *Hub) RestartLiveKit() bool {
+	if h.voiceHub.lkProcess == nil {
+		return false
+	}
+	return h.voiceHub.lkProcess.Restart()
+}
+
 // LiveKitPID returns the supervised companion's process id; ok is false when
 // LiveKit is not managed or no process is running right now.
 func (h *Hub) LiveKitPID() (int, bool) {

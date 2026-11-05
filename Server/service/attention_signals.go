@@ -243,7 +243,7 @@ func (s *AttentionService) evalBackup(r attentionReadings, now time.Time) {
 func (s *AttentionService) evalVoice(r attentionReadings, now time.Time) {
 	sig := AttentionSignal{ID: "voice", Label: "Voice (LiveKit)", ObservedAt: now}
 	title := "Voice is unavailable"
-	action := "Check Server Logs for \"livekit companion output\" entries (component=livekit; the managed LiveKit's own line is in their line attribute). If it gave up, fix its config or binary and restart the server."
+	action := "Check Server Logs for \"livekit companion output\" entries (component=livekit; the managed LiveKit's own line is in their line attribute). If it gave up, fix its config or binary, then press Restart voice server on the System health page (it also tries again by itself every 10 minutes)."
 	if r.voice == nil {
 		sig.Status, sig.Detail = AttentionStatusUnknown, "voice health is not measured on this server"
 		s.settle(sig, title, action)
@@ -287,7 +287,7 @@ func (s *AttentionService) evalVoice(r attentionReadings, now time.Time) {
 	switch sig.Status {
 	case AttentionStatusCritical:
 		sig.Value = "gave up"
-		sig.Detail = fmt.Sprintf("the companion exited %d time(s) and the supervisor stopped restarting it", v.Restarts)
+		sig.Detail = fmt.Sprintf("the companion exited %d time(s) and the supervisor stopped its quick restarts; it tries again every 10 minutes", v.Restarts)
 	case AttentionStatusWarning:
 		sig.Value = "not running"
 		sig.Detail = "the supervised LiveKit process is not running; voice joins are refused"
