@@ -2,7 +2,10 @@ package db
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
+
+	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
 // Auditor is the minimal audit-write surface WriteAudit needs. *DB satisfies
@@ -89,4 +92,176 @@ func WriteAuditEntry(ctx context.Context, a Auditor, e AuditEntry) {
 			"error", err,
 		)
 	}
+}
+
+// LogAudit inserts an audit log entry. It goes through LogAuditEntry so the
+// erasure's unlinking rules apply to it too: WriteAudit takes this path when
+// the audit writer cannot queue an entry.
+func (d *DB) LogAudit(ctx context.Context, actorID int64, action, targetType string, targetID int64, detail string) error {
+	if err := d.LogAuditEntry(ctx, AuditEntry{
+		ActorID:    actorID,
+		Action:     action,
+		TargetType: targetType,
+		TargetID:   targetID,
+		Detail:     detail,
+	}); err != nil {
+		return fmt.Errorf("LogAudit: %w", err)
+	}
+	return nil
+}
+
+// LogAuditEntry inserts an audit entry with every field, tokens included
+// (LogAudit is the token-less form). The erasure's unlinking rules are applied
+// once the writer connection is held, so an entry about a subject whose
+// erasure committed while this call waited is written unlinked.
+func (d *DB) LogAuditEntry(ctx context.Context, e AuditEntry) error {
+	tx, err := d.writer.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("LogAuditEntry begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+	e = unlinkEntry(e, d.auditUnlinkRules())
+	if err := dbgen.New(tx).LogAuditEntry(ctx, dbgen.LogAuditEntryParams{
+		ActorID:      e.ActorID,
+		Action:       e.Action,
+		TargetType:   e.TargetType,
+		TargetID:     e.TargetID,
+		Detail:       e.Detail,
+		SubjectToken: nullableToken(e.SubjectToken),
+		ActorToken:   nullableToken(e.ActorToken),
+	}); err != nil {
+		return fmt.Errorf("LogAuditEntry: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("LogAuditEntry commit: %w", err)
+	}
+	return nil
+}
+
+// PersistAudits inserts a batch of audit entries in one transaction with one
+// prepared insert, so the audit writer's flush costs one fsync instead of one
+// per entry. Only LogAudit-shaped fields are written; ID, ActorName and
+// CreatedAt on the input are ignored (id autoincrements, created_at defaults,
+// actor_name is a join product). Like PersistEvents, a failed batch falls back
+// to per-row inserts so the good rows land. It returns the rows persisted and,
+// if any was lost, the first per-row error.
+func (d *DB) PersistAudits(ctx context.Context, entries []AuditEntry) (int, error) {
+	if len(entries) == 0 {
+		return 0, nil
+	}
+	if err := d.persistAuditsTx(ctx, entries); err == nil {
+		return len(entries), nil
+	}
+	// Fallback: insert rows individually so one bad row does not drop the batch.
+	persisted := 0
+	var firstErr error
+	for i := range entries {
+		e := &entries[i]
+		if err := d.LogAuditEntry(ctx, *e); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		persisted++
+	}
+	return persisted, firstErr
+}
+
+// persistAuditsTx inserts all entries inside one transaction; any failure
+// rolls the whole batch back.
+func (d *DB) persistAuditsTx(ctx context.Context, entries []AuditEntry) error {
+	tx, err := d.writer.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("PersistAudits begin tx: %w", err)
+	}
+	stmt, err := tx.PrepareContext(ctx,
+		`INSERT INTO audit_log (actor_id, action, target_type, target_id, detail, subject_token, actor_token) VALUES (?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''))`,
+	)
+	if err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("PersistAudits prepare: %w", err)
+	}
+	defer func() { _ = stmt.Close() }()
+	// The erasure's unlinking rules, read now that the writer connection is held:
+	// an erasure that committed while this batch waited has installed its rule,
+	// and entries about the subject go down unlinked, not raw after its UPDATE.
+	rules := d.auditUnlinkRules()
+	for i := range entries {
+		e := unlinkEntry(entries[i], rules)
+		if _, err := stmt.ExecContext(ctx, e.ActorID, e.Action, e.TargetType, e.TargetID, e.Detail, e.SubjectToken, e.ActorToken); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("PersistAudits insert action %q: %w", e.Action, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("PersistAudits commit: %w", err)
+	}
+	return nil
+}
+
+// GetAuditLog returns audit log entries ordered newest-first with pagination.
+func (d *DB) GetAuditLog(ctx context.Context, limit, offset int) ([]AuditEntry, error) {
+	return d.SearchAuditLog(ctx, "", "", false, limit, offset)
+}
+
+// SearchAuditLog is GetAuditLog narrowed to one action (exact) and to rows
+// whose actor name, action, target type or detail contains query (ASCII
+// case-insensitive). An empty action or query does not narrow. hideSignins
+// drops the user_login and ws_connect rows.
+//
+// ponytail: a substring scan over the whole table, fine at an admin's page
+// rate; an FTS5 index over audit_log is the upgrade if the table outgrows it.
+func (d *DB) SearchAuditLog(ctx context.Context, action, query string, hideSignins bool, limit, offset int) ([]AuditEntry, error) {
+	var hide int64
+	if hideSignins {
+		hide = 1
+	}
+	rows, err := d.q.GetAuditLog(ctx, dbgen.GetAuditLogParams{
+		Action:      action,
+		HideSignins: hide,
+		Query:       query,
+		RowLimit:    int64(limit),
+		RowOffset:   int64(offset),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("SearchAuditLog: %w", err)
+	}
+	entries := make([]AuditEntry, 0, len(rows))
+	for i := range rows {
+		r := &rows[i]
+		entries = append(entries, AuditEntry{
+			ID:           r.ID,
+			ActorID:      r.ActorID,
+			ActorName:    r.ActorName,
+			Action:       r.Action,
+			TargetType:   r.TargetType,
+			TargetID:     r.TargetID,
+			TargetName:   r.TargetName,
+			Detail:       r.Detail,
+			SubjectToken: r.SubjectToken,
+			ActorToken:   r.ActorToken,
+			CreatedAt:    r.CreatedAt,
+		})
+	}
+	return entries, nil
+}
+
+// ListAuditActions returns up to limit distinct action names in the whole
+// audit log, sorted.
+func (d *DB) ListAuditActions(ctx context.Context, limit int) ([]string, error) {
+	actions, err := d.q.ListAuditActions(ctx, int64(limit))
+	if err != nil {
+		return nil, fmt.Errorf("ListAuditActions: %w", err)
+	}
+	return actions, nil
+}
+
+// nullableToken maps an empty token to NULL, so the partial indexes on the
+// token columns hold only the rows that carry one.
+func nullableToken(token string) *string {
+	if token == "" {
+		return nil
+	}
+	return &token
 }

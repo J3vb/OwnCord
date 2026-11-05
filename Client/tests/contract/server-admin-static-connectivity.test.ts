@@ -118,6 +118,11 @@ describe("Server/admin/static — connectivity check", () => {
       "Online now": "3",
     });
     expect(result.textContent).toContain("server.reachability_report_enabled");
+    // The key is editable from the panel, so the note links to that page
+    // instead of sending the owner to edit config.yaml by hand.
+    expect(result.textContent).not.toContain("config.yaml");
+    const link = result.querySelector('[data-action="navigateTo"]');
+    expect(link?.getAttribute("data-args")).toBe('["config"]');
   });
 
   it("lists the forwarding rules and what the server cannot see when the owner enabled the detail", async () => {

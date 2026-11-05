@@ -248,7 +248,7 @@ function connectivityHtml(r){
     +row('Online now',typeof sv.online_users==='number'?String(sv.online_users):'')
     +'</dl>';
   const rep=r.reachability;
-  if(!rep)return html+'<p class="card-note" style="margin-top:12px">For the ports to forward and what this server cannot check from inside, set <code>server.reachability_report_enabled: true</code> in config.yaml and restart.</p>';
+  if(!rep)return html+'<p class="card-note" style="margin-top:12px">For the ports to forward and what this server cannot check from inside, turn on Detailed network report (<code>server.reachability_report_enabled</code>) on the '+configPageLink()+' and restart.</p>';
   if(rep.cgnat_note)html+='<p class="card-note" style="margin-top:12px">'+esc(rep.cgnat_note)+'</p>';
   if((rep.required_ports||[]).length)html+='<h4 class="support-heading" style="margin-top:14px">Ports to forward</h4><ul class="support-list">'
     +rep.required_ports.map(p=>'<li><code>'+esc(p.port)+'/'+esc(p.protocol)+'</code> — '+esc(p.purpose)+'</li>').join('')+'</ul>';
