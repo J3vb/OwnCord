@@ -83,10 +83,6 @@
     "components/message-input/inputSend.ts": {
       "createInputSend > handleSend": [20]
     },
-    "components/message-list/listRender.ts": {
-      "createListRender > patchRows": [64],
-      "createListRender > renderAll": [36]
-    },
     "components/message-list/listWindow.ts": {
       "createListWindow > measureRendered": [16],
       "createListWindow > renderWindow": [35],
@@ -100,10 +96,6 @@
     },
     "components/message-list/pollCard.ts": {
       "renderPollCard > draw": [27]
-    },
-    "components/message-list/renderers.ts": {
-      "renderMessage": [59],
-      "renderReplyRef": [22]
     },
     "components/message-list/virtualItems.ts": {
       "estimateItemHeight": [16]
@@ -417,9 +409,6 @@
     }
   },
   "depth": {
-    "components/message-list/listRender.ts": {
-      "createListRender > renderAll": [5, 5]
-    },
     "features/messaging/content/attachmentCache.ts": {
       "fetchImageBlob": [5]
     },

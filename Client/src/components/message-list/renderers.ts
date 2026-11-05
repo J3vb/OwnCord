@@ -15,9 +15,8 @@ import { endForwardBlock, startForwardBlock } from "./forwardBlock";
 import { renderPollCard } from "./pollCard";
 import { renderStickerBody, stickerReplyPreview, stickerReplyText } from "./sticker";
 import { renderThreadChip } from "./threadChip";
+import { applyDeleteGate, renderActionsBar } from "./messageActionBar";
 import { threadOfMessage } from "@stores/threads.store";
-import { connectionLockReason, messageActionGates } from "./messageActions";
-import { QUICK_REACTIONS, emojiNode, quickReactionEmojiForPass } from "./quickReactions";
 import { messagesStore, type Message } from "@stores/messages.store";
 import type { MessageListOptions } from "../MessageList";
 import { messageStatusText } from "../../i18n/messageStatus";
@@ -28,7 +27,7 @@ import { connectText } from "../../i18n/connect";
 import { uiStore } from "@stores/ui.store";
 import { voiceStore } from "@stores/voice.store";
 import { dmCallText } from "../../i18n/dmCall";
-import type { CallInfo } from "../../lib/types";
+import type { CallInfo, ImportedAuthor } from "../../lib/types";
 
 // -- Re-exports (only the names consumers actually import; everything else is
 // -- available directly from the split modules) -------------------------------
@@ -81,7 +80,7 @@ import {
   resolveServerUrl,
   type LightboxGallery,
 } from "../../features/messaging/content/attachments";
-import { atReactionLimit, renderReactions, wireReactionControl } from "./reactions";
+import { renderReactions } from "./reactions";
 import { WsErrorCode } from "@lib/protocolTypes";
 import { isPhoneLayout } from "@lib/ui/bottomSheet";
 
@@ -221,22 +220,6 @@ export function authorAvatarKey(
   return `${author.avatar ?? ""}\u0000${resolveDisplayName(author)}\u0000${author.username}\u0000${roleColor}`;
 }
 
-/** Apply the connection gate to one delete button in place. */
-function applyDeleteGate(
-  btn: HTMLButtonElement,
-  status: "connected" | "reconnecting" | "disconnected",
-): void {
-  if (status === "connected") {
-    btn.disabled = false;
-    btn.removeAttribute("aria-disabled");
-    btn.title = messagingText("action.delete");
-    return;
-  }
-  btn.disabled = true;
-  btn.setAttribute("aria-disabled", "true");
-  btn.title = connectionLockReason(status) ?? messagingText("action.delete");
-}
-
 /** Toggle the delete gate on every rendered delete control for the current
  *  connection status. Called on a connection flip; no row is rebuilt. */
 export function refreshConnectionControls(root: ParentNode): void {
@@ -244,6 +227,105 @@ export function refreshConnectionControls(root: ParentNode): void {
   for (const btn of root.querySelectorAll<HTMLButtonElement>("[data-testid^='msg-delete-']")) {
     applyDeleteGate(btn, status);
   }
+}
+
+/** The jump-to-parent bar, activatable by click, Enter or Space. */
+function createReplyBar(
+  replyToId: number,
+  opts: MessageRenderOptions,
+  signal: AbortSignal,
+): HTMLDivElement {
+  const bar = createElement("div", {
+    class: "msg-reply-ref",
+    role: "button",
+    tabindex: "0",
+    "data-reply-to": String(replyToId),
+    title: messagingText("reply.jumpTitle"),
+  });
+  const jump = (): void => opts.onJumpToMessage?.(replyToId);
+  bar.addEventListener("click", jump, { signal });
+  bar.addEventListener(
+    "keydown",
+    (e: KeyboardEvent) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        jump();
+      }
+    },
+    { signal },
+  );
+  return bar;
+}
+
+/** The quoted author and text, for an imported author or an account. */
+function fillReplyQuote(
+  bar: HTMLElement,
+  imported: ImportedAuthor | undefined,
+  user: Message["user"],
+  preview: string,
+): void {
+  const text = createElement("span", { class: "rr-text" }, preview);
+  if (imported !== undefined) {
+    bar.dataset["authorKey"] = importedAuthorKey(imported);
+    appendChildren(
+      bar,
+      createImportedAvatar(imported, "rr-avatar"),
+      createImportedName(imported, "rr-author"),
+      createImportedTag(),
+      text,
+    );
+    return;
+  }
+  const author = resolveAuthor(user);
+  const roleColor = userRoleColorVar(user.id);
+  // Tag the quoted author so a rename/role change repaints it in place,
+  // without rebuilding the row.
+  bar.dataset["authorKey"] = authorAvatarKey(author, roleColor);
+  const miniAvatar = createAvatarElement(author, {
+    className: "rr-avatar",
+    background: pickAvatarColor(author.username),
+  });
+  appendChildren(
+    bar,
+    miniAvatar,
+    createElement("span", { class: "rr-author" }, resolveDisplayName(author)),
+    text,
+  );
+}
+
+/** The quote of a parent that is in the loaded window. */
+function fillLoadedReply(bar: HTMLElement, ref: Message): void {
+  // A sticker message has no text of its own: say what it is.
+  const plain =
+    stickerReplyText(ref.sticker, ref.content) ??
+    Array.from(markdownToPlainText(ref.content, messagingText("spoiler.revealed")))
+      .slice(0, 100)
+      .join("");
+  // A message that is only an attachment (or only a spoiler) has no plain
+  // text; show a placeholder rather than an empty preview (F24).
+  fillReplyQuote(
+    bar,
+    ref.importedAuthor,
+    ref.user,
+    plain === "" ? messagingText("reply.attachment") : plain,
+  );
+}
+
+/** The quote of a parent outside the loaded window, from the server's snippet. */
+function fillSnippetReply(
+  bar: HTMLElement,
+  referenced: NonNullable<Message["referencedMessage"]>,
+  user: Message["user"],
+): void {
+  const snippet =
+    stickerReplyPreview(referenced.content) ??
+    markdownToPlainText(referenced.content, messagingText("spoiler.revealed"));
+  fillReplyQuote(
+    bar,
+    referenced.imported_author,
+    user,
+    snippet === "" ? messagingText("reply.attachment") : snippet,
+  );
 }
 
 /**
@@ -271,104 +353,15 @@ function renderReplyRef(
       messagingText("reply.originalDeleted"),
     );
   }
-  const bar = createElement("div", {
-    class: "msg-reply-ref",
-    role: "button",
-    tabindex: "0",
-    "data-reply-to": String(replyToId),
-    title: messagingText("reply.jumpTitle"),
-  });
-  const jump = (): void => opts.onJumpToMessage?.(replyToId);
-  bar.addEventListener("click", jump, { signal });
-  bar.addEventListener(
-    "keydown",
-    (e: KeyboardEvent) => {
-      if (e.key === "Enter" || e.key === " ") {
-        e.preventDefault();
-        jump();
-      }
-    },
-    { signal },
-  );
+  const bar = createReplyBar(replyToId, opts, signal);
   const parentAuthorId = ref?.user.id ?? referenced?.user?.id;
   if (parentAuthorId !== undefined && opts.blockedUsers?.has(parentAuthorId) === true) {
     bar.classList.add("msg-reply-ref--blocked");
     setText(bar, messagingText("blocked.message"));
   } else if (ref) {
-    // A sticker message has no text of its own: say what it is.
-    const plain =
-      stickerReplyText(ref.sticker, ref.content) ??
-      Array.from(markdownToPlainText(ref.content, messagingText("spoiler.revealed")))
-        .slice(0, 100)
-        .join("");
-    // A message that is only an attachment (or only a spoiler) has no plain
-    // text; show a placeholder rather than an empty preview (F24).
-    const preview = plain === "" ? messagingText("reply.attachment") : plain;
-    if (ref.importedAuthor !== undefined) {
-      bar.dataset["authorKey"] = importedAuthorKey(ref.importedAuthor);
-      appendChildren(
-        bar,
-        createImportedAvatar(ref.importedAuthor, "rr-avatar"),
-        createImportedName(ref.importedAuthor, "rr-author"),
-        createImportedTag(),
-        createElement("span", { class: "rr-text" }, preview),
-      );
-      return bar;
-    }
-    const author = resolveAuthor(ref.user);
-    const roleColor = userRoleColorVar(ref.user.id);
-    // Tag the quoted author so a rename/role change repaints it in place,
-    // without rebuilding the row.
-    bar.dataset["authorKey"] = authorAvatarKey(author, roleColor);
-    const miniAvatar = createAvatarElement(author, {
-      className: "rr-avatar",
-      background: pickAvatarColor(author.username),
-    });
-    appendChildren(
-      bar,
-      miniAvatar,
-      createElement("span", { class: "rr-author" }, resolveDisplayName(author)),
-      createElement("span", { class: "rr-text" }, preview),
-    );
+    fillLoadedReply(bar, ref);
   } else if (referenced?.user) {
-    const importedParent = referenced.imported_author;
-    if (importedParent !== undefined) {
-      bar.dataset["authorKey"] = importedAuthorKey(importedParent);
-      const snippet =
-        stickerReplyPreview(referenced.content) ??
-        markdownToPlainText(referenced.content, messagingText("spoiler.revealed"));
-      appendChildren(
-        bar,
-        createImportedAvatar(importedParent, "rr-avatar"),
-        createImportedName(importedParent, "rr-author"),
-        createImportedTag(),
-        createElement(
-          "span",
-          { class: "rr-text" },
-          snippet === "" ? messagingText("reply.attachment") : snippet,
-        ),
-      );
-      return bar;
-    }
-    const author = resolveAuthor(referenced.user);
-    const roleColor = userRoleColorVar(referenced.user.id);
-    bar.dataset["authorKey"] = authorAvatarKey(author, roleColor);
-    const plain =
-      stickerReplyPreview(referenced.content) ??
-      markdownToPlainText(referenced.content, messagingText("spoiler.revealed"));
-    appendChildren(
-      bar,
-      createAvatarElement(author, {
-        className: "rr-avatar",
-        background: pickAvatarColor(author.username),
-      }),
-      createElement("span", { class: "rr-author" }, resolveDisplayName(author)),
-      createElement(
-        "span",
-        { class: "rr-text" },
-        plain === "" ? messagingText("reply.attachment") : plain,
-      ),
-    );
+    fillSnippetReply(bar, referenced, referenced.user);
   } else {
     setText(bar, messagingText("reply.unknown"));
   }
@@ -629,15 +622,31 @@ function appendAttachments(el: HTMLElement, msg: Message): void {
   }
 }
 
-export function renderMessage(
+/** The mention fields that decide whether a row highlights the viewer. */
+function mentionInfoOf(msg: Message): {
+  mentions: Message["mentions"];
+  mentionsEveryone: Message["mentionsEveryone"];
+  mentionRoles: Message["mentionRoles"];
+} {
+  return {
+    mentions: msg.mentions,
+    mentionsEveryone: msg.mentionsEveryone,
+    mentionRoles: msg.mentionRoles,
+  };
+}
+
+function sendStatusClass(msg: Message): string {
+  if (msg.status === "pending" || msg.status === "uploading") return " pending";
+  return msg.status === "failed" ? " failed" : "";
+}
+
+/** The rows a server draws from its kind alone (a call log, a group DM event,
+ *  a pin or welcome row), or null for an ordinary message. */
+function renderKindRow(
   msg: Message,
-  isGrouped: boolean,
-  allMessages: readonly Message[],
   opts: MessageRenderOptions,
   signal: AbortSignal,
-  /** The inline editor to host in place of the message body. */
-  editor?: HTMLElement,
-): HTMLDivElement {
+): HTMLDivElement | null {
   // id 0 is the reserved sentinel for server-synthesized system rows (DB
   // user ids are AUTOINCREMENT starting at 1, so no real account can ever
   // hold it). Dispatching on the username alone let any account that
@@ -651,37 +660,271 @@ export function renderMessage(
   // A call log row is drawn from kind + call alone, and a group DM row from
   // kind + groupEvent. Any other kind (a future one) falls back to plain system
   // text; so does a call row with no `call`. An empty kind counts as unset.
-  if (isServerRowKind(msg.kind)) {
-    if (msg.kind === "call" && msg.call !== undefined) {
-      return renderCallRow(msg, msg.call, opts, signal);
-    }
-    if (isPinRowKind(msg.kind)) return renderPinRow(msg, opts, signal);
-    if (isWelcomeRowKind(msg.kind)) return renderWelcomeRow(msg, opts, signal);
-    const groupText = groupRowText(msg, opts.currentUserId);
-    if (groupText !== null) return renderGroupRow(msg, groupText);
-    const fallback = renderSystemMessage(msg);
-    fallback.dataset["testid"] = `message-${msg.id}`;
-    return fallback;
+  if (!isServerRowKind(msg.kind)) return null;
+  if (msg.kind === "call" && msg.call !== undefined) {
+    return renderCallRow(msg, msg.call, opts, signal);
+  }
+  if (isPinRowKind(msg.kind)) return renderPinRow(msg, opts, signal);
+  if (isWelcomeRowKind(msg.kind)) return renderWelcomeRow(msg, opts, signal);
+  const groupText = groupRowText(msg, opts.currentUserId);
+  if (groupText !== null) return renderGroupRow(msg, groupText);
+  const fallback = renderSystemMessage(msg);
+  fallback.dataset["testid"] = `message-${msg.id}`;
+  return fallback;
+}
+
+/** The avatar a row is drawn with: the account's picture, or an imported
+ *  author's letter. */
+function renderRowAvatar(msg: Message, author: ReturnType<typeof resolveAuthor>): HTMLDivElement {
+  const imported = msg.importedAuthor;
+  // An imported author has no account to open, so its avatar carries no user id.
+  if (imported !== undefined) return createImportedAvatar(imported, "msg-avatar");
+  return createAvatarElement(author, {
+    className: "msg-avatar",
+    background: pickAvatarColor(author.username),
+    attrs: { "data-user-id": String(msg.user.id) },
+  });
+}
+
+function renderHoverTime(msg: Message): HTMLDivElement {
+  return createElement(
+    "div",
+    {
+      class: "msg-hover-time",
+      title: fullDateTimeTitle(msg.timestamp),
+    },
+    // The header's clock time without its "Today at" (F24): the full form
+    // wrapped onto three lines over the avatar column. The title has the date.
+    formatClockTime(msg.timestamp),
+  );
+}
+
+function renderAuthorName(
+  msg: Message,
+  author: ReturnType<typeof resolveAuthor>,
+  roleColor: string,
+): HTMLElement {
+  const imported = msg.importedAuthor;
+  if (imported !== undefined) {
+    return createImportedName(imported, "msg-author msg-author--imported");
+  }
+  return createElement(
+    "span",
+    {
+      class: "msg-author",
+      // The list's one delegated handler opens the author's profile from this
+      // (and from the avatar), so the name is a real control for the keyboard.
+      role: "button",
+      tabindex: "0",
+      "data-user-id": String(msg.user.id),
+      // The username stays as the title so the handle you would @mention is
+      // one hover away even when a display name is standing in for it.
+      title: author.username,
+      style: `color: ${readableRoleColor(roleColor)}`,
+      "data-role-color": roleColor,
+    },
+    resolveDisplayName(author),
+  );
+}
+
+function renderMessageHeader(
+  msg: Message,
+  author: ReturnType<typeof resolveAuthor>,
+  roleColor: string,
+): HTMLDivElement {
+  const header = createElement("div", { class: "msg-header" });
+  const authorEl = renderAuthorName(msg, author, roleColor);
+  const time = createElement(
+    "span",
+    { class: "msg-time", title: fullDateTimeTitle(msg.timestamp) },
+    messageHeaderTime(msg.timestamp),
+  );
+  // Compact mode shows this short clock time ahead of the name; CSS hides it
+  // otherwise. The clock time never changes, so relabelRenderedTimes skips it.
+  const compactTime = createElement(
+    "span",
+    { class: "msg-compact-time", title: fullDateTimeTitle(msg.timestamp) },
+    formatClockTime(msg.timestamp),
+  );
+  appendChildren(header, compactTime, authorEl);
+  if (msg.importedAuthor !== undefined) header.appendChild(createImportedTag());
+  header.appendChild(time);
+  return header;
+}
+
+function appendReactionsIfAny(
+  el: HTMLElement,
+  msg: Message,
+  opts: MessageRenderOptions,
+  signal: AbortSignal,
+): void {
+  if (msg.reactions.length > 0) {
+    el.appendChild(renderReactions(msg, opts, signal));
+  }
+}
+
+/** Put the parsed text into `box`, wrapped where it needs a hook or is hidden. */
+function appendTextBody(box: HTMLElement, msg: Message, body: Node): void {
+  if (msg.status === "uploading" && msg.correlationId !== null) {
+    // A queued row's Cancel describes itself by this text (3A-9).
+    const wrap = createElement("div", { id: `msg-body-${msg.correlationId}` });
+    wrap.style.display = "contents";
+    wrap.appendChild(body);
+    box.appendChild(wrap);
+  } else if (isLoneImageEmbed(msg.content)) {
+    // The image stands in for its link; the text comes back if the embed goes.
+    const wrap = createElement("div", { "data-lone-image-text": "" });
+    wrap.hidden = true;
+    wrap.appendChild(body);
+    box.appendChild(wrap);
+  } else if (!isVoiceOnly(msg)) box.appendChild(body);
+}
+
+/** An ordinary message's text, files and embeds, thread chip and reactions. */
+function appendStandardBody(
+  el: HTMLElement,
+  msg: Message,
+  opts: MessageRenderOptions,
+  signal: AbortSignal,
+): void {
+  // Key the parse cache by the message's identity plus its edit stamp: an
+  // unchanged message reuses its parse when a row is re-materialised, and an
+  // edit changes the key so the new content is parsed. Id 0 is the
+  // unconfirmed-optimistic sentinel shared by every pending row, so it is not
+  // a unique identity — those parse uncached.
+  const cacheKey = msg.id === 0 ? undefined : `${msg.id}\u0000${msg.editedAt ?? ""}`;
+  const body = renderMessageContent(msg.content, mentionInfoOf(msg), cacheKey);
+  // A forward's text, files and embeds sit inside its "Forwarded" frame.
+  const box = msg.forward === undefined ? el : startForwardBlock();
+  appendTextBody(box, msg, body);
+  if (msg.editedAt !== null) {
+    box.appendChild(
+      createElement(
+        "span",
+        { class: "msg-edited", title: fullDateTimeTitle(msg.editedAt) },
+        messagingText("message.edited"),
+      ),
+    );
   }
 
-  const statusClass =
-    msg.status === "pending" || msg.status === "uploading"
-      ? " pending"
-      : msg.status === "failed"
-        ? " failed"
-        : "";
-  const mentionInfo = {
-    mentions: msg.mentions,
-    mentionsEveryone: msg.mentionsEveryone,
-    mentionRoles: msg.mentionRoles,
-  };
+  appendAttachments(box, msg);
+
+  // URL embeds (YouTube players, link previews)
+  const embeds = renderUrlEmbeds(msg.content);
+  if (embeds.childNodes.length > 0) {
+    box.appendChild(embeds);
+  }
+  if (msg.forward !== undefined) {
+    endForwardBlock(box, msg.forward);
+    el.appendChild(box);
+  }
+
+  // The thread this message started, below its body.
+  const thread = threadOfMessage(msg);
+  if (thread !== undefined) el.appendChild(renderThreadChip(thread, opts.onOpenThread, signal));
+
+  appendReactionsIfAny(el, msg, opts, signal);
+}
+
+/** The row's body, in place of which an editor, a poll or a sticker may stand. */
+function appendBody(
+  el: HTMLElement,
+  msg: Message,
+  opts: MessageRenderOptions,
+  signal: AbortSignal,
+  editor: HTMLElement | undefined,
+): void {
+  if (editor !== undefined) {
+    // The editor takes the body's place; attachments and reactions stay.
+    el.appendChild(editor);
+    appendAttachments(el, msg);
+    appendReactionsIfAny(el, msg, opts, signal);
+  } else if (msg.deleted) {
+    const text = createElement("div", { class: "msg-text" });
+    text.style.fontStyle = "italic";
+    text.style.color = "var(--text-muted)";
+    setText(text, messagingText("message.deleted"));
+    el.appendChild(text);
+  } else if (msg.poll !== undefined) {
+    // A poll's card takes the body's place (the server's fallback text is for
+    // clients that predate polls); it has no files or embeds, and reactions stay.
+    el.appendChild(renderPollCard(msg, opts, signal));
+    appendReactionsIfAny(el, msg, opts, signal);
+  } else if (msg.sticker !== undefined) {
+    // A sticker stands alone: the server's "[Sticker: name]" fallback
+    // is for clients that predate stickers. It has no files or embeds, and
+    // reactions stay.
+    el.appendChild(renderStickerBody(msg.sticker, signal));
+    appendReactionsIfAny(el, msg, opts, signal);
+  } else {
+    appendStandardBody(el, msg, opts, signal);
+  }
+}
+
+/** Failed optimistic send: the reason, with retry and discard. */
+function renderSendFailedBar(
+  msg: Message,
+  cid: string,
+  opts: MessageRenderOptions,
+  signal: AbortSignal,
+): HTMLDivElement {
+  const bar = createElement("div", { class: "msg-send-failed" });
+  bar.appendChild(
+    createElement("span", { class: "msg-send-failed-text" }, sendErrorReason(msg.errorCode)),
+  );
+  const retryBtn = createElement(
+    "button",
+    { class: "msg-send-retry", "data-testid": `msg-retry-${cid}` },
+    messagingText("action.retry"),
+  );
+  retryBtn.addEventListener("click", () => opts.onRetry?.(cid), { signal });
+  const discardBtn = createElement(
+    "button",
+    { class: "msg-send-discard", "data-testid": `msg-discard-${cid}` },
+    messagingText("action.delete"),
+  );
+  discardBtn.addEventListener("click", () => opts.onDeleteDraft?.(cid), { signal });
+  appendChildren(bar, retryBtn, discardBtn);
+  return bar;
+}
+
+/** What a send that is queued or failed adds below the body. */
+function appendSendState(
+  el: HTMLElement,
+  msg: Message,
+  opts: MessageRenderOptions,
+  signal: AbortSignal,
+): void {
+  const cid = msg.correlationId;
+  if (cid === null) return;
+  // A send queued behind its files shows them, with progress and Cancel while
+  // they upload and plain once it failed (3A-9).
+  if (msg.status === "uploading" || msg.status === "failed") {
+    const strip = opts.renderUploadStrip?.(cid, signal);
+    if (strip != null) el.appendChild(strip);
+  }
+  if (msg.status === "failed") el.appendChild(renderSendFailedBar(msg, cid, opts, signal));
+}
+
+export function renderMessage(
+  msg: Message,
+  isGrouped: boolean,
+  allMessages: readonly Message[],
+  opts: MessageRenderOptions,
+  signal: AbortSignal,
+  /** The inline editor to host in place of the message body. */
+  editor?: HTMLElement,
+): HTMLDivElement {
+  const special = renderKindRow(msg, opts, signal);
+  if (special !== null) return special;
+
   // A deleted row shows no content, so it must not keep the mention accent.
   const mentionedClass =
-    !msg.deleted && highlightsCurrentUser(msg.content, mentionInfo) ? " mentioned" : "";
+    !msg.deleted && highlightsCurrentUser(msg.content, mentionInfoOf(msg)) ? " mentioned" : "";
   const el = createElement("div", {
     class:
       (isGrouped ? "message grouped" : "message") +
-      statusClass +
+      sendStatusClass(msg) +
       mentionedClass +
       (editor === undefined ? "" : " editing"),
     "data-testid": `message-${msg.id}`,
@@ -696,308 +939,18 @@ export function renderMessage(
   // only the rows whose author actually changed on a roleRevision bump.
   el.dataset["authorKey"] =
     imported === undefined ? authorAvatarKey(author, roleColor) : importedAuthorKey(imported);
-  // An imported author has no account to open, so its avatar carries no user id.
-  const avatar =
-    imported === undefined
-      ? createAvatarElement(author, {
-          className: "msg-avatar",
-          background: pickAvatarColor(author.username),
-          attrs: { "data-user-id": String(msg.user.id) },
-        })
-      : createImportedAvatar(imported, "msg-avatar");
-  el.appendChild(avatar);
-
-  if (isGrouped) {
-    const hoverTime = createElement(
-      "div",
-      {
-        class: "msg-hover-time",
-        title: fullDateTimeTitle(msg.timestamp),
-      },
-      // The header's clock time without its "Today at" (F24): the full form
-      // wrapped onto three lines over the avatar column. The title has the date.
-      formatClockTime(msg.timestamp),
-    );
-    el.appendChild(hoverTime);
-  }
-
+  el.appendChild(renderRowAvatar(msg, author));
+  if (isGrouped) el.appendChild(renderHoverTime(msg));
   if (msg.replyTo !== null) {
     el.appendChild(renderReplyRef(msg.replyTo, msg.referencedMessage, allMessages, opts, signal));
   }
-
-  const header = createElement("div", { class: "msg-header" });
-  const authorEl =
-    imported !== undefined
-      ? createImportedName(imported, "msg-author msg-author--imported")
-      : createElement(
-          "span",
-          {
-            class: "msg-author",
-            // The list's one delegated handler opens the author's profile from this
-            // (and from the avatar), so the name is a real control for the keyboard.
-            role: "button",
-            tabindex: "0",
-            "data-user-id": String(msg.user.id),
-            // The username stays as the title so the handle you would @mention is
-            // one hover away even when a display name is standing in for it.
-            title: author.username,
-            style: `color: ${readableRoleColor(roleColor)}`,
-            "data-role-color": roleColor,
-          },
-          resolveDisplayName(author),
-        );
-  const time = createElement(
-    "span",
-    { class: "msg-time", title: fullDateTimeTitle(msg.timestamp) },
-    messageHeaderTime(msg.timestamp),
-  );
-  // Compact mode shows this short clock time ahead of the name; CSS hides it
-  // otherwise. The clock time never changes, so relabelRenderedTimes skips it.
-  const compactTime = createElement(
-    "span",
-    { class: "msg-compact-time", title: fullDateTimeTitle(msg.timestamp) },
-    formatClockTime(msg.timestamp),
-  );
-  appendChildren(header, compactTime, authorEl);
-  if (imported !== undefined) header.appendChild(createImportedTag());
-  header.appendChild(time);
-  el.appendChild(header);
-
-  if (editor !== undefined) {
-    // The editor takes the body's place; attachments and reactions stay.
-    el.appendChild(editor);
-    appendAttachments(el, msg);
-    if (msg.reactions.length > 0) {
-      el.appendChild(renderReactions(msg, opts, signal));
-    }
-  } else if (msg.deleted) {
-    const text = createElement("div", { class: "msg-text" });
-    text.style.fontStyle = "italic";
-    text.style.color = "var(--text-muted)";
-    setText(text, messagingText("message.deleted"));
-    el.appendChild(text);
-  } else if (msg.poll !== undefined) {
-    // A poll's card takes the body's place (the server's fallback text is for
-    // clients that predate polls); it has no files or embeds, and reactions stay.
-    el.appendChild(renderPollCard(msg, opts, signal));
-    if (msg.reactions.length > 0) {
-      el.appendChild(renderReactions(msg, opts, signal));
-    }
-  } else if (msg.sticker !== undefined) {
-    // A sticker stands alone: the server's "[Sticker: name]" fallback
-    // is for clients that predate stickers. It has no files or embeds, and
-    // reactions stay.
-    el.appendChild(renderStickerBody(msg.sticker, signal));
-    if (msg.reactions.length > 0) {
-      el.appendChild(renderReactions(msg, opts, signal));
-    }
-  } else {
-    // Key the parse cache by the message's identity plus its edit stamp: an
-    // unchanged message reuses its parse when a row is re-materialised, and an
-    // edit changes the key so the new content is parsed. Id 0 is the
-    // unconfirmed-optimistic sentinel shared by every pending row, so it is not
-    // a unique identity — those parse uncached.
-    const cacheKey = msg.id === 0 ? undefined : `${msg.id}\u0000${msg.editedAt ?? ""}`;
-    const body = renderMessageContent(msg.content, mentionInfo, cacheKey);
-    // A forward's text, files and embeds sit inside its "Forwarded" frame.
-    const box = msg.forward === undefined ? el : startForwardBlock();
-    if (msg.status === "uploading" && msg.correlationId !== null) {
-      // A queued row's Cancel describes itself by this text (3A-9).
-      const wrap = createElement("div", { id: `msg-body-${msg.correlationId}` });
-      wrap.style.display = "contents";
-      wrap.appendChild(body);
-      box.appendChild(wrap);
-    } else if (isLoneImageEmbed(msg.content)) {
-      // The image stands in for its link; the text comes back if the embed goes.
-      const wrap = createElement("div", { "data-lone-image-text": "" });
-      wrap.hidden = true;
-      wrap.appendChild(body);
-      box.appendChild(wrap);
-    } else if (!isVoiceOnly(msg)) box.appendChild(body);
-    if (msg.editedAt !== null) {
-      box.appendChild(
-        createElement(
-          "span",
-          { class: "msg-edited", title: fullDateTimeTitle(msg.editedAt) },
-          messagingText("message.edited"),
-        ),
-      );
-    }
-
-    appendAttachments(box, msg);
-
-    // URL embeds (YouTube players, link previews)
-    const embeds = renderUrlEmbeds(msg.content);
-    if (embeds.childNodes.length > 0) {
-      box.appendChild(embeds);
-    }
-    if (msg.forward !== undefined) {
-      endForwardBlock(box, msg.forward);
-      el.appendChild(box);
-    }
-
-    // The thread this message started, below its body.
-    const thread = threadOfMessage(msg);
-    if (thread !== undefined) el.appendChild(renderThreadChip(thread, opts.onOpenThread, signal));
-
-    if (msg.reactions.length > 0) {
-      el.appendChild(renderReactions(msg, opts, signal));
-    }
-  }
-
-  // A send queued behind its files shows them, with progress and Cancel while
-  // they upload and plain once it failed (3A-9).
-  if ((msg.status === "uploading" || msg.status === "failed") && msg.correlationId !== null) {
-    const strip = opts.renderUploadStrip?.(msg.correlationId, signal);
-    if (strip != null) el.appendChild(strip);
-  }
-
-  // Failed optimistic send: show the reason and offer retry / discard.
-  if (msg.status === "failed" && msg.correlationId !== null) {
-    const cid = msg.correlationId;
-    const bar = createElement("div", { class: "msg-send-failed" });
-    bar.appendChild(
-      createElement("span", { class: "msg-send-failed-text" }, sendErrorReason(msg.errorCode)),
-    );
-    const retryBtn = createElement(
-      "button",
-      { class: "msg-send-retry", "data-testid": `msg-retry-${cid}` },
-      messagingText("action.retry"),
-    );
-    retryBtn.addEventListener("click", () => opts.onRetry?.(cid), { signal });
-    const discardBtn = createElement(
-      "button",
-      { class: "msg-send-discard", "data-testid": `msg-discard-${cid}` },
-      messagingText("action.delete"),
-    );
-    discardBtn.addEventListener("click", () => opts.onDeleteDraft?.(cid), { signal });
-    appendChildren(bar, retryBtn, discardBtn);
-    el.appendChild(bar);
-  }
-
-  // The hover action bar only applies to confirmed server messages — not
-  // deleted rows or unsent optimistic rows. Normal bar: the quick reactions,
-  // React, Edit (own) or Reply (others'), then "...". Holding Shift also shows
-  // Pin, Delete and, on your own message, Reply (CSS on `.shift-held`; the
-  // buttons are always rendered when their gate allows, `display:none` keeps
-  // them out of the tab order otherwise). Copy Link, Report and Copy ID live
-  // in the "..." menu.
+  el.appendChild(renderMessageHeader(msg, author, roleColor));
+  appendBody(el, msg, opts, signal, editor);
+  appendSendState(el, msg, opts, signal);
+  // Confirmed server messages only: not deleted rows, unsent optimistic rows
+  // or a row being edited.
   if (!msg.deleted && msg.status === "sent" && editor === undefined) {
-    const gates = messageActionGates(msg, opts);
-    const actionsBar = createElement("div", { class: "msg-actions-bar" });
-
-    // The lock is applied at render from the current timeout, then updated in
-    // place by refreshReactionLocks when the timeout changes.
-    quickReactionEmojiForPass(QUICK_REACTIONS).forEach((emoji, index) => {
-      // A new emoji on a message at the cap is left out, as in the menu.
-      if (atReactionLimit(msg.reactions, emoji)) return;
-      const { node, name } = emojiNode(emoji);
-      const label = messagingText("action.reactWith", { name });
-      const quickBtn = createElement("button", {
-        class: "msg-quick-react",
-        "data-testid": `msg-quick-react-${msg.id}-${index}`,
-        "aria-label": label,
-      });
-      quickBtn.appendChild(node);
-      quickBtn.title = label;
-      wireReactionControl(
-        quickBtn,
-        () => opts.onReactionClick(msg.id, emoji),
-        gates.react.reason,
-        signal,
-      );
-      actionsBar.appendChild(quickBtn);
-    });
-
-    const reactBtn = createElement("button", {
-      "data-testid": `msg-react-${msg.id}`,
-      "aria-label": messagingText("action.react"),
-    });
-    reactBtn.appendChild(createIcon("smile", 16));
-    reactBtn.title = messagingText("action.react");
-    wireReactionControl(
-      reactBtn,
-      () => opts.onReactionClick(msg.id, ""),
-      gates.react.reason,
-      signal,
-    );
-    actionsBar.appendChild(reactBtn);
-
-    const own = gates.edit.shown;
-    if (own) {
-      const editBtn = createElement("button", {
-        "data-testid": `msg-edit-${msg.id}`,
-        "aria-label": messagingText("action.edit"),
-      });
-      editBtn.appendChild(createIcon("pencil", 16));
-      editBtn.title = messagingText("action.edit");
-      editBtn.addEventListener("click", () => opts.onEditClick(msg.id), { signal });
-      actionsBar.appendChild(editBtn);
-    }
-
-    const replyBtn = createElement("button", {
-      class: own ? "msg-shift-only" : "",
-      ...(own ? { tabindex: "-1" } : {}),
-      "data-testid": `msg-reply-${msg.id}`,
-      "aria-label": messagingText("action.reply"),
-    });
-    replyBtn.appendChild(createIcon("reply", 16));
-    replyBtn.title = messagingText("action.reply");
-    replyBtn.addEventListener("click", () => opts.onReplyClick(msg.id), { signal });
-    actionsBar.appendChild(replyBtn);
-
-    if (gates.pin.shown) {
-      const pinBtn = createElement("button", {
-        class: "msg-shift-only",
-        tabindex: "-1",
-        "data-testid": `msg-pin-${msg.id}`,
-        "aria-label": msg.pinned ? messagingText("action.unpin") : messagingText("action.pin"),
-      });
-      pinBtn.appendChild(createIcon(msg.pinned ? "pin-off" : "pin", 16));
-      pinBtn.title = msg.pinned ? messagingText("action.unpin") : messagingText("action.pin");
-      pinBtn.addEventListener("click", () => opts.onPinClick(msg.id, msg.channelId, msg.pinned), {
-        signal,
-      });
-      actionsBar.appendChild(pinBtn);
-    }
-
-    if (gates.delete.shown) {
-      const deleteBtn = createElement("button", {
-        class: "msg-shift-only",
-        tabindex: "-1",
-        "data-testid": `msg-delete-${msg.id}`,
-        "aria-label": messagingText("action.delete"),
-      });
-      deleteBtn.appendChild(createIcon("trash-2", 16));
-      // The listener is attached once; whether the button is disabled is read
-      // at click time, so a connection flip is a class/attribute change on the
-      // already-rendered button (refreshConnectionControls) rather than a row
-      // rebuild.
-      deleteBtn.addEventListener(
-        "click",
-        (e) => {
-          if (deleteBtn.disabled) return;
-          opts.onDeleteClick(msg.id, e.shiftKey);
-        },
-        { signal },
-      );
-      applyDeleteGate(deleteBtn, uiStore.getState().connectionStatus);
-      actionsBar.appendChild(deleteBtn);
-    }
-
-    const moreBtn = createElement("button", {
-      "data-testid": `msg-more-${msg.id}`,
-      "aria-label": messagingText("action.more"),
-      "aria-haspopup": "menu",
-      "aria-expanded": "false",
-    });
-    moreBtn.appendChild(createIcon("ellipsis", 16));
-    moreBtn.title = messagingText("action.more");
-    // Opened by MessageList's delegated listener, which owns the menu's signal.
-    actionsBar.appendChild(moreBtn);
-
-    el.appendChild(actionsBar);
+    el.appendChild(renderActionsBar(msg, opts, signal));
   }
-
   return el;
 }

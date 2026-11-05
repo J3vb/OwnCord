@@ -46,6 +46,7 @@ describe("MessageList — deleted messages leave the list", () => {
 
   const row = (id: number): HTMLElement | null =>
     container.querySelector<HTMLElement>(`[data-testid='message-${id}']`);
+  const content = (): HTMLElement => container.querySelector<HTMLElement>(".virtual-content")!;
   const stored = (): readonly Message[] => messagesStore.getState().messagesByChannel.get(1)!;
   const mount = (): void => {
     list = createMessageList(options);
@@ -228,6 +229,88 @@ describe("MessageList — deleted messages leave the list", () => {
 
       expect(row(5)).toBeNull();
       expect(offsetOf(topId)).toBe(before);
+    });
+  });
+
+  describe("the row patch", () => {
+    it("an edit to a row outside the rendered window leaves the DOM alone", () => {
+      const all = Array.from({ length: 300 }, (_, i) =>
+        buildMinuteMessage({
+          id: i + 1,
+          user: { id: i + 1, username: `user${i + 1}`, avatar: null },
+          timestamp: spacedTimestamp(i + 1),
+        }),
+      );
+      setMessages(CHANNEL_ID, all);
+      mount();
+      expect(row(1)).toBeNull();
+      const before = [...content().children];
+      const topSpacer = container.querySelector<HTMLElement>(".virtual-spacer-top")!.style.height;
+      expect(before.length).toBeGreaterThan(0);
+      expect(row(300)).not.toBeNull();
+
+      setMessages(CHANNEL_ID, [
+        { ...all[0]!, content: "edited far above", editedAt: "2024-01-16T00:00:00Z" },
+        ...all.slice(1),
+      ]);
+      messagesStore.flush();
+
+      expect([...content().children]).toEqual(before);
+      expect(container.querySelector<HTMLElement>(".virtual-spacer-top")!.style.height).toBe(
+        topSpacer,
+      );
+      expect(row(1)).toBeNull();
+    });
+
+    it("an edit that changes who the row above is re-renders the row below it, and only that one", () => {
+      setMessages(
+        CHANNEL_ID,
+        [1, 2, 3, 4].map((id) => buildMinuteMessage({ id })),
+      );
+      mount();
+      const [row1, row2, row3, row4] = [row(1), row(2), row(3), row(4)];
+      expect(row2!.classList.contains("grouped")).toBe(true);
+      expect(row3!.classList.contains("grouped")).toBe(true);
+
+      // Row 2 now belongs to another author: it shows its header, and row 3 no
+      // longer continues it.
+      const stored = messagesStore.getState().messagesByChannel.get(CHANNEL_ID)!;
+      setMessages(
+        CHANNEL_ID,
+        stored.map((m) => (m.id === 2 ? { ...m, user: BOB } : m)),
+      );
+      messagesStore.flush();
+
+      expect(row(1)).toBe(row1);
+      expect(row(2)).not.toBe(row2);
+      expect(row(2)!.classList.contains("grouped")).toBe(false);
+      expect(row(3)).not.toBe(row3);
+      expect(row(3)!.classList.contains("grouped")).toBe(false);
+      expect(row(4)).toBe(row4);
+      expect(row(4)!.classList.contains("grouped")).toBe(true);
+    });
+
+    it("a reaction on a row re-renders that row and nothing around it", () => {
+      setMessages(
+        CHANNEL_ID,
+        [1, 2, 3].map((id) => buildMinuteMessage({ id })),
+      );
+      mount();
+      const [row1, row2, row3] = [row(1), row(2), row(3)];
+
+      const stored = messagesStore.getState().messagesByChannel.get(CHANNEL_ID)!;
+      setMessages(
+        CHANNEL_ID,
+        stored.map((m) =>
+          m.id === 2 ? { ...m, reactions: [{ emoji: "👍", count: 1, me: false }] } : m,
+        ),
+      );
+      messagesStore.flush();
+
+      expect(row(1)).toBe(row1);
+      expect(row(3)).toBe(row3);
+      expect(row(2)).not.toBe(row2);
+      expect(row(2)!.querySelector(".reaction-pill, [data-emoji]")).not.toBeNull();
     });
   });
 
