@@ -17,11 +17,15 @@ const fileSizesID = "file-sizes"
 // someone had already shrunk — and nothing else, so 35 files sat over the same
 // 500 lines unflagged, the largest of them six times it. An allowlist that
 // names only the files that were hot when it was written drifts away from
-// where the risk lives; a default with declared exemptions cannot.
+// where the risk lives; a default with declared exemptions cannot. Those 35
+// were then split by concern until none needed an exemption, so the table
+// below holds only ceilings tighter than the default.
 const DefaultFileLimit = 500
 
-// FileSizeOverride classes. A row's class says why it is exempt, so a whole
-// class can be judged at once rather than one file at a time.
+// FileSizeOverride classes. A row's class says why its ceiling differs from
+// the default, so a whole class can be judged at once rather than one file at
+// a time. Every class is at or under the default: a file over 500 lines is
+// split, never exempted.
 const (
 	// classB3ExitTarget: an exit target, tighter than the default. The
 	// architecture plan set these for the ws coordination hotspots
@@ -31,14 +35,6 @@ const (
 	// bites.
 	classB3ExitTarget = "b3-exit-target"
 
-	// classGrandfathered: already over the default when the default was
-	// introduced, pinned at the size it had then, rounded up to the next 50.
-	// These are the files a default-only rule would have failed the tree on.
-	// The pin is a ratchet, not a licence: a ceiling here only goes down, and
-	// a row whose file has shrunk below the default is deleted rather than
-	// raised.
-	classGrandfathered = "grandfathered"
-
 	// classRegistrationPoint: a wiring file every feature used to edit, now
 	// a short list features register into. Held tighter than the default so
 	// a feature's routes go in its own file, not back into the wiring. Only
@@ -46,15 +42,15 @@ const (
 	classRegistrationPoint = "registration-point"
 )
 
-// FileSizeOverride is one declared exemption from DefaultFileLimit.
+// FileSizeOverride is one declared ceiling that replaces DefaultFileLimit.
 type FileSizeOverride struct {
 	Ceiling int    // lines: the file fails above this
 	Class   string // one of the class constants above
 	Note    string // what the file is, so the row can be judged
 }
 
-// FileSizeOverrides is the exemption table, keyed by path relative to the
-// Server tree.
+// FileSizeOverrides is the table of tighter ceilings, keyed by path relative
+// to the Server tree.
 //
 // cmd/ is deliberately absent as a class and skipped in the rule instead: it
 // holds entry points and one-shot tooling, where a long main is a shape rather
@@ -66,36 +62,10 @@ var FileSizeOverrides = map[string]FileSizeOverride{
 		Class:   classB3ExitTarget,
 		Note:    "hub: client registry, broadcast fan-out, replay",
 	},
-
 	"api/router.go": {
 		Ceiling: 300,
 		Class:   classRegistrationPoint,
 		Note:    "middleware chain and NewRouter; feature routes live in route_groups.go and their own files",
-	},
-	"config/config.go": {
-		Ceiling: 900,
-		Class:   classGrandfathered,
-		Note:    "config schema and load",
-	},
-	"api/profile_handler.go": {
-		Ceiling: 800,
-		Class:   classGrandfathered,
-		Note:    "profile and avatar routes",
-	},
-	"plugin/registry.go": {
-		Ceiling: 750,
-		Class:   classGrandfathered,
-		Note:    "WASM plugin registry and capability grants",
-	},
-	"admin/logstream.go": {
-		Ceiling: 600,
-		Class:   classGrandfathered,
-		Note:    "the admin SSE log stream",
-	},
-	"api/waf.go": {
-		Ceiling: 550,
-		Class:   classGrandfathered,
-		Note:    "coraza WAF wiring and rule set",
 	},
 }
 

@@ -1,0 +1,292 @@
+package config
+
+import (
+	"slices"
+
+	"github.com/J3vb/OwnCord/Server/storage"
+)
+
+func defaults() Config {
+	return Config{
+		Server: ServerConfig{
+			Port:           8443,
+			Name:           "OwnCord Server",
+			DataDir:        "data",
+			AllowedOrigins: []string{},
+			TrustedProxies: []string{},
+			AdminAllowedCIDRs: []string{
+				"127.0.0.0/8",    // localhost IPv4
+				"::1/128",        // localhost IPv6
+				"10.0.0.0/8",     // private class A
+				"172.16.0.0/12",  // private class B
+				"192.168.0.0/16", // private class C
+				"fc00::/7",       // IPv6 unique local
+			},
+			WAFCRSMode:    "detect",
+			RestartMode:   "auto",
+			MinFreeDiskMB: 256,
+			// Applied only while PprofEnabled is true, so a disabled
+			// profiler still adds nothing at runtime.
+			PprofBlockProfileRate:     100_000,
+			PprofMutexProfileFraction: 5,
+		},
+		Database: DatabaseConfig{
+			Type: "sqlite",
+			Path: "data/chatserver.db",
+		},
+		Backup: BackupConfig{
+			Dir: "data/backups",
+		},
+		TLS: TLSConfig{
+			Mode:         "self_signed",
+			CertFile:     "data/cert.pem",
+			KeyFile:      "data/key.pem",
+			AcmeCacheDir: "data/acme_certs",
+		},
+		Upload: UploadConfig{
+			MaxSizeMB:         100,
+			ImportMaxMB:       500,
+			StorageDir:        "data/uploads",
+			BlockedExtensions: slices.Clone(storage.DefaultBlockedExtensions),
+			AllowedExtensions: []string{},
+		},
+		Voice: VoiceConfig{
+			LiveKitURL: "ws://localhost:7880",
+			Quality:    "medium",
+		},
+		GitHub: GitHubConfig{
+			Owner: "J3vb",
+			Repo:  "OwnCord",
+		},
+		EventPersistence: EventPersistenceConfig{
+			Enabled:               true,
+			RetentionHours:        24,
+			BatchSize:             50,
+			BatchFlushMs:          100,
+			PrunerIntervalMinutes: 60,
+			ReplayRingSize:        1000,
+			ReplayColdLimit:       5000,
+		},
+		Security: SecurityConfig{
+			AuthRateLimitMultiplier: 1.0,
+			// 0 = auth.DefaultAdmissionBudget(): twice the core count.
+			ExpensiveAuthConcurrency: 0,
+		},
+		Telemetry: TelemetryConfig{
+			Enabled:     false,
+			Exporter:    "none",
+			ServiceName: "owncord-server",
+		},
+		Plugins: PluginsConfig{
+			Enabled:       false,
+			Directory:     "data/plugins",
+			MaxMemoryMB:   64,
+			CPUBudgetMs:   100,
+			HTTPAllowlist: []string{},
+		},
+		Logging: LoggingConfig{
+			Level:        "info",
+			HistoryDays:  7,
+			HistoryMaxMB: 200,
+		},
+		Moderation: ModerationConfig{
+			ReportRetentionDays: 180,
+			ActionRetentionDays: 90,
+		},
+		Attention: AttentionConfig{DiskWarnFreeMB: 1024, WriterWaitMsPerMin: 5000, ReconnectsPerMin: 30, DeliveryDropsPerMin: 1},
+		Push: PushConfig{
+			Enabled:             false,
+			SubscriptionTTLDays: 90,
+			DispatchEnabled:     false,
+			Contact:             "",
+		},
+	}
+}
+
+const defaultYAML = `# OwnCord Server Configuration
+server:
+  port: 8443
+  name: "OwnCord Server"
+  data_dir: "data"
+  # min_free_disk_mb: 256     # reserved headroom on the volumes the server writes to:
+  #                           # below it the banner errors, /health reports degraded
+  #                           # and uploads are refused with 507. 0 disables the floor.
+  # allowed_origins: []       # browser origins allowed to connect; empty = deny cross-origin.
+  #                           # The OwnCord desktop client is always accepted and needs no entry.
+  # trusted_proxies: []       # CIDRs of the reverse-proxy HOPS only (e.g. ["10.0.0.2/32"]).
+  #                           # Never list client networks here: a range that covers
+  #                           # clients degrades per-client rate limiting and lets
+  #                           # covered clients influence their own rate-limit key.
+  #                           # An entry that covers every address (0.0.0.0/0, ::/0)
+  #                           # is refused and the server will not start.
+  # admin_allowed_cidrs:      # CIDRs allowed to access /admin (default: private networks only)
+  #   - "127.0.0.0/8"
+  #   - "::1/128"
+  #   - "10.0.0.0/8"
+  #   - "172.16.0.0/12"
+  #   - "192.168.0.0/16"
+  # pprof_enabled: false      # expose Go's pprof endpoints on a separate
+  #                           # listener bound to 127.0.0.1:6060 only, for
+  #                           # operator profiling. Off by default; never mounted
+  #                           # on the main router. In Docker that is the
+  #                           # container's own loopback: reach it with e.g.
+  #                           # docker run --rm --network container:<name>
+  #                           # curlimages/curl http://127.0.0.1:6060/debug/pprof/
+  # pprof_block_profile_rate: 100000       # nanoseconds between block samples when
+  #                           # pprof is on (0 disables); sees SQLite writer contention.
+  # pprof_mutex_profile_fraction: 5        # sample 1 in N contended mutex events
+  #                           # when pprof is on (0 disables).
+  # browser_client_enabled: false  # host the browser client from this server.
+  #                           # Owner opt-in, off by default. Release builds carry
+  #                           # the browser bundle; a build from source without it
+  #                           # answers GET / with a 404 note.
+  # reachability_report_enabled: false
+  #                           # add a "reachability" block to the admin-only
+  #                           # GET /api/v1/diagnostics/connectivity: this host's
+  #                           # addresses by class, the ports that must be forwarded,
+  #                           # and what the server cannot determine about its own
+  #                           # reachability. Owner opt-in; the startup banner reports
+  #                           # the address class either way. See docs/port-forwarding.md
+  # waf_enabled: false        # Coraza WAF (inline rules + OWASP Core Rule Set)
+  # waf_paranoia_level: 2     # OWASP CRS paranoia level 1-4
+  # waf_crs_mode: "detect"    # off | detect | block — CRS layer mode; "detect" logs
+  #                           # CRS matches without blocking (safe default for chat traffic)
+  # restart_mode: "auto"      # auto | spawn | supervised — how self-restarts (update,
+  #                           # restore, setup wizard) hand off. "supervised" exits and
+  #                           # lets systemd/NSSM/Docker relaunch; "spawn" starts the
+  #                           # replacement directly; "auto" detects (NSSM users: set
+  #                           # "supervised" explicitly, NSSM is not auto-detectable)
+
+database:
+  type: "sqlite"          # "sqlite" is the only supported backend
+  path: "data/chatserver.db"
+
+# backup:
+#   dir: "data/backups"   # where database backups are written; point at another
+#                         # disk or an off-host mount so backups don't share a
+#                         # single point of failure with the live database
+
+tls:
+  mode: "self_signed"  # self_signed, acme, manual, off
+  cert_file: "data/cert.pem"
+  key_file: "data/key.pem"
+  domain: ""              # required for acme mode (e.g. "chat.example.com")
+  acme_cache_dir: "data/acme_certs"  # where Let's Encrypt certs are cached
+
+upload:
+  max_size_mb: 100
+  storage_dir: "data/uploads"
+  # user_quota_mb: 0          # total bytes one user may hold in upload storage
+  #                           # (attachments and avatars); 0 = unlimited
+  # import_max_mb: 500        # largest Discord export (.json or .zip) the admin
+  #                           # panel accepts for "Import from Discord"
+  # blocked_extensions: [bat, cmd, ps1]  # refused by name; a list replaces the
+  #                           # default (Windows scripts, installers, disk images)
+  # allowed_extensions: []    # non-empty = only these extensions may be uploaded
+
+# Web Push subscriptions. Disabled by default: with push.enabled false,
+# every /api/v1/push/* route answers 503 PUSH_DISABLED after authentication
+# and nothing is written. push.dispatch_enabled is a SECOND, separate
+# opt-in: with it false (the default) nothing is ever dispatched to a
+# stored subscription, even with push.enabled true. Turning dispatch on
+# makes the server open outbound HTTPS connections to the push service
+# named in each stored subscription's endpoint.
+# push:
+#   enabled: false
+#   subscription_ttl_days: 90  # a subscription not refreshed in this many
+#                              # days is removed by the maintenance sweep
+#   dispatch_enabled: false    # opens outbound connections to push services
+#                              # when enabled together with push.enabled
+#   contact: ""                # operator contact for VAPID JWTs, sent as
+#                              # "mailto:<contact>"; empty omits the claim
+
+voice:
+  # livekit_api_key: ""       # LiveKit API key (REQUIRED for voice — generate a unique key)
+  # livekit_api_secret: ""    # LiveKit API secret (REQUIRED, min 32 chars — generate a unique secret)
+  livekit_url: "ws://localhost:7880"  # LiveKit server WebSocket URL
+  auto_download_livekit: true # download and run livekit-server automatically when
+                              # no livekit_binary is set (verified against the
+                              # official LiveKit release checksums; stored in data/livekit/)
+  # livekit_version: ""            # override the pinned livekit-server version (e.g. "1.13.11")
+  # livekit_metrics_url: ""        # LiveKit's stats page for the admin Dashboard card, e.g.
+  #                                # "http://livekit:6789/metrics" (needs prometheus: port: 6789
+  #                                # in livekit.yaml); optional, empty = found by itself
+  # livekit_binary: ""             # path to an existing livekit-server binary; set this to
+  #                                # skip auto-download and run your own build
+  # node_ip: ""                    # public IP for WebRTC media; empty = auto-detect (pin only if detection fails)
+  # advertise_internal_ip: false   # also advertise LAN IPs so local-network clients can connect
+  # udp_port: 0                    # carry all WebRTC media on ONE UDP port (e.g. 7882) instead of
+  #                                # the 50000-60000 range — forward just that one port. 0 = range
+  # quality: "medium"              # low | medium | high
+
+# github:
+#   token: ""  # optional: GitHub API token for higher rate limits (5000 req/hr vs 60)
+
+# Phase B Step 7 — cold-tier event log used by the WebSocket reconnect path.
+# When the in-memory ring buffer can't cover a client's last_seq the server
+# falls back to these rows before forcing a full re-sync. Rows older than
+# retention_hours are pruned by a background goroutine.
+# event_persistence:
+#   enabled: true             # set false to disable cold-tier replay entirely
+#   retention_hours: 24       # how long to keep persisted broadcast events
+#   batch_size: 50            # flush after this many events buffered
+#   batch_flush_ms: 100       # OR after this many milliseconds, whichever first
+#   pruner_interval_minutes: 60  # how often the retention pruner runs
+
+# Phase B Step 8 — OpenTelemetry exporter. The default build ships a no-op
+# provider; building with -tags otel enables the real SDK.
+# telemetry:
+#   enabled: false            # master switch
+#   exporter: "none"          # none | prometheus | otlp
+#   otlp_endpoint: ""         # required when exporter == "otlp" (host:port of collector)
+#   otlp_insecure: false      # set true only for dev/private networks (disables TLS)
+#   service_name: "owncord-server"
+
+# Phase C Step 9 — Wazero plugin runtime. Disabled by default so existing
+# operators are unaffected. Plugins live in subdirectories of the configured
+# directory; see Server/plugin/examples/hello for the manifest format.
+# plugins:
+#   enabled: false
+#   directory: "data/plugins"
+#   max_memory_mb: 64         # per-plugin memory cap
+#   cpu_budget_ms: 100        # per-invocation CPU budget
+#   http_allowlist: []        # hostnames plugins may reach via the http capability
+
+# GIF picker (Klipy). Disabled by default: with no api_key the /api/v1/gif/*
+# endpoints answer 503 GIF_DISABLED and the client hides its GIF button. The
+# key stays on the server — it is never sent to clients.
+# Get a key at https://partner.klipy.com
+# gif:
+#   api_key: ""
+
+# Logging. "level" gates what is logged, to stdout and the admin panel's live
+# log view alike. Override without editing this file via the
+# OWNCORD_LOGGING_LEVEL environment variable.
+# "history_days" keeps that many days of logs on disk under <data_dir>/logs,
+# searchable from the Logs page's History tab (0 turns it off);
+# "history_max_mb" caps their total size, deleting the oldest first.
+# logging:
+#   level: "info"             # debug | info | warn | error
+#   history_days: 7
+#   history_max_mb: 200
+
+# Moderation: the report queue's content retention window (B5-8), and the
+# moderator-action ledger's own window (B5-9). Report rows and ban/kick/
+# removal ledger rows are kept indefinitely either way; these bound only
+# the report's evidence/notes/detail and the warning/timeout rows.
+# moderation:
+#   report_retention_days: 180  # days after a report closes before its content
+#                                # is pruned; 0 = never. Open reports are never touched.
+#   action_retention_days: 90   # days after acknowledgement (warning) or expiry/lift
+#                                # (timeout) before the row retires; 0 = never.
+
+# Admin attention panel (Dashboard): warning floors, raised for rates by the
+# learned baseline. Shown only in the admin panel; never exported off-host.
+# attention:
+#   disk_warn_free_mb: 1024     # warn below this much free space on the data volume;
+#                               # 0 = only critical, at server.min_free_disk_mb
+#   writer_wait_ms_per_min: 5000  # warn when writes queue longer than this per minute
+#   reconnects_per_min: 30      # warn when clients resume sessions faster than this
+#   delivery_drops_per_min: 1   # warn when broadcasts drop or full send queues cut
+#                               # clients off (typing/presence drops not counted)
+`

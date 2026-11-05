@@ -179,7 +179,7 @@ func TestAbsenceContract_NoFederationDirectoryOrListingConfigKeys(t *testing.T) 
 	// a filesystem location, never a network one; adding to this list needs
 	// the same justification as a route hit.
 	allowed := map[string]string{
-		"plugins.directory": "the on-disk plugin directory (Server/config/config.go PluginsConfig.Directory)",
+		"plugins.directory": "the on-disk plugin directory (Server/config/sections.go PluginsConfig.Directory)",
 	}
 
 	keys := configKeys(reflect.TypeFor[config.Config](), "")
