@@ -67,11 +67,6 @@ var FileSizeOverrides = map[string]FileSizeOverride{
 		Note:    "hub: client registry, broadcast fan-out, replay",
 	},
 
-	"service/auth.go": {
-		Ceiling: 1000,
-		Class:   classGrandfathered,
-		Note:    "registration, login, sessions, account deletion",
-	},
 	"db/message_queries.go": {
 		Ceiling: 1050,
 		Class:   classGrandfathered,
@@ -81,11 +76,6 @@ var FileSizeOverrides = map[string]FileSizeOverride{
 		Ceiling: 950,
 		Class:   classGrandfathered,
 		Note:    "message frame handling",
-	},
-	"service/moderation.go": {
-		Ceiling: 950,
-		Class:   classGrandfathered,
-		Note:    "bans, kicks, the moderation log",
 	},
 	"api/router.go": {
 		Ceiling: 300,
@@ -122,11 +112,6 @@ var FileSizeOverrides = map[string]FileSizeOverride{
 		Class:   classGrandfathered,
 		Note:    "voice join and leave",
 	},
-	"service/report.go": {
-		Ceiling: 750,
-		Class:   classGrandfathered,
-		Note:    "user reports",
-	},
 	"ws/replay.go": {
 		Ceiling: 700,
 		Class:   classGrandfathered,
@@ -137,20 +122,10 @@ var FileSizeOverrides = map[string]FileSizeOverride{
 		Class:   classGrandfathered,
 		Note:    "client command dispatch",
 	},
-	"service/message_crud.go": {
-		Ceiling: 640,
-		Class:   classGrandfathered,
-		Note:    "message create, edit and delete",
-	},
 	"db/appeal_queries.go": {
 		Ceiling: 700,
 		Class:   classGrandfathered,
 		Note:    "appeal queries",
-	},
-	"service/appeal.go": {
-		Ceiling: 700,
-		Class:   classGrandfathered,
-		Note:    "ban appeals",
 	},
 	"ws/serve_ready.go": {
 		Ceiling: 700,
@@ -171,11 +146,6 @@ var FileSizeOverrides = map[string]FileSizeOverride{
 		Ceiling: 650,
 		Class:   classGrandfathered,
 		Note:    "direct-message queries",
-	},
-	"db/moderation_action_queries.go": {
-		Ceiling: 600,
-		Class:   classGrandfathered,
-		Note:    "moderation action queries",
 	},
 	"db/report_queries.go": {
 		Ceiling: 600,
@@ -201,36 +171,6 @@ var FileSizeOverrides = map[string]FileSizeOverride{
 		Ceiling: 600,
 		Class:   classGrandfathered,
 		Note:    "admin queries",
-	},
-	"service/user.go": {
-		Ceiling: 600,
-		Class:   classGrandfathered,
-		Note:    "user profiles and settings",
-	},
-	"service/role.go": {
-		Ceiling: 600,
-		Class:   classGrandfathered,
-		Note:    "roles and permission resolution",
-	},
-	"service/dm.go": {
-		Ceiling: 600,
-		Class:   classGrandfathered,
-		Note:    "direct messages",
-	},
-	"service/erasure.go": {
-		Ceiling: 600,
-		Class:   classGrandfathered,
-		Note:    "erasure orchestration",
-	},
-	"service/push_dispatch.go": {
-		Ceiling: 550,
-		Class:   classGrandfathered,
-		Note:    "web push dispatch",
-	},
-	"service/retention.go": {
-		Ceiling: 550,
-		Class:   classGrandfathered,
-		Note:    "the retention policy",
 	},
 	"db/db.go": {
 		Ceiling: 550,

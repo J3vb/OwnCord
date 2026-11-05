@@ -50,3 +50,37 @@ func (s *authCommon) requirePasswordConfirmation(user *db.User, password string)
 	}
 	return nil
 }
+
+// newSessionToken generates a bearer token and hands its hash to persist (the
+// session row insert). The token is returned only once persist succeeded.
+func newSessionToken(persist func(tokenHash string) error) (string, error) {
+	token, err := auth.GenerateToken()
+	if err != nil {
+		return "", err
+	}
+	if err := persist(auth.HashToken(token)); err != nil {
+		return "", err
+	}
+	return token, nil
+}
+
+// sessionIssueError maps a failed session issue; sign-in is refused while an
+// account deletion is being completed.
+func sessionIssueError(err error) error {
+	if errors.Is(err, db.ErrAccountErasing) {
+		return ErrBanned
+	}
+	return ErrSessionIssue
+}
+
+// sessionCreator writes a new session row.
+type sessionCreator interface {
+	CreateSession(ctx context.Context, userID int64, tokenHash, device, ip string) (int64, error)
+}
+
+func issueSession(ctx context.Context, st sessionCreator, userID int64, device, ip string) (string, error) {
+	return newSessionToken(func(tokenHash string) error {
+		_, err := st.CreateSession(ctx, userID, tokenHash, device, ip)
+		return err
+	})
+}
