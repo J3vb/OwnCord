@@ -72,6 +72,16 @@ describe("message handling edge cases", () => {
     expect(messages).toHaveLength(0);
   });
 
+  it("drops a frame whose payload is not an object without logging its contents", async () => {
+    await openSocket(client);
+
+    const messages = collect(client, "chat_message");
+
+    emitTauriEvent("ws-message", JSON.stringify({ type: "chat_message", payload: "secret-body" }));
+    expectConsole("warn", /Invalid WS message: missing type or payload(?!.*secret-body).*String/);
+    expect(messages).toHaveLength(0);
+  });
+
   it("tracks highest seq number (ignores lower seq)", async () => {
     await openSocket(client);
 

@@ -579,7 +579,10 @@ export function createWsClient({
     }
 
     if (!parsed.type || !hasObjectPayload(parsed)) {
-      log.warn("Invalid WS message: missing type or payload", { parsed });
+      log.warn("Invalid WS message: missing type or payload", {
+        bytes: raw.length,
+        payloadKind: Object.prototype.toString.call(parsed.payload),
+      });
       return;
     }
 
