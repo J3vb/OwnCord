@@ -255,7 +255,9 @@ describe("MessageList — deleted messages leave the list", () => {
       ]);
       messagesStore.flush();
 
-      expect([...content().children]).toEqual(before);
+      const after = [...content().children];
+      expect(after).toHaveLength(before.length);
+      after.forEach((node, i) => expect(node).toBe(before[i]));
       expect(container.querySelector<HTMLElement>(".virtual-spacer-top")!.style.height).toBe(
         topSpacer,
       );
