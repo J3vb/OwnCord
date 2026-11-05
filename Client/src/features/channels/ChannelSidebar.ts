@@ -31,7 +31,7 @@ import { voiceStore } from "@stores/voice.store";
 import type { PeerVerification, VoiceState, VoiceUser } from "@stores/voice.store";
 import { SCREENSHARE_TILE_ID_OFFSET, USER_LOCAL_MUTE_CHANGED } from "@lib/constants";
 import { openMenuOnKeyboard } from "@lib/ui/contextMenu";
-import { createLazyScreen } from "../../components/lazyScreen";
+import { createLazyScreen } from "../../lib/ui/lazyScreen";
 import { getUserLocalMute, getUserVolume } from "@lib/voice/livekitSession";
 import type { VoiceModMenuOptions } from "./sidebar/volumeMenu";
 import { attachCategoryContextMenu } from "./sidebar/categoryMenu";

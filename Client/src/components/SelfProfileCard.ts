@@ -46,7 +46,7 @@ import {
   statusTimerLine,
   type StatusDef,
 } from "@components/statusDefs";
-import { createLazyScreen } from "@components/lazyScreen";
+import { createLazyScreen } from "@lib/ui/lazyScreen";
 import { createAvatarElement } from "../features/profiles/avatar";
 import { copyWithToast, isDeveloperMode } from "../features/developer-mode/developerTools";
 import { shellText } from "../i18n/shell";

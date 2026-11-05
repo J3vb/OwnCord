@@ -23,7 +23,7 @@ import {
   filterEmojiSuggestions,
   MAX_EMOJI_SUGGESTIONS,
   MIN_EMOJI_QUERY,
-} from "../../src/components/EmojiAutocomplete";
+} from "../../src/features/messaging/composer/EmojiAutocomplete";
 import {
   composerTextarea,
   pressIn,

@@ -1,7 +1,7 @@
 /** Constants and small helpers the message input modules share. */
 import { createElement, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import { createLazyScreen } from "@components/lazyScreen";
+import { createLazyScreen } from "@lib/ui/lazyScreen";
 import { isSpoilerFilename } from "../spoilerAttachment";
 import { authStore } from "@stores/auth.store";
 import { messagingText } from "../../../i18n/messaging";

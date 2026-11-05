@@ -11,7 +11,7 @@
 import { isImeCommit } from "@lib/text/ime";
 import { Disposable } from "@lib/disposable";
 import { createElement } from "@lib/dom";
-import { stickersText } from "../i18n/stickers";
+import { stickersText } from "../../../i18n/stickers";
 
 export type ExpressionTab = "gif" | "sticker" | "emoji";
 

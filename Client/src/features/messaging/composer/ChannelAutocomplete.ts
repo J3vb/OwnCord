@@ -6,11 +6,8 @@
 import { createElement, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { channelsStore } from "@stores/channels.store";
-import {
-  createInlineAutocomplete,
-  type InlineAutocompleteComponent,
-} from "@components/inlineAutocomplete";
-import { messagingText } from "../i18n/messaging";
+import { createInlineAutocomplete, type InlineAutocompleteComponent } from "./inlineAutocomplete";
+import { messagingText } from "../../../i18n/messaging";
 
 /** Maximum rows shown at once, as for mentions. */
 export const MAX_CHANNEL_SUGGESTIONS = 10;

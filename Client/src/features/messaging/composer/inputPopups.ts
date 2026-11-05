@@ -15,7 +15,7 @@ import {
   type ExpressionPanel,
   type ExpressionPopup,
   type ExpressionTab,
-} from "@components/ExpressionPopup";
+} from "./ExpressionPopup";
 import { stickersText } from "../../../i18n/stickers";
 import {
   emojiPickerScreen,

@@ -20,7 +20,7 @@ import { blocksStore } from "@stores/blocks.store";
 import { channelsStore } from "@stores/channels.store";
 import { voiceStore, type VoiceUser } from "@stores/voice.store";
 import type { VoiceModMenuOptions } from "../channels/sidebar/volumeMenu";
-import { withMemberMenu } from "../../components/memberMenuLoader";
+import { withMemberMenu } from "./memberMenuLoader";
 import { createAvatarElement, pickAvatarColor } from "../profiles/avatar";
 import { assignableRoleNames, outranksPosition } from "../moderation/roleAssignment";
 import { memberTimeoutsStore } from "../moderation/store";

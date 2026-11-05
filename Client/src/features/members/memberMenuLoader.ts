@@ -8,8 +8,10 @@ import { createLogger } from "@lib/logger";
 const log = createLogger("member-menu");
 
 /** Run `use` with the loaded menu module; a failed load is logged. */
-export function withMemberMenu(use: (menu: typeof import("./AdminActions")) => void): void {
-  import("./AdminActions")
+export function withMemberMenu(
+  use: (menu: typeof import("../../components/AdminActions")) => void,
+): void {
+  import("../../components/AdminActions")
     .then(use)
     .catch((err: unknown) => log.warn("Member menu failed to open", { error: String(err) }));
 }

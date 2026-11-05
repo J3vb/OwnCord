@@ -4,7 +4,7 @@ const showToast = vi.fn();
 vi.mock("@lib/ui/toast", () => ({ showToast: (...a: unknown[]) => showToast(...a) }));
 
 import { expectConsole } from "../helpers/console";
-import { createLazyScreen } from "../../src/components/lazyScreen";
+import { createLazyScreen } from "../../src/lib/ui/lazyScreen";
 import { shellText } from "../../src/i18n/shell";
 
 describe("createLazyScreen", () => {

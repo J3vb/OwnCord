@@ -15,7 +15,7 @@
  * main-page chunk; `tests/unit/lazy-screens-structure.test.ts` pins that.
  */
 
-import { createLazyScreen } from "@components/lazyScreen";
+import { createLazyScreen } from "@lib/ui/lazyScreen";
 import { createLogger } from "@lib/logger";
 import type {
   CallState,

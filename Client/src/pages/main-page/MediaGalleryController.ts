@@ -8,7 +8,7 @@
 import type { ApiClient } from "@lib/api";
 import { Disposable } from "@lib/disposable";
 import { resolveDisplayName } from "@lib/ui/avatar";
-import { createLazyScreen } from "@components/lazyScreen";
+import { createLazyScreen } from "@lib/ui/lazyScreen";
 import type { MediaUploader } from "@components/ChannelMediaGallery";
 import { channelsStore } from "@stores/channels.store";
 import { membersStore } from "@stores/members.store";

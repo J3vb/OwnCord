@@ -12,7 +12,7 @@ process.env.OC_ALLOW_UNPINNED_TZ = "1";
 // Lets wall-clock timing tests loosen their budget: instrumentation makes it meaningless.
 process.env.OC_MUTATION_RUN = "1";
 
-// Code that moved into features/ from components/ without a change. It stays
+// Code that moved into features/ (or lib/) from components/ without a change. It stays
 // out of the mutation surface it was never in; adding it is a separate decision.
 const MOVED_NOT_MUTATED = [
   "src/features/channels/ChannelSidebar.ts",
@@ -21,6 +21,7 @@ const MOVED_NOT_MUTATED = [
   "src/features/channels/sidebar/channelSheet.ts",
   "src/features/channels/sidebar/contextMenu.ts",
   "src/features/channels/sidebar/dragReorder.ts",
+  "src/features/channels/sidebar/purgePrompt.ts",
   "src/features/channels/sidebar/threadMenu.ts",
   "src/features/channels/sidebar/volumeMenu.ts",
   "src/features/direct-messages/DmCallPanel.ts",
@@ -30,8 +31,15 @@ const MOVED_NOT_MUTATED = [
   "src/features/direct-messages/dm-call/dmCallState.ts",
   "src/features/direct-messages/dm-call/dmCallVerify.ts",
   "src/features/members/MemberList.ts",
+  "src/features/members/memberMenuLoader.ts",
   "src/features/messaging/MessageInput.ts",
   "src/features/messaging/MessageList.ts",
+  "src/features/messaging/composer/ChannelAutocomplete.ts",
+  "src/features/messaging/composer/EmojiAutocomplete.ts",
+  "src/features/messaging/composer/ExpressionPopup.ts",
+  "src/features/messaging/composer/MentionAutocomplete.ts",
+  "src/features/messaging/composer/SlashAutocomplete.ts",
+  "src/features/messaging/composer/inlineAutocomplete.ts",
   "src/features/messaging/composer/inputAttachments.ts",
   "src/features/messaging/composer/inputAutocomplete.ts",
   "src/features/messaging/composer/inputComposer.ts",
@@ -52,6 +60,7 @@ const MOVED_NOT_MUTATED = [
   "src/features/messaging/content/imageViewer.ts",
   "src/features/messaging/content/media.ts",
   "src/features/messaging/content/syntaxHighlight.ts",
+  "src/features/messaging/emojiRecent.ts",
   "src/features/messaging/message-list/fenwick.ts",
   "src/features/messaging/message-list/forwardBlock.ts",
   "src/features/messaging/message-list/gifFavoriteStar.ts",
@@ -119,6 +128,7 @@ const MOVED_NOT_MUTATED = [
   "src/features/settings/voice-audio/voiceTabScope.ts",
   "src/features/settings/voice-audio/voiceTabShared.ts",
   "src/features/voice/voiceStatusText.ts",
+  "src/lib/ui/lazyScreen.ts",
 ];
 
 /** @type {import('@stryker-mutator/api/core').PartialStrykerOptions} */

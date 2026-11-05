@@ -20,12 +20,12 @@ vi.mock("@lib/voice/livekitSession", () => voiceSession.defaults());
 import {
   filterMentionSuggestions,
   MAX_MENTION_SUGGESTIONS,
-} from "../../src/components/MentionAutocomplete";
+} from "../../src/features/messaging/composer/MentionAutocomplete";
 import {
   filterEmojiSuggestions,
   MAX_EMOJI_SUGGESTIONS,
   MIN_EMOJI_QUERY,
-} from "../../src/components/EmojiAutocomplete";
+} from "../../src/features/messaging/composer/EmojiAutocomplete";
 import { membersStore } from "../../src/stores/members.store";
 import { authStore } from "../../src/stores/auth.store";
 import { channelsStore, setRoles } from "../../src/stores/channels.store";

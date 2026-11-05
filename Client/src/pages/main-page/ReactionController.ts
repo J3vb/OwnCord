@@ -5,7 +5,7 @@
 
 import { createElement } from "@lib/dom";
 import { isPhoneLayout, openBottomSheet } from "@lib/ui/bottomSheet";
-import { createLazyScreen } from "@components/lazyScreen";
+import { createLazyScreen } from "@lib/ui/lazyScreen";
 import {
   atReactionLimit,
   channelCanReact,

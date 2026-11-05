@@ -27,7 +27,7 @@ import {
   type NotificationLevel,
 } from "@lib/prefs/notificationLevel";
 import type { ContextMenuItem, ContextMenuSeparator } from "@lib/ui/contextMenu";
-import { appendPurgeSection } from "@components/purgePrompt";
+import { appendPurgeSection } from "./purgePrompt";
 import { copyWithToast, isDeveloperMode } from "../../developer-mode/developerTools";
 import type { ChannelReorderData } from "../ChannelSidebar";
 import { openMenuSheet } from "../../menus/menuSheet";

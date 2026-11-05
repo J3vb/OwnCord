@@ -44,7 +44,7 @@ import {
   setChannelNotificationLevel,
   type NotificationLevel,
 } from "@lib/prefs/notificationLevel";
-import { appendPurgeSection } from "@components/purgePrompt";
+import { appendPurgeSection } from "./purgePrompt";
 import { copyWithToast, isDeveloperMode } from "../../developer-mode/developerTools";
 import type { ChannelReorderData } from "../ChannelSidebar";
 import { shellText } from "../../../i18n/shell";

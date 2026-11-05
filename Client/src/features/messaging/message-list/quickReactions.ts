@@ -4,7 +4,7 @@
  * of the main-page chunk.
  */
 
-import { getRecentEmoji } from "@components/emojiRecent";
+import { getRecentEmoji } from "../emojiRecent";
 import { buildCustomEmojiNode } from "../content/customEmoji";
 
 /** How many quick-reaction emoji the message menu and the hover bar each show. */

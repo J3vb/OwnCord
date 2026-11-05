@@ -12,7 +12,7 @@ import {
   createMentionAutocomplete,
   filterMentionSuggestions,
   MAX_MENTION_SUGGESTIONS,
-} from "../../src/components/MentionAutocomplete";
+} from "../../src/features/messaging/composer/MentionAutocomplete";
 import { createMessageInput } from "../../src/features/messaging/MessageInput";
 import type { MessageInputOptions } from "../../src/features/messaging/MessageInput";
 import { membersStore } from "../../src/stores/members.store";

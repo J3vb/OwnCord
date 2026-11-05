@@ -3,7 +3,7 @@ import { createElement } from "@lib/dom";
 import { createIcon, type IconName } from "@lib/icons";
 import { createLogger } from "@lib/logger";
 import type { DmConversation } from "@components/DmSidebar";
-import { createLazyScreen } from "@components/lazyScreen";
+import { createLazyScreen } from "@lib/ui/lazyScreen";
 import { buildDmConversations, isDmInCall } from "../SidebarDmHelpers";
 
 export const log = createLogger("SidebarArea");

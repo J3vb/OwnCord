@@ -2,11 +2,11 @@
  * Autocomplete in the message input: the @mention, :emoji:, #channel and
  * /command popups and what each inserts.
  */
-import { createMentionAutocomplete } from "@components/MentionAutocomplete";
-import { createEmojiAutocomplete, MIN_EMOJI_QUERY } from "@components/EmojiAutocomplete";
-import { createChannelAutocomplete } from "@components/ChannelAutocomplete";
+import { createMentionAutocomplete } from "./MentionAutocomplete";
+import { createEmojiAutocomplete, MIN_EMOJI_QUERY } from "./EmojiAutocomplete";
+import { createChannelAutocomplete } from "./ChannelAutocomplete";
 import { emojiCatalog, loadEmojiCatalog } from "../emojiCatalog";
-import { createSlashAutocomplete } from "@components/SlashAutocomplete";
+import { createSlashAutocomplete } from "./SlashAutocomplete";
 import { idMentionsEnabled } from "@lib/net/serverCapabilities";
 import type { InputState, InputApi } from "./inputState";
 

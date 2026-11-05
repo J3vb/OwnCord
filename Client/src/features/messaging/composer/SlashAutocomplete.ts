@@ -8,12 +8,9 @@
  */
 
 import { createElement, setText } from "@lib/dom";
-import {
-  createInlineAutocomplete,
-  type InlineAutocompleteComponent,
-} from "@components/inlineAutocomplete";
-import { messagingText } from "../i18n/messaging";
-import { filterSlashCommands, type SlashCommand } from "../features/messaging/slashCommands";
+import { createInlineAutocomplete, type InlineAutocompleteComponent } from "./inlineAutocomplete";
+import { messagingText } from "../../../i18n/messaging";
+import { filterSlashCommands, type SlashCommand } from "../slashCommands";
 
 export interface SlashAutocompleteOptions {
   /** Called with the command name to insert (without the leading "/"). */

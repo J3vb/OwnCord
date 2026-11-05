@@ -1,13 +1,10 @@
 /** The mutable state one message input instance keeps, shared by its modules. */
 import type { NativeFile } from "../../../platform/contracts/nativeFiles";
 import type { Disposable } from "@lib/disposable";
-import type {
-  MentionAutocompleteComponent,
-  MentionSuggestion,
-} from "@components/MentionAutocomplete";
-import type { EmojiAutocompleteComponent } from "@components/EmojiAutocomplete";
-import type { ChannelAutocompleteComponent } from "@components/ChannelAutocomplete";
-import type { SlashAutocompleteComponent } from "@components/SlashAutocomplete";
+import type { MentionAutocompleteComponent, MentionSuggestion } from "./MentionAutocomplete";
+import type { EmojiAutocompleteComponent } from "./EmojiAutocomplete";
+import type { ChannelAutocompleteComponent } from "./ChannelAutocomplete";
+import type { SlashAutocompleteComponent } from "./SlashAutocomplete";
 import type { PickedMention } from "@lib/text/pickedMentions";
 import type { VoiceComposer } from "../../voice-messages/voiceComposer";
 import type {

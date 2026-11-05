@@ -16,20 +16,17 @@
  */
 
 import { createElement, setText } from "@lib/dom";
-import { buildCustomEmojiImage } from "../features/messaging/content/customEmoji";
+import { buildCustomEmojiImage } from "../content/customEmoji";
 import { listCustomEmoji, type CustomEmoji } from "@stores/emoji.store";
-import { messagingText } from "../i18n/messaging";
-import {
-  createInlineAutocomplete,
-  type InlineAutocompleteComponent,
-} from "@components/inlineAutocomplete";
+import { messagingText } from "../../../i18n/messaging";
+import { createInlineAutocomplete, type InlineAutocompleteComponent } from "./inlineAutocomplete";
 import {
   emojiCatalog,
   emojiMatches,
   skinTone,
   withSkinTone,
   type UnicodeEmoji,
-} from "../features/messaging/emojiCatalog";
+} from "../emojiCatalog";
 
 /** Maximum rows shown at once — the popup is a shortcut, not the picker. */
 export const MAX_EMOJI_SUGGESTIONS = 10;

@@ -12,11 +12,8 @@ import { Permission } from "@lib/types";
 import { EVERYONE_TOKEN, HERE_TOKEN, isEveryoneToken } from "@lib/text/mentions";
 import { idMentionsEnabled } from "@lib/net/serverCapabilities";
 import { channelsStore } from "@stores/channels.store";
-import {
-  createInlineAutocomplete,
-  type InlineAutocompleteComponent,
-} from "@components/inlineAutocomplete";
-import { messagingText } from "../i18n/messaging";
+import { createInlineAutocomplete, type InlineAutocompleteComponent } from "./inlineAutocomplete";
+import { messagingText } from "../../../i18n/messaging";
 
 /** Maximum rows shown at once — the popup is a shortcut, not the member list. */
 export const MAX_MENTION_SUGGESTIONS = 10;
