@@ -32,6 +32,7 @@ import { voiceText as t } from "../i18n/voice";
 import { formatElapsed, headerStatusText, isConnecting } from "../features/voice/voiceStatusText";
 import { shareBlockReason } from "../features/voice/shareGate";
 import { canPublishScreen } from "../features/voice/native/platform";
+import { createSecuredBadge, type SecuredBadge } from "../features/voice/securedBadge";
 import type { StreamCard } from "./voice-widget/streamCard";
 
 export interface VoiceWidgetOptions {
@@ -62,7 +63,8 @@ const QUALITY_BARS: Record<QualityLevel, number> = {
 
 function swapIcon(btn: HTMLButtonElement, name: IconName): void {
   const existing = btn.querySelector("svg");
-  if (existing) existing.remove();
+  if (existing?.getAttribute("data-icon") === name) return;
+  existing?.remove();
   btn.appendChild(createIcon(name, 18));
 }
 
@@ -104,8 +106,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
   /** The call the name link opens; read at click time. */
   let linkedChannelId: number | null = null;
   let statusLabel: HTMLSpanElement | null = null;
-  let securedBadge: HTMLSpanElement | null = null;
-  let securedText: HTMLSpanElement | null = null;
+  let securedBadge: SecuredBadge | null = null;
   let controlsRow: HTMLDivElement | null = null;
   let cameraBtn: HTMLButtonElement | null = null;
   let shareBtn: HTMLButtonElement | null = null;
@@ -264,24 +265,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
       statusLabel.classList.toggle("vw-securing", status === "securing");
       statusLabel.classList.toggle("vw-reconnecting", status === "reconnecting");
     }
-    if (securedBadge !== null && securedText !== null) {
-      const connected = status === "connected";
-      const degraded = connected && encryptionDegraded;
-      const wasDegraded = securedBadge.classList.contains("vw-secured--degraded");
-      securedBadge.classList.toggle("vw-secured--degraded", degraded);
-      if (degraded !== wasDegraded) {
-        securedBadge.querySelector("svg")?.remove();
-        securedBadge.prepend(createIcon(degraded ? "shield-alert" : "shield-check", 12));
-      }
-      if (degraded) {
-        setText(securedText, t("widget.unsecured"));
-        securedBadge.title = t("encryption.unsecuredLabel");
-      } else {
-        setText(securedText, t("widget.secured"));
-        securedBadge.title = t("encryption.securedLabel");
-      }
-      securedBadge.style.display = connected ? "inline-flex" : "none";
-    }
+    securedBadge?.sync(status === "connected", encryptionDegraded);
   }
 
   /** A live control's tooltip: what a press does next. */
@@ -494,14 +478,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     });
     setText(statusLabel, t("status.connected"));
     // Persistent E2EE affirmation, shown only once the room key is ready.
-    securedBadge = createElement("span", {
-      class: "vw-secured",
-      "data-testid": "vw-secured",
-      title: t("encryption.securedLabel"),
-    });
-    securedText = createElement("span", {}, t("widget.secured"));
-    appendChildren(securedBadge, createIcon("shield-check", 12), securedText);
-    securedBadge.style.display = "none";
+    securedBadge = createSecuredBadge("vw-secured");
     timerEl = createElement("span", { class: "vw-timer" }, "00:00");
     channelNameEl = createElement("span", { class: "vw-channel" }, t("widget.channelFallback"));
 
@@ -551,7 +528,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     renderNs();
 
     const headerSub = createElement("div", { class: "vw-header-sub" });
-    appendChildren(headerSub, channelNameEl, securedBadge, signalWrap, nsBtn);
+    appendChildren(headerSub, channelNameEl, securedBadge.el, signalWrap, nsBtn);
     appendChildren(header, headerMain, headerSub);
 
     // Expanded stats pane (hidden by default): Upload and Download tiles,
@@ -749,7 +726,6 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     channelNameEl = null;
     statusLabel = null;
     securedBadge = null;
-    securedText = null;
     controlsRow = null;
     cameraBtn = null;
     nsBtn = null;

@@ -90,6 +90,7 @@ export type IconName =
   | "flag"
   | "ban"
   | "ellipsis"
+  | "square-user"
   | "gamepad-2"
   | "music"
   | "zap"
@@ -284,6 +285,8 @@ const ICON_PATHS: Record<IconName, string> = {
   moon: `<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>`,
   // More actions.
   ellipsis: `<circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>`,
+  // The call view's "show my camera" toggle: your own tile, not a camera.
+  "square-user": `<rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="12" cy="10" r="3"/><path d="M7 21v-2a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v2"/>`,
 
   // Block.
   ban: `<circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/>`,

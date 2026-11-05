@@ -15,7 +15,34 @@ import (
 // Returns ErrNotFound if the user does not exist. Returns an error wrapping
 // a UNIQUE constraint violation if the username is already taken.
 func (d *DB) UpdateUserProfile(ctx context.Context, userID int64, username string, avatar, displayName, about, bannerID, bannerColor *string) error {
-	result, err := d.q.UpdateUserProfile(ctx, dbgen.UpdateUserProfileParams{
+	return updateUserProfile(ctx, d.q, userID, username, avatar, displayName, about, bannerID, bannerColor)
+}
+
+// UpdateUserProfileAndIdentityKey is UpdateUserProfile plus the E2EE identity
+// key, in one transaction: both commit or neither does, so a failed key write
+// never leaves a half-applied profile behind a failed request.
+func (d *DB) UpdateUserProfileAndIdentityKey(ctx context.Context, userID int64, username string, avatar, displayName, about, bannerID, bannerColor *string, identityKey string) error {
+	tx, err := d.writer.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("UpdateUserProfileAndIdentityKey begin: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+	q := d.q.WithTx(tx)
+
+	if err := updateUserProfile(ctx, q, userID, username, avatar, displayName, about, bannerID, bannerColor); err != nil {
+		return err
+	}
+	if err := q.UpdateUserIdentityKey(ctx, dbgen.UpdateUserIdentityKeyParams{IdentityPublicKey: &identityKey, ID: userID}); err != nil {
+		return fmt.Errorf("UpdateUserProfileAndIdentityKey identity key: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("UpdateUserProfileAndIdentityKey commit: %w", err)
+	}
+	return nil
+}
+
+func updateUserProfile(ctx context.Context, q *dbgen.Queries, userID int64, username string, avatar, displayName, about, bannerID, bannerColor *string) error {
+	result, err := q.UpdateUserProfile(ctx, dbgen.UpdateUserProfileParams{
 		Username:    username,
 		Avatar:      avatar,
 		DisplayName: displayName,

@@ -364,6 +364,21 @@ func TestRenameGroupDM_RejectsOverlongName(t *testing.T) {
 	}
 }
 
+// A rename body past the 16 KiB group cap is refused as too large before any
+// name check, the same cap add-members and owner transfer read under.
+func TestRenameGroupDM_BodyOverGroupCapIs413(t *testing.T) {
+	_, router, _, tokens := groupFixture(t)
+	group := decodeDMInfo(t, dmPost(t, router, "/api/v1/dms/group", tokens[0], map[string]any{
+		"recipient_ids": []int64{2, 3},
+	}))
+
+	rr := dmPatch(t, router, fmt.Sprintf("/api/v1/dms/%d", group.ChannelID), tokens[0],
+		map[string]any{"name": "ok", "pad": string(bytes.Repeat([]byte{'x'}, 20<<10))})
+	if rr.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected 413 for a body over the group cap, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
 // ─── leaving ────────────────────────────────────────────────────────────────
 
 func TestLeaveGroupDM_RemovesParticipantAndNotifiesSurvivors(t *testing.T) {

@@ -209,6 +209,30 @@ func (d *DB) GetReport(ctx context.Context, id int64) (*Report, error) {
 	return &rep, nil
 }
 
+// ReportLink is the part of a report a moderation action's link needs: the
+// public id it shows and the subject the confidentiality guard checks.
+type ReportLink struct {
+	PublicID  string
+	SubjectID int64
+}
+
+// ListReportLinks resolves many report ids in one read, keyed by internal id.
+// An id with no row is simply absent.
+func (d *DB) ListReportLinks(ctx context.Context, ids []int64) (map[int64]ReportLink, error) {
+	if len(ids) == 0 {
+		return map[int64]ReportLink{}, nil
+	}
+	rows, err := d.q.ListReportLinksByIDs(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("ListReportLinks: %w", err)
+	}
+	out := make(map[int64]ReportLink, len(rows))
+	for _, r := range rows {
+		out[r.ID] = ReportLink{PublicID: r.PublicID, SubjectID: r.SubjectID}
+	}
+	return out, nil
+}
+
 // GetReportByPublicID resolves the opaque public id used in route parameters
 // and API responses to the report row, or ErrNotFound.
 func (d *DB) GetReportByPublicID(ctx context.Context, publicID string) (*Report, error) {

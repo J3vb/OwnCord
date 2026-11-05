@@ -109,7 +109,7 @@
       "estimateItemHeight": [16]
     },
     "components/video-grid/gridCallBar.ts": {
-      "createGridCallBar > drawCallState": [27]
+      "createGridCallBar > drawCallState": [25]
     },
     "components/video-grid/gridLayout.ts": {
       "createGridLayout > rebuildFocusLayout": [21]
@@ -126,7 +126,7 @@
     },
     "features/direct-messages/DmCallPanel.ts": {
       "createDmCallPanel > rebuild": [25],
-      "createDmCallPanel > refresh": [54]
+      "createDmCallPanel > refresh": [51]
     },
     "features/direct-messages/DmCallViewModel.ts": {
       "deriveCallView": [16],
@@ -198,7 +198,7 @@
       "openUserProfilePopup > (anonymous)": [20]
     },
     "features/settings/AppearanceTab.ts": {
-      "buildAppearanceTab": [17]
+      "buildAppearanceTab": [16]
     },
     "features/settings/KeybindsTab.ts": {
       "buildKeybindsTab > renderPortal": [20]

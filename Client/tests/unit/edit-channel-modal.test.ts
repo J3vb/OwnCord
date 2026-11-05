@@ -124,6 +124,17 @@ describe("EditChannelModal", () => {
     modal.destroy?.();
   });
 
+  it("caps the name at the server's 100 characters and shows the limit", () => {
+    const { modal } = makeModal({});
+    const name = container.querySelector<HTMLInputElement>(
+      "[data-testid='edit-channel-name-input']",
+    )!;
+    expect(name.maxLength).toBe(200);
+    const hintId = name.getAttribute("aria-describedby")!.split(" ").at(-1)!;
+    expect(container.querySelector(`#${hintId}`)?.textContent).toContain("100 characters");
+    modal.destroy?.();
+  });
+
   it("pre-fills the topic input and includes the edited topic in onSave", async () => {
     const onSave = vi.fn(async () => {});
     const { modal } = makeModal({ onSave, channelTopic: "old topic" });

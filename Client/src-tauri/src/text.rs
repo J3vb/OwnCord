@@ -138,7 +138,7 @@ pub fn cert_mismatch(host: &str, stored: &str, current: &str) -> String {
 
 // --- Linux .deb update -----------------------------------------
 //
-// The two `update …` strings are stable codes: the renderer matches their
+// The `update …` strings are stable codes: the renderer matches their
 // prefix (`platform/desktop/updater.ts`) to choose its own catalog text, so do
 // not reword them. The polkit prompt's message is read by polkit from
 // `packaging/linux/com.owncord.client.update.policy`, not from here.
@@ -153,6 +153,9 @@ pub const UPDATE_NOT_AUTHORIZED: &str = "update not authorized";
 /// allows it was opened instead of the installer.
 #[cfg(target_os = "android")]
 pub const UPDATE_INSTALL_PERMISSION: &str = "update install permission needed";
+/// The server now offers a different version from the one the banner showed;
+/// nothing was downloaded. The banner checks again and shows the new one.
+pub const UPDATE_VERSION_CHANGED: &str = "update version changed";
 /// The root helper refused the package (exit 10 to 13).
 #[cfg(target_os = "linux")]
 pub const UPDATE_PACKAGE_CHECK_FAILED: &str = "download/install failed: package check failed";

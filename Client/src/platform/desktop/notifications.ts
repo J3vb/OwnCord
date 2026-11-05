@@ -13,6 +13,28 @@ import type { Notifier, NotifierShowOptions, NotificationTarget } from "../contr
 
 const log = createLogger("notifications");
 
+// The host command runs off the UI thread, so two calls in flight could land
+// out of order and leave an old count on the taskbar. Send one at a time, and
+// always the newest count asked for.
+let badgeQueued: number | null = null;
+let badgeDrain: Promise<void> | null = null;
+
+async function drainBadge(): Promise<void> {
+  for (;;) {
+    const count = badgeQueued;
+    if (count === null) {
+      // Cleared in the same tick as the empty check, so a call arriving now
+      // starts a new drain instead of waiting on this finished one.
+      badgeDrain = null;
+      return;
+    }
+    badgeQueued = null;
+    // oxlint-disable-next-line no-await-in-loop -- one call at a time keeps the counts in order
+    const result = await tryInvoke("set_unread_badge", { count });
+    if (!result.ok) log.debug("unread badge not shown", result.error);
+  }
+}
+
 export const notifier: Notifier = {
   // tauri-plugin-notification's desktop backend hard-codes both the
   // permission state and the request answer to "granted".
@@ -94,8 +116,9 @@ export const notifier: Notifier = {
   // macOS) and sets the tray tooltip (src-tauri/src/unread_badge.rs).
   // A host with no badge (an older build) leaves the count unshown; nothing
   // for the caller to do about it.
-  async setUnreadBadge(count: number): Promise<void> {
-    const result = await tryInvoke("set_unread_badge", { count });
-    if (!result.ok) log.debug("unread badge not shown", result.error);
+  setUnreadBadge(count: number): Promise<void> {
+    badgeQueued = count;
+    badgeDrain ??= drainBadge();
+    return badgeDrain;
   },
 };

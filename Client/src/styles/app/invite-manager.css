@@ -121,3 +121,17 @@
   color: var(--text-danger);
   padding: 8px 0;
 }
+.invite-manager__select {
+  background: var(--bg-input);
+  color: var(--text-normal);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+  font: inherit;
+  font-size: var(--font-size-sm);
+  min-height: 32px;
+}
+.invite-manager__select:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}

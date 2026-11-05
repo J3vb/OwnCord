@@ -31,7 +31,7 @@ import type { MountableComponent } from "@lib/text/safeRender";
 import { claimBack, type BackClaim } from "@lib/ui/backHistory";
 import { isPhoneLayout } from "@lib/ui/bottomSheet";
 import type { RingState, OutgoingCallState } from "@lib/voice/callRing";
-import { voiceStore, isSelfMuted } from "@stores/voice.store";
+import { voiceStore, isSelfMuted, type VoiceState } from "@stores/voice.store";
 import { channelsStore } from "@stores/channels.store";
 import { dmStore } from "@stores/dm.store";
 import { membersStore } from "@stores/members.store";
@@ -111,6 +111,23 @@ export {
 const isCallView = (kind: DmCallView["kind"]): boolean =>
   kind === "outgoing" || kind === "connected";
 
+/** Voice fields that tick without changing anything this panel draws: the
+ *  local input gate's verdict and other channels' rosters (speaking flips). */
+const UNDRAWN_VOICE_FIELDS: ReadonlySet<string> = new Set(["voiceUsers", "localGateSpeaking"]);
+
+/** What the panel reads from the voice store, as a flat list for the store's
+ *  element-wise compare: every other field, plus the rosters of the DM rooms
+ *  and the room you are in. */
+export function panelVoiceKey(voice: VoiceState): unknown[] {
+  const key: unknown[] = [];
+  for (const [field, value] of Object.entries(voice)) {
+    if (!UNDRAWN_VOICE_FIELDS.has(field)) key.push(field, value);
+  }
+  if (voice.currentChannelId !== null) key.push(voice.voiceUsers.get(voice.currentChannelId));
+  for (const dm of dmStore.getState().channels) key.push(voice.voiceUsers.get(dm.channelId));
+  return key;
+}
+
 export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelComponent {
   const disposable = new Disposable();
   const st: DmCallState = {
@@ -155,7 +172,7 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
     avatars: new Map<number, AvatarRef>(),
     controls: { mute: null, deafen: null, camera: null, share: null },
     statusEl: null,
-    securedEl: null,
+    secured: null,
     timerEls: [],
     speakingEl: null,
     timerInterval: null,
@@ -390,7 +407,7 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
     st.people = [];
     st.controls = { mute: null, deafen: null, camera: null, share: null };
     st.statusEl = null;
-    st.securedEl = null;
+    st.secured = null;
     st.speakingEl = null;
     st.timerEls = [];
     st.root.classList.remove(
@@ -484,14 +501,7 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
     if (st.view.kind === "connected" && st.statusEl !== null) {
       setText(st.statusEl, connectedStatus(st.view, voice.voiceStatus));
     }
-    if (st.securedEl !== null) {
-      const connected = voice.voiceStatus === "connected";
-      const degraded = connected && voice.encryptionDegraded === true;
-      st.securedEl.hidden = !connected;
-      st.securedEl.classList.toggle("dcp-secured--degraded", degraded);
-      setText(st.securedEl, degraded ? t("encryption.unsecured") : t("encryption.secured"));
-      st.securedEl.title = degraded ? t("encryption.unsecuredLabel") : t("encryption.securedLabel");
-    }
+    st.secured?.sync(voice.voiceStatus === "connected", voice.encryptionDegraded === true);
 
     // Controls: the widget's rules. Socket down freezes camera and share
     // (Leave stays live; mute and deafen apply locally and are restated when
@@ -625,7 +635,7 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
       // Turning the device moves the window onto or off the phone layout.
       st.disposable.onEvent(window, "resize", () => update());
       st.unsubs.push(
-        voiceStore.subscribe(() => update()),
+        voiceStore.subscribeSelector(panelVoiceKey, () => update()),
         channelsStore.subscribeSelector(
           (s) => s.activeChannelId,
           () => update(),

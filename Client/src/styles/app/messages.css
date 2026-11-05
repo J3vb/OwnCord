@@ -816,6 +816,10 @@
   overflow: hidden;
   max-width: 420px;
 }
+/* The stand-in before consent is only its Load button: no empty card beside it. */
+.msg-embed-concealed {
+  width: fit-content;
+}
 .msg-embed-youtube {
   width: 420px;
   max-width: 100%;

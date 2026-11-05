@@ -30,7 +30,7 @@ type userCoreStore interface {
 	UpdateUserProfile(ctx context.Context, userID int64, username string, avatar, displayName, about, bannerID, bannerColor *string) error
 	UpdateUserCustomStatus(ctx context.Context, userID int64, customStatus *string) error
 	UpdateUserPassword(ctx context.Context, userID int64, newPasswordHash string) error
-	UpdateUserIdentityKey(ctx context.Context, id int64, key *string) error
+	UpdateUserProfileAndIdentityKey(ctx context.Context, userID int64, username string, avatar, displayName, about, bannerID, bannerColor *string, identityKey string) error
 	DeleteOtherSessions(ctx context.Context, userID, keepSessionID int64) (int64, error)
 	RevokeUserAPITokens(ctx context.Context, userID int64) (int64, error)
 	GetRoleByID(ctx context.Context, id int64) (*db.Role, error)
@@ -117,6 +117,9 @@ type ProfilePatch struct {
 	// BannerID (upload handler only) and BannerColor (#rgb or #rrggbb): "" clears.
 	BannerID    *string
 	BannerColor *string
+	// IdentityKey, when set, publishes an already validated E2EE identity
+	// public key in the same transaction as the profile columns.
+	IdentityKey *string
 }
 
 func nullable(v string) *string {
@@ -210,22 +213,23 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID int64, patch Pro
 	// An empty Username means "unspecified", like a nil pointer. That lets the avatar
 	// upload leave username alone without a snapshot that could be stale; PATCH
 	// /users/me rejects an empty username before calling in.
-	username := patch.Username
-	if username == "" {
-		username = current.Username
+	next := *current
+	if patch.Username != "" {
+		next.Username = patch.Username
 	}
-	avatar := current.Avatar
 	if patch.Avatar != nil {
-		avatar = nullable(*patch.Avatar)
+		next.Avatar = nullable(*patch.Avatar)
 	}
-	displayName := current.DisplayName
 	if cleanDisplayName != nil {
-		displayName = nullable(*cleanDisplayName)
+		next.DisplayName = nullable(*cleanDisplayName)
 	}
-	about := resolveOptional(patch.About, current.About)
-	bannerID, bannerColor := mergeBanner(current, patch.BannerID, cleanBannerColor)
+	next.About = resolveOptional(patch.About, current.About)
+	next.BannerID, next.BannerColor = mergeBanner(current, patch.BannerID, cleanBannerColor)
+	if patch.IdentityKey != nil {
+		next.IdentityPublicKey = patch.IdentityKey
+	}
 
-	if err := s.st.UpdateUserProfile(ctx, userID, username, avatar, displayName, about, bannerID, bannerColor); err != nil {
+	if err := s.writeProfile(ctx, &next, patch.IdentityKey); err != nil {
 		if db.IsUniqueConstraintError(err) {
 			return nil, fmt.Errorf("%w: username is already taken", ErrConflict)
 		}
@@ -239,23 +243,44 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID int64, patch Pro
 		// The write committed, so a failing re-read (SQLITE_BUSY, I/O error, pool
 		// exhaustion) must not be ErrInternal: handleUploadAvatar treats any error as
 		// "the write never landed" and deletes the file the committed avatar now points
-		// at. UpdateUserProfile writes only username, avatar, display_name, about and the
-		// banner, so merging those onto the pre-write snapshot reconstructs the row.
+		// at. The write touches only the columns merged into next (username, avatar,
+		// display_name, about, the banner and the identity key), so next is the row.
 		slog.Error("UpdateProfile post-commit re-read failed; returning locally merged row",
 			"user_id", userID, "error", err)
-		merged := *current
-		merged.Username = username
-		merged.Avatar = avatar
-		merged.DisplayName = displayName
-		merged.About = about
-		merged.BannerID, merged.BannerColor = bannerID, bannerColor
-		user = &merged
+		user = &next
 	}
-	// Audit rows must survive a request canceled after the write committed.
-	db.WriteAudit(context.WithoutCancel(ctx), s.st, userID, "profile_update", "user", userID,
-		fmt.Sprintf("username=%s", username)+displayNameAuditSuffix(current.DisplayName, displayName))
-	slog.Info("profile updated", "user_id", userID, "username", username)
+	s.auditProfileUpdate(ctx, current, &next, patch.IdentityKey != nil)
 	return user, nil
+}
+
+// auditProfileUpdate records a committed profile write. Audit rows must survive
+// a request canceled after the write committed.
+func (s *UserService) auditProfileUpdate(ctx context.Context, current, next *db.User, keyWritten bool) {
+	ctx = context.WithoutCancel(ctx)
+	db.WriteAudit(ctx, s.st, next.ID, "profile_update", "user", next.ID,
+		fmt.Sprintf("username=%s", next.Username)+displayNameAuditSuffix(current.DisplayName, next.DisplayName))
+	if keyWritten {
+		// Every key write is audited so a rotation, which peers surface as a
+		// TOFU mismatch, leaves a trail.
+		db.WriteAudit(ctx, s.st, next.ID, "identity_key_update", "user", next.ID, "")
+		slog.Info("identity key published", "user_id", next.ID)
+	}
+	slog.Info("profile updated", "user_id", next.ID, "username", next.Username)
+}
+
+// writeProfile writes the merged profile columns, and the identity key with
+// them in one transaction when the patch carries one.
+func (s *UserService) writeProfile(ctx context.Context, u *db.User, identityKey *string) error {
+	if identityKey == nil {
+		if err := s.st.UpdateUserProfile(ctx, u.ID, u.Username, u.Avatar, u.DisplayName, u.About, u.BannerID, u.BannerColor); err != nil {
+			return fmt.Errorf("write profile: %w", err)
+		}
+		return nil
+	}
+	if err := s.st.UpdateUserProfileAndIdentityKey(ctx, u.ID, u.Username, u.Avatar, u.DisplayName, u.About, u.BannerID, u.BannerColor, *identityKey); err != nil {
+		return fmt.Errorf("write profile and identity key: %w", err)
+	}
+	return nil
 }
 
 // SetCustomStatus stores (or clears, with "") the custom status. It persists across
@@ -278,24 +303,6 @@ func (s *UserService) ClearCustomStatus(ctx context.Context, userID int64) error
 		return fmt.Errorf("%w: failed to clear custom status: %w", ErrInternal, err)
 	}
 	return nil
-}
-
-// UpdateIdentityKey publishes the user's E2EE identity public key (voice E2EE
-// TOFU). Last write wins; every write is audited so a rotation, which peers
-// surface as a TOFU mismatch, leaves a trail.
-func (s *UserService) UpdateIdentityKey(ctx context.Context, userID int64, key string) (*db.User, error) {
-	if err := s.st.UpdateUserIdentityKey(ctx, userID, &key); err != nil {
-		return nil, fmt.Errorf("%w: failed to update identity key: %w", ErrInternal, err)
-	}
-	// Detached like UpdateProfile's re-read: a canceled ctx must not turn a
-	// successful rotation into ErrInternal and stop the broadcast peers pin on.
-	user, err := s.st.GetUserByID(context.WithoutCancel(ctx), userID)
-	if err != nil {
-		return nil, fmt.Errorf("%w: failed to fetch updated user: %w", ErrInternal, err)
-	}
-	db.WriteAudit(context.WithoutCancel(ctx), s.st, userID, "identity_key_update", "user", userID, "")
-	slog.Info("identity key published", "user_id", userID)
-	return user, nil
 }
 
 // ChangePasswordResult reports a completed password change. RevokeFailed means
