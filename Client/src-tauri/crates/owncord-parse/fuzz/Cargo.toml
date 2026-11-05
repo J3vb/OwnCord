@@ -1,0 +1,37 @@
+[package]
+name = "owncord-parse-fuzz"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+owncord-parse = { path = ".." }
+
+# Its own workspace: this crate builds with a nightly toolchain and is not
+# part of the app's build.
+[workspace]
+
+[[bin]]
+name = "http_request_head"
+path = "fuzz_targets/http_request_head.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "livekit_request_head"
+path = "fuzz_targets/livekit_request_head.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "pin_inputs"
+path = "fuzz_targets/pin_inputs.rs"
+test = false
+doc = false
+bench = false

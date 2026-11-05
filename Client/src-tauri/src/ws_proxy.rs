@@ -37,6 +37,7 @@ const LIVENESS_TIMEOUT: Duration = Duration::from_millis(62_500);
 
 use crate::constants::CERTS_STORE;
 use crate::tofu::{self, TofuOutcome};
+pub(crate) use owncord_parse::pins::{is_valid_cert_fingerprint, pin_needs_confirmation};
 
 /// Sender half kept in Tauri state so `ws_send` can push messages.
 /// `tx` is wrapped in `Arc` so the monitoring task can clone a reference
@@ -554,29 +555,6 @@ pub async fn ws_disconnect(
     // whose login was verified this app run. That set is kept.
     session.clear_active();
     Ok(())
-}
-
-/// Whether `fingerprint` is a SHA-256 digest in colon-hex form:
-/// `XX:XX:XX:...`, 32 hex pairs separated by colons (95 chars total).
-///
-/// Split out of `accept_cert_fingerprint` so the format check — the guard on
-/// the only code path that writes a cert pin — is reachable from unit tests
-/// without a Tauri runtime.
-pub(crate) fn is_valid_cert_fingerprint(fingerprint: &str) -> bool {
-    fingerprint.len() == 95
-        && fingerprint.bytes().enumerate().all(|(i, b)| {
-            if (i + 1) % 3 == 0 {
-                b == b':'
-            } else {
-                b.is_ascii_hexdigit()
-            }
-        })
-}
-
-/// Whether writing `fingerprint` changes what `host` trusts: a first pin, or a
-/// different one. Restating the stored pin asks nothing.
-pub(crate) fn pin_needs_confirmation(stored: Option<&Value>, fingerprint: &str) -> bool {
-    !matches!(stored, Some(Value::String(s)) if s == fingerprint)
 }
 
 /// Ask the user, in a native dialog, to confirm pinning `fingerprint` for
