@@ -205,10 +205,6 @@
     "features/voice/e2eePeerState.ts": {
       "E2EEPeerState > verifyPeerAnnounce": [33]
     },
-    "features/voice/joinOrchestration.ts": {
-      "JoinOrchestration > connectAndSetup": [57],
-      "JoinOrchestration > handleVoiceToken": [17]
-    },
     "features/voice/localVoiceRestore.ts": {
       "restoreLocalVoiceState": [19]
     },
@@ -385,9 +381,6 @@
     },
     "features/voice-messages/recorder.ts": {
       "createVoiceRecorder > openStream": [5]
-    },
-    "features/voice/joinOrchestration.ts": {
-      "JoinOrchestration > connectAndSetup": [6, 5, 5, 5]
     },
     "features/voice/mediaControl.ts": {
       "MediaControl > doSwitchVideoDevice": [5]

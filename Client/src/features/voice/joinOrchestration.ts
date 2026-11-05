@@ -13,7 +13,7 @@ import type { AudioPipeline } from "../../lib/voice/audioPipeline";
 import type { AudioElements } from "../../lib/voice/audioElements";
 import type { DeviceManager } from "../../lib/voice/deviceManager";
 import type { E2EEManager } from "../../lib/voice/livekitE2EE";
-import { ROOM_CONNECT_OPTIONS, type SessionState } from "./sessionState";
+import { ROOM_CONNECT_OPTIONS, type PendingVoiceJoin, type SessionState } from "./sessionState";
 import { detachRoom, releaseRoom } from "./releaseRoom";
 import { setJoinedVoiceStatus } from "../../lib/voice/roomEventHandlers";
 import { voiceText } from "../../i18n/voice";
@@ -170,6 +170,386 @@ export class JoinOrchestration {
     if (this._state.type === "idle") this.syncModuleRooms();
   }
 
+  /** Tear down what a new attempt must not inherit. Also tear down (and
+   *  abort) an in-flight reconnect: `_room` reads null for the whole
+   *  "reconnecting" state, so a join issued while the LiveKit auto-reconnect
+   *  loop is running would otherwise skip leaveVoice(false) entirely —
+   *  meaning _e2ee.clearState() never runs, and setupKeyExchange inherits
+   *  the PREVIOUS channel's residual _isKeyHolder via its OR-with-server-value
+   *  guard, joining the new channel as a phantom key holder the server never
+   *  elected. */
+  private clearForNewAttempt(): void {
+    if (this._room !== null || this._state.type === "reconnecting") {
+      this.leaveVoice(false, true);
+    } else if (this._state.type === "connecting") {
+      // The pending-join drain loop (handleVoiceToken) re-enters
+      // connectAndSetup while `_state` is still "connecting" — there is no
+      // room to disconnect and no reconnect AC to abort, so the branch above
+      // never fires, but a discarded prior attempt (e.g. the e2ee_timeout /
+      // checkpoint-2 queued-join paths) can still leave residual E2EE
+      // state (_isKeyHolder, keypair, peer keys) behind for THIS attempt to
+      // inherit via setupKeyExchange's OR-with-server-value guard. Clear it
+      // explicitly since leaveVoice() itself never runs on this path.
+      this._e2ee.clearState({ keepHeldAnnounces: true });
+    }
+  }
+
+  /** Point the extracted modules at the room this attempt is building. */
+  private wireModules(room: Room): void {
+    this._audioPipeline.setRoom(room);
+    this._audioElements.setRoom(room);
+    this._deviceManager.setRoom(room);
+    this._deviceManager.setAudioPipeline(this._audioPipeline);
+  }
+
+  private unwireModules(): void {
+    this._audioPipeline.setRoom(null);
+    this._audioElements.setRoom(null);
+    this._deviceManager.setRoom(null);
+    this._deviceManager.setAudioPipeline(null);
+  }
+
+  /** A join is queued on the attempt connecting now. */
+  private hasQueuedJoin(): boolean {
+    const s = this._state;
+    return s.type === "connecting" && s.pendingJoin !== null;
+  }
+
+  private currentGeneration(): number | "n/a" {
+    return this._state.type === "connecting" ? this._state.joinGeneration : "n/a";
+  }
+
+  /** Drop the room of an attempt a checkpoint found superseded. */
+  private dropSuperseded(localRoom: Room): "superseded" {
+    this.disconnectSupersededLocalRoom(localRoom);
+    return "superseded";
+  }
+
+  /** The key exchange did not finish. setupKeyExchange() also returns false
+   *  when clearState() aborted the wait (e.g. a supersession that ran
+   *  leaveVoice() while we were blocked there) — indistinguishable from a
+   *  genuine timeout by return value alone. Check ownership before treating
+   *  it as a real failure: a superseded attempt must not fire a spurious
+   *  toast, send voice_leave (it carries no channel id and would act on
+   *  whichever channel the NEWER attempt just joined), or clear the store's
+   *  currentChannelId that the newer join just set. */
+  private onKeyExchangeFailed(
+    localRoom: Room,
+    channelId: number,
+    myGeneration: number,
+    traceId: number,
+  ): false | "superseded" {
+    if (!this.ownsConnectAttempt(myGeneration)) {
+      log.info("connectAndSetup: superseded during key exchange — aborting", {
+        channelId,
+        myGeneration,
+      });
+      return this.dropSuperseded(localRoom);
+    }
+    releaseRoom(localRoom).catch((err) =>
+      log.debug("Failed to disconnect room after key exchange failure", err),
+    );
+    // A channel switch queued during the wait (handleVoiceToken's
+    // pendingJoin branch) preserves this attempt's type/joinGeneration, so
+    // the ownership check above cannot distinguish it from "no newer join
+    // is coming". Treating it as a genuine failure here would send
+    // voice_leave with no channel id — deleting the QUEUED join's
+    // voice_states row, not this timed-out attempt's — and would drop the
+    // pendingJoin itself by transitioning to idle before the drain loop
+    // ever reads it. Only run the give-up cleanup when nothing is queued.
+    if (!this.hasQueuedJoin()) {
+      this._onError?.(voiceText("join.securingTimeout"));
+      // The exchange timed out BEFORE room.connect(): no SFU participant
+      // exists, so no LiveKit webhook will ever clean up, and the server
+      // registered the join when it sent voice_token. Send voice_leave and
+      // leave the store's voice channel (like the reconnect-exhausted give-up
+      // path) or the stale row ghosts forever and can wedge the channel's
+      // key-holder election.
+      this.leaveVoice(true);
+      leaveVoiceChannel();
+      noteJoinFailed();
+    } else {
+      // Leave state as "connecting" with pendingJoin intact so the finally
+      // block and handleVoiceToken's drain loop can run the queued join.
+      // Clear this attempt's own E2EE residue (keypair/_isKeyHolder/etc.)
+      // so the queued join does not inherit it — entry-point leaveVoice(false)
+      // never runs for that next call since `_room` is null here.
+      this._e2ee.clearState({ keepHeldAnnounces: true });
+    }
+    // SRE-M2: the key exchange is a real failure stage (timeout / aborted
+    // exchange), recorded so a report can place it.
+    failJoinAttempt(traceId);
+    return false;
+  }
+
+  /** A newer request queued while this attempt connected, and it differs
+   *  from this one (an identical one is a duplicate frame). */
+  private queuedDifferentJoin(
+    token: string,
+    url: string,
+    channelId: number,
+    directUrl: string | undefined,
+  ): PendingVoiceJoin | null {
+    const queuedJoin = this._state.type === "connecting" ? this._state.pendingJoin : null;
+    if (queuedJoin === null) return null;
+    const same =
+      queuedJoin.token === token &&
+      queuedJoin.url === url &&
+      queuedJoin.channelId === channelId &&
+      queuedJoin.directUrl === directUrl;
+    return same ? null : queuedJoin;
+  }
+
+  /** A different join queued while this attempt connected: drop this
+   *  attempt's room and unwire the modules, so the drain runs the queued
+   *  one. True when it did. */
+  private discardForQueuedJoin(
+    room: Room,
+    join: { token: string; url: string; channelId: number; directUrl?: string },
+  ): boolean {
+    const { token, url, channelId, directUrl } = join;
+    const queuedJoin = this.queuedDifferentJoin(token, url, channelId, directUrl);
+    if (queuedJoin === null) return false;
+    log.info("Discarding stale voice join in favor of queued request", {
+      channelId,
+      queuedChannelId: queuedJoin.channelId,
+    });
+    detachRoom(room);
+    room.disconnect().catch((err) => log.debug("Failed to disconnect room during cleanup", err));
+    this.unwireModules();
+    return true;
+  }
+
+  /** The connect-with-retry loop; on success it claims the session in the
+   *  same tick as its checkpoint. `attempt.room` always holds the room this
+   *  attempt owns now (the catch in connectAndSetup releases it); it is null
+   *  when the connected room was discarded for a queued request. Resolves
+   *  "superseded" when a checkpoint found a newer join. */
+  private async connectWithRetry(
+    attempt: { room: Room | null },
+    join: { token: string; url: string; channelId: number; directUrl?: string },
+    resolvedUrl: string,
+    myGeneration: number,
+    traceId: number,
+  ): Promise<"connected" | "superseded"> {
+    const MAX_RETRIES = 3;
+    const RETRY_DELAY_MS = 2000;
+    const { token, channelId } = join;
+    for (let tries = 1; tries <= MAX_RETRIES; tries++) {
+      if (tries > 1) countJoinRetry(traceId);
+      const room = attempt.room!;
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- sequential retry: must attempt connect before checking result
+        await room.connect(resolvedUrl, token, ROOM_CONNECT_OPTIONS);
+        // Checkpoint 2: after room.connect() — the primary race window.
+        if (!this.ownsConnectAttempt(myGeneration)) {
+          log.info("connectAndSetup: superseded after room.connect() — aborting", {
+            channelId,
+            myGeneration,
+            currentGeneration: this.currentGeneration(),
+          });
+          return this.dropSuperseded(room);
+        }
+        // Belt-and-suspenders: also keep existing pending-join token check
+        // for logging clarity when a newer request arrived via pendingJoin.
+        if (this.discardForQueuedJoin(room, join)) attempt.room = null;
+        break;
+      } catch (connectErr) {
+        if (tries >= MAX_RETRIES) throw connectErr;
+        log.warn("LiveKit connect failed, retrying", {
+          attempt: tries,
+          maxRetries: MAX_RETRIES,
+          url: redactTunnelUrl(resolvedUrl),
+          error: connectErr,
+        });
+        // oxlint-disable-next-line no-await-in-loop -- intentional backoff delay between retry attempts
+        await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
+        // Generation check inside retry loop: a superseding join may arrive
+        // during the backoff delay.
+        if (!this.ownsConnectAttempt(myGeneration)) {
+          log.info("connectAndSetup: superseded during retry backoff — aborting", {
+            channelId,
+            attempt: tries,
+          });
+          return this.dropSuperseded(room);
+        }
+        detachRoom(room);
+        // oxlint-disable-next-line no-await-in-loop -- sequential retry: must arm E2EE before the next connect attempt
+        attempt.room = await this.createRoom(channelId);
+        if (!this.ownsConnectAttempt(myGeneration)) {
+          this.disconnectSupersededLocalRoom(attempt.room);
+          return "superseded";
+        }
+        this.wireModules(attempt.room);
+      }
+    }
+    // Outside the retry catch, so a throw here fails the join as before
+    // instead of retrying the connect.
+    if (attempt.room !== null) this.claimSession(attempt.room, join, resolvedUrl, traceId);
+    return "connected";
+  }
+
+  /** The room connected and this attempt still owns the session: make it
+   *  the session. Runs in the same tick as the last checkpoint, so nothing
+   *  (a queued join, a leave, a room event) can land in between. */
+  private claimSession(
+    localRoom: Room,
+    join: { token: string; url: string; channelId: number; directUrl?: string },
+    resolvedUrl: string,
+    traceId: number,
+  ): void {
+    const { token, url, channelId, directUrl } = join;
+    advanceJoinStage(traceId, "activate");
+    log.info("Connected to LiveKit room", { channelId, url: redactTunnelUrl(resolvedUrl) });
+    logIceConnectionInfo(localRoom);
+    // This attempt survived with its queued request identical to it (a
+    // duplicate frame), so no queued session will take what was held:
+    // stop holding or the live session would never see another announce,
+    // and hand what was held for this channel to the live session.
+    this._e2ee.releaseHeldAnnounces(channelId);
+    // Atomic transition to "connected" — all connection fields set together.
+    this.setState({
+      type: "connected",
+      room: localRoom,
+      channelId,
+      latestToken: token,
+      lastUrl: url,
+      lastDirectUrl: directUrl,
+    });
+    // Room connected and E2EE key ready — the call is now secured.
+    setJoinedVoiceStatus(localRoom);
+    this.host.sweepPublications(localRoom);
+    // Optimistic startAudio — may succeed if the join was triggered by a
+    // recent user gesture. If not, the AudioPlaybackStatusChanged handler
+    // will register a click-to-unlock fallback.
+    localRoom.startAudio().catch(() => {
+      log.debug("Optimistic startAudio failed — waiting for user gesture");
+    });
+  }
+
+  /** Bring the call up on the claimed session (the rest of the "activate"
+   *  phase: device switches, local voice state, pipeline). */
+  private async activateRoom(
+    localRoom: Room,
+    channelId: number,
+    traceId: number,
+  ): Promise<true | "superseded"> {
+    // Point capture at the saved input BEFORE the mic is first
+    // enabled. With no mic track yet this only records the capture
+    // constraint (native: the backend's capture device), so the join opens
+    // the saved mic once instead of publishing on the default and then
+    // switching. Non-exact, so a saved mic that is gone degrades to the
+    // default rather than failing the publish into listen-only.
+    const savedInput = loadPref<string>("audioInputDevice", "");
+    if (savedInput) {
+      try {
+        await localRoom.switchActiveDevice("audioinput", savedInput, false);
+      } catch (err) {
+        log.warn("Saved input device unavailable, using default", err);
+      }
+    }
+
+    // Checkpoint 4: after audioinput switchActiveDevice.
+    if (!this.isStateConnected(channelId, localRoom)) {
+      log.info("connectAndSetup: superseded after audioinput switch — aborting", { channelId });
+      return this.dropSuperseded(localRoom);
+    }
+
+    await this.restoreLocalVoiceState("join");
+
+    // Checkpoint 3: after restoreLocalVoiceState (mic acquisition can be slow).
+    if (!this.isStateConnected(channelId, localRoom)) {
+      log.info("connectAndSetup: superseded after restoreLocalVoiceState — aborting", {
+        channelId,
+      });
+      return this.dropSuperseded(localRoom);
+    }
+
+    const savedOutput = loadPref<string>("audioOutputDevice", "");
+    if (savedOutput) {
+      try {
+        await localRoom.switchActiveDevice("audiooutput", savedOutput);
+      } catch (err) {
+        log.warn("Saved output device unavailable, using default", err);
+      }
+    }
+
+    // Checkpoint 5: after audiooutput switchActiveDevice.
+    if (!this.isStateConnected(channelId, localRoom)) {
+      log.info("connectAndSetup: superseded after audiooutput switch — aborting", { channelId });
+      return this.dropSuperseded(localRoom);
+    }
+
+    this._audioPipeline.setupAudioPipeline();
+    this.reapplyMuteGain();
+    // A join the user already switched away from leaves the restate to
+    // the switch's own join, and keeps the switch's wait.
+    const stillHere = voiceStore.getState().currentChannelId === channelId;
+    if (stillHere) this.host.restateSelfVoiceState();
+    this.startTokenRefreshTimer();
+    log.info("Voice session active", { channelId });
+    finishJoinAttempt(traceId);
+    if (voiceStore.getState().currentChannelId === channelId) noteJoinSucceeded();
+    return true;
+  }
+
+  /** A thrown connect/setup failure. */
+  private onConnectFailed(
+    err: unknown,
+    resolvedUrl: string,
+    localRoom: Room | null,
+    channelId: number,
+    myGeneration: number,
+    traceId: number,
+  ): void {
+    log.error("Failed to connect to LiveKit", { url: redactTunnelUrl(resolvedUrl), error: err });
+    // SRE-M2: a thrown connect/setup failure is placed at the stage the
+    // attempt last reached (resolve / connect / activate) — but only while
+    // this attempt still owns the session (connecting with its generation,
+    // or connected with its room). A superseded attempt that happened to
+    // throw is churn, not a failure, and is abandoned in the finally below.
+    if (
+      this.ownsConnectAttempt(myGeneration) ||
+      (localRoom !== null && this.isStateConnected(channelId, localRoom))
+    ) {
+      failJoinAttempt(traceId);
+      if (this._state.type !== "connecting" || this._state.pendingJoin === null) {
+        noteJoinFailed();
+      }
+    }
+    if (localRoom !== null) {
+      // Drop this attempt's listeners BEFORE disconnecting: handleDisconnected
+      // acts on the shared session state, so a failed attempt's Disconnected
+      // event would otherwise tear down (or spawn a reconnect loop for)
+      // whichever session owns `_state` by then — which, when this attempt
+      // has been superseded, is a live one that belongs to a newer join.
+      try {
+        void releaseRoom(localRoom);
+      } catch (disconnectErr) {
+        log.debug("Room disconnect during error cleanup failed (safe to ignore)", disconnectErr);
+      }
+      this._onError?.(voiceText("join.connectionError"));
+    }
+    // Only touch the shared session state if this attempt is still current.
+    // A superseded attempt must not clear a newer join's server-side voice
+    // membership — leaveVoice's voice_leave frame carries no channel id and
+    // acts on whichever channel the user currently occupies, so sending it
+    // here for a stale attempt would delete the NEW join's voice_states row
+    // — nor reset a live session back to idle (CLAUDE.md: voice sessions are
+    // superseded, not cancelled).
+    if (this.ownsConnectAttempt(myGeneration) && !this.hasQueuedJoin()) {
+      // The connect attempt failed entirely: no SFU participant was ever
+      // created, so no LiveKit webhook will ever clean up, and the server
+      // already registered the join when it sent voice_token. Send
+      // voice_leave and leave the store's voice channel (mirroring the
+      // e2ee-timeout and reconnect-exhausted give-up paths) or the stale
+      // voice_states row ghosts forever and can wedge the channel's
+      // key-holder election.
+      this.leaveVoice(true);
+      leaveVoiceChannel();
+    }
+  }
+
   /** Shared connect-with-retry + post-connect setup used by both the primary
    *  handleVoiceToken path and the pending-join drain loop.
    *  Returns true if the room ended up connected and set up,
@@ -182,26 +562,7 @@ export class JoinOrchestration {
     directUrl?: string,
     isKeyHolder?: boolean,
   ): Promise<boolean | "superseded"> {
-    // Also tear down (and abort) an in-flight reconnect: `_room` reads null
-    // for the whole "reconnecting" state, so a join issued while the LiveKit
-    // auto-reconnect loop is running would otherwise skip leaveVoice(false)
-    // entirely — meaning _e2ee.clearState() never runs, and setupKeyExchange
-    // below inherits the PREVIOUS channel's residual _isKeyHolder via its
-    // OR-with-server-value guard, joining the new channel as a phantom key
-    // holder the server never elected.
-    if (this._room !== null || this._state.type === "reconnecting") {
-      this.leaveVoice(false, true);
-    } else if (this._state.type === "connecting") {
-      // The pending-join drain loop (handleVoiceToken) re-enters
-      // this function while `_state` is still "connecting" — there is no
-      // room to disconnect and no reconnect AC to abort, so the branch above
-      // never fires, but a discarded prior attempt (e.g. the e2ee_timeout /
-      // checkpoint-2 queued-join paths below) can still leave residual E2EE
-      // state (_isKeyHolder, keypair, peer keys) behind for THIS attempt to
-      // inherit via setupKeyExchange's OR-with-server-value guard. Clear it
-      // explicitly since leaveVoice() itself never runs on this path.
-      this._e2ee.clearState({ keepHeldAnnounces: true });
-    }
+    this.clearForNewAttempt();
     // Draw the next generation from the monotonic instance counter (never
     // re-derived from `_state`) and embed it into the "connecting" state.
     // Any newer call to connectAndSetup() will produce a strictly larger
@@ -216,21 +577,20 @@ export class JoinOrchestration {
     // unfinished previous attempt without recording it — a superseded join is
     // normal churn, not a failure.
     const traceId = beginJoinAttempt(channelId);
+    const join = { token, url, channelId, directUrl };
     let resolvedUrl = "";
     // Track the room being built in this attempt so we can disconnect it on
     // supersession without touching the shared state (which may already have
     // been claimed by a newer attempt).
-    let localRoom: Room | null = null;
+    const attempt: { room: Room | null } = { room: null };
     try {
-      localRoom = await this.createRoom(channelId);
+      const firstRoom = await this.createRoom(channelId);
+      attempt.room = firstRoom;
       if (!this.ownsConnectAttempt(myGeneration)) {
-        this.disconnectSupersededLocalRoom(localRoom);
+        this.disconnectSupersededLocalRoom(firstRoom);
         return "superseded";
       }
-      this._audioPipeline.setRoom(localRoom);
-      this._audioElements.setRoom(localRoom);
-      this._deviceManager.setRoom(localRoom);
-      this._deviceManager.setAudioPipeline(this._audioPipeline);
+      this.wireModules(firstRoom);
       this._deviceManager.setOnError(this._onError);
       this._deviceManager.setOnToast(this._onError);
       // SRE-M2: the failure stage a URL-resolution failure lands at is
@@ -240,18 +600,14 @@ export class JoinOrchestration {
       setJoinUrlKind(traceId, classifyJoinUrl(resolvedUrl, directUrl, url));
 
       // Checkpoint 1: after URL resolution (may be slow for TLS proxy init).
-      if (this._state.type !== "connecting" || this._state.joinGeneration !== myGeneration) {
+      if (!this.ownsConnectAttempt(myGeneration)) {
         log.info("connectAndSetup: superseded after URL resolution — aborting", {
           channelId,
           myGeneration,
-          currentGeneration: this._state.type === "connecting" ? this._state.joinGeneration : "n/a",
+          currentGeneration: this.currentGeneration(),
         });
-        this.disconnectSupersededLocalRoom(localRoom);
-        return "superseded";
+        return this.dropSuperseded(firstRoom);
       }
-
-      const MAX_RETRIES = 3;
-      const RETRY_DELAY_MS = 2000;
 
       // ── Client-side E2EE key exchange (ECDH) ──────────────────────────
       // "securing" — until the room key is ready the call is not yet private.
@@ -261,295 +617,27 @@ export class JoinOrchestration {
       advanceJoinStage(traceId, "keyExchange");
       const keyExchangeOk = await this._e2ee.setupKeyExchange(isKeyHolder ?? false, channelId);
       if (!keyExchangeOk) {
-        // setupKeyExchange() also returns false when clearState() aborted the
-        // wait (e.g. a supersession that ran leaveVoice() while we were
-        // blocked here) — indistinguishable from a genuine timeout by return
-        // value alone. Check ownership before treating it as a real failure:
-        // a superseded attempt must not fire a spurious toast, send
-        // voice_leave (it carries no channel id and would act on whichever
-        // channel the NEWER attempt just joined), or clear the store's
-        // currentChannelId that the newer join just set.
-        if (this._state.type !== "connecting" || this._state.joinGeneration !== myGeneration) {
-          log.info("connectAndSetup: superseded during key exchange — aborting", {
-            channelId,
-            myGeneration,
-          });
-          this.disconnectSupersededLocalRoom(localRoom);
-          return "superseded";
-        }
-        releaseRoom(localRoom).catch((err) =>
-          log.debug("Failed to disconnect room after key exchange failure", err),
-        );
-        // A channel switch queued during the wait (handleVoiceToken's
-        // pendingJoin branch) preserves this attempt's type/joinGeneration, so
-        // the ownership check above cannot distinguish it from "no newer join
-        // is coming". Treating it as a genuine failure here would send
-        // voice_leave with no channel id — deleting the QUEUED join's
-        // voice_states row, not this timed-out attempt's — and would drop the
-        // pendingJoin itself by transitioning to idle before the drain loop
-        // ever reads it. Only run the give-up cleanup when nothing is queued.
-        if (this._state.pendingJoin === null) {
-          this._onError?.(voiceText("join.securingTimeout"));
-          // The exchange timed out BEFORE room.connect(): no SFU participant
-          // exists, so no LiveKit webhook will ever clean up, and the server
-          // registered the join when it sent voice_token. Send voice_leave and
-          // leave the store's voice channel (like the reconnect-exhausted give-up
-          // path) or the stale row ghosts forever and can wedge the channel's
-          // key-holder election.
-          this.leaveVoice(true);
-          leaveVoiceChannel();
-          noteJoinFailed();
-        } else {
-          // Leave state as "connecting" with pendingJoin intact so the finally
-          // block and handleVoiceToken's drain loop can run the queued join.
-          // Clear this attempt's own E2EE residue (keypair/_isKeyHolder/etc.)
-          // so the queued join does not inherit it — entry-point leaveVoice(false)
-          // never runs for that next call since `_room` is null here.
-          this._e2ee.clearState({ keepHeldAnnounces: true });
-        }
-        // SRE-M2: the key exchange is a real failure stage (timeout / aborted
-        // exchange), recorded so a report can place it.
-        failJoinAttempt(traceId);
-        return false;
+        return this.onKeyExchangeFailed(firstRoom, channelId, myGeneration, traceId);
       }
 
       // SRE-M2: entering "connect" ends the key-exchange phase; the connect
       // phase start is set once, before the first attempt, so a retry re-runs
       // the connect without resetting the phase clock.
       advanceJoinStage(traceId, "connect");
-      for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-        if (attempt > 1) countJoinRetry(traceId);
-        try {
-          // oxlint-disable-next-line no-await-in-loop -- sequential retry: must attempt connect before checking result
-          await localRoom.connect(resolvedUrl, token, ROOM_CONNECT_OPTIONS);
-
-          // Checkpoint 2: after room.connect() — the primary race window.
-          if (this._state.type !== "connecting" || this._state.joinGeneration !== myGeneration) {
-            log.info("connectAndSetup: superseded after room.connect() — aborting", {
-              channelId,
-              myGeneration,
-              currentGeneration:
-                this._state.type === "connecting" ? this._state.joinGeneration : "n/a",
-            });
-            this.disconnectSupersededLocalRoom(localRoom);
-            return "superseded";
-          }
-
-          // Belt-and-suspenders: also keep existing pending-join token check
-          // for logging clarity when a newer request arrived via pendingJoin.
-          const queuedJoin = this._state.type === "connecting" ? this._state.pendingJoin : null;
-          if (
-            queuedJoin !== null &&
-            (queuedJoin.token !== token ||
-              queuedJoin.url !== url ||
-              queuedJoin.channelId !== channelId ||
-              queuedJoin.directUrl !== directUrl)
-          ) {
-            log.info("Discarding stale voice join in favor of queued request", {
-              channelId,
-              queuedChannelId: queuedJoin.channelId,
-            });
-            detachRoom(localRoom);
-            localRoom
-              .disconnect()
-              .catch((err) => log.debug("Failed to disconnect room during cleanup", err));
-            localRoom = null;
-            this._audioPipeline.setRoom(null);
-            this._audioElements.setRoom(null);
-            this._deviceManager.setRoom(null);
-            this._deviceManager.setAudioPipeline(null);
-            break;
-          }
-          break;
-        } catch (connectErr) {
-          if (attempt < MAX_RETRIES) {
-            log.warn("LiveKit connect failed, retrying", {
-              attempt,
-              maxRetries: MAX_RETRIES,
-              url: redactTunnelUrl(resolvedUrl),
-              error: connectErr,
-            });
-            // oxlint-disable-next-line no-await-in-loop -- intentional backoff delay between retry attempts
-            await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
-            // Generation check inside retry loop: a superseding join may arrive
-            // during the backoff delay.
-            if (this._state.type !== "connecting" || this._state.joinGeneration !== myGeneration) {
-              log.info("connectAndSetup: superseded during retry backoff — aborting", {
-                channelId,
-                attempt,
-              });
-              if (localRoom !== null) this.disconnectSupersededLocalRoom(localRoom);
-              return "superseded";
-            }
-            if (localRoom === null) throw connectErr;
-            detachRoom(localRoom);
-            // oxlint-disable-next-line no-await-in-loop -- sequential retry: must arm E2EE before the next connect attempt
-            localRoom = await this.createRoom(channelId);
-            if (!this.ownsConnectAttempt(myGeneration)) {
-              this.disconnectSupersededLocalRoom(localRoom);
-              return "superseded";
-            }
-            this._audioPipeline.setRoom(localRoom);
-            this._audioElements.setRoom(localRoom);
-            this._deviceManager.setRoom(localRoom);
-            this._deviceManager.setAudioPipeline(this._audioPipeline);
-          } else {
-            throw connectErr;
-          }
-        }
-      }
+      const connected = await this.connectWithRetry(
+        attempt,
+        join,
+        resolvedUrl,
+        myGeneration,
+        traceId,
+      );
+      if (connected === "superseded") return "superseded";
       // If the room was discarded (stale join superseded by pending), skip setup.
-      if (localRoom !== null) {
-        // SRE-M2: the room connected; the remaining work (device switches,
-        // local voice state, pipeline) is the "activate" phase.
-        advanceJoinStage(traceId, "activate");
-        log.info("Connected to LiveKit room", { channelId, url: redactTunnelUrl(resolvedUrl) });
-        logIceConnectionInfo(localRoom);
-        // This attempt survived with its queued request identical to it (a
-        // duplicate frame), so no queued session will take what was held:
-        // stop holding or the live session would never see another announce,
-        // and hand what was held for this channel to the live session.
-        this._e2ee.releaseHeldAnnounces(channelId);
-        // Atomic transition to "connected" — all connection fields set together.
-        this.setState({
-          type: "connected",
-          room: localRoom,
-          channelId,
-          latestToken: token,
-          lastUrl: url,
-          lastDirectUrl: directUrl,
-        });
-        // Room connected and E2EE key ready — the call is now secured.
-        setJoinedVoiceStatus(localRoom);
-        this.host.sweepPublications(localRoom);
-        // Optimistic startAudio — may succeed if the join was triggered by a
-        // recent user gesture. If not, the AudioPlaybackStatusChanged handler
-        // will register a click-to-unlock fallback.
-        localRoom.startAudio().catch(() => {
-          log.debug("Optimistic startAudio failed — waiting for user gesture");
-        });
-        // Point capture at the saved input BEFORE the mic is first
-        // enabled. With no mic track yet this only records the capture
-        // constraint (native: the backend's capture device), so the join opens
-        // the saved mic once instead of publishing on the default and then
-        // switching. Non-exact, so a saved mic that is gone degrades to the
-        // default rather than failing the publish into listen-only.
-        const savedInput = loadPref<string>("audioInputDevice", "");
-        if (savedInput) {
-          try {
-            await localRoom.switchActiveDevice("audioinput", savedInput, false);
-          } catch (err) {
-            log.warn("Saved input device unavailable, using default", err);
-          }
-        }
-
-        // Checkpoint 4: after audioinput switchActiveDevice.
-        if (!this.isStateConnected(channelId, localRoom)) {
-          log.info("connectAndSetup: superseded after audioinput switch — aborting", {
-            channelId,
-          });
-          this.disconnectSupersededLocalRoom(localRoom);
-          return "superseded";
-        }
-
-        await this.restoreLocalVoiceState("join");
-
-        // Checkpoint 3: after restoreLocalVoiceState (mic acquisition can be slow).
-        // Cast to SessionState to escape TS control-flow narrowing that incorrectly
-        // assumes _state is still "connecting" (it was set to "connected" above, but
-        // TS cannot see through the setState() opaque method call).
-        if (!this.isStateConnected(channelId, localRoom)) {
-          log.info("connectAndSetup: superseded after restoreLocalVoiceState — aborting", {
-            channelId,
-          });
-          this.disconnectSupersededLocalRoom(localRoom);
-          return "superseded";
-        }
-
-        const savedOutput = loadPref<string>("audioOutputDevice", "");
-        if (savedOutput) {
-          try {
-            await localRoom.switchActiveDevice("audiooutput", savedOutput);
-          } catch (err) {
-            log.warn("Saved output device unavailable, using default", err);
-          }
-        }
-
-        // Checkpoint 5: after audiooutput switchActiveDevice.
-        if (!this.isStateConnected(channelId, localRoom)) {
-          log.info("connectAndSetup: superseded after audiooutput switch — aborting", {
-            channelId,
-          });
-          this.disconnectSupersededLocalRoom(localRoom);
-          return "superseded";
-        }
-
-        this._audioPipeline.setupAudioPipeline();
-        this.reapplyMuteGain();
-        // A join the user already switched away from leaves the restate to
-        // the switch's own join.
-        if (voiceStore.getState().currentChannelId === channelId) {
-          this.host.restateSelfVoiceState();
-        }
-        this.startTokenRefreshTimer();
-        log.info("Voice session active", { channelId });
-        finishJoinAttempt(traceId);
-        // A join the user already switched away from keeps the switch's wait.
-        if (voiceStore.getState().currentChannelId === channelId) noteJoinSucceeded();
-        return true;
-      }
-      return false;
+      const room = attempt.room;
+      if (room === null) return false;
+      return await this.activateRoom(room, channelId, traceId);
     } catch (err) {
-      log.error("Failed to connect to LiveKit", { url: redactTunnelUrl(resolvedUrl), error: err });
-      // SRE-M2: a thrown connect/setup failure is placed at the stage the
-      // attempt last reached (resolve / connect / activate) — but only while
-      // this attempt still owns the session (connecting with its generation,
-      // or connected with its room). A superseded attempt that happened to
-      // throw is churn, not a failure, and is abandoned in the finally below.
-      if (
-        this.ownsConnectAttempt(myGeneration) ||
-        (localRoom !== null && this.isStateConnected(channelId, localRoom))
-      ) {
-        failJoinAttempt(traceId);
-        if (this._state.type !== "connecting" || this._state.pendingJoin === null) {
-          noteJoinFailed();
-        }
-      }
-      if (localRoom !== null) {
-        // Drop this attempt's listeners BEFORE disconnecting: handleDisconnected
-        // acts on the shared session state, so a failed attempt's Disconnected
-        // event would otherwise tear down (or spawn a reconnect loop for)
-        // whichever session owns `_state` by then — which, when this attempt
-        // has been superseded, is a live one that belongs to a newer join.
-        try {
-          void releaseRoom(localRoom);
-        } catch (disconnectErr) {
-          log.debug("Room disconnect during error cleanup failed (safe to ignore)", disconnectErr);
-        }
-        this._onError?.(voiceText("join.connectionError"));
-      }
-      // Only touch the shared session state if this attempt is still current.
-      // A superseded attempt must not clear a newer join's server-side voice
-      // membership — leaveVoice's voice_leave frame carries no channel id and
-      // acts on whichever channel the user currently occupies, so sending it
-      // here for a stale attempt would delete the NEW join's voice_states row
-      // — nor reset a live session back to idle (CLAUDE.md: voice sessions are
-      // superseded, not cancelled).
-      if (
-        this._state.type === "connecting" &&
-        this._state.joinGeneration === myGeneration &&
-        this._state.pendingJoin === null
-      ) {
-        // The connect attempt failed entirely: no SFU participant was ever
-        // created, so no LiveKit webhook will ever clean up, and the server
-        // already registered the join when it sent voice_token. Send
-        // voice_leave and leave the store's voice channel (mirroring the
-        // e2ee-timeout and reconnect-exhausted give-up paths) or the stale
-        // voice_states row ghosts forever and can wedge the channel's
-        // key-holder election.
-        this.leaveVoice(true);
-        leaveVoiceChannel();
-      }
+      this.onConnectFailed(err, resolvedUrl, attempt.room, channelId, myGeneration, traceId);
       return false;
     } finally {
       // Only clear "connecting" back to "idle" if we are still in the connecting
@@ -557,16 +645,70 @@ export class JoinOrchestration {
       // set by the success path above (guards against risk #4 in the analysis).
       // If a pendingJoin was queued while this attempt ran, leave the state as
       // "connecting" so handleVoiceToken's drain loop can read and consume it.
-      if (this._state.type === "connecting" && this._state.joinGeneration === myGeneration) {
-        if (this._state.pendingJoin === null) {
-          this.setState({ type: "idle" });
-        }
+      if (this.ownsConnectAttempt(myGeneration) && !this.hasQueuedJoin()) {
+        this.setState({ type: "idle" });
       }
       // SRE-M2: every exit path that did not record the attempt (success or a
       // placed failure) leaves it superseded — drop it silently rather than
       // report a live join as failed.
       abandonJoinAttempt(traceId);
     }
+  }
+
+  /** A token for the session already up (or reconnecting) on this channel.
+   *  livekit-client's own internal reconnect (network blip on the SFU
+   *  signal socket) moves Room.state through "signalReconnecting" /
+   *  "reconnecting" without ever emitting RoomEvent.Disconnected — the only
+   *  event this session listens for — so `_state` stays "connected" the
+   *  whole time. A routine 4-minute refresh token landing in that window
+   *  must still take the lightweight refresh path instead of falling
+   *  through to a full teardown+rejoin of a session that is about to
+   *  recover on its own; only a room the SDK has fully given up on
+   *  ("disconnected") should be treated as needing a real reconnect here.
+   *  P2-T5: the same for our own auto-reconnect — the token answers its
+   *  voice_token_refresh, and the loop connects with it on its next attempt;
+   *  a full join here would eject the user if the SFU is still down. */
+  private isRefreshFor(channelId: number): boolean {
+    const s = this._state;
+    return (
+      (s.type === "connected" && s.channelId === channelId && s.room.state !== "disconnected") ||
+      (s.type === "reconnecting" && s.channelId === channelId)
+    );
+  }
+
+  /** Read and clear the queued join, if any. */
+  private takePendingVoiceJoin(): PendingVoiceJoin | null {
+    const pendingJoin = this._state.type === "connecting" ? this._state.pendingJoin : null;
+    if (this._state.type === "connecting") {
+      this.setState({ ...this._state, pendingJoin: null });
+    }
+    return pendingJoin;
+  }
+
+  /** Queue the latest join on the attempt already connecting. */
+  private queueJoin(
+    token: string,
+    url: string,
+    channelId: number,
+    directUrl?: string,
+    isKeyHolder?: boolean,
+  ): void {
+    // Update the pendingJoin on the existing "connecting" state immutably.
+    if (this._state.type === "connecting") {
+      this.setState({
+        ...this._state,
+        pendingJoin: { token, url, channelId, directUrl, isKeyHolder },
+      });
+      // The server has already moved us to this channel: from here on the
+      // announces it relays are the queued channel's peers, whose exchange
+      // starts only when the drain re-enters connectAndSetup. Hold them for
+      // that session; the attempt in flight is about to be discarded, and
+      // retargeting drops what a superseded queued channel had collected.
+      // Set synchronously, before any await: correctness relies on the voice_token
+      // and voice_e2ee_announce handlers resolving their dynamic imports in order.
+      this._e2ee.holdAnnouncesForQueuedJoin(channelId);
+    }
+    log.warn("handleVoiceToken: already connecting, queued latest join request", { channelId });
   }
 
   async handleVoiceToken(
@@ -576,44 +718,13 @@ export class JoinOrchestration {
     directUrl?: string,
     isKeyHolder?: boolean,
   ): Promise<void> {
-    const s = this._state;
-    // livekit-client's own internal reconnect (network blip on the
-    // SFU signal socket) moves Room.state through "signalReconnecting" /
-    // "reconnecting" without ever emitting RoomEvent.Disconnected — the only
-    // event this session listens for — so `_state` stays "connected" the
-    // whole time. A routine 4-minute refresh token landing in that window
-    // must still take the lightweight refresh path instead of falling
-    // through to a full teardown+rejoin of a session that is about to
-    // recover on its own; only a room the SDK has fully given up on
-    // ("disconnected") should be treated as needing a real reconnect here.
-    // P2-T5: the same for our own auto-reconnect — the token answers its
-    // voice_token_refresh, and the loop connects with it on its next attempt;
-    // a full join here would eject the user if the SFU is still down.
-    if (
-      (s.type === "connected" && s.channelId === channelId && s.room.state !== "disconnected") ||
-      (s.type === "reconnecting" && s.channelId === channelId)
-    ) {
+    if (this.isRefreshFor(channelId)) {
       this.handleVoiceTokenRefresh(token);
       return;
     }
     // Prevent concurrent connect attempts (rapid channel switching).
     if (this._connecting) {
-      // Update the pendingJoin on the existing "connecting" state immutably.
-      if (this._state.type === "connecting") {
-        this.setState({
-          ...this._state,
-          pendingJoin: { token, url, channelId, directUrl, isKeyHolder },
-        });
-        // The server has already moved us to this channel: from here on the
-        // announces it relays are the queued channel's peers, whose exchange
-        // starts only when the drain re-enters connectAndSetup. Hold them for
-        // that session; the attempt in flight is about to be discarded, and
-        // retargeting drops what a superseded queued channel had collected.
-        // Set synchronously, before any await: correctness relies on the voice_token
-        // and voice_e2ee_announce handlers resolving their dynamic imports in order.
-        this._e2ee.holdAnnouncesForQueuedJoin(channelId);
-      }
-      log.warn("handleVoiceToken: already connecting, queued latest join request", { channelId });
+      this.queueJoin(token, url, channelId, directUrl, isKeyHolder);
       return;
     }
     // A voice_token can arrive after the user already left this
@@ -637,10 +748,7 @@ export class JoinOrchestration {
     // rapid channel switches queue multiple requests.
     // A "superseded" result means connectAndSetup() already aborted early;
     // we still drain pendingJoin so the latest request always wins.
-    let pendingJoin = this._state.type === "connecting" ? this._state.pendingJoin : null;
-    if (this._state.type === "connecting") {
-      this.setState({ ...this._state, pendingJoin: null });
-    }
+    let pendingJoin = this.takePendingVoiceJoin();
     while (pendingJoin !== null) {
       const {
         token: pToken,
@@ -662,10 +770,7 @@ export class JoinOrchestration {
         // If this attempt was itself superseded (another join arrived during the
         // await), the loop will naturally pick it up via the updated pendingJoin.
       }
-      pendingJoin = this._state.type === "connecting" ? this._state.pendingJoin : null;
-      if (this._state.type === "connecting") {
-        this.setState({ ...this._state, pendingJoin: null });
-      }
+      pendingJoin = this.takePendingVoiceJoin();
     }
   }
 }
