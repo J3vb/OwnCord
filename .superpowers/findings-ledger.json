@@ -1,5 +1,5 @@
 {
-  "nextId": 558,
+  "nextId": 559,
   "findings": [
     {
       "id": "OC-0001",
@@ -12884,6 +12884,29 @@
       "hunt": "server-review-2026-11-03",
       "finder": "claude",
       "fixedDate": "2026-11-04"
+    },
+    {
+      "id": "OC-0558",
+      "title": "A server frame that was null, or carried a null payload, threw out of the WebSocket frame handler",
+      "file": "Client/src/lib/ws.ts",
+      "line": 530,
+      "severity": "low",
+      "why": "handleMessage read fields straight off the parsed JSON. A frame that parsed to null threw at the cseq read, and auth_ok, auth_error, error and server_restart frames with a null payload threw at their payload reads. The throw left the transport callback; later frames still arrived, so the effect was an uncaught error in the log and a dropped frame.",
+      "repro": "Deliver the text null, or {\"type\":\"auth_ok\",\"payload\":null}, to the ws-message event: TypeError before the fix; after it the frame is dropped with a warning and nothing is dispatched.",
+      "evidence": "Client/tests/unit/ws-frame-decode.property.test.ts (all three properties fail on the old handler).",
+      "suggestedFix": "Parse into a helper that keeps only JSON objects, and drop a frame whose payload is not an object before any payload read.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/unit/ws-frame-decode.property.test.ts",
+        "revertProof": "fail (TypeError out of the handler)"
+      },
+      "lens": "client-net",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-04",
+      "hunt": "fuzzing-fz-4",
+      "finder": "claude",
+      "fixedDate": "2026-11-05"
     }
   ]
 }
