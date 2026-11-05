@@ -80,8 +80,16 @@ export async function nativeLogin(page: Page): Promise<void> {
     confirmed.add(SERVER_URL);
     confirmedHosts.set(page, confirmed);
   }
-  await submit.click();
-  await expect(page.getByTestId("app-layout")).toBeVisible({ timeout: 30_000 });
+  // Trusting the certificate resubmits a sign-in it refused, so the app may
+  // already be signing in or signed in. Click only while the form sits idle,
+  // and let a click that loses that race to the app's own resubmit go.
+  const appLayout = page.getByTestId("app-layout");
+  const idleSubmit = page.locator("button.btn-primary[type='submit']:not([disabled])");
+  await expect(async () => {
+    if (await appLayout.isVisible()) return;
+    if (await idleSubmit.isVisible()) await idleSubmit.click({ timeout: 2_000 });
+    await expect(appLayout).toBeVisible({ timeout: 5_000 });
+  }).toPass({ timeout: 45_000 });
 }
 
 /**
