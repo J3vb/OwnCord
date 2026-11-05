@@ -7,7 +7,7 @@ vi.mock("@lib/net/e2eeCrypto", () => mocks.e2eeCryptoMock());
 vi.mock("@lib/presence/profiles", () => mocks.presenceProfilesMock());
 vi.mock("@components/UserBar", () => mocks.userBarMock());
 vi.mock("@components/VoiceWidget", () => mocks.voiceWidgetMock());
-vi.mock("@components/MemberList", () => mocks.memberListMock());
+vi.mock("../../src/features/members/MemberList", () => mocks.memberListMock());
 const { createQuickSwitchOverlay, switchToServer } = vi.hoisted(() => ({
   createQuickSwitchOverlay: vi.fn(),
   switchToServer: vi.fn(),

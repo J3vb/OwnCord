@@ -13,7 +13,7 @@
     "components/ChannelMediaGallery.ts": {
       "createChannelMediaGallery > loadMore": [18]
     },
-    "components/ChannelSidebar.ts": {
+    "features/channels/ChannelSidebar.ts": {
       "buildVoiceModOptions": [16],
       "createChannelSidebar > drawChannels > reconcileRows": [16]
     },
@@ -27,15 +27,11 @@
     "components/EmojiPicker.ts": {
       "createEmojiPicker > renderAllCategories": [16]
     },
-    "components/MemberList.ts": {
+    "features/members/MemberList.ts": {
       "createMemberItem > openContextMenu": [22],
       "createMemberList > runFrame": [18]
     },
-    "components/MessageInput.ts": {
-      "createMessageInput > mount": [31],
-      "createMessageInput > mount > (anonymous)": [31]
-    },
-    "components/MessageList.ts": {
+    "features/messaging/MessageList.ts": {
       "createMessageList > mount > (anonymous)": [18]
     },
     "components/PhoneCallBar.ts": {
@@ -61,51 +57,37 @@
       "createVoiceWidget > render": [34],
       "createVoiceWidget > updateSignalIcon": [17]
     },
-    "components/channel-sidebar/categoryMenu.ts": {
+    "features/channels/sidebar/categoryMenu.ts": {
       "attachCategoryContextMenu > buildCategoryMenu": [16]
     },
-    "components/channel-sidebar/channelSheet.ts": {
+    "features/channels/sidebar/channelSheet.ts": {
       "channelSheetItems": [19]
     },
-    "components/channel-sidebar/contextMenu.ts": {
+    "features/channels/sidebar/contextMenu.ts": {
       "attachChannelContextMenu": [23],
       "attachChannelContextMenu > buildChannelMenu": [36]
     },
-    "components/channel-sidebar/dragReorder.ts": {
+    "features/channels/sidebar/dragReorder.ts": {
       "planDrop": [32]
     },
     "components/dmContextMenu.ts": {
       "openDmContextMenu": [30]
     },
-    "components/message-input/inputDraft.ts": {
+    "features/messaging/composer/inputDraft.ts": {
       "createInputDraft > restoreDraft": [16]
     },
-    "components/message-input/inputSend.ts": {
+    "features/messaging/composer/inputSend.ts": {
       "createInputSend > handleSend": [20]
     },
-    "components/message-list/listRender.ts": {
-      "createListRender > patchRows": [64],
-      "createListRender > renderAll": [36]
-    },
-    "components/message-list/listWindow.ts": {
+    "features/messaging/message-list/listWindow.ts": {
       "createListWindow > measureRendered": [16],
       "createListWindow > renderWindow": [35],
       "createListWindow > resolveNewDividerIndex": [17]
     },
-    "components/message-list/messageActions.ts": {
-      "messageActionGates": [29]
-    },
-    "components/message-list/messageMenu.ts": {
-      "buildItems": [43]
-    },
-    "components/message-list/pollCard.ts": {
+    "features/messaging/message-list/pollCard.ts": {
       "renderPollCard > draw": [27]
     },
-    "components/message-list/renderers.ts": {
-      "renderMessage": [59],
-      "renderReplyRef": [22]
-    },
-    "components/message-list/virtualItems.ts": {
+    "features/messaging/message-list/virtualItems.ts": {
       "estimateItemHeight": [16]
     },
     "components/video-grid/gridCallBar.ts": {
@@ -151,10 +133,6 @@
     },
     "features/messaging/content/attachments.ts": {
       "renderAttachmentContent": [18]
-    },
-    "features/messaging/content/contentParser.ts": {
-      "renderMentionSegment": [31],
-      "resyncMentions": [25]
     },
     "features/messaging/content/imageViewer.ts": {
       "openImageLightbox": [19],
@@ -417,9 +395,6 @@
     }
   },
   "depth": {
-    "components/message-list/listRender.ts": {
-      "createListRender > renderAll": [5, 5]
-    },
     "features/messaging/content/attachmentCache.ts": {
       "fetchImageBlob": [5]
     },

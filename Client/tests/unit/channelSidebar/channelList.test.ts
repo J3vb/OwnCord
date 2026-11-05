@@ -5,7 +5,7 @@ import {
   createChannelSidebar,
   type ChannelReorderData,
   type ChannelSidebarOptions,
-} from "../../../src/components/ChannelSidebar";
+} from "../../../src/features/channels/ChannelSidebar";
 import {
   channelsStore,
   incrementUnread,

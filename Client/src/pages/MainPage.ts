@@ -22,7 +22,7 @@ import {
   setServerHost as setLiveKitServerHost,
   setOnError as setVoiceOnError,
 } from "@lib/voice/livekitSession";
-import { setServerHost } from "@components/message-list/renderers";
+import { setServerHost } from "../features/messaging/message-list/renderers";
 import { setAttachmentCacheScope } from "../features/messaging/content/attachments";
 import { closeActiveLightbox } from "../features/messaging/content/media";
 import { markAllRead } from "@lib/readState";

@@ -4,7 +4,7 @@
  */
 import { createElement } from "@lib/dom";
 import { Disposable } from "@lib/disposable";
-import { createLazyScreen } from "@components/lazyScreen";
+import { createLazyScreen } from "@lib/ui/lazyScreen";
 import { createQuickSwitchOverlay, type QuickSwitchProfile } from "@components/QuickSwitchOverlay";
 import { createVoiceWidgetCallbacks } from "../VoiceCallbacks";
 import { selectDmConversation } from "../SidebarDmHelpers";

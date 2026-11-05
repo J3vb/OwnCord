@@ -36,8 +36,8 @@ vi.mock("../../src/features/messaging/content/attachments", async (importOrigina
   return { ...actual, fetchImageAsObjectUrl: fetchImageAsObjectUrlMock };
 });
 
-import { createMessageList } from "@components/MessageList";
-import type { MessageListOptions } from "@components/MessageList";
+import { createMessageList } from "../../src/features/messaging/MessageList";
+import type { MessageListOptions } from "../../src/features/messaging/MessageList";
 import { messagesStore } from "@stores/messages.store";
 import type { Message } from "@stores/messages.store";
 import { setChannels, setActiveChannel } from "@stores/channels.store";
@@ -100,6 +100,12 @@ describe("MessageList — a history page keeps the rendered rows", () => {
     rootEl().dispatchEvent(new Event("scroll"));
     // Let the scroll frame it queued run, so a later scroll queues a new one.
     await new Promise((r) => setTimeout(r, 40));
+  };
+  const expectEachRowOnce = (): void => {
+    const ids = [...container.querySelectorAll<HTMLElement>(".virtual-content > .message")].map(
+      (el) => el.dataset.testid,
+    );
+    expect(new Set(ids).size).toBe(ids.length);
   };
   const expectSameNodes = (kept: ReadonlyMap<number, HTMLElement>): void => {
     for (const [id, el] of kept) {
@@ -248,10 +254,26 @@ describe("MessageList — a history page keeps the rendered rows", () => {
     const refetched = fetchImageAsObjectUrlMock.mock.calls.map((c) => c[0]);
     for (const id of KEPT) expect(refetched).not.toContain(`/api/v1/files/av${id}`);
     // The rows now in the window are the ones around the reader, once each.
-    const ids = [...container.querySelectorAll<HTMLElement>(".virtual-content > .message")].map(
-      (el) => el.dataset.testid,
-    );
-    expect(new Set(ids).size).toBe(ids.length);
+    expectEachRowOnce();
+  });
+
+  it("a page that also drops a rendered row falls back to a full rebuild", async () => {
+    const initial = range(61, 120);
+    setMessages(initial);
+    mount();
+    await settle();
+    await scrollNearTop();
+    const before = rowsOf(KEPT);
+
+    // Row 65 is rendered and leaves with the page: the rows cannot all stay.
+    setMessages([...range(11, 60), ...initial.filter((m) => m.id !== 65)]);
+    messagesStore.flush();
+
+    expect(row(65)).toBeNull();
+    const rebuilt = KEPT.filter((id) => id !== 65 && row(id) !== null);
+    expect(rebuilt.length).toBeGreaterThan(0);
+    for (const id of rebuilt) expect(row(id), `row ${id}`).not.toBe(before.get(id));
+    expectEachRowOnce();
   });
 
   it("a page of only deleted messages changes nothing", async () => {

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from "vitest";
 import { usePhone } from "../../helpers/phoneMedia";
 import * as mocks from "../../helpers/channelSidebarMocks";
-import { createChannelSidebar } from "../../../src/components/ChannelSidebar";
+import { createChannelSidebar } from "../../../src/features/channels/ChannelSidebar";
 import { channelsStore, setChannels } from "../../../src/stores/channels.store";
 import { uiStore } from "../../../src/stores/ui.store";
 import { setActiveTimeout } from "../../../src/features/safety/store";

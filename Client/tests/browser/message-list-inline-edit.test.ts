@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { createMessageList } from "@components/MessageList";
+import type { createMessageList } from "../../src/features/messaging/MessageList";
 import { messagesStore } from "@stores/messages.store";
 import { frames, setRows, useMessageListHost } from "../helpers/browserMessageList";
 import "../../src/styles/app.css";

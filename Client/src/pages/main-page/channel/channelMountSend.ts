@@ -4,7 +4,7 @@
  */
 import type { MountableComponent } from "@lib/text/safeRender";
 import type { VoiceUploadMeta } from "@lib/types";
-import type { QueuedAttachment, SentAttachment } from "@components/MessageInput";
+import type { QueuedAttachment, SentAttachment } from "../../../features/messaging/MessageInput";
 import { loadSendQueue, preloadSendQueue } from "../../../features/messaging/sendQueueLoader";
 import type { QueuedSend, QueueDeps } from "../../../features/messaging/sendQueue";
 import {

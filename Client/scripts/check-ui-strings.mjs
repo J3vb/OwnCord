@@ -65,11 +65,11 @@ const EXCLUDED = [
  */
 const OWNERS = [
   [
-    /^src\/(pages\/ConnectPage|pages\/connect-page\/|pages\/main-page\/Sidebar|pages\/main-page\/OverlayManagers|components\/(QuickSwitchOverlay|QuickSwitcher|CertMismatchModal|ServerBanner|ConnectedOverlay|UserBar|StatusPicker|MemberList|AdminActions|InviteManager|ChannelSidebar|CreateChannelModal|EditChannelModal|DeleteChannelModal|purgePrompt)\.ts|components\/channel-sidebar\/contextMenu\.ts|lib\/(text\/safeRender|net\/credentials)\.ts|features\/channels\/wsHandlers\.ts|main\.ts)/,
+    /^src\/(pages\/ConnectPage|pages\/connect-page\/|pages\/main-page\/Sidebar|pages\/main-page\/OverlayManagers|components\/(QuickSwitchOverlay|QuickSwitcher|CertMismatchModal|ServerBanner|ConnectedOverlay|UserBar|StatusPicker|AdminActions|InviteManager|CreateChannelModal|EditChannelModal|DeleteChannelModal)\.ts|features\/channels\/sidebar\/purgePrompt\.ts|features\/(members\/MemberList|channels\/ChannelSidebar)\.ts|features\/channels\/sidebar\/contextMenu\.ts|lib\/(text\/safeRender|net\/credentials)\.ts|features\/channels\/wsHandlers\.ts|main\.ts)/,
     "B9-18",
   ],
   [
-    /^src\/(components\/message-list\/|features\/messaging\/content\/|components\/message-input\/|components\/(MessageList|MessageInput|GifPicker|SearchOverlay|PinnedMessages|DmSidebar|DmProfileSidebar|EmojiPicker|UserProfilePopup|NsfwGate|MentionAutocomplete|EmojiAutocomplete)\.ts|pages\/main-page\/channel\/|pages\/main-page\/(ChannelController|MessageJump|ChatHeader|MemberPickerModal)\.ts)/,
+    /^src\/(features\/messaging\/(message-list|composer|content)\/|features\/messaging\/(MessageList|MessageInput)\.ts|components\/(GifPicker|SearchOverlay|PinnedMessages|DmSidebar|DmProfileSidebar|EmojiPicker|UserProfilePopup|NsfwGate)\.ts|pages\/main-page\/channel\/|pages\/main-page\/(ChannelController|MessageJump|ChatHeader|MemberPickerModal)\.ts)/,
     "B9-19",
   ],
   [/^src\//, "B9-20"],

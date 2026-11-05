@@ -4,7 +4,7 @@
 import type { ChannelType } from "@lib/types";
 import type { MountableComponent } from "@lib/text/safeRender";
 import { errorText } from "@lib/api";
-import { createChannelSidebar } from "@components/ChannelSidebar";
+import { createChannelSidebar } from "../../../features/channels/ChannelSidebar";
 import { withThreadsStore } from "@stores/threadsLoader";
 import {
   requestOpenThread,

@@ -10,7 +10,7 @@ vi.mock("@components/GifPicker", () => ({
   createGifPicker: () => ({ element: document.createElement("div"), destroy: vi.fn() }),
 }));
 
-import { createMessageInput } from "@components/MessageInput";
+import { createMessageInput } from "../../../src/features/messaging/MessageInput";
 import { sendShareTo } from "../../../src/features/share/shareInbox";
 import { runSessionResets } from "../../../src/lib/net/sessionRegistry";
 

@@ -1,10 +1,10 @@
 import { expect, vi, beforeEach, afterEach } from "vitest";
-import { renderMessage, setServerHost } from "../../src/components/message-list/renderers";
+import { renderMessage, setServerHost } from "../../src/features/messaging/message-list/renderers";
 import type { Message } from "../../src/stores/messages.store";
 import { membersStore } from "../../src/stores/members.store";
 import { channelsStore, setRoles } from "../../src/stores/channels.store";
 import { setConnectionStatus } from "../../src/stores/ui.store";
-import type { MessageListOptions } from "../../src/components/MessageList";
+import type { MessageListOptions } from "../../src/features/messaging/MessageList";
 import {
   clearExternalImageCache,
   closeActiveLightbox,

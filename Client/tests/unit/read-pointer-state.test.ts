@@ -32,7 +32,7 @@ import {
 import {
   markMessageUnread,
   setMarkUnreadSender,
-} from "../../src/components/message-list/markUnread";
+} from "../../src/features/messaging/message-list/markUnread";
 import { applyReadyCapabilities, resetServerCapabilities } from "@lib/net/serverCapabilities";
 import { markReadyActiveChannelRead } from "../../src/features/channels/wsHandlers";
 import {

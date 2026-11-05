@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-import { createMessageList } from "@components/MessageList";
-import type { MessageListOptions } from "@components/MessageList";
+import { createMessageList } from "../../src/features/messaging/MessageList";
+import type { MessageListOptions } from "../../src/features/messaging/MessageList";
 import {
   bindImageMenu,
   closeActiveLightbox,
@@ -57,7 +57,7 @@ const item = (testId: string): HTMLElement | null =>
 
 /** Let the lazy `import()` and any microtasks land, so "no menu" is not vacuous. */
 async function settled(): Promise<void> {
-  await import("@components/message-list/messageMenu");
+  await import("../../src/features/messaging/message-list/messageMenu");
   await new Promise((r) => setTimeout(r, 0));
   await new Promise((r) => setTimeout(r, 0));
 }
@@ -619,7 +619,8 @@ describe("message menu module", () => {
   it("opening for a vanished message opens nothing", async () => {
     resetGateStores();
     seed([]);
-    const { openMessageMenu } = await import("@components/message-list/messageMenu");
+    const { openMessageMenu } =
+      await import("../../src/features/messaging/message-list/messageMenu");
     openMessageMenu({
       msg: OTHER_MSG(),
       opts: makeOpts(),
@@ -640,7 +641,7 @@ describe("message menu module", () => {
     document.body.appendChild(invoker);
     invoker.focus();
     const { openMessageMenu, closeMessageMenu } =
-      await import("@components/message-list/messageMenu");
+      await import("../../src/features/messaging/message-list/messageMenu");
     const ac = new AbortController();
     openMessageMenu({
       msg: OTHER_MSG(),

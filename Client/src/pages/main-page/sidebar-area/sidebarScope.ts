@@ -14,7 +14,7 @@ import type { CategoryRef } from "@stores/channels.store";
 import type { ProfileManager } from "@lib/presence/profiles";
 import type { CategoryDialogs } from "../categoryDialogs";
 import type { InviteManagerController } from "../OverlayManagers";
-import type { LazyScreen } from "../../../components/lazyScreen";
+import type { LazyScreen } from "@lib/ui/lazyScreen";
 import type { VoiceWidgetCallbacks } from "../VoiceCallbacks";
 
 /** The values one sidebar builds, shared by its build steps. */

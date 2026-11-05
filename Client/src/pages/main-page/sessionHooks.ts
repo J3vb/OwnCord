@@ -5,7 +5,7 @@
 // torn-down connection never leaves one pointed at a dead socket. A feature
 // that needs a new slot adds a hook here, not to MainPage.
 import { setMarkReadSender } from "@lib/readState";
-import { setMarkUnreadSender } from "@components/message-list/markUnread";
+import { setMarkUnreadSender } from "../../features/messaging/message-list/markUnread";
 import { setActivePresenceSender } from "@lib/presence/presence";
 import { setScreenSourcePicker } from "../../features/voice/native/screenPickerSlot";
 import {

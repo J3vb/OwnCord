@@ -6,10 +6,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { useMountContainer } from "../helpers/mountContainer";
 
-import { createMessageList } from "@components/MessageList";
-import { renderMessage } from "@components/message-list/renderers";
-import { messageActionGates } from "@components/message-list/messageActions";
-import { groupRowText } from "@components/message-list/groupRows";
+import { createMessageList } from "../../src/features/messaging/MessageList";
+import { renderMessage } from "../../src/features/messaging/message-list/renderers";
+import { messageActionGates } from "../../src/features/messaging/message-list/messageActions";
+import { groupRowText } from "../../src/features/messaging/message-list/groupRows";
 import { shouldGroup } from "@lib/text/formatting";
 import { isServerRowKind } from "@lib/text/messageKind";
 import { dmStore } from "@stores/dm.store";

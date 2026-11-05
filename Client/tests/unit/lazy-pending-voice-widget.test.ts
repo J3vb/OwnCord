@@ -28,11 +28,11 @@ vi.mock("@lib/ui/toast", () => mocks.uiToastMock());
 
 vi.mock("@lib/presence/profiles", () => mocks.presenceProfilesMock());
 
-vi.mock("@components/ChannelSidebar", () => mocks.channelSidebarMock());
+vi.mock("../../src/features/channels/ChannelSidebar", () => mocks.channelSidebarMock());
 
 vi.mock("@components/DmSidebar", () => mocks.dmSidebarMock());
 
-vi.mock("@components/MemberList", () => mocks.memberListMock());
+vi.mock("../../src/features/members/MemberList", () => mocks.memberListMock());
 
 vi.mock("@components/UserBar", () => mocks.userBarMock());
 

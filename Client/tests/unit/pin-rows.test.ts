@@ -8,10 +8,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { resetMessagesState } from "../helpers/storeResets";
 import { useMountContainer } from "../helpers/mountContainer";
 
-import { createMessageList } from "@components/MessageList";
-import { renderMessage } from "@components/message-list/renderers";
-import { messageActionGates } from "@components/message-list/messageActions";
-import { pinRowTarget } from "@components/message-list/pinRows";
+import { createMessageList } from "../../src/features/messaging/MessageList";
+import { renderMessage } from "../../src/features/messaging/message-list/renderers";
+import { messageActionGates } from "../../src/features/messaging/message-list/messageActions";
+import { pinRowTarget } from "../../src/features/messaging/message-list/pinRows";
 import { shouldGroup } from "@lib/text/formatting";
 import { isPinRowKind, isServerRowKind } from "@lib/text/messageKind";
 import {
@@ -294,7 +294,7 @@ describe("pin row actions", () => {
     container
       .querySelector<HTMLElement>('[data-testid="message-9"]')!
       .dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
-    await import("@components/message-list/messageMenu");
+    await import("../../src/features/messaging/message-list/messageMenu");
     await new Promise((r) => setTimeout(r, 0));
     expect(document.querySelector(".message-context-menu")).toBeNull();
   });

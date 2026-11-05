@@ -3,7 +3,7 @@ import * as mocks from "../../helpers/channelSidebarMocks";
 import {
   createChannelSidebar,
   type ChannelSidebarOptions,
-} from "../../../src/components/ChannelSidebar";
+} from "../../../src/features/channels/ChannelSidebar";
 import { channelsStore, setChannels } from "../../../src/stores/channels.store";
 import { uiStore } from "../../../src/stores/ui.store";
 import {

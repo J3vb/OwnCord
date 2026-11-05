@@ -11,7 +11,7 @@ vi.mock("@lib/voice/livekitSession", () =>
 );
 
 // Mock MemberList to capture the callbacks passed to it
-vi.mock("@components/MemberList", () => ({
+vi.mock("../../src/features/members/MemberList", () => ({
   createMemberList: vi.fn().mockImplementation(() => ({
     mount: vi.fn(),
     destroy: vi.fn(),
@@ -27,7 +27,7 @@ import {
 import { authStore } from "../../src/stores/auth.store";
 import { addMember, membersStore, removeMember } from "../../src/stores/members.store";
 import { channelsStore, setRoles } from "../../src/stores/channels.store";
-import { createMemberList } from "@components/MemberList";
+import { createMemberList } from "../../src/features/members/MemberList";
 import { openUserReport } from "../../src/features/reports/openers";
 import { Permission, type UserStatus } from "../../src/lib/types";
 import { ApiClientError } from "../../src/lib/api";

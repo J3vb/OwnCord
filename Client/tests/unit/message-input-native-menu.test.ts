@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { useMountContainer } from "../helpers/mountContainer";
-import { createMessageInput } from "@components/MessageInput";
+import { createMessageInput } from "../../src/features/messaging/MessageInput";
 import { wantsNativeMenu } from "@lib/dom";
 import { stubGifApi as gifApi } from "../helpers/messageInputHarness";
 

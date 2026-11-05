@@ -39,7 +39,7 @@ vi.mock("../../src/features/messaging/content/attachments", async (importOrigina
   };
 });
 
-import { createChannelSidebar } from "../../src/components/ChannelSidebar";
+import { createChannelSidebar } from "../../src/features/channels/ChannelSidebar";
 import { channelsStore, setChannels } from "../../src/stores/channels.store";
 import { authStore } from "../../src/stores/auth.store";
 import { uiStore } from "../../src/stores/ui.store";

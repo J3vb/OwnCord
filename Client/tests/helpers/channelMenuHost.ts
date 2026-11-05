@@ -1,5 +1,5 @@
 import { afterEach, beforeEach } from "vitest";
-import { attachChannelContextMenu } from "../../src/components/channel-sidebar/contextMenu";
+import { attachChannelContextMenu } from "../../src/features/channels/sidebar/contextMenu";
 import type { Channel } from "../../src/stores/channels.store";
 
 /**

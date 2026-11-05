@@ -6,7 +6,7 @@
  */
 
 import type { MessageUser } from "@lib/types";
-import type { QueuedAttachment, SentAttachment } from "../../components/MessageInput";
+import type { QueuedAttachment, SentAttachment } from "../messaging/MessageInput";
 import { addOptimisticMessage, markSendFailed, removeOptimistic } from "@stores/messages.store";
 import { loadSendQueue, type SendQueueModule } from "../messaging/sendQueueLoader";
 import type { QueuedSend, QueueDeps } from "../messaging/sendQueue";

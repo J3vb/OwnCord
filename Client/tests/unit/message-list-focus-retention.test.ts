@@ -4,8 +4,8 @@
 // async update/removal).
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-import { createMessageList } from "@components/MessageList";
-import type { MessageListOptions } from "@components/MessageList";
+import { createMessageList } from "../../src/features/messaging/MessageList";
+import type { MessageListOptions } from "../../src/features/messaging/MessageList";
 import { messagesStore } from "@stores/messages.store";
 import {
   makeListOptions,

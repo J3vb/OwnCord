@@ -14,8 +14,8 @@ const { createPopupMock, destroyMock } = vi.hoisted(() => {
 });
 vi.mock("@components/UserProfilePopup", () => ({ createUserProfilePopup: createPopupMock }));
 
-import { createMessageList } from "@components/MessageList";
-import type { MessageListOptions } from "@components/MessageList";
+import { createMessageList } from "../../src/features/messaging/MessageList";
+import type { MessageListOptions } from "../../src/features/messaging/MessageList";
 import { messagesStore } from "@stores/messages.store";
 import type { Message } from "@stores/messages.store";
 import { membersStore, updateMemberRole } from "@stores/members.store";

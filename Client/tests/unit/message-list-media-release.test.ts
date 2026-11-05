@@ -16,7 +16,7 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: () => new Promise(() => {}) }))
 
 vi.mock("@lib/prefs/mediaVisibility", () => mocks.mediaVisibilityMock());
 
-import { createMessageList } from "@components/MessageList";
+import { createMessageList } from "../../src/features/messaging/MessageList";
 import { messagesStore } from "@stores/messages.store";
 import { makeMessage, useMessageListHarness, setMessages } from "../helpers/messageListHarness";
 import "../helpers/resizeObserverStub";

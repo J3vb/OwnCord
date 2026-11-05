@@ -9,7 +9,7 @@ import {
   renderMessageContent,
   getUserRole,
   roleColorVar,
-} from "../../../src/components/message-list/renderers";
+} from "../../../src/features/messaging/message-list/renderers";
 import { membersStore } from "../../../src/stores/members.store";
 import { setRoles } from "../../../src/stores/channels.store";
 import { setConnectionStatus } from "../../../src/stores/ui.store";

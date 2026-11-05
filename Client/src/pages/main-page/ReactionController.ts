@@ -5,12 +5,12 @@
 
 import { createElement } from "@lib/dom";
 import { isPhoneLayout, openBottomSheet } from "@lib/ui/bottomSheet";
-import { createLazyScreen } from "@components/lazyScreen";
+import { createLazyScreen } from "@lib/ui/lazyScreen";
 import {
   atReactionLimit,
   channelCanReact,
   reactionLockReason,
-} from "@components/message-list/reactions";
+} from "../../features/messaging/message-list/reactions";
 import { addOptimisticReaction, getChannelMessages } from "@stores/messages.store";
 import { listCustomEmoji } from "@stores/emoji.store";
 import type { WsClient } from "@lib/ws";

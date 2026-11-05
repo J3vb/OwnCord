@@ -6,9 +6,9 @@ import { channelsStore, type Channel, type ChannelsState } from "../../src/store
 import { uiStore } from "../../src/stores/ui.store";
 import { voiceStore, joinVoiceChannel } from "../../src/stores/voice.store";
 import type { DmChannel } from "../../src/stores/dm.store";
-import { createChannelSidebar } from "@components/ChannelSidebar";
+import { createChannelSidebar } from "../../src/features/channels/ChannelSidebar";
 import { createDmSidebar } from "@components/DmSidebar";
-import { createMemberList } from "@components/MemberList";
+import { createMemberList } from "../../src/features/members/MemberList";
 import { createUserBar } from "@components/UserBar";
 import { createVoiceWidget } from "@components/VoiceWidget";
 import { createCreateChannelModal } from "@components/CreateChannelModal";

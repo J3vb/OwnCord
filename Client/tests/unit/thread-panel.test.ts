@@ -16,7 +16,7 @@ vi.mock("@lib/readState", async (importOriginal) => ({
 }));
 
 import { createThreadPanel } from "@components/ThreadPanel";
-import { createMessageList } from "@components/MessageList";
+import { createMessageList } from "../../src/features/messaging/MessageList";
 import { resumeThreadFocus, withThreadsStore } from "../../src/stores/threadsLoader";
 import { createThreadPanelHost } from "../../src/pages/main-page/ThreadPanelHost";
 import { applyReadyCapabilities, resetServerCapabilities } from "@lib/net/serverCapabilities";

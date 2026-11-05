@@ -31,7 +31,7 @@ import type { ChatAreaResult } from "./ChatArea";
 import type { QuickSwitcherManager } from "./OverlayManagers";
 import type { VoiceWidgetCallbacks } from "./VoiceCallbacks";
 import type { Channel } from "../../stores/channels.store";
-import type { VoiceModMenuOptions } from "../../components/channel-sidebar/volumeMenu";
+import type { VoiceModMenuOptions } from "../../features/channels/sidebar/volumeMenu";
 export interface PageState {
   readonly options: MainPageOptions;
   readonly ws: MainPageOptions["ws"];

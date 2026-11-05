@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { pressComposingEnter } from "../helpers/keyEvents";
-import { appendPurgeSection } from "@components/purgePrompt";
+import { appendPurgeSection } from "../../src/features/channels/sidebar/purgePrompt";
 
 describe("appendPurgeSection", () => {
   let menu: HTMLDivElement;

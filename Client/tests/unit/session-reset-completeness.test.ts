@@ -8,17 +8,17 @@
  */
 import { makeChannel } from "../helpers/channelFactory";
 import { makeDm } from "../helpers/dmHarness";
-import { hasWaved, markWaved } from "@components/message-list/welcomeRows";
+import { hasWaved, markWaved } from "../../src/features/messaging/message-list/welcomeRows";
 import {
   rememberReadingPosition,
   takeReadingPosition,
-} from "@components/message-list/readingPositions";
+} from "../../src/features/messaging/message-list/readingPositions";
 import {
   claimForwardRequest,
   isForwardRequest,
 } from "../../src/features/messaging/forwardRequests";
 import { claimPollRequest, isPollRequest } from "../../src/features/messaging/pollRequests";
-import { pollCardState } from "../../src/components/message-list/pollCard";
+import { pollCardState } from "../../src/features/messaging/message-list/pollCard";
 import { withThreadsStore } from "../../src/stores/threadsLoader";
 import { acceptSharesFor, sendShareTo } from "../../src/features/share/shareInbox";
 import { setFocusedThread, threadsStore, upsertThread } from "../../src/stores/threads.store";
@@ -48,7 +48,7 @@ import { getImageBox, setImageBox } from "../../src/features/messaging/content/i
 import {
   rememberRowHeight,
   rememberedRowHeight,
-} from "../../src/components/message-list/rowHeights";
+} from "../../src/features/messaging/message-list/rowHeights";
 import { discardMedia, observeMedia } from "../../src/lib/prefs/mediaVisibility";
 import {
   EXTERNAL_CONSENT_PREF,
@@ -74,7 +74,7 @@ import {
   uiStore,
 } from "../../src/stores/ui.store";
 import { membersStore, setMembers, setTyping } from "../../src/stores/members.store";
-import { hasMemberModelMemo, memberModelFor } from "../../src/components/MemberList";
+import { hasMemberModelMemo, memberModelFor } from "../../src/features/members/MemberList";
 import { dmStore, setDmChannels } from "../../src/stores/dm.store";
 import type { DmChannel } from "../../src/stores/dm.store";
 import { safetyStore, setReadyNotices } from "../../src/features/safety/store";

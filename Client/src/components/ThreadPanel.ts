@@ -67,21 +67,21 @@ import {
   threadComposerReason,
   THREAD_NAME_MAX,
 } from "../features/threads/threadCommands";
-import { createMessageList, type MessageListComponent } from "./MessageList";
+import { createMessageList, type MessageListComponent } from "../features/messaging/MessageList";
 import {
   createMessageInput,
   type MessageInputComponent,
   type SentAttachment,
-} from "./MessageInput";
+} from "../features/messaging/MessageInput";
 import { createThreadSendQueue } from "../features/threads/threadSendQueue";
-import { createArchiveIcon } from "./message-list/threadChip";
+import { createArchiveIcon } from "../features/messaging/message-list/threadChip";
 import { renderMessageContent } from "../features/messaging/content/contentParser";
 import { createAvatarElement, pickAvatarColor } from "../features/profiles/avatar";
 import {
   createImportedAvatar,
   createImportedName,
   createImportedTag,
-} from "./message-list/importedAuthor";
+} from "../features/messaging/message-list/importedAuthor";
 import { importedName } from "../features/messaging/importedAuthor";
 import type { MessageController } from "../pages/main-page/MessageController";
 import { messagingText } from "../i18n/messaging";

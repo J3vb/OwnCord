@@ -8,7 +8,7 @@ vi.mock("@lib/voice/livekitSession", () =>
   }),
 );
 
-vi.mock("@components/MemberList", () => ({
+vi.mock("../../src/features/members/MemberList", () => ({
   createMemberList: vi.fn().mockImplementation(() => ({
     mount: vi.fn((container: HTMLElement) => {
       const root = document.createElement("div");
@@ -29,7 +29,7 @@ import { createMemberPanel, type MemberPanelOptions } from "../../src/features/m
 import { memberPanelUi } from "../../src/pages/main-page/SidebarMemberSection";
 import { membersStore } from "../../src/stores/members.store";
 import { channelsStore, setRoles } from "../../src/stores/channels.store";
-import { createMemberList } from "@components/MemberList";
+import { createMemberList } from "../../src/features/members/MemberList";
 import { Permission } from "../../src/lib/types";
 import { resetMembersState } from "../helpers/storeResets";
 import { signInAsAdmin } from "../helpers/storeSeeds";

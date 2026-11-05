@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-import { createMessageList } from "@components/MessageList";
-import type { MessageListOptions } from "@components/MessageList";
-import { renderMessage } from "@components/message-list/renderers";
+import { createMessageList } from "../../src/features/messaging/MessageList";
+import type { MessageListOptions } from "../../src/features/messaging/MessageList";
+import { renderMessage } from "../../src/features/messaging/message-list/renderers";
 import { messagesStore, type Message } from "@stores/messages.store";
 import { setConnectionStatus } from "@stores/ui.store";
 import { setActiveTimeout } from "../../src/features/safety/store";
@@ -178,7 +178,8 @@ describe("message hover bar", () => {
   });
 
   it("refreshReactionLocks locks and unlocks the quick buttons in place", async () => {
-    const { refreshReactionLocks } = await import("@components/message-list/reactions");
+    const { refreshReactionLocks } =
+      await import("../../src/features/messaging/message-list/reactions");
     render(makeMessage());
     const first = btn("msg-quick-react-1-0");
     expect(first.hasAttribute("aria-disabled")).toBe(false);

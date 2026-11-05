@@ -13,7 +13,10 @@ import * as voiceSession from "../helpers/voiceSessionMock";
 
 vi.mock("@lib/voice/livekitSession", () => voiceSession.defaults());
 
-import { refreshReactionLocks, renderReactions } from "../../src/components/message-list/reactions";
+import {
+  refreshReactionLocks,
+  renderReactions,
+} from "../../src/features/messaging/message-list/reactions";
 import { setConnectionStatus, uiStore } from "@stores/ui.store";
 
 // Reaction controls lock while the socket is down (3A-3); these tests react online.

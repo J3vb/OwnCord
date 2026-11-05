@@ -141,7 +141,7 @@ Tauri commands are marked `#[tauri::command]`; ones that must run off the main t
 
 - **Go** naming is lint-enforced by staticcheck's ST checks: ST1003 (MixedCaps; initialisms as `ID`, `URL`, `HTTP`, `JSON`; no underscores), ST1016 (one receiver name per type), ST1005 (error strings lower-case, no trailing punctuation).
 - **TypeScript:** oxlint's `no-underscore-dangle` (fatal under `src/`) rejects a leading or trailing `_` except on `this._x` members, function parameters, destructured names and its allow-list, so `const _x` fails even though `no-unused-vars` accepts `^_`.
-- **Client files:** every TypeScript file under `src/` is camelCase for a module (`lib/net/httpProxy.ts`) or PascalCase for a component or class (`components/MemberList.ts`); a hyphenated name fails `tests/unit/file-naming-structure.test.ts`. Tests are `*.test.ts`; where a new one goes is the placement rule under [Tests](#tests).
+- **Client files:** every TypeScript file under `src/` is camelCase for a module (`lib/net/httpProxy.ts`) or PascalCase for a component or class (`features/members/MemberList.ts`); a hyphenated name fails `tests/unit/file-naming-structure.test.ts`. Tests are `*.test.ts`; where a new one goes is the placement rule under [Tests](#tests).
 - Rule identifiers are kebab-case: Go invariant IDs (`"syncutil-locks"`) and ESLint local rules (`no-leave-voice-when-superseded`).
 - Otherwise, match the surrounding file.
 

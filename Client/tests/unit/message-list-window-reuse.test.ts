@@ -10,8 +10,8 @@ vi.mock("../../src/features/content-consent/external", (importOriginal) =>
 );
 vi.mock("@lib/prefs/mediaVisibility", () => mocks.mediaVisibilityMock());
 
-import { createMessageList } from "@components/MessageList";
-import type { MessageListOptions } from "@components/MessageList";
+import { createMessageList } from "../../src/features/messaging/MessageList";
+import type { MessageListOptions } from "../../src/features/messaging/MessageList";
 import {
   makeListOptions,
   makeMessage,

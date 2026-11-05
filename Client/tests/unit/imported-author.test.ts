@@ -5,8 +5,8 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-import { renderMessage } from "@components/message-list/renderers";
-import { messageActionGates } from "@components/message-list/messageActions";
+import { renderMessage } from "../../src/features/messaging/message-list/renderers";
+import { messageActionGates } from "../../src/features/messaging/message-list/messageActions";
 import { shouldGroup } from "@lib/text/formatting";
 import { messageResponseToMessage } from "../../src/features/messaging/messageModel";
 import {

@@ -16,7 +16,7 @@ import {
 } from "../../src/features/messaging/content/contentParser";
 import { setChannelMutesHost } from "../../src/lib/prefs/channelMutes";
 import { setInviteJoinHandler } from "../../src/lib/nav/inviteNavigation";
-import { renderMessage } from "../../src/components/message-list/renderers";
+import { renderMessage } from "../../src/features/messaging/message-list/renderers";
 import {
   highlightsCurrentUser,
   mentionsCurrentUser,
@@ -26,7 +26,7 @@ import { membersStore } from "../../src/stores/members.store";
 import { authStore } from "../../src/stores/auth.store";
 import { channelsStore, setRoles } from "../../src/stores/channels.store";
 import type { Message } from "../../src/stores/messages.store";
-import type { MessageListOptions } from "../../src/components/MessageList";
+import type { MessageListOptions } from "../../src/features/messaging/MessageList";
 import type { ReadyChannel } from "../../src/lib/types";
 import { seedMembersAndChannels } from "../helpers/contentRenderHarness";
 

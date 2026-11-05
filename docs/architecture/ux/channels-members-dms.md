@@ -15,13 +15,13 @@ Renders from `channels.store` (`channels` map, `activeChannelId`), grouped by
 category, sorted by position. The sidebar has two modes (`ui.store.sidebarMode`):
 `channels` and `dms`.
 
-| State              | Trigger                                                                                                                                                                                                                                  | Target reaction                                                                                                 |
-| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `ready`            | Channels loaded from `ready`                                                                                                                                                                                                             | Grouped, collapsible category list                                                                              |
-| `empty`            | Zero channels                                                                                                                                                                                                                            | "No channels yet" + hint (already the empty-state branch of `renderChannels()`, `components/ChannelSidebar.ts`) |
-| category collapsed | User toggles                                                                                                                                                                                                                             | Persisted per-server in localStorage (`ui.toggleCategory`); chevron reflects state                              |
-| active channel     | `setActiveChannel`                                                                                                                                                                                                                       | Highlighted; unread cleared only when actually mounted (UX-8)                                                   |
-| unread             | `chat_message` in a non-active channel, or in the active channel while the reader is away (`isChannelAway`: window unfocused, loaded window detached, or list scrolled away from the live tail) ([messaging.md §7](messaging.md), P4-03) | Unread pill; badge on the channel                                                                               |
+| State              | Trigger                                                                                                                                                                                                                                  | Target reaction                                                                                                        |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `ready`            | Channels loaded from `ready`                                                                                                                                                                                                             | Grouped, collapsible category list                                                                                     |
+| `empty`            | Zero channels                                                                                                                                                                                                                            | "No channels yet" + hint (already the empty-state branch of `renderChannels()`, `features/channels/ChannelSidebar.ts`) |
+| category collapsed | User toggles                                                                                                                                                                                                                             | Persisted per-server in localStorage (`ui.toggleCategory`); chevron reflects state                                     |
+| active channel     | `setActiveChannel`                                                                                                                                                                                                                       | Highlighted; unread cleared only when actually mounted (UX-8)                                                          |
+| unread             | `chat_message` in a non-active channel, or in the active channel while the reader is away (`isChannelAway`: window unfocused, loaded window detached, or list scrolled away from the live tail) ([messaging.md §7](messaging.md), P4-03) | Unread pill; badge on the channel                                                                                      |
 
 ### 1.1 Channel type affordances
 
@@ -37,7 +37,7 @@ Each channel type gets a distinct icon and interaction:
 ### 1.1a Per-channel notification mutes
 
 The channel context menu offers "Mute Channel" / "Unmute Channel"
-(the Mute Channel item in `attachChannelContextMenu()`, `components/channel-sidebar/contextMenu.ts`, backed by `lib/prefs/channelMutes.ts`).
+(the Mute Channel item in `attachChannelContextMenu()`, `features/channels/sidebar/contextMenu.ts`, backed by `lib/prefs/channelMutes.ts`).
 Discord semantics, deliberately: a mute silences the channel's _noise_ — no
 desktop notification, no chime — while the unread badge still counts but
 renders dimmed, and a message that mentions you still notifies and shows the
@@ -106,7 +106,7 @@ role grouping.
 | State           | Trigger                    | Target reaction                                                                                                         |
 | --------------- | -------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
 | `ready`         | `ready.members`            | Grouped by role, sorted; presence dot per member                                                                        |
-| `empty`         | No online members          | "No members online" (already the empty-state branch of `renderList()`, `components/MemberList.ts`)                      |
+| `empty`         | No online members          | "No members online" (already the empty-state branch of `renderList()`, `features/members/MemberList.ts`)                |
 | presence change | `presence` event           | Live dot update; offline members styled distinctly                                                                      |
 | role change     | `member_update`            | Re-group live                                                                                                           |
 | profile change  | `user_update`              | Name/avatar update; if it's us, also patch `auth.store` (already `handleUserUpdate`, `features/channels/wsHandlers.ts`) |
@@ -230,8 +230,8 @@ and `IsEitherBlocked` is bidirectional). **Target UX:**
 
 ## Source of truth
 
-`src/components/ChannelSidebar.ts` (+ `channel-sidebar/`),
-`src/components/MemberList.ts`, `src/components/TypingIndicator.ts`,
+`src/features/channels/ChannelSidebar.ts` (+ `sidebar/`),
+`src/features/members/MemberList.ts`, `src/components/TypingIndicator.ts`,
 `src/components/DmSidebar.ts`, `src/components/DmProfileSidebar.ts`,
 `src/pages/main-page/SidebarArea.ts`, `SidebarMemberSection.ts`,
 `SidebarDmSection.ts`, `SidebarDmHelpers.ts`, `src/stores/channels.store.ts`,

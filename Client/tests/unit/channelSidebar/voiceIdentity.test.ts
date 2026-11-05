@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import * as mocks from "../../helpers/channelSidebarMocks";
-import { createChannelSidebar } from "../../../src/components/ChannelSidebar";
+import { createChannelSidebar } from "../../../src/features/channels/ChannelSidebar";
 import { channelsStore, setChannels } from "../../../src/stores/channels.store";
 import { authStore } from "../../../src/stores/auth.store";
 import { voiceStore } from "../../../src/stores/voice.store";

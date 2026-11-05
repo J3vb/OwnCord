@@ -24,9 +24,9 @@ vi.mock("@lib/ui/toast", () => ({
 
 import { createMessageJumper } from "../../src/pages/main-page/MessageJump";
 import { createMessageController } from "../../src/pages/main-page/MessageController";
-import { createMessageList } from "@components/MessageList";
-import type { MessageListOptions } from "@components/MessageList";
-import { renderMessage } from "../../src/components/message-list/renderers";
+import { createMessageList } from "../../src/features/messaging/MessageList";
+import type { MessageListOptions } from "../../src/features/messaging/MessageList";
+import { renderMessage } from "../../src/features/messaging/message-list/renderers";
 import { renderMentionSegment } from "../../src/features/messaging/content/contentParser";
 import { jumpToMessage, setMessageJumpHandler } from "@lib/nav/messageNavigation";
 import {
@@ -512,7 +512,8 @@ describe("Copy Message Link action", () => {
 
     // Copy Message Link left the hover bar: it is in the message menu.
     expect(row.querySelector('[data-testid="msg-copy-link-42"]')).toBeNull();
-    const { openMessageMenu } = await import("../../src/components/message-list/messageMenu");
+    const { openMessageMenu } =
+      await import("../../src/features/messaging/message-list/messageMenu");
     openMessageMenu({
       msg,
       opts: makeListOptions({ channelId: 7 }),

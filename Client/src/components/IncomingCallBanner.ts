@@ -24,7 +24,7 @@ import { dmStore, dmDisplayName } from "@stores/dm.store";
 import { membersStore } from "@stores/members.store";
 import { voiceText } from "../i18n/voice";
 import { dmCallText } from "../i18n/dmCall";
-import { createLazyScreen } from "./lazyScreen";
+import { createLazyScreen } from "../lib/ui/lazyScreen";
 import type { IncomingCallScreen, IncomingCallView } from "../features/voice/incomingCallScreen";
 
 export interface IncomingCallBannerOptions {

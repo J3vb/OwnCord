@@ -14,7 +14,7 @@ import {
   renderInlineImage,
   setInlineImageDecorator,
 } from "../../src/features/messaging/content/media";
-import { gifFavoriteStar } from "../../src/components/message-list/gifFavoriteStar";
+import { gifFavoriteStar } from "../../src/features/messaging/message-list/gifFavoriteStar";
 import {
   bindGifFavoritesApi,
   isGifFavorite,

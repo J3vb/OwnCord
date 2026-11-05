@@ -7,8 +7,8 @@
 import { Disposable } from "@lib/disposable";
 import { readStored, writeStored } from "@lib/prefs/preferences";
 import { createElement, appendChildren } from "@lib/dom";
-import { createMemberList } from "@components/MemberList";
-import { buildVoiceModOptions } from "@components/ChannelSidebar";
+import { createMemberList } from "../../features/members/MemberList";
+import { buildVoiceModOptions } from "../../features/channels/ChannelSidebar";
 import { shellText } from "../../i18n/shell";
 import {
   createMemberPanel,

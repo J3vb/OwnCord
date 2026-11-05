@@ -1,6 +1,6 @@
 /** The mutable state one channel controller keeps, shared by its modules. */
 import type { MountableComponent } from "@lib/text/safeRender";
-import type { MessageListComponent } from "@components/MessageList";
+import type { MessageListComponent } from "../../../features/messaging/MessageList";
 import type { SendQueueModule } from "../../../features/messaging/sendQueueLoader";
 import type { QueuedSend } from "../../../features/messaging/sendQueue";
 import type { MessageController } from "../MessageController";
@@ -18,7 +18,7 @@ import type {
   QueuedAttachment,
   ReplyTarget,
   SentAttachment,
-} from "@components/MessageInput";
+} from "../../../features/messaging/MessageInput";
 import type { QueueDeps } from "../../../features/messaging/sendQueue";
 import type { SessionScope } from "../../../lib/net/sessionScope";
 import type { DmChannel } from "../../../stores/dm.store";

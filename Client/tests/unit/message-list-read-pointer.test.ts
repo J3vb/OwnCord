@@ -7,8 +7,8 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-import { createMessageList } from "@components/MessageList";
-import type { MessageListOptions } from "@components/MessageList";
+import { createMessageList } from "../../src/features/messaging/MessageList";
+import type { MessageListOptions } from "../../src/features/messaging/MessageList";
 import { messagesStore } from "@stores/messages.store";
 import type { Message } from "@stores/messages.store";
 import { channelsStore, getPointerOnOpen } from "@stores/channels.store";
@@ -21,7 +21,7 @@ import {
   setMarkReadSender,
   writeReadPointer,
 } from "@lib/readState";
-import { setMarkUnreadSender } from "../../src/components/message-list/markUnread";
+import { setMarkUnreadSender } from "../../src/features/messaging/message-list/markUnread";
 import { applyReadyCapabilities, resetServerCapabilities } from "@lib/net/serverCapabilities";
 import { makeMessage, makeOpts, resetGateStores } from "../helpers/message-actions-fixtures";
 import { resetMessagesState, resetMembersState } from "../helpers/storeResets";
@@ -249,7 +249,7 @@ describe("MessageList: NEW line by read pointer and Mark Unread", () => {
 
   describe("Mark Unread", () => {
     const settled = async (): Promise<void> => {
-      await import("@components/message-list/messageMenu");
+      await import("../../src/features/messaging/message-list/messageMenu");
       await new Promise((r) => setTimeout(r, 0));
     };
 

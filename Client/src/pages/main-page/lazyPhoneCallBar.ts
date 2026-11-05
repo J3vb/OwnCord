@@ -10,7 +10,7 @@ import { createElement } from "@lib/dom";
 import type { MountableComponent } from "@lib/text/safeRender";
 import { isPhoneLayout } from "@lib/ui/bottomSheet";
 import { voiceStore } from "@stores/voice.store";
-import { createLazyScreen } from "@components/lazyScreen";
+import { createLazyScreen } from "@lib/ui/lazyScreen";
 import type { PhoneCallBar, PhoneCallBarOptions } from "@components/PhoneCallBar";
 
 const phoneCallBarScreen = createLazyScreen(

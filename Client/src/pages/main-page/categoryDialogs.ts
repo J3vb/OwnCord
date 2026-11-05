@@ -8,7 +8,7 @@
  * `channel_update` / `channel_categories` frames.
  */
 
-import { createLazyScreen } from "@components/lazyScreen";
+import { createLazyScreen } from "@lib/ui/lazyScreen";
 import type { MountableComponent } from "@lib/text/safeRender";
 import type { CategoryRef } from "@stores/channels.store";
 import {

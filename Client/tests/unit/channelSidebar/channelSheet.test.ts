@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { attachChannelContextMenu } from "@components/channel-sidebar/contextMenu";
+import { attachChannelContextMenu } from "../../../src/features/channels/sidebar/contextMenu";
 import {
   getChannelMute,
   invalidateMuteCache,

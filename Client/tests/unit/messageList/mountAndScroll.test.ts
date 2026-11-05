@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { fakeTimersTest } from "../../helpers/fakeTimersTest";
 import * as mocks from "../../helpers/messageListMocks";
-import { createMessageList } from "@components/MessageList";
-import type { MessageListOptions } from "@components/MessageList";
+import { createMessageList } from "../../../src/features/messaging/MessageList";
+import type { MessageListOptions } from "../../../src/features/messaging/MessageList";
 import { messagesStore } from "@stores/messages.store";
 import {
   resetSafetyStore,

@@ -8,7 +8,7 @@ import {
   createMessageInput,
   type QueuedAttachment,
   type SentAttachment,
-} from "@components/MessageInput";
+} from "../../../features/messaging/MessageInput";
 import { createTypingIndicator } from "@components/TypingIndicator";
 import { getChannelMessages } from "@stores/messages.store";
 import { canManageMessages } from "@lib/permissions";

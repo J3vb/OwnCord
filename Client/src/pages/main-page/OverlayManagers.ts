@@ -11,7 +11,7 @@ import { createModal } from "@lib/ui/modalFactory";
 import { claimBackOnPhone } from "@lib/ui/bottomSheet";
 import { canManageInvites } from "@lib/permissions";
 import { createLogger } from "@lib/logger";
-import { createLazyScreen } from "@components/lazyScreen";
+import { createLazyScreen } from "@lib/ui/lazyScreen";
 import type { InviteItem } from "@components/InviteManager";
 import type { ImportedAuthor, InviteResponse } from "@lib/types";
 import type { PinnedMessage } from "@components/PinnedMessages";

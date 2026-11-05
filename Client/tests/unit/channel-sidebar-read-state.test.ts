@@ -10,7 +10,7 @@ import * as stubs from "../helpers/sidebarStubs";
 vi.mock("@lib/voice/livekitSession", () => mocks.rePinOnlySessionMock());
 vi.mock("@lib/net/e2eeCrypto", () => mocks.inertE2eeCryptoMock());
 
-import { createChannelSidebar } from "../../src/components/ChannelSidebar";
+import { createChannelSidebar } from "../../src/features/channels/ChannelSidebar";
 import { channelsStore, setChannels } from "../../src/stores/channels.store";
 import { setMarkReadSender } from "@lib/readState";
 import { readStateChannels } from "../helpers/sidebarAreaOpts";

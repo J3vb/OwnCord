@@ -7,7 +7,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useMountContainer } from "../helpers/mountContainer";
 
-import { createMessageList } from "@components/MessageList";
+import { createMessageList } from "../../src/features/messaging/MessageList";
 import { channelBitOrRole } from "@lib/permissions";
 import { Permission } from "@lib/types";
 import { addChannel, channelsStore, setChannels, setRoles } from "@stores/channels.store";

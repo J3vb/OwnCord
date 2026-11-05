@@ -6,8 +6,8 @@
  */
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest";
 
-import { createMessageList } from "@components/MessageList";
-import type { MessageListOptions } from "@components/MessageList";
+import { createMessageList } from "../../src/features/messaging/MessageList";
+import type { MessageListOptions } from "../../src/features/messaging/MessageList";
 import { messagesStore, type Message } from "@stores/messages.store";
 import { loadEmojiCatalog } from "../../src/features/messaging/emojiCatalog";
 import { clearCustomEmoji, emojiStore, setCustomEmoji } from "../../src/stores/emoji.store";

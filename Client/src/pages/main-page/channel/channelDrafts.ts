@@ -2,7 +2,10 @@
  * Composer drafts per channel: saving the mounted draft, restoring a saved one,
  * and putting unsent files back.
  */
-import type { MessageInputComponent, SentAttachment } from "@components/MessageInput";
+import type {
+  MessageInputComponent,
+  SentAttachment,
+} from "../../../features/messaging/MessageInput";
 import { getChannelMessages } from "@stores/messages.store";
 import { loadSavedDraft, saveDraft, type SavedDraft } from "@lib/prefs/savedDrafts";
 import { DRAFT_SAVE_DELAY_MS } from "./channelShared";

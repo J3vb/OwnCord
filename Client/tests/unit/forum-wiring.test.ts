@@ -19,7 +19,7 @@ import { createQuickSwitcher } from "@components/QuickSwitcher";
 import {
   filterChannelSuggestions,
   createChannelAutocomplete,
-} from "@components/ChannelAutocomplete";
+} from "../../src/features/messaging/composer/ChannelAutocomplete";
 import { buildChatHeader, setChatHeaderChannelType } from "../../src/pages/main-page/ChatHeader";
 import {
   applyReadyCapabilities,

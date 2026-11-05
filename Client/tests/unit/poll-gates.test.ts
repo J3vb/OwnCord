@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useMountContainer } from "../helpers/mountContainer";
-import { messageActionGates } from "../../src/components/message-list/messageActions";
-import { createMessageInput } from "../../src/components/MessageInput";
+import { messageActionGates } from "../../src/features/messaging/message-list/messageActions";
+import { createMessageInput } from "../../src/features/messaging/MessageInput";
 import type { PollView } from "../../src/lib/types";
 import {
   applyReadyCapabilities,

@@ -9,8 +9,8 @@
 
 import { Disposable } from "@lib/disposable";
 import { createElement } from "@lib/dom";
-import type { createMemberList } from "@components/MemberList";
-import type { buildVoiceModOptions, VoiceModerationCallbacks } from "@components/ChannelSidebar";
+import type { createMemberList } from "./MemberList";
+import type { buildVoiceModOptions, VoiceModerationCallbacks } from "../channels/ChannelSidebar";
 import { parseTimestamp } from "@lib/text/formatting";
 import { authStore } from "@stores/auth.store";
 import { channelsStore } from "@stores/channels.store";

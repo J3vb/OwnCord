@@ -18,13 +18,13 @@ vi.mock("@lib/voice/livekitSession", () => ({}));
 vi.mock("@components/QuickSwitchOverlay", () => ({
   createQuickSwitchOverlay: vi.fn().mockReturnValue({ mount: vi.fn(), destroy: vi.fn() }),
 }));
-vi.mock("@components/ChannelSidebar", () => ({
+vi.mock("../../src/features/channels/ChannelSidebar", () => ({
   createChannelSidebar: vi.fn().mockReturnValue({ mount: vi.fn(), destroy: vi.fn() }),
 }));
 vi.mock("@components/DmSidebar", () => ({
   createDmSidebar: vi.fn().mockReturnValue({ mount: vi.fn(), destroy: vi.fn(), update: vi.fn() }),
 }));
-vi.mock("@components/MemberList", () => ({
+vi.mock("../../src/features/members/MemberList", () => ({
   createMemberList: vi.fn().mockReturnValue({ mount: vi.fn(), destroy: vi.fn() }),
 }));
 

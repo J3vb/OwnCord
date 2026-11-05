@@ -9,7 +9,7 @@
 
 import { Disposable } from "../../lib/disposable";
 import { createElement } from "../../lib/dom";
-import type { DraftUpload, SentAttachment } from "../../components/MessageInput";
+import type { DraftUpload, SentAttachment } from "./MessageInput";
 import { sendQueueText } from "../../i18n/sendQueue";
 import { attachmentTtlMs } from "./attachmentTtl";
 
