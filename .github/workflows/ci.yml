@@ -980,8 +980,9 @@ jobs:
       - name: Formatting, shell and workflow gates
         run: npm run check:hygiene
 
-      # Duplicated lines in Client/tests are a shrink-only share
-      # (docs/code-style.md, "Tests"). jscpd comes from the root install above.
+      # Duplicated lines in Client/tests and in the Server Go tests are
+      # shrink-only shares (docs/code-style.md, "Tests"). jscpd comes from the
+      # root install above.
       - name: Self-test the test duplication ratchet
         run: node --test scripts/checks/check-test-duplication.test.mjs
 

@@ -1,15 +1,17 @@
 #!/usr/bin/env node
-// Copy-pasted setup is what makes the client tests long, so the share of
-// duplicated lines in Client/tests is held as a shrink-only ratchet: the
-// percentage jscpd reports may not rise above the one stored in
-// scripts/checks/test-duplication-baseline.json. A change that removes
-// duplication lowers the stored number with --update, which refuses to raise it.
+// Copy-pasted setup is what makes tests long, so the share of duplicated
+// lines is held as a shrink-only ratchet for two targets: Client/tests, and
+// the Go test files under Server/. The percentage jscpd reports for a target
+// may not rise above the one stored in its baseline file. A change that
+// removes duplication lowers the stored number with --update, which refuses
+// to raise it. --target client|server limits a run to one target.
 //
 // jscpd is a pinned root devDependency, so `npm ci` at the repository root
 // is all the script needs (the Repository Hygiene job runs it there). It can
-// also read a report that is already on disk with --report <jscpd-report.json>.
+// also read a report that is already on disk with
+// --target <name> --report <jscpd-report.json>.
 //
-// The settings below are the ones the baseline was measured with: a
+// The settings below are the ones both baselines were measured with: a
 // 50-token minimum, and a line and size limit high enough that no file is
 // skipped (jscpd skips files over 1,000 lines by default, which hides the
 // biggest tests from the count).
@@ -20,7 +22,22 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
-export const BASELINE_PATH = path.join(ROOT, "scripts/checks/test-duplication-baseline.json");
+export const TARGETS = {
+  client: {
+    label: "Client/tests",
+    scan: "Client/tests",
+    extraArgs: [],
+    baselinePath: path.join(ROOT, "scripts/checks/test-duplication-baseline.json"),
+    hint: "Share the repeated setup in Client/tests/helpers instead of copying it.",
+  },
+  server: {
+    label: "Server Go tests",
+    scan: "Server",
+    extraArgs: ["--pattern", "**/*_test.go"],
+    baselinePath: path.join(ROOT, "scripts/checks/server-test-duplication-baseline.json"),
+    hint: "Share the repeated setup in a helper in the package's _test.go files instead of copying it.",
+  },
+};
 const JSCPD_BIN = path.join(ROOT, "node_modules/jscpd/bin/jscpd");
 export const JSCPD_ARGS = [
   "--min-tokens",
@@ -33,7 +50,8 @@ export const JSCPD_ARGS = [
   "json",
   "--silent",
 ];
-export const UPDATE_COMMAND = "node scripts/checks/check-test-duplication.mjs --update";
+export const updateCommand = (name) =>
+  `node scripts/checks/check-test-duplication.mjs --target ${name} --update`;
 
 /** The duplicated-line share and counts from a jscpd JSON report. */
 export function measure(report) {
@@ -65,63 +83,91 @@ export function nextBaseline(current, baseline) {
   return current;
 }
 
-function runJscpd() {
+function runJscpd(target) {
   const out = mkdtempSync(path.join(tmpdir(), "jscpd-tests-"));
   try {
-    execFileSync(process.execPath, [JSCPD_BIN, ...JSCPD_ARGS, "--output", out, "Client/tests"], {
-      cwd: ROOT,
-      stdio: ["ignore", "ignore", "inherit"],
-    });
+    execFileSync(
+      process.execPath,
+      [JSCPD_BIN, ...JSCPD_ARGS, ...target.extraArgs, "--output", out, target.scan],
+      { cwd: ROOT, stdio: ["ignore", "ignore", "inherit"] },
+    );
     return JSON.parse(readFileSync(path.join(out, "jscpd-report.json"), "utf8"));
   } finally {
     rmSync(out, { recursive: true, force: true });
   }
 }
 
-function readBaseline() {
+function readBaseline(target) {
   try {
-    return JSON.parse(readFileSync(BASELINE_PATH, "utf8"));
+    return JSON.parse(readFileSync(target.baselinePath, "utf8"));
   } catch {
     return null;
   }
 }
 
-function main(argv) {
-  const update = argv.includes("--update");
-  const reportAt = argv.includes("--report") ? argv[argv.indexOf("--report") + 1] : null;
-  const report = reportAt ? JSON.parse(readFileSync(reportAt, "utf8")) : runJscpd();
+/** Checks or updates one target; returns the exit code for it. */
+function runTarget(name, target, { update, reportAt }) {
+  const report = reportAt ? JSON.parse(readFileSync(reportAt, "utf8")) : runJscpd(target);
   const current = measure(report);
-  const baseline = readBaseline();
+  const baseline = readBaseline(target);
+  const fix = updateCommand(name);
 
   if (update) {
     const next = nextBaseline(current, baseline);
-    writeFileSync(BASELINE_PATH, `${JSON.stringify(next, null, 2)}\n`);
-    console.log(`baseline set to ${next.percentage}% (${next.duplicatedLines} duplicated lines)`);
+    writeFileSync(target.baselinePath, `${JSON.stringify(next, null, 2)}\n`);
+    console.log(
+      `${target.label}: baseline set to ${next.percentage}% (${next.duplicatedLines} duplicated lines)`,
+    );
     return 0;
   }
   if (!baseline) {
-    console.error(`no baseline yet; measured ${current.percentage}%. Run: ${UPDATE_COMMAND}`);
+    console.error(`${target.label}: no baseline yet; measured ${current.percentage}%. Run: ${fix}`);
     return 1;
   }
   const verdict = compare(current, baseline);
   if (verdict === "higher") {
     console.error(
-      `Client/tests duplication rose to ${current.percentage}% (baseline ${baseline.percentage}%). ` +
-        "Share the repeated setup in Client/tests/helpers instead of copying it.",
+      `${target.label} duplication rose to ${current.percentage}% (baseline ${baseline.percentage}%). ` +
+        target.hint,
     );
     return 1;
   }
   if (verdict === "lower") {
     console.log(
-      `Client/tests duplication is ${current.percentage}%, below the baseline ${baseline.percentage}%. ` +
-        `Lower the baseline in this PR: ${UPDATE_COMMAND}`,
+      `${target.label} duplication is ${current.percentage}%, below the baseline ${baseline.percentage}%. ` +
+        `Lower the baseline in this PR: ${fix}`,
     );
     return 0;
   }
   console.log(
-    `Client/tests duplication is ${current.percentage}% (baseline ${baseline.percentage}%).`,
+    `${target.label} duplication is ${current.percentage}% (baseline ${baseline.percentage}%).`,
   );
   return 0;
+}
+
+/** The target names a run covers: one with --target, else all of them. */
+export function selectTargets(argv) {
+  if (!argv.includes("--target")) return Object.keys(TARGETS);
+  const name = argv[argv.indexOf("--target") + 1];
+  if (!Object.hasOwn(TARGETS, name)) {
+    throw new Error(`unknown --target ${name}; use ${Object.keys(TARGETS).join(" or ")}`);
+  }
+  return [name];
+}
+
+function main(argv) {
+  const update = argv.includes("--update");
+  const reportAt = argv.includes("--report") ? argv[argv.indexOf("--report") + 1] : null;
+  const names = selectTargets(argv);
+  if (reportAt && names.length !== 1) {
+    console.error("--report reads one target's report; add --target client|server");
+    return 2;
+  }
+  let code = 0;
+  for (const name of names) {
+    code = Math.max(code, runTarget(name, TARGETS[name], { update, reportAt }));
+  }
+  return code;
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
