@@ -51,6 +51,55 @@ function applyNames(entry: CellEntry, username: string, name: string): void {
     );
 }
 
+/** Only replace srcObject if the underlying tracks changed. */
+function sameTracks(video: HTMLVideoElement, stream: MediaStream): boolean {
+  const oldTracks = (video.srcObject as MediaStream | null)?.getTracks() ?? [];
+  const newTracks = stream.getTracks();
+  return (
+    video.srcObject != null &&
+    oldTracks.length === newTracks.length &&
+    oldTracks.every((t, i) => t.id === newTracks[i]?.id)
+  );
+}
+
+function buildTileVideo(userId: number, stream: MediaStream | null): HTMLVideoElement {
+  const video = createElement("video", {
+    autoplay: "",
+    playsinline: "",
+  });
+  video.muted = true;
+  if (stream !== null) {
+    video.srcObject = stream;
+    video.play()?.catch((err) => {
+      log.debug("Video autoplay rejected (new tile)", { userId, err });
+    });
+  }
+  return video;
+}
+
+/** Who is watching this screen share: an eye and the count, top-right,
+ *  hidden at zero (applyStreamViewers draws it). */
+function buildViewersBadge(): HTMLElement {
+  const viewers = createElement("span", {
+    class: "video-viewers",
+    role: "img",
+    "data-testid": "tile-viewers",
+  });
+  viewers.hidden = true;
+  viewers.appendChild(createIcon("eye", 14));
+  viewers.appendChild(createElement("span", { class: "video-viewers__count" }));
+  return viewers;
+}
+
+function buildTileLabel(config: TileConfig | undefined): HTMLElement {
+  const label = createElement("div", { class: "video-label" });
+  label.appendChild(createElement("div", { class: "video-username" }));
+  if (config?.isScreenshare === true) {
+    label.appendChild(createElement("span", { class: "video-live" }, voiceText("tile.live")));
+  }
+  return label;
+}
+
 export function createGridStreams(st: GridState, api: GridApi) {
   /** Attach ended/mute/unmute listeners on the first video track to handle stale tiles. */
   /** On the tile and on its video, so a video in its pop-out window hides
@@ -183,154 +232,96 @@ export function createGridStreams(st: GridState, api: GridApi) {
     return cover;
   }
 
-  function addStream(
-    userId: number,
-    username: string,
-    stream: MediaStream | null,
-    config?: TileConfig,
-  ): void {
-    if (st.root === null) return;
-
-    // The same person shared again while their tile said it ended (a new
-    // source, a quick re-share): a new tile, still watched and in focus.
+  /** The republished share is back: it plays in the tile it left. */
+  function endHold(userId: number, stream: MediaStream | null): void {
     const held = st.cells.get(userId);
-    if (held?.holding !== undefined && stream !== null) {
-      // The republished share is back: it plays in the tile it left.
-      clearTimeout(held.holding);
-      held.holding = undefined;
-    }
-    const reshared = st.cells.get(userId)?.ending !== undefined;
-    const refocus = reshared && st.focusedTileId === userId;
-    if (reshared) dropTile(userId, true);
-    // If a cell already exists for this user, update it in place
-    const existing = st.cells.get(userId);
-    if (existing !== undefined && stream === null) {
-      // No longer received (not watched): back to Watch stream.
-      existing.trackCleanup?.();
-      existing.trackCleanup = undefined;
-      existing.video.srcObject = null;
-      syncVideoSurface(existing.video);
-      setTrackMuted(existing, false);
-      if (!existing.el.classList.contains("video-cell--stopped")) {
-        existing.lost = existing.mini === undefined && existing.config?.isSelf !== true;
-        // A codec switch unsubscribes before it unpublishes: a stream whose
-        // owner still has it on waits for its republish, pop-out and mini open.
-        const owner = existing.config;
-        if (
-          owner !== undefined &&
-          !owner.isSelf &&
-          existing.holding === undefined &&
-          st.callbacks.isStreamLive?.(owner.audioUserId, owner.isScreenshare) === true
-        ) {
-          holdForRepublish(userId, existing, owner.audioUserId, owner.isScreenshare);
-        } else {
-          api.setStopped(userId, true, false);
-        }
-      }
-      applyNames(existing, username, config?.name ?? username);
-      return;
-    }
-    if (existing !== undefined && stream !== null) {
-      existing.lost = false;
-      // Received only while watched: a stream on a tile showing Watch plays.
+    if (held?.holding === undefined || stream === null) return;
+    clearTimeout(held.holding);
+    held.holding = undefined;
+  }
+
+  /** No longer received (not watched): back to Watch stream. */
+  function showUnreceived(
+    userId: number,
+    existing: CellEntry,
+    username: string,
+    config: TileConfig | undefined,
+  ): void {
+    existing.trackCleanup?.();
+    existing.trackCleanup = undefined;
+    existing.video.srcObject = null;
+    syncVideoSurface(existing.video);
+    setTrackMuted(existing, false);
+    if (!existing.el.classList.contains("video-cell--stopped")) {
+      existing.lost = existing.mini === undefined && existing.config?.isSelf !== true;
+      // A codec switch unsubscribes before it unpublishes: a stream whose
+      // owner still has it on waits for its republish, pop-out and mini open.
+      const owner = existing.config;
       if (
-        existing.config?.isSelf !== true &&
-        existing.el.classList.contains("video-cell--stopped")
+        owner !== undefined &&
+        !owner.isSelf &&
+        existing.holding === undefined &&
+        st.callbacks.isStreamLive?.(owner.audioUserId, owner.isScreenshare) === true
       ) {
-        api.setStopped(userId, false, false);
+        holdForRepublish(userId, existing, owner.audioUserId, owner.isScreenshare);
+      } else {
+        api.setStopped(userId, true, false);
       }
-      const video = existing.video;
-      // Only replace srcObject if the underlying tracks changed
-      const oldTracks = (video.srcObject as MediaStream | null)?.getTracks() ?? [];
-      const newTracks = stream.getTracks();
-      const tracksMatch =
-        video.srcObject != null &&
-        oldTracks.length === newTracks.length &&
-        oldTracks.every((t, i) => t.id === newTracks[i]?.id);
-      if (!tracksMatch) {
-        // A new picture starts unzoomed: the old view may frame nothing.
-        existing.zoom?.reset();
-        video.srcObject = stream;
-        syncVideoSurface(video);
-        video.play()?.catch((err) => {
-          log.debug("Video autoplay rejected (track replacement)", { userId, err });
-        });
-        attachTrackLifecycle(userId, stream);
-        // A new track can come with a new publication (a reconnect): tell it too.
-        existing.view = undefined;
-        api.syncViews();
-      }
-      applyNames(existing, username, config?.name ?? username);
-      // Sync stream type attribute in case it changed
-      existing.el.dataset.streamType = config?.isScreenshare ? "screenshare" : "camera";
-      existing.el.classList.toggle("video-cell--self", isSelfCamera(config));
-      return;
     }
+    applyNames(existing, username, config?.name ?? username);
+  }
 
-    const video = createElement("video", {
-      autoplay: "",
-      playsinline: "",
-    });
-    video.muted = true;
-    if (stream !== null) {
+  /** Received again (or still): play it, and swap the picture only when its
+   *  tracks changed. */
+  function showReceived(
+    userId: number,
+    existing: CellEntry,
+    stream: MediaStream,
+    username: string,
+    config: TileConfig | undefined,
+  ): void {
+    existing.lost = false;
+    // Received only while watched: a stream on a tile showing Watch plays.
+    if (existing.config?.isSelf !== true && existing.el.classList.contains("video-cell--stopped")) {
+      api.setStopped(userId, false, false);
+    }
+    const video = existing.video;
+    if (!sameTracks(video, stream)) {
+      // A new picture starts unzoomed: the old view may frame nothing.
+      existing.zoom?.reset();
       video.srcObject = stream;
+      syncVideoSurface(video);
       video.play()?.catch((err) => {
-        log.debug("Video autoplay rejected (new tile)", { userId, err });
+        log.debug("Video autoplay rejected (track replacement)", { userId, err });
       });
+      attachTrackLifecycle(userId, stream);
+      // A new track can come with a new publication (a reconnect): tell it too.
+      existing.view = undefined;
+      api.syncViews();
     }
+    applyNames(existing, username, config?.name ?? username);
+    // Sync stream type attribute in case it changed
+    existing.el.dataset.streamType = config?.isScreenshare ? "screenshare" : "camera";
+    existing.el.classList.toggle("video-cell--self", isSelfCamera(config));
+  }
 
-    const streamType = config?.isScreenshare ? "screenshare" : "camera";
-    const cell = createElement("div", {
-      class: isSelfCamera(config) ? "video-cell video-cell--self" : "video-cell",
-      "data-user-id": String(userId),
-      "data-stream-type": streamType,
-    });
-
-    // The whole tile is one real button (click, Enter, Space) that opens it
-    // in focus view; the tile's own controls sit above it, never inside it.
-    const select = createElement("button", {
+  /** Filled by the stats poll while you watch this screen share. */
+  function buildStatsChip(userId: number): HTMLElement {
+    const chip = createElement("button", {
       type: "button",
-      class: "video-cell-select",
-      "data-tile-control": "select",
+      class: "video-quality",
+      "aria-expanded": "false",
+      "data-tile-control": "stats",
     });
-    select.addEventListener("click", () => api.setFocusedTile(userId));
+    chip.hidden = true;
+    chip.addEventListener("click", (e) => {
+      e.stopPropagation();
+      api.toggleStats(userId, chip);
+    });
+    return chip;
+  }
 
-    const label = createElement("div", { class: "video-label" });
-    label.appendChild(createElement("div", { class: "video-username" }));
-    if (config?.isScreenshare === true) {
-      label.appendChild(createElement("span", { class: "video-live" }, voiceText("tile.live")));
-    }
-    // Who is watching this screen share: an eye and the count, top-right,
-    // hidden at zero (applyStreamViewers draws it).
-    const viewers =
-      config?.isScreenshare === true
-        ? createElement("span", {
-            class: "video-viewers",
-            role: "img",
-            "data-testid": "tile-viewers",
-          })
-        : null;
-    if (viewers !== null) {
-      viewers.hidden = true;
-      viewers.appendChild(createIcon("eye", 14));
-      viewers.appendChild(createElement("span", { class: "video-viewers__count" }));
-    }
-    if (config !== undefined && !config.isSelf && config.isScreenshare) {
-      // Filled by the stats poll while you watch this screen share.
-      const chip = createElement("button", {
-        type: "button",
-        class: "video-quality",
-        "aria-expanded": "false",
-        "data-tile-control": "stats",
-      });
-      chip.hidden = true;
-      chip.addEventListener("click", (e) => {
-        e.stopPropagation();
-        api.toggleStats(userId, chip);
-      });
-      label.appendChild(chip);
-    }
-
+  function buildTileNav(userId: number): { nav: HTMLElement; back: HTMLElement } {
     const nav = createElement("div", { class: "video-tile-nav" });
     const back = tileButton(voiceText("tile.backToGrid"), "layout-grid", "grid", () =>
       api.setFocusedTile(null),
@@ -346,35 +337,30 @@ export function createGridStreams(st: GridState, api: GridApi) {
       api.toggleFullscreen(userId),
     );
     appendChildren(nav, back, pip, fullscreen);
+    return { nav, back };
+  }
 
-    appendChildren(cell, video, select, label, nav);
-    syncVideoSurface(video);
-    if (viewers !== null) cell.appendChild(viewers);
-    // A click anywhere on a filmstrip thumb (not on one of its controls)
-    // swaps it into focus, as the tile button does. On a phone a tap on the
-    // focused tile itself gives the focus back (a tile is focused by a tap on
-    // it, so it is unfocused the same way); an open tile menu or a pinch-zoomed
-    // picture takes the tap for itself.
-    cell.addEventListener("click", (e) => {
-      if ((e.target as Element).closest("button, input, .context-menu") !== null) return;
-      if (st.focusedTileId !== null && st.focusedTileId !== userId) {
-        api.setFocusedTile(userId);
-        return;
-      }
-      if (st.focusedTileId !== userId || !isPhoneLayout()) return;
-      if (api.isFullscreen(userId) || cell.classList.contains("video-zoomed")) return;
-      if (api.doc().querySelector(".video-tile-menu") !== null) return;
-      api.setFocusedTile(null);
-    });
-
-    const entry: CellEntry = { el: cell, video, config, listeners: new Disposable(), name: "" };
-    // Your own screen share shows its cover, not the picture: nothing to zoom.
-    if (config?.isSelf !== true || !config.isScreenshare) {
-      entry.zoom = bindVideoZoom(cell, entry.listeners.signal);
+  /** A click anywhere on a filmstrip thumb (not on one of its controls)
+   *  swaps it into focus, as the tile button does. On a phone a tap on the
+   *  focused tile itself gives the focus back (a tile is focused by a tap on
+   *  it, so it is unfocused the same way); an open tile menu or a pinch-zoomed
+   *  picture takes the tap for itself. */
+  function onTileClick(e: MouseEvent, userId: number, cell: HTMLElement): void {
+    if ((e.target as Element).closest("button, input, .context-menu") !== null) return;
+    if (st.focusedTileId !== null && st.focusedTileId !== userId) {
+      api.setFocusedTile(userId);
+      return;
     }
-    // F toggles full screen from anywhere in the tile (not while typing), a
-    // double-click too. The theatre fallback's own keys are on the document
-    // (onTheatreKey).
+    if (st.focusedTileId !== userId || !isPhoneLayout()) return;
+    if (api.isFullscreen(userId) || cell.classList.contains("video-zoomed")) return;
+    if (api.doc().querySelector(".video-tile-menu") !== null) return;
+    api.setFocusedTile(null);
+  }
+
+  /** F toggles full screen from anywhere in the tile (not while typing), a
+   *  double-click too. The theatre fallback's own keys are on the document
+   *  (onTheatreKey). */
+  function bindFullscreenKeys(cell: HTMLElement, userId: number, signal: AbortSignal): void {
     cell.addEventListener(
       "keydown",
       (e) => {
@@ -383,7 +369,7 @@ export function createGridStreams(st: GridState, api: GridApi) {
           api.toggleFullscreen(userId);
         }
       },
-      { signal: entry.listeners.signal },
+      { signal },
     );
     cell.addEventListener(
       "dblclick",
@@ -392,40 +378,108 @@ export function createGridStreams(st: GridState, api: GridApi) {
         if ((e.target as Element).closest(skip) !== null) return;
         api.toggleFullscreen(userId);
       },
+      { signal },
+    );
+  }
+
+  /** Remote tiles: volume, Stop watching and the tile menu. */
+  function addRemoteControls(
+    userId: number,
+    entry: CellEntry,
+    config: TileConfig,
+    nav: HTMLElement,
+    back: HTMLElement,
+  ): void {
+    const volume = buildVolumeControls(config);
+    entry.applyVolume = volume.apply;
+    entry.volumeOverlay = volume.overlay;
+    entry.el.appendChild(volume.overlay);
+    nav.insertBefore(
+      tileButton(voiceText("tile.stopWatching"), "eye-off", "stop", () =>
+        api.setWatching(userId, false),
+      ),
+      back,
+    );
+    st.resizeObserver?.observe(entry.el);
+  }
+
+  /** Loaded on first use: the menu opens only on a right-click or Shift+F10,
+   *  so it stays out of the eager bundle. */
+  function bindTileMenu(userId: number, entry: CellEntry, config: TileConfig): void {
+    const cell = entry.el;
+    const openMenu = (x: number, y: number): void =>
+      void import("./tileMenu").then((menus) => {
+        if (entry.listeners.signal.aborted || st.root?.contains(cell) !== true) return;
+        if (config.isSelf) menus.showSelfTileMenu(selfMenuOptions(x, y, userId, entry));
+        else menus.showTileMenu(tileMenuOptions(x, y, userId, entry, config));
+      });
+    cell.addEventListener(
+      "contextmenu",
+      (e) => {
+        e.preventDefault();
+        openMenu(e.clientX, e.clientY);
+      },
       { signal: entry.listeners.signal },
     );
-    // Remote tiles: volume, Stop watching and the tile menu.
-    if (config !== undefined && !config.isSelf) {
-      const volume = buildVolumeControls(config);
-      entry.applyVolume = volume.apply;
-      entry.volumeOverlay = volume.overlay;
-      cell.appendChild(volume.overlay);
-      nav.insertBefore(
-        tileButton(voiceText("tile.stopWatching"), "eye-off", "stop", () =>
-          api.setWatching(userId, false),
-        ),
-        back,
-      );
-      st.resizeObserver?.observe(cell);
+    openMenuOnKeyboard(cell, openMenu, entry.listeners.signal);
+  }
+
+  function buildTile(
+    userId: number,
+    stream: MediaStream | null,
+    config: TileConfig | undefined,
+  ): CellEntry {
+    const video = buildTileVideo(userId, stream);
+    const cell = createElement("div", {
+      class: isSelfCamera(config) ? "video-cell video-cell--self" : "video-cell",
+      "data-user-id": String(userId),
+      "data-stream-type": config?.isScreenshare ? "screenshare" : "camera",
+    });
+
+    // The whole tile is one real button (click, Enter, Space) that opens it
+    // in focus view; the tile's own controls sit above it, never inside it.
+    const select = createElement("button", {
+      type: "button",
+      class: "video-cell-select",
+      "data-tile-control": "select",
+    });
+    select.addEventListener("click", () => api.setFocusedTile(userId));
+
+    const label = buildTileLabel(config);
+    const viewers = config?.isScreenshare === true ? buildViewersBadge() : null;
+    if (config !== undefined && !config.isSelf && config.isScreenshare) {
+      label.appendChild(buildStatsChip(userId));
     }
-    // Loaded on first use: the menu opens only on a right-click or Shift+F10,
-    // so it stays out of the eager bundle. Your own screen share has none.
+    const { nav, back } = buildTileNav(userId);
+
+    appendChildren(cell, video, select, label, nav);
+    syncVideoSurface(video);
+    if (viewers !== null) cell.appendChild(viewers);
+    cell.addEventListener("click", (e) => onTileClick(e, userId, cell));
+
+    const entry: CellEntry = { el: cell, video, config, listeners: new Disposable(), name: "" };
+    equipTile(userId, entry, stream, nav, back);
+    return entry;
+  }
+
+  /** The tile's zoom, keys, remote controls, menu and self-share cover. */
+  function equipTile(
+    userId: number,
+    entry: CellEntry,
+    stream: MediaStream | null,
+    nav: HTMLElement,
+    back: HTMLElement,
+  ): void {
+    const { el: cell, config } = entry;
+    // Your own screen share shows its cover, not the picture: nothing to zoom.
+    if (config?.isSelf !== true || !config.isScreenshare) {
+      entry.zoom = bindVideoZoom(cell, entry.listeners.signal);
+    }
+    bindFullscreenKeys(cell, userId, entry.listeners.signal);
+    if (config !== undefined && !config.isSelf) addRemoteControls(userId, entry, config, nav, back);
+    // Your own screen share has no menu.
     if (config !== undefined && (!config.isSelf || !config.isScreenshare)) {
-      const openMenu = (x: number, y: number): void =>
-        void import("./tileMenu").then((menus) => {
-          if (entry.listeners.signal.aborted || st.root?.contains(cell) !== true) return;
-          if (config.isSelf) menus.showSelfTileMenu(selfMenuOptions(x, y, userId, entry));
-          else menus.showTileMenu(tileMenuOptions(x, y, userId, entry, config));
-        });
-      cell.addEventListener(
-        "contextmenu",
-        (e) => {
-          e.preventDefault();
-          openMenu(e.clientX, e.clientY);
-        },
-        { signal: entry.listeners.signal },
-      );
-      openMenuOnKeyboard(cell, openMenu, entry.listeners.signal);
+      bindTileMenu(userId, entry, config);
     }
 
     // Your own screen share: say what is going out instead of showing a
@@ -435,12 +489,37 @@ export function createGridStreams(st: GridState, api: GridApi) {
         buildSelfCover(userId, stream, config.hasAudio === true, entry.listeners.signal),
       );
     }
+  }
+
+  function addStream(
+    userId: number,
+    username: string,
+    stream: MediaStream | null,
+    config?: TileConfig,
+  ): void {
+    if (st.root === null) return;
+
+    // The same person shared again while their tile said it ended (a new
+    // source, a quick re-share): a new tile, still watched and in focus.
+    endHold(userId, stream);
+    const reshared = st.cells.get(userId)?.ending !== undefined;
+    const refocus = reshared && st.focusedTileId === userId;
+    if (reshared) dropTile(userId, true);
+    // If a cell already exists for this user, update it in place
+    const existing = st.cells.get(userId);
+    if (existing !== undefined) {
+      if (stream === null) showUnreceived(userId, existing, username, config);
+      else showReceived(userId, existing, stream, username, config);
+      return;
+    }
+
+    const entry = buildTile(userId, stream, config);
     applyNames(entry, username, config?.name ?? username);
     st.cells.set(userId, entry);
     st.pendingWatch.delete(userId);
     if (stream !== null) attachTrackLifecycle(userId, stream);
     else api.setStopped(userId, true, false);
-    st.root.appendChild(cell);
+    st.root.appendChild(entry.el);
     applySpeaking();
     applyUserAudioState();
     applyStreamViewers();
@@ -631,17 +710,8 @@ export function createGridStreams(st: GridState, api: GridApi) {
     api.syncStatsPolling();
   }
 
-  /** `keepWatch`: the same stream is coming back on a new tile. */
-  function dropTile(userId: number, keepWatch = false): void {
-    const entry = st.cells.get(userId);
-    if (entry === undefined) return;
-    clearTimeout(entry.ending);
-    clearTimeout(entry.holding);
-
-    // Capture the focused tile control before detaching, so a user tabbing
-    // through the overlay keeps a focus target when this tile leaves (Q1).
-    const savedFocus = api.captureFocusedControl();
-
+  /** Close the tile's windows, listeners and picture before it leaves. */
+  function releaseEntry(userId: number, entry: CellEntry, keepWatch: boolean): void {
     entry.popout?.close();
     entry.mini?.close();
     // The stream is gone: so is the watch (a new one starts from the default).
@@ -659,6 +729,20 @@ export function createGridStreams(st: GridState, api: GridApi) {
 
     entry.video.srcObject = null;
     syncVideoSurface(entry.video);
+  }
+
+  /** `keepWatch`: the same stream is coming back on a new tile. */
+  function dropTile(userId: number, keepWatch = false): void {
+    const entry = st.cells.get(userId);
+    if (entry === undefined) return;
+    clearTimeout(entry.ending);
+    clearTimeout(entry.holding);
+
+    // Capture the focused tile control before detaching, so a user tabbing
+    // through the overlay keeps a focus target when this tile leaves (Q1).
+    const savedFocus = api.captureFocusedControl();
+
+    releaseEntry(userId, entry, keepWatch);
 
     entry.el.remove();
     st.cells.delete(userId);
