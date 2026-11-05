@@ -67,13 +67,30 @@ function configCopyHTML(row,status){
   return h;
 }
 
-function configRow(row){
-  if(row.type==='secret')return configSecretRow(row);
+/* What the filter box matches a row against: its key, label and description,
+   with dots, underscores and other punctuation read as spaces so "max size" finds
+   upload.max_size_mb. Each typed word must start a word there, so "port"
+   finds server.port and not report_retention_days. */
+function configFilterText(...parts){
+  return parts.filter(Boolean).join(' ').toLowerCase().replace(/[^\p{L}\p{N}]+/gu,' ');
+}
+function configMatches(text,query){
+  const q=configFilterText(query).trim();
+  const words=' '+text;
+  return !q||q.split(/\s+/).every(w=>words.includes(' '+w));
+}
+function configRowOpen(text,shown){
+  return'<div class="setting-row" data-config-text="'+esc(text)+'"'+(shown?'':' hidden')+'>';
+}
+function configRowText(row){return configFilterText(row.key,row.label,row.description)}
+
+function configRow(row,shown){
+  if(row.type==='secret')return configSecretRow(row,shown);
   const overridden=row.override!=null;
   const desc=row.env_locked?'Set by the environment':(overridden?'Overridden from the panel':'');
   const reset=overridden&&!row.env_locked
     ? '<button class="btn btn-ghost" data-action="resetConfigKey" data-args="'+actArgs(row.key)+'">Reset</button>':'';
-  return'<div class="setting-row"><div class="setting-info"><div class="setting-name">'+configName(row)+'</div>'
+  return configRowOpen(configRowText(row),shown)+'<div class="setting-info"><div class="setting-name">'+configName(row)+'</div>'
     +configCopyHTML(row,desc)+'</div>'
     +'<div class="setting-ctrl">'+configControl(row)+reset+'</div></div>';
 }
@@ -84,7 +101,7 @@ function configRow(row){
    Remove override sends null, so the value falls back to config.yaml (an empty
    string is refused for a key whose rule requires a value, like the LiveKit
    credentials, and no Clear value is offered there). */
-function configSecretRow(row){
+function configSecretRow(row,shown){
   const set=!!(row.configured||row.override_set);
   const badge=set?'<span class="badge badge-success">Configured</span>':'<span class="badge">Not set</span>';
   const desc=row.env_locked?'Set by the environment':(row.override_set?'Overridden from the panel':'');
@@ -92,7 +109,7 @@ function configSecretRow(row){
     ? '<button class="btn btn-ghost" data-action="clearConfigSecretValue" data-args="'+actArgs(row.key)+'" title="Sets the value to empty">Clear value</button>':'';
   const clear=row.override_set&&!row.env_locked
     ? '<button class="btn btn-ghost" data-action="clearConfigSecret" data-args="'+actArgs(row.key)+'" title="Removes the panel override; the value reverts to the value in config.yaml">Remove override</button>':'';
-  return'<div class="setting-row"><div class="setting-info"><div class="setting-name">'+configName(row)+' '+badge+'</div>'
+  return configRowOpen(configRowText(row),shown)+'<div class="setting-info"><div class="setting-name">'+configName(row)+' '+badge+'</div>'
     +configCopyHTML(row,desc)+'</div>'
     +'<div class="setting-ctrl">'+configControl(row)+blank+clear+'</div></div>';
 }
@@ -100,28 +117,150 @@ function configSecretRow(row){
 /* server.data_dir stays read-only: the overrides file, TOTP, erasure and VAPID
    keys all live inside it, so a move needs a shell copy anyway. It carries no
    data-config-key, so it is never part of the diff. */
-function configReadonlyDataDir(){
-  return'<div class="setting-row"><div class="setting-info"><div class="setting-name">server.data_dir <span class="badge">Read-only</span></div>'
+const CONFIG_DATA_DIR_TEXT=configFilterText('server.data_dir data directory');
+function configReadonlyDataDir(shown){
+  return configRowOpen(CONFIG_DATA_DIR_TEXT,shown)+'<div class="setting-info"><div class="setting-name">server.data_dir <span class="badge">Read-only</span></div>'
     +'<div class="setting-desc">The overrides file and the TOTP, erasure and VAPID keys live here. Change it in config.yaml or OWNCORD_SERVER_DATA_DIR and restart; see the server configuration docs.</div></div>'
     +'<div class="setting-ctrl"></div></div>';
 }
 
 /* The upload-type lists already have live rows on the Settings page; a second
    panel value would be a third source, so link there instead. */
-function configUploadsLink(){
-  return'<div class="setting-row"><div class="setting-info"><div class="setting-name">Allowed / blocked file types</div>'
+const CONFIG_UPLOAD_TYPES_TEXT=configFilterText('upload allowed blocked file types extensions');
+function configUploadsLink(shown){
+  return configRowOpen(CONFIG_UPLOAD_TYPES_TEXT,shown)+'<div class="setting-info"><div class="setting-name">Allowed / blocked file types</div>'
     +'<div class="setting-desc">These are edited live on the Settings page.</div></div>'
     +'<div class="setting-ctrl"><button class="btn btn-ghost" data-action="navigateTo" data-args="'+actArgs('settings')+'">Open Settings</button></div></div>';
 }
 
-function configSectionCard(name,rows){
-  let body=rows.map(configRow).join('');
-  if(name==='server')body+=configReadonlyDataDir();
-  if(name==='upload')body+=configUploadsLink();
-  return settingsCard(name.charAt(0).toUpperCase()+name.slice(1),body);
+/* The page in the order an operator looks for things. Each group is one jump
+   target and holds the cards for its key prefixes, each with a plain title.
+   Every prefix in config.EditableKeys has an entry (admin/config_page_test.go
+   pins that); one that does not still renders, under Advanced, titled from
+   its prefix. */
+const CONFIG_GROUPS=[
+  {id:'server',title:'Server',sections:[['server','Server'],['security','Sign-in security'],['moderation','Moderation history']]},
+  {id:'tls',title:'TLS',sections:[['tls','TLS']]},
+  {id:'uploads',title:'Uploads',sections:[['upload','Uploads']]},
+  {id:'voice',title:'Voice',sections:[['voice','Voice']]},
+  {id:'backup',title:'Backup',sections:[['backup','Backup']]},
+  {id:'logging',title:'Logging',sections:[['logging','Logging'],['telemetry','Telemetry']]},
+  {id:'integrations',title:'Integrations',sections:[['gif','GIF search'],['github','GitHub updates'],['push','Push notifications'],['plugins','Plugins']]},
+  {id:'advanced',title:'Advanced',sections:[['database','Database'],['event_persistence','Event persistence'],['attention','Attention thresholds']]}
+];
+
+function configPrefixTitle(prefix){
+  const s=String(prefix).replace(/_/g,' ');
+  return s.charAt(0).toUpperCase()+s.slice(1);
 }
 
-/* One card per key prefix, in the order the keys arrive (EditableKeys order). */
+/* The groups with their cards, in page order; prefixes the map does not know
+   join Advanced in the order their keys arrive. */
+function configLayout(settings){
+  const byPrefix={};
+  const order=[];
+  settings.forEach(s=>{
+    const prefix=String(s.key).split('.')[0];
+    if(!(prefix in byPrefix)){byPrefix[prefix]=[];order.push(prefix)}
+    byPrefix[prefix].push(s);
+  });
+  const known=new Set();
+  const groups=CONFIG_GROUPS.map(g=>({id:g.id,title:g.title,cards:g.sections.filter(([p])=>{known.add(p);return p in byPrefix}).map(([p,t])=>({prefix:p,title:t,rows:byPrefix[p]}))}));
+  const extra=order.filter(p=>!known.has(p)).map(p=>({prefix:p,title:configPrefixTitle(p),rows:byPrefix[p]}));
+  groups[groups.length-1].cards.push(...extra);
+  return groups.filter(g=>g.cards.length);
+}
+
+/* A card shows every row when the filter matches its title, else only the
+   rows that match; a card or group with nothing to show is hidden. The same
+   rule runs live in applyConfigFilter, over the data-config-* attributes. */
+function configCardTitleHit(card,q){
+  return !!String(q||'').trim()&&configMatches(configFilterText(card.title,card.prefix),q);
+}
+function configCardItems(card){
+  const items=card.rows.map(r=>({text:configRowText(r),render:shown=>configRow(r,shown)}));
+  if(card.prefix==='server')items.push({text:CONFIG_DATA_DIR_TEXT,render:configReadonlyDataDir});
+  if(card.prefix==='upload')items.push({text:CONFIG_UPLOAD_TYPES_TEXT,render:configUploadsLink});
+  return items;
+}
+function configCardShown(card,q){
+  return configCardTitleHit(card,q)||configCardItems(card).some(it=>configMatches(it.text,q));
+}
+
+function configSectionCard(card){
+  const q=state.configFilter||'';
+  const titleHit=configCardTitleHit(card,q);
+  const body=configCardItems(card).map(it=>it.render(titleHit||configMatches(it.text,q))).join('');
+  return'<div class="config-section" data-config-section="'+esc(configFilterText(card.title,card.prefix))+'"'+(configCardShown(card,q)?'':' hidden')+'>'+settingsCard(card.title,body)+'</div>';
+}
+
+function configGroupShown(group,q){return group.cards.some(c=>configCardShown(c,q))}
+
+function configGroupHTML(group){
+  const shown=configGroupShown(group,state.configFilter||'');
+  return'<div class="config-group" id="cfgGroup-'+esc(group.id)+'" data-config-group="'+esc(group.id)+'" tabindex="-1" aria-label="'+esc(group.title)+'"'+(shown?'':' hidden')+'>'
+    +group.cards.map(configSectionCard).join('')+'</div>';
+}
+
+/* Sticky above the cards: the filter box (the page's "/" search target) and
+   one jump button per group. */
+function configToolbarHTML(groups){
+  const q=state.configFilter||'';
+  return'<div class="config-toolbar">'
+    +'<input class="filter-search" id="configFilter" type="search" maxlength="64" autocomplete="off" spellcheck="false" aria-label="Filter settings" placeholder="Filter settings by name or key" value="'+esc(q)+'" data-input-action="filterConfig">'
+    +'<nav class="config-jump" aria-label="Jump to a group">'
+    +groups.map(g=>'<button class="btn btn-ghost btn-sm" data-config-jump="'+esc(g.id)+'" data-action="jumpToConfigGroup" data-args="'+actArgs(g.id)+'"'+(configGroupShown(g,q)?'':' hidden')+'>'+esc(g.title)+'</button>').join('')
+    +'</nav></div>'
+    +'<p class="setting-desc config-no-match" id="configNoMatch" role="status"'+(groups.some(g=>configGroupShown(g,q))?' hidden':'')+'>No settings match this filter.</p>';
+}
+
+/* Live filtering only toggles hidden, so typed but unsaved values stay in
+   their controls (configDiff reads them from the DOM). */
+function applyConfigFilter(){
+  const q=state.configFilter||'';
+  let any=false;
+  document.querySelectorAll('[data-config-group]').forEach(g=>{
+    if(!(g instanceof HTMLElement))return;
+    let groupShown=false;
+    g.querySelectorAll('[data-config-section]').forEach(sec=>{
+      if(!(sec instanceof HTMLElement))return;
+      const titleHit=!!q.trim()&&configMatches(sec.getAttribute('data-config-section')||'',q);
+      let cardShown=titleHit;
+      sec.querySelectorAll('[data-config-text]').forEach(row=>{
+        if(!(row instanceof HTMLElement))return;
+        const hit=titleHit||configMatches(row.getAttribute('data-config-text')||'',q);
+        row.hidden=!hit;
+        if(hit)cardShown=true;
+      });
+      sec.hidden=!cardShown;
+      if(cardShown)groupShown=true;
+    });
+    g.hidden=!groupShown;
+    if(groupShown)any=true;
+    const jump=document.querySelector('[data-config-jump="'+g.getAttribute('data-config-group')+'"]');
+    if(jump instanceof HTMLElement)jump.hidden=!groupShown;
+  });
+  const none=document.getElementById('configNoMatch');
+  if(none)none.hidden=any;
+}
+
+function filterConfig(){state.configFilter=this.value;applyConfigFilter()}
+
+function jumpToConfigGroup(id){
+  const g=document.getElementById('cfgGroup-'+id);
+  if(!g)return;
+  if(typeof g.scrollIntoView==='function')g.scrollIntoView({block:'start'});
+  g.focus({preventScroll:true});
+}
+
+/* The link other pages use to send an operator here; a viewer who cannot
+   open the page is told who can. */
+function configPageLink(){
+  return ownerOrHolds(PERM.MANAGE_CONFIG)
+    ?'<button class="link-btn" data-action="navigateTo" data-args="'+actArgs('config')+'">Server configuration</button> page'
+    :'Server configuration page (the server owner can open it)';
+}
+
 function configPageHTML(data){
   const settings=(data&&data.settings)||[];
   let html='<div class="page-title">Server configuration</div>'
@@ -132,14 +271,9 @@ function configPageHTML(data){
   }
   html+=settingsCard('Restart','<p class="setting-desc">Restart the server process, for example after editing config.yaml on the host. Everyone connected is disconnected for a moment.</p>'
     +'<button class="btn btn-ghost" style="margin-top:8px" data-action="openRestartDialog">Restart server…</button>');
-  const names=[];
-  const byName={};
-  settings.forEach(s=>{
-    const name=String(s.key).split('.')[0];
-    if(!(name in byName)){byName[name]=[];names.push(name)}
-    byName[name].push(s);
-  });
-  names.forEach(name=>{html+=configSectionCard(name,byName[name])});
+  const groups=configLayout(settings);
+  html+=configToolbarHTML(groups);
+  html+=groups.map(configGroupHTML).join('');
   html+='<div class="save-bar" id="configSaveBar" role="region" aria-label="Save configuration">'
     +'<span class="save-bar-status" id="configSaveState" role="status">All changes saved</span>'
     +'<button class="btn btn-ghost" id="discardConfigBtn" data-action="discardConfig" disabled>Discard</button>'
@@ -371,5 +505,5 @@ async function confirmRestart(){
 
 Object.assign(ACTIONS,{
   markConfigChanged,saveServerConfig,resetConfigKey,openRestartDialog,confirmRestart,discardConfig,
-  confirmServerConfig,clearConfigSecret,clearConfigSecretValue,
+  confirmServerConfig,clearConfigSecret,clearConfigSecretValue,filterConfig,jumpToConfigGroup,
   toggleConfigKey(){toggleSwitch(this);markConfigChanged()}});

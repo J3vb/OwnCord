@@ -106,7 +106,7 @@ async function renderSettings(){
     ['Report retention',facts.moderation_report_retention_days?facts.moderation_report_retention_days+' days':'Never','moderation.report_retention_days'],
     ['Action retention',facts.moderation_action_retention_days?facts.moderation_action_retention_days+' days':'Never','moderation.action_retention_days'],
   ].filter(([,val])=>val!==undefined).map(([n,val,key])=>'<div class="fact-row"><dt>'+n+'</dt><dd><span class="fact-value">'+esc(val===''?'Not set':String(val))+'</span><code class="fact-key">'+key+'</code></dd></div>').join('');
-  html+=settingsCard('Running configuration','<p class="setting-desc">The values this server started with. Change config.yaml and restart the server to change them; use the Logs page to raise the log level for a while.</p>'
+  html+=settingsCard('Running configuration','<p class="setting-desc">The values this server started with. Change them on the '+configPageLink()+'; they apply after a restart. Only a value set by an <code>OWNCORD_</code> environment variable has to be changed on the host. Use the Logs page to raise the log level for a while.</p>'
     +(facts?'<dl class="fact-list">'+factRows+'</dl>':'<p class="setting-desc" style="margin-top:8px">The running configuration could not be read.</p>'));
   html+='<div class="save-bar" id="settingsSaveBar" role="region" aria-label="Save settings"><span class="save-bar-status" id="settingsSaveState" role="status">All changes saved</span>'
     +'<button class="btn btn-ghost" id="discardSettingsBtn" data-action="discardSettings" disabled>Discard</button>'

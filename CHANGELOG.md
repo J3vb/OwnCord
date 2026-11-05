@@ -61,6 +61,8 @@ and only when it changes something a contributor or fork holder must do
 - Desktop: the app's own daily log file stops at about 20 MB, and the support bundle keeps the newest 4 MB of each log file.
 - In Open and Approval registration, a refused attempt (username taken, server busy, queue full) no longer uses up one of the address's 5 registrations per day.
 - A voice-channel password attempt refused because the whole server is at its limit no longer counts against the member's own attempts.
+- The admin Server configuration page was one long alphabetical list with titles like "Tls" and "Gif". It now has plain titles, a fixed order (Server, TLS, Uploads, Voice, Backup, Logging, Integrations, Advanced), a jump bar and a filter box that stay at the top.
+- The admin Settings and Dashboard no longer tell you to edit config.yaml for settings you can change on the Server configuration page; they link there instead.
 
 ### Added
 
