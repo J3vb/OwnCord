@@ -66,7 +66,7 @@ func MountAuthRoutes(r chi.Router, svc AuthService, requireAuth func(http.Handle
 
 		r.With(requireAuth, requireLoginSession,
 			RateLimitMiddleware(limiter, "del_account:", scaledAuthLimit(sensitiveEndpointRateLimitPerMinute), time.Minute, trustedProxies)).
-			Delete("/account", handleDeleteAccount(svc))
+			Delete("/account", handleDeleteAccount(svc, trustedProxies))
 	})
 
 	r.With(requireAuth, requireLoginSession,
@@ -269,8 +269,10 @@ type deleteAccountRequest struct {
 
 // handleDeleteAccount processes DELETE /api/v1/auth/account. The caller must
 // supply their current password for confirmation; the lockout, the compare
-// and the member_ban broadcast are the service's.
-func handleDeleteAccount(svc AuthService) http.HandlerFunc {
+// and the member_ban broadcast are the service's. The logged IP is resolved
+// through trusted_proxies like every other auth route's.
+func handleDeleteAccount(svc AuthService, trustedProxies []string) http.HandlerFunc {
+	proxyNets := parseCIDRList(trustedProxies)
 	return func(w http.ResponseWriter, r *http.Request) {
 		p, ok := principal(r)
 		if !ok {
@@ -283,7 +285,7 @@ func handleDeleteAccount(svc AuthService) http.HandlerFunc {
 			return
 		}
 
-		if err := svc.DeleteAccount(r.Context(), p, req.Password, clientIP(r)); err != nil {
+		if err := svc.DeleteAccount(r.Context(), p, req.Password, clientip.Resolve(r, proxyNets)); err != nil {
 			writeAuthError(r.Context(), w, err)
 			return
 		}

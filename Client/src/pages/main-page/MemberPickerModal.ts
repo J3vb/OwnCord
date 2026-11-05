@@ -138,8 +138,8 @@ export function createMemberPickerModal(opts: MemberPickerOptions): MountableCom
     const confirmBtn = createElement(
       "button",
       {
-        class: "btn btn-primary",
-        style: "margin-top:10px;width:100%;",
+        class: "btn-modal-save",
+        type: "button",
         "data-testid": "dm-picker-create",
       },
       adding ? requestsText("picker.add") : requestsText("picker.create"),
@@ -397,13 +397,12 @@ export function createMemberPickerModal(opts: MemberPickerOptions): MountableCom
 
     const cancelBtn = createElement(
       "button",
-      {
-        class: "btn btn-secondary",
-        style: "margin-top:8px;width:100%;",
-      },
+      { class: "btn-modal-cancel", type: "button" },
       requestsText("picker.cancel"),
     );
     cancelBtn.addEventListener("click", () => close());
+    const actions = createElement("div", { class: "dm-member-picker-actions" });
+    appendChildren(actions, cancelBtn, confirmBtn);
 
     appendChildren(
       content,
@@ -415,8 +414,7 @@ export function createMemberPickerModal(opts: MemberPickerOptions): MountableCom
       emptyNotice,
       ...(adding ? [] : [nameInput, nameHint.el]),
       errorEl,
-      confirmBtn,
-      cancelBtn,
+      actions,
     );
 
     modalInstance = createModal(

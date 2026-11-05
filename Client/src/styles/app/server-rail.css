@@ -359,11 +359,9 @@
 }
 .server-rail-join-actions {
   display: flex;
+  justify-content: flex-end;
   gap: 8px;
   margin-top: 16px;
-}
-.server-rail-join-actions .btn {
-  flex: 1;
 }
 
 /* Switch question */

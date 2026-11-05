@@ -81,7 +81,8 @@ stateDiagram-v2
 > **✓ Implemented (2026-07).** The VoiceWidget header now renders the E2EE phase
 > from `voiceStatus`: a "Securing…" label (amber) while the key exchange runs and
 > a persistent "Secured" chip (shield icon) once the room key is ready and the room is
-> connected — replacing the log-line-only feedback. `joining` shows "Connecting…"
+> connected — replacing the log-line-only feedback. The DM call panel's header
+> shows the same chip (`features/voice/securedBadge.ts`). `joining` shows "Connecting…"
 > and `reconnecting` shows "Reconnecting voice…", neither showing the secured
 > badge. An E2EE-timeout still shows the "couldn't secure the voice call" message and auto-leaves
 > (`features/voice/joinOrchestration.ts` `connectAndSetup`). **Code vs. diagram note:** the client
@@ -147,6 +148,10 @@ saved preference (`callShowNonVideo`, `callShowSelfCamera`, `callShowStrip`)
 and none applies while the DM call panel hosts the grid. A control bar at the
 bottom of the call view, in grid and focus view, has mute, deafen, camera,
 share and disconnect; camera and share are inert until the join has connected.
+The header toggles sit beside the bar, or stack above it with room kept below
+the tiles when the call view is narrower than 680 px. On a phone the toggles
+are not square buttons: one round **View options** control in the bar opens
+them as a menu, so the call screen has a single row of round controls.
 On a phone with a front and a back camera, **Flip camera** sits beside Camera
 while the camera is on and moves it to the camera facing the other way; a tap
 while a flip is still switching does nothing. Share is left out where the

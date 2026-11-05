@@ -16,9 +16,7 @@ export const voiceText = defineCatalog("voice", {
   "status.reconnectingShort": "Reconnecting…",
   "status.notConnected": "Not connected",
 
-  "encryption.unsecured": "⚠️ Unsecured",
   "encryption.unsecuredLabel": "End-to-end encryption failed — this call may not be protected",
-  "encryption.secured": "🔒 Secured",
   "encryption.securedLabel": "End-to-end encrypted",
   "identity.keyChanged":
     "{name} is using a key you haven't seen before. The call continues. If you didn't expect this, compare safety numbers with them.",

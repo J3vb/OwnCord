@@ -379,3 +379,62 @@ func TestWAFMiddleware_AllowsLargeDiscordImportUploadBody(t *testing.T) {
 		t.Fatalf("called = %v, status = %d, body = %s", called, rr.Code, rr.Body.String())
 	}
 }
+
+// The WebSocket upgrade is served at /api/v1/ws with no body and no query
+// arguments; it must pass the WAF untouched without an exclusion rule.
+func TestWAFMiddleware_AllowsWebSocketUpgrade(t *testing.T) {
+	called := false
+	handler := NewWAFMiddlewareCRS(2, CRSModeBlock)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusSwitchingProtocols)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/ws", nil)
+	req.Header.Set("Connection", "Upgrade")
+	req.Header.Set("Upgrade", "websocket")
+	req.Header.Set("Sec-WebSocket-Version", "13")
+	req.Header.Set("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
+	req.Header.Set("User-Agent", "Mozilla/5.0")
+	req.Header.Set("Accept", "*/*")
+	req.RemoteAddr = "127.0.0.1:9999"
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if !called {
+		t.Fatalf("upgrade request blocked: status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+}
+
+// The inline engine buffers up to the global body cap: a JSON body under the
+// cap reaches the handler, one past it is refused, so the WAF never buffers
+// more than the transport admits.
+func TestWAFMiddleware_InspectBufferMatchesGlobalBodyCap(t *testing.T) {
+	handler := NewWAFMiddlewareCRS(2, CRSModeOff)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	body := func(size int) string {
+		const head, tail = `{"pad":"`, `"}`
+		return head + strings.Repeat("a", size-len(head)-len(tail)) + tail
+	}
+
+	for _, tc := range []struct {
+		size int
+		want int
+	}{
+		{wafRequestBodyLimit - 1, http.StatusNoContent},
+		{wafRequestBodyLimit + 1, http.StatusRequestEntityTooLarge},
+	} {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(body(tc.size)))
+		req.Header.Set("Content-Type", "application/json")
+		req.RemoteAddr = "127.0.0.1:9999"
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+		if rr.Code != tc.want {
+			t.Errorf("body of %d bytes: status = %d, want %d", tc.size, rr.Code, tc.want)
+		}
+	}
+	if wafRequestBodyLimit != defaultMaxBodySize {
+		t.Fatalf("wafRequestBodyLimit = %d, want the global body cap %d", wafRequestBodyLimit, defaultMaxBodySize)
+	}
+}

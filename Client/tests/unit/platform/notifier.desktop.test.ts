@@ -2,7 +2,7 @@
 // ran the same suite file against the in-place seam in `lib/notifications.ts`
 // first (proving it could fail and pinning today's behaviour), then re-bound
 // it here. The legacy binding is deleted with this commit: its export is gone.
-import { vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { tauriEventMock } from "../../helpers/tauriEventMock";
 import type { Notifier, NotificationTarget } from "../../../src/platform/contracts/notifications";
 import { describeNotifierSuite } from "./notifier.suite";
@@ -91,4 +91,40 @@ describeNotifierSuite(async () => {
           .map((call) => (call[1] as { channelId: number }).channelId),
     },
   };
+});
+
+describe("desktop unread badge ordering", () => {
+  it("sends one count at a time and ends on the newest", async () => {
+    const pending: Array<() => void> = [];
+    invoke.mockReset().mockImplementation(
+      (command: string) =>
+        new Promise<void>((resolve) => {
+          if (command === "set_unread_badge") pending.push(resolve);
+          else resolve();
+        }),
+    );
+    const { notifier } = await import("../../../src/platform/desktop/notifications");
+    const sent = (): number[] =>
+      invoke.mock.calls
+        .filter((call) => call[0] === "set_unread_badge")
+        .map((call) => (call[1] as { count: number }).count);
+
+    const first = notifier.setUnreadBadge(3);
+    void notifier.setUnreadBadge(5);
+    const last = notifier.setUnreadBadge(0);
+    await Promise.resolve();
+    expect(sent()).toEqual([3]);
+
+    pending.shift()?.();
+    await vi.waitFor(() => expect(sent()).toEqual([3, 0]));
+    pending.shift()?.();
+    await Promise.all([first, last]);
+    expect(sent()).toEqual([3, 0]);
+
+    // A later count after the queue drained starts a new send.
+    const again = notifier.setUnreadBadge(7);
+    await vi.waitFor(() => expect(sent()).toEqual([3, 0, 7]));
+    pending.shift()?.();
+    await again;
+  });
 });

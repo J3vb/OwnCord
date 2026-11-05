@@ -50,4 +50,23 @@ describe("windowPrefs (desktop)", () => {
     invoke.mockRejectedValue("disk full");
     await expect(windowPrefs.set("minimizeToTray", false)).resolves.toBe(false);
   });
+
+  it("sends a second toggle only after the first save answered", async () => {
+    let answerFirst: () => void = () => undefined;
+    invoke
+      .mockImplementationOnce(() => new Promise<void>((resolve) => (answerFirst = resolve)))
+      .mockResolvedValue(undefined);
+    const on = windowPrefs.set("minimizeToTray", true);
+    const off = windowPrefs.set("minimizeToTray", false);
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(1));
+    await Promise.resolve();
+    expect(invoke).toHaveBeenCalledTimes(1);
+
+    answerFirst();
+    await expect(Promise.all([on, off])).resolves.toEqual([true, true]);
+    expect(invoke.mock.calls.map((call) => (call[1] as { enabled: boolean }).enabled)).toEqual([
+      true,
+      false,
+    ]);
+  });
 });

@@ -118,7 +118,7 @@ describe("createCertFirstUseModal (F4/F8)", () => {
     document.body.appendChild(container);
     modal.mount(container);
 
-    expect(container.contains(document.activeElement)).toBe(true);
+    expect(document.activeElement).toBe(container.querySelector(".modal-footer .btn-ghost"));
 
     modal.destroy?.();
     expect(document.activeElement).toBe(outside);

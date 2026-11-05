@@ -40,12 +40,12 @@ export function openServerRailJoinModal(options: JoinModalOptions): ModalInstanc
   error.hidden = true;
   const cancel = createElement(
     "button",
-    { type: "button", class: "btn btn-secondary", "data-testid": "server-rail-join-cancel" },
+    { type: "button", class: "btn-modal-cancel", "data-testid": "server-rail-join-cancel" },
     shellText("common.cancel"),
   );
   const submit = createElement(
     "button",
-    { type: "submit", class: "btn btn-primary", "data-testid": "server-rail-join-submit" },
+    { type: "submit", class: "btn-modal-save", "data-testid": "server-rail-join-submit" },
     serverRailText("joinConfirm"),
   );
   const footer = createElement("div", { class: "server-rail-join-actions" });

@@ -7,6 +7,7 @@ import type { ChannelType } from "@lib/types";
 import {
   updateChatHeaderForDm,
   setChatHeaderChannelType,
+  setChatHeaderLock,
   setChatHeaderThreads,
   setChatHeaderMedia,
   setChatHeaderTopic,
@@ -108,6 +109,12 @@ export function mountDmHeader(st: ChannelState, cc: ChannelApi, ms: MountScope):
     syncHeaderType();
     st.composerGatingUnsubs.push(
       channelsStore.subscribeSelector((s) => s.channels.get(ms.channelId)?.type, syncHeaderType),
+    );
+    const lockOf = (s: ReturnType<typeof channelsStore.getState>): boolean =>
+      s.channels.get(ms.channelId)?.passwordProtected === true;
+    setChatHeaderLock(typeRefs, lockOf(channelsStore.getState()));
+    st.composerGatingUnsubs.push(
+      channelsStore.subscribeSelector(lockOf, (locked) => setChatHeaderLock(typeRefs, locked)),
     );
     if (st.chatHeaderName !== null) {
       setText(st.chatHeaderName, ms.channelName);

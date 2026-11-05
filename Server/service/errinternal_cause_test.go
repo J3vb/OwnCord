@@ -66,11 +66,11 @@ func (f *faultStore) RevokeNSFW(ctx context.Context, userID, channelID int64) er
 	return f.DB.RevokeNSFW(ctx, userID, channelID)
 }
 
-func (f *faultStore) UpdateUserIdentityKey(ctx context.Context, id int64, key *string) error {
-	if err := f.fail["UpdateUserIdentityKey"]; err != nil {
+func (f *faultStore) UpdateUserProfileAndIdentityKey(ctx context.Context, userID int64, username string, avatar, displayName, about, bannerID, bannerColor *string, identityKey string) error {
+	if err := f.fail["UpdateUserProfileAndIdentityKey"]; err != nil {
 		return err
 	}
-	return f.DB.UpdateUserIdentityKey(ctx, id, key)
+	return f.DB.UpdateUserProfileAndIdentityKey(ctx, userID, username, avatar, displayName, about, bannerID, bannerColor, identityKey)
 }
 
 func (f *faultStore) GetUserByID(ctx context.Context, id int64) (*db.User, error) {
@@ -125,12 +125,8 @@ func TestErrInternal_KeepsStoreCause(t *testing.T) {
 		{"nsfw_revoke", "RevokeNSFW", func(t *testing.T, ctx context.Context, st *faultStore) error {
 			return newFaultNSFW(t, st).Revoke(ctx, 1, 10)
 		}},
-		{"user_identity_key_update", "UpdateUserIdentityKey", func(t *testing.T, ctx context.Context, st *faultStore) error {
-			_, err := NewUserService(st).UpdateIdentityKey(ctx, 1, "key")
-			return err
-		}},
-		{"user_identity_key_reload", "GetUserByID", func(t *testing.T, ctx context.Context, st *faultStore) error {
-			_, err := NewUserService(st).UpdateIdentityKey(ctx, 1, "key")
+		{"user_identity_key_update", "UpdateUserProfileAndIdentityKey", func(t *testing.T, ctx context.Context, st *faultStore) error {
+			_, err := NewUserService(st).UpdateProfile(ctx, 1, ProfilePatch{IdentityKey: new("key")})
 			return err
 		}},
 		{"recovery_kit_status", "GetRecoveryKit", func(t *testing.T, ctx context.Context, st *faultStore) error {

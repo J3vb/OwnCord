@@ -49,8 +49,14 @@ and only when it changes something a contributor or fork holder must do
 
 ### Changed
 
+- In-app dialogs (join with an invite link, rename prompts, new DM picker, nickname, new thread) use the same Save and Cancel buttons as Create Channel.
+- Privacy & Safety shows a failed load the same way in every section: the message in red with Retry beside it.
+- Small polish: the GIF consent button and the empty sticker panel sit in the middle of the picker; "Load external content" no longer shows an empty card beside it; the certificate prompts open on Cancel instead of the close button; a password voice channel shows its lock in the chat header; a phone menu sheet opens without a focus line on its first row; search on a phone is a top sheet in landscape too.
+- Settings rows look the same everywhere on Appearance and Notifications: name and description on the left, the control on the right. Choices like Notification Level and Date Format sit on one line and turn into a dropdown on a narrow screen instead of wrapping.
 - The admin Live log no longer fills with the panel's own request lines, and a viewer that falls behind sees how many lines were skipped.
 - A file attached to a draft is now kept for a day instead of an hour, so a message written across a laptop sleep or a long phone reconnect still sends its files. Unsent uploads count against a member's storage quota until then.
+- Desktop: an upload that keeps moving is no longer cut by the app after 10 minutes; only the server's own transfer limit ends it.
+- Desktop: the update button installs only the version the banner showed. If a newer one was published meanwhile, the banner shows that one instead.
 - In Open and Approval registration, a refused attempt (username taken, server busy, queue full) no longer uses up one of the address's 5 registrations per day.
 - A voice-channel password attempt refused because the whole server is at its limit no longer counts against the member's own attempts.
 
