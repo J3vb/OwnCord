@@ -199,8 +199,8 @@ describe("e2eeCrypto room-key properties", () => {
     async () => {
       await fc.assert(
         fc.asyncProperty(
-          fc.oneof(fc.string(), fc.uint8Array({ maxLength: 80 }).map(toBase64)),
-          fc.oneof(fc.string(), fc.uint8Array({ maxLength: 16 }).map(toBase64)),
+          fc.oneof(fc.string(), fc.uint8Array({ maxLength: 80, size: "max" }).map(toBase64)),
+          fc.oneof(fc.string(), fc.uint8Array({ maxLength: 16, size: "max" }).map(toBase64)),
           fc.option(fc.record({ senderId: fc.integer(), recipientId: fc.integer() }), {
             nil: undefined,
           }),
@@ -210,7 +210,23 @@ describe("e2eeCrypto room-key properties", () => {
                 unwrapRoomKey(bob.privateKey, alice.publicKey, encryptedKey, iv, binding),
               ),
             ).toBe(true);
-            expect(await rejects(() => importPublicKey(encryptedKey))).toBe(true);
+          },
+        ),
+        { numRuns: RUNS * 4 },
+      );
+    },
+    PROPERTY_TIMEOUT_MS,
+  );
+
+  it(
+    "rejects a public key that is not base64 of a P-256 point, without throwing",
+    async () => {
+      await fc.assert(
+        fc.asyncProperty(
+          // Random bytes can form a valid compressed point, so only the text half is fuzzed.
+          fc.string({ maxLength: 120, size: "max" }),
+          async (text) => {
+            expect(await rejects(() => importPublicKey(text))).toBe(true);
           },
         ),
         { numRuns: RUNS * 4 },

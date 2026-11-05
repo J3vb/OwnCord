@@ -21,5 +21,7 @@ export function parseFrame(raw: string): RawFrame | null {
 
 /** Every server payload is an object; null or a bare value is never dispatched. */
 export function hasObjectPayload(frame: RawFrame): boolean {
-  return typeof frame.payload === "object" && frame.payload !== null;
+  return (
+    typeof frame.payload === "object" && frame.payload !== null && !Array.isArray(frame.payload)
+  );
 }

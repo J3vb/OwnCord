@@ -538,7 +538,7 @@ export function createWsClient({
       return;
     }
 
-    // Any parsed inbound frame proves the socket is delivering bytes — refresh
+    // Any inbound object frame proves the socket is delivering bytes — refresh
     // the silence deadline, even for a frame the size guard drops below.
     armLiveness();
     // U4: and that the clock was running, so a later gap is measured from

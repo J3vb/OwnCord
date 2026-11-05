@@ -713,6 +713,10 @@ describe("E2EEOffer log tag", () => {
 
 describe("E2EEOffer with arbitrary offer text", () => {
   const PROPERTY_TIMEOUT_MS = 30_000;
+  // The real unwrap installed below must not outlive this block.
+  afterEach(() => {
+    vi.mocked(unwrapRoomKey).mockReset();
+  });
 
   it(
     "never rejects or installs a key for a bad offer, and still applies a good one after",
@@ -737,7 +741,7 @@ describe("E2EEOffer with arbitrary offer text", () => {
       );
       const text = fc.oneof(
         fc.string(),
-        fc.uint8Array({ maxLength: 80 }).map((b) => btoa(String.fromCharCode(...b))),
+        fc.uint8Array({ maxLength: 80, size: "max" }).map((b) => btoa(String.fromCharCode(...b))),
         fc.constant(good.encryptedKey),
         fc.constant(good.iv),
       );

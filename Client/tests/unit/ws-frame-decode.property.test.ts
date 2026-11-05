@@ -41,7 +41,8 @@ function isObjectFrame(raw: string): boolean {
     typeof frame.type === "string" &&
     frame.type !== "" &&
     typeof frame.payload === "object" &&
-    frame.payload !== null
+    frame.payload !== null &&
+    !Array.isArray(frame.payload)
   );
 }
 
@@ -111,6 +112,7 @@ describe("WebSocket frame decode properties", () => {
       '{"type":"server_restart","payload":null}',
       '{"type":"auth_ok","payload":null}',
       '{"type":"chat_message","payload":5}',
+      '{"type":"chat_message","payload":[]}',
     ]) {
       expect(() => deliver(raw), raw).not.toThrow();
     }
