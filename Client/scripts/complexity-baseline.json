@@ -293,9 +293,6 @@
       "createConnectionStatsPoller > sampleCamera": [17],
       "extractMetrics > (anonymous)": [24]
     },
-    "lib/voice/deviceManager.ts": {
-      "DeviceManager > handleDeviceChange": [50]
-    },
     "lib/voice/livekitE2EE.ts": {
       "E2EEManager > handleAnnounceInner": [29],
       "E2EEManager > handleParticipantLeft": [32],
