@@ -165,6 +165,9 @@ func New(st Store, limiter *auth.RateLimiter) *Services {
 	if ps, ok := st.(PrivacyStore); ok {
 		privacy = NewPrivacyService(ps)
 	}
+	threads := NewThreadService(st, permSvc, limiter)
+	threadArchiver := NewThreadArchiver(st)
+	threads.SetArchiveWake(threadArchiver.Wake)
 	emoji := NewEmojiService(st, permSvc)
 	var stickers *StickerService
 	if ss, ok := st.(StickerStore); ok {
@@ -182,8 +185,8 @@ func New(st Store, limiter *auth.RateLimiter) *Services {
 		Channels:        channels,
 		StatusExpiry:    statusExpiry,
 		PollExpiry:      pollExpiry,
-		Threads:         NewThreadService(st, permSvc, limiter),
-		ThreadArchiver:  NewThreadArchiver(st),
+		Threads:         threads,
+		ThreadArchiver:  threadArchiver,
 		Permissions:     permSvc,
 		Users:           users,
 		DMs:             dms,

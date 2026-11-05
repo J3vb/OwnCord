@@ -293,25 +293,9 @@ func (s *MessageService) EditMessage(ctx context.Context, userID, msgID int64, r
 		return nil, err
 	}
 
-	msg, err := s.st.GetMessage(ctx, msgID)
-	if err != nil || msg == nil {
-		return nil, fmt.Errorf("%w: cannot edit this message", ErrForbidden)
-	}
-	if msg.Deleted {
-		return nil, fmt.Errorf("%w: cannot edit this message", ErrDeletedMessage)
-	}
-	// Call log and group event rows are written only by the server.
-	if msg.Kind != db.MessageKindUser {
-		return nil, fmt.Errorf("%w: cannot edit this message", ErrForbidden)
-	}
-
-	// Fail closed: a lookup failure must not fall through with chanType="", which
-	// routes into the non-DM permission branch. That branch passes on the base role
-	// mask alone (no per-channel override exists for a DM), skipping the
-	// DM-participant check and RequireDMReachable.
-	ch, chErr := s.st.GetChannel(ctx, msg.ChannelID)
-	if chErr != nil || ch == nil {
-		return nil, fmt.Errorf("%w: cannot edit this message", ErrForbidden)
+	_, ch, err := s.loadEditTarget(ctx, msgID)
+	if err != nil {
+		return nil, err
 	}
 	chanType := ch.Type
 	isDM := chanType == "dm"
@@ -326,7 +310,12 @@ func (s *MessageService) EditMessage(ctx context.Context, userID, msgID int64, r
 
 	// EditMessage checks ownership itself and returns the row via RETURNING, so
 	// edited_at arrives with the write.
-	msg, err = s.st.EditMessage(ctx, msgID, userID, content)
+	msg, err := s.st.EditMessage(ctx, msgID, userID, content)
+	if err != nil && !errors.Is(err, db.ErrNotFound) && !errors.Is(err, db.ErrForbidden) {
+		// A store failure (busy database, spent deadline, I/O) is not a refusal:
+		// it is logged and answered INTERNAL, or REQUEST_TIMEOUT for a spent frame.
+		return nil, fmt.Errorf("%w: edit message: %w", ErrInternal, err)
+	}
 	if err != nil || msg == nil {
 		return nil, fmt.Errorf("%w: cannot edit this message", ErrForbidden)
 	}
@@ -381,14 +370,50 @@ func (s *MessageService) EditMessage(ctx context.Context, userID, msgID int64, r
 	return result, nil
 }
 
+// loadEditTarget reads the message and its channel for an edit. A store failure
+// is internal; a missing, deleted or server-written message is refused.
+func (s *MessageService) loadEditTarget(ctx context.Context, msgID int64) (*db.Message, *db.Channel, error) {
+	msg, err := s.st.GetMessage(ctx, msgID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("%w: edit message: load: %w", ErrInternal, err)
+	}
+	if msg == nil {
+		return nil, nil, fmt.Errorf("%w: cannot edit this message", ErrForbidden)
+	}
+	if msg.Deleted {
+		return nil, nil, fmt.Errorf("%w: cannot edit this message", ErrDeletedMessage)
+	}
+	// Call log and group event rows are written only by the server.
+	if msg.Kind != db.MessageKindUser {
+		return nil, nil, fmt.Errorf("%w: cannot edit this message", ErrForbidden)
+	}
+
+	// Fail closed: a lookup failure must not fall through with chanType="", which
+	// routes into the non-DM permission branch. That branch passes on the base role
+	// mask alone (no per-channel override exists for a DM), skipping the
+	// DM-participant check and RequireDMReachable.
+	ch, chErr := s.st.GetChannel(ctx, msg.ChannelID)
+	if chErr != nil {
+		return nil, nil, fmt.Errorf("%w: edit message: load channel: %w", ErrInternal, chErr)
+	}
+	if ch == nil {
+		return nil, nil, fmt.Errorf("%w: cannot edit this message", ErrForbidden)
+	}
+	return msg, ch, nil
+}
+
 // editMessageCheckAccess gates an edit through the send predicate
 // (permissions.CanSendMessage via channelSubject/denial) instead of a DM-only
 // copy, so a timed-out user cannot broadcast new text by editing an old message.
 // Most verdicts collapse into one opaque ErrForbidden (an ownership/permission
 // non-oracle), but ErrTimedOut and a DM's ErrBlocked pass through: the client
-// already surfaces them elsewhere.
+// already surfaces them elsewhere. A store failure while resolving the verdict
+// passes through as internal: it is not a refusal.
 func (s *MessageService) editMessageCheckAccess(ctx context.Context, userID int64, ch *db.Channel) error {
 	sub, err := channelSubject(ctx, s.st, s.perms, userID, ch, true)
+	if errors.Is(err, ErrInternal) {
+		return err
+	}
 	if err != nil {
 		return fmt.Errorf("%w: cannot edit this message", ErrForbidden)
 	}

@@ -1,5 +1,5 @@
 {
-  "nextId": 555,
+  "nextId": 558,
   "findings": [
     {
       "id": "OC-0001",
@@ -12832,6 +12832,52 @@
         "revertProof": "fail (holder's token missing from the list)"
       },
       "lens": "api-authz",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-03",
+      "hunt": "server-review-2026-11-03",
+      "finder": "claude",
+      "fixedDate": "2026-11-04"
+    },
+    {
+      "id": "OC-0556",
+      "title": "Editing or deleting a message during a store failure said 'not allowed' instead of a server error",
+      "file": "Server/service/message_crud.go",
+      "line": 298,
+      "severity": "low",
+      "why": "EditMessage and the delete path turned any store error (a busy database, an I/O error) into FORBIDDEN 'cannot edit/delete this message', so the author was told they may not change their own message and nothing was logged.",
+      "repro": "Wrap the store so EditMessage, DeleteMessageWithRemoval or GetMessage returns an error, then edit or delete your own message. Before the fix the result was ErrForbidden.",
+      "evidence": "Server/service/message_store_error_test.go (TestEditMessage_StoreFailureIsInternalNotForbidden, TestDeleteMessage_StoreFailureIsInternalNotForbidden, TestSoftDeleteRow_StoreRefusalStaysForbidden).",
+      "suggestedFix": "Wrap a store failure as ErrInternal and keep ErrForbidden for the not-found and not-owner answers; the WS and REST handlers then log it and answer INTERNAL.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/service/message_store_error_test.go",
+        "revertProof": "fail (forbidden: cannot edit this message, want ErrInternal)"
+      },
+      "lens": "service",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-03",
+      "hunt": "server-review-2026-11-03",
+      "finder": "claude",
+      "fixedDate": "2026-11-04"
+    },
+    {
+      "id": "OC-0557",
+      "title": "Shortening a thread's idle period did not wake the thread archiver",
+      "file": "Server/service/thread_archiver.go",
+      "line": 93,
+      "severity": "low",
+      "why": "The archiver sleeps until the earliest due thread, capped at 10 minutes, and nothing woke it. A thread whose idle period was shortened so it was already due could stay open up to 10 minutes past its deadline.",
+      "repro": "Run the archiver with a due time an hour out, move the due time into the past and call Wake: before the fix there was no Wake and the thread archived only at the capped sleep.",
+      "evidence": "Server/service/thread_archiver_wake_test.go (TestThreadArchiver_WakeRereadsTheDueTime, TestThreadService_UpdateWakesTheArchiverOnlyForAPeriodChange).",
+      "suggestedFix": "Give ThreadArchiver a Wake like the poll expirer and call it from ThreadService.Update when the idle period changes. A create or a post only moves a due time later, at least an hour out, so they need no wake.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/service/thread_archiver_wake_test.go",
+        "revertProof": "no Wake before the fix: the test does not compile"
+      },
+      "lens": "service",
       "confidence": "high",
       "status": "fixed",
       "found": "2026-11-03",
