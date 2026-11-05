@@ -15,6 +15,7 @@ import { PROTOCOL_EPOCH } from "./protocolTypes";
 import { Disposable } from "./disposable";
 import { isAndroidHost } from "./hostPlatform";
 import { normalizeHostForCertCompare } from "./net/hostNormalize";
+import { hasObjectPayload, parseFrame } from "./net/wsFrame";
 import { WsErrorCode } from "@lib/protocolTypes";
 import {
   type CertFirstUseListener,
@@ -529,23 +530,15 @@ export function createWsClient({
   function handleMessage(raw: string): void {
     const maxSize = config?.maxMessageSizeBytes ?? DEFAULT_MAX_MESSAGE_SIZE;
 
-    let parsed: { type?: string; payload?: unknown; id?: string; seq?: number; cseq?: number };
-    try {
-      parsed = JSON.parse(raw) as {
-        type?: string;
-        payload?: unknown;
-        id?: string;
-        seq?: number;
-        cseq?: number;
-      };
-    } catch {
+    const parsed = parseFrame(raw);
+    if (parsed === null) {
       // Log the size only — `raw` is the decrypted frame (chat plaintext,
       // usernames) and this line is persisted to the on-disk log.
       log.warn("Failed to parse WS message", { bytes: raw.length });
       return;
     }
 
-    // Any parsed inbound frame proves the socket is delivering bytes — refresh
+    // Any inbound object frame proves the socket is delivering bytes — refresh
     // the silence deadline, even for a frame the size guard drops below.
     armLiveness();
     // U4: and that the clock was running, so a later gap is measured from
@@ -585,8 +578,11 @@ export function createWsClient({
       return;
     }
 
-    if (!parsed.type || parsed.payload === undefined) {
-      log.warn("Invalid WS message: missing type or payload", { parsed });
+    if (!parsed.type || !hasObjectPayload(parsed)) {
+      log.warn("Invalid WS message: missing type or payload", {
+        bytes: raw.length,
+        payloadKind: Object.prototype.toString.call(parsed.payload),
+      });
       return;
     }
 

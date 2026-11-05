@@ -19,11 +19,15 @@ interface Covered {
 }
 
 /** Webview decoders with a property test. */
-const clientCovered: Record<string, Covered> = {};
+const clientCovered: Record<string, Covered> = {
+  "wsFrame.parseFrame": {
+    source: "every WebSocket frame from the server",
+    targets: ["tests/unit/ws-frame-decode.property.test.ts"],
+  },
+};
 
 /** Webview decoders of server or user data with no property test yet. */
 const clientGaps: Record<string, string> = {
-  "ws.handleMessage": "every WebSocket frame from the server",
   "socket.connectErrorCode": "connect errors relayed from the native socket",
   "api.doFetch": "REST responses",
   "api.parseError": "REST error responses",
@@ -36,7 +40,7 @@ const clientGaps: Record<string, string> = {
   "externalContent.json": "external-content broker responses",
   "api.parseAttachments": "moderation report attachments from the server",
 };
-const clientGapCeiling = 12;
+const clientGapCeiling = 11;
 
 /** Decoders of the client's own storage: what this client wrote earlier. */
 const clientTrusted: Record<string, string> = {
