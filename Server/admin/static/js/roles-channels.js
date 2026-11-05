@@ -29,6 +29,7 @@ async function renderChannels(){
      Archived shows only on a channel that is. */
   const groups=new Map();
   const catIds=new Map();
+  state.channelGroups=groups;
   channels.forEach(ch=>{
     const cat=ch.category||ch.Category||((ch.type||ch.Type)==='voice'?'Voice':'');
     if(!groups.has(cat))groups.set(cat,[]);
@@ -54,7 +55,7 @@ async function renderChannels(){
       html+='<tr class="ch-cat"><th colspan="2" scope="rowgroup">'+esc(cat||'No category')
         +(cid?' <button class="act-btn" title="Category permissions" aria-label="Permissions for category '+esc(cat)+'" data-action="openCategoryPermsModal" data-args="'+actArgs(cid,cat)+'">'+I.lock+'</button>':'')+'</th></tr>';
     }
-    chs.forEach(ch=>{
+    chs.forEach((ch,i)=>{
       const id=ch.id||ch.ID;const name=ch.name||ch.Name||'';const type=ch.type||ch.Type||'text';
       const archived=ch.archived||ch.Archived||false;
       html+='<tr data-channel="'+esc(id)+'"><td><div class="ch-name"><span class="ch-type" title="'+esc(CH_TYPE_NAME[type]||type)+'">'+chIcon(type)+'<span class="sr-only">'+esc(CH_TYPE_NAME[type]||type)+'</span></span><strong>'+esc(name)+'</strong>'
@@ -64,7 +65,8 @@ async function renderChannels(){
       const lockBtn=type==='dm'?'':'<button class="act-btn" title="Who can see this" aria-label="Who can see #'+esc(name)+'" data-action="openChannelPermsModal" data-args="'+actArgs(id,name)+'">'+I.lock+'</button>';
       state.channelCache[id]=ch;
       if(ch.category||ch.Category)catSet.add(ch.category||ch.Category);
-      html+='<td><div class="act-group" style="justify-content:flex-end"><button class="act-btn" title="Edit" aria-label="Edit #'+esc(name)+'" data-action="openChannelEditModal" data-args="'+actArgs(id)+'">'+I.edit+'</button>'+lockBtn+'<button class="act-btn danger" title="Delete" aria-label="Delete #'+esc(name)+'" data-action="openDeleteChannel" data-args="'+actArgs(id,name)+'">'+I.trash+'</button></div></td></tr>';
+      const moveBtn=(d,icon,word,off)=>'<button class="act-btn" title="Move '+word+'" aria-label="Move #'+esc(name)+' '+word+'"'+(off?' disabled':'')+' data-focus="ch'+word+'-'+esc(id)+'" data-action="moveChannel" data-args="'+actArgs(id,d)+'">'+icon+'</button>';
+      html+='<td><div class="act-group" style="justify-content:flex-end">'+moveBtn(-1,I.arrowUp,'up',i===0)+moveBtn(1,I.arrowDown,'down',i===chs.length-1)+'<button class="act-btn" title="Edit" aria-label="Edit #'+esc(name)+'" data-action="openChannelEditModal" data-args="'+actArgs(id)+'">'+I.edit+'</button>'+lockBtn+'<button class="act-btn danger" title="Delete" aria-label="Delete #'+esc(name)+'" data-action="openDeleteChannel" data-args="'+actArgs(id,name)+'">'+I.trash+'</button></div></td></tr>';
     });
     html+='</tbody>';
   });
@@ -78,17 +80,42 @@ async function renderChannels(){
 /* A channel type in words, beside its icon. */
 const CH_TYPE_NAME={text:'Text channel',voice:'Voice channel',announcement:'Announcement channel',forum:'Forum channel',dm:'Direct message'};
 
-/* <datalist> of the categories currently in use. Purely a suggestion list —
-   typing a brand-new name is the supported way to create a category. */
-function categoryDatalist(listId){
-  const cats=state.channelCategories||[];
-  let html='<datalist id="'+listId+'">';
-  cats.forEach(c=>{html+='<option value="'+esc(c)+'"></option>'});
-  return html+'</datalist>';
+/* The category a channel lives in, picked from the ones that exist (every
+   category, empty ones too, else the ones channels use) or typed after
+   'New category…'. The current name stays listed even when the loaded list
+   does not have it, so opening and saving never moves the channel. */
+/* Category names are trimmed, so a value with a leading space is never one. */
+const NEW_CATEGORY=' new';
+function categoryNames(){
+  const listed=(state.categoryList||[]).map(c=>c.name).filter(Boolean);
+  return listed.length?listed:(state.channelCategories||[]);
+}
+function categoryPicker(id,current){
+  const names=categoryNames().slice();
+  if(current&&!names.some(n=>n===current))names.unshift(current);
+  const opt=(v,label)=>'<option value="'+esc(v)+'"'+(v===current?' selected':'')+'>'+esc(label)+'</option>';
+  return'<select class="form-input" id="'+id+'" style="appearance:auto" data-change-action="onCategoryPick">'
+    +opt('','No category')+names.map(n=>opt(n,n)).join('')+opt(NEW_CATEGORY,'New category…')+'</select>'
+    +'<input class="form-input" id="'+id+'New" placeholder="Category name" aria-label="New category name" style="margin-top:6px" maxlength="100" hidden>';
+}
+function onCategoryPick(){
+  const input=document.getElementById(this.id+'New');
+  if(!input)return;
+  input.hidden=this.value!==NEW_CATEGORY;
+  if(!input.hidden)input.focus();
+}
+function pickedCategory(id){
+  const sel=fsInput(document,'#'+id);
+  return sel.value===NEW_CATEGORY?fsInput(document,'#'+id+'New').value.trim():sel.value;
+}
+/* A new channel goes last in its category, as the client lists it. */
+function nextChannelPosition(category){
+  const inCat=Object.values(state.channelCache||{}).filter(c=>(c.category||c.Category||'')===category);
+  return inCat.length?Math.max(...inCat.map(c=>c.position||c.Position||0))+1:0;
 }
 
 function openChannelModal(){
-  openModal('<div class="modal-header"><h3>Create Channel</h3><button class="modal-close" aria-label="Close dialog" data-action="closeModal">&times;</button></div><div class="modal-body"><div class="form-group"><label class="form-label" for="chName">Name <span class="req">*</span></label><input class="form-input" id="chName" placeholder="general"></div><div class="form-group"><label class="form-label" for="chType">Type</label><select class="form-input" id="chType" style="appearance:auto" data-change-action="onChannelTypeChange"><option value="text">Text</option><option value="voice">Voice</option><option value="announcement">Announcement</option><option value="forum">Forum</option></select></div><div class="form-group"><label class="form-label" for="chCat">Category</label><input class="form-input" id="chCat" list="chCatList" placeholder="Text Channels" autocomplete="off">'+categoryDatalist('chCatList')+'<div style="font-size:11px;color:var(--text-muted);margin-top:4px">Any name works, for voice and text channels alike. Leave blank for no category.</div></div><div class="form-group"><label class="form-label" for="chTopic">Topic</label><input class="form-input" id="chTopic"><div id="chTopicHint" style="font-size:11px;color:var(--text-muted);margin-top:4px" hidden>For a forum the topic is its guidelines, shown above the posts. Tags are set after creating it, with Edit.</div></div><div class="form-group"><label class="form-label" for="chPos">Position</label><input class="form-input" id="chPos" type="number" value="0" min="0"></div></div><div class="modal-footer"><button class="btn btn-ghost" data-action="closeModal">Cancel</button><button class="btn btn-accent" data-action="createChannel">Create</button></div>');
+  openModal('<div class="modal-header"><h3>Create Channel</h3><button class="modal-close" aria-label="Close dialog" data-action="closeModal">&times;</button></div><div class="modal-body"><div class="form-group"><label class="form-label" for="chName">Name <span class="req">*</span></label><input class="form-input" id="chName" placeholder="general"></div><div class="form-group"><label class="form-label" for="chType">Type</label><select class="form-input" id="chType" style="appearance:auto" data-change-action="onChannelTypeChange"><option value="text">Text</option><option value="voice">Voice</option><option value="announcement">Announcement</option><option value="forum">Forum</option></select></div><div class="form-group"><label class="form-label" for="chCat">Category</label>'+categoryPicker('chCat','')+'<div style="font-size:11px;color:var(--text-muted);margin-top:4px">Voice and text channels can share a category. The channel goes last in it; reorder with the arrows on the Channels page.</div></div><div class="form-group"><label class="form-label" for="chTopic">Topic</label><input class="form-input" id="chTopic"><div id="chTopicHint" style="font-size:11px;color:var(--text-muted);margin-top:4px" hidden>For a forum the topic is its guidelines, shown above the posts. Tags are set after creating it, with Edit.</div></div></div><div class="modal-footer"><button class="btn btn-ghost" data-action="closeModal">Cancel</button><button class="btn btn-accent" data-action="createChannel">Create</button></div>');
 }
 
 /* A forum's topic is its guidelines, and its tags come after it exists. */
@@ -98,8 +125,10 @@ function onChannelTypeChange(){
 }
 
 async function createChannel(){
-  const body={name:document.getElementById('chName').value.trim(),type:document.getElementById('chType').value,category:document.getElementById('chCat').value.trim(),topic:document.getElementById('chTopic').value.trim(),position:parseInt(document.getElementById('chPos').value)||0};
+  const category=pickedCategory('chCat');
+  const body={name:document.getElementById('chName').value.trim(),type:document.getElementById('chType').value,category,topic:document.getElementById('chTopic').value.trim(),position:nextChannelPosition(category)};
   if(!body.name){showToast('Name is required','error');return}
+  if(fsInput(document,'#chCat').value===NEW_CATEGORY&&!category){showToast('Name the new category','error');return}
   try{await api('POST','/channels',body);closeModal();showToast('Channel created');renderContent()}catch(e){showToast(e.message,'error')}
 }
 
@@ -121,7 +150,6 @@ function openChannelEditModal(id){
   const topic=ch.topic||ch.Topic||'';
   const cat=ch.category||ch.Category||'';
   const slow=ch.slow_mode||ch.SlowMode||0;
-  const pos=ch.position||ch.Position||0;
   const archived=ch.archived||ch.Archived||false;
   const nsfw=ch.nsfw||ch.NSFW||false;
   const type=ch.type||ch.Type||'text';
@@ -135,15 +163,44 @@ function openChannelEditModal(id){
     +'<div class="modal-body">'
     +'<div class="form-group"><label class="form-label" for="chEditName">Name</label><input class="form-input" id="chEditName" value="'+esc(name)+'"></div>'
     +'<div class="form-group"><label class="form-label" for="chEditTopic">Topic</label><input class="form-input" id="chEditTopic" value="'+esc(topic)+'"></div>'
-    +'<div class="form-group"><label class="form-label" for="chEditCat">Category</label><input class="form-input" id="chEditCat" list="chEditCatList" value="'+esc(cat)+'" data-orig="'+esc(cat.trim())+'" autocomplete="off">'+categoryDatalist('chEditCatList')+'<div style="font-size:11px;color:var(--text-muted);margin-top:4px">Move the channel to another category, or blank it to leave it uncategorized.</div></div>'
+    +'<div class="form-group" data-orig-cat="'+esc(cat.trim())+'" id="chEditCatGroup"><label class="form-label" for="chEditCat">Category</label>'+categoryPicker('chEditCat',cat.trim())+'<div style="font-size:11px;color:var(--text-muted);margin-top:4px">Move the channel to another category, or choose No category.</div></div>'
     +'<div class="form-group"><label class="form-label" for="chEditSlow">Slow mode (seconds, 0 = off)</label><input class="form-input" id="chEditSlow" type="number" min="0" value="'+esc(slow)+'"></div>'
-    +'<div class="form-group"><label class="form-label" for="chEditPos">Position</label><input class="form-input" id="chEditPos" type="number" min="0" value="'+esc(pos)+'"></div>'
     +voiceRows
     +'<div class="setting-row"><div class="setting-info"><div class="setting-name" id="chEditArchived-name">Archived</div><div class="setting-desc">Hide the channel without deleting its messages</div></div><div class="setting-ctrl"><button class="toggle '+(archived?'on':'')+'" id="chEditArchived" role="switch" aria-checked="'+(archived?'true':'false')+'" aria-labelledby="chEditArchived-name" data-action="toggleSwitch"></button></div></div>'
     +'<div class="setting-row"><div class="setting-info"><div class="setting-name" id="chEditNsfw-name">Age-restricted (NSFW)</div><div class="setting-desc">Clients show a one-time warning and mark the channel. The server does not filter or restrict anything.</div></div><div class="setting-ctrl"><button class="toggle '+(nsfw?'on':'')+'" id="chEditNsfw" role="switch" aria-checked="'+(nsfw?'true':'false')+'" aria-labelledby="chEditNsfw-name" data-action="toggleSwitch"></button></div></div>'
     +forumRows
     +'</div>'
     +'<div class="modal-footer"><button class="btn btn-ghost" data-action="closeModal">Cancel</button><button class="btn btn-accent" data-action="saveChannelEdit" data-args="'+actArgs(id)+'">Save</button></div>');
+}
+
+/* Up and down swap a channel with its neighbour in the group the page shows.
+   The group keeps the positions it already uses, made distinct, so other
+   groups and categories do not move; only channels whose position changes are
+   sent (PATCH /channels/{id} with position alone). */
+async function moveChannel(id,delta){
+  const group=[...(state.channelGroups||new Map()).values()].find(g=>g.some(c=>(c.id||c.ID)===id));
+  if(!group)return;
+  const i=group.findIndex(c=>(c.id||c.ID)===id),j=i+delta;
+  if(j<0||j>=group.length)return;
+  const order=group.slice();
+  order[i]=group[j];order[j]=group[i];
+  const slots=group.map(c=>c.position||c.Position||0).sort((a,b)=>a-b);
+  for(let k=1;k<slots.length;k++)if(slots[k]<=slots[k-1])slots[k]=slots[k-1]+1;
+  try{
+    for(let k=0;k<order.length;k++){
+      const c=order[k];
+      if((c.position||c.Position||0)!==slots[k])await api('PATCH','/channels/'+(c.id||c.ID),{position:slots[k]});
+    }
+  }catch(e){showToast(e.message,'error');renderContent();return}
+  if(state.section!=='channels')return;
+  let html;
+  try{html=await renderChannels()}catch(e){renderContent();return}
+  const content=document.getElementById('content');
+  if(!content||state.section!=='channels')return;
+  content.innerHTML=html;
+  const dir=delta<0?'up':'down',other=delta<0?'down':'up';
+  const btn=[content.querySelector('[data-focus="ch'+dir+'-'+id+'"]'),content.querySelector('[data-focus="ch'+other+'-'+id+'"]')].find(b=>b instanceof HTMLButtonElement&&!b.disabled);
+  if(btn instanceof HTMLElement)btn.focus();
 }
 
 async function saveChannelEdit(id){
@@ -153,16 +210,15 @@ async function saveChannelEdit(id){
     name,
     topic:document.getElementById('chEditTopic').value.trim(),
     slow_mode:parseInt(document.getElementById('chEditSlow').value,10)||0,
-    position:parseInt(document.getElementById('chEditPos').value,10)||0,
     archived:document.getElementById('chEditArchived').classList.contains('on'),
     nsfw:document.getElementById('chEditNsfw').classList.contains('on'),
   };
   /* Send category only when the input differs from what the modal opened
      with. The row's name can be stale (a category renamed since the list
      loaded), and echoing it back would recreate the old name. */
-  const catEl=document.getElementById('chEditCat');
-  const catNow=catEl.value.trim();
-  if(catNow!==(catEl.dataset.orig||'')){body.category=catNow}
+  const catNow=pickedCategory('chEditCat');
+  if(fsInput(document,'#chEditCat').value===NEW_CATEGORY&&!catNow){showToast('Name the new category','error');return}
+  if(catNow!==(document.getElementById('chEditCatGroup').dataset.origCat||'')){body.category=catNow}
   /* Only present for a voice channel. Omitting them entirely (rather than
      sending 0) is what keeps a text-channel edit from clobbering limits a
      channel might carry from an earlier life as a voice channel — the handler
@@ -1243,7 +1299,7 @@ async function renderEmoji(){
   html+='<div style="color:var(--text-muted);font-size:13px;margin-bottom:10px">PNG, JPEG, GIF or WebP. Up to 512 KB and 128&times;128 pixels. Shortcodes are 2-32 characters of a-z, 0-9 or underscore.</div>';
   html+='<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">';
   html+='<input type="text" id="emojiShortcode" aria-label="Emoji shortcode" class="form-input" style="max-width:200px" placeholder="shortcode" maxlength="32">';
-  html+='<input type="file" id="emojiFile" aria-label="Emoji image file" accept="image/png,image/jpeg,image/gif,image/webp" class="form-input" style="max-width:320px;padding:8px">';
+  html+=pickFile('emojiFile','image/png,image/jpeg,image/gif,image/webp','Emoji image file');
   html+='<button class="btn btn-accent" data-action="uploadEmoji">'+I.upload+' Upload</button>';
   html+='</div></div></div>';
 
@@ -1292,7 +1348,7 @@ async function deleteEmoji(id){
   }catch(e){showToast(e.message,'error')}
 }
 
-Object.assign(ACTIONS,{forumTagAdd,forumTagMove,forumTagRemove,onChannelTypeChange,saveForumSettings,openCategoryPermsModal,openCategoryPermsPicker,saveCategoryPerms,syncChannelPerms,clearPermOverride,confirmDeleteChannel,confirmDeleteEmoji,confirmDeleteRole,createChannel,
+Object.assign(ACTIONS,{onCategoryPick,moveChannel,forumTagAdd,forumTagMove,forumTagRemove,onChannelTypeChange,saveForumSettings,openCategoryPermsModal,openCategoryPermsPicker,saveCategoryPerms,syncChannelPerms,clearPermOverride,confirmDeleteChannel,confirmDeleteEmoji,confirmDeleteRole,createChannel,
   deleteEmoji,explainAccess,moveRole,onPermTargetChange,openChannelEditModal,openChannelModal,openChannelPermsModal,openDeleteChannel,
   applyRolePreset,openDeleteRole,openRoleModal,placeRoleAboveDefault,previewPermChange,renderRolePlacement,
   saveChannelEdit,saveChannelPerms,saveRole,selectChannelTab,syncTypedConfirm,uploadEmoji});

@@ -417,6 +417,12 @@
         "go": "CodeContainerDeployment",
         "ts": "CONTAINER_DEPLOYMENT"
       },
+      {
+        "wire": "DEVELOPMENT_BUILD",
+        "go": "CodeDevelopmentBuild",
+        "ts": "DEVELOPMENT_BUILD",
+        "note": "A source build (version dev or untagged) never replaces itself with a release."
+      },
       { "wire": "DOWNLOAD_FAILED", "go": "CodeDownloadFailed", "ts": "DOWNLOAD_FAILED" },
       { "wire": "DUPLICATE_REPORT", "go": "CodeDuplicateReport", "ts": "DUPLICATE_REPORT" },
       { "wire": "ENV_OVERRIDDEN", "go": "CodeEnvOverridden", "ts": "ENV_OVERRIDDEN" },

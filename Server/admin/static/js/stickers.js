@@ -70,7 +70,7 @@ async function renderStickers(){
   html+='<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">';
   html+='<input type="text" id="stickerName" aria-label="Sticker name" class="form-input" style="max-width:200px" placeholder="name" maxlength="30">';
   html+='<input type="text" id="stickerEmoji" aria-label="Related emoji (optional)" class="form-input" style="max-width:160px" placeholder="related emoji" maxlength="64">';
-  html+='<input type="file" id="stickerFile" aria-label="Sticker image file" accept="image/png,image/gif,image/webp" class="form-input" style="max-width:320px;padding:8px">';
+  html+=pickFile('stickerFile','image/png,image/gif,image/webp','Sticker image file');
   html+='<button class="btn btn-accent" data-action="uploadSticker">'+I.upload+' Upload</button>';
   html+='</div></div></div>';
 

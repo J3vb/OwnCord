@@ -3,7 +3,7 @@
 // module carries no JavaScript engine, so nothing under Server/ can execute
 // this SPA. See docs/contributing.md#testing for the membership rule.
 //
-// WP 6.10d: the Settings page's "Voice: AFK" card and the AFK badge on the
+// WP 6.10d: the Settings page's Voice card (its AFK part) and the AFK badge on the
 // Channels page, driven against the real admin scripts in jsdom.
 import { describe, it, expect } from "vitest";
 import {
