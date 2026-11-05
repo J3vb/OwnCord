@@ -36,7 +36,7 @@ func TestFileSizes_Rule(t *testing.T) {
 		{"unlisted file at the default", "ws/unrelated.go", build(500), 0},
 		{"unlisted file one line over the default", "ws/unrelated.go", build(501), 1},
 		{"unlisted file, arbitrarily long", "ws/unrelated.go", build(5000), 1},
-		{"exempt file under the default is not capped by it", "db/markers.go", build(600), 0},
+		{"exempt file under the default is not capped by it", "config/config.go", build(600), 0},
 		// cmd/ holds entry points and one-shot tooling; a long main there is a
 		// shape, not a smell. The largest Go file in the tree lives in it.
 		{"cmd/ is out of scope", "cmd/smoke/drills.go", build(5000), 0},

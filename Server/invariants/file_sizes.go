@@ -67,11 +67,6 @@ var FileSizeOverrides = map[string]FileSizeOverride{
 		Note:    "hub: client registry, broadcast fan-out, replay",
 	},
 
-	"db/message_queries.go": {
-		Ceiling: 1050,
-		Class:   classGrandfathered,
-		Note:    "message queries",
-	},
 	"ws/messages.go": {
 		Ceiling: 950,
 		Class:   classGrandfathered,
@@ -86,16 +81,6 @@ var FileSizeOverrides = map[string]FileSizeOverride{
 		Ceiling: 900,
 		Class:   classGrandfathered,
 		Note:    "config schema and load",
-	},
-	"db/erasure.go": {
-		Ceiling: 750,
-		Class:   classGrandfathered,
-		Note:    "erasure and the erasure checkpoint",
-	},
-	"db/auth_queries.go": {
-		Ceiling: 850,
-		Class:   classGrandfathered,
-		Note:    "session and credential queries",
 	},
 	"api/profile_handler.go": {
 		Ceiling: 800,
@@ -122,11 +107,6 @@ var FileSizeOverrides = map[string]FileSizeOverride{
 		Class:   classGrandfathered,
 		Note:    "client command dispatch",
 	},
-	"db/appeal_queries.go": {
-		Ceiling: 700,
-		Class:   classGrandfathered,
-		Note:    "appeal queries",
-	},
 	"ws/serve_ready.go": {
 		Ceiling: 700,
 		Class:   classGrandfathered,
@@ -137,45 +117,15 @@ var FileSizeOverrides = map[string]FileSizeOverride{
 		Class:   classGrandfathered,
 		Note:    "voice moderation",
 	},
-	"db/markers.go": {
-		Ceiling: 650,
-		Class:   classGrandfathered,
-		Note:    "read markers",
-	},
-	"db/dm_queries.go": {
-		Ceiling: 650,
-		Class:   classGrandfathered,
-		Note:    "direct-message queries",
-	},
-	"db/report_queries.go": {
-		Ceiling: 600,
-		Class:   classGrandfathered,
-		Note:    "report queries",
-	},
 	"ws/hub_visibility.go": {
 		Ceiling: 600,
 		Class:   classGrandfathered,
 		Note:    "channel visibility fan-out",
 	},
-	"db/retention.go": {
-		Ceiling: 600,
-		Class:   classGrandfathered,
-		Note:    "retention queries",
-	},
 	"admin/logstream.go": {
 		Ceiling: 600,
 		Class:   classGrandfathered,
 		Note:    "the admin SSE log stream",
-	},
-	"db/admin_queries.go": {
-		Ceiling: 600,
-		Class:   classGrandfathered,
-		Note:    "admin queries",
-	},
-	"db/db.go": {
-		Ceiling: 550,
-		Class:   classGrandfathered,
-		Note:    "open, migrate and the query surface",
 	},
 	"api/waf.go": {
 		Ceiling: 550,
