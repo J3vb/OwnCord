@@ -1,8 +1,5 @@
 import { vi, beforeEach } from "vitest";
-import {
-  createMessageInput,
-  type MessageInputOptions,
-} from "../../src/features/messaging/MessageInput";
+import { createMessageInput, type MessageInputOptions } from "./messageInputApi";
 import { resetPickerCaptures } from "./messageInputMocks";
 import { useMountContainer } from "./mountContainer";
 import type { GifApi, GifFavoritesApi } from "@lib/media/gifProvider";

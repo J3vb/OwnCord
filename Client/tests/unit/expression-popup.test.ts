@@ -19,10 +19,7 @@ vi.mock("@components/StickerPicker", () => ({
   },
 }));
 
-import {
-  createMessageInput,
-  type MessageInputOptions,
-} from "../../src/features/messaging/MessageInput";
+import { createMessageInput, type MessageInputOptions } from "../helpers/messageInputApi";
 import { applyReadyCapabilities, resetServerCapabilities } from "@lib/net/serverCapabilities";
 import { stubGifApi as gifApi } from "../helpers/messageInputHarness";
 

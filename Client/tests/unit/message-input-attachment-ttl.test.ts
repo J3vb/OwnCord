@@ -8,10 +8,7 @@ import * as mocks from "../helpers/messageInputMocks";
 vi.mock("@components/EmojiPicker", () => mocks.emojiPickerMock());
 vi.mock("@components/GifPicker", () => mocks.gifPickerMock());
 
-import {
-  createMessageInput,
-  type MessageInputOptions,
-} from "../../src/features/messaging/MessageInput";
+import { createMessageInput, type MessageInputOptions } from "../helpers/messageInputApi";
 import {
   attachmentErrorText,
   clickSend,
