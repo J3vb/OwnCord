@@ -24,9 +24,7 @@ func TestMessageDelivery_ReceiptSurvivesDatabaseReopen(t *testing.T) {
 	open := func() *db.DB {
 		t.Helper()
 		database, err := db.Open(path)
-		if err != nil {
-			t.Fatal(err)
-		}
+		mustDo(t, "Open", err)
 		if err := db.Migrate(database); err != nil {
 			_ = database.Close()
 			t.Fatal(err)
@@ -41,22 +39,16 @@ func TestMessageDelivery_ReceiptSurvivesDatabaseReopen(t *testing.T) {
 		_ = database.Close()
 		t.Fatal(err)
 	}
-	if err := database.Close(); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Close", database.Close())
 	database = open()
 	t.Cleanup(func() { _ = database.Close() })
 	retry, err := database.CreateMessageDelivery(ctx, p)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateMessageDelivery", err)
 	if !retry.Duplicate || retry.Message.ID != first.Message.ID || retry.Message.Timestamp != first.Message.Timestamp {
 		t.Fatalf("reopened retry = %+v, original = %+v", retry, first)
 	}
 	var count int
-	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM messages`).Scan(&count); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "QueryRowContext", database.QueryRowContext(ctx, `SELECT COUNT(*) FROM messages`).Scan(&count))
 	if count != 1 {
 		t.Fatalf("reopen retry stored %d messages", count)
 	}
@@ -72,13 +64,9 @@ func TestMessageDelivery_ExpiredReceiptsPrunedWithoutRecreatingMessage(t *testin
 	if _, err := database.ExecContext(ctx, `UPDATE message_delivery_receipts SET expires_at_ms = 0`); err != nil {
 		t.Fatal(err)
 	}
-	if err := database.DeleteExpiredMessageDeliveryReceipts(ctx); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "DeleteExpiredMessageDeliveryReceipts", database.DeleteExpiredMessageDeliveryReceipts(ctx))
 	var count int
-	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM message_delivery_receipts`).Scan(&count); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "QueryRowContext", database.QueryRowContext(ctx, `SELECT COUNT(*) FROM message_delivery_receipts`).Scan(&count))
 	if count != 0 {
 		t.Fatalf("expired receipts = %d", count)
 	}
@@ -86,9 +74,7 @@ func TestMessageDelivery_ExpiredReceiptsPrunedWithoutRecreatingMessage(t *testin
 	if _, err := database.CreateMessageDelivery(ctx, p); !errors.Is(err, db.ErrMessageDeliveryExpired) {
 		t.Fatalf("expired send after prune = %v", err)
 	}
-	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM messages`).Scan(&count); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "QueryRowContext", database.QueryRowContext(ctx, `SELECT COUNT(*) FROM messages`).Scan(&count))
 	if count != 1 {
 		t.Fatalf("pruned retry stored %d messages", count)
 	}
@@ -109,9 +95,7 @@ func TestMessageDelivery_ErasureRemovesOnlySubjectsReceipts(t *testing.T) {
 		t.Fatal(err)
 	}
 	var count int
-	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM message_delivery_receipts WHERE user_id = ?`, subject).Scan(&count); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "QueryRowContext", database.QueryRowContext(ctx, `SELECT COUNT(*) FROM message_delivery_receipts WHERE user_id = ?`, subject).Scan(&count))
 	if count != 0 {
 		t.Fatalf("erased sender left %d receipts", count)
 	}
@@ -129,9 +113,7 @@ func TestMessageDelivery_FailedReceiptInsertRollsBackMessageMentionsAndAttachmen
 	p := storageDeliveryParams(userID, seedChannel(t, database, "general"))
 	p.MentionedUserIDs = []int64{other}
 	p.AttachmentIDs = []string{"owned"}
-	if err := database.CreateAttachment(ctx, "owned", userID, "a.txt", "a.txt", "text/plain", 1, nil, nil); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateAttachment", database.CreateAttachment(ctx, "owned", userID, "a.txt", "a.txt", "text/plain", 1, nil, nil))
 	if _, err := database.ExecContext(ctx, `CREATE TRIGGER fail_delivery BEFORE INSERT ON message_delivery_receipts BEGIN SELECT RAISE(ABORT, 'disk-write-simulation'); END`); err != nil {
 		t.Fatal(err)
 	}
@@ -140,9 +122,7 @@ func TestMessageDelivery_FailedReceiptInsertRollsBackMessageMentionsAndAttachmen
 	}
 	for _, query := range []string{`SELECT COUNT(*) FROM messages`, `SELECT COUNT(*) FROM message_mentions`, `SELECT COUNT(*) FROM message_delivery_receipts`} {
 		var count int
-		if err := database.QueryRowContext(ctx, query).Scan(&count); err != nil {
-			t.Fatal(err)
-		}
+		mustDo(t, "QueryRowContext", database.QueryRowContext(ctx, query).Scan(&count))
 		if count != 0 {
 			t.Fatalf("partial commit: %s = %d", query, count)
 		}
@@ -170,14 +150,10 @@ func TestCreateMessageDelivery_ReportsLinkedAttachmentIDs(t *testing.T) {
 	p := storageDeliveryParams(userID, seedChannel(t, database, "general"))
 	p.AttachmentIDs = []string{"mine", "theirs", "gone"}
 	for id, up := range map[string]int64{"mine": userID, "theirs": other} {
-		if err := database.CreateAttachment(ctx, id, up, "a.txt", id, "text/plain", 1, nil, nil); err != nil {
-			t.Fatal(err)
-		}
+		mustDo(t, "CreateAttachment", database.CreateAttachment(ctx, id, up, "a.txt", id, "text/plain", 1, nil, nil))
 	}
 	got, err := database.CreateMessageDelivery(ctx, p)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateMessageDelivery", err)
 	if len(got.LinkedAttachmentIDs) != 1 || got.LinkedAttachmentIDs[0] != "mine" {
 		t.Fatalf("LinkedAttachmentIDs = %v, want [mine]", got.LinkedAttachmentIDs)
 	}

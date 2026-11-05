@@ -29,10 +29,7 @@ func TestAdminDeleteChannel_UnlinksAttachmentsForReclaim(t *testing.T) {
 	); err != nil {
 		t.Fatalf("CreateAttachment: %v", err)
 	}
-	msgID, err := database.CreateMessage(ctx, chID, userID, "with attachment", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	msgID := mustCreateMessage(t, database, chID, userID, "with attachment", nil)
 	if n, err := database.LinkAttachmentsToMessage(ctx, msgID, userID, []string{"att-cascade-1"}); err != nil || len(n) != 1 {
 		t.Fatalf("LinkAttachmentsToMessage: n=%d err=%v", len(n), err)
 	}
@@ -42,16 +39,12 @@ func TestAdminDeleteChannel_UnlinksAttachmentsForReclaim(t *testing.T) {
 		t.Fatalf("precondition: attachment should exist before the delete (err=%v)", err)
 	}
 
-	if err := database.AdminDeleteChannel(ctx, chID); err != nil {
-		t.Fatalf("AdminDeleteChannel: %v", err)
-	}
+	mustDo(t, "AdminDeleteChannel", database.AdminDeleteChannel(ctx, chID))
 
 	// The row must SURVIVE the cascade — that is the whole point. Under the
 	// old ON DELETE CASCADE it was gone here and the file became unreachable.
 	att, err := database.GetAttachmentByID(ctx, "att-cascade-1")
-	if err != nil {
-		t.Fatalf("GetAttachmentByID after channel delete: %v", err)
-	}
+	mustDo(t, "GetAttachmentByID after channel delete", err)
 	if att == nil {
 		t.Fatal("attachment row was destroyed by the channel-delete cascade — its file is now unreclaimable on disk")
 	}
@@ -59,9 +52,7 @@ func TestAdminDeleteChannel_UnlinksAttachmentsForReclaim(t *testing.T) {
 	// ...and it must now look like an ordinary orphan, so the existing sweep
 	// reclaims it and reports the stored filename for unlinking from disk.
 	files, err := database.DeleteOrphanedAttachments(ctx, time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC))
-	if err != nil {
-		t.Fatalf("DeleteOrphanedAttachments: %v", err)
-	}
+	mustDo(t, "DeleteOrphanedAttachments", err)
 	if len(files) != 1 || files[0] != "stored-cascade.txt" {
 		t.Fatalf("orphan sweep returned %v, want exactly [stored-cascade.txt]", files)
 	}

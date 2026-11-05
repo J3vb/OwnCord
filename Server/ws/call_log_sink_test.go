@@ -203,14 +203,7 @@ func TestCallLog_JoinReachesDMThroughHub(t *testing.T) {
 	t.Parallel()
 	// The fully migrated schema: the call tables are not in the hand-written
 	// handler schema.
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	database := openMigratedDB(t)
 	limiter := auth.NewRateLimiter()
 	svc := service.New(database, limiter)
 	hub := newTestHubDeps(t, database, limiter, svc)
@@ -227,10 +220,7 @@ func TestCallLog_JoinReachesDMThroughHub(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	send := make(chan []byte, 64)
-	c := ws.NewTestClientWithUser(hub, bob, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	_, send := connectClient(t, hub, bob, 0, 64)
 
 	ctx := t.Context()
 	stop := svc.CallLog.StartCallLogWorker(ctx)
@@ -258,14 +248,7 @@ func TestCallLog_JoinReachesDMThroughHub(t *testing.T) {
 // call row the caller's join produced.
 func TestCallLog_DeclineAddsNoParticipant(t *testing.T) {
 	t.Parallel()
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	database := openMigratedDB(t)
 	limiter := auth.NewRateLimiter()
 	svc := service.New(database, limiter)
 	hub := newTestHubDeps(t, database, limiter, svc)
@@ -282,10 +265,7 @@ func TestCallLog_DeclineAddsNoParticipant(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	send := make(chan []byte, 64)
-	c := ws.NewTestClientWithUser(hub, bob, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, bob, 0, 64)
 
 	ctx := t.Context()
 	stop := svc.CallLog.StartCallLogWorker(ctx)
@@ -295,7 +275,7 @@ func TestCallLog_DeclineAddsNoParticipant(t *testing.T) {
 	}
 	svc.Voice.NoteJoinCompleted(dm.ID, alice.ID)
 
-	raw, _ := json.Marshal(map[string]any{"type": "call_decline", "payload": map[string]any{"channel_id": dm.ID}})
+	raw := envelope("call_decline", map[string]any{"channel_id": dm.ID})
 	hub.HandleMessageForTest(c, raw)
 
 	deadline := time.After(10 * time.Second)

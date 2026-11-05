@@ -64,10 +64,7 @@ func TestClientUpdate_UnverifiableManifestIsNotAdvertised(t *testing.T) {
 	u.SetBaseURL(srv.URL)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/client-update/windows-x86_64-nsis/1.0.0", nil)
-	rr := httptest.NewRecorder()
-	buildClientUpdateRouter(u).ServeHTTP(rr, req)
+	rr := serveRequest(buildClientUpdateRouter(u), req)
 
-	if rr.Code != http.StatusNoContent {
-		t.Fatalf("status = %d, want 204 (unverifiable manifest must not be advertised); body: %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusNoContent)
 }

@@ -44,21 +44,15 @@ func TestMoveReadPointer_BoundsPlansUseIndexes(t *testing.T) {
 func queryPlan(t *testing.T, database *db.DB, query string, args ...any) []string {
 	t.Helper()
 	rows, err := database.SQLReaderDB().QueryContext(context.Background(), "EXPLAIN QUERY PLAN "+query, args...)
-	if err != nil {
-		t.Fatalf("EXPLAIN QUERY PLAN: %v", err)
-	}
+	mustDo(t, "EXPLAIN QUERY PLAN", err)
 	defer rows.Close() //nolint:errcheck
 	var plan []string
 	for rows.Next() {
 		var id, parent, notUsed int
 		var detail string
-		if err := rows.Scan(&id, &parent, &notUsed, &detail); err != nil {
-			t.Fatalf("scan plan row: %v", err)
-		}
+		mustDo(t, "scan plan row", rows.Scan(&id, &parent, &notUsed, &detail))
 		plan = append(plan, detail)
 	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("plan rows: %v", err)
-	}
+	mustDo(t, "plan rows", rows.Err())
 	return plan
 }

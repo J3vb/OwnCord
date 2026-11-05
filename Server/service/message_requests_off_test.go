@@ -24,12 +24,9 @@ func setPrivacy(t *testing.T, database *db.DB, userID int64, allowDMs, requests 
 
 func sendFirst(t *testing.T, svc *Services, from int64, content string) *SendMessageResult {
 	t.Helper()
-	res, err := svc.Messages.SendMessage(context.Background(), SendMessageParams{
+	res := mustSendMessage(context.Background(), t, svc.Messages, SendMessageParams{
 		ChannelID: 50, UserID: from, Username: "u", Content: content,
 	})
-	if err != nil {
-		t.Fatalf("SendMessage: %v", err)
-	}
 	return res
 }
 
@@ -317,9 +314,7 @@ func TestRequestsOff_BlockDuringFirstSendStages(t *testing.T) {
 	if n := countRows(t, database, `SELECT COUNT(*) FROM dm_open_state WHERE user_id = 2`); n != 0 {
 		t.Errorf("recipient dm_open_state rows = %d, want 0", n)
 	}
-	if err := database.UnblockUser(ctx, 2, 1); err != nil {
-		t.Fatalf("UnblockUser: %v", err)
-	}
+	mustDo(t, "UnblockUser", database.UnblockUser(ctx, 2, 1))
 	if n := countRows(t, database, `SELECT COUNT(*) FROM trusted_senders WHERE recipient_id = 2 AND sender_id = 1`); n != 0 {
 		t.Errorf("recipient trust rows after unblock = %d, want 0", n)
 	}

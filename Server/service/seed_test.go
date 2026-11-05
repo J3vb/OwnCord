@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
 // This file provides real in-memory SQLite test helpers for the service
@@ -21,13 +22,9 @@ import (
 func newTestDB(t testing.TB) *db.DB {
 	t.Helper()
 	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
+	mustDo(t, "db.Open", err)
 	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("db.Migrate: %v", err)
-	}
+	mustDo(t, "db.Migrate", db.Migrate(database))
 	return database
 }
 
@@ -215,4 +212,60 @@ func nullStr(s string) any {
 		return nil
 	}
 	return s
+}
+
+// seedMemberRole upserts the default member role (position 1) with perms.
+func seedMemberRole(t testing.TB, database *db.DB, perms int64) {
+	t.Helper()
+	seedRole(t, database, &db.Role{ID: permissions.MemberRoleID, Name: "member", Permissions: perms, Position: 1})
+}
+
+// seedModeratorRole upserts the default moderator role (position 10) with perms.
+func seedModeratorRole(t testing.TB, database *db.DB, perms int64) {
+	t.Helper()
+	seedRole(t, database, &db.Role{ID: permissions.ModeratorRoleID, Name: "moderator", Permissions: perms, Position: 10})
+}
+
+// newMessageServiceOn builds a MessageService with the production permission
+// stack over database and no rate limiter.
+func newMessageServiceOn(database *db.DB) *MessageService {
+	return NewMessageService(database, NewPermissionService(database, permissions.NewChecker(database)), nil)
+}
+
+// seedAliceAndModBob seeds the member and moderator roles with the given
+// permissions, plus alice (user 1, member) and mod_bob (user 2, moderator).
+func seedAliceAndModBob(t *testing.T, database *db.DB, memberPerms, moderatorPerms int64) {
+	t.Helper()
+	seedMemberRole(t, database, memberPerms)
+	seedModeratorRole(t, database, moderatorPerms)
+	seedUser(t, database, &db.User{ID: 1, Username: "alice"})
+	seedUser(t, database, &db.User{ID: 2, Username: "mod_bob"})
+	seedUserRole(t, database, 1, permissions.MemberRoleID)
+	seedUserRole(t, database, 2, permissions.ModeratorRoleID)
+}
+
+// seedAliceBobDM seeds the member role with perms, alice (1) and bob (2) as
+// members, and the one-to-one DM channel 50 between them.
+func seedAliceBobDM(t *testing.T, database *db.DB, memberPerms int64) {
+	t.Helper()
+	seedMemberRole(t, database, memberPerms)
+	seedUser(t, database, &db.User{ID: 1, Username: "alice"})
+	seedUser(t, database, &db.User{ID: 2, Username: "bob"})
+	seedUserRole(t, database, 1, permissions.MemberRoleID)
+	seedUserRole(t, database, 2, permissions.MemberRoleID)
+	seedChannel(t, database, &db.Channel{ID: 50, Name: "dm-1-2", Type: "dm"})
+	seedDMParticipant(t, database, 50, 1)
+	seedDMParticipant(t, database, 50, 2)
+}
+
+// seedAliceAndMallory seeds the member role with perms, two online members
+// (alice 1, mallory 2) and the text channel 10.
+func seedAliceAndMallory(t *testing.T, database *db.DB, memberPerms int64) {
+	t.Helper()
+	seedMemberRole(t, database, memberPerms)
+	seedUser(t, database, &db.User{ID: 1, Username: "alice", Status: "online"})
+	seedUser(t, database, &db.User{ID: 2, Username: "mallory", Status: "online"})
+	seedUserRole(t, database, 1, permissions.MemberRoleID)
+	seedUserRole(t, database, 2, permissions.MemberRoleID)
+	seedChannel(t, database, &db.Channel{ID: 10, Name: "general", Type: "text"})
 }

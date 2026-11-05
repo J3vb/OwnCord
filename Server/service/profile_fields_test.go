@@ -31,9 +31,7 @@ func TestUpdateProfile_SetsAndClearsDisplayNameAndAbout(t *testing.T) {
 
 	name, about := "Ada L.", "counts on it"
 	u, err := svc.UpdateProfile(ctx, 1, ProfilePatch{Username: "ada", DisplayName: &name, About: &about})
-	if err != nil {
-		t.Fatalf("UpdateProfile: %v", err)
-	}
+	mustDo(t, "UpdateProfile", err)
 	if u.DisplayName == nil || *u.DisplayName != name {
 		t.Fatalf("display_name = %v, want %q", u.DisplayName, name)
 	}
@@ -44,9 +42,7 @@ func TestUpdateProfile_SetsAndClearsDisplayNameAndAbout(t *testing.T) {
 	// A patch that mentions neither field must leave both standing — the
 	// update writes every column, so this is the merge doing its job.
 	u, err = svc.UpdateProfile(ctx, 1, ProfilePatch{Username: "ada"})
-	if err != nil {
-		t.Fatalf("UpdateProfile (username only): %v", err)
-	}
+	mustDo(t, "UpdateProfile (username only)", err)
 	if u.DisplayName == nil || u.About == nil {
 		t.Fatalf("a username-only patch cleared other fields: %v / %v", u.DisplayName, u.About)
 	}
@@ -54,9 +50,7 @@ func TestUpdateProfile_SetsAndClearsDisplayNameAndAbout(t *testing.T) {
 	// An explicit empty string clears.
 	empty := ""
 	u, err = svc.UpdateProfile(ctx, 1, ProfilePatch{Username: "ada", DisplayName: &empty, About: &empty})
-	if err != nil {
-		t.Fatalf("UpdateProfile (clear): %v", err)
-	}
+	mustDo(t, "UpdateProfile (clear)", err)
 	if u.DisplayName != nil || u.About != nil {
 		t.Fatalf("expected cleared, got %v / %v", u.DisplayName, u.About)
 	}
@@ -116,10 +110,7 @@ func TestUpdateProfile_ConcurrentUpdatesSerializePerUser(t *testing.T) {
 		t.Errorf("UpdateProfile's read-merge-write overlapped %d times, want 0 (must be serialized per user)", got)
 	}
 
-	u, err := database.GetUserByID(ctx, 1)
-	if err != nil {
-		t.Fatalf("GetUserByID: %v", err)
-	}
+	u := mustGetUserByID(t, database, 1)
 	if u.DisplayName == nil || *u.DisplayName != "Ada L." {
 		t.Errorf("display_name = %v, want %q — must not be reverted by a concurrent update", u.DisplayName, "Ada L.")
 	}
@@ -151,9 +142,7 @@ func TestUpdateProfile_AvatarOnlyPatchDoesNotOverwriteUsername(t *testing.T) {
 	// after the fix (it no longer fills Username from its stale snapshot).
 	avatarURL := "/api/v1/files/abc"
 	u, err := svc.UpdateProfile(ctx, 1, ProfilePatch{Avatar: &avatarURL})
-	if err != nil {
-		t.Fatalf("avatar-only UpdateProfile: %v", err)
-	}
+	mustDo(t, "avatar-only UpdateProfile", err)
 	if u.Username != "bob" {
 		t.Fatalf("username = %q, want %q — an avatar-only patch must not revert a concurrent rename", u.Username, "bob")
 	}
@@ -161,10 +150,7 @@ func TestUpdateProfile_AvatarOnlyPatchDoesNotOverwriteUsername(t *testing.T) {
 		t.Fatalf("avatar = %v, want %q — the avatar itself must still be applied", u.Avatar, avatarURL)
 	}
 
-	stored, err := database.GetUserByID(ctx, 1)
-	if err != nil {
-		t.Fatalf("GetUserByID: %v", err)
-	}
+	stored := mustGetUserByID(t, database, 1)
 	if stored.Username != "bob" {
 		t.Fatalf("stored username = %q, want %q", stored.Username, "bob")
 	}
@@ -256,17 +242,13 @@ func TestSetCustomStatus_RoundTripClearAndBound(t *testing.T) {
 	svc, database := newUserSvc(t)
 	ctx := context.Background()
 
-	if err := svc.SetCustomStatus(ctx, 1, "  <i>debugging</i>  "); err != nil {
-		t.Fatalf("SetCustomStatus: %v", err)
-	}
+	mustDo(t, "SetCustomStatus", svc.SetCustomStatus(ctx, 1, "  <i>debugging</i>  "))
 	u, _ := database.GetUserByID(ctx, 1)
 	if u.CustomStatus == nil || *u.CustomStatus != "debugging" {
 		t.Fatalf("custom_status = %v, want sanitized+trimmed %q", u.CustomStatus, "debugging")
 	}
 
-	if err := svc.SetCustomStatus(ctx, 1, "   "); err != nil {
-		t.Fatalf("SetCustomStatus (blank): %v", err)
-	}
+	mustDo(t, "SetCustomStatus (blank)", svc.SetCustomStatus(ctx, 1, "   "))
 	u, _ = database.GetUserByID(ctx, 1)
 	if u.CustomStatus != nil {
 		t.Fatalf("whitespace-only text should clear, got %q", *u.CustomStatus)
@@ -280,12 +262,8 @@ func TestSetCustomStatus_RoundTripClearAndBound(t *testing.T) {
 func TestClearCustomStatus(t *testing.T) {
 	svc, database := newUserSvc(t)
 	ctx := context.Background()
-	if err := svc.SetCustomStatus(ctx, 1, "afk"); err != nil {
-		t.Fatalf("SetCustomStatus: %v", err)
-	}
-	if err := svc.ClearCustomStatus(ctx, 1); err != nil {
-		t.Fatalf("ClearCustomStatus: %v", err)
-	}
+	mustDo(t, "SetCustomStatus", svc.SetCustomStatus(ctx, 1, "afk"))
+	mustDo(t, "ClearCustomStatus", svc.ClearCustomStatus(ctx, 1))
 	u, _ := database.GetUserByID(ctx, 1)
 	if u.CustomStatus != nil {
 		t.Fatalf("custom_status = %q, want nil", *u.CustomStatus)
@@ -307,9 +285,7 @@ func TestHandlePresenceUpdate_AcceptsInvisibleAndCarriesCustomStatus(t *testing.
 	text := "  <b>away</b>  "
 	res, err := svc.HandlePresenceUpdate(ctx, 1, db.StatusInvisible, &text, nil, nil)
 	got := res.CustomStatus
-	if err != nil {
-		t.Fatalf("HandlePresenceUpdate: %v", err)
-	}
+	mustDo(t, "HandlePresenceUpdate", err)
 	if got == nil || *got != "away" {
 		t.Fatalf("returned custom status = %v, want sanitized %q", got, "away")
 	}
@@ -326,9 +302,7 @@ func TestHandlePresenceUpdate_AcceptsInvisibleAndCarriesCustomStatus(t *testing.
 	// blank everyone else's copy several times an hour.
 	res, err = svc.HandlePresenceUpdate(ctx, 1, db.StatusIdle, nil, nil, nil)
 	got = res.CustomStatus
-	if err != nil {
-		t.Fatalf("HandlePresenceUpdate (bare): %v", err)
-	}
+	mustDo(t, "HandlePresenceUpdate (bare)", err)
 	if got == nil || *got != "away" {
 		t.Fatalf("bare status flip returned %v, want the stored %q", got, "away")
 	}
@@ -506,9 +480,7 @@ func TestVisibleText_CapCountsAfterCollapse(t *testing.T) {
 	if len([]rune(spaced)) <= MaxCustomStatusLen {
 		t.Fatalf("test input must exceed the cap before collapsing, has %d runes", len([]rune(spaced)))
 	}
-	if err := svc.SetCustomStatus(ctx, 1, spaced); err != nil {
-		t.Fatalf("SetCustomStatus(over the cap only by spaces): %v", err)
-	}
+	mustDo(t, "SetCustomStatus(over the cap only by spaces)", svc.SetCustomStatus(ctx, 1, spaced))
 	u, _ := database.GetUserByID(ctx, 1)
 	if u.CustomStatus == nil || len([]rune(*u.CustomStatus)) > MaxCustomStatusLen {
 		t.Fatalf("stored status = %v, want within the cap", u.CustomStatus)
@@ -535,9 +507,7 @@ func TestGroupDMName_CharacterRules(t *testing.T) {
 		t.Fatalf("CreateGroupDM with a newline in the name = %v, want ErrBadRequest", err)
 	}
 	res, err := svc.CreateGroupDM(ctx, 1, []int64{2, 3}, "book   club")
-	if err != nil {
-		t.Fatalf("CreateGroupDM: %v", err)
-	}
+	mustDo(t, "CreateGroupDM", err)
 	if res.Channel.Name != "book club" {
 		t.Fatalf("group name = %q, want collapsed %q", res.Channel.Name, "book club")
 	}

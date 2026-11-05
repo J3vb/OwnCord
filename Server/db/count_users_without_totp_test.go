@@ -27,9 +27,7 @@ func TestCountUsersWithoutTOTP_LapsedTempBanStillCounts(t *testing.T) {
 	}
 
 	count, err := database.CountUsersWithoutTOTP(ctx)
-	if err != nil {
-		t.Fatalf("CountUsersWithoutTOTP: %v", err)
-	}
+	mustDo(t, "CountUsersWithoutTOTP", err)
 	if count != 1 {
 		t.Fatalf("CountUsersWithoutTOTP = %d, want 1 (lapsed-ban user without TOTP must still be counted since they can still log in)", count)
 	}
@@ -50,9 +48,7 @@ func TestCountUsersWithoutTOTP_ActiveTempBanExcluded(t *testing.T) {
 	}
 
 	count, err := database.CountUsersWithoutTOTP(ctx)
-	if err != nil {
-		t.Fatalf("CountUsersWithoutTOTP: %v", err)
-	}
+	mustDo(t, "CountUsersWithoutTOTP", err)
 	if count != 0 {
 		t.Fatalf("CountUsersWithoutTOTP = %d, want 0 (actively banned user without TOTP cannot log in and must not block require_2fa)", count)
 	}

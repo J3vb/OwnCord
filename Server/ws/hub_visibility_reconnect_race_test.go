@@ -44,10 +44,7 @@ func TestRefreshChannelVisibility_ReconnectDuringFanoutForcesFullResync(t *testi
 	if err != nil || ch == nil {
 		t.Fatalf("GetChannel: %v", err)
 	}
-	user, err := database.GetUserByID(ctx, uid)
-	if err != nil || user == nil {
-		t.Fatalf("GetUserByID: %v", err)
-	}
+	user := mustGetUser(t, database, uid)
 
 	h := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	h.RegisterNowForTest(NewTestClientWithUser(h, user, 0, make(chan []byte, 8)))
@@ -79,10 +76,7 @@ func TestRevokeUnreadableChannels_ReconnectDuringPassForcesFullResync(t *testing
 	seedDemotedRole(t, database)
 	uid := seedHarvestVoiceUser(t, database, "revoke-resync-user")
 	chID := mustCreateTextChannel(t, database, "revoke-resync-channel")
-	user, err := database.GetUserByID(ctx, uid)
-	if err != nil || user == nil {
-		t.Fatalf("GetUserByID: %v", err)
-	}
+	user := mustGetUser(t, database, uid)
 
 	h := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	c := newClient(h, nil, user, "", 0, ctx)

@@ -20,20 +20,14 @@ func TestExecutablePath_RemainsStableAfterRename(t *testing.T) {
 	}
 
 	sourcePath, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Executable", err)
 	source, err := os.Open(sourcePath)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Open", err)
 	defer source.Close()
 
 	exePath := filepath.Join(t.TempDir(), "chatserver.exe")
 	dest, err := os.OpenFile(exePath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o700)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "OpenFile", err)
 	_, copyErr := io.Copy(dest, source)
 	closeErr := dest.Close()
 	if copyErr != nil {
@@ -53,15 +47,9 @@ func TestExecutablePath_RemainsStableAfterRename(t *testing.T) {
 func assertExecutablePathAfterRename(t *testing.T) {
 	t.Helper()
 	exePath, err := ExecutablePath()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Rename(exePath, exePath+".old"); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(exePath, []byte("replacement version"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "ExecutablePath", err)
+	mustDo(t, "Rename", os.Rename(exePath, exePath+".old"))
+	mustDo(t, "WriteFile", os.WriteFile(exePath, []byte("replacement version"), 0o600))
 
 	got, err := ExecutablePath()
 	if err != nil || got != exePath {
@@ -87,9 +75,7 @@ func TestCanReplaceExecutable_WritableDir(t *testing.T) {
 		t.Fatalf("CanReplaceExecutable = %v, want nil", err)
 	}
 	entries, err := os.ReadDir(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "ReadDir", err)
 	if len(entries) != 0 {
 		t.Errorf("probe left %d file(s) behind: %v", len(entries), entries)
 	}
@@ -103,9 +89,7 @@ func TestCanReplaceExecutable_ReadOnlyDir(t *testing.T) {
 		t.Skip("root ignores directory permissions")
 	}
 	dir := t.TempDir()
-	if err := os.Chmod(dir, 0o555); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Chmod", os.Chmod(dir, 0o555))
 	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
 
 	err := CanReplaceExecutable(filepath.Join(dir, "chatserver"))

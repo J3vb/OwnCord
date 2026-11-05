@@ -2,7 +2,6 @@ package api_test
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"testing"
@@ -37,7 +36,7 @@ func TestChannelList_FiltersOutDeniedChannels(t *testing.T) {
 	// Create member user (roleID=4, has READ_MESSAGES by default).
 	token := chTestCreateToken(t, database, "authz-member1", 4)
 
-	chVisible, _ := database.CreateChannel(context.Background(), "visible", "text", "", "", 0)
+	chVisible := mustCreateChannel(t, database, "visible", "text")
 	chHidden, _ := database.CreateChannel(context.Background(), "hidden", "text", "", "", 1)
 	_ = chVisible // used implicitly in response
 
@@ -45,14 +44,9 @@ func TestChannelList_FiltersOutDeniedChannels(t *testing.T) {
 	denyReadMessages(t, database, chHidden, permissions.MemberRoleID)
 
 	rr := chGet(t, router, "/api/v1/channels", token)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 
-	var channels []map[string]any
-	if err := json.NewDecoder(rr.Body).Decode(&channels); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	channels := decodeBody[[]map[string]any](t, rr)
 	if len(channels) != 1 {
 		t.Errorf("expected 1 visible channel, got %d", len(channels))
 	}
@@ -71,7 +65,7 @@ func TestChannelList_AdminSeesAllChannels(t *testing.T) {
 	// Owner (roleID=1) has Administrator bit — bypasses all checks.
 	token := chTestCreateToken(t, database, "authz-owner1", 1)
 
-	chA, _ := database.CreateChannel(context.Background(), "a", "text", "", "", 0)
+	chA := mustCreateChannel(t, database, "a", "text")
 	chB, _ := database.CreateChannel(context.Background(), "b", "text", "", "", 1)
 
 	// Deny READ_MESSAGES on both channels for all roles.
@@ -79,12 +73,9 @@ func TestChannelList_AdminSeesAllChannels(t *testing.T) {
 	denyReadMessages(t, database, chB, permissions.MemberRoleID)
 
 	rr := chGet(t, router, "/api/v1/channels", token)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rr.Code)
-	}
+	requireStatus(t, rr, http.StatusOK)
 
-	var channels []any
-	_ = json.NewDecoder(rr.Body).Decode(&channels)
+	channels := decodeBody[[]any](t, rr)
 	if len(channels) != 2 {
 		t.Errorf("admin should see all 2 channels, got %d", len(channels))
 	}
@@ -97,15 +88,13 @@ func TestChannelMessages_DeniedByPermission(t *testing.T) {
 	router := buildChannelRouter(database)
 
 	token := chTestCreateToken(t, database, "authz-member2", 4)
-	chID, _ := database.CreateChannel(context.Background(), "restricted", "text", "", "", 0)
+	chID := mustCreateChannel(t, database, "restricted", "text")
 
 	// Deny READ_MESSAGES for Member role on this channel.
 	denyReadMessages(t, database, chID, permissions.MemberRoleID)
 
 	rr := chGet(t, router, fmt.Sprintf("/api/v1/channels/%d/messages", chID), token)
-	if rr.Code != http.StatusForbidden {
-		t.Errorf("status = %d, want 403; body: %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusForbidden)
 }
 
 func TestChannelMessages_AdminBypassesDeny(t *testing.T) {
@@ -113,15 +102,13 @@ func TestChannelMessages_AdminBypassesDeny(t *testing.T) {
 	router := buildChannelRouter(database)
 
 	token := chTestCreateToken(t, database, "authz-owner2", 1)
-	chID, _ := database.CreateChannel(context.Background(), "restricted", "text", "", "", 0)
+	chID := mustCreateChannel(t, database, "restricted", "text")
 
 	// Deny READ_MESSAGES for Member role — should not affect Owner.
 	denyReadMessages(t, database, chID, permissions.MemberRoleID)
 
 	rr := chGet(t, router, fmt.Sprintf("/api/v1/channels/%d/messages", chID), token)
-	if rr.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200; admin should bypass deny", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusOK)
 }
 
 // ─── GET /api/v1/search: permission filtering ───────────────────────────────
@@ -137,23 +124,20 @@ func TestSearch_FiltersResultsByPermission(t *testing.T) {
 	// Member user for search.
 	memberToken := chTestCreateToken(t, database, "authz-member3", 4)
 
-	chVisible, _ := database.CreateChannel(context.Background(), "pub", "text", "", "", 0)
+	chVisible := mustCreateChannel(t, database, "pub", "text")
 	chHidden, _ := database.CreateChannel(context.Background(), "priv", "text", "", "", 1)
 
 	// Insert messages in both channels with a common keyword.
-	_, _ = database.CreateMessage(context.Background(), chVisible, owner.ID, "searchable keyword public", nil)
-	_, _ = database.CreateMessage(context.Background(), chHidden, owner.ID, "searchable keyword private", nil)
+	_ = mustCreateMessage(t, database, chVisible, owner.ID, "searchable keyword public")
+	_ = mustCreateMessage(t, database, chHidden, owner.ID, "searchable keyword private")
 
 	// Deny READ_MESSAGES on the hidden channel for members.
 	denyReadMessages(t, database, chHidden, permissions.MemberRoleID)
 
 	rr := chGet(t, router, "/api/v1/search?q=searchable", memberToken)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 
-	var resp map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	resp := decodeBody[map[string]any](t, rr)
 	results, ok := resp["results"].([]any)
 	if !ok {
 		t.Fatalf("results is not an array: %v", resp)
@@ -203,18 +187,13 @@ func TestSearch_RecentPagingKeepsReadableScope(t *testing.T) {
 	path := "/api/v1/search?q=scopedword&sort=recent&limit=1"
 	for range 10 {
 		rr := chGet(t, router, path, memberToken)
-		if rr.Code != http.StatusOK {
-			t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
-		}
-		var resp struct {
+		requireStatus(t, rr, http.StatusOK)
+		resp := decodeBody[struct {
 			Results []struct {
 				MessageID int64 `json:"message_id"`
 			} `json:"results"`
 			NextBefore *int64 `json:"next_before"`
-		}
-		if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
-			t.Fatalf("decode: %v", err)
-		}
+		}](t, rr)
 		for _, r := range resp.Results {
 			got = append(got, r.MessageID)
 		}
@@ -235,23 +214,20 @@ func TestSearch_AdminSeesAllResults(t *testing.T) {
 	token := chTestCreateToken(t, database, "authz-owner4", 1)
 	owner, _ := database.GetUserByUsername(context.Background(), "authz-owner4")
 
-	chA, _ := database.CreateChannel(context.Background(), "a", "text", "", "", 0)
+	chA := mustCreateChannel(t, database, "a", "text")
 	chB, _ := database.CreateChannel(context.Background(), "b", "text", "", "", 1)
 
-	_, _ = database.CreateMessage(context.Background(), chA, owner.ID, "findme alpha", nil)
-	_, _ = database.CreateMessage(context.Background(), chB, owner.ID, "findme beta", nil)
+	_ = mustCreateMessage(t, database, chA, owner.ID, "findme alpha")
+	_ = mustCreateMessage(t, database, chB, owner.ID, "findme beta")
 
 	// Deny READ_MESSAGES on both for member role — admin bypasses.
 	denyReadMessages(t, database, chA, permissions.MemberRoleID)
 	denyReadMessages(t, database, chB, permissions.MemberRoleID)
 
 	rr := chGet(t, router, "/api/v1/search?q=findme", token)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rr.Code)
-	}
+	requireStatus(t, rr, http.StatusOK)
 
-	var resp map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	resp := decodeBody[map[string]any](t, rr)
 	results := resp["results"].([]any)
 	if len(results) != 2 {
 		t.Errorf("admin should see all 2 results, got %d", len(results))
@@ -262,22 +238,16 @@ func TestSearch_AdminSeesAllResults(t *testing.T) {
 
 func TestChannelList_ExcludesDMChannels_Member(t *testing.T) {
 	database := newChannelTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "dm-excl-member", 4)
+	router, token := newChannelRouterAs(t, database, "dm-excl-member", 4)
 
 	// Create a normal text channel and a DM channel.
 	database.CreateChannel(context.Background(), "general", "text", "", "", 0)
 	database.ExecContext(context.Background(), `INSERT INTO channels (name, type, position) VALUES ('dm-1', 'dm', 0)`)
 
 	rr := chGet(t, router, "/api/v1/channels", token)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 
-	var channels []map[string]any
-	if err := json.NewDecoder(rr.Body).Decode(&channels); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	channels := decodeBody[[]map[string]any](t, rr)
 	for _, ch := range channels {
 		if ch["type"] == "dm" {
 			t.Errorf("DM channel should not appear in channel list, got: %v", ch["name"])
@@ -298,12 +268,9 @@ func TestChannelList_ExcludesDMChannels_Admin(t *testing.T) {
 	database.ExecContext(context.Background(), `INSERT INTO channels (name, type, position) VALUES ('dm-1', 'dm', 0)`)
 
 	rr := chGet(t, router, "/api/v1/channels", token)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rr.Code)
-	}
+	requireStatus(t, rr, http.StatusOK)
 
-	var channels []map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&channels)
+	channels := decodeBody[[]map[string]any](t, rr)
 	for _, ch := range channels {
 		if ch["type"] == "dm" {
 			t.Errorf("DM channel should not appear even for admin, got: %v", ch["name"])

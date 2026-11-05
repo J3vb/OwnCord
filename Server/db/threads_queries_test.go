@@ -21,22 +21,16 @@ func newThreadCRUD(t *testing.T) threadCRUD {
 	ctx := context.Background()
 	d := openMigratedMemory(t)
 	u, err := d.CreateUser(ctx, "crud", "hash", 4)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateUser", err)
 	p, err := d.CreateChannel(ctx, "general", "text", "", "", 0)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateChannel", err)
 	return threadCRUD{d: d, user: u, parent: p}
 }
 
 func (f threadCRUD) post(t *testing.T, channel int64, content string) int64 {
 	t.Helper()
 	id, err := f.d.CreateMessage(context.Background(), channel, f.user, content, nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	mustDo(t, "CreateMessage", err)
 	return id
 }
 
@@ -93,13 +87,9 @@ func TestCreateThread_RefusesAnUnavailableStarter(t *testing.T) {
 	f := newThreadCRUD(t)
 	ctx := context.Background()
 	other, err := f.d.CreateChannel(ctx, "other", "text", "", "", 1)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateChannel", err)
 	deleted := f.post(t, f.parent, "gone")
-	if err := f.d.DeleteMessage(ctx, deleted, f.user, false); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "DeleteMessage", f.d.DeleteMessage(ctx, deleted, f.user, false))
 	system := f.post(t, f.parent, "joined")
 	if _, err := f.d.ExecContext(ctx, `UPDATE messages SET kind = 1 WHERE id = ?`, system); err != nil {
 		t.Fatal(err)
@@ -182,9 +172,7 @@ func TestThreadCountsOnlyLiveUserMessagesAndPostReopens(t *testing.T) {
 	th := f.create(t, "busy")
 	first := f.post(t, th.ID, "one")
 	f.post(t, th.ID, "two")
-	if err := f.d.DeleteMessage(ctx, first, f.user, false); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "DeleteMessage", f.d.DeleteMessage(ctx, first, f.user, false))
 	got, err := f.d.GetThread(ctx, th.ID)
 	if err != nil || got == nil {
 		t.Fatalf("GetThread = %+v, %v", got, err)
@@ -268,9 +256,7 @@ func TestListThreads_KeysetPagesByActivityAndFiltersArchived(t *testing.T) {
 	}
 	// A thread of another parent never shows up.
 	other, err := f.d.CreateChannel(ctx, "other", "text", "", "", 1)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateChannel", err)
 	if _, _, err := f.d.CreateThread(ctx, db.NewThread{ParentID: other, StarterMessageID: f.post(t, other, "s"), OwnerID: f.user, Name: "z", AutoArchiveMinutes: 60}); err != nil {
 		t.Fatal(err)
 	}
@@ -373,9 +359,7 @@ func TestMessageHistoryCarriesTheThreadOnItsStarter(t *testing.T) {
 	plain := f.post(t, f.parent, "no thread")
 
 	msgs, err := f.d.GetMessagesForAPI(ctx, f.parent, 0, 50, f.user)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "GetMessagesForAPI", err)
 	byID := map[int64]db.MessageAPIResponse{}
 	for _, m := range msgs {
 		byID[m.ID] = m

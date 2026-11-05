@@ -76,9 +76,7 @@ func TestUpdateRole_ServiceInvalidatesThenNotifies(t *testing.T) {
 	svc, database := newRoleCRUDService(t)
 	ctx := context.Background()
 	created, err := svc.CreateRole(ctx, 1, RoleInput{Name: new("Bots"), Permissions: new(permissions.ReadMessages)})
-	if err != nil {
-		t.Fatalf("CreateRole: %v", err)
-	}
+	mustDo(t, "CreateRole", err)
 	seedUserRole(t, database, 4, created.ID)
 	seedUserRole(t, database, 5, created.ID)
 	rec := &permNotifyRecorder{probe: roleProbe(t, svc.perms, 4)}
@@ -117,9 +115,7 @@ func TestUpdateRole_ColorOnlyEditSkipsVisibilityAndMemberUpdate(t *testing.T) {
 	svc, database := newRoleCRUDService(t)
 	ctx := context.Background()
 	created, err := svc.CreateRole(ctx, 1, RoleInput{Name: new("Bots")})
-	if err != nil {
-		t.Fatalf("CreateRole: %v", err)
-	}
+	mustDo(t, "CreateRole", err)
 	seedUserRole(t, database, 4, created.ID)
 	rec := &permNotifyRecorder{}
 	svc.SetPermissionNotifier(rec)
@@ -145,9 +141,7 @@ func TestUpdateRole_UnreadableMemberListFlushesAllAndFansOutToEveryone(t *testin
 	base, database := newRoleCRUDService(t)
 	ctx := context.Background()
 	created, err := base.CreateRole(ctx, 1, RoleInput{Name: new("Bots")})
-	if err != nil {
-		t.Fatalf("CreateRole: %v", err)
-	}
+	mustDo(t, "CreateRole", err)
 	seedUserRole(t, database, 4, created.ID)
 	svc := NewRoleService(failingMemberList{database}, base.perms)
 	rec := &permNotifyRecorder{}
@@ -158,9 +152,7 @@ func TestUpdateRole_UnreadableMemberListFlushesAllAndFansOutToEveryone(t *testin
 	if r, _ := svc.perms.GetRoleForUser(ctx, 5); r == nil || r.Top.ID != permissions.MemberRoleID {
 		t.Fatalf("warm role = %+v", r)
 	}
-	if err := database.UpdateUserRole(ctx, 5, permissions.ModeratorRoleID); err != nil {
-		t.Fatalf("UpdateUserRole: %v", err)
-	}
+	mustDo(t, "UpdateUserRole", database.UpdateUserRole(ctx, 5, permissions.ModeratorRoleID))
 
 	if _, _, err := svc.UpdateRole(ctx, 1, created.ID, RoleInput{
 		Name: new("Robots"), Permissions: new(permissions.ReadMessages),
@@ -209,9 +201,7 @@ func TestReorderRoles_FlushesCacheThenNotifies(t *testing.T) {
 
 	// Reorder the roles below the Owner: Admin, Moderator, Member -> reversed.
 	updated, err := svc.ReorderRoles(ctx, 1, []int64{permissions.MemberRoleID, permissions.ModeratorRoleID, permissions.AdminRoleID})
-	if err != nil {
-		t.Fatalf("ReorderRoles: %v", err)
-	}
+	mustDo(t, "ReorderRoles", err)
 	if len(updated) == 0 || len(rec.events) != 1 || !reflect.DeepEqual(rec.events[0].fan, RoleFanout{Roles: true}) {
 		t.Fatalf("events = %+v", rec.events)
 	}
@@ -227,9 +217,7 @@ func TestDeleteRole_RevokesInlineThenNotifies(t *testing.T) {
 	svc, database := newRoleCRUDService(t)
 	ctx := context.Background()
 	role, err := svc.CreateRole(ctx, 1, RoleInput{Name: new("Contractor"), Position: new(30)})
-	if err != nil {
-		t.Fatalf("CreateRole: %v", err)
-	}
+	mustDo(t, "CreateRole", err)
 	seedUserRole(t, database, 4, role.ID)
 	seedUserRole(t, database, 5, role.ID)
 	rec := &permNotifyRecorder{probe: roleProbe(t, svc.perms, 4)}
@@ -258,9 +246,7 @@ func TestDeleteRole_InlineRevokeIsCappedAndWorkerGetsEveryone(t *testing.T) {
 	svc, database := newRoleCRUDService(t)
 	ctx := context.Background()
 	role, err := svc.CreateRole(ctx, 1, RoleInput{Name: new("Crowd"), Position: new(30)})
-	if err != nil {
-		t.Fatalf("CreateRole: %v", err)
-	}
+	mustDo(t, "CreateRole", err)
 	total := roleRevokeInline + 5
 	for i := range total {
 		id := int64(100 + i)
@@ -406,9 +392,7 @@ func TestRoleOverride_UnreadableMemberListFlushesEveryCachedMask(t *testing.T) {
 	if r, _ := svc.perms.GetRoleForUser(ctx, 33); r == nil || r.Top.ID != permissions.MemberRoleID {
 		t.Fatalf("warm role = %+v", r)
 	}
-	if err := database.UpdateUserRole(ctx, 33, permissions.ModeratorRoleID); err != nil {
-		t.Fatalf("UpdateUserRole: %v", err)
-	}
+	mustDo(t, "UpdateUserRole", database.UpdateUserRole(ctx, 33, permissions.ModeratorRoleID))
 
 	res, err := svc.PutRoleOverride(ctx, 7, mod, ch, low.ID, 0, permissions.ReadMessages)
 	if err != nil || !res.AffectedAll {

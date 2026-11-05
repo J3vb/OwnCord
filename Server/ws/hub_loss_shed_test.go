@@ -127,15 +127,10 @@ func (r audienceFailingReader) GetMemberRoles(ctx context.Context, userID int64)
 func TestChannelReadAudience_UnresolvedUserIsMarkedForResync(t *testing.T) {
 	ctx := context.Background()
 	database := newTeardownTestDB(t)
-	chID, err := database.CreateChannel(ctx, "aud-text", "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
+	chID := mustCreateChannel(t, database, "aud-text", "text")
 	var ids [3]int64
 	for i, name := range []string{"aud-a", "aud-b", "aud-c"} {
-		if ids[i], err = database.CreateUser(ctx, name, "hash", 4); err != nil {
-			t.Fatalf("CreateUser: %v", err)
-		}
+		ids[i] = mustCreateUser(t, database, name, 4)
 	}
 	h := newTestHub(t, database, nil, nil)
 	h.perms = nil // the bare-hub branch reads the Dispatch reader

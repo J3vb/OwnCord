@@ -2,7 +2,6 @@ package api_test
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -68,8 +67,7 @@ func (f *searchFixture) search(t *testing.T, tok, query string, extra ...string)
 		path += "&" + e
 	}
 	rr := chGet(t, f.router, path, tok)
-	var body searchBody
-	_ = json.Unmarshal(rr.Body.Bytes(), &body)
+	body := decodeBody[searchBody](t, rr)
 	return rr.Code, rr.Body.String(), body
 }
 

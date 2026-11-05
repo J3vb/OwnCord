@@ -45,8 +45,7 @@ func TestDeleteAccount_ResolvesClientIPThroughTrustedProxy(t *testing.T) {
 			r := chi.NewRouter()
 			api.MountAuthRoutes(r, rec, api.AuthMiddleware(service.NewSessionService(database)), limiter, tc.trusted)
 
-			hash, _ := auth.HashPassword("correctPass1")
-			uid, _ := database.CreateUser(context.Background(), "deleteip", hash, 4)
+			uid := seedUser(t, database, "deleteip", "correctPass1", 4)
 			token, _ := auth.GenerateToken()
 			_, _ = database.CreateSession(context.Background(), uid, auth.HashToken(token), "test", "10.0.0.1")
 
@@ -55,12 +54,9 @@ func TestDeleteAccount_ResolvesClientIPThroughTrustedProxy(t *testing.T) {
 			req.Header.Set("Authorization", "Bearer "+token)
 			req.Header.Set("X-Forwarded-For", "203.0.113.7")
 			req.RemoteAddr = "10.0.0.1:4000"
-			rr := httptest.NewRecorder()
-			r.ServeHTTP(rr, req)
+			rr := serveRequest(r, req)
 
-			if rr.Code != http.StatusNoContent {
-				t.Fatalf("status = %d, want 204; body = %s", rr.Code, rr.Body.String())
-			}
+			requireStatus(t, rr, http.StatusNoContent)
 			if rec.gotIP != tc.want {
 				t.Fatalf("DeleteAccount ip = %q, want %q", rec.gotIP, tc.want)
 			}

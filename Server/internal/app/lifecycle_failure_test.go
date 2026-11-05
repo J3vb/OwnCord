@@ -42,9 +42,7 @@ import (
 func freePort(t *testing.T) int {
 	t.Helper()
 	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("probe listen: %v", err)
-	}
+	mustDo(t, "probe listen", err)
 	port := l.Addr().(*net.TCPAddr).Port
 	_ = l.Close()
 	return port
@@ -138,9 +136,7 @@ func TestAppRun_PortInUse_KeepsOldBinary(t *testing.T) {
 	t.Cleanup(func() { bindRetryEvery = prevEvery })
 
 	held, err := net.Listen("tcp", ":0")
-	if err != nil {
-		t.Fatalf("hold port: %v", err)
-	}
+	mustDo(t, "hold port", err)
 	defer held.Close() //nolint:errcheck
 	port := held.Addr().(*net.TCPAddr).Port
 

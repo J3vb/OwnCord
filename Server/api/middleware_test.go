@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -13,7 +12,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"testing/fstest"
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/api"
@@ -28,19 +26,7 @@ import (
 
 func newAPITestDB(t *testing.T) *db.DB {
 	t.Helper()
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-
-	migrFS := fstest.MapFS{
-		"001_schema.sql": {Data: apiTestSchema},
-	}
-	if err := db.MigrateFS(database, migrFS); err != nil {
-		t.Fatalf("MigrateFS: %v", err)
-	}
-	return database
+	return openSchemaDB(t, apiTestSchema)
 }
 
 // ok is a trivial handler that responds 200 OK to confirm the middleware
@@ -59,17 +45,10 @@ func withBearer(req *http.Request, token string) *http.Request {
 
 func TestAuthMiddleware_ValidToken(t *testing.T) {
 	database := newAPITestDB(t)
-	uid, _ := database.CreateUser(context.Background(), "alice", "hash", 4)
-	token, _ := auth.GenerateToken()
-	hash := auth.HashToken(token)
-	_, _ = database.CreateSession(context.Background(), uid, hash, "test", "127.0.0.1")
+	_, token, _ := seedLoginSession(t, database, "alice", 4)
 
 	h := api.AuthMiddleware(service.NewSessionService(database))(http.HandlerFunc(ok))
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	withBearer(req, token)
-	rr := httptest.NewRecorder()
-
-	h.ServeHTTP(rr, req)
+	rr := serveBearerGET(h, token)
 
 	if rr.Code != http.StatusOK {
 		t.Errorf("AuthMiddleware valid token status = %d, want %d", rr.Code, http.StatusOK)
@@ -83,10 +62,7 @@ func TestAuthMiddleware_ValidToken(t *testing.T) {
 // request.
 func TestAuthMiddleware_TouchSessionThrottled(t *testing.T) {
 	database := newAPITestDB(t)
-	uid, _ := database.CreateUser(context.Background(), "touchy", "hash", 4)
-	token, _ := auth.GenerateToken()
-	hash := auth.HashToken(token)
-	_, _ = database.CreateSession(context.Background(), uid, hash, "test", "127.0.0.1")
+	_, token, hash := seedLoginSession(t, database, "touchy", 4)
 
 	h := api.AuthMiddleware(service.NewSessionService(database))(http.HandlerFunc(ok))
 
@@ -110,9 +86,7 @@ func TestAuthMiddleware_TouchSessionThrottled(t *testing.T) {
 		t.Helper()
 		rr := httptest.NewRecorder()
 		h.ServeHTTP(rr, withBearer(httptest.NewRequest(http.MethodGet, "/", nil), token))
-		if rr.Code != http.StatusOK {
-			t.Fatalf("status = %d, want 200", rr.Code)
-		}
+		requireStatus(t, rr, http.StatusOK)
 	}
 
 	// First request: the session has never been touched by this middleware
@@ -136,10 +110,7 @@ func TestAuthMiddleware_TouchSessionThrottled(t *testing.T) {
 // inside the interval writes nothing.
 func TestAuthMiddleware_TouchSlidesExpiry(t *testing.T) {
 	database := newAPITestDB(t)
-	uid, _ := database.CreateUser(context.Background(), "slider", "hash", 4)
-	token, _ := auth.GenerateToken()
-	hash := auth.HashToken(token)
-	_, _ = database.CreateSession(context.Background(), uid, hash, "test", "127.0.0.1")
+	_, token, hash := seedLoginSession(t, database, "slider", 4)
 
 	t0 := time.Now()
 	clock := t0
@@ -167,9 +138,7 @@ func TestAuthMiddleware_TouchSlidesExpiry(t *testing.T) {
 		t.Helper()
 		rr := httptest.NewRecorder()
 		h.ServeHTTP(rr, withBearer(httptest.NewRequest(http.MethodGet, "/", nil), token))
-		if rr.Code != http.StatusOK {
-			t.Fatalf("status = %d, want 200", rr.Code)
-		}
+		requireStatus(t, rr, http.StatusOK)
 	}
 
 	backdate()
@@ -197,18 +166,14 @@ func TestAuthMiddleware_MissingToken(t *testing.T) {
 
 	h := api.AuthMiddleware(service.NewSessionService(database))(http.HandlerFunc(ok))
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rr := httptest.NewRecorder()
+	rr := serveRequest(h, req)
 
-	h.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusUnauthorized {
-		t.Errorf("AuthMiddleware no token status = %d, want 401", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusUnauthorized)
 }
 
 func TestAuthMiddleware_ValidAPIToken(t *testing.T) {
 	database := newAPITestDB(t)
-	uid, _ := database.CreateUser(context.Background(), "botuser", "hash", 4)
+	uid := mustCreateUser(t, database, "botuser", "hash", 4)
 	token, _ := auth.GenerateToken()
 	if _, err := database.CreateAPIToken(context.Background(), uid, auth.HashToken(token), "ci", nil); err != nil {
 		t.Fatalf("CreateAPIToken: %v", err)
@@ -226,13 +191,9 @@ func TestAuthMiddleware_ValidAPIToken(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	req := withBearer(httptest.NewRequest(http.MethodGet, "/", nil), token)
-	rr := httptest.NewRecorder()
+	rr := serveRequest(h, req)
 
-	h.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("API token status = %d, want 200", rr.Code)
-	}
+	requireStatus(t, rr, http.StatusOK)
 	if gotUserID != uid {
 		t.Errorf("API token authenticated as user %d, want %d", gotUserID, uid)
 	}
@@ -240,7 +201,7 @@ func TestAuthMiddleware_ValidAPIToken(t *testing.T) {
 
 func TestAuthMiddleware_RevokedAPIToken(t *testing.T) {
 	database := newAPITestDB(t)
-	uid, _ := database.CreateUser(context.Background(), "botuser2", "hash", 4)
+	uid := mustCreateUser(t, database, "botuser2", "hash", 4)
 	token, _ := auth.GenerateToken()
 	id, _ := database.CreateAPIToken(context.Background(), uid, auth.HashToken(token), "ci", nil)
 	if _, err := database.RevokeAPIToken(context.Background(), id); err != nil {
@@ -249,13 +210,9 @@ func TestAuthMiddleware_RevokedAPIToken(t *testing.T) {
 
 	h := api.AuthMiddleware(service.NewSessionService(database))(http.HandlerFunc(ok))
 	req := withBearer(httptest.NewRequest(http.MethodGet, "/", nil), token)
-	rr := httptest.NewRecorder()
+	rr := serveRequest(h, req)
 
-	h.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusUnauthorized {
-		t.Errorf("revoked API token status = %d, want 401", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusUnauthorized)
 }
 
 func TestAuthMiddleware_InvalidToken(t *testing.T) {
@@ -264,18 +221,14 @@ func TestAuthMiddleware_InvalidToken(t *testing.T) {
 	h := api.AuthMiddleware(service.NewSessionService(database))(http.HandlerFunc(ok))
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	withBearer(req, "notarealtoken")
-	rr := httptest.NewRecorder()
+	rr := serveRequest(h, req)
 
-	h.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusUnauthorized {
-		t.Errorf("AuthMiddleware invalid token status = %d, want 401", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusUnauthorized)
 }
 
 func TestAuthMiddleware_ExpiredSession(t *testing.T) {
 	database := newAPITestDB(t)
-	uid, _ := database.CreateUser(context.Background(), "bob", "hash", 4)
+	uid := mustCreateUser(t, database, "bob", "hash", 4)
 	token, _ := auth.GenerateToken()
 	hash := auth.HashToken(token)
 
@@ -287,15 +240,9 @@ func TestAuthMiddleware_ExpiredSession(t *testing.T) {
 	)
 
 	h := api.AuthMiddleware(service.NewSessionService(database))(http.HandlerFunc(ok))
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	withBearer(req, token)
-	rr := httptest.NewRecorder()
+	rr := serveBearerGET(h, token)
 
-	h.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusUnauthorized {
-		t.Errorf("AuthMiddleware expired session status = %d, want 401", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusUnauthorized)
 }
 
 func TestAuthMiddleware_MalformedAuthHeader(t *testing.T) {
@@ -311,8 +258,7 @@ func TestAuthMiddleware_MalformedAuthHeader(t *testing.T) {
 	for _, header := range cases {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		req.Header.Set("Authorization", header)
-		rr := httptest.NewRecorder()
-		h.ServeHTTP(rr, req)
+		rr := serveRequest(h, req)
 		if rr.Code != http.StatusUnauthorized {
 			t.Errorf("AuthMiddleware header=%q status = %d, want 401", header, rr.Code)
 		}
@@ -353,15 +299,9 @@ func TestAuthMiddleware_DanglingRoleUnauthorized(t *testing.T) {
 	}
 
 	h := api.AuthMiddleware(service.NewSessionService(database))(http.HandlerFunc(ok))
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	withBearer(req, token)
-	rr := httptest.NewRecorder()
+	rr := serveBearerGET(h, token)
 
-	h.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusUnauthorized {
-		t.Errorf("AuthMiddleware dangling role status = %d, want 401", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusUnauthorized)
 }
 
 // TestAuthMiddleware_DBErrorIsNotUnauthorized pins OC-0202: a transient DB
@@ -373,10 +313,7 @@ func TestAuthMiddleware_DanglingRoleUnauthorized(t *testing.T) {
 // (503) instead of tearing down a perfectly valid session.
 func TestAuthMiddleware_DBErrorIsNotUnauthorized(t *testing.T) {
 	database := newAPITestDB(t)
-	uid, _ := database.CreateUser(context.Background(), "erin", "hash", 4)
-	token, _ := auth.GenerateToken()
-	hash := auth.HashToken(token)
-	_, _ = database.CreateSession(context.Background(), uid, hash, "test", "127.0.0.1")
+	_, token, _ := seedLoginSession(t, database, "erin", 4)
 
 	h := api.AuthMiddleware(service.NewSessionService(database))(http.HandlerFunc(ok))
 
@@ -389,16 +326,12 @@ func TestAuthMiddleware_DBErrorIsNotUnauthorized(t *testing.T) {
 	}
 
 	req := withBearer(httptest.NewRequest(http.MethodGet, "/", nil), token)
-	rr := httptest.NewRecorder()
-
-	h.ServeHTTP(rr, req)
+	rr := serveRequest(h, req)
 
 	if rr.Code == http.StatusUnauthorized {
 		t.Errorf("AuthMiddleware DB error status = %d, want non-401 (503)", rr.Code)
 	}
-	if rr.Code != http.StatusServiceUnavailable {
-		t.Errorf("AuthMiddleware DB error status = %d, want 503", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusServiceUnavailable)
 }
 
 // blockingSessionStore is the real DB with AuthMiddleware's two background
@@ -432,7 +365,7 @@ func TestAuthMiddleware_BackgroundWritesAreBounded(t *testing.T) {
 		seed func(t *testing.T, database *db.DB) string
 	}{
 		{"expired session delete", func(t *testing.T, database *db.DB) string {
-			uid, _ := database.CreateUser(context.Background(), "wedge-expired", "hash", 4)
+			uid := mustCreateUser(t, database, "wedge-expired", "hash", 4)
 			token, _ := auth.GenerateToken()
 			pastTime := time.Now().Add(-time.Hour).UTC().Format("2006-01-02 15:04:05")
 			if _, err := database.ExecContext(context.Background(),
@@ -444,7 +377,7 @@ func TestAuthMiddleware_BackgroundWritesAreBounded(t *testing.T) {
 			return token
 		}},
 		{"api token touch", func(t *testing.T, database *db.DB) string {
-			uid, _ := database.CreateUser(context.Background(), "wedge-bot", "hash", 4)
+			uid := mustCreateUser(t, database, "wedge-bot", "hash", 4)
 			token, _ := auth.GenerateToken()
 			if _, err := database.CreateAPIToken(context.Background(), uid, auth.HashToken(token), "ci", nil); err != nil {
 				t.Fatalf("CreateAPIToken: %v", err)
@@ -477,67 +410,40 @@ func TestAuthMiddleware_BackgroundWritesAreBounded(t *testing.T) {
 
 func TestRequirePermission_Allowed(t *testing.T) {
 	database := newAPITestDB(t)
-	uid, _ := database.CreateUser(context.Background(), "carol", "hash", 4) // Member role = 0x663
-	token, _ := auth.GenerateToken()
-	hash := auth.HashToken(token)
-	_, _ = database.CreateSession(context.Background(), uid, hash, "test", "127.0.0.1")
+	_, token, _ := seedLoginSession(t, database, "carol", 4)
 
 	h := api.AuthMiddleware(service.NewSessionService(database))(
 		api.RequirePermission(permissions.SendMessages)(http.HandlerFunc(ok)),
 	)
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	withBearer(req, token)
-	rr := httptest.NewRecorder()
+	rr := serveBearerGET(h, token)
 
-	h.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Errorf("RequirePermission allowed status = %d, want 200", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusOK)
 }
 
 func TestRequirePermission_Forbidden(t *testing.T) {
 	database := newAPITestDB(t)
-	uid, _ := database.CreateUser(context.Background(), "dave", "hash", 4) // Member role = 0x663
-	token, _ := auth.GenerateToken()
-	hash := auth.HashToken(token)
-	_, _ = database.CreateSession(context.Background(), uid, hash, "test", "127.0.0.1")
+	_, token, _ := seedLoginSession(t, database, "dave", 4)
 
 	h := api.AuthMiddleware(service.NewSessionService(database))(
 		api.RequirePermission(permissions.ManageRoles)(http.HandlerFunc(ok)),
 	)
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	withBearer(req, token)
-	rr := httptest.NewRecorder()
+	rr := serveBearerGET(h, token)
 
-	h.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusForbidden {
-		t.Errorf("RequirePermission forbidden status = %d, want 403", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusForbidden)
 }
 
 func TestRequirePermission_Administrator_Bypass(t *testing.T) {
 	database := newAPITestDB(t)
 	// Owner role (id=1) has permissions 0x7FFFFFFF which includes ADMINISTRATOR (0x40000000)
-	uid, _ := database.CreateUser(context.Background(), "owner", "hash", 1)
-	token, _ := auth.GenerateToken()
-	hash := auth.HashToken(token)
-	_, _ = database.CreateSession(context.Background(), uid, hash, "test", "127.0.0.1")
+	_, token, _ := seedLoginSession(t, database, "owner", 1)
 
 	// Any permission should pass for ADMINISTRATOR
 	h := api.AuthMiddleware(service.NewSessionService(database))(
 		api.RequirePermission(permissions.ManageRoles)(http.HandlerFunc(ok)),
 	)
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	withBearer(req, token)
-	rr := httptest.NewRecorder()
+	rr := serveBearerGET(h, token)
 
-	h.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Errorf("RequirePermission administrator bypass status = %d, want 200", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusOK)
 }
 
 // TestRequirePermission_MultiBitRequiresAllBits pins the one behaviour the
@@ -546,23 +452,14 @@ func TestRequirePermission_Administrator_Bypass(t *testing.T) {
 // Member holds SendMessages, which was enough to make the mask non-zero.
 func TestRequirePermission_MultiBitRequiresAllBits(t *testing.T) {
 	database := newAPITestDB(t)
-	uid, _ := database.CreateUser(context.Background(), "multibit", "hash", 4) // Member role = 1635, has SendMessages, not ManageRoles
-	token, _ := auth.GenerateToken()
-	hash := auth.HashToken(token)
-	_, _ = database.CreateSession(context.Background(), uid, hash, "test", "127.0.0.1")
+	_, token, _ := seedLoginSession(t, database, "multibit", 4)
 
 	h := api.AuthMiddleware(service.NewSessionService(database))(
 		api.RequirePermission(permissions.SendMessages | permissions.ManageRoles)(http.HandlerFunc(ok)),
 	)
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	withBearer(req, token)
-	rr := httptest.NewRecorder()
+	rr := serveBearerGET(h, token)
 
-	h.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusForbidden {
-		t.Errorf("RequirePermission partial multi-bit mask status = %d, want 403", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusForbidden)
 }
 
 // TestRequirePermission_NoRoleInContext pins the fail-closed branch: the
@@ -597,13 +494,9 @@ func TestRequirePermission_NoRoleInContext(t *testing.T) {
 			)
 			req := httptest.NewRequest(http.MethodGet, "/", nil)
 			req = req.WithContext(tt.ctx(req.Context()))
-			rr := httptest.NewRecorder()
+			rr := serveRequest(h, req)
 
-			h.ServeHTTP(rr, req)
-
-			if rr.Code != http.StatusForbidden {
-				t.Errorf("RequirePermission without role status = %d, want 403", rr.Code)
-			}
+			expectStatus(t, rr, http.StatusForbidden)
 			if downstream {
 				t.Error("RequirePermission without role ran the downstream handler")
 			}
@@ -619,13 +512,9 @@ func TestRateLimitMiddleware_UnderLimit(t *testing.T) {
 	h := api.RateLimitMiddleware(limiter, "test:", 5, time.Minute)(http.HandlerFunc(ok))
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.RemoteAddr = "10.0.0.1:1234"
-	rr := httptest.NewRecorder()
+	rr := serveRequest(h, req)
 
-	h.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Errorf("RateLimitMiddleware under limit status = %d, want 200", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusOK)
 }
 
 func TestRateLimitMiddleware_OverLimit(t *testing.T) {
@@ -637,19 +526,15 @@ func TestRateLimitMiddleware_OverLimit(t *testing.T) {
 	for range limit {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		req.RemoteAddr = "10.0.0.2:1234"
-		rr := httptest.NewRecorder()
-		h.ServeHTTP(rr, req)
+		serveRequest(h, req)
 	}
 
 	// This next request should be rate-limited.
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.RemoteAddr = "10.0.0.2:1234"
-	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, req)
+	rr := serveRequest(h, req)
 
-	if rr.Code != http.StatusTooManyRequests {
-		t.Errorf("RateLimitMiddleware over limit status = %d, want 429", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusTooManyRequests)
 }
 
 func TestRateLimitMiddleware_RetryAfterHeader(t *testing.T) {
@@ -661,14 +546,12 @@ func TestRateLimitMiddleware_RetryAfterHeader(t *testing.T) {
 	for range 2 {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		req.RemoteAddr = "10.0.0.3:1234"
-		rr := httptest.NewRecorder()
-		h.ServeHTTP(rr, req)
+		serveRequest(h, req)
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.RemoteAddr = "10.0.0.3:1234"
-	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, req)
+	rr := serveRequest(h, req)
 
 	if rr.Header().Get("Retry-After") == "" {
 		t.Error("RateLimitMiddleware: missing Retry-After header on 429 response")
@@ -689,8 +572,7 @@ func TestRateLimitMiddleware_XRealIPIgnoredWithoutTrustedProxy(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		req.Header.Set("X-Real-IP", "192.168.1.1") // forged; must be ignored
 		req.RemoteAddr = "10.0.0.99:9999"
-		rr := httptest.NewRecorder()
-		h.ServeHTTP(rr, req)
+		serveRequest(h, req)
 	}
 
 	// Third request from the same RemoteAddr should be blocked — rate key is
@@ -698,12 +580,9 @@ func TestRateLimitMiddleware_XRealIPIgnoredWithoutTrustedProxy(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set("X-Real-IP", "192.168.1.1")
 	req.RemoteAddr = "10.0.0.99:9999"
-	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, req)
+	rr := serveRequest(h, req)
 
-	if rr.Code != http.StatusTooManyRequests {
-		t.Errorf("RateLimitMiddleware no-trusted-proxy status = %d, want 429", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusTooManyRequests)
 }
 
 // lockedBuffer is a goroutine-safe writer for capturing log output.
@@ -749,11 +628,8 @@ func TestRateLimitMiddleware_InvalidCIDRWarnsAtConstructionNotPerRequest(t *test
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		req.RemoteAddr = "10.0.0.1:9999"
 		req.Header.Set("X-Real-IP", "203.0.113.77")
-		rr := httptest.NewRecorder()
-		h.ServeHTTP(rr, req)
-		if rr.Code != http.StatusOK {
-			t.Fatalf("request status = %d, want 200", rr.Code)
-		}
+		rr := serveRequest(h, req)
+		requireStatus(t, rr, http.StatusOK)
 	}
 
 	if got := strings.Count(logBuf.String(), warnMsg); got != 1 {
@@ -775,20 +651,16 @@ func TestRateLimitMiddleware_XRealIPHonouredFromTrustedProxy(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		req.Header.Set("X-Real-IP", "203.0.113.5")
 		req.RemoteAddr = "10.0.0.1:9999"
-		rr := httptest.NewRecorder()
-		h.ServeHTTP(rr, req)
+		serveRequest(h, req)
 	}
 
 	// Third request with same X-Real-IP from same trusted proxy — should be blocked.
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set("X-Real-IP", "203.0.113.5")
 	req.RemoteAddr = "10.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, req)
+	rr := serveRequest(h, req)
 
-	if rr.Code != http.StatusTooManyRequests {
-		t.Errorf("RateLimitMiddleware trusted proxy X-Real-IP status = %d, want 429", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusTooManyRequests)
 }
 
 // ─── Fix 2.10: Ban expiry in AuthMiddleware ───────────────────────────────────
@@ -797,29 +669,23 @@ func TestRateLimitMiddleware_XRealIPHonouredFromTrustedProxy(t *testing.T) {
 // with no expiry cannot pass the auth middleware.
 func TestAuthMiddleware_BannedUserBlocked(t *testing.T) {
 	database := newAPITestDB(t)
-	uid, _ := database.CreateUser(context.Background(), "banneduser", "hash", 4)
+	uid := mustCreateUser(t, database, "banneduser", "hash", 4)
 	_ = database.BanUser(context.Background(), uid, "rule violation", nil) // permanent ban
 	token, _ := auth.GenerateToken()
 	hash := auth.HashToken(token)
 	_, _ = database.CreateSession(context.Background(), uid, hash, "test", "127.0.0.1")
 
 	h := api.AuthMiddleware(service.NewSessionService(database))(http.HandlerFunc(ok))
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	withBearer(req, token)
-	rr := httptest.NewRecorder()
+	rr := serveBearerGET(h, token)
 
-	h.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusForbidden {
-		t.Errorf("AuthMiddleware banned user status = %d, want 403", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusForbidden)
 }
 
 // TestAuthMiddleware_ExpiredBanAllowed verifies that a user whose ban has
 // expired in the past can pass the auth middleware.
 func TestAuthMiddleware_ExpiredBanAllowed(t *testing.T) {
 	database := newAPITestDB(t)
-	uid, _ := database.CreateUser(context.Background(), "expbanned", "hash", 4)
+	uid := mustCreateUser(t, database, "expbanned", "hash", 4)
 
 	// Set ban with an expiry time in the past.
 	past := time.Now().UTC().Add(-time.Hour)
@@ -830,22 +696,16 @@ func TestAuthMiddleware_ExpiredBanAllowed(t *testing.T) {
 	_, _ = database.CreateSession(context.Background(), uid, hash, "test", "127.0.0.1")
 
 	h := api.AuthMiddleware(service.NewSessionService(database))(http.HandlerFunc(ok))
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	withBearer(req, token)
-	rr := httptest.NewRecorder()
+	rr := serveBearerGET(h, token)
 
-	h.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Errorf("AuthMiddleware expired-ban user status = %d, want 200", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusOK)
 }
 
 // TestAuthMiddleware_ActiveTemporaryBanBlocked verifies that a user with a
 // temporary ban whose expiry is in the future is still blocked.
 func TestAuthMiddleware_ActiveTemporaryBanBlocked(t *testing.T) {
 	database := newAPITestDB(t)
-	uid, _ := database.CreateUser(context.Background(), "tempbanned", "hash", 4)
+	uid := mustCreateUser(t, database, "tempbanned", "hash", 4)
 
 	// Set ban with an expiry time in the future.
 	future := time.Now().UTC().Add(time.Hour)
@@ -856,15 +716,9 @@ func TestAuthMiddleware_ActiveTemporaryBanBlocked(t *testing.T) {
 	_, _ = database.CreateSession(context.Background(), uid, hash, "test", "127.0.0.1")
 
 	h := api.AuthMiddleware(service.NewSessionService(database))(http.HandlerFunc(ok))
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	withBearer(req, token)
-	rr := httptest.NewRecorder()
+	rr := serveBearerGET(h, token)
 
-	h.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusForbidden {
-		t.Errorf("AuthMiddleware active temp-ban user status = %d, want 403", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusForbidden)
 }
 
 // ─── SecurityHeaders tests ───────────────────────────────────────────────────
@@ -872,9 +726,7 @@ func TestAuthMiddleware_ActiveTemporaryBanBlocked(t *testing.T) {
 func TestSecurityHeaders_AllHeadersPresent(t *testing.T) {
 	h := api.SecurityHeaders(http.HandlerFunc(ok))
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rr := httptest.NewRecorder()
-
-	h.ServeHTTP(rr, req)
+	rr := serveRequest(h, req)
 
 	want := map[string]string{
 		"X-Content-Type-Options":  "nosniff",
@@ -900,9 +752,7 @@ func TestSecurityHeaders_PassesThrough(t *testing.T) {
 		w.WriteHeader(http.StatusTeapot)
 	}))
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rr := httptest.NewRecorder()
-
-	h.ServeHTTP(rr, req)
+	rr := serveRequest(h, req)
 
 	if !called {
 		t.Error("SecurityHeaders: downstream handler was not called")
@@ -923,9 +773,7 @@ func TestSecurityHeaders_DoesNotOverrideExistingHeaders(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rr := httptest.NewRecorder()
-
-	h.ServeHTTP(rr, req)
+	rr := serveRequest(h, req)
 
 	// The handler's override wins because it runs after the middleware sets the header.
 	if got := rr.Header().Get("Content-Security-Policy"); got != "default-src 'none'" {
@@ -950,12 +798,9 @@ func TestMaxBodySize_UnderLimit(t *testing.T) {
 	}))
 
 	req := httptest.NewRequest(http.MethodPost, "/", body)
-	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, req)
+	rr := serveRequest(h, req)
 
-	if rr.Code != http.StatusOK {
-		t.Errorf("MaxBodySize under limit: status = %d, want 200", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusOK)
 }
 
 func TestMaxBodySize_ExactLimit(t *testing.T) {
@@ -973,12 +818,9 @@ func TestMaxBodySize_ExactLimit(t *testing.T) {
 	}))
 
 	req := httptest.NewRequest(http.MethodPost, "/", body)
-	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, req)
+	rr := serveRequest(h, req)
 
-	if rr.Code != http.StatusOK {
-		t.Errorf("MaxBodySize exact limit: status = %d, want 200", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusOK)
 }
 
 func TestMaxBodySize_OverLimit(t *testing.T) {
@@ -994,8 +836,7 @@ func TestMaxBodySize_OverLimit(t *testing.T) {
 	}))
 
 	req := httptest.NewRequest(http.MethodPost, "/", body)
-	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, req)
+	serveRequest(h, req)
 
 	if readErr == nil {
 		t.Error("MaxBodySize over limit: expected read error, got nil")
@@ -1014,9 +855,7 @@ func TestMaxBodySize_NilBody(t *testing.T) {
 	// Must not panic.
 	h.ServeHTTP(rr, req)
 
-	if rr.Code != http.StatusOK {
-		t.Errorf("MaxBodySize nil body: status = %d, want 200", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusOK)
 }
 
 func TestMaxBodySize_PassesThrough(t *testing.T) {
@@ -1026,12 +865,9 @@ func TestMaxBodySize_PassesThrough(t *testing.T) {
 	}))
 
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("data"))
-	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, req)
+	rr := serveRequest(h, req)
 
-	if rr.Code != http.StatusCreated {
-		t.Errorf("MaxBodySize pass-through: status = %d, want 201", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusCreated)
 }
 
 // ─── AdminIPRestrict tests ──────────────────────────────────────────────────
@@ -1040,13 +876,9 @@ func TestAdminIPRestrict_AllowedCIDR(t *testing.T) {
 	h := api.AdminIPRestrict("server.admin_allowed_cidrs", []string{"127.0.0.0/8"}, nil)(http.HandlerFunc(ok))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, req)
+	rr := serveLocal(h, req)
 
-	if rr.Code != http.StatusOK {
-		t.Errorf("AdminIPRestrict allowed CIDR status = %d, want 200", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusOK)
 }
 
 func TestAdminIPRestrict_BlockedCIDR(t *testing.T) {
@@ -1054,12 +886,9 @@ func TestAdminIPRestrict_BlockedCIDR(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.RemoteAddr = "192.168.1.1:9999" // not in 10.0.0.0/8
-	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, req)
+	rr := serveRequest(h, req)
 
-	if rr.Code != http.StatusForbidden {
-		t.Errorf("AdminIPRestrict blocked CIDR status = %d, want 403", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusForbidden)
 }
 
 // TestAdminIPRestrict_BlockedNamesTheSetting pins OP-05: the refusal must name
@@ -1072,8 +901,7 @@ func TestAdminIPRestrict_BlockedNamesTheSetting(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.RemoteAddr = "192.168.1.1:9999"
-	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, req)
+	rr := serveRequest(h, req)
 
 	body := rr.Body.String()
 	if !strings.Contains(body, "server.admin_allowed_cidrs") {
@@ -1089,12 +917,9 @@ func TestAdminIPRestrict_EmptyAllowsAll(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.RemoteAddr = "203.0.113.1:9999"
-	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, req)
+	rr := serveRequest(h, req)
 
-	if rr.Code != http.StatusOK {
-		t.Errorf("AdminIPRestrict empty list status = %d, want 200", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusOK)
 }
 
 func TestAdminIPRestrict_InvalidCIDR(t *testing.T) {
@@ -1104,13 +929,9 @@ func TestAdminIPRestrict_InvalidCIDR(t *testing.T) {
 	h := api.AdminIPRestrict("server.admin_allowed_cidrs", []string{"not-a-cidr"}, nil)(http.HandlerFunc(ok))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, req)
+	rr := serveLocal(h, req)
 
-	if rr.Code != http.StatusForbidden {
-		t.Errorf("AdminIPRestrict invalid CIDR status = %d, want 403", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusForbidden)
 }
 
 func TestAdminIPRestrict_MultipleCIDRs(t *testing.T) {
@@ -1119,29 +940,20 @@ func TestAdminIPRestrict_MultipleCIDRs(t *testing.T) {
 	// First CIDR matches.
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.RemoteAddr = "10.1.2.3:9999"
-	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Errorf("AdminIPRestrict multi-CIDR (10.x) status = %d, want 200", rr.Code)
-	}
+	rr := serveRequest(h, req)
+	expectStatus(t, rr, http.StatusOK)
 
 	// Second CIDR matches.
 	req = httptest.NewRequest(http.MethodGet, "/", nil)
 	req.RemoteAddr = "192.168.1.50:9999"
-	rr = httptest.NewRecorder()
-	h.ServeHTTP(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Errorf("AdminIPRestrict multi-CIDR (192.168.x) status = %d, want 200", rr.Code)
-	}
+	rr = serveRequest(h, req)
+	expectStatus(t, rr, http.StatusOK)
 
 	// Neither matches.
 	req = httptest.NewRequest(http.MethodGet, "/", nil)
 	req.RemoteAddr = "172.16.0.1:9999"
-	rr = httptest.NewRecorder()
-	h.ServeHTTP(rr, req)
-	if rr.Code != http.StatusForbidden {
-		t.Errorf("AdminIPRestrict multi-CIDR (no match) status = %d, want 403", rr.Code)
-	}
+	rr = serveRequest(h, req)
+	expectStatus(t, rr, http.StatusForbidden)
 }
 
 // ─── AdminIPRestrict proxy-aware tests (BUG-116) ─────────────────────────────
@@ -1160,21 +972,15 @@ func TestAdminIPRestrict_TrustedProxy_UsesXForwardedFor(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.RemoteAddr = "127.0.0.1:9999"
 	req.Header.Set("X-Forwarded-For", "203.0.113.50")
-	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Errorf("trusted proxy + allowed XFF status = %d, want 200", rr.Code)
-	}
+	rr := serveRequest(h, req)
+	expectStatus(t, rr, http.StatusOK)
 
 	// Request from proxy with disallowed real client → blocked.
 	req = httptest.NewRequest(http.MethodGet, "/", nil)
 	req.RemoteAddr = "127.0.0.1:9999"
 	req.Header.Set("X-Forwarded-For", "198.51.100.1")
-	rr = httptest.NewRecorder()
-	h.ServeHTTP(rr, req)
-	if rr.Code != http.StatusForbidden {
-		t.Errorf("trusted proxy + blocked XFF status = %d, want 403", rr.Code)
-	}
+	rr = serveRequest(h, req)
+	expectStatus(t, rr, http.StatusForbidden)
 }
 
 // TestAdminIPRestrict_TrustedProxy_UsesXRealIP verifies X-Real-IP is preferred
@@ -1188,11 +994,8 @@ func TestAdminIPRestrict_TrustedProxy_UsesXRealIP(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.RemoteAddr = "127.0.0.1:9999"
 	req.Header.Set("X-Real-IP", "203.0.113.50")
-	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Errorf("trusted proxy + X-Real-IP status = %d, want 200", rr.Code)
-	}
+	rr := serveRequest(h, req)
+	expectStatus(t, rr, http.StatusOK)
 }
 
 // TestAdminIPRestrict_UntrustedProxy_IgnoresHeaders verifies that proxy headers
@@ -1207,11 +1010,8 @@ func TestAdminIPRestrict_UntrustedProxy_IgnoresHeaders(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.RemoteAddr = "192.168.1.1:9999"
 	req.Header.Set("X-Forwarded-For", "203.0.113.50") // spoofed
-	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, req)
-	if rr.Code != http.StatusForbidden {
-		t.Errorf("untrusted proxy spoofed XFF status = %d, want 403 (should use RemoteAddr)", rr.Code)
-	}
+	rr := serveRequest(h, req)
+	expectStatus(t, rr, http.StatusForbidden)
 }
 
 // TestAdminIPRestrict_ProxyCollapse_WithoutTrusted verifies the original bug:
@@ -1228,14 +1028,11 @@ func TestAdminIPRestrict_ProxyCollapse_WithoutTrusted(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.RemoteAddr = "127.0.0.1:9999"
 	req.Header.Set("X-Forwarded-For", "198.51.100.1") // real external IP
-	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, req)
+	rr := serveRequest(h, req)
 
 	// Without trusted proxies, 127.0.0.1 is used — passes the private CIDR check.
 	// This is the documented limitation: operators MUST configure trusted_proxies.
-	if rr.Code != http.StatusOK {
-		t.Errorf("no trusted proxies, proxy on localhost status = %d, want 200 (known limitation)", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusOK)
 }
 
 // ─── SecurityHeadersWithTLS tests ───────────────────────────────────────────
@@ -1243,8 +1040,7 @@ func TestAdminIPRestrict_ProxyCollapse_WithoutTrusted(t *testing.T) {
 func TestSecurityHeadersWithTLS_HSTS(t *testing.T) {
 	h := api.SecurityHeadersWithTLS("auto")(http.HandlerFunc(ok))
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, req)
+	rr := serveRequest(h, req)
 
 	if got := rr.Header().Get("Strict-Transport-Security"); got == "" {
 		t.Error("SecurityHeadersWithTLS: missing HSTS header when TLS enabled")
@@ -1254,8 +1050,7 @@ func TestSecurityHeadersWithTLS_HSTS(t *testing.T) {
 func TestSecurityHeadersWithTLS_NoHSTSWithoutTLS(t *testing.T) {
 	h := api.SecurityHeadersWithTLS("")(http.HandlerFunc(ok))
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, req)
+	rr := serveRequest(h, req)
 
 	if got := rr.Header().Get("Strict-Transport-Security"); got != "" {
 		t.Errorf("SecurityHeadersWithTLS: unexpected HSTS header %q when TLS disabled", got)
@@ -1270,15 +1065,11 @@ func TestLiveKitHealth_Healthy(t *testing.T) {
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, req)
+	rr := serveRequest(h, req)
 
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 
-	var resp map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	resp := decodeBody[map[string]any](t, rr)
 	if resp["status"] != "ok" {
 		t.Errorf("status = %v, want ok", resp["status"])
 	}
@@ -1293,15 +1084,11 @@ func TestLiveKitHealth_Unhealthy(t *testing.T) {
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, req)
+	rr := serveRequest(h, req)
 
-	if rr.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want 503; body: %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusServiceUnavailable)
 
-	var resp map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	resp := decodeBody[map[string]any](t, rr)
 	if resp["status"] != "degraded" {
 		t.Errorf("status = %v, want degraded", resp["status"])
 	}
@@ -1319,15 +1106,11 @@ func TestLiveKitHealth_UnhealthyNoError(t *testing.T) {
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, req)
+	rr := serveRequest(h, req)
 
-	if rr.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want 503; body: %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusServiceUnavailable)
 
-	var resp map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	resp := decodeBody[map[string]any](t, rr)
 	if resp["error"] != "unknown" {
 		t.Errorf("error = %v, want 'unknown'", resp["error"])
 	}
@@ -1335,62 +1118,7 @@ func TestLiveKitHealth_UnhealthyNoError(t *testing.T) {
 
 // apiTestSchema is the full schema needed for all api tests (middleware,
 // auth handler, and invite handler).
-var apiTestSchema = []byte(`
-CREATE TABLE IF NOT EXISTS roles (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    name        TEXT    NOT NULL UNIQUE,
-    color       TEXT,
-    permissions INTEGER NOT NULL DEFAULT 0,
-    position    INTEGER NOT NULL DEFAULT 0,
-    is_default  INTEGER NOT NULL DEFAULT 0,
-    hoist       INTEGER NOT NULL DEFAULT 0,
-    mentionable INTEGER NOT NULL DEFAULT 0
-);
-
-INSERT OR IGNORE INTO roles (id, name, color, permissions, position, is_default) VALUES
-    (1, 'Owner',     '#E74C3C', 2147483647, 100, 0),
-    (2, 'Admin',     '#F39C12', 1073741823,  80, 0),
-    (3, 'Moderator', '#3498DB', 1048575,     60, 0),
-    (4, 'Member',    NULL,      1635,     40, 1);
-
-CREATE TABLE IF NOT EXISTS users (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    username    TEXT    NOT NULL UNIQUE COLLATE NOCASE,
-    password    TEXT    NOT NULL,
-    avatar      TEXT,
-    role_id     INTEGER NOT NULL DEFAULT 4 REFERENCES roles(id),
-    totp_secret TEXT,
-    status      TEXT    NOT NULL DEFAULT 'offline',
-    created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
-    last_seen   TEXT,
-    banned      INTEGER NOT NULL DEFAULT 0,
-    ban_reason  TEXT,
-    ban_expires TEXT,
-    registration_status TEXT NOT NULL DEFAULT 'active',
-    identity_public_key TEXT,
-    display_name TEXT,
-    about TEXT,
-    custom_status TEXT,
-    custom_status_expires_at TEXT,
-    banner_id TEXT,
-    banner_color TEXT
-);
-
--- Second-factor state (migration 032): the auth service persists its
--- partial-auth challenges, pending enrolments, replay window and recovery
--- codes through the Store, so this schema carries the tables too.
-CREATE TABLE IF NOT EXISTS user_roles (
-    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    role_id INTEGER NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
-    PRIMARY KEY (user_id, role_id)
-) WITHOUT ROWID;
-
-CREATE TRIGGER IF NOT EXISTS user_roles_on_user_insert AFTER INSERT ON users
-BEGIN
-    INSERT OR IGNORE INTO user_roles (user_id, role_id)
-    SELECT NEW.id, r.id FROM roles r WHERE r.id = NEW.role_id;
-END;
-
+var apiTestSchema = []byte(schemaAccounts + schemaMessaging + `
 CREATE TABLE IF NOT EXISTS partial_auth_challenges (
     token_hash TEXT PRIMARY KEY,
     user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -1399,20 +1127,17 @@ CREATE TABLE IF NOT EXISTS partial_auth_challenges (
     failures   INTEGER NOT NULL DEFAULT 0,
     expires_at TEXT    NOT NULL
 );
-
 CREATE TABLE IF NOT EXISTS pending_totp_enrollments (
     user_id    INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
     secret_enc TEXT    NOT NULL,
     expires_at TEXT    NOT NULL
 );
-
 CREATE TABLE IF NOT EXISTS totp_used_codes (
     user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     code_hash  TEXT    NOT NULL,
     expires_at TEXT    NOT NULL,
     PRIMARY KEY (user_id, code_hash)
 );
-
 CREATE TABLE IF NOT EXISTS totp_recovery_codes (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -1420,40 +1145,6 @@ CREATE TABLE IF NOT EXISTS totp_recovery_codes (
     created_at TEXT    NOT NULL,
     used_at    TEXT
 );
-
-CREATE TABLE IF NOT EXISTS erasure_jobs (
-    id      INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    state   TEXT    NOT NULL
-);
-CREATE TABLE IF NOT EXISTS sessions (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    token      TEXT    NOT NULL UNIQUE,
-    device     TEXT,
-    ip_address TEXT,
-    created_at TEXT    NOT NULL DEFAULT (datetime('now')),
-    last_used  TEXT    NOT NULL DEFAULT (datetime('now')),
-    expires_at TEXT    NOT NULL,
-    unseen     INTEGER NOT NULL DEFAULT 0
-);
-CREATE TABLE IF NOT EXISTS recovery_kits (
-    user_id    INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-    verifier   TEXT    NOT NULL,
-    created_at TEXT    NOT NULL,
-    used_at    TEXT
-);
-CREATE TABLE IF NOT EXISTS recovery_assists (
-    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-    verifier TEXT NOT NULL,
-    issued_by INTEGER NOT NULL,
-    verification TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    expires_at TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token);
-
 CREATE TABLE IF NOT EXISTS api_tokens (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -1464,7 +1155,6 @@ CREATE TABLE IF NOT EXISTS api_tokens (
     expires_at   TEXT,
     revoked_at   TEXT
 );
-
 CREATE TABLE IF NOT EXISTS invites (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     code        TEXT    NOT NULL UNIQUE,
@@ -1476,50 +1166,22 @@ CREATE TABLE IF NOT EXISTS invites (
     created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
     revoked     INTEGER NOT NULL DEFAULT 0
 );
-
 CREATE INDEX IF NOT EXISTS idx_invites_code ON invites(code);
-
 CREATE TABLE IF NOT EXISTS invite_redemptions (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     invite_id   INTEGER NOT NULL REFERENCES invites(id) ON DELETE CASCADE,
     user_id     INTEGER,
     redeemed_at TEXT    NOT NULL DEFAULT (datetime('now'))
 );
-
 CREATE INDEX IF NOT EXISTS idx_invite_redemptions_invite ON invite_redemptions(invite_id, id);
 CREATE INDEX IF NOT EXISTS idx_invite_redemptions_user   ON invite_redemptions(user_id);
-
 CREATE TABLE IF NOT EXISTS settings (
 	key   TEXT PRIMARY KEY,
 	value TEXT NOT NULL
 );
-
 INSERT OR IGNORE INTO settings (key, value) VALUES
 	('require_2fa', 'false'),
 	('registration_mode', 'invite');
-
-CREATE TABLE IF NOT EXISTS channel_categories (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    name       TEXT    NOT NULL,
-    position   INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT    NOT NULL DEFAULT (datetime('now'))
-);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_channel_categories_name ON channel_categories(name COLLATE NOCASE);
-CREATE TABLE IF NOT EXISTS category_overrides (
-    category_id INTEGER NOT NULL REFERENCES channel_categories(id) ON DELETE CASCADE,
-    role_id     INTEGER NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
-    allow       INTEGER NOT NULL DEFAULT 0,
-    deny        INTEGER NOT NULL DEFAULT 0,
-    UNIQUE(category_id, role_id)
-);
-CREATE TABLE IF NOT EXISTS category_user_overrides (
-    category_id INTEGER NOT NULL REFERENCES channel_categories(id) ON DELETE CASCADE,
-    user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    allow       INTEGER NOT NULL DEFAULT 0,
-    deny        INTEGER NOT NULL DEFAULT 0,
-    UNIQUE(category_id, user_id)
-);
-
 CREATE TABLE IF NOT EXISTS channels (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
     name             TEXT    NOT NULL,
@@ -1553,84 +1215,6 @@ CREATE TABLE IF NOT EXISTS channels (
     dm_owner_id      INTEGER,
     dm_icon      TEXT
 );
-
-CREATE TABLE IF NOT EXISTS channel_overrides (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
-    role_id    INTEGER NOT NULL REFERENCES roles(id)    ON DELETE CASCADE,
-    allow      INTEGER NOT NULL DEFAULT 0,
-    deny       INTEGER NOT NULL DEFAULT 0,
-    UNIQUE(channel_id, role_id)
-);
-
-CREATE TABLE IF NOT EXISTS channel_user_overrides (
-    channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
-    user_id    INTEGER NOT NULL REFERENCES users(id)    ON DELETE CASCADE,
-    allow      INTEGER NOT NULL DEFAULT 0,
-    deny       INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (channel_id, user_id)
-);
-
-CREATE TABLE IF NOT EXISTS messages (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
-    user_id    INTEGER NOT NULL REFERENCES users(id),
-    content    TEXT    NOT NULL,
-    reply_to   INTEGER REFERENCES messages(id) ON DELETE SET NULL,
-    edited_at  TEXT,
-    deleted    INTEGER NOT NULL DEFAULT 0,
-    pinned     INTEGER NOT NULL DEFAULT 0,
-    timestamp  TEXT    NOT NULL DEFAULT (datetime('now')),
-    mentions_everyone INTEGER NOT NULL DEFAULT 0,
-    pinned_at  TEXT,
-    kind       INTEGER NOT NULL DEFAULT 0
-);
-CREATE TABLE IF NOT EXISTS message_import_authors (
-    message_id      INTEGER PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
-    discord_user_id TEXT NOT NULL,
-    name            TEXT NOT NULL,
-    color           TEXT
-);
-CREATE TABLE IF NOT EXISTS import_jobs (
-    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
-    channel_id         INTEGER REFERENCES channels(id) ON DELETE SET NULL,
-    created_by         INTEGER REFERENCES users(id) ON DELETE SET NULL,
-    source_name        TEXT    NOT NULL DEFAULT '',
-    discord_channel_id TEXT    NOT NULL DEFAULT '',
-    status             TEXT    NOT NULL DEFAULT 'running',
-    total              INTEGER NOT NULL DEFAULT 0,
-    imported           INTEGER NOT NULL DEFAULT 0,
-    skipped            INTEGER NOT NULL DEFAULT 0,
-    skipped_attachments INTEGER NOT NULL DEFAULT 0,
-    error              TEXT,
-    created_at         TEXT    NOT NULL DEFAULT (datetime('now')),
-    finished_at        TEXT
-);
-CREATE TABLE IF NOT EXISTS message_mentions (
-    message_id        INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
-    mentioned_user_id INTEGER NOT NULL REFERENCES users(id)    ON DELETE CASCADE,
-    PRIMARY KEY (message_id, mentioned_user_id)
-);
-CREATE TABLE IF NOT EXISTS message_role_mentions (
-    message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
-    role_id    INTEGER NOT NULL,
-    PRIMARY KEY (message_id, role_id)
-);
-
-
-CREATE TABLE IF NOT EXISTS dm_participants (
-    channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
-    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    PRIMARY KEY (channel_id, user_id)
-);
-
-CREATE TABLE IF NOT EXISTS dm_open_state (
-    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
-    opened_at  TEXT NOT NULL DEFAULT (datetime('now')),
-    PRIMARY KEY (user_id, channel_id)
-);
-
 CREATE TABLE IF NOT EXISTS reactions (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
@@ -1639,15 +1223,6 @@ CREATE TABLE IF NOT EXISTS reactions (
     created_at TEXT    NOT NULL DEFAULT (datetime('now')),
     UNIQUE(message_id, user_id, emoji)
 );
-
-CREATE TABLE IF NOT EXISTS read_states (
-    user_id         INTEGER NOT NULL REFERENCES users(id)    ON DELETE CASCADE,
-    channel_id      INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
-    last_message_id INTEGER NOT NULL DEFAULT 0,
-    mention_count   INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (user_id, channel_id)
-);
-
 CREATE TABLE IF NOT EXISTS audit_log (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     actor_id    INTEGER NOT NULL REFERENCES users(id),
@@ -1659,29 +1234,12 @@ CREATE TABLE IF NOT EXISTS audit_log (
     actor_token TEXT,
     created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
 );
-
 CREATE TABLE IF NOT EXISTS user_blocks (
     blocker_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     blocked_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     created_at TEXT    NOT NULL DEFAULT (datetime('now')),
     PRIMARY KEY (blocker_id, blocked_id),
     CHECK (blocker_id != blocked_id)
-);
-
--- WP 6.4b: UpdateProfile reads the timeout ledger for a display name change.
-CREATE TABLE IF NOT EXISTS moderation_actions (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    kind            TEXT    NOT NULL CHECK (kind IN ('warning', 'timeout', 'removal', 'kick', 'ban')),
-    target_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    actor_id        INTEGER NOT NULL DEFAULT 0,
-    actor_token     TEXT,
-    report_id       INTEGER,
-    reason          TEXT    NOT NULL DEFAULT '',
-    expires_at      TEXT,
-    acknowledged_at TEXT,
-    lifted_at       TEXT,
-    lifted_by       INTEGER NOT NULL DEFAULT 0,
-    created_at      TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 `)
 
@@ -1695,8 +1253,7 @@ func TestRateLimitMiddleware_IPv6SharesSlash64Bucket(t *testing.T) {
 	for i, remote := range []string{"[2001:db8:1:2::1]:1234", "[2001:db8:1:2::2]:1234"} {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		req.RemoteAddr = remote
-		rr := httptest.NewRecorder()
-		h.ServeHTTP(rr, req)
+		rr := serveRequest(h, req)
 		want := http.StatusOK
 		if i == 1 {
 			want = http.StatusTooManyRequests
@@ -1748,12 +1305,9 @@ func TestAdminIPRestrict_NoForwardedPeerWarningWhenPeerRefused(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.RemoteAddr = "127.0.0.1:9999"
 	req.Header.Set("X-Forwarded-For", "203.0.113.9")
-	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, req)
+	rr := serveRequest(h, req)
 
-	if rr.Code != http.StatusForbidden {
-		t.Errorf("status = %d, want 403", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusForbidden)
 	if strings.Contains(buf.String(), "trusted_proxies is empty") {
 		t.Errorf("warned although the allowlist refused the peer; log:\n%s", buf.String())
 	}
@@ -1770,7 +1324,7 @@ func TestAuthMiddleware_BatchedTouchAndDiscardAreQueuedUntilFlush(t *testing.T) 
 	sessions := service.NewSessionService(database)
 	sessions.SetConnWrites(batch)
 
-	uid, _ := database.CreateUser(context.Background(), "batched-bot", "hash", 4)
+	uid := mustCreateUser(t, database, "batched-bot", "hash", 4)
 	apiToken, _ := auth.GenerateToken()
 	if _, err := database.CreateAPIToken(context.Background(), uid, auth.HashToken(apiToken), "ci", nil); err != nil {
 		t.Fatalf("CreateAPIToken: %v", err)
@@ -1789,14 +1343,10 @@ func TestAuthMiddleware_BatchedTouchAndDiscardAreQueuedUntilFlush(t *testing.T) 
 	for range 25 {
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, withBearer(httptest.NewRequest(http.MethodGet, "/", nil), apiToken))
-		if rec.Code != http.StatusOK {
-			t.Fatalf("api token request = %d, want 200", rec.Code)
-		}
+		requireStatus(t, rec, http.StatusOK)
 		rec = httptest.NewRecorder()
 		h.ServeHTTP(rec, withBearer(httptest.NewRequest(http.MethodGet, "/", nil), expiredToken))
-		if rec.Code != http.StatusUnauthorized {
-			t.Fatalf("expired session request = %d, want 401", rec.Code)
-		}
+		requireStatus(t, rec, http.StatusUnauthorized)
 	}
 	goleak.VerifyNone(t, before)
 

@@ -1,12 +1,9 @@
 package admin_test
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"testing"
-
-	"github.com/J3vb/OwnCord/Server/admin"
 )
 
 // S-04 (B3-8 channel family): every admin channel lookup follows ONE non-DM
@@ -16,14 +13,9 @@ import (
 // precisely what the channels path's 404 was hardened to conceal
 // (A-2026-08-02).
 func TestS04_DMAndMissingChannelAnswerIdentically(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	database, handler, token := newAdminHarness(t)
 
-	dmID, err := database.CreateChannel(context.Background(), "", "dm", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel(dm): %v", err)
-	}
+	dmID := mustCreateChannel(t, database, "", "dm")
 	const missingID = 987654
 
 	paths := []struct {
@@ -38,12 +30,8 @@ func TestS04_DMAndMissingChannelAnswerIdentically(t *testing.T) {
 		t.Run(p.name, func(t *testing.T) {
 			dm := doRequest(t, handler, p.method, fmt.Sprintf(p.path, dmID), token, p.body)
 			miss := doRequest(t, handler, p.method, fmt.Sprintf(p.path, missingID), token, p.body)
-			if dm.Code != http.StatusNotFound {
-				t.Fatalf("DM id: status = %d, want 404; body: %s", dm.Code, dm.Body.String())
-			}
-			if miss.Code != http.StatusNotFound {
-				t.Fatalf("missing id: status = %d, want 404; body: %s", miss.Code, miss.Body.String())
-			}
+			requireStatus(t, dm, http.StatusNotFound)
+			requireStatus(t, miss, http.StatusNotFound)
 			if dm.Body.String() != miss.Body.String() {
 				t.Fatalf("DM and missing answers differ:\n  dm:      %s\n  missing: %s", dm.Body.String(), miss.Body.String())
 			}

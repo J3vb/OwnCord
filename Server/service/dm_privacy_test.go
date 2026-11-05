@@ -50,9 +50,7 @@ func TestDMPrivacy_TrustedSourcesStillReach(t *testing.T) {
 			database, svc := newMessageRequestFixture(t)
 			ctx := context.Background()
 			setAllowDMs(t, database, 2, false)
-			if err := database.TrustSender(ctx, 2, 1, source); err != nil {
-				t.Fatalf("TrustSender: %v", err)
-			}
+			mustDo(t, "TrustSender", database.TrustSender(ctx, 2, 1, source))
 
 			result, err := svc.Messages.SendMessage(ctx, SendMessageParams{
 				ChannelID: 50, UserID: 1, Username: "alice", Content: "hi",
@@ -79,10 +77,7 @@ func TestDMPrivacy_TrustedSourcesStillReach(t *testing.T) {
 func dmSinkErrors(t *testing.T, database *db.DB, svc *Services) map[string]error {
 	t.Helper()
 	ctx := context.Background()
-	msgID, err := database.CreateMessage(ctx, 50, 1, "hello", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	msgID := mustCreateMessage(t, database, 50, 1, "hello", nil)
 	out := map[string]error{}
 	_, out["send"] = svc.Messages.SendMessage(ctx, SendMessageParams{ChannelID: 50, UserID: 1, Username: "alice", Content: "again"})
 	_, out["edit"] = svc.Messages.EditMessage(ctx, 1, msgID, "edited")
@@ -122,14 +117,10 @@ func TestDMPrivacy_RefusalMatchesBlock(t *testing.T) {
 	}{
 		{"privacy_off", func(t *testing.T, d *db.DB) { setAllowDMs(t, d, 2, false) }},
 		{"blocked_by_recipient", func(t *testing.T, d *db.DB) {
-			if err := d.BlockUser(context.Background(), 2, 1); err != nil {
-				t.Fatalf("BlockUser: %v", err)
-			}
+			mustDo(t, "BlockUser", d.BlockUser(context.Background(), 2, 1))
 		}},
 		{"sender_blocked_recipient", func(t *testing.T, d *db.DB) {
-			if err := d.BlockUser(context.Background(), 1, 2); err != nil {
-				t.Fatalf("BlockUser: %v", err)
-			}
+			mustDo(t, "BlockUser", d.BlockUser(context.Background(), 1, 2))
 		}},
 	}
 	results := make([]map[string]error, len(scenarios))
@@ -166,12 +157,9 @@ func TestDMPrivacy_FlipDuringSendStagesRequest(t *testing.T) {
 	svc.Messages.afterFirstContactTrustCheck = func() { setAllowDMs(t, database, 2, false) }
 	defer func() { svc.Messages.afterFirstContactTrustCheck = nil }()
 
-	result, err := svc.Messages.SendMessage(ctx, SendMessageParams{
+	result := mustSendMessage(ctx, t, svc.Messages, SendMessageParams{
 		ChannelID: 50, UserID: 1, Username: "alice", Content: "first",
 	})
-	if err != nil {
-		t.Fatalf("in-flight SendMessage: %v", err)
-	}
 	if len(result.RequestCreatedFor) != 1 {
 		t.Fatalf("RequestCreatedFor = %v, want one staged request", result.RequestCreatedFor)
 	}
@@ -215,9 +203,7 @@ func TestDMPrivacy_AcceptByOpenWhenSenderOff(t *testing.T) {
 	setAllowDMs(t, database, 1, false)
 
 	opened, err := svc.DMs.CreateDM(ctx, 2, 1)
-	if err != nil {
-		t.Fatalf("CreateDM by the recipient while the sender has DMs off: %v", err)
-	}
+	mustDo(t, "CreateDM by the recipient while the sender has DMs off", err)
 	if opened.AcceptedRequest == nil {
 		t.Error("opening the DM did not accept the undecided request")
 	}
@@ -237,9 +223,7 @@ func TestDMPrivacy_GroupDMUnaffected(t *testing.T) {
 	seedUserRole(t, database, 3, 4)
 
 	group, err := svc.DMs.CreateGroupDM(ctx, 1, []int64{2, 3}, "")
-	if err != nil {
-		t.Fatalf("CreateGroupDM: %v", err)
-	}
+	mustDo(t, "CreateGroupDM", err)
 	setAllowDMs(t, database, 2, false)
 	setAllowDMs(t, database, 3, false)
 

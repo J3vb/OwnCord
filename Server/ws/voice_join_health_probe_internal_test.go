@@ -22,10 +22,7 @@ func TestHandleVoiceJoin_ExternalLiveKitUnreachable_RefusedNoToken(t *testing.T)
 	uid := seedHarvestVoiceUser(t, database, "lk-down")
 	chID := mustCreateVoiceChannel(t, database, "voice-lk-down")
 
-	user, err := database.GetUserByID(ctx, uid)
-	if err != nil || user == nil {
-		t.Fatalf("GetUserByID: %v", err)
-	}
+	user := mustGetUser(t, database, uid)
 
 	h := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	lk, err := NewLiveKitClient(&config.VoiceConfig{

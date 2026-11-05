@@ -52,9 +52,7 @@ func readyMembers(t *testing.T, raw []byte) map[int64]map[string]any {
 			Members []map[string]any `json:"members"`
 		} `json:"payload"`
 	}
-	if err := json.Unmarshal(raw, &env); err != nil {
-		t.Fatalf("unmarshal ready: %v", err)
-	}
+	mustUnmarshal(t, raw, &env)
 	out := make(map[int64]map[string]any, len(env.Payload.Members))
 	for _, m := range env.Payload.Members {
 		id, _ := m["id"].(float64)
@@ -92,18 +90,12 @@ func TestReady_InvisibleMemberIsOfflineToOthersAndTrueToSelf(t *testing.T) {
 	hub.ApplyConnectStatusForTest(gc)
 	hub.ApplyConnectStatusForTest(wc)
 
-	forWatcher, err := hub.BuildReadyForTest(database, watcher.ID)
-	if err != nil {
-		t.Fatalf("buildReady(watcher): %v", err)
-	}
+	forWatcher := mustBuildReady(t, hub, database, watcher.ID)
 	if got := readyMembers(t, forWatcher)[ghost.ID]["status"]; got != db.StatusOffline {
 		t.Errorf("ghost as seen by watcher = %v, want offline", got)
 	}
 
-	forGhost, err := hub.BuildReadyForTest(database, ghost.ID)
-	if err != nil {
-		t.Fatalf("buildReady(ghost): %v", err)
-	}
+	forGhost := mustBuildReady(t, hub, database, ghost.ID)
 	if got := readyMembers(t, forGhost)[ghost.ID]["status"]; got != db.StatusInvisible {
 		t.Errorf("ghost as seen by themselves = %v, want invisible", got)
 	}
@@ -131,10 +123,7 @@ func TestReady_DisconnectedMemberWithChosenStatusRendersOffline(t *testing.T) {
 	hub.Register(vc)
 	waitRegistered(t, hub, vc)
 
-	raw, err := hub.BuildReadyForTest(database, viewer.ID)
-	if err != nil {
-		t.Fatalf("buildReady: %v", err)
-	}
+	raw := mustBuildReady(t, hub, database, viewer.ID)
 	if got := readyMembers(t, raw)[absent.ID]["status"]; got != db.StatusOffline {
 		t.Errorf("disconnected dnd member = %v, want offline", got)
 	}
@@ -147,13 +136,8 @@ func TestConnectPresence_InvisibleSplitsSelfFromEveryoneElse(t *testing.T) {
 
 	ghost := seedOwnerUser(t, database, "bc-ghost")
 	other := seedOwnerUser(t, database, "bc-other")
-	ghostCh := make(chan []byte, 8)
-	otherCh := make(chan []byte, 8)
-	gc := ws.NewTestClientWithUser(hub, ghost, 0, ghostCh)
-	oc := ws.NewTestClientWithUser(hub, other, 0, otherCh)
-	hub.Register(gc)
-	hub.Register(oc)
-	waitRegistered(t, hub, gc)
+	_, ghostCh := connectClient(t, hub, ghost, 0, 8)
+	oc, otherCh := connectClient(t, hub, other, 0, 8)
 	waitRegistered(t, hub, oc)
 
 	text := "heads down"
@@ -195,13 +179,8 @@ func TestConnectPresence_InvisibleBlanksCustomStatusForObservers(t *testing.T) {
 
 	ghost := seedOwnerUser(t, database, "bc-ghost-cs")
 	other := seedOwnerUser(t, database, "bc-other-cs")
-	ghostCh := make(chan []byte, 8)
-	otherCh := make(chan []byte, 8)
-	gc := ws.NewTestClientWithUser(hub, ghost, 0, ghostCh)
-	oc := ws.NewTestClientWithUser(hub, other, 0, otherCh)
-	hub.Register(gc)
-	hub.Register(oc)
-	waitRegistered(t, hub, gc)
+	_, ghostCh := connectClient(t, hub, ghost, 0, 8)
+	oc, otherCh := connectClient(t, hub, other, 0, 8)
 	waitRegistered(t, hub, oc)
 
 	text := "in a meeting"
@@ -237,10 +216,7 @@ func TestConnectPresence_NonInvisibleGoesToEveryoneUnchanged(t *testing.T) {
 	t.Cleanup(hub.Stop)
 
 	user := seedOwnerUser(t, database, "bc-dnd")
-	ch := make(chan []byte, 8)
-	c := ws.NewTestClientWithUser(hub, user, 0, ch)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	_, ch := connectClient(t, hub, user, 0, 8)
 
 	hub.QueuePresence(user.ID, db.StatusDND, nil)
 
@@ -283,9 +259,7 @@ func TestAuthOK_CarriesOwnTrueStatusAndProfileFields(t *testing.T) {
 			User map[string]any `json:"user"`
 		} `json:"payload"`
 	}
-	if err := json.Unmarshal(hub.BuildAuthOKForTest(fresh, "owner"), &env); err != nil {
-		t.Fatalf("unmarshal auth_ok: %v", err)
-	}
+	mustUnmarshal(t, hub.BuildAuthOKForTest(fresh, "owner"), &env)
 	u := env.Payload.User
 	if u["status"] != db.StatusInvisible {
 		t.Errorf("auth_ok status = %v, want the owner's true invisible", u["status"])
@@ -308,21 +282,13 @@ func TestPresenceUpdate_InvisibleIsAcceptedAndCarriesCustomStatus(t *testing.T) 
 
 	ghost := seedCoverageOwner(t, database, "cmd-ghost")
 	other := seedCoverageOwner(t, database, "cmd-other")
-	ghostCh := make(chan []byte, 16)
-	otherCh := make(chan []byte, 16)
-	gc := ws.NewTestClientWithUser(hub, ghost, 0, ghostCh)
-	oc := ws.NewTestClientWithUser(hub, other, 0, otherCh)
-	hub.Register(gc)
-	hub.Register(oc)
-	waitRegistered(t, hub, gc)
+	gc, ghostCh := connectClient(t, hub, ghost, 0, 16)
+	oc, otherCh := connectClient(t, hub, other, 0, 16)
 	waitRegistered(t, hub, oc)
 
-	raw, _ := json.Marshal(map[string]any{
-		"type": "presence_update",
-		"payload": map[string]any{
-			"status":        db.StatusInvisible,
-			"custom_status": "shhh",
-		},
+	raw := envelope("presence_update", map[string]any{
+		"status":        db.StatusInvisible,
+		"custom_status": "shhh",
 	})
 	hub.HandleMessageForTest(gc, raw)
 

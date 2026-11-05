@@ -150,9 +150,7 @@ func TestUpload_TIFFStoresMimeAndDimensions(t *testing.T) {
 func assertPreviewJPEG(t *testing.T, rr *httptest.ResponseRecorder, wantW, wantH int) {
 	t.Helper()
 	body := rr.Body.Bytes()
-	if rr.Code != http.StatusOK {
-		t.Fatalf("preview: %d, want 200", rr.Code)
-	}
+	requireStatus(t, rr, http.StatusOK)
 	if ct := rr.Header().Get("Content-Type"); ct != "image/jpeg" {
 		t.Fatalf("Content-Type = %q, want image/jpeg", ct)
 	}
@@ -195,8 +193,7 @@ func TestServeThumb_HEICIsAJPEGEvenInsideTheBox(t *testing.T) {
 	// Download still gives the original, as stored.
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/files/"+id, nil)
 	req.Header.Set("Authorization", "Bearer "+token)
-	dl := httptest.NewRecorder()
-	router.ServeHTTP(dl, req)
+	dl := serveRequest(router, req)
 	if dl.Code != http.StatusOK || !bytes.Equal(dl.Body.Bytes(), original) || dl.Header().Get("Content-Type") != "image/heic" {
 		t.Errorf("download: %d %q, %d bytes; want the original image/heic", dl.Code, dl.Header().Get("Content-Type"), dl.Body.Len())
 	}
@@ -276,9 +273,7 @@ func TestServeThumb_UnconvertibleImageIs404OnceAndNeverRetried(t *testing.T) {
 			id := uploadForThumb(t, router, token, tc.file, tc.content)
 
 			rr := doServeThumb(t, router, id, token)
-			if rr.Code != http.StatusNotFound {
-				t.Fatalf("first request: %d, want 404", rr.Code)
-			}
+			requireStatus(t, rr, http.StatusNotFound)
 			if bytes.Contains(rr.Body.Bytes(), tc.content[:16]) {
 				t.Error("the raw original was served")
 			}
@@ -310,9 +305,7 @@ func TestServeThumb_UnconvertibleImageIs404OnceAndNeverRetried(t *testing.T) {
 				}
 			}
 			rr = doServeThumb(t, router, id, token)
-			if rr.Code != http.StatusNotFound {
-				t.Errorf("second request: %d, want 404 from the kept marker", rr.Code)
-			}
+			expectStatus(t, rr, http.StatusNotFound)
 		})
 	}
 }

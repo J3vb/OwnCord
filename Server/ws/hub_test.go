@@ -7,7 +7,6 @@ import (
 	"slices"
 	"sync"
 	"testing"
-	"testing/fstest"
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/auth"
@@ -23,19 +22,7 @@ import (
 
 func openTestDB(t testing.TB) *db.DB {
 	t.Helper()
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-
-	migrFS := fstest.MapFS{
-		"001_schema.sql": {Data: hubTestSchema},
-	}
-	if err := db.MigrateFS(database, migrFS); err != nil {
-		t.Fatalf("MigrateFS: %v", err)
-	}
-	return database
+	return openSchemaDB(t, hubTestSchema)
 }
 
 func newTestHub(t testing.TB) (*ws.Hub, *db.DB) {
@@ -49,10 +36,7 @@ func newTestHub(t testing.TB) (*ws.Hub, *db.DB) {
 // seedTestUser inserts a Member-role user and returns its ID.
 func seedTestUser(t testing.TB, database *db.DB, username string) int64 {
 	t.Helper()
-	id, err := database.CreateUser(context.Background(), username, "hash", 4)
-	if err != nil {
-		t.Fatalf("seedUser: %v", err)
-	}
+	id := mustCreateUser(t, database, username, 4)
 	return id
 }
 
@@ -60,25 +44,13 @@ func seedTestUser(t testing.TB, database *db.DB, username string) int64 {
 // Owner role (id=1) has all permissions (0x7FFFFFFF), so it passes all checks.
 func seedOwnerUser(t testing.TB, database *db.DB, username string) *db.User {
 	t.Helper()
-	_, err := database.CreateUser(context.Background(), username, "hash", 1) // roleID=1 → Owner
-	if err != nil {
-		t.Fatalf("seedOwnerUser: %v", err)
-	}
-	user, err := database.GetUserByUsername(context.Background(), username)
-	if err != nil || user == nil {
-		t.Fatalf("seedOwnerUser GetUserByUsername: %v", err)
-	}
-	return user
+	return seedUserWithRole(t, database, username, 1)
 }
 
 // seedTestChannel inserts a channel and returns its ID.
 func seedTestChannel(t testing.TB, database *db.DB, name string) int64 {
 	t.Helper()
-	id, err := database.CreateChannel(context.Background(), name, "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("seedChannel: %v", err)
-	}
-	return id
+	return mustCreateChannel(t, database, name, "text")
 }
 
 // ─── Hub lifecycle ────────────────────────────────────────────────────────────
@@ -272,9 +244,7 @@ func TestHub_BroadcastChatBulkDeleted_OneEventToChannelMembers(t *testing.T) {
 				IDs       []int64 `json:"ids"`
 			} `json:"payload"`
 		}
-		if err := json.Unmarshal(got, &env); err != nil {
-			t.Fatalf("unmarshal: %v", err)
-		}
+		mustUnmarshal(t, got, &env)
 		if env.Type != "chat_bulk_deleted" {
 			t.Errorf("type = %q, want chat_bulk_deleted", env.Type)
 		}
@@ -486,9 +456,7 @@ func TestHub_HandleMessage_UnknownType_SendsError(t *testing.T) {
 	select {
 	case got := <-send:
 		var resp map[string]any
-		if err := json.Unmarshal(got, &resp); err != nil {
-			t.Fatalf("unmarshal response: %v", err)
-		}
+		mustUnmarshal(t, got, &resp)
 		if resp["type"] != "error" {
 			t.Errorf("type = %q, want 'error'", resp["type"])
 		}
@@ -513,9 +481,7 @@ func TestHub_HandleMessage_InvalidJSON(t *testing.T) {
 	select {
 	case got := <-send:
 		var resp map[string]any
-		if err := json.Unmarshal(got, &resp); err != nil {
-			t.Fatalf("unmarshal: %v", err)
-		}
+		mustUnmarshal(t, got, &resp)
 		if resp["type"] != "error" {
 			t.Errorf("type = %q, want 'error'", resp["type"])
 		}
@@ -538,19 +504,13 @@ func TestHub_ChatSend_RateLimit(t *testing.T) {
 
 	user := seedOwnerUser(t, database, "larry")
 	chID := seedTestChannel(t, database, "rl-test")
-	send := make(chan []byte, 64)
-	c := ws.NewTestClientWithUser(hub, user, chID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, chID, 64)
 
 	payload := map[string]any{
 		"channel_id": chID,
 		"content":    "hi",
 	}
-	raw, _ := json.Marshal(map[string]any{
-		"type":    "chat_send",
-		"payload": payload,
-	})
+	raw := envelope("chat_send", payload)
 
 	// One real send, then exhaust the user's chat window (10 per second) so
 	// the next two are refused however slowly the runner goes.
@@ -940,14 +900,8 @@ func TestHub_SweepRevokedSessions_KicksRevokedClient(t *testing.T) {
 	defer hub.Stop()
 
 	// Create two users with sessions.
-	uid1, err := database.CreateUser(context.Background(), "alice-revoke", "hash", 3)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	uid2, err := database.CreateUser(context.Background(), "bob-valid", "hash", 3)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	uid1 := mustCreateUser(t, database, "alice-revoke", 3)
+	uid2 := mustCreateUser(t, database, "bob-valid", 3)
 
 	u1, _ := database.GetUserByID(context.Background(), uid1)
 	u2, _ := database.GetUserByID(context.Background(), uid2)
@@ -1001,10 +955,7 @@ func TestHub_SweepRevokedSessions_KicksBannedClient(t *testing.T) {
 	go hub.Run()
 	defer hub.Stop()
 
-	uid, err := database.CreateUser(context.Background(), "soon-banned", "hash", 3)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	uid := mustCreateUser(t, database, "soon-banned", 3)
 	u, _ := database.GetUserByID(context.Background(), uid)
 
 	hash := auth.HashToken("ban-sweep-token")
@@ -1181,18 +1132,10 @@ func TestRefreshChannelVisibility_TargetedSends(t *testing.T) {
 
 	owner := seedOwnerUser(t, database, "vis-owner")
 	memberID := seedTestUser(t, database, "vis-member")
-	member, err := database.GetUserByID(context.Background(), memberID)
-	if err != nil || member == nil {
-		t.Fatalf("GetUserByID: %v", err)
-	}
+	member := mustGetUser(t, database, memberID)
 
-	ownerSend := make(chan []byte, 16)
-	memberSend := make(chan []byte, 16)
-	ownerClient := ws.NewTestClientWithUser(hub, owner, chID, ownerSend)
-	memberClient := ws.NewTestClientWithUser(hub, member, chID, memberSend)
-	hub.Register(ownerClient)
-	hub.Register(memberClient)
-	waitRegistered(t, hub, memberClient)
+	_, ownerSend := connectClient(t, hub, owner, chID, 16)
+	_, memberSend := connectClient(t, hub, member, chID, 16)
 
 	// Hide the channel from the Member role (deny ReadMessages).
 	if _, err := database.ExecContext(context.Background(),
@@ -1238,18 +1181,10 @@ func TestRefreshChannelVisibility_TargetedCreateCarriesPerClientCanSend(t *testi
 
 	owner := seedOwnerUser(t, database, "cansend-owner")
 	memberID := seedTestUser(t, database, "cansend-member")
-	member, err := database.GetUserByID(context.Background(), memberID)
-	if err != nil || member == nil {
-		t.Fatalf("GetUserByID: %v", err)
-	}
+	member := mustGetUser(t, database, memberID)
 
-	ownerSend := make(chan []byte, 16)
-	memberSend := make(chan []byte, 16)
-	ownerClient := ws.NewTestClientWithUser(hub, owner, chID, ownerSend)
-	memberClient := ws.NewTestClientWithUser(hub, member, chID, memberSend)
-	hub.Register(ownerClient)
-	hub.Register(memberClient)
-	waitRegistered(t, hub, memberClient)
+	_, ownerSend := connectClient(t, hub, owner, chID, 16)
+	_, memberSend := connectClient(t, hub, member, chID, 16)
 
 	// Member keeps READ_MESSAGES (0x0002) but loses SEND_MESSAGES (0x0001), so
 	// the channel stays VISIBLE while posting is revoked — precisely the case a
@@ -1299,10 +1234,7 @@ func TestRefreshChannelVisibility_TargetedCreateCarriesCanMoveVoice(t *testing.T
 	defer hub.Stop()
 	ctx := context.Background()
 
-	chID, err := database.CreateChannel(ctx, "movevoice-room", "voice", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
+	chID := mustCreateChannel(t, database, "movevoice-room", "voice")
 	ch, err := database.GetChannel(ctx, chID)
 	if err != nil || ch == nil {
 		t.Fatalf("GetChannel: %v", err)
@@ -1315,19 +1247,10 @@ func TestRefreshChannelVisibility_TargetedCreateCarriesCanMoveVoice(t *testing.T
 		^(permissions.MoveMembers | permissions.MuteMembers)); err != nil {
 		t.Fatalf("strip Member move bits: %v", err)
 	}
-	modID, err := database.CreateUser(ctx, "movevoice-mod", "hash", 3)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	mod, err := database.GetUserByID(ctx, modID)
-	if err != nil || mod == nil {
-		t.Fatalf("GetUserByID: %v", err)
-	}
+	modID := mustCreateUser(t, database, "movevoice-mod", 3)
+	mod := mustGetUser(t, database, modID)
 	memberID := seedTestUser(t, database, "movevoice-member")
-	member, err := database.GetUserByID(ctx, memberID)
-	if err != nil || member == nil {
-		t.Fatalf("GetUserByID: %v", err)
-	}
+	member := mustGetUser(t, database, memberID)
 	modSend := make(chan []byte, 16)
 	memberSend := make(chan []byte, 16)
 	hub.Register(ws.NewTestClientWithUser(hub, mod, 0, modSend))
@@ -1384,10 +1307,7 @@ func TestRefreshChannelVisibility_TargetedCreateCarriesCanModerateVoice(t *testi
 	defer hub.Stop()
 	ctx := context.Background()
 
-	chID, err := database.CreateChannel(ctx, "modvoice-room", "voice", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
+	chID := mustCreateChannel(t, database, "modvoice-room", "voice")
 	ch, err := database.GetChannel(ctx, chID)
 	if err != nil || ch == nil {
 		t.Fatalf("GetChannel: %v", err)
@@ -1395,30 +1315,14 @@ func TestRefreshChannelVisibility_TargetedCreateCarriesCanModerateVoice(t *testi
 
 	// Pin the Moderator role's MUTE_MEMBERS rather than lean on migration
 	// history for the default mask.
-	if _, err := database.ExecContext(ctx, `UPDATE roles SET permissions = permissions | ? WHERE id = 3`, permissions.MuteMembers); err != nil {
-		t.Fatalf("grant MUTE_MEMBERS: %v", err)
-	}
-	modID, err := database.CreateUser(ctx, "modvoice-mod", "hash", 3)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	mod, err := database.GetUserByID(ctx, modID)
-	if err != nil || mod == nil {
-		t.Fatalf("GetUserByID: %v", err)
-	}
+	mustExec(t, database, `UPDATE roles SET permissions = permissions | ? WHERE id = 3`, permissions.MuteMembers)
+	modID := mustCreateUser(t, database, "modvoice-mod", 3)
+	mod := mustGetUser(t, database, modID)
 	memberID := seedTestUser(t, database, "modvoice-member")
-	member, err := database.GetUserByID(ctx, memberID)
-	if err != nil || member == nil {
-		t.Fatalf("GetUserByID: %v", err)
-	}
+	member := mustGetUser(t, database, memberID)
 
-	modSend := make(chan []byte, 16)
-	memberSend := make(chan []byte, 16)
-	modClient := ws.NewTestClientWithUser(hub, mod, 0, modSend)
-	memberClient := ws.NewTestClientWithUser(hub, member, 0, memberSend)
-	hub.Register(modClient)
-	hub.Register(memberClient)
-	waitRegistered(t, hub, memberClient)
+	_, modSend := connectClient(t, hub, mod, 0, 16)
+	_, memberSend := connectClient(t, hub, member, 0, 16)
 
 	canModerateVoice := func(send chan []byte) any {
 		t.Helper()
@@ -1477,22 +1381,11 @@ func TestBroadcastChannelCreate_CarriesPerRecipientCanModerateVoice(t *testing.T
 	defer hub.Stop()
 	ctx := context.Background()
 
-	if _, err := database.ExecContext(ctx, `UPDATE roles SET permissions = permissions | ? WHERE id = 3`, permissions.MuteMembers); err != nil {
-		t.Fatalf("grant MUTE_MEMBERS: %v", err)
-	}
-	modID, err := database.CreateUser(ctx, "newvoice-mod", "hash", 3)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	mod, err := database.GetUserByID(ctx, modID)
-	if err != nil || mod == nil {
-		t.Fatalf("GetUserByID: %v", err)
-	}
+	mustExec(t, database, `UPDATE roles SET permissions = permissions | ? WHERE id = 3`, permissions.MuteMembers)
+	modID := mustCreateUser(t, database, "newvoice-mod", 3)
+	mod := mustGetUser(t, database, modID)
 	memberID := seedTestUser(t, database, "newvoice-member")
-	member, err := database.GetUserByID(ctx, memberID)
-	if err != nil || member == nil {
-		t.Fatalf("GetUserByID: %v", err)
-	}
+	member := mustGetUser(t, database, memberID)
 
 	modSend := make(chan []byte, 16)
 	memberSend := make(chan []byte, 16)
@@ -1501,10 +1394,7 @@ func TestBroadcastChannelCreate_CarriesPerRecipientCanModerateVoice(t *testing.T
 	hub.Register(memberClient)
 	waitRegistered(t, hub, memberClient)
 
-	chID, err := database.CreateChannel(ctx, "newvoice-room", "voice", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
+	chID := mustCreateChannel(t, database, "newvoice-room", "voice")
 	ch, err := database.GetChannel(ctx, chID)
 	if err != nil || ch == nil {
 		t.Fatalf("GetChannel: %v", err)
@@ -1595,10 +1485,7 @@ func TestBroadcastMemberUpdate_RevokesUnreadableSubscriptions(t *testing.T) {
 	); err != nil {
 		t.Fatalf("insert dm_participants: %v", err)
 	}
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, chID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, chID, 16)
 	// The user is a participant of this DM but has closed it (no dm_open_state
 	// row), so the topic is held while being absent from the allowed set.
 	hub.PubSubForTest().Subscribe(c, ws.ChannelTopic(dmID))
@@ -1655,23 +1542,14 @@ func TestBroadcastMemberUpdate_ClosesSocketWhenVisibilityUnresolved(t *testing.T
 	hub, database := newTestHub(t)
 	go hub.Run()
 	defer hub.Stop()
-	ctx := context.Background()
 
 	chID := seedTestChannel(t, database, "hiccup-room")
 	uid := seedTestUser(t, database, "hiccup-user")
-	user, err := database.GetUserByID(ctx, uid)
-	if err != nil || user == nil {
-		t.Fatalf("GetUserByID: %v", err)
-	}
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, chID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	user := mustGetUser(t, database, uid)
+	connectClient(t, hub, user, chID, 16)
 
 	// Break the override lookup computeAllowedChannels depends on.
-	if _, err := database.ExecContext(ctx, `DROP TABLE channel_overrides`); err != nil {
-		t.Fatalf("drop channel_overrides: %v", err)
-	}
+	mustExec(t, database, `DROP TABLE channel_overrides`)
 
 	hub.BroadcastMemberUpdate(uid, "member")
 

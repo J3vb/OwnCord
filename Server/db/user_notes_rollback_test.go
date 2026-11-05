@@ -4,21 +4,12 @@ import (
 	"context"
 	"strings"
 	"testing"
-
-	"github.com/J3vb/OwnCord/Server/rollback"
 )
 
 func TestRollback069_Rehearsal(t *testing.T) {
 	database := openMigratedMemoryInternal(t)
 	ctx := context.Background()
-	count := func(q string) int {
-		t.Helper()
-		var n int
-		if err := database.QueryRowContext(ctx, q).Scan(&n); err != nil {
-			t.Fatalf("%s: %v", q, err)
-		}
-		return n
-	}
+	count := rowCounter(t, database)
 	a, err := database.CreateUser(ctx, "ra", "hash", 4)
 	if err != nil {
 		t.Fatal(err)
@@ -30,18 +21,7 @@ func TestRollback069_Rehearsal(t *testing.T) {
 	if _, err := database.UpsertUserNote(ctx, a, b, "private"); err != nil {
 		t.Fatal(err)
 	}
-	raw, err := rollback.FS.ReadFile("069_profile_notes_banners.down.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, stmt := range splitStatements(string(raw)) {
-		if sqlText(stmt) == "" {
-			continue
-		}
-		if _, err := database.ExecContext(ctx, stmt); err != nil {
-			t.Fatalf("reversal statement %q: %v", stmt, err)
-		}
-	}
+	applyRollbackFile(t, database, "069_profile_notes_banners.down.sql")
 	if n := count(`SELECT COUNT(*) FROM sqlite_master WHERE name IN ('user_notes','idx_users_banner_id','idx_user_notes_target')`); n != 0 {
 		t.Errorf("%d objects survived the reversal", n)
 	}

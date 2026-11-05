@@ -1,7 +1,11 @@
 package safefetch
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -42,9 +46,7 @@ func testPolicy(t *testing.T, srv *httptest.Server) Policy {
 func serverPort(t *testing.T, srv *httptest.Server) int {
 	t.Helper()
 	_, port, err := net.SplitHostPort(srv.Listener.Addr().String())
-	if err != nil {
-		t.Fatalf("SplitHostPort: %v", err)
-	}
+	mustDo(t, "SplitHostPort", err)
 	n, err := strconv.Atoi(port)
 	if err != nil {
 		t.Fatalf("Atoi(%q): %v", port, err)
@@ -61,9 +63,7 @@ func newFetcher(t *testing.T, srv *httptest.Server, tweak func(*Policy)) *Fetche
 		tweak(&p)
 	}
 	f, err := New(p)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	mustDo(t, "New", err)
 	return f
 }
 
@@ -78,4 +78,57 @@ func stub(t *testing.T, h http.HandlerFunc) *httptest.Server {
 // get is the common one-line fetch used by most cases below.
 func get(f *Fetcher, url string) (*Response, error) {
 	return f.Fetch(context.Background(), Request{URL: url})
+}
+
+// gzipRepeated compresses chunk written n times, which is how the bomb tests
+// get a tiny wire body that inflates to something large.
+func gzipRepeated(t *testing.T, chunk []byte, n int) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := gzip.NewWriter(&buf)
+	for range n {
+		if _, err := zw.Write(chunk); err != nil {
+			t.Fatalf("gzip write: %v", err)
+		}
+	}
+	mustDo(t, "gzip close", zw.Close())
+	return buf.Bytes()
+}
+
+// flushHeaders sends a 200 and its headers immediately, so a handler can then
+// stall with the response already in flight.
+func flushHeaders(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "text/plain")
+	w.WriteHeader(http.StatusOK)
+	if fl, ok := w.(http.Flusher); ok {
+		fl.Flush()
+	}
+}
+
+// newTLSChainFetcher builds a fetcher that trusts the given TLS servers and may
+// reach every server's port, for the redirect-chain tests.
+func newTLSChainFetcher(t *testing.T, schemes []string, servers ...*httptest.Server) *Fetcher {
+	t.Helper()
+	pool := x509.NewCertPool()
+	ports := make([]int, 0, len(servers))
+	for _, s := range servers {
+		if s.TLS != nil {
+			pool.AddCert(s.Certificate())
+		}
+		ports = append(ports, serverPort(t, s))
+	}
+	f, err := New(Policy{
+		Schemes:              schemes,
+		Ports:                ports,
+		ContentTypes:         []string{"application/json", "text/plain"},
+		MaxRedirects:         3,
+		Deadline:             5 * time.Second,
+		MaxBytes:             64 << 10,
+		MaxDecompressedBytes: 256 << 10,
+		MaxConcurrent:        4,
+		Classify:             allowLoopback,
+		TLSConfig:            &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12},
+	})
+	mustDo(t, "New", err)
+	return f
 }

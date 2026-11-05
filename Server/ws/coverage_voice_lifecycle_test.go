@@ -6,10 +6,10 @@ package ws_test
 
 import (
 	"context"
-	"encoding/json"
 	"testing"
 	"time"
 
+	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
 	"github.com/J3vb/OwnCord/Server/ws"
 )
@@ -19,10 +19,7 @@ import (
 func TestHandleVoiceTokenRefresh_NotInVoice(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "vtr-notinvoice")
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, 0, 16)
 
 	hub.HandleMessageForTest(c, voiceTokenRefreshMsg())
 
@@ -36,30 +33,16 @@ func TestHandleVoiceTokenRefresh_InVoice_ReturnsToken(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "vtr-invc")
 	vcID := seedVoiceChannel(t, database, "vtr-vc")
-	send := make(chan []byte, 64)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, 0, 64)
 
-	raw, _ := json.Marshal(map[string]any{
-		"type":    "voice_join",
-		"payload": map[string]any{"channel_id": vcID},
-	})
+	raw := envelope("voice_join", map[string]any{"channel_id": vcID})
 	hub.HandleMessageForTest(c, raw)
 	drainChanTimeout(send, 100*time.Millisecond)
 
 	hub.HandleMessageForTest(c, voiceTokenRefreshMsg())
 
 	msgs := drainChanTimeout(send, 300*time.Millisecond)
-	foundToken := false
-	for _, msg := range msgs {
-		var env map[string]any
-		if json.Unmarshal(msg, &env) == nil && env["type"] == "voice_token" {
-			foundToken = true
-			break
-		}
-	}
-	if !foundToken {
+	if !containsFrameType(msgs, "voice_token") {
 		t.Error("expected voice_token message after token refresh")
 	}
 }
@@ -94,14 +77,9 @@ func TestRollbackVoiceJoin_ClearsVoiceStateAndBroadcasts(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "rb-user")
 	vcID := seedVoiceChannel(t, database, "rb-vc")
-	send := make(chan []byte, 64)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, 0, 64)
 
-	if err := database.JoinVoiceChannel(context.Background(), user.ID, vcID); err != nil {
-		t.Fatalf("JoinVoiceChannel: %v", err)
-	}
+	mustJoinVoice(t, database, user.ID, vcID)
 	ws.SetVoiceChIDForTest(c, vcID)
 
 	// rollbackVoiceJoin, CleanupVoiceForChannel, and sweepStaleVoiceStates are
@@ -118,15 +96,7 @@ func TestRollbackVoiceJoin_ClearsVoiceStateAndBroadcasts(t *testing.T) {
 	}
 
 	msgs := drainChanTimeout(send, 300*time.Millisecond)
-	foundLeave := false
-	for _, msg := range msgs {
-		var env map[string]any
-		if json.Unmarshal(msg, &env) == nil && env["type"] == "voice_leave" {
-			foundLeave = true
-			break
-		}
-	}
-	if !foundLeave {
+	if !containsFrameType(msgs, "voice_leave") {
 		t.Error("expected voice_leave broadcast after rollback")
 	}
 }
@@ -134,16 +104,30 @@ func TestRollbackVoiceJoin_ClearsVoiceStateAndBroadcasts(t *testing.T) {
 func TestRollbackVoiceJoin_NoDBState_DoesNotPanic(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "rb-nostate")
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, _ := connectClient(t, hub, user, 0, 16)
 
 	ws.SetVoiceChIDForTest(c, 999)
 	hub.RollbackVoiceJoinForTest(c, 999)
 
 	if got := ws.GetClientVoiceChIDForTest(c); got != 0 {
 		t.Fatalf("voiceChID after rollback = %d, want 0", got)
+	}
+}
+
+// requireVoiceStateUnchanged fails unless the user's voice row still names
+// chID with the join stamp it had before a rollback that did not own it.
+func requireVoiceStateUnchanged(t *testing.T, database *db.DB, userID, chID int64, joinedAt string) {
+	t.Helper()
+	got, err := database.GetVoiceState(context.Background(), userID)
+	if err != nil {
+		t.Fatalf("GetVoiceState after rollback: %v", err)
+	}
+	if got == nil {
+		t.Fatal("rollbackVoiceJoin deleted the newer voice membership it did not own")
+	}
+	if got.ChannelID != chID || got.JoinedAt != joinedAt {
+		t.Fatalf("voice state after rollback = %+v, want unchanged channel=%d joined_at=%q",
+			got, chID, joinedAt)
 	}
 }
 
@@ -162,17 +146,12 @@ func TestRollbackVoiceJoin_StaleTokenDoesNotDeleteNewerJoin(t *testing.T) {
 	user := seedCoverageOwner(t, database, "rb-stale-token")
 	staleChID := seedVoiceChannel(t, database, "rb-stale-token-old")
 	newChID := seedVoiceChannel(t, database, "rb-stale-token-new")
-	send := make(chan []byte, 64)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, _ := connectClient(t, hub, user, 0, 64)
 
 	// A second connection for the same user has already joined a different
 	// channel and committed its own voice_states row by the time the stale
 	// rollback below runs.
-	if err := database.JoinVoiceChannel(context.Background(), user.ID, newChID); err != nil {
-		t.Fatalf("JoinVoiceChannel (newer): %v", err)
-	}
+	mustJoinVoice(t, database, user.ID, newChID)
 	newState, err := database.GetVoiceState(context.Background(), user.ID)
 	if err != nil || newState == nil {
 		t.Fatalf("GetVoiceState (newer): state=%v err=%v", newState, err)
@@ -182,17 +161,7 @@ func TestRollbackVoiceJoin_StaleTokenDoesNotDeleteNewerJoin(t *testing.T) {
 	// token that does not match the row currently in the DB (newChID's).
 	hub.RollbackVoiceJoinWithTokenForTest(c, staleChID, "stale-token-does-not-match-anything")
 
-	got, err := database.GetVoiceState(context.Background(), user.ID)
-	if err != nil {
-		t.Fatalf("GetVoiceState after rollback: %v", err)
-	}
-	if got == nil {
-		t.Fatal("rollbackVoiceJoin deleted the newer voice membership it did not own")
-	}
-	if got.ChannelID != newChID || got.JoinedAt != newState.JoinedAt {
-		t.Fatalf("voice state after rollback = %+v, want unchanged channel=%d joined_at=%q",
-			got, newChID, newState.JoinedAt)
-	}
+	requireVoiceStateUnchanged(t, database, user.ID, newChID, newState.JoinedAt)
 }
 
 // OC-0044: mirrors the GetVoiceState-failure call site (voiceJoinPersist),
@@ -205,14 +174,9 @@ func TestRollbackVoiceJoin_EmptyTokenDoesNotDeleteDifferentChannel(t *testing.T)
 	user := seedCoverageOwner(t, database, "rb-empty-token")
 	staleChID := seedVoiceChannel(t, database, "rb-empty-token-old")
 	newChID := seedVoiceChannel(t, database, "rb-empty-token-new")
-	send := make(chan []byte, 64)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, _ := connectClient(t, hub, user, 0, 64)
 
-	if err := database.JoinVoiceChannel(context.Background(), user.ID, newChID); err != nil {
-		t.Fatalf("JoinVoiceChannel (newer): %v", err)
-	}
+	mustJoinVoice(t, database, user.ID, newChID)
 	newState, err := database.GetVoiceState(context.Background(), user.ID)
 	if err != nil || newState == nil {
 		t.Fatalf("GetVoiceState (newer): state=%v err=%v", newState, err)
@@ -221,17 +185,7 @@ func TestRollbackVoiceJoin_EmptyTokenDoesNotDeleteDifferentChannel(t *testing.T)
 	// RollbackVoiceJoinForTest exercises the empty-joinedAt path.
 	hub.RollbackVoiceJoinForTest(c, staleChID)
 
-	got, err := database.GetVoiceState(context.Background(), user.ID)
-	if err != nil {
-		t.Fatalf("GetVoiceState after rollback: %v", err)
-	}
-	if got == nil {
-		t.Fatal("rollbackVoiceJoin deleted the newer voice membership it did not own")
-	}
-	if got.ChannelID != newChID || got.JoinedAt != newState.JoinedAt {
-		t.Fatalf("voice state after rollback = %+v, want unchanged channel=%d joined_at=%q",
-			got, newChID, newState.JoinedAt)
-	}
+	requireVoiceStateUnchanged(t, database, user.ID, newChID, newState.JoinedAt)
 }
 
 // ─── leaveVoiceChannelWithRetry (voice_leave.go:57) ─────────────────────────
@@ -241,9 +195,7 @@ func TestLeaveVoiceChannelWithRetry_SuccessOnFirstAttempt(t *testing.T) {
 	user := seedCoverageOwner(t, database, "lvcr-ok")
 	vcID := seedVoiceChannel(t, database, "lvcr-ok-vc")
 
-	if err := database.JoinVoiceChannel(context.Background(), user.ID, vcID); err != nil {
-		t.Fatalf("JoinVoiceChannel: %v", err)
-	}
+	mustJoinVoice(t, database, user.ID, vcID)
 
 	state, _ := database.GetVoiceState(context.Background(), user.ID)
 	if state == nil {
@@ -279,20 +231,11 @@ func TestCleanupVoiceForChannel_WithClientsInChannel(t *testing.T) {
 	user2 := seedCoverageOwner(t, database, "cvfc-u2")
 	vcID := seedVoiceChannel(t, database, "cvfc-vc")
 
-	send1 := make(chan []byte, 64)
-	send2 := make(chan []byte, 64)
-	c1 := ws.NewTestClientWithUser(hub, user1, 0, send1)
-	c2 := ws.NewTestClientWithUser(hub, user2, 0, send2)
-	hub.Register(c1)
-	hub.Register(c2)
-	waitRegistered(t, hub, c2)
+	c1, _ := connectClient(t, hub, user1, 0, 64)
+	c2, _ := connectClient(t, hub, user2, 0, 64)
 
-	if err := database.JoinVoiceChannel(context.Background(), user1.ID, vcID); err != nil {
-		t.Fatalf("JoinVoiceChannel u1: %v", err)
-	}
-	if err := database.JoinVoiceChannel(context.Background(), user2.ID, vcID); err != nil {
-		t.Fatalf("JoinVoiceChannel u2: %v", err)
-	}
+	mustJoinVoice(t, database, user1.ID, vcID)
+	mustJoinVoice(t, database, user2.ID, vcID)
 	ws.SetVoiceChIDForTest(c1, vcID)
 	ws.SetVoiceChIDForTest(c2, vcID)
 	hub.SubscribeVoiceTopicForTest(c1, vcID) // as the real voice_join flow does
@@ -331,16 +274,11 @@ func TestCleanupVoiceForChannel_DoesNotClobberMovedParticipant(t *testing.T) {
 	oldVC := seedVoiceChannel(t, database, "cvfc-moved-old")
 	newVC := seedVoiceChannel(t, database, "cvfc-moved-new")
 
-	send := make(chan []byte, 64)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, _ := connectClient(t, hub, user, 0, 64)
 
 	// DB row still on the old channel (the snapshot the cleanup reads), but
 	// the client has already moved on to the new channel.
-	if err := database.JoinVoiceChannel(context.Background(), user.ID, oldVC); err != nil {
-		t.Fatalf("JoinVoiceChannel: %v", err)
-	}
+	mustJoinVoice(t, database, user.ID, oldVC)
 	ws.SetVoiceChIDForTest(c, newVC)
 	hub.SubscribeVoiceTopicForTest(c, newVC)
 
@@ -374,9 +312,7 @@ func TestCleanupVoiceForChannel_DBStateButNoClient(t *testing.T) {
 	user := seedCoverageOwner(t, database, "cvfc-noclient")
 	vcID := seedVoiceChannel(t, database, "cvfc-noclient-vc")
 
-	if err := database.JoinVoiceChannel(context.Background(), user.ID, vcID); err != nil {
-		t.Fatalf("JoinVoiceChannel: %v", err)
-	}
+	mustJoinVoice(t, database, user.ID, vcID)
 
 	hub.CleanupVoiceForChannel(vcID)
 
@@ -394,9 +330,7 @@ func TestSweepStaleVoiceStates_RemovesGhostState(t *testing.T) {
 	vcID := seedVoiceChannel(t, database, "sweep-ghost-vc")
 
 	// Put user in voice in DB but don't register a client — ghost state.
-	if err := database.JoinVoiceChannel(context.Background(), user.ID, vcID); err != nil {
-		t.Fatalf("JoinVoiceChannel: %v", err)
-	}
+	mustJoinVoice(t, database, user.ID, vcID)
 
 	// Verify it exists.
 	state, _ := database.GetVoiceState(context.Background(), user.ID)
@@ -419,14 +353,9 @@ func TestSweepStaleVoiceStates_PreservesActiveClientState(t *testing.T) {
 	vcID := seedVoiceChannel(t, database, "sweep-active-vc")
 
 	// Register client and set voice channel.
-	send := make(chan []byte, 64)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, _ := connectClient(t, hub, user, 0, 64)
 
-	if err := database.JoinVoiceChannel(context.Background(), user.ID, vcID); err != nil {
-		t.Fatalf("JoinVoiceChannel: %v", err)
-	}
+	mustJoinVoice(t, database, user.ID, vcID)
 	ws.SetVoiceChIDForTest(c, vcID)
 
 	hub.SweepStaleVoiceStatesForTest()
@@ -461,14 +390,9 @@ func TestSweepStaleVoiceStates_MismatchedChannelIsGhost(t *testing.T) {
 	vc2 := seedVoiceChannel(t, database, "sweep-mismatch-vc2")
 
 	// Register client in vc1 but DB says vc2.
-	send := make(chan []byte, 64)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, _ := connectClient(t, hub, user, 0, 64)
 
-	if err := database.JoinVoiceChannel(context.Background(), user.ID, vc2); err != nil {
-		t.Fatalf("JoinVoiceChannel: %v", err)
-	}
+	mustJoinVoice(t, database, user.ID, vc2)
 	ws.SetVoiceChIDForTest(c, vc1) // Client thinks vc1, DB says vc2 — mismatch.
 
 	hub.SweepStaleVoiceStatesForTest()
@@ -497,10 +421,7 @@ func TestSweepStaleVoiceStates_EvictsRevokedConnectVoice(t *testing.T) {
 	}
 	vcID := seedVoiceChannel(t, database, "sweep-revoked-vc")
 
-	send := make(chan []byte, 64)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, _ := connectClient(t, hub, user, 0, 64)
 
 	if joinErr := database.JoinVoiceChannel(context.Background(), user.ID, vcID); joinErr != nil {
 		t.Fatalf("JoinVoiceChannel: %v", joinErr)

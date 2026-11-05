@@ -2,9 +2,7 @@ package api_test
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/auth"
@@ -21,11 +19,8 @@ func TestListInviteRedemptions_Success(t *testing.T) {
 
 	// Create an invite and redeem it.
 	rr := postJSONWithToken(t, router, "/api/v1/invites", token, map[string]any{"max_uses": 1})
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("create invite = %d; body %s", rr.Code, rr.Body.String())
-	}
-	var created map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&created)
+	requireStatus(t, rr, http.StatusCreated)
+	created := decodeBody[map[string]any](t, rr)
 	code, _ := created["code"].(string)
 	if code == "" {
 		t.Fatal("create invite response missing code")
@@ -35,19 +30,10 @@ func TestListInviteRedemptions_Success(t *testing.T) {
 		t.Fatalf("CreateUserWithInvite: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/invites/"+code+"/redemptions", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.RemoteAddr = "127.0.0.1:9999"
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	w := doAPI(t, router, http.MethodGet, "/api/v1/invites/"+code+"/redemptions", token, nil)
 
-	if w.Code != http.StatusOK {
-		t.Fatalf("ListInviteRedemptions = %d, want 200; body = %s", w.Code, w.Body.String())
-	}
-	var resp []map[string]any
-	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	requireStatus(t, w, http.StatusOK)
+	resp := decodeBody[[]map[string]any](t, w)
 	if len(resp) != 1 {
 		t.Fatalf("redemptions = %d, want 1", len(resp))
 	}
@@ -68,15 +54,9 @@ func TestListInviteRedemptions_MemberForbidden(t *testing.T) {
 	// Member role (id=4) lacks MANAGE_INVITES.
 	token := loginAndGetToken(t, router, database, "plain-member", 4)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/invites/whatever/redemptions", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.RemoteAddr = "127.0.0.1:9999"
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	w := doAPI(t, router, http.MethodGet, "/api/v1/invites/whatever/redemptions", token, nil)
 
-	if w.Code != http.StatusForbidden {
-		t.Errorf("member ListInviteRedemptions = %d, want 403; body = %s", w.Code, w.Body.String())
-	}
+	expectStatus(t, w, http.StatusForbidden)
 }
 
 // An unknown code is 404.
@@ -86,13 +66,7 @@ func TestListInviteRedemptions_UnknownCode(t *testing.T) {
 	router := buildInviteRouter(database, limiter)
 	token := loginAndGetToken(t, router, database, "unknown-redemption-lister", 2)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/invites/no-such-code/redemptions", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.RemoteAddr = "127.0.0.1:9999"
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	w := doAPI(t, router, http.MethodGet, "/api/v1/invites/no-such-code/redemptions", token, nil)
 
-	if w.Code != http.StatusNotFound {
-		t.Errorf("unknown code = %d, want 404; body = %s", w.Code, w.Body.String())
-	}
+	expectStatus(t, w, http.StatusNotFound)
 }

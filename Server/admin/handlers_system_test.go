@@ -70,9 +70,7 @@ func TestAdminAPI_SystemStats(t *testing.T) {
 	ownerToken := createAdminUser(t, database)
 
 	w := doRequest(t, handler, http.MethodGet, "/system/stats", ownerToken, nil)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 	s := decodeSystemStats(t, w.Body.Bytes())
 	if s.IntervalSeconds != 5 || s.WindowSeconds != 3600 || s.OnlineUsers != 3 || s.CPUCores < 1 {
 		t.Errorf("header = %+v", s)
@@ -125,9 +123,7 @@ func TestAdminAPI_SystemStats_NothingWired(t *testing.T) {
 	})
 	ownerToken := createAdminUser(t, database)
 	w := doRequest(t, handler, http.MethodGet, "/system/stats", ownerToken, nil)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 	s := decodeSystemStats(t, w.Body.Bytes())
 	if s.Current != nil || len(s.Series) != 0 || s.MemoryTotal != nil || s.UptimeSeconds != nil {
 		t.Errorf("stats = %+v, want no CPU, memory or uptime", s)
@@ -156,10 +152,8 @@ func TestAdminAPI_SlowRequests(t *testing.T) {
 	ownerToken := createAdminUser(t, database)
 
 	w := doRequest(t, handler, http.MethodGet, "/system/slow-requests", ownerToken, nil)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
-	var got struct {
+	requireStatus(t, w, http.StatusOK)
+	got := decodeBody[struct {
 		WindowSeconds int `json:"window_seconds"`
 		Routes        []struct {
 			Method string  `json:"method"`
@@ -169,10 +163,7 @@ func TestAdminAPI_SlowRequests(t *testing.T) {
 			P95    float64 `json:"p95_ms"`
 			Max    float64 `json:"max_ms"`
 		} `json:"routes"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	}](t, w)
 	if got.WindowSeconds != 3600 || len(got.Routes) != 10 {
 		t.Fatalf("window %d, %d routes; want 3600 and 10", got.WindowSeconds, len(got.Routes))
 	}

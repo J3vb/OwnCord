@@ -43,9 +43,7 @@ func (f uploadsFixture) link(t *testing.T, id string, user int64, deleted bool) 
 	t.Helper()
 	ctx := context.Background()
 	msgID, err := f.database.CreateMessage(ctx, f.ch, user, "files", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	mustDo(t, "CreateMessage", err)
 	if _, err := f.database.ExecContext(ctx, `UPDATE attachments SET message_id = ? WHERE id = ?`, msgID, id); err != nil {
 		t.Fatalf("link %s: %v", id, err)
 	}
@@ -69,9 +67,7 @@ func (f uploadsFixture) list(t *testing.T, q db.OwnUploadQuery) []db.OwnUpload {
 		q.Limit = 50
 	}
 	items, err := f.database.ListOwnUploads(context.Background(), q)
-	if err != nil {
-		t.Fatalf("ListOwnUploads: %v", err)
-	}
+	mustDo(t, "ListOwnUploads", err)
 	return items
 }
 
@@ -291,9 +287,7 @@ func TestDeleteEmptyOwnMessage_OnlyWhileStillEmpty(t *testing.T) {
 	if err := f.database.DeleteEmptyOwnMessage(ctx, blank, f.bob); !errors.Is(err, db.ErrNotFound) {
 		t.Errorf("someone else's message: err = %v, want ErrNotFound", err)
 	}
-	if err := f.database.DeleteEmptyOwnMessage(ctx, blank, f.alice); err != nil {
-		t.Fatalf("blank delete: %v", err)
-	}
+	mustDo(t, "blank delete", f.database.DeleteEmptyOwnMessage(ctx, blank, f.alice))
 	if err := f.database.DeleteEmptyOwnMessage(ctx, blank, f.alice); !errors.Is(err, db.ErrNotFound) {
 		t.Errorf("second delete: err = %v, want ErrNotFound", err)
 	}

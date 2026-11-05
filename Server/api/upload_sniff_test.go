@@ -55,10 +55,7 @@ func TestUploadStoreFile_ShortReadStillSniffsFullHeader(t *testing.T) {
 	store := newUploadTestStorage(t)
 	svc := testUploadSvc(database)
 
-	userID, err := database.CreateUser(context.Background(), "sniffuser", "$2a$12$fake", 1)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	userID := mustCreateUser(t, database, "sniffuser", "$2a$12$fake", 1)
 
 	// A minimal RIFF/WEBP header: bytes 0-3 "RIFF", 4-7 an (arbitrary,
 	// masked-out) chunk size, 8-13 "WEBPVP". http.DetectContentType needs

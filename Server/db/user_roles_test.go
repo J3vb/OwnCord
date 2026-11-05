@@ -29,27 +29,19 @@ func userRoleIDs(t *testing.T, database *db.DB, userID int64) []int64 {
 	var ids []int64
 	for rows.Next() {
 		var id int64
-		if err := rows.Scan(&id); err != nil {
-			t.Fatal(err)
-		}
+		mustDo(t, "Scan", rows.Scan(&id))
 		ids = append(ids, id)
 	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Err", rows.Err())
 	return ids
 }
 
 func TestMigration067_BackfillsOneRowPerUser(t *testing.T) {
 	database := openMemory(t)
-	if err := db.MigrateFS(database, migrationsUpTo(t, "067_")); err != nil {
-		t.Fatalf("pre-067 schema: %v", err)
-	}
+	mustDo(t, "pre-067 schema", db.MigrateFS(database, migrationsUpTo(t, "067_")))
 	execAll(t, database,
 		`INSERT INTO users (id, username, password, role_id) VALUES (1, 'a', 'h', 1), (2, 'b', 'h', 4), (3, 'c', 'h', 4)`)
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	mustDo(t, "Migrate", db.Migrate(database))
 	for uid, want := range map[int64]int64{1: 1, 2: 4, 3: 4} {
 		if got := userRoleIDs(t, database, uid); !slices.Equal(got, []int64{want}) {
 			t.Errorf("user %d user_roles = %v, want [%d]", uid, got, want)
@@ -72,18 +64,14 @@ func TestMigration067_BackfillsOneRowPerUser(t *testing.T) {
 
 func TestMigration067_DanglingRoleSkipped(t *testing.T) {
 	database := openMemory(t)
-	if err := db.MigrateFS(database, migrationsUpTo(t, "067_")); err != nil {
-		t.Fatalf("pre-067 schema: %v", err)
-	}
+	mustDo(t, "pre-067 schema", db.MigrateFS(database, migrationsUpTo(t, "067_")))
 	// Historical databases ran with foreign keys off. The memory pool holds a
 	// single connection, so the pragma sticks for the seed insert.
 	execAll(t, database, `PRAGMA foreign_keys = OFF`,
 		`INSERT INTO users (id, username, password, role_id) VALUES (1, 'a', 'h', 4), (2, 'ghost', 'h', 999)`,
 		`PRAGMA foreign_keys = ON`)
 	// Stop before 077, which reconciles the dangling user onto the default role.
-	if err := db.MigrateFS(database, migrationsUpTo(t, "077_")); err != nil {
-		t.Fatalf("Migrate must still commit: %v", err)
-	}
+	mustDo(t, "Migrate must still commit", db.MigrateFS(database, migrationsUpTo(t, "077_")))
 	if got := userRoleIDs(t, database, 1); !slices.Equal(got, []int64{4}) {
 		t.Errorf("user 1 roles = %v, want [4]", got)
 	}
@@ -109,20 +97,14 @@ func TestSyncTopRole_PicksHighestPositionThenLowestID(t *testing.T) {
 
 	topID := func() int64 {
 		var id int64
-		if err := database.QueryRowContext(ctx, `SELECT role_id FROM users WHERE id = 1`).Scan(&id); err != nil {
-			t.Fatal(err)
-		}
+		mustDo(t, "QueryRowContext", database.QueryRowContext(ctx, `SELECT role_id FROM users WHERE id = 1`).Scan(&id))
 		return id
 	}
-	if err := database.AddUserRole(ctx, 1, 20); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "AddUserRole", database.AddUserRole(ctx, 1, 20))
 	if got := topID(); got != 20 {
 		t.Fatalf("top after adding 20 = %d, want 20", got)
 	}
-	if err := database.AddUserRole(ctx, 1, 10); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "AddUserRole", database.AddUserRole(ctx, 1, 10))
 	if got := topID(); got != 10 {
 		t.Fatalf("top on a position tie = %d, want lowest id 10", got)
 	}
@@ -133,15 +115,11 @@ func TestSyncTopRole_PicksHighestPositionThenLowestID(t *testing.T) {
 	if mr.Top.ID != 10 || !slices.Equal(mr.IDs, []int64{10, 20, 30}) {
 		t.Errorf("MemberRoles top %d ids %v, want 10 and [10 20 30]", mr.Top.ID, mr.IDs)
 	}
-	if err := database.RemoveUserRole(ctx, 1, 10); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "RemoveUserRole", database.RemoveUserRole(ctx, 1, 10))
 	if got := topID(); got != 20 {
 		t.Errorf("top after removing 10 = %d, want 20", got)
 	}
-	if err := database.RemoveUserRole(ctx, 1, 20); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "RemoveUserRole", database.RemoveUserRole(ctx, 1, 20))
 	if err := database.RemoveUserRole(ctx, 1, 30); !errors.Is(err, db.ErrLastRole) {
 		t.Errorf("removing last role err = %v, want ErrLastRole", err)
 	}
@@ -157,9 +135,7 @@ func TestMemberGeneration_BumpsOnUserRolesWrite(t *testing.T) {
 		`INSERT INTO users (id, username, password, role_id) VALUES (1, 'u', 'h', 4)`)
 	gen := func() int64 {
 		g, err := database.MemberGeneration(ctx)
-		if err != nil {
-			t.Fatal(err)
-		}
+		mustDo(t, "MemberGeneration", err)
 		return g
 	}
 	g0 := gen()
@@ -201,9 +177,7 @@ func TestRemoveUserRole_NotHeldIsNoOp(t *testing.T) {
 		t.Errorf("removing a role the member does not hold err = %v, want nil", err)
 	}
 	mr, err := database.GetMemberRoles(ctx, 1)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "GetMemberRoles", err)
 	if mr.Top.ID != 4 || len(mr.IDs) != 1 {
 		t.Errorf("member roles after no-op removal = %+v, want only role 4", mr)
 	}

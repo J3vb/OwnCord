@@ -23,12 +23,8 @@ func TestReportRetention_PrunesContentKeepsRow(t *testing.T) {
 	seedChannel(t, database, &db.Channel{ID: 1400, Name: "general"})
 	msgID := seedReportMessage(t, database, 1400, 11, "hi")
 	id, err := svc.File(ctx, FileReportParams{ReporterID: 10, TargetType: TargetMessage, TargetID: strconv.FormatInt(msgID, 10), Reason: "spam", Detail: "the reporter's written detail"})
-	if err != nil {
-		t.Fatalf("File: %v", err)
-	}
-	if err := svc.Note(ctx, 2, id, "old note"); err != nil {
-		t.Fatalf("Note: %v", err)
-	}
+	mustDo(t, "File", err)
+	mustDo(t, "Note", svc.Note(ctx, 2, id, "old note"))
 	if _, err := svc.Close(ctx, 2, id, "actioned"); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
@@ -43,12 +39,8 @@ func TestReportRetention_PrunesContentKeepsRow(t *testing.T) {
 	// short of the window was left untouched).
 	recentMsgID := seedReportMessage(t, database, 1400, 11, "hi again")
 	recentID, err := svc.File(ctx, FileReportParams{ReporterID: 12, TargetType: TargetMessage, TargetID: strconv.FormatInt(recentMsgID, 10), Reason: "spam", Detail: "recent detail"})
-	if err != nil {
-		t.Fatalf("File(recent): %v", err)
-	}
-	if err := svc.Note(ctx, 2, recentID, "recent note"); err != nil {
-		t.Fatalf("Note(recent): %v", err)
-	}
+	mustDo(t, "File(recent)", err)
+	mustDo(t, "Note(recent)", svc.Note(ctx, 2, recentID, "recent note"))
 	if _, err := svc.Close(ctx, 2, recentID, "actioned"); err != nil {
 		t.Fatalf("Close(recent): %v", err)
 	}
@@ -56,28 +48,18 @@ func TestReportRetention_PrunesContentKeepsRow(t *testing.T) {
 		t.Fatalf("back-date closed_at(recent): %v", err)
 	}
 
-	if err := svc.PruneClosedContent(ctx, 180*24*time.Hour); err != nil {
-		t.Fatalf("PruneClosedContent: %v", err)
-	}
+	mustDo(t, "PruneClosedContent", svc.PruneClosedContent(ctx, 180*24*time.Hour))
 
-	evidence, err := database.ListReportEvidence(ctx, id)
-	if err != nil {
-		t.Fatalf("ListReportEvidence: %v", err)
-	}
+	evidence := mustListReportEvidence(t, database, id)
 	if len(evidence) != 0 {
 		t.Errorf("evidence after prune = %d rows, want 0", len(evidence))
 	}
 	notes, err := database.ListReportNotes(ctx, id)
-	if err != nil {
-		t.Fatalf("ListReportNotes: %v", err)
-	}
+	mustDo(t, "ListReportNotes", err)
 	if len(notes) != 0 {
 		t.Errorf("notes after prune = %d rows, want 0", len(notes))
 	}
-	report, err := database.GetReport(ctx, id)
-	if err != nil {
-		t.Fatalf("GetReport: %v", err)
-	}
+	report := mustGetReport(t, database, id)
 	if report.Detail != "" {
 		t.Errorf("detail after prune = %q, want empty", report.Detail)
 	}
@@ -88,40 +70,25 @@ func TestReportRetention_PrunesContentKeepsRow(t *testing.T) {
 		t.Errorf("reports row count after prune = %d, want 1 (kept)", n)
 	}
 
-	recentEvidence, err := database.ListReportEvidence(ctx, recentID)
-	if err != nil {
-		t.Fatalf("ListReportEvidence(recent): %v", err)
-	}
+	recentEvidence := mustListReportEvidence(t, database, recentID)
 	if len(recentEvidence) == 0 {
 		t.Error("recent report's evidence was pruned by a 180-day window at 10 days closed")
 	}
 	recentNotes, err := database.ListReportNotes(ctx, recentID)
-	if err != nil {
-		t.Fatalf("ListReportNotes(recent): %v", err)
-	}
+	mustDo(t, "ListReportNotes(recent)", err)
 	if len(recentNotes) == 0 {
 		t.Error("recent report's notes were pruned by a 180-day window at 10 days closed")
 	}
-	recentReport, err := database.GetReport(ctx, recentID)
-	if err != nil {
-		t.Fatalf("GetReport(recent): %v", err)
-	}
+	recentReport := mustGetReport(t, database, recentID)
 	if recentReport.Detail == "" {
 		t.Error("recent report's detail was pruned by a 180-day window at 10 days closed")
 	}
 
 	// An open report, however old, is never touched by this window.
 	openID, err := svc.File(ctx, FileReportParams{ReporterID: 12, TargetType: TargetUser, TargetID: "13", Reason: "spam", Detail: "still open detail"})
-	if err != nil {
-		t.Fatalf("File(open): %v", err)
-	}
-	if err := svc.PruneClosedContent(ctx, 0); err != nil {
-		t.Fatalf("PruneClosedContent: %v", err)
-	}
-	openReport, err := database.GetReport(ctx, openID)
-	if err != nil {
-		t.Fatalf("GetReport(open): %v", err)
-	}
+	mustDo(t, "File(open)", err)
+	mustDo(t, "PruneClosedContent", svc.PruneClosedContent(ctx, 0))
+	openReport := mustGetReport(t, database, openID)
 	if openReport.Detail == "" {
 		t.Error("an open report's detail was cleared by the retention sweep")
 	}

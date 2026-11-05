@@ -64,9 +64,7 @@ func TestMessageDelivery_ConcurrentRetriesCommitOneMessageAndMention(t *testing.
 		t.Fatalf("new-message results = %d, want 1", created)
 	}
 	var count int
-	if err := database.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM messages`).Scan(&count); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "QueryRowContext", database.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM messages`).Scan(&count))
 	if count != 1 {
 		t.Fatalf("stored messages = %d, want 1", count)
 	}
@@ -80,9 +78,7 @@ func TestMessageDelivery_PayloadMismatchAndSenderScope(t *testing.T) {
 	svc.RunBackgroundInlineForTest()
 	p := deliveryTestParams()
 	first, err := svc.SendMessage(context.Background(), p)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "SendMessage", err)
 	seedChannel(t, database, &db.Channel{ID: 11, Name: "other", Type: "text"})
 	for _, mutate := range []func(*SendMessageParams){
 		func(p *SendMessageParams) { p.Content = "different" },
@@ -157,9 +153,7 @@ func TestMessageDelivery_RefusedSendRetryStaysRefused(t *testing.T) {
 		}
 	}
 	var receipts int
-	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM message_delivery_receipts`).Scan(&receipts); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "QueryRowContext", database.QueryRowContext(ctx, `SELECT COUNT(*) FROM message_delivery_receipts`).Scan(&receipts))
 	if receipts != 0 {
 		t.Fatalf("receipts = %d, want 0 for a refused send", receipts)
 	}
@@ -187,9 +181,7 @@ func TestMessageDelivery_DeletedOriginalCannotBeResent(t *testing.T) {
 			svc.RunBackgroundInlineForTest()
 			p := deliveryTestParams()
 			first, err := svc.SendMessage(context.Background(), p)
-			if err != nil {
-				t.Fatal(err)
-			}
+			mustDo(t, "SendMessage", err)
 			query := `UPDATE messages SET deleted = 1 WHERE id = ?`
 			if hard {
 				query = `DELETE FROM messages WHERE id = ?`
@@ -201,9 +193,7 @@ func TestMessageDelivery_DeletedOriginalCannotBeResent(t *testing.T) {
 				t.Fatalf("deleted retry = %v", err)
 			}
 			var count int
-			if err := database.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM messages WHERE deleted = 0`).Scan(&count); err != nil {
-				t.Fatal(err)
-			}
+			mustDo(t, "QueryRowContext", database.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM messages WHERE deleted = 0`).Scan(&count))
 			if count != 0 {
 				t.Fatalf("retry resurrected %d messages", count)
 			}
@@ -224,15 +214,11 @@ func TestMessageDelivery_AttachmentOnlyFailureIsAtomicAndRetryable(t *testing.T)
 		t.Fatalf("missing attachment = %v", err)
 	}
 	var count int
-	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM messages`).Scan(&count); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "QueryRowContext", database.QueryRowContext(ctx, `SELECT COUNT(*) FROM messages`).Scan(&count))
 	if count != 0 {
 		t.Fatalf("failed attachment send left %d message rows", count)
 	}
-	if err := database.CreateAttachment(ctx, "pending-upload", 1, "a.txt", "a.txt", "text/plain", 1, nil, nil); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateAttachment", database.CreateAttachment(ctx, "pending-upload", 1, "a.txt", "a.txt", "text/plain", 1, nil, nil))
 	first, err := svc.SendMessage(ctx, p)
 	if err != nil || len(first.Attachments) != 1 {
 		t.Fatalf("completed upload = %+v, %v", first, err)

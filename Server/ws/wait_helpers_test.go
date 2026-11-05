@@ -16,10 +16,12 @@ package ws_test
 // old sleep+drain behavior.
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 	"time"
 
+	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/ws"
 )
 
@@ -45,6 +47,24 @@ func waitFor(t *testing.T, timeout time.Duration, cond func() bool, msg string) 
 		}
 		time.Sleep(waitPoll)
 	}
+}
+
+// waitVoiceStateGone waits until the user has no voice_states row.
+func waitVoiceStateGone(t *testing.T, database *db.DB, userID int64, what string) {
+	t.Helper()
+	waitFor(t, waitTimeout, func() bool {
+		state, err := database.GetVoiceState(context.Background(), userID)
+		return err == nil && state == nil
+	}, what)
+}
+
+// waitVoiceStateIn waits until the user's voice_states row points at chanID.
+func waitVoiceStateIn(t *testing.T, database *db.DB, userID, chanID int64, what string) {
+	t.Helper()
+	waitFor(t, waitTimeout, func() bool {
+		state, err := database.GetVoiceState(context.Background(), userID)
+		return err == nil && state != nil && state.ChannelID == chanID
+	}, what)
 }
 
 // waitRegistered blocks until c is the hub's registered client for its user,

@@ -22,14 +22,9 @@ package ws
 import (
 	"context"
 	"encoding/json"
-	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
-	"github.com/coder/websocket"
-
-	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
@@ -37,10 +32,7 @@ func TestReconnect_AuthOKReflectsSettledStatus_NotDisconnectTimeStatus(t *testin
 	database := newTeardownTestDB(t)
 	ctx := context.Background()
 
-	userID, err := database.CreateUser(ctx, "resume-status-user", "hash", 1)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	userID := mustCreateUser(t, database, "resume-status-user", 1)
 
 	// Establish the user as a plain "online" session, then simulate the
 	// socket loss that precedes every reconnect: StampConnections only
@@ -52,25 +44,15 @@ func TestReconnect_AuthOKReflectsSettledStatus_NotDisconnectTimeStatus(t *testin
 	if err := database.StampConnections(ctx, nil, []int64{userID}); err != nil {
 		t.Fatalf("StampConnections: %v", err)
 	}
-	pre, err := database.GetUserByID(ctx, userID)
-	if err != nil || pre == nil {
-		t.Fatalf("GetUserByID (precondition): %v", err)
-	}
+	pre := mustGetUser(t, database, userID)
 	if pre.Status != db.StatusOffline {
 		t.Fatalf("precondition: expected status=offline after StampConnections, got %q", pre.Status)
 	}
 
-	token, err := auth.GenerateToken()
-	if err != nil {
-		t.Fatalf("GenerateToken: %v", err)
-	}
-	if _, err := database.CreateSession(ctx, userID, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
+	token := seedSessionToken(t, database, userID)
 
-	hub := newTestHub(t, database, auth.NewRateLimiter(), nil)
-	go hub.Run()
-	defer hub.Stop()
+	rig := newServeRigOn(t, database, nil)
+	hub := rig.hub
 
 	// Global (channel_id 0) frames bracketing last_seq=99, so the resume takes
 	// the buffer tier rather than falling through to a full ready (which also
@@ -81,30 +63,7 @@ func TestReconnect_AuthOKReflectsSettledStatus_NotDisconnectTimeStatus(t *testin
 	rb.Push(99, 0, []byte(`{"seq":99,"type":"presence","payload":{}}`))
 	rb.Push(100, 0, []byte(`{"seq":100,"type":"presence","payload":{}}`))
 
-	srv := httptest.NewServer(ServeWS(hub, []string{"*"}, 0))
-	defer srv.Close()
-
-	dialCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	conn, dialResp, dialErr := websocket.Dial(dialCtx, "ws"+strings.TrimPrefix(srv.URL, "http"), nil)
-	if dialResp != nil && dialResp.Body != nil {
-		_ = dialResp.Body.Close()
-	}
-	if dialErr != nil {
-		t.Fatalf("websocket.Dial: %v", dialErr)
-	}
-	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
-
-	raw, _ := json.Marshal(map[string]any{
-		"type": "auth",
-		"payload": map[string]any{
-			"token":    token,
-			"last_seq": uint64(99),
-		},
-	})
-	if err := conn.Write(dialCtx, websocket.MessageText, raw); err != nil {
-		t.Fatalf("write auth: %v", err)
-	}
+	conn := rig.dialAuth(t, ctx, token, 99, 0)
 
 	readCtx, readCancel := context.WithTimeout(ctx, 5*time.Second)
 	defer readCancel()
@@ -135,10 +94,7 @@ func TestReconnect_AuthOKReflectsSettledStatus_NotDisconnectTimeStatus(t *testin
 	// must have actually run and been visible before/at the point auth_ok was
 	// built, not merely be about to run after the client already parsed the
 	// (wrong) value.
-	post, err := database.GetUserByID(ctx, userID)
-	if err != nil || post == nil {
-		t.Fatalf("GetUserByID (postcondition): %v", err)
-	}
+	post := mustGetUser(t, database, userID)
 	if post.Status != db.StatusOnline {
 		t.Fatalf("persisted status after reconnect = %q, want %q", post.Status, db.StatusOnline)
 	}

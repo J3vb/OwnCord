@@ -2,7 +2,6 @@ package api_test
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"testing"
 	"time"
@@ -27,18 +26,13 @@ func TestAuditCoverage_APIMutations(t *testing.T) {
 		t.Helper()
 		rr := postJSONWithToken(t, router, "/api/v1/users/me/totp/enable", token,
 			map[string]string{"password": password})
-		if rr.Code != http.StatusOK {
-			t.Fatalf("enable: status = %d; body = %s", rr.Code, rr.Body.String())
-		}
-		var enableResp map[string]any
-		_ = json.NewDecoder(rr.Body).Decode(&enableResp)
+		requireStatus(t, rr, http.StatusOK)
+		enableResp := decodeBody[map[string]any](t, rr)
 		secret = extractSecretFromURI(t, enableResp["qr_uri"].(string))
 		code, _ = auth.GenerateTOTPCode(secret, time.Now().UTC())
 		rr = postJSONWithToken(t, router, "/api/v1/users/me/totp/confirm", token,
 			map[string]string{"password": password, "code": code})
-		if rr.Code != http.StatusNoContent {
-			t.Fatalf("confirm: status = %d; body = %s", rr.Code, rr.Body.String())
-		}
+		requireStatus(t, rr, http.StatusNoContent)
 		return secret, code
 	}
 
@@ -63,9 +57,7 @@ func TestAuditCoverage_APIMutations(t *testing.T) {
 			rec := audittest.Install(t, database)
 			rr := deleteWithToken(t, router, "/api/v1/users/me/totp", token,
 				map[string]string{"password": password})
-			if rr.Code != http.StatusNoContent {
-				t.Fatalf("disable: status = %d; body = %s", rr.Code, rr.Body.String())
-			}
+			requireStatus(t, rr, http.StatusNoContent)
 			return rec, []string{password, token, secret, code}
 		}},
 		{"recovery codes regenerate", "recovery_codes_regenerated", func(t *testing.T) (*audittest.Recorder, []string) {
@@ -76,15 +68,10 @@ func TestAuditCoverage_APIMutations(t *testing.T) {
 			rec := audittest.Install(t, database)
 			rr := postJSONWithToken(t, router, "/api/v1/users/me/totp/recovery-codes", token,
 				map[string]string{"password": password})
-			if rr.Code != http.StatusOK {
-				t.Fatalf("regenerate: status = %d; body = %s", rr.Code, rr.Body.String())
-			}
-			var resp struct {
+			requireStatus(t, rr, http.StatusOK)
+			resp := decodeBody[struct {
 				BackupCodes []string `json:"backup_codes"`
-			}
-			if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
-				t.Fatalf("decode: %v", err)
-			}
+			}](t, rr)
 			// The codes are secrets: the audit row must not carry them.
 			return rec, append([]string{password, token, secret, code}, resp.BackupCodes...)
 		}},
@@ -92,15 +79,13 @@ func TestAuditCoverage_APIMutations(t *testing.T) {
 			database := newMigratedAuthTestDB(t)
 			router := buildAuthRouter(database, auth.NewRateLimiter())
 			hash, _ := auth.HashPassword(password)
-			uid, _ := database.CreateUser(context.Background(), "selfdelete", hash, 4)
+			uid := mustCreateUser(t, database, "selfdelete", hash, 4)
 			token, _ := auth.GenerateToken()
 			_, _ = database.CreateSession(context.Background(), uid, auth.HashToken(token), "test", "127.0.0.1")
 			rec := audittest.Install(t, database)
 			rr := deleteJSONWithToken(t, router, "/api/v1/auth/account", token,
 				map[string]string{"password": password})
-			if rr.Code != http.StatusNoContent {
-				t.Fatalf("delete account: status = %d; body = %s", rr.Code, rr.Body.String())
-			}
+			requireStatus(t, rr, http.StatusNoContent)
 			return rec, []string{password, hash, token}
 		}},
 	}

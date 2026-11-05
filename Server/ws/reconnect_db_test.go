@@ -11,14 +11,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
-	"github.com/coder/websocket"
-
-	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/ws"
 )
@@ -28,15 +23,7 @@ import (
 // (D3 removed the store abstraction and its MemStore fake).
 func openEventStoreDB(t *testing.T) *db.DB {
 	t.Helper()
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("db.Migrate: %v", err)
-	}
-	return database
+	return openMigratedDB(t)
 }
 
 // TestReconnect_BufferMiss_FallsBackToDBTier verifies that when a client
@@ -54,100 +41,27 @@ func openEventStoreDB(t *testing.T) *db.DB {
 //   - auth_ok is received with replay_source = "db".
 //   - hub.ReconnectTierStats() db counter = 1.
 func TestReconnect_BufferMiss_FallsBackToDBTier(t *testing.T) {
-	database := openServeTestDB(t)
-	limiter := auth.NewRateLimiter()
-
-	// Create a user. role_id=1 intentionally does not exist in the test DB so
-	// computeAllowedChannels returns an empty channel set — but events with
-	// channelID=0 (global) bypass the per-channel filter in the DB event store
-	// and in EventsSinceFiltered, so they are always returned.
-	userID, err := database.CreateUser(context.Background(), "reconnect-db-user", "hash", 1)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	token, err := auth.GenerateToken()
-	if err != nil {
-		t.Fatalf("GenerateToken: %v", err)
-	}
-	if _, err := database.CreateSession(context.Background(), userID, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
-
-	// Pre-populate the event store with 100 global events (seqs 501..600).
 	// channelID=0 means "global broadcast" — the DB event store's
 	// GetEventsSinceForChannels returns them regardless of the allowed-channel
-	// filter.
-	eventStore := openEventStoreDB(t)
-	bgCtx := context.Background()
-	for seq := int64(501); seq <= 600; seq++ {
-		payload := fmt.Appendf(nil, `{"seq":%d,"type":"broadcast"}`, seq)
-		if err := eventStore.PersistEvent(bgCtx, seq, "broadcast", 0, payload); err != nil {
-			t.Fatalf("PersistEvent seq=%d: %v", seq, err)
-		}
-	}
+	// filter. role_id=1 intentionally does not exist in the test DB so
+	// computeAllowedChannels returns an empty channel set; global events
+	// bypass the per-channel filter, so they are always returned.
+	store := openEventStoreDB(t)
+	persistBroadcasts(t, store, 501, 600)
+	rig := newWSRigWithStore(t, store)
+	_, token := rig.seedUser(t, "reconnect-db-user", 1)
 
-	// Build hub, attach the DB event store as the cold-tier read path.
-	hub := newTestHubDeps(t, database, limiter, nil)
-	hub.SetEventStore(eventStore)
-	go hub.Run()
-	defer hub.Stop()
-
-	// Fill the ring buffer with seqs 501..1500 (exactly 1000 entries).
 	// After 1000 pushes into a 1000-slot buffer, oldestSeq = 501 (the first
-	// entry pushed).  A client with last_seq=500 satisfies 500 <= 501, so
+	// entry pushed). A client with last_seq=500 satisfies 500 <= 501, so
 	// EventsSinceFiltered returns nil and the DB tier is invoked.
-	rb := hub.ReplayBuffer()
-	dummyPayload := []byte(`{"type":"broadcast"}`)
-	for seq := uint64(501); seq <= 1500; seq++ {
-		rb.Push(seq, 0, dummyPayload)
-	}
-	if oldest := rb.OldestSeq(); oldest != 501 {
-		t.Fatalf("pre-condition: expected oldestSeq=501, got %d", oldest)
-	}
+	fillRingBuffer(t, rig.hub, 501, 1500)
 
-	// Spin up a real HTTP+WS server.
-	handler := ws.ServeWS(hub, []string{"*"}, 0)
-	srv := httptest.NewServer(handler)
-	defer srv.Close()
-
-	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
-	dialCtx, cancel := context.WithTimeout(bgCtx, 10*time.Second)
-	defer cancel()
-
-	// Dial and authenticate with last_seq=500 — this triggers the reconnect
-	// path (handleReconnect) rather than the fresh-connect path.
-	conn, dialResp, dialErr := websocket.Dial(dialCtx, wsURL, nil)
-	if dialResp != nil && dialResp.Body != nil {
-		_ = dialResp.Body.Close()
-	}
-	if dialErr != nil {
-		t.Fatalf("websocket.Dial: %v", dialErr)
-	}
-	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
-
-	authMsg := map[string]any{
-		"type": "auth",
-		"payload": map[string]any{
-			"token":    token,
-			"last_seq": uint64(500),
-		},
-	}
-	raw, _ := json.Marshal(authMsg)
-	if err := conn.Write(dialCtx, websocket.MessageText, raw); err != nil {
-		t.Fatalf("write auth: %v", err)
-	}
-
-	// The first message back must be auth_ok with replay_source="db".
-	_, msg, err := conn.Read(dialCtx)
-	if err != nil {
-		t.Fatalf("read auth_ok: %v", err)
-	}
-	var resp map[string]any
-	if err := json.Unmarshal(msg, &resp); err != nil {
-		t.Fatalf("unmarshal response: %v; raw=%s", err, msg)
-	}
+	// last_seq=500 triggers the reconnect path (handleReconnect) rather than
+	// the fresh-connect path; the first message back must be auth_ok with
+	// replay_source="db".
+	_, resp := rig.dialResume(t, testCtx(t, 10*time.Second), token, 500)
 	if resp["type"] != "auth_ok" {
-		t.Fatalf("expected type=auth_ok, got %v; raw=%s", resp["type"], msg)
+		t.Fatalf("expected type=auth_ok, got %v; raw=%v", resp["type"], resp)
 	}
 	payloadField, _ := resp["payload"].(map[string]any)
 	if payloadField["replay_source"] != "db" {
@@ -156,13 +70,13 @@ func TestReconnect_BufferMiss_FallsBackToDBTier(t *testing.T) {
 
 	// hub.reconnectTierDB is incremented before auth_ok is sent, so the
 	// counter is stable by the time we read auth_ok.
-	_, dbTier, _ := hub.ReconnectTierStats()
+	_, dbTier, _ := rig.hub.ReconnectTierStats()
 	if dbTier != 1 {
 		t.Fatalf("expected db tier count=1, got %d", dbTier)
 	}
 	// WP 4.6a: the same resume is one ring miss — the denominator of the
 	// events table's hit rate.
-	if misses := hub.ReconnectRingMissCount(); misses != 1 {
+	if misses := rig.hub.ReconnectRingMissCount(); misses != 1 {
 		t.Fatalf("expected ring miss count=1, got %d", misses)
 	}
 }
@@ -179,25 +93,9 @@ func TestReconnect_BufferMiss_FallsBackToDBTier(t *testing.T) {
 // Setup mirrors TestReconnect_BufferMiss_FallsBackToDBTier, but seeds 100 more
 // events than the cap so the query comes back exactly full.
 func TestReconnect_ColdTierAtRowLimit_ForcesFullReady(t *testing.T) {
-	database := openServeTestDB(t)
-	limiter := auth.NewRateLimiter()
-
-	userID, err := database.CreateUser(context.Background(), "reconnect-overflow-user", "hash", 1)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	token, err := auth.GenerateToken()
-	if err != nil {
-		t.Fatalf("GenerateToken: %v", err)
-	}
-	if _, err := database.CreateSession(context.Background(), userID, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
-
 	// Seed seqs 501..(500+cap+100): the query caps at `cap` rows, so the newest
 	// 100 are dropped — the exact overflow condition.
-	eventStore := openEventStoreDB(t)
-	bgCtx := context.Background()
+	store := openEventStoreDB(t)
 	const overflow = 100
 	events := make([]db.PersistedEvent, 0, ws.MaxColdReplayForTest+overflow)
 	for i := range ws.MaxColdReplayForTest + overflow {
@@ -209,61 +107,20 @@ func TestReconnect_ColdTierAtRowLimit_ForcesFullReady(t *testing.T) {
 			Payload:   fmt.Appendf(nil, `{"seq":%d,"type":"broadcast"}`, seq),
 		})
 	}
-	if n, err := eventStore.PersistEvents(bgCtx, events); err != nil || n != len(events) {
+	if n, err := store.PersistEvents(context.Background(), events); err != nil || n != len(events) {
 		t.Fatalf("PersistEvents: persisted %d/%d, err=%v", n, len(events), err)
 	}
-
-	hub := newTestHubDeps(t, database, limiter, nil)
-	hub.SetEventStore(eventStore)
-	go hub.Run()
-	defer hub.Stop()
+	rig := newWSRigWithStore(t, store)
+	_, token := rig.seedUser(t, "reconnect-overflow-user", 1)
 
 	// Ring buffer holds 501..1500, so last_seq=500 misses it and the cold tier
 	// is consulted.
-	rb := hub.ReplayBuffer()
-	dummyPayload := []byte(`{"type":"broadcast"}`)
-	for seq := uint64(501); seq <= 1500; seq++ {
-		rb.Push(seq, 0, dummyPayload)
-	}
-	if oldest := rb.OldestSeq(); oldest != 501 {
-		t.Fatalf("pre-condition: expected oldestSeq=501, got %d", oldest)
-	}
-
-	handler := ws.ServeWS(hub, []string{"*"}, 0)
-	srv := httptest.NewServer(handler)
-	defer srv.Close()
-
-	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
-	dialCtx, cancel := context.WithTimeout(bgCtx, 30*time.Second)
-	defer cancel()
-
-	conn, dialResp, dialErr := websocket.Dial(dialCtx, wsURL, nil)
-	if dialResp != nil && dialResp.Body != nil {
-		_ = dialResp.Body.Close()
-	}
-	if dialErr != nil {
-		t.Fatalf("websocket.Dial: %v", dialErr)
-	}
-	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
-
-	authMsg := map[string]any{
-		"type": "auth",
-		"payload": map[string]any{
-			"token":    token,
-			"last_seq": uint64(500),
-		},
-	}
-	raw, _ := json.Marshal(authMsg)
-	if err := conn.Write(dialCtx, websocket.MessageText, raw); err != nil {
-		t.Fatalf("write auth: %v", err)
-	}
+	fillRingBuffer(t, rig.hub, 501, 1500)
 
 	// Reading the first frame guarantees the handshake picked a tier.
-	if _, _, err := conn.Read(dialCtx); err != nil {
-		t.Fatalf("read handshake response: %v", err)
-	}
+	rig.dialResume(t, testCtx(t, 30*time.Second), token, 500)
 
-	_, dbTier, fullTier := hub.ReconnectTierStats()
+	_, dbTier, fullTier := rig.hub.ReconnectTierStats()
 	if dbTier != 0 {
 		t.Errorf("db tier count = %d, want 0: a truncated cold-tier replay was delivered as a complete resume", dbTier)
 	}
@@ -285,81 +142,27 @@ func TestReconnect_ColdTierAtRowLimit_ForcesFullReady(t *testing.T) {
 // persisted row). The replay must deliver 501..710 — the 200 cold rows plus
 // the 10-event buffer tail.
 func TestReconnect_ColdTierMergesRingBufferTail(t *testing.T) {
-	database := openServeTestDB(t)
-	limiter := auth.NewRateLimiter()
+	store := openEventStoreDB(t)
+	persistBroadcasts(t, store, 501, 700)
+	rig := newWSRigWithStore(t, store)
+	_, token := rig.seedUser(t, "reconnect-tail-user", 1)
 
-	userID, err := database.CreateUser(context.Background(), "reconnect-tail-user", "hash", 1)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	token, err := auth.GenerateToken()
-	if err != nil {
-		t.Fatalf("GenerateToken: %v", err)
-	}
-	if _, err := database.CreateSession(context.Background(), userID, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
-
-	eventStore := openEventStoreDB(t)
-	bgCtx := context.Background()
-	for seq := int64(501); seq <= 700; seq++ {
-		payload := fmt.Appendf(nil, `{"seq":%d,"type":"broadcast"}`, seq)
-		if err := eventStore.PersistEvent(bgCtx, seq, "broadcast", 0, payload); err != nil {
-			t.Fatalf("PersistEvent seq=%d: %v", seq, err)
-		}
-	}
-
-	hub := newTestHubDeps(t, database, limiter, nil)
-	hub.SetEventStore(eventStore)
-	go hub.Run()
-	defer hub.Stop()
-
-	rb := hub.ReplayBuffer()
+	rb := rig.hub.ReplayBuffer()
 	for seq := uint64(601); seq <= 710; seq++ {
 		rb.Push(seq, 0, fmt.Appendf(nil, `{"seq":%d,"type":"broadcast"}`, seq))
 	}
 
-	handler := ws.ServeWS(hub, []string{"*"}, 0)
-	srv := httptest.NewServer(handler)
-	defer srv.Close()
-
-	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
-	dialCtx, cancel := context.WithTimeout(bgCtx, 15*time.Second)
-	defer cancel()
-
-	conn, dialResp, dialErr := websocket.Dial(dialCtx, wsURL, nil)
-	if dialResp != nil && dialResp.Body != nil {
-		_ = dialResp.Body.Close()
-	}
-	if dialErr != nil {
-		t.Fatalf("websocket.Dial: %v", dialErr)
-	}
-	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
-
-	authMsg := map[string]any{
-		"type":    "auth",
-		"payload": map[string]any{"token": token, "last_seq": uint64(500)},
-	}
-	raw, _ := json.Marshal(authMsg)
-	if err := conn.Write(dialCtx, websocket.MessageText, raw); err != nil {
-		t.Fatalf("write auth: %v", err)
-	}
-
-	_, msg, err := conn.Read(dialCtx)
-	if err != nil {
-		t.Fatalf("read auth_ok: %v", err)
-	}
-	var resp map[string]any
-	_ = json.Unmarshal(msg, &resp)
+	ctx := testCtx(t, 15*time.Second)
+	conn, resp := rig.dialResume(t, ctx, token, 500)
 	if resp["type"] != "auth_ok" {
-		t.Fatalf("expected auth_ok, got %s", msg)
+		t.Fatalf("expected auth_ok, got %v", resp)
 	}
 
 	// Count replayed frames; the highest seq seen must reach the buffer tail.
 	var replayed int
 	var maxSeq float64
 	for {
-		readCtx, readCancel := context.WithTimeout(dialCtx, 500*time.Millisecond)
+		readCtx, readCancel := context.WithTimeout(ctx, 500*time.Millisecond)
 		_, evt, readErr := conn.Read(readCtx)
 		readCancel()
 		if readErr != nil {

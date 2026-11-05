@@ -1,7 +1,6 @@
 package admin_test
 
 import (
-	"encoding/json"
 	"net/http"
 	"path/filepath"
 	"testing"
@@ -28,20 +27,13 @@ func TestAdminAPI_Stats_CarriesCertificateFingerprint(t *testing.T) {
 	const fp = "aa:bb:cc:dd"
 	serveCert(t, "self_signed", fp)
 
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	_, handler, token := newAdminHarnessNoHub(t)
 
 	w := doRequest(t, handler, http.MethodGet, "/stats", token, nil)
-	if w.Code != http.StatusOK {
-		t.Fatalf("GET /stats = %d, want 200", w.Code)
-	}
-	var stats struct {
+	requireStatus(t, w, http.StatusOK)
+	stats := decodeBody[struct {
 		CertificateFingerprint string `json:"certificate_fingerprint"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &stats); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	}](t, w)
 	if stats.CertificateFingerprint != fp {
 		t.Errorf("certificate_fingerprint = %q, want %q", stats.CertificateFingerprint, fp)
 	}
@@ -50,18 +42,11 @@ func TestAdminAPI_Stats_CarriesCertificateFingerprint(t *testing.T) {
 func TestAdminAPI_Stats_OmitsFingerprintWhenUnknown(t *testing.T) {
 	serveCert(t, "acme", "")
 
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	_, handler, token := newAdminHarnessNoHub(t)
 
 	w := doRequest(t, handler, http.MethodGet, "/stats", token, nil)
-	if w.Code != http.StatusOK {
-		t.Fatalf("GET /stats = %d, want 200", w.Code)
-	}
-	var stats map[string]any
-	if err := json.Unmarshal(w.Body.Bytes(), &stats); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	requireStatus(t, w, http.StatusOK)
+	stats := decodeBody[map[string]any](t, w)
 	if _, present := stats["certificate_fingerprint"]; present {
 		t.Error("an unknown fingerprint (TLS off / ACME) must be omitted, not sent empty")
 	}
@@ -78,15 +63,10 @@ func TestSetup_FinishStepCarriesCertificateFingerprint(t *testing.T) {
 		"username": "myadmin",
 		"password": "SecurePass123!",
 	})
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("POST /setup = %d, want 201; body=%s", rr.Code, rr.Body.String())
-	}
-	var resp struct {
+	requireStatus(t, rr, http.StatusCreated)
+	resp := decodeBody[struct {
 		CertificateFingerprint string `json:"certificate_fingerprint"`
-	}
-	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	}](t, rr)
 	if resp.CertificateFingerprint != fp {
 		t.Errorf("setup certificate_fingerprint = %q, want %q", resp.CertificateFingerprint, fp)
 	}
@@ -104,13 +84,8 @@ func TestSetup_FinishStepOmitsFingerprintWhenWizardChangesTLSMode(t *testing.T) 
 		"password": "SecurePass123!",
 		"wizard":   map[string]any{"tls_mode": "acme", "tls_domain": "chat.example.com"},
 	})
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("POST /setup = %d, want 201; body=%s", rr.Code, rr.Body.String())
-	}
-	var resp map[string]any
-	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	requireStatus(t, rr, http.StatusCreated)
+	resp := decodeBody[map[string]any](t, rr)
 	if fp, present := resp["certificate_fingerprint"]; present {
 		t.Errorf("certificate_fingerprint = %v; the restart serves a different certificate, so it must be omitted", fp)
 	}
@@ -119,17 +94,10 @@ func TestSetup_FinishStepOmitsFingerprintWhenWizardChangesTLSMode(t *testing.T) 
 // statsFor fetches the dashboard payload as a generic map.
 func statsFor(t *testing.T) map[string]any {
 	t.Helper()
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	_, handler, token := newAdminHarnessNoHub(t)
 	w := doRequest(t, handler, http.MethodGet, "/stats", token, nil)
-	if w.Code != http.StatusOK {
-		t.Fatalf("GET /stats = %d, want 200", w.Code)
-	}
-	var stats map[string]any
-	if err := json.Unmarshal(w.Body.Bytes(), &stats); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	requireStatus(t, w, http.StatusOK)
+	stats := decodeBody[map[string]any](t, w)
 	return stats
 }
 

@@ -33,9 +33,7 @@ func seedExplainFixture(t *testing.T) (*ChannelService, *db.DB, *db.Channel) {
 	seedUserRole(t, database, explainOwner, permissions.OwnerRoleID)
 	seedChannel(t, database, &db.Channel{ID: 80, Name: "general", Type: "text"})
 	ch, err := svc.ResolveGuildChannel(context.Background(), 80)
-	if err != nil {
-		t.Fatalf("ResolveGuildChannel: %v", err)
-	}
+	mustDo(t, "ResolveGuildChannel", err)
 	return svc, database, ch
 }
 
@@ -45,9 +43,7 @@ var ownerRole = &db.Role{ID: permissions.OwnerRoleID, Permissions: permissions.A
 func explain(t *testing.T, svc *ChannelService, ch *db.Channel, userID int64, a permissions.Action) (AccessExplanation, permissions.Decision) {
 	t.Helper()
 	res, err := svc.ExplainAccess(context.Background(), explainOwner, ownerRole, userID, ch, string(a))
-	if err != nil {
-		t.Fatalf("ExplainAccess: %v", err)
-	}
+	mustDo(t, "ExplainAccess", err)
 	if len(res.Decisions) != 1 || res.Decisions[0].Action != a {
 		t.Fatalf("decisions = %+v, want the one %s", res.Decisions, a)
 	}
@@ -75,9 +71,7 @@ func TestExplainAccess_AllowedWithBaseRoleTrace(t *testing.T) {
 func TestExplainAccess_RoleDenyAndUserAllowLayers(t *testing.T) {
 	svc, database, ch := seedExplainFixture(t)
 	ctx := context.Background()
-	if err := database.UpsertChannelOverride(ctx, ch.ID, explainRole, 0, permissions.SendMessages); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "UpsertChannelOverride", database.UpsertChannelOverride(ctx, ch.ID, explainRole, 0, permissions.SendMessages))
 	_, send := explain(t, svc, ch, explainAlice, permissions.ActionSendMessage)
 	if send.Allowed || !strings.Contains(send.Reason, "SEND_MESSAGES") {
 		t.Fatalf("role deny: send = %+v", send)
@@ -111,9 +105,7 @@ func TestExplainAccess_NonRoleRestrictions(t *testing.T) {
 		t.Fatalf("a timeout must not hide the channel: %+v", view)
 	}
 
-	if err := database.BanUser(ctx, explainBob, "spam", nil); err != nil {
-		t.Fatalf("BanUser: %v", err)
-	}
+	mustDo(t, "BanUser", database.BanUser(ctx, explainBob, "spam", nil))
 	for _, a := range permissions.Actions {
 		res, d := explain(t, svc, ch, explainBob, a)
 		if !res.Restrictions.Banned {
@@ -128,9 +120,7 @@ func TestExplainAccess_NonRoleRestrictions(t *testing.T) {
 		t.Fatal(err)
 	}
 	nsfw, err := svc.ResolveGuildChannel(ctx, ch.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "ResolveGuildChannel", err)
 	if _, rc := explain(t, svc, nsfw, explainOwner, permissions.ActionReadContent); rc.Allowed || rc.Reason != permissions.ErrNSFWUnacknowledged.Error() || !rc.AdministratorBypass {
 		t.Fatalf("unacknowledged NSFW for the owner = %+v (consent has no admin bypass)", rc)
 	}
@@ -172,9 +162,7 @@ func TestPreviewOverride_RoleLayerListsOnlyChangedMembers(t *testing.T) {
 	rec := audittest.Install(t, database)
 
 	res, err := svc.PreviewOverride(ctx, explainOwner, ownerRole, ch, explainRole, 0, 0, permissions.ReadMessages)
-	if err != nil {
-		t.Fatalf("PreviewOverride: %v", err)
-	}
+	mustDo(t, "PreviewOverride", err)
 	if res.Evaluated != 2 || len(res.Members) != 1 || res.Members[0].UserID != explainAlice {
 		t.Fatalf("preview = %+v, want only Alice changed of 2", res)
 	}
@@ -201,14 +189,10 @@ func TestPreviewOverride_RoleLayerListsOnlyChangedMembers(t *testing.T) {
 func TestPreviewOverride_UserLayerAndValidation(t *testing.T) {
 	svc, database, ch := seedExplainFixture(t)
 	ctx := context.Background()
-	if err := database.UpsertChannelOverride(ctx, ch.ID, explainRole, 0, permissions.ReadMessages); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "UpsertChannelOverride", database.UpsertChannelOverride(ctx, ch.ID, explainRole, 0, permissions.ReadMessages))
 	// Garbage bits are clamped like the save path clamps them.
 	res, err := svc.PreviewOverride(ctx, explainOwner, ownerRole, ch, 0, explainBob, permissions.ReadMessages|1<<62, 0)
-	if err != nil {
-		t.Fatalf("PreviewOverride: %v", err)
-	}
+	mustDo(t, "PreviewOverride", err)
 	if res.Allow != permissions.ReadMessages || res.Evaluated != 1 || len(res.Members) != 1 || res.Members[0].UserID != explainBob {
 		t.Fatalf("user preview = %+v", res)
 	}
@@ -239,9 +223,7 @@ func TestPreviewOverride_UserLayerAndValidation(t *testing.T) {
 
 func TestExplainAccess_AdministratorHasNoBitTrace(t *testing.T) {
 	svc, database, ch := seedExplainFixture(t)
-	if err := database.UpsertChannelOverride(context.Background(), ch.ID, permissions.OwnerRoleID, 0, permissions.ReadMessages); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "UpsertChannelOverride", database.UpsertChannelOverride(context.Background(), ch.ID, permissions.OwnerRoleID, 0, permissions.ReadMessages))
 	// The override is never consulted for an Administrator, so no trace
 	// claims the layer has no opinion.
 	if _, d := explain(t, svc, ch, explainOwner, permissions.ActionViewChannel); !d.Allowed || !d.AdministratorBypass || d.Bits != nil {

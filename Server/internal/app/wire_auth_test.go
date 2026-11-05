@@ -49,9 +49,7 @@ func authServiceErasureForTest(t *testing.T, a *service.AuthService) *service.Er
 func newWireAuthTestStorage(t *testing.T) *storage.Storage {
 	t.Helper()
 	st, err := storage.New(t.TempDir(), 10)
-	if err != nil {
-		t.Fatalf("storage.New: %v", err)
-	}
+	mustDo(t, "storage.New", err)
 	return st
 }
 

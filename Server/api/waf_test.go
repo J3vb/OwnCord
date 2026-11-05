@@ -11,6 +11,17 @@ import (
 	"github.com/corazawaf/coraza/v3/types"
 )
 
+// noContent answers 204 and, when called is non-nil, records that the
+// downstream handler ran.
+func noContent(called *bool) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if called != nil {
+			*called = true
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+}
+
 func TestHandleWAFInterruption_WritesJSONAndStatus(t *testing.T) {
 	rr := httptest.NewRecorder()
 	handleWAFInterruption(rr, &types.Interruption{
@@ -34,15 +45,10 @@ func TestHandleWAFInterruption_WritesJSONAndStatus(t *testing.T) {
 func TestWAFMiddleware_AllowsBenignRequest(t *testing.T) {
 	called := false
 	middleware := NewWAFMiddlewareCRS(2, CRSModeDetect)
-	handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		called = true
-		w.WriteHeader(http.StatusNoContent)
-	}))
+	handler := middleware(noContent(&called))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/channels?q=hello", nil)
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
+	rr := serveLocal(handler, req)
 
 	if !called {
 		t.Fatal("expected downstream handler to be called")
@@ -55,15 +61,10 @@ func TestWAFMiddleware_AllowsBenignRequest(t *testing.T) {
 func TestWAFMiddleware_InvalidParanoiaLevelStillAllowsBenignRequest(t *testing.T) {
 	called := false
 	middleware := NewWAFMiddlewareCRS(99, CRSModeDetect)
-	handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		called = true
-		w.WriteHeader(http.StatusNoContent)
-	}))
+	handler := middleware(noContent(&called))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/channels?q=hello", nil)
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
+	rr := serveLocal(handler, req)
 
 	if !called {
 		t.Fatal("expected downstream handler to be called")
@@ -81,9 +82,7 @@ func TestWAFMiddleware_BlocksScannerUserAgent(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/channels", nil)
 	req.Header.Set("User-Agent", "sqlmap/1.8")
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
+	rr := serveLocal(handler, req)
 
 	if rr.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403; body = %s", rr.Code, rr.Body.String())
@@ -151,133 +150,59 @@ func TestWAFMiddleware_BlocksAttackPayloadInRequestBody(t *testing.T) {
 	}
 }
 
+// assertWAFPassesBody posts size bytes to path through the detect-mode WAF
+// and requires the full body to reach the downstream handler.
+func assertWAFPassesBody(t *testing.T, path, contentType string, size int) {
+	t.Helper()
+	requestBody := strings.Repeat("A", size)
+	called := false
+	handler := NewWAFMiddlewareCRS(2, CRSModeDetect)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("ReadAll: %v", err)
+		}
+		if len(body) != len(requestBody) {
+			t.Fatalf("body len = %d, want %d", len(body), len(requestBody))
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(requestBody))
+	req.Header.Set("Content-Type", contentType)
+	rr := serveLocal(handler, req)
+
+	if !called {
+		t.Fatalf("expected downstream handler to be called, got status %d body %s", rr.Code, rr.Body.String())
+	}
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204; body = %s", rr.Code, rr.Body.String())
+	}
+}
+
 // Routes exempted from the app's global 1 MiB body cap (bodyCapExemptPrefixes
 // in constants.go) must also be exempted from the inline WAF engine's own
 // SecRequestBodyLimit, or coraza's default SecRequestBodyLimitAction (Reject)
 // 413s the request as soon as its buffer hits 1 MiB — well below these
 // routes' documented, larger caps.
 func TestWAFMiddleware_AllowsLargePluginInstallBody(t *testing.T) {
-	requestBody := strings.Repeat("A", 2*1024*1024) // 2 MiB; within the 16 MiB plugin-install cap
-	middleware := NewWAFMiddlewareCRS(2, CRSModeDetect)
-
-	called := false
-	handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		called = true
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			t.Fatalf("ReadAll: %v", err)
-		}
-		if len(body) != len(requestBody) {
-			t.Fatalf("body len = %d, want %d", len(body), len(requestBody))
-		}
-		w.WriteHeader(http.StatusNoContent)
-	}))
-
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/plugins/install", strings.NewReader(requestBody))
-	req.Header.Set("Content-Type", "application/zip")
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-
-	if !called {
-		t.Fatalf("expected downstream handler to be called, got status %d body %s", rr.Code, rr.Body.String())
-	}
-	if rr.Code != http.StatusNoContent {
-		t.Fatalf("status = %d, want 204; body = %s", rr.Code, rr.Body.String())
-	}
+	// 2 MiB; within the 16 MiB plugin-install cap
+	assertWAFPassesBody(t, "/api/v1/admin/plugins/install", "application/zip", 2*1024*1024)
 }
 
 func TestWAFMiddleware_AllowsLargeAvatarUploadBody(t *testing.T) {
-	requestBody := strings.Repeat("A", 1_100_000) // >1 MiB; within the 3 MiB avatar envelope
-	middleware := NewWAFMiddlewareCRS(2, CRSModeDetect)
-
-	called := false
-	handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		called = true
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			t.Fatalf("ReadAll: %v", err)
-		}
-		if len(body) != len(requestBody) {
-			t.Fatalf("body len = %d, want %d", len(body), len(requestBody))
-		}
-		w.WriteHeader(http.StatusNoContent)
-	}))
-
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/users/me/avatar", strings.NewReader(requestBody))
-	req.Header.Set("Content-Type", "image/png")
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-
-	if !called {
-		t.Fatalf("expected downstream handler to be called, got status %d body %s", rr.Code, rr.Body.String())
-	}
-	if rr.Code != http.StatusNoContent {
-		t.Fatalf("status = %d, want 204; body = %s", rr.Code, rr.Body.String())
-	}
+	// >1 MiB; within the 3 MiB avatar envelope
+	assertWAFPassesBody(t, "/api/v1/users/me/avatar", "image/png", 1_100_000)
 }
 
 func TestWAFMiddleware_AllowsLargeBannerUploadBody(t *testing.T) {
-	requestBody := strings.Repeat("A", 3<<20) // 3 MiB; within the 5 MiB banner envelope (WP 8.7)
-	middleware := NewWAFMiddlewareCRS(2, CRSModeDetect)
-
-	called := false
-	handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		called = true
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			t.Fatalf("ReadAll: %v", err)
-		}
-		if len(body) != len(requestBody) {
-			t.Fatalf("body len = %d, want %d", len(body), len(requestBody))
-		}
-		w.WriteHeader(http.StatusNoContent)
-	}))
-
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/users/me/banner", strings.NewReader(requestBody))
-	req.Header.Set("Content-Type", "image/png")
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-
-	if !called {
-		t.Fatalf("expected downstream handler to be called, got status %d body %s", rr.Code, rr.Body.String())
-	}
-	if rr.Code != http.StatusNoContent {
-		t.Fatalf("status = %d, want 204; body = %s", rr.Code, rr.Body.String())
-	}
+	// 3 MiB; within the 5 MiB banner envelope
+	assertWAFPassesBody(t, "/api/v1/users/me/banner", "image/png", 3<<20)
 }
 
 func TestWAFMiddleware_AllowsLargeGroupIconUploadBody(t *testing.T) {
-	requestBody := strings.Repeat("A", 1_100_000) // >1 MiB; within the 3 MiB avatar envelope
-	middleware := NewWAFMiddlewareCRS(2, CRSModeDetect)
-
-	called := false
-	handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		called = true
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			t.Fatalf("ReadAll: %v", err)
-		}
-		if len(body) != len(requestBody) {
-			t.Fatalf("body len = %d, want %d", len(body), len(requestBody))
-		}
-		w.WriteHeader(http.StatusNoContent)
-	}))
-
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/dms/12/icon", strings.NewReader(requestBody))
-	req.Header.Set("Content-Type", "image/png")
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-
-	if !called {
-		t.Fatalf("expected downstream handler to be called, got status %d body %s", rr.Code, rr.Body.String())
-	}
-	if rr.Code != http.StatusNoContent {
-		t.Fatalf("status = %d, want 204; body = %s", rr.Code, rr.Body.String())
-	}
+	// >1 MiB; within the 3 MiB avatar envelope
+	assertWAFPassesBody(t, "/api/v1/dms/12/icon", "image/png", 1_100_000)
 }
 
 func TestWAFMiddleware_PreservesReadableBodyForDownstream(t *testing.T) {
@@ -296,9 +221,7 @@ func TestWAFMiddleware_PreservesReadableBodyForDownstream(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/messages", strings.NewReader(requestBody))
 	req.Header.Set("Content-Type", "application/json")
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
+	rr := serveLocal(handler, req)
 
 	if rr.Code != http.StatusNoContent {
 		t.Fatalf("status = %d, want 204; body = %s", rr.Code, rr.Body.String())
@@ -320,9 +243,7 @@ func TestWAFMiddleware_BlocksArgumentLimitOverflow(t *testing.T) {
 			serve := func(query string) int {
 				called = false
 				req := httptest.NewRequest(http.MethodGet, "/api/v1/channels?"+query, nil)
-				req.RemoteAddr = "127.0.0.1:9999"
-				rr := httptest.NewRecorder()
-				handler.ServeHTTP(rr, req)
+				rr := serveLocal(handler, req)
 				return rr.Code
 			}
 
@@ -339,8 +260,7 @@ func TestWAFMiddleware_BlocksArgumentLimitOverflow(t *testing.T) {
 			body.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 			body.RemoteAddr = "127.0.0.1:9999"
 			called = false
-			rr := httptest.NewRecorder()
-			handler.ServeHTTP(rr, body)
+			rr := serveRequest(handler, body)
 			if rr.Code != http.StatusForbidden || called {
 				t.Fatalf("over-limit body: status = %d, handler called = %v, want 403 and not called", rr.Code, called)
 			}
@@ -353,31 +273,8 @@ func TestWAFMiddleware_BlocksArgumentLimitOverflow(t *testing.T) {
 }
 
 func TestWAFMiddleware_AllowsLargeDiscordImportUploadBody(t *testing.T) {
-	requestBody := strings.Repeat("A", 3<<20) // above the 1 MiB inline body limit
-	middleware := NewWAFMiddlewareCRS(2, CRSModeDetect)
-
-	called := false
-	handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		called = true
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			t.Fatalf("ReadAll: %v", err)
-		}
-		if len(body) != len(requestBody) {
-			t.Fatalf("body len = %d, want %d", len(body), len(requestBody))
-		}
-		w.WriteHeader(http.StatusNoContent)
-	}))
-
-	req := httptest.NewRequest(http.MethodPost, "/admin/api/discord-imports/upload?filename=x.json", strings.NewReader(requestBody))
-	req.Header.Set("Content-Type", "application/octet-stream")
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-
-	if !called || rr.Code != http.StatusNoContent {
-		t.Fatalf("called = %v, status = %d, body = %s", called, rr.Code, rr.Body.String())
-	}
+	// above the 1 MiB inline body limit
+	assertWAFPassesBody(t, "/admin/api/discord-imports/upload?filename=x.json", "application/octet-stream", 3<<20)
 }
 
 // The WebSocket upgrade is served at /api/v1/ws with no body and no query
@@ -396,9 +293,7 @@ func TestWAFMiddleware_AllowsWebSocketUpgrade(t *testing.T) {
 	req.Header.Set("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
 	req.Header.Set("User-Agent", "Mozilla/5.0")
 	req.Header.Set("Accept", "*/*")
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
+	rr := serveLocal(handler, req)
 
 	if !called {
 		t.Fatalf("upgrade request blocked: status = %d, body = %s", rr.Code, rr.Body.String())
@@ -427,9 +322,7 @@ func TestWAFMiddleware_InspectBufferMatchesGlobalBodyCap(t *testing.T) {
 	} {
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(body(tc.size)))
 		req.Header.Set("Content-Type", "application/json")
-		req.RemoteAddr = "127.0.0.1:9999"
-		rr := httptest.NewRecorder()
-		handler.ServeHTTP(rr, req)
+		rr := serveLocal(handler, req)
 		if rr.Code != tc.want {
 			t.Errorf("body of %d bytes: status = %d, want %d", tc.size, rr.Code, tc.want)
 		}

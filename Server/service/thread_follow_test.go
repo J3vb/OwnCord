@@ -13,9 +13,7 @@ import (
 func (f *threadFixture) followersOf(t *testing.T, threadID int64) []int64 {
 	t.Helper()
 	ids, err := f.threads.Followers(context.Background(), threadID)
-	if err != nil {
-		t.Fatalf("Followers: %v", err)
-	}
+	mustDo(t, "Followers", err)
 	return ids
 }
 
@@ -32,18 +30,15 @@ func TestThreadFollow_PostAndMentionJoinAndReportTheNewOnes(t *testing.T) {
 	ctx := context.Background()
 	th := f.start(t, thrOwner, "plans")
 
-	res, err := f.msgs.SendMessage(ctx, SendMessageParams{
+	res := mustSendMessage(ctx, t, f.msgs, SendMessageParams{
 		ChannelID: th.ID, UserID: thrOther, Username: "bob", RoleName: "member", Content: "hello @mod",
 	})
-	if err != nil {
-		t.Fatalf("SendMessage: %v", err)
-	}
 	slices.Sort(res.ThreadJoined)
 	if want := []int64{thrOther, thrMod}; !slices.Equal(res.ThreadJoined, want) {
 		t.Fatalf("ThreadJoined = %v, want %v", res.ThreadJoined, want)
 	}
 	// Everyone is already in: the next post reports nobody.
-	res, err = f.msgs.SendMessage(ctx, SendMessageParams{
+	res, err := f.msgs.SendMessage(ctx, SendMessageParams{
 		ChannelID: th.ID, UserID: thrOwner, Username: "alice", RoleName: "member", Content: "hi @bob",
 	})
 	if err != nil || len(res.ThreadJoined) != 0 {
@@ -100,9 +95,7 @@ func TestThreadSetFollow_GateIdempotenceAndStorage(t *testing.T) {
 	}
 
 	// A user who cannot read the parent does not see the thread.
-	if err := f.database.UpsertChannelUserOverride(ctx, thrParent, thrOther, 0, permissions.ReadMessages); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "UpsertChannelUserOverride", f.database.UpsertChannelUserOverride(ctx, thrParent, thrOther, 0, permissions.ReadMessages))
 	f.perms.InvalidateAll()
 	if _, err := f.threads.SetFollow(ctx, thrOther, th.ID, true); !errors.Is(err, ErrNotFound) {
 		t.Errorf("follow without parent READ = %v, want ErrNotFound", err)
@@ -180,9 +173,7 @@ func TestMoveReadPointer_ThreadAdmittedThroughParent(t *testing.T) {
 		t.Fatalf("MoveReadPointer(thread) = %+v, %v; want last read %d", rs, err, last)
 	}
 
-	if err := f.database.UpsertChannelOverride(ctx, thrParent, permissions.MemberRoleID, 0, permissions.ReadMessages); err != nil {
-		t.Fatalf("UpsertChannelOverride: %v", err)
-	}
+	mustDo(t, "UpsertChannelOverride", f.database.UpsertChannelOverride(ctx, thrParent, permissions.MemberRoleID, 0, permissions.ReadMessages))
 	f.perms.InvalidateAll()
 	if _, err := f.msgs.MoveReadPointer(ctx, thrOther, th.ID, db.ReadAtLatest, 0); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("MoveReadPointer(thread, parent denied) = %v, want ErrForbidden", err)

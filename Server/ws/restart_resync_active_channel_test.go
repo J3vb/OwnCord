@@ -19,48 +19,20 @@ package ws
 import (
 	"context"
 	"encoding/json"
-	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
-
-	"github.com/coder/websocket"
-
-	"github.com/J3vb/OwnCord/Server/auth"
 )
 
 func TestFullResyncAfterRestartHonorsActiveChannelID(t *testing.T) {
-	database := newTeardownTestDB(t)
+	rig := newServeRig(t)
+	hub := rig.hub
 	ctx := context.Background()
-
-	userID, err := database.CreateUser(ctx, "restart-resync-user", "hash", 1)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	user, err := database.GetUserByID(ctx, userID)
-	if err != nil || user == nil {
-		t.Fatalf("GetUserByID: %v", err)
-	}
-	chID, err := database.CreateChannel(ctx, "restart-resync-room", "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
-
-	token, err := auth.GenerateToken()
-	if err != nil {
-		t.Fatalf("GenerateToken: %v", err)
-	}
-	if _, err := database.CreateSession(ctx, userID, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
-
-	hub := newTestHub(t, database, auth.NewRateLimiter(), nil)
-	go hub.Run()
-	defer hub.Stop()
+	user, token := rig.seedOwner(t, "restart-resync-user")
+	chID := mustCreateTextChannel(t, rig.db, "restart-resync-room")
 
 	// Precondition: the channel IS readable, so the auth-frame id is eligible
 	// to be honoured.
-	allowed, err := hub.computeAllowedChannels(ctx, database, user)
+	allowed, err := hub.computeAllowedChannels(ctx, rig.db, user)
 	if err != nil {
 		t.Fatalf("computeAllowedChannels: %v", err)
 	}
@@ -79,84 +51,32 @@ func TestFullResyncAfterRestartHonorsActiveChannelID(t *testing.T) {
 		t.Fatalf("precondition: mustFullResync must be true after the simulated restart boot")
 	}
 
-	srv := httptest.NewServer(ServeWS(hub, []string{"*"}, 0))
-	defer srv.Close()
-
-	dialCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	conn, dialResp, dialErr := websocket.Dial(dialCtx, "ws"+strings.TrimPrefix(srv.URL, "http"), nil)
-	if dialResp != nil && dialResp.Body != nil {
-		_ = dialResp.Body.Close()
-	}
-	if dialErr != nil {
-		t.Fatalf("websocket.Dial: %v", dialErr)
-	}
-	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
-
-	raw, _ := json.Marshal(map[string]any{
-		"type": "auth",
-		"payload": map[string]any{
-			"token":             token,
-			"last_seq":          preRestartLastSeq,
-			"active_channel_id": chID,
-		},
-	})
-	if err := conn.Write(dialCtx, websocket.MessageText, raw); err != nil {
-		t.Fatalf("write auth: %v", err)
-	}
-
-	readCtx, readCancel := context.WithTimeout(ctx, 5*time.Second)
-	defer readCancel()
+	conn := rig.dialAuth(t, ctx, token, preRestartLastSeq, chID)
 
 	// auth_ok carries replay_source "none" — proof this is the full-resync path.
-	_, authMsg, err := conn.Read(readCtx)
-	if err != nil {
-		t.Fatalf("read auth_ok: %v", err)
+	typ, authMsg := readFrameType(t, ctx, conn)
+	if typ != MsgTypeAuthOK {
+		t.Fatalf("expected auth_ok, got %v", typ)
 	}
-	var authParsed map[string]any
+	var authParsed struct {
+		Payload map[string]any `json:"payload"`
+	}
 	if err := json.Unmarshal(authMsg, &authParsed); err != nil {
 		t.Fatalf("unmarshal auth_ok: %v", err)
 	}
-	if authParsed["type"] != MsgTypeAuthOK {
-		t.Fatalf("expected auth_ok, got %v", authParsed["type"])
+	if authParsed.Payload["replay_source"] != "none" {
+		t.Fatalf("expected replay_source=none (full resync), got %v", authParsed.Payload["replay_source"])
 	}
-	authPayload, _ := authParsed["payload"].(map[string]any)
-	if authPayload["replay_source"] != "none" {
-		t.Fatalf("expected replay_source=none (full resync), got %v", authPayload["replay_source"])
-	}
-
-	if _, readyMsg, err := conn.Read(readCtx); err != nil {
-		t.Fatalf("read ready: %v", err)
-	} else {
-		var readyParsed map[string]any
-		if err := json.Unmarshal(readyMsg, &readyParsed); err != nil {
-			t.Fatalf("unmarshal ready: %v", err)
-		}
-		if readyParsed["type"] != MsgTypeReady {
-			t.Fatalf("expected ready, got %v", readyParsed["type"])
-		}
+	if typ, _ := readFrameType(t, ctx, conn); typ != MsgTypeReady {
+		t.Fatalf("expected ready, got %v", typ)
 	}
 
 	// The full-resync socket must already be focused on — and subscribed to —
 	// the channel the auth frame named, BEFORE any channel_focus is sent.
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		hub.mu.Lock()
-		c := hub.newestLocked(userID)
-		hub.mu.Unlock()
-		if c != nil && c.getChannelID() == chID {
-			break
-		}
-		if time.Now().After(deadline) {
-			got := int64(-1)
-			if c != nil {
-				got = c.getChannelID()
-			}
-			t.Fatalf("post-restart full-resync client channelID = %d, want %d — the auth frame's "+
-				"active_channel_id was ignored on the full-resync path, so the socket is unsubscribed "+
-				"until channel_focus and every channel frame broadcast in the meantime is lost", got, chID)
-		}
-		time.Sleep(10 * time.Millisecond)
+	if _, got, ok := rig.waitFocused(user.ID, chID); !ok {
+		t.Fatalf("post-restart full-resync client channelID = %d, want %d — the auth frame's "+
+			"active_channel_id was ignored on the full-resync path, so the socket is unsubscribed "+
+			"until channel_focus and every channel frame broadcast in the meantime is lost", got, chID)
 	}
 
 	// End-to-end: a channel frame broadcast right now (before the client sends
@@ -194,79 +114,26 @@ func TestFullResyncAfterRestartHonorsActiveChannelID(t *testing.T) {
 // same fail-closed gate handleReconnect applies. A regression here would hand
 // an unreadable channel's live stream to a resumed socket.
 func TestFullResyncAfterRestartActiveChannelIsReadGated(t *testing.T) {
-	database := newTeardownTestDB(t)
+	rig := newServeRig(t)
+	hub := rig.hub
 	ctx := context.Background()
-
-	userID, err := database.CreateUser(ctx, "restart-resync-gated", "hash", 1)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	noPerms, err := database.CreateRole(ctx, "restart-resync-no-perms", nil, 0, 1, false, false)
+	user, token := rig.seedOwner(t, "restart-resync-gated")
+	noPerms, err := rig.db.CreateRole(ctx, "restart-resync-no-perms", nil, 0, 1, false, false)
 	if err != nil || noPerms == nil {
 		t.Fatalf("CreateRole: %v", err)
 	}
-	if err := database.UpdateUserRole(ctx, userID, noPerms.ID); err != nil {
+	if err := rig.db.UpdateUserRole(ctx, user.ID, noPerms.ID); err != nil {
 		t.Fatalf("UpdateUserRole: %v", err)
 	}
-	secretID, err := database.CreateChannel(ctx, "restart-resync-secret", "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
-
-	token, err := auth.GenerateToken()
-	if err != nil {
-		t.Fatalf("GenerateToken: %v", err)
-	}
-	if _, err := database.CreateSession(ctx, userID, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
-
-	hub := newTestHub(t, database, auth.NewRateLimiter(), nil)
-	go hub.Run()
-	defer hub.Stop()
+	secretID := mustCreateTextChannel(t, rig.db, "restart-resync-secret")
 
 	hub.SeedSeq(1_000_000_000)
 	hub.MarkVisibilityChanged()
 
-	srv := httptest.NewServer(ServeWS(hub, []string{"*"}, 0))
-	defer srv.Close()
-
-	dialCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	conn, dialResp, dialErr := websocket.Dial(dialCtx, "ws"+strings.TrimPrefix(srv.URL, "http"), nil)
-	if dialResp != nil && dialResp.Body != nil {
-		_ = dialResp.Body.Close()
-	}
-	if dialErr != nil {
-		t.Fatalf("websocket.Dial: %v", dialErr)
-	}
-	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
-
-	raw, _ := json.Marshal(map[string]any{
-		"type": "auth",
-		"payload": map[string]any{
-			"token":             token,
-			"last_seq":          uint64(500),
-			"active_channel_id": secretID,
-		},
-	})
-	if err := conn.Write(dialCtx, websocket.MessageText, raw); err != nil {
-		t.Fatalf("write auth: %v", err)
-	}
-
-	readCtx, readCancel := context.WithTimeout(ctx, 5*time.Second)
-	defer readCancel()
-	if _, _, err := conn.Read(readCtx); err != nil {
-		t.Fatalf("read auth_ok: %v", err)
-	}
-	if _, _, err := conn.Read(readCtx); err != nil {
-		t.Fatalf("read ready: %v", err)
-	}
+	rig.handshake(t, ctx, token, 500, secretID)
 
 	time.Sleep(200 * time.Millisecond)
-	hub.mu.Lock()
-	c := hub.newestLocked(userID)
-	hub.mu.Unlock()
+	c := rig.newestClient(user.ID)
 	if c == nil {
 		t.Fatal("client was not registered")
 	}
@@ -274,7 +141,7 @@ func TestFullResyncAfterRestartActiveChannelIsReadGated(t *testing.T) {
 		t.Fatalf("post-restart full-resync client was focused on unreadable channel %d from an "+
 			"attacker-supplied auth frame", got)
 	}
-	sub := hub.pubsub.subscriberForTest(ChannelTopic(secretID), userID)
+	sub := hub.pubsub.subscriberForTest(ChannelTopic(secretID), user.ID)
 	if sub != nil {
 		t.Fatalf("post-restart full-resync client is subscribed to ChannelTopic(%d) despite "+
 			"READ_MESSAGES being denied", secretID)
@@ -285,69 +152,15 @@ func TestFullResyncAfterRestartActiveChannelIsReadGated(t *testing.T) {
 // hint is ignored there: the socket must stay unsubscribed until its own
 // channel_focus, even when the named channel is READ-visible.
 func TestFreshConnectIgnoresActiveChannelID(t *testing.T) {
-	database := newTeardownTestDB(t)
+	rig := newServeRig(t)
 	ctx := context.Background()
+	user, token := rig.seedOwner(t, "fresh-connect-hint-user")
+	chID := mustCreateTextChannel(t, rig.db, "fresh-connect-hint-room")
 
-	userID, err := database.CreateUser(ctx, "fresh-connect-hint-user", "hash", 1)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	chID, err := database.CreateChannel(ctx, "fresh-connect-hint-room", "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
-
-	token, err := auth.GenerateToken()
-	if err != nil {
-		t.Fatalf("GenerateToken: %v", err)
-	}
-	if _, err := database.CreateSession(ctx, userID, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
-
-	hub := newTestHub(t, database, auth.NewRateLimiter(), nil)
-	go hub.Run()
-	defer hub.Stop()
-
-	srv := httptest.NewServer(ServeWS(hub, []string{"*"}, 0))
-	defer srv.Close()
-
-	dialCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	conn, dialResp, dialErr := websocket.Dial(dialCtx, "ws"+strings.TrimPrefix(srv.URL, "http"), nil)
-	if dialResp != nil && dialResp.Body != nil {
-		_ = dialResp.Body.Close()
-	}
-	if dialErr != nil {
-		t.Fatalf("websocket.Dial: %v", dialErr)
-	}
-	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
-
-	raw, _ := json.Marshal(map[string]any{
-		"type": "auth",
-		"payload": map[string]any{
-			"token":             token,
-			"last_seq":          0,
-			"active_channel_id": chID,
-		},
-	})
-	if err := conn.Write(dialCtx, websocket.MessageText, raw); err != nil {
-		t.Fatalf("write auth: %v", err)
-	}
-
-	readCtx, readCancel := context.WithTimeout(ctx, 5*time.Second)
-	defer readCancel()
-	if _, _, err := conn.Read(readCtx); err != nil {
-		t.Fatalf("read auth_ok: %v", err)
-	}
-	if _, _, err := conn.Read(readCtx); err != nil {
-		t.Fatalf("read ready: %v", err)
-	}
+	rig.handshake(t, ctx, token, 0, chID)
 
 	time.Sleep(200 * time.Millisecond)
-	hub.mu.Lock()
-	c := hub.newestLocked(userID)
-	hub.mu.Unlock()
+	c := rig.newestClient(user.ID)
 	if c == nil {
 		t.Fatal("client was not registered")
 	}
@@ -355,7 +168,7 @@ func TestFreshConnectIgnoresActiveChannelID(t *testing.T) {
 		t.Fatalf("fresh-connect client channelID = %d, want 0 — active_channel_id must be "+
 			"ignored when last_seq is 0", got)
 	}
-	sub := hub.pubsub.subscriberForTest(ChannelTopic(chID), userID)
+	sub := rig.hub.pubsub.subscriberForTest(ChannelTopic(chID), user.ID)
 	if sub != nil {
 		t.Fatalf("fresh-connect client is subscribed to ChannelTopic(%d) via the auth-frame hint", chID)
 	}

@@ -43,9 +43,7 @@ func getSystemHealth(t *testing.T, src admin.SystemSources, hub admin.HubBroadca
 	database := openAdminTestDB(t)
 	handler := admin.NewAdminAPI(database, "9.9.9", hub, nil, nil, nil, nil, newTestServices(database), admin.SetupOptions{System: src})
 	w := doRequest(t, handler, http.MethodGet, "/system/health", createAdminUser(t, database), nil)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 	var got systemHealth
 	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
 		t.Fatalf("decode: %v; body %s", err, w.Body.String())

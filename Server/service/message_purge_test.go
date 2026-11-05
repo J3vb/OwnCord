@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/db"
@@ -35,10 +36,7 @@ func seedPurgeMessages(t *testing.T, database *db.DB, channelID int64, n int) []
 	t.Helper()
 	ids := make([]int64, 0, n)
 	for range n {
-		id, err := database.CreateMessage(context.Background(), channelID, 1, "spam", nil)
-		if err != nil {
-			t.Fatalf("CreateMessage: %v", err)
-		}
+		id := mustCreateMessage(t, database, channelID, 1, "spam", nil)
 		ids = append(ids, id)
 	}
 	return ids
@@ -49,9 +47,7 @@ func TestPurgeMessages_ModeratorPurgesNewest(t *testing.T) {
 	ids := seedPurgeMessages(t, database, 10, 5)
 
 	result, err := svc.PurgeMessages(context.Background(), 2, 10, 2, 0)
-	if err != nil {
-		t.Fatalf("PurgeMessages: %v", err)
-	}
+	mustDo(t, "PurgeMessages", err)
 	if len(result.MessageIDs) != 2 {
 		t.Fatalf("purged %d messages, want 2", len(result.MessageIDs))
 	}
@@ -73,21 +69,7 @@ func TestPurgeMessages_TombstonesPreserved(t *testing.T) {
 
 	// Soft delete only: the rows and their content must survive so clients
 	// render tombstones and reply targets still resolve.
-	for _, id := range ids {
-		msg, err := database.GetMessage(context.Background(), id)
-		if err != nil {
-			t.Fatalf("GetMessage(%d): %v", id, err)
-		}
-		if msg == nil {
-			t.Fatalf("message %d was hard-deleted", id)
-		}
-		if !msg.Deleted {
-			t.Errorf("message %d not marked deleted", id)
-		}
-		if msg.Content == "" {
-			t.Errorf("message %d lost its content", id)
-		}
-	}
+	requireSoftDeleted(t, database, ids)
 }
 
 func TestPurgeMessages_MissingManageMessagesDenied(t *testing.T) {
@@ -145,9 +127,7 @@ func TestPurgeMessages_LimitClampedToMax(t *testing.T) {
 	seedPurgeMessages(t, database, 10, maxPurgeLimit+10)
 
 	result, err := svc.PurgeMessages(context.Background(), 2, 10, 5000, 0)
-	if err != nil {
-		t.Fatalf("PurgeMessages: %v", err)
-	}
+	mustDo(t, "PurgeMessages", err)
 	if len(result.MessageIDs) != maxPurgeLimit {
 		t.Fatalf("purged %d messages, want the clamp of %d", len(result.MessageIDs), maxPurgeLimit)
 	}
@@ -177,9 +157,7 @@ func TestPurgeMessages_BeforeCursorHonored(t *testing.T) {
 	ids := seedPurgeMessages(t, database, 10, 4)
 
 	result, err := svc.PurgeMessages(context.Background(), 2, 10, 100, ids[2])
-	if err != nil {
-		t.Fatalf("PurgeMessages: %v", err)
-	}
+	mustDo(t, "PurgeMessages", err)
 	if len(result.MessageIDs) != 2 {
 		t.Fatalf("purged %v, want the two messages below the cursor", result.MessageIDs)
 	}
@@ -206,9 +184,7 @@ func TestPurgeMessages_EmptyChannelSucceedsWithNoIDs(t *testing.T) {
 	svc, _ := newPurgeService(t)
 
 	result, err := svc.PurgeMessages(context.Background(), 2, 10, 50, 0)
-	if err != nil {
-		t.Fatalf("PurgeMessages: %v", err)
-	}
+	mustDo(t, "PurgeMessages", err)
 	if result.MessageIDs == nil {
 		t.Fatal("MessageIDs is nil, want an empty slice")
 	}
@@ -225,10 +201,7 @@ func TestPurgeMessages_WritesOneAuditEntry(t *testing.T) {
 		t.Fatalf("PurgeMessages: %v", err)
 	}
 
-	entries, err := database.GetAuditLog(context.Background(), 50, 0)
-	if err != nil {
-		t.Fatalf("GetAuditLog: %v", err)
-	}
+	entries := mustGetAuditLog(t, database, 50, 0)
 	var purges int
 	for _, e := range entries {
 		if e.Action == "message_purge" {
@@ -243,5 +216,21 @@ func TestPurgeMessages_WritesOneAuditEntry(t *testing.T) {
 	}
 	if purges != 1 {
 		t.Fatalf("wrote %d message_purge audit entries, want exactly 1", purges)
+	}
+}
+
+// requireSoftDeleted checks each message is tombstoned but still holds its
+// row and content.
+func requireSoftDeleted(t *testing.T, database *db.DB, ids []int64) {
+	t.Helper()
+	for _, id := range ids {
+		msg, err := database.GetMessage(context.Background(), id)
+		mustDo(t, fmt.Sprintf("GetMessage(%d)", id), err)
+		if msg == nil {
+			t.Fatalf("message %d was hard-deleted", id)
+		}
+		if !msg.Deleted || msg.Content == "" {
+			t.Errorf("message %d deleted=%v content=%q, want marked deleted with its content kept", id, msg.Deleted, msg.Content)
+		}
 	}
 }

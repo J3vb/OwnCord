@@ -3,7 +3,6 @@ package api_test
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -53,18 +52,11 @@ func TestHandleMetrics_ReturnsExpectedFields(t *testing.T) {
 	router := buildMetricsRouter(nil) // no IP restriction
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/metrics", nil)
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
+	rr := serveLocal(router, req)
 
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 
-	var resp map[string]any
-	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	resp := decodeBody[map[string]any](t, rr)
 
 	requiredFields := []string{
 		"uptime", "uptime_seconds", "goroutines",
@@ -164,25 +156,18 @@ func TestHandleMetrics_AdminIPRestrict_BlocksNonAdmin(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/metrics", nil)
 	req.RemoteAddr = "192.168.1.1:9999" // not in allowed CIDR
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
+	rr := serveRequest(router, req)
 
-	if rr.Code != http.StatusForbidden {
-		t.Errorf("status = %d, want 403; body: %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusForbidden)
 }
 
 func TestHandleMetrics_AdminIPRestrict_AllowsAdmin(t *testing.T) {
 	router := buildMetricsRouter([]string{"127.0.0.0/8"})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/metrics", nil)
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
+	rr := serveLocal(router, req)
 
-	if rr.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusOK)
 }
 
 func TestHandleMetrics_WithoutLiveKitHealthCheck(t *testing.T) {
@@ -197,16 +182,11 @@ func TestHandleMetrics_WithoutLiveKitHealthCheck(t *testing.T) {
 	}))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/metrics", nil)
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	r.ServeHTTP(rr, req)
+	rr := serveLocal(r, req)
 
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 
-	var resp map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	resp := decodeBody[map[string]any](t, rr)
 
 	// livekit_healthy should be absent when no health check is provided.
 	if _, ok := resp["livekit_healthy"]; ok {
@@ -229,16 +209,9 @@ func TestHandleMetrics_PushCounters(t *testing.T) {
 	}))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/metrics", nil)
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	r.ServeHTTP(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
-	}
-	var resp map[string]any
-	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	rr := serveLocal(r, req)
+	requireStatus(t, rr, http.StatusOK)
+	resp := decodeBody[map[string]any](t, rr)
 	if resp["push_dispatched"] != float64(7) || resp["push_failed"] != float64(2) || resp["push_pruned"] != float64(1) {
 		t.Errorf("push counters = %v/%v/%v, want 7/2/1", resp["push_dispatched"], resp["push_failed"], resp["push_pruned"])
 	}
@@ -248,12 +221,8 @@ func TestHandleMetrics_PushCounters(t *testing.T) {
 	r2.Get("/api/v1/metrics", api.HandleMetricsForTest(api.MetricsSources{}))
 	req2 := httptest.NewRequest(http.MethodGet, "/api/v1/metrics", nil)
 	req2.RemoteAddr = "127.0.0.1:9999"
-	rr2 := httptest.NewRecorder()
-	r2.ServeHTTP(rr2, req2)
-	var resp2 map[string]any
-	if err := json.NewDecoder(rr2.Body).Decode(&resp2); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	rr2 := serveRequest(r2, req2)
+	resp2 := decodeBody[map[string]any](t, rr2)
 	if resp2["push_dispatched"] != float64(0) || resp2["push_failed"] != float64(0) || resp2["push_pruned"] != float64(0) {
 		t.Errorf("push counters with no source = %v/%v/%v, want 0/0/0", resp2["push_dispatched"], resp2["push_failed"], resp2["push_pruned"])
 	}

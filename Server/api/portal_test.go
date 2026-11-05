@@ -43,8 +43,7 @@ func getPortal(t *testing.T, h http.Handler, host, path string) *httptest.Respon
 	if host != "" {
 		req.Host = host
 	}
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	rec := serveRequest(h, req)
 	return rec
 }
 
@@ -148,9 +147,7 @@ func TestPortal_PlaceholderBuild404(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			h := portalRouter(bundle)
 			rec := getPortal(t, h, "", "/")
-			if rec.Code != http.StatusNotFound {
-				t.Fatalf("GET / = %d, want 404", rec.Code)
-			}
+			requireStatus(t, rec, http.StatusNotFound)
 			if body := rec.Body.String(); body != "browser client not included in this build\n" {
 				t.Errorf("GET / body = %q, want the one-line note", body)
 			}

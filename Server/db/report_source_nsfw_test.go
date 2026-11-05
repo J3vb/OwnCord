@@ -78,23 +78,14 @@ var (
 // by the evidence gate) where the channel was already deleted.
 func TestReportSourceNSFW_Backfill(t *testing.T) {
 	database := openMemory(t)
-	if err := db.MigrateFS(database, migrationsBefore(t, "052_")); err != nil {
-		t.Fatalf("MigrateFS(<052): %v", err)
-	}
-	reporter, err := database.CreateUser(context.Background(), "src-reporter", "x", 4)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	mustDo(t, "MigrateFS(<052)", db.MigrateFS(database, migrationsBefore(t, "052_")))
+	reporter := mustCreateUser(t, database, "src-reporter", "x", 4)
 	f := &sourceNSFWFixture{t: t, database: database, reporter: reporter}
 	labelled, plain, gone := f.channel(true), f.channel(false), f.channel(true)
 	rLabelled, rPlain, rGone, rUser := f.file(&labelled), f.file(&plain), f.file(&gone), f.file(nil)
-	if err := database.DeleteChannel(context.Background(), gone); err != nil {
-		t.Fatalf("DeleteChannel: %v", err)
-	}
+	mustDo(t, "DeleteChannel", database.DeleteChannel(context.Background(), gone))
 
-	if err := db.MigrateFS(database, migrations.FS); err != nil {
-		t.Fatalf("MigrateFS(all): %v", err)
-	}
+	mustDo(t, "MigrateFS(all)", db.MigrateFS(database, migrations.FS))
 	f.expect(rLabelled, yes)
 	f.expect(rPlain, no)
 	f.expect(rGone, nil)
@@ -105,10 +96,7 @@ func TestReportSourceNSFW_Backfill(t *testing.T) {
 // filing, set by any later labelling, and never cleared by unlabelling.
 func TestReportSourceNSFW_TriggersAreSticky(t *testing.T) {
 	database := openMigratedMemory(t)
-	reporter, err := database.CreateUser(context.Background(), "src-reporter", "x", 4)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	reporter := mustCreateUser(t, database, "src-reporter", "x", 4)
 	f := &sourceNSFWFixture{t: t, database: database, reporter: reporter}
 	labelled, plain := f.channel(true), f.channel(false)
 	rLabelled, rPlain := f.file(&labelled), f.file(&plain)

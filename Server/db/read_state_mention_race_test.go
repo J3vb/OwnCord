@@ -30,18 +30,13 @@ func TestMarkChannelReadAtLatest_KeepsAMentionRaisedAfterTheSnapshot(t *testing.
 	// The channel already has history the reader has seen.
 	var lastSeen int64
 	for range 3 {
-		id, err := database.CreateMessage(ctx, chID, author, "old", nil)
-		if err != nil {
-			t.Fatalf("CreateMessage: %v", err)
-		}
+		id := mustCreateMessage(t, database, chID, author, "old", nil)
 		lastSeen = id
 	}
 
 	// Step 1 of the race: the focus path reads the newest id it can see.
 	snapshot, err := database.GetLatestMessageID(ctx, chID)
-	if err != nil {
-		t.Fatalf("GetLatestMessageID: %v", err)
-	}
+	mustDo(t, "GetLatestMessageID", err)
 	if snapshot != lastSeen {
 		t.Fatalf("snapshot = %d, want the newest message %d", snapshot, lastSeen)
 	}
@@ -49,19 +44,12 @@ func TestMarkChannelReadAtLatest_KeepsAMentionRaisedAfterTheSnapshot(t *testing.
 	// Step 2: a message mentioning the reader commits while the focus path is
 	// still in flight, and the send path's background goroutine raises the
 	// mention. Its own guard passes, because the reader is behind this message.
-	mentioning, err := database.CreateMessage(ctx, chID, author, "@reader ping", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage (mentioning): %v", err)
-	}
-	if err := database.IncrementMentionCounts(ctx, chID, mentioning, []int64{reader}); err != nil {
-		t.Fatalf("IncrementMentionCounts: %v", err)
-	}
+	mentioning := mustCreateMessage(t, database, chID, author, "@reader ping", nil)
+	mustDo(t, "IncrementMentionCounts", database.IncrementMentionCounts(ctx, chID, mentioning, []int64{reader}))
 
 	// Step 3: the focus path performs its write. It must not clear the mention
 	// while leaving the reader behind the message that raised it.
-	if err := database.MarkChannelReadAtLatest(ctx, reader, chID); err != nil {
-		t.Fatalf("MarkChannelReadAtLatest: %v", err)
-	}
+	mustDo(t, "MarkChannelReadAtLatest", database.MarkChannelReadAtLatest(ctx, reader, chID))
 
 	lastRead, mentions, found, err := database.GetReadState(ctx, reader, chID)
 	if err != nil || !found {
@@ -88,20 +76,11 @@ func TestMarkChannelReadAtLatest_LaterMentionStillCounts(t *testing.T) {
 	author := seedUser(t, database, "later-author")
 	chID := seedChannel(t, database, "later-ch")
 
-	if _, err := database.CreateMessage(ctx, chID, author, "old", nil); err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
-	if err := database.MarkChannelReadAtLatest(ctx, reader, chID); err != nil {
-		t.Fatalf("MarkChannelReadAtLatest: %v", err)
-	}
+	mustCreateMessage(t, database, chID, author, "old", nil)
+	mustDo(t, "MarkChannelReadAtLatest", database.MarkChannelReadAtLatest(ctx, reader, chID))
 
-	mentioning, err := database.CreateMessage(ctx, chID, author, "@reader later", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage (mentioning): %v", err)
-	}
-	if err := database.IncrementMentionCounts(ctx, chID, mentioning, []int64{reader}); err != nil {
-		t.Fatalf("IncrementMentionCounts: %v", err)
-	}
+	mentioning := mustCreateMessage(t, database, chID, author, "@reader later", nil)
+	mustDo(t, "IncrementMentionCounts", database.IncrementMentionCounts(ctx, chID, mentioning, []int64{reader}))
 
 	_, mentions, found, err := database.GetReadState(ctx, reader, chID)
 	if err != nil || !found {
@@ -120,9 +99,7 @@ func TestMarkChannelReadAtLatest_EmptyChannel(t *testing.T) {
 	reader := seedUser(t, database, "empty-reader")
 	chID := seedChannel(t, database, "empty-ch")
 
-	if err := database.MarkChannelReadAtLatest(ctx, reader, chID); err != nil {
-		t.Fatalf("MarkChannelReadAtLatest: %v", err)
-	}
+	mustDo(t, "MarkChannelReadAtLatest", database.MarkChannelReadAtLatest(ctx, reader, chID))
 	lastRead, mentions, found, err := database.GetReadState(ctx, reader, chID)
 	if err != nil || !found {
 		t.Fatalf("GetReadState: %v (found=%v)", err, found)

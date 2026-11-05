@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/livekitproc"
 	"github.com/J3vb/OwnCord/Server/service"
 )
@@ -85,19 +84,9 @@ func TestGracefulStopContext_StopsLiveKitAfterSocketsClose(t *testing.T) {
 // step: the stop's user set is taken when the stop begins, so the user ends
 // offline with last_seen at stop time (P5-S07).
 func TestGracefulStopContext_StoppedUsersSurviveTeardownUnregister(t *testing.T) {
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	database := newTeardownTestDB(t)
 	ctx := context.Background()
-	uid, err := database.CreateUser(ctx, "voice", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	uid := mustCreateUser(t, database, "voice", 4)
 	if _, err := database.ExecContext(ctx,
 		`UPDATE users SET status = 'online', last_seen = datetime('now', '-2 days') WHERE id = ?`, uid); err != nil {
 		t.Fatalf("seed: %v", err)

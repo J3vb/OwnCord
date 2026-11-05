@@ -105,9 +105,7 @@ func TestUploadTotals_GroupsByKind(t *testing.T) {
 		t.Fatal(err)
 	}
 	totals, err := f.database.UploadTotals(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "UploadTotals", err)
 	got := map[string]db.UploadKindTotal{}
 	for _, k := range totals {
 		got[k.Kind] = k
@@ -169,9 +167,7 @@ func TestUserStorageQuotaMB_SetAndList(t *testing.T) {
 	}
 
 	rows, err := f.database.ListMemberStorage(ctx, []int64{f.alice, f.bob})
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "ListMemberStorage", err)
 	if len(rows) != 1 || rows[0].UserID != f.alice || rows[0].QuotaMB == nil || *rows[0].QuotaMB != 5 {
 		t.Errorf("member storage = %+v", rows)
 	}

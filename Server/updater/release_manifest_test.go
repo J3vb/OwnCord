@@ -30,9 +30,7 @@ func TestVerifyReleaseManifest_MultiAssetSelectsLinuxEntry(t *testing.T) {
 	sig := signTestAsset(t, key, manifest)
 
 	got, err := u.VerifyReleaseManifest(manifest, sig, "v1.0.0", "chatserver-linux-amd64.tar.gz")
-	if err != nil {
-		t.Fatalf("VerifyReleaseManifest: %v", err)
-	}
+	mustDo(t, "VerifyReleaseManifest", err)
 	if got.Asset != "chatserver-linux-amd64.tar.gz" || got.SHA256 != testHash("linux") {
 		t.Errorf("resolved binding = {%s, %s}, want linux entry", got.Asset, got.SHA256)
 	}
@@ -44,9 +42,7 @@ func TestVerifyReleaseManifest_MultiAssetSelectsWindowsEntry(t *testing.T) {
 	sig := signTestAsset(t, key, manifest)
 
 	got, err := u.VerifyReleaseManifest(manifest, sig, "v1.0.0", "chatserver.exe")
-	if err != nil {
-		t.Fatalf("VerifyReleaseManifest: %v", err)
-	}
+	mustDo(t, "VerifyReleaseManifest", err)
 	if got.Asset != "chatserver.exe" || got.SHA256 != testHash("exe") {
 		t.Errorf("resolved binding = {%s, %s}, want windows entry", got.Asset, got.SHA256)
 	}
@@ -81,9 +77,7 @@ func TestVerifyReleaseManifest_LegacySingleAssetStillVerifies(t *testing.T) {
 	sig := signTestAsset(t, key, manifest)
 
 	got, err := u.VerifyReleaseManifest(manifest, sig, "v1.0.0", "chatserver.exe")
-	if err != nil {
-		t.Fatalf("VerifyReleaseManifest: %v", err)
-	}
+	mustDo(t, "VerifyReleaseManifest", err)
 	if got.SHA256 != testHash("exe") {
 		t.Errorf("SHA256 = %s, want legacy hash", got.SHA256)
 	}
@@ -106,13 +100,9 @@ func TestReleaseManifest_Epoch1Shape(t *testing.T) {
 		},
 	}
 	data, err := json.Marshal(full)
-	if err != nil {
-		t.Fatalf("Marshal full manifest: %v", err)
-	}
+	mustDo(t, "Marshal full manifest", err)
 	var got map[string]any
-	if err := json.Unmarshal(data, &got); err != nil {
-		t.Fatalf("Unmarshal full manifest: %v", err)
-	}
+	mustDo(t, "Unmarshal full manifest", json.Unmarshal(data, &got))
 	want := map[string]any{
 		"version": "1.2.0",
 		"asset":   "chatserver.exe",
@@ -129,13 +119,9 @@ func TestReleaseManifest_Epoch1Shape(t *testing.T) {
 	// Assets == nil (legacy single-asset form) must omit "assets" entirely.
 	legacy := releaseManifest{Version: "1.2.0", Asset: "chatserver.exe", SHA256: testHash("exe")}
 	legacyData, err := json.Marshal(legacy)
-	if err != nil {
-		t.Fatalf("Marshal legacy manifest: %v", err)
-	}
+	mustDo(t, "Marshal legacy manifest", err)
 	var gotLegacy map[string]any
-	if err := json.Unmarshal(legacyData, &gotLegacy); err != nil {
-		t.Fatalf("Unmarshal legacy manifest: %v", err)
-	}
+	mustDo(t, "Unmarshal legacy manifest", json.Unmarshal(legacyData, &gotLegacy))
 	if _, ok := gotLegacy["assets"]; ok {
 		t.Errorf("legacy manifest JSON has an \"assets\" key = %v, want absent", gotLegacy["assets"])
 	}
@@ -152,9 +138,7 @@ func TestReleaseManifest_Epoch1Shape(t *testing.T) {
 	// legacy payload and assert the Go field values, not just presence.
 	const legacyJSON = `{"version":"1.2.0","asset":"chatserver.exe","sha256":"deadbeef"}`
 	var parsed releaseManifest
-	if err := json.Unmarshal([]byte(legacyJSON), &parsed); err != nil {
-		t.Fatalf("Unmarshal legacy JSON literal: %v", err)
-	}
+	mustDo(t, "Unmarshal legacy JSON literal", json.Unmarshal([]byte(legacyJSON), &parsed))
 	wantParsed := releaseManifest{Version: "1.2.0", Asset: "chatserver.exe", SHA256: "deadbeef"}
 	if !reflect.DeepEqual(parsed, wantParsed) {
 		t.Errorf("parsed legacy manifest = %+v, want %+v", parsed, wantParsed)

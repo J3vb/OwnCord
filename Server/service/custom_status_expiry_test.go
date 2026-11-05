@@ -45,9 +45,7 @@ func TestHandlePresenceUpdate_StoresExpiry(t *testing.T) {
 	text := "in a meeting"
 
 	res, err := svc.HandlePresenceUpdate(context.Background(), 1, db.StatusDND, &text, new(int64(3600)), nil)
-	if err != nil {
-		t.Fatalf("HandlePresenceUpdate: %v", err)
-	}
+	mustDo(t, "HandlePresenceUpdate", err)
 	const want = "2026-10-15T13:00:00Z"
 	if res.CustomStatus == nil || *res.CustomStatus != text || res.ExpiresAt != want {
 		t.Fatalf("result = %v / %q, want %q / %q", res.CustomStatus, res.ExpiresAt, text, want)
@@ -68,9 +66,7 @@ func TestHandlePresenceUpdate_NewTextWithoutExpiryClearsOld(t *testing.T) {
 		t.Fatal(err)
 	}
 	res, err := svc.HandlePresenceUpdate(ctx, 1, db.StatusOnline, &second, nil, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "HandlePresenceUpdate", err)
 	if res.ExpiresAt != "" {
 		t.Fatalf("ExpiresAt = %q, want none", res.ExpiresAt)
 	}
@@ -95,13 +91,9 @@ func TestHandlePresenceUpdate_BareFlipKeepsExpiry(t *testing.T) {
 	ctx := context.Background()
 	text := "heads down"
 	first, err := svc.HandlePresenceUpdate(ctx, 1, db.StatusOnline, &text, new(int64(3600)), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "HandlePresenceUpdate", err)
 	flip, err := svc.HandlePresenceUpdate(ctx, 1, db.StatusIdle, nil, nil, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "HandlePresenceUpdate", err)
 	if flip.CustomStatus == nil || *flip.CustomStatus != text || flip.ExpiresAt != first.ExpiresAt {
 		t.Fatalf("bare flip = %v / %q, want the stored %q / %q", flip.CustomStatus, flip.ExpiresAt, text, first.ExpiresAt)
 	}
@@ -143,14 +135,9 @@ func TestLogout_ClearsExpiry(t *testing.T) {
 	if _, err := svc.HandlePresenceUpdate(ctx, 1, db.StatusOnline, &text, new(int64(600)), nil); err != nil {
 		t.Fatal(err)
 	}
-	user, err := database.GetUserByID(ctx, 1)
-	if err != nil {
-		t.Fatal(err)
-	}
+	user := mustGetUserByID(t, database, 1)
 	a := NewAuthService(database, auth.NewRateLimiter(), make([]byte, 32), nil)
-	if err := a.Logout(ctx, Principal{User: user, Session: &db.Session{UserID: 1, TokenHash: "tok"}}); err != nil {
-		t.Fatalf("Logout: %v", err)
-	}
+	mustDo(t, "Logout", a.Logout(ctx, Principal{User: user, Session: &db.Session{UserID: 1, TokenHash: "tok"}}))
 	if got, exp := storedExpiry(t, database, 1); got != "" || exp != "" {
 		t.Fatalf("after logout stored = %q / %q, want both cleared", got, exp)
 	}
@@ -204,9 +191,7 @@ func TestCustomStatusExpirer_ClearsAtDeadline(t *testing.T) {
 	_, database := newExpiryChannels(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	text := "short"
-	if err := database.UpdateUserPresence(ctx, 1, db.StatusOnline, &text, inSeconds(time.Second)); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "UpdateUserPresence", database.UpdateUserPresence(ctx, 1, db.StatusOnline, &text, inSeconds(time.Second)))
 	n := newRecordingNotifier()
 	e := fastExpirer(database)
 	e.SetNotifier(n)
@@ -238,17 +223,13 @@ func TestCustomStatusExpirer_WakesOnEarlierSet(t *testing.T) {
 	// The loop is asleep on a far deadline; a nearer one set afterwards must
 	// wake it rather than wait the old sleep out.
 	far := "far"
-	if err := database.UpdateUserPresence(ctx, 2, db.StatusOnline, &far, inSeconds(time.Hour)); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "UpdateUserPresence", database.UpdateUserPresence(ctx, 2, db.StatusOnline, &far, inSeconds(time.Hour)))
 	e.Wake()
 	time.Sleep(100 * time.Millisecond)
 	text := "soon"
 	// Service validation enforces 60 s at the minimum, so write the near
 	// deadline directly and wake through the same hook the service uses.
-	if err := database.UpdateUserPresence(ctx, 1, db.StatusOnline, &text, inSeconds(time.Second)); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "UpdateUserPresence", database.UpdateUserPresence(ctx, 1, db.StatusOnline, &text, inSeconds(time.Second)))
 	svc.wakeExpiry()
 
 	n.wait(t, 5*time.Second)
@@ -265,15 +246,11 @@ func TestCustomStatusExpirer_BootSweepClearsOfflineExpiry(t *testing.T) {
 	ctx := context.Background()
 	text := "left a while ago"
 	past := time.Now().UTC().Add(-time.Hour).Format(dbtime.ISOLayout)
-	if err := database.UpdateUserPresence(ctx, 1, db.StatusOffline, &text, &past); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "UpdateUserPresence", database.UpdateUserPresence(ctx, 1, db.StatusOffline, &text, &past))
 	n := newRecordingNotifier()
 	e := NewCustomStatusExpirer(database)
 	e.SetNotifier(n)
-	if err := e.Sweep(ctx); err != nil {
-		t.Fatalf("Sweep: %v", err)
-	}
+	mustDo(t, "Sweep", e.Sweep(ctx))
 	if got, exp := storedExpiry(t, database, 1); got != "" || exp != "" {
 		t.Fatalf("stored = %q / %q after the boot sweep, want cleared", got, exp)
 	}

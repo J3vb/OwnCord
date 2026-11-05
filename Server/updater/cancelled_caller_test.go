@@ -39,9 +39,7 @@ func TestCheckForUpdateCancelledCallerDoesNotPoisonCache(t *testing.T) {
 	_, _ = u.CheckForUpdate(cancelled)
 
 	info, err := u.CheckForUpdate(context.Background())
-	if err != nil {
-		t.Fatalf("second caller got a poisoned cache: %v", err)
-	}
+	mustDo(t, "second caller got a poisoned cache", err)
 	if info.Latest != "v1.2.0" {
 		t.Fatalf("Latest = %q, want %q", info.Latest, "v1.2.0")
 	}
@@ -62,9 +60,7 @@ func TestFetchTextAssetCachedCancelledCallerDoesNotPoisonCache(t *testing.T) {
 	_, _ = u.FetchTextAssetCached(cancelled, url)
 
 	content, err := u.FetchTextAssetCached(context.Background(), url)
-	if err != nil {
-		t.Fatalf("second caller got a poisoned cache: %v", err)
-	}
+	mustDo(t, "second caller got a poisoned cache", err)
 	if content != "asset-body" {
 		t.Fatalf("content = %q, want %q", content, "asset-body")
 	}

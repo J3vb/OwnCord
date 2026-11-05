@@ -26,9 +26,7 @@ func TestPushVAPID_JWTVerifiesAndClaims(t *testing.T) {
 
 	before := time.Now()
 	header, err := svc.vapidAuthorization("https://push.example.net/subscribe/abc123?x=1")
-	if err != nil {
-		t.Fatalf("vapidAuthorization: %v", err)
-	}
+	mustDo(t, "vapidAuthorization", err)
 
 	// "vapid t=<jwt>, k=<pubkey>"
 	if !strings.HasPrefix(header, "vapid t=") {
@@ -49,32 +47,24 @@ func TestPushVAPID_JWTVerifiesAndClaims(t *testing.T) {
 		t.Fatalf("jwt has %d segments, want 3", len(parts))
 	}
 	headerJSON, err := base64.RawURLEncoding.DecodeString(parts[0])
-	if err != nil {
-		t.Fatalf("decoding JWT header: %v", err)
-	}
+	mustDo(t, "decoding JWT header", err)
 	var hdr struct {
 		Typ string `json:"typ"`
 		Alg string `json:"alg"`
 	}
-	if err := json.Unmarshal(headerJSON, &hdr); err != nil {
-		t.Fatalf("unmarshalling JWT header: %v", err)
-	}
+	mustDo(t, "unmarshalling JWT header", json.Unmarshal(headerJSON, &hdr))
 	if hdr.Typ != "JWT" || hdr.Alg != "ES256" {
 		t.Errorf("JWT header = %+v, want typ=JWT alg=ES256", hdr)
 	}
 
 	claimsJSON, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		t.Fatalf("decoding claims: %v", err)
-	}
+	mustDo(t, "decoding claims", err)
 	var claims struct {
 		Aud string `json:"aud"`
 		Exp int64  `json:"exp"`
 		Sub string `json:"sub"`
 	}
-	if err := json.Unmarshal(claimsJSON, &claims); err != nil {
-		t.Fatalf("unmarshalling claims: %v", err)
-	}
+	mustDo(t, "unmarshalling claims", json.Unmarshal(claimsJSON, &claims))
 	if claims.Aud != "https://push.example.net" {
 		t.Errorf("aud = %q, want the endpoint's origin %q", claims.Aud, "https://push.example.net")
 	}
@@ -88,9 +78,7 @@ func TestPushVAPID_JWTVerifiesAndClaims(t *testing.T) {
 	}
 
 	sigRaw, err := base64.RawURLEncoding.DecodeString(parts[2])
-	if err != nil {
-		t.Fatalf("decoding signature: %v", err)
-	}
+	mustDo(t, "decoding signature", err)
 	if len(sigRaw) != 64 {
 		t.Fatalf("signature is %d bytes, want 64 (raw r||s)", len(sigRaw))
 	}
@@ -128,9 +116,7 @@ func TestPushVAPID_EmptyContactOmitsSub(t *testing.T) {
 	svc.SetVAPIDKey(genTestVAPIDKey(t))
 
 	header, err := svc.vapidAuthorization("https://push.example.net/x")
-	if err != nil {
-		t.Fatalf("vapidAuthorization: %v", err)
-	}
+	mustDo(t, "vapidAuthorization", err)
 	jwtPart, _, _ := strings.Cut(strings.TrimPrefix(header, "vapid t="), ", k=")
 	parts := strings.Split(jwtPart, ".")
 	claimsJSON, _ := base64.RawURLEncoding.DecodeString(parts[1])
@@ -149,21 +135,15 @@ func TestPushVAPID_AudIsRFC6454Origin(t *testing.T) {
 	svc.SetVAPIDKey(genTestVAPIDKey(t))
 
 	header, err := svc.vapidAuthorization("https://PUSH.EXAMPLE.NET:443/x")
-	if err != nil {
-		t.Fatalf("vapidAuthorization: %v", err)
-	}
+	mustDo(t, "vapidAuthorization", err)
 	jwtPart, _, _ := strings.Cut(strings.TrimPrefix(header, "vapid t="), ", k=")
 	parts := strings.Split(jwtPart, ".")
 	claimsJSON, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		t.Fatalf("decoding claims: %v", err)
-	}
+	mustDo(t, "decoding claims", err)
 	var claims struct {
 		Aud string `json:"aud"`
 	}
-	if err := json.Unmarshal(claimsJSON, &claims); err != nil {
-		t.Fatalf("unmarshalling claims: %v", err)
-	}
+	mustDo(t, "unmarshalling claims", json.Unmarshal(claimsJSON, &claims))
 	if claims.Aud != "https://push.example.net" {
 		t.Errorf("aud = %q, want %q", claims.Aud, "https://push.example.net")
 	}

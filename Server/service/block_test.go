@@ -24,14 +24,10 @@ func TestBlockService_BlockUser(t *testing.T) {
 	svc, database := newBlockService(t)
 	ctx := context.Background()
 
-	if err := svc.BlockUser(ctx, 1, 2); err != nil {
-		t.Fatalf("BlockUser: %v", err)
-	}
+	mustDo(t, "BlockUser", svc.BlockUser(ctx, 1, 2))
 
 	blocked, err := database.IsBlocked(ctx, 1, 2)
-	if err != nil {
-		t.Fatalf("IsBlocked: %v", err)
-	}
+	mustDo(t, "IsBlocked", err)
 	if !blocked {
 		t.Error("block was not persisted")
 	}
@@ -84,9 +80,7 @@ func TestBlockService_BlockUser_Idempotent(t *testing.T) {
 	}
 
 	ids, err := database.ListBlockedUsers(ctx, 1)
-	if err != nil {
-		t.Fatalf("ListBlockedUsers: %v", err)
-	}
+	mustDo(t, "ListBlockedUsers", err)
 	if len(ids) != 1 {
 		t.Errorf("ListBlockedUsers = %v after blocking twice, want one entry", ids)
 	}
@@ -96,17 +90,11 @@ func TestBlockService_UnblockUser(t *testing.T) {
 	svc, database := newBlockService(t)
 	ctx := context.Background()
 
-	if err := svc.BlockUser(ctx, 1, 2); err != nil {
-		t.Fatalf("BlockUser: %v", err)
-	}
-	if err := svc.UnblockUser(ctx, 1, 2); err != nil {
-		t.Fatalf("UnblockUser: %v", err)
-	}
+	mustDo(t, "BlockUser", svc.BlockUser(ctx, 1, 2))
+	mustDo(t, "UnblockUser", svc.UnblockUser(ctx, 1, 2))
 
 	blocked, err := database.IsBlocked(ctx, 1, 2)
-	if err != nil {
-		t.Fatalf("IsBlocked: %v", err)
-	}
+	mustDo(t, "IsBlocked", err)
 	if blocked {
 		t.Error("block survived UnblockUser")
 	}
@@ -137,9 +125,7 @@ func TestBlockService_ListBlocked(t *testing.T) {
 	// Never nil — the REST layer serializes this straight to JSON, and a nil
 	// slice would emit `null` where clients expect `[]`.
 	got, err := svc.ListBlocked(ctx, 1)
-	if err != nil {
-		t.Fatalf("ListBlocked: %v", err)
-	}
+	mustDo(t, "ListBlocked", err)
 	if got == nil {
 		t.Fatal("ListBlocked returned nil; want an empty slice so it marshals as []")
 	}
@@ -147,26 +133,18 @@ func TestBlockService_ListBlocked(t *testing.T) {
 		t.Errorf("ListBlocked = %v on a fresh user, want empty", got)
 	}
 
-	if err := svc.BlockUser(ctx, 1, 2); err != nil {
-		t.Fatalf("BlockUser: %v", err)
-	}
-	if err := svc.BlockUser(ctx, 1, 3); err != nil {
-		t.Fatalf("BlockUser: %v", err)
-	}
+	mustDo(t, "BlockUser", svc.BlockUser(ctx, 1, 2))
+	mustDo(t, "BlockUser", svc.BlockUser(ctx, 1, 3))
 
 	got, err = svc.ListBlocked(ctx, 1)
-	if err != nil {
-		t.Fatalf("ListBlocked: %v", err)
-	}
+	mustDo(t, "ListBlocked", err)
 	if len(got) != 2 {
 		t.Fatalf("ListBlocked = %v, want 2 entries", got)
 	}
 
 	// Another user's blocks must not appear.
 	other, err := svc.ListBlocked(ctx, 2)
-	if err != nil {
-		t.Fatalf("ListBlocked for user 2: %v", err)
-	}
+	mustDo(t, "ListBlocked for user 2", err)
 	if len(other) != 0 {
 		t.Errorf("ListBlocked(2) = %v, want empty", other)
 	}
@@ -178,19 +156,11 @@ func TestBlockService_ListBlocked(t *testing.T) {
 func TestBlockUser_RevokesBlockersTrustInTarget(t *testing.T) {
 	database, svc := newMessageRequestFixture(t)
 	ctx := context.Background()
-	if err := database.TrustSender(ctx, 2, 1, "accepted"); err != nil {
-		t.Fatalf("TrustSender(2,1): %v", err)
-	}
-	if err := database.TrustSender(ctx, 1, 2, "accepted"); err != nil {
-		t.Fatalf("TrustSender(1,2): %v", err)
-	}
+	mustDo(t, "TrustSender(2,1)", database.TrustSender(ctx, 2, 1, "accepted"))
+	mustDo(t, "TrustSender(1,2)", database.TrustSender(ctx, 1, 2, "accepted"))
 
-	if err := svc.Blocks.BlockUser(ctx, 2, 1); err != nil {
-		t.Fatalf("BlockUser: %v", err)
-	}
-	if err := svc.Blocks.UnblockUser(ctx, 2, 1); err != nil {
-		t.Fatalf("UnblockUser: %v", err)
-	}
+	mustDo(t, "BlockUser", svc.Blocks.BlockUser(ctx, 2, 1))
+	mustDo(t, "UnblockUser", svc.Blocks.UnblockUser(ctx, 2, 1))
 
 	if ok, _ := database.IsTrustedSender(ctx, 2, 1); ok {
 		t.Error("blocker still trusts the blocked user after block + unblock")
@@ -198,12 +168,9 @@ func TestBlockUser_RevokesBlockersTrustInTarget(t *testing.T) {
 	if ok, _ := database.IsTrustedSender(ctx, 1, 2); !ok {
 		t.Error("blocked user's trust in the blocker was revoked, want untouched")
 	}
-	res, err := svc.Messages.SendMessage(ctx, SendMessageParams{
+	res := mustSendMessage(ctx, t, svc.Messages, SendMessageParams{
 		ChannelID: 50, UserID: 1, Username: "alice", Content: "hi",
 	})
-	if err != nil {
-		t.Fatalf("SendMessage: %v", err)
-	}
 	if len(res.RequestCreatedFor) != 1 {
 		t.Errorf("RequestCreatedFor = %v, want one pending request", res.RequestCreatedFor)
 	}
@@ -224,19 +191,12 @@ func TestBlockUser_ResetsDecidedRequestSoNextSendIsARequestAgain(t *testing.T) {
 		t.Fatalf("Accept: %v", err)
 	}
 
-	if err := svc.Blocks.BlockUser(ctx, 2, 1); err != nil {
-		t.Fatalf("BlockUser: %v", err)
-	}
-	if err := svc.Blocks.UnblockUser(ctx, 2, 1); err != nil {
-		t.Fatalf("UnblockUser: %v", err)
-	}
+	mustDo(t, "BlockUser", svc.Blocks.BlockUser(ctx, 2, 1))
+	mustDo(t, "UnblockUser", svc.Blocks.UnblockUser(ctx, 2, 1))
 
-	again, err := svc.Messages.SendMessage(ctx, SendMessageParams{
+	again := mustSendMessage(ctx, t, svc.Messages, SendMessageParams{
 		ChannelID: 50, UserID: 1, Username: "alice", Content: "hi again",
 	})
-	if err != nil {
-		t.Fatalf("SendMessage after unblock: %v", err)
-	}
 	if len(again.RequestCreatedFor) != 1 {
 		t.Errorf("RequestCreatedFor = %v, want a fresh request", again.RequestCreatedFor)
 	}
@@ -257,16 +217,11 @@ func TestUnblockUser_NotBlockedKeepsIgnoredRequest(t *testing.T) {
 		t.Fatalf("Ignore: %v", err)
 	}
 
-	if err := svc.Blocks.UnblockUser(ctx, 2, 1); err != nil {
-		t.Fatalf("UnblockUser: %v", err)
-	}
+	mustDo(t, "UnblockUser", svc.Blocks.UnblockUser(ctx, 2, 1))
 
-	again, err := svc.Messages.SendMessage(ctx, SendMessageParams{
+	again := mustSendMessage(ctx, t, svc.Messages, SendMessageParams{
 		ChannelID: 50, UserID: 1, Username: "alice", Content: "hi again",
 	})
-	if err != nil {
-		t.Fatalf("SendMessage after no-op unblock: %v", err)
-	}
 	if len(again.RequestCreatedFor) != 0 {
 		t.Errorf("RequestCreatedFor = %v, want none (request stays ignored)", again.RequestCreatedFor)
 	}

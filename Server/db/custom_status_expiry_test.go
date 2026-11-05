@@ -14,29 +14,17 @@ import (
 func TestClearCustomStatusIfExpiry_TagMismatchNoop(t *testing.T) {
 	database := openMigratedMemory(t)
 	ctx := context.Background()
-	uid, err := database.CreateUser(ctx, "alice", "hash", 4)
-	if err != nil {
-		t.Fatal(err)
-	}
+	uid := mustCreateUser(t, database, "alice", "hash", 4)
 	const old, fresh = "2026-01-01T00:00:00Z", "2026-01-01T00:30:00Z"
-	if err := database.UpdateUserPresence(ctx, uid, db.StatusOnline, new("lunch"), new(old)); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "UpdateUserPresence", database.UpdateUserPresence(ctx, uid, db.StatusOnline, new("lunch"), new(old)))
 	// The user re-sets the status before the expirer's clear lands.
-	if err := database.UpdateUserPresence(ctx, uid, db.StatusOnline, new("meeting"), new(fresh)); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "UpdateUserPresence", database.UpdateUserPresence(ctx, uid, db.StatusOnline, new("meeting"), new(fresh)))
 	ok, err := database.ClearCustomStatusIfExpiry(ctx, uid, old)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "ClearCustomStatusIfExpiry", err)
 	if ok {
 		t.Fatal("ClearCustomStatusIfExpiry cleared a status carrying a different expiry")
 	}
-	u, err := database.GetUserByID(ctx, uid)
-	if err != nil {
-		t.Fatal(err)
-	}
+	u := mustGetUserByID(t, database, uid)
 	if u.CustomStatus == nil || *u.CustomStatus != "meeting" || u.CustomStatusExpiresAt == nil || *u.CustomStatusExpiresAt != fresh {
 		t.Fatalf("new status was disturbed: %v / %v", u.CustomStatus, u.CustomStatusExpiresAt)
 	}
@@ -74,9 +62,7 @@ func TestCustomStatusExpiry_NextAndListExpired(t *testing.T) {
 		t.Fatalf("Next = %q, %v, %v; want the soonest", next, ok, err)
 	}
 	rows, err := database.ListExpiredCustomStatuses(ctx, "2026-01-01T12:00:00Z", 10)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "ListExpiredCustomStatuses", err)
 	if len(rows) != 1 || rows[0].UserID != b || rows[0].ExpiresAt != "2026-01-01T00:00:00Z" {
 		t.Fatalf("ListExpired = %+v, want only b", rows)
 	}
@@ -91,15 +77,9 @@ func TestDenyPendingUser_ClearsCustomStatusExpiry(t *testing.T) {
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	pid, err := database.CreatePendingUser(ctx, "applicant", "hash", 4, 100)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := database.UpdateUserPresence(ctx, pid, db.StatusOnline, new("hi"), new(time.Now().UTC().Add(time.Hour).Format(dbtime.ISOLayout))); err != nil {
-		t.Fatal(err)
-	}
-	if err := database.DenyPendingUser(ctx, pid); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreatePendingUser", err)
+	mustDo(t, "UpdateUserPresence", database.UpdateUserPresence(ctx, pid, db.StatusOnline, new("hi"), new(time.Now().UTC().Add(time.Hour).Format(dbtime.ISOLayout))))
+	mustDo(t, "DenyPendingUser", database.DenyPendingUser(ctx, pid))
 	if _, ok, err := database.NextCustomStatusExpiry(ctx); err != nil || ok {
 		t.Fatalf("a denied account kept an expiry: ok %v err %v", ok, err)
 	}

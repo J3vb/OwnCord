@@ -64,13 +64,8 @@ func TestMessageRequest_UntrustedRecipientHearsNothingButTheRequest(t *testing.T
 	bob := seedMemberUser(t, database, "mr-untrusted-bob")
 	dmChID := untrustedDMChannel(t, database, alice.ID, bob.ID)
 
-	sendAlice := make(chan []byte, 64)
-	sendBob := make(chan []byte, 64)
-	cAlice := ws.NewTestClientWithUser(hub, alice, dmChID, sendAlice)
-	cBob := ws.NewTestClientWithUser(hub, bob, dmChID, sendBob)
-	hub.Register(cAlice)
-	hub.Register(cBob)
-	waitRegistered(t, hub, cBob)
+	cAlice, sendAlice := connectClient(t, hub, alice, dmChID, 64)
+	_, sendBob := connectClient(t, hub, bob, dmChID, 64)
 
 	// Message: alice's first send. Bob gets exactly one dm_request.
 	hub.HandleMessageForTest(cAlice, dmChatSendMsg(dmChID, "hi stranger"))
@@ -139,13 +134,8 @@ func TestMessageRequest_AcceptOpensAndDelivers(t *testing.T) {
 	bob := seedMemberUser(t, database, "mr-accept-bob")
 	dmChID := untrustedDMChannel(t, database, alice.ID, bob.ID)
 
-	sendAlice := make(chan []byte, 64)
-	sendBob := make(chan []byte, 64)
-	cAlice := ws.NewTestClientWithUser(hub, alice, dmChID, sendAlice)
-	cBob := ws.NewTestClientWithUser(hub, bob, dmChID, sendBob)
-	hub.Register(cAlice)
-	hub.Register(cBob)
-	waitRegistered(t, hub, cBob)
+	cAlice, sendAlice := connectClient(t, hub, alice, dmChID, 64)
+	_, sendBob := connectClient(t, hub, bob, dmChID, 64)
 
 	sendResult, err := svc.Messages.SendMessage(context.Background(), service.SendMessageParams{
 		ChannelID: dmChID, UserID: alice.ID, Username: alice.Username, Content: "hi stranger",
@@ -255,10 +245,7 @@ func TestMessageRequest_SenderViewIsByteIdentical(t *testing.T) {
 	// chat_send_ok + chat_message frames, normalised.
 	capture := func(recipientName string, dmChID int64) []map[string]any {
 		t.Helper()
-		sendAlice := make(chan []byte, 64)
-		cAlice := ws.NewTestClientWithUser(hub, alice, dmChID, sendAlice)
-		hub.Register(cAlice)
-		waitRegistered(t, hub, cAlice)
+		cAlice, sendAlice := connectClient(t, hub, alice, dmChID, 64)
 
 		hub.HandleMessageForTest(cAlice, dmChatSendMsg(dmChID, "hello"))
 		ok := dmWaitMsgType(sendAlice, "chat_send_ok", waitTimeout)
@@ -281,10 +268,7 @@ func TestMessageRequest_SenderViewIsByteIdentical(t *testing.T) {
 		recipient := seedMemberUser(t, database, recipientName)
 		dmChID := untrustedDMChannel(t, database, alice.ID, recipient.ID)
 
-		setup := make(chan []byte, 64)
-		cSetup := ws.NewTestClientWithUser(hub, alice, dmChID, setup)
-		hub.Register(cSetup)
-		waitRegistered(t, hub, cSetup)
+		cSetup, setup := connectClient(t, hub, alice, dmChID, 64)
 		hub.HandleMessageForTest(cSetup, dmChatSendMsg(dmChID, "setup"))
 		if dmWaitMsgType(setup, "chat_send_ok", waitTimeout) == nil {
 			t.Fatalf("%s: setup send failed", recipientName)

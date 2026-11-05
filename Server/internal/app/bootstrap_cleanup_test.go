@@ -10,19 +10,13 @@ import (
 
 func TestRemoveOldBinary_PreservesReplacement(t *testing.T) {
 	exePath := filepath.Join(t.TempDir(), "chatserver")
-	if err := os.WriteFile(exePath, []byte("new version"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "WriteFile", os.WriteFile(exePath, []byte("new version"), 0o600))
 	olds := []string{exePath + ".old", exePath + ".old-1", exePath + ".old-2"}
 	for _, p := range olds {
-		if err := os.WriteFile(p, []byte("previous version"), 0o600); err != nil {
-			t.Fatal(err)
-		}
+		mustDo(t, "WriteFile", os.WriteFile(p, []byte("previous version"), 0o600))
 	}
 	unrelated := exePath + ".new"
-	if err := os.WriteFile(unrelated, []byte("staged"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "WriteFile", os.WriteFile(unrelated, []byte("staged"), 0o600))
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	removeOldBinaryAt(exePath, log)
@@ -46,13 +40,9 @@ func TestRemoveOldBinary_PreservesReplacement(t *testing.T) {
 // remove it like any other previous binary.
 func TestRemoveOldBinary_RemovesLeftoverProbe(t *testing.T) {
 	exePath := filepath.Join(t.TempDir(), "chatserver")
-	if err := os.WriteFile(exePath, []byte("current"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "WriteFile", os.WriteFile(exePath, []byte("current"), 0o600))
 	probe := exePath + ".old-probe-123456"
-	if err := os.WriteFile(probe, nil, 0o600); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "WriteFile", os.WriteFile(probe, nil, 0o600))
 
 	removeOldBinaryAt(exePath, slog.New(slog.NewTextHandler(io.Discard, nil)))
 

@@ -23,14 +23,7 @@ const oc0023VideoLimitRoleID = int64(210)
 
 func newOC0023VideoLimitDB(t *testing.T) *db.DB {
 	t.Helper()
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
+	database := newTeardownTestDB(t)
 	if _, err := database.ExecContext(context.Background(),
 		`INSERT INTO roles (id, name, color, permissions, position, is_default)
 		 VALUES (?, 'oc-0023-video', NULL, ?, 5, 0)`,
@@ -81,12 +74,8 @@ func TestHandleVoiceScreenshareV2_RefusedWhenCameraSlotFull(t *testing.T) {
 
 	userA := seedOC0023VideoLimitUser(t, database, "cam-holder")
 	userB := seedOC0023VideoLimitUser(t, database, "share-hopeful")
-	if err := database.JoinVoiceChannel(ctx, userA, chID); err != nil {
-		t.Fatalf("JoinVoiceChannel A: %v", err)
-	}
-	if err := database.JoinVoiceChannel(ctx, userB, chID); err != nil {
-		t.Fatalf("JoinVoiceChannel B: %v", err)
-	}
+	mustJoinVoice(t, database, userA, chID)
+	mustJoinVoice(t, database, userB, chID)
 
 	d := VoiceDeps{Voice: service.NewVoiceService(database), Reader: database, Permissions: permissions.NewChecker(database)}
 
@@ -125,12 +114,8 @@ func TestHandleVoiceCameraV2_RefusedWhenScreenshareSlotFull(t *testing.T) {
 
 	userA := seedOC0023VideoLimitUser(t, database, "share-holder")
 	userB := seedOC0023VideoLimitUser(t, database, "cam-hopeful")
-	if err := database.JoinVoiceChannel(ctx, userA, chID); err != nil {
-		t.Fatalf("JoinVoiceChannel A: %v", err)
-	}
-	if err := database.JoinVoiceChannel(ctx, userB, chID); err != nil {
-		t.Fatalf("JoinVoiceChannel B: %v", err)
-	}
+	mustJoinVoice(t, database, userA, chID)
+	mustJoinVoice(t, database, userB, chID)
 
 	d := VoiceDeps{Voice: service.NewVoiceService(database), Reader: database, Permissions: permissions.NewChecker(database)}
 

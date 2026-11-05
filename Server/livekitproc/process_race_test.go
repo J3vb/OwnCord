@@ -22,9 +22,7 @@ func TestProcess_IsRunningWhileStarting_NoRaceOnCmdProcess(t *testing.T) {
 		script = filepath.Join(dir, "fake-livekit.bat")
 		content = "@ping -n 2 127.0.0.1 > nul\r\n"
 	}
-	if err := os.WriteFile(script, []byte(content), 0o700); err != nil {
-		t.Fatalf("write fake binary: %v", err)
-	}
+	mustDo(t, "write fake binary", os.WriteFile(script, []byte(content), 0o700))
 
 	p := New(&config.VoiceConfig{
 		LiveKitAPIKey:    "harvest-key",

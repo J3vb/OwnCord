@@ -25,12 +25,7 @@ func (n *recordingReadNotifier) NotifyReadState(_, _ int64, rs db.ReadPointer) {
 func newReadPointerService(t *testing.T) (*MessageService, *recordingReadNotifier, *db.DB) {
 	t.Helper()
 	database := newTestDB(t)
-	seedRole(t, database, &db.Role{
-		ID:          permissions.MemberRoleID,
-		Name:        "member",
-		Permissions: permissions.SendMessages | permissions.ReadMessages,
-		Position:    1,
-	})
+	seedMemberRole(t, database, permissions.SendMessages|permissions.ReadMessages)
 	seedUserRole(t, database, 1, permissions.MemberRoleID)
 	seedChannel(t, database, &db.Channel{ID: 10, Name: "general", Type: "text"})
 	svc := NewMessageService(database, NewPermissionService(database, permissions.NewChecker(database)), nil)
@@ -42,14 +37,8 @@ func newReadPointerService(t *testing.T) (*MessageService, *recordingReadNotifie
 func TestMoveReadPointer_AdmissionAndFramesOnlyOnSuccess(t *testing.T) {
 	svc, n, database := newReadPointerService(t)
 	ctx := context.Background()
-	m1, err := database.CreateMessage(ctx, 10, 1, "one", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
-	m2, err := database.CreateMessage(ctx, 10, 1, "two", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	m1 := mustCreateMessage(t, database, 10, 1, "one", nil)
+	m2 := mustCreateMessage(t, database, 10, 1, "two", nil)
 
 	if _, err := svc.MoveReadPointer(ctx, 1, 999, db.ReadUpTo, m1); !errors.Is(err, ErrNotFound) {
 		t.Errorf("unknown channel: err = %v, want ErrNotFound", err)
@@ -65,9 +54,7 @@ func TestMoveReadPointer_AdmissionAndFramesOnlyOnSuccess(t *testing.T) {
 	}
 
 	rs, err := svc.MoveReadPointer(ctx, 1, 10, db.MarkUnread, m2)
-	if err != nil {
-		t.Fatalf("MarkUnread: %v", err)
-	}
+	mustDo(t, "MarkUnread", err)
 	if rs.LastReadMessageID != m1 || rs.UnreadCount != 1 {
 		t.Errorf("rs = %+v, want pointer %d, unread 1", rs, m1)
 	}
@@ -103,10 +90,7 @@ func (s *moveCountingStore) MoveReadPointer(ctx context.Context, userID, channel
 // would have returned.
 func TestMoveReadPointer_AtLatestSkipsWriterWhenCurrent(t *testing.T) {
 	database := newTestDB(t)
-	seedRole(t, database, &db.Role{
-		ID: permissions.MemberRoleID, Name: "member",
-		Permissions: permissions.SendMessages | permissions.ReadMessages, Position: 1,
-	})
+	seedMemberRole(t, database, permissions.SendMessages|permissions.ReadMessages)
 	seedUserRole(t, database, 1, permissions.MemberRoleID)
 	seedChannel(t, database, &db.Channel{ID: 10, Name: "general", Type: "text"})
 	st := &moveCountingStore{DB: database}
@@ -114,19 +98,14 @@ func TestMoveReadPointer_AtLatestSkipsWriterWhenCurrent(t *testing.T) {
 	n := &recordingReadNotifier{}
 	svc.SetReadStateNotifier(n)
 	ctx := context.Background()
-	m1, err := database.CreateMessage(ctx, 10, 1, "one", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	m1 := mustCreateMessage(t, database, 10, 1, "one", nil)
 
 	first, err := svc.MoveReadPointer(ctx, 1, 10, db.ReadAtLatest, 0)
 	if err != nil || st.moves.Load() != 1 {
 		t.Fatalf("first read (err %v, moves %d): the row did not exist, so it must write", err, st.moves.Load())
 	}
 	second, err := svc.MoveReadPointer(ctx, 1, 10, db.ReadAtLatest, 0)
-	if err != nil {
-		t.Fatalf("second read: %v", err)
-	}
+	mustDo(t, "second read", err)
 	if got := st.moves.Load(); got != 1 {
 		t.Errorf("writer transactions = %d, want 1: a current row must not open another", got)
 	}
@@ -138,9 +117,7 @@ func TestMoveReadPointer_AtLatestSkipsWriterWhenCurrent(t *testing.T) {
 	}
 
 	// A new message makes the row stale: back to the write path.
-	if _, err := database.CreateMessage(ctx, 10, 1, "two", nil); err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	mustCreateMessage(t, database, 10, 1, "two", nil)
 	if _, err := svc.MoveReadPointer(ctx, 1, 10, db.ReadAtLatest, 0); err != nil || st.moves.Load() != 2 {
 		t.Errorf("stale row (err %v, moves %d): want a second write", err, st.moves.Load())
 	}

@@ -118,9 +118,7 @@ func TestSweepStaleVoiceStates_TransientPermissionErrorDoesNotEvict(t *testing.T
 	database := newHarvestVoiceDB(t)
 	uid := seedHarvestVoiceUser(t, database, "sweep-transient-err")
 	chID := mustCreateVoiceChannel(t, database, "voice-transient-err")
-	if err := database.JoinVoiceChannel(ctx, uid, chID); err != nil {
-		t.Fatalf("JoinVoiceChannel: %v", err)
-	}
+	mustJoinVoice(t, database, uid, chID)
 
 	h := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	c := NewTestClient(h, uid, make(chan []byte, 8))
@@ -131,9 +129,7 @@ func TestSweepStaleVoiceStates_TransientPermissionErrorDoesNotEvict(t *testing.T
 	// CONNECT_VOICE directly on the role, so the sweep's permission lookup
 	// (voiceStillAllowed) must reach GetChannelPermissions (channel_overrides)
 	// before it can resolve — nobody's permissions actually changed.
-	if _, err := database.ExecContext(ctx, `ALTER TABLE channel_overrides RENAME TO channel_overrides_offline`); err != nil {
-		t.Fatalf("rename channel_overrides: %v", err)
-	}
+	mustExec(t, database, `ALTER TABLE channel_overrides RENAME TO channel_overrides_offline`)
 
 	h.sweepStaleVoiceStates(context.Background())
 
@@ -172,9 +168,7 @@ func TestSweepStaleVoiceStates_GhostRemovalReelectsKeyHolder(t *testing.T) {
 
 	// Ghost: a real voice_states row, but no connected client — the exact
 	// state sweepStaleVoiceStates' second loop treats as a ghost.
-	if err := database.JoinVoiceChannel(ctx, ghostUID, chID); err != nil {
-		t.Fatalf("JoinVoiceChannel(ghost): %v", err)
-	}
+	mustJoinVoice(t, database, ghostUID, chID)
 
 	h := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	survivor := NewTestClient(h, survivorUID, make(chan []byte, 8))
@@ -221,15 +215,12 @@ func TestSweepStaleVoiceStates_GhostRemovalReelectsKeyHolder(t *testing.T) {
 // (test-only, nil in production) fires at exactly that point so the test
 // reproduces the interleaving deterministically instead of by luck.
 func TestCleanupVoiceForChannel_ConcurrentJoinNotClobbered(t *testing.T) {
-	ctx := context.Background()
 	database := newHarvestVoiceDB(t)
 	uid := seedHarvestVoiceUser(t, database, "cleanup-race")
 	chA := mustCreateVoiceChannel(t, database, "voice-cleanup-a")
 	chB := mustCreateVoiceChannel(t, database, "voice-cleanup-b")
 
-	if err := database.JoinVoiceChannel(ctx, uid, chA); err != nil {
-		t.Fatalf("JoinVoiceChannel: %v", err)
-	}
+	mustJoinVoice(t, database, uid, chA)
 
 	h := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	c := NewTestClient(h, uid, make(chan []byte, 8))
@@ -275,9 +266,7 @@ func TestSweepStaleVoiceStates_CommittedGhostDeleteStillBroadcastsAfterCancel(t 
 	ghostUID := seedHarvestVoiceUser(t, database, "sweep-cancel-ghost")
 	survivorUID := seedHarvestVoiceUser(t, database, "sweep-cancel-survivor")
 	chID := mustCreateVoiceChannel(t, database, "voice-cancel-ghost")
-	if err := database.JoinVoiceChannel(context.Background(), ghostUID, chID); err != nil {
-		t.Fatalf("JoinVoiceChannel(ghost): %v", err)
-	}
+	mustJoinVoice(t, database, ghostUID, chID)
 
 	h := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	send := make(chan []byte, 8)

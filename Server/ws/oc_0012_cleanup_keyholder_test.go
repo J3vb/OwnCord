@@ -3,8 +3,6 @@ package ws_test
 import (
 	"testing"
 	"time"
-
-	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 // OC-0012: every other voice-removal path re-elects the key holder
@@ -18,10 +16,7 @@ func TestCleanupVoiceForChannel_ClearsKeyHolder(t *testing.T) {
 	alice := seedMemberUser(t, database, "ckh-alice")
 	vcID := seedVoiceChannel(t, database, "ckh-vc")
 
-	send := make(chan []byte, 32)
-	c := ws.NewTestClientWithUser(hub, alice, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, alice, 0, 32)
 
 	// Real join flow: elects alice key holder of the one-person room.
 	hub.HandleMessageForTest(c, voiceJoinMsg(vcID))

@@ -10,7 +10,6 @@ package ws
 import (
 	"context"
 	"encoding/json"
-	"net/http/httptest"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -103,9 +102,8 @@ func TestFreshConnect_BannedDuringHandshake_DisconnectsSocket(t *testing.T) {
 	uid := seedHarvestVoiceUser(t, database, "ban-handshake-fresh-user")
 	token := newBanHandshakeSession(t, database, uid)
 
-	hub := newTestHub(t, database, auth.NewRateLimiter(), nil)
-	go hub.Run()
-	defer hub.Stop()
+	rig := newServeRigOn(t, database, nil)
+	hub := rig.hub
 
 	var hookRan atomic.Bool
 	freshConnectPreRegisterRaceHook = func() {
@@ -121,10 +119,7 @@ func TestFreshConnect_BannedDuringHandshake_DisconnectsSocket(t *testing.T) {
 	}
 	defer func() { freshConnectPreRegisterRaceHook = nil }()
 
-	srv := httptest.NewServer(ServeWS(hub, []string{"*"}, 0))
-	defer srv.Close()
-
-	conn := dialAndAuth(t, ctx, srv.URL, token, 0, 0)
+	conn := dialAndAuth(t, ctx, rig.srv.URL, token, 0, 0)
 	defer func() { _ = conn.CloseNow() }()
 
 	seen, sawBanned := banHandshakeFrames(t, conn)
@@ -147,16 +142,12 @@ func TestReconnect_BannedDuringHandshake_DisconnectsSocket(t *testing.T) {
 	chID := mustCreateTextChannel(t, database, "ban-handshake-reconnect-channel")
 	token := newBanHandshakeSession(t, database, uid)
 
-	hub := newTestHub(t, database, auth.NewRateLimiter(), nil)
-	go hub.Run()
-	defer hub.Stop()
+	rig := newServeRigOn(t, database, nil)
+	hub := rig.hub
 
 	// Bracket last_seq so the resume takes the buffer tier and reaches
 	// reconnectRegister, where the hook fires.
-	rb := hub.ReplayBuffer()
-	rb.Push(98, chID, []byte(`{"seq":98,"type":"chat_message","payload":{}}`))
-	rb.Push(99, chID, []byte(`{"seq":99,"type":"chat_message","payload":{}}`))
-	rb.Push(100, chID, []byte(`{"seq":100,"type":"chat_message","payload":{}}`))
+	pushReplayWindow(hub, chID)
 	hub.SeedSeq(100)
 
 	var hookRan atomic.Bool
@@ -182,11 +173,7 @@ func TestReconnect_BannedDuringHandshake_DisconnectsSocket(t *testing.T) {
 		}
 	}()
 
-	srv := httptest.NewServer(ServeWS(hub, []string{"*"}, 0))
-	defer srv.Close()
-
-	conn := dialAndAuth(t, ctx, srv.URL, token, 99, chID)
-	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
+	conn := rig.dialAuth(t, ctx, token, 99, chID)
 
 	seen, sawBanned := banHandshakeFrames(t, conn)
 	if !hookRan.Load() {

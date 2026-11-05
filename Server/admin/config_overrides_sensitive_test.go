@@ -127,9 +127,7 @@ func TestConfigOverridesSensitive_GetListsEverythingButDataDir(t *testing.T) {
 	token := createAdminUser(t, f.database)
 
 	w := doRequest(t, f.handler, http.MethodGet, "/config/settings", token, nil)
-	if w.Code != http.StatusOK {
-		t.Fatalf("GET = %d; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 	for _, secret := range []string{cfgOvGIFKey, cfgOvGitHubToken, cfgOvLKSecret} {
 		if strings.Contains(w.Body.String(), secret) {
 			t.Fatalf("GET /config/settings leaked a secret value: %s", w.Body.String())
@@ -174,9 +172,7 @@ func TestConfigOverridesSensitive_SecretsAreWriteOnly(t *testing.T) {
 
 	const newKey = "klipy-new-secret-value-321"
 	w := patchConfig(t, f.handler, token, map[string]any{"gif.api_key": newKey}, nil, "")
-	if w.Code != http.StatusOK {
-		t.Fatalf("PATCH secret = %d; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 	if strings.Contains(w.Body.String(), newKey) {
 		t.Fatalf("PATCH response echoed the secret: %s", w.Body.String())
 	}
@@ -220,9 +216,7 @@ func TestConfigOverridesSensitive_RemoveLiveKitSecretOverride(t *testing.T) {
 		t.Fatal("fixture did not save the LiveKit secret override")
 	}
 	w := patchConfig(t, f.handler, token, map[string]any{"voice.livekit_api_secret": nil}, nil, "")
-	if w.Code != http.StatusOK {
-		t.Fatalf("PATCH null voice.livekit_api_secret = %d; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 	if _, ok := savedOverrides(t, f.dataDir)["voice.livekit_api_secret"]; ok {
 		t.Error("voice.livekit_api_secret still in the overrides file after a null PATCH")
 	}

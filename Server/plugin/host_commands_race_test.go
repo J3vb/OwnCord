@@ -16,24 +16,16 @@ import (
 func TestDispatchCommandRuntimePlatformRace(t *testing.T) {
 	mem := openPluginTestDB(t)
 	reg, err := NewRegistry(Config{Directory: t.TempDir(), Store: mem})
-	if err != nil {
-		t.Fatalf("NewRegistry: %v", err)
-	}
+	mustDo(t, "NewRegistry", err)
 
 	ctx := context.Background()
 	manifest, err := ParseManifest([]byte(`{"name":"racer","version":"0.1.0","entrypoint":"p.wasm","permissions":["commands"],"commands":[{"name":"roll"}]}`))
-	if err != nil {
-		t.Fatalf("ParseManifest: %v", err)
-	}
-	if err := reg.installFromDisk(ctx, foundPlugin{Manifest: manifest, WASMPath: "p.wasm"}); err != nil {
-		t.Fatalf("installFromDisk: %v", err)
-	}
+	mustDo(t, "ParseManifest", err)
+	mustDo(t, "installFromDisk", reg.installFromDisk(ctx, foundPlugin{Manifest: manifest, WASMPath: "p.wasm"}))
 	reg.mu.RLock()
 	inst := reg.byName["racer"]
 	reg.mu.RUnlock()
-	if err := reg.RegisterCommand("roll", inst); err != nil {
-		t.Fatalf("RegisterCommand: %v", err)
-	}
+	mustDo(t, "RegisterCommand", reg.RegisterCommand("roll", inst))
 
 	// Race DispatchCommand's unsynchronised read of r.runtimePlatform (line
 	// 71 in host_commands.go) against Close's r.mu.Lock()-guarded write of

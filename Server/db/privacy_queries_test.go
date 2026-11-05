@@ -14,9 +14,7 @@ func TestUserPrivacy_DefaultsWithoutRow(t *testing.T) {
 	uid := seedUser(t, database, "no-privacy-row")
 
 	got, err := database.GetUserPrivacy(context.Background(), uid)
-	if err != nil {
-		t.Fatalf("GetUserPrivacy: %v", err)
-	}
+	mustDo(t, "GetUserPrivacy", err)
 	if want := (db.UserPrivacy{AllowMemberDMs: true, MessageRequests: true}); got != want {
 		t.Errorf("privacy = %+v, want %+v", got, want)
 	}
@@ -32,17 +30,13 @@ func TestUserPrivacy_UpsertRoundTripAndReplacesWholeRow(t *testing.T) {
 	other := seedUser(t, database, "privacy-other")
 
 	first := db.UserPrivacy{AllowMemberDMs: false, MessageRequests: true}
-	if err := database.SetUserPrivacy(ctx, uid, first); err != nil {
-		t.Fatalf("SetUserPrivacy: %v", err)
-	}
+	mustDo(t, "SetUserPrivacy", database.SetUserPrivacy(ctx, uid, first))
 	if got, err := database.GetUserPrivacy(ctx, uid); err != nil || got != first {
 		t.Fatalf("round trip = %+v, %v; want %+v", got, err, first)
 	}
 
 	second := db.UserPrivacy{AllowMemberDMs: true, MessageRequests: false}
-	if err := database.SetUserPrivacy(ctx, uid, second); err != nil {
-		t.Fatalf("second SetUserPrivacy: %v", err)
-	}
+	mustDo(t, "second SetUserPrivacy", database.SetUserPrivacy(ctx, uid, second))
 	if got, err := database.GetUserPrivacy(ctx, uid); err != nil || got != second {
 		t.Fatalf("after second upsert = %+v, %v; want %+v (whole row replaced)", got, err, second)
 	}
@@ -58,17 +52,10 @@ func TestUserPrivacy_NotInMemberPayloads(t *testing.T) {
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	uid := seedUser(t, database, "payload-user")
-	if err := database.SetUserPrivacy(ctx, uid, db.UserPrivacy{}); err != nil {
-		t.Fatalf("SetUserPrivacy: %v", err)
-	}
+	mustDo(t, "SetUserPrivacy", database.SetUserPrivacy(ctx, uid, db.UserPrivacy{}))
 	members, err := database.ListMembers(ctx)
-	if err != nil {
-		t.Fatalf("ListMembers: %v", err)
-	}
-	user, err := database.GetUserByID(ctx, uid)
-	if err != nil {
-		t.Fatalf("GetUserByID: %v", err)
-	}
+	mustDo(t, "ListMembers", err)
+	user := mustGetUserByID(t, database, uid)
 	for name, v := range map[string]any{"members": members, "user": user} {
 		raw, err := json.Marshal(v)
 		if err != nil {

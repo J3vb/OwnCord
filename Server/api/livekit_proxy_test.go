@@ -2,7 +2,6 @@ package api
 
 import (
 	"bytes"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -203,8 +202,7 @@ func TestIsOriginAllowed_FirstPartyLookalikesDenied(t *testing.T) {
 func TestLiveKitProxy_BlocksAdminPath(t *testing.T) {
 	proxy := NewLiveKitProxy("http://localhost:7880", []string{"*"})
 	r := httptest.NewRequest("GET", "/admin/dashboard", nil)
-	w := httptest.NewRecorder()
-	proxy.ServeHTTP(w, r)
+	w := serveRequest(proxy, r)
 	if w.Code != http.StatusForbidden {
 		t.Errorf("expected 403 for /admin path, got %d", w.Code)
 	}
@@ -213,8 +211,7 @@ func TestLiveKitProxy_BlocksAdminPath(t *testing.T) {
 func TestLiveKitProxy_BlocksMetricsPath(t *testing.T) {
 	proxy := NewLiveKitProxy("http://localhost:7880", []string{"*"})
 	r := httptest.NewRequest("GET", "/metrics", nil)
-	w := httptest.NewRecorder()
-	proxy.ServeHTTP(w, r)
+	w := serveRequest(proxy, r)
 	if w.Code != http.StatusForbidden {
 		t.Errorf("expected 403 for /metrics path, got %d", w.Code)
 	}
@@ -223,8 +220,7 @@ func TestLiveKitProxy_BlocksMetricsPath(t *testing.T) {
 func TestLiveKitProxy_BlocksDebugPath(t *testing.T) {
 	proxy := NewLiveKitProxy("http://localhost:7880", []string{"*"})
 	r := httptest.NewRequest("GET", "/debug/pprof", nil)
-	w := httptest.NewRecorder()
-	proxy.ServeHTTP(w, r)
+	w := serveRequest(proxy, r)
 	if w.Code != http.StatusForbidden {
 		t.Errorf("expected 403 for /debug path, got %d", w.Code)
 	}
@@ -233,8 +229,7 @@ func TestLiveKitProxy_BlocksDebugPath(t *testing.T) {
 func TestLiveKitProxy_BlocksTwirpPath(t *testing.T) {
 	proxy := NewLiveKitProxy("http://localhost:7880", []string{"*"})
 	r := httptest.NewRequest("POST", "/twirp/livekit.RoomService/ListRooms", nil)
-	w := httptest.NewRecorder()
-	proxy.ServeHTTP(w, r)
+	w := serveRequest(proxy, r)
 	if w.Code != http.StatusForbidden {
 		t.Errorf("expected 403 for /twirp path, got %d", w.Code)
 	}
@@ -250,8 +245,7 @@ func TestLiveKitProxy_AllowsNormalPath(t *testing.T) {
 
 	proxy := NewLiveKitProxy(backend.URL, []string{"*"})
 	r := httptest.NewRequest("GET", "/rtc", nil)
-	w := httptest.NewRecorder()
-	proxy.ServeHTTP(w, r)
+	w := serveRequest(proxy, r)
 	if w.Code != http.StatusOK {
 		t.Errorf("expected 200 for normal path, got %d", w.Code)
 	}
@@ -261,8 +255,7 @@ func TestLiveKitProxy_BlocksCrossOriginHTTP(t *testing.T) {
 	proxy := NewLiveKitProxy("http://localhost:7880", []string{"https://myapp.com"})
 	r := httptest.NewRequest("GET", "/rtc", nil)
 	r.Header.Set("Origin", "https://evil.com")
-	w := httptest.NewRecorder()
-	proxy.ServeHTTP(w, r)
+	w := serveRequest(proxy, r)
 	if w.Code != http.StatusForbidden {
 		t.Errorf("expected 403 for cross-origin HTTP, got %d", w.Code)
 	}
@@ -277,8 +270,7 @@ func TestLiveKitProxy_AllowsSameOriginHTTP(t *testing.T) {
 	proxy := NewLiveKitProxy(backend.URL, []string{"https://myapp.com"})
 	r := httptest.NewRequest("GET", "/rtc", nil)
 	r.Header.Set("Origin", "https://myapp.com")
-	w := httptest.NewRecorder()
-	proxy.ServeHTTP(w, r)
+	w := serveRequest(proxy, r)
 	if w.Code != http.StatusOK {
 		t.Errorf("expected 200 for same-origin HTTP, got %d", w.Code)
 	}
@@ -293,8 +285,7 @@ func TestLiveKitProxy_DoesNotBlockUserMetrics(t *testing.T) {
 
 	proxy := NewLiveKitProxy(backend.URL, []string{"*"})
 	r := httptest.NewRequest("GET", "/user-metrics", nil)
-	w := httptest.NewRecorder()
-	proxy.ServeHTTP(w, r)
+	w := serveRequest(proxy, r)
 	// The path is split by "/" — "user-metrics" is one segment, not "metrics"
 	// Wait — actually the blocked check splits by "/" and checks each segment.
 	// "/user-metrics" splits to ["", "user-metrics"] so "user-metrics" != "metrics". Should pass.
@@ -314,9 +305,7 @@ func TestProxyWebSocket_DialFailureDoesNotLogAccessToken(t *testing.T) {
 	const headerToken = "eyJhbGciOiJIUzI1NiJ9.SECRET-HEADER-JWT-PAYLOAD.c2lnbmF0dXJl"
 
 	var logs bytes.Buffer
-	prev := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
-	t.Cleanup(func() { slog.SetDefault(prev) })
+	captureDebugLogs(t, &logs)
 
 	// Port 1 on loopback refuses connections, which is the exact branch where
 	// the wrapped *url.Error carries the query string.
@@ -325,8 +314,7 @@ func TestProxyWebSocket_DialFailureDoesNotLogAccessToken(t *testing.T) {
 	r.Header.Set("Connection", "Upgrade")
 	r.Header.Set("Upgrade", "websocket")
 	r.Header.Set("Authorization", "Bearer "+headerToken)
-	w := httptest.NewRecorder()
-	proxy.ServeHTTP(w, r)
+	w := serveRequest(proxy, r)
 
 	if w.Code != http.StatusBadGateway {
 		t.Fatalf("expected 502 when the backend refuses the dial, got %d", w.Code)

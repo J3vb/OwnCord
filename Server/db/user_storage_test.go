@@ -20,9 +20,7 @@ func TestMigration044_SeedsCountersFromAttachmentsAndSkipsLegacyOrphans(t *testi
 	database := openMemory(t)
 	ctx := context.Background()
 	// Apply everything up to 043, build the pre-044 world, then apply 044.
-	if err := db.MigrateFS(database, migrationsBefore(t, "044")); err != nil {
-		t.Fatalf("migrate to 043: %v", err)
-	}
+	mustDo(t, "migrate to 043", db.MigrateFS(database, migrationsBefore(t, "044")))
 	exec := func(q string, args ...any) {
 		t.Helper()
 		if _, err := database.ExecContext(ctx, q, args...); err != nil {
@@ -36,9 +34,7 @@ func TestMigration044_SeedsCountersFromAttachmentsAndSkipsLegacyOrphans(t *testi
 	exec(`INSERT INTO attachments (id, filename, stored_as, mime_type, size) VALUES ('legacy', 'l', 'legacy', 'x', 5)`)
 	exec(`PRAGMA foreign_keys = ON`)
 
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("044 failed on a legacy tree: %v", err)
-	}
+	mustDo(t, "044 failed on a legacy tree", db.Migrate(database))
 	for _, tc := range []struct {
 		user int64
 		want int64
@@ -75,9 +71,7 @@ func TestChargeUserStorage_GuardIsExactAtTheBoundary(t *testing.T) {
 	if ok, err := database.ChargeUserStorage(ctx, 10, 1<<40, 0); err != nil || !ok {
 		t.Fatalf("unlimited quota: ok=%v err=%v", ok, err)
 	}
-	if err := database.ReleaseUserStorage(ctx, 10, 1<<50); err != nil {
-		t.Fatalf("release past zero: %v", err)
-	}
+	mustDo(t, "release past zero", database.ReleaseUserStorage(ctx, 10, 1<<50))
 	if got, err := database.UserStorageUsed(ctx, 10); err != nil || got != 0 {
 		t.Fatalf("counter after an over-release = %d, %v; want 0 (floored)", got, err)
 	}
@@ -105,14 +99,10 @@ func TestUserStorage_RowSurvivesRetentionAtZeroAndDiesWithTheAccount(t *testing.
 		t.Fatal(err)
 	}
 	exec(`DELETE FROM attachments WHERE id = 'a1'`) // what retention does to the rows
-	if err := database.RecountUserStorage(ctx, 10); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "RecountUserStorage", database.RecountUserStorage(ctx, 10))
 	var rows int
 	var bytes int64
-	if err := database.QueryRowContext(ctx, `SELECT COUNT(*), COALESCE(SUM(bytes_used), -1) FROM user_storage WHERE user_id = 10`).Scan(&rows, &bytes); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "QueryRowContext", database.QueryRowContext(ctx, `SELECT COUNT(*), COALESCE(SUM(bytes_used), -1) FROM user_storage WHERE user_id = 10`).Scan(&rows, &bytes))
 	if rows != 1 || bytes != 0 {
 		t.Fatalf("after retention: rows=%d bytes=%d; want the row kept at 0", rows, bytes)
 	}
@@ -143,9 +133,7 @@ func TestChargeUserStorage_NewCounterStartsFromExistingAttachments(t *testing.T)
 		}
 	}
 	ok, err := database.ChargeUserStorage(ctx, 10, 50, 120)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "ChargeUserStorage", err)
 	if ok {
 		t.Fatal("100 existing + 50 charged is over a 120 quota, but the charge was admitted")
 	}

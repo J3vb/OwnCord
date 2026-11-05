@@ -280,10 +280,7 @@ func TestOwnerOnlyMiddleware_NoUserInContext(t *testing.T) {
 func TestOwnerOnlyMiddleware_UserWithoutRoleInContext(t *testing.T) {
 	database := openWhiteboxTestDB(t)
 
-	uid, err := database.CreateUser(context.Background(), "orphanuser", "$2a$12$x", 1)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	uid := mustCreateUser(t, database, "orphanuser", "$2a$12$x", 1)
 	user, err := database.GetUserByID(context.Background(), uid)
 	if err != nil || user == nil {
 		t.Fatalf("GetUserByID: %v", err)
@@ -351,10 +348,7 @@ func TestOwnerOnlyMiddleware_BelowOwnerForbidden(t *testing.T) {
 func TestOwnerOnlyMiddleware_OwnerPassesThrough(t *testing.T) {
 	database := openWhiteboxTestDB(t)
 
-	uid, err := database.CreateUser(context.Background(), "ownerpass", "$2a$12$x", 1)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	uid := mustCreateUser(t, database, "ownerpass", "$2a$12$x", 1)
 	user, err := database.GetUserByID(context.Background(), uid)
 	if err != nil || user == nil {
 		t.Fatalf("GetUserByID: %v", err)
@@ -395,10 +389,7 @@ func TestAdminAuthMiddleware_RoleNotFound(t *testing.T) {
 	database := openWhiteboxTestDB(t)
 	handler := NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, nil)
 
-	uid, err := database.CreateUser(context.Background(), "noroleuser", "$2a$12$x", 1)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	uid := mustCreateUser(t, database, "noroleuser", "$2a$12$x", 1)
 	token := "norole-token"
 	if _, err := database.CreateSession(context.Background(), uid, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
 		t.Fatalf("CreateSession: %v", err)
@@ -679,10 +670,7 @@ func TestSpawnReplacement_CommandConstruction(t *testing.T) {
 func TestOwnerOnlyMiddleware_NoSecondRoleLookup(t *testing.T) {
 	database := openWhiteboxTestDB(t)
 
-	uid, err := database.CreateUser(context.Background(), "ownerctx", "$2a$12$x", 1)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	uid := mustCreateUser(t, database, "ownerctx", "$2a$12$x", 1)
 	user, err := database.GetUserByID(context.Background(), uid)
 	if err != nil || user == nil {
 		t.Fatalf("GetUserByID: %v", err)

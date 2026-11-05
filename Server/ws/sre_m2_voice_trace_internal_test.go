@@ -53,7 +53,6 @@ func captureVoiceLog(t *testing.T) *lockedBuffer {
 // id and a voice channel they are cleared to join.
 func newVoiceTraceHub(t *testing.T, name string) (*Hub, *db.DB, *Client, int64) {
 	t.Helper()
-	ctx := context.Background()
 	database := newHarvestVoiceDB(t)
 	uid := seedHarvestVoiceUser(t, database, name)
 	chID := mustCreateVoiceChannel(t, database, name+"-voice")
@@ -63,10 +62,7 @@ func newVoiceTraceHub(t *testing.T, name string) (*Hub, *db.DB, *Client, int64) 
 	lk := healthyTestLiveKit(t)
 	h.livekit = lk
 
-	user, err := database.GetUserByID(ctx, uid)
-	if err != nil || user == nil {
-		t.Fatalf("GetUserByID: %v", err)
-	}
+	user := mustGetUser(t, database, uid)
 	c := NewTestClient(h, uid, make(chan []byte, 256))
 	c.user = user
 	h.clients[uid] = []*Client{c}

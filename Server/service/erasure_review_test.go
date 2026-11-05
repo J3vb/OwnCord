@@ -33,7 +33,7 @@ func TestErasureService_QueuedAuditEntriesAreUnlinked(t *testing.T) {
 	database := newTestDB(t)
 	ctx := context.Background()
 	dir := t.TempDir()
-	uid, _ := seedErasureMember(t, database, dir)
+	uid, _ := seedErasureMember(ctx, t, database, dir)
 	owner, err := database.GetUserByUsername(ctx, "erasure-owner")
 	if err != nil || owner == nil {
 		t.Fatalf("owner: %v", err)
@@ -54,9 +54,7 @@ func TestErasureService_QueuedAuditEntriesAreUnlinked(t *testing.T) {
 	if n := countAudit(t, database, `action IN ('role_change', 'message_delete')`); n != 0 {
 		t.Fatalf("the entries were written synchronously (%d rows); the writer is not installed", n)
 	}
-	if err := svc.Erase(ctx, uid); err != nil {
-		t.Fatalf("Erase: %v", err)
-	}
+	mustDo(t, "Erase", svc.Erase(ctx, uid))
 	if n := countAudit(t, database, `actor_id = ? OR (target_type = 'user' AND target_id = ?)`, uid, uid); n != 0 {
 		t.Errorf("%d audit rows still name the subject by id after the erasure", n)
 	}
@@ -70,9 +68,7 @@ func TestErasureService_QueuedAuditEntriesAreUnlinked(t *testing.T) {
 	// A producer that read its rows before the commit and enqueues after
 	// the erasure.
 	db.WriteAudit(ctx, database, uid, "user_login", "user", uid, "203.0.113.9")
-	if err := w.Flush(ctx); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Flush", w.Flush(ctx))
 	if n := countAudit(t, database, `action = 'user_login' AND actor_id = 0 AND target_id = 0 AND detail = '' AND subject_token = ? AND actor_token = ?`, tok, tok); n != 1 {
 		t.Errorf("late entry rows written unlinked = %d, want 1", n)
 	}
@@ -94,9 +90,7 @@ func TestErasureService_QueuedAuditEntriesAreUnlinked(t *testing.T) {
 		t.Errorf("the entry queued before the refused erasure = %d rows with its ids and detail, want 1", n)
 	}
 	db.WriteAudit(ctx, database, owner.ID, "settings_change", "settings", 0, "retention")
-	if err := w.Flush(ctx); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Flush", w.Flush(ctx))
 	if n := countAudit(t, database, `action = 'settings_change' AND actor_id = ? AND detail = 'retention' AND subject_token IS NULL AND actor_token IS NULL`, owner.ID); n != 1 {
 		t.Errorf("the owner's entry after the refused erasure = %d rows with their id, want 1", n)
 	}
@@ -111,14 +105,12 @@ func TestErasureService_ReplayMarkersRecoversMissingFloors(t *testing.T) {
 	database := newTestDB(t)
 	ctx := context.Background()
 	dir := t.TempDir()
-	uid, _ := seedErasureMember(t, database, dir)
+	uid, _ := seedErasureMember(ctx, t, database, dir)
 	markers := newTestMarkers(t)
 	svc := NewErasureService(database)
 	svc.SetFiles(newTestStorage(t, dir))
 	svc.SetMarkers(markers)
-	if err := svc.Erase(ctx, uid); err != nil {
-		t.Fatalf("Erase: %v", err)
-	}
+	mustDo(t, "Erase", svc.Erase(ctx, uid))
 	channelsSeq, err := database.SequenceValue(ctx, db.SequenceFloorChannels)
 	if err != nil || channelsSeq == 0 {
 		t.Fatalf("channels sequence = %d, %v; want the seeded channel counted", channelsSeq, err)
@@ -128,9 +120,7 @@ func TestErasureService_ReplayMarkersRecoversMissingFloors(t *testing.T) {
 	// review describes: the counter rolled back below the erased id, so it
 	// cannot stand in for the floor.
 	rawFile, err := sql.Open("sqlite", markers.Path())
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Open", err)
 	defer rawFile.Close()
 	if _, err := rawFile.ExecContext(ctx, `DELETE FROM sequence_floors`); err != nil {
 		t.Fatal(err)
@@ -171,28 +161,18 @@ func TestErasureService_ReplayMarkersRecoversMissingFloors(t *testing.T) {
 func openFileDB(t *testing.T, path string) *db.DB {
 	t.Helper()
 	database, err := db.Open(path)
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("db.Migrate: %v", err)
-	}
+	mustDo(t, "db.Open", err)
+	mustDo(t, "db.Migrate", db.Migrate(database))
 	return database
 }
 
 // restoreBackupOver closes database, copies backup over path and reopens.
 func restoreBackupOver(t *testing.T, database *db.DB, path, backup string) *db.DB {
 	t.Helper()
-	if err := database.Close(); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Close", database.Close())
 	data, err := os.ReadFile(backup)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "ReadFile", err)
+	mustDo(t, "WriteFile", os.WriteFile(path, data, 0o600))
 	restored := openFileDB(t, path)
 	t.Cleanup(func() { _ = restored.Close() })
 	return restored
@@ -205,24 +185,14 @@ func TestErasureService_ReplayErasesTheLastAdminOfAnOlderBackup(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "main.sqlite")
 	database := openFileDB(t, dbPath)
 	ctx := context.Background()
-	first, err := database.CreateUser(ctx, "first-owner", "hash", 1)
-	if err != nil {
-		t.Fatal(err)
-	}
+	first := mustCreateUser(t, database, "first-owner", "hash", 1)
 	backup := filepath.Join(t.TempDir(), "before-handover.db")
-	if err := database.BackupToSafe(ctx, backup, filepath.Dir(backup)); err != nil {
-		t.Fatal(err)
-	}
-	second, err := database.CreateUser(ctx, "second-owner", "hash", 1)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "BackupToSafe", database.BackupToSafe(ctx, backup, filepath.Dir(backup)))
+	second := mustCreateUser(t, database, "second-owner", "hash", 1)
 	markers := newTestMarkers(t)
 	svc := NewErasureService(database)
 	svc.SetMarkers(markers)
-	if err := svc.Erase(ctx, first); err != nil {
-		t.Fatalf("Erase(first owner, with a second): %v", err)
-	}
+	mustDo(t, "Erase(first owner, with a second)", svc.Erase(ctx, first))
 
 	restored := restoreBackupOver(t, database, dbPath, backup)
 	if u, _ := restored.GetUserByID(ctx, first); u == nil {
@@ -234,9 +204,7 @@ func TestErasureService_ReplayErasesTheLastAdminOfAnOlderBackup(t *testing.T) {
 	fresh := NewErasureService(restored)
 	fresh.SetMarkers(markers)
 	rep, err := fresh.ReplayMarkers(ctx)
-	if err != nil {
-		t.Fatalf("ReplayMarkers against the older backup: %v", err)
-	}
+	mustDo(t, "ReplayMarkers against the older backup", err)
 	if rep.Erased != 1 {
 		t.Fatalf("report = %+v, want the first owner erased again", rep)
 	}
@@ -248,9 +216,7 @@ func TestErasureService_ReplayErasesTheLastAdminOfAnOlderBackup(t *testing.T) {
 	}
 	// The live guard is untouched: a new sole owner cannot be erased.
 	newOwner, err := restored.CreateUser(ctx, "new-owner", "hash", 1)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateUser", err)
 	if err := fresh.Erase(ctx, newOwner); !errors.Is(err, db.ErrLastAdmin) {
 		t.Errorf("Erase(new sole owner) = %v, want ErrLastAdmin", err)
 	}
@@ -269,21 +235,15 @@ func TestErasureService_PendingMarkerSurvivesACrashAndARestore(t *testing.T) {
 	database := openFileDB(t, dbPath)
 	ctx := context.Background()
 	dir := t.TempDir()
-	uid, files := seedErasureMember(t, database, dir)
+	uid, files := seedErasureMember(ctx, t, database, dir)
 	backup := filepath.Join(t.TempDir(), "before-erasure.db")
-	if err := database.BackupToSafe(ctx, backup, filepath.Dir(backup)); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "BackupToSafe", database.BackupToSafe(ctx, backup, filepath.Dir(backup)))
 	markers := newTestMarkers(t)
 	// The crash, by hand: the pending marker, the transaction, no confirm.
 	seq, err := database.SequenceValue(ctx, db.SequenceFloorUsers)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "SequenceValue", err)
 	tok, _, err := markers.RecordPendingAccount(ctx, uid, seq)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "RecordPendingAccount", err)
 	if _, err := database.EraseAccount(ctx, uid, tok); err != nil {
 		t.Fatalf("EraseAccount: %v", err)
 	}
@@ -296,9 +256,7 @@ func TestErasureService_PendingMarkerSurvivesACrashAndARestore(t *testing.T) {
 	fresh.SetFiles(newTestStorage(t, dir))
 	fresh.SetMarkers(markers)
 	rep, err := fresh.ReplayMarkers(ctx)
-	if err != nil {
-		t.Fatalf("ReplayMarkers: %v", err)
-	}
+	mustDo(t, "ReplayMarkers", err)
 	if rep.Erased != 1 || rep.Confirmed != 0 {
 		t.Fatalf("report = %+v, want the pending marker applied", rep)
 	}
@@ -316,17 +274,13 @@ func TestErasureService_PendingMarkerSurvivesACrashAndARestore(t *testing.T) {
 
 	// A pending marker whose transaction never ran.
 	late, err := restored.CreateUser(ctx, "late-member", "hash", 4)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateUser", err)
 	if _, _, err := markers.RecordPendingAccount(ctx, late, 0); err != nil {
 		t.Fatal(err)
 	}
 	// A pending marker whose account is gone: confirmed, nothing erased.
 	goneID, err := restored.CreateUser(ctx, "gone-member", "hash", 4)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateUser", err)
 	if _, _, err := markers.RecordPendingAccount(ctx, goneID, 0); err != nil {
 		t.Fatal(err)
 	}
@@ -334,9 +288,7 @@ func TestErasureService_PendingMarkerSurvivesACrashAndARestore(t *testing.T) {
 		t.Fatal(err)
 	}
 	rep, err = fresh.ReplayMarkers(ctx)
-	if err != nil {
-		t.Fatalf("second ReplayMarkers: %v", err)
-	}
+	mustDo(t, "second ReplayMarkers", err)
 	if rep.Erased != 1 || rep.Confirmed != 1 {
 		t.Errorf("second report = %+v, want 1 erased (the late member), 1 confirmed", rep)
 	}
@@ -353,9 +305,7 @@ func TestErasureService_PendingMarkerSurvivesACrashAndARestore(t *testing.T) {
 func mustMarkers(t *testing.T, m *db.MarkerStore) []db.DeletionMarker {
 	t.Helper()
 	list, err := m.Markers(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Markers", err)
 	return list
 }
 
@@ -367,14 +317,12 @@ func TestErasureService_ReplayMarkersRaisesTheSequenceFloors(t *testing.T) {
 	database := newTestDB(t)
 	ctx := context.Background()
 	dir := t.TempDir()
-	uid, _ := seedErasureMember(t, database, dir)
+	uid, _ := seedErasureMember(ctx, t, database, dir)
 	markers := newTestMarkers(t)
 	svc := NewErasureService(database)
 	svc.SetFiles(newTestStorage(t, dir))
 	svc.SetMarkers(markers)
-	if err := svc.Erase(ctx, uid); err != nil {
-		t.Fatalf("Erase: %v", err)
-	}
+	mustDo(t, "Erase", svc.Erase(ctx, uid))
 	floors, err := markers.SequenceFloors(ctx)
 	if err != nil || floors[db.SequenceFloorUsers] < uid {
 		t.Fatalf("floors after the erasure = %v, %v; want users >= %d", floors, err, uid)
@@ -389,10 +337,7 @@ func TestErasureService_ReplayMarkersRaisesTheSequenceFloors(t *testing.T) {
 	// Negative control: with the counter rolled back and no floor applied,
 	// the next account takes the erased id, which the marker names.
 	rollBack()
-	reused, err := database.CreateUser(ctx, "reused-id", "hash", 4)
-	if err != nil {
-		t.Fatal(err)
-	}
+	reused := mustCreateUser(t, database, "reused-id", "hash", 4)
 	if reused != uid {
 		t.Fatalf("negative control: the new account got id %d, not the erased %d", reused, uid)
 	}
@@ -409,10 +354,7 @@ func TestErasureService_ReplayMarkersRaisesTheSequenceFloors(t *testing.T) {
 	if err != nil || rep.Erased != 0 {
 		t.Fatalf("ReplayMarkers = %+v, %v; want nothing erased", rep, err)
 	}
-	fresh, err := database.CreateUser(ctx, "fresh-id", "hash", 4)
-	if err != nil {
-		t.Fatal(err)
-	}
+	fresh := mustCreateUser(t, database, "fresh-id", "hash", 4)
 	if fresh <= uid {
 		t.Fatalf("the new account got id %d, within the erased range (<= %d)", fresh, uid)
 	}
@@ -434,22 +376,18 @@ func TestErasureService_ReplayMarkersProbesPastAnInsufficientFloor(t *testing.T)
 	database := newTestDB(t)
 	ctx := context.Background()
 	dir := t.TempDir()
-	uid, _ := seedErasureMember(t, database, dir)
+	uid, _ := seedErasureMember(ctx, t, database, dir)
 	markers := newTestMarkers(t)
 	svc := NewErasureService(database)
 	svc.SetFiles(newTestStorage(t, dir))
 	svc.SetMarkers(markers)
-	if err := svc.Erase(ctx, uid); err != nil {
-		t.Fatalf("Erase: %v", err)
-	}
+	mustDo(t, "Erase", svc.Erase(ctx, uid))
 
 	// The legacy store: the marker for uid survives, and the only floor is a
 	// lower one a later erasure recorded after a restore rolled the counter
 	// back. No probe has been recorded.
 	rawFile, err := sql.Open("sqlite", markers.Path())
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Open", err)
 	defer rawFile.Close()
 	if _, err := rawFile.ExecContext(ctx, `DELETE FROM floor_probes`); err != nil {
 		t.Fatal(err)
@@ -493,16 +431,10 @@ func TestErasureService_ReplayMarkersRefusesAnUnresolvableFloor(t *testing.T) {
 	svc.floorProbeCeiling = 200
 
 	tok, _, err := markers.RecordPendingAccount(ctx, 5000, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := markers.ConfirmAccount(ctx, tok); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "RecordPendingAccount", err)
+	mustDo(t, "ConfirmAccount", markers.ConfirmAccount(ctx, tok))
 	rawFile, err := sql.Open("sqlite", markers.Path())
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Open", err)
 	defer rawFile.Close()
 	if _, err := rawFile.ExecContext(ctx, `DELETE FROM floor_probes`); err != nil {
 		t.Fatal(err)
@@ -520,15 +452,11 @@ func TestErasureService_ReplayMarkersRefusesAnUnresolvableFloor(t *testing.T) {
 	// start-up honours it instead of probing again — without that, the
 	// advertised remedy would not unblock anything (Codex's third review of
 	// #1523).
-	if err := markers.RaiseSequenceFloor(ctx, db.SequenceFloorUsers, 9000); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "RaiseSequenceFloor", markers.RaiseSequenceFloor(ctx, db.SequenceFloorUsers, 9000))
 	if _, err := svc.ReplayMarkers(ctx); !errors.Is(err, ErrSequenceFloorUnresolved) {
 		t.Fatalf("ReplayMarkers with a raised but unacknowledged floor = %v, want the refusal to stand", err)
 	}
-	if err := markers.MarkFloorProbed(ctx, db.SequenceFloorUsers); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "MarkFloorProbed", markers.MarkFloorProbed(ctx, db.SequenceFloorUsers))
 	if _, err := svc.ReplayMarkers(ctx); err != nil {
 		t.Fatalf("ReplayMarkers after the operator acknowledged the floor = %v", err)
 	}
@@ -546,16 +474,10 @@ func TestErasureService_ReplayMarkersRefusesAnUnresolvableFloor(t *testing.T) {
 	freshSvc.SetMarkers(fresh)
 	freshSvc.floorProbeCeiling = 6000
 	tok, _, err = fresh.RecordPendingAccount(ctx, 5000, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := fresh.ConfirmAccount(ctx, tok); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "RecordPendingAccount", err)
+	mustDo(t, "ConfirmAccount", fresh.ConfirmAccount(ctx, tok))
 	rawFresh, err := sql.Open("sqlite", fresh.Path())
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Open", err)
 	defer rawFresh.Close()
 	if _, err := rawFresh.ExecContext(ctx, `DELETE FROM floor_probes`); err != nil {
 		t.Fatal(err)
@@ -582,28 +504,19 @@ func TestErasureService_AccountMarkersCloseSetupAcrossAPreSetupRestore(t *testin
 
 	// The backup the maintenance loop takes before anyone has set up.
 	preSetup := filepath.Join(t.TempDir(), "before-setup.db")
-	if err := database.BackupToSafe(ctx, preSetup, filepath.Dir(preSetup)); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "BackupToSafe", database.BackupToSafe(ctx, preSetup, filepath.Dir(preSetup)))
 	if v, err := database.GetSetting(ctx, db.SetupCompletedKey); err != nil || v != db.SetupOpen {
 		t.Fatalf("the pre-setup flag = %q, %v; want it open", v, err)
 	}
 
 	// Setup, a second administrator, and an erasure that leaves a marker.
 	owner, err := database.CreateOwnerIfEmpty(ctx, "the-owner", "hash", 1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	second, err := database.CreateUser(ctx, "second-admin", "hash", 1)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateOwnerIfEmpty", err)
+	second := mustCreateUser(t, database, "second-admin", "hash", 1)
 	markers := newTestMarkers(t)
 	svc := NewErasureService(database)
 	svc.SetMarkers(markers)
-	if err := svc.Erase(ctx, second); err != nil {
-		t.Fatalf("Erase(second admin): %v", err)
-	}
+	mustDo(t, "Erase(second admin)", svc.Erase(ctx, second))
 	_ = owner
 
 	// The restore of that pre-setup backup: no users, and the flag back to
@@ -619,9 +532,7 @@ func TestErasureService_AccountMarkersCloseSetupAcrossAPreSetupRestore(t *testin
 	fresh := NewErasureService(restored)
 	fresh.SetMarkers(markers)
 	rep, err := fresh.ReplayMarkers(ctx)
-	if err != nil {
-		t.Fatalf("ReplayMarkers: %v", err)
-	}
+	mustDo(t, "ReplayMarkers", err)
 	if rep.Erased != 0 {
 		t.Fatalf("report = %+v; the marked account is absent from the restore, so nothing is erased", rep)
 	}
@@ -644,9 +555,7 @@ func TestErasureService_AccountMarkersCloseSetupAcrossAPreSetupRestore(t *testin
 	freshDB := openFileDB(t, freshPath)
 	t.Cleanup(func() { _ = freshDB.Close() })
 	empty := newTestMarkers(t)
-	if err := empty.RecordMessagesSweep(ctx, 1, "2026-01-01 00:00:00", 0); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "RecordMessagesSweep", empty.RecordMessagesSweep(ctx, 1, "2026-01-01 00:00:00", 0))
 	bare := NewErasureService(freshDB)
 	bare.SetMarkers(empty)
 	if _, err := bare.ReplayMarkers(ctx); err != nil {

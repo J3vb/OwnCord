@@ -14,10 +14,7 @@ func seedAroundHistory(t *testing.T, database *db.DB, channelID int64, n int) []
 	t.Helper()
 	ids := make([]int64, 0, n)
 	for range n {
-		id, err := database.CreateMessage(context.Background(), channelID, 1, "history", nil)
-		if err != nil {
-			t.Fatalf("CreateMessage: %v", err)
-		}
+		id := mustCreateMessage(t, database, channelID, 1, "history", nil)
 		ids = append(ids, id)
 	}
 	return ids
@@ -28,9 +25,7 @@ func TestGetMessagesAround_SplitsTheLimitAroundTheCentre(t *testing.T) {
 	ids := seedAroundHistory(t, database, 10, 40)
 
 	window, err := svc.GetMessagesAround(context.Background(), 1, 10, ids[20], 11)
-	if err != nil {
-		t.Fatalf("GetMessagesAround: %v", err)
-	}
+	mustDo(t, "GetMessagesAround", err)
 	if len(window.Messages) != 11 {
 		t.Fatalf("window size = %d, want 11", len(window.Messages))
 	}
@@ -49,9 +44,7 @@ func TestGetMessagesAround_EdgesReportNoMore(t *testing.T) {
 	ids := seedAroundHistory(t, database, 10, 30)
 
 	first, err := svc.GetMessagesAround(context.Background(), 1, 10, ids[0], 10)
-	if err != nil {
-		t.Fatalf("GetMessagesAround(first): %v", err)
-	}
+	mustDo(t, "GetMessagesAround(first)", err)
 	if first.HasMoreBefore {
 		t.Error("HasMoreBefore = true at the oldest message")
 	}
@@ -60,9 +53,7 @@ func TestGetMessagesAround_EdgesReportNoMore(t *testing.T) {
 	}
 
 	last, err := svc.GetMessagesAround(context.Background(), 1, 10, ids[len(ids)-1], 10)
-	if err != nil {
-		t.Fatalf("GetMessagesAround(last): %v", err)
-	}
+	mustDo(t, "GetMessagesAround(last)", err)
 	if last.HasMoreAfter {
 		t.Error("HasMoreAfter = true at the newest message")
 	}
@@ -77,9 +68,7 @@ func TestGetMessagesAround_ExactFitReportsNoMore(t *testing.T) {
 	ids := seedAroundHistory(t, database, 10, 5)
 
 	window, err := svc.GetMessagesAround(context.Background(), 1, 10, ids[2], 5)
-	if err != nil {
-		t.Fatalf("GetMessagesAround: %v", err)
-	}
+	mustDo(t, "GetMessagesAround", err)
 	if len(window.Messages) != 5 {
 		t.Fatalf("window size = %d, want 5", len(window.Messages))
 	}
@@ -94,9 +83,7 @@ func TestGetMessagesAround_ClampsLimit(t *testing.T) {
 	ids := seedAroundHistory(t, database, 10, 150)
 
 	window, err := svc.GetMessagesAround(context.Background(), 1, 10, ids[75], 5000)
-	if err != nil {
-		t.Fatalf("GetMessagesAround: %v", err)
-	}
+	mustDo(t, "GetMessagesAround", err)
 	if len(window.Messages) != 100 {
 		t.Errorf("window size = %d, want the 100 cap", len(window.Messages))
 	}
@@ -104,9 +91,7 @@ func TestGetMessagesAround_ClampsLimit(t *testing.T) {
 	// A zero/negative limit falls back to the 50 default rather than returning
 	// an empty window.
 	window, err = svc.GetMessagesAround(context.Background(), 1, 10, ids[75], 0)
-	if err != nil {
-		t.Fatalf("GetMessagesAround(limit=0): %v", err)
-	}
+	mustDo(t, "GetMessagesAround(limit=0)", err)
 	if len(window.Messages) != 50 {
 		t.Errorf("default window size = %d, want 50", len(window.Messages))
 	}
@@ -141,9 +126,7 @@ func TestGetMessagesAround_MessageFromAnotherChannelIsNotFound(t *testing.T) {
 func TestGetMessagesAround_DeletedCentreIsNotFound(t *testing.T) {
 	svc, database := newTestMessageService(t)
 	ids := seedAroundHistory(t, database, 10, 3)
-	if err := database.DeleteMessage(context.Background(), ids[1], 1, false); err != nil {
-		t.Fatalf("DeleteMessage: %v", err)
-	}
+	mustDo(t, "DeleteMessage", database.DeleteMessage(context.Background(), ids[1], 1, false))
 
 	// History omits soft-deleted rows, so there is no row to centre on — the
 	// jump must fail loudly rather than land on an arbitrary neighbour.
@@ -160,18 +143,13 @@ func TestGetMessagesAround_DMNonParticipantIsNotFound(t *testing.T) {
 	seedChannel(t, database, &db.Channel{ID: 13, Name: "dm", Type: "dm"})
 	seedDMParticipant(t, database, 13, 1)
 	seedDMParticipant(t, database, 13, 2)
-	msgID, err := database.CreateMessage(context.Background(), 13, 1, "private", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	msgID := mustCreateMessage(t, database, 13, 1, "private", nil)
 
 	if _, err := svc.GetMessagesAround(context.Background(), 3, 13, msgID, 50); !errors.Is(err, ErrNotFound) {
 		t.Errorf("outsider error = %v, want ErrNotFound", err)
 	}
 	window, err := svc.GetMessagesAround(context.Background(), 1, 13, msgID, 50)
-	if err != nil {
-		t.Fatalf("participant GetMessagesAround: %v", err)
-	}
+	mustDo(t, "participant GetMessagesAround", err)
 	if len(window.Messages) != 1 {
 		t.Errorf("participant window size = %d, want 1", len(window.Messages))
 	}

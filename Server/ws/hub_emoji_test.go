@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/db"
-	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 // ─── emoji_update ────────────────────────────────────────────────────────────
@@ -28,9 +27,7 @@ func decodeEmojiUpdate(t *testing.T, msg map[string]any) emojiUpdatePayload {
 		t.Fatalf("marshal payload: %v", err)
 	}
 	var payload emojiUpdatePayload
-	if err := json.Unmarshal(raw, &payload); err != nil {
-		t.Fatalf("unmarshal payload: %v", err)
-	}
+	mustUnmarshal(t, raw, &payload)
 	return payload
 }
 
@@ -40,10 +37,7 @@ func TestBroadcastEmojiUpdate_CarriesShortcodeAndURL(t *testing.T) {
 	defer hub.Stop()
 
 	user := seedOwnerUser(t, database, "emoji-owner")
-	send := make(chan []byte, 16)
-	client := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(client)
-	waitRegistered(t, hub, client)
+	_, send := connectClient(t, hub, user, 0, 16)
 
 	hub.BroadcastEmojiUpdate([]*db.Emoji{
 		{ID: 3, Shortcode: "wave", StoredAs: "uuid-a", MimeType: "image/png"},
@@ -68,10 +62,7 @@ func TestBroadcastEmojiUpdate_EmptySetIsAnArray(t *testing.T) {
 	defer hub.Stop()
 
 	user := seedOwnerUser(t, database, "emoji-empty-owner")
-	send := make(chan []byte, 16)
-	client := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(client)
-	waitRegistered(t, hub, client)
+	_, send := connectClient(t, hub, user, 0, 16)
 
 	// Deleting the last emoji broadcasts an empty set; it must be [] and not
 	// null, so the client can replace its map unconditionally.
@@ -93,10 +84,7 @@ func TestBroadcastEmojiUpdate_NilEntriesAreSkipped(t *testing.T) {
 	defer hub.Stop()
 
 	user := seedOwnerUser(t, database, "emoji-nil-owner")
-	send := make(chan []byte, 16)
-	client := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(client)
-	waitRegistered(t, hub, client)
+	_, send := connectClient(t, hub, user, 0, 16)
 
 	hub.BroadcastEmojiUpdate([]*db.Emoji{nil, {ID: 1, Shortcode: "wave"}})
 

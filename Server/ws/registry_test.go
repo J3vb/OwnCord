@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/auth"
-	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
@@ -200,14 +199,7 @@ func TestMigrationComplete_ConstructorHandlerParity(t *testing.T) {
 // dereference is a hardware exception whose frame can land below a small
 // goroutine stack and corrupt the heap (golang/go#81238).
 func TestAllV2Types_SmokeDispatch(t *testing.T) {
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	database := newTeardownTestDB(t)
 	limiter := auth.NewRateLimiter()
 	r := newTestHub(t, database, limiter, service.New(database, limiter)).seams.registry
 

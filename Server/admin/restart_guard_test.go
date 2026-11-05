@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -160,13 +159,8 @@ func TestApplyUpdate_Conflict409(t *testing.T) {
 			t.Cleanup(admin.ResetRestartState)
 
 			w := doRequest(t, handler, http.MethodPost, "/updates/apply", token, nil)
-			if w.Code != http.StatusConflict {
-				t.Fatalf("status = %d, want 409; body: %s", w.Code, w.Body.String())
-			}
-			var resp map[string]string
-			if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-				t.Fatalf("unmarshal: %v", err)
-			}
+			requireStatus(t, w, http.StatusConflict)
+			resp := decodeBody[map[string]string](t, w)
 			if resp["error"] != tc.wantCode {
 				t.Errorf("error code = %q, want %q", resp["error"], tc.wantCode)
 			}
@@ -176,21 +170,14 @@ func TestApplyUpdate_Conflict409(t *testing.T) {
 
 // POST /backups/{name}/restore refuses the same way — before any disk I/O.
 func TestRestoreBackup_Conflict409(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	_, handler, token := newAdminHarness(t)
 
 	admin.ForceRestartState(false) // restart pending
 	t.Cleanup(admin.ResetRestartState)
 
 	w := doRequest(t, handler, http.MethodPost, "/backups/chatserver_x.db/restore", token, nil)
-	if w.Code != http.StatusConflict {
-		t.Fatalf("status = %d, want 409; body: %s", w.Code, w.Body.String())
-	}
-	var resp map[string]string
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	requireStatus(t, w, http.StatusConflict)
+	resp := decodeBody[map[string]string](t, w)
 	if resp["error"] != "RESTART_PENDING" {
 		t.Errorf("error code = %q, want RESTART_PENDING", resp["error"])
 	}
@@ -216,9 +203,7 @@ func TestSetupRestart_SkippedWhenPending(t *testing.T) {
 			"tls_mode":    "off",
 		},
 	})
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("POST /setup = %d, want 201; body=%s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusCreated)
 
 	select {
 	case reason := <-restarted:

@@ -50,9 +50,7 @@ func TestHandleBackup_LowDiskAnswers507(t *testing.T) {
 	f.database.SetBackupFreeBytesForTest(256<<20, func(string) (uint64, error) { return 100 << 20, nil })
 
 	w := doRequest(t, f.handler, http.MethodPost, "/backup", f.token, nil)
-	if w.Code != http.StatusInsufficientStorage {
-		t.Fatalf("status = %d, want 507; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusInsufficientStorage)
 	code, msg := decodeAdminErr(t, w.Body.Bytes())
 	if code != string(httperr.CodeStorageLowDisk) {
 		t.Errorf("code = %q, want %q", code, httperr.CodeStorageLowDisk)
@@ -76,9 +74,7 @@ func TestHandleRestoreBackup_LowDiskAbortsWith507(t *testing.T) {
 	f.database.SetBackupFreeBytesForTest(256<<20, func(string) (uint64, error) { return 1 << 20, nil })
 
 	w := doRequest(t, f.handler, http.MethodPost, "/backups/"+f.backupName+"/restore", f.token, nil)
-	if w.Code != http.StatusInsufficientStorage {
-		t.Fatalf("status = %d, want 507; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusInsufficientStorage)
 	code, msg := decodeAdminErr(t, w.Body.Bytes())
 	if code != string(httperr.CodeStorageLowDisk) || !strings.Contains(msg, "restore aborted, database untouched") || !strings.Contains(msg, "1 MB is free") {
 		t.Errorf("answer = %q %q, want STORAGE_LOW_DISK naming the abort and the numbers", code, msg)

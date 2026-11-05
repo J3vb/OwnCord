@@ -70,19 +70,7 @@ func (s disconnectAfterWriteStore) GetDMDeliveryTargets(ctx context.Context, cha
 func newDMFixture(t *testing.T) (*db.DB, *PermissionService) {
 	t.Helper()
 	database := newTestDB(t)
-	seedRole(t, database, &db.Role{
-		ID:          permissions.MemberRoleID,
-		Name:        "member",
-		Permissions: permissions.SendMessages | permissions.ReadMessages,
-		Position:    1,
-	})
-	seedUser(t, database, &db.User{ID: 1, Username: "alice"})
-	seedUser(t, database, &db.User{ID: 2, Username: "bob"})
-	seedUserRole(t, database, 1, permissions.MemberRoleID)
-	seedUserRole(t, database, 2, permissions.MemberRoleID)
-	seedChannel(t, database, &db.Channel{ID: 50, Name: "dm-1-2", Type: "dm"})
-	seedDMParticipant(t, database, 50, 1)
-	seedDMParticipant(t, database, 50, 2)
+	seedAliceBobDM(t, database, permissions.SendMessages|permissions.ReadMessages)
 	return database, NewPermissionService(database, permissions.NewChecker(database))
 }
 
@@ -94,12 +82,9 @@ func TestSendMessage_DMFanoutSurvivesSenderDisconnectAfterCommit(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	svc := NewMessageService(disconnectAfterWriteStore{Store: database, cancel: cancel}, permSvc, nil)
 
-	result, err := svc.SendMessage(ctx, SendMessageParams{
+	result := mustSendMessage(ctx, t, svc, SendMessageParams{
 		ChannelID: 50, UserID: 1, Username: "alice", Content: "hi bob",
 	})
-	if err != nil {
-		t.Fatalf("SendMessage: %v", err)
-	}
 	if len(result.ParticipantIDs) == 0 {
 		t.Fatal("ParticipantIDs empty after a sender disconnect that raced the post-commit DM lookup — " +
 			"the recipient gets no live chat_message fan-out until their next reconnect")
@@ -113,20 +98,15 @@ func TestEditMessage_DMFanoutSurvivesEditorDisconnectAfterCommit(t *testing.T) {
 	database, permSvc := newDMFixture(t)
 	plainSvc := NewMessageService(database, permSvc, nil)
 
-	sent, err := plainSvc.SendMessage(context.Background(), SendMessageParams{
+	sent := mustSendMessage(context.Background(), t, plainSvc, SendMessageParams{
 		ChannelID: 50, UserID: 1, Username: "alice", Content: "original",
 	})
-	if err != nil {
-		t.Fatalf("send: %v", err)
-	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	svc := NewMessageService(disconnectAfterWriteStore{Store: database, cancel: cancel}, permSvc, nil)
 
 	editResult, err := svc.EditMessage(ctx, 1, sent.MessageID, "edited content")
-	if err != nil {
-		t.Fatalf("EditMessage: %v", err)
-	}
+	mustDo(t, "EditMessage", err)
 	if len(editResult.ParticipantIDs) == 0 {
 		t.Fatal("ParticipantIDs empty after an editor disconnect that raced the post-commit DM lookup — " +
 			"the other participant never sees the edit live")
@@ -140,20 +120,15 @@ func TestDeleteMessage_DMFanoutSurvivesDeleterDisconnectAfterCommit(t *testing.T
 	database, permSvc := newDMFixture(t)
 	plainSvc := NewMessageService(database, permSvc, nil)
 
-	sent, err := plainSvc.SendMessage(context.Background(), SendMessageParams{
+	sent := mustSendMessage(context.Background(), t, plainSvc, SendMessageParams{
 		ChannelID: 50, UserID: 1, Username: "alice", Content: "delete me",
 	})
-	if err != nil {
-		t.Fatalf("send: %v", err)
-	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	svc := NewMessageService(disconnectAfterWriteStore{Store: database, cancel: cancel}, permSvc, nil)
 
 	delResult, err := svc.DeleteMessage(ctx, 1, sent.MessageID)
-	if err != nil {
-		t.Fatalf("DeleteMessage: %v", err)
-	}
+	mustDo(t, "DeleteMessage", err)
 	if len(delResult.ParticipantIDs) == 0 {
 		t.Fatal("ParticipantIDs empty after a deleter disconnect that raced the post-commit DM lookup — " +
 			"the other participant never sees the delete live")
@@ -180,18 +155,13 @@ func (s erroringDMAudienceStore) GetDMParticipantIDs(ctx context.Context, channe
 func TestEditMessage_DMAudienceErrorFailsClosedToEditor(t *testing.T) {
 	database, permSvc := newDMFixture(t)
 	plainSvc := NewMessageService(database, permSvc, nil)
-	sent, err := plainSvc.SendMessage(context.Background(), SendMessageParams{
+	sent := mustSendMessage(context.Background(), t, plainSvc, SendMessageParams{
 		ChannelID: 50, UserID: 1, Username: "alice", Content: "original",
 	})
-	if err != nil {
-		t.Fatalf("send: %v", err)
-	}
 
 	svc := NewMessageService(erroringDMAudienceStore{Store: database}, permSvc, nil)
 	editResult, err := svc.EditMessage(context.Background(), 1, sent.MessageID, "edited content")
-	if err != nil {
-		t.Fatalf("EditMessage: %v", err)
-	}
+	mustDo(t, "EditMessage", err)
 	if len(editResult.ParticipantIDs) != 1 || editResult.ParticipantIDs[0] != 1 {
 		t.Errorf("ParticipantIDs = %v, want exactly [1] (the editor, fail-closed)", editResult.ParticipantIDs)
 	}
@@ -202,18 +172,13 @@ func TestEditMessage_DMAudienceErrorFailsClosedToEditor(t *testing.T) {
 func TestDeleteMessage_DMAudienceErrorFailsClosedToDeleter(t *testing.T) {
 	database, permSvc := newDMFixture(t)
 	plainSvc := NewMessageService(database, permSvc, nil)
-	sent, err := plainSvc.SendMessage(context.Background(), SendMessageParams{
+	sent := mustSendMessage(context.Background(), t, plainSvc, SendMessageParams{
 		ChannelID: 50, UserID: 1, Username: "alice", Content: "delete me",
 	})
-	if err != nil {
-		t.Fatalf("send: %v", err)
-	}
 
 	svc := NewMessageService(erroringDMAudienceStore{Store: database}, permSvc, nil)
 	delResult, err := svc.DeleteMessage(context.Background(), 1, sent.MessageID)
-	if err != nil {
-		t.Fatalf("DeleteMessage: %v", err)
-	}
+	mustDo(t, "DeleteMessage", err)
 	if len(delResult.ParticipantIDs) != 1 || delResult.ParticipantIDs[0] != 1 {
 		t.Errorf("ParticipantIDs = %v, want exactly [1] (the deleter, fail-closed)", delResult.ParticipantIDs)
 	}
@@ -241,12 +206,9 @@ func TestEditMessage_FailsClosedWhenChannelLookupErrors(t *testing.T) {
 	database, permSvc := newDMFixture(t)
 	plainSvc := NewMessageService(database, permSvc, nil)
 
-	sent, err := plainSvc.SendMessage(context.Background(), SendMessageParams{
+	sent := mustSendMessage(context.Background(), t, plainSvc, SendMessageParams{
 		ChannelID: 50, UserID: 1, Username: "alice", Content: "hi bob",
 	})
-	if err != nil {
-		t.Fatalf("send: %v", err)
-	}
 	seedBlock(t, database, 2, 1) // bob blocks alice
 
 	svc := NewMessageService(erroringGetChannelStore{Store: database, failFor: 50}, permSvc, nil)
@@ -270,12 +232,9 @@ func TestDeleteMessage_RefusedInArchivedChannel(t *testing.T) {
 	svc, database := newTestMessageService(t)
 	ctx := context.Background()
 
-	sent, err := svc.SendMessage(ctx, SendMessageParams{
+	sent := mustSendMessage(ctx, t, svc, SendMessageParams{
 		ChannelID: 10, UserID: 1, Username: "alice", RoleName: "member", Content: "delete me",
 	})
-	if err != nil {
-		t.Fatalf("send: %v", err)
-	}
 
 	if _, err := database.ExecContext(ctx, `UPDATE channels SET archived = 1 WHERE id = 10`); err != nil {
 		t.Fatalf("archive channel: %v", err)
@@ -304,22 +263,16 @@ func TestSendMessage_DoesNotReopenAlreadyOpenDM(t *testing.T) {
 	svc := NewMessageService(database, permSvc, nil)
 	ctx := context.Background()
 
-	first, err := svc.SendMessage(ctx, SendMessageParams{
+	first := mustSendMessage(ctx, t, svc, SendMessageParams{
 		ChannelID: 50, UserID: 1, Username: "alice", Content: "first",
 	})
-	if err != nil {
-		t.Fatalf("first send: %v", err)
-	}
 	if len(first.OpenedDMFor) != 1 || first.OpenedDMFor[0] != 2 {
 		t.Fatalf("first send OpenedDMFor = %v, want [2] (bob's first open)", first.OpenedDMFor)
 	}
 
-	second, err := svc.SendMessage(ctx, SendMessageParams{
+	second := mustSendMessage(ctx, t, svc, SendMessageParams{
 		ChannelID: 50, UserID: 1, Username: "alice", Content: "second",
 	})
-	if err != nil {
-		t.Fatalf("second send: %v", err)
-	}
 	if len(second.OpenedDMFor) != 0 {
 		t.Fatalf("second send OpenedDMFor = %v, want [] — the DM was already open for bob, "+
 			"so re-reporting it forces a redundant dm_channel_open and a global visibility-watermark bump "+
@@ -334,19 +287,14 @@ func TestSendMessage_DoesNotReopenAlreadyOpenDM(t *testing.T) {
 func TestSendMessage_DMReopenSurvivesSenderDisconnectAfterCommit(t *testing.T) {
 	database, permSvc := newDMFixture(t)
 	// Bob has closed the DM; this send must genuinely re-open it for him.
-	if err := database.CloseDM(context.Background(), 2, 50); err != nil {
-		t.Fatalf("CloseDM: %v", err)
-	}
+	mustDo(t, "CloseDM", database.CloseDM(context.Background(), 2, 50))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	svc := NewMessageService(disconnectAfterWriteStore{Store: database, cancel: cancel}, permSvc, nil)
 
-	result, err := svc.SendMessage(ctx, SendMessageParams{
+	result := mustSendMessage(ctx, t, svc, SendMessageParams{
 		ChannelID: 50, UserID: 1, Username: "alice", Content: "hi bob",
 	})
-	if err != nil {
-		t.Fatalf("SendMessage: %v", err)
-	}
 	if len(result.OpenedDMFor) != 1 || result.OpenedDMFor[0] != 2 {
 		t.Fatalf("OpenedDMFor = %v, want [2] — OpenDM must run detached from the request ctx, "+
 			"or a sender disconnect after commit leaves the DM invisible in the recipient's sidebar",
@@ -361,12 +309,9 @@ func TestDeleteMessage_FailsClosedWhenChannelLookupErrors(t *testing.T) {
 	database, permSvc := newDMFixture(t)
 
 	sendSvc := NewMessageService(database, permSvc, nil)
-	sent, err := sendSvc.SendMessage(context.Background(), SendMessageParams{
+	sent := mustSendMessage(context.Background(), t, sendSvc, SendMessageParams{
 		ChannelID: 50, UserID: 1, Username: "alice", Content: "to be deleted",
 	})
-	if err != nil {
-		t.Fatalf("SendMessage: %v", err)
-	}
 
 	svc := NewMessageService(erroringGetChannelStore{Store: database, failFor: 50}, permSvc, nil)
 	if _, err := svc.DeleteMessage(context.Background(), 1, sent.MessageID); err == nil {
@@ -386,9 +331,7 @@ func TestDeleteMessage_FailsClosedWhenChannelLookupErrors(t *testing.T) {
 // window even though nothing was ever posted.
 func TestSendMessage_SlowModeNotConsumedByFailedContentValidation(t *testing.T) {
 	_, database := newTestMessageService(t)
-	if err := database.SetChannelSlowMode(context.Background(), 10, 3600); err != nil {
-		t.Fatalf("SetChannelSlowMode: %v", err)
-	}
+	mustDo(t, "SetChannelSlowMode", database.SetChannelSlowMode(context.Background(), 10, 3600))
 	checker := permissions.NewChecker(database)
 	permSvc := NewPermissionService(database, checker)
 	svc := NewMessageService(database, permSvc, auth.NewRateLimiter())
@@ -442,12 +385,7 @@ func (s disconnectAfterLinkStore) GetAttachmentsByMessageIDs(ctx context.Context
 func TestSendMessage_AttachmentsSurviveSenderDisconnectAfterLink(t *testing.T) {
 	_, database := newTestMessageService(t)
 	// Grant ATTACH_FILES on top of the base member perms newTestMessageService seeds.
-	seedRole(t, database, &db.Role{
-		ID:          permissions.MemberRoleID,
-		Name:        "member",
-		Permissions: permissions.SendMessages | permissions.ReadMessages | permissions.AddReactions | permissions.AttachFiles,
-		Position:    1,
-	})
+	seedMemberRole(t, database, permissions.SendMessages|permissions.ReadMessages|permissions.AddReactions|permissions.AttachFiles)
 	if _, err := database.ExecContext(context.Background(),
 		`INSERT INTO attachments (id, uploader_id, filename, stored_as, mime_type, size)
 		 VALUES (?, ?, ?, ?, ?, ?)`,
@@ -461,12 +399,9 @@ func TestSendMessage_AttachmentsSurviveSenderDisconnectAfterLink(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	svc := NewMessageService(disconnectAfterLinkStore{Store: database, cancel: cancel}, permSvc, nil)
 
-	result, err := svc.SendMessage(ctx, SendMessageParams{
+	result := mustSendMessage(ctx, t, svc, SendMessageParams{
 		ChannelID: 10, UserID: 1, Username: "alice", AttachmentIDs: []string{"att-1"},
 	})
-	if err != nil {
-		t.Fatalf("SendMessage: %v", err)
-	}
 	if len(result.Attachments) != 1 {
 		t.Fatalf("Attachments = %v, want 1 — a disconnect right after the attachment link commits must not "+
 			"broadcast a blank message bubble", result.Attachments)
@@ -497,12 +432,9 @@ func TestSendMessage_GroupDMLookupFailureDoesNotMisfireFirstContactGate(t *testi
 
 	svc := New(&erroringIsGroupDMStore{DB: database}, nil)
 
-	result, err := svc.Messages.SendMessage(context.Background(), SendMessageParams{
+	result := mustSendMessage(context.Background(), t, svc.Messages, SendMessageParams{
 		ChannelID: 50, UserID: 1, Username: "alice", Content: "hi all",
 	})
-	if err != nil {
-		t.Fatalf("SendMessage: %v", err)
-	}
 	if result == nil || result.MessageID == 0 {
 		t.Fatalf("SendMessage result = %+v, want the message still saved despite the lookup failure", result)
 	}
@@ -521,12 +453,9 @@ func TestSendMessage_DeliveryTargetsFailureAddressesOnlySender(t *testing.T) {
 	database, _ := newDMFixture(t)
 	svc := New(&erroringIsGroupDMStore{DB: database}, nil)
 
-	result, err := svc.Messages.SendMessage(context.Background(), SendMessageParams{
+	result := mustSendMessage(context.Background(), t, svc.Messages, SendMessageParams{
 		ChannelID: 50, UserID: 1, Username: "alice", Content: "hi",
 	})
-	if err != nil {
-		t.Fatalf("SendMessage: %v", err)
-	}
 	if result == nil || result.MessageID == 0 || !result.IsDM {
 		t.Fatalf("SendMessage result = %+v, want a saved DM message", result)
 	}
@@ -602,12 +531,9 @@ func TestSendMessage_GroupDMSkipsOpenDMForOpenMembers(t *testing.T) {
 	spy := &dmSendSpyStore{DB: database}
 	svc := New(spy, nil)
 
-	result, err := svc.Messages.SendMessage(ctx, SendMessageParams{
+	result := mustSendMessage(ctx, t, svc.Messages, SendMessageParams{
 		ChannelID: 50, UserID: 1, Username: "alice", Content: "hi all",
 	})
-	if err != nil {
-		t.Fatalf("SendMessage: %v", err)
-	}
 	if n := spy.openDM.Load(); n != 0 {
 		t.Errorf("OpenDM calls = %d, want 0 — every member already has the DM open", n)
 	}
@@ -626,15 +552,10 @@ func TestSendMessage_GroupDMSkipsOpenDMForOpenMembers(t *testing.T) {
 	}
 
 	// Carol closes the DM: the next send re-opens it for her alone.
-	if err := database.CloseDM(ctx, 3, 50); err != nil {
-		t.Fatalf("CloseDM: %v", err)
-	}
-	result, err = svc.Messages.SendMessage(ctx, SendMessageParams{
+	mustDo(t, "CloseDM", database.CloseDM(ctx, 3, 50))
+	result = mustSendMessage(ctx, t, svc.Messages, SendMessageParams{
 		ChannelID: 50, UserID: 1, Username: "alice", Content: "carol?",
 	})
-	if err != nil {
-		t.Fatalf("second SendMessage: %v", err)
-	}
 	if n := spy.openDM.Load(); n != 1 {
 		t.Errorf("OpenDM calls after carol closed = %d, want 1", n)
 	}

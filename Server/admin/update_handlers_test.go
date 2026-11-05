@@ -22,37 +22,12 @@ import (
 
 func TestAdminAPI_CheckUpdate_OK(t *testing.T) {
 	// Mock GitHub API
-	mockGH := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"tag_name": "v2.0.0",
-			"body":     "New release",
-			"html_url": "https://github.com/J3vb/OwnCord/releases/tag/v2.0.0",
-			"assets": []map[string]any{
-				{"name": "chatserver.exe", "browser_download_url": "https://github.com/J3vb/OwnCord/releases/download/v2.0.0/chatserver.exe"},
-				{"name": "chatserver-linux-amd64.tar.gz", "browser_download_url": "https://github.com/J3vb/OwnCord/releases/download/v2.0.0/chatserver-linux-amd64.tar.gz"},
-				{"name": "checksums.sha256", "browser_download_url": "https://github.com/J3vb/OwnCord/releases/download/v2.0.0/checksums.sha256"},
-				{"name": "chatserver.exe.sig", "browser_download_url": "https://github.com/J3vb/OwnCord/releases/download/v2.0.0/chatserver.exe.sig"},
-				{"name": "server-update-manifest.json", "browser_download_url": "https://github.com/J3vb/OwnCord/releases/download/v2.0.0/server-update-manifest.json"},
-				{"name": "server-update-manifest.json.sig", "browser_download_url": "https://github.com/J3vb/OwnCord/releases/download/v2.0.0/server-update-manifest.json.sig"},
-			},
-		})
-	}))
-	defer mockGH.Close()
-
-	u := updater.NewUpdater("1.0.0", "", "J3vb", "OwnCord")
-	u.SetBaseURL(mockGH.URL)
-
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, u, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	_, handler, token := newUpdateHarness(t, releaseJSON("v2.0.0", "New release", "chatserver.exe", "chatserver-linux-amd64.tar.gz", "checksums.sha256", "chatserver.exe.sig", "server-update-manifest.json", "server-update-manifest.json.sig"))
 
 	w := doRequest(t, handler, http.MethodGet, "/updates", token, nil)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 
-	var info updater.UpdateInfo
-	_ = json.Unmarshal(w.Body.Bytes(), &info)
+	info := decodeBody[updater.UpdateInfo](t, w)
 	if !info.UpdateAvailable {
 		t.Error("expected update_available = true")
 	}
@@ -65,33 +40,12 @@ func TestAdminAPI_CheckUpdate_OK(t *testing.T) {
 }
 
 func TestAdminAPI_CheckUpdate_IncompleteReleaseNotInstallable(t *testing.T) {
-	mockGH := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"tag_name": "v2.0.0",
-			"body":     "Missing manifest",
-			"html_url": "https://github.com/J3vb/OwnCord/releases/tag/v2.0.0",
-			"assets": []map[string]any{
-				{"name": "chatserver.exe", "browser_download_url": "https://github.com/J3vb/OwnCord/releases/download/v2.0.0/chatserver.exe"},
-				{"name": "checksums.sha256", "browser_download_url": "https://github.com/J3vb/OwnCord/releases/download/v2.0.0/checksums.sha256"},
-			},
-		})
-	}))
-	defer mockGH.Close()
-
-	u := updater.NewUpdater("1.0.0", "", "J3vb", "OwnCord")
-	u.SetBaseURL(mockGH.URL)
-
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, u, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	_, handler, token := newUpdateHarness(t, releaseJSON("v2.0.0", "Missing manifest", "chatserver.exe", "checksums.sha256"))
 
 	w := doRequest(t, handler, http.MethodGet, "/updates", token, nil)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 
-	var info updater.UpdateInfo
-	_ = json.Unmarshal(w.Body.Bytes(), &info)
+	info := decodeBody[updater.UpdateInfo](t, w)
 	if info.UpdateAvailable {
 		t.Error("expected update_available = false for incomplete release")
 	}
@@ -101,30 +55,12 @@ func TestAdminAPI_CheckUpdate_IncompleteReleaseNotInstallable(t *testing.T) {
 }
 
 func TestAdminAPI_CheckUpdate_UpToDate(t *testing.T) {
-	mockGH := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"tag_name": "v1.0.0",
-			"body":     "",
-			"html_url": "https://github.com/J3vb/OwnCord/releases/tag/v1.0.0",
-			"assets":   []map[string]any{},
-		})
-	}))
-	defer mockGH.Close()
-
-	u := updater.NewUpdater("1.0.0", "", "J3vb", "OwnCord")
-	u.SetBaseURL(mockGH.URL)
-
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, u, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	_, handler, token := newUpdateHarness(t, releaseJSON("v1.0.0", ""))
 
 	w := doRequest(t, handler, http.MethodGet, "/updates", token, nil)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", w.Code)
-	}
+	requireStatus(t, w, http.StatusOK)
 
-	var info updater.UpdateInfo
-	_ = json.Unmarshal(w.Body.Bytes(), &info)
+	info := decodeBody[updater.UpdateInfo](t, w)
 	if info.UpdateAvailable {
 		t.Error("expected update_available = false")
 	}
@@ -135,9 +71,7 @@ func TestAdminAPI_CheckUpdate_Unauthenticated(t *testing.T) {
 	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestServices(database))
 
 	w := doRequest(t, handler, http.MethodGet, "/updates", "", nil)
-	if w.Code != http.StatusUnauthorized {
-		t.Errorf("status = %d, want 401", w.Code)
-	}
+	expectStatus(t, w, http.StatusUnauthorized)
 }
 
 func TestAdminAPI_ApplyUpdate_RequiresOwner(t *testing.T) {
@@ -145,14 +79,12 @@ func TestAdminAPI_ApplyUpdate_RequiresOwner(t *testing.T) {
 	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestServices(database))
 
 	// Create admin user (not owner - role 2)
-	adminUID, _ := database.CreateUser(context.Background(), "adminonly2", "hash", 2)
+	adminUID := mustCreateUser(t, database, "adminonly2", "hash", 2)
 	token := "admin-role-token"
 	_, _ = database.CreateSession(context.Background(), adminUID, auth.HashToken(token), "test", "127.0.0.1")
 
 	w := doRequest(t, handler, http.MethodPost, "/updates/apply", token, nil)
-	if w.Code != http.StatusForbidden {
-		t.Errorf("status = %d, want 403", w.Code)
-	}
+	expectStatus(t, w, http.StatusForbidden)
 }
 
 // ─── handleApplyUpdate additional paths ──────────────────────────────────────
@@ -166,24 +98,17 @@ func TestAdminAPI_ApplyUpdate_NilUpdater(t *testing.T) {
 	token := createAdminUser(t, database)
 
 	w := doRequest(t, handler, http.MethodPost, "/updates/apply", token, nil)
-	if w.Code != http.StatusServiceUnavailable {
-		t.Errorf("status = %d, want 503; body: %s", w.Code, w.Body.String())
-	}
+	expectStatus(t, w, http.StatusServiceUnavailable)
 }
 
 // TestAdminAPI_ApplyUpdate_NilUpdater_ErrorCode verifies the error code field
 // in the 503 response.
 func TestAdminAPI_ApplyUpdate_NilUpdater_ErrorCode(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	_, handler, token := newAdminHarnessNoHub(t)
 
 	w := doRequest(t, handler, http.MethodPost, "/updates/apply", token, nil)
 
-	var resp map[string]string
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal response: %v", err)
-	}
+	resp := decodeBody[map[string]string](t, w)
 	if resp["error"] != "UPDATE_UNAVAILABLE" {
 		t.Errorf("error code = %q, want UPDATE_UNAVAILABLE", resp["error"])
 	}
@@ -193,32 +118,12 @@ func TestAdminAPI_ApplyUpdate_NilUpdater_ErrorCode(t *testing.T) {
 // returned when the server is already up to date.
 func TestAdminAPI_ApplyUpdate_NoUpdateAvailable(t *testing.T) {
 	// Mock GitHub API to return same version (no update available).
-	mockGH := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"tag_name": "v1.0.0",
-			"body":     "",
-			"html_url": "https://github.com/J3vb/OwnCord/releases/tag/v1.0.0",
-			"assets":   []map[string]any{},
-		})
-	}))
-	defer mockGH.Close()
-
-	u := updater.NewUpdater("1.0.0", "", "J3vb", "OwnCord")
-	u.SetBaseURL(mockGH.URL)
-
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, u, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	_, handler, token := newUpdateHarness(t, releaseJSON("v1.0.0", ""))
 
 	w := doRequest(t, handler, http.MethodPost, "/updates/apply", token, nil)
-	if w.Code != http.StatusConflict {
-		t.Errorf("status = %d, want 409 (no update available); body: %s", w.Code, w.Body.String())
-	}
+	expectStatus(t, w, http.StatusConflict)
 
-	var resp map[string]string
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal response: %v", err)
-	}
+	resp := decodeBody[map[string]string](t, w)
 	if resp["error"] != "NO_UPDATE" {
 		t.Errorf("error = %q, want NO_UPDATE", resp["error"])
 	}
@@ -228,56 +133,26 @@ func TestAdminAPI_ApplyUpdate_NoUpdateAvailable(t *testing.T) {
 // when the update check request to GitHub fails.
 func TestAdminAPI_ApplyUpdate_CheckFails(t *testing.T) {
 	// Server that immediately closes connections (simulates network error).
-	mockGH := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	_, handler, token := newUpdateHarness(t, func(w http.ResponseWriter, r *http.Request) {
 		// Return invalid JSON to trigger a parse error.
 		w.WriteHeader(http.StatusInternalServerError)
-	}))
-	defer mockGH.Close()
-
-	u := updater.NewUpdater("1.0.0", "", "J3vb", "OwnCord")
-	u.SetBaseURL(mockGH.URL)
-
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, u, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	})
 
 	w := doRequest(t, handler, http.MethodPost, "/updates/apply", token, nil)
 	// Expect 502 Bad Gateway when update check call fails.
-	if w.Code != http.StatusBadGateway {
-		t.Errorf("status = %d, want 502; body: %s", w.Code, w.Body.String())
-	}
+	expectStatus(t, w, http.StatusBadGateway)
 }
 
 // TestAdminAPI_ApplyUpdate_MissingAssets verifies that 502 is returned when the
 // release has no download URL, checksum URL, or detached signature URL.
 func TestAdminAPI_ApplyUpdate_MissingAssets(t *testing.T) {
 	// Return a newer version but with no assets (empty download/checksum URLs).
-	mockGH := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"tag_name": "v2.0.0",
-			"body":     "Release notes",
-			"html_url": "https://github.com/J3vb/OwnCord/releases/tag/v2.0.0",
-			"assets":   []map[string]any{},
-		})
-	}))
-	defer mockGH.Close()
-
-	u := updater.NewUpdater("1.0.0", "", "J3vb", "OwnCord")
-	u.SetBaseURL(mockGH.URL)
-
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, u, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	_, handler, token := newUpdateHarness(t, releaseJSON("v2.0.0", "Release notes"))
 
 	w := doRequest(t, handler, http.MethodPost, "/updates/apply", token, nil)
-	if w.Code != http.StatusBadGateway {
-		t.Errorf("status = %d, want 502 (missing assets); body: %s", w.Code, w.Body.String())
-	}
+	expectStatus(t, w, http.StatusBadGateway)
 
-	var resp map[string]string
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal response: %v", err)
-	}
+	resp := decodeBody[map[string]string](t, w)
 	if resp["error"] != "MISSING_ASSETS" {
 		t.Errorf("error = %q, want MISSING_ASSETS", resp["error"])
 	}
@@ -290,9 +165,7 @@ func TestAdminAPI_ApplyUpdate_Unauthenticated(t *testing.T) {
 	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestServices(database))
 
 	w := doRequest(t, handler, http.MethodPost, "/updates/apply", "", nil)
-	if w.Code != http.StatusUnauthorized {
-		t.Errorf("status = %d, want 401", w.Code)
-	}
+	expectStatus(t, w, http.StatusUnauthorized)
 }
 
 // TestAdminAPI_ApplyUpdate_DownloadFails verifies that 502 is returned when
@@ -374,18 +247,11 @@ func TestAdminAPI_ApplyUpdate_DownloadFails(t *testing.T) {
 // "disable this endpoint in docker builds?" TODO).
 func TestAdminAPI_ApplyUpdate_RefusedInContainer(t *testing.T) {
 	t.Setenv("OWNCORD_CONTAINER", "1")
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	_, handler, token := newAdminHarnessNoHub(t)
 
 	w := doRequest(t, handler, http.MethodPost, "/updates/apply", token, nil)
-	if w.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want 503; body: %s", w.Code, w.Body.String())
-	}
-	var resp map[string]string
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	requireStatus(t, w, http.StatusServiceUnavailable)
+	resp := decodeBody[map[string]string](t, w)
 	if resp["error"] != "CONTAINER_DEPLOYMENT" {
 		t.Errorf("error code = %q, want CONTAINER_DEPLOYMENT", resp["error"])
 	}
@@ -396,18 +262,11 @@ func TestAdminAPI_ApplyUpdate_RefusedInContainer(t *testing.T) {
 // to 0, the container guard steps aside and the nil-updater 503 answers.
 func TestAdminAPI_ApplyUpdate_ContainerOptOut(t *testing.T) {
 	t.Setenv("OWNCORD_CONTAINER", "0")
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	_, handler, token := newAdminHarnessNoHub(t)
 
 	w := doRequest(t, handler, http.MethodPost, "/updates/apply", token, nil)
-	if w.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want 503; body: %s", w.Code, w.Body.String())
-	}
-	var resp map[string]string
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	requireStatus(t, w, http.StatusServiceUnavailable)
+	resp := decodeBody[map[string]string](t, w)
 	if resp["error"] != "UPDATE_UNAVAILABLE" {
 		t.Errorf("error code = %q, want UPDATE_UNAVAILABLE (container guard must step aside)", resp["error"])
 	}
@@ -533,13 +392,8 @@ func checkUpdateBody(t *testing.T) map[string]any {
 	token := createAdminUser(t, database)
 
 	w := doRequest(t, handler, http.MethodGet, "/updates", token, nil)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
-	var body map[string]any
-	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	requireStatus(t, w, http.StatusOK)
+	body := decodeBody[map[string]any](t, w)
 	return body
 }
 
@@ -600,13 +454,8 @@ func TestApplyUpdate_ReadOnlyInstallRefusedBeforeDownload(t *testing.T) {
 	token := createAdminUser(t, database)
 
 	w := doRequest(t, handler, http.MethodPost, "/updates/apply", token, nil)
-	if w.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want 503; body: %s", w.Code, w.Body.String())
-	}
-	var resp map[string]string
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	requireStatus(t, w, http.StatusServiceUnavailable)
+	resp := decodeBody[map[string]string](t, w)
 	if resp["error"] != "INSTALL_READ_ONLY" {
 		t.Errorf("error code = %q, want INSTALL_READ_ONLY", resp["error"])
 	}

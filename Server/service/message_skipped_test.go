@@ -59,9 +59,7 @@ func TestSendMessage_KeyedSweptAttachmentReportedSkipped(t *testing.T) {
 	p := deliveryTestParams()
 	p.Content, p.AttachmentIDs = "hi", []string{"att-a", "att-b"}
 	res, err := svc.SendMessage(context.Background(), p)
-	if err != nil {
-		t.Fatalf("SendMessage: %v", err)
-	}
+	mustDo(t, "SendMessage", err)
 	if !reflect.DeepEqual(res.SkippedAttachmentIDs, []string{"att-b"}) {
 		t.Fatalf("skipped = %v, want [att-b]", res.SkippedAttachmentIDs)
 	}
@@ -75,9 +73,7 @@ func TestSendMessage_UnkeyedSkippedReported(t *testing.T) {
 	p := SendMessageParams{ChannelID: 10, UserID: 1, Username: "alice", Content: "hi",
 		AttachmentIDs: []string{"att-a", "att-missing"}}
 	res, err := svc.SendMessage(context.Background(), p)
-	if err != nil {
-		t.Fatalf("SendMessage: %v", err)
-	}
+	mustDo(t, "SendMessage", err)
 	if !reflect.DeepEqual(res.SkippedAttachmentIDs, []string{"att-missing"}) {
 		t.Fatalf("skipped = %v, want [att-missing]", res.SkippedAttachmentIDs)
 	}
@@ -104,9 +100,7 @@ func TestSendMessage_RetryReplaysSkipped(t *testing.T) {
 	p := deliveryTestParams()
 	p.Content, p.AttachmentIDs = "hi", []string{"att-a", "att-b"}
 	first, err := svc.SendMessage(ctx, p)
-	if err != nil {
-		t.Fatalf("SendMessage: %v", err)
-	}
+	mustDo(t, "SendMessage", err)
 	retry, err := svc.SendMessage(ctx, p)
 	if err != nil || !retry.Duplicate || retry.MessageID != first.MessageID {
 		t.Fatalf("retry = %+v, %v", retry, err)
@@ -157,9 +151,7 @@ func TestSendMessage_TextWithAllSkippedSendsAndReportsEveryID(t *testing.T) {
 	p := deliveryTestParams()
 	p.AttachmentIDs = []string{"att-missing", "att-missing", "att-other"}
 	res, err := svc.SendMessage(context.Background(), p)
-	if err != nil {
-		t.Fatalf("SendMessage: %v", err)
-	}
+	mustDo(t, "SendMessage", err)
 	if want := []string{"att-missing", "att-other"}; !reflect.DeepEqual(res.SkippedAttachmentIDs, want) {
 		t.Fatalf("skipped = %v, want %v", res.SkippedAttachmentIDs, want)
 	}
@@ -198,9 +190,7 @@ func TestSendMessage_ReplaySkippedReadFailureOmits(t *testing.T) {
 	p := deliveryTestParams()
 	p.AttachmentIDs = []string{"att-a", "att-b"}
 	first, err := svc.SendMessage(ctx, p)
-	if err != nil {
-		t.Fatalf("SendMessage: %v", err)
-	}
+	mustDo(t, "SendMessage", err)
 	failing := NewMessageService(replayReadFailsStore{Store: database}, svc.perms, nil)
 	retry, err := failing.SendMessage(ctx, p)
 	if err != nil || !retry.Duplicate || retry.MessageID != first.MessageID {
@@ -228,9 +218,7 @@ func TestSendMessage_InTxDuplicateReplaysSkipped(t *testing.T) {
 	p := deliveryTestParams()
 	p.Content, p.AttachmentIDs = "hi", []string{"att-a", "att-b"}
 	first, err := svc.SendMessage(ctx, p)
-	if err != nil {
-		t.Fatalf("SendMessage: %v", err)
-	}
+	mustDo(t, "SendMessage", err)
 	racing := NewMessageService(missedReceiptStore{Store: database}, svc.perms, nil)
 	racing.RunBackgroundInlineForTest()
 	retry, err := racing.SendMessage(ctx, p)

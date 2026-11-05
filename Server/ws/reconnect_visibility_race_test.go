@@ -20,13 +20,7 @@ package ws
 
 import (
 	"context"
-	"net/http"
-	"net/http/httptest"
-	"strings"
 	"testing"
-	"time"
-
-	"github.com/coder/websocket"
 
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/permissions"
@@ -41,10 +35,7 @@ func TestHandleReconnect_VisibilityChangeDuringHandshake_ForcesFullReady(t *test
 	if err != nil || ch == nil {
 		t.Fatalf("GetChannel: %v", err)
 	}
-	user, err := database.GetUserByID(ctx, uid)
-	if err != nil || user == nil {
-		t.Fatalf("GetUserByID: %v", err)
-	}
+	user := mustGetUser(t, database, uid)
 
 	h := newTestHub(t, database, auth.NewRateLimiter(), nil)
 
@@ -80,36 +71,7 @@ func TestHandleReconnect_VisibilityChangeDuringHandshake_ForcesFullReady(t *test
 
 	// A real server-side *websocket.Conn so the (buggy) success path's writes
 	// (auth_ok + replay) succeed instead of panicking on a nil conn.
-	connCh := make(chan *websocket.Conn, 1)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		conn, acceptErr := websocket.Accept(w, r, nil)
-		if acceptErr != nil {
-			return
-		}
-		connCh <- conn
-	}))
-	defer srv.Close()
-
-	dialCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	clientConn, dialResp, dialErr := websocket.Dial(dialCtx, "ws"+strings.TrimPrefix(srv.URL, "http"), nil)
-	if dialResp != nil && dialResp.Body != nil {
-		_ = dialResp.Body.Close()
-	}
-	if dialErr != nil {
-		t.Fatalf("dial: %v", dialErr)
-	}
-	defer func() { _ = clientConn.Close(websocket.StatusNormalClosure, "") }()
-
-	var conn *websocket.Conn
-	select {
-	case conn = <-connCh:
-	case <-time.After(5 * time.Second):
-		t.Fatal("server never accepted the connection")
-	}
-	// CloseNow: the peer never reads, so a close handshake would wait out its
-	// 5 s timeout.
-	defer func() { _ = conn.CloseNow() }()
+	conn := serverSideConn(t, false)
 
 	// Fires once, deep inside the handshake — after mustFullResync's initial
 	// check and after computeAllowedChannels already snapshotted the

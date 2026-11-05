@@ -18,9 +18,7 @@ func TestAdminAPI_PatchRole_RenameBroadcastsMemberUpdate(t *testing.T) {
 	w := doRequest(t, handler, http.MethodPatch, "/roles/3", token, map[string]any{
 		"name": "Mods",
 	})
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 
 	// The enqueue names the holder; the worker reads the committed name when
 	// it sends, so a coalesced or overtaken rename announces the final one.
@@ -41,9 +39,7 @@ func TestAdminAPI_PatchRole_NoRenameNoMemberUpdate(t *testing.T) {
 	w := doRequest(t, handler, http.MethodPatch, "/roles/3", token, map[string]any{
 		"color": "#abcdef",
 	})
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 
 	if len(hub.memberUpdateIDs()) != 0 {
 		t.Fatalf("expected no member_update for a color-only patch, got %+v", hub.roleRefreshes)

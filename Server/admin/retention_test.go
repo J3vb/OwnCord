@@ -33,18 +33,14 @@ func TestAdminAPI_Retention_PolicyPreviewAndOverrides(t *testing.T) {
 		t.Errorf("member GET /retention = %d, want 403", w.Code)
 	}
 	w := doRequest(t, handler, http.MethodGet, "/retention", ownerToken, nil)
-	if w.Code != http.StatusOK {
-		t.Fatalf("GET /retention = %d: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 	var policy service.RetentionPolicy
 	if err := json.Unmarshal(w.Body.Bytes(), &policy); err != nil || policy.ServerDays != 0 || len(policy.Channels) != 0 {
 		t.Errorf("default policy = %+v, %v", policy, err)
 	}
 
 	w = applyAdminRetention(t, handler, ownerToken, service.RetentionChange{Scope: "channel", ChannelID: chID, Days: new(14)})
-	if w.Code != http.StatusOK {
-		t.Fatalf("PUT retention = %d: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 	if w := doRequest(t, handler, http.MethodPut, "/channels/"+itoa(chID)+"/retention", ownerToken, map[string]int{"days": -3}); w.Code != http.StatusBadRequest {
 		t.Errorf("negative days = %d, want 400", w.Code)
 	}
@@ -56,9 +52,7 @@ func TestAdminAPI_Retention_PolicyPreviewAndOverrides(t *testing.T) {
 	}
 
 	w = doRequest(t, handler, http.MethodGet, "/retention/preview", ownerToken, nil)
-	if w.Code != http.StatusOK {
-		t.Fatalf("GET /retention/preview = %d: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 	var preview []service.RetentionPreview
 	if err := json.Unmarshal(w.Body.Bytes(), &preview); err != nil || len(preview) != 1 || preview[0].ChannelID != chID || preview[0].Days != 14 || preview[0].WouldDelete != 0 {
 		t.Errorf("preview = %+v, %v", preview, err)
@@ -87,9 +81,7 @@ func TestAdminAPI_Retention_PolicyPreviewAndOverrides(t *testing.T) {
 func requestAdminRetentionPreview(t *testing.T, handler http.Handler, token string, change service.RetentionChange) *httptest.ResponseRecorder {
 	t.Helper()
 	w := doRequest(t, handler, http.MethodGet, "/retention", token, nil)
-	if w.Code != http.StatusOK {
-		t.Fatalf("policy = %d: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 	var policy service.RetentionPolicy
 	if err := json.Unmarshal(w.Body.Bytes(), &policy); err != nil {
 		t.Fatal(err)
@@ -100,9 +92,7 @@ func requestAdminRetentionPreview(t *testing.T, handler http.Handler, token stri
 func applyAdminRetention(t *testing.T, handler http.Handler, token string, change service.RetentionChange) *httptest.ResponseRecorder {
 	t.Helper()
 	w := requestAdminRetentionPreview(t, handler, token, change)
-	if w.Code != http.StatusOK {
-		t.Fatalf("preview = %d: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 	var preview service.ProposedRetentionPreview
 	if err := json.Unmarshal(w.Body.Bytes(), &preview); err != nil {
 		t.Fatal(err)
@@ -155,9 +145,7 @@ func TestAdminRetentionPreviewPermissionsAndConflicts(t *testing.T) {
 	getPreview := func() string {
 		t.Helper()
 		w := requestAdminRetentionPreview(t, handler, token, change)
-		if w.Code != 200 {
-			t.Fatalf("preview = %d: %s", w.Code, w.Body.String())
-		}
+		requireStatus(t, w, http.StatusOK)
 		var preview service.ProposedRetentionPreview
 		if err := json.Unmarshal(w.Body.Bytes(), &preview); err != nil {
 			t.Fatal(err)
@@ -242,9 +230,7 @@ func TestRetentionChannels_ManageServerOnlyRoleListsChannels(t *testing.T) {
 		t.Fatalf("precondition: GET /channels = %d, want 403 for a MANAGE_SERVER-only role", w.Code)
 	}
 	w := doRequest(t, handler, http.MethodGet, "/retention/channels", keeper, nil)
-	if w.Code != http.StatusOK {
-		t.Fatalf("GET /retention/channels = %d: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 	var got []map[string]any
 	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)

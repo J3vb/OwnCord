@@ -15,9 +15,7 @@ import (
 // plain text.
 func TestAssetHandler_RefusalsAreJSON(t *testing.T) {
 	r, inst, dir := newAssetTestInstance(t, []string{"index.html"})
-	if err := os.Mkdir(filepath.Join(dir, "folder"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Mkdir", os.Mkdir(filepath.Join(dir, "folder"), 0o755))
 	cases := map[string]string{"folder": "folder"}
 	if err := os.Symlink(filepath.Join(dir, "index.html"), filepath.Join(dir, "link.html")); err == nil {
 		cases["symlink"] = "link.html"

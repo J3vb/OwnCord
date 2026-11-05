@@ -22,7 +22,6 @@ package ws
 // client's own stored key onto VoiceTopic (excluding itself) so the key
 // holder's duplicate-announce branch fires and re-offers the live room key.
 import (
-	"encoding/json"
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/auth"
@@ -62,35 +61,9 @@ func TestRegisterNow_ReannouncesOwnKeyOnResume(t *testing.T) {
 	hub.clients[userID] = []*Client{old}
 	hub.mu.Unlock()
 
-	// The resuming connection: lastSeq > 0 marks this as a network reconnect
-	// (registerNow only transfers voice state on this path) rather than a
-	// fresh login.
-	newSend := make(chan []byte, 8)
-	newC := &Client{userID: userID, send: newSend, sendHigh: newSend, sendLow: newSend, lastSeq: 1}
+	_, _ = resumeVoiceClient(t, hub, userID, chanID)
 
-	hub.registerNowTest(newC, nil)
-
-	if got := newC.voice.channel(); got != chanID {
-		t.Fatalf("precondition failed: resumed client's voice state was not transferred, got channel %d want %d", got, chanID)
-	}
-
-	close(peerSend)
-	var gotReannounce bool
-	for msg := range peerSend {
-		var env struct {
-			Type    string `json:"type"`
-			Payload struct {
-				UserID    int64  `json:"user_id"`
-				PublicKey string `json:"public_key"`
-			} `json:"payload"`
-		}
-		if err := json.Unmarshal(msg, &env); err != nil {
-			t.Fatalf("unmarshal message sent to peer: %v (raw=%s)", err, msg)
-		}
-		if env.Type == MsgTypeVoiceE2EEAnnounceBC && env.Payload.UserID == userID && env.Payload.PublicKey == "user-pub-key-b64" {
-			gotReannounce = true
-		}
-	}
+	gotReannounce := drainedE2EEAnnounce(t, peerSend, userID, "user-pub-key-b64")
 	if !gotReannounce {
 		t.Error("resumed client's own E2EE key was never re-broadcast onto the voice channel — " +
 			"OC-0316: the key holder never re-offers the room key after a peer's WS-only resume, " +

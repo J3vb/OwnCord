@@ -16,9 +16,7 @@ import (
 func enrolCauseKit(t *testing.T, f *authCauseFixture) string {
 	t.Helper()
 	issue, err := f.svc.EnrolRecoveryKit(context.Background(), sessionPrincipal(f.user), causeLogPassword, "")
-	if err != nil {
-		t.Fatalf("EnrolRecoveryKit: %v", err)
-	}
+	mustDo(t, "EnrolRecoveryKit", err)
 	return issue.Secret
 }
 

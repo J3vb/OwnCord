@@ -26,18 +26,14 @@ func newGroupMembershipFixture(t *testing.T) *groupMembershipFixture {
 	f := newModerationActionsFixture(t)
 	dms := NewDMService(f.database, f.mod.perms)
 	res, err := dms.CreateGroupDM(context.Background(), fixtureMember, []int64{fixtureMember2, fixtureMod}, "Crew")
-	if err != nil {
-		t.Fatalf("CreateGroupDM: %v", err)
-	}
+	mustDo(t, "CreateGroupDM", err)
 	return &groupMembershipFixture{moderationActionsFixture: f, dms: dms, dm: res.Channel.ID}
 }
 
 func (f *groupMembershipFixture) members(t *testing.T) []int64 {
 	t.Helper()
 	ids, err := f.database.GetDMParticipantIDs(context.Background(), f.dm)
-	if err != nil {
-		t.Fatalf("GetDMParticipantIDs: %v", err)
-	}
+	mustDo(t, "GetDMParticipantIDs", err)
 	slices.Sort(ids)
 	return ids
 }
@@ -45,9 +41,7 @@ func (f *groupMembershipFixture) members(t *testing.T) []int64 {
 func (f *groupMembershipFixture) ownerID(t *testing.T) int64 {
 	t.Helper()
 	owner, _, err := f.database.GetGroupDMMeta(context.Background(), f.dm)
-	if err != nil {
-		t.Fatalf("GetGroupDMMeta: %v", err)
-	}
+	mustDo(t, "GetGroupDMMeta", err)
 	return owner
 }
 
@@ -98,9 +92,7 @@ func TestAddGroupMembers_AnyMemberAddsAndRowsNameTheTarget(t *testing.T) {
 	ctx := context.Background()
 	// fixtureMember2 is not the owner: any member may add.
 	res, err := f.dms.AddGroupMembers(ctx, fixtureMember2, f.dm, []int64{fixtureOwner, fixturePeerMod})
-	if err != nil {
-		t.Fatalf("AddGroupMembers: %v", err)
-	}
+	mustDo(t, "AddGroupMembers", err)
 	if want := []int64{fixtureOwner, fixtureMod, fixtureMember, fixtureMember2, fixturePeerMod}; !slices.Equal(res.Audience, want) {
 		t.Errorf("Audience = %v, want %v", res.Audience, want)
 	}
@@ -146,9 +138,7 @@ func TestAddGroupMembers_Validation(t *testing.T) {
 func TestAddGroupMembers_ExistingMembersAreSkipped(t *testing.T) {
 	f := newGroupMembershipFixture(t)
 	res, err := f.dms.AddGroupMembers(context.Background(), fixtureMember, f.dm, []int64{fixtureMember2, fixtureOwner})
-	if err != nil {
-		t.Fatalf("AddGroupMembers: %v", err)
-	}
+	mustDo(t, "AddGroupMembers", err)
 	if len(res.Rows) != 1 || res.Rows[0].TargetUserID != fixtureOwner {
 		t.Errorf("rows = %+v, want a single row for the new member", res.Rows)
 	}
@@ -161,9 +151,7 @@ func TestAddGroupMembers_RefusalsForCallerAndChannel(t *testing.T) {
 		t.Errorf("non-member add = %v, want ErrNotFound", err)
 	}
 	oneToOne, err := f.dms.CreateDM(ctx, fixtureMember, fixtureMember2)
-	if err != nil {
-		t.Fatalf("CreateDM: %v", err)
-	}
+	mustDo(t, "CreateDM", err)
 	if _, err := f.dms.AddGroupMembers(ctx, fixtureMember, oneToOne.Channel.ID, []int64{fixtureOwner}); !errors.Is(err, ErrBadRequest) {
 		t.Errorf("add to a 1:1 DM = %v, want ErrBadRequest", err)
 	}
@@ -181,9 +169,7 @@ func TestAddGroupMembers_RefusalsForCallerAndChannel(t *testing.T) {
 func TestAddGroupMembers_BannedTargetNotFound(t *testing.T) {
 	f := newGroupMembershipFixture(t)
 	ctx := context.Background()
-	if err := f.database.BanUser(ctx, fixtureOwner, "x", nil); err != nil {
-		t.Fatalf("BanUser: %v", err)
-	}
+	mustDo(t, "BanUser", f.database.BanUser(ctx, fixtureOwner, "x", nil))
 	if _, err := f.dms.AddGroupMembers(ctx, fixtureMember, f.dm, []int64{fixtureOwner}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("err = %v, want ErrNotFound", err)
 	}
@@ -243,19 +229,13 @@ func TestAddGroupMembers_BlockedPairForbidden(t *testing.T) {
 	f := newGroupMembershipFixture(t)
 	ctx := context.Background()
 	// A non-actor member blocked the target.
-	if err := f.database.BlockUser(ctx, fixtureMod, fixtureOwner); err != nil {
-		t.Fatalf("BlockUser: %v", err)
-	}
+	mustDo(t, "BlockUser", f.database.BlockUser(ctx, fixtureMod, fixtureOwner))
 	if _, err := f.dms.AddGroupMembers(ctx, fixtureMember, f.dm, []int64{fixtureOwner}); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("add of a user a member blocked = %v, want ErrForbidden", err)
 	}
 	// Two targets that block each other.
-	if err := f.database.BlockUser(ctx, fixturePeerMod, fixtureOwner); err != nil {
-		t.Fatalf("BlockUser: %v", err)
-	}
-	if err := f.database.UnblockUser(ctx, fixtureMod, fixtureOwner); err != nil {
-		t.Fatalf("UnblockUser: %v", err)
-	}
+	mustDo(t, "BlockUser", f.database.BlockUser(ctx, fixturePeerMod, fixtureOwner))
+	mustDo(t, "UnblockUser", f.database.UnblockUser(ctx, fixtureMod, fixtureOwner))
 	if _, err := f.dms.AddGroupMembers(ctx, fixtureMember, f.dm, []int64{fixtureOwner, fixturePeerMod}); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("add of two mutually blocked users = %v, want ErrForbidden", err)
 	}
@@ -269,9 +249,7 @@ func TestAddGroupMembers_BlockedPairForbidden(t *testing.T) {
 func TestAddGroupMembers_BlockBetweenExistingMembersDoesNotRefuse(t *testing.T) {
 	f := newGroupMembershipFixture(t)
 	ctx := context.Background()
-	if err := f.database.BlockUser(ctx, fixtureMember2, fixtureMod); err != nil {
-		t.Fatalf("BlockUser: %v", err)
-	}
+	mustDo(t, "BlockUser", f.database.BlockUser(ctx, fixtureMember2, fixtureMod))
 	if _, err := f.dms.AddGroupMembers(ctx, fixtureMember, f.dm, []int64{fixtureOwner}); err != nil {
 		t.Fatalf("AddGroupMembers: %v", err)
 	}
@@ -331,9 +309,7 @@ func TestRemoveGroupMember_OwnerOnlyAndRules(t *testing.T) {
 		t.Errorf("remove by a non-member = %v, want ErrNotFound", err)
 	}
 	oneToOne, err := f.dms.CreateDM(ctx, fixtureMember, fixtureMember2)
-	if err != nil {
-		t.Fatalf("CreateDM: %v", err)
-	}
+	mustDo(t, "CreateDM", err)
 	if _, err := f.dms.RemoveGroupMember(ctx, fixtureMember, oneToOne.Channel.ID, fixtureMember2); !errors.Is(err, ErrBadRequest) {
 		t.Errorf("remove in a 1:1 DM = %v, want ErrBadRequest", err)
 	}
@@ -342,9 +318,7 @@ func TestRemoveGroupMember_OwnerOnlyAndRules(t *testing.T) {
 	}
 
 	res, err := f.dms.RemoveGroupMember(ctx, fixtureMember, f.dm, fixtureMod)
-	if err != nil {
-		t.Fatalf("owner remove: %v", err)
-	}
+	mustDo(t, "owner remove", err)
 	if want := []int64{fixtureMember, fixtureMember2}; !slices.Equal(res.Audience, want) {
 		t.Errorf("Audience = %v, want the remaining %v", res.Audience, want)
 	}
@@ -383,9 +357,7 @@ func TestTransferGroupOwner_OwnerOnlyAndTargetMustBeMember(t *testing.T) {
 		t.Fatalf("owner = %d after refused transfers", got)
 	}
 	res, err := f.dms.TransferGroupOwner(ctx, fixtureMember, f.dm, fixtureMember2)
-	if err != nil {
-		t.Fatalf("TransferGroupOwner: %v", err)
-	}
+	mustDo(t, "TransferGroupOwner", err)
 	if len(res.Rows) != 0 {
 		t.Errorf("a transfer wrote rows: %+v", res.Rows)
 	}
@@ -405,9 +377,7 @@ func TestRenameGroupDM_WritesRowAndUnchangedWritesNone(t *testing.T) {
 	ctx := context.Background()
 
 	res, err := f.dms.RenameGroupDM(ctx, fixtureMember2, f.dm, "Raid night")
-	if err != nil {
-		t.Fatalf("RenameGroupDM: %v", err)
-	}
+	mustDo(t, "RenameGroupDM", err)
 	if len(res.Rows) != 1 || res.Rows[0].Kind != "group_rename" || res.Rows[0].Name == nil || *res.Rows[0].Name != "Raid night" ||
 		!strings.Contains(res.Rows[0].Content, "Raid night") {
 		t.Fatalf("rows = %+v", res.Rows)
@@ -417,9 +387,7 @@ func TestRenameGroupDM_WritesRowAndUnchangedWritesNone(t *testing.T) {
 	}
 
 	again, err := f.dms.RenameGroupDM(ctx, fixtureMember, f.dm, "Raid night")
-	if err != nil {
-		t.Fatalf("RenameGroupDM (same name): %v", err)
-	}
+	mustDo(t, "RenameGroupDM (same name)", err)
 	if len(again.Rows) != 0 {
 		t.Errorf("an unchanged name wrote rows: %+v", again.Rows)
 	}
@@ -436,9 +404,7 @@ func TestRenameGroupDM_WritesRowAndUnchangedWritesNone(t *testing.T) {
 func TestCloseDM_GroupLeaveWritesRowForSurvivors(t *testing.T) {
 	f := newGroupMembershipFixture(t)
 	res, err := f.dms.CloseDM(context.Background(), fixtureMember2, f.dm)
-	if err != nil {
-		t.Fatalf("CloseDM: %v", err)
-	}
+	mustDo(t, "CloseDM", err)
 	if !res.Left || res.ChannelDeleted {
 		t.Fatalf("result = %+v", res)
 	}
@@ -453,12 +419,8 @@ func TestCloseDM_GroupLeaveWritesRowForSurvivors(t *testing.T) {
 func TestCreateAndAdd_ShareRecipientValidation(t *testing.T) {
 	f := newGroupMembershipFixture(t)
 	ctx := context.Background()
-	if err := f.database.BanUser(ctx, fixtureOwner, "x", nil); err != nil {
-		t.Fatalf("BanUser: %v", err)
-	}
-	if err := f.database.BlockUser(ctx, fixturePeerMod, fixtureMember2); err != nil {
-		t.Fatalf("BlockUser: %v", err)
-	}
+	mustDo(t, "BanUser", f.database.BanUser(ctx, fixtureOwner, "x", nil))
+	mustDo(t, "BlockUser", f.database.BlockUser(ctx, fixturePeerMod, fixtureMember2))
 
 	// A banned recipient: not found on both paths.
 	if _, err := f.dms.CreateGroupDM(ctx, fixtureMember, []int64{fixtureMod, fixtureOwner}, ""); !errors.Is(err, ErrNotFound) {

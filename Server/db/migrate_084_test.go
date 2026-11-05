@@ -13,9 +13,7 @@ import (
 func TestMigration084_AddsVoiceColumns(t *testing.T) {
 	database := openMemory(t)
 	ctx := context.Background()
-	if err := db.MigrateFS(database, migrationsUpTo(t, "084_")); err != nil {
-		t.Fatalf("MigrateFS up to 083: %v", err)
-	}
+	mustDo(t, "MigrateFS up to 083", db.MigrateFS(database, migrationsUpTo(t, "084_")))
 	for _, col := range []string{"duration_ms", "waveform"} {
 		if columnExists(t, database, "attachments", col) {
 			t.Fatalf("attachments.%s exists before 084; the test no longer exercises the migration", col)
@@ -26,9 +24,7 @@ func TestMigration084_AddsVoiceColumns(t *testing.T) {
 		t.Fatalf("insert pre-084 attachment: %v", err)
 	}
 
-	if err := db.MigrateFS(database, migrationsUpTo(t, "085_")); err != nil {
-		t.Fatalf("Migrate 084: %v", err)
-	}
+	mustDo(t, "Migrate 084", db.MigrateFS(database, migrationsUpTo(t, "085_")))
 	for _, col := range []string{"duration_ms", "waveform"} {
 		if !columnExists(t, database, "attachments", col) {
 			t.Errorf("attachments.%s missing after 084", col)

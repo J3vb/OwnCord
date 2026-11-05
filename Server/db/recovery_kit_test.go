@@ -17,9 +17,7 @@ func TestRecoveryKit_UpsertReplacesAndUnspends(t *testing.T) {
 	if kit, err := database.GetRecoveryKit(ctx, uid); err != nil || kit != nil {
 		t.Fatalf("GetRecoveryKit before enrolment = %+v, %v; want nil", kit, err)
 	}
-	if err := database.UpsertRecoveryKit(ctx, uid, "$argon2id$first"); err != nil {
-		t.Fatalf("UpsertRecoveryKit: %v", err)
-	}
+	mustDo(t, "UpsertRecoveryKit", database.UpsertRecoveryKit(ctx, uid, "$argon2id$first"))
 	if _, err := database.RedeemRecoveryKit(ctx, uid, "$argon2id$first", "newhash", "recovery_kit_used", "test"); err != nil {
 		t.Fatalf("RedeemRecoveryKit: %v", err)
 	}
@@ -27,9 +25,7 @@ func TestRecoveryKit_UpsertReplacesAndUnspends(t *testing.T) {
 	if kit == nil || kit.UsedAt == nil {
 		t.Fatalf("kit after redeem = %+v, want spent", kit)
 	}
-	if err := database.UpsertRecoveryKit(ctx, uid, "$argon2id$second"); err != nil {
-		t.Fatalf("UpsertRecoveryKit (rotation): %v", err)
-	}
+	mustDo(t, "UpsertRecoveryKit (rotation)", database.UpsertRecoveryKit(ctx, uid, "$argon2id$second"))
 	kit, _ = database.GetRecoveryKit(ctx, uid)
 	if kit == nil || kit.Verifier != "$argon2id$second" || kit.UsedAt != nil {
 		t.Fatalf("kit after rotation = %+v, want the new verifier, unspent", kit)
@@ -46,9 +42,7 @@ func TestRedeemRecoveryKit_IsOneTransaction(t *testing.T) {
 	if _, err := database.CreateSession(ctx, uid, "tok-b", "phone", "10.0.0.2"); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
-	if err := database.UpsertRecoveryKit(ctx, uid, "$argon2id$v"); err != nil {
-		t.Fatalf("UpsertRecoveryKit: %v", err)
-	}
+	mustDo(t, "UpsertRecoveryKit", database.UpsertRecoveryKit(ctx, uid, "$argon2id$v"))
 
 	revoked, err := database.RedeemRecoveryKit(ctx, uid, "$argon2id$v", "newhash", "recovery_kit_used", "recovered")
 	if err != nil || revoked != 2 {
@@ -85,12 +79,8 @@ func TestRedeemRecoveryKit_SpendsOnlyTheComparedKit(t *testing.T) {
 	if _, err := database.CreateSession(ctx, uid, "tok-live", "laptop", "10.0.0.1"); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
-	if err := database.UpsertRecoveryKit(ctx, uid, "$argon2id$old"); err != nil {
-		t.Fatalf("UpsertRecoveryKit: %v", err)
-	}
-	if err := database.UpsertRecoveryKit(ctx, uid, "$argon2id$new"); err != nil {
-		t.Fatalf("UpsertRecoveryKit (rotation): %v", err)
-	}
+	mustDo(t, "UpsertRecoveryKit", database.UpsertRecoveryKit(ctx, uid, "$argon2id$old"))
+	mustDo(t, "UpsertRecoveryKit (rotation)", database.UpsertRecoveryKit(ctx, uid, "$argon2id$new"))
 
 	if _, err := database.RedeemRecoveryKit(ctx, uid, "$argon2id$old", "newhash", "recovery_kit_used", "stale"); !errors.Is(err, db.ErrRecoveryKitSpent) {
 		t.Fatalf("redeem with the replaced verifier = %v, want ErrRecoveryKitSpent", err)
@@ -124,9 +114,7 @@ func TestRedeemRecoveryKit_RollsBackAsAWhole(t *testing.T) {
 	if _, err := database.CreateSession(ctx, uid, "tok-live", "laptop", "10.0.0.1"); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
-	if err := database.UpsertRecoveryKit(ctx, uid, "$argon2id$v"); err != nil {
-		t.Fatalf("UpsertRecoveryKit: %v", err)
-	}
+	mustDo(t, "UpsertRecoveryKit", database.UpsertRecoveryKit(ctx, uid, "$argon2id$v"))
 	if _, err := database.ExecContext(ctx,
 		"CREATE TRIGGER fault_delete_sessions BEFORE DELETE ON sessions BEGIN SELECT RAISE(FAIL, 'injected fault'); END"); err != nil {
 		t.Fatalf("install fault: %v", err)
@@ -155,13 +143,9 @@ func TestRedeemRecoveryKit_RollsBackAsAWhole(t *testing.T) {
 func TestEraseAccount_PurgesTheRecoveryKit(t *testing.T) {
 	database := openMigratedMemory(t)
 	ctx := context.Background()
-	if _, err := database.CreateUser(ctx, "owner", "hash", 1); err != nil {
-		t.Fatalf("CreateUser(owner): %v", err)
-	}
+	mustCreateUser(t, database, "owner", "hash", 1)
 	uid, _ := database.CreateUser(ctx, "leaving", "hash", 4)
-	if err := database.UpsertRecoveryKit(ctx, uid, "$argon2id$v"); err != nil {
-		t.Fatalf("UpsertRecoveryKit: %v", err)
-	}
+	mustDo(t, "UpsertRecoveryKit", database.UpsertRecoveryKit(ctx, uid, "$argon2id$v"))
 	if _, err := database.EraseAccount(ctx, uid, ""); err != nil {
 		t.Fatalf("EraseAccount: %v", err)
 	}
@@ -206,9 +190,7 @@ func TestRedeemRecovery_RevokesTheAccountsAPITokens(t *testing.T) {
 				t.Fatalf("CreateAPIToken: %v", err)
 			}
 
-			if err := tc.redeem(database, uid); err != nil {
-				t.Fatalf("redeem: %v", err)
-			}
+			mustDo(t, "redeem", tc.redeem(database, uid))
 			for _, h := range []string{"api-a", "api-b"} {
 				if tok, err := database.GetActiveAPIToken(ctx, h); err != nil || tok != nil {
 					t.Errorf("token %s after recovery = %+v, %v; want revoked", h, tok, err)
@@ -218,9 +200,7 @@ func TestRedeemRecovery_RevokesTheAccountsAPITokens(t *testing.T) {
 				t.Error("another account's token was revoked")
 			}
 			var detail string
-			if err := database.QueryRowContext(ctx, `SELECT detail FROM audit_log WHERE action = 'recovery_used'`).Scan(&detail); err != nil {
-				t.Fatalf("audit row: %v", err)
-			}
+			mustDo(t, "audit row", database.QueryRowContext(ctx, `SELECT detail FROM audit_log WHERE action = 'recovery_used'`).Scan(&detail))
 			if !strings.Contains(detail, "2 API tokens revoked") {
 				t.Errorf("audit detail = %q, want the API token count", detail)
 			}

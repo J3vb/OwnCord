@@ -28,6 +28,24 @@ func contentionOpenMigrated(t *testing.T) *DB {
 	return database
 }
 
+// seedMessageRequest has sender post "hi" in their DM with recipient and files
+// the resulting request, returning the stored row.
+func seedMessageRequest(ctx context.Context, t *testing.T, database *DB, channelID, sender, recipient int64) *MessageRequest {
+	t.Helper()
+	msgID, err := database.CreateMessage(ctx, channelID, sender, "hi", nil)
+	if err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+	if _, err := database.CreateMessageRequest(ctx, sender, recipient, channelID, msgID); err != nil {
+		t.Fatalf("CreateMessageRequest: %v", err)
+	}
+	req, err := database.GetMessageRequestByPair(ctx, sender, recipient)
+	if err != nil {
+		t.Fatalf("GetMessageRequestByPair: %v", err)
+	}
+	return req
+}
+
 func contentionSeedUser(t *testing.T, database *DB, username string) int64 {
 	t.Helper()
 	id, err := database.CreateUser(context.Background(), username, "hash", 4)
@@ -67,17 +85,7 @@ func TestAcceptMessageRequest_ConcurrentDecisionsOneWins(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetOrCreateDMChannel: %v", err)
 	}
-	msgID, err := database.CreateMessage(ctx, ch.ID, sender, "hi", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
-	if _, err := database.CreateMessageRequest(ctx, sender, recipient, ch.ID, msgID); err != nil {
-		t.Fatalf("CreateMessageRequest: %v", err)
-	}
-	req, err := database.GetMessageRequestByPair(ctx, sender, recipient)
-	if err != nil {
-		t.Fatalf("GetMessageRequestByPair: %v", err)
-	}
+	req := seedMessageRequest(ctx, t, database, ch.ID, sender, recipient)
 
 	guardReached := make(chan struct{})
 	release := make(chan struct{})
@@ -271,17 +279,7 @@ func TestGetOrCreateDMChannelGated_RecipientWithPendingRequestAccepts(t *testing
 			if err != nil {
 				t.Fatalf("create: %v", err)
 			}
-			msgID, err := database.CreateMessage(ctx, ch.ID, sender, "hi", nil)
-			if err != nil {
-				t.Fatalf("CreateMessage: %v", err)
-			}
-			if _, err := database.CreateMessageRequest(ctx, sender, recipient, ch.ID, msgID); err != nil {
-				t.Fatalf("CreateMessageRequest: %v", err)
-			}
-			req, err := database.GetMessageRequestByPair(ctx, sender, recipient)
-			if err != nil {
-				t.Fatalf("GetMessageRequestByPair: %v", err)
-			}
+			req := seedMessageRequest(ctx, t, database, ch.ID, sender, recipient)
 			if preState != "pending" {
 				if _, err := database.TransitionMessageRequest(ctx, req.ID, recipient, preState); err != nil {
 					t.Fatalf("Transition: %v", err)
@@ -333,17 +331,7 @@ func TestGetOrCreateDMChannelGated_SenderReopenDoesNotAcceptOwnRequest(t *testin
 			if err != nil {
 				t.Fatalf("create: %v", err)
 			}
-			msgID, err := database.CreateMessage(ctx, ch.ID, alice, "hi", nil)
-			if err != nil {
-				t.Fatalf("CreateMessage: %v", err)
-			}
-			if _, err := database.CreateMessageRequest(ctx, alice, bob, ch.ID, msgID); err != nil {
-				t.Fatalf("CreateMessageRequest: %v", err)
-			}
-			req, err := database.GetMessageRequestByPair(ctx, alice, bob)
-			if err != nil {
-				t.Fatalf("GetMessageRequestByPair: %v", err)
-			}
+			req := seedMessageRequest(ctx, t, database, ch.ID, alice, bob)
 			if preState != "pending" {
 				if _, err := database.TransitionMessageRequest(ctx, req.ID, bob, preState); err != nil {
 					t.Fatalf("Transition: %v", err)
@@ -403,17 +391,7 @@ func TestGetOrCreateDMChannelGated_OpenDoesNotAcceptBlockedOrAbsentRequest(t *te
 				t.Fatalf("create: %v", err)
 			}
 			if preState == "blocked" {
-				msgID, err := database.CreateMessage(ctx, ch.ID, sender, "hi", nil)
-				if err != nil {
-					t.Fatalf("CreateMessage: %v", err)
-				}
-				if _, err := database.CreateMessageRequest(ctx, sender, recipient, ch.ID, msgID); err != nil {
-					t.Fatalf("CreateMessageRequest: %v", err)
-				}
-				req, err := database.GetMessageRequestByPair(ctx, sender, recipient)
-				if err != nil {
-					t.Fatalf("GetMessageRequestByPair: %v", err)
-				}
+				req := seedMessageRequest(ctx, t, database, ch.ID, sender, recipient)
 				if _, err := database.TransitionMessageRequest(ctx, req.ID, recipient, "blocked"); err != nil {
 					t.Fatalf("Transition: %v", err)
 				}

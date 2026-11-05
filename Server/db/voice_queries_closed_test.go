@@ -10,9 +10,7 @@ import (
 // or reporting "no voice state" as if the lookup had succeeded.
 func TestVoiceQueries_ReportClosedDatabaseErrors(t *testing.T) {
 	database := openMigratedMemory(t)
-	if err := database.Close(); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Close", database.Close())
 	ctx := context.Background()
 
 	calls := map[string]func() error{

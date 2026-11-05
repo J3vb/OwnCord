@@ -139,8 +139,7 @@ func walkAnonymousPosture(t *testing.T, h http.Handler) (total int, seen map[str
 		checked[key] = true
 
 		req := httptest.NewRequest(method, concretePath(pattern), nil)
-		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, req)
+		rec := serveRequest(h, req)
 
 		var body struct {
 			Error string `json:"error"`

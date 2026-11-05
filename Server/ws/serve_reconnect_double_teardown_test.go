@@ -16,13 +16,7 @@ package ws
 import (
 	"bytes"
 	"context"
-	"net/http"
-	"net/http/httptest"
-	"strings"
 	"testing"
-	"time"
-
-	"github.com/coder/websocket"
 
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
@@ -43,10 +37,7 @@ func TestHandleReconnect_HandshakeWriteFailure_TearsDownOnlyOnce(t *testing.T) {
 	t.Cleanup(func() { database.Close() })
 
 	ctx := context.Background()
-	userID, err := database.CreateUser(ctx, "reconnect-write-fail", "hash", 1)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	userID := mustCreateUser(t, database, "reconnect-write-fail", 1)
 	if err := database.UpdateUserStatus(ctx, userID, "online"); err != nil {
 		t.Fatalf("UpdateUserStatus: %v", err)
 	}
@@ -69,38 +60,7 @@ func TestHandleReconnect_HandshakeWriteFailure_TearsDownOnlyOnce(t *testing.T) {
 	// A real server-side *websocket.Conn, closed before handleReconnect ever
 	// writes to it — reproducing "peer already gone / write timeout" from the
 	// finding's repro without relying on network timing.
-	connCh := make(chan *websocket.Conn, 1)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		conn, acceptErr := websocket.Accept(w, r, nil)
-		if acceptErr != nil {
-			return
-		}
-		// CloseNow (not Close) — Close performs a close handshake that blocks
-		// up to 5s waiting for a reply the unread client connection below
-		// never sends. CloseNow just tears down the underlying net.Conn, which
-		// is all this test needs to make the next Write on conn fail.
-		_ = conn.CloseNow()
-		connCh <- conn
-	}))
-	defer srv.Close()
-
-	dialCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	clientConn, resp, dialErr := websocket.Dial(dialCtx, "ws"+strings.TrimPrefix(srv.URL, "http"), nil)
-	if resp != nil && resp.Body != nil {
-		_ = resp.Body.Close()
-	}
-	if dialErr != nil {
-		t.Fatalf("dial: %v", dialErr)
-	}
-	defer func() { _ = clientConn.Close(websocket.StatusNormalClosure, "") }()
-
-	var conn *websocket.Conn
-	select {
-	case conn = <-connCh:
-	case <-time.After(5 * time.Second):
-		t.Fatal("server never accepted the connection")
-	}
+	conn := serverSideConn(t, true)
 
 	// handleReconnect: replay succeeds (buffer tier), but the auth_ok write
 	// fails because conn is already closed — the handshake-write-failure

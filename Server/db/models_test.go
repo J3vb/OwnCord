@@ -21,14 +21,10 @@ func TestRole_JSONRoundTrip(t *testing.T) {
 	}
 
 	data, err := json.Marshal(original)
-	if err != nil {
-		t.Fatalf("Marshal: %v", err)
-	}
+	mustDo(t, "Marshal", err)
 
 	var decoded db.Role
-	if err := json.Unmarshal(data, &decoded); err != nil {
-		t.Fatalf("Unmarshal: %v", err)
-	}
+	mustDo(t, "Unmarshal", json.Unmarshal(data, &decoded))
 
 	if decoded.ID != original.ID {
 		t.Errorf("ID = %d, want %d", decoded.ID, original.ID)
@@ -55,9 +51,7 @@ func TestRole_JSONKeys(t *testing.T) {
 	data, _ := json.Marshal(role)
 
 	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(data, &raw); err != nil {
-		t.Fatalf("Unmarshal to map: %v", err)
-	}
+	mustDo(t, "Unmarshal to map", json.Unmarshal(data, &raw))
 
 	expectedKeys := []string{"id", "name", "color", "permissions", "position", "is_default"}
 	for _, k := range expectedKeys {
@@ -72,9 +66,7 @@ func TestRole_NilColor(t *testing.T) {
 	data, _ := json.Marshal(role)
 
 	var raw map[string]any
-	if err := json.Unmarshal(data, &raw); err != nil {
-		t.Fatalf("Unmarshal: %v", err)
-	}
+	mustDo(t, "Unmarshal", json.Unmarshal(data, &raw))
 
 	if raw["color"] != nil {
 		t.Errorf("nil Color should serialize as null, got %v", raw["color"])
@@ -103,14 +95,10 @@ func TestChannel_JSONRoundTrip(t *testing.T) {
 	}
 
 	data, err := json.Marshal(original)
-	if err != nil {
-		t.Fatalf("Marshal: %v", err)
-	}
+	mustDo(t, "Marshal", err)
 
 	var decoded db.Channel
-	if err := json.Unmarshal(data, &decoded); err != nil {
-		t.Fatalf("Unmarshal: %v", err)
-	}
+	mustDo(t, "Unmarshal", json.Unmarshal(data, &decoded))
 
 	if decoded.ID != original.ID || decoded.Name != original.Name {
 		t.Errorf("basic fields mismatch: got ID=%d Name=%q", decoded.ID, decoded.Name)
@@ -128,9 +116,7 @@ func TestChannel_OmitEmptyFields(t *testing.T) {
 	data, _ := json.Marshal(ch)
 
 	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(data, &raw); err != nil {
-		t.Fatalf("Unmarshal: %v", err)
-	}
+	mustDo(t, "Unmarshal", json.Unmarshal(data, &raw))
 
 	// voice_quality and mixing_threshold have omitempty — should be absent when nil.
 	if _, ok := raw["voice_quality"]; ok {
@@ -153,9 +139,7 @@ func TestVoiceState_JoinedAtOmittedFromJSON(t *testing.T) {
 
 	data, _ := json.Marshal(vs)
 	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(data, &raw); err != nil {
-		t.Fatalf("Unmarshal: %v", err)
-	}
+	mustDo(t, "Unmarshal", json.Unmarshal(data, &raw))
 
 	if _, ok := raw["JoinedAt"]; ok {
 		t.Error("JoinedAt has json:\"-\" tag and should not appear in JSON output")
@@ -170,9 +154,7 @@ func TestVoiceState_BoolDefaults(t *testing.T) {
 	data, _ := json.Marshal(vs)
 
 	var decoded db.VoiceState
-	if err := json.Unmarshal(data, &decoded); err != nil {
-		t.Fatalf("Unmarshal: %v", err)
-	}
+	mustDo(t, "Unmarshal", json.Unmarshal(data, &decoded))
 
 	if decoded.Muted || decoded.Deafened || decoded.Speaking || decoded.Camera || decoded.Screenshare {
 		t.Error("zero-value VoiceState bools should all be false")
@@ -194,9 +176,7 @@ func TestMessageAPIResponse_JSONKeys(t *testing.T) {
 
 	data, _ := json.Marshal(resp)
 	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(data, &raw); err != nil {
-		t.Fatalf("Unmarshal: %v", err)
-	}
+	mustDo(t, "Unmarshal", json.Unmarshal(data, &raw))
 
 	required := []string{
 		"id", "channel_id", "user", "content", "reply_to",
@@ -218,9 +198,7 @@ func TestAttachmentInfo_OmitsNilDimensions(t *testing.T) {
 	data, _ := json.Marshal(att)
 
 	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(data, &raw); err != nil {
-		t.Fatalf("Unmarshal: %v", err)
-	}
+	mustDo(t, "Unmarshal", json.Unmarshal(data, &raw))
 
 	if _, ok := raw["width"]; ok {
 		t.Error("nil Width should be omitted")
@@ -239,9 +217,7 @@ func TestAttachmentInfo_IncludesDimensions(t *testing.T) {
 	data, _ := json.Marshal(att)
 
 	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(data, &raw); err != nil {
-		t.Fatalf("Unmarshal: %v", err)
-	}
+	mustDo(t, "Unmarshal", json.Unmarshal(data, &raw))
 
 	if _, ok := raw["width"]; !ok {
 		t.Error("non-nil Width should be present")
@@ -258,9 +234,7 @@ func TestUserPublic_OmitsNilAvatar(t *testing.T) {
 	data, _ := json.Marshal(u)
 
 	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(data, &raw); err != nil {
-		t.Fatalf("Unmarshal: %v", err)
-	}
+	mustDo(t, "Unmarshal", json.Unmarshal(data, &raw))
 
 	if _, ok := raw["avatar"]; ok {
 		t.Error("nil Avatar should be omitted")
@@ -273,9 +247,7 @@ func TestUserPublic_IncludesAvatar(t *testing.T) {
 	data, _ := json.Marshal(u)
 
 	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(data, &raw); err != nil {
-		t.Fatalf("Unmarshal: %v", err)
-	}
+	mustDo(t, "Unmarshal", json.Unmarshal(data, &raw))
 
 	if _, ok := raw["avatar"]; !ok {
 		t.Error("non-nil Avatar should be present")
@@ -295,14 +267,10 @@ func TestServerStats_JSONRoundTrip(t *testing.T) {
 	}
 
 	data, err := json.Marshal(original)
-	if err != nil {
-		t.Fatalf("Marshal: %v", err)
-	}
+	mustDo(t, "Marshal", err)
 
 	var decoded db.ServerStats
-	if err := json.Unmarshal(data, &decoded); err != nil {
-		t.Fatalf("Unmarshal: %v", err)
-	}
+	mustDo(t, "Unmarshal", json.Unmarshal(data, &decoded))
 
 	if decoded != original {
 		t.Errorf("round-trip mismatch:\n  got  %+v\n  want %+v", decoded, original)
@@ -319,9 +287,7 @@ func TestAuditEntry_JSONKeys(t *testing.T) {
 
 	data, _ := json.Marshal(entry)
 	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(data, &raw); err != nil {
-		t.Fatalf("Unmarshal: %v", err)
-	}
+	mustDo(t, "Unmarshal", json.Unmarshal(data, &raw))
 
 	required := []string{"id", "actor_id", "actor_name", "action", "target_type", "target_id", "detail", "created_at"}
 	for _, k := range required {

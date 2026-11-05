@@ -6,17 +6,13 @@ import (
 	"net/http"
 	"testing"
 	"time"
-
-	"github.com/J3vb/OwnCord/Server/admin"
 )
 
 // TestPatchUser_BanDurationRoundTrips: the duration the panel's ban dialog
 // sends comes back from the member list as an expiry that far ahead, and a
 // permanent ban (0) comes back with none.
 func TestPatchUser_BanDurationRoundTrips(t *testing.T) {
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	database, handler, token := newAdminHarness(t)
 	ctx := context.Background()
 
 	cases := []struct {

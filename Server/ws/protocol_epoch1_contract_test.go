@@ -357,14 +357,7 @@ type epochRig struct {
 func newEpochRig(t *testing.T, journey string, configure ...func(*ws.HubOptions)) *epochRig {
 	t.Helper()
 
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("db.Migrate: %v", err)
-	}
+	database := openMigratedDB(t)
 
 	limiter := auth.NewRateLimiter()
 
@@ -488,6 +481,32 @@ type wsConn struct {
 	conn    *websocket.Conn
 	record  bool
 	lastSeq uint64
+}
+
+// connectPair dials and authenticates alice ("a") then bob ("b"), and has a
+// consume the member_join and presence_batch that b's connect produced, so
+// the journey records from a quiet baseline.
+func (r *epochRig) connectPair(t *testing.T, aliceTok, bobTok string) (a, b *wsConn) {
+	t.Helper()
+	a, b = r.dial(t, "a"), r.dial(t, "b")
+	a.authenticate(aliceTok)
+	b.authenticate(bobTok)
+	a.drain("member_join", "presence_batch")
+	return a, b
+}
+
+// recordedPair is connectPair followed by recording on both sockets. Given a
+// channel it first focuses it on both: a without a barrier, b with one so
+// b's subscription is live before a acts.
+func (r *epochRig) recordedPair(t *testing.T, aliceTok, bobTok string, focusChannel ...int64) (a, b *wsConn) {
+	t.Helper()
+	a, b = r.connectPair(t, aliceTok, bobTok)
+	for _, ch := range focusChannel {
+		a.focus(ch, false)
+		b.focus(ch, true)
+	}
+	a.record, b.record = true, true
+	return a, b
 }
 
 // dial opens a WebSocket to the rig and registers its close in t.Cleanup —
@@ -846,14 +865,7 @@ func journeyPing(t *testing.T, r *epochRig) {
 func journeyChatSendFanout(t *testing.T, r *epochRig) {
 	_, _, aliceTok, bobTok := r.seedBaseline(t)
 
-	a, b := r.dial(t, "a"), r.dial(t, "b")
-	a.authenticate(aliceTok)
-	b.authenticate(bobTok)
-	a.drain("member_join", "presence_batch") // b's connect, observed by a
-	a.focus(textChannelID, false)
-	b.focus(textChannelID, true)
-
-	a.record, b.record = true, true
+	a, b := r.recordedPair(t, aliceTok, bobTok, textChannelID)
 	a.send(map[string]any{
 		"type":    "chat_send",
 		"id":      "req-chat-send-1",
@@ -876,14 +888,7 @@ func journeyChatEditDelete(t *testing.T, r *epochRig) {
 		t.Fatalf("CreateMessage: %v", err)
 	}
 
-	a, b := r.dial(t, "a"), r.dial(t, "b")
-	a.authenticate(aliceTok)
-	b.authenticate(bobTok)
-	a.drain("member_join", "presence_batch")
-	a.focus(textChannelID, false)
-	b.focus(textChannelID, true)
-
-	a.record, b.record = true, true
+	a, b := r.recordedPair(t, aliceTok, bobTok, textChannelID)
 	a.send(map[string]any{
 		"type":    "chat_edit",
 		"id":      "req-chat-edit-1",
@@ -912,14 +917,7 @@ func journeyReactionAddRemove(t *testing.T, r *epochRig) {
 		t.Fatalf("CreateMessage: %v", err)
 	}
 
-	a, b := r.dial(t, "a"), r.dial(t, "b")
-	a.authenticate(aliceTok)
-	b.authenticate(bobTok)
-	a.drain("member_join", "presence_batch")
-	a.focus(textChannelID, false)
-	b.focus(textChannelID, true)
-
-	a.record, b.record = true, true
+	a, b := r.recordedPair(t, aliceTok, bobTok, textChannelID)
 	a.send(map[string]any{
 		"type":    "reaction_add",
 		"id":      "req-reaction-add-1",
@@ -953,14 +951,7 @@ func journeyReactionAddRemove(t *testing.T, r *epochRig) {
 func journeyTyping(t *testing.T, r *epochRig) {
 	_, _, aliceTok, bobTok := r.seedBaseline(t)
 
-	a, b := r.dial(t, "a"), r.dial(t, "b")
-	a.authenticate(aliceTok)
-	b.authenticate(bobTok)
-	a.drain("member_join", "presence_batch")
-	a.focus(textChannelID, false)
-	b.focus(textChannelID, true)
-
-	a.record, b.record = true, true
+	a, b := r.recordedPair(t, aliceTok, bobTok, textChannelID)
 	a.send(map[string]any{
 		"type":    "typing_start",
 		"payload": map[string]any{"channel_id": textChannelID},
@@ -979,10 +970,7 @@ func journeyTyping(t *testing.T, r *epochRig) {
 func journeyChannelActivity(t *testing.T, r *epochRig) {
 	_, _, aliceTok, bobTok := r.seedBaseline(t)
 
-	a, b := r.dial(t, "a"), r.dial(t, "b")
-	a.authenticate(aliceTok)
-	b.authenticate(bobTok)
-	a.drain("member_join", "presence_batch")
+	a, b := r.connectPair(t, aliceTok, bobTok)
 	a.focus(textChannelID, false)
 
 	a.record, b.record = true, true
@@ -1068,12 +1056,7 @@ func journeyDMSend(t *testing.T, r *epochRig) {
 		t.Fatalf("TrustSender: %v", err)
 	}
 
-	a, b := r.dial(t, "a"), r.dial(t, "b")
-	a.authenticate(aliceTok)
-	b.authenticate(bobTok)
-	a.drain("member_join", "presence_batch")
-
-	a.record, b.record = true, true
+	a, b := r.recordedPair(t, aliceTok, bobTok)
 	a.send(map[string]any{
 		"type":    "chat_send",
 		"id":      "req-dm-send-1",
@@ -1098,12 +1081,7 @@ func journeyDMRequest(t *testing.T, r *epochRig) {
 		t.Fatalf("GetOrCreateDMChannel: %v", err)
 	}
 
-	a, b := r.dial(t, "a"), r.dial(t, "b")
-	a.authenticate(aliceTok)
-	b.authenticate(bobTok)
-	a.drain("member_join", "presence_batch")
-
-	a.record, b.record = true, true
+	a, b := r.recordedPair(t, aliceTok, bobTok)
 	a.send(map[string]any{
 		"type":    "chat_send",
 		"id":      "req-dm-request-1",
@@ -1130,10 +1108,7 @@ func journeyDMRequestIgnored(t *testing.T, r *epochRig) {
 		t.Fatalf("GetOrCreateDMChannel: %v", err)
 	}
 
-	a, b := r.dial(t, "a"), r.dial(t, "b")
-	a.authenticate(aliceTok)
-	b.authenticate(bobTok)
-	a.drain("member_join", "presence_batch")
+	a, b := r.connectPair(t, aliceTok, bobTok)
 
 	// Setup, not recorded: alice's first message stages the request and bob
 	// drains the resulting dm_request, then the request is marked ignored
@@ -1175,10 +1150,7 @@ func journeyDMRequestIgnored(t *testing.T, r *epochRig) {
 func journeyResumeReplay(t *testing.T, r *epochRig) {
 	_, _, aliceTok, bobTok := r.seedBaseline(t)
 
-	a, b := r.dial(t, "a"), r.dial(t, "b")
-	a.authenticate(aliceTok)
-	b.authenticate(bobTok)
-	a.drain("member_join", "presence_batch")
+	a, b := r.connectPair(t, aliceTok, bobTok)
 	b.focus(textChannelID, true)
 
 	lastSeq := a.lastSeq
@@ -1249,12 +1221,7 @@ func journeyResumeReplay(t *testing.T, r *epochRig) {
 func journeyVoiceJoinE2EELeave(t *testing.T, r *epochRig) {
 	_, bobID, aliceTok, bobTok := r.seedBaseline(t)
 
-	a, b := r.dial(t, "a"), r.dial(t, "b")
-	a.authenticate(aliceTok)
-	b.authenticate(bobTok)
-	a.drain("member_join", "presence_batch")
-
-	a.record, b.record = true, true
+	a, b := r.recordedPair(t, aliceTok, bobTok)
 
 	// alice joins an empty room: token, her own state, then room config.
 	a.send(map[string]any{
@@ -1332,12 +1299,7 @@ func journeyVoiceJoinE2EELeave(t *testing.T, r *epochRig) {
 func journeyVoiceWatch(t *testing.T, r *epochRig) {
 	_, bobID, aliceTok, bobTok := r.seedBaseline(t)
 
-	a, b := r.dial(t, "a"), r.dial(t, "b")
-	a.authenticate(aliceTok)
-	b.authenticate(bobTok)
-	a.drain("member_join", "presence_batch")
-
-	a.record, b.record = true, true
+	a, b := r.recordedPair(t, aliceTok, bobTok)
 
 	a.send(map[string]any{
 		"type":    "voice_join",
@@ -1416,12 +1378,7 @@ func voiceJoinPair(a, b *wsConn, channelID int64) {
 func journeyVoiceSelfState(t *testing.T, r *epochRig) {
 	_, _, aliceTok, bobTok := r.seedBaseline(t)
 
-	a, b := r.dial(t, "a"), r.dial(t, "b")
-	a.authenticate(aliceTok)
-	b.authenticate(bobTok)
-	a.drain("member_join", "presence_batch")
-
-	a.record, b.record = true, true
+	a, b := r.recordedPair(t, aliceTok, bobTok)
 	voiceJoinPair(a, b, voiceChannelID)
 
 	toggles := []struct {
@@ -1483,12 +1440,7 @@ func journeyVoiceModeration(t *testing.T, r *epochRig) {
 	aliceID, bobID, aliceTok, bobTok := r.seedBaseline(t)
 	r.seedModerator(t, aliceID)
 
-	a, b := r.dial(t, "a"), r.dial(t, "b")
-	a.authenticate(aliceTok)
-	b.authenticate(bobTok)
-	a.drain("member_join", "presence_batch")
-
-	a.record, b.record = true, true
+	a, b := r.recordedPair(t, aliceTok, bobTok)
 	voiceJoinPair(a, b, voiceChannelID)
 
 	for _, on := range []bool{true, false} {
@@ -1540,12 +1492,7 @@ func journeyVoiceModerationMoveKick(t *testing.T, r *epochRig) {
 	}
 	r.seedSecondVoiceChannel(t)
 
-	a, b := r.dial(t, "a"), r.dial(t, "b")
-	a.authenticate(aliceTok)
-	b.authenticate(bobTok)
-	a.drain("member_join", "presence_batch")
-
-	a.record, b.record = true, true
+	a, b := r.recordedPair(t, aliceTok, bobTok)
 	voiceJoinPair(a, b, voiceChannelID)
 
 	a.send(map[string]any{
@@ -1586,12 +1533,7 @@ func journeyVoiceModerationMoveKick(t *testing.T, r *epochRig) {
 func journeyVoiceTokenRefresh(t *testing.T, r *epochRig) {
 	_, _, aliceTok, bobTok := r.seedBaseline(t)
 
-	a, b := r.dial(t, "a"), r.dial(t, "b")
-	a.authenticate(aliceTok)
-	b.authenticate(bobTok)
-	a.drain("member_join", "presence_batch")
-
-	a.record, b.record = true, true
+	a, b := r.recordedPair(t, aliceTok, bobTok)
 	a.send(map[string]any{
 		"type":    "voice_join",
 		"payload": map[string]any{"channel_id": voiceChannelID},
@@ -1641,12 +1583,7 @@ func journeyCallRingDecline(t *testing.T, r *epochRig) {
 		t.Fatalf("TrustSender(alice trusts bob): %v", err)
 	}
 
-	a, b := r.dial(t, "a"), r.dial(t, "b")
-	a.authenticate(aliceTok)
-	b.authenticate(bobTok)
-	a.drain("member_join", "presence_batch")
-
-	a.record, b.record = true, true
+	a, b := r.recordedPair(t, aliceTok, bobTok)
 	a.send(map[string]any{
 		"type":    "voice_join",
 		"payload": map[string]any{"channel_id": dmChannel.ID},
@@ -1678,12 +1615,7 @@ func journeyCallRingDecline(t *testing.T, r *epochRig) {
 func journeyVoiceModDenied(t *testing.T, r *epochRig) {
 	aliceID, _, aliceTok, bobTok := r.seedBaseline(t)
 
-	a, b := r.dial(t, "a"), r.dial(t, "b")
-	a.authenticate(aliceTok)
-	b.authenticate(bobTok)
-	a.drain("member_join", "presence_batch")
-
-	a.record, b.record = true, true
+	a, b := r.recordedPair(t, aliceTok, bobTok)
 	b.send(map[string]any{
 		"type":    "voice_mod_kick",
 		"payload": map[string]any{"user_id": aliceID},
@@ -1787,14 +1719,7 @@ func journeyChatForwardPin(t *testing.T, r *epochRig) {
 		t.Fatalf("TrustSender: %v", err)
 	}
 
-	a, b := r.dial(t, "a"), r.dial(t, "b")
-	a.authenticate(aliceTok)
-	b.authenticate(bobTok)
-	a.drain("member_join", "presence_batch")
-	a.focus(textChannelID, false)
-	b.focus(textChannelID, true)
-
-	a.record, b.record = true, true
+	a, b := r.recordedPair(t, aliceTok, bobTok, textChannelID)
 	a.send(map[string]any{
 		"type": "chat_forward",
 		"id":   "req-chat-forward-1",
@@ -1823,14 +1748,7 @@ func journeyChatForwardPin(t *testing.T, r *epochRig) {
 // version, and the voter alone gets poll_vote_ok.
 func journeyChatPoll(t *testing.T, r *epochRig) {
 	_, _, aliceTok, bobTok := r.seedBaseline(t)
-	a, b := r.dial(t, "a"), r.dial(t, "b")
-	a.authenticate(aliceTok)
-	b.authenticate(bobTok)
-	a.drain("member_join", "presence_batch")
-	a.focus(textChannelID, false)
-	b.focus(textChannelID, true)
-
-	a.record, b.record = true, true
+	a, b := r.recordedPair(t, aliceTok, bobTok, textChannelID)
 	a.send(map[string]any{
 		"type": "poll_create",
 		"id":   "req-poll-create-1",
@@ -1934,10 +1852,7 @@ func journeyChatBulkDelete(t *testing.T, r *epochRig) {
 		ids = append(ids, id)
 	}
 
-	a, b := r.dial(t, "a"), r.dial(t, "b")
-	a.authenticate(aliceTok)
-	b.authenticate(bobTok)
-	a.drain("member_join", "presence_batch")
+	a, b := r.connectPair(t, aliceTok, bobTok)
 	// Both sockets wait for their subscription: nothing a sends afterwards
 	// orders the hub's broadcast behind a's focus (unlike chat-forward-pin,
 	// where a's own chat_forward does), so an unconfirmed focus is a flake.
@@ -1982,12 +1897,7 @@ func journeyMentionCountNSFWAck(t *testing.T, r *epochRig) {
 	}
 	rest := r.mountREST(t)
 
-	a, b := r.dial(t, "a"), r.dial(t, "b")
-	a.authenticate(aliceTok)
-	b.authenticate(bobTok)
-	a.drain("member_join", "presence_batch")
-
-	a.record, b.record = true, true
+	a, b := r.recordedPair(t, aliceTok, bobTok)
 	r.hub.NotifyMentionCount(bobID, textChannelID, 2)
 	b.expect("mention_count")
 
@@ -2010,12 +1920,7 @@ func journeyMentionCountNSFWAck(t *testing.T, r *epochRig) {
 func journeyChatCommandUnknown(t *testing.T, r *epochRig) {
 	_, _, aliceTok, bobTok := r.seedBaseline(t)
 
-	a, b := r.dial(t, "a"), r.dial(t, "b")
-	a.authenticate(aliceTok)
-	b.authenticate(bobTok)
-	a.drain("member_join", "presence_batch")
-
-	a.record, b.record = true, true
+	a, b := r.recordedPair(t, aliceTok, bobTok)
 	a.send(map[string]any{
 		"type": "chat_command",
 		"id":   "req-chat-command-1",
@@ -2042,10 +1947,7 @@ func journeyChannelCRUD(t *testing.T, r *epochRig) {
 	_, _, aliceTok, bobTok := r.seedBaseline(t)
 	ctx := context.Background()
 
-	a, b := r.dial(t, "a"), r.dial(t, "b")
-	a.authenticate(aliceTok)
-	b.authenticate(bobTok)
-	a.drain("member_join", "presence_batch")
+	a, b := r.connectPair(t, aliceTok, bobTok)
 
 	id, err := r.db.CreateChannel(ctx, "announcements", "text", "Info", "fixture topic", 3)
 	if err != nil {
@@ -2096,12 +1998,7 @@ func journeyDMOpenClose(t *testing.T, r *epochRig) {
 	}
 	rest := r.mountREST(t)
 
-	a, b := r.dial(t, "a"), r.dial(t, "b")
-	a.authenticate(aliceTok)
-	b.authenticate(bobTok)
-	a.drain("member_join", "presence_batch")
-
-	a.record, b.record = true, true
+	a, b := r.recordedPair(t, aliceTok, bobTok)
 	rest.do(t, http.MethodPost, "/api/v1/dms", aliceTok, map[string]any{"recipient_id": bobID}, http.StatusCreated)
 	b.expect("dm_channel_open")
 
@@ -2139,12 +2036,7 @@ func journeyServerAdminBroadcasts(t *testing.T, r *epochRig) {
 		t.Fatalf("CreateEmoji: %v", err)
 	}
 
-	a, b := r.dial(t, "a"), r.dial(t, "b")
-	a.authenticate(aliceTok)
-	b.authenticate(bobTok)
-	a.drain("member_join", "presence_batch")
-
-	a.record, b.record = true, true
+	a, b := r.recordedPair(t, aliceTok, bobTok)
 	r.hub.BroadcastEmojiUpdate([]*db.Emoji{emoji})
 	a.expect("emoji_update")
 	b.expect("emoji_update")
@@ -2197,12 +2089,7 @@ func journeyModerationQueue(t *testing.T, r *epochRig) {
 		t.Fatalf("FileReport: %v", err)
 	}
 
-	a, b := r.dial(t, "a"), r.dial(t, "b")
-	a.authenticate(aliceTok)
-	b.authenticate(bobTok)
-	a.drain("member_join", "presence_batch")
-
-	a.record, b.record = true, true
+	a, b := r.recordedPair(t, aliceTok, bobTok)
 	r.hub.BroadcastModQueue(ctx, reportID, "open")
 	a.expect("mod_queue")
 
@@ -2317,12 +2204,7 @@ func journeyRoleChange(t *testing.T, r *epochRig) {
 	aliceID, bobID, aliceTok, bobTok := r.seedBaseline(t)
 	r.seedModerator(t, aliceID)
 
-	a, b := r.dial(t, "a"), r.dial(t, "b")
-	a.authenticate(aliceTok)
-	b.authenticate(bobTok)
-	a.drain("member_join", "presence_batch")
-
-	a.record, b.record = true, true
+	a, b := r.recordedPair(t, aliceTok, bobTok)
 	for _, roleID := range []int64{roleIDModerator, roleIDMember} {
 		r.applyRoleChange(t, aliceID, bobID, roleID)
 		b.expect("channel_create")
@@ -2355,12 +2237,7 @@ func journeyRoleEdit(t *testing.T, r *epochRig) {
 		t.Fatalf("GetRoleByID(%d): %v", roleIDMember, err)
 	}
 
-	a, b := r.dial(t, "a"), r.dial(t, "b")
-	a.authenticate(aliceTok)
-	b.authenticate(bobTok)
-	a.drain("member_join", "presence_batch")
-
-	a.record, b.record = true, true
+	a, b := r.recordedPair(t, aliceTok, bobTok)
 	color := "#3366cc"
 	r.applyRoleEdit(t, aliceID, roleIDMember, service.RoleInput{Color: &color})
 	a.expect("roles_update")
@@ -2390,12 +2267,7 @@ func journeyUserUpdate(t *testing.T, r *epochRig) {
 	_ = aliceID
 	rest := r.mountREST(t)
 
-	a, b := r.dial(t, "a"), r.dial(t, "b")
-	a.authenticate(aliceTok)
-	b.authenticate(bobTok)
-	a.drain("member_join", "presence_batch")
-
-	a.record, b.record = true, true
+	a, b := r.recordedPair(t, aliceTok, bobTok)
 	rest.do(t, http.MethodPatch, "/api/v1/users/me/", aliceTok, map[string]any{
 		"username": "alice", "about": "edited fixture profile text", "banner_color": "#112233",
 	}, http.StatusOK)
@@ -2426,12 +2298,7 @@ func journeyMemberBan(t *testing.T, r *epochRig) {
 	r.seedModerator(t, aliceID)
 	carolID, _ := r.seedUser(t, "carol")
 
-	a, b := r.dial(t, "a"), r.dial(t, "b")
-	a.authenticate(aliceTok)
-	b.authenticate(bobTok)
-	a.drain("member_join", "presence_batch")
-
-	a.record, b.record = true, true
+	a, b := r.recordedPair(t, aliceTok, bobTok)
 	r.applyBan(t, aliceID, carolID)
 	a.expect("member_ban")
 	b.expect("member_ban")
@@ -2546,12 +2413,7 @@ func journeyMemberTimeout(t *testing.T, r *epochRig) {
 	r.svc.Moderation.SetNotifier(r.hub)
 	ctx := context.Background()
 
-	a, b := r.dial(t, "a"), r.dial(t, "b")
-	a.authenticate(aliceTok)
-	b.authenticate(bobTok)
-	a.drain("member_join", "presence_batch")
-
-	a.record, b.record = true, true
+	a, b := r.recordedPair(t, aliceTok, bobTok)
 	if _, err := r.svc.Moderation.Timeout(ctx, aliceID, bobID, "fixture timeout", 10*time.Minute, nil); err != nil {
 		t.Fatalf("Timeout: %v", err)
 	}

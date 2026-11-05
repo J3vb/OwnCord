@@ -53,16 +53,11 @@ func TestSetup_HonoursTrustedProxies(t *testing.T) {
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
-	if w.Code != http.StatusCreated {
-		t.Fatalf("POST /setup = %d, want 201; body=%s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusCreated)
 
-	var resp struct {
+	resp := decodeBody[struct {
 		UserID int64 `json:"user_id"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal response: %v", err)
-	}
+	}](t, w)
 
 	sessions, err := database.ListUserSessions(req.Context(), resp.UserID)
 	if err != nil {

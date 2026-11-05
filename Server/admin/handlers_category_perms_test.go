@@ -279,9 +279,7 @@ func TestCategoryPermissions_HierarchyGuards(t *testing.T) {
 		t.Errorf("bad category id: %d, want 400", code)
 	}
 	w := doRequestRaw(t, f.handler, http.MethodPut, f.path("/permissions/"+itoa(catTargetRole)), f.mod, "{nope")
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("bad body: %d, want 400", w.Code)
-	}
+	expectStatus(t, w, http.StatusBadRequest)
 }
 
 func TestCategoryPermissions_UserRowsWriteAndClearOnSyncedChannels(t *testing.T) {

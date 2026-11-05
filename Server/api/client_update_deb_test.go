@@ -86,9 +86,7 @@ func TestClientUpdate_DebTargetWithoutOptInNoContentEvenWhenDebPublished(t *test
 func TestClientUpdate_DebOptInGetsDeb(t *testing.T) {
 	srv := fakeGitHubRelease(t, "v2.0.0")
 	rr := getClientUpdate(t, srv.URL, "/api/v1/client-update/linux-x86_64-deb/1.0.0?deb_install=pkexec")
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 	entry := platformEntry(t, rr, "linux-x86_64-deb")
 	if got, _ := entry["url"].(string); !strings.HasSuffix(got, "_amd64.deb") {
 		t.Errorf("url = %q, want the amd64 .deb", got)
@@ -101,9 +99,7 @@ func TestClientUpdate_DebOptInGetsDeb(t *testing.T) {
 func TestClientUpdate_DebOptInArm64GetsArm64Deb(t *testing.T) {
 	srv := fakeGitHubRelease(t, "v2.0.0")
 	rr := getClientUpdate(t, srv.URL, "/api/v1/client-update/linux-aarch64-deb/1.0.0?deb_install=pkexec")
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 	entry := platformEntry(t, rr, "linux-aarch64-deb")
 	if got, _ := entry["url"].(string); !strings.HasSuffix(got, "_arm64.deb") {
 		t.Errorf("url = %q, want the arm64 .deb", got)
@@ -113,13 +109,8 @@ func TestClientUpdate_DebOptInArm64GetsArm64Deb(t *testing.T) {
 func TestClientUpdate_DebOptInCurrentGets200WithLatest(t *testing.T) {
 	srv := fakeGitHubRelease(t, "v1.0.0")
 	rr := getClientUpdate(t, srv.URL, "/api/v1/client-update/linux-x86_64-deb/1.0.0?deb_install=pkexec")
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
-	}
-	var resp map[string]any
-	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	requireStatus(t, rr, http.StatusOK)
+	resp := decodeBody[map[string]any](t, rr)
 	if resp["version"] != "1.0.0" {
 		t.Errorf("version = %v, want 1.0.0", resp["version"])
 	}
@@ -132,9 +123,7 @@ func TestClientUpdate_DebOptInCurrentGets200WithLatest(t *testing.T) {
 func TestClientUpdate_DebOptInNewerThanLatestGets200(t *testing.T) {
 	srv := fakeGitHubRelease(t, "v1.0.0")
 	rr := getClientUpdate(t, srv.URL, "/api/v1/client-update/linux-x86_64-deb/3.0.0?deb_install=pkexec")
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 }
 
 func TestClientUpdate_DebOptInUnverifiableManifestNoContent(t *testing.T) {
@@ -166,9 +155,7 @@ func TestClientUpdate_DebOptInSignatureMissingNoContent(t *testing.T) {
 	names := append([]string{"OwnCord_1.0.0_amd64.deb"}, preLP14aAssets...)
 	srv := fakeReleaseWithAssets(t, "v1.0.0", names, nil, nil)
 	rr := getClientUpdate(t, srv.URL, "/api/v1/client-update/linux-x86_64-deb/1.0.0?deb_install=pkexec")
-	if rr.Code != http.StatusNoContent {
-		t.Errorf("status = %d, want 204; body: %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusNoContent)
 }
 
 func TestClientUpdate_OptInIgnoredForNonDebTargets(t *testing.T) {

@@ -3,8 +3,6 @@ package admin
 import (
 	"context"
 	"testing"
-
-	"github.com/J3vb/OwnCord/Server/db"
 )
 
 // TestApplyAndRestart_AuditsTheOutcome pins OC-0391: replacing the running
@@ -30,14 +28,7 @@ func TestApplyAndRestart_AuditsTheOutcome(t *testing.T) {
 		{"failed", "update_failed", "staged server update v9.9.9 was not applied, the running binary is unchanged"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			database, err := db.Open(":memory:")
-			if err != nil {
-				t.Fatalf("db.Open: %v", err)
-			}
-			t.Cleanup(func() { _ = database.Close() })
-			if err := db.Migrate(database); err != nil {
-				t.Fatalf("db.Migrate: %v", err)
-			}
+			database := openMigratedDB(t)
 
 			const actor int64 = 42
 			auditUpdateOutcome(context.Background(), database, actor, tc.action, tc.detail)

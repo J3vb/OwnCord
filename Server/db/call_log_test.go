@@ -31,9 +31,7 @@ func newCallFixture(t *testing.T) callFixture {
 	alice := seedUser(t, database, "alice")
 	bob := seedUser(t, database, "bob")
 	dm, _, err := database.GetOrCreateDMChannel(context.Background(), alice, bob)
-	if err != nil {
-		t.Fatalf("GetOrCreateDMChannel: %v", err)
-	}
+	mustDo(t, "GetOrCreateDMChannel", err)
 	return callFixture{database: database, alice: alice, bob: bob, dm: dm.ID}
 }
 
@@ -60,9 +58,7 @@ func count(t *testing.T, database *db.DB, query string, args ...any) int {
 
 func TestMigration064_ExistingMessagesKindZero(t *testing.T) {
 	database := openMemory(t)
-	if err := db.MigrateFS(database, migrationsBefore(t, "064")); err != nil {
-		t.Fatalf("migrate to 063: %v", err)
-	}
+	mustDo(t, "migrate to 063", db.MigrateFS(database, migrationsBefore(t, "064")))
 	ctx := context.Background()
 	alice := seedUser(t, database, "alice")
 	ch := seedChannelRawSQL(t, database, "general")
@@ -73,9 +69,7 @@ func TestMigration064_ExistingMessagesKindZero(t *testing.T) {
 		t.Fatalf("insert message: %v", err)
 	}
 	id, _ := res.LastInsertId()
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("Migrate to head: %v", err)
-	}
+	mustDo(t, "Migrate to head", db.Migrate(database))
 	if got := count(t, database, `SELECT kind FROM messages WHERE id = ?`, id); got != 0 {
 		t.Errorf("existing message kind = %d, want 0", got)
 	}
@@ -197,17 +191,13 @@ func TestMessagesForAPI_CallRowCarriesKindAndCall(t *testing.T) {
 	f := newCallFixture(t)
 	ctx := context.Background()
 	before, err := f.database.CreateMessage(ctx, f.dm, f.bob, "hi", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	mustDo(t, "CreateMessage", err)
 	row := f.startCall(t, f.alice, f.bob)
 	if _, err := f.database.EndCall(ctx, row.Message.ID, callEnd, "ended"); err != nil {
 		t.Fatalf("EndCall: %v", err)
 	}
 	after, err := f.database.CreateMessage(ctx, f.dm, f.bob, "bye", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	mustDo(t, "CreateMessage", err)
 
 	check := func(name string, msgs []db.MessageAPIResponse, err error) {
 		t.Helper()
@@ -254,9 +244,7 @@ func TestSearch_ExcludesCallRows(t *testing.T) {
 		t.Fatalf("CreateCallLog: %v", err)
 	}
 	ordinary, err := f.database.CreateMessage(ctx, f.dm, f.bob, "zebra message", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	mustDo(t, "CreateMessage", err)
 	for name, run := range map[string]func() ([]db.MessageSearchResult, error){
 		"all channels": func() ([]db.MessageSearchResult, error) {
 			return f.database.SearchMessages(ctx, "zebra", nil, db.SearchPage{Limit: 10})
@@ -325,9 +313,7 @@ func TestEraseAccount_RemovesCallParticipation(t *testing.T) {
 	defer rows.Close() //nolint:errcheck // test read path
 	for rows.Next() {
 		var id int64
-		if err := rows.Scan(&id); err != nil {
-			t.Fatalf("scan: %v", err)
-		}
+		mustDo(t, "scan", rows.Scan(&id))
 		rest = append(rest, id)
 	}
 	if want := []int64{f.bob, third}; !slices.Equal(rest, want) {
@@ -338,9 +324,7 @@ func TestEraseAccount_RemovesCallParticipation(t *testing.T) {
 func TestDeleteChannel_CascadesCallTables(t *testing.T) {
 	f := newCallFixture(t)
 	row := f.startCall(t, f.alice, f.bob)
-	if err := f.database.DeleteChannel(context.Background(), f.dm); err != nil {
-		t.Fatalf("DeleteChannel: %v", err)
-	}
+	mustDo(t, "DeleteChannel", f.database.DeleteChannel(context.Background(), f.dm))
 	for _, table := range []string{"message_calls", "message_call_participants"} {
 		if got := count(t, f.database, `SELECT COUNT(*) FROM `+table+` WHERE message_id = ?`, row.Message.ID); got != 0 {
 			t.Errorf("%s rows after channel delete = %d, want 0", table, got)
@@ -402,13 +386,9 @@ func TestPurgeChannelMessages_SkipsCallRows(t *testing.T) {
 	ctx := context.Background()
 	row := f.startCall(t, f.alice)
 	plain, err := f.database.CreateMessage(ctx, f.dm, f.bob, "hi", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	mustDo(t, "CreateMessage", err)
 	ids, err := f.database.PurgeChannelMessages(ctx, f.dm, 0, 10)
-	if err != nil {
-		t.Fatalf("PurgeChannelMessages: %v", err)
-	}
+	mustDo(t, "PurgeChannelMessages", err)
 	if !slices.Equal(ids, []int64{plain}) {
 		t.Errorf("purged ids = %v, want only %d", ids, plain)
 	}
@@ -422,13 +402,9 @@ func TestPurgeUserChannelMessagesSince_SkipsCallRows(t *testing.T) {
 	ctx := context.Background()
 	row := f.startCall(t, f.alice) // authored by alice
 	plain, err := f.database.CreateMessage(ctx, f.dm, f.alice, "hi", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	mustDo(t, "CreateMessage", err)
 	ids, err := f.database.PurgeUserChannelMessagesSince(ctx, f.dm, f.alice, "2000-01-01 00:00:00", 10)
-	if err != nil {
-		t.Fatalf("PurgeUserChannelMessagesSince: %v", err)
-	}
+	mustDo(t, "PurgeUserChannelMessagesSince", err)
 	if !slices.Equal(ids, []int64{plain}) {
 		t.Errorf("purged ids = %v, want only %d", ids, plain)
 	}
@@ -485,13 +461,9 @@ func TestAddCallParticipants_IdempotentAndSkipsMissingUsers(t *testing.T) {
 	f := newCallFixture(t)
 	ctx := context.Background()
 	row := f.startCall(t, f.alice)
-	if err := f.database.AddCallParticipants(ctx, row.Message.ID, nil); err != nil {
-		t.Fatalf("empty add: %v", err)
-	}
+	mustDo(t, "empty add", f.database.AddCallParticipants(ctx, row.Message.ID, nil))
 	for range 2 {
-		if err := f.database.AddCallParticipants(ctx, row.Message.ID, []int64{f.alice, f.bob, 9999}); err != nil {
-			t.Fatalf("AddCallParticipants: %v", err)
-		}
+		mustDo(t, "AddCallParticipants", f.database.AddCallParticipants(ctx, row.Message.ID, []int64{f.alice, f.bob, 9999}))
 	}
 	ci, err := f.database.GetCallInfo(ctx, row.Message.ID)
 	if err != nil || ci == nil {
@@ -513,24 +485,18 @@ func TestTouchCall_OnlyMovesForwardAndOnlyWhileLive(t *testing.T) {
 		}
 		return oc.LastSeenAt
 	}
-	if err := f.database.TouchCall(ctx, row.Message.ID, "2026-10-16 10:02:00"); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "TouchCall", f.database.TouchCall(ctx, row.Message.ID, "2026-10-16 10:02:00"))
 	if got := seen(); got != "2026-10-16 10:02:00" {
 		t.Fatalf("last_seen_at = %q, want the later time", got)
 	}
-	if err := f.database.TouchCall(ctx, row.Message.ID, callSeen); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "TouchCall", f.database.TouchCall(ctx, row.Message.ID, callSeen))
 	if got := seen(); got != "2026-10-16 10:02:00" {
 		t.Errorf("last_seen_at moved backwards to %q", got)
 	}
 	if _, err := f.database.EndCall(ctx, row.Message.ID, callEnd, "x"); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.database.TouchCall(ctx, row.Message.ID, "2026-10-16 11:00:00"); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "TouchCall", f.database.TouchCall(ctx, row.Message.ID, "2026-10-16 11:00:00"))
 	if n := count(t, f.database, `SELECT COUNT(*) FROM message_calls WHERE message_id = ? AND last_seen_at = '2026-10-16 10:02:00'`, row.Message.ID); n != 1 {
 		t.Error("TouchCall changed an ended call")
 	}
@@ -540,9 +506,7 @@ func TestGetCallInfo_NilForNonCallMessage(t *testing.T) {
 	f := newCallFixture(t)
 	ctx := context.Background()
 	id, err := f.database.CreateMessage(ctx, f.dm, f.alice, "plain", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateMessage", err)
 	if ci, err := f.database.GetCallInfo(ctx, id); err != nil || ci != nil {
 		t.Errorf("GetCallInfo(plain message) = %v, %v; want nil, nil", ci, err)
 	}

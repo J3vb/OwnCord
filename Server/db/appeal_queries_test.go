@@ -20,23 +20,10 @@ import (
 func newAppealQueriesTestDB(t *testing.T) (database *db.DB, ownerID, modID, memberID, member2ID int64) {
 	t.Helper()
 	database = openMigratedMemory(t)
-	var err error
-	ownerID, err = database.CreateUser(context.Background(), "aq-owner", "hash", 1)
-	if err != nil {
-		t.Fatalf("CreateUser(owner): %v", err)
-	}
-	modID, err = database.CreateUser(context.Background(), "aq-mod", "hash", 3)
-	if err != nil {
-		t.Fatalf("CreateUser(mod): %v", err)
-	}
-	memberID, err = database.CreateUser(context.Background(), "aq-member", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser(member): %v", err)
-	}
-	member2ID, err = database.CreateUser(context.Background(), "aq-member2", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser(member2): %v", err)
-	}
+	ownerID = mustCreateUser(t, database, "aq-owner", "hash", 1)
+	modID = mustCreateUser(t, database, "aq-mod", "hash", 3)
+	memberID = mustCreateUser(t, database, "aq-member", "hash", 4)
+	member2ID = mustCreateUser(t, database, "aq-member2", "hash", 4)
 	return database, ownerID, modID, memberID, member2ID
 }
 
@@ -58,39 +45,22 @@ func newAppealQueriesTestDB(t *testing.T) (database *db.DB, ownerID, modID, memb
 // path's own transaction directly: a passing checkAuthority commits the
 // assign, and a failing one refuses without writing anything (P2 review).
 func TestAppealQueries_AssignAppealTx(t *testing.T) {
-	database, ownerID, modID, memberID, _ := newAppealQueriesTestDB(t)
 	ctx := context.Background()
-
-	actionID, err := database.WarnUser(ctx, memberID, ownerID, nil, "x")
-	if err != nil {
-		t.Fatalf("WarnUser: %v", err)
-	}
-	appealID, err := database.InsertAppeal(ctx, "pub-assigntx", actionID, memberID, "please")
-	if err != nil {
-		t.Fatalf("InsertAppeal: %v", err)
-	}
+	database, ownerID, modID, memberID, _, appealID := newOpenAppeal(t, "pub-assigntx")
 
 	ok, err := database.AssignAppealTx(ctx, appealID, modID, 0, modID, false, 0, 0, 0, simpleAuthorityCheck)
-	if err != nil {
-		t.Fatalf("AssignAppealTx: %v", err)
-	}
+	mustDo(t, "AssignAppealTx", err)
 	if !ok {
 		t.Fatal("AssignAppealTx reported no row affected")
 	}
-	got, err := database.GetAppeal(ctx, appealID)
-	if err != nil {
-		t.Fatalf("GetAppeal: %v", err)
-	}
+	got := mustGetAppeal(t, database, appealID)
 	if got.State != "assigned" || got.AssigneeID != modID {
 		t.Fatalf("appeal after AssignAppealTx = %+v, want assigned/%d", got, modID)
 	}
 
 	// A failing checkAuthority refuses, and nothing changes.
 	appealID2, err := database.InsertAppeal(ctx, "pub-assigntx-2", func() int64 {
-		id, err := database.WarnUser(ctx, memberID, ownerID, nil, "y")
-		if err != nil {
-			t.Fatalf("WarnUser (2nd): %v", err)
-		}
+		id := mustWarn(t, database, memberID, ownerID, "y")
 		return id
 	}(), memberID, "please")
 	if err != nil {
@@ -100,10 +70,7 @@ func TestAppealQueries_AssignAppealTx(t *testing.T) {
 	if _, err := database.AssignAppealTx(ctx, appealID2, modID, 0, modID, false, 0, 0, 0, alwaysFails); !errors.Is(err, db.ErrForbidden) {
 		t.Fatalf("AssignAppealTx with a failing authority check: want db.ErrForbidden, got %v", err)
 	}
-	unchanged, err := database.GetAppeal(ctx, appealID2)
-	if err != nil {
-		t.Fatalf("GetAppeal (2nd): %v", err)
-	}
+	unchanged := mustGetAppeal(t, database, appealID2)
 	if unchanged.State != "open" || unchanged.AssigneeID != 0 {
 		t.Fatalf("appeal after the refused AssignAppealTx = %+v, want unchanged (open/0)", unchanged)
 	}
@@ -135,10 +102,7 @@ func TestAppealQueries_InsertAppealConcurrentBothInFlight(t *testing.T) {
 	database, ownerID, _, memberID, _ := newAppealQueriesTestDB(t)
 	ctx := context.Background()
 
-	actionID, err := database.WarnUser(ctx, memberID, ownerID, nil, "x")
-	if err != nil {
-		t.Fatalf("WarnUser: %v", err)
-	}
+	actionID := mustWarn(t, database, memberID, ownerID, "x")
 
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -196,19 +160,13 @@ func TestAppealQueries_InsertFindGetLifecycle(t *testing.T) {
 	database, ownerID, modID, memberID, _ := newAppealQueriesTestDB(t)
 	ctx := context.Background()
 
-	actionID, err := database.WarnUser(ctx, memberID, ownerID, nil, "be nice")
-	if err != nil {
-		t.Fatalf("WarnUser: %v", err)
-	}
+	actionID := mustWarn(t, database, memberID, ownerID, "be nice")
 
 	if id, err := database.FindAppealForAction(ctx, actionID); err != nil || id != 0 {
 		t.Fatalf("FindAppealForAction before any appeal = (%d, %v), want (0, nil)", id, err)
 	}
 
-	appealID, err := database.InsertAppeal(ctx, "pub-aq-1", actionID, memberID, "please reconsider")
-	if err != nil {
-		t.Fatalf("InsertAppeal: %v", err)
-	}
+	appealID := mustInsertAppeal(t, database, "pub-aq-1", actionID, memberID, "please reconsider")
 
 	if id, err := database.FindAppealForAction(ctx, actionID); err != nil || id != appealID {
 		t.Fatalf("FindAppealForAction after insert = (%d, %v), want (%d, nil)", id, err, appealID)
@@ -220,18 +178,13 @@ func TestAppealQueries_InsertFindGetLifecycle(t *testing.T) {
 		t.Fatalf("second InsertAppeal for the same action: want db.ErrConflict, got %v", err)
 	}
 
-	got, err := database.GetAppeal(ctx, appealID)
-	if err != nil {
-		t.Fatalf("GetAppeal: %v", err)
-	}
+	got := mustGetAppeal(t, database, appealID)
 	if got.ActionID != actionID || got.AppellantID != memberID || got.Body != "please reconsider" || got.State != "open" {
 		t.Fatalf("GetAppeal = %+v, want action %d, appellant %d, body %q, state open", got, actionID, memberID, "please reconsider")
 	}
 
 	byPublic, err := database.GetAppealByPublicID(ctx, "pub-aq-1")
-	if err != nil {
-		t.Fatalf("GetAppealByPublicID: %v", err)
-	}
+	mustDo(t, "GetAppealByPublicID", err)
 	if byPublic.ID != appealID {
 		t.Fatalf("GetAppealByPublicID.ID = %d, want %d", byPublic.ID, appealID)
 	}
@@ -243,9 +196,7 @@ func TestAppealQueries_InsertFindGetLifecycle(t *testing.T) {
 	}
 
 	mine, err := database.ListAppealsMine(ctx, memberID)
-	if err != nil {
-		t.Fatalf("ListAppealsMine: %v", err)
-	}
+	mustDo(t, "ListAppealsMine", err)
 	if len(mine) != 1 || mine[0].PublicID != "pub-aq-1" {
 		t.Fatalf("ListAppealsMine = %+v, want one row for pub-aq-1", mine)
 	}
@@ -271,9 +222,7 @@ func TestAppealQueries_InsertFindGetLifecycle(t *testing.T) {
 
 	// ── Assign ──
 	ok, err := database.AssignAppeal(ctx, appealID, modID, 0)
-	if err != nil {
-		t.Fatalf("AssignAppeal: %v", err)
-	}
+	mustDo(t, "AssignAppeal", err)
 	if !ok {
 		t.Fatal("AssignAppeal reported no row affected")
 	}
@@ -288,11 +237,7 @@ func TestAppealQueries_InsertFindGetLifecycle(t *testing.T) {
 	// ── Decide ──
 	// The observed state is now "assigned" (the owner assigned it above),
 	// with the owner as the observed assignee (Claim 5 review).
-	action, err := database.GetModerationAction(ctx, actionID)
-	if err != nil {
-		t.Fatalf("GetModerationAction: %v", err)
-	}
-	reversal := db.AppealedAction{ID: action.ID, Kind: action.Kind, TargetID: action.TargetID}
+	reversal := appealedActionOf(ctx, t, database, actionID)
 	result, soleModerator, _, err := database.DecideAppealTx(ctx, appealID, "assigned", modID, "upheld", ownerID, "no",
 		false, memberID, permissions.ModerateMembers, permissions.Administrator, reversal, nil)
 	if err != nil {
@@ -304,10 +249,7 @@ func TestAppealQueries_InsertFindGetLifecycle(t *testing.T) {
 	if soleModerator {
 		t.Fatal("soleModerator = true, want false (the owner did not take the appealed action)")
 	}
-	decided, err := database.GetAppeal(ctx, appealID)
-	if err != nil {
-		t.Fatalf("GetAppeal after decision: %v", err)
-	}
+	decided := mustGetAppeal(t, database, appealID)
 	if decided.State != "upheld" || decided.DecidedBy != ownerID || decided.DecisionNote != "no" || decided.DecidedAt == nil {
 		t.Fatalf("appeal after decision = %+v, want state upheld, decided_by %d, note %q, decided_at set", decided, ownerID, "no")
 	}
@@ -353,17 +295,8 @@ func simpleAuthorityCheck(rolePerms int64, banned bool, banExpires *string) erro
 // authorization and DecideAppealTx's own BeginTx — proving the transaction
 // boundary, not mere sequencing, is what the guard depends on.
 func TestDecideAppealTx_BitRevokedBeforeTxRefuses(t *testing.T) {
-	database, ownerID, modID, memberID, _ := newAppealQueriesTestDB(t)
 	ctx := context.Background()
-
-	actionID, err := database.WarnUser(ctx, memberID, ownerID, nil, "x")
-	if err != nil {
-		t.Fatalf("WarnUser: %v", err)
-	}
-	appealID, err := database.InsertAppeal(ctx, "pub-bit-revoked", actionID, memberID, "please")
-	if err != nil {
-		t.Fatalf("InsertAppeal: %v", err)
-	}
+	database, _, modID, memberID, actionID, appealID := newOpenAppeal(t, "pub-bit-revoked")
 
 	db.SetAppealDecideInTxHookForTest(func(ctx context.Context, q *dbgen.Queries) error {
 		// demote to plain Member: replace the held roles, then re-mirror the top role
@@ -377,23 +310,14 @@ func TestDecideAppealTx_BitRevokedBeforeTxRefuses(t *testing.T) {
 	})
 	defer db.SetAppealDecideInTxHookForTest(nil)
 
-	action, err := database.GetModerationAction(ctx, actionID)
-	if err != nil {
-		t.Fatalf("GetModerationAction: %v", err)
-	}
-	reversal := db.AppealedAction{ID: action.ID, Kind: action.Kind, TargetID: action.TargetID}
-	result, _, _, err := database.DecideAppealTx(ctx, appealID, "open", 0, "upheld", modID, "no",
-		false, memberID, permissions.ModerateMembers, permissions.Administrator, reversal, simpleAuthorityCheck)
+	result, err := decideOpenAppeal(ctx, t, database, appealID, actionID, "upheld", modID, "no", memberID, simpleAuthorityCheck)
 	if err != nil {
 		t.Fatalf("DecideAppealTx: %v", err)
 	}
 	if result != db.AppealWriteForbidden {
 		t.Fatalf("DecideAppealTx after the decider's bit was revoked pre-tx: result = %v, want AppealWriteForbidden", result)
 	}
-	got, err := database.GetAppeal(ctx, appealID)
-	if err != nil {
-		t.Fatalf("GetAppeal: %v", err)
-	}
+	got := mustGetAppeal(t, database, appealID)
 	if got.State != "open" || got.DecidedBy != 0 {
 		t.Fatalf("appeal after the refused decide = %+v, want unchanged (open, decided_by 0)", got)
 	}
@@ -403,17 +327,8 @@ func TestDecideAppealTx_BitRevokedBeforeTxRefuses(t *testing.T) {
 // permanent ban landing on the decider in the same pre-BeginTx gap must
 // refuse identically.
 func TestDecideAppealTx_BanLandedBeforeTxRefuses(t *testing.T) {
-	database, ownerID, modID, memberID, _ := newAppealQueriesTestDB(t)
 	ctx := context.Background()
-
-	actionID, err := database.WarnUser(ctx, memberID, ownerID, nil, "x")
-	if err != nil {
-		t.Fatalf("WarnUser: %v", err)
-	}
-	appealID, err := database.InsertAppeal(ctx, "pub-ban-landed", actionID, memberID, "please")
-	if err != nil {
-		t.Fatalf("InsertAppeal: %v", err)
-	}
+	database, _, modID, memberID, actionID, appealID := newOpenAppeal(t, "pub-ban-landed")
 
 	db.SetAppealDecideInTxHookForTest(func(ctx context.Context, q *dbgen.Queries) error {
 		reason := "spam"
@@ -421,13 +336,7 @@ func TestDecideAppealTx_BanLandedBeforeTxRefuses(t *testing.T) {
 	})
 	defer db.SetAppealDecideInTxHookForTest(nil)
 
-	action, err := database.GetModerationAction(ctx, actionID)
-	if err != nil {
-		t.Fatalf("GetModerationAction: %v", err)
-	}
-	reversal := db.AppealedAction{ID: action.ID, Kind: action.Kind, TargetID: action.TargetID}
-	result, _, _, err := database.DecideAppealTx(ctx, appealID, "open", 0, "upheld", modID, "no",
-		false, memberID, permissions.ModerateMembers, permissions.Administrator, reversal, simpleAuthorityCheck)
+	result, err := decideOpenAppeal(ctx, t, database, appealID, actionID, "upheld", modID, "no", memberID, simpleAuthorityCheck)
 	if err != nil {
 		t.Fatalf("DecideAppealTx: %v", err)
 	}
@@ -452,32 +361,18 @@ func TestDecideAppealTx_DeciderDemotedBeforeTxRefusesOverturn(t *testing.T) {
 
 	// A role equal to the target's Member position (40) but still holding
 	// MODERATE_MEMBERS: rank alone must be what refuses the overturn.
-	equalRankMod, err := database.CreateRole(ctx, "equal-rank-mod", nil, permissions.ModerateMembers, 40, false, false)
-	if err != nil {
-		t.Fatalf("CreateRole: %v", err)
-	}
+	equalRankMod := mustCreateRole(t, database, "equal-rank-mod", nil, permissions.ModerateMembers, 40, false, false)
 
 	actionID, _, err := database.TimeoutUser(ctx, memberID, ownerID, nil, "cool off", time.Now().Add(time.Hour))
-	if err != nil {
-		t.Fatalf("TimeoutUser: %v", err)
-	}
-	appealID, err := database.InsertAppeal(ctx, "pub-overturn-demoted", actionID, memberID, "please")
-	if err != nil {
-		t.Fatalf("InsertAppeal: %v", err)
-	}
+	mustDo(t, "TimeoutUser", err)
+	appealID := mustInsertAppeal(t, database, "pub-overturn-demoted", actionID, memberID, "please")
 
 	db.SetAppealDecideInTxHookForTest(func(ctx context.Context, q *dbgen.Queries) error {
 		return replaceUserRoleTx(ctx, q, modID, equalRankMod.ID)
 	})
 	defer db.SetAppealDecideInTxHookForTest(nil)
 
-	action, err := database.GetModerationAction(ctx, actionID)
-	if err != nil {
-		t.Fatalf("GetModerationAction: %v", err)
-	}
-	reversal := db.AppealedAction{ID: action.ID, Kind: action.Kind, TargetID: action.TargetID}
-	result, _, _, err := database.DecideAppealTx(ctx, appealID, "open", 0, "overturned", modID, "fine",
-		false, memberID, permissions.ModerateMembers, permissions.Administrator, reversal, simpleAuthorityCheck)
+	result, err := decideOpenAppeal(ctx, t, database, appealID, actionID, "overturned", modID, "fine", memberID, simpleAuthorityCheck)
 	if err != nil {
 		t.Fatalf("DecideAppealTx: %v", err)
 	}
@@ -485,16 +380,11 @@ func TestDecideAppealTx_DeciderDemotedBeforeTxRefusesOverturn(t *testing.T) {
 		t.Fatalf("DecideAppealTx after the decider was demoted to the target's rank pre-tx: result = %v, want AppealWriteForbidden", result)
 	}
 	active, err := database.HasActiveTimeout(ctx, memberID)
-	if err != nil {
-		t.Fatalf("HasActiveTimeout: %v", err)
-	}
+	mustDo(t, "HasActiveTimeout", err)
 	if !active {
 		t.Fatal("timeout was lifted despite the demoted decider's overturn being refused")
 	}
-	got, err := database.GetAppeal(ctx, appealID)
-	if err != nil {
-		t.Fatalf("GetAppeal: %v", err)
-	}
+	got := mustGetAppeal(t, database, appealID)
 	if got.State != "open" {
 		t.Fatalf("appeal state = %q, want open (the refused overturn must not commit)", got.State)
 	}
@@ -513,19 +403,10 @@ func TestAssignAppealForced_BitRevokedBeforeTxRefuses(t *testing.T) {
 	ctx := context.Background()
 
 	// A role that outranks the Member role (position 40) but holds no bit.
-	unprivilegedButHighRank, err := database.CreateRole(ctx, "unprivileged-high-rank", nil, 0, 70, false, false)
-	if err != nil {
-		t.Fatalf("CreateRole: %v", err)
-	}
+	unprivilegedButHighRank := mustCreateRole(t, database, "unprivileged-high-rank", nil, 0, 70, false, false)
 
-	actionID, err := database.WarnUser(ctx, memberID, ownerID, nil, "x")
-	if err != nil {
-		t.Fatalf("WarnUser: %v", err)
-	}
-	appealID, err := database.InsertAppeal(ctx, "pub-forced-bit-revoked", actionID, memberID, "please")
-	if err != nil {
-		t.Fatalf("InsertAppeal: %v", err)
-	}
+	actionID := mustWarn(t, database, memberID, ownerID, "x")
+	appealID := mustInsertAppeal(t, database, "pub-forced-bit-revoked", actionID, memberID, "please")
 	if ok, err := database.AssignAppeal(ctx, appealID, memberID, 0); err != nil || !ok {
 		t.Fatalf("AssignAppeal: (%v, %v)", ok, err)
 	}
@@ -554,26 +435,14 @@ func TestDecideAppealTx_EligibilityCountIsFreshInsideTheTransaction(t *testing.T
 	ctx := context.Background()
 
 	modID, err := database.CreateUser(ctx, "f2-sole-mod", "hash", 3) // Moderator: MODERATE_MEMBERS
-	if err != nil {
-		t.Fatalf("CreateUser(mod): %v", err)
-	}
+	mustDo(t, "CreateUser(mod)", err)
 	memberID, err := database.CreateUser(ctx, "f2-member", "hash", 4) // Member: no bit
-	if err != nil {
-		t.Fatalf("CreateUser(member): %v", err)
-	}
+	mustDo(t, "CreateUser(member)", err)
 	secondModID, err := database.CreateUser(ctx, "f2-second-mod", "hash", 4) // starts as a plain Member
-	if err != nil {
-		t.Fatalf("CreateUser(second mod, starts unprivileged): %v", err)
-	}
+	mustDo(t, "CreateUser(second mod, starts unprivileged)", err)
 
-	actionID, err := database.WarnUser(ctx, memberID, modID, nil, "x")
-	if err != nil {
-		t.Fatalf("WarnUser: %v", err)
-	}
-	appealID, err := database.InsertAppeal(ctx, "pub-f2-fresh", actionID, memberID, "please")
-	if err != nil {
-		t.Fatalf("InsertAppeal: %v", err)
-	}
+	actionID := mustWarn(t, database, memberID, modID, "x")
+	appealID := mustInsertAppeal(t, database, "pub-f2-fresh", actionID, memberID, "please")
 
 	db.SetAppealDecideInTxHookForTest(func(ctx context.Context, q *dbgen.Queries) error {
 		// Promote the second user to Moderator in the exact gap between the
@@ -583,11 +452,7 @@ func TestDecideAppealTx_EligibilityCountIsFreshInsideTheTransaction(t *testing.T
 	})
 	defer db.SetAppealDecideInTxHookForTest(nil)
 
-	action, err := database.GetModerationAction(ctx, actionID)
-	if err != nil {
-		t.Fatalf("GetModerationAction: %v", err)
-	}
-	reversal := db.AppealedAction{ID: action.ID, Kind: action.Kind, TargetID: action.TargetID}
+	reversal := appealedActionOf(ctx, t, database, actionID)
 	result, soleModerator, _, err := database.DecideAppealTx(ctx, appealID, "open", 0, "upheld", modID, "self-serving",
 		true, memberID, permissions.ModerateMembers, permissions.Administrator, reversal, nil)
 	if err != nil {
@@ -611,27 +476,12 @@ func TestAssignAppealTx_EligibilityCheckIsFreshInsideTheTransaction(t *testing.T
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 
-	modID, err := database.CreateUser(ctx, "assigntx-sole-mod", "hash", 3)
-	if err != nil {
-		t.Fatalf("CreateUser(mod): %v", err)
-	}
-	memberID, err := database.CreateUser(ctx, "assigntx-member", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser(member): %v", err)
-	}
-	secondModID, err := database.CreateUser(ctx, "assigntx-second-mod", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser(second mod, starts unprivileged): %v", err)
-	}
+	modID := mustCreateUser(t, database, "assigntx-sole-mod", "hash", 3)
+	memberID := mustCreateUser(t, database, "assigntx-member", "hash", 4)
+	secondModID := mustCreateUser(t, database, "assigntx-second-mod", "hash", 4)
 
-	actionID, err := database.WarnUser(ctx, memberID, modID, nil, "x")
-	if err != nil {
-		t.Fatalf("WarnUser: %v", err)
-	}
-	appealID, err := database.InsertAppeal(ctx, "pub-assigntx-fresh", actionID, memberID, "please")
-	if err != nil {
-		t.Fatalf("InsertAppeal: %v", err)
-	}
+	actionID := mustWarn(t, database, memberID, modID, "x")
+	appealID := mustInsertAppeal(t, database, "pub-assigntx-fresh", actionID, memberID, "please")
 
 	db.SetAppealAssignInTxHookForTest(func(ctx context.Context, q *dbgen.Queries) error {
 		return replaceUserRoleTx(ctx, q, secondModID, 3)
@@ -664,31 +514,13 @@ func TestAssignAppealForced_EligibilityCheckIsFreshInsideTheTransaction(t *testi
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 
-	modID, err := database.CreateUser(ctx, "assignforced-mod", "hash", 3)
-	if err != nil {
-		t.Fatalf("CreateUser(mod): %v", err)
-	}
-	memberID, err := database.CreateUser(ctx, "assignforced-member", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser(member): %v", err)
-	}
-	otherMemberID, err := database.CreateUser(ctx, "assignforced-other-member", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser(other member): %v", err)
-	}
-	secondModID, err := database.CreateUser(ctx, "assignforced-second-mod", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser(second mod, starts unprivileged): %v", err)
-	}
+	modID := mustCreateUser(t, database, "assignforced-mod", "hash", 3)
+	memberID := mustCreateUser(t, database, "assignforced-member", "hash", 4)
+	otherMemberID := mustCreateUser(t, database, "assignforced-other-member", "hash", 4)
+	secondModID := mustCreateUser(t, database, "assignforced-second-mod", "hash", 4)
 
-	actionID, err := database.WarnUser(ctx, memberID, modID, nil, "x")
-	if err != nil {
-		t.Fatalf("WarnUser: %v", err)
-	}
-	appealID, err := database.InsertAppeal(ctx, "pub-assignforced-fresh", actionID, memberID, "please")
-	if err != nil {
-		t.Fatalf("InsertAppeal: %v", err)
-	}
+	actionID := mustWarn(t, database, memberID, modID, "x")
+	appealID := mustInsertAppeal(t, database, "pub-assignforced-fresh", actionID, memberID, "please")
 	// Assigned to a low-rank, uninvolved member first, so modID
 	// force-reassigning to itself outranks the observed assignee.
 	if ok, err := database.AssignAppeal(ctx, appealID, otherMemberID, 0); err != nil || !ok {
@@ -714,27 +546,14 @@ func TestAppealQueries_DecideAppealTxAppliesEachReversalKind(t *testing.T) {
 		ctx := context.Background()
 		database, ownerID, modID, memberID, _ := newAppealQueriesTestDB(t)
 		actionID, _, err := database.TimeoutUser(ctx, memberID, ownerID, nil, "cool off", time.Now().Add(time.Hour))
-		if err != nil {
-			t.Fatalf("TimeoutUser: %v", err)
-		}
-		appealID, err := database.InsertAppeal(ctx, "pub-reversal-timeout", actionID, memberID, "please")
-		if err != nil {
-			t.Fatalf("InsertAppeal: %v", err)
-		}
-		action, err := database.GetModerationAction(ctx, actionID)
-		if err != nil {
-			t.Fatalf("GetModerationAction: %v", err)
-		}
-		reversal := db.AppealedAction{ID: action.ID, Kind: action.Kind, TargetID: action.TargetID}
-		result, _, _, err := database.DecideAppealTx(ctx, appealID, "open", 0, "overturned", modID, "fine",
-			false, memberID, permissions.ModerateMembers, permissions.Administrator, reversal, nil)
+		mustDo(t, "TimeoutUser", err)
+		appealID := mustInsertAppeal(t, database, "pub-reversal-timeout", actionID, memberID, "please")
+		result, err := decideOpenAppeal(ctx, t, database, appealID, actionID, "overturned", modID, "fine", memberID, nil)
 		if err != nil || result != db.AppealWriteOK {
 			t.Fatalf("DecideAppealTx: (%v, %v), want (AppealWriteOK, nil)", result, err)
 		}
 		active, err := database.HasActiveTimeout(ctx, memberID)
-		if err != nil {
-			t.Fatalf("HasActiveTimeout: %v", err)
-		}
+		mustDo(t, "HasActiveTimeout", err)
 		if active {
 			t.Fatal("timeout still active after overturning it")
 		}
@@ -744,27 +563,13 @@ func TestAppealQueries_DecideAppealTxAppliesEachReversalKind(t *testing.T) {
 		ctx := context.Background()
 		database, ownerID, modID, memberID, _ := newAppealQueriesTestDB(t)
 		actionID, err := database.BanUserWithAction(ctx, memberID, "spam", nil, ownerID, nil)
-		if err != nil {
-			t.Fatalf("BanUserWithAction: %v", err)
-		}
-		appealID, err := database.InsertAppeal(ctx, "pub-reversal-ban", actionID, memberID, "please")
-		if err != nil {
-			t.Fatalf("InsertAppeal: %v", err)
-		}
-		action, err := database.GetModerationAction(ctx, actionID)
-		if err != nil {
-			t.Fatalf("GetModerationAction: %v", err)
-		}
-		reversal := db.AppealedAction{ID: action.ID, Kind: action.Kind, TargetID: action.TargetID}
-		result, _, _, err := database.DecideAppealTx(ctx, appealID, "open", 0, "overturned", modID, "fine",
-			false, memberID, permissions.ModerateMembers, permissions.Administrator, reversal, nil)
+		mustDo(t, "BanUserWithAction", err)
+		appealID := mustInsertAppeal(t, database, "pub-reversal-ban", actionID, memberID, "please")
+		result, err := decideOpenAppeal(ctx, t, database, appealID, actionID, "overturned", modID, "fine", memberID, nil)
 		if err != nil || result != db.AppealWriteOK {
 			t.Fatalf("DecideAppealTx: (%v, %v), want (AppealWriteOK, nil)", result, err)
 		}
-		target, err := database.GetUserByID(ctx, memberID)
-		if err != nil {
-			t.Fatalf("GetUserByID: %v", err)
-		}
+		target := mustGetUserByID(t, database, memberID)
 		if target.Banned {
 			t.Fatal("target still banned after overturning the ban")
 		}
@@ -773,28 +578,14 @@ func TestAppealQueries_DecideAppealTxAppliesEachReversalKind(t *testing.T) {
 	t.Run("warning", func(t *testing.T) {
 		ctx := context.Background()
 		database, ownerID, modID, memberID, _ := newAppealQueriesTestDB(t)
-		actionID, err := database.WarnUser(ctx, memberID, ownerID, nil, "be nice")
-		if err != nil {
-			t.Fatalf("WarnUser: %v", err)
-		}
-		appealID, err := database.InsertAppeal(ctx, "pub-reversal-warning", actionID, memberID, "please")
-		if err != nil {
-			t.Fatalf("InsertAppeal: %v", err)
-		}
-		action, err := database.GetModerationAction(ctx, actionID)
-		if err != nil {
-			t.Fatalf("GetModerationAction: %v", err)
-		}
-		reversal := db.AppealedAction{ID: action.ID, Kind: action.Kind, TargetID: action.TargetID}
-		result, _, _, err := database.DecideAppealTx(ctx, appealID, "open", 0, "overturned", modID, "fine",
-			false, memberID, permissions.ModerateMembers, permissions.Administrator, reversal, nil)
+		actionID := mustWarn(t, database, memberID, ownerID, "be nice")
+		appealID := mustInsertAppeal(t, database, "pub-reversal-warning", actionID, memberID, "please")
+		result, err := decideOpenAppeal(ctx, t, database, appealID, actionID, "overturned", modID, "fine", memberID, nil)
 		if err != nil || result != db.AppealWriteOK {
 			t.Fatalf("DecideAppealTx: (%v, %v), want (AppealWriteOK, nil)", result, err)
 		}
 		notices, err := database.ListUnacknowledgedWarnings(ctx, memberID)
-		if err != nil {
-			t.Fatalf("ListUnacknowledgedWarnings: %v", err)
-		}
+		mustDo(t, "ListUnacknowledgedWarnings", err)
 		if len(notices) != 0 {
 			t.Fatalf("unacknowledged notices after overturning a warning = %d, want 0", len(notices))
 		}
@@ -803,21 +594,10 @@ func TestAppealQueries_DecideAppealTxAppliesEachReversalKind(t *testing.T) {
 	t.Run("removal", func(t *testing.T) {
 		ctx := context.Background()
 		database, ownerID, modID, memberID, _ := newAppealQueriesTestDB(t)
-		chID, err := database.CreateChannel(ctx, "reversal-removal", "text", "", "", 0)
-		if err != nil {
-			t.Fatalf("CreateChannel: %v", err)
-		}
-		msgID, err := database.CreateMessage(ctx, chID, memberID, "reported content", nil)
-		if err != nil {
-			t.Fatalf("CreateMessage: %v", err)
-		}
-		if err := database.DeleteMessageWithRemoval(ctx, msgID, ownerID, true, memberID, nil, "violated rule 3"); err != nil {
-			t.Fatalf("DeleteMessageWithRemoval: %v", err)
-		}
-		rows, err := database.ListModerationActionsForTarget(ctx, memberID)
-		if err != nil {
-			t.Fatalf("ListModerationActionsForTarget: %v", err)
-		}
+		chID := mustCreateChannel(t, database, "reversal-removal", "text", "", "", 0)
+		msgID := mustCreateMessage(t, database, chID, memberID, "reported content", nil)
+		mustDo(t, "DeleteMessageWithRemoval", database.DeleteMessageWithRemoval(ctx, msgID, ownerID, true, memberID, nil, "violated rule 3"))
+		rows := mustListModerationActionsForTarget(t, database, memberID)
 		var actionID int64
 		for i := range rows {
 			if r := &rows[i]; r.Kind == "removal" {
@@ -827,17 +607,8 @@ func TestAppealQueries_DecideAppealTxAppliesEachReversalKind(t *testing.T) {
 		if actionID == 0 {
 			t.Fatal("no removal ledger row found")
 		}
-		appealID, err := database.InsertAppeal(ctx, "pub-reversal-removal", actionID, memberID, "please")
-		if err != nil {
-			t.Fatalf("InsertAppeal: %v", err)
-		}
-		action, err := database.GetModerationAction(ctx, actionID)
-		if err != nil {
-			t.Fatalf("GetModerationAction: %v", err)
-		}
-		reversal := db.AppealedAction{ID: action.ID, Kind: action.Kind, TargetID: action.TargetID}
-		result, _, _, err := database.DecideAppealTx(ctx, appealID, "open", 0, "overturned", modID, "fine",
-			false, memberID, permissions.ModerateMembers, permissions.Administrator, reversal, nil)
+		appealID := mustInsertAppeal(t, database, "pub-reversal-removal", actionID, memberID, "please")
+		result, err := decideOpenAppeal(ctx, t, database, appealID, actionID, "overturned", modID, "fine", memberID, nil)
 		if err != nil || result != db.AppealWriteOK {
 			t.Fatalf("DecideAppealTx: (%v, %v), want (AppealWriteOK, nil) — removal is record-only, never an error", result, err)
 		}
@@ -856,20 +627,11 @@ func TestAppealQueries_DecideRefusesAssignThatLandedAfterTheCallersRead(t *testi
 	database, ownerID, modID, memberID, _ := newAppealQueriesTestDB(t)
 	ctx := context.Background()
 
-	actionID, err := database.WarnUser(ctx, memberID, ownerID, nil, "be nice")
-	if err != nil {
-		t.Fatalf("WarnUser: %v", err)
-	}
-	appealID, err := database.InsertAppeal(ctx, "pub-aq-race", actionID, memberID, "please")
-	if err != nil {
-		t.Fatalf("InsertAppeal: %v", err)
-	}
+	actionID := mustWarn(t, database, memberID, ownerID, "be nice")
+	appealID := mustInsertAppeal(t, database, "pub-aq-race", actionID, memberID, "please")
 
 	// modID "reads" the appeal here: open, unassigned.
-	observed, err := database.GetAppeal(ctx, appealID)
-	if err != nil {
-		t.Fatalf("GetAppeal (the caller's read): %v", err)
-	}
+	observed := mustGetAppeal(t, database, appealID)
 	if observed.State != "open" || observed.AssigneeID != 0 {
 		t.Fatalf("observed appeal = %+v, want open/unassigned", observed)
 	}
@@ -879,11 +641,7 @@ func TestAppealQueries_DecideRefusesAssignThatLandedAfterTheCallersRead(t *testi
 		t.Fatalf("AssignAppeal(owner): (%v, %v), want (true, nil)", ok, err)
 	}
 
-	action, err := database.GetModerationAction(ctx, actionID)
-	if err != nil {
-		t.Fatalf("GetModerationAction: %v", err)
-	}
-	reversal := db.AppealedAction{ID: action.ID, Kind: action.Kind, TargetID: action.TargetID}
+	reversal := appealedActionOf(ctx, t, database, actionID)
 	// modID now decides using its STALE read (observed.State, observed.AssigneeID).
 	result, _, _, err := database.DecideAppealTx(ctx, appealID, observed.State, observed.AssigneeID, "upheld", modID, "stale",
 		false, memberID, permissions.ModerateMembers, permissions.Administrator, reversal, nil)
@@ -894,10 +652,7 @@ func TestAppealQueries_DecideRefusesAssignThatLandedAfterTheCallersRead(t *testi
 		t.Fatalf("DecideAppealTx with a stale observed read: result = %v, want AppealWriteConflict", result)
 	}
 
-	after, err := database.GetAppeal(ctx, appealID)
-	if err != nil {
-		t.Fatalf("GetAppeal after the refused decide: %v", err)
-	}
+	after := mustGetAppeal(t, database, appealID)
 	if after.State != "assigned" || after.AssigneeID != ownerID {
 		t.Fatalf("appeal after the refused decide = %+v, want the real assignment (assigned/%d) untouched", after, ownerID)
 	}
@@ -930,41 +685,22 @@ func TestAppealQueries_DecideRefusesAssignThatLandedAfterTheCallersRead(t *testi
 // same observed values the precheck itself would accept), isolates the
 // UPDATE's guard.
 func TestAppealQueries_DecideGuardCatchesStateChangeAloneWithAssigneeUnchanged(t *testing.T) {
-	database, ownerID, modID, memberID, _ := newAppealQueriesTestDB(t)
 	ctx := context.Background()
-
-	actionID, err := database.WarnUser(ctx, memberID, ownerID, nil, "x")
-	if err != nil {
-		t.Fatalf("WarnUser: %v", err)
-	}
-	appealID, err := database.InsertAppeal(ctx, "pub-state-alone", actionID, memberID, "please")
-	if err != nil {
-		t.Fatalf("InsertAppeal: %v", err)
-	}
+	database, _, modID, memberID, actionID, appealID := newOpenAppeal(t, "pub-state-alone")
 	if ok, err := database.AssignAppeal(ctx, appealID, modID, 0); err != nil || !ok {
 		t.Fatalf("AssignAppeal: (%v, %v)", ok, err)
 	}
 	// The caller "reads" here: assigned to modID.
-	observed, err := database.GetAppeal(ctx, appealID)
-	if err != nil {
-		t.Fatalf("GetAppeal (the caller's read): %v", err)
-	}
+	observed := mustGetAppeal(t, database, appealID)
 
-	action, err := database.GetModerationAction(ctx, actionID)
-	if err != nil {
-		t.Fatalf("GetModerationAction: %v", err)
-	}
-	reversal := db.AppealedAction{ID: action.ID, Kind: action.Kind, TargetID: action.TargetID}
+	reversal := appealedActionOf(ctx, t, database, actionID)
 
 	// A REAL decide lands first: state changes, assignee_id does NOT.
 	if result, _, _, err := database.DecideAppealTx(ctx, appealID, observed.State, observed.AssigneeID, "upheld", modID, "real",
 		false, memberID, permissions.ModerateMembers, permissions.Administrator, reversal, nil); err != nil || result != db.AppealWriteOK {
 		t.Fatalf("real DecideAppealTx: (%v, %v), want (AppealWriteOK, nil)", result, err)
 	}
-	after, err := database.GetAppeal(ctx, appealID)
-	if err != nil {
-		t.Fatalf("GetAppeal after the real decide: %v", err)
-	}
+	after := mustGetAppeal(t, database, appealID)
 	if after.AssigneeID != observed.AssigneeID {
 		t.Fatalf("assignee_id changed by Decide (=%d, was %d) — this test needs it to stay put to isolate the state predicate", after.AssigneeID, observed.AssigneeID)
 	}
@@ -974,9 +710,7 @@ func TestAppealQueries_DecideGuardCatchesStateChangeAloneWithAssigneeUnchanged(t
 	// itself can catch this; the precheck is bypassed by calling
 	// db.DecideAppeal directly.
 	landed, err := database.DecideAppeal(ctx, appealID, observed.State, observed.AssigneeID, "overturned", modID, "stale")
-	if err != nil {
-		t.Fatalf("stale db.DecideAppeal: %v", err)
-	}
+	mustDo(t, "stale db.DecideAppeal", err)
 	if landed {
 		t.Fatal("stale db.DecideAppeal (state changed, assignee unchanged) landed, want the guarded UPDATE to refuse it")
 	}
@@ -996,35 +730,20 @@ func TestAppealQueries_DecideGuardCatchesStateChangeAloneWithAssigneeUnchanged(t
 // (not DecideAppealTx), so AppealObservedRowExists's precheck cannot mask
 // whether the guarded UPDATE's own assignee predicate is load-bearing.
 func TestAppealQueries_DecideGuardCatchesAssigneeChangeAloneWithStateUnchanged(t *testing.T) {
-	database, ownerID, modID, memberID, _ := newAppealQueriesTestDB(t)
 	ctx := context.Background()
-
-	actionID, err := database.WarnUser(ctx, memberID, ownerID, nil, "x")
-	if err != nil {
-		t.Fatalf("WarnUser: %v", err)
-	}
-	appealID, err := database.InsertAppeal(ctx, "pub-assignee-alone", actionID, memberID, "please")
-	if err != nil {
-		t.Fatalf("InsertAppeal: %v", err)
-	}
+	database, ownerID, modID, _, _, appealID := newOpenAppeal(t, "pub-assignee-alone")
 	if ok, err := database.AssignAppeal(ctx, appealID, modID, 0); err != nil || !ok {
 		t.Fatalf("AssignAppeal: (%v, %v)", ok, err)
 	}
 	// The caller "reads" here: assigned to modID.
-	observed, err := database.GetAppeal(ctx, appealID)
-	if err != nil {
-		t.Fatalf("GetAppeal (the caller's read): %v", err)
-	}
+	observed := mustGetAppeal(t, database, appealID)
 
 	// A REAL force-reassign lands: assignee_id changes, state does NOT
 	// (AssignAppeal's own UPDATE sets state = 'assigned' unconditionally).
 	if ok, err := database.AssignAppealForced(ctx, appealID, ownerID, modID, ownerID, false, 0, 0, 0, nil); err != nil || !ok {
 		t.Fatalf("AssignAppealForced: (%v, %v)", ok, err)
 	}
-	after, err := database.GetAppeal(ctx, appealID)
-	if err != nil {
-		t.Fatalf("GetAppeal after the real reassign: %v", err)
-	}
+	after := mustGetAppeal(t, database, appealID)
 	if after.State != observed.State {
 		t.Fatalf("state changed by the reassign (=%q, was %q) — this test needs it to stay put to isolate the assignee predicate", after.State, observed.State)
 	}
@@ -1037,9 +756,7 @@ func TestAppealQueries_DecideGuardCatchesAssigneeChangeAloneWithStateUnchanged(t
 	// guarded UPDATE itself can catch this; the precheck is bypassed by
 	// calling db.DecideAppeal directly.
 	landed, err := database.DecideAppeal(ctx, appealID, observed.State, observed.AssigneeID, "upheld", modID, "stale")
-	if err != nil {
-		t.Fatalf("stale db.DecideAppeal: %v", err)
-	}
+	mustDo(t, "stale db.DecideAppeal", err)
 	if landed {
 		t.Fatal("stale db.DecideAppeal (assignee changed, state unchanged) landed, want the guarded UPDATE to refuse it")
 	}
@@ -1050,32 +767,18 @@ func TestAppealQueries_DecideGuardCatchesAssigneeChangeAloneWithStateUnchanged(t
 // check and this write cannot land as the appeal's new assignee — the write
 // affects zero rows rather than assigning a dangling id.
 func TestAppealQueries_AssignAppealRefusesAnErasedAssignee(t *testing.T) {
-	database, ownerID, modID, memberID, _ := newAppealQueriesTestDB(t)
 	ctx := context.Background()
-
-	actionID, err := database.WarnUser(ctx, memberID, ownerID, nil, "x")
-	if err != nil {
-		t.Fatalf("WarnUser: %v", err)
-	}
-	appealID, err := database.InsertAppeal(ctx, "pub-assignee-erased", actionID, memberID, "please")
-	if err != nil {
-		t.Fatalf("InsertAppeal: %v", err)
-	}
+	database, _, modID, _, _, appealID := newOpenAppeal(t, "pub-assignee-erased")
 	if _, err := database.EraseAccount(ctx, modID, ""); err != nil {
 		t.Fatalf("EraseAccount(modID): %v", err)
 	}
 
 	ok, err := database.AssignAppeal(ctx, appealID, modID, 0)
-	if err != nil {
-		t.Fatalf("AssignAppeal with an erased assignee: %v", err)
-	}
+	mustDo(t, "AssignAppeal with an erased assignee", err)
 	if ok {
 		t.Fatal("AssignAppeal reported success naming an erased user as the new assignee")
 	}
-	got, err := database.GetAppeal(ctx, appealID)
-	if err != nil {
-		t.Fatalf("GetAppeal: %v", err)
-	}
+	got := mustGetAppeal(t, database, appealID)
 	if got.State != "open" || got.AssigneeID != 0 {
 		t.Fatalf("appeal after the refused assign = %+v, want unchanged (open/0)", got)
 	}
@@ -1087,55 +790,28 @@ func TestAppealQueries_AssignAppealRefusesAnErasedAssignee(t *testing.T) {
 // the whole transaction (DecideAppealTx) reports AppealWriteConflict, not a
 // decision recorded against a dangling id.
 func TestAppealQueries_DecideAppealTxRefusesAnErasedDecider(t *testing.T) {
-	database, ownerID, modID, memberID, _ := newAppealQueriesTestDB(t)
 	ctx := context.Background()
-
-	actionID, err := database.WarnUser(ctx, memberID, ownerID, nil, "x")
-	if err != nil {
-		t.Fatalf("WarnUser: %v", err)
-	}
-	appealID, err := database.InsertAppeal(ctx, "pub-decider-erased", actionID, memberID, "please")
-	if err != nil {
-		t.Fatalf("InsertAppeal: %v", err)
-	}
+	database, _, modID, memberID, actionID, appealID := newOpenAppeal(t, "pub-decider-erased")
 	if _, err := database.EraseAccount(ctx, modID, ""); err != nil {
 		t.Fatalf("EraseAccount(modID): %v", err)
 	}
 
-	action, err := database.GetModerationAction(ctx, actionID)
-	if err != nil {
-		t.Fatalf("GetModerationAction: %v", err)
-	}
-	reversal := db.AppealedAction{ID: action.ID, Kind: action.Kind, TargetID: action.TargetID}
-	result, _, _, err := database.DecideAppealTx(ctx, appealID, "open", 0, "upheld", modID, "no",
-		false, memberID, permissions.ModerateMembers, permissions.Administrator, reversal, nil)
+	result, err := decideOpenAppeal(ctx, t, database, appealID, actionID, "upheld", modID, "no", memberID, nil)
 	if err != nil {
 		t.Fatalf("DecideAppealTx with an erased decider: %v", err)
 	}
 	if result != db.AppealWriteConflict {
 		t.Fatalf("DecideAppealTx with an erased decider: result = %v, want AppealWriteConflict", result)
 	}
-	got, err := database.GetAppeal(ctx, appealID)
-	if err != nil {
-		t.Fatalf("GetAppeal: %v", err)
-	}
+	got := mustGetAppeal(t, database, appealID)
 	if got.State != "open" || got.DecidedBy != 0 {
 		t.Fatalf("appeal after the refused decide = %+v, want unchanged (open, decided_by 0)", got)
 	}
 }
 
 func TestAppealQueries_AssignAppealForced(t *testing.T) {
-	database, ownerID, modID, memberID, _ := newAppealQueriesTestDB(t)
 	ctx := context.Background()
-
-	actionID, err := database.WarnUser(ctx, memberID, ownerID, nil, "x")
-	if err != nil {
-		t.Fatalf("WarnUser: %v", err)
-	}
-	appealID, err := database.InsertAppeal(ctx, "pub-forced-1", actionID, memberID, "please")
-	if err != nil {
-		t.Fatalf("InsertAppeal: %v", err)
-	}
+	database, ownerID, modID, memberID, _, appealID := newOpenAppeal(t, "pub-forced-1")
 	if ok, err := database.AssignAppeal(ctx, appealID, modID, 0); err != nil || !ok {
 		t.Fatalf("AssignAppeal: (%v, %v)", ok, err)
 	}
@@ -1145,16 +821,11 @@ func TestAppealQueries_AssignAppealForced(t *testing.T) {
 	// the write's own transaction (inherited-P2 review), so the caller
 	// passes actorID, not a pre-read position.
 	ok, err := database.AssignAppealForced(ctx, appealID, ownerID, modID, ownerID, false, 0, 0, 0, nil)
-	if err != nil {
-		t.Fatalf("AssignAppealForced: %v", err)
-	}
+	mustDo(t, "AssignAppealForced", err)
 	if !ok {
 		t.Fatal("AssignAppealForced reported no row affected")
 	}
-	got, err := database.GetAppeal(ctx, appealID)
-	if err != nil {
-		t.Fatalf("GetAppeal: %v", err)
-	}
+	got := mustGetAppeal(t, database, appealID)
 	if got.AssigneeID != ownerID {
 		t.Fatalf("assignee after forced reassign = %d, want %d", got.AssigneeID, ownerID)
 	}
@@ -1162,10 +833,7 @@ func TestAppealQueries_AssignAppealForced(t *testing.T) {
 	// A second forced reassignment attempt, this time by someone who does
 	// NOT outrank the current assignee (the owner), is refused.
 	appealID2, err := database.InsertAppeal(ctx, "pub-forced-2", func() int64 {
-		id, err := database.WarnUser(ctx, memberID, ownerID, nil, "y")
-		if err != nil {
-			t.Fatalf("WarnUser (2nd): %v", err)
-		}
+		id := mustWarn(t, database, memberID, ownerID, "y")
 		return id
 	}(), memberID, "please")
 	if err != nil {
@@ -1192,17 +860,8 @@ func TestAppealQueries_AssignAppealForced(t *testing.T) {
 // before this call, even one a caller elsewhere might still believe is
 // unchanged, is what actually governs the outcome.
 func TestAppealQueries_AssignAppealForced_ActorDemotedIsRefusedOnFreshRank(t *testing.T) {
-	database, ownerID, modID, memberID, _ := newAppealQueriesTestDB(t)
 	ctx := context.Background()
-
-	actionID, err := database.WarnUser(ctx, memberID, ownerID, nil, "x")
-	if err != nil {
-		t.Fatalf("WarnUser: %v", err)
-	}
-	appealID, err := database.InsertAppeal(ctx, "pub-demoted", actionID, memberID, "please")
-	if err != nil {
-		t.Fatalf("InsertAppeal: %v", err)
-	}
+	database, _, modID, memberID, _, appealID := newOpenAppeal(t, "pub-demoted")
 	// Assigned to the plain member (position 40) — modID (position 60) would
 	// ordinarily outrank them and could force-reassign.
 	if ok, err := database.AssignAppeal(ctx, appealID, memberID, 0); err != nil || !ok {
@@ -1211,9 +870,7 @@ func TestAppealQueries_AssignAppealForced_ActorDemotedIsRefusedOnFreshRank(t *te
 
 	// modID demoted to the plain member role (also position 40) BEFORE the
 	// force-reassign attempt.
-	if err := database.UpdateUserRole(ctx, modID, 4); err != nil {
-		t.Fatalf("UpdateUserRole: %v", err)
-	}
+	mustDo(t, "UpdateUserRole", database.UpdateUserRole(ctx, modID, 4))
 	if _, err := database.AssignAppealForced(ctx, appealID, modID, memberID, modID, false, 0, 0, 0, nil); !errors.Is(err, db.ErrForbidden) {
 		t.Fatalf("AssignAppealForced with a freshly-demoted actor (now equal rank): want db.ErrForbidden, got %v", err)
 	}
@@ -1227,17 +884,8 @@ func TestAppealQueries_AssignAppealForced_ActorDemotedIsRefusedOnFreshRank(t *te
 // and this write must be what actually governs the outcome, exactly as the
 // actor's own freshness does above.
 func TestAppealQueries_AssignAppealForced_TargetPromotedIsRefusedOnFreshRank(t *testing.T) {
-	database, ownerID, modID, memberID, _ := newAppealQueriesTestDB(t)
 	ctx := context.Background()
-
-	actionID, err := database.WarnUser(ctx, memberID, ownerID, nil, "x")
-	if err != nil {
-		t.Fatalf("WarnUser: %v", err)
-	}
-	appealID, err := database.InsertAppeal(ctx, "pub-target-promoted", actionID, memberID, "please")
-	if err != nil {
-		t.Fatalf("InsertAppeal: %v", err)
-	}
+	database, _, modID, memberID, _, appealID := newOpenAppeal(t, "pub-target-promoted")
 	// Assigned to the plain member (position 40) — modID (position 60) would
 	// ordinarily outrank them and could force-reassign.
 	if ok, err := database.AssignAppeal(ctx, appealID, memberID, 0); err != nil || !ok {
@@ -1247,9 +895,7 @@ func TestAppealQueries_AssignAppealForced_TargetPromotedIsRefusedOnFreshRank(t *
 	// memberID promoted to modID's own role (now equal rank) BEFORE the
 	// force-reassign attempt — a stale read of the target's position (still
 	// 40) would wrongly let this succeed.
-	if err := database.UpdateUserRole(ctx, memberID, 3); err != nil {
-		t.Fatalf("UpdateUserRole: %v", err)
-	}
+	mustDo(t, "UpdateUserRole", database.UpdateUserRole(ctx, memberID, 3))
 	if _, err := database.AssignAppealForced(ctx, appealID, modID, memberID, modID, false, 0, 0, 0, nil); !errors.Is(err, db.ErrForbidden) {
 		t.Fatalf("AssignAppealForced against a freshly-promoted target (now equal rank): want db.ErrForbidden, got %v", err)
 	}
@@ -1259,30 +905,19 @@ func TestAppealQueries_WithdrawAppeal(t *testing.T) {
 	database, ownerID, _, memberID, member2ID := newAppealQueriesTestDB(t)
 	ctx := context.Background()
 
-	actionID, err := database.WarnUser(ctx, memberID, ownerID, nil, "x")
-	if err != nil {
-		t.Fatalf("WarnUser: %v", err)
-	}
-	appealID, err := database.InsertAppeal(ctx, "pub-withdraw", actionID, memberID, "please")
-	if err != nil {
-		t.Fatalf("InsertAppeal: %v", err)
-	}
+	actionID := mustWarn(t, database, memberID, ownerID, "x")
+	appealID := mustInsertAppeal(t, database, "pub-withdraw", actionID, memberID, "please")
 
 	// A different user cannot withdraw someone else's appeal.
 	if ok, err := database.WithdrawAppeal(ctx, appealID, member2ID); err != nil || ok {
 		t.Fatalf("WithdrawAppeal by a non-appellant = (%v, %v), want (false, nil)", ok, err)
 	}
 	ok, err := database.WithdrawAppeal(ctx, appealID, memberID)
-	if err != nil {
-		t.Fatalf("WithdrawAppeal: %v", err)
-	}
+	mustDo(t, "WithdrawAppeal", err)
 	if !ok {
 		t.Fatal("WithdrawAppeal reported no row affected")
 	}
-	got, err := database.GetAppeal(ctx, appealID)
-	if err != nil {
-		t.Fatalf("GetAppeal: %v", err)
-	}
+	got := mustGetAppeal(t, database, appealID)
 	if got.State != "withdrawn" {
 		t.Fatalf("state after withdraw = %q, want withdrawn", got.State)
 	}
@@ -1299,27 +934,21 @@ func TestAppealQueries_CountEligibleModerators(t *testing.T) {
 	// Excluding the owner (as acting moderator) and member2 (as appellant),
 	// only the moderator holds MODERATE_MEMBERS or Administrator.
 	n, err := database.CountEligibleModerators(ctx, ownerID, member2ID, permissions.ModerateMembers, permissions.Administrator)
-	if err != nil {
-		t.Fatalf("CountEligibleModerators: %v", err)
-	}
+	mustDo(t, "CountEligibleModerators", err)
 	if n != 1 {
 		t.Fatalf("CountEligibleModerators(exclude owner) = %d, want 1 (the moderator)", n)
 	}
 
 	// Excluding the moderator, only the owner (Administrator) is left.
 	n, err = database.CountEligibleModerators(ctx, modID, member2ID, permissions.ModerateMembers, permissions.Administrator)
-	if err != nil {
-		t.Fatalf("CountEligibleModerators: %v", err)
-	}
+	mustDo(t, "CountEligibleModerators", err)
 	if n != 1 {
 		t.Fatalf("CountEligibleModerators(exclude mod) = %d, want 1 (the owner)", n)
 	}
 
 	// A plain member holds neither bit and is not eligible either way.
 	n, err = database.CountEligibleModerators(ctx, memberID, member2ID, permissions.ModerateMembers, permissions.Administrator)
-	if err != nil {
-		t.Fatalf("CountEligibleModerators: %v", err)
-	}
+	mustDo(t, "CountEligibleModerators", err)
 	if n != 2 {
 		t.Fatalf("CountEligibleModerators(exclude member) = %d, want 2 (owner and moderator)", n)
 	}
@@ -1330,9 +959,7 @@ func TestAppealQueries_CountEligibleModerators(t *testing.T) {
 	// would otherwise be double-counted as an "eligible alternative" to
 	// themselves.
 	n, err = database.CountEligibleModerators(ctx, memberID, ownerID, permissions.ModerateMembers, permissions.Administrator)
-	if err != nil {
-		t.Fatalf("CountEligibleModerators: %v", err)
-	}
+	mustDo(t, "CountEligibleModerators", err)
 	if n != 1 {
 		t.Fatalf("CountEligibleModerators(exclude member, appellant=owner) = %d, want 1 (only the moderator)", n)
 	}
@@ -1357,9 +984,7 @@ func TestAppealQueries_CountEligibleModerators_ExcludesBannedModerators(t *testi
 		t.Fatalf("CountEligibleModerators before ban = (%d, %v), want (1, nil)", n, err)
 	}
 
-	if err := database.BanUser(ctx, modID, "banned", nil); err != nil {
-		t.Fatalf("BanUser: %v", err)
-	}
+	mustDo(t, "BanUser", database.BanUser(ctx, modID, "banned", nil))
 	if n, err := database.CountEligibleModerators(ctx, ownerID, member2ID, permissions.ModerateMembers, permissions.Administrator); err != nil || n != 0 {
 		t.Fatalf("CountEligibleModerators after banning the only other moderator = (%d, %v), want (0, nil)", n, err)
 	}
@@ -1397,9 +1022,7 @@ func TestAppealQueries_CountEligibleModerators_LapsedBanCountsAsEligible(t *test
 	ctx := context.Background()
 
 	expired := sameDayLapsedBanExpiry()
-	if err := database.BanUser(ctx, modID, "spam", &expired); err != nil {
-		t.Fatalf("BanUser: %v", err)
-	}
+	mustDo(t, "BanUser", database.BanUser(ctx, modID, "spam", &expired))
 	if n, err := database.CountEligibleModerators(ctx, ownerID, member2ID, permissions.ModerateMembers, permissions.Administrator); err != nil || n != 1 {
 		t.Fatalf("CountEligibleModerators with a lapsed ban = (%d, %v), want (1, nil) -- the lapsed-ban moderator still counts", n, err)
 	}
@@ -1423,36 +1046,18 @@ func TestDecideAppealTx_LapsedBanOnSecondModeratorCountsAsEligibleForSelfReview(
 	ctx := context.Background()
 
 	modID, err := database.CreateUser(ctx, "lapsed-sole-mod", "hash", 3) // Moderator: MODERATE_MEMBERS
-	if err != nil {
-		t.Fatalf("CreateUser(mod): %v", err)
-	}
+	mustDo(t, "CreateUser(mod)", err)
 	memberID, err := database.CreateUser(ctx, "lapsed-member", "hash", 4) // Member: no bit
-	if err != nil {
-		t.Fatalf("CreateUser(member): %v", err)
-	}
+	mustDo(t, "CreateUser(member)", err)
 	secondModID, err := database.CreateUser(ctx, "lapsed-second-mod", "hash", 3) // Moderator, will be banned
-	if err != nil {
-		t.Fatalf("CreateUser(second mod): %v", err)
-	}
+	mustDo(t, "CreateUser(second mod)", err)
 
 	expired := sameDayLapsedBanExpiry()
-	if err := database.BanUser(ctx, secondModID, "spam", &expired); err != nil {
-		t.Fatalf("BanUser: %v", err)
-	}
+	mustDo(t, "BanUser", database.BanUser(ctx, secondModID, "spam", &expired))
 
-	actionID, err := database.WarnUser(ctx, memberID, modID, nil, "x")
-	if err != nil {
-		t.Fatalf("WarnUser: %v", err)
-	}
-	appealID, err := database.InsertAppeal(ctx, "pub-lapsed-ban-exists", actionID, memberID, "please")
-	if err != nil {
-		t.Fatalf("InsertAppeal: %v", err)
-	}
-	action, err := database.GetModerationAction(ctx, actionID)
-	if err != nil {
-		t.Fatalf("GetModerationAction: %v", err)
-	}
-	reversal := db.AppealedAction{ID: action.ID, Kind: action.Kind, TargetID: action.TargetID}
+	actionID := mustWarn(t, database, memberID, modID, "x")
+	appealID := mustInsertAppeal(t, database, "pub-lapsed-ban-exists", actionID, memberID, "please")
+	reversal := appealedActionOf(ctx, t, database, actionID)
 
 	result, soleModerator, _, err := database.DecideAppealTx(ctx, appealID, "open", 0, "upheld", modID, "self-serving",
 		true, memberID, permissions.ModerateMembers, permissions.Administrator, reversal, nil)
@@ -1471,14 +1076,9 @@ func TestAppealQueries_GetModerationAction(t *testing.T) {
 	database, ownerID, _, memberID, _ := newAppealQueriesTestDB(t)
 	ctx := context.Background()
 
-	actionID, err := database.WarnUser(ctx, memberID, ownerID, nil, "be nice")
-	if err != nil {
-		t.Fatalf("WarnUser: %v", err)
-	}
+	actionID := mustWarn(t, database, memberID, ownerID, "be nice")
 	action, err := database.GetModerationAction(ctx, actionID)
-	if err != nil {
-		t.Fatalf("GetModerationAction: %v", err)
-	}
+	mustDo(t, "GetModerationAction", err)
 	if action.Kind != "warning" || action.TargetID != memberID || action.ActorID != ownerID {
 		t.Fatalf("GetModerationAction = %+v, want kind warning, target %d, actor %d", action, memberID, ownerID)
 	}

@@ -32,22 +32,9 @@ type ringMissEnv struct {
 func newRingMissEnv(t *testing.T, withStore bool) *ringMissEnv {
 	t.Helper()
 	database := newTeardownTestDB(t)
-	ctx := context.Background()
-	userID, err := database.CreateUser(ctx, "ring-miss-user", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	user, err := database.GetUserByID(ctx, userID)
-	if err != nil || user == nil {
-		t.Fatalf("GetUserByID: %v", err)
-	}
-	token, err := auth.GenerateToken()
-	if err != nil {
-		t.Fatalf("GenerateToken: %v", err)
-	}
-	if _, err := database.CreateSession(ctx, userID, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
+	userID := mustCreateUser(t, database, "ring-miss-user", 4)
+	user := mustGetUser(t, database, userID)
+	token := seedSessionToken(t, database, userID)
 	hub := newTestHubWith(t, HubOptions{DB: database, Limiter: auth.NewRateLimiter(), ReplayRingSize: ringMissRingSize})
 	if withStore {
 		hub.SetEventStore(database)

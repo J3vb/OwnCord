@@ -34,9 +34,7 @@ func TestBuildReady_PropagatesListMembersError(t *testing.T) {
 		t.Fatalf("GetRoleByID: %v", err)
 	}
 
-	if _, err := database.ExecContext(context.Background(), `DROP TABLE users`); err != nil {
-		t.Fatalf("drop users: %v", err)
-	}
+	mustExec(t, database, `DROP TABLE users`)
 
 	if _, err := hub.BuildReadyWithRoleForTest(database, user.ID, role); err == nil {
 		t.Fatal("buildReady must fail the handshake when ListMembers errors, not silently ship an empty member list as if the server genuinely has none")
@@ -54,9 +52,7 @@ func TestBuildReady_PropagatesUnreadCountsError(t *testing.T) {
 		t.Fatalf("GetRoleByID: %v", err)
 	}
 
-	if _, err := database.ExecContext(context.Background(), `DROP TABLE read_states`); err != nil {
-		t.Fatalf("drop read_states: %v", err)
-	}
+	mustExec(t, database, `DROP TABLE read_states`)
 
 	if _, err := hub.BuildReadyWithRoleForTest(database, user.ID, role); err == nil {
 		t.Fatal("buildReady must fail the handshake when GetChannelUnreadCounts errors, not silently ship every channel with unread_count/mention_count zeroed")
@@ -73,9 +69,7 @@ func TestBuildReady_PropagatesDMChannelsError(t *testing.T) {
 		t.Fatalf("GetRoleByID: %v", err)
 	}
 
-	if _, err := database.ExecContext(context.Background(), `DROP TABLE dm_open_state`); err != nil {
-		t.Fatalf("drop dm_open_state: %v", err)
-	}
+	mustExec(t, database, `DROP TABLE dm_open_state`)
 
 	if _, err := hub.BuildReadyWithRoleForTest(database, user.ID, role); err == nil {
 		t.Fatal("buildReady must fail the handshake when GetUserDMChannels errors, not silently ship dm_channels: [] as if the user genuinely has none")
@@ -94,9 +88,7 @@ func TestBuildReady_PropagatesNoticesError(t *testing.T) {
 		t.Fatalf("GetRoleByID: %v", err)
 	}
 
-	if _, err := database.ExecContext(context.Background(), `DROP TABLE moderation_actions`); err != nil {
-		t.Fatalf("drop moderation_actions: %v", err)
-	}
+	mustExec(t, database, `DROP TABLE moderation_actions`)
 
 	if _, err := hub.BuildReadyWithRoleForTest(database, user.ID, role); err == nil {
 		t.Fatal("buildReady must fail the handshake when ListUnacknowledgedWarnings errors, not silently ship notices: [] as if the user genuinely has none")

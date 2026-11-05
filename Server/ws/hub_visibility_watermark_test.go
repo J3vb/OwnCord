@@ -155,19 +155,7 @@ func TestEmitEvents_DMChannelOpen_WatermarkNeverRegresses(t *testing.T) {
 // behaviour these functions must still provide: a genuine, later seq still
 // moves the watermark forward so mustFullResync keeps working.
 func TestEmitEvents_DMChannelOpen_WatermarkStillAdvances(t *testing.T) {
-	h := newEmitTestHub()
-	atomic.StoreUint64(&h.seq, 40)
-
-	h.EmitEvents(context.Background(), []Event{
-		DMChannelOpenEvent{targetUserID: 7, payload: []byte(`{"type":"dm_channel_open"}`)},
-	})
-
-	if !h.mustFullResync(40) {
-		t.Error("a client resuming from a seq at or before a dm_channel_open must be forced onto the full-ready path")
-	}
-	if h.mustFullResync(41) {
-		t.Error("clients past the open must keep replaying normally")
-	}
+	requireDMChannelOpenRaisesWatermark(t)
 }
 
 // A permission read that never returns on its own cannot hold a visibility walk

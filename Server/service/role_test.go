@@ -91,9 +91,7 @@ func TestCreateRole_DefaultsToJustBelowActor(t *testing.T) {
 
 	// The Admin actor sits at 80, so an unpositioned role lands at 79.
 	role, err := svc.CreateRole(context.Background(), 2, RoleInput{Name: new("Deputy")})
-	if err != nil {
-		t.Fatalf("CreateRole: %v", err)
-	}
+	mustDo(t, "CreateRole", err)
 	if role.Position != 79 {
 		t.Errorf("position = %d, want 79 (one below the actor)", role.Position)
 	}
@@ -109,13 +107,9 @@ func TestCreateRole_DefaultPlacementAvoidsCollision(t *testing.T) {
 	svc, _ := newRoleCRUDService(t)
 
 	first, err := svc.CreateRole(context.Background(), 2, RoleInput{Name: new("Deputy")})
-	if err != nil {
-		t.Fatalf("CreateRole first: %v", err)
-	}
+	mustDo(t, "CreateRole first", err)
 	second, err := svc.CreateRole(context.Background(), 2, RoleInput{Name: new("Deputy2")})
-	if err != nil {
-		t.Fatalf("CreateRole second: %v", err)
-	}
+	mustDo(t, "CreateRole second", err)
 	if first.Position == second.Position {
 		t.Fatalf("two default-placed roles collided at position %d", first.Position)
 	}
@@ -130,9 +124,7 @@ func TestCreateRole_RejectsExplicitPositionCollision(t *testing.T) {
 	svc, _ := newRoleCRUDService(t)
 
 	first, err := svc.CreateRole(context.Background(), 2, RoleInput{Name: new("Deputy")})
-	if err != nil {
-		t.Fatalf("CreateRole first: %v", err)
-	}
+	mustDo(t, "CreateRole first", err)
 	_, err = svc.CreateRole(context.Background(), 2, RoleInput{Name: new("Clash"), Position: &first.Position})
 	if !errors.Is(err, ErrBadRequest) {
 		t.Fatalf("explicit-collision err = %v, want ErrBadRequest", err)
@@ -166,9 +158,7 @@ func TestCreateRole_RejectsBadColor(t *testing.T) {
 	}
 	// An empty color is "no color", not an error.
 	role, err := svc.CreateRole(context.Background(), 1, RoleInput{Name: new("Plain"), Color: new("")})
-	if err != nil {
-		t.Fatalf("empty color: %v", err)
-	}
+	mustDo(t, "empty color", err)
 	if role.Color != nil {
 		t.Errorf("color = %v, want nil", role.Color)
 	}
@@ -295,9 +285,7 @@ func TestUpdateRole_ReportsPermissionChange(t *testing.T) {
 	svc, database := newRoleCRUDService(t)
 
 	created, err := svc.CreateRole(context.Background(), 1, RoleInput{Name: new("Bots")})
-	if err != nil {
-		t.Fatalf("CreateRole: %v", err)
-	}
+	mustDo(t, "CreateRole", err)
 	_, res, err := svc.UpdateRole(context.Background(), 1, created.ID, RoleInput{
 		Permissions: new(permissions.ReadMessages),
 	})
@@ -328,14 +316,10 @@ func TestUpdateRole_ReportsRename(t *testing.T) {
 	ctx := context.Background()
 
 	created, err := svc.CreateRole(ctx, 1, RoleInput{Name: new("Bots")})
-	if err != nil {
-		t.Fatalf("CreateRole: %v", err)
-	}
+	mustDo(t, "CreateRole", err)
 
 	_, res, err := svc.UpdateRole(ctx, 1, created.ID, RoleInput{Name: new("Robots")})
-	if err != nil {
-		t.Fatalf("UpdateRole rename: %v", err)
-	}
+	mustDo(t, "UpdateRole rename", err)
 	if !res.Renamed {
 		t.Error("Renamed should be true when the name moves")
 	}
@@ -343,16 +327,12 @@ func TestUpdateRole_ReportsRename(t *testing.T) {
 	// Re-stating the same name is not a rename, and neither is a change to
 	// something else entirely.
 	_, res, err = svc.UpdateRole(ctx, 1, created.ID, RoleInput{Name: new("Robots")})
-	if err != nil {
-		t.Fatalf("UpdateRole idempotent rename: %v", err)
-	}
+	mustDo(t, "UpdateRole idempotent rename", err)
 	if res.Renamed {
 		t.Error("Renamed should be false when the name is unchanged")
 	}
 	_, res, err = svc.UpdateRole(ctx, 1, created.ID, RoleInput{Color: new("#101010")})
-	if err != nil {
-		t.Fatalf("UpdateRole color: %v", err)
-	}
+	mustDo(t, "UpdateRole color", err)
 	if res.Renamed || res.PermsChanged {
 		t.Errorf("a color-only change reported %+v, want neither flag", res)
 	}
@@ -365,13 +345,9 @@ func TestAllRoles_IsUnscopedAndOrdered(t *testing.T) {
 	ctx := context.Background()
 
 	roles, err := svc.AllRoles(ctx)
-	if err != nil {
-		t.Fatalf("AllRoles: %v", err)
-	}
+	mustDo(t, "AllRoles", err)
 	stored, err := database.ListRoles(ctx)
-	if err != nil {
-		t.Fatalf("ListRoles: %v", err)
-	}
+	mustDo(t, "ListRoles", err)
 	if len(roles) != len(stored) {
 		t.Fatalf("AllRoles returned %d roles, want every one of the %d stored", len(roles), len(stored))
 	}
@@ -448,22 +424,16 @@ func TestDeleteRole_ReassignsMembersAndDropsOverrides(t *testing.T) {
 	ctx := context.Background()
 
 	role, err := svc.CreateRole(ctx, 1, RoleInput{Name: new("Contractor"), Position: new(30)})
-	if err != nil {
-		t.Fatalf("CreateRole: %v", err)
-	}
+	mustDo(t, "CreateRole", err)
 	seedChannel(t, database, &db.Channel{ID: 10, Name: "general"})
-	if err := database.UpsertChannelOverride(ctx, 10, role.ID, 0, permissions.ReadMessages); err != nil {
-		t.Fatalf("UpsertChannelOverride: %v", err)
-	}
+	mustDo(t, "UpsertChannelOverride", database.UpsertChannelOverride(ctx, 10, role.ID, 0, permissions.ReadMessages))
 	// Two members hold the role; a third stays put so the UPDATE is proven
 	// to be scoped rather than global.
 	seedUserRole(t, database, 4, role.ID)
 	seedUserRole(t, database, 5, role.ID)
 
 	deleted, fallback, moved, err := svc.DeleteRole(ctx, 1, role.ID)
-	if err != nil {
-		t.Fatalf("DeleteRole: %v", err)
-	}
+	mustDo(t, "DeleteRole", err)
 	if deleted.ID != role.ID {
 		t.Errorf("deleted role id = %d, want %d", deleted.ID, role.ID)
 	}
@@ -487,9 +457,7 @@ func TestDeleteRole_ReassignsMembersAndDropsOverrides(t *testing.T) {
 		t.Errorf("role still present after delete: %v, %v", gone, err)
 	}
 	overrides, err := database.GetChannelOverrides(ctx, 10)
-	if err != nil {
-		t.Fatalf("GetChannelOverrides: %v", err)
-	}
+	mustDo(t, "GetChannelOverrides", err)
 	if _, ok := overrides[role.ID]; ok {
 		t.Error("channel_overrides row for the deleted role survived")
 	}
@@ -573,9 +541,7 @@ func TestReorderRoles_NormalizesPositions(t *testing.T) {
 	ctx := context.Background()
 
 	extra, err := svc.CreateRole(ctx, 1, RoleInput{Name: new("Helper"), Position: new(50)})
-	if err != nil {
-		t.Fatalf("CreateRole: %v", err)
-	}
+	mustDo(t, "CreateRole", err)
 
 	// The owner may reorder everything below position 100: Admin, Moderator,
 	// Helper and Member — highest first.
@@ -605,9 +571,7 @@ func TestReorderRoles_NormalizesPositions(t *testing.T) {
 	}
 	// The returned list is the persisted one.
 	stored, err := database.ListRoles(ctx)
-	if err != nil {
-		t.Fatalf("ListRoles: %v", err)
-	}
+	mustDo(t, "ListRoles", err)
 	for _, r := range stored {
 		if got := want[r.ID]; r.Position != got {
 			t.Errorf("stored role %d position = %d, want %d", r.ID, r.Position, got)
@@ -656,9 +620,7 @@ func TestListRoles_CarriesMemberCounts(t *testing.T) {
 	svc, _ := newRoleCRUDService(t)
 
 	list, err := svc.ListRoles(context.Background(), 1)
-	if err != nil {
-		t.Fatalf("ListRoles: %v", err)
-	}
+	mustDo(t, "ListRoles", err)
 	counts := map[int64]int{}
 	for _, r := range list {
 		counts[r.ID] = r.MemberCount
@@ -689,10 +651,7 @@ func TestAffectedUserIDs(t *testing.T) {
 // assertAudit fails unless an audit row with the given action exists.
 func assertAudit(t *testing.T, database *db.DB, action string) {
 	t.Helper()
-	entries, err := database.GetAuditLog(context.Background(), 50, 0)
-	if err != nil {
-		t.Fatalf("GetAuditLog: %v", err)
-	}
+	entries := mustGetAuditLog(t, database, 50, 0)
 	for i := range entries {
 		e := &entries[i]
 		if e.Action == action {
@@ -708,9 +667,7 @@ func TestUpdateRole_ExpectedPermissions(t *testing.T) {
 	svc, database := newRoleCRUDService(t)
 	ctx := context.Background()
 	created, err := svc.CreateRole(ctx, 1, RoleInput{Name: new("Bots"), Permissions: new(permissions.ReadMessages)})
-	if err != nil {
-		t.Fatalf("CreateRole: %v", err)
-	}
+	mustDo(t, "CreateRole", err)
 
 	// Stale: refused with ErrConflict, and neither the row nor the audit log moves.
 	_, _, err = svc.UpdateRole(ctx, 1, created.ID, RoleInput{
@@ -722,9 +679,7 @@ func TestUpdateRole_ExpectedPermissions(t *testing.T) {
 		t.Fatalf("stale expected: err = %v, want ErrConflict", err)
 	}
 	got, err := database.GetRoleByID(ctx, created.ID)
-	if err != nil {
-		t.Fatalf("GetRoleByID: %v", err)
-	}
+	mustDo(t, "GetRoleByID", err)
 	if got.Name != "Bots" || got.Permissions != permissions.ReadMessages {
 		t.Errorf("stale edit wrote: name=%q perms=%#x", got.Name, got.Permissions)
 	}
@@ -752,9 +707,7 @@ func TestUpdateRole_ExpectedPermissionsRaceHasOneWinner(t *testing.T) {
 	ctx := context.Background()
 	loaded := permissions.ReadMessages
 	created, err := svc.CreateRole(ctx, 1, RoleInput{Name: new("Bots"), Permissions: new(loaded)})
-	if err != nil {
-		t.Fatalf("CreateRole: %v", err)
-	}
+	mustDo(t, "CreateRole", err)
 	masks := []int64{permissions.ReadMessages | permissions.SendMessages, permissions.ReadMessages | permissions.AttachFiles}
 	errs := make([]error, len(masks))
 	start := make(chan struct{})
@@ -784,9 +737,7 @@ func TestUpdateRole_ExpectedPermissionsRaceHasOneWinner(t *testing.T) {
 		t.Fatalf("no edit won: %v", errs)
 	}
 	got, err := database.GetRoleByID(ctx, created.ID)
-	if err != nil {
-		t.Fatalf("GetRoleByID: %v", err)
-	}
+	mustDo(t, "GetRoleByID", err)
 	if got.Permissions != masks[winner] {
 		t.Errorf("stored mask = %#x, want the winner's %#x", got.Permissions, masks[winner])
 	}

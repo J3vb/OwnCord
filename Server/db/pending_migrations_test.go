@@ -15,9 +15,7 @@ import (
 func expectedPending(t *testing.T, cutoff string) []string {
 	t.Helper()
 	entries, err := fs.ReadDir(migrations.FS, ".")
-	if err != nil {
-		t.Fatalf("ReadDir: %v", err)
-	}
+	mustDo(t, "ReadDir", err)
 	var out []string
 	for _, e := range entries {
 		if e.Name() >= cutoff {
@@ -36,9 +34,7 @@ func TestPendingMigrations(t *testing.T) {
 	t.Run("fresh database reports nothing", func(t *testing.T) {
 		database := openMemory(t)
 		pending, err := db.PendingMigrations(database)
-		if err != nil {
-			t.Fatalf("PendingMigrations: %v", err)
-		}
+		mustDo(t, "PendingMigrations", err)
 		if len(pending) != 0 {
 			t.Fatalf("pending = %v, want none for a fresh database", pending)
 		}
@@ -47,9 +43,7 @@ func TestPendingMigrations(t *testing.T) {
 	t.Run("fully migrated database reports nothing", func(t *testing.T) {
 		database := openMigratedMemory(t)
 		pending, err := db.PendingMigrations(database)
-		if err != nil {
-			t.Fatalf("PendingMigrations: %v", err)
-		}
+		mustDo(t, "PendingMigrations", err)
 		if len(pending) != 0 {
 			t.Fatalf("pending = %v, want none after Migrate", pending)
 		}
@@ -57,13 +51,9 @@ func TestPendingMigrations(t *testing.T) {
 
 	t.Run("partially migrated database reports the remainder", func(t *testing.T) {
 		database := openMemory(t)
-		if err := db.MigrateFS(database, migrationsUpTo(t, "020_")); err != nil {
-			t.Fatalf("MigrateFS(<020): %v", err)
-		}
+		mustDo(t, "MigrateFS(<020)", db.MigrateFS(database, migrationsUpTo(t, "020_")))
 		pending, err := db.PendingMigrations(database)
-		if err != nil {
-			t.Fatalf("PendingMigrations: %v", err)
-		}
+		mustDo(t, "PendingMigrations", err)
 		if want := expectedPending(t, "020_"); !slices.Equal(pending, want) {
 			t.Fatalf("pending = %v, want %v", pending, want)
 		}

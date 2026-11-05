@@ -25,14 +25,7 @@ const harvestVoiceRoleID = int64(200)
 
 func newHarvestVoiceDB(t *testing.T) *db.DB {
 	t.Helper()
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
+	database := newTeardownTestDB(t)
 	if _, err := database.ExecContext(context.Background(),
 		`INSERT INTO roles (id, name, color, permissions, position, is_default)
 		 VALUES (?, 'harvest-voice', NULL, ?, 5, 0)`,
@@ -124,9 +117,7 @@ func TestHandleVoiceJoin_AbortedSwitchDoesNotResurrectVoiceTopicSubscription(t *
 	chA := mustCreateVoiceChannel(t, database, "voice-a")
 	chB := mustCreateVoiceChannel(t, database, "voice-b")
 
-	if err := database.JoinVoiceChannel(ctx, uid, chA); err != nil {
-		t.Fatalf("JoinVoiceChannel: %v", err)
-	}
+	mustJoinVoice(t, database, uid, chA)
 	vs, err := database.GetVoiceState(ctx, uid)
 	if err != nil || vs == nil {
 		t.Fatalf("GetVoiceState: %v", err)
@@ -136,10 +127,7 @@ func TestHandleVoiceJoin_AbortedSwitchDoesNotResurrectVoiceTopicSubscription(t *
 	t.Cleanup(h.Stop) // ends the background leave retries the blocked delete spawns
 	h.livekit = healthyTestLiveKit(t)
 
-	user, err := database.GetUserByID(ctx, uid)
-	if err != nil || user == nil {
-		t.Fatalf("GetUserByID: %v", err)
-	}
+	user := mustGetUser(t, database, uid)
 	c := NewTestClient(h, uid, make(chan []byte, 64))
 	c.user = user
 	h.clients[uid] = []*Client{c}
@@ -176,15 +164,11 @@ func TestHandleVoiceCameraV2_ChannelLookupErrorFailsClosed(t *testing.T) {
 	database := newHarvestVoiceDB(t)
 	uid := seedHarvestVoiceUser(t, database, "camera-err")
 	chID := mustCreateVoiceChannel(t, database, "video-room")
-	if err := database.JoinVoiceChannel(ctx, uid, chID); err != nil {
-		t.Fatalf("JoinVoiceChannel: %v", err)
-	}
+	mustJoinVoice(t, database, uid, chID)
 
 	// Make exactly GetChannel fail; permission and voice-state queries keep
 	// working (the role check reads roles/channel_overrides only).
-	if _, err := database.ExecContext(ctx, `ALTER TABLE channels RENAME TO channels_offline`); err != nil {
-		t.Fatalf("rename channels: %v", err)
-	}
+	mustExec(t, database, `ALTER TABLE channels RENAME TO channels_offline`)
 
 	d := VoiceDeps{Voice: service.NewVoiceService(database), Reader: database, Permissions: permissions.NewChecker(database)}
 	res := handleVoiceCameraV2(ctx, VoiceCameraCmd{userID: uid, Enabled: true}, ClientInfo{UserID: uid, VoiceChannelID: chID}, d)

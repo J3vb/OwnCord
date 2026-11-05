@@ -28,9 +28,7 @@ type removalFrame struct {
 func decodeRemovalFrame(t *testing.T, raw []byte) removalFrame {
 	t.Helper()
 	var f removalFrame
-	if err := json.Unmarshal(raw, &f); err != nil {
-		t.Fatalf("decode frame: %v", err)
-	}
+	mustUnmarshal(t, raw, &f)
 	return f
 }
 

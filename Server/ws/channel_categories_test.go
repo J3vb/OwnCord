@@ -3,7 +3,6 @@ package ws_test
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"testing"
 	"time"
 
@@ -34,10 +33,7 @@ func TestBroadcastChannelCategories_OnlyManagersReceiveIt(t *testing.T) {
 	t.Cleanup(hub.Stop)
 
 	owner := seedOwnerUser(t, database, "cat-owner")
-	mod, err := database.CreateUser(context.Background(), "cat-mod", "hash", moderatorRoleID)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	mod := mustCreateUser(t, database, "cat-mod", moderatorRoleID)
 	member := seedMemberUser(t, database, "cat-member")
 
 	chans := map[string]chan []byte{}
@@ -83,9 +79,7 @@ func readyPayload(t *testing.T, raw []byte) map[string]any {
 	var env struct {
 		Payload map[string]any `json:"payload"`
 	}
-	if err := json.Unmarshal(raw, &env); err != nil {
-		t.Fatalf("decode ready: %v", err)
-	}
+	mustUnmarshal(t, raw, &env)
 	return env.Payload
 }
 
@@ -95,10 +89,7 @@ func buildReadyFor(t *testing.T, hub *ws.Hub, database *db.DB, u *db.User) ([]by
 	if err != nil || role == nil {
 		t.Fatalf("GetRoleByID: %v", err)
 	}
-	raw, err := hub.BuildReadyWithRoleForTest(database, u.ID, role)
-	if err != nil {
-		t.Fatalf("ready: %v", err)
-	}
+	raw := mustBuildReadyWithRole(t, hub, database, u.ID, role)
 	return raw, readyPayload(t, raw)
 }
 

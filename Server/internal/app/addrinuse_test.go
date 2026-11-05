@@ -17,9 +17,7 @@ import (
 // fired against localized error text.
 func TestIsAddrInUse_RealBindConflict(t *testing.T) {
 	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen: %v", err)
-	}
+	mustDo(t, "listen", err)
 	defer l.Close() //nolint:errcheck
 
 	_, err = net.Listen("tcp", l.Addr().String())

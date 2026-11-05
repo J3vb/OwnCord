@@ -22,10 +22,7 @@ func newPinFixture(t *testing.T) pinFixture {
 	alice := seedUser(t, database, "alice")
 	bob := seedUser(t, database, "bob")
 	ch := seedChannel(t, database, "general")
-	target, err := database.CreateMessage(context.Background(), ch, bob, "pin me", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	target := mustCreateMessage(t, database, ch, bob, "pin me", nil)
 	return pinFixture{database: database, alice: alice, bob: bob, ch: ch, target: target}
 }
 
@@ -122,9 +119,7 @@ func TestSetMessagePinned_ConcurrentPinsWriteOneRow(t *testing.T) {
 		}()
 	}
 	for range n {
-		if err := <-errs; err != nil {
-			t.Fatalf("concurrent pin: %v", err)
-		}
+		mustDo(t, "concurrent pin", <-errs)
 	}
 	if got := f.pinRows(t); got != 1 {
 		t.Errorf("pin rows after %d racing pins = %d, want 1", n, got)
@@ -155,13 +150,9 @@ func TestPinRow_TargetDeletedOrPurged(t *testing.T) {
 	t.Run("soft deleted", func(t *testing.T) {
 		f := newPinFixture(t)
 		row := f.pin(t, true, time.Time{})
-		if err := f.database.DeleteMessage(context.Background(), f.target, f.bob, false); err != nil {
-			t.Fatalf("DeleteMessage: %v", err)
-		}
+		mustDo(t, "DeleteMessage", f.database.DeleteMessage(context.Background(), f.target, f.bob, false))
 		msgs, err := f.database.GetMessagesForAPI(context.Background(), f.ch, 0, 50, f.alice)
-		if err != nil {
-			t.Fatalf("GetMessagesForAPI: %v", err)
-		}
+		mustDo(t, "GetMessagesForAPI", err)
 		var found bool
 		for _, m := range msgs {
 			if m.ID != row.MessageID {
@@ -193,9 +184,7 @@ func TestPinRow_TargetDeletedOrPurged(t *testing.T) {
 			t.Fatalf("pin row after purge: survived with NULL reply_to = %d, want 1", got)
 		}
 		msgs, err := f.database.GetMessagesForAPI(context.Background(), f.ch, 0, 50, f.alice)
-		if err != nil {
-			t.Fatalf("GetMessagesForAPI: %v", err)
-		}
+		mustDo(t, "GetMessagesForAPI", err)
 		for _, m := range msgs {
 			if m.ID == row.MessageID && (m.ReplyTo != nil || m.ReferencedMessage != nil) {
 				t.Errorf("row after purge: reply_to = %v referenced = %+v, want both nil", m.ReplyTo, m.ReferencedMessage)
@@ -228,9 +217,7 @@ func TestSoftDelete_PinRowDeletableCallAndGroupRowsNot(t *testing.T) {
 	if err := f.database.DeleteMessage(context.Background(), group, f.alice, true); !errors.Is(err, db.ErrNotFound) {
 		t.Errorf("delete group row: err = %v, want ErrNotFound", err)
 	}
-	if err := f.database.DeleteMessage(context.Background(), pinRow.MessageID, f.alice, false); err != nil {
-		t.Fatalf("delete pin row: %v", err)
-	}
+	mustDo(t, "delete pin row", f.database.DeleteMessage(context.Background(), pinRow.MessageID, f.alice, false))
 	for id, want := range map[int64]int{pinRow.MessageID: 1, call: 0, group: 0} {
 		if got := count(t, f.database, `SELECT deleted FROM messages WHERE id = ?`, id); got != want {
 			t.Errorf("message %d deleted = %d, want %d", id, got, want)
@@ -245,9 +232,7 @@ func TestPurge_TakesPinRowsNotCallOrGroupRows(t *testing.T) {
 		call := f.insertKindRow(t, db.MessageKindCall)
 		group := f.insertKindRow(t, db.MessageKindGroupLeave)
 		ids, err := f.database.PurgeChannelMessages(context.Background(), f.ch, 0, 50)
-		if err != nil {
-			t.Fatalf("PurgeChannelMessages: %v", err)
-		}
+		mustDo(t, "PurgeChannelMessages", err)
 		if !slices.Contains(ids, pinRow.MessageID) || slices.Contains(ids, call) || slices.Contains(ids, group) {
 			t.Errorf("purged ids = %v, want the pin row %d and neither %d nor %d", ids, pinRow.MessageID, call, group)
 		}
@@ -259,9 +244,7 @@ func TestPurge_TakesPinRowsNotCallOrGroupRows(t *testing.T) {
 		group := f.insertKindRow(t, db.MessageKindGroupLeave)
 		// alice authored all three rows.
 		ids, err := f.database.PurgeUserChannelMessagesSince(context.Background(), f.ch, f.alice, "2000-01-01 00:00:00", 50)
-		if err != nil {
-			t.Fatalf("PurgeUserChannelMessagesSince: %v", err)
-		}
+		mustDo(t, "PurgeUserChannelMessagesSince", err)
 		if !slices.Contains(ids, pinRow.MessageID) || slices.Contains(ids, call) || slices.Contains(ids, group) {
 			t.Errorf("purged ids = %v, want the pin row %d and neither %d nor %d", ids, pinRow.MessageID, call, group)
 		}
@@ -277,9 +260,7 @@ func TestSetMessagePinned_DeletedRowHoldsWindow(t *testing.T) {
 	if row == nil {
 		t.Fatal("first pin wrote no row")
 	}
-	if err := f.database.DeleteMessage(context.Background(), row.MessageID, f.alice, false); err != nil {
-		t.Fatalf("delete pin row: %v", err)
-	}
+	mustDo(t, "delete pin row", f.database.DeleteMessage(context.Background(), row.MessageID, f.alice, false))
 	f.pin(t, false, t0.Add(time.Minute))
 	if f.pin(t, true, t0.Add(2*time.Minute)) != nil {
 		t.Error("pin inside the window of a deleted row wrote a new row")

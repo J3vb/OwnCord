@@ -3,7 +3,6 @@ package ws
 import (
 	"context"
 	"encoding/json"
-	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -48,13 +47,9 @@ func TestSocketSession_TouchSlidesExpiry(t *testing.T) {
 	}
 	backdate()
 
-	hub := newTestHub(t, database, auth.NewRateLimiter(), nil)
-	go hub.Run()
-	defer hub.Stop()
-	srv := httptest.NewServer(ServeWS(hub, []string{"*"}, 0))
-	defer srv.Close()
-
-	conn := dialAndAuth(t, ctx, srv.URL, token, 0, 0)
+	rig := newServeRigOn(t, database, nil)
+	hub := rig.hub
+	conn := dialAndAuth(t, ctx, rig.srv.URL, token, 0, 0)
 	defer func() { _ = conn.CloseNow() }()
 	readUntil := func(want string) {
 		t.Helper()

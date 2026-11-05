@@ -42,9 +42,7 @@ func TestFreshConnectCleanStaleVoice_ClearsOldClientVoiceState(t *testing.T) {
 	uid := seedHarvestVoiceUser(t, database, "oc0252-user")
 	chID := mustCreateVoiceChannel(t, database, "oc0252-voice")
 
-	if err := database.JoinVoiceChannel(ctx, uid, chID); err != nil {
-		t.Fatalf("JoinVoiceChannel: %v", err)
-	}
+	mustJoinVoice(t, database, uid, chID)
 	vs, err := database.GetVoiceState(ctx, uid)
 	if err != nil || vs == nil {
 		t.Fatalf("GetVoiceState: %v", err)
@@ -95,23 +93,11 @@ func TestUpgradeAndAuth_RoleLookupFailure_FailsClosed(t *testing.T) {
 	// users.role_id carries a plain (non-cascading) FK to roles(id); an
 	// in-memory DB is a single shared connection (db.Open), so toggling the
 	// pragma here is safe and does not leak into any other test.
-	if _, err := database.ExecContext(ctx, `PRAGMA foreign_keys=OFF`); err != nil {
-		t.Fatalf("disable foreign_keys: %v", err)
-	}
-	if _, err := database.ExecContext(ctx, `DELETE FROM roles WHERE id = ?`, harvestVoiceRoleID); err != nil {
-		t.Fatalf("delete role: %v", err)
-	}
-	if _, err := database.ExecContext(ctx, `PRAGMA foreign_keys=ON`); err != nil {
-		t.Fatalf("re-enable foreign_keys: %v", err)
-	}
+	mustExec(t, database, `PRAGMA foreign_keys=OFF`)
+	mustExec(t, database, `DELETE FROM roles WHERE id = ?`, harvestVoiceRoleID)
+	mustExec(t, database, `PRAGMA foreign_keys=ON`)
 
-	token, err := auth.GenerateToken()
-	if err != nil {
-		t.Fatalf("GenerateToken: %v", err)
-	}
-	if _, err := database.CreateSession(ctx, uid, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
+	token := seedSessionToken(t, database, uid)
 
 	hub := newTestHub(t, database, auth.NewRateLimiter(), nil)
 
@@ -177,10 +163,7 @@ func TestRefreshUserSnapshot_FailsClosedForBannedUser(t *testing.T) {
 	database := newHarvestVoiceDB(t)
 	ctx := context.Background()
 	uid := seedHarvestVoiceUser(t, database, "oc0272-user")
-	user, err := database.GetUserByID(ctx, uid)
-	if err != nil || user == nil {
-		t.Fatalf("GetUserByID: %v", err)
-	}
+	user := mustGetUser(t, database, uid)
 
 	hub := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	c := newClient(hub, nil, user, "", 0, ctx)

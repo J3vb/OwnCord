@@ -17,14 +17,7 @@ import (
 // POST, GET and DELETE only.
 func dmPut(t *testing.T, router http.Handler, path, token string) *httptest.ResponseRecorder {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodPut, path, nil)
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
-	return rr
+	return doAPI(t, router, http.MethodPut, path, token, nil)
 }
 
 // decodeBlockedIDs pulls blocked_user_ids out of a GET /api/v1/blocks response.
@@ -48,9 +41,7 @@ func TestBlockUser_Success(t *testing.T) {
 	dmCreateToken(t, database, "bob", 4) // user id 2
 
 	rr := dmPut(t, router, "/api/v1/blocks/2", alice)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (body %q)", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 
 	blocked, err := database.IsBlocked(t.Context(), 1, 2)
 	if err != nil {
@@ -67,9 +58,7 @@ func TestBlockUser_SelfBlockRejected(t *testing.T) {
 	alice := dmCreateToken(t, database, "alice", 4)
 
 	rr := dmPut(t, router, "/api/v1/blocks/1", alice)
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("status = %d for a self-block, want 400 (body %q)", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusBadRequest)
 }
 
 func TestBlockUser_UnknownTarget(t *testing.T) {
@@ -78,9 +67,7 @@ func TestBlockUser_UnknownTarget(t *testing.T) {
 	alice := dmCreateToken(t, database, "alice", 4)
 
 	rr := dmPut(t, router, "/api/v1/blocks/9999", alice)
-	if rr.Code != http.StatusNotFound {
-		t.Errorf("status = %d for an unknown target, want 404 (body %q)", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusNotFound)
 }
 
 func TestBlockUser_InvalidUserID(t *testing.T) {
@@ -89,9 +76,7 @@ func TestBlockUser_InvalidUserID(t *testing.T) {
 	alice := dmCreateToken(t, database, "alice", 4)
 
 	rr := dmPut(t, router, "/api/v1/blocks/not-a-number", alice)
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("status = %d for a non-numeric userId, want 400 (body %q)", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusBadRequest)
 }
 
 func TestBlockUser_Unauthorized(t *testing.T) {
@@ -100,9 +85,7 @@ func TestBlockUser_Unauthorized(t *testing.T) {
 	dmCreateToken(t, database, "bob", 4)
 
 	rr := dmPut(t, router, "/api/v1/blocks/1", "")
-	if rr.Code != http.StatusUnauthorized {
-		t.Errorf("status = %d without a token, want 401 (body %q)", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusUnauthorized)
 }
 
 // ─── DELETE /api/v1/blocks/{userId} (handleUnblockUser) ─────────────────────
@@ -118,9 +101,7 @@ func TestUnblockUser_Success(t *testing.T) {
 	}
 
 	rr := dmDelete(t, router, "/api/v1/blocks/2", alice)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (body %q)", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 
 	blocked, err := database.IsBlocked(t.Context(), 1, 2)
 	if err != nil {
@@ -139,9 +120,7 @@ func TestUnblockUser_NotBlockedStillSucceeds(t *testing.T) {
 
 	// Unblocking someone who was never blocked is a no-op, not a 404.
 	rr := dmDelete(t, router, "/api/v1/blocks/2", alice)
-	if rr.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200 (body %q)", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusOK)
 }
 
 func TestUnblockUser_InvalidUserID(t *testing.T) {
@@ -150,9 +129,7 @@ func TestUnblockUser_InvalidUserID(t *testing.T) {
 	alice := dmCreateToken(t, database, "alice", 4)
 
 	rr := dmDelete(t, router, "/api/v1/blocks/abc", alice)
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("status = %d for a non-numeric userId, want 400 (body %q)", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusBadRequest)
 }
 
 func TestUnblockUser_Unauthorized(t *testing.T) {
@@ -160,9 +137,7 @@ func TestUnblockUser_Unauthorized(t *testing.T) {
 	router := buildDMRouter(database, &mockBroadcaster{})
 
 	rr := dmDelete(t, router, "/api/v1/blocks/2", "")
-	if rr.Code != http.StatusUnauthorized {
-		t.Errorf("status = %d without a token, want 401 (body %q)", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusUnauthorized)
 }
 
 // ─── GET /api/v1/blocks (handleListBlocks) ──────────────────────────────────
@@ -173,9 +148,7 @@ func TestListBlocks_EmptyArray(t *testing.T) {
 	alice := dmCreateToken(t, database, "alice", 4)
 
 	rr := dmGet(t, router, "/api/v1/blocks", alice)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (body %q)", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 
 	// The service normalizes nil to an empty slice specifically so this
 	// serializes as [] rather than null.
@@ -201,9 +174,7 @@ func TestListBlocks_ReturnsBlockedIDs(t *testing.T) {
 	}
 
 	rr := dmGet(t, router, "/api/v1/blocks", alice)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rr.Code)
-	}
+	requireStatus(t, rr, http.StatusOK)
 	ids := decodeBlockedIDs(t, rr)
 	if len(ids) != 2 {
 		t.Fatalf("blocked_user_ids = %v, want 2 entries", ids)
@@ -211,9 +182,7 @@ func TestListBlocks_ReturnsBlockedIDs(t *testing.T) {
 
 	// Blocks are per-user: bob sees none of alice's.
 	rr = dmGet(t, router, "/api/v1/blocks", bob)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d for bob, want 200", rr.Code)
-	}
+	requireStatus(t, rr, http.StatusOK)
 	if ids := decodeBlockedIDs(t, rr); len(ids) != 0 {
 		t.Errorf("bob's blocked_user_ids = %v, want empty", ids)
 	}
@@ -224,9 +193,7 @@ func TestListBlocks_Unauthorized(t *testing.T) {
 	router := buildDMRouter(database, &mockBroadcaster{})
 
 	rr := dmGet(t, router, "/api/v1/blocks", "")
-	if rr.Code != http.StatusUnauthorized {
-		t.Errorf("status = %d without a token, want 401", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusUnauthorized)
 }
 
 // jsonContainsEmptyBlockList reports whether the payload encodes an empty JSON

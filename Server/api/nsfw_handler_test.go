@@ -22,15 +22,7 @@ import (
 
 func newNSFWTestDB(t *testing.T) *db.DB {
 	t.Helper()
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("db.Migrate: %v", err)
-	}
-	return database
+	return openMigratedDB(t)
 }
 
 func buildNSFWRouter(database *db.DB, broadcaster api.DMBroadcaster) http.Handler {
@@ -42,14 +34,7 @@ func buildNSFWRouter(database *db.DB, broadcaster api.DMBroadcaster) http.Handle
 
 func nsfwDo(t *testing.T, router http.Handler, method, path, token string) *httptest.ResponseRecorder {
 	t.Helper()
-	req := httptest.NewRequest(method, path, nil)
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
-	return rr
+	return doAPI(t, router, method, path, token, nil)
 }
 
 func nsfwSetLabel(t *testing.T, database *db.DB, channelID int64, nsfw bool) {
@@ -75,10 +60,7 @@ func TestNSFW_AcknowledgeRequiresVisibilityAndALabel(t *testing.T) {
 	token, _ := mintSession(t, database, userID)
 
 	// Invisible channel: deny READ_MESSAGES for the caller's role.
-	hiddenID, err := database.CreateChannel(context.Background(), "hidden", "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel(hidden): %v", err)
-	}
+	hiddenID := mustCreateChannel(t, database, "hidden", "text")
 	if err := database.UpsertChannelOverride(context.Background(), hiddenID, permissions.MemberRoleID, 0, permissions.ReadMessages); err != nil {
 		t.Fatalf("UpsertChannelOverride: %v", err)
 	}
@@ -87,27 +69,18 @@ func TestNSFW_AcknowledgeRequiresVisibilityAndALabel(t *testing.T) {
 	}
 
 	// Visible but not labelled.
-	plainID, err := database.CreateChannel(context.Background(), "plain", "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel(plain): %v", err)
-	}
+	plainID := mustCreateChannel(t, database, "plain", "text")
 	rr := nsfwDo(t, router, http.MethodPut, nsfwPath(plainID), token)
-	if rr.Code != http.StatusConflict {
-		t.Errorf("PUT on unlabelled channel = %d, want 409; body %s", rr.Code, rr.Body.String())
-	}
-	var body struct {
+	expectStatus(t, rr, http.StatusConflict)
+	body := decodeBody[struct {
 		Error string `json:"error"`
-	}
-	_ = json.Unmarshal(rr.Body.Bytes(), &body)
+	}](t, rr)
 	if body.Error != "NOT_NSFW" {
 		t.Errorf("error code = %q, want NOT_NSFW", body.Error)
 	}
 
 	// Visible and labelled: 204, twice (idempotent).
-	labelledID, err := database.CreateChannel(context.Background(), "labelled", "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel(labelled): %v", err)
-	}
+	labelledID := mustCreateChannel(t, database, "labelled", "text")
 	nsfwSetLabel(t, database, labelledID, true)
 	for i := range 2 {
 		if rr := nsfwDo(t, router, http.MethodPut, nsfwPath(labelledID), token); rr.Code != http.StatusNoContent {
@@ -123,10 +96,7 @@ func TestNSFW_AcknowledgeRequiresVisibilityAndALabel(t *testing.T) {
 func TestNSFW_Unauthenticated(t *testing.T) {
 	database := newNSFWTestDB(t)
 	router := buildNSFWRouter(database, &mockBroadcaster{})
-	chID, err := database.CreateChannel(context.Background(), "any", "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
+	chID := mustCreateChannel(t, database, "any", "text")
 	for _, method := range []string{http.MethodPut, http.MethodDelete} {
 		if rr := nsfwDo(t, router, method, nsfwPath(chID), ""); rr.Code != http.StatusUnauthorized {
 			t.Errorf("%s unauthenticated = %d, want 401", method, rr.Code)
@@ -142,10 +112,7 @@ func TestNSFW_RevokeTakesEffectOnTheNextRead(t *testing.T) {
 	userID := mintUser(t, database, "revoker")
 	token, _ := mintSession(t, database, userID)
 
-	chID, err := database.CreateChannel(context.Background(), "labelled", "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
+	chID := mustCreateChannel(t, database, "labelled", "text")
 	nsfwSetLabel(t, database, chID, true)
 
 	if rr := nsfwDo(t, router, http.MethodPut, nsfwPath(chID), token); rr.Code != http.StatusNoContent {
@@ -177,10 +144,7 @@ func TestNSFW_SecondDeviceGetsTheSignal(t *testing.T) {
 	userID := mintUser(t, database, "twodevice")
 	token, _ := mintSession(t, database, userID)
 
-	chID, err := database.CreateChannel(context.Background(), "labelled", "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
+	chID := mustCreateChannel(t, database, "labelled", "text")
 	nsfwSetLabel(t, database, chID, true)
 
 	if rr := nsfwDo(t, router, http.MethodPut, nsfwPath(chID), token); rr.Code != http.StatusNoContent {
@@ -231,10 +195,7 @@ func TestNSFW_AcknowledgeAndRevokeBumpVisibilityWatermark(t *testing.T) {
 	userID := mintUser(t, database, "watermark-user")
 	token, _ := mintSession(t, database, userID)
 
-	chID, err := database.CreateChannel(context.Background(), "labelled", "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
+	chID := mustCreateChannel(t, database, "labelled", "text")
 	nsfwSetLabel(t, database, chID, true)
 
 	if rr := nsfwDo(t, router, http.MethodPut, nsfwPath(chID), token); rr.Code != http.StatusNoContent {

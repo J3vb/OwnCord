@@ -2,7 +2,6 @@ package api_test
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -43,14 +42,7 @@ type uploadsHarness struct {
 
 func newUploadsHarness(t *testing.T) *uploadsHarness {
 	t.Helper()
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	database := openMigratedDB(t)
 	files, err := storage.New(t.TempDir(), 10)
 	if err != nil {
 		t.Fatal(err)
@@ -135,10 +127,7 @@ func (h *uploadsHarness) list(t *testing.T, query, token string) ownUploadsBody 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("GET uploads%s = %d: %s", query, rr.Code, rr.Body.String())
 	}
-	var body ownUploadsBody
-	if err := json.NewDecoder(rr.Body).Decode(&body); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	body := decodeBody[ownUploadsBody](t, rr)
 	return body
 }
 
@@ -228,9 +217,7 @@ func TestRemoveOwnUpload_204RemovesRowBytesAndAnnounces(t *testing.T) {
 	}
 
 	rr := uploadsDelete(t, h.router, "gone-soon", token)
-	if rr.Code != http.StatusNoContent {
-		t.Fatalf("DELETE = %d: %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusNoContent)
 	if h.fileExists("gone-soon") {
 		t.Error("the bytes are still on disk")
 	}
@@ -307,9 +294,7 @@ func TestRemoveOwnUpload_InUseIs409AndKeepsEverything(t *testing.T) {
 		t.Fatal(err)
 	}
 	rr := uploadsDelete(t, h.router, "my-avatar", token)
-	if rr.Code != http.StatusConflict {
-		t.Fatalf("DELETE avatar = %d, want 409: %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusConflict)
 	if !strings.Contains(rr.Body.String(), "in use") {
 		t.Errorf("body = %s, want a plain in-use message", rr.Body.String())
 	}

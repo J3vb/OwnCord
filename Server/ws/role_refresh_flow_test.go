@@ -26,27 +26,14 @@ import (
 func TestRoleRefresh_ResumeWhilePendingTakesFullReady(t *testing.T) {
 	t.Parallel()
 	database := newTeardownTestDB(t)
-	ctx := context.Background()
 	mk := func(name string) (int64, string) {
-		id, err := database.CreateUser(ctx, name, "hash", rrMemberRole)
-		if err != nil {
-			t.Fatalf("CreateUser: %v", err)
-		}
-		token, err := auth.GenerateToken()
-		if err != nil {
-			t.Fatalf("GenerateToken: %v", err)
-		}
-		if _, err := database.CreateSession(ctx, id, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
-			t.Fatalf("CreateSession: %v", err)
-		}
+		id := mustCreateUser(t, database, name, rrMemberRole)
+		token := seedSessionToken(t, database, id)
 		return id, token
 	}
 	affected, affToken := mk("rr-resume-aff")
 	_, otherToken := mk("rr-resume-other")
-	chID, err := database.CreateChannel(ctx, "rr-resume", "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
+	chID := mustCreateChannel(t, database, "rr-resume", "text")
 	hub := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	hub.perms = service.NewPermissionService(database, permissions.NewChecker(database))
 	go hub.Run()

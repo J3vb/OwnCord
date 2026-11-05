@@ -31,19 +31,13 @@ func TestCreateMessageRequest_PrivacyDecidesInTransaction(t *testing.T) {
 			sender, recipient, channelID, msgID := seedMessageRequestPair(t, database, "auto-sender", "auto-recipient")
 			// GetOrCreateDMChannel opens the DM for both sides; a first send
 			// meets a recipient whose side is not open.
-			if err := database.CloseDM(ctx, recipient, channelID); err != nil {
-				t.Fatalf("CloseDM: %v", err)
-			}
+			mustDo(t, "CloseDM", database.CloseDM(ctx, recipient, channelID))
 			if tc.privacy != nil {
-				if err := database.SetUserPrivacy(ctx, recipient, *tc.privacy); err != nil {
-					t.Fatalf("SetUserPrivacy: %v", err)
-				}
+				mustDo(t, "SetUserPrivacy", database.SetUserPrivacy(ctx, recipient, *tc.privacy))
 			}
 
 			out, err := database.CreateMessageRequest(ctx, sender, recipient, channelID, msgID)
-			if err != nil {
-				t.Fatalf("CreateMessageRequest: %v", err)
-			}
+			mustDo(t, "CreateMessageRequest", err)
 			if !out.Created || out.AutoAccepted != tc.wantAuto || out.Opened != tc.wantDMOpened {
 				t.Errorf("outcome = %+v, want Created, AutoAccepted=%v, Opened=%v", out, tc.wantAuto, tc.wantDMOpened)
 			}
@@ -61,9 +55,7 @@ func TestCreateMessageRequest_PrivacyDecidesInTransaction(t *testing.T) {
 				t.Error("sender does not trust the recipient: the sent_first edge is written either way")
 			}
 			var open int
-			if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM dm_open_state WHERE user_id = ? AND channel_id = ?`, recipient, channelID).Scan(&open); err != nil {
-				t.Fatal(err)
-			}
+			mustDo(t, "QueryRowContext", database.QueryRowContext(ctx, `SELECT COUNT(*) FROM dm_open_state WHERE user_id = ? AND channel_id = ?`, recipient, channelID).Scan(&open))
 			if (open == 1) != tc.wantDMOpened {
 				t.Errorf("recipient dm_open_state rows = %d, want open = %v", open, tc.wantDMOpened)
 			}
@@ -78,12 +70,8 @@ func TestCreateMessageRequest_ExistingRowPath(t *testing.T) {
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	sender, recipient, channelID, msgID := seedMessageRequestPair(t, database, "auto2-sender", "auto2-recipient")
-	if err := database.CloseDM(ctx, recipient, channelID); err != nil {
-		t.Fatal(err)
-	}
-	if err := database.SetUserPrivacy(ctx, recipient, db.UserPrivacy{AllowMemberDMs: true, MessageRequests: false}); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CloseDM", database.CloseDM(ctx, recipient, channelID))
+	mustDo(t, "SetUserPrivacy", database.SetUserPrivacy(ctx, recipient, db.UserPrivacy{AllowMemberDMs: true, MessageRequests: false}))
 	if _, err := database.CreateMessageRequest(ctx, sender, recipient, channelID, msgID); err != nil {
 		t.Fatal(err)
 	}
@@ -97,9 +85,7 @@ func TestCreateMessageRequest_ExistingRowPath(t *testing.T) {
 	if _, err := database.CreateMessageRequest(ctx, s2, r2, c2, m2); err != nil {
 		t.Fatal(err)
 	}
-	if err := database.SetUserPrivacy(ctx, r2, db.UserPrivacy{AllowMemberDMs: true, MessageRequests: false}); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "SetUserPrivacy", database.SetUserPrivacy(ctx, r2, db.UserPrivacy{AllowMemberDMs: true, MessageRequests: false}))
 	out, err = database.CreateMessageRequest(ctx, s2, r2, c2, m2)
 	if err != nil || out.Created || out.AutoAccepted {
 		t.Errorf("resend over a pending row = %+v, %v; want nothing delivered", out, err)

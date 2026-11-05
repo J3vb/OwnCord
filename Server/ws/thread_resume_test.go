@@ -1,7 +1,6 @@
 package ws
 
 import (
-	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -44,28 +43,13 @@ func TestReconnect_ReplaysThreadChanged(t *testing.T) {
 func resumeSeesThreadChanged(t *testing.T, labelled bool) bool {
 	t.Helper()
 	database := newTeardownTestDB(t)
-	ctx := context.Background()
 
-	userID, err := database.CreateUser(ctx, "resume-thread-user", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	parent, err := database.CreateChannel(ctx, "resume-parent", "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
+	userID := mustCreateUser(t, database, "resume-thread-user", 4)
+	parent := mustCreateChannel(t, database, "resume-parent", "text")
 	if labelled {
-		if _, err := database.ExecContext(ctx, `UPDATE channels SET nsfw = 1 WHERE id = ?`, parent); err != nil {
-			t.Fatalf("label channel: %v", err)
-		}
+		mustExec(t, database, `UPDATE channels SET nsfw = 1 WHERE id = ?`, parent)
 	}
-	token, err := auth.GenerateToken()
-	if err != nil {
-		t.Fatalf("GenerateToken: %v", err)
-	}
-	if _, err := database.CreateSession(ctx, userID, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
+	token := seedSessionToken(t, database, userID)
 
 	hub := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	go hub.Run()

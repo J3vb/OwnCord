@@ -99,19 +99,25 @@ func TestNewLiveKitClient_MissingConfig(t *testing.T) {
 	}
 }
 
-func TestGenerateToken_ValidToken(t *testing.T) {
-	t.Parallel()
-
-	cfg := &config.VoiceConfig{
+// newTestLiveKitClient builds a client against a local URL that is never
+// dialed: token generation is purely local.
+func newTestLiveKitClient(t *testing.T) *ws.LiveKitClient {
+	t.Helper()
+	client, err := ws.NewLiveKitClient(&config.VoiceConfig{
 		LiveKitAPIKey:    "test-key",
 		LiveKitAPISecret: "test-secret-that-is-long-enough-for-hmac",
 		LiveKitURL:       "ws://localhost:7880",
-	}
-
-	client, err := ws.NewLiveKitClient(cfg)
+	})
 	if err != nil {
 		t.Fatalf("NewLiveKitClient: %v", err)
 	}
+	return client
+}
+
+func TestGenerateToken_ValidToken(t *testing.T) {
+	t.Parallel()
+
+	client := newTestLiveKitClient(t)
 
 	token, err := client.GenerateToken(123, "testuser", 456, "join-token-1", true, true, true)
 	if err != nil {
@@ -136,16 +142,7 @@ func TestGenerateToken_ValidToken(t *testing.T) {
 func TestGenerateToken_DifferentPermissions(t *testing.T) {
 	t.Parallel()
 
-	cfg := &config.VoiceConfig{
-		LiveKitAPIKey:    "test-key",
-		LiveKitAPISecret: "test-secret-that-is-long-enough-for-hmac",
-		LiveKitURL:       "ws://localhost:7880",
-	}
-
-	client, err := ws.NewLiveKitClient(cfg)
-	if err != nil {
-		t.Fatalf("NewLiveKitClient: %v", err)
-	}
+	client := newTestLiveKitClient(t)
 
 	// Subscribe-only token (canPublish=false).
 	token, err := client.GenerateToken(1, "listener", 10, "join-token-2", false, false, false)
@@ -169,16 +166,7 @@ func TestGenerateToken_DifferentPermissions(t *testing.T) {
 func TestGenerateToken_VideoAndScreenShareGrantedWithoutSpeakVoice(t *testing.T) {
 	t.Parallel()
 
-	cfg := &config.VoiceConfig{
-		LiveKitAPIKey:    "test-key",
-		LiveKitAPISecret: "test-secret-that-is-long-enough-for-hmac",
-		LiveKitURL:       "ws://localhost:7880",
-	}
-
-	client, err := ws.NewLiveKitClient(cfg)
-	if err != nil {
-		t.Fatalf("NewLiveKitClient: %v", err)
-	}
+	client := newTestLiveKitClient(t)
 
 	// canPublish=false (SPEAK_VOICE denied), canVideo=true, canScreenShare=true.
 	token, err := client.GenerateToken(1, "presenter", 10, "join-token-3", false, true, true)
@@ -190,7 +178,7 @@ func TestGenerateToken_VideoAndScreenShareGrantedWithoutSpeakVoice(t *testing.T)
 	if err != nil {
 		t.Fatalf("ParseAPIToken: %v", err)
 	}
-	_, grants, err := verifier.Verify(cfg.LiveKitAPISecret)
+	_, grants, err := verifier.Verify("test-secret-that-is-long-enough-for-hmac")
 	if err != nil {
 		t.Fatalf("Verify: %v", err)
 	}
@@ -347,9 +335,7 @@ func TestWebhook_ParticipantLeft_NoDoubleBroadcast_AfterFreshCleanup(t *testing.
 
 	// Insert the matching DB row first so the simulated client carries the
 	// same join token production would have persisted and handed to LiveKit.
-	if err := database.JoinVoiceChannel(context.Background(), user.ID, chanID); err != nil {
-		t.Fatalf("JoinVoiceChannel: %v", err)
-	}
+	mustJoinVoice(t, database, user.ID, chanID)
 	vs, err := database.GetVoiceState(context.Background(), user.ID)
 	if err != nil || vs == nil {
 		t.Fatalf("GetVoiceState: %v (nil=%v)", err, vs == nil)
@@ -415,17 +401,13 @@ func TestWebhook_ParticipantLeft_OldToken_DoesNotTeardownReplacement(t *testing.
 
 	// Create an old same-channel voice session, then rejoin the same channel so
 	// the DB carries a replacement join token like production would.
-	if err := database.JoinVoiceChannel(context.Background(), user.ID, chanID); err != nil {
-		t.Fatalf("JoinVoiceChannel(old): %v", err)
-	}
+	mustJoinVoice(t, database, user.ID, chanID)
 	oldState, err := database.GetVoiceState(context.Background(), user.ID)
 	if err != nil || oldState == nil {
 		t.Fatalf("GetVoiceState(old): %v (nil=%v)", err, oldState == nil)
 	}
 
-	if err := database.JoinVoiceChannel(context.Background(), user.ID, chanID); err != nil {
-		t.Fatalf("JoinVoiceChannel(new): %v", err)
-	}
+	mustJoinVoice(t, database, user.ID, chanID)
 	newState, err := database.GetVoiceState(context.Background(), user.ID)
 	if err != nil || newState == nil {
 		t.Fatalf("GetVoiceState(new): %v (nil=%v)", err, newState == nil)
@@ -489,9 +471,7 @@ func TestWebhook_ParticipantLeft_ClearsE2EEState_OnMatch(t *testing.T) {
 	user := seedVoiceOwner(t, database, "webhook-e2ee-user")
 	chanID := seedVoiceChannel(t, database, "webhook-e2ee-ch")
 
-	if err := database.JoinVoiceChannel(context.Background(), user.ID, chanID); err != nil {
-		t.Fatalf("JoinVoiceChannel: %v", err)
-	}
+	mustJoinVoice(t, database, user.ID, chanID)
 	vs, err := database.GetVoiceState(context.Background(), user.ID)
 	if err != nil || vs == nil {
 		t.Fatalf("GetVoiceState: %v (nil=%v)", err, vs == nil)
@@ -551,9 +531,7 @@ func TestWebhook_ParticipantLeft_LeaverWithoutReadStillNotified(t *testing.T) {
 		t.Fatalf("UpsertChannelOverride: %v", err)
 	}
 
-	if err := database.JoinVoiceChannel(context.Background(), leaver.ID, chanID); err != nil {
-		t.Fatalf("JoinVoiceChannel: %v", err)
-	}
+	mustJoinVoice(t, database, leaver.ID, chanID)
 	vs, err := database.GetVoiceState(context.Background(), leaver.ID)
 	if err != nil || vs == nil {
 		t.Fatalf("GetVoiceState: %v (nil=%v)", err, vs == nil)
@@ -594,9 +572,7 @@ func TestWebhook_ParticipantLeft_SurvivesCancelledRequestContext(t *testing.T) {
 	leaver := seedVoiceOwner(t, database, "webhook-ctxcancel-leaver")
 	observer := seedVoiceOwner(t, database, "webhook-ctxcancel-observer")
 
-	if err := database.JoinVoiceChannel(context.Background(), leaver.ID, chanID); err != nil {
-		t.Fatalf("JoinVoiceChannel: %v", err)
-	}
+	mustJoinVoice(t, database, leaver.ID, chanID)
 	vs, err := database.GetVoiceState(context.Background(), leaver.ID)
 	if err != nil || vs == nil {
 		t.Fatalf("GetVoiceState: %v (nil=%v)", err, vs == nil)
@@ -729,9 +705,7 @@ func TestWebhookHandler_SignedParticipantLeftDispatches(t *testing.T) {
 	user := seedVoiceOwner(t, database, "webhook-signed-user")
 	chanID := seedVoiceChan(t, database, "webhook-signed-ch")
 
-	if err := database.JoinVoiceChannel(context.Background(), user.ID, chanID); err != nil {
-		t.Fatalf("JoinVoiceChannel: %v", err)
-	}
+	mustJoinVoice(t, database, user.ID, chanID)
 	state, err := database.GetVoiceState(context.Background(), user.ID)
 	if err != nil || state == nil {
 		t.Fatalf("GetVoiceState: %v (nil=%v)", err, state == nil)

@@ -2,7 +2,6 @@ package ws_test
 
 import (
 	"context"
-	"encoding/json"
 	"testing"
 	"time"
 
@@ -17,10 +16,7 @@ import (
 // channel read from its context menu must do the second without the first.
 
 func markReadEnvelope(channelID int64) []byte {
-	raw, _ := json.Marshal(map[string]any{
-		"type":    "mark_read",
-		"payload": map[string]any{"channel_id": channelID},
-	})
+	raw := envelope("mark_read", map[string]any{"channel_id": channelID})
 	return raw
 }
 
@@ -30,15 +26,9 @@ func TestMarkRead_AdvancesReadStateWithoutChangingFocus(t *testing.T) {
 	focused := seedTestChannel(t, database, "markread-focused")
 	other := seedTestChannel(t, database, "markread-other")
 
-	latest, err := database.CreateMessage(context.Background(), other, user.ID, "unread", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	latest := mustCreateMessage(t, database, other, user.ID, "unread")
 
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, focused, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, focused, 16)
 
 	hub.HandleMessageForTest(c, markReadEnvelope(other))
 
@@ -70,18 +60,12 @@ func TestMarkRead_ClearsMentionCount(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "markread-mention-user")
 	chID := seedTestChannel(t, database, "markread-mention-chan")
-	msgID, err := database.CreateMessage(context.Background(), chID, user.ID, "@you", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	msgID := mustCreateMessage(t, database, chID, user.ID, "@you")
 	if err := database.IncrementMentionCounts(context.Background(), chID, msgID, []int64{user.ID}); err != nil {
 		t.Fatalf("IncrementMentionCounts: %v", err)
 	}
 
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, _ := connectClient(t, hub, user, 0, 16)
 
 	hub.HandleMessageForTest(c, markReadEnvelope(chID))
 
@@ -100,10 +84,7 @@ func TestMarkRead_DeniedChannelIsForbidden(t *testing.T) {
 	user := seedMemberUser(t, database, "markread-denied-user")
 	denyReadOnChannel(t, database, chID, permissions.MemberRoleID)
 
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, 0, 16)
 
 	hub.HandleMessageForTest(c, markReadEnvelope(chID))
 
@@ -116,10 +97,7 @@ func TestMarkRead_RejectsInvalidPayload(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "markread-badpayload-user")
 
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, 0, 16)
 
 	hub.HandleMessageForTest(c, markReadEnvelope(0))
 

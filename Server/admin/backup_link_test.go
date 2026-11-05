@@ -2,7 +2,6 @@ package admin_test
 
 import (
 	"context"
-	"encoding/json"
 	"io"
 	"mime"
 	"net"
@@ -55,12 +54,9 @@ func issueBackupLink(t *testing.T, f backupLinkFixture, name string) string {
 	if w.Code != http.StatusOK {
 		t.Fatalf("POST /backups/%s/link = %d, want 200; body: %s", name, w.Code, w.Body.String())
 	}
-	var resp struct {
+	resp := decodeBody[struct {
 		Path string `json:"path"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	}](t, w)
 	u, err := url.Parse(resp.Path)
 	if err != nil || u.Query().Get("token") == "" {
 		t.Fatalf("link response has no token in its path: %s", w.Body.String())
@@ -130,9 +126,7 @@ func TestBackupLink_NonOwnerRefused(t *testing.T) {
 	_, adminToken := createRoleUser(t, database, 2, "Admin", permissions.AllPerms&^permissions.Administrator&^permissions.ManageBackups, 80, "backuplinkadmin")
 
 	w := doRequest(t, handler, http.MethodPost, "/backups/chatserver_20260901_100000.db/link", adminToken, map[string]any{})
-	if w.Code != http.StatusForbidden {
-		t.Errorf("non-owner without MANAGE_BACKUPS POST backup link = %d, want 403; body: %s", w.Code, w.Body.String())
-	}
+	expectStatus(t, w, http.StatusForbidden)
 }
 
 // TestBackupLink_Expires: a link older than its short window is refused.

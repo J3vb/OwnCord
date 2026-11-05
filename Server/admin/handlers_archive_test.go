@@ -91,9 +91,7 @@ func newArchiveFixture(t *testing.T, configure ...func(dir string, cfg *config.C
 func archiveZip(t *testing.T, f archiveFixture) *zip.Reader {
 	t.Helper()
 	w := doRequest(t, f.handler, http.MethodGet, "/archive", f.token, nil)
-	if w.Code != http.StatusOK {
-		t.Fatalf("GET /archive = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusOK)
 	if ct := w.Header().Get("Content-Type"); ct != "application/zip" {
 		t.Errorf("Content-Type = %q, want application/zip", ct)
 	}
@@ -230,9 +228,7 @@ func TestHandleArchive_BadDataDirIs500(t *testing.T) {
 	token := createAdminUser(t, database)
 
 	w := doRequest(t, handler, http.MethodGet, "/archive", token, nil)
-	if w.Code != http.StatusInternalServerError {
-		t.Errorf("GET /archive with an unwalkable data dir = %d, want 500", w.Code)
-	}
+	expectStatus(t, w, http.StatusInternalServerError)
 	var body map[string]string
 	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
 		t.Errorf("error body is not JSON: %s", w.Body.String())
@@ -326,9 +322,7 @@ func TestHandleArchive_RefusesBelowFreeDiskFloor(t *testing.T) {
 		backups = cfg.Backup.Dir
 	})
 	w := doRequest(t, f.handler, http.MethodGet, "/archive", f.token, nil)
-	if w.Code != http.StatusInsufficientStorage {
-		t.Fatalf("GET /archive below the free-disk floor = %d, want 507; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusInsufficientStorage)
 	var body map[string]string
 	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
 		t.Fatalf("error body is not JSON: %s", w.Body.String())

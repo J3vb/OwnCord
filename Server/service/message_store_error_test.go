@@ -64,9 +64,7 @@ func TestEditMessage_StoreFailureIsInternalNotForbidden(t *testing.T) {
 	plain, database, permSvc := newStoreErrorFixture(t)
 	ctx := context.Background()
 	sent, err := plain.SendMessage(ctx, SendMessageParams{ChannelID: 10, UserID: 1, Username: "alice", RoleName: "member", Content: "hi bob"})
-	if err != nil {
-		t.Fatalf("send: %v", err)
-	}
+	mustDo(t, "send", err)
 
 	for name, st := range map[string]busyStore{
 		"write": {Store: database, failEdit: true},
@@ -93,9 +91,7 @@ func TestDeleteMessage_StoreFailureIsInternalNotForbidden(t *testing.T) {
 	plain, database, permSvc := newStoreErrorFixture(t)
 	ctx := context.Background()
 	sent, err := plain.SendMessage(ctx, SendMessageParams{ChannelID: 10, UserID: 1, Username: "alice", RoleName: "member", Content: "hi bob"})
-	if err != nil {
-		t.Fatalf("send: %v", err)
-	}
+	mustDo(t, "send", err)
 
 	for name, st := range map[string]busyStore{
 		"write": {Store: database, failDelete: true},
@@ -121,9 +117,7 @@ func TestSoftDeleteRow_StoreRefusalStaysForbidden(t *testing.T) {
 	plain, _, _ := newStoreErrorFixture(t)
 	ctx := context.Background()
 	sent, err := plain.SendMessage(ctx, SendMessageParams{ChannelID: 10, UserID: 1, Username: "alice", RoleName: "member", Content: "hi bob"})
-	if err != nil {
-		t.Fatalf("send: %v", err)
-	}
+	mustDo(t, "send", err)
 	// The store's own ownership check (a non-moderator deleting another's row)
 	// is a refusal, not a failure.
 	err = plain.softDeleteRow(ctx, sent.MessageID, 2, false, 1, nil, "", false)

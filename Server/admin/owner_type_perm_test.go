@@ -2,7 +2,6 @@ package admin_test
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -54,13 +53,8 @@ type tokenRow struct {
 func listTokens(t *testing.T, f ownerTypeFixture, token string) []tokenRow {
 	t.Helper()
 	w := doRequest(t, f.api, http.MethodGet, "/tokens", token, nil)
-	if w.Code != http.StatusOK {
-		t.Fatalf("GET /tokens = %d; body: %s", w.Code, w.Body.String())
-	}
-	var rows []tokenRow
-	if err := json.Unmarshal(w.Body.Bytes(), &rows); err != nil {
-		t.Fatalf("decode tokens: %v", err)
-	}
+	requireStatus(t, w, http.StatusOK)
+	rows := decodeBody[[]tokenRow](t, w)
 	return rows
 }
 
@@ -74,13 +68,10 @@ func TestManageTokens_HolderIsConfinedToOwnTokens(t *testing.T) {
 
 	// Seed one token for the other member and one for the owner, via the owner.
 	w := doRequest(t, f.api, http.MethodPost, "/tokens", f.owner, map[string]any{"label": "other-bot", "username": "tokenother"})
-	if w.Code != http.StatusCreated {
-		t.Fatalf("owner mint for other = %d; body: %s", w.Code, w.Body.String())
-	}
-	var otherTok struct {
+	requireStatus(t, w, http.StatusCreated)
+	otherTok := decodeBody[struct {
 		ID int64 `json:"id"`
-	}
-	_ = json.Unmarshal(w.Body.Bytes(), &otherTok)
+	}](t, w)
 	if w = doRequest(t, f.api, http.MethodPost, "/tokens", f.owner, map[string]any{"label": "owner-bot"}); w.Code != http.StatusCreated {
 		t.Fatalf("owner mint for self = %d; body: %s", w.Code, w.Body.String())
 	}
@@ -88,11 +79,10 @@ func TestManageTokens_HolderIsConfinedToOwnTokens(t *testing.T) {
 	// Create: empty username and the holder's own name bind to the holder.
 	for _, body := range []map[string]any{{"label": "mine-empty"}, {"label": "mine-named", "username": "tokenholder"}} {
 		w = doRequest(t, f.api, http.MethodPost, "/tokens", holder, body)
-		var resp struct {
+		resp := decodeBody[struct {
 			ID   int64  `json:"id"`
 			User string `json:"user"`
-		}
-		_ = json.Unmarshal(w.Body.Bytes(), &resp)
+		}](t, w)
 		if w.Code != http.StatusCreated || resp.User != "tokenholder" {
 			t.Fatalf("holder mint %v = %d user %q; body: %s", body, w.Code, resp.User, w.Body.String())
 		}
@@ -163,9 +153,7 @@ func TestIssueRecovery_HolderRankRule(t *testing.T) {
 		}
 	}
 	w := doRequest(t, f.api, http.MethodPost, "/users/"+itoa(low)+"/recovery-credential", holder, body)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("holder issuing to a lower rank = %d, want 201; body: %s", w.Code, w.Body.String())
-	}
+	requireStatus(t, w, http.StatusCreated)
 	// The owner still issues to a higher-ranked member.
 	if w = doRequest(t, f.api, http.MethodPost, "/users/"+itoa(high)+"/recovery-credential", f.owner, body); w.Code != http.StatusCreated {
 		t.Errorf("owner issuing to a higher rank = %d, want 201; body: %s", w.Code, w.Body.String())
@@ -245,9 +233,7 @@ func TestRestoreBackups_ArchiveLinkRevalidatedOnRedeem(t *testing.T) {
 	issue := func(t *testing.T, f ownerTypeFixture, token string) string {
 		t.Helper()
 		w := doRequest(t, f.api, http.MethodPost, "/archive/link", token, map[string]any{})
-		if w.Code != http.StatusOK {
-			t.Fatalf("POST /archive/link = %d; body: %s", w.Code, w.Body.String())
-		}
+		requireStatus(t, w, http.StatusOK)
 		return linkPath(t, w.Body.Bytes())
 	}
 	t.Run("bit removed from the role", func(t *testing.T) {
@@ -288,13 +274,10 @@ func TestViewDiagnostics_LogStreamRevalidated(t *testing.T) {
 	stream := func(t *testing.T, f ownerTypeFixture, token string, mutate func()) int {
 		t.Helper()
 		w := doRequest(t, f.api, http.MethodPost, "/logs/ticket", token, nil)
-		if w.Code != http.StatusOK {
-			t.Fatalf("POST /logs/ticket = %d; body: %s", w.Code, w.Body.String())
-		}
-		var payload struct {
+		requireStatus(t, w, http.StatusOK)
+		payload := decodeBody[struct {
 			Ticket string `json:"ticket"`
-		}
-		_ = json.Unmarshal(w.Body.Bytes(), &payload)
+		}](t, w)
 		if mutate != nil {
 			mutate()
 		}

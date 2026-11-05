@@ -3,7 +3,6 @@ package api_test
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -44,13 +43,8 @@ func newLinkFixture(t *testing.T) linkFixture {
 	viewer := uploadCreateToken(t, database, "linkviewer", 4)
 	content := []byte(strings.Repeat("0123456789", 100))
 	rr := doUpload(t, router, owner, "file", "clip.txt", content)
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("upload: %d %s", rr.Code, rr.Body.String())
-	}
-	var resp map[string]any
-	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode upload: %v", err)
-	}
+	requireStatus(t, rr, http.StatusCreated)
+	resp := decodeBody[map[string]any](t, rr)
 	fileID, _ := resp["id"].(string)
 	ctx := context.Background()
 	for _, q := range []string{
@@ -73,18 +67,14 @@ func (f linkFixture) mint(t *testing.T, fileID, token string) (int, string) {
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
-	rr := httptest.NewRecorder()
-	f.router.ServeHTTP(rr, req)
+	rr := serveRequest(f.router, req)
 	if rr.Code != http.StatusOK {
 		return rr.Code, ""
 	}
-	var body struct {
+	body := decodeBody[struct {
 		Path      string `json:"path"`
 		ExpiresAt string `json:"expires_at"`
-	}
-	if err := json.NewDecoder(rr.Body).Decode(&body); err != nil {
-		t.Fatalf("decode link: %v", err)
-	}
+	}](t, rr)
 	if _, err := time.Parse(time.RFC3339, body.ExpiresAt); err != nil {
 		t.Errorf("expires_at %q is not RFC 3339: %v", body.ExpiresAt, err)
 	}
@@ -96,8 +86,7 @@ func (f linkFixture) get(path string, hdr map[string]string) *httptest.ResponseR
 	for k, v := range hdr {
 		req.Header.Set(k, v)
 	}
-	rr := httptest.NewRecorder()
-	f.router.ServeHTTP(rr, req)
+	rr := serveRequest(f.router, req)
 	return rr
 }
 
@@ -160,8 +149,7 @@ func TestFileLink_SameCredentialSameFileReusesToken(t *testing.T) {
 func TestFileLink_WrongFileIDIsRefused(t *testing.T) {
 	f := newLinkFixture(t)
 	rr := doUpload(t, f.router, f.viewer, "file", "other.txt", []byte("other file"))
-	var resp map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	resp := decodeBody[map[string]any](t, rr)
 	otherID, _ := resp["id"].(string)
 	if otherID == "" {
 		t.Fatal("second upload returned no id")
@@ -207,9 +195,7 @@ func TestFileLink_SignedOutOrExpiredSessionVoidsLink(t *testing.T) {
 				t.Fatalf("kill: %v", err)
 			}
 			rr := f.get(path, map[string]string{"Range": "bytes=10-19"})
-			if rr.Code != http.StatusForbidden {
-				t.Errorf("after = %d, want 403", rr.Code)
-			}
+			expectStatus(t, rr, http.StatusForbidden)
 			if bytes.Contains(rr.Body.Bytes(), f.content[:10]) {
 				t.Errorf("a refused link leaked file bytes")
 			}
@@ -262,9 +248,7 @@ func TestFileLink_AuthorizationHeaderTakesPrecedence(t *testing.T) {
 	}
 	// A bogus link plus a good bearer: the link is ignored, so this is a 200.
 	rr := f.get("/api/v1/files/"+f.fileID+"?link=bogus", map[string]string{"Authorization": "Bearer " + f.viewer})
-	if rr.Code != http.StatusOK {
-		t.Errorf("bogus link + good bearer = %d, want 200", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusOK)
 }
 
 func TestFileLink_ThumbRouteDoesNotAcceptLinks(t *testing.T) {
@@ -411,8 +395,7 @@ func TestFileLink_IssueIsRateLimitedPerUser(t *testing.T) {
 	api.MountUploadRoutes(r, service.NewSessionService(database), newUploadTestStorage(t), limiter, nil, service.NewUploadService(database, perms))
 	owner := uploadCreateToken(t, database, "ratelinkowner", 4)
 	rr := doUpload(t, r, owner, "file", "a.txt", []byte("abc"))
-	var resp map[string]any
-	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	resp := decodeBody[map[string]any](t, rr)
 	fileID, _ := resp["id"].(string)
 	var uid int64
 	if err := database.QueryRowContext(context.Background(), `SELECT id FROM users WHERE username = 'ratelinkowner'`).Scan(&uid); err != nil {
@@ -421,8 +404,7 @@ func TestFileLink_IssueIsRateLimitedPerUser(t *testing.T) {
 	post := func() int {
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/files/"+fileID+"/link", nil)
 		req.Header.Set("Authorization", "Bearer "+owner)
-		w := httptest.NewRecorder()
-		r.ServeHTTP(w, req)
+		w := serveRequest(r, req)
 		return w.Code
 	}
 	if code := post(); code != http.StatusOK {

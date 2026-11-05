@@ -250,9 +250,7 @@ func heicRefused(t *testing.T, content []byte) {
 	}
 	for range 2 {
 		rr := doServeThumb(t, router, id, token)
-		if rr.Code != http.StatusNotFound {
-			t.Fatalf("preview: %d, want 404", rr.Code)
-		}
+		requireStatus(t, rr, http.StatusNotFound)
 	}
 	marker, err := store.OpenThumb(id)
 	if err != nil {

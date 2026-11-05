@@ -36,9 +36,7 @@ type pinFrame struct {
 func decodePinFrame(t *testing.T, raw []byte) pinFrame {
 	t.Helper()
 	var f pinFrame
-	if err := json.Unmarshal(raw, &f); err != nil {
-		t.Fatalf("decode frame: %v", err)
-	}
+	mustUnmarshal(t, raw, &f)
 	return f
 }
 
@@ -189,9 +187,7 @@ func TestPinEventRow_ChannelGates(t *testing.T) {
 	ctx := context.Background()
 
 	chID := seedTestChannel(t, database, "gated")
-	if _, err := database.ExecContext(ctx, `UPDATE channels SET nsfw = 1 WHERE id = ?`, chID); err != nil {
-		t.Fatalf("label channel: %v", err)
-	}
+	mustExec(t, database, `UPDATE channels SET nsfw = 1 WHERE id = ?`, chID)
 	pinner := seedTestUser(t, database, "gate-pinner")
 	acked := seedTestUser(t, database, "gate-acked")
 	unacked := seedTestUser(t, database, "gate-unacked")

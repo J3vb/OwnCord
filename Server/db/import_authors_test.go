@@ -11,10 +11,7 @@ import (
 func seedImported(t *testing.T, database *db.DB, ch, owner int64, content, name string, color *string) int64 {
 	t.Helper()
 	ctx := context.Background()
-	id, err := database.CreateMessage(ctx, ch, owner, content, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	id := mustCreateMessage(t, database, ch, owner, content, nil)
 	if _, err := database.ExecContext(ctx,
 		`INSERT INTO message_import_authors (message_id, discord_user_id, name, color) VALUES (?, ?, ?, ?)`,
 		id, "1234567890", name, color); err != nil {
@@ -35,9 +32,7 @@ func TestImportedAuthor_HistoryAndPins(t *testing.T) {
 	plain, _ := database.CreateMessage(ctx, ch, alice, "native", nil)
 
 	msgs, err := database.GetMessagesForAPI(ctx, ch, 0, 50, alice)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "GetMessagesForAPI", err)
 	for _, m := range msgs {
 		switch m.ID {
 		case imp:
@@ -56,9 +51,7 @@ func TestImportedAuthor_HistoryAndPins(t *testing.T) {
 		t.Fatalf("after: %v %+v", err, after)
 	}
 	around, err := database.GetMessagesAroundForAPI(ctx, ch, imp, 5, 5, alice)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "GetMessagesAroundForAPI", err)
 	found := false
 	for _, m := range around {
 		if m.ID == imp {
@@ -99,9 +92,7 @@ func TestImportedAuthor_ReplyPreview(t *testing.T) {
 	reply, _ := database.CreateMessage(ctx, ch, alice, "re", &imp)
 
 	msgs, err := database.GetMessagesForAPI(ctx, ch, 0, 50, alice)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "GetMessagesForAPI", err)
 	if msgs[0].ID != reply || msgs[0].ReferencedMessage == nil || msgs[0].ReferencedMessage.ImportedAuthor == nil ||
 		msgs[0].ReferencedMessage.ImportedAuthor.Name != "Ann" {
 		t.Fatalf("reply preview = %+v", msgs[0].ReferencedMessage)

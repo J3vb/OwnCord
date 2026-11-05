@@ -17,9 +17,7 @@ func TestProposedRetentionSnapshotAndAtomicApply(t *testing.T) {
 	other, _ := database.CreateUser(ctx, "policy-member", "hash", 4)
 	channel, _ := database.CreateChannel(ctx, "policy-channel", "text", "", "", 0)
 	dm, _, err := database.GetOrCreateDMChannel(ctx, uid, other)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "GetOrCreateDMChannel", err)
 	now := time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC)
 	seedAgedMessage(t, database, channel, uid, "old", now.Add(-31*24*time.Hour), false)
 	seedAgedMessage(t, database, channel, uid, "pinned", now.Add(-31*24*time.Hour), true)
@@ -28,9 +26,7 @@ func TestProposedRetentionSnapshotAndAtomicApply(t *testing.T) {
 	policy := func() *db.RetentionPolicySnapshot {
 		t.Helper()
 		p, err := database.RetentionPolicySnapshot(ctx)
-		if err != nil {
-			t.Fatal(err)
-		}
+		mustDo(t, "RetentionPolicySnapshot", err)
 		return p
 	}
 	server := db.RetentionChange{Scope: "server", Days: new(30)}
@@ -102,12 +98,8 @@ func TestProposedRetentionFailsSafeForMalformedWindows(t *testing.T) {
 	uid, _ := database.CreateUser(ctx, "malformed-owner", "hash", 1)
 	channel, _ := database.CreateChannel(ctx, "malformed", "text", "", "", 0)
 	other, _ := database.CreateChannel(ctx, "other", "text", "", "", 0)
-	if err := database.SetChannelRetention(ctx, channel, db.RetentionMaxDays+1, uid); err != nil {
-		t.Fatal(err)
-	}
-	if err := database.ApplySettings(ctx, map[string]string{db.RetentionDaysKey: "106752"}); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "SetChannelRetention", database.SetChannelRetention(ctx, channel, db.RetentionMaxDays+1, uid))
+	mustDo(t, "ApplySettings", database.ApplySettings(ctx, map[string]string{db.RetentionDaysKey: "106752"}))
 	p, err := database.RetentionPolicySnapshot(ctx)
 	if err != nil || p.ServerDays != 0 {
 		t.Fatalf("malformed policy=%+v, %v", p, err)
@@ -116,9 +108,7 @@ func TestProposedRetentionFailsSafeForMalformedWindows(t *testing.T) {
 	if err != nil || preview.Channels[0].Days != 0 {
 		t.Fatalf("malformed override=%+v, %v", preview, err)
 	}
-	if err := database.Close(); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Close", database.Close())
 	if _, err := database.RetentionPolicySnapshot(ctx); err == nil {
 		t.Fatal("closed store returned a policy")
 	}

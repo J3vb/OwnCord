@@ -44,9 +44,7 @@ func authOKFileTypes(t *testing.T, hub *ws.Hub, user *db.User) uploadPolicyLists
 			UploadPolicy uploadPolicyLists `json:"upload_policy"`
 		} `json:"payload"`
 	}
-	if err := json.Unmarshal(hub.BuildAuthOKForTest(user, "member"), &env); err != nil {
-		t.Fatalf("unmarshal auth_ok: %v", err)
-	}
+	mustUnmarshal(t, hub.BuildAuthOKForTest(user, "member"), &env)
 	return env.Payload.UploadPolicy
 }
 
@@ -74,10 +72,7 @@ func TestBroadcastUploadPolicy_EmptiedListsReachClientsAndAuthOK(t *testing.T) {
 		t.Fatalf("auth_ok before the save = %+v, want the blocked list", got)
 	}
 
-	send := make(chan []byte, 16)
-	client := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(client)
-	waitRegistered(t, hub, client)
+	_, send := connectClient(t, hub, user, 0, 16)
 
 	saved.set(storage.FileTypePolicy{Blocked: []string{}, Allowed: []string{}}, nil)
 	hub.BroadcastUploadPolicy()
@@ -103,10 +98,7 @@ func TestBroadcastUploadPolicy_FailedReadSendsNothing(t *testing.T) {
 	user := seedServeUser(t, database, "policy-failed")
 	authOKFileTypes(t, hub, user)
 
-	send := make(chan []byte, 16)
-	client := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(client)
-	waitRegistered(t, hub, client)
+	_, send := connectClient(t, hub, user, 0, 16)
 
 	saved.set(storage.FileTypePolicy{}, errors.New("settings read failed"))
 	hub.BroadcastUploadPolicy()
@@ -133,10 +125,7 @@ func TestBroadcastUploadPolicy_IsNotSequenced(t *testing.T) {
 	saved := &savedFileTypes{policy: storage.FileTypePolicy{Blocked: []string{"bat"}}}
 	hub, database := uploadPolicyHub(t, saved)
 	user := seedServeUser(t, database, "policy-unsequenced")
-	send := make(chan []byte, 16)
-	client := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(client)
-	waitRegistered(t, hub, client)
+	_, send := connectClient(t, hub, user, 0, 16)
 
 	hub.BroadcastUploadPolicy()
 	if seq, ok := drainForMsgType(t, send, "upload_policy")["seq"]; ok {

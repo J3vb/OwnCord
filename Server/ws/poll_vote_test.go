@@ -33,7 +33,7 @@ func (h *forwardHarness) endPoll(cl *ws.Client, reqID string, messageID int64) {
 
 // focus subscribes cl to a channel, as the client does on opening it.
 func (h *forwardHarness) focus(cl *ws.Client, channelID int64) {
-	raw, _ := json.Marshal(map[string]any{"type": "channel_focus", "payload": map[string]any{"channel_id": channelID}})
+	raw := envelope("channel_focus", map[string]any{"channel_id": channelID})
 	h.hub.HandleMessageForTest(cl, raw)
 }
 
@@ -462,7 +462,7 @@ func TestPollUpdate_ReplayAfterGap(t *testing.T) {
 	h.focus(h.aliceCl, h.dstChan)
 	poll := h.rawPoll(t, h.dstChan, true)
 	// Two control frames first: the ring serves nothing from its oldest slot.
-	control, _ := json.Marshal(map[string]any{"type": "typing", "payload": map[string]any{"channel_id": h.dstChan, "user_id": h.bob.ID}})
+	control := envelope("typing", map[string]any{"channel_id": h.dstChan, "user_id": h.bob.ID})
 	h.hub.BroadcastToChannel(h.dstChan, control)
 	h.hub.BroadcastToChannel(h.dstChan, control)
 	waitFor(t, waitTimeout, func() bool { return h.hub.CurrentSeqForTest() >= 2 }, "the control frames to be sequenced")

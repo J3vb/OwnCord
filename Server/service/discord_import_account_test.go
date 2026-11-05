@@ -18,9 +18,7 @@ func TestLogin_RefusesTheHiddenImportAccount(t *testing.T) {
 	database := newTestDB(t)
 	ctx := context.Background()
 	id, err := database.EnsureImportAccount(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "EnsureImportAccount", err)
 	svc := NewAuthService(database, auth.NewRateLimiter(), make([]byte, 32), nil)
 	in := LoginInput{Username: "[imported]", Password: "!", Device: "d", IP: "203.0.113.9"}
 	for _, pw := range []string{"!", "", "password123", "[imported]"} {
@@ -31,9 +29,7 @@ func TestLogin_RefusesTheHiddenImportAccount(t *testing.T) {
 	}
 
 	hash, err := auth.HashPassword("correct horse battery")
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "HashPassword", err)
 	if _, err := database.ExecContext(ctx, `UPDATE users SET password = ? WHERE id = ?`, hash, id); err != nil {
 		t.Fatal(err)
 	}
@@ -51,9 +47,7 @@ func TestCreateDM_RefusesTheHiddenImportAccount(t *testing.T) {
 	database, permSvc := newDMFixture(t)
 	ctx := context.Background()
 	id, err := database.EnsureImportAccount(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "EnsureImportAccount", err)
 	if _, err := NewDMService(database, permSvc).CreateDM(ctx, 1, id); err == nil {
 		t.Fatal("a direct message to the import account was created")
 	}
@@ -75,9 +69,7 @@ func TestModeration_TargetsRefuseTheHiddenImportAccount(t *testing.T) {
 	svc, database := newTestModerationService(t)
 	ctx := context.Background()
 	sys, err := database.EnsureImportAccount(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "EnsureImportAccount", err)
 	const owner = 1
 	exp := time.Now().Add(time.Hour)
 	calls := map[string]func() error{
@@ -119,20 +111,13 @@ func TestModeration_TargetsRefuseTheHiddenImportAccount(t *testing.T) {
 func TestEraseUser_RefusesTheHiddenImportAccountAndKeepsImportedMessages(t *testing.T) {
 	database := newTestDB(t)
 	ctx := context.Background()
-	owner, err := database.CreateUser(ctx, "the-owner", "hash", 1)
-	if err != nil {
-		t.Fatal(err)
-	}
+	owner := mustCreateUser(t, database, "the-owner", "hash", 1)
 	svc := New(database, auth.NewRateLimiter())
 	svc.Erasure.SetFiles(newTestStorage(t, t.TempDir()))
 	sys, err := database.EnsureImportAccount(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "EnsureImportAccount", err)
 	ch, job, err := database.StartImport(ctx, db.StartImportParams{Name: "history"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "StartImport", err)
 	ids, err := database.ImportChunk(ctx, db.ImportChunkParams{
 		JobID: job, ChannelID: ch, AuthorID: sys, Progress: db.ImportProgress{Imported: 1},
 		Messages: []db.ImportMessage{{Key: "a", Content: "kept", Timestamp: time.Now(), DiscordUserID: "1", AuthorName: "Ann"}},
@@ -140,9 +125,7 @@ func TestEraseUser_RefusesTheHiddenImportAccountAndKeepsImportedMessages(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := database.PublishImport(ctx, job, ch, ids["a"], db.ImportProgress{Imported: 1}); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "PublishImport", database.PublishImport(ctx, job, ch, ids["a"], db.ImportProgress{Imported: 1}))
 
 	if err := svc.Moderation.EraseUser(ctx, owner, sys); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("EraseUser(import account) = %v, want ErrNotFound", err)
@@ -158,12 +141,8 @@ func TestEraseUser_RefusesTheHiddenImportAccountAndKeepsImportedMessages(t *test
 func TestResolveSocketPrincipal_RefusesTheHiddenImportAccount(t *testing.T) {
 	svc, database, ctx := sessionFixture(t)
 	sys, err := database.EnsureImportAccount(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := database.CreateSession(ctx, sys, "sys-hash", "web", "127.0.0.1"); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "EnsureImportAccount", err)
+	mustCreateSession(t, database, sys, "sys-hash", "web", "127.0.0.1")
 	if u, err := svc.ResolveSocketPrincipal(ctx, "sys-hash"); !errors.Is(err, ErrPrincipalGone) || u != nil {
 		t.Errorf("ResolveSocketPrincipal = %v, %v; want ErrPrincipalGone", u, err)
 	}
@@ -175,21 +154,14 @@ func TestAuthorize_RefusesFilesOfAPendingImportChannel(t *testing.T) {
 	database := newTestDB(t)
 	ctx := context.Background()
 	sys, _ := database.EnsureImportAccount(ctx)
-	adminID, err := database.CreateUser(ctx, "root", "hash", 1)
-	if err != nil {
-		t.Fatal(err)
-	}
+	adminID := mustCreateUser(t, database, "root", "hash", 1)
 	admin, _ := database.GetUserByID(ctx, adminID)
 	role := &db.Role{ID: 1, Permissions: permissions.Administrator}
 	uploads := NewUploadService(database, NewPermissionService(database, permissions.NewChecker(database)))
 
 	ch, job, err := database.StartImport(ctx, db.StartImportParams{Name: "history"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := database.CreateAttachment(ctx, "att-1", sys, "a.txt", "att-1", "text/plain", 1, nil, nil); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "StartImport", err)
+	mustDo(t, "CreateAttachment", database.CreateAttachment(ctx, "att-1", sys, "a.txt", "att-1", "text/plain", 1, nil, nil))
 	ids, err := database.ImportChunk(ctx, db.ImportChunkParams{
 		JobID: job, ChannelID: ch, AuthorID: sys, Progress: db.ImportProgress{Imported: 1},
 		Messages: []db.ImportMessage{{Key: "a", Content: "x", Timestamp: time.Now(), DiscordUserID: "1", AuthorName: "Ann", AttachmentIDs: []string{"att-1"}}},
@@ -198,15 +170,11 @@ func TestAuthorize_RefusesFilesOfAPendingImportChannel(t *testing.T) {
 		t.Fatal(err)
 	}
 	aa, err := uploads.Resolve(ctx, "att-1")
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Resolve", err)
 	if err := uploads.Authorize(ctx, aa, admin, role); !errors.Is(err, ErrNotFound) {
 		t.Errorf("file of a channel still being imported: err = %v, want not found", err)
 	}
-	if err := database.PublishImport(ctx, job, ch, ids["a"], db.ImportProgress{Imported: 1}); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "PublishImport", database.PublishImport(ctx, job, ch, ids["a"], db.ImportProgress{Imported: 1}))
 	aa, _ = uploads.Resolve(ctx, "att-1")
 	if err := uploads.Authorize(ctx, aa, admin, role); err != nil {
 		t.Errorf("after publishing: %v", err)
@@ -217,9 +185,7 @@ func TestIssueRecoveryAssist_RefusesTheHiddenImportAccount(t *testing.T) {
 	ctx := context.Background()
 	svc, owner, _, database := newAssistFixture(t, false)
 	sys, err := database.EnsureImportAccount(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "EnsureImportAccount", err)
 	if _, err := svc.IssueRecoveryAssist(ctx, owner.ID, sys, "in_person"); !errors.Is(err, ErrNotFound) {
 		t.Errorf("assist for the import account = %v, want not found", err)
 	}

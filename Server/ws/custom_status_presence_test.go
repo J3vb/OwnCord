@@ -37,15 +37,8 @@ func TestPresenceUpdate_ExpiresInParse(t *testing.T) {
 		{"with blank custom_status", `{"status":"online","custom_status":"   ","custom_status_expires_in":600}`, true, 0},
 	}
 	for _, tc := range cases {
-		cmd, err := ctor(1, "", json.RawMessage(tc.payload))
-		if tc.wantErr {
-			if err == nil {
-				t.Errorf("%s: parsed, want an error", tc.name)
-			}
-			continue
-		}
-		if err != nil {
-			t.Errorf("%s: %v", tc.name, err)
+		cmd, ok := parseCase(t, ctor, tc.name, tc.payload, tc.wantErr)
+		if !ok {
 			continue
 		}
 		got := cmd.(PresenceUpdateCmd).ExpiresIn

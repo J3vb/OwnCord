@@ -43,9 +43,7 @@ func TestUserService_StampConnectPreservesAChosenStatus(t *testing.T) {
 		// The returned value is what the caller caches and broadcasts, so the
 		// row has to agree with it.
 		user, err := svc.Get(ctx, userID)
-		if err != nil {
-			t.Fatalf("Get: %v", err)
-		}
+		mustDo(t, "Get", err)
 		if user.Status != got {
 			t.Errorf("users.status = %q but StampConnect returned %q — the auth_ok reply "+
 				"and the presence broadcast would claim a value the row disagrees with",
@@ -65,14 +63,10 @@ func TestUserService_ChosenStatusSurvivesADisconnectCycle(t *testing.T) {
 	if _, err := svc.StampConnect(ctx, 1, db.StatusDND); err != nil {
 		t.Fatalf("StampConnect: %v", err)
 	}
-	if err := svc.StampDisconnect(ctx, 1); err != nil {
-		t.Fatalf("StampDisconnect: %v", err)
-	}
+	mustDo(t, "StampDisconnect", svc.StampDisconnect(ctx, 1))
 
 	after, err := svc.Get(ctx, 1)
-	if err != nil {
-		t.Fatalf("Get: %v", err)
-	}
+	mustDo(t, "Get", err)
 	if after.Status != db.StatusDND {
 		t.Fatalf("status after a disconnect = %q, want %q — the stamp must clear only the "+
 			"non-choice \"online\", or the next connect has nothing left to preserve",
@@ -80,9 +74,7 @@ func TestUserService_ChosenStatusSurvivesADisconnectCycle(t *testing.T) {
 	}
 	// …and the next connect reads that choice back rather than forcing online.
 	got, err := svc.StampConnect(ctx, 1, after.Status)
-	if err != nil {
-		t.Fatalf("StampConnect (reconnect): %v", err)
-	}
+	mustDo(t, "StampConnect (reconnect)", err)
 	if got != db.StatusDND {
 		t.Errorf("reconnect came online as %q, want %q", got, db.StatusDND)
 	}
@@ -94,13 +86,9 @@ func TestUserService_StampDisconnectClearsOnlineOnly(t *testing.T) {
 	ctx := context.Background()
 	seedUser(t, database, &db.User{ID: 1, Username: "plain", Status: db.StatusOnline})
 
-	if err := svc.StampDisconnect(ctx, 1); err != nil {
-		t.Fatalf("StampDisconnect: %v", err)
-	}
+	mustDo(t, "StampDisconnect", svc.StampDisconnect(ctx, 1))
 	user, err := svc.Get(ctx, 1)
-	if err != nil {
-		t.Fatalf("Get: %v", err)
-	}
+	mustDo(t, "Get", err)
 	if user.Status != db.StatusOffline {
 		t.Errorf("status after disconnecting an online user = %q, want %q", user.Status, db.StatusOffline)
 	}
@@ -115,9 +103,7 @@ func TestUserService_PresenceStampsFailLoud(t *testing.T) {
 	svc := NewUserService(database)
 	ctx := context.Background()
 	seedUser(t, database, &db.User{ID: 1, Username: "doomed"})
-	if err := database.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
+	mustDo(t, "Close", database.Close())
 
 	got, err := svc.StampConnect(ctx, 1, db.StatusIdle)
 	if !errors.Is(err, ErrInternal) {

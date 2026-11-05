@@ -41,10 +41,7 @@ func seedVoiceModerator(t *testing.T, database *db.DB, username string) *db.User
 func fillVoiceChannel(t *testing.T, hub *ws.Hub, database *db.DB, chanID int64, username string) {
 	t.Helper()
 	filler := seedVoiceMember(t, database, username)
-	send := make(chan []byte, 32)
-	c := ws.NewTestClientWithUser(hub, filler, chanID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, filler, chanID, 32)
 	hub.HandleMessageForTest(c, voiceJoinMsg(chanID))
 	drainChanTimeout(send, 30*time.Millisecond)
 	if st, err := database.GetVoiceState(context.Background(), filler.ID); err != nil || st == nil || st.ChannelID != chanID {
@@ -76,10 +73,7 @@ func TestVoice_Join_FullChannel_ModeratorAdmitted(t *testing.T) {
 	fillVoiceChannel(t, hub, database, chanID, "full-mod-filler")
 
 	mod := seedVoiceModerator(t, database, "full-mod")
-	send := make(chan []byte, 32)
-	c := ws.NewTestClientWithUser(hub, mod, chanID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, mod, chanID, 32)
 
 	joinAndExpectChannel(t, hub, database, c, send, mod.ID, chanID)
 }
@@ -94,10 +88,7 @@ func TestVoice_Join_SwitchToFullChannel_ModeratorAdmitted(t *testing.T) {
 	fillVoiceChannel(t, hub, database, chanB, "full-mod-switch-filler")
 
 	mod := seedVoiceModerator(t, database, "full-mod-switcher")
-	send := make(chan []byte, 32)
-	c := ws.NewTestClientWithUser(hub, mod, chanA, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, mod, chanA, 32)
 	joinAndExpectChannel(t, hub, database, c, send, mod.ID, chanA)
 
 	joinAndExpectChannel(t, hub, database, c, send, mod.ID, chanB)
@@ -115,10 +106,7 @@ func TestVoice_Join_FullChannel_ModeratorDeniedInChannel(t *testing.T) {
 	}
 	fillVoiceChannel(t, hub, database, chanID, "full-mod-deny-filler")
 
-	send := make(chan []byte, 32)
-	c := ws.NewTestClientWithUser(hub, mod, chanID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, mod, chanID, 32)
 	hub.HandleMessageForTest(c, voiceJoinMsg(chanID))
 
 	if code := drainForErrorCode(send, 300*time.Millisecond); code != "CHANNEL_FULL" {
@@ -152,10 +140,7 @@ func TestVoiceMod_Move_IntoFullChannel(t *testing.T) {
 			target := seedVoiceUserWithRole(t, database, "target-move-full", tc.targetRole)
 			_, targetSend := joinVoice(t, hub, target, fromID)
 
-			send := make(chan []byte, 16)
-			c := ws.NewTestClientWithUser(hub, actor, fromID, send)
-			hub.Register(c)
-			waitRegistered(t, hub, c)
+			c, send := connectClient(t, hub, actor, fromID, 16)
 			hub.HandleMessageForTest(c, voiceModMoveMsg(target.ID, toID))
 
 			if tc.wantMoved {
@@ -164,7 +149,7 @@ func TestVoiceMod_Move_IntoFullChannel(t *testing.T) {
 				}
 				return
 			}
-			if code := receiveErrorCode(send, waitTimeout); code != "CHANNEL_FULL" {
+			if code := drainForErrorCode(send, waitTimeout); code != "CHANNEL_FULL" {
 				t.Fatalf("error code = %q, want CHANNEL_FULL", code)
 			}
 			if st, err := database.GetVoiceState(context.Background(), target.ID); err != nil || st == nil || st.ChannelID != fromID {

@@ -11,7 +11,6 @@ package ws_test
 
 import (
 	"context"
-	"encoding/json"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -25,10 +24,7 @@ import (
 
 // voiceJoinRaw builds a raw voice_join envelope for channelID.
 func voiceJoinRaw(channelID int64) []byte {
-	raw, _ := json.Marshal(map[string]any{
-		"type":    "voice_join",
-		"payload": map[string]any{"channel_id": channelID},
-	})
+	raw := envelope("voice_join", map[string]any{"channel_id": channelID})
 	return raw
 }
 
@@ -57,7 +53,7 @@ func TestPermCache_RoleChangeInvalidationIsImmediate(t *testing.T) {
 	// First join: the gate passes (and populates the user's cache entry); the
 	// join then fails on the unconfigured LiveKit, not on permissions.
 	hub.HandleMessageForTest(c, voiceJoinRaw(chID))
-	if code := receiveErrorCode(send, 300*time.Millisecond); code == "FORBIDDEN" {
+	if code := drainForErrorCode(send, 300*time.Millisecond); code == "FORBIDDEN" {
 		t.Fatalf("member with CONNECT_VOICE was denied the voice_join gate (code %q)", code)
 	}
 
@@ -77,7 +73,7 @@ func TestPermCache_RoleChangeInvalidationIsImmediate(t *testing.T) {
 
 	// The very next check must see the demoted role — cached entry gone.
 	hub.HandleMessageForTest(c, voiceJoinRaw(chID))
-	if code := receiveErrorCode(send, 300*time.Millisecond); code != "FORBIDDEN" {
+	if code := drainForErrorCode(send, 300*time.Millisecond); code != "FORBIDDEN" {
 		t.Fatalf("demoted user passed the CONNECT_VOICE gate right after InvalidateUser, got code %q, want FORBIDDEN", code)
 	}
 }
@@ -115,7 +111,7 @@ func TestPermCache_SecondCheckServedFromCache(t *testing.T) {
 
 	for i := range 2 {
 		hub.HandleMessageForTest(c, voiceJoinRaw(chID))
-		if code := receiveErrorCode(send, 300*time.Millisecond); code == "FORBIDDEN" {
+		if code := drainForErrorCode(send, 300*time.Millisecond); code == "FORBIDDEN" {
 			t.Fatalf("join %d: member with CONNECT_VOICE was denied the gate", i+1)
 		}
 	}

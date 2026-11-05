@@ -36,10 +36,7 @@ func newFocusHub(t *testing.T, n int) (*Hub, *Client, []int64, context.CancelFun
 	limiter := auth.NewRateLimiter()
 	hub := newTestHub(t, database, limiter, service.New(database, limiter))
 
-	uid, err := database.CreateUser(context.Background(), "fastswitch", "hash", 1)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	uid := mustCreateUser(t, database, "fastswitch", 1)
 	user, err := database.GetUserByUsername(context.Background(), "fastswitch")
 	if err != nil || user == nil {
 		t.Fatalf("GetUserByUsername: %v", err)

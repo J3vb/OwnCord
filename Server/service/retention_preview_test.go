@@ -14,13 +14,9 @@ import (
 func previewChange(t *testing.T, svc *RetentionService, actor int64, c RetentionChange) *ProposedRetentionPreview {
 	t.Helper()
 	p, err := svc.Policy(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Policy", err)
 	preview, err := svc.PreviewChange(context.Background(), actor, c, p.Revision)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "PreviewChange", err)
 	return preview
 }
 
@@ -55,18 +51,10 @@ func TestRetentionProposedPreviewMath(t *testing.T) {
 				t.Fatal(err)
 			}
 			dm, _, err := database.GetOrCreateDMChannel(ctx, uid, other)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if _, err := database.CreateMessage(ctx, dm.ID, uid, "private", nil); err != nil {
-				t.Fatal(err)
-			}
-			if err := database.ApplySettings(ctx, map[string]string{db.RetentionDaysKey: "30"}); err != nil {
-				t.Fatal(err)
-			}
-			if err := database.SetChannelRetention(ctx, forever, 0, uid); err != nil {
-				t.Fatal(err)
-			}
+			mustDo(t, "GetOrCreateDMChannel", err)
+			mustCreateMessage(t, database, dm.ID, uid, "private", nil)
+			mustDo(t, "ApplySettings", database.ApplySettings(ctx, map[string]string{db.RetentionDaysKey: "30"}))
+			mustDo(t, "SetChannelRetention", database.SetChannelRetention(ctx, forever, 0, uid))
 			svc := newRetention(t, database, dir)
 			change := RetentionChange{Scope: tc.scope, Days: tc.days}
 			if tc.scope == "channel" {
@@ -89,9 +77,7 @@ func TestRetentionProposedPreviewMath(t *testing.T) {
 			if after.Revision != before.Revision || countMessages(t, database, general) != 4 || countMessages(t, database, forever) != 3 {
 				t.Fatal("preview changed persisted policy or messages")
 			}
-			if err := svc.ApplyChange(ctx, uid, change, preview.Token); err != nil {
-				t.Fatal(err)
-			}
+			mustDo(t, "ApplyChange", svc.ApplyChange(ctx, uid, change, preview.Token))
 			rep, err := svc.Tick(ctx)
 			if err != nil || int64(rep.Messages) != preview.WouldDelete || rep.Channels != preview.AffectedChannels {
 				t.Fatalf("applied sweep = %+v, %v; preview = %+v", rep, err, preview)
@@ -133,9 +119,7 @@ func TestRetentionPreviewBindingAndStaleRevision(t *testing.T) {
 	svc.SetClock(func() time.Time { return retentionNow })
 	// A -> B -> A is still stale, even inside the same timestamp second.
 	for _, days := range []string{"60", "0"} {
-		if err := database.ApplySettings(ctx, map[string]string{db.RetentionDaysKey: days}); err != nil {
-			t.Fatal(err)
-		}
+		mustDo(t, "ApplySettings", database.ApplySettings(ctx, map[string]string{db.RetentionDaysKey: days}))
 	}
 	if err := svc.ApplyChange(ctx, uid, c, preview.Token); !errors.Is(err, ErrConflict) || !strings.Contains(err.Error(), "nothing was saved") {
 		t.Fatalf("stale apply = %v", err)
@@ -147,9 +131,7 @@ func TestRetentionPreviewBindingAndStaleRevision(t *testing.T) {
 	if p.ServerDays != 0 {
 		t.Fatalf("rejected edit changed policy: %+v", p)
 	}
-	if err := svc.ApplyChange(ctx, uid, c, previewChange(t, svc, uid, c).Token); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "ApplyChange", svc.ApplyChange(ctx, uid, c, previewChange(t, svc, uid, c).Token))
 }
 
 func TestRetentionConcurrentApplyHasOneWinner(t *testing.T) {
@@ -191,18 +173,14 @@ func TestRetentionPreviewInvalidationByEveryChannelWriter(t *testing.T) {
 			ctx := context.Background()
 			database := newTestDB(t)
 			uid, _ := database.CreateUser(ctx, "revision-owner", "hash", 1)
-			channel, err := database.CreateChannel(ctx, "revision-channel", "text", "", "", 0)
-			if err != nil {
-				t.Fatal(err)
-			}
+			channel := mustCreateChannel(t, database, "revision-channel", "text", "", "", 0)
 			if change != "insert" {
-				if err := database.SetChannelRetention(ctx, channel, 0, uid); err != nil {
-					t.Fatal(err)
-				}
+				mustDo(t, "SetChannelRetention", database.SetChannelRetention(ctx, channel, 0, uid))
 			}
 			svc := NewRetentionService(database)
 			c := RetentionChange{Scope: "server", Days: new(7)}
 			p := previewChange(t, svc, uid, c)
+			var err error
 			switch change {
 			case "insert", "update":
 				err = database.SetChannelRetention(ctx, channel, 14, uid)
@@ -227,9 +205,7 @@ func TestRetentionPreviewValidation(t *testing.T) {
 	uid, _ := database.CreateUser(ctx, "validation-owner", "hash", 1)
 	other, _ := database.CreateUser(ctx, "validation-member", "hash", 4)
 	dm, _, err := database.GetOrCreateDMChannel(ctx, uid, other)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "GetOrCreateDMChannel", err)
 	svc := NewRetentionService(database)
 	p, _ := svc.Policy(ctx)
 	for _, c := range []RetentionChange{

@@ -3,21 +3,12 @@ package db
 import (
 	"context"
 	"testing"
-
-	"github.com/J3vb/OwnCord/Server/rollback"
 )
 
 func TestRollback071_Rehearsal(t *testing.T) {
 	database := openMigratedMemoryInternal(t)
 	ctx := context.Background()
-	count := func(q string) int {
-		t.Helper()
-		var n int
-		if err := database.QueryRowContext(ctx, q).Scan(&n); err != nil {
-			t.Fatalf("%s: %v", q, err)
-		}
-		return n
-	}
+	count := rowCounter(t, database)
 	u, err := database.CreateUser(ctx, "ra", "hash", 4)
 	if err != nil {
 		t.Fatal(err)
@@ -35,18 +26,7 @@ func TestRollback071_Rehearsal(t *testing.T) {
 		msg, ch); err != nil {
 		t.Fatal(err)
 	}
-	raw, err := rollback.FS.ReadFile("071_message_forwards.down.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, stmt := range splitStatements(string(raw)) {
-		if sqlText(stmt) == "" {
-			continue
-		}
-		if _, err := database.ExecContext(ctx, stmt); err != nil {
-			t.Fatalf("reversal statement %q: %v", stmt, err)
-		}
-	}
+	applyRollbackFile(t, database, "071_message_forwards.down.sql")
 	if n := count(`SELECT COUNT(*) FROM sqlite_master WHERE name IN ('message_forwards','idx_message_forwards_source')`); n != 0 {
 		t.Errorf("%d objects survived the reversal", n)
 	}

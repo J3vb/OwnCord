@@ -36,9 +36,7 @@ func TestCheckForUpdate_RefusesOlderRelease(t *testing.T) {
 
 			u := newTestUpdater(srv.URL, tt.current)
 			info, err := u.CheckForUpdate(context.Background())
-			if err != nil {
-				t.Fatalf("CheckForUpdate: %v", err)
-			}
+			mustDo(t, "CheckForUpdate", err)
 			if !info.RequiredAssetsPresent {
 				t.Fatal("RequiredAssetsPresent = false; the refusal must come from the version alone")
 			}

@@ -16,9 +16,7 @@ func TestAuditWriter_FlushIsABarrier(t *testing.T) {
 	ctx := context.Background()
 	store := &fakeAuditStore{}
 	w := db.NewAuditWriter(store, 64, 50, time.Hour)
-	if err := w.Flush(ctx); err != nil {
-		t.Fatalf("Flush before Start: %v", err)
-	}
+	mustDo(t, "Flush before Start", w.Flush(ctx))
 	w.Start(ctx)
 	defer w.Stop(ctx)
 
@@ -27,9 +25,7 @@ func TestAuditWriter_FlushIsABarrier(t *testing.T) {
 	if _, entries := store.snapshot(); len(entries) != 0 {
 		t.Fatalf("entries persisted before the barrier: %+v", entries)
 	}
-	if err := w.Flush(ctx); err != nil {
-		t.Fatalf("Flush: %v", err)
-	}
+	mustDo(t, "Flush", w.Flush(ctx))
 	flushes, entries := store.snapshot()
 	if flushes != 1 || len(entries) != 2 {
 		t.Fatalf("after the barrier: %d flushes, %d entries; want 1 and 2", flushes, len(entries))
@@ -40,9 +36,7 @@ func TestAuditWriter_FlushIsABarrier(t *testing.T) {
 		t.Errorf("entry after the barrier = %+v, want it as queued", e)
 	}
 	w.Enqueue(1, "settings_change", "settings", 0, "retention")
-	if err := w.Flush(ctx); err != nil {
-		t.Fatalf("second Flush: %v", err)
-	}
+	mustDo(t, "second Flush", w.Flush(ctx))
 	if _, entries := store.snapshot(); len(entries) != 3 {
 		t.Errorf("entries after the second barrier = %d, want 3", len(entries))
 	}
@@ -83,17 +77,11 @@ func TestPersistAudits_AppliesTheUnlinkRulesAtInsert(t *testing.T) {
 	if n, err := database.PersistAudits(ctx, entries); err != nil || n != 5 {
 		t.Fatalf("PersistAudits = %d, %v", n, err)
 	}
-	if err := database.LogAuditEntry(ctx, db.AuditEntry{ActorID: 42, Action: "user_login", TargetType: "user", TargetID: 42, Detail: "203.0.113.9"}); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "LogAuditEntry", database.LogAuditEntry(ctx, db.AuditEntry{ActorID: 42, Action: "user_login", TargetType: "user", TargetID: 42, Detail: "203.0.113.9"}))
 	database.SetAuditWriter(nil)
-	if err := database.LogAuditEntry(ctx, db.AuditEntry{ActorID: 42, Action: "user_logout", TargetType: "user", TargetID: 42, Detail: "bye"}); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "LogAuditEntry", database.LogAuditEntry(ctx, db.AuditEntry{ActorID: 42, Action: "user_logout", TargetType: "user", TargetID: 42, Detail: "bye"}))
 	got, err := database.GetAuditLog(ctx, 50, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "GetAuditLog", err)
 	byAction := map[string]db.AuditEntry{}
 	for _, e := range got {
 		byAction[e.Action] = e

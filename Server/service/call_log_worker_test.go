@@ -80,9 +80,7 @@ func newCallLogFixture(t *testing.T) *callLogFixture {
 	database, permSvc := newDMFixture(t)
 	ctx := context.Background()
 	for _, p := range [][2]int64{{clBob, clAlice}, {clAlice, clBob}} {
-		if err := database.TrustSender(ctx, p[0], p[1], "accepted"); err != nil {
-			t.Fatalf("TrustSender: %v", err)
-		}
+		mustDo(t, "TrustSender", database.TrustSender(ctx, p[0], p[1], "accepted"))
 	}
 	f := &callLogFixture{database: database, sink: &clSink{}, clock: &clClock{t: clT0}}
 	f.svc = NewCallLogService(database, NewDMService(database, permSvc))
@@ -95,18 +93,14 @@ func newCallLogFixture(t *testing.T) *callLogFixture {
 // join puts userID in the channel's voice room and notes it at the clock.
 func (f *callLogFixture) join(t *testing.T, userID, channelID int64) {
 	t.Helper()
-	if err := f.database.JoinVoiceChannel(context.Background(), userID, channelID); err != nil {
-		t.Fatalf("JoinVoiceChannel: %v", err)
-	}
+	mustDo(t, "JoinVoiceChannel", f.database.JoinVoiceChannel(context.Background(), userID, channelID))
 	f.svc.NoteJoin(channelID, userID, f.clock.now())
 }
 
 // leave removes userID's voice row and notes it at the clock.
 func (f *callLogFixture) leave(t *testing.T, userID, channelID int64) {
 	t.Helper()
-	if err := f.database.LeaveVoiceChannel(context.Background(), userID); err != nil {
-		t.Fatalf("LeaveVoiceChannel: %v", err)
-	}
+	mustDo(t, "LeaveVoiceChannel", f.database.LeaveVoiceChannel(context.Background(), userID))
 	f.svc.NoteLeave(channelID, f.clock.now())
 }
 
@@ -118,18 +112,14 @@ func (f *callLogFixture) pass(t *testing.T) {
 func (f *callLogFixture) open(t *testing.T, channelID int64) *db.OpenCall {
 	t.Helper()
 	oc, err := f.database.GetOpenCall(context.Background(), channelID)
-	if err != nil {
-		t.Fatalf("GetOpenCall: %v", err)
-	}
+	mustDo(t, "GetOpenCall", err)
 	return oc
 }
 
 func (f *callLogFixture) callRows(t *testing.T) int {
 	t.Helper()
 	var n int
-	if err := f.database.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM message_calls`).Scan(&n); err != nil {
-		t.Fatalf("count calls: %v", err)
-	}
+	mustDo(t, "count calls", f.database.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM message_calls`).Scan(&n))
 	return n
 }
 
@@ -451,9 +441,7 @@ func TestCallLog_RecoveryEndsOpenCallsAtLastSeen(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.svc.running = false
-	if err := f.database.ClearAllVoiceStates(ctx); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "ClearAllVoiceStates", f.database.ClearAllVoiceStates(ctx))
 	stop := f.svc.StartCallLogWorker(ctx)
 	defer stop(ctx)
 
@@ -534,9 +522,7 @@ func TestCallLog_ChannelDeletedDropsState(t *testing.T) {
 func TestCallLog_ReopensClosedDMBeforeRow(t *testing.T) {
 	f := newCallLogFixture(t)
 	ctx := context.Background()
-	if err := f.database.CloseDM(ctx, clBob, clDM); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CloseDM", f.database.CloseDM(ctx, clBob, clDM))
 	f.join(t, clAlice, clDM)
 	f.pass(t)
 	if created, _ := f.sink.counts(); created != 1 {
@@ -598,9 +584,7 @@ func TestVoiceService_NotesJoinAndLeaveOnlyWhenDeleted(t *testing.T) {
 	if p := f.svc.takeDirty()[clDM]; p == nil || len(p.joiners) != 1 {
 		t.Fatalf("join note = %+v", p)
 	}
-	if err := voice.Join(ctx, clAlice, clDM, 0); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Join", voice.Join(ctx, clAlice, clDM, 0))
 	// A stale join token deletes nothing, so it notes nothing.
 	if deleted, err := voice.LeaveIfMatch(ctx, clAlice, clDM, "stale"); err != nil || deleted {
 		t.Fatalf("stale leave = %v, %v", deleted, err)

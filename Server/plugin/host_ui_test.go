@@ -18,20 +18,14 @@ func newAssetTestInstance(t *testing.T, declaredAssets []string) (*Registry, *In
 	dir := t.TempDir()
 	// The handler uses filepath.Dir(inst.WASMPath) as pluginDir.
 	wasmPath := filepath.Join(dir, "main.wasm")
-	if err := os.WriteFile(wasmPath, []byte("\x00asm"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "WriteFile", os.WriteFile(wasmPath, []byte("\x00asm"), 0o644))
 	tabs := make([]UITab, len(declaredAssets))
 	for i, a := range declaredAssets {
 		tabs[i] = UITab{ID: "tab", Asset: a}
 		// Create the file under the plugin dir so ServeFile can find it.
 		full := filepath.Join(dir, a)
-		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(full, []byte("hello: "+a), 0o644); err != nil {
-			t.Fatal(err)
-		}
+		mustDo(t, "MkdirAll", os.MkdirAll(filepath.Dir(full), 0o755))
+		mustDo(t, "WriteFile", os.WriteFile(full, []byte("hello: "+a), 0o644))
 	}
 	r := &Registry{}
 	inst := &Instance{
@@ -67,9 +61,7 @@ func TestAssetHandlerServesAllowedFile(t *testing.T) {
 func TestAssetHandlerRejectsUnlistedFile(t *testing.T) {
 	r, inst, dir := newAssetTestInstance(t, []string{"index.html"})
 	// File EXISTS in the plugin dir but is not declared in the manifest.
-	if err := os.WriteFile(filepath.Join(dir, "secret.txt"), []byte("nope"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "WriteFile", os.WriteFile(filepath.Join(dir, "secret.txt"), []byte("nope"), 0o644))
 	h := r.AssetHandler(inst)
 
 	req := httptest.NewRequest("GET", "/secret.txt", nil)

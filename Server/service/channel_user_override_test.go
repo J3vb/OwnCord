@@ -19,12 +19,7 @@ func seedChannelUserOverride(t *testing.T, database *db.DB, userID, channelID, a
 func newOverrideFixture(t *testing.T) (*ChannelService, *PermissionService, *db.DB) {
 	t.Helper()
 	database := newTestDB(t)
-	seedRole(t, database, &db.Role{
-		ID:          permissions.MemberRoleID,
-		Name:        "member",
-		Permissions: permissions.SendMessages | permissions.ReadMessages,
-		Position:    1,
-	})
+	seedMemberRole(t, database, permissions.SendMessages|permissions.ReadMessages)
 	seedUser(t, database, &db.User{ID: 1, Username: "alice", Status: "online"})
 	seedUser(t, database, &db.User{ID: 2, Username: "bob", Status: "online"})
 	seedUserRole(t, database, 1, permissions.MemberRoleID)

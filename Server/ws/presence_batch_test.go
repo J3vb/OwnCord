@@ -59,10 +59,7 @@ func presenceBatchHub(t *testing.T) (*Hub, *db.DB, func(name string, seen bool) 
 	waitUntilRunning(t, h)
 	ctx := context.Background()
 	connect := func(name string, seen bool) *Client {
-		id, err := database.CreateUser(ctx, name, "hash", 4)
-		if err != nil {
-			t.Fatalf("CreateUser: %v", err)
-		}
+		id := mustCreateUser(t, database, name, 4)
 		if seen {
 			if err := database.UpdateUserStatus(ctx, id, db.StatusOffline); err != nil {
 				t.Fatalf("UpdateUserStatus: %v", err)
@@ -245,10 +242,7 @@ func TestPresenceBatch_LostAtEnqueueRepairsBySnapshot(t *testing.T) {
 	database := newTeardownTestDB(t)
 	h := newTestHub(t, database, nil, nil)
 	ctx := context.Background()
-	id, err := database.CreateUser(ctx, "watcher", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	id := mustCreateUser(t, database, "watcher", 4)
 	u, err := database.GetUserByID(ctx, id)
 	if err != nil {
 		t.Fatalf("GetUserByID: %v", err)
@@ -497,10 +491,7 @@ func TestPresenceSnapshot_InvisibleIsIndistinguishableFromOffline(t *testing.T) 
 	observer := connect("observer", true)
 	ghost := connect("ghost", true)
 	ghost.setLivePresence(db.StatusInvisible, nil, "")
-	away, err := database.CreateUser(ctx, "away", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	away := mustCreateUser(t, database, "away", 4)
 	settle(t, h)
 	drain(observer.send)
 	drain(ghost.send)
@@ -529,10 +520,7 @@ func TestPresenceBatch_LostAtEnqueueForcesFullReadyOnResume(t *testing.T) {
 	database := newTeardownTestDB(t)
 	h := newTestHub(t, database, nil, nil)
 	ctx := context.Background()
-	id, err := database.CreateUser(ctx, "away", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	id := mustCreateUser(t, database, "away", 4)
 	u, err := database.GetUserByID(ctx, id)
 	if err != nil {
 		t.Fatalf("GetUserByID: %v", err)

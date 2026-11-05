@@ -52,9 +52,7 @@ func TestSessionService_ResolveSocketPrincipalRefusalsAreDistinct(t *testing.T) 
 		t.Errorf("unknown token: err = %v, want ErrSessionInvalid", err)
 	}
 
-	if _, err := database.CreateSession(ctx, 1, "live-hash", "web", "127.0.0.1"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
+	mustCreateSession(t, database, 1, "live-hash", "web", "127.0.0.1")
 	user, err := svc.ResolveSocketPrincipal(ctx, "live-hash")
 	if err != nil || user == nil || user.ID != 1 {
 		t.Fatalf("live session: %+v, %v", user, err)
@@ -62,9 +60,7 @@ func TestSessionService_ResolveSocketPrincipalRefusalsAreDistinct(t *testing.T) 
 
 	// Expired: the row exists, so this must NOT be reported as invalid — the
 	// client is told its session expired, which is a different message.
-	if _, err := database.CreateSession(ctx, 1, "stale-hash", "web", "127.0.0.1"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
+	mustCreateSession(t, database, 1, "stale-hash", "web", "127.0.0.1")
 	expireSession(t, database, "stale-hash")
 	if _, err := svc.ResolveSocketPrincipal(ctx, "stale-hash"); !errors.Is(err, ErrSessionExpired) {
 		t.Errorf("expired session: err = %v, want ErrSessionExpired", err)
@@ -72,9 +68,7 @@ func TestSessionService_ResolveSocketPrincipalRefusalsAreDistinct(t *testing.T) 
 
 	// A session whose user row is gone.
 	seedSessionUser(t, database, 2, "ghost")
-	if _, err := database.CreateSession(ctx, 2, "orphan-hash", "web", "127.0.0.1"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
+	mustCreateSession(t, database, 2, "orphan-hash", "web", "127.0.0.1")
 	if _, err := database.ExecContext(ctx, `PRAGMA foreign_keys = OFF`); err != nil {
 		t.Fatalf("disabling foreign keys: %v", err)
 	}
@@ -90,9 +84,7 @@ func TestSessionService_ResolveSocketPrincipalRefusalsAreDistinct(t *testing.T) 
 	if _, err := database.ExecContext(ctx, `UPDATE users SET banned = 1 WHERE id = 3`); err != nil {
 		t.Fatalf("banning: %v", err)
 	}
-	if _, err := database.CreateSession(ctx, 3, "banned-hash", "web", "127.0.0.1"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
+	mustCreateSession(t, database, 3, "banned-hash", "web", "127.0.0.1")
 	if _, err := svc.ResolveSocketPrincipal(ctx, "banned-hash"); !errors.Is(err, ErrPrincipalBanned) {
 		t.Errorf("banned user: err = %v, want ErrPrincipalBanned", err)
 	} else if !strings.Contains(err.Error(), "user 3") {
@@ -111,12 +103,8 @@ func TestSessionService_ResolveSocketPrincipalRefusalsAreDistinct(t *testing.T) 
 func TestSessionService_OutageIsNeverABadCredential(t *testing.T) {
 	svc, database, ctx := sessionFixture(t)
 	seedSessionUser(t, database, 1, "alice")
-	if _, err := database.CreateSession(ctx, 1, "live-hash", "web", "127.0.0.1"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
-	if err := database.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
+	mustCreateSession(t, database, 1, "live-hash", "web", "127.0.0.1")
+	mustDo(t, "Close", database.Close())
 
 	_, err := svc.ResolveSocketPrincipal(ctx, "live-hash")
 	if !errors.Is(err, ErrInternal) {
@@ -150,9 +138,7 @@ func TestSessionService_SweepSessionsClassifies(t *testing.T) {
 	}
 
 	verdicts, err := svc.SweepSessions(ctx, []string{"h-live", "h-expired", "h-banned", "h-never-existed"})
-	if err != nil {
-		t.Fatalf("SweepSessions: %v", err)
-	}
+	mustDo(t, "SweepSessions", err)
 	want := map[string]SessionVerdict{
 		"h-live":          SessionLive,
 		"h-expired":       SessionRevoked,
@@ -177,12 +163,8 @@ func TestSessionService_SweepSessionsClassifies(t *testing.T) {
 func TestSessionService_SweepSessionsFailsRatherThanRevokingEveryone(t *testing.T) {
 	svc, database, ctx := sessionFixture(t)
 	seedSessionUser(t, database, 1, "alice")
-	if _, err := database.CreateSession(ctx, 1, "h-live", "web", "127.0.0.1"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
-	if err := database.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
+	mustCreateSession(t, database, 1, "h-live", "web", "127.0.0.1")
+	mustDo(t, "Close", database.Close())
 
 	verdicts, err := svc.SweepSessions(ctx, []string{"h-live"})
 	if !errors.Is(err, ErrInternal) {
@@ -205,9 +187,7 @@ func TestSessionService_ResolveBearerFallsBackToAPITokens(t *testing.T) {
 		t.Errorf("unknown token: err = %v, want auth.ErrTokenNotFound", err)
 	}
 
-	if _, err := database.CreateSession(ctx, 1, "sess-hash", "web", "127.0.0.1"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
+	mustCreateSession(t, database, 1, "sess-hash", "web", "127.0.0.1")
 	user, role, sess, err := svc.ResolveBearer(ctx, "sess-hash")
 	if err != nil || user == nil || role == nil || sess == nil {
 		t.Fatalf("session principal: user=%+v role=%+v sess=%+v err=%v", user, role, sess, err)
@@ -229,9 +209,7 @@ func TestSessionService_ResolveBearerFallsBackToAPITokens(t *testing.T) {
 
 	// An outage is not a bad credential here either: it must not surface as
 	// any of the auth sentinels the perimeters answer 401 to.
-	if err := database.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
+	mustDo(t, "Close", database.Close())
 	_, _, _, err = svc.ResolveBearer(ctx, "sess-hash")
 	if err == nil {
 		t.Fatal("ResolveBearer during an outage returned no error")

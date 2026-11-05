@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/admin"
-	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/syncutil"
 	"github.com/J3vb/OwnCord/Server/ws"
 )
@@ -21,14 +20,7 @@ import (
 func TestApplyUpdate_DrainDuringCountdownAbortsSwap(t *testing.T) {
 	exePath, newPath, stagedHash := stageFakeUpdate(t)
 
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("db.Migrate: %v", err)
-	}
+	database := openMigratedDB(t)
 
 	admin.ResetRestartState()
 	admin.ForceRestartState(true) // the handler claims busy before spawning the tail

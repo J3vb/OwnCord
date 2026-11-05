@@ -47,9 +47,7 @@ type pushTestSubscriber struct {
 func newPushTestSubscriber(t *testing.T) *pushTestSubscriber {
 	t.Helper()
 	priv, err := ecdh.P256().GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatalf("generating subscriber key: %v", err)
-	}
+	mustDo(t, "generating subscriber key", err)
 	auth := make([]byte, 16)
 	if _, err := rand.Read(auth); err != nil {
 		t.Fatalf("generating auth secret: %v", err)
@@ -82,39 +80,23 @@ func (s *pushTestSubscriber) decrypt(t *testing.T, body []byte) []byte {
 	ciphertext := body[headerPrefix+idlen:]
 
 	ephemeralPub, err := ecdh.P256().NewPublicKey(ephemeralPubBytes)
-	if err != nil {
-		t.Fatalf("ephemeral public key: %v", err)
-	}
+	mustDo(t, "ephemeral public key", err)
 	ecdhSecret, err := s.priv.ECDH(ephemeralPub)
-	if err != nil {
-		t.Fatalf("ECDH: %v", err)
-	}
+	mustDo(t, "ECDH", err)
 	receiverPub := s.priv.PublicKey().Bytes()
 	keyInfo := "WebPush: info\x00" + string(receiverPub) + string(ephemeralPubBytes)
 	ikm, err := hkdf.Key(sha256.New, ecdhSecret, s.authRaw, keyInfo, sha256.Size)
-	if err != nil {
-		t.Fatalf("deriving IKM: %v", err)
-	}
+	mustDo(t, "deriving IKM", err)
 	cek, err := hkdf.Key(sha256.New, ikm, salt, "Content-Encoding: aes128gcm\x00", 16)
-	if err != nil {
-		t.Fatalf("deriving CEK: %v", err)
-	}
+	mustDo(t, "deriving CEK", err)
 	nonce, err := hkdf.Key(sha256.New, ikm, salt, "Content-Encoding: nonce\x00", 12)
-	if err != nil {
-		t.Fatalf("deriving nonce: %v", err)
-	}
+	mustDo(t, "deriving nonce", err)
 	block, err := aes.NewCipher(cek)
-	if err != nil {
-		t.Fatalf("aes cipher: %v", err)
-	}
+	mustDo(t, "aes cipher", err)
 	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		t.Fatalf("gcm: %v", err)
-	}
+	mustDo(t, "gcm", err)
 	paddedPlaintext, err := gcm.Open(nil, nonce, ciphertext, nil)
-	if err != nil {
-		t.Fatalf("gcm open: %v", err)
-	}
+	mustDo(t, "gcm open", err)
 	if len(paddedPlaintext) == 0 || paddedPlaintext[len(paddedPlaintext)-1] != pushPaddingDelimiter {
 		t.Fatalf("plaintext %x is missing the 0x02 padding delimiter", paddedPlaintext)
 	}
@@ -293,9 +275,7 @@ func (f *pushDispatchFixture) subscribe(t *testing.T, userID int64, endpoint str
 func (f *pushDispatchFixture) subscriptionCount(t *testing.T, userID int64) int {
 	t.Helper()
 	rows, err := f.database.ListPushSubscriptionsForDispatch(context.Background(), []int64{userID}, f.keyID)
-	if err != nil {
-		t.Fatalf("ListPushSubscriptionsForDispatch: %v", err)
-	}
+	mustDo(t, "ListPushSubscriptionsForDispatch", err)
 	return len(rows)
 }
 
@@ -310,13 +290,11 @@ func (f *pushDispatchFixture) subscriptionCount(t *testing.T, userID int64) int 
 // here.
 func TestPushDispatch_OffByDefaultSendsNothing(t *testing.T) {
 	f := newPushDispatchFixture(t)
-	seedChannel(t, f.database, &db.Channel{ID: 10, Name: "general", Type: "text"})
-	seedUserRole(t, f.database, 1, 4)
-	seedUserRole(t, f.database, 2, 4)
+	f.seedGeneralChannel(t)
 	f.subscribe(t, 2, "https://push.example.net/a")
 
 	fetch := newRecordingPushFetcher()
-	dispatcher := NewPushDispatcher(f.database, f.perms, f.push, nil, fetch)
+	dispatcher := f.newDispatcher(fetch)
 
 	msgSvc := NewMessageService(f.database, f.perms, nil)
 	msgSvc.RunBackgroundInlineForTest()
@@ -333,9 +311,7 @@ func TestPushDispatch_OffByDefaultSendsNothing(t *testing.T) {
 	if urls := fetch.urls(); len(urls) != 0 {
 		t.Errorf("fetch calls = %v, want none: dispatch must stay off until SetPushNotifier is called", urls)
 	}
-	if d, fl, p := dispatcher.Counters(); d != 0 || fl != 0 || p != 0 {
-		t.Errorf("counters = %d/%d/%d, want 0/0/0", d, fl, p)
-	}
+	requireCounters(t, dispatcher, 0, 0, 0, "")
 }
 
 // TestPushDispatch_PayloadIsGenericAlways decrypts the body dispatch sent
@@ -344,13 +320,11 @@ func TestPushDispatch_OffByDefaultSendsNothing(t *testing.T) {
 // guild-channel push and a DM push.
 func TestPushDispatch_PayloadIsGenericAlways(t *testing.T) {
 	f := newPushDispatchFixture(t)
-	seedChannel(t, f.database, &db.Channel{ID: 10, Name: "general", Type: "text"})
-	seedUserRole(t, f.database, 1, 4)
-	seedUserRole(t, f.database, 2, 4)
+	f.seedGeneralChannel(t)
 	sub := f.subscribe(t, 2, "https://push.example.net/generic")
 
 	fetch := newRecordingPushFetcher()
-	dispatcher := NewPushDispatcher(f.database, f.perms, f.push, nil, fetch)
+	dispatcher := f.newDispatcher(fetch)
 
 	dispatcher.Notify(context.Background(), 10, 1, []int64{2})
 
@@ -396,9 +370,7 @@ func TestPushDispatch_SkipsAuthorOnlineAndUnauthorized(t *testing.T) {
 	if urls := fetch.urls(); len(urls) != 0 {
 		t.Errorf("fetch calls = %v, want none (author, online, and unauthorized subscribers all excluded)", urls)
 	}
-	if d, fl, p := dispatcher.Counters(); d != 0 || fl != 0 || p != 0 {
-		t.Errorf("counters = %d/%d/%d, want 0/0/0", d, fl, p)
-	}
+	requireCounters(t, dispatcher, 0, 0, 0, "")
 }
 
 // TestPushDispatch_LabelledChannelSendsNothingUnacknowledged: a labelled
@@ -406,16 +378,13 @@ func TestPushDispatch_SkipsAuthorOnlineAndUnauthorized(t *testing.T) {
 // same CanReadContent verdict every content read path reaches for them.
 func TestPushDispatch_LabelledChannelSendsNothingUnacknowledged(t *testing.T) {
 	f := newPushDispatchFixture(t)
-	seedChannel(t, f.database, &db.Channel{ID: 10, Name: "nsfw-general", Type: "text"})
-	if _, err := f.database.ExecContext(context.Background(), `UPDATE channels SET nsfw = 1 WHERE id = ?`, int64(10)); err != nil {
-		t.Fatal(err)
-	}
+	f.seedLabelledChannel(t)
 	seedUserRole(t, f.database, 1, 4)
 	seedUserRole(t, f.database, 2, 4)
 	f.subscribe(t, 2, "https://push.example.net/nsfw")
 
 	fetch := newRecordingPushFetcher()
-	dispatcher := NewPushDispatcher(f.database, f.perms, f.push, nil, fetch)
+	dispatcher := f.newDispatcher(fetch)
 	dispatcher.Notify(context.Background(), 10, 1, []int64{2})
 
 	if urls := fetch.urls(); len(urls) != 0 {
@@ -431,10 +400,7 @@ func TestPushDispatch_LabelledChannelSendsNothingUnacknowledged(t *testing.T) {
 // read path resolves, not a re-implementation of the rule.
 func TestPushDispatch_LabelledChannelPushesOnlyToAcknowledgedRecipient(t *testing.T) {
 	f := newPushDispatchFixture(t)
-	seedChannel(t, f.database, &db.Channel{ID: 10, Name: "nsfw-general", Type: "text"})
-	if _, err := f.database.ExecContext(context.Background(), `UPDATE channels SET nsfw = 1 WHERE id = ?`, int64(10)); err != nil {
-		t.Fatal(err)
-	}
+	f.seedLabelledChannel(t)
 	seedUserRole(t, f.database, 1, 4)
 	seedUserRole(t, f.database, 2, 4) // acknowledges
 	seedUserRole(t, f.database, 3, 4) // does not
@@ -445,7 +411,7 @@ func TestPushDispatch_LabelledChannelPushesOnlyToAcknowledgedRecipient(t *testin
 	}
 
 	fetch := newRecordingPushFetcher()
-	dispatcher := NewPushDispatcher(f.database, f.perms, f.push, nil, fetch)
+	dispatcher := f.newDispatcher(fetch)
 	dispatcher.Notify(context.Background(), 10, 1, []int64{2, 3})
 
 	urls := fetch.urls()
@@ -462,10 +428,7 @@ func TestPushDispatch_LabelledChannelPushesOnlyToAcknowledgedRecipient(t *testin
 // from the round's start.
 func TestPushDispatch_RecheckBeforeEachAttempt_NSFWAckRevoked(t *testing.T) {
 	f := newPushDispatchFixture(t)
-	seedChannel(t, f.database, &db.Channel{ID: 10, Name: "nsfw-general", Type: "text"})
-	if _, err := f.database.ExecContext(context.Background(), `UPDATE channels SET nsfw = 1 WHERE id = ?`, int64(10)); err != nil {
-		t.Fatal(err)
-	}
+	f.seedLabelledChannel(t)
 	seedUserRole(t, f.database, 1, 4)
 	seedUserRole(t, f.database, 2, 4)
 	if _, err := f.database.AcknowledgeNSFW(context.Background(), 2, 10); err != nil {
@@ -474,31 +437,16 @@ func TestPushDispatch_RecheckBeforeEachAttempt_NSFWAckRevoked(t *testing.T) {
 	f.subscribe(t, 2, "https://push.example.net/nsfw-ack-revoked")
 
 	fetch := newRecordingPushFetcher()
-	var calls atomic.Int32
-	fetch.onFetch("https://push.example.net/nsfw-ack-revoked", func(ctx context.Context) (*safefetch.Response, error) {
-		n := calls.Add(1)
-		if n > 1 {
-			t.Error("a second attempt reached the fetcher after the acknowledgement was revoked")
-			return &safefetch.Response{StatusCode: 201}, nil
-		}
+	calls := failFirstAttempt(t, fetch, "https://push.example.net/nsfw-ack-revoked", "after the acknowledgement was revoked", func(ctx context.Context) {
 		// Revoke between the first attempt and the retry.
-		if err := f.database.RevokeNSFW(ctx, 2, 10); err != nil {
-			t.Fatal(err)
-		}
-		return &safefetch.Response{StatusCode: 503}, nil
+		mustDo(t, "RevokeNSFW", f.database.RevokeNSFW(ctx, 2, 10))
 	})
 
-	dispatcher := NewPushDispatcher(f.database, f.perms, f.push, nil, fetch)
-	dispatcher.sleep = noSleep
+	dispatcher := f.newRetryDispatcher(fetch)
 	dispatcher.Notify(context.Background(), 10, 1, []int64{2})
 
-	if got := calls.Load(); got != 1 {
-		t.Errorf("fetch was called %d times, want exactly 1 (the retry must be refused before it fetches)", got)
-	}
-	d, fl, p := dispatcher.Counters()
-	if d != 0 || fl != 0 || p != 0 {
-		t.Errorf("counters = %d/%d/%d, want 0/0/0", d, fl, p)
-	}
+	requireRetryRefused(t, calls)
+	requireCounters(t, dispatcher, 0, 0, 0, "")
 }
 
 // TestPushDispatch_DMOnlyParticipants proves the DM audience is exactly the
@@ -515,15 +463,13 @@ func TestPushDispatch_DMOnlyParticipants(t *testing.T) {
 	seedUserRole(t, f.database, 3, 4)
 	seedDMParticipant(t, f.database, 20, 1)
 	seedDMParticipant(t, f.database, 20, 2)
-	if err := f.database.TrustSender(context.Background(), 2, 1, "accepted"); err != nil {
-		t.Fatalf("TrustSender: %v", err)
-	}
+	mustDo(t, "TrustSender", f.database.TrustSender(context.Background(), 2, 1, "accepted"))
 	// user 3 is NOT a participant of this DM.
 	f.subscribe(t, 2, "https://push.example.net/participant")
 	f.subscribe(t, 3, "https://push.example.net/outsider")
 
 	fetch := newRecordingPushFetcher()
-	dispatcher := NewPushDispatcher(f.database, f.perms, f.push, nil, fetch)
+	dispatcher := f.newDispatcher(fetch)
 	dispatcher.Notify(context.Background(), 20, 1, []int64{2, 3})
 
 	urls := fetch.urls()
@@ -542,15 +488,11 @@ func TestPushDispatch_DMOnlyParticipants(t *testing.T) {
 // MessageRequestService.Accept writes), the next message pushes normally.
 func TestPushDispatch_DMUntrustedRecipientExcluded_ThenPushesAfterAccept(t *testing.T) {
 	f := newPushDispatchFixture(t)
-	seedChannel(t, f.database, &db.Channel{ID: 20, Type: "dm"})
-	seedUserRole(t, f.database, 1, 4)
-	seedUserRole(t, f.database, 2, 4)
-	seedDMParticipant(t, f.database, 20, 1)
-	seedDMParticipant(t, f.database, 20, 2)
+	f.seedDirectMessage(t)
 	f.subscribe(t, 2, "https://push.example.net/untrusted-then-trusted")
 
 	fetch := newRecordingPushFetcher()
-	dispatcher := NewPushDispatcher(f.database, f.perms, f.push, nil, fetch)
+	dispatcher := f.newDispatcher(fetch)
 
 	// First message: 2 does not yet trust 1 (the pending-request state) — no push.
 	dispatcher.Notify(context.Background(), 20, 1, []int64{2})
@@ -559,9 +501,7 @@ func TestPushDispatch_DMUntrustedRecipientExcluded_ThenPushesAfterAccept(t *test
 	}
 
 	// 2 accepts the request — the same write MessageRequestService.Accept makes.
-	if err := f.database.TrustSender(context.Background(), 2, 1, "accepted"); err != nil {
-		t.Fatalf("TrustSender: %v", err)
-	}
+	mustDo(t, "TrustSender", f.database.TrustSender(context.Background(), 2, 1, "accepted"))
 
 	// Next message: now pushes.
 	dispatcher.Notify(context.Background(), 20, 1, []int64{2})
@@ -578,43 +518,24 @@ func TestPushDispatch_DMUntrustedRecipientExcluded_ThenPushesAfterAccept(t *test
 // retry.
 func TestPushDispatch_RecheckBeforeEachAttempt_TrustRevoked(t *testing.T) {
 	f := newPushDispatchFixture(t)
-	seedChannel(t, f.database, &db.Channel{ID: 20, Type: "dm"})
-	seedUserRole(t, f.database, 1, 4)
-	seedUserRole(t, f.database, 2, 4)
-	seedDMParticipant(t, f.database, 20, 1)
-	seedDMParticipant(t, f.database, 20, 2)
-	if err := f.database.TrustSender(context.Background(), 2, 1, "accepted"); err != nil {
-		t.Fatalf("TrustSender: %v", err)
-	}
+	f.seedDirectMessage(t)
+	mustDo(t, "TrustSender", f.database.TrustSender(context.Background(), 2, 1, "accepted"))
 	f.subscribe(t, 2, "https://push.example.net/trust-revoked")
 
 	fetch := newRecordingPushFetcher()
-	var calls atomic.Int32
-	fetch.onFetch("https://push.example.net/trust-revoked", func(ctx context.Context) (*safefetch.Response, error) {
-		n := calls.Add(1)
-		if n > 1 {
-			t.Error("a second attempt reached the fetcher after trust was revoked")
-			return &safefetch.Response{StatusCode: 201}, nil
-		}
+	calls := failFirstAttempt(t, fetch, "https://push.example.net/trust-revoked", "after trust was revoked", func(ctx context.Context) {
 		// Revoke between the first attempt and the retry.
 		if _, err := f.database.ExecContext(ctx,
 			`DELETE FROM trusted_senders WHERE recipient_id = ? AND sender_id = ?`, int64(2), int64(1)); err != nil {
 			t.Fatal(err)
 		}
-		return &safefetch.Response{StatusCode: 503}, nil
 	})
 
-	dispatcher := NewPushDispatcher(f.database, f.perms, f.push, nil, fetch)
-	dispatcher.sleep = noSleep
+	dispatcher := f.newRetryDispatcher(fetch)
 	dispatcher.Notify(context.Background(), 20, 1, []int64{2})
 
-	if got := calls.Load(); got != 1 {
-		t.Errorf("fetch was called %d times, want exactly 1 (the retry must be refused before it fetches)", got)
-	}
-	d, fl, p := dispatcher.Counters()
-	if d != 0 || fl != 0 || p != 0 {
-		t.Errorf("counters = %d/%d/%d, want 0/0/0", d, fl, p)
-	}
+	requireRetryRefused(t, calls)
+	requireCounters(t, dispatcher, 0, 0, 0, "")
 }
 
 // TestPushDispatch_410PrunesTheRow proves the authoritative staleness
@@ -622,20 +543,15 @@ func TestPushDispatch_RecheckBeforeEachAttempt_TrustRevoked(t *testing.T) {
 // never failed.
 func TestPushDispatch_410PrunesTheRow(t *testing.T) {
 	f := newPushDispatchFixture(t)
-	seedChannel(t, f.database, &db.Channel{ID: 10, Name: "general", Type: "text"})
-	seedUserRole(t, f.database, 1, 4)
-	seedUserRole(t, f.database, 2, 4)
+	f.seedGeneralChannel(t)
 	f.subscribe(t, 2, "https://push.example.net/gone")
 
 	fetch := newRecordingPushFetcher()
 	fetch.always("https://push.example.net/gone", 410)
-	dispatcher := NewPushDispatcher(f.database, f.perms, f.push, nil, fetch)
+	dispatcher := f.newDispatcher(fetch)
 	dispatcher.Notify(context.Background(), 10, 1, []int64{2})
 
-	d, fl, p := dispatcher.Counters()
-	if d != 0 || fl != 0 || p != 1 {
-		t.Errorf("counters = %d/%d/%d, want 0/0/1", d, fl, p)
-	}
+	requireCounters(t, dispatcher, 0, 0, 1, "")
 	if n := f.subscriptionCount(t, 2); n != 0 {
 		t.Errorf("subscription still present after a 410: %d rows, want 0", n)
 	}
@@ -651,25 +567,19 @@ func TestPushDispatch_410PrunesTheRow(t *testing.T) {
 // endpoint).
 func TestPushDispatch_RetryBudgetThenDrop(t *testing.T) {
 	f := newPushDispatchFixture(t)
-	seedChannel(t, f.database, &db.Channel{ID: 10, Name: "general", Type: "text"})
-	seedUserRole(t, f.database, 1, 4)
-	seedUserRole(t, f.database, 2, 4)
+	f.seedGeneralChannel(t)
 	f.subscribe(t, 2, "https://push.example.net/flaky")
 
 	fetch := newRecordingPushFetcher()
 	fetch.always("https://push.example.net/flaky", 503)
-	dispatcher := NewPushDispatcher(f.database, f.perms, f.push, nil, fetch)
-	dispatcher.sleep = noSleep
+	dispatcher := f.newRetryDispatcher(fetch)
 
 	dispatcher.Notify(context.Background(), 10, 1, []int64{2})
 
 	if got := fetch.countFor("https://push.example.net/flaky"); got != pushMaxAttempts {
 		t.Errorf("fetch was called %d times, want exactly %d (the retry budget)", got, pushMaxAttempts)
 	}
-	d, fl, p := dispatcher.Counters()
-	if d != 0 || fl != 1 || p != 0 {
-		t.Errorf("counters = %d/%d/%d, want 0/1/0", d, fl, p)
-	}
+	requireCounters(t, dispatcher, 0, 1, 0, "")
 	if n := f.subscriptionCount(t, 2); n != 1 {
 		t.Errorf("subscription removed after a transient failure: %d rows, want 1 (a 5xx is not a dead endpoint)", n)
 	}
@@ -680,13 +590,11 @@ func TestPushDispatch_RetryBudgetThenDrop(t *testing.T) {
 // the window sends nothing more, even though the user is (still) eligible.
 func TestPushDispatch_CoalescesPerUserPerChannel(t *testing.T) {
 	f := newPushDispatchFixture(t)
-	seedChannel(t, f.database, &db.Channel{ID: 10, Name: "general", Type: "text"})
-	seedUserRole(t, f.database, 1, 4)
-	seedUserRole(t, f.database, 2, 4)
+	f.seedGeneralChannel(t)
 	f.subscribe(t, 2, "https://push.example.net/coalesce")
 
 	fetch := newRecordingPushFetcher()
-	dispatcher := NewPushDispatcher(f.database, f.perms, f.push, nil, fetch)
+	dispatcher := f.newDispatcher(fetch)
 
 	dispatcher.Notify(context.Background(), 10, 1, []int64{2})
 	dispatcher.Notify(context.Background(), 10, 1, []int64{2})
@@ -708,9 +616,7 @@ func TestPushDispatch_CoalescesPerUserPerChannel(t *testing.T) {
 // bogus reservation.
 func TestPushDispatch_CoalesceOnlyReservedAfterEligibility(t *testing.T) {
 	f := newPushDispatchFixture(t)
-	seedChannel(t, f.database, &db.Channel{ID: 10, Name: "general", Type: "text"})
-	seedUserRole(t, f.database, 1, 4)
-	seedUserRole(t, f.database, 2, 4)
+	f.seedGeneralChannel(t)
 	f.subscribe(t, 2, "https://push.example.net/was-online")
 
 	var online atomic.Bool
@@ -772,8 +678,7 @@ func TestPushDispatch_RetriesRunAfterEveryFirstAttempt(t *testing.T) {
 		candidates = append(candidates, uid)
 	}
 
-	dispatcher := NewPushDispatcher(f.database, f.perms, f.push, nil, fetch)
-	dispatcher.sleep = noSleep
+	dispatcher := f.newRetryDispatcher(fetch)
 	dispatcher.Notify(context.Background(), 10, 1, candidates)
 
 	// Compute, for every recorded call in the order it actually happened,
@@ -812,15 +717,13 @@ func TestPushDispatch_RetriesRunAfterEveryFirstAttempt(t *testing.T) {
 // push_subscriptions.endpoint values, for every subscriber pushed to.
 func TestPushDispatch_EndpointsAreOnlyStoredOnes(t *testing.T) {
 	f := newPushDispatchFixture(t)
-	seedChannel(t, f.database, &db.Channel{ID: 10, Name: "general", Type: "text"})
-	seedUserRole(t, f.database, 1, 4)
-	seedUserRole(t, f.database, 2, 4)
+	f.seedGeneralChannel(t)
 	seedUserRole(t, f.database, 3, 4)
 	f.subscribe(t, 2, "https://push.example.net/one")
 	f.subscribe(t, 3, "https://push.example.net/two")
 
 	fetch := newRecordingPushFetcher()
-	dispatcher := NewPushDispatcher(f.database, f.perms, f.push, nil, fetch)
+	dispatcher := f.newDispatcher(fetch)
 	dispatcher.Notify(context.Background(), 10, 1, []int64{2, 3})
 
 	want := map[string]bool{"https://push.example.net/one": true, "https://push.example.net/two": true}
@@ -849,9 +752,7 @@ func TestPushDispatch_EndpointsAreOnlyStoredOnes(t *testing.T) {
 // misconfigured answer right now).
 func TestPushDispatch_HostileEndpointResolvingPrivateIsRefused(t *testing.T) {
 	f := newPushDispatchFixture(t)
-	seedChannel(t, f.database, &db.Channel{ID: 10, Name: "general", Type: "text"})
-	seedUserRole(t, f.database, 1, 4)
-	seedUserRole(t, f.database, 2, 4)
+	f.seedGeneralChannel(t)
 	f.subscribe(t, 2, "https://push.hostile.example/x")
 
 	// P2-7: a Dial spy proves the classifier is what refused this, not some
@@ -869,18 +770,12 @@ func TestPushDispatch_HostileEndpointResolvingPrivateIsRefused(t *testing.T) {
 		return nil, fmt.Errorf("test dial spy: must never be called for %s %s", network, addr)
 	}
 	fetcher, err := safefetch.New(policy)
-	if err != nil {
-		t.Fatalf("safefetch.New: %v", err)
-	}
+	mustDo(t, "safefetch.New", err)
 
-	dispatcher := NewPushDispatcher(f.database, f.perms, f.push, nil, fetcher)
-	dispatcher.sleep = noSleep
+	dispatcher := f.newRetryDispatcher(fetcher)
 	dispatcher.Notify(context.Background(), 10, 1, []int64{2})
 
-	d, fl, p := dispatcher.Counters()
-	if d != 0 || fl != 1 || p != 0 {
-		t.Errorf("counters = %d/%d/%d, want 0/1/0 (refused, not delivered, not pruned)", d, fl, p)
-	}
+	requireCounters(t, dispatcher, 0, 1, 0, "(refused, not delivered, not pruned)")
 	if n := f.subscriptionCount(t, 2); n != 1 {
 		t.Errorf("subscription removed after a refused connect: %d rows, want 1", n)
 	}
@@ -896,9 +791,7 @@ func TestPushDispatch_HostileEndpointResolvingPrivateIsRefused(t *testing.T) {
 // actually load-bearing and not a vacuous assertion.
 func TestPushDispatch_ClassificationRemovedWouldDial(t *testing.T) {
 	f := newPushDispatchFixture(t)
-	seedChannel(t, f.database, &db.Channel{ID: 10, Name: "general", Type: "text"})
-	seedUserRole(t, f.database, 1, 4)
-	seedUserRole(t, f.database, 2, 4)
+	f.seedGeneralChannel(t)
 	f.subscribe(t, 2, "https://push.hostile.example/x")
 
 	var dialAttempts atomic.Int32
@@ -912,12 +805,9 @@ func TestPushDispatch_ClassificationRemovedWouldDial(t *testing.T) {
 		return nil, fmt.Errorf("test dial spy: refusing to actually connect to %s %s", network, addr)
 	}
 	fetcher, err := safefetch.New(policy)
-	if err != nil {
-		t.Fatalf("safefetch.New: %v", err)
-	}
+	mustDo(t, "safefetch.New", err)
 
-	dispatcher := NewPushDispatcher(f.database, f.perms, f.push, nil, fetcher)
-	dispatcher.sleep = noSleep
+	dispatcher := f.newRetryDispatcher(fetcher)
 	dispatcher.Notify(context.Background(), 10, 1, []int64{2})
 
 	if got := dialAttempts.Load(); got == 0 {
@@ -936,9 +826,7 @@ func TestPushDispatch_ClassificationRemovedWouldDial(t *testing.T) {
 // failed; it must now be exactly one request and one dispatched.
 func TestPushDispatch_Empty201IsSuccessNotRetry(t *testing.T) {
 	f := newPushDispatchFixture(t)
-	seedChannel(t, f.database, &db.Channel{ID: 10, Name: "general", Type: "text"})
-	seedUserRole(t, f.database, 1, 4)
-	seedUserRole(t, f.database, 2, 4)
+	f.seedGeneralChannel(t)
 
 	var requests atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -967,9 +855,7 @@ func TestPushDispatch_Empty201IsSuccessNotRetry(t *testing.T) {
 		return safefetch.ClassifyAddr(addr)
 	}
 	fetcher, err := safefetch.New(policy)
-	if err != nil {
-		t.Fatalf("safefetch.New: %v", err)
-	}
+	mustDo(t, "safefetch.New", err)
 
 	dispatcher := NewPushDispatcher(f.database, f.perms, f.push, nil, fetcher)
 	dispatcher.Notify(context.Background(), 10, 1, []int64{2})
@@ -977,10 +863,7 @@ func TestPushDispatch_Empty201IsSuccessNotRetry(t *testing.T) {
 	if got := requests.Load(); got != 1 {
 		t.Errorf("upstream saw %d requests, want exactly 1 (no retry on a valid empty 201)", got)
 	}
-	d, fl, p := dispatcher.Counters()
-	if d != 1 || fl != 0 || p != 0 {
-		t.Errorf("counters = %d/%d/%d, want 1/0/0", d, fl, p)
-	}
+	requireCounters(t, dispatcher, 1, 0, 0, "")
 }
 
 // TestAbsenceContract_NoPushRelay: no push.* config key names a relay or
@@ -1001,13 +884,11 @@ func TestAbsenceContract_NoPushRelay(t *testing.T) {
 	}
 
 	f := newPushDispatchFixture(t)
-	seedChannel(t, f.database, &db.Channel{ID: 10, Name: "general", Type: "text"})
-	seedUserRole(t, f.database, 1, 4)
-	seedUserRole(t, f.database, 2, 4)
+	f.seedGeneralChannel(t)
 	f.subscribe(t, 2, "https://push.example.net/only-endpoint")
 
 	fetch := newRecordingPushFetcher()
-	dispatcher := NewPushDispatcher(f.database, f.perms, f.push, nil, fetch)
+	dispatcher := f.newDispatcher(fetch)
 	dispatcher.Notify(context.Background(), 10, 1, []int64{2})
 
 	for _, u := range fetch.urls() {
@@ -1025,9 +906,7 @@ func TestAbsenceContract_NoPushRelay(t *testing.T) {
 // retried, then counted failed once the budget runs out.
 func TestPushDispatch_SendOneWrapsAFetchError(t *testing.T) {
 	f := newPushDispatchFixture(t)
-	seedChannel(t, f.database, &db.Channel{ID: 10, Name: "general", Type: "text"})
-	seedUserRole(t, f.database, 1, 4)
-	seedUserRole(t, f.database, 2, 4)
+	f.seedGeneralChannel(t)
 	f.subscribe(t, 2, "https://push.example.net/network-error")
 
 	fetch := newRecordingPushFetcher()
@@ -1036,8 +915,7 @@ func TestPushDispatch_SendOneWrapsAFetchError(t *testing.T) {
 		pushFetchResult{err: errors.New("connection reset")},
 		pushFetchResult{err: errors.New("connection reset")},
 	)
-	dispatcher := NewPushDispatcher(f.database, f.perms, f.push, nil, fetch)
-	dispatcher.sleep = noSleep
+	dispatcher := f.newRetryDispatcher(fetch)
 	dispatcher.Notify(context.Background(), 10, 1, []int64{2})
 
 	if got := fetch.countFor("https://push.example.net/network-error"); got != pushMaxAttempts {
@@ -1074,37 +952,23 @@ func (listBlockersErrorStore) ListBlockersOf(context.Context, int64) ([]int64, e
 // immediately before every attempt, not just once for the whole dispatch.
 func TestPushDispatch_RecheckBeforeEachAttempt_ComesOnline(t *testing.T) {
 	f := newPushDispatchFixture(t)
-	seedChannel(t, f.database, &db.Channel{ID: 10, Name: "general", Type: "text"})
-	seedUserRole(t, f.database, 1, 4)
-	seedUserRole(t, f.database, 2, 4)
+	f.seedGeneralChannel(t)
 	f.subscribe(t, 2, "https://push.example.net/goes-online")
 
 	var wentOnline atomic.Bool
 	online := func(uid int64) bool { return uid == 2 && wentOnline.Load() }
 
 	fetch := newRecordingPushFetcher()
-	var calls atomic.Int32
-	fetch.onFetch("https://push.example.net/goes-online", func(context.Context) (*safefetch.Response, error) {
-		n := calls.Add(1)
-		if n > 1 {
-			t.Error("a second attempt reached the fetcher after the recipient came online")
-			return &safefetch.Response{StatusCode: 201}, nil
-		}
+	calls := failFirstAttempt(t, fetch, "https://push.example.net/goes-online", "after the recipient came online", func(ctx context.Context) {
 		wentOnline.Store(true) // simulate: recipient connects right after the first attempt
-		return &safefetch.Response{StatusCode: 503}, nil
 	})
 
 	dispatcher := NewPushDispatcher(f.database, f.perms, f.push, online, fetch)
 	dispatcher.sleep = noSleep
 	dispatcher.Notify(context.Background(), 10, 1, []int64{2})
 
-	if got := calls.Load(); got != 1 {
-		t.Errorf("fetch was called %d times, want exactly 1 (the retry must be refused before it fetches)", got)
-	}
-	d, fl, p := dispatcher.Counters()
-	if d != 0 || fl != 0 || p != 0 {
-		t.Errorf("counters = %d/%d/%d, want 0/0/0", d, fl, p)
-	}
+	requireRetryRefused(t, calls)
+	requireCounters(t, dispatcher, 0, 0, 0, "")
 }
 
 // TestPushDispatch_RecheckBeforeEachAttempt_LosesAccess is P1-1's other
@@ -1113,39 +977,22 @@ func TestPushDispatch_RecheckBeforeEachAttempt_ComesOnline(t *testing.T) {
 // retry.
 func TestPushDispatch_RecheckBeforeEachAttempt_LosesAccess(t *testing.T) {
 	f := newPushDispatchFixture(t)
-	seedChannel(t, f.database, &db.Channel{ID: 10, Name: "general", Type: "text"})
-	seedUserRole(t, f.database, 1, 4)
-	seedUserRole(t, f.database, 2, 4)
+	f.seedGeneralChannel(t)
 	seedRole(t, f.database, &db.Role{ID: 5, Name: "Restricted", Permissions: 0, Position: 0})
 	f.subscribe(t, 2, "https://push.example.net/loses-access")
 
 	fetch := newRecordingPushFetcher()
-	var calls atomic.Int32
-	fetch.onFetch("https://push.example.net/loses-access", func(ctx context.Context) (*safefetch.Response, error) {
-		n := calls.Add(1)
-		if n > 1 {
-			t.Error("a second attempt reached the fetcher after access was revoked")
-			return &safefetch.Response{StatusCode: 201}, nil
-		}
+	calls := failFirstAttempt(t, fetch, "https://push.example.net/loses-access", "after access was revoked", func(ctx context.Context) {
 		// Revoke between the first attempt and the retry.
-		if err := f.database.UpdateUserRole(ctx, 2, 5); err != nil {
-			t.Fatal(err)
-		}
+		mustDo(t, "UpdateUserRole", f.database.UpdateUserRole(ctx, 2, 5))
 		f.perms.InvalidateAll()
-		return &safefetch.Response{StatusCode: 503}, nil
 	})
 
-	dispatcher := NewPushDispatcher(f.database, f.perms, f.push, nil, fetch)
-	dispatcher.sleep = noSleep
+	dispatcher := f.newRetryDispatcher(fetch)
 	dispatcher.Notify(context.Background(), 10, 1, []int64{2})
 
-	if got := calls.Load(); got != 1 {
-		t.Errorf("fetch was called %d times, want exactly 1 (the retry must be refused before it fetches)", got)
-	}
-	d, fl, p := dispatcher.Counters()
-	if d != 0 || fl != 0 || p != 0 {
-		t.Errorf("counters = %d/%d/%d, want 0/0/0", d, fl, p)
-	}
+	requireRetryRefused(t, calls)
+	requireCounters(t, dispatcher, 0, 0, 0, "")
 }
 
 // TestPushDispatch_GroupDMExcluded is P2-3: a group DM has Type == "dm"
@@ -1163,7 +1010,7 @@ func TestPushDispatch_GroupDMExcluded(t *testing.T) {
 	f.subscribe(t, 2, "https://push.example.net/group-dm")
 
 	fetch := newRecordingPushFetcher()
-	dispatcher := NewPushDispatcher(f.database, f.perms, f.push, nil, fetch)
+	dispatcher := f.newDispatcher(fetch)
 	dispatcher.Notify(context.Background(), 20, 1, []int64{2})
 
 	if urls := fetch.urls(); len(urls) != 0 {
@@ -1176,11 +1023,7 @@ func TestPushDispatch_GroupDMExcluded(t *testing.T) {
 // posture.
 func TestPushDispatch_GroupDMLookupFailureFailsClosed(t *testing.T) {
 	f := newPushDispatchFixture(t)
-	seedChannel(t, f.database, &db.Channel{ID: 20, Type: "dm"})
-	seedUserRole(t, f.database, 1, 4)
-	seedUserRole(t, f.database, 2, 4)
-	seedDMParticipant(t, f.database, 20, 1)
-	seedDMParticipant(t, f.database, 20, 2)
+	f.seedDirectMessage(t)
 	f.subscribe(t, 2, "https://push.example.net/group-dm-lookup-fails")
 
 	fetch := newRecordingPushFetcher()
@@ -1197,14 +1040,12 @@ func TestPushDispatch_GroupDMLookupFailureFailsClosed(t *testing.T) {
 // applyMentionCounts' ListBlockersOf(authorID) exclusion for badges.
 func TestPushDispatch_BlockedByAuthorExcluded(t *testing.T) {
 	f := newPushDispatchFixture(t)
-	seedChannel(t, f.database, &db.Channel{ID: 10, Name: "general", Type: "text"})
-	seedUserRole(t, f.database, 1, 4)
-	seedUserRole(t, f.database, 2, 4)
+	f.seedGeneralChannel(t)
 	seedBlock(t, f.database, 2, 1) // user 2 has blocked user 1 (the author)
 	f.subscribe(t, 2, "https://push.example.net/blocker")
 
 	fetch := newRecordingPushFetcher()
-	dispatcher := NewPushDispatcher(f.database, f.perms, f.push, nil, fetch)
+	dispatcher := f.newDispatcher(fetch)
 	dispatcher.Notify(context.Background(), 10, 1, []int64{2})
 
 	if urls := fetch.urls(); len(urls) != 0 {
@@ -1216,9 +1057,7 @@ func TestPushDispatch_BlockedByAuthorExcluded(t *testing.T) {
 // drops the whole round rather than risk pushing a blocker.
 func TestPushDispatch_BlockerLookupFailureFailsClosed(t *testing.T) {
 	f := newPushDispatchFixture(t)
-	seedChannel(t, f.database, &db.Channel{ID: 10, Name: "general", Type: "text"})
-	seedUserRole(t, f.database, 1, 4)
-	seedUserRole(t, f.database, 2, 4)
+	f.seedGeneralChannel(t)
 	f.subscribe(t, 2, "https://push.example.net/blocker-lookup-fails")
 
 	fetch := newRecordingPushFetcher()
@@ -1305,7 +1144,7 @@ func TestPushDispatch_ConcurrentSendsDoNotStarveOnAStall(t *testing.T) {
 	release := fetch.block("https://push.example.net/stall")
 	defer release()
 
-	dispatcher := NewPushDispatcher(f.database, f.perms, f.push, nil, fetch)
+	dispatcher := f.newDispatcher(fetch)
 	done := make(chan struct{})
 	go func() {
 		dispatcher.Notify(context.Background(), 10, 1, []int64{2, 3, 4})
@@ -1335,13 +1174,11 @@ func TestPushDispatch_ConcurrentSendsDoNotStarveOnAStall(t *testing.T) {
 // same SendMessage path with no notifier installed.
 func TestPushDispatch_ThroughSendMessageHook(t *testing.T) {
 	f := newPushDispatchFixture(t)
-	seedChannel(t, f.database, &db.Channel{ID: 10, Name: "general", Type: "text"})
-	seedUserRole(t, f.database, 1, 4)
-	seedUserRole(t, f.database, 2, 4)
+	f.seedGeneralChannel(t)
 	f.subscribe(t, 2, "https://push.example.net/via-sendmessage")
 
 	fetch := newRecordingPushFetcher()
-	dispatcher := NewPushDispatcher(f.database, f.perms, f.push, nil, fetch)
+	dispatcher := f.newDispatcher(fetch)
 
 	msgSvc := NewMessageService(f.database, f.perms, nil)
 	msgSvc.RunBackgroundInlineForTest()
@@ -1430,32 +1267,19 @@ func (s *revokeAfterListingStore) ListPushSubscriptionsForDispatch(ctx context.C
 // (recipient, author) pair instead -- see stillEligible.
 func TestPushDispatch_RecheckBeforeEachAttempt_BlockedAfterFirst503(t *testing.T) {
 	f := newPushDispatchFixture(t)
-	seedChannel(t, f.database, &db.Channel{ID: 10, Name: "general", Type: "text"})
-	seedUserRole(t, f.database, 1, 4)
-	seedUserRole(t, f.database, 2, 4)
+	f.seedGeneralChannel(t)
 	const endpoint = "https://push.example.net/block-after-503"
 	f.subscribe(t, 2, endpoint)
 
 	fetch := newRecordingPushFetcher()
-	var calls atomic.Int32
-	fetch.onFetch(endpoint, func(ctx context.Context) (*safefetch.Response, error) {
-		if calls.Add(1) > 1 {
-			t.Error("a second attempt reached the fetcher after the recipient blocked the author")
-			return &safefetch.Response{StatusCode: 201}, nil
-		}
-		if err := f.database.BlockUser(ctx, 2, 1); err != nil {
-			t.Fatal(err)
-		}
-		return &safefetch.Response{StatusCode: 503}, nil
+	calls := failFirstAttempt(t, fetch, endpoint, "after the recipient blocked the author", func(ctx context.Context) {
+		mustDo(t, "BlockUser", f.database.BlockUser(ctx, 2, 1))
 	})
 
-	dispatcher := NewPushDispatcher(f.database, f.perms, f.push, nil, fetch)
-	dispatcher.sleep = noSleep
+	dispatcher := f.newRetryDispatcher(fetch)
 	dispatcher.Notify(context.Background(), 10, 1, []int64{2})
 
-	if got := calls.Load(); got != 1 {
-		t.Errorf("fetch was called %d times, want exactly 1 (the retry must be refused before it fetches)", got)
-	}
+	requireRetryRefused(t, calls)
 	d, fl, p := dispatcher.Counters()
 	if d != 0 || fl != 0 || p != 0 {
 		t.Errorf("counters = %d/%d/%d, want 0/0/0: a refusal is not a delivery outcome", d, fl, p)
@@ -1469,37 +1293,20 @@ func TestPushDispatch_RecheckBeforeEachAttempt_BlockedAfterFirst503(t *testing.T
 // and would otherwise ride through on a still-valid trusted_senders row.
 func TestPushDispatch_RecheckBeforeEachAttempt_BlockedAfterFirst503_DM(t *testing.T) {
 	f := newPushDispatchFixture(t)
-	seedChannel(t, f.database, &db.Channel{ID: 20, Type: "dm"})
-	seedUserRole(t, f.database, 1, 4)
-	seedUserRole(t, f.database, 2, 4)
-	seedDMParticipant(t, f.database, 20, 1)
-	seedDMParticipant(t, f.database, 20, 2)
-	if err := f.database.TrustSender(context.Background(), 2, 1, "accepted"); err != nil {
-		t.Fatalf("TrustSender: %v", err)
-	}
+	f.seedDirectMessage(t)
+	mustDo(t, "TrustSender", f.database.TrustSender(context.Background(), 2, 1, "accepted"))
 	const endpoint = "https://push.example.net/dm-block-after-503"
 	f.subscribe(t, 2, endpoint)
 
 	fetch := newRecordingPushFetcher()
-	var calls atomic.Int32
-	fetch.onFetch(endpoint, func(ctx context.Context) (*safefetch.Response, error) {
-		if calls.Add(1) > 1 {
-			t.Error("a second attempt reached the fetcher after the recipient blocked the author in a DM")
-			return &safefetch.Response{StatusCode: 201}, nil
-		}
-		if err := f.database.BlockUser(ctx, 2, 1); err != nil {
-			t.Fatal(err)
-		}
-		return &safefetch.Response{StatusCode: 503}, nil
+	calls := failFirstAttempt(t, fetch, endpoint, "after the recipient blocked the author in a DM", func(ctx context.Context) {
+		mustDo(t, "BlockUser", f.database.BlockUser(ctx, 2, 1))
 	})
 
-	dispatcher := NewPushDispatcher(f.database, f.perms, f.push, nil, fetch)
-	dispatcher.sleep = noSleep
+	dispatcher := f.newRetryDispatcher(fetch)
 	dispatcher.Notify(context.Background(), 20, 1, []int64{2})
 
-	if got := calls.Load(); got != 1 {
-		t.Errorf("fetch was called %d times, want exactly 1", got)
-	}
+	requireRetryRefused(t, calls)
 }
 
 // TestPushDispatch_RecheckBeforeEachAttempt_SubscriptionRevoked is R3's
@@ -1509,9 +1316,7 @@ func TestPushDispatch_RecheckBeforeEachAttempt_BlockedAfterFirst503_DM(t *testin
 // user rather than the row would pass the first half and fail this one.
 func TestPushDispatch_RecheckBeforeEachAttempt_SubscriptionRevoked(t *testing.T) {
 	f := newPushDispatchFixture(t)
-	seedChannel(t, f.database, &db.Channel{ID: 10, Name: "general", Type: "text"})
-	seedUserRole(t, f.database, 1, 4)
-	seedUserRole(t, f.database, 2, 4)
+	f.seedGeneralChannel(t)
 	const revoked = "https://push.example.net/revoked-device"
 	const kept = "https://push.example.net/kept-device"
 	f.subscribe(t, 2, revoked)
@@ -1525,9 +1330,7 @@ func TestPushDispatch_RecheckBeforeEachAttempt_SubscriptionRevoked(t *testing.T)
 			return &safefetch.Response{StatusCode: 201}, nil
 		}
 		rows, err := f.database.ListPushSubscriptions(ctx, 2, f.keyID)
-		if err != nil {
-			t.Fatal(err)
-		}
+		mustDo(t, "ListPushSubscriptions", err)
 		for _, row := range rows {
 			if row.Endpoint != revoked {
 				continue
@@ -1540,8 +1343,7 @@ func TestPushDispatch_RecheckBeforeEachAttempt_SubscriptionRevoked(t *testing.T)
 	})
 	fetch.always(kept, 201)
 
-	dispatcher := NewPushDispatcher(f.database, f.perms, f.push, nil, fetch)
-	dispatcher.sleep = noSleep
+	dispatcher := f.newRetryDispatcher(fetch)
 	dispatcher.Notify(context.Background(), 10, 1, []int64{2})
 
 	if got := revokedCalls.Load(); got != 1 {
@@ -1563,9 +1365,7 @@ func TestPushDispatch_RecheckBeforeEachAttempt_SubscriptionRevoked(t *testing.T)
 // the device has already replaced.
 func TestPushDispatch_RecheckBeforeEachAttempt_CredentialRotated(t *testing.T) {
 	f := newPushDispatchFixture(t)
-	seedChannel(t, f.database, &db.Channel{ID: 10, Name: "general", Type: "text"})
-	seedUserRole(t, f.database, 1, 4)
-	seedUserRole(t, f.database, 2, 4)
+	f.seedGeneralChannel(t)
 	const endpoint = "https://push.example.net/credential-rotated"
 	f.subscribe(t, 2, endpoint)
 
@@ -1584,13 +1384,10 @@ func TestPushDispatch_RecheckBeforeEachAttempt_CredentialRotated(t *testing.T) {
 		return &safefetch.Response{StatusCode: 503}, nil
 	})
 
-	dispatcher := NewPushDispatcher(f.database, f.perms, f.push, nil, fetch)
-	dispatcher.sleep = noSleep
+	dispatcher := f.newRetryDispatcher(fetch)
 	dispatcher.Notify(context.Background(), 10, 1, []int64{2})
 
-	if got := calls.Load(); got != 1 {
-		t.Errorf("fetch was called %d times, want exactly 1", got)
-	}
+	requireRetryRefused(t, &calls)
 }
 
 // TestPushDispatch_RecheckBeforeEachAttempt_VAPIDKeyRotated: a row the running
@@ -1601,9 +1398,7 @@ func TestPushDispatch_RecheckBeforeEachAttempt_CredentialRotated(t *testing.T) {
 // so carry on".
 func TestPushDispatch_RecheckBeforeEachAttempt_VAPIDKeyRotated(t *testing.T) {
 	f := newPushDispatchFixture(t)
-	seedChannel(t, f.database, &db.Channel{ID: 10, Name: "general", Type: "text"})
-	seedUserRole(t, f.database, 1, 4)
-	seedUserRole(t, f.database, 2, 4)
+	f.seedGeneralChannel(t)
 	const endpoint = "https://push.example.net/key-rotated"
 	f.subscribe(t, 2, endpoint)
 
@@ -1619,13 +1414,10 @@ func TestPushDispatch_RecheckBeforeEachAttempt_VAPIDKeyRotated(t *testing.T) {
 		return &safefetch.Response{StatusCode: 503}, nil
 	})
 
-	dispatcher := NewPushDispatcher(f.database, f.perms, f.push, nil, fetch)
-	dispatcher.sleep = noSleep
+	dispatcher := f.newRetryDispatcher(fetch)
 	dispatcher.Notify(context.Background(), 10, 1, []int64{2})
 
-	if got := calls.Load(); got != 1 {
-		t.Errorf("fetch was called %d times, want exactly 1", got)
-	}
+	requireRetryRefused(t, &calls)
 }
 
 // TestPushDispatch_RecheckBeforeEachAttempt_BlockLookupFailureFailsClosed: a
@@ -1635,9 +1427,7 @@ func TestPushDispatch_RecheckBeforeEachAttempt_VAPIDKeyRotated(t *testing.T) {
 // for the narrow per-pair lookup.
 func TestPushDispatch_RecheckBeforeEachAttempt_BlockLookupFailureFailsClosed(t *testing.T) {
 	f := newPushDispatchFixture(t)
-	seedChannel(t, f.database, &db.Channel{ID: 10, Name: "general", Type: "text"})
-	seedUserRole(t, f.database, 1, 4)
-	seedUserRole(t, f.database, 2, 4)
+	f.seedGeneralChannel(t)
 	f.subscribe(t, 2, "https://push.example.net/per-attempt-block-error")
 
 	fetch := newRecordingPushFetcher()
@@ -1654,9 +1444,7 @@ func TestPushDispatch_RecheckBeforeEachAttempt_BlockLookupFailureFailsClosed(t *
 // never permission to re-send the saved request.
 func TestPushDispatch_RecheckBeforeEachAttempt_SubscriptionLookupFailureFailsClosed(t *testing.T) {
 	f := newPushDispatchFixture(t)
-	seedChannel(t, f.database, &db.Channel{ID: 10, Name: "general", Type: "text"})
-	seedUserRole(t, f.database, 1, 4)
-	seedUserRole(t, f.database, 2, 4)
+	f.seedGeneralChannel(t)
 	f.subscribe(t, 2, "https://push.example.net/per-attempt-sub-error")
 
 	fetch := newRecordingPushFetcher()
@@ -1679,9 +1467,7 @@ func TestPushDispatch_RecheckBeforeEachAttempt_SubscriptionLookupFailureFailsClo
 // first attempt for a whole round.
 func TestPushDispatch_RecheckBeforeEachAttempt_RevokedBeforeFirstAttempt(t *testing.T) {
 	f := newPushDispatchFixture(t)
-	seedChannel(t, f.database, &db.Channel{ID: 10, Name: "general", Type: "text"})
-	seedUserRole(t, f.database, 1, 4)
-	seedUserRole(t, f.database, 2, 4)
+	f.seedGeneralChannel(t)
 	f.subscribe(t, 2, "https://push.example.net/revoked-before-first-attempt")
 
 	fetch := newRecordingPushFetcher()
@@ -1700,9 +1486,7 @@ func TestPushDispatch_RecheckBeforeEachAttempt_RevokedBeforeFirstAttempt(t *test
 // Without this, refusing every retry would satisfy every test above.
 func TestPushDispatch_RecheckBeforeEachAttempt_ValidWorkStillRetries(t *testing.T) {
 	f := newPushDispatchFixture(t)
-	seedChannel(t, f.database, &db.Channel{ID: 10, Name: "general", Type: "text"})
-	seedUserRole(t, f.database, 1, 4)
-	seedUserRole(t, f.database, 2, 4)
+	f.seedGeneralChannel(t)
 	const endpoint = "https://push.example.net/unchanged-still-retries"
 	f.subscribe(t, 2, endpoint)
 
@@ -1713,17 +1497,13 @@ func TestPushDispatch_RecheckBeforeEachAttempt_ValidWorkStillRetries(t *testing.
 		pushFetchResult{status: 201},
 	)
 
-	dispatcher := NewPushDispatcher(f.database, f.perms, f.push, nil, fetch)
-	dispatcher.sleep = noSleep
+	dispatcher := f.newRetryDispatcher(fetch)
 	dispatcher.Notify(context.Background(), 10, 1, []int64{2})
 
 	if got := fetch.countFor(endpoint); got != 3 {
 		t.Errorf("fetch called %d times, want 3: an unchanged subscription must still get its full retry budget", got)
 	}
-	d, fl, p := dispatcher.Counters()
-	if d != 1 || fl != 0 || p != 0 {
-		t.Errorf("counters = %d/%d/%d, want 1/0/0", d, fl, p)
-	}
+	requireCounters(t, dispatcher, 1, 0, 0, "")
 }
 
 // listingErrorOnceStore fails the first dispatch listing, then serves normally.
@@ -1750,12 +1530,10 @@ func (deleteErrorStore) DeletePushSubscriptionByID(context.Context, int64) (bool
 // user subscribes afterwards and the next mention must still be pushed.
 func TestNotify_NoSubscriptionDoesNotReserveCoalesceWindow(t *testing.T) {
 	f := newPushDispatchFixture(t)
-	seedChannel(t, f.database, &db.Channel{ID: 10, Name: "general", Type: "text"})
-	seedUserRole(t, f.database, 1, 4)
-	seedUserRole(t, f.database, 2, 4)
+	f.seedGeneralChannel(t)
 
 	fetch := newRecordingPushFetcher()
-	dispatcher := NewPushDispatcher(f.database, f.perms, f.push, nil, fetch)
+	dispatcher := f.newDispatcher(fetch)
 
 	dispatcher.Notify(context.Background(), 10, 1, []int64{2})
 	f.subscribe(t, 2, "https://push.example.net/late-subscriber")
@@ -1769,13 +1547,11 @@ func TestNotify_NoSubscriptionDoesNotReserveCoalesceWindow(t *testing.T) {
 // A failed subscription lookup sends nothing and so must not reserve the window.
 func TestNotify_FailedLookupDoesNotReserveWindow(t *testing.T) {
 	f := newPushDispatchFixture(t)
-	seedChannel(t, f.database, &db.Channel{ID: 10, Name: "general", Type: "text"})
-	seedUserRole(t, f.database, 1, 4)
-	seedUserRole(t, f.database, 2, 4)
+	f.seedGeneralChannel(t)
 	f.subscribe(t, 2, "https://push.example.net/after-error")
 
 	fetch := newRecordingPushFetcher()
-	dispatcher := NewPushDispatcher(f.database, f.perms, f.push, nil, fetch)
+	dispatcher := f.newDispatcher(fetch)
 	dispatcher.st = &listingErrorOnceStore{Store: dispatcher.st.(Store)}
 
 	dispatcher.Notify(context.Background(), 10, 1, []int64{2})

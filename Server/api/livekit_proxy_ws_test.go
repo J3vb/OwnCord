@@ -3,7 +3,6 @@ package api_test
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -56,23 +55,31 @@ func echoWSBackend(t *testing.T) string {
 	return "ws://" + srv.Listener.Addr().String()
 }
 
-func TestLiveKitProxy_WebSocket_RoundTrip(t *testing.T) {
-	backend := echoWSBackend(t)
-
+// dialLiveKitProxy starts a LiveKit proxy in front of backend and dials path
+// through it, returning the connection and the context that bounds it.
+func dialLiveKitProxy(t *testing.T, backend, path string, opts *websocket.DialOptions) (context.Context, *websocket.Conn) {
+	t.Helper()
 	proxy := httptest.NewServer(api.NewLiveKitProxy(backend, []string{"*"}))
 	t.Cleanup(proxy.Close)
 
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
-	defer cancel()
+	t.Cleanup(cancel)
 
-	conn, dialResp, err := websocket.Dial(ctx, "ws://"+proxy.Listener.Addr().String()+"/rtc", nil)
+	conn, dialResp, err := websocket.Dial(ctx, "ws://"+proxy.Listener.Addr().String()+path, opts)
 	if dialResp != nil && dialResp.Body != nil {
-		defer dialResp.Body.Close() //nolint:errcheck // best-effort close in test
+		t.Cleanup(func() { _ = dialResp.Body.Close() })
 	}
 	if err != nil {
 		t.Fatalf("dial through proxy: %v", err)
 	}
-	defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck // best-effort
+	t.Cleanup(func() { _ = conn.Close(websocket.StatusNormalClosure, "") })
+	return ctx, conn
+}
+
+func TestLiveKitProxy_WebSocket_RoundTrip(t *testing.T) {
+	backend := echoWSBackend(t)
+
+	ctx, conn := dialLiveKitProxy(t, backend, "/rtc", nil)
 
 	// Frontend → backend → frontend, through both copyWS goroutines.
 	if err := conn.Write(ctx, websocket.MessageText, []byte("signal")); err != nil {
@@ -89,20 +96,7 @@ func TestLiveKitProxy_WebSocket_RoundTrip(t *testing.T) {
 
 func TestLiveKitProxy_WebSocket_ForwardsBinary(t *testing.T) {
 	backend := echoWSBackend(t)
-	proxy := httptest.NewServer(api.NewLiveKitProxy(backend, []string{"*"}))
-	t.Cleanup(proxy.Close)
-
-	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
-	defer cancel()
-
-	conn, dialResp, err := websocket.Dial(ctx, "ws://"+proxy.Listener.Addr().String()+"/rtc", nil)
-	if dialResp != nil && dialResp.Body != nil {
-		defer dialResp.Body.Close() //nolint:errcheck // best-effort close in test
-	}
-	if err != nil {
-		t.Fatalf("dial through proxy: %v", err)
-	}
-	defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck // best-effort
+	ctx, conn := dialLiveKitProxy(t, backend, "/rtc", nil)
 
 	// LiveKit signaling is protobuf, so the binary opcode must survive the hop.
 	payload := []byte{0x00, 0x01, 0x02, 0xff}
@@ -131,20 +125,7 @@ func TestLiveKitProxy_WebSocket_PreservesQueryString(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	proxy := httptest.NewServer(api.NewLiveKitProxy("ws://"+srv.Listener.Addr().String(), []string{"*"}))
-	t.Cleanup(proxy.Close)
-
-	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
-	defer cancel()
-
-	conn, dialResp, err := websocket.Dial(ctx, "ws://"+proxy.Listener.Addr().String()+"/rtc?access_token=abc", nil)
-	if dialResp != nil && dialResp.Body != nil {
-		defer dialResp.Body.Close() //nolint:errcheck // best-effort close in test
-	}
-	if err != nil {
-		t.Fatalf("dial through proxy: %v", err)
-	}
-	defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck // best-effort
+	ctx, conn := dialLiveKitProxy(t, "ws://"+srv.Listener.Addr().String(), "/rtc?access_token=abc", nil)
 
 	if _, _, err := conn.Read(ctx); err != nil {
 		t.Fatalf("read: %v", err)
@@ -175,22 +156,9 @@ func TestLiveKitProxy_WebSocket_ForwardsAuthorization(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	proxy := httptest.NewServer(api.NewLiveKitProxy("ws://"+srv.Listener.Addr().String(), []string{"*"}))
-	t.Cleanup(proxy.Close)
-
-	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
-	defer cancel()
-
-	conn, dialResp, err := websocket.Dial(ctx, "ws://"+proxy.Listener.Addr().String()+"/rtc", &websocket.DialOptions{
+	ctx, conn := dialLiveKitProxy(t, "ws://"+srv.Listener.Addr().String(), "/rtc", &websocket.DialOptions{
 		HTTPHeader: http.Header{"Authorization": {authz}, "Cookie": {"session=secret"}},
 	})
-	if dialResp != nil && dialResp.Body != nil {
-		defer dialResp.Body.Close() //nolint:errcheck // best-effort close in test
-	}
-	if err != nil {
-		t.Fatalf("dial through proxy: %v", err)
-	}
-	defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck // best-effort
 
 	if _, _, err := conn.Read(ctx); err != nil {
 		t.Fatalf("read: %v", err)
@@ -358,17 +326,12 @@ func TestHandleLiveKitHealth_Healthy(t *testing.T) {
 	rr := httptest.NewRecorder()
 	handler(rr, httptest.NewRequest(http.MethodGet, "/api/v1/livekit/health", nil))
 
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (body %q)", rr.Code, rr.Body.String())
-	}
-	var body struct {
+	requireStatus(t, rr, http.StatusOK)
+	body := decodeBody[struct {
 		Status           string `json:"status"`
 		LiveKitReachable bool   `json:"livekit_reachable"`
 		Error            string `json:"error"`
-	}
-	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	}](t, rr)
 	if body.Status != "ok" || !body.LiveKitReachable {
 		t.Errorf("body = %+v, want status ok and reachable", body)
 	}
@@ -383,17 +346,12 @@ func TestHandleLiveKitHealth_Degraded(t *testing.T) {
 	rr := httptest.NewRecorder()
 	handler(rr, httptest.NewRequest(http.MethodGet, "/api/v1/livekit/health", nil))
 
-	if rr.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want 503 (body %q)", rr.Code, rr.Body.String())
-	}
-	var body struct {
+	requireStatus(t, rr, http.StatusServiceUnavailable)
+	body := decodeBody[struct {
 		Status           string `json:"status"`
 		LiveKitReachable bool   `json:"livekit_reachable"`
 		Error            string `json:"error"`
-	}
-	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	}](t, rr)
 	if body.Status != "degraded" || body.LiveKitReachable {
 		t.Errorf("body = %+v, want status degraded and unreachable", body)
 	}
@@ -409,9 +367,7 @@ func TestHandleLiveKitHealth_NotConfigured(t *testing.T) {
 	rr := httptest.NewRecorder()
 	handler(rr, httptest.NewRequest(http.MethodGet, "/api/v1/livekit/health", nil))
 
-	if rr.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want 503", rr.Code)
-	}
+	requireStatus(t, rr, http.StatusServiceUnavailable)
 	if !strings.Contains(rr.Body.String(), "not configured") {
 		t.Errorf("body = %q, want it to name the missing configuration", rr.Body.String())
 	}
@@ -433,20 +389,7 @@ func TestLiveKitProxy_WebSocket_LargeFrameLimit(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			backend := echoWSBackend(t)
-			proxy := httptest.NewServer(api.NewLiveKitProxy(backend, []string{"*"}))
-			t.Cleanup(proxy.Close)
-
-			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
-			defer cancel()
-
-			conn, dialResp, err := websocket.Dial(ctx, "ws://"+proxy.Listener.Addr().String()+"/rtc", nil)
-			if dialResp != nil && dialResp.Body != nil {
-				defer dialResp.Body.Close() //nolint:errcheck // best-effort close in test
-			}
-			if err != nil {
-				t.Fatalf("dial through proxy: %v", err)
-			}
-			defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck // best-effort
+			ctx, conn := dialLiveKitProxy(t, backend, "/rtc", nil)
 			conn.SetReadLimit(512 * kib)
 
 			payload := bytes.Repeat([]byte{0xab}, tc.size)

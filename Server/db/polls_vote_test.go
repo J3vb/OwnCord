@@ -176,9 +176,7 @@ func TestSetPollVote_DeletedPoll(t *testing.T) {
 	f := newPollFixture(t)
 	ctx := context.Background()
 	id := f.create(t, pizzaPoll())
-	if err := f.database.DeleteMessage(ctx, id, f.author, false); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "DeleteMessage", f.database.DeleteMessage(ctx, id, f.author, false))
 	if _, err := f.database.SetPollVote(ctx, id, f.viewer, []int64{1}); !errors.Is(err, db.ErrPollNotFound) {
 		t.Errorf("soft-deleted poll: err = %v, want ErrPollNotFound", err)
 	}
@@ -189,9 +187,7 @@ func TestSetPollVote_DeletedPoll(t *testing.T) {
 	}
 	// A message that is not a poll at all.
 	plain, err := f.database.CreateMessage(ctx, f.channel, f.author, "hello", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateMessage", err)
 	if _, err := f.database.SetPollVote(ctx, plain, f.viewer, []int64{1}); !errors.Is(err, db.ErrPollNotFound) {
 		t.Errorf("plain message: err = %v, want ErrPollNotFound", err)
 	}
@@ -254,9 +250,7 @@ func TestEndPoll_ReportsDeletedPoll(t *testing.T) {
 	f := newPollFixture(t)
 	ctx := context.Background()
 	id := f.create(t, pizzaPoll())
-	if err := f.database.DeleteMessage(ctx, id, f.author, false); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "DeleteMessage", f.database.DeleteMessage(ctx, id, f.author, false))
 	r, err := f.database.EndPoll(ctx, id)
 	if err != nil || !r.Deleted {
 		t.Fatalf("EndPoll(deleted) = %+v, %v", r, err)
@@ -379,9 +373,7 @@ func TestNextPollExpiryAndListDuePolls(t *testing.T) {
 	f.exec(t, `UPDATE polls SET expires_at = '2026-01-01T00:00:20Z' WHERE message_id = ?`, later)
 	f.exec(t, `UPDATE polls SET expires_at = '2026-01-01T00:00:05Z', ended_at = '2026-01-01T00:00:06Z' WHERE message_id = ?`, ended)
 	f.exec(t, `UPDATE polls SET expires_at = '2026-01-01T00:00:15Z' WHERE message_id = ?`, deleted)
-	if err := f.database.DeleteMessage(ctx, deleted, f.author, false); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "DeleteMessage", f.database.DeleteMessage(ctx, deleted, f.author, false))
 
 	next, ok, err := f.database.NextPollExpiry(ctx)
 	if err != nil || !ok || next != "2026-01-01T00:00:10Z" {

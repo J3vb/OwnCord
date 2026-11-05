@@ -81,8 +81,7 @@ func (c *containerWizard) postHost(t *testing.T, host string, wizard map[string]
 	}
 	rr := httptest.NewRecorder()
 	c.handler.ServeHTTP(rr, req)
-	var resp containerSetupResp
-	_ = json.Unmarshal(rr.Body.Bytes(), &resp)
+	resp := decodeBody[containerSetupResp](t, rr)
 	return rr.Code, resp
 }
 
@@ -231,9 +230,7 @@ func TestSetupWizard_BareMetalStillWritesConfigYAML(t *testing.T) {
 		"username": "owner", "password": "SecurePass123!",
 		"wizard": map[string]any{"port": 9000, "upload_max_size_mb": 250},
 	})
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("POST /setup = %d; body=%s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusCreated)
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
 		t.Fatal(err)

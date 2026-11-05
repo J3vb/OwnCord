@@ -72,14 +72,18 @@ func fakeGitHubRelease(t *testing.T, tag string) *httptest.Server {
 	return srv
 }
 
+// getClientUpdateFrom serves a fake release tagged tag and requests path from
+// a client-update router backed by it.
+func getClientUpdateFrom(t *testing.T, tag, path string) *httptest.ResponseRecorder {
+	t.Helper()
+	return getClientUpdate(t, fakeGitHubRelease(t, tag).URL, path)
+}
+
 // platformEntry decodes the response body and returns the platforms entry for
 // the given target, failing the test if it is missing.
 func platformEntry(t *testing.T, rr *httptest.ResponseRecorder, target string) map[string]any {
 	t.Helper()
-	var resp map[string]any
-	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	resp := decodeBody[map[string]any](t, rr)
 	platforms, ok := resp["platforms"].(map[string]any)
 	if !ok {
 		t.Fatalf("response missing platforms map: %v", resp)
@@ -98,24 +102,11 @@ func buildClientUpdateRouter(u *updater.Updater) http.Handler {
 }
 
 func TestClientUpdate_NewVersionAvailable(t *testing.T) {
-	srv := fakeGitHubRelease(t, "v2.0.0")
-	u := updater.NewUpdater("1.0.0", "", "test", "repo")
-	u.SetBaseURL(srv.URL)
+	rr := getClientUpdateFrom(t, "v2.0.0", "/api/v1/client-update/windows-x86_64-nsis/1.0.0")
 
-	router := buildClientUpdateRouter(u)
+	requireStatus(t, rr, http.StatusOK)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/client-update/windows-x86_64-nsis/1.0.0", nil)
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
-	}
-
-	var resp map[string]any
-	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	resp := decodeBody[map[string]any](t, rr)
 
 	if resp["version"] == nil {
 		t.Error("response missing 'version' field")
@@ -126,52 +117,22 @@ func TestClientUpdate_NewVersionAvailable(t *testing.T) {
 }
 
 func TestClientUpdate_AlreadyLatest(t *testing.T) {
-	srv := fakeGitHubRelease(t, "v1.0.0")
-	u := updater.NewUpdater("1.0.0", "", "test", "repo")
-	u.SetBaseURL(srv.URL)
+	rr := getClientUpdateFrom(t, "v1.0.0", "/api/v1/client-update/windows-x86_64-nsis/1.0.0")
 
-	router := buildClientUpdateRouter(u)
-
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/client-update/windows-x86_64-nsis/1.0.0", nil)
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusNoContent {
-		t.Errorf("status = %d, want 204; body: %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusNoContent)
 }
 
 func TestClientUpdate_FutureVersion(t *testing.T) {
-	srv := fakeGitHubRelease(t, "v1.0.0")
-	u := updater.NewUpdater("1.0.0", "", "test", "repo")
-	u.SetBaseURL(srv.URL)
-
-	router := buildClientUpdateRouter(u)
-
 	// Client has a newer version than the release.
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/client-update/windows-x86_64-nsis/2.0.0", nil)
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
+	rr := getClientUpdateFrom(t, "v1.0.0", "/api/v1/client-update/windows-x86_64-nsis/2.0.0")
 
-	if rr.Code != http.StatusNoContent {
-		t.Errorf("status = %d, want 204; body: %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusNoContent)
 }
 
 func TestClientUpdate_WindowsTargetGetsNSISInstaller(t *testing.T) {
-	srv := fakeGitHubRelease(t, "v2.0.0")
-	u := updater.NewUpdater("1.0.0", "", "test", "repo")
-	u.SetBaseURL(srv.URL)
+	rr := getClientUpdateFrom(t, "v2.0.0", "/api/v1/client-update/windows-x86_64-nsis/1.0.0")
 
-	router := buildClientUpdateRouter(u)
-
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/client-update/windows-x86_64-nsis/1.0.0", nil)
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 	entry := platformEntry(t, rr, "windows-x86_64-nsis")
 	url, _ := entry["url"].(string)
 	if !strings.HasSuffix(url, "_x64-setup.nsis.zip") {
@@ -180,19 +141,9 @@ func TestClientUpdate_WindowsTargetGetsNSISInstaller(t *testing.T) {
 }
 
 func TestClientUpdate_WindowsArm64TargetGetsArm64NSIS(t *testing.T) {
-	srv := fakeGitHubRelease(t, "v2.0.0")
-	u := updater.NewUpdater("1.0.0", "", "test", "repo")
-	u.SetBaseURL(srv.URL)
+	rr := getClientUpdateFrom(t, "v2.0.0", "/api/v1/client-update/windows-aarch64-nsis/1.0.0")
 
-	router := buildClientUpdateRouter(u)
-
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/client-update/windows-aarch64-nsis/1.0.0", nil)
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 	entry := platformEntry(t, rr, "windows-aarch64-nsis")
 	url, _ := entry["url"].(string)
 	if !strings.HasSuffix(url, "_arm64-setup.nsis.zip") {
@@ -224,28 +175,15 @@ func TestClientUpdate_Arm64SignatureWithoutArchiveNoContent(t *testing.T) {
 	u.SetBaseURL(srv.URL)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/client-update/windows-aarch64-nsis/1.0.0", nil)
-	rr := httptest.NewRecorder()
-	buildClientUpdateRouter(u).ServeHTTP(rr, req)
+	rr := serveRequest(buildClientUpdateRouter(u), req)
 
-	if rr.Code != http.StatusNoContent {
-		t.Errorf("status = %d, want 204; body: %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusNoContent)
 }
 
 func TestClientUpdate_LinuxTargetGetsAppImage(t *testing.T) {
-	srv := fakeGitHubRelease(t, "v2.0.0")
-	u := updater.NewUpdater("1.0.0", "", "test", "repo")
-	u.SetBaseURL(srv.URL)
+	rr := getClientUpdateFrom(t, "v2.0.0", "/api/v1/client-update/linux-x86_64-appimage/1.0.0")
 
-	router := buildClientUpdateRouter(u)
-
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/client-update/linux-x86_64-appimage/1.0.0", nil)
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 	entry := platformEntry(t, rr, "linux-x86_64-appimage")
 	url, _ := entry["url"].(string)
 	if !strings.HasSuffix(url, "_amd64.AppImage.tar.gz") {
@@ -257,19 +195,9 @@ func TestClientUpdate_LinuxTargetGetsAppImage(t *testing.T) {
 }
 
 func TestClientUpdate_LinuxArm64TargetGetsAarch64AppImage(t *testing.T) {
-	srv := fakeGitHubRelease(t, "v2.0.0")
-	u := updater.NewUpdater("1.0.0", "", "test", "repo")
-	u.SetBaseURL(srv.URL)
+	rr := getClientUpdateFrom(t, "v2.0.0", "/api/v1/client-update/linux-aarch64-appimage/1.0.0")
 
-	router := buildClientUpdateRouter(u)
-
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/client-update/linux-aarch64-appimage/1.0.0", nil)
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 	entry := platformEntry(t, rr, "linux-aarch64-appimage")
 	url, _ := entry["url"].(string)
 	if !strings.HasSuffix(url, "_aarch64.AppImage.tar.gz") {
@@ -278,19 +206,9 @@ func TestClientUpdate_LinuxArm64TargetGetsAarch64AppImage(t *testing.T) {
 }
 
 func TestClientUpdate_AndroidTargetGetsSignedAPK(t *testing.T) {
-	srv := fakeGitHubRelease(t, "v2.0.0")
-	u := updater.NewUpdater("1.0.0", "", "test", "repo")
-	u.SetBaseURL(srv.URL)
+	rr := getClientUpdateFrom(t, "v2.0.0", "/api/v1/client-update/android-aarch64-apk/1.0.0")
 
-	router := buildClientUpdateRouter(u)
-
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/client-update/android-aarch64-apk/1.0.0", nil)
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 	entry := platformEntry(t, rr, "android-aarch64-apk")
 	url, _ := entry["url"].(string)
 	if !strings.HasSuffix(url, "_arm64.apk") {
@@ -311,12 +229,9 @@ func TestClientUpdate_UnsupportedTargetNoContent(t *testing.T) {
 	// No darwin client is published; the updater must not be offered a
 	// Windows installer for it.
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/client-update/darwin-aarch64-app/1.0.0", nil)
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
+	rr := serveRequest(router, req)
 
-	if rr.Code != http.StatusNoContent {
-		t.Errorf("status = %d, want 204; body: %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusNoContent)
 }
 
 func TestClientUpdate_DebTargetNoContent(t *testing.T) {
@@ -330,12 +245,9 @@ func TestClientUpdate_DebTargetNoContent(t *testing.T) {
 	// (no ?deb_install=pkexec) cannot install it. It must get 204 so it keeps
 	// its "cannot update itself" banner rather than an offer that always fails.
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/client-update/linux-x86_64-deb/1.0.0", nil)
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
+	rr := serveRequest(router, req)
 
-	if rr.Code != http.StatusNoContent {
-		t.Errorf("status = %d, want 204; body: %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusNoContent)
 }
 
 func TestClientUpdate_GitHubError(t *testing.T) {
@@ -351,12 +263,9 @@ func TestClientUpdate_GitHubError(t *testing.T) {
 	router := buildClientUpdateRouter(u)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/client-update/windows-x86_64-nsis/1.0.0", nil)
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
+	rr := serveRequest(router, req)
 
-	if rr.Code != http.StatusBadGateway {
-		t.Errorf("status = %d, want 502; body: %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusBadGateway)
 }
 
 // TestClientUpdate_Epoch1ResponseShape pins the exact JSON shape of the
@@ -372,26 +281,14 @@ func TestClientUpdate_GitHubError(t *testing.T) {
 // stays absent.
 func TestClientUpdate_Epoch1ResponseShape(t *testing.T) {
 	srv := fakeGitHubRelease(t, "v2.0.0")
-	u := updater.NewUpdater("1.0.0", "", "test", "repo")
-	u.SetBaseURL(srv.URL)
+	rr := getClientUpdate(t, srv.URL, "/api/v1/client-update/windows-x86_64-nsis/1.0.0")
 
-	router := buildClientUpdateRouter(u)
-
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/client-update/windows-x86_64-nsis/1.0.0", nil)
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 	if ct := rr.Header().Get("Content-Type"); ct != "application/json; charset=utf-8" {
 		t.Errorf("Content-Type = %q, want %q", ct, "application/json; charset=utf-8")
 	}
 
-	var resp map[string]any
-	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	resp := decodeBody[map[string]any](t, rr)
 
 	want := map[string]any{
 		"version": "2.0.0",
@@ -411,18 +308,9 @@ func TestClientUpdate_Epoch1ResponseShape(t *testing.T) {
 	}
 
 	// 204 (already latest) has an empty body, not "{}" or any other JSON.
-	srv204 := fakeGitHubRelease(t, "v1.0.0")
-	u204 := updater.NewUpdater("1.0.0", "", "test", "repo")
-	u204.SetBaseURL(srv204.URL)
-	router204 := buildClientUpdateRouter(u204)
+	rr204 := getClientUpdateFrom(t, "v1.0.0", "/api/v1/client-update/windows-x86_64-nsis/1.0.0")
 
-	req204 := httptest.NewRequest(http.MethodGet, "/api/v1/client-update/windows-x86_64-nsis/1.0.0", nil)
-	rr204 := httptest.NewRecorder()
-	router204.ServeHTTP(rr204, req204)
-
-	if rr204.Code != http.StatusNoContent {
-		t.Fatalf("status = %d, want 204; body: %s", rr204.Code, rr204.Body.String())
-	}
+	requireStatus(t, rr204, http.StatusNoContent)
 	if rr204.Body.Len() != 0 {
 		t.Errorf("204 body length = %d, want 0 (body: %q)", rr204.Body.Len(), rr204.Body.String())
 	}
@@ -441,9 +329,7 @@ func TestClientUpdate_ErrorIsJSONEnvelope(t *testing.T) {
 	rr := httptest.NewRecorder()
 	buildClientUpdateRouter(u).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/v1/client-update/windows-x86_64-nsis/1.0.0", nil))
 
-	if rr.Code != http.StatusBadGateway {
-		t.Fatalf("status = %d, want 502; body: %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusBadGateway)
 	if ct := rr.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
 		t.Errorf("Content-Type = %q, want application/json", ct)
 	}

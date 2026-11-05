@@ -21,9 +21,7 @@ import (
 func TestRegisterCommandRequiresManifestDeclaration(t *testing.T) {
 	mem := openPluginTestDB(t)
 	reg, err := NewRegistry(Config{Directory: t.TempDir(), Store: mem})
-	if err != nil {
-		t.Fatalf("NewRegistry: %v", err)
-	}
+	mustDo(t, "NewRegistry", err)
 	t.Cleanup(func() { _ = reg.Close(context.Background()) })
 
 	manifest, err := ParseManifest([]byte(
@@ -33,13 +31,9 @@ func TestRegisterCommandRequiresManifestDeclaration(t *testing.T) {
 	}
 	inst := &Instance{ID: 1, Manifest: manifest}
 
-	if err := reg.RegisterCommand("declared", inst); err != nil {
-		t.Fatalf("declared command must bind: %v", err)
-	}
+	mustDo(t, "declared command must bind", reg.RegisterCommand("declared", inst))
 	// "/DECLARED" normalizes to the declared name and must still bind.
-	if err := reg.RegisterCommand("/DECLARED", inst); err != nil {
-		t.Fatalf("normalized declared command must bind: %v", err)
-	}
+	mustDo(t, "normalized declared command must bind", reg.RegisterCommand("/DECLARED", inst))
 	for _, undeclared := range []string{"undeclared", "ban", "declared2"} {
 		if err := reg.RegisterCommand(undeclared, inst); !errors.Is(err, ErrCommandNotDeclared) {
 			t.Fatalf("RegisterCommand(%q) = %v, want ErrCommandNotDeclared", undeclared, err)
@@ -90,9 +84,7 @@ func TestStorageKeysIsolatedPerPlugin(t *testing.T) {
 	ctx := context.Background()
 	mem := openPluginTestDB(t)
 	reg, err := NewRegistry(Config{Store: mem})
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "NewRegistry", err)
 	newInst := func(name string) *Instance {
 		id, instErr := mem.InstallPlugin(ctx, name, "0.1", "{}")
 		if instErr != nil {
@@ -105,13 +97,9 @@ func TestStorageKeysIsolatedPerPlugin(t *testing.T) {
 	}
 	alice, mallory := newInst("alice"), newInst("mallory")
 
-	if err := reg.StoragePut(ctx, alice, "secret", []byte("alice-value")); err != nil {
-		t.Fatalf("StoragePut alice: %v", err)
-	}
+	mustDo(t, "StoragePut alice", reg.StoragePut(ctx, alice, "secret", []byte("alice-value")))
 	// Same key, different plugin: the writes must not collide.
-	if err := reg.StoragePut(ctx, mallory, "secret", []byte("mallory-value")); err != nil {
-		t.Fatalf("StoragePut mallory: %v", err)
-	}
+	mustDo(t, "StoragePut mallory", reg.StoragePut(ctx, mallory, "secret", []byte("mallory-value")))
 	got, err := reg.StorageGet(ctx, alice, "secret")
 	if err != nil || string(got) != "alice-value" {
 		t.Fatalf("alice's value was clobbered: got %q err %v", got, err)
@@ -119,17 +107,13 @@ func TestStorageKeysIsolatedPerPlugin(t *testing.T) {
 
 	// Scan is namespaced too: an empty prefix returns only the caller's keys.
 	all, err := reg.StorageScan(ctx, mallory, "", 0)
-	if err != nil {
-		t.Fatalf("StorageScan: %v", err)
-	}
+	mustDo(t, "StorageScan", err)
 	if len(all) != 1 || string(all["secret"]) != "mallory-value" {
 		t.Fatalf("scan leaked across plugin namespaces: %v", all)
 	}
 
 	// Deleting from one namespace leaves the other intact.
-	if err := reg.StorageDelete(ctx, mallory, "secret"); err != nil {
-		t.Fatalf("StorageDelete: %v", err)
-	}
+	mustDo(t, "StorageDelete", reg.StorageDelete(ctx, mallory, "secret"))
 	if got, err := reg.StorageGet(ctx, alice, "secret"); err != nil || string(got) != "alice-value" {
 		t.Fatalf("alice's key was deleted by mallory: got %q err %v", got, err)
 	}
@@ -139,13 +123,9 @@ func TestStorageRejectsOversizedKeyAndValue(t *testing.T) {
 	ctx := context.Background()
 	mem := openPluginTestDB(t)
 	reg, err := NewRegistry(Config{Store: mem})
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "NewRegistry", err)
 	id, err := mem.InstallPlugin(ctx, "bloat", "0.1", "{}")
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "InstallPlugin", err)
 	inst := &Instance{ID: id, Manifest: &Manifest{Name: "bloat", Permissions: []string{string(CapStorage)}}}
 
 	if err := reg.StoragePut(ctx, inst, "", []byte("v")); err == nil {
@@ -157,9 +137,7 @@ func TestStorageRejectsOversizedKeyAndValue(t *testing.T) {
 	if err := reg.StoragePut(ctx, inst, "k", make([]byte, maxPluginValueBytes+1)); err == nil {
 		t.Fatal("oversized value must be rejected")
 	}
-	if err := reg.StoragePut(ctx, inst, strings.Repeat("k", maxPluginKeyBytes), make([]byte, maxPluginValueBytes)); err != nil {
-		t.Fatalf("at-limit key/value must be accepted: %v", err)
-	}
+	mustDo(t, "at-limit key/value must be accepted", reg.StoragePut(ctx, inst, strings.Repeat("k", maxPluginKeyBytes), make([]byte, maxPluginValueBytes)))
 }
 
 // TestEventDeliveryHasNoGuestPath locks finding #4. Dispatch is called on the
@@ -178,9 +156,7 @@ func TestEventDeliveryHasNoGuestPath(t *testing.T) {
 	}
 
 	sub := &Instance{ID: 2, Manifest: &Manifest{Name: "sub", Permissions: []string{string(CapEvents)}}}
-	if err := sink.Subscribe("message_send", sub); err != nil {
-		t.Fatalf("Subscribe: %v", err)
-	}
+	mustDo(t, "Subscribe", sink.Subscribe("message_send", sub))
 	// inst.module is nil here, so a real guest call would panic or error.
 	sink.Dispatch(context.Background(), "message_send", []byte(`{}`))
 

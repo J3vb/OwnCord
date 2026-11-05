@@ -50,26 +50,10 @@ type cseqSocketFixture struct {
 func newCseqSocketFixture(t *testing.T) *cseqSocketFixture {
 	t.Helper()
 	database := newTeardownTestDB(t)
-	ctx := context.Background()
-	userID, err := database.CreateUser(ctx, "cseq-user", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	chID, err := database.CreateChannel(ctx, "cseq-channel", "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
-	other, err := database.CreateChannel(ctx, "cseq-other", "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
-	token, err := auth.GenerateToken()
-	if err != nil {
-		t.Fatalf("GenerateToken: %v", err)
-	}
-	if _, err := database.CreateSession(ctx, userID, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
+	userID := mustCreateUser(t, database, "cseq-user", 4)
+	chID := mustCreateChannel(t, database, "cseq-channel", "text")
+	other := mustCreateChannel(t, database, "cseq-other", "text")
+	token := seedSessionToken(t, database, userID)
 	reader := &switchableGetChannelReader{VisibilityReader: database}
 	hub := newTestHubWith(t, HubOptions{
 		DB:      database,

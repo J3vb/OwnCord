@@ -26,11 +26,8 @@ import (
 
 	"github.com/coder/websocket"
 
-	"github.com/J3vb/OwnCord/Server/api"
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/config"
-	"github.com/J3vb/OwnCord/Server/db"
-	"github.com/J3vb/OwnCord/Server/internal/app"
 )
 
 // voiceJoinWSMsg builds a raw voice_join WebSocket frame for the given channel.
@@ -43,14 +40,7 @@ func voiceJoinWSMsg(channelID int64) []byte {
 }
 
 func TestNewRouter_LiveKitProcessStartFailure_VoiceJoinFailsClosed(t *testing.T) {
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("db.Migrate: %v", err)
-	}
+	database := openMigratedDB(t)
 
 	cfg := &config.Config{
 		Server: config.ServerConfig{
@@ -73,19 +63,11 @@ func TestNewRouter_LiveKitProcessStartFailure_VoiceJoinFailsClosed(t *testing.T)
 		},
 	}
 
-	rt, rtErr := app.StartRuntime(cfg, database, nil, testRuntimeInputs(cfg))
-	if rtErr != nil {
-		t.Fatalf("app.StartRuntime: %v", rtErr)
-	}
-	handler, cleanup := api.NewRouter(cfg, database, "test", nil, nil, rt)
-	t.Cleanup(cleanup)
+	handler, _ := startRouter(t, cfg, database)
 
 	// role_id=1 -> Owner, so CONNECT_VOICE is granted and the test isolates
 	// the LiveKit-process guard rather than a permission check.
-	uid, err := database.CreateUser(context.Background(), "oc0019voiceuser", "hash", 1)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	uid := mustCreateUser(t, database, "oc0019voiceuser", "hash", 1)
 	token, err := auth.GenerateToken()
 	if err != nil {
 		t.Fatalf("GenerateToken: %v", err)
@@ -94,10 +76,7 @@ func TestNewRouter_LiveKitProcessStartFailure_VoiceJoinFailsClosed(t *testing.T)
 		t.Fatalf("CreateSession: %v", err)
 	}
 
-	channelID, err := database.CreateChannel(context.Background(), "oc0019-voice", "voice", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
+	channelID := mustCreateChannel(t, database, "oc0019-voice", "voice")
 
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)

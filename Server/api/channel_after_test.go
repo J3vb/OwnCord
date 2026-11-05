@@ -42,14 +42,11 @@ func decodeAfter(t *testing.T, rr *httptest.ResponseRecorder) (ids []int64, hasM
 
 func TestChannelMessages_AfterReturnsAscendingNewerPage(t *testing.T) {
 	database := newChannelTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "afterasc", 1)
+	router, token := newChannelRouterAs(t, database, "afterasc", 1)
 	chID, ids := seedAroundChannel(t, database, "afterasc", 8)
 
 	rr := chGet(t, router, afterPath(chID, fmt.Sprintf("after=%d&limit=3", ids[2])), token)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 	got, hasMore := decodeAfter(t, rr)
 	if want := ids[3:6]; !slices.Equal(got, want) {
 		t.Errorf("ids = %v, want %v (ascending, strictly after the cursor)", got, want)
@@ -68,14 +65,11 @@ func TestChannelMessages_AfterReturnsAscendingNewerPage(t *testing.T) {
 
 func TestChannelMessages_AfterNewestIsEmpty(t *testing.T) {
 	database := newChannelTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "afternewest", 1)
+	router, token := newChannelRouterAs(t, database, "afternewest", 1)
 	chID, ids := seedAroundChannel(t, database, "afternewest", 3)
 
 	rr := chGet(t, router, afterPath(chID, fmt.Sprintf("after=%d", ids[2])), token)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 	got, hasMore := decodeAfter(t, rr)
 	if len(got) != 0 || hasMore {
 		t.Errorf("page = %v (has_more %v), want empty", got, hasMore)
@@ -87,8 +81,7 @@ func TestChannelMessages_AfterNewestIsEmpty(t *testing.T) {
 
 func TestChannelMessages_AfterRejectsBadQuery(t *testing.T) {
 	database := newChannelTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "afterbad", 1)
+	router, token := newChannelRouterAs(t, database, "afterbad", 1)
 	chID, ids := seedAroundChannel(t, database, "afterbad", 3)
 
 	for _, q := range []string{
@@ -129,8 +122,7 @@ func TestChannelMessages_AfterDeniedByPermission(t *testing.T) {
 
 func TestChannelMessages_AfterUnknownChannelIsNotFound(t *testing.T) {
 	database := newChannelTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "afternochan", 1)
+	router, token := newChannelRouterAs(t, database, "afternochan", 1)
 	if rr := chGet(t, router, afterPath(9999, "after=1"), token); rr.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404; body: %s", rr.Code, rr.Body.String())
 	}

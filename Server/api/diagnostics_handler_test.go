@@ -20,14 +20,7 @@ import (
 func setupDiagnosticsRouter(t *testing.T) (http.Handler, string, *db.DB) {
 	t.Helper()
 
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("db.Migrate: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
+	database := openMigratedDB(t)
 
 	cfg := &config.Config{
 		Server: config.ServerConfig{
@@ -44,7 +37,7 @@ func setupDiagnosticsRouter(t *testing.T) (http.Handler, string, *db.DB) {
 	t.Cleanup(cleanup)
 
 	// Create a user and session for authenticated requests.
-	uid, _ := database.CreateUser(context.Background(), "diaguser", "$2a$12$fake", 1)
+	uid := mustCreateUser(t, database, "diaguser", "$2a$12$fake", 1)
 	token := "diagtest-token-123"
 	hash := auth.HashToken(token)
 	_, _ = database.ExecContext(context.Background(),
@@ -59,20 +52,11 @@ func setupDiagnosticsRouter(t *testing.T) (http.Handler, string, *db.DB) {
 func TestDiagnosticsConnectivity_ReturnsData(t *testing.T) {
 	router, token, _ := setupDiagnosticsRouter(t)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/diagnostics/connectivity", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
+	rr := doAPI(t, router, http.MethodGet, "/api/v1/diagnostics/connectivity", token, nil)
 
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 
-	var resp map[string]any
-	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	resp := decodeBody[map[string]any](t, rr)
 
 	// Verify top-level sections exist.
 	for _, section := range []string{"server", "voice", "client"} {
@@ -94,14 +78,7 @@ func TestDiagnosticsConnectivity_ReturnsData(t *testing.T) {
 // matching the same route's RateLimitMiddleware, which already honours
 // cfg.Server.TrustedProxies.
 func TestDiagnosticsConnectivity_HonoursTrustedProxies(t *testing.T) {
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("db.Migrate: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
+	database := openMigratedDB(t)
 
 	cfg := &config.Config{
 		Server: config.ServerConfig{
@@ -118,7 +95,7 @@ func TestDiagnosticsConnectivity_HonoursTrustedProxies(t *testing.T) {
 	handler, cleanup := api.NewRouter(cfg, database, "1.0.0-test", nil, nil, rt)
 	t.Cleanup(cleanup)
 
-	uid, _ := database.CreateUser(context.Background(), "diagproxyuser", "$2a$12$fake", 1)
+	uid := mustCreateUser(t, database, "diagproxyuser", "$2a$12$fake", 1)
 	token := "diagtest-proxy-token"
 	hash := auth.HashToken(token)
 	if _, err := database.ExecContext(context.Background(),
@@ -133,17 +110,11 @@ func TestDiagnosticsConnectivity_HonoursTrustedProxies(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("X-Forwarded-For", "203.0.113.9")
 	req.RemoteAddr = "127.0.0.1:9999" // the trusted reverse proxy's own hop
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
+	rr := serveRequest(handler, req)
 
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 
-	var resp map[string]any
-	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	resp := decodeBody[map[string]any](t, rr)
 
 	client, _ := resp["client"].(map[string]any)
 	if client["remote_addr"] != "203.0.113.9" {
@@ -158,13 +129,9 @@ func TestDiagnosticsConnectivity_Unauthenticated(t *testing.T) {
 	router, _, _ := setupDiagnosticsRouter(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/diagnostics/connectivity", nil)
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
+	rr := serveLocal(router, req)
 
-	if rr.Code != http.StatusUnauthorized {
-		t.Errorf("status = %d, want 401", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusUnauthorized)
 }
 
 // TestDiagnosticsConnectivity_MemberForbidden locks the RequirePermission gate
@@ -174,10 +141,7 @@ func TestDiagnosticsConnectivity_Unauthenticated(t *testing.T) {
 func TestDiagnosticsConnectivity_MemberForbidden(t *testing.T) {
 	router, _, database := setupDiagnosticsRouter(t)
 
-	uid, err := database.CreateUser(context.Background(), "diagmember", "$2a$12$fake", int(permissions.MemberRoleID))
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	uid := mustCreateUser(t, database, "diagmember", "$2a$12$fake", int(permissions.MemberRoleID))
 	token := "diagtest-member-token"
 	if _, err := database.ExecContext(context.Background(),
 		`INSERT INTO sessions (user_id, token, device, ip_address, expires_at)
@@ -187,15 +151,9 @@ func TestDiagnosticsConnectivity_MemberForbidden(t *testing.T) {
 		t.Fatalf("insert session: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/diagnostics/connectivity", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
+	rr := doAPI(t, router, http.MethodGet, "/api/v1/diagnostics/connectivity", token, nil)
 
-	if rr.Code != http.StatusForbidden {
-		t.Errorf("status = %d, want 403; body: %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusForbidden)
 }
 
 // ─── isPrivateIP tests ──────────────────────────────────────────────────────
@@ -255,14 +213,7 @@ func TestIsPrivateIP(t *testing.T) {
 func diagnosticsWithConfig(t *testing.T, cfg *config.Config) (http.Handler, string) {
 	t.Helper()
 
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("db.Migrate: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
+	database := openMigratedDB(t)
 
 	rt, rtErr := app.StartRuntime(cfg, database, nil, testRuntimeInputs(cfg))
 	if rtErr != nil {
@@ -271,7 +222,7 @@ func diagnosticsWithConfig(t *testing.T, cfg *config.Config) (http.Handler, stri
 	handler, cleanup := api.NewRouter(cfg, database, "1.0.0-test", nil, nil, rt)
 	t.Cleanup(cleanup)
 
-	uid, _ := database.CreateUser(context.Background(), "diaguser", "$2a$12$fake", 1)
+	uid := mustCreateUser(t, database, "diaguser", "$2a$12$fake", 1)
 	token := "diagtest-token-123"
 	_, _ = database.ExecContext(context.Background(),
 		`INSERT INTO sessions (user_id, token, device, ip_address, expires_at)
@@ -284,19 +235,10 @@ func diagnosticsWithConfig(t *testing.T, cfg *config.Config) (http.Handler, stri
 func fetchDiagnostics(t *testing.T, router http.Handler, token string) map[string]any {
 	t.Helper()
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/diagnostics/connectivity", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
+	rr := doAPI(t, router, http.MethodGet, "/api/v1/diagnostics/connectivity", token, nil)
 
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
-	}
-	var resp map[string]any
-	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	requireStatus(t, rr, http.StatusOK)
+	resp := decodeBody[map[string]any](t, rr)
 	return resp
 }
 
@@ -385,8 +327,7 @@ func TestHealthResponseCarriesNoReachabilityFields(t *testing.T) {
 
 	for _, path := range []string{"/health", "/api/v1/health"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
-		rr := httptest.NewRecorder()
-		router.ServeHTTP(rr, req)
+		rr := serveRequest(router, req)
 
 		var resp map[string]any
 		if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {

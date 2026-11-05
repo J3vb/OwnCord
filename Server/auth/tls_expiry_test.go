@@ -26,9 +26,7 @@ func writeExpiredPair(t *testing.T, dir string) (string, string) {
 	t.Helper()
 
 	privKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		t.Fatalf("generating ECDSA key: %v", err)
-	}
+	mustDo(t, "generating ECDSA key", err)
 	template := &x509.Certificate{
 		SerialNumber:          big.NewInt(1),
 		Subject:               pkix.Name{Organization: []string{"OwnCord Server"}, CommonName: "OwnCord Self-Signed"},
@@ -40,22 +38,14 @@ func writeExpiredPair(t *testing.T, dir string) (string, string) {
 		IsCA:                  false,
 	}
 	certDER, err := x509.CreateCertificate(rand.Reader, template, template, &privKey.PublicKey, privKey)
-	if err != nil {
-		t.Fatalf("creating certificate: %v", err)
-	}
+	mustDo(t, "creating certificate", err)
 	keyDER, err := x509.MarshalECPrivateKey(privKey)
-	if err != nil {
-		t.Fatalf("marshalling EC private key: %v", err)
-	}
+	mustDo(t, "marshalling EC private key", err)
 
 	certFile := filepath.Join(dir, "cert.pem")
 	keyFile := filepath.Join(dir, "key.pem")
-	if err := os.WriteFile(certFile, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER}), 0o600); err != nil {
-		t.Fatalf("writing cert file: %v", err)
-	}
-	if err := os.WriteFile(keyFile, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}), 0o600); err != nil {
-		t.Fatalf("writing key file: %v", err)
-	}
+	mustDo(t, "writing cert file", os.WriteFile(certFile, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER}), 0o600))
+	mustDo(t, "writing key file", os.WriteFile(keyFile, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}), 0o600))
 	return certFile, keyFile
 }
 
@@ -71,14 +61,10 @@ func TestExpiredSelfSignedCertIsServedAsIs(t *testing.T) {
 	// LoadOrGenerate with mode self_signed and both files present takes the
 	// load-if-present branch: an expired pair is loaded without complaint.
 	result, err := auth.LoadOrGenerate(config.TLSConfig{Mode: "self_signed", CertFile: certFile, KeyFile: keyFile})
-	if err != nil {
-		t.Fatalf("LoadOrGenerate() refused an expired pair: %v", err)
-	}
+	mustDo(t, "LoadOrGenerate() refused an expired pair", err)
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("net.Listen: %v", err)
-	}
+	mustDo(t, "net.Listen", err)
 	defer listener.Close()
 	go func() {
 		raw, aerr := listener.Accept()
@@ -91,9 +77,7 @@ func TestExpiredSelfSignedCertIsServedAsIs(t *testing.T) {
 
 	dialer := &tls.Dialer{NetDialer: &net.Dialer{}, Config: &tls.Config{InsecureSkipVerify: true}} //nolint:gosec // the test pins nothing on purpose
 	conn, err := dialer.DialContext(t.Context(), listener.Addr().Network(), listener.Addr().String())
-	if err != nil {
-		t.Fatalf("handshake against the expired pair failed: %v", err)
-	}
+	mustDo(t, "handshake against the expired pair failed", err)
 	defer conn.Close()
 
 	tlsConn, ok := conn.(*tls.Conn)

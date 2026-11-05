@@ -71,15 +71,12 @@ func decodeAround(t *testing.T, rr *httptest.ResponseRecorder) aroundResponse {
 func TestMessagesAround_Unauthenticated(t *testing.T) {
 	router := buildChannelRouter(newChannelTestDB(t))
 	rr := chGet(t, router, aroundPath(1, 1, ""), "")
-	if rr.Code != http.StatusUnauthorized {
-		t.Errorf("status = %d, want 401", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusUnauthorized)
 }
 
 func TestMessagesAround_InvalidMessageID(t *testing.T) {
 	database := newChannelTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "aroundbadid", 1)
+	router, token := newChannelRouterAs(t, database, "aroundbadid", 1)
 	chID, _ := seedAroundChannel(t, database, "aroundbadid", 1)
 
 	for _, raw := range []string{"abc", "0", "-3"} {
@@ -93,44 +90,34 @@ func TestMessagesAround_InvalidMessageID(t *testing.T) {
 
 func TestMessagesAround_InvalidLimit(t *testing.T) {
 	database := newChannelTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "aroundbadlimit", 1)
+	router, token := newChannelRouterAs(t, database, "aroundbadlimit", 1)
 	chID, ids := seedAroundChannel(t, database, "aroundbadlimit", 3)
 
 	rr := chGet(t, router, aroundPath(chID, ids[1], "limit=abc"), token)
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want 400; body: %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusBadRequest)
 }
 
 func TestMessagesAround_ChannelNotFound(t *testing.T) {
 	database := newChannelTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "aroundnochan", 1)
+	router, token := newChannelRouterAs(t, database, "aroundnochan", 1)
 
 	rr := chGet(t, router, aroundPath(9999, 1, ""), token)
-	if rr.Code != http.StatusNotFound {
-		t.Errorf("status = %d, want 404; body: %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusNotFound)
 }
 
 func TestMessagesAround_MessageInAnotherChannel(t *testing.T) {
 	database := newChannelTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "aroundcross", 1)
+	router, token := newChannelRouterAs(t, database, "aroundcross", 1)
 	_, idsA := seedAroundChannel(t, database, "aroundcross", 2)
 	chB, _ := seedAroundChannel(t, database, "aroundcross", 2)
 
 	rr := chGet(t, router, aroundPath(chB, idsA[0], ""), token)
-	if rr.Code != http.StatusNotFound {
-		t.Errorf("status = %d, want 404; body: %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusNotFound)
 }
 
 func TestMessagesAround_DeletedMessageIsNotFound(t *testing.T) {
 	database := newChannelTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "arounddeleted", 1)
+	router, token := newChannelRouterAs(t, database, "arounddeleted", 1)
 	user, _ := database.GetUserByUsername(context.Background(), "arounddeleted")
 	chID, ids := seedAroundChannel(t, database, "arounddeleted", 3)
 
@@ -139,22 +126,17 @@ func TestMessagesAround_DeletedMessageIsNotFound(t *testing.T) {
 	}
 
 	rr := chGet(t, router, aroundPath(chID, ids[1], ""), token)
-	if rr.Code != http.StatusNotFound {
-		t.Errorf("status = %d, want 404; body: %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusNotFound)
 }
 
 func TestMessagesAround_CentersTheWindow(t *testing.T) {
 	database := newChannelTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "aroundcenter", 1)
+	router, token := newChannelRouterAs(t, database, "aroundcenter", 1)
 	chID, ids := seedAroundChannel(t, database, "aroundcenter", 40)
 
 	target := ids[20]
 	rr := chGet(t, router, aroundPath(chID, target, "limit=10"), token)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 	resp := decodeAround(t, rr)
 
 	if len(resp.Messages) != 10 {
@@ -178,14 +160,11 @@ func TestMessagesAround_CentersTheWindow(t *testing.T) {
 
 func TestMessagesAround_NearChannelStart(t *testing.T) {
 	database := newChannelTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "aroundstart", 1)
+	router, token := newChannelRouterAs(t, database, "aroundstart", 1)
 	chID, ids := seedAroundChannel(t, database, "aroundstart", 30)
 
 	rr := chGet(t, router, aroundPath(chID, ids[0], "limit=10"), token)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 	resp := decodeAround(t, rr)
 
 	if len(resp.Messages) == 0 || resp.Messages[0].ID != ids[0] {
@@ -205,15 +184,12 @@ func TestMessagesAround_NearChannelStart(t *testing.T) {
 
 func TestMessagesAround_NearChannelEnd(t *testing.T) {
 	database := newChannelTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "aroundend", 1)
+	router, token := newChannelRouterAs(t, database, "aroundend", 1)
 	chID, ids := seedAroundChannel(t, database, "aroundend", 30)
 
 	last := ids[len(ids)-1]
 	rr := chGet(t, router, aroundPath(chID, last, "limit=10"), token)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 	resp := decodeAround(t, rr)
 
 	if resp.HasMoreAfter {
@@ -233,14 +209,11 @@ func TestMessagesAround_NearChannelEnd(t *testing.T) {
 
 func TestMessagesAround_ShortChannelReturnsEverything(t *testing.T) {
 	database := newChannelTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "aroundshort", 1)
+	router, token := newChannelRouterAs(t, database, "aroundshort", 1)
 	chID, ids := seedAroundChannel(t, database, "aroundshort", 3)
 
 	rr := chGet(t, router, aroundPath(chID, ids[1], "limit=50"), token)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 	resp := decodeAround(t, rr)
 
 	if len(resp.Messages) != 3 {
@@ -254,8 +227,7 @@ func TestMessagesAround_ShortChannelReturnsEverything(t *testing.T) {
 
 func TestMessagesAround_SkipsDeletedNeighbours(t *testing.T) {
 	database := newChannelTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "aroundtomb", 1)
+	router, token := newChannelRouterAs(t, database, "aroundtomb", 1)
 	user, _ := database.GetUserByUsername(context.Background(), "aroundtomb")
 	chID, ids := seedAroundChannel(t, database, "aroundtomb", 5)
 
@@ -266,9 +238,7 @@ func TestMessagesAround_SkipsDeletedNeighbours(t *testing.T) {
 	}
 
 	rr := chGet(t, router, aroundPath(chID, ids[2], "limit=50"), token)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 	resp := decodeAround(t, rr)
 
 	if len(resp.Messages) != 4 {
@@ -295,12 +265,10 @@ func TestMessagesAround_DMNonParticipantIsNotFound(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetOrCreateDMChannel: %v", err)
 	}
-	msgID, _ := database.CreateMessage(context.Background(), dmCh.ID, user1.ID, "private", nil)
+	msgID := mustCreateMessage(t, database, dmCh.ID, user1.ID, "private")
 
 	rr := chGet(t, router, aroundPath(dmCh.ID, msgID, ""), outsiderToken)
-	if rr.Code != http.StatusNotFound {
-		t.Errorf("outsider status = %d, want 404; body: %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusNotFound)
 }
 
 func TestMessagesAround_DMParticipantAllowed(t *testing.T) {
@@ -315,12 +283,10 @@ func TestMessagesAround_DMParticipantAllowed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetOrCreateDMChannel: %v", err)
 	}
-	msgID, _ := database.CreateMessage(context.Background(), dmCh.ID, user1.ID, "private", nil)
+	msgID := mustCreateMessage(t, database, dmCh.ID, user1.ID, "private")
 
 	rr := chGet(t, router, aroundPath(dmCh.ID, msgID, ""), token1)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("participant status = %d, want 200; body: %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 	resp := decodeAround(t, rr)
 	if len(resp.Messages) != 1 || resp.Messages[0].ID != msgID {
 		t.Errorf("window = %v, want just the DM message %d", resp.Messages, msgID)
@@ -344,20 +310,15 @@ func TestMessagesAround_NoReadPermissionIsForbidden(t *testing.T) {
 	}
 
 	rr := chGet(t, router, aroundPath(chID, ids[1], ""), deniedToken)
-	if rr.Code != http.StatusForbidden {
-		t.Errorf("denied member status = %d, want 403; body: %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusForbidden)
 	// The owner still gets the window — the override, not the endpoint, is the gate.
 	rr = chGet(t, router, aroundPath(chID, ids[1], ""), ownerToken)
-	if rr.Code != http.StatusOK {
-		t.Errorf("owner status = %d, want 200; body: %s", rr.Code, rr.Body.String())
-	}
+	expectStatus(t, rr, http.StatusOK)
 }
 
 func TestMessagesAround_EnrichesReactionsAndMentions(t *testing.T) {
 	database := newChannelTestDB(t)
-	router := buildChannelRouter(database)
-	token := chTestCreateToken(t, database, "aroundrich", 1)
+	router, token := newChannelRouterAs(t, database, "aroundrich", 1)
 	user, _ := database.GetUserByUsername(context.Background(), "aroundrich")
 	chID, ids := seedAroundChannel(t, database, "aroundrich", 3)
 
@@ -366,11 +327,9 @@ func TestMessagesAround_EnrichesReactionsAndMentions(t *testing.T) {
 	}
 
 	rr := chGet(t, router, aroundPath(chID, ids[1], ""), token)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 
-	var raw struct {
+	raw := decodeBody[struct {
 		Messages []struct {
 			ID        int64 `json:"id"`
 			Reactions []struct {
@@ -381,10 +340,7 @@ func TestMessagesAround_EnrichesReactionsAndMentions(t *testing.T) {
 			Attachments []any   `json:"attachments"`
 			Mentions    []int64 `json:"mentions"`
 		} `json:"messages"`
-	}
-	if err := json.Unmarshal(rr.Body.Bytes(), &raw); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	}](t, rr)
 	for _, m := range raw.Messages {
 		if m.Attachments == nil || m.Mentions == nil {
 			t.Errorf("message %d has null attachments/mentions; the enrichment path was skipped", m.ID)

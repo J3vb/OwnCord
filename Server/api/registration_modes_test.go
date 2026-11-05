@@ -2,7 +2,6 @@ package api_test
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"testing"
 	"time"
@@ -112,13 +111,8 @@ func TestRegister_ApprovalMode_LockedUntilApproved(t *testing.T) {
 	rr := postJSON(t, router, "/api/v1/auth/register", map[string]string{
 		"username": "applicant", "password": "securePass1",
 	})
-	if rr.Code != http.StatusAccepted {
-		t.Fatalf("register status = %d, want 202; body = %s", rr.Code, rr.Body.String())
-	}
-	var resp map[string]any
-	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	requireStatus(t, rr, http.StatusAccepted)
+	resp := decodeBody[map[string]any](t, rr)
 	if resp["status"] != "pending_approval" || resp["token"] != nil {
 		t.Fatalf("body = %v, want status pending_approval and no token", resp)
 	}
@@ -138,18 +132,14 @@ func TestRegister_ApprovalMode_LockedUntilApproved(t *testing.T) {
 		t.Fatalf("ApproveRegistration: %v", err)
 	}
 	rr = postJSON(t, router, "/api/v1/auth/login", login)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("login after approval = %d, want 200; body = %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 
 	// A denied application is locked for good and its username released:
 	// the same name can apply again, and the old credentials never sign in.
 	rr = postJSON(t, router, "/api/v1/auth/register", map[string]string{
 		"username": "denied", "password": "securePass1",
 	})
-	if rr.Code != http.StatusAccepted {
-		t.Fatalf("register status = %d, want 202", rr.Code)
-	}
+	requireStatus(t, rr, http.StatusAccepted)
 	denied, _ := database.GetUserByUsername(ctx, "denied")
 	if err := service.NewUserService(database).DenyRegistration(ctx, 1, denied.ID); err != nil {
 		t.Fatalf("DenyRegistration: %v", err)
@@ -164,7 +154,5 @@ func TestRegister_ApprovalMode_LockedUntilApproved(t *testing.T) {
 	rr = postJSON(t, router, "/api/v1/auth/register", map[string]string{
 		"username": "denied", "password": "securePass1",
 	})
-	if rr.Code != http.StatusAccepted {
-		t.Fatalf("re-application with the released name: status = %d, want 202; body = %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusAccepted)
 }

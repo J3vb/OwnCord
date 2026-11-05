@@ -17,9 +17,7 @@ func callRowFixture(t *testing.T) (f *moderationActionsFixture, dmID, callMsgID 
 	f = newModerationActionsFixture(t)
 	ctx := context.Background()
 	dm, err := NewDMService(f.database, f.mod.perms).CreateDM(ctx, fixtureMember, fixtureMember2)
-	if err != nil {
-		t.Fatalf("CreateDM: %v", err)
-	}
+	mustDo(t, "CreateDM", err)
 	row, err := f.database.CreateCallLog(ctx, db.CallLogParams{
 		ChannelID: dm.Channel.ID, AuthorID: fixtureMember, Content: "started a call.",
 		StartedAt: "2026-10-16 10:00:00", LastSeenAt: "2026-10-16 10:00:00",
@@ -103,12 +101,9 @@ func TestSend_ReplyToCallRowRefused(t *testing.T) {
 		t.Fatalf("reply = %v, want ErrBadRequest", err)
 	}
 	// A reply to an ordinary message in the same DM still works.
-	plain, err := f.messages.SendMessage(ctx, SendMessageParams{
+	plain := mustSendMessage(ctx, t, f.messages, SendMessageParams{
 		ChannelID: dmID, UserID: fixtureMember, Username: "u3", Content: "hi",
 	})
-	if err != nil {
-		t.Fatalf("send: %v", err)
-	}
 	if _, err := f.messages.SendMessage(ctx, SendMessageParams{
 		ChannelID: dmID, UserID: fixtureMember2, Username: "u5", Content: "hello", ReplyTo: &plain.MessageID,
 	}); err != nil {

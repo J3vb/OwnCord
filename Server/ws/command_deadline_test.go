@@ -115,10 +115,7 @@ func TestHandleMessage_DeadlineSendsRequestTimeout(t *testing.T) {
 
 	user := seedOwnerUser(t, database, "deadline-owner")
 	chID := seedTestChannel(t, database, "deadline-chan")
-	send := make(chan []byte, 32)
-	c := ws.NewTestClientWithUser(hub, user, chID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, chID, 32)
 
 	release := pinWriter(t, database)
 	cmid := deadlineClientMessageID()
@@ -197,10 +194,7 @@ func TestHandleMessage_DeadlineAfterCommitStillSucceeds(t *testing.T) {
 
 	user := seedOwnerUser(t, database, "deadline-after")
 	chID := seedTestChannel(t, database, "deadline-after-chan")
-	send := make(chan []byte, 32)
-	c := ws.NewTestClientWithUser(hub, user, chID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, chID, 32)
 
 	hub.HandleMessageForTest(c, deadlineChatSend(chID, "committed", deadlineClientMessageID(), "req-after"))
 
@@ -312,10 +306,7 @@ func TestHandleMessage_EditDeadlineAfterCommitKeepsMentions(t *testing.T) {
 	target := seedMemberUser(t, database, "edit-dl-bob")
 	chID := seedTestChannel(t, database, "edit-dl-chan")
 	msgID := seedMessage(t, database, chID, author.ID, "before")
-	send := make(chan []byte, 32)
-	c := ws.NewTestClientWithUser(hub, author, chID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, author, chID, 32)
 
 	hub.HandleMessageForTest(c, chatEditMsg(msgID, "hello @edit-dl-bob"))
 

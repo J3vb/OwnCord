@@ -107,22 +107,7 @@ func (b *recordingBroadcaster) find(kind string, user int64) *recordedEvent {
 
 func dmDo(t *testing.T, router http.Handler, method, path, token string, body any) *httptest.ResponseRecorder {
 	t.Helper()
-	var rdr *bytes.Reader
-	if body != nil {
-		raw, _ := json.Marshal(body)
-		rdr = bytes.NewReader(raw)
-	} else {
-		rdr = bytes.NewReader(nil)
-	}
-	req := httptest.NewRequest(method, path, rdr)
-	req.Header.Set("Content-Type", "application/json")
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
-	return rr
+	return doAPIJSON(t, router, method, path, token, body)
 }
 
 func buildLimitedDMRouter(database *db.DB, bc api.DMBroadcaster, limiter *auth.RateLimiter) http.Handler {
@@ -150,9 +135,7 @@ func newMembersFixture(t *testing.T) *membersFixture {
 	for _, name := range []string{"alice", "bob", "carol", "dave", "erin"} {
 		tokens = append(tokens, dmCreateToken(t, database, name, 4))
 	}
-	group := decodeDMInfo(t, dmPost(t, router, "/api/v1/dms/group", tokens[0], map[string]any{
-		"recipient_ids": []int64{2, 3},
-	}))
+	group := createGroupDM(t, router, tokens[0])
 	bc.reset()
 	return &membersFixture{database: database, router: router, bc: bc, tokens: tokens, group: group.ChannelID}
 }
@@ -181,9 +164,7 @@ func (f *membersFixture) groupRowCount(t *testing.T) int {
 func TestAddMembers_AddedUserGetsOpenBeforeRow(t *testing.T) {
 	f := newMembersFixture(t)
 	rr := f.add(t, 1, 4) // bob, not the owner, adds dave
-	if rr.Code != http.StatusOK {
-		t.Fatalf("add: %d %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 	info := decodeDMInfo(t, rr)
 	if info.OwnerID != 1 || len(info.Recipients) != 3 {
 		t.Errorf("response = owner %d, %d recipients, want owner 1 and 3 recipients (bob's view of 4 members)", info.OwnerID, len(info.Recipients))
@@ -254,9 +235,7 @@ func TestAddMembers_Errors(t *testing.T) {
 
 	oneToOne := decodeCreateDM(t, dmPost(t, f.router, "/api/v1/dms", f.tokens[0], map[string]any{"recipient_id": 2}))
 	rr := dmDo(t, f.router, http.MethodPost, fmt.Sprintf("/api/v1/dms/%d/members", oneToOne), f.tokens[0], map[string]any{"user_ids": []int64{4}})
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("add to a 1:1 DM = %d, want 400", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusBadRequest)
 
 	if _, err := f.database.ExecContext(context.Background(), `INSERT INTO user_blocks (blocker_id, blocked_id) VALUES (3, 4)`); err != nil {
 		t.Fatalf("block: %v", err)
@@ -293,13 +272,10 @@ func TestGroupFull_Returns409GroupDMFull(t *testing.T) {
 	f.bc.reset()
 
 	rr := f.add(t, 0, 4)
-	if rr.Code != http.StatusConflict {
-		t.Fatalf("add to a full group = %d, want 409: %s", rr.Code, rr.Body.String())
-	}
-	var body struct {
+	requireStatus(t, rr, http.StatusConflict)
+	body := decodeBody[struct {
 		Error string `json:"error"`
-	}
-	_ = json.Unmarshal(rr.Body.Bytes(), &body)
+	}](t, rr)
 	if body.Error != "GROUP_DM_FULL" {
 		t.Errorf("error code = %q, want GROUP_DM_FULL", body.Error)
 	}
@@ -313,9 +289,7 @@ func TestGroupFull_Returns409GroupDMFull(t *testing.T) {
 func TestRemoveMember_RemovedGetsCloseAndNoRow(t *testing.T) {
 	f := newMembersFixture(t)
 	rr := dmDo(t, f.router, http.MethodDelete, f.path("/members/3"), f.tokens[0], nil)
-	if rr.Code != http.StatusNoContent {
-		t.Fatalf("remove: %d %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusNoContent)
 	kinds := f.bc.kinds()
 	if kinds[0] != "close:3" {
 		t.Errorf("the removed member's dm_channel_open/close order = %v, want close:3 first", kinds)
@@ -371,9 +345,7 @@ func TestRemoveMember_Errors(t *testing.T) {
 	}
 	oneToOne := decodeCreateDM(t, dmPost(t, f.router, "/api/v1/dms", f.tokens[0], map[string]any{"recipient_id": 2}))
 	rr := dmDo(t, f.router, http.MethodDelete, fmt.Sprintf("/api/v1/dms/%d/members/2", oneToOne), f.tokens[0], nil)
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("remove in a 1:1 DM = %d, want 400", rr.Code)
-	}
+	expectStatus(t, rr, http.StatusBadRequest)
 	if len(f.bc.kinds()) != 0 || f.groupRowCount(t) != 0 {
 		t.Errorf("refused removes sent %v and wrote %d rows", f.bc.kinds(), f.groupRowCount(t))
 	}
@@ -384,9 +356,7 @@ func TestRemoveMember_Errors(t *testing.T) {
 func TestTransferOwner_RefreshesMembersWithoutARow(t *testing.T) {
 	f := newMembersFixture(t)
 	rr := dmDo(t, f.router, http.MethodPut, f.path("/owner"), f.tokens[0], map[string]any{"user_id": 3})
-	if rr.Code != http.StatusOK {
-		t.Fatalf("transfer: %d %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 	if info := decodeDMInfo(t, rr); info.OwnerID != 3 {
 		t.Errorf("response owner_id = %d, want 3", info.OwnerID)
 	}
@@ -465,9 +435,7 @@ func TestLeave_LastMemberWritesNoRow(t *testing.T) {
 func TestRename_WritesRowAndUnchangedSendsNothing(t *testing.T) {
 	f := newMembersFixture(t)
 	rr := dmPatch(t, f.router, f.path(""), f.tokens[1], map[string]any{"name": "Raid night"})
-	if rr.Code != http.StatusOK {
-		t.Fatalf("rename: %d %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusOK)
 	kinds := f.bc.kinds()
 	if !slices.Equal(kinds, []string{"open:1", "open:2", "open:3", "rows"}) {
 		t.Errorf("events = %v, want the three refreshed opens and then the row", kinds)
@@ -561,9 +529,7 @@ func TestFanOut_SurvivesRequestCancelAfterCommit(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, f.path("/members"), bytes.NewReader(raw)).WithContext(reqCtx)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+f.tokens[0])
-	req.RemoteAddr = "127.0.0.1:9999"
-	rr := httptest.NewRecorder()
-	r.ServeHTTP(rr, req)
+	rr := serveLocal(r, req)
 
 	if reqCtx.Err() == nil {
 		t.Fatal("test bug: the request context was never cancelled")

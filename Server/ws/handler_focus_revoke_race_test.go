@@ -38,10 +38,7 @@ func TestApplySetChannelID_RevalidatesAfterConcurrentRevoke(t *testing.T) {
 	// handler already cleared the user for.
 	denyReadOnChannel(t, database, chNew, permissions.MemberRoleID)
 
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, chOld, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, _ := connectClient(t, hub, user, chOld, 16)
 
 	// This is exactly what handleMessage's applier runs for a channel_focus
 	// result carrying SetChannelID: &chNew — the READ check already happened
@@ -66,10 +63,7 @@ func TestApplySetChannelID_AllowedChannel_SubscribesAndFocuses(t *testing.T) {
 	chOld := seedTestChannel(t, database, "focus-ok-old")
 	chNew := seedTestChannel(t, database, "focus-ok-new")
 
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, chOld, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, _ := connectClient(t, hub, user, chOld, 16)
 
 	hub.ApplySetChannelIDForTest(c, chNew)
 
@@ -100,10 +94,7 @@ func TestApplySetChannelID_DMParticipantWithoutRead_KeepsFocus(t *testing.T) {
 	// consults it for DMs, so the applier's recheck must not either.
 	denyReadOnChannel(t, database, dm.ID, permissions.MemberRoleID)
 
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, _ := connectClient(t, hub, user, 0, 16)
 
 	hub.ApplySetChannelIDForTest(c, dm.ID)
 
@@ -124,10 +115,7 @@ func TestApplySetChannelID_DeletedChannel_Unwinds(t *testing.T) {
 	user := seedMemberUser(t, database, "focus-del-user")
 	ch := seedTestChannel(t, database, "focus-del-chan")
 
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, _ := connectClient(t, hub, user, 0, 16)
 
 	if err := database.DeleteChannel(context.Background(), ch); err != nil {
 		t.Fatalf("DeleteChannel: %v", err)
@@ -154,10 +142,7 @@ func TestApplySetChannelID_TransientLookupError_KeepsFocus(t *testing.T) {
 	user := seedMemberUser(t, database, "focus-err-user")
 	ch := seedTestChannel(t, database, "focus-err-chan")
 
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, _ := connectClient(t, hub, user, 0, 16)
 
 	// Closing the DB makes every lookup in the recheck error — the closest
 	// deterministic stand-in for a transient failure on those queries.
@@ -189,10 +174,7 @@ func TestApplySetChannelID_ArchivedChannel_Unwinds(t *testing.T) {
 	user := seedMemberUser(t, database, "focus-archived-user")
 	ch := seedTestChannel(t, database, "focus-archived-chan")
 
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, _ := connectClient(t, hub, user, 0, 16)
 
 	// Simulate the admin's archive having already committed before the
 	// applier runs: the admission gate (HandleChannelFocus) ran and passed
@@ -251,10 +233,7 @@ func TestApplySetChannelID_TransientPermissionLookupError_KeepsFocus(t *testing.
 	user := seedMemberUser(t, database, "focus-permerr-user")
 	ch := seedTestChannel(t, database, "focus-permerr-chan")
 
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, _ := connectClient(t, hub, user, 0, 16)
 
 	hub.ApplySetChannelIDForTest(c, ch)
 

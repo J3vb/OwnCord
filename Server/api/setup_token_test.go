@@ -8,7 +8,6 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/api"
 	"github.com/J3vb/OwnCord/Server/config"
-	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/internal/app"
 )
 
@@ -32,8 +31,7 @@ func TestSetupRequiresTokenFromAdmittedPeers(t *testing.T) {
 				req.RemoteAddr = peer
 				req.Header.Set("Content-Type", "application/json")
 				req.Header.Set("X-Forwarded-For", "203.0.113.9")
-				rec := httptest.NewRecorder()
-				router.ServeHTTP(rec, req)
+				rec := serveRequest(router, req)
 				return rec.Code
 			}
 
@@ -53,14 +51,7 @@ func TestSetupRequiresTokenFromAdmittedPeers(t *testing.T) {
 
 func setupTokenRouter(t *testing.T, token string) http.Handler {
 	t.Helper()
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("db.Migrate: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
+	database := openMigratedDB(t)
 
 	// The compiled admin_allowed_cidrs default, with trusted_proxies empty.
 	cfg := &config.Config{Server: config.ServerConfig{

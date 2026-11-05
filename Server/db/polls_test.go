@@ -56,9 +56,7 @@ func (f pollFixture) params(poll *db.PollInput) db.MessageDeliveryParams {
 func (f pollFixture) create(t *testing.T, poll *db.PollInput) int64 {
 	t.Helper()
 	saved, err := f.database.CreateMessageDelivery(context.Background(), f.params(poll))
-	if err != nil {
-		t.Fatalf("CreateMessageDelivery: %v", err)
-	}
+	mustDo(t, "CreateMessageDelivery", err)
 	return saved.Message.ID
 }
 
@@ -81,9 +79,7 @@ func (f pollFixture) exec(t *testing.T, q string, args ...any) {
 func (f pollFixture) history(t *testing.T, viewer int64) []db.MessageAPIResponse {
 	t.Helper()
 	msgs, err := f.database.GetMessagesForAPI(context.Background(), f.channel, 0, 50, viewer)
-	if err != nil {
-		t.Fatalf("GetMessagesForAPI: %v", err)
-	}
+	mustDo(t, "GetMessagesForAPI", err)
 	return msgs
 }
 
@@ -112,9 +108,7 @@ func TestCreateMessageDelivery_PollAtomic(t *testing.T) {
 
 	p := f.params(pizzaPoll())
 	saved, err := f.database.CreateMessageDelivery(ctx, p)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateMessageDelivery", err)
 	id := saved.Message.ID
 	meta, err := f.database.GetPollMeta(ctx, id)
 	if err != nil || meta == nil {
@@ -290,9 +284,7 @@ func TestPollCascade_ChannelDeleteAndPurge(t *testing.T) {
 	f.channel = other
 	id = f.create(t, pizzaPoll())
 	f.exec(t, `INSERT INTO poll_votes (message_id, answer_id, user_id) VALUES (?, 2, ?)`, id, f.viewer)
-	if err := f.database.DeleteChannel(context.Background(), other); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "DeleteChannel", f.database.DeleteChannel(context.Background(), other))
 	for _, table := range []string{"polls", "poll_answers", "poll_votes"} {
 		if n := f.count(t, `SELECT COUNT(*) FROM `+table); n != 0 {
 			t.Errorf("%s holds %d rows after the channel went", table, n)
@@ -323,9 +315,7 @@ func TestErasure_PollVotes(t *testing.T) {
 		id, f.viewer, id, f.author)
 
 	before, err := f.database.TakeInventory(ctx, f.viewer, "poll-viewer")
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "TakeInventory", err)
 	if before["10a poll votes"] != 1 {
 		t.Fatalf("inventory 10a before = %d, want 1", before["10a poll votes"])
 	}
@@ -333,9 +323,7 @@ func TestErasure_PollVotes(t *testing.T) {
 		t.Fatalf("EraseAccount: %v", err)
 	}
 	after, err := f.database.TakeInventory(ctx, f.viewer, "poll-viewer")
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "TakeInventory", err)
 	if after["10a poll votes"] != 0 {
 		t.Errorf("inventory 10a after = %d, want 0", after["10a poll votes"])
 	}

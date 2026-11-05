@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"testing"
-
-	"github.com/J3vb/OwnCord/Server/admin"
 )
 
 // TestAdminAPI_Registrations_PagesPastFifty: with more applicants than one
@@ -15,9 +13,7 @@ import (
 // one of them, oldest first, with no gap or repeat between pages.
 func TestAdminAPI_Registrations_PagesPastFifty(t *testing.T) {
 	ctx := context.Background()
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
+	database, handler, token := newAdminHarness(t)
 	const total = 57
 	for i := range total {
 		if _, err := database.CreatePendingUser(ctx, fmt.Sprintf("applicant-%02d", i), "hash", 3, 100); err != nil {
@@ -63,8 +59,7 @@ func TestAdminAPI_Registrations_PagesPastFifty(t *testing.T) {
 
 	// The unparameterised list the nav badge uses still stops at 50.
 	w := doRequest(t, handler, http.MethodGet, "/registrations", token, nil)
-	var all []map[string]any
-	_ = json.NewDecoder(w.Body).Decode(&all)
+	all := decodeBody[[]map[string]any](t, w)
 	if len(all) != 50 {
 		t.Errorf("default page = %d rows, want 50", len(all))
 	}

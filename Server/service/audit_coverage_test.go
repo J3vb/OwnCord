@@ -13,6 +13,29 @@ import (
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
+// auditAppealBody is the free text of every appeal below; the denylist pass
+// asserts it never reaches an audit row.
+const auditAppealBody = "appeal body sentinel 3f0c9a1e"
+
+// warnedAuditAppellant warns the fixture member so they have an action to appeal.
+func warnedAuditAppellant(t *testing.T) (*moderationActionsFixture, *AppealService, int64) {
+	t.Helper()
+	f := newModerationActionsFixture(t)
+	appeals := NewAppealService(f.database, f.mod.perms, f.mod, auth.NewRateLimiter())
+	actionID, err := f.mod.Warn(context.Background(), fixtureMod, fixtureMember, "be nice", nil)
+	mustDo(t, "Warn", err)
+	return f, appeals, actionID
+}
+
+// submittedAuditAppeal is warnedAuditAppellant plus the appeal itself.
+func submittedAuditAppeal(t *testing.T) (*moderationActionsFixture, *AppealService, string) {
+	t.Helper()
+	f, appeals, actionID := warnedAuditAppellant(t)
+	publicID, err := appeals.Submit(context.Background(), fixtureMember, actionID, auditAppealBody)
+	mustDo(t, "Submit", err)
+	return f, appeals, publicID
+}
+
 // TestAuditCoverage_ServiceMutations is the B2-6 audit table for the
 // service-owned security-sensitive mutations: each row performs one mutation
 // against a fake db.AuditStore and asserts the expected action arrives. The
@@ -30,30 +53,22 @@ func TestAuditCoverage_ServiceMutations(t *testing.T) {
 			_, database := newTestModerationService(t)
 			rec := audittest.Install(t, database)
 			inv, err := NewInviteService(database).CreateInvite(context.Background(), 1, 5, 24)
-			if err != nil {
-				t.Fatalf("CreateInvite: %v", err)
-			}
+			mustDo(t, "CreateInvite", err)
 			return rec, []string{inv.Code}
 		}},
 		{"invite revoke", "invite_revoke", func(t *testing.T) (*audittest.Recorder, []string) {
 			_, database := newTestModerationService(t)
 			svc := NewInviteService(database)
 			inv, err := svc.CreateInvite(context.Background(), 1, 5, 24)
-			if err != nil {
-				t.Fatalf("CreateInvite: %v", err)
-			}
+			mustDo(t, "CreateInvite", err)
 			rec := audittest.Install(t, database)
-			if err := svc.RevokeInvite(context.Background(), 1, inv.Code); err != nil {
-				t.Fatalf("RevokeInvite: %v", err)
-			}
+			mustDo(t, "RevokeInvite", svc.RevokeInvite(context.Background(), 1, inv.Code))
 			return rec, []string{inv.Code}
 		}},
 		{"ban", "user_ban", func(t *testing.T) (*audittest.Recorder, []string) {
 			svc, database := newTestModerationService(t)
 			rec := audittest.Install(t, database)
-			if err := svc.BanUser(context.Background(), 1, 4, "spam", nil); err != nil {
-				t.Fatalf("BanUser: %v", err)
-			}
+			mustDo(t, "BanUser", svc.BanUser(context.Background(), 1, 4, "spam", nil))
 			return rec, nil
 		}},
 		{"warning", "user_warn", func(t *testing.T) (*audittest.Recorder, []string) {
@@ -78,100 +93,50 @@ func TestAuditCoverage_ServiceMutations(t *testing.T) {
 				t.Fatalf("Timeout: %v", err)
 			}
 			rec := audittest.Install(t, f.database)
-			if err := f.mod.LiftTimeout(context.Background(), fixtureMod, fixtureMember); err != nil {
-				t.Fatalf("LiftTimeout: %v", err)
-			}
+			mustDo(t, "LiftTimeout", f.mod.LiftTimeout(context.Background(), fixtureMod, fixtureMember))
 			return rec, nil
 		}},
 		{"unban", "user_unban", func(t *testing.T) (*audittest.Recorder, []string) {
 			svc, database := newTestModerationService(t)
-			if err := svc.BanUser(context.Background(), 1, 4, "spam", nil); err != nil {
-				t.Fatalf("BanUser: %v", err)
-			}
+			mustDo(t, "BanUser", svc.BanUser(context.Background(), 1, 4, "spam", nil))
 			rec := audittest.Install(t, database)
-			if err := svc.UnbanUser(context.Background(), 1, 4); err != nil {
-				t.Fatalf("UnbanUser: %v", err)
-			}
+			mustDo(t, "UnbanUser", svc.UnbanUser(context.Background(), 1, 4))
 			return rec, nil
 		}},
 		{"appeal submit", "appeal_submit", func(t *testing.T) (*audittest.Recorder, []string) {
-			f := newModerationActionsFixture(t)
-			appeals := NewAppealService(f.database, f.mod.perms, f.mod, auth.NewRateLimiter())
-			actionID, err := f.mod.Warn(context.Background(), fixtureMod, fixtureMember, "be nice", nil)
-			if err != nil {
-				t.Fatalf("Warn: %v", err)
-			}
-			const body = "appeal body sentinel 3f0c9a1e"
+			f, appeals, actionID := warnedAuditAppellant(t)
 			rec := audittest.Install(t, f.database)
-			if _, err := appeals.Submit(context.Background(), fixtureMember, actionID, body); err != nil {
+			if _, err := appeals.Submit(context.Background(), fixtureMember, actionID, auditAppealBody); err != nil {
 				t.Fatalf("Submit: %v", err)
 			}
-			return rec, []string{body}
+			return rec, []string{auditAppealBody}
 		}},
 		{"appeal withdraw", "appeal_withdraw", func(t *testing.T) (*audittest.Recorder, []string) {
-			f := newModerationActionsFixture(t)
-			appeals := NewAppealService(f.database, f.mod.perms, f.mod, auth.NewRateLimiter())
-			actionID, err := f.mod.Warn(context.Background(), fixtureMod, fixtureMember, "be nice", nil)
-			if err != nil {
-				t.Fatalf("Warn: %v", err)
-			}
-			const body = "appeal body sentinel 3f0c9a1e"
-			publicID, err := appeals.Submit(context.Background(), fixtureMember, actionID, body)
-			if err != nil {
-				t.Fatalf("Submit: %v", err)
-			}
+			f, appeals, publicID := submittedAuditAppeal(t)
 			rec := audittest.Install(t, f.database)
-			if err := appeals.Withdraw(context.Background(), fixtureMember, publicID); err != nil {
-				t.Fatalf("Withdraw: %v", err)
-			}
-			return rec, []string{body}
+			mustDo(t, "Withdraw", appeals.Withdraw(context.Background(), fixtureMember, publicID))
+			return rec, []string{auditAppealBody}
 		}},
 		{"appeal assign", "appeal_assign", func(t *testing.T) (*audittest.Recorder, []string) {
-			f := newModerationActionsFixture(t)
-			appeals := NewAppealService(f.database, f.mod.perms, f.mod, auth.NewRateLimiter())
-			actionID, err := f.mod.Warn(context.Background(), fixtureMod, fixtureMember, "be nice", nil)
-			if err != nil {
-				t.Fatalf("Warn: %v", err)
-			}
-			const body = "appeal body sentinel 3f0c9a1e"
-			publicID, err := appeals.Submit(context.Background(), fixtureMember, actionID, body)
-			if err != nil {
-				t.Fatalf("Submit: %v", err)
-			}
+			f, appeals, publicID := submittedAuditAppeal(t)
 			rec := audittest.Install(t, f.database)
-			if err := appeals.Assign(context.Background(), fixturePeerMod, publicID, false); err != nil {
-				t.Fatalf("Assign: %v", err)
-			}
-			return rec, []string{body}
+			mustDo(t, "Assign", appeals.Assign(context.Background(), fixturePeerMod, publicID, false))
+			return rec, []string{auditAppealBody}
 		}},
 		{"appeal decide", "appeal_decide", func(t *testing.T) (*audittest.Recorder, []string) {
-			f := newModerationActionsFixture(t)
-			appeals := NewAppealService(f.database, f.mod.perms, f.mod, auth.NewRateLimiter())
-			actionID, err := f.mod.Warn(context.Background(), fixtureMod, fixtureMember, "be nice", nil)
-			if err != nil {
-				t.Fatalf("Warn: %v", err)
-			}
-			const body = "appeal body sentinel 3f0c9a1e"
 			const note = "decision note sentinel 8a41d02c"
-			publicID, err := appeals.Submit(context.Background(), fixtureMember, actionID, body)
-			if err != nil {
-				t.Fatalf("Submit: %v", err)
-			}
+			f, appeals, publicID := submittedAuditAppeal(t)
 			rec := audittest.Install(t, f.database)
 			// "overturned" (not "upheld"): item 4's reversal audit row
 			// (user_warning_acknowledged, for a warning) is written alongside
 			// appeal_decide, and both must clear the sentinel denylist.
-			if err := appeals.Decide(context.Background(), fixturePeerMod, publicID, "overturned", note); err != nil {
-				t.Fatalf("Decide: %v", err)
-			}
-			return rec, []string{body, note}
+			mustDo(t, "Decide", appeals.Decide(context.Background(), fixturePeerMod, publicID, "overturned", note))
+			return rec, []string{auditAppealBody, note}
 		}},
 		{"kick (force logout)", "force_logout", func(t *testing.T) (*audittest.Recorder, []string) {
 			svc, database := newTestModerationService(t)
 			rec := audittest.Install(t, database)
-			if err := svc.ForceLogout(context.Background(), 1, 4); err != nil {
-				t.Fatalf("ForceLogout: %v", err)
-			}
+			mustDo(t, "ForceLogout", svc.ForceLogout(context.Background(), 1, 4))
 			return rec, nil
 		}},
 		{"role assignment", "role_change", func(t *testing.T) (*audittest.Recorder, []string) {
@@ -216,23 +181,16 @@ func TestAuditCoverage_ServiceMutations(t *testing.T) {
 			_, database := newTestModerationService(t)
 			raw, _ := auth.GenerateToken()
 			hash := auth.HashToken(raw)
-			sid, err := database.CreateSession(context.Background(), 4, hash, "test", "127.0.0.1")
-			if err != nil {
-				t.Fatalf("CreateSession: %v", err)
-			}
+			sid := mustCreateSession(t, database, 4, hash, "test", "127.0.0.1")
 			rec := audittest.Install(t, database)
-			if err := NewUserService(database).RevokeSession(context.Background(), 4, sid); err != nil {
-				t.Fatalf("RevokeSession: %v", err)
-			}
+			mustDo(t, "RevokeSession", NewUserService(database).RevokeSession(context.Background(), 4, sid))
 			return rec, []string{raw, hash}
 		}},
 		{"recovery credential issued", "recovery_assist_issued", func(t *testing.T) (*audittest.Recorder, []string) {
 			svc, owner, user, database := newAssistFixture(t, false)
 			rec := audittest.Install(t, database)
 			issue, err := svc.IssueRecoveryAssist(context.Background(), owner.ID, user.ID, "in_person")
-			if err != nil {
-				t.Fatalf("IssueRecoveryAssist: %v", err)
-			}
+			mustDo(t, "IssueRecoveryAssist", err)
 			stored, _ := database.GetRecoveryAssist(context.Background(), user.ID)
 			return rec, []string{issue.Credential, stored.Verifier}
 		}},
@@ -240,18 +198,14 @@ func TestAuditCoverage_ServiceMutations(t *testing.T) {
 			svc, user, _ := newKitService(t, false)
 			rec := audittest.Install(t, svc.st.(*db.DB))
 			issue, err := svc.EnrolRecoveryKit(context.Background(), sessionPrincipal(user), kitPassword, "")
-			if err != nil {
-				t.Fatalf("EnrolRecoveryKit: %v", err)
-			}
+			mustDo(t, "EnrolRecoveryKit", err)
 			kit, _ := svc.accountRecovery.st.GetRecoveryKit(context.Background(), user.ID)
 			return rec, []string{issue.Secret, kit.Verifier, kitPassword}
 		}},
 		{"recovery kit locked", "recovery_kit_locked", func(t *testing.T) (*audittest.Recorder, []string) {
 			svc, user, _ := newKitService(t, false)
 			issue, err := svc.EnrolRecoveryKit(context.Background(), sessionPrincipal(user), kitPassword, "")
-			if err != nil {
-				t.Fatalf("EnrolRecoveryKit: %v", err)
-			}
+			mustDo(t, "EnrolRecoveryKit", err)
 			rec := audittest.Install(t, svc.st.(*db.DB))
 			wrong, _, _ := auth.GenerateRecoveryKitSecret()
 			for i := range recoveryKitFailureThreshold {
@@ -262,34 +216,24 @@ func TestAuditCoverage_ServiceMutations(t *testing.T) {
 		{"registration approve", "registration_approve", func(t *testing.T) (*audittest.Recorder, []string) {
 			_, database := newTestModerationService(t)
 			uid, err := database.CreatePendingUser(context.Background(), "applicant-a", "hash", 4, 100)
-			if err != nil {
-				t.Fatalf("CreatePendingUser: %v", err)
-			}
+			mustDo(t, "CreatePendingUser", err)
 			rec := audittest.Install(t, database)
-			if err := NewUserService(database).ApproveRegistration(context.Background(), 1, uid); err != nil {
-				t.Fatalf("ApproveRegistration: %v", err)
-			}
+			mustDo(t, "ApproveRegistration", NewUserService(database).ApproveRegistration(context.Background(), 1, uid))
 			return rec, []string{"hash"}
 		}},
 		{"registration deny", "registration_deny", func(t *testing.T) (*audittest.Recorder, []string) {
 			_, database := newTestModerationService(t)
 			uid, err := database.CreatePendingUser(context.Background(), "applicant-d", "hash", 4, 100)
-			if err != nil {
-				t.Fatalf("CreatePendingUser: %v", err)
-			}
+			mustDo(t, "CreatePendingUser", err)
 			rec := audittest.Install(t, database)
-			if err := NewUserService(database).DenyRegistration(context.Background(), 1, uid); err != nil {
-				t.Fatalf("DenyRegistration: %v", err)
-			}
+			mustDo(t, "DenyRegistration", NewUserService(database).DenyRegistration(context.Background(), 1, uid))
 			return rec, []string{"hash"}
 		}},
 		{"session revoke all", "session_revoke_all", func(t *testing.T) (*audittest.Recorder, []string) {
 			_, database := newTestModerationService(t)
 			raw, _ := auth.GenerateToken()
 			hash := auth.HashToken(raw)
-			if _, err := database.CreateSession(context.Background(), 4, hash, "test", "127.0.0.1"); err != nil {
-				t.Fatalf("CreateSession: %v", err)
-			}
+			mustCreateSession(t, database, 4, hash, "test", "127.0.0.1")
 			rec := audittest.Install(t, database)
 			if _, err := NewUserService(database).RevokeAllSessions(context.Background(), 4); err != nil {
 				t.Fatalf("RevokeAllSessions: %v", err)
@@ -300,19 +244,16 @@ func TestAuditCoverage_ServiceMutations(t *testing.T) {
 			svc, database := newTestMessageService(t)
 			const body = "secret message body 4d0d1405"
 			res, err := svc.SendMessage(context.Background(), SendMessageParams{ChannelID: 10, UserID: 1, Username: "alice", RoleName: "member", Content: body})
-			if err != nil {
-				t.Fatalf("SendMessage: %v", err)
-			}
+			mustDo(t, "SendMessage", err)
 			rec := audittest.Install(t, database)
 			if _, err := svc.DeleteMessage(context.Background(), 1, res.MessageID); err != nil {
 				t.Fatalf("DeleteMessage: %v", err)
 			}
-			return rec, []string{body}
+			return rec, []string{auditAppealBody}
 		}},
 		{"message purge", "message_purge", func(t *testing.T) (*audittest.Recorder, []string) {
 			svc, database := newTestMessageService(t)
-			seedRole(t, database, &db.Role{ID: permissions.MemberRoleID, Name: "member",
-				Permissions: permissions.SendMessages | permissions.ReadMessages | permissions.ManageMessages, Position: 1})
+			seedMemberRole(t, database, permissions.SendMessages|permissions.ReadMessages|permissions.ManageMessages)
 			const body = "purged message body 4d0d1405"
 			if _, err := svc.SendMessage(context.Background(), SendMessageParams{ChannelID: 10, UserID: 1, Username: "alice", RoleName: "member", Content: body}); err != nil {
 				t.Fatalf("SendMessage: %v", err)
@@ -321,7 +262,7 @@ func TestAuditCoverage_ServiceMutations(t *testing.T) {
 			if _, err := svc.PurgeMessages(context.Background(), 1, 10, 10, 0); err != nil {
 				t.Fatalf("PurgeMessages: %v", err)
 			}
-			return rec, []string{body}
+			return rec, []string{auditAppealBody}
 		}},
 	}
 
@@ -380,9 +321,7 @@ func TestCreateInvite_AuditSurvivesCanceledLookup(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	inv, err := NewInviteService(&cancelAfterCreateStore{DB: database, cancel: cancel}).CreateInvite(ctx, 1, 5, 24)
-	if err != nil {
-		t.Fatalf("committed invite must not fail on a canceled lookup: %v", err)
-	}
+	mustDo(t, "committed invite must not fail on a canceled lookup", err)
 	if e := rec.Wait(t, "invite_create"); e.TargetID != inv.ID {
 		t.Fatalf("invite_create target = %d, want %d", e.TargetID, inv.ID)
 	}

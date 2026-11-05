@@ -57,21 +57,15 @@ func TestUpsertPushSubscription_RefreshBumpsLastSeenAtSameRow(t *testing.T) {
 	seedPushUser(t, database, 1)
 
 	first, err := database.UpsertPushSubscription(ctx, 1, "https://push.example/a", "p256-old", "auth-old", "old-name", "key1", 10)
-	if err != nil {
-		t.Fatalf("first upsert: %v", err)
-	}
+	mustDo(t, "first upsert", err)
 	if _, err := database.ExecContext(ctx, `UPDATE push_subscriptions SET last_seen_at = datetime('now', '-1 day') WHERE id = ?`, first); err != nil {
 		t.Fatal(err)
 	}
 	var before string
-	if err := database.QueryRowContext(ctx, `SELECT last_seen_at FROM push_subscriptions WHERE id = ?`, first).Scan(&before); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "QueryRowContext", database.QueryRowContext(ctx, `SELECT last_seen_at FROM push_subscriptions WHERE id = ?`, first).Scan(&before))
 
 	second, err := database.UpsertPushSubscription(ctx, 1, "https://push.example/a", "p256-new", "auth-new", "new-name", "key2", 10)
-	if err != nil {
-		t.Fatalf("second upsert: %v", err)
-	}
+	mustDo(t, "second upsert", err)
 	if second != first {
 		t.Fatalf("refresh id = %d, want the same row %d", second, first)
 	}
@@ -127,16 +121,12 @@ func TestUpsertPushSubscription_TrimEvictsPastKeep(t *testing.T) {
 		t.Fatalf("rows after trim = %d, %v; want 2", n, err)
 	}
 	var oldestSurvives int
-	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM push_subscriptions WHERE endpoint = 'https://push.example/existing-a'`).Scan(&oldestSurvives); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "QueryRowContext", database.QueryRowContext(ctx, `SELECT COUNT(*) FROM push_subscriptions WHERE endpoint = 'https://push.example/existing-a'`).Scan(&oldestSurvives))
 	if oldestSurvives != 0 {
 		t.Error("the oldest (30-minutes-ago) row survived the trim")
 	}
 	var newestSurvives int
-	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM push_subscriptions WHERE endpoint IN ('https://push.example/existing-c', 'https://push.example/new')`).Scan(&newestSurvives); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "QueryRowContext", database.QueryRowContext(ctx, `SELECT COUNT(*) FROM push_subscriptions WHERE endpoint IN ('https://push.example/existing-c', 'https://push.example/new')`).Scan(&newestSurvives))
 	if newestSurvives != 2 {
 		t.Errorf("survivors = %d, want the newest existing row and the new one", newestSurvives)
 	}
@@ -159,9 +149,7 @@ func TestUpsertPushSubscription_NegativeKeepClampsToZero(t *testing.T) {
 	}
 
 	var n int
-	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM push_subscriptions WHERE user_id = 1`).Scan(&n); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "QueryRowContext", database.QueryRowContext(ctx, `SELECT COUNT(*) FROM push_subscriptions WHERE user_id = 1`).Scan(&n))
 	if n != 0 {
 		t.Errorf("rows after keep=-1 = %d, want 0 (clamped to keep=0, evicting everything)", n)
 	}
@@ -181,9 +169,7 @@ func TestUpsertPushSubscription_CancelledContextFailsAtomically(t *testing.T) {
 	}
 
 	var n int
-	if err := database.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM push_subscriptions WHERE user_id = 1`).Scan(&n); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "QueryRowContext", database.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM push_subscriptions WHERE user_id = 1`).Scan(&n))
 	if n != 0 {
 		t.Errorf("rows after the failed call = %d, want 0", n)
 	}
@@ -278,23 +264,17 @@ func TestUpsertPushSubscription_RollbackOnFailingTrimDelete(t *testing.T) {
 	}
 
 	var n int
-	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM push_subscriptions WHERE user_id = 1`).Scan(&n); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "QueryRowContext", database.QueryRowContext(ctx, `SELECT COUNT(*) FROM push_subscriptions WHERE user_id = 1`).Scan(&n))
 	if n != 2 {
 		t.Fatalf("rows after the failed trim = %d, want 2 (the pre-existing 'blocked' and 'middle' rows, untouched)", n)
 	}
 	var newRowExists int
-	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM push_subscriptions WHERE endpoint = 'https://push.example/new'`).Scan(&newRowExists); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "QueryRowContext", database.QueryRowContext(ctx, `SELECT COUNT(*) FROM push_subscriptions WHERE endpoint = 'https://push.example/new'`).Scan(&newRowExists))
 	if newRowExists != 0 {
 		t.Error("the new row survived even though the transaction failed — the upsert was not rolled back")
 	}
 	var middleRowExists int
-	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM push_subscriptions WHERE endpoint = 'https://push.example/middle'`).Scan(&middleRowExists); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "QueryRowContext", database.QueryRowContext(ctx, `SELECT COUNT(*) FROM push_subscriptions WHERE endpoint = 'https://push.example/middle'`).Scan(&middleRowExists))
 	if middleRowExists != 1 {
 		t.Error("the 'middle' row's successful delete was not rolled back with the rest of the transaction")
 	}
@@ -322,9 +302,7 @@ func TestListPushSubscriptions_KeyScopedNoCredentialsOrdering(t *testing.T) {
 	exec("https://push.example/newest", "key-new", 1)  // right key, newest
 
 	rows, err := database.ListPushSubscriptions(ctx, 1, "key-new")
-	if err != nil {
-		t.Fatalf("ListPushSubscriptions: %v", err)
-	}
+	mustDo(t, "ListPushSubscriptions", err)
 	if len(rows) != 2 {
 		t.Fatalf("rows = %d, want 2 (the wrong-key row excluded)", len(rows))
 	}
@@ -357,9 +335,7 @@ func TestDeletePushSubscription_ScopedAndReportsRows(t *testing.T) {
 	seedPushUser(t, database, 1)
 	seedPushUser(t, database, 2)
 	id, err := database.UpsertPushSubscription(ctx, 1, "https://push.example/a", "p", "a", "d", "k", 10)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "UpsertPushSubscription", err)
 
 	if ok, err := database.DeletePushSubscription(ctx, 2, id); err != nil || ok {
 		t.Fatalf("user 2 deleting user 1's row: ok=%v err=%v, want ok=false", ok, err)
@@ -393,16 +369,12 @@ func TestSweepPushSubscriptions_CutoffFormatting(t *testing.T) {
 	exec("https://push.example/fresh", cutoff.Add(time.Minute), "key1")
 
 	n, err := database.SweepPushSubscriptions(ctx, cutoff, "")
-	if err != nil {
-		t.Fatalf("SweepPushSubscriptions: %v", err)
-	}
+	mustDo(t, "SweepPushSubscriptions", err)
 	if n != 1 {
 		t.Fatalf("swept %d rows, want 1", n)
 	}
 	var survivor string
-	if err := database.QueryRowContext(ctx, `SELECT endpoint FROM push_subscriptions WHERE user_id = 1`).Scan(&survivor); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "QueryRowContext", database.QueryRowContext(ctx, `SELECT endpoint FROM push_subscriptions WHERE user_id = 1`).Scan(&survivor))
 	if survivor != "https://push.example/fresh" {
 		t.Errorf("survivor = %q, want the fresh row", survivor)
 	}
@@ -422,9 +394,7 @@ func TestSweepPushSubscriptions_EmptyKeyIsTimeOnly(t *testing.T) {
 	}
 
 	n, err := database.SweepPushSubscriptions(ctx, time.Now().Add(-90*24*time.Hour), "")
-	if err != nil {
-		t.Fatalf("SweepPushSubscriptions: %v", err)
-	}
+	mustDo(t, "SweepPushSubscriptions", err)
 	if n != 0 {
 		t.Fatalf("swept %d rows, want 0 (fresh, and no key installed to compare against)", n)
 	}
@@ -457,9 +427,7 @@ func TestCountPushSubscriptions(t *testing.T) {
 // rather than panic or silently succeed.
 func TestPushSubscriptionWrappers_ReportClosedDatabaseErrors(t *testing.T) {
 	database := openMigratedMemory(t)
-	if err := database.Close(); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Close", database.Close())
 	ctx := context.Background()
 
 	if _, err := database.ListPushSubscriptions(ctx, 1, "k"); err == nil {
@@ -497,9 +465,7 @@ func TestListPushSubscriptionsForDispatch_ScopesToTheGivenUsersAndKey(t *testing
 	seedPushUser(t, database, 3)
 
 	idA, err := database.UpsertPushSubscription(ctx, 1, "https://push.example/a", "p256-a", "auth-a", "d1", "key1", 10)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "UpsertPushSubscription", err)
 	if _, err := database.UpsertPushSubscription(ctx, 2, "https://push.example/b", "p256-b", "auth-b", "d2", "key1", 10); err != nil {
 		t.Fatal(err)
 	}
@@ -510,9 +476,7 @@ func TestListPushSubscriptionsForDispatch_ScopesToTheGivenUsersAndKey(t *testing
 	}
 
 	rows, err := database.ListPushSubscriptionsForDispatch(ctx, []int64{1, 3}, "key1")
-	if err != nil {
-		t.Fatalf("ListPushSubscriptionsForDispatch: %v", err)
-	}
+	mustDo(t, "ListPushSubscriptionsForDispatch", err)
 	if len(rows) != 1 {
 		t.Fatalf("rows = %d, want 1 (user 2 was not requested, user 3 is under a stale key)", len(rows))
 	}
@@ -542,9 +506,7 @@ func TestDeletePushSubscriptionByID_UnscopedDeletesRegardlessOfOwner(t *testing.
 	ctx := context.Background()
 	seedPushUser(t, database, 1)
 	id, err := database.UpsertPushSubscription(ctx, 1, "https://push.example/a", "p", "a", "d", "k", 10)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "UpsertPushSubscription", err)
 
 	ok, err := database.DeletePushSubscriptionByID(ctx, id)
 	if err != nil || !ok {

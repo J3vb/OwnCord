@@ -15,7 +15,6 @@ package ws_test
 
 import (
 	"context"
-	"encoding/json"
 	"testing"
 	"time"
 )
@@ -29,10 +28,7 @@ func TestBuildReady_TimedOutUserCanSendFalse(t *testing.T) {
 	// (db.TimeoutUser) requires.
 	actor := seedServeUser(t, database, "timeout-actor")
 
-	targetID, err := database.CreateUser(ctx, "timeout-target", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser(target): %v", err)
-	}
+	targetID := mustCreateUser(t, database, "timeout-target", 4)
 	memberRole, err := database.GetRoleByID(ctx, 4)
 	if err != nil || memberRole == nil {
 		t.Fatalf("GetRoleByID(member): %v", err)
@@ -49,10 +45,7 @@ func TestBuildReady_TimedOutUserCanSendFalse(t *testing.T) {
 		t.Fatalf("TimeoutUser: %v", err)
 	}
 
-	msg, err := hub.BuildReadyWithRoleForTest(database, targetID, memberRole)
-	if err != nil {
-		t.Fatalf("BuildReadyWithRoleForTest: %v", err)
-	}
+	msg := mustBuildReadyWithRole(t, hub, database, targetID, memberRole)
 
 	var env struct {
 		Payload struct {
@@ -63,9 +56,7 @@ func TestBuildReady_TimedOutUserCanSendFalse(t *testing.T) {
 			} `json:"channels"`
 		} `json:"payload"`
 	}
-	if err := json.Unmarshal(msg, &env); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	mustUnmarshal(t, msg, &env)
 
 	sawTextChannel := false
 	for _, ch := range env.Payload.Channels {

@@ -58,15 +58,7 @@ func buildModQueueActRouter(t *testing.T) (http.Handler, *db.DB, *recordingModQu
 // newModQueueActTestDB opens a fully migrated in-memory database.
 func newModQueueActTestDB(t *testing.T) *db.DB {
 	t.Helper()
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("db.Migrate: %v", err)
-	}
-	return database
+	return openMigratedDB(t)
 }
 
 // mintModerator creates a role with the given position and permission bits
@@ -93,8 +85,7 @@ func actJSON(t *testing.T, h http.Handler, method, path, token, body string) (in
 	if body != "" {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
+	rec := serveRequest(h, req)
 	return rec.Code, rec.Body.Bytes()
 }
 
@@ -262,14 +253,8 @@ func TestModerationQueueAct_NoBroadcastWhenRemovalWriteFails(t *testing.T) {
 	reporterToken, _ := mintSession(t, database, reporterID)
 	authorID := mintUser(t, database, "act-removalwritefail-author")
 
-	chID, err := database.CreateChannel(context.Background(), "act-removalwritefail-channel", "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
-	msgID, err := database.CreateMessage(context.Background(), chID, authorID, "reported content", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	chID := mustCreateChannel(t, database, "act-removalwritefail-channel", "text")
+	msgID := mustCreateMessage(t, database, chID, authorID, "reported content")
 
 	body := `{"target_type":"message","target_id":"` + itoa(msgID) + `","reason":"spam"}`
 	status, respBody := actJSON(t, h, http.MethodPost, "/api/v1/reports", reporterToken, body)
@@ -316,14 +301,8 @@ func TestModerationQueueAct_RemovalBroadcastsChatBulkDeleted(t *testing.T) {
 	reporterToken, _ := mintSession(t, database, reporterID)
 	authorID := mintUser(t, database, "act-removal-author")
 
-	chID, err := database.CreateChannel(context.Background(), "act-removal-channel", "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
-	msgID, err := database.CreateMessage(context.Background(), chID, authorID, "reported content", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	chID := mustCreateChannel(t, database, "act-removal-channel", "text")
+	msgID := mustCreateMessage(t, database, chID, authorID, "reported content")
 
 	body := `{"target_type":"message","target_id":"` + itoa(msgID) + `","reason":"spam"}`
 	status, respBody := actJSON(t, h, http.MethodPost, "/api/v1/reports", reporterToken, body)
@@ -370,14 +349,8 @@ func TestModerationQueueAct_RemovalOfDeletedMessageIsConflict(t *testing.T) {
 	reporterToken, _ := mintSession(t, database, reporterID)
 	authorID := mintUser(t, database, "act-alreadydeleted-author")
 
-	chID, err := database.CreateChannel(context.Background(), "act-alreadydeleted-channel", "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
-	msgID, err := database.CreateMessage(context.Background(), chID, authorID, "reported content", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	chID := mustCreateChannel(t, database, "act-alreadydeleted-channel", "text")
+	msgID := mustCreateMessage(t, database, chID, authorID, "reported content")
 
 	body := `{"target_type":"message","target_id":"` + itoa(msgID) + `","reason":"spam"}`
 	status, respBody := actJSON(t, h, http.MethodPost, "/api/v1/reports", reporterToken, body)

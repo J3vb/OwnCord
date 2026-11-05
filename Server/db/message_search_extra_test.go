@@ -15,10 +15,7 @@ func seedAttached(t *testing.T, database *db.DB, ch, user int64, content, mime s
 	t.Helper()
 	ctx := context.Background()
 	msg := seedUnlinked(t, database, user, mime)
-	id, err := database.CreateMessage(ctx, ch, user, content, nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	id := mustCreateMessage(t, database, ch, user, content, nil)
 	linked, err := database.LinkAttachmentsToMessage(ctx, id, user, []string{msg})
 	if err != nil || len(linked) != 1 {
 		t.Fatalf("link attachment: %v %v", linked, err)
@@ -33,18 +30,14 @@ func seedUnlinked(t *testing.T, database *db.DB, user int64, mime string) string
 	t.Helper()
 	attachSeq++
 	id := fmt.Sprintf("att-%d", attachSeq)
-	if err := database.CreateAttachment(context.Background(), id, user, "f", id, mime, 10, nil, nil); err != nil {
-		t.Fatalf("CreateAttachment: %v", err)
-	}
+	mustDo(t, "CreateAttachment", database.CreateAttachment(context.Background(), id, user, "f", id, mime, 10, nil, nil))
 	return id
 }
 
 func searchIDs(t *testing.T, database *db.DB, q db.SearchQuery) []int64 {
 	t.Helper()
 	rs, err := database.SearchMessagesFiltered(context.Background(), q, db.SearchPage{Limit: 50})
-	if err != nil {
-		t.Fatalf("SearchMessagesFiltered: %v", err)
-	}
+	mustDo(t, "SearchMessagesFiltered", err)
 	ids := resultIDs(rs)
 	slices.Sort(ids)
 	return ids
@@ -106,9 +99,7 @@ func TestSearchFiltered_HasExcludesUnlinkedAttachments(t *testing.T) {
 	plain, _ := database.CreateMessage(ctx, ch, u, "no attachment", nil)
 	gone := seedAttached(t, database, ch, u, "deleted one", "image/png")
 	kept := seedAttached(t, database, ch, u, "kept one", "image/png")
-	if err := database.DeleteMessage(ctx, gone, u, true); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "DeleteMessage", database.DeleteMessage(ctx, gone, u, true))
 	for _, has := range []string{"file", "image"} {
 		got := searchIDs(t, database, db.SearchQuery{ChannelIDs: []int64{ch}, Has: []string{has}})
 		if want := []int64{kept}; !slices.Equal(got, want) {
@@ -168,10 +159,7 @@ func TestSearchFiltered_MentionsExcludesReplyPingAndEveryone(t *testing.T) {
 	author, bob, cat := seedUser(t, database, "ma"), seedUser(t, database, "mb"), seedUser(t, database, "mc")
 	ch := seedChannel(t, database, "mentions")
 
-	text, err := database.CreateMessageWithMentions(ctx, ch, author, "hi bob", nil, []int64{bob}, 0, false, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	text := mustCreateMessageWithMentions(t, database, ch, author, "hi bob", nil, []int64{bob}, 0, false, nil)
 	both, _ := database.CreateMessageWithMentions(ctx, ch, author, "hi bob and cat", nil, []int64{bob, cat}, 0, false, nil)
 	// Only a reply ping to bob: a notification, not a mention in the text.
 	ping, _ := database.CreateMessageWithMentions(ctx, ch, author, "replying", nil, nil, bob, false, nil)
@@ -196,20 +184,11 @@ func TestSearchFiltered_MentionsFollowsEdit(t *testing.T) {
 	author, bob := seedUser(t, database, "ea"), seedUser(t, database, "eb")
 	ch := seedChannel(t, database, "mentionedit")
 
-	msg, err := database.CreateMessageWithMentions(ctx, ch, author, "hello bob", nil, []int64{bob}, 0, false, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	msg := mustCreateMessageWithMentions(t, database, ch, author, "hello bob", nil, []int64{bob}, 0, false, nil)
 	// A pure reply ping: bob is not named in the text.
-	pingOnly, err := database.CreateMessageWithMentions(ctx, ch, author, "hello again", nil, nil, bob, false, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	pingOnly := mustCreateMessageWithMentions(t, database, ch, author, "hello again", nil, nil, bob, false, nil)
 	// Pings bob and names him: stored as one reply_ping row, still a mention.
-	pinged, err := database.CreateMessageWithMentions(ctx, ch, author, "hey @EB look", nil, []int64{bob}, bob, false, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	pinged := mustCreateMessageWithMentions(t, database, ch, author, "hey @EB look", nil, []int64{bob}, bob, false, nil)
 	q := db.SearchQuery{ChannelIDs: []int64{ch}, MentionIDs: []int64{bob}}
 	if got := searchIDs(t, database, q); !slices.Equal(got, []int64{msg.ID, pinged.ID}) {
 		t.Fatalf("before edit = %v, want [%d %d] (not the ping-only %d)", got, msg.ID, pinged.ID, pingOnly.ID)

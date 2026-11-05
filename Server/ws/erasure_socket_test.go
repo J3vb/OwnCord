@@ -2,7 +2,6 @@ package ws_test
 
 import (
 	"context"
-	"encoding/json"
 	"testing"
 	"time"
 
@@ -18,14 +17,7 @@ import (
 // survives — after the transaction the users row is gone and the message
 // insert fails its foreign key; after the broadcast the frame is dropped.
 func TestErasure_MessageOnAuthenticatedSocketDoesNotSurvive(t *testing.T) {
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("db.Migrate: %v", err)
-	}
+	database := openMigratedDB(t)
 	limiter := auth.NewRateLimiter()
 	svc := service.New(database, limiter)
 	hub := newTestHubWith(t, ws.HubOptions{DB: database, Limiter: limiter, Services: svc})
@@ -38,16 +30,10 @@ func TestErasure_MessageOnAuthenticatedSocketDoesNotSurvive(t *testing.T) {
 	}
 	subject := seedCoverageOwner(t, database, "erasure-subject")
 	chID := seedTestChannel(t, database, "erasure-chan")
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, subject, chID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, subject, chID, 16)
 
 	chat := func(content string) []byte {
-		raw, _ := json.Marshal(map[string]any{
-			"type":    "chat_send",
-			"payload": map[string]any{"channel_id": chID, "content": content},
-		})
+		raw := envelope("chat_send", map[string]any{"channel_id": chID, "content": content})
 		return raw
 	}
 	// The socket works before the erasure.

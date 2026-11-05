@@ -36,25 +36,15 @@ func TestActiveTimeouts_ReloadsFromStore(t *testing.T) {
 	database := newTestDB(t)
 	ctx := context.Background()
 	s := NewPermissionService(database, permissions.NewChecker(database))
-	if err := s.RefreshTimeouts(ctx); err != nil {
-		t.Fatalf("RefreshTimeouts: %v", err)
-	}
-	actor, err := database.CreateUser(ctx, "at-actor", "hash", 1)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	target, err := database.CreateUser(ctx, "at-target", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	mustDo(t, "RefreshTimeouts", s.RefreshTimeouts(ctx))
+	actor := mustCreateUser(t, database, "at-actor", "hash", 1)
+	target := mustCreateUser(t, database, "at-target", "hash", 4)
 	// Written behind the mirror's back: ActiveTimeouts must still see it.
 	if _, _, err := database.TimeoutUser(ctx, target, actor, nil, "x", time.Now().Add(time.Hour)); err != nil {
 		t.Fatalf("TimeoutUser: %v", err)
 	}
 	got, err := s.ActiveTimeouts(ctx)
-	if err != nil {
-		t.Fatalf("ActiveTimeouts: %v", err)
-	}
+	mustDo(t, "ActiveTimeouts", err)
 	if _, ok := got[target]; !ok || len(got) != 1 {
 		t.Fatalf("ActiveTimeouts = %v, want the target", got)
 	}

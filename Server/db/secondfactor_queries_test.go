@@ -15,17 +15,10 @@ import (
 func secondFactorTestDB(t *testing.T) (*db.DB, int64) {
 	t.Helper()
 	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("db.Migrate: %v", err)
-	}
+	mustDo(t, "db.Open", err)
+	mustDo(t, "db.Migrate", db.Migrate(database))
 	t.Cleanup(func() { _ = database.Close() })
-	uid, err := database.CreateUser(context.Background(), "second-factor", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	uid := mustCreateUser(t, database, "second-factor", "hash", 4)
 	return database, uid
 }
 
@@ -37,9 +30,7 @@ func TestPartialAuthPersistence_RoundTrip(t *testing.T) {
 	if _, _, _, _, _, found, err := database.GetPartialAuth(ctx, "missing"); err != nil || found {
 		t.Fatalf("GetPartialAuth(missing) = found %v, err %v; want not found, nil", found, err)
 	}
-	if err := database.UpsertPartialAuth(ctx, "h1", uid, "desktop", "203.0.113.4", 0, exp); err != nil {
-		t.Fatalf("UpsertPartialAuth: %v", err)
-	}
+	mustDo(t, "UpsertPartialAuth", database.UpsertPartialAuth(ctx, "h1", uid, "desktop", "203.0.113.4", 0, exp))
 	userID, device, ip, failures, expiresAt, found, err := database.GetPartialAuth(ctx, "h1")
 	if err != nil || !found {
 		t.Fatalf("GetPartialAuth: found %v, err %v", found, err)
@@ -49,9 +40,7 @@ func TestPartialAuthPersistence_RoundTrip(t *testing.T) {
 	}
 
 	// Upsert refreshes in place: the failure count moves, the key does not.
-	if err := database.UpsertPartialAuth(ctx, "h1", uid, "desktop", "203.0.113.4", 3, exp); err != nil {
-		t.Fatalf("UpsertPartialAuth (update): %v", err)
-	}
+	mustDo(t, "UpsertPartialAuth (update)", database.UpsertPartialAuth(ctx, "h1", uid, "desktop", "203.0.113.4", 3, exp))
 	if _, _, _, failures, _, _, err := database.GetPartialAuth(ctx, "h1"); err != nil || failures != 3 {
 		t.Fatalf("failures after update = %d, err %v; want 3", failures, err)
 	}
@@ -72,9 +61,7 @@ func TestIncrementPartialAuthFailures(t *testing.T) {
 	now := time.Now()
 	count := func() int {
 		var n int
-		if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM partial_auth_challenges`).Scan(&n); err != nil {
-			t.Fatalf("count: %v", err)
-		}
+		mustDo(t, "count", database.QueryRowContext(ctx, `SELECT COUNT(*) FROM partial_auth_challenges`).Scan(&n))
 		return n
 	}
 
@@ -87,9 +74,7 @@ func TestIncrementPartialAuthFailures(t *testing.T) {
 	}
 
 	// An expired row is reported gone and left as it was.
-	if err := database.UpsertPartialAuth(ctx, "old", uid, "", "", 2, now.Add(-time.Minute)); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "UpsertPartialAuth", database.UpsertPartialAuth(ctx, "old", uid, "", "", 2, now.Add(-time.Minute)))
 	if n, found, err := database.IncrementPartialAuthFailures(ctx, "old", now); err != nil || found || n != 0 {
 		t.Fatalf("Increment(expired) = %d, %v, %v; want 0, false, nil", n, found, err)
 	}
@@ -98,9 +83,7 @@ func TestIncrementPartialAuthFailures(t *testing.T) {
 	}
 
 	// A live row counts up and reports the new total.
-	if err := database.UpsertPartialAuth(ctx, "live", uid, "", "", 0, now.Add(time.Minute)); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "UpsertPartialAuth", database.UpsertPartialAuth(ctx, "live", uid, "", "", 0, now.Add(time.Minute)))
 	for want := 1; want <= 2; want++ {
 		if n, found, err := database.IncrementPartialAuthFailures(ctx, "live", now); err != nil || !found || n != want {
 			t.Fatalf("Increment(live) = %d, %v, %v; want %d, true, nil", n, found, err, want)
@@ -119,19 +102,13 @@ func TestPendingTOTPPersistence_RoundTrip(t *testing.T) {
 	if _, _, found, err := database.GetPendingTOTP(ctx, uid); err != nil || found {
 		t.Fatalf("GetPendingTOTP(none) = found %v, err %v", found, err)
 	}
-	if err := database.UpsertPendingTOTP(ctx, uid, "sealed-1", exp); err != nil {
-		t.Fatalf("UpsertPendingTOTP: %v", err)
-	}
-	if err := database.UpsertPendingTOTP(ctx, uid, "sealed-2", exp); err != nil {
-		t.Fatalf("UpsertPendingTOTP (replace): %v", err)
-	}
+	mustDo(t, "UpsertPendingTOTP", database.UpsertPendingTOTP(ctx, uid, "sealed-1", exp))
+	mustDo(t, "UpsertPendingTOTP (replace)", database.UpsertPendingTOTP(ctx, uid, "sealed-2", exp))
 	sealed, expiresAt, found, err := database.GetPendingTOTP(ctx, uid)
 	if err != nil || !found || sealed != "sealed-2" || !expiresAt.Equal(exp) {
 		t.Fatalf("GetPendingTOTP = %q, %v, %v, %v; want sealed-2 at %v", sealed, expiresAt, found, err, exp)
 	}
-	if err := database.DeletePendingTOTP(ctx, uid); err != nil {
-		t.Fatalf("DeletePendingTOTP: %v", err)
-	}
+	mustDo(t, "DeletePendingTOTP", database.DeletePendingTOTP(ctx, uid))
 	if _, _, found, err := database.GetPendingTOTP(ctx, uid); err != nil || found {
 		t.Fatalf("GetPendingTOTP after delete = found %v, err %v", found, err)
 	}
@@ -150,9 +127,7 @@ func TestUsedTOTPCodePersistence_FirstUseWins(t *testing.T) {
 	if err != nil || inserted {
 		t.Fatalf("replay InsertUsedTOTPCode = %v, %v; want false, nil", inserted, err)
 	}
-	if err := database.DeleteUsedTOTPCode(ctx, uid, "digest"); err != nil {
-		t.Fatalf("DeleteUsedTOTPCode: %v", err)
-	}
+	mustDo(t, "DeleteUsedTOTPCode", database.DeleteUsedTOTPCode(ctx, uid, "digest"))
 	inserted, err = database.InsertUsedTOTPCode(ctx, uid, "digest", exp)
 	if err != nil || !inserted {
 		t.Fatalf("InsertUsedTOTPCode after release = %v, %v; want true, nil", inserted, err)
@@ -169,19 +144,13 @@ func TestCleanupExpiredSecondFactorState_SweepsOnlyExpired(t *testing.T) {
 		hash string
 		exp  time.Time
 	}{{"old", past}, {"live", future}} {
-		if err := database.UpsertPartialAuth(ctx, row.hash, uid, "", "", 0, row.exp); err != nil {
-			t.Fatal(err)
-		}
+		mustDo(t, "UpsertPartialAuth", database.UpsertPartialAuth(ctx, row.hash, uid, "", "", 0, row.exp))
 		if _, err := database.InsertUsedTOTPCode(ctx, uid, row.hash, row.exp); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := database.UpsertPendingTOTP(ctx, uid, "sealed", past); err != nil {
-		t.Fatal(err)
-	}
-	if err := database.CleanupExpiredSecondFactorState(ctx); err != nil {
-		t.Fatalf("CleanupExpiredSecondFactorState: %v", err)
-	}
+	mustDo(t, "UpsertPendingTOTP", database.UpsertPendingTOTP(ctx, uid, "sealed", past))
+	mustDo(t, "CleanupExpiredSecondFactorState", database.CleanupExpiredSecondFactorState(ctx))
 	if _, _, _, _, _, found, _ := database.GetPartialAuth(ctx, "old"); found {
 		t.Fatal("an expired challenge survived the sweep")
 	}
@@ -207,9 +176,7 @@ func TestRecoveryCodes_ReplaceListMarkCountDelete(t *testing.T) {
 	if err != nil || len(ids) != 0 || len(hashes) != 0 {
 		t.Fatalf("ListUnusedRecoveryCodes(empty) = %v, %v, %v", ids, hashes, err)
 	}
-	if err := database.ReplaceRecoveryCodes(ctx, uid, []string{"h-a", "h-b", "h-c"}); err != nil {
-		t.Fatalf("ReplaceRecoveryCodes: %v", err)
-	}
+	mustDo(t, "ReplaceRecoveryCodes", database.ReplaceRecoveryCodes(ctx, uid, []string{"h-a", "h-b", "h-c"}))
 	ids, hashes, err = database.ListUnusedRecoveryCodes(ctx, uid)
 	if err != nil || len(ids) != 3 || len(hashes) != 3 || hashes[0] != "h-a" || hashes[2] != "h-c" {
 		t.Fatalf("ListUnusedRecoveryCodes = %v, %v, %v; want three in order", ids, hashes, err)
@@ -232,23 +199,17 @@ func TestRecoveryCodes_ReplaceListMarkCountDelete(t *testing.T) {
 	}
 
 	// Replacing drops the old set entirely, spent rows included, in one go.
-	if err := database.ReplaceRecoveryCodes(ctx, uid, []string{"h-d"}); err != nil {
-		t.Fatalf("ReplaceRecoveryCodes (again): %v", err)
-	}
+	mustDo(t, "ReplaceRecoveryCodes (again)", database.ReplaceRecoveryCodes(ctx, uid, []string{"h-d"}))
 	if n, err := database.CountUnusedRecoveryCodes(ctx, uid); err != nil || n != 1 {
 		t.Fatalf("CountUnusedRecoveryCodes after replace = %d, %v; want 1", n, err)
 	}
 	var total int
-	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM totp_recovery_codes WHERE user_id = ?`, uid).Scan(&total); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "QueryRowContext", database.QueryRowContext(ctx, `SELECT COUNT(*) FROM totp_recovery_codes WHERE user_id = ?`, uid).Scan(&total))
 	if total != 1 {
 		t.Fatalf("%d rows after replace, want 1 (spent rows go too)", total)
 	}
 
-	if err := database.DeleteRecoveryCodes(ctx, uid); err != nil {
-		t.Fatalf("DeleteRecoveryCodes: %v", err)
-	}
+	mustDo(t, "DeleteRecoveryCodes", database.DeleteRecoveryCodes(ctx, uid))
 	if n, err := database.CountUnusedRecoveryCodes(ctx, uid); err != nil || n != 0 {
 		t.Fatalf("CountUnusedRecoveryCodes after delete = %d, %v; want 0", n, err)
 	}
@@ -260,24 +221,15 @@ func TestEraseAccount_PurgesSecondFactorState(t *testing.T) {
 	database, uid := secondFactorTestDB(t)
 	// A second account so uid is not the last admin-class account (it is a
 	// member anyway) and so the purge is provably scoped to one user.
-	other, err := database.CreateUser(ctx, "bystander", "hash", 4)
-	if err != nil {
-		t.Fatal(err)
-	}
+	other := mustCreateUser(t, database, "bystander", "hash", 4)
 	future := time.Now().Add(time.Hour)
 	for _, id := range []int64{uid, other} {
-		if err := database.UpsertPartialAuth(ctx, "c"+string(rune('0'+id)), id, "", "", 0, future); err != nil {
-			t.Fatal(err)
-		}
-		if err := database.UpsertPendingTOTP(ctx, id, "sealed", future); err != nil {
-			t.Fatal(err)
-		}
+		mustDo(t, "UpsertPartialAuth", database.UpsertPartialAuth(ctx, "c"+string(rune('0'+id)), id, "", "", 0, future))
+		mustDo(t, "UpsertPendingTOTP", database.UpsertPendingTOTP(ctx, id, "sealed", future))
 		if _, err := database.InsertUsedTOTPCode(ctx, id, "d", future); err != nil {
 			t.Fatal(err)
 		}
-		if err := database.ReplaceRecoveryCodes(ctx, id, []string{"h"}); err != nil {
-			t.Fatal(err)
-		}
+		mustDo(t, "ReplaceRecoveryCodes", database.ReplaceRecoveryCodes(ctx, id, []string{"h"}))
 	}
 
 	if _, err := database.EraseAccount(ctx, uid, ""); err != nil {

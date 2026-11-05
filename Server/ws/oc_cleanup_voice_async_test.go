@@ -11,7 +11,6 @@ package ws
 // populated channel held the admin request for 5 s per participant.
 
 import (
-	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -28,9 +27,7 @@ func TestCleanupVoiceForChannel_DoesNotWaitOnLiveKitRemoval(t *testing.T) {
 	database := newHarvestVoiceDB(t)
 	uid := seedHarvestVoiceUser(t, database, "cleanup-slow-lk")
 	chID := mustCreateVoiceChannel(t, database, "voice-cleanup-slow")
-	if err := database.JoinVoiceChannel(context.Background(), uid, chID); err != nil {
-		t.Fatalf("JoinVoiceChannel: %v", err)
-	}
+	mustJoinVoice(t, database, uid, chID)
 
 	// Slow LiveKit: records the removed identity, then holds the response
 	// until the test releases it.

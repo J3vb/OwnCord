@@ -49,13 +49,9 @@ func bootTestApp(t *testing.T, port, failStage string) *App {
 	rc := NewRestartCoordinator(time.Hour, nil)
 
 	cfg, baseLevel, err := LoadConfig(log, levelVar, rc)
-	if err != nil {
-		t.Fatalf("LoadConfig: %v", err)
-	}
+	mustDo(t, "LoadConfig", err)
 	a, err := New(cfg, Deps{Version: "test", Log: log, LogBuf: admin.NewRingBuffer(64), Restart: rc, LogLevelVar: levelVar, LogBaseLevel: baseLevel})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	mustDo(t, "New", err)
 	a.failStage = failStage
 	return a
 }
@@ -90,7 +86,5 @@ func TestAppRun_LateStageFailure_StopsTheHubAndClosesTheDatabase(t *testing.T) {
 	if err := a.database.PingRead(context.Background()); err == nil {
 		t.Error("the database handle is still open after Run returned")
 	}
-	if err := goleak.Find(leakOpt); err != nil {
-		t.Fatalf("goroutine leaked after a failed start: %v", err)
-	}
+	mustDo(t, "goroutine leaked after a failed start", goleak.Find(leakOpt))
 }

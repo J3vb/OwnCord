@@ -108,10 +108,7 @@ func TestAddUserRole_AuditsInvalidatesAndNotifiesOnce(t *testing.T) {
 	if fan := rec.events[1].fan; !slices.Equal(fan.Visibility, []int64{5}) || !slices.Equal(fan.MemberUpdate, []int64{5}) {
 		t.Errorf("fan-out = %+v, want visibility and member_update for user 5", fan)
 	}
-	entries, err := database.GetAuditLog(ctx, 20, 0)
-	if err != nil {
-		t.Fatalf("GetAuditLog: %v", err)
-	}
+	entries := mustGetAuditLog(t, database, 20, 0)
 	n := 0
 	for _, e := range entries {
 		if e.Action == "role_add" && e.TargetID == 5 && e.ActorID == 3 {
@@ -149,10 +146,7 @@ func TestRemoveUserRole_LastRoleRefused(t *testing.T) {
 	if _, err := svc.RemoveUserRole(ctx, 3, 5, memberRolesHelperID); err != nil {
 		t.Errorf("removing a role not held: %v", err)
 	}
-	entries, err := database.GetAuditLog(ctx, 20, 0)
-	if err != nil {
-		t.Fatalf("GetAuditLog: %v", err)
-	}
+	entries := mustGetAuditLog(t, database, 20, 0)
 	var removed int
 	for _, e := range entries {
 		if e.Action == "role_remove" {
@@ -328,9 +322,7 @@ func TestRoleInput_HoistAndMentionable(t *testing.T) {
 		t.Fatalf("UpdateRole = %+v, %v, want hoist cleared and mentionable kept", updated, err)
 	}
 	all, err := svc.AllRoles(ctx)
-	if err != nil {
-		t.Fatalf("AllRoles: %v", err)
-	}
+	mustDo(t, "AllRoles", err)
 	for _, r := range all {
 		if r.ID == role.ID && (r.Hoist || !r.Mentionable) {
 			t.Errorf("stored role = %+v, want hoist false mentionable true", r)
@@ -360,10 +352,7 @@ func TestMemberRoles_ConcurrentDuplicatesAuditOnce(t *testing.T) {
 	run("add", func() error { _, err := svc.AddUserRole(ctx, 3, 5, memberRolesHelperID); return err })
 	run("remove", func() error { _, err := svc.RemoveUserRole(ctx, 3, 5, memberRolesHelperID); return err })
 
-	entries, err := database.GetAuditLog(ctx, 50, 0)
-	if err != nil {
-		t.Fatalf("GetAuditLog: %v", err)
-	}
+	entries := mustGetAuditLog(t, database, 50, 0)
 	counts := map[string]int{}
 	for _, e := range entries {
 		if e.TargetID == 5 {

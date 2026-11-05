@@ -26,13 +26,8 @@ func TestEditMessage_RefusesASoftDeletedRow(t *testing.T) {
 	userID := seedUser(t, database, "edit-race-owner")
 	chID := seedChannel(t, database, "edit-race-ch")
 
-	id, err := database.CreateMessage(ctx, chID, userID, "original", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
-	if err := database.DeleteMessage(ctx, id, userID, false); err != nil {
-		t.Fatalf("DeleteMessage: %v", err)
-	}
+	id := mustCreateMessage(t, database, chID, userID, "original", nil)
+	mustDo(t, "DeleteMessage", database.DeleteMessage(ctx, id, userID, false))
 
 	updated, err := database.EditMessage(ctx, id, userID, "resurrected")
 	if !errors.Is(err, db.ErrNotFound) {
@@ -71,9 +66,7 @@ func TestSearchMessages_PunctuationFoldsToASeparator(t *testing.T) {
 		"contact me at someone@example.com please",
 		"see docs/architecture/README.md for the map",
 	} {
-		if _, err := database.CreateMessage(ctx, chID, userID, content, nil); err != nil {
-			t.Fatalf("CreateMessage: %v", err)
-		}
+		mustCreateMessage(t, database, chID, userID, content, nil)
 	}
 
 	for _, tc := range []struct {
@@ -106,9 +99,7 @@ func TestSearchMessages_OperatorSyntaxStaysInert(t *testing.T) {
 	userID := seedUser(t, database, "fts-operator-author")
 	chID := seedChannel(t, database, "fts-operator-ch")
 
-	if _, err := database.CreateMessage(ctx, chID, userID, "harmless content here", nil); err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	mustCreateMessage(t, database, chID, userID, "harmless content here", nil)
 
 	// Every one of these is FTS5 grammar; none may reach the engine as syntax,
 	// and none may error the query.

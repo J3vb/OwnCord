@@ -52,13 +52,8 @@ func TestAdminAPI_ApplyUpdate_RefusesSignedDowngrade(t *testing.T) {
 	token := createAdminUser(t, database)
 
 	w := doRequest(t, handler, http.MethodPost, "/updates/apply", token, nil)
-	if w.Code != http.StatusConflict {
-		t.Fatalf("status = %d, want 409; body: %s", w.Code, w.Body.String())
-	}
-	var resp map[string]string
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal response: %v", err)
-	}
+	requireStatus(t, w, http.StatusConflict)
+	resp := decodeBody[map[string]string](t, w)
 	if resp["error"] != "NO_UPDATE" {
 		t.Errorf("error = %q, want NO_UPDATE", resp["error"])
 	}

@@ -34,12 +34,7 @@ func (errOverrideStore) GetMemberGrants(context.Context, int64) (permissions.Mem
 // would then cache that degraded snapshot for permCacheTTL.
 func TestHasChannelPerm_OverrideFetchErrorDenies(t *testing.T) {
 	database := newTestDB(t)
-	seedRole(t, database, &db.Role{
-		ID:          permissions.MemberRoleID,
-		Name:        "member",
-		Permissions: permissions.SendMessages | permissions.ReadMessages | permissions.AddReactions,
-		Position:    1,
-	})
+	seedMemberRole(t, database, permissions.SendMessages|permissions.ReadMessages|permissions.AddReactions)
 	seedUserRole(t, database, 1, permissions.MemberRoleID)
 	seedChannel(t, database, &db.Channel{ID: 10, Name: "readonly", Type: "text"})
 	seedChannelOverride(t, database, permissions.MemberRoleID, 10, 0, permissions.ReadMessages)
@@ -56,12 +51,7 @@ func TestHasChannelPerm_OverrideFetchErrorDenies(t *testing.T) {
 func newTestPermService(t *testing.T) (*PermissionService, *db.DB) {
 	t.Helper()
 	database := newTestDB(t)
-	seedRole(t, database, &db.Role{
-		ID:          permissions.MemberRoleID,
-		Name:        "member",
-		Permissions: permissions.SendMessages | permissions.ReadMessages | permissions.AddReactions,
-		Position:    1,
-	})
+	seedMemberRole(t, database, permissions.SendMessages|permissions.ReadMessages|permissions.AddReactions)
 	seedUserRole(t, database, 1, permissions.MemberRoleID)
 	checker := permissions.NewChecker(database)
 	return NewPermissionService(database, checker), database
@@ -289,12 +279,7 @@ func TestGetOrPopulate_InvalidationDuringPopulateNotLost(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			database := newTestDB(t)
-			seedRole(t, database, &db.Role{
-				ID:          permissions.MemberRoleID,
-				Name:        "member",
-				Permissions: permissions.SendMessages | permissions.ReadMessages,
-				Position:    1,
-			})
+			seedMemberRole(t, database, permissions.SendMessages|permissions.ReadMessages)
 			seedUserRole(t, database, 1, permissions.MemberRoleID)
 			seedChannel(t, database, &db.Channel{ID: 10, Name: "general", Type: "text"})
 

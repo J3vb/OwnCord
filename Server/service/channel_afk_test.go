@@ -20,13 +20,9 @@ func TestSetAFKChannel_RefusesTextDMAndArchived(t *testing.T) {
 	text, _ := database.CreateChannel(ctx, "general", "text", "", "", 1)
 	announce, _ := database.CreateChannel(ctx, "news", "announcement", "", "", 2)
 	archived, _ := database.CreateChannel(ctx, "old", "voice", "", "", 3)
-	if err := database.AdminUpdateChannel(ctx, archived, db.ChannelUpdate{Name: "old", Archived: true}); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "AdminUpdateChannel", database.AdminUpdateChannel(ctx, archived, db.ChannelUpdate{Name: "old", Archived: true}))
 	dm, _, err := database.GetOrCreateDMChannel(ctx, actor, other)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "GetOrCreateDMChannel", err)
 
 	if _, err := svc.SetAFKChannel(ctx, actor, &voice); err != nil {
 		t.Fatalf("a live voice channel was refused: %v", err)
@@ -91,9 +87,7 @@ func TestSettingsPatch_AFKTimeoutAllowedValues(t *testing.T) {
 		}
 	}
 	settings, err := svc.List(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "List", err)
 	if v, present := settings[AFKTimeoutKey]; present {
 		t.Fatalf("a refused patch wrote %s = %q", AFKTimeoutKey, v)
 	}

@@ -35,9 +35,7 @@ func TestBackupToSafe_RunsWhileTheWriterIsBusy(t *testing.T) {
 	// Hold the writer: BeginTx issues BEGIN IMMEDIATE on the single writer
 	// connection, so nothing else can write until it ends.
 	tx, err := database.BeginTx(context.Background(), nil)
-	if err != nil {
-		t.Fatalf("BeginTx: %v", err)
-	}
+	mustDo(t, "BeginTx", err)
 	defer tx.Rollback() //nolint:errcheck
 	if _, err := tx.ExecContext(context.Background(),
 		`INSERT INTO roles (name, permissions, position, is_default) VALUES ('busy', 0, 0, 0)`); err != nil {
@@ -45,9 +43,7 @@ func TestBackupToSafe_RunsWhileTheWriterIsBusy(t *testing.T) {
 	}
 
 	backupDir := filepath.Join(tmpDir, "backups")
-	if err := os.MkdirAll(backupDir, 0o755); err != nil {
-		t.Fatalf("MkdirAll: %v", err)
-	}
+	mustDo(t, "MkdirAll", os.MkdirAll(backupDir, 0o755))
 	backupPath := filepath.Join(backupDir, "while-busy.db")
 
 	done := make(chan error, 1)
@@ -57,16 +53,12 @@ func TestBackupToSafe_RunsWhileTheWriterIsBusy(t *testing.T) {
 
 	select {
 	case err := <-done:
-		if err != nil {
-			t.Fatalf("backup while the writer is busy: %v", err)
-		}
+		mustDo(t, "backup while the writer is busy", err)
 	case <-time.After(10 * time.Second):
 		t.Fatal("backup blocked behind the writer's open transaction; it must run on the reader pool")
 	}
 
-	if err := db.CheckBackupIntegrity(context.Background(), backupPath); err != nil {
-		t.Fatalf("backup taken while the writer was busy is not restorable: %v", err)
-	}
+	mustDo(t, "backup taken while the writer was busy is not restorable", db.CheckBackupIntegrity(context.Background(), backupPath))
 }
 
 // TestBackupToSafe_ConcurrentWriteIsNotDelayed is PERF-10's isolating proof at
@@ -96,24 +88,9 @@ func TestBackupToSafe_ConcurrentWriteIsNotDelayed(t *testing.T) {
 	}
 
 	backupDir := filepath.Join(tmpDir, "backups")
-	if err := os.MkdirAll(backupDir, 0o755); err != nil {
-		t.Fatalf("MkdirAll: %v", err)
-	}
+	mustDo(t, "MkdirAll", os.MkdirAll(backupDir, 0o755))
 
-	// The seam the backup parks on: it signals reached once it holds the
-	// connection its VACUUM will use, then blocks until the test releases it.
-	parked := make(chan struct{})
-	release := make(chan struct{})
-	var releaseOnce sync.Once
-	releaseBackup := func() { releaseOnce.Do(func() { close(release) }) }
-	t.Cleanup(func() {
-		releaseBackup()
-		db.BackupVACUUMPreExecHook = nil
-	})
-	db.BackupVACUUMPreExecHook = func() {
-		close(parked)
-		<-release
-	}
+	parked, releaseBackup := parkBackupVACUUM(t)
 
 	done := make(chan error, 1)
 	go func() {
@@ -139,9 +116,7 @@ func TestBackupToSafe_ConcurrentWriteIsNotDelayed(t *testing.T) {
 
 	select {
 	case err := <-insertDone:
-		if err != nil {
-			t.Fatalf("INSERT during backup: %v", err)
-		}
+		mustDo(t, "INSERT during backup", err)
 	case <-time.After(10 * time.Second):
 		t.Fatal("INSERT did not complete while the backup was held at its VACUUM; writers are queuing behind the backup")
 	}
@@ -150,9 +125,7 @@ func TestBackupToSafe_ConcurrentWriteIsNotDelayed(t *testing.T) {
 	if backupErr := <-done; backupErr != nil {
 		t.Fatalf("BackupToSafe: %v", backupErr)
 	}
-	if err := db.CheckBackupIntegrity(ctx, filepath.Join(backupDir, "during-writes.db")); err != nil {
-		t.Fatalf("the backup taken during the write is not restorable: %v", err)
-	}
+	mustDo(t, "the backup taken during the write is not restorable", db.CheckBackupIntegrity(ctx, filepath.Join(backupDir, "during-writes.db")))
 }
 
 // TestBackupToSafe_FailedBackupLeavesNoCandidateFile locks the temp-name
@@ -165,15 +138,11 @@ func TestBackupToSafe_FailedBackupLeavesNoCandidateFile(t *testing.T) {
 	database, tmpDir := newBackupFileDB(t)
 
 	backupDir := filepath.Join(tmpDir, "backups")
-	if err := os.MkdirAll(backupDir, 0o755); err != nil {
-		t.Fatalf("MkdirAll: %v", err)
-	}
+	mustDo(t, "MkdirAll", os.MkdirAll(backupDir, 0o755))
 	backupPath := filepath.Join(backupDir, "never-lands.db")
 
 	other := backupPath + ".tmp"
-	if err := os.WriteFile(other, []byte("another backup's temp"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "WriteFile", os.WriteFile(other, []byte("another backup's temp"), 0o600))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -209,9 +178,7 @@ func TestBackupToSafe_SameNameBackupsDoNotShareATemp(t *testing.T) {
 	database, tmpDir := newBackupFileDB(t)
 
 	backupDir := filepath.Join(tmpDir, "backups")
-	if err := os.MkdirAll(backupDir, 0o755); err != nil {
-		t.Fatalf("MkdirAll: %v", err)
-	}
+	mustDo(t, "MkdirAll", os.MkdirAll(backupDir, 0o755))
 	backupPath := filepath.Join(backupDir, "same-second.db")
 
 	// Both goroutines must reach this point before either proceeds: each
@@ -240,9 +207,7 @@ func TestBackupToSafe_SameNameBackupsDoNotShareATemp(t *testing.T) {
 	if succeeded != 1 {
 		t.Fatalf("same-name backups landed %d files, want exactly 1", succeeded)
 	}
-	if err := db.CheckBackupIntegrity(context.Background(), backupPath); err != nil {
-		t.Fatalf("the published backup is not a complete database: %v", err)
-	}
+	mustDo(t, "the published backup is not a complete database", db.CheckBackupIntegrity(context.Background(), backupPath))
 	if temps := backupTemps(t, backupDir); len(temps) != 0 {
 		t.Fatalf("temps survived the backups: %v", temps)
 	}
@@ -251,9 +216,7 @@ func TestBackupToSafe_SameNameBackupsDoNotShareATemp(t *testing.T) {
 func backupTemps(t *testing.T, dir string) []string {
 	t.Helper()
 	temps, err := filepath.Glob(filepath.Join(dir, "*.tmp"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Glob", err)
 	return temps
 }
 
@@ -269,13 +232,9 @@ func TestBackupToSafe_LogsDuration(t *testing.T) {
 	defer slog.SetDefault(prev)
 
 	backupDir := filepath.Join(tmpDir, "backups")
-	if err := os.MkdirAll(backupDir, 0o755); err != nil {
-		t.Fatalf("MkdirAll: %v", err)
-	}
+	mustDo(t, "MkdirAll", os.MkdirAll(backupDir, 0o755))
 	backupPath := filepath.Join(backupDir, "timed.db")
-	if err := database.BackupToSafe(context.Background(), backupPath, backupDir); err != nil {
-		t.Fatalf("BackupToSafe: %v", err)
-	}
+	mustDo(t, "BackupToSafe", database.BackupToSafe(context.Background(), backupPath, backupDir))
 
 	out := buf.String()
 	if !strings.Contains(out, "database backup written") {
@@ -290,4 +249,24 @@ func TestBackupToSafe_LogsDuration(t *testing.T) {
 	if _, err := os.Stat(backupPath); err != nil {
 		t.Fatalf("the published backup is missing: %v", err)
 	}
+}
+
+// parkBackupVACUUM installs a hook that parks the next backup once it holds
+// the connection its VACUUM will use. parked closes when that happens; the
+// backup stays blocked until releaseBackup runs (also at cleanup).
+func parkBackupVACUUM(t *testing.T) (parked <-chan struct{}, releaseBackup func()) {
+	t.Helper()
+	reached := make(chan struct{})
+	gate := make(chan struct{})
+	var once sync.Once
+	releaseBackup = func() { once.Do(func() { close(gate) }) }
+	db.BackupVACUUMPreExecHook = func() {
+		close(reached)
+		<-gate
+	}
+	t.Cleanup(func() {
+		releaseBackup()
+		db.BackupVACUUMPreExecHook = nil
+	})
+	return reached, releaseBackup
 }

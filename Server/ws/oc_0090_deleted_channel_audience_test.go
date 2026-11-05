@@ -23,13 +23,8 @@ func TestVoiceLeave_DeletedChannel_NotLeakedToNonParticipant(t *testing.T) {
 	mallory := seedMemberUser(t, database, "delchan-mallory") // connected, READ_MESSAGES, not a participant
 	dmID := seedDMChannel(t, database, alice.ID, bob.ID)
 
-	aliceSend := make(chan []byte, 32)
-	mallorySend := make(chan []byte, 32)
-	aliceClient := ws.NewTestClientWithUser(hub, alice, 0, aliceSend)
-	malloryClient := ws.NewTestClientWithUser(hub, mallory, 0, mallorySend)
-	hub.Register(aliceClient)
-	hub.Register(malloryClient)
-	waitRegistered(t, hub, malloryClient)
+	aliceClient, aliceSend := connectClient(t, hub, alice, 0, 32)
+	_, mallorySend := connectClient(t, hub, mallory, 0, 32)
 
 	hub.HandleMessageForTest(aliceClient, voiceJoinMsg(dmID))
 	drainChanTimeout(aliceSend, 200*time.Millisecond)

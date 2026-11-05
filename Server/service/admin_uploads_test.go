@@ -71,9 +71,7 @@ func TestRemoveUploadAsAdmin_RefusesInUseAndAudits(t *testing.T) {
 	_, fileID := f.sendWithFile(t, fwdBob, fwdDstChan, "", "0123456789")
 	f.chargeCounter(t, fwdBob)
 	removed, err := f.uploads.RemoveUploadAsAdmin(ctx, fwdAlice, fileID)
-	if err != nil {
-		t.Fatalf("remove: %v", err)
-	}
+	mustDo(t, "remove", err)
 	if removed.UploaderID == nil || *removed.UploaderID != fwdBob || removed.Size != 10 || removed.Filename != "pic.png" {
 		t.Errorf("removed = %+v, want bob's 10-byte pic.png", removed)
 	}
@@ -98,9 +96,7 @@ func TestSetMemberQuota_ReplacesTheServerLimit(t *testing.T) {
 	}
 
 	one := int64(1)
-	if err := f.uploads.SetMemberQuota(ctx, fwdAlice, fwdCarol, &one); err != nil {
-		t.Fatalf("set 1 MB: %v", err)
-	}
+	mustDo(t, "set 1 MB", f.uploads.SetMemberQuota(ctx, fwdAlice, fwdCarol, &one))
 	if err := reserve(2 << 20); !errors.Is(err, ErrQuotaExceeded) {
 		t.Errorf("2 MB under a 1 MB member limit: err = %v, want ErrQuotaExceeded", err)
 	}
@@ -109,16 +105,12 @@ func TestSetMemberQuota_ReplacesTheServerLimit(t *testing.T) {
 	}
 
 	zero := int64(0)
-	if err := f.uploads.SetMemberQuota(ctx, fwdAlice, fwdCarol, &zero); err != nil {
-		t.Fatalf("set none: %v", err)
-	}
+	mustDo(t, "set none", f.uploads.SetMemberQuota(ctx, fwdAlice, fwdCarol, &zero))
 	if err := reserve(20 << 20); err != nil {
 		t.Errorf("20 MB with no member limit: %v", err)
 	}
 
-	if err := f.uploads.SetMemberQuota(ctx, fwdAlice, fwdCarol, nil); err != nil {
-		t.Fatalf("back to default: %v", err)
-	}
+	mustDo(t, "back to default", f.uploads.SetMemberQuota(ctx, fwdAlice, fwdCarol, nil))
 	if err := reserve(20 << 20); !errors.Is(err, ErrQuotaExceeded) {
 		t.Errorf("20 MB under the 10 MB server limit: err = %v, want ErrQuotaExceeded", err)
 	}
@@ -134,9 +126,7 @@ func TestSetMemberQuota_ReplacesTheServerLimit(t *testing.T) {
 		t.Errorf("upload_limit_change audit rows = %d, want 3", n)
 	}
 	rows, err := f.uploads.MemberStorage(ctx, []int64{fwdCarol, fwdBob})
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "MemberStorage", err)
 	if len(rows) != 1 || rows[0].UserID != fwdCarol || rows[0].QuotaMB != nil {
 		t.Errorf("member storage = %+v, want carol only, on the server default", rows)
 	}

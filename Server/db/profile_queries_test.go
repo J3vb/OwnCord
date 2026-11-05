@@ -12,20 +12,12 @@ import (
 
 func TestUpdateUserProfile_UsernameAndAvatar(t *testing.T) {
 	database := newSchemaTestDB(t, testSchema)
-	id, err := database.CreateUser(context.Background(), "profileuser", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	id := mustCreateUser(t, database, "profileuser", "hash", 4)
 
 	avatar := "https://example.com/avatar.png"
-	if err := database.UpdateUserProfile(context.Background(), id, "newname", &avatar, nil, nil, nil, nil); err != nil {
-		t.Fatalf("UpdateUserProfile: %v", err)
-	}
+	mustDo(t, "UpdateUserProfile", database.UpdateUserProfile(context.Background(), id, "newname", &avatar, nil, nil, nil, nil))
 
-	user, err := database.GetUserByID(context.Background(), id)
-	if err != nil {
-		t.Fatalf("GetUserByID: %v", err)
-	}
+	user := mustGetUserByID(t, database, id)
 	if user.Username != "newname" {
 		t.Errorf("Username = %q, want %q", user.Username, "newname")
 	}
@@ -38,9 +30,7 @@ func TestUpdateUserProfile_UsernameOnly(t *testing.T) {
 	database := newSchemaTestDB(t, testSchema)
 	id, _ := database.CreateUser(context.Background(), "keepavatar", "hash", 4)
 
-	if err := database.UpdateUserProfile(context.Background(), id, "renamed", nil, nil, nil, nil, nil); err != nil {
-		t.Fatalf("UpdateUserProfile: %v", err)
-	}
+	mustDo(t, "UpdateUserProfile", database.UpdateUserProfile(context.Background(), id, "renamed", nil, nil, nil, nil, nil))
 
 	user, _ := database.GetUserByID(context.Background(), id)
 	if user.Username != "renamed" {
@@ -76,9 +66,7 @@ func TestUpdateUserPassword_Success(t *testing.T) {
 	database := newSchemaTestDB(t, testSchema)
 	id, _ := database.CreateUser(context.Background(), "pwuser", "oldhash", 4)
 
-	if err := database.UpdateUserPassword(context.Background(), id, "newhash"); err != nil {
-		t.Fatalf("UpdateUserPassword: %v", err)
-	}
+	mustDo(t, "UpdateUserPassword", database.UpdateUserPassword(context.Background(), id, "newhash"))
 
 	user, _ := database.GetUserByID(context.Background(), id)
 	if user.PasswordHash != "newhash" {
@@ -96,9 +84,7 @@ func TestListUserSessions_ReturnsSessions(t *testing.T) {
 	database.CreateSession(context.Background(), uid, "tok2", "Firefox", "5.6.7.8")
 
 	sessions, err := database.ListUserSessions(context.Background(), uid)
-	if err != nil {
-		t.Fatalf("ListUserSessions: %v", err)
-	}
+	mustDo(t, "ListUserSessions", err)
 	if len(sessions) != 2 {
 		t.Errorf("len(sessions) = %d, want 2", len(sessions))
 	}
@@ -109,9 +95,7 @@ func TestListUserSessions_EmptyArray(t *testing.T) {
 	uid, _ := database.CreateUser(context.Background(), "nosess", "hash", 4)
 
 	sessions, err := database.ListUserSessions(context.Background(), uid)
-	if err != nil {
-		t.Fatalf("ListUserSessions: %v", err)
-	}
+	mustDo(t, "ListUserSessions", err)
 	if sessions == nil {
 		t.Error("ListUserSessions should return empty slice, not nil")
 	}
@@ -152,9 +136,7 @@ func TestSignOutEverywhere_RevokesEveryOneOfTheUsersOnly(t *testing.T) {
 	}
 
 	sessions, tokens, err := database.SignOutEverywhere(ctx, alice)
-	if err != nil {
-		t.Fatalf("SignOutEverywhere: %v", err)
-	}
+	mustDo(t, "SignOutEverywhere", err)
 	if sessions != 2 || tokens != 1 {
 		t.Fatalf("revoked = (%d sessions, %d tokens), want (2, 1)", sessions, tokens)
 	}
@@ -213,9 +195,7 @@ func TestDeleteSessionByID_Success(t *testing.T) {
 	sessID, _ := database.CreateSession(context.Background(), uid, "deltok", "Chrome", "1.2.3.4")
 
 	err := database.DeleteSessionByID(context.Background(), sessID, uid)
-	if err != nil {
-		t.Fatalf("DeleteSessionByID: %v", err)
-	}
+	mustDo(t, "DeleteSessionByID", err)
 
 	// Session should be gone.
 	sess, _ := database.GetSessionByTokenHash(context.Background(), "deltok")
@@ -252,14 +232,8 @@ func TestDeleteSessionByID_NotFound(t *testing.T) {
 func TestMarkSessionsSeen_AcknowledgesEveryLoginButTheCallers(t *testing.T) {
 	database := newSchemaTestDB(t, testSchema)
 	ctx := context.Background()
-	uid, err := database.CreateUser(ctx, "seenuser", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	other, err := database.CreateUser(ctx, "otheruser", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser(other): %v", err)
-	}
+	uid := mustCreateUser(t, database, "seenuser", "hash", 4)
+	other := mustCreateUser(t, database, "otheruser", "hash", 4)
 	login := func(t *testing.T, userID int64, tokenHash, device string) int64 {
 		t.Helper()
 		id, err := database.CreateSession(ctx, userID, tokenHash, device, "10.0.0.1")
@@ -275,9 +249,7 @@ func TestMarkSessionsSeen_AcknowledgesEveryLoginButTheCallers(t *testing.T) {
 	unseen := func(t *testing.T, userID int64) map[int64]bool {
 		t.Helper()
 		sessions, err := database.ListUserSessions(ctx, userID)
-		if err != nil {
-			t.Fatalf("ListUserSessions: %v", err)
-		}
+		mustDo(t, "ListUserSessions", err)
 		flags := make(map[int64]bool, len(sessions))
 		for _, s := range sessions {
 			flags[s.ID] = s.Unseen
@@ -291,9 +263,7 @@ func TestMarkSessionsSeen_AcknowledgesEveryLoginButTheCallers(t *testing.T) {
 
 	// The phone lists: it acknowledges the laptop's login, never its own.
 	n, err := database.MarkSessionsSeen(ctx, uid, phone)
-	if err != nil {
-		t.Fatalf("MarkSessionsSeen(phone): %v", err)
-	}
+	mustDo(t, "MarkSessionsSeen(phone)", err)
 	if n != 1 {
 		t.Errorf("rows acknowledged = %d, want 1", n)
 	}
@@ -348,21 +318,13 @@ func TestUpdateUserProfileAndIdentityKey_AllOrNothing(t *testing.T) {
 	if !db.IsUniqueConstraintError(err) {
 		t.Fatalf("clash err = %v, want a unique constraint error", err)
 	}
-	u, err := database.GetUserByID(ctx, uid)
-	if err != nil {
-		t.Fatalf("GetUserByID: %v", err)
-	}
+	u := mustGetUserByID(t, database, uid)
 	if u.Username != "pk-alice" || u.IdentityPublicKey != nil {
 		t.Fatalf("after the failed write: username %q, key %v; want unchanged and no key", u.Username, u.IdentityPublicKey)
 	}
 
-	if err := database.UpdateUserProfileAndIdentityKey(ctx, uid, "pk-alice2", nil, nil, nil, nil, nil, "key-two"); err != nil {
-		t.Fatalf("UpdateUserProfileAndIdentityKey: %v", err)
-	}
-	u, err = database.GetUserByID(ctx, uid)
-	if err != nil {
-		t.Fatalf("GetUserByID: %v", err)
-	}
+	mustDo(t, "UpdateUserProfileAndIdentityKey", database.UpdateUserProfileAndIdentityKey(ctx, uid, "pk-alice2", nil, nil, nil, nil, nil, "key-two"))
+	u = mustGetUserByID(t, database, uid)
 	if u.Username != "pk-alice2" || u.IdentityPublicKey == nil || *u.IdentityPublicKey != "key-two" {
 		t.Fatalf("after the write: username %q, key %v; want both stored", u.Username, u.IdentityPublicKey)
 	}

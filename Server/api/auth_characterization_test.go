@@ -71,8 +71,7 @@ func send(t *testing.T, router http.Handler, method, path, token, ip, ua string,
 		ip = "127.0.0.1"
 	}
 	req.RemoteAddr = ip + ":9999"
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
+	rr := serveRequest(router, req)
 	return rr
 }
 
@@ -123,10 +122,7 @@ func seedUser(t *testing.T, database *db.DB, username, password string, roleID i
 	if err != nil {
 		t.Fatalf("HashPassword: %v", err)
 	}
-	uid, err := database.CreateUser(context.Background(), username, hash, roleID)
-	if err != nil {
-		t.Fatalf("CreateUser(%s): %v", username, err)
-	}
+	uid := mustCreateUser(t, database, username, hash, roleID)
 	return uid
 }
 
@@ -183,11 +179,8 @@ func userByName(t *testing.T, database *db.DB, username string) *db.User {
 func loginPartial(t *testing.T, router http.Handler, username, password, ip, ua string) string {
 	t.Helper()
 	rr := send(t, router, http.MethodPost, "/api/v1/auth/login", "", ip, ua, map[string]string{"username": username, "password": password})
-	if rr.Code != http.StatusOK {
-		t.Fatalf("login status = %d, want 200; body = %s", rr.Code, rr.Body.String())
-	}
-	var resp map[string]any
-	_ = json.Unmarshal(rr.Body.Bytes(), &resp)
+	requireStatus(t, rr, http.StatusOK)
+	resp := decodeBody[map[string]any](t, rr)
 	pt, _ := resp["partial_token"].(string)
 	if pt == "" || resp["requires_2fa"] != true {
 		t.Fatalf("expected a 2FA challenge, got %s", rr.Body.String())
@@ -485,9 +478,7 @@ func TestAuthCharacterization_RegisterPolicyAndFailurePaths(t *testing.T) {
 			t.Fatalf("clear settings: %v", err)
 		}
 		rr := send(t, router, http.MethodPost, "/api/v1/auth/register", "", "", "", body(code))
-		if rr.Code != http.StatusCreated {
-			t.Fatalf("status = %d, want 201; body = %s", rr.Code, rr.Body.String())
-		}
+		requireStatus(t, rr, http.StatusCreated)
 	})
 	t.Run("require_2fa true -> 403 before any credential is read", func(t *testing.T) {
 		database := newAuthTestDB(t)
@@ -617,10 +608,7 @@ func TestAuthCharacterization_SessionShape(t *testing.T) {
 		if rr.Code != wantStatus {
 			t.Fatalf("status = %d, want %d; body = %s", rr.Code, wantStatus, rr.Body.String())
 		}
-		var resp map[string]any
-		if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
-			t.Fatalf("decode: %v", err)
-		}
+		resp := decodeBody[map[string]any](t, rr)
 		keys := slices.Sorted(maps.Keys(resp))
 		if want := []string{"requires_2fa", "token", "user"}; !slices.Equal(keys, want) {
 			t.Errorf("response keys = %v, want %v", keys, want)
@@ -714,9 +702,7 @@ func TestAuthCharacterization_Logout(t *testing.T) {
 	t.Run("clears the custom status", func(t *testing.T) {
 		database, router, uid, token := setup(t)
 		rr := send(t, router, http.MethodPost, "/api/v1/auth/logout", token, "", "", nil)
-		if rr.Code != http.StatusNoContent {
-			t.Fatalf("status = %d, want 204; body = %s", rr.Code, rr.Body.String())
-		}
+		requireStatus(t, rr, http.StatusNoContent)
 		u, _ := database.GetUserByID(context.Background(), uid)
 		if u.CustomStatus != nil {
 			t.Errorf("custom_status after logout = %q, want cleared", *u.CustomStatus)
@@ -735,9 +721,7 @@ func TestAuthCharacterization_Logout(t *testing.T) {
 		database, router, uid, token := setup(t)
 		failWrite(t, database, "UPDATE OF custom_status", "users")
 		rr := send(t, router, http.MethodPost, "/api/v1/auth/logout", token, "", "", nil)
-		if rr.Code != http.StatusNoContent {
-			t.Fatalf("status = %d, want 204 (status clear is best-effort); body = %s", rr.Code, rr.Body.String())
-		}
+		requireStatus(t, rr, http.StatusNoContent)
 		if s, _ := database.GetSessionByTokenHash(context.Background(), auth.HashToken(token)); s != nil {
 			t.Error("session survived logout")
 		}
@@ -906,9 +890,7 @@ func TestAuthCharacterization_VerifyTOTPFailurePaths(t *testing.T) {
 			t.Fatalf("drop trigger: %v", err)
 		}
 		rr := verify(t, router, pt, code, "203.0.113.2")
-		if rr.Code != http.StatusOK {
-			t.Fatalf("retry status = %d, want 200; body = %s", rr.Code, rr.Body.String())
-		}
+		requireStatus(t, rr, http.StatusOK)
 		var res struct {
 			Token       string `json:"token"`
 			Requires2FA bool   `json:"requires_2fa"`
@@ -981,11 +963,8 @@ func TestAuthCharacterization_TOTPManagementFailurePaths(t *testing.T) {
 	t.Run("confirm: secret persist fails -> 500, nothing enrolled", func(t *testing.T) {
 		database, router, uid, token := setup(t)
 		rr := send(t, router, http.MethodPost, "/api/v1/users/me/totp/enable", token, "", "", pw)
-		if rr.Code != http.StatusOK {
-			t.Fatalf("enable: %d %s", rr.Code, rr.Body.String())
-		}
-		var enable map[string]any
-		_ = json.Unmarshal(rr.Body.Bytes(), &enable)
+		requireStatus(t, rr, http.StatusOK)
+		enable := decodeBody[map[string]any](t, rr)
 		secret := extractSecretFromURI(t, enable["qr_uri"].(string))
 		failWrite(t, database, "UPDATE OF totp_secret", "users")
 		rr = send(t, router, http.MethodPost, "/api/v1/users/me/totp/confirm", token, "", "", map[string]string{"password": "correctPass1", "code": totpCode(t, secret)})
@@ -1022,9 +1001,7 @@ func TestAuthCharacterization_TOTPManagementFailurePaths(t *testing.T) {
 	t.Run("disable when not enrolled -> 204 (idempotent)", func(t *testing.T) {
 		_, router, _, token := setup(t)
 		rr := send(t, router, http.MethodDelete, "/api/v1/users/me/totp", token, "", "", pw)
-		if rr.Code != http.StatusNoContent {
-			t.Fatalf("status = %d, want 204; body = %s", rr.Code, rr.Body.String())
-		}
+		requireStatus(t, rr, http.StatusNoContent)
 	})
 	t.Run("disable with an empty body -> 400 password is required", func(t *testing.T) {
 		_, router, _, token := setup(t)

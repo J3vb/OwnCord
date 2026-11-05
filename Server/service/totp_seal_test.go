@@ -12,27 +12,18 @@ import (
 func openSealTestDB(t *testing.T) *db.DB {
 	t.Helper()
 	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
+	mustDo(t, "db.Open", err)
 	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	mustDo(t, "Migrate", db.Migrate(database))
 	return database
 }
 
 func sealTestUser(t *testing.T, database *db.DB, name string, stored *string) int64 {
 	t.Helper()
 	ctx := context.Background()
-	uid, err := database.CreateUser(ctx, name, "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	uid := mustCreateUser(t, database, name, "hash", 4)
 	if stored != nil {
-		if err := database.UpdateUserTOTPSecret(ctx, uid, stored); err != nil {
-			t.Fatalf("UpdateUserTOTPSecret: %v", err)
-		}
+		mustDo(t, "UpdateUserTOTPSecret", database.UpdateUserTOTPSecret(ctx, uid, stored))
 	}
 	return uid
 }
@@ -65,9 +56,7 @@ func TestSealLegacyTOTPSecrets_ConvertsOnlyUnsealedSecrets(t *testing.T) {
 
 	legacy := "JBSWY3DPEHPK3PXP"
 	sealedValue, err := auth.EncryptTOTPSecret(key, "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ")
-	if err != nil {
-		t.Fatalf("EncryptTOTPSecret: %v", err)
-	}
+	mustDo(t, "EncryptTOTPSecret", err)
 	damaged := "not a secret"
 
 	legacyUID := sealTestUser(t, database, "legacy", &legacy)
@@ -76,9 +65,7 @@ func TestSealLegacyTOTPSecrets_ConvertsOnlyUnsealedSecrets(t *testing.T) {
 	noneUID := sealTestUser(t, database, "none", nil)
 
 	sealed, unreadable, err := SealLegacyTOTPSecrets(ctx, database, key)
-	if err != nil {
-		t.Fatalf("sealLegacyTOTPSecrets: %v", err)
-	}
+	mustDo(t, "sealLegacyTOTPSecrets", err)
 	if sealed != 1 || !slices.Equal(unreadable, []int64{damagedUID}) {
 		t.Fatalf("sealed, unreadable = %d, %v, want 1, [%d]", sealed, unreadable, damagedUID)
 	}

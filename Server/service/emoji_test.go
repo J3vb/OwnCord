@@ -121,18 +121,14 @@ func TestEmojiCreate_RequiresManageServer(t *testing.T) {
 func TestEmojiDelete_RequiresManageServer(t *testing.T) {
 	svc, _ := newEmojiService(t)
 	created, err := svc.Create(context.Background(), 1, "wave", "stored-1", "image/png")
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
+	mustDo(t, "Create", err)
 
 	if _, err := svc.Delete(context.Background(), 4, created.ID); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("member Delete error = %v, want ErrForbidden", err)
 	}
 	// The refusal must not have removed anything.
 	list, err := svc.List(context.Background())
-	if err != nil {
-		t.Fatalf("List: %v", err)
-	}
+	mustDo(t, "List", err)
 	if len(list) != 1 {
 		t.Fatalf("after refused delete len(list) = %d, want 1", len(list))
 	}
@@ -159,9 +155,7 @@ func TestEmojiCreate_NormalizesAndPersists(t *testing.T) {
 	svc, database := newEmojiService(t)
 
 	created, err := svc.Create(context.Background(), 1, ":WAVE:", "stored-1", "image/png")
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
+	mustDo(t, "Create", err)
 	if created.Shortcode != "wave" {
 		t.Errorf("Shortcode = %q, want %q", created.Shortcode, "wave")
 	}
@@ -242,9 +236,7 @@ func TestEmojiCreate_RejectsBadShortcodeBeforeInsert(t *testing.T) {
 		t.Fatalf("Create error = %v, want ErrBadRequest", err)
 	}
 	list, err := svc.List(context.Background())
-	if err != nil {
-		t.Fatalf("List: %v", err)
-	}
+	mustDo(t, "List", err)
 	if len(list) != 0 {
 		t.Fatalf("len(list) = %d, want 0", len(list))
 	}
@@ -274,9 +266,7 @@ func TestEmojiList_OrderedByShortcode(t *testing.T) {
 		}
 	}
 	list, err := svc.List(context.Background())
-	if err != nil {
-		t.Fatalf("List: %v", err)
-	}
+	mustDo(t, "List", err)
 	got := make([]string, 0, len(list))
 	for _, e := range list {
 		got = append(got, e.Shortcode)
@@ -290,22 +280,16 @@ func TestEmojiList_OrderedByShortcode(t *testing.T) {
 func TestEmojiDelete_RemovesAndReturnsStorageID(t *testing.T) {
 	svc, _ := newEmojiService(t)
 	created, err := svc.Create(context.Background(), 1, "wave", "stored-1", "image/png")
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
+	mustDo(t, "Create", err)
 
 	removed, err := svc.Delete(context.Background(), 1, created.ID)
-	if err != nil {
-		t.Fatalf("Delete: %v", err)
-	}
+	mustDo(t, "Delete", err)
 	if removed.StoredAs != "stored-1" {
 		t.Errorf("removed.StoredAs = %q, want stored-1", removed.StoredAs)
 	}
 
 	list, err := svc.List(context.Background())
-	if err != nil {
-		t.Fatalf("List: %v", err)
-	}
+	mustDo(t, "List", err)
 	if len(list) != 0 {
 		t.Fatalf("len(list) after delete = %d, want 0", len(list))
 	}
@@ -332,17 +316,12 @@ func TestEmojiGet_UnknownIDIsNotFound(t *testing.T) {
 func TestEmojiCreate_WritesAudit(t *testing.T) {
 	svc, database := newEmojiService(t)
 	created, err := svc.Create(context.Background(), 1, "wave", "stored-1", "image/png")
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
+	mustDo(t, "Create", err)
 	if _, err := svc.Delete(context.Background(), 1, created.ID); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 
-	entries, err := database.GetAuditLog(context.Background(), 50, 0)
-	if err != nil {
-		t.Fatalf("GetAuditLog: %v", err)
-	}
+	entries := mustGetAuditLog(t, database, 50, 0)
 	seen := map[string]bool{}
 	for _, e := range entries {
 		if e.TargetType == "emoji" {
@@ -383,9 +362,7 @@ func TestEmojiService_RunsOnASixMethodFake(t *testing.T) {
 	want := []*db.Emoji{{ID: 7, Shortcode: "wave"}}
 	svc := NewEmojiService(&listOnlyEmojiStore{rows: want}, nil)
 	got, err := svc.List(context.Background())
-	if err != nil {
-		t.Fatalf("List: %v", err)
-	}
+	mustDo(t, "List", err)
 	if len(got) != 1 || got[0].ID != 7 {
 		t.Fatalf("List = %+v, want the fake's row", got)
 	}

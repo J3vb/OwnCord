@@ -7,7 +7,6 @@ import (
 	"io"
 	"testing"
 
-	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/storage"
@@ -33,14 +32,7 @@ func (failingStore) SaveThumb(string, []byte) error { return errors.New("simulat
 // bytes. The handler-level tests cannot see this — their Settle would
 // release it anyway — which is exactly why it has its own test.
 func TestSaveReserved_ReleasesTheChargeOnAFailedWrite(t *testing.T) {
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(database); err != nil {
-		t.Fatal(err)
-	}
+	database := openMigratedDB(t)
 	ctx := context.Background()
 	if _, err := database.ExecContext(ctx, `INSERT INTO users (id, username, password, role_id) VALUES (10, 'alice', 'x', 4)`); err != nil {
 		t.Fatal(err)
@@ -67,14 +59,7 @@ func TestSaveReserved_ReleasesTheChargeOnAFailedWrite(t *testing.T) {
 // write with no reservation and hand a reservation back on a failed write, just
 // as saveReserved does for the handlers.
 func TestReservedStore_RefusesAnUnreservedWriteAndReleasesOnFailure(t *testing.T) {
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(database); err != nil {
-		t.Fatal(err)
-	}
+	database := openMigratedDB(t)
 	ctx := context.Background()
 	uploads := service.NewUploadService(database, nil)
 

@@ -3,7 +3,6 @@ package admin_test
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -21,15 +20,10 @@ import (
 func issueArchiveLink(t *testing.T, f archiveFixture, token string) (string, string) {
 	t.Helper()
 	w := doRequest(t, f.handler, http.MethodPost, "/archive/link", token, map[string]any{})
-	if w.Code != http.StatusOK {
-		t.Fatalf("POST /archive/link = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
-	var resp struct {
+	requireStatus(t, w, http.StatusOK)
+	resp := decodeBody[struct {
 		Path string `json:"path"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	}](t, w)
 	u, err := url.Parse(resp.Path)
 	if err != nil || u.Query().Get("token") == "" {
 		t.Fatalf("link response has no token in its path: %s", w.Body.String())
@@ -95,9 +89,7 @@ func TestArchiveLink_WrongRoute(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/logs/stream?ticket="+token, nil)
 	w := httptest.NewRecorder()
 	logs.ServeHTTP(w, req)
-	if w.Code != http.StatusUnauthorized {
-		t.Errorf("archive link token as a log-stream ticket = %d, want 401", w.Code)
-	}
+	expectStatus(t, w, http.StatusUnauthorized)
 
 	if w := doRequest(t, f.handler, http.MethodGet, "/archive", token, nil); w.Code != http.StatusUnauthorized {
 		t.Errorf("archive link token as a Bearer credential = %d, want 401", w.Code)

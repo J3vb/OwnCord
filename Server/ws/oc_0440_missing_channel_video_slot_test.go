@@ -78,9 +78,7 @@ func TestHandleVoiceCameraV2_DeletedChannel_RefusesEnable(t *testing.T) {
 	database := newOC0023VideoLimitDB(t)
 	chID := mustCreateVideoCappedChannel(t, database, "soon-deleted", 2)
 	userID := seedOC0023VideoLimitUser(t, database, "cam-after-delete")
-	if err := database.JoinVoiceChannel(ctx, userID, chID); err != nil {
-		t.Fatalf("JoinVoiceChannel: %v", err)
-	}
+	mustJoinVoice(t, database, userID, chID)
 	if err := database.DeleteChannel(ctx, chID); err != nil {
 		t.Fatalf("DeleteChannel: %v", err)
 	}

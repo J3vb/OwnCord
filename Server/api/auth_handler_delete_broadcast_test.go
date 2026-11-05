@@ -35,17 +35,14 @@ func TestDeleteAccount_BroadcastsMemberBan(t *testing.T) {
 	r := chi.NewRouter()
 	api.MountAuthRoutes(r, service.NewAuthService(database, limiter, testTOTPKey, broadcaster), api.AuthMiddleware(service.NewSessionService(database)), limiter, nil)
 
-	hash, _ := auth.HashPassword("correctPass1")
-	uid, _ := database.CreateUser(context.Background(), "deletebroadcast", hash, 4)
+	uid := seedUser(t, database, "deletebroadcast", "correctPass1", 4)
 	token, _ := auth.GenerateToken()
 	_, _ = database.CreateSession(context.Background(), uid, auth.HashToken(token), "test", "127.0.0.1")
 
 	rr := deleteJSONWithToken(t, r, "/api/v1/auth/account", token, map[string]string{
 		"password": "correctPass1",
 	})
-	if rr.Code != http.StatusNoContent {
-		t.Fatalf("DeleteAccount status = %d, want 204; body = %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusNoContent)
 
 	if len(broadcaster.bannedIDs) != 1 || broadcaster.bannedIDs[0] != uid {
 		t.Fatalf("BroadcastMemberBan calls = %v, want exactly [%d]", broadcaster.bannedIDs, uid)
@@ -61,15 +58,12 @@ func TestDeleteAccount_NoBroadcasterOmitted(t *testing.T) {
 	r := chi.NewRouter()
 	api.MountAuthRoutes(r, service.NewAuthService(database, limiter, testTOTPKey, nil), api.AuthMiddleware(service.NewSessionService(database)), limiter, nil)
 
-	hash, _ := auth.HashPassword("correctPass1")
-	uid, _ := database.CreateUser(context.Background(), "deletenobroadcast", hash, 4)
+	uid := seedUser(t, database, "deletenobroadcast", "correctPass1", 4)
 	token, _ := auth.GenerateToken()
 	_, _ = database.CreateSession(context.Background(), uid, auth.HashToken(token), "test", "127.0.0.1")
 
 	rr := deleteJSONWithToken(t, r, "/api/v1/auth/account", token, map[string]string{
 		"password": "correctPass1",
 	})
-	if rr.Code != http.StatusNoContent {
-		t.Fatalf("DeleteAccount status = %d, want 204; body = %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusNoContent)
 }

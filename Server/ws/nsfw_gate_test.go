@@ -48,27 +48,15 @@ type nsfwGateFixture struct {
 
 func newNSFWGateFixture(t *testing.T) *nsfwGateFixture {
 	t.Helper()
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("db.Migrate: %v", err)
-	}
+	database := newTeardownTestDB(t)
 
 	limiter := auth.NewRateLimiter()
 	svc := service.New(database, limiter)
 	hub := newTestHub(t, database, limiter, svc)
 
 	ctx := context.Background()
-	labelledID, err := database.CreateChannel(ctx, "labelled", "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel(labelled): %v", err)
-	}
-	if _, err := database.ExecContext(ctx, `UPDATE channels SET nsfw = 1 WHERE id = ?`, labelledID); err != nil {
-		t.Fatalf("label channel: %v", err)
-	}
+	labelledID := mustCreateChannel(t, database, "labelled", "text")
+	mustExec(t, database, `UPDATE channels SET nsfw = 1 WHERE id = ?`, labelledID)
 	controlID, err := database.CreateChannel(ctx, "control", "text", "", "", 1)
 	if err != nil {
 		t.Fatalf("CreateChannel(control): %v", err)
@@ -359,30 +347,16 @@ func TestReconnect_ReplaySkipsUnacknowledgedLabelledContent(t *testing.T) {
 		if err != nil {
 			t.Fatalf("CreateUser: %v", err)
 		}
-		user, err := database.GetUserByID(ctx, userID)
-		if err != nil || user == nil {
-			t.Fatalf("GetUserByID: %v", err)
-		}
-		chID, err = database.CreateChannel(ctx, "resume-labelled", "text", "", "", 0)
-		if err != nil {
-			t.Fatalf("CreateChannel: %v", err)
-		}
-		if _, err := database.ExecContext(ctx, `UPDATE channels SET nsfw = 1 WHERE id = ?`, chID); err != nil {
-			t.Fatalf("label channel: %v", err)
-		}
+		user := mustGetUser(t, database, userID)
+		chID = mustCreateChannel(t, database, "resume-labelled", "text")
+		mustExec(t, database, `UPDATE channels SET nsfw = 1 WHERE id = ?`, chID)
 		if acknowledge {
 			if _, err := database.AcknowledgeNSFW(ctx, userID, chID); err != nil {
 				t.Fatalf("AcknowledgeNSFW: %v", err)
 			}
 		}
 
-		token, err = auth.GenerateToken()
-		if err != nil {
-			t.Fatalf("GenerateToken: %v", err)
-		}
-		if _, err := database.CreateSession(ctx, userID, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
-			t.Fatalf("CreateSession: %v", err)
-		}
+		token = seedSessionToken(t, database, userID)
 
 		hub = newTestHub(t, database, auth.NewRateLimiter(), nil)
 		go hub.Run()
@@ -447,26 +421,15 @@ func TestReconnect_RevokeBetweenTwoFramesOfTheSameReplayDropsOnlyTheLaterOnes(t 
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
-	chID, err := database.CreateChannel(ctx, "interleave-labelled", "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
-	if _, err := database.ExecContext(ctx, `UPDATE channels SET nsfw = 1 WHERE id = ?`, chID); err != nil {
-		t.Fatalf("label channel: %v", err)
-	}
+	chID := mustCreateChannel(t, database, "interleave-labelled", "text")
+	mustExec(t, database, `UPDATE channels SET nsfw = 1 WHERE id = ?`, chID)
 	// Starts ACKNOWLEDGED: every frame's live check must pass until the hook
 	// revokes mid-batch, or the test would prove nothing about the recheck.
 	if _, err := database.AcknowledgeNSFW(ctx, userID, chID); err != nil {
 		t.Fatalf("AcknowledgeNSFW: %v", err)
 	}
 
-	token, err := auth.GenerateToken()
-	if err != nil {
-		t.Fatalf("GenerateToken: %v", err)
-	}
-	if _, err := database.CreateSession(ctx, userID, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
+	token := seedSessionToken(t, database, userID)
 
 	hub := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	go hub.Run()
@@ -582,10 +545,7 @@ func TestNSFW_ChannelLookupFailureDeniesEverySocketRecipient(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
-	chID, err := database.CreateChannel(ctx, "lookup-fail-channel", "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
+	chID := mustCreateChannel(t, database, "lookup-fail-channel", "text")
 
 	hub := newTestHubWith(t, HubOptions{
 		DB:      database,
@@ -633,17 +593,9 @@ func TestReconnectPrecheck_ComputeReadableChannelsErrorFallsBackToFullReady(t *t
 	database := newTeardownTestDB(t)
 	ctx := context.Background()
 
-	userID, err := database.CreateUser(ctx, "precheck-nsfw-err-user", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	chID, err := database.CreateChannel(ctx, "precheck-nsfw-err-chan", "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
-	if _, err := database.ExecContext(ctx, `UPDATE channels SET nsfw = 1 WHERE id = ?`, chID); err != nil {
-		t.Fatalf("label channel: %v", err)
-	}
+	userID := mustCreateUser(t, database, "precheck-nsfw-err-user", 4)
+	chID := mustCreateChannel(t, database, "precheck-nsfw-err-chan", "text")
+	mustExec(t, database, `UPDATE channels SET nsfw = 1 WHERE id = ?`, chID)
 
 	hub := newTestHubWith(t, HubOptions{
 		DB:      database,
@@ -858,24 +810,13 @@ func TestNSFW_RevokeWhileDisconnectedForcesFullReadyOnResume(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
-	chID, err := database.CreateChannel(ctx, "resume-revoke-labelled", "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
-	if _, err := database.ExecContext(ctx, `UPDATE channels SET nsfw = 1 WHERE id = ?`, chID); err != nil {
-		t.Fatalf("label channel: %v", err)
-	}
+	chID := mustCreateChannel(t, database, "resume-revoke-labelled", "text")
+	mustExec(t, database, `UPDATE channels SET nsfw = 1 WHERE id = ?`, chID)
 	if _, err := database.AcknowledgeNSFW(ctx, userID, chID); err != nil {
 		t.Fatalf("AcknowledgeNSFW: %v", err)
 	}
 
-	token, err := auth.GenerateToken()
-	if err != nil {
-		t.Fatalf("GenerateToken: %v", err)
-	}
-	if _, err := database.CreateSession(ctx, userID, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
+	token := seedSessionToken(t, database, userID)
 
 	limiter := auth.NewRateLimiter()
 	svc := service.New(database, limiter)

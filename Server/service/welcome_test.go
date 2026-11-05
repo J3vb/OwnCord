@@ -51,9 +51,7 @@ func newWelcomeFixture(t *testing.T, mode RegistrationMode) *welcomeFixture {
 	t.Helper()
 	ctx := context.Background()
 	database := newTestDB(t)
-	if err := database.SetSetting(ctx, registrationModeKey, string(mode)); err != nil {
-		t.Fatalf("SetSetting: %v", err)
-	}
+	mustDo(t, "SetSetting", database.SetSetting(ctx, registrationModeKey, string(mode)))
 	seedChannel(t, database, &db.Channel{ID: 50, Name: "lobby", Type: "text"})
 	f := &welcomeFixture{ctx: ctx, database: database, notifier: &recordingWelcomeNotifier{}, channel: 50}
 	welcome := NewWelcomeService(database)
@@ -67,17 +65,13 @@ func newWelcomeFixture(t *testing.T, mode RegistrationMode) *welcomeFixture {
 
 func (f *welcomeFixture) pick(t *testing.T, id int64) {
 	t.Helper()
-	if err := f.database.SetSetting(f.ctx, WelcomeChannelKey, strconv.FormatInt(id, 10)); err != nil {
-		t.Fatalf("SetSetting: %v", err)
-	}
+	mustDo(t, "SetSetting", f.database.SetSetting(f.ctx, WelcomeChannelKey, strconv.FormatInt(id, 10)))
 }
 
 func (f *welcomeFixture) rows(t *testing.T) int {
 	t.Helper()
 	var n int
-	if err := f.database.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM messages WHERE kind = ?`, db.MessageKindMemberJoin).Scan(&n); err != nil {
-		t.Fatalf("count welcome rows: %v", err)
-	}
+	mustDo(t, "count welcome rows", f.database.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM messages WHERE kind = ?`, db.MessageKindMemberJoin).Scan(&n))
 	return n
 }
 
@@ -125,13 +119,9 @@ func TestWelcome_InviteRegistrationWritesRow(t *testing.T) {
 	f := newWelcomeFixture(t, RegistrationInvite)
 	f.pick(t, f.channel)
 	owner, err := f.database.CreateUser(f.ctx, "owner", "hash", 1)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateUser", err)
 	code, err := f.database.CreateInvite(f.ctx, owner, 1, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateInvite", err)
 	f.register(t, "bob", code)
 	if got := f.rows(t); got != 1 || len(f.notifier.got) != 1 {
 		t.Fatalf("rows = %d notifications = %d, want 1 and 1", got, len(f.notifier.got))
@@ -141,9 +131,7 @@ func TestWelcome_InviteRegistrationWritesRow(t *testing.T) {
 func TestWelcome_OffWritesNothing(t *testing.T) {
 	f := newWelcomeFixture(t, RegistrationOpen)
 	f.register(t, "carol", "") // never picked
-	if err := f.database.SetSetting(f.ctx, WelcomeChannelKey, ""); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "SetSetting", f.database.SetSetting(f.ctx, WelcomeChannelKey, ""))
 	f.register(t, "dave", "") // cleared
 	if got := f.rows(t); got != 0 || len(f.notifier.got) != 0 {
 		t.Fatalf("rows = %d notifications = %d, want 0 and 0", got, len(f.notifier.got))
@@ -161,12 +149,8 @@ func TestWelcome_ApprovalModeWritesOnlyOnApprove(t *testing.T) {
 		t.Fatalf("a pending application wrote %d welcome rows, want 0", got)
 	}
 	var uid int64
-	if err := f.database.QueryRowContext(f.ctx, `SELECT id FROM users WHERE username = 'erin'`).Scan(&uid); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.users.ApproveRegistration(f.ctx, 1, uid); err != nil {
-		t.Fatalf("ApproveRegistration: %v", err)
-	}
+	mustDo(t, "QueryRowContext", f.database.QueryRowContext(f.ctx, `SELECT id FROM users WHERE username = 'erin'`).Scan(&uid))
+	mustDo(t, "ApproveRegistration", f.users.ApproveRegistration(f.ctx, 1, uid))
 	if got := f.rows(t); got != 1 || len(f.notifier.got) != 1 || f.notifier.got[0].Author.ID != uid {
 		t.Fatalf("rows = %d notifications = %d, want the approved member greeted once", got, len(f.notifier.got))
 	}
@@ -277,9 +261,7 @@ func TestDeleteMessage_WelcomeRowIsDeletable(t *testing.T) {
 	f.pick(t, f.channel)
 	res := f.register(t, "ivy", "")
 	id := f.notifier.got[0].Row.MessageID
-	if err := f.database.DeleteMessage(f.ctx, id, res.User.ID, false); err != nil {
-		t.Fatalf("DeleteMessage: %v", err)
-	}
+	mustDo(t, "DeleteMessage", f.database.DeleteMessage(f.ctx, id, res.User.ID, false))
 	var deleted int
 	if err := f.database.QueryRowContext(f.ctx, `SELECT deleted FROM messages WHERE id = ?`, id).Scan(&deleted); err != nil || deleted != 1 {
 		t.Fatalf("deleted = %d err=%v, want 1", deleted, err)
@@ -292,9 +274,7 @@ func TestWelcomeRow_DeleteAndReplyRules(t *testing.T) {
 	svc, _, database, _ := pinFixture(t)
 	ctx := context.Background()
 	row, err := database.InsertWelcomeRow(ctx, 10, 2, "mod_bob joined the server.")
-	if err != nil {
-		t.Fatalf("InsertWelcomeRow: %v", err)
-	}
+	mustDo(t, "InsertWelcomeRow", err)
 	wave, err := svc.SendMessage(ctx, SendMessageParams{
 		ChannelID: 10, UserID: 1, Username: "alice", Content: "\U0001F44B", ReplyTo: &row.MessageID,
 	})

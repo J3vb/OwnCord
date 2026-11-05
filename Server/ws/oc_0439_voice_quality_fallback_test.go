@@ -1,7 +1,6 @@
 package ws_test
 
 import (
-	"encoding/json"
 	"testing"
 	"time"
 
@@ -31,10 +30,7 @@ func TestVoiceJoin_UsesConfiguredQualityFallback(t *testing.T) {
 	chanID := seedVoiceChan(t, database, "vc-oc0439")
 
 	user := seedVoiceOwner(t, database, "oc0439-user")
-	send := make(chan []byte, 32)
-	c := ws.NewTestClientWithUser(hub, user, chanID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, chanID, 32)
 
 	hub.HandleMessageForTest(c, voiceJoinMsg(chanID))
 
@@ -51,9 +47,7 @@ func TestVoiceJoin_UsesConfiguredQualityFallback(t *testing.T) {
 				Bitrate int    `json:"bitrate"`
 			} `json:"payload"`
 		}
-		if err := json.Unmarshal(msg, &env); err != nil {
-			t.Fatalf("unmarshal voice_config: %v", err)
-		}
+		mustUnmarshal(t, msg, &env)
 		if env.Payload.Quality != "high" || env.Payload.Bitrate != 128000 {
 			t.Errorf("voice_config = (quality=%q, bitrate=%d), want (quality=high, bitrate=128000): "+
 				"a channel with no per-channel voice_quality override must fall back to the "+

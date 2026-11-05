@@ -18,14 +18,9 @@ package ws
 import (
 	"context"
 	"encoding/json"
-	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
-	"github.com/coder/websocket"
-
-	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
@@ -39,22 +34,12 @@ func TestReconnect_FullReadyFallbackDoesNotLeakRevokedChannelSubscription(t *tes
 	if err != nil || ch == nil {
 		t.Fatalf("GetChannel: %v", err)
 	}
-	user, err := database.GetUserByID(ctx, uid)
-	if err != nil || user == nil {
-		t.Fatalf("GetUserByID: %v", err)
-	}
+	user := mustGetUser(t, database, uid)
 
-	token, err := auth.GenerateToken()
-	if err != nil {
-		t.Fatalf("GenerateToken: %v", err)
-	}
-	if _, err := database.CreateSession(ctx, uid, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
+	token := seedSessionToken(t, database, uid)
 
-	hub := newTestHub(t, database, auth.NewRateLimiter(), nil)
-	go hub.Run()
-	defer hub.Stop()
+	rig := newServeRigOn(t, database, nil)
+	hub := rig.hub
 
 	// Precondition: the channel is READ-visible at the moment the auth frame
 	// is evaluated, so the auth-frame active_channel_id is legitimately
@@ -69,10 +54,7 @@ func TestReconnect_FullReadyFallbackDoesNotLeakRevokedChannelSubscription(t *tes
 
 	// Bracket last_seq=99 so the resume takes the buffer tier (not a
 	// mustFullResync-forced full ready from the very start).
-	rb := hub.ReplayBuffer()
-	rb.Push(98, chID, []byte(`{"seq":98,"type":"chat_message","payload":{}}`))
-	rb.Push(99, chID, []byte(`{"seq":99,"type":"chat_message","payload":{}}`))
-	rb.Push(100, chID, []byte(`{"seq":100,"type":"chat_message","payload":{}}`))
+	pushReplayWindow(hub, chID)
 	hub.SeedSeq(100)
 	const lastSeq = uint64(99)
 
@@ -96,31 +78,7 @@ func TestReconnect_FullReadyFallbackDoesNotLeakRevokedChannelSubscription(t *tes
 	}
 	defer func() { handleReconnectPreSeqMuRaceHook = nil }()
 
-	srv := httptest.NewServer(ServeWS(hub, []string{"*"}, 0))
-	defer srv.Close()
-
-	dialCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	conn, dialResp, dialErr := websocket.Dial(dialCtx, "ws"+strings.TrimPrefix(srv.URL, "http"), nil)
-	if dialResp != nil && dialResp.Body != nil {
-		_ = dialResp.Body.Close()
-	}
-	if dialErr != nil {
-		t.Fatalf("websocket.Dial: %v", dialErr)
-	}
-	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
-
-	raw, _ := json.Marshal(map[string]any{
-		"type": "auth",
-		"payload": map[string]any{
-			"token":             token,
-			"last_seq":          lastSeq,
-			"active_channel_id": chID,
-		},
-	})
-	if err := conn.Write(dialCtx, websocket.MessageText, raw); err != nil {
-		t.Fatalf("write auth: %v", err)
-	}
+	conn := rig.dialAuth(t, ctx, token, lastSeq, chID)
 
 	// The abort forces the fallback full-connect flow, which writes TWO
 	// frames — auth_ok, then ready — unlike the single auth_ok a successful

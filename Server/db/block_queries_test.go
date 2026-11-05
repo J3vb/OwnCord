@@ -17,30 +17,22 @@ func TestBlockUser_And_IsBlocked(t *testing.T) {
 	seedBlockUser(t, database, 2, "bob")
 
 	blocked, err := database.IsBlocked(ctx, 1, 2)
-	if err != nil {
-		t.Fatalf("IsBlocked before block: %v", err)
-	}
+	mustDo(t, "IsBlocked before block", err)
 	if blocked {
 		t.Fatal("IsBlocked = true before any block was recorded")
 	}
 
-	if err := database.BlockUser(ctx, 1, 2); err != nil {
-		t.Fatalf("BlockUser: %v", err)
-	}
+	mustDo(t, "BlockUser", database.BlockUser(ctx, 1, 2))
 
 	blocked, err = database.IsBlocked(ctx, 1, 2)
-	if err != nil {
-		t.Fatalf("IsBlocked after block: %v", err)
-	}
+	mustDo(t, "IsBlocked after block", err)
 	if !blocked {
 		t.Error("IsBlocked(1, 2) = false after 1 blocked 2")
 	}
 
 	// The block is directional: 2 has not blocked 1.
 	reverse, err := database.IsBlocked(ctx, 2, 1)
-	if err != nil {
-		t.Fatalf("IsBlocked reverse: %v", err)
-	}
+	mustDo(t, "IsBlocked reverse", err)
 	if reverse {
 		t.Error("IsBlocked(2, 1) = true; block should be directional")
 	}
@@ -60,9 +52,7 @@ func TestBlockUser_Idempotent(t *testing.T) {
 	}
 
 	ids, err := database.ListBlockedUsers(ctx, 1)
-	if err != nil {
-		t.Fatalf("ListBlockedUsers: %v", err)
-	}
+	mustDo(t, "ListBlockedUsers", err)
 	if len(ids) != 1 {
 		t.Errorf("ListBlockedUsers len = %d after 3 identical blocks, want 1 (got %v)", len(ids), ids)
 	}
@@ -74,17 +64,11 @@ func TestUnblockUser(t *testing.T) {
 	seedBlockUser(t, database, 1, "alice")
 	seedBlockUser(t, database, 2, "bob")
 
-	if err := database.BlockUser(ctx, 1, 2); err != nil {
-		t.Fatalf("BlockUser: %v", err)
-	}
-	if err := database.UnblockUser(ctx, 1, 2); err != nil {
-		t.Fatalf("UnblockUser: %v", err)
-	}
+	mustDo(t, "BlockUser", database.BlockUser(ctx, 1, 2))
+	mustDo(t, "UnblockUser", database.UnblockUser(ctx, 1, 2))
 
 	blocked, err := database.IsBlocked(ctx, 1, 2)
-	if err != nil {
-		t.Fatalf("IsBlocked: %v", err)
-	}
+	mustDo(t, "IsBlocked", err)
 	if blocked {
 		t.Error("IsBlocked = true after UnblockUser")
 	}
@@ -127,15 +111,11 @@ func TestIsEitherBlocked(t *testing.T) {
 			seedBlockUser(t, database, 3, "carol")
 
 			if tt.blockerID != 0 {
-				if err := database.BlockUser(ctx, tt.blockerID, tt.blockedID); err != nil {
-					t.Fatalf("BlockUser: %v", err)
-				}
+				mustDo(t, "BlockUser", database.BlockUser(ctx, tt.blockerID, tt.blockedID))
 			}
 
 			got, err := database.IsEitherBlocked(ctx, tt.queryA, tt.queryB)
-			if err != nil {
-				t.Fatalf("IsEitherBlocked: %v", err)
-			}
+			mustDo(t, "IsEitherBlocked", err)
 			if got != tt.wantEitherResult {
 				t.Errorf("IsEitherBlocked(%d, %d) = %v, want %v",
 					tt.queryA, tt.queryB, got, tt.wantEitherResult)
@@ -153,9 +133,7 @@ func TestListBlockedUsers(t *testing.T) {
 	seedBlockUser(t, database, 4, "dave")
 
 	empty, err := database.ListBlockedUsers(ctx, 1)
-	if err != nil {
-		t.Fatalf("ListBlockedUsers on empty: %v", err)
-	}
+	mustDo(t, "ListBlockedUsers on empty", err)
 	if len(empty) != 0 {
 		t.Errorf("ListBlockedUsers on empty = %v, want none", empty)
 	}
@@ -166,14 +144,10 @@ func TestListBlockedUsers(t *testing.T) {
 		}
 	}
 	// A block by a different user must not leak into user 1's list.
-	if err := database.BlockUser(ctx, 4, 3); err != nil {
-		t.Fatalf("BlockUser(4, 3): %v", err)
-	}
+	mustDo(t, "BlockUser(4, 3)", database.BlockUser(ctx, 4, 3))
 
 	ids, err := database.ListBlockedUsers(ctx, 1)
-	if err != nil {
-		t.Fatalf("ListBlockedUsers: %v", err)
-	}
+	mustDo(t, "ListBlockedUsers", err)
 	if len(ids) != 2 {
 		t.Fatalf("ListBlockedUsers = %v, want 2 entries", ids)
 	}
@@ -201,16 +175,12 @@ func TestBlockUser_SelfBlockIsSilentlyDropped(t *testing.T) {
 
 	// What matters is that no row is written.
 	ids, err := database.ListBlockedUsers(ctx, 1)
-	if err != nil {
-		t.Fatalf("ListBlockedUsers: %v", err)
-	}
+	mustDo(t, "ListBlockedUsers", err)
 	if len(ids) != 0 {
 		t.Errorf("ListBlockedUsers = %v after a self-block, want none", ids)
 	}
 	blocked, err := database.IsBlocked(ctx, 1, 1)
-	if err != nil {
-		t.Fatalf("IsBlocked: %v", err)
-	}
+	mustDo(t, "IsBlocked", err)
 	if blocked {
 		t.Error("IsBlocked(1, 1) = true; a self-block must never be recorded")
 	}

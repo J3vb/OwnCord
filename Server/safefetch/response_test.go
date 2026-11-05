@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
-	"crypto/tls"
-	"crypto/x509"
 	"errors"
 	"fmt"
 	"io"
@@ -108,18 +106,7 @@ func TestFetch_EndlessBodyIsCutOffEarly(t *testing.T) {
 // A decompression bomb: tiny on the wire, enormous once inflated. The wire
 // ceiling cannot catch this, which is why the decompressed ceiling exists.
 func TestFetch_DecompressionBomb(t *testing.T) {
-	var buf bytes.Buffer
-	zw := gzip.NewWriter(&buf)
-	chunk := make([]byte, 64<<10)
-	for range 256 { // 16 MiB of zeroes, a few KiB compressed
-		if _, err := zw.Write(chunk); err != nil {
-			t.Fatalf("gzip write: %v", err)
-		}
-	}
-	if err := zw.Close(); err != nil {
-		t.Fatalf("gzip close: %v", err)
-	}
-	bomb := buf.Bytes()
+	bomb := gzipRepeated(t, make([]byte, 64<<10), 256) // 16 MiB of zeroes, a few KiB compressed
 	if len(bomb) > 64<<10 {
 		t.Fatalf("the bomb is %d bytes on the wire; it must fit under MaxBytes for this test to mean anything", len(bomb))
 	}
@@ -144,9 +131,7 @@ func TestFetch_GzipUnderCeilingSucceeds(t *testing.T) {
 	if _, err := zw.Write([]byte(`{"ok":true}`)); err != nil {
 		t.Fatalf("gzip write: %v", err)
 	}
-	if err := zw.Close(); err != nil {
-		t.Fatalf("gzip close: %v", err)
-	}
+	mustDo(t, "gzip close", zw.Close())
 	body := buf.Bytes()
 	srv := stub(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -154,9 +139,7 @@ func TestFetch_GzipUnderCeilingSucceeds(t *testing.T) {
 		_, _ = w.Write(body)
 	})
 	resp, err := get(newFetcher(t, srv, nil), srv.URL)
-	if err != nil {
-		t.Fatalf("Fetch: %v", err)
-	}
+	mustDo(t, "Fetch", err)
 	if string(resp.Body) != `{"ok":true}` {
 		t.Fatalf("body = %q", resp.Body)
 	}
@@ -167,11 +150,7 @@ func TestFetch_GzipUnderCeilingSucceeds(t *testing.T) {
 func TestFetch_SlowLorisBodyHitsTheDeadline(t *testing.T) {
 	release := make(chan struct{})
 	srv := stub(t, func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "text/plain")
-		w.WriteHeader(http.StatusOK)
-		if fl, ok := w.(http.Flusher); ok {
-			fl.Flush()
-		}
+		flushHeaders(w)
 		_, _ = w.Write([]byte("A"))
 		if fl, ok := w.(http.Flusher); ok {
 			fl.Flush()
@@ -210,11 +189,7 @@ func TestFetch_SlowLorisHeadersHitTheDeadline(t *testing.T) {
 func TestFetch_CallerCancellation(t *testing.T) {
 	release := make(chan struct{})
 	srv := stub(t, func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "text/plain")
-		w.WriteHeader(http.StatusOK)
-		if fl, ok := w.(http.Flusher); ok {
-			fl.Flush()
-		}
+		flushHeaders(w)
 		<-release
 	})
 	t.Cleanup(func() { close(release) })
@@ -357,9 +332,7 @@ func TestFetch_RelativeRedirectFollowed(t *testing.T) {
 		_, _ = w.Write([]byte(`{"ok":1}`))
 	})
 	resp, err := get(newFetcher(t, srv, nil), srv.URL+"/start")
-	if err != nil {
-		t.Fatalf("Fetch: %v", err)
-	}
+	mustDo(t, "Fetch", err)
 	if resp.FinalURL != srv.URL+"/final" {
 		t.Fatalf("FinalURL = %q, want %q", resp.FinalURL, srv.URL+"/final")
 	}
@@ -438,9 +411,7 @@ func TestFetch_EmptyBodyWithoutContentTypeIsAccepted(t *testing.T) {
 		w.WriteHeader(http.StatusCreated)
 	})
 	resp, err := get(newFetcher(t, srv, nil), srv.URL)
-	if err != nil {
-		t.Fatalf("an empty body with no declared Content-Type must be accepted: %v", err)
-	}
+	mustDo(t, "an empty body with no declared Content-Type must be accepted", err)
 	if resp.StatusCode != http.StatusCreated || len(resp.Body) != 0 {
 		t.Errorf("resp = %+v, want status 201 and an empty body", resp)
 	}
@@ -489,9 +460,7 @@ func TestFetch_ConcurrencyCap(t *testing.T) {
 		}()
 	}
 	for range callers {
-		if err := <-errs; err != nil {
-			t.Fatalf("a queued fetch must still succeed: %v", err)
-		}
+		mustDo(t, "a queued fetch must still succeed", <-errs)
 	}
 	if got := peak.Load(); got > maxInFlight {
 		t.Fatalf("peak concurrency %d exceeded the cap of %d", got, maxInFlight)
@@ -534,9 +503,7 @@ func TestFetch_NonSuccessStatusIsReturned(t *testing.T) {
 		_, _ = w.Write([]byte("nope"))
 	})
 	resp, err := get(newFetcher(t, srv, nil), srv.URL)
-	if err != nil {
-		t.Fatalf("Fetch: %v", err)
-	}
+	mustDo(t, "Fetch", err)
 	if resp.StatusCode != http.StatusNotFound || string(resp.Body) != "nope" {
 		t.Fatalf("got %d %q", resp.StatusCode, resp.Body)
 	}
@@ -754,9 +721,7 @@ func TestFetch_ReturnedHeaderDescribesTheReturnedBody(t *testing.T) {
 	if _, err := zw.Write([]byte(`{"ok":true}`)); err != nil {
 		t.Fatalf("gzip write: %v", err)
 	}
-	if err := zw.Close(); err != nil {
-		t.Fatalf("gzip close: %v", err)
-	}
+	mustDo(t, "gzip close", zw.Close())
 	body := buf.Bytes()
 	srv := stub(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -765,9 +730,7 @@ func TestFetch_ReturnedHeaderDescribesTheReturnedBody(t *testing.T) {
 		_, _ = w.Write(body)
 	})
 	resp, err := get(newFetcher(t, srv, nil), srv.URL)
-	if err != nil {
-		t.Fatalf("Fetch: %v", err)
-	}
+	mustDo(t, "Fetch", err)
 	if got := resp.Header.Get("Content-Encoding"); got != "" {
 		t.Errorf("Content-Encoding survived on an inflated body: %q", got)
 	}
@@ -811,9 +774,7 @@ func TestFetch_ProcessGateBoundsEveryFetcher(t *testing.T) {
 		}()
 	}
 	for range 12 {
-		if err := <-errs; err != nil {
-			t.Fatalf("a queued fetch must still succeed: %v", err)
-		}
+		mustDo(t, "a queued fetch must still succeed", <-errs)
 	}
 	if got := peak.Load(); got > 1 {
 		t.Fatalf("peak concurrency %d across two Fetchers, but the process gate was 1", got)
@@ -852,9 +813,7 @@ func TestFetch_DecompressedCeilingIsExact(t *testing.T) {
 		if _, err := zw.Write(bytes.Repeat([]byte("A"), size)); err != nil {
 			t.Fatalf("gzip write: %v", err)
 		}
-		if err := zw.Close(); err != nil {
-			t.Fatalf("gzip close: %v", err)
-		}
+		mustDo(t, "gzip close", zw.Close())
 		body := buf.Bytes()
 		srv := stub(t, func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "text/plain")
@@ -930,23 +889,7 @@ func TestFetch_RedirectSchemeDowngradeEndToEnd(t *testing.T) {
 	}))
 	t.Cleanup(origin.Close)
 
-	pool := x509.NewCertPool()
-	pool.AddCert(origin.Certificate())
-	f, err := New(Policy{
-		Schemes:              []string{"http", "https"}, // http is allowed, and still refused as a downgrade
-		Ports:                []int{serverPort(t, origin), serverPort(t, target)},
-		ContentTypes:         []string{"application/json", "text/plain"},
-		MaxRedirects:         3,
-		Deadline:             5 * time.Second,
-		MaxBytes:             64 << 10,
-		MaxDecompressedBytes: 256 << 10,
-		MaxConcurrent:        4,
-		Classify:             allowLoopback,
-		TLSConfig:            &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12},
-	})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	f := newTLSChainFetcher(t, []string{"http", "https"}, origin, target) // http is allowed, and still refused as a downgrade
 	if _, err := get(f, origin.URL); !errors.Is(err, ErrSchemeDowngrade) {
 		t.Fatalf("want ErrSchemeDowngrade, got %v", err)
 	}
@@ -965,28 +908,9 @@ func TestFetch_HTTPSRedirectToHTTPSIsFollowed(t *testing.T) {
 	}))
 	t.Cleanup(origin.Close)
 
-	pool := x509.NewCertPool()
-	pool.AddCert(origin.Certificate())
-	pool.AddCert(final.Certificate())
-	f, err := New(Policy{
-		Schemes:              []string{"https"},
-		Ports:                []int{serverPort(t, origin), serverPort(t, final)},
-		ContentTypes:         []string{"application/json", "text/plain"},
-		MaxRedirects:         3,
-		Deadline:             5 * time.Second,
-		MaxBytes:             64 << 10,
-		MaxDecompressedBytes: 256 << 10,
-		MaxConcurrent:        4,
-		Classify:             allowLoopback,
-		TLSConfig:            &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12},
-	})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	f := newTLSChainFetcher(t, []string{"https"}, origin, final)
 	resp, err := get(f, origin.URL)
-	if err != nil {
-		t.Fatalf("an https -> https redirect must be followed: %v", err)
-	}
+	mustDo(t, "an https -> https redirect must be followed", err)
 	if string(resp.Body) != `{"ok":1}` || resp.FinalURL != final.URL+"/x" {
 		t.Fatalf("body=%q finalURL=%q", resp.Body, resp.FinalURL)
 	}

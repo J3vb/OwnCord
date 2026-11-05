@@ -26,7 +26,6 @@ package ws_test
 // the drift this test exists to catch, not something to silently allowlist.
 
 import (
-	"encoding/json"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -78,9 +77,7 @@ func loadProtocolSchema(t *testing.T) protocolSchema {
 	}
 
 	var schema protocolSchema
-	if err := json.Unmarshal(raw, &schema); err != nil {
-		t.Fatalf("parsing protocol schema: %v", err)
-	}
+	mustUnmarshal(t, raw, &schema)
 	return schema
 }
 

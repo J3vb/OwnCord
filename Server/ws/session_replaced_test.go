@@ -24,13 +24,7 @@ func sessionReplacedFixture(t *testing.T) (*Hub, int64, string, string) {
 	t.Helper()
 	database := newHarvestVoiceDB(t)
 	uid := seedHarvestVoiceUser(t, database, "two-devices")
-	token, err := auth.GenerateToken()
-	if err != nil {
-		t.Fatalf("GenerateToken: %v", err)
-	}
-	if _, err := database.CreateSession(context.Background(), uid, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
+	token := seedSessionToken(t, database, uid)
 	hub := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	go hub.Run()
 	t.Cleanup(hub.Stop)

@@ -23,8 +23,7 @@ func TestAuditCoverage_PluginLifecycle(t *testing.T) {
 		body, contentType := buildZipUpload(t, validPluginZip(t))
 		req := httptest.NewRequest("POST", "/install", body)
 		req.Header.Set("Content-Type", contentType)
-		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, req)
+		rec := serveRequest(h, req)
 		if rec.Code != http.StatusCreated {
 			t.Fatalf("install: status = %d; body = %s", rec.Code, rec.Body.String())
 		}
@@ -47,8 +46,7 @@ func TestAuditCoverage_PluginLifecycle(t *testing.T) {
 			body, contentType := buildZipUpload(t, validPluginZip(t))
 			req := httptest.NewRequest("POST", "/install", body)
 			req.Header.Set("Content-Type", contentType)
-			w := httptest.NewRecorder()
-			h.ServeHTTP(w, req)
+			w := serveRequest(h, req)
 			if w.Code != http.StatusCreated {
 				t.Fatalf("install: status = %d; body = %s", w.Code, w.Body.String())
 			}

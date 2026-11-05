@@ -21,9 +21,7 @@ func (f *forwardFixture) chargeCounter(t *testing.T, user int64) {
 	if _, err := f.database.ChargeUserStorage(ctx, user, 0, 0); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.database.RecountUserStorage(ctx, user); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "RecountUserStorage", f.database.RecountUserStorage(ctx, user))
 }
 
 func (f *forwardFixture) rowBytes(t *testing.T, user int64) int64 {
@@ -39,9 +37,7 @@ func (f *forwardFixture) rowBytes(t *testing.T, user int64) int64 {
 // addFile stores a second file on an existing message.
 func (f *forwardFixture) addFile(t *testing.T, user, msgID int64, id, body string) {
 	t.Helper()
-	if err := f.database.CreateAttachment(context.Background(), id, user, id+".txt", id, "text/plain", int64(len(body)), nil, nil); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateAttachment", f.database.CreateAttachment(context.Background(), id, user, id+".txt", id, "text/plain", int64(len(body)), nil, nil))
 	if _, err := f.database.ExecContext(context.Background(), `UPDATE attachments SET message_id = ? WHERE id = ?`, msgID, id); err != nil {
 		t.Fatal(err)
 	}
@@ -59,9 +55,7 @@ func TestRemoveOwnUpload_SecondRemovalIsNotFoundAndNothingIsReleasedTwice(t *tes
 	}
 
 	removed, err := f.uploads.RemoveOwnUpload(ctx, fileID, fwdBob)
-	if err != nil {
-		t.Fatalf("first removal: %v", err)
-	}
+	mustDo(t, "first removal", err)
 	if removed.StoredAs != fileID || removed.Size != 10 || removed.MessageID == nil || *removed.MessageID != msgID {
 		t.Errorf("removed = %+v, want stored %s size 10 message %d", removed, fileID, msgID)
 	}
@@ -130,6 +124,25 @@ func TestRemoveOwnUpload_RefusesOthersInUseAndUnknown(t *testing.T) {
 	}
 }
 
+// removeOwnUpload deletes fwdBob's upload, the first half of every removal case.
+func (f *forwardFixture) removeOwnUpload(ctx context.Context, t *testing.T, fileID string) {
+	t.Helper()
+	if _, err := f.uploads.RemoveOwnUpload(ctx, fileID, fwdBob); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// afterRemovalChanged runs the post-removal step and requires the "files
+// changed" outcome rather than a delete.
+func (f *forwardFixture) afterRemovalChanged(ctx context.Context, t *testing.T, msgID int64) *AttachmentsChangedResult {
+	t.Helper()
+	changed, deleted, err := f.svc.AfterAttachmentRemoved(ctx, fwdBob, msgID)
+	if err != nil || deleted != nil || changed == nil {
+		t.Fatalf("after = %v %v %v, want a changed result", changed, deleted, err)
+	}
+	return changed
+}
+
 func TestAfterAttachmentRemoved_MessageDeletedMeanwhileAnnouncesNothing(t *testing.T) {
 	f := newForwardFixture(t, nil)
 	ctx := context.Background()
@@ -151,9 +164,7 @@ func TestAfterAttachmentRemoved_LastFileOfBlankMessageDeletesIt(t *testing.T) {
 	f := newForwardFixture(t, nil)
 	ctx := context.Background()
 	msgID, fileID := f.sendWithFile(t, fwdBob, fwdDstChan, "", "0123456789")
-	if _, err := f.uploads.RemoveOwnUpload(ctx, fileID, fwdBob); err != nil {
-		t.Fatal(err)
-	}
+	f.removeOwnUpload(ctx, t, fileID)
 	changed, deleted, err := f.svc.AfterAttachmentRemoved(ctx, fwdBob, msgID)
 	if err != nil || changed != nil || deleted == nil {
 		t.Fatalf("after = %v %v %v, want a delete result", changed, deleted, err)
@@ -176,13 +187,8 @@ func TestAfterAttachmentRemoved_LastFileWithTextAnnouncesEmptyListAndKeepsMentio
 	if n := f.count(t, `SELECT COUNT(*) FROM message_mentions WHERE message_id = ?`, msgID); n != 1 {
 		t.Fatalf("seed mentions = %d, want 1", n)
 	}
-	if _, err := f.uploads.RemoveOwnUpload(ctx, fileID, fwdBob); err != nil {
-		t.Fatal(err)
-	}
-	changed, deleted, err := f.svc.AfterAttachmentRemoved(ctx, fwdBob, msgID)
-	if err != nil || deleted != nil || changed == nil {
-		t.Fatalf("after = %v %v %v, want a changed result", changed, deleted, err)
-	}
+	f.removeOwnUpload(ctx, t, fileID)
+	changed := f.afterRemovalChanged(ctx, t, msgID)
 	if changed.Attachments == nil || len(changed.Attachments) != 0 {
 		t.Errorf("attachments = %#v, want a non-nil empty list", changed.Attachments)
 	}
@@ -207,13 +213,8 @@ func TestAfterAttachmentRemoved_RenamedMentionIsStillAnnouncedAndStored(t *testi
 	if _, err := f.database.ExecContext(ctx, `UPDATE users SET username = 'carol_renamed' WHERE id = ?`, fwdCarol); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.uploads.RemoveOwnUpload(ctx, fileID, fwdBob); err != nil {
-		t.Fatal(err)
-	}
-	changed, deleted, err := f.svc.AfterAttachmentRemoved(ctx, fwdBob, msgID)
-	if err != nil || deleted != nil || changed == nil {
-		t.Fatalf("after = %v %v %v, want a changed result", changed, deleted, err)
-	}
+	f.removeOwnUpload(ctx, t, fileID)
+	changed := f.afterRemovalChanged(ctx, t, msgID)
 	if len(changed.Mentions) != 1 || changed.Mentions[0] != fwdCarol {
 		t.Errorf("mentions = %v, want the stored [%d] despite the rename", changed.Mentions, fwdCarol)
 	}
@@ -226,19 +227,14 @@ func TestAfterAttachmentRemoved_TextAddedBeforeTheDeleteKeepsTheMessage(t *testi
 	f := newForwardFixture(t, nil)
 	ctx := context.Background()
 	msgID, fileID := f.sendWithFile(t, fwdBob, fwdDstChan, "", "0123456789")
-	if _, err := f.uploads.RemoveOwnUpload(ctx, fileID, fwdBob); err != nil {
-		t.Fatal(err)
-	}
+	f.removeOwnUpload(ctx, t, fileID)
 	// Another device edits in text between the read and the delete.
 	f.svc.afterRemovalRead = func() {
 		if _, err := f.svc.EditMessage(ctx, fwdBob, msgID, "late text"); err != nil {
 			t.Errorf("edit in the window: %v", err)
 		}
 	}
-	changed, deleted, err := f.svc.AfterAttachmentRemoved(ctx, fwdBob, msgID)
-	if err != nil || deleted != nil || changed == nil {
-		t.Fatalf("after = %v %v %v, want a changed result", changed, deleted, err)
-	}
+	changed := f.afterRemovalChanged(ctx, t, msgID)
 	if changed.Content != "late text" || changed.EditedAt == nil || len(changed.Attachments) != 0 {
 		t.Errorf("changed = %+v, want the fresh text, its edited_at and no files", changed)
 	}
@@ -252,13 +248,8 @@ func TestAfterAttachmentRemoved_KeepsTheOtherFiles(t *testing.T) {
 	ctx := context.Background()
 	msgID, fileID := f.sendWithFile(t, fwdBob, fwdDstChan, "", "0123456789")
 	f.addFile(t, fwdBob, msgID, "second", "abc")
-	if _, err := f.uploads.RemoveOwnUpload(ctx, fileID, fwdBob); err != nil {
-		t.Fatal(err)
-	}
-	changed, deleted, err := f.svc.AfterAttachmentRemoved(ctx, fwdBob, msgID)
-	if err != nil || deleted != nil || changed == nil {
-		t.Fatalf("after = %v %v %v, want a changed result", changed, deleted, err)
-	}
+	f.removeOwnUpload(ctx, t, fileID)
+	changed := f.afterRemovalChanged(ctx, t, msgID)
 	if len(changed.Attachments) != 1 || changed.Attachments[0].ID != "second" {
 		t.Errorf("attachments = %+v, want just second", changed.Attachments)
 	}
@@ -271,9 +262,7 @@ func TestAfterAttachmentRemoved_ArchivedChannelFallsBackToChanged(t *testing.T) 
 	if _, err := f.database.ExecContext(ctx, `UPDATE channels SET archived = 1 WHERE id = ?`, fwdDstChan); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.uploads.RemoveOwnUpload(ctx, fileID, fwdBob); err != nil {
-		t.Fatal(err)
-	}
+	f.removeOwnUpload(ctx, t, fileID)
 	changed, deleted, err := f.svc.AfterAttachmentRemoved(ctx, fwdBob, msgID)
 	if err != nil || deleted != nil || changed == nil || len(changed.Attachments) != 0 {
 		t.Fatalf("after = %+v %v %v, want a changed result with no files", changed, deleted, err)
@@ -288,16 +277,9 @@ func TestAfterAttachmentRemoved_ForwardIsNeverDeletedNorGainsMentions(t *testing
 	ctx := context.Background()
 	res := mustForward(t, f, fwdDstChan, f.srcID)
 	var cloneID string
-	if err := f.database.QueryRowContext(ctx, `SELECT id FROM attachments WHERE message_id = ?`, res.MessageID).Scan(&cloneID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.uploads.RemoveOwnUpload(ctx, cloneID, fwdBob); err != nil {
-		t.Fatal(err)
-	}
-	changed, deleted, err := f.svc.AfterAttachmentRemoved(ctx, fwdBob, res.MessageID)
-	if err != nil || deleted != nil || changed == nil {
-		t.Fatalf("after = %v %v %v, want a changed result", changed, deleted, err)
-	}
+	mustDo(t, "QueryRowContext", f.database.QueryRowContext(ctx, `SELECT id FROM attachments WHERE message_id = ?`, res.MessageID).Scan(&cloneID))
+	f.removeOwnUpload(ctx, t, cloneID)
+	changed := f.afterRemovalChanged(ctx, t, res.MessageID)
 	if len(changed.Mentions) != 0 || changed.MentionsEveryone {
 		t.Errorf("a forward gained mentions: %v everyone=%v", changed.Mentions, changed.MentionsEveryone)
 	}
@@ -310,9 +292,7 @@ func TestAfterAttachmentRemoved_DMAudienceIsTheParticipants(t *testing.T) {
 	f := newForwardFixture(t, nil)
 	ctx := context.Background()
 	msgID, fileID := f.sendWithFile(t, fwdBob, fwdDM, "private", "0123456789")
-	if _, err := f.uploads.RemoveOwnUpload(ctx, fileID, fwdBob); err != nil {
-		t.Fatal(err)
-	}
+	f.removeOwnUpload(ctx, t, fileID)
 	changed, _, err := f.svc.AfterAttachmentRemoved(ctx, fwdBob, msgID)
 	if err != nil || changed == nil || !changed.IsDM {
 		t.Fatalf("after = %+v %v, want a DM changed result", changed, err)

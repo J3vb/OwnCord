@@ -164,17 +164,8 @@ func TestResume_AfterRoleAdd_FullReadyHasRole(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateUser owner: %v", err)
 	}
-	chID, err := database.CreateChannel(ctx, "resume-role-channel", "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
-	token, err := auth.GenerateToken()
-	if err != nil {
-		t.Fatalf("GenerateToken: %v", err)
-	}
-	if _, err := database.CreateSession(ctx, userID, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
+	chID := mustCreateChannel(t, database, "resume-role-channel", "text")
+	token := seedSessionToken(t, database, userID)
 	limiter := auth.NewRateLimiter()
 	svc := service.New(database, limiter)
 	hub := newTestHub(t, database, limiter, svc)

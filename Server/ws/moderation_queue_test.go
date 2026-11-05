@@ -23,15 +23,7 @@ import (
 
 func openReportTestDB(t *testing.T) *db.DB {
 	t.Helper()
-	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("db.Migrate: %v", err)
-	}
-	return database
+	return openMigratedDB(t)
 }
 
 // TestModerationAudience_OnlyBitHoldersOrAdmin pins the base property: only
@@ -54,14 +46,8 @@ func TestModerationAudience_OnlyBitHoldersOrAdmin(t *testing.T) {
 	}
 	// A report naming neither connected user: the audience should be
 	// unfiltered by principal exclusion here, isolating the bit check.
-	reporterID, err := database.CreateUser(ctx, "mq-reporter-offline", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser(reporter): %v", err)
-	}
-	subjectID, err := database.CreateUser(ctx, "mq-subject-offline", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser(subject): %v", err)
-	}
+	reporterID := mustCreateUser(t, database, "mq-reporter-offline", 4)
+	subjectID := mustCreateUser(t, database, "mq-subject-offline", 4)
 	reportID, err := database.FileReport(ctx, "pub-base", reporterID, subjectID, "user", "1", nil, "spam", "", nil)
 	if err != nil {
 		t.Fatalf("FileReport: %v", err)
@@ -103,18 +89,9 @@ func TestModQueue_ExcludesSubjectAndReporterEvenIfTheyHoldTheBit(t *testing.T) {
 	ctx := context.Background()
 	// All three are Moderator-role (id 3): CanModerate is satisfied by all,
 	// so only the principal exclusion can be responsible for who is left out.
-	reporterID, err := database.CreateUser(ctx, "mq-reporter-mod", "hash", 3)
-	if err != nil {
-		t.Fatalf("CreateUser(reporter): %v", err)
-	}
-	subjectID, err := database.CreateUser(ctx, "mq-subject-mod", "hash", 3)
-	if err != nil {
-		t.Fatalf("CreateUser(subject): %v", err)
-	}
-	thirdModID, err := database.CreateUser(ctx, "mq-third-mod", "hash", 3)
-	if err != nil {
-		t.Fatalf("CreateUser(third): %v", err)
-	}
+	reporterID := mustCreateUser(t, database, "mq-reporter-mod", 3)
+	subjectID := mustCreateUser(t, database, "mq-subject-mod", 3)
+	thirdModID := mustCreateUser(t, database, "mq-third-mod", 3)
 	reportID, err := database.FileReport(ctx, "pub-excl", reporterID, subjectID, "user", "1", nil, "spam", "", nil)
 	if err != nil {
 		t.Fatalf("FileReport: %v", err)

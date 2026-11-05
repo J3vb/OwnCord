@@ -13,9 +13,7 @@ import (
 func TestGenerateTOTPCodeAndVerify_RFCVector(t *testing.T) {
 	secret := "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"
 	code, err := auth.GenerateTOTPCode(secret, time.Unix(59, 0).UTC())
-	if err != nil {
-		t.Fatalf("GenerateTOTPCode: %v", err)
-	}
+	mustDo(t, "GenerateTOTPCode", err)
 	if code != "287082" {
 		t.Fatalf("code = %q, want 287082", code)
 	}
@@ -31,9 +29,7 @@ func TestVerifyTOTPCode_ClockSkewTolerance(t *testing.T) {
 	secret := "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"
 	now := time.Now().UTC()
 	code, err := auth.GenerateTOTPCode(secret, now)
-	if err != nil {
-		t.Fatalf("GenerateTOTPCode: %v", err)
-	}
+	mustDo(t, "GenerateTOTPCode", err)
 
 	// Code should verify at current time.
 	if !auth.VerifyTOTPCode(secret, code, now) {
@@ -78,9 +74,7 @@ func TestGenerateTOTPCode_InvalidSecret(t *testing.T) {
 
 func TestGenerateTOTPSecret_ReturnsValidBase32(t *testing.T) {
 	secret, err := auth.GenerateTOTPSecret()
-	if err != nil {
-		t.Fatalf("GenerateTOTPSecret() error: %v", err)
-	}
+	mustDo(t, "GenerateTOTPSecret() error", err)
 	if secret == "" {
 		t.Fatal("GenerateTOTPSecret() returned empty string")
 	}
@@ -107,9 +101,7 @@ func TestPartialAuthStore_IssueAndLookup(t *testing.T) {
 	ctx := context.Background()
 	store := auth.NewPartialAuthStore(time.Minute)
 	token, err := store.Issue(ctx, 42, "desktop", "192.168.1.1")
-	if err != nil {
-		t.Fatalf("Issue() error: %v", err)
-	}
+	mustDo(t, "Issue() error", err)
 	if token == "" {
 		t.Fatal("Issue() returned empty token")
 	}
@@ -219,9 +211,7 @@ func TestPartialAuthStore_ExpiryCleanup(t *testing.T) {
 func TestPendingTOTPStore_PutAndLookup(t *testing.T) {
 	ctx := context.Background()
 	store := auth.NewPendingTOTPStore(time.Minute)
-	if err := store.Put(ctx, 42, "MYSECRET"); err != nil {
-		t.Fatalf("Put: %v", err)
-	}
+	mustDo(t, "Put", store.Put(ctx, 42, "MYSECRET"))
 
 	secret, ok := store.Lookup(ctx, 42)
 	if !ok {
@@ -243,9 +233,7 @@ func TestPendingTOTPStore_LookupMissing(t *testing.T) {
 func TestPendingTOTPStore_Delete(t *testing.T) {
 	ctx := context.Background()
 	store := auth.NewPendingTOTPStore(time.Minute)
-	if err := store.Put(ctx, 42, "SECRET"); err != nil {
-		t.Fatalf("Put: %v", err)
-	}
+	mustDo(t, "Put", store.Put(ctx, 42, "SECRET"))
 	store.Delete(ctx, 42)
 
 	_, ok := store.Lookup(ctx, 42)
@@ -257,12 +245,8 @@ func TestPendingTOTPStore_Delete(t *testing.T) {
 func TestPendingTOTPStore_Overwrite(t *testing.T) {
 	ctx := context.Background()
 	store := auth.NewPendingTOTPStore(time.Minute)
-	if err := store.Put(ctx, 42, "OLD"); err != nil {
-		t.Fatalf("Put: %v", err)
-	}
-	if err := store.Put(ctx, 42, "NEW"); err != nil {
-		t.Fatalf("Put: %v", err)
-	}
+	mustDo(t, "Put", store.Put(ctx, 42, "OLD"))
+	mustDo(t, "Put", store.Put(ctx, 42, "NEW"))
 
 	secret, ok := store.Lookup(ctx, 42)
 	if !ok {
@@ -276,9 +260,7 @@ func TestPendingTOTPStore_Overwrite(t *testing.T) {
 func TestPendingTOTPStore_ExpiryCleanup(t *testing.T) {
 	ctx := context.Background()
 	store := auth.NewPendingTOTPStore(50 * time.Millisecond)
-	if err := store.Put(ctx, 42, "EPHEMERAL"); err != nil {
-		t.Fatalf("Put: %v", err)
-	}
+	mustDo(t, "Put", store.Put(ctx, 42, "EPHEMERAL"))
 
 	time.Sleep(80 * time.Millisecond)
 
@@ -334,9 +316,7 @@ func TestVerifyTOTPCodeOnce_ValidCodeAccepted(t *testing.T) {
 	secret := "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"
 	now := time.Now().UTC()
 	code, err := auth.GenerateTOTPCode(secret, now)
-	if err != nil {
-		t.Fatalf("GenerateTOTPCode: %v", err)
-	}
+	mustDo(t, "GenerateTOTPCode", err)
 
 	store := auth.NewUsedTOTPCodeStore()
 	if !auth.VerifyTOTPCodeOnce(context.Background(), secret, code, now, 1, store) {
@@ -383,9 +363,7 @@ func TestBuildTOTPURI_ContainsIssuerAndSecret(t *testing.T) {
 	secret := "JBSWY3DPEHPK3PXP"
 	uri := auth.BuildTOTPURI("alice", secret, "OwnCord")
 	parsed, err := url.Parse(uri)
-	if err != nil {
-		t.Fatalf("url.Parse: %v", err)
-	}
+	mustDo(t, "url.Parse", err)
 	if parsed.Scheme != "otpauth" {
 		t.Fatalf("scheme = %q, want otpauth", parsed.Scheme)
 	}
@@ -407,9 +385,7 @@ func TestPartialAuthStore_RestoreAfterConsume(t *testing.T) {
 	ctx := context.Background()
 	store := auth.NewPartialAuthStore(time.Minute)
 	token, err := store.Issue(ctx, 7, "device", "203.0.113.7")
-	if err != nil {
-		t.Fatalf("Issue: %v", err)
-	}
+	mustDo(t, "Issue", err)
 	store.RegisterFailure(ctx, token, 5) // Failures=1 must survive the round trip
 
 	claimed, ok := store.Consume(ctx, token)
@@ -437,9 +413,7 @@ func TestPartialAuthStore_RestoreExpiredStaysGone(t *testing.T) {
 	ctx := context.Background()
 	store := auth.NewPartialAuthStore(20 * time.Millisecond)
 	token, err := store.Issue(ctx, 7, "device", "203.0.113.7")
-	if err != nil {
-		t.Fatalf("Issue: %v", err)
-	}
+	mustDo(t, "Issue", err)
 	claimed, ok := store.Consume(ctx, token)
 	if !ok {
 		t.Fatal("Consume: challenge not found")

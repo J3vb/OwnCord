@@ -20,19 +20,13 @@ import (
 func openAndBoot(t *testing.T, path string) (*db.DB, uint64) {
 	t.Helper()
 	database, err := db.Open(path)
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	if err := db.Migrate(database); err != nil {
-		t.Fatalf("db.Migrate: %v", err)
-	}
+	mustDo(t, "db.Open", err)
+	mustDo(t, "db.Migrate", db.Migrate(database))
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	hub := &ws.Hub{}
 	seedHubSeqFloor(context.Background(), hub, database, log)
 	raw, err := database.GetSetting(context.Background(), wsSeqFloorSettingKey)
-	if err != nil {
-		t.Fatalf("GetSetting: %v", err)
-	}
+	mustDo(t, "GetSetting", err)
 	floor, err := strconv.ParseUint(raw, 10, 64)
 	if err != nil {
 		t.Fatalf("parse floor %q: %v", raw, err)
@@ -60,15 +54,9 @@ func removeWALSidecars(t *testing.T, dbPath string) {
 // database.
 func restoreOver(t *testing.T, database *db.DB, path, backup string) {
 	t.Helper()
-	if err := database.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
-	if err := db.CarryWSSeqFloorForRestore(context.Background(), path); err != nil {
-		t.Fatalf("CarryWSSeqFloorForRestore: %v", err)
-	}
-	if err := db.AdvanceMessageDeliveryFloorForRestore(path); err != nil {
-		t.Fatalf("AdvanceMessageDeliveryFloorForRestore: %v", err)
-	}
+	mustDo(t, "Close", database.Close())
+	mustDo(t, "CarryWSSeqFloorForRestore", db.CarryWSSeqFloorForRestore(context.Background(), path))
+	mustDo(t, "AdvanceMessageDeliveryFloorForRestore", db.AdvanceMessageDeliveryFloorForRestore(path))
 	removeWALSidecars(t, path)
 	copyFile(t, backup, path)
 }
@@ -82,12 +70,8 @@ func prepareRestoredScenario(t *testing.T) (path string, preRestoreFloor uint64)
 	backup := filepath.Join(dir, "backup.db")
 
 	first, _ := openAndBoot(t, path)
-	if err := first.BackupToSafe(context.Background(), backup, dir); err != nil {
-		t.Fatalf("BackupTo: %v", err)
-	}
-	if err := first.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
+	mustDo(t, "BackupTo", first.BackupToSafe(context.Background(), backup, dir))
+	mustDo(t, "Close", first.Close())
 	// The pre-restore server keeps running and reserves further blocks.
 	second, floor := openAndBoot(t, path)
 	restoreOver(t, second, path, backup)
@@ -105,9 +89,7 @@ func TestSeedHubSeqFloor_RestoredBackupDoesNotReuseTheOldBlock(t *testing.T) {
 		t.Fatalf("post-restore floor %d must be at least pre-restore floor %d + reserve", floor, preRestore)
 	}
 	// Restoring the same backup again must not walk the floor back.
-	if err := booted.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
+	mustDo(t, "Close", booted.Close())
 	removeWALSidecars(t, path)
 	copyFile(t, filepath.Join(filepath.Dir(path), "backup.db"), path)
 	again, floor2 := openAndBoot(t, path)
@@ -125,16 +107,10 @@ func TestSeedHubSeqFloor_RestoreCarriesTheLiveFloorWithoutASidecar(t *testing.T)
 	path := filepath.Join(dir, "chat.db")
 	backup := filepath.Join(dir, "backup.db")
 	first, _ := openAndBoot(t, path)
-	if err := first.BackupToSafe(context.Background(), backup, dir); err != nil {
-		t.Fatal(err)
-	}
-	if err := first.Close(); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "BackupToSafe", first.BackupToSafe(context.Background(), backup, dir))
+	mustDo(t, "Close", first.Close())
 	live, liveFloor := openAndBoot(t, path)
-	if err := os.Remove(path + ".ws-seq-floor"); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Remove", os.Remove(path+".ws-seq-floor"))
 	restoreOver(t, live, path, backup)
 	booted, floor := openAndBoot(t, path)
 	defer booted.Close() //nolint:errcheck
@@ -155,19 +131,13 @@ func TestSeedHubSeqFloor_OutOfRangeValuesSaturate(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "chat.db")
 			first, _ := openAndBoot(t, path)
-			if err := first.SetSetting(context.Background(), wsSeqFloorSettingKey, strconv.FormatUint(stored, 10)); err != nil {
-				t.Fatal(err)
-			}
-			if err := first.Close(); err != nil {
-				t.Fatal(err)
-			}
+			mustDo(t, "SetSetting", first.SetSetting(context.Background(), wsSeqFloorSettingKey, strconv.FormatUint(stored, 10)))
+			mustDo(t, "Close", first.Close())
 			booted, floor := openAndBoot(t, path)
 			if floor != db.MaxWSSeqFloor {
 				t.Fatalf("floor = %d, want the limit %d", floor, db.MaxWSSeqFloor)
 			}
-			if err := booted.Close(); err != nil {
-				t.Fatal(err)
-			}
+			mustDo(t, "Close", booted.Close())
 			again, floor2 := openAndBoot(t, path)
 			defer again.Close() //nolint:errcheck
 			if floor2 != db.MaxWSSeqFloor {
@@ -182,15 +152,9 @@ func TestSeedHubSeqFloor_OutOfRangeValuesSaturate(t *testing.T) {
 func TestSeedHubSeqFloor_FailedSidecarWriteStillBoots(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "chat.db")
 	first, firstFloor := openAndBoot(t, path)
-	if err := first.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Remove(path + ".ws-seq-floor"); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Mkdir(path+".ws-seq-floor", 0o700); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Close", first.Close())
+	mustDo(t, "Remove", os.Remove(path+".ws-seq-floor"))
+	mustDo(t, "Mkdir", os.Mkdir(path+".ws-seq-floor", 0o700))
 	booted, floor := openAndBoot(t, path) // asserts the hub seq equals floor
 	defer booted.Close()                  //nolint:errcheck
 	if want := firstFloor + wsSeqFloorReserve; floor != want {
@@ -230,9 +194,7 @@ func TestSeedHubSeqFloor_FailedSettingsWriteStillSeedsTheHub(t *testing.T) {
 func TestSeedHubSeqFloor_UnreadableSettingsUseTheSidecar(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "chat.db")
 	first, firstFloor := openAndBoot(t, path)
-	if err := first.Close(); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "Close", first.Close())
 	hub := &ws.Hub{}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	seedHubSeqFloor(context.Background(), hub, first, log)
@@ -250,9 +212,7 @@ func TestSeedHubSeqFloor_MissingOrCorruptSidecarFallsBack(t *testing.T) {
 			path, _ := prepareRestoredScenario(t)
 			sidecar := path + ".ws-seq-floor"
 			if contents == nil {
-				if err := os.Remove(sidecar); err != nil {
-					t.Fatal(err)
-				}
+				mustDo(t, "Remove", os.Remove(sidecar))
 			} else if err := os.WriteFile(sidecar, []byte(*contents), 0o600); err != nil {
 				t.Fatal(err)
 			}

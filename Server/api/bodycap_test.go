@@ -50,8 +50,7 @@ func TestBodyCapExemptions_RouteEnvelopesReachable(t *testing.T) {
 			method = http.MethodPost
 		}
 		req := httptest.NewRequest(method, tc.path, bytes.NewReader(body))
-		rr := httptest.NewRecorder()
-		h.ServeHTTP(rr, req)
+		rr := serveRequest(h, req)
 		if rr.Code != tc.want {
 			t.Errorf("%s with 2 MiB body: status = %d, want %d", tc.path, rr.Code, tc.want)
 		}

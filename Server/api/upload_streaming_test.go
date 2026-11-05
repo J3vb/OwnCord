@@ -62,9 +62,7 @@ func TestUpload_LargeBodyNeverStagesOutsideTheStorageDir(t *testing.T) {
 	const size = 20 << 20 // above the 10 MiB in-memory multipart threshold, below the 100 MiB request cap
 	body := bytes.Repeat([]byte("z"), size)
 	rr := doUpload(t, h.router, h.token, "file", "big.bin", body)
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("large upload: %d %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusCreated)
 
 	entries, err := os.ReadDir(tmpDir)
 	if err != nil {
@@ -110,8 +108,7 @@ func TestUpload_UnknownLengthIsFloorGatedBeforeTheBodyIsRead(t *testing.T) {
 	req.TransferEncoding = []string{"chunked"}
 	req.Header.Set("Content-Type", contentType)
 	req.Header.Set("Authorization", "Bearer "+h.token)
-	rr := httptest.NewRecorder()
-	h.router.ServeHTTP(rr, req)
+	rr := serveRequest(h.router, req)
 
 	assertErrorCode(t, rr, http.StatusInsufficientStorage, "STORAGE_LOW_DISK")
 	if probes.Load() < 1 {
@@ -137,8 +134,7 @@ func chunkedUpload(t *testing.T, h *quotaHarness, content []byte) *httptest.Resp
 	req.TransferEncoding = []string{"chunked"}
 	req.Header.Set("Content-Type", contentType)
 	req.Header.Set("Authorization", "Bearer "+h.token)
-	rr := httptest.NewRecorder()
-	h.router.ServeHTTP(rr, req)
+	rr := serveRequest(h.router, req)
 	return rr
 }
 
@@ -152,9 +148,7 @@ func TestUpload_UnknownLengthAdmittedUnderAPerFileCap(t *testing.T) {
 	h.limitsCapped(t, 10<<20, 0, nil, 5<<20) // quota above the 5 MiB cap, below the 100 MiB request cap
 
 	rr := chunkedUpload(t, h, []byte("hello"))
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("chunked upload under a per-file cap smaller than the quota: %d %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusCreated)
 }
 
 // TestUpload_UnknownLengthRefusedWhenQuotaBelowTheCap: the same shape, but
@@ -181,9 +175,7 @@ func TestUpload_UnknownLengthReservesThePerFileCapBeforeTheBodyIsRead(t *testing
 	h.limitsCapped(t, 0, 50<<20, func(string) (uint64, error) { probes.Add(1); return 60 << 20, nil }, 5<<20)
 
 	rr := chunkedUpload(t, h, []byte("hello"))
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("chunked upload reserving the 5 MiB cap under a floor that only has room for the cap: %d %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusCreated)
 	if probes.Load() < 1 {
 		t.Fatal("the floor probe never ran for an unknown-length body")
 	}
@@ -209,8 +201,7 @@ func TestUpload_PlainFieldNamedFileIsNotAFile(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/uploads", body)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	req.Header.Set("Authorization", "Bearer "+h.token)
-	rr := httptest.NewRecorder()
-	h.router.ServeHTTP(rr, req)
+	rr := serveRequest(h.router, req)
 
 	assertErrorCode(t, rr, http.StatusBadRequest, "BAD_REQUEST")
 	if !strings.Contains(rr.Body.String(), "missing file field") {

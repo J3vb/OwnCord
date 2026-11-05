@@ -48,9 +48,7 @@ func TestEraseAccount_AllowedWhenOtherAdminExists(t *testing.T) {
 	setRole(t, database, admin2, 2) // Admin
 
 	err := eraseAccount(context.Background(), database, admin1)
-	if err != nil {
-		t.Fatalf("EraseAccount with another admin present: %v", err)
-	}
+	mustDo(t, "EraseAccount with another admin present", err)
 }
 
 // TestEraseAccount_AllowedWhenOtherAdminHasLapsedTempBan locks the guard's
@@ -75,9 +73,7 @@ func TestEraseAccount_AllowedWhenOtherAdminHasLapsedTempBan(t *testing.T) {
 	}
 
 	err := eraseAccount(context.Background(), database, admin1)
-	if err != nil {
-		t.Fatalf("EraseAccount with a lapsed-temp-ban admin present: %v", err)
-	}
+	mustDo(t, "EraseAccount with a lapsed-temp-ban admin present", err)
 }
 
 func TestEraseAccount_AdminAllowedWhenOwnerExists(t *testing.T) {
@@ -89,9 +85,7 @@ func TestEraseAccount_AdminAllowedWhenOwnerExists(t *testing.T) {
 
 	// Admin can delete because owner still exists.
 	err := eraseAccount(context.Background(), database, adminID)
-	if err != nil {
-		t.Fatalf("EraseAccount(admin with owner present): %v", err)
-	}
+	mustDo(t, "EraseAccount(admin with owner present)", err)
 }
 
 // ─── EraseAccount — member deletion ─────────────────────────────────────────
@@ -101,9 +95,7 @@ func TestEraseAccount_MemberSucceeds(t *testing.T) {
 	userID := seedUser(t, database, "alice") // default role_id=4
 
 	err := eraseAccount(context.Background(), database, userID)
-	if err != nil {
-		t.Fatalf("EraseAccount(member): %v", err)
-	}
+	mustDo(t, "EraseAccount(member)", err)
 }
 
 // ─── EraseAccount — the row is gone ─────────────────────────────────────────
@@ -114,17 +106,12 @@ func TestEraseAccount_RemovesTheUserRow(t *testing.T) {
 	database.ExecContext(context.Background(), "UPDATE users SET avatar = 'pic.png', totp_secret = 'SECRET', display_name = 'A', about = 'bio', custom_status = 'busy', identity_public_key = 'key' WHERE id = ?", userID) //nolint:errcheck
 
 	job, err := database.EraseAccount(context.Background(), userID, "")
-	if err != nil {
-		t.Fatalf("EraseAccount: %v", err)
-	}
+	mustDo(t, "EraseAccount", err)
 	if job == nil || job.UserID != userID || job.State != db.ErasureStateDBDone {
 		t.Fatalf("job = %+v, want db_done for user %d", job, userID)
 	}
 
-	user, err := database.GetUserByID(context.Background(), userID)
-	if err != nil {
-		t.Fatalf("GetUserByID after erasure: %v", err)
-	}
+	user := mustGetUserByID(t, database, userID)
 	if user != nil {
 		t.Errorf("user row survived the erasure: %+v", user)
 	}
@@ -181,9 +168,7 @@ func TestEraseAccount_HardDeletesMessages(t *testing.T) {
 func countFTS(t *testing.T, database *db.DB, term string) int {
 	t.Helper()
 	var n int
-	if err := database.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM messages_fts WHERE messages_fts MATCH ?`, term).Scan(&n); err != nil {
-		t.Fatalf("FTS count: %v", err)
-	}
+	mustDo(t, "FTS count", database.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM messages_fts WHERE messages_fts MATCH ?`, term).Scan(&n))
 	return n
 }
 
@@ -201,20 +186,13 @@ func TestEraseAccount_ReversesMentionCounts(t *testing.T) {
 	bob := seedUser(t, database, "bob-mention")
 	chID := seedChannel(t, database, "general-mention")
 
-	msg, err := database.CreateMessageWithMentions(ctx, chID, alice, "hi @bob", nil, []int64{bob}, 0, false, nil)
-	if err != nil {
-		t.Fatalf("CreateMessageWithMentions: %v", err)
-	}
-	if err := database.IncrementMentionCounts(ctx, chID, msg.ID, []int64{bob}); err != nil {
-		t.Fatalf("IncrementMentionCounts: %v", err)
-	}
+	msg := mustCreateMessageWithMentions(t, database, chID, alice, "hi @bob", nil, []int64{bob}, 0, false, nil)
+	mustDo(t, "IncrementMentionCounts", database.IncrementMentionCounts(ctx, chID, msg.ID, []int64{bob}))
 	if n, _ := database.GetMentionCount(ctx, bob, chID); n != 1 {
 		t.Fatalf("precondition: bob mention_count = %d, want 1", n)
 	}
 
-	if err := eraseAccount(ctx, database, alice); err != nil {
-		t.Fatalf("EraseAccount: %v", err)
-	}
+	mustDo(t, "EraseAccount", eraseAccount(ctx, database, alice))
 
 	if n, _ := database.GetMentionCount(ctx, bob, chID); n != 0 {
 		t.Errorf("bob mention_count = %d after alice's account deletion, want 0 (phantom badge on a channel with nothing unread)", n)
@@ -234,29 +212,17 @@ func TestEraseAccount_MentionCounts_PreservesOthersContribution(t *testing.T) {
 	bob := seedUser(t, database, "bob-mention2")
 	chID := seedChannel(t, database, "general-mention2")
 
-	msgAlice, err := database.CreateMessageWithMentions(ctx, chID, alice, "hi @bob", nil, []int64{bob}, 0, false, nil)
-	if err != nil {
-		t.Fatalf("CreateMessageWithMentions(alice): %v", err)
-	}
-	if err := database.IncrementMentionCounts(ctx, chID, msgAlice.ID, []int64{bob}); err != nil {
-		t.Fatalf("IncrementMentionCounts(alice): %v", err)
-	}
+	msgAlice := mustCreateMessageWithMentions(t, database, chID, alice, "hi @bob", nil, []int64{bob}, 0, false, nil)
+	mustDo(t, "IncrementMentionCounts(alice)", database.IncrementMentionCounts(ctx, chID, msgAlice.ID, []int64{bob}))
 
-	msgCarol, err := database.CreateMessageWithMentions(ctx, chID, carol, "hey @bob too", nil, []int64{bob}, 0, false, nil)
-	if err != nil {
-		t.Fatalf("CreateMessageWithMentions(carol): %v", err)
-	}
-	if err := database.IncrementMentionCounts(ctx, chID, msgCarol.ID, []int64{bob}); err != nil {
-		t.Fatalf("IncrementMentionCounts(carol): %v", err)
-	}
+	msgCarol := mustCreateMessageWithMentions(t, database, chID, carol, "hey @bob too", nil, []int64{bob}, 0, false, nil)
+	mustDo(t, "IncrementMentionCounts(carol)", database.IncrementMentionCounts(ctx, chID, msgCarol.ID, []int64{bob}))
 
 	if n, _ := database.GetMentionCount(ctx, bob, chID); n != 2 {
 		t.Fatalf("precondition: bob mention_count = %d, want 2", n)
 	}
 
-	if err := eraseAccount(ctx, database, alice); err != nil {
-		t.Fatalf("EraseAccount: %v", err)
-	}
+	mustDo(t, "EraseAccount", eraseAccount(ctx, database, alice))
 
 	if n, _ := database.GetMentionCount(ctx, bob, chID); n != 1 {
 		t.Errorf("bob mention_count = %d after alice's account deletion, want 1 (carol's genuine mention must survive)", n)
@@ -308,9 +274,7 @@ func TestEraseAccount_DeletesAPITokenRows(t *testing.T) {
 		t.Error("API token still active after erasure")
 	}
 	var rows int
-	if err := database.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM api_tokens WHERE user_id = ?`, uid).Scan(&rows); err != nil {
-		t.Fatalf("count api_tokens: %v", err)
-	}
+	mustDo(t, "count api_tokens", database.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM api_tokens WHERE user_id = ?`, uid).Scan(&rows))
 	if rows != 0 {
 		t.Errorf("api_tokens rows = %d after erasure, want 0 (class 3 keeps no labels or hashes)", rows)
 	}
@@ -323,9 +287,7 @@ func TestEraseAccount_LastGroupDMParticipant_RemovesChannel(t *testing.T) {
 	userC := seedUser(t, database, "dmlast-c")
 
 	ch, err := database.CreateGroupDMChannel(context.Background(), "grp", userA, []int64{userA, userB, userC})
-	if err != nil {
-		t.Fatalf("CreateGroupDMChannel: %v", err)
-	}
+	mustDo(t, "CreateGroupDMChannel", err)
 	if _, err := database.LeaveGroupDM(context.Background(), userB, ch.ID, "left"); err != nil {
 		t.Fatalf("LeaveGroupDM(userB): %v", err)
 	}
@@ -336,9 +298,7 @@ func TestEraseAccount_LastGroupDMParticipant_RemovesChannel(t *testing.T) {
 	// userA is now the last participant; deleting the account must apply
 	// LeaveGroupDM's invariant — a participant-less DM channel is an
 	// unreachable, undeletable row and must not survive.
-	if err := eraseAccount(context.Background(), database, userA); err != nil {
-		t.Fatalf("EraseAccount: %v", err)
-	}
+	mustDo(t, "EraseAccount", eraseAccount(context.Background(), database, userA))
 
 	var count int
 	if err := database.QueryRowContext(context.Background(),
@@ -363,13 +323,9 @@ func TestEraseAccount_OneOnOneDM_ClosesForSurvivor(t *testing.T) {
 	bob := seedUser(t, database, "bob-dm")
 
 	ch, _, err := database.GetOrCreateDMChannel(context.Background(), alice, bob)
-	if err != nil {
-		t.Fatalf("GetOrCreateDMChannel: %v", err)
-	}
+	mustDo(t, "GetOrCreateDMChannel", err)
 
-	if err := eraseAccount(context.Background(), database, bob); err != nil {
-		t.Fatalf("EraseAccount(bob): %v", err)
-	}
+	mustDo(t, "EraseAccount(bob)", eraseAccount(context.Background(), database, bob))
 
 	// The channel itself and Alice's participant row must survive — Alice is
 	// still a real, undeleted DM participant.
@@ -384,10 +340,7 @@ func TestEraseAccount_OneOnOneDM_ClosesForSurvivor(t *testing.T) {
 
 	// But it must be gone from Alice's open-DM list, not linger as a blank
 	// recipient she can still send into.
-	dms, err := database.GetUserDMChannels(context.Background(), alice)
-	if err != nil {
-		t.Fatalf("GetUserDMChannels(alice): %v", err)
-	}
+	dms := mustGetUserDMChannels(t, database, alice)
 	for _, dm := range dms {
 		if dm.ChannelID == ch.ID {
 			t.Errorf("channel %d still in alice's open DM list after bob's account deletion", ch.ID)
@@ -409,15 +362,10 @@ func TestEraseAccount_SurvivingDM_KeepsAttachmentsLinked(t *testing.T) {
 	bob := seedUser(t, database, "bob-att")
 
 	ch, _, err := database.GetOrCreateDMChannel(ctx, alice, bob)
-	if err != nil {
-		t.Fatalf("GetOrCreateDMChannel: %v", err)
-	}
+	mustDo(t, "GetOrCreateDMChannel", err)
 
 	// Alice's own message and attachment: they must outlive Bob's deletion.
-	msgID, err := database.CreateMessage(ctx, ch.ID, alice, "here you go", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	msgID := mustCreateMessage(t, database, ch.ID, alice, "here you go", nil)
 	if _, err := database.ExecContext(ctx,
 		`INSERT INTO attachments (id, filename, stored_as, mime_type, size, uploader_id)
 		 VALUES (?, ?, ?, ?, ?, ?)`,
@@ -429,14 +377,10 @@ func TestEraseAccount_SurvivingDM_KeepsAttachmentsLinked(t *testing.T) {
 		t.Fatalf("LinkAttachmentsToMessage: n=%d err=%v", len(n), err)
 	}
 
-	if err := eraseAccount(ctx, database, bob); err != nil {
-		t.Fatalf("EraseAccount(bob): %v", err)
-	}
+	mustDo(t, "EraseAccount(bob)", eraseAccount(ctx, database, bob))
 
 	att, err := database.GetAttachmentByID(ctx, "att-survivor-1")
-	if err != nil {
-		t.Fatalf("GetAttachmentByID: %v", err)
-	}
+	mustDo(t, "GetAttachmentByID", err)
 	if att == nil {
 		t.Fatal("attachment row disappeared although the DM channel still has a live participant")
 	}
@@ -464,16 +408,12 @@ func TestEraseAccount_EmptiedDMChannel_PreservesOthersAttachmentsForReclaim(t *t
 	userC := seedUser(t, database, "dmatt-c")
 
 	ch, err := database.CreateGroupDMChannel(ctx, "grp", userA, []int64{userA, userB, userC})
-	if err != nil {
-		t.Fatalf("CreateGroupDMChannel: %v", err)
-	}
+	mustDo(t, "CreateGroupDMChannel", err)
 
 	seedLinked := func(uploader int64, attID, storedAs string) {
 		t.Helper()
 		msgID, err := database.CreateMessage(ctx, ch.ID, uploader, "look at this", nil)
-		if err != nil {
-			t.Fatalf("CreateMessage: %v", err)
-		}
+		mustDo(t, "CreateMessage", err)
 		if _, err := database.ExecContext(ctx,
 			`INSERT INTO attachments (id, filename, stored_as, mime_type, size, uploader_id)
 			 VALUES (?, ?, ?, ?, ?, ?)`,
@@ -498,14 +438,10 @@ func TestEraseAccount_EmptiedDMChannel_PreservesOthersAttachmentsForReclaim(t *t
 	// userA is now the last participant; the erasure empties and
 	// hard-deletes the channel.
 	job, err := database.EraseAccount(ctx, userA, "")
-	if err != nil {
-		t.Fatalf("EraseAccount: %v", err)
-	}
+	mustDo(t, "EraseAccount", err)
 
 	var channelCount int
-	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM channels WHERE id = ?`, ch.ID).Scan(&channelCount); err != nil {
-		t.Fatalf("count channels: %v", err)
-	}
+	mustDo(t, "count channels", database.QueryRowContext(ctx, `SELECT COUNT(*) FROM channels WHERE id = ?`, ch.ID).Scan(&channelCount))
 	if channelCount != 0 {
 		t.Errorf("group DM channel survived the erasure of its last participant; want removed")
 	}
@@ -518,9 +454,7 @@ func TestEraseAccount_EmptiedDMChannel_PreservesOthersAttachmentsForReclaim(t *t
 	}
 
 	att, err := database.GetAttachmentByID(ctx, "att-dm-b")
-	if err != nil {
-		t.Fatalf("GetAttachmentByID: %v", err)
-	}
+	mustDo(t, "GetAttachmentByID", err)
 	if att == nil {
 		t.Fatal("the departed member's attachment row was destroyed by the channel-delete cascade; want it unlinked and preserved for the orphan sweep")
 	}

@@ -24,9 +24,7 @@ func TestGetRoleByName_IsCaseInsensitive(t *testing.T) {
 		}
 	}
 	role, err := database.GetRoleByName(context.Background(), "nobody")
-	if err != nil {
-		t.Fatalf("GetRoleByName(missing): %v", err)
-	}
+	mustDo(t, "GetRoleByName(missing)", err)
 	if role != nil {
 		t.Errorf("GetRoleByName(missing) = %v, want nil", role)
 	}
@@ -49,9 +47,7 @@ func TestGetDefaultRole(t *testing.T) {
 	database := openMigratedMemory(t)
 
 	role, err := database.GetDefaultRole(context.Background())
-	if err != nil {
-		t.Fatalf("GetDefaultRole: %v", err)
-	}
+	mustDo(t, "GetDefaultRole", err)
 	if role == nil || role.ID != 4 || !role.IsDefault {
 		t.Fatalf("GetDefaultRole = %v, want the seeded Member role", role)
 	}
@@ -62,10 +58,7 @@ func TestCreateAndUpdateRole(t *testing.T) {
 	ctx := context.Background()
 
 	color := "#ABCDEF"
-	created, err := database.CreateRole(ctx, "Helper", &color, 0x3, 55, false, false)
-	if err != nil {
-		t.Fatalf("CreateRole: %v", err)
-	}
+	created := mustCreateRole(t, database, "Helper", &color, 0x3, 55, false, false)
 	if created.ID == 0 || created.Name != "Helper" || created.Position != 55 {
 		t.Fatalf("created = %+v", created)
 	}
@@ -129,9 +122,7 @@ func TestListRoles_OrdersByPositionThenIDDeterministically(t *testing.T) {
 	var lastOrder []int64
 	for range 5 {
 		roles, err := database.ListRoles(ctx)
-		if err != nil {
-			t.Fatalf("ListRoles: %v", err)
-		}
+		mustDo(t, "ListRoles", err)
 		order := make([]int64, 0, len(roles))
 		var prev = -1
 		for _, r := range roles {
@@ -167,21 +158,12 @@ func TestCountRoleMembersAndListUserIDsByRole(t *testing.T) {
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 
-	a, err := database.CreateUser(ctx, "counta", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	if _, err := database.CreateUser(ctx, "countb", "hash", 4); err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	if _, err := database.CreateUser(ctx, "countc", "hash", 3); err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	a := mustCreateUser(t, database, "counta", "hash", 4)
+	mustCreateUser(t, database, "countb", "hash", 4)
+	mustCreateUser(t, database, "countc", "hash", 3)
 
 	counts, err := database.CountRoleMembers(ctx)
-	if err != nil {
-		t.Fatalf("CountRoleMembers: %v", err)
-	}
+	mustDo(t, "CountRoleMembers", err)
 	if counts[4] != 2 || counts[3] != 1 {
 		t.Errorf("counts = %v, want 2 members on role 4 and 1 on role 3", counts)
 	}
@@ -191,9 +173,7 @@ func TestCountRoleMembersAndListUserIDsByRole(t *testing.T) {
 	}
 
 	ids, err := database.ListUserIDsByRole(ctx, 4)
-	if err != nil {
-		t.Fatalf("ListUserIDsByRole: %v", err)
-	}
+	mustDo(t, "ListUserIDsByRole", err)
 	if len(ids) != 2 {
 		t.Fatalf("ListUserIDsByRole = %v, want 2 ids", ids)
 	}
@@ -212,30 +192,14 @@ func TestDeleteRoleReassigning(t *testing.T) {
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 
-	role, err := database.CreateRole(ctx, "Temp", nil, 0x3, 50, false, false)
-	if err != nil {
-		t.Fatalf("CreateRole: %v", err)
-	}
-	moved, err := database.CreateUser(ctx, "tempuser", "hash", int(role.ID))
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	stayer, err := database.CreateUser(ctx, "stayer", "hash", 3)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	chID, err := database.CreateChannel(ctx, "general", "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
-	if err := database.UpsertChannelOverride(ctx, chID, role.ID, 0, 0x2); err != nil {
-		t.Fatalf("UpsertChannelOverride: %v", err)
-	}
+	role := mustCreateRole(t, database, "Temp", nil, 0x3, 50, false, false)
+	moved := mustCreateUser(t, database, "tempuser", "hash", int(role.ID))
+	stayer := mustCreateUser(t, database, "stayer", "hash", 3)
+	chID := mustCreateChannel(t, database, "general", "text", "", "", 0)
+	mustDo(t, "UpsertChannelOverride", database.UpsertChannelOverride(ctx, chID, role.ID, 0, 0x2))
 
 	ids, err := database.DeleteRoleReassigning(ctx, role.ID, 4)
-	if err != nil {
-		t.Fatalf("DeleteRoleReassigning: %v", err)
-	}
+	mustDo(t, "DeleteRoleReassigning", err)
 	if len(ids) != 1 || ids[0] != moved {
 		t.Fatalf("reassigned ids = %v, want [%d]", ids, moved)
 	}
@@ -255,9 +219,7 @@ func TestDeleteRoleReassigning(t *testing.T) {
 		t.Errorf("role survived the delete: %v, %v", gone, err)
 	}
 	overrides, err := database.GetChannelOverrides(ctx, chID)
-	if err != nil {
-		t.Fatalf("GetChannelOverrides: %v", err)
-	}
+	mustDo(t, "GetChannelOverrides", err)
 	if _, present := overrides[role.ID]; present {
 		t.Error("the deleted role's channel_overrides row survived")
 	}

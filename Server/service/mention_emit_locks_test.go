@@ -41,9 +41,7 @@ func TestMentionEmitLocks_OtherChannelDoesNotWait(t *testing.T) {
 	if _, err := svc.MoveReadPointer(ctx, 2, 11, db.ReadAtLatest, 0); err != nil {
 		t.Fatalf("MoveReadPointer on another channel: %v", err)
 	}
-	if err := svc.reverseMentionCounts(ctx, 11, []int64{1}); err != nil {
-		t.Fatalf("reverseMentionCounts on another channel: %v", err)
-	}
+	mustDo(t, "reverseMentionCounts on another channel", svc.reverseMentionCounts(ctx, 11, []int64{1}))
 
 	short, cancelShort := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancelShort()

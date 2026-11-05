@@ -142,15 +142,9 @@ func newMDFix(t *testing.T) *mdFix {
 	f := &mdFix{t: t, hub: hub, db: database, sfu: sfu}
 	f.uid = seedHarvestVoiceUser(t, database, "md-user")
 	f.oid = seedHarvestVoiceUser(t, database, "md-observer")
-	user, err := database.GetUserByID(context.Background(), f.uid)
-	if err != nil || user == nil {
-		t.Fatalf("GetUserByID: %v", err)
-	}
+	user := mustGetUser(t, database, f.uid)
 	f.user = user
-	chID, err := database.CreateChannel(context.Background(), "md-text", "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
+	chID := mustCreateChannel(t, database, "md-text", "text")
 	f.text = chID
 	f.voiceA = mustCreateVoiceChannel(t, database, "md-voice-a")
 	f.voiceB = mustCreateVoiceChannel(t, database, "md-voice-b")

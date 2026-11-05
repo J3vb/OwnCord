@@ -29,6 +29,8 @@ import (
 	"time"
 
 	"github.com/tetratelabs/wazero"
+
+	"github.com/J3vb/OwnCord/Server/db"
 )
 
 // addWASM is the bytes of a minimal (module (func (export "add") ... )).
@@ -46,15 +48,9 @@ var addWASM = []byte{
 func writeTestPlugin(t *testing.T, root, name string, manifest string, wasmBytes []byte) {
 	t.Helper()
 	pluginDir := filepath.Join(root, name)
-	if err := os.MkdirAll(pluginDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(pluginDir, "plugin.json"), []byte(manifest), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(pluginDir, "hello.wasm"), wasmBytes, 0o644); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "MkdirAll", os.MkdirAll(pluginDir, 0o755))
+	mustDo(t, "WriteFile", os.WriteFile(filepath.Join(pluginDir, "plugin.json"), []byte(manifest), 0o644))
+	mustDo(t, "WriteFile", os.WriteFile(filepath.Join(pluginDir, "hello.wasm"), wasmBytes, 0o644))
 }
 
 func newWazeroTestRegistry(t *testing.T, dir string) (*Registry, PluginStore) {
@@ -73,6 +69,31 @@ func newWazeroTestRegistry(t *testing.T, dir string) (*Registry, PluginStore) {
 	return reg, mem
 }
 
+// enabledWazeroPlugin installs the plugin under a fresh directory, loads the
+// registry and enables it, returning the registry, its store and the stored
+// rows (the plugin is rows[0]).
+// instance returns the registered plugin instance under the registry lock.
+func (r *Registry) instance(id int64) *Instance {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.plugins[id]
+}
+
+func enabledWazeroPlugin(t *testing.T, name, manifest string, wasm []byte) (*Registry, PluginStore, []db.PluginRow) {
+	t.Helper()
+	dir := t.TempDir()
+	writeTestPlugin(t, dir, name, manifest, wasm)
+	reg, mem := newWazeroTestRegistry(t, dir)
+	ctx := context.Background()
+	mustDo(t, "LoadAll", reg.LoadAll(ctx))
+	rows, err := mem.ListPlugins(ctx)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("ListPlugins: rows=%+v err=%v", rows, err)
+	}
+	mustDo(t, "EnablePlugin", reg.EnablePlugin(ctx, rows[0].ID))
+	return reg, mem, rows
+}
+
 func TestWazeroRegistryCreatesRuntime(t *testing.T) {
 	reg, _ := newWazeroTestRegistry(t, t.TempDir())
 	if reg.runtimePlatform == nil {
@@ -84,29 +105,9 @@ func TestWazeroRegistryCreatesRuntime(t *testing.T) {
 }
 
 func TestWazeroActivateCompilesModule(t *testing.T) {
-	dir := t.TempDir()
-	manifest := `{"name":"hello","version":"0.1.0","entrypoint":"hello.wasm","permissions":["commands"],"commands":[{"name":"hello"}]}`
-	writeTestPlugin(t, dir, "hello", manifest, addWASM)
+	reg, _, rows := enabledWazeroPlugin(t, "hello", `{"name":"hello","version":"0.1.0","entrypoint":"hello.wasm","permissions":["commands"],"commands":[{"name":"hello"}]}`, addWASM)
 
-	reg, mem := newWazeroTestRegistry(t, dir)
-	ctx := context.Background()
-	if err := reg.LoadAll(ctx); err != nil {
-		t.Fatalf("LoadAll: %v", err)
-	}
-
-	rows, err := mem.ListPlugins(ctx)
-	if err != nil || len(rows) != 1 {
-		t.Fatalf("ListPlugins: rows=%+v err=%v", rows, err)
-	}
-
-	// The plugin starts disabled; enable it and confirm the module compiles.
-	if err := reg.EnablePlugin(ctx, rows[0].ID); err != nil {
-		t.Fatalf("EnablePlugin: %v", err)
-	}
-
-	reg.mu.RLock()
-	inst := reg.plugins[rows[0].ID]
-	reg.mu.RUnlock()
+	inst := reg.instance(rows[0].ID)
 	if inst == nil {
 		t.Fatal("instance not registered after enable")
 	}
@@ -119,26 +120,11 @@ func TestWazeroActivateCompilesModule(t *testing.T) {
 }
 
 func TestWazeroDispatchCommandMissingExport(t *testing.T) {
-	dir := t.TempDir()
-	manifest := `{"name":"hello","version":"0.1.0","entrypoint":"hello.wasm","permissions":["commands"],"commands":[{"name":"hello"}]}`
-	writeTestPlugin(t, dir, "hello", manifest, addWASM)
-
-	reg, mem := newWazeroTestRegistry(t, dir)
+	reg, _, rows := enabledWazeroPlugin(t, "hello", `{"name":"hello","version":"0.1.0","entrypoint":"hello.wasm","permissions":["commands"],"commands":[{"name":"hello"}]}`, addWASM)
 	ctx := context.Background()
-	if err := reg.LoadAll(ctx); err != nil {
-		t.Fatal(err)
-	}
-	rows, _ := mem.ListPlugins(ctx)
-	if err := reg.EnablePlugin(ctx, rows[0].ID); err != nil {
-		t.Fatalf("EnablePlugin: %v", err)
-	}
 
-	reg.mu.RLock()
-	inst := reg.plugins[rows[0].ID]
-	reg.mu.RUnlock()
-	if err := reg.RegisterCommand("hello", inst); err != nil {
-		t.Fatalf("RegisterCommand: %v", err)
-	}
+	inst := reg.instance(rows[0].ID)
+	mustDo(t, "RegisterCommand", reg.RegisterCommand("hello", inst))
 
 	result, ok := reg.DispatchCommand(ctx, 1, 2, "hello", nil)
 	if !ok {
@@ -150,55 +136,25 @@ func TestWazeroDispatchCommandMissingExport(t *testing.T) {
 }
 
 func TestWazeroCloseTearsDownRuntime(t *testing.T) {
-	dir := t.TempDir()
-	manifest := `{"name":"hello","version":"0.1.0","entrypoint":"hello.wasm","permissions":["commands"],"commands":[{"name":"hello"}]}`
-	writeTestPlugin(t, dir, "hello", manifest, addWASM)
-
-	reg, mem := newWazeroTestRegistry(t, dir)
+	reg, _, _ := enabledWazeroPlugin(t, "hello", `{"name":"hello","version":"0.1.0","entrypoint":"hello.wasm","permissions":["commands"],"commands":[{"name":"hello"}]}`, addWASM)
 	ctx := context.Background()
-	if err := reg.LoadAll(ctx); err != nil {
-		t.Fatal(err)
-	}
-	rows, _ := mem.ListPlugins(ctx)
-	if err := reg.EnablePlugin(ctx, rows[0].ID); err != nil {
-		t.Fatalf("EnablePlugin: %v", err)
-	}
 
-	if err := reg.Close(ctx); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
+	mustDo(t, "Close", reg.Close(ctx))
 	if reg.runtimePlatform != nil || reg.platformClose != nil {
 		t.Fatal("Close should clear platform fields")
 	}
 	// Calling Close twice must not panic.
-	if err := reg.Close(ctx); err != nil {
-		t.Fatalf("Close (second): %v", err)
-	}
+	mustDo(t, "Close (second)", reg.Close(ctx))
 }
 
 func TestWazeroDisablePluginFreesModule(t *testing.T) {
-	dir := t.TempDir()
-	manifest := `{"name":"hello","version":"0.1.0","entrypoint":"hello.wasm","permissions":["commands"],"commands":[{"name":"hello"}]}`
-	writeTestPlugin(t, dir, "hello", manifest, addWASM)
-
-	reg, mem := newWazeroTestRegistry(t, dir)
+	reg, _, rows := enabledWazeroPlugin(t, "hello", `{"name":"hello","version":"0.1.0","entrypoint":"hello.wasm","permissions":["commands"],"commands":[{"name":"hello"}]}`, addWASM)
 	ctx := context.Background()
-	if err := reg.LoadAll(ctx); err != nil {
-		t.Fatal(err)
-	}
-	rows, _ := mem.ListPlugins(ctx)
-	if err := reg.EnablePlugin(ctx, rows[0].ID); err != nil {
-		t.Fatalf("EnablePlugin: %v", err)
-	}
-	reg.mu.RLock()
-	inst := reg.plugins[rows[0].ID]
-	reg.mu.RUnlock()
+	inst := reg.instance(rows[0].ID)
 	if inst.module == nil {
 		t.Fatal("pre-condition: module should be populated after EnablePlugin")
 	}
-	if err := reg.DisablePlugin(ctx, rows[0].ID); err != nil {
-		t.Fatalf("DisablePlugin: %v", err)
-	}
+	mustDo(t, "DisablePlugin", reg.DisablePlugin(ctx, rows[0].ID))
 	if inst.module != nil {
 		t.Fatal("DisablePlugin must release the wazero module (inst.module != nil)")
 	}
@@ -206,9 +162,7 @@ func TestWazeroDisablePluginFreesModule(t *testing.T) {
 		t.Fatal("DisablePlugin must clear inst.Enabled")
 	}
 	// Re-enabling must rebuild a new module.
-	if err := reg.EnablePlugin(ctx, rows[0].ID); err != nil {
-		t.Fatalf("re-EnablePlugin: %v", err)
-	}
+	mustDo(t, "re-EnablePlugin", reg.EnablePlugin(ctx, rows[0].ID))
 	if inst.module == nil {
 		t.Fatal("re-Enable should repopulate inst.module")
 	}
@@ -273,25 +227,10 @@ var spinWASM = []byte{
 // serve the next command via lazy re-instantiation — not stay dead until an
 // admin disable/enable cycle or server restart.
 func TestWazeroCPUBudgetOverrunDoesNotBrickPlugin(t *testing.T) {
-	dir := t.TempDir()
-	manifest := `{"name":"spinner","version":"0.1.0","entrypoint":"hello.wasm","permissions":["commands"],"commands":[{"name":"spin"}]}`
-	writeTestPlugin(t, dir, "spinner", manifest, spinWASM)
-
-	reg, mem := newWazeroTestRegistry(t, dir)
+	reg, _, rows := enabledWazeroPlugin(t, "spinner", `{"name":"spinner","version":"0.1.0","entrypoint":"hello.wasm","permissions":["commands"],"commands":[{"name":"spin"}]}`, spinWASM)
 	ctx := context.Background()
-	if err := reg.LoadAll(ctx); err != nil {
-		t.Fatal(err)
-	}
-	rows, _ := mem.ListPlugins(ctx)
-	if err := reg.EnablePlugin(ctx, rows[0].ID); err != nil {
-		t.Fatalf("EnablePlugin: %v", err)
-	}
-	reg.mu.RLock()
-	inst := reg.plugins[rows[0].ID]
-	reg.mu.RUnlock()
-	if err := reg.RegisterCommand("spin", inst); err != nil {
-		t.Fatalf("RegisterCommand: %v", err)
-	}
+	inst := reg.instance(rows[0].ID)
+	mustDo(t, "RegisterCommand", reg.RegisterCommand("spin", inst))
 
 	// Baseline: a small payload dispatches fine.
 	result, ok := reg.DispatchCommand(ctx, 1, 2, "spin", nil)
@@ -333,25 +272,10 @@ func TestWazeroCPUBudgetOverrunDoesNotBrickPlugin(t *testing.T) {
 // memory. Run under -race: without the fix the detector reports a data race;
 // with it the run is clean.
 func TestWazeroConcurrentDispatchRace(t *testing.T) {
-	dir := t.TempDir()
-	manifest := `{"name":"spinner","version":"0.1.0","entrypoint":"hello.wasm","permissions":["commands"],"commands":[{"name":"spin"}]}`
-	writeTestPlugin(t, dir, "spinner", manifest, spinWASM)
-
-	reg, mem := newWazeroTestRegistry(t, dir)
+	reg, _, rows := enabledWazeroPlugin(t, "spinner", `{"name":"spinner","version":"0.1.0","entrypoint":"hello.wasm","permissions":["commands"],"commands":[{"name":"spin"}]}`, spinWASM)
 	ctx := context.Background()
-	if err := reg.LoadAll(ctx); err != nil {
-		t.Fatal(err)
-	}
-	rows, _ := mem.ListPlugins(ctx)
-	if err := reg.EnablePlugin(ctx, rows[0].ID); err != nil {
-		t.Fatalf("EnablePlugin: %v", err)
-	}
-	reg.mu.RLock()
-	inst := reg.plugins[rows[0].ID]
-	reg.mu.RUnlock()
-	if err := reg.RegisterCommand("spin", inst); err != nil {
-		t.Fatalf("RegisterCommand: %v", err)
-	}
+	inst := reg.instance(rows[0].ID)
+	mustDo(t, "RegisterCommand", reg.RegisterCommand("spin", inst))
 
 	const goroutines = 8
 	var wg sync.WaitGroup
@@ -413,17 +337,11 @@ func TestWazeroMemorylessModuleDoesNotPanic(t *testing.T) {
 
 	reg, mem := newWazeroTestRegistry(t, dir)
 	ctx := context.Background()
-	if err := reg.LoadAll(ctx); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "LoadAll", reg.LoadAll(ctx))
 	rows, _ := mem.ListPlugins(ctx)
 	// Activation calls list_commands, which used to nil-deref the guest memory.
-	if err := reg.EnablePlugin(ctx, rows[0].ID); err != nil {
-		t.Fatalf("EnablePlugin: %v", err)
-	}
-	reg.mu.RLock()
-	inst := reg.plugins[rows[0].ID]
-	reg.mu.RUnlock()
+	mustDo(t, "EnablePlugin", reg.EnablePlugin(ctx, rows[0].ID))
+	inst := reg.instance(rows[0].ID)
 	if inst == nil || inst.module == nil {
 		t.Fatal("expected the module to activate")
 	}
@@ -436,9 +354,7 @@ func TestWazeroMemorylessModuleDoesNotPanic(t *testing.T) {
 	}
 
 	// The dispatch path must report a diagnostic instead of writing into nil.
-	if err := reg.RegisterCommand("noop", inst); err != nil {
-		t.Fatalf("RegisterCommand: %v", err)
-	}
+	mustDo(t, "RegisterCommand", reg.RegisterCommand("noop", inst))
 	result, ok := reg.DispatchCommand(ctx, 1, 2, "noop", nil)
 	if !ok || result == nil {
 		t.Fatalf("expected a dispatch result: ok=%v result=%+v", ok, result)
@@ -455,9 +371,7 @@ func TestWazeroInvalidWASMFailsActivation(t *testing.T) {
 
 	reg, mem := newWazeroTestRegistry(t, dir)
 	ctx := context.Background()
-	if err := reg.LoadAll(ctx); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "LoadAll", reg.LoadAll(ctx))
 	rows, _ := mem.ListPlugins(ctx)
 	if err := reg.EnablePlugin(ctx, rows[0].ID); err == nil {
 		t.Fatal("expected EnablePlugin to fail on invalid WASM")
@@ -467,26 +381,10 @@ func TestWazeroInvalidWASMFailsActivation(t *testing.T) {
 // Every re-activation compiles the module again; without closing the previous
 // CompiledModule the shared runtime retains each copy until process exit.
 func TestWazeroDeactivateClosesCompiledModule(t *testing.T) {
-	dir := t.TempDir()
-	manifest := `{"name":"hello","version":"0.1.0","entrypoint":"hello.wasm","permissions":["commands"],"commands":[{"name":"hello"}]}`
-	writeTestPlugin(t, dir, "hello", manifest, addWASM)
-
-	reg, mem := newWazeroTestRegistry(t, dir)
+	reg, _, rows := enabledWazeroPlugin(t, "hello", `{"name":"hello","version":"0.1.0","entrypoint":"hello.wasm","permissions":["commands"],"commands":[{"name":"hello"}]}`, addWASM)
 	ctx := context.Background()
-	if err := reg.LoadAll(ctx); err != nil {
-		t.Fatalf("LoadAll: %v", err)
-	}
-	rows, err := mem.ListPlugins(ctx)
-	if err != nil || len(rows) != 1 {
-		t.Fatalf("ListPlugins: rows=%+v err=%v", rows, err)
-	}
-	if err := reg.EnablePlugin(ctx, rows[0].ID); err != nil {
-		t.Fatalf("EnablePlugin: %v", err)
-	}
 
-	reg.mu.RLock()
-	inst := reg.plugins[rows[0].ID]
-	reg.mu.RUnlock()
+	inst := reg.instance(rows[0].ID)
 	if inst == nil || inst.module == nil {
 		t.Fatal("instance not activated")
 	}
@@ -522,9 +420,7 @@ var memoryWASM = []byte{
 // ceiling is 65536 pages = 4 GiB, i.e. exactly this value is allowed).
 func TestPlatformInitPageCountDoesNotOverflowUint32(t *testing.T) {
 	platform, closeFn, err := platformInit(Config{MaxMemoryMB: 4096})
-	if err != nil {
-		t.Fatalf("platformInit: %v", err)
-	}
+	mustDo(t, "platformInit", err)
 	t.Cleanup(func() { _ = closeFn(context.Background()) })
 
 	rt, ok := platform.(wazero.Runtime)
@@ -566,16 +462,12 @@ func TestActivate_ListCommandsTrapFailsActivation(t *testing.T) {
 	writeTestPlugin(t, dir, "listtrap", manifest, listTrapWASM)
 	reg, mem := newWazeroTestRegistry(t, dir)
 	ctx := context.Background()
-	if err := reg.LoadAll(ctx); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "LoadAll", reg.LoadAll(ctx))
 	rows, _ := mem.ListPlugins(ctx)
 	if err := reg.EnablePlugin(ctx, rows[0].ID); err == nil {
 		t.Fatal("EnablePlugin must fail when list_commands traps")
 	}
-	reg.mu.RLock()
-	inst := reg.plugins[rows[0].ID]
-	reg.mu.RUnlock()
+	inst := reg.instance(rows[0].ID)
 	if inst.module != nil {
 		t.Fatal("a trapped module must not stay installed")
 	}
@@ -590,9 +482,7 @@ func TestEnablePlugin_ActivationFailureReleasesCompiled(t *testing.T) {
 	reg, mem := newWazeroTestRegistry(t, dir)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	if err := reg.LoadAll(ctx); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "LoadAll", reg.LoadAll(ctx))
 	rows, _ := mem.ListPlugins(ctx)
 	if err := reg.EnablePlugin(ctx, rows[0].ID); err == nil {
 		t.Fatal("EnablePlugin must fail when list_commands overruns its budget")

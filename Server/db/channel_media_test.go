@@ -33,18 +33,14 @@ func (f mediaFixture) post(t *testing.T, ch, user int64, ts string, files ...[2]
 	t.Helper()
 	ctx := context.Background()
 	msgID, err := f.database.CreateMessage(ctx, ch, user, "files", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	mustDo(t, "CreateMessage", err)
 	if _, err := f.database.ExecContext(ctx, `UPDATE messages SET timestamp = ? WHERE id = ?`, ts, msgID); err != nil {
 		t.Fatalf("set timestamp: %v", err)
 	}
 	ids := make([]string, 0, len(files))
 	for i, file := range files {
 		id := fmt.Sprintf("att-%d-%d", msgID, i)
-		if err := f.database.CreateAttachment(ctx, id, user, file[0], id, file[1], 10, nil, nil); err != nil {
-			t.Fatalf("CreateAttachment: %v", err)
-		}
+		mustDo(t, "CreateAttachment", f.database.CreateAttachment(ctx, id, user, file[0], id, file[1], 10, nil, nil))
 		ids = append(ids, id)
 	}
 	if len(ids) > 0 {
@@ -70,9 +66,7 @@ func (f mediaFixture) list(t *testing.T, q db.ChannelMediaQuery) []db.ChannelMed
 		q.Limit = 50
 	}
 	items, err := f.database.ListChannelMedia(context.Background(), q)
-	if err != nil {
-		t.Fatalf("ListChannelMedia: %v", err)
-	}
+	mustDo(t, "ListChannelMedia", err)
 	return items
 }
 
@@ -122,17 +116,13 @@ func TestListChannelMedia_DeletedBlockedAndUnlinkedAreHidden(t *testing.T) {
 	gone := f.post(t, f.ch, f.alice, "2026-01-01 10:00:00", png("deleted.png"))
 	f.post(t, f.ch, f.bob, "2026-01-02 10:00:00", png("bob.png"))
 	f.post(t, f.ch, f.alice, "2026-01-03 10:00:00", png("alice.png"))
-	if err := f.database.CreateAttachment(ctx, "staged", f.alice, "staged.png", "staged", "image/png", 1, nil, nil); err != nil {
-		t.Fatalf("CreateAttachment: %v", err)
-	}
+	mustDo(t, "CreateAttachment", f.database.CreateAttachment(ctx, "staged", f.alice, "staged.png", "staged", "image/png", 1, nil, nil))
 	if _, err := f.database.ExecContext(ctx, `UPDATE messages SET deleted = 1 WHERE id = ?`, gone); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
 	assertNames(t, f.list(t, db.ChannelMediaQuery{}), "alice.png", "bob.png")
 
-	if err := f.database.BlockUser(ctx, f.alice, f.bob); err != nil {
-		t.Fatalf("BlockUser: %v", err)
-	}
+	mustDo(t, "BlockUser", f.database.BlockUser(ctx, f.alice, f.bob))
 	assertNames(t, f.list(t, db.ChannelMediaQuery{}), "alice.png")
 	// The block is one-way: bob still sees alice's media.
 	assertNames(t, f.list(t, db.ChannelMediaQuery{ViewerID: f.bob}), "alice.png", "bob.png")

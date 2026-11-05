@@ -40,14 +40,10 @@ func TestPushCrypto_RFC8291KnownAnswer(t *testing.T) {
 	want := mustHex(t, "0c6bfaadad67958803092d454676f397000010004104fe33f4ab0dea71914db55823f73b54948f41306d920732dbb9a59a53286482200e597a7b7bc260ba1c227998580992e93973002f3012a28ae8f06bbb78e5ec0ff297de5b429bba7153d3a4ae0caa091fd425f3b4b5414add8ab37a19c1bbb05cf5cb5b2a2e0562d558635641ec52812c6c8ff42e95ccb86be7cd")
 
 	ephemeral, err := ecdh.P256().NewPrivateKey(asPriv)
-	if err != nil {
-		t.Fatalf("NewPrivateKey(as_private): %v", err)
-	}
+	mustDo(t, "NewPrivateKey(as_private)", err)
 
 	got, err := encryptWebPush(plaintext, uaPub, authSecret, ephemeral, salt)
-	if err != nil {
-		t.Fatalf("encryptWebPush: %v", err)
-	}
+	mustDo(t, "encryptWebPush", err)
 	if !bytes.Equal(got, want) {
 		t.Fatalf("encryptWebPush =\n  %x\nwant\n  %x", got, want)
 	}
@@ -63,20 +59,14 @@ func TestPushCrypto_RFC8291KnownAnswer(t *testing.T) {
 // confidentiality for both messages.
 func TestPushCrypto_SaltAndEphemeralKeyAreFresh(t *testing.T) {
 	receiver, err := ecdh.P256().GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatalf("generating receiver key: %v", err)
-	}
+	mustDo(t, "generating receiver key", err)
 	receiverPub := receiver.PublicKey().Bytes()
 	authSecret := make([]byte, 16)
 
 	a, err := encryptWebPushMessage([]byte(`{"t":"activity"}`), receiverPub, authSecret)
-	if err != nil {
-		t.Fatalf("encryptWebPushMessage (1): %v", err)
-	}
+	mustDo(t, "encryptWebPushMessage (1)", err)
 	b, err := encryptWebPushMessage([]byte(`{"t":"activity"}`), receiverPub, authSecret)
-	if err != nil {
-		t.Fatalf("encryptWebPushMessage (2): %v", err)
-	}
+	mustDo(t, "encryptWebPushMessage (2)", err)
 	// header = salt(16) || rs(4) || idlen(1) || ephemeral pub(65)
 	if bytes.Equal(a[:16], b[:16]) {
 		t.Error("two dispatches to the same subscriber reused the same salt")

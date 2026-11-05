@@ -14,22 +14,12 @@ import (
 func TestListMembers_CarriesRoleIDsTopFirst(t *testing.T) {
 	database := openMigratedMemory(t)
 	ctx := context.Background()
-	multi, err := database.CreateUser(ctx, "multi", "hash", int(permissions.MemberRoleID))
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	single, err := database.CreateUser(ctx, "single", "hash", int(permissions.MemberRoleID))
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	if err := database.AddUserRole(ctx, multi, permissions.ModeratorRoleID); err != nil {
-		t.Fatalf("AddUserRole: %v", err)
-	}
+	multi := mustCreateUser(t, database, "multi", "hash", int(permissions.MemberRoleID))
+	single := mustCreateUser(t, database, "single", "hash", int(permissions.MemberRoleID))
+	mustDo(t, "AddUserRole", database.AddUserRole(ctx, multi, permissions.ModeratorRoleID))
 
 	members, err := database.ListMembers(ctx)
-	if err != nil {
-		t.Fatalf("ListMembers: %v", err)
-	}
+	mustDo(t, "ListMembers", err)
 	byID := map[int64]db.MemberSummary{}
 	for _, m := range members {
 		byID[m.ID] = m
@@ -48,29 +38,19 @@ func TestListMembers_CarriesRoleIDsTopFirst(t *testing.T) {
 func TestRoleFlags_RoundTripAndPositionResync(t *testing.T) {
 	database := openMigratedMemory(t)
 	ctx := context.Background()
-	helper, err := database.CreateRole(ctx, "Helper", nil, permissions.ReadMessages, 50, true, false)
-	if err != nil {
-		t.Fatalf("CreateRole: %v", err)
-	}
+	helper := mustCreateRole(t, database, "Helper", nil, permissions.ReadMessages, 50, true, false)
 	if !helper.Hoist || helper.Mentionable {
 		t.Fatalf("created = %+v, want hoist and not mentionable", helper)
 	}
-	uid, err := database.CreateUser(ctx, "holder", "hash", int(permissions.MemberRoleID))
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	if err := database.AddUserRole(ctx, uid, helper.ID); err != nil {
-		t.Fatalf("AddUserRole: %v", err)
-	}
+	uid := mustCreateUser(t, database, "holder", "hash", int(permissions.MemberRoleID))
+	mustDo(t, "AddUserRole", database.AddUserRole(ctx, uid, helper.ID))
 	if got := mirrorRoleID(t, database, uid); got != helper.ID {
 		t.Fatalf("mirror = %d, want helper on top", got)
 	}
 
 	// Moving the role below Member (40) re-ranks the holder in the same write.
 	resynced, err := database.UpdateRole(ctx, helper.ID, "Helper", nil, permissions.ReadMessages, 30, false, true)
-	if err != nil {
-		t.Fatalf("UpdateRole: %v", err)
-	}
+	mustDo(t, "UpdateRole", err)
 	if !slices.Equal(resynced, []int64{uid}) {
 		t.Errorf("resynced = %v, want [%d]", resynced, uid)
 	}
@@ -88,14 +68,9 @@ func TestRoleFlags_RoundTripAndPositionResync(t *testing.T) {
 	}
 
 	// SetRolePositions re-ranks multi-role holders too, and only them.
-	other, err := database.CreateUser(ctx, "single", "hash", int(permissions.MemberRoleID))
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	other := mustCreateUser(t, database, "single", "hash", int(permissions.MemberRoleID))
 	resynced, err = database.SetRolePositions(ctx, map[int64]int{helper.ID: 55})
-	if err != nil {
-		t.Fatalf("SetRolePositions: %v", err)
-	}
+	mustDo(t, "SetRolePositions", err)
 	if !slices.Equal(resynced, []int64{uid}) || slices.Contains(resynced, other) {
 		t.Errorf("SetRolePositions resynced = %v, want just the multi-role holder [%d]", resynced, uid)
 	}

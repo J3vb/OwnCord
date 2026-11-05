@@ -14,12 +14,8 @@ import (
 func TestHealthcheckProbeReadsOverridesFile(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.yaml")
-	if err := os.WriteFile(cfgPath, []byte("server:\n  data_dir: \""+filepath.ToSlash(dir)+"\"\n  port: 8443\n"), 0o600); err != nil {
-		t.Fatalf("write config.yaml: %v", err)
-	}
-	if err := os.WriteFile(config.OverridesPath(dir), []byte(`{"server.port": 9443, "tls.mode": "off"}`), 0o600); err != nil {
-		t.Fatalf("write overrides: %v", err)
-	}
+	mustDo(t, "write config.yaml", os.WriteFile(cfgPath, []byte("server:\n  data_dir: \""+filepath.ToSlash(dir)+"\"\n  port: 8443\n"), 0o600))
+	mustDo(t, "write overrides", os.WriteFile(config.OverridesPath(dir), []byte(`{"server.port": 9443, "tls.mode": "off"}`), 0o600))
 
 	p := resolveHealthcheckProbe(cfgPath)
 	if p.port != 9443 {

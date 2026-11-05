@@ -2,7 +2,6 @@ package ws_test
 
 import (
 	"encoding/base64"
-	"encoding/json"
 	"testing"
 	"time"
 
@@ -13,22 +12,16 @@ import (
 
 // e2eeAnnounceMsg builds a voice_e2ee_announce WebSocket message.
 func e2eeAnnounceMsg(publicKey string) []byte {
-	raw, _ := json.Marshal(map[string]any{
-		"type":    "voice_e2ee_announce",
-		"payload": map[string]any{"public_key": publicKey},
-	})
+	raw := envelope("voice_e2ee_announce", map[string]any{"public_key": publicKey})
 	return raw
 }
 
 // e2eeOfferMsg builds a voice_e2ee_offer WebSocket message.
 func e2eeOfferMsg(targetUserID int64, encryptedKey, iv string) []byte {
-	raw, _ := json.Marshal(map[string]any{
-		"type": "voice_e2ee_offer",
-		"payload": map[string]any{
-			"target_user_id": targetUserID,
-			"encrypted_key":  encryptedKey,
-			"iv":             iv,
-		},
+	raw := envelope("voice_e2ee_offer", map[string]any{
+		"target_user_id": targetUserID,
+		"encrypted_key":  encryptedKey,
+		"iv":             iv,
 	})
 	return raw
 }
@@ -37,9 +30,7 @@ func e2eeOfferMsg(targetUserID int64, encryptedKey, iv string) []byte {
 func extractPayloadField(t *testing.T, msg []byte, field string) any {
 	t.Helper()
 	var env map[string]any
-	if err := json.Unmarshal(msg, &env); err != nil {
-		t.Fatalf("extractPayloadField unmarshal: %v", err)
-	}
+	mustUnmarshal(t, msg, &env)
 	payload, ok := env["payload"].(map[string]any)
 	if !ok {
 		return nil
@@ -90,19 +81,13 @@ func TestE2EE_Offer_TargetChannelCheckAtomicWithLookup(t *testing.T) {
 
 	// sender joins voice
 	sender := seedVoiceOwner(t, database, "toctou-sender")
-	sendCh := make(chan []byte, 32)
-	senderClient := ws.NewTestClientWithUser(hub, sender, 0, sendCh)
-	hub.Register(senderClient)
-	waitRegistered(t, hub, senderClient)
+	senderClient, sendCh := connectClient(t, hub, sender, 0, 32)
 	hub.HandleMessageForTest(senderClient, voiceJoinMsg(chanID))
 	drainChanTimeout(sendCh, 30*time.Millisecond)
 
 	// target joins voice
 	target := seedVoiceOwner(t, database, "toctou-target")
-	targetCh := make(chan []byte, 32)
-	targetClient := ws.NewTestClientWithUser(hub, target, 0, targetCh)
-	hub.Register(targetClient)
-	waitRegistered(t, hub, targetClient)
+	targetClient, targetCh := connectClient(t, hub, target, 0, 32)
 	hub.HandleMessageForTest(targetClient, voiceJoinMsg(chanID))
 	drainChanTimeout(targetCh, 30*time.Millisecond)
 
@@ -134,19 +119,13 @@ func TestE2EE_Offer_RejectsNonKeyHolder(t *testing.T) {
 
 	// user1 (lower ID) joins first — should be key holder
 	user1 := seedVoiceOwner(t, database, "kh-user1")
-	send1 := make(chan []byte, 32)
-	c1 := ws.NewTestClientWithUser(hub, user1, 0, send1)
-	hub.Register(c1)
-	waitRegistered(t, hub, c1)
+	c1, send1 := connectClient(t, hub, user1, 0, 32)
 	hub.HandleMessageForTest(c1, voiceJoinMsg(chanID))
 	drainChanTimeout(send1, 30*time.Millisecond)
 
 	// user2 (higher ID) joins — should NOT be key holder
 	user2 := seedVoiceOwner(t, database, "kh-user2")
-	send2 := make(chan []byte, 32)
-	c2 := ws.NewTestClientWithUser(hub, user2, 0, send2)
-	hub.Register(c2)
-	waitRegistered(t, hub, c2)
+	c2, send2 := connectClient(t, hub, user2, 0, 32)
 	hub.HandleMessageForTest(c2, voiceJoinMsg(chanID))
 	drainChanTimeout(send2, 30*time.Millisecond)
 
@@ -174,19 +153,13 @@ func TestE2EE_Offer_KeyHolderCanSend(t *testing.T) {
 
 	// user1 (lower ID) joins first — key holder
 	user1 := seedVoiceOwner(t, database, "kh-ok-user1")
-	send1 := make(chan []byte, 32)
-	c1 := ws.NewTestClientWithUser(hub, user1, 0, send1)
-	hub.Register(c1)
-	waitRegistered(t, hub, c1)
+	c1, send1 := connectClient(t, hub, user1, 0, 32)
 	hub.HandleMessageForTest(c1, voiceJoinMsg(chanID))
 	drainChanTimeout(send1, 30*time.Millisecond)
 
 	// user2 (higher ID) joins
 	user2 := seedVoiceOwner(t, database, "kh-ok-user2")
-	send2 := make(chan []byte, 32)
-	c2 := ws.NewTestClientWithUser(hub, user2, 0, send2)
-	hub.Register(c2)
-	waitRegistered(t, hub, c2)
+	c2, send2 := connectClient(t, hub, user2, 0, 32)
 	hub.HandleMessageForTest(c2, voiceJoinMsg(chanID))
 	drainChanTimeout(send2, 30*time.Millisecond)
 
@@ -214,27 +187,18 @@ func TestE2EE_KeyHolderTransfersOnLeave(t *testing.T) {
 
 	// user1 (lower ID) joins — key holder
 	user1 := seedVoiceOwner(t, database, "kht-user1")
-	send1 := make(chan []byte, 32)
-	c1 := ws.NewTestClientWithUser(hub, user1, 0, send1)
-	hub.Register(c1)
-	waitRegistered(t, hub, c1)
+	c1, send1 := connectClient(t, hub, user1, 0, 32)
 	hub.HandleMessageForTest(c1, voiceJoinMsg(chanID))
 	drainChanTimeout(send1, 30*time.Millisecond)
 
 	// user2 (higher ID) joins
 	user2 := seedVoiceOwner(t, database, "kht-user2")
-	send2 := make(chan []byte, 32)
-	c2 := ws.NewTestClientWithUser(hub, user2, 0, send2)
-	hub.Register(c2)
-	waitRegistered(t, hub, c2)
+	c2, send2 := connectClient(t, hub, user2, 0, 32)
 	hub.HandleMessageForTest(c2, voiceJoinMsg(chanID))
 
 	// user3 (highest ID) joins
 	user3 := seedVoiceOwner(t, database, "kht-user3")
-	send3 := make(chan []byte, 32)
-	c3 := ws.NewTestClientWithUser(hub, user3, 0, send3)
-	hub.Register(c3)
-	waitRegistered(t, hub, c3)
+	c3, send3 := connectClient(t, hub, user3, 0, 32)
 	hub.HandleMessageForTest(c3, voiceJoinMsg(chanID))
 	drainChanTimeout(send1, 30*time.Millisecond)
 	drainChan(send2)
@@ -270,10 +234,7 @@ func TestE2EE_Announce_AcceptsRawBase64(t *testing.T) {
 	chanID := seedVoiceChan(t, database, "vc-b64")
 
 	user := seedVoiceOwner(t, database, "b64-user")
-	sendCh := make(chan []byte, 32)
-	c := ws.NewTestClientWithUser(hub, user, 0, sendCh)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, sendCh := connectClient(t, hub, user, 0, 32)
 	hub.HandleMessageForTest(c, voiceJoinMsg(chanID))
 	drainChanTimeout(sendCh, 30*time.Millisecond)
 
@@ -297,18 +258,12 @@ func TestE2EE_Offer_AcceptsRawBase64(t *testing.T) {
 
 	// user1 is key holder (lowest ID)
 	user1 := seedVoiceOwner(t, database, "b64o-user1")
-	send1 := make(chan []byte, 32)
-	c1 := ws.NewTestClientWithUser(hub, user1, 0, send1)
-	hub.Register(c1)
-	waitRegistered(t, hub, c1)
+	c1, send1 := connectClient(t, hub, user1, 0, 32)
 	hub.HandleMessageForTest(c1, voiceJoinMsg(chanID))
 	drainChanTimeout(send1, 30*time.Millisecond)
 
 	user2 := seedVoiceOwner(t, database, "b64o-user2")
-	send2 := make(chan []byte, 32)
-	c2 := ws.NewTestClientWithUser(hub, user2, 0, send2)
-	hub.Register(c2)
-	waitRegistered(t, hub, c2)
+	c2, send2 := connectClient(t, hub, user2, 0, 32)
 	hub.HandleMessageForTest(c2, voiceJoinMsg(chanID))
 	drainChanTimeout(send1, 30*time.Millisecond)
 	drainChan(send2)
@@ -348,10 +303,7 @@ func TestE2EE_GetPubKey_ReturnsKeyAfterAnnounce(t *testing.T) {
 	chanID := seedVoiceChan(t, database, "vc-pubkey")
 
 	user := seedVoiceOwner(t, database, "pubkey-user")
-	sendCh := make(chan []byte, 32)
-	c := ws.NewTestClientWithUser(hub, user, 0, sendCh)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, sendCh := connectClient(t, hub, user, 0, 32)
 	hub.HandleMessageForTest(c, voiceJoinMsg(chanID))
 	drainChanTimeout(sendCh, 30*time.Millisecond)
 
@@ -375,10 +327,7 @@ func TestE2EE_VoiceToken_IncludesIsKeyHolder(t *testing.T) {
 
 	// user1 joins first — should be key holder (lowest ID)
 	user1 := seedVoiceOwner(t, database, "iskh-user1")
-	send1 := make(chan []byte, 32)
-	c1 := ws.NewTestClientWithUser(hub, user1, 0, send1)
-	hub.Register(c1)
-	waitRegistered(t, hub, c1)
+	c1, send1 := connectClient(t, hub, user1, 0, 32)
 	hub.HandleMessageForTest(c1, voiceJoinMsg(chanID))
 
 	// Check that user1's voice_token has is_key_holder=true
@@ -399,10 +348,7 @@ func TestE2EE_VoiceToken_IncludesIsKeyHolder(t *testing.T) {
 
 	// user2 joins — should NOT be key holder
 	user2 := seedVoiceOwner(t, database, "iskh-user2")
-	send2 := make(chan []byte, 32)
-	c2 := ws.NewTestClientWithUser(hub, user2, 0, send2)
-	hub.Register(c2)
-	waitRegistered(t, hub, c2)
+	c2, send2 := connectClient(t, hub, user2, 0, 32)
 	hub.HandleMessageForTest(c2, voiceJoinMsg(chanID))
 
 	msgs2 := drainChanTimeout(send2, 50*time.Millisecond)
@@ -448,12 +394,9 @@ func TestE2EE_ConcurrentPubKeyAccess(t *testing.T) {
 
 // e2eeAnnounceMsgSigned builds a voice_e2ee_announce message with a signature.
 func e2eeAnnounceMsgSigned(publicKey, signature string) []byte {
-	raw, _ := json.Marshal(map[string]any{
-		"type": "voice_e2ee_announce",
-		"payload": map[string]any{
-			"public_key": publicKey,
-			"signature":  signature,
-		},
+	raw := envelope("voice_e2ee_announce", map[string]any{
+		"public_key": publicKey,
+		"signature":  signature,
 	})
 	return raw
 }
@@ -474,10 +417,7 @@ func TestE2EE_AnnounceSignature_RelayedToPeers(t *testing.T) {
 	c1 := ws.NewTestClientWithUser(hub, user1, 0, send1)
 	hub.Register(c1)
 	user2 := seedVoiceOwner(t, database, "sig-user2")
-	send2 := make(chan []byte, 32)
-	c2 := ws.NewTestClientWithUser(hub, user2, 0, send2)
-	hub.Register(c2)
-	waitRegistered(t, hub, c2)
+	c2, send2 := connectClient(t, hub, user2, 0, 32)
 
 	hub.HandleMessageForTest(c1, voiceJoinMsg(chanID))
 	hub.HandleMessageForTest(c2, voiceJoinMsg(chanID))
@@ -508,10 +448,7 @@ func TestE2EE_AnnounceSignature_ReplayedToLateJoiner(t *testing.T) {
 	chanID := seedVoiceChan(t, database, "vc-sig-replay")
 
 	user1 := seedVoiceOwner(t, database, "sigrp-user1")
-	send1 := make(chan []byte, 32)
-	c1 := ws.NewTestClientWithUser(hub, user1, 0, send1)
-	hub.Register(c1)
-	waitRegistered(t, hub, c1)
+	c1, send1 := connectClient(t, hub, user1, 0, 32)
 	hub.HandleMessageForTest(c1, voiceJoinMsg(chanID))
 
 	key := validB64Key()
@@ -521,10 +458,7 @@ func TestE2EE_AnnounceSignature_ReplayedToLateJoiner(t *testing.T) {
 
 	// A late joiner must receive the stored announce WITH its signature.
 	user2 := seedVoiceOwner(t, database, "sigrp-user2")
-	send2 := make(chan []byte, 32)
-	c2 := ws.NewTestClientWithUser(hub, user2, 0, send2)
-	hub.Register(c2)
-	waitRegistered(t, hub, c2)
+	c2, send2 := connectClient(t, hub, user2, 0, 32)
 	hub.HandleMessageForTest(c2, voiceJoinMsg(chanID))
 
 	m := waitMsgOfType(send2, "voice_e2ee_announce", waitTimeout)
@@ -543,19 +477,13 @@ func TestE2EE_AnnounceNoSignature_ReplayOmitsField(t *testing.T) {
 	chanID := seedVoiceChan(t, database, "vc-nosig")
 
 	user1 := seedVoiceOwner(t, database, "nosig-user1")
-	send1 := make(chan []byte, 32)
-	c1 := ws.NewTestClientWithUser(hub, user1, 0, send1)
-	hub.Register(c1)
-	waitRegistered(t, hub, c1)
+	c1, send1 := connectClient(t, hub, user1, 0, 32)
 	hub.HandleMessageForTest(c1, voiceJoinMsg(chanID))
 	hub.HandleMessageForTest(c1, e2eeAnnounceMsg(validB64Key()))
 	drainChanTimeout(send1, 30*time.Millisecond)
 
 	user2 := seedVoiceOwner(t, database, "nosig-user2")
-	send2 := make(chan []byte, 32)
-	c2 := ws.NewTestClientWithUser(hub, user2, 0, send2)
-	hub.Register(c2)
-	waitRegistered(t, hub, c2)
+	c2, send2 := connectClient(t, hub, user2, 0, 32)
 	hub.HandleMessageForTest(c2, voiceJoinMsg(chanID))
 
 	if m := waitMsgOfType(send2, "voice_e2ee_announce", waitTimeout); m != nil {

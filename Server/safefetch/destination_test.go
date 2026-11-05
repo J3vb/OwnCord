@@ -35,9 +35,7 @@ func resolverPolicy(answers []netip.Addr, dialed *[]string) Policy {
 func mustNew(t *testing.T, p Policy) *Fetcher {
 	t.Helper()
 	f, err := New(p)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	mustDo(t, "New", err)
 	return f
 }
 
@@ -251,9 +249,7 @@ func TestFetch_DialBindingRejectsAnUnvettedAddress(t *testing.T) {
 		t.Fatalf("a dial with no validated destination must fail closed, got %v", err)
 	}
 	u, err := url.Parse("https://good.invalid/")
-	if err != nil {
-		t.Fatalf("Parse: %v", err)
-	}
+	mustDo(t, "Parse", err)
 	ctx := context.WithValue(context.Background(), vettedKey{}, &destination{
 		url: u, host: "good.invalid", port: "443",
 		addrs: []netip.Addr{netip.MustParseAddr("93.184.216.34")},

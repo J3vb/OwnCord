@@ -68,9 +68,7 @@ CREATE TABLE IF NOT EXISTS channels (
 func newVoiceTestDB(t *testing.T) *db.DB {
 	t.Helper()
 	database, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
+	mustDo(t, "db.Open", err)
 	t.Cleanup(func() { _ = database.Close() })
 
 	migrFS := fstest.MapFS{
@@ -100,29 +98,21 @@ CREATE TABLE IF NOT EXISTS voice_states (
 CREATE INDEX IF NOT EXISTS idx_voice_states_channel ON voice_states(channel_id);
 `)},
 	}
-	if err := db.MigrateFS(database, migrFS); err != nil {
-		t.Fatalf("MigrateFS: %v", err)
-	}
+	mustDo(t, "MigrateFS", db.MigrateFS(database, migrFS))
 	return database
 }
 
 // seedVoiceUser creates a user and returns its ID.
 func seedVoiceUser(t *testing.T, database *db.DB, username string) int64 {
 	t.Helper()
-	id, err := database.CreateUser(context.Background(), username, "hash", 4)
-	if err != nil {
-		t.Fatalf("seedVoiceUser: %v", err)
-	}
+	id := mustCreateUser(t, database, username, "hash", 4)
 	return id
 }
 
 // seedVoiceChannel creates a voice-type channel and returns its ID.
 func seedVoiceChannel(t *testing.T, database *db.DB, name string) int64 {
 	t.Helper()
-	id, err := database.CreateChannel(context.Background(), name, "voice", "", "", 0)
-	if err != nil {
-		t.Fatalf("seedVoiceChannel: %v", err)
-	}
+	id := mustCreateChannel(t, database, name, "voice", "", "", 0)
 	return id
 }
 
@@ -141,9 +131,7 @@ func seedTimeoutAction(t *testing.T, database *db.DB, targetID int64, active boo
 	row := database.QueryRowContext(context.Background(),
 		`INSERT INTO moderation_actions (kind, target_id, expires_at) VALUES ('timeout', ?, ?) RETURNING id`,
 		targetID, expires)
-	if err := row.Scan(&id); err != nil {
-		t.Fatalf("seedTimeoutAction: %v", err)
-	}
+	mustDo(t, "seedTimeoutAction", row.Scan(&id))
 	return id
 }
 
@@ -154,14 +142,9 @@ func TestVoice_JoinVoiceChannel_Success(t *testing.T) {
 	userID := seedVoiceUser(t, database, "alice")
 	chanID := seedVoiceChannel(t, database, "general-voice")
 
-	if err := database.JoinVoiceChannel(context.Background(), userID, chanID); err != nil {
-		t.Fatalf("JoinVoiceChannel: %v", err)
-	}
+	mustDo(t, "JoinVoiceChannel", database.JoinVoiceChannel(context.Background(), userID, chanID))
 
-	state, err := database.GetVoiceState(context.Background(), userID)
-	if err != nil {
-		t.Fatalf("GetVoiceState: %v", err)
-	}
+	state := mustGetVoiceState(t, database, userID)
 	if state == nil {
 		t.Fatal("GetVoiceState returned nil after join")
 	}
@@ -185,18 +168,11 @@ func TestVoice_JoinVoiceChannel_ReplacesExistingState(t *testing.T) {
 	chan1 := seedVoiceChannel(t, database, "voice-1")
 	chan2 := seedVoiceChannel(t, database, "voice-2")
 
-	if err := database.JoinVoiceChannel(context.Background(), userID, chan1); err != nil {
-		t.Fatalf("first JoinVoiceChannel: %v", err)
-	}
+	mustDo(t, "first JoinVoiceChannel", database.JoinVoiceChannel(context.Background(), userID, chan1))
 	// Join a different channel — should replace the old state.
-	if err := database.JoinVoiceChannel(context.Background(), userID, chan2); err != nil {
-		t.Fatalf("second JoinVoiceChannel: %v", err)
-	}
+	mustDo(t, "second JoinVoiceChannel", database.JoinVoiceChannel(context.Background(), userID, chan2))
 
-	state, err := database.GetVoiceState(context.Background(), userID)
-	if err != nil {
-		t.Fatalf("GetVoiceState: %v", err)
-	}
+	state := mustGetVoiceState(t, database, userID)
 	if state == nil {
 		t.Fatal("GetVoiceState returned nil after re-join")
 	}
@@ -210,13 +186,9 @@ func TestVoice_JoinVoiceChannel_SameChannel_Idempotent(t *testing.T) {
 	userID := seedVoiceUser(t, database, "carol")
 	chanID := seedVoiceChannel(t, database, "voice-same")
 
-	if err := database.JoinVoiceChannel(context.Background(), userID, chanID); err != nil {
-		t.Fatalf("first join: %v", err)
-	}
+	mustDo(t, "first join", database.JoinVoiceChannel(context.Background(), userID, chanID))
 	// Joining same channel again should not error.
-	if err := database.JoinVoiceChannel(context.Background(), userID, chanID); err != nil {
-		t.Fatalf("second join same channel: %v", err)
-	}
+	mustDo(t, "second join same channel", database.JoinVoiceChannel(context.Background(), userID, chanID))
 }
 
 // ─── LeaveVoiceChannel ────────────────────────────────────────────────────────
@@ -226,17 +198,10 @@ func TestVoice_LeaveVoiceChannel_ClearsState(t *testing.T) {
 	userID := seedVoiceUser(t, database, "dave")
 	chanID := seedVoiceChannel(t, database, "voice-leave")
 
-	if err := database.JoinVoiceChannel(context.Background(), userID, chanID); err != nil {
-		t.Fatalf("JoinVoiceChannel: %v", err)
-	}
-	if err := database.LeaveVoiceChannel(context.Background(), userID); err != nil {
-		t.Fatalf("LeaveVoiceChannel: %v", err)
-	}
+	mustDo(t, "JoinVoiceChannel", database.JoinVoiceChannel(context.Background(), userID, chanID))
+	mustDo(t, "LeaveVoiceChannel", database.LeaveVoiceChannel(context.Background(), userID))
 
-	state, err := database.GetVoiceState(context.Background(), userID)
-	if err != nil {
-		t.Fatalf("GetVoiceState after leave: %v", err)
-	}
+	state := mustGetVoiceState(t, database, userID)
 	if state != nil {
 		t.Error("GetVoiceState returned non-nil after leave, want nil")
 	}
@@ -247,9 +212,7 @@ func TestVoice_LeaveVoiceChannel_NoState_NoError(t *testing.T) {
 	userID := seedVoiceUser(t, database, "eve")
 
 	// Leaving when not in any channel should not error.
-	if err := database.LeaveVoiceChannel(context.Background(), userID); err != nil {
-		t.Fatalf("LeaveVoiceChannel (not in channel): %v", err)
-	}
+	mustDo(t, "LeaveVoiceChannel (not in channel)", database.LeaveVoiceChannel(context.Background(), userID))
 }
 
 // ─── GetVoiceState ────────────────────────────────────────────────────────────
@@ -258,10 +221,7 @@ func TestVoice_GetVoiceState_NotFound(t *testing.T) {
 	database := newVoiceTestDB(t)
 	userID := seedVoiceUser(t, database, "frank")
 
-	state, err := database.GetVoiceState(context.Background(), userID)
-	if err != nil {
-		t.Fatalf("GetVoiceState(not found): %v", err)
-	}
+	state := mustGetVoiceState(t, database, userID)
 	if state != nil {
 		t.Error("GetVoiceState returned non-nil for user not in voice")
 	}
@@ -272,14 +232,9 @@ func TestVoice_GetVoiceState_IncludesUsername(t *testing.T) {
 	userID := seedVoiceUser(t, database, "grace")
 	chanID := seedVoiceChannel(t, database, "voice-username")
 
-	if err := database.JoinVoiceChannel(context.Background(), userID, chanID); err != nil {
-		t.Fatalf("JoinVoiceChannel: %v", err)
-	}
+	mustDo(t, "JoinVoiceChannel", database.JoinVoiceChannel(context.Background(), userID, chanID))
 
-	state, err := database.GetVoiceState(context.Background(), userID)
-	if err != nil {
-		t.Fatalf("GetVoiceState: %v", err)
-	}
+	state := mustGetVoiceState(t, database, userID)
 	if state == nil {
 		t.Fatal("GetVoiceState returned nil")
 	}
@@ -295,9 +250,7 @@ func TestVoice_GetChannelVoiceStates_Empty(t *testing.T) {
 	chanID := seedVoiceChannel(t, database, "empty-voice")
 
 	states, err := database.GetChannelVoiceStates(context.Background(), chanID)
-	if err != nil {
-		t.Fatalf("GetChannelVoiceStates: %v", err)
-	}
+	mustDo(t, "GetChannelVoiceStates", err)
 	if len(states) != 0 {
 		t.Errorf("got %d states, want 0", len(states))
 	}
@@ -311,21 +264,13 @@ func TestVoice_GetChannelVoiceStates_MultipleUsers(t *testing.T) {
 	chanID := seedVoiceChannel(t, database, "multi-voice")
 	otherChan := seedVoiceChannel(t, database, "other-voice")
 
-	if err := database.JoinVoiceChannel(context.Background(), u1, chanID); err != nil {
-		t.Fatalf("join u1: %v", err)
-	}
-	if err := database.JoinVoiceChannel(context.Background(), u2, chanID); err != nil {
-		t.Fatalf("join u2: %v", err)
-	}
+	mustDo(t, "join u1", database.JoinVoiceChannel(context.Background(), u1, chanID))
+	mustDo(t, "join u2", database.JoinVoiceChannel(context.Background(), u2, chanID))
 	// u3 joins a different channel — should not appear.
-	if err := database.JoinVoiceChannel(context.Background(), u3, otherChan); err != nil {
-		t.Fatalf("join u3: %v", err)
-	}
+	mustDo(t, "join u3", database.JoinVoiceChannel(context.Background(), u3, otherChan))
 
 	states, err := database.GetChannelVoiceStates(context.Background(), chanID)
-	if err != nil {
-		t.Fatalf("GetChannelVoiceStates: %v", err)
-	}
+	mustDo(t, "GetChannelVoiceStates", err)
 	if len(states) != 2 {
 		t.Errorf("got %d states, want 2", len(states))
 	}
@@ -345,12 +290,8 @@ func TestVoice_UpdateVoiceMute_True(t *testing.T) {
 	userID := seedVoiceUser(t, database, "kate")
 	chanID := seedVoiceChannel(t, database, "voice-mute")
 
-	if err := database.JoinVoiceChannel(context.Background(), userID, chanID); err != nil {
-		t.Fatalf("JoinVoiceChannel: %v", err)
-	}
-	if err := database.UpdateVoiceMute(context.Background(), userID, true); err != nil {
-		t.Fatalf("UpdateVoiceMute(true): %v", err)
-	}
+	mustDo(t, "JoinVoiceChannel", database.JoinVoiceChannel(context.Background(), userID, chanID))
+	mustDo(t, "UpdateVoiceMute(true)", database.UpdateVoiceMute(context.Background(), userID, true))
 
 	state, _ := database.GetVoiceState(context.Background(), userID)
 	if state == nil || !state.Muted {
@@ -363,15 +304,9 @@ func TestVoice_UpdateVoiceMute_False(t *testing.T) {
 	userID := seedVoiceUser(t, database, "leo")
 	chanID := seedVoiceChannel(t, database, "voice-unmute")
 
-	if err := database.JoinVoiceChannel(context.Background(), userID, chanID); err != nil {
-		t.Fatalf("JoinVoiceChannel: %v", err)
-	}
-	if err := database.UpdateVoiceMute(context.Background(), userID, true); err != nil {
-		t.Fatalf("UpdateVoiceMute(true): %v", err)
-	}
-	if err := database.UpdateVoiceMute(context.Background(), userID, false); err != nil {
-		t.Fatalf("UpdateVoiceMute(false): %v", err)
-	}
+	mustDo(t, "JoinVoiceChannel", database.JoinVoiceChannel(context.Background(), userID, chanID))
+	mustDo(t, "UpdateVoiceMute(true)", database.UpdateVoiceMute(context.Background(), userID, true))
+	mustDo(t, "UpdateVoiceMute(false)", database.UpdateVoiceMute(context.Background(), userID, false))
 
 	state, _ := database.GetVoiceState(context.Background(), userID)
 	if state == nil || state.Muted {
@@ -384,9 +319,7 @@ func TestVoice_UpdateVoiceMute_NotInChannel_NoError(t *testing.T) {
 	userID := seedVoiceUser(t, database, "mia")
 
 	// Muting when not in a channel should not error.
-	if err := database.UpdateVoiceMute(context.Background(), userID, true); err != nil {
-		t.Fatalf("UpdateVoiceMute for non-member: %v", err)
-	}
+	mustDo(t, "UpdateVoiceMute for non-member", database.UpdateVoiceMute(context.Background(), userID, true))
 }
 
 // ─── UpdateVoiceDeafen ────────────────────────────────────────────────────────
@@ -396,12 +329,8 @@ func TestVoice_UpdateVoiceDeafen_True(t *testing.T) {
 	userID := seedVoiceUser(t, database, "noah")
 	chanID := seedVoiceChannel(t, database, "voice-deafen")
 
-	if err := database.JoinVoiceChannel(context.Background(), userID, chanID); err != nil {
-		t.Fatalf("JoinVoiceChannel: %v", err)
-	}
-	if err := database.UpdateVoiceDeafen(context.Background(), userID, true); err != nil {
-		t.Fatalf("UpdateVoiceDeafen(true): %v", err)
-	}
+	mustDo(t, "JoinVoiceChannel", database.JoinVoiceChannel(context.Background(), userID, chanID))
+	mustDo(t, "UpdateVoiceDeafen(true)", database.UpdateVoiceDeafen(context.Background(), userID, true))
 
 	state, _ := database.GetVoiceState(context.Background(), userID)
 	if state == nil || !state.Deafened {
@@ -414,15 +343,9 @@ func TestVoice_UpdateVoiceDeafen_False(t *testing.T) {
 	userID := seedVoiceUser(t, database, "olivia")
 	chanID := seedVoiceChannel(t, database, "voice-undeafen")
 
-	if err := database.JoinVoiceChannel(context.Background(), userID, chanID); err != nil {
-		t.Fatalf("JoinVoiceChannel: %v", err)
-	}
-	if err := database.UpdateVoiceDeafen(context.Background(), userID, true); err != nil {
-		t.Fatalf("UpdateVoiceDeafen(true): %v", err)
-	}
-	if err := database.UpdateVoiceDeafen(context.Background(), userID, false); err != nil {
-		t.Fatalf("UpdateVoiceDeafen(false): %v", err)
-	}
+	mustDo(t, "JoinVoiceChannel", database.JoinVoiceChannel(context.Background(), userID, chanID))
+	mustDo(t, "UpdateVoiceDeafen(true)", database.UpdateVoiceDeafen(context.Background(), userID, true))
+	mustDo(t, "UpdateVoiceDeafen(false)", database.UpdateVoiceDeafen(context.Background(), userID, false))
 
 	state, _ := database.GetVoiceState(context.Background(), userID)
 	if state == nil || state.Deafened {
@@ -437,17 +360,10 @@ func TestVoice_ClearVoiceState_RemovesState(t *testing.T) {
 	userID := seedVoiceUser(t, database, "pedro")
 	chanID := seedVoiceChannel(t, database, "voice-clear")
 
-	if err := database.JoinVoiceChannel(context.Background(), userID, chanID); err != nil {
-		t.Fatalf("JoinVoiceChannel: %v", err)
-	}
-	if err := database.ClearVoiceState(context.Background(), userID); err != nil {
-		t.Fatalf("ClearVoiceState: %v", err)
-	}
+	mustDo(t, "JoinVoiceChannel", database.JoinVoiceChannel(context.Background(), userID, chanID))
+	mustDo(t, "ClearVoiceState", database.ClearVoiceState(context.Background(), userID))
 
-	state, err := database.GetVoiceState(context.Background(), userID)
-	if err != nil {
-		t.Fatalf("GetVoiceState after clear: %v", err)
-	}
+	state := mustGetVoiceState(t, database, userID)
 	if state != nil {
 		t.Error("GetVoiceState returned non-nil after ClearVoiceState")
 	}
@@ -457,9 +373,7 @@ func TestVoice_ClearVoiceState_NotInChannel_NoError(t *testing.T) {
 	database := newVoiceTestDB(t)
 	userID := seedVoiceUser(t, database, "quinn")
 
-	if err := database.ClearVoiceState(context.Background(), userID); err != nil {
-		t.Fatalf("ClearVoiceState for non-member: %v", err)
-	}
+	mustDo(t, "ClearVoiceState for non-member", database.ClearVoiceState(context.Background(), userID))
 }
 
 // ─── Cascade delete ───────────────────────────────────────────────────────────
@@ -469,14 +383,10 @@ func TestVoice_GetChannelVoiceStates_IncludesUsername(t *testing.T) {
 	u1 := seedVoiceUser(t, database, "rachel")
 	chanID := seedVoiceChannel(t, database, "voice-name-check")
 
-	if err := database.JoinVoiceChannel(context.Background(), u1, chanID); err != nil {
-		t.Fatalf("JoinVoiceChannel: %v", err)
-	}
+	mustDo(t, "JoinVoiceChannel", database.JoinVoiceChannel(context.Background(), u1, chanID))
 
 	states, err := database.GetChannelVoiceStates(context.Background(), chanID)
-	if err != nil {
-		t.Fatalf("GetChannelVoiceStates: %v", err)
-	}
+	mustDo(t, "GetChannelVoiceStates", err)
 	if len(states) != 1 {
 		t.Fatalf("got %d states, want 1", len(states))
 	}
@@ -492,12 +402,8 @@ func TestVoice_UpdateVoiceCamera_True(t *testing.T) {
 	userID := seedVoiceUser(t, database, "cam-on")
 	chanID := seedVoiceChannel(t, database, "voice-camera")
 
-	if err := database.JoinVoiceChannel(context.Background(), userID, chanID); err != nil {
-		t.Fatalf("JoinVoiceChannel: %v", err)
-	}
-	if err := database.UpdateVoiceCamera(context.Background(), userID, true); err != nil {
-		t.Fatalf("UpdateVoiceCamera(true): %v", err)
-	}
+	mustDo(t, "JoinVoiceChannel", database.JoinVoiceChannel(context.Background(), userID, chanID))
+	mustDo(t, "UpdateVoiceCamera(true)", database.UpdateVoiceCamera(context.Background(), userID, true))
 
 	state, _ := database.GetVoiceState(context.Background(), userID)
 	if state == nil || !state.Camera {
@@ -510,15 +416,9 @@ func TestVoice_UpdateVoiceCamera_False(t *testing.T) {
 	userID := seedVoiceUser(t, database, "cam-off")
 	chanID := seedVoiceChannel(t, database, "voice-camera-off")
 
-	if err := database.JoinVoiceChannel(context.Background(), userID, chanID); err != nil {
-		t.Fatalf("JoinVoiceChannel: %v", err)
-	}
-	if err := database.UpdateVoiceCamera(context.Background(), userID, true); err != nil {
-		t.Fatalf("UpdateVoiceCamera(true): %v", err)
-	}
-	if err := database.UpdateVoiceCamera(context.Background(), userID, false); err != nil {
-		t.Fatalf("UpdateVoiceCamera(false): %v", err)
-	}
+	mustDo(t, "JoinVoiceChannel", database.JoinVoiceChannel(context.Background(), userID, chanID))
+	mustDo(t, "UpdateVoiceCamera(true)", database.UpdateVoiceCamera(context.Background(), userID, true))
+	mustDo(t, "UpdateVoiceCamera(false)", database.UpdateVoiceCamera(context.Background(), userID, false))
 
 	state, _ := database.GetVoiceState(context.Background(), userID)
 	if state == nil || state.Camera {
@@ -530,9 +430,7 @@ func TestVoice_UpdateVoiceCamera_NotInChannel_NoError(t *testing.T) {
 	database := newVoiceTestDB(t)
 	userID := seedVoiceUser(t, database, "cam-noop")
 
-	if err := database.UpdateVoiceCamera(context.Background(), userID, true); err != nil {
-		t.Fatalf("UpdateVoiceCamera for non-member: %v", err)
-	}
+	mustDo(t, "UpdateVoiceCamera for non-member", database.UpdateVoiceCamera(context.Background(), userID, true))
 }
 
 // ─── UpdateVoiceScreenshare ──────────────────────────────────────────────────
@@ -542,12 +440,8 @@ func TestVoice_UpdateVoiceScreenshare_True(t *testing.T) {
 	userID := seedVoiceUser(t, database, "share-on")
 	chanID := seedVoiceChannel(t, database, "voice-screen")
 
-	if err := database.JoinVoiceChannel(context.Background(), userID, chanID); err != nil {
-		t.Fatalf("JoinVoiceChannel: %v", err)
-	}
-	if err := database.UpdateVoiceScreenshare(context.Background(), userID, true); err != nil {
-		t.Fatalf("UpdateVoiceScreenshare(true): %v", err)
-	}
+	mustDo(t, "JoinVoiceChannel", database.JoinVoiceChannel(context.Background(), userID, chanID))
+	mustDo(t, "UpdateVoiceScreenshare(true)", database.UpdateVoiceScreenshare(context.Background(), userID, true))
 
 	state, _ := database.GetVoiceState(context.Background(), userID)
 	if state == nil || !state.Screenshare {
@@ -560,15 +454,9 @@ func TestVoice_UpdateVoiceScreenshare_False(t *testing.T) {
 	userID := seedVoiceUser(t, database, "share-off")
 	chanID := seedVoiceChannel(t, database, "voice-screen-off")
 
-	if err := database.JoinVoiceChannel(context.Background(), userID, chanID); err != nil {
-		t.Fatalf("JoinVoiceChannel: %v", err)
-	}
-	if err := database.UpdateVoiceScreenshare(context.Background(), userID, true); err != nil {
-		t.Fatalf("UpdateVoiceScreenshare(true): %v", err)
-	}
-	if err := database.UpdateVoiceScreenshare(context.Background(), userID, false); err != nil {
-		t.Fatalf("UpdateVoiceScreenshare(false): %v", err)
-	}
+	mustDo(t, "JoinVoiceChannel", database.JoinVoiceChannel(context.Background(), userID, chanID))
+	mustDo(t, "UpdateVoiceScreenshare(true)", database.UpdateVoiceScreenshare(context.Background(), userID, true))
+	mustDo(t, "UpdateVoiceScreenshare(false)", database.UpdateVoiceScreenshare(context.Background(), userID, false))
 
 	state, _ := database.GetVoiceState(context.Background(), userID)
 	if state == nil || state.Screenshare {
@@ -583,9 +471,7 @@ func TestVoice_CountChannelVoiceUsers_Empty(t *testing.T) {
 	chanID := seedVoiceChannel(t, database, "count-empty")
 
 	count, err := database.CountChannelVoiceUsers(context.Background(), chanID)
-	if err != nil {
-		t.Fatalf("CountChannelVoiceUsers: %v", err)
-	}
+	mustDo(t, "CountChannelVoiceUsers", err)
 	if count != 0 {
 		t.Errorf("count = %d, want 0", count)
 	}
@@ -599,21 +485,13 @@ func TestVoice_CountChannelVoiceUsers_Multiple(t *testing.T) {
 	chanID := seedVoiceChannel(t, database, "count-multi")
 	otherChan := seedVoiceChannel(t, database, "count-other")
 
-	if err := database.JoinVoiceChannel(context.Background(), u1, chanID); err != nil {
-		t.Fatalf("join u1: %v", err)
-	}
-	if err := database.JoinVoiceChannel(context.Background(), u2, chanID); err != nil {
-		t.Fatalf("join u2: %v", err)
-	}
+	mustDo(t, "join u1", database.JoinVoiceChannel(context.Background(), u1, chanID))
+	mustDo(t, "join u2", database.JoinVoiceChannel(context.Background(), u2, chanID))
 	// u3 joins a different channel — should not be counted.
-	if err := database.JoinVoiceChannel(context.Background(), u3, otherChan); err != nil {
-		t.Fatalf("join u3: %v", err)
-	}
+	mustDo(t, "join u3", database.JoinVoiceChannel(context.Background(), u3, otherChan))
 
 	count, err := database.CountChannelVoiceUsers(context.Background(), chanID)
-	if err != nil {
-		t.Fatalf("CountChannelVoiceUsers: %v", err)
-	}
+	mustDo(t, "CountChannelVoiceUsers", err)
 	if count != 2 {
 		t.Errorf("count = %d, want 2", count)
 	}
@@ -628,16 +506,10 @@ func TestVoice_ClearAllVoiceStates_RemovesAll(t *testing.T) {
 	chan1 := seedVoiceChannel(t, database, "clear-ch1")
 	chan2 := seedVoiceChannel(t, database, "clear-ch2")
 
-	if err := database.JoinVoiceChannel(context.Background(), u1, chan1); err != nil {
-		t.Fatalf("join u1: %v", err)
-	}
-	if err := database.JoinVoiceChannel(context.Background(), u2, chan2); err != nil {
-		t.Fatalf("join u2: %v", err)
-	}
+	mustDo(t, "join u1", database.JoinVoiceChannel(context.Background(), u1, chan1))
+	mustDo(t, "join u2", database.JoinVoiceChannel(context.Background(), u2, chan2))
 
-	if err := database.ClearAllVoiceStates(context.Background()); err != nil {
-		t.Fatalf("ClearAllVoiceStates: %v", err)
-	}
+	mustDo(t, "ClearAllVoiceStates", database.ClearAllVoiceStates(context.Background()))
 
 	s1, _ := database.GetVoiceState(context.Background(), u1)
 	s2, _ := database.GetVoiceState(context.Background(), u2)
@@ -649,9 +521,7 @@ func TestVoice_ClearAllVoiceStates_RemovesAll(t *testing.T) {
 func TestVoice_ClearAllVoiceStates_EmptyTable_NoError(t *testing.T) {
 	database := newVoiceTestDB(t)
 
-	if err := database.ClearAllVoiceStates(context.Background()); err != nil {
-		t.Fatalf("ClearAllVoiceStates on empty table: %v", err)
-	}
+	mustDo(t, "ClearAllVoiceStates on empty table", database.ClearAllVoiceStates(context.Background()))
 }
 
 // ─── JoinVoiceChannel resets camera/screenshare ──────────────────────────────
@@ -663,20 +533,12 @@ func TestVoice_JoinVoiceChannel_ResetsCameraAndScreenshare(t *testing.T) {
 	chan2 := seedVoiceChannel(t, database, "voice-reset2")
 
 	// Join, enable camera and screenshare.
-	if err := database.JoinVoiceChannel(context.Background(), userID, chan1); err != nil {
-		t.Fatalf("first join: %v", err)
-	}
-	if err := database.UpdateVoiceCamera(context.Background(), userID, true); err != nil {
-		t.Fatalf("UpdateVoiceCamera: %v", err)
-	}
-	if err := database.UpdateVoiceScreenshare(context.Background(), userID, true); err != nil {
-		t.Fatalf("UpdateVoiceScreenshare: %v", err)
-	}
+	mustDo(t, "first join", database.JoinVoiceChannel(context.Background(), userID, chan1))
+	mustDo(t, "UpdateVoiceCamera", database.UpdateVoiceCamera(context.Background(), userID, true))
+	mustDo(t, "UpdateVoiceScreenshare", database.UpdateVoiceScreenshare(context.Background(), userID, true))
 
 	// Join a different channel — camera and screenshare should be reset.
-	if err := database.JoinVoiceChannel(context.Background(), userID, chan2); err != nil {
-		t.Fatalf("second join: %v", err)
-	}
+	mustDo(t, "second join", database.JoinVoiceChannel(context.Background(), userID, chan2))
 
 	state, _ := database.GetVoiceState(context.Background(), userID)
 	if state == nil {
@@ -697,9 +559,7 @@ func TestVoice_GetVoiceState_IncludesCameraAndScreenshare(t *testing.T) {
 	userID := seedVoiceUser(t, database, "av-fields")
 	chanID := seedVoiceChannel(t, database, "voice-av-fields")
 
-	if err := database.JoinVoiceChannel(context.Background(), userID, chanID); err != nil {
-		t.Fatalf("JoinVoiceChannel: %v", err)
-	}
+	mustDo(t, "JoinVoiceChannel", database.JoinVoiceChannel(context.Background(), userID, chanID))
 
 	// Initially both should be false.
 	state, _ := database.GetVoiceState(context.Background(), userID)
@@ -736,15 +596,11 @@ func TestVoice_GetChannelVoiceStates_IncludesCameraAndScreenshare(t *testing.T) 
 	userID := seedVoiceUser(t, database, "chan-av")
 	chanID := seedVoiceChannel(t, database, "voice-chan-av")
 
-	if err := database.JoinVoiceChannel(context.Background(), userID, chanID); err != nil {
-		t.Fatalf("JoinVoiceChannel: %v", err)
-	}
+	mustDo(t, "JoinVoiceChannel", database.JoinVoiceChannel(context.Background(), userID, chanID))
 	_ = database.UpdateVoiceCamera(context.Background(), userID, true)
 
 	states, err := database.GetChannelVoiceStates(context.Background(), chanID)
-	if err != nil {
-		t.Fatalf("GetChannelVoiceStates: %v", err)
-	}
+	mustDo(t, "GetChannelVoiceStates", err)
 	if len(states) != 1 {
 		t.Fatalf("got %d states, want 1", len(states))
 	}
@@ -761,24 +617,14 @@ func TestVoice_JoinVoiceChannel_SameChannel_RefreshesJoinToken(t *testing.T) {
 	userID := seedVoiceUser(t, database, "same-channel-token")
 	chanID := seedVoiceChannel(t, database, "voice-same-token")
 
-	if err := database.JoinVoiceChannel(context.Background(), userID, chanID); err != nil {
-		t.Fatalf("first JoinVoiceChannel: %v", err)
-	}
-	first, err := database.GetVoiceState(context.Background(), userID)
-	if err != nil {
-		t.Fatalf("GetVoiceState(first): %v", err)
-	}
+	mustDo(t, "first JoinVoiceChannel", database.JoinVoiceChannel(context.Background(), userID, chanID))
+	first := mustGetVoiceState(t, database, userID)
 	if first == nil || first.JoinedAt == "" {
 		t.Fatal("first join token missing")
 	}
 
-	if err := database.JoinVoiceChannel(context.Background(), userID, chanID); err != nil {
-		t.Fatalf("second JoinVoiceChannel: %v", err)
-	}
-	second, err := database.GetVoiceState(context.Background(), userID)
-	if err != nil {
-		t.Fatalf("GetVoiceState(second): %v", err)
-	}
+	mustDo(t, "second JoinVoiceChannel", database.JoinVoiceChannel(context.Background(), userID, chanID))
+	second := mustGetVoiceState(t, database, userID)
 	if second == nil || second.JoinedAt == "" {
 		t.Fatal("second join token missing")
 	}
@@ -792,40 +638,25 @@ func TestVoice_LeaveVoiceChannelIfMatch_DoesNotDeleteSameChannelRejoin(t *testin
 	userID := seedVoiceUser(t, database, "stale-delete")
 	chanID := seedVoiceChannel(t, database, "voice-stale-delete")
 
-	if err := database.JoinVoiceChannel(context.Background(), userID, chanID); err != nil {
-		t.Fatalf("first JoinVoiceChannel: %v", err)
-	}
-	first, err := database.GetVoiceState(context.Background(), userID)
-	if err != nil {
-		t.Fatalf("GetVoiceState(first): %v", err)
-	}
+	mustDo(t, "first JoinVoiceChannel", database.JoinVoiceChannel(context.Background(), userID, chanID))
+	first := mustGetVoiceState(t, database, userID)
 	if first == nil {
 		t.Fatal("GetVoiceState(first) returned nil")
 	}
 
-	if err := database.JoinVoiceChannel(context.Background(), userID, chanID); err != nil {
-		t.Fatalf("second JoinVoiceChannel: %v", err)
-	}
-	second, err := database.GetVoiceState(context.Background(), userID)
-	if err != nil {
-		t.Fatalf("GetVoiceState(second): %v", err)
-	}
+	mustDo(t, "second JoinVoiceChannel", database.JoinVoiceChannel(context.Background(), userID, chanID))
+	second := mustGetVoiceState(t, database, userID)
 	if second == nil {
 		t.Fatal("GetVoiceState(second) returned nil")
 	}
 
 	deleted, err := database.LeaveVoiceChannelIfMatch(context.Background(), userID, chanID, first.JoinedAt)
-	if err != nil {
-		t.Fatalf("LeaveVoiceChannelIfMatch: %v", err)
-	}
+	mustDo(t, "LeaveVoiceChannelIfMatch", err)
 	if deleted {
 		t.Fatal("stale join token deleted the replacement same-channel row")
 	}
 
-	current, err := database.GetVoiceState(context.Background(), userID)
-	if err != nil {
-		t.Fatalf("GetVoiceState(current): %v", err)
-	}
+	current := mustGetVoiceState(t, database, userID)
 	if current == nil {
 		t.Fatal("replacement voice state was removed")
 	}
@@ -851,21 +682,15 @@ func TestVoice_SetVoiceServerMute_ScopedToChannel(t *testing.T) {
 	chanA := seedVoiceChannel(t, database, "vc-scope-mute-a")
 	chanB := seedVoiceChannel(t, database, "vc-scope-mute-b")
 
-	if err := database.JoinVoiceChannel(ctx, userID, chanA); err != nil {
-		t.Fatalf("JoinVoiceChannel A: %v", err)
-	}
+	mustDo(t, "JoinVoiceChannel A", database.JoinVoiceChannel(ctx, userID, chanA))
 	// Simulate the race: the user's row moves to channel B — a channel nobody's
 	// mute command was authorized against — before the write below lands.
-	if err := database.JoinVoiceChannel(ctx, userID, chanB); err != nil {
-		t.Fatalf("JoinVoiceChannel B: %v", err)
-	}
+	mustDo(t, "JoinVoiceChannel B", database.JoinVoiceChannel(ctx, userID, chanB))
 
 	// A mute authorized against chanA (the channel a stale requireTargetInChannel
 	// snapshot showed) must not land on the row now in chanB.
 	matched, err := database.SetVoiceServerMute(ctx, userID, chanA, true)
-	if err != nil {
-		t.Fatalf("SetVoiceServerMute: %v", err)
-	}
+	mustDo(t, "SetVoiceServerMute", err)
 	if matched {
 		t.Error("SetVoiceServerMute matched=true against channel A after the user moved to channel B")
 	}
@@ -883,9 +708,7 @@ func TestVoice_SetVoiceServerMute_ScopedToChannel(t *testing.T) {
 
 	// The scoped write must still succeed when the channel does match.
 	matched, err = database.SetVoiceServerMute(ctx, userID, chanB, true)
-	if err != nil {
-		t.Fatalf("SetVoiceServerMute (matching channel): %v", err)
-	}
+	mustDo(t, "SetVoiceServerMute (matching channel)", err)
 	if !matched {
 		t.Error("SetVoiceServerMute matched=false for the channel the user is actually in")
 	}
@@ -905,17 +728,11 @@ func TestVoice_SetVoiceServerDeafen_ScopedToChannel(t *testing.T) {
 	chanA := seedVoiceChannel(t, database, "vc-scope-deafen-a")
 	chanB := seedVoiceChannel(t, database, "vc-scope-deafen-b")
 
-	if err := database.JoinVoiceChannel(ctx, userID, chanA); err != nil {
-		t.Fatalf("JoinVoiceChannel A: %v", err)
-	}
-	if err := database.JoinVoiceChannel(ctx, userID, chanB); err != nil {
-		t.Fatalf("JoinVoiceChannel B: %v", err)
-	}
+	mustDo(t, "JoinVoiceChannel A", database.JoinVoiceChannel(ctx, userID, chanA))
+	mustDo(t, "JoinVoiceChannel B", database.JoinVoiceChannel(ctx, userID, chanB))
 
 	matched, err := database.SetVoiceServerDeafen(ctx, userID, chanA, true)
-	if err != nil {
-		t.Fatalf("SetVoiceServerDeafen: %v", err)
-	}
+	mustDo(t, "SetVoiceServerDeafen", err)
 	if matched {
 		t.Error("SetVoiceServerDeafen matched=true against channel A after the user moved to channel B")
 	}
@@ -932,9 +749,7 @@ func TestVoice_SetVoiceServerDeafen_ScopedToChannel(t *testing.T) {
 	}
 
 	matched, err = database.SetVoiceServerDeafen(ctx, userID, chanB, true)
-	if err != nil {
-		t.Fatalf("SetVoiceServerDeafen (matching channel): %v", err)
-	}
+	mustDo(t, "SetVoiceServerDeafen (matching channel)", err)
 	if !matched {
 		t.Error("SetVoiceServerDeafen matched=false for the channel the user is actually in")
 	}
@@ -962,23 +777,17 @@ func TestVoice_MuteForTimeoutSession_ChannelMismatch(t *testing.T) {
 	chanB := seedVoiceChannel(t, database, "vc-cas-mismatch-b")
 	actionID := seedTimeoutAction(t, database, userID, true)
 
-	if err := database.JoinVoiceChannel(ctx, userID, chanA); err != nil {
-		t.Fatalf("JoinVoiceChannel A: %v", err)
-	}
+	mustDo(t, "JoinVoiceChannel A", database.JoinVoiceChannel(ctx, userID, chanA))
 	stale, err := database.GetVoiceState(ctx, userID)
 	if err != nil || stale == nil {
 		t.Fatalf("GetVoiceState: %v", err)
 	}
 	// The user moves to channel B — an authorization against channel A must
 	// not follow them there.
-	if err := database.JoinVoiceChannel(ctx, userID, chanB); err != nil {
-		t.Fatalf("JoinVoiceChannel B: %v", err)
-	}
+	mustDo(t, "JoinVoiceChannel B", database.JoinVoiceChannel(ctx, userID, chanB))
 
 	matched, transitioned, err := database.MuteForTimeoutSession(ctx, userID, chanA, actionID, stale.JoinedAt, nil)
-	if err != nil {
-		t.Fatalf("MuteForTimeoutSession: %v", err)
-	}
+	mustDo(t, "MuteForTimeoutSession", err)
 	if matched || transitioned {
 		t.Fatalf("matched=%v transitioned=%v, want both false: the session moved to channel B", matched, transitioned)
 	}
@@ -1002,20 +811,14 @@ func TestVoice_MuteForTimeoutSession_JoinedAtMismatch(t *testing.T) {
 	chanA := seedVoiceChannel(t, database, "vc-cas-rejoin-a")
 	actionID := seedTimeoutAction(t, database, userID, true)
 
-	if err := database.JoinVoiceChannel(ctx, userID, chanA); err != nil {
-		t.Fatalf("JoinVoiceChannel (first): %v", err)
-	}
+	mustDo(t, "JoinVoiceChannel (first)", database.JoinVoiceChannel(ctx, userID, chanA))
 	stale, err := database.GetVoiceState(ctx, userID)
 	if err != nil || stale == nil {
 		t.Fatalf("GetVoiceState: %v", err)
 	}
 	// Leave and rejoin the SAME channel — a new join-instance token.
-	if err := database.LeaveVoiceChannel(ctx, userID); err != nil {
-		t.Fatalf("LeaveVoiceChannel: %v", err)
-	}
-	if err := database.JoinVoiceChannel(ctx, userID, chanA); err != nil {
-		t.Fatalf("JoinVoiceChannel (rejoin): %v", err)
-	}
+	mustDo(t, "LeaveVoiceChannel", database.LeaveVoiceChannel(ctx, userID))
+	mustDo(t, "JoinVoiceChannel (rejoin)", database.JoinVoiceChannel(ctx, userID, chanA))
 	fresh, err := database.GetVoiceState(ctx, userID)
 	if err != nil || fresh == nil {
 		t.Fatalf("GetVoiceState (after rejoin): %v", err)
@@ -1025,9 +828,7 @@ func TestVoice_MuteForTimeoutSession_JoinedAtMismatch(t *testing.T) {
 	}
 
 	matched, _, err := database.MuteForTimeoutSession(ctx, userID, chanA, actionID, stale.JoinedAt, nil)
-	if err != nil {
-		t.Fatalf("MuteForTimeoutSession: %v", err)
-	}
+	mustDo(t, "MuteForTimeoutSession", err)
 	if matched {
 		t.Fatal("matched = true, want false: the stale join instance is gone, even though the channel matches")
 	}
@@ -1044,18 +845,14 @@ func TestVoice_MuteForTimeoutSession_Transitioned(t *testing.T) {
 	chanA := seedVoiceChannel(t, database, "vc-cas-transition-a")
 	actionID := seedTimeoutAction(t, database, userID, true)
 
-	if err := database.JoinVoiceChannel(ctx, userID, chanA); err != nil {
-		t.Fatalf("JoinVoiceChannel: %v", err)
-	}
+	mustDo(t, "JoinVoiceChannel", database.JoinVoiceChannel(ctx, userID, chanA))
 	state, err := database.GetVoiceState(ctx, userID)
 	if err != nil || state == nil {
 		t.Fatalf("GetVoiceState: %v", err)
 	}
 
 	matched, transitioned, err := database.MuteForTimeoutSession(ctx, userID, chanA, actionID, state.JoinedAt, nil)
-	if err != nil {
-		t.Fatalf("MuteForTimeoutSession (first mute): %v", err)
-	}
+	mustDo(t, "MuteForTimeoutSession (first mute)", err)
 	if !matched || !transitioned {
 		t.Fatalf("matched=%v transitioned=%v, want both true: the first mute is a genuine unmuted->muted transition", matched, transitioned)
 	}
@@ -1063,9 +860,7 @@ func TestVoice_MuteForTimeoutSession_Transitioned(t *testing.T) {
 	// Muting an already-muted target owned by the SAME still-active action:
 	// matched, but nothing new transitioned.
 	matched, transitioned, err = database.MuteForTimeoutSession(ctx, userID, chanA, actionID, state.JoinedAt, nil)
-	if err != nil {
-		t.Fatalf("MuteForTimeoutSession (already muted): %v", err)
-	}
+	mustDo(t, "MuteForTimeoutSession (already muted)", err)
 	if !matched {
 		t.Fatal("matched = false, want true: the session is still live and in the right channel")
 	}
@@ -1074,9 +869,7 @@ func TestVoice_MuteForTimeoutSession_Transitioned(t *testing.T) {
 	}
 
 	channelID, joinedAt, cleared, err := database.ClearServerMuteOwnedBy(ctx, userID, []int64{actionID})
-	if err != nil {
-		t.Fatalf("ClearServerMuteOwnedBy: %v", err)
-	}
+	mustDo(t, "ClearServerMuteOwnedBy", err)
 	if !cleared || channelID != chanA || joinedAt != state.JoinedAt {
 		t.Fatalf("ClearServerMuteOwnedBy = (%d, %q, %v), want (%d, %q, true)", channelID, joinedAt, cleared, chanA, state.JoinedAt)
 	}
@@ -1103,9 +896,7 @@ func TestVoice_MuteForTimeoutSession_ReclaimsFromInactiveOwner(t *testing.T) {
 	staleAction := seedTimeoutAction(t, database, userID, true) // active for now
 	newAction := seedTimeoutAction(t, database, userID, true)
 
-	if err := database.JoinVoiceChannel(ctx, userID, chanA); err != nil {
-		t.Fatalf("JoinVoiceChannel: %v", err)
-	}
+	mustDo(t, "JoinVoiceChannel", database.JoinVoiceChannel(ctx, userID, chanA))
 	state, err := database.GetVoiceState(ctx, userID)
 	if err != nil || state == nil {
 		t.Fatalf("GetVoiceState: %v", err)
@@ -1122,9 +913,7 @@ func TestVoice_MuteForTimeoutSession_ReclaimsFromInactiveOwner(t *testing.T) {
 	}
 
 	matched, transitioned, err := database.MuteForTimeoutSession(ctx, userID, chanA, newAction, state.JoinedAt, nil)
-	if err != nil {
-		t.Fatalf("MuteForTimeoutSession (reclaim): %v", err)
-	}
+	mustDo(t, "MuteForTimeoutSession (reclaim)", err)
 	if !matched || !transitioned {
 		t.Fatalf("matched=%v transitioned=%v, want both true: an inactive owner's mute must be reclaimable", matched, transitioned)
 	}
@@ -1148,9 +937,7 @@ func TestVoice_MuteForTimeoutSession_NoSession(t *testing.T) {
 	actionID := seedTimeoutAction(t, database, userID, true)
 
 	matched, transitioned, err := database.MuteForTimeoutSession(ctx, userID, chanA, actionID, "no-such-join-token", nil)
-	if err != nil {
-		t.Fatalf("MuteForTimeoutSession: %v", err)
-	}
+	mustDo(t, "MuteForTimeoutSession", err)
 	if matched || transitioned {
 		t.Fatalf("matched=%v transitioned=%v, want both false: no such session", matched, transitioned)
 	}
@@ -1167,9 +954,7 @@ func TestVoice_FindOrphanedVoiceMutes_FindsLiftedAndExpiredOwners(t *testing.T) 
 
 	liftedUser := seedVoiceUser(t, database, "orphan-lifted-user")
 	liftedAction := seedTimeoutAction(t, database, liftedUser, true) // active for now
-	if err := database.JoinVoiceChannel(ctx, liftedUser, chanA); err != nil {
-		t.Fatalf("JoinVoiceChannel: %v", err)
-	}
+	mustDo(t, "JoinVoiceChannel", database.JoinVoiceChannel(ctx, liftedUser, chanA))
 	liftedState, err := database.GetVoiceState(ctx, liftedUser)
 	if err != nil || liftedState == nil {
 		t.Fatalf("GetVoiceState: %v", err)
@@ -1185,9 +970,7 @@ func TestVoice_FindOrphanedVoiceMutes_FindsLiftedAndExpiredOwners(t *testing.T) 
 
 	expiredUser := seedVoiceUser(t, database, "orphan-expired-user")
 	expiredAction := seedTimeoutAction(t, database, expiredUser, true) // active for now
-	if err := database.JoinVoiceChannel(ctx, expiredUser, chanA); err != nil {
-		t.Fatalf("JoinVoiceChannel: %v", err)
-	}
+	mustDo(t, "JoinVoiceChannel", database.JoinVoiceChannel(ctx, expiredUser, chanA))
 	expiredState, err := database.GetVoiceState(ctx, expiredUser)
 	if err != nil || expiredState == nil {
 		t.Fatalf("GetVoiceState: %v", err)
@@ -1200,9 +983,7 @@ func TestVoice_FindOrphanedVoiceMutes_FindsLiftedAndExpiredOwners(t *testing.T) 
 	}
 
 	got, err := database.FindOrphanedVoiceMutes(ctx)
-	if err != nil {
-		t.Fatalf("FindOrphanedVoiceMutes: %v", err)
-	}
+	mustDo(t, "FindOrphanedVoiceMutes", err)
 	want := map[int64]int64{liftedUser: liftedAction, expiredUser: expiredAction}
 	if len(got) != len(want) {
 		t.Fatalf("FindOrphanedVoiceMutes = %+v, want %d entries matching %+v", got, len(want), want)
@@ -1224,9 +1005,7 @@ func TestVoice_FindOrphanedVoiceMutes_ExcludesActiveOwnersAndManualMutes(t *test
 
 	activeUser := seedVoiceUser(t, database, "orphan-active-user")
 	activeAction := seedTimeoutAction(t, database, activeUser, true)
-	if err := database.JoinVoiceChannel(ctx, activeUser, chanA); err != nil {
-		t.Fatalf("JoinVoiceChannel: %v", err)
-	}
+	mustDo(t, "JoinVoiceChannel", database.JoinVoiceChannel(ctx, activeUser, chanA))
 	activeState, err := database.GetVoiceState(ctx, activeUser)
 	if err != nil || activeState == nil {
 		t.Fatalf("GetVoiceState: %v", err)
@@ -1236,17 +1015,13 @@ func TestVoice_FindOrphanedVoiceMutes_ExcludesActiveOwnersAndManualMutes(t *test
 	}
 
 	manualUser := seedVoiceUser(t, database, "orphan-manual-user")
-	if err := database.JoinVoiceChannel(ctx, manualUser, chanA); err != nil {
-		t.Fatalf("JoinVoiceChannel: %v", err)
-	}
+	mustDo(t, "JoinVoiceChannel", database.JoinVoiceChannel(ctx, manualUser, chanA))
 	if matched, err := database.SetVoiceServerMute(ctx, manualUser, chanA, true); err != nil || !matched {
 		t.Fatalf("SetVoiceServerMute: matched=%v err=%v", matched, err)
 	}
 
 	got, err := database.FindOrphanedVoiceMutes(ctx)
-	if err != nil {
-		t.Fatalf("FindOrphanedVoiceMutes: %v", err)
-	}
+	mustDo(t, "FindOrphanedVoiceMutes", err)
 	if len(got) != 0 {
 		t.Fatalf("FindOrphanedVoiceMutes = %+v, want none: an active-owned mute and a manual mute are never candidates", got)
 	}
@@ -1261,9 +1036,7 @@ func TestVoice_ClearServerMuteOwnedBy_NoSession(t *testing.T) {
 	userID := seedVoiceUser(t, database, "clr-nosession-user")
 
 	channelID, joinedAt, cleared, err := database.ClearServerMuteOwnedBy(ctx, userID, []int64{999})
-	if err != nil {
-		t.Fatalf("ClearServerMuteOwnedBy: %v", err)
-	}
+	mustDo(t, "ClearServerMuteOwnedBy", err)
 	if cleared || channelID != 0 || joinedAt != "" {
 		t.Fatalf("got (%d, %q, %v), want (0, \"\", false)", channelID, joinedAt, cleared)
 	}
@@ -1280,9 +1053,7 @@ func TestVoice_ClearServerMuteOwnedBy_ManualMuteNeverReclaimed(t *testing.T) {
 	chanA := seedVoiceChannel(t, database, "vc-clr-manual-a")
 	actionID := seedTimeoutAction(t, database, userID, true)
 
-	if err := database.JoinVoiceChannel(ctx, userID, chanA); err != nil {
-		t.Fatalf("JoinVoiceChannel: %v", err)
-	}
+	mustDo(t, "JoinVoiceChannel", database.JoinVoiceChannel(ctx, userID, chanA))
 	if matched, err := database.SetVoiceServerMute(ctx, userID, chanA, true); err != nil || !matched {
 		t.Fatalf("SetVoiceServerMute: matched=%v err=%v", matched, err)
 	}
@@ -1307,9 +1078,7 @@ func TestVoice_ClearServerMuteOwnedBy_MatchesAnyOfTheChain(t *testing.T) {
 	owner := seedTimeoutAction(t, database, userID, true)
 	other := seedTimeoutAction(t, database, userID, true)
 
-	if err := database.JoinVoiceChannel(ctx, userID, chanA); err != nil {
-		t.Fatalf("JoinVoiceChannel: %v", err)
-	}
+	mustDo(t, "JoinVoiceChannel", database.JoinVoiceChannel(ctx, userID, chanA))
 	state, err := database.GetVoiceState(ctx, userID)
 	if err != nil || state == nil {
 		t.Fatalf("GetVoiceState: %v", err)

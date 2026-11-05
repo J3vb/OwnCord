@@ -3,7 +3,6 @@ package ws
 import (
 	"context"
 	"encoding/base64"
-	"errors"
 	"strings"
 	"testing"
 
@@ -151,17 +150,7 @@ func TestVoiceE2EEOfferV2_NotInVoiceChannel(t *testing.T) {
 
 	result := handleVoiceE2EEOfferV2(context.Background(), cmd, info, deps)
 
-	if result.Error == nil {
-		t.Fatal("expected error for not in voice channel")
-	}
-	var ce ClientError
-	ok := errors.As(result.Error, &ce)
-	if !ok {
-		t.Fatalf("expected ClientError, got %T", result.Error)
-	}
-	if ce.Code != ErrCodeVoiceError {
-		t.Errorf("expected code %q, got %q", ErrCodeVoiceError, ce.Code)
-	}
+	requireClientErrorCode(t, result.Error, ErrCodeVoiceError, "expected error for not in voice channel")
 }
 
 func TestVoiceE2EEOfferV2_EmptyFields(t *testing.T) {
@@ -179,17 +168,7 @@ func TestVoiceE2EEOfferV2_EmptyFields(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			info := ClientInfo{UserID: 1, VoiceChannelID: 100}
 			result := handleVoiceE2EEOfferV2(context.Background(), tt.cmd, info, deps)
-			if result.Error == nil {
-				t.Fatal("expected error for empty field")
-			}
-			var ce ClientError
-			ok := errors.As(result.Error, &ce)
-			if !ok {
-				t.Fatalf("expected ClientError, got %T", result.Error)
-			}
-			if ce.Code != ErrCodeBadPayload {
-				t.Errorf("expected code %q, got %q", ErrCodeBadPayload, ce.Code)
-			}
+			requireClientErrorCode(t, result.Error, ErrCodeBadPayload, "expected error for empty field")
 		})
 	}
 }
@@ -208,17 +187,7 @@ func TestVoiceE2EEOfferV2_OversizedFields(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			info := ClientInfo{UserID: 1, VoiceChannelID: 100}
 			result := handleVoiceE2EEOfferV2(context.Background(), tt.cmd, info, deps)
-			if result.Error == nil {
-				t.Fatal("expected error for oversized field")
-			}
-			var ce ClientError
-			ok := errors.As(result.Error, &ce)
-			if !ok {
-				t.Fatalf("expected ClientError, got %T", result.Error)
-			}
-			if ce.Code != ErrCodeBadPayload {
-				t.Errorf("expected code %q, got %q", ErrCodeBadPayload, ce.Code)
-			}
+			requireClientErrorCode(t, result.Error, ErrCodeBadPayload, "expected error for oversized field")
 		})
 	}
 }
@@ -237,17 +206,7 @@ func TestVoiceE2EEOfferV2_InvalidBase64(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			info := ClientInfo{UserID: 1, VoiceChannelID: 100}
 			result := handleVoiceE2EEOfferV2(context.Background(), tt.cmd, info, deps)
-			if result.Error == nil {
-				t.Fatal("expected error for invalid base64")
-			}
-			var ce ClientError
-			ok := errors.As(result.Error, &ce)
-			if !ok {
-				t.Fatalf("expected ClientError, got %T", result.Error)
-			}
-			if ce.Code != ErrCodeBadPayload {
-				t.Errorf("expected code %q, got %q", ErrCodeBadPayload, ce.Code)
-			}
+			requireClientErrorCode(t, result.Error, ErrCodeBadPayload, "expected error for invalid base64")
 		})
 	}
 }
@@ -259,17 +218,7 @@ func TestVoiceE2EEOfferV2_NotKeyHolder(t *testing.T) {
 
 	result := handleVoiceE2EEOfferV2(context.Background(), cmd, info, deps)
 
-	if result.Error == nil {
-		t.Fatal("expected error for non-key-holder")
-	}
-	var ce ClientError
-	ok := errors.As(result.Error, &ce)
-	if !ok {
-		t.Fatalf("expected ClientError, got %T", result.Error)
-	}
-	if ce.Code != ErrCodeNotKeyHolder {
-		t.Errorf("expected code %q, got %q", ErrCodeNotKeyHolder, ce.Code)
-	}
+	requireClientErrorCode(t, result.Error, ErrCodeNotKeyHolder, "expected error for non-key-holder")
 }
 
 func TestVoiceE2EEOfferV2_NilKeyHolder_ReturnsInternal(t *testing.T) {
@@ -279,17 +228,7 @@ func TestVoiceE2EEOfferV2_NilKeyHolder_ReturnsInternal(t *testing.T) {
 
 	result := handleVoiceE2EEOfferV2(context.Background(), cmd, info, deps)
 
-	if result.Error == nil {
-		t.Fatal("expected error for nil KeyHolder")
-	}
-	var ce ClientError
-	ok := errors.As(result.Error, &ce)
-	if !ok {
-		t.Fatalf("expected ClientError, got %T", result.Error)
-	}
-	if ce.Code != ErrCodeInternal {
-		t.Errorf("expected code %q, got %q", ErrCodeInternal, ce.Code)
-	}
+	requireClientErrorCode(t, result.Error, ErrCodeInternal, "expected error for nil KeyHolder")
 }
 
 func TestVoiceE2EEOfferV2_NoReply(t *testing.T) {

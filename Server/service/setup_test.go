@@ -46,9 +46,7 @@ func TestSetupService_BootstrapMakesAServerUsable(t *testing.T) {
 
 	// The password is stored hashed, never as given.
 	var stored string
-	if err := database.QueryRowContext(ctx, `SELECT password FROM users WHERE id = ?`, res.OwnerID).Scan(&stored); err != nil {
-		t.Fatalf("reading the stored password: %v", err)
-	}
+	mustDo(t, "reading the stored password", database.QueryRowContext(ctx, `SELECT password FROM users WHERE id = ?`, res.OwnerID).Scan(&stored))
 	if stored == "" || strings.Contains(stored, "correct horse") {
 		t.Errorf("the password is recoverable from the users row")
 	}
@@ -56,9 +54,7 @@ func TestSetupService_BootstrapMakesAServerUsable(t *testing.T) {
 	// The two default channels exist, so the owner does not land in an empty
 	// server with nothing to click.
 	var channels int
-	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM channels`).Scan(&channels); err != nil {
-		t.Fatalf("counting channels: %v", err)
-	}
+	mustDo(t, "counting channels", database.QueryRowContext(ctx, `SELECT COUNT(*) FROM channels`).Scan(&channels))
 	if channels != 2 {
 		t.Errorf("first run created %d channels, want 2 (one text, one voice)", channels)
 	}
@@ -90,9 +86,7 @@ func TestSetupService_BootstrapIsRefusedOnceAnAccountExists(t *testing.T) {
 	svc, database, ctx := setupFixture(t)
 
 	first, err := svc.Bootstrap(ctx, BootstrapInput{Username: "owner", Password: "first-password-here"})
-	if err != nil {
-		t.Fatalf("first Bootstrap: %v", err)
-	}
+	mustDo(t, "first Bootstrap", err)
 
 	_, err = svc.Bootstrap(ctx, BootstrapInput{Username: "usurper", Password: "second-password-here"})
 	if !errors.Is(err, ErrSetupAlreadyDone) {
@@ -101,16 +95,12 @@ func TestSetupService_BootstrapIsRefusedOnceAnAccountExists(t *testing.T) {
 
 	// The refused call left nothing behind, and the real owner is untouched.
 	var users int
-	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM users`).Scan(&users); err != nil {
-		t.Fatalf("counting users: %v", err)
-	}
+	mustDo(t, "counting users", database.QueryRowContext(ctx, `SELECT COUNT(*) FROM users`).Scan(&users))
 	if users != 1 {
 		t.Errorf("%d users exist after a refused second setup, want 1", users)
 	}
 	var name string
-	if err := database.QueryRowContext(ctx, `SELECT username FROM users WHERE id = ?`, first.OwnerID).Scan(&name); err != nil {
-		t.Fatalf("re-reading the owner: %v", err)
-	}
+	mustDo(t, "re-reading the owner", database.QueryRowContext(ctx, `SELECT username FROM users WHERE id = ?`, first.OwnerID).Scan(&name))
 	if name != "owner" {
 		t.Errorf("owner username = %q, want \"owner\"", name)
 	}
@@ -175,9 +165,7 @@ func TestSetupService_ApplyWizardSettings(t *testing.T) {
 	settings := NewSettingsService(database)
 
 	// An empty map is a no-op, not an empty transaction.
-	if err := svc.ApplyWizardSettings(ctx, map[string]string{}); err != nil {
-		t.Fatalf("ApplyWizardSettings(empty): %v", err)
-	}
+	mustDo(t, "ApplyWizardSettings(empty)", svc.ApplyWizardSettings(ctx, map[string]string{}))
 
 	if err := svc.ApplyWizardSettings(ctx, map[string]string{
 		"server_name":       "Bootstrapped",
@@ -198,9 +186,7 @@ func TestSetupService_ApplyWizardSettings(t *testing.T) {
 
 func TestSetupService_FailsLoudBeforeTheAccountExists(t *testing.T) {
 	svc, database, ctx := setupFixture(t)
-	if err := database.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
+	mustDo(t, "Close", database.Close())
 
 	if _, err := svc.NeedsSetup(ctx); !errors.Is(err, ErrInternal) {
 		t.Errorf("NeedsSetup on a closed database: err = %v, want ErrInternal", err)
@@ -260,16 +246,12 @@ func TestSetupService_BootstrapWithoutRecoveryKitStoresNone(t *testing.T) {
 	svc, database, ctx := setupFixture(t)
 
 	res, err := svc.Bootstrap(ctx, BootstrapInput{Username: "owner", Password: "a-good-password-here"})
-	if err != nil {
-		t.Fatalf("Bootstrap: %v", err)
-	}
+	mustDo(t, "Bootstrap", err)
 	if res.RecoveryKitSecret != "" {
 		t.Errorf("a kit was issued without being asked for: %q", res.RecoveryKitSecret)
 	}
 	kit, err := database.GetRecoveryKit(ctx, res.OwnerID)
-	if err != nil {
-		t.Fatalf("GetRecoveryKit: %v", err)
-	}
+	mustDo(t, "GetRecoveryKit", err)
 	if kit != nil {
 		t.Error("a recovery kit row exists though the run did not ask for one")
 	}
@@ -282,9 +264,7 @@ func TestSetupService_BootstrapFirstSessionIsSeen(t *testing.T) {
 		t.Fatalf("Bootstrap = %+v, %v", res, err)
 	}
 	var unseen int
-	if err := database.QueryRowContext(ctx, `SELECT unseen FROM sessions WHERE user_id = ?`, res.OwnerID).Scan(&unseen); err != nil {
-		t.Fatalf("reading the bootstrap session: %v", err)
-	}
+	mustDo(t, "reading the bootstrap session", database.QueryRowContext(ctx, `SELECT unseen FROM sessions WHERE user_id = ?`, res.OwnerID).Scan(&unseen))
 	if unseen != 0 {
 		t.Error("the owner's own setup session is flagged as an unreviewed new login")
 	}

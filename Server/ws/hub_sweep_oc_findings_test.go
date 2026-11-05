@@ -38,9 +38,7 @@ func TestSweepStaleVoiceStates_JoinCatchesUpDuringDeleteWindow(t *testing.T) {
 
 	// The row a real voice_join would have committed via
 	// JoinVoiceChannelIfCapacity, before its c.setVoiceState call runs.
-	if err := database.JoinVoiceChannel(ctx, uid, chID); err != nil {
-		t.Fatalf("JoinVoiceChannel: %v", err)
-	}
+	mustJoinVoice(t, database, uid, chID)
 	vs, err := database.GetVoiceState(ctx, uid)
 	if err != nil || vs == nil {
 		t.Fatalf("GetVoiceState: %v", err)
@@ -98,12 +96,8 @@ func TestCleanupVoiceForChannel_NotifiesReadAudienceOfArchivedChannel(t *testing
 	bystander := seedHarvestVoiceUser(t, database, "cleanup-audience-c")
 	chID := mustCreateVoiceChannel(t, database, "voice-cleanup-audience")
 
-	if err := database.JoinVoiceChannel(ctx, userA, chID); err != nil {
-		t.Fatalf("JoinVoiceChannel(A): %v", err)
-	}
-	if err := database.JoinVoiceChannel(ctx, userB, chID); err != nil {
-		t.Fatalf("JoinVoiceChannel(B): %v", err)
-	}
+	mustJoinVoice(t, database, userA, chID)
+	mustJoinVoice(t, database, userB, chID)
 
 	h := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	cA := NewTestClient(h, userA, make(chan []byte, 8))
@@ -118,9 +112,7 @@ func TestCleanupVoiceForChannel_NotifiesReadAudienceOfArchivedChannel(t *testing
 	cB.voice.setState(chID, "tok-b")
 
 	// Mirrors both production callers: archive before evicting.
-	if _, err := database.ExecContext(ctx, `UPDATE channels SET archived = 1 WHERE id = ?`, chID); err != nil {
-		t.Fatalf("archive channel: %v", err)
-	}
+	mustExec(t, database, `UPDATE channels SET archived = 1 WHERE id = ?`, chID)
 	ch, err := database.GetChannel(ctx, chID)
 	if err != nil || ch == nil || !ch.Archived {
 		t.Fatalf("channel not archived before cleanup, GetChannel = %+v, err = %v", ch, err)

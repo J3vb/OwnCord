@@ -19,19 +19,13 @@ func reactionReadFixture(t *testing.T) (*MessageService, *db.DB, int64) {
 	seedUserRole(t, database, 2, permissions.MemberRoleID)
 	seedChannel(t, database, &db.Channel{ID: 11, Name: "private", Type: "text"})
 	seedChannelOverride(t, database, permissions.MemberRoleID, 11, 0, permissions.ReadMessages)
-	msgID, err := database.CreateMessage(context.Background(), 11, 1, "hidden", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	msgID := mustCreateMessage(t, database, 11, 1, "hidden", nil)
 	return svc, database, msgID
 }
 
 func reactionRows(t *testing.T, database *db.DB, msgID int64) int {
 	t.Helper()
-	counts, err := database.GetReactions(context.Background(), msgID)
-	if err != nil {
-		t.Fatalf("GetReactions: %v", err)
-	}
+	counts := mustGetReactions(t, database, msgID)
 	return len(counts)
 }
 
@@ -47,9 +41,7 @@ func TestReaction_UnreadableChannelIsNotFoundAndWritesNothing(t *testing.T) {
 	}
 
 	// A remove of an existing reaction by an unreadable-channel caller leaves it.
-	if err := database.AddReaction(ctx, msgID, 2, "👍"); err != nil {
-		t.Fatalf("seed AddReaction: %v", err)
-	}
+	mustDo(t, "seed AddReaction", database.AddReaction(ctx, msgID, 2, "👍"))
 	if _, err := svc.RemoveReaction(ctx, 2, msgID, "👍"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("RemoveReaction = %v, want ErrNotFound", err)
 	}
@@ -64,10 +56,7 @@ func TestReaction_UnacknowledgedAgeRestrictedChannelIsNotFound(t *testing.T) {
 	if _, err := database.ExecContext(ctx, `UPDATE channels SET nsfw = 1 WHERE id = ?`, int64(10)); err != nil {
 		t.Fatalf("set nsfw: %v", err)
 	}
-	msgID, err := database.CreateMessage(ctx, 10, 1, "labelled", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	msgID := mustCreateMessage(t, database, 10, 1, "labelled", nil)
 
 	if _, err := svc.AddReaction(ctx, 1, msgID, "👍"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("AddReaction before acknowledgement = %v, want ErrNotFound", err)
@@ -91,21 +80,11 @@ func TestReaction_MissingDeletedAndUnreadableShareOneAnswer(t *testing.T) {
 	svc, database, hiddenID := reactionReadFixture(t)
 	ctx := context.Background()
 
-	deletedID, err := database.CreateMessage(ctx, 10, 1, "gone", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
-	if err := database.DeleteMessage(ctx, deletedID, 1, false); err != nil {
-		t.Fatalf("DeleteMessage: %v", err)
-	}
+	deletedID := mustCreateMessage(t, database, 10, 1, "gone", nil)
+	mustDo(t, "DeleteMessage", database.DeleteMessage(ctx, deletedID, 1, false))
 	// A deleted message in a channel the caller cannot read answers the same too.
-	hiddenDeletedID, err := database.CreateMessage(ctx, 11, 1, "gone hidden", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
-	if err := database.DeleteMessage(ctx, hiddenDeletedID, 1, false); err != nil {
-		t.Fatalf("DeleteMessage: %v", err)
-	}
+	hiddenDeletedID := mustCreateMessage(t, database, 11, 1, "gone hidden", nil)
+	mustDo(t, "DeleteMessage", database.DeleteMessage(ctx, hiddenDeletedID, 1, false))
 
 	for _, add := range []bool{true, false} {
 		texts := make([]string, 0, 4)
@@ -138,13 +117,8 @@ func TestReaction_DMNonParticipantIsNotFound(t *testing.T) {
 	seedUserRole(t, database, 3, permissions.MemberRoleID)
 
 	ch, _, err := database.GetOrCreateDMChannel(ctx, 2, 3)
-	if err != nil {
-		t.Fatalf("GetOrCreateDMChannel: %v", err)
-	}
-	msgID, err := database.CreateMessage(ctx, ch.ID, 2, "psst", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	mustDo(t, "GetOrCreateDMChannel", err)
+	msgID := mustCreateMessage(t, database, ch.ID, 2, "psst", nil)
 
 	_, missingErr := svc.AddReaction(ctx, 1, 999999, "👍")
 	if missingErr == nil {

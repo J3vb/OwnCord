@@ -36,10 +36,18 @@ func newRegistryWithDir(t *testing.T) (*Registry, PluginStore, string) {
 	dir := t.TempDir()
 	store := openPluginTestDB(t)
 	r, err := NewRegistry(Config{Directory: dir, Store: store})
-	if err != nil {
-		t.Fatalf("NewRegistry: %v", err)
-	}
+	mustDo(t, "NewRegistry", err)
 	t.Cleanup(func() { _ = r.Close(context.Background()) })
+	return r, store, dir
+}
+
+// loadedAlphaRegistry is a registry that has already loaded one on-disk
+// plugin named alpha, the starting point for most lifecycle cases.
+func loadedAlphaRegistry(t *testing.T) (*Registry, PluginStore, string) {
+	t.Helper()
+	r, store, dir := newRegistryWithDir(t)
+	writePluginDir(t, dir, "alpha", simpleManifest("alpha"))
+	mustDo(t, "LoadAll", r.LoadAll(context.Background()))
 	return r, store, dir
 }
 
@@ -50,12 +58,8 @@ func writePluginDir(t *testing.T, root, name, manifestJSON string) string {
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		t.Fatalf("mkdir %s: %v", dir, err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "plugin.json"), []byte(manifestJSON), 0o600); err != nil {
-		t.Fatalf("write plugin.json: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, name+".wasm"), []byte("\x00asm\x01\x00\x00\x00"), 0o600); err != nil {
-		t.Fatalf("write wasm: %v", err)
-	}
+	mustDo(t, "write plugin.json", os.WriteFile(filepath.Join(dir, "plugin.json"), []byte(manifestJSON), 0o600))
+	mustDo(t, "write wasm", os.WriteFile(filepath.Join(dir, name+".wasm"), []byte("\x00asm\x01\x00\x00\x00"), 0o600))
 	return dir
 }
 
@@ -91,9 +95,7 @@ func TestRegistry_LoadAll_RegistersDiscoveredPlugins(t *testing.T) {
 	writePluginDir(t, dir, "alpha", simpleManifest("alpha"))
 	writePluginDir(t, dir, "beta", simpleManifest("beta"))
 
-	if err := r.LoadAll(ctx); err != nil {
-		t.Fatalf("LoadAll: %v", err)
-	}
+	mustDo(t, "LoadAll", r.LoadAll(ctx))
 
 	list := r.List()
 	if len(list) != 2 {
@@ -106,9 +108,7 @@ func TestRegistry_LoadAll_RegistersDiscoveredPlugins(t *testing.T) {
 	}
 
 	rows, err := store.ListPlugins(ctx)
-	if err != nil {
-		t.Fatalf("ListPlugins: %v", err)
-	}
+	mustDo(t, "ListPlugins", err)
 	if len(rows) != 2 {
 		t.Errorf("store has %d rows, want 2 — LoadAll must persist discovered manifests", len(rows))
 	}
@@ -128,9 +128,7 @@ func TestRegistry_LoadAll_InstallsGoodPluginsDespiteOneBadDirectory(t *testing.T
 	if err := os.MkdirAll(brokenDir, 0o750); err != nil {
 		t.Fatalf("mkdir %s: %v", brokenDir, err)
 	}
-	if err := os.WriteFile(filepath.Join(brokenDir, "plugin.json"), []byte(`{"name":"broken",}`), 0o600); err != nil {
-		t.Fatalf("write plugin.json: %v", err)
-	}
+	mustDo(t, "write plugin.json", os.WriteFile(filepath.Join(brokenDir, "plugin.json"), []byte(`{"name":"broken",}`), 0o600))
 
 	if err := r.LoadAll(ctx); err != nil {
 		t.Fatalf("LoadAll: %v — a malformed plugin directory must not fail the whole load", err)
@@ -145,9 +143,7 @@ func TestRegistry_LoadAll_InstallsGoodPluginsDespiteOneBadDirectory(t *testing.T
 	}
 
 	rows, err := store.ListPlugins(ctx)
-	if err != nil {
-		t.Fatalf("ListPlugins: %v", err)
-	}
+	mustDo(t, "ListPlugins", err)
 	if len(rows) != 1 {
 		t.Errorf("store has %d rows, want 1 — the good plugin must still be persisted", len(rows))
 	}
@@ -158,13 +154,9 @@ func TestRegistry_LoadAll_RemovesStaleStagingDirs(t *testing.T) {
 
 	// A crash mid-InstallFromZip leaves a ".install-XXXX" directory behind.
 	stale := filepath.Join(dir, ".install-abc123")
-	if err := os.MkdirAll(stale, 0o750); err != nil {
-		t.Fatalf("mkdir stale: %v", err)
-	}
+	mustDo(t, "mkdir stale", os.MkdirAll(stale, 0o750))
 
-	if err := r.LoadAll(context.Background()); err != nil {
-		t.Fatalf("LoadAll: %v", err)
-	}
+	mustDo(t, "LoadAll", r.LoadAll(context.Background()))
 
 	if _, err := os.Stat(stale); !os.IsNotExist(err) {
 		t.Errorf("stale staging dir survived LoadAll (stat err = %v)", err)
@@ -172,12 +164,7 @@ func TestRegistry_LoadAll_RemovesStaleStagingDirs(t *testing.T) {
 }
 
 func TestRegistry_List_IsASnapshot(t *testing.T) {
-	r, _, dir := newRegistryWithDir(t)
-	ctx := context.Background()
-	writePluginDir(t, dir, "alpha", simpleManifest("alpha"))
-	if err := r.LoadAll(ctx); err != nil {
-		t.Fatalf("LoadAll: %v", err)
-	}
+	r, _, _ := loadedAlphaRegistry(t)
 
 	first := r.List()
 	if len(first) != 1 {
@@ -195,12 +182,8 @@ func TestRegistry_List_IsASnapshot(t *testing.T) {
 // ─── activate (default build) ───────────────────────────────────────────────
 
 func TestRegistry_Activate_WithoutRuntime(t *testing.T) {
-	r, _, dir := newRegistryWithDir(t)
 	ctx := context.Background()
-	writePluginDir(t, dir, "alpha", simpleManifest("alpha"))
-	if err := r.LoadAll(ctx); err != nil {
-		t.Fatalf("LoadAll: %v", err)
-	}
+	r, _, _ := loadedAlphaRegistry(t)
 
 	inst := r.List()[0]
 	err := r.activate(ctx, inst)
@@ -210,17 +193,11 @@ func TestRegistry_Activate_WithoutRuntime(t *testing.T) {
 }
 
 func TestRegistry_Activate_AfterClose(t *testing.T) {
-	r, _, dir := newRegistryWithDir(t)
 	ctx := context.Background()
-	writePluginDir(t, dir, "alpha", simpleManifest("alpha"))
-	if err := r.LoadAll(ctx); err != nil {
-		t.Fatalf("LoadAll: %v", err)
-	}
+	r, _, _ := loadedAlphaRegistry(t)
 	inst := r.List()[0]
 
-	if err := r.Close(ctx); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
+	mustDo(t, "Close", r.Close(ctx))
 
 	// Close nils runtimePlatform under the lock; activate must observe that
 	// and refuse rather than call into a torn-down runtime.
@@ -235,12 +212,8 @@ func TestRegistry_Activate_AfterClose(t *testing.T) {
 // ─── EnablePlugin ───────────────────────────────────────────────────────────
 
 func TestRegistry_EnablePlugin_RollsBackWhenActivationFails(t *testing.T) {
-	r, store, dir := newRegistryWithDir(t)
 	ctx := context.Background()
-	writePluginDir(t, dir, "alpha", simpleManifest("alpha"))
-	if err := r.LoadAll(ctx); err != nil {
-		t.Fatalf("LoadAll: %v", err)
-	}
+	r, store, _ := loadedAlphaRegistry(t)
 	inst := r.List()[0]
 
 	// The default build has no runtime, so activation always fails. What
@@ -254,9 +227,7 @@ func TestRegistry_EnablePlugin_RollsBackWhenActivationFails(t *testing.T) {
 		t.Error("in-memory Enabled flag stayed true after a failed activation")
 	}
 	row, err := store.GetPlugin(ctx, inst.ID)
-	if err != nil {
-		t.Fatalf("GetPlugin: %v", err)
-	}
+	mustDo(t, "GetPlugin", err)
 	if row.Enabled {
 		t.Error("store row stayed enabled after a failed activation; the rollback did not run")
 	}
@@ -277,12 +248,8 @@ func TestRegistry_EnablePlugin_UnknownID(t *testing.T) {
 // activation-failure path below it already does — otherwise the row is
 // permanently stuck at enabled=1 with no runtime instance to match it.
 func TestRegistry_EnablePlugin_RollsBackWhenInstanceMissing(t *testing.T) {
-	r, store, dir := newRegistryWithDir(t)
 	ctx := context.Background()
-	writePluginDir(t, dir, "alpha", simpleManifest("alpha"))
-	if err := r.LoadAll(ctx); err != nil {
-		t.Fatalf("LoadAll: %v", err)
-	}
+	r, store, _ := loadedAlphaRegistry(t)
 	inst := r.List()[0]
 	id := inst.ID
 
@@ -311,12 +278,8 @@ func TestRegistry_EnablePlugin_RollsBackWhenInstanceMissing(t *testing.T) {
 // ─── DisablePlugin ──────────────────────────────────────────────────────────
 
 func TestRegistry_DisablePlugin_ClearsFlagAndCommands(t *testing.T) {
-	r, store, dir := newRegistryWithDir(t)
 	ctx := context.Background()
-	writePluginDir(t, dir, "alpha", simpleManifest("alpha"))
-	if err := r.LoadAll(ctx); err != nil {
-		t.Fatalf("LoadAll: %v", err)
-	}
+	r, store, _ := loadedAlphaRegistry(t)
 	inst := r.List()[0]
 
 	// Simulate an activated plugin that owns a command binding.
@@ -325,9 +288,7 @@ func TestRegistry_DisablePlugin_ClearsFlagAndCommands(t *testing.T) {
 	r.commands["greet"] = inst
 	r.mu.Unlock()
 
-	if err := r.DisablePlugin(ctx, inst.ID); err != nil {
-		t.Fatalf("DisablePlugin: %v", err)
-	}
+	mustDo(t, "DisablePlugin", r.DisablePlugin(ctx, inst.ID))
 
 	if inst.Enabled {
 		t.Error("Enabled flag survived DisablePlugin")
@@ -340,9 +301,7 @@ func TestRegistry_DisablePlugin_ClearsFlagAndCommands(t *testing.T) {
 	}
 
 	row, err := store.GetPlugin(ctx, inst.ID)
-	if err != nil {
-		t.Fatalf("GetPlugin: %v", err)
-	}
+	mustDo(t, "GetPlugin", err)
 	if row.Enabled {
 		t.Error("store row stayed enabled after DisablePlugin")
 	}
@@ -364,22 +323,16 @@ func TestRegistry_UninstallPlugin_RemovesRowAndDirectory(t *testing.T) {
 	r, store, dir := newRegistryWithDir(t)
 	ctx := context.Background()
 	pluginDir := writePluginDir(t, dir, "alpha", simpleManifest("alpha"))
-	if err := r.LoadAll(ctx); err != nil {
-		t.Fatalf("LoadAll: %v", err)
-	}
+	mustDo(t, "LoadAll", r.LoadAll(ctx))
 	inst := r.List()[0]
 
-	if err := r.UninstallPlugin(ctx, inst.ID); err != nil {
-		t.Fatalf("UninstallPlugin: %v", err)
-	}
+	mustDo(t, "UninstallPlugin", r.UninstallPlugin(ctx, inst.ID))
 
 	if got := r.List(); len(got) != 0 {
 		t.Errorf("List() = %d entries after uninstall, want 0", len(got))
 	}
 	rows, err := store.ListPlugins(ctx)
-	if err != nil {
-		t.Fatalf("ListPlugins: %v", err)
-	}
+	mustDo(t, "ListPlugins", err)
 	if len(rows) != 0 {
 		t.Errorf("store has %d rows after uninstall, want 0", len(rows))
 	}
@@ -388,9 +341,7 @@ func TestRegistry_UninstallPlugin_RemovesRowAndDirectory(t *testing.T) {
 	if _, err := os.Stat(pluginDir); !os.IsNotExist(err) {
 		t.Errorf("plugin directory survived uninstall (stat err = %v)", err)
 	}
-	if err := r.LoadAll(ctx); err != nil {
-		t.Fatalf("LoadAll after uninstall: %v", err)
-	}
+	mustDo(t, "LoadAll after uninstall", r.LoadAll(ctx))
 	if got := r.List(); len(got) != 0 {
 		t.Errorf("uninstalled plugin was resurrected by LoadAll: %d entries", len(got))
 	}
@@ -405,9 +356,7 @@ func TestRegistry_UninstallPlugin_ReturnsErrorWhenDirRemovalFails(t *testing.T) 
 	r, store, dir := newRegistryWithDir(t)
 	ctx := context.Background()
 	pluginDir := writePluginDir(t, dir, "alpha", simpleManifest("alpha"))
-	if err := r.LoadAll(ctx); err != nil {
-		t.Fatalf("LoadAll: %v", err)
-	}
+	mustDo(t, "LoadAll", r.LoadAll(ctx))
 	inst := r.List()[0]
 
 	// Force the directory removal to fail. There's no portable,
@@ -449,44 +398,30 @@ func TestRegistry_UninstallPlugin_DirNameDiffersFromManifestName(t *testing.T) {
 	ctx := context.Background()
 
 	actualDir := filepath.Join(dir, "hello-v2")
-	if err := os.MkdirAll(actualDir, 0o750); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
+	mustDo(t, "mkdir", os.MkdirAll(actualDir, 0o750))
 	manifestJSON := `{"name":"hello","version":"1.0.0","entrypoint":"hello.wasm","permissions":["storage"]}`
-	if err := os.WriteFile(filepath.Join(actualDir, "plugin.json"), []byte(manifestJSON), 0o600); err != nil {
-		t.Fatalf("write manifest: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(actualDir, "hello.wasm"), []byte("\x00asm\x01\x00\x00\x00"), 0o600); err != nil {
-		t.Fatalf("write wasm: %v", err)
-	}
+	mustDo(t, "write manifest", os.WriteFile(filepath.Join(actualDir, "plugin.json"), []byte(manifestJSON), 0o600))
+	mustDo(t, "write wasm", os.WriteFile(filepath.Join(actualDir, "hello.wasm"), []byte("\x00asm\x01\x00\x00\x00"), 0o600))
 
-	if err := r.LoadAll(ctx); err != nil {
-		t.Fatalf("LoadAll: %v", err)
-	}
+	mustDo(t, "LoadAll", r.LoadAll(ctx))
 	inst := r.List()[0]
 	if inst.Manifest.Name != "hello" {
 		t.Fatalf("test setup: manifest name = %q, want hello", inst.Manifest.Name)
 	}
 
-	if err := r.UninstallPlugin(ctx, inst.ID); err != nil {
-		t.Fatalf("UninstallPlugin: %v", err)
-	}
+	mustDo(t, "UninstallPlugin", r.UninstallPlugin(ctx, inst.ID))
 
 	if _, statErr := os.Stat(actualDir); !os.IsNotExist(statErr) {
 		t.Errorf("actual plugin directory %q survived uninstall (stat err = %v)", actualDir, statErr)
 	}
 
 	// The real bug symptom: a stale directory makes the plugin come back.
-	if err := r.LoadAll(ctx); err != nil {
-		t.Fatalf("LoadAll after uninstall: %v", err)
-	}
+	mustDo(t, "LoadAll after uninstall", r.LoadAll(ctx))
 	if got := r.List(); len(got) != 0 {
 		t.Errorf("uninstalled plugin was resurrected by LoadAll: %d entries", len(got))
 	}
 	rows, err := store.ListPlugins(ctx)
-	if err != nil {
-		t.Fatalf("ListPlugins: %v", err)
-	}
+	mustDo(t, "ListPlugins", err)
 	if len(rows) != 0 {
 		t.Errorf("store still has %d rows after uninstall+reload, want 0", len(rows))
 	}
@@ -547,9 +482,7 @@ func buildZip(t *testing.T, files map[string]string) []byte {
 			t.Fatalf("zip write %s: %v", name, err)
 		}
 	}
-	if err := zw.Close(); err != nil {
-		t.Fatalf("zip close: %v", err)
-	}
+	mustDo(t, "zip close", zw.Close())
 	return buf.Bytes()
 }
 
@@ -563,9 +496,7 @@ func TestRegistry_InstallFromZip_Success(t *testing.T) {
 	})
 
 	name, err := r.InstallFromZip(ctx, zipBytes)
-	if err != nil {
-		t.Fatalf("InstallFromZip: %v", err)
-	}
+	mustDo(t, "InstallFromZip", err)
 	if name != "zipped" {
 		t.Errorf("name = %q, want %q", name, "zipped")
 	}
@@ -574,18 +505,14 @@ func TestRegistry_InstallFromZip_Success(t *testing.T) {
 		t.Errorf("plugin was not staged into the plugin directory: %v", err)
 	}
 	rows, err := store.ListPlugins(ctx)
-	if err != nil {
-		t.Fatalf("ListPlugins: %v", err)
-	}
+	mustDo(t, "ListPlugins", err)
 	if len(rows) != 1 || rows[0].Name != "zipped" {
 		t.Errorf("store rows = %+v, want one row named zipped", rows)
 	}
 
 	// No staging directory may be left behind on the success path.
 	entries, err := os.ReadDir(dir)
-	if err != nil {
-		t.Fatalf("ReadDir: %v", err)
-	}
+	mustDo(t, "ReadDir", err)
 	for _, e := range entries {
 		if len(e.Name()) > 9 && e.Name()[:9] == ".install-" {
 			t.Errorf("staging dir %q survived a successful install", e.Name())
@@ -601,20 +528,14 @@ func TestRegistry_InstallFromZip_Success(t *testing.T) {
 // agreeing — otherwise the DB says enabled while the module is actually
 // unloaded, and the admin panel has no reason to prompt a re-enable.
 func TestRegistry_InstallFromZip_ReactivatesPreviouslyEnabledPlugin(t *testing.T) {
-	r, store, dir := newRegistryWithDir(t)
 	ctx := context.Background()
-	writePluginDir(t, dir, "alpha", simpleManifest("alpha"))
-	if err := r.LoadAll(ctx); err != nil {
-		t.Fatalf("LoadAll: %v", err)
-	}
+	r, store, _ := loadedAlphaRegistry(t)
 	inst := r.List()[0]
 
 	// Simulate a previously-activated, enabled plugin — what activateAll
 	// leaves behind under a real (wazero-tagged) runtime: DB row enabled and
 	// the in-memory flag set to match.
-	if err := store.EnablePlugin(ctx, inst.ID); err != nil {
-		t.Fatalf("EnablePlugin (setup): %v", err)
-	}
+	mustDo(t, "EnablePlugin (setup)", store.EnablePlugin(ctx, inst.ID))
 	r.mu.Lock()
 	inst.Enabled = true
 	r.mu.Unlock()
@@ -630,9 +551,7 @@ func TestRegistry_InstallFromZip_ReactivatesPreviouslyEnabledPlugin(t *testing.T
 
 	newInst := r.List()[0]
 	row, err := store.GetPlugin(ctx, newInst.ID)
-	if err != nil {
-		t.Fatalf("GetPlugin: %v", err)
-	}
+	mustDo(t, "GetPlugin", err)
 	if row.Enabled != newInst.Enabled {
 		t.Errorf("store row Enabled=%v but runtime instance Enabled=%v after InstallFromZip; a hot upgrade must never leave these disagreeing", row.Enabled, newInst.Enabled)
 	}
@@ -696,9 +615,7 @@ func TestRegistry_InstallFromZip_Rejections(t *testing.T) {
 func TestRegistry_InstallFromZip_NotConfigured(t *testing.T) {
 	store := openPluginTestDB(t)
 	r, err := NewRegistry(Config{Store: store}) // no Directory
-	if err != nil {
-		t.Fatalf("NewRegistry: %v", err)
-	}
+	mustDo(t, "NewRegistry", err)
 	t.Cleanup(func() { _ = r.Close(context.Background()) })
 
 	if _, err := r.InstallFromZip(context.Background(), []byte("whatever")); err == nil {

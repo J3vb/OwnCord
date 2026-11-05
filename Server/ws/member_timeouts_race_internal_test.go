@@ -216,13 +216,7 @@ func newTimeoutDialFixture(t *testing.T) *timeoutDialFixture {
 		if err != nil {
 			t.Fatalf("CreateUser %s: %v", name, err)
 		}
-		token, err := auth.GenerateToken()
-		if err != nil {
-			t.Fatalf("GenerateToken: %v", err)
-		}
-		if _, err := database.CreateSession(ctx, id, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
-			t.Fatalf("CreateSession: %v", err)
-		}
+		token := seedSessionToken(t, database, id)
 		d.tokens[id] = token
 		return id
 	}
@@ -230,10 +224,7 @@ func newTimeoutDialFixture(t *testing.T) *timeoutDialFixture {
 	f.modID = mk("td-mod", 3)
 	f.targetID = mk("td-target", 4)
 	f.byID = mk("td-bystander", 4)
-	chID, err := database.CreateChannel(ctx, "td-channel", "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
+	chID := mustCreateChannel(t, database, "td-channel", "text")
 	d.chID = chID
 	if _, _, err := database.TimeoutUser(ctx, f.targetID, f.adminID, nil, "cool off", time.Now().Add(time.Hour)); err != nil {
 		t.Fatalf("TimeoutUser: %v", err)

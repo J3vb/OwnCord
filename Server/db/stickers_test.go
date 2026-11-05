@@ -60,14 +60,9 @@ func TestMessageStickerSurvivesStickerDeleteAndCascadesWithMessage(t *testing.T)
 	ctx := context.Background()
 	uid := seedUser(t, database, "sticker-author")
 	st, err := database.CreateSticker(ctx, "Wave", nil, "uuid-wave", "image/png", uid)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "CreateSticker", err)
 	chID := seedChannel(t, database, "stickers")
-	msg, err := database.CreateMessageWithMentions(ctx, chID, uid, "[Sticker: Wave]", nil, nil, 0, false, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	msg := mustCreateMessageWithMentions(t, database, chID, uid, "[Sticker: Wave]", nil, nil, 0, false, nil)
 	if _, err := database.ExecContext(ctx, `INSERT INTO message_stickers (message_id, sticker_id, name) VALUES (?, ?, 'Wave')`, msg.ID, st.ID); err != nil {
 		t.Fatal(err)
 	}

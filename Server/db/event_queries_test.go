@@ -25,9 +25,7 @@ func TestPersistEvent_AndGetEventsSince(t *testing.T) {
 	}
 
 	all, err := database.GetEventsSince(ctx, 0, 100)
-	if err != nil {
-		t.Fatalf("GetEventsSince: %v", err)
-	}
+	mustDo(t, "GetEventsSince", err)
 	if len(all) != 3 {
 		t.Fatalf("GetEventsSince(0) returned %d events, want 3", len(all))
 	}
@@ -45,9 +43,7 @@ func TestPersistEvent_AndGetEventsSince(t *testing.T) {
 
 	// afterSeq is exclusive.
 	tail, err := database.GetEventsSince(ctx, 2, 100)
-	if err != nil {
-		t.Fatalf("GetEventsSince(2): %v", err)
-	}
+	mustDo(t, "GetEventsSince(2)", err)
 	if len(tail) != 1 || tail[0].Seq != 3 {
 		t.Errorf("GetEventsSince(2) = %+v, want only seq 3", tail)
 	}
@@ -63,17 +59,13 @@ func TestPersistEvents_BatchInsertsAll(t *testing.T) {
 		{Seq: 3, EventType: "presence", ChannelID: 0, Payload: []byte(`{"n":3}`)},
 	}
 	persisted, err := database.PersistEvents(ctx, batch)
-	if err != nil {
-		t.Fatalf("PersistEvents: %v", err)
-	}
+	mustDo(t, "PersistEvents", err)
 	if persisted != 3 {
 		t.Fatalf("persisted = %d, want 3", persisted)
 	}
 
 	rows, err := database.GetEventsSince(ctx, 0, 100)
-	if err != nil {
-		t.Fatalf("GetEventsSince: %v", err)
-	}
+	mustDo(t, "GetEventsSince", err)
 	if len(rows) != 3 {
 		t.Fatalf("stored %d events, want 3", len(rows))
 	}
@@ -88,9 +80,7 @@ func TestPersistEvents_EmptyBatchIsNoop(t *testing.T) {
 	database := openMigratedMemory(t)
 
 	persisted, err := database.PersistEvents(context.Background(), nil)
-	if err != nil {
-		t.Fatalf("PersistEvents(nil): %v", err)
-	}
+	mustDo(t, "PersistEvents(nil)", err)
 	if persisted != 0 {
 		t.Errorf("persisted = %d, want 0", persisted)
 	}
@@ -103,9 +93,7 @@ func TestPersistEvents_FallbackKeepsGoodRowsOnBadBatch(t *testing.T) {
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 
-	if err := database.PersistEvent(ctx, 2, "e", 0, []byte(`{}`)); err != nil {
-		t.Fatalf("PersistEvent: %v", err)
-	}
+	mustDo(t, "PersistEvent", database.PersistEvent(ctx, 2, "e", 0, []byte(`{}`)))
 
 	persisted, err := database.PersistEvents(ctx, []db.PersistedEvent{
 		{Seq: 1, EventType: "e", ChannelID: 0, Payload: []byte(`{}`)},
@@ -138,15 +126,11 @@ func TestGetEventsSince_RespectsLimit(t *testing.T) {
 	ctx := context.Background()
 
 	for seq := int64(1); seq <= 10; seq++ {
-		if err := database.PersistEvent(ctx, seq, "e", 0, []byte(`{}`)); err != nil {
-			t.Fatalf("PersistEvent: %v", err)
-		}
+		mustDo(t, "PersistEvent", database.PersistEvent(ctx, seq, "e", 0, []byte(`{}`)))
 	}
 
 	got, err := database.GetEventsSince(ctx, 0, 4)
-	if err != nil {
-		t.Fatalf("GetEventsSince: %v", err)
-	}
+	mustDo(t, "GetEventsSince", err)
 	if len(got) != 4 {
 		t.Fatalf("returned %d events, want the 4-row limit", len(got))
 	}
@@ -165,16 +149,12 @@ func TestGetEventsSinceForChannels(t *testing.T) {
 		channelID int64
 	}{{1, 0}, {2, 10}, {3, 20}, {4, 30}}
 	for _, e := range events {
-		if err := database.PersistEvent(ctx, e.seq, "e", e.channelID, []byte(`{}`)); err != nil {
-			t.Fatalf("PersistEvent: %v", err)
-		}
+		mustDo(t, "PersistEvent", database.PersistEvent(ctx, e.seq, "e", e.channelID, []byte(`{}`)))
 	}
 
 	t.Run("no channels returns globals only", func(t *testing.T) {
 		got, err := database.GetEventsSinceForChannels(ctx, 0, nil, 100)
-		if err != nil {
-			t.Fatalf("GetEventsSinceForChannels: %v", err)
-		}
+		mustDo(t, "GetEventsSinceForChannels", err)
 		if len(got) != 1 || got[0].Seq != 1 {
 			t.Errorf("got %+v, want only the global event", got)
 		}
@@ -182,9 +162,7 @@ func TestGetEventsSinceForChannels(t *testing.T) {
 
 	t.Run("visible channels plus globals", func(t *testing.T) {
 		got, err := database.GetEventsSinceForChannels(ctx, 0, []int64{10, 20}, 100)
-		if err != nil {
-			t.Fatalf("GetEventsSinceForChannels: %v", err)
-		}
+		mustDo(t, "GetEventsSinceForChannels", err)
 		if len(got) != 3 {
 			t.Fatalf("got %d events, want 3 (global + channels 10 and 20): %+v", len(got), got)
 		}
@@ -198,9 +176,7 @@ func TestGetEventsSinceForChannels(t *testing.T) {
 
 	t.Run("afterSeq is applied with the channel filter", func(t *testing.T) {
 		got, err := database.GetEventsSinceForChannels(ctx, 2, []int64{10, 20}, 100)
-		if err != nil {
-			t.Fatalf("GetEventsSinceForChannels: %v", err)
-		}
+		mustDo(t, "GetEventsSinceForChannels", err)
 		if len(got) != 1 || got[0].Seq != 3 {
 			t.Errorf("got %+v, want only seq 3", got)
 		}
@@ -208,9 +184,7 @@ func TestGetEventsSinceForChannels(t *testing.T) {
 
 	t.Run("limit is applied", func(t *testing.T) {
 		got, err := database.GetEventsSinceForChannels(ctx, 0, []int64{10, 20}, 2)
-		if err != nil {
-			t.Fatalf("GetEventsSinceForChannels: %v", err)
-		}
+		mustDo(t, "GetEventsSinceForChannels", err)
 		if len(got) != 2 {
 			t.Errorf("got %d events, want the 2-row limit", len(got))
 		}
@@ -224,9 +198,7 @@ func TestGetMaxEventSeq(t *testing.T) {
 	// On an empty table MAX(seq) is NULL — the hub seeds its counter from this
 	// at startup, so it has to come back as 0 rather than an error.
 	got, err := database.GetMaxEventSeq(ctx)
-	if err != nil {
-		t.Fatalf("GetMaxEventSeq on empty: %v", err)
-	}
+	mustDo(t, "GetMaxEventSeq on empty", err)
 	if got != 0 {
 		t.Errorf("GetMaxEventSeq on an empty table = %d, want 0", got)
 	}
@@ -238,9 +210,7 @@ func TestGetMaxEventSeq(t *testing.T) {
 	}
 
 	got, err = database.GetMaxEventSeq(ctx)
-	if err != nil {
-		t.Fatalf("GetMaxEventSeq: %v", err)
-	}
+	mustDo(t, "GetMaxEventSeq", err)
 	if got != 7 {
 		t.Errorf("GetMaxEventSeq = %d, want 7 (the highest, not the last inserted)", got)
 	}
@@ -254,30 +224,22 @@ func TestPruneEventsOlderThan(t *testing.T) {
 	// explicitly in the same "2006-01-02 15:04:05" format the prune compares.
 	old := time.Now().UTC().Add(-48 * time.Hour).Format("2006-01-02 15:04:05")
 	for _, seq := range []int64{1, 2} {
-		if err := database.PersistEvent(ctx, seq, "e", 0, []byte(`{}`)); err != nil {
-			t.Fatalf("PersistEvent: %v", err)
-		}
+		mustDo(t, "PersistEvent", database.PersistEvent(ctx, seq, "e", 0, []byte(`{}`)))
 		if _, err := database.ExecContext(ctx,
 			`UPDATE events SET created_at = ? WHERE seq = ?`, old, seq); err != nil {
 			t.Fatalf("backdate seq %d: %v", seq, err)
 		}
 	}
-	if err := database.PersistEvent(ctx, 3, "e", 0, []byte(`{}`)); err != nil {
-		t.Fatalf("PersistEvent: %v", err)
-	}
+	mustDo(t, "PersistEvent", database.PersistEvent(ctx, 3, "e", 0, []byte(`{}`)))
 
 	deleted, err := database.PruneEventsOlderThan(ctx, time.Now().UTC().Add(-24*time.Hour))
-	if err != nil {
-		t.Fatalf("PruneEventsOlderThan: %v", err)
-	}
+	mustDo(t, "PruneEventsOlderThan", err)
 	if deleted != 2 {
 		t.Errorf("deleted = %d, want 2", deleted)
 	}
 
 	remaining, err := database.GetEventsSince(ctx, 0, 100)
-	if err != nil {
-		t.Fatalf("GetEventsSince: %v", err)
-	}
+	mustDo(t, "GetEventsSince", err)
 	if len(remaining) != 1 || remaining[0].Seq != 3 {
 		t.Errorf("remaining = %+v, want only the recent event", remaining)
 	}
@@ -307,18 +269,14 @@ func TestPruneEventsOlderThan_ChunksDelete(t *testing.T) {
 		t.Fatalf("backdate: %v", err)
 	}
 	// One fresh row that must survive the prune.
-	if err := database.PersistEvent(ctx, oldRows+1, "e", 0, []byte(`{}`)); err != nil {
-		t.Fatalf("PersistEvent(recent): %v", err)
-	}
+	mustDo(t, "PersistEvent(recent)", database.PersistEvent(ctx, oldRows+1, "e", 0, []byte(`{}`)))
 
 	statements := 0
 	db.SetEventPruneStatementHookForTest(func() { statements++ })
 	defer db.SetEventPruneStatementHookForTest(nil)
 
 	deleted, err := database.PruneEventsOlderThan(ctx, time.Now().UTC().Add(-24*time.Hour))
-	if err != nil {
-		t.Fatalf("PruneEventsOlderThan: %v", err)
-	}
+	mustDo(t, "PruneEventsOlderThan", err)
 	if deleted != oldRows {
 		t.Errorf("deleted = %d, want %d", deleted, oldRows)
 	}
@@ -327,9 +285,7 @@ func TestPruneEventsOlderThan_ChunksDelete(t *testing.T) {
 	}
 
 	remaining, err := database.GetEventsSince(ctx, 0, 10)
-	if err != nil {
-		t.Fatalf("GetEventsSince: %v", err)
-	}
+	mustDo(t, "GetEventsSince", err)
 	if len(remaining) != 1 || remaining[0].Seq != oldRows+1 {
 		t.Errorf("remaining = %+v, want only the fresh seq %d", remaining, oldRows+1)
 	}
@@ -339,14 +295,10 @@ func TestPruneEventsOlderThan_NothingToPrune(t *testing.T) {
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 
-	if err := database.PersistEvent(ctx, 1, "e", 0, []byte(`{}`)); err != nil {
-		t.Fatalf("PersistEvent: %v", err)
-	}
+	mustDo(t, "PersistEvent", database.PersistEvent(ctx, 1, "e", 0, []byte(`{}`)))
 
 	deleted, err := database.PruneEventsOlderThan(ctx, time.Now().UTC().Add(-24*time.Hour))
-	if err != nil {
-		t.Fatalf("PruneEventsOlderThan: %v", err)
-	}
+	mustDo(t, "PruneEventsOlderThan", err)
 	if deleted != 0 {
 		t.Errorf("deleted = %d, want 0 — a fresh event must survive the retention window", deleted)
 	}
@@ -356,9 +308,7 @@ func TestPersistEvent_DuplicateSeqRejected(t *testing.T) {
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 
-	if err := database.PersistEvent(ctx, 1, "e", 0, []byte(`{}`)); err != nil {
-		t.Fatalf("PersistEvent: %v", err)
-	}
+	mustDo(t, "PersistEvent", database.PersistEvent(ctx, 1, "e", 0, []byte(`{}`)))
 	// seq is the PRIMARY KEY; a duplicate would corrupt replay ordering, so it
 	// must surface as an error rather than silently overwrite.
 	if err := database.PersistEvent(ctx, 1, "e", 0, []byte(`{}`)); err == nil {

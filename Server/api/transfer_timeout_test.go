@@ -228,9 +228,7 @@ func TestServeFile_StalledClientClosesWithContentLengthMismatch(t *testing.T) {
 
 	content := bytes.Repeat([]byte("d"), 8<<20)
 	rr := doUpload(t, router, token, "file", "big.bin", content)
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("fixture upload: %d %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusCreated)
 	var up struct {
 		ID string `json:"id"`
 	}
@@ -304,8 +302,7 @@ func TestUploadAvatar_InFlightUploadsPerUserCapped(t *testing.T) {
 		req.Header.Set("Authorization", "Bearer "+token)
 		req.RemoteAddr = "127.0.0.1:9999"
 		go func() {
-			rr := httptest.NewRecorder()
-			router.ServeHTTP(rr, req)
+			rr := serveRequest(router, req)
 			done <- rr
 		}()
 		// The write returns once the handler has read it: the upload holds its slot.

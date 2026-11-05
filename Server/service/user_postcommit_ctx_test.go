@@ -76,10 +76,7 @@ func TestUpdateProfile_SurvivesRequestCancelAfterCommit(t *testing.T) {
 
 	// The write itself committed regardless — confirm the DB agrees, using a
 	// fresh context since the original is canceled.
-	stored, err := database.GetUserByID(context.Background(), 1)
-	if err != nil {
-		t.Fatalf("GetUserByID: %v", err)
-	}
+	stored := mustGetUserByID(t, database, 1)
 	if stored.Username != "alice2" {
 		t.Fatalf("stored username = %q, want %q", stored.Username, "alice2")
 	}

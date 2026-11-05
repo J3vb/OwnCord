@@ -22,9 +22,7 @@ func TestActivate_ListCommandsOverrunKeepsCause(t *testing.T) {
 	reg, mem := newWazeroTestRegistry(t, dir)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	if err := reg.LoadAll(ctx); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "LoadAll", reg.LoadAll(ctx))
 	rows, _ := mem.ListPlugins(ctx)
 
 	err := reg.EnablePlugin(ctx, rows[0].ID)

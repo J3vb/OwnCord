@@ -3,7 +3,6 @@ package api_test
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -18,20 +17,14 @@ func doDiscard(t *testing.T, router http.Handler, token, id string) *httptest.Re
 	t.Helper()
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/uploads/"+id, nil)
 	req.Header.Set("Authorization", "Bearer "+token)
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
+	rr := serveRequest(router, req)
 	return rr
 }
 
 func uploadedID(t *testing.T, rr *httptest.ResponseRecorder) string {
 	t.Helper()
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("upload: %d %s", rr.Code, rr.Body.String())
-	}
-	var resp struct{ ID string }
-	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("upload body: %v", err)
-	}
+	requireStatus(t, rr, http.StatusCreated)
+	resp := decodeBody[struct{ ID string }](t, rr)
 	return resp.ID
 }
 
@@ -45,9 +38,7 @@ func TestDiscardUpload_FreesQuotaForTheNextUpload(t *testing.T) {
 	assertErrorCode(t, rr, http.StatusInsufficientStorage, "STORAGE_QUOTA_EXCEEDED")
 
 	rr = doDiscard(t, h.router, h.token, first)
-	if rr.Code != http.StatusNoContent {
-		t.Fatalf("discard: %d %s", rr.Code, rr.Body.String())
-	}
+	requireStatus(t, rr, http.StatusNoContent)
 	if got := h.used(t); got != 0 {
 		t.Fatalf("counter = %d after discard, want 0", got)
 	}
@@ -107,11 +98,8 @@ func TestDiscardUpload_RequiresAuth(t *testing.T) {
 	h := newQuotaHarness(t, nil)
 	id := uploadedID(t, doUpload(t, h.router, h.token, "file", "a.txt", []byte("a")))
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/uploads/"+id, nil)
-	rr := httptest.NewRecorder()
-	h.router.ServeHTTP(rr, req)
-	if rr.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401", rr.Code)
-	}
+	rr := serveRequest(h.router, req)
+	requireStatus(t, rr, http.StatusUnauthorized)
 	if h.filesOnDisk(t) != 1 {
 		t.Fatal("an unauthenticated discard removed the file")
 	}

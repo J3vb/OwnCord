@@ -22,9 +22,7 @@ func TestSetupService_AnEmptiedUserTableDoesNotReopenSetup(t *testing.T) {
 		t.Fatalf("NeedsSetup on an empty server = %v, %v; want true", needs, err)
 	}
 	res, err := svc.Bootstrap(ctx, BootstrapInput{Username: "owner", Password: "correct horse battery staple", Host: "127.0.0.1"})
-	if err != nil {
-		t.Fatalf("Bootstrap: %v", err)
-	}
+	mustDo(t, "Bootstrap", err)
 
 	// The erasure's aftermath.
 	erasure := NewErasureService(database)
@@ -51,9 +49,7 @@ func TestSetupService_AnEmptiedUserTableDoesNotReopenSetup(t *testing.T) {
 
 	// The operator's deliberate recovery: clear the flag with filesystem
 	// access, and the wizard is offered again.
-	if err := database.SetSetting(ctx, SetupCompletedSetting, "0"); err != nil {
-		t.Fatal(err)
-	}
+	mustDo(t, "SetSetting", database.SetSetting(ctx, SetupCompletedSetting, "0"))
 	if needs, err := svc.NeedsSetup(ctx); err != nil || !needs {
 		t.Fatalf("NeedsSetup after the operator re-opened setup = %v, %v; want true", needs, err)
 	}

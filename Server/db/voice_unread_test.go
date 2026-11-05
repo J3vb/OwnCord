@@ -11,19 +11,11 @@ func TestGetChannelUnreadCounts_IncludesVoice(t *testing.T) {
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	userID := seedUser(t, database, "voiceunread")
-	voiceID, err := database.CreateChannel(ctx, "call", "voice", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel(voice): %v", err)
-	}
-	msgID, err := database.CreateMessage(ctx, voiceID, userID, "from the call", nil)
-	if err != nil {
-		t.Fatalf("CreateMessage: %v", err)
-	}
+	voiceID := mustCreateChannel(t, database, "call", "voice", "", "", 0)
+	msgID := mustCreateMessage(t, database, voiceID, userID, "from the call", nil)
 
 	counts, err := database.GetChannelUnreadCounts(ctx, userID)
-	if err != nil {
-		t.Fatalf("GetChannelUnreadCounts: %v", err)
-	}
+	mustDo(t, "GetChannelUnreadCounts", err)
 	cu, ok := counts[voiceID]
 	if !ok {
 		t.Fatalf("voice channel %d missing from unread counts", voiceID)

@@ -2,13 +2,11 @@ package ws_test
 
 import (
 	"context"
-	"encoding/json"
 	"testing"
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
-	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 // ─── Authorization tests for WS channel_focus ───────────────────────────────
@@ -17,11 +15,8 @@ import (
 
 // channelFocusMsg constructs a raw channel_focus WebSocket envelope.
 func channelFocusMsg(channelID int64) []byte {
-	raw, _ := json.Marshal(map[string]any{
-		"type": "channel_focus",
-		"payload": map[string]any{
-			"channel_id": channelID,
-		},
+	raw := envelope("channel_focus", map[string]any{
+		"channel_id": channelID,
 	})
 	return raw
 }
@@ -46,27 +41,13 @@ func TestChannelFocus_AllowedByDefault(t *testing.T) {
 	user := seedMemberUser(t, database, "focus-allowed")
 	chID := seedTestChannel(t, database, "focus-pub")
 
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, 0, 16)
 
 	hub.HandleMessageForTest(c, channelFocusMsg(chID))
 
 	// Should NOT receive a FORBIDDEN error.
-	msgs := drainChanTimeout(send, 50*time.Millisecond)
-	for _, m := range msgs {
-		var env map[string]any
-		if err := json.Unmarshal(m, &env); err != nil {
-			continue
-		}
-		if env["type"] == "error" {
-			if payload, ok := env["payload"].(map[string]any); ok {
-				if payload["code"] == "FORBIDDEN" {
-					t.Error("member was incorrectly denied channel_focus on accessible channel")
-				}
-			}
-		}
+	if hasErrorCode(drainChanTimeout(send, 50*time.Millisecond), "FORBIDDEN") {
+		t.Error("member was incorrectly denied channel_focus on accessible channel")
 	}
 }
 
@@ -80,14 +61,11 @@ func TestChannelFocus_DeniedByOverride(t *testing.T) {
 	// Deny READ_MESSAGES for Member role on this channel.
 	denyReadOnChannel(t, database, chID, permissions.MemberRoleID)
 
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, 0, 16)
 
 	hub.HandleMessageForTest(c, channelFocusMsg(chID))
 
-	code := receiveErrorCode(send, 300*time.Millisecond)
+	code := drainForErrorCode(send, 300*time.Millisecond)
 	if code != "FORBIDDEN" {
 		t.Errorf("expected FORBIDDEN error for denied channel_focus, got %q", code)
 	}
@@ -103,27 +81,13 @@ func TestChannelFocus_AdminBypassesDeny(t *testing.T) {
 	// Deny READ_MESSAGES for all non-admin roles.
 	denyReadOnChannel(t, database, chID, permissions.MemberRoleID)
 
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, 0, 16)
 
 	hub.HandleMessageForTest(c, channelFocusMsg(chID))
 
 	// Should NOT receive a FORBIDDEN error.
-	msgs := drainChanTimeout(send, 50*time.Millisecond)
-	for _, m := range msgs {
-		var env map[string]any
-		if err := json.Unmarshal(m, &env); err != nil {
-			continue
-		}
-		if env["type"] == "error" {
-			if payload, ok := env["payload"].(map[string]any); ok {
-				if payload["code"] == "FORBIDDEN" {
-					t.Error("admin was incorrectly denied channel_focus")
-				}
-			}
-		}
+	if hasErrorCode(drainChanTimeout(send, 50*time.Millisecond), "FORBIDDEN") {
+		t.Error("admin was incorrectly denied channel_focus")
 	}
 }
 
@@ -137,14 +101,11 @@ func TestChatSend_DeniedWithoutSendMessages(t *testing.T) {
 	// Deny READ_MESSAGES (which also blocks SEND as both are required).
 	denyReadOnChannel(t, database, chID, permissions.MemberRoleID)
 
-	send := make(chan []byte, 16)
-	c := ws.NewTestClientWithUser(hub, user, chID, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
+	c, send := connectClient(t, hub, user, chID, 16)
 
 	hub.HandleMessageForTest(c, chatSendMsg(chID, "should be rejected"))
 
-	code := receiveErrorCode(send, 300*time.Millisecond)
+	code := drainForErrorCode(send, 300*time.Millisecond)
 	if code != "FORBIDDEN" {
 		t.Errorf("expected FORBIDDEN error for denied chat_send, got %q", code)
 	}

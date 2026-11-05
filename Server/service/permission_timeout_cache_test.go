@@ -58,9 +58,7 @@ func TestSubject_TimeoutMirror_NoPerCallQuery(t *testing.T) {
 
 	for range 100 {
 		sub, err := f.mod.perms.Subject(ctx, fixtureMember, fixtureChannel)
-		if err != nil {
-			t.Fatalf("Subject: %v", err)
-		}
+		mustDo(t, "Subject", err)
 		if sub.TimedOut {
 			t.Fatal("TimedOut = true for a user with no timeout")
 		}
@@ -85,21 +83,15 @@ func TestSubject_TimeoutMirror_IssueAndLiftTakeEffectAtOnce(t *testing.T) {
 		})
 		return err
 	}
-	if err := send("before"); err != nil {
-		t.Fatalf("send before timeout: %v", err)
-	}
+	mustDo(t, "send before timeout", send("before"))
 	if _, err := f.mod.Timeout(ctx, fixtureMod, fixtureMember, "cool off", time.Hour, nil); err != nil {
 		t.Fatalf("Timeout: %v", err)
 	}
 	if err := send("during"); !errors.Is(err, ErrTimedOut) {
 		t.Fatalf("send right after Timeout: want ErrTimedOut, got %v", err)
 	}
-	if err := f.mod.LiftTimeout(ctx, fixtureMod, fixtureMember); err != nil {
-		t.Fatalf("LiftTimeout: %v", err)
-	}
-	if err := send("after"); err != nil {
-		t.Fatalf("send right after LiftTimeout: %v", err)
-	}
+	mustDo(t, "LiftTimeout", f.mod.LiftTimeout(ctx, fixtureMod, fixtureMember))
+	mustDo(t, "send right after LiftTimeout", send("after"))
 }
 
 // An expired timeout stops denying on the clock alone: no lift, no sweep and
@@ -114,13 +106,9 @@ func TestSubject_TimeoutMirror_ExpiryIsClockEvaluated(t *testing.T) {
 	if _, _, err := f.database.TimeoutUser(ctx, fixtureMember, fixtureMod, nil, "brief", expires); err != nil {
 		t.Fatalf("TimeoutUser: %v", err)
 	}
-	if err := f.mod.perms.RefreshTimeouts(ctx); err != nil {
-		t.Fatalf("RefreshTimeouts: %v", err)
-	}
+	mustDo(t, "RefreshTimeouts", f.mod.perms.RefreshTimeouts(ctx))
 	sub, err := f.mod.perms.Subject(ctx, fixtureMember, fixtureChannel)
-	if err != nil {
-		t.Fatalf("Subject: %v", err)
-	}
+	mustDo(t, "Subject", err)
 	if !sub.TimedOut {
 		t.Fatal("TimedOut = false while the timeout is active")
 	}

@@ -140,13 +140,9 @@ func TestRun_NoLeakAfterCloseWithPushInFlight(t *testing.T) {
 	msgs.SetPushNotifier(notifier)
 	ctx := context.Background()
 	uid, err := a.database.CreateUser(ctx, "pusher", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	mustDo(t, "CreateUser", err)
 	channelID, err := a.database.CreateChannel(ctx, "push-room", "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
+	mustDo(t, "CreateChannel", err)
 	if _, err := msgs.SendMessage(ctx, service.SendMessageParams{
 		ChannelID: channelID, UserID: uid, Username: "pusher", RoleName: "member", Content: "hello",
 	}); err != nil {
@@ -219,9 +215,7 @@ func TestRun_QueuedTouchAndDiscardAreFlushedAtClose(t *testing.T) {
 
 	ctx := context.Background()
 	uid, err := a.database.CreateUser(ctx, "flusher", "hash", 4)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	mustDo(t, "CreateUser", err)
 	apiHash := "api-token-hash-flush"
 	if _, err := a.database.CreateAPIToken(ctx, uid, apiHash, "ci", nil); err != nil {
 		t.Fatalf("CreateAPIToken: %v", err)
@@ -235,32 +229,22 @@ func TestRun_QueuedTouchAndDiscardAreFlushedAtClose(t *testing.T) {
 	}
 
 	sessions := a.runtime.Services.Sessions
-	if err := sessions.TouchAPIToken(ctx, apiHash); err != nil {
-		t.Fatalf("TouchAPIToken: %v", err)
-	}
-	if err := sessions.DiscardSession(ctx, sessHash); err != nil {
-		t.Fatalf("DiscardSession: %v", err)
-	}
+	mustDo(t, "TouchAPIToken", sessions.TouchAPIToken(ctx, apiHash))
+	mustDo(t, "DiscardSession", sessions.DiscardSession(ctx, sessHash))
 
 	cancel()
 	awaitRun(t, runErr)
 
 	reopened, err := db.Open(a.cfg.Database.Path)
-	if err != nil {
-		t.Fatalf("reopen database: %v", err)
-	}
+	mustDo(t, "reopen database", err)
 	defer func() { _ = reopened.Close() }()
 	var lastUsed sql.NullString
-	if err := reopened.QueryRowContext(ctx, `SELECT last_used_at FROM api_tokens WHERE token_hash = ?`, apiHash).Scan(&lastUsed); err != nil {
-		t.Fatalf("read last_used_at: %v", err)
-	}
+	mustDo(t, "read last_used_at", reopened.QueryRowContext(ctx, `SELECT last_used_at FROM api_tokens WHERE token_hash = ?`, apiHash).Scan(&lastUsed))
 	if !lastUsed.Valid {
 		t.Error("the queued API-token touch was lost at shutdown: last_used_at is NULL")
 	}
 	var rows int
-	if err := reopened.QueryRowContext(ctx, `SELECT COUNT(*) FROM sessions WHERE token = ?`, sessHash).Scan(&rows); err != nil {
-		t.Fatalf("count sessions: %v", err)
-	}
+	mustDo(t, "count sessions", reopened.QueryRowContext(ctx, `SELECT COUNT(*) FROM sessions WHERE token = ?`, sessHash).Scan(&rows))
 	if rows != 0 {
 		t.Errorf("the queued expired-session discard was lost at shutdown: %d row(s) remain", rows)
 	}

@@ -26,10 +26,7 @@ import (
 func TestAdminAuthMiddleware_DBErrorIsNotUnauthorized(t *testing.T) {
 	database := openWhiteboxTestDB(t)
 
-	uid, err := database.CreateUser(context.Background(), "dberroruser", "$2a$12$x", 1)
-	if err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
+	uid := mustCreateUser(t, database, "dberroruser", "$2a$12$x", 1)
 	token := "db-error-token"
 	if _, err := database.CreateSession(context.Background(), uid, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
 		t.Fatalf("CreateSession: %v", err)

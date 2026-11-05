@@ -48,9 +48,7 @@ func hasFrame(frames [][]byte, marker string) bool {
 func TestRoleRefresh_NamedUserRevokedWhileRoundHeld(t *testing.T) {
 	database := openTestDB(t)
 	ctx := context.Background()
-	if _, err := database.ExecContext(ctx, `UPDATE roles SET permissions = 0 WHERE id = 4`); err != nil {
-		t.Fatalf("strip member role: %v", err)
-	}
+	mustExec(t, database, `UPDATE roles SET permissions = 0 WHERE id = 4`)
 	chX := seedTestChannel(t, database, "revoke-chan")
 	hub := newTestHubDeps(t, database, nil, nil)
 	go hub.Run()
@@ -60,14 +58,8 @@ func TestRoleRefresh_NamedUserRevokedWhileRoundHeld(t *testing.T) {
 	})
 
 	connect := func(name string, role int, ch int64) (int64, chan []byte) {
-		id, err := database.CreateUser(ctx, name, "hash", role)
-		if err != nil {
-			t.Fatalf("CreateUser: %v", err)
-		}
-		u, err := database.GetUserByID(ctx, id)
-		if err != nil || u == nil {
-			t.Fatalf("GetUserByID: %v", err)
-		}
+		id := mustCreateUser(t, database, name, role)
+		u := mustGetUser(t, database, id)
 		send := make(chan []byte, 256)
 		c := ws.NewTestClientWithUser(hub, u, ch, send)
 		hub.RegisterNowForTest(c)
@@ -126,10 +118,7 @@ func TestRoleRefresh_NamedUserRevokedWhileRoundHeld(t *testing.T) {
 	svcs.Moderation.SetPermissionNotifier(hub)
 	svcs.Roles.SetPermissionNotifier(hub)
 	svcs.Channels.SetPermissionNotifier(hub)
-	adminID, err := database.CreateUser(ctx, "rv-admin", "hash", 1)
-	if err != nil {
-		t.Fatalf("CreateUser admin: %v", err)
-	}
+	adminID := mustCreateUser(t, database, "rv-admin", 1)
 	if _, err := database.CreateSession(ctx, adminID, auth.HashToken("rv-token"), "t", "127.0.0.1"); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}

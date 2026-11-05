@@ -51,9 +51,7 @@ func realLiveKitBinary(t *testing.T) string {
 func freeUDPPort(t *testing.T) int {
 	t.Helper()
 	conn, err := net.ListenPacket("udp4", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("reserving a UDP port: %v", err)
-	}
+	mustDo(t, "reserving a UDP port", err)
 	port := conn.LocalAddr().(*net.UDPAddr).Port
 	_ = conn.Close()
 	return port
@@ -70,9 +68,7 @@ func runVoiceOverGeneratedConfig(t *testing.T, cfg *config.VoiceConfig, binary s
 	cfg.LiveKitURL = "ws://127.0.0.1:7880"
 	proc := livekitproc.New(cfg, &config.TLSConfig{}, dataDir)
 
-	if err := proc.Start(); err != nil {
-		t.Fatalf("starting livekit: %v", err)
-	}
+	mustDo(t, "starting livekit", proc.Start())
 	t.Cleanup(proc.Stop)
 
 	ctx := context.Background()
@@ -97,9 +93,7 @@ func runVoiceOverGeneratedConfig(t *testing.T, cfg *config.VoiceConfig, binary s
 		at.SetVideoGrant(&auth.VideoGrant{RoomJoin: true, Room: "single-port-proof"})
 		at.SetIdentity(identity)
 		s, err := at.ToJWT()
-		if err != nil {
-			t.Fatalf("minting token: %v", err)
-		}
+		mustDo(t, "minting token", err)
 		return s
 	}
 
@@ -130,15 +124,11 @@ func runVoiceOverGeneratedConfig(t *testing.T, cfg *config.VoiceConfig, binary s
 	defer sub.Disconnect()
 
 	pub, err := lksdk.ConnectToRoomWithToken(cfg.LiveKitURL, token("publisher"), &lksdk.RoomCallback{})
-	if err != nil {
-		t.Fatalf("publisher join: %v", err)
-	}
+	mustDo(t, "publisher join", err)
 	defer pub.Disconnect()
 
 	track, err := lksdk.NewLocalTrack(webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeOpus})
-	if err != nil {
-		t.Fatalf("local track: %v", err)
-	}
+	mustDo(t, "local track", err)
 	if _, err := pub.LocalParticipant.PublishTrack(track, &lksdk.TrackPublicationOptions{Name: "audio"}); err != nil {
 		t.Fatalf("publish: %v", err)
 	}
@@ -169,9 +159,7 @@ func runVoiceOverGeneratedConfig(t *testing.T, cfg *config.VoiceConfig, binary s
 	var pair *webrtc.ICECandidatePair
 	for deadline := time.Now().Add(5 * time.Second); pair == nil; time.Sleep(100 * time.Millisecond) {
 		pair, err = remote.Receiver().Transport().ICETransport().GetSelectedCandidatePair()
-		if err != nil {
-			t.Fatalf("selected candidate pair: %v", err)
-		}
+		mustDo(t, "selected candidate pair", err)
 		if pair == nil && time.Now().After(deadline) {
 			t.Fatal("no selected ICE candidate pair on the subscriber")
 		}

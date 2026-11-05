@@ -3,7 +3,6 @@ package ws
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/auth"
@@ -60,9 +59,7 @@ func tokenRefreshDeps(t *testing.T) (VoiceDeps, *db.DB) {
 	); execErr != nil {
 		t.Fatalf("seed channel: %v", execErr)
 	}
-	if err := database.JoinVoiceChannel(context.Background(), 1, 100); err != nil {
-		t.Fatalf("seed voice membership: %v", err)
-	}
+	mustJoinVoice(t, database, 1, 100)
 
 	return VoiceDeps{
 		Voice:       service.NewVoiceService(database),
@@ -138,17 +135,7 @@ func TestVoiceTokenRefreshV2_NotInVoice(t *testing.T) {
 
 	result := handleVoiceTokenRefreshV2(context.Background(), cmd, info, deps)
 
-	if result.Error == nil {
-		t.Fatal("expected error for not in voice")
-	}
-	var ce ClientError
-	ok := errors.As(result.Error, &ce)
-	if !ok {
-		t.Fatalf("expected ClientError, got %T", result.Error)
-	}
-	if ce.Code != ErrCodeBadRequest {
-		t.Errorf("expected code %q, got %q", ErrCodeBadRequest, ce.Code)
-	}
+	requireClientErrorCode(t, result.Error, ErrCodeBadRequest, "expected error for not in voice")
 }
 
 func TestVoiceTokenRefreshV2_RateLimited(t *testing.T) {
@@ -161,17 +148,7 @@ func TestVoiceTokenRefreshV2_RateLimited(t *testing.T) {
 
 	result := handleVoiceTokenRefreshV2(context.Background(), cmd, info, deps)
 
-	if result.Error == nil {
-		t.Fatal("expected rate limit error")
-	}
-	var ce ClientError
-	ok := errors.As(result.Error, &ce)
-	if !ok {
-		t.Fatalf("expected ClientError, got %T", result.Error)
-	}
-	if ce.Code != ErrCodeRateLimited {
-		t.Errorf("expected code %q, got %q", ErrCodeRateLimited, ce.Code)
-	}
+	requireClientErrorCode(t, result.Error, ErrCodeRateLimited, "expected rate limit error")
 }
 
 func TestVoiceTokenRefreshV2_TokenGenNil(t *testing.T) {
@@ -182,17 +159,7 @@ func TestVoiceTokenRefreshV2_TokenGenNil(t *testing.T) {
 
 	result := handleVoiceTokenRefreshV2(context.Background(), cmd, info, deps)
 
-	if result.Error == nil {
-		t.Fatal("expected error for nil TokenGen")
-	}
-	var ce ClientError
-	ok := errors.As(result.Error, &ce)
-	if !ok {
-		t.Fatalf("expected ClientError, got %T", result.Error)
-	}
-	if ce.Code != ErrCodeInternal {
-		t.Errorf("expected code %q, got %q", ErrCodeInternal, ce.Code)
-	}
+	requireClientErrorCode(t, result.Error, ErrCodeInternal, "expected error for nil TokenGen")
 }
 
 func TestVoiceTokenRefreshV2_GenerateTokenError(t *testing.T) {
@@ -203,17 +170,7 @@ func TestVoiceTokenRefreshV2_GenerateTokenError(t *testing.T) {
 
 	result := handleVoiceTokenRefreshV2(context.Background(), cmd, info, deps)
 
-	if result.Error == nil {
-		t.Fatal("expected error from GenerateToken failure")
-	}
-	var ce ClientError
-	ok := errors.As(result.Error, &ce)
-	if !ok {
-		t.Fatalf("expected ClientError, got %T", result.Error)
-	}
-	if ce.Code != ErrCodeInternal {
-		t.Errorf("expected code %q, got %q", ErrCodeInternal, ce.Code)
-	}
+	requireClientErrorCode(t, result.Error, ErrCodeInternal, "expected error from GenerateToken failure")
 }
 
 func TestVoiceTokenRefreshV2_IsKeyHolderReflectedInReply(t *testing.T) {
@@ -307,17 +264,7 @@ func TestVoiceTokenRefreshV2_RevokedConnectVoiceRefusedAndEvicts(t *testing.T) {
 	deps.Limiter = auth.NewRateLimiter() // clear the 1-per-60s budget for this second call
 
 	result := handleVoiceTokenRefreshV2(context.Background(), cmd, info, deps)
-	if result.Error == nil {
-		t.Fatal("revoked CONNECT_VOICE must not mint a fresh SFU token")
-	}
-	var ce ClientError
-	ok := errors.As(result.Error, &ce)
-	if !ok {
-		t.Fatalf("expected ClientError, got %T", result.Error)
-	}
-	if ce.Code != ErrCodeForbidden {
-		t.Errorf("expected code %q, got %q", ErrCodeForbidden, ce.Code)
-	}
+	requireClientErrorCode(t, result.Error, ErrCodeForbidden, "revoked CONNECT_VOICE must not mint a fresh SFU token")
 	if result.Reply != nil {
 		t.Error("no voice token may accompany the refusal")
 	}
