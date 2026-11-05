@@ -215,9 +215,6 @@
     "features/voice/mediaControl.ts": {
       "MediaControl > doSwitchVideoDevice": [22]
     },
-    "features/voice/native/nativeRoom.ts": {
-      "NativeRoom > apply": [44]
-    },
     "features/voice/screenshareChange.ts": {
       "changeScreenshareSource": [39]
     },
