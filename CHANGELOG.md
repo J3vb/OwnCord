@@ -56,6 +56,8 @@ and only when it changes something a contributor or fork holder must do
 - The admin Live log no longer fills with the panel's own request lines, and a viewer that falls behind sees how many lines were skipped.
 - Desktop: an upload that keeps moving is no longer cut by the app after 10 minutes; only the server's own transfer limit ends it.
 - Desktop: the update button installs only the version the banner showed. If a newer one was published meanwhile, the banner shows that one instead.
+- An upload ended by the server's time limit now says it took too long for this connection, instead of a generic network error.
+- Desktop: the app's own daily log file stops at about 20 MB, and the support bundle keeps the newest 4 MB of each log file.
 - In Open and Approval registration, a refused attempt (username taken, server busy, queue full) no longer uses up one of the address's 5 registrations per day.
 - A voice-channel password attempt refused because the whole server is at its limit no longer counts against the member's own attempts.
 

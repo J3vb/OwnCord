@@ -324,6 +324,8 @@ describe("error mapping", () => {
       ["BANNED", "x", "error.banned"],
       ["SERVICE_UNAVAILABLE", "x", "error.unavailable"],
       ["BAD_GATEWAY", "x", "error.unavailable"],
+      ["SERVER_SHUTTING_DOWN", "x", "error.unavailable"],
+      ["TRANSFER_TIMED_OUT", "x", "error.transferTimedOut"],
       ["STORAGE_QUOTA_EXCEEDED", "x", "error.storageQuota"],
       ["STORAGE_LOW_DISK", "x", "error.storageLowDisk"],
       ["STORAGE_ERROR", "x", "error.storageError"],
