@@ -274,3 +274,122 @@ func storedCopy(rs *replaySplice, msg, wrapped []byte, seq uint64) []byte {
 	}
 	return slices.Concat(rs.prefix, m, rs.suffix)
 }
+
+type chatSendOKPayload struct {
+	ClientMessageID string `json:"client_message_id,omitempty"`
+	Deduplicated    bool   `json:"deduplicated,omitempty"`
+	MessageID       int64  `json:"message_id"`
+	Timestamp       string `json:"timestamp"`
+	// SkippedAttachmentIDs are requested uploads the send did not attach; absent when all were attached.
+	SkippedAttachmentIDs []string `json:"skipped_attachment_ids,omitempty"`
+}
+
+type chatEditedPayload struct {
+	MessageID int64  `json:"message_id"`
+	ChannelID int64  `json:"channel_id"`
+	Content   string `json:"content"`
+	EditedAt  string `json:"edited_at"`
+	// Mentions/MentionsEveryone are re-resolved from the edited content.
+	Mentions         []int64 `json:"mentions"`
+	MentionsEveryone bool    `json:"mentions_everyone"`
+	// MentionRoles: see chatMessagePayload.MentionRoles.
+	MentionRoles []int64 `json:"mention_roles"`
+	// MentionsHere: see chatMessagePayload.MentionsHere.
+	MentionsHere bool `json:"mentions_here"`
+}
+
+type chatDeletedPayload struct {
+	MessageID int64 `json:"message_id"`
+	ChannelID int64 `json:"channel_id"`
+}
+
+type chatBulkDeletedPayload struct {
+	ChannelID int64   `json:"channel_id"`
+	IDs       []int64 `json:"ids"`
+}
+
+type reactionUpdatePayload struct {
+	MessageID int64  `json:"message_id"`
+	ChannelID int64  `json:"channel_id"`
+	Emoji     string `json:"emoji"`
+	UserID    int64  `json:"user_id"`
+	Action    string `json:"action"`
+}
+
+type typingPayload struct {
+	ChannelID int64  `json:"channel_id"`
+	UserID    int64  `json:"user_id"`
+	Username  string `json:"username"`
+}
+
+func buildChatSendOK(requestID string, msgID int64, timestamp, clientMessageID string, duplicate bool, skippedAttachmentIDs []string) []byte {
+	return buildJSON(wsMsg{
+		Type:    MsgTypeChatSendOK,
+		ID:      requestID,
+		Payload: chatSendOKPayload{MessageID: msgID, Timestamp: timestamp, ClientMessageID: clientMessageID, Deduplicated: duplicate, SkippedAttachmentIDs: skippedAttachmentIDs},
+	})
+}
+
+func buildChatEdited(msgID, channelID int64, content, editedAt string, mentions, mentionRoles []int64, mentionsEveryone, mentionsHere bool) []byte {
+	if mentions == nil {
+		mentions = []int64{}
+	}
+	if mentionRoles == nil {
+		mentionRoles = []int64{}
+	}
+	return buildJSON(wsMsg{
+		Type: MsgTypeChatEdited,
+		Payload: chatEditedPayload{
+			MessageID:        msgID,
+			ChannelID:        channelID,
+			Content:          content,
+			EditedAt:         editedAt,
+			Mentions:         mentions,
+			MentionRoles:     mentionRoles,
+			MentionsEveryone: mentionsEveryone,
+			MentionsHere:     mentionsHere,
+		},
+	})
+}
+
+func buildChatDeleted(msgID, channelID int64) []byte {
+	return buildJSON(wsMsg{
+		Type:    MsgTypeChatDeleted,
+		Payload: chatDeletedPayload{MessageID: msgID, ChannelID: channelID},
+	})
+}
+
+// buildChatBulkDeleted emits ids as [] not null when nothing was purged.
+func buildChatBulkDeleted(channelID int64, ids []int64) []byte {
+	if ids == nil {
+		ids = []int64{}
+	}
+	return buildJSON(wsMsg{
+		Type:    MsgTypeChatBulkDeleted,
+		Payload: chatBulkDeletedPayload{ChannelID: channelID, IDs: ids},
+	})
+}
+
+func buildReactionUpdate(msgID, channelID, userID int64, emoji, action string) []byte {
+	return buildJSON(wsMsg{
+		Type: MsgTypeReactionUpdate,
+		Payload: reactionUpdatePayload{
+			MessageID: msgID,
+			ChannelID: channelID,
+			Emoji:     emoji,
+			UserID:    userID,
+			Action:    action,
+		},
+	})
+}
+
+func buildTypingMsg(channelID, userID int64, username string) []byte {
+	return buildJSON(wsMsg{
+		Type: MsgTypeTyping,
+		Payload: typingPayload{
+			ChannelID: channelID,
+			UserID:    userID,
+			Username:  username,
+		},
+	})
+}

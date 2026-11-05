@@ -67,11 +67,6 @@ var FileSizeOverrides = map[string]FileSizeOverride{
 		Note:    "hub: client registry, broadcast fan-out, replay",
 	},
 
-	"ws/messages.go": {
-		Ceiling: 950,
-		Class:   classGrandfathered,
-		Note:    "message frame handling",
-	},
 	"api/router.go": {
 		Ceiling: 300,
 		Class:   classRegistrationPoint,
@@ -91,36 +86,6 @@ var FileSizeOverrides = map[string]FileSizeOverride{
 		Ceiling: 750,
 		Class:   classGrandfathered,
 		Note:    "WASM plugin registry and capability grants",
-	},
-	"ws/voice_join.go": {
-		Ceiling: 750,
-		Class:   classGrandfathered,
-		Note:    "voice join and leave",
-	},
-	"ws/replay.go": {
-		Ceiling: 700,
-		Class:   classGrandfathered,
-		Note:    "the per-client replay buffer",
-	},
-	"ws/command.go": {
-		Ceiling: 700,
-		Class:   classGrandfathered,
-		Note:    "client command dispatch",
-	},
-	"ws/serve_ready.go": {
-		Ceiling: 700,
-		Class:   classGrandfathered,
-		Note:    "the ready/serve handshake",
-	},
-	"ws/voice_moderation.go": {
-		Ceiling: 700,
-		Class:   classGrandfathered,
-		Note:    "voice moderation",
-	},
-	"ws/hub_visibility.go": {
-		Ceiling: 600,
-		Class:   classGrandfathered,
-		Note:    "channel visibility fan-out",
 	},
 	"admin/logstream.go": {
 		Ceiling: 600,

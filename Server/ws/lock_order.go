@@ -51,7 +51,7 @@
 // too. Continuation lines are indented past the tab and are not read.
 //
 //	rank  lock                       declared                 taken under it
-//	1 S   voicestate.userLockEntry.mu voice_registry.go:35    DB, broadcasts, seqMu (replay.go:438-441); never a
+//	1 S   voicestate.userLockEntry.mu voice_registry.go:35    DB, broadcasts, seqMu (replay.go:219-275); never a
 //	      (voiceRegistry.voiceMember) voicestate/userlocks.go:39 LiveKit RPC
 //	2 S   voicestate.userLockEntry.mu hub_voice_state.go:29   DB and LiveKit RPC (voicestate/userlocks.go:10-16);
 //	      (hubVoice.mod)             voicestate/userlocks.go:39 never a membership path
