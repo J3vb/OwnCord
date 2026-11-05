@@ -1096,6 +1096,7 @@ jobs:
             -L Server/go.mod \
             -L Client/package-lock.json \
             -L Client/src-tauri/Cargo.lock \
+            -L Client/src-tauri/crates/owncord-parse/fuzz/Cargo.lock \
             -L tools/mcp-introspect/package-lock.json \
             -L package-lock.json
 
@@ -1282,6 +1283,13 @@ jobs:
 
       - name: Rust unit tests
         run: cargo test --lib
+
+      # The pure parsers crate: its own lints plus the property tests in its
+      # tests/ folder, which `--lib` above does not run.
+      - name: Parser crate lint and property tests
+        run: |
+          cargo clippy -p owncord-parse --all-targets -- -D warnings
+          cargo test -p owncord-parse
 
       # Native-voice E2EE interop (Linux): the crate's own NativeSession
       # (examples/native_voice_interop.rs) against livekit-client in Chromium

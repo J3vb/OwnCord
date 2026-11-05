@@ -250,3 +250,172 @@ func (s *twoFactor) ConfirmTOTP(ctx context.Context, p Principal, password, code
 	}
 	return res, nil
 }
+
+// VerifyTOTP completes a challenge Login started and issues the session, bound
+// to the login request's device and IP rather than this one's.
+func (s *AuthService) VerifyTOTP(ctx context.Context, partialToken, code string) (*AuthResult, error) {
+	code = strings.TrimSpace(code)
+	challenge, ok := s.partial.Lookup(ctx, partialToken)
+	if !ok {
+		return nil, ErrTOTPChallengeInvalid
+	}
+
+	// Refuse an exhausted per-user budget before touching the store: the read-only
+	// Check charges nothing, so rotating source IPs cannot drive user reads and
+	// secret decryptions past the cap.
+	totpRateLimitKey := auth.Key("totp_fail", challenge.UserID)
+	if !s.limiter.Check(totpRateLimitKey, totpFailureRateLimit, totpFailureWindow) {
+		return nil, ErrTooManyAttempts
+	}
+
+	user, err := s.challengeUser(ctx, challenge.UserID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Record the attempt atomically up-front rather than a read-only Check now and
+	// Allow on failure: that would be a TOCTOU where many concurrent requests
+	// reusing one valid partial token all pass before any failure is recorded,
+	// defeating the per-user cap (the only cross-IP defence). Success resets the
+	// counter below, so legitimate retries are not penalised. Deliberately NOT
+	// auth.ScaledLimit: the multiplier is for shared-NAT per-IP limits, and scaling a
+	// per-user threshold would hand a distributed attacker more guesses (as in
+	// authenticate). The reservation sits after the store read so an outage consumes
+	// no attempts, and before the code compare. A recovery code is matched against
+	// up to ten bcrypt hashes, so it takes an admission slot first (a refusal charges
+	// nothing, and it queues like login); a TOTP code is an HMAC and needs none.
+	canonical, isRecovery := auth.NormalizeRecoveryCode(code)
+	// Only a TOTP code needs the stored secret, so an unreadable one still lets a
+	// recovery code through, and it fails before Allow, charging nothing.
+	secret, err := s.unsealTOTPSecret(user, isRecovery)
+	if err != nil {
+		return nil, err
+	}
+	release := func() {}
+	if isRecovery {
+		if release, err = s.acquireAdmission(ctx); err != nil {
+			return nil, err
+		}
+		defer release()
+	}
+	if !s.limiter.Allow(totpRateLimitKey, totpFailureRateLimit, totpFailureWindow) {
+		return nil, ErrTooManyAttempts
+	}
+
+	// A recovery code has a different shape, so the input routes itself. It is spent
+	// by the conditional update that consumed it, not the replay window, so Unmark
+	// below applies to TOTP codes only.
+	var recoveryRemaining *int
+	if isRecovery {
+		remaining, matched, err := s.consumeRecoveryCode(ctx, user.ID, canonical)
+		release()
+		if err != nil {
+			return nil, ErrTOTPUnavailable
+		}
+		if !matched {
+			s.partial.RegisterFailure(ctx, partialToken, partialAuthMaxFailures)
+			return nil, ErrTOTPCodeInvalid
+		}
+		recoveryRemaining = &remaining
+	} else if !auth.VerifyTOTPCodeOnce(ctx, secret, code, time.Now().UTC(), user.ID, s.usedCodes) {
+		// The attempt was already recorded up-front; only the per-challenge counter
+		// advances here.
+		s.partial.RegisterFailure(ctx, partialToken, partialAuthMaxFailures)
+		return nil, ErrTOTPCodeInvalid
+	}
+
+	s.limiter.Reset(ctx, totpRateLimitKey)
+
+	claimed, ok := s.partial.Consume(ctx, partialToken)
+	if !ok {
+		// The claim lost: a concurrent verify consumed the challenge (or it expired)
+		// after this request marked its code. Release the code so a Restore by a winner
+		// whose issueSession failed is not stuck behind this mark. A spent recovery code
+		// stays spent: un-spending it would hand a racing verifier a second use.
+		if recoveryRemaining == nil {
+			s.usedCodes.Unmark(ctx, user.ID, code)
+		}
+		return nil, ErrTOTPChallengeInvalid
+	}
+
+	token, err := issueSession(ctx, s.st, user.ID, challenge.Device, challenge.IP)
+	if err != nil {
+		// The second factor was verified; a store fault must not discard it. The claim
+		// is atomic and first, so two verifies never both reach issueSession. Put the
+		// challenge back under the same token and release the code so the retry
+		// completes the login without another password step; code first, then token, so
+		// a retry never finds a live token with a dead code.
+		if recoveryRemaining == nil {
+			s.usedCodes.Unmark(ctx, user.ID, code)
+		}
+		s.partial.Restore(ctx, partialToken, claimed)
+		slog.Error("verify-totp: session issue failed", "err", err, "user_id", user.ID)
+		return nil, sessionIssueError(err)
+	}
+
+	detail := "two-factor verification completed from " + challenge.IP
+	if recoveryRemaining != nil {
+		detail = "two-factor verification completed with a recovery code from " + challenge.IP
+	}
+	slog.Info("totp verified", "user_id", user.ID, "ip", challenge.IP, "recovery_code", recoveryRemaining != nil)
+	db.WriteAudit(context.WithoutCancel(ctx), s.st, user.ID, "totp_verified", "user", user.ID, detail)
+	return &AuthResult{Token: token, User: user, RecoveryCodesRemaining: recoveryRemaining}, nil
+}
+
+// DisableTOTP confirms the password, refuses while the server requires 2FA,
+// clears the secret and revokes the caller's other sessions.
+func (s *AuthService) DisableTOTP(ctx context.Context, p Principal, password string) (*TOTPChangeResult, error) {
+	if p.Session == nil {
+		return nil, ErrLoginSessionRequired
+	}
+	user := p.User
+
+	lockKey := auth.Key("pw_confirm_lock", user.ID)
+	if s.limiter.IsLockedOut(lockKey) {
+		return nil, ErrTooManyAttempts
+	}
+
+	if err := s.confirmPassword(ctx, user, password, lockKey); err != nil {
+		return nil, err
+	}
+
+	require2FA, err := s.require2FAEnabled(ctx)
+	if err != nil {
+		slog.Error("totp disable: reading require_2fa failed", "err", err, "user_id", user.ID)
+		return nil, ErrAuthPolicyUnavailable
+	}
+	if require2FA {
+		return nil, ErrTOTPRequiredByServer
+	}
+
+	s.pending.Delete(ctx, user.ID)
+	if err := s.twoFactor.st.UpdateUserTOTPSecret(ctx, user.ID, nil); err != nil {
+		slog.Error("totp disable: clearing the secret failed", "err", err, "user_id", user.ID)
+		return nil, ErrTOTPDisableFailed
+	}
+	// Recovery codes mean nothing without 2FA; a leftover set is still a credential.
+	if err := s.twoFactor.st.DeleteRecoveryCodes(ctx, user.ID); err != nil {
+		slog.Warn("recovery codes: deleting after 2FA disable failed", "user_id", user.ID, "error", err)
+	}
+
+	// Once the secret update committed, revoking other sessions must not be aborted
+	// by a dead request.
+	tailCtx := context.WithoutCancel(ctx)
+	revoked, revokeFailed := s.revokeOtherSessionsAfterAuthChange(tailCtx, user.ID, keepSessionID(p), "totp disable")
+
+	slog.Info("totp disabled", "user_id", user.ID)
+	db.WriteAudit(tailCtx, s.st, user.ID, "totp_disabled", "user", user.ID,
+		"two-factor authentication disabled")
+
+	res := &TOTPChangeResult{SessionsRevoked: revoked}
+	if revokeFailed {
+		// Partial success: 2FA IS disabled. A 5xx would be a lie, so mirror
+		// ChangePassword (api/profile_handler.go): 200 with an explicit warning.
+		res.Warning = "two-factor authentication disabled, but other sessions could not be revoked; revoke them from the sessions list"
+	}
+	return res, nil
+}
+
+func (s *AuthService) require2FAEnabled(ctx context.Context) (bool, error) {
+	return getBooleanSetting(ctx, s.st, "require_2fa", false)
+}

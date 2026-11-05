@@ -45,11 +45,13 @@ type SystemSources struct {
 // mountSystemRoutes mounts the Dashboard health row, the LiveKit and slow requests cards
 // and the System health page: server health detail, so View Diagnostics like
 // the attention panel.
-func mountSystemRoutes(r chi.Router, gates *gateRegistry, src SystemSources, hub HubBroadcaster, attention *service.AttentionService, version string) {
+func mountSystemRoutes(r chi.Router, gates *gateRegistry, src SystemSources, hub HubBroadcaster, attention *service.AttentionService, audit voiceRestartAuditor, version string) {
 	gates.route(r, gateViewDiagnostics, http.MethodGet, "/system/stats", handleGetSystemStats(src, hub))
 	gates.route(r, gateViewDiagnostics, http.MethodGet, "/system/livekit", handleGetSystemLiveKit(src, hub))
 	gates.route(r, gateViewDiagnostics, http.MethodGet, "/system/slow-requests", handleGetSlowRequests(src))
 	gates.route(r, gateViewDiagnostics, http.MethodGet, "/system/health", handleGetSystemHealth(src, hub, attention, version, time.Now))
+	// Waking a voice server that stopped restarting is gated like POST /restart.
+	gates.route(r, gateManageConfig, http.MethodPost, "/system/livekit/restart", handleRestartLiveKit(audit, hub))
 }
 
 // systemWindows are the history lengths the route serves.

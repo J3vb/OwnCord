@@ -1,5 +1,5 @@
 {
-  "nextId": 559,
+  "nextId": 560,
   "findings": [
     {
       "id": "OC-0001",
@@ -12887,6 +12887,29 @@
     },
     {
       "id": "OC-0558",
+      "title": "The loopback tunnels now refuse a request head with a lone CR or LF",
+      "file": "Client/src-tauri/crates/owncord-parse/src/proxy.rs",
+      "line": 100,
+      "severity": "low",
+      "why": "The tunnels' header rewrites split a request head on CRLF only. A head line holding a lone LF was passed through as one line, so the result the server read could differ from the head the rewrite checked. Browsers never send such a head, so normal use is unchanged.",
+      "repro": "Property test a_head_with_a_lone_line_break_never_passes_the_tunnel: before the fix strip_tunnel_token returned the head unchanged.",
+      "evidence": "Client/src-tauri/crates/owncord-parse/tests/proxy_properties.rs",
+      "suggestedFix": "Refuse a head with a CR not followed by LF or an LF not preceded by CR at the tunnel-token check, which every request through both tunnels passes.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/src-tauri/crates/owncord-parse/tests/proxy_properties.rs",
+        "revertProof": "remove the lone-line-break check and the property fails"
+      },
+      "lens": "tauri",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-05",
+      "hunt": "fuzzing-fz",
+      "finder": "claude",
+      "fixedDate": "2026-11-05"
+    },
+    {
+      "id": "OC-0559",
       "title": "A server frame that was null, or carried a null payload, threw out of the WebSocket frame handler",
       "file": "Client/src/lib/ws.ts",
       "line": 530,

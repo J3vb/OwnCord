@@ -67,6 +67,7 @@ jobs:
             -L Server/go.mod \
             -L Client/package-lock.json \
             -L Client/src-tauri/Cargo.lock \
+            -L Client/src-tauri/crates/owncord-parse/fuzz/Cargo.lock \
             -L tools/mcp-introspect/package-lock.json \
             -L package-lock.json
 
