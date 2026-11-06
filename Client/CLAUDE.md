@@ -14,7 +14,10 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   `src/features/messaging/` also holds `stores/messages.store.ts`'s pure
   reducers and message model — the store stays the facade, so import its
   mutators from `@stores/messages.store`, never from the reducer modules; new
-  or extracted code uses `src/features/`, relative imports
+  or extracted code uses `src/features/`, relative imports, except the pieces
+  of a store split by concern (`channelModel`/`channelGroups`,
+  `voiceModel`/`voiceRoster`/`voicePeers`/`voiceSelfPrefs`), which stay in
+  `src/stores/` so the store adds no upward import to `scripts/layer-baseline.json`
 - `src/app/` is the composition layer above `pages/` (`main.ts`'s siblings, the
   only code besides `main.ts` that may import `pages/`; enforced from 7.4b:
   `local/layer-direction`): modules export functions or types, with no

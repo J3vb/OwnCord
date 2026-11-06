@@ -150,4 +150,73 @@ describe("restateSelfVoiceState", () => {
 
     expect(socket.send).not.toHaveBeenCalled();
   });
+
+  it("skips only the flag the caller names", () => {
+    voiceStore.setState((prev) => ({ ...prev, localMuted: true, localDeafened: true }));
+    setSelfRow(selfRow());
+
+    const skipMute = socketStub();
+    restateSelfVoiceState(skipMute, true, false);
+    expect(skipMute.send.mock.calls).toEqual([
+      [{ type: "voice_deafen", payload: { deafened: true } }],
+    ]);
+
+    const skipDeafen = socketStub();
+    restateSelfVoiceState(skipDeafen, false, true);
+    expect(skipDeafen.send.mock.calls).toEqual([
+      [{ type: "voice_mute", payload: { muted: true } }],
+    ]);
+  });
+
+  it("sends the mute before the deafen", () => {
+    voiceStore.setState((prev) => ({ ...prev, localMuted: true, localDeafened: true }));
+    setSelfRow(selfRow());
+    const socket = socketStub();
+
+    restateSelfVoiceState(socket);
+
+    expect(socket.send.mock.calls.map(([frame]) => frame.type)).toEqual([
+      "voice_mute",
+      "voice_deafen",
+    ]);
+  });
+
+  it("still restates the deafen when only a moderator's mute holds", () => {
+    voiceStore.setState((prev) => ({
+      ...prev,
+      localMuted: true,
+      localDeafened: true,
+      localServerMuted: true,
+    }));
+    setSelfRow(selfRow());
+    const socket = socketStub();
+
+    restateSelfVoiceState(socket);
+
+    expect(socket.send.mock.calls).toEqual([
+      [{ type: "voice_deafen", payload: { deafened: true } }],
+    ]);
+  });
+
+  it("restates a deafen that the server row lost, with no mute change", () => {
+    voiceStore.setState((prev) => ({ ...prev, localDeafened: true }));
+    setSelfRow(selfRow());
+    const socket = socketStub();
+
+    restateSelfVoiceState(socket);
+
+    expect(socket.send.mock.calls).toEqual([
+      [{ type: "voice_deafen", payload: { deafened: true } }],
+    ]);
+  });
+
+  it("does nothing when nobody is signed in", () => {
+    voiceStore.setState((prev) => ({ ...prev, localMuted: true }));
+    authStore.setState((prev) => ({ ...prev, user: null }));
+    const socket = socketStub();
+
+    restateSelfVoiceState(socket);
+
+    expect(socket.send).not.toHaveBeenCalled();
+  });
 });
