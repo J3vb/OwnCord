@@ -87,7 +87,7 @@ export function buildGroupPanelView(channelId: number): GroupPanelView | null {
                     displayName: viewer.display_name ?? null,
                   }),
             username: viewer.username,
-            avatar: live?.avatar ?? viewer.avatar,
+            avatar: live?.avatar ?? viewer.avatar ?? null,
             status: live?.status ?? viewer.status ?? "online",
             mobile: live?.mobile === true,
             isOwner: dm.ownerId === viewer.id,

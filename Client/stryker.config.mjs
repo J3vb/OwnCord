@@ -174,6 +174,7 @@ const config = {
     "!src/lib/types.ts",
     "!src/lib/wire*.ts", // split out of types.ts, excluded with it
     "!src/lib/net/wireShapes.ts", // generated data, no logic to mutate
+    "!src/lib/net/restShapes.ts", // generated data, no logic to mutate
     "!src/features/messaging/emojiData.ts", // generated data, no logic to mutate
     ...MOVED_NOT_MUTATED.map((file) => `!${file}`),
     "!src/**/*.d.ts",

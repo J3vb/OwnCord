@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { checkAgainst, checkFrame, checkRest, type WireFault } from "../../src/lib/net/wireCheck";
 import { FRAME_SHAPES, type Shape } from "../../src/lib/net/wireShapes";
+import * as restTable from "../../src/lib/net/restShapes";
 import type { RestReplyShapes } from "../../src/lib/net/restReplies";
 
 // Shape numbers 0 to 4 are the primitives, so a hand-built table starts with them.
@@ -201,11 +202,25 @@ describe("checkFrame and checkRest", () => {
   });
   it("passes a REST reply name with no shape", () => {
     // No reply is registered yet, so the only name to try is one the types forbid.
-    expect(checkRest("unregistered" as keyof RestReplyShapes, { any: "thing" })).toBeNull();
+    expect(
+      checkRest("unregistered" as keyof RestReplyShapes, { any: "thing" }, restTable),
+    ).toBeNull();
   });
-  it("has no REST reply names yet, so checkRest takes none", () => {
-    const none: keyof RestReplyShapes extends never ? true : false = true;
-    expect(none).toBe(true);
+  it("checks a registered REST reply against the generated table", () => {
+    expect(
+      checkRest("BlockedUsersResponse", { blocked_user_ids: [1, 2], extra: true }, restTable),
+    ).toBeNull();
+    expect(checkRest("BlockedUsersResponse", {}, restTable)).toEqual({
+      path: "blocked_user_ids",
+      expected: "array (missing)",
+    });
+    expect(checkRest("BlockedUsersResponse", { blocked_user_ids: ["x"] }, restTable)?.path).toBe(
+      "blocked_user_ids[]",
+    );
+  });
+  it("never checks the body of a reply nothing reads", () => {
+    expect(checkRest("NoBody", { anything: 1 }, restTable)).toBeNull();
+    expect(checkRest("NoBody", "text", restTable)).toBeNull();
   });
 });
 

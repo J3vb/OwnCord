@@ -61,7 +61,7 @@ async function mockSession(page: Page): Promise<void> {
       httpRoutes: [
         ...BASE_SESSION_ROUTES,
         { pattern: "/pins", status: 200, body: MOCK_PINNED_MESSAGES },
-        { pattern: "GET /api/v1/dms", status: 200, body: MOCK_DM_CHANNELS },
+        { pattern: "GET /api/v1/dms", status: 200, body: { dm_channels: MOCK_DM_CHANNELS } },
       ],
       simulateWsFlow: true,
       wsHandlers: voiceJoinWithTokenHandlers(),

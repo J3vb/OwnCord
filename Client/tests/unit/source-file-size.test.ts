@@ -28,7 +28,11 @@ const STEP = 50;
 const OVER_LIMIT_CAP = 74;
 
 /** Generated data files, exempt from the limit. Never add a hand-written file here. */
-const GENERATED = new Set(["src/features/messaging/emojiData.ts", "src/lib/net/wireShapes.ts"]);
+const GENERATED = new Set([
+  "src/features/messaging/emojiData.ts",
+  "src/lib/net/wireShapes.ts",
+  "src/lib/net/restShapes.ts",
+]);
 
 const ceilings = JSON.parse(readFileSync(join(__dirname, "file-sizes.json"), "utf8")) as Record<
   string,
@@ -106,6 +110,6 @@ describe("source file size", () => {
         ),
     );
     expect(handWritten).toEqual([]);
-    expect(GENERATED.size).toBeLessThanOrEqual(2);
+    expect(GENERATED.size).toBeLessThanOrEqual(3);
   });
 });

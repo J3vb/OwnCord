@@ -101,7 +101,7 @@ export const MOCK_READY_PAYLOAD = {
 export const MOCK_AUTH_OK = {
   type: "auth_ok",
   payload: {
-    user: { id: 1, username: "testuser", avatar: "", role: "admin" },
+    user: { id: 1, username: "testuser", avatar: "", role: "admin", status: "online" },
     server_name: "Test Server",
     motd: "Welcome to the test server",
   },
