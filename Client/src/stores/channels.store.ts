@@ -6,112 +6,37 @@
 import { createStore } from "@lib/store";
 import { registerSessionReset } from "@lib/net/sessionRegistry";
 import { registerRoleIdLookup } from "@lib/presence/roleLookup";
-import { connectText } from "../i18n/connect";
 import type {
   ReadyChannel,
   ReadyRole,
   ChannelCreatePayload,
   ChannelUpdatePayload,
-  ChannelType,
   ChannelCategory,
-  ForumSettings,
 } from "@lib/types";
-import { isTextLikeChannel } from "@lib/types";
+import { channelFromCreate, channelFromUpdate, readyChannelMap } from "./channelModel";
+import type { Channel } from "./channelModel";
+import {
+  categoryGroups,
+  categoryKey,
+  groupChannelsByCategory,
+  keyOfChannel,
+  UNCATEGORIZED_VOICE_CATEGORY,
+  voiceFallback,
+} from "./channelGroups";
+import type { KnownCategory } from "./channelGroups";
 
-export interface Channel {
-  readonly id: number;
-  readonly name: string;
-  readonly type: ChannelType;
-  readonly category: string | null;
-  /**
-   * The id of the category the channel sits under, 0 when none.
-   * Absent or 0 on an older server, which groups by `category` (the name).
-   */
-  readonly categoryId?: number | undefined;
-  /** The category's place in the category order (0 when none or unknown). */
-  readonly categoryPosition?: number | undefined;
-  /** Channel topic ("" = none). */
-  readonly topic: string;
-  readonly position: number;
-  readonly unreadCount: number;
-  /**
-   * Unread messages here that mention the current user (directly or via
-   * @everyone/@here). Not capped like unreadCount, so it can exceed it; drives
-   * the red mention badge, which outranks the plain unread badge.
-   */
-  readonly mentionCount: number;
-  readonly lastMessageId: number | null;
-  /**
-   * The current user's read pointer: the last message they have read here
-   * (0 = nothing). Undefined when the server never said (an older server), in
-   * which case the NEW line stays count-based.
-   */
-  readonly lastReadMessageId?: number | undefined;
-  /** Whether the current user may post here (drives the composer affordance). */
-  readonly canSend: boolean;
-  /**
-   * Whether the current user may mute, deafen, move or disconnect voice
-   * participants here, as the server computed it (ReadyChannel.can_moderate_voice).
-   * Absent when the server never said, which offers no voice moderation.
-   */
-  readonly canModerateVoice?: boolean | undefined;
-  /**
-   * Whether the current user may move voice participants here at any rank
-   * (ReadyChannel.can_move_voice, MOVE_MEMBERS). Independent of
-   * canModerateVoice. Absent when the server never said.
-   */
-  readonly canMoveVoice?: boolean | undefined;
-  /**
-   * Whether the current user may delete others' messages / pin / react here,
-   * as the server computed it. Undefined when the server never said (older
-   * server): callers fall back to the role's MANAGE_MESSAGES for the first two
-   * and to true for react — never to false.
-   */
-  readonly canDeleteOthers?: boolean | undefined;
-  readonly canPin?: boolean | undefined;
-  readonly canReact?: boolean | undefined;
-  /** Per-channel cooldown in seconds (0 = off). Drives the composer countdown. */
-  readonly slowMode: number;
-  /**
-   * Labelled age-restricted. The server withholds the channel's content from
-   * anyone who has not acknowledged it; this client shows a consent
-   * gate instead of the channel and marks the sidebar row.
-   */
-  readonly nsfw: boolean;
-  /**
-   * Hidden from @everyone by a permission override, visible to this viewer.
-   * Marks the sidebar row with a lock. Older servers never send it: false.
-   */
-  readonly isPrivate: boolean;
-  /**
-   * The current account's own acknowledgement of the label, as the server
-   * last confirmed it (ready, a 204 from the acknowledgement route, or
-   * nsfw_ack). Absent or false means content stays gated; it is only ever
-   * true while `nsfw` is, because the server drops acknowledgements when the
-   * label is cleared.
-   */
-  readonly nsfwAcknowledged?: boolean;
-  /**
-   * Voice capacity limits (0 = unlimited). The server enforces both on join
-   * (CHANNEL_FULL / VIDEO_LIMIT); these copies exist so the sidebar can show
-   * "3/5" and the client never has to guess why a join was refused.
-   */
-  readonly voiceMaxUsers: number;
-  readonly voiceMaxVideo: number;
-  /**
-   * A voice channel that asks for a password on join. Only the flag is ever
-   * held: the password is typed into the join dialog and never stored. Absent
-   * reads as unprotected (an older server, a DM).
-   */
-  readonly passwordProtected?: boolean | undefined;
-  /**
-   * The server's AFK voice channel: idle members are moved here and it is
-   * listen-only. Absent from older servers, which is read as false.
-   */
-  readonly afk?: boolean | undefined;
-  /** A forum's tags and settings; absent on every other type. */
-  readonly forum?: ForumSettings | undefined;
-}
+export type { Channel } from "./channelModel";
+export { readyChannelMap } from "./channelModel";
+export type { CategoryRef, KnownCategory } from "./channelGroups";
+export {
+  UNCATEGORIZED_VOICE_CATEGORY,
+  NO_CATEGORY,
+  groupLabel,
+  categoryGroups,
+  displayCategoryOf,
+  firstTextInSidebarOrder,
+  groupChannelsByCategory,
+} from "./channelGroups";
 
 export interface ChannelsState {
   readonly channels: ReadonlyMap<number, Channel>;
@@ -173,47 +98,6 @@ export function getUnreadOnOpen(channelId: number): number {
   return unreadOnOpen.get(channelId) ?? 0;
 }
 
-/** The ready payload's channels as channelsStore rows, keyed by id. */
-export function readyChannelMap(channels: readonly ReadyChannel[]): Map<number, Channel> {
-  const map = new Map<number, Channel>();
-  for (const ch of channels) {
-    map.set(ch.id, {
-      id: ch.id,
-      name: ch.name,
-      type: ch.type,
-      category: ch.category,
-      categoryId: ch.category_id ?? 0,
-      categoryPosition: ch.category_position ?? 0,
-      topic: ch.topic ?? "",
-      position: ch.position,
-      unreadCount: ch.unread_count ?? 0,
-      mentionCount: ch.mention_count ?? 0,
-      lastMessageId: ch.last_message_id ?? null,
-      lastReadMessageId: ch.last_read_message_id,
-      // The current server always sends can_send; older servers omit it, in
-      // which case we default permissive (no gating) rather than guessing.
-      canSend: ch.can_send ?? true,
-      canModerateVoice: ch.can_moderate_voice,
-      canMoveVoice: ch.can_move_voice,
-      canDeleteOthers: ch.can_delete_others,
-      canPin: ch.can_pin,
-      canReact: ch.can_react,
-      slowMode: ch.slow_mode ?? 0,
-      // Older servers omit these; "absent" reads as unflagged / unlimited,
-      // which is also what an unconfigured channel sends.
-      nsfw: ch.nsfw ?? false,
-      isPrivate: ch.private ?? false,
-      nsfwAcknowledged: (ch.nsfw ?? false) && ch.nsfw_acknowledged === true,
-      voiceMaxUsers: ch.voice_max_users ?? 0,
-      voiceMaxVideo: ch.voice_max_video ?? 0,
-      passwordProtected: ch.password_protected,
-      afk: ch.afk ?? false,
-      forum: ch.forum,
-    });
-  }
-  return map;
-}
-
 /** Bulk set channels from the ready payload. Converts ReadyChannel[] to Map. */
 export function setChannels(channels: readonly ReadyChannel[]): void {
   // A fresh ready payload restates unread from the server; any snapshot from
@@ -270,99 +154,25 @@ export function getRoleIdByName(name: string): number | undefined {
   return match?.id;
 }
 
-/** Add a single channel from a channel_create event. The server re-sends
- *  channel_create to still-visible clients on role/override edits, so the add
- *  must be idempotent: a re-add must preserve the existing row's per-user
- *  fields the frame does not carry instead of resetting them. */
+/** Add a single channel from a channel_create event. Idempotent: a re-send
+ *  keeps the per-user fields the frame does not carry (see channelFromCreate). */
 export function addChannel(channel: ChannelCreatePayload): void {
   channelsStore.setState((prev) => {
-    const existing = prev.channels.get(channel.id);
     const next = new Map(prev.channels);
-    next.set(channel.id, {
-      id: channel.id,
-      name: channel.name,
-      type: channel.type,
-      category: channel.category,
-      categoryId: channel.category_id ?? existing?.categoryId ?? 0,
-      categoryPosition: channel.category_position ?? existing?.categoryPosition ?? 0,
-      topic: channel.topic ?? "",
-      position: channel.position,
-      unreadCount: existing?.unreadCount ?? 0,
-      mentionCount: existing?.mentionCount ?? 0,
-      lastMessageId: existing?.lastMessageId ?? null,
-      lastReadMessageId: existing?.lastReadMessageId,
-      // Every channel_create carries this viewer's own can_send, so a live
-      // role/override edit updates the composer without waiting for a
-      // reconnect. Older servers omit it — keep the existing verdict there,
-      // and default permissive for a genuinely new channel. The server
-      // enforces regardless.
-      canSend: channel.can_send ?? existing?.canSend ?? true,
-      // Same targeted, absent-means-unchanged rule; a new channel stays unknown.
-      canModerateVoice: channel.can_moderate_voice ?? existing?.canModerateVoice,
-      canMoveVoice: channel.can_move_voice ?? existing?.canMoveVoice,
-      canDeleteOthers: channel.can_delete_others ?? existing?.canDeleteOthers,
-      canPin: channel.can_pin ?? existing?.canPin,
-      canReact: channel.can_react ?? existing?.canReact,
-      slowMode: channel.slow_mode ?? 0,
-      nsfw: channel.nsfw ?? false,
-      // A re-sent channel_create from an older server omits it: keep what we know.
-      isPrivate: channel.private ?? existing?.isPrivate ?? false,
-      // channel_create never carries the per-viewer acknowledgement; keep the
-      // known one while the label stays on.
-      nsfwAcknowledged: (channel.nsfw ?? false) && existing?.nsfwAcknowledged === true,
-      voiceMaxUsers: channel.voice_max_users ?? 0,
-      voiceMaxVideo: channel.voice_max_video ?? 0,
-      passwordProtected: channel.password_protected ?? existing?.passwordProtected,
-      afk: channel.afk ?? existing?.afk ?? false,
-      forum: channel.forum ?? existing?.forum,
-    });
+    next.set(channel.id, channelFromCreate(channel, prev.channels.get(channel.id)));
     return { ...prev, channels: next };
   });
 }
 
-/**
- * Apply a channel_update broadcast immutably.
- *
- * Every field is optional and an absent one is left alone rather than reset:
- * the payload from an older server carries fewer keys than this one knows
- * about, and treating "absent" as "cleared" would blank a channel's topic or
- * drop its NSFW flag on the first update after connecting.
- */
+/** Apply a channel_update broadcast immutably; an absent field is left alone. */
 export function updateChannel(update: ChannelUpdatePayload): void {
   channelsStore.setState((prev) => {
     const existing = prev.channels.get(update.id);
     if (existing === undefined) {
       return prev;
     }
-    const updated: Channel = {
-      ...existing,
-      ...(update.name !== undefined ? { name: update.name } : {}),
-      ...(update.topic !== undefined ? { topic: update.topic } : {}),
-      // "" is a real value here — it means "no category" — so only undefined
-      // is treated as "not sent".
-      ...(update.category !== undefined ? { category: update.category } : {}),
-      ...(update.category_id !== undefined ? { categoryId: update.category_id } : {}),
-      ...(update.category_position !== undefined
-        ? { categoryPosition: update.category_position }
-        : {}),
-      ...(update.position !== undefined ? { position: update.position } : {}),
-      ...(update.slow_mode !== undefined ? { slowMode: update.slow_mode } : {}),
-      // Clearing the label deletes every acknowledgement server-side, so a
-      // later relabel starts gated again.
-      ...(update.nsfw !== undefined
-        ? { nsfw: update.nsfw, nsfwAcknowledged: update.nsfw && existing.nsfwAcknowledged === true }
-        : {}),
-      ...(update.private !== undefined ? { isPrivate: update.private } : {}),
-      ...(update.voice_max_users !== undefined ? { voiceMaxUsers: update.voice_max_users } : {}),
-      ...(update.voice_max_video !== undefined ? { voiceMaxVideo: update.voice_max_video } : {}),
-      ...(update.password_protected !== undefined
-        ? { passwordProtected: update.password_protected }
-        : {}),
-      ...(update.afk !== undefined ? { afk: update.afk } : {}),
-      ...(update.forum !== undefined ? { forum: update.forum } : {}),
-    };
     const next = new Map(prev.channels);
-    next.set(update.id, updated);
+    next.set(update.id, channelFromUpdate(existing, update));
     return { ...prev, channels: next };
   });
 }
@@ -459,69 +269,6 @@ export function getActiveChannel(): Channel | null {
 }
 
 /**
- * The group key (and name) of the synthetic group an uncategorized VOICE
- * channel falls back to.
- *
- * A voice channel groups under whatever category it has — there is no magic
- * name that makes a category "the voice one". Only a voice channel with no
- * category at all needs somewhere to go, and mixing it into the unnamed group
- * next to uncategorized text channels reads as a bug, so it gets this group.
- */
-// i18n-exempt: stable group key, not rendered directly; groupLabel() maps it to the channel.voiceCategory catalog entry
-export const UNCATEGORIZED_VOICE_CATEGORY = "Voice";
-
-/**
- * A category as a menu or dialog names it. `id` is 0 for "no category" and for
- * a name-only category from a server that sends no ids; `name` is "" for none.
- */
-export interface CategoryRef {
-  readonly id: number;
-  readonly name: string;
-}
-
-/** Filed under no category. */
-export const NO_CATEGORY: CategoryRef = { id: 0, name: "" };
-
-/** The group key of a real category. Collapse state is keyed by it. */
-export function categoryKey(categoryId: number): string {
-  return `cat:${categoryId}`;
-}
-
-/**
- * One group of the channel list. `key` is stable across a rename: `cat:<id>`
- * for a real category, the category name for a channel from a server that
- * sends no ids (the older-server fallback), `UNCATEGORIZED_VOICE_CATEGORY` for
- * the synthetic voice group and null for uncategorized text.
- */
-export interface CategoryGroup {
-  readonly key: string | null;
-  /** The raw header name; null for uncategorized text. */
-  readonly name: string | null;
-  /** The category's id; 0 for every group that is not a real category. */
-  readonly categoryId: number;
-  readonly channels: readonly Channel[];
-}
-
-/** The header text for a group; the synthetic voice group reads through the catalog. */
-export function groupLabel(group: Pick<CategoryGroup, "key" | "name">): string {
-  return group.key === UNCATEGORIZED_VOICE_CATEGORY && group.name === UNCATEGORIZED_VOICE_CATEGORY
-    ? connectText("channel.voiceCategory")
-    : (group.name ?? "");
-}
-
-/** The group key a channel is displayed under. */
-function keyOfChannel(channel: Channel): string | null {
-  if ((channel.categoryId ?? 0) > 0) return categoryKey(channel.categoryId ?? 0);
-  if (channel.category !== null && channel.category !== "") return channel.category;
-  return channel.type === "voice" ? UNCATEGORIZED_VOICE_CATEGORY : null;
-}
-
-/** The category header a channel is displayed under (its group key). */
-export function displayCategoryOf(channel: Channel): string | null {
-  return keyOfChannel(channel);
-}
-
-/**
  * The position a new channel needs to land at the bottom of the group it will
  * be shown under: one past the highest position among the channels displayed
  * in that group (the synthetic "Voice" group counts uncategorized voice
@@ -531,10 +278,6 @@ export function displayCategoryOf(channel: Channel): string | null {
  */
 export function nextPositionInCategory(categoryId: number, type: Channel["type"]): number {
   return nextPositionInGroup(categoryId > 0 ? categoryKey(categoryId) : voiceFallback(type));
-}
-
-function voiceFallback(type: Channel["type"]): string | null {
-  return type === "voice" ? UNCATEGORIZED_VOICE_CATEGORY : null;
 }
 
 /** `nextPositionInCategory` for a legacy (name-keyed) group on a server without ids. */
@@ -557,17 +300,7 @@ function nextPositionInGroup(target: string | null): number {
   });
 }
 
-/**
- * The categories a channel can be filed under, in sidebar order, for the
- * create/edit pickers: the real ones (from the manager's list and from the
- * channels) plus, on a server that sends no ids, the free-text names in use.
- */
-export interface KnownCategory {
-  /** 0 for a legacy name-only category. */
-  readonly id: number;
-  readonly name: string;
-}
-
+/** The categories a channel can be filed under, in sidebar order (see KnownCategory). */
 export function getKnownCategories(categories: readonly ChannelCategory[]): KnownCategory[] {
   return channelsStore.select((s) =>
     categoryGroups(s.channels, categories)
@@ -576,124 +309,11 @@ export function getKnownCategories(categories: readonly ChannelCategory[]): Know
   );
 }
 
-/**
- * Group channels by category in sidebar order (D7): uncategorized text first,
- * then the synthetic Voice group, then categories by (category position, id),
- * then any name-only categories from a server that sends no ids, in the order
- * of their first channel. Channels inside a group are sorted by (position, id)
- * — the server's `ORDER BY position, id` — with text-type channels before
- * voice (N23).
- *
- * `categories` is the manager's list (callers pass `visibleCategories()`, which is
- * empty once the viewer has lost MANAGE_CHANNELS): it adds the categories with no channel
- * and is authoritative for the name and position of the ones that have some.
- * A non-manager passes none, and a channel whose category the list never named
- * still draws its group from the channel's own category fields.
- */
-export function categoryGroups(
-  channels: ReadonlyMap<number, Channel>,
-  categories: readonly ChannelCategory[] = [],
-): CategoryGroup[] {
-  type Draft = {
-    key: string | null;
-    name: string | null;
-    categoryId: number;
-    rank: number;
-    sortPosition: number;
-    order: number;
-    channels: Channel[];
-  };
-  const sorted = [...channels.values()]
-    // DM channels are shown in the DM sidebar, not the channel list
-    .filter((channel) => channel.type !== "dm")
-    .toSorted((a, b) => a.position - b.position || a.id - b.id);
-  const drafts = new Map<string | null, Draft>();
-  const draftFor = (key: string | null, make: () => Omit<Draft, "order" | "channels">): Draft => {
-    const found = drafts.get(key);
-    if (found !== undefined) return found;
-    const draft: Draft = { ...make(), order: drafts.size, channels: [] };
-    drafts.set(key, draft);
-    return draft;
-  };
-  for (const channel of sorted) {
-    const key = keyOfChannel(channel);
-    const id = channel.categoryId ?? 0;
-    const draft = draftFor(key, () => {
-      if (key === null) return { key, name: null, categoryId: 0, rank: 0, sortPosition: 0 };
-      if (key === UNCATEGORIZED_VOICE_CATEGORY && id <= 0 && (channel.category ?? "") === "") {
-        return { key, name: key, categoryId: 0, rank: 1, sortPosition: 0 };
-      }
-      if (id > 0) {
-        return {
-          key,
-          name: channel.category ?? "",
-          categoryId: id,
-          rank: 2,
-          sortPosition: channel.categoryPosition ?? 0,
-        };
-      }
-      return { key, name: key, categoryId: 0, rank: 3, sortPosition: 0 };
-    });
-    draft.channels.push(channel);
-  }
-  for (const category of categories) {
-    const draft = draftFor(categoryKey(category.id), () => ({
-      key: categoryKey(category.id),
-      name: category.name,
-      categoryId: category.id,
-      rank: 2,
-      sortPosition: category.position,
-    }));
-    draft.name = category.name;
-    draft.sortPosition = category.position;
-  }
-  return [...drafts.values()]
-    .toSorted(
-      (a, b) =>
-        a.rank - b.rank ||
-        (a.rank === 2 ? a.sortPosition - b.sortPosition || a.categoryId - b.categoryId : 0) ||
-        a.order - b.order,
-    )
-    .map((draft) => ({
-      key: draft.key,
-      name: draft.name,
-      categoryId: draft.categoryId,
-      // Text-type channels (text, announcement) come before voice inside each
-      // group, each kind keeping its position order (a stable partition).
-      channels: draft.channels.toSorted(
-        (a, b) => Number(a.type === "voice") - Number(b.type === "voice"),
-      ),
-    }));
-}
-
-/**
- * The first text-like channel the channel list draws, walking the groups in
- * sidebar order. Where the app lands when it has to pick a channel itself:
- * after sign-in, after the open channel is deleted, after the open DM closes.
- */
-export function firstTextInSidebarOrder(
-  channels: ReadonlyMap<number, Channel>,
-): Channel | undefined {
-  for (const group of categoryGroups(channels)) {
-    const first = group.channels.find((ch) => isTextLikeChannel(ch));
-    if (first !== undefined) return first;
-  }
-  return undefined;
-}
-
 /** The groups keyed by `CategoryGroup.key`, in sidebar order. */
 export function getChannelsByCategory(
   categories: readonly ChannelCategory[],
 ): Map<string | null, readonly Channel[]> {
   return channelsStore.select((s) => groupChannelsByCategory(s.channels, categories));
-}
-
-/** `getChannelsByCategory` over a channel map the caller already holds. */
-export function groupChannelsByCategory(
-  channels: ReadonlyMap<number, Channel>,
-  categories: readonly ChannelCategory[],
-): Map<string | null, readonly Channel[]> {
-  return new Map(categoryGroups(channels, categories).map((g) => [g.key, g.channels]));
 }
 
 /**

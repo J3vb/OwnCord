@@ -286,14 +286,6 @@
     },
     "platform/desktop/pushToTalkService.ts": {
       "startBinding": [19]
-    },
-    "stores/channels.store.ts": {
-      "addChannel > (anonymous)": [45],
-      "readyChannelMap": [17],
-      "updateChannel > (anonymous)": [17]
-    },
-    "stores/voice.store.ts": {
-      "restateSelfVoiceState": [20]
     }
   },
   "depth": {
