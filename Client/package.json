@@ -34,6 +34,7 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:browser": "vitest run --config vitest.config.browser.ts",
+    "gen:wire": "node scripts/gen-wire-validators.mjs",
     "typecheck": "tsc --noEmit",
     "typecheck:build": "tsc -p tsconfig.build.json --noEmit",
     "typecheck:e2e": "tsc -p tsconfig.e2e.json --noEmit",
