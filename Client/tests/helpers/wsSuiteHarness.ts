@@ -38,6 +38,14 @@ export function authOkFrame(opts: AuthOkOptions = {}): string {
   });
 }
 
+/** A `ready` frame with every list empty, the smallest the shape check accepts; `fields` adds to it. */
+export function readyFrame(fields: object = {}): string {
+  return JSON.stringify({
+    type: "ready",
+    payload: { channels: [], members: [], voice_states: [], roles: [], ...fields },
+  });
+}
+
 export function emitAuthOk(opts: AuthOkOptions = {}): void {
   emitTauriEvent("ws-message", authOkFrame(opts));
 }

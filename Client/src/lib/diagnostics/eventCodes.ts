@@ -556,6 +556,12 @@ export const EVENT_CODES = {
     dataClasses: [],
     fields: { generation: GEN, live_generation: GEN },
   },
+  "ws.frame_invalid": {
+    label: "Server message with the wrong shape dropped", // i18n-exempt: support bundle text, never shown in the app
+    owners: ["src/lib/net/wsFrame.ts"],
+    dataClasses: [],
+    fields: { type: TOKEN, field: TOKEN },
+  },
 
   "events.dropped": {
     label: "Similar events left out", // i18n-exempt: support bundle text, never shown in the app

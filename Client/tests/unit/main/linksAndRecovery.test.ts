@@ -18,6 +18,7 @@ import {
   dialogShows,
   dialogEl,
   clickDialog,
+  readyFrame,
   useMainHarness,
 } from "../../helpers/mainHarness";
 
@@ -391,7 +392,7 @@ describe("main.ts connect page after a protocol-epoch refusal", () => {
       motd: "",
     });
     expectConsole("warn", /\[main\] Credential delete failed/);
-    emitTauriEvent("ws-message", JSON.stringify({ type: "ready", payload: {} }));
+    emitTauriEvent("ws-message", readyFrame());
     await vi.advanceTimersByTimeAsync(800);
 
     // The real dispatcher's auth_error handler records the host when the
@@ -466,7 +467,7 @@ describe("main.ts connect page after a protocol-epoch refusal", () => {
       motd: "",
     });
     expectConsole("warn", /\[main\] Credential delete failed/);
-    emitTauriEvent("ws-message", JSON.stringify({ type: "ready", payload: {} }));
+    emitTauriEvent("ws-message", readyFrame());
     await vi.advanceTimersByTimeAsync(800);
 
     vi.mocked(deleteCredential).mockClear();
@@ -490,7 +491,7 @@ describe("main.ts connect page after a protocol-epoch refusal", () => {
       motd: "",
     });
     expectConsole("warn", /\[main\] Credential delete failed/);
-    emitTauriEvent("ws-message", JSON.stringify({ type: "ready", payload: {} }));
+    emitTauriEvent("ws-message", readyFrame());
     await vi.advanceTimersByTimeAsync(800);
     clearAuth("user");
     await Promise.resolve();
@@ -547,7 +548,7 @@ describe("main.ts session ownership", () => {
       motd: "",
     });
     expectConsole("warn", /\[main\] Credential delete failed/);
-    emitTauriEvent("ws-message", JSON.stringify({ type: "ready", payload: {} }));
+    emitTauriEvent("ws-message", readyFrame());
     await vi.advanceTimersByTimeAsync(800);
     clearAuth();
     await Promise.resolve();
@@ -601,7 +602,7 @@ describe("main.ts session ownership", () => {
       motd: "",
     });
     expectConsole("warn", /\[main\] Credential delete failed/);
-    emitTauriEvent("ws-message", JSON.stringify({ type: "ready", payload: {} }));
+    emitTauriEvent("ws-message", readyFrame());
     await vi.advanceTimersByTimeAsync(800);
     clearAuth();
     for (let i = 0; i < 4; i++) await Promise.resolve();

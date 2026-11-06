@@ -148,6 +148,7 @@ import { expectConsole } from "../helpers/console";
 import { authStore, clearAuth } from "@stores/auth.store";
 import { deleteCredential } from "@lib/net/credentials";
 import { joinVoiceChannel } from "@stores/voice.store";
+import { readyFrame } from "../helpers/wsSuiteHarness";
 import { createConnectPage } from "@pages/ConnectPage";
 import { createMainPage } from "@pages/MainPage";
 import { requestInviteJoin } from "@lib/nav/inviteNavigation";
@@ -387,7 +388,7 @@ describe("main.ts session teardown order", () => {
     async function reachMainPage(): Promise<void> {
       await startLogin(HOST);
       await reachAuthOk();
-      emitTauriEvent("ws-message", JSON.stringify({ type: "ready", payload: {} }));
+      emitTauriEvent("ws-message", readyFrame());
       // The overlay's own timer hands off to navigate("main").
       await vi.advanceTimersByTimeAsync(800);
       expect(overlays()).toBe(0);
