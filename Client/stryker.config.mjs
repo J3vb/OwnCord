@@ -26,7 +26,10 @@ const MOVED_NOT_MUTATED = [
   "src/features/channels/sidebar/volumeMenu.ts",
   "src/features/direct-messages/DmCallPanel.ts",
   "src/features/direct-messages/DmCallViewModel.ts",
+  "src/features/direct-messages/dm-call/dmCallRebuild.ts",
+  "src/features/direct-messages/dm-call/dmCallRefresh.ts",
   "src/features/direct-messages/dm-call/dmCallRender.ts",
+  "src/features/direct-messages/dm-call/dmCallResize.ts",
   "src/features/direct-messages/dm-call/dmCallShared.ts",
   "src/features/direct-messages/dm-call/dmCallState.ts",
   "src/features/direct-messages/dm-call/dmCallVerify.ts",
@@ -127,7 +130,12 @@ const MOVED_NOT_MUTATED = [
   "src/features/settings/voice-audio/voiceOutputVideo.ts",
   "src/features/settings/voice-audio/voiceTabScope.ts",
   "src/features/settings/voice-audio/voiceTabShared.ts",
+  "src/features/voice/videoGrid/gridFocus.ts",
+  "src/features/voice/videoGrid/gridStats.ts",
   "src/features/voice/voiceStatusText.ts",
+  "src/features/voice/widget/listenOnly.ts",
+  "src/features/voice/widget/statsPane.ts",
+  "src/features/voice/widget/subscriptions.ts",
   "src/lib/ui/lazyScreen.ts",
 ];
 

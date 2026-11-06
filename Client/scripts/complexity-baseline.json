@@ -23,9 +23,6 @@
     "components/EmojiPicker.ts": {
       "createEmojiPicker > renderAllCategories": [16]
     },
-    "components/PhoneCallBar.ts": {
-      "createPhoneCallBar > update": [19]
-    },
     "components/SelfProfileCard.ts": {
       "createSelfProfileCard > open > (anonymous)": [25]
     },
@@ -42,18 +39,8 @@
       "createUserProfilePopup > mount": [33],
       "createUserProfilePopup > mount > renderChips": [17]
     },
-    "components/VoiceWidget.ts": {
-      "createVoiceWidget > render": [34],
-      "createVoiceWidget > updateSignalIcon": [17]
-    },
     "components/dmContextMenu.ts": {
       "openDmContextMenu": [30]
-    },
-    "components/video-grid/gridCallBar.ts": {
-      "createGridCallBar > drawCallState": [25]
-    },
-    "components/video-grid/gridLayout.ts": {
-      "createGridLayout > rebuildFocusLayout": [21]
     },
     "features/channels/ChannelSidebar.ts": {
       "buildVoiceModOptions": [16],
@@ -77,14 +64,6 @@
     },
     "features/dialogs/confirmModal.ts": {
       "createConfirmModal": [19]
-    },
-    "features/direct-messages/DmCallPanel.ts": {
-      "createDmCallPanel > rebuild": [25],
-      "createDmCallPanel > refresh": [51]
-    },
-    "features/direct-messages/DmCallViewModel.ts": {
-      "deriveCallView": [16],
-      "resolvePerson": [16]
     },
     "features/forums/ForumView.ts": {
       "renderForumView > loadMore": [19],

@@ -2,18 +2,16 @@
  * The video grid's call view: the control bar, the view toggles, popping the
  * whole call out, and per-tile stream stats.
  */
-import { isImeCommit } from "@lib/text/ime";
 import { createElement, appendChildren } from "@lib/dom";
 import { createIcon, type IconName } from "@lib/icons";
 import { showToast } from "@lib/ui/toast";
 import { showContextMenu, type ContextMenuItem } from "@lib/ui/contextMenu";
 import { loadPref, savePref } from "@lib/prefs/preferences";
 import { voiceText } from "../../i18n/voice";
-import type { StreamSample } from "../../features/voice/remoteTracks";
 import { canPublishScreen, isAndroidApp } from "../../features/voice/native/platform";
 import { openPopoutWindow } from "../../features/voice/popout";
 import { createTalkSlot } from "../../features/voice/talkSlot";
-import { STATS_POLL_MS, VIEW_PREFS, type ViewToggle, log, callButton, sizeOf } from "./gridShared";
+import { VIEW_PREFS, type ViewToggle, log, callButton } from "./gridShared";
 import type { GridState, GridApi } from "./gridState";
 import type { VideoGridCallbacks } from "../VideoGrid";
 
@@ -152,31 +150,33 @@ export function createGridCallBar(st: GridState, api: GridApi) {
     return bar;
   }
 
-  function drawCallState(bar: Element): void {
+  function drawMuteControl(bar: Element): void {
     const mute = bar.querySelector<HTMLButtonElement>("[data-call-control='mute']");
+    if (mute === null) return;
+    mute.setAttribute("aria-pressed", String(st.callState.muted));
+    setIcon(mute, st.callState.muted || st.callState.listenOnly ? "mic-off" : "mic");
+    mute.disabled = st.callState.listenOnly || st.callState.serverMuted === true;
+    mute.title = voiceText(
+      st.callState.serverMuted === true
+        ? "widget.mutedByModerator"
+        : st.callState.listenOnly
+          ? "widget.control.listenOnly"
+          : "widget.control.mute",
+    );
+  }
+
+  function drawDeafenControl(bar: Element): void {
     const deafen = bar.querySelector<HTMLButtonElement>("[data-call-control='deafen']");
-    if (mute !== null) {
-      mute.setAttribute("aria-pressed", String(st.callState.muted));
-      setIcon(mute, st.callState.muted || st.callState.listenOnly ? "mic-off" : "mic");
-      mute.disabled = st.callState.listenOnly || st.callState.serverMuted === true;
-      mute.title = voiceText(
-        st.callState.serverMuted === true
-          ? "widget.mutedByModerator"
-          : st.callState.listenOnly
-            ? "widget.control.listenOnly"
-            : "widget.control.mute",
-      );
-    }
-    if (deafen !== null) {
-      deafen.setAttribute("aria-pressed", String(st.callState.deafened));
-      setIcon(deafen, st.callState.deafened ? "headphones-off" : "headphones");
-      deafen.disabled = st.callState.serverDeafened === true;
-      deafen.title = voiceText(
-        st.callState.serverDeafened === true
-          ? "widget.deafenedByModerator"
-          : "widget.control.deafen",
-      );
-    }
+    if (deafen === null) return;
+    deafen.setAttribute("aria-pressed", String(st.callState.deafened));
+    setIcon(deafen, st.callState.deafened ? "headphones-off" : "headphones");
+    deafen.disabled = st.callState.serverDeafened === true;
+    deafen.title = voiceText(
+      st.callState.serverDeafened === true ? "widget.deafenedByModerator" : "widget.control.deafen",
+    );
+  }
+
+  function drawCameraControls(bar: Element): void {
     const camera = bar.querySelector<HTMLButtonElement>("[data-call-control='camera']");
     if (camera !== null) {
       const on = st.callState.camera === true;
@@ -197,15 +197,24 @@ export function createGridCallBar(st: GridState, api: GridApi) {
       flip.hidden = st.callState.camera !== true || st.flipCheck !== "yes";
       flip.disabled = st.flipping || mediaLockReason() !== null;
     }
+  }
+
+  function drawShareControl(bar: Element): void {
     const share = bar.querySelector<HTMLButtonElement>("[data-call-control='share']");
-    if (share !== null) {
-      const on = st.callState.screenshare === true;
-      drawMediaButton(share, on, on ? "monitor-off" : "monitor");
-      const label = voiceText(on ? "widget.control.shareStop" : "widget.control.shareStart");
-      share.setAttribute("aria-label", label);
-      share.title = mediaLockReason() ?? st.callState.shareBlock ?? label;
-      if (st.callState.shareBlock !== undefined) share.disabled = true;
-    }
+    if (share === null) return;
+    const on = st.callState.screenshare === true;
+    drawMediaButton(share, on, on ? "monitor-off" : "monitor");
+    const label = voiceText(on ? "widget.control.shareStop" : "widget.control.shareStart");
+    share.setAttribute("aria-label", label);
+    share.title = mediaLockReason() ?? st.callState.shareBlock ?? label;
+    if (st.callState.shareBlock !== undefined) share.disabled = true;
+  }
+
+  function drawCallState(bar: Element): void {
+    drawMuteControl(bar);
+    drawDeafenControl(bar);
+    drawCameraControls(bar);
+    drawShareControl(bar);
   }
 
   function redrawCallBars(): void {
@@ -399,7 +408,7 @@ export function createGridCallBar(st: GridState, api: GridApi) {
     savePref(VIEW_PREFS[key], on);
     api.relayout();
     syncViewBar();
-    syncStatsPolling();
+    api.syncStatsPolling();
     api.syncViews();
   }
 
@@ -447,95 +456,6 @@ export function createGridCallBar(st: GridState, api: GridApi) {
     api.relayout();
   }
 
-  // --- Stream info -------------------------------------------------------------
-
-  /** Poll the screen share you are watching (focused or full screen), and
-   *  only it: a camera tile has no quality chip. */
-  function syncStatsPolling(): void {
-    const target = st.fullscreenTile ?? st.theatreTile ?? st.focusedTileId;
-    const entry = target === null ? undefined : st.cells.get(target);
-    const wanted =
-      entry?.config?.isScreenshare === true && !entry.config.isSelf && entry.ending === undefined
-        ? target
-        : null;
-    if (wanted === st.statsTile) return;
-    if (st.statsTimer !== null) {
-      clearInterval(st.statsTimer);
-      st.statsTimer = null;
-    }
-    st.statsTile = wanted;
-    if (wanted === null) return;
-    const poll = (): void => void pollStats(wanted);
-    poll();
-    st.statsTimer = setInterval(poll, STATS_POLL_MS);
-  }
-
-  async function pollStats(tileId: number): Promise<void> {
-    const entry = st.cells.get(tileId);
-    if (entry === undefined) return;
-    let sample: StreamSample | null = null;
-    try {
-      sample = (await st.callbacks.getStreamStats?.(tileId)) ?? null;
-    } catch (err) {
-      log.debug("Stream stats unavailable", { tileId, err });
-    }
-    // Loaded on first use: only a watched stream needs the readout.
-    try {
-      st.infoModule ??= await import("./streamInfo");
-    } catch (err) {
-      log.debug("Stream info unavailable", { tileId, err });
-      return;
-    }
-    const { chipText, renderStats, streamInfo } = st.infoModule;
-    if (st.statsTile !== tileId || st.cells.get(tileId) !== entry) return;
-    const info = sample !== null ? streamInfo(sample, entry.prevSample) : sizeOf(entry.video);
-    if (sample !== null) entry.prevSample = sample;
-    const chip = entry.el.querySelector<HTMLButtonElement>(".video-quality");
-    const text = chipText(info);
-    if (chip !== null) {
-      chip.hidden = text === null;
-      if (text !== null) {
-        chip.textContent = text.text;
-        chip.setAttribute("aria-label", text.label);
-      }
-    }
-    const pop = entry.el.querySelector<HTMLElement>(".video-stats");
-    if (pop !== null) renderStats(pop, entry.name, info);
-    st.lastInfo.set(tileId, info);
-  }
-
-  function toggleStats(tileId: number, chip: HTMLButtonElement): void {
-    const entry = st.cells.get(tileId);
-    if (entry === undefined) return;
-    const open = entry.el.querySelector<HTMLElement>(".video-stats");
-    if (open !== null) {
-      open.remove();
-      chip.setAttribute("aria-expanded", "false");
-      return;
-    }
-    const pop = createElement("div", {
-      class: "video-stats",
-      role: "dialog",
-      "aria-label": voiceText("tile.stats"),
-      tabindex: "-1",
-    });
-    st.infoModule?.renderStats(pop, entry.name, st.lastInfo.get(tileId) ?? {});
-    pop.addEventListener(
-      "keydown",
-      (e) => {
-        if (e.key !== "Escape" || isImeCommit(e)) return;
-        e.stopPropagation();
-        pop.remove();
-        chip.setAttribute("aria-expanded", "false");
-        chip.focus();
-      },
-      { signal: entry.listeners.signal },
-    );
-    entry.el.appendChild(pop);
-    chip.setAttribute("aria-expanded", "true");
-    pop.focus();
-  }
-
   return {
     buildCallControls,
     drawCallState,
@@ -552,8 +472,5 @@ export function createGridCallBar(st: GridState, api: GridApi) {
     syncViewBar,
     loadViewPrefs,
     setCallView,
-    syncStatsPolling,
-    pollStats,
-    toggleStats,
   };
 }
