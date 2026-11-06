@@ -35,6 +35,7 @@ import type {
   NativeVoiceAudioOptions,
   NativeVoiceEnvelope,
   NativeVoiceEvent,
+  NativeVoiceParticipant,
   NativeVoiceStats,
   NativeVoiceStatsEntry,
   NativeVoiceTrack,
@@ -762,65 +763,48 @@ export class NativeRoom {
   }
 
   private apply(event: NativeVoiceEvent): void {
+    if (!this.applyRosterEvent(event)) this.applySessionEvent(event);
+  }
+
+  /** People and their tracks. False for any other event. */
+  private applyRosterEvent(event: NativeVoiceEvent): boolean {
     switch (event.type) {
       case "connected":
-        this.releaseVideo();
-        this.clearDecryptTimers();
-        this.remoteParticipants.clear();
-        for (const info of event.participants) {
-          this.participant(info.identity);
-          for (const t of info.tracks) this.addPublication(info.identity, t);
-        }
-        this.emit(RoomEvent.Connected);
-        break;
+        this.onConnected(event.participants);
+        return true;
       case "participantConnected":
         this.emit(RoomEvent.ParticipantConnected, this.participant(event.identity));
-        break;
-      case "participantDisconnected": {
-        const p = this.remoteParticipants.get(event.identity);
-        // livekit-client raises the track unsubscriptions before the leave.
-        for (const pub of p?.trackPublications.values() ?? []) {
-          this.unsubscribeVideo(event.identity, pub);
-          this.emit(RoomEvent.TrackUnpublished, pub, p);
-        }
-        this.remoteParticipants.delete(event.identity);
-        this.clearDecryptTimer(event.identity);
-        if (p !== undefined) this.emit(RoomEvent.ParticipantDisconnected, p);
-        break;
-      }
+        return true;
+      case "participantDisconnected":
+        this.onParticipantDisconnected(event.identity);
+        return true;
       case "trackPublished":
         this.addPublication(event.identity, event.track);
-        break;
-      case "trackSubscribed": {
-        this.addPublication(event.identity, event.track);
-        const pub = this.participant(event.identity).trackPublications.get(event.track.sid)!;
-        // The backend auto-subscribes: one already unsubscribed (not watched)
-        // was on its way, and raises nothing.
-        if (pub.kind === "video" && pub.isSubscribed) this.subscribeVideo(event.identity, pub);
-        break;
-      }
-      case "trackUnpublished": {
-        const p = this.remoteParticipants.get(event.identity);
-        const pub = p?.trackPublications.get(event.sid);
-        this.unsubscribeVideo(event.identity, pub);
-        p?.trackPublications.delete(event.sid);
-        if (pub !== undefined) this.emit(RoomEvent.TrackUnpublished, pub, p);
-        break;
-      }
+        return true;
+      case "trackSubscribed":
+        this.onTrackSubscribed(event.identity, event.track);
+        return true;
+      case "trackUnpublished":
+        this.onTrackUnpublished(event.identity, event.sid);
+        return true;
       case "trackUnsubscribed":
         this.unsubscribeVideo(
           event.identity,
           this.remoteParticipants.get(event.identity)?.trackPublications.get(event.sid),
         );
-        break;
-      case "trackMuted": {
-        const p = this.remoteParticipants.get(event.identity);
-        const pub = p?.trackPublications.get(event.sid);
-        if (pub === undefined) break;
-        pub.isMuted = event.muted;
-        if (event.muted) this.emit(RoomEvent.TrackMuted, pub, p);
-        break;
-      }
+        return true;
+      case "trackMuted":
+        this.onTrackMuted(event.identity, event.sid, event.muted);
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  /** The local session: permissions, the mic gate and level, speakers,
+   *  captures ending, encryption and the connection state. */
+  private applySessionEvent(event: NativeVoiceEvent): void {
+    switch (event.type) {
       case "permission":
         // The shape `publishAllowed` reads, as livekit-client keeps it.
         this.localParticipant.permissions = {
@@ -832,13 +816,9 @@ export class NativeRoom {
       case "voiceGate":
         if (this.voiceThreshold > 0) this.onVoiceGate(event.open);
         break;
-      case "inputLevel": {
-        if (!this.capturing) break;
-        this.onInputLevel?.(event.rms, event.open);
-        const next = this.autoFloor?.push(event.rms, performance.now()) ?? null;
-        if (next !== null) this.retuneVoiceGate(next);
+      case "inputLevel":
+        this.onCaptureLevel(event.rms, event.open);
         break;
-      }
       case "activeSpeakers":
         this.emit(
           RoomEvent.ActiveSpeakersChanged,
@@ -852,33 +832,7 @@ export class NativeRoom {
         this.video.cameraEnded(event.capture);
         break;
       case "encryptionStatus":
-        if (event.identity === this.localParticipant.identity) {
-          // The backend's only signal that frames are not being protected —
-          // surface it the way the web path surfaces a dead E2EE worker.
-          if (!event.encrypted)
-            // i18n-exempt: internal E2EE state guard, never rendered
-            this.emit(RoomEvent.EncryptionError, new Error("native E2EE not active"));
-          break;
-        }
-        // A remote peer's frames stopped (or resumed) decrypting.
-        // The backend reports each transition once; re-report the failure the
-        // way the web worker does (an InvalidKey decrypt error once a second)
-        // until the peer decrypts again, so the shared streak grace degrades
-        // a failure that persists and the quiet gap after `encrypted` clears
-        // it. Tracked per identity, so a peer whose audio decrypts while its
-        // camera does not reads as decrypting.
-        this.clearDecryptTimer(event.identity);
-        if (!event.encrypted) {
-          const identity = event.identity;
-          const report = (): void => {
-            const p = this.remoteParticipants.get(identity);
-            // i18n-exempt: the web worker's decrypt error, matched by prefix, never rendered
-            const error = new Error("InvalidKey: native decrypt failure");
-            if (p !== undefined) this.emit(RoomEvent.EncryptionError, error, p);
-          };
-          report();
-          this.decryptTimers.set(identity, setInterval(report, DECRYPT_REPORT_MS));
-        }
+        this.onEncryptionStatus(event.identity, event.encrypted);
         break;
       case "reconnecting":
         this.state = "reconnecting";
@@ -890,17 +844,105 @@ export class NativeRoom {
         this.emit(RoomEvent.Reconnected);
         break;
       case "disconnected":
-        this.state = "disconnected";
-        this.statsTick = null;
-        this.clearDecryptTimers();
-        this.emit(
-          RoomEvent.Disconnected,
-          event.reason === "ClientInitiated"
-            ? DisconnectReason.CLIENT_INITIATED
-            : DisconnectReason.UNKNOWN_REASON,
-        );
+        this.onDisconnected(event.reason);
+        break;
+      default:
         break;
     }
+  }
+
+  private onConnected(participants: NativeVoiceParticipant[]): void {
+    this.releaseVideo();
+    this.clearDecryptTimers();
+    this.remoteParticipants.clear();
+    for (const info of participants) {
+      this.participant(info.identity);
+      for (const t of info.tracks) this.addPublication(info.identity, t);
+    }
+    this.emit(RoomEvent.Connected);
+  }
+
+  private onParticipantDisconnected(identity: string): void {
+    const p = this.remoteParticipants.get(identity);
+    // livekit-client raises the track unsubscriptions before the leave.
+    for (const pub of p?.trackPublications.values() ?? []) {
+      this.unsubscribeVideo(identity, pub);
+      this.emit(RoomEvent.TrackUnpublished, pub, p);
+    }
+    this.remoteParticipants.delete(identity);
+    this.clearDecryptTimer(identity);
+    if (p !== undefined) this.emit(RoomEvent.ParticipantDisconnected, p);
+  }
+
+  private onTrackSubscribed(identity: string, track: NativeVoiceTrack): void {
+    this.addPublication(identity, track);
+    const pub = this.participant(identity).trackPublications.get(track.sid)!;
+    // The backend auto-subscribes: one already unsubscribed (not watched)
+    // was on its way, and raises nothing.
+    if (pub.kind === "video" && pub.isSubscribed) this.subscribeVideo(identity, pub);
+  }
+
+  private onTrackUnpublished(identity: string, sid: string): void {
+    const p = this.remoteParticipants.get(identity);
+    const pub = p?.trackPublications.get(sid);
+    this.unsubscribeVideo(identity, pub);
+    p?.trackPublications.delete(sid);
+    if (pub !== undefined) this.emit(RoomEvent.TrackUnpublished, pub, p);
+  }
+
+  private onTrackMuted(identity: string, sid: string, muted: boolean): void {
+    const p = this.remoteParticipants.get(identity);
+    const pub = p?.trackPublications.get(sid);
+    if (pub === undefined) return;
+    pub.isMuted = muted;
+    if (muted) this.emit(RoomEvent.TrackMuted, pub, p);
+  }
+
+  private onCaptureLevel(rms: number, open: boolean): void {
+    if (!this.capturing) return;
+    this.onInputLevel?.(rms, open);
+    const next = this.autoFloor?.push(rms, performance.now()) ?? null;
+    if (next !== null) this.retuneVoiceGate(next);
+  }
+
+  private onEncryptionStatus(identity: string, encrypted: boolean): void {
+    if (identity === this.localParticipant.identity) {
+      // The backend's only signal that frames are not being protected —
+      // surface it the way the web path surfaces a dead E2EE worker.
+      if (!encrypted)
+        // i18n-exempt: internal E2EE state guard, never rendered
+        this.emit(RoomEvent.EncryptionError, new Error("native E2EE not active"));
+      return;
+    }
+    // A remote peer's frames stopped (or resumed) decrypting.
+    // The backend reports each transition once; re-report the failure the
+    // way the web worker does (an InvalidKey decrypt error once a second)
+    // until the peer decrypts again, so the shared streak grace degrades
+    // a failure that persists and the quiet gap after `encrypted` clears
+    // it. Tracked per identity, so a peer whose audio decrypts while its
+    // camera does not reads as decrypting.
+    this.clearDecryptTimer(identity);
+    if (encrypted) return;
+    const report = (): void => {
+      const p = this.remoteParticipants.get(identity);
+      // i18n-exempt: the web worker's decrypt error, matched by prefix, never rendered
+      const error = new Error("InvalidKey: native decrypt failure");
+      if (p !== undefined) this.emit(RoomEvent.EncryptionError, error, p);
+    };
+    report();
+    this.decryptTimers.set(identity, setInterval(report, DECRYPT_REPORT_MS));
+  }
+
+  private onDisconnected(reason: string): void {
+    this.state = "disconnected";
+    this.statsTick = null;
+    this.clearDecryptTimers();
+    this.emit(
+      RoomEvent.Disconnected,
+      reason === "ClientInitiated"
+        ? DisconnectReason.CLIENT_INITIATED
+        : DisconnectReason.UNKNOWN_REASON,
+    );
   }
 }
 
