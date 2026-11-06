@@ -4,7 +4,7 @@
  */
 
 import { createElement, setText } from "@lib/dom";
-import { observeMedia } from "@lib/prefs/mediaVisibility";
+import { observeMedia } from "./mediaVisibility";
 import { createLogger } from "@lib/logger";
 import {
   isExternalGif,

@@ -12,7 +12,7 @@ import {
   isWindowDetached,
   type Message,
 } from "@stores/messages.store";
-import { discardMedia } from "@lib/prefs/mediaVisibility";
+import { discardMedia } from "../content/mediaVisibility";
 import { renderBlockedRun, renderDayDivider, renderNewDivider, renderMessage } from "./renderers";
 import { ROW_FOCUSABLE_SELECTOR } from "./messageActions";
 import {

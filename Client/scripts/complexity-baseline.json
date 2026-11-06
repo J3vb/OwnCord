@@ -225,15 +225,6 @@
       "notifyIncomingMessage": [30],
       "notifyMention": [19]
     },
-    "lib/prefs/gameActivityPrefs.ts": {
-      "parseGamePrefs": [21]
-    },
-    "lib/prefs/keybinds.ts": {
-      "isReserved": [37]
-    },
-    "lib/prefs/serverRailLayout.ts": {
-      "parseLayout": [16]
-    },
     "lib/presence/gameActivity.ts": {
       "startGameActivity > poll": [24]
     },
@@ -296,12 +287,6 @@
     "pages/main-page/ChannelController.ts": {
       "createChannelController > destroyChannel": [21],
       "createChannelController > mountChannel": [18]
-    },
-    "pages/main-page/GlobalKeybinds.ts": {
-      "attachGlobalKeybinds > dispatchRebindable": [34],
-      "attachGlobalKeybinds > handlePlainKey": [17],
-      "attachGlobalKeybinds > handler": [47],
-      "attachGlobalKeybinds > onEscape": [16]
     },
     "pages/main-page/MemberColumn.ts": {
       "createMemberColumn > sync": [16]

@@ -20,7 +20,7 @@
  */
 
 import { createElement } from "@lib/dom";
-import { observeMedia, playMedia } from "@lib/prefs/mediaVisibility";
+import { observeMedia, playMedia } from "../content/mediaVisibility";
 import { loadPref } from "@lib/prefs/preferences";
 import { isAnimatedImage, motionReduced } from "@lib/ui/animatedStill";
 import type { MessageStickerInfo } from "@lib/types";

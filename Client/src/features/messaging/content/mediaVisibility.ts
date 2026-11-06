@@ -17,30 +17,14 @@
  *                        User clicks ❚❚ → freeze immediately
  */
 
-import { createElement, setOwnedTimeout } from "../dom";
-import { createIcon } from "../icons";
-import { connectText } from "../../i18n/connect";
-import { registerSessionReset } from "../net/sessionRegistry";
-import { SessionScope } from "../net/sessionScope";
+import { createElement, setOwnedTimeout } from "../../../lib/dom";
+import { createIcon } from "../../../lib/icons";
+import { connectText } from "../../../i18n/connect";
+import { StillCache, releaseStill, type Still } from "./mediaStills";
+import { registerSessionReset } from "../../../lib/net/sessionRegistry";
 
 /** How long a GIF plays before auto-pausing (ms). */
 const AUTO_PAUSE_MS = 10_000;
-
-/** Soft cap on cached stills; an entry a tracked image still shows is never evicted. */
-const MAX_STILLS = 200;
-
-/** One captured first frame, shared by every row showing the same GIF. */
-interface Still {
-  readonly key: string;
-  readonly url: string;
-  /** True when `url` is a blob: URL this module must revoke. */
-  readonly isBlob: boolean;
-  /** Tracked entries currently showing (or about to show) this still. */
-  users: number;
-  /** Still in `stills`; false once evicted or cleared. */
-  listed: boolean;
-  revoked: boolean;
-}
 
 interface MediaEntry {
   readonly originalSrc: string;
@@ -62,155 +46,33 @@ let observer: IntersectionObserver | null = null;
 let visibilityListenerAttached = false;
 let documentHidden = false;
 
-// ---------------------------------------------------------------------------
-// Still cache — one first-frame still per GIF URL, per session
-// ---------------------------------------------------------------------------
+const cache = new StillCache();
 
-/** Insertion order is recency order (oldest first). */
-const stills = new Map<string, Still>();
-/** Captures in flight, with the entries that asked for the same GIF meanwhile. */
-const pendingCaptures = new Map<string, Set<() => void>>();
-/** Bumped by a reset so a late `toBlob` callback knows it is stale. */
-let stillGeneration = 0;
-/** Owns the deferred-capture timers; replaced when a reset disposes it. */
-let captureScope = new SessionScope({ host: "", generation: 0 });
-
-function revokeStill(still: Still): void {
-  if (still.revoked) return;
-  still.revoked = true;
-  if (still.isBlob) URL.revokeObjectURL(still.url);
-}
-
-function releaseStill(entry: MediaEntry): void {
-  const still = entry.still;
-  if (still === null) return;
-  entry.still = null;
-  still.users -= 1;
-  if (still.users <= 0 && !still.listed) revokeStill(still);
-}
-
-function adoptStill(entry: MediaEntry, still: Still): void {
-  if (entry.still !== still) {
-    releaseStill(entry);
-    still.users += 1;
-    entry.still = still;
-  }
-  if (still.listed) {
-    // Touch: most recently used goes to the back.
-    stills.delete(still.key);
-    stills.set(still.key, still);
-  }
-}
-
-function evictStills(): void {
-  if (stills.size <= MAX_STILLS) return;
-  for (const [key, still] of stills) {
-    if (stills.size <= MAX_STILLS) break;
-    if (still.users > 0) continue;
-    stills.delete(key);
-    still.listed = false;
-    revokeStill(still);
-  }
-}
-
-/** Drop every cached still (session reset); blob URLs still shown outlive it. */
-function resetStills(): void {
-  stillGeneration += 1;
-  pendingCaptures.clear();
-  captureScope.dispose();
-  captureScope = new SessionScope({ host: "", generation: stillGeneration });
-  for (const still of stills.values()) {
-    still.listed = false;
-    if (still.users <= 0) revokeStill(still);
-  }
-  stills.clear();
-  // Deferred captures died with the old scope; ask again for the paused rows.
-  for (const ref of allTracked) {
-    const img = ref.deref();
-    const entry = img === undefined ? undefined : tracked.get(img);
-    if (img === undefined || entry === undefined) continue;
-    entry.captureCancel = null;
-    if (!entry.isPlaying && entry.still === null) scheduleCapture(img, entry);
-  }
-}
-void registerSessionReset("media-visibility:stills", resetStills, { phase: "cache" }); // app-lifetime
-
-function makeStill(key: string, url: string, isBlob: boolean): Still {
-  return { key, url, isBlob, users: 0, listed: false, revoked: false };
-}
-
-function dataUrlStill(key: string, canvas: HTMLCanvasElement): Still | null {
-  try {
-    return makeStill(key, canvas.toDataURL("image/png"), false);
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Draw the GIF's current frame and encode it. `toBlob` encodes off the main
- * thread; without it (jsdom, old WebKit) the data-URL path is the fallback.
- * `done` is not called when a reset made the result stale.
- */
-function captureStill(img: HTMLImageElement, key: string, done: (s: Still | null) => void): void {
-  const generation = stillGeneration;
-  let canvas: HTMLCanvasElement;
-  try {
-    canvas = document.createElement("canvas");
-    // Scale as a whole, so a box that is not the image's shape (a sticker's
-    // square, object-fit: contain) does not stretch the still.
-    const nw = img.naturalWidth;
-    const nh = img.naturalHeight;
-    const scale =
-      nw > 0 && nh > 0 ? Math.min(1, (img.width || 400) / nw, (img.height || 350) / nh) : 1;
-    const w = Math.round(nw * scale);
-    const h = Math.round(nh * scale);
-    canvas.width = w;
-    canvas.height = h;
-    const ctx = canvas.getContext("2d");
-    if (ctx === null) {
-      done(null);
-      return;
+void registerSessionReset(
+  "media-visibility:stills",
+  () => {
+    cache.reset();
+    // Deferred captures died with the old scope; ask again for the paused rows.
+    for (const ref of allTracked) {
+      const img = ref.deref();
+      const entry = img === undefined ? undefined : tracked.get(img);
+      if (img === undefined || entry === undefined) continue;
+      entry.captureCancel = null;
+      if (!entry.isPlaying && entry.still === null) scheduleCapture(img, entry);
     }
-    ctx.drawImage(img, 0, 0, w, h);
-  } catch {
-    done(null);
-    return;
-  }
-  if (typeof canvas.toBlob !== "function" || typeof URL.createObjectURL !== "function") {
-    done(dataUrlStill(key, canvas));
-    return;
-  }
-  const source = canvas;
-  try {
-    source.toBlob((blob) => {
-      // A reset ran while the encode was in flight: drop the result, and make
-      // no URL, so there is nothing to revoke.
-      if (generation !== stillGeneration) return;
-      if (blob === null) {
-        done(dataUrlStill(key, source));
-        return;
-      }
-      try {
-        done(makeStill(key, URL.createObjectURL(blob), true));
-      } catch {
-        done(dataUrlStill(key, source));
-      }
-    }, "image/png");
-  } catch {
-    done(dataUrlStill(key, source));
-  }
-}
+  },
+  { phase: "cache" },
+); // app-lifetime
 
 function applyStill(img: HTMLImageElement, entry: MediaEntry, still: Still): void {
-  adoptStill(entry, still);
+  cache.adopt(entry, still);
   if (img.src !== still.url) img.src = still.url;
 }
 
 /** Show the cached still on a paused, still-tracked image, if there is one. */
 function applyCached(img: HTMLImageElement, entry: MediaEntry): boolean {
   if (tracked.get(img) !== entry || entry.isPlaying) return false;
-  const still = stills.get(entry.originalSrc);
+  const still = cache.get(entry.originalSrc);
   if (still === undefined) return false;
   applyStill(img, entry, still);
   return true;
@@ -224,28 +86,27 @@ function scheduleCapture(img: HTMLImageElement, entry: MediaEntry): void {
   if (entry.captureCancel !== null) return;
   const key = entry.originalSrc;
   entry.captureCancel = setOwnedTimeout(
-    captureScope.signal,
+    cache.signal,
     () => {
       entry.captureCancel = null;
       if (tracked.get(img) !== entry || entry.isPlaying) return;
       if (applyCached(img, entry)) return;
-      const waiters = pendingCaptures.get(key);
+      const waiters = cache.pending.get(key);
       if (waiters !== undefined) {
         waiters.add(() => applyCached(img, entry));
         return;
       }
       const mine = new Set<() => void>();
-      pendingCaptures.set(key, mine);
-      captureStill(img, key, (still) => {
-        if (pendingCaptures.get(key) === mine) pendingCaptures.delete(key);
+      cache.pending.set(key, mine);
+      cache.capture(img, key, (still) => {
+        if (cache.pending.get(key) === mine) cache.pending.delete(key);
         if (still !== null) {
-          still.listed = true;
-          stills.set(key, still);
+          cache.put(key, still);
         }
         // A row that left meanwhile takes nothing; the still stays cached for the next one.
         applyCached(img, entry);
         for (const waiter of mine) waiter();
-        evictStills();
+        cache.evict();
       });
     },
     0,
@@ -269,7 +130,7 @@ function freezeImage(img: HTMLImageElement, entry: MediaEntry): void {
   }
   entry.isPlaying = false;
 
-  const cached = entry.still ?? stills.get(entry.originalSrc);
+  const cached = entry.still ?? cache.get(entry.originalSrc);
   if (cached !== undefined) {
     applyStill(img, entry, cached);
   } else {

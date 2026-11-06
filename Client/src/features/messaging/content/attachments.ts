@@ -6,7 +6,7 @@
 
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import { observeMedia } from "@lib/prefs/mediaVisibility";
+import { observeMedia } from "./mediaVisibility";
 import { loadPref, onPrefChange } from "@lib/prefs/preferences";
 import { isVoiceAttachment, renderVoicePlayer } from "../../voice-messages/player";
 import type { Attachment } from "@lib/types";

@@ -1,11 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import * as mediaVisibility from "../../src/lib/prefs/mediaVisibility";
+import * as mediaVisibility from "../../src/features/messaging/content/mediaVisibility";
 import {
   observeMedia,
   unobserveMedia,
   pauseAllMedia,
   playMedia,
-} from "../../src/lib/prefs/mediaVisibility";
+} from "../../src/features/messaging/content/mediaVisibility";
 import { runSessionResets } from "../../src/lib/net/sessionRegistry";
 
 // Resolved off the namespace so a missing export fails the assertion, not the import.
