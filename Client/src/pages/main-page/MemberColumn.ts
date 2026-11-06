@@ -193,39 +193,45 @@ export function createMemberColumn(opts: MemberColumnOptions): MemberColumn {
     }
   }
 
+  function wantsOpen(overlay: boolean): boolean {
+    if (overlay) return narrowOpen;
+    return stepsAside() ? asideOpen : loadPref<boolean>(MEMBER_OPEN_PREF, true);
+  }
+
+  function showPanel(): void {
+    if (panel === null) {
+      panel = opts.buildPanel();
+      body.appendChild(panel.element);
+    }
+    column.hidden = false;
+  }
+
+  function hidePanel(): void {
+    if (panel === null) {
+      column.hidden = true;
+      return;
+    }
+    const focusInside = column.contains(document.activeElement);
+    panel.destroy();
+    panel.element.remove();
+    panel = null;
+    column.hidden = true;
+    if (focusInside) opts.fallbackFocus?.();
+  }
+
   function sync(): void {
     if (destroyed) return;
     const right = loadMemberLayout() === "right";
     const onScreen = guildChannelOnScreen();
     const overlay = overlayMode();
     if (!right || !onScreen) narrowOpen = false;
-    const wanted = overlay
-      ? narrowOpen
-      : stepsAside()
-        ? asideOpen
-        : loadPref<boolean>(MEMBER_OPEN_PREF, true);
+    const wanted = wantsOpen(overlay);
     const shown = right && onScreen && uiStore.getState().activeView === null && wanted;
     button.hidden = !(right && onScreen);
     button.setAttribute("aria-pressed", String(shown));
     syncBackClaim(overlay && shown);
-    if (shown) {
-      if (panel === null) {
-        panel = opts.buildPanel();
-        body.appendChild(panel.element);
-      }
-      column.hidden = false;
-      return;
-    }
-    if (panel !== null) {
-      const focusInside = column.contains(document.activeElement);
-      panel.destroy();
-      panel.element.remove();
-      panel = null;
-      column.hidden = true;
-      if (focusInside) opts.fallbackFocus?.();
-      return;
-    }
-    column.hidden = true;
+    if (shown) showPanel();
+    else hidePanel();
   }
 
   // A channel or DM switch, or a mode change, dismisses the overlay.

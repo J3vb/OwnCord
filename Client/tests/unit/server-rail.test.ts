@@ -389,10 +389,10 @@ describe("ServerRail", () => {
 
 describe("web portal", () => {
   it("MainPage only creates the rail outside the web build", () => {
-    const src = readFileSync("src/pages/main-page/pageMountShell.ts", "utf8");
-    expect(src).toMatch(
-      /if \(!__OWNCORD_WEB__\) \{[\s\S]{0,400}import\("@components\/ServerRail"\)/,
-    );
-    expect(src.match(/createServerRail/g)?.length).toBe(2);
+    const shell = readFileSync("src/pages/main-page/pageMountShell.ts", "utf8");
+    expect(shell).toMatch(/if \(!__OWNCORD_WEB__\) \{[\s\S]{0,400}mountServerRail\(/);
+    const loader = readFileSync("src/features/server-rail/mountServerRail.ts", "utf8");
+    expect(loader).toMatch(/import\("@components\/ServerRail"\)/);
+    expect(loader.match(/createServerRail/g)?.length).toBe(2);
   });
 });

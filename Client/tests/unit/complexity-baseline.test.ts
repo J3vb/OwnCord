@@ -28,9 +28,9 @@ const baseline = readBaseline();
 
 /** Over-limit functions and blocks that may remain. Lower these with every
  *  change that removes one; they never rise. */
-const COMPLEXITY_CAP = 133;
-const DEPTH_CAP = 13;
-const WORST_COMPLEXITY_CAP = 47;
+const COMPLEXITY_CAP = 117;
+const DEPTH_CAP = 7;
+const WORST_COMPLEXITY_CAP = 45;
 
 const highest = (sections: Sections["complexity"]): number =>
   Math.max(0, ...Object.values(sections).flatMap((keys) => Object.values(keys).flat()));

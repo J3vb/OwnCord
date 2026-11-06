@@ -2,9 +2,9 @@
 import { shellText } from "../../i18n/shell";
 import { createLogger } from "@lib/logger";
 import { authStore } from "@stores/auth.store";
-import { dmStore, dmDisplayName } from "@stores/dm.store";
+import { dmStore, dmDisplayName, type DmChannel } from "@stores/dm.store";
 import { voiceStore } from "@stores/voice.store";
-import { membersStore, memberDisplayName } from "@stores/members.store";
+import { membersStore, memberDisplayName, type Member } from "@stores/members.store";
 import type { DmProfileData } from "@components/DmProfileSidebar";
 
 export const log = createLogger("main-page");
@@ -41,6 +41,36 @@ export function listeningKey(l: DmProfileData["listening"] | undefined): string 
 /** Saved preference: the 1:1 DM profile panel opens with the conversation. */
 export const DM_PROFILE_PREF = "dmProfileOpen";
 
+type DmRecipient = DmChannel["recipient"];
+
+/** The live member's status, else the DM list's own copy (a partner who is not
+ *  a member of this server); anything unknown reads offline. */
+function profileStatus(
+  member: Member | undefined,
+  recipient: DmRecipient,
+): DmProfileData["status"] {
+  const rawStatus = member?.status ?? recipient.status;
+  return rawStatus === "online" ||
+    rawStatus === "idle" ||
+    rawStatus === "dnd" ||
+    rawStatus === "offline"
+    ? rawStatus
+    : "offline";
+}
+
+/** The live copy first, as for the status; the DM list's own copy covers a
+ *  partner who is not a member of this server. */
+function profilePresence(
+  member: Member | undefined,
+  recipient: DmRecipient,
+): Pick<DmProfileData, "mobile" | "activity" | "listening"> {
+  return {
+    mobile: member === undefined ? recipient.mobile === true : member.mobile === true,
+    activity: member === undefined ? (recipient.activity ?? null) : (member.activity ?? null),
+    listening: member === undefined ? (recipient.listening ?? null) : (member.listening ?? null),
+  };
+}
+
 /**
  * Build the profile panel's data from the live stores for a 1:1 DM channel.
  * Null for a group (no single "recipient" -- see the caller) or a channel
@@ -61,11 +91,6 @@ export function buildDmProfileUser(channelId: number): DmProfileData | null {
   // does (ChannelController.ts) -- falling back to dmStore's own copy keeps
   // this correct even for a DM partner who isn't a guild member.
   const member = membersStore.getState().members.get(recipient.id);
-  const rawStatus = member?.status ?? recipient.status;
-  const status =
-    rawStatus === "online" || rawStatus === "idle" || rawStatus === "dnd" || rawStatus === "offline"
-      ? rawStatus
-      : ("offline" as const);
 
   return {
     id: recipient.id,
@@ -75,13 +100,9 @@ export function buildDmProfileUser(channelId: number): DmProfileData | null {
     // different identity from the header the reader just clicked.
     displayName: recipient.displayName ?? null,
     avatar: recipient.avatar || null,
-    status,
+    status: profileStatus(member, recipient),
     customStatus: member?.customStatus ?? null,
-    mobile: member === undefined ? recipient.mobile === true : member.mobile === true,
-    // The live copy first, as for the status; the DM list's own copy covers a
-    // partner who is not a member of this server.
-    activity: member === undefined ? (recipient.activity ?? null) : (member.activity ?? null),
-    listening: member === undefined ? (recipient.listening ?? null) : (member.listening ?? null),
+    ...profilePresence(member, recipient),
     about: null,
     joinDate: null,
     banner: member?.banner ?? null,
