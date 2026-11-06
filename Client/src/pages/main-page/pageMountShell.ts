@@ -3,22 +3,22 @@
  * then the layout (sidebar, chat area, member column, server rail, drawer,
  * notices).
  */
+import { mountServerRail } from "../../features/server-rail/mountServerRail";
 import {
-  addServer,
-  loadSavedServers,
-  switchToServer,
-} from "../../features/server-rail/switchServer";
+  startDetectedActivities,
+  followSpeakingActivity,
+} from "../../features/presence/pageActivities";
 import {
-  confirmAndJoinInvite,
-  currentServerName,
-  parseInviteInput,
-} from "../../features/server-rail/joinInvite";
+  subscribeDeletedMessages,
+  subscribeEditedAttachments,
+} from "../../features/messaging/chatSocketSubscriptions";
 import { Disposable } from "@lib/disposable";
 import { createElement, appendChildren } from "@lib/dom";
 import { desktop } from "../../platform/desktop";
 import { createServerBanner, applyConnectionStatus } from "@components/ServerBanner";
 import { showToast } from "@lib/ui/toast";
 import { isPhoneLayout } from "@lib/ui/bottomSheet";
+import { focusFirst } from "@lib/ui/focusFirst";
 import { shellText } from "../../i18n/shell";
 import { sessionNoticeMessage, startSessionNotice } from "@lib/net/sessionNotice";
 import { authStore } from "@stores/auth.store";
@@ -27,7 +27,6 @@ import { onPrefChange } from "@lib/prefs/preferences";
 import { startAutoIdle } from "@lib/presence/autoIdle";
 import { startStatusTimerWatcher } from "@lib/presence/statusTimer";
 import { getActiveChannel } from "@stores/channels.store";
-import { voiceStore } from "@stores/voice.store";
 import { setChatHeaderCallChat } from "./ChatHeader";
 import { createCallChat } from "./callChat";
 import { createVideoModeController } from "./VideoModeController";
@@ -174,61 +173,9 @@ export function mountConnectionBanner(st: PageState, pg: PageApi, ms: MountScope
     systemIdleMs: () => desktop.systemIdle.idleMs(),
   });
 
-  // The game being played, for other members' "Playing <game>" line. The
-  // loop sends nothing unless the setting is on and the server advertises
-  // game_activity; the web build has no detector and never loads it.
-  if (desktop.gameDetector.available) {
-    void import("@lib/presence/gameActivity").then(
-      ({ startGameActivity }) => {
-        if (st.tornDown) return;
-        st.gameActivity = startGameActivity({
-          ws: st.ws,
-          detect: (prefs) => desktop.gameDetector.detect(prefs),
-        });
-      },
-      (err: unknown) => log.warn("Game activity failed to load", { error: String(err) }),
-    );
-  }
+  startDetectedActivities(st);
 
-  // The song being listened to, for the "Listening to <player>" line. Same
-  // rules as the game loop, with its own capability (listening_activity).
-  if (desktop.mediaDetector.available) {
-    void import("@lib/presence/musicActivity").then(
-      ({ startMusicActivity }) => {
-        if (st.tornDown) return;
-        st.musicActivity = startMusicActivity({
-          ws: st.ws,
-          detect: (prefs) => desktop.mediaDetector.detect(prefs),
-        });
-      },
-      (err: unknown) => log.warn("Music activity failed to load", { error: String(err) }),
-    );
-  }
-
-  // Talking in a call is being here even with hands off the keyboard and
-  // mouse, which neither the window nor (for another app) the OS poll sees.
-  // The local ring is the same on web and native (voice.store withLocalRing).
-  st.unsubscribers.push(
-    voiceStore.subscribeSelector(
-      (v) => {
-        const uid = authStore.getState().user?.id ?? 0;
-        const ch = v.currentChannelId;
-        return ch !== null && v.voiceUsers.get(ch)?.get(uid)?.speaking === true;
-      },
-      (speaking) => {
-        if (st.speakingActivityTimer !== null) clearInterval(st.speakingActivityTimer);
-        st.speakingActivityTimer = null;
-        if (!speaking) return;
-        st.autoIdle?.notifyActivity();
-        // Talking for longer than the idle delay must keep counting.
-        st.speakingActivityTimer = setInterval(() => st.autoIdle?.notifyActivity(), 60_000);
-      },
-    ),
-    () => {
-      if (st.speakingActivityTimer !== null) clearInterval(st.speakingActivityTimer);
-      st.speakingActivityTimer = null;
-    },
-  );
+  st.unsubscribers.push(...followSpeakingActivity(st));
 
   st.unsubscribers.push(
     st.ws.on("server_restart", (payload) => {
@@ -310,24 +257,8 @@ export function mountLayout(st: PageState, pg: PageApi, ms: MountScope): void {
       onLeave: () => callBarActions.onDisconnect(),
       onOpenCall: (channelId) => ms.sidebar.openCall(channelId),
     },
-    subscribeDeletes: (listener) => {
-      const offOne = st.ws.on("chat_deleted", (p) => listener(p.channel_id, [p.message_id]));
-      const offMany = st.ws.on("chat_bulk_deleted", (p) => listener(p.channel_id, p.ids));
-      return () => {
-        offOne();
-        offMany();
-      };
-    },
-    subscribeAttachments: (listener) =>
-      st.ws.on("chat_edited", (p) => {
-        if (p.attachments !== undefined) {
-          listener(
-            p.channel_id,
-            p.message_id,
-            p.attachments.map((a) => a.id),
-          );
-        }
-      }),
+    subscribeDeletes: (listener) => subscribeDeletedMessages(st.ws, listener),
+    subscribeAttachments: (listener) => subscribeEditedAttachments(st.ws, listener),
     onToggleDmProfile: () => {
       pg.toggleDmProfile();
     },
@@ -398,7 +329,7 @@ export function mountLayout(st: PageState, pg: PageApi, ms: MountScope): void {
   // the first of them that takes focus. On a phone the composer is skipped:
   // focusing it raises the keyboard over the chat.
   ms.focusReachable = (): HTMLElement | null => {
-    const candidates = [
+    return focusFirst([
       isPhoneLayout()
         ? null
         : ms.chatAreaResult.slots.inputSlot.querySelector<HTMLElement>("textarea:enabled"),
@@ -406,12 +337,7 @@ export function mountLayout(st: PageState, pg: PageApi, ms: MountScope): void {
       ...Array.from(ms.sidebar.sidebarWrapper.querySelectorAll<HTMLElement>("button")).filter(
         (b) => b.style.display !== "none" && b.style.visibility !== "hidden",
       ),
-    ];
-    for (const el of candidates) {
-      el?.focus();
-      if (el != null && document.activeElement === el) return el;
-    }
-    return null;
+    ]);
   };
 
   st.contentNav = createContentNavigator({
@@ -449,30 +375,14 @@ export function mountLayout(st: PageState, pg: PageApi, ms: MountScope): void {
   if (!__OWNCORD_WEB__) {
     ms.railSlot = createElement("div", { class: "server-rail-slot" });
     ms.app.classList.add("has-server-rail");
-    const slot = ms.railSlot;
-    const railHost = st.api.getConfig().host ?? "";
-    void import("@components/ServerRail")
-      .then(({ createServerRail }) => {
-        if (st.tornDown) return;
-        const rail = createServerRail({
-          currentHost: railHost,
-          currentName: authStore.getState().serverName ?? "",
-          loadServers: loadSavedServers,
-          switchServer: switchToServer,
-          addServer,
-          onOpenDm: (dm) => ms.sidebar.openDm(dm),
-          onShowServer: () => ms.sidebar.returnToChannel(),
-          joinInvite: (text) => {
-            const invite = parseInviteInput(text);
-            if (invite === null) return false;
-            confirmAndJoinInvite(invite, currentServerName(railHost));
-            return true;
-          },
-        });
-        rail.mount(slot);
-        st.unsubscribers.push(() => rail.destroy?.());
-      })
-      .catch((err: unknown) => log.warn("Server rail failed to load", err));
+    mountServerRail({
+      host: st.api.getConfig().host ?? "",
+      slot: ms.railSlot,
+      isTornDown: () => st.tornDown,
+      onOpenDm: (dm) => ms.sidebar.openDm(dm),
+      onShowServer: () => ms.sidebar.returnToChannel(),
+      own: (destroy) => st.unsubscribers.push(destroy),
+    });
   }
 
   if (ms.railSlot !== null) ms.app.appendChild(ms.railSlot);

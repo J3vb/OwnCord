@@ -284,46 +284,6 @@
       "createLoginFormSubmit > handleFormSubmit": [21],
       "createLoginFormSubmit > validateForm": [16]
     },
-    "pages/main-page/ChannelController.ts": {
-      "createChannelController > destroyChannel": [21],
-      "createChannelController > mountChannel": [18]
-    },
-    "pages/main-page/MemberColumn.ts": {
-      "createMemberColumn > sync": [16]
-    },
-    "pages/main-page/MessageController.ts": {
-      "createMessageController > loadMessages": [26]
-    },
-    "pages/main-page/MessageJump.ts": {
-      "createMessageJumper > jumpTo": [18]
-    },
-    "pages/main-page/OverlayManagers.ts": {
-      "createAsyncOverlayController > open": [16]
-    },
-    "pages/main-page/channel/channelMountComposer.ts": {
-      "mountComposerGating > (anonymous)": [21]
-    },
-    "pages/main-page/channel/channelMountSend.ts": {
-      "mountSendPipeline > performSend": [26],
-      "mountSendPipeline > retrySend": [17]
-    },
-    "pages/main-page/pageMountCalls.ts": {
-      "mountCalls > (anonymous)": [17],
-      "mountCalls > onChange": [17],
-      "mountVideo > (anonymous)": [46]
-    },
-    "pages/main-page/pageShared.ts": {
-      "buildDmProfileUser": [24]
-    },
-    "pages/main-page/sidebar-area/sidebarChannels.ts": {
-      "mountChannelSidebar > buildChannelSidebar > onEditChannel > (anonymous)": [20],
-      "mountChannelSidebar > buildChannelSidebar > onReorderChannel > (anonymous) > (anonymous)": [
-        16
-      ]
-    },
-    "pages/main-page/sidebar-area/sidebarContent.ts": {
-      "mountMembersAndMode > mountSidebarContent": [17]
-    },
     "platform/desktop/pushToTalkService.ts": {
       "startBinding": [19]
     },
@@ -354,9 +314,6 @@
     },
     "lib/voice/livekitE2EE.ts": {
       "E2EEManager > handleParticipantLeft": [5]
-    },
-    "pages/main-page/pageMountCalls.ts": {
-      "mountVideo > (anonymous)": [6, 6, 5, 5, 5, 5]
     }
   }
 }
