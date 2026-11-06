@@ -109,6 +109,7 @@ export const shards = {
     "src/features/menus/menuSheet.ts",
     "src/features/voice-messages/player.ts",
     "src/features/voice/miniPlayer.ts",
+    "src/lib/prefs/mediaStills.ts",
     "src/lib/prefs/mediaVisibility.ts",
     "src/lib/ui/statusIndicator.ts",
     "src/lib/voice/noiseFloor.ts",

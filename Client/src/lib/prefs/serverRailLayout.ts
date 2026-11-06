@@ -293,32 +293,38 @@ function isStringArray(v: unknown): v is string[] {
   return Array.isArray(v) && v.every((x) => typeof x === "string" && x !== "");
 }
 
+function parseFolder(e: Record<string, unknown>): RailItem | null {
+  const { id, name, color, collapsed, hosts } = e;
+  if (typeof id !== "string" || id === "") return null;
+  if (typeof name !== "string" || typeof collapsed !== "boolean") return null;
+  if (typeof color !== "string" || !isStringArray(hosts)) return null;
+  return {
+    kind: "folder",
+    id,
+    name: name.slice(0, FOLDER_NAME_MAX),
+    color: FOLDER_COLORS.includes(color) ? color : DEFAULT_COLOR,
+    collapsed,
+    hosts,
+  };
+}
+
+function parseItem(entry: unknown): RailItem | null {
+  if (typeof entry !== "object" || entry === null) return null;
+  const e = entry as Record<string, unknown>;
+  if (e["kind"] === "folder") return parseFolder(e);
+  if (e["kind"] !== "server") return null;
+  if (typeof e["host"] !== "string" || e["host"] === "") return null;
+  return { kind: "server", host: e["host"] };
+}
+
 /** Validate untrusted JSON into a layout; null when any part is malformed. */
 export function parseLayout(raw: unknown): RailLayout | null {
   if (!Array.isArray(raw)) return null;
   const out: RailItem[] = [];
   for (const entry of raw as unknown[]) {
-    if (typeof entry !== "object" || entry === null) return null;
-    const e = entry as Record<string, unknown>;
-    if (e["kind"] === "server") {
-      if (typeof e["host"] !== "string" || e["host"] === "") return null;
-      out.push({ kind: "server", host: e["host"] });
-    } else if (e["kind"] === "folder") {
-      const { id, name, color, collapsed, hosts } = e;
-      if (typeof id !== "string" || id === "") return null;
-      if (typeof name !== "string" || typeof collapsed !== "boolean") return null;
-      if (typeof color !== "string" || !isStringArray(hosts)) return null;
-      out.push({
-        kind: "folder",
-        id,
-        name: name.slice(0, FOLDER_NAME_MAX),
-        color: FOLDER_COLORS.includes(color) ? color : DEFAULT_COLOR,
-        collapsed,
-        hosts,
-      });
-    } else {
-      return null;
-    }
+    const item = parseItem(entry);
+    if (item === null) return null;
+    out.push(item);
   }
   return out;
 }
