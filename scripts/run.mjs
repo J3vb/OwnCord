@@ -370,6 +370,8 @@ const TASKS = {
     ),
     // After sqlc: gendocs compiles the api package, which imports db/dbgen.
     step("go", ["run", "-tags", "otel,wazero", "./cmd/gendocs"], "Server"),
+    // The shape table reads the hand-written payload types, not the generated ones.
+    step("npm", ["run", "gen:wire"], "Client"),
   ],
   format: [
     step("npx", ["prettier", "--write", "."], "."),
