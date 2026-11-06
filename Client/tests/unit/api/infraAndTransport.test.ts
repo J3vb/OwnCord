@@ -8,6 +8,7 @@ import {
   serverErrorText,
 } from "../../../src/lib/api";
 import { expectConsole } from "../../helpers/console";
+import { validReply } from "../../helpers/restReplyFixtures";
 import {
   jsonResponse,
   errorResponse,
@@ -143,7 +144,8 @@ describe("API Client", () => {
 
   describe("admin channel endpoints", () => {
     it("adminCreateChannel calls POST /api/v1/moderation/channels", async () => {
-      mockFetch.mockResolvedValue(jsonResponse({ id: 1, name: "general", type: "text" }));
+      const created = { ...validReply("ChannelResponse"), name: "general", type: "text" };
+      mockFetch.mockResolvedValue(jsonResponse(created));
       const result = await api.adminCreateChannel({
         name: "general",
         type: "text",
@@ -161,11 +163,18 @@ describe("API Client", () => {
         topic: "General chat",
         position: 0,
       });
-      expect(result).toEqual({ id: 1, name: "general", type: "text" });
+      expect(result).toEqual(created);
     });
 
     it("adminUpdateChannel calls PATCH /api/v1/moderation/channels/{id}", async () => {
-      mockFetch.mockResolvedValue(jsonResponse({ id: 5, name: "renamed", topic: "new topic" }));
+      mockFetch.mockResolvedValue(
+        jsonResponse({
+          ...validReply("ChannelResponse"),
+          id: 5,
+          name: "renamed",
+          topic: "new topic",
+        }),
+      );
       const result = await api.adminUpdateChannel(5, {
         name: "renamed",
         topic: "new topic",
@@ -187,7 +196,9 @@ describe("API Client", () => {
     });
 
     it("adminUpdateForumSettings calls PUT /api/v1/moderation/channels/{id}/forum", async () => {
-      mockFetch.mockResolvedValue(jsonResponse({ id: 9, name: "feedback", type: "forum" }));
+      mockFetch.mockResolvedValue(
+        jsonResponse({ ...validReply("ChannelResponse"), id: 9, name: "feedback", type: "forum" }),
+      );
       const body = {
         tags: [{ id: 1, name: "Bug", emoji: "🐛" }, { name: "Idea" }],
         require_tag: true,
@@ -264,7 +275,11 @@ describe("API Client", () => {
 
     it("adminListUsers pages until a short page, so a user past the first 500 is reachable", async () => {
       const page = (from: number, count: number) =>
-        Array.from({ length: count }, (_, i) => ({ id: from + i, username: `u${from + i}` }));
+        Array.from({ length: count }, (_, i) => ({
+          ...validReply("AdminUserList")[0]!,
+          id: from + i,
+          username: `u${from + i}`,
+        }));
       mockFetch
         .mockResolvedValueOnce(jsonResponse(page(1, 500)))
         .mockResolvedValueOnce(jsonResponse(page(501, 2)));
@@ -322,13 +337,13 @@ describe("API Client", () => {
 
   describe("doFetch transport", () => {
     it("never sets danger — TLS trust is enforced by the Rust HTTP proxy", async () => {
-      mockFetch.mockResolvedValue(jsonResponse({}));
+      mockFetch.mockResolvedValue(jsonResponse(validReply("MemberResponse")));
       await api.getMe();
       expect((fetchCallOpts() as Record<string, unknown>).danger).toBeUndefined();
     });
 
     it("fetches through the resolved proxy origin", async () => {
-      mockFetch.mockResolvedValue(jsonResponse({}));
+      mockFetch.mockResolvedValue(jsonResponse(validReply("MemberResponse")));
       await api.getMe();
       expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/auth/me");
     });

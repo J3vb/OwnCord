@@ -171,6 +171,7 @@ export const shards = {
     "src/features/voice/callChatResize.ts",
     "src/features/voice/e2eeIdentity.ts",
     "src/lib/api.ts",
+    "src/lib/apiReply.ts",
     "src/lib/apiChannels.ts",
     "src/lib/dispatcher.ts",
     "src/lib/net/identity.ts",
