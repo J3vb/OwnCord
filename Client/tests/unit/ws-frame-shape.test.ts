@@ -16,7 +16,6 @@ import {
   chatMessage,
   collect,
   connectAndAuth,
-  dropAndReopen,
   expectAuthLastSeq,
   openSocket,
   trackStates,
@@ -114,17 +113,57 @@ describe("ws frame shape check", () => {
     expect(events).toHaveLength(0);
   });
 
-  it("a bad sequenced frame still advances the resume point", async () => {
+  it("a bad sequenced frame advances the resume point and asks for a fresh state", async () => {
     await connectAndAuth(client);
-    const received = collect(client, "chat_message");
     const bad = withoutContent("x") as { type: string; payload: unknown };
     emit({ ...bad, seq: 7 });
-    expect(received).toHaveLength(0);
     expectConsole("warn", /Invalid WS frame, dropping/);
 
-    wsMocks.mockInvoke.mockClear();
-    await dropAndReopen();
+    mockInvoke.mockClear();
+    await vi.advanceTimersByTimeAsync(5_001);
+    expect(wsConnectCalls()).toHaveLength(1);
+    emitTauriEvent("ws-state", "open");
     expectAuthLastSeq(7);
+  });
+
+  it("a bad frame without a seq does not ask for a fresh state", async () => {
+    await connectAndAuth(client);
+    emit(withoutContent("x"));
+    expectConsole("warn", /Invalid WS frame, dropping/);
+
+    mockInvoke.mockClear();
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(wsConnectCalls()).toHaveLength(0);
+  });
+
+  it("an unreadable auth_error ends the connect instead of redialling", async () => {
+    await openSocket(client);
+    const faults: number[] = [];
+    client.onHandshakeFault(() => faults.push(1));
+    emit({ type: "auth_error", payload: {} });
+    expectConsole("warn", /Invalid WS frame, dropping.*"type":"auth_error"/);
+    expect(faults).toHaveLength(1);
+
+    mockInvoke.mockClear();
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(wsConnectCalls()).toHaveLength(0);
+  });
+
+  it("a throwing fault listener does not stop the others or the teardown", async () => {
+    await connectAndAuth(client);
+    const later: number[] = [];
+    client.onHandshakeFault(() => {
+      throw new Error("listener broke");
+    });
+    client.onHandshakeFault(() => later.push(1));
+    const states = trackStates(client);
+
+    emit({ type: "ready", payload: {} });
+
+    expectConsole("warn", /Invalid WS frame, dropping/);
+    expectConsole("error", /Handshake fault listener error/);
+    expect(later).toHaveLength(1);
+    expect(states).toContain("disconnected");
   });
 
   it("a bad ready ends the connect, tells the listener and does not dispatch", async () => {

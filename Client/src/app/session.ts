@@ -23,7 +23,7 @@ import {
 import { wireDispatcher } from "@lib/dispatcher";
 import { setIdentityKeyProvider } from "@lib/ws";
 import { setLastChannelHost } from "@lib/prefs/lastChannel";
-import { authStore, clearAuth } from "@stores/auth.store";
+import { authStore, clearAuth, type LogoutReason } from "@stores/auth.store";
 import { setTransientError } from "@stores/ui.store";
 import { leaveVoiceChannel } from "@stores/voice.store";
 import { createConnectedOverlay } from "@components/ConnectedOverlay";
@@ -198,7 +198,7 @@ export function startSession(
   // host, or when the session tears down. A SERVER_BUSY refusal restarts it,
   // up to PREAUTH_BUSY_CAP_MS after this first attempt (P5-S04).
   const preauthStartedAt = Date.now();
-  const endPreauth = (message: string): void => {
+  const endPreauth = (message: string, retryWait = true): void => {
     // Stop the retry loop and tear the dead attempt down exactly as a
     // cancelled auto-login does, then tell the user on the connect form.
     api.endSession();
@@ -210,7 +210,9 @@ export function startSession(
     lastConnectHost = "";
     lastConnectToken = "";
     setTransientError(message);
-    onPreauthTimeout?.();
+    // A server that answers with a reply we cannot read is not offline: waiting
+    // for it would redial into the same fault.
+    if (retryWait) onPreauthTimeout?.();
   };
   const onPreauthDeadline = (): void => {
     if (!owner.isCurrent()) return;
@@ -249,8 +251,8 @@ export function startSession(
     ws.onHandshakeFault(() => {
       if (!owner.isCurrent()) return;
       const message = connectText("session.unreadableReply");
-      if (preauthTimer !== null) endPreauth(message);
-      else endAuthedSession(message);
+      if (preauthTimer !== null) endPreauth(message, false);
+      else endAuthedSession(message, "unreadable_reply");
     }),
   );
   sessionUnsubs.push(
@@ -432,10 +434,10 @@ export function startSession(
 }
 
 /** Ends a session that got past sign-in, keeping the stored sign-in, and says why on the form. */
-function endAuthedSession(message: string): void {
+function endAuthedSession(message: string, reason: LogoutReason = "user"): void {
   api.endSession();
   abandonInFlight();
-  if (authStore.getState().isAuthenticated) clearAuth();
+  if (authStore.getState().isAuthenticated) clearAuth(reason);
   setTransientError(message);
 }
 
@@ -525,13 +527,17 @@ export function installLogoutTeardown(): void {
           // skip flag below — does not survive that relaunch).
           // A quick switch keeps it as well: switching back resumes with it, and
           // the departed session is left for that return.
-          if (reason !== "protocol_epoch" && reason !== "server_switch") {
+          if (
+            reason !== "protocol_epoch" &&
+            reason !== "server_switch" &&
+            reason !== "unreadable_reply"
+          ) {
             if (__OWNCORD_WEB__) void deleteCredential(host, sessionToken || undefined);
             else void deleteCredential(host);
           }
           // Whenever this session must not turn around and auto-login with the
           // credential (removed, or just refused), say so.
-          sessionStorage.setItem("owncord:skip-auto-login", "1");
+          if (reason !== "unreadable_reply") sessionStorage.setItem("owncord:skip-auto-login", "1");
         }
         navigate("connect");
       }

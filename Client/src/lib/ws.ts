@@ -15,7 +15,8 @@ import { PROTOCOL_EPOCH } from "./protocolTypes";
 import { Disposable } from "./disposable";
 import { isAndroidHost } from "./hostPlatform";
 import { normalizeHostForCertCompare } from "./net/hostNormalize";
-import { parseFrame, readServerFrame, reportRejectedFrame } from "./net/wsFrame";
+import { planGapResume } from "./net/gapResume";
+import { callAll, parseFrame, readServerFrame, reportRejectedFrame } from "./net/wsFrame";
 import { WsErrorCode } from "@lib/protocolTypes";
 import {
   type CertFirstUseListener,
@@ -24,8 +25,6 @@ import {
   type ConnectionState,
   DEFAULT_MAX_MESSAGE_SIZE,
   DEFAULT_MAX_RECONNECT_DELAY,
-  GAP_RESUME_QUIET_MS,
-  GAP_RESUME_WINDOWS_MS,
   HEARTBEAT_INTERVAL_MS,
   IDENTITY_KEY_WAIT_MS,
   parseStoredFingerprint,
@@ -552,16 +551,12 @@ export function createWsClient({
     // itself is not read as one the server lost.
     if (typeof parsed.cseq === "number") noteCseq(parsed.cseq);
 
-    // The size guard runs AFTER parsing (raw is already fully materialized
-    // in memory either way, so this costs nothing) and exempts the handshake
-    // frames: "ready" is the one server frame with no bound — it embeds every
-    // member/channel/DM the server knows about — and, unlike a sequenced
-    // frame, carries no seq, so nothing ever re-requests it. Dropping it
-    // would leave a client that just flipped to "connected" sitting
-    // on empty stores with no error and no recovery path. "auth_ok" gets the
-    // same exemption since it can embed a long-username/motd payload and is
-    // equally unrecoverable if dropped — the client never even reaches
-    // "connected". Every other message type keeps the strict bound.
+    // The size guard runs AFTER parsing (raw is already fully materialized, so
+    // this costs nothing) and exempts the handshake frames: "ready" embeds every
+    // member/channel/DM the server knows, so it has no bound, and carries no seq,
+    // so nothing re-requests it; dropping it would leave a "connected" client on
+    // empty stores with no recovery. "auth_ok" can embed a long username/motd
+    // and is equally unrecoverable. Every other message type keeps the strict bound.
     if (raw.length > maxSize && parsed.type !== "ready" && parsed.type !== "auth_ok") {
       log.warn("Message exceeds size limit, dropping", { size: raw.length, type: parsed.type });
       return;
@@ -581,7 +576,7 @@ export function createWsClient({
 
     const read = readServerFrame(parsed);
     if (read.kind !== "message") {
-      if (reportRejectedFrame(read, raw.length)) failHandshake();
+      onRejected(reportRejectedFrame(read, raw.length, seq > 0));
       return;
     }
     const msg = read.msg;
@@ -654,11 +649,15 @@ export function createWsClient({
     dispatch(msg);
   }
 
-  // A ready or auth_ok of the wrong shape cannot be asked for again and a
-  // redial meets the same server: end the connect like auth_error, tell the user.
-  function failHandshake(): void {
-    handshakeFaultListeners.forEach((listener) => listener());
+  // A handshake frame of the wrong shape cannot be asked for again: end the connect
+  // like auth_error, stopping every timer here (the close arrives stale). A lost
+  // sequenced frame is made up for by a fresh state.
+  function onRejected(verdict: ReturnType<typeof reportRejectedFrame>): void {
+    if (verdict === "resync") armGapResume({ rejected: "shape" });
+    if (verdict !== "fatal") return;
     intentionalClose = true;
+    for (const stop of [stopHeartbeat, stopLiveness, stopWakeListeners, cancelGapResume]) stop();
+    callAll(handshakeFaultListeners, (err) => log.error("Handshake fault listener error", err));
     void disconnectProxy();
     setState("disconnected");
   }
@@ -669,22 +668,23 @@ export function createWsClient({
   function noteCseq(cseq: number): void {
     const expected = lastCseq + 1;
     lastCseq = cseq;
-    if (cseq === expected || gapResumeTimer !== null) return;
-    if (Date.now() - lastGapResumeAt > GAP_RESUME_QUIET_MS) gapStreak = 0;
-    const [min, max] =
-      GAP_RESUME_WINDOWS_MS[Math.min(gapStreak, GAP_RESUME_WINDOWS_MS.length - 1)]!;
-    const delay = min + random() * (max - min);
+    if (cseq !== expected) armGapResume({ expected, received: cseq });
+  }
+
+  function armGapResume(detail: object): void {
+    if (gapResumeTimer !== null) return;
+    const plan = planGapResume(gapStreak, lastGapResumeAt, Date.now(), random());
+    gapStreak = plan.streak;
     log.info("Missed a live update; resuming to fetch fresh", {
-      expected,
-      received: cseq,
-      delayMs: Math.round(delay),
+      ...detail,
+      delayMs: Math.round(plan.delay),
     });
     const owner = socketId;
     gapResumeTimer = clock.setTimeout(() => {
       gapResumeTimer = null;
       if (owner !== socketId) return;
       resumeForGap();
-    }, delay);
+    }, plan.delay);
   }
 
   function cancelGapResume(): void {

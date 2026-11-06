@@ -320,7 +320,8 @@ describe("a handshake frame the client cannot read", () => {
       "ws-message",
       JSON.stringify({ type: "auth_ok", payload: { server_name: "S" } }),
     );
-    expect(onTimeout).toHaveBeenCalledTimes(1);
+    // Not "waiting for the server": that would redial into the same fault.
+    expect(onTimeout).not.toHaveBeenCalled();
     expect(sessionInFlight()).toBe(false);
     expect(uiStore.getState().transientError).toBe(connectText("session.unreadableReply"));
     mockInvoke.mockClear();
@@ -445,6 +446,16 @@ describe("logout teardown", () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(hoisted.deleteCredential).not.toHaveBeenCalled();
     expect(navigate).toHaveBeenCalledWith("connect");
+  });
+
+  it("keeps the credential and auto-login when a later reconnect gets an unreadable ready", async () => {
+    await signIn();
+    emitTauriEvent("ws-message", JSON.stringify({ type: "ready", payload: { channels: 5 } }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(hoisted.deleteCredential).not.toHaveBeenCalled();
+    expect(sessionStorage.getItem("owncord:skip-auto-login")).toBeNull();
+    expect(navigate).toHaveBeenCalledWith("connect");
+    expect(uiStore.getState().transientError).toBe(connectText("session.unreadableReply"));
   });
 
   it("leaves the voice channel before the socket closes", async () => {

@@ -33,8 +33,25 @@ export function hasObjectPayload(frame: RawFrame): boolean {
   );
 }
 
-/** The two handshake frames: nothing re-requests them, so a bad one ends the connect. */
-const HANDSHAKE_TYPES: ReadonlySet<string> = new Set(["ready", "auth_ok"]);
+/**
+ * The frames that settle the connect: nothing re-requests them, and redialling
+ * with the same token would only meet them again, so an unreadable one ends it.
+ */
+const HANDSHAKE_TYPES: ReadonlySet<string> = new Set(["ready", "auth_ok", "auth_error"]);
+
+/** Calls each listener; one that throws is reported and must not stop the rest. */
+export function callAll(listeners: ReadonlySet<() => void>, onError: (err: unknown) => void): void {
+  for (const listener of listeners) {
+    try {
+      listener();
+    } catch (err) {
+      onError(err);
+    }
+  }
+}
+
+/** What to do about a frame that was not dispatched. */
+export type RejectVerdict = "fatal" | "resync" | "drop";
 
 /** What a frame turned out to be. */
 export type FrameRead =
@@ -68,19 +85,21 @@ export function readServerFrame(frame: RawFrame): FrameRead {
 
 /**
  * Logs and records a frame that is not dispatched. Only the type and the field
- * name go out: frames hold chat text and the log is persisted. Returns true
- * when the frame was a handshake frame, which the caller must treat as fatal.
+ * name go out: frames hold chat text and the log is persisted. "fatal" is a
+ * handshake frame; "resync" is a sequenced frame whose event is now lost, so
+ * the caller asks the server for a fresh state; "drop" needs nothing more.
  */
 export function reportRejectedFrame(
   read: Exclude<FrameRead, { kind: "message" }>,
   bytes: number,
-): boolean {
+  sequenced: boolean,
+): RejectVerdict {
   if (read.kind === "malformed") {
     log.warn("Invalid WS message: missing type or payload", {
       bytes,
       payloadKind: read.payloadKind,
     });
-    return false;
+    return "drop";
   }
   log.warn("Invalid WS frame, dropping", {
     type: read.type,
@@ -90,5 +109,6 @@ export function reportRejectedFrame(
   // The recorder keeps tokens only: brackets in a path are shape marks, not names.
   const field = read.fault.path.replace(/[[\]{}]/g, "").slice(0, 48) || "payload";
   recordEvent("ws.frame_invalid", { type: read.type, field });
-  return HANDSHAKE_TYPES.has(read.type);
+  if (HANDSHAKE_TYPES.has(read.type)) return "fatal";
+  return sequenced ? "resync" : "drop";
 }
