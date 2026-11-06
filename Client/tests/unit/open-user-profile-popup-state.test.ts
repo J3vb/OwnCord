@@ -8,7 +8,9 @@ const { createPopupMock } = vi.hoisted(() => ({
     isOpen: () => true,
   })),
 }));
-vi.mock("@components/UserProfilePopup", () => ({ createUserProfilePopup: createPopupMock }));
+vi.mock("../../src/features/profiles/userProfilePopup", () => ({
+  createUserProfilePopup: createPopupMock,
+}));
 
 // Wraps the real binding so a test can see which card flushed its note.
 const { bindings } = vi.hoisted(() => ({ bindings: [] as { destroy: () => void }[] }));
@@ -29,7 +31,7 @@ import type {
   ProfileRoleControl,
   ProfileRolesControl,
   UserProfilePopupComponent,
-} from "@components/UserProfilePopup";
+} from "../../src/features/profiles/userProfilePopup";
 import { Permission } from "@lib/types";
 import { resetBlocksStore, setUserBlockedByMe, setUserBlockedByThem } from "@stores/blocks.store";
 import { authStore } from "@stores/auth.store";

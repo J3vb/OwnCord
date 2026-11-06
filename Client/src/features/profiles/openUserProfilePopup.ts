@@ -15,7 +15,7 @@ import type {
   ProfileRoleControl,
   ProfileRolesControl,
   UserProfilePopupComponent,
-} from "../../components/UserProfilePopup";
+} from "./userProfilePopup";
 import { showToast } from "../../lib/ui/toast";
 import { isPhoneLayout } from "../../lib/ui/bottomSheet";
 import { reportEntryText } from "../../i18n/reportEntry";
@@ -200,7 +200,7 @@ export function openUserProfilePopup(options: OpenUserProfilePopupOptions): () =
   const note = notesContext === null ? undefined : createNoteBinding(notesContext, userId);
   const seq = ++popupSeq;
 
-  import("../../components/UserProfilePopup").then(
+  import("./userProfilePopup").then(
     ({ createUserProfilePopup }) => {
       if (seq !== popupSeq || signal?.aborted === true) {
         note?.destroy();

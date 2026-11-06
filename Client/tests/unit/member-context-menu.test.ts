@@ -16,7 +16,7 @@ import {
   applyReadyCapabilities,
   resetServerCapabilities,
 } from "../../src/lib/net/serverCapabilities";
-import "@components/UserProfilePopup";
+import "../../src/features/profiles/userProfilePopup";
 import "@components/AdminActions";
 import { resetAuthState } from "../helpers/storeSeeds";
 

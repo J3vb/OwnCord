@@ -19,18 +19,18 @@ import { createIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/text/safeRender";
 import type { UserStatus } from "@lib/types";
 import { resolveDisplayName } from "@lib/ui/avatar";
-import { createAvatarElement } from "../features/profiles/avatar";
+import { createAvatarElement } from "./avatar";
 import { roleColorVar } from "@lib/text/formatting";
-import { reportEntryText } from "../i18n/reportEntry";
+import { reportEntryText } from "../../i18n/reportEntry";
 import { applyStatusIndicator, applyStatusLine } from "@lib/ui/statusIndicator";
-import { NOTE_MAX_LENGTH, type NoteBinding } from "../features/profiles/userNotes";
-import { paintBanner } from "../features/profiles/banner";
-import { bannerImages } from "../features/profiles/bannerImages";
-import { requestsText } from "../i18n/requests";
-import { shellText } from "../i18n/shell";
-import { playingForLine } from "../features/members/gameActivityLine";
-import { mountListeningCard } from "../features/members/listeningCard";
-import type { ListeningSong } from "../features/members/listeningLine";
+import { NOTE_MAX_LENGTH, type NoteBinding } from "./userNotes";
+import { paintBanner } from "./banner";
+import { bannerImages } from "./bannerImages";
+import { requestsText } from "../../i18n/requests";
+import { shellText } from "../../i18n/shell";
+import { playingForLine } from "../members/gameActivityLine";
+import { mountListeningCard } from "../members/listeningCard";
+import type { ListeningSong } from "../members/listeningLine";
 
 // ---------------------------------------------------------------------------
 // Types

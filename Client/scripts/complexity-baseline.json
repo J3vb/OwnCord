@@ -35,10 +35,6 @@
     "components/UpdateNotifier.ts": {
       "createUpdateNotifier > renderInstallState": [19]
     },
-    "components/UserProfilePopup.ts": {
-      "createUserProfilePopup > mount": [33],
-      "createUserProfilePopup > mount > renderChips": [17]
-    },
     "components/dmContextMenu.ts": {
       "openDmContextMenu": [30]
     },
@@ -149,6 +145,10 @@
     "features/profiles/openUserProfilePopup.ts": {
       "openUserProfilePopup": [21],
       "openUserProfilePopup > (anonymous)": [20]
+    },
+    "features/profiles/userProfilePopup.ts": {
+      "createUserProfilePopup > mount": [33],
+      "createUserProfilePopup > mount > renderChips": [17]
     },
     "features/settings/AppearanceTab.ts": {
       "buildAppearanceTab": [16]

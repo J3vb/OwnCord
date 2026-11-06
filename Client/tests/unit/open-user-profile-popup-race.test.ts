@@ -6,7 +6,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as profileMocks from "../helpers/profilePopupMocks";
-import "@components/UserProfilePopup";
+import "../../src/features/profiles/userProfilePopup";
 
 const { bindings } = vi.hoisted(() => ({ bindings: [] as { destroy: () => void }[] }));
 vi.mock("../../src/features/profiles/userNotes", (importOriginal) =>

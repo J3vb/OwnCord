@@ -113,6 +113,7 @@ const MOVED_NOT_MUTATED = [
   "src/features/messaging/sendAcknowledged.ts",
   "src/features/presence/pageActivities.ts",
   "src/features/profiles/bannerImages.ts",
+  "src/features/profiles/userProfilePopup.ts",
   "src/features/server-rail/mountServerRail.ts",
   "src/features/settings/AboutTab.ts",
   "src/features/settings/AccessibilityTab.ts",
