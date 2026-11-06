@@ -162,6 +162,7 @@ export const shards = {
     "src/lib/apiAccount.ts",
     "src/lib/net/legacyKeyMigration.ts",
     "src/lib/net/wsFrame.ts",
+    "src/lib/net/gapResume.ts",
   ],
   "transport-auth-3": [
     "src/features/voice/callChatResize.ts",

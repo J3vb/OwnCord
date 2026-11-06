@@ -1,8 +1,9 @@
 /**
  * Property tests for the WebSocket frame handler in ws.ts: whatever text the
  * socket delivers, the handler never throws, a frame that is not a JSON object
- * with an object payload never reaches a listener, and a well-formed frame
- * reaches its own type's listeners exactly once.
+ * with an object payload never reaches a listener, and a frame of the shape
+ * its type promises reaches its own type's listeners exactly once (one of the
+ * wrong shape reaches none).
  */
 import { describe, it, expect, vi } from "vitest";
 import fc from "fast-check";
@@ -18,6 +19,8 @@ import { createWsClient } from "../../src/lib/ws";
 import { ServerMessageType } from "../../src/lib/protocolTypes";
 import { useWsClientFixture } from "../helpers/wsClientFixture";
 import { openSocket } from "../helpers/wsSuiteHarness";
+import { checkFrame } from "../../src/lib/net/wireCheck";
+import { SHAPED_FRAME_TYPES, samplePayload } from "../helpers/wireSamples";
 
 type WsClient = ReturnType<typeof createWsClient>;
 type ServerType = Parameters<WsClient["on"]>[0];
@@ -25,7 +28,10 @@ type ServerType = Parameters<WsClient["on"]>[0];
 const SERVER_TYPES = Object.values(ServerMessageType) as ServerType[];
 // Frames that change the connection itself, and the heartbeat the handler eats.
 const CONTROL_TYPES = new Set<string>(["auth_ok", "auth_error", "error", "server_restart", "pong"]);
-const PLAIN_TYPES = SERVER_TYPES.filter((t) => !CONTROL_TYPES.has(t));
+const PLAIN_TYPES = SERVER_TYPES.filter((t) => !CONTROL_TYPES.has(t) && t !== "ready");
+// Types with a shape in the table whose frame is dispatched to its own listeners;
+// a wrong-shape ready ends the connect, so it is covered in ws-frame-shape.
+const VALID_TYPES = SHAPED_FRAME_TYPES.filter((t) => !CONTROL_TYPES.has(t));
 const PROPERTY_TIMEOUT_MS = 20_000;
 
 function isObjectFrame(raw: string): boolean {
@@ -121,14 +127,14 @@ describe("WebSocket frame decode properties", () => {
   });
 
   it(
-    "delivers a well-formed frame to its own listeners once, even after garbage",
+    "delivers a frame of the right shape to its own listeners once, even after garbage",
     async () => {
       await openSocket(client);
       const received = new Map<string, unknown[]>();
-      for (const type of PLAIN_TYPES) {
+      for (const type of VALID_TYPES) {
         const list: unknown[] = [];
         received.set(type, list);
-        client.on(type, (payload) => list.push(payload));
+        client.on(type as ServerType, (payload) => list.push(payload));
       }
       fc.assert(
         fc.property(
@@ -136,15 +142,39 @@ describe("WebSocket frame decode properties", () => {
             anyText.filter((raw) => !isObjectFrame(raw)),
             { maxLength: 4 },
           ),
-          fc.constantFrom(...PLAIN_TYPES),
+          fc.constantFrom(...VALID_TYPES),
           fc.dictionary(fc.string(), fc.jsonValue()),
-          (garbage, type, payload) => {
+          (garbage, type, extras) => {
+            const payload = { ...extras, ...samplePayload(type) };
+            expect(checkFrame(type, payload)).toBeNull();
             for (const list of received.values()) list.length = 0;
             for (const raw of garbage) deliver(raw);
             deliver(JSON.stringify({ type, payload }));
             const delivered = [...received.entries()].filter(([, list]) => list.length > 0);
             expect(delivered.map(([t]) => t)).toEqual([type]);
             expect(received.get(type)).toEqual([JSON.parse(JSON.stringify(payload)) as unknown]);
+          },
+        ),
+        { numRuns: 200 },
+      );
+    },
+    PROPERTY_TIMEOUT_MS,
+  );
+
+  it(
+    "drops a frame of the wrong shape and delivers nothing",
+    async () => {
+      await openSocket(client);
+      const seen = countAll(client);
+      fc.assert(
+        fc.property(
+          fc.constantFrom(...PLAIN_TYPES),
+          fc.dictionary(fc.string(), fc.jsonValue()),
+          (type, payload) => {
+            fc.pre(checkFrame(type, payload) !== null);
+            const before = seen.count;
+            deliver(JSON.stringify({ type, payload }));
+            expect(seen.count).toBe(before);
           },
         ),
         { numRuns: 200 },

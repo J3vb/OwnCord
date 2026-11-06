@@ -61,7 +61,10 @@ describe("client liveness deadline", () => {
 
     await vi.advanceTimersByTimeAsync(50_000);
     // A broadcast (not a pong) still proves the socket is delivering bytes.
-    emitTauriEvent("ws-message", JSON.stringify({ type: "typing", payload: { channel_id: 1 } }));
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({ type: "typing", payload: { channel_id: 1, user_id: 2, username: "u" } }),
+    );
 
     const states = trackStates(client);
 

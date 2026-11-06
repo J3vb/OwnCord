@@ -12,6 +12,7 @@ import { mockInvoke, emitTauriEvent } from "./helpers/ws-mocks";
 import { createWsClient } from "../../src/lib/ws";
 import { attachRecorder } from "../../src/lib/diagnostics/eventSink";
 import { useWsClientFixture } from "../helpers/wsClientFixture";
+import { emitAuthOk } from "../helpers/wsSuiteHarness";
 
 type Seen = { code: string; fields: Readonly<Record<string, unknown>> };
 
@@ -42,7 +43,7 @@ describe("ws diagnostic events", () => {
     client.connect({ host: "Chat.Example.org:8443", token: "secret-token" });
     await vi.advanceTimersByTimeAsync(10);
     emitTauriEvent("ws-state", "open");
-    emitTauriEvent("ws-message", JSON.stringify({ type: "auth_ok", payload: { user: { id: 1 } } }));
+    emitAuthOk();
     await vi.advanceTimersByTimeAsync(10);
     emitTauriEvent("ws-state", "closed");
     await vi.advanceTimersByTimeAsync(10);

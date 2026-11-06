@@ -68,6 +68,7 @@ export function fakeWs(): FakeWsClient {
     onCertMismatch: vi.fn(() => () => {}),
     onCertFirstUse: vi.fn(() => () => {}),
     onServerBusy: vi.fn(() => () => {}),
+    onHandshakeFault: vi.fn(() => () => {}),
     startCertListener: vi.fn(async () => {}),
     acceptCertFingerprint: vi.fn(async () => {}),
     getConnectFailureCode: vi.fn(() => null),

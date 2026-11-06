@@ -7,6 +7,7 @@ vi.mock("@tauri-apps/api/event", async () => ({
 }));
 import { createWsClient } from "@lib/ws";
 import { mockInvoke, eventHandlers, emitTauriEvent } from "./helpers/ws-mocks";
+import { emitAuthOk } from "../helpers/wsSuiteHarness";
 
 describe("diagnostic heartbeat", () => {
   let ws: ReturnType<typeof createWsClient>;
@@ -18,7 +19,7 @@ describe("diagnostic heartbeat", () => {
     ws.connect({ host: "server.test", token: "token" });
     await vi.advanceTimersByTimeAsync(10);
     emitTauriEvent("ws-state", "open");
-    emitTauriEvent("ws-message", JSON.stringify({ type: "auth_ok", payload: {} }));
+    emitAuthOk();
   });
   afterEach(() => {
     ws.disconnect();
@@ -32,7 +33,10 @@ describe("diagnostic heartbeat", () => {
     expect(mockInvoke).toHaveBeenCalledWith("ws_send", {
       message: JSON.stringify({ type: "ping", payload: {} }),
     });
-    emitTauriEvent("ws-message", JSON.stringify({ type: "typing", payload: {} }));
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({ type: "typing", payload: { channel_id: 1, user_id: 2, username: "u" } }),
+    );
     await vi.advanceTimersByTimeAsync(10);
     expect(done).not.toHaveBeenCalled();
     emitTauriEvent("ws-message", JSON.stringify({ type: "pong" }));

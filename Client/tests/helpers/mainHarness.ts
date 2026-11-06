@@ -13,6 +13,9 @@ import {
   createdConnectPages,
   setStartupInvokes,
 } from "./mainMocks";
+import { readyFrame } from "./wsSuiteHarness";
+
+export { readyFrame };
 
 export const latestConnectPage = () =>
   vi.mocked(createdConnectPages.at(-1) as ReturnType<typeof createConnectPage>, true);
@@ -48,7 +51,7 @@ export async function signedInWithDeepLinkHandler(
     motd: "",
   });
   expectConsole("warn", /\[main\] Credential delete failed/);
-  emitTauriEvent("ws-message", JSON.stringify({ type: "ready", payload: {} }));
+  emitTauriEvent("ws-message", readyFrame());
   await vi.advanceTimersByTimeAsync(800);
   deepLinkHandler ??= deepLink.handler as (urls: readonly string[]) => void;
   expect(deepLinkHandler).toBeTypeOf("function");

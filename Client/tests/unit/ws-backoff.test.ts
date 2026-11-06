@@ -6,6 +6,7 @@ import type {
   SocketRetryHint,
 } from "../../src/platform/contracts/socket";
 import { createWsClient, type WsClient } from "../../src/lib/ws";
+import { authOkFrame } from "../helpers/wsSuiteHarness";
 
 const { createTransport } = vi.hoisted(() => ({ createTransport: vi.fn() }));
 vi.mock("../../src/platform/desktop", () => ({
@@ -46,7 +47,7 @@ function transportHarness() {
     close: (retryAfterMs?: number) => state("disconnected", { retryAfterMs }),
     authenticate() {
       state("connected");
-      message(JSON.stringify({ type: "auth_ok", payload: { replay_source: "none" } }));
+      message(authOkFrame({ replaySource: "none" }));
     },
     mismatch: () => mismatch({ host: "example.com", fingerprint: "new", status: "mismatch" }),
     frame: (type: string, payload: unknown) => message(JSON.stringify({ type, payload })),

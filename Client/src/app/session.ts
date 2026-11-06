@@ -23,7 +23,7 @@ import {
 import { wireDispatcher } from "@lib/dispatcher";
 import { setIdentityKeyProvider } from "@lib/ws";
 import { setLastChannelHost } from "@lib/prefs/lastChannel";
-import { authStore, clearAuth } from "@stores/auth.store";
+import { authStore, clearAuth, type LogoutReason } from "@stores/auth.store";
 import { setTransientError } from "@stores/ui.store";
 import { leaveVoiceChannel } from "@stores/voice.store";
 import { createConnectedOverlay } from "@components/ConnectedOverlay";
@@ -198,9 +198,7 @@ export function startSession(
   // host, or when the session tears down. A SERVER_BUSY refusal restarts it,
   // up to PREAUTH_BUSY_CAP_MS after this first attempt (P5-S04).
   const preauthStartedAt = Date.now();
-  const onPreauthDeadline = (): void => {
-    if (!owner.isCurrent()) return;
-    log.warn("Pre-auth connection timed out", { host, timeoutMs: PREAUTH_CONNECT_TIMEOUT_MS });
+  const endPreauth = (message: string, retryWait = true): void => {
     // Stop the retry loop and tear the dead attempt down exactly as a
     // cancelled auto-login does, then tell the user on the connect form.
     api.endSession();
@@ -211,15 +209,22 @@ export function startSession(
     dispatcherCleanup = null;
     lastConnectHost = "";
     lastConnectToken = "";
+    setTransientError(message);
+    // A server that answers with a reply we cannot read is not offline: waiting
+    // for it would redial into the same fault.
+    if (retryWait) onPreauthTimeout?.();
+  };
+  const onPreauthDeadline = (): void => {
+    if (!owner.isCurrent()) return;
+    log.warn("Pre-auth connection timed out", { host, timeoutMs: PREAUTH_CONNECT_TIMEOUT_MS });
     // A dial that failed on the certificate is not an unreachable server:
     // name it. `getConnectFailureCode` reads the distinct code the transport
     // reported for the rejected connect (ws.ts).
-    setTransientError(
+    endPreauth(
       ws.getConnectFailureCode() === TLS_CERT_CODE
         ? connectText("error.tlsFailed")
         : connectText("session.connectTimeout"),
     );
-    onPreauthTimeout?.();
   };
   let preauthTimer: ReturnType<typeof setTimeout> | null = setTimeout(
     onPreauthDeadline,
@@ -238,6 +243,16 @@ export function startSession(
   sessionUnsubs.push(
     ws.onCertFirstUse((evt) => {
       if (evt.host === normalizeHostForCertCompare(host)) clearPreauthDeadline();
+    }),
+  );
+  // A sign-in or ready the client cannot read: nothing re-requests it and a
+  // redial meets the same server, so end the attempt and say so.
+  sessionUnsubs.push(
+    ws.onHandshakeFault(() => {
+      if (!owner.isCurrent()) return;
+      const message = connectText("session.unreadableReply");
+      if (preauthTimer !== null) endPreauth(message, false);
+      else endAuthedSession(message, "unreadable_reply");
     }),
   );
   sessionUnsubs.push(
@@ -418,6 +433,14 @@ export function startSession(
   owner.addCleanup(sessionCleanup);
 }
 
+/** Ends a session that got past sign-in, keeping the stored sign-in, and says why on the form. */
+function endAuthedSession(message: string, reason: LogoutReason = "user"): void {
+  api.endSession();
+  abandonInFlight();
+  if (authStore.getState().isAuthenticated) clearAuth(reason);
+  setTransientError(message);
+}
+
 /**
  * The connected overlay has no Cancel, and the main page cannot mount without
  * `ready`: a server that signs the user in but stalls building `ready` (or a
@@ -436,10 +459,7 @@ function startReadyDeadline(owner: SessionScope, host: string): { restart(): voi
     timer = null;
     if (!owner.isCurrent()) return;
     log.warn("Server did not send ready in time", { host, timeoutMs: READY_TIMEOUT_MS });
-    api.endSession();
-    abandonInFlight();
-    if (authStore.getState().isAuthenticated) clearAuth();
-    setTransientError(connectText("session.readyTimeout"));
+    endAuthedSession(connectText("session.readyTimeout"));
   };
   const arm = (): void => {
     clear();
@@ -507,13 +527,17 @@ export function installLogoutTeardown(): void {
           // skip flag below — does not survive that relaunch).
           // A quick switch keeps it as well: switching back resumes with it, and
           // the departed session is left for that return.
-          if (reason !== "protocol_epoch" && reason !== "server_switch") {
+          if (
+            reason !== "protocol_epoch" &&
+            reason !== "server_switch" &&
+            reason !== "unreadable_reply"
+          ) {
             if (__OWNCORD_WEB__) void deleteCredential(host, sessionToken || undefined);
             else void deleteCredential(host);
           }
           // Whenever this session must not turn around and auto-login with the
           // credential (removed, or just refused), say so.
-          sessionStorage.setItem("owncord:skip-auto-login", "1");
+          if (reason !== "unreadable_reply") sessionStorage.setItem("owncord:skip-auto-login", "1");
         }
         navigate("connect");
       }

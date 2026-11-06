@@ -15,7 +15,7 @@ import { createLogger } from "../logger";
 const log = createLogger("sessionRegistry");
 
 /** Why the session ended; see `LogoutReason` in auth.store for each meaning. */
-export type SessionResetReason = "user" | "protocol_epoch" | "server_switch";
+export type SessionResetReason = "user" | "protocol_epoch" | "server_switch" | "unreadable_reply";
 
 /**
  * When an entry runs. `session` cancels in-flight work before any store is

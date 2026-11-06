@@ -19,6 +19,8 @@ const log = createLogger("auth.store");
  * credential and the update it offers relaunches into auto-login.
  * "server_switch": the user quick-switched to another server — main.ts keeps
  * the departed server's credential so switching back resumes it.
+ * "unreadable_reply": the server sent a sign-in or ready this client cannot
+ * read; the token is fine, so the credential stays and auto-login is not blocked.
  */
 export type LogoutReason = SessionResetReason;
 

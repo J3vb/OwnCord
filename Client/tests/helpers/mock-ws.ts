@@ -94,6 +94,10 @@ export function createMockWsClient() {
       return () => {};
     },
 
+    onHandshakeFault(): () => void {
+      return () => {};
+    },
+
     onCertMismatch(_listener: CertMismatchListener): () => void {
       return () => {};
     },

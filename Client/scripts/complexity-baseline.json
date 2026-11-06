@@ -274,7 +274,7 @@
       "readingFromStats": [17]
     },
     "lib/ws.ts": {
-      "createWsClient > handleMessage": [28],
+      "createWsClient > handleMessage": [27],
       "createWsClient > handleTransportState": [23]
     },
     "pages/connect-page/login-form/loginFormDom.ts": {

@@ -310,15 +310,16 @@ twice across two starts.
 
 ### `ws`
 
-| Code                     | Label                                       | Fields                                                                                                                                       | Emitted by      |
-| ------------------------ | ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | --------------- |
-| `ws.connecting`          | Connecting to the server                    | `generation` (int)<br>`attempt` (int)<br>`host` (host)                                                                                       | `src/lib/ws.ts` |
-| `ws.open`                | Server connection open                      | `generation` (int)                                                                                                                           | `src/lib/ws.ts` |
-| `ws.ready`               | Server connection ready                     | `generation` (int)<br>`after_ms` (ms)                                                                                                        | `src/lib/ws.ts` |
-| `ws.closed`              | Server connection closed                    | `generation` (int)<br>`close_code` (int)<br>`close_class` (normal / going_away / protocol / auth / policy / server_error / abnormal / other) | `src/lib/ws.ts` |
-| `ws.reconnect_scheduled` | Reconnect to the server scheduled           | `generation` (int)<br>`attempt` (int)<br>`delay_ms` (ms)                                                                                     | `src/lib/ws.ts` |
-| `ws.superseded`          | A newer server connection replaced this one | `generation` (int)<br>`by_generation` (int)                                                                                                  | `src/lib/ws.ts` |
-| `ws.stale_event`         | Event from an old server connection ignored | `generation` (int)<br>`live_generation` (int)                                                                                                | `src/lib/ws.ts` |
+| Code                     | Label                                       | Fields                                                                                                                                       | Emitted by               |
+| ------------------------ | ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ |
+| `ws.connecting`          | Connecting to the server                    | `generation` (int)<br>`attempt` (int)<br>`host` (host)                                                                                       | `src/lib/ws.ts`          |
+| `ws.open`                | Server connection open                      | `generation` (int)                                                                                                                           | `src/lib/ws.ts`          |
+| `ws.ready`               | Server connection ready                     | `generation` (int)<br>`after_ms` (ms)                                                                                                        | `src/lib/ws.ts`          |
+| `ws.closed`              | Server connection closed                    | `generation` (int)<br>`close_code` (int)<br>`close_class` (normal / going_away / protocol / auth / policy / server_error / abnormal / other) | `src/lib/ws.ts`          |
+| `ws.reconnect_scheduled` | Reconnect to the server scheduled           | `generation` (int)<br>`attempt` (int)<br>`delay_ms` (ms)                                                                                     | `src/lib/ws.ts`          |
+| `ws.superseded`          | A newer server connection replaced this one | `generation` (int)<br>`by_generation` (int)                                                                                                  | `src/lib/ws.ts`          |
+| `ws.stale_event`         | Event from an old server connection ignored | `generation` (int)<br>`live_generation` (int)                                                                                                | `src/lib/ws.ts`          |
+| `ws.frame_invalid`       | Server message with the wrong shape dropped | `type` (token)<br>`field` (token)                                                                                                            | `src/lib/net/wsFrame.ts` |
 
 ### `events`
 

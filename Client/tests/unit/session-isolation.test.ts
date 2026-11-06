@@ -216,6 +216,7 @@ import { deleteCredential, loadCredential } from "@lib/net/credentials";
 import { PREAUTH_BUSY_CAP_MS, PREAUTH_CONNECT_TIMEOUT_MS } from "@lib/ws";
 import { createProfileManager } from "@lib/presence/profiles";
 import { createConnectPage } from "@pages/ConnectPage";
+import { readyFrame } from "../helpers/wsSuiteHarness";
 
 const A = "a.example:8443";
 const B = "b.example:8443";
@@ -300,7 +301,7 @@ async function completeHandshake(
       },
     }),
   );
-  emitTauriEvent("ws-message", JSON.stringify({ type: "ready", payload: ready }));
+  emitTauriEvent("ws-message", readyFrame(ready));
   await vi.advanceTimersByTimeAsync(800);
 }
 
@@ -331,6 +332,16 @@ const dmChannelRow = (channelId: number): DmChannel =>
     unreadCount: 3,
     mentionCount: 1,
   });
+// The row as `ready` ships it for the shape check, plus the store fields the
+// stand-in handler below reads (extra fields pass the check).
+const dmReadyRow = (channelId: number): object => ({
+  ...dmChannelRow(channelId),
+  channel_id: channelId,
+  last_message_id: null,
+  last_message_at: "",
+  last_message: "hi",
+  unread_count: 3,
+});
 const memberOf = (id: number): object => ({
   id,
   username: `user${id}`,
@@ -423,7 +434,7 @@ describe("a server switch leaves nothing of the old server behind", () => {
   });
 
   it("drops a late `ready` from server A: after B's ready only B's roster and DMs remain", async () => {
-    await loginWithPassword(A, 1, { members: [memberOf(11)], dm_channels: [dmChannelRow(9)] });
+    await loginWithPassword(A, 1, { members: [memberOf(11)], dm_channels: [dmReadyRow(9)] });
     expect([...membersStore.getState().members.keys()]).toEqual([11]);
     expect(dmStore.getState().channels.map((c) => c.channelId)).toEqual([9]);
 
@@ -434,16 +445,13 @@ describe("a server switch leaves nothing of the old server behind", () => {
     // A's snapshot arrives after the switch, before B signs in.
     emitTauriEvent(
       "ws-message",
-      JSON.stringify({
-        type: "ready",
-        payload: { members: [memberOf(11)], dm_channels: [dmChannelRow(9)] },
-      }),
+      readyFrame({ members: [memberOf(11)], dm_channels: [dmReadyRow(9)] }),
     );
     await vi.advanceTimersByTimeAsync(10);
     expect(membersStore.getState().members.size).toBe(0);
     expect(dmStore.getState().channels.length).toBe(0);
 
-    await loginWithPassword(B, 2, { members: [memberOf(22)], dm_channels: [dmChannelRow(10)] });
+    await loginWithPassword(B, 2, { members: [memberOf(22)], dm_channels: [dmReadyRow(10)] });
     expect([...membersStore.getState().members.keys()]).toEqual([22]);
     expect(dmStore.getState().channels.map((c) => c.channelId)).toEqual([10]);
   });
