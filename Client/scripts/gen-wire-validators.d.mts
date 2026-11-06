@@ -23,5 +23,5 @@ export const UNIONS_FILE: string;
 export const REST_FILE: string;
 export const OUT_FILE: string;
 export function buildTables(options?: GenerateOptions): WireTables;
-export function renderModule(tables: WireTables, outFile?: string): Promise<string>;
+export function renderModule(tables: WireTables): Promise<string>;
 export function generate(options?: GenerateOptions): Promise<string>;

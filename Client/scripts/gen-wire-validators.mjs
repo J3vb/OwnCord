@@ -89,7 +89,7 @@ class ShapeBuilder {
       throw new Error(`${where}: a bigint or symbol cannot appear on the wire`);
     }
     if (f & F.TypeParameter) throw new Error(`${where}: unresolved type parameter`);
-    if (f & F.NonPrimitive) return this.intern([K_OBJECT, [], []]);
+    if (f & F.NonPrimitive) return UNKNOWN;
     if (type.isUnion()) return this.unionOf(type, where);
     if (f & (F.Object | F.Intersection)) return this.objectOf(type, where);
     throw new Error(`${where}: unsupported type ${this.checker.typeToString(type)}`);
@@ -212,9 +212,28 @@ function findDeclaredType(program, checker, file, name, kind) {
  * Walks the types and returns the table as plain data:
  * `{ shapes, frames, rest }` where `frames` and `rest` map a name to a shape number.
  */
+// Parsed declaration files (.d.ts: the lib and DOM types, dependencies), kept
+// so a process that builds many tables parses them once, not once per call.
+const declarationCache = new Map();
+
+function cachingHost(options) {
+  const host = ts.createCompilerHost(options);
+  const read = host.getSourceFile.bind(host);
+  host.getSourceFile = (fileName, languageVersion, onError, shouldCreate) => {
+    if (!fileName.endsWith(".d.ts")) return read(fileName, languageVersion, onError, shouldCreate);
+    let file = declarationCache.get(fileName);
+    if (file === undefined) {
+      file = read(fileName, languageVersion, onError, shouldCreate);
+      if (file !== undefined) declarationCache.set(fileName, file);
+    }
+    return file;
+  };
+  return host;
+}
+
 export function buildTables({ unionsFile = UNIONS_FILE, restFile = REST_FILE } = {}) {
   const { options, rootNames } = readCompilerOptions([unionsFile, restFile]);
-  const program = ts.createProgram({ rootNames, options });
+  const program = ts.createProgram({ rootNames, options, host: cachingHost(options) });
   const checker = program.getTypeChecker();
   const builder = new ShapeBuilder(checker);
 
@@ -276,26 +295,30 @@ export type Shape =
 `;
 
 function renderMap(map) {
-  return `{${Object.entries(map)
-    .map(([k, v]) => `${JSON.stringify(k)}: ${v}`)
-    .join(",")}}`;
+  const rows = Object.entries(map).map(([k, v]) => `  ${JSON.stringify(k)}: ${v},`);
+  return rows.length === 0 ? "{}" : `{\n${rows.join("\n")}\n}`;
 }
 
-/** The text of wireShapes.ts for `tables`, formatted by the repo's prettier. */
-export async function renderModule(tables, outFile = OUT_FILE) {
-  const source = `${HEADER}
+/**
+ * The text of wireShapes.ts for `tables`: one shape per line, so a type change
+ * shows as a small diff. Not run through prettier (the file is in
+ * .prettierignore like protocolTypes.ts), so the generator needs only
+ * TypeScript and works from Client/ alone.
+ */
+export async function renderModule(tables) {
+  const shapes = tables.shapes.map((s) => `  ${JSON.stringify(s)},`).join("\n");
+  return `${HEADER}
 import type { RestReplyShapes } from "./restReplies";
 
 ${SHAPE_TYPE}
-export const SHAPES: readonly Shape[] = ${JSON.stringify(tables.shapes)};
+export const SHAPES: readonly Shape[] = [
+${shapes}
+];
 
 export const FRAME_SHAPES: Readonly<Record<string, number>> = ${renderMap(tables.frames)};
 
 export const REST_SHAPES: Readonly<Record<keyof RestReplyShapes, number>> = ${renderMap(tables.rest)};
 `;
-  const prettier = await import("prettier");
-  const config = (await prettier.resolveConfig(outFile)) ?? {};
-  return prettier.format(source, { ...config, parser: "typescript", filepath: outFile });
 }
 
 /** The full generated text, from the committed type files. */

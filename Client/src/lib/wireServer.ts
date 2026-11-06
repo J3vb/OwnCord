@@ -340,12 +340,12 @@ export interface ImportedAuthor {
   readonly color?: string;
 }
 
-/** Reply parent snippet. A deleted parent is redacted to `{id, deleted: true}`. */
 /** The parent's author. The server leaves `avatar` out when the author has none. */
 export type ReferencedMessageUser = Omit<MessageUser, "avatar"> & {
   readonly avatar?: string | null;
 };
 
+/** Reply parent snippet. A deleted parent is redacted to `{id, deleted: true}`. */
 export interface ReferencedMessage {
   readonly id: number;
   readonly user: ReferencedMessageUser | null;

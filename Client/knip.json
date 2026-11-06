@@ -5,5 +5,5 @@
   "ignore": ["src/lib/protocolTypes.ts"],
   "ignoreExportsUsedInFile": true,
   "ignoreBinaries": ["go"],
-  "ignoreDependencies": ["@jitsi/rnnoise-wasm", "prettier"]
+  "ignoreDependencies": ["@jitsi/rnnoise-wasm"]
 }
