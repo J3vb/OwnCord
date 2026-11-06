@@ -63,6 +63,29 @@ export function absentMembers(dm: DmChannel, present: readonly number[]): number
   return dm.participants.map((p) => p.id).filter((id) => !present.includes(id));
 }
 
+/** The view while you are in the DM's room: your own ring, or the call. */
+function deriveInCallView(
+  input: DmCallViewInput,
+  dm: DmChannel,
+  others: readonly number[],
+): DmCallView {
+  const out = input.outgoing;
+  // Anyone else in the room means the call is up, whatever the ring said.
+  if (others.length === 0 && out !== null && out.channelId === dm.channelId) {
+    if (out.phase === "ringing") return { kind: "outgoing", dm, pending: out.pending };
+    return { kind: "unanswered", dm, reason: out.phase };
+  }
+  const inRoom = [input.selfId, ...others];
+  const peerLeft = !dm.isGroup && others.length === 0 && input.peerWasHere === true;
+  return {
+    kind: "connected",
+    dm,
+    inRoom,
+    peerLeft,
+    canRingAgain: peerLeft || absentMembers(dm, inRoom).length > 0,
+  };
+}
+
 /** Which panel, if any, the open channel shows. Pure: the whole decision. */
 export function deriveCallView(input: DmCallViewInput): DmCallView {
   const { activeChannelId, voice, selfId } = input;
@@ -77,23 +100,7 @@ export function deriveCallView(input: DmCallViewInput): DmCallView {
   if (!inCall && input.incoming !== null && input.incoming.channelId === dm.channelId) {
     return { kind: "incoming", dm, ring: input.incoming };
   }
-  if (inCall) {
-    const out = input.outgoing;
-    // Anyone else in the room means the call is up, whatever the ring said.
-    if (others.length === 0 && out !== null && out.channelId === dm.channelId) {
-      if (out.phase === "ringing") return { kind: "outgoing", dm, pending: out.pending };
-      return { kind: "unanswered", dm, reason: out.phase };
-    }
-    const inRoom = [selfId, ...others];
-    const peerLeft = !dm.isGroup && others.length === 0 && input.peerWasHere === true;
-    return {
-      kind: "connected",
-      dm,
-      inRoom,
-      peerLeft,
-      canRingAgain: peerLeft || absentMembers(dm, inRoom).length > 0,
-    };
-  }
+  if (inCall) return deriveInCallView(input, dm, others);
   if (others.length > 0) {
     return { kind: "live", dm, inRoom: others, otherChannelId: voice.currentChannelId };
   }
@@ -121,6 +128,40 @@ export interface ControlRefs {
   share: HTMLButtonElement | null;
 }
 
+function selfPerson(): Person {
+  const me = authStore.getState().user;
+  return {
+    name: d("you"),
+    subject: {
+      username: me?.username ?? "",
+      displayName: me?.display_name ?? null,
+      avatar: me?.avatar ?? null,
+    },
+  };
+}
+
+function memberPerson(userId: number): Person | null {
+  const member = membersStore.getState().members.get(userId);
+  if (member === undefined) return null;
+  return {
+    name: memberDisplayName(member),
+    subject: {
+      username: member.username,
+      displayName: member.displayName,
+      avatar: member.avatar,
+    },
+  };
+}
+
+function participantPerson(userId: number, dm: DmChannel): Person | null {
+  const p = dm.participants.find((x) => x.id === userId);
+  if (p === undefined) return null;
+  return {
+    name: (p.displayName ?? "") || p.username,
+    subject: { username: p.username, displayName: p.displayName ?? null, avatar: p.avatar },
+  };
+}
+
 /** Resolve a user the way every other identity surface does: the members
  *  store first, then the DM's own participant copy, then the voice roster. */
 export function resolvePerson(
@@ -129,35 +170,9 @@ export function resolvePerson(
   voice: VoiceState,
   selfId: number,
 ): Person {
-  if (userId === selfId) {
-    const me = authStore.getState().user;
-    return {
-      name: d("you"),
-      subject: {
-        username: me?.username ?? "",
-        displayName: me?.display_name ?? null,
-        avatar: me?.avatar ?? null,
-      },
-    };
-  }
-  const member = membersStore.getState().members.get(userId);
-  if (member !== undefined) {
-    return {
-      name: memberDisplayName(member),
-      subject: {
-        username: member.username,
-        displayName: member.displayName,
-        avatar: member.avatar,
-      },
-    };
-  }
-  const p = dm.participants.find((x) => x.id === userId);
-  if (p !== undefined) {
-    return {
-      name: (p.displayName ?? "") || p.username,
-      subject: { username: p.username, displayName: p.displayName ?? null, avatar: p.avatar },
-    };
-  }
+  if (userId === selfId) return selfPerson();
+  const known = memberPerson(userId) ?? participantPerson(userId, dm);
+  if (known !== null) return known;
   const username = voice.voiceUsers.get(dm.channelId)?.get(userId)?.username ?? "";
   return { name: username, subject: { username } };
 }

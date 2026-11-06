@@ -20,6 +20,7 @@ import {
   isSelfCamera,
 } from "./gridShared";
 import type { GridState, GridApi } from "./gridState";
+import { seatFocusedTile, fillThumbStrip } from "../../features/voice/videoGrid/gridFocus";
 import type { TileConfig } from "../VideoGrid";
 
 export function createGridLayout(st: GridState, api: GridApi) {
@@ -195,22 +196,27 @@ export function createGridLayout(st: GridState, api: GridApi) {
     }
   }
 
+  /** No focused tile: the regular flex-wrap layout. The grid's own controls
+   *  stay put, so a control the user is on keeps focus. */
+  function rebuildPlainLayout(root: HTMLDivElement): void {
+    for (const child of Array.from(root.childNodes)) if (!isChrome(child)) child.remove();
+    root.classList.remove("focus-mode");
+    for (const el of allTiles()) {
+      el.classList.remove("focused", "thumb");
+      beforeChrome(el);
+    }
+    appendChrome();
+    applyGridSizes();
+  }
+
   function rebuildFocusLayout(): void {
     if (st.root === null) return;
     const savedFocus = captureFocusedControl();
     syncTileNav();
 
-    if (st.focusedTileId === null || st.cells.size === 0) {
-      // No focus — use regular flex-wrap layout. The grid's own controls stay
-      // put, so a control the user is on keeps focus.
-      for (const child of Array.from(st.root.childNodes)) if (!isChrome(child)) child.remove();
-      st.root.classList.remove("focus-mode");
-      for (const el of allTiles()) {
-        el.classList.remove("focused", "thumb");
-        beforeChrome(el);
-      }
-      appendChrome();
-      applyGridSizes();
+    const focusedId = st.focusedTileId;
+    if (focusedId === null || st.cells.size === 0) {
+      rebuildPlainLayout(st.root);
       restoreFocusedControl(savedFocus);
       return;
     }
@@ -233,26 +239,8 @@ export function createGridLayout(st: GridState, api: GridApi) {
     // Strip area
     const stripArea = createElement("div", { class: "video-focus-strip" });
 
-    const focusedEntry = st.cells.get(st.focusedTileId);
-    if (focusedEntry === undefined) {
-      mainArea.replaceChildren();
-    } else {
-      focusedEntry.el.classList.add("focused");
-      focusedEntry.el.classList.remove("thumb");
-      if (focusedEntry.el.parentNode !== mainArea) mainArea.replaceChildren(focusedEntry.el);
-    }
-
-    for (const [id, entry] of st.cells) {
-      if (id === st.focusedTileId) continue;
-      entry.el.classList.remove("focused");
-      entry.el.classList.add("thumb");
-      stripArea.appendChild(entry.el);
-    }
-    for (const el of allTiles()) {
-      if (!el.classList.contains("video-cell--avatar")) continue;
-      el.classList.add("thumb");
-      stripArea.appendChild(el);
-    }
+    seatFocusedTile(st, mainArea, focusedId);
+    fillThumbStrip(st, stripArea, focusedId, allTiles());
 
     if (mainArea.parentNode !== st.root) beforeChrome(mainArea);
     // Only show strip if there are thumbnails. The call view's toggle hides

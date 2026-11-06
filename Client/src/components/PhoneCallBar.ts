@@ -19,9 +19,9 @@ import { createIcon } from "@lib/icons";
 import type { IconName } from "@lib/icons";
 import type { MountableComponent } from "@lib/text/safeRender";
 import { isPhoneLayout } from "@lib/ui/bottomSheet";
-import { voiceStore } from "@stores/voice.store";
+import { voiceStore, type VoiceState } from "@stores/voice.store";
 import { channelsStore } from "@stores/channels.store";
-import { dmStore, dmDisplayName } from "@stores/dm.store";
+import { dmStore, dmDisplayName, type DmChannel } from "@stores/dm.store";
 import { membersStore } from "@stores/members.store";
 import { voiceText as t } from "../i18n/voice";
 import { createTalkSlot } from "../features/voice/talkSlot";
@@ -87,29 +87,17 @@ export function createPhoneCallBar(options: PhoneCallBarOptions): PhoneCallBar {
     timer = setInterval(update, 1000);
   }
 
-  function update(): void {
-    if (root === null) return;
-    const voice = voiceStore.getState();
-    const channelId = voice.currentChannelId;
-    // A DM call resolves through the DM store, as the voice widget does: the
-    // channels-store row for a DM only exists once the conversation was opened.
-    const dm =
-      channelId === null
-        ? undefined
-        : dmStore.getState().channels.find((c) => c.channelId === channelId);
-    // The DM's call panel (its own mute, camera and leave controls) is on
-    // screen whenever that DM is the open channel and you are in its call.
+  /** Whether the bar shows now: in a call, on a phone, with no grid and no
+   *  DM call panel up. A DM call resolves through the DM store, as the voice
+   *  widget does: the channels-store row for a DM only exists once the
+   *  conversation was opened. The DM's call panel (its own mute, camera and
+   *  leave controls) is on screen whenever that DM is the open channel. */
+  function barVisible(channelId: number | null, dm: DmChannel | undefined): boolean {
     const dmPanelUp = dm !== undefined && channelsStore.getState().activeChannelId === channelId;
-    const show = channelId !== null && isPhoneLayout() && !options.isGridUp() && !dmPanelUp;
-    root.hidden = !show;
-    if (!show || channelId === null) {
-      stopTimer();
-      openChannelId = null;
-      return;
-    }
-    startTimer();
-    openChannelId = channelId;
+    return channelId !== null && isPhoneLayout() && !options.isGridUp() && !dmPanelUp;
+  }
 
+  function drawName(channelId: number, dm: DmChannel | undefined): void {
     const channel = channelsStore.getState().channels.get(channelId);
     const name =
       dm !== undefined ? dmDisplayName(dm) : (channel?.name ?? t("widget.channelFallback"));
@@ -117,7 +105,10 @@ export function createPhoneCallBar(options: PhoneCallBarOptions): PhoneCallBar {
     openBtn.setAttribute("aria-label", t("callBar.open", { name }));
     // A call whose channel is not known yet has nowhere to open.
     openBtn.disabled = dm === undefined && channel?.type !== "voice";
+  }
 
+  /** The faces and the detail line. */
+  function drawPeople(channelId: number): void {
     const people = callParticipants(channelId);
     const shown = people.slice(0, MAX_AVATARS);
     const key = shown.map(participantKey).join(",");
@@ -130,7 +121,9 @@ export function createPhoneCallBar(options: PhoneCallBarOptions): PhoneCallBar {
     }
     const detail = detailText(people.length);
     if (detailEl.textContent !== detail) setText(detailEl, detail);
+  }
 
+  function drawMute(voice: VoiceState): void {
     const mic = micControlState(voice);
     const icon: IconName = mic.micOff ? "mic-off" : "mic";
     if (icon !== muteIcon) {
@@ -143,6 +136,28 @@ export function createPhoneCallBar(options: PhoneCallBarOptions): PhoneCallBar {
     muteBtn.setAttribute("aria-label", mic.title);
     muteBtn.title = mic.title;
     muteBtn.disabled = mic.disabled;
+  }
+
+  function update(): void {
+    if (root === null) return;
+    const voice = voiceStore.getState();
+    const channelId = voice.currentChannelId;
+    const dm =
+      channelId === null
+        ? undefined
+        : dmStore.getState().channels.find((c) => c.channelId === channelId);
+    const show = barVisible(channelId, dm);
+    root.hidden = !show;
+    if (!show || channelId === null) {
+      stopTimer();
+      openChannelId = null;
+      return;
+    }
+    startTimer();
+    openChannelId = channelId;
+    drawName(channelId, dm);
+    drawPeople(channelId);
+    drawMute(voice);
   }
 
   function mount(container: Element): void {

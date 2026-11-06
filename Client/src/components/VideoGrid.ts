@@ -14,12 +14,13 @@ import type { StreamInfo } from "./video-grid/streamInfo";
 import type { VoiceModMenuOptions } from "../features/channels/sidebar/volumeMenu";
 import type { StreamSample, VideoView } from "../features/voice/remoteTracks";
 import type { ShareSenderSample } from "../features/voice/shareSenderStats";
-import type { CellEntry } from "./video-grid/gridShared";
+import { STATS_POLL_MS, log, sizeOf, type CellEntry } from "./video-grid/gridShared";
 import type { GridState, GridApi } from "./video-grid/gridState";
 import { createGridLayout } from "./video-grid/gridLayout";
 import { createGridCallBar } from "./video-grid/gridCallBar";
 import { createGridWatch } from "./video-grid/gridWatch";
 import { createGridStreams } from "./video-grid/gridStreams";
+import { createGridStats } from "../features/voice/videoGrid/gridStats";
 
 export interface TileConfig {
   /** True if this is the local user's own tile (no audio controls) */
@@ -232,6 +233,12 @@ export function createVideoGrid(): VideoGridComponent {
     api,
     createGridLayout(st, api),
     createGridCallBar(st, api),
+    createGridStats(st, {
+      pollMs: STATS_POLL_MS,
+      log,
+      sizeOf,
+      loadInfo: () => import("./video-grid/streamInfo"),
+    }),
     createGridWatch(st, api),
     createGridStreams(st, api),
   );
