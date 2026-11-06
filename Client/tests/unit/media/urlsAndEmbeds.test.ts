@@ -21,7 +21,7 @@ vi.mock("../../../src/features/content-consent/external", (importOriginal) =>
 );
 vi.mock("../../../src/platform/desktop/externalContent", () => mocks.desktopExternalContentMock());
 vi.mock("@lib/logger", () => mocks.loggerMock());
-vi.mock("@lib/prefs/mediaVisibility", () => mocks.prefsMediaVisibilityMock());
+vi.mock("/src/features/messaging/content/mediaVisibility", () => mocks.prefsMediaVisibilityMock());
 vi.mock("@lib/icons", () => mocks.iconsMock());
 vi.mock("@lib/prefs/preferences", (importOriginal) => mocks.prefsPreferencesMock(importOriginal));
 vi.mock("../../../src/features/messaging/content/attachments", (importOriginal) =>

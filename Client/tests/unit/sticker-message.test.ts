@@ -13,8 +13,9 @@ vi.mock("../../src/features/messaging/content/attachments", async (importOrigina
     await importOriginal<typeof import("../../src/features/messaging/content/attachments")>();
   return { ...actual, fetchImageAsObjectUrl: fetchImage, cachedImageBytes: cachedBytes };
 });
-vi.mock("../../src/lib/prefs/mediaVisibility", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../src/lib/prefs/mediaVisibility")>();
+vi.mock("/src/features/messaging/content/mediaVisibility", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../src/features/messaging/content/mediaVisibility")>();
   return { ...actual, observeMedia, playMedia };
 });
 vi.mock("../../src/features/messaging/emojiStill", async (importOriginal) => {

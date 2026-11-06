@@ -14,7 +14,7 @@ vi.mock("../../src/features/content-consent/external", (importOriginal) =>
 // No native host: the GIF stays loading, so the suite sees only the observer.
 vi.mock("@tauri-apps/api/core", () => ({ invoke: () => new Promise(() => {}) }));
 
-vi.mock("@lib/prefs/mediaVisibility", () => mocks.mediaVisibilityMock());
+vi.mock("/src/features/messaging/content/mediaVisibility", () => mocks.mediaVisibilityMock());
 
 import { createMessageList } from "../../src/features/messaging/MessageList";
 import { messagesStore } from "@stores/messages.store";

@@ -62,6 +62,8 @@ const MOVED_NOT_MUTATED = [
   "src/features/messaging/content/imageSizes.ts",
   "src/features/messaging/content/imageViewer.ts",
   "src/features/messaging/content/media.ts",
+  "src/features/messaging/content/mediaStills.ts",
+  "src/features/messaging/content/mediaVisibility.ts",
   "src/features/messaging/content/syntaxHighlight.ts",
   "src/features/messaging/emojiRecent.ts",
   "src/features/messaging/message-list/fenwick.ts",

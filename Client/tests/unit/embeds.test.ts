@@ -25,7 +25,9 @@ vi.mock("../../src/platform/desktop/externalContent", () =>
   mocks.externalContentMock(previewMock, imageMock),
 );
 
-vi.mock("@lib/prefs/mediaVisibility", () => mocks.mediaVisibilityMock(mockObserveMedia));
+vi.mock("/src/features/messaging/content/mediaVisibility", () =>
+  mocks.mediaVisibilityMock(mockObserveMedia),
+);
 
 import {
   clearEmbedCaches,

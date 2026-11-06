@@ -17,11 +17,11 @@
  *                        User clicks ❚❚ → freeze immediately
  */
 
-import { createElement, setOwnedTimeout } from "../dom";
-import { createIcon } from "../icons";
-import { connectText } from "../../i18n/connect";
+import { createElement, setOwnedTimeout } from "../../../lib/dom";
+import { createIcon } from "../../../lib/icons";
+import { connectText } from "../../../i18n/connect";
 import { StillCache, releaseStill, type Still } from "./mediaStills";
-import { registerSessionReset } from "../net/sessionRegistry";
+import { registerSessionReset } from "../../../lib/net/sessionRegistry";
 
 /** How long a GIF plays before auto-pausing (ms). */
 const AUTO_PAUSE_MS = 10_000;

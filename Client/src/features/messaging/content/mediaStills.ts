@@ -4,7 +4,7 @@
  * The owner keeps one `StillCache` and calls `reset()` from its session reset.
  */
 
-import { SessionScope } from "../net/sessionScope";
+import { SessionScope } from "../../../lib/net/sessionScope";
 
 /** Soft cap on cached stills; an entry a tracked image still shows is never evicted. */
 const MAX_STILLS = 200;

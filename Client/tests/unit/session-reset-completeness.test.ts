@@ -49,7 +49,7 @@ import {
   rememberRowHeight,
   rememberedRowHeight,
 } from "../../src/features/messaging/message-list/rowHeights";
-import { discardMedia, observeMedia } from "../../src/lib/prefs/mediaVisibility";
+import { discardMedia, observeMedia } from "../../src/features/messaging/content/mediaVisibility";
 import {
   EXTERNAL_CONSENT_PREF,
   admitDerived,

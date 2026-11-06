@@ -20,7 +20,7 @@ vi.mock("../../src/features/content-consent/external", async (importOriginal) =>
   ...(await importOriginal<typeof import("../../src/features/content-consent/external")>()),
   externalAllowed: () => true,
 }));
-vi.mock("@lib/prefs/mediaVisibility", () => ({
+vi.mock("/src/features/messaging/content/mediaVisibility", () => ({
   observeMedia: observeMediaMock,
   discardMedia: discardMediaMock,
 }));
