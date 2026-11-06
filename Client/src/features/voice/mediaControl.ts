@@ -36,6 +36,7 @@ import {
   reconcileVideoFlags as doReconcileVideoFlags,
   inPlaceSourceChange,
   getLocalScreenshareStats,
+  getLocalCameraStats,
 } from "../../lib/voice/screenShare";
 
 // Same logger tag as before the extraction, so the media log lines are unchanged.
@@ -72,6 +73,7 @@ export class MediaControl {
     getCameraState: () => this._cameraState,
     getScreenState: () => this._screenState,
     getDeps: () => this._videoTrackDeps,
+    readCameraSenderSample: () => getLocalCameraStats(this._room),
     readScreenSenderSample: () => getLocalScreenshareStats(this._room),
     onSwitchError: (err) => log.warn("Codec switch failed", err),
   });
@@ -348,14 +350,18 @@ export class MediaControl {
    *  browser capture; Linux asks the host to swap its own). */
   async changeScreenshareSource(): Promise<void> {
     const { changeScreenshareSource } = await import("./screenshareChange");
-    return changeScreenshareSource(this._screenState, this._videoTrackDeps);
+    return this.codecSwitch.checkAfterChange("screen", () =>
+      changeScreenshareSource(this._screenState, this._videoTrackDeps),
+    );
   }
 
   /** The live share's quality for this share only (the web path re-sizes the
    *  browser capture; Linux has the host re-size and republish its own). */
   async setScreenshareQuality(quality: StreamQuality): Promise<void> {
     const { setScreenshareQuality } = await import("./screenshareChange");
-    return setScreenshareQuality(this._screenState, this._videoTrackDeps, quality);
+    return this.codecSwitch.checkAfterChange("screen", () =>
+      setScreenshareQuality(this._screenState, this._videoTrackDeps, quality),
+    );
   }
 
   /** The live share's quality, or null while it is not published. */
@@ -377,7 +383,9 @@ export class MediaControl {
     savePref("videoInputDevice", deviceId);
     this.latestVideoDevice = deviceId;
     const run = this.videoSwitch.then(() =>
-      this.latestVideoDevice === deviceId ? this.doSwitchVideoDevice(deviceId) : undefined,
+      this.latestVideoDevice === deviceId
+        ? this.codecSwitch.checkAfterChange("camera", () => this.doSwitchVideoDevice(deviceId))
+        : undefined,
     );
     this.videoSwitch = run.catch(() => {});
     return run;

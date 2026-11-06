@@ -18,6 +18,7 @@ const log = vi.hoisted(() => ({
 }));
 const loggerTags = vi.hoisted(() => [] as string[]);
 const codecSwitch = vi.hoisted(() => ({
+  checkAfterChange: vi.fn((_kind: string, action: () => Promise<void>) => action()),
   kick: vi.fn(),
   stop: vi.fn(),
   options: null as null | {
@@ -30,6 +31,7 @@ const codecSwitch = vi.hoisted(() => ({
       reapplyAudioPipeline(): void;
     };
     readScreenSenderSample(): unknown;
+    readCameraSenderSample(): unknown;
     onSwitchError(err: unknown): void;
   },
 }));
@@ -73,6 +75,9 @@ vi.mock("./codecSwitch", () => ({
     stop(): void {
       codecSwitch.stop();
     }
+    checkAfterChange(kind: string, action: () => Promise<void>): Promise<void> {
+      return codecSwitch.checkAfterChange(kind, action);
+    }
   },
 }));
 const changeScreenshareSource = vi.hoisted(() => vi.fn(async (..._args: unknown[]) => undefined));
@@ -89,6 +94,7 @@ vi.mock("../../lib/voice/screenShare", () => ({
   disableScreenshare: vi.fn(async (..._args: unknown[]) => undefined),
   reconcileVideoFlags: vi.fn(),
   inPlaceSourceChange: vi.fn(() => inPlaceSource.value),
+  getLocalCameraStats: vi.fn((room: unknown) => ({ cameraSampleOf: room })),
   getLocalScreenshareStats: vi.fn((room: unknown) => ({ sampleOf: room })),
 }));
 
@@ -961,6 +967,7 @@ describe("session wiring", () => {
     vi.mocked(enableScreenshare).mockClear();
     vi.mocked(disableScreenshare).mockClear();
     vi.mocked(reconcileVideoFlags).mockClear();
+    codecSwitch.checkAfterChange.mockClear();
     changeScreenshareSource.mockClear();
     setScreenshareQuality.mockClear();
   });
@@ -979,6 +986,7 @@ describe("session wiring", () => {
     expect(options.getCameraState()).toBe(made.camera);
     expect(options.getScreenState()).toBe(made.screen);
     expect(options.readScreenSenderSample()).toEqual({ sampleOf: room });
+    expect(options.readCameraSenderSample()).toEqual({ cameraSampleOf: room });
     const deps = options.getDeps();
     expect(deps.getRoom()).toBe(room);
     expect(deps.getWs()).toBe(ws);
@@ -1081,6 +1089,8 @@ describe("session wiring", () => {
     expect(setScreenshareQuality).toHaveBeenCalledTimes(1);
     expect(setScreenshareQuality.mock.calls[0]?.[0]).toBe(made.screen);
     expect(setScreenshareQuality.mock.calls[0]?.[2]).toBe("high");
+    expect(codecSwitch.checkAfterChange).toHaveBeenNthCalledWith(1, "screen", expect.any(Function));
+    expect(codecSwitch.checkAfterChange).toHaveBeenNthCalledWith(2, "screen", expect.any(Function));
   });
 
   it("reports the live share's quality, or null while nothing is published", () => {

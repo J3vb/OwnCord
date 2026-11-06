@@ -22,6 +22,7 @@ import {
   getLocalCameraStream,
   getLocalScreenshareStream,
   getLocalScreenshareStats,
+  getLocalCameraStats,
   stopManualCameraTrack,
   stopManualScreenTracks,
   CameraTrackState,
@@ -612,6 +613,19 @@ describe("stream getters", () => {
       ],
     });
     await expect(getLocalScreenshareStats(room)).resolves.toMatchObject({ sentFps: 58 });
+  });
+
+  it("reads camera encoder evidence only from the camera publication", async () => {
+    const room = roomWithLocalPub(Track.Source.Camera, {
+      getSenderStats: async () => [{ encoderImplementation: "OpenH264", framesPerSecond: 9 }],
+    });
+    await expect(getLocalCameraStats(room)).resolves.toMatchObject({
+      encoder: "OpenH264",
+      sentFps: 9,
+    });
+    await expect(getLocalScreenshareStats(room)).resolves.toBeNull();
+    await expect(getLocalCameraStats(null)).resolves.toBeNull();
+    await expect(getLocalCameraStats(fakeRoom().room)).resolves.toBeNull();
   });
 
   it("getLocalScreenshareStats reads the WebRTC sender: limit, encoder and codec", async () => {

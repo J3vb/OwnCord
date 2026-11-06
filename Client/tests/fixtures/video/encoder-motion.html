@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <meta charset="utf-8" />
+  <title>OwnCord encoder motion test</title>
+  <style>
+    html, body { margin: 0; overflow: hidden; background: #101820; color: white; font: 24px monospace; }
+    canvas { display: block; width: 100vw; height: 100vh; }
+    #info { position: fixed; top: 16px; left: 16px; padding: 16px; background: #101820ee; }
+  </style>
+  <canvas aria-label="Moving bars and fine text for screen-sharing tests"></canvas>
+  <div id="info"></div>
+  <script>
+    // Local-only source fixture. This counter measures the source page, not OwnCord's encoder.
+    const canvas = document.querySelector("canvas");
+    const ctx = canvas.getContext("2d");
+    const info = document.querySelector("#info");
+    let frame = 0, count = 0, measured = 0, last = performance.now();
+    const start = last;
+    function resize() {
+      canvas.width = Math.round(innerWidth * devicePixelRatio);
+      canvas.height = Math.round(innerHeight * devicePixelRatio);
+    }
+    addEventListener("resize", resize);
+    resize();
+    function draw(now) {
+      const w = canvas.width, h = canvas.height;
+      const seconds = (now - start) / 1000;
+      ctx.fillStyle = "#101820";
+      ctx.fillRect(0, 0, w, h);
+      const offset = (seconds * 480) % 160;
+      for (let x = -160; x < w; x += 160) {
+        ctx.fillStyle = (Math.floor(x / 160) % 2) ? "#08a6c9" : "#e6b84c";
+        ctx.fillRect(x + offset, h * 0.25, 80, h * 0.5);
+      }
+      ctx.fillStyle = "white";
+      ctx.font = "12px monospace";
+      for (let y = h * 0.8; y < h; y += 20) {
+        ctx.fillText("Fine text: OwnCord 0123456789 ABCDEFGHIJKLMNOPQRSTUVWXYZ — frame " + frame, 20, y);
+      }
+      frame++;
+      count++;
+      if (now - last >= 1000) {
+        measured = Math.round(count * 1000 / (now - last));
+        count = 0;
+        last = now;
+      }
+      info.textContent = `${w} × ${h} source pixels | frame ${frame} | ${seconds.toFixed(1)} s | page ${measured} FPS (not stream FPS)`;
+      requestAnimationFrame(draw);
+    }
+    requestAnimationFrame(draw);
+  </script>
+</html>

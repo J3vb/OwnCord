@@ -47,6 +47,8 @@ and only when it changes something a contributor or fork holder must do
 
 ## Unreleased
 
+- **Voice:** H.264 webcam encoding is now checked for software fallback; changing a shared source, quality or camera device rechecks the encoder without letting stale results affect a new session.
+
 ### Changed
 
 - In-app dialogs (join with an invite link, rename prompts, new DM picker, nickname, new thread) use the same Save and Cancel buttons as Create Channel.

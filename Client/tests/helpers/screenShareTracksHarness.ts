@@ -22,6 +22,7 @@ export const {
   getLocalCameraStream,
   getLocalScreenshareStream,
   getLocalScreenshareStats,
+  getLocalCameraStats,
   stopManualCameraTrack,
   stopManualScreenTracks,
   rollbackPendingVideo,
