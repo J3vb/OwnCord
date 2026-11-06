@@ -123,6 +123,203 @@ async function swapBackupCodecs(video: LocalVideoTrack): Promise<void> {
   }
 }
 
+/** What a Change source run created, for its failure path to release. */
+interface SourceChangeRun {
+  fresh: LocalTrack[];
+  swapped: boolean;
+  appShare: AppShareAudio | null;
+}
+
+/** The new capture's video once it is checked and shaped for the share's
+ *  codec. Null when the run stops here: a stop took the share while the
+ *  picker or the GPU fit was pending, or the capture already ended. The new
+ *  capture is released then. */
+async function prepareFreshVideo(
+  state: ScreenTrackState,
+  deps: VideoTrackDeps,
+  live: LiveShare,
+  run: SourceChangeRun,
+  captureOptions: ReturnType<typeof getScreenShareCaptureOptions>,
+): Promise<LocalTrack | null> {
+  const freshVideo = run.fresh.find((t) => t.kind === Track.Kind.Video);
+  if (
+    superseded(state, deps, live) ||
+    freshVideo === undefined ||
+    freshVideo.mediaStreamTrack.readyState === "ended"
+  ) {
+    for (const t of run.fresh) t.stop();
+    return null;
+  }
+  const codec = state.published ?? "vp8";
+  applyScreenShareContentHint(freshVideo.mediaStreamTrack, captureOptions, codec);
+  // A window swapped for a wide screen must still fit the GPU encoder.
+  if (h264GpuPublish(codec)) {
+    await fitGpuH264Share(freshVideo);
+    if (superseded(state, deps, live)) {
+      for (const t of run.fresh) t.stop();
+      return null;
+    }
+  }
+  return freshVideo;
+}
+
+/** The audio the new source goes out with: its own, or on Windows a window's
+ *  app sound as the "fresh audio". The host replaces the capture of the window
+ *  being left; leaving a window for anything else stops it later. "stale" when
+ *  a stop took the share while the start was pending. */
+async function pickFreshAudio(
+  state: ScreenTrackState,
+  deps: VideoTrackDeps,
+  live: LiveShare,
+  run: SourceChangeRun,
+  freshVideo: LocalTrack,
+): Promise<LocalTrack | undefined | "stale"> {
+  let freshAudio: LocalTrack | undefined = run.fresh.find((t) => t.kind === Track.Kind.Audio);
+  if (
+    !isLinuxDesktop() &&
+    wantsAppAudio(state.appAudioOn, freshVideo.mediaStreamTrack, freshAudio !== undefined)
+  ) {
+    run.appShare = await startAppShareAudio(freshVideo.mediaStreamTrack, () =>
+      superseded(state, deps, live),
+    );
+    if (superseded(state, deps, live)) {
+      // startAppShareAudio already stopped a capture it opened.
+      for (const t of run.fresh) t.stop();
+      return "stale";
+    }
+    if (run.appShare !== null) freshAudio = run.appShare.track;
+  }
+  return freshAudio;
+}
+
+/** Move the share's audio onto the new source: swap it in place, drop it, or
+ *  publish it. Returns the tracks the share holds afterwards. */
+async function swapShareAudio(
+  live: LiveShare,
+  oldAudio: LocalTrack | undefined,
+  freshAudio: LocalTrack | undefined,
+): Promise<LocalTrack[]> {
+  const tracks: LocalTrack[] = [live.video];
+  if (oldAudio !== undefined && freshAudio !== undefined) {
+    await oldAudio.replaceTrack(freshAudio.mediaStreamTrack, { userProvidedTrack: false });
+    tracks.push(oldAudio);
+  } else if (oldAudio !== undefined) {
+    unpublishManualTrack(live.room, oldAudio);
+    oldAudio.stop();
+  } else if (freshAudio !== undefined) {
+    await live.room.localParticipant.publishTrack(freshAudio, {
+      source: Track.Source.ScreenShareAudio,
+      ...SCREENSHARE_AUDIO_PUBLISH,
+    });
+    tracks.push(freshAudio);
+  }
+  return tracks;
+}
+
+/** A stop took the share during the swap. It already released the share's
+ *  tracks; the new captures are the only ones it could not reach. */
+function releaseSupersededSwap(
+  live: LiveShare,
+  run: SourceChangeRun,
+  freshAudio: LocalTrack | undefined,
+  tracks: LocalTrack[],
+): void {
+  for (const t of run.fresh) t.stop();
+  run.appShare?.close();
+  if (freshAudio !== undefined && tracks.includes(freshAudio)) {
+    unpublishManualTrack(live.room, freshAudio);
+  }
+}
+
+/** The swap went through and no stop overtook it: the share now holds
+ *  `tracks`, and the app's sound and the ended watch follow the new source. */
+async function commitSourceChange(
+  state: ScreenTrackState,
+  deps: VideoTrackDeps,
+  live: LiveShare,
+  run: SourceChangeRun,
+  tracks: LocalTrack[],
+  freshAudio: LocalTrack | undefined,
+): Promise<void> {
+  // The `fresh` wrappers stay unstopped: stopping one would stop the
+  // capture the published track now carries.
+  state.manualScreenTracks = tracks;
+  // The app's sound follows the window.
+  const oldApp = state.appAudio;
+  state.appAudio = run.appShare ?? undefined;
+  // A newer start (window to window) already replaced the old capture on the
+  // host, so closing the old one skips the stop; to a screen it stops.
+  oldApp?.close();
+  watchScreenEnded(state, deps, live.video, tracks, live.generation);
+  if (live.video.mediaStreamTrack.readyState === "ended") {
+    // The new capture ended while it was being swapped in, before the
+    // watch above was listening.
+    await disableScreenshare(state, deps);
+    return;
+  }
+  deps.reapplyAudioPipeline();
+  bumpLocalShareRev();
+  recordSourceChanged(live.video.mediaStreamTrack);
+  log.info("Screenshare source changed", { audio: freshAudio !== undefined });
+}
+
+/** Capture the new source and put it under the published track. */
+async function swapSource(
+  state: ScreenTrackState,
+  deps: VideoTrackDeps,
+  live: LiveShare,
+  run: SourceChangeRun,
+): Promise<void> {
+  const captureOptions = getScreenShareCaptureOptions(live.quality, live.fps);
+  run.fresh = await createLocalScreenTracks(captureOptions);
+  const freshVideo = await prepareFreshVideo(state, deps, live, run, captureOptions);
+  if (freshVideo === null) return;
+  const oldAudio = live.tracks.find((t) => t.kind === Track.Kind.Audio);
+  const freshAudio = await pickFreshAudio(state, deps, live, run, freshVideo);
+  if (freshAudio === "stale") return;
+  run.swapped = true;
+  state.screenTrackEndedCleanup?.();
+  // The SDK stops the old capture once the sender carries the new one.
+  await live.video.replaceTrack(freshVideo.mediaStreamTrack, { userProvidedTrack: false });
+  // A reconnect republishes the share with this capture: keep its H.264
+  // profiles.
+  setH264GpuProfiles(freshVideo.mediaStreamTrack, h264GpuPublish(state.published ?? "vp8"));
+  await swapBackupCodecs(live.video);
+  const tracks = await swapShareAudio(live, oldAudio, freshAudio);
+  if (superseded(state, deps, live)) {
+    releaseSupersededSwap(live, run, freshAudio, tracks);
+    return;
+  }
+  await commitSourceChange(state, deps, live, run, tracks, freshAudio);
+}
+
+/** A failed Change source: release what the run created, then either leave
+ *  the old source going (nothing swapped) or end the share (half swapped). */
+async function failSourceChange(
+  state: ScreenTrackState,
+  deps: VideoTrackDeps,
+  live: LiveShare,
+  run: SourceChangeRun,
+  err: unknown,
+): Promise<void> {
+  for (const t of run.fresh) t.stop();
+  if (run.appShare !== null && state.appAudio !== run.appShare) run.appShare.close();
+  if (superseded(state, deps, live)) return;
+  if (!run.swapped) {
+    // The picker was closed (not a failure) or could not open: the old
+    // source is still going out untouched.
+    if (!(err instanceof DOMException && err.name === "NotAllowedError")) {
+      log.error("Failed to open a new screenshare source", err);
+      deps.onError(voiceText("share.changeFailed"));
+    }
+    return;
+  }
+  // Half swapped: what goes out is unknown, so end the share cleanly.
+  log.error("Failed to change screenshare source", err);
+  deps.onError(voiceText("share.changeFailed"));
+  await disableScreenshare(state, deps);
+}
+
 /** Share something else without stopping: the OS picker opens, and the old
  *  source keeps going until the new one is picked. Cancelling the picker
  *  changes nothing. */
@@ -138,122 +335,11 @@ export async function changeScreenshareSource(
   const live = liveShare(state, deps);
   if (live === null) return;
   state.changing = true;
-  let fresh: LocalTrack[] = [];
-  let swapped = false;
-  let appShare: AppShareAudio | null = null;
+  const run: SourceChangeRun = { fresh: [], swapped: false, appShare: null };
   try {
-    const captureOptions = getScreenShareCaptureOptions(live.quality, live.fps);
-    fresh = await createLocalScreenTracks(captureOptions);
-    const freshVideo = fresh.find((t) => t.kind === Track.Kind.Video);
-    if (
-      superseded(state, deps, live) ||
-      freshVideo === undefined ||
-      freshVideo.mediaStreamTrack.readyState === "ended"
-    ) {
-      for (const t of fresh) t.stop();
-      return;
-    }
-    applyScreenShareContentHint(
-      freshVideo.mediaStreamTrack,
-      captureOptions,
-      state.published ?? "vp8",
-    );
-    // A window swapped for a wide screen must still fit the GPU encoder.
-    if (h264GpuPublish(state.published ?? "vp8")) {
-      await fitGpuH264Share(freshVideo);
-      if (superseded(state, deps, live)) {
-        for (const t of fresh) t.stop();
-        return;
-      }
-    }
-    let freshAudio: LocalTrack | undefined = fresh.find((t) => t.kind === Track.Kind.Audio);
-    const oldAudio = live.tracks.find((t) => t.kind === Track.Kind.Audio);
-    // Windows: a window gets its app's sound as the "fresh audio".
-    // The host replaces the capture of the window being left; leaving a
-    // window for anything else stops it below.
-    if (
-      !isLinuxDesktop() &&
-      wantsAppAudio(state.appAudioOn, freshVideo.mediaStreamTrack, freshAudio !== undefined)
-    ) {
-      appShare = await startAppShareAudio(freshVideo.mediaStreamTrack, () =>
-        superseded(state, deps, live),
-      );
-      if (superseded(state, deps, live)) {
-        // startAppShareAudio already stopped a capture it opened.
-        for (const t of fresh) t.stop();
-        return;
-      }
-      if (appShare !== null) freshAudio = appShare.track;
-    }
-    swapped = true;
-    state.screenTrackEndedCleanup?.();
-    // The SDK stops the old capture once the sender carries the new one.
-    await live.video.replaceTrack(freshVideo.mediaStreamTrack, { userProvidedTrack: false });
-    // A reconnect republishes the share with this capture: keep its H.264
-    // profiles.
-    setH264GpuProfiles(freshVideo.mediaStreamTrack, h264GpuPublish(state.published ?? "vp8"));
-    await swapBackupCodecs(live.video);
-    const tracks: LocalTrack[] = [live.video];
-    if (oldAudio !== undefined && freshAudio !== undefined) {
-      await oldAudio.replaceTrack(freshAudio.mediaStreamTrack, { userProvidedTrack: false });
-      tracks.push(oldAudio);
-    } else if (oldAudio !== undefined) {
-      unpublishManualTrack(live.room, oldAudio);
-      oldAudio.stop();
-    } else if (freshAudio !== undefined) {
-      await live.room.localParticipant.publishTrack(freshAudio, {
-        source: Track.Source.ScreenShareAudio,
-        ...SCREENSHARE_AUDIO_PUBLISH,
-      });
-      tracks.push(freshAudio);
-    }
-    if (superseded(state, deps, live)) {
-      // The stop already released the share's tracks; these captures are the
-      // only ones it could not reach.
-      for (const t of fresh) t.stop();
-      appShare?.close();
-      if (freshAudio !== undefined && tracks.includes(freshAudio)) {
-        unpublishManualTrack(live.room, freshAudio);
-      }
-      return;
-    }
-    // The `fresh` wrappers stay unstopped: stopping one would stop the
-    // capture the published track now carries.
-    state.manualScreenTracks = tracks;
-    // The app's sound follows the window.
-    const oldApp = state.appAudio;
-    state.appAudio = appShare ?? undefined;
-    // A newer start (window to window) already replaced the old capture on the
-    // host, so closing the old one skips the stop; to a screen it stops.
-    oldApp?.close();
-    watchScreenEnded(state, deps, live.video, tracks, live.generation);
-    if (live.video.mediaStreamTrack.readyState === "ended") {
-      // The new capture ended while it was being swapped in, before the
-      // watch above was listening.
-      await disableScreenshare(state, deps);
-      return;
-    }
-    deps.reapplyAudioPipeline();
-    bumpLocalShareRev();
-    recordSourceChanged(live.video.mediaStreamTrack);
-    log.info("Screenshare source changed", { audio: freshAudio !== undefined });
+    await swapSource(state, deps, live, run);
   } catch (err) {
-    for (const t of fresh) t.stop();
-    if (appShare !== null && state.appAudio !== appShare) appShare.close();
-    if (superseded(state, deps, live)) return;
-    if (!swapped) {
-      // The picker was closed (not a failure) or could not open: the old
-      // source is still going out untouched.
-      if (!(err instanceof DOMException && err.name === "NotAllowedError")) {
-        log.error("Failed to open a new screenshare source", err);
-        deps.onError(voiceText("share.changeFailed"));
-      }
-      return;
-    }
-    // Half swapped: what goes out is unknown, so end the share cleanly.
-    log.error("Failed to change screenshare source", err);
-    deps.onError(voiceText("share.changeFailed"));
-    await disableScreenshare(state, deps);
+    await failSourceChange(state, deps, live, run, err);
   } finally {
     state.changing = false;
   }

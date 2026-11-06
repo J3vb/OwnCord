@@ -125,7 +125,7 @@
       "features/voice/sessionState.ts": 1,
       "stores/voice.store.ts": 1
     },
-    "lib/voice/screenShare.ts": {
+    "lib/voice/shareHostLinks.ts": {
       "features/voice/native/devices.ts": 1,
       "features/voice/native/platform.ts": 1,
       "features/voice/native/screenPickerSlot.ts": 1,

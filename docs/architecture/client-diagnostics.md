@@ -287,7 +287,7 @@ twice across two starts.
 | ---------------------- | ------------------------------ | --------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
 | `share.started`        | Screen share started           | `surface` (monitor / window / browser / unknown)<br>`width` (int)<br>`height` (int)<br>`fps` (int)<br>`native` (bool) | `src/lib/voice/voiceEventLog.ts`          |
 | `share.stopped`        | Screen share stopped           | `reason` (user / ended / error / left_voice / replaced / unknown)                                                     | `src/lib/voice/voiceEventLog.ts`          |
-| `share.ended`          | Browser ended the screen share | none                                                                                                                  | `src/lib/voice/screenShare.ts`            |
+| `share.ended`          | Browser ended the screen share | none                                                                                                                  | `src/lib/voice/screenTrackStop.ts`        |
 | `share.source_changed` | Screen share source changed    | `surface` (monitor / window / browser / unknown)                                                                      | `src/features/voice/screenshareChange.ts` |
 
 ### `voice`

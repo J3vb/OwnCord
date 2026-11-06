@@ -296,7 +296,7 @@
       "reason": "Emptied by resetReadPointerState (pendingMarkUnread also by forgetPendingMarkUnread) in the dispatcher cleanup, which also runs when startSession retries"
     },
     {
-      "file": "lib/voice/screenShare.ts",
+      "file": "lib/voice/videoTrackState.ts",
       "binding": "pendingVideoEnables",
       "category": "transient",
       "reason": "Request-id keyed bookkeeping for an enable in flight; a newer enable of the same kind supersedes it"

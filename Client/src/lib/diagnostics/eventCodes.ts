@@ -137,7 +137,7 @@ const HASH = { type: "hash" } as const;
 
 const WS = "src/lib/ws.ts";
 const ROOM_EVENTS = "src/lib/voice/roomEventHandlers.ts";
-const SCREEN = "src/lib/voice/screenShare.ts";
+const SCREEN = "src/lib/voice/screenTrackStop.ts";
 const EXIT_WATCH = "src-tauri/src/exit_watch.rs";
 const CRASH_LOG = "src-tauri/src/crash_log.rs";
 const EXCEPTION_LOG = "src-tauri/src/exception_log.rs";
