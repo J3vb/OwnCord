@@ -5,7 +5,12 @@ import { expectConsole } from "../../helpers/console";
 import { authStore, clearAuth } from "@stores/auth.store";
 import { deleteCredential, loadCredential, saveCredential } from "@lib/net/credentials";
 import { createMainPage } from "@pages/MainPage";
-import { latestConnectPage, loginAndReachAuthOk, useMainHarness } from "../../helpers/mainHarness";
+import {
+  latestConnectPage,
+  loginAndReachAuthOk,
+  readyFrame,
+  useMainHarness,
+} from "../../helpers/mainHarness";
 
 vi.mock("@tauri-apps/api/core", () => mocks.apiCoreMock());
 vi.mock("@tauri-apps/api/event", () => mocks.apiEventMock());
@@ -219,7 +224,7 @@ describe("main.ts startup resume of the stored token", () => {
       server_name: "Elsewhere",
       motd: "",
     });
-    emitTauriEvent("ws-message", JSON.stringify({ type: "ready", payload: {} }));
+    emitTauriEvent("ws-message", readyFrame());
     await vi.advanceTimersByTimeAsync(800);
     vi.mocked(createMainPage).mockClear();
     // A fresh launch has no logout behind it, so the skip flag a session end
@@ -354,7 +359,7 @@ describe("main.ts connected overlay teardown on mid-handshake session end", () =
 
     // `ready` arrives and arms the overlay's onReady hand-off (which would
     // otherwise call router.navigate("main") on its own on the next task).
-    emitTauriEvent("ws-message", JSON.stringify({ type: "ready", payload: {} }));
+    emitTauriEvent("ws-message", readyFrame());
 
     // A queued ban/shutdown task lands before the hand-off task runs.
     clearAuth();
@@ -389,7 +394,7 @@ describe("main.ts connect-page skip-auto-login flag", () => {
       motd: "",
     });
     expectConsole("warn", /\[main\] Credential delete failed/);
-    emitTauriEvent("ws-message", JSON.stringify({ type: "ready", payload: {} }));
+    emitTauriEvent("ws-message", readyFrame());
     // ConnectedOverlay.markReady() hands off on the next task, which starts
     // router.navigate("main") — main.ts's only route away from "connect",
     // needed so a later navigate("connect") is a real transition and not a
@@ -450,7 +455,7 @@ describe("main.ts quick-switch resume", () => {
       motd: "",
     });
     expectConsole("warn", /\[main\] Credential delete failed/);
-    emitTauriEvent("ws-message", JSON.stringify({ type: "ready", payload: {} }));
+    emitTauriEvent("ws-message", readyFrame());
     await vi.advanceTimersByTimeAsync(800);
     mockProfileManager.getAll.mockReturnValue(profiles);
     vi.mocked(loadCredential).mockResolvedValue({

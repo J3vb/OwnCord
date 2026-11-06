@@ -1,5 +1,12 @@
 // The shape check on a WebSocket frame before ws.ts reads any field of it.
 
+import type { ServerMessage } from "../types";
+import { recordEvent } from "../diagnostics/eventSink";
+import { createLogger } from "../logger";
+import { checkFrame, type WireFault } from "./wireCheck";
+
+const log = createLogger("ws");
+
 export interface RawFrame {
   type?: string;
   payload?: unknown;
@@ -24,4 +31,64 @@ export function hasObjectPayload(frame: RawFrame): boolean {
   return (
     typeof frame.payload === "object" && frame.payload !== null && !Array.isArray(frame.payload)
   );
+}
+
+/** The two handshake frames: nothing re-requests them, so a bad one ends the connect. */
+const HANDSHAKE_TYPES: ReadonlySet<string> = new Set(["ready", "auth_ok"]);
+
+/** What a frame turned out to be. */
+export type FrameRead =
+  | { readonly kind: "message"; readonly msg: ServerMessage }
+  | { readonly kind: "malformed"; readonly payloadKind: string }
+  | { readonly kind: "invalid"; readonly type: string; readonly fault: WireFault };
+
+/** The fault in a typed frame's payload. A checker that throws counts as a fault. */
+function faultOf(type: string, payload: unknown): WireFault | null {
+  try {
+    return checkFrame(type, payload);
+  } catch {
+    return { path: "", expected: "checkable" };
+  }
+}
+
+/** True when the frame has the shape its type promises; an unknown type passes. */
+function conforms(frame: RawFrame): frame is RawFrame & ServerMessage {
+  return faultOf(frame.type ?? "", frame.payload) === null;
+}
+
+/** Sorts a parsed frame into a typed message, a malformed envelope or a shape fault. */
+export function readServerFrame(frame: RawFrame): FrameRead {
+  if (!frame.type || !hasObjectPayload(frame)) {
+    return { kind: "malformed", payloadKind: Object.prototype.toString.call(frame.payload) };
+  }
+  if (conforms(frame)) return { kind: "message", msg: frame };
+  const fault = faultOf(frame.type, frame.payload) ?? { path: "", expected: "valid" };
+  return { kind: "invalid", type: frame.type, fault };
+}
+
+/**
+ * Logs and records a frame that is not dispatched. Only the type and the field
+ * name go out: frames hold chat text and the log is persisted. Returns true
+ * when the frame was a handshake frame, which the caller must treat as fatal.
+ */
+export function reportRejectedFrame(
+  read: Exclude<FrameRead, { kind: "message" }>,
+  bytes: number,
+): boolean {
+  if (read.kind === "malformed") {
+    log.warn("Invalid WS message: missing type or payload", {
+      bytes,
+      payloadKind: read.payloadKind,
+    });
+    return false;
+  }
+  log.warn("Invalid WS frame, dropping", {
+    type: read.type,
+    path: read.fault.path,
+    expected: read.fault.expected,
+  });
+  // The recorder keeps tokens only: brackets in a path are shape marks, not names.
+  const field = read.fault.path.replace(/[[\]{}]/g, "").slice(0, 48) || "payload";
+  recordEvent("ws.frame_invalid", { type: read.type, field });
+  return HANDSHAKE_TYPES.has(read.type);
 }

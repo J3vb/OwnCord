@@ -47,6 +47,7 @@ const ws = {
   send: vi.fn(),
   onCertFirstUse: vi.fn(unsub),
   onServerBusy: vi.fn(unsub),
+  onHandshakeFault: vi.fn(unsub),
   onStateChange: vi.fn(unsub),
   getConnectFailureCode: vi.fn(() => null),
   on: vi.fn((type: string, handler: unknown) => {

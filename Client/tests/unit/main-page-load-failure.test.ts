@@ -42,6 +42,7 @@ vi.mock("@pages/MainPage", () => {
 
 import { mockInvoke, emitTauriEvent } from "./helpers/ws-mocks";
 import { expectConsole } from "../helpers/console";
+import { readyFrame } from "../helpers/wsSuiteHarness";
 import { authStore, clearAuth } from "@stores/auth.store";
 import { createConnectPage } from "@pages/ConnectPage";
 
@@ -81,7 +82,7 @@ describe("main.ts when the main page chunk fails to load", () => {
         },
       }),
     );
-    emitTauriEvent("ws-message", JSON.stringify({ type: "ready", payload: {} }));
+    emitTauriEvent("ws-message", readyFrame());
     await vi.advanceTimersByTimeAsync(800);
     for (let i = 0; i < 12; i++) await Promise.resolve();
 

@@ -198,9 +198,7 @@ export function startSession(
   // host, or when the session tears down. A SERVER_BUSY refusal restarts it,
   // up to PREAUTH_BUSY_CAP_MS after this first attempt (P5-S04).
   const preauthStartedAt = Date.now();
-  const onPreauthDeadline = (): void => {
-    if (!owner.isCurrent()) return;
-    log.warn("Pre-auth connection timed out", { host, timeoutMs: PREAUTH_CONNECT_TIMEOUT_MS });
+  const endPreauth = (message: string): void => {
     // Stop the retry loop and tear the dead attempt down exactly as a
     // cancelled auto-login does, then tell the user on the connect form.
     api.endSession();
@@ -211,15 +209,20 @@ export function startSession(
     dispatcherCleanup = null;
     lastConnectHost = "";
     lastConnectToken = "";
+    setTransientError(message);
+    onPreauthTimeout?.();
+  };
+  const onPreauthDeadline = (): void => {
+    if (!owner.isCurrent()) return;
+    log.warn("Pre-auth connection timed out", { host, timeoutMs: PREAUTH_CONNECT_TIMEOUT_MS });
     // A dial that failed on the certificate is not an unreachable server:
     // name it. `getConnectFailureCode` reads the distinct code the transport
     // reported for the rejected connect (ws.ts).
-    setTransientError(
+    endPreauth(
       ws.getConnectFailureCode() === TLS_CERT_CODE
         ? connectText("error.tlsFailed")
         : connectText("session.connectTimeout"),
     );
-    onPreauthTimeout?.();
   };
   let preauthTimer: ReturnType<typeof setTimeout> | null = setTimeout(
     onPreauthDeadline,
@@ -238,6 +241,16 @@ export function startSession(
   sessionUnsubs.push(
     ws.onCertFirstUse((evt) => {
       if (evt.host === normalizeHostForCertCompare(host)) clearPreauthDeadline();
+    }),
+  );
+  // A sign-in or ready the client cannot read: nothing re-requests it and a
+  // redial meets the same server, so end the attempt and say so.
+  sessionUnsubs.push(
+    ws.onHandshakeFault(() => {
+      if (!owner.isCurrent()) return;
+      const message = connectText("session.unreadableReply");
+      if (preauthTimer !== null) endPreauth(message);
+      else endAuthedSession(message);
     }),
   );
   sessionUnsubs.push(
@@ -418,6 +431,14 @@ export function startSession(
   owner.addCleanup(sessionCleanup);
 }
 
+/** Ends a session that got past sign-in, keeping the stored sign-in, and says why on the form. */
+function endAuthedSession(message: string): void {
+  api.endSession();
+  abandonInFlight();
+  if (authStore.getState().isAuthenticated) clearAuth();
+  setTransientError(message);
+}
+
 /**
  * The connected overlay has no Cancel, and the main page cannot mount without
  * `ready`: a server that signs the user in but stalls building `ready` (or a
@@ -436,10 +457,7 @@ function startReadyDeadline(owner: SessionScope, host: string): { restart(): voi
     timer = null;
     if (!owner.isCurrent()) return;
     log.warn("Server did not send ready in time", { host, timeoutMs: READY_TIMEOUT_MS });
-    api.endSession();
-    abandonInFlight();
-    if (authStore.getState().isAuthenticated) clearAuth();
-    setTransientError(connectText("session.readyTimeout"));
+    endAuthedSession(connectText("session.readyTimeout"));
   };
   const arm = (): void => {
     clear();

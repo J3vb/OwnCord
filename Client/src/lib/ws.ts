@@ -15,7 +15,7 @@ import { PROTOCOL_EPOCH } from "./protocolTypes";
 import { Disposable } from "./disposable";
 import { isAndroidHost } from "./hostPlatform";
 import { normalizeHostForCertCompare } from "./net/hostNormalize";
-import { hasObjectPayload, parseFrame } from "./net/wsFrame";
+import { parseFrame, readServerFrame, reportRejectedFrame } from "./net/wsFrame";
 import { WsErrorCode } from "@lib/protocolTypes";
 import {
   type CertFirstUseListener,
@@ -263,6 +263,7 @@ export function createWsClient({
 
   // P5-S04: SERVER_BUSY refusals, which never reach the error listeners.
   const serverBusyListeners = new Set<() => void>();
+  const handshakeFaultListeners = new Set<() => void>(); // bad ready or auth_ok
 
   function setState(newState: ConnectionState): void {
     if (state !== newState) {
@@ -578,15 +579,12 @@ export function createWsClient({
       return;
     }
 
-    if (!parsed.type || !hasObjectPayload(parsed)) {
-      log.warn("Invalid WS message: missing type or payload", {
-        bytes: raw.length,
-        payloadKind: Object.prototype.toString.call(parsed.payload),
-      });
+    const read = readServerFrame(parsed);
+    if (read.kind !== "message") {
+      if (reportRejectedFrame(read, raw.length)) failHandshake();
       return;
     }
-
-    const msg = parsed as unknown as ServerMessage;
+    const msg = read.msg;
 
     log.debug("WS ←", { type: msg.type, id: msg.id });
 
@@ -654,6 +652,15 @@ export function createWsClient({
     }
 
     dispatch(msg);
+  }
+
+  // A ready or auth_ok of the wrong shape cannot be asked for again and a
+  // redial meets the same server: end the connect like auth_error, tell the user.
+  function failHandshake(): void {
+    handshakeFaultListeners.forEach((listener) => listener());
+    intentionalClose = true;
+    void disconnectProxy();
+    setState("disconnected");
   }
 
   // A `cseq` other than last + 1 means the server skipped a frame it
@@ -1143,6 +1150,12 @@ export function createWsClient({
     onServerBusy(listener: () => void): () => void {
       serverBusyListeners.add(listener);
       return () => serverBusyListeners.delete(listener);
+    },
+
+    /** Register a listener for a ready or auth_ok of the wrong shape. */
+    onHandshakeFault(listener: () => void): () => void {
+      handshakeFaultListeners.add(listener);
+      return () => handshakeFaultListeners.delete(listener);
     },
 
     /** Register a listener for TOFU certificate mismatch events. */

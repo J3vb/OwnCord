@@ -1,8 +1,9 @@
 /**
  * Property tests for the WebSocket frame handler in ws.ts: whatever text the
  * socket delivers, the handler never throws, a frame that is not a JSON object
- * with an object payload never reaches a listener, and a well-formed frame
- * reaches its own type's listeners exactly once.
+ * with an object payload never reaches a listener, and a frame of the shape
+ * its type promises reaches its own type's listeners exactly once (one of the
+ * wrong shape reaches none).
  */
 import { describe, it, expect, vi } from "vitest";
 import fc from "fast-check";
@@ -18,13 +19,21 @@ import { createWsClient } from "../../src/lib/ws";
 import { ServerMessageType } from "../../src/lib/protocolTypes";
 import { useWsClientFixture } from "../helpers/wsClientFixture";
 import { openSocket } from "../helpers/wsSuiteHarness";
+import { checkFrame } from "../../src/lib/net/wireCheck";
 
 type WsClient = ReturnType<typeof createWsClient>;
 type ServerType = Parameters<WsClient["on"]>[0];
 
 const SERVER_TYPES = Object.values(ServerMessageType) as ServerType[];
 // Frames that change the connection itself, and the heartbeat the handler eats.
-const CONTROL_TYPES = new Set<string>(["auth_ok", "auth_error", "error", "server_restart", "pong"]);
+const CONTROL_TYPES = new Set<string>([
+  "auth_ok",
+  "auth_error",
+  "error",
+  "server_restart",
+  "pong",
+  "ready",
+]);
 const PLAIN_TYPES = SERVER_TYPES.filter((t) => !CONTROL_TYPES.has(t));
 const PROPERTY_TIMEOUT_MS = 20_000;
 
@@ -121,7 +130,7 @@ describe("WebSocket frame decode properties", () => {
   });
 
   it(
-    "delivers a well-formed frame to its own listeners once, even after garbage",
+    "delivers a frame of the right shape to its own listeners once, even after garbage, and drops one of the wrong shape",
     async () => {
       await openSocket(client);
       const received = new Map<string, unknown[]>();
@@ -143,6 +152,10 @@ describe("WebSocket frame decode properties", () => {
             for (const raw of garbage) deliver(raw);
             deliver(JSON.stringify({ type, payload }));
             const delivered = [...received.entries()].filter(([, list]) => list.length > 0);
+            if (checkFrame(type, payload) !== null) {
+              expect(delivered).toEqual([]);
+              return;
+            }
             expect(delivered.map(([t]) => t)).toEqual([type]);
             expect(received.get(type)).toEqual([JSON.parse(JSON.stringify(payload)) as unknown]);
           },

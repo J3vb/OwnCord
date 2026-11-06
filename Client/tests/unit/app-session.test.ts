@@ -96,6 +96,8 @@ import {
   startSession,
 } from "../../src/app/session";
 import type { PageId } from "../../src/app/context";
+import { connectText } from "../../src/i18n/connect";
+import { readyFrame } from "../helpers/wsSuiteHarness";
 
 const USER = { id: 7, username: "casey", avatar: null, role: "member" };
 const api = createApiClient({ host: "" });
@@ -265,13 +267,7 @@ describe("pre-auth deadline", () => {
 describe("ready deadline", () => {
   /** Delivers `ready`, the frame the connected overlay waits for. */
   function ready(): void {
-    emitTauriEvent(
-      "ws-message",
-      JSON.stringify({
-        type: "ready",
-        payload: { channels: [], members: [], voice_states: [], roles: [] },
-      }),
-    );
+    emitTauriEvent("ws-message", readyFrame());
   }
 
   it("returns to the connect page with a message when ready never arrives", async () => {
@@ -311,6 +307,38 @@ describe("ready deadline", () => {
     await vi.advanceTimersByTimeAsync(READY_TIMEOUT_MS + 1);
     expect(sessionInFlight()).toBe(true);
     expect(overlays[0]!.destroyed).toBe(false);
+  });
+});
+
+describe("a handshake frame the client cannot read", () => {
+  it("ends a sign-in whose auth_ok has the wrong shape and tells the form", async () => {
+    const onTimeout = vi.fn();
+    startSession("a.example:8443", "tok-a", "casey", undefined, true, false, onTimeout);
+    await vi.advanceTimersByTimeAsync(0);
+    emitTauriEvent("ws-state", "open");
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({ type: "auth_ok", payload: { server_name: "S" } }),
+    );
+    expect(onTimeout).toHaveBeenCalledTimes(1);
+    expect(sessionInFlight()).toBe(false);
+    expect(uiStore.getState().transientError).toBe(connectText("session.unreadableReply"));
+    mockInvoke.mockClear();
+    await vi.advanceTimersByTimeAsync(PREAUTH_CONNECT_TIMEOUT_MS + 60_000);
+    expect(mockInvoke.mock.calls.filter((c) => c[0] === "ws_connect")).toHaveLength(0);
+  });
+
+  it("ends a session whose ready has the wrong shape, keeping the stored sign-in", async () => {
+    startSession("a.example:8443", "tok-a", "casey");
+    await authOk();
+    setAuth("tok-a", USER, "Srv", "");
+    emitTauriEvent("ws-message", JSON.stringify({ type: "ready", payload: { channels: 5 } }));
+    expect(overlays[0]!.destroyed).toBe(true);
+    expect(sessionInFlight()).toBe(false);
+    expect(authStore.getState().isAuthenticated).toBe(false);
+    expect(uiStore.getState().transientError).toBe(connectText("session.unreadableReply"));
+    await vi.advanceTimersByTimeAsync(READY_TIMEOUT_MS + 1);
+    expect(hoisted.deleteCredential).not.toHaveBeenCalled();
   });
 });
 
