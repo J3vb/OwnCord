@@ -358,7 +358,10 @@ function renderReplyRef(
   } else if (ref) {
     fillLoadedReply(bar, ref);
   } else if (referenced?.user) {
-    fillSnippetReply(bar, referenced, referenced.user);
+    fillSnippetReply(bar, referenced, {
+      ...referenced.user,
+      avatar: referenced.user.avatar ?? null,
+    });
   } else {
     setText(bar, messagingText("reply.unknown"));
   }

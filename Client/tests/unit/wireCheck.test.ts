@@ -208,3 +208,31 @@ describe("checkFrame and checkRest", () => {
     expect(none).toBe(true);
   });
 });
+
+describe("checkFrame: fields the server may leave out", () => {
+  const reply = {
+    id: 2,
+    channel_id: 1,
+    user: { id: 1, username: "a", avatar: null },
+    content: "hi",
+    reply_to: 1,
+    attachments: [],
+    reactions: [],
+    pinned: false,
+    timestamp: "2026-11-06T00:00:00Z",
+  };
+
+  it("accepts a reply whose parent author has no avatar key", () => {
+    const frame = {
+      ...reply,
+      referenced_message: {
+        id: 1,
+        user: { id: 3, username: "b" },
+        content: "parent",
+        deleted: false,
+        has_attachments: false,
+      },
+    };
+    expect(checkFrame("chat_message", frame)).toBeNull();
+  });
+});

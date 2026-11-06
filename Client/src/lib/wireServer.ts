@@ -341,9 +341,14 @@ export interface ImportedAuthor {
 }
 
 /** Reply parent snippet. A deleted parent is redacted to `{id, deleted: true}`. */
+/** The parent's author. The server leaves `avatar` out when the author has none. */
+export type ReferencedMessageUser = Omit<MessageUser, "avatar"> & {
+  readonly avatar?: string | null;
+};
+
 export interface ReferencedMessage {
   readonly id: number;
-  readonly user: MessageUser | null;
+  readonly user: ReferencedMessageUser | null;
   readonly content: string;
   readonly deleted: boolean;
   readonly has_attachments: boolean;
@@ -488,7 +493,8 @@ export interface ForumPostMeta {
 
 export interface ForumFirstMessage {
   readonly id: number;
-  readonly author_id: number;
+  /** Null when the author row is gone. */
+  readonly author_id: number | null;
   /** The sanitised text cut to 200 characters; empty for a deleted message. */
   readonly preview: string;
   readonly has_attachments: boolean;
