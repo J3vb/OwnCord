@@ -304,11 +304,6 @@
     "lib/voice/noiseFloor.ts": {
       "NoiseFloorTracker > push": [16]
     },
-    "lib/voice/screenShare.ts": {
-      "enableCamera": [32],
-      "enableScreenshare": [57],
-      "republishVideo": [22]
-    },
     "lib/voice/shareResolutionRecovery.ts": {
       "readingFromStats": [17]
     },
