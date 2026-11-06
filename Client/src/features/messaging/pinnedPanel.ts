@@ -88,7 +88,7 @@ export function createPinnedPanelController(opts: {
   /**
    * Whether the current channel allows the viewer to pin/unpin. Omitted means
    * no — the panel then renders read-only rather than offering an action the
-   * server refuses (F1).
+   * server refuses.
    */
   readonly canPin?: (channelId: number) => boolean;
   /**

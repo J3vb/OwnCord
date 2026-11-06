@@ -61,13 +61,13 @@ export function createChannelState(
       {
         content: string;
         replyTo: number | null;
-        // 3A-12: the reply's @ON/@OFF, part of the retry fingerprint, so a
+        // The reply's @ON/@OFF, part of the retry fingerprint, so a
         // retry resends the same value.
         replyPing?: boolean;
         // A sticker send, kept so a retry posts the same sticker.
         sticker?: { readonly id: number; readonly name: string };
         // Each file with its name (and picked File, when there is one), so a
-        // file the server did not attach can go back into the composer (2A-3).
+        // file the server did not attach can go back into the composer.
         attachments: readonly SentAttachment[];
         // Which channel this cid was actually sent to. chat_send_ok and the
         // SLOW_MODE error are global ws.on subscriptions with no channel_id of

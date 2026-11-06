@@ -56,7 +56,7 @@ function isInviteRevoked(r: InviteResponse): boolean {
 }
 
 /** Whether an invite's expiry has already passed, so it is not offered as a
- *  live code (F4). A null expiry never expires. */
+ *  live code. A null expiry never expires. */
 function isInviteExpired(r: InviteResponse): boolean {
   if (r.expires_at === null) return false;
   const t = Date.parse(r.expires_at);
