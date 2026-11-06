@@ -192,7 +192,7 @@ export function addMember(payload: MemberJoinPayload): void {
     next.set(payload.user.id, {
       id: payload.user.id,
       username: payload.user.username,
-      avatar: payload.user.avatar,
+      avatar: payload.user.avatar ?? null,
       role: payload.user.role,
       ...(payload.user.role_ids === undefined ? {} : { roleIds: payload.user.role_ids }),
       status: payload.status ?? "offline",

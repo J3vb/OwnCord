@@ -1,5 +1,6 @@
-// Checks a decoded server value against the shape table in wireShapes.ts
-// (generated from the payload types; the table format is described there).
+// Checks a decoded server value against a shape table: wireShapes.ts for frames,
+// restShapes.ts for REST replies (generated from the payload types; the table
+// format is described there).
 //
 // The check answers one question, "does this value have the shape its type
 // promises?", and is deliberately forgiving about everything a newer server
@@ -14,7 +15,7 @@
 // The success path allocates nothing: `matches` only returns a boolean. Only
 // when it fails does `locate` walk the same value again to find the field.
 
-import { FRAME_SHAPES, REST_SHAPES, SHAPES, type Shape } from "./wireShapes";
+import { FRAME_SHAPES, SHAPES, type Shape } from "./wireShapes";
 import type { RestReplyShapes } from "./restReplies";
 
 export interface WireFault {
@@ -261,7 +262,20 @@ export function checkFrame(type: string, payload: unknown): WireFault | null {
   return checkAgainst(SHAPES, FRAME_SHAPES[type] as number, payload);
 }
 
+/**
+ * The REST table (the exports of restShapes.ts). The caller supplies it so
+ * this module, which the frame path loads at startup, never imports it.
+ */
+export interface RestTable {
+  readonly SHAPES: readonly Shape[];
+  readonly REST_SHAPES: Readonly<Record<keyof RestReplyShapes, number>>;
+}
+
 /** Checks the body of the REST reply registered as `name` in `RestReplyShapes`. */
-export function checkRest(name: keyof RestReplyShapes, value: unknown): WireFault | null {
-  return checkAgainst(SHAPES, REST_SHAPES[name], value);
+export function checkRest(
+  name: keyof RestReplyShapes,
+  value: unknown,
+  table: RestTable,
+): WireFault | null {
+  return checkAgainst(table.SHAPES, table.REST_SHAPES[name], value);
 }

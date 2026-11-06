@@ -5,6 +5,8 @@ vi.mock("@tauri-apps/plugin-http", () => ({ fetch: mockFetch }));
 vi.mock("../../src/lib/net/httpProxy", () => ({ ensureHttpProxy: mockProxy }));
 import { createApiClient, type ApiClient } from "../../src/lib/api";
 import { expectConsole } from "../helpers/console";
+import type { RestReplyShapes } from "../../src/lib/net/restReplies";
+import { validReply } from "../helpers/restReplyFixtures";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -23,24 +25,46 @@ function response(data: unknown = {}, status = 200): Response {
   } as Response;
 }
 
-const requests: Array<[string, (api: ApiClient, signal?: AbortSignal) => Promise<unknown>]> = [
-  ["JSON", (api, signal) => api.getMe(signal)],
-  ["admin", (api, signal) => api.adminUpdateChannel(1, { name: "renamed" }, signal)],
-  ["avatar", (api, signal) => api.uploadAvatar(new File(["x"], "avatar.png"), signal)],
-  ["attachment", (api, signal) => api.uploadFile(new File(["x"], "file.txt"), signal)],
-  ["emoji", (api, signal) => api.uploadEmoji("wave", new File(["x"], "wave.png"), signal)],
-  ["TOTP", (api, signal) => api.verifyTotp("123456", "partial-token", signal)],
+const requests: Array<
+  [string, (api: ApiClient, signal?: AbortSignal) => Promise<unknown>, keyof RestReplyShapes]
+> = [
+  ["JSON", (api, signal) => api.getMe(signal), "MemberResponse"],
+  [
+    "admin",
+    (api, signal) => api.adminUpdateChannel(1, { name: "renamed" }, signal),
+    "ChannelResponse",
+  ],
+  [
+    "avatar",
+    (api, signal) => api.uploadAvatar(new File(["x"], "avatar.png"), signal),
+    "UploadResponse",
+  ],
+  [
+    "attachment",
+    (api, signal) => api.uploadFile(new File(["x"], "file.txt"), signal),
+    "UploadResponse",
+  ],
+  [
+    "emoji",
+    (api, signal) => api.uploadEmoji("wave", new File(["x"], "wave.png"), signal),
+    "EmojiResponse",
+  ],
+  ["TOTP", (api, signal) => api.verifyTotp("123456", "partial-token", signal), "AuthResponse"],
 ];
 
 beforeEach(() => {
-  mockFetch.mockReset().mockResolvedValue(response());
+  mockFetch.mockReset().mockResolvedValue(response(validReply("MemberResponse")));
   mockProxy.mockReset().mockImplementation((host: string) => Promise.resolve(`https://${host}`));
 });
 
 describe("API session ownership", () => {
-  it.each([...requests, ["health", (api: ApiClient) => api.getHealth()] as const])(
+  it.each([
+    ...requests,
+    ["health", (api: ApiClient) => api.getHealth(), "HealthResponse"] as const,
+  ])(
     "%s releases completed transport before disposing its logical request scope",
-    async (_label, send) => {
+    async (_label, send, reply) => {
+      mockFetch.mockResolvedValue(response(validReply(reply)));
       const api = createApiClient({ host: "same.example", token: "alice" });
       await send(api);
       const transport = (mockFetch.mock.calls[0]![1] as RequestInit).signal!;

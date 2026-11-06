@@ -17,6 +17,8 @@ import {
 import { setNsfwAcknowledged } from "../stores/channels.store";
 import { connectText } from "../i18n/connect";
 import type { ApiError } from "./types";
+import type { RestReplyShapes } from "./net/restReplies";
+import { readReply } from "./apiReply";
 import {
   type ApiClientConfig,
   ApiClientError,
@@ -30,6 +32,7 @@ import {
 } from "./apiShared";
 export {
   TLS_CERT_CODE,
+  REPLY_SHAPE_CODE,
   ApiClientError,
   TransportError,
   httpError,
@@ -106,7 +109,8 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
   // Every path (including multipart, admin and TOTP) uses the same ownership
   // checks through response-body consumption. Native cancellation is best-effort;
   // SessionScope also rejects completions that arrive after a session switch.
-  async function doFetch<T>(
+  async function doFetch<K extends keyof RestReplyShapes>(
+    reply: K,
     label: string,
     prefix: string,
     method: string,
@@ -114,7 +118,7 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
     body?: unknown,
     signal?: AbortSignal,
     opts?: RequestOptions,
-  ): Promise<T> {
+  ): Promise<RestReplyShapes[K]> {
     const snapshot = config;
     // A detached request is owned by its caller's signal alone, so ending the
     // session it was sent from does not cancel it.
@@ -201,11 +205,11 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       }
       if (res.status === 204) {
         releaseTransport();
-        return undefined as T;
+        return undefined as RestReplyShapes[K];
       }
-      let data: T;
+      let data: unknown;
       try {
-        data = await owner.run(res.json() as Promise<T>).finally(releaseTransport);
+        data = await owner.run(res.json() as Promise<unknown>).finally(releaseTransport);
       } catch (jsonErr) {
         owner.assertCurrent();
         // A 2xx that is not JSON (a proxy's web page in front of the API): the
@@ -220,39 +224,44 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
         throw new ApiClientError(res.status, "NOT_JSON", connectText("error.notJson"));
       }
       owner.assertCurrent();
-      return data;
+      const checked = await owner.run(readReply(reply, data, { method, path, status: res.status }));
+      owner.assertCurrent();
+      return checked;
     } finally {
       clearTimeout(timer);
       owner.dispose();
     }
   }
 
-  function request<T>(
+  function request<K extends keyof RestReplyShapes>(
+    reply: K,
     method: string,
     path: string,
     body?: unknown,
     signal?: AbortSignal,
     opts?: RequestOptions,
-  ): Promise<T> {
-    return doFetch<T>("API", "/api/v1", method, path, body, signal, opts);
+  ): Promise<RestReplyShapes[K]> {
+    return doFetch(reply, "API", "/api/v1", method, path, body, signal, opts);
   }
 
-  function channelRequest<T>(
+  function channelRequest<K extends keyof RestReplyShapes>(
+    reply: K,
     method: string,
     path: string,
     body?: unknown,
     signal?: AbortSignal,
-  ): Promise<T> {
-    return request<T>(method, `/moderation/channels${path}`, body, signal);
+  ): Promise<RestReplyShapes[K]> {
+    return request(reply, method, `/moderation/channels${path}`, body, signal);
   }
 
-  function memberRequest<T>(
+  function memberRequest<K extends keyof RestReplyShapes>(
+    reply: K,
     method: string,
     path: string,
     body?: unknown,
     signal?: AbortSignal,
-  ): Promise<T> {
-    return request<T>(method, `/moderation/members${path}`, body, signal);
+  ): Promise<RestReplyShapes[K]> {
+    return request(reply, method, `/moderation/members${path}`, body, signal);
   }
 
   // oxlint-disable-next-line consistent-function-scoping -- co-located with doFetch for encapsulation
