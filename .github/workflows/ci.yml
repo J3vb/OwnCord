@@ -1216,6 +1216,11 @@ jobs:
 
       - name: Install Linux system dependencies
         run: |
+          # Azure can trickle downloads for minutes before falling back. Prefer
+          # the official archive while retaining the runner's fallback mirrors.
+          if [ -f /etc/apt/apt-mirrors.txt ]; then
+            sudo sed -i '\|^https://archive\.ubuntu\.com/ubuntu/[[:blank:]]\+priority:2$|s/priority:2$/priority:0/' /etc/apt/apt-mirrors.txt
+          fi
           sudo apt-get update
           # ubuntu-22.04 ships LLVM's slotted libunwind-14-dev, which conflicts
           # with the libunwind-dev that libgstreamer1.0-dev depends on; apt will
