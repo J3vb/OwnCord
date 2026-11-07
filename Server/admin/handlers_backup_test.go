@@ -383,20 +383,33 @@ func TestHandleRestoreBackup_AbortsWithoutSafetyBackup(t *testing.T) {
 	restarted, restoreHook := admin.StubRestart()
 	defer restoreHook()
 
-	// Make the safety copy impossible: VACUUM INTO refuses a destination that
-	// already exists. The name is pre_restore_<UTC seconds>.db, so occupy the
-	// next two minutes' worth of candidates — a 4-second window flaked on slow
-	// Windows CI runners where the request itself outlived it.
-	for i := range 120 {
-		name := "pre_restore_" + time.Now().UTC().Add(time.Duration(i)*time.Second).Format("20060102_150405") + ".db"
-		if err := os.WriteFile(filepath.Join(backupDir, name), []byte("occupied"), 0o644); err != nil {
+	// Occupy the actual VACUUM destination after it is allocated. Predicting
+	// timestamped names races the clock, and can skip seconds during slow writes.
+	previousHook := db.BackupVACUUMPreExecHook
+	t.Cleanup(func() { db.BackupVACUUMPreExecHook = previousHook })
+	blocked := false
+	db.BackupVACUUMPreExecHook = func() {
+		paths, err := filepath.Glob(filepath.Join(backupDir, "pre_restore_*.tmp"))
+		if err != nil || len(paths) != 1 {
+			t.Fatalf("safety backup temporary paths = %v, %v; want one", paths, err)
+		}
+		if err := os.WriteFile(paths[0], []byte("occupied"), 0o644); err != nil {
 			t.Fatalf("WriteFile blocker: %v", err)
 		}
+		blocked = true
 	}
 
 	w := doRequest(t, handler, http.MethodPost, "/backups/"+backupName+"/restore", token, nil)
 
 	requireStatus(t, w, http.StatusInternalServerError)
+	if !blocked || !strings.Contains(w.Body.String(), "could not create the pre-restore safety backup") {
+		t.Fatalf("request did not reach the injected safety backup failure: %s", w.Body.String())
+	}
+	for _, suffix := range []string{".restore-staged", ".restore-pending.json"} {
+		if _, err := os.Stat(dbFile + suffix); !os.IsNotExist(err) {
+			t.Errorf("aborted restore left %s: %v", suffix, err)
+		}
+	}
 	if restarted() {
 		t.Error("aborted restore must not restart the process")
 	}
