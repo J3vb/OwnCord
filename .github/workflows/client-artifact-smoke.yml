@@ -30,6 +30,9 @@
 name: Desktop Artifact Smoke
 
 on:
+  # Temporary isolation build trigger; remove before merging this test branch.
+  push:
+    branches: [fix/windows-auto-gpu-isolation]
   schedule:
     # After upgrade-rehearsal.yml (04:00) so they do not compete for runners.
     - cron: "0 5 * * *"

@@ -47,6 +47,8 @@ and only when it changes something a contributor or fork holder must do
 
 ## Unreleased
 
+- **Windows video:** Auto leaves graphics-card selection to Windows again; choosing a specific card still applies after restarting OwnCord.
+
 - **Voice:** H.264 webcam encoding is now checked for software fallback; changing a shared source, quality or camera device rechecks the encoder without letting stale results affect a new session.
 
 ### Changed
