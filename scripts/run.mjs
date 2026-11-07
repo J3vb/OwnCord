@@ -187,10 +187,16 @@ const CHECK_RUST = [
   step("cargo", ["fmt", "--all", "--", "--check"], "Client/src-tauri"),
   step("cargo", ["test", "--lib"], "Client/src-tauri"),
   step("cargo", ["test", "-p", "owncord-parse"], "Client/src-tauri"),
+  step("cargo", ["test", "-p", "owncord-capture", "--all-targets", "--locked"], "Client/src-tauri"),
   step("cargo", ["clippy", "--all-targets", "--", "-D", "warnings"], "Client/src-tauri"),
   step(
     "cargo",
     ["clippy", "-p", "owncord-parse", "--all-targets", "--", "-D", "warnings"],
+    "Client/src-tauri",
+  ),
+  step(
+    "cargo",
+    ["clippy", "-p", "owncord-capture", "--all-targets", "--locked", "--", "-D", "warnings"],
     "Client/src-tauri",
   ),
 ];

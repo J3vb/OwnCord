@@ -26,11 +26,11 @@ unused_unsafe = "warn"
 unwrap_used = "deny"
 expect_used = "deny"
 
-# The app plus the small crate of pure parsers it depends on (property-tested
-# and fuzzed on its own). The fuzz crate has its own lock file and nightly
-# toolchain, so it stays out.
+# The app, its pure parsers, and an independent capture experiment. The app
+# does not depend on the capture crate. The parser fuzz crate has its own lock
+# file and nightly toolchain, so it stays out.
 [workspace]
-members = [".", "crates/owncord-parse"]
+members = [".", "crates/owncord-parse", "crates/owncord-capture"]
 exclude = ["crates/owncord-parse/fuzz"]
 
 [lib]

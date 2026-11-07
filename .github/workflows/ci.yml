@@ -1194,6 +1194,32 @@ jobs:
           path: Client/coverage/
           retention-days: 7
 
+  capture-tests:
+    name: Capture Crate (${{ matrix.os }})
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.rust == 'true') }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: Client/src-tauri/
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          components: clippy, rustfmt
+      - name: Check capture crate and example
+        run: cargo clippy -p owncord-capture --all-targets --locked -- -D warnings
+      - name: Test capture crate
+        run: cargo test -p owncord-capture --all-targets --locked
+
   # Rust unit tests used to live inside tauri-build, which only runs on PRs to
   # main — so #[cfg(test)] code never ran on pushes or on PRs to dev, and could
   # rot for a whole release cycle. This job runs them on every event. Clippy is
