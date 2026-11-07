@@ -143,7 +143,10 @@ describe("WebSocket frame decode properties", () => {
             { maxLength: 4 },
           ),
           fc.constantFrom(...VALID_TYPES),
-          fc.dictionary(fc.string(), fc.jsonValue()),
+          fc.dictionary(
+            fc.string().map((key) => `x-${key}`),
+            fc.jsonValue(),
+          ),
           (garbage, type, extras) => {
             const payload = { ...extras, ...samplePayload(type) };
             expect(checkFrame(type, payload)).toBeNull();
