@@ -8,22 +8,31 @@ import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import {
   OUT_FILE,
+  REST_FILE,
+  UNIONS_FILE,
   buildTables,
   generate,
   renderModule,
 } from "../../scripts/gen-wire-validators.mjs";
 import { checkAgainst } from "../../src/lib/net/wireCheck";
+import { isInstrumented, withoutSandboxHeader } from "../helpers/instrumented";
 import type { Shape } from "../../src/lib/net/wireShapes";
 
 // Loading the TypeScript program takes a second or two.
 const SLOW = 30_000;
 
+const read = (file: string): string => withoutSandboxHeader(readFileSync(file, "utf8"));
+/** The nightly test-depth run rewrites some sources; the committed table is judged against the originals only. */
+const inputsAreOriginal = [OUT_FILE, UNIONS_FILE, REST_FILE].every(
+  (file) => !isInstrumented(read(file)),
+);
+
 describe("generated wireShapes.ts", () => {
-  it(
+  it.runIf(inputsAreOriginal)(
     "matches what the generator writes now",
     async () => {
       const expected = await generate();
-      const committed = readFileSync(OUT_FILE, "utf8");
+      const committed = read(OUT_FILE);
       expect(
         committed === expected,
         "src/lib/net/wireShapes.ts is out of date: run `npm run gen:wire` in Client/ and commit the result",
