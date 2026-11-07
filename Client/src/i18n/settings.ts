@@ -634,7 +634,7 @@ export const settingsText = defineCatalog("settings", {
     "Auto (default: H.264 when your graphics card can encode it, otherwise VP8)",
   "voiceAudio.gpuAdapter": "Graphics card for video",
   "voiceAudio.gpuAdapterDesc":
-    "Used to draw, play and encode video. Auto picks the high performance card. Applies after a restart.",
+    "Used to draw, play and encode video. Auto lets Windows choose the card. Applies after a restart.",
   "voiceAudio.gpuAdapter.auto": "Auto (recommended)",
   "voiceAudio.gpuAdapterNotFound": "Saved card not found, using Auto.",
   "voiceAudio.gpuAdapterReset":

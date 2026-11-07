@@ -1,6 +1,7 @@
 //! Graphics card for video (Windows).
 //!
-//! WebView2 picks its graphics card when it starts, so the choice is applied
+//! WebView2 picks its graphics card when it starts. Auto leaves that choice
+//! to Windows; only an explicit card selection is applied
 //! at launch: before the main window is built, `--use-adapter-luid=<card>` is
 //! added to the webview's start flags and the whole app (drawing, decode,
 //! encode) follows that card. A card's LUID changes on every reboot, so the
@@ -114,16 +115,15 @@ pub struct Resolution {
     pub fell_back: bool,
 }
 
-/// Auto picks only when there is a real choice: with fewer than two hardware
-/// cards nothing is added and the webview behaves as before.
+/// Auto leaves WebView2's adapter selection to Windows, even on multi-GPU PCs.
 #[cfg(test)]
 pub fn resolve(saved: &SavedChoice, cards: &[GpuCard]) -> Resolution {
     resolve_with(saved, cards, false)
 }
 
-/// `auto_off`: an earlier start on the Auto pick never finished, so Auto
-/// leaves the card to Windows until the user picks again.
-pub fn resolve_with(saved: &SavedChoice, cards: &[GpuCard], auto_off: bool) -> Resolution {
+/// The legacy Auto flag is retained for stored-state compatibility. Auto
+/// never adds an adapter override; explicit card choices still do.
+pub fn resolve_with(saved: &SavedChoice, cards: &[GpuCard], _auto_off: bool) -> Resolution {
     let by_card = |card: &GpuCard, fell_back: bool| Resolution {
         luid: Some(card.luid()),
         active: Some(card.id()),
@@ -135,11 +135,6 @@ pub fn resolve_with(saved: &SavedChoice, cards: &[GpuCard], auto_off: bool) -> R
             return by_card(card, false);
         }
         fell_back = true;
-    }
-    if !auto_off && cards.len() >= 2 {
-        if let Some(card) = cards.iter().min_by_key(|c| c.high_performance_rank) {
-            return by_card(card, fell_back);
-        }
     }
     Resolution {
         luid: None,
@@ -531,10 +526,11 @@ mod tests {
     }
 
     #[test]
-    fn auto_with_two_cards_picks_high_performance() {
+    fn auto_with_two_cards_leaves_selection_to_windows() {
         let r = resolve(&SavedChoice::Auto, &two_cards());
-        assert_eq!(r.luid, Some(Luid { high: 0, low: 200 }));
-        assert_eq!(r.active.as_deref(), Some("10de:1234:NVIDIA GeForce RTX"));
+        assert_eq!(r.luid, None);
+        assert_eq!(r.active, None);
+        assert!(!r.fell_back);
     }
 
     #[test]
@@ -554,7 +550,8 @@ mod tests {
         };
         let r = resolve(&saved, &two_cards());
         assert!(r.fell_back);
-        assert_eq!(r.luid, Some(Luid { high: 0, low: 200 }));
+        assert_eq!(r.luid, None);
+        assert_eq!(r.active, None);
         let r = resolve(&saved, &[card(0x10de, "Only", 0, 1)]);
         assert!(r.fell_back);
         assert_eq!(r.luid, None);
@@ -570,13 +567,16 @@ mod tests {
     }
 
     #[test]
-    fn auto_stands_down_after_a_crash_until_picked_again() {
-        let plan = plan_startup(&SavedChoice::Auto, &two_cards(), true, false);
-        assert!(plan.reset_after_crash);
-        let plan = plan_startup(&SavedChoice::Auto, &two_cards(), false, true);
-        assert_eq!(plan.resolution.luid, None);
-        assert!(!plan.set_pending && !plan.reset_after_crash);
-        // An explicit card still applies while Auto is off.
+    fn auto_ignores_stale_markers_and_legacy_auto_off_flag() {
+        for pending in [false, true] {
+            for auto_off in [false, true] {
+                let plan = plan_startup(&SavedChoice::Auto, &two_cards(), pending, auto_off);
+                assert_eq!(plan.resolution.luid, None);
+                assert_eq!(plan.resolution.active, None);
+                assert!(!plan.set_pending && !plan.reset_after_crash);
+            }
+        }
+        // A legacy Auto flag must not disable an explicit choice.
         let saved = SavedChoice::of(&two_cards()[0]);
         let plan = plan_startup(&saved, &two_cards(), false, true);
         assert!(plan.resolution.luid.is_some() && plan.set_pending);
@@ -584,8 +584,11 @@ mod tests {
 
     #[test]
     fn marker_is_set_only_when_a_flag_is_applied() {
-        let plan = plan_startup(&SavedChoice::Auto, &two_cards(), false, false);
+        let saved = SavedChoice::of(&two_cards()[1]);
+        let plan = plan_startup(&saved, &two_cards(), false, false);
         assert!(plan.set_pending && !plan.reset_after_crash);
+        let plan = plan_startup(&SavedChoice::Auto, &two_cards(), false, false);
+        assert!(!plan.set_pending);
         let plan = plan_startup(&SavedChoice::Auto, &[card(1, "One", 0, 1)], false, false);
         assert!(!plan.set_pending);
         // A stale marker with no flag to apply is not a crash.
