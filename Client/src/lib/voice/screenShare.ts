@@ -1179,3 +1179,10 @@ export function getLocalScreenshareStats(room: Room | null): Promise<ShareSender
     SenderStatsTrack | undefined;
   return readSenderSample(track);
 }
+
+/** Sender evidence for camera encoder checks, using the same stats reader as shares. */
+export function getLocalCameraStats(room: Room | null): Promise<ShareSenderSample | null> {
+  const track = room?.localParticipant.getTrackPublication(Track.Source.Camera)?.track as
+    SenderStatsTrack | undefined;
+  return readSenderSample(track);
+}

@@ -3,13 +3,14 @@
 // surface, so no file silently drops out of the nightly baseline (B7-8 Task 3).
 import { globSync } from "node:fs";
 import { join, matchesGlob } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
-const clientDir = new URL("..", import.meta.url).pathname;
+const clientDir = fileURLToPath(new URL("..", import.meta.url));
 process.env.STRYKER_SHARD ||= "livekit-1"; // satisfy the config's own validation on import
 const { shards, default: shardConfig } = await import(
-  join(clientDir, "tests/mutation/stryker.shard.config.mjs")
+  pathToFileURL(join(clientDir, "tests/mutation/stryker.shard.config.mjs")).href
 );
-const base = (await import(join(clientDir, "stryker.config.mjs"))).default;
+const base = (await import(pathToFileURL(join(clientDir, "stryker.config.mjs")).href)).default;
 
 if (!shardConfig.reporters?.includes("json")) {
   console.error('shard config must list the "json" reporter, or mutation.json is never written');
@@ -24,7 +25,8 @@ const excluded = (p) => negative.some((g) => matchesGlob(p, g));
 const expected = new Set();
 for (const g of positive) {
   for (const p of globSync(g, { cwd: clientDir })) {
-    if (!excluded(p)) expected.add(p);
+    const normalized = p.replaceAll("\\", "/");
+    if (!excluded(normalized)) expected.add(normalized);
   }
 }
 

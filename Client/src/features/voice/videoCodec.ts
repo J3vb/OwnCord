@@ -208,7 +208,7 @@ async function resolvePreferredCodec(
   // WebView2's encodingInfo answers powerEfficient:false for every WebRTC
   // config, so it cannot see the GPU encoder that Main/High reach. The live
   // check in `codecSwitch` still turns a share that lands on OpenH264 into VP8;
-  // a camera has no such check and stays on the software encoder then. Auto
+  // cameras are checked by the same controller. Auto
   // takes the same GPU path, since the probe would always answer VP8 here.
   if ((pref === "h264" || pref === "auto") && h264GpuProfiles()) return "h264";
   if (pref === "h264")
