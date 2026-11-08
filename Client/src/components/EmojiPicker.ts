@@ -7,6 +7,8 @@ import { isImeCommit } from "@lib/text/ime";
 import { createElement, setText, clearChildren } from "@lib/dom";
 import { enableRovingNavigation, setRovingTabindex } from "@lib/ui/a11y";
 import { buildCustomEmojiNode } from "../features/messaging/content/customEmoji";
+import { createPickerImages, type PickerImages } from "../features/messaging/pickerImages";
+import { trackPickerCategory } from "../features/messaging/pickerScroll";
 import { messagingText } from "../i18n/messaging";
 import { addRecentEmoji, getRecentEmoji } from "../features/messaging/emojiRecent";
 import {
@@ -90,7 +92,7 @@ function buildCategoryIcon(cat: EmojiCategory): Node {
 // EmojiPicker
 // ---------------------------------------------------------------------------
 
-function buildEmojiSpan(emoji: string): HTMLSpanElement {
+function buildEmojiSpan(emoji: string, images: PickerImages): HTMLSpanElement {
   const span = createElement("span", {
     class: "ep-emoji",
     title: emoji,
@@ -105,7 +107,7 @@ function buildEmojiSpan(emoji: string): HTMLSpanElement {
   // A `:shortcode:` entry shows its image; everything else is the character
   // itself. An unresolvable shortcode falls back to the text, which is what
   // it would render as in a message anyway.
-  const image = buildCustomEmojiNode(emoji);
+  const image = buildCustomEmojiNode(emoji, images);
   if (image !== null) {
     span.classList.add("ep-emoji-custom");
     span.appendChild(image);
@@ -181,6 +183,8 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
     "aria-label": messagingText("emoji.listLabel"),
   });
   body.appendChild(scrollArea);
+  const images = createPickerImages(scrollArea, signal);
+  const refreshCategory = trackPickerCategory(scrollArea, categoryBar, signal);
   enableRovingNavigation(scrollArea, ".ep-emoji", signal, "grid", GRID_COLUMNS);
 
   // Single delegated listener for the whole grid, registered once at mount
@@ -229,23 +233,7 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
       categoryBar.appendChild(btn);
     }
     setRovingTabindex(categoryBar, ".ep-category-btn");
-    syncActiveCategory();
   }
-
-  // The rail highlights the category whose heading was last scrolled past.
-  function syncActiveCategory(): void {
-    const labels = scrollArea.querySelectorAll<HTMLElement>(".ep-category-label");
-    let current: string | undefined = labels[0]?.dataset.category;
-    const top = scrollArea.scrollTop + 1;
-    for (const label of labels) {
-      if (label.offsetTop > top) break;
-      current = label.dataset.category;
-    }
-    for (const btn of categoryBar.querySelectorAll<HTMLElement>(".ep-category-btn")) {
-      btn.classList.toggle("active", btn.dataset.category === current);
-    }
-  }
-  scrollArea.addEventListener("scroll", syncActiveCategory, { signal, passive: true });
 
   // Build categories with recent + custom, then the Unicode set once loaded.
   function getAllCategories(): readonly EmojiCategory[] {
@@ -310,6 +298,7 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
   }
 
   function renderAllCategories(categories: readonly EmojiCategory[]): void {
+    images.clear();
     for (const child of Array.from(scrollArea.children)) {
       if (child !== failureRow) child.remove();
     }
@@ -355,7 +344,7 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
 
       const grid = createElement("div", { class: "ep-grid" });
       for (const emoji of filtered) {
-        grid.appendChild(buildEmojiSpan(emoji));
+        grid.appendChild(buildEmojiSpan(emoji, images));
       }
       scrollArea.appendChild(grid);
     }
@@ -379,7 +368,7 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
     // Every render rebuilds the cell set, so the single Tab stop must be
     // re-established or filtering would leave zero tabbable cells.
     setRovingTabindex(scrollArea, ".ep-emoji");
-    syncActiveCategory();
+    refreshCategory();
   }
 
   function renderAll(): void {

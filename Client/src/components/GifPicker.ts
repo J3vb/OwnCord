@@ -11,6 +11,7 @@ import { ApiClientError } from "@lib/api";
 import { searchGifs, getTrendingGifs } from "@lib/media/gifProvider";
 import type { GifApi, GifFavoritesApi, GifPage, GifResult } from "@lib/media/gifProvider";
 import { createGifPager } from "@lib/media/gifPager";
+import { createPickerImages, type PickerImages } from "../features/messaging/pickerImages";
 import { gifFavoritesStore, isGifFavorite, toggleGifFavorite } from "@stores/gifFavorites.store";
 import {
   fetchExternalImage,
@@ -53,7 +54,7 @@ export interface GifPickerOptions {
 const DEBOUNCE_MS = 300;
 const GIF_LIMIT = 20;
 /** Start the next page this far before the sentinel scrolls into view. */
-const LOAD_MORE_MARGIN = "0px 0px 160px 0px";
+const LOAD_MORE_MARGIN = "0px 0px 480px 0px";
 
 // ---------------------------------------------------------------------------
 // GifPicker
@@ -77,7 +78,7 @@ async function toggleCell(cell: HTMLElement): Promise<void> {
   });
 }
 
-function appendCells(grid: HTMLElement, gifs: readonly GifResult[]): void {
+function appendCells(grid: HTMLElement, gifs: readonly GifResult[], images: PickerImages): void {
   for (const gif of gifs) {
     const item = createElement("div", {
       class: "gp-item",
@@ -101,9 +102,7 @@ function appendCells(grid: HTMLElement, gifs: readonly GifResult[]): void {
     });
     admitDerived(GIF_PICKER_ITEM, `url:${gif.url}`);
     recoverEvictedImage(img, { url: gif.url });
-    void fetchExternalImage({ url: gif.url }).then((src) => {
-      if (src !== null) img.src = src;
-    });
+    images.observe(img, () => fetchExternalImage({ url: gif.url }));
     item.appendChild(img);
     const star = createElement("button", {
       type: "button",
@@ -184,7 +183,13 @@ export function createGifPicker(options: GifPickerOptions): {
     "aria-label": messagingText("gif.listLabel"),
   });
   root.appendChild(gridArea);
+  const images = createPickerImages(gridArea, signal);
   enableRovingNavigation(gridArea, ".gp-item", signal);
+
+  function clearGrid(): void {
+    images.clear();
+    clearChildren(gridArea);
+  }
 
   // Single delegated listener for the whole grid, registered once at mount
   // time. renderGifs() discards and rebuilds every cell on each search (20
@@ -235,7 +240,7 @@ export function createGifPicker(options: GifPickerOptions): {
   function renderFavorites(): void {
     const favs = gifFavoritesStore.getState().favorites;
     if (favs.length === 0) {
-      clearChildren(gridArea);
+      clearGrid();
       const empty = createElement("div", { class: "gp-empty", role: "status" });
       setText(empty, gifFavoritesText("favoritesEmpty"));
       gridArea.appendChild(empty);
@@ -310,14 +315,14 @@ export function createGifPicker(options: GifPickerOptions): {
   /** Transient failure: the same calm line as before plus a bounded retry,
    *  which re-runs the last query under the picker's current consent. */
   function showLoadError(message: string, retry: () => void): void {
-    clearChildren(gridArea);
+    clearGrid();
     gridArea.appendChild(renderFailureStatus(message, contentText("gif.retry"), retry));
   }
 
   // ── Rendering ──
 
   function renderGifs(gifs: readonly GifResult[]): void {
-    clearChildren(gridArea);
+    clearGrid();
 
     if (gifs.length === 0) {
       gridArea.appendChild(emptyEl);
@@ -325,7 +330,7 @@ export function createGifPicker(options: GifPickerOptions): {
     }
 
     const grid = createElement("div", { class: "gp-grid" });
-    appendCells(grid, gifs);
+    appendCells(grid, gifs, images);
     gridArea.appendChild(grid);
 
     // Each render replaces the cell set, so re-establish the single Tab stop.
@@ -378,7 +383,7 @@ export function createGifPicker(options: GifPickerOptions): {
     const grid = gridArea.querySelector<HTMLElement>(".gp-grid");
     if (fresh !== null && grid !== null && fresh.length > 0) {
       const hadTabStop = grid.querySelector(".gp-item[tabindex='0']") !== null;
-      appendCells(grid, fresh);
+      appendCells(grid, fresh, images);
       // Only the new cells: the user's current Tab stop stays where it is.
       const added = [...grid.querySelectorAll<HTMLElement>(".gp-item")].slice(-fresh.length);
       added.forEach((cell, i) =>
@@ -410,7 +415,7 @@ export function createGifPicker(options: GifPickerOptions): {
   );
 
   function showLoading(): void {
-    clearChildren(gridArea);
+    clearGrid();
     gridArea.appendChild(loadingEl);
   }
 
@@ -460,14 +465,14 @@ export function createGifPicker(options: GifPickerOptions): {
           ? await searchGifs(options.api, query, GIF_LIMIT)
           : await getTrendingGifs(options.api, GIF_LIMIT);
 
-      // Only render if this is still the latest request
-      if (requestId === currentRequestId) {
+      // Only render if this is still the latest live request.
+      if (!signal.aborted && requestId === currentRequestId) {
         activeQuery = query;
         const first = pager.begin(page);
         if (first.length === 0 && pager.hasMore()) {
           // An empty page that still has a cursor: keep an empty grid so the
           // next page has somewhere to land.
-          clearChildren(gridArea);
+          clearGrid();
           gridArea.appendChild(createElement("div", { class: "gp-grid" }));
         } else {
           renderGifs(first);
@@ -475,6 +480,7 @@ export function createGifPicker(options: GifPickerOptions): {
         observeSentinel();
       }
     } catch (err) {
+      if (signal.aborted) return;
       // The server has no GIF key configured — degrade calmly and tell the
       // caller so it can disable its GIF button, rather than looking broken.
       const disabled = err instanceof ApiClientError && err.code === RestErrorCode.GIF_DISABLED;
@@ -485,7 +491,7 @@ export function createGifPicker(options: GifPickerOptions): {
       }
       if (requestId === currentRequestId) {
         if (disabled) {
-          clearChildren(gridArea);
+          clearGrid();
           const errEl = createElement("div", { class: "gp-empty", role: "status" });
           setText(errEl, messagingText("gif.disabled"));
           gridArea.appendChild(errEl);
