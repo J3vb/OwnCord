@@ -34,13 +34,14 @@ const COMPLEXITY_CAP = 113;
 const DEPTH_CAP = 7;
 const WORST_COMPLEXITY_CAP = 39;
 
+function rewritten(file: string): boolean {
+  const full = path.join(srcDir, file);
+  return existsSync(full) && isInstrumented(readFileSync(full, "utf8"));
+}
+
 /** The nightly test-depth run rewrites the files it exercises, which inflates
  *  their measures; those files are judged in the original tree only. */
 function withoutRewritten(sections: Sections): Sections {
-  const rewritten = (file: string): boolean => {
-    const full = path.join(srcDir, file);
-    return existsSync(full) && isInstrumented(readFileSync(full, "utf8"));
-  };
   const keep = (section: Section): Section =>
     Object.fromEntries(Object.entries(section).filter(([file]) => !rewritten(file)));
   return { complexity: keep(sections.complexity), depth: keep(sections.depth) };
