@@ -47,6 +47,7 @@ and only when it changes something a contributor or fork holder must do
 
 ## Unreleased
 
+- **Voice:** Zoomed screen shares show a draggable overview thumbnail, zoom percentage and Reset button; the overview stays hidden at 100%.
 - **Messages:** Emoji and GIF pickers prioritize nearby previews, load the next GIF page earlier, and keep emoji scrolling stable without measuring every category on each scroll.
 - **Voice:** H.264 webcam encoding is now checked for software fallback; changing a shared source, quality or camera device rechecks the encoder without letting stale results affect a new session.
 
