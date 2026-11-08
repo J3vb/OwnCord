@@ -5,7 +5,7 @@ export function trackPickerCategory(
   signal: AbortSignal,
 ): () => void {
   let positions: Array<{ name: string | undefined; top: number }> | null = null;
-  let current: string | undefined;
+  let current: string | undefined | null = null;
   let frame: number | null = null;
 
   function sync(): void {
@@ -35,7 +35,7 @@ export function trackPickerCategory(
 
   function refresh(): void {
     positions = null;
-    current = undefined;
+    current = null;
     schedule();
   }
 

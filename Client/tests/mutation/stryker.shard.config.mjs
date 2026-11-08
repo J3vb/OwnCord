@@ -226,6 +226,8 @@ export const shards = {
     "src/lib/voice/voiceDeafened.ts",
   ],
   "lib-rest-2": [
+    "src/features/messaging/pickerImages.ts",
+    "src/features/messaging/pickerScroll.ts",
     "src/features/messaging/pollModel.ts",
     "src/features/whats-new/changelog.ts",
     "src/lib/media/gifPager.ts",

@@ -19,14 +19,13 @@ describe("emoji picker scrolling", () => {
     frames = new Map();
     resizes = [];
     nextFrame = 0;
-    vi.stubGlobal(
-      "requestAnimationFrame",
-      vi.fn((callback: FrameRequestCallback) => {
-        frames.set(++nextFrame, callback);
-        return nextFrame;
-      }),
-    );
-    vi.stubGlobal("cancelAnimationFrame", vi.fn((id: number) => frames.delete(id)));
+    const requestFrame = vi.fn((callback: FrameRequestCallback) => {
+      frames.set(++nextFrame, callback);
+      return nextFrame;
+    });
+    const cancelFrame = vi.fn((id: number) => frames.delete(id));
+    vi.stubGlobal("requestAnimationFrame", requestFrame);
+    vi.stubGlobal("cancelAnimationFrame", cancelFrame);
     stubCapturingResizeObserver(resizes);
   });
 
@@ -103,6 +102,14 @@ describe("emoji picker scrolling", () => {
     area.dispatchEvent(new Event("scroll"));
     flushFrame();
     expect(toggle).not.toHaveBeenCalled();
+  });
+
+  it("clears the active category when filtering leaves no results", () => {
+    const { area, bar, refresh } = fixture();
+    area.replaceChildren();
+    refresh();
+    flushFrame();
+    expect(bar.querySelector(".active")).toBeNull();
   });
 
   it("cancels pending scroll work when the picker closes", () => {

@@ -33,7 +33,7 @@ test.describe("Emoji Picker — Insert into textarea", () => {
     }
   });
 
-  test("scrolling keeps the emoji grid stable and keyboard selection accessible", async ({ page }) => {
+  test("keeps emoji scrolling stable and keyboard selection accessible", async ({ page }) => {
     await page.locator(".emoji-btn").click();
     const picker = page.locator(".emoji-picker.open");
     await expect(picker.locator(".ep-loading")).toHaveCount(0);
