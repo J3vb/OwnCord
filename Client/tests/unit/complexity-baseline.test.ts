@@ -19,8 +19,10 @@ import {
   countFunctions,
   measureTree,
   readBaseline,
+  type Section,
   type Sections,
 } from "../../scripts/complexity-baseline.mjs";
+import { isInstrumented } from "../helpers/instrumented";
 
 const clientRoot = path.resolve(__dirname, "../..");
 const srcDir = path.join(clientRoot, "src");
@@ -32,12 +34,27 @@ const COMPLEXITY_CAP = 113;
 const DEPTH_CAP = 7;
 const WORST_COMPLEXITY_CAP = 39;
 
+/** The nightly test-depth run rewrites the files it exercises, which inflates
+ *  their measures; those files are judged in the original tree only. */
+function withoutRewritten(sections: Sections): Sections {
+  const rewritten = (file: string): boolean => {
+    const full = path.join(srcDir, file);
+    return existsSync(full) && isInstrumented(readFileSync(full, "utf8"));
+  };
+  const keep = (section: Section): Section =>
+    Object.fromEntries(Object.entries(section).filter(([file]) => !rewritten(file)));
+  return { complexity: keep(sections.complexity), depth: keep(sections.depth) };
+}
+
 const highest = (sections: Sections["complexity"]): number =>
   Math.max(0, ...Object.values(sections).flatMap((keys) => Object.values(keys).flat()));
 
 describe("complexity baseline", () => {
   it("matches the tree exactly: nothing over it, nothing it can lose", async () => {
-    const { grown, stale } = compareSections(await measureTree(), baseline);
+    const { grown, stale } = compareSections(
+      withoutRewritten(await measureTree()),
+      withoutRewritten(baseline),
+    );
     expect(grown, "simplify the function; never raise or add a baseline entry").toEqual([]);
     expect(
       stale,
