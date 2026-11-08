@@ -4,6 +4,7 @@
  */
 import { test, expect } from "./fixtures";
 import { startFullSession } from "./helpers";
+import { findUnnamedControls, keyboardReachable } from "./support/accessibility";
 
 test.describe("Emoji Picker — Insert into textarea", () => {
   test.beforeEach(async ({ page }) => {
@@ -30,6 +31,29 @@ test.describe("Emoji Picker — Insert into textarea", () => {
     if (emojiText) {
       expect(newValue).toContain(emojiText);
     }
+  });
+
+  test("keeps emoji scrolling stable and keyboard selection accessible", async ({ page }) => {
+    await page.locator(".emoji-btn").click();
+    const picker = page.locator(".emoji-picker.open");
+    await expect(picker.locator(".ep-loading")).toHaveCount(0);
+    const area = picker.locator(".ep-scroll");
+    await expect(picker.locator(".ep-category-label")).toHaveCount(9);
+    const height = await area.evaluate((el) => el.scrollHeight);
+    const first = picker.locator(".ep-emoji").first();
+    expect(await keyboardReachable(page, first)).toBe(true);
+    await first.press("End");
+    const last = picker.locator(".ep-emoji").last();
+    await expect(last).toBeFocused();
+    await expect(last).toBeInViewport();
+    expect(await area.evaluate((el) => el.scrollHeight)).toBe(height);
+    expect(await findUnnamedControls(picker)).toEqual([]);
+    await last.press("Home");
+    await expect(first).toBeFocused();
+    await expect(first).toBeInViewport();
+    const emoji = await first.getAttribute("data-emoji");
+    await first.press("Enter");
+    await expect(page.locator("[data-testid='msg-textarea']")).toHaveValue(emoji!);
   });
 
   test("emoji picker closes after selecting an emoji", async ({ page }) => {

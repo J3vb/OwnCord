@@ -15,6 +15,7 @@
 import { createElement } from "@lib/dom";
 import { resolveEmoji, type CustomEmoji } from "@stores/emoji.store";
 import { animateEmojiEnabled, showStillFrame } from "../emojiStill";
+import type { PickerImages } from "../pickerImages";
 import { fetchImageAsObjectUrl, recoverEvictedImage, resolveServerUrl } from "./attachments";
 
 /**
@@ -91,7 +92,7 @@ export function isEmojiOnlyMessage(content: string): boolean {
  * do. Until then (and forever, if the fetch fails) the `alt` text is the
  * shortcode, so the message still reads correctly.
  */
-export function buildCustomEmojiImage(emoji: CustomEmoji): HTMLImageElement {
+export function buildCustomEmojiImage(emoji: CustomEmoji, images?: PickerImages): HTMLImageElement {
   const img = createElement("img", {
     class: "custom-emoji",
     alt: `:${emoji.shortcode}:`,
@@ -101,12 +102,14 @@ export function buildCustomEmojiImage(emoji: CustomEmoji): HTMLImageElement {
   });
   const url = resolveServerUrl(emoji.url);
   recoverEvictedImage(img, { url });
-  void fetchImageAsObjectUrl(url).then((objectUrl) => {
+  const show = (objectUrl: string | null): void => {
     if (objectUrl === null) return;
     // "Animate emoji" off: the first frame, whatever the emoji is.
     if (animateEmojiEnabled()) img.src = objectUrl;
     else showStillFrame(img, objectUrl);
-  });
+  };
+  if (images === undefined) void fetchImageAsObjectUrl(url).then(show);
+  else images.observe(img, () => fetchImageAsObjectUrl(url), show);
   return img;
 }
 
@@ -114,7 +117,10 @@ export function buildCustomEmojiImage(emoji: CustomEmoji): HTMLImageElement {
  * The image node for `token` (with or without colons), or null when no such
  * emoji exists — the caller leaves an unresolved token as plain text.
  */
-export function buildCustomEmojiNode(token: string): HTMLImageElement | null {
+export function buildCustomEmojiNode(
+  token: string,
+  images?: PickerImages,
+): HTMLImageElement | null {
   const emoji = resolveEmoji(token);
-  return emoji === null ? null : buildCustomEmojiImage(emoji);
+  return emoji === null ? null : buildCustomEmojiImage(emoji, images);
 }

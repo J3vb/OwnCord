@@ -13,6 +13,7 @@ vi.mock("../../src/features/messaging/content/attachments", async (importOrigina
 });
 
 import { buildCustomEmojiImage } from "../../src/features/messaging/content/customEmoji";
+import { createPickerImages } from "../../src/features/messaging/pickerImages";
 import { clearAttachmentCaches } from "../../src/features/messaging/content/attachments";
 import {
   animateEmojiEnabled,
@@ -78,6 +79,24 @@ describe("Animate emoji", () => {
     img.dispatchEvent(new Event("load"));
     expect(img.getAttribute("src")).toBe("blob:animated");
     expect(drawImage).not.toHaveBeenCalled();
+  });
+
+  it("a deferred picker preview still follows the animation preference", async () => {
+    localStorage.setItem("owncord:settings:animateEmoji", "false");
+    const scope = new AbortController();
+    const root = document.createElement("div");
+    const images = createPickerImages(root, scope.signal);
+    try {
+      const img = buildCustomEmojiImage(EMOJI, images);
+      root.appendChild(img);
+      await vi.waitFor(() => expect(img.getAttribute("src")).toBe("blob:animated"));
+      loaded(img);
+      img.dispatchEvent(new Event("load"));
+      expect(img.getAttribute("src")).toBe(STILL);
+      expect(fetchImageAsObjectUrlMock).toHaveBeenCalledOnce();
+    } finally {
+      scope.abort();
+    }
   });
 
   it("off: the emoji renders its first frame once the image has loaded", async () => {
