@@ -39,12 +39,14 @@ function rewritten(file: string): boolean {
   return existsSync(full) && isInstrumented(readFileSync(full, "utf8"));
 }
 
+function keepOriginal(section: Section): Section {
+  return Object.fromEntries(Object.entries(section).filter(([file]) => !rewritten(file)));
+}
+
 /** The nightly test-depth run rewrites the files it exercises, which inflates
  *  their measures; those files are judged in the original tree only. */
 function withoutRewritten(sections: Sections): Sections {
-  const keep = (section: Section): Section =>
-    Object.fromEntries(Object.entries(section).filter(([file]) => !rewritten(file)));
-  return { complexity: keep(sections.complexity), depth: keep(sections.depth) };
+  return { complexity: keepOriginal(sections.complexity), depth: keepOriginal(sections.depth) };
 }
 
 const highest = (sections: Sections["complexity"]): number =>
