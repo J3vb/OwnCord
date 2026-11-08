@@ -130,6 +130,7 @@ export const shards = {
     "src/features/voice-messages/wav.ts",
     "src/features/voice-messages/waveform.ts",
     "src/lib/ui/backHistory.ts",
+    "src/lib/ui/videoZoomNavigator.ts",
     "src/lib/ui/zoomPan.ts",
   ],
   "audio-media-4": [
