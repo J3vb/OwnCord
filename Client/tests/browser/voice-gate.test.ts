@@ -9,7 +9,7 @@ import {
   type MicProcessor,
 } from "../../src/lib/voice/micProcessor";
 import { startVadDetector } from "../../src/lib/voice/audioPipeline";
-import { speechDetectionOf } from "../../src/features/voice/sileroDetection";
+import { createSpeechDetection, speechDetectionOf } from "../../src/features/voice/sileroDetection";
 import { vadThreshold } from "../../src/lib/voice/gateScale";
 import speechUrl from "../fixtures/audio/speech.wav?url";
 import clickUrl from "../fixtures/audio/mouse-click.wav?url";
@@ -77,7 +77,12 @@ describe("sensitivity gate (real AudioContext)", () => {
 
       if (mode === "silero") await processor.setEnhanced(true);
       processor.setLookahead(GATE_LOOKAHEAD_S);
-      const speech = speechDetectionOf(processor, mode === "silero");
+      const speech =
+        mode === "silero"
+          ? speechDetectionOf(processor)
+          : createSpeechDetection(processor.speechProbability!, (on) =>
+              processor.setSpeechDetection(on),
+            );
 
       const events: Array<{ atMs: number; open: boolean }> = [];
       let startedAt = 0;
