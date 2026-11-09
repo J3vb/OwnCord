@@ -745,7 +745,7 @@ describe("startVadDetector", () => {
       const { source, setOn, detection } = speechDetection(async (on) => on);
       const detector = await startDetector(detection);
       const worklet = FakeAudioWorkletNode.instances[0]!;
-      expect(source.connect).toHaveBeenCalledWith(worklet, 0, 1);
+      await vi.waitFor(() => expect(source.connect).toHaveBeenCalledWith(worklet, 0, 1));
       await vi.waitFor(() => expect(speechGateMessages(worklet)).toEqual([true]));
 
       detector.setThreshold(0.05);
@@ -774,6 +774,19 @@ describe("startVadDetector", () => {
       void detector.stop();
     });
 
+    it("does not bind a lazy classifier that was disabled while loading", async () => {
+      const { source, setOn, detection } = speechDetection(async (on) => on);
+      const node = new FakeAudioWorkletNode(new FakeAudioContext(), "vad-processor");
+      const enable = detection.bind(node as never);
+
+      enable(true);
+      enable(false);
+      await vi.dynamicImportSettled();
+
+      expect(source.connect).not.toHaveBeenCalled();
+      expect(setOn).not.toHaveBeenCalled();
+    });
+
     it("ignores an old classifier result across an off and on toggle", async () => {
       const answers: Array<(on: boolean) => void> = [];
       const { detection } = speechDetection((on) => {
@@ -782,6 +795,7 @@ describe("startVadDetector", () => {
       });
       const detector = await startDetector(detection, 0.02);
       const worklet = FakeAudioWorkletNode.instances[0]!;
+      await vi.waitFor(() => expect(answers).toHaveLength(1));
       detector.setSpeechDetection(false);
       detector.setSpeechDetection(true);
       expect(answers).toHaveLength(2);
@@ -802,7 +816,7 @@ describe("startVadDetector", () => {
       );
       const detector = await startDetector(detection, 0.02);
       const worklet = FakeAudioWorkletNode.instances[0]!;
-      expect(answers).toHaveLength(1);
+      await vi.waitFor(() => expect(answers).toHaveLength(1));
 
       void detector.stop();
       answers[0]!(true);
