@@ -45,6 +45,7 @@ describe("AudioPipeline", () => {
     });
 
     it("opens on a press and closes on a release without touching the track", async () => {
+      prefs.set("voiceSensitivity", 100);
       const pipeline = new AudioPipeline();
       const track = micTrack();
       await pipeline.attach(track);
@@ -61,6 +62,7 @@ describe("AudioPipeline", () => {
     });
 
     it("carries the gate onto the next processor: a reconnect's new track, the first press after it", async () => {
+      prefs.set("voiceSensitivity", 100);
       const pipeline = new AudioPipeline();
       pipeline.setPttGated(true);
       await pipeline.attach(micTrack());
@@ -174,6 +176,7 @@ describe("AudioPipeline", () => {
       expect(worklet.port.postMessage).toHaveBeenCalledWith({
         type: "config",
         threshold: vadThreshold(30),
+        speechGate: true,
       });
       worklet.emit({ type: "gate", gated: true });
       expect(pipeline.isVadGated).toBe(true);
@@ -187,7 +190,7 @@ describe("AudioPipeline", () => {
       expect(worklet.port.postMessage).toHaveBeenCalledWith({ type: "stop" });
     });
 
-    it("a restart keeps RNNoise's verdict running; no gate (100) turns it off", async () => {
+    it("retunes without reopening the mic or restarting RNNoise; no gate (100) turns it off", async () => {
       prefs.set("voiceSensitivity", 100);
       const pipeline = new AudioPipeline();
       const track = micTrack();
@@ -199,10 +202,15 @@ describe("AudioPipeline", () => {
       await vi.waitFor(() => expect(detection).toHaveBeenCalledWith(true));
       detection.mockClear();
 
+      const worklet = FakeAudioWorkletNode.instances[0]!;
       pipeline.setVoiceSensitivity(40);
-      await vi.waitFor(() => expect(FakeAudioWorkletNode.instances).toHaveLength(2));
-      await vi.waitFor(() => expect(detection).toHaveBeenCalledWith(true));
-      expect(detection).not.toHaveBeenCalledWith(false);
+      expect(FakeAudioWorkletNode.instances).toHaveLength(1);
+      expect(worklet.port.postMessage).toHaveBeenLastCalledWith({
+        type: "threshold",
+        threshold: vadThreshold(40),
+      });
+      expect(detection).not.toHaveBeenCalled();
+      expect(outputGain(contextOf(track)).value).toBe(0);
 
       pipeline.setVoiceSensitivity(100);
       expect(detection).toHaveBeenLastCalledWith(false);
@@ -236,6 +244,7 @@ describe("AudioPipeline", () => {
       expect(worklet.port.postMessage).toHaveBeenCalledWith({
         type: "config",
         threshold: vadThreshold(30),
+        speechGate: true,
       });
       worklet.emit({ type: "gate", gated: true });
       expect(outputGain(ctx).value).toBe(0);
@@ -294,6 +303,7 @@ describe("AudioPipeline", () => {
         expect(first.port.postMessage).toHaveBeenCalledWith({
           type: "config",
           threshold: AUTO_MAX_THRESHOLD,
+          speechGate: true,
         });
 
         // A second of a -60 dBFS room moves the gate 10 dB above it.
@@ -308,8 +318,13 @@ describe("AudioPipeline", () => {
         expect(moved.type).toBe("threshold");
         expect(moved.threshold).toBeCloseTo(reached, 9);
 
-        // Switching modes restarts the detector: it starts where the last left off.
+        // Applying the same mode keeps the learned floor. A new capture
+        // starts from it if the old capture actually goes away.
         pipeline.applyInputMode();
+        expect(
+          FakeAudioWorkletNode.instances.filter((w) => w.name === "vad-processor"),
+        ).toHaveLength(1);
+        await pipeline.attach(micTrack());
         await vi.waitFor(() =>
           expect(
             FakeAudioWorkletNode.instances.filter((w) => w.name === "vad-processor"),
@@ -350,7 +365,7 @@ describe("AudioPipeline", () => {
       await pipeline.attach(micTrack());
       await vi.waitFor(() => expect(pipeline.vadUsingWorklet).toBe(true));
       const vad = FakeAudioWorkletNode.instances.find((w) => w.name === "vad-processor")!;
-      expect(verdicts.at(-1)).toBe(true);
+      expect(verdicts.at(-1)).toBe(false);
       verdicts.length = 0;
 
       vad.emit({ type: "gate", gated: false });
@@ -661,8 +676,13 @@ describe("startVadDetector", () => {
     detector.setThreshold(0.01);
 
     const worklet = FakeAudioWorkletNode.instances[0]!;
-    expect(worklet.port.postMessage).toHaveBeenLastCalledWith({ type: "config", threshold: 0.01 });
+    expect(worklet.port.postMessage).toHaveBeenLastCalledWith({
+      type: "threshold",
+      threshold: 0.01,
+    });
     expect(FakeAudioWorkletNode.instances).toHaveLength(1);
+    expect(onGate.mock.calls).toEqual([[true]]);
+    onGate.mockClear();
     void detector.stop();
     worklet.emit({ type: "gate", gated: true });
     expect(onGate).not.toHaveBeenCalled();
@@ -730,7 +750,7 @@ describe("startVadDetector", () => {
       const detector = await startDetector(detection, 0.02);
       await vi.waitFor(() => expect(setOn).toHaveBeenCalledWith(true));
       await Promise.resolve();
-      expect(speechGateMessages(FakeAudioWorkletNode.instances[0]!)).toEqual([]);
+      expect(speechGateMessages(FakeAudioWorkletNode.instances[0]!)).toEqual([false]);
       void detector.stop();
     });
 
@@ -754,10 +774,14 @@ describe("startVadDetector", () => {
     vi.useFakeTimers();
     const ctx = new FakeAudioContext();
     const analyser = ctx.createAnalyser();
-    analyser.getFloatTimeDomainData.mockImplementation((arr: Float32Array) => arr.fill(0));
+    let level = 0.2;
+    analyser.getFloatTimeDomainData.mockImplementation((arr: Float32Array) => arr.fill(level));
     const onGate = vi.fn();
     const detector = startVadDetector(ctx as never, analyser as never, 0.05, { onGate });
     await vi.advanceTimersByTimeAsync(16 * 30);
+    expect(onGate.mock.calls).toEqual([[true], [false]]);
+    onGate.mockClear();
+    level = 0;
     await vi.advanceTimersByTimeAsync(16); // the first quiet poll starts the hold
     expect(onGate).not.toHaveBeenCalled();
     // A hidden window runs the next poll a second later, not 16 ms: it is
@@ -783,21 +807,21 @@ describe("startVadDetector", () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(onStarted).toHaveBeenCalledWith(false);
 
-    // Start-up grace (30 polls) then 500 ms below the threshold (the
-    // worklet's hold) close the gate.
+    // Start closed. A single loud poll cannot open the gate; two can.
     await vi.advanceTimersByTimeAsync(16 * 30);
-    expect(onGate).not.toHaveBeenCalled();
-    await vi.advanceTimersByTimeAsync(16 * 31);
-    expect(onGate).not.toHaveBeenCalled();
-    await vi.advanceTimersByTimeAsync(16 * 2);
-    expect(onGate).toHaveBeenLastCalledWith(true);
-
-    // A single loud poll is not speech; two are.
+    expect(onGate.mock.calls).toEqual([[true]]);
     level = 0.2;
     await vi.advanceTimersByTimeAsync(16);
     expect(onGate).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(16);
     expect(onGate).toHaveBeenLastCalledWith(false);
+
+    // The hold is still 500 ms after speech.
+    level = 0;
+    await vi.advanceTimersByTimeAsync(16 * 32);
+    expect(onGate).toHaveBeenLastCalledWith(false);
+    await vi.advanceTimersByTimeAsync(16);
+    expect(onGate).toHaveBeenLastCalledWith(true);
     void detector.stop();
   });
 

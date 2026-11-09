@@ -1,6 +1,6 @@
 // LiveKit diagnostics — ICE connection logging and session debug info
 import type { Room } from "livekit-client";
-import { LogLevel, RoomEvent, Track, setLogExtension, setLogLevel } from "livekit-client";
+import { LogLevel, RoomEvent, setLogExtension, setLogLevel } from "livekit-client";
 import { createLogger } from "@lib/logger";
 import { recordEvent } from "@lib/diagnostics/eventSink";
 import { parseUserId } from "../../features/voice/sessionState";
@@ -223,13 +223,13 @@ export function buildSessionDebugInfo(deps: SessionDebugDeps): Record<string, un
     kind: pub.kind,
     isMuted: pub.isMuted,
   }));
+  const rnnoise = audioPipeline.rnnoiseState;
   return {
     hasRoom: true,
     roomName: room.name,
     roomState: room.state,
-    hasRNNoiseProcessor:
-      room.localParticipant.getTrackPublication(Track.Source.Microphone)?.track?.getProcessor() !==
-      undefined,
+    hasRNNoiseProcessor: rnnoise?.enhanced === true || rnnoise?.speechDetection === true,
+    enhancedNoiseSuppressionActive: rnnoise?.enhanced ?? null,
     currentChannelId,
     outputVolumeMultiplier,
     audioPipelineActive: audioPipeline.isActive,

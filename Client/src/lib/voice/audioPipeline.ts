@@ -139,18 +139,24 @@ export function startVadDetector(
 ): VadDetector {
   let tracker = gate === "auto" ? new NoiseFloorTracker(seed) : null;
   let threshold = tracker?.threshold ?? (gate as number);
+  let gated = threshold > 0;
+  handlers.onGate(gated);
+  const reportGate = (closed: boolean): void => {
+    if (closed === gated) return;
+    gated = closed;
+    handlers.onGate(closed);
+  };
   let stopped = false;
   let workletNode: AudioWorkletNode | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
-  /** Run RNNoise's verdict for the gate. The worklet is told once RNNoise
-   *  answers, so the gate never waits on a signal that is not there. */
+  /** The worklet waits briefly for a verdict, then falls back to level alone. */
   const startSpeechGate = (): void => {
     if (speech === undefined) return;
     speech.setOn(true).then(
       (on) => {
-        if (stopped || !on) return;
+        if (stopped) return;
         // oxlint-disable-next-line require-post-message-target-origin -- MessagePort.postMessage, not Window.postMessage
-        workletNode?.port.postMessage({ type: "speechGate", on: true });
+        workletNode?.port.postMessage({ type: "speechGate", on });
       },
       (err: unknown) => log.warn("Speech detection could not start", err),
     );
@@ -174,12 +180,37 @@ export function startVadDetector(
     const dataArray = new Float32Array(analyser.fftSize);
     let quietSince = 0; // Date.now() of the first poll below the close level, 0 = none
     let speechFrames = 0;
-    let gated = false;
     const GATE_HOLD_MS = 500; // as vad-worklet.js holds; elapsed time, as timers throttle
     const GATE_OFF_FRAMES = 2;
     let startupFrames = 0;
     const STARTUP_GRACE = 30;
     let frameCounter = 0;
+    const updateGate = (rms: number): void => {
+      if (threshold === 0) {
+        speechFrames = 0;
+        quietSince = 0;
+      } else if (gated) {
+        // The attack counts up at the threshold and down below it, as the
+        // worklet's does, so one dip inside an onset does not start it over.
+        if (rms >= threshold) speechFrames++;
+        else if (speechFrames > 0) speechFrames--;
+        if (speechFrames >= GATE_OFF_FRAMES) {
+          speechFrames = 0;
+          quietSince = 0;
+          reportGate(false);
+        }
+      } else if (rms < threshold * GATE_CLOSE_RATIO) {
+        const now = Date.now();
+        if (quietSince === 0) quietSince = now;
+        if (now - quietSince >= GATE_HOLD_MS) {
+          quietSince = 0;
+          speechFrames = 0;
+          reportGate(true);
+        }
+      } else {
+        quietSince = 0;
+      }
+    };
     const poll = (): void => {
       if (stopped) return;
       analyser.getFloatTimeDomainData(dataArray);
@@ -201,29 +232,8 @@ export function startVadDetector(
       }
       if (startupFrames < STARTUP_GRACE) {
         startupFrames++;
-      } else if (gated) {
-        // The attack counts up at the threshold and down below it, as the
-        // worklet's does, so one dip inside an onset does not start it over.
-        if (rms >= threshold) speechFrames++;
-        else if (speechFrames > 0) speechFrames--;
-        if (speechFrames >= GATE_OFF_FRAMES) {
-          gated = false;
-          speechFrames = 0;
-          quietSince = 0;
-          handlers.onGate(false);
-        }
-      } else if (rms < threshold * GATE_CLOSE_RATIO) {
-        const now = Date.now();
-        if (quietSince === 0) quietSince = now;
-        if (now - quietSince >= GATE_HOLD_MS) {
-          gated = true;
-          quietSince = 0;
-          speechFrames = 0;
-          handlers.onGate(true);
-        }
-      } else {
-        quietSince = 0;
       }
+      updateGate(rms);
       timer = setTimeout(poll, 16);
     };
     timer = setTimeout(poll, 16);
@@ -246,11 +256,11 @@ export function startVadDetector(
       analyser.connect(workletNode);
       speech?.source.connect(workletNode, 0, 1);
       // oxlint-disable-next-line require-post-message-target-origin -- MessagePort.postMessage, not Window.postMessage
-      workletNode.port.postMessage({ type: "config", threshold });
+      workletNode.port.postMessage({ type: "config", threshold, speechGate: speech !== undefined });
       startSpeechGate();
       // oxlint-disable-next-line prefer-add-event-listener -- MessagePort does not support addEventListener
       workletNode.port.onmessage = (event: MessageEvent) => {
-        if (event.data.type === "gate") handlers.onGate(event.data.gated as boolean);
+        if (event.data.type === "gate") reportGate(event.data.gated as boolean);
         else if (event.data.type === "rms") onLevel(event.data.value as number);
       };
       handlers.onStarted?.(true);
@@ -280,10 +290,14 @@ export function startVadDetector(
   return {
     stop,
     setThreshold(next: number | "auto"): void {
-      tracker = next === "auto" ? new NoiseFloorTracker(tracker?.threshold) : null;
+      if (next === "auto" && tracker !== null) return;
+      if (next === threshold && tracker === null) return;
+      const wasEnabled = threshold > 0;
+      tracker = next === "auto" ? new NoiseFloorTracker(seed) : null;
       threshold = tracker?.threshold ?? (next as number);
+      if (wasEnabled !== threshold > 0) reportGate(threshold > 0);
       // oxlint-disable-next-line require-post-message-target-origin -- MessagePort.postMessage, not Window.postMessage
-      workletNode?.port.postMessage({ type: "config", threshold });
+      workletNode?.port.postMessage({ type: "threshold", threshold });
     },
     resetFloor(): void {
       tracker?.reset(performance.now());
@@ -361,7 +375,7 @@ export class AudioPipeline {
    *  across calls on purpose: it only seeds the first second, until the new
    *  detector's own estimate replaces it. */
   private lastAutoThreshold: number | undefined = undefined;
-  /** Last value passed to setVoiceSensitivity, so a repeat does not rebuild VAD. */
+  /** Last value passed to setVoiceSensitivity, so a repeat needs no retune. */
   private voiceSensitivity: number | null = null;
   /** The track whose SDK restarts are watched, see onMicRestarted. */
   private watchedTrack: LocalAudioTrack | null = null;
@@ -420,6 +434,14 @@ export class AudioPipeline {
   /** Whether a mic processor is live. */
   get isActive(): boolean {
     return this.processor !== null;
+  }
+
+  /** Distinguish RNNoise classifying audio from RNNoise filtering the output. */
+  get rnnoiseState(): { speechDetection: boolean; enhanced: boolean } | null {
+    const processor = this.processor;
+    return processor === null
+      ? null
+      : { speechDetection: processor.speechDetection, enhanced: processor.enhanced };
   }
 
   /** Current gain value from the processor's GainNode, or null if inactive. */
@@ -482,6 +504,7 @@ export class AudioPipeline {
     const processor = createMicProcessor();
     processor.setInputGain(this.currentInputGain);
     processor.setGate("ptt", this.pttGated);
+    processor.setGate("vad", effectiveVoiceGate(this.pttPollingLive()) !== "off");
     await track.setAudioContext(processor.context);
     await track.setProcessor(processor);
     if (gen !== this.generation) {
@@ -625,13 +648,13 @@ export class AudioPipeline {
 
   // --- VAD ---
 
-  /** (Re)start the detector on the live processor for the saved sensitivity. */
+  /** Start, stop or retune the live detector for the saved sensitivity. */
   startVadPolling(): void {
-    void this.stopVadPolling();
     const processor = this.processor;
     if (processor === null || processor.analyser === null) return;
     const gate = effectiveVoiceGate(this.pttPollingLive());
     if (gate === "off") {
+      void this.stopVadPolling();
       processor.setLookahead(0);
       // No gate to ask: RNNoise runs on for Enhanced Noise Suppression only.
       processor
@@ -639,9 +662,12 @@ export class AudioPipeline {
         .catch((err: unknown) => log.debug("Speech detection stop", err));
       return;
     }
-    processor.setLookahead(GATE_LOOKAHEAD_S);
-    this.onGateSpeaking?.(true);
     const threshold = gate === "auto" ? "auto" : vadThreshold(gate);
+    if (this.vad !== null) {
+      this.vad.setThreshold(threshold);
+      return;
+    }
+    processor.setLookahead(GATE_LOOKAHEAD_S);
     this.vad = startVadDetector(
       processor.context,
       processor.analyser,

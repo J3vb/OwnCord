@@ -35,15 +35,10 @@ const SMOOTH_QUANTA = 4;
 const HYSTERESIS_DB = 6;
 const CLOSE_RATIO = 10 ** (-HYSTERESIS_DB / 20);
 
-// RNNoise's probability that a frame is voice: at or above the first it
-// counts toward opening, under the second it counts toward closing. Inside
-// a word the probability dips at stops and pauses; the hold covers those.
-// A running RNNoise never reports exactly 0 (rnnoise-worklet.js's floor):
-// a silent probability input means RNNoise is not there (not yet started,
-// or stopped by an error), and the gate runs on its level alone rather
-// than staying shut.
-const SPEECH_OPEN_PROBABILITY = 0.5;
-const SPEECH_CLOSE_PROBABILITY = 0.15;
+// Use the same speech confidence to open the gate and to renew its hold.
+// The hold bridges quiet consonants, while sustained uncertain audio
+// cannot keep the gate open by itself.
+const SPEECH_PROBABILITY = 0.5;
 
 class VadProcessor extends AudioWorkletProcessor {
   constructor() {
@@ -60,11 +55,11 @@ class VadProcessor extends AudioWorkletProcessor {
     // Counts up on a quantum at the threshold and down on one below it, so a
     // single dip inside an onset does not start the attack over.
     this._speechFrames = 0;
-    this._gated = false;
+    this._gated = true;
     this._speechGate = false;
     this._active = true;
     this._startupFrames = 0;
-    this._startupGrace = 188; // ~500ms grace period
+    this._startupGrace = 188; // ~500 ms for the capture and classifier to settle
     this._frameCounter = 0; // for throttled RMS updates
     this._rmsPeak = 0; // loudest smoothed level since the last RMS update
     this._powers = new Float64Array(SMOOTH_QUANTA); // mean square of the last quanta
@@ -73,22 +68,13 @@ class VadProcessor extends AudioWorkletProcessor {
 
     this.port.onmessage = (event) => {
       if (event.data.type === "config") {
-        this._threshold = event.data.threshold;
         if (event.data.gateOnFrames !== undefined) this._gateOnFrames = event.data.gateOnFrames;
         if (event.data.gateOffFrames !== undefined) this._gateOffFrames = event.data.gateOffFrames;
         if (event.data.speechGate !== undefined) this._speechGate = event.data.speechGate;
-        // A new threshold restarts the attack/hold counts; the start-up
-        // grace is about audio settling and is not repeated.
-        this._silentFrames = 0;
-        this._speechFrames = 0;
-        if (this._gated) {
-          this._gated = false;
-          this.port.postMessage({ type: "gate", gated: false });
-        }
+        this._setThreshold(event.data.threshold);
+        if (this._gated) this.port.postMessage({ type: "gate", gated: true });
       } else if (event.data.type === "threshold") {
-        // The automatic floor moved: the attack/hold state and the gate carry
-        // on, so a running estimate never reopens a closed gate.
-        this._threshold = event.data.threshold;
+        this._setThreshold(event.data.threshold);
       } else if (event.data.type === "speechGate") {
         // RNNoise's verdict arrived (or went away) under a running gate: the
         // counts carry on, as a threshold move's do.
@@ -97,6 +83,17 @@ class VadProcessor extends AudioWorkletProcessor {
         this._active = false;
       }
     };
+  }
+
+  _setThreshold(threshold) {
+    const wasEnabled = this._threshold > 0;
+    this._threshold = threshold;
+    const enabled = threshold > 0;
+    if (wasEnabled === enabled) return;
+    this._silentFrames = 0;
+    this._speechFrames = 0;
+    this._gated = enabled;
+    this.port.postMessage({ type: "gate", gated: enabled });
   }
 
   process(inputs) {
@@ -130,30 +127,19 @@ class VadProcessor extends AudioWorkletProcessor {
     this._powerAt = (this._powerAt + 1) % SMOOTH_QUANTA;
     const rms = Math.sqrt(Math.max(this._powerSum, 0) / SMOOTH_QUANTA);
 
-    // Grace period: don't gate for the first ~500ms to let audio settle
-    if (this._startupFrames < this._startupGrace) {
+    const starting = this._startupFrames < this._startupGrace;
+    if (starting) {
       this._startupFrames++;
+    } else {
+      this._reportLevel(rms);
+    }
+
+    // Zero means RNNoise has no verdict. Give it time to start before
+    // opening on level alone. If it fails, the level gate still works.
+    if (this._threshold === 0 || (starting && this._speechGate && probability === 0)) {
       return true;
     }
-
-    // Send the loudest smoothed level to the main thread every ~19 frames
-    // (~50ms at 128 samples/frame @ 48kHz): the level the gate below compared
-    // against, for the VAD indicator bar in the UI
-    if (rms > this._rmsPeak) this._rmsPeak = rms;
-    this._frameCounter++;
-    if (this._frameCounter >= 19) {
-      this._frameCounter = 0;
-      this.port.postMessage({ type: "rms", value: this._rmsPeak });
-      this._rmsPeak = 0;
-    }
-
-    // Gate logic (the setTimeout fallback in audioPipeline.ts mirrors the
-    // level rule; it has no RNNoise and so no speech rule)
-    // A threshold of 0 is no gate (sensitivity 100): the verdict alone
-    // never closes it, as capture.rs's gate is off at 0.
-    const speechRuled = this._speechGate && this._threshold > 0 && probability > 0;
-    const voiced = !speechRuled || probability >= SPEECH_OPEN_PROBABILITY;
-    const unvoiced = speechRuled && probability < SPEECH_CLOSE_PROBABILITY;
+    const voiced = !this._speechGate || probability === 0 || probability >= SPEECH_PROBABILITY;
     if (this._gated) {
       if (rms >= this._threshold && voiced) this._speechFrames++;
       else if (this._speechFrames > 0) this._speechFrames--;
@@ -163,7 +149,7 @@ class VadProcessor extends AudioWorkletProcessor {
         this._silentFrames = 0;
         this.port.postMessage({ type: "gate", gated: false });
       }
-    } else if (rms < this._threshold * CLOSE_RATIO || unvoiced) {
+    } else if (rms < this._threshold * CLOSE_RATIO || !voiced) {
       this._silentFrames++;
       if (this._silentFrames >= this._gateOnFrames) {
         this._gated = true;
@@ -176,6 +162,18 @@ class VadProcessor extends AudioWorkletProcessor {
     }
 
     return true;
+  }
+
+  _reportLevel(rms) {
+    // Report the peak of the smoothed levels every ~50 ms for the meter
+    // and the automatic sensitivity estimate.
+    if (rms > this._rmsPeak) this._rmsPeak = rms;
+    this._frameCounter++;
+    if (this._frameCounter >= 19) {
+      this._frameCounter = 0;
+      this.port.postMessage({ type: "rms", value: this._rmsPeak });
+      this._rmsPeak = 0;
+    }
   }
 }
 

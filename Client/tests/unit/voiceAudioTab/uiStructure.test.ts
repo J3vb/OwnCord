@@ -721,6 +721,7 @@ describe("VoiceAudioTab UI structure", () => {
         expect(worklet.port.postMessage).toHaveBeenCalledWith({
           type: "config",
           threshold: AUTO_MAX_THRESHOLD,
+          speechGate: true,
         });
         vi.useFakeTimers({ toFake: ["performance"] });
         try {
@@ -741,7 +742,7 @@ describe("VoiceAudioTab UI structure", () => {
 
         autoToggle(el).click();
         expect(worklet.port.postMessage).toHaveBeenLastCalledWith({
-          type: "config",
+          type: "threshold",
           threshold: vadThreshold(50),
         });
         ac.abort();
@@ -801,6 +802,7 @@ describe("VoiceAudioTab UI structure", () => {
         expect(worklet.port.postMessage).toHaveBeenCalledWith({
           type: "config",
           threshold: vadThreshold(30),
+          speechGate: true,
         });
         ac.abort();
       });
@@ -845,11 +847,11 @@ describe("VoiceAudioTab UI structure", () => {
       // sustained level. Now the gate's own verdict colours it.
       it("is green exactly while the gate is open", async () => {
         const { el, worklet, ac } = await meter();
-        expect(meterOf(el).style.background).toBe("");
-        worklet.emit({ type: "gate", gated: true });
         expect(meterOf(el).style.background).toBe("var(--yellow)");
         worklet.emit({ type: "gate", gated: false });
         expect(meterOf(el).style.background).toBe("var(--green)");
+        worklet.emit({ type: "gate", gated: true });
+        expect(meterOf(el).style.background).toBe("var(--yellow)");
         ac.abort();
       });
 
@@ -882,7 +884,7 @@ describe("VoiceAudioTab UI structure", () => {
 
         expect(el.querySelector("[data-testid='sensitivity-value']")!.textContent).toBe("-37 dB");
         expect(worklet.port.postMessage).toHaveBeenLastCalledWith({
-          type: "config",
+          type: "threshold",
           threshold: vadThreshold(45),
         });
         expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledTimes(1);
