@@ -43,9 +43,11 @@ export function startSileroDetection(
     node.port.postMessage({ type: "silero", port: null });
     fallback();
   };
+  // i18n-exempt: internal diagnostic log for the RNNoise fallback
   const timer = setTimeout(() => failed("model initialization timed out"), INIT_TIMEOUT_MS);
 
   worker.addEventListener("error", (event) => failed(event.message));
+  // i18n-exempt: internal diagnostic log for the RNNoise fallback
   worker.addEventListener("messageerror", () => failed("invalid worker message"));
   worker.addEventListener("message", (event: MessageEvent) => {
     if (closed) return;

@@ -1,16 +1,6 @@
-// AudioPipeline — owns the microphone's MicProcessor (lib/voice/micProcessor.ts)
-// and the voice detector that drives its gate.
-//
-// The processor is attached to the LocalAudioTrack before its first publish
-// (MediaControl.enableMicrophone → attach) and stays on it for the track's
-// life: livekit-client's mute, unmute, device switch, processing restart and
-// full-reconnect republish all keep it, so the sender only ever carries the
-// processor's gated output. This class holds the settings (input volume,
-// sensitivity, push-to-talk) and re-applies them to whichever processor is
-// live, runs the VAD worklet on the processor's tap, and mirrors the
-// Enhanced Noise Suppression preference into it. The Linux native room has
-// no web mic track and so no processor: push-to-talk and the sensitivity
-// threshold go to its own gates.
+// Owns the outbound mic processor and sensitivity detector. Track restarts
+// keep the processor attached, so LiveKit always publishes the gated output.
+// Native rooms apply the same settings to their own capture.
 
 import { Track, TrackEvent, type Room, type LocalAudioTrack } from "livekit-client";
 import { loadPref, savePref } from "@lib/prefs/preferences";
@@ -117,20 +107,9 @@ export interface VadDetectorHandlers {
   onThreshold?(threshold: number): void;
 }
 
-/**
- * Run the voice detector over `analyser`: the AudioWorklet (vad-worklet.js)
- * when it loads, otherwise a setTimeout poll with the same timing. Both apply
- * the same attack (~32 ms), hysteresis (closing 6 dB under the threshold)
- * and hold (~500 ms), so the settings meter and the live gate open and
- * close alike. `gate` "auto" runs the threshold a margin
- * above the noise floor of the levels the detector reports (lib/voice/noiseFloor.ts),
- * starting at `seed`. With `speech`, the gate also asks RNNoise whether a
- * frame is a voice (vad-worklet.js's speech gate) once it runs, at the
- * automatic threshold and at the slider's alike; the fallback has no
- * worklets, so no RNNoise, and gates on the level alone. Stopping leaves
- * RNNoise running: whoever owns the processor turns it off when no gate
- * follows (a restart's detector asks for it again at once).
- */
+/** Run the mic detector on its analyser tap. It uses Silero when available,
+ * then RNNoise's speech verdict, then level alone if audio worklets fail.
+ * Automatic sensitivity tracks the noise floor of the reported levels. */
 export function startVadDetector(
   ctx: AudioContext,
   analyser: AnalyserNode,
