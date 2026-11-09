@@ -225,7 +225,7 @@ describe("AudioPipeline lifecycle and settings", () => {
   });
 
   describe("voice sensitivity", () => {
-    it("restarts the detector only when the value changes, and saves it", async () => {
+    it("saves changes to sensitivity without restarting the detector", async () => {
       const pipeline = new AudioPipeline();
       const track = micTrack();
       await pipeline.attach(track);
@@ -233,12 +233,12 @@ describe("AudioPipeline lifecycle and settings", () => {
       const before = addModule.mock.calls.length;
 
       pipeline.setVoiceSensitivity(30);
-      expect(addModule).toHaveBeenCalledTimes(before + 1);
+      expect(addModule).toHaveBeenCalledTimes(before);
       expect(prefs.get("voiceSensitivity")).toBe(30);
       pipeline.setVoiceSensitivity(30);
-      expect(addModule).toHaveBeenCalledTimes(before + 1);
+      expect(addModule).toHaveBeenCalledTimes(before);
       pipeline.setVoiceSensitivity(31);
-      expect(addModule).toHaveBeenCalledTimes(before + 2);
+      expect(addModule).toHaveBeenCalledTimes(before);
       expect(logs.debug).toHaveBeenCalledWith("Voice sensitivity updated", { sensitivity: 31 });
     });
 
@@ -353,6 +353,41 @@ describe("AudioPipeline lifecycle and settings", () => {
       expect(restartTrack).not.toHaveBeenCalled();
       expect(setEnhanced).not.toHaveBeenCalled();
     });
+  });
+
+  it("turns off both advanced paths when Noise Suppression is switched off mid-call", async () => {
+    FakeAudioContext.workletsLoad = true;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: true, arrayBuffer: async () => new ArrayBuffer(8) })),
+    );
+    const pipeline = new AudioPipeline();
+    const track = micTrack();
+    pipeline.setRoom(roomWith(track));
+    await pipeline.attach(track);
+    await vi.waitFor(() => expect(pipeline.vadUsingWorklet).toBe(true));
+    expect(rnnoise()).toBeUndefined();
+
+    prefs.set("enhancedNoiseSuppression", true);
+    const enabling = pipeline.reapplyEnhancedNoiseSuppression();
+    await vi.waitFor(() => expect(rnnoise()).toBeDefined());
+    rnnoise()!.emit({ type: "ready" });
+    await enabling;
+    expect(pipeline.rnnoiseState).toEqual({ speechDetection: true, enhanced: true });
+
+    const processor = track.getProcessor();
+    prefs.set("noiseSuppression", false);
+    await pipeline.reapplyAudioProcessing();
+    expect(track.getProcessor()).toBe(processor);
+    expect(pipeline.rnnoiseState).toEqual({ speechDetection: false, enhanced: false });
+    expect(contextOf(track).node("delay").delayTime.value).toBe(0.05);
+    const gate = FakeAudioWorkletNode.instances.find((w) => w.name === "vad-processor")!;
+    expect(gate.port.postMessage).toHaveBeenLastCalledWith({ type: "speechGate", on: false });
+
+    prefs.set("noiseSuppression", true);
+    await pipeline.reapplyAudioProcessing();
+    expect(pipeline.rnnoiseState).toEqual({ speechDetection: true, enhanced: true });
+    pipeline.teardownAudioPipeline();
   });
 
   describe("reapplyEnhancedNoiseSuppression errors", () => {
@@ -662,9 +697,13 @@ describe("startVadDetector details", () => {
     });
 
     it("closes the gate on the poll where the quiet has lasted exactly the hold", async () => {
-      const { onGate, detector } = await polling(0);
-      // 30 polls of start-up grace, then the first quiet poll starts the hold.
-      await vi.advanceTimersByTimeAsync(16 * 62);
+      const { onGate, detector, state } = await polling(0.2);
+      await vi.advanceTimersByTimeAsync(16 * 30);
+      expect(onGate.mock.calls).toEqual([[true], [false]]);
+      onGate.mockClear();
+      state.level = 0;
+      // The first quiet poll starts the hold.
+      await vi.advanceTimersByTimeAsync(16 * 32);
       expect(onGate).not.toHaveBeenCalled();
       await vi.advanceTimersByTimeAsync(16);
       expect(onGate.mock.calls).toEqual([[true]]);
@@ -674,7 +713,7 @@ describe("startVadDetector details", () => {
     it("counts a level equal to the threshold as speech", async () => {
       const { onGate, detector } = await polling(0.5, 0.5);
       await vi.advanceTimersByTimeAsync(16 * 100);
-      expect(onGate).not.toHaveBeenCalled();
+      expect(onGate.mock.calls).toEqual([[true], [false]]);
       void detector.stop();
     });
 
@@ -689,13 +728,14 @@ describe("startVadDetector details", () => {
       vi.useFakeTimers();
       const ctx = new FakeAudioContext();
       const analyser = ctx.createAnalyser();
+      analyser.getFloatTimeDomainData.mockImplementation((arr: Float32Array) => arr.fill(0.2));
       let detector: ReturnType<typeof startVadDetector> | null = null;
-      const onGate = vi.fn(() => {
-        void detector?.stop();
+      const onGate = vi.fn((closed: boolean) => {
+        if (!closed) void detector?.stop();
       });
       detector = startVadDetector(ctx as never, analyser as never, 0.05, { onGate });
       await vi.advanceTimersByTimeAsync(16 * 70);
-      expect(onGate).toHaveBeenCalledTimes(1);
+      expect(onGate.mock.calls).toEqual([[true], [false]]);
       const polls = analyser.getFloatTimeDomainData.mock.calls.length;
 
       await vi.advanceTimersByTimeAsync(16 * 20);

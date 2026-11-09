@@ -3,27 +3,38 @@
  * toggles.
  */
 import { createElement, appendChildren, setText } from "@lib/dom";
+import { Disposable } from "@lib/disposable";
 import { loadPref, savePref, createToggle } from "../helpers";
+import { onPrefChange } from "@lib/prefs/preferences";
 import {
   onNativeInputLevel,
   reapplyAudioProcessing,
   reapplyEnhancedNoiseSuppression,
+  setSileroBufferMs,
 } from "@lib/voice/livekitSession";
 import {
+  enhancedNoiseSuppressionEnabled,
   micCaptureOptions,
   isMissingDeviceError,
   speechDetectionOf,
   startVadDetector,
   vadThreshold,
 } from "@lib/voice/audioPipeline";
-import { createMicProcessor } from "@lib/voice/micProcessor";
+import {
+  createMicProcessor,
+  sileroBufferMs,
+  SILERO_BUFFER_MAX_MS,
+  SILERO_BUFFER_PREF,
+} from "@lib/voice/micProcessor";
 import { Track, type AudioProcessorOptions } from "livekit-client";
 import { settingsText as t } from "../../../i18n/settings";
+import { voiceText } from "../../../i18n/voice";
 import { setStatusIcon } from "../status";
 import { log, nativeTestAudio } from "./voiceTabShared";
 import type { VoiceTabScope } from "./voiceTabScope";
 
 export function mountMeterAndToggles(sc: VoiceTabScope): void {
+  let renderEnhanced: (() => void) | undefined;
   // Camera teardown on overlay close is already covered by the factory's
   // single signal.addEventListener("abort", cleanupMic), registered once
   // against the overlay-lifetime signal in createVoiceAudioTab — registering
@@ -77,7 +88,6 @@ export function mountMeterAndToggles(sc: VoiceTabScope): void {
         await processor.init(options as AudioProcessorOptions);
         sc.meterProcessor = processor;
         processor.setInputGain(sc.inputVolumePercent / 100);
-        await processor.setEnhanced(loadPref<boolean>("enhancedNoiseSuppression", false));
         if (sc.signal.aborted || thisRequest !== sc.micRequestId) {
           if (sc.meterProcessor === processor) sc.meterProcessor = null;
           void processor.destroy();
@@ -109,11 +119,26 @@ export function mountMeterAndToggles(sc: VoiceTabScope): void {
           },
           undefined,
           speechDetectionOf(processor),
+          enhancedNoiseSuppressionEnabled(),
         );
+        const applySuppression = (): void => {
+          renderEnhanced?.();
+          const enabled = enhancedNoiseSuppressionEnabled();
+          detector.setSpeechDetection(enabled);
+          void processor.setEnhanced(enabled);
+        };
+        const meterLifetime = new Disposable();
+        onPrefChange(
+          ["noiseSuppression", "enhancedNoiseSuppression"],
+          applySuppression,
+          meterLifetime.signal,
+        );
+        applySuppression();
         sc.meterThresholdSetter = detector.setThreshold;
         sc.meterResetFloor = detector.resetFloor;
         sc.syncMeterGate();
         sc.registerMic(() => {
+          meterLifetime.destroy();
           sc.stopMicTestPlayback();
           if (sc.meterThresholdSetter === detector.setThreshold) sc.meterThresholdSetter = null;
           if (sc.meterResetFloor === detector.resetFloor) sc.meterResetFloor = null;
@@ -222,12 +247,12 @@ export function mountMeterAndToggles(sc: VoiceTabScope): void {
       label: item.label,
       onChange: (nowOn) => {
         savePref(item.key, nowOn);
+        renderEnhanced?.();
         sc.updateNativeTest({ kind: "processing", audio: nativeTestAudio() });
         if (item.key === "enhancedNoiseSuppression") {
           // RNNoise sits inside the processors: re-route the call's and the
           // meter's, and leave both captures alone.
           void reapplyEnhancedNoiseSuppression();
-          void sc.meterProcessor?.setEnhanced(nowOn);
           return;
         }
         // Reapply audio processing constraints to the live mic track, then to
@@ -237,8 +262,76 @@ export function mountMeterAndToggles(sc: VoiceTabScope): void {
     });
 
     appendChildren(row, info, toggle);
-    // Enhanced noise suppression builds on noise suppression: nest it.
-    if (item.key === "enhancedNoiseSuppression") row.classList.add("nested");
     sc.processingCard.appendChild(row);
+    // Enhanced noise suppression builds on noise suppression: nest it.
+    if (item.key === "enhancedNoiseSuppression") {
+      row.classList.add("nested");
+      const bufferSlider = sc.nativeAudio ? null : mountVoiceBuffer(sc);
+      renderEnhanced = (): void => {
+        const available = loadPref("noiseSuppression", true);
+        const enabled = enhancedNoiseSuppressionEnabled();
+        toggle.setAttribute("aria-disabled", String(!available));
+        toggle.setAttribute("aria-checked", String(enabled));
+        toggle.classList.toggle("on", enabled);
+        if (bufferSlider !== null) bufferSlider.disabled = !enabled;
+      };
+      renderEnhanced();
+    }
   }
+}
+
+function mountVoiceBuffer(sc: VoiceTabScope): HTMLInputElement {
+  const label = voiceText("audio.buffer.label");
+  const saved = sileroBufferMs();
+  const savedText = voiceText("audio.buffer.value", { ms: saved });
+  const slider = createElement("input", {
+    type: "range",
+    class: "settings-slider",
+    min: "0",
+    max: String(SILERO_BUFFER_MAX_MS),
+    step: "1",
+    value: String(saved),
+    "aria-label": label,
+    "aria-describedby": "voice-buffer-desc",
+    "aria-valuetext": savedText,
+    "data-testid": "voice-buffer-slider",
+  });
+  const value = createElement("span", { class: "slider-val" }, savedText);
+  slider.addEventListener(
+    "input",
+    () => {
+      const text = voiceText("audio.buffer.value", { ms: slider.valueAsNumber });
+      setText(value, text);
+      slider.setAttribute("aria-valuetext", text);
+    },
+    { signal: sc.signal },
+  );
+  // Retune once when the slider is committed so a drag does not skip through the audio.
+  slider.addEventListener(
+    "change",
+    () => {
+      const ms = slider.valueAsNumber;
+      savePref(SILERO_BUFFER_PREF, ms);
+      setSileroBufferMs(ms);
+      sc.meterProcessor?.setSileroBufferMs(ms);
+    },
+    { signal: sc.signal },
+  );
+
+  const row = createElement("div", { class: "setting-row nested", "data-testid": "voice-buffer" });
+  const info = createElement("div", {});
+  appendChildren(
+    info,
+    createElement("div", { class: "setting-label" }, label),
+    createElement(
+      "div",
+      { class: "setting-desc", id: "voice-buffer-desc" },
+      voiceText("audio.buffer.desc"),
+    ),
+  );
+  const control = createElement("div", { class: "slider-row" });
+  appendChildren(control, slider, value);
+  appendChildren(row, info, control);
+  sc.processingCard.appendChild(row);
+  return slider;
 }

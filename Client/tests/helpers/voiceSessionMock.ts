@@ -58,6 +58,7 @@ export function defaults() {
     retryMicPermission: vi.fn().mockResolvedValue(undefined),
     setDeafened: vi.fn(),
     setInputVolume: vi.fn(),
+    setSileroBufferMs: vi.fn(),
     setMuted: vi.fn(),
     setOnError: vi.fn(),
     setOnRemoteVideo: vi.fn(),

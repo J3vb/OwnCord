@@ -21,6 +21,7 @@ CHANGELOG.md merge=union
 *.png binary
 *.ico binary
 *.wasm binary
+Client/public/silero-v5.1.2.bin binary
 *.woff2 binary
 *.exe binary
 

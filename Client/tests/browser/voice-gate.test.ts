@@ -1,11 +1,13 @@
-// The sensitivity gate in a real AudioContext: the call's own mic processor
-// (RNNoise in its worklet, its verdict on the detector's second input) and
-// the detector, over recorded speech followed by typing. The unit tests drive
-// the worklets by hand; this proves the graph wires the verdict through.
+// Recorded speech and typing through the call's own mic processor in a real
+// AudioContext, with the bundled Silero worker and with the RNNoise fallback.
 import { afterEach, describe, expect, it } from "vitest";
 import { userEvent } from "vitest/browser";
 import { Track } from "livekit-client";
-import { createMicProcessor, type MicProcessor } from "../../src/lib/voice/micProcessor";
+import {
+  createMicProcessor,
+  GATE_LOOKAHEAD_S,
+  type MicProcessor,
+} from "../../src/lib/voice/micProcessor";
 import { speechDetectionOf, startVadDetector } from "../../src/lib/voice/audioPipeline";
 import { vadThreshold } from "../../src/lib/voice/gateScale";
 import speechUrl from "../fixtures/audio/speech.wav?url";
@@ -50,63 +52,74 @@ describe("sensitivity gate (real AudioContext)", () => {
     for (const step of cleanup.splice(0).reverse()) await step();
   });
 
-  it("at the slider's sensitivity, typing after speech does not hold the gate open", async () => {
-    const samples = await speechThenTyping();
-    // A real click, as in the app: autoplay policy resumes an AudioContext
-    // only after a user gesture.
-    const button = document.createElement("button");
-    button.textContent = "Join voice";
-    document.body.appendChild(button);
-    await userEvent.click(button);
-    button.remove();
-    const feed = new AudioContext({ sampleRate: RATE });
-    cleanup.push(() => feed.close());
-    const input = feed.createMediaStreamDestination();
-    const processor: MicProcessor = createMicProcessor();
-    cleanup.push(() => processor.destroy());
-    await processor.init({
-      kind: Track.Kind.Audio,
-      track: input.stream.getAudioTracks()[0]!,
-    } as never);
-    await Promise.all([processor.context.resume(), feed.resume()]);
+  it.each(["silero", "rnnoise"] as const)(
+    "typing after speech does not hold the %s gate open",
+    async (mode) => {
+      const samples = await speechThenTyping();
+      // A real click, as in the app: autoplay policy resumes an AudioContext
+      // only after a user gesture.
+      const button = document.createElement("button");
+      button.textContent = "Join voice";
+      document.body.appendChild(button);
+      await userEvent.click(button);
+      button.remove();
+      const feed = new AudioContext({ sampleRate: RATE });
+      cleanup.push(() => feed.close());
+      const input = feed.createMediaStreamDestination();
+      const processor: MicProcessor = createMicProcessor();
+      cleanup.push(() => processor.destroy());
+      await processor.init({
+        kind: Track.Kind.Audio,
+        track: input.stream.getAudioTracks()[0]!,
+      } as never);
+      await Promise.all([processor.context.resume(), feed.resume()]);
 
-    const events: Array<{ atMs: number; open: boolean }> = [];
-    let startedAt = 0;
-    const detector = startVadDetector(
-      processor.context,
-      processor.analyser!,
-      vadThreshold(40),
-      {
-        // Only the scene's verdicts: the detector settles on silence first.
-        onGate: (gated) => {
-          if (startedAt > 0) events.push({ atMs: performance.now() - startedAt, open: !gated });
+      if (mode === "silero") await processor.setEnhanced(true);
+      processor.setLookahead(GATE_LOOKAHEAD_S);
+      const speech = speechDetectionOf(processor)!;
+
+      const events: Array<{ atMs: number; open: boolean }> = [];
+      let startedAt = 0;
+      const detector = startVadDetector(
+        processor.context,
+        processor.analyser!,
+        vadThreshold(40),
+        {
+          // Only the scene's verdicts: the detector settles on silence first.
+          onGate: (gated) => {
+            if (startedAt > 0) events.push({ atMs: performance.now() - startedAt, open: !gated });
+          },
         },
-      },
-      undefined,
-      speechDetectionOf(processor),
-    );
-    cleanup.push(() => detector.stop());
-    // RNNoise is running for the verdict before the scene starts, and the
-    // start-up grace and hold are over.
-    await expect.poll(() => processor.speechDetection, { timeout: 5000 }).toBe(true);
-    await new Promise((resolve) => setTimeout(resolve, 1200));
+        undefined,
+        mode === "silero" ? speech : { ...speech, silero: undefined },
+      );
+      cleanup.push(() => detector.stop());
+      // Wait for the requested detector and let the start-up grace finish.
+      await expect
+        .poll(() => (mode === "silero" ? processor.sileroActive : processor.speechDetection), {
+          timeout: 5000,
+        })
+        .toBe(true);
+      await new Promise((resolve) => setTimeout(resolve, 1200));
 
-    const buffer = feed.createBuffer(1, samples.length, RATE);
-    buffer.copyToChannel(samples, 0);
-    const source = feed.createBufferSource();
-    source.buffer = buffer;
-    source.connect(input);
-    startedAt = performance.now();
-    source.start();
-    await new Promise((resolve) => setTimeout(resolve, SCENE_S * 1000));
+      const buffer = feed.createBuffer(1, samples.length, RATE);
+      buffer.copyToChannel(samples, 0);
+      const source = feed.createBufferSource();
+      source.buffer = buffer;
+      source.connect(input);
+      startedAt = performance.now();
+      source.start();
+      await new Promise((resolve) => setTimeout(resolve, SCENE_S * 1000));
 
-    // The sentence opens the gate; it shuts after the hold although the
-    // typing goes on, and the typing never reopens it.
-    const speechOpen = events.find((e) => e.open && e.atMs >= SPEECH_AT_S * 1000);
-    expect(speechOpen).toBeDefined();
-    const shut = events.find((e) => !e.open && e.atMs > speechOpen!.atMs);
-    expect(shut).toBeDefined();
-    expect(shut!.atMs).toBeLessThan((TYPING_FROM_S + 1.3) * 1000);
-    expect(events.filter((e) => e.open && e.atMs > shut!.atMs)).toEqual([]);
-  }, 30_000);
+      // The sentence opens the gate; it shuts after the hold although the
+      // typing goes on, and the typing never reopens it.
+      const speechOpen = events.find((e) => e.open && e.atMs >= SPEECH_AT_S * 1000);
+      expect(speechOpen).toBeDefined();
+      const shut = events.find((e) => !e.open && e.atMs > speechOpen!.atMs);
+      expect(shut).toBeDefined();
+      expect(shut!.atMs).toBeLessThan((TYPING_FROM_S + 1.3) * 1000);
+      expect(events.filter((e) => e.open && e.atMs > shut!.atMs)).toEqual([]);
+    },
+    30_000,
+  );
 });

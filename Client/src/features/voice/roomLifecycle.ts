@@ -9,7 +9,11 @@ import type { WsClient } from "../../lib/ws";
 import { setLocalCamera, setLocalScreenshare, setVoiceStatus } from "../../stores/voice.store";
 import { loadPref } from "@lib/prefs/preferences";
 import { createLogger } from "../../lib/logger";
-import { micProcessingOptions, type AudioPipeline } from "../../lib/voice/audioPipeline";
+import {
+  enhancedNoiseSuppressionEnabled,
+  micProcessingOptions,
+  type AudioPipeline,
+} from "../../lib/voice/audioPipeline";
 import type { AudioElements } from "../../lib/voice/audioElements";
 import { type DeviceManager, isMicPolicyGated } from "../../lib/voice/deviceManager";
 import type { E2EEManager } from "../../lib/voice/livekitE2EE";
@@ -266,7 +270,7 @@ export class RoomLifecycle {
         echoCancellation: loadPref("echoCancellation", true),
         noiseSuppression: loadPref("noiseSuppression", true),
         autoGainControl: loadPref("autoGainControl", true),
-        enhancedNoiseSuppression: loadPref("enhancedNoiseSuppression", false),
+        enhancedNoiseSuppression: enhancedNoiseSuppressionEnabled(),
       },
       (identity) => this._audioElements.getEffectiveVolume(parseUserId(identity)),
       (identity) => this._audioElements.getScreenshareGain(parseUserId(identity)),
