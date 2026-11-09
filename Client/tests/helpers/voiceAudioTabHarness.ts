@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, vi } from "vitest";
 import { installFakeAudio } from "./fakeAudioContext";
 
-/** The volume sliders, not the Push to Talk release delay in the input mode card. */
-export const VOLUME_SLIDERS = 'input[type="range"]:not([data-testid="ptt-release-delay"])';
+/** The two volume sliders, excluding the timing controls. */
+export const VOLUME_SLIDERS =
+  'input[type="range"]:not([data-testid="ptt-release-delay"]):not([data-testid="voice-buffer-slider"])';
 
 /** Fires the `devicechange` listeners registered on the stubbed MediaDevices. */
 let currentEmit: () => void = () => {};

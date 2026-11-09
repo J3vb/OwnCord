@@ -174,8 +174,8 @@ describe("VoiceAudioTab UI structure", () => {
 
     const sliders = el.querySelectorAll(VOLUME_SLIDERS);
     expect(sliders.length).toBe(2); // input volume + output volume
-    // ...plus the Push to Talk release delay, under the input mode.
-    expect(el.querySelectorAll('input[type="range"]').length).toBe(3);
+    // The other two sliders are Push to Talk release delay and Voice Buffer.
+    expect(el.querySelectorAll('input[type="range"]').length).toBe(4);
     ac.abort();
   });
 
@@ -632,6 +632,7 @@ describe("VoiceAudioTab UI structure", () => {
         "Echo Cancellation",
         "Noise Suppression",
         "Enhanced Noise Suppression",
+        "Voice Buffer",
         "Automatic Gain Control",
       ]);
       const enhanced = el

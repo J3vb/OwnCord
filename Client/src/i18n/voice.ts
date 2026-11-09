@@ -297,6 +297,10 @@ export const voiceText = defineCatalog("voice", {
   "device.micFailed": "Failed to switch microphone",
   "device.speakerFailed": "Failed to switch speaker",
   "audio.settingsFailed": "Failed to update audio settings",
+  "audio.buffer.label": "Voice Buffer",
+  "audio.buffer.desc":
+    "Used with Enhanced Noise Suppression in Voice Activity. A longer buffer can preserve the start of short words and adds microphone delay.",
+  "audio.buffer.value": "{ms} ms",
 
   "passwordDialog.title": "Password required",
   "passwordDialog.body": "{channel} is protected by a password. Enter it to join.",

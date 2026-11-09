@@ -80,6 +80,7 @@ export const getUserVolume = session.getUserVolume.bind(session);
 export const setUserLocalMute = session.setUserLocalMute.bind(session);
 export const getUserLocalMute = session.getUserLocalMute.bind(session);
 export const setInputVolume = session.setInputVolume.bind(session);
+export const setSileroBufferMs = session.setSileroBufferMs;
 export const onNativeInputLevel = session.onNativeInputLevel.bind(session);
 export const setOutputVolume = session.setOutputVolume.bind(session);
 export const setVoiceSensitivity = session.setVoiceSensitivity.bind(session);

@@ -994,6 +994,8 @@ export class LiveKitSession {
     this._media.setInputVolume(volume);
   }
 
+  readonly setSileroBufferMs = (ms: number): void => this._audioPipeline.setSileroBufferMs(ms);
+
   /** Hear the call capture's level reports where the room captures on its
    *  own (Linux native engine). Returns the unsubscribe. */
   onNativeInputLevel(listener: (rms: number | null, open: boolean) => void): () => void {

@@ -134,6 +134,23 @@ describe("AudioPipeline", () => {
       expect(pipeline.isActive).toBe(false);
     });
 
+    it("applies the saved voice buffer on attach and retunes the published processor", async () => {
+      prefs.set("voiceSensitivity", 40);
+      prefs.set("sileroBufferMs", 137);
+      const pipeline = new AudioPipeline();
+      const track = micTrack();
+      await pipeline.attach(track);
+      const processor = track.getProcessor() as unknown as MicProcessor;
+      const delay = contextOf(track).node("delay");
+
+      processor.setSileroActive(true);
+      expect(delay.delayTime.value).toBe(0.137);
+      pipeline.setSileroBufferMs(300);
+      expect(delay.delayTime.value).toBe(0.3);
+      expect(track.getProcessor()).toBe(processor);
+      pipeline.teardownAudioPipeline();
+    });
+
     it("is a no-op for a track that already carries this pipeline's processor", async () => {
       const pipeline = new AudioPipeline();
       const track = micTrack();

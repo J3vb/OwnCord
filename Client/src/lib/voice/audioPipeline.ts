@@ -10,6 +10,7 @@ import { bindSpeechDetection, type SpeechDetection } from "@lib/voice/sileroDete
 import {
   createMicProcessor,
   GATE_LOOKAHEAD_S,
+  sileroBufferMs,
   workletStopped,
   type MicProcessor,
 } from "@lib/voice/micProcessor";
@@ -507,6 +508,7 @@ export class AudioPipeline {
       return;
     }
     this.processor = processor;
+    processor.setSileroBufferMs(sileroBufferMs());
     this.watchedTrack = track;
     track.on(TrackEvent.Restarted, this.onMicRestarted);
     log.info("Mic processor attached", { inputGain: this.currentInputGain });
@@ -599,6 +601,10 @@ export class AudioPipeline {
   }
 
   // --- Volume / gates ---
+
+  setSileroBufferMs(ms: number): void {
+    this.processor?.setSileroBufferMs(ms);
+  }
 
   setInputVolume(volume: number): void {
     const clamped = Math.max(0, Math.min(200, volume));

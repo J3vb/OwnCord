@@ -47,15 +47,35 @@ describe("createMicProcessor", () => {
     // The detector taps ahead of the delay and gain: it sees the level, not the gate.
     expect(ctx.reaches(ctx.node("analyser"), output)).toBe(false);
     expect(processor.processedTrack).toBe(ctx.outputTrack);
-    expect(ctx.node("delay").maxDelay).toBe(GATE_LOOKAHEAD_S);
+    expect(ctx.node("delay").maxDelay).toBe(0.3);
     processor.setLookahead(GATE_LOOKAHEAD_S);
     processor.setSileroActive(true);
-    expect(ctx.node("delay").delayTime.value).toBe(0.032);
+    expect(ctx.node("delay").delayTime.value).toBe(0.2);
     processor.setLookahead(0);
     expect(ctx.node("delay").delayTime.value).toBe(0);
     processor.setLookahead(GATE_LOOKAHEAD_S);
     processor.setSileroActive(false);
     expect(ctx.node("delay").delayTime.value).toBe(GATE_LOOKAHEAD_S);
+  });
+
+  it("retunes the Silero buffer from zero to 300 ms on the same output track", async () => {
+    const { processor, ctx, output } = await started();
+    const track = processor.processedTrack;
+    const delay = ctx.node("delay");
+    processor.setLookahead(GATE_LOOKAHEAD_S);
+    processor.setSileroActive(true);
+    processor.setGate("vad", true);
+    processor.setSileroBufferMs(0);
+    expect(delay.delayTime.value).toBe(0);
+    expect(output.gain.value).toBe(0);
+    processor.setSileroBufferMs(300);
+    expect(delay.delayTime.value).toBe(0.3);
+    expect(processor.processedTrack).toBe(track);
+
+    processor.setSileroActive(false);
+    expect(delay.delayTime.value).toBe(GATE_LOOKAHEAD_S);
+    processor.setSileroActive(true);
+    expect(delay.delayTime.value).toBe(0.3);
   });
 
   it("gates the output: either gate closed is silence, both open is the input gain", async () => {

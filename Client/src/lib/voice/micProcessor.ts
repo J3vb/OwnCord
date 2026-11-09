@@ -27,6 +27,7 @@
 
 import type { Track, TrackProcessor, AudioProcessorOptions } from "livekit-client";
 import { createLogger } from "@lib/logger";
+import { loadPref } from "@lib/prefs/preferences";
 import {
   createRNNoiseNode,
   RNNOISE_SPEECH_OUTPUT,
@@ -40,8 +41,18 @@ const log = createLogger("micProcessor");
  *  keeps a mouse click from opening it; the delay covers that wait and the
  *  opening ramp, so the start of a word is not cut off. */
 export const GATE_LOOKAHEAD_S = 0.05;
-/** Fixed outbound buffer for the short-lookahead Silero trial. */
-const SILERO_LOOKAHEAD_S = 0.032;
+export const SILERO_BUFFER_PREF = "sileroBufferMs";
+export const SILERO_BUFFER_MAX_MS = 300;
+const SILERO_BUFFER_DEFAULT_MS = 200;
+
+function clampSileroBufferMs(ms: number): number {
+  if (!Number.isFinite(ms)) return SILERO_BUFFER_DEFAULT_MS;
+  return Math.min(SILERO_BUFFER_MAX_MS, Math.max(0, Math.round(ms)));
+}
+
+export function sileroBufferMs(): number {
+  return clampSileroBufferMs(loadPref(SILERO_BUFFER_PREF, SILERO_BUFFER_DEFAULT_MS));
+}
 /** Gain smoothing: opening has to finish inside the lookahead. */
 const GATE_OPEN_TIME_CONSTANT_S = 0.005;
 const GAIN_TIME_CONSTANT_S = 0.015;
@@ -98,6 +109,7 @@ export interface MicProcessor extends TrackProcessor<Track.Kind.Audio, AudioProc
   setGate(source: GateSource, closed: boolean): void;
   isGateClosed(source: GateSource): boolean;
   setLookahead(seconds: number): void;
+  setSileroBufferMs(ms: number): void;
   /** Route through RNNoise or around it; a load failure leaves it off. */
   setEnhanced(on: boolean): Promise<void>;
   /** Run RNNoise for its speech probability (the sensitivity gate's speech
@@ -117,6 +129,7 @@ export function createMicProcessor(): MicProcessor {
   let speech: GainNode | null = null;
   let speechInput: GainNode | null = null;
   let baseLookahead = 0;
+  let sileroLookahead = sileroBufferMs() / 1000;
   let sileroActive = false;
   let rnnoise: RNNoiseNode | null = null;
   let loadingRnnoise: Promise<void> | null = null;
@@ -137,7 +150,7 @@ export function createMicProcessor(): MicProcessor {
 
   function applyLookahead(): void {
     if (delay === null) return;
-    delay.delayTime.value = baseLookahead > 0 && sileroActive ? SILERO_LOOKAHEAD_S : baseLookahead;
+    delay.delayTime.value = baseLookahead > 0 && sileroActive ? sileroLookahead : baseLookahead;
   }
 
   function resetEntryRoute(): void {
@@ -252,7 +265,7 @@ export function createMicProcessor(): MicProcessor {
       analyser = ctx.createAnalyser();
       analyser.fftSize = 2048;
       analyser.smoothingTimeConstant = 0.3;
-      delay = ctx.createDelay(Math.max(GATE_LOOKAHEAD_S, SILERO_LOOKAHEAD_S));
+      delay = ctx.createDelay(SILERO_BUFFER_MAX_MS / 1000);
       delay.delayTime.value = 0;
       gain = ctx.createGain();
       gain.gain.setValueAtTime(closed.vad || closed.ptt ? 0 : 1, ctx.currentTime);
@@ -313,6 +326,11 @@ export function createMicProcessor(): MicProcessor {
 
     setLookahead(seconds: number): void {
       baseLookahead = seconds;
+      applyLookahead();
+    },
+
+    setSileroBufferMs(ms: number): void {
+      sileroLookahead = clampSileroBufferMs(ms) / 1000;
       applyLookahead();
     },
 
