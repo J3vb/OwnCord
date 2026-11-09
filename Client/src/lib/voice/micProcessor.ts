@@ -40,8 +40,8 @@ const log = createLogger("micProcessor");
  *  keeps a mouse click from opening it; the delay covers that wait and the
  *  opening ramp, so the start of a word is not cut off. */
 export const GATE_LOOKAHEAD_S = 0.05;
-/** Gives a quiet onset time to reach the model and its three-frame attack. */
-const SILERO_LOOKAHEAD_S = 0.2;
+/** Fixed outbound buffer for the short-lookahead Silero trial. */
+const SILERO_LOOKAHEAD_S = 0.032;
 /** Gain smoothing: opening has to finish inside the lookahead. */
 const GATE_OPEN_TIME_CONSTANT_S = 0.005;
 const GAIN_TIME_CONSTANT_S = 0.015;
@@ -252,7 +252,7 @@ export function createMicProcessor(): MicProcessor {
       analyser = ctx.createAnalyser();
       analyser.fftSize = 2048;
       analyser.smoothingTimeConstant = 0.3;
-      delay = ctx.createDelay(SILERO_LOOKAHEAD_S);
+      delay = ctx.createDelay(Math.max(GATE_LOOKAHEAD_S, SILERO_LOOKAHEAD_S));
       delay.delayTime.value = 0;
       gain = ctx.createGain();
       gain.gain.setValueAtTime(closed.vad || closed.ptt ? 0 : 1, ctx.currentTime);
