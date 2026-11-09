@@ -40,6 +40,8 @@ const log = createLogger("micProcessor");
  *  keeps a mouse click from opening it; the delay covers that wait and the
  *  opening ramp, so the start of a word is not cut off. */
 export const GATE_LOOKAHEAD_S = 0.05;
+/** Gives a quiet onset time to reach the model and its three-frame attack. */
+const SILERO_LOOKAHEAD_S = 0.26;
 /** Gain smoothing: opening has to finish inside the lookahead. */
 const GATE_OPEN_TIME_CONSTANT_S = 0.005;
 const GAIN_TIME_CONSTANT_S = 0.015;
@@ -79,6 +81,9 @@ export interface MicProcessor extends TrackProcessor<Track.Kind.Audio, AudioProc
   readonly context: AudioContext;
   /** Post-RNNoise tap for the voice detector; null before init(). */
   readonly analyser: AnalyserNode | null;
+  readonly speechInput: AudioNode | null;
+  readonly sileroActive: boolean;
+  setSileroActive(active: boolean): void;
   /** RNNoise's speech probability as a signal, for the voice detector's
    *  second input; null before init(). Silent until RNNoise runs. */
   readonly speechProbability: AudioNode | null;
@@ -110,6 +115,9 @@ export function createMicProcessor(): MicProcessor {
   let gain: GainNode | null = null;
   let dest: MediaStreamAudioDestinationNode | null = null;
   let speech: GainNode | null = null;
+  let speechInput: GainNode | null = null;
+  let baseLookahead = 0;
+  let sileroActive = false;
   let rnnoise: RNNoiseNode | null = null;
   let loadingRnnoise: Promise<void> | null = null;
   /** The last setEnhanced request: a load that settles late applies it. */
@@ -125,6 +133,16 @@ export function createMicProcessor(): MicProcessor {
   function applyGain(timeConstant: number): void {
     if (gain === null) return;
     gain.gain.setTargetAtTime(closed.vad || closed.ptt ? 0 : 1, ctx.currentTime, timeConstant);
+  }
+
+  function applyLookahead(): void {
+    if (delay === null) return;
+    delay.delayTime.value = baseLookahead > 0 && sileroActive ? SILERO_LOOKAHEAD_S : baseLookahead;
+  }
+
+  function resetEntryRoute(): void {
+    entry?.disconnect();
+    if (speechInput !== null) entry?.connect(speechInput);
   }
 
   /** The RNNoise node the graph was last wired with, and how. */
@@ -147,7 +165,7 @@ export function createMicProcessor(): MicProcessor {
       return;
     }
     wired = { rnnoise, enhanced, detecting };
-    entry.disconnect();
+    resetEntryRoute();
     if (rnnoise !== null) rnnoise.node.disconnect();
     if (rnnoise !== null && (enhanced || detecting)) {
       entry.connect(rnnoise.node);
@@ -204,6 +222,17 @@ export function createMicProcessor(): MicProcessor {
     get enhanced() {
       return enhanced;
     },
+    get speechInput() {
+      if (entry === null) return null;
+      if (speechInput === null) {
+        speechInput = ctx.createGain();
+        entry.connect(speechInput);
+      }
+      return speechInput;
+    },
+    get sileroActive() {
+      return sileroActive;
+    },
     get speechProbability() {
       return speech;
     },
@@ -223,7 +252,7 @@ export function createMicProcessor(): MicProcessor {
       analyser = ctx.createAnalyser();
       analyser.fftSize = 2048;
       analyser.smoothingTimeConstant = 0.3;
-      delay = ctx.createDelay(GATE_LOOKAHEAD_S);
+      delay = ctx.createDelay(SILERO_LOOKAHEAD_S);
       delay.delayTime.value = 0;
       gain = ctx.createGain();
       gain.gain.setValueAtTime(closed.vad || closed.ptt ? 0 : 1, ctx.currentTime);
@@ -260,6 +289,7 @@ export function createMicProcessor(): MicProcessor {
       gain?.disconnect();
       dest?.disconnect();
       speech?.disconnect();
+      speechInput?.disconnect();
       await rnnoiseStopped;
       void ctx.close();
       log.info("Mic processor destroyed");
@@ -282,7 +312,13 @@ export function createMicProcessor(): MicProcessor {
     },
 
     setLookahead(seconds: number): void {
-      if (delay !== null) delay.delayTime.value = seconds;
+      baseLookahead = seconds;
+      applyLookahead();
+    },
+
+    setSileroActive(active: boolean): void {
+      sileroActive = active;
+      applyLookahead();
     },
 
     async setEnhanced(on: boolean): Promise<void> {

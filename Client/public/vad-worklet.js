@@ -40,6 +40,13 @@ const CLOSE_RATIO = 10 ** (-HYSTERESIS_DB / 20);
 // cannot keep the gate open by itself.
 const SPEECH_PROBABILITY = 0.5;
 
+// Three 32 ms Silero frames must agree before a sound opens the trial gate.
+const SILERO_CAPTURE_SAMPLES = 1536;
+const SILERO_ATTACK_FRAMES = 3;
+const SILERO_HOLD_FRAMES = 16;
+const SILERO_MAX_PENDING = 3;
+const SILERO_OPEN_PROBABILITY = 0.8;
+
 class VadProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
@@ -65,6 +72,15 @@ class VadProcessor extends AudioWorkletProcessor {
     this._powers = new Float64Array(SMOOTH_QUANTA); // mean square of the last quanta
     this._powerAt = 0;
     this._powerSum = 0;
+    this._sileroPort = null;
+    this._sileroReady = false;
+    this._sileroAudio = null;
+    this._sileroOffset = 0;
+    this._sileroFrame = 0;
+    this._sileroLastScore = -1;
+    this._sileroPending = 0;
+    this._sileroPeak = 0;
+    this._sileroAttackPeak = 0;
 
     this.port.onmessage = (event) => {
       if (event.data.type === "config") {
@@ -79,10 +95,93 @@ class VadProcessor extends AudioWorkletProcessor {
         // RNNoise's verdict arrived (or went away) under a running gate: the
         // counts carry on, as a threshold move's do.
         this._speechGate = event.data.on;
+      } else if (event.data.type === "silero") {
+        this._setSileroPort(event.data.port);
+      } else if (event.data.type === "sileroReady") {
+        this._sileroReady = true;
       } else if (event.data.type === "stop") {
+        this._sileroPort?.close();
         this._active = false;
       }
     };
+  }
+
+  _setGated(closed) {
+    if (closed === this._gated) return;
+    this._gated = closed;
+    this.port.postMessage({ type: "gate", gated: closed });
+  }
+
+  _setSileroPort(port) {
+    this._sileroPort?.close();
+    this._sileroPort = port;
+    this._sileroReady = false;
+    this._sileroAudio = port === null ? null : new Float32Array(SILERO_CAPTURE_SAMPLES);
+    this._sileroOffset = 0;
+    this._sileroFrame = 0;
+    this._sileroLastScore = -1;
+    this._sileroPending = 0;
+    this._sileroPeak = 0;
+    this._resetSileroAttack();
+    this._silentFrames = 0;
+    this._setGated(this._threshold > 0);
+    if (port !== null) port.onmessage = ({ data }) => this._onSileroScore(data);
+  }
+
+  _resetSileroAttack() {
+    this._speechFrames = 0;
+    this._sileroAttackPeak = 0;
+  }
+
+  _onSileroScore({ frame, probability, peak }) {
+    this._sileroPending--;
+    const previous = this._sileroLastScore;
+    this._sileroLastScore = frame;
+    if (this._threshold === 0 || this._sileroFrame - frame > SILERO_MAX_PENDING) return;
+
+    if (frame !== previous + 1 || probability < SILERO_OPEN_PROBABILITY) this._resetSileroAttack();
+    if (probability >= SILERO_OPEN_PROBABILITY) {
+      this._sileroAttackPeak = Math.max(this._sileroAttackPeak, peak);
+      this._speechFrames = Math.min(SILERO_ATTACK_FRAMES, this._speechFrames + 1);
+    }
+    const speechConfirmed = this._speechFrames === SILERO_ATTACK_FRAMES;
+    if (this._gated) {
+      if (speechConfirmed && this._sileroAttackPeak >= this._threshold) {
+        this._silentFrames = 0;
+        this._setGated(false);
+      }
+    } else if (speechConfirmed && peak >= this._threshold * CLOSE_RATIO) {
+      this._silentFrames = 0;
+    } else if (++this._silentFrames >= SILERO_HOLD_FRAMES) {
+      this._resetSileroAttack();
+      this._setGated(true);
+    }
+  }
+
+  _sampleSilero(samples, rms) {
+    this._sileroPeak = Math.max(this._sileroPeak, rms);
+    for (let start = 0; start < samples.length;) {
+      const count = Math.min(samples.length - start, SILERO_CAPTURE_SAMPLES - this._sileroOffset);
+      this._sileroAudio.set(samples.subarray(start, start + count), this._sileroOffset);
+      start += count;
+      this._sileroOffset += count;
+      if (this._sileroOffset !== SILERO_CAPTURE_SAMPLES) continue;
+      const frame = this._sileroFrame++;
+      if (this._sileroPending < SILERO_MAX_PENDING) {
+        const audio = this._sileroAudio;
+        this._sileroPort.postMessage({ frame, samples: audio, peak: this._sileroPeak }, [
+          audio.buffer,
+        ]);
+        this._sileroAudio = new Float32Array(SILERO_CAPTURE_SAMPLES);
+        this._sileroPending++;
+      }
+      this._sileroOffset = 0;
+      this._sileroPeak = rms;
+      if (frame - this._sileroLastScore > SILERO_MAX_PENDING) {
+        this._resetSileroAttack();
+        this._setGated(true);
+      }
+    }
   }
 
   _setThreshold(threshold) {
@@ -91,9 +190,8 @@ class VadProcessor extends AudioWorkletProcessor {
     const enabled = threshold > 0;
     if (wasEnabled === enabled) return;
     this._silentFrames = 0;
-    this._speechFrames = 0;
-    this._gated = enabled;
-    this.port.postMessage({ type: "gate", gated: enabled });
+    this._resetSileroAttack();
+    this._setGated(enabled);
   }
 
   process(inputs) {
@@ -132,6 +230,12 @@ class VadProcessor extends AudioWorkletProcessor {
       this._startupFrames++;
     } else {
       this._reportLevel(rms);
+    }
+
+    if (this._sileroPort !== null) {
+      if (this._sileroReady && this._threshold > 0)
+        this._sampleSilero(inputs[2]?.[0] ?? samples, rms);
+      return true;
     }
 
     // Zero means RNNoise has no verdict. Give it time to start before

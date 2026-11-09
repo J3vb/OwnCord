@@ -1,8 +1,8 @@
-name: Windows Voice Test Build
+name: Windows Silero Voice Test Build
 
 on:
   push:
-    branches: [fix/voice-gate-dev-build]
+    branches: [fix/silero-voice-test]
 
 permissions:
   contents: read
@@ -27,6 +27,19 @@ jobs:
         with:
           workspaces: Client/src-tauri
       - run: npm ci
+      - name: Stage the pinned Silero model
+        shell: pwsh
+        run: |
+          $ProgressPreference = 'SilentlyContinue'
+          $model = 'public/silero-v5.1.2.bin'
+          $uri = 'https://huggingface.co/ggml-org/silero-v5.1.2/resolve/60cbe3094451f5bb86ecd0307c814356da24cdf6/ggml-silero-v5.1.2.bin'
+          Invoke-WebRequest -Uri $uri -OutFile $model
+          $actual = (Get-FileHash -LiteralPath $model -Algorithm SHA256).Hash
+          if ($actual -ne '29940d98d42b91fbd05ce489f3ecf7c72f0a42f027e4875919a28fb4c04ea2cf') {
+            throw 'Silero model SHA-256 mismatch'
+          }
+      - name: Verify the voice detector
+        run: npx --no-install vitest run tests/unit/silero-vad.test.ts tests/unit/mic-processor.test.ts tests/unit/audioPipeline
       - name: Build the test installer
         shell: bash
         run: |
@@ -34,7 +47,7 @@ jobs:
           {
             "productName": "OwnCord Voice Test",
             "mainBinaryName": "owncord-voice-test",
-            "version": "2.8.1-dev.1",
+            "version": "2.8.1-dev.2",
             "identifier": "com.owncord.voicetest",
             "bundle": { "createUpdaterArtifacts": false },
             "plugins": { "deep-link": { "desktop": { "schemes": ["owncord-voice-test"] } } }
@@ -43,7 +56,7 @@ jobs:
           npm run tauri build -- --bundles nsis --config voice-test.conf.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: OwnCord-Voice-Test-Windows-x64
+          name: OwnCord-Silero-Test-Windows-x64
           path: Client/src-tauri/target/release/bundle/nsis/*-setup.exe
           if-no-files-found: error
           retention-days: 7

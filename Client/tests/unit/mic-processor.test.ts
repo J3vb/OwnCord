@@ -47,7 +47,15 @@ describe("createMicProcessor", () => {
     // The detector taps ahead of the delay and gain: it sees the level, not the gate.
     expect(ctx.reaches(ctx.node("analyser"), output)).toBe(false);
     expect(processor.processedTrack).toBe(ctx.outputTrack);
-    expect(ctx.node("delay").maxDelay).toBe(GATE_LOOKAHEAD_S);
+    expect(ctx.node("delay").maxDelay).toBe(0.26);
+    processor.setLookahead(GATE_LOOKAHEAD_S);
+    processor.setSileroActive(true);
+    expect(ctx.node("delay").delayTime.value).toBe(0.26);
+    processor.setLookahead(0);
+    expect(ctx.node("delay").delayTime.value).toBe(0);
+    processor.setLookahead(GATE_LOOKAHEAD_S);
+    processor.setSileroActive(false);
+    expect(ctx.node("delay").delayTime.value).toBe(GATE_LOOKAHEAD_S);
   });
 
   it("gates the output: either gate closed is silence, both open is the input gain", async () => {

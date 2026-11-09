@@ -16,6 +16,7 @@ import { Track, TrackEvent, type Room, type LocalAudioTrack } from "livekit-clie
 import { loadPref, savePref } from "@lib/prefs/preferences";
 import { createLogger } from "@lib/logger";
 import { publicAssetUrl } from "@lib/media/publicAssets";
+import { startSileroDetection, type SileroInput } from "@lib/voice/sileroDetection";
 import {
   createMicProcessor,
   GATE_LOOKAHEAD_S,
@@ -100,6 +101,7 @@ export interface VadDetector {
  *  switch that runs RNNoise for it (MicProcessor.setSpeechDetection). */
 export interface SpeechDetection {
   readonly source: AudioNode;
+  readonly silero?: SileroInput;
   /** Resolves whether RNNoise runs; false leaves the gate on its level. */
   setOn(on: boolean): Promise<boolean>;
 }
@@ -148,6 +150,7 @@ export function startVadDetector(
   };
   let stopped = false;
   let workletNode: AudioWorkletNode | null = null;
+  let stopSilero: (() => void) | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
   /** The worklet waits briefly for a verdict, then falls back to level alone. */
   const startSpeechGate = (): void => {
@@ -246,7 +249,9 @@ export function startVadDetector(
     .then(() => {
       if (stopped) return;
       try {
-        workletNode = new AudioWorkletNode(ctx, "vad-processor", { numberOfInputs: 2 });
+        workletNode = new AudioWorkletNode(ctx, "vad-processor", {
+          numberOfInputs: speech?.silero === undefined ? 2 : 3,
+        });
       } catch (err) {
         log.warn("Failed to create VAD AudioWorkletNode, falling back", err);
         startFallback();
@@ -257,7 +262,10 @@ export function startVadDetector(
       speech?.source.connect(workletNode, 0, 1);
       // oxlint-disable-next-line require-post-message-target-origin -- MessagePort.postMessage, not Window.postMessage
       workletNode.port.postMessage({ type: "config", threshold, speechGate: speech !== undefined });
-      startSpeechGate();
+      if (speech?.silero !== undefined) {
+        stopSilero = startSileroDetection(workletNode, speech.silero, startSpeechGate);
+      }
+      if (stopSilero === null) startSpeechGate();
       // oxlint-disable-next-line prefer-add-event-listener -- MessagePort does not support addEventListener
       workletNode.port.onmessage = (event: MessageEvent) => {
         if (event.data.type === "gate") reportGate(event.data.gated as boolean);
@@ -274,6 +282,7 @@ export function startVadDetector(
 
   const stop = (): Promise<void> => {
     stopped = true;
+    stopSilero?.();
     if (timer !== null) clearTimeout(timer);
     const node = workletNode;
     if (node === null) return Promise.resolve();
@@ -310,7 +319,15 @@ export function startVadDetector(
 export function speechDetectionOf(processor: MicProcessor): SpeechDetection | undefined {
   const source = processor.speechProbability;
   if (source === null) return undefined;
-  return { source, setOn: (on) => processor.setSpeechDetection(on) };
+  const input = typeof Worker === "undefined" ? null : processor.speechInput;
+  return {
+    source,
+    setOn: (on) => processor.setSpeechDetection(on),
+    silero:
+      input === null
+        ? undefined
+        : { source: input, setActive: (on) => processor.setSileroActive(on) },
+  };
 }
 
 /** A room that gates its own capture for push-to-talk: the Linux NativeRoom,
@@ -442,6 +459,10 @@ export class AudioPipeline {
     return processor === null
       ? null
       : { speechDetection: processor.speechDetection, enhanced: processor.enhanced };
+  }
+
+  get sileroDetectionActive(): boolean {
+    return this.processor?.sileroActive ?? false;
   }
 
   /** Current gain value from the processor's GainNode, or null if inactive. */

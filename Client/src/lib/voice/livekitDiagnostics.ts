@@ -230,6 +230,7 @@ export function buildSessionDebugInfo(deps: SessionDebugDeps): Record<string, un
     roomState: room.state,
     hasRNNoiseProcessor: rnnoise?.enhanced === true || rnnoise?.speechDetection === true,
     enhancedNoiseSuppressionActive: rnnoise?.enhanced ?? null,
+    sileroDetectionActive: audioPipeline.sileroDetectionActive,
     currentChannelId,
     outputVolumeMultiplier,
     audioPipelineActive: audioPipeline.isActive,
