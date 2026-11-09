@@ -40,12 +40,15 @@ const CLOSE_RATIO = 10 ** (-HYSTERESIS_DB / 20);
 // cannot keep the gate open by itself.
 const SPEECH_PROBABILITY = 0.5;
 
-// Three 32 ms Silero frames must agree before a sound opens the trial gate.
+// Three 32 ms frames confirm speech. Two strong frames can open the gate
+// sooner when RNNoise independently confirms the second frame.
 const SILERO_CAPTURE_SAMPLES = 1536;
 const SILERO_ATTACK_FRAMES = 3;
 const SILERO_HOLD_FRAMES = 16;
 const SILERO_MAX_PENDING = 3;
 const SILERO_OPEN_PROBABILITY = 0.8;
+const SILERO_FAST_OPEN_PROBABILITY = 0.85;
+const RNNOISE_FAST_OPEN_PROBABILITY = 0.98;
 
 class VadProcessor extends AudioWorkletProcessor {
   constructor() {
@@ -80,7 +83,9 @@ class VadProcessor extends AudioWorkletProcessor {
     this._sileroLastScore = -1;
     this._sileroPending = 0;
     this._sileroPeak = 0;
+    this._sileroRnnoisePeak = 0;
     this._sileroAttackPeak = 0;
+    this._sileroStrongFrame = null;
 
     this.port.onmessage = (event) => {
       if (event.data.type === "config") {
@@ -122,6 +127,7 @@ class VadProcessor extends AudioWorkletProcessor {
     this._sileroLastScore = -1;
     this._sileroPending = 0;
     this._sileroPeak = 0;
+    this._sileroRnnoisePeak = 0;
     this._resetSileroAttack();
     this._silentFrames = 0;
     if (port !== null) {
@@ -135,9 +141,10 @@ class VadProcessor extends AudioWorkletProcessor {
   _resetSileroAttack() {
     this._speechFrames = 0;
     this._sileroAttackPeak = 0;
+    this._sileroStrongFrame = null;
   }
 
-  _onSileroScore({ frame, probability, peak }) {
+  _onSileroScore({ frame, probability, peak, rnnoisePeak }) {
     this._sileroPending--;
     const previous = this._sileroLastScore;
     this._sileroLastScore = frame;
@@ -148,9 +155,15 @@ class VadProcessor extends AudioWorkletProcessor {
       this._sileroAttackPeak = Math.max(this._sileroAttackPeak, peak);
       this._speechFrames = Math.min(SILERO_ATTACK_FRAMES, this._speechFrames + 1);
     }
+    const strong = probability >= SILERO_FAST_OPEN_PROBABILITY;
+    const shortSpeechConfirmed =
+      strong &&
+      this._sileroStrongFrame === frame - 1 &&
+      rnnoisePeak >= RNNOISE_FAST_OPEN_PROBABILITY;
+    this._sileroStrongFrame = strong ? frame : null;
     const speechConfirmed = this._speechFrames === SILERO_ATTACK_FRAMES;
     if (this._gated) {
-      if (speechConfirmed && this._sileroAttackPeak >= this._threshold) {
+      if ((speechConfirmed || shortSpeechConfirmed) && this._sileroAttackPeak >= this._threshold) {
         this._silentFrames = 0;
         this._setGated(false);
       }
@@ -162,8 +175,9 @@ class VadProcessor extends AudioWorkletProcessor {
     }
   }
 
-  _sampleSilero(samples, rms) {
+  _sampleSilero(samples, rms, rnnoiseProbability) {
     this._sileroPeak = Math.max(this._sileroPeak, rms);
+    this._sileroRnnoisePeak = Math.max(this._sileroRnnoisePeak, rnnoiseProbability);
     for (let start = 0; start < samples.length;) {
       const count = Math.min(samples.length - start, SILERO_CAPTURE_SAMPLES - this._sileroOffset);
       this._sileroAudio.set(samples.subarray(start, start + count), this._sileroOffset);
@@ -173,14 +187,16 @@ class VadProcessor extends AudioWorkletProcessor {
       const frame = this._sileroFrame++;
       if (this._sileroPending < SILERO_MAX_PENDING) {
         const audio = this._sileroAudio;
-        this._sileroPort.postMessage({ frame, samples: audio, peak: this._sileroPeak }, [
-          audio.buffer,
-        ]);
+        this._sileroPort.postMessage(
+          { frame, samples: audio, peak: this._sileroPeak, rnnoisePeak: this._sileroRnnoisePeak },
+          [audio.buffer],
+        );
         this._sileroAudio = new Float32Array(SILERO_CAPTURE_SAMPLES);
         this._sileroPending++;
       }
       this._sileroOffset = 0;
       this._sileroPeak = rms;
+      this._sileroRnnoisePeak = 0;
       if (frame - this._sileroLastScore > SILERO_MAX_PENDING) {
         this._resetSileroAttack();
         this._setGated(true);
@@ -238,7 +254,7 @@ class VadProcessor extends AudioWorkletProcessor {
 
     if (this._sileroPort !== null) {
       if (this._sileroReady && this._threshold > 0)
-        this._sampleSilero(inputs[2]?.[0] ?? samples, rms);
+        this._sampleSilero(inputs[2]?.[0] ?? samples, rms, probability);
       return true;
     }
 

@@ -47,7 +47,7 @@ jobs:
           {
             "productName": "OwnCord Voice Test",
             "mainBinaryName": "owncord-voice-test",
-            "version": "2.8.1-dev.5",
+            "version": "2.8.1-dev.6",
             "identifier": "com.owncord.voicetest",
             "bundle": { "createUpdaterArtifacts": false },
             "plugins": { "deep-link": { "desktop": { "schemes": ["owncord-voice-test"] } } }
