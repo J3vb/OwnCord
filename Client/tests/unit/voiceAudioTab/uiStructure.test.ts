@@ -174,8 +174,8 @@ describe("VoiceAudioTab UI structure", () => {
 
     const sliders = el.querySelectorAll(VOLUME_SLIDERS);
     expect(sliders.length).toBe(2); // input volume + output volume
-    // ...plus the Push to Talk release delay, under the input mode.
-    expect(el.querySelectorAll('input[type="range"]').length).toBe(3);
+    // The other two sliders are Push to Talk release delay and Voice Buffer.
+    expect(el.querySelectorAll('input[type="range"]').length).toBe(4);
     ac.abort();
   });
 
@@ -632,6 +632,7 @@ describe("VoiceAudioTab UI structure", () => {
         "Echo Cancellation",
         "Noise Suppression",
         "Enhanced Noise Suppression",
+        "Voice Buffer",
         "Automatic Gain Control",
       ]);
       const enhanced = el
@@ -721,6 +722,7 @@ describe("VoiceAudioTab UI structure", () => {
         expect(worklet.port.postMessage).toHaveBeenCalledWith({
           type: "config",
           threshold: AUTO_MAX_THRESHOLD,
+          speechGate: false,
         });
         vi.useFakeTimers({ toFake: ["performance"] });
         try {
@@ -741,7 +743,7 @@ describe("VoiceAudioTab UI structure", () => {
 
         autoToggle(el).click();
         expect(worklet.port.postMessage).toHaveBeenLastCalledWith({
-          type: "config",
+          type: "threshold",
           threshold: vadThreshold(50),
         });
         ac.abort();
@@ -801,6 +803,7 @@ describe("VoiceAudioTab UI structure", () => {
         expect(worklet.port.postMessage).toHaveBeenCalledWith({
           type: "config",
           threshold: vadThreshold(30),
+          speechGate: false,
         });
         ac.abort();
       });
@@ -845,11 +848,11 @@ describe("VoiceAudioTab UI structure", () => {
       // sustained level. Now the gate's own verdict colours it.
       it("is green exactly while the gate is open", async () => {
         const { el, worklet, ac } = await meter();
-        expect(meterOf(el).style.background).toBe("");
-        worklet.emit({ type: "gate", gated: true });
         expect(meterOf(el).style.background).toBe("var(--yellow)");
         worklet.emit({ type: "gate", gated: false });
         expect(meterOf(el).style.background).toBe("var(--green)");
+        worklet.emit({ type: "gate", gated: true });
+        expect(meterOf(el).style.background).toBe("var(--yellow)");
         ac.abort();
       });
 
@@ -882,7 +885,7 @@ describe("VoiceAudioTab UI structure", () => {
 
         expect(el.querySelector("[data-testid='sensitivity-value']")!.textContent).toBe("-37 dB");
         expect(worklet.port.postMessage).toHaveBeenLastCalledWith({
-          type: "config",
+          type: "threshold",
           threshold: vadThreshold(45),
         });
         expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledTimes(1);

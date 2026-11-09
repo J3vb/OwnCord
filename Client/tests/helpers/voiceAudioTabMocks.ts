@@ -10,6 +10,7 @@ export const mockSwitchVideoDevice = vi.fn().mockResolvedValue(undefined);
 export const mockSetVoiceSensitivity = vi.fn();
 
 export const mockSetInputVolume = vi.fn();
+export const mockSetSileroBufferMs = vi.fn();
 
 /** The native engine's level reports: the meter's listener and its release. */
 export let nativeLevelListener: ((rms: number | null, open: boolean) => void) | null = null;
@@ -51,6 +52,7 @@ export function voiceLivekitSessionMock() {
     setVoiceSensitivity: (...args: unknown[]) => mockSetVoiceSensitivity(...args),
     applyInputMode: () => mockApplyInputMode(),
     setInputVolume: (...args: unknown[]) => mockSetInputVolume(...args),
+    setSileroBufferMs: (...args: unknown[]) => mockSetSileroBufferMs(...args),
     onNativeInputLevel: (listener: (rms: number | null, open: boolean) => void) => {
       nativeLevelListener = listener;
       return mockUnsubscribeNativeLevel;

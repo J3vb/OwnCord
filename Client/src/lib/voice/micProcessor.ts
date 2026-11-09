@@ -27,6 +27,7 @@
 
 import type { Track, TrackProcessor, AudioProcessorOptions } from "livekit-client";
 import { createLogger } from "@lib/logger";
+import { loadPref } from "@lib/prefs/preferences";
 import {
   createRNNoiseNode,
   RNNOISE_SPEECH_OUTPUT,
@@ -40,6 +41,18 @@ const log = createLogger("micProcessor");
  *  keeps a mouse click from opening it; the delay covers that wait and the
  *  opening ramp, so the start of a word is not cut off. */
 export const GATE_LOOKAHEAD_S = 0.05;
+export const SILERO_BUFFER_PREF = "sileroBufferMs";
+export const SILERO_BUFFER_MAX_MS = 300;
+const SILERO_BUFFER_DEFAULT_MS = 200;
+
+function clampSileroBufferMs(ms: number): number {
+  if (!Number.isFinite(ms)) return SILERO_BUFFER_DEFAULT_MS;
+  return Math.min(SILERO_BUFFER_MAX_MS, Math.max(0, Math.round(ms)));
+}
+
+export function sileroBufferMs(): number {
+  return clampSileroBufferMs(loadPref(SILERO_BUFFER_PREF, SILERO_BUFFER_DEFAULT_MS));
+}
 /** Gain smoothing: opening has to finish inside the lookahead. */
 const GATE_OPEN_TIME_CONSTANT_S = 0.005;
 const GAIN_TIME_CONSTANT_S = 0.015;
@@ -79,6 +92,9 @@ export interface MicProcessor extends TrackProcessor<Track.Kind.Audio, AudioProc
   readonly context: AudioContext;
   /** Post-RNNoise tap for the voice detector; null before init(). */
   readonly analyser: AnalyserNode | null;
+  readonly speechInput: AudioNode | null;
+  readonly sileroActive: boolean;
+  setSileroActive(active: boolean): void;
   /** RNNoise's speech probability as a signal, for the voice detector's
    *  second input; null before init(). Silent until RNNoise runs. */
   readonly speechProbability: AudioNode | null;
@@ -93,6 +109,7 @@ export interface MicProcessor extends TrackProcessor<Track.Kind.Audio, AudioProc
   setGate(source: GateSource, closed: boolean): void;
   isGateClosed(source: GateSource): boolean;
   setLookahead(seconds: number): void;
+  setSileroBufferMs(ms: number): void;
   /** Route through RNNoise or around it; a load failure leaves it off. */
   setEnhanced(on: boolean): Promise<void>;
   /** Run RNNoise for its speech probability (the sensitivity gate's speech
@@ -110,6 +127,10 @@ export function createMicProcessor(): MicProcessor {
   let gain: GainNode | null = null;
   let dest: MediaStreamAudioDestinationNode | null = null;
   let speech: GainNode | null = null;
+  let speechInput: GainNode | null = null;
+  let baseLookahead = 0;
+  let sileroLookahead = sileroBufferMs() / 1000;
+  let sileroActive = false;
   let rnnoise: RNNoiseNode | null = null;
   let loadingRnnoise: Promise<void> | null = null;
   /** The last setEnhanced request: a load that settles late applies it. */
@@ -125,6 +146,16 @@ export function createMicProcessor(): MicProcessor {
   function applyGain(timeConstant: number): void {
     if (gain === null) return;
     gain.gain.setTargetAtTime(closed.vad || closed.ptt ? 0 : 1, ctx.currentTime, timeConstant);
+  }
+
+  function applyLookahead(): void {
+    if (delay === null) return;
+    delay.delayTime.value = baseLookahead > 0 && sileroActive ? sileroLookahead : baseLookahead;
+  }
+
+  function resetEntryRoute(): void {
+    entry?.disconnect();
+    if (speechInput !== null) entry?.connect(speechInput);
   }
 
   /** The RNNoise node the graph was last wired with, and how. */
@@ -147,7 +178,7 @@ export function createMicProcessor(): MicProcessor {
       return;
     }
     wired = { rnnoise, enhanced, detecting };
-    entry.disconnect();
+    resetEntryRoute();
     if (rnnoise !== null) rnnoise.node.disconnect();
     if (rnnoise !== null && (enhanced || detecting)) {
       entry.connect(rnnoise.node);
@@ -204,6 +235,17 @@ export function createMicProcessor(): MicProcessor {
     get enhanced() {
       return enhanced;
     },
+    get speechInput() {
+      if (entry === null) return null;
+      if (speechInput === null) {
+        speechInput = ctx.createGain();
+        entry.connect(speechInput);
+      }
+      return speechInput;
+    },
+    get sileroActive() {
+      return sileroActive;
+    },
     get speechProbability() {
       return speech;
     },
@@ -223,7 +265,7 @@ export function createMicProcessor(): MicProcessor {
       analyser = ctx.createAnalyser();
       analyser.fftSize = 2048;
       analyser.smoothingTimeConstant = 0.3;
-      delay = ctx.createDelay(GATE_LOOKAHEAD_S);
+      delay = ctx.createDelay(SILERO_BUFFER_MAX_MS / 1000);
       delay.delayTime.value = 0;
       gain = ctx.createGain();
       gain.gain.setValueAtTime(closed.vad || closed.ptt ? 0 : 1, ctx.currentTime);
@@ -260,6 +302,7 @@ export function createMicProcessor(): MicProcessor {
       gain?.disconnect();
       dest?.disconnect();
       speech?.disconnect();
+      speechInput?.disconnect();
       await rnnoiseStopped;
       void ctx.close();
       log.info("Mic processor destroyed");
@@ -282,7 +325,18 @@ export function createMicProcessor(): MicProcessor {
     },
 
     setLookahead(seconds: number): void {
-      if (delay !== null) delay.delayTime.value = seconds;
+      baseLookahead = seconds;
+      applyLookahead();
+    },
+
+    setSileroBufferMs(ms: number): void {
+      sileroLookahead = clampSileroBufferMs(ms) / 1000;
+      applyLookahead();
+    },
+
+    setSileroActive(active: boolean): void {
+      sileroActive = active;
+      applyLookahead();
     },
 
     async setEnhanced(on: boolean): Promise<void> {
