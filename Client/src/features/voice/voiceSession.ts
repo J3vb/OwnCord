@@ -53,6 +53,7 @@ import { noteWatchSent } from "@lib/voice/watchRequest";
 import { type LostMedia, dismissMediaLostNotice } from "./mediaLostNotice";
 import { isLinuxDesktop } from "./native/platform";
 import { nativeCounters } from "./native/counters";
+import { speechDetectionOf } from "./sileroDetection";
 import { desktop } from "../../platform/desktop";
 import { voiceText } from "../../i18n/voice";
 import { channelsStore } from "@stores/channels.store";
@@ -337,7 +338,7 @@ export class LiveKitSession {
     },
     configuredAudioOptions: (channelId) => this.configuredAudioOptions(channelId),
   });
-  private _audioPipeline = new AudioPipeline(isPttPollingLive);
+  private _audioPipeline = new AudioPipeline(isPttPollingLive, speechDetectionOf);
   private _audioElements = new AudioElements();
   private _deviceManager = new DeviceManager();
   private _eventHandlers: RoomEventHandlers;

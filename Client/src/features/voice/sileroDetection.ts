@@ -1,5 +1,7 @@
-import { createLogger } from "@lib/logger";
-import { publicAssetUrl } from "@lib/media/publicAssets";
+import { createLogger } from "../../lib/logger";
+import { publicAssetUrl } from "../../lib/media/publicAssets";
+import type { SpeechDetection } from "../../lib/voice/audioPipeline";
+import type { MicProcessor } from "../../lib/voice/micProcessor";
 
 const log = createLogger("sileroDetection");
 const INIT_TIMEOUT_MS = 4000;
@@ -68,18 +70,14 @@ function startSileroDetection(
   return close;
 }
 
-export interface SpeechDetection {
-  readonly source: AudioNode;
-  readonly silero?: SileroInput;
-  setOn(on: boolean): Promise<boolean>;
-}
-
 /** Switch the classifier without replacing the detector or its noise floor. */
-export function bindSpeechDetection(
+function bindSpeechDetection(
   node: AudioWorkletNode,
-  speech: SpeechDetection,
+  source: AudioNode,
+  setOn: (enabled: boolean) => Promise<boolean>,
+  silero?: SileroInput,
 ): (enabled: boolean) => void {
-  speech.source.connect(node, 0, 1);
+  source.connect(node, 0, 1);
   let enabled = false;
   let stopSilero: (() => void) | null = null;
   let revision = 0;
@@ -95,11 +93,11 @@ export function bindSpeechDetection(
       stopSilero?.();
       stopSilero = null;
       report(false);
-      void speech.setOn(false).catch((err: unknown) => log.debug("Speech detection stop", err));
+      void setOn(false).catch((err: unknown) => log.debug("Speech detection stop", err));
       return;
     }
     const startRnnoise = (): void => {
-      speech.setOn(true).then(
+      setOn(true).then(
         (on) => {
           if (request === revision) report(on);
         },
@@ -110,8 +108,35 @@ export function bindSpeechDetection(
         },
       );
     };
-    stopSilero =
-      speech.silero === undefined ? null : startSileroDetection(node, speech.silero, startRnnoise);
+    stopSilero = silero === undefined ? null : startSileroDetection(node, silero, startRnnoise);
     if (stopSilero === null) startRnnoise();
   };
+}
+
+export function createSpeechDetection(
+  source: AudioNode,
+  setOn: (enabled: boolean) => Promise<boolean>,
+  silero?: SileroInput,
+): SpeechDetection {
+  return {
+    numberOfInputs: silero === undefined ? 2 : 3,
+    bind: (node) => bindSpeechDetection(node, source, setOn, silero),
+  };
+}
+
+/** Bind the call or settings mic graph to the feature's speech classifier. */
+export function speechDetectionOf(
+  processor: MicProcessor,
+  useSilero = true,
+): SpeechDetection | undefined {
+  const source = processor.speechProbability;
+  if (source === null) return undefined;
+  const input = useSilero && typeof Worker !== "undefined" ? processor.speechInput : null;
+  return createSpeechDetection(
+    source,
+    (on) => processor.setSpeechDetection(on),
+    input === null
+      ? undefined
+      : { source: input, setActive: (on) => processor.setSileroActive(on) },
+  );
 }

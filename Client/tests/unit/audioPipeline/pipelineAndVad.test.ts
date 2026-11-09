@@ -8,6 +8,10 @@ import {
 } from "../../../src/lib/voice/audioPipeline";
 import type { MicProcessor } from "../../../src/lib/voice/micProcessor";
 import {
+  createSpeechDetection,
+  speechDetectionOf,
+} from "../../../src/features/voice/sileroDetection";
+import {
   FakeAudioContext,
   FakeAudioWorkletNode,
   FakeMediaStream,
@@ -210,7 +214,7 @@ describe("AudioPipeline", () => {
     it("retunes without reopening the mic or restarting RNNoise; no gate (100) turns it off", async () => {
       prefs.set("voiceSensitivity", 100);
       prefs.set("enhancedNoiseSuppression", true);
-      const pipeline = new AudioPipeline();
+      const pipeline = new AudioPipeline(undefined, speechDetectionOf);
       const track = micTrack();
       await pipeline.attach(track);
       contextOf(track).audioWorklet.addModule.mockResolvedValue(undefined);
@@ -710,7 +714,7 @@ describe("startVadDetector", () => {
     function speechDetection(answer: (on: boolean) => Promise<boolean>) {
       const source = { connect: vi.fn(), disconnect: vi.fn() };
       const setOn = vi.fn(answer);
-      return { source, setOn, detection: { source: source as never, setOn } };
+      return { source, setOn, detection: createSpeechDetection(source as never, setOn) };
     }
     /** A detector with RNNoise's verdict wired in, once its worklet is up. */
     async function startDetector(

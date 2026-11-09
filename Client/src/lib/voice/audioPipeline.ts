@@ -6,7 +6,6 @@ import { Track, TrackEvent, type Room, type LocalAudioTrack } from "livekit-clie
 import { loadPref, savePref } from "@lib/prefs/preferences";
 import { createLogger } from "@lib/logger";
 import { publicAssetUrl } from "@lib/media/publicAssets";
-import { bindSpeechDetection, type SpeechDetection } from "@lib/voice/sileroDetection";
 import {
   createMicProcessor,
   GATE_LOOKAHEAD_S,
@@ -80,6 +79,11 @@ export function isMissingDeviceError(err: unknown, options: { deviceId?: unknown
 
 export function enhancedNoiseSuppressionEnabled(): boolean {
   return loadPref("noiseSuppression", true) && loadPref("enhancedNoiseSuppression", false);
+}
+
+export interface SpeechDetection {
+  readonly numberOfInputs: 2 | 3;
+  bind(node: AudioWorkletNode): (enabled: boolean) => void;
 }
 
 export interface VadDetector {
@@ -215,7 +219,7 @@ export function startVadDetector(
       if (stopped) return;
       try {
         workletNode = new AudioWorkletNode(ctx, "vad-processor", {
-          numberOfInputs: speech?.silero === undefined ? 2 : 3,
+          numberOfInputs: speech?.numberOfInputs ?? 2,
         });
       } catch (err) {
         log.warn("Failed to create VAD AudioWorkletNode, falling back", err);
@@ -232,7 +236,7 @@ export function startVadDetector(
       // oxlint-disable-next-line require-post-message-target-origin -- MessagePort.postMessage, not Window.postMessage
       workletNode.port.postMessage(config);
       if (speech !== undefined) {
-        setSpeechGate = bindSpeechDetection(workletNode, speech);
+        setSpeechGate = speech.bind(workletNode);
         setSpeechGate(speechEnabled);
       }
       // oxlint-disable-next-line prefer-add-event-listener -- MessagePort does not support addEventListener
@@ -288,22 +292,6 @@ export function startVadDetector(
   };
 }
 
-/** The processor's RNNoise verdict for the detector, once the processor has
- *  its graph. */
-export function speechDetectionOf(processor: MicProcessor): SpeechDetection | undefined {
-  const source = processor.speechProbability;
-  if (source === null) return undefined;
-  const input = typeof Worker === "undefined" ? null : processor.speechInput;
-  return {
-    source,
-    setOn: (on) => processor.setSpeechDetection(on),
-    silero:
-      input === null
-        ? undefined
-        : { source: input, setActive: (on) => processor.setSileroActive(on) },
-  };
-}
-
 /** A room that gates its own capture for push-to-talk: the Linux NativeRoom,
  *  whose microphone is the Rust session's and never has a web processor. */
 interface PttGatedRoom {
@@ -351,7 +339,10 @@ export class AudioPipeline {
   /** `pttPollingLive` reports whether a Push to Talk key can gate the mic
    *  right now (the voice store's isPttPollingLive), injected so this module
    *  stays off the store graph. */
-  constructor(private readonly pttPollingLive: () => boolean = () => false) {}
+  constructor(
+    private readonly pttPollingLive: () => boolean = () => false,
+    private readonly speechDetectionOf?: (processor: MicProcessor) => SpeechDetection | undefined,
+  ) {}
 
   /** Bumped on every teardown so an attach that outlived it is discarded. */
   private generation = 0;
@@ -692,7 +683,7 @@ export class AudioPipeline {
         },
       },
       this.lastAutoThreshold,
-      speechDetectionOf(processor),
+      this.speechDetectionOf?.(processor),
       enhancedNoiseSuppressionEnabled(),
     );
   }

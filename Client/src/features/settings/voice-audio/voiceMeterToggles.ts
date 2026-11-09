@@ -4,6 +4,7 @@
  */
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { Disposable } from "@lib/disposable";
+import { speechDetectionOf } from "../../voice/sileroDetection";
 import { loadPref, savePref, createToggle } from "../helpers";
 import { onPrefChange } from "@lib/prefs/preferences";
 import {
@@ -16,7 +17,6 @@ import {
   enhancedNoiseSuppressionEnabled,
   micCaptureOptions,
   isMissingDeviceError,
-  speechDetectionOf,
   startVadDetector,
   vadThreshold,
 } from "@lib/voice/audioPipeline";
@@ -318,8 +318,11 @@ function mountVoiceBuffer(sc: VoiceTabScope): HTMLInputElement {
     { signal: sc.signal },
   );
 
-  const row = createElement("div", { class: "setting-row nested", "data-testid": "voice-buffer" });
-  const info = createElement("div", {});
+  const row = createElement("div", {
+    class: "setting-row stacked nested",
+    "data-testid": "voice-buffer",
+  });
+  const info = createElement("div", { class: "setting-info" });
   appendChildren(
     info,
     createElement("div", { class: "setting-label" }, label),

@@ -8,6 +8,7 @@ import {
   startVadDetector,
 } from "../../../src/lib/voice/audioPipeline";
 import type { MicProcessor } from "../../../src/lib/voice/micProcessor";
+import { speechDetectionOf } from "../../../src/features/voice/sileroDetection";
 import {
   FakeAudioContext,
   FakeAudioWorkletNode,
@@ -361,7 +362,7 @@ describe("AudioPipeline lifecycle and settings", () => {
       "fetch",
       vi.fn(async () => ({ ok: true, arrayBuffer: async () => new ArrayBuffer(8) })),
     );
-    const pipeline = new AudioPipeline();
+    const pipeline = new AudioPipeline(undefined, speechDetectionOf);
     const track = micTrack();
     pipeline.setRoom(roomWith(track));
     await pipeline.attach(track);

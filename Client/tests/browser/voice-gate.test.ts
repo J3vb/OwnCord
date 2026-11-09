@@ -8,7 +8,8 @@ import {
   GATE_LOOKAHEAD_S,
   type MicProcessor,
 } from "../../src/lib/voice/micProcessor";
-import { speechDetectionOf, startVadDetector } from "../../src/lib/voice/audioPipeline";
+import { startVadDetector } from "../../src/lib/voice/audioPipeline";
+import { speechDetectionOf } from "../../src/features/voice/sileroDetection";
 import { vadThreshold } from "../../src/lib/voice/gateScale";
 import speechUrl from "../fixtures/audio/speech.wav?url";
 import clickUrl from "../fixtures/audio/mouse-click.wav?url";
@@ -76,7 +77,7 @@ describe("sensitivity gate (real AudioContext)", () => {
 
       if (mode === "silero") await processor.setEnhanced(true);
       processor.setLookahead(GATE_LOOKAHEAD_S);
-      const speech = speechDetectionOf(processor)!;
+      const speech = speechDetectionOf(processor, mode === "silero");
 
       const events: Array<{ atMs: number; open: boolean }> = [];
       let startedAt = 0;
@@ -91,7 +92,7 @@ describe("sensitivity gate (real AudioContext)", () => {
           },
         },
         undefined,
-        mode === "silero" ? speech : { ...speech, silero: undefined },
+        speech,
       );
       cleanup.push(() => detector.stop());
       // Wait for the requested detector and let the start-up grace finish.
