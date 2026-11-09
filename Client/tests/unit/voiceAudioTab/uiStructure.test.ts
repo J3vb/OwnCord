@@ -721,7 +721,7 @@ describe("VoiceAudioTab UI structure", () => {
         expect(worklet.port.postMessage).toHaveBeenCalledWith({
           type: "config",
           threshold: AUTO_MAX_THRESHOLD,
-          speechGate: true,
+          speechGate: false,
         });
         vi.useFakeTimers({ toFake: ["performance"] });
         try {
@@ -802,7 +802,7 @@ describe("VoiceAudioTab UI structure", () => {
         expect(worklet.port.postMessage).toHaveBeenCalledWith({
           type: "config",
           threshold: vadThreshold(30),
-          speechGate: true,
+          speechGate: false,
         });
         ac.abort();
       });

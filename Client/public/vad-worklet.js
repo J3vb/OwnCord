@@ -124,8 +124,12 @@ class VadProcessor extends AudioWorkletProcessor {
     this._sileroPeak = 0;
     this._resetSileroAttack();
     this._silentFrames = 0;
-    this._setGated(this._threshold > 0);
-    if (port !== null) port.onmessage = ({ data }) => this._onSileroScore(data);
+    if (port !== null) {
+      this._setGated(this._threshold > 0);
+      port.onmessage = ({ data }) => {
+        if (this._sileroPort === port) this._onSileroScore(data);
+      };
+    }
   }
 
   _resetSileroAttack() {

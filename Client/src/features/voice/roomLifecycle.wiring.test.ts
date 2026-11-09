@@ -273,7 +273,7 @@ describe("the microphone processor", () => {
 });
 
 describe("the native room's capture settings", () => {
-  it("reads each processing switch from its own saved setting", async () => {
+  it("applies the saved processing switches with Noise Suppression as the master", async () => {
     env.linux = true;
     env.prefs.set("echoCancellation", false);
     env.prefs.set("noiseSuppression", false);
@@ -291,7 +291,7 @@ describe("the native room's capture settings", () => {
       echoCancellation: false,
       noiseSuppression: false,
       autoGainControl: false,
-      enhancedNoiseSuppression: true,
+      enhancedNoiseSuppression: false,
     });
   });
 });

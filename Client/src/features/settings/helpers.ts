@@ -42,6 +42,7 @@ export function createToggle(
   });
 
   function doToggle(): void {
+    if (toggle.getAttribute("aria-disabled") === "true") return;
     const nowOn = !toggle.classList.contains("on");
     toggle.classList.toggle("on", nowOn);
     toggle.setAttribute("aria-checked", String(nowOn));

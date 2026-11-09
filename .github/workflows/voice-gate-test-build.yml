@@ -39,7 +39,7 @@ jobs:
             throw 'Silero model SHA-256 mismatch'
           }
       - name: Verify the voice detector
-        run: npx --no-install vitest run tests/unit/silero-vad.test.ts tests/unit/mic-processor.test.ts tests/unit/audioPipeline
+        run: npx --no-install vitest run tests/unit/silero-vad.test.ts tests/unit/mic-processor.test.ts tests/unit/audioPipeline tests/unit/voiceAudioTab tests/unit/voice-widget.test.ts src/features/voice/roomLifecycle.wiring.test.ts
       - name: Build the test installer
         shell: bash
         run: |
@@ -47,7 +47,7 @@ jobs:
           {
             "productName": "OwnCord Voice Test",
             "mainBinaryName": "owncord-voice-test",
-            "version": "2.8.1-dev.2",
+            "version": "2.8.1-dev.3",
             "identifier": "com.owncord.voicetest",
             "bundle": { "createUpdaterArtifacts": false },
             "plugins": { "deep-link": { "desktop": { "schemes": ["owncord-voice-test"] } } }

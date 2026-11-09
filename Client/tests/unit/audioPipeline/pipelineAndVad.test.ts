@@ -176,7 +176,7 @@ describe("AudioPipeline", () => {
       expect(worklet.port.postMessage).toHaveBeenCalledWith({
         type: "config",
         threshold: vadThreshold(30),
-        speechGate: true,
+        speechGate: false,
       });
       worklet.emit({ type: "gate", gated: true });
       expect(pipeline.isVadGated).toBe(true);
@@ -192,6 +192,7 @@ describe("AudioPipeline", () => {
 
     it("retunes without reopening the mic or restarting RNNoise; no gate (100) turns it off", async () => {
       prefs.set("voiceSensitivity", 100);
+      prefs.set("enhancedNoiseSuppression", true);
       const pipeline = new AudioPipeline();
       const track = micTrack();
       await pipeline.attach(track);
@@ -244,7 +245,7 @@ describe("AudioPipeline", () => {
       expect(worklet.port.postMessage).toHaveBeenCalledWith({
         type: "config",
         threshold: vadThreshold(30),
-        speechGate: true,
+        speechGate: false,
       });
       worklet.emit({ type: "gate", gated: true });
       expect(outputGain(ctx).value).toBe(0);
@@ -303,7 +304,7 @@ describe("AudioPipeline", () => {
         expect(first.port.postMessage).toHaveBeenCalledWith({
           type: "config",
           threshold: AUTO_MAX_THRESHOLD,
-          speechGate: true,
+          speechGate: false,
         });
 
         // A second of a -60 dBFS room moves the gate 10 dB above it.
@@ -730,10 +731,8 @@ describe("startVadDetector", () => {
       detector.setThreshold("auto");
       expect(speechGateMessages(worklet)).toEqual([true]);
       expect(setOn.mock.calls).toEqual([[true]]);
-      // Stopping leaves RNNoise to the processor's owner: a restart's
-      // detector asks for it again at once.
       void detector.stop();
-      expect(setOn.mock.calls).toEqual([[true]]);
+      expect(setOn.mock.calls).toEqual([[true], [false]]);
     });
 
     it("turns the rule on at the slider's threshold too", async () => {
@@ -754,6 +753,27 @@ describe("startVadDetector", () => {
       void detector.stop();
     });
 
+    it("ignores an old classifier result across an off and on toggle", async () => {
+      const answers: Array<(on: boolean) => void> = [];
+      const { detection } = speechDetection((on) => {
+        if (!on) return Promise.resolve(false);
+        return new Promise<boolean>((resolve) => answers.push(resolve));
+      });
+      const detector = await startDetector(detection, 0.02);
+      const worklet = FakeAudioWorkletNode.instances[0]!;
+      detector.setSpeechDetection(false);
+      detector.setSpeechDetection(true);
+      expect(answers).toHaveLength(2);
+
+      answers[0]!(true);
+      await Promise.resolve();
+      expect(speechGateMessages(worklet)).toEqual([false]);
+      answers[1]!(true);
+      await Promise.resolve();
+      expect(speechGateMessages(worklet)).toEqual([false, true]);
+      void detector.stop();
+    });
+
     it("does not turn the rule on when RNNoise answers after a stop", async () => {
       const answers: Array<(on: boolean) => void> = [];
       const { detection } = speechDetection(
@@ -766,7 +786,7 @@ describe("startVadDetector", () => {
       void detector.stop();
       answers[0]!(true);
       await Promise.resolve();
-      expect(speechGateMessages(worklet)).toEqual([]);
+      expect(speechGateMessages(worklet)).toEqual([false]);
     });
   });
 

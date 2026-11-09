@@ -355,6 +355,41 @@ describe("AudioPipeline lifecycle and settings", () => {
     });
   });
 
+  it("turns off both advanced paths when Noise Suppression is switched off mid-call", async () => {
+    FakeAudioContext.workletsLoad = true;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: true, arrayBuffer: async () => new ArrayBuffer(8) })),
+    );
+    const pipeline = new AudioPipeline();
+    const track = micTrack();
+    pipeline.setRoom(roomWith(track));
+    await pipeline.attach(track);
+    await vi.waitFor(() => expect(pipeline.vadUsingWorklet).toBe(true));
+    expect(rnnoise()).toBeUndefined();
+
+    prefs.set("enhancedNoiseSuppression", true);
+    const enabling = pipeline.reapplyEnhancedNoiseSuppression();
+    await vi.waitFor(() => expect(rnnoise()).toBeDefined());
+    rnnoise()!.emit({ type: "ready" });
+    await enabling;
+    expect(pipeline.rnnoiseState).toEqual({ speechDetection: true, enhanced: true });
+
+    const processor = track.getProcessor();
+    prefs.set("noiseSuppression", false);
+    await pipeline.reapplyAudioProcessing();
+    expect(track.getProcessor()).toBe(processor);
+    expect(pipeline.rnnoiseState).toEqual({ speechDetection: false, enhanced: false });
+    expect(contextOf(track).node("delay").delayTime.value).toBe(0.05);
+    const gate = FakeAudioWorkletNode.instances.find((w) => w.name === "vad-processor")!;
+    expect(gate.port.postMessage).toHaveBeenLastCalledWith({ type: "speechGate", on: false });
+
+    prefs.set("noiseSuppression", true);
+    await pipeline.reapplyAudioProcessing();
+    expect(pipeline.rnnoiseState).toEqual({ speechDetection: true, enhanced: true });
+    pipeline.teardownAudioPipeline();
+  });
+
   describe("reapplyEnhancedNoiseSuppression errors", () => {
     it("does not report a failure when Enhanced Noise Suppression is off", async () => {
       const pipeline = new AudioPipeline();

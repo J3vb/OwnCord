@@ -900,6 +900,22 @@ describe("VoiceWidget", () => {
       }
     });
 
+    it("disables Enhanced Noise Suppression while the master switch is off", () => {
+      savePref("enhancedNoiseSuppression", true);
+      const { widget, btn } = mountWithButton();
+
+      savePref("noiseSuppression", false);
+      expect(btn.disabled).toBe(true);
+      expect(btn.getAttribute("aria-pressed")).toBe("false");
+      btn.click();
+      expect(mockReapplyEnhanced).not.toHaveBeenCalled();
+
+      savePref("noiseSuppression", true);
+      expect(btn.disabled).toBe(false);
+      expect(btn.getAttribute("aria-pressed")).toBe("true");
+      widget.destroy?.();
+    });
+
     it("starts from the saved pref and follows a change made in Settings", () => {
       savePref("enhancedNoiseSuppression", true);
       const { widget, btn } = mountWithButton();

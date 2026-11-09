@@ -3,13 +3,16 @@
  * toggles.
  */
 import { createElement, appendChildren, setText } from "@lib/dom";
+import { Disposable } from "@lib/disposable";
 import { loadPref, savePref, createToggle } from "../helpers";
+import { onPrefChange } from "@lib/prefs/preferences";
 import {
   onNativeInputLevel,
   reapplyAudioProcessing,
   reapplyEnhancedNoiseSuppression,
 } from "@lib/voice/livekitSession";
 import {
+  enhancedNoiseSuppressionEnabled,
   micCaptureOptions,
   isMissingDeviceError,
   speechDetectionOf,
@@ -77,7 +80,6 @@ export function mountMeterAndToggles(sc: VoiceTabScope): void {
         await processor.init(options as AudioProcessorOptions);
         sc.meterProcessor = processor;
         processor.setInputGain(sc.inputVolumePercent / 100);
-        await processor.setEnhanced(loadPref<boolean>("enhancedNoiseSuppression", false));
         if (sc.signal.aborted || thisRequest !== sc.micRequestId) {
           if (sc.meterProcessor === processor) sc.meterProcessor = null;
           void processor.destroy();
@@ -109,11 +111,25 @@ export function mountMeterAndToggles(sc: VoiceTabScope): void {
           },
           undefined,
           speechDetectionOf(processor),
+          enhancedNoiseSuppressionEnabled(),
         );
+        const applySuppression = (): void => {
+          const enabled = enhancedNoiseSuppressionEnabled();
+          detector.setSpeechDetection(enabled);
+          void processor.setEnhanced(enabled);
+        };
+        const meterLifetime = new Disposable();
+        onPrefChange(
+          ["noiseSuppression", "enhancedNoiseSuppression"],
+          applySuppression,
+          meterLifetime.signal,
+        );
+        applySuppression();
         sc.meterThresholdSetter = detector.setThreshold;
         sc.meterResetFloor = detector.resetFloor;
         sc.syncMeterGate();
         sc.registerMic(() => {
+          meterLifetime.destroy();
           sc.stopMicTestPlayback();
           if (sc.meterThresholdSetter === detector.setThreshold) sc.meterThresholdSetter = null;
           if (sc.meterResetFloor === detector.resetFloor) sc.meterResetFloor = null;
@@ -209,6 +225,7 @@ export function mountMeterAndToggles(sc: VoiceTabScope): void {
     },
   ];
 
+  let renderEnhanced: (() => void) | undefined;
   for (const item of sc.audioToggles) {
     const row = createElement("div", { class: "setting-row" });
     const info = createElement("div", {});
@@ -222,12 +239,12 @@ export function mountMeterAndToggles(sc: VoiceTabScope): void {
       label: item.label,
       onChange: (nowOn) => {
         savePref(item.key, nowOn);
+        renderEnhanced?.();
         sc.updateNativeTest({ kind: "processing", audio: nativeTestAudio() });
         if (item.key === "enhancedNoiseSuppression") {
           // RNNoise sits inside the processors: re-route the call's and the
           // meter's, and leave both captures alone.
           void reapplyEnhancedNoiseSuppression();
-          void sc.meterProcessor?.setEnhanced(nowOn);
           return;
         }
         // Reapply audio processing constraints to the live mic track, then to
@@ -238,7 +255,17 @@ export function mountMeterAndToggles(sc: VoiceTabScope): void {
 
     appendChildren(row, info, toggle);
     // Enhanced noise suppression builds on noise suppression: nest it.
-    if (item.key === "enhancedNoiseSuppression") row.classList.add("nested");
+    if (item.key === "enhancedNoiseSuppression") {
+      row.classList.add("nested");
+      renderEnhanced = (): void => {
+        const available = loadPref("noiseSuppression", true);
+        const enabled = enhancedNoiseSuppressionEnabled();
+        toggle.setAttribute("aria-disabled", String(!available));
+        toggle.setAttribute("aria-checked", String(enabled));
+        toggle.classList.toggle("on", enabled);
+      };
+      renderEnhanced();
+    }
     sc.processingCard.appendChild(row);
   }
 }

@@ -6,7 +6,7 @@ import { Track, TrackEvent, type Room, type LocalAudioTrack } from "livekit-clie
 import { loadPref, savePref } from "@lib/prefs/preferences";
 import { createLogger } from "@lib/logger";
 import { publicAssetUrl } from "@lib/media/publicAssets";
-import { startSileroDetection, type SileroInput } from "@lib/voice/sileroDetection";
+import { bindSpeechDetection, type SpeechDetection } from "@lib/voice/sileroDetection";
 import {
   createMicProcessor,
   GATE_LOOKAHEAD_S,
@@ -77,23 +77,19 @@ export function isMissingDeviceError(err: unknown, options: { deviceId?: unknown
   );
 }
 
+export function enhancedNoiseSuppressionEnabled(): boolean {
+  return loadPref("noiseSuppression", true) && loadPref("enhancedNoiseSuppression", false);
+}
+
 export interface VadDetector {
   /** Resolves once the worklet has stopped: only then may its context close. */
   stop(): Promise<void>;
+  setSpeechDetection(enabled: boolean): void;
   /** Move the threshold without restarting, or hand it to the automatic
    *  noise-floor estimate ("auto"). */
   setThreshold(threshold: number | "auto"): void;
   /** The input gain ahead of the detector moved: relearn the floor. */
   resetFloor(): void;
-}
-
-/** RNNoise's speech probability for the detector's second input, and the
- *  switch that runs RNNoise for it (MicProcessor.setSpeechDetection). */
-export interface SpeechDetection {
-  readonly source: AudioNode;
-  readonly silero?: SileroInput;
-  /** Resolves whether RNNoise runs; false leaves the gate on its level. */
-  setOn(on: boolean): Promise<boolean>;
 }
 
 export interface VadDetectorHandlers {
@@ -117,6 +113,7 @@ export function startVadDetector(
   handlers: VadDetectorHandlers,
   seed?: number,
   speech?: SpeechDetection,
+  speechEnabled = true,
 ): VadDetector {
   let tracker = gate === "auto" ? new NoiseFloorTracker(seed) : null;
   let threshold = tracker?.threshold ?? (gate as number);
@@ -129,20 +126,8 @@ export function startVadDetector(
   };
   let stopped = false;
   let workletNode: AudioWorkletNode | null = null;
-  let stopSilero: (() => void) | null = null;
+  let setSpeechGate: ((on: boolean) => void) | undefined;
   let timer: ReturnType<typeof setTimeout> | null = null;
-  /** The worklet waits briefly for a verdict, then falls back to level alone. */
-  const startSpeechGate = (): void => {
-    if (speech === undefined) return;
-    speech.setOn(true).then(
-      (on) => {
-        if (stopped) return;
-        // oxlint-disable-next-line require-post-message-target-origin -- MessagePort.postMessage, not Window.postMessage
-        workletNode?.port.postMessage({ type: "speechGate", on });
-      },
-      (err: unknown) => log.warn("Speech detection could not start", err),
-    );
-  };
 
   /** Every level report: the meter's, and the automatic estimate's input. */
   const onLevel = (rms: number): void => {
@@ -238,13 +223,17 @@ export function startVadDetector(
       }
       // Analysis only: the worklet's output goes nowhere.
       analyser.connect(workletNode);
-      speech?.source.connect(workletNode, 0, 1);
+      const config = {
+        type: "config",
+        threshold,
+        speechGate: speechEnabled && speech !== undefined,
+      };
       // oxlint-disable-next-line require-post-message-target-origin -- MessagePort.postMessage, not Window.postMessage
-      workletNode.port.postMessage({ type: "config", threshold, speechGate: speech !== undefined });
-      if (speech?.silero !== undefined) {
-        stopSilero = startSileroDetection(workletNode, speech.silero, startSpeechGate);
+      workletNode.port.postMessage(config);
+      if (speech !== undefined) {
+        setSpeechGate = bindSpeechDetection(workletNode, speech);
+        setSpeechGate(speechEnabled);
       }
-      if (stopSilero === null) startSpeechGate();
       // oxlint-disable-next-line prefer-add-event-listener -- MessagePort does not support addEventListener
       workletNode.port.onmessage = (event: MessageEvent) => {
         if (event.data.type === "gate") reportGate(event.data.gated as boolean);
@@ -261,7 +250,7 @@ export function startVadDetector(
 
   const stop = (): Promise<void> => {
     stopped = true;
-    stopSilero?.();
+    setSpeechGate?.(false);
     if (timer !== null) clearTimeout(timer);
     const node = workletNode;
     if (node === null) return Promise.resolve();
@@ -277,6 +266,11 @@ export function startVadDetector(
   };
   return {
     stop,
+    setSpeechDetection(enabled): void {
+      if (stopped) return;
+      speechEnabled = enabled;
+      setSpeechGate?.(enabled);
+    },
     setThreshold(next: number | "auto"): void {
       if (next === "auto" && tracker !== null) return;
       if (next === threshold && tracker === null) return;
@@ -571,7 +565,9 @@ export class AudioPipeline {
   private async applyEnhancedPreference(): Promise<void> {
     const processor = this.processor;
     if (processor === null) return;
-    await processor.setEnhanced(loadPref<boolean>("enhancedNoiseSuppression", false));
+    const enabled = enhancedNoiseSuppressionEnabled();
+    this.vad?.setSpeechDetection(enabled);
+    await processor.setEnhanced(enabled);
   }
 
   /** Route the live processor through or around RNNoise for the saved
@@ -582,7 +578,7 @@ export class AudioPipeline {
     if (processor === null) return;
     await this.applyEnhancedPreference();
     // The user just asked for it: say so when it could not start.
-    if (loadPref<boolean>("enhancedNoiseSuppression", false) && !processor.enhanced) {
+    if (enhancedNoiseSuppressionEnabled() && !processor.enhanced) {
       onError?.(voiceText("audio.settingsFailed"));
     }
   }
@@ -597,7 +593,7 @@ export class AudioPipeline {
       echoCancellation: loadPref("echoCancellation", true),
       noiseSuppression: loadPref("noiseSuppression", true),
       autoGainControl: loadPref("autoGainControl", true),
-      enhancedNoiseSuppression: loadPref("enhancedNoiseSuppression", false),
+      enhancedNoiseSuppression: enhancedNoiseSuppressionEnabled(),
     });
     return true;
   }
@@ -691,6 +687,7 @@ export class AudioPipeline {
       },
       this.lastAutoThreshold,
       speechDetectionOf(processor),
+      enhancedNoiseSuppressionEnabled(),
     );
   }
 
@@ -724,6 +721,7 @@ export class AudioPipeline {
       return;
     }
     const captureOptions = micCaptureOptions();
+    const enhanced = this.applyEnhancedPreference();
     try {
       // restartTrack re-acquires the mic with new constraints without unpublishing
       await track.restartTrack(captureOptions).catch((err: unknown) => {
@@ -735,5 +733,6 @@ export class AudioPipeline {
       log.error("Failed to reapply audio processing", err);
       onError?.(voiceText("audio.settingsFailed"));
     }
+    await enhanced;
   }
 }

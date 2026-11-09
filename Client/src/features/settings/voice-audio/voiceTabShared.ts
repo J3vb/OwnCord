@@ -1,7 +1,11 @@
 /** Constants and small helpers the voice settings modules share. */
 import { loadPref } from "../helpers";
 import { createLogger } from "@lib/logger";
-import { vadThresholdDb, micProcessingOptions } from "@lib/voice/audioPipeline";
+import {
+  enhancedNoiseSuppressionEnabled,
+  vadThresholdDb,
+  micProcessingOptions,
+} from "@lib/voice/audioPipeline";
 import type { NativeVoiceAudioOptions } from "../../../platform/contracts/nativeVoice";
 import { settingsText as t } from "../../../i18n/settings";
 
@@ -38,7 +42,7 @@ export function nativeTestAudio(): NativeVoiceAudioOptions {
     echoCancellation,
     noiseSuppression,
     autoGainControl,
-    enhancedNoiseSuppression: loadPref<boolean>("enhancedNoiseSuppression", false),
+    enhancedNoiseSuppression: enhancedNoiseSuppressionEnabled(),
   };
 }
 

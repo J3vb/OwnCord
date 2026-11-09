@@ -41,7 +41,7 @@ const log = createLogger("micProcessor");
  *  opening ramp, so the start of a word is not cut off. */
 export const GATE_LOOKAHEAD_S = 0.05;
 /** Gives a quiet onset time to reach the model and its three-frame attack. */
-const SILERO_LOOKAHEAD_S = 0.26;
+const SILERO_LOOKAHEAD_S = 0.2;
 /** Gain smoothing: opening has to finish inside the lookahead. */
 const GATE_OPEN_TIME_CONSTANT_S = 0.005;
 const GAIN_TIME_CONSTANT_S = 0.015;
