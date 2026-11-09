@@ -1,0 +1,49 @@
+name: Windows Voice Test Build
+
+on:
+  push:
+    branches: [fix/voice-gate-dev-build]
+
+permissions:
+  contents: read
+
+jobs:
+  windows-x64:
+    name: Build Windows x64 test installer
+    runs-on: windows-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: Client
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 26
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      - uses: swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: Client/src-tauri
+      - run: npm ci
+      - name: Build the test installer
+        shell: bash
+        run: |
+          cat > voice-test.conf.json <<'JSON'
+          {
+            "productName": "OwnCord Voice Test",
+            "mainBinaryName": "owncord-voice-test",
+            "version": "2.8.1-dev.1",
+            "identifier": "com.owncord.voicetest",
+            "bundle": { "createUpdaterArtifacts": false },
+            "plugins": { "deep-link": { "desktop": { "schemes": ["owncord-voice-test"] } } }
+          }
+          JSON
+          npm run tauri build -- --bundles nsis --config voice-test.conf.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: OwnCord-Voice-Test-Windows-x64
+          path: Client/src-tauri/target/release/bundle/nsis/*-setup.exe
+          if-no-files-found: error
+          retention-days: 7
