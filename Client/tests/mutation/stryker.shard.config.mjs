@@ -27,6 +27,7 @@ export const shards = {
     "src/features/voice/mediaEncryption.ts",
     "src/features/voice/native/screenAudioTrack.ts",
     "src/lib/voice/audioPipeline.ts",
+    "src/lib/voice/sileroDetection.ts",
     "src/lib/voice/videoPresets.ts",
   ],
   "livekit-2": [
