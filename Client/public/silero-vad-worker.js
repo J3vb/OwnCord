@@ -43,7 +43,7 @@ async function start(port) {
   const downsample = createDownsampler();
   let lastFrame = -1;
   port.onmessage = ({ data }) => {
-    const { frame, samples, peak, rnnoisePeak } = data;
+    const { frame, samples, peak } = data;
     try {
       if (samples.length !== INPUT_SAMPLES) throw new Error("Invalid Silero input frame");
       if (frame !== lastFrame + 1) {
@@ -53,7 +53,7 @@ async function start(port) {
       lastFrame = frame;
       const probability = vad.score(downsample.frame(samples));
       if (!Number.isFinite(probability)) throw new Error("Invalid Silero score");
-      port.postMessage({ frame, probability, peak, rnnoisePeak });
+      port.postMessage({ frame, probability, peak });
     } catch (error) {
       self.postMessage({ type: "error", message: String(error) });
       port.close();

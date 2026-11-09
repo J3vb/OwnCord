@@ -11,7 +11,6 @@ interface Score {
   frame: number;
   probability: number;
   peak: number;
-  rnnoisePeak: number;
 }
 interface TestPort {
   onmessage: ((event: { data: Score }) => void) | null;
@@ -40,8 +39,8 @@ function createGate() {
   let captured: Omit<Score, "probability"> | undefined;
   const connection: TestPort = {
     onmessage: null,
-    postMessage: ({ frame, peak, rnnoisePeak }) => {
-      captured = { frame, peak, rnnoisePeak };
+    postMessage: ({ frame, peak }) => {
+      captured = { frame, peak };
     },
     close() {},
   };
@@ -54,19 +53,16 @@ function createGate() {
   return {
     control,
     audio,
-    report(probability: number, rnnoise = 0, level = 0.04) {
-      confidence[0]!.fill(rnnoise);
+    report(probability: number, level = 0.04) {
       levels[0]!.fill(level);
       for (let i = 0; i < 12; i++) audio();
       if (captured === undefined) throw new Error("Silero did not capture a frame");
       connection.onmessage?.({ data: { ...captured, probability } });
     },
-    open: () =>
-      events.filter(
-        (event) =>
-          (event as { type?: string; gated?: boolean }).type === "gate" &&
-          (event as { gated?: boolean }).gated === false,
-      ),
+    gates: () =>
+      events
+        .filter((event) => (event as { type?: string }).type === "gate")
+        .map((event) => (event as { gated: boolean }).gated),
   };
 }
 
@@ -88,40 +84,44 @@ describe("Silero test build", () => {
     expect(probabilities.filter((score) => score >= 0.8).length).toBeGreaterThan(10);
   });
 
-  it("requires three consecutive Silero frames when RNNoise does not confirm", () => {
+  it("opens on two consecutive chunks at the 0.35 threshold above the mic level", () => {
     const gate = createGate();
-    for (const probability of [0.99, 0.99, 0.25, 0.99, 0.99]) gate.report(probability);
-    expect(gate.open()).toHaveLength(0);
-    gate.report(0.99);
-    expect(gate.open()).toHaveLength(1);
+    gate.report(0.35);
+    expect(gate.gates()).toEqual([true]);
+    gate.report(0.34);
+    gate.report(0.35);
+    expect(gate.gates()).toEqual([true]);
+    gate.report(0.35);
+    expect(gate.gates()).toEqual([true, false]);
   });
 
-  it("opens for a short word with two strong Silero frames and RNNoise agreement", () => {
+  it("keeps the mic closed if speech falls below its level threshold", () => {
     const gate = createGate();
-    gate.report(0.92, 0.99);
-    expect(gate.open()).toHaveLength(0);
-    gate.report(0.91, 0.99);
-    expect(gate.open()).toHaveLength(1);
+    gate.report(0.99, 0.001);
+    gate.report(0.99, 0.001);
+    expect(gate.gates()).toEqual([true]);
   });
 
-  it("rejects separated or too-quiet speech scores even when RNNoise agrees", () => {
+  it("closes after 250 ms of silence plus 150 ms of tail and renews for resumed speech", () => {
     const gate = createGate();
-    gate.report(0.95, 0.99, 0.001);
-    gate.report(0.95, 0.99, 0.001);
-    expect(gate.open()).toHaveLength(0);
-    gate.report(0.2, 0.99);
-    gate.report(0.95, 0.99);
-    gate.report(0.2, 0.99);
-    gate.report(0.95, 0.99);
-    expect(gate.open()).toHaveLength(0);
+    gate.report(0.35);
+    gate.report(0.35);
+    // Twelve 32 ms frames are 384 ms, still within the silence and tail.
+    for (let i = 0; i < 12; i++) gate.report(0.34);
+    expect(gate.gates()).toEqual([true, false]);
+    gate.report(0.35);
+    for (let i = 0; i < 12; i++) gate.report(0.34);
+    expect(gate.gates()).toEqual([true, false]);
+    gate.report(0.34);
+    expect(gate.gates()).toEqual([true, false, true]);
   });
 
   it("uses the existing speech gate after the Silero worker fails", () => {
     const gate = createGate();
-    gate.report(0.99, 0.99);
-    expect(gate.open()).toHaveLength(0);
+    gate.report(0.99);
+    expect(gate.gates()).toEqual([true]);
     gate.control({ type: "silero", port: null });
     for (let i = 0; i < 12; i++) gate.audio();
-    expect(gate.open()).toHaveLength(1);
+    expect(gate.gates()).toEqual([true, false]);
   });
 });
