@@ -9,6 +9,7 @@ import { loggerMock } from "../helpers/loggerMock";
 import { LocalAudioTrack, Track } from "livekit-client";
 import { createMicProcessor, type MicProcessor } from "../../src/lib/voice/micProcessor";
 import { AudioPipeline } from "../../src/lib/voice/audioPipeline";
+import { savePref } from "../../src/lib/prefs/preferences";
 import {
   FakeAudioContext,
   FakeMediaStream,
@@ -132,8 +133,10 @@ describe("mic processor on livekit-client's LocalAudioTrack", () => {
   });
 
   it("keeps the push-to-talk gate closed on the output across a mute/unmute restart", async () => {
+    savePref("inputMode", "ptt");
+    savePref("pttVk", 0x41);
     const track = micTrack();
-    const pipeline = new AudioPipeline();
+    const pipeline = new AudioPipeline(() => true);
     pipeline.setPttGated(true);
     await pipeline.attach(track);
     const ctx = contextOf(track);
