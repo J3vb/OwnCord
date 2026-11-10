@@ -47,10 +47,10 @@ vi.mock("../../../src/features/voice/VoiceWidget", () => mocks.voiceWidgetMock()
 vi.mock("../../../src/features/navigation/QuickSwitchOverlay", () =>
   mocks.quickSwitchOverlayMock(),
 );
-vi.mock("@components/CreateChannelModal", () => mocks.createChannelModalMock());
+vi.mock("../../../src/features/channels/CreateChannelModal", () => mocks.createChannelModalMock());
 vi.mock("@tauri-apps/api/core", () => mocks.apiCoreMock());
 vi.mock("../../../src/features/channels/editChannelDialog", () => mocks.editChannelModalMock());
-vi.mock("@components/DeleteChannelModal", () => mocks.deleteChannelModalMock());
+vi.mock("../../../src/features/channels/DeleteChannelModal", () => mocks.deleteChannelModalMock());
 vi.mock("../../../src/pages/main-page/VoiceCallbacks", () => mocks.pageVoiceCallbacksMock());
 vi.mock("../../../src/pages/main-page/OverlayManagers", () => mocks.pageOverlayManagersMock());
 

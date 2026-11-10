@@ -199,7 +199,7 @@ const CANARIES: readonly Canary[] = [
     rule: "local/layer-direction",
     shape: "relative",
     filePath: "src/stores/voice.store.ts",
-    code: `import { x } from "../components/Foo";`,
+    code: `import { x } from "../pages/Foo";`,
     messageId: "upwardImport",
     hasOptions: true,
   },

@@ -14,10 +14,10 @@ import { isImeCommit } from "@lib/text/ime";
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { closeOnBackdropClick, createModal, type ModalInstance } from "@lib/ui/modalFactory";
-import { createConfirmModal, type ConfirmModalInstance } from "../features/dialogs/confirmModal";
+import { createConfirmModal, type ConfirmModalInstance } from "../dialogs/confirmModal";
 import type { MountableComponent } from "@lib/text/safeRender";
-import { shellText } from "../i18n/shell";
-import { categoryErrorText } from "../features/channels/categoryActions";
+import { shellText } from "../../i18n/shell";
+import { categoryErrorText } from "./categoryActions";
 
 /** The server's cap on a category name (docs/api.md, "Categories"). */
 export const MAX_CATEGORY_NAME_LENGTH = 100;

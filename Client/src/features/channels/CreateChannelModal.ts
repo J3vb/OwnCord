@@ -24,17 +24,13 @@ import {
   nextPositionInCategoryNamed,
   type CategoryRef,
 } from "@stores/channels.store";
-import { shellText } from "../i18n/shell";
+import { shellText } from "../../i18n/shell";
 import {
   MAX_CHANNEL_NAME_LENGTH,
   MAX_CHANNEL_TOPIC_LENGTH,
   channelTypeLabel,
-} from "../features/channels/channelTypes";
-import {
-  buildCategorySelect,
-  categoryFields,
-  categoryOptionValue,
-} from "../features/channels/channelCategorySelect";
+} from "./channelTypes";
+import { buildCategorySelect, categoryFields, categoryOptionValue } from "./channelCategorySelect";
 
 export interface CreateChannelModalOptions {
   /** The category the create affordance was invoked from (`NO_CATEGORY` = none). */

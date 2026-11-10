@@ -12,10 +12,14 @@ process.env.OC_ALLOW_UNPINNED_TZ = "1";
 // Lets wall-clock timing tests loosen their budget: instrumentation makes it meaningless.
 process.env.OC_MUTATION_RUN = "1";
 
-// Code that moved into features/ (or lib/) from components/ without a change. It stays
+// Code that moved into features/ (or lib/) from the old components/ folder without a change. It stays
 // out of the mutation surface it was never in; adding it is a separate decision.
 const MOVED_NOT_MUTATED = [
+  "src/features/channels/CategoryModals.ts",
   "src/features/channels/ChannelSidebar.ts",
+  "src/features/channels/CreateChannelModal.ts",
+  "src/features/channels/DeleteChannelModal.ts",
+  "src/features/channels/VoiceJoinSheet.ts",
   "src/features/channels/channelCategorySelect.ts",
   "src/features/channels/channelListRender.ts",
   "src/features/channels/channelReorderRollback.ts",
@@ -87,6 +91,7 @@ const MOVED_NOT_MUTATED = [
   "src/features/messaging/MessageInput.ts",
   "src/features/messaging/MessageList.ts",
   "src/features/messaging/PinnedMessages.ts",
+  "src/features/messaging/PollComposer.ts",
   "src/features/messaging/StickerPicker.ts",
   "src/features/messaging/TypingIndicator.ts",
   "src/features/messaging/channelInitialState.ts",

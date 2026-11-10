@@ -17,7 +17,7 @@ const h = vi.hoisted(() => ({
   createPicker: vi.fn(),
 }));
 
-vi.mock("@components/CreateChannelModal", () => {
+vi.mock("../../src/features/channels/CreateChannelModal", () => {
   if (h.failCreate.value) {
     h.failCreate.value = false;
     throw new Error("chunk load failed");
@@ -61,7 +61,7 @@ vi.mock("@tauri-apps/api/core", () => mocks.apiCoreMock());
 
 vi.mock("../../src/features/channels/editChannelDialog", () => mocks.editChannelModalMock());
 
-vi.mock("@components/DeleteChannelModal", () => mocks.deleteChannelModalMock());
+vi.mock("../../src/features/channels/DeleteChannelModal", () => mocks.deleteChannelModalMock());
 
 vi.mock("../../src/pages/main-page/VoiceCallbacks", () => mocks.pageVoiceCallbacksMock());
 

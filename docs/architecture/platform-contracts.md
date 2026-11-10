@@ -444,7 +444,7 @@ addition to `contracts/`, not just B7-3's:
    `@tauri-apps` and `invoke("` must not appear anywhere under
    `src/platform/`, comments included.
 3. **No production imports, no domain types.** Contracts import nothing from
-   `@lib/*`/`@stores/*`/`@components/*`/`@pages/*`. Small host result types
+   `@lib/*`/`@stores/*`/`@pages/*`. Small host result types
    are re-declared, structurally identical, rather than imported.
 4. **Reuse before inventing.** Where an existing interface already has the
    right shape (`PersistenceBackend`, `PendingMessagePersistence`), the

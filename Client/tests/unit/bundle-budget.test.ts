@@ -34,11 +34,11 @@ const MANIFEST = {
   },
   "_chunk-bbb.js": { file: "assets/chunk-bbb.js" },
   "style.css": { file: "assets/style-ccc.css" },
-  "src/components/SettingsOverlay.ts": {
+  "src/features/settings/SettingsOverlay.ts": {
     file: "assets/SettingsOverlay-ddd.js",
     css: ["assets/SettingsOverlay-ddd.css"],
   },
-  "src/components/SettingsOverlay-eee.css": { file: "assets/SettingsOverlay-ddd.css" },
+  "src/features/settings/SettingsOverlay-eee.css": { file: "assets/SettingsOverlay-ddd.css" },
 };
 
 describe("bundle budget closure split (D5)", () => {
