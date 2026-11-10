@@ -12,7 +12,7 @@ import {
   resetServerCapabilities,
 } from "../../../src/lib/net/serverCapabilities";
 import "../../../src/features/profiles/userProfilePopup";
-import "@components/AdminActions";
+import "../../../src/features/moderation/AdminActions";
 import { lastResizeCallback } from "../../helpers/memberListMocks";
 import {
   useDarkSurfaces,

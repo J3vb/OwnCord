@@ -27,7 +27,7 @@ import {
   openLeaveConfirm,
   type DmMenuActions,
   type DmMenuConvo,
-} from "@components/dmContextMenu";
+} from "../../features/direct-messages/dmContextMenu";
 import { voiceText } from "../../i18n/voice";
 import { dmPreviewText, isDmInCall } from "./SidebarDmHelpers";
 import { rowActivity } from "../../features/members/listeningLine";

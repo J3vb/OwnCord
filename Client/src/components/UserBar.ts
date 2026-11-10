@@ -11,7 +11,7 @@ import { authStore } from "@stores/auth.store";
 import { membersStore, type MembersState } from "@stores/members.store";
 import { voiceStore, type VoiceState } from "@stores/voice.store";
 import { openSettings, uiStore } from "@stores/ui.store";
-import { createSelfProfileCard, type SelfProfileCard } from "@components/SelfProfileCard";
+import { createSelfProfileCard, type SelfProfileCard } from "../features/profiles/SelfProfileCard";
 import type { UserStatus } from "@lib/types";
 import {
   isTimedStatus,
@@ -22,7 +22,7 @@ import {
   saveStatusTimer,
   saveUserStatus,
 } from "@lib/presence/userStatus";
-import { parseExpiry } from "@components/statusDefs";
+import { parseExpiry } from "../features/presence/statusDefs";
 import { avatarInitial, resolveDisplayName } from "@lib/ui/avatar";
 import { applyStatusIndicator, showsPhone } from "@lib/ui/statusIndicator";
 import {

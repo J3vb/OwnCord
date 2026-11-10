@@ -17,7 +17,7 @@ import {
   resetServerCapabilities,
 } from "../../src/lib/net/serverCapabilities";
 import "../../src/features/profiles/userProfilePopup";
-import "@components/AdminActions";
+import "../../src/features/moderation/AdminActions";
 import { resetAuthState } from "../helpers/storeSeeds";
 
 globalThis.ResizeObserver = class {

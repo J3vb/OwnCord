@@ -30,7 +30,7 @@ vi.mock("@lib/presence/profiles", () => mocks.presenceProfilesMock());
 
 vi.mock("../../src/features/channels/ChannelSidebar", () => mocks.channelSidebarMock());
 
-vi.mock("@components/DmSidebar", () => mocks.dmSidebarMock());
+vi.mock("../../src/features/direct-messages/DmSidebar", () => mocks.dmSidebarMock());
 
 vi.mock("../../src/features/members/MemberList", () => mocks.memberListMock());
 

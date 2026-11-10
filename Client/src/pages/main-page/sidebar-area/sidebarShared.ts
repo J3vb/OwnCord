@@ -2,7 +2,7 @@
 import { createElement } from "@lib/dom";
 import { createIcon, type IconName } from "@lib/icons";
 import { createLogger } from "@lib/logger";
-import type { DmConversation } from "@components/DmSidebar";
+import type { DmConversation } from "../../../features/direct-messages/DmSidebar";
 import { createLazyScreen } from "@lib/ui/lazyScreen";
 import { buildDmConversations, isDmInCall } from "../SidebarDmHelpers";
 

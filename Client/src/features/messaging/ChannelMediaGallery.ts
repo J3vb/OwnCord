@@ -9,11 +9,9 @@
  */
 
 import { Disposable } from "@lib/disposable";
-import { createElement, appendChildren, setOwnedTimeout } from "@lib/dom";
+import { createElement, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import type { IconName } from "@lib/icons";
 import type { MountableComponent } from "@lib/text/safeRender";
-import { parseTimestamp } from "@lib/text/formatting";
 import type {
   ChannelMediaItem,
   ChannelMediaMonthsResponse,
@@ -21,28 +19,23 @@ import type {
   ChannelMediaQuery,
   UserStorage,
 } from "@lib/types";
-import { formatDate, formatNumber } from "../i18n/format";
-import { mediaGalleryText } from "../i18n/mediaGallery";
-import { isSpoilerFilename } from "../features/messaging/spoilerAttachment";
+import { mediaGalleryText } from "../../i18n/mediaGallery";
+import { fetchImageAsObjectUrl } from "./content/attachments";
 import {
-  fetchImageAsObjectUrl,
-  formatFileSize,
-  isImageMime,
-  isVideoAttachment,
-  isAudioMime,
-  resolveServerUrl,
-  thumbnailUrl,
-} from "../features/messaging/content/attachments";
+  fillUsageLine,
+  localMonthKey,
+  monthLabel,
+  renderFileRow,
+  renderMonths,
+  renderTile,
+} from "./channelMediaView";
+import { buildToolbar, type MediaOrder, type MediaUploader } from "./channelMediaToolbar";
 
-/** Quiet period after the last keystroke before a name search runs. */
-export const MEDIA_SEARCH_DEBOUNCE_MS = 300;
+export { localMonthKey, storageUsageText } from "./channelMediaView";
+export { MEDIA_SEARCH_DEBOUNCE_MS, type MediaUploader } from "./channelMediaToolbar";
+
 /** Items per page; one grid screen is about 30 tiles. */
 export const MEDIA_PAGE_SIZE = 60;
-
-export interface MediaUploader {
-  readonly id: number;
-  readonly name: string;
-}
 
 export interface ChannelMediaGalleryOptions {
   readonly channelName: string;
@@ -72,71 +65,6 @@ export interface ChannelMediaGalleryPanel extends MountableComponent {
 }
 
 type Kind = ChannelMediaQuery["kind"];
-type Order = NonNullable<ChannelMediaQuery["order"]>;
-
-/** "YYYY-MM" of a timestamp in the viewer's local calendar. */
-export function localMonthKey(timestamp: string): string {
-  const d = parseTimestamp(timestamp);
-  if (Number.isNaN(d.getTime())) return "";
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-}
-
-function monthLabel(key: string, style: "long" | "short"): string {
-  const [y, m] = key.split("-").map(Number);
-  if (y === undefined || m === undefined || Number.isNaN(y) || Number.isNaN(m)) return key;
-  return style === "long"
-    ? formatDate(new Date(y, m - 1, 1), { month: "long", year: "numeric" })
-    : formatDate(new Date(y, m - 1, 1), { month: "short" });
-}
-
-function fileIcon(item: ChannelMediaItem): IconName {
-  const att = item.attachment;
-  if (att.duration_ms !== undefined && att.waveform !== undefined) return "mic";
-  if (isAudioMime(att.mime)) return "music";
-  if (isImageMime(att.mime)) return "image";
-  return "file-text";
-}
-
-function formatDuration(ms: number): string {
-  const s = Math.max(0, Math.round(ms / 1000));
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
-}
-
-/** The usage line's text: "You've used X of Y", or "X used" with no limit. */
-export function storageUsageText(storage: UserStorage): string {
-  return storage.quota_bytes > 0
-    ? mediaGalleryText("usage.of", {
-        used: formatFileSize(storage.used_bytes),
-        quota: formatFileSize(storage.quota_bytes),
-      })
-    : mediaGalleryText("usage.noLimit", { used: formatFileSize(storage.used_bytes) });
-}
-
-function renderFileRow(item: ChannelMediaItem): HTMLButtonElement {
-  const att = item.attachment;
-  const row = createElement("button", {
-    type: "button",
-    class: "media-gallery__file",
-    "aria-label": mediaGalleryText("item.open", { name: att.filename }),
-    "data-message-id": String(item.message_id),
-    "data-attachment-id": att.id,
-  });
-  const icon = createElement("span", { class: "media-gallery__file-icon" });
-  icon.appendChild(createIcon(fileIcon(item), 20));
-  const text = createElement("span", { class: "media-gallery__file-text" });
-  const name = createElement("span", { class: "media-gallery__file-name" }, att.filename);
-  const size =
-    att.duration_ms !== undefined ? formatDuration(att.duration_ms) : formatFileSize(att.size);
-  const when = formatDate(parseTimestamp(item.timestamp), { day: "numeric", month: "short" });
-  const meta = createElement(
-    "span",
-    { class: "media-gallery__file-meta" },
-    mediaGalleryText("file.meta", { size, user: item.user.username, date: when }),
-  );
-  appendChildren(text, name, meta);
-  appendChildren(row, icon, text);
-  return row;
-}
 
 export function createChannelMediaGallery(
   options: ChannelMediaGalleryOptions,
@@ -145,7 +73,7 @@ export function createChannelMediaGallery(
   const timeZone = options.timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
 
   let kind: Kind = "media";
-  let order: Order = "newest";
+  let order: MediaOrder = "newest";
   let nameQuery = "";
   let uploader: number | undefined;
   let startMonth: string | undefined;
@@ -223,36 +151,6 @@ export function createChannelMediaGallery(
     else els.push(el);
   }
 
-  function renderTile(item: ChannelMediaItem): HTMLButtonElement {
-    const att = item.attachment;
-    const tile = createElement("button", {
-      type: "button",
-      class: "media-gallery__tile",
-      title: att.filename,
-      "aria-label": mediaGalleryText("item.open", { name: att.filename }),
-      "data-message-id": String(item.message_id),
-      "data-attachment-id": att.id,
-    });
-    const url = resolveServerUrl(att.url);
-    if (isVideoAttachment(att)) {
-      tile.classList.add("media-gallery__tile--video");
-      tile.appendChild(createIcon("play", 28));
-      tile.appendChild(createElement("span", { class: "media-gallery__tile-name" }, att.filename));
-    } else {
-      const img = createElement("img", { alt: "", draggable: "false" });
-      img.dataset.src = thumbnailUrl(url, att.mime);
-      tile.appendChild(img);
-      observeThumb(img);
-    }
-    if (isSpoilerFilename(att.filename)) {
-      tile.classList.add("is-spoiler");
-      tile.appendChild(
-        createElement("span", { class: "media-gallery__spoiler" }, mediaGalleryText("spoiler")),
-      );
-    }
-    return tile;
-  }
-
   function appendItems(items: readonly ChannelMediaItem[]): void {
     if (list === null) return;
     for (const item of items) {
@@ -271,20 +169,31 @@ export function createChannelMediaGallery(
         list.appendChild(section);
         lastSection = { key, content };
       }
-      const el = kind === "media" ? renderTile(item) : renderFileRow(item);
+      const el = kind === "media" ? renderTile(item, observeThumb) : renderFileRow(item);
       lastSection.content.appendChild(el);
       track(item.message_id, el);
     }
+  }
+
+  /** The query for the next page: the cursor if the walk has one, else the start month. */
+  function pageQuery(): ChannelMediaQuery {
+    const base = currentQuery();
+    if (cursor !== "") return { ...base, cursor };
+    if (startMonth !== undefined) return { ...base, month: startMonth };
+    return base;
+  }
+
+  /** What an empty walk says: nothing matches the filters, or nothing was ever shared. */
+  function emptyText(): string {
+    if (nameQuery !== "" || uploader !== undefined) return mediaGalleryText("empty.filtered");
+    return mediaGalleryText(kind === "media" ? "empty.media" : "empty.files");
   }
 
   async function loadMore(): Promise<void> {
     if (loading) return;
     loading = true;
     const scope = queryScope;
-    const query: ChannelMediaQuery = {
-      ...currentQuery(),
-      ...(cursor !== "" ? { cursor } : startMonth !== undefined ? { month: startMonth } : {}),
-    };
+    const query = pageQuery();
     setStatus(cursor === "" ? mediaGalleryText("loading") : null);
     let loaded = false;
     try {
@@ -294,15 +203,7 @@ export function createChannelMediaGallery(
       cursor = page.next_cursor;
       hasMore = cursor !== "";
       loaded = true;
-      if (tilesByMessage.size === 0 && !hasMore) {
-        setStatus(
-          nameQuery !== "" || uploader !== undefined
-            ? mediaGalleryText("empty.filtered")
-            : mediaGalleryText(kind === "media" ? "empty.media" : "empty.files"),
-        );
-      } else {
-        setStatus(null);
-      }
+      setStatus(tilesByMessage.size === 0 && !hasMore ? emptyText() : null);
     } catch {
       if (scope.signal.aborted) return;
       setStatus(mediaGalleryText("loadFailed"), () => void loadMore());
@@ -322,35 +223,6 @@ export function createChannelMediaGallery(
     return sentinel.getBoundingClientRect().top <= box.bottom + 200;
   }
 
-  function renderMonths(resp: ChannelMediaMonthsResponse): void {
-    if (monthNav === null) return;
-    monthNav.textContent = "";
-    let year = "";
-    for (const { month, count } of resp.months) {
-      const y = month.slice(0, 4);
-      if (y !== year) {
-        year = y;
-        monthNav.appendChild(createElement("div", { class: "media-gallery__year" }, y));
-      }
-      const btn = createElement("button", {
-        type: "button",
-        class: "media-gallery__month-btn",
-        "data-month": month,
-        "aria-pressed": String(month === startMonth),
-        "aria-label": mediaGalleryText("month.jump", {
-          month: monthLabel(month, "long"),
-          count: formatNumber(count),
-        }),
-      });
-      appendChildren(
-        btn,
-        createElement("span", {}, monthLabel(month, "short")),
-        createElement("span", { class: "media-gallery__month-count" }, formatNumber(count)),
-      );
-      monthNav.appendChild(btn);
-    }
-  }
-
   /** Start over with the current filters: the list, the cursor and the months. */
   function reload(withMonths: boolean): void {
     queryScope.destroy();
@@ -367,7 +239,7 @@ export function createChannelMediaGallery(
       const scope = queryScope;
       options.loadMonths(currentQuery(), scope.signal).then(
         (resp) => {
-          if (!scope.signal.aborted) renderMonths(resp);
+          if (!scope.signal.aborted && monthNav !== null) renderMonths(monthNav, resp, startMonth);
         },
         () => {
           if (!scope.signal.aborted && monthNav !== null) monthNav.textContent = "";
@@ -388,19 +260,7 @@ export function createChannelMediaGallery(
     options.loadStorage(disposable.signal).then(
       (storage) => {
         if (disposable.signal.aborted || usageEl === null) return;
-        usageEl.textContent = "";
-        usageEl.appendChild(createElement("span", {}, storageUsageText(storage)));
-        if (options.onManageUploads !== undefined) {
-          const manage = createElement(
-            "button",
-            { type: "button", class: "media-gallery__manage", "data-testid": "media-manage" },
-            mediaGalleryText("usage.manage"),
-          );
-          manage.addEventListener("click", () => options.onManageUploads?.(), {
-            signal: disposable.signal,
-          });
-          usageEl.appendChild(manage);
-        }
+        fillUsageLine(usageEl, storage, options.onManageUploads, disposable.signal);
         usageEl.hidden = kind !== "files";
       },
       () => {
@@ -420,75 +280,6 @@ export function createChannelMediaGallery(
     }
     startMonth = undefined;
     reload(true);
-  }
-
-  function buildToolbar(): HTMLDivElement {
-    const toolbar = createElement("div", { class: "media-gallery__toolbar" });
-    const search = createElement("input", {
-      type: "search",
-      class: "media-gallery__search",
-      placeholder: mediaGalleryText("search.placeholder"),
-      "aria-label": mediaGalleryText("search.label"),
-      maxlength: "100",
-    });
-    let cancelDebounce: (() => void) | null = null;
-    search.addEventListener(
-      "input",
-      () => {
-        cancelDebounce?.();
-        cancelDebounce = setOwnedTimeout(
-          disposable.signal,
-          () => {
-            const next = search.value.trim();
-            if (next === nameQuery) return;
-            nameQuery = next;
-            startMonth = undefined;
-            reload(true);
-          },
-          MEDIA_SEARCH_DEBOUNCE_MS,
-        );
-      },
-      { signal: disposable.signal },
-    );
-
-    const from = createElement("select", {
-      class: "media-gallery__select",
-      "aria-label": mediaGalleryText("from.label"),
-    });
-    from.appendChild(createElement("option", { value: "" }, mediaGalleryText("from.anyone")));
-    for (const u of options.uploaders()) {
-      from.appendChild(createElement("option", { value: String(u.id) }, u.name));
-    }
-    from.addEventListener(
-      "change",
-      () => {
-        uploader = from.value === "" ? undefined : Number(from.value);
-        startMonth = undefined;
-        reload(true);
-      },
-      { signal: disposable.signal },
-    );
-
-    const sort = createElement("select", {
-      class: "media-gallery__select",
-      "aria-label": mediaGalleryText("order.label"),
-    });
-    appendChildren(
-      sort,
-      createElement("option", { value: "newest" }, mediaGalleryText("order.newest")),
-      createElement("option", { value: "oldest" }, mediaGalleryText("order.oldest")),
-    );
-    sort.addEventListener(
-      "change",
-      () => {
-        order = sort.value === "oldest" ? "oldest" : "newest";
-        reload(false);
-      },
-      { signal: disposable.signal },
-    );
-
-    appendChildren(toolbar, search, from, sort);
-    return toolbar;
   }
 
   function onListClick(e: MouseEvent): void {
@@ -593,7 +384,30 @@ export function createChannelMediaGallery(
       "data-testid": "media-usage",
     });
     usageEl.hidden = true;
-    appendChildren(root, header, tabList, buildToolbar(), usageEl, main);
+    appendChildren(
+      root,
+      header,
+      tabList,
+      buildToolbar(options.uploaders(), disposable.signal, {
+        onSearch: (text) => {
+          if (text === nameQuery) return;
+          nameQuery = text;
+          startMonth = undefined;
+          reload(true);
+        },
+        onUploader: (id) => {
+          uploader = id;
+          startMonth = undefined;
+          reload(true);
+        },
+        onOrder: (next) => {
+          order = next;
+          reload(false);
+        },
+      }),
+      usageEl,
+      main,
+    );
     container.appendChild(root);
 
     if (typeof IntersectionObserver !== "undefined") {

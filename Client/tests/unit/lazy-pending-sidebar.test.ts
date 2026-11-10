@@ -47,7 +47,7 @@ vi.mock("@lib/presence/profiles", () => mocks.presenceProfilesMock());
 
 vi.mock("../../src/features/channels/ChannelSidebar", () => mocks.channelSidebarMock());
 
-vi.mock("@components/DmSidebar", () => mocks.dmSidebarMock());
+vi.mock("../../src/features/direct-messages/DmSidebar", () => mocks.dmSidebarMock());
 
 vi.mock("../../src/features/members/MemberList", () => mocks.memberListMock());
 
@@ -70,7 +70,7 @@ vi.mock("../../src/pages/main-page/OverlayManagers", () => mocks.pageOverlayMana
 import { createSidebarArea } from "../../src/pages/main-page/SidebarArea";
 import { setSidebarMode } from "../../src/stores/ui.store";
 import { createChannelSidebar } from "../../src/features/channels/ChannelSidebar";
-import { createDmSidebar } from "@components/DmSidebar";
+import { createDmSidebar } from "../../src/features/direct-messages/DmSidebar";
 import { showToast } from "@lib/ui/toast";
 import { shellText } from "../../src/i18n/shell";
 
