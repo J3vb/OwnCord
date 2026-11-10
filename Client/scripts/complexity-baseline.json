@@ -7,26 +7,6 @@
     "app/session.ts": {
       "startSession": [17]
     },
-    "features/channels/ChannelSidebar.ts": {
-      "buildVoiceModOptions": [16],
-      "createChannelSidebar > drawChannels > reconcileRows": [16]
-    },
-    "features/channels/sidebar/categoryMenu.ts": {
-      "attachCategoryContextMenu > buildCategoryMenu": [16]
-    },
-    "features/channels/sidebar/channelSheet.ts": {
-      "channelSheetItems": [19]
-    },
-    "features/channels/sidebar/contextMenu.ts": {
-      "attachChannelContextMenu": [23],
-      "attachChannelContextMenu > buildChannelMenu": [36]
-    },
-    "features/channels/sidebar/dragReorder.ts": {
-      "planDrop": [32]
-    },
-    "features/channels/voiceRow.view.ts": {
-      "patchVoiceChannelChrome": [25]
-    },
     "features/dialogs/confirmModal.ts": {
       "createConfirmModal": [19]
     },

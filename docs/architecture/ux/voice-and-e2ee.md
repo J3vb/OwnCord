@@ -122,7 +122,7 @@ the accepted cost.
 | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | mic muted      | Mic-slash icon on self tile + control bar                                                                                                                                                                                                                                              |
 | deafened       | Headphone-slash alone (deafen implies mute, so no mic-slash beside it); a moderator mute or deafen gives it the server-muted class and title                                                                                                                                           |
-| server muted   | Distinct server-muted icon (title "Muted by a moderator"); the user panel's mute/deafen buttons are disabled with the reason while the mute holds — `serverMuted`/`serverDeafened`, `features/channels/ChannelSidebar.ts`, `components/UserBar.ts`                                     |
+| server muted   | Distinct server-muted icon (title "Muted by a moderator"); the user panel's mute/deafen buttons are disabled with the reason while the mute holds — `serverMuted`/`serverDeafened`, `features/channels/voiceSidebarRows.ts`, `components/UserBar.ts`                                   |
 | listen-only    | Badge "Listen only — no microphone" with a **Retry mic** affordance (`retryMicPermission`); the mic button is disabled, dimmed and reads mic-off                                                                                                                                       |
 | camera on      | Self video tile in the grid                                                                                                                                                                                                                                                            |
 | screenshare on | Screen tile; a stop-share affordance always visible                                                                                                                                                                                                                                    |
@@ -557,7 +557,7 @@ never silences message chimes for the rest of the session.
 `src/stores/voice.store.ts`, `src/features/voice/screenShare.ts`,
 `src/lib/voice/ptt.ts`, `src/lib/ui/inputMode.ts`, `src/lib/voice/noiseFloor.ts`, `src/lib/voice/roomEventHandlers.ts`, `src/components/VoiceWidget.ts`,
 `src/components/UserBar.ts` (mute and deafen buttons),
-`src/features/channels/ChannelSidebar.ts` (voice rows, join freeze on WS reconnect,
+`src/features/channels/voiceSidebarRows.ts` (voice rows, join freeze on WS reconnect,
 and the E2EE verification badge), `src/components/VideoGrid.ts`,
 `src-tauri/src/livekit_proxy.rs`, `src-tauri/src/ptt.rs`,
 `src/lib/net/e2eeCrypto.ts`, `src/lib/net/identity.ts`; and the structural map in

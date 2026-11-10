@@ -32,7 +32,7 @@
       "reason": "Projection of threads.store, which publishes the empty view from its own registered reset; it holds nothing until that store has loaded"
     },
     {
-      "file": "features/channels/ChannelSidebar.ts",
+      "file": "features/channels/voiceSidebarRows.ts",
       "binding": "volumeMenuAttempts",
       "category": "dom-owned",
       "reason": "WeakMap keyed by the sidebar's lifetime AbortSignal; entries go with the destroyed sidebar"

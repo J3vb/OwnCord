@@ -37,6 +37,7 @@ import {
   openMenuOnKeyboard,
   openMenuShell,
 } from "@lib/ui/contextMenu";
+import { menuItemAdder, type AddMenuItem } from "./menuItemAdder";
 import {
   NOTIFICATION_LEVELS,
   effectiveNotificationLevel,
@@ -46,7 +47,7 @@ import {
 } from "@lib/prefs/notificationLevel";
 import { appendPurgeSection } from "./purgePrompt";
 import { copyWithToast, isDeveloperMode } from "../../developer-mode/developerTools";
-import type { ChannelReorderData } from "../ChannelSidebar";
+import type { ChannelReorderData } from "../channelSidebarTypes";
 import { shellText } from "../../../i18n/shell";
 import { muteChoices, mutedUntilLabel } from "../muteMenu";
 import { channelMoves } from "../channelMoves";
@@ -58,6 +59,267 @@ const LEVEL_KEYS = {
   mentions: "channel.notify.mentions",
   nothing: "channel.notify.nothing",
 } as const satisfies Record<NotificationLevel, string>;
+
+/** Which entries a channel's menu offers, as decided when the row is built. */
+interface ChannelMenuShow {
+  readonly openChat: boolean;
+  readonly markRead: boolean;
+  readonly mute: boolean;
+  readonly copyLink: boolean;
+  readonly invite: boolean;
+  readonly move: boolean;
+  readonly edit: boolean;
+  readonly delete: boolean;
+  readonly purge: boolean;
+}
+
+/** What the page wired for a row: an absent callback hides its entry. */
+interface ChannelMenuHandlers {
+  readonly onEdit: ((channel: Channel) => void) | undefined;
+  readonly onDelete: ((channel: Channel) => void) | undefined;
+  readonly onPurge: ((channel: Channel, count: number) => Promise<void>) | undefined;
+  readonly channels: readonly Channel[] | undefined;
+  readonly onReorder: ((reorders: readonly ChannelReorderData[]) => void) | undefined;
+  readonly onInvite: ((channel: Channel) => void) | undefined;
+}
+
+/** The entries that follow from the channel's kind alone. */
+function kindGates(
+  channel: Channel,
+): Pick<ChannelMenuShow, "openChat" | "markRead" | "mute" | "copyLink"> {
+  return {
+    // A voice channel's chat opens without joining; clicking the row
+    // still joins.
+    openChat: channel.type === "voice",
+    // Mark as Read touches only the caller's own read state, so it needs no
+    // permission — but a voice channel holds no messages to read.
+    // A forum holds no messages either, so it has no unread state to clear.
+    markRead: channel.type !== "voice" && channel.type !== "forum",
+    // Muting silences notifications, which a voice channel does not produce.
+    mute: channel.type !== "voice",
+    // The link opens the channel's message view, so a voice channel has none to
+    // offer (joining one is a click on its row, not a link).
+    copyLink: channel.type !== "voice",
+  };
+}
+
+/** The entries that also need a permission and a wired callback. */
+function permissionGates(
+  channel: Channel,
+  h: ChannelMenuHandlers,
+  access: ChannelAccess | undefined,
+): Pick<ChannelMenuShow, "invite" | "move" | "edit" | "delete" | "purge"> {
+  const canManage = access?.manageChannels ?? canManageChannels();
+  return {
+    // Voice channels hold no messages, and the server rejects a purge in a DM,
+    // so the section is offered only where it can succeed.
+    purge:
+      h.onPurge !== undefined &&
+      channel.type !== "voice" &&
+      (access?.manageMessages ??
+        hasPermission(currentUserPermissions(), Permission.MANAGE_MESSAGES)),
+    edit: canManage && h.onEdit !== undefined,
+    delete: canManage && h.onDelete !== undefined,
+    // Keyboard reordering only makes sense with the row's own group at hand.
+    move: canManage && h.channels !== undefined && h.onReorder !== undefined,
+    // Invite People opens the invite manager, which only MANAGE_INVITES holders
+    // can list or create from; the server enforces the same bit.
+    invite: h.onInvite !== undefined && (access?.manageInvites ?? canManageInvites()),
+  };
+}
+
+/** Mute Channel (or Unmute), then the Notification Settings flyout. */
+function appendMuteItems(
+  menu: HTMLElement,
+  addItem: AddMenuItem,
+  closeMenu: () => void,
+  channel: Channel,
+  lifetimeSignal: AbortSignal,
+): void {
+  // A mute is a read-time check on a stored expiry (`channel-mutes`), so a
+  // timed one needs no sweep for the gates to be right.
+  const mute = getChannelMute(channel.id);
+  if (mute !== null) {
+    const row = addItem(shellText("channel.unmute"), "context-menu-item", "ctx-mute-channel", () =>
+      unmuteChannel(channel.id),
+    );
+    const until = mutedUntilLabel(mute.until);
+    if (until !== null) {
+      row.appendChild(createElement("span", { class: "context-menu-item__detail" }, until));
+    }
+  } else {
+    // Clicking the row (or Enter) mutes until turned off, as Discord does;
+    // hovering or ArrowRight offers the timed choices.
+    const { trigger, flyout } = createSubmenuTrigger(
+      shellText("channel.mute"),
+      "context-menu-item",
+      {
+        testId: "ctx-mute-channel",
+        activates: true,
+        onActivate: () => {
+          closeMenu();
+          muteChannel(channel.id);
+        },
+      },
+      lifetimeSignal,
+    );
+    for (const choice of muteChoices()) {
+      const row = createMenuItem(choice.label, "context-menu-item", {
+        testId: choice.testId,
+      });
+      row.addEventListener(
+        "click",
+        () => {
+          closeMenu();
+          muteChannel(channel.id, choice.durationMs);
+        },
+        { signal: lifetimeSignal },
+      );
+      flyout.appendChild(row);
+    }
+    menu.append(trigger, flyout);
+  }
+
+  // Notification Settings ›: the channel's own level, or the server's.
+  // Only the flyout rows act; the row itself just opens them.
+  const own = getChannelNotificationLevel(channel.id);
+  const { trigger, flyout } = createSubmenuTrigger(
+    shellText("channel.notifySettings"),
+    "context-menu-item",
+    { testId: "ctx-notify-settings" },
+    lifetimeSignal,
+  );
+  const addLevelRow = (label: string, level: NotificationLevel | null, testId: string): void => {
+    const row = createMenuItem(label, "context-menu-item", { testId });
+    row.setAttribute("role", "menuitemradio");
+    row.setAttribute("aria-checked", String(own === level));
+    row.addEventListener(
+      "click",
+      () => {
+        closeMenu();
+        setChannelNotificationLevel(channel.id, level);
+      },
+      { signal: lifetimeSignal },
+    );
+    flyout.appendChild(row);
+  };
+  addLevelRow(
+    shellText("channel.notify.default", {
+      level: shellText(LEVEL_KEYS[effectiveNotificationLevel()]),
+    }),
+    null,
+    "ctx-notify-default",
+  );
+  for (const level of NOTIFICATION_LEVELS) {
+    addLevelRow(shellText(LEVEL_KEYS[level]), level, `ctx-notify-${level}`);
+  }
+  menu.append(trigger, flyout);
+}
+
+/** Open Chat and Mark as Read, the entries that lead the menu. */
+function appendReadItems(addItem: AddMenuItem, channel: Channel, show: ChannelMenuShow): void {
+  if (show.openChat) {
+    addItem(shellText("channel.openChat"), "context-menu-item", "ctx-open-chat", () =>
+      navigateToChannel(channel.id),
+    );
+  }
+
+  if (show.markRead) {
+    // Disabled rather than hidden: a menu whose entries move between
+    // right-clicks is harder to use than one with a greyed-out row.
+    const unread = showsUnreadBadge(channel.id);
+    addItem(
+      shellText("channel.markRead"),
+      unread ? "context-menu-item" : "context-menu-item disabled",
+      "ctx-mark-read",
+      unread ? () => markChannelRead(channel.id) : null,
+    );
+  }
+}
+
+/** Copy Link, Invite People, Move Up/Down and Copy Channel ID: the entries after mute. */
+function appendShareItems(
+  addItem: AddMenuItem,
+  channel: Channel,
+  show: ChannelMenuShow,
+  h: ChannelMenuHandlers,
+): void {
+  if (show.copyLink) {
+    addItem(shellText("channel.copyLink"), "context-menu-item", "ctx-copy-channel-link", () =>
+      copyWithToast(
+        formatChannelLink(channel.id, getChannelMutesHost() ?? ""),
+        "toast.channelLinkCopied",
+        "toast.channelLinkCopyFailed",
+      ),
+    );
+  }
+
+  const { onInvite, channels, onReorder } = h;
+  if (show.invite && onInvite !== undefined) {
+    addItem(shellText("channel.invite"), "context-menu-item", "ctx-invite-people", () =>
+      onInvite(channel),
+    );
+  }
+
+  if (show.move && channels !== undefined && onReorder !== undefined) {
+    const { up, down } = channelMoves(channel, channels, onReorder);
+    addItem(shellText("channel.moveUp"), "context-menu-item", "ctx-move-up", up);
+    addItem(shellText("channel.moveDown"), "context-menu-item", "ctx-move-down", down);
+  }
+
+  if (isDeveloperMode()) {
+    addItem(shellText("channel.copyId"), "context-menu-item", "ctx-copy-channel-id", () =>
+      copyWithToast(String(channel.id), "toast.channelIdCopied", "toast.channelIdCopyFailed"),
+    );
+  }
+}
+
+/** Whether anything sits above the management entries, so a separator is due. */
+function hasLeadingEntries(show: ChannelMenuShow): boolean {
+  return show.openChat || show.markRead || show.mute || show.move || show.copyLink || show.invite;
+}
+
+/** Edit, Delete and Purge, below their separator. */
+function appendManageItems(
+  menu: HTMLElement,
+  addItem: AddMenuItem,
+  closeMenu: () => void,
+  channel: Channel,
+  show: ChannelMenuShow,
+  h: ChannelMenuHandlers,
+  lifetimeSignal: AbortSignal,
+): void {
+  if (hasLeadingEntries(show) && (show.edit || show.delete || show.purge)) {
+    menu.appendChild(createElement("div", { class: "context-menu-sep" }));
+  }
+
+  const { onEdit, onDelete, onPurge } = h;
+  if (show.edit && onEdit !== undefined) {
+    addItem(shellText("channel.edit"), "context-menu-item", "ctx-edit-channel", () =>
+      onEdit(channel),
+    );
+  }
+
+  if (show.delete && onDelete !== undefined) {
+    if (show.edit) {
+      menu.appendChild(createElement("div", { class: "context-menu-sep" }));
+    }
+    addItem(shellText("channel.delete"), "context-menu-item danger", "ctx-delete-channel", () =>
+      onDelete(channel),
+    );
+  }
+
+  if (show.purge && onPurge !== undefined) {
+    appendPurgeSection(menu, {
+      itemClass: "context-menu-item",
+      dangerItemClass: "context-menu-item danger",
+      separatorClass: show.edit || show.delete ? "context-menu-sep" : "",
+      onPurge: (count) => onPurge(channel, count),
+      signal: lifetimeSignal,
+      onDone: () => closeMenu(),
+    });
+  }
+}
 
 /**
  * Attach a context menu to a channel element for mark-read/move/edit/delete/
@@ -87,44 +349,19 @@ export function attachChannelContextMenu(
    *  omitted, each entry reads the stores here. */
   access?: ChannelAccess,
 ): void {
-  const canManage = access?.manageChannels ?? canManageChannels();
-
-  // Voice channels hold no messages, and the server rejects a purge in a DM,
-  // so the section is offered only where it can succeed.
-  const canPurge =
-    onPurge !== undefined &&
-    channel.type !== "voice" &&
-    (access?.manageMessages ?? hasPermission(currentUserPermissions(), Permission.MANAGE_MESSAGES));
-
-  const showEdit = canManage && onEdit !== undefined;
-  const showDelete = canManage && onDelete !== undefined;
-  // Mark as Read touches only the caller's own read state, so it needs no
-  // permission — but a voice channel holds no messages to read.
-  // A forum holds no messages either, so it has no unread state to clear.
-  const showMarkRead = channel.type !== "voice" && channel.type !== "forum";
-  // Muting silences notifications, which a voice channel does not produce.
-  const showMute = channel.type !== "voice";
-  // Keyboard reordering only makes sense with the row's own group at hand.
-  const showMove = canManage && channels !== undefined && onReorder !== undefined;
-  // Invite People opens the invite manager, which only MANAGE_INVITES holders
-  // can list or create from; the server enforces the same bit.
-  const showInvite = onInvite !== undefined && (access?.manageInvites ?? canManageInvites());
-  // The link opens the channel's message view, so a voice channel has none to
-  // offer (joining one is a click on its row, not a link).
-  const showCopyLink = channel.type !== "voice";
-  // A voice channel's chat opens without joining; clicking the row
-  // still joins.
-  const showOpenChat = channel.type === "voice";
-  const hasEntries =
-    showOpenChat ||
-    showMarkRead ||
-    showMute ||
-    showEdit ||
-    showDelete ||
-    canPurge ||
-    showMove ||
-    showCopyLink ||
-    showInvite;
+  const handlers: ChannelMenuHandlers = {
+    onEdit,
+    onDelete,
+    onPurge,
+    channels,
+    onReorder,
+    onInvite,
+  };
+  const show: ChannelMenuShow = {
+    ...kindGates(channel),
+    ...permissionGates(channel, handlers, access),
+  };
+  const hasEntries = Object.values(show).some(Boolean);
 
   /** A phone gets the menu as a bottom sheet, loaded on the first long-press. */
   function openSheet(): void {
@@ -133,17 +370,7 @@ export function attachChannelContextMenu(
         if (lifetimeSignal.aborted) return;
         openChannelSheet({
           channel,
-          show: {
-            openChat: showOpenChat,
-            markRead: showMarkRead,
-            mute: showMute,
-            copyLink: showCopyLink,
-            invite: showInvite,
-            move: showMove,
-            edit: showEdit,
-            delete: showDelete,
-            purge: canPurge,
-          },
+          show,
           ...(onEdit !== undefined ? { onEdit } : {}),
           ...(onDelete !== undefined ? { onDelete } : {}),
           ...(onPurge !== undefined ? { onPurge } : {}),
@@ -174,203 +401,14 @@ export function attachChannelContextMenu(
       attrs: { "data-testid": "channel-context-menu" },
       signal: lifetimeSignal,
       dismiss: "any-click",
-      build: (menu, closeMenu) => buildChannelMenu(menu, closeMenu),
+      build: (menu, closeMenu) => {
+        const addItem = menuItemAdder(menu, closeMenu, lifetimeSignal);
+        appendReadItems(addItem, channel, show);
+        if (show.mute) appendMuteItems(menu, addItem, closeMenu, channel, lifetimeSignal);
+        appendShareItems(addItem, channel, show, handlers);
+        appendManageItems(menu, addItem, closeMenu, channel, show, handlers, lifetimeSignal);
+      },
     });
-  }
-
-  function buildChannelMenu(menu: HTMLElement, closeMenu: () => void): void {
-    const addItem = (
-      label: string,
-      className: string,
-      testId: string,
-      onClick: (() => void) | null,
-    ): HTMLElement => {
-      const item = createMenuItem(label, className, { testId });
-      if (onClick === null) {
-        item.setAttribute("aria-disabled", "true");
-        item.classList.add("disabled");
-      } else {
-        item.addEventListener(
-          "click",
-          () => {
-            closeMenu();
-            onClick();
-          },
-          { signal: lifetimeSignal },
-        );
-      }
-      menu.appendChild(item);
-      return item;
-    };
-
-    if (showOpenChat) {
-      addItem(shellText("channel.openChat"), "context-menu-item", "ctx-open-chat", () =>
-        navigateToChannel(channel.id),
-      );
-    }
-
-    if (showMarkRead) {
-      // Disabled rather than hidden: a menu whose entries move between
-      // right-clicks is harder to use than one with a greyed-out row.
-      const unread = showsUnreadBadge(channel.id);
-      addItem(
-        shellText("channel.markRead"),
-        unread ? "context-menu-item" : "context-menu-item disabled",
-        "ctx-mark-read",
-        unread ? () => markChannelRead(channel.id) : null,
-      );
-    }
-
-    if (showMute) {
-      // A mute is a read-time check on a stored expiry (`channel-mutes`), so a
-      // timed one needs no sweep for the gates to be right.
-      const mute = getChannelMute(channel.id);
-      if (mute !== null) {
-        const row = addItem(
-          shellText("channel.unmute"),
-          "context-menu-item",
-          "ctx-mute-channel",
-          () => unmuteChannel(channel.id),
-        );
-        const until = mutedUntilLabel(mute.until);
-        if (until !== null) {
-          row.appendChild(createElement("span", { class: "context-menu-item__detail" }, until));
-        }
-      } else {
-        // Clicking the row (or Enter) mutes until turned off, as Discord does;
-        // hovering or ArrowRight offers the timed choices.
-        const { trigger, flyout } = createSubmenuTrigger(
-          shellText("channel.mute"),
-          "context-menu-item",
-          {
-            testId: "ctx-mute-channel",
-            activates: true,
-            onActivate: () => {
-              closeMenu();
-              muteChannel(channel.id);
-            },
-          },
-          lifetimeSignal,
-        );
-        for (const choice of muteChoices()) {
-          const row = createMenuItem(choice.label, "context-menu-item", {
-            testId: choice.testId,
-          });
-          row.addEventListener(
-            "click",
-            () => {
-              closeMenu();
-              muteChannel(channel.id, choice.durationMs);
-            },
-            { signal: lifetimeSignal },
-          );
-          flyout.appendChild(row);
-        }
-        menu.append(trigger, flyout);
-      }
-    }
-
-    if (showMute) {
-      // Notification Settings ›: the channel's own level, or the server's.
-      // Only the flyout rows act; the row itself just opens them.
-      const own = getChannelNotificationLevel(channel.id);
-      const { trigger, flyout } = createSubmenuTrigger(
-        shellText("channel.notifySettings"),
-        "context-menu-item",
-        { testId: "ctx-notify-settings" },
-        lifetimeSignal,
-      );
-      const addLevelRow = (
-        label: string,
-        level: NotificationLevel | null,
-        testId: string,
-      ): void => {
-        const row = createMenuItem(label, "context-menu-item", { testId });
-        row.setAttribute("role", "menuitemradio");
-        row.setAttribute("aria-checked", String(own === level));
-        row.addEventListener(
-          "click",
-          () => {
-            closeMenu();
-            setChannelNotificationLevel(channel.id, level);
-          },
-          { signal: lifetimeSignal },
-        );
-        flyout.appendChild(row);
-      };
-      addLevelRow(
-        shellText("channel.notify.default", {
-          level: shellText(LEVEL_KEYS[effectiveNotificationLevel()]),
-        }),
-        null,
-        "ctx-notify-default",
-      );
-      for (const level of NOTIFICATION_LEVELS) {
-        addLevelRow(shellText(LEVEL_KEYS[level]), level, `ctx-notify-${level}`);
-      }
-      menu.append(trigger, flyout);
-    }
-
-    if (showCopyLink) {
-      addItem(shellText("channel.copyLink"), "context-menu-item", "ctx-copy-channel-link", () =>
-        copyWithToast(
-          formatChannelLink(channel.id, getChannelMutesHost() ?? ""),
-          "toast.channelLinkCopied",
-          "toast.channelLinkCopyFailed",
-        ),
-      );
-    }
-
-    if (showInvite && onInvite !== undefined) {
-      addItem(shellText("channel.invite"), "context-menu-item", "ctx-invite-people", () =>
-        onInvite(channel),
-      );
-    }
-
-    if (showMove && channels !== undefined && onReorder !== undefined) {
-      const { up, down } = channelMoves(channel, channels, onReorder);
-      addItem(shellText("channel.moveUp"), "context-menu-item", "ctx-move-up", up);
-      addItem(shellText("channel.moveDown"), "context-menu-item", "ctx-move-down", down);
-    }
-
-    if (isDeveloperMode()) {
-      addItem(shellText("channel.copyId"), "context-menu-item", "ctx-copy-channel-id", () =>
-        copyWithToast(String(channel.id), "toast.channelIdCopied", "toast.channelIdCopyFailed"),
-      );
-    }
-
-    if (
-      (showOpenChat || showMarkRead || showMute || showMove || showCopyLink || showInvite) &&
-      (showEdit || showDelete || canPurge)
-    ) {
-      menu.appendChild(createElement("div", { class: "context-menu-sep" }));
-    }
-
-    if (showEdit && onEdit !== undefined) {
-      addItem(shellText("channel.edit"), "context-menu-item", "ctx-edit-channel", () =>
-        onEdit(channel),
-      );
-    }
-
-    if (showDelete && onDelete !== undefined) {
-      if (showEdit) {
-        menu.appendChild(createElement("div", { class: "context-menu-sep" }));
-      }
-      addItem(shellText("channel.delete"), "context-menu-item danger", "ctx-delete-channel", () =>
-        onDelete(channel),
-      );
-    }
-
-    if (canPurge && onPurge !== undefined) {
-      appendPurgeSection(menu, {
-        itemClass: "context-menu-item",
-        dangerItemClass: "context-menu-item danger",
-        separatorClass: showEdit || showDelete ? "context-menu-sep" : "",
-        onPurge: (count) => onPurge(channel, count),
-        signal: lifetimeSignal,
-        onDone: () => closeMenu(),
-      });
-    }
   }
 
   el.addEventListener(

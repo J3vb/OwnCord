@@ -6,8 +6,6 @@
   "src/components/SearchOverlay.ts": 700,
   "src/components/ServerRail.ts": 750,
   "src/components/video-grid/gridStreams.ts": 900,
-  "src/features/channels/ChannelSidebar.ts": 1200,
-  "src/features/channels/sidebar/dragReorder.ts": 800,
   "src/features/channels/wsHandlers.ts": 850,
   "src/features/forums/ForumView.ts": 750,
   "src/features/forums/NewPostDialog.ts": 600,

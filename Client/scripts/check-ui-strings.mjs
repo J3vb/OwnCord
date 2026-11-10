@@ -65,7 +65,7 @@ const EXCLUDED = [
  */
 const OWNERS = [
   [
-    /^src\/(pages\/ConnectPage|pages\/connect-page\/|pages\/main-page\/Sidebar|pages\/main-page\/OverlayManagers|components\/(QuickSwitchOverlay|QuickSwitcher|CertMismatchModal|ServerBanner|ConnectedOverlay|UserBar|StatusPicker|InviteManager|CreateChannelModal|DeleteChannelModal)\.ts|features\/channels\/(editChannelDialog|channelTypes|channelCategorySelect)\.ts|features\/channels\/sidebar\/purgePrompt\.ts|features\/moderation\/(AdminActions|memberMenuRows)\.ts|features\/(members\/MemberList|channels\/ChannelSidebar)\.ts|features\/channels\/sidebar\/contextMenu\.ts|lib\/(text\/safeRender|net\/credentials)\.ts|features\/channels\/wsHandlers\.ts|main\.ts)/,
+    /^src\/(pages\/ConnectPage|pages\/connect-page\/|pages\/main-page\/Sidebar|pages\/main-page\/OverlayManagers|components\/(QuickSwitchOverlay|QuickSwitcher|CertMismatchModal|ServerBanner|ConnectedOverlay|UserBar|StatusPicker|InviteManager|CreateChannelModal|DeleteChannelModal)\.ts|features\/channels\/(editChannelDialog|channelTypes|channelCategorySelect)\.ts|features\/channels\/sidebar\/purgePrompt\.ts|features\/moderation\/(AdminActions|memberMenuRows)\.ts|features\/(members\/MemberList|channels\/(ChannelSidebar|channelListRender|voiceSidebarRows))\.ts|features\/channels\/sidebar\/contextMenu\.ts|lib\/(text\/safeRender|net\/credentials)\.ts|features\/channels\/wsHandlers\.ts|main\.ts)/,
     "B9-18",
   ],
   [
