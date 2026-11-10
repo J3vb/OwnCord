@@ -32,7 +32,6 @@
   "src/features/messaging/wsHandlers.ts": 650,
   "src/features/moderation/AppealQueue.ts": 550,
   "src/features/moderation/Queue.ts": 900,
-  "src/features/profiles/userProfilePopup.ts": 1050,
   "src/features/settings/AccountProfile.ts": 750,
   "src/features/settings/AccountSecurity.ts": 650,
   "src/features/settings/AccountSessions.ts": 600,

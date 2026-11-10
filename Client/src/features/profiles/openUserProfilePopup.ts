@@ -14,8 +14,10 @@ import { membersStore, memberDisplayName, type Member } from "../../stores/membe
 import type {
   ProfileRoleControl,
   ProfileRolesControl,
+  UserProfileData,
   UserProfilePopupComponent,
-} from "./userProfilePopup";
+  UserProfilePopupOptions,
+} from "./userProfileTypes";
 import { showToast } from "../../lib/ui/toast";
 import { isPhoneLayout } from "../../lib/ui/bottomSheet";
 import { reportEntryText } from "../../i18n/reportEntry";
@@ -23,10 +25,8 @@ import { requestsText } from "../../i18n/requests";
 import { formatDate } from "../../i18n/format";
 import { blocksStore } from "../../stores/blocks.store";
 import { uiStore } from "../../stores/ui.store";
-import { channelsStore } from "../../stores/channels.store";
-import { memberRolesState, roleChangeChoices } from "../moderation/roleAssignment";
-import { multiRoleEnabled } from "../../lib/net/serverCapabilities";
-import { createNoteBinding, currentNotesContext } from "./userNotes";
+import { buildRoleControl, buildRolesControl } from "./profileRoleControls";
+import { createNoteBinding, currentNotesContext, type NoteBinding } from "./userNotes";
 
 /** What the popup's action buttons do. Each is omitted when the caller has no
  *  handler for it, and all are withheld for the signed-in user's own card. */
@@ -99,6 +99,80 @@ export function closeUserProfilePopup(): void {
   }
 }
 
+interface PopupInputs {
+  readonly live: Member;
+  readonly joinDate: string | null;
+  readonly anchorX: number;
+  readonly anchorY: number;
+  readonly roleControl: ProfileRoleControl;
+  readonly rolesControl: ProfileRolesControl | undefined;
+  readonly note: NoteBinding | undefined;
+  /** The caller's buttons; empty for the signed-in user's own card. */
+  readonly actions: UserProfilePopupCallbacks;
+  readonly blocked: boolean;
+  readonly unavailableReason: string | undefined;
+  readonly fallbackFocus: (() => HTMLElement | null) | undefined;
+}
+
+/** The member the card shows, built from the live roster entry. */
+function profileUserOf(live: Member, joinDate: string | null): UserProfileData {
+  return {
+    id: live.id,
+    username: live.username,
+    avatar: live.avatar,
+    role: live.role,
+    status: live.status,
+    ...(live.mobile === true ? { mobile: true } : {}),
+    displayName: live.displayName,
+    customStatus: live.customStatus,
+    activity: live.activity ?? null,
+    listening: live.listening ?? null,
+    // Absent (older server) hides the sections, as before.
+    ...(live.about === undefined ? {} : { about: live.about }),
+    banner: live.banner ?? null,
+    banner_color: live.banner_color ?? null,
+    ...(joinDate === null ? {} : { joinDate }),
+  };
+}
+
+/** The popup options for one open, minus `onClose`, which needs the popup. */
+function buildPopupOptions(i: PopupInputs): UserProfilePopupOptions {
+  const { live, note, fallbackFocus } = i;
+  const { onMessage, onCall, onReport, onToggleBlock } = i.actions;
+  return {
+    user: profileUserOf(live, i.joinDate),
+    anchorX: i.anchorX,
+    anchorY: i.anchorY,
+    ...(i.rolesControl === undefined
+      ? { roleControl: i.roleControl }
+      : { rolesControl: i.rolesControl }),
+    ...(note === undefined ? {} : { note, onNoteFlush: () => note.destroy() }),
+    ...(onMessage === undefined ? {} : { onMessage: (id: number) => onMessage(id) }),
+    ...(onCall === undefined ? {} : { onCall: (id: number) => onCall(id) }),
+    ...(onReport === undefined
+      ? {}
+      : { onReport: (id: number) => onReport(id, memberDisplayName(live)) }),
+    ...(onToggleBlock === undefined
+      ? {}
+      : {
+          blocked: i.blocked,
+          onToggleBlock: (id: number, block: boolean) =>
+            onToggleBlock(id, memberDisplayName(live), block),
+        }),
+    ...(i.unavailableReason === undefined ? {} : { unavailableReason: i.unavailableReason }),
+    ...(fallbackFocus === undefined ? {} : { fallbackFocus }),
+    sheet: isPhoneLayout(),
+  };
+}
+
+/** The viewer's note about the member, none on their own card. Captured at
+ *  open, not when the card mounts or closes: a flush on close must use the
+ *  session that opened the card, whatever has been switched to since. */
+function openNoteBinding(userId: number, isSelf: boolean): NoteBinding | undefined {
+  const notesContext = isSelf ? null : currentNotesContext();
+  return notesContext === null ? undefined : createNoteBinding(notesContext, userId);
+}
+
 /**
  * Open the profile popup for `options.userId`. Returns a cleanup that closes
  * (or cancels) this popup, and does nothing if another popup has replaced it.
@@ -111,93 +185,18 @@ export function openUserProfilePopup(options: OpenUserProfilePopupOptions): () =
 
   const joinDate = formatJoinDate(live.createdAt);
   const isSelf = userId === (authStore.getState().user?.id ?? 0);
-  const onMessage = isSelf ? undefined : callbacks?.onMessage;
-  const onCall = isSelf ? undefined : callbacks?.onCall;
-  const onReport = isSelf ? undefined : callbacks?.onReport;
-  const onToggleBlock = isSelf ? undefined : callbacks?.onToggleBlock;
-  const onChangeRole = callbacks?.onChangeRole;
-  const onAddRole = callbacks?.onAddRole;
-  const onRemoveRole = callbacks?.onRemoveRole;
+  const actions = isSelf ? {} : (callbacks ?? {});
   const blocked = blocksStore.getState().blockedByMe.has(userId);
   const unavailableReason = callUnavailableReason(userId);
   const fallbackFocus = options.fallbackFocus;
-  // Read from the stores every time, so a role change on either side (the
-  // member's, or the viewer's own, or the role list) re-filters or removes the
-  // picker while the card is open.
-  const roleControl: ProfileRoleControl = {
-    read: () => {
-      const member = membersStore.getState().members.get(userId);
-      const role = member?.role ?? live.role;
-      // A member who left or was banned while the card is open has no role to change.
-      return {
-        role,
-        choices:
-          onChangeRole === undefined || member === undefined
-            ? null
-            : roleChangeChoices(userId, role, member.roleIds),
-      };
-    },
-    subscribe: (listener) => {
-      const unsubs = [
-        membersStore.subscribeSelector((st) => st.members.get(userId)?.role, listener),
-        authStore.subscribeSelector(
-          (st) => `${st.user?.role ?? ""}|${st.user?.role_ids?.join(",") ?? ""}`,
-          listener,
-        ),
-        channelsStore.subscribeSelector((st) => st.roles, listener),
-      ];
-      return () => {
-        for (const unsub of unsubs) unsub();
-      };
-    },
-    change: async (role) => {
-      const username = membersStore.getState().members.get(userId)?.username ?? live.username;
-      await onChangeRole?.(userId, username, role);
-    },
-  };
-  // The chips replace the single-role picker only on a server that holds
-  // several roles per member; any other server keeps the picker above.
-  const rolesControl: ProfileRolesControl | undefined =
-    multiRoleEnabled() && onAddRole !== undefined && onRemoveRole !== undefined
-      ? {
-          read: () => {
-            const member = membersStore.getState().members.get(userId);
-            return memberRolesState(
-              userId,
-              member?.role ?? live.role,
-              member === undefined ? live.roleIds : member.roleIds,
-            );
-          },
-          subscribe: (listener) => {
-            const unsubs = [
-              membersStore.subscribeSelector(
-                (st) => st.members.get(userId)?.roleIds ?? st.members.get(userId)?.role,
-                listener,
-              ),
-              authStore.subscribeSelector(
-                (st) => `${st.user?.role ?? ""}|${st.user?.role_ids?.join(",") ?? ""}`,
-                listener,
-              ),
-              channelsStore.subscribeSelector((st) => st.roles, listener),
-            ];
-            return () => {
-              for (const unsub of unsubs) unsub();
-            };
-          },
-          add: async (roleId) => {
-            const username = membersStore.getState().members.get(userId)?.username ?? live.username;
-            await onAddRole(userId, username, roleId);
-          },
-          remove: async (roleId) => {
-            const username = membersStore.getState().members.get(userId)?.username ?? live.username;
-            await onRemoveRole(userId, username, roleId);
-          },
-        }
-      : undefined;
-  // Captured now, not when the card mounts or closes: a flush on close must
-  // use the session that opened the card, whatever has been switched to since.
-  const notesContext = isSelf ? null : currentNotesContext();
-  const note = notesContext === null ? undefined : createNoteBinding(notesContext, userId);
+  const roleControl = buildRoleControl(userId, live, callbacks?.onChangeRole);
+  const rolesControl = buildRolesControl(
+    userId,
+    live,
+    callbacks?.onAddRole,
+    callbacks?.onRemoveRole,
+  );
+  const note = openNoteBinding(userId, isSelf);
   const seq = ++popupSeq;
 
   import("./userProfilePopup").then(
@@ -206,46 +205,23 @@ export function openUserProfilePopup(options: OpenUserProfilePopupOptions): () =
         note?.destroy();
         return;
       }
-      const popup = createUserProfilePopup({
-        user: {
-          id: live.id,
-          username: live.username,
-          avatar: live.avatar,
-          role: live.role,
-          status: live.status,
-          ...(live.mobile === true ? { mobile: true } : {}),
-          displayName: live.displayName,
-          customStatus: live.customStatus,
-          activity: live.activity ?? null,
-          listening: live.listening ?? null,
-          // Absent (older server) hides the sections, as before.
-          ...(live.about === undefined ? {} : { about: live.about }),
-          banner: live.banner ?? null,
-          banner_color: live.banner_color ?? null,
-          ...(joinDate === null ? {} : { joinDate }),
-        },
-        anchorX,
-        anchorY,
-        ...(rolesControl === undefined ? { roleControl } : { rolesControl }),
-        ...(note === undefined ? {} : { note, onNoteFlush: () => note.destroy() }),
-        ...(onMessage === undefined ? {} : { onMessage: (id: number) => onMessage(id) }),
-        ...(onCall === undefined ? {} : { onCall: (id: number) => onCall(id) }),
-        ...(onReport === undefined
-          ? {}
-          : { onReport: (id: number) => onReport(id, memberDisplayName(live)) }),
-        ...(onToggleBlock === undefined
-          ? {}
-          : {
-              blocked,
-              onToggleBlock: (id: number, block: boolean) =>
-                onToggleBlock(id, memberDisplayName(live), block),
-            }),
-        ...(unavailableReason === undefined ? {} : { unavailableReason }),
+      const popup: UserProfilePopupComponent = createUserProfilePopup({
+        ...buildPopupOptions({
+          live,
+          joinDate,
+          anchorX,
+          anchorY,
+          roleControl,
+          rolesControl,
+          note,
+          actions,
+          blocked,
+          unavailableReason,
+          fallbackFocus,
+        }),
         onClose: () => {
           if (activePopup === popup) activePopup = null;
         },
-        ...(fallbackFocus === undefined ? {} : { fallbackFocus }),
-        sheet: isPhoneLayout(),
       });
       activePopup = popup;
       popup.mount(document.body);

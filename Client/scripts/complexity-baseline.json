@@ -142,14 +142,6 @@
     "features/people-home/PeopleHome.ts": {
       "renderPeopleHome > render": [17]
     },
-    "features/profiles/openUserProfilePopup.ts": {
-      "openUserProfilePopup": [21],
-      "openUserProfilePopup > (anonymous)": [20]
-    },
-    "features/profiles/userProfilePopup.ts": {
-      "createUserProfilePopup > mount": [33],
-      "createUserProfilePopup > mount > renderChips": [17]
-    },
     "features/settings/AppearanceTab.ts": {
       "buildAppearanceTab": [16]
     },
