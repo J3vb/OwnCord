@@ -30,7 +30,7 @@ const baseline = readBaseline();
 
 /** Over-limit functions and blocks that may remain. Lower these with every
  *  change that removes one; they never rise. */
-const COMPLEXITY_CAP = 75;
+const COMPLEXITY_CAP = 68;
 const DEPTH_CAP = 6;
 const WORST_COMPLEXITY_CAP = 35;
 

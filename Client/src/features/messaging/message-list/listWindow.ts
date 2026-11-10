@@ -9,7 +9,6 @@ import {
   getChannelMessages,
   hasMoreMessages,
   getHistoryLoadState,
-  isWindowDetached,
   type Message,
 } from "@stores/messages.store";
 import { discardMedia } from "../content/mediaVisibility";
@@ -18,7 +17,6 @@ import { ROW_FOCUSABLE_SELECTOR } from "./messageActions";
 import {
   buildVirtualItems,
   estimateItemHeight,
-  firstUnreadIndex,
   keyOf,
   visibleMessages,
   type VirtualItem,
@@ -35,81 +33,21 @@ import {
   type ScrollMetrics,
   readMetrics,
 } from "./listShared";
+import { resolveNewDividerIndex, storeDividerEnv } from "./newDivider";
 import type { ListState, ListApi } from "./listState";
 
+interface Measurement {
+  readonly key: string;
+  readonly idx: number;
+  readonly h: number;
+}
+
 export function createListWindow(st: ListState, api: ListApi) {
-  /**
-   * Resolve the NEW divider's position for this rebuild. Prefers the latched
-   * anchor id (stable across window growth); falls back to the count formula
-   * only until an anchor exists, then latches it — skipping id 0 (an
-   * unconfirmed optimistic row) since that id is not unique across pending
-   * sends and would anchor to the wrong message once reconciled.
-   *
-   * Also skips latching while the window is shorter than unreadOnOpen: the
-   * initial mount can render one live message before the async history
-   * fetch resolves, and firstUnreadIndex's
-   * `Math.max(0, ...)` clamp turns that 1-row window into index 0 just like a
-   * real boundary would. Latching onto that message would glue the divider
-   * to whatever happened to arrive first instead of the actual unread
-   * boundary once the full window loads.
-   */
-  function resolveNewDividerIndex(messages: readonly Message[]): number {
-    if (st.newDividerAnchorId !== null) {
-      const at = messages.findIndex((m) => m.id === st.newDividerAnchorId);
-      if (at === -1) {
-        // The anchor was deleted (the store keeps it as a tombstone): the line
-        // moves to the first message after it, or waits when there is none.
-        const anchorId = st.newDividerAnchorId;
-        const tombstone = getChannelMessages(st.options.channelId).some(
-          (m) => m.id === anchorId && m.deleted,
-        );
-        if (tombstone) {
-          const nextAt = messages.findIndex((m) => m.id > anchorId);
-          if (nextAt === -1) return -1;
-          st.newDividerAnchorId = messages[nextAt]!.id;
-          return nextAt;
-        }
-      }
-      if (at !== -1 || st.linePointer === undefined) return at;
-      // The anchor left the window (a jump): place the line again by pointer.
-      st.newDividerAnchorId = null;
-    }
-    // The first loaded message above the pointer, latched like the count-based
-    // one — except at the top of the window, where older history may still
-    // arrive above it and move the true boundary.
-    const byPointer = (): number => {
-      const idx = messages.findIndex((m) => m.id > (st.linePointer ?? 0));
-      if (idx > 0) st.newDividerAnchorId = messages[idx]!.id;
-      return idx;
-    };
-    // An around-window centred on a jumped-to message is not the tail: counting
-    // back from its end would mark an arbitrary row. Detachment is read here,
-    // not at mount, because a cross-channel jump detaches after the mount.
-    if (isWindowDetached(st.options.channelId)) {
-      st.newDividerDeferred = false;
-      // No divider will exist to open at, and a pending open left armed would
-      // scroll the reader up to the line once the tail returns.
-      st.openAtDividerPending = false;
-      // A pointer places the line inside the around-window too (never scrolled to).
-      return st.linePointer === undefined ? -1 : byPointer();
-    }
-    // A revisit renders the cached window while its tail is refetched.
-    // Those rows predate what arrived while away, so counting back from their
-    // end would mark messages already read; wait for the fetched tail.
-    st.newDividerDeferred =
-      st.unreadOnOpen > 0 && getHistoryLoadState(st.options.channelId) === "loading";
-    if (st.newDividerDeferred) return -1;
-    if (st.linePointer !== undefined) {
-      // Only a channel that had unread when opened: with none, the first message
-      // above the pointer is just the first live arrival.
-      return st.unreadOnOpen > 0 ? byPointer() : -1;
-    }
-    const idx = firstUnreadIndex(messages, st.unreadOnOpen);
-    const anchor = idx !== -1 ? messages[idx] : undefined;
-    if (anchor !== undefined && anchor.id !== 0 && messages.length >= st.unreadOnOpen) {
-      st.newDividerAnchorId = anchor.id;
-    }
-    return idx;
+  const dividerEnv = storeDividerEnv(st.options.channelId);
+
+  /** The NEW divider's position for a rebuild of `messages`. */
+  function resolveDivider(messages: readonly Message[]): number {
+    return resolveNewDividerIndex(st, messages, dividerEnv);
   }
 
   // ---------------------------------------------------------------------------
@@ -222,19 +160,26 @@ export function createListWindow(st: ListState, api: ListApi) {
    *  other row was measured when it entered or by the ResizeObserver pass). */
   function measureRendered(from: number = st.renderedStart, to: number = st.renderedEnd): void {
     if (st.contentContainer === null || st.renderedStart < 0) return;
-    const children = st.contentContainer.children;
-    const first = Math.max(0, from - st.renderedStart);
-    const last = Math.min(children.length, to - st.renderedStart);
-
     // Pass 1 — pure reads: collect all heights without touching any styles.
     // Batching all getComputedStyle / offsetHeight reads before any writes
     // allows the browser to satisfy them with a single layout calculation
     // instead of forcing a synchronous reflow on every iteration.
-    interface Measurement {
-      readonly key: string;
-      readonly idx: number;
-      readonly h: number;
-    }
+    const measurements = readRowHeights(st.contentContainer, from, to);
+
+    // The width these rows were laid out at, read with the heights (layout is
+    // already clean): the observer may not have reported a resize yet.
+    const measuredWidth = st.root?.clientWidth ?? 0;
+
+    // Pass 2 — pure writes: apply all cached heights to heightCache and the
+    // Fenwick tree. No DOM reads here, so no additional reflow is triggered.
+    recordRowHeights(measurements, measuredWidth);
+  }
+
+  /** The rendered rows' heights, margins included, for item indexes in [from, to). */
+  function readRowHeights(container: HTMLElement, from: number, to: number): Measurement[] {
+    const children = container.children;
+    const first = Math.max(0, from - st.renderedStart);
+    const last = Math.min(children.length, to - st.renderedStart);
     const measurements: Measurement[] = [];
     for (let i = first; i < last; i++) {
       const globalIdx = st.renderedStart + i;
@@ -246,13 +191,10 @@ export function createListWindow(st: ListState, api: ListApi) {
         measurements.push({ key: itemKey(globalIdx), idx: globalIdx, h });
       }
     }
+    return measurements;
+  }
 
-    // The width these rows were laid out at, read with the heights (layout is
-    // already clean): the observer may not have reported a resize yet.
-    const measuredWidth = st.root?.clientWidth ?? 0;
-
-    // Pass 2 — pure writes: apply all cached heights to heightCache and the
-    // Fenwick tree. No DOM reads here, so no additional reflow is triggered.
+  function recordRowHeights(measurements: readonly Measurement[], measuredWidth: number): void {
     for (const { key, idx, h } of measurements) {
       st.heightCache.set(key, h);
       const shared = measuredWidth > 0 ? rememberKey(idx) : null;
@@ -429,62 +371,53 @@ export function createListWindow(st: ListState, api: ListApi) {
     el.querySelector("textarea")?.focus({ preventScroll: true });
   }
 
-  function renderWindow(m?: ScrollMetrics): void {
-    if (
-      st.root === null ||
-      st.contentContainer === null ||
-      st.topSpacer === null ||
-      st.bottomSpacer === null
-    )
-      return;
-
-    st.scrollSnapshot = null;
-    const { scrollTop, clientHeight } = m ?? readMetrics(st.root);
-    st.lastViewportHeight = clientHeight;
-
-    if (st.virtualItems.length === 0) {
-      releaseTrackedMedia();
-      beginRowRender();
-      clearChildren(st.contentContainer);
-      // With no rows, the region shows the fetch state: an in-region loading
-      // placeholder, an inline error + Retry, or the welcome/empty state once
-      // the channel is actually loaded and empty (UX spec §1/§2).
-      const loadState = getHistoryLoadState(st.options.channelId);
-      // Every loaded row was deleted but the server has older ones: not an
-      // empty channel, so load the page before them instead of welcoming.
-      const allDeleted =
-        loadState === null &&
-        getChannelMessages(st.options.channelId).length > 0 &&
-        hasMoreMessages(st.options.channelId);
-      // The page before them just failed to load: say so, with a retry,
-      // instead of a placeholder that never ends.
-      const olderFailed = allDeleted && !st.loadingOlder && performance.now() < st.olderRetryAt;
-      if (olderFailed) {
-        st.contentContainer.appendChild(
-          renderLoadErrorState(() => {
-            st.olderRetryAt = 0;
-            renderWindow();
-          }),
-        );
-      } else if (loadState === "loading" || allDeleted) {
-        st.contentContainer.appendChild(renderLoadingState());
-      } else if (loadState === "error") {
-        st.contentContainer.appendChild(renderLoadErrorState(st.options.onRetryLoad));
-      } else {
-        st.contentContainer.appendChild(
-          renderEmptyState(st.options.channelName, st.options.channelType),
-        );
-      }
-      st.loadedEmptyShown = loadState === null && !allDeleted;
-      if (allDeleted && !st.loadingOlder && !olderFailed) api.fireOlderLoad();
-      st.topSpacer.style.height = "0px";
-      st.bottomSpacer.style.height = "0px";
-      st.renderedStart = 0;
-      st.renderedEnd = 0;
-      return;
+  /** What an empty region shows: the fetch state's placeholder, an inline error
+   *  + Retry, or the welcome/empty state (UX spec §1/§2). */
+  function emptyRegionNode(
+    loadState: "loading" | "error" | null,
+    allDeleted: boolean,
+    olderFailed: boolean,
+  ): HTMLElement {
+    if (olderFailed) {
+      return renderLoadErrorState(() => {
+        st.olderRetryAt = 0;
+        renderWindow();
+      });
     }
+    if (loadState === "loading" || allDeleted) return renderLoadingState();
+    if (loadState === "error") return renderLoadErrorState(st.options.onRetryLoad);
+    return renderEmptyState(st.options.channelName, st.options.channelType);
+  }
 
-    // Determine visible range
+  /** No rows: clear the region and show the fetch state in it. */
+  function renderEmptyRegion(content: HTMLElement, top: HTMLElement, bottom: HTMLElement): void {
+    releaseTrackedMedia();
+    beginRowRender();
+    clearChildren(content);
+    // With no rows, the region shows the fetch state: an in-region loading
+    // placeholder, an inline error + Retry, or the welcome/empty state once
+    // the channel is actually loaded and empty.
+    const loadState = getHistoryLoadState(st.options.channelId);
+    // Every loaded row was deleted but the server has older ones: not an
+    // empty channel, so load the page before them instead of welcoming.
+    const allDeleted =
+      loadState === null &&
+      getChannelMessages(st.options.channelId).length > 0 &&
+      hasMoreMessages(st.options.channelId);
+    // The page before them just failed to load: say so, with a retry,
+    // instead of a placeholder that never ends.
+    const olderFailed = allDeleted && !st.loadingOlder && performance.now() < st.olderRetryAt;
+    content.appendChild(emptyRegionNode(loadState, allDeleted, olderFailed));
+    st.loadedEmptyShown = loadState === null && !allDeleted;
+    if (allDeleted && !st.loadingOlder && !olderFailed) api.fireOlderLoad();
+    top.style.height = "0px";
+    bottom.style.height = "0px";
+    st.renderedStart = 0;
+    st.renderedEnd = 0;
+  }
+
+  /** The item range [start, end) the viewport needs, overscan included. */
+  function windowRangeFor(scrollTop: number, clientHeight: number): { start: number; end: number } {
     const firstVisible = offsetToIndex(scrollTop);
     const lastVisible = offsetToIndex(scrollTop + clientHeight);
 
@@ -504,22 +437,104 @@ export function createListWindow(st: ListState, api: ListApi) {
     // on the divider being there, so a window starting between them would
     // measure the row differently from how it is laid out once both show.
     while (start > 0 && st.virtualItems[start - 1]!.kind !== "message") start--;
+    return { start, end };
+  }
+
+  /** Count a DOM rebuild against the breaker; true when it must be skipped. */
+  function rebuildSuppressed(): boolean {
+    // Rate-limit DOM rebuilds only (expensive path).
+    // Scroll-driven spacer updates are cheap and don't need limiting.
+    st.renderWindowCount++;
+    if (st.renderWindowCount > 30) {
+      if (!st.renderWindowSuppressed) {
+        log.error("[MessageList] renderWindow REBUILD called >30 times in 2s — breaking loop");
+      }
+      st.renderWindowSuppressed = true;
+      return true;
+    }
+    if (st.renderWindowResetTimer === 0) {
+      st.renderWindowResetTimer = window.setTimeout(() => {
+        st.renderWindowCount = 0;
+        st.renderWindowResetTimer = 0;
+        if (st.renderWindowSuppressed) {
+          st.renderWindowSuppressed = false;
+          renderWindow();
+        }
+      }, 2000);
+    }
+    return false;
+  }
+
+  /** Full rebuild: requested by renderAll, or the window is following a
+   *  scroll into a region that is not rendered yet. */
+  function rebuildWindow(content: HTMLElement, start: number, end: number): void {
+    log.debug("renderWindow REBUILD", { start, end });
+
+    // Measure current elements before replacing.
+    measureRendered();
+
+    st.renderedStart = start;
+    st.renderedEnd = end;
+
+    // Rebuild content. The focused row's control is about to be detached by
+    // clearChildren; capture its identity so it can be restored on its
+    // replacement row (Q1: focus stays put through a virtualized rebuild).
+    const focusedRow = captureRowFocus();
+    if (api.editHoldsFocus()) st.editRefocus = true;
+    releaseTrackedMedia();
+    beginRowRender();
+    clearChildren(content);
+    const fragment = document.createDocumentFragment();
+    for (let i = start; i < end; i++) {
+      fragment.appendChild(renderVirtualItem(st.virtualItems[i]!));
+    }
+    content.appendChild(fragment);
+
+    // Measure newly rendered elements and update spacers
+    measureRendered();
+    updateSpacers();
+    restoreRowFocus(focusedRow);
+    refocusEditor();
+  }
+
+  function renderWindow(m?: ScrollMetrics): void {
+    if (
+      st.root === null ||
+      st.contentContainer === null ||
+      st.topSpacer === null ||
+      st.bottomSpacer === null
+    )
+      return;
+
+    st.scrollSnapshot = null;
+    const { scrollTop, clientHeight } = m ?? readMetrics(st.root);
+    st.lastViewportHeight = clientHeight;
+
+    if (st.virtualItems.length === 0) {
+      renderEmptyRegion(st.contentContainer, st.topSpacer, st.bottomSpacer);
+      return;
+    }
+
+    const { start, end } = windowRangeFor(scrollTop, clientHeight);
 
     // Rebuild the DOM when explicitly requested by renderAll (which sets
     // renderedStart to -1) or when the target range has left the rendered
     // window — scrolling past the overscan must materialize the rows the
     // spacers are standing in for. When the range is already fully rendered
-    // this is a no-op, which (together with the rebuild rate limiter below)
-    // prevents the height oscillation loop where images loading → height
-    // change → range recalculation → DOM rebuild → images reload → repeat.
-    const rangeAlreadyRendered =
-      st.renderedStart >= 0 && start >= st.renderedStart && end <= st.renderedEnd;
+    // this is a no-op, which (together with the rebuild rate limiter) prevents
+    // the height oscillation loop where images loading → height change →
+    // range recalculation → DOM rebuild → images reload → repeat. The
+    // ResizeObserver handles measurement and spacer updates when element
+    // sizes change; calling measureRendered + updateSpacers here would create
+    // an infinite feedback loop:
+    //   spacer change → scrollHeight change → scroll event → renderWindow
+    //   → spacer change → ...
+    if (st.renderedStart >= 0 && start >= st.renderedStart && end <= st.renderedEnd) return;
     // A scroll that only slides the window keeps the rows still in range and
     // builds just the ones entering it. It is cheap and never reloads a kept
-    // row's media, so it neither consumes the rebuild breaker below nor can
+    // row's media, so it neither consumes the rebuild breaker nor can
     // feed the height oscillation that breaker guards.
     if (
-      !rangeAlreadyRendered &&
       st.renderedStart >= 0 &&
       start < st.renderedEnd &&
       end > st.renderedStart &&
@@ -528,65 +543,8 @@ export function createListWindow(st: ListState, api: ListApi) {
       shiftWindow(start, end, { scrollTop, clientHeight });
       return;
     }
-    if (!rangeAlreadyRendered) {
-      // Rate-limit DOM rebuilds only (expensive path).
-      // Scroll-driven spacer updates are cheap and don't need limiting.
-      st.renderWindowCount++;
-      if (st.renderWindowCount > 30) {
-        if (!st.renderWindowSuppressed) {
-          log.error("[MessageList] renderWindow REBUILD called >30 times in 2s — breaking loop");
-        }
-        st.renderWindowSuppressed = true;
-        return;
-      }
-      if (st.renderWindowResetTimer === 0) {
-        st.renderWindowResetTimer = window.setTimeout(() => {
-          st.renderWindowCount = 0;
-          st.renderWindowResetTimer = 0;
-          if (st.renderWindowSuppressed) {
-            st.renderWindowSuppressed = false;
-            renderWindow();
-          }
-        }, 2000);
-      }
-
-      // Full rebuild: requested by renderAll, or the window is following a
-      // scroll into a region that is not rendered yet.
-      log.debug("renderWindow REBUILD", { start, end });
-
-      // Measure current elements before replacing.
-      measureRendered();
-
-      st.renderedStart = start;
-      st.renderedEnd = end;
-
-      // Rebuild content. The focused row's control is about to be detached by
-      // clearChildren; capture its identity so it can be restored on its
-      // replacement row (Q1: focus stays put through a virtualized rebuild).
-      const focusedRow = captureRowFocus();
-      if (api.editHoldsFocus()) st.editRefocus = true;
-      releaseTrackedMedia();
-      beginRowRender();
-      clearChildren(st.contentContainer);
-      const fragment = document.createDocumentFragment();
-      for (let i = start; i < end; i++) {
-        fragment.appendChild(renderVirtualItem(st.virtualItems[i]!));
-      }
-      st.contentContainer.appendChild(fragment);
-
-      // Measure newly rendered elements and update spacers
-      measureRendered();
-      updateSpacers();
-      restoreRowFocus(focusedRow);
-      refocusEditor();
-    } else {
-      // Target range already fully rendered: no-op. The ResizeObserver
-      // handles measurement and spacer updates when element sizes change.
-      // Calling measureRendered + updateSpacers here creates an infinite
-      // feedback loop:
-      //   spacer change → scrollHeight change → scroll event → renderWindow
-      //   → spacer change → ...
-    }
+    if (rebuildSuppressed()) return;
+    rebuildWindow(st.contentContainer, start, end);
   }
 
   // ---------------------------------------------------------------------------
@@ -598,7 +556,7 @@ export function createListWindow(st: ListState, api: ListApi) {
     st.allMessages = visibleMessages(st.replyParents);
     st.virtualItems = buildVirtualItems(
       st.allMessages,
-      resolveNewDividerIndex(st.allMessages),
+      resolveDivider(st.allMessages),
       blockedUsers(),
       st.shownBlocked,
     );
@@ -622,7 +580,7 @@ export function createListWindow(st: ListState, api: ListApi) {
   }
 
   return {
-    resolveNewDividerIndex,
+    resolveNewDividerIndex: resolveDivider,
     renderVirtualItem,
     releaseRow,
     itemKey,
