@@ -71,6 +71,9 @@ interface ReconnectRun {
   readonly channelId: number;
   readonly directUrl: string | undefined;
   readonly startedAt: number;
+  /** The shared state is no longer this loop's: a newer owner, or a leave. */
+  readonly displaced: () => boolean;
+  /** Displaced, or standing down for a join the user sent for another channel. */
   readonly superseded: () => boolean;
 }
 
@@ -164,19 +167,25 @@ function judgeMembership(run: ReconnectRun, membership: ServerMembership): Gate 
  *  unconditionally nulling: a newer attempt may already own `_state` (and its
  *  room), and this attempt's own room is never the one referenced there. */
 function resyncModulesIfSafe(run: ReconnectRun, current: SessionState): void {
-  if (!run.superseded() || current.type === "idle" || current.type === "connected") {
+  if (!run.displaced() || current.type === "idle" || current.type === "connected") {
     run.deps.syncModuleRooms();
   }
 }
 
-/** Tear down this attempt's own room and return; never the global session. */
-async function abortAttempt(run: ReconnectRun, room: Room): Promise<void> {
+/** Tear down this attempt's own room, never the global session. True when
+ *  the loop is over. The release is a round trip, so it looks again after it:
+ *  false when the join it stopped for is gone by then (the user clicked back),
+ *  and the loop goes on as after a failed attempt. */
+async function abortAttempt(run: ReconnectRun, room: Room): Promise<boolean> {
   try {
     await releaseRoom(room);
   } catch (disconnectErr) {
     log.warn("Failed to disconnect room after reconnect abort", disconnectErr);
   }
-  resyncModulesIfSafe(run, run.deps.getState());
+  const over = run.superseded();
+  if (!over) log.info("Auto-reconnect: the join it stopped for is gone — carrying on");
+  resyncModulesIfSafe(run, over ? run.deps.getState() : restateReconnecting(run.deps));
+  return over;
 }
 
 /** Re-state the room-less reconnecting attempt; returns the state it read. */
@@ -305,10 +314,25 @@ function handleAttemptFailure(
   resyncModulesIfSafe(run, current);
 }
 
+/** Clear this loop's session out of the way of the join in flight. */
+function handOver(deps: ReconnectDeps, channelId: number): void {
+  log.info("Auto-reconnect: handing the session to the join in flight", { channelId });
+  deps.yieldToSwitch();
+}
+
 /** Leave the call for real and tell the user. leaveVoice also sends voice_leave
  *  while the chat socket is connected, so the server removes our voice state —
- *  without that the server and other clients see us as a ghost participant. */
-function endCall(deps: ReconnectDeps): void {
+ *  without that the server and other clients see us as a ghost participant.
+ *
+ *  Not while a join the user already sent for another channel waits for its
+ *  answer: that voice_leave names no channel, so it would end the membership
+ *  the join just made, and clearing the store would turn its token away. The
+ *  loop then only clears its own session out of that join's way. */
+function endCall(deps: ReconnectDeps, channelId: number): void {
+  if (deps.switchInFlight()) {
+    handOver(deps, channelId);
+    return;
+  }
   deps.leaveVoice();
   leaveVoiceChannel();
   deps.onError(voiceText("reconnect.voiceLost"));
@@ -328,7 +352,7 @@ function endedAfterConnectedFailure(
 ): boolean {
   if (!run.deps.isStateConnected(run.channelId, room)) return false;
   log.error("Auto-reconnect failed after connecting — leaving voice", { attempt, error: err });
-  endCall(run.deps);
+  endCall(run.deps, run.channelId);
   return true;
 }
 
@@ -353,8 +377,7 @@ async function runAttempt(run: ReconnectRun, attempt: number): Promise<boolean> 
     attemptRoom = newRoom;
     if (run.superseded()) {
       log.info("Auto-reconnect aborted after room creation");
-      await abortAttempt(run, newRoom);
-      return true;
+      return await abortAttempt(run, newRoom);
     }
     // Set state to reconnecting with the fresh room-less attempt info;
     // the actual room appears in "connected" state after connect succeeds.
@@ -367,23 +390,20 @@ async function runAttempt(run: ReconnectRun, attempt: number): Promise<boolean> 
     const resolvedUrl = await deps.resolveUrl(run.url, run.directUrl);
     if (run.superseded()) {
       log.info("Auto-reconnect aborted before room connect");
-      await abortAttempt(run, newRoom);
-      return true;
+      return await abortAttempt(run, newRoom);
     }
 
     // E2EE: Regenerate ECDH keypair for the new session (forward secrecy)
     // and re-announce so other participants can re-wrap the room key for us.
     await deps.reannounceE2EE();
     if (run.superseded()) {
-      await abortAttempt(run, newRoom);
-      return true;
+      return await abortAttempt(run, newRoom);
     }
 
     await newRoom.connect(resolvedUrl, token, ROOM_CONNECT_OPTIONS);
     if (run.superseded()) {
       log.info("Auto-reconnect aborted after room connect");
-      await abortAttempt(run, newRoom);
-      return true;
+      return await abortAttempt(run, newRoom);
     }
 
     installedRoom = newRoom;
@@ -408,7 +428,7 @@ function giveUpReconnect(run: ReconnectRun): void {
     return;
   }
   log.error("Auto-reconnect giving up");
-  endCall(run.deps);
+  endCall(run.deps, run.channelId);
 }
 
 /** Attempt to auto-reconnect after unexpected disconnect using stored token.
@@ -424,6 +444,11 @@ export async function attemptAutoReconnect(
 ): Promise<void> {
   const state = deps.getState();
   const owner = state.type === "reconnecting" ? state.ac : null;
+  const displaced = (): boolean => reconnectSuperseded(signal, channelId, owner, deps.getState());
+  // A join the user already sent for another channel supersedes the loop as a
+  // newer owner does, before its answer has made it a session. The last look
+  // says why the loop stopped: every stop returns straight after one.
+  let standingDown = false;
   const run: ReconnectRun = {
     deps,
     initialToken,
@@ -431,9 +456,18 @@ export async function attemptAutoReconnect(
     channelId,
     directUrl,
     startedAt: Date.now(),
-    superseded: () => reconnectSuperseded(signal, channelId, owner, deps.getState()),
+    displaced,
+    superseded: () => displaced() || (standingDown = deps.switchInFlight()),
   };
+  await runReconnectLoop(run);
+  // Stopped for a join that is not a session yet: the state is still this
+  // loop's, so nothing else clears it out of that join's way.
+  if (standingDown && !displaced()) handOver(deps, channelId);
+}
 
+/** The attempts, one after another, until one ends the loop or it gives up. */
+async function runReconnectLoop(run: ReconnectRun): Promise<void> {
+  const { deps } = run;
   for (let attempt = 1; ; attempt++) {
     const delay = reconnectDelayMs(attempt);
     if (attempt > FAST_RECONNECT_ATTEMPTS) {

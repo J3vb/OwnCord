@@ -427,8 +427,10 @@ export function handleVoiceLeave(payload: Payload<"voice_leave">, clock: Reconne
   // voice_state happens to restore it, or forever if the switch then fails
   // server-side.
   // P2-T5: while the auto-reconnect loop owns the session, it decides what a
-  // released membership means — it rejoins, or gives up with its toast. Only a
-  // "reconnecting" badge can mean the loop, so any other clears the store now.
+  // released membership means — it rejoins, or gives up with its toast. A loop
+  // for the store's own channel always shows the "reconnecting" badge (one the
+  // user clicked away from runs under "joining", but the store then names the
+  // other channel), so any other status clears the store now.
   const loopMayOwn = voiceStore.getState().voiceStatus === "reconnecting";
   if (shouldTeardownSession && !loopMayOwn) leaveVoiceChannel();
   // A rejoin may come from another client; its own announce restates the list.
@@ -587,7 +589,9 @@ export function handleVoiceJoinRollback(payload: Payload<"error">, id: string | 
   // attempt ran to completion unseen (hot mic, no UI). isVoiceSessionActive()
   // also covers "connecting"/"reconnecting", and leaveVoice() itself
   // already tolerates a null Room, aborting the in-flight attempt at its
-  // next checkpoint.
+  // next checkpoint. It also reads true for a call the reconnect loop handed
+  // to this join before its answer: no session is left by then, but the
+  // server may still hold that call, and the voice_leave is what ends it.
   const { voiceStatus, currentChannelId } = voiceStore.getState();
   if (voiceStatus === "joining" && takeJoinRefusal(payload.code, id, currentChannelId)) {
     // A refused join abandons an AFK move: nothing to explain.

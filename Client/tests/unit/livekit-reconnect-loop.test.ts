@@ -77,6 +77,8 @@ describe("attemptAutoReconnect loop", () => {
     serverMembership: ReturnType<typeof vi.fn>;
     rejoinVoice: ReturnType<typeof vi.fn>;
     leaveVoice: ReturnType<typeof vi.fn>;
+    switchInFlight: ReturnType<typeof vi.fn>;
+    yieldToSwitch: ReturnType<typeof vi.fn>;
     onError: ReturnType<typeof vi.fn>;
     isStateConnected: ReturnType<typeof vi.fn>;
     disconnectSupersededLocalRoom: ReturnType<typeof vi.fn>;
@@ -125,6 +127,8 @@ describe("attemptAutoReconnect loop", () => {
       serverMembership: vi.fn().mockResolvedValue("held"),
       rejoinVoice: vi.fn(),
       leaveVoice: vi.fn(),
+      switchInFlight: vi.fn().mockReturnValue(false),
+      yieldToSwitch: vi.fn(),
       onError: vi.fn(),
       isStateConnected: vi.fn(
         (channelId: number, owned: Room) =>
@@ -980,6 +984,309 @@ describe("attemptAutoReconnect loop", () => {
           expect(logs.find("Auto-reconnect failed")).toHaveLength(0);
         },
       );
+    });
+  });
+
+  // The user clicked another voice channel: the store points at it and reads
+  // "joining", but until the server answers the session is still this loop's.
+  describe("a join for another channel is waiting for its answer", () => {
+    const HANDED = "Auto-reconnect: handing the session to the join in flight";
+
+    /** The click lands now. */
+    function clickAway(): void {
+      fn.switchInFlight.mockReturnValue(true);
+    }
+
+    /** The session's own hand-over: a local leave that keeps the join. */
+    function handOverAsTheSessionDoes(): void {
+      fn.yieldToSwitch.mockImplementation(() => {
+        state = { type: "idle" };
+      });
+    }
+
+    function expectHandedOverOnce(): void {
+      expect(fn.yieldToSwitch).toHaveBeenCalledTimes(1);
+      const entries = logs.find(HANDED);
+      expect(entries).toHaveLength(1);
+      expect(entries[0]?.data).toEqual({ channelId: CHANNEL });
+      // Nothing that would end the membership the join made, clear the store
+      // under its token, or tell the user the call was lost.
+      expect(fn.leaveVoice).not.toHaveBeenCalled();
+      expect(mocks.leaveVoiceChannel).not.toHaveBeenCalled();
+      expect(fn.onError).not.toHaveBeenCalled();
+      expect(fn.rejoinVoice).not.toHaveBeenCalled();
+      expect(vi.getTimerCount()).toBe(0);
+    }
+
+    it("hands the session over instead of giving up when retrying is no longer allowed", async () => {
+      handOverAsTheSessionDoes();
+      fn.canKeepRetrying.mockImplementation(() => {
+        clickAway();
+        return false;
+      });
+      await runFirstAttempt();
+      expectHandedOverOnce();
+      expect(fn.createRoom).not.toHaveBeenCalled();
+      expect(logs.find("Auto-reconnect give-up skipped — superseded")).toHaveLength(1);
+      expect(logs.find("Auto-reconnect giving up")).toHaveLength(0);
+    });
+
+    it("hands the session over instead of giving up at the ceiling", async () => {
+      handOverAsTheSessionDoes();
+      const { loop } = await reachSlowPhase();
+      claimFailures(5);
+      skew = CEILING_MS;
+      clickAway();
+      await vi.advanceTimersByTimeAsync(SLOW_DELAY_MS);
+      await loop;
+      expectHandedOverOnce();
+      expect(fn.createRoom).toHaveBeenCalledTimes(5);
+    });
+
+    it("stops at the end of a wait without starting an attempt", async () => {
+      handOverAsTheSessionDoes();
+      const loop = start();
+      clickAway();
+      await vi.advanceTimersByTimeAsync(3000);
+      await loop;
+      expectHandedOverOnce();
+      expect(fn.serverMembership).not.toHaveBeenCalled();
+      expect(fn.createRoom).not.toHaveBeenCalled();
+      expect(logs.find(ABORTED)).toHaveLength(1);
+    });
+
+    it("does not rejoin the old channel when the roster shows it released", async () => {
+      handOverAsTheSessionDoes();
+      fn.serverMembership.mockImplementation(async () => {
+        clickAway();
+        return "released";
+      });
+      await runFirstAttempt();
+      expectHandedOverOnce();
+      expect(fn.createRoom).not.toHaveBeenCalled();
+    });
+
+    it("does not refresh the token for the old channel before a slow wait", async () => {
+      handOverAsTheSessionDoes();
+      fn.tokenAgeMs.mockReturnValue(TOKEN_REFRESH_AGE_MS);
+      const { loop } = await reachSlowPhase(clickAway);
+      claimFailures(5);
+      await loop;
+      expectHandedOverOnce();
+      expect(fn.refreshTokenAndWait).not.toHaveBeenCalled();
+      expect(fn.serverMembership).toHaveBeenCalledTimes(5);
+    });
+
+    it("writes nothing after a failed attempt and hands over at the next check", async () => {
+      handOverAsTheSessionDoes();
+      room.connect.mockImplementation(async () => {
+        clickAway();
+        throw new Error("sfu down");
+      });
+      const loop = start();
+      await vi.advanceTimersByTimeAsync(3000);
+      claimFailures(1);
+      const writes = fn.setState.mock.calls.length;
+      expect(fn.yieldToSwitch).not.toHaveBeenCalled();
+      expect(mocks.releaseRoom).toHaveBeenCalledWith(room);
+      await vi.advanceTimersByTimeAsync(6000);
+      await loop;
+      expectHandedOverOnce();
+      expect(fn.setState).toHaveBeenCalledTimes(writes);
+      // The modules leave the released room at once, not at the hand-over.
+      expect(fn.syncModuleRooms).toHaveBeenCalledTimes(1);
+      expect(fn.createRoom).toHaveBeenCalledTimes(1);
+    });
+
+    type Step = "createRoom" | "resolveUrl" | "reannounceE2EE" | "connect";
+    const awaits: Array<[string, Step, Step[]]> = [
+      ["creating the room", "createRoom", ["resolveUrl", "reannounceE2EE", "connect"]],
+      ["resolving the URL", "resolveUrl", ["reannounceE2EE", "connect"]],
+      ["announcing the E2EE key", "reannounceE2EE", ["connect"]],
+      ["connecting the room", "connect", []],
+    ];
+
+    function step(name: Step): ReturnType<typeof vi.fn> {
+      return name === "connect" ? room.connect : fn[name];
+    }
+
+    it.each(awaits)(
+      "releases its own room, installs nothing and hands over when the click lands while %s",
+      async (_name, during, never) => {
+        handOverAsTheSessionDoes();
+        step(during).mockImplementation(async () => {
+          clickAway();
+          if (during === "createRoom") return asRoom(room);
+          return during === "resolveUrl" ? RESOLVED : undefined;
+        });
+        await runFirstAttempt();
+        expectHandedOverOnce();
+        for (const later of never) expect(step(later)).not.toHaveBeenCalled();
+        expect(mocks.releaseRoom).toHaveBeenCalledTimes(1);
+        expect(mocks.releaseRoom).toHaveBeenCalledWith(room);
+        expect(fn.setState).not.toHaveBeenCalledWith(
+          expect.objectContaining({ type: "connected" }),
+        );
+        expect(mocks.setJoinedVoiceStatus).not.toHaveBeenCalled();
+        expect(fn.sweepPublications).not.toHaveBeenCalled();
+        // The modules leave the released room before the hand-over.
+        expect(fn.syncModuleRooms).toHaveBeenCalledTimes(1);
+        expect(fn.syncModuleRooms.mock.invocationCallOrder[0]).toBeLessThan(
+          fn.yieldToSwitch.mock.invocationCallOrder[0]!,
+        );
+        expect(fn.createRoom).toHaveBeenCalledTimes(1);
+      },
+    );
+
+    // The stop is not instant: releasing a connected room takes a round trip.
+    // If the join is gone again by then (the user clicked back), the loop
+    // looks once more and goes on, as after a failed attempt.
+    it("goes on reconnecting when the join is gone again once the stopped attempt released its room", async () => {
+      room.connect.mockImplementationOnce(async () => {
+        clickAway();
+      });
+      let released!: () => void;
+      mocks.releaseRoom.mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            released = resolve;
+          }),
+      );
+      const loop = start();
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(mocks.releaseRoom).toHaveBeenCalledTimes(1);
+      fn.switchInFlight.mockReturnValue(false);
+      released();
+      await vi.advanceTimersByTimeAsync(6000);
+      await loop;
+      expect(fn.yieldToSwitch).not.toHaveBeenCalled();
+      expect(
+        logs.find("Auto-reconnect: the join it stopped for is gone — carrying on"),
+      ).toHaveLength(1);
+      expect(fn.createRoom).toHaveBeenCalledTimes(2);
+      // The modules left the released room before the next attempt took them.
+      expect(fn.syncModuleRooms).toHaveBeenCalledTimes(1);
+      expect(state).toMatchObject({ type: "connected", channelId: CHANNEL });
+    });
+
+    it("hands over once the stopped attempt released its room with the join still waiting", async () => {
+      handOverAsTheSessionDoes();
+      room.connect.mockImplementation(async () => {
+        clickAway();
+      });
+      let released!: () => void;
+      mocks.releaseRoom.mockImplementation(
+        () =>
+          new Promise<void>((resolve) => {
+            released = resolve;
+          }),
+      );
+      const loop = start();
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(fn.yieldToSwitch).not.toHaveBeenCalled();
+      released();
+      await loop;
+      expectHandedOverOnce();
+      expect(fn.createRoom).toHaveBeenCalledTimes(1);
+    });
+
+    it("leaves the state alone when the join's token takes it while the stopped attempt releases its room", async () => {
+      const newer: FakeState = { type: "connecting" };
+      room.connect.mockImplementation(async () => {
+        clickAway();
+      });
+      mocks.releaseRoom.mockImplementation(async () => {
+        state = newer;
+      });
+      await runFirstAttempt();
+      expect(fn.yieldToSwitch).not.toHaveBeenCalled();
+      expect(state).toBe(newer);
+      expect(mocks.releaseRoom).toHaveBeenCalledTimes(1);
+    });
+
+    // A failed attempt does not stop the loop, so nothing is left ownerless:
+    // if the join is gone by the next look, the loop simply goes on.
+    it("goes on reconnecting when the join is gone again after a failed attempt", async () => {
+      room.connect.mockImplementationOnce(async () => {
+        clickAway();
+        throw new Error("sfu down");
+      });
+      const loop = start();
+      await vi.advanceTimersByTimeAsync(3000);
+      claimFailures(1);
+      fn.switchInFlight.mockReturnValue(false);
+      await vi.advanceTimersByTimeAsync(6000);
+      await loop;
+      expect(fn.yieldToSwitch).not.toHaveBeenCalled();
+      expect(fn.createRoom).toHaveBeenCalledTimes(2);
+      expect(state).toMatchObject({ type: "connected", channelId: CHANNEL });
+    });
+
+    it("carries on when the join is gone again before the loop looked", async () => {
+      const loop = start();
+      clickAway();
+      await vi.advanceTimersByTimeAsync(2999);
+      fn.switchInFlight.mockReturnValue(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await loop;
+      expect(fn.yieldToSwitch).not.toHaveBeenCalled();
+      expect(state).toMatchObject({ type: "connected", channelId: CHANNEL });
+    });
+
+    it("hands the session over instead of ending the call when the tail fails after connecting", async () => {
+      handOverAsTheSessionDoes();
+      fn.setupAudioPipeline.mockImplementation(() => {
+        clickAway();
+        throw new Error("pipeline broke");
+      });
+      await runFirstAttempt();
+      expectHandedOverOnce();
+      // The session's hand-over disconnects the room it holds.
+      expect(mocks.releaseRoom).not.toHaveBeenCalled();
+      expect(logs.find("Auto-reconnect failed")).toHaveLength(0);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(fn.createRoom).toHaveBeenCalledTimes(1);
+      expectConsole("error", "Auto-reconnect failed after connecting — leaving voice");
+    });
+
+    it("lets a connected tail finish when the click lands after the room became the session", async () => {
+      fn.restoreLocalVoiceState.mockImplementation(async () => {
+        clickAway();
+      });
+      await runFirstAttempt();
+      expect(fn.yieldToSwitch).not.toHaveBeenCalled();
+      expect(fn.noticeLostMedia).toHaveBeenCalledTimes(1);
+      expect(state).toMatchObject({ type: "connected", channelId: CHANNEL });
+    });
+
+    // Once the answer is a token, the join's own attempt owns the state while
+    // the store still reads "joining" on the other channel.
+    const newOwners: Array<[string, () => FakeState]> = [
+      ["the join's own attempt", () => ({ type: "connecting" })],
+      ["a leave", () => ({ type: "idle" })],
+    ];
+
+    it.each(newOwners)("leaves the state alone once it belongs to %s", async (_name, next) => {
+      const newer = next();
+      const loop = start();
+      clickAway();
+      state = newer;
+      await vi.advanceTimersByTimeAsync(3000);
+      await loop;
+      expect(fn.yieldToSwitch).not.toHaveBeenCalled();
+      expect(logs.find(HANDED)).toHaveLength(0);
+      expect(state).toBe(newer);
+      expect(fn.leaveVoice).not.toHaveBeenCalled();
+    });
+
+    it("leaves the state alone when the user left while it was stopping for the join", async () => {
+      const loop = start();
+      clickAway();
+      await vi.advanceTimersByTimeAsync(2999);
+      ac.abort();
+      await vi.advanceTimersByTimeAsync(1);
+      await loop;
+      expect(fn.yieldToSwitch).not.toHaveBeenCalled();
     });
   });
 

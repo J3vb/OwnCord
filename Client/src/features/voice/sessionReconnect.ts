@@ -4,6 +4,7 @@
 import type { Room } from "livekit-client";
 import {
   voiceStore,
+  leaveVoiceChannel,
   setVoiceStatus,
   setLocalCamera,
   setLocalScreenshare,
@@ -22,11 +23,15 @@ import {
 } from "./screenShare";
 import type { JoinOrchestration } from "./joinOrchestration";
 import { isDmKeptForCall } from "../direct-messages/keptCallDms";
-import { noteJoinSent } from "./joinRequest";
+import { joinSequence, noteJoinSent } from "./joinRequest";
 import { restoreMediaAfterReconnect } from "./localVoiceRestore";
 import { isLinuxDesktop } from "./native/platform";
 import { voiceText } from "../../i18n/voice";
 import { SessionTokens } from "./sessionTokens";
+
+/** How long a session handed to a join waits for that join's answer. The
+ *  server answers a voice_join in one round trip; past this it was lost. */
+const YIELD_ANSWER_WAIT_MS = 15_000;
 
 export abstract class SessionReconnect extends SessionTokens {
   protected abstract readonly _join: JoinOrchestration;
@@ -84,7 +89,10 @@ export abstract class SessionReconnect extends SessionTokens {
             lastDirectUrl,
             ac,
           });
-          setVoiceStatus("reconnecting");
+          // A join already sent for another channel keeps its "joining": its
+          // refusal is only rolled back under that status, and the loop about
+          // to start stands down for it.
+          if (!this.joinInFlightElsewhere(channelId)) setVoiceStatus("reconnecting");
         }
         // ac === null: reconnect succeeded — connectAndSetup already set "connected".
         // No transition needed; just discard stale pending fields if any.
@@ -204,6 +212,15 @@ export abstract class SessionReconnect extends SessionTokens {
         noteJoinSent(this.ws?.send({ type: "voice_join", payload: { channel_id: channelId } }));
       },
       leaveVoice: () => this.leaveVoice(this.ws?.getState() === "connected"),
+      switchInFlight: () => this.joinInFlightElsewhere(channelId),
+      yieldToSwitch: () => {
+        void this.leaveVoice(false, true);
+        this._yieldedToJoin = true;
+        // leaveVoice wrote "idle"; the join's refusal is only rolled back
+        // while the status reads "joining".
+        setVoiceStatus("joining");
+        this.armYieldWait(joinSequence());
+      },
       sweepPublications: (room) => this.sweepPublications(room),
       onError: (msg) => this.onErrorCallback?.(msg),
       isStateConnected: (id, room) => this._join.isStateConnected(id, room),
@@ -215,6 +232,37 @@ export abstract class SessionReconnect extends SessionTokens {
       },
       noticeLostMedia: () => this.restoreLostMedia(),
     });
+  }
+
+  /** True while a join the user sent for a channel other than `channelId`
+   *  waits for its answer. The store is where a click is recorded before its
+   *  voice_join is answered (handleVoiceToken reads the same record). */
+  private joinInFlightElsewhere(channelId: number): boolean {
+    const { currentChannelId, voiceStatus } = voiceStore.getState();
+    return voiceStatus === "joining" && currentChannelId !== null && currentChannelId !== channelId;
+  }
+
+  /** Bound the wait for the answer of join number `join`, the one the session
+   *  was handed to. A token or a refusal clears the timer through
+   *  clearYield(). With neither, the join was lost: the call ends the way a
+   *  reconnect that gave up does, so the server drops whichever membership it
+   *  still holds and the user can click again. */
+  private armYieldWait(join: number): void {
+    this._yieldTimer = setTimeout(() => {
+      this._yieldTimer = null;
+      const sent = joinSequence();
+      const socket = this.ws?.getState();
+      const socketSettled = socket === "connected" || socket === "disconnected";
+      // A newer join has its own round trip to wait out, and a socket still
+      // reconnecting can carry neither the answer nor the leave yet.
+      if (sent !== join || (socket !== undefined && !socketSettled)) {
+        this.armYieldWait(sent);
+        return;
+      }
+      void this.leaveVoice(socket === "connected");
+      leaveVoiceChannel();
+      this.onErrorCallback?.(voiceText("reconnect.voiceLost"));
+    }, YIELD_ANSWER_WAIT_MS);
   }
 
   /** Once a reconnect (or its rejoin) lands: bring back what the drop stopped. */

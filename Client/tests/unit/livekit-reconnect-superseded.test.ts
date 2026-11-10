@@ -37,6 +37,8 @@ describe("attemptAutoReconnect: superseded before the slow-phase token refresh",
       canKeepRetrying: () => true,
       serverMembership: async () => "held",
       leaveVoice: vi.fn(),
+      switchInFlight: () => false,
+      yieldToSwitch: vi.fn(),
       onError: vi.fn(),
     } as unknown as ReconnectDeps;
   });
