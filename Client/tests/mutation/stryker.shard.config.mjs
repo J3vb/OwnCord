@@ -28,6 +28,7 @@ export const shards = {
     "src/features/voice/native/screenAudioTrack.ts",
     "src/features/voice/sileroDetection.ts",
     "src/features/voice/sileroWorker.ts",
+    "src/features/voice/videoBitrateCap.ts",
     "src/lib/voice/audioPipeline.ts",
     "src/lib/voice/videoPresets.ts",
   ],
@@ -110,7 +111,6 @@ export const shards = {
     "src/features/voice/trustedKeysPanel.ts",
     "src/lib/voice/livekitE2EE.ts",
     "src/lib/voice/shareResolutionRecovery.ts",
-    "src/lib/voice/videoBitrateCap.ts",
     "src/lib/voice/watchRequest.ts",
   ],
   "audio-media-1": [

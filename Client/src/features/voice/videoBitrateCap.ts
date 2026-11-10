@@ -1,7 +1,7 @@
 // The server's video upload cap per person (camera and screen share together),
 // in bits per second; 0 means no cap. Set from auth_ok on every connect and
 // resume and from the video_bitrate_cap frame after an admin saves it.
-import { registerSessionReset } from "../net/sessionRegistry";
+import { registerSessionReset } from "../../lib/net/sessionRegistry";
 
 let cap = 0;
 

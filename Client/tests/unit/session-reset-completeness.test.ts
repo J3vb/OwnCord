@@ -91,7 +91,7 @@ import { createAvatarElement } from "../../src/features/profiles/avatar";
 import { isVoiceMovePending, noteVoiceMoved } from "../../src/features/voice/moveHint";
 import { isVoiceLeaveOwed, noteVoiceLeave } from "../../src/features/voice/leaveOwed";
 import { noteWatchSent, takeWatchRefusal } from "../../src/lib/voice/watchRequest";
-import { applyVideoBitrateCap, videoBitrateCap } from "../../src/lib/voice/videoBitrateCap";
+import { applyVideoBitrateCap, videoBitrateCap } from "../../src/features/voice/videoBitrateCap";
 import { getChannelMutesHost, setChannelMutesHost } from "../../src/lib/prefs/channelMutes";
 import {
   bindGifFavoritesApi,

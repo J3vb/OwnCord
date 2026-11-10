@@ -26,7 +26,7 @@ import {
   voiceStateEvent,
 } from "../../helpers/dispatcherHarness";
 import { signInAs } from "../../helpers/storeSeeds";
-import { onVideoBitrateCap, videoBitrateCap } from "@lib/voice/videoBitrateCap";
+import { onVideoBitrateCap, videoBitrateCap } from "../../../src/features/voice/videoBitrateCap";
 
 vi.mock("@lib/notifications", () => dispatcherMocks.notificationsMock());
 vi.mock("@lib/voice/livekitSession", () => dispatcherMocks.livekitSessionMock());

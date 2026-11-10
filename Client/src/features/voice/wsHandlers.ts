@@ -24,7 +24,7 @@ import { ensureIdentityKeyPublished } from "../../lib/net/identity";
 import { showToast } from "../../lib/ui/toast";
 import { noteJoinFailed } from "./joinBackoff";
 import { takeWatchRefusal } from "../../lib/voice/watchRequest";
-import { applyVideoBitrateCap } from "../../lib/voice/videoBitrateCap";
+import { applyVideoBitrateCap } from "./videoBitrateCap";
 import {
   joinSequence,
   noteJoinSent,

@@ -24,7 +24,7 @@ import { safetyText } from "../../i18n/safety";
 import { connectText } from "../../i18n/connect";
 import { noteJoinSent } from "../voice/joinRequest";
 import { sendOwedVoiceLeave } from "../voice/leaveOwed";
-import { applyVideoBitrateCap } from "../../lib/voice/videoBitrateCap";
+import { applyVideoBitrateCap } from "../voice/videoBitrateCap";
 import { livekitSession, log, route } from "./dispatchContext";
 import type { DispatchApi, DispatchWs, Payload, ReconnectClock, WsRoute } from "./dispatchContext";
 import type { ConnectionState } from "../../lib/ws";
