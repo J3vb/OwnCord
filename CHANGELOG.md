@@ -70,6 +70,7 @@ and only when it changes something a contributor or fork holder must do
 ### Added
 
 - Admin: Settings > Voice has **Max video upload per person** (default No limit), the most one member may send for camera and screen share together. The server sends it to members' apps at once, and the apps follow a change live with no rejoin, so each viewer receives at most that much from one member (the member's own upload can be a little higher, because it also carries the lower-quality layers) (the share gets 75% and the camera 25% when both are on). A share held back by the limit says so in its stream info.
+- Admin: Settings > Voice has **Server upload speed (Mbit/s)**. Type it once and the page shows, under the video cap, about how many people can watch one stream at the same time, with and without a cap.
 - Voice: Enhanced Noise Suppression now recognizes short replies like "yes" or "ok", and the **Voice Buffer** slider lets you tune the microphone delay during a call.
 - Zooming a screen share (Ctrl+scroll) shows a small overview you can drag to move around, with the zoom level and a Reset button. It hides again at 100%.
 - On Linux, a crash report after an unexpected exit now includes the app's last error output, which names the library that closed the app when it exits without a crash signal.
@@ -84,6 +85,8 @@ and only when it changes something a contributor or fork holder must do
 - A webcam using H.264 could quietly fall back to the slow software encoder. Webcams are now checked like screen shares and switch to VP8 when that happens, and changing the shared window, quality or camera checks again.
 - Android: the app now stops its file-saving and sharing work cleanly when Android closes or recreates the app screen.
 - Desktop: signing out, switching servers or accepting a changed server certificate now closes the voice connection's local tunnel right away.
+- Voice: a reconnect that reached the voice server but could not finish setting the call up left you shown as connected with no audio. The call now ends with "Voice connection lost" so you can rejoin.
+- Voice: a reconnect could stay on "Reconnecting voice…" for good if a token refresh or a check of the voice roster failed part way. It now carries on, and still gives up after 5 minutes.
 - Desktop and Android: saved logins, media and game activity, notifications, saving or sharing files and installing an update no longer hold up the rest of the app while the system is slow to answer.
 
 ### Under the hood

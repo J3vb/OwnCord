@@ -89,6 +89,8 @@ func normalizeValueSetting(key, value string) (normalized string, ok bool, err e
 		normalized, err = normalizeMaxUploadBytes(value)
 	case VoiceMaxVideoKbpsKey:
 		normalized, err = normalizeVoiceMaxVideoKbps(key, value)
+	case ServerUploadMbpsKey:
+		normalized, err = normalizeServerUploadMbps(key, value)
 	case VoiceOwnerMovableKey, GameActivityEnabledKey:
 		var parsed bool
 		if parsed, err = parseSettingsPatchBool(value); err != nil {

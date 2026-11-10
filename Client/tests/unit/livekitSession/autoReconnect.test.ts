@@ -404,6 +404,59 @@ describe("LiveKitSession", () => {
       expect((session as any)._state.latestToken).toBe("fresh-token");
     });
 
+    // The new room is the session from the moment "connected" is written, and
+    // the rest of the setup runs after that. A failure there used to release
+    // the room and stop the loop with the state still "connected" on it.
+    it("ends the call when the reconnect fails after the new room became the session", async () => {
+      enterReconnecting(session, 5, { latestToken: "token" });
+      session.setServerHost("localhost:7880");
+      const send = vi.fn();
+      session.setWsClient({ send, getState: () => "connected", ping: async () => {} } as any);
+      const errorCb = vi.fn();
+      session.setOnError(errorCb);
+      vi.spyOn((session as any)._audioPipeline, "setupAudioPipeline").mockImplementation(() => {
+        throw new Error("pipeline broke");
+      });
+
+      await runReconnect(session, 5, { token: "token" });
+
+      expect((session as any)._state.type).toBe("idle");
+      expect(setVoiceStatus).toHaveBeenLastCalledWith("idle");
+      expect(leaveVoiceChannel).toHaveBeenCalledTimes(1);
+      expect(errorCb).toHaveBeenCalledWith("Voice connection lost — failed to reconnect");
+      expect(mockRoom.disconnect).toHaveBeenCalledTimes(1);
+      expect(send.mock.calls.filter(([m]) => m.type === "voice_leave")).toHaveLength(1);
+      // The loop is over: nothing connects again.
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(mockRoom.connect).toHaveBeenCalledTimes(1);
+    });
+
+    // The same late failure, but the user left first: the state is no longer
+    // this attempt's connected room, so the attempt must not end anything.
+    it("leaves a session it no longer owns alone when the late failure follows a leave", async () => {
+      enterReconnecting(session, 5, { latestToken: "token" });
+      session.setServerHost("localhost:7880");
+      const send = vi.fn();
+      session.setWsClient({ send, getState: () => "connected", ping: async () => {} } as any);
+      const errorCb = vi.fn();
+      session.setOnError(errorCb);
+      vi.spyOn((session as any)._audioPipeline, "setupAudioPipeline").mockImplementation(() => {
+        void session.leaveVoice(false);
+        throw new Error("pipeline broke");
+      });
+
+      const reconnectPromise = startReconnect(session, 5, { token: "token" });
+      await vi.advanceTimersByTimeAsync(3100);
+      await vi.advanceTimersByTimeAsync(60_000);
+      await reconnectPromise;
+
+      expect((session as any)._state.type).toBe("idle");
+      expect(send.mock.calls.filter(([m]) => m.type === "voice_leave")).toHaveLength(0);
+      expect(leaveVoiceChannel).not.toHaveBeenCalled();
+      expect(errorCb).not.toHaveBeenCalled();
+      expect(mockRoom.connect).toHaveBeenCalledTimes(1);
+    });
+
     it("cleans up reconnect room when signal aborts after connect resolves", async () => {
       enterReconnecting(session, 5, { latestToken: "token" });
       session.setServerHost("localhost:7880");

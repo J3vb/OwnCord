@@ -54,3 +54,30 @@ func TestVoiceMaxVideoBitrate(t *testing.T) {
 		t.Errorf("failed read = ok %v, err %v; want false and the wrapped error", ok, err)
 	}
 }
+
+func TestSettings_PatchServerUploadMbps(t *testing.T) {
+	svc, database := newSettingsService(t)
+	ctx := context.Background()
+	for _, tc := range []struct{ in, stored string }{
+		{"0", "0"},
+		{" 1 ", "1"},
+		{"250", "250"},
+		{"100000", "100000"},
+	} {
+		if _, err := svc.Patch(ctx, 0, map[string]string{ServerUploadMbpsKey: tc.in}); err != nil {
+			t.Fatalf("Patch %q: %v", tc.in, err)
+		}
+		if got, err := database.GetSetting(ctx, ServerUploadMbpsKey); err != nil || got != tc.stored {
+			t.Errorf("stored after %q = %q, %v; want %q", tc.in, got, err, tc.stored)
+		}
+	}
+	for _, bad := range []string{"", "-1", "100001", "1.5", "fast", "10 Mbps"} {
+		_, err := svc.Patch(ctx, 0, map[string]string{ServerUploadMbpsKey: bad})
+		if !errors.Is(err, ErrBadRequest) {
+			t.Errorf("Patch %q err = %v, want ErrBadRequest", bad, err)
+		}
+	}
+	if got, _ := database.GetSetting(ctx, ServerUploadMbpsKey); got != "100000" {
+		t.Errorf("a refused value changed the row to %q", got)
+	}
+}

@@ -5,7 +5,10 @@
 //
 // WP 6.10d: the Settings page's Voice card (its AFK part) and the AFK badge on the
 // Channels page, driven against the real admin scripts in jsdom.
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { describe, it, expect } from "vitest";
+import { SCREENSHARE_PUBLISH_BITRATES } from "../../src/lib/voice/videoPresets";
 import {
   adminHtmlWithBridge,
   bootAdminPanel,
@@ -13,6 +16,7 @@ import {
   type FetchCall,
   type PanelReply as Reply,
 } from "../helpers/adminPanelFetch";
+import { repoRoot } from "../helpers/repoRoot";
 
 const BRIDGE = `<script>
 window.__test = {
@@ -58,6 +62,7 @@ describe("Server/admin/static — AFK card", () => {
     put?: Reply;
     timeout?: string;
     videoCap?: string;
+    upload?: string;
   }) {
     return (path: string, method: string): Reply => {
       if (path === "/settings" && method === "GET") {
@@ -67,6 +72,7 @@ describe("Server/admin/static — AFK card", () => {
             registration_mode: "invite",
             ...(opts.timeout ? { afk_timeout_seconds: opts.timeout } : {}),
             ...(opts.videoCap ? { voice_max_video_kbps: opts.videoCap } : {}),
+            ...(opts.upload ? { server_upload_mbps: opts.upload } : {}),
           },
         };
       }
@@ -149,6 +155,92 @@ describe("Server/admin/static — AFK card", () => {
     const kept = custom.doc.getElementById("s-voice_max_video_kbps") as HTMLSelectElement;
     expect(kept.value).toBe("3500");
     expect(kept.selectedOptions[0]?.textContent).toBe("3.5 Mbps");
+  });
+
+  const hintText = (doc: Document) => doc.getElementById("videoCapHint")?.textContent ?? "";
+  const fire = (doc: Document, el: Element, type: "input" | "change") =>
+    el.dispatchEvent(
+      new (doc.defaultView as Window & typeof globalThis).Event(type, { bubbles: true }),
+    );
+  const patchBody = (calls: FetchCall[]) =>
+    calls.find((c) => c.path === "/settings" && c.method === "PATCH")?.body;
+
+  it("the upload speed shows no hint while empty, follows the cap live, and saves only a change", async () => {
+    const calls: FetchCall[] = [];
+    const b = await boot(calls, responder({ channels: CHANNELS }));
+    await mountSettings(b.bridge, b.doc);
+    const up = b.doc.getElementById("s-server_upload_mbps") as HTMLInputElement;
+    const cap = b.doc.getElementById("s-voice_max_video_kbps") as HTMLSelectElement;
+    expect(up.value).toBe("");
+    expect(hintText(b.doc)).toBe("");
+    (b.doc.getElementById("saveSettingsBtn") as HTMLButtonElement).disabled = false;
+    await b.bridge.saveSettings();
+    expect(patchBody(calls)).toBeUndefined();
+
+    up.value = "100";
+    fire(b.doc, up, "input");
+    expect(hintText(b.doc)).toBe(
+      "About 8 people can watch a full-quality stream with no cap (at 4 Mbps: 20)",
+    );
+    expect((b.doc.getElementById("saveSettingsBtn") as HTMLButtonElement).disabled).toBe(false);
+    cap.value = "4000";
+    fire(b.doc, cap, "change");
+    expect(hintText(b.doc)).toBe("About 20 people can watch a stream at this cap (with no cap: 8)");
+    cap.value = "0";
+    fire(b.doc, cap, "change");
+    expect(hintText(b.doc)).toContain("with no cap (at 4 Mbps: 20)");
+    up.value = "5";
+    fire(b.doc, up, "input");
+    expect(hintText(b.doc)).toBe(
+      "Not even one person can watch a full-quality stream with no cap (at 4 Mbps: 1)",
+    );
+    up.value = "0";
+    fire(b.doc, up, "input");
+    expect(hintText(b.doc)).toBe("");
+    up.value = "100";
+    fire(b.doc, up, "input");
+    await b.bridge.saveSettings();
+    expect(patchBody(calls)).toEqual({ server_upload_mbps: "100" });
+  });
+
+  it("a stored upload value the panel cannot read shows empty, no hint, and is not rewritten", async () => {
+    for (const stored of ["fast", "1.5", "0"]) {
+      const calls: FetchCall[] = [];
+      const b = await boot(calls, responder({ channels: CHANNELS, upload: stored }));
+      await mountSettings(b.bridge, b.doc);
+      const up = b.doc.getElementById("s-server_upload_mbps") as HTMLInputElement;
+      expect(up.value).toBe("");
+      expect(hintText(b.doc)).toBe("");
+      (b.doc.getElementById("saveSettingsBtn") as HTMLButtonElement).disabled = false;
+      await b.bridge.saveSettings();
+      expect(patchBody(calls)).toBeUndefined();
+      up.value = "50";
+      fire(b.doc, up, "input");
+      (b.doc.getElementById("saveSettingsBtn") as HTMLButtonElement).disabled = false;
+      await b.bridge.saveSettings();
+      expect(patchBody(calls)).toEqual({ server_upload_mbps: "50" });
+    }
+    const typedCalls: FetchCall[] = [];
+    const typed = await boot(typedCalls, responder({ channels: CHANNELS, upload: "100" }));
+    await mountSettings(typed.bridge, typed.doc);
+    const typedUp = typed.doc.getElementById("s-server_upload_mbps") as HTMLInputElement;
+    typedUp.value = "12.5";
+    fire(typed.doc, typedUp, "input");
+    (typed.doc.getElementById("saveSettingsBtn") as HTMLButtonElement).disabled = false;
+    await typed.bridge.saveSettings();
+    expect(patchBody(typedCalls)).toEqual({ server_upload_mbps: "12.5" });
+    const ok = await boot([], responder({ channels: CHANNELS, upload: "250", videoCap: "10000" }));
+    await mountSettings(ok.bridge, ok.doc);
+    expect((ok.doc.getElementById("s-server_upload_mbps") as HTMLInputElement).value).toBe("250");
+    expect(hintText(ok.doc)).toBe(
+      "About 20 people can watch a stream at this cap (with no cap: 20)",
+    );
+  });
+
+  it("the hint's no-cap rate is the Source screen share rate the client publishes", () => {
+    const js = readFileSync(path.join(repoRoot, "Server/admin/static/js/server.js"), "utf8");
+    const mbps = /const SOURCE_STREAM_MBPS=(\d+);/.exec(js)?.[1];
+    expect(Number(mbps) * 1_000_000).toBe(SCREENSHARE_PUBLISH_BITRATES.source);
   });
 
   it("saves the channel on its own endpoint and clears it with null", async () => {

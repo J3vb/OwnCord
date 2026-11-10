@@ -62,6 +62,7 @@ export const shards = {
   "livekit-4": [
     "src/features/voice/joinBackoff.ts",
     "src/features/voice/localVoiceRestore.ts",
+    "src/features/voice/reconnectDeps.ts",
     "src/features/voice/roomLifecycle.ts",
     "src/features/voice/talkSlot.ts",
     "src/lib/prefs/serverRailLayout.ts",

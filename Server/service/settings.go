@@ -63,6 +63,8 @@ var allowedSettingKeys = map[string]struct{}{
 	WelcomeChannelKey:      {},
 	// Video upload cap per person in kbit/s; 0 or missing means no cap.
 	VoiceMaxVideoKbpsKey: {},
+	// Server upload speed in Mbit/s for the admin panel's viewer estimate; 0 or missing means not set.
+	ServerUploadMbpsKey: {},
 }
 
 // VoiceOwnerMovableKey holds whether MOVE_MEMBERS holders may move the owner
