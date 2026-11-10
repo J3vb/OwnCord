@@ -862,8 +862,12 @@ mod linux {
 
 #[cfg(target_os = "linux")]
 fn main() {
+    // Captures are released on tokio's blocking pool, whose idle threads stay
+    // for 10 s by default. A short keep-alive lets them exit before the
+    // thread counts are sampled, so the counts show only threads still owned.
     let rt = match tokio::runtime::Builder::new_multi_thread()
         .enable_all()
+        .thread_keep_alive(std::time::Duration::from_millis(200))
         .build()
     {
         Ok(rt) => rt,
