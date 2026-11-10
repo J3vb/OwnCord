@@ -13,7 +13,7 @@
 import { createElement, setText } from "@lib/dom";
 import { Disposable } from "@lib/disposable";
 import type { MountableComponent } from "@lib/text/safeRender";
-import { shellText } from "../i18n/shell";
+import { shellText } from "../../i18n/shell";
 
 export type ToastType = "info" | "error" | "success" | "warning";
 

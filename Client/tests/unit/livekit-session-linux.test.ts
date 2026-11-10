@@ -252,7 +252,7 @@ import { setVoiceStatus, setListenOnly } from "@stores/voice.store";
 import { channelsStore } from "@stores/channels.store";
 import { nativeCounters } from "../../src/features/voice/native/counters";
 import { initToast, teardownToast } from "@lib/ui/toast";
-import type { ToastContainer } from "@components/Toast";
+import type { ToastContainer } from "@lib/ui/toastContainer";
 import { setScreenSourcePicker } from "../../src/features/voice/native/screenPickerSlot";
 import { showScreenSharePicker } from "../../src/components/ScreenSharePicker";
 

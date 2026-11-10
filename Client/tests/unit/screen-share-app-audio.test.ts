@@ -10,7 +10,7 @@ import * as shareRig from "../helpers/screenShareRig";
 import { Track } from "livekit-client";
 import type { LocalTrack } from "livekit-client";
 import { initToast, teardownToast } from "@lib/ui/toast";
-import type { ToastContainer } from "@components/Toast";
+import type { ToastContainer } from "@lib/ui/toastContainer";
 import { expectConsole } from "../helpers/console";
 
 const createLocalScreenTracks = vi.fn();

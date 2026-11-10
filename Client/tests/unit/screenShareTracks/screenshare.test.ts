@@ -6,7 +6,7 @@ import { AudioPresets, Track } from "livekit-client";
 import type { LocalTrack } from "livekit-client";
 import { expectConsole } from "../../helpers/console";
 import { initToast, teardownToast } from "@lib/ui/toast";
-import type { ToastContainer } from "@components/Toast";
+import type { ToastContainer } from "@lib/ui/toastContainer";
 import {
   disableScreenshare,
   enableScreenshare,

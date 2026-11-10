@@ -202,6 +202,7 @@ const MOVED_NOT_MUTATED = [
   "src/lib/ui/asyncOverlay.ts",
   "src/lib/ui/focusFirst.ts",
   "src/lib/ui/lazyScreen.ts",
+  "src/lib/ui/toastContainer.ts",
 ];
 
 /** @type {import('@stryker-mutator/api/core').PartialStrykerOptions} */

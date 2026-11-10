@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { createToastContainer, type ToastContainer } from "../../src/components/Toast";
+import { createToastContainer, type ToastContainer } from "../../src/lib/ui/toastContainer";
 
 describe("ToastContainer", () => {
   let container: HTMLDivElement;
