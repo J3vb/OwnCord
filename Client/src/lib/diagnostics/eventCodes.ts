@@ -136,6 +136,11 @@ const TOKEN = { type: "token" } as const;
 const HASH = { type: "hash" } as const;
 
 const WS = "src/lib/ws.ts";
+const WS_TIMERS = "src/lib/net/ws/wsTimers.ts";
+const WS_LIVENESS = "src/lib/net/ws/wsLiveness.ts";
+const WS_TRANSPORT = "src/lib/net/ws/wsTransport.ts";
+const WS_INBOUND = "src/lib/net/ws/wsInbound.ts";
+const WS_RECONNECT = "src/lib/net/ws/wsReconnect.ts";
 const ROOM_EVENTS = "src/lib/voice/roomEventHandlers.ts";
 const SCREEN = "src/features/voice/screenTrackStop.ts";
 const EXIT_WATCH = "src-tauri/src/exit_watch.rs";
@@ -177,19 +182,19 @@ export const EVENT_CODES = {
   },
   "app.resumed": {
     label: "Computer woke up", // i18n-exempt: support bundle text, never shown in the app
-    owners: [WS],
+    owners: [WS_TIMERS],
     dataClasses: [],
     fields: { asleep_ms: MS },
   },
   "app.visibility": {
     label: "Window shown or hidden", // i18n-exempt: support bundle text, never shown in the app
-    owners: [WS],
+    owners: [WS_LIVENESS],
     dataClasses: [],
     fields: { state: { type: "enum", values: ["visible", "hidden", "minimized", "restored"] } },
   },
   "app.network": {
     label: "Network went online or offline", // i18n-exempt: support bundle text, never shown in the app
-    owners: [WS],
+    owners: [WS_LIVENESS],
     dataClasses: [],
     fields: { state: { type: "enum", values: ["online", "offline"] } },
   },
@@ -506,19 +511,19 @@ export const EVENT_CODES = {
   },
   "ws.open": {
     label: "Server connection open", // i18n-exempt: support bundle text, never shown in the app
-    owners: [WS],
+    owners: [WS_TRANSPORT],
     dataClasses: [],
     fields: { generation: GEN },
   },
   "ws.ready": {
     label: "Server connection ready", // i18n-exempt: support bundle text, never shown in the app
-    owners: [WS],
+    owners: [WS_INBOUND],
     dataClasses: [],
     fields: { generation: GEN, after_ms: MS },
   },
   "ws.closed": {
     label: "Server connection closed", // i18n-exempt: support bundle text, never shown in the app
-    owners: [WS],
+    owners: [WS_TRANSPORT],
     dataClasses: [],
     fields: {
       generation: GEN,
@@ -540,7 +545,7 @@ export const EVENT_CODES = {
   },
   "ws.reconnect_scheduled": {
     label: "Reconnect to the server scheduled", // i18n-exempt: support bundle text, never shown in the app
-    owners: [WS],
+    owners: [WS_RECONNECT],
     dataClasses: [],
     fields: { generation: GEN, attempt: INT, delay_ms: MS },
   },
@@ -552,7 +557,7 @@ export const EVENT_CODES = {
   },
   "ws.stale_event": {
     label: "Event from an old server connection ignored", // i18n-exempt: support bundle text, never shown in the app
-    owners: [WS],
+    owners: [WS, WS_TRANSPORT],
     dataClasses: [],
     fields: { generation: GEN, live_generation: GEN },
   },
