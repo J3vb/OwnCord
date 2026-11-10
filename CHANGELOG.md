@@ -84,6 +84,8 @@ and only when it changes something a contributor or fork holder must do
 - A webcam using H.264 could quietly fall back to the slow software encoder. Webcams are now checked like screen shares and switch to VP8 when that happens, and changing the shared window, quality or camera checks again.
 - Android: the app now stops its file-saving and sharing work cleanly when Android closes or recreates the app screen.
 - Desktop: signing out, switching servers or accepting a changed server certificate now closes the voice connection's local tunnel right away.
+- Voice: a reconnect that reached the voice server but could not finish setting the call up left you shown as connected with no audio. The call now ends with "Voice connection lost" so you can rejoin.
+- Voice: a reconnect could stay on "Reconnecting voice…" for good if a token refresh or a check of the voice roster failed part way. It now carries on, and still gives up after 5 minutes.
 - Desktop and Android: saved logins, media and game activity, notifications, saving or sharing files and installing an update no longer hold up the rest of the app while the system is slow to answer.
 
 ### Under the hood
