@@ -54,10 +54,8 @@ pub(crate) fn resolve_remote_target(
 ///
 /// Both steps must be bounded. A peer that accepts the TCP connection and then
 /// never answers the ClientHello blocks the handshake forever, and the calling
-/// task holds `local` without polling it — so the SDK closing its side never
-/// cancels it. Those tasks and their sockets accumulate on every SDK retry and
-/// survive the proxy's stop command, whose shutdown oneshot only stops the
-/// accept loop; the per-connection tasks are detached.
+/// task holds `local` without polling it, so the SDK closing its side never
+/// cancels it.
 pub(crate) async fn connect_tls(
     connector: &tokio_rustls::TlsConnector,
     server_name: ServerName<'static>,
@@ -309,6 +307,16 @@ impl<A: AsyncWrite + Unpin> AsyncWrite for CountingStream<A> {
     }
 }
 
+/// Aborts the wrapped task when dropped, so a helper task cannot outlive the
+/// future that started it.
+pub(crate) struct AbortOnDrop(pub(crate) JoinHandle<()>);
+
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
 /// Maximum consecutive accept errors before [`run_accept_loop`] exits.
 pub(crate) const MAX_CONSECUTIVE_ACCEPT_ERRORS: u32 = 5;
 
@@ -324,7 +332,8 @@ pub(crate) fn spawn_watched(tag: &'static str, handle: JoinHandle<()>) {
     });
 }
 
-/// Accept loop shared by both proxies: hand each connection to `on_conn` and,
+/// Accept loop shared by both proxies: run each connection from `on_conn` in a
+/// task owned by this loop (all are aborted and awaited when the loop exits) and,
 /// once `MAX_CONSECUTIVE_ACCEPT_ERRORS` is hit, run `on_dead` before exiting.
 ///
 /// `on_dead` must run HERE, while `listener` is still held, and not by the
@@ -345,15 +354,23 @@ pub(crate) async fn run_accept_loop<C, Fut, D, DFut>(
 {
     let mut consecutive_errors: u32 = 0;
     let mut on_dead = Some(on_dead);
+    let mut conns: tokio::task::JoinSet<()> = tokio::task::JoinSet::new();
 
     loop {
         tokio::select! {
+            Some(joined) = conns.join_next(), if !conns.is_empty() => {
+                if let Err(e) = joined {
+                    if e.is_panic() {
+                        error!("[{tag}] connection task panicked: {e:?}");
+                    }
+                }
+            }
             result = listener.accept() => {
                 match result {
                     Ok((stream, addr)) => {
                         consecutive_errors = 0;
                         debug!("[{tag}] accepted connection from {}", addr);
-                        tokio::spawn(on_conn(stream));
+                        conns.spawn(on_conn(stream));
                     }
                     Err(e) => {
                         consecutive_errors += 1;
@@ -377,6 +394,8 @@ pub(crate) async fn run_accept_loop<C, Fut, D, DFut>(
             _ = &mut shutdown_rx => break,
         }
     }
+
+    conns.shutdown().await;
 }
 
 /// A tunnel's loopback address and the path token every request through it
@@ -405,7 +424,137 @@ pub(crate) const FORBIDDEN_RESPONSE: &[u8] =
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio::io::AsyncWriteExt;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::time::{timeout, Duration};
+
+    async fn echo_conn(mut stream: TcpStream) {
+        let mut buf = [0u8; 64];
+        while let Ok(n) = stream.read(&mut buf).await {
+            if n == 0 || stream.write_all(&buf[..n]).await.is_err() {
+                break;
+            }
+        }
+    }
+
+    async fn start_loop(
+        on_conn: impl FnMut(TcpStream) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>
+            + Send
+            + 'static,
+    ) -> (
+        std::net::SocketAddr,
+        tokio::sync::oneshot::Sender<()>,
+        JoinHandle<()>,
+    ) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+        let handle = tokio::spawn(run_accept_loop(listener, rx, "test", on_conn, || async {}));
+        (addr, tx, handle)
+    }
+
+    fn echo_loop_conn(
+        s: TcpStream,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> {
+        Box::pin(echo_conn(s))
+    }
+
+    #[tokio::test]
+    async fn shutdown_closes_open_connections() {
+        let (addr, tx, handle) = start_loop(echo_loop_conn).await;
+        let mut client = TcpStream::connect(addr).await.expect("connect");
+        client.write_all(b"hi").await.expect("write");
+        let mut buf = [0u8; 2];
+        client.read_exact(&mut buf).await.expect("echo");
+
+        tx.send(()).expect("signal");
+        timeout(Duration::from_secs(5), handle)
+            .await
+            .expect("loop returns")
+            .expect("join");
+        let n = timeout(Duration::from_secs(5), client.read(&mut buf))
+            .await
+            .expect("client sees close");
+        assert!(matches!(n, Ok(0) | Err(_)));
+    }
+
+    #[tokio::test]
+    async fn stopping_one_loop_leaves_another_loop_connections_working() {
+        let (addr_a, tx_a, handle_a) = start_loop(echo_loop_conn).await;
+        let (addr_b, tx_b, handle_b) = start_loop(echo_loop_conn).await;
+        let mut client_a = TcpStream::connect(addr_a).await.expect("connect a");
+        let mut client_b = TcpStream::connect(addr_b).await.expect("connect b");
+        client_a.write_all(b"a").await.expect("write a");
+        client_b.write_all(b"b").await.expect("write b");
+        let mut one = [0u8; 1];
+        client_a.read_exact(&mut one).await.expect("echo a");
+        client_b.read_exact(&mut one).await.expect("echo b");
+
+        tx_a.send(()).expect("signal a");
+        timeout(Duration::from_secs(5), handle_a)
+            .await
+            .expect("loop a returns")
+            .expect("join a");
+
+        client_b.write_all(b"x").await.expect("write b after");
+        timeout(Duration::from_secs(5), client_b.read_exact(&mut one))
+            .await
+            .expect("b responds")
+            .expect("read b");
+        assert_eq!(&one, b"x");
+
+        tx_b.send(()).expect("signal b");
+        timeout(Duration::from_secs(5), handle_b)
+            .await
+            .expect("loop b returns")
+            .expect("join b");
+    }
+
+    #[tokio::test]
+    async fn many_short_connections_are_served_and_loop_stops_cleanly() {
+        let (addr, tx, handle) = start_loop(|mut s| {
+            Box::pin(async move {
+                let _ = s.write_all(b"ok").await;
+            })
+        })
+        .await;
+        for _ in 0..200 {
+            let mut c = TcpStream::connect(addr).await.expect("connect");
+            let mut buf = Vec::new();
+            timeout(Duration::from_secs(5), c.read_to_end(&mut buf))
+                .await
+                .expect("read")
+                .expect("io");
+            assert_eq!(buf, b"ok");
+        }
+        tx.send(()).expect("signal");
+        timeout(Duration::from_secs(5), handle)
+            .await
+            .expect("loop returns")
+            .expect("join");
+    }
+
+    #[tokio::test]
+    async fn abort_on_drop_stops_the_task_when_its_future_is_cancelled() {
+        let marker = Arc::new(());
+        let held = Arc::clone(&marker);
+        let outer = tokio::spawn(async move {
+            let _guard = AbortOnDrop(tokio::spawn(async move {
+                let _held = held;
+                std::future::pending::<()>().await;
+            }));
+            std::future::pending::<()>().await;
+        });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(Arc::strong_count(&marker), 2);
+        outer.abort();
+        timeout(Duration::from_secs(5), async {
+            while Arc::strong_count(&marker) != 1 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("helper task stops with its owner");
+    }
 
     #[test]
     fn strip_tunnel_token_requires_the_exact_token() {
