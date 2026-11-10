@@ -17,7 +17,10 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   or extracted code uses `src/features/`, relative imports, except the pieces
   of a store split by concern (`channelModel`/`channelGroups`,
   `voiceModel`/`voiceRoster`/`voicePeers`/`voiceSelfPrefs`), which stay in
-  `src/stores/` so the store adds no upward import to `scripts/layer-baseline.json`
+  `src/stores/` so the store adds no upward import to `scripts/layer-baseline.json`,
+  and the pieces of a `lib/` module that other `lib/` or `stores/` code still
+  imports (`lib/text/markdownScan.ts`, since `lib/notifications.ts` imports the
+  markdown facade), which stay in `src/lib/` for the same reason
 - `src/app/` is the composition layer above `pages/` (`main.ts`'s siblings, the
   only code besides `main.ts` that may import `pages/`; enforced from 7.4b:
   `local/layer-direction`): modules export functions or types, with no
