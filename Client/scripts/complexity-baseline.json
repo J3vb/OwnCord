@@ -146,9 +146,6 @@
       "E2EEManager > handleParticipantLeft": [32],
       "E2EEManager > setupKeyExchange": [27]
     },
-    "lib/voice/livekitReconnect.ts": {
-      "attemptAutoReconnect": [35]
-    },
     "lib/voice/micProcessor.ts": {
       "createMicProcessor > route": [17]
     },

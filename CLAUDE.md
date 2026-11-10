@@ -97,8 +97,8 @@ and proceeds, so a reviewer can see what was assumed.
 
 - **`any` is banned.** Use the precise type, a generated protocol type, or
   `unknown` plus a narrowing check. `@typescript-eslint/no-explicit-any` is an
-  error in `eslint.config.js`. The residue in `src/lib/voice/livekitReconnect.ts`
-  only shrinks — never add an `eslint-disable` for this rule.
+  error in `eslint.config.js`, and `src/` has no use left — never add an
+  `eslint-disable` for this rule.
 - **Every Tauri `invoke()` is wrapped in `try/catch`** where it is called, in
   `src/platform/desktop/` (the only place a `@tauri-apps` import may appear).
   The `catch` turns the rejection into a typed result or a user-visible
