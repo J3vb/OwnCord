@@ -6,7 +6,7 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
 ## Layout
 
 - `src/stores/` observable stores · `src/lib/` protocol, WS, voice, E2EE ·
-  `src/pages/`, `src/components/` UI · `src/features/voice/` modules
+  `src/pages/` wiring only (screens live in `src/features/`, shared UI in `src/lib/ui/`; there is no `components/`) · `src/features/voice/` modules
   extracted from `lib/voice/livekitSession.ts` and `lib/voice/livekitE2EE.ts` (the
   facades; the `e2ee*.ts` files are `E2EEManager`'s), with colocated
   `*.test.ts`; `src/features/{connection,direct-messages,message-requests,channels,messaging,voice,safety,moderation}/wsHandlers.ts`
@@ -92,14 +92,17 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   covering the module it guards (ARCH-06).
 - **Layers import downward or sideways only** (`local/layer-direction`, an
   error on `src/**/*.ts` except tests): `main.ts` and `app/`, then `pages/`,
-  then `components/` and `features/`, then `stores/`, then `lib/`, `platform/`
+  then `features/`, then `stores/`, then `lib/`, `platform/`
   and `i18n/`, then `styles/` and `assets/`. A static import, `export … from`
   or dynamic `import()` of a higher layer fails lint; `import type` does not
   count. The imports that predate the rule are listed in
   `scripts/layer-baseline.json`, which only shrinks
   (`tests/unit/layer-baseline.test.ts` fails on a stale entry): when you remove
   one, delete its entry and lower the cap in that test. The rank list and the
-  alias map are in the rule's header in `eslint-rules.js`.
+  alias map are in the rule's header in `eslint-rules.js`. `src/pages/` is held
+  to wiring by a shrink-only line cap (`PAGES_LINE_CAP` in
+  `tests/unit/pages-size-ratchet.test.ts`; lower it when pages shrink), and
+  `tests/unit/layer-folders.test.ts` keeps `src/components/` gone.
 - **No new function over complexity 15 or nesting depth 4**
   (`local/complexity-ratchet`, `local/max-depth-ratchet`, errors on
   `src/**/*.ts` except tests). Functions over the limit before the cap are

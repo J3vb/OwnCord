@@ -12,7 +12,7 @@ process.env.OC_ALLOW_UNPINNED_TZ = "1";
 // Lets wall-clock timing tests loosen their budget: instrumentation makes it meaningless.
 process.env.OC_MUTATION_RUN = "1";
 
-// Code that moved into features/ (or lib/) from components/ without a change. It stays
+// Code that moved into features/ (or lib/) from the old components/ folder without a change. It stays
 // out of the mutation surface it was never in; adding it is a separate decision.
 const MOVED_NOT_MUTATED = [
   "src/features/channels/CategoryModals.ts",
