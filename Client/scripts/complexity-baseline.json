@@ -1,11 +1,4 @@
 {
-  "complexity": {
-    "lib/net/connectionDiagnostics.ts": {
-      "runConnectionDiagnostics": [29]
-    },
-    "platform/desktop/pushToTalkService.ts": {
-      "startBinding": [19]
-    }
-  },
+  "complexity": {},
   "depth": {}
 }

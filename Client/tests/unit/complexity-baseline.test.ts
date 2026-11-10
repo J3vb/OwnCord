@@ -30,9 +30,9 @@ const baseline = readBaseline();
 
 /** Over-limit functions and blocks that may remain. Lower these with every
  *  change that removes one; they never rise. */
-const COMPLEXITY_CAP = 2;
+const COMPLEXITY_CAP = 0;
 const DEPTH_CAP = 0;
-const WORST_COMPLEXITY_CAP = 29;
+const WORST_COMPLEXITY_CAP = 0;
 
 function rewritten(file: string): boolean {
   const full = path.join(srcDir, file);
