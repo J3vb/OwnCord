@@ -36,9 +36,10 @@ const {
   deleteCredential,
   createUserUpdateCredentialSaver,
   parseRelayedLogin,
+  readRelayedLogin,
   loginWithSavedPassword,
 } = await import("@lib/net/credentials");
-const { ApiClientError, TransportError } = await import("@lib/api");
+const { ApiClientError, TransportError, REPLY_SHAPE_CODE } = await import("@lib/api");
 
 // Logger names are taken when the module loads, before the per-test mock clear.
 const loggerCallsAtLoad = [...createLoggerMock.mock.calls];
@@ -552,5 +553,25 @@ describe("parseRelayedLogin", () => {
         expect((err as Error).message).toContain("500");
       }
     }
+  });
+});
+
+describe("readRelayedLogin", () => {
+  it("returns a login reply that has the AuthResponse shape", async () => {
+    await expect(
+      readRelayedLogin({ status: 200, body: '{"token":"t","requires_2fa":false}' }),
+    ).resolves.toEqual({ token: "t", requires_2fa: false });
+  });
+
+  it("refuses a 2xx login reply of the wrong shape, as api.login does", async () => {
+    await expect(
+      readRelayedLogin({ status: 200, body: '{"token":7,"requires_2fa":"no"}' }),
+    ).rejects.toMatchObject({ status: 200, code: REPLY_SHAPE_CODE });
+  });
+
+  it("still rejects a refused login with the server's own error", async () => {
+    await expect(
+      readRelayedLogin({ status: 401, body: '{"error":"INVALID_CREDENTIALS","message":"No"}' }),
+    ).rejects.toMatchObject({ status: 401, code: "INVALID_CREDENTIALS" });
   });
 });

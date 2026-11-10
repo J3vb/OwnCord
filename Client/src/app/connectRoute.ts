@@ -8,7 +8,7 @@
 // here runs at import time.
 
 import type { ApiClient } from "@lib/api";
-import { deleteCredential, loginWithSavedPassword, parseRelayedLogin } from "@lib/net/credentials";
+import { deleteCredential, loginWithSavedPassword, readRelayedLogin } from "@lib/net/credentials";
 import { createLogger } from "@lib/logger";
 import { deactivatePendingMessages } from "@lib/pendingMessages";
 import type { ProfileManager } from "@lib/presence/profiles";
@@ -150,7 +150,10 @@ export function renderConnect(
         // The relayed body is the same AuthResponse shape api.login returns,
         // so from here the flow is literally the typed-password one: a
         // refused credential throws to the form and touches no session state.
-        completeLogin(host, username, parseRelayedLogin(relayed));
+        const auth = await attempt.run(readRelayedLogin(relayed));
+        attempt.assertCurrent();
+        pageOwner.assertCurrent();
+        completeLogin(host, username, auth);
       },
       async onRegister(host, username, password, inviteCode) {
         api.endSession();

@@ -34,7 +34,7 @@ vi.mock("@lib/text/safeRender", () => ({ safeMount: vi.fn() }));
 vi.mock("@lib/net/credentials", () => ({
   deleteCredential: vi.fn(),
   loginWithSavedPassword: vi.fn(),
-  parseRelayedLogin: vi.fn(),
+  readRelayedLogin: vi.fn(),
 }));
 vi.mock("@lib/pendingMessages", () => ({ deactivatePendingMessages: vi.fn() }));
 vi.mock("@pages/ConnectPage", () => ({

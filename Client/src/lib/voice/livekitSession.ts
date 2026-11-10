@@ -30,10 +30,12 @@ const session = new LiveKitSession();
 
 // Expose debug info on window under __owncord namespace for DevTools console access
 // Usage: JSON.stringify(__owncord.lkDebug(), null, 2)
-const owncordNs = ((window as unknown as Record<string, unknown>).__owncord ??= {}) as Record<
-  string,
-  unknown
->;
+declare global {
+  interface Window {
+    __owncord?: Record<string, unknown>;
+  }
+}
+const owncordNs = (window.__owncord ??= {});
 owncordNs.lkDebug = session.getSessionDebugInfo.bind(session);
 // Status seam for the production-build e2e suite, which cannot import stores:
 // it stands in for room.connect() succeeding (no real LiveKit server there).
