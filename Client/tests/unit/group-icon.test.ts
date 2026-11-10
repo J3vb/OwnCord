@@ -19,7 +19,7 @@ import {
   uploadGroupIcon,
 } from "../../src/features/direct-messages/groupIcon";
 import { ApiClientError, type ApiClient } from "../../src/lib/api";
-import { buildDmConversations } from "../../src/pages/main-page/SidebarDmHelpers";
+import { buildDmConversations } from "../../src/features/direct-messages/SidebarDmHelpers";
 import { dmStore, type DmChannel } from "../../src/stores/dm.store";
 
 const faces = [

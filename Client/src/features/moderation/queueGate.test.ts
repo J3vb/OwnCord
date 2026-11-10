@@ -159,7 +159,7 @@ async function openWithheld(ids: string[] = ["a"]): Promise<HTMLElement> {
 
 beforeEach(() => {
   vi.resetModules();
-  vi.doMock("@components/NsfwGate", gateModule);
+  vi.doMock("../content-consent/NsfwGate", gateModule);
   lists = [];
   details = [];
   acks = [];

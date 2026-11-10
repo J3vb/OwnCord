@@ -1,5 +1,8 @@
 import { describe, it, expect, afterEach, beforeEach } from "vitest";
-import { closeShortcutsOverlay, openShortcutsOverlay } from "../../src/components/ShortcutsOverlay";
+import {
+  closeShortcutsOverlay,
+  openShortcutsOverlay,
+} from "../../src/features/navigation/ShortcutsOverlay";
 import { saveGlobalShortcutVk } from "../../src/lib/voice/voiceShortcuts";
 import { saveKeybind } from "../../src/lib/prefs/keybinds";
 import { KEYBIND_GROUPS } from "../../src/lib/prefs/keybindCatalog";

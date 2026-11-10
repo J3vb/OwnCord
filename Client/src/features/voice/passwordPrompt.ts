@@ -8,7 +8,7 @@ import { registerSessionReset } from "../../lib/net/sessionRegistry";
 import { showToast } from "../../lib/ui/toast";
 import { createLogger } from "../../lib/logger";
 import type { MountableComponent } from "../../lib/text/safeRender";
-import type { PasswordProblem } from "../../components/ChannelPasswordDialog";
+import type { PasswordProblem } from "./ChannelPasswordDialog";
 import type { DispatchWs } from "../connection/dispatchContext";
 import { joinBackoffText } from "./joinBackoffText";
 import { noteJoinSent, onNonRetryJoin } from "./joinRequest";
@@ -84,7 +84,7 @@ export function promptForChannelPassword(
   if (voiceStore.getState().currentChannelId !== null) return;
   const mine = generation;
   const channelName = channelsStore.getState().channels.get(channelId)?.name ?? "";
-  void import("../../components/ChannelPasswordDialog").then(
+  void import("./ChannelPasswordDialog").then(
     ({ createChannelPasswordDialog }) => {
       if (mine !== generation) return;
       const dialog = createChannelPasswordDialog({

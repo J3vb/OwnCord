@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { useMountContainer } from "../helpers/mountContainer";
-import { createUserBar } from "@components/UserBar";
+import { createUserBar } from "../../src/features/voice/UserBar";
 import { voiceStore, resetVoiceStore, joinVoiceChannel } from "@stores/voice.store";
 import { channelsStore, setChannels, updateChannel } from "@stores/channels.store";
 import { cascadedDeclaration, keyword, varToken } from "../helpers/app-css";

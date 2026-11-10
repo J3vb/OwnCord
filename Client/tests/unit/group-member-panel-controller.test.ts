@@ -6,7 +6,7 @@
 import { makeDm } from "../helpers/dmHarness";
 import { makeChannel } from "../helpers/channelFactory";
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vitest";
-import { createGroupMemberPanelController } from "../../src/pages/main-page/GroupMemberPanelController";
+import { createGroupMemberPanelController } from "../../src/features/direct-messages/GroupMemberPanelController";
 import type { ApiClient } from "../../src/lib/api";
 import { channelsStore } from "../../src/stores/channels.store";
 import {

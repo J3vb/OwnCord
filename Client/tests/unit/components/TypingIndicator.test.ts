@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { useMountContainer } from "../../helpers/mountContainer";
-import { createTypingIndicator } from "@components/TypingIndicator";
+import { createTypingIndicator } from "../../../src/features/messaging/TypingIndicator";
 import { membersStore, setMembers, setTyping } from "@stores/members.store";
 import type { ReadyMember } from "@lib/types";
 

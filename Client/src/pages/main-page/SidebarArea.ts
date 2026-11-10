@@ -14,15 +14,18 @@ import type { PresenceSender } from "@lib/presence/presence";
 import type { ToastContainer } from "@lib/ui/toastContainer";
 import { createCategoryDialogs } from "./categoryDialogs";
 import { logout } from "../../features/connection/logout";
-import { createUserBar } from "@components/UserBar";
+import { createUserBar } from "../../features/voice/UserBar";
 import { createVoiceWidgetCallbacks } from "./VoiceCallbacks";
 import { type MemberPanel } from "../../features/members/memberPanel";
-import { selectDmConversation, handleCreateDm } from "./SidebarDmHelpers";
+import {
+  selectDmConversation,
+  handleCreateDm,
+} from "../../features/direct-messages/SidebarDmHelpers";
 import { type DmChannel } from "@stores/dm.store";
 import type { ContentViewId, NavigationDestinations } from "../../features/navigation/destinations";
 import { mountServerHeader } from "./sidebar-area/sidebarHeader";
 import { mountChannelSidebar } from "./sidebar-area/sidebarChannels";
-import { mountDmSidebar } from "./sidebar-area/sidebarDms";
+import { mountDmSidebar } from "../../features/direct-messages/sidebarDms";
 import { mountMembersAndMode } from "./sidebar-area/sidebarContent";
 import { mountVoiceAndSwitcher } from "./sidebar-area/sidebarVoiceSwitch";
 import type { SidebarScope } from "./sidebar-area/sidebarScope";

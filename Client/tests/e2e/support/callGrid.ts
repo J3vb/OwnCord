@@ -74,7 +74,7 @@ export async function mountCallGrid(page: Page, tiles: readonly CallGridTile[]):
       (window as unknown as { __callGrid: unknown }).__callGrid = grid;
       return true;
     },
-    { moduleUrl: "/src/components/VideoGrid.ts", tiles },
+    { moduleUrl: "/src/features/voice/videoGrid/VideoGrid.ts", tiles },
   );
 }
 

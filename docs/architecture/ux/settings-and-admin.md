@@ -270,7 +270,7 @@ The tray icon (`src-tauri/src/tray.rs`) is a parallel presence/window surface:
 **Show/Hide** toggles the main window, a **Status** submenu
 (Online / Idle / Do Not Disturb / Offline) emits a `status-change` event that
 the TS side applies through the same presence path as the user bar's status
-menu (`lib/presence/userStatus.ts` / `components/UserBar.ts`), **Mute / Unmute** and
+menu (`lib/presence/userStatus.ts` / `features/voice/UserBar.ts`), **Mute / Unmute** and
 **Deafen / Undeafen** emit the `voice-shortcut` event that the global
 Ctrl+Shift+<key> poller (`src-tauri/src/shortcuts.rs`, rebindable from the
 Keybinds tab) also emits,
@@ -298,7 +298,7 @@ the only indicator. Both clear at 0 and on logout.
 ## Source of truth
 
 `src/features/settings/SettingsOverlay.ts` (+ `settings/*`), `src/features/moderation/AdminActions.ts`,
-`src/components/InviteManager.ts`, `CreateChannelModal.ts`, `src/features/channels/editChannelDialog.ts`,
+`src/features/invites/InviteManager.ts`, `CreateChannelModal.ts`, `src/features/channels/editChannelDialog.ts`,
 `DeleteChannelModal.ts`, `src/features/updates/UpdateNotifier.ts`, `src/lib/net/updater.ts`,
 `src/lib/api.ts`, `src/lib/prefs/themes.ts`, `src/lib/prefs/preferences.ts`,
 `src/pages/main-page/SidebarArea.ts`, `SidebarMemberSection.ts`,

@@ -28,9 +28,6 @@
     "features/message-requests/Inbox.ts": {
       "renderInbox > render": [23]
     },
-    "features/messaging/MessageList.ts": {
-      "createMessageList > mount > (anonymous)": [18]
-    },
     "features/messaging/composer/inputDraft.ts": {
       "createInputDraft > restoreDraft": [16]
     },
@@ -53,20 +50,8 @@
     "features/messaging/forwardTargets.ts": {
       "listForwardTargets": [21]
     },
-    "features/messaging/historyWindows.ts": {
-      "reduceSetAroundMessages": [20],
-      "reduceSetMessages": [30]
-    },
-    "features/messaging/message-list/listWindow.ts": {
-      "createListWindow > measureRendered": [16],
-      "createListWindow > renderWindow": [35],
-      "createListWindow > resolveNewDividerIndex": [17]
-    },
     "features/messaging/message-list/pollCard.ts": {
       "renderPollCard > draw": [27]
-    },
-    "features/messaging/message-list/virtualItems.ts": {
-      "estimateItemHeight": [16]
     },
     "features/messaging/slashCommands.ts": {
       "splitPieces": [16]
@@ -160,9 +145,6 @@
       "E2EEManager > handleAnnounceInner": [29],
       "E2EEManager > handleParticipantLeft": [32],
       "E2EEManager > setupKeyExchange": [27]
-    },
-    "lib/voice/livekitReconnect.ts": {
-      "attemptAutoReconnect": [35]
     },
     "lib/voice/micProcessor.ts": {
       "createMicProcessor > route": [17]

@@ -327,7 +327,7 @@ describe("MessageList", () => {
 // TypingIndicator
 // ---------------------------------------------------------------------------
 
-import { createTypingIndicator } from "../../src/components/TypingIndicator";
+import { createTypingIndicator } from "../../src/features/messaging/TypingIndicator";
 import { setTyping } from "../../src/stores/members.store";
 
 describe("TypingIndicator", () => {

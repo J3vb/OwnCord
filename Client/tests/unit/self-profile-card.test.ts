@@ -4,7 +4,7 @@ import { pressComposingEnter } from "../helpers/keyEvents";
 import { authStore } from "@stores/auth.store";
 import { membersStore } from "@stores/members.store";
 import { uiStore, setConnectionStatus } from "@stores/ui.store";
-import { createUserBar } from "@components/UserBar";
+import { createUserBar } from "../../src/features/voice/UserBar";
 import {
   loadCustomStatus,
   loadStatusTimer,

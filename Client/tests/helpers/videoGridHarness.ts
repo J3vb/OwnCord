@@ -3,7 +3,7 @@ import {
   createVideoGrid,
   type VideoGridComponent,
   type TileConfig,
-} from "../../src/components/VideoGrid";
+} from "../../src/features/voice/videoGrid/VideoGrid";
 import "./resizeObserverStub";
 import { mockGetScreenshareAudioMuted, mockGetScreenshareAudioVolume } from "./videoGridMocks";
 

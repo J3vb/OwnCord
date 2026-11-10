@@ -35,7 +35,7 @@ describe("the dialog buttons door", () => {
 
   it("finds the dialogs", () => {
     expect(dialogFiles).toContain("lib/ui/modalFactory.ts");
-    expect(dialogFiles).toContain("components/ServerRailJoinModal.ts");
+    expect(dialogFiles).toContain("features/server-rail/ServerRailJoinModal.ts");
   });
 
   it("no dialog outside the connect page uses the login buttons", () => {

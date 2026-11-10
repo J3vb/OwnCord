@@ -1,8 +1,8 @@
 /** The mutable state one main page instance keeps, shared by its modules. */
 import type { MountableComponent } from "@lib/text/safeRender";
 import type { UserStatus } from "@lib/types";
-import type { VideoGridComponent } from "@components/VideoGrid";
-import type { ServerBannerControl } from "@components/ServerBanner";
+import type { VideoGridComponent } from "../../features/voice/videoGrid/VideoGrid";
+import type { ServerBannerControl } from "../../features/server-rail/ServerBanner";
 import type { ToastContainer } from "@lib/ui/toastContainer";
 import type { AutoIdleController } from "@lib/presence/autoIdle";
 import type { GameActivityLoop } from "@lib/presence/gameActivity";
@@ -13,9 +13,9 @@ import type { MessageController } from "./MessageController";
 import type { ReactionController } from "./ReactionController";
 import type { VideoModeController, VideoPanelHost } from "./VideoModeController";
 import type { ChannelController } from "./ChannelController";
-import type { DmProfileSidebarComponent } from "@components/DmProfileSidebar";
-import type { GroupMemberPanelController } from "./GroupMemberPanelController";
-import type { IncomingCallBannerComponent } from "@components/IncomingCallBanner";
+import type { DmProfileSidebarComponent } from "../../features/direct-messages/DmProfileSidebar";
+import type { GroupMemberPanelController } from "../../features/direct-messages/GroupMemberPanelController";
+import type { IncomingCallBannerComponent } from "../../features/direct-messages/IncomingCallBanner";
 import type { RingController, OutgoingCall } from "@lib/voice/callRing";
 import type { DmCallPanelComponent } from "../../features/direct-messages/DmCallPanel";
 import type { SidebarDrawer } from "./SidebarDrawer";
@@ -217,7 +217,7 @@ export interface MountScope {
   qsManager: QuickSwitcherManager;
   // The rest of the shortcuts listed on the settings Keybinds tab.
   voiceKeybindActions: VoiceWidgetCallbacks;
-  shortcutsOverlay: typeof import("@components/ShortcutsOverlay") | null;
+  shortcutsOverlay: typeof import("../../features/navigation/ShortcutsOverlay") | null;
   shortcutsClosed: boolean;
   // The label shown on a video tile: memberDisplayName when known —
   // the same identity a rename shows everywhere else (ChannelSidebar's

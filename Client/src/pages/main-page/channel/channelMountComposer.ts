@@ -10,7 +10,7 @@ import {
   type SentAttachment,
 } from "../../../features/messaging/MessageInput";
 import { onSendAcknowledged } from "../../../features/messaging/sendAcknowledged";
-import { createTypingIndicator } from "@components/TypingIndicator";
+import { createTypingIndicator } from "../../../features/messaging/TypingIndicator";
 import { getChannelMessages } from "@stores/messages.store";
 import { canManageMessages } from "@lib/permissions";
 import { blocksStore, dmComposerBlockReason } from "@stores/blocks.store";

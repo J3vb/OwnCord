@@ -18,7 +18,7 @@ import { Permission } from "../../../src/lib/types";
 import { createChannelSidebar } from "../../../src/features/channels/ChannelSidebar";
 import { createMemberList } from "../../../src/features/members/MemberList";
 import { createCreateChannelModal } from "@components/CreateChannelModal";
-import "../../../src/pages/main-page/MemberPickerModal";
+import "../../../src/features/direct-messages/MemberPickerModal";
 import { openBanDialogFor } from "../../helpers/banDialog";
 import {
   MockedFn,
@@ -44,9 +44,11 @@ vi.mock("@lib/presence/profiles", () => mocks.presenceProfilesMock());
 vi.mock("../../../src/features/channels/ChannelSidebar", () => mocks.channelSidebarMock());
 vi.mock("../../../src/features/direct-messages/DmSidebar", () => mocks.dmSidebarMock());
 vi.mock("../../../src/features/members/MemberList", () => mocks.memberListMock());
-vi.mock("@components/UserBar", () => mocks.userBarMock());
-vi.mock("@components/VoiceWidget", () => mocks.voiceWidgetMock());
-vi.mock("@components/QuickSwitchOverlay", () => mocks.quickSwitchOverlayMock());
+vi.mock("../../../src/features/voice/UserBar", () => mocks.userBarMock());
+vi.mock("../../../src/features/voice/VoiceWidget", () => mocks.voiceWidgetMock());
+vi.mock("../../../src/features/navigation/QuickSwitchOverlay", () =>
+  mocks.quickSwitchOverlayMock(),
+);
 vi.mock("@components/CreateChannelModal", () => mocks.createChannelModalMock());
 vi.mock("@tauri-apps/api/core", () => mocks.apiCoreMock());
 vi.mock("../../../src/features/channels/editChannelDialog", () => mocks.editChannelModalMock());

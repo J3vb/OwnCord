@@ -389,6 +389,7 @@ export const shards = {
   "lib-rest-15": [
     "src/features/connection/wsHandlers.ts",
     "src/features/messaging/historyWindows.ts",
+    "src/features/messaging/sameValue.ts",
     "src/features/server-rail/switchConfirmDialog.ts",
     "src/features/server-rail/switchConfirmPref.ts",
     "src/features/threads/threadAgo.ts",

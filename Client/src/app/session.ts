@@ -26,8 +26,8 @@ import { setLastChannelHost } from "@lib/prefs/lastChannel";
 import { authStore, clearAuth, type LogoutReason } from "@stores/auth.store";
 import { setTransientError } from "@stores/ui.store";
 import { leaveVoiceChannel } from "@stores/voice.store";
-import { createConnectedOverlay } from "@components/ConnectedOverlay";
-import type { ConnectedOverlayControl } from "@components/ConnectedOverlay";
+import { createConnectedOverlay } from "../features/connection/ConnectedOverlay";
+import type { ConnectedOverlayControl } from "../features/connection/ConnectedOverlay";
 import { createLogger } from "@lib/logger";
 import {
   saveCredential,

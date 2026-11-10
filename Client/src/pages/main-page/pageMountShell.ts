@@ -15,7 +15,7 @@ import {
 import { Disposable } from "@lib/disposable";
 import { createElement, appendChildren } from "@lib/dom";
 import { desktop } from "../../platform/desktop";
-import { createServerBanner, applyConnectionStatus } from "@components/ServerBanner";
+import { createServerBanner, applyConnectionStatus } from "../../features/server-rail/ServerBanner";
 import { showToast } from "@lib/ui/toast";
 import { isPhoneLayout } from "@lib/ui/bottomSheet";
 import { focusFirst } from "@lib/ui/focusFirst";
