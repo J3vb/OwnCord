@@ -189,6 +189,11 @@ describe("Server/admin/static — AFK card", () => {
     cap.value = "0";
     fire(b.doc, cap, "change");
     expect(hintText(b.doc)).toContain("with no cap (at 4 Mbps: 20)");
+    up.value = "5";
+    fire(b.doc, up, "input");
+    expect(hintText(b.doc)).toBe(
+      "Not even one person can watch a full-quality stream with no cap (at 4 Mbps: 1)",
+    );
     up.value = "0";
     fire(b.doc, up, "input");
     expect(hintText(b.doc)).toBe("");

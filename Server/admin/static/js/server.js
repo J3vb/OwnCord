@@ -45,13 +45,13 @@ function videoViewerHint(upload,capKbps){
   const up=uploadMbps(upload);
   if(!up||up>100000)return'';
   const cap=Number(capKbps);
-  const noun=n=>n===1?'person':'people';
+  const who=n=>n<1?'Not even one person':'About '+n+' '+(n===1?'person':'people');
   if(!(Number.isFinite(cap)&&cap>0)){
     const n=viewerCount(up,SOURCE_STREAM_MBPS),c=viewerCount(up,4);
-    return'About '+n+' '+noun(n)+' can watch a full-quality stream with no cap (at 4 Mbps: '+c+')';
+    return who(n)+' can watch a full-quality stream with no cap (at 4 Mbps: '+c+')';
   }
   const n=viewerCount(up,cap/1000),u=viewerCount(up,SOURCE_STREAM_MBPS);
-  return'About '+n+' '+noun(n)+' can watch a stream at this cap (with no cap: '+u+')';
+  return who(n)+' can watch a stream at this cap (with no cap: '+u+')';
 }
 function updateVideoHint(){
   const el=document.getElementById('videoCapHint');if(!el)return;
