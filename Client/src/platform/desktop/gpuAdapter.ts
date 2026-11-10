@@ -27,8 +27,7 @@ function isState(value: unknown): value is GpuAdapterState {
     typeof v.saved === "string" &&
     (v.active === null || typeof v.active === "string") &&
     typeof v.notFound === "boolean" &&
-    typeof v.resetAfterCrash === "boolean" &&
-    typeof v.autoOff === "boolean"
+    typeof v.resetAfterCrash === "boolean"
   );
 }
 

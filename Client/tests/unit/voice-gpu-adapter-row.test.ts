@@ -26,7 +26,6 @@ const base = {
   active: null,
   notFound: false,
   resetAfterCrash: false,
-  autoOff: false,
 };
 
 let parent: HTMLElement;
@@ -99,13 +98,9 @@ describe("graphics card row", () => {
     expect(parent.textContent).toContain("could not start on that card");
   });
 
-  it("offers to try Auto again after Auto stood down", async () => {
-    await mount({ ...base, autoOff: true });
-    expect(parent.textContent).toContain("Windows picks the card for now");
-    const retry = parent.querySelector<HTMLButtonElement>('[data-testid="gpu-adapter-retry"]')!;
-    retry.click();
-    await vi.waitFor(() => expect(host.set).toHaveBeenCalledWith("auto"));
-    await vi.waitFor(() => expect(restart().hidden).toBe(false));
-    expect(retry.hidden).toBe(true);
+  it("says Auto lets Windows choose and adds no note on a plain start", async () => {
+    await mount(base);
+    expect(parent.textContent).toContain("Auto lets Windows choose.");
+    expect(parent.querySelectorAll("p.setting-desc")).toHaveLength(2);
   });
 });
