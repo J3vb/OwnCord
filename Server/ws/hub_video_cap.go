@@ -19,6 +19,12 @@ type videoCapState struct {
 	mu      syncutil.Ranked[lockRankSerialiser] // orders ApplyVideoBitrateCap's saves
 }
 
+// applyVideoCapAfterSnapshotHook, when non-nil, runs in ApplyVideoBitrateCap
+// right after the client snapshot, before the sends. Test-only: a connection it
+// registers is missing from the snapshot, so it must read the new value from
+// the store, which pins the store-before-snapshot order.
+var applyVideoCapAfterSnapshotHook func()
+
 // videoCapReadTimeout bounds the video cap's settings read.
 const videoCapReadTimeout = 5 * time.Second
 
@@ -75,7 +81,11 @@ func (h *Hub) ApplyVideoBitrateCap(savedKbps int) {
 	}
 	h.settings.videoCap.bitrate.Store(int64(bitrate))
 	msg := buildVideoBitrateCap(bitrate)
-	for _, c := range h.clientSnapshot() {
+	clients := h.clientSnapshot()
+	if applyVideoCapAfterSnapshotHook != nil {
+		applyVideoCapAfterSnapshotHook()
+	}
+	for _, c := range clients {
 		c.trySendMsg(msg)
 	}
 }

@@ -24,7 +24,7 @@ const WELCOME_KEY='welcome_channel_id';
    choice so a save never changes it by accident. */
 const VIDEO_CAP_KEY='voice_max_video_kbps';
 const VIDEO_CAPS=[['0','No limit'],['1000','1 Mbps'],['2500','2.5 Mbps'],['4000','4 Mbps'],['6000','6 Mbps'],['8000','8 Mbps'],['10000','10 Mbps'],['15000','15 Mbps'],['20000','20 Mbps']];
-function videoCapOptions(cur){return VIDEO_CAPS.some(([v])=>v===cur)?VIDEO_CAPS:VIDEO_CAPS.concat([[cur,(Number(cur)/1000)+' Mbps']])}
+function videoCapOptions(cur){return VIDEO_CAPS.some(([v])=>v===cur)?VIDEO_CAPS:VIDEO_CAPS.concat([[cur,Number.isFinite(Number(cur))?(Number(cur)/1000)+' Mbps':'No limit (unreadable value)']])}
 const SETTINGS_KEYS=['server_name','motd','registration_mode','require_2fa','afk_timeout_seconds',VIDEO_CAP_KEY,WELCOME_KEY,OWNER_MOVABLE_KEY,GAME_ACTIVITY_KEY,...EXT_KEYS];
 /* An extension list as the server stores it: lower case, no dots, deduped,
    comma-separated; so a respelled but equal list is not a change. */
@@ -148,7 +148,7 @@ async function voiceCard(timeout,movable,videoCap){
     +settingsRow('afk_timeout_seconds','Move after','How long a member must stay idle, on top of the 10 minutes the app waits before marking them idle',timeoutSel)
     +moving
     +'<h4 class="setting-sub">Video</h4>'
-    +settingsRow(VIDEO_CAP_KEY,'Max video upload per person','The most one person may send for camera and screen share together. Lower it when your server\'s upload line is limited: every viewer of a stream gets their own copy from the server. Applies at once to streams already live',afkSelect('s-'+VIDEO_CAP_KEY,videoCapOptions(videoCap),videoCap,' aria-describedby="s-'+VIDEO_CAP_KEY+'-desc" data-change-action="markSettingsChanged"')));
+    +settingsRow(VIDEO_CAP_KEY,'Max video upload per person','The most one person may send for camera and screen share together. Lower it when your server\'s upload line is limited: every viewer of a stream gets their own copy from the server. Members\' apps receive it at once; keeping their video under it arrives in an app update',afkSelect('s-'+VIDEO_CAP_KEY,videoCapOptions(videoCap),videoCap,' aria-describedby="s-'+VIDEO_CAP_KEY+'-desc" data-change-action="markSettingsChanged"')));
 }
 /* Welcome messages: an ordinary setting that rides the save bar. The choices
    are Off and every non-archived text channel; a saved channel that has since

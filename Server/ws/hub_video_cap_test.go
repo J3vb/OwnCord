@@ -121,17 +121,47 @@ func TestVideoBitrateCap_AuthOkCarriesCap_ConnectAndResume(t *testing.T) {
 	}
 }
 
-// Edge case 1: saves racing connections. A connection registers and then builds
-// its auth_ok (the handshake order); its queued frames drain after auth_ok. Each
-// connection must end on the last saved cap, never on an older one. Run under -race.
+// Edge case 1: a save racing connections. A connection registers and then builds
+// its auth_ok (the handshake order), and its queued frames drain after auth_ok.
+// One connection registers before the save (it must get the frame) and one right
+// after the save's snapshot, through the hook: it is not sent the frame, so its
+// auth_ok must already read the new value. Each must end on the save.
 func TestVideoBitrateCap_SaveRacingConnect_EndsOnLastSave(t *testing.T) {
 	h, database, connect := presenceBatchHub(t)
+	before := connect("vcracebefore", true)
+	beforeAuth := authOKVideoCap(t, h, before.user, "none")
+	drain(before.send)
+
+	var inWindow *Client
+	var inWindowAuth int
+	applyVideoCapAfterSnapshotHook = func() {
+		inWindow = connect("vcracewindow", true)
+		inWindowAuth = authOKVideoCap(t, h, inWindow.user, "none")
+	}
+	t.Cleanup(func() { applyVideoCapAfterSnapshotHook = nil })
+	saveVideoCap(t, h, database, 900)
+	applyVideoCapAfterSnapshotHook = nil
+
+	endsOn := func(auth int, c *Client) int {
+		if frames := videoCapFrames(t, c); len(frames) > 0 {
+			return frames[len(frames)-1]
+		}
+		return auth
+	}
+	if got := endsOn(beforeAuth, before); got != 900_000 {
+		t.Errorf("connection registered before the save ended on %d, want 900000", got)
+	}
+	if got := endsOn(inWindowAuth, inWindow); got != 900_000 {
+		t.Errorf("connection registered inside the save ended on %d, want 900000", got)
+	}
+
+	// Many saves and connects at once, under -race: still none ends stale.
 	const conns = 12
 	clients := make([]*Client, conns)
 	authVals := make([]int, conns)
 	var wg sync.WaitGroup
 	wg.Go(func() {
-		for _, kbps := range []int{300, 1000, 4000, 900} {
+		for _, kbps := range []int{300, 1000, 4000, 700} {
 			saveVideoCap(t, h, database, kbps)
 		}
 	})
@@ -144,12 +174,8 @@ func TestVideoBitrateCap_SaveRacingConnect_EndsOnLastSave(t *testing.T) {
 	}
 	wg.Wait()
 	for i, c := range clients {
-		last := authVals[i]
-		if frames := videoCapFrames(t, c); len(frames) > 0 {
-			last = frames[len(frames)-1]
-		}
-		if last != 900_000 {
-			t.Errorf("connection %d ended on cap %d, want the last save 900000", i, last)
+		if got := endsOn(authVals[i], c); got != 700_000 {
+			t.Errorf("connection %d ended on cap %d, want the last save 700000", i, got)
 		}
 	}
 }

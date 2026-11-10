@@ -28,14 +28,15 @@ describe("videoBitrateCap", () => {
     expect(seen).toEqual([4_000_000]);
   });
 
-  it("a session reset forgets the cap but keeps listeners", () => {
+  it("a session reset lifts the cap and tells the kept listeners", () => {
     const seen: number[] = [];
     const off = onVideoBitrateCap((b) => seen.push(b));
     applyVideoBitrateCap(8_000_000);
     resetVideoBitrateCap();
     expect(videoBitrateCap()).toBe(0);
+    resetVideoBitrateCap();
     applyVideoBitrateCap(8_000_000);
-    expect(seen).toEqual([8_000_000, 8_000_000]);
+    expect(seen).toEqual([8_000_000, 0, 8_000_000]);
     off();
   });
 });

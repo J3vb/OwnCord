@@ -2710,8 +2710,10 @@ Sent to every connected client after an admin with `MANAGE_SERVER` saves the
 
 `max_video_bitrate` is the most video one person may send, in bits per second,
 for their camera and screen share together; `0` means no cap. LiveKit cannot
-cap one publisher, so this is advisory: OwnCord clients keep every video sender
-under it, and a client already sending follows a new value without a rejoin.
+cap one publisher, so this is advisory: a client is meant to keep every video
+sender under it and to follow a new value without a rejoin. Clients store the
+value from this release on; keeping senders under it lands in a later client
+release.
 A client treats a value that is not a positive whole number as no cap.
 
 Unfiltered, unsequenced and never replayed, like

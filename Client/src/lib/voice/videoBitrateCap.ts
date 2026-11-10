@@ -39,9 +39,9 @@ export function onVideoBitrateCap(listener: (bitrate: number) => void): () => vo
   };
 }
 
-/** Test seam and session end: back to no cap, listeners kept. */
+/** Session end: back to no cap. Listeners are kept and told when a cap is lifted. */
 export function resetVideoBitrateCap(): void {
-  cap = 0;
+  applyVideoBitrateCap(0);
 }
 
 // The cap belongs to the server that stated it; a session end forgets it.
