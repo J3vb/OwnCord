@@ -75,7 +75,8 @@ func normalizeMaxUploadBytes(v string) (string, error) {
 }
 
 // normalizeValueSetting validates the settings whose limits the wizard shares
-// (and the boolean switches voice_owner_movable and game_activity_enabled), reporting ok=false for any other key.
+// (and the boolean switches voice_owner_movable and game_activity_enabled, and the
+// video cap), reporting ok=false for any other key.
 func normalizeValueSetting(key, value string) (normalized string, ok bool, err error) {
 	switch key {
 	case "server_name":
@@ -86,6 +87,8 @@ func normalizeValueSetting(key, value string) (normalized string, ok bool, err e
 		normalized, err = NormalizeVoiceQuality(value)
 	case "max_upload_bytes":
 		normalized, err = normalizeMaxUploadBytes(value)
+	case VoiceMaxVideoKbpsKey:
+		normalized, err = normalizeVoiceMaxVideoKbps(key, value)
 	case VoiceOwnerMovableKey, GameActivityEnabledKey:
 		var parsed bool
 		if parsed, err = parseSettingsPatchBool(value); err != nil {

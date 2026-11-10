@@ -91,6 +91,7 @@ import { createAvatarElement } from "../../src/features/profiles/avatar";
 import { isVoiceMovePending, noteVoiceMoved } from "../../src/features/voice/moveHint";
 import { isVoiceLeaveOwed, noteVoiceLeave } from "../../src/features/voice/leaveOwed";
 import { noteWatchSent, takeWatchRefusal } from "../../src/lib/voice/watchRequest";
+import { applyVideoBitrateCap, videoBitrateCap } from "../../src/lib/voice/videoBitrateCap";
 import { getChannelMutesHost, setChannelMutesHost } from "../../src/lib/prefs/channelMutes";
 import {
   bindGifFavoritesApi,
@@ -475,6 +476,13 @@ const PROBES: readonly Probe[] = [
     },
     // takeWatchRefusal consumes a pending id, so a live one reads as not initial.
     isInitial: () => !takeWatchRefusal("env-1"),
+  },
+  {
+    name: "voice:video-bitrate-cap",
+    mutate: () => {
+      applyVideoBitrateCap(6_000_000);
+    },
+    isInitial: () => videoBitrateCap() === 0,
   },
   {
     name: "voice:passwordPrompt",

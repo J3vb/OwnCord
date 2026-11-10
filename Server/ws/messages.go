@@ -145,6 +145,21 @@ func buildGameActivityPolicy(enabled bool) []byte {
 	})
 }
 
+// videoBitrateCapPayload is video_bitrate_cap's payload and auth_ok's
+// video_bitrate_cap key: the per-person video upload cap in bits per second,
+// camera and screen share together; 0 means no cap.
+type videoBitrateCapPayload struct {
+	MaxVideoBitrate int `json:"max_video_bitrate"`
+}
+
+// buildVideoBitrateCap constructs a video_bitrate_cap broadcast.
+func buildVideoBitrateCap(bitrate int) []byte {
+	return buildJSON(wsMsg{
+		Type:    MsgTypeVideoBitrateCap,
+		Payload: videoBitrateCapPayload{MaxVideoBitrate: bitrate},
+	})
+}
+
 // uploadPolicyPayload is upload_policy's payload: the file-type lists in force, as in auth_ok.
 type uploadPolicyPayload struct {
 	BlockedExtensions []string `json:"blocked_extensions"`

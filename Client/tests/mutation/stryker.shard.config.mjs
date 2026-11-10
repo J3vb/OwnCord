@@ -110,6 +110,7 @@ export const shards = {
     "src/features/voice/trustedKeysPanel.ts",
     "src/lib/voice/livekitE2EE.ts",
     "src/lib/voice/shareResolutionRecovery.ts",
+    "src/lib/voice/videoBitrateCap.ts",
     "src/lib/voice/watchRequest.ts",
   ],
   "audio-media-1": [

@@ -18,11 +18,18 @@ const OWNER_MOVABLE_KEY='voice_owner_movable';
 const GAME_ACTIVITY_KEY='game_activity_enabled';
 /* The text channel that greets each new member; empty is off (WP 8.6). */
 const WELCOME_KEY='welcome_channel_id';
-const SETTINGS_KEYS=['server_name','motd','registration_mode','require_2fa','afk_timeout_seconds',WELCOME_KEY,OWNER_MOVABLE_KEY,GAME_ACTIVITY_KEY,...EXT_KEYS];
+/* The video upload cap per person, camera and screen share together, in
+   kbit/s; 0 or unset is no limit (service.VoiceMaxVideoKbpsKey). Any value from
+   300 to 50000 is accepted; a stored one not in the list is shown as its own
+   choice so a save never changes it by accident. */
+const VIDEO_CAP_KEY='voice_max_video_kbps';
+const VIDEO_CAPS=[['0','No limit'],['1000','1 Mbps'],['2500','2.5 Mbps'],['4000','4 Mbps'],['6000','6 Mbps'],['8000','8 Mbps'],['10000','10 Mbps'],['15000','15 Mbps'],['20000','20 Mbps']];
+function videoCapOptions(cur){return VIDEO_CAPS.some(([v])=>v===cur)?VIDEO_CAPS:VIDEO_CAPS.concat([[cur,(Number(cur)/1000)+' Mbps']])}
+const SETTINGS_KEYS=['server_name','motd','registration_mode','require_2fa','afk_timeout_seconds',VIDEO_CAP_KEY,WELCOME_KEY,OWNER_MOVABLE_KEY,GAME_ACTIVITY_KEY,...EXT_KEYS];
 /* An extension list as the server stores it: lower case, no dots, deduped,
    comma-separated; so a respelled but equal list is not a change. */
 function extListNorm(v){return[...new Set(String(v||'').split(/[\s,]+/).map(x=>x.replace(/^\.+/,'').toLowerCase()).filter(Boolean))].join(',')}
-function settingNorm(k,v){return k===OWNER_MOVABLE_KEY||k===GAME_ACTIVITY_KEY?((v==='false'||v==='0')?'false':'true'):k==='afk_timeout_seconds'?(v||AFK_TIMEOUT_DEFAULT):k==='require_2fa'?((v==='1'||v==='true')?'true':'false'):EXT_KEYS.includes(k)?extListNorm(v):(v||'')}
+function settingNorm(k,v){return k===OWNER_MOVABLE_KEY||k===GAME_ACTIVITY_KEY?((v==='false'||v==='0')?'false':'true'):k==='afk_timeout_seconds'?(v||AFK_TIMEOUT_DEFAULT):k===VIDEO_CAP_KEY?(String(v||'').trim()||'0'):k==='require_2fa'?((v==='1'||v==='true')?'true':'false'):EXT_KEYS.includes(k)?extListNorm(v):(v||'')}
 function settingsFormValues(keys){
   const out={};
   keys.forEach(k=>{
@@ -64,7 +71,7 @@ async function renderSettings(){
   html+=settingsCard('Access & registration',regModeCards(v('registration_mode')||'invite'));
   html+=settingsCard('Security',
     '<div class="setting-row"><div class="setting-info"><div class="setting-name" id="s-require_2fa-name">Require two-factor authentication</div><div class="setting-desc" id="s-require_2fa-desc">Every member must turn on 2FA before they can use the server</div></div><div class="setting-ctrl"><button class="toggle '+(on?'on':'')+'" id="s-require_2fa" role="switch" aria-checked="'+on+'" aria-labelledby="s-require_2fa-name" aria-describedby="s-require_2fa-desc" data-action="toggleSetting"></button></div></div>');
-  html+=await voiceCard(v('afk_timeout_seconds')||AFK_TIMEOUT_DEFAULT,isOwner()?settingNorm(OWNER_MOVABLE_KEY,v(OWNER_MOVABLE_KEY))==='true':null);
+  html+=await voiceCard(v('afk_timeout_seconds')||AFK_TIMEOUT_DEFAULT,isOwner()?settingNorm(OWNER_MOVABLE_KEY,v(OWNER_MOVABLE_KEY))==='true':null,settingNorm(VIDEO_CAP_KEY,v(VIDEO_CAP_KEY)));
   const gameActivityOn=settingNorm(GAME_ACTIVITY_KEY,v(GAME_ACTIVITY_KEY))==='true';
   html+=settingsCard('Member activity (games and music)',
     '<div class="setting-row"><div class="setting-info"><div class="setting-name" id="s-'+GAME_ACTIVITY_KEY+'-name">Show what members are playing and listening to</div><div class="setting-desc" id="s-'+GAME_ACTIVITY_KEY+'-desc">This covers games and music. Turn it off and no one sees what anyone is playing or listening to on this server. Games and songs already shown are cleared at once, and members\' apps stop sending them</div></div><div class="setting-ctrl"><button class="toggle '+(gameActivityOn?'on':'')+'" id="s-'+GAME_ACTIVITY_KEY+'" role="switch" aria-checked="'+gameActivityOn+'" aria-labelledby="s-'+GAME_ACTIVITY_KEY+'-name" aria-describedby="s-'+GAME_ACTIVITY_KEY+'-desc" data-action="toggleSetting"></button></div></div>');
@@ -118,7 +125,7 @@ async function renderSettings(){
 function afkSelect(id,opts,cur,attrs){
   return'<select class="filter-select" id="'+id+'"'+attrs+'>'+opts.map(([val,label])=>'<option value="'+esc(val)+'"'+(val===cur?' selected':'')+'>'+esc(label)+'</option>').join('')+'</select>';
 }
-async function voiceCard(timeout,movable){
+async function voiceCard(timeout,movable,videoCap){
   let channels=null,chErr='';
   try{const r=await api('GET','/channels');if(Array.isArray(r))channels=r}catch(e){chErr=e.message||''}
   const voice=(channels||[]).filter(c=>c.type==='voice');
@@ -139,7 +146,9 @@ async function voiceCard(timeout,movable){
       ,'<div class="afk-ctrl">'+chSel+'<span class="setting-desc" id="afkChannelState" role="status">'+(channels?'':esc((chErr||'Could not load channels')+' Choosing the AFK channel needs Manage Channels.'))+'</span></div>')
     +'<div id="afkWarnings" aria-live="polite">'+warnings+'</div>'
     +settingsRow('afk_timeout_seconds','Move after','How long a member must stay idle, on top of the 10 minutes the app waits before marking them idle',timeoutSel)
-    +moving);
+    +moving
+    +'<h4 class="setting-sub">Video</h4>'
+    +settingsRow(VIDEO_CAP_KEY,'Max video upload per person','The most one person may send for camera and screen share together. Lower it when your server\'s upload line is limited: every viewer of a stream gets their own copy from the server. Applies at once to streams already live',afkSelect('s-'+VIDEO_CAP_KEY,videoCapOptions(videoCap),videoCap,' aria-describedby="s-'+VIDEO_CAP_KEY+'-desc" data-change-action="markSettingsChanged"')));
 }
 /* Welcome messages: an ordinary setting that rides the save bar. The choices
    are Off and every non-archived text channel; a saved channel that has since

@@ -52,7 +52,13 @@ function boot(calls: FetchCall[], respond: (path: string, method: string) => Rep
 }
 
 describe("Server/admin/static — AFK card", () => {
-  function responder(opts: { channels: unknown; perms?: unknown; put?: Reply; timeout?: string }) {
+  function responder(opts: {
+    channels: unknown;
+    perms?: unknown;
+    put?: Reply;
+    timeout?: string;
+    videoCap?: string;
+  }) {
     return (path: string, method: string): Reply => {
       if (path === "/settings" && method === "GET") {
         return {
@@ -60,6 +66,7 @@ describe("Server/admin/static — AFK card", () => {
             server_name: "T",
             registration_mode: "invite",
             ...(opts.timeout ? { afk_timeout_seconds: opts.timeout } : {}),
+            ...(opts.videoCap ? { voice_max_video_kbps: opts.videoCap } : {}),
           },
         };
       }
@@ -118,6 +125,30 @@ describe("Server/admin/static — AFK card", () => {
     expect(calls.find((c) => c.path === "/settings" && c.method === "PATCH")?.body).toEqual({
       afk_timeout_seconds: "3600",
     });
+  });
+
+  it("the video cap reads unset as No limit, keeps a custom stored value, and saves only a change", async () => {
+    const calls: FetchCall[] = [];
+    const b = await boot(calls, responder({ channels: CHANNELS }));
+    await mountSettings(b.bridge, b.doc);
+    const cap = b.doc.getElementById("s-voice_max_video_kbps") as HTMLSelectElement;
+    expect(cap.value).toBe("0");
+    expect(cap.options[0]?.textContent).toBe("No limit");
+    (b.doc.getElementById("saveSettingsBtn") as HTMLButtonElement).disabled = false;
+    await b.bridge.saveSettings();
+    expect(calls.find((c) => c.path === "/settings" && c.method === "PATCH")?.body).toBeUndefined();
+    cap.value = "6000";
+    (b.doc.getElementById("saveSettingsBtn") as HTMLButtonElement).disabled = false;
+    await b.bridge.saveSettings();
+    expect(calls.find((c) => c.path === "/settings" && c.method === "PATCH")?.body).toEqual({
+      voice_max_video_kbps: "6000",
+    });
+
+    const custom = await boot([], responder({ channels: CHANNELS, videoCap: "3500" }));
+    await mountSettings(custom.bridge, custom.doc);
+    const kept = custom.doc.getElementById("s-voice_max_video_kbps") as HTMLSelectElement;
+    expect(kept.value).toBe("3500");
+    expect(kept.selectedOptions[0]?.textContent).toBe("3.5 Mbps");
   });
 
   it("saves the channel on its own endpoint and clears it with null", async () => {

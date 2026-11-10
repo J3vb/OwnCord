@@ -131,6 +131,37 @@ type gameActivityPolicyApplier interface {
 	ApplyGameActivityPolicy(saved bool)
 }
 
+// videoBitrateCapApplier is the hub capability that makes the hub follow the
+// saved video upload cap and sends video_bitrate_cap to connected clients.
+// *ws.Hub implements it (hub_wiring_test.go pins that).
+type videoBitrateCapApplier interface {
+	ApplyVideoBitrateCap(savedKbps int)
+}
+
+// applyLiveSettings hands the running hub the saved settings it follows live:
+// turning game activity off must clear the games already shown and tell open
+// clients, and a new video cap must reach streams already live, not wait for
+// their next connect. all is what Patch returned (nil on an early failure); the
+// stored value wins over the requested one when present.
+func applyLiveSettings(hub HubBroadcaster, updates, all map[string]string) {
+	if value, changing := updates[service.GameActivityEnabledKey]; changing {
+		if a, ok := hub.(gameActivityPolicyApplier); ok {
+			if stored, read := all[service.GameActivityEnabledKey]; read {
+				value = stored
+			}
+			a.ApplyGameActivityPolicy(service.GameActivityEnabled(value))
+		}
+	}
+	if value, changing := updates[service.VoiceMaxVideoKbpsKey]; changing {
+		if a, ok := hub.(videoBitrateCapApplier); ok {
+			if stored, read := all[service.VoiceMaxVideoKbpsKey]; read {
+				value = stored
+			}
+			a.ApplyVideoBitrateCap(service.VoiceMaxVideoBitrate(value) / 1000)
+		}
+	}
+}
+
 func handlePatchSettings(settings *service.SettingsService, retention *service.RetentionService, hub HubBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if settings == nil {
@@ -178,19 +209,10 @@ func handlePatchSettings(settings *service.SettingsService, retention *service.R
 			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, err.Error())
 			return
 		}
-		// Turning game activity off must clear the games already shown and
-		// tell open clients, not wait for their next connect. It runs before
-		// the error check: Patch can fail after its commit (the response read
-		// on a cancelled request), and the hub re-reads the stored value
-		// itself, so a save that did land still reaches it.
-		if value, changing := updates[service.GameActivityEnabledKey]; changing {
-			if a, ok := hub.(gameActivityPolicyApplier); ok {
-				if stored, read := all[service.GameActivityEnabledKey]; read {
-					value = stored
-				}
-				a.ApplyGameActivityPolicy(service.GameActivityEnabled(value))
-			}
-		}
+		// Runs before the error check: Patch can fail after its commit (the
+		// response read on a cancelled request), and the hub re-reads the stored
+		// values itself, so a save that did land still reaches it.
+		applyLiveSettings(hub, updates, all)
 		if err != nil {
 			slog.ErrorContext(r.Context(), "settings patch failed", "error", err)
 			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "failed to update settings")

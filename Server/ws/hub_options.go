@@ -253,6 +253,7 @@ func NewHub(opts HubOptions) (*Hub, error) {
 
 	h.settings.cache.Refresh(context.Background())
 	h.initGameActivityPolicy()
+	h.initVideoBitrateCap()
 	return h, nil
 }
 
