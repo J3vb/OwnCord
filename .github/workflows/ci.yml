@@ -543,13 +543,23 @@ jobs:
         working-directory: Client/
         run: node tests/e2e/scripts/install-livekit.mjs
 
-      - name: Run the real-SFU single-port proof
+      - name: Run the real-SFU proofs
         if: matrix.os == 'ubuntu-latest' && env.RUN_SERVER != 'false'
         env:
-          # Relative to the test's working directory, which is the package
-          # directory Server/ws, not Server/.
+          # Relative to each test's working directory, which is its package
+          # directory (Server/livekitproc, Server/ws), not Server/.
           OWNCORD_LIVEKIT_TEST_BINARY: ../../Client/tests/e2e/.bin/livekit-server
-        run: go test -count=1 ./ws/ -run '^TestRealLiveKit_'
+        # A pattern that matches no test still exits 0, so the count is
+        # checked first: a proof that moves package must fail this step, not
+        # drop out of it. -p 1 because both packages start livekit-server on
+        # its fixed ports.
+        run: |
+          found="$(go test -list '^TestRealLiveKit_' ./livekitproc/ ./ws/ | grep -c '^TestRealLiveKit_' || true)"
+          if [ "$found" -ne 3 ]; then
+            echo "::error::expected 3 real-SFU proofs in livekitproc and ws, found $found"
+            exit 1
+          fi
+          go test -count=1 -p 1 ./livekitproc/ ./ws/ -run '^TestRealLiveKit_'
 
       # One leg is enough: -tags deadlock swaps syncutil's lock types and
       # reports lock-order inversions, which do not depend on the OS, and no

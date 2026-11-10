@@ -82,6 +82,11 @@ export async function startTestServer(
       livekit_url: `ws://127.0.0.1:${livekitPort}`,
       livekit_api_key: LIVEKIT_KEY_ID,
       livekit_api_secret: LIVEKIT_API_SECRET,
+      // Every real-server journey runs on voice grants without the data
+      // right, the stricter of the two settings: a journey that passes here
+      // also passes with the default grant, and a feature that starts to
+      // depend on media-server data fails here first.
+      restrict_data_publishing: true,
     },
   };
   // JSON is valid YAML; avoids platform-specific escaping of temporary paths.
