@@ -19,7 +19,10 @@ import { connectText } from "../../i18n/connect";
 import { messagingText } from "../../i18n/messaging";
 
 // The picker loads on its first open, so its code stays out of the main-page chunk.
-const emojiPickerScreen = createLazyScreen("emoji-picker", () => import("@components/EmojiPicker"));
+const emojiPickerScreen = createLazyScreen(
+  "emoji-picker",
+  () => import("../../features/messaging/EmojiPicker"),
+);
 
 // ---------------------------------------------------------------------------
 // Types
@@ -130,7 +133,10 @@ export function createReactionController(opts: ReactionControllerOptions): React
       });
   }
 
-  function mountPickerSheet(screen: typeof import("@components/EmojiPicker"), msgId: number): void {
+  function mountPickerSheet(
+    screen: typeof import("../../features/messaging/EmojiPicker"),
+    msgId: number,
+  ): void {
     const picker = screen.createEmojiPicker({
       customEmoji: listCustomEmoji(),
       onSelect: (selectedEmoji: string, select) => {
@@ -159,7 +165,10 @@ export function createReactionController(opts: ReactionControllerOptions): React
     activeSheetClose = sheet.close;
   }
 
-  function mountPicker(screen: typeof import("@components/EmojiPicker"), msgId: number): void {
+  function mountPicker(
+    screen: typeof import("../../features/messaging/EmojiPicker"),
+    msgId: number,
+  ): void {
     if (isPhoneLayout()) {
       mountPickerSheet(screen, msgId);
       return;

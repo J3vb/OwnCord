@@ -15,7 +15,7 @@ vi.mock("@lib/logger", () => ({
   createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
 
-let createUpdateNotifier: typeof import("@components/UpdateNotifier").createUpdateNotifier;
+let createUpdateNotifier: typeof import("../../src/features/updates/UpdateNotifier").createUpdateNotifier;
 let downloadAndInstallUpdate: typeof import("@lib/net/updater").downloadAndInstallUpdate;
 let host: HTMLElement;
 let finishInstall: () => void;
@@ -25,7 +25,7 @@ const notifiers: MountableComponent[] = [];
 beforeEach(async () => {
   vi.useFakeTimers();
   vi.resetModules();
-  ({ createUpdateNotifier } = await import("@components/UpdateNotifier"));
+  ({ createUpdateNotifier } = await import("../../src/features/updates/UpdateNotifier"));
   ({ downloadAndInstallUpdate } = await import("@lib/net/updater"));
   host = document.createElement("div");
   document.body.appendChild(host);

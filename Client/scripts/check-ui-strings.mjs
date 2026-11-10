@@ -65,11 +65,11 @@ const EXCLUDED = [
  */
 const OWNERS = [
   [
-    /^src\/(pages\/ConnectPage|pages\/connect-page\/|pages\/main-page\/Sidebar|pages\/main-page\/OverlayManagers|components\/(QuickSwitchOverlay|QuickSwitcher|CertMismatchModal|ServerBanner|ConnectedOverlay|UserBar|StatusPicker|InviteManager|CreateChannelModal|EditChannelModal|DeleteChannelModal)\.ts|features\/channels\/sidebar\/purgePrompt\.ts|features\/moderation\/(AdminActions|memberMenuRows)\.ts|features\/(members\/MemberList|channels\/ChannelSidebar)\.ts|features\/channels\/sidebar\/contextMenu\.ts|lib\/(text\/safeRender|net\/credentials)\.ts|features\/channels\/wsHandlers\.ts|main\.ts)/,
+    /^src\/(pages\/ConnectPage|pages\/connect-page\/|pages\/main-page\/Sidebar|pages\/main-page\/OverlayManagers|components\/(QuickSwitchOverlay|QuickSwitcher|CertMismatchModal|ServerBanner|ConnectedOverlay|UserBar|StatusPicker|InviteManager|CreateChannelModal|DeleteChannelModal)\.ts|features\/channels\/(editChannelDialog|channelTypes|channelCategorySelect)\.ts|features\/channels\/sidebar\/purgePrompt\.ts|features\/moderation\/(AdminActions|memberMenuRows)\.ts|features\/(members\/MemberList|channels\/ChannelSidebar)\.ts|features\/channels\/sidebar\/contextMenu\.ts|lib\/(text\/safeRender|net\/credentials)\.ts|features\/channels\/wsHandlers\.ts|main\.ts)/,
     "B9-18",
   ],
   [
-    /^src\/(features\/messaging\/(message-list|composer|content)\/|features\/messaging\/(MessageList|MessageInput)\.ts|features\/direct-messages\/(DmSidebar|dmRow|dmAvatars)\.ts|features\/profiles\/(userProfile[A-Za-z]*|userNoteSection)\.ts|components\/(GifPicker|SearchOverlay|PinnedMessages|DmProfileSidebar|EmojiPicker|NsfwGate)\.ts|pages\/main-page\/channel\/|pages\/main-page\/(ChannelController|MessageJump|ChatHeader|MemberPickerModal)\.ts)/,
+    /^src\/(features\/messaging\/(message-list|composer|content)\/|features\/messaging\/(MessageList|MessageInput)\.ts|features\/direct-messages\/(DmSidebar|dmRow|dmAvatars)\.ts|features\/profiles\/(userProfile[A-Za-z]*|userNoteSection)\.ts|features\/messaging\/EmojiPicker\.ts|components\/(GifPicker|SearchOverlay|PinnedMessages|DmProfileSidebar|NsfwGate)\.ts|pages\/main-page\/channel\/|pages\/main-page\/(ChannelController|MessageJump|ChatHeader|MemberPickerModal)\.ts)/,
     "B9-19",
   ],
   [/^src\//, "B9-20"],

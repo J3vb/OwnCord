@@ -42,7 +42,7 @@ const EAGER_SITES = [
   "features/messaging/composer/inputSend.ts",
   "features/messaging/composer/inputShared.ts",
   "features/profiles/SelfProfileCard.ts",
-  "components/EditChannelModal.ts",
+  "features/channels/editChannelDialog.ts",
   "features/messaging/message-list/quickReactions.ts",
   "pages/MainPage.ts",
   "pages/main-page/dmCalls.ts",

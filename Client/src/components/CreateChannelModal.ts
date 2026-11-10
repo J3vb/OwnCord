@@ -29,8 +29,12 @@ import {
   MAX_CHANNEL_NAME_LENGTH,
   MAX_CHANNEL_TOPIC_LENGTH,
   channelTypeLabel,
-} from "./channelTypes";
-import { buildCategorySelect, categoryFields, categoryOptionValue } from "./channelCategorySelect";
+} from "../features/channels/channelTypes";
+import {
+  buildCategorySelect,
+  categoryFields,
+  categoryOptionValue,
+} from "../features/channels/channelCategorySelect";
 
 export interface CreateChannelModalOptions {
   /** The category the create affordance was invoked from (`NO_CATEGORY` = none). */

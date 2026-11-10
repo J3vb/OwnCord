@@ -6,13 +6,13 @@ import { createIcon } from "@lib/icons";
 import type { IconName } from "@lib/icons";
 import { createLogger } from "@lib/logger";
 import { downloadAndInstallUpdate, subscribeToUpdateInstall } from "@lib/net/updater";
-import { createUpdateChecker } from "../features/updates/updateChecker";
-import type { UpdateCheckReason, UpdateOutcome } from "../features/updates/updateChecker";
-import { setAvailableUpdate } from "../features/updates/availableUpdate";
+import { createUpdateChecker } from "./updateChecker";
+import type { UpdateCheckReason, UpdateOutcome } from "./updateChecker";
+import { setAvailableUpdate } from "./availableUpdate";
 import { openSettings, uiStore } from "@stores/ui.store";
 import type { DownloadProgress, UpdateInstallState } from "@lib/net/updater";
 import type { MountableComponent } from "@lib/text/safeRender";
-import { connectText } from "../i18n/connect";
+import { connectText } from "../../i18n/connect";
 
 const log = createLogger("update-notifier");
 
@@ -90,6 +90,28 @@ function failedText(state: Extract<UpdateInstallState, { status: "failed" }>): s
   if (state.reason === "android-permission") return connectText("update.androidPermission");
   if (state.reason === "version-changed") return connectText("update.versionChanged");
   return connectText("update.failed");
+}
+
+type ActiveInstallState = Exclude<UpdateInstallState, { status: "idle" }>;
+
+/** The banner headline for an install phase. */
+function installStateText(state: ActiveInstallState): string {
+  if (state.status === "downloading") {
+    return state.progress === null
+      ? connectText("update.downloading")
+      : formatDownloadProgress(state.progress);
+  }
+  if (state.status === "installing") return connectText("update.installing");
+  if (state.status === "restarting") return connectText("update.installedRestarting");
+  return failedText(state);
+}
+
+/** What the live region says for an install phase: the phase, never the percentage. */
+function installStateAnnouncement(state: ActiveInstallState, text: string): string {
+  if (state.status === "downloading") return connectText("update.downloading");
+  if (state.status === "installing") return text;
+  if (state.status === "restarting") return connectText("update.installedRestarting");
+  return failedText(state);
 }
 
 export function createUpdateNotifier(options: UpdateNotifierOptions): MountableComponent {
@@ -261,16 +283,7 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
       banner = createElement("div", { class: "update-banner" });
       container.prepend(banner);
     }
-    const text =
-      state.status === "downloading"
-        ? state.progress === null
-          ? connectText("update.downloading")
-          : formatDownloadProgress(state.progress)
-        : state.status === "installing"
-          ? connectText("update.installing")
-          : state.status === "restarting"
-            ? connectText("update.installedRestarting")
-            : failedText(state);
+    const text = installStateText(state);
     const failed =
       state.status === "failed" && !state.restartRequired && state.reason !== "android-confirm";
     const body = buildFrame(banner, failed ? "triangle-alert" : "download", text);
@@ -282,37 +295,34 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
     // Announce only the coarse transition. A percentage tick is not a new
     // event; reading "Downloading update… 47%" every frame is noise, so the
     // live region keeps the phase and updates only when it changes.
-    if (state.status === "downloading") {
-      announce(connectText("update.downloading"));
-    } else if (state.status === "installing") {
-      announce(text);
-    } else if (state.status === "restarting") {
-      announce(connectText("update.installedRestarting"));
-    } else {
-      announce(failedText(state));
-    }
+    announce(installStateAnnouncement(state, text));
 
-    if (state.status === "failed") {
-      if (!state.restartRequired) {
-        const retryBtn = createElement(
-          "button",
-          { class: "update-banner-btn update-banner-install" },
-          connectText("update.retry"),
-        );
-        retryBtn.addEventListener("click", installUpdate);
-        banner.appendChild(retryBtn);
-      }
-      const dismissBtn = createElement(
+    if (state.status === "failed") appendFailureActions(banner, state);
+  }
+
+  function appendFailureActions(
+    target: HTMLDivElement,
+    state: Extract<UpdateInstallState, { status: "failed" }>,
+  ): void {
+    if (!state.restartRequired) {
+      const retryBtn = createElement(
         "button",
-        { class: "update-banner-btn update-banner-later" },
-        connectText("update.dismiss"),
+        { class: "update-banner-btn update-banner-install" },
+        connectText("update.retry"),
       );
-      dismissBtn.addEventListener("click", () => {
-        dismissedKey = shownKey;
-        removeBanner();
-      });
-      banner.appendChild(dismissBtn);
+      retryBtn.addEventListener("click", installUpdate);
+      target.appendChild(retryBtn);
     }
+    const dismissBtn = createElement(
+      "button",
+      { class: "update-banner-btn update-banner-later" },
+      connectText("update.dismiss"),
+    );
+    dismissBtn.addEventListener("click", () => {
+      dismissedKey = shownKey;
+      removeBanner();
+    });
+    target.appendChild(dismissBtn);
   }
 
   function removeBanner(): void {
