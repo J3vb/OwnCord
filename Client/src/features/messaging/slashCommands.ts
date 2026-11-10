@@ -58,6 +58,27 @@ interface Piece {
   readonly keep: boolean;
 }
 
+/** Where the match of `re` starting at `i` ends, or -1 when it does not match there. */
+function runEnd(re: RegExp, text: string, i: number): number {
+  re.lastIndex = i;
+  const m = re.exec(text);
+  return m === null ? -1 : i + m[0].length;
+}
+
+/** The end of the code span, bare URL or @mention that starts at `i`, or -1 for prose. */
+function keptRunEnd(text: string, i: number, mentions: boolean): number {
+  const c = text[i]!;
+  if (c === "`") {
+    const end = codeSpanEnd(text, i);
+    return end > 0 && !text.slice(i, end).includes("\n") ? end : -1;
+  }
+  if ((c === "h" || c === "H") && !isWordChar(text[i - 1])) return runEnd(URL_RUN, text, i);
+  if (mentions && c === "@" && !/[\p{L}\p{N}_@]/u.test(text[i - 1] ?? " ")) {
+    return runEnd(MENTION_RUN, text, i);
+  }
+  return -1;
+}
+
 /**
  * Split `text` into runs the markdown and mention parsers read as units —
  * code spans (same-length backtick runs, as lib/text/markdown's codeSpanEnd), bare
@@ -76,30 +97,13 @@ function splitPieces(text: string, mentions: boolean): Piece[] {
     start = end;
   };
   while (i < text.length) {
-    const c = text[i]!;
-    if (c === "`") {
-      const end = codeSpanEnd(text, i);
-      if (end > 0 && !text.slice(i, end).includes("\n")) {
-        take(end);
-        continue;
-      }
-      // An unclosed run is plain text; step over all of it.
-      while (text[i + 1] === "`") i++;
-    } else if ((c === "h" || c === "H") && !isWordChar(text[i - 1])) {
-      URL_RUN.lastIndex = i;
-      const m = URL_RUN.exec(text);
-      if (m !== null) {
-        take(i + m[0].length);
-        continue;
-      }
-    } else if (mentions && c === "@" && !/[\p{L}\p{N}_@]/u.test(text[i - 1] ?? " ")) {
-      MENTION_RUN.lastIndex = i;
-      const m = MENTION_RUN.exec(text);
-      if (m !== null) {
-        take(i + m[0].length);
-        continue;
-      }
+    const end = keptRunEnd(text, i, mentions);
+    if (end !== -1) {
+      take(end);
+      continue;
     }
+    // An unclosed run is plain text; step over all of it.
+    if (text[i] === "`") while (text[i + 1] === "`") i++;
     i++;
   }
   if (start < text.length) pieces.push({ text: text.slice(start), keep: false });

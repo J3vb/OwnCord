@@ -36,7 +36,7 @@ const clientGaps: Record<string, string> = {
   "profiles.pingHost": "server health response",
   "profiles.importProfiles": "a profile file the user imports",
   "credentials.parseRelayedLogin": "login response relayed by the native side",
-  "attachmentCache.requestFileLink": "REST response",
+  "attachmentMedia.requestFileLink": "REST response",
   "externalContent.json": "external-content broker responses",
   "api.parseAttachments": "moderation report attachments from the server",
 };

@@ -109,6 +109,24 @@ export function emojiMatches(e: UnicodeEmoji, query: string): boolean {
 let byName: Map<string, UnicodeEmoji> | null = null;
 let byNameOf: EmojiCatalog | null = null;
 
+/** Every name of every emoji, exact first; a name that only matches with its
+ *  underscores dropped fills the gaps, so `thumbsup` finds `thumbs_up`. */
+function indexNames(cat: EmojiCatalog): Map<string, UnicodeEmoji> {
+  const exact = new Map<string, UnicodeEmoji>();
+  const loose = new Map<string, UnicodeEmoji>();
+  for (const group of cat.groups) {
+    for (const e of group.emoji) {
+      for (const n of e.names) {
+        if (!exact.has(n)) exact.set(n, e);
+        const bare = n.replaceAll("_", "");
+        if (!loose.has(bare)) loose.set(bare, e);
+      }
+    }
+  }
+  for (const [n, e] of loose) if (!exact.has(n)) exact.set(n, e);
+  return exact;
+}
+
 /**
  * The emoji a typed `:name:` stands for, or null: an exact name first, then a
  * name equal once underscores drop (`thumbsup` is `thumbs_up`), the way the
@@ -118,19 +136,7 @@ export function emojiForShortcode(name: string): UnicodeEmoji | null {
   const cat = catalog;
   if (cat === null) return null;
   if (byName === null || byNameOf !== cat) {
-    const exact = new Map<string, UnicodeEmoji>();
-    const loose = new Map<string, UnicodeEmoji>();
-    for (const group of cat.groups) {
-      for (const e of group.emoji) {
-        for (const n of e.names) {
-          if (!exact.has(n)) exact.set(n, e);
-          const bare = n.replaceAll("_", "");
-          if (!loose.has(bare)) loose.set(bare, e);
-        }
-      }
-    }
-    for (const [n, e] of loose) if (!exact.has(n)) exact.set(n, e);
-    byName = exact;
+    byName = indexNames(cat);
     byNameOf = cat;
   }
   return byName.get(name.toLowerCase()) ?? null;

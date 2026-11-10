@@ -47,6 +47,54 @@ export function createInputDraft(st: InputState, api: InputApi) {
     };
   }
 
+  /** Build and mount one attachment chip in the preview bar and show the bar. */
+  function mountPreviewChip(
+    bar: HTMLElement,
+    file: Parameters<typeof api.appendPreview>[1],
+    filename: string,
+  ): HTMLDivElement {
+    const item = createElement("div", { class: "attachment-preview-item" });
+    api.appendPreview(item, file, filename);
+    api.appendRemoveButton(item, filename);
+    api.appendSpoilerButton(item, file);
+    bar.classList.add("visible");
+    bar.appendChild(item);
+    return item;
+  }
+
+  /** A ready chip per still-live upload of the draft. */
+  function restoreReadyChips(live: ComposerDraft["attachments"]): void {
+    for (const att of live) {
+      if (st.attachmentPreviewBar === null) break;
+      if (att.unsent === true) continue;
+      const item = mountPreviewChip(st.attachmentPreviewBar, att.file, att.filename);
+      const restored = { ...att, previewEl: item };
+      st.pendingAttachments.push(restored);
+      api.scheduleExpiry(restored);
+    }
+  }
+
+  /** An uploading chip per upload still in flight at capture. */
+  function restoreUploadingChips(uploads: NonNullable<ComposerDraft["uploads"]>): void {
+    for (const handle of uploads) {
+      if (handle.owner.signal.aborted) continue;
+      if (st.attachmentPreviewBar === null) {
+        handle.owner.destroy();
+        continue;
+      }
+      const item = mountPreviewChip(st.attachmentPreviewBar, handle.file, handle.filename);
+      const pending: (typeof st.pendingAttachments)[number] = {
+        id: handle.refreshing?.id ?? `pending-${++st.previewCounter}`,
+        filename: handle.filename,
+        previewEl: item,
+        file: handle.file,
+      };
+      if (handle.refreshing !== null) pending.uploadedAt = handle.refreshing.uploadedAt;
+      st.pendingAttachments.push(pending);
+      void api.followUpload(pending, handle);
+    }
+  }
+
   /** Restore a captured draft into this (fresh) composer: text, reply bar, a
    *  ready chip (no spinner) per still-live upload, so its id sends without
    *  re-uploading, and an uploading chip per upload still in flight. A chip
@@ -66,41 +114,8 @@ export function createInputDraft(st: InputState, api: InputApi) {
       (a) => a.unsent === true || a.file !== undefined || now - a.uploadedAt < attachmentTtlMs(),
     );
     const unsent = live.filter((a) => a.unsent === true);
-    for (const att of live) {
-      if (st.attachmentPreviewBar === null) break;
-      if (att.unsent === true) continue;
-      const item = createElement("div", { class: "attachment-preview-item" });
-      api.appendPreview(item, att.file, att.filename);
-      api.appendRemoveButton(item, att.filename);
-      api.appendSpoilerButton(item, att.file);
-      st.attachmentPreviewBar.classList.add("visible");
-      st.attachmentPreviewBar.appendChild(item);
-      const restored = { ...att, previewEl: item };
-      st.pendingAttachments.push(restored);
-      api.scheduleExpiry(restored);
-    }
-    for (const handle of draft.uploads ?? []) {
-      if (handle.owner.signal.aborted) continue;
-      if (st.attachmentPreviewBar === null) {
-        handle.owner.destroy();
-        continue;
-      }
-      const item = createElement("div", { class: "attachment-preview-item" });
-      api.appendPreview(item, handle.file, handle.filename);
-      api.appendRemoveButton(item, handle.filename);
-      api.appendSpoilerButton(item, handle.file);
-      st.attachmentPreviewBar.classList.add("visible");
-      st.attachmentPreviewBar.appendChild(item);
-      const pending: (typeof st.pendingAttachments)[number] = {
-        id: handle.refreshing?.id ?? `pending-${++st.previewCounter}`,
-        filename: handle.filename,
-        previewEl: item,
-        file: handle.file,
-      };
-      if (handle.refreshing !== null) pending.uploadedAt = handle.refreshing.uploadedAt;
-      st.pendingAttachments.push(pending);
-      void api.followUpload(pending, handle);
-    }
+    restoreReadyChips(live);
+    restoreUploadingChips(draft.uploads ?? []);
     if (unsent.length > 0) restoreUnsent(unsent, "skipped");
     if (live.length < draft.attachments.length) {
       api.showUploadError(messagingText("error.draftAttachmentExpired"));

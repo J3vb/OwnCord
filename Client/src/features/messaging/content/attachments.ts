@@ -550,6 +550,176 @@ export function renderAttachment(att: Attachment, gallery?: LightboxGallery): HT
     : node;
 }
 
+/** An inline image: reserved box, cache-first load with retry, lightbox and menu. */
+function renderImageAttachment(
+  att: Attachment,
+  resolvedUrl: string,
+  gallery?: LightboxGallery,
+): HTMLDivElement {
+  const wrap = createElement("div", { class: "msg-image" });
+  // The row shows the server's preview; the lightbox loads the full file.
+  const inlineUrl = thumbnailUrl(resolvedUrl, att.mime);
+
+  // Reserve space using server-provided dimensions to prevent layout shift.
+  // An old attachment has none: it takes the box remembered for its URL, or
+  // the size its header declares once the bytes arrive, or 200px until then.
+  const serverBox =
+    att.width != null && att.height != null
+      ? fitImageBox(att.width, att.height, ATTACHMENT_BOX_MAX_H)
+      : null;
+  const reserve = (box: ImageBox): void => {
+    wrap.style.minHeight = "";
+    wrap.style.width = `${box.w}px`;
+    wrap.style.height = `${box.h}px`;
+  };
+  // A reset between mount and load must not write this URL into the new session.
+  const generation = imageSizeGeneration();
+  const rememberedBox = serverBox === null ? getImageBox(inlineUrl) : undefined;
+  if (serverBox !== null) reserve(serverBox);
+  else if (rememberedBox !== undefined) reserve(rememberedBox);
+  else wrap.style.minHeight = "200px";
+
+  function attachLightbox(img: HTMLImageElement): void {
+    // Keyboard-operable like an inline image: focus it and Enter or
+    // Space opens the lightbox, the Menu key or Shift+F10 the image menu.
+    img.tabIndex = 0;
+    img.setAttribute("role", "button");
+    img.setAttribute("aria-label", messageStatusText("file.openImage", { filename: att.filename }));
+    img.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      e.preventDefault();
+      img.click();
+    });
+    img.addEventListener("click", () => {
+      openImageLightbox(
+        img.src,
+        att.filename,
+        { url: resolvedUrl },
+        gallery,
+        shownImageUrl(resolvedUrl, att.mime),
+      );
+    });
+  }
+
+  const isGif = att.mime === "image/gif";
+
+  // Without server dimensions, settle the box on the real size once it is
+  // known (a header the sniffer could not read) so a rebuild starts there.
+  const clearReservation = (img: HTMLImageElement): void => {
+    if (serverBox !== null) return;
+    const actual = fitImageBox(img.naturalWidth, img.naturalHeight, ATTACHMENT_BOX_MAX_H);
+    const reserved = getImageBox(inlineUrl);
+    if (actual !== null) {
+      // Decoded and oriented by the browser: the measured box beats a sniffed one.
+      if (
+        reserved === undefined ||
+        reserved.measured !== true ||
+        reserved.w !== actual.w ||
+        reserved.h !== actual.h
+      ) {
+        reserve(actual);
+        setImageBox(inlineUrl, { ...actual, measured: true }, generation);
+      }
+      return;
+    }
+    if (reserved !== undefined) return;
+    // No intrinsic size reported: keep the measured height as the minimum.
+    wrap.style.minHeight = "";
+    const h = wrap.offsetHeight;
+    if (h > 0) wrap.style.minHeight = `${h}px`;
+  };
+
+  const buildImage = (objectUrl: string): HTMLImageElement => {
+    const img = createElement("img", {
+      src: objectUrl,
+      alt: att.filename,
+      decoding: "async",
+    });
+    recoverEvictedImage(img, { url: inlineUrl });
+    // Bytes that arrived but do not decode (a corrupt or unsupported file)
+    // would leave a broken-image icon: the file chip keeps it downloadable.
+    img.addEventListener(
+      "error",
+      () => {
+        if (!wrap.isConnected) return;
+        swapKeepingFocus(wrap, renderUnshownImage(att, resolvedUrl));
+      },
+      { once: true },
+    );
+    attachLightbox(img);
+    bindImageMenu({
+      img,
+      link: null,
+      // The row may show a thumbnail or a frozen GIF frame; copy the file
+      // (a HEIC or TIFF has only its JPEG preview to copy).
+      full: () => fetchImageAsObjectUrl(shownImageUrl(resolvedUrl, att.mime)),
+      save: () => downloadFile(resolvedUrl, att.filename),
+      share: () => downloadFile(resolvedUrl, att.filename, "share"),
+    });
+    img.addEventListener(
+      "load",
+      () => {
+        clearReservation(img);
+        if (isGif) observeMedia(img, img.src, wrap, !animateGifsPref);
+      },
+      { once: true },
+    );
+    return img;
+  };
+
+  // Check cache first for instant render
+  const cached = imageCache.get(inlineUrl);
+  if (cached !== undefined) {
+    wrap.appendChild(buildImage(cached));
+  } else {
+    // Show loading placeholder, then replace with image. On failure the
+    // placeholder becomes a typed failure line with a bounded retry, like the
+    // external-media path — a silently un-"loading" filename box reads as
+    // still-loading forever (F14).
+    const placeholder = createElement("div", { class: "placeholder-img loading" }, att.filename);
+    wrap.appendChild(placeholder);
+    let current: Element = placeholder;
+
+    const attempt = (): void => {
+      void fetchImageAsObjectUrl(inlineUrl, { sniff: serverBox === null }).then((objectUrl) => {
+        if (objectUrl !== null) {
+          const sniffed = serverBox === null ? blobImageSize(objectUrl) : undefined;
+          const exact =
+            sniffed === undefined
+              ? null
+              : fitImageBox(sniffed.width, sniffed.height, ATTACHMENT_BOX_MAX_H);
+          if (exact !== null) {
+            // A measured box from an earlier load wins over the header's reading.
+            const held = setImageBox(inlineUrl, exact, generation);
+            reserve(held ?? exact);
+          }
+          const img = buildImage(objectUrl);
+          current.replaceWith(img);
+          current = img;
+        } else if (isConvertedImageMime(att.mime)) {
+          // No preview for this HEIC/TIFF: the file chip keeps the original downloadable.
+          swapKeepingFocus(wrap, renderUnshownImage(att, resolvedUrl));
+        } else {
+          const failure = renderFailureStatus(
+            messageStatusText("file.imageFailed"),
+            messageStatusText("file.retry"),
+            () => {
+              // Retry asks the server again, even after a definite refusal.
+              missingImages.delete(inlineUrl);
+              attempt();
+            },
+          );
+          current.replaceWith(failure);
+          current = failure;
+        }
+      });
+    };
+    attempt();
+  }
+
+  return wrap;
+}
+
 function renderAttachmentContent(att: Attachment, gallery?: LightboxGallery): HTMLDivElement {
   const resolvedUrl = resolveServerUrl(att.url);
   const inlineable = isSafeUrl(resolvedUrl);
@@ -566,173 +736,7 @@ function renderAttachmentContent(att: Attachment, gallery?: LightboxGallery): HT
   if (inlineable && isAudioMime(att.mime)) {
     return renderAudioAttachment(att, resolvedUrl);
   }
-  if (isImageMime(att.mime) && inlineable) {
-    const wrap = createElement("div", { class: "msg-image" });
-    // The row shows the server's preview; the lightbox loads the full file.
-    const inlineUrl = thumbnailUrl(resolvedUrl, att.mime);
-
-    // Reserve space using server-provided dimensions to prevent layout shift.
-    // An old attachment has none: it takes the box remembered for its URL, or
-    // the size its header declares once the bytes arrive, or 200px until then.
-    const serverBox =
-      att.width != null && att.height != null
-        ? fitImageBox(att.width, att.height, ATTACHMENT_BOX_MAX_H)
-        : null;
-    const reserve = (box: ImageBox): void => {
-      wrap.style.minHeight = "";
-      wrap.style.width = `${box.w}px`;
-      wrap.style.height = `${box.h}px`;
-    };
-    // A reset between mount and load must not write this URL into the new session.
-    const generation = imageSizeGeneration();
-    const rememberedBox = serverBox === null ? getImageBox(inlineUrl) : undefined;
-    if (serverBox !== null) reserve(serverBox);
-    else if (rememberedBox !== undefined) reserve(rememberedBox);
-    else wrap.style.minHeight = "200px";
-
-    function attachLightbox(img: HTMLImageElement): void {
-      // Keyboard-operable like an inline image: focus it and Enter or
-      // Space opens the lightbox, the Menu key or Shift+F10 the image menu.
-      img.tabIndex = 0;
-      img.setAttribute("role", "button");
-      img.setAttribute(
-        "aria-label",
-        messageStatusText("file.openImage", { filename: att.filename }),
-      );
-      img.addEventListener("keydown", (e) => {
-        if (e.key !== "Enter" && e.key !== " ") return;
-        e.preventDefault();
-        img.click();
-      });
-      img.addEventListener("click", () => {
-        openImageLightbox(
-          img.src,
-          att.filename,
-          { url: resolvedUrl },
-          gallery,
-          shownImageUrl(resolvedUrl, att.mime),
-        );
-      });
-    }
-
-    const isGif = att.mime === "image/gif";
-
-    // Without server dimensions, settle the box on the real size once it is
-    // known (a header the sniffer could not read) so a rebuild starts there.
-    const clearReservation = (img: HTMLImageElement): void => {
-      if (serverBox !== null) return;
-      const actual = fitImageBox(img.naturalWidth, img.naturalHeight, ATTACHMENT_BOX_MAX_H);
-      const reserved = getImageBox(inlineUrl);
-      if (actual !== null) {
-        // Decoded and oriented by the browser: the measured box beats a sniffed one.
-        if (
-          reserved === undefined ||
-          reserved.measured !== true ||
-          reserved.w !== actual.w ||
-          reserved.h !== actual.h
-        ) {
-          reserve(actual);
-          setImageBox(inlineUrl, { ...actual, measured: true }, generation);
-        }
-        return;
-      }
-      if (reserved !== undefined) return;
-      // No intrinsic size reported: keep the measured height as the minimum.
-      wrap.style.minHeight = "";
-      const h = wrap.offsetHeight;
-      if (h > 0) wrap.style.minHeight = `${h}px`;
-    };
-
-    const buildImage = (objectUrl: string): HTMLImageElement => {
-      const img = createElement("img", {
-        src: objectUrl,
-        alt: att.filename,
-        decoding: "async",
-      });
-      recoverEvictedImage(img, { url: inlineUrl });
-      // Bytes that arrived but do not decode (a corrupt or unsupported file)
-      // would leave a broken-image icon: the file chip keeps it downloadable.
-      img.addEventListener(
-        "error",
-        () => {
-          if (!wrap.isConnected) return;
-          swapKeepingFocus(wrap, renderUnshownImage(att, resolvedUrl));
-        },
-        { once: true },
-      );
-      attachLightbox(img);
-      bindImageMenu({
-        img,
-        link: null,
-        // The row may show a thumbnail or a frozen GIF frame; copy the file
-        // (a HEIC or TIFF has only its JPEG preview to copy).
-        full: () => fetchImageAsObjectUrl(shownImageUrl(resolvedUrl, att.mime)),
-        save: () => downloadFile(resolvedUrl, att.filename),
-        share: () => downloadFile(resolvedUrl, att.filename, "share"),
-      });
-      img.addEventListener(
-        "load",
-        () => {
-          clearReservation(img);
-          if (isGif) observeMedia(img, img.src, wrap, !animateGifsPref);
-        },
-        { once: true },
-      );
-      return img;
-    };
-
-    // Check cache first for instant render
-    const cached = imageCache.get(inlineUrl);
-    if (cached !== undefined) {
-      wrap.appendChild(buildImage(cached));
-    } else {
-      // Show loading placeholder, then replace with image. On failure the
-      // placeholder becomes a typed failure line with a bounded retry, like the
-      // external-media path — a silently un-"loading" filename box reads as
-      // still-loading forever (F14).
-      const placeholder = createElement("div", { class: "placeholder-img loading" }, att.filename);
-      wrap.appendChild(placeholder);
-      let current: Element = placeholder;
-
-      const attempt = (): void => {
-        void fetchImageAsObjectUrl(inlineUrl, { sniff: serverBox === null }).then((objectUrl) => {
-          if (objectUrl !== null) {
-            const sniffed = serverBox === null ? blobImageSize(objectUrl) : undefined;
-            const exact =
-              sniffed === undefined
-                ? null
-                : fitImageBox(sniffed.width, sniffed.height, ATTACHMENT_BOX_MAX_H);
-            if (exact !== null) {
-              // A measured box from an earlier load wins over the header's reading.
-              const held = setImageBox(inlineUrl, exact, generation);
-              reserve(held ?? exact);
-            }
-            const img = buildImage(objectUrl);
-            current.replaceWith(img);
-            current = img;
-          } else if (isConvertedImageMime(att.mime)) {
-            // No preview for this HEIC/TIFF: the file chip keeps the original downloadable.
-            swapKeepingFocus(wrap, renderUnshownImage(att, resolvedUrl));
-          } else {
-            const failure = renderFailureStatus(
-              messageStatusText("file.imageFailed"),
-              messageStatusText("file.retry"),
-              () => {
-                // Retry asks the server again, even after a definite refusal.
-                missingImages.delete(inlineUrl);
-                attempt();
-              },
-            );
-            current.replaceWith(failure);
-            current = failure;
-          }
-        });
-      };
-      attempt();
-    }
-
-    return wrap;
-  }
+  if (isImageMime(att.mime) && inlineable) return renderImageAttachment(att, resolvedUrl, gallery);
   if (inlineable && isServerUrl(resolvedUrl) && isTextPreviewable(att)) {
     return renderTextPreview(att, resolvedUrl, textPreviewDeps);
   }

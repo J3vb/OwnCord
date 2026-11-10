@@ -28,38 +28,6 @@
     "features/message-requests/Inbox.ts": {
       "renderInbox > render": [23]
     },
-    "features/messaging/composer/inputDraft.ts": {
-      "createInputDraft > restoreDraft": [16]
-    },
-    "features/messaging/composer/inputSend.ts": {
-      "createInputSend > handleSend": [20]
-    },
-    "features/messaging/content/attachmentCache.ts": {
-      "requestFileLink": [16]
-    },
-    "features/messaging/content/attachments.ts": {
-      "renderAttachmentContent": [18]
-    },
-    "features/messaging/content/imageViewer.ts": {
-      "openImageLightbox": [19],
-      "openImageLightbox > onKey": [17]
-    },
-    "features/messaging/content/syntaxHighlight.ts": {
-      "applySgr": [18]
-    },
-    "features/messaging/forwardTargets.ts": {
-      "listForwardTargets": [21]
-    },
-    "features/messaging/message-list/pollCard.ts": {
-      "renderPollCard > draw": [27]
-    },
-    "features/messaging/slashCommands.ts": {
-      "splitPieces": [16]
-    },
-    "features/messaging/wsHandlers.ts": {
-      "handleChatMessage": [26],
-      "handleMessagingError": [22]
-    },
     "features/moderation/ActionForms.ts": {
       "buildActionForms": [19]
     },
@@ -160,12 +128,6 @@
     }
   },
   "depth": {
-    "features/messaging/content/attachmentCache.ts": {
-      "fetchImageBlob": [5]
-    },
-    "features/messaging/emojiCatalog.ts": {
-      "emojiForShortcode": [5, 5]
-    },
     "features/voice-messages/recorder.ts": {
       "createVoiceRecorder > openStream": [5]
     },
