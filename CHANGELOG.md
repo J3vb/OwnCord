@@ -47,15 +47,11 @@ and only when it changes something a contributor or fork holder must do
 
 ## Unreleased
 
-- **Voice:** The microphone gate starts closed and keeps its state when sensitivity changes.
-- **Voice:** Enhanced Noise Suppression recognizes short replies, and the Voice Buffer slider lets you tune the microphone delay during a call.
-- **Voice:** Zoomed screen shares show a draggable overview thumbnail, zoom percentage and Reset button; the overview stays hidden at 100%.
-- **Messages:** Emoji and GIF pickers prioritize nearby previews, load the next GIF page earlier, and keep emoji scrolling stable without measuring every category on each scroll.
-- **Voice:** H.264 webcam encoding is now checked for software fallback; changing a shared source, quality or camera device rechecks the encoder without letting stale results affect a new session.
-
 ### Changed
 
 - The app now checks each server reply before using it. A reply it cannot read (from a much older or newer server, or a proxy answering in its place) shows "The server sent a reply this version of OwnCord cannot read" instead of half-loading; after a save, it adds that the change may already have been made.
+- Voice: the microphone gate starts closed and keeps its state when you change the sensitivity.
+- Emoji and GIF pickers load the previews you can see first, fetch the next GIF page earlier, and scroll the emoji list more smoothly.
 - In-app dialogs (join with an invite link, rename prompts, new DM picker, nickname, new thread) use the same Save and Cancel buttons as Create Channel.
 - Privacy & Safety shows a failed load the same way in every section: the message in red with Retry beside it.
 - Small polish: the GIF consent button and the empty sticker panel sit in the middle of the picker; "Load external content" no longer shows an empty card beside it; the certificate prompts open on Cancel instead of the close button; a password voice channel shows its lock in the chat header; a phone menu sheet opens without a focus line on its first row; search on a phone is a top sheet in landscape too.
@@ -73,8 +69,21 @@ and only when it changes something a contributor or fork holder must do
 
 ### Added
 
+- Voice: Enhanced Noise Suppression now recognizes short replies like "yes" or "ok", and the **Voice Buffer** slider lets you tune the microphone delay during a call.
+- Zooming a screen share (Ctrl+scroll) shows a small overview you can drag to move around, with the zoom level and a Reset button. It hides again at 100%.
 - On Linux, a crash report after an unexpected exit now includes the app's last error output, which names the library that closed the app when it exits without a crash signal.
 - Voice used to stay off until the whole server restarted after the built-in LiveKit crashed 10 times in a row. OwnCord now tries again every 10 minutes, and the System health page has a **Restart voice server** button to try right away.
+
+### Fixed
+
+- A webcam using H.264 could quietly fall back to the slow software encoder. Webcams are now checked like screen shares and switch to VP8 when that happens, and changing the shared window, quality or camera checks again.
+
+### Under the hood
+
+- A review of CI job timings with ideas to speed it up (docs only).
+- The Linux Rust test job prefers the official Ubuntu package mirror, after one run spent 28 minutes on a slow one.
+- Tests for the protocol generator's checks on duplicate names and mismatched error codes.
+- The restore-without-safety-backup test no longer depends on the clock, and the long-session soak test waits for the camera to start before measuring.
 
 ## v2.8.0
 
