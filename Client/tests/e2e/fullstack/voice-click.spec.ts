@@ -232,16 +232,9 @@ test("Enhanced Noise Suppression removes the click with the gate off", async ({
     contentType: "application/json",
   });
   expect(heard.off, "the reference click must be audible").toBeGreaterThan(-35);
-  // The unit test isolates RNNoise from browser capture effects and covers
-  // every point in its 10 ms frame a click can land. Here both switches enable
-  // the call's RNNoise path, verified through its diagnostics. Capture starts
-  // at an arbitrary point, so each run hears the click at a different place in
-  // the frame: from about 41 to 55 dB below the reference over CI runs. The bar
-  // sits under the least of those.
-  expect(
-    heard.off! - heard.enhanced!,
-    "dB Enhanced Noise Suppression takes off the click",
-  ).toBeGreaterThan(34);
+  // The unit test isolates RNNoise from browser capture effects. Here both
+  // switches enable the call's RNNoise path, verified through its diagnostics.
+  expect(heard.enhanced, "click heard through Enhanced Noise Suppression").toBeLessThan(-55);
 });
 
 test("a processing toggle applies to the live microphone and keeps the chosen input device", async ({

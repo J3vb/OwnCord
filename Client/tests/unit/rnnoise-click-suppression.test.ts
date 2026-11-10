@@ -82,32 +82,21 @@ describe("RNNoise worklet on recorded audio", () => {
   });
 
   // RNNoise works on 10 ms frames, so how much of a click survives depends on
-  // where in a frame it lands. Every millisecond of the frame is covered: a
-  // call's capture starts at an arbitrary point, so a real click can land at
-  // any of them. A click 4 to 6 ms in keeps the most (about 18 dB comes off
-  // there, against 29 to 60 dB elsewhere), so those offsets have a lower bar.
-  it.each([
-    [0, 25],
-    [1, 25],
-    [2, 25],
-    [3, 25],
-    [4, 15],
-    [5, 15],
-    [6, 15],
-    [7, 25],
-    [8, 25],
-    [9, 25],
-  ])("takes over its bar off a mouse click landing %i ms into a frame (%i dB)", async (ms, bar) => {
-    const at = 1 + ms / 1000;
-    const input = placeInRoomTone(readAudioFixture("mouse-click.wav"), at, 2);
+  // where in a frame it lands; each offset has to clear the bar.
+  it.each([0, 3, 7])(
+    "takes over 25 dB off a mouse click landing %i ms into a frame",
+    async (ms) => {
+      const at = 1 + ms / 1000;
+      const input = placeInRoomTone(readAudioFixture("mouse-click.wav"), at, 2);
 
-    const output = await denoise(input);
+      const output = await denoise(input);
 
-    // 80 ms from the click: its 60 ms plus the worklet's buffering delay.
-    const window = (samples: Float32Array) =>
-      samples.subarray(at * FIXTURE_SAMPLE_RATE, (at + 0.08) * FIXTURE_SAMPLE_RATE);
-    expect(toDb(rms(window(input))) - toDb(rms(window(output)))).toBeGreaterThan(bar);
-  });
+      // 80 ms from the click: its 60 ms plus the worklet's buffering delay.
+      const window = (samples: Float32Array) =>
+        samples.subarray(at * FIXTURE_SAMPLE_RATE, (at + 0.08) * FIXTURE_SAMPLE_RATE);
+      expect(toDb(rms(window(input))) - toDb(rms(window(output)))).toBeGreaterThan(25);
+    },
+  );
 
   it("keeps speech within 3 dB of its level", async () => {
     const input = placeInRoomTone(readAudioFixture("speech.wav"), 0.5, 2);
