@@ -25,7 +25,6 @@
   "src/features/settings/AdvancedTab.ts": 550,
   "src/features/settings/KeybindsTab.ts": 600,
   "src/features/settings/NotificationsTab.ts": 700,
-  "src/features/settings/SettingsOverlay.ts": 1100,
   "src/features/voice-messages/recorder.ts": 550,
   "src/features/voice/ScreenSharePicker.ts": 550,
   "src/features/voice/joinOrchestration.ts": 800,

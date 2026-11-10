@@ -402,42 +402,50 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
     setText(portalNote, text ?? "");
   };
   let portalHeading = false;
-  const renderPortal = (status: GlobalKeysStatus): void => {
-    // The heading is built on first use so a polling or unsupported desktop
-    // carries no empty section.
-    if (!portalHeading) {
-      portalHeading = true;
-      portalSection.prepend(
-        createElement("div", { class: "settings-separator" }),
-        createElement("div", { class: "keybind-section-header" }, t("keybinds.globalSection")),
-      );
-    }
-    portalSection.style.display = "";
-    portalPriority.hidden = false;
+  // The heading is built on first use: a polling or unsupported desktop has no empty section.
+  const ensurePortalHeading = (): void => {
+    if (portalHeading) return;
+    portalHeading = true;
+    portalSection.prepend(
+      createElement("div", { class: "settings-separator" }),
+      createElement("div", { class: "keybind-section-header" }, t("keybinds.globalSection")),
+    );
+  };
+  const paintPortalKeys = (status: GlobalKeysStatus): void => {
     const { mute, deafen } = status.triggers;
-    const muteKbd = commKbd.mute;
-    const deafenKbd = commKbd.deafen;
     // An unbound action keeps the in-app Ctrl+Shift combination it still answers to.
     // A desktop that names no keys has none to show; the action has no in-app
     // fallback to promise either, so say where it is set.
     const unbound = (action: "mute" | "deafen"): string =>
       status.triggersUnnamed ? t("keybinds.portalSetInDesktop") : comboText(action);
-    if (muteKbd !== undefined) setText(muteKbd, mute ?? unbound("mute"));
-    if (deafenKbd !== undefined) setText(deafenKbd, deafen ?? unbound("deafen"));
+    if (commKbd.mute !== undefined) setText(commKbd.mute, mute ?? unbound("mute"));
+    if (commKbd.deafen !== undefined) setText(commKbd.deafen, deafen ?? unbound("deafen"));
     portalSetUp.style.display =
       (mute === null || deafen === null) && !status.triggersUnnamed ? "" : "none";
     portalSetUp.disabled = binding;
     portalUnnamed.style.display = status.triggersUnnamed ? "" : "none";
+  };
+  const paintPortalRefusal = (status: GlobalKeysStatus): void => {
     if (status.sessionRefused) {
       if (noteKind !== "bind") showPortalNote(t("keybinds.portalRefused"), "refused");
     } else if (noteKind === "refused") {
       showPortalNote(null);
     }
-    // Where to change keys only matters once the desktop holds some.
-    const anyBound =
-      mute !== null || deafen !== null || status.triggers.ptt !== null || status.triggersUnnamed;
+  };
+  // Where to change keys only matters once the desktop holds some.
+  const paintPortalChange = (status: GlobalKeysStatus): void => {
+    const { mute, deafen, ptt } = status.triggers;
+    const anyBound = mute !== null || deafen !== null || ptt !== null || status.triggersUnnamed;
     portalChange.style.display = anyBound && status.canConfigure ? "" : "none";
     portalWhere.style.display = anyBound && !status.canConfigure ? "" : "none";
+  };
+  const renderPortal = (status: GlobalKeysStatus): void => {
+    ensurePortalHeading();
+    portalSection.style.display = "";
+    portalPriority.hidden = false;
+    paintPortalKeys(status);
+    paintPortalRefusal(status);
+    paintPortalChange(status);
   };
 
   portalSetUp.addEventListener(
