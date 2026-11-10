@@ -117,6 +117,58 @@ function play(kind: VoiceSound): void {
 }
 
 /**
+ * The sound for someone else's change in the room, or `undefined` when this
+ * update holds no such edge (so the caller goes on to the mute toggle). `null`
+ * is an edge that makes no sound.
+ *
+ * Someone starts or stops watching your own screen share: only a change while
+ * you share before and after counts. A share starting (viewers already on the
+ * roster) or the re-sync after a join or a resume is not an edge. A viewer who
+ * left voice is a leave, not a viewer leaving.
+ *
+ * Another member joining or leaving the channel we are in: only the
+ * incremental roster revision reaches here, since a setVoiceStates replacement
+ * leaves it unchanged, so a reconnect replay is silent. The revision is global,
+ * so the peer sets are diffed: a voice_state for a user in another channel (or
+ * a mute toggle) must not read as a join. Someone who stays (you included) and
+ * starts or stops sharing is a stream edge; one who joins or leaves while
+ * sharing plays only the join or leave.
+ */
+function peerEdge(
+  prev: SoundState,
+  next: SoundState,
+  quietUntil: number,
+): VoiceSound | null | undefined {
+  const viewer = viewerEdge(prev, next, quietUntil);
+  if (viewer !== null) return viewer;
+  if (next.rosterRevision === prev.rosterRevision || next.channelId === null) return undefined;
+  return rosterEdge(prev, next);
+}
+
+function viewerEdge(prev: SoundState, next: SoundState, quietUntil: number): VoiceSound | null {
+  if (!(
+    prev.sharing.has(selfId()) &&
+    next.sharing.has(selfId()) &&
+    !isWatchingResync() &&
+    quietUntil <= Date.now()
+  )) {
+    return null;
+  }
+  const gained = [...next.viewers].some((id) => !prev.viewers.has(id));
+  const lost = [...prev.viewers].some((id) => !next.viewers.has(id) && next.peers.has(id));
+  if (!gained && !lost) return null;
+  return gained ? "viewerJoin" : "viewerLeave";
+}
+
+function rosterEdge(prev: SoundState, next: SoundState): VoiceSound | null {
+  if ([...next.peers].some((id) => !prev.peers.has(id))) return "join";
+  if ([...prev.peers].some((id) => !next.peers.has(id))) return "leave";
+  if ([...next.sharing].some((id) => !prev.sharing.has(id))) return "streamStart";
+  if ([...prev.sharing].some((id) => !next.sharing.has(id))) return "streamEnd";
+  return null;
+}
+
+/**
  * Subscribe to voiceStore and play the voice UI sounds. Returns an
  * unsubscribe that also stops any pending sound decision.
  */
@@ -164,12 +216,30 @@ export function startVoiceUiSounds(): () => void {
     return takeVoiceMoved(next.channelId) ? "moved" : "join";
   };
 
-  const unsubscribe = voiceStore.subscribe((state) => {
-    const next = snapshot(state.currentChannelId);
-    const finish = (): void => {
-      prev = next;
-    };
+  /** The sound for an update that passed the gates: your own join, leave or
+   *  move, else someone else's edge in the room, else a mute toggle. */
+  const playEdge = (next: SoundState, self: VoiceSound | null): void => {
+    // Self join/leave/move. A switch plays nothing until the new channel
+    // connects, and then only the join: never a leave and a join back to back.
+    if (self !== null || next.channelId !== prev.channelId) {
+      if (self === "leave") scheduleLeave();
+      else if (self !== null) play(self);
+      return;
+    }
 
+    const edge = peerEdge(prev, next, quietUntil);
+    if (edge !== undefined) {
+      if (edge !== null) play(edge);
+      return;
+    }
+
+    if (next.localMuted !== prev.localMuted) {
+      play(next.localMuted ? "mute" : "unmute");
+    }
+  };
+
+  /** Decide and play what one store update sounds like. */
+  const react = (next: SoundState): void => {
     // Sign-out clears auth synchronously but only resets voiceStore (and
     // notifies this subscriber) on the next microtask. A reset is a teardown,
     // not a user edge: without this guard the cleared channel/deafen/mute
@@ -178,7 +248,6 @@ export function startVoiceUiSounds(): () => void {
       announced = null;
       cancelLeave();
       takeVoiceMoved(null);
-      finish();
       return;
     }
 
@@ -188,76 +257,20 @@ export function startVoiceUiSounds(): () => void {
 
     // A deafen edge is its own sound and owns the notification: the mute that
     // a deafen implies (the keybind mutes too) must not also blip.
-    const deafenChanged = next.localDeafened !== prev.localDeafened;
-    if (deafenChanged) {
+    if (next.localDeafened !== prev.localDeafened) {
       if (canPlay()) play(next.localDeafened ? "deafen" : "undeafen");
-      finish();
       return;
     }
     // While deafened, nothing else plays (only the ringtone is exempt).
-    if (next.localDeafened) {
-      finish();
-      return;
-    }
-    if (!canPlay()) {
-      finish();
-      return;
-    }
+    if (next.localDeafened || !canPlay()) return;
 
-    // Self join/leave/move. A switch plays nothing until the new channel
-    // connects, and then only the join: never a leave and a join back to back.
-    if (self !== null || next.channelId !== prev.channelId) {
-      if (self === "leave") scheduleLeave();
-      else if (self !== null) play(self);
-      finish();
-      return;
-    }
+    playEdge(next, self);
+  };
 
-    // Someone starts or stops watching your own screen share. Only a change
-    // while you share before and after counts: a share starting (viewers
-    // already on the roster) or the re-sync after a join or a resume is not
-    // an edge. A viewer who left voice is a leave, not a viewer leaving.
-    if (
-      prev.sharing.has(selfId()) &&
-      next.sharing.has(selfId()) &&
-      !isWatchingResync() &&
-      quietUntil <= Date.now()
-    ) {
-      const gained = [...next.viewers].some((id) => !prev.viewers.has(id));
-      const lost = [...prev.viewers].some((id) => !next.viewers.has(id) && next.peers.has(id));
-      if (gained || lost) {
-        play(gained ? "viewerJoin" : "viewerLeave");
-        finish();
-        return;
-      }
-    }
-
-    // Another member joining or leaving the channel we are in. Only the
-    // incremental roster revision reaches here — a setVoiceStates replacement
-    // leaves it unchanged, so a reconnect replay is silent. The revision is
-    // global, so diff the peer sets: a voice_state for a user in another
-    // channel (or a mute toggle) must not read as a join. Someone who stays
-    // (you included) and starts or stops sharing is a stream edge; one who
-    // joins or leaves while sharing plays only the join or leave.
-    if (next.rosterRevision !== prev.rosterRevision && next.channelId !== null) {
-      const joined = [...next.peers].some((id) => !prev.peers.has(id));
-      const left = [...prev.peers].some((id) => !next.peers.has(id));
-      if (joined) play("join");
-      else if (left) play("leave");
-      else if ([...next.sharing].some((id) => !prev.sharing.has(id))) {
-        play("streamStart");
-      } else if ([...prev.sharing].some((id) => !next.sharing.has(id))) {
-        play("streamEnd");
-      }
-      finish();
-      return;
-    }
-
-    if (next.localMuted !== prev.localMuted) {
-      play(next.localMuted ? "mute" : "unmute");
-    }
-
-    finish();
+  const unsubscribe = voiceStore.subscribe((state) => {
+    const next = snapshot(state.currentChannelId);
+    react(next);
+    prev = next;
   });
   return () => {
     unsubscribe();

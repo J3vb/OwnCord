@@ -118,6 +118,15 @@ export class NoiseFloorTracker {
     if (rms <= SILENCE_RMS || nowMs < this.skipUntil) return null;
     const db = toDb(rms);
     if (this.firstAt === null) this.firstAt = nowMs;
+    this.addToWindow(db, nowMs);
+    if (nowMs - this.firstAt < WARMUP_MS) return null;
+    this.learnSpeech(db, nowMs);
+    return this.moveThreshold();
+  }
+
+  /** Fold a level into the open sub-window, closing it when it is full and
+   *  dropping the closed ones that aged out of the window. */
+  private addToWindow(db: number, nowMs: number): void {
     if (this.windowStart === null) {
       this.windowStart = nowMs;
     } else if (nowMs - this.windowStart >= SUBWINDOW_MS) {
@@ -129,8 +138,11 @@ export class NoiseFloorTracker {
     while (this.closed.length > 0 && this.closed[0]!.start <= nowMs - WINDOW_MS) {
       this.closed.shift();
     }
-    if (nowMs - this.firstAt < WARMUP_MS) return null;
+  }
 
+  /** A level well above the threshold feeds the voice estimate; a long quiet
+   *  stretch after the last such level sinks it. */
+  private learnSpeech(db: number, nowMs: number): void {
     if (db >= toDb(this.current) + SPEECH_ABOVE_DB) {
       this.speechDb =
         this.speechDb === null ? db : this.speechDb + SPEECH_ALPHA * (db - this.speechDb);
@@ -139,7 +151,11 @@ export class NoiseFloorTracker {
     } else if (this.speechDb !== null && nowMs - this.speechAt > SPEECH_DECAY_AFTER_MS) {
       this.speechDb = Math.max(toDb(AUTO_MIN_THRESHOLD), this.speechDb - SPEECH_DECAY_DB);
     }
+  }
 
+  /** Place the threshold between the floor and the voice; the new value when
+   *  it moved enough to re-send, otherwise null. */
+  private moveThreshold(): number | null {
     let floorDb = this.windowMinDb;
     for (const sub of this.closed) floorDb = Math.min(floorDb, sub.minDb);
     const low = Math.max(toDb(AUTO_MIN_THRESHOLD), floorDb + AUTO_MARGIN_DB);

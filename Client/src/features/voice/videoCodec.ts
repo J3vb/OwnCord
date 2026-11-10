@@ -182,6 +182,16 @@ export async function resolveCodecChoice(
   return { preferred, codec: pickCommonCodec(preferred, peers()) };
 }
 
+/** Linux: VP8 unless H.264 or VP9 is chosen and the native encoder has it.
+ *  Auto is VP8 (software H.264 is slower, and hardware H.264 under E2EE is
+ *  unproven), and a saved H.265 is VP8, as the select shows. A saved VP9 on an
+ *  engine without it is VP8 too; the pref is left alone. */
+async function nativePreferredCodec(pref: VideoCodecPref): Promise<PublishCodec> {
+  if (pref === "h264") return (await h264Offered()) ? "h264" : "vp8";
+  if (pref === "vp9") return (await vp9Available()) ? "vp9" : "vp8";
+  return "vp8";
+}
+
 /** The codec for one publish of `track` at `fps` and `bitrate`, before peers
  *  are considered. Auto probes at the captured size, since a hardware encoder
  *  can take 1080p30 and refuse 1080p120. A saved VP8 is probed the same way at
@@ -196,15 +206,7 @@ async function resolvePreferredCodec(
   bitrate: number,
 ): Promise<PublishCodec> {
   const pref = getVideoCodecPref();
-  // Linux: VP8 unless H.264 or VP9 is chosen and the native encoder has it.
-  // Auto is VP8 (software H.264 is slower, and hardware H.264 under E2EE is
-  // unproven), and a saved H.265 is VP8, as the select shows. A saved VP9 on an
-  // engine without it is VP8 too; the pref is left alone.
-  if (isLinuxDesktop()) {
-    if (pref === "h264") return (await h264Offered()) ? "h264" : "vp8";
-    if (pref === "vp9") return (await vp9Available()) ? "vp9" : "vp8";
-    return "vp8";
-  }
+  if (isLinuxDesktop()) return nativePreferredCodec(pref);
   // WebView2's encodingInfo answers powerEfficient:false for every WebRTC
   // config, so it cannot see the GPU encoder that Main/High reach. The live
   // check in `codecSwitch` still turns a share that lands on OpenH264 into VP8;

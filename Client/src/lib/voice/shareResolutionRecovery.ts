@@ -79,6 +79,30 @@ interface OutboundRow {
   readonly active?: boolean;
 }
 
+/** Whether `row` is an active video layer the allocator gave a size and a
+ *  budget: a layer it gave nothing says nothing about recovery. */
+function isJudgeableLayer(
+  row: OutboundRow,
+): row is OutboundRow & { frameWidth: number; targetBitrate: number } {
+  if (row.type !== "outbound-rtp" || row.kind !== "video" || row.active === false) return false;
+  const { frameWidth, targetBitrate } = row;
+  return frameWidth !== undefined && targetBitrate !== undefined && !(targetBitrate <= 0);
+}
+
+/** Layers of the same size (a 720p capture's two layers): the one listed
+ *  last is the share's top layer, whatever the report order and whatever a
+ *  cap did to their rates (the rule `topIndex` uses for the sender). */
+function isSmallerLayer(
+  best: RecoveryReading | null,
+  bestAt: number,
+  fullWidth: number,
+  at: number,
+): boolean {
+  return (
+    best !== null && (best.fullWidth > fullWidth || (best.fullWidth === fullWidth && bestAt >= at))
+  );
+}
+
 /** The widest active layer's reading, or null while there is none to judge. */
 export function readingFromStats(
   rows: Iterable<OutboundRow>,
@@ -89,20 +113,12 @@ export function readingFromStats(
   let best: RecoveryReading | null = null;
   let bestAt = -1;
   for (const row of rows) {
-    if (row.type !== "outbound-rtp" || row.kind !== "video" || row.active === false) continue;
+    if (!isJudgeableLayer(row)) continue;
     const { frameWidth, targetBitrate } = row;
-    // A layer the allocator gave nothing says nothing about recovery.
-    if (frameWidth === undefined || targetBitrate === undefined || targetBitrate <= 0) continue;
     const encoding = encodings.find((e) => e.rid === row.rid) ?? encodings[0];
     const fullWidth = captureWidth / (encoding?.scaleResolutionDownBy ?? 1);
-    // Layers of the same size (a 720p capture's two layers): the one listed
-    // last is the share's top layer, whatever the report order and whatever a
-    // cap did to their rates (the rule `topIndex` uses for the sender).
     const at = encoding === undefined ? 0 : encodings.indexOf(encoding);
-    const smaller =
-      best !== null &&
-      (best.fullWidth > fullWidth || (best.fullWidth === fullWidth && bestAt >= at));
-    if (smaller) continue;
+    if (isSmallerLayer(best, bestAt, fullWidth, at)) continue;
     bestAt = at;
     best = {
       now,

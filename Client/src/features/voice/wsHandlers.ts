@@ -21,6 +21,7 @@ import {
   clearPeerWatching,
 } from "../../stores/voice.store";
 import { ensureIdentityKeyPublished } from "../../lib/net/identity";
+import { moderatorAudioPlan } from "./moderatorAudioPlan";
 import { showToast } from "../../lib/ui/toast";
 import { noteJoinFailed } from "./joinBackoff";
 import { takeWatchRefusal } from "../../lib/voice/watchRequest";
@@ -98,15 +99,19 @@ function enforceModeratorAudioState(
   selfDeafened: boolean,
 ): void {
   const voice = voiceStore.getState();
-  const applyDeafen = serverDeafened && !voice.localDeafened;
-  if (applyDeafen) setModeratorDeafened(true);
-  const deafenLifted = prevServerDeafened && !serverDeafened;
-  const keepOwnDeafen = deafenLifted && voice.localDeafened && voice.moderatorDeafened !== true;
-  if (deafenLifted) setModeratorDeafened(false);
-  if (keepOwnDeafen) ws.send({ type: "voice_deafen", payload: { deafened: true } });
-  const applyMute = serverMuted && !voice.localMuted;
-  const releaseMute = prevServerMuted && !serverMuted && voice.localMuted && !selfMuted;
-  const releaseDeafen = deafenLifted && !keepOwnDeafen && voice.localDeafened && !selfDeafened;
+  const plan = moderatorAudioPlan(
+    voice,
+    serverMuted,
+    serverDeafened,
+    prevServerMuted,
+    prevServerDeafened,
+    selfMuted,
+    selfDeafened,
+  );
+  if (plan.applyDeafen) setModeratorDeafened(true);
+  if (plan.deafenLifted) setModeratorDeafened(false);
+  if (plan.keepOwnDeafen) ws.send({ type: "voice_deafen", payload: { deafened: true } });
+  const { applyDeafen, applyMute, releaseMute, releaseDeafen } = plan;
   if (applyDeafen || applyMute || releaseMute || releaseDeafen) {
     void livekitSession().then(({ setDeafened, setMuted }) => {
       if (applyDeafen) setDeafened(true);
