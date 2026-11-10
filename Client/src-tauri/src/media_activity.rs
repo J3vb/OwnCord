@@ -87,11 +87,11 @@ static LAST_PLAYER: Mutex<Option<String>> = Mutex::new(None);
 static READING: AtomicBool = AtomicBool::new(false);
 
 /// Holds a "read in progress" flag until dropped.
-struct BusyGuard<'a>(&'a AtomicBool);
+pub(crate) struct BusyGuard<'a>(&'a AtomicBool);
 
 impl<'a> BusyGuard<'a> {
     /// `None` when the flag is already held.
-    fn acquire(flag: &'a AtomicBool) -> Option<Self> {
+    pub(crate) fn acquire(flag: &'a AtomicBool) -> Option<Self> {
         flag.compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .is_ok()
             .then(|| Self(flag))
@@ -105,17 +105,22 @@ impl Drop for BusyGuard<'_> {
 }
 
 /// The song being played. Read-only; the frontend polls it while the setting
-/// is on. `async` so the OS call runs off the IPC main thread, like
-/// `detect_game`. A poll that starts while one is still running answers
-/// unknown at once.
+/// is on. The OS call runs on a blocking thread, like `detect_game`. A poll
+/// that starts while one is still running answers unknown at once.
 #[tauri::command(async)]
-pub fn detect_media(prefs: MediaPrefs) -> MediaReading {
+pub async fn detect_media(prefs: MediaPrefs) -> MediaReading {
+    tauri::async_runtime::spawn_blocking(move || detect_media_blocking(&prefs))
+        .await
+        .unwrap_or(MediaReading::Unknown)
+}
+
+fn detect_media_blocking(prefs: &MediaPrefs) -> MediaReading {
     let Some(_guard) = BusyGuard::acquire(&READING) else {
         return MediaReading::Unknown;
     };
     let candidates = platform_candidates();
     let mut last = crate::sync::lock(&LAST_PLAYER);
-    reading_from(candidates, &prefs, &mut last)
+    reading_from(candidates, prefs, &mut last)
 }
 
 /// Turn what the OS reported into the answer. `None` (the read failed) is
