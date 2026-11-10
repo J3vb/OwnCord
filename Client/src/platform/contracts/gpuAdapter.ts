@@ -21,8 +21,6 @@ export interface GpuAdapterState {
   readonly notFound: boolean;
   /** The last start on a chosen card did not finish, so the choice was reset. */
   readonly resetAfterCrash: boolean;
-  /** Auto leaves the card to Windows after a start on its pick did not finish. */
-  readonly autoOff: boolean;
 }
 
 export interface GpuAdapter {
