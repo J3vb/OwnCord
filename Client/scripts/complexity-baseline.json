@@ -16,10 +16,6 @@
     "lib/net/connectionDiagnostics.ts": {
       "runConnectionDiagnostics": [29]
     },
-    "lib/ws.ts": {
-      "createWsClient > handleMessage": [27],
-      "createWsClient > handleTransportState": [23]
-    },
     "pages/connect-page/login-form/loginFormDom.ts": {
       "createLoginFormDom > buildFormPanel": [19]
     },
