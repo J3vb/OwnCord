@@ -2710,10 +2710,11 @@ Sent to every connected client after an admin with `MANAGE_SERVER` saves the
 
 `max_video_bitrate` is the most video one person may send, in bits per second,
 for their camera and screen share together; `0` means no cap. LiveKit cannot
-cap one publisher, so this is advisory: a client is meant to keep every video
-sender under it and to follow a new value without a rejoin. Clients store the
-value from this release on; keeping senders under it lands in a later client
-release.
+cap one publisher, so this is advisory: a client keeps its camera and screen
+share together under it and follows a new value at once, with no rejoin and no
+republish (it changes the running encoders' rates). With both streams live the
+share gets 75% and the camera 25%, the camera never less than 300 kbit/s; a
+stream alone may use the whole cap.
 A client treats a value that is not a positive whole number as no cap.
 
 Unfiltered, unsequenced and never replayed, like
