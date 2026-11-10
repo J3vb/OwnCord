@@ -11,7 +11,6 @@
   "src/components/SelfProfileCard.ts": 950,
   "src/components/ServerRail.ts": 750,
   "src/components/ThreadPanel.ts": 900,
-  "src/components/UserProfilePopup.ts": 1050,
   "src/components/video-grid/gridStreams.ts": 900,
   "src/features/channels/ChannelSidebar.ts": 1200,
   "src/features/channels/sidebar/dragReorder.ts": 800,

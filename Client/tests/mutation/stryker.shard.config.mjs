@@ -206,6 +206,7 @@ export const shards = {
     "src/features/message-requests/sync.ts",
     "src/features/messaging/wsHandlers.ts",
     "src/features/profiles/openUserProfilePopup.ts",
+    "src/features/profiles/profileRoleControls.ts",
     "src/lib/apiAdmin.ts",
     "src/lib/net/rateLimiter.ts",
     "src/lib/net/serverCapabilities.ts",

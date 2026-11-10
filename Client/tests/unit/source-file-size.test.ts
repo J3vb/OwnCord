@@ -25,7 +25,7 @@ const MAX_LINES = 500;
 const STEP = 50;
 
 /** Files still over the limit. Lower this with every file that leaves the list; it never rises. */
-const OVER_LIMIT_CAP = 71;
+const OVER_LIMIT_CAP = 70;
 
 /** Generated data files, exempt from the limit. Never add a hand-written file here. */
 const GENERATED = new Set([

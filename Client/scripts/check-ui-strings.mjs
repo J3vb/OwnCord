@@ -69,7 +69,7 @@ const OWNERS = [
     "B9-18",
   ],
   [
-    /^src\/(features\/messaging\/(message-list|composer|content)\/|features\/messaging\/(MessageList|MessageInput)\.ts|components\/(GifPicker|SearchOverlay|PinnedMessages|DmSidebar|DmProfileSidebar|EmojiPicker|UserProfilePopup|NsfwGate)\.ts|pages\/main-page\/channel\/|pages\/main-page\/(ChannelController|MessageJump|ChatHeader|MemberPickerModal)\.ts)/,
+    /^src\/(features\/messaging\/(message-list|composer|content)\/|features\/messaging\/(MessageList|MessageInput)\.ts|features\/profiles\/(userProfile[A-Za-z]*|userNoteSection)\.ts|components\/(GifPicker|SearchOverlay|PinnedMessages|DmSidebar|DmProfileSidebar|EmojiPicker|NsfwGate)\.ts|pages\/main-page\/channel\/|pages\/main-page\/(ChannelController|MessageJump|ChatHeader|MemberPickerModal)\.ts)/,
     "B9-19",
   ],
   [/^src\//, "B9-20"],

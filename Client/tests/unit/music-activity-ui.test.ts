@@ -6,7 +6,7 @@ const invoke = vi.hoisted(() => vi.fn());
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 vi.mock("@lib/logger", () => loggerMock());
 
-import { createUserProfilePopup } from "@components/UserProfilePopup";
+import { createUserProfilePopup } from "../../src/features/profiles/userProfilePopup";
 import { createDmProfileSidebar } from "@components/DmProfileSidebar";
 import { createDmSidebar, type DmConversation } from "@components/DmSidebar";
 import { buildMusicActivityRows } from "../../src/features/settings/MusicActivityRows";
