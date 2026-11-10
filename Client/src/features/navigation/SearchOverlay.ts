@@ -5,21 +5,15 @@
  * Uses @lib/dom helpers exclusively. Never sets innerHTML with user content.
  */
 
+import { buildResultItem, channelScopeLabel } from "./searchResultItem";
+import { highlightTerms } from "./searchHighlight";
 import { Disposable } from "@lib/disposable";
 import { isImeCommit } from "@lib/text/ime";
 import { createElement, setText, appendChildren, clearChildren } from "@lib/dom";
 import { closeOnBackdropClick } from "@lib/ui/modalFactory";
 import type { MountableComponent } from "@lib/text/safeRender";
 import type { SearchResultItem, SearchResponse } from "@lib/types";
-import { dmStore, dmDisplayName } from "@stores/dm.store";
-import { channelsStore } from "@stores/channels.store";
-import { blocksStore } from "@stores/blocks.store";
-import { parseTimestamp, resolveAuthor } from "@lib/text/formatting";
-import { resolveDisplayName } from "@lib/ui/avatar";
-import { createImportedName, createImportedTag } from "../messaging/message-list/importedAuthor";
 import { setRovingTabindex, enableRovingNavigation } from "@lib/ui/a11y";
-import { markdownToPlainText } from "@lib/text/markdown";
-import { formatDate } from "../../i18n/format";
 import { messagingText } from "../../i18n/messaging";
 
 // ---------------------------------------------------------------------------
@@ -52,125 +46,11 @@ const MIN_QUERY_LEN = 2;
 /** Minimum interval between actual search API calls (rate limiting). */
 const MIN_SEARCH_INTERVAL_MS = 500;
 
-/** Filter keys the server parses out of `q` (service.ParseSearch). */
-const FILTER_KEYS = new Set([
-  "from",
-  "in",
-  "before",
-  "after",
-  "during",
-  "has",
-  "mentions",
-  "pinned",
-]);
-/** A preview whose first hit lies beyond this many chars is windowed around it. */
-const WINDOW_LEAD = 60;
-const PREVIEW_MAX = 200;
-const MIN_TERM_LEN = 2;
-
-/**
- * The words to highlight for a query: whitespace-split, `key:value` filter
- * tokens (including a quoted value that holds spaces) dropped, quotes removed,
- * then every remaining token split on non letter/digit/mark characters (the
- * server's sanitizeFTSQuery turns those into separators) and terms under 2
- * chars ignored. Mirrors the server's lexSearch.
- */
-export function highlightTerms(query: string): string[] {
-  const terms: string[] = [];
-  const n = query.length;
-  let i = 0;
-  while (i < n) {
-    if (/\s/.test(query[i]!)) {
-      i++;
-      continue;
-    }
-    let j = i;
-    while (j < n && !/\s/.test(query[j]!)) j++;
-    const token = query.slice(i, j);
-    const colon = token.indexOf(":");
-    if (colon > 0 && FILTER_KEYS.has(token.slice(0, colon).toLowerCase())) {
-      // A quoted filter value runs to the next quote, spaces included.
-      if (token[colon + 1] === '"') {
-        const close = query.indexOf('"', i + colon + 2);
-        j = close === -1 ? n : close + 1;
-      }
-    } else {
-      for (const part of token.replace(/"/g, "").split(/[^\p{L}\p{N}\p{M}]+/u)) {
-        if (Array.from(part).length >= MIN_TERM_LEN) terms.push(part);
-      }
-    }
-    i = j;
-  }
-  return terms;
-}
-
-/**
- * One case-insensitive regex over the terms (longest first so the longer of
- * two overlapping terms wins), or null when there is nothing to match. It runs
- * on the original text, so offsets never drift the way a lowercased copy can
- * ("İ" lowercases to two units), and the `u` flag keeps surrogate pairs whole.
- */
-function termRegex(terms: readonly string[]): RegExp | null {
-  if (terms.length === 0) return null;
-  const alts = terms
-    .toSorted((a, b) => b.length - a.length)
-    .map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-  return new RegExp(alts.join("|"), "giu");
-}
-
-const isLowSurrogate = (text: string, at: number): boolean => {
-  const c = text.charCodeAt(at);
-  return c >= 0xdc00 && c <= 0xdfff;
-};
-
-/** Plain-text preview: markdown stripped, windowed around the first hit, capped. */
-function buildPreview(raw: string, terms: readonly string[], spoilerLabel: string): string {
-  const plain = markdownToPlainText(raw, spoilerLabel);
-  const re = termRegex(terms);
-  const hit = re === null ? null : re.exec(plain);
-  let start = 0;
-  if (hit !== null && hit.index > WINDOW_LEAD) start = hit.index - WINDOW_LEAD;
-  // Never cut through a surrogate pair: step back so the pair stays whole at
-  // the start, and stop before its high half at the end.
-  if (start > 0 && isLowSurrogate(plain, start)) start--;
-  let end = start + PREVIEW_MAX;
-  if (end < plain.length && isLowSurrogate(plain, end)) end--;
-  return (
-    (start > 0 ? "\u2026" : "") + plain.slice(start, end) + (end < plain.length ? "\u2026" : "")
-  );
-}
-
-/** Fill `el` with `text`, each case-insensitive term hit wrapped in a <mark>. */
-function fillHighlighted(el: HTMLElement, text: string, terms: readonly string[]): void {
-  const re = termRegex(terms);
-  let pos = 0;
-  if (re !== null) {
-    for (const m of text.matchAll(re)) {
-      if (m[0] === "") continue;
-      if (m.index > pos) el.appendChild(document.createTextNode(text.slice(pos, m.index)));
-      const mark = createElement("mark", { class: "search-hit" });
-      setText(mark, m[0]);
-      el.appendChild(mark);
-      pos = m.index + m[0].length;
-    }
-  }
-  if (pos < text.length) el.appendChild(document.createTextNode(text.slice(pos)));
-}
+export { highlightTerms };
 
 // ---------------------------------------------------------------------------
 // Factory
 // ---------------------------------------------------------------------------
-
-/** "in #general" / "in @bob", falling back to a generic label when unknown. */
-// oxlint-disable-next-line consistent-function-scoping -- co-located with its sole caller for readability
-function channelScopeLabel(channelId: number): string {
-  const dm = dmStore.getState().channels.find((c) => c.channelId === channelId);
-  if (dm !== undefined) return messagingText("search.scope.inDm", { name: dmDisplayName(dm) });
-  const channel = channelsStore.getState().channels.get(channelId);
-  return channel !== undefined && channel.name !== ""
-    ? messagingText("search.scope.inChannel", { channel: channel.name })
-    : messagingText("search.scope.channel");
-}
 
 export function createSearchOverlay(options: SearchOverlayOptions): MountableComponent {
   const disposable = new Disposable();
@@ -203,20 +83,6 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
   let searchAbort: AbortController | null = null;
   let lastSearchTime = 0;
 
-  // oxlint-disable-next-line consistent-function-scoping -- co-located with its sole caller for readability
-  function formatTimestamp(ts: string): string {
-    try {
-      const d = parseTimestamp(ts);
-      return (
-        formatDate(d, { year: "numeric", month: "short", day: "numeric" }) +
-        " " +
-        formatDate(d, { hour: "2-digit", minute: "2-digit" })
-      );
-    } catch {
-      return ts;
-    }
-  }
-
   /** The channel filter for the current scope: undefined = whole server. */
   function scopeChannelId(): number | undefined {
     return scopeServer ? undefined : options.currentChannelId;
@@ -228,63 +94,7 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
 
     const terms = highlightTerms(lastQuery);
     for (let i = 0; i < results.length; i++) {
-      const r = results[i]!;
-      const isActive = i === activeIndex;
-
-      const item = createElement("div", {
-        class: isActive ? "search-result-item search-result-item--active" : "search-result-item",
-        id: `search-result-option-${i}`,
-        role: "option",
-        "aria-selected": isActive ? "true" : "false",
-        "data-testid": `search-result-${i}`,
-      });
-
-      const header = createElement("div", { class: "search-result-header" });
-      const channel = createElement("span", { class: "search-result-channel" });
-      const dm = dmStore.getState().channels.find((c) => c.channelId === r.channel_id);
-      setText(channel, dm !== undefined ? `@${dmDisplayName(dm)}` : `#${r.channel_name}`);
-      if (r.imported_author !== undefined) {
-        // No account behind it: the Discord name and tag, and no @handle.
-        appendChildren(
-          header,
-          channel,
-          createImportedName(r.imported_author, "search-result-author"),
-          createImportedTag(),
-        );
-      } else {
-        const who = resolveAuthor(r.user);
-        const authorName = resolveDisplayName(who);
-        const author = createElement("span", { class: "search-result-author" });
-        setText(author, authorName);
-        appendChildren(header, channel, author);
-        if (authorName !== who.username) {
-          const handle = createElement("span", { class: "search-result-handle" });
-          setText(handle, messagingText("search.authorHandle", { username: who.username }));
-          header.appendChild(handle);
-        }
-      }
-      const time = createElement("span", { class: "search-result-time" });
-      setText(time, formatTimestamp(r.timestamp));
-      header.appendChild(time);
-
-      const blocked = blocksStore.getState().blockedByMe.has(r.user.id);
-      const content = createElement("div", {
-        class: blocked
-          ? "search-result-content search-result-content--blocked"
-          : "search-result-content",
-      });
-      if (blocked) setText(content, messagingText("blocked.message"));
-      else {
-        fillHighlighted(
-          content,
-          buildPreview(r.content, terms, messagingText("search.spoiler")),
-          terms,
-        );
-      }
-
-      appendChildren(item, header, content);
-
-      resultsDiv.appendChild(item);
+      resultsDiv.appendChild(buildResultItem(results[i]!, i, i === activeIndex, terms));
     }
 
     // Re-point aria-activedescendant on every render — arrow keys, filtering

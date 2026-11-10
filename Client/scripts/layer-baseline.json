@@ -115,7 +115,9 @@
     },
     "lib/readState.ts": {
       "stores/channels.store.ts": 1,
-      "stores/dm.store.ts": 1,
+      "stores/dm.store.ts": 1
+    },
+    "lib/readStateAway.ts": {
       "stores/messages.store.ts": 1,
       "stores/ui.store.ts": 1
     },

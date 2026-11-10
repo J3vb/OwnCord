@@ -12,35 +12,35 @@ import { createPromptModal, type ModalInstance } from "@lib/ui/modalFactory";
 import type { MountableComponent } from "@lib/text/safeRender";
 import type { ServerProfile } from "@lib/presence/profiles";
 import {
-  FOLDER_COLORS,
   FOLDER_NAME_MAX,
-  folderOf,
-  groupServers,
-  groupWithNext,
   loadLayout,
-  moveItem,
-  moveOutOfFolder,
-  moveServer,
   reconcile,
   renameFolder,
   saveLayout,
   serverInitials,
-  setFolderColor,
-  shiftItem,
   toggleCollapsed,
-  ungroupFolder,
   type ItemRef,
   type RailItem,
   type RailLayout,
 } from "@lib/prefs/serverRailLayout";
 import { setSidebarMode, uiStore } from "@stores/ui.store";
-import { dmDisplayName, dmStore, type DmChannel } from "@stores/dm.store";
+import { dmStore, type DmChannel } from "@stores/dm.store";
 import { voiceStore } from "@stores/voice.store";
 import { CHANNEL_MUTE_CHANGED } from "@lib/prefs/channelMutes";
 import { dmUnreadCount, totalDmUnread } from "@lib/dmUnread";
-import { createAvatarElement, pickAvatarColor } from "../profiles/avatar";
 import { formatBadgeCount } from "@lib/text/formatting";
 import { serverRailText } from "../../i18n/serverRail";
+import {
+  FALLBACK_COLOR,
+  atDmMode,
+  defaultFolderId,
+  dmItem,
+  railIcon,
+  roundButton,
+  sameItem,
+  zoneOf,
+} from "./serverRailParts";
+import { applyDrop, folderMenu, serverMenu, type RailMutations } from "./serverRailMenus";
 import { openServerRailJoinModal } from "./ServerRailJoinModal";
 import { shouldConfirmServerSwitch } from "./switchConfirmPref";
 import { openServerSwitchConfirm } from "./switchConfirmDialog";
@@ -60,106 +60,6 @@ export interface ServerRailOptions {
   readonly onShowServer?: () => void;
   /** Open a DM from its icon under Home. */
   readonly onOpenDm?: (dm: DmChannel) => void;
-}
-
-type DropZone = "before" | "after" | "into";
-
-const SVG_NS = "http://www.w3.org/2000/svg";
-
-// Lucide paths, kept here rather than in lib/icons so they stay out of the
-// startup closure (lib/icons is imported eagerly).
-const RAIL_ICON_PATHS = {
-  plus: ["M5 12h14", "M12 5v14"],
-  compass: [
-    "M22 12a10 10 0 1 1-20 0a10 10 0 0 1 20 0z",
-    "m16.24 7.76-1.804 5.411a2 2 0 0 1-1.265 1.265L7.76 16.24l1.804-5.411a2 2 0 0 1 1.265-1.265z",
-  ],
-  folder: [
-    "M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z",
-  ],
-  phone: [
-    "M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z",
-  ],
-} as const;
-
-function railIcon(name: keyof typeof RAIL_ICON_PATHS): SVGSVGElement {
-  const svg = document.createElementNS(SVG_NS, "svg");
-  for (const [k, v] of [
-    ["viewBox", "0 0 24 24"],
-    ["width", "24"],
-    ["height", "24"],
-    ["fill", "none"],
-    ["stroke", "currentColor"],
-    ["stroke-width", "2"],
-    ["stroke-linecap", "round"],
-    ["stroke-linejoin", "round"],
-    ["aria-hidden", "true"],
-    ["data-icon", name],
-  ] as const) {
-    svg.setAttribute(k, v);
-  }
-  svg.classList.add("icon");
-  for (const d of RAIL_ICON_PATHS[name]) {
-    const path = document.createElementNS(SVG_NS, "path");
-    path.setAttribute("d", d);
-    svg.appendChild(path);
-  }
-  return svg;
-}
-
-const FALLBACK_COLOR = "var(--accent)";
-const COLOR_NAME_KEYS = [
-  "color.blurple",
-  "color.green",
-  "color.amber",
-  "color.red",
-  "color.pink",
-  "color.grey",
-] as const;
-
-function defaultFolderId(): string {
-  return `f-${globalThis.crypto.randomUUID()}`;
-}
-
-function atDmMode(): boolean {
-  return uiStore.getState().sidebarMode === "dms";
-}
-
-function zoneOf(e: DragEvent, el: HTMLElement, allowInto: boolean): DropZone {
-  const rect = el.getBoundingClientRect();
-  if (rect.height === 0) return allowInto ? "into" : "after";
-  const y = (e.clientY - rect.top) / rect.height;
-  if (allowInto) {
-    if (y < 0.25) return "before";
-    if (y > 0.75) return "after";
-    return "into";
-  }
-  return y < 0.5 ? "before" : "after";
-}
-
-function sameItem(a: ItemRef, b: ItemRef): boolean {
-  if (a.kind === "server" && b.kind === "server") return a.host === b.host;
-  if (a.kind === "folder" && b.kind === "folder") return a.id === b.id;
-  return false;
-}
-
-function roundButton(
-  cls: string,
-  testId: string,
-  label: string,
-  icon: "plus" | "compass",
-  onClick: () => void,
-): HTMLElement {
-  const btn = createElement("button", {
-    type: "button",
-    class: `server-rail-btn server-rail-action ${cls}`,
-    title: label,
-    "aria-label": label,
-    "data-testid": testId,
-  });
-  btn.appendChild(railIcon(icon));
-  btn.addEventListener("click", onClick);
-  return btn;
 }
 
 export function createServerRail(options: ServerRailOptions): MountableComponent {
@@ -283,6 +183,8 @@ export function createServerRail(options: ServerRailOptions): MountableComponent
     );
   }
 
+  const mutations: RailMutations = { reconciled, commit, newFolderId, promptRename };
+
   // --- Context menus (also the keyboard route for every drag operation) ----
 
   function menuAt(e: MouseEvent, el: HTMLElement, items: ContextMenuItem[], label: string): void {
@@ -300,82 +202,6 @@ export function createServerRail(options: ServerRailOptions): MountableComponent
     });
   }
 
-  function serverMenu(host: string): ContextMenuItem[] {
-    const current = reconciled();
-    const ref: ItemRef = { kind: "server", host };
-    const items: ContextMenuItem[] = [
-      {
-        label: serverRailText("moveUp"),
-        testId: "rail-move-up",
-        onClick: () => commit(shiftItem(current, ref, -1)),
-      },
-      {
-        label: serverRailText("moveDown"),
-        testId: "rail-move-down",
-        onClick: () => commit(shiftItem(current, ref, 1)),
-      },
-    ];
-    if (folderOf(current, host) !== null) {
-      items.push({
-        label: serverRailText("removeFromFolder"),
-        testId: "rail-remove-from-folder",
-        onClick: () => commit(moveOutOfFolder(current, host)),
-      });
-    } else {
-      const index = current.findIndex((i) => i.kind === "server" && i.host === host);
-      const next = current[index + 1];
-      if (next !== undefined && next.kind === "server") {
-        items.push({
-          label: serverRailText("groupNext"),
-          testId: "rail-group-next",
-          onClick: () => commit(groupWithNext(current, host, newFolderId())),
-        });
-      }
-    }
-    return items;
-  }
-
-  function folderMenu(folder: Extract<RailItem, { kind: "folder" }>): ContextMenuItem[] {
-    const current = reconciled();
-    const ref: ItemRef = { kind: "folder", id: folder.id };
-    return [
-      {
-        label: folder.collapsed ? serverRailText("expand") : serverRailText("collapse"),
-        onClick: () => commit(toggleCollapsed(current, folder.id)),
-      },
-      {
-        label: serverRailText("renameFolder"),
-        testId: "rail-rename-folder",
-        onClick: () => promptRename(folder),
-      },
-      {
-        label: serverRailText("folderColor"),
-        testId: "rail-folder-color",
-        onClick: () => {},
-        submenu: FOLDER_COLORS.map((color, i) => ({
-          label: serverRailText(COLOR_NAME_KEYS[i] ?? "color.grey"),
-          checked: folder.color === color,
-          radio: true,
-          testId: `rail-color-${i}`,
-          onClick: () => commit(setFolderColor(current, folder.id, color)),
-        })),
-      },
-      {
-        label: serverRailText("moveUp"),
-        onClick: () => commit(shiftItem(current, ref, -1)),
-      },
-      {
-        label: serverRailText("moveDown"),
-        onClick: () => commit(shiftItem(current, ref, 1)),
-      },
-      {
-        label: serverRailText("ungroup"),
-        testId: "rail-ungroup",
-        onClick: () => commit(ungroupFolder(current, folder.id)),
-      },
-    ];
-  }
-
   // --- Drag and drop ------------------------------------------------------
 
   function clearIndicators(): void {
@@ -383,31 +209,6 @@ export function createServerRail(options: ServerRailOptions): MountableComponent
     for (const el of root.querySelectorAll(".drop-before, .drop-after, .drop-into")) {
       el.classList.remove("drop-before", "drop-after", "drop-into");
     }
-  }
-
-  function applyDrop(from: ItemRef, target: ItemRef, zone: DropZone): void {
-    const current = reconciled();
-    if (from.kind === "server") {
-      if (target.kind === "server") {
-        if (zone === "into") {
-          commit(groupServers(current, from.host, target.host, newFolderId()));
-        } else {
-          commit(moveServer(current, from.host, { type: zone, ref: target }));
-        }
-      } else if (zone === "into") {
-        commit(moveServer(current, from.host, { type: "into", folderId: target.id }));
-      } else {
-        commit(moveServer(current, from.host, { type: zone, ref: target }));
-      }
-      return;
-    }
-    // A folder only moves among the top-level items.
-    let anchor: ItemRef = target;
-    if (target.kind === "server") {
-      const holder = folderOf(current, target.host);
-      if (holder !== null) anchor = { kind: "folder", id: holder.id };
-    }
-    commit(moveItem(current, from, anchor, zone === "after" || zone === "into"));
   }
 
   function makeDraggable(el: HTMLElement, ref: ItemRef): void {
@@ -453,7 +254,7 @@ export function createServerRail(options: ServerRailOptions): MountableComponent
       dragging = null;
       clearIndicators();
       if (from.kind === target.kind && sameItem(from, target)) return;
-      applyDrop(from, target, zone);
+      applyDrop(from, target, zone, mutations);
     });
   }
 
@@ -484,7 +285,7 @@ export function createServerRail(options: ServerRailOptions): MountableComponent
     if (active) btn.setAttribute("aria-current", "true");
     btn.appendChild(avatar(host, false));
     btn.addEventListener("click", () => activateServer(host));
-    btn.addEventListener("contextmenu", (e) => menuAt(e, btn, serverMenu(host), name));
+    btn.addEventListener("contextmenu", (e) => menuAt(e, btn, serverMenu(host, mutations), name));
     const ref: ItemRef = { kind: "server", host };
     makeDraggable(btn, ref);
     makeDropTarget(wrapper, ref, inFolder);
@@ -522,7 +323,9 @@ export function createServerRail(options: ServerRailOptions): MountableComponent
       btn.appendChild(glyph);
     }
     btn.addEventListener("click", () => commit(toggleCollapsed(reconciled(), folder.id)));
-    btn.addEventListener("contextmenu", (e) => menuAt(e, btn, folderMenu(folder), label));
+    btn.addEventListener("contextmenu", (e) =>
+      menuAt(e, btn, folderMenu(folder, mutations), label),
+    );
     const ref: ItemRef = { kind: "folder", id: folder.id };
     makeDraggable(btn, ref);
     makeDropTarget(head, ref, false);
@@ -533,56 +336,6 @@ export function createServerRail(options: ServerRailOptions): MountableComponent
       for (const host of folder.hosts) box.appendChild(serverItem(host, true));
     }
     return box;
-  }
-
-  function dmItem(dm: DmChannel, inCall: boolean): HTMLElement {
-    const name = dmDisplayName(dm);
-    const count = dmUnreadCount(dm);
-    const label = inCall
-      ? count > 0
-        ? serverRailText("dmCallUnread", { name, count })
-        : serverRailText("dmCall", { name })
-      : serverRailText("dmUnread", { name, count });
-    const wrapper = createElement("div", { class: "server-rail-item" });
-    const btn = createElement("button", {
-      type: "button",
-      class: "server-rail-btn server-rail-dm",
-      title: inCall ? serverRailText("dmCall", { name }) : name,
-      "aria-label": label,
-      "data-testid": inCall ? "server-rail-dm-call" : "server-rail-dm",
-      "data-channel-id": String(dm.channelId),
-    });
-    const subject = dm.isGroup
-      ? { username: name, avatar: dm.icon ?? null }
-      : { username: dm.recipient.username, avatar: dm.recipient.avatar };
-    btn.appendChild(
-      createAvatarElement(subject, {
-        className: "server-rail-dm-avatar",
-        background: pickAvatarColor(subject.username),
-        decorative: true,
-      }),
-    );
-    btn.addEventListener("click", () => {
-      const live = dmStore.getState().channels.find((c) => c.channelId === dm.channelId);
-      options.onOpenDm?.(live ?? dm);
-    });
-    if (inCall) {
-      // The call outranks an unread count: the badge says why the icon is there.
-      const callBadge = createElement("span", {
-        class: "server-rail-call-badge",
-        "aria-hidden": "true",
-      });
-      callBadge.appendChild(railIcon("phone"));
-      appendChildren(wrapper, btn, callBadge);
-      return wrapper;
-    }
-    const badge = createElement(
-      "span",
-      { class: "server-rail-badge", "aria-hidden": "true" },
-      formatBadgeCount(count),
-    );
-    appendChildren(wrapper, btn, badge);
-    return wrapper;
   }
 
   function render(): void {
@@ -636,11 +389,11 @@ export function createServerRail(options: ServerRailOptions): MountableComponent
       // ends, so the call is one click away from any server view.
       const callId = voiceStore.getState().currentChannelId;
       const callDm = callId === null ? undefined : channels.find((c) => c.channelId === callId);
-      if (callDm !== undefined) dmList.appendChild(dmItem(callDm, true));
+      if (callDm !== undefined) dmList.appendChild(dmItem(callDm, true, options.onOpenDm));
       const unread = channels
         .filter((c) => c !== callDm && dmUnreadCount(c) > 0)
         .toSorted((a, b) => b.lastMessageAt.localeCompare(a.lastMessageAt));
-      for (const dm of unread) dmList.appendChild(dmItem(dm, false));
+      for (const dm of unread) dmList.appendChild(dmItem(dm, false, options.onOpenDm));
     };
     top.appendChild(homeWrap);
     top.appendChild(dmList);
