@@ -72,24 +72,6 @@
       "createVoiceComposer > submit": [16],
       "createVoiceComposer > upload": [21]
     },
-    "features/voice/localVoiceRestore.ts": {
-      "restoreLocalVoiceState": [19]
-    },
-    "features/voice/mediaControl.ts": {
-      "MediaControl > doSwitchVideoDevice": [22]
-    },
-    "features/voice/uiSounds.ts": {
-      "startVoiceUiSounds > (anonymous)": [28]
-    },
-    "features/voice/videoCodec.ts": {
-      "resolvePreferredCodec": [17]
-    },
-    "features/voice/voiceStatusText.ts": {
-      "micControlState": [20]
-    },
-    "features/voice/wsHandlers.ts": {
-      "enforceModeratorAudioState": [19]
-    },
     "lib/api.ts": {
       "createApiClient > doFetch": [30]
     },
@@ -98,19 +80,6 @@
     },
     "lib/net/connectionDiagnostics.ts": {
       "runConnectionDiagnostics": [29]
-    },
-    "lib/voice/connectionStats.ts": {
-      "createConnectionStatsPoller > sampleCamera": [17],
-      "extractMetrics > (anonymous)": [24]
-    },
-    "lib/voice/micProcessor.ts": {
-      "createMicProcessor > route": [17]
-    },
-    "lib/voice/noiseFloor.ts": {
-      "NoiseFloorTracker > push": [16]
-    },
-    "lib/voice/shareResolutionRecovery.ts": {
-      "readingFromStats": [16]
     },
     "lib/ws.ts": {
       "createWsClient > handleMessage": [27],
@@ -130,9 +99,6 @@
   "depth": {
     "features/voice-messages/recorder.ts": {
       "createVoiceRecorder > openStream": [5]
-    },
-    "features/voice/mediaControl.ts": {
-      "MediaControl > doSwitchVideoDevice": [5]
     }
   }
 }
