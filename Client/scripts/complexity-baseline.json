@@ -45,13 +45,6 @@
     "features/dialogs/confirmModal.ts": {
       "createConfirmModal": [19]
     },
-    "features/direct-messages/DmSidebar.ts": {
-      "convoSignature": [18],
-      "renderDmItem": [16]
-    },
-    "features/direct-messages/dmContextMenu.ts": {
-      "openDmContextMenu": [30]
-    },
     "features/forums/ForumView.ts": {
       "renderForumView > loadMore": [19],
       "renderForumView > paintList": [25]
@@ -69,9 +62,6 @@
     },
     "features/message-requests/Inbox.ts": {
       "renderInbox > render": [23]
-    },
-    "features/messaging/ChannelMediaGallery.ts": {
-      "createChannelMediaGallery > loadMore": [18]
     },
     "features/messaging/MessageList.ts": {
       "createMessageList > mount > (anonymous)": [18]
@@ -123,9 +113,6 @@
     "features/moderation/ActionForms.ts": {
       "buildActionForms": [19]
     },
-    "features/moderation/AdminActions.ts": {
-      "buildMemberMenu": [38]
-    },
     "features/moderation/AppealDetail.ts": {
       "buildAppealDetail": [26]
     },
@@ -138,9 +125,6 @@
     },
     "features/people-home/PeopleHome.ts": {
       "renderPeopleHome > render": [17]
-    },
-    "features/profiles/SelfProfileCard.ts": {
-      "createSelfProfileCard > open > (anonymous)": [25]
     },
     "features/settings/AppearanceTab.ts": {
       "buildAppearanceTab": [16]

@@ -97,12 +97,16 @@ export interface DmContextMenuRequest {
   readonly signal: AbortSignal;
 }
 
-/** Open the menu for one DM row at (x, y). Opens nothing when it would be empty. */
-export function openDmContextMenu(req: DmContextMenuRequest): void {
-  const { convo, actions, confirmLeave, signal } = req;
-  const items: ContextMenuItem[] = [];
-  const isGroup = convo.isGroup;
-  const id = convo.channelId;
+/** Everything one row's builders need; `id` is the conversation's channel id. */
+interface RowMenu {
+  readonly convo: DmMenuConvo;
+  readonly actions: DmMenuActions;
+  readonly id: number;
+  readonly items: ContextMenuItem[];
+}
+
+function pushMarkRead(m: RowMenu): void {
+  const { convo, actions, id, items } = m;
   if (convo.unread && actions.onMarkRead !== undefined) {
     const markRead = actions.onMarkRead;
     items.push({
@@ -111,7 +115,11 @@ export function openDmContextMenu(req: DmContextMenuRequest): void {
       onClick: () => markRead(id),
     });
   }
-  if (!isGroup && actions.onOpenProfile !== undefined) {
+}
+
+function pushProfile(m: RowMenu): void {
+  const { convo, actions, id, items } = m;
+  if (!convo.isGroup && actions.onOpenProfile !== undefined) {
     const openProfile = actions.onOpenProfile;
     items.push({
       label: requestsText("dm.profile"),
@@ -119,10 +127,13 @@ export function openDmContextMenu(req: DmContextMenuRequest): void {
       onClick: () => openProfile(id),
     });
   }
-  // Someone you blocked (or who blocked you) cannot be called, and nothing
-  // can be dialled while the socket is down: show Call greyed with why.
-  const blockedByMe = blocksStore.getState().blockedByMe.has(convo.userId);
-  if (!isGroup && actions.onCall !== undefined) {
+}
+
+// Someone you blocked (or who blocked you) cannot be called, and nothing
+// can be dialled while the socket is down: show Call greyed with why.
+function pushCall(m: RowMenu): void {
+  const { convo, actions, id, items } = m;
+  if (!convo.isGroup && actions.onCall !== undefined) {
     const call = actions.onCall;
     const reason = callUnavailableReason(convo.userId);
     items.push({
@@ -132,34 +143,40 @@ export function openDmContextMenu(req: DmContextMenuRequest): void {
       onClick: () => call(id),
     });
   }
-  if (actions.onSetMute !== undefined || actions.onToggleMute !== undefined) {
-    const { onSetMute, onToggleMute } = actions;
-    const setMute = (channelId: number, muted: boolean): void =>
-      onSetMute !== undefined ? onSetMute(channelId, muted) : onToggleMute?.(channelId);
-    const muteFor = actions.onMuteFor;
-    const until = convo.muted ? mutedUntilLabel(convo.mutedUntil) : null;
-    items.push({
-      label: convo.muted ? requestsText("dm.unmute") : requestsText("dm.mute"),
-      testId: `dm-mute-${id}`,
-      ...(until === null ? {} : { detail: until }),
-      // The row itself is the default action (mute until turned off); the
-      // flyout offers the timed choices.
-      ...(convo.muted || muteFor === undefined
-        ? {}
-        : {
-            submenu: muteChoices().map((choice): ContextMenuItem => ({
-              label: choice.label,
-              testId: `dm-mute-for-${choice.durationMs ?? "forever"}-${id}`,
-              onClick: () =>
-                choice.durationMs === undefined
-                  ? setMute(id, true)
-                  : muteFor(id, choice.durationMs),
-            })),
-          }),
-      onClick: () => setMute(id, !convo.muted),
-    });
-  }
-  if (isGroup && actions.onRenameGroup !== undefined) {
+}
+
+function pushMute(m: RowMenu): void {
+  const { convo, actions, id, items } = m;
+  if (actions.onSetMute === undefined && actions.onToggleMute === undefined) return;
+  const { onSetMute, onToggleMute } = actions;
+  const setMute = (channelId: number, muted: boolean): void =>
+    onSetMute !== undefined ? onSetMute(channelId, muted) : onToggleMute?.(channelId);
+  const muteFor = actions.onMuteFor;
+  const until = convo.muted ? mutedUntilLabel(convo.mutedUntil) : null;
+  items.push({
+    label: convo.muted ? requestsText("dm.unmute") : requestsText("dm.mute"),
+    testId: `dm-mute-${id}`,
+    ...(until === null ? {} : { detail: until }),
+    // The row itself is the default action (mute until turned off); the
+    // flyout offers the timed choices.
+    ...(convo.muted || muteFor === undefined
+      ? {}
+      : {
+          submenu: muteChoices().map((choice): ContextMenuItem => ({
+            label: choice.label,
+            testId: `dm-mute-for-${choice.durationMs ?? "forever"}-${id}`,
+            onClick: () =>
+              choice.durationMs === undefined ? setMute(id, true) : muteFor(id, choice.durationMs),
+          })),
+        }),
+    onClick: () => setMute(id, !convo.muted),
+  });
+}
+
+function pushGroupItems(m: RowMenu): void {
+  const { convo, actions, id, items } = m;
+  if (!convo.isGroup) return;
+  if (actions.onRenameGroup !== undefined) {
     const rename = actions.onRenameGroup;
     items.push({
       label: requestsText("dm.renameGroup"),
@@ -169,26 +186,31 @@ export function openDmContextMenu(req: DmContextMenuRequest): void {
   }
   // Any member may set or clear the icon, so this is not gated on ownership,
   // only on the server being one that reports an owner.
-  if (isGroup && convo.hasOwner === true) {
-    const change = actions.onChangeGroupIcon;
-    if (change !== undefined) {
-      items.push({
-        label: requestsText("dm.changeGroupIcon"),
-        testId: `dm-change-icon-${id}`,
-        onClick: () => change(id),
-      });
-    }
-    const remove = actions.onRemoveGroupIcon;
-    if (remove !== undefined && convo.hasIcon === true) {
-      items.push({
-        label: requestsText("dm.removeGroupIcon"),
-        testId: `dm-remove-icon-${id}`,
-        onClick: () => remove(id),
-      });
-    }
+  if (convo.hasOwner !== true) return;
+  const change = actions.onChangeGroupIcon;
+  if (change !== undefined) {
+    items.push({
+      label: requestsText("dm.changeGroupIcon"),
+      testId: `dm-change-icon-${id}`,
+      onClick: () => change(id),
+    });
   }
-  if (!isGroup && actions.onToggleBlock !== undefined) {
+  const remove = actions.onRemoveGroupIcon;
+  if (remove !== undefined && convo.hasIcon === true) {
+    items.push({
+      label: requestsText("dm.removeGroupIcon"),
+      testId: `dm-remove-icon-${id}`,
+      onClick: () => remove(id),
+    });
+  }
+}
+
+function pushBlockAndCopyId(m: RowMenu): void {
+  const { convo, actions, id, items } = m;
+  if (convo.isGroup) return;
+  if (actions.onToggleBlock !== undefined) {
     const toggleBlock = actions.onToggleBlock;
+    const blockedByMe = blocksStore.getState().blockedByMe.has(convo.userId);
     items.push({
       label: shellText(blockedByMe ? "member.unblock" : "member.block"),
       danger: !blockedByMe,
@@ -196,7 +218,7 @@ export function openDmContextMenu(req: DmContextMenuRequest): void {
       onClick: () => toggleBlock(convo.userId, convo.username, !blockedByMe),
     });
   }
-  if (!isGroup && isDeveloperMode()) {
+  if (isDeveloperMode()) {
     items.push({
       label: shellText("member.copyId"),
       testId: `dm-copy-id-${id}`,
@@ -204,17 +226,34 @@ export function openDmContextMenu(req: DmContextMenuRequest): void {
         copyWithToast(String(convo.userId), "toast.userIdCopied", "toast.userIdCopyFailed"),
     });
   }
-  if (actions.onCloseDm !== undefined) {
-    const close = actions.onCloseDm;
-    items.push({
-      label: isGroup ? requestsText("dm.leaveGroup") : requestsText("dm.close"),
-      danger: true,
-      testId: `dm-close-${id}`,
-      // The menu item has no Shift modifier, so a group always confirms here
-      // too — the destructive action is destructive whichever path opens it.
-      onClick: () => (isGroup ? confirmLeave(convo, close) : close(id)),
-    });
-  }
+}
+
+function pushClose(m: RowMenu, confirmLeave: DmConfirmLeave): void {
+  const { convo, actions, id, items } = m;
+  if (actions.onCloseDm === undefined) return;
+  const close = actions.onCloseDm;
+  items.push({
+    label: convo.isGroup ? requestsText("dm.leaveGroup") : requestsText("dm.close"),
+    danger: true,
+    testId: `dm-close-${id}`,
+    // The menu item has no Shift modifier, so a group always confirms here
+    // too — the destructive action is destructive whichever path opens it.
+    onClick: () => (convo.isGroup ? confirmLeave(convo, close) : close(id)),
+  });
+}
+
+/** Open the menu for one DM row at (x, y). Opens nothing when it would be empty. */
+export function openDmContextMenu(req: DmContextMenuRequest): void {
+  const { convo, actions, confirmLeave, signal } = req;
+  const items: ContextMenuItem[] = [];
+  const m: RowMenu = { convo, actions, id: convo.channelId, items };
+  pushMarkRead(m);
+  pushProfile(m);
+  pushCall(m);
+  pushMute(m);
+  pushGroupItems(m);
+  pushBlockAndCopyId(m);
+  pushClose(m, confirmLeave);
   if (items.length === 0) return;
   showContextMenu({
     x: req.x,
