@@ -12,7 +12,7 @@ import { createMemberList } from "../../src/features/members/MemberList";
 import { createUserBar } from "@components/UserBar";
 import { createVoiceWidget } from "@components/VoiceWidget";
 import { createCreateChannelModal } from "@components/CreateChannelModal";
-import { createEditChannelModal } from "@components/EditChannelModal";
+import { createEditChannelModal } from "../../src/features/channels/editChannelDialog";
 import { createDeleteChannelModal } from "@components/DeleteChannelModal";
 import { defaultSidebarAreaOpts } from "./sidebarAreaOpts";
 import { resetMembersState } from "./storeResets";

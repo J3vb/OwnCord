@@ -13,7 +13,7 @@ import { createChannelSidebar } from "../../../src/features/channels/ChannelSide
 import { createVoiceWidget } from "@components/VoiceWidget";
 import { createCreateChannelModal } from "@components/CreateChannelModal";
 import "../../../src/pages/main-page/MemberPickerModal";
-import { createEditChannelModal } from "@components/EditChannelModal";
+import { createEditChannelModal } from "../../../src/features/channels/editChannelDialog";
 import { createDeleteChannelModal } from "@components/DeleteChannelModal";
 import { createQuickSwitchOverlay } from "@components/QuickSwitchOverlay";
 import { createProfileManager } from "@lib/presence/profiles";
@@ -45,7 +45,7 @@ vi.mock("@components/VoiceWidget", () => mocks.voiceWidgetMock());
 vi.mock("@components/QuickSwitchOverlay", () => mocks.quickSwitchOverlayMock());
 vi.mock("@components/CreateChannelModal", () => mocks.createChannelModalMock());
 vi.mock("@tauri-apps/api/core", () => mocks.apiCoreMock());
-vi.mock("@components/EditChannelModal", () => mocks.editChannelModalMock());
+vi.mock("../../../src/features/channels/editChannelDialog", () => mocks.editChannelModalMock());
 vi.mock("@components/DeleteChannelModal", () => mocks.deleteChannelModalMock());
 vi.mock("../../../src/pages/main-page/VoiceCallbacks", () => mocks.pageVoiceCallbacksMock());
 vi.mock("../../../src/pages/main-page/OverlayManagers", () => mocks.pageOverlayManagersMock());

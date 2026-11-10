@@ -1,6 +1,6 @@
 /**
  * "Check for updates" — the on-demand twin of the periodic check. It runs the
- * active checker (components/UpdateNotifier mounts it) with the `manual`
+ * active checker (UpdateNotifier mounts it) with the `manual`
  * reason, so a dismissed version is offered again, and reports in place. An
  * available update gets the existing install action; its progress shows in the
  * update banner the notifier raises for the same outcome.

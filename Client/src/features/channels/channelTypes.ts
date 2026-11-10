@@ -3,7 +3,7 @@
 // pull in the create dialog, which loads on first use.
 
 import type { ChannelType } from "@lib/types";
-import { shellText } from "../i18n/shell";
+import { shellText } from "../../i18n/shell";
 
 /** The server's ceiling for a channel name (`MaxChannelNameLen`), mirrored for the field. */
 export const MAX_CHANNEL_NAME_LENGTH = 100;

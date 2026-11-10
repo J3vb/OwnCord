@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { useMountContainer } from "../helpers/mountContainer";
-import { createEditChannelModal } from "@components/EditChannelModal";
+import { createEditChannelModal } from "../../src/features/channels/editChannelDialog";
 import { ApiClientError } from "@lib/api";
 import { applyReadyCapabilities, resetServerCapabilities } from "@lib/net/serverCapabilities";
 import { Permission, type ForumSettings, type ForumSettingsBody } from "@lib/types";

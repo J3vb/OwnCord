@@ -3,7 +3,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { NativeFile } from "../../../src/platform/contracts/nativeFiles";
 
-vi.mock("@components/EmojiPicker", () => ({
+vi.mock("../../../src/features/messaging/EmojiPicker", () => ({
   createEmojiPicker: () => ({ element: document.createElement("div"), destroy: vi.fn() }),
 }));
 vi.mock("@components/GifPicker", () => ({

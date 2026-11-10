@@ -26,7 +26,7 @@ vi.mock("../../../src/platform/desktop", async (importOriginal) => {
     },
   };
 });
-vi.mock("@components/EmojiPicker", () => ({
+vi.mock("../../../src/features/messaging/EmojiPicker", () => ({
   createEmojiPicker: () => ({ element: document.createElement("div"), destroy: vi.fn() }),
 }));
 vi.mock("@components/GifPicker", () => ({

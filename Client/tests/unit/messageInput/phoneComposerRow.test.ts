@@ -16,7 +16,7 @@ import {
   useFullComposerServer,
 } from "../../helpers/composerSheets";
 
-vi.mock("@components/EmojiPicker", () => mocks.emojiPickerMock());
+vi.mock("../../../src/features/messaging/EmojiPicker", () => mocks.emojiPickerMock());
 vi.mock("@components/GifPicker", () => mocks.gifPickerMock());
 
 const sheet = attachSheetEl;
