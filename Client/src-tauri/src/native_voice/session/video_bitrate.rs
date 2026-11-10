@@ -2,7 +2,7 @@
 //! republishing it. The rule is the web path's (`lib/voice/senderLayers.ts`):
 //! the top layer runs at the cap and every lower layer at the lower of its own
 //! rate and that top. The vendored SDK reads and writes the sender's encodings
-//! in place (`LocalVideoTrack::set_sender_max_bitrates`), so viewers keep the
+//! in place (`LocalVideoTrack::sender_layers` / `set_sender_max_bitrates`), so viewers keep the
 //! same publication and see no keyframe.
 use super::*;
 
@@ -23,21 +23,36 @@ impl VideoKind {
     }
 }
 
-/// The rate each layer carries under a top of `top` bits per second.
-/// `original` is the layers' rates right after the publish, the full-size
-/// layer last. The top layer takes `top`; every lower layer takes the lower of
-/// its own rate and `top` (a layer with no rate of its own stays without one).
-/// A `top` of 0 restores `original`.
-pub(super) fn capped_layers(original: &[Option<u64>], top: u64) -> Vec<Option<u64>> {
-    if top == 0 {
-        return original.to_vec();
+/// One sender layer as the publish produced it: its rate and how far it is
+/// scaled down from the capture (1.0 is full size).
+pub(super) type Layer = (Option<u64>, f64);
+
+/// The full-size layer of `layers`: the smallest scale-down, the last of
+/// equals (the web path's `topIndex`). The SDK lists it first, not last.
+fn top_index(layers: &[Layer]) -> Option<usize> {
+    let mut best: Option<usize> = None;
+    for (i, (_, scale)) in layers.iter().enumerate() {
+        if best.is_none_or(|b| *scale <= layers[b].1) {
+            best = Some(i);
+        }
     }
-    let last = original.len().saturating_sub(1);
+    best
+}
+
+/// The rate each layer carries under a top of `top` bits per second.
+/// `original` is the layers right after the publish. The full-size layer
+/// takes `top`; every other layer takes the lower of its own rate and `top`
+/// (a layer with no rate of its own stays without one). A `top` of 0 restores
+/// `original`.
+pub(super) fn capped_layers(original: &[Layer], top: u64) -> Vec<Option<u64>> {
+    let top_at = top_index(original);
     original
         .iter()
         .enumerate()
-        .map(|(i, rate)| {
-            if i == last {
+        .map(|(i, (rate, _))| {
+            if top == 0 {
+                *rate
+            } else if Some(i) == top_at {
                 Some(top)
             } else {
                 rate.map(|r| r.min(top))
@@ -67,7 +82,7 @@ impl NativeSession {
         let Some(LocalTrack::Video(track)) = track else {
             return;
         };
-        let layers = track.sender_max_bitrates();
+        let layers = track.sender_layers();
         if let Some(publication) = lock(self.video_slot(kind))
             .as_mut()
             .filter(|p| p.live == *live)
@@ -103,7 +118,7 @@ impl NativeSession {
         // A republish after a full reconnect starts the layers over: take what
         // the sender carries now as the originals.
         let original = if recorded.is_empty() {
-            let layers = track.sender_max_bitrates();
+            let layers = track.sender_layers();
             if let Some(p) = lock(slot).as_mut().filter(|p| p.live == live) {
                 p.original_layers = layers.clone();
             }
@@ -121,43 +136,60 @@ impl NativeSession {
 mod tests {
     use super::*;
 
+    // The SDK's order: full size first, then the scaled-down layers.
     #[test]
-    fn the_top_layer_takes_the_cap_and_lower_layers_stay_under_it() {
-        let original = [Some(450_000), Some(1_700_000), Some(4_000_000)];
+    fn the_full_size_layer_takes_the_cap_and_lower_layers_stay_under_it() {
+        let original = [
+            (Some(4_000_000), 1.0),
+            (Some(1_700_000), 1.5),
+            (Some(450_000), 3.0),
+        ];
         assert_eq!(
             capped_layers(&original, 1_000_000),
-            vec![Some(450_000), Some(1_000_000), Some(1_000_000)]
+            vec![Some(1_000_000), Some(1_000_000), Some(450_000)]
+        );
+    }
+
+    #[test]
+    fn the_top_is_found_by_its_scale_not_its_place() {
+        let original = [(Some(450_000), 3.0), (Some(4_000_000), 1.0)];
+        assert_eq!(
+            capped_layers(&original, 2_000_000),
+            vec![Some(450_000), Some(2_000_000)]
         );
     }
 
     #[test]
     fn a_lower_layer_already_under_the_cap_keeps_its_own_rate() {
-        let original = [Some(300_000), Some(2_000_000)];
+        let original = [(Some(2_000_000), 1.0), (Some(300_000), 1.5)];
         assert_eq!(
             capped_layers(&original, 5_000_000),
-            vec![Some(300_000), Some(5_000_000)]
+            vec![Some(5_000_000), Some(300_000)]
         );
     }
 
     #[test]
     fn a_single_layer_is_the_top() {
         assert_eq!(
-            capped_layers(&[Some(8_000_000)], 600_000),
+            capped_layers(&[(Some(8_000_000), 1.0)], 600_000),
             vec![Some(600_000)]
         );
-        assert_eq!(capped_layers(&[None], 600_000), vec![Some(600_000)]);
+        assert_eq!(capped_layers(&[(None, 1.0)], 600_000), vec![Some(600_000)]);
     }
 
     #[test]
     fn a_layer_without_a_rate_stays_without_one() {
-        let original = [None, Some(1_200_000)];
-        assert_eq!(capped_layers(&original, 700_000), vec![None, Some(700_000)]);
+        let original = [(Some(1_200_000), 1.0), (None, 2.0)];
+        assert_eq!(capped_layers(&original, 700_000), vec![Some(700_000), None]);
     }
 
     #[test]
     fn a_top_of_zero_restores_the_originals() {
-        let original = [Some(450_000), None, Some(4_000_000)];
-        assert_eq!(capped_layers(&original, 0), original.to_vec());
+        let original = [(Some(4_000_000), 1.0), (None, 1.5), (Some(450_000), 3.0)];
+        assert_eq!(
+            capped_layers(&original, 0),
+            vec![Some(4_000_000), None, Some(450_000)]
+        );
     }
 
     #[test]

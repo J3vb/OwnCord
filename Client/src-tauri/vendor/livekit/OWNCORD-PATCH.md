@@ -206,8 +206,10 @@ A live change of the server's per-person video cap must change a published
 camera's or share's encoder rate with no republish (a republish gives viewers
 a new publication and a keyframe). libwebrtc has `RtpSender::set_parameters`,
 but upstream keeps a local video track's sender `pub(crate)`, so nothing
-outside the crate can reach it. `LocalVideoTrack::sender_max_bitrates` reads
-each sender encoding's `max_bitrate` and `set_sender_max_bitrates` writes them
+outside the crate can reach it. `LocalVideoTrack::sender_layers` reads
+each sender encoding's `max_bitrate` and scale-down (the SDK lists the
+full-size layer first, so callers find it by scale) and
+`set_sender_max_bitrates` writes the rates
 back in place, built like the SDK's own dynacast `set_parameters` call (a
 length mismatch or a missing transceiver is a no-op). Marked
 `OWNCORD-PATCH (WP VB-2)` in `src/room/track/local_video_track.rs`. No C++ or
@@ -220,11 +222,17 @@ CI does not run the vendored crate's own tests.
 +++ src/room/track/local_video_track.rs
 @@ -361,6 +361,41 @@
 +    // OWNCORD-PATCH (WP VB-2): not in upstream livekit 0.10.0. See OWNCORD-PATCH.md.
-+    pub fn sender_max_bitrates(&self) -> Vec<Option<u64>> {
++    pub fn sender_layers(&self) -> Vec<(Option<u64>, f64)> {
 +        let Some(transceiver) = self.transceiver() else {
 +            return Vec::new();
 +        };
-+        transceiver.sender().parameters().encodings.iter().map(|e| e.max_bitrate).collect()
++        transceiver
++            .sender()
++            .parameters()
++            .encodings
++            .iter()
++            .map(|e| (e.max_bitrate, e.scale_resolution_down_by.unwrap_or(1.0)))
++            .collect()
 +    }
 +
 +    // OWNCORD-PATCH (WP VB-2): not in upstream livekit 0.10.0. See OWNCORD-PATCH.md.

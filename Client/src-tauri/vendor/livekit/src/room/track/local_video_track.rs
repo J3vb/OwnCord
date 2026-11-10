@@ -357,13 +357,21 @@ impl LocalVideoTrack {
     }
 
     // OWNCORD-PATCH (WP VB-2): not in upstream livekit 0.10.0. See OWNCORD-PATCH.md.
-    /// The `max_bitrate` of each sender encoding, in encoding order (the last
-    /// is the full-size layer). Empty if no transceiver is set.
-    pub fn sender_max_bitrates(&self) -> Vec<Option<u64>> {
+    /// Each sender encoding's `max_bitrate` and `scale_resolution_down_by`
+    /// (1.0 when unset), in encoding order. The SDK lists the full-size layer
+    /// first, so a caller finds it by its scale, not its place. Empty if no
+    /// transceiver is set.
+    pub fn sender_layers(&self) -> Vec<(Option<u64>, f64)> {
         let Some(transceiver) = self.transceiver() else {
             return Vec::new();
         };
-        transceiver.sender().parameters().encodings.iter().map(|e| e.max_bitrate).collect()
+        transceiver
+            .sender()
+            .parameters()
+            .encodings
+            .iter()
+            .map(|e| (e.max_bitrate, e.scale_resolution_down_by.unwrap_or(1.0)))
+            .collect()
     }
 
     // OWNCORD-PATCH (WP VB-2): not in upstream livekit 0.10.0. See OWNCORD-PATCH.md.

@@ -305,10 +305,10 @@ struct VideoPublication {
     issued: String,
     live: TrackSid,
     capture: Option<u64>,
-    /// The sender's layer rates right after the publish, the full-size layer
-    /// last: what a lifted bitrate cap restores (`video_bitrate.rs`). Empty
-    /// until recorded, and again after a republish, whose layers are new.
-    original_layers: Vec<Option<u64>>,
+    /// The sender's layers (rate, scale-down) right after the publish: what a
+    /// lifted bitrate cap restores (`video_bitrate.rs`). Empty until recorded,
+    /// and again after a republish, whose layers are new.
+    original_layers: Vec<video_bitrate::Layer>,
 }
 
 impl VideoPublication {
