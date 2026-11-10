@@ -87,6 +87,7 @@ import {
   reportTitle,
   stateText,
 } from "./Evidence";
+import { captureDetailFocus, restoreDetailFocus } from "./detailFocus";
 import { buildHistory } from "./History";
 import { modQueueStore } from "./store";
 import { buildWorkflow, type WorkflowWrite } from "./Workflow";
@@ -443,6 +444,55 @@ function renderReports(
     if (focused !== undefined) focusList(focused);
   }
 
+  /** Keep the open report in step with a fresh list: re-read it, or say it left the filter or is gone. */
+  function reconcileSelection(was: QueueItem | undefined, refreshDetail: boolean): void {
+    if (selected === null) return;
+    if (items.some((i) => i.id === selected)) {
+      offList = null;
+      if (refreshDetail) loadDetail(selected, false);
+    } else if (
+      was !== undefined &&
+      (selected === ownWrite || selected === linked || offList === was)
+    ) {
+      if (offList === null) setText(detailStatus, t("detail.leftFilter"));
+      offList = was;
+      if (refreshDetail) loadDetail(selected, false);
+    } else if (selected !== linked) {
+      clearDetail(t("detail.gone"));
+    }
+  }
+
+  function onListLoaded(
+    rows: Parameters<typeof mapQueueRow>[0][],
+    forFilter: { readonly countKey: Parameters<typeof t>[0] },
+    refreshDetail: boolean,
+  ): void {
+    listReq = null;
+    list.removeAttribute("aria-busy");
+    const retryHadFocus = document.activeElement === retry;
+    const was = selected === null ? undefined : itemFor(selected);
+    items = rows.map(mapQueueRow);
+    renderList();
+    setText(failure, "");
+    retry.hidden = true;
+    setText(status, t(forFilter.countKey, { count: items.length }));
+    if (retryHadFocus) focusList(null);
+    reconcileSelection(was, refreshDetail);
+    if (writing !== "sending") ownWrite = null;
+  }
+
+  function onListFailed(err: unknown): void {
+    listReq = null;
+    list.removeAttribute("aria-busy");
+    if (isStatus(err, 403)) {
+      deny();
+      return;
+    }
+    setText(status, "");
+    setText(failure, t("list.error"));
+    retry.hidden = false;
+  }
+
   function loadList(announce: boolean, refreshDetail: boolean): void {
     if (denied) return;
     listReq?.destroy();
@@ -454,44 +504,11 @@ function renderReports(
     api.getModerationQueue(forFilter.value, req.signal).then(
       (rows) => {
         if (req !== listReq || signal.aborted) return;
-        listReq = null;
-        list.removeAttribute("aria-busy");
-        const retryHadFocus = document.activeElement === retry;
-        const was = selected === null ? undefined : itemFor(selected);
-        items = rows.map(mapQueueRow);
-        renderList();
-        setText(failure, "");
-        retry.hidden = true;
-        setText(status, t(forFilter.countKey, { count: items.length }));
-        if (retryHadFocus) focusList(null);
-        if (selected !== null) {
-          if (items.some((i) => i.id === selected)) {
-            offList = null;
-            if (refreshDetail) loadDetail(selected, false);
-          } else if (
-            was !== undefined &&
-            (selected === ownWrite || selected === linked || offList === was)
-          ) {
-            if (offList === null) setText(detailStatus, t("detail.leftFilter"));
-            offList = was;
-            if (refreshDetail) loadDetail(selected, false);
-          } else if (selected !== linked) {
-            clearDetail(t("detail.gone"));
-          }
-        }
-        if (writing !== "sending") ownWrite = null;
+        onListLoaded(rows, forFilter, refreshDetail);
       },
       (err: unknown) => {
         if (req !== listReq || signal.aborted) return;
-        listReq = null;
-        list.removeAttribute("aria-busy");
-        if (isStatus(err, 403)) {
-          deny();
-          return;
-        }
-        setText(status, "");
-        setText(failure, t("list.error"));
-        retry.hidden = false;
+        onListFailed(err);
       },
     );
   }
@@ -522,22 +539,8 @@ function renderReports(
     );
   }
 
-  function showDetail(item: QueueItem, detail: ReportDetail, takeFocus: boolean): void {
-    const active = document.activeElement;
-    const hadFocus = detailSlot.contains(active);
-    const retryHadFocus = active === detailRetry;
-    // A re-read rebuilds the report: put focus back on the same control.
-    const focusKey = hadFocus && active instanceof HTMLElement ? active.dataset.focus : undefined;
-    const typed =
-      active instanceof HTMLTextAreaElement ||
-      (active instanceof HTMLInputElement && active.type === "text");
-    const caret = typed ? ([active.selectionStart, active.selectionEnd] as const) : null;
-    dropDetail();
-    shown = detail;
-    const view = buildReportDetail(item, detail, mountGate);
-    reportHeading = view.heading;
-    const me = authStore.getState().user?.id ?? -1;
-    view.element.append(...buildHistory(detail, me));
+  /** The review controls; a draft the review no longer takes is dropped with a notice. */
+  function appendWorkflow(parent: HTMLElement, detail: ReportDetail, me: number): void {
     const mine = draft.id === detail.id ? draft : NO_DRAFT;
     const work = buildWorkflow({
       detail,
@@ -553,11 +556,15 @@ function renderReports(
       onWrite: (w) => write(detail.id, w),
       signal,
     });
-    view.element.appendChild(work.element);
+    parent.appendChild(work.element);
     if (draft.id === detail.id && !work.takesNotes) {
       if (draft.text.trim() !== "") setText(writeAlert, t("draft.lost"));
       draft = NO_DRAFT;
     }
+  }
+
+  /** The moderator actions; reasons typed for actions no longer offered are dropped with a notice. */
+  function appendActions(parent: HTMLElement, detail: ReportDetail, me: number): void {
     if (actDraft.id !== detail.id) actDraft = { id: detail.id, ...emptyActionDraft() };
     const acts = buildActionForms({
       detail,
@@ -568,12 +575,25 @@ function renderReports(
       refocus: (key) =>
         detailSlot.querySelector<HTMLElement>(`[data-focus="${key}"]`) ?? reportHeading,
     });
-    if (acts.element !== null) view.element.appendChild(acts.element);
+    if (acts.element !== null) parent.appendChild(acts.element);
     if (!acts.takesInput) {
       if (`${actDraft.warn}${actDraft.reason}${actDraft.enforce}`.trim() !== "")
         setText(writeAlert, t("act.draftLost"));
       actDraft = { id: detail.id, ...emptyActionDraft() };
     }
+  }
+
+  function showDetail(item: QueueItem, detail: ReportDetail, takeFocus: boolean): void {
+    // A re-read rebuilds the report: put focus back on the same control.
+    const before = captureDetailFocus(detailSlot, detailRetry, true);
+    dropDetail();
+    shown = detail;
+    const view = buildReportDetail(item, detail, mountGate);
+    reportHeading = view.heading;
+    const me = authStore.getState().user?.id ?? -1;
+    view.element.append(...buildHistory(detail, me));
+    appendWorkflow(view.element, detail, me);
+    appendActions(view.element, detail, me);
     view.element.addEventListener(
       "keydown",
       (e: KeyboardEvent) => {
@@ -585,19 +605,7 @@ function renderReports(
       { signal },
     );
     detailSlot.appendChild(view.element);
-    const again =
-      focusKey === undefined || takeFocus
-        ? null
-        : view.element.querySelector<HTMLElement>(`[data-focus="${focusKey}"]`);
-    if (again !== null) {
-      again.focus();
-      if (
-        caret !== null &&
-        (again instanceof HTMLTextAreaElement || again instanceof HTMLInputElement)
-      ) {
-        again.setSelectionRange(caret[0], caret[1]);
-      }
-    } else if (takeFocus || hadFocus || retryHadFocus) view.heading.focus();
+    restoreDetailFocus(view, before, takeFocus, true);
   }
 
   const WRITE_DONE = { assign: "done.assign", note: "done.note", close: "done.close" } as const;

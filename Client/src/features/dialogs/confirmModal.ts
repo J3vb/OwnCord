@@ -70,6 +70,69 @@ export interface ConfirmModalInstance extends ModalInstance {
 
 let titleSeq = 0;
 
+function testIdAttr(id: string | undefined): Record<string, string> {
+  return id === undefined ? {} : { "data-testid": id };
+}
+
+function buildBody(options: ConfirmModalOptions, tone: "danger" | "primary"): HTMLElement {
+  const body = createElement("div", { class: "modal-body" });
+  if (typeof options.body === "string") {
+    const attrs: Record<string, string> = tone === "danger" ? { class: "modal-danger-text" } : {};
+    body.appendChild(createElement("p", attrs, options.body));
+  } else if (options.body instanceof Node) {
+    body.appendChild(options.body);
+  } else {
+    body.append(...options.body);
+  }
+  return body;
+}
+
+function buildErrorEl(options: ConfirmModalOptions): HTMLElement | null {
+  if (options.failureText === undefined) return null;
+  return createElement("div", {
+    style: "color: var(--text-danger); font-size: 13px; display: none; margin-top: 8px;",
+    ...testIdAttr(options.errorTestId),
+  });
+}
+
+function buildButtons(
+  options: ConfirmModalOptions,
+  tone: "danger" | "primary",
+): { cancel: HTMLButtonElement; confirm: HTMLButtonElement } {
+  const cancel = createElement(
+    "button",
+    {
+      class: "btn-modal-cancel",
+      type: "button",
+      ...testIdAttr(options.cancelTestId),
+    },
+    options.cancelLabel ?? connectText("common.cancel"),
+  );
+  const confirm = createElement(
+    "button",
+    {
+      class: tone === "danger" ? "btn-danger" : "btn-modal-save",
+      type: "button",
+      ...testIdAttr(options.confirmTestId),
+    },
+    options.confirmLabel,
+  );
+  return { cancel, confirm };
+}
+
+/** Modal options that are only present when the caller supplied them. */
+function optionalModalOptions(options: ConfirmModalOptions): {
+  overlayAttrs?: Record<string, string>;
+  signal?: AbortSignal;
+  fallbackFocus?: () => HTMLElement | null;
+} {
+  return {
+    ...(options.testId === undefined ? {} : { overlayAttrs: { "data-testid": options.testId } }),
+    ...(options.signal === undefined ? {} : { signal: options.signal }),
+    ...(options.fallbackFocus === undefined ? {} : { fallbackFocus: options.fallbackFocus }),
+  };
+}
+
 export function createConfirmModal(
   options: ConfirmModalOptions,
   container: Element = document.body,
@@ -85,42 +148,11 @@ export function createConfirmModal(
   const title = createElement("h3", { id: titleId }, options.title);
   header.appendChild(title);
 
-  const body = createElement("div", { class: "modal-body" });
-  if (typeof options.body === "string") {
-    const attrs: Record<string, string> = tone === "danger" ? { class: "modal-danger-text" } : {};
-    body.appendChild(createElement("p", attrs, options.body));
-  } else if (options.body instanceof Node) {
-    body.appendChild(options.body);
-  } else {
-    body.append(...options.body);
-  }
-  const errorEl =
-    options.failureText === undefined
-      ? null
-      : createElement("div", {
-          style: "color: var(--text-danger); font-size: 13px; display: none; margin-top: 8px;",
-          ...(options.errorTestId === undefined ? {} : { "data-testid": options.errorTestId }),
-        });
+  const body = buildBody(options, tone);
+  const errorEl = buildErrorEl(options);
   if (errorEl !== null) body.appendChild(errorEl);
 
-  const cancel = createElement(
-    "button",
-    {
-      class: "btn-modal-cancel",
-      type: "button",
-      ...(options.cancelTestId === undefined ? {} : { "data-testid": options.cancelTestId }),
-    },
-    options.cancelLabel ?? connectText("common.cancel"),
-  );
-  const confirm = createElement(
-    "button",
-    {
-      class: tone === "danger" ? "btn-danger" : "btn-modal-save",
-      type: "button",
-      ...(options.confirmTestId === undefined ? {} : { "data-testid": options.confirmTestId }),
-    },
-    options.confirmLabel,
-  );
+  const { cancel, confirm } = buildButtons(options, tone);
   const footer = createElement("div", { class: "modal-footer" });
   footer.append(cancel, confirm);
 
@@ -131,9 +163,7 @@ export function createConfirmModal(
     {
       content,
       ariaLabelledBy: titleId,
-      ...(options.testId === undefined ? {} : { overlayAttrs: { "data-testid": options.testId } }),
-      ...(options.signal === undefined ? {} : { signal: options.signal }),
-      ...(options.fallbackFocus === undefined ? {} : { fallbackFocus: options.fallbackFocus }),
+      ...optionalModalOptions(options),
       onClose: () => {
         closed = true;
         owner.destroy();

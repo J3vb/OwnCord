@@ -37,6 +37,7 @@ import {
   type AppealWrite,
 } from "./AppealDetail";
 import { isStatus, mapAppealDetail, mapAppealRow, type AppealDetail, type AppealItem } from "./api";
+import { captureDetailFocus, restoreDetailFocus } from "./detailFocus";
 import { dateText } from "./Evidence";
 import { actorName } from "./History";
 import { modAppealStore } from "./store";
@@ -300,15 +301,8 @@ export function renderAppeals(
   }
 
   function showDetail(detail: AppealDetail, takeFocus: boolean): void {
-    const active = document.activeElement;
-    const hadFocus = detailSlot.contains(active);
-    const retryHadFocus = active === detailRetry;
     // A re-read rebuilds the appeal: put focus back on the same control.
-    const focusKey = hadFocus && active instanceof HTMLElement ? active.dataset.focus : undefined;
-    const caret =
-      active instanceof HTMLTextAreaElement
-        ? ([active.selectionStart, active.selectionEnd] as const)
-        : null;
+    const before = captureDetailFocus(detailSlot, detailRetry, false);
     dropDetail();
     shown = detail;
     if (draft.id !== detail.id) draft = { ...NO_DRAFT(), id: detail.id };
@@ -336,16 +330,7 @@ export function renderAppeals(
       { signal },
     );
     detailSlot.appendChild(view.element);
-    const again =
-      focusKey === undefined || takeFocus
-        ? null
-        : view.element.querySelector<HTMLElement>(`[data-focus="${focusKey}"]`);
-    if (again !== null) {
-      again.focus();
-      if (caret !== null && again instanceof HTMLTextAreaElement) {
-        again.setSelectionRange(caret[0], caret[1]);
-      }
-    } else if (takeFocus || hadFocus || retryHadFocus) view.heading.focus();
+    restoreDetailFocus(view, before, takeFocus, false);
   }
 
   function send(id: string, w: AppealWrite): Promise<void> {

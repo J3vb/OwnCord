@@ -7,51 +7,6 @@
     "app/session.ts": {
       "startSession": [17]
     },
-    "features/dialogs/confirmModal.ts": {
-      "createConfirmModal": [19]
-    },
-    "features/forums/ForumView.ts": {
-      "renderForumView > loadMore": [19],
-      "renderForumView > paintList": [25]
-    },
-    "features/forums/NewPostDialog.ts": {
-      "openNewPostDialog": [17],
-      "openNewPostDialog > (anonymous)": [17]
-    },
-    "features/members/MemberList.ts": {
-      "createMemberItem > openContextMenu": [22],
-      "createMemberList > runFrame": [18]
-    },
-    "features/members/memberModel.ts": {
-      "updateModel": [21]
-    },
-    "features/message-requests/Inbox.ts": {
-      "renderInbox > render": [23]
-    },
-    "features/moderation/ActionForms.ts": {
-      "buildActionForms": [19]
-    },
-    "features/moderation/AppealDetail.ts": {
-      "buildAppealDetail": [26]
-    },
-    "features/moderation/AppealQueue.ts": {
-      "renderAppeals > showDetail": [16]
-    },
-    "features/moderation/Queue.ts": {
-      "renderReports > loadList > (anonymous)": [16],
-      "renderReports > showDetail": [25]
-    },
-    "features/people-home/PeopleHome.ts": {
-      "renderPeopleHome > render": [17]
-    },
-    "features/voice-messages/recorder.ts": {
-      "createVoiceRecorder > openStream": [21],
-      "createVoiceRecorder > start": [23]
-    },
-    "features/voice-messages/voiceComposer.ts": {
-      "createVoiceComposer > submit": [16],
-      "createVoiceComposer > upload": [21]
-    },
     "lib/api.ts": {
       "createApiClient > doFetch": [30]
     },
@@ -76,9 +31,5 @@
       "startBinding": [19]
     }
   },
-  "depth": {
-    "features/voice-messages/recorder.ts": {
-      "createVoiceRecorder > openStream": [5]
-    }
-  }
+  "depth": {}
 }

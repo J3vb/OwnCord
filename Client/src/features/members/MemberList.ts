@@ -21,15 +21,14 @@ import { channelsStore } from "@stores/channels.store";
 import { voiceStore, type VoiceUser } from "@stores/voice.store";
 import type { VoiceModMenuOptions } from "../channels/sidebar/volumeMenu";
 import { withMemberMenu } from "./memberMenuLoader";
+import { resolveMenuGates } from "./memberMenuGates";
 import { createAvatarElement, pickAvatarColor } from "../profiles/avatar";
-import { assignableRoleNames, outranksPosition } from "../moderation/roleAssignment";
 import { memberTimeoutsStore } from "../moderation/store";
 import { canMention, mentionInComposer } from "../messaging/activeComposer";
 import { openUserProfilePopup } from "../profiles/openUserProfilePopup";
 import { openMenuOnKeyboard, type OpenMenu } from "@lib/ui/contextMenu";
-import { Permission, type ReadyRole } from "@lib/types";
-import { manageNicknamesEnabled, multiRoleEnabled } from "@lib/net/serverCapabilities";
-import { memberHasPermissionIn, topPositionFor } from "@lib/permissions";
+import type { ReadyRole } from "@lib/types";
+import { multiRoleEnabled } from "@lib/net/serverCapabilities";
 import {
   MEMBER_PATCH_FIELDS,
   drawMemberItem,
@@ -87,37 +86,7 @@ export interface MemberListOptions {
   ) => VoiceModMenuOptions | string | undefined;
 }
 
-/** Which moderation menu items the signed-in user may see. */
-interface ModerationGates {
-  readonly canKick: boolean;
-  readonly canBan: boolean;
-  readonly canManageRoles: boolean;
-  readonly canTimeout: boolean;
-  readonly canManageNicknames: boolean;
-}
-
-/**
- * Menu items the signed-in user's role permits, from the permission mask the
- * server ships in `ready`. Administrator implies all three. When the role name
- * has no match in that list (pre-`ready`, or an older server that sent none)
- * the legacy owner/admin name check stands in — a mask of 0 would otherwise
- * hide moderation from every actual admin.
- */
-function moderationGates(
-  roles: readonly ReadyRole[],
-  roleIds: readonly number[] | undefined,
-  roleName: string,
-): ModerationGates {
-  const has = (perm: Permission): boolean => memberHasPermissionIn(roles, roleIds, roleName, perm);
-  return {
-    canKick: has(Permission.KICK_MEMBERS),
-    canBan: has(Permission.BAN_MEMBERS),
-    canManageRoles: has(Permission.MANAGE_ROLES),
-    canTimeout: has(Permission.MODERATE_MEMBERS),
-    // The bit alone is not enough: an older server can hold it without the route.
-    canManageNicknames: manageNicknamesEnabled() && has(Permission.MANAGE_NICKNAMES),
-  };
-}
+type VoiceModParam = VoiceModMenuOptions | string;
 
 /** Where a member is connected, when that is a server voice channel (a DM call
  *  is excluded: its participants are not moderated from the roster). */
@@ -351,46 +320,39 @@ function createMemberItem(
   // Context menu for admin actions. `openContextMenu` takes viewport
   // coordinates; the keyboard path (Shift+F10 / the Menu key) anchors to the
   // row's own edge instead of a pointer position.
+  /** The menu parameters that exist only when the owner supplied the matching handler. */
+  const optionalMenuParams = (member: Member, voiceMod: VoiceModParam | undefined) => {
+    const { onTimeoutMember, onRemoveTimeout, onMessageUser, onCallUser, onChangeNickname } = opts;
+    return {
+      ...(canMention() ? {} : { mentionDisabledReason: shellText("member.mentionUnavailable") }),
+      ...(onMessageUser === undefined ? {} : { onMessage: () => onMessageUser(member.id) }),
+      ...(onCallUser === undefined ? {} : { onCall: () => onCallUser(member.id) }),
+      ...(voiceMod === undefined ? {} : { voiceMod }),
+      ...(onTimeoutMember === undefined
+        ? {}
+        : {
+            onTimeout: (seconds: number) => onTimeoutMember(member.id, member.username, seconds),
+          }),
+      ...(onRemoveTimeout === undefined
+        ? {}
+        : { onRemoveTimeout: () => onRemoveTimeout(member.id, member.username) }),
+      ...(onChangeNickname === undefined
+        ? {}
+        : {
+            onChangeNickname: () =>
+              onChangeNickname(member.id, member.username, member.displayName ?? null),
+          }),
+    };
+  };
+
   const openContextMenu = (clientX: number, clientY: number): void => {
     const member = liveMember();
     const isSelf = member.id === (authStore.getState().user?.id ?? 0);
-
-    // Moderation actions are permission-gated per item (a role name told us
-    // nothing about what its bits allow); block/unblock is open to everyone.
-    // The role name is read live from authStore, not the opts snapshot
-    // taken once at mount -- dispatcher.ts keeps authStore.user.role
-    // current on every self MEMBER_UPDATE precisely so gates like this one
-    // see a promotion/demotion without waiting for the sidebar to rebuild.
-    const actor = authStore.getState().user;
-    const actorRole = actor?.role ?? opts.currentUserRole;
-    const roleList = channelsStore.getState().roles;
-    // Permissions are the OR of every held role; rank is the top one.
-    const baseGates = moderationGates(roleList, actor?.role_ids, actorRole);
-    // The server refuses moderation of a member ranked at or above the actor
-    // and any role assignment at or above the actor's own rank; mirror both so
-    // the menu never offers a request that cannot succeed. Unknown positions
-    // (an older server) leave the decision to the server.
-    const actorPosition = topPositionFor(roleList, actor?.role_ids, actorRole);
-    const targetPosition = topPositionFor(roleList, member.roleIds, member.role);
-    const outranks = outranksPosition(actorPosition, targetPosition);
-    // Roles come from the server's `ready` payload — a hardcoded list made
-    // custom roles unreachable and, worse, unresolvable to a role id, so
-    // picking one silently did nothing.
-    const availableRoles = assignableRoleNames(actorPosition);
-    const gates: ModerationGates = {
-      canKick: baseGates.canKick && outranks,
-      canBan: baseGates.canBan && outranks,
-      canManageRoles: baseGates.canManageRoles && outranks && availableRoles.length > 0,
-      canTimeout: baseGates.canTimeout && outranks,
-      canManageNicknames: baseGates.canManageNicknames && outranks,
-    };
-    const showAdminActions =
-      !isSelf &&
-      (gates.canKick ||
-        gates.canBan ||
-        gates.canManageRoles ||
-        gates.canTimeout ||
-        gates.canManageNicknames);
+    const { gates, availableRoles, outranks, showAdminActions } = resolveMenuGates(
+      member,
+      isSelf,
+      opts.currentUserRole,
+    );
 
     closeActiveMenu();
     const seq = menuOpenSeq;
@@ -402,13 +364,13 @@ function createMemberItem(
       voiceTarget === undefined || opts.voiceModFor === undefined
         ? undefined
         : opts.voiceModFor(voiceTarget.channelId, voiceTarget.user);
-    const { onTimeoutMember, onRemoveTimeout, onMessageUser, onCallUser, onChangeNickname } = opts;
 
     withMemberMenu(({ createMemberContextMenu }) => {
       if (seq !== menuOpenSeq || signal.aborted || !item.isConnected) {
         if (seq === menuOpenSeq) menuRowKey = null;
         return;
       }
+      const optional = optionalMenuParams(member, voiceMod);
       // Kept on screen and re-placed when it resizes, so the ban form expanding
       // cannot push Confirm Ban and Block off the bottom at the 940x500 minimum.
       const created = createMemberContextMenu({
@@ -433,28 +395,11 @@ function createMemberItem(
         onMention: () => {
           mentionInComposer(member.username);
         },
-        ...(canMention() ? {} : { mentionDisabledReason: shellText("member.mentionUnavailable") }),
-        ...(onMessageUser === undefined ? {} : { onMessage: () => onMessageUser(member.id) }),
-        ...(onCallUser === undefined ? {} : { onCall: () => onCallUser(member.id) }),
-        ...(voiceMod === undefined ? {} : { voiceMod }),
-        ...(onTimeoutMember === undefined
-          ? {}
-          : {
-              onTimeout: (seconds: number) => onTimeoutMember(member.id, member.username, seconds),
-            }),
-        ...(onRemoveTimeout === undefined
-          ? {}
-          : { onRemoveTimeout: () => onRemoveTimeout(member.id, member.username) }),
+        ...optional,
         onToggleBlock: () => opts.onToggleBlock(member.id, memberDisplayName(member), !isBlocked),
         onKick: () => opts.onKick(member.id, member.username),
         onBan: () => opts.onBan(member.id, member.username, memberDisplayName(member)),
         onChangeRole: (newRole: string) => opts.onChangeRole(member.id, member.username, newRole),
-        ...(onChangeNickname === undefined
-          ? {}
-          : {
-              onChangeNickname: () =>
-                onChangeNickname(member.id, member.username, member.displayName ?? null),
-            }),
         restoreFocusTo: () => hooks.focusMember(member.id),
         onClosed: () => {
           if (activeMenu !== created) return;
@@ -848,45 +793,61 @@ export function createMemberList(opts: MemberListOptions): MemberListComponent {
     root.style.height = `${total}px`;
   }
 
+  function ensureObserver(): void {
+    if (observer === null && typeof ResizeObserver !== "undefined") {
+      observer = new ResizeObserver(onResize);
+      disposable.addCleanup(() => observer?.disconnect());
+    }
+  }
+
+  function ensureScroller(rootEl: HTMLElement): void {
+    // Until a scroller is found (the panel is built before its host appends
+    // it) the root itself is watched, so connecting it schedules a frame.
+    if (scroller === null || !scroller.contains(rootEl)) {
+      bindScroller(findScroller());
+      if (scroller === null) observer?.observe(rootEl);
+    }
+  }
+
+  function syncItems(): void {
+    model = memberModelFor(membersStore.getState().members, channelsStore.getState().roles);
+    if (model !== flatModel || query !== flatQuery) {
+      flatModel = model;
+      flatQuery = query;
+      items = flattenModel(model, query);
+      itemIndex = new Map(items.map((item, at) => [item.key, at]));
+      offsetsDirty = true;
+    }
+    if (queryChanged) {
+      queryChanged = false;
+      if (scroller !== null && scroller.scrollTop > 0) scroller.scrollTop = 0;
+    }
+  }
+
+  function paintPasses(): void {
+    for (let pass = 0; pass < 2; pass++) {
+      if (offsetsDirty) {
+        offsets = buildOffsets(items.map((item) => heights[kindOf(item)]!));
+        offsetsDirty = false;
+      }
+      paint();
+      // Re-measure what was just drawn: a new row of a kind can be taller
+      // than the one measured before (a wrapped role name, a font change
+      // while no row of that kind was drawn).
+      if (!measure()) break;
+    }
+  }
+
   function runFrame(): void {
     frameId = null;
     if (root === null || !virtual || inFrame) return;
     inFrame = true;
     try {
-      if (observer === null && typeof ResizeObserver !== "undefined") {
-        observer = new ResizeObserver(onResize);
-        disposable.addCleanup(() => observer?.disconnect());
-      }
-      // Until a scroller is found (the panel is built before its host appends
-      // it) the root itself is watched, so connecting it schedules a frame.
-      if (scroller === null || !scroller.contains(root)) {
-        bindScroller(findScroller());
-        if (scroller === null) observer?.observe(root);
-      }
-      model = memberModelFor(membersStore.getState().members, channelsStore.getState().roles);
-      if (model !== flatModel || query !== flatQuery) {
-        flatModel = model;
-        flatQuery = query;
-        items = flattenModel(model, query);
-        itemIndex = new Map(items.map((item, at) => [item.key, at]));
-        offsetsDirty = true;
-      }
-      if (queryChanged) {
-        queryChanged = false;
-        if (scroller !== null && scroller.scrollTop > 0) scroller.scrollTop = 0;
-      }
+      ensureObserver();
+      ensureScroller(root);
+      syncItems();
       measure();
-      for (let pass = 0; pass < 2; pass++) {
-        if (offsetsDirty) {
-          offsets = buildOffsets(items.map((item) => heights[kindOf(item)]!));
-          offsetsDirty = false;
-        }
-        paint();
-        // Re-measure what was just drawn: a new row of a kind can be taller
-        // than the one measured before (a wrapped role name, a font change
-        // while no row of that kind was drawn).
-        if (!measure()) break;
-      }
+      paintPasses();
       sampleRows();
     } finally {
       inFrame = false;
