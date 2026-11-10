@@ -69,7 +69,7 @@ const OWNERS = [
     "B9-18",
   ],
   [
-    /^src\/(features\/messaging\/(message-list|composer|content)\/|features\/messaging\/(MessageList|MessageInput)\.ts|features\/direct-messages\/(DmSidebar|dmRow|dmAvatars|MemberPickerModal)\.ts|features\/profiles\/(userProfile[A-Za-z]*|userNoteSection)\.ts|features\/messaging\/EmojiPicker\.ts|features\/messaging\/GifPicker\.ts|features\/navigation\/SearchOverlay\.ts|components\/DmProfileSidebar\.ts|features\/(content-consent\/NsfwGate|messaging\/PinnedMessages)\.ts|pages\/main-page\/channel\/|pages\/main-page\/(ChannelController|MessageJump|ChatHeader)\.ts)/,
+    /^src\/(features\/messaging\/(message-list|composer|content)\/|features\/messaging\/(MessageList|MessageInput)\.ts|features\/direct-messages\/(DmSidebar|dmRow|dmAvatars|MemberPickerModal)\.ts|features\/profiles\/(userProfile[A-Za-z]*|userNoteSection)\.ts|features\/messaging\/EmojiPicker\.ts|features\/messaging\/GifPicker\.ts|features\/navigation\/SearchOverlay\.ts|features\/direct-messages\/DmProfileSidebar\.ts|features\/(content-consent\/NsfwGate|messaging\/PinnedMessages)\.ts|pages\/main-page\/channel\/|pages\/main-page\/(ChannelController|MessageJump|ChatHeader)\.ts)/,
     "B9-19",
   ],
   [/^src\//, "B9-20"],

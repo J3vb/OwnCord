@@ -19,13 +19,13 @@ import type { MountableComponent } from "@lib/text/safeRender";
 import type { RingState } from "@lib/voice/callRing";
 import type { AvatarSubject } from "@lib/ui/avatar";
 import { isPhoneLayout, onPhoneLayoutChange } from "@lib/ui/bottomSheet";
-import { createAvatarElement } from "../features/profiles/avatar";
+import { createAvatarElement } from "../profiles/avatar";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
 import { membersStore } from "@stores/members.store";
-import { voiceText } from "../i18n/voice";
-import { dmCallText } from "../i18n/dmCall";
-import { createLazyScreen } from "../lib/ui/lazyScreen";
-import type { IncomingCallScreen, IncomingCallView } from "../features/voice/incomingCallScreen";
+import { voiceText } from "../../i18n/voice";
+import { dmCallText } from "../../i18n/dmCall";
+import { createLazyScreen } from "../../lib/ui/lazyScreen";
+import type { IncomingCallScreen, IncomingCallView } from "../voice/incomingCallScreen";
 
 export interface IncomingCallBannerOptions {
   /** `withVideo` is true for "Join with video": the camera turns on at join. */
@@ -76,7 +76,7 @@ function view(state: RingState): IncomingCallView {
 
 const callScreen = createLazyScreen(
   "incoming-call-screen",
-  () => import("../features/voice/incomingCallScreen"),
+  () => import("../voice/incomingCallScreen"),
 );
 
 /** One ring, for telling a redial of it from a new one. */

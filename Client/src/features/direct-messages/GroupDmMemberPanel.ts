@@ -18,12 +18,12 @@ import { dialogOpen } from "@lib/ui/dialogOpen";
 import { createElement, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { showContextMenu, openMenuOnKeyboard } from "@lib/ui/contextMenu";
-import { createConfirmModal } from "../features/dialogs/confirmModal";
+import { createConfirmModal } from "../dialogs/confirmModal";
 import type { MountableComponent } from "@lib/text/safeRender";
 import type { UserStatus } from "@lib/types";
-import { createAvatarElement, pickAvatarColor } from "../features/profiles/avatar";
-import type { GroupMemberView, GroupPanelView } from "../features/direct-messages/groupMembers";
-import { groupDmText } from "../i18n/groupDm";
+import { createAvatarElement, pickAvatarColor } from "../profiles/avatar";
+import type { GroupMemberView, GroupPanelView } from "./groupMembers";
+import { groupDmText } from "../../i18n/groupDm";
 import { applyStatusIndicator } from "@lib/ui/statusIndicator";
 
 export interface GroupDmMemberPanelOptions {

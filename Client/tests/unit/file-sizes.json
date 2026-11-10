@@ -1,7 +1,7 @@
 {
   "src/app/session.ts": 550,
-  "src/components/DmProfileSidebar.ts": 650,
   "src/features/channels/wsHandlers.ts": 850,
+  "src/features/direct-messages/DmProfileSidebar.ts": 650,
   "src/features/forums/ForumView.ts": 750,
   "src/features/forums/NewPostDialog.ts": 600,
   "src/features/members/MemberList.ts": 1000,

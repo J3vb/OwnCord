@@ -7,7 +7,7 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 vi.mock("@lib/logger", () => loggerMock());
 
 import { createUserProfilePopup } from "../../src/features/profiles/userProfilePopup";
-import { createDmProfileSidebar } from "@components/DmProfileSidebar";
+import { createDmProfileSidebar } from "../../src/features/direct-messages/DmProfileSidebar";
 import { createDmSidebar, type DmConversation } from "../../src/features/direct-messages/DmSidebar";
 import { buildMusicActivityRows } from "../../src/features/settings/MusicActivityRows";
 import { mountListeningCard } from "../../src/features/members/listeningCard";

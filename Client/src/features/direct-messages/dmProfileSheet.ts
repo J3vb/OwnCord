@@ -8,8 +8,8 @@ import type { ApiClient } from "@lib/api";
 import type { Member } from "@stores/members.store";
 import { shellText } from "../../i18n/shell";
 import { reportEntryText } from "../../i18n/reportEntry";
-import { openUserProfilePopup } from "../../features/profiles/openUserProfilePopup";
-import { buildDmProfileUser } from "./pageShared";
+import { openUserProfilePopup } from "../profiles/openUserProfilePopup";
+import { buildDmProfileUser } from "./dmProfileShared";
 
 export interface DmProfileSheetDeps {
   readonly api: ApiClient;
@@ -22,7 +22,7 @@ export interface DmProfileSheetDeps {
 
 /** The report form for a DM partner; focus goes back to the header button. */
 export function openDmPartnerReport(deps: DmProfileSheetDeps, userId: number, name: string): void {
-  void import("../../features/reports/openers").then(
+  void import("../reports/openers").then(
     ({ openUserReport }) => {
       if (deps.signal.aborted) return;
       openUserReport({
@@ -67,7 +67,7 @@ export function openDmProfileSheet(deps: DmProfileSheetDeps, channelId: number):
       onCall: () => deps.startCall(),
       onReport: (userId, name) => openDmPartnerReport(deps, userId, name),
       onToggleBlock: (userId, name, block) => {
-        void import("../../features/blocks/blockActions").then(
+        void import("../blocks/blockActions").then(
           ({ confirmAndToggleBlock }) =>
             confirmAndToggleBlock({ api: deps.api, notify: showToast }, userId, name, block),
           () =>

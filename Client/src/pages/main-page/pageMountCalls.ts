@@ -28,7 +28,7 @@ import {
   forgetRemoteVideoWatch,
 } from "@lib/voice/livekitSession";
 import { createSidebarVoiceCallbacks } from "./VoiceCallbacks";
-import { createIncomingCallBanner } from "@components/IncomingCallBanner";
+import { createIncomingCallBanner } from "../../features/direct-messages/IncomingCallBanner";
 import { createRingController, createOutgoingCall } from "@lib/voice/callRing";
 import {
   startRingChime,

@@ -172,13 +172,13 @@ sequenceDiagram
 
 ### 3.1b The DM side panels
 
-A 1:1 DM shows the partner's profile panel (`components/DmProfileSidebar.ts`:
+A 1:1 DM shows the partner's profile panel (`features/direct-messages/DmProfileSidebar.ts`:
 name, @username under a nickname, custom status, about, note, Report, Block)
 and a group shows its member panel, both in the slot beside the chat. On a
 computer they open with the conversation while the saved preference is on
-(`pages/main-page/dmProfilePanel.ts`, `GroupMemberPanelController.ts`). On the
+(`features/direct-messages/dmProfilePanel.ts`, `GroupMemberPanelController.ts`). On the
 phone layout neither opens by itself: the header's profile button opens the
-member profile sheet (`pages/main-page/dmProfileSheet.ts`), the members button
+member profile sheet (`features/direct-messages/dmProfileSheet.ts`), the members button
 opens the group panel as an overlay that Back closes, and the saved preference
 is left alone. Turning the device across the phone layout closes or restores
 the panels.
@@ -232,7 +232,7 @@ and `IsEitherBlocked` is bidirectional). **Target UX:**
 
 `src/features/channels/ChannelSidebar.ts` (+ its siblings `channelListRender.ts`, `voiceSidebarRows.ts` and `sidebar/`),
 `src/features/members/MemberList.ts`, `src/features/messaging/TypingIndicator.ts`,
-`src/features/direct-messages/DmSidebar.ts`, `src/components/DmProfileSidebar.ts`,
+`src/features/direct-messages/DmSidebar.ts`, `src/features/direct-messages/DmProfileSidebar.ts`,
 `src/pages/main-page/SidebarArea.ts`, `SidebarMemberSection.ts`,
 `src/features/direct-messages/SidebarDmSection.ts`, `SidebarDmHelpers.ts`, `src/stores/channels.store.ts`,
 `members.store.ts`, `dm.store.ts`, `src/lib/dispatcher.ts` (+ `src/features/{channels,direct-messages}/wsHandlers.ts`);

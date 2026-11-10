@@ -15,11 +15,11 @@ import { loadPref, savePref } from "@lib/prefs/preferences";
 import { getActiveChannel } from "@stores/channels.store";
 import { dmStore } from "@stores/dm.store";
 import { membersStore } from "@stores/members.store";
-import { createNotesContext } from "../../features/profiles/userNotes";
+import { createNotesContext } from "../profiles/userNotes";
 import type { DmProfileSheetDeps } from "./dmProfileSheet";
 import type { GroupMemberPanelController } from "./GroupMemberPanelController";
-import { listeningKey, DM_PROFILE_PREF, buildDmProfileUser } from "./pageShared";
-import type { PageState, PageApi } from "./pageState";
+import { listeningKey, DM_PROFILE_PREF, buildDmProfileUser } from "./dmProfileShared";
+import type { PageState, PageApi } from "../../pages/main-page/pageState";
 
 const sheetModule = () => import("./dmProfileSheet");
 const sheetLoadFailed = (): void => showToast(reportEntryText("profileLoadFailed"), "error");
@@ -207,7 +207,7 @@ export function createDmProfilePanel(st: PageState, pg: PageApi) {
     const load = {};
     st.dmProfileLoad = load;
     syncDmProfileButton();
-    void import("@components/DmProfileSidebar").then(
+    void import("./DmProfileSidebar").then(
       ({ createDmProfileSidebar }) => {
         // A close (or teardown) since the click supersedes this import: drop it.
         if (st.tornDown || st.dmProfileLoad !== load || st.dmProfileSlot === null) return;
@@ -224,7 +224,7 @@ export function createDmProfilePanel(st: PageState, pg: PageApi) {
           // The panel may have moved to another DM since it opened.
           onReport: (userId) => openReport(userId, dmProfileBlockName(profileUser.username)),
           onToggleBlock: (userId, block) => {
-            void import("../../features/blocks/blockActions").then(
+            void import("../blocks/blockActions").then(
               ({ confirmAndToggleBlock }) =>
                 confirmAndToggleBlock(
                   { api: st.api, notify: showToast },

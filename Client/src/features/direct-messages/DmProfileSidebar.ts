@@ -20,31 +20,27 @@ import { createIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/text/safeRender";
 import type { UserStatus } from "@lib/types";
 import { avatarInitial, resolveDisplayName } from "@lib/ui/avatar";
-import { isRenderableAvatar, setAvatarSource } from "../features/profiles/avatar";
+import { isRenderableAvatar, setAvatarSource } from "../profiles/avatar";
 import {
   fetchImageAsObjectUrl,
   recoverEvictedImage,
   resolveServerUrl,
-} from "../features/messaging/content/attachments";
+} from "../messaging/content/attachments";
 import { blocksStore } from "@stores/blocks.store";
-import { paintBanner } from "../features/profiles/banner";
-import { bannerImages } from "../features/profiles/bannerImages";
-import { shellText } from "../i18n/shell";
+import { paintBanner } from "../profiles/banner";
+import { bannerImages } from "../profiles/bannerImages";
+import { shellText } from "../../i18n/shell";
 import {
   applyStatusIndicator,
   applyStatusLine,
   statusIndicatorLabel,
 } from "@lib/ui/statusIndicator";
-import { requestsText } from "../i18n/requests";
-import { reportEntryText } from "../i18n/reportEntry";
-import { playingForLine } from "../features/members/gameActivityLine";
-import { mountListeningCard } from "../features/members/listeningCard";
-import type { ListeningSong } from "../features/members/listeningLine";
-import {
-  NOTE_MAX_LENGTH,
-  createNoteBinding,
-  type NotesContext,
-} from "../features/profiles/userNotes";
+import { requestsText } from "../../i18n/requests";
+import { reportEntryText } from "../../i18n/reportEntry";
+import { playingForLine } from "../members/gameActivityLine";
+import { mountListeningCard } from "../members/listeningCard";
+import type { ListeningSong } from "../members/listeningLine";
+import { NOTE_MAX_LENGTH, createNoteBinding, type NotesContext } from "../profiles/userNotes";
 
 // ---------------------------------------------------------------------------
 // Types
