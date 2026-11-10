@@ -10,6 +10,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { authStore } from "@stores/auth.store";
+import { connectText } from "../../src/i18n/connect";
 
 const invoke = vi.fn();
 
@@ -566,7 +567,11 @@ describe("readRelayedLogin", () => {
   it("refuses a 2xx login reply of the wrong shape, as api.login does", async () => {
     await expect(
       readRelayedLogin({ status: 200, body: '{"token":7,"requires_2fa":"no"}' }),
-    ).rejects.toMatchObject({ status: 200, code: REPLY_SHAPE_CODE });
+    ).rejects.toMatchObject({
+      status: 200,
+      code: REPLY_SHAPE_CODE,
+      message: connectText("session.unreadableReply"),
+    });
   });
 
   it("still rejects a refused login with the server's own error", async () => {
