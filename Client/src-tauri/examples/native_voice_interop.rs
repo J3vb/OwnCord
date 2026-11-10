@@ -645,7 +645,7 @@ mod linux {
                     // start a fresh capture and publish it. A late unpublish
                     // of the replaced camera must leave the new one published.
                     session.unpublish_camera(&camera_sid).await;
-                    session.stop_camera(capture).await;
+                    session.stop_camera(capture).await.release().await;
                     let stale = camera_sid;
                     (capture, camera_sid) =
                         start_camera(&mut session, width, height, simulcast, codec).await?;
@@ -684,7 +684,7 @@ mod linux {
                     serde_json::json!({ "event": { "type": "threads", "phase": "screen-before", "count": process_threads(), "fds": open_fds(), "captures": screen::active_captures() } }),
                 );
                 for _ in 0..screen_cycles {
-                    session.stop_screen(capture).await;
+                    session.stop_screen(capture).await.release().await;
                     tokio::time::sleep(Duration::from_millis(50)).await;
                     let (fresh, fresh_sid) =
                         share_screen(&mut session, width, height, screen_codec).await?;
@@ -692,7 +692,7 @@ mod linux {
                     let stale = std::mem::replace(&mut capture, fresh);
                     // A late stop of the replaced capture must leave the
                     // new one running and published.
-                    session.stop_screen(stale).await;
+                    session.stop_screen(stale).await.release().await;
                     tokio::time::sleep(Duration::from_millis(50)).await;
                 }
                 tokio::time::sleep(Duration::from_millis(500)).await;
@@ -711,9 +711,11 @@ mod linux {
                         serde_json::json!({ "event": { "type": "threads", "phase": "screen-audio-before", "count": process_threads(), "fds": open_fds() } }),
                     );
                     for _ in 0..audio_cycles {
-                        let sid = session.publish_screen_audio(capture).await?;
+                        let (retired, published) = session.publish_screen_audio(capture).await;
+                        retired.release().await;
+                        let sid = published?;
                         tokio::time::sleep(Duration::from_millis(50)).await;
-                        session.unpublish_screen_audio(&sid).await;
+                        session.unpublish_screen_audio(&sid).await.release().await;
                     }
                     tokio::time::sleep(Duration::from_millis(500)).await;
                     emit(
@@ -721,9 +723,11 @@ mod linux {
                     );
                 }
                 let source = screen_audio_source();
-                let sid = session
+                let (retired, published) = session
                     .publish_screen_audio_source(capture, source.clone())
-                    .await?;
+                    .await;
+                retired.release().await;
+                let sid = published?;
                 stereo = Some(tokio::spawn(play_stereo(source)));
                 let (channels, fmtp) = screen_audio_codec(&session, &sid).await;
                 emit(
@@ -745,7 +749,7 @@ mod linux {
                     // so does the capture thread.
                     tokio::time::sleep(Duration::from_secs(8)).await;
                     let before = session.resources();
-                    session.stop_screen(capture).await;
+                    session.stop_screen(capture).await.release().await;
                     emit(
                         serde_json::json!({ "event": { "type": "screenStopped", "before": before, "after": session.resources() } }),
                     );

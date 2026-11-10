@@ -764,7 +764,9 @@ impl NativeSession {
         target: CameraTarget,
         options: CameraCaptureOptions,
     ) -> Result<(u64, Started), String> {
-        self.release_camera().await;
+        // The command released any running capture before this; direct
+        // callers get the old device freed before the new one opens it.
+        self.release_camera().await.release().await;
         self.next_camera += 1;
         let id = self.next_camera;
         let on_event = self.on_event.clone();
@@ -837,35 +839,56 @@ impl NativeSession {
     /// capture's id and its first-frame receiver, as `start_camera`; the
     /// caller awaits it without holding the session, then calls
     /// `finish_camera_change` (or `stop_camera` to give up).
+    /// Take out the pending camera change, if any, for the caller to release
+    /// before it starts another.
+    pub fn retire_camera_change(&mut self) -> Retired {
+        let mut retired = Retired::default();
+        retired.cameras.extend(self.camera_change.take());
+        retired
+    }
+
     pub fn start_camera_change(
         &mut self,
         target: CameraTarget,
         options: CameraCaptureOptions,
-    ) -> Result<(u64, Started), String> {
+    ) -> (Retired, Result<(u64, Started), String>) {
+        let mut retired = Retired::default();
         if !self.camera_published() {
-            return Err("no published camera to change".into());
+            return (retired, Err("no published camera to change".into()));
         }
-        self.camera_change.take();
+        retired.cameras.extend(self.camera_change.take());
         self.next_camera += 1;
         let id = self.next_camera;
         let on_event = self.on_event.clone();
-        let (capture, started) = CameraCapture::start(target, options, move || {
+        let started = CameraCapture::start(target, options, move || {
             on_event(Event::CameraCaptureEnded { capture: id })
-        })?;
-        self.camera_change = Some(CameraShare { id, capture });
-        Ok((id, started))
+        });
+        match started {
+            Ok((capture, started)) => {
+                self.camera_change = Some(CameraShare { id, capture });
+                (retired, Ok((id, started)))
+            }
+            Err(e) => (retired, Err(e)),
+        }
     }
 
     /// Move the published camera onto capture `capture` (started by
     /// `start_camera_change`): same publication and sid, same preview socket,
     /// and the old capture is released. Fails, changing nothing, when a stop,
     /// a new camera or another change came first.
-    pub fn finish_camera_change(&mut self, capture: u64) -> Result<(), String> {
+    pub fn finish_camera_change(&mut self, capture: u64) -> (Retired, Result<(), String>) {
+        let mut retired = Retired::default();
+        let result = self.swap_camera(capture, &mut retired);
+        (retired, result)
+    }
+
+    fn swap_camera(&mut self, capture: u64, retired: &mut Retired) -> Result<(), String> {
         let next = self
             .camera_change
             .take_if(|c| c.id == capture)
             .ok_or("the camera change was superseded")?;
         let Some(live) = self.camera_capture.as_mut() else {
+            retired.cameras.push(next);
             return Err("the camera stopped during the change".into());
         };
         {
@@ -873,6 +896,7 @@ impl NativeSession {
             // clearing the slot in between must not be written over.
             let mut slot = lock(&self.camera);
             let Some(publication) = slot.as_mut().filter(|p| p.capture == Some(live.id)) else {
+                retired.cameras.push(next);
                 return Err("the camera stopped during the change".into());
             };
             // The source keeps the size it was published at: the encoder follows
@@ -880,9 +904,9 @@ impl NativeSession {
             next.capture.take_over(&live.capture);
             publication.capture = Some(next.id);
         }
-        // Dropping the old capture joins its thread and frees its device; the
+        // Releasing the old capture joins its thread and frees its device; the
         // preview lives on in `next`.
-        drop(std::mem::replace(live, next));
+        retired.cameras.push(std::mem::replace(live, next));
         Ok(())
     }
 
@@ -925,27 +949,31 @@ impl NativeSession {
     /// Stop capture `capture` if it is still the running one (a stale id is a
     /// no-op): unpublish it and release the pipeline and the device. A
     /// pending change's capture is only dropped.
-    pub async fn stop_camera(&mut self, capture: u64) {
+    pub async fn stop_camera(&mut self, capture: u64) -> Retired {
+        let mut retired = Retired::default();
         if self.camera_change.as_ref().is_some_and(|c| c.id == capture) {
-            self.camera_change.take();
+            retired.cameras.extend(self.camera_change.take());
         }
         if self
             .camera_capture
             .as_ref()
             .is_some_and(|c| c.id == capture)
         {
-            self.release_camera().await;
+            retired.merge(self.release_camera().await);
         }
+        retired
     }
 
     /// Unpublish whatever camera is published and stop its capture: the
     /// preview socket ends with it.
-    async fn release_camera(&mut self) {
-        self.camera_change.take();
+    pub async fn release_camera(&mut self) -> Retired {
+        let mut retired = Retired::default();
+        retired.cameras.extend(self.camera_change.take());
         self.release_camera_publication().await;
         self.frames.set_camera(None);
-        // Dropping joins the capture thread and tears down the pipeline.
-        self.camera_capture.take();
+        // Releasing joins the capture thread and tears down the pipeline.
+        retired.cameras.extend(self.camera_capture.take());
+        retired
     }
 
     /// Start capturing `target` for a screen share, replacing any capture
@@ -961,7 +989,9 @@ impl NativeSession {
         target: Target,
         options: CaptureOptions,
     ) -> Result<(u64, Started), String> {
-        self.release_screen().await;
+        // The command released any running share before this; direct callers
+        // get the old one closed before the new one opens.
+        self.release_screen().await.release().await;
         self.next_capture += 1;
         let id = self.next_capture;
         let on_event = self.on_event.clone();
@@ -1016,9 +1046,15 @@ impl NativeSession {
     /// alongside running capture `capture` (replacing an earlier one). The
     /// capture (`share_audio.rs`) starts here and ends with the publication.
     /// Returns the publication's sid.
-    pub async fn publish_screen_audio(&mut self, capture: u64) -> Result<String, String> {
+    pub async fn publish_screen_audio(
+        &mut self,
+        capture: u64,
+    ) -> (Retired, Result<String, String>) {
         if !self.screen.as_ref().is_some_and(|s| s.id == capture) {
-            return Err(format!("screen capture {capture} is not running"));
+            return (
+                Retired::default(),
+                Err(format!("screen capture {capture} is not running")),
+            );
         }
         let source = screen_audio_source();
         let app = self
@@ -1036,7 +1072,7 @@ impl NativeSession {
         &mut self,
         capture: u64,
         source: NativeAudioSource,
-    ) -> Result<String, String> {
+    ) -> (Retired, Result<String, String>) {
         self.publish_screen_audio_from(capture, source, None).await
     }
 
@@ -1045,24 +1081,49 @@ impl NativeSession {
         capture: u64,
         source: NativeAudioSource,
         feed: Option<ShareAudio>,
+    ) -> (Retired, Result<String, String>) {
+        let mut retired = Retired::default();
+        let result = self
+            .publish_screen_audio_into(capture, source, feed, &mut retired)
+            .await;
+        (retired, result)
+    }
+
+    async fn publish_screen_audio_into(
+        &mut self,
+        capture: u64,
+        source: NativeAudioSource,
+        feed: Option<ShareAudio>,
+        retired: &mut Retired,
     ) -> Result<String, String> {
         if !self.screen.as_ref().is_some_and(|s| s.id == capture) {
+            retired.share_audio.extend(feed);
             return Err(format!("screen capture {capture} is not running"));
         }
-        // Replace semantics. On any error below `feed` drops with this frame,
-        // leaving the slot empty and no capture thread behind.
-        self.release_screen_audio().await;
+        // Replace semantics. On any error below `feed` is retired, leaving the
+        // slot empty and no capture thread behind.
+        retired.merge(self.release_screen_audio().await);
         let track = LocalAudioTrack::create_audio_track(
             "screen_share_audio",
             RtcAudioSource::Native(source),
         );
-        let publication = self
+        let published = self
             .room
             .local_participant()
             .publish_track(LocalTrack::Audio(track), screen_audio_publish_options())
             .await
-            .map_err(|e| e.to_string())?;
-        self.require_encrypted(&publication).await?;
+            .map_err(|e| e.to_string());
+        let publication = match published {
+            Ok(publication) => publication,
+            Err(e) => {
+                retired.share_audio.extend(feed);
+                return Err(e);
+            }
+        };
+        if let Err(e) = self.require_encrypted(&publication).await {
+            retired.share_audio.extend(feed);
+            return Err(e);
+        }
         let sid = publication.sid();
         *lock(&self.screen_audio) = Some(VideoPublication::of_capture(sid.clone(), Some(capture)));
         self.share_audio = feed;
@@ -1100,12 +1161,14 @@ impl NativeSession {
 
     /// Unpublish screen audio `sid` if it is still the published one; a stale
     /// sid, one a later publish replaced, is a no-op.
-    pub async fn unpublish_screen_audio(&mut self, sid: &str) {
+    pub async fn unpublish_screen_audio(&mut self, sid: &str) -> Retired {
         let issued = lock(&self.screen_audio)
             .as_ref()
             .is_some_and(|a| a.issued == sid);
         if issued {
-            self.release_screen_audio().await;
+            self.release_screen_audio().await
+        } else {
+            Retired::default()
         }
     }
 
@@ -1114,9 +1177,10 @@ impl NativeSession {
     /// `unpublish_screen`, so a codec republish keeps the audio, as the web
     /// path does (screenShare.ts: "Screen audio stays published"); the
     /// interop example's `--republish-screen` and stop cover both.
-    async fn release_screen_audio(&mut self) {
+    async fn release_screen_audio(&mut self) -> Retired {
+        let mut retired = Retired::default();
         let publication = lock(&self.screen_audio).take();
-        self.share_audio.take();
+        retired.share_audio.extend(self.share_audio.take());
         if let Some(publication) = publication {
             if let Err(e) = self
                 .room
@@ -1127,6 +1191,7 @@ impl NativeSession {
                 log::warn!("[native_voice] screen audio unpublish: {e}");
             }
         }
+        retired
     }
 
     /// Start capturing `target` to replace the published share's source,
@@ -1134,35 +1199,56 @@ impl NativeSession {
     /// new capture's id and its first-frame receiver, as `start_screen`;
     /// the caller awaits it without holding the session, then calls
     /// `finish_screen_change` (or `stop_screen` to give up).
+    /// Take out the pending screen source change, if any, for the caller to
+    /// release before it starts another.
+    pub fn retire_screen_change(&mut self) -> Retired {
+        let mut retired = Retired::default();
+        retired.screens.extend(self.screen_change.take());
+        retired
+    }
+
     pub fn start_screen_change(
         &mut self,
         target: Target,
         options: CaptureOptions,
-    ) -> Result<(u64, Started), String> {
+    ) -> (Retired, Result<(u64, Started), String>) {
+        let mut retired = Retired::default();
         if !self.screen_published() {
-            return Err("no published screen share to change".into());
+            return (retired, Err("no published screen share to change".into()));
         }
-        self.screen_change.take();
+        retired.screens.extend(self.screen_change.take());
         self.next_capture += 1;
         let id = self.next_capture;
         let on_event = self.on_event.clone();
-        let (capture, started) = ScreenCapture::start(target, options, move || {
+        let started = ScreenCapture::start(target, options, move || {
             on_event(Event::ScreenCaptureEnded { capture: id })
-        })?;
-        self.screen_change = Some(ScreenShare { id, capture });
-        Ok((id, started))
+        });
+        match started {
+            Ok((capture, started)) => {
+                self.screen_change = Some(ScreenShare { id, capture });
+                (retired, Ok((id, started)))
+            }
+            Err(e) => (retired, Err(e)),
+        }
     }
 
     /// Move the published share onto capture `capture` (started by
     /// `start_screen_change`): same publication and sid, same preview socket,
     /// and the old capture is released. Fails, changing nothing, when a stop,
     /// a new share or another change came first.
-    pub fn finish_screen_change(&mut self, capture: u64) -> Result<(), String> {
+    pub fn finish_screen_change(&mut self, capture: u64) -> (Retired, Result<(), String>) {
+        let mut retired = Retired::default();
+        let result = self.swap_screen(capture, &mut retired);
+        (retired, result)
+    }
+
+    fn swap_screen(&mut self, capture: u64, retired: &mut Retired) -> Result<(), String> {
         let next = self
             .screen_change
             .take_if(|c| c.id == capture)
             .ok_or("the screen source change was superseded")?;
         let Some(live) = self.screen.as_mut() else {
+            retired.screens.push(next);
             return Err("the screen share stopped during the source change".into());
         };
         {
@@ -1170,6 +1256,7 @@ impl NativeSession {
             // clearing the slot in between must not be written over.
             let mut slot = lock(&self.screen_publication);
             let Some(publication) = slot.as_mut().filter(|p| p.capture == Some(live.id)) else {
+                retired.screens.push(next);
                 return Err("the screen share stopped during the source change".into());
             };
             // The source keeps the size it was published at: the encoder follows
@@ -1193,9 +1280,9 @@ impl NativeSession {
                 }
             }
         }
-        // Dropping the old share joins its capture thread (and, on Wayland,
+        // Releasing the old share joins its capture thread (and, on Wayland,
         // closes its portal session); the preview lives on in `next`.
-        drop(std::mem::replace(live, next));
+        retired.screens.push(std::mem::replace(live, next));
         Ok(())
     }
 
@@ -1248,13 +1335,15 @@ impl NativeSession {
     /// Stop capture `capture` if it is still the running one (a stale id is
     /// a no-op): unpublish it, and release the capturer and, on Wayland, the
     /// portal session. A pending source change's capture is only dropped.
-    pub async fn stop_screen(&mut self, capture: u64) {
+    pub async fn stop_screen(&mut self, capture: u64) -> Retired {
+        let mut retired = Retired::default();
         if self.screen_change.as_ref().is_some_and(|s| s.id == capture) {
-            self.screen_change.take();
+            retired.screens.extend(self.screen_change.take());
         }
         if self.screen.as_ref().is_some_and(|s| s.id == capture) {
-            self.release_screen().await;
+            retired.merge(self.release_screen().await);
         }
+        retired
     }
 
     /// Unpublish the screen share if `capture` is the running one, keeping the
@@ -1283,13 +1372,15 @@ impl NativeSession {
         }
     }
 
-    async fn release_screen(&mut self) {
-        self.screen_change.take();
-        self.release_screen_audio().await;
+    pub async fn release_screen(&mut self) -> Retired {
+        let mut retired = Retired::default();
+        retired.screens.extend(self.screen_change.take());
+        retired.merge(self.release_screen_audio().await);
         self.unpublish_screen().await;
         self.frames.set_screen(None);
-        // Dropping joins the capture thread.
-        self.screen.take();
+        // Releasing joins the capture thread.
+        retired.screens.extend(self.screen.take());
+        retired
     }
 
     /// The publisher and subscriber transports' raw stats.
@@ -1408,8 +1499,8 @@ impl NativeSession {
     /// closes its listener and every frame socket.
     pub async fn close(mut self) {
         self.capture.stop();
-        self.release_camera().await;
-        self.release_screen().await;
+        self.release_camera().await.release().await;
+        self.release_screen().await.release().await;
         // The track's sid follows a republish; a stored publication's would not.
         if let Some(track) = self.mic.take() {
             let _ = self
@@ -1425,6 +1516,45 @@ impl NativeSession {
         if let Some(reports) = &self.capture_reports {
             reports.abort();
         }
+    }
+}
+
+/// Captures taken out of a session whose drop joins an OS thread and frees a
+/// device or portal session. The session methods that stop, replace or finish
+/// a capture return them so the caller releases them with [`Retired::release`]
+/// after dropping the session lock.
+#[derive(Default)]
+#[must_use = "release retired captures with `.release().await` once the session lock is dropped"]
+pub struct Retired {
+    cameras: Vec<CameraShare>,
+    screens: Vec<ScreenShare>,
+    share_audio: Vec<ShareAudio>,
+}
+
+impl Retired {
+    pub fn merge(&mut self, other: Retired) {
+        self.cameras.extend(other.cameras);
+        self.screens.extend(other.screens);
+        self.share_audio.extend(other.share_audio);
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.cameras.is_empty() && self.screens.is_empty() && self.share_audio.is_empty()
+    }
+
+    /// Drop them on a blocking thread; returns once every device is released.
+    pub async fn release(self) {
+        if !self.is_empty() {
+            release_blocking(self).await;
+        }
+    }
+}
+
+/// Drop `value` on a blocking thread and wait for it: dropping a capture
+/// joins its OS thread, which must not hold an async worker.
+pub async fn release_blocking<T: Send + 'static>(value: T) {
+    if let Err(e) = tokio::task::spawn_blocking(move || drop(value)).await {
+        log::warn!("[native_voice] release: {e}");
     }
 }
 
