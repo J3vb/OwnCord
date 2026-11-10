@@ -50,6 +50,7 @@ mod win;
 mod wine;
 
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::AtomicBool;
 use std::sync::{Mutex, OnceLock};
 
 use serde::{Deserialize, Serialize};
@@ -139,10 +140,26 @@ impl Prefs {
 
 /// The game being played, or `None` when nothing recognised is running or the
 /// OS cannot list processes. Read-only; the frontend polls it while the setting
-/// is on, passing the user's manual and hidden games. `async` so the scan runs
-/// on a worker thread, not the IPC main thread.
+/// is on, passing the user's manual and hidden games. The scan runs on a
+/// blocking thread, not the IPC main thread or an async worker.
 #[tauri::command(async)]
-pub fn detect_game(prefs: Option<DetectPrefs>) -> Option<DetectedGame> {
+pub async fn detect_game(prefs: Option<DetectPrefs>) -> Option<DetectedGame> {
+    tauri::async_runtime::spawn_blocking(move || detect_game_guarded(&SCANNING, prefs))
+        .await
+        .unwrap_or(None)
+}
+
+/// Set while a scan or a picker listing runs, so polls do not pile up behind a
+/// stalled process listing.
+static SCANNING: AtomicBool = AtomicBool::new(false);
+static LISTING: AtomicBool = AtomicBool::new(false);
+
+fn detect_game_guarded(flag: &AtomicBool, prefs: Option<DetectPrefs>) -> Option<DetectedGame> {
+    let _guard = crate::media_activity::BusyGuard::acquire(flag)?;
+    detect_game_blocking(prefs)
+}
+
+fn detect_game_blocking(prefs: Option<DetectPrefs>) -> Option<DetectedGame> {
     let procs = platform_processes()?;
     let prefs = Prefs::new(&prefs.unwrap_or_default());
     let mut state = crate::sync::lock(&STATE);
@@ -172,7 +189,16 @@ const MAX_PROGRAMS: usize = 300;
 /// the OS cannot list processes. The list is the answer to this call only; it is
 /// not stored, logged or sent anywhere.
 #[tauri::command(async)]
-pub fn list_running_programs() -> Vec<RunningProgram> {
+pub async fn list_running_programs() -> Vec<RunningProgram> {
+    tauri::async_runtime::spawn_blocking(|| list_running_programs_guarded(&LISTING))
+        .await
+        .unwrap_or_default()
+}
+
+fn list_running_programs_guarded(flag: &AtomicBool) -> Vec<RunningProgram> {
+    let Some(_guard) = crate::media_activity::BusyGuard::acquire(flag) else {
+        return Vec::new();
+    };
     platform_processes().map_or_else(Vec::new, |procs| {
         list_programs(&procs, windows_dir().as_deref())
     })

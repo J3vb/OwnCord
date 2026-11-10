@@ -101,15 +101,26 @@ pub async fn download_and_install_update(
         )
         .await
         .map_err(|e| format!("download/install failed: {e}"))?;
-    verify_apk_artifact(&bytes, &update.signature, updater_public_key(&app)?)
-        .map_err(|e| format!("download/install failed: {e}"))?;
+    let byte_len = bytes.len();
+    let signature = update.signature.clone();
+    let pubkey = updater_public_key(&app)?.to_owned();
+    let write_app = app.clone();
+    let path = tauri::async_runtime::spawn_blocking(move || {
+        verify_apk_artifact(&bytes, &signature, &pubkey)
+            .map_err(|e| format!("download/install failed: {e}"))?;
+        write_update_apk(&write_app, &bytes)
+    })
+    .await
+    .map_err(|e| {
+        log::warn!("[update] verify/write task ended early: {e}");
+        "download/install failed".to_string()
+    })??;
     log::info!(
-        "[update] APK downloaded ({} bytes) for version {}",
-        bytes.len(),
+        "[update] APK verified and written ({} bytes) for version {}",
+        byte_len,
         update.version
     );
 
-    let path = write_update_apk(&app, &bytes)?;
     let installer = app.state::<ApkInstaller>();
     let response: InstallerResponse = installer
         .0
