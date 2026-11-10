@@ -152,7 +152,9 @@ export const shards = {
     "src/features/channels/channelMoves.ts",
     "src/features/members/gameActivityLine.ts",
     "src/features/members/memberModel.ts",
+    "src/features/members/memberMenuGates.ts",
     "src/features/voice-messages/recorder.ts",
+    "src/features/voice-messages/recorderDevices.ts",
     "src/features/voice-messages/wav.ts",
     "src/features/voice-messages/waveform.ts",
     "src/lib/ui/backHistory.ts",
@@ -293,6 +295,7 @@ export const shards = {
   "lib-rest-5": [
     "src/features/direct-messages/callAlerts.ts",
     "src/features/forums/NewPostDialog.ts",
+    "src/features/forums/postTagPicker.ts",
     "src/features/messaging/spoilerAttachment.ts",
     "src/features/unread-badge/unreadBadge.ts",
     "src/lib/diagnostics/appEvents.ts",
@@ -413,6 +416,7 @@ export const shards = {
   ],
   "lib-rest-16": [
     "src/features/forums/ForumView.ts",
+    "src/features/forums/postRowParts.ts",
     "src/features/forums/view.ts",
     "src/features/messaging/reactionUsers.ts",
     "src/features/server-rail/joinInvite.ts",
@@ -495,6 +499,7 @@ export const shards = {
   ],
   "safety-moderation-3": [
     "src/features/moderation/AppealDetail.ts",
+    "src/features/moderation/detailFocus.ts",
     "src/features/moderation/Evidence.ts",
     "src/features/moderation/Workflow.ts",
     "src/features/moderation/store.ts",

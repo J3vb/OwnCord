@@ -105,96 +105,68 @@ function facts(rows: readonly (readonly [string, string])[]): HTMLDListElement {
 
 let appealSeq = 0;
 
-export function buildAppealDetail(o: AppealDetailOptions): AppealDetailView {
-  const { detail, me, signal } = o;
-  const seq = ++appealSeq;
-  const element = createElement("section", {
-    class: "mod-report",
-    "aria-labelledby": `mod-appeal-${seq}`,
-    "data-testid": "mod-appeal",
-  });
-  const heading = createElement(
-    "h3",
-    { id: `mod-appeal-${seq}`, tabindex: "-1" },
-    t("appeal.title", { kind: kindText(detail.action.kind) }),
-  );
+type AppealRecord = AppealDetail["action"];
+type WorkSend = (write: AppealWrite) => void;
+type WorkButton = (label: string, key: string, type: "button" | "submit") => HTMLButtonElement;
 
-  const decided = detail.state === "upheld" || detail.state === "overturned";
+function headerFacts(detail: AppealDetail, me: number, decided: boolean): HTMLDListElement {
+  return facts([
+    [t("appeal.fact.appellant"), actorName(detail.appellantId, me)],
+    [t("fact.state"), appealStateText(detail.state)],
+    [
+      t("fact.assignee"),
+      detail.assigneeId === 0 ? t("fact.unassigned") : actorName(detail.assigneeId, me),
+    ],
+    [t("fact.filed"), dateText(detail.createdAt)],
+    ...(decided
+      ? ([
+          [t("appeal.fact.decidedBy"), actorName(detail.decidedBy, me)],
+          [t("appeal.fact.decided"), dateText(detail.decidedAt)],
+        ] as const)
+      : []),
+  ]);
+}
+
+function actionFacts(a: AppealRecord, me: number): HTMLDListElement {
+  return facts([
+    [t("appeal.action.by"), actorName(a.actorId, me)],
+    [t("appeal.action.at"), dateText(a.createdAt)],
+    [t("appeal.action.reason"), a.reason === "" ? t("appeal.action.noReason") : a.reason],
+    ...(a.expiresAt !== null && a.liftedAt === null
+      ? ([[t("appeal.action.until"), dateText(a.expiresAt)]] as const)
+      : []),
+    ...(a.liftedAt !== null ? ([[t("appeal.action.lifted"), dateText(a.liftedAt)]] as const) : []),
+    ...(a.acknowledgedAt !== null
+      ? ([[t("appeal.action.acknowledged"), dateText(a.acknowledgedAt)]] as const)
+      : []),
+  ]);
+}
+
+/** The link to the report this appeal came from, when the server returned its id. */
+function appendReportLink(element: HTMLElement, o: AppealDetailOptions): void {
+  const { detail, signal } = o;
+  if (detail.reportId === null) return;
+  const reportId = detail.reportId;
+  const open = createElement(
+    "button",
+    { type: "button", class: "btn-modal-save", "data-focus": "report" },
+    t("appeal.report.open"),
+  );
+  open.addEventListener("click", () => o.onOpenReport(reportId), { signal });
   appendChildren(
     element,
-    heading,
-    facts([
-      [t("appeal.fact.appellant"), actorName(detail.appellantId, me)],
-      [t("fact.state"), appealStateText(detail.state)],
-      [
-        t("fact.assignee"),
-        detail.assigneeId === 0 ? t("fact.unassigned") : actorName(detail.assigneeId, me),
-      ],
-      [t("fact.filed"), dateText(detail.createdAt)],
-      ...(decided
-        ? ([
-            [t("appeal.fact.decidedBy"), actorName(detail.decidedBy, me)],
-            [t("appeal.fact.decided"), dateText(detail.decidedAt)],
-          ] as const)
-        : []),
-    ]),
+    createElement("h4", {}, t("appeal.report.title")),
+    muted(t("appeal.report.hint")),
+    open,
   );
+}
 
-  const a = detail.action;
-  element.appendChild(createElement("h4", {}, t("appeal.action.title")));
-  element.appendChild(
-    facts([
-      [t("appeal.action.by"), actorName(a.actorId, me)],
-      [t("appeal.action.at"), dateText(a.createdAt)],
-      [t("appeal.action.reason"), a.reason === "" ? t("appeal.action.noReason") : a.reason],
-      ...(a.expiresAt !== null && a.liftedAt === null
-        ? ([[t("appeal.action.until"), dateText(a.expiresAt)]] as const)
-        : []),
-      ...(a.liftedAt !== null
-        ? ([[t("appeal.action.lifted"), dateText(a.liftedAt)]] as const)
-        : []),
-      ...(a.acknowledgedAt !== null
-        ? ([[t("appeal.action.acknowledged"), dateText(a.acknowledgedAt)]] as const)
-        : []),
-    ]),
-  );
-
-  element.appendChild(createElement("h4", {}, t("appeal.statement.title")));
-  element.appendChild(
-    detail.body === ""
-      ? muted(t("appeal.statement.none"))
-      : createElement("p", { class: "mod-report-note" }, detail.body),
-  );
-
-  if (detail.reportId !== null) {
-    const reportId = detail.reportId;
-    const open = createElement(
-      "button",
-      { type: "button", class: "btn-modal-save", "data-focus": "report" },
-      t("appeal.report.open"),
-    );
-    open.addEventListener("click", () => o.onOpenReport(reportId), { signal });
-    appendChildren(
-      element,
-      createElement("h4", {}, t("appeal.report.title")),
-      muted(t("appeal.report.hint")),
-      open,
-    );
-  }
-
-  const work = createElement("section", {
-    class: "mod-work",
-    "aria-labelledby": `mod-appeal-work-${seq}`,
-    "data-testid": "mod-appeal-work",
-  });
-  work.appendChild(createElement("h4", { id: `mod-appeal-work-${seq}` }, t("appeal.work.title")));
-  element.appendChild(work);
-  const done = (takesInput: boolean): AppealDetailView => ({ element, heading, takesInput });
-
+/** A decided, withdrawn or unrecognised appeal: the recorded result and no controls. */
+function fillSettledWork(work: HTMLElement, detail: AppealDetail, decided: boolean): boolean {
   if (decided) {
     const outcome = detail.state === "upheld" ? "appeal.result.upheld" : "appeal.result.overturned";
     work.appendChild(createElement("p", { "data-testid": "mod-appeal-result" }, t(outcome)));
-    const after = detail.state === "overturned" ? effect(a.kind, 1) : null;
+    const after = detail.state === "overturned" ? effect(detail.action.kind, 1) : null;
     if (after !== null) work.appendChild(muted(after));
     appendChildren(
       work,
@@ -204,44 +176,29 @@ export function buildAppealDetail(o: AppealDetailOptions): AppealDetailView {
         : createElement("p", { class: "mod-report-note" }, detail.decisionNote),
       muted(t("appeal.result.appellant")),
     );
-    return done(false);
+    return true;
   }
   if (detail.state === "withdrawn") {
     work.appendChild(muted(t("appeal.result.withdrawn")));
-    return done(false);
+    return true;
   }
   if (detail.state !== "open" && detail.state !== "assigned") {
     work.appendChild(muted(t("appeal.state.unknown")));
-    return done(false);
+    return true;
   }
+  return false;
+}
 
-  const buttons: HTMLButtonElement[] = [];
-  /** AppealQueue.ts lets one write run at a time; the next render comes from the fresh read. */
-  const send = (write: AppealWrite): void => {
-    if (!o.onWrite(write)) return;
-    for (const b of buttons) b.setAttribute("aria-disabled", "true");
-  };
-  const button = (label: string, key: string, type: "button" | "submit"): HTMLButtonElement => {
-    const b = createElement("button", { type, class: "btn-modal-save", "data-focus": key }, label);
-    buttons.push(b);
-    return b;
-  };
-  if (a.actorId !== 0 && a.actorId === me) work.appendChild(muted(t("appeal.work.ownAction")));
-
-  if (detail.assigneeId === 0) {
-    const take = button(t("appeal.work.assign"), "assign", "button");
-    take.addEventListener("click", () => send({ kind: "assign" }), { signal });
-    appendChildren(work, muted(t("appeal.work.unassigned")), take);
-    return done(false);
-  }
-  if (detail.assigneeId !== me) {
-    work.appendChild(muted(t("appeal.work.other")));
-    return done(false);
-  }
-  work.appendChild(muted(t("appeal.work.mine")));
-
-  // Decide: nothing is preselected.
-  const form = createElement("form", { class: "mod-work-form", novalidate: "" });
+/** The outcome radios, the effect hint and the outcome error line. */
+function buildOutcomeFieldset(
+  o: AppealDetailOptions,
+  seq: number,
+): {
+  fieldset: HTMLElement;
+  radios: HTMLInputElement[];
+  effectHint: HTMLElement;
+  outcomeError: HTMLElement;
+} {
   const fieldset = createElement("fieldset", { class: "mod-work-outcomes" });
   fieldset.appendChild(createElement("legend", {}, t("appeal.work.outcomeLabel")));
   const radios: HTMLInputElement[] = [];
@@ -260,7 +217,7 @@ export function buildAppealDetail(o: AppealDetailOptions): AppealDetailView {
     appendChildren(label, radio, createElement("span", {}, t(labelKey)));
     fieldset.appendChild(label);
   }
-  const before = effect(a.kind, 0);
+  const before = effect(o.detail.action.kind, 0);
   const effectHint = createElement("p", {
     id: `mod-appeal-${seq}-effect`,
     class: "mod-evidence-status",
@@ -272,6 +229,19 @@ export function buildAppealDetail(o: AppealDetailOptions): AppealDetailView {
     role: "alert",
   });
   fieldset.setAttribute("aria-describedby", `${effectHint.id} ${outcomeError.id}`);
+  return { fieldset, radios, effectHint, outcomeError };
+}
+
+/** The decision form: nothing is preselected. */
+function buildDecideForm(
+  o: AppealDetailOptions,
+  seq: number,
+  send: WorkSend,
+  button: WorkButton,
+): HTMLElement {
+  const { signal } = o;
+  const form = createElement("form", { class: "mod-work-form", novalidate: "" });
+  const { fieldset, radios, effectHint, outcomeError } = buildOutcomeFieldset(o, seq);
 
   const noteId = `mod-appeal-${seq}-note`;
   const noteHint = createElement("p", { id: `${noteId}-hint`, class: "mod-evidence-status" });
@@ -338,6 +308,78 @@ export function buildAppealDetail(o: AppealDetailOptions): AppealDetailView {
     decideHint,
     decide,
   );
-  work.appendChild(form);
-  return done(true);
+  return form;
+}
+
+/** An open appeal's controls; whether the decision form (a draft's home) was offered. */
+function fillOpenWork(o: AppealDetailOptions, seq: number, work: HTMLElement): boolean {
+  const { detail, me, signal } = o;
+  const buttons: HTMLButtonElement[] = [];
+  /** AppealQueue.ts lets one write run at a time; the next render comes from the fresh read. */
+  const send: WorkSend = (write) => {
+    if (!o.onWrite(write)) return;
+    for (const b of buttons) b.setAttribute("aria-disabled", "true");
+  };
+  const button: WorkButton = (label, key, type) => {
+    const b = createElement("button", { type, class: "btn-modal-save", "data-focus": key }, label);
+    buttons.push(b);
+    return b;
+  };
+  const a = detail.action;
+  if (a.actorId !== 0 && a.actorId === me) work.appendChild(muted(t("appeal.work.ownAction")));
+
+  if (detail.assigneeId === 0) {
+    const take = button(t("appeal.work.assign"), "assign", "button");
+    take.addEventListener("click", () => send({ kind: "assign" }), { signal });
+    appendChildren(work, muted(t("appeal.work.unassigned")), take);
+    return false;
+  }
+  if (detail.assigneeId !== me) {
+    work.appendChild(muted(t("appeal.work.other")));
+    return false;
+  }
+  work.appendChild(muted(t("appeal.work.mine")));
+  work.appendChild(buildDecideForm(o, seq, send, button));
+  return true;
+}
+
+export function buildAppealDetail(o: AppealDetailOptions): AppealDetailView {
+  const { detail, me } = o;
+  const seq = ++appealSeq;
+  const element = createElement("section", {
+    class: "mod-report",
+    "aria-labelledby": `mod-appeal-${seq}`,
+    "data-testid": "mod-appeal",
+  });
+  const heading = createElement(
+    "h3",
+    { id: `mod-appeal-${seq}`, tabindex: "-1" },
+    t("appeal.title", { kind: kindText(detail.action.kind) }),
+  );
+
+  const decided = detail.state === "upheld" || detail.state === "overturned";
+  appendChildren(element, heading, headerFacts(detail, me, decided));
+
+  element.appendChild(createElement("h4", {}, t("appeal.action.title")));
+  element.appendChild(actionFacts(detail.action, me));
+
+  element.appendChild(createElement("h4", {}, t("appeal.statement.title")));
+  element.appendChild(
+    detail.body === ""
+      ? muted(t("appeal.statement.none"))
+      : createElement("p", { class: "mod-report-note" }, detail.body),
+  );
+
+  appendReportLink(element, o);
+
+  const work = createElement("section", {
+    class: "mod-work",
+    "aria-labelledby": `mod-appeal-work-${seq}`,
+    "data-testid": "mod-appeal-work",
+  });
+  work.appendChild(createElement("h4", { id: `mod-appeal-work-${seq}` }, t("appeal.work.title")));
+  element.appendChild(work);
+
+  const takesInput = fillSettledWork(work, detail, decided) ? false : fillOpenWork(o, seq, work);
+  return { element, heading, takesInput };
 }

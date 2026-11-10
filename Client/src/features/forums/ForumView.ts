@@ -19,13 +19,12 @@ import { Disposable } from "@lib/disposable";
 import { createIcon } from "@lib/icons";
 import { errorText } from "@lib/api";
 import { createLogger } from "@lib/logger";
-import { avatarInitial, resolveDisplayName } from "@lib/ui/avatar";
+import { avatarInitial } from "@lib/ui/avatar";
 import { loadPref, savePref } from "@lib/prefs/preferences";
 import { isPhoneLayout, onPhoneLayoutChange } from "@lib/ui/bottomSheet";
 import type { ForumTag, ThreadInfo } from "@lib/types";
 import { channelsStore } from "@stores/channels.store";
 import { uiStore } from "@stores/ui.store";
-import { membersStore } from "@stores/members.store";
 import { adoptThreadSnapshots, threadsStore, upsertThread } from "@stores/threads.store";
 import { threadAgoLabel } from "../threads/threadAgo";
 import { forumsText } from "../../i18n/forums";
@@ -44,6 +43,7 @@ import {
   type ForumLayout,
   type ForumSort,
 } from "./forumModel";
+import { authorName, authorOf, previewOf, syncChildren } from "./postRowParts";
 
 const log = createLogger("forum-view");
 
@@ -72,36 +72,9 @@ const freshSection = (): Section => ({
   started: false,
 });
 
-function authorOf(post: ThreadInfo) {
-  const id = post.owner_id ?? post.post?.first_message?.author_id ?? null;
-  return id === null ? undefined : membersStore.getState().members.get(id);
-}
-
-function authorName(post: ThreadInfo): string {
-  const member = authorOf(post);
-  return member === undefined ? forumsText("post.unknownAuthor") : resolveDisplayName(member);
-}
-
-function previewOf(post: ThreadInfo): { text: string; muted: boolean } {
-  const first = post.post?.first_message ?? null;
-  if (first === null || first.deleted) return { text: forumsText("post.deleted"), muted: true };
-  if (first.preview !== "") return { text: first.preview, muted: false };
-  return first.has_attachments
-    ? { text: forumsText("post.attachment"), muted: true }
-    : { text: "", muted: true };
-}
-
 /** The number a post is ranked by under `sort`. */
 function sortKey(post: ThreadInfo, sort: ForumSort): number {
   return sort === "created" ? post.id : activityMs(post);
-}
-
-/** Put `els` in `ul` in order, moving only what is out of place. */
-function syncChildren(ul: HTMLElement, els: readonly HTMLElement[]): void {
-  els.forEach((el, i) => {
-    if (ul.children[i] !== el) ul.insertBefore(el, ul.children[i] ?? null);
-  });
-  while (ul.children.length > els.length) ul.lastElementChild?.remove();
 }
 
 export function renderForumView(root: HTMLElement, ctx: ForumViewContext): void {
@@ -361,6 +334,26 @@ export function renderForumView(root: HTMLElement, ctx: ForumViewContext): void 
     return sortPosts(found, sort);
   }
 
+  /** The "no posts" message; the hint shows only to someone who can start a post. */
+  function paintEmpty(): void {
+    setText(emptyTitle, forumsText(selected.size > 0 ? "empty.tags" : "empty.none"));
+    setText(emptyHint, selected.size > 0 ? "" : forumsText("empty.noneHint"));
+    emptyHint.hidden = selected.size > 0 || !(forumChannel()?.canSend ?? false);
+  }
+
+  /** The empty state, the loading/failed line and the load-more button. */
+  function paintFooter(postCount: number): void {
+    const busy = open.loading || older.loading;
+    const done = !open.hasMore && !older.hasMore;
+    const failed = open.failed || older.failed;
+    const empty = done && !busy && !failed && postCount === 0;
+    emptyEl.hidden = !empty;
+    if (empty) paintEmpty();
+    setText(statusEl, busy ? forumsText("list.loading") : failed ? forumsText("list.failed") : "");
+    moreBtn.hidden = busy || (done && !failed);
+    setText(moreBtn, forumsText(failed ? "list.retry" : "list.loadMore"));
+  }
+
   function paintList(): void {
     const focusedId =
       document.activeElement?.closest<HTMLElement>("[data-post-id]")?.dataset["postId"];
@@ -373,19 +366,7 @@ export function renderForumView(root: HTMLElement, ctx: ForumViewContext): void 
     olderHead.hidden = archivedPosts.length === 0;
     olderList.hidden = archivedPosts.length === 0;
 
-    const busy = open.loading || older.loading;
-    const done = !open.hasMore && !older.hasMore;
-    const failed = open.failed || older.failed;
-    const empty = done && !busy && !failed && posts.length === 0;
-    emptyEl.hidden = !empty;
-    if (empty) {
-      setText(emptyTitle, forumsText(selected.size > 0 ? "empty.tags" : "empty.none"));
-      setText(emptyHint, selected.size > 0 ? "" : forumsText("empty.noneHint"));
-      emptyHint.hidden = selected.size > 0 || !(forumChannel()?.canSend ?? false);
-    }
-    setText(statusEl, busy ? forumsText("list.loading") : failed ? forumsText("list.failed") : "");
-    moreBtn.hidden = busy || (done && !failed);
-    setText(moreBtn, forumsText(failed ? "list.retry" : "list.loadMore"));
+    paintFooter(posts.length);
 
     markCurrent();
 
@@ -520,6 +501,24 @@ export function renderForumView(root: HTMLElement, ctx: ForumViewContext): void 
     for (const post of posts) paged.add(post.id);
   }
 
+  /** Fold a landed page into the section it belongs to. */
+  function applyPage(
+    section: Section,
+    page: { threads: readonly ThreadInfo[]; has_more: boolean; next_before: string },
+  ): void {
+    if (refreshing && section === open) {
+      // A refresh: what the old pages showed is replaced by the new first page.
+      refreshing = false;
+      paged.clear();
+      live.clear();
+    }
+    writePage(page.threads);
+    if (section === open && !section.started) adoptStoredNewer(page.threads, page.has_more);
+    section.cursor = page.next_before;
+    section.hasMore = page.has_more;
+    section.started = true;
+  }
+
   async function loadMore(): Promise<void> {
     const section = open.hasMore ? open : older.hasMore ? older : null;
     if (section === null || section.loading) return;
@@ -536,17 +535,7 @@ export function renderForumView(root: HTMLElement, ctx: ForumViewContext): void 
         ctx.signal,
       );
       if (myGen !== gen || ctx.signal.aborted) return;
-      if (refreshing && section === open) {
-        // A refresh: what the old pages showed is replaced by the new first page.
-        refreshing = false;
-        paged.clear();
-        live.clear();
-      }
-      writePage(page.threads);
-      if (section === open && !section.started) adoptStoredNewer(page.threads, page.has_more);
-      section.cursor = page.next_before;
-      section.hasMore = page.has_more;
-      section.started = true;
+      applyPage(section, page);
       landed = true;
     } catch (err) {
       if (myGen !== gen || ctx.signal.aborted) return;
