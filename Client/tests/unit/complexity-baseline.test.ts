@@ -30,8 +30,8 @@ const baseline = readBaseline();
 
 /** Over-limit functions and blocks that may remain. Lower these with every
  *  change that removes one; they never rise. */
-const COMPLEXITY_CAP = 67;
-const DEPTH_CAP = 6;
+const COMPLEXITY_CAP = 64;
+const DEPTH_CAP = 5;
 const WORST_COMPLEXITY_CAP = 33;
 
 function rewritten(file: string): boolean {

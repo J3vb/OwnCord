@@ -49,7 +49,6 @@
   "src/lib/voice/audioElements.ts": 700,
   "src/lib/voice/audioPipeline.ts": 750,
   "src/lib/voice/connectionStats.ts": 550,
-  "src/lib/voice/livekitE2EE.ts": 1200,
   "src/lib/voice/roomEventHandlers.ts": 650,
   "src/lib/wireServer.ts": 1000,
   "src/lib/ws.ts": 1200,

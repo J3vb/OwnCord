@@ -141,11 +141,6 @@
       "createConnectionStatsPoller > sampleCamera": [17],
       "extractMetrics > (anonymous)": [24]
     },
-    "lib/voice/livekitE2EE.ts": {
-      "E2EEManager > handleAnnounceInner": [29],
-      "E2EEManager > handleParticipantLeft": [32],
-      "E2EEManager > setupKeyExchange": [27]
-    },
     "lib/voice/micProcessor.ts": {
       "createMicProcessor > route": [17]
     },
@@ -182,9 +177,6 @@
     },
     "features/voice/mediaControl.ts": {
       "MediaControl > doSwitchVideoDevice": [5]
-    },
-    "lib/voice/livekitE2EE.ts": {
-      "E2EEManager > handleParticipantLeft": [5]
     }
   }
 }
