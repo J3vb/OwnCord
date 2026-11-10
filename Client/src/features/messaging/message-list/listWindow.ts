@@ -13,17 +13,9 @@ import {
 } from "@stores/messages.store";
 import { discardMedia } from "../content/mediaVisibility";
 import { renderBlockedRun, renderDayDivider, renderNewDivider, renderMessage } from "./renderers";
-import { ROW_FOCUSABLE_SELECTOR } from "./messageActions";
-import {
-  buildVirtualItems,
-  estimateItemHeight,
-  keyOf,
-  visibleMessages,
-  type VirtualItem,
-} from "./virtualItems";
+import { buildVirtualItems, visibleMessages, type VirtualItem } from "./virtualItems";
 import { renderEmptyState, renderLoadErrorState, renderLoadingState } from "./listStates";
-import { FenwickTree } from "./fenwick";
-import { rememberRowHeight, rememberedRowHeight, rowHeightKey } from "./rowHeights";
+import { rememberRowHeight } from "./rowHeights";
 import {
   log,
   blockedUsers,
@@ -34,6 +26,8 @@ import {
   readMetrics,
 } from "./listShared";
 import { resolveNewDividerIndex, storeDividerEnv } from "./newDivider";
+import { createListHeights } from "./listHeights";
+import { createRowFocus } from "./listFocus";
 import type { ListState, ListApi } from "./listState";
 
 interface Measurement {
@@ -44,15 +38,23 @@ interface Measurement {
 
 export function createListWindow(st: ListState, api: ListApi) {
   const dividerEnv = storeDividerEnv(st.options.channelId);
+  const {
+    itemKey,
+    getItemHeight,
+    rememberKey,
+    estimateRow,
+    totalHeight,
+    offsetToIndex,
+    offsetBefore,
+    reseedUnmeasured,
+    seedTree,
+  } = createListHeights(st);
+  const { captureRowFocus, restoreRowFocus } = createRowFocus(st);
 
   /** The NEW divider's position for a rebuild of `messages`. */
   function resolveDivider(messages: readonly Message[]): number {
     return resolveNewDividerIndex(st, messages, dividerEnv);
   }
-
-  // ---------------------------------------------------------------------------
-  // Height estimation (Fenwick tree backed)
-  // ---------------------------------------------------------------------------
 
   /** Render one virtual item — the single place the item kinds map to DOM. */
   function renderVirtualItem(item: VirtualItem): HTMLElement {
@@ -93,62 +95,6 @@ export function createListWindow(st: ListState, api: ListApi) {
     st.rowOwners.get(el)?.destroy();
     st.rowOwners.delete(el);
     el.remove();
-  }
-
-  function itemKey(index: number): string {
-    return keyOf(st.virtualItems[index], index);
-  }
-
-  function getItemHeight(index: number): number {
-    const cached = st.heightCache.get(itemKey(index));
-    if (cached !== undefined) return cached;
-    return estimateRow(index);
-  }
-
-  /** A message row's height key across lists; null for rows that are not a
-   *  confirmed message. */
-  function rememberKey(index: number): string | null {
-    const item = st.virtualItems[index];
-    if (item === undefined || item.kind !== "message" || item.message.id === 0) return null;
-    return rowHeightKey(item.message.id, item.isGrouped, item.message.editedAt);
-  }
-
-  /** An unmeasured row: the height an earlier list of this channel drew it at,
-   *  else the estimate. */
-  function estimateRow(index: number): number {
-    const key = st.estimateWidth === undefined ? null : rememberKey(index);
-    const remembered = key === null ? undefined : rememberedRowHeight(key, st.estimateWidth!);
-    return remembered ?? estimateItemHeight(st.virtualItems[index]!, st.estimateWidth);
-  }
-
-  function totalHeight(): number {
-    if (st.tree !== null) return st.tree.total();
-    let h = 0;
-    for (let i = 0; i < st.virtualItems.length; i++) {
-      h += getItemHeight(i);
-    }
-    return h;
-  }
-
-  function offsetToIndex(scrollTop: number): number {
-    if (st.tree !== null) return st.tree.findIndex(scrollTop);
-    let offset = 0;
-    for (let i = 0; i < st.virtualItems.length; i++) {
-      const h = getItemHeight(i);
-      if (offset + h > scrollTop) return i;
-      offset += h;
-    }
-    return st.virtualItems.length - 1;
-  }
-
-  function offsetBefore(index: number): number {
-    if (st.tree !== null && index > 0) return st.tree.prefixSum(index - 1);
-    if (st.tree !== null && index <= 0) return 0;
-    let offset = 0;
-    for (let i = 0; i < index && i < st.virtualItems.length; i++) {
-      offset += getItemHeight(i);
-    }
-    return offset;
   }
 
   // ---------------------------------------------------------------------------
@@ -231,51 +177,6 @@ export function createListWindow(st: ListState, api: ListApi) {
     for (const img of st.contentContainer.querySelectorAll("img")) {
       discardMedia(img);
     }
-  }
-
-  /**
-   * Stable identity of the focused control inside the rendered window, so a
-   * virtualized rebuild can put focus back on its replacement (Q1 focus:
-   * stable location through async update/removal). The row's own key survives
-   * the rebuild because rows are keyed by message id; a control with its own
-   * `data-testid` (the action buttons) is restored exactly, and a focusable
-   * without one (a reaction chip, a reply bar, a link) is restored by its
-   * position among the row's focusable controls. Null when focus is outside
-   * the rendered window, so an unrelated rebuild never pulls focus back into
-   * the list. Restoring never scrolls, so a reader scrolling away from the
-   * focused row or a history-prepend anchor is not pulled back to it.
-   */
-  function captureRowFocus(): { own: string | null; row: string | null; index: number } | null {
-    const active = document.activeElement;
-    if (
-      !(active instanceof HTMLElement) ||
-      st.contentContainer === null ||
-      !st.contentContainer.contains(active)
-    ) {
-      return null;
-    }
-    const row = active.closest<HTMLElement>("[data-testid]");
-    const index =
-      row === null ? -1 : [...row.querySelectorAll(ROW_FOCUSABLE_SELECTOR)].indexOf(active);
-    return { own: active.dataset.testid ?? null, row: row?.dataset.testid ?? null, index };
-  }
-
-  /** Put focus back on the captured control's replacement; false when it has none. */
-  function restoreRowFocus(
-    captured: { own: string | null; row: string | null; index: number } | null,
-  ): boolean {
-    if (captured === null || st.contentContainer === null) return false;
-    let target: HTMLElement | null | undefined = null;
-    if (captured.own !== null) {
-      target = st.contentContainer.querySelector<HTMLElement>(`[data-testid="${captured.own}"]`);
-    } else if (captured.row !== null && captured.index >= 0) {
-      target = st.contentContainer
-        .querySelector<HTMLElement>(`[data-testid="${captured.row}"]`)
-        ?.querySelectorAll<HTMLElement>(ROW_FOCUSABLE_SELECTOR)
-        .item(captured.index);
-    }
-    target?.focus({ preventScroll: true });
-    return target !== null && target !== undefined;
   }
 
   /** Abort every rendered row's listeners before a rebuild discards the rows,
@@ -563,22 +464,6 @@ export function createListWindow(st: ListState, api: ListApi) {
 
     seedTree();
   }
-
-  /** Estimate again every row that has no measured height, leaving measured
-   *  rows (and so the rendered window) as they are. */
-  function reseedUnmeasured(): void {
-    if (st.tree === null) return;
-    for (let i = 0; i < st.virtualItems.length; i++) {
-      if (!st.heightCache.has(itemKey(i))) st.tree.set(i, estimateRow(i));
-    }
-  }
-
-  /** Build the Fenwick tree from measured heights, estimating the rest. */
-  function seedTree(): void {
-    st.tree = new FenwickTree(st.virtualItems.length);
-    for (let i = 0; i < st.virtualItems.length; i++) st.tree.set(i, getItemHeight(i));
-  }
-
   return {
     resolveNewDividerIndex: resolveDivider,
     renderVirtualItem,

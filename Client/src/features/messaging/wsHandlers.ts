@@ -2,7 +2,7 @@
 // extracted from lib/dispatcher.ts, which keeps every socket subscription and
 // calls these plain functions.
 import { authStore } from "../../stores/auth.store";
-import { channelsStore, noteChannelMessage } from "../../stores/channels.store";
+import { channelsStore } from "../../stores/channels.store";
 import {
   addMessage,
   updateReaction,
@@ -11,211 +11,40 @@ import {
   rollbackReaction,
   confirmSend,
   markSendFailed,
-  removeOptimistic,
   channelIdForSend,
   applyServerMessage,
   messagesStore,
-  setMessages,
-  setAroundMessages,
-  getChannelMessages,
-  invalidateLoadedMessageWindows,
-  setChannelLoading,
-  setChannelLoadError,
-  isWindowDetached,
   editMessage,
   deleteMessage,
   bulkDeleteMessages,
   setMessagePinned,
 } from "../../stores/messages.store";
 import { setTyping, clearTyping } from "../../stores/members.store";
-import {
-  dmStore,
-  reviseDmLastMessage,
-  updateDmLastMessage,
-  updateDmLastMessagePreview,
-} from "../../stores/dm.store";
-import { blocksStore, setUserBlockedByThem } from "../../stores/blocks.store";
+import { dmStore, reviseDmLastMessage } from "../../stores/dm.store";
 import type { ConnectionState } from "../../lib/ws";
-import { clearReactionUsersCache, invalidateReactionUsers } from "./reactionUsers";
-import { parseTimestamp } from "@lib/text/formatting";
-import { notifyIncomingMessage } from "../../lib/notifications";
-import { mentionsCurrentUser } from "../../lib/text/mentions";
-import { showToast } from "../../lib/ui/toast";
-import { connectText } from "../../i18n/connect";
-import { readingAnchor } from "./readingAnchor";
-import { isForwardRequest } from "./forwardRequests";
-import { isPollRequest } from "./pollRequests";
+import { invalidateReactionUsers } from "./reactionUsers";
 import { handleThreadDeleted, handleThreadFollow, handleThreadState } from "./threadFrames";
 import { loadedThreadsStore } from "../../stores/threadsLoader";
-import { isChannelAway, noteAwayUnread } from "@lib/readState";
-import {
-  activatePendingMessages,
-  acknowledgePendingMessage,
-  pendingMessageBeforeRestore,
-} from "../../lib/pendingMessages";
+import { isChannelAway } from "@lib/readState";
+import { acknowledgePendingMessage } from "../../lib/pendingMessages";
 import type { DispatchApi, Payload, ReconnectClock, WsRoute } from "../connection/dispatchContext";
 import { log, route } from "../connection/dispatchContext";
-import { WsErrorCode, ServerMessageType as S } from "@lib/protocolTypes";
+import { ServerMessageType as S } from "@lib/protocolTypes";
+import {
+  isReplayedFrame,
+  raisesMentionBadge,
+  noteChannelUnread,
+  noteDmMessage,
+  notifyLiveMessage,
+} from "./chatNotify";
+import { hasDmPreviewRefetch, reviseDmPreviewAfterDelete } from "./dmPreview";
 
-/**
- * serverClockSkewMs (see createReconnectClock) starts at 0 and is only
- * ever sampled from a frame the replay check itself already accepted as
- * live — so if the channel is quiet between login and the first reconnect,
- * the skew is never sampled, and a lagging/skewed server clock then makes
- * every genuinely live message look like a replay for as long as real
- * elapsed time takes to exceed the drift (which can be unbounded). A
- * replayed burst is delivered as a burst immediately after auth_ok, so cap
- * how long a frame can be classified as a replay by wall-clock distance from
- * the handshake as well as by timestamp — that bounds a cold (unsampled)
- * skew's worst case to this window instead of the whole drift, while still
- * covering the burst's actual delivery window with room to spare.
- */
-const REPLAY_GATE_WINDOW_MS = 5_000;
+export { activateReadyPendingMessages, applyReadyMessageResync } from "./readyResync";
+export { handleMessagingError } from "./sendErrors";
 
 // Thread frames: the dispatcher reaches them through this module.
 export { applyReadyThreads } from "./threadFrames";
 export { resumeThreadFocus } from "../../stores/threadsLoader";
-
-/**
- * Whether `payload` is one of a reconnect's replayed burst rather than a live
- * message. It is computed before the mention badge, which needs it too.
- */
-function isReplayedFrame(clock: ReconnectClock, payload: Payload<"chat_message">): boolean {
-  return (
-    clock.lastReconnectHandshakeAt !== null &&
-    Date.now() - clock.lastReconnectHandshakeAt < REPLAY_GATE_WINDOW_MS &&
-    parseTimestamp(payload.timestamp).getTime() <
-      clock.lastReconnectHandshakeAt - clock.serverClockSkewMs
-  );
-}
-
-/** Whether `payload` raises a mention badge for the current user. */
-function raisesMentionBadge(payload: Payload<"chat_message">, isReplayFrame: boolean): boolean {
-  // highlightsCurrentUser (mentions.ts) treats @everyone and @here as one
-  // bit, because the wire carries only one: mentions_everyone. But the
-  // server's applyMentionCounts (mentions.go) narrows an @here fan-out to
-  // readers who had a live connection at send time — a reader with none
-  // never got read_states.mention_count bumped for a here-only mention.
-  // The reconnect tier that delivers this replay burst never follows up
-  // with a `ready` to correct a wrongly-raised badge, so a
-  // here-only mention landing inside that burst must not raise one here
-  // either. A direct mention, or an @here/@everyone frame delivered live,
-  // is unaffected — mentions_here is only ever set alongside
-  // mentions_everyone for an @here (never a plain @everyone) token.
-  // A blocked author never raises one: the server leaves blockers out of its
-  // mention counts, so the badge here must agree with the next `ready`.
-  return (
-    !blocksStore.getState().blockedByMe.has(payload.user.id) &&
-    (mentionsCurrentUser(payload.content, {
-      mentions: payload.mentions,
-      mentionRoles: payload.mention_roles,
-    }) ||
-      (payload.mentions_everyone === true && !(payload.mentions_here === true && isReplayFrame)))
-  );
-}
-
-/**
- * Increment channel-level unread for non-active, non-own-message
- * channels — OR for the active channel when its loaded window is
- * detached from the live tail. "Active" normally means "the
- * user is watching the live tail", which is why it is otherwise
- * excluded here, but a jump to an old permalink/reply/search hit can
- * leave the active channel showing a detached around-window
- * (messages.store's detachedChannels) — addMessage already refuses to
- * append a live broadcast onto that window, so without this a message
- * (an @mention included) that arrives while the user reads
- * back-history leaves no row AND no badge, with nothing to tell them
- * it ever arrived. Replayed frames increment unread counts like live
- * ones — the burst is exactly the messages missed while away (a
- * full-ready resume sends no burst at all; ready's unread_count values
- * are authoritative there). DM channel IDs are not in channelsStore
- * (they use dmStore), so noteChannelMessage is a no-op for DMs, but the
- * own-message guard is applied here for defence-in-depth.
- */
-function noteChannelUnread(
-  payload: Payload<"chat_message">,
-  activeId: number | null,
-  isOwnMessage: boolean,
-  isMention: boolean,
-  isAway: boolean,
-): void {
-  if ((payload.channel_id === activeId && !isAway) || isOwnMessage) return;
-  // noteChannelMessage skips the active channel by default —
-  // evenIfActive (isAway here) is a no-op for a genuinely
-  // non-active channel, since its internal guard only fires when
-  // channelId IS the active one. It also guards both counters behind
-  // payload.id vs. the channel's lastMessageId watermark, so
-  // a message already reflected in a `ready` snapshot (delivered
-  // between the server's registerNow and buildReady, then redelivered
-  // as a queued chat_message) does not double-count.
-  noteChannelMessage(payload.channel_id, payload.id, isMention, isAway);
-  // Counted unread in the channel on screen: the reader was away, so after a
-  // Mark Unread a later live arrival may release the hold (readState.ts).
-  if (isAway && payload.channel_id === activeId) noteAwayUnread(payload.channel_id);
-}
-
-/**
- * Update the DM store's last message when the message belongs to a DM channel.
- * Skip unread increment for own messages and the currently focused DM
- * — unless that DM's window is detached from the live tail,
- * the same exception the channel-level increment makes.
- */
-function noteDmMessage(
-  payload: Payload<"chat_message">,
-  activeId: number | null,
-  isOwnMessage: boolean,
-  isMention: boolean,
-  isAway: boolean,
-): void {
-  const isDmActive = payload.channel_id === activeId && !isAway;
-  if (isOwnMessage || isDmActive) {
-    // Update last message preview but don't increment unread count.
-    updateDmLastMessagePreview(payload.channel_id, payload.id, payload.content, payload.timestamp);
-    return;
-  }
-  // The DM badge reads dmStore's mentionCount (mute-immune, rendered
-  // by DmSidebar) — noteChannelMessage above no-ops for DM ids, which
-  // are absent from channelsStore. isMention is passed through so the
-  // mention bump sits behind updateDmLastMessage's own message-id
-  // guard — a separate unconditional increment here would
-  // double-count a mention redelivered between registerNow and
-  // buildReady, since lastMessageId has already advanced by the time
-  // any such follow-up call could check it.
-  updateDmLastMessage(
-    payload.channel_id,
-    payload.id,
-    payload.content,
-    payload.timestamp,
-    isMention,
-  );
-}
-
-/**
- * Fire desktop notification, taskbar flash, and sound — but not for a
- * reconnect's replayed burst. No connection-state flag can gate this:
- * the server writes auth_ok before the burst, so by the time replayed
- * frames arrive the client is already "connected". A replay frame's
- * timestamp instead predates the reconnect handshake that preceded it,
- * unlike a genuinely new live message — compared in server-clock terms
- * (see serverClockSkewMs above) so a lagging or skewed server clock
- * cannot make a live message look like a replay.
- * The wall-clock window additionally bounds a cold (never-sampled)
- * skew's damage — see REPLAY_GATE_WINDOW_MS.
- */
-function notifyLiveMessage(clock: ReconnectClock, payload: Payload<"chat_message">): void {
-  // A reply in a thread is judged by its parent channel: the parent's mute and
-  // notification level apply, its name labels the popup, and a thread the
-  // reader is watching beside the active channel is not worth a chime.
-  const surface =
-    loadedThreadsStore()?.authorityChannelId(payload.channel_id) ?? payload.channel_id;
-  notifyIncomingMessage(
-    surface === payload.channel_id ? payload : { ...payload, channel_id: surface },
-  );
-  // Refresh the skew estimate from this accepted-as-live frame so it
-  // stays current for the next reconnect.
-  clock.serverClockSkewMs = Date.now() - parseTimestamp(payload.timestamp).getTime();
-}
-
 export function handleChatMessage(clock: ReconnectClock, payload: Payload<"chat_message">): void {
   if (payload.user.id === authStore.getState().user?.id) {
     acknowledgePendingMessage(payload.client_message_id);
@@ -261,7 +90,7 @@ export function handleChatEdited(
 ): void {
   editMessage(payload);
   reviseDmLastMessage(payload.channel_id, payload.message_id, { lastMessage: payload.content });
-  if (dmPreviewRefetches.has(payload.channel_id)) {
+  if (hasDmPreviewRefetch(payload.channel_id)) {
     reviseDmPreviewAfterDelete(api, payload.channel_id, []);
   }
 }
@@ -281,53 +110,6 @@ export function handleChatBulkDeleted(
   bulkDeleteMessages(payload);
   reviseDmPreviewAfterDelete(api, payload.channel_id, payload.ids);
 }
-
-/** The in-flight GET /dms refetch per DM channel: the preview id it was
- *  issued for, and the token of the only answer that may be applied. */
-const dmPreviewRefetches = new Map<number, { shown: number; token: number }>();
-let dmPreviewRefetchToken = 0;
-
-/** A DM whose preview showed a now-deleted message is blanked at once, then
- *  takes the server's last message from GET /dms. A delete in the channel
- *  while that is in flight reissues it; an answer newer than the preview is
- *  dropped, since its chat_message frame owns it. */
-function reviseDmPreviewAfterDelete(
-  api: DispatchApi | undefined,
-  channelId: number,
-  ids: readonly number[],
-): void {
-  const shown = dmStore.getState().channels.find((c) => c.channelId === channelId)?.lastMessageId;
-  if (shown === undefined || shown === null) return;
-  if (!ids.includes(shown) && dmPreviewRefetches.get(channelId)?.shown !== shown) return;
-  reviseDmLastMessage(channelId, shown, { lastMessage: "" });
-  const getDmChannels = api?.getDmChannels;
-  if (getDmChannels === undefined) return;
-  const token = ++dmPreviewRefetchToken;
-  dmPreviewRefetches.set(channelId, { shown, token });
-  const settle = (): boolean => {
-    if (dmPreviewRefetches.get(channelId)?.token !== token) return false;
-    dmPreviewRefetches.delete(channelId);
-    return true;
-  };
-  getDmChannels().then(
-    (r) => {
-      if (!settle()) return;
-      const p = r.dm_channels.find((d) => d.channel_id === channelId);
-      if (p === undefined || (p.last_message_id !== null && p.last_message_id > shown)) return;
-      reviseDmLastMessage(channelId, shown, {
-        lastMessageId: p.last_message_id,
-        lastMessage: p.last_message,
-        lastMessageAt: p.last_message_at,
-      });
-    },
-    (err: unknown) => {
-      if (settle()) {
-        log.warn("Failed to refetch a DM preview after a delete", { error: String(err) });
-      }
-    },
-  );
-}
-
 /** A message was pinned or unpinned elsewhere — keep this client's row in
  *  sync (F5). The store's per-channel pin revision moves with it, which is what
  *  an open pinned panel watches to refetch its list. */
@@ -434,186 +216,6 @@ export function handleSendFailure(id: string, code: string): void {
   }
   rollbackReaction(id);
 }
-
-/** The pending-message slice of `ready`: resume this user's queued sends. */
-export function activateReadyPendingMessages(
-  api: DispatchApi | undefined,
-  payload: Payload<"ready">,
-): void {
-  const pendingUser = authStore.getState().user;
-  if (api?.getConfig && pendingUser) {
-    activatePendingMessages(
-      { host: api.getConfig().host, userId: pendingUser.id },
-      pendingUser,
-      payload.capabilities?.message_deduplication === true,
-      payload.capabilities?.message_retry_floor_ms,
-    );
-  }
-}
-
-/** The message-window slice of `ready`: after a full-ready resync, refetch the active channel. */
-export function applyReadyMessageResync(api: DispatchApi | undefined, clock: ReconnectClock): void {
-  // A second (or later) `ready` in this dispatcher's lifetime only ever
-  // arrives from a full-ready resync (Server/ws/serve.go: a fresh connect
-  // and a full resync are the only paths that send `ready` at all — a
-  // successful seq-based replay reconnect does not), and that tier never
-  // replays missed chat_message frames. Every channel this session had
-  // already loaded would otherwise keep a permanent, silent hole in its
-  // history — invalidate them and refetch the one actually on screen.
-  if (clock.hasReceivedReadyBefore) {
-    // Missed reaction_update frames are not replayed either, so every cached
-    // who-reacted list may be stale.
-    clearReactionUsersCache();
-    const activeAfterReady = channelsStore.select((s) => s.activeChannelId);
-    const getMessages = api?.getMessages;
-    // Only invalidate when the refetch below can actually happen — api is
-    // a Partial<...>, so getMessages may be absent, and there may be no
-    // resolvable active channel to refetch. A channel marked not loaded with
-    // nothing able to reload it would take live broadcasts onto a window
-    // that may have a hole in it.
-    if (activeAfterReady !== null && getMessages !== undefined) {
-      const getMessagesAround = api?.getMessagesAround;
-      // P2-T4: every loaded row stays on screen, and the refetch splices into
-      // the window. A reader back in history (a detached window) is refetched
-      // around the message at the top of the list, so it stays where it is;
-      // with no list showing it, the tail is refetched instead.
-      const anchor = isWindowDetached(activeAfterReady) ? readingAnchor(activeAfterReady) : null;
-      // Mark the active channel loading BEFORE invalidating: it records the
-      // watermark the splice checks the page against, and a channel with no
-      // rows shows the in-region spinner instead of reading as a genuinely
-      // empty channel for the whole refetch.
-      setChannelLoading(activeAfterReady);
-      invalidateLoadedMessageWindows();
-      // The user can switch (or the active channel can be cleared)
-      // while the fetch is in flight. Writing the page unconditionally would
-      // re-add a channel the user already left to loadedChannels with a
-      // pre-resync-era page — MessageController.loadMessages then
-      // short-circuits on isChannelLoaded() forever, so the hole this whole
-      // resync block exists to close becomes permanent instead. Only the
-      // channel still on screen when the response lands may accept it.
-      const stillActive = (): boolean =>
-        channelsStore.select((s) => s.activeChannelId) === activeAfterReady;
-      const refetch: Promise<void> =
-        anchor !== null && getMessagesAround !== undefined
-          ? getMessagesAround(activeAfterReady, anchor, { limit: 50 }).then((resp) => {
-              if (!stillActive()) return;
-              setAroundMessages(
-                activeAfterReady,
-                resp.messages,
-                resp.has_more_before,
-                resp.has_more_after,
-                true,
-              );
-            })
-          : getMessages(activeAfterReady, { limit: 50 }).then((resp) => {
-              if (!stillActive()) return;
-              setMessages(
-                activeAfterReady,
-                resp.messages,
-                resp.has_more,
-                true,
-                readingAnchor(activeAfterReady),
-              );
-            });
-      refetch.catch((err: unknown) => {
-        log.warn("Failed to reload message history after resync", { error: String(err) });
-        // Same staleness guard as above — a rejection for a channel the user
-        // already left must not flag it load-errored; that channel's own
-        // mount/retry path owns its state now.
-        if (!stillActive()) return;
-        // An empty channel shows the inline error + Retry (MessageController's
-        // loadMessages re-fetches because invalidate cleared "loaded"). Rows
-        // still on screen hide that region, so say it with a toast, as the
-        // normal load path does; the error detaches them, so "Jump to
-        // Present" refetches and no live row lands across the gap.
-        setChannelLoadError(activeAfterReady);
-        if (getChannelMessages(activeAfterReady).length > 0) {
-          showToast(connectText("app.loadHistoryFailed"), "error");
-        }
-      });
-    }
-  }
-  clock.hasReceivedReadyBefore = true;
-}
-
-function hasSendRow(correlationId: string): boolean {
-  for (const rows of messagesStore.getState().messagesByChannel.values()) {
-    if (rows.some((m) => m.correlationId === correlationId)) return true;
-  }
-  return false;
-}
-
-/**
- * A FORBIDDEN on a DM send is the server's generic block refusal
- * (ErrBlocked → FORBIDDEN, bidirectional). Gate the composer with the
- * neutral "being blocked" reason; blocks.store precedence still shows
- * the explicit reason if we are the blocker. Read the channel before
- * markSendFailed clears the pending row.
- */
-function gateDmBlockedByThem(id: string): void {
-  const chId = messagesStore.getState().pendingSends.get(id);
-  const dm =
-    chId === undefined ? undefined : dmStore.getState().channels.find((c) => c.channelId === chId);
-  // Block gating is a 1:1-only rule (server exempts group DMs from
-  // block checks entirely — a group FORBIDDEN means something else,
-  // e.g. stale membership). recipient is just participants[0] for a
-  // group, so flagging it there would gate an unrelated 1:1 DM.
-  if (dm !== undefined && !dm.isGroup) setUserBlockedByThem(dm.recipient.id, true);
-}
-
-/** Mark the pending optimistic send `id` failed (with retry) for this error. */
-function failPendingSend(payload: Payload<"error">, id: string): void {
-  if (payload.code === WsErrorCode.FORBIDDEN) gateDmBlockedByThem(id);
-  // A resent pre-restore id the server holds no receipt for is
-  // refused as BAD_REQUEST; say the server was restored, keeping the text.
-  // The toast lives here, with the connect catalog, to keep MainPage small.
-  const { pendingSends, messagesByChannel } = messagesStore.getState();
-  const clientMessageId = messagesByChannel
-    .get(pendingSends.get(id) ?? 0)
-    ?.find((m) => m.correlationId === id)?.clientMessageId;
-  const beforeRestore =
-    payload.code === WsErrorCode.BAD_REQUEST &&
-    clientMessageId !== undefined &&
-    pendingMessageBeforeRestore(clientMessageId);
-  if (beforeRestore) showToast(connectText("app.sendBeforeRestore"), "error");
-  markSendFailed(id, beforeRestore ? "BEFORE_RESTORE" : payload.code);
-}
-
-/**
- * The pending-send and pending-reaction branches of `error`. Returns true when
- * the frame answered one of them and the error chain must stop.
- */
-export function handleMessagingError(payload: Payload<"error">, id: string | undefined): boolean {
-  // A refused Forward is shown on its picker row; no toast on top.
-  if (isForwardRequest(id)) return true;
-  // A refused poll create, vote or end is shown on its dialog or card.
-  if (isPollRequest(id)) return true;
-  // 2A-3: a files-only send none of whose files could be attached stored
-  // nothing, and a Retry with the same ids fails the same way. Its row goes,
-  // even one already failed as unconfirmed; the channel controller puts its
-  // files back into the composer.
-  if (payload.code === WsErrorCode.ATTACHMENTS_UNAVAILABLE && id !== undefined && hasSendRow(id)) {
-    removeOptimistic(id);
-    return true;
-  }
-  // If the error carries the request id of a pending optimistic send, mark
-  // that specific row failed (with retry) instead of a global toast. This
-  // covers SLOW_MODE, FORBIDDEN, RATE_LIMITED, BAD_REQUEST, etc. on send.
-  if (id && messagesStore.getState().pendingSends.has(id)) {
-    failPendingSend(payload, id);
-    return true;
-  }
-  // A failed optimistic reaction toggle: the pill reverting is the
-  // feedback the spec asks for (ux/messaging §5) — no toast on top.
-  if (id !== undefined && rollbackReaction(id)) {
-    // 3A-12: the cap is not visible from the pill alone, so say why it reverted.
-    if (payload.code === WsErrorCode.REACTION_LIMIT)
-      showToast(connectText("app.reactionLimit"), "error");
-    return true;
-  }
-  return false;
-}
-
 // Messages, threads, reactions, polls and typing. thread_create_ok,
 // thread_changed and forum_post_create_ok all carry a thread's whole state.
 export const wsRoutes: readonly WsRoute[] = [

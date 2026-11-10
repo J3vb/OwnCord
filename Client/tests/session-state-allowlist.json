@@ -146,7 +146,7 @@
       "reason": "Keyed by emoji glyph; the still is derived from the bundled catalog"
     },
     {
-      "file": "features/messaging/wsHandlers.ts",
+      "file": "features/messaging/dmPreview.ts",
       "binding": "dmPreviewRefetches",
       "category": "transient",
       "reason": "Documented in the 5.2 design note: endSession drops the stale answer, so the leftover entry is harmless"

@@ -2,11 +2,6 @@
   "src/features/forums/ForumView.ts": 750,
   "src/features/forums/NewPostDialog.ts": 550,
   "src/features/members/MemberList.ts": 1000,
-  "src/features/messaging/message-list/listRender.ts": 650,
-  "src/features/messaging/message-list/listWindow.ts": 650,
-  "src/features/messaging/message-list/messageMenu.ts": 600,
-  "src/features/messaging/message-list/renderers.ts": 1000,
-  "src/features/messaging/wsHandlers.ts": 650,
   "src/features/moderation/AppealQueue.ts": 550,
   "src/features/moderation/Queue.ts": 900,
   "src/features/settings/AccountProfile.ts": 750,
@@ -36,6 +31,5 @@
   "src/pages/connect-page/ServerPanel.ts": 650,
   "src/pages/connect-page/login-form/loginFormDom.ts": 600,
   "src/platform/contracts/nativeVoice.ts": 650,
-  "src/stores/members.store.ts": 550,
-  "src/stores/messages.store.ts": 600
+  "src/stores/members.store.ts": 550
 }
