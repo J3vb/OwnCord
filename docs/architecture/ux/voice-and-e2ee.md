@@ -336,7 +336,10 @@ Per-user volume is adjustable (0–200%; saved values above 200% are read as 200
 Token refresh (a 4 min timer against the 5 min token) and voice reconnect (five attempts, 3 s-doubling
 backoff capped at 6 s, about 27 s, then every 15 s for up to 5 minutes) should be **invisible on success** beyond the
 "Reconnecting voice…" badge while a reconnect runs. Only giving up surfaces:
-"Voice connection lost — failed to reconnect" + auto-leave. A reconnect drops your camera and screen
+"Voice connection lost — failed to reconnect" + auto-leave. An attempt that connects to the voice
+server but then fails to set the call up ends the same way, at once: the new room is already the
+session by then, so it is not retried. A failed roster read or token refresh does not end the loop: the
+attempt waits for the next delay, or runs with the token it has. A reconnect drops your camera and screen
 share (`teardownForReconnect`); once it (or its rejoin) lands, the camera turns back on by itself, under
 the server's video limit. A screen share needs the OS picker again, so a sticky toast says it stopped,
 with a "Share again" button; on Linux X11 the same source is shared again with no dialog while the host

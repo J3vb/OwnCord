@@ -19,7 +19,8 @@ vi.mock("@lib/voice/livekitDiagnostics", () => ({
   logIceConnectionInfo: mocks.logIceConnectionInfo,
 }));
 
-import { attemptAutoReconnect, type ReconnectDeps } from "../../src/lib/voice/livekitReconnect";
+import { attemptAutoReconnect } from "../../src/lib/voice/livekitReconnect";
+import type { ReconnectDeps } from "../../src/features/voice/reconnectDeps";
 import { savePref } from "../../src/lib/prefs/preferences";
 
 const CHANNEL = 7;
@@ -31,17 +32,18 @@ const SLOW_DELAY_MS = 15_000;
 const FAST_PHASE_MS = 27_000;
 const TOKEN_REFRESH_AGE_MS = 4 * 60_000;
 
+interface FakeRoom {
+  connect: ReturnType<typeof vi.fn>;
+  startAudio: ReturnType<typeof vi.fn>;
+  switchActiveDevice: ReturnType<typeof vi.fn>;
+}
+
 interface FakeState {
   type: string;
   channelId?: number;
   ac?: AbortController | null;
   latestToken?: string;
-}
-
-interface FakeRoom {
-  connect: ReturnType<typeof vi.fn>;
-  startAudio: ReturnType<typeof vi.fn>;
-  switchActiveDevice: ReturnType<typeof vi.fn>;
+  room?: FakeRoom | Room;
 }
 
 function asRoom(room: FakeRoom): Room {
@@ -104,7 +106,11 @@ describe("attemptAutoReconnect loop", () => {
       switchActiveDevice: vi.fn().mockResolvedValue(undefined),
     };
     fn = {
-      setState: vi.fn(),
+      // As the session does: a write replaces the shared state, and the
+      // connected check reads it.
+      setState: vi.fn((next: FakeState) => {
+        state = next;
+      }),
       syncModuleRooms: vi.fn(),
       setModuleRooms: vi.fn(),
       createRoom: vi.fn().mockResolvedValue(asRoom(room)),
@@ -120,7 +126,10 @@ describe("attemptAutoReconnect loop", () => {
       rejoinVoice: vi.fn(),
       leaveVoice: vi.fn(),
       onError: vi.fn(),
-      isStateConnected: vi.fn().mockReturnValue(true),
+      isStateConnected: vi.fn(
+        (channelId: number, owned: Room) =>
+          state.type === "connected" && state.channelId === channelId && state.room === owned,
+      ),
       disconnectSupersededLocalRoom: vi.fn(),
       setupAudioPipeline: vi.fn(),
       reapplyMuteGain: vi.fn(),
@@ -228,6 +237,19 @@ describe("attemptAutoReconnect loop", () => {
       expect(fn.createRoom).not.toHaveBeenCalled();
       expect(logs.find(ABORTED)).toHaveLength(1);
       expect(fn.rejoinVoice).not.toHaveBeenCalled();
+    });
+
+    it("does not rejoin a released membership when a newer attempt took over during the read", async () => {
+      const newer: FakeState = { type: "connecting" };
+      fn.serverMembership.mockImplementation(async () => {
+        state = newer;
+        return "released";
+      });
+      await runFirstAttempt();
+      expect(fn.rejoinVoice).not.toHaveBeenCalled();
+      expect(fn.createRoom).not.toHaveBeenCalled();
+      expect(state).toBe(newer);
+      expect(logs.find(ABORTED)).toHaveLength(1);
     });
 
     it("logs the attempt number before waiting", async () => {
@@ -353,22 +375,6 @@ describe("attemptAutoReconnect loop", () => {
       claimFailures(3);
     });
 
-    it("counts a failure after the connected state was installed as a failed attempt and tries again", async () => {
-      fn.setupAudioPipeline.mockImplementationOnce(() => {
-        throw new Error("pipeline broke");
-      });
-      const loop = start();
-      await vi.advanceTimersByTimeAsync(3000);
-      expect(logs.find("Auto-reconnect failed")).toHaveLength(1);
-      expect(mocks.releaseRoom).toHaveBeenCalledWith(room);
-      expect(fn.noticeLostMedia).not.toHaveBeenCalled();
-      await vi.advanceTimersByTimeAsync(6000);
-      await loop;
-      expect(fn.setupAudioPipeline).toHaveBeenCalledTimes(2);
-      expect(fn.noticeLostMedia).toHaveBeenCalledTimes(1);
-      claimFailures(1);
-    });
-
     it("does not read the roster for a refresh when retrying stopped being allowed in the slow phase", async () => {
       fn.tokenAgeMs.mockReturnValue(10 * 60_000);
       fn.canKeepRetrying.mockImplementation(() => fn.createRoom.mock.calls.length < 5);
@@ -394,28 +400,93 @@ describe("attemptAutoReconnect loop", () => {
       claimFailures(5);
     });
 
-    it("lets a failed token refresh reject the loop without starting the attempt", async () => {
+    it("keeps the current token and starts the attempt when the token refresh fails", async () => {
       fn.tokenAgeMs.mockReturnValue(10 * 60_000);
       fn.refreshTokenAndWait.mockRejectedValue(new Error("refresh failed"));
-      fn.createRoom.mockRejectedValue(new Error("sfu down"));
-      const loop = start();
-      const rejected = expect(loop).rejects.toThrow("refresh failed");
-      await vi.advanceTimersByTimeAsync(FAST_PHASE_MS);
-      await rejected;
-      expect(fn.createRoom).toHaveBeenCalledTimes(5);
-      expect(attemptsLogged()).not.toContainEqual({ attempt: 6 });
+      const { loop } = await reachSlowPhase();
+      expect(fn.refreshTokenAndWait).toHaveBeenCalledTimes(1);
+      expect(attemptsLogged()).toContainEqual({ attempt: 6 });
+      await vi.advanceTimersByTimeAsync(SLOW_DELAY_MS);
+      expect(fn.createRoom).toHaveBeenCalledTimes(6);
       expect(fn.leaveVoice).not.toHaveBeenCalled();
-      claimFailures(5);
+      await finishWithAbort(loop);
+      claimFailures(6);
+      // Attempts 6 and 7 each asked for a token before their wait.
+      expectConsole("warn", "token refresh failed — keeping the current token");
+      expectConsole("warn", "token refresh failed — keeping the current token");
     });
 
-    it("lets a failed membership read reject the loop without creating a room", async () => {
+    it("stops without an attempt when the user left during a token refresh that failed", async () => {
+      fn.tokenAgeMs.mockReturnValue(10 * 60_000);
+      fn.refreshTokenAndWait.mockImplementation(() => {
+        ac.abort();
+        return Promise.reject(new Error("refresh failed"));
+      });
+      const { loop } = await reachSlowPhase();
+      await vi.advanceTimersByTimeAsync(60_000);
+      await loop;
+      expect(fn.createRoom).toHaveBeenCalledTimes(5);
+      expect(fn.leaveVoice).not.toHaveBeenCalled();
+      expect(logs.find(ABORTED)).toHaveLength(1);
+      claimFailures(5);
+      expectConsole("warn", "token refresh failed — keeping the current token");
+    });
+
+    const failedReads: Array<[string, () => Promise<string>]> = [
+      ["rejects", () => Promise.reject(new Error("roster failed"))],
+      [
+        "throws at once",
+        () => {
+          throw new Error("roster failed");
+        },
+      ],
+    ];
+
+    it.each(failedReads)(
+      "skips the attempt and tries again on the next delay when the membership read %s",
+      async (_name, failedRead) => {
+        fn.serverMembership.mockImplementationOnce(failedRead);
+        const loop = start();
+        await vi.advanceTimersByTimeAsync(3000);
+        expect(fn.createRoom).not.toHaveBeenCalled();
+        expect(fn.rejoinVoice).not.toHaveBeenCalled();
+        expect(fn.leaveVoice).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(6000);
+        await loop;
+        expect(attemptsLogged()).toEqual([{ attempt: 1 }, { attempt: 2 }]);
+        expect(fn.createRoom).toHaveBeenCalledTimes(1);
+        expect(state.type).toBe("connected");
+        expectConsole("warn", "membership read failed — treating it as unknown");
+      },
+    );
+
+    it("does not refresh the token when the membership read for the refresh fails", async () => {
+      fn.tokenAgeMs.mockReturnValue(10 * 60_000);
+      fn.serverMembership.mockImplementation(async () => {
+        if (fn.createRoom.mock.calls.length >= 5) throw new Error("roster failed");
+        return "held";
+      });
+      const { loop } = await reachSlowPhase();
+      expect(fn.refreshTokenAndWait).not.toHaveBeenCalled();
+      expect(attemptsLogged()).toContainEqual({ attempt: 6 });
+      await finishWithAbort(loop);
+      expect(fn.createRoom).toHaveBeenCalledTimes(5);
+      claimFailures(5);
+      expectConsole("warn", "membership read failed — treating it as unknown");
+    });
+
+    it("gives up at the ceiling when the membership read never works", async () => {
       fn.serverMembership.mockRejectedValue(new Error("roster failed"));
       const loop = start();
-      const rejected = expect(loop).rejects.toThrow("roster failed");
-      await vi.advanceTimersByTimeAsync(3000);
-      await rejected;
+      await vi.advanceTimersByTimeAsync(CEILING_MS);
+      await loop;
       expect(fn.createRoom).not.toHaveBeenCalled();
-      expect(fn.leaveVoice).not.toHaveBeenCalled();
+      expect(fn.leaveVoice).toHaveBeenCalledTimes(1);
+      expect(fn.onError).toHaveBeenCalledWith("Voice connection lost — failed to reconnect");
+      const reads = fn.serverMembership.mock.calls.length;
+      expect(reads).toBeGreaterThan(5);
+      for (let i = 0; i < reads; i++) expectConsole("warn", "membership read failed");
+      expectConsole("error", "Auto-reconnect giving up");
     });
   });
 
@@ -705,6 +776,213 @@ describe("attemptAutoReconnect loop", () => {
     });
   });
 
+  describe("a failure after the connected state was installed", () => {
+    const LATE = "Auto-reconnect failed after connecting — leaving voice";
+    const lateFailures: Array<[string, () => void]> = [
+      [
+        "sweeping the publications",
+        () =>
+          fn.sweepPublications.mockImplementation(() => {
+            throw new Error("sweep broke");
+          }),
+      ],
+      [
+        "restoring local voice state",
+        () => fn.restoreLocalVoiceState.mockRejectedValue(new Error("restore broke")),
+      ],
+      [
+        "building the audio pipeline",
+        () =>
+          fn.setupAudioPipeline.mockImplementation(() => {
+            throw new Error("pipeline broke");
+          }),
+      ],
+      [
+        "the last step of the tail",
+        () =>
+          fn.noticeLostMedia.mockImplementation(() => {
+            throw new Error("notice broke");
+          }),
+      ],
+    ];
+
+    it.each(lateFailures)(
+      "ends the call instead of keeping a connected state on a dead room: %s",
+      async (_name, arm) => {
+        arm();
+        fn.leaveVoice.mockImplementation(() => {
+          state = { type: "idle" };
+        });
+        await runFirstAttempt();
+        expect(fn.leaveVoice).toHaveBeenCalledTimes(1);
+        expect(mocks.leaveVoiceChannel).toHaveBeenCalledTimes(1);
+        expect(fn.onError).toHaveBeenCalledTimes(1);
+        expect(fn.onError).toHaveBeenCalledWith("Voice connection lost — failed to reconnect");
+        expect(state).toEqual({ type: "idle" });
+        // The session's own leave tears the room down; the attempt does not
+        // release it a second time, restate "reconnecting" or try again.
+        expect(mocks.releaseRoom).not.toHaveBeenCalled();
+        expect(fn.setState.mock.calls.at(-1)?.[0]).toMatchObject({ type: "connected" });
+        expect(logs.find("Auto-reconnect failed")).toHaveLength(0);
+        const entries = logs.find(LATE);
+        expect(entries).toHaveLength(1);
+        expect(entries[0]?.data).toMatchObject({ attempt: 1 });
+        await vi.advanceTimersByTimeAsync(60_000);
+        expect(fn.createRoom).toHaveBeenCalledTimes(1);
+        expect(vi.getTimerCount()).toBe(0);
+        expectConsole("error", LATE);
+      },
+    );
+
+    it("counts a connected write that fails as an ordinary failed attempt and tries again", async () => {
+      // The state is still this loop's "reconnecting": there is no session to end.
+      fn.setState.mockImplementationOnce((next: FakeState) => {
+        state = next;
+      });
+      fn.setState.mockImplementationOnce(() => {
+        throw new Error("write broke");
+      });
+      const loop = start();
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(fn.leaveVoice).not.toHaveBeenCalled();
+      expect(mocks.releaseRoom).toHaveBeenCalledWith(room);
+      expect(logs.find("Auto-reconnect failed")).toHaveLength(1);
+      await vi.advanceTimersByTimeAsync(6000);
+      await loop;
+      expect(fn.createRoom).toHaveBeenCalledTimes(2);
+      expect(state.type).toBe("connected");
+      expect(fn.noticeLostMedia).toHaveBeenCalledTimes(1);
+      claimFailures(1);
+    });
+
+    const newerOwners: Array<[string, () => FakeState, number]> = [
+      [
+        "a session on another channel",
+        () => ({ type: "connected", channelId: CHANNEL + 1, room: asRoom({ ...room }) }),
+        1,
+      ],
+      [
+        "a new session on the same channel",
+        () => ({ type: "connected", channelId: CHANNEL, room: asRoom({ ...room }) }),
+        1,
+      ],
+      [
+        "a newer reconnect loop",
+        () => ({ type: "reconnecting", channelId: CHANNEL, ac: new AbortController() }),
+        0,
+      ],
+      ["a join in progress", () => ({ type: "connecting" }), 0],
+      ["a leave", () => ({ type: "idle" }), 1],
+    ];
+
+    it.each(newerOwners)(
+      "releases only its own room when the failure comes after %s took the state",
+      async (_name, next, syncs) => {
+        const newer = next();
+        fn.restoreLocalVoiceState.mockImplementation(async () => {
+          state = newer;
+          throw new Error("restore broke");
+        });
+        const loop = start();
+        await vi.advanceTimersByTimeAsync(3000);
+        expect(fn.leaveVoice).not.toHaveBeenCalled();
+        expect(mocks.leaveVoiceChannel).not.toHaveBeenCalled();
+        expect(fn.onError).not.toHaveBeenCalled();
+        expect(mocks.releaseRoom).toHaveBeenCalledTimes(1);
+        expect(mocks.releaseRoom).toHaveBeenCalledWith(room);
+        expect(fn.syncModuleRooms).toHaveBeenCalledTimes(syncs);
+        expect(logs.find(LATE)).toHaveLength(0);
+        await vi.advanceTimersByTimeAsync(60_000);
+        await loop;
+        expect(fn.createRoom).toHaveBeenCalledTimes(1);
+        // Not one write after the takeover: the state is the newer owner's.
+        expect(state).toBe(newer);
+        expect(fn.setState.mock.calls.at(-1)?.[0]).toMatchObject({ type: "connected" });
+        claimFailures(1);
+      },
+    );
+  });
+
+  describe("a newer attempt takes the shared state inside an attempt's await", () => {
+    type Step = keyof typeof fn | "connect";
+
+    /** Each await of an attempt, with the steps that must not run after it. */
+    const awaits: Array<[string, Step, Step[]]> = [
+      [
+        "creating the room",
+        "createRoom",
+        ["setModuleRooms", "resolveUrl", "reannounceE2EE", "connect"],
+      ],
+      ["resolving the URL", "resolveUrl", ["reannounceE2EE", "connect"]],
+      ["announcing the E2EE key", "reannounceE2EE", ["connect"]],
+      [
+        "connecting the room",
+        "connect",
+        ["sweepPublications", "restoreLocalVoiceState", "setupAudioPipeline"],
+      ],
+    ];
+
+    /** Who took the state, and whether the modules are re-synced to it. */
+    const takeovers: Array<[string, () => FakeState, number]> = [
+      [
+        "a newer reconnect loop",
+        () => ({ type: "reconnecting", channelId: CHANNEL, ac: new AbortController() }),
+        0,
+      ],
+      ["a join to another channel", () => ({ type: "connecting" }), 0],
+      [
+        "a new session on the same channel",
+        () => ({ type: "connected", channelId: CHANNEL, room: asRoom({ ...room }) }),
+        1,
+      ],
+    ];
+
+    function step(name: Step): ReturnType<typeof vi.fn> {
+      return name === "connect" ? room.connect : fn[name];
+    }
+
+    const results: Record<string, unknown> = { createRoom: undefined, resolveUrl: RESOLVED };
+
+    describe.each(awaits)("while %s", (_awaitName, during, never) => {
+      it.each(takeovers)(
+        "stops, releases only its own room and leaves the state to %s",
+        async (_name, next, syncs) => {
+          const newer = next();
+          let writesBefore = -1;
+          step(during).mockImplementation(async () => {
+            writesBefore = fn.setState.mock.calls.length;
+            state = newer;
+            return during === "createRoom" ? asRoom(room) : results[during];
+          });
+          await runFirstAttempt();
+
+          // Not one write after the takeover: the state is the newer owner's.
+          expect(state).toBe(newer);
+          expect(fn.setState).toHaveBeenCalledTimes(writesBefore);
+          expect(fn.setState).not.toHaveBeenCalledWith(
+            expect.objectContaining({ type: "connected" }),
+          );
+          for (const later of never) expect(step(later)).not.toHaveBeenCalled();
+          // Its own room only, and never the session-wide teardown.
+          expect(mocks.releaseRoom).toHaveBeenCalledTimes(1);
+          expect(mocks.releaseRoom).toHaveBeenCalledWith(room);
+          expect(fn.disconnectSupersededLocalRoom).not.toHaveBeenCalled();
+          expect(fn.leaveVoice).not.toHaveBeenCalled();
+          expect(mocks.leaveVoiceChannel).not.toHaveBeenCalled();
+          expect(fn.rejoinVoice).not.toHaveBeenCalled();
+          expect(fn.onError).not.toHaveBeenCalled();
+          expect(fn.startTokenRefreshTimer).not.toHaveBeenCalled();
+          expect(fn.requestTokenRefresh).not.toHaveBeenCalled();
+          expect(fn.syncModuleRooms).toHaveBeenCalledTimes(syncs);
+          // The loop is over: no wait is pending and nothing tries again.
+          expect(vi.getTimerCount()).toBe(0);
+          expect(fn.createRoom).toHaveBeenCalledTimes(1);
+          expect(logs.find("Auto-reconnect failed")).toHaveLength(0);
+        },
+      );
+    });
+  });
+
   describe("a failed attempt", () => {
     it("logs the attempt, URL and error", async () => {
       room.connect.mockRejectedValue(new Error("handshake failed"));
@@ -773,9 +1051,8 @@ describe("attemptAutoReconnect loop", () => {
         const loop = start();
         await vi.advanceTimersByTimeAsync(3000);
         expect(fn.syncModuleRooms).toHaveBeenCalledTimes(syncs);
-        if (next().type !== "reconnecting") {
-          expect(fn.setState).not.toHaveBeenCalled();
-        }
+        // A superseded attempt writes nothing, a newer loop's state included.
+        expect(fn.setState).not.toHaveBeenCalled();
         await vi.advanceTimersByTimeAsync(60_000);
         await loop;
         claimFailures(1);

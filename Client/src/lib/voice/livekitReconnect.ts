@@ -7,92 +7,13 @@ import { loadPref } from "@lib/prefs/preferences";
 import { createLogger } from "@lib/logger";
 import { logIceConnectionInfo } from "@lib/voice/livekitDiagnostics";
 import { setJoinedVoiceStatus } from "@lib/voice/roomEventHandlers";
+import type { ReconnectDeps, ServerMembership } from "../../features/voice/reconnectDeps";
 import { releaseRoom } from "../../features/voice/releaseRoom";
 import { ROOM_CONNECT_OPTIONS, type SessionState } from "../../features/voice/sessionState";
 import { voiceText } from "../../i18n/voice";
 import { redactTunnelUrl } from "@lib/voice/voiceJoinTrace";
 
 const log = createLogger("livekitReconnect");
-
-export interface ReconnectDeps {
-  sweepPublications(room: Room): void;
-  /** Current session state accessor. */
-  getState: () => SessionState;
-  /** Transition to a new state. */
-  setState: (state: SessionState) => void;
-  /** Sync extracted modules (AudioPipeline, AudioElements, DeviceManager) to the room
-   *  in the CURRENT shared state. Only correct where that state is the one to follow —
-   *  the abort/failure paths. Mid-attempt, use setModuleRooms instead. */
-  syncModuleRooms: () => void;
-  /** Point the extracted modules at THIS attempt's room.
-   *
-   *  Not syncModuleRooms(): that reads the room out of the shared state, and at
-   *  the point this is called the state is still "reconnecting", which is
-   *  room-less. Syncing there wires every module to null, so the reconnect
-   *  finishes with no audio pipeline and no remote-subscription handling —
-   *  deafen silently stops being re-applied. */
-  setModuleRooms: (room: Room) => void;
-  /** Create a new Room with E2EE wired up. */
-  createRoom: () => Promise<Room>;
-  /** Resolve a LiveKit URL. */
-  resolveUrl: (proxyPath: string, directUrl?: string) => Promise<string>;
-  /** Re-announce E2EE for the new session (forward secrecy). */
-  reannounceE2EE: () => Promise<void>;
-  /** Restore local voice state (mic, deafen, PTT). */
-  restoreLocalVoiceState: (mode: "join" | "reconnect") => Promise<void>;
-  /** Start the token refresh timer. */
-  startTokenRefreshTimer: () => void;
-  /** Request a token refresh. */
-  requestTokenRefresh: () => void;
-  /** Request a token refresh and wait for the reply (bounded), so the next
-   *  attempt reads the fresh token from the state. */
-  refreshTokenAndWait: () => Promise<void>;
-  /** Milliseconds since the current token arrived. */
-  tokenAgeMs: () => number;
-  /** True while the chat socket is connected or reconnecting (not closed for
-   *  good: sign-out, session replaced, auth failure) and the channel still
-   *  exists — every attempt's precondition (P2-T5). */
-  canKeepRetrying: () => boolean;
-  /** Whether the server still holds the membership the old token belongs to,
-   *  read from the voice roster — "unknown" while the chat socket is not
-   *  connected, since the roster cannot update then. Resolves only once the
-   *  socket's own ready or resume replay is applied: a socket reads
-   *  "connected" from its auth_ok, while the roster still shows the drop. */
-  serverMembership: () => Promise<"held" | "released" | "unknown">;
-  /** Tear the session down and send voice_join for the same channel, so the
-   *  ordinary join path (E2EE, device prefs) resumes the call. Only called
-   *  once serverMembership() reads "released". */
-  rejoinVoice: () => void;
-  /** Full session teardown, sending voice_leave to the server when the chat
-   *  socket is connected (a socket still reconnecting cannot carry it; the
-   *  server's grace window and reaper retire the membership instead).
-   *
-   *  Not a bare voice_leave frame: the give-up path is a real leave, so it owes
-   *  the session everything leaveVoice(true) does — state back to "idle", the
-   *  E2EE worker terminated so the last room key does not stay resident, timers
-   *  cleared, and the FULL audio-element cleanup that also clears per-call
-   *  screenshare mute/volume state (the reconnect-flavoured cleanup
-   *  deliberately preserves it). Only ever called once the give-up path has
-   *  confirmed it is not superseded — this teardown is global, so a superseded
-   *  loop calling it would kill the live session that replaced it
-   *  (Client/CLAUDE.md: voice sessions are superseded, not cancelled). */
-  leaveVoice: () => void;
-  /** Error callback. */
-  onError: (message: string) => void;
-  /** True when the shared state is still THIS attempt's connected room. */
-  isStateConnected: (channelId: number, room: Room) => boolean;
-  /** Tear down a room this attempt no longer owns. */
-  disconnectSupersededLocalRoom: (room: Room) => void;
-  /** Rebuild the audio pipeline against the new room. */
-  setupAudioPipeline: () => void;
-  /** Re-apply mute gain once the pipeline is rebuilt. */
-  reapplyMuteGain: () => void;
-  /** Clear the pending-reconnect fields now the tail has completed. */
-  clearPendingReconnectFields: () => void;
-  /** Tell the user about a camera or screen share the drop stopped. Only a
-   *  reconnect that got all the way through calls it. */
-  noticeLostMedia: () => void;
-}
 
 /** Auto-reconnect budget, sized to outlast a companion LiveKit restart.
  *
@@ -179,16 +100,33 @@ function slowPreflight(run: ReconnectRun, delay: number): Gate {
   return deps.tokenAgeMs() + delay > TOKEN_REFRESH_AGE_MS ? "refresh" : "go";
 }
 
+/** Read the membership from the voice roster. A read that fails says nothing
+ *  either way, so it counts as "unknown": the loop waits one attempt instead
+ *  of ending with the session left in "reconnecting". */
+async function readMembership(deps: ReconnectDeps): Promise<ServerMembership> {
+  try {
+    return await deps.serverMembership();
+  } catch (err) {
+    log.warn("Auto-reconnect: membership read failed — treating it as unknown", err);
+    return "unknown";
+  }
+}
+
 /** Refresh a token that would be stale by the next attempt, but only for a
  *  membership the server still holds. False when the loop was superseded. */
 async function refreshStaleToken(run: ReconnectRun): Promise<boolean> {
   const { deps } = run;
-  const held = (await deps.serverMembership()) === "held";
+  const held = (await readMembership(deps)) === "held";
   if (run.superseded()) {
     logAborted();
     return false;
   }
-  if (held) await deps.refreshTokenAndWait();
+  try {
+    if (held) await deps.refreshTokenAndWait();
+  } catch (err) {
+    // As when no reply arrives in time: the attempt runs with the token it has.
+    log.warn("Auto-reconnect: token refresh failed — keeping the current token", err);
+  }
   return true;
 }
 
@@ -208,7 +146,7 @@ function afterBackoff(run: ReconnectRun): Gate {
  *  The old token is only good for a membership the server still holds:
  *  wait out a chat socket that cannot say, and rejoin one it released
  *  (grace expiry, a server reap, a restart). */
-function judgeMembership(run: ReconnectRun, membership: "held" | "released" | "unknown"): Gate {
+function judgeMembership(run: ReconnectRun, membership: ServerMembership): Gate {
   if (run.superseded()) {
     logAborted();
     return "stop";
@@ -361,12 +299,42 @@ function handleAttemptFailure(
       log.warn("Failed to disconnect room after reconnect failure", disconnectErr),
     );
   }
-  // Return to idle so the next attempt starts fresh.
-  resyncModulesIfSafe(run, restateReconnecting(run.deps));
+  // Restate "reconnecting" so the next attempt starts fresh, but only as its
+  // owner: a superseded attempt writes nothing into the shared state.
+  const current = run.superseded() ? run.deps.getState() : restateReconnecting(run.deps);
+  resyncModulesIfSafe(run, current);
 }
 
-/** One connect attempt. True when the loop is finished (connected, or aborted
- *  and cleaned up), false when the attempt failed and the loop should go on.
+/** Leave the call for real and tell the user. leaveVoice also sends voice_leave
+ *  while the chat socket is connected, so the server removes our voice state —
+ *  without that the server and other clients see us as a ghost participant. */
+function endCall(deps: ReconnectDeps): void {
+  deps.leaveVoice();
+  leaveVoiceChannel();
+  deps.onError(voiceText("reconnect.voiceLost"));
+}
+
+/** A failure after this attempt made its room the session: "connected" is
+ *  installed before the tail runs. Releasing only the room would leave the
+ *  state "connected" on a room that is gone, and nothing here can put back
+ *  "reconnecting" over what the tail already set up, so the call ends the way
+ *  a give-up does. False when the state is no longer this attempt's connected
+ *  room (a newer attempt owns it): the caller then cleans up its own room only. */
+function endedAfterConnectedFailure(
+  run: ReconnectRun,
+  attempt: number,
+  err: unknown,
+  room: Room,
+): boolean {
+  if (!run.deps.isStateConnected(run.channelId, room)) return false;
+  log.error("Auto-reconnect failed after connecting — leaving voice", { attempt, error: err });
+  endCall(run.deps);
+  return true;
+}
+
+/** One connect attempt. True when the loop is finished (connected, aborted
+ *  and cleaned up, or ended after a late failure), false when the attempt
+ *  failed and the loop should go on.
  *  Every await is followed at once by its supersession checkpoint. */
 async function runAttempt(run: ReconnectRun, attempt: number): Promise<boolean> {
   const { deps } = run;
@@ -378,6 +346,8 @@ async function runAttempt(run: ReconnectRun, attempt: number): Promise<boolean> 
   // Aliased outside the try so the catch can tear down the attempt's own
   // room: deps.getState() has no room while state is "reconnecting".
   let attemptRoom: Room | null = null;
+  // The room this attempt wrote into the state as the connected session.
+  let installedRoom: Room | null = null;
   try {
     const newRoom = await deps.createRoom();
     attemptRoom = newRoom;
@@ -416,10 +386,14 @@ async function runAttempt(run: ReconnectRun, attempt: number): Promise<boolean> 
       return true;
     }
 
+    installedRoom = newRoom;
     installConnected(run, newRoom, token, attempt, resolvedUrl);
     await finishConnectedTail(run, newRoom);
     return true;
   } catch (err) {
+    if (installedRoom !== null && endedAfterConnectedFailure(run, attempt, err, installedRoom)) {
+      return true;
+    }
     handleAttemptFailure(run, attempt, err, attemptRoom);
     return false;
   }
@@ -429,18 +403,12 @@ async function runAttempt(run: ReconnectRun, attempt: number): Promise<boolean> 
  *  gone — give up and clean up. But first check this loop is still current
  *  (see connectAndSetup). */
 function giveUpReconnect(run: ReconnectRun): void {
-  const { deps } = run;
   if (run.superseded()) {
     log.info("Auto-reconnect give-up skipped — superseded");
     return;
   }
-  // Tear the session down for real. leaveVoice(true) also sends voice_leave
-  // over WS, so the server removes our voice state — without that the server
-  // and other clients see us as a ghost participant.
   log.error("Auto-reconnect giving up");
-  deps.leaveVoice();
-  leaveVoiceChannel();
-  deps.onError(voiceText("reconnect.voiceLost"));
+  endCall(run.deps);
 }
 
 /** Attempt to auto-reconnect after unexpected disconnect using stored token.
@@ -483,7 +451,7 @@ export async function attemptAutoReconnect(
     if (waited === "giveUp") break;
     if (waited === "stop") return;
     // oxlint-disable-next-line no-await-in-loop -- each attempt reads the roster as it is now
-    const verdict = judgeMembership(run, await deps.serverMembership());
+    const verdict = judgeMembership(run, await readMembership(deps));
     if (verdict === "stop") return;
     if (verdict === "retry") continue;
     // oxlint-disable-next-line no-await-in-loop -- sequential: one attempt at a time
