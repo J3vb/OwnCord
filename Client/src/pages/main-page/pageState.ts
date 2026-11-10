@@ -24,7 +24,6 @@ import type { ContentNavigator } from "../../features/navigation/contentView";
 import type { MainPageOptions } from "../MainPage";
 
 import type { Disposable } from "@lib/disposable";
-import type { ApiClient } from "@lib/api";
 import type { VoiceState } from "@stores/voice.store";
 import type { SidebarAreaResult } from "./SidebarArea";
 import type { ChatAreaResult } from "./ChatArea";
@@ -205,11 +204,7 @@ export interface MountScope {
   layoutOwner: Disposable;
   // --- Moderation notices: persistent, above the app row ---
   notices: Disposable;
-  // Settings overlay
-  // Bumped by every local 2FA change so an in-flight profile refresh
-  // cannot overwrite it with an older answer.
-  totpEpoch: number;
-  safety: { readonly build: (signal: AbortSignal, api: ApiClient) => HTMLDivElement } | undefined;
+  // Settings overlay (built by features/settings/mountSettings)
   settingsOverlay: MountableComponent & { open(): void; close(): void };
   // Quick switcher (Ctrl+K)
   // Don't fire while the settings panel is on top of it — same guard as

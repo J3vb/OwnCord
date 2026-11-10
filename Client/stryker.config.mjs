@@ -233,6 +233,7 @@ const MOVED_NOT_MUTATED = [
   "src/features/settings/comboCapture.ts",
   "src/features/settings/globalKeysWatch.ts",
   "src/features/settings/helpers.ts",
+  "src/features/settings/mountSettings.ts",
   "src/features/settings/pttControls.ts",
   "src/features/settings/settingsChrome.ts",
   "src/features/settings/settingsGuards.ts",
