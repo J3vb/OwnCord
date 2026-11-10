@@ -9,6 +9,7 @@ import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
 import androidx.annotation.RequiresApi
+import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.FileProvider
 import app.tauri.annotation.Command
 import app.tauri.annotation.InvokeArg
@@ -19,7 +20,6 @@ import app.tauri.plugin.Plugin
 import java.io.File
 import java.io.FileInputStream
 import java.io.IOException
-import java.util.concurrent.Executors
 
 @InvokeArg
 class FileArgs {
@@ -53,16 +53,27 @@ object SaveTarget {
 @TauriPlugin
 class FilesPlugin(private val activity: Activity) : Plugin(activity) {
   // MediaStore copies can be large: off the main thread, one at a time.
-  private val io = Executors.newSingleThreadExecutor()
+  private val io = RetirableWorker()
+  // Storage work holds this, not the activity, so a queued save cannot keep a
+  // retired screen alive.
+  private val appContext = activity.applicationContext
+
+  override fun onDestroy(activity: AppCompatActivity) {
+    io.retire()
+  }
 
   private fun staged(path: String): File? {
     val file = File(path)
-    val outgoing = File(activity.cacheDir, "outgoing").canonicalPath + File.separator
+    val outgoing = File(appContext.cacheDir, "outgoing").canonicalPath + File.separator
     return if (file.isFile && file.canonicalPath.startsWith(outgoing)) file else null
   }
 
   @Command
   fun saveFile(invoke: Invoke) {
+    if (io.isRetired) {
+      invoke.reject(CLOSED)
+      return
+    }
     val args = invoke.parseArgs(FileArgs::class.java)
     val file = staged(args.path)
     if (file == null) {
@@ -78,19 +89,20 @@ class FilesPlugin(private val activity: Activity) : Plugin(activity) {
       }
       return
     }
-    io.execute {
+    val accepted = io.execute(onCancelled = { invoke.reject(CLOSED) }) {
       try {
         writeToMediaStore(file, args)
-        invoke.resolve(JSObject().apply { put("status", "saved") })
+        if (!io.isRetired) invoke.resolve(JSObject().apply { put("status", "saved") })
       } catch (e: Exception) {
-        invoke.reject("could not save the file: $e", e)
+        if (!io.isRetired) invoke.reject("could not save the file: $e", e)
       }
     }
+    if (!accepted) invoke.reject(CLOSED)
   }
 
   @RequiresApi(Build.VERSION_CODES.Q)
   private fun writeToMediaStore(file: File, args: FileArgs) {
-    val resolver = activity.contentResolver
+    val resolver = appContext.contentResolver
     val collection: Uri = if (SaveTarget.isPictures(args.folder)) {
       MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
     } else {
@@ -117,6 +129,10 @@ class FilesPlugin(private val activity: Activity) : Plugin(activity) {
 
   @Command
   fun shareFile(invoke: Invoke) {
+    if (io.isRetired) {
+      invoke.reject(CLOSED)
+      return
+    }
     val args = invoke.parseArgs(FileArgs::class.java)
     val file = staged(args.path)
     if (file == null) {
@@ -135,6 +151,10 @@ class FilesPlugin(private val activity: Activity) : Plugin(activity) {
 
   @Command
   fun shareText(invoke: Invoke) {
+    if (io.isRetired) {
+      invoke.reject(CLOSED)
+      return
+    }
     val args = invoke.parseArgs(ShareTextArgs::class.java)
     try {
       val send = Intent(Intent.ACTION_SEND).apply {
@@ -161,5 +181,9 @@ class FilesPlugin(private val activity: Activity) : Plugin(activity) {
       addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
     activity.startActivity(chooser)
+  }
+
+  companion object {
+    private const val CLOSED = "the app screen was closed; try again"
   }
 }
