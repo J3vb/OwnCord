@@ -88,6 +88,7 @@ and only when it changes something a contributor or fork holder must do
 - Desktop: signing out, switching servers or accepting a changed server certificate now closes the voice connection's local tunnel right away.
 - Voice: a reconnect that reached the voice server but could not finish setting the call up left you shown as connected with no audio. The call now ends with "Voice connection lost" so you can rejoin.
 - Voice: a reconnect could stay on "Reconnecting voice…" for good if a token refresh or a check of the voice roster failed part way. It now carries on, and still gives up after 5 minutes.
+- Voice: clicking another voice channel at the very moment a reconnect gave up could cancel the new join and show "Voice connection lost". The new channel now connects.
 - Desktop and Android: saved logins, media and game activity, notifications, saving or sharing files and installing an update no longer hold up the rest of the app while the system is slow to answer.
 
 ### Under the hood

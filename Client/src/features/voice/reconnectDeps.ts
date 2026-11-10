@@ -71,6 +71,18 @@ export interface ReconnectDeps {
    *  replaced it (Client/CLAUDE.md: voice sessions are superseded, not
    *  cancelled). */
   leaveVoice: () => void;
+  /** True while a join the user sent for ANOTHER channel waits for its answer:
+   *  the store already points at that channel and reads "joining", and the
+   *  session is still this loop's. From then on that join owns what the
+   *  session does next, so the loop treats it as a newer owner. */
+  switchInFlight: () => boolean;
+  /** Clear this loop's session out of the way of that join, as its token
+   *  would have: a local teardown that sends nothing and shows nothing, with
+   *  the store left on the new channel and "joining" so the answer still
+   *  lands — a token connects, and a refusal still ends the old call on the
+   *  server. Only called while switchInFlight() is true and the loop still
+   *  owns the session. */
+  yieldToSwitch: () => void;
   /** Error callback. */
   onError: (message: string) => void;
   /** True when the shared state is still THIS attempt's connected room. */

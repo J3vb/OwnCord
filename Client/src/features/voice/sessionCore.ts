@@ -34,6 +34,15 @@ export abstract class SessionCore {
   /** P2-T5: the reconnect loop sent voice_join and awaits the server's answer. */
   protected _rejoinPending = false;
 
+  /** The reconnect loop cleared the session for a join the user had already
+   *  sent for another channel, and that join has no answer yet. The server may
+   *  still hold the old call (a join refused before it moves the member leaves
+   *  it in place), so the refusal has to end it. Cleared when the join starts
+   *  connecting and by every leave. */
+  protected _yieldedToJoin = false;
+  /** Bounds that wait: an answer that never comes ends as a give-up. */
+  protected _yieldTimer: ReturnType<typeof setTimeout> | null = null;
+
   protected ws: WsClient | null = null;
   protected onErrorCallback: ((message: string) => void) | null = null;
   protected serverHost: string | null = null;
@@ -53,6 +62,13 @@ export abstract class SessionCore {
     lastUrl: string;
     lastDirectUrl: string | undefined;
   } | null = null;
+
+  /** The join a reconnect was cleared for has its answer, or the call ended. */
+  protected clearYield(): void {
+    this._yieldedToJoin = false;
+    if (this._yieldTimer !== null) clearTimeout(this._yieldTimer);
+    this._yieldTimer = null;
+  }
 
   // --- State transition (single writer) ---
 
@@ -147,12 +163,15 @@ export abstract class SessionCore {
     return this._room;
   }
 
-  /** True while a join/connect attempt is in flight OR a room is live —
-   *  i.e. `_state.type !== "idle"`. Unlike `getRoom() !== null`, this also
+  /** True while a join/connect attempt is in flight OR a room is live (any
+   *  state but "idle"). Unlike `getRoom() !== null`, this also
    *  covers "connecting" (no Room object exists yet) and "reconnecting" (the
    *  `_room` getter reads null there too): a caller that only
-   *  wants to know "should we tear anything down" must not miss those. */
+   *  wants to know "should we tear anything down" must not miss those. Also
+   *  true, in "idle", for a call the reconnect loop handed to a join still
+   *  waiting for its answer: nothing is left here, but the server may still
+   *  hold it. */
   hasActiveSession(): boolean {
-    return this._state.type !== "idle";
+    return this._state.type !== "idle" || this._yieldedToJoin;
   }
 }

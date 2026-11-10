@@ -1,14 +1,23 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, onTestFinished } from "vitest";
 import * as mocks from "../../helpers/livekitSessionMocks";
 import { LiveKitSession } from "../../../src/lib/voice/livekitSession";
+import * as voice from "../../../src/lib/voice/livekitSession";
+import { handleVoiceJoinRollback } from "../../../src/features/voice/wsHandlers";
 import { leaveVoiceChannel, setVoiceStatus } from "@stores/voice.store";
 import { channelsStore, resetChannelsStore } from "@stores/channels.store";
-import { takeJoinRefusal } from "../../../src/features/voice/joinRequest";
 import {
+  noteJoinSent,
+  resetJoinRequest,
+  takeJoinRefusal,
+} from "../../../src/features/voice/joinRequest";
+import {
+  captureDisconnectedHandler,
   useLiveKitSessionHarness,
   enterReconnecting,
   startReconnect,
   enterConnected,
+  wireLoopRig,
+  type LoopRig,
 } from "../../helpers/livekitSessionHarness";
 
 vi.mock("livekit-client", () => mocks.livekitClientMock());
@@ -379,6 +388,286 @@ describe("LiveKitSession", () => {
       expect(errorCb).toHaveBeenCalledWith("Voice connection lost — failed to reconnect");
       expect((session as any)._state.type).toBe("idle");
       expect(sendSpy.mock.calls.filter(([m]) => m.type === "voice_leave")).toHaveLength(1);
+    });
+  });
+
+  // The user clicked channel 9 while the loop still owned the session: the
+  // store points at 9 and reads "joining" until the server answers the join.
+  describe("attemptAutoReconnect with a join for another channel in flight", () => {
+    let rig: LoopRig;
+
+    beforeEach(() => {
+      rig = wireLoopRig(session);
+      enterReconnecting(session, 5, { latestToken: "old-token", ac: rig.ac });
+    });
+
+    function startLoop(): Promise<void> {
+      return startReconnect(session, 5, { token: "old-token", signal: rig.ac.signal });
+    }
+
+    function clickChannel(channelId: number | null): void {
+      mockVoiceState.currentChannelId = channelId;
+      mockVoiceState.voiceStatus = "joining";
+    }
+
+    const sent = (type: string) => rig.sendSpy.mock.calls.filter(([m]) => m.type === type).length;
+
+    function expectHandedToTheJoin(): void {
+      expect((session as any)._state.type).toBe("idle");
+      expect(sent("voice_leave")).toBe(0);
+      expect(leaveVoiceChannel).not.toHaveBeenCalled();
+      expect(rig.errorCb).not.toHaveBeenCalled();
+      // The refusal of the join is only rolled back while the status reads "joining".
+      expect(setVoiceStatus).toHaveBeenLastCalledWith("joining");
+    }
+
+    /** Runs the loop into its give-up: the old channel is deleted mid-wait. */
+    async function giveUpAfter(click: () => void): Promise<void> {
+      mockRoom.connect.mockRejectedValue(new Error("SFU down"));
+      const loop = startLoop();
+      await vi.advanceTimersByTimeAsync(1_000);
+      click();
+      resetChannelsStore();
+      await vi.advanceTimersByTimeAsync(5_000);
+      await loop;
+    }
+
+    it("keeps the join when the loop gives up before the join's token arrives", async () => {
+      await giveUpAfter(() => clickChannel(9));
+      expectHandedToTheJoin();
+
+      mockRoom.connect.mockResolvedValue(undefined);
+      await session.handleVoiceToken("token-9", "/livekit", 9, "ws://localhost:7880", true);
+
+      expect((session as any)._state).toMatchObject({ type: "connected", channelId: 9 });
+      expect((session as any)._yieldedToJoin).toBe(false);
+      expect(sent("voice_leave")).toBe(0);
+      expect(rig.errorCb).not.toHaveBeenCalled();
+    });
+
+    it("still ends the old call on the server when the join is refused", async () => {
+      await giveUpAfter(() => clickChannel(9));
+      expectHandedToTheJoin();
+
+      // The dispatcher's join rollback asks exactly this before it leaves.
+      expect(session.hasActiveSession()).toBe(true);
+      await session.leaveVoice(true);
+
+      expect(sent("voice_leave")).toBe(1);
+      expect(session.hasActiveSession()).toBe(false);
+      expect(rig.errorCb).not.toHaveBeenCalled();
+    });
+
+    it("keeps the join when the reconnect fails after its room became the session", async () => {
+      vi.spyOn((session as any)._audioPipeline, "setupAudioPipeline").mockImplementation(() => {
+        clickChannel(9);
+        throw new Error("pipeline broke");
+      });
+
+      const loop = startLoop();
+      await vi.advanceTimersByTimeAsync(3100);
+      await loop;
+
+      expectHandedToTheJoin();
+      expect(mockRoom.disconnect).toHaveBeenCalledTimes(1);
+      expect(session.hasActiveSession()).toBe(true);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(mockRoom.connect).toHaveBeenCalledTimes(1);
+    });
+
+    it("stops reconnecting to the old channel at its next check", async () => {
+      mockRoom.connect.mockRejectedValue(new Error("SFU down"));
+      const loop = startLoop();
+      await vi.advanceTimersByTimeAsync(3100);
+      expect(mockRoom.connect).toHaveBeenCalledTimes(1);
+      clickChannel(9);
+      await vi.advanceTimersByTimeAsync(6_000);
+      await loop;
+
+      expectHandedToTheJoin();
+      expect(rig.ac.signal.aborted).toBe(true);
+      expect(mockRoom.connect).toHaveBeenCalledTimes(1);
+      expect(sent("voice_join")).toBe(0);
+    });
+
+    // The old room can drop after the click: the server takes the member out
+    // of it when it accepts the join, and that can reach the client first.
+    it("keeps the join's status when the old room drops after the click", async () => {
+      const disconnected = captureDisconnectedHandler();
+      mockVoiceState.currentChannelId = 1;
+      await session.handleVoiceToken("token", "/livekit", 1, "ws://localhost:7880", true);
+      clickChannel(9);
+      vi.mocked(setVoiceStatus).mockClear();
+
+      disconnected()!(/* SERVER_SHUTDOWN */ 1);
+
+      expect(session.isAutoReconnecting()).toBe(true);
+      expect(setVoiceStatus).not.toHaveBeenCalledWith("reconnecting");
+      // The loop it started stands down at its first check.
+      await vi.advanceTimersByTimeAsync(3000);
+      expect((session as any)._state.type).toBe("idle");
+      expect(setVoiceStatus).toHaveBeenLastCalledWith("joining");
+      expect(sent("voice_leave")).toBe(0);
+      expect(rig.errorCb).not.toHaveBeenCalled();
+    });
+
+    it("shows the reconnect when the room drops with no join in flight", async () => {
+      const disconnected = captureDisconnectedHandler();
+      mockVoiceState.currentChannelId = 1;
+      await session.handleVoiceToken("token", "/livekit", 1, "ws://localhost:7880", true);
+
+      disconnected()!(/* SERVER_SHUTDOWN */ 1);
+
+      expect(session.isAutoReconnecting()).toBe(true);
+      expect(setVoiceStatus).toHaveBeenLastCalledWith("reconnecting");
+    });
+
+    describe("when the join's answer never comes", () => {
+      const LOST = "Voice connection lost — failed to reconnect";
+      // The loop hands over at its first check, 3 s in; giveUpAfter returns at 6 s.
+      const WAIT_LEFT_MS = 15_000 - 3_000;
+
+      function expectGivenUp(leaves: number): void {
+        expect(sent("voice_leave")).toBe(leaves);
+        expect(leaveVoiceChannel).toHaveBeenCalledTimes(1);
+        expect(rig.errorCb).toHaveBeenCalledTimes(1);
+        expect(rig.errorCb).toHaveBeenCalledWith(LOST);
+        expect(setVoiceStatus).toHaveBeenLastCalledWith("idle");
+        expect(session.hasActiveSession()).toBe(false);
+        expect(vi.getTimerCount()).toBe(0);
+      }
+
+      beforeEach(async () => {
+        resetJoinRequest();
+        noteJoinSent("join-9");
+        await giveUpAfter(() => clickChannel(9));
+        expectHandedToTheJoin();
+      });
+
+      afterEach(() => {
+        resetJoinRequest();
+      });
+
+      it("ends the call like a give-up after 15 seconds, so the server drops what it holds", async () => {
+        await vi.advanceTimersByTimeAsync(WAIT_LEFT_MS - 1);
+        expect(rig.errorCb).not.toHaveBeenCalled();
+        expect(sent("voice_leave")).toBe(0);
+
+        await vi.advanceTimersByTimeAsync(1);
+        expectGivenUp(1);
+      });
+
+      it("waits again for a newer join instead of cancelling it", async () => {
+        await vi.advanceTimersByTimeAsync(WAIT_LEFT_MS - 1_000);
+        clickChannel(11);
+        noteJoinSent("join-11");
+        await vi.advanceTimersByTimeAsync(1_000);
+        expect(rig.errorCb).not.toHaveBeenCalled();
+        expect(leaveVoiceChannel).not.toHaveBeenCalled();
+        expect(session.hasActiveSession()).toBe(true);
+
+        await vi.advanceTimersByTimeAsync(14_999);
+        expect(rig.errorCb).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(1);
+        expectGivenUp(1);
+      });
+
+      it.each(["reconnecting", "connecting", "authenticating"])(
+        "keeps waiting while the chat socket is %s, then ends once it is back",
+        async (socketState) => {
+          rig.wsState = socketState;
+          await vi.advanceTimersByTimeAsync(WAIT_LEFT_MS);
+          expect(rig.errorCb).not.toHaveBeenCalled();
+          expect(sent("voice_leave")).toBe(0);
+          expect(session.hasActiveSession()).toBe(true);
+
+          rig.wsState = "connected";
+          await vi.advanceTimersByTimeAsync(15_000);
+          expectGivenUp(1);
+        },
+      );
+
+      it("ends without sending when the chat socket closed for good", async () => {
+        rig.wsState = "disconnected";
+        await vi.advanceTimersByTimeAsync(WAIT_LEFT_MS);
+        expectGivenUp(0);
+      });
+
+      it("stops waiting once the token connects the new channel", async () => {
+        mockRoom.connect.mockResolvedValue(undefined);
+        await session.handleVoiceToken("token-9", "/livekit", 9, "ws://localhost:7880", true);
+        await vi.advanceTimersByTimeAsync(60_000);
+
+        expect((session as any)._state).toMatchObject({ type: "connected", channelId: 9 });
+        expect(rig.errorCb).not.toHaveBeenCalled();
+        expect(sent("voice_leave")).toBe(0);
+        expect(leaveVoiceChannel).not.toHaveBeenCalled();
+      });
+
+      it("stops waiting once the user leaves", async () => {
+        await session.leaveVoice(false);
+        await vi.advanceTimersByTimeAsync(60_000);
+
+        expect(rig.errorCb).not.toHaveBeenCalled();
+        expect(sent("voice_leave")).toBe(0);
+        expect(leaveVoiceChannel).not.toHaveBeenCalled();
+        expect(vi.getTimerCount()).toBe(0);
+      });
+    });
+
+    // The whole path, on the session the dispatcher itself reaches: a drop,
+    // the click, the loop standing down, then the server's refusal frame.
+    it("ends the old call with one voice_leave when the dispatcher rolls the refused join back", async () => {
+      const send = vi.fn<(msg: { type: string }) => string | undefined>();
+      const left = () => send.mock.calls.filter(([m]) => m.type === "voice_leave").length;
+      voice.setServerHost("localhost:7880");
+      voice.setWsClient({ send, getState: () => "connected", ping: async () => {} } as any);
+      onTestFinished(() => {
+        voice.cleanupAll();
+        resetJoinRequest();
+      });
+      const disconnected = captureDisconnectedHandler();
+      await voice.handleVoiceToken("token", "/livekit", 1, "ws://localhost:7880", true);
+      disconnected()!(/* SERVER_SHUTDOWN */ 1);
+      expect(voice.isAutoReconnecting()).toBe(true);
+
+      clickChannel(9);
+      noteJoinSent("join-9");
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(voice.isAutoReconnecting()).toBe(false);
+      expect(voice.isVoiceSessionActive()).toBe(true);
+      expect(left()).toBe(0);
+
+      handleVoiceJoinRollback({ code: "FORBIDDEN", message: "" }, "join-9");
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(left()).toBe(1);
+      expect(voice.isVoiceSessionActive()).toBe(false);
+      expect(leaveVoiceChannel).toHaveBeenCalledTimes(1);
+    });
+
+    // Not a switch: the loop ends the call as it always did.
+    const notASwitch: Array<[string, () => void]> = [
+      ["the store still points at the loop's own channel", () => clickChannel(5)],
+      ["the store points at no channel", () => clickChannel(null)],
+      [
+        "the store points elsewhere without a join in flight",
+        () => {
+          mockVoiceState.currentChannelId = 9;
+          mockVoiceState.voiceStatus = "reconnecting";
+        },
+      ],
+    ];
+
+    it.each(notASwitch)("gives up as usual when %s", async (_name, arrange) => {
+      await giveUpAfter(arrange);
+
+      expect((session as any)._state.type).toBe("idle");
+      expect(sent("voice_leave")).toBe(1);
+      expect(leaveVoiceChannel).toHaveBeenCalledTimes(1);
+      expect(rig.errorCb).toHaveBeenCalledWith("Voice connection lost — failed to reconnect");
+      expect(setVoiceStatus).toHaveBeenLastCalledWith("idle");
+      expect(session.hasActiveSession()).toBe(false);
     });
   });
 

@@ -113,7 +113,9 @@ export const getScreenshareAudioMuted = session.getScreenshareAudioMuted.bind(se
  *  live ("connected") — i.e. there is something for leaveVoice() to tear
  *  down. A Room-existence check alone reads false for the entire
  *  "connecting" state (no Room object exists yet), so a caller deciding
- *  whether to abort an in-flight join must ask this instead. */
+ *  whether to abort an in-flight join must ask this instead. Also true for a
+ *  call the reconnect loop handed to a join that has no answer yet: the
+ *  server may still hold that call, and leaveVoice(true) is what ends it. */
 export function isVoiceSessionActive(): boolean {
   return session.hasActiveSession();
 }

@@ -339,7 +339,14 @@ backoff capped at 6 s, about 27 s, then every 15 s for up to 5 minutes) should b
 "Voice connection lost — failed to reconnect" + auto-leave. An attempt that connects to the voice
 server but then fails to set the call up ends the same way, at once: the new room is already the
 session by then, so it is not retried. A failed roster read or token refresh does not end the loop: the
-attempt waits for the next delay, or runs with the token it has. A reconnect drops your camera and screen
+attempt waits for the next delay, or runs with the token it has. Clicking another voice channel while
+a reconnect runs hands the call to that join: from the click on, the loop starts nothing new for the old
+channel, and if it would give up (or fail late) before the join is answered it only clears its own session,
+with no `voice_leave` and no "Voice connection lost". The join's token then connects as usual; a refusal
+still ends the old call on the server. If neither arrives within 15 s of the hand-over (counted again
+for a newer click, or while the chat socket is itself reconnecting), the call ends as a give-up does.
+A drop that only starts after the click leaves the widget on "Connecting…" for the new channel instead of
+"Reconnecting voice…". A reconnect drops your camera and screen
 share (`teardownForReconnect`); once it (or its rejoin) lands, the camera turns back on by itself, under
 the server's video limit. A screen share needs the OS picker again, so a sticky toast says it stopped,
 with a "Share again" button; on Linux X11 the same source is shared again with no dialog while the host

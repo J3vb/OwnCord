@@ -193,6 +193,9 @@ export class LiveKitSession extends SessionReconnect {
     directUrl?: string,
     isKeyHolder?: boolean,
   ): Promise<boolean | "superseded"> {
+    // The join a reconnect was cleared for has its answer: from here the
+    // attempt itself is the session.
+    this.clearYield();
     return this._join.connectAndSetup(token, url, channelId, directUrl, isKeyHolder);
   }
 
@@ -222,6 +225,7 @@ export class LiveKitSession extends SessionReconnect {
    *  once the host acknowledged it); never rejects. */
   leaveVoice(sendWs = true, keepWatched = false): Promise<void> {
     this._rejoinPending = false;
+    this.clearYield();
     this._lostOnReconnect = null;
     if (this._watchRetry !== null) clearTimeout(this._watchRetry);
     this._watchRetry = null;
