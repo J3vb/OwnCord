@@ -21,7 +21,6 @@
     "paths": {
       "@lib/*": ["./src/lib/*"],
       "@stores/*": ["./src/stores/*"],
-      "@components/*": ["./src/components/*"],
       "@pages/*": ["./src/pages/*"],
       "@styles/*": ["./src/styles/*"]
     }

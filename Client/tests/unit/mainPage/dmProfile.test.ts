@@ -76,7 +76,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
       m.container.appendChild(capturedChatAreaRef.current!.dmProfileSlot);
     }
     async function settle(): Promise<void> {
-      await import("@components/DmProfileSidebar");
+      await import("../../../src/features/direct-messages/DmProfileSidebar");
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
 
@@ -522,7 +522,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
 
   /** Let the panel's lazy import (and anything it schedules) settle. */
   async function settleDmProfileImport(): Promise<void> {
-    await import("@components/DmProfileSidebar");
+    await import("../../../src/features/direct-messages/DmProfileSidebar");
     await new Promise((resolve) => setTimeout(resolve, 0));
   }
 

@@ -8,7 +8,7 @@ import {
   createGroupDmMemberPanel,
   type GroupDmMemberPanelComponent,
   type GroupDmMemberPanelOptions,
-} from "../../src/components/GroupDmMemberPanel";
+} from "../../src/features/direct-messages/GroupDmMemberPanel";
 import type {
   GroupMemberView,
   GroupPanelView,

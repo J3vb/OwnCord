@@ -7,6 +7,7 @@ import { nativeCounters } from "../counters";
 import { setLocalDeafened } from "../../../../stores/voice.store";
 import { createConnectionStatsPoller } from "../../../../lib/voice/connectionStats";
 import { readSenderSample } from "../../shareSenderStats";
+import { applyVideoBitrateCap, resetVideoBitrateCap } from "../../videoBitrateCap";
 import {
   audio,
   emit,
@@ -408,6 +409,36 @@ describe("NativeRoom screen share", () => {
           codec: "vp8",
         },
       ],
+    ]);
+  });
+
+  it("publishes under the server's video cap: the lower rate, and one layer when it is tight", async () => {
+    host.pick = () =>
+      Promise.resolve({
+        source: "screen:7",
+        capture: { fps: 30, maxWidth: 1280, maxHeight: 720 },
+        maxBitrate: 3_000_000,
+        maxFramerate: 30,
+        simulcast: true,
+      });
+    const room = createNativeRoom(audio);
+    await room.connect("u", "t");
+    const screen = await share(room);
+    applyVideoBitrateCap(2_000_000);
+    await room.localParticipant.publishTrack(screen, screenOptions);
+    expect(host.calls.at(-1)?.[1]).toEqual([
+      1,
+      4,
+      expect.objectContaining({ maxBitrate: 2_000_000, simulcast: false }),
+    ]);
+    // The track keeps what the picker chose: a lifted cap restores it.
+    resetVideoBitrateCap();
+    await room.localParticipant.unpublishTrack(screen.mediaStreamTrack, false);
+    await room.localParticipant.publishTrack(screen, screenOptions);
+    expect(host.calls.at(-1)?.[1]).toEqual([
+      1,
+      4,
+      expect.objectContaining({ maxBitrate: 3_000_000, simulcast: true }),
     ]);
   });
 

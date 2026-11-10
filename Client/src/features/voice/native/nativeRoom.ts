@@ -412,6 +412,21 @@ export class NativeRoom {
   private frames = "";
   /** Whether this room is counted in `nativeCounters.openRooms`. */
   private counted = false;
+  /** Hold the published camera or share `track` under `maxBitrate` bits per
+   *  second without republishing it (`NativeBitrateRoom`). Dropped when the
+   *  track is not the live publication or the room has no session. */
+  async setVideoBitrate(
+    kind: "camera" | "screen",
+    track: object,
+    maxBitrate: number,
+  ): Promise<void> {
+    const session = this.sessionId;
+    const pub = this.localParticipant.trackPublications.get(
+      kind === "camera" ? "camera" : "screen_share",
+    );
+    if (session === null || pub?.track !== track) return;
+    await desktop.nativeVoice.setVideoBitrate(session, kind, pub.trackSid, maxBitrate);
+  }
   private readonly listeners = new Map<string, Set<Listener>>();
   /** Releases this connect attempt's event subscription; null when none. */
   private unsubscribe: (() => void) | null = null;

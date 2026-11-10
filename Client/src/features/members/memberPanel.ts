@@ -34,7 +34,7 @@ import {
 import { TIMEOUT_PRESETS } from "../moderation/timeoutPresets";
 
 /** The two UI-layer functions the panel needs. Injected rather than imported:
- *  `features/` is a lower layer and may not statically import `components/`.
+ *  `features/` is a lower layer and may not statically import `pages/`.
  *  The host (`pages/`) passes the real ones. */
 export interface MemberPanelUi {
   readonly createMemberList: typeof createMemberList;

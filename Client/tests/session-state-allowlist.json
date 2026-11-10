@@ -510,6 +510,12 @@
       "binding": "lastExitTimer",
       "category": "app-lifetime",
       "reason": "One delayed read of the native log per app start, copying how the previous run ended; nothing per-server"
+    },
+    {
+      "file": "lib/voice/senderLayers.ts",
+      "binding": "layersBySender",
+      "category": "dom-owned",
+      "reason": "WeakMap keyed by the live RTCRtpSender; its layer rates go with the sender when a stop or leave drops it, so nothing outlives the session"
     }
   ]
 }

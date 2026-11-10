@@ -29,6 +29,8 @@ export const shards = {
     "src/features/voice/sileroDetection.ts",
     "src/features/voice/sileroWorker.ts",
     "src/features/voice/videoBitrateCap.ts",
+    "src/features/voice/videoBudgetNow.ts",
+    "src/features/voice/videoCapFollow.ts",
     "src/lib/voice/audioPipeline.ts",
     "src/lib/voice/videoPresets.ts",
   ],
@@ -39,6 +41,8 @@ export const shards = {
     "src/features/voice/videoCodec.ts",
     "src/lib/hostPlatform.ts",
     "src/lib/voice/shareDiagnostics.ts",
+    "src/lib/voice/senderLayers.ts",
+    "src/lib/voice/videoBudget.ts",
     "src/lib/voice/shareFps.ts",
   ],
   "livekit-3": [

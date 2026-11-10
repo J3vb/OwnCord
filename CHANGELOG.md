@@ -69,7 +69,7 @@ and only when it changes something a contributor or fork holder must do
 
 ### Added
 
-- Admin: Settings > Voice has **Max video upload per person** (default No limit), the most one member may send for camera and screen share together. The server sends it to members' apps at once; the apps start keeping their video under it in a following update.
+- Admin: Settings > Voice has **Max video upload per person** (default No limit), the most one member may send for camera and screen share together. The server sends it to members' apps at once, and the apps follow a change live with no rejoin, so each viewer receives at most that much from one member (the member's own upload can be a little higher, because it also carries the lower-quality layers) (the share gets 75% and the camera 25% when both are on). A share held back by the limit says so in its stream info.
 - Voice: Enhanced Noise Suppression now recognizes short replies like "yes" or "ok", and the **Voice Buffer** slider lets you tune the microphone delay during a call.
 - Zooming a screen share (Ctrl+scroll) shows a small overview you can drag to move around, with the zoom level and a Reset button. It hides again at 100%.
 - On Linux, a crash report after an unexpected exit now includes the app's last error output, which names the library that closed the app when it exits without a crash signal.

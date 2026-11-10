@@ -148,7 +148,7 @@ async function voiceCard(timeout,movable,videoCap){
     +settingsRow('afk_timeout_seconds','Move after','How long a member must stay idle, on top of the 10 minutes the app waits before marking them idle',timeoutSel)
     +moving
     +'<h4 class="setting-sub">Video</h4>'
-    +settingsRow(VIDEO_CAP_KEY,'Max video upload per person','The most one person may send for camera and screen share together. Lower it when your server\'s upload line is limited: every viewer of a stream gets their own copy from the server. Members\' apps receive it at once; keeping their video under it arrives in an app update',afkSelect('s-'+VIDEO_CAP_KEY,videoCapOptions(videoCap),videoCap,' aria-describedby="s-'+VIDEO_CAP_KEY+'-desc" data-change-action="markSettingsChanged"')));
+    +settingsRow(VIDEO_CAP_KEY,'Max video upload per person','The most one person may send for camera and screen share together. Lower it when your server\'s upload line is limited: every viewer of a stream gets their own copy from the server. Members\' apps follow it at once, with no rejoin: each viewer receives at most this much from one person (camera and share together)',afkSelect('s-'+VIDEO_CAP_KEY,videoCapOptions(videoCap),videoCap,' aria-describedby="s-'+VIDEO_CAP_KEY+'-desc" data-change-action="markSettingsChanged"')));
 }
 /* Welcome messages: an ordinary setting that rides the save bar. The choices
    are Off and every non-archived text channel; a saved channel that has since

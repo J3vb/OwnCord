@@ -5,7 +5,7 @@
  *     clicking a row in the member list) — identity (nickname heading +
  *     @handle), role badge, status, the Message action that starts a DM, and
  *     the close paths (Escape / outside click).
- *   - The DM profile sidebar (`components/DmProfileSidebar.ts`, opened by
+ *   - The DM profile sidebar (`features/direct-messages/DmProfileSidebar.ts`, opened by
  *     clicking the DM chat header) — identity/status, the local-only Note
  *     (persisted per user), live status while open, and its close paths.
  *

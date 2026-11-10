@@ -17,7 +17,7 @@ vi.mock("../../src/lib/ui/backHistory", () => ({
 import {
   createIncomingCallBanner,
   type IncomingCallBannerComponent,
-} from "../../src/components/IncomingCallBanner";
+} from "../../src/features/direct-messages/IncomingCallBanner";
 import type { RingState } from "../../src/lib/voice/callRing";
 
 const RING: RingState = { channelId: 100, fromUserId: 2, fromUsername: "Otto" };

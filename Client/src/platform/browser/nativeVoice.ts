@@ -40,6 +40,7 @@ export const nativeVoice: NativeVoice = {
   stopScreen: () => no(),
   changeScreen: () => no(),
   setScreenQuality: () => no(),
+  setVideoBitrate: () => no(),
   changeCamera: () => no(),
   debugInfo: () => no(),
   listDevices: () => no(),

@@ -32,6 +32,8 @@ import {
   type CameraTrackState,
   type VideoTrackDeps,
 } from "./videoTrackState";
+import { clampPublishedVideo, presetRate } from "./videoCapFollow";
+import { liveVideoBudget } from "./videoBudgetNow";
 
 const log = createLogger("screenShare");
 
@@ -207,7 +209,10 @@ export async function enableCamera(state: CameraTrackState, deps: VideoTrackDeps
       return;
     }
     setH264GpuProfiles(videoTrack.mediaStreamTrack, h264GpuPublish(videoCodec));
-    await room.localParticipant.publishTrack(videoTrack, cameraPublishOptions(videoCodec, quality));
+    await room.localParticipant.publishTrack(
+      videoTrack,
+      cameraPublishOptions(videoCodec, quality, liveVideoBudget().camera),
+    );
     if (stale() || state.manualCameraTrack !== videoTrack) {
       // A disableCamera (or the track unplugging) ran to completion while
       // publishTrack was in flight — it already reset localCamera, stopped the
@@ -222,6 +227,7 @@ export async function enableCamera(state: CameraTrackState, deps: VideoTrackDeps
       return;
     }
     announceCamera(state, ws, deps, videoTrack, quality, choice);
+    void clampPublishedVideo(videoTrack, "camera", presetRate("camera", quality));
   } catch (err) {
     cameraEndedCleanup?.();
     failCameraEnable(state, generation, deps, err);

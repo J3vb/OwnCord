@@ -138,6 +138,7 @@ const commandPassThrough: Record<string, string> = {
   native_voice_unpublish_screen_audio: "track id used as a lookup key",
   native_voice_set_subscribed: "participant and track ids used as lookup keys",
   native_voice_set_video_view: "participant and track ids used as lookup keys",
+  native_voice_set_video_bitrate: "video kind and track id used as lookup keys",
   native_voice_set_volume: "participant id used as a lookup key",
   native_voice_set_screenshare_volume: "participant id used as a lookup key",
   set_gpu_adapter: "card id matched against the listed cards",

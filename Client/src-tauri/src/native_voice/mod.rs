@@ -46,7 +46,7 @@ use mic_test::{
 use serde::Serialize;
 use session::{
     release_blocking, AudioOptions, CameraOptions, Event, NativeSession, QualityError, Resources,
-    Retired, ScreenOptions,
+    Retired, ScreenOptions, VideoKind,
 };
 use tauri::{AppHandle, Emitter, Runtime};
 use tokio::sync::Mutex;
@@ -1204,6 +1204,27 @@ pub async fn native_voice_set_screen_quality(
         .set_screen_quality(capture, options, publish)
         .await?;
     Ok(ScreenQualitySet { sid, width, height })
+}
+
+/// Hold the published camera or share `sid` under `max_bitrate` bits per
+/// second without republishing it: the top layer runs at it and every lower
+/// layer at the lower of its own rate and it; 0 restores the rates the
+/// publish produced. A `sid` that is not the live publication is a no-op.
+#[tauri::command]
+pub async fn native_voice_set_video_bitrate(
+    state: tauri::State<'_, NativeVoiceState>,
+    session: u64,
+    kind: String,
+    sid: String,
+    max_bitrate: u64,
+) -> Result<(), String> {
+    let kind = VideoKind::parse(&kind)?;
+    state
+        .inner
+        .lock()
+        .await
+        .current(session)?
+        .set_video_bitrate(kind, &sid, max_bitrate)
 }
 
 /// Publish running capture `capture` as the screen share; returns its sid.

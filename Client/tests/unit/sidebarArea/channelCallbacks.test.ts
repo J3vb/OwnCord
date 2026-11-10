@@ -11,10 +11,10 @@ import { authStore } from "../../../src/stores/auth.store";
 import { dmStore, setDmChannels } from "../../../src/stores/dm.store";
 import { createChannelSidebar } from "../../../src/features/channels/ChannelSidebar";
 import { createVoiceWidget } from "../../../src/features/voice/VoiceWidget";
-import { createCreateChannelModal } from "@components/CreateChannelModal";
-import "../../../src/pages/main-page/MemberPickerModal";
+import { createCreateChannelModal } from "../../../src/features/channels/CreateChannelModal";
+import "../../../src/features/direct-messages/MemberPickerModal";
 import { createEditChannelModal } from "../../../src/features/channels/editChannelDialog";
-import { createDeleteChannelModal } from "@components/DeleteChannelModal";
+import { createDeleteChannelModal } from "../../../src/features/channels/DeleteChannelModal";
 import { createQuickSwitchOverlay } from "../../../src/features/navigation/QuickSwitchOverlay";
 import { createProfileManager } from "@lib/presence/profiles";
 import {
@@ -45,10 +45,10 @@ vi.mock("../../../src/features/voice/VoiceWidget", () => mocks.voiceWidgetMock()
 vi.mock("../../../src/features/navigation/QuickSwitchOverlay", () =>
   mocks.quickSwitchOverlayMock(),
 );
-vi.mock("@components/CreateChannelModal", () => mocks.createChannelModalMock());
+vi.mock("../../../src/features/channels/CreateChannelModal", () => mocks.createChannelModalMock());
 vi.mock("@tauri-apps/api/core", () => mocks.apiCoreMock());
 vi.mock("../../../src/features/channels/editChannelDialog", () => mocks.editChannelModalMock());
-vi.mock("@components/DeleteChannelModal", () => mocks.deleteChannelModalMock());
+vi.mock("../../../src/features/channels/DeleteChannelModal", () => mocks.deleteChannelModalMock());
 vi.mock("../../../src/pages/main-page/VoiceCallbacks", () => mocks.pageVoiceCallbacksMock());
 vi.mock("../../../src/pages/main-page/OverlayManagers", () => mocks.pageOverlayManagersMock());
 

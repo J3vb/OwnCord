@@ -200,6 +200,49 @@ engines.
      }
 ```
 
+## Video bitrate in place
+
+A live change of the server's per-person video cap must change a published
+camera's or share's encoder rate with no republish (a republish gives viewers
+a new publication and a keyframe). libwebrtc has `RtpSender::set_parameters`,
+but upstream keeps a local video track's sender `pub(crate)`, so nothing
+outside the crate can reach it. `LocalVideoTrack::sender_layers` reads
+each sender encoding's `max_bitrate` and scale-down (the SDK lists the
+full-size layer first, so callers find it by scale) and
+`set_sender_max_bitrates` writes the rates
+back in place, built like the SDK's own dynacast `set_parameters` call (a
+length mismatch or a missing transceiver is a no-op). Marked
+`OWNCORD-PATCH (WP VB-2)` in `src/room/track/local_video_track.rs`. No C++ or
+ABI change. The rule that decides the rates is
+`native_voice/session/video_bitrate.rs` (`capped_layers`), which has unit tests;
+CI does not run the vendored crate's own tests.
+
+```diff
+--- src/room/track/local_video_track.rs
++++ src/room/track/local_video_track.rs
+@@ -361,6 +361,41 @@
++    // OWNCORD-PATCH (WP VB-2): not in upstream livekit 0.10.0. See OWNCORD-PATCH.md.
++    pub fn sender_layers(&self) -> Vec<(Option<u64>, f64)> {
++        let Some(transceiver) = self.transceiver() else {
++            return Vec::new();
++        };
++        transceiver
++            .sender()
++            .parameters()
++            .encodings
++            .iter()
++            .map(|e| (e.max_bitrate, e.scale_resolution_down_by.unwrap_or(1.0)))
++            .collect()
++    }
++
++    // OWNCORD-PATCH (WP VB-2): not in upstream livekit 0.10.0. See OWNCORD-PATCH.md.
++    pub fn set_sender_max_bitrates(&self, rates: &[Option<u64>]) -> RoomResult<()> {
++        // no transceiver or a length mismatch: Ok(()), nothing changed;
++        // otherwise write each encoding's max_bitrate and set_parameters
++        // only when one differs
++    }
+```
+
 ## Signal input
 
 Invalid or missing fields in server signal messages are logged and skipped, or
@@ -236,7 +279,7 @@ Remove `vendor/livekit` and the `[patch.crates-io]` table once a livekit
 release ships an equivalent option (upstream PR to livekit/rust-sdks pending).
 That is an SDK bump: re-verify the libwebrtc pin per the comment in
 `Cargo.toml`. On any bump, re-apply the diff above and the `OWNCORD-PATCH (signal input)`
-markers (`grep -rn 'signal input' src`) to the new package.
+markers (`grep -rn 'signal input' src`), and the two `OWNCORD-PATCH (WP VB-2)` methods (`grep -rn 'WP VB-2' src`) to the new package.
 
 ## Tests
 

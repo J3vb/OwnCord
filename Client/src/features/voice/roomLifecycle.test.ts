@@ -37,6 +37,11 @@ vi.mock("../../lib/logger", () => ({
 }));
 vi.mock("../../lib/voice/deviceManager", () => ({ isMicPolicyGated: () => false }));
 vi.mock("../../lib/voice/livekitDiagnostics", () => ({ attachDiagnosticListeners: vi.fn() }));
+vi.mock("./videoCapFollow", () => ({
+  VideoCapFollower: vi.fn(function () {
+    return { kick: vi.fn(), stop: vi.fn() };
+  }),
+}));
 vi.mock("./screenShare", () => ({
   CAMERA_PRESETS: { high: {} },
   CAMERA_PUBLISH_BITRATES: { high: 1 },

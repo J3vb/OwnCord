@@ -56,6 +56,7 @@ import { nativeCounters } from "./native/counters";
 import { speechDetectionOf } from "./sileroDetection";
 import { desktop } from "../../platform/desktop";
 import { voiceText } from "../../i18n/voice";
+import { withServerLimit } from "./videoCapFollow";
 import { channelsStore } from "@stores/channels.store";
 import { dmStore } from "@stores/dm.store";
 import { authStore } from "@stores/auth.store";
@@ -1044,15 +1045,14 @@ export class LiveKitSession {
     return this._remoteTracks.getLocalScreenshareStream();
   }
 
-  /** What your screen share is sending; the last sample also goes into the
-   *  support bundle's voice diagnostics. */
+  /** What your screen share is sending; the last sample also goes into diagnostics. */
   async getLocalScreenshareStats(): Promise<ShareSenderSample | null> {
     const shared = this.localScreenshareTrack();
     const sample = await this._remoteTracks.getLocalScreenshareStats();
     // A read that outlived its share says nothing about the one now live.
     if (this.localScreenshareTrack() !== shared) return null;
     this._shareSender = sample;
-    return sample;
+    return withServerLimit(sample, this._screenState);
   }
 
   private localScreenshareTrack(): object | undefined {
