@@ -36,12 +36,12 @@ touch Linux voice do not load it. `Client/CLAUDE.md` keeps the short rule.
   back over the frame socket. Screen share captures in the backend
   (`src-tauri/src/native_voice/screen.rs`, libwebrtc's `DesktopCapturer`):
   `native/screenPicker.ts` picks on X11, the xdg-desktop-portal dialog picks
-  on Wayland, and `lib/voice/screenShare.ts`'s one `isLinuxDesktop()` branch swaps
+  on Wayland, and `features/voice/screenShare.ts`'s one `isLinuxDesktop()` branch swaps
   `createLocalScreenTracks` for `NativeRoom`'s `createScreenTracks`; the
   picker's Share audio switch (on when a PulseAudio-protocol sound server
   answers) adds a `NativeScreenAudioTrack` that follows the share. Change source there is the
   track's own (`NativeScreenTrack.changeSource`, the host's
-  `native_voice_change_screen`), reached through `lib/voice/screenShare.ts`'s
+  `native_voice_change_screen`), reached through `features/voice/screenShare.ts`'s
   capability check `inPlaceSourceChange`, never an `isLinuxDesktop()` branch.
   A camera switch is the track's own too (`NativeCameraTrack.setDeviceId`, the
   host's `native_voice_change_camera`); `mediaControl` restarts the camera only

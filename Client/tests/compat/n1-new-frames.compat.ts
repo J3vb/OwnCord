@@ -41,7 +41,9 @@ vi.mock("@lib/voice/livekitSession", () => ({
 }));
 vi.mock("@lib/ui/toast", () => ({ showToast: vi.fn() }));
 vi.mock("@lib/net/identity", () => ({ ensureIdentityKeyPublished: vi.fn(async () => true) }));
-vi.mock("@lib/voice/screenShare", () => ({ rollbackPendingVideo: vi.fn(() => undefined) }));
+vi.mock("../../src/features/voice/screenShare", () => ({
+  rollbackPendingVideo: vi.fn(() => undefined),
+}));
 
 import { wireDispatcher } from "../../src/lib/dispatcher";
 import { createMockWsClient } from "../helpers/mock-ws";

@@ -27,7 +27,7 @@ vi.mock("@tauri-apps/api/core", () => shareRig.tauriInvokeMock(invoke));
 vi.mock("../../src/lib/voice/appAudioTrack", () => shareRig.appAudioTrackMock(openAppAudio));
 vi.mock("@lib/prefs/preferences", () => shareRig.fallbackPrefsMock());
 
-const { watchScreenEnded } = await import("@lib/voice/screenShare");
+const { watchScreenEnded } = await import("../../src/features/voice/screenShare");
 const { changeScreenshareSource } = await import("../../src/features/voice/screenshareChange");
 const { startAppShareAudio } = await import("../../src/lib/voice/appAudioShare");
 const { voiceStore } = await import("@stores/voice.store");

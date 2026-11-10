@@ -1,6 +1,6 @@
 /**
  * WP 6.7b: Windows per-app share audio on the web share path
- * (src/lib/voice/screenShare.ts + src/lib/voice/appAudioShare.ts). The host commands are
+ * (src/features/voice/screenShare.ts + src/lib/voice/appAudioShare.ts). The host commands are
  * driven through the real desktop wrappers over a mocked Tauri `invoke`; the
  * socket-to-track step (`openAppAudio`) is mocked.
  */
@@ -33,7 +33,7 @@ vi.mock("@lib/voice/shareResolutionRecovery", () => ({
 }));
 
 const { disableScreenshare, enableScreenshare, stopManualScreenTracks } =
-  await import("@lib/voice/screenShare");
+  await import("../../src/features/voice/screenShare");
 const { setScreenSourcePicker } = await import("../../src/features/voice/native/screenPickerSlot");
 const { voiceStore } = await import("@stores/voice.store");
 

@@ -3,11 +3,7 @@ import type { LocalVideoTrack } from "livekit-client";
 import { captureLogs } from "../../../tests/helpers/log-capture";
 import type { PublishCodec } from "./videoCodec";
 import type { ShareSenderSample } from "./shareSenderStats";
-import type {
-  CameraTrackState,
-  ScreenTrackState,
-  VideoTrackDeps,
-} from "../../lib/voice/screenShare";
+import type { CameraTrackState, ScreenTrackState, VideoTrackDeps } from "./screenShare";
 
 const republish = vi.hoisted(() => vi.fn());
 const isLinuxDesktop = vi.hoisted(() => vi.fn(() => false));
@@ -21,8 +17,8 @@ vi.mock("./native/videoCodecs", () => ({
   nativeVideoCodecs: () => Promise.resolve({ h264: false, vp9: nativeVp9.value, decode: [] }),
 }));
 
-vi.mock("../../lib/voice/screenShare", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../lib/voice/screenShare")>();
+vi.mock("./screenShare", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./screenShare")>();
   return { ...actual, republishVideo: republish };
 });
 

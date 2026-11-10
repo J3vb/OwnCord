@@ -13,7 +13,7 @@ import {
   isAutoReconnecting as mockIsAutoReconnecting,
   failPendingRejoin as mockFailPendingRejoin,
 } from "@lib/voice/livekitSession";
-import { rollbackPendingVideo as mockRollbackPendingVideo } from "@lib/voice/screenShare";
+import { rollbackPendingVideo as mockRollbackPendingVideo } from "../../../src/features/voice/screenShare";
 import { takeVoiceMoved } from "../../../src/features/voice/moveHint";
 import { noteJoinSent, takeJoinRefusal } from "../../../src/features/voice/joinRequest";
 import {
@@ -29,7 +29,7 @@ import { signInAs } from "../../helpers/storeSeeds";
 
 vi.mock("@lib/notifications", () => dispatcherMocks.notificationsMock());
 vi.mock("@lib/voice/livekitSession", () => dispatcherMocks.livekitSessionMock());
-vi.mock("@lib/voice/screenShare", () => dispatcherMocks.screenShareMock());
+vi.mock("../../../src/features/voice/screenShare", () => dispatcherMocks.screenShareMock());
 vi.mock("@lib/ui/toast", () => dispatcherMocks.toastMock());
 vi.mock("@lib/net/identity", () => dispatcherMocks.identityMock());
 vi.mock("../../../src/features/connection/dispatchContext", async (importOriginal) =>

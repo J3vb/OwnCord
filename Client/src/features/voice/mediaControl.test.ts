@@ -87,7 +87,7 @@ const setH264GpuProfiles = vi.hoisted(() => vi.fn());
 vi.mock("../../lib/voice/h264Profile", () => ({ setH264GpuProfiles }));
 vi.mock("./videoCodec", () => ({ h264GpuPublish: (codec: string) => codec === "h264" }));
 const inPlaceSource = vi.hoisted(() => ({ value: null as { changeSource: () => void } | null }));
-vi.mock("../../lib/voice/screenShare", () => ({
+vi.mock("./screenShare", () => ({
   enableCamera: vi.fn(async (..._args: unknown[]) => undefined),
   disableCamera: vi.fn(async (..._args: unknown[]) => undefined),
   enableScreenshare: vi.fn(async (..._args: unknown[]) => undefined),
@@ -112,7 +112,7 @@ import {
   disableScreenshare,
   reconcileVideoFlags,
   inPlaceSourceChange,
-} from "../../lib/voice/screenShare";
+} from "./screenShare";
 import { CameraDeviceUnusable, CameraSwitchUnavailable } from "./cameraSwitch";
 import { voiceText } from "../../i18n/voice";
 import { MediaControl, syncShareGrant, type MediaControlHost } from "./mediaControl";
