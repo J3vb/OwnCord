@@ -46,6 +46,17 @@ export interface ThreadListPopover {
 
 type Phase = "active" | "archived";
 
+type ThreadListPage = Awaited<ReturnType<ApiClient["listThreads"]>>;
+
+function threadPageQuery(phase: Phase, cursor: string): string {
+  const query = new URLSearchParams({
+    archived: phase === "archived" ? "1" : "0",
+    limit: String(PAGE_SIZE),
+  });
+  if (cursor !== "") query.set("before", cursor);
+  return query.toString();
+}
+
 export function openThreadListPopover(options: ThreadListPopoverOptions): ThreadListPopover {
   const { api, channelId, anchor, onOpenThread } = options;
   const owner = new Disposable();
@@ -155,6 +166,21 @@ export function openThreadListPopover(options: ThreadListPopoverOptions): Thread
     archivedHead.hidden = archivedList.childElementCount === 0;
   }
 
+  /** Fold one answered page into the lists and the paging cursor. */
+  function applyPage(page: ThreadListPage, requestPhase: Phase): void {
+    adoptThreadSnapshots(page.threads);
+    const list = requestPhase === "archived" ? archivedList : activeList;
+    for (const thread of page.threads) list.appendChild(renderItem(thread));
+    if (requestPhase === "archived") archivedShown = true;
+    cursor = page.next_before;
+    hasMore = page.has_more;
+    if (requestPhase === "active" && !page.has_more) {
+      phase = "archived";
+      cursor = "";
+      hasMore = true;
+    }
+  }
+
   async function loadNext(): Promise<void> {
     if (loading || closed) return;
     loading = true;
@@ -163,24 +189,13 @@ export function openThreadListPopover(options: ThreadListPopoverOptions): Thread
     const requestPhase = phase;
     paintFooter();
     try {
-      const query = new URLSearchParams({
-        archived: requestPhase === "archived" ? "1" : "0",
-        limit: String(PAGE_SIZE),
-      });
-      if (cursor !== "") query.set("before", cursor);
-      const page = await api.listThreads(channelId, query.toString(), owner.signal);
+      const page = await api.listThreads(
+        channelId,
+        threadPageQuery(requestPhase, cursor),
+        owner.signal,
+      );
       if (closed || gen !== requestGen) return;
-      adoptThreadSnapshots(page.threads);
-      const list = requestPhase === "archived" ? archivedList : activeList;
-      for (const thread of page.threads) list.appendChild(renderItem(thread));
-      if (requestPhase === "archived") archivedShown = true;
-      cursor = page.next_before;
-      hasMore = page.has_more;
-      if (requestPhase === "active" && !page.has_more) {
-        phase = "archived";
-        cursor = "";
-        hasMore = true;
-      }
+      applyPage(page, requestPhase);
     } catch (err) {
       if (closed || gen !== requestGen) return;
       failed = true;

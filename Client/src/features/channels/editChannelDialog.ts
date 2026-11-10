@@ -35,82 +35,26 @@ import {
   MAX_CHANNEL_NAME_LENGTH,
   MAX_CHANNEL_TOPIC_LENGTH,
 } from "./channelTypes";
+import { buildCategorySelect, categoryOptionValue } from "./channelCategorySelect";
 import {
-  buildCategorySelect,
-  categoryFields,
-  categoryOptionValue,
-  setCategoryValue,
-} from "./channelCategorySelect";
+  buildSlowModeField,
+  buildTrackedFields,
+  buildVoiceLimitField,
+  collectChanges,
+  followChannel,
+  type EditChannelData,
+} from "./editChannelFields";
+import { createChannelPasswordSection } from "./editChannelPassword";
 
-/** The server's ceiling for `slow_mode`, mirrored so the UI cannot exceed it. */
-export const MAX_SLOW_MODE_SECONDS = 21600;
-/** The server's ceiling for both voice capacity limits. */
-export const MAX_VOICE_LIMIT = 99;
-
-/** Slow-mode presets, in seconds. 0 = off. */
-const SLOW_MODE_PRESETS: readonly number[] = [
-  0, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200, 21600,
-];
-
-/** Human label for a slow-mode second count, preset or not. */
-export function formatSlowMode(seconds: number): string {
-  if (seconds === 0) return shellText("slowMode.off");
-  if (seconds % 3600 === 0) return shellText("slowMode.hours", { count: seconds / 3600 });
-  if (seconds % 60 === 0) return shellText("slowMode.minutes", { count: seconds / 60 });
-  return shellText("slowMode.seconds", { count: seconds });
-}
-
-/**
- * Clamp a value into the server's accepted slow-mode range.
- * Applied to the STORED value as well as the submitted one, so a row carrying
- * something out of range still opens the modal on a legal option.
- */
-export function clampSlowMode(value: number): number {
-  if (!Number.isFinite(value)) return 0;
-  return Math.min(MAX_SLOW_MODE_SECONDS, Math.max(0, Math.trunc(value)));
-}
-
-/**
- * Clamp a voice limit into the server's accepted range.
- *
- * A `<input type="number" max>` is advisory — typing past it, or pasting, still
- * produces the larger value — so the bound is applied here rather than trusting
- * the attribute and letting the server 400 a form the user had no way to fix.
- */
-export function clampVoiceLimit(value: number): number {
-  if (!Number.isFinite(value)) return 0;
-  return Math.min(MAX_VOICE_LIMIT, Math.max(0, Math.trunc(value)));
-}
-
-/**
- * The fields an edit submits. Mirrors the PATCH body, which is partial: only
- * the fields the user changed are present, so a field someone else changed
- * meanwhile is left as they set it.
- */
-export interface EditChannelData {
-  readonly name?: string;
-  readonly topic?: string;
-  /** The chosen category's id (0 = none); `category` carries the name on a server that sends no ids. */
-  readonly category_id?: number;
-  readonly category?: string;
-  readonly slow_mode?: number;
-  readonly nsfw?: boolean;
-  /**
-   * Only present for a voice channel. A text channel's PATCH omits them
-   * entirely rather than sending 0, so an edit here cannot wipe limits the
-   * channel carries.
-   */
-  readonly voice_max_users?: number;
-  readonly voice_max_video?: number;
-  /**
-   * Voice channels only, and only when the user changed it: "" removes the
-   * password, anything else sets or changes it. Absent keeps it as it is.
-   */
-  readonly password?: string;
-}
-
-/** The server's ceiling for a channel password, mirrored on the input. */
-export const MAX_CHANNEL_PASSWORD_LENGTH = 64;
+export {
+  MAX_SLOW_MODE_SECONDS,
+  MAX_VOICE_LIMIT,
+  clampSlowMode,
+  clampVoiceLimit,
+  formatSlowMode,
+} from "./editChannelLimits";
+export { MAX_CHANNEL_PASSWORD_LENGTH } from "./editChannelPassword";
+export type { EditChannelData } from "./editChannelFields";
 
 export interface EditChannelModalOptions {
   /** Current channel ID. */
@@ -144,32 +88,6 @@ export interface EditChannelModalOptions {
   readonly onSave: (data: EditChannelData) => Promise<void>;
   /** Called when the modal is closed. */
   readonly onClose: () => void;
-}
-
-const slowOf = (ch: Channel): string => String(clampSlowMode(ch.slowMode ?? 0));
-const limitOf = (value: number | undefined): string => String(clampVoiceLimit(value ?? 0));
-
-/** A labelled number input constrained to 0…MAX_VOICE_LIMIT. */
-function buildVoiceLimitField(
-  labelText: string,
-  hintText: string,
-  testId: string,
-  value: number,
-): { group: HTMLDivElement; input: HTMLInputElement } {
-  const group = createElement("div", { class: "form-group" });
-  const label = createElement("label", { class: "form-label", for: testId }, labelText);
-  const input = createElement("input", {
-    id: testId,
-    class: "form-input",
-    type: "number",
-    min: "0",
-    max: String(MAX_VOICE_LIMIT),
-    "data-testid": testId,
-  });
-  input.value = String(clampVoiceLimit(value));
-  const hint = createElement("div", { class: "form-hint" }, hintText);
-  appendChildren(group, label, input, hint);
-  return { group, input };
 }
 
 export function createEditChannelModal(options: EditChannelModalOptions): MountableComponent {
@@ -284,33 +202,7 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
     );
     appendChildren(categoryGroup, categoryLabel, categorySelect);
 
-    // Slow mode (presets; a stored off-preset value keeps its own option)
-    const currentSlowMode = clampSlowMode(channelSlowMode ?? 0);
-    const slowGroup = createElement("div", { class: "form-group" });
-    const slowLabel = createElement(
-      "label",
-      { class: "form-label", for: "edit-channel-slowmode" },
-      shellText("channelForm.slowMode"),
-    );
-    const slowSelect = createElement("select", {
-      id: "edit-channel-slowmode",
-      class: "form-input",
-      "data-testid": "edit-channel-slowmode-select",
-    });
-    const choices = SLOW_MODE_PRESETS.includes(currentSlowMode)
-      ? SLOW_MODE_PRESETS
-      : [...SLOW_MODE_PRESETS, currentSlowMode];
-    for (const seconds of choices.toSorted((a, b) => a - b)) {
-      const opt = createElement("option", { value: String(seconds) }, formatSlowMode(seconds));
-      if (seconds === currentSlowMode) opt.selected = true;
-      slowSelect.appendChild(opt);
-    }
-    const slowHint = createElement(
-      "div",
-      { class: "form-hint" },
-      shellText("channelForm.slowModeHint"),
-    );
-    appendChildren(slowGroup, slowLabel, slowSelect, slowHint);
+    const { group: slowGroup, select: slowSelect } = buildSlowModeField(channelSlowMode);
 
     // NSFW flag. The hint says what the label does: the server
     // withholds the channel's content from each member until they agree.
@@ -332,121 +224,12 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
 
     appendChildren(body, typeGroup, nameGroup, topicGroup, categoryGroup, slowGroup, nsfwGroup);
 
-    // Password (voice channels only). The password is never shown or held
-    // anywhere but this input: the section knows only whether one is set. Only
-    // a change the user made is sent, so saving other fields never touches it.
-    type PasswordMode = "keep" | "change" | "remove";
-    let passwordSet = channelPasswordProtected === true;
-    let passwordMode: PasswordMode = "keep";
-    const passwordGroup = createElement("div", {
-      class: "form-group",
-      "data-testid": "edit-channel-password-group",
+    // Password (voice channels only): the section holds the mode and the input.
+    const password = createChannelPasswordSection({
+      isSet: channelPasswordProtected === true,
+      isVoice,
+      signal: disposable.signal,
     });
-    const passwordInput = createElement("input", {
-      id: "edit-channel-password",
-      class: "form-input",
-      type: "password",
-      autocomplete: "new-password",
-      maxlength: String(MAX_CHANNEL_PASSWORD_LENGTH),
-      "data-testid": "edit-channel-password-input",
-    });
-    const passwordButton = (label: string, testId: string, onClick: () => void): HTMLElement => {
-      const btn = createElement(
-        "button",
-        { class: "btn-modal-cancel", type: "button", "data-testid": testId },
-        label,
-      );
-      btn.addEventListener("click", onClick, { signal: disposable.signal });
-      return btn;
-    };
-    function setPasswordMode(mode: PasswordMode): void {
-      passwordMode = mode;
-      if (mode !== "change") passwordInput.value = "";
-      renderPassword();
-      // The control that was clicked is gone: land on the one that replaced it.
-      const next =
-        mode === "change"
-          ? passwordInput
-          : passwordGroup.querySelector<HTMLElement>(
-              mode === "remove"
-                ? "[data-testid='edit-channel-password-keep']"
-                : "[data-testid='edit-channel-password-change']",
-            );
-      next?.focus();
-    }
-    function renderPassword(): void {
-      // Redrawing detaches the input, which drops focus a remote update would
-      // otherwise take from someone typing.
-      const hadFocus = document.activeElement === passwordInput;
-      drawPassword();
-      if (hadFocus && passwordInput.isConnected) passwordInput.focus();
-    }
-    function drawPassword(): void {
-      const label = createElement(
-        "label",
-        { class: "form-label", for: "edit-channel-password" },
-        shellText("channelForm.password"),
-      );
-      const hint = createElement(
-        "div",
-        { class: "form-hint" },
-        shellText("channelForm.passwordHint"),
-      );
-      passwordGroup.replaceChildren(label);
-      if (!passwordSet) {
-        appendChildren(passwordGroup, passwordInput, hint);
-        return;
-      }
-      if (passwordMode === "keep") {
-        const row = createElement("div", { class: "form-row", style: "align-items: center;" });
-        appendChildren(
-          row,
-          createElement(
-            "span",
-            { "data-testid": "edit-channel-password-set" },
-            shellText("channelForm.passwordSet"),
-          ),
-          passwordButton(
-            shellText("channelForm.passwordChange"),
-            "edit-channel-password-change",
-            () => setPasswordMode("change"),
-          ),
-          passwordButton(
-            shellText("channelForm.passwordRemove"),
-            "edit-channel-password-remove",
-            () => setPasswordMode("remove"),
-          ),
-        );
-        appendChildren(passwordGroup, row, hint);
-      } else if (passwordMode === "change") {
-        appendChildren(
-          passwordGroup,
-          passwordInput,
-          passwordButton(shellText("channelForm.passwordKeep"), "edit-channel-password-keep", () =>
-            setPasswordMode("keep"),
-          ),
-        );
-      } else {
-        appendChildren(
-          passwordGroup,
-          createElement(
-            "div",
-            { class: "form-hint", "data-testid": "edit-channel-password-removed" },
-            shellText("channelForm.passwordRemoved"),
-          ),
-          passwordButton(shellText("channelForm.passwordUndo"), "edit-channel-password-keep", () =>
-            setPasswordMode("keep"),
-          ),
-        );
-      }
-    }
-    /** What the password part of the PATCH carries, undefined when the user left it alone. */
-    function passwordChange(): string | undefined {
-      if (!isVoice) return undefined;
-      if (passwordSet && passwordMode === "remove") return "";
-      if (passwordSet && passwordMode !== "change") return undefined;
-      return passwordInput.value === "" ? undefined : passwordInput.value;
-    }
 
     // Voice-only section. Rendered for a voice channel alone: the columns exist
     // on every row, but on a text channel they are values nothing reads, and
@@ -477,109 +260,20 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
       );
       maxUsersInput = users.input;
       maxVideoInput = video.input;
-      appendChildren(voiceSection, voiceHeading, users.group, video.group, passwordGroup);
+      appendChildren(voiceSection, voiceHeading, users.group, video.group, password.group);
       body.appendChild(voiceSection);
-      renderPassword();
+      password.render();
     }
 
-    // Fields the user has not touched follow the store while the dialog is
-    // open, and only touched fields are sent: a concurrent edit by another admin
-    // is neither hidden from this form nor overwritten by its save. "Touched"
-    // is the control differing from the latest server value, so typing back
-    // what another admin replaced still counts as a change and is sent.
-    type Mutable = { -readonly [K in keyof EditChannelData]: EditChannelData[K] };
-    interface TrackedField {
-      applied: string | boolean;
-      readonly read: () => string | boolean;
-      readonly write: (value: string | boolean) => void;
-      readonly fromChannel: (ch: Channel) => string | boolean;
-      readonly send: (data: Mutable) => void;
-    }
-    const textField = (
-      input: HTMLInputElement,
-      fromChannel: (ch: Channel) => string,
-      send: (data: Mutable, value: string) => void,
-    ): TrackedField => ({
-      applied: input.value,
-      read: () => input.value,
-      write: (value) => {
-        input.value = String(value);
-      },
-      fromChannel,
-      send: (data) => send(data, input.value.trim()),
+    const fields = buildTrackedFields({
+      nameInput,
+      topicInput,
+      categorySelect,
+      slowSelect,
+      nsfwInput,
+      maxUsersInput,
+      maxVideoInput,
     });
-    const fields: TrackedField[] = [
-      textField(
-        nameInput,
-        (ch) => ch.name,
-        (d, v) => {
-          d.name = v;
-        },
-      ),
-      textField(
-        topicInput,
-        (ch) => ch.topic,
-        (d, v) => {
-          d.topic = v;
-        },
-      ),
-      {
-        applied: categorySelect.value,
-        read: () => categorySelect.value,
-        write: (value) => setCategoryValue(categorySelect, String(value)),
-        fromChannel: (ch) => categoryOptionValue(ch.categoryId ?? 0, ch.category ?? ""),
-        send: (d) => Object.assign(d, categoryFields(categorySelect.value)),
-      },
-      {
-        applied: slowSelect.value,
-        read: () => slowSelect.value,
-        write: (value) => {
-          const v = String(value);
-          if (!Array.from(slowSelect.options).some((o) => o.value === v)) {
-            slowSelect.appendChild(
-              createElement("option", { value: v }, formatSlowMode(Number(v))),
-            );
-          }
-          slowSelect.value = v;
-        },
-        fromChannel: slowOf,
-        send: (d) => {
-          d.slow_mode = clampSlowMode(Number.parseInt(slowSelect.value, 10));
-        },
-      },
-      {
-        applied: nsfwInput.checked,
-        read: () => nsfwInput.checked,
-        write: (value) => {
-          nsfwInput.checked = value === true;
-        },
-        fromChannel: (ch) => ch.nsfw === true,
-        send: (d) => {
-          d.nsfw = nsfwInput.checked;
-        },
-      },
-    ];
-    if (maxUsersInput !== null && maxVideoInput !== null) {
-      const users = maxUsersInput;
-      const video = maxVideoInput;
-      fields.push(
-        textField(
-          users,
-          (ch) => limitOf(ch.voiceMaxUsers),
-          (d) => {
-            d.voice_max_users = clampVoiceLimit(Number.parseInt(users.value, 10));
-          },
-        ),
-        textField(
-          video,
-          (ch) => limitOf(ch.voiceMaxVideo),
-          (d) => {
-            d.voice_max_video = clampVoiceLimit(Number.parseInt(video.value, 10));
-          },
-        ),
-      );
-    }
-    const touched = (f: TrackedField): boolean => f.read() !== f.applied;
     disposable.onStoreChange<ChannelsState, Channel | undefined>(
       channelsStore,
       (state) => state.channels.get(options.channelId),
@@ -587,23 +281,8 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
         if (ch === undefined) return;
         // Another admin set or removed the password while this is open: follow
         // it, and drop a pending removal that no longer means anything.
-        const nowSet = ch.passwordProtected === true;
-        if (isVoice && nowSet !== passwordSet) {
-          passwordSet = nowSet;
-          // A flip to protected must not carry a half-typed value into "change".
-          if (nowSet) passwordInput.value = "";
-          else passwordMode = "keep";
-          renderPassword();
-        }
-        for (const f of fields) {
-          const next = f.fromChannel(ch);
-          if (touched(f)) {
-            f.applied = next;
-            continue;
-          }
-          f.write(next);
-          f.applied = f.read();
-        }
+        if (isVoice) password.follow(ch.passwordProtected === true);
+        followChannel(fields, ch);
       },
     );
 
@@ -672,10 +351,9 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
         }
 
         if (warnUnsavedForum()) return;
-        const data: Mutable = {};
-        for (const f of fields) if (touched(f)) f.send(data);
-        const password = passwordChange();
-        if (password !== undefined) data.password = password;
+        const data = collectChanges(fields);
+        const passwordValue = password.change();
+        if (passwordValue !== undefined) data.password = passwordValue;
         // Nothing changed: there is nothing to PATCH.
         if (Object.keys(data).length === 0) {
           requestClose();

@@ -20,6 +20,7 @@ import {
   withSkinTone,
   SKIN_TONES,
   type EmojiGroupKey,
+  type UnicodeEmoji,
 } from "./emojiCatalog";
 
 // ---------------------------------------------------------------------------
@@ -115,6 +116,23 @@ function buildEmojiSpan(emoji: string, images: PickerImages): HTMLSpanElement {
     setText(span, emoji);
   }
   return span;
+}
+
+/** Whether an emoji (or a custom `:shortcode:` token) matches the typed query. */
+function emojiMatchesQuery(
+  emoji: string,
+  raw: string,
+  q: string,
+  byChar: ReadonlyMap<string, UnicodeEmoji> | undefined,
+): boolean {
+  // Match against emoji name/keywords (a toned Recent entry included)
+  const entry = byChar?.get(emoji);
+  if (entry !== undefined && (emojiMatches(entry, raw) || emojiMatches(entry, q))) {
+    return true;
+  }
+  // Also match the character itself and custom shortcodes like :wave:
+  const lower = emoji.toLowerCase();
+  return lower.includes(raw) || lower.includes(q);
 }
 
 export function createEmojiPicker(options: EmojiPickerOptions): {
@@ -297,14 +315,9 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
     return failure;
   }
 
-  function renderAllCategories(categories: readonly EmojiCategory[]): void {
-    images.clear();
-    for (const child of Array.from(scrollArea.children)) {
-      if (child !== failureRow) child.remove();
-    }
-
-    // A failed load says so, with a way to try again, above whatever Recent
-    // and Server emoji are already showing.
+  /** A failed load says so, with a way to try again, above whatever Recent
+   *  and Server emoji are already showing. */
+  function syncFailureRow(): void {
     if (loadFailed && emojiCatalog() === null) {
       const row = ensureFailureRow();
       if (row.parentElement !== scrollArea) scrollArea.prepend(row);
@@ -312,43 +325,24 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
       failureRow.remove();
       failureRow = null;
     }
+  }
 
-    // Shortcodes join words with "_", so "thumbs up" also searches as thumbs_up.
-    const raw = searchQuery.toLowerCase();
-    const q = raw.replace(/\s+/g, "_");
-    const byChar = emojiCatalog()?.byChar;
-    for (const cat of categories) {
-      if (cat.emoji.length === 0) continue;
+  function appendCategory(cat: EmojiCategory, filtered: readonly string[]): void {
+    const label = createElement("div", {
+      class: "ep-category-label",
+      "data-category": cat.name,
+    });
+    setText(label, messagingText(cat.name));
+    scrollArea.appendChild(label);
 
-      const filtered = q
-        ? cat.emoji.filter((e) => {
-            // Match against emoji name/keywords (a toned Recent entry included)
-            const entry = byChar?.get(e);
-            if (entry !== undefined && (emojiMatches(entry, raw) || emojiMatches(entry, q))) {
-              return true;
-            }
-            // Also match the character itself and custom shortcodes like :wave:
-            const lower = e.toLowerCase();
-            return lower.includes(raw) || lower.includes(q);
-          })
-        : cat.emoji;
-
-      if (filtered.length === 0) continue;
-
-      const label = createElement("div", {
-        class: "ep-category-label",
-        "data-category": cat.name,
-      });
-      setText(label, messagingText(cat.name));
-      scrollArea.appendChild(label);
-
-      const grid = createElement("div", { class: "ep-grid" });
-      for (const emoji of filtered) {
-        grid.appendChild(buildEmojiSpan(emoji, images));
-      }
-      scrollArea.appendChild(grid);
+    const grid = createElement("div", { class: "ep-grid" });
+    for (const emoji of filtered) {
+      grid.appendChild(buildEmojiSpan(emoji, images));
     }
+    scrollArea.appendChild(grid);
+  }
 
+  function appendLoadingOrEmpty(): void {
     if (emojiCatalog() === null && !loadFailed) {
       scrollArea.appendChild(
         createElement("div", { class: "ep-loading" }, messagingText("emoji.loading")),
@@ -364,6 +358,28 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
       );
       scrollArea.appendChild(empty);
     }
+  }
+
+  function renderAllCategories(categories: readonly EmojiCategory[]): void {
+    images.clear();
+    for (const child of Array.from(scrollArea.children)) {
+      if (child !== failureRow) child.remove();
+    }
+    syncFailureRow();
+
+    // Shortcodes join words with "_", so "thumbs up" also searches as thumbs_up.
+    const raw = searchQuery.toLowerCase();
+    const q = raw.replace(/\s+/g, "_");
+    const byChar = emojiCatalog()?.byChar;
+    for (const cat of categories) {
+      if (cat.emoji.length === 0) continue;
+      const filtered = q
+        ? cat.emoji.filter((e) => emojiMatchesQuery(e, raw, q, byChar))
+        : cat.emoji;
+      if (filtered.length === 0) continue;
+      appendCategory(cat, filtered);
+    }
+    appendLoadingOrEmpty();
 
     // Every render rebuilds the cell set, so the single Tab stop must be
     // re-established or filtering would leave zero tabbable cells.

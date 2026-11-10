@@ -7,21 +7,6 @@
     "app/session.ts": {
       "startSession": [17]
     },
-    "features/channels/editChannelDialog.ts": {
-      "createEditChannelModal > mount": [17]
-    },
-    "features/messaging/EmojiPicker.ts": {
-      "createEmojiPicker > renderAllCategories": [16]
-    },
-    "features/threads/ThreadListPopover.ts": {
-      "openThreadListPopover > loadNext": [16]
-    },
-    "features/threads/ThreadPanel.ts": {
-      "createThreadPanel > sendText": [18]
-    },
-    "features/updates/UpdateNotifier.ts": {
-      "createUpdateNotifier > renderInstallState": [19]
-    },
     "features/channels/ChannelSidebar.ts": {
       "buildVoiceModOptions": [16],
       "createChannelSidebar > drawChannels > reconcileRows": [16]
