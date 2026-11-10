@@ -15,7 +15,7 @@ import {
   setScreenshareQuality,
   type StreamQuality,
 } from "@lib/voice/livekitSession";
-import { voiceText as t } from "../../i18n/voice";
+import { voiceText as t } from "../../../i18n/voice";
 
 const QUALITIES: readonly StreamQuality[] = ["low", "medium", "high", "source"];
 

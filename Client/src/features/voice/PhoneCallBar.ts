@@ -23,15 +23,15 @@ import { voiceStore, type VoiceState } from "@stores/voice.store";
 import { channelsStore } from "@stores/channels.store";
 import { dmStore, dmDisplayName, type DmChannel } from "@stores/dm.store";
 import { membersStore } from "@stores/members.store";
-import { voiceText as t } from "../i18n/voice";
-import { createTalkSlot } from "../features/voice/talkSlot";
+import { voiceText as t } from "../../i18n/voice";
+import { createTalkSlot } from "./talkSlot";
 import {
   formatElapsed,
   headerStatusText,
   isConnecting,
   micControlKey,
   micControlState,
-} from "../features/voice/voiceStatusText";
+} from "./voiceStatusText";
 import { callParticipants, participantAvatar, participantKey } from "./callParticipants";
 
 export interface PhoneCallBarOptions {

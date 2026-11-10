@@ -6,7 +6,7 @@
 import type { VoiceUser } from "@stores/voice.store";
 import { membersStore, memberDisplayName } from "@stores/members.store";
 import { createAvatarElement, pickAvatarColor } from "../../features/profiles/avatar";
-import type { GridPerson } from "@components/VideoGrid";
+import type { GridPerson } from "../../features/voice/videoGrid/VideoGrid";
 import { shellText } from "../../i18n/shell";
 
 /** Avatar elements by user, kept while their name and picture stay the same:

@@ -179,7 +179,7 @@ test.describe("video tile overlay keyboard parity", () => {
         isScreenshare: false,
       });
       return true;
-    }, "/src/components/VideoGrid.ts");
+    }, "/src/features/voice/videoGrid/VideoGrid.ts");
     test.skip(!mounted, "needs the dev server's modules");
     await expect(page.locator("#b9-grid-host .video-cell")).toBeVisible();
     // The join click leaves the pointer on the sidebar, which the host covers;

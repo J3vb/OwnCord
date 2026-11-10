@@ -1,7 +1,7 @@
 /** The mutable state one main page instance keeps, shared by its modules. */
 import type { MountableComponent } from "@lib/text/safeRender";
 import type { UserStatus } from "@lib/types";
-import type { VideoGridComponent } from "@components/VideoGrid";
+import type { VideoGridComponent } from "../../features/voice/videoGrid/VideoGrid";
 import type { ServerBannerControl } from "@components/ServerBanner";
 import type { ToastContainer } from "@lib/ui/toastContainer";
 import type { AutoIdleController } from "@lib/presence/autoIdle";

@@ -22,20 +22,20 @@ import {
 import { enhancedNoiseSuppressionEnabled } from "@lib/voice/audioPipeline";
 import { getRoomForStats, reapplyEnhancedNoiseSuppression } from "@lib/voice/livekitSession";
 import { loadPref, onPrefChange, savePref } from "@lib/prefs/preferences";
-import { voiceText as t } from "../i18n/voice";
-import { formatElapsed, headerStatusText, isConnecting } from "../features/voice/voiceStatusText";
-import { shareBlockReason } from "../features/voice/shareGate";
-import { canPublishScreen } from "../features/voice/native/platform";
-import { createSecuredBadge, type SecuredBadge } from "../features/voice/securedBadge";
-import type { StreamCard } from "./voice-widget/streamCard";
+import { voiceText as t } from "../../i18n/voice";
+import { formatElapsed, headerStatusText, isConnecting } from "./voiceStatusText";
+import { shareBlockReason } from "./shareGate";
+import { canPublishScreen } from "./native/platform";
+import { createSecuredBadge, type SecuredBadge } from "./securedBadge";
+import type { StreamCard } from "./voiceWidget/streamCard";
 import {
   createSignalButton,
   createStatsPane,
   type SignalButton,
   type StatsPane,
-} from "../features/voice/widget/statsPane";
-import { subscribeVoiceWidget } from "../features/voice/widget/subscriptions";
-import { createListenOnlyUi, type ListenOnlyUi } from "../features/voice/widget/listenOnly";
+} from "./widget/statsPane";
+import { subscribeVoiceWidget } from "./widget/subscriptions";
+import { createListenOnlyUi, type ListenOnlyUi } from "./widget/listenOnly";
 
 export interface VoiceWidgetOptions {
   onDisconnect(): void;
@@ -300,7 +300,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
       return;
     }
     const load = ++streamCardLoad;
-    void import("./voice-widget/streamCard").then(({ createStreamCard }) => {
+    void import("./voiceWidget/streamCard").then(({ createStreamCard }) => {
       if (load !== streamCardLoad || root === null || controlsRow === null) return;
       streamCardScope = new Disposable();
       streamCard = createStreamCard(options.onScreenshareToggle, streamCardScope.signal);

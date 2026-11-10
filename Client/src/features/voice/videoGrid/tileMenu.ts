@@ -21,14 +21,14 @@ import {
   setScreenshareAudioVolume,
   setUserVolume,
 } from "@lib/voice/livekitSession";
-import type { TileConfig } from "../VideoGrid";
+import type { TileConfig } from "./VideoGrid";
 import {
   appendVoiceModeration,
   createLocalMuteItem,
   type VoiceModMenuOptions,
-} from "../../features/channels/sidebar/volumeMenu";
-import { voiceText as t } from "../../i18n/voice";
-import { isAndroidApp } from "../../features/voice/native/platform";
+} from "../../channels/sidebar/volumeMenu";
+import { voiceText as t } from "../../../i18n/voice";
+import { isAndroidApp } from "../native/platform";
 
 export interface TileMenuOptions {
   readonly x: number;

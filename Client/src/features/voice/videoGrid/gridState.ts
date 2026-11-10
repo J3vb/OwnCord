@@ -2,10 +2,10 @@
 import type { Disposable } from "@lib/disposable";
 import type { IconName } from "@lib/icons";
 import type { StreamInfo } from "./streamInfo";
-import type { VideoView } from "../../features/voice/remoteTracks";
-import type { PopoutWindow } from "../../features/voice/popout";
+import type { VideoView } from "../remoteTracks";
+import type { PopoutWindow } from "../popout";
 import type { ViewToggle, CellEntry } from "./gridShared";
-import type { TileConfig, VideoGridCallbacks, GridPerson, CallState } from "../VideoGrid";
+import type { TileConfig, VideoGridCallbacks, GridPerson, CallState } from "./VideoGrid";
 
 export interface GridState {
   root: HTMLDivElement | null;

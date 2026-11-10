@@ -20,8 +20,8 @@ import {
 vi.mock("@lib/voice/livekitSession", () => mocks.rePinSessionMock());
 vi.mock("@lib/net/e2eeCrypto", () => mocks.e2eeCryptoMock());
 vi.mock("@lib/presence/profiles", () => mocks.presenceProfilesMock());
-vi.mock("@components/UserBar", () => mocks.userBarMock());
-vi.mock("@components/VoiceWidget", () => mocks.voiceWidgetMock());
+vi.mock("../../src/features/voice/UserBar", () => mocks.userBarMock());
+vi.mock("../../src/features/voice/VoiceWidget", () => mocks.voiceWidgetMock());
 vi.mock("../../src/features/members/MemberList", () => mocks.memberListMock());
 vi.mock("@components/QuickSwitchOverlay", () => mocks.quickSwitchOverlayMock());
 vi.mock("../../src/pages/main-page/OverlayManagers", () => mocks.inviteManagerMock());

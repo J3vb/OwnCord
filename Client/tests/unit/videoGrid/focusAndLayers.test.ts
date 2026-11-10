@@ -1,7 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { stubCapturingResizeObserver } from "../../helpers/resizeObserverStub";
 import * as mocks from "../../helpers/videoGridMocks";
-import { createVideoGrid, type VideoGridComponent } from "../../../src/components/VideoGrid";
+import {
+  createVideoGrid,
+  type VideoGridComponent,
+} from "../../../src/features/voice/videoGrid/VideoGrid";
 import { RemoteTracks } from "../../../src/features/voice/remoteTracks";
 import { VideoQuality, type Room } from "livekit-client";
 import {

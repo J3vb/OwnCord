@@ -9,18 +9,18 @@ import { createIcon } from "@lib/icons";
 import { USER_LOCAL_MUTE_CHANGED } from "@lib/constants";
 import { syncVideoSurface } from "@lib/voice/videoSurface";
 import type { MountableComponent } from "@lib/text/safeRender";
-import { voiceText } from "../i18n/voice";
-import type { StreamInfo } from "./video-grid/streamInfo";
-import type { VoiceModMenuOptions } from "../features/channels/sidebar/volumeMenu";
-import type { StreamSample, VideoView } from "../features/voice/remoteTracks";
-import type { ShareSenderSample } from "../features/voice/shareSenderStats";
-import { STATS_POLL_MS, log, sizeOf, type CellEntry } from "./video-grid/gridShared";
-import type { GridState, GridApi } from "./video-grid/gridState";
-import { createGridLayout } from "./video-grid/gridLayout";
-import { createGridCallBar } from "./video-grid/gridCallBar";
-import { createGridWatch } from "./video-grid/gridWatch";
-import { createGridStreams } from "./video-grid/gridStreams";
-import { createGridStats } from "../features/voice/videoGrid/gridStats";
+import { voiceText } from "../../../i18n/voice";
+import type { StreamInfo } from "./streamInfo";
+import type { VoiceModMenuOptions } from "../../channels/sidebar/volumeMenu";
+import type { StreamSample, VideoView } from "../remoteTracks";
+import type { ShareSenderSample } from "../shareSenderStats";
+import { STATS_POLL_MS, log, sizeOf, type CellEntry } from "./gridShared";
+import type { GridState, GridApi } from "./gridState";
+import { createGridLayout } from "./gridLayout";
+import { createGridCallBar } from "./gridCallBar";
+import { createGridWatch } from "./gridWatch";
+import { createGridStreams } from "./gridStreams";
+import { createGridStats } from "./gridStats";
 
 export interface TileConfig {
   /** True if this is the local user's own tile (no audio controls) */
@@ -187,7 +187,7 @@ export interface VideoGridComponent extends MountableComponent {
   raiseCallPopout(): boolean;
 }
 
-export { computeGridLayout, type GridLayout } from "./video-grid/gridShared";
+export { computeGridLayout, type GridLayout } from "./gridShared";
 
 export function createVideoGrid(): VideoGridComponent {
   const st: GridState = {
@@ -237,7 +237,7 @@ export function createVideoGrid(): VideoGridComponent {
       pollMs: STATS_POLL_MS,
       log,
       sizeOf,
-      loadInfo: () => import("./video-grid/streamInfo"),
+      loadInfo: () => import("./streamInfo"),
     }),
     createGridWatch(st, api),
     createGridStreams(st, api),

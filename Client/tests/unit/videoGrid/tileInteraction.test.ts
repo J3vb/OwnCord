@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as mocks from "../../helpers/videoGridMocks";
-import { type VideoGridComponent, type TileConfig } from "../../../src/components/VideoGrid";
+import {
+  type VideoGridComponent,
+  type TileConfig,
+} from "../../../src/features/voice/videoGrid/VideoGrid";
 import {
   fakeStream,
   SCREEN_TILE,

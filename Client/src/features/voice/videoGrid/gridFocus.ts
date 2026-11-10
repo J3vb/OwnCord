@@ -1,5 +1,5 @@
 /** The focus layout's two areas: the focused tile and the strip of the rest. */
-import type { GridState } from "@components/video-grid/gridState";
+import type { GridState } from "./gridState";
 
 /** Put the focused tile in the main area. */
 export function seatFocusedTile(st: GridState, mainArea: HTMLElement, focusedId: number): void {

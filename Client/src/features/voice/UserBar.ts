@@ -11,7 +11,7 @@ import { authStore } from "@stores/auth.store";
 import { membersStore, type MembersState } from "@stores/members.store";
 import { voiceStore, type VoiceState } from "@stores/voice.store";
 import { openSettings, uiStore } from "@stores/ui.store";
-import { createSelfProfileCard, type SelfProfileCard } from "../features/profiles/SelfProfileCard";
+import { createSelfProfileCard, type SelfProfileCard } from "../profiles/SelfProfileCard";
 import type { UserStatus } from "@lib/types";
 import {
   isTimedStatus,
@@ -22,26 +22,22 @@ import {
   saveStatusTimer,
   saveUserStatus,
 } from "@lib/presence/userStatus";
-import { parseExpiry } from "../features/presence/statusDefs";
+import { parseExpiry } from "../presence/statusDefs";
 import { avatarInitial, resolveDisplayName } from "@lib/ui/avatar";
 import { applyStatusIndicator, showsPhone } from "@lib/ui/statusIndicator";
-import {
-  avatarAnimationMode,
-  isRenderableAvatar,
-  setAvatarSource,
-} from "../features/profiles/avatar";
+import { avatarAnimationMode, isRenderableAvatar, setAvatarSource } from "../profiles/avatar";
 import {
   fetchImageAsObjectUrl,
   recoverEvictedImage,
   resolveServerUrl,
-} from "../features/messaging/content/attachments";
+} from "../messaging/content/attachments";
 import type { WsClient } from "@lib/ws";
 import type { PresenceSender } from "@lib/presence/presence";
-import { shellText } from "../i18n/shell";
-import { voiceText } from "../i18n/voice";
-import { micControlState } from "../features/voice/voiceStatusText";
-import { portalText } from "../i18n/portal";
-import { createTalkSlot } from "../features/voice/talkSlot";
+import { shellText } from "../../i18n/shell";
+import { voiceText } from "../../i18n/voice";
+import { micControlState } from "./voiceStatusText";
+import { portalText } from "../../i18n/portal";
+import { createTalkSlot } from "./talkSlot";
 
 export interface UserBarOptions {
   readonly onDisconnect?: () => void;

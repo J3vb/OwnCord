@@ -15,11 +15,11 @@ import {
 } from "@lib/voice/livekitSession";
 import { videoSurfaceOf } from "@lib/voice/videoSurface";
 import type { ZoomPan } from "@lib/ui/zoomPan";
-import { voiceText } from "../../i18n/voice";
-import type { StreamSample } from "../../features/voice/remoteTracks";
-import type { Popout } from "../../features/voice/popout";
-import type { MiniPlayer } from "../../features/voice/miniPlayer";
-import type { TileConfig } from "../VideoGrid";
+import { voiceText } from "../../../i18n/voice";
+import type { StreamSample } from "../remoteTracks";
+import type { Popout } from "../popout";
+import type { MiniPlayer } from "../miniPlayer";
+import type { TileConfig } from "./VideoGrid";
 
 /** How often a watched stream's quality chip refreshes. */
 export const STATS_POLL_MS = 2000;

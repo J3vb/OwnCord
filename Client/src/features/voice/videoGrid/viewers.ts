@@ -1,6 +1,6 @@
 // Who is watching a screen share: the text a tile's viewer badge shows and
 // reads out. Pure, so the cap and the wording are testable alone.
-import { voiceText } from "../../i18n/voice";
+import { voiceText } from "../../../i18n/voice";
 
 /** Names listed before "and N more". */
 export const MAX_VIEWER_NAMES = 10;

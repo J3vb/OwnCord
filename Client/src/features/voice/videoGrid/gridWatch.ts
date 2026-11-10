@@ -5,9 +5,9 @@
 import { createElement, appendChildren } from "@lib/dom";
 import { showToast } from "@lib/ui/toast";
 import { syncVideoSurface } from "@lib/voice/videoSurface";
-import { voiceText } from "../../i18n/voice";
-import type { VideoView } from "../../features/voice/remoteTracks";
-import { openPopout } from "../../features/voice/popout";
+import { voiceText } from "../../../i18n/voice";
+import type { VideoView } from "../remoteTracks";
+import { openPopout } from "../popout";
 import { VIEW_RESIZE_MS, log, type CellEntry, isPlayingHere } from "./gridShared";
 import type { GridState, GridApi } from "./gridState";
 
@@ -169,7 +169,7 @@ export function createGridWatch(st: GridState, api: GridApi) {
     const request = ++st.miniRequest;
     if (api.isFullscreen(tileId)) api.leaveFullscreen();
     // Loaded on first use: only leaving a watched stream needs it.
-    void import("../../features/voice/miniPlayer").then(({ openMiniPlayer }) => {
+    void import("../miniPlayer").then(({ openMiniPlayer }) => {
       const entry = st.cells.get(tileId);
       if (request !== st.miniRequest || st.root === null || entry === undefined) return;
       if (entry.mini !== undefined || !isPlayingHere(entry)) return;

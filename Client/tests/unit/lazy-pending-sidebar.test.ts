@@ -51,9 +51,9 @@ vi.mock("../../src/features/direct-messages/DmSidebar", () => mocks.dmSidebarMoc
 
 vi.mock("../../src/features/members/MemberList", () => mocks.memberListMock());
 
-vi.mock("@components/UserBar", () => mocks.userBarMock());
+vi.mock("../../src/features/voice/UserBar", () => mocks.userBarMock());
 
-vi.mock("@components/VoiceWidget", () => mocks.voiceWidgetMock());
+vi.mock("../../src/features/voice/VoiceWidget", () => mocks.voiceWidgetMock());
 
 vi.mock("@components/QuickSwitchOverlay", () => mocks.quickSwitchOverlayMock());
 

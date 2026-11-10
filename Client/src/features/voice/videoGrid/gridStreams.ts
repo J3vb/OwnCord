@@ -10,9 +10,9 @@ import { getUserLocalMute, getUserVolume } from "@lib/voice/livekitSession";
 import { syncVideoSurface } from "@lib/voice/videoSurface";
 import { bindVideoZoom } from "@lib/ui/zoomPan";
 import { isPhoneLayout } from "@lib/ui/bottomSheet";
-import { voiceText } from "../../i18n/voice";
+import { voiceText } from "../../../i18n/voice";
 import { viewersLabel } from "./viewers";
-import type { ShareSenderSample } from "../../features/voice/shareSenderStats";
+import type { ShareSenderSample } from "../shareSenderStats";
 import {
   STATS_POLL_MS,
   log,
@@ -27,7 +27,7 @@ import {
   isSelfCamera,
 } from "./gridShared";
 import type { GridState, GridApi } from "./gridState";
-import type { TileConfig } from "../VideoGrid";
+import type { TileConfig } from "./VideoGrid";
 
 function setTrackMuted(entry: CellEntry, muted: boolean): void {
   entry.el.classList.toggle("track-muted", muted);

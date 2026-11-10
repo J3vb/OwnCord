@@ -7,13 +7,13 @@ import { createIcon, type IconName } from "@lib/icons";
 import { showToast } from "@lib/ui/toast";
 import { showContextMenu, type ContextMenuItem } from "@lib/ui/contextMenu";
 import { loadPref, savePref } from "@lib/prefs/preferences";
-import { voiceText } from "../../i18n/voice";
-import { canPublishScreen, isAndroidApp } from "../../features/voice/native/platform";
-import { openPopoutWindow } from "../../features/voice/popout";
-import { createTalkSlot } from "../../features/voice/talkSlot";
+import { voiceText } from "../../../i18n/voice";
+import { canPublishScreen, isAndroidApp } from "../native/platform";
+import { openPopoutWindow } from "../popout";
+import { createTalkSlot } from "../talkSlot";
 import { VIEW_PREFS, type ViewToggle, log, callButton } from "./gridShared";
 import type { GridState, GridApi } from "./gridState";
-import type { VideoGridCallbacks } from "../VideoGrid";
+import type { VideoGridCallbacks } from "./VideoGrid";
 
 /** Swap a control's icon only when it changes: the bars redraw on every voice
  *  store tick, and speaking alone ticks it several times a second. */

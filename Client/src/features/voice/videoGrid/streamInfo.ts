@@ -5,9 +5,9 @@
  */
 
 import { createElement, appendChildren } from "@lib/dom";
-import { voiceText as t } from "../../i18n/voice";
-import type { StreamSample } from "../../features/voice/remoteTracks";
-import type { ShareSenderSample } from "../../features/voice/shareSenderStats";
+import { voiceText as t } from "../../../i18n/voice";
+import type { StreamSample } from "../remoteTracks";
+import type { ShareSenderSample } from "../shareSenderStats";
 
 export type { StreamSample };
 

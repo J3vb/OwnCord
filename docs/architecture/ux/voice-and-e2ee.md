@@ -104,7 +104,7 @@ All four are optimistic with rollback; each also emits a WS control message.
 | **Camera**      | `localCamera` set optimistically, rolled back on device failure (`enableCamera()` in `features/voice/screenShare.ts`)                                                                                                                                                                                                                 | `voice_camera{enabled}`       | revert on failure + toast                    |
 | **Screenshare** | `localScreenshare` optimistic, rollback on failure (`enableScreenshare()` in `features/voice/screenShare.ts`); rate-limited                                                                                                                                                                                                           | `voice_screenshare{enabled}`  | revert + toast; a dismissed picker is silent |
 
-Mute and deafen live in the user panel (`components/UserBar.ts`, next to
+Mute and deafen live in the user panel (`features/voice/UserBar.ts`, next to
 Settings), not the voice widget. They, their keys and the tray work outside a
 call too: there they change only the local state and send nothing. The
 member's own mute and deafen are saved (`saveSelfVoiceState`, never a
@@ -122,7 +122,7 @@ the accepted cost.
 | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | mic muted      | Mic-slash icon on self tile + control bar                                                                                                                                                                                                                                              |
 | deafened       | Headphone-slash alone (deafen implies mute, so no mic-slash beside it); a moderator mute or deafen gives it the server-muted class and title                                                                                                                                           |
-| server muted   | Distinct server-muted icon (title "Muted by a moderator"); the user panel's mute/deafen buttons are disabled with the reason while the mute holds — `serverMuted`/`serverDeafened`, `features/channels/voiceSidebarRows.ts`, `components/UserBar.ts`                                   |
+| server muted   | Distinct server-muted icon (title "Muted by a moderator"); the user panel's mute/deafen buttons are disabled with the reason while the mute holds — `serverMuted`/`serverDeafened`, `features/channels/voiceSidebarRows.ts`, `features/voice/UserBar.ts`                               |
 | listen-only    | Badge "Listen only — no microphone" with a **Retry mic** affordance (`retryMicPermission`); the mic button is disabled, dimmed and reads mic-off                                                                                                                                       |
 | camera on      | Self video tile in the grid                                                                                                                                                                                                                                                            |
 | screenshare on | Screen tile; a stop-share affordance always visible                                                                                                                                                                                                                                    |
@@ -135,7 +135,7 @@ call bar above the chat (Mute, Leave, Expand); reopening the DM opens the call
 view again. On a computer the panel keeps its resizable height and the
 collapsed choice survives a DM switch.
 
-**Video tiles** (`components/VideoGrid.ts`, in guild voice and DM calls alike):
+**Video tiles** (`features/voice/videoGrid/VideoGrid.ts`, in guild voice and DM calls alike):
 each tile is a button (click, Enter, Space) that opens it in focus view, with a
 filmstrip for the rest and **Back to grid** to leave. Screen shares carry a
 **LIVE** badge, and the speaking ring (`--text-positive`) and a mic-slash or
@@ -187,7 +187,7 @@ A remote tile's volume slider is named for whose it is ("Otto stream volume"
 for screen-share audio, 0–100 %; "Otto voice volume" for the mic, 0–200 %; its mute
 button is the same local Mute as the sidebar menu's) and
 shows its value. The tile menu (right-click, the Menu key, Shift+F10;
-`components/video-grid/tileMenu.ts`, loaded on first use) is the person's
+`features/voice/videoGrid/tileMenu.ts`, loaded on first use) is the person's
 menu: Profile, Message, the two volumes kept apart, Mute stream, the local
 Mute, Focus (Back to grid when focused), Full screen, Pop out, **Stop
 watching**, and the voice roster's moderation section where the channel's
@@ -221,7 +221,7 @@ stream as it is published. Every subscribed tile asks only for its displayed
 size, and a tile nobody can see (grid closed, app hidden, stopped) for none.
 Your own screen share is covered by what is going out (surface, resolution, fps, audio) with **Stop sharing** and
 **Hide preview**. While you share, the voice widget shows a stream card
-(`components/voice-widget/streamCard.ts`, loaded on the first share): what is
+(`features/voice/voiceWidget/streamCard.ts`, loaded on the first share): what is
 going out, **Change source**, **Quality** and **Stop sharing**. Change source
 opens the picker and swaps the new capture under the published track
 (`features/voice/screenshareChange.ts`), so viewers keep watching and the
@@ -555,10 +555,10 @@ never silences message chimes for the rest of the session.
 
 `src/lib/voice/livekitSession.ts`, `src/features/voice/`, `src/lib/voice/livekitE2EE.ts`,
 `src/stores/voice.store.ts`, `src/features/voice/screenShare.ts`,
-`src/lib/voice/ptt.ts`, `src/lib/ui/inputMode.ts`, `src/lib/voice/noiseFloor.ts`, `src/lib/voice/roomEventHandlers.ts`, `src/components/VoiceWidget.ts`,
-`src/components/UserBar.ts` (mute and deafen buttons),
+`src/lib/voice/ptt.ts`, `src/lib/ui/inputMode.ts`, `src/lib/voice/noiseFloor.ts`, `src/lib/voice/roomEventHandlers.ts`, `src/features/voice/VoiceWidget.ts`,
+`src/features/voice/UserBar.ts` (mute and deafen buttons),
 `src/features/channels/voiceSidebarRows.ts` (voice rows, join freeze on WS reconnect,
-and the E2EE verification badge), `src/components/VideoGrid.ts`,
+and the E2EE verification badge), `src/features/voice/videoGrid/VideoGrid.ts`,
 `src-tauri/src/livekit_proxy.rs`, `src-tauri/src/ptt.rs`,
 `src/lib/net/e2eeCrypto.ts`, `src/lib/net/identity.ts`; and the structural map in
 [../voice-e2ee.md](../voice-e2ee.md).

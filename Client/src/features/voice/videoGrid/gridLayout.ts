@@ -6,8 +6,8 @@ import { isImeCommit } from "@lib/text/ime";
 import { createElement, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { isPhoneLayout } from "@lib/ui/bottomSheet";
-import { voiceText } from "../../i18n/voice";
-import { beginPhoneFullscreen } from "../../features/voice/phoneFullscreen";
+import { voiceText } from "../../../i18n/voice";
+import { beginPhoneFullscreen } from "../phoneFullscreen";
 import {
   CALL_BAR_SPACE,
   CALL_BAR_SPACE_PHONE,
@@ -20,8 +20,8 @@ import {
   isSelfCamera,
 } from "./gridShared";
 import type { GridState, GridApi } from "./gridState";
-import { seatFocusedTile, fillThumbStrip } from "../../features/voice/videoGrid/gridFocus";
-import type { TileConfig } from "../VideoGrid";
+import { seatFocusedTile, fillThumbStrip } from "./gridFocus";
+import type { TileConfig } from "./VideoGrid";
 
 export function createGridLayout(st: GridState, api: GridApi) {
   /** The document the grid is in: the call's pop-out window's, or the app's. */
