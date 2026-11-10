@@ -200,15 +200,46 @@ engines.
      }
 ```
 
+## Signal input
+
+Invalid or missing fields in server signal messages are logged and skipped, or
+end the session through the normal reconnect path, instead of stopping the
+handler. Marked `OWNCORD-PATCH (signal input)` in
+`src/rtc_engine/rtc_session.rs` and `src/room/mod.rs`:
+
+- An unusable publisher answer or subscriber offer (unknown SDP type or
+  unparsable SDP) is validated before any session state is updated, sends a
+  `Close` event with `Action::Disconnect` and returns an error. The signal task
+  only logs a returned error, so the event is what ends the session: the engine
+  stops reconnecting and reports a terminal disconnect. A reconnect is not
+  used because a server that keeps sending unusable descriptions would loop.
+- An unusable trickle candidate, a room-update message without its room, and a
+  subscriber message without a subscriber connection are logged and skipped.
+  A track-published response without track info drops the pending sender, and
+  `add_track` now returns "track publication cancelled" immediately instead of
+  waiting for its timeout (its `select!` no longer ignores a dropped sender).
+- A join response without a room closes the engine and fails `Room::connect`.
+  A missing participant or invalid participant sid is already rejected earlier
+  by `SessionParticipantInfo::from_join`; `split_join_response` only repeats
+  that check so the later code needs no unwraps. Participant, speaker, connection
+  quality, track-subscribed, transcription and remote-track entries with an
+  invalid sid are skipped; non-finite speaker levels count as 0 and speakers
+  sort with `total_cmp`. A restarted join response missing a part skips that
+  part and still completes the restart.
+- Pure helpers (`parse_sdp_type`, `parse_remote_description`,
+  `parse_ice_candidate_json`, `split_join_response`, `sanitize_audio_level`)
+  have unit tests in both files.
+
 ## Dropping it
 
 Remove `vendor/livekit` and the `[patch.crates-io]` table once a livekit
 release ships an equivalent option (upstream PR to livekit/rust-sdks pending).
 That is an SDK bump: re-verify the libwebrtc pin per the comment in
-`Cargo.toml`. On any bump, re-apply the diff above to the new package.
+`Cargo.toml`. On any bump, re-apply the diff above and the `OWNCORD-PATCH (signal input)`
+markers (`grep -rn 'signal input' src`) to the new package.
 
 ## Tests
 
-`stereo_is_signalled_for_audio_only` (in the patched `local_participant.rs`) covers the helper, but CI does not run it: the Rust job tests only the root package. Run it by hand with `cargo test --manifest-path vendor/livekit/Cargo.toml --lib stereo` after re-applying the patch. CI covers the behaviour through `session.rs`'s publish-options tests and the native-voice interop case "a native share's audio reaches the browser as stereo with the channels apart".
+The signal input helpers are covered by `cargo test --manifest-path vendor/livekit/Cargo.toml --lib signal_input` and the `rtc_session` tests, also run by hand. `stereo_is_signalled_for_audio_only` (in the patched `local_participant.rs`) covers the helper, but CI does not run it: the Rust job tests only the root package. Run it by hand with `cargo test --manifest-path vendor/livekit/Cargo.toml --lib stereo` after re-applying the patch. CI covers the behaviour through `session.rs`'s publish-options tests and the native-voice interop case "a native share's audio reaches the browser as stereo with the channels apart".
 
 The crate's own `Cargo.lock` is upstream's, kept verbatim; nothing builds from it.

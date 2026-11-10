@@ -75,6 +75,7 @@ and only when it changes something a contributor or fork holder must do
 
 ### Fixed
 
+- Linux: voice calls skip voice server messages they cannot use, and end with a clear disconnect when a call can no longer continue.
 - A webcam using H.264 could quietly fall back to the slow software encoder. Webcams are now checked like screen shares and switch to VP8 when that happens, and changing the shared window, quality or camera checks again.
 
 - Android: the app now stops its file-saving and sharing work cleanly when Android closes or recreates the app screen.
