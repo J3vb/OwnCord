@@ -11,12 +11,12 @@ import {
   setLocalMuted,
   setLocalDeafened,
   setListenOnly,
-  setShareDenied,
 } from "../../stores/voice.store";
 import { createLogger } from "../../lib/logger";
 import type { AudioPipeline } from "../../lib/voice/audioPipeline";
 import type { AudioElements } from "../../lib/voice/audioElements";
 import { type DeviceManager, isMicPolicyGated } from "../../lib/voice/deviceManager";
+import { publishAllowed, announceFallbackMute } from "./publishGrant";
 import { voiceText } from "../../i18n/voice";
 import { CodecSwitchController } from "./codecSwitch";
 import { VideoCapFollower } from "./videoCapFollow";
@@ -286,21 +286,12 @@ export class MediaControl {
         }
         setListenOnly(true);
         setLocalMuted(true);
-        this.announceFallbackMute();
+        announceFallbackMute(this.ws, this._currentChannelId);
         log.warn("Mic re-publish failed — falling back to listen-only/muted", err);
         this.onErrorCallback?.(voiceText("mic.unavailableMuted"));
         return;
       }
     }
-  }
-
-  /** The unmute toggle already sent voice_mute{muted:false}; restate the
-   *  fallback's mute so the server row and every peer's roster match. */
-  private announceFallbackMute(): void {
-    const ws = this.ws;
-    if (ws === null || ws.getState() !== "connected") return;
-    if (this._currentChannelId === null) return;
-    ws.send({ type: "voice_mute", payload: { muted: true } });
   }
 
   async enableCamera(): Promise<void> {
@@ -498,19 +489,4 @@ export class MediaControl {
   }
 }
 
-/** Whether the SFU grant lets this room publish `source`; an empty source
- *  list means every source. */
-export function publishAllowed(room: Room, source: Track.Source): boolean {
-  const permissions = room.localParticipant.permissions;
-  return (
-    permissions === undefined ||
-    (permissions.canPublish &&
-      (permissions.canPublishSources.length === 0 ||
-        permissions.canPublishSources.includes(Track.sourceToProto(source))))
-  );
-}
-
-/** Mirror the grant's screen-share permission into the store for the share buttons. */
-export function syncShareGrant(room: Room): void {
-  setShareDenied(!publishAllowed(room, Track.Source.ScreenShare));
-}
+export { publishAllowed, syncShareGrant } from "./publishGrant";

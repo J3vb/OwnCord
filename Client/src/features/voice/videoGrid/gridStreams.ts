@@ -2,105 +2,31 @@
  * The video grid's tiles: adding, relabelling and removing streams, the self-
  * camera cover, tile menus and per-user volume.
  */
-import { createElement, appendChildren, setText, setOwnedTimeout } from "@lib/dom";
-import { Disposable } from "@lib/disposable";
-import { openMenuOnKeyboard } from "@lib/ui/contextMenu";
-import { createIcon } from "@lib/icons";
-import { getUserLocalMute, getUserVolume } from "@lib/voice/livekitSession";
+import { createElement } from "@lib/dom";
 import { syncVideoSurface } from "@lib/voice/videoSurface";
-import { bindVideoZoom } from "@lib/ui/zoomPan";
-import { isPhoneLayout } from "@lib/ui/bottomSheet";
 import { voiceText } from "../../../i18n/voice";
-import { viewersLabel } from "./viewers";
-import type { ShareSenderSample } from "../shareSenderStats";
 import {
-  STATS_POLL_MS,
   log,
-  tileButton,
   type CellEntry,
   ENDED_COVER_MS,
   REPUBLISH_HOLD_MS,
   REPUBLISH_HOLD_POLL_MS,
   isPlayingHere,
-  buildVolumeControls,
-  isFullscreenKey,
   isSelfCamera,
 } from "./gridShared";
 import type { GridState, GridApi } from "./gridState";
 import type { TileConfig } from "./VideoGrid";
-
-function setTrackMuted(entry: CellEntry, muted: boolean): void {
-  entry.el.classList.toggle("track-muted", muted);
-  entry.video.classList.toggle("track-muted", muted);
-}
-
-function applyNames(entry: CellEntry, username: string, name: string): void {
-  entry.name = name;
-  const label = entry.el.querySelector(".video-username");
-  if (label !== null) label.textContent = username;
-  entry.el
-    .querySelector(".video-cell-select")
-    ?.setAttribute("aria-label", voiceText("tile.watch", { name: username }));
-  entry.el
-    .querySelector(".tile-volume-slider")
-    ?.setAttribute(
-      "aria-label",
-      entry.config?.isScreenshare === true
-        ? voiceText("tile.streamVolume", { name })
-        : voiceText("tile.voiceVolume", { name }),
-    );
-}
-
-/** Only replace srcObject if the underlying tracks changed. */
-function sameTracks(video: HTMLVideoElement, stream: MediaStream): boolean {
-  const oldTracks = (video.srcObject as MediaStream | null)?.getTracks() ?? [];
-  const newTracks = stream.getTracks();
-  return (
-    video.srcObject != null &&
-    oldTracks.length === newTracks.length &&
-    oldTracks.every((t, i) => t.id === newTracks[i]?.id)
-  );
-}
-
-function buildTileVideo(userId: number, stream: MediaStream | null): HTMLVideoElement {
-  const video = createElement("video", {
-    autoplay: "",
-    playsinline: "",
-  });
-  video.muted = true;
-  if (stream !== null) {
-    video.srcObject = stream;
-    video.play()?.catch((err) => {
-      log.debug("Video autoplay rejected (new tile)", { userId, err });
-    });
-  }
-  return video;
-}
-
-/** Who is watching this screen share: an eye and the count, top-right,
- *  hidden at zero (applyStreamViewers draws it). */
-function buildViewersBadge(): HTMLElement {
-  const viewers = createElement("span", {
-    class: "video-viewers",
-    role: "img",
-    "data-testid": "tile-viewers",
-  });
-  viewers.hidden = true;
-  viewers.appendChild(createIcon("eye", 14));
-  viewers.appendChild(createElement("span", { class: "video-viewers__count" }));
-  return viewers;
-}
-
-function buildTileLabel(config: TileConfig | undefined): HTMLElement {
-  const label = createElement("div", { class: "video-label" });
-  label.appendChild(createElement("div", { class: "video-username" }));
-  if (config?.isScreenshare === true) {
-    label.appendChild(createElement("span", { class: "video-live" }, voiceText("tile.live")));
-  }
-  return label;
-}
+import { createGridBadges } from "./gridBadges";
+import { createGridMenus } from "./gridMenus";
+import { createGridTileBuild } from "./gridTileBuild";
+import { applyNames, sameTracks, setTrackMuted } from "./tileParts";
 
 export function createGridStreams(st: GridState, api: GridApi) {
+  const menus = createGridMenus(st, api);
+  const { tileMenuOptions, selfMenuOptions, applyVolume, onUserLocalMute } = menus;
+  const { buildTile, buildSelfCover } = createGridTileBuild(st, api, menus);
+  const { stateTiles, applySpeaking, applyUserAudioState, applyStreamViewers } =
+    createGridBadges(st);
   /** Attach ended/mute/unmute listeners on the first video track to handle stale tiles. */
   /** On the tile and on its video, so a video in its pop-out window hides
    *  its stalled frame too. */
@@ -143,93 +69,6 @@ export function createGridStreams(st: GridState, api: GridApi) {
         track.removeEventListener("unmute", onTrackUnmute);
       };
     }
-  }
-
-  function buildSelfCover(
-    tileId: number,
-    stream: MediaStream,
-    hasAudio: boolean,
-    signal: AbortSignal,
-  ): HTMLDivElement {
-    const track = stream.getVideoTracks()[0];
-    const surface = track?.getSettings?.()?.displaySurface;
-    const title =
-      surface === "window"
-        ? voiceText("tile.sharingWindow")
-        : surface === "browser"
-          ? voiceText("tile.sharingTab")
-          : voiceText("tile.sharingScreen");
-    const detail = createElement("div", { class: "video-self-detail" });
-    // The rate actually sent, never the requested one: the capture can fall
-    // short of it (a 60 Hz monitor, a busy encoder).
-    const renderDetail = (fps: number | null): void => {
-      const parts: string[] = [];
-      // Read each time: the share's quality can change while it runs.
-      const shown = track?.getSettings?.().height;
-      if (shown !== undefined) {
-        // Plain strings: the catalog would group 1080 as "1,080".
-        const height = String(shown);
-        parts.push(
-          fps === null
-            ? voiceText("tile.qualityHeight", { height })
-            : voiceText("tile.shareQuality", { height, fps: String(Math.round(fps)) }),
-        );
-      }
-      parts.push(hasAudio ? voiceText("tile.withAudio") : voiceText("tile.noAudio"));
-      detail.textContent = parts.join(" · ");
-    };
-    renderDetail(null);
-    // Why the share sends what it does: the capture rate, what limits
-    // the encoder, and which encoder. Filled once the first poll is back.
-    const senderLine = createElement("div", { class: "video-self-stats" });
-    senderLine.hidden = true;
-    const pollSender = async (): Promise<void> => {
-      let sample: ShareSenderSample | null = null;
-      try {
-        sample = (await st.callbacks.getLocalShareStats?.()) ?? null;
-        st.infoModule ??= await import("./streamInfo");
-      } catch (err) {
-        log.debug("Local share stats unavailable", { tileId, err });
-      }
-      if (signal.aborted) return;
-      renderDetail(sample?.sentFps ?? null);
-      const text = st.infoModule?.senderText(sample) ?? "";
-      senderLine.textContent = text;
-      senderLine.title = st.infoModule?.layersText(sample) ?? "";
-      senderLine.hidden = text === "";
-      setOwnedTimeout(signal, () => void pollSender(), STATS_POLL_MS);
-    };
-    setOwnedTimeout(signal, () => void pollSender(), STATS_POLL_MS);
-
-    const cover = createElement("div", { class: "video-self-cover" });
-    const actions = createElement("div", { class: "video-self-actions" });
-    const stop = createElement(
-      "button",
-      { type: "button", class: "btn-danger", "data-tile-control": "stop-sharing" },
-      voiceText("tile.stopSharing"),
-    );
-    stop.addEventListener("click", (e) => {
-      e.stopPropagation();
-      st.callbacks.onStopSharing?.();
-    });
-    const hide = createElement(
-      "button",
-      { type: "button", class: "btn-ghost", "data-tile-control": "hide-preview" },
-      voiceText("tile.hidePreview"),
-    );
-    hide.addEventListener("click", (e) => {
-      e.stopPropagation();
-      api.setStopped(tileId, true);
-    });
-    appendChildren(actions, stop, hide);
-    appendChildren(
-      cover,
-      createElement("div", { class: "video-self-title" }, title),
-      detail,
-      senderLine,
-      actions,
-    );
-    return cover;
   }
 
   /** The republished share is back: it plays in the tile it left. */
@@ -305,192 +144,6 @@ export function createGridStreams(st: GridState, api: GridApi) {
     existing.el.classList.toggle("video-cell--self", isSelfCamera(config));
   }
 
-  /** Filled by the stats poll while you watch this screen share. */
-  function buildStatsChip(userId: number): HTMLElement {
-    const chip = createElement("button", {
-      type: "button",
-      class: "video-quality",
-      "aria-expanded": "false",
-      "data-tile-control": "stats",
-    });
-    chip.hidden = true;
-    chip.addEventListener("click", (e) => {
-      e.stopPropagation();
-      api.toggleStats(userId, chip);
-    });
-    return chip;
-  }
-
-  function buildTileNav(userId: number): { nav: HTMLElement; back: HTMLElement } {
-    const nav = createElement("div", { class: "video-tile-nav" });
-    const back = tileButton(voiceText("tile.backToGrid"), "layout-grid", "grid", () =>
-      api.setFocusedTile(null),
-    );
-    back.hidden = true;
-    // Pop out: the stream in a window of its own (togglePopout), and the
-    // same control brings it back.
-    const pip = tileButton(voiceText("tile.popOut"), "picture-in-picture-2", "pip", () =>
-      api.togglePopout(userId),
-    );
-    pip.setAttribute("aria-pressed", "false");
-    const fullscreen = tileButton(voiceText("tile.fullscreen"), "maximize", "fullscreen", () =>
-      api.toggleFullscreen(userId),
-    );
-    appendChildren(nav, back, pip, fullscreen);
-    return { nav, back };
-  }
-
-  /** A click anywhere on a filmstrip thumb (not on one of its controls)
-   *  swaps it into focus, as the tile button does. On a phone a tap on the
-   *  focused tile itself gives the focus back (a tile is focused by a tap on
-   *  it, so it is unfocused the same way); an open tile menu or a pinch-zoomed
-   *  picture takes the tap for itself. */
-  function onTileClick(e: MouseEvent, userId: number, cell: HTMLElement): void {
-    if ((e.target as Element).closest("button, input, .context-menu") !== null) return;
-    if (st.focusedTileId !== null && st.focusedTileId !== userId) {
-      api.setFocusedTile(userId);
-      return;
-    }
-    if (st.focusedTileId !== userId || !isPhoneLayout()) return;
-    if (api.isFullscreen(userId) || cell.classList.contains("video-zoomed")) return;
-    if (api.doc().querySelector(".video-tile-menu") !== null) return;
-    api.setFocusedTile(null);
-  }
-
-  /** F toggles full screen from anywhere in the tile (not while typing), a
-   *  double-click too. The theatre fallback's own keys are on the document
-   *  (onTheatreKey). */
-  function bindFullscreenKeys(cell: HTMLElement, userId: number, signal: AbortSignal): void {
-    cell.addEventListener(
-      "keydown",
-      (e) => {
-        if (isFullscreenKey(e)) {
-          e.preventDefault();
-          api.toggleFullscreen(userId);
-        }
-      },
-      { signal },
-    );
-    cell.addEventListener(
-      "dblclick",
-      (e) => {
-        const skip = "button:not(.video-cell-select), input, .context-menu";
-        if ((e.target as Element).closest(skip) !== null) return;
-        api.toggleFullscreen(userId);
-      },
-      { signal },
-    );
-  }
-
-  /** Remote tiles: volume, Stop watching and the tile menu. */
-  function addRemoteControls(
-    userId: number,
-    entry: CellEntry,
-    config: TileConfig,
-    nav: HTMLElement,
-    back: HTMLElement,
-  ): void {
-    const volume = buildVolumeControls(config);
-    entry.applyVolume = volume.apply;
-    entry.volumeOverlay = volume.overlay;
-    entry.el.appendChild(volume.overlay);
-    nav.insertBefore(
-      tileButton(voiceText("tile.stopWatching"), "eye-off", "stop", () =>
-        api.setWatching(userId, false),
-      ),
-      back,
-    );
-    st.resizeObserver?.observe(entry.el);
-  }
-
-  /** Loaded on first use: the menu opens only on a right-click or Shift+F10,
-   *  so it stays out of the eager bundle. */
-  function bindTileMenu(userId: number, entry: CellEntry, config: TileConfig): void {
-    const cell = entry.el;
-    const openMenu = (x: number, y: number): void =>
-      void import("./tileMenu").then((menus) => {
-        if (entry.listeners.signal.aborted || st.root?.contains(cell) !== true) return;
-        if (config.isSelf) menus.showSelfTileMenu(selfMenuOptions(x, y, userId, entry));
-        else menus.showTileMenu(tileMenuOptions(x, y, userId, entry, config));
-      });
-    cell.addEventListener(
-      "contextmenu",
-      (e) => {
-        e.preventDefault();
-        openMenu(e.clientX, e.clientY);
-      },
-      { signal: entry.listeners.signal },
-    );
-    openMenuOnKeyboard(cell, openMenu, entry.listeners.signal);
-  }
-
-  function buildTile(
-    userId: number,
-    stream: MediaStream | null,
-    config: TileConfig | undefined,
-  ): CellEntry {
-    const video = buildTileVideo(userId, stream);
-    const cell = createElement("div", {
-      class: isSelfCamera(config) ? "video-cell video-cell--self" : "video-cell",
-      "data-user-id": String(userId),
-      "data-stream-type": config?.isScreenshare ? "screenshare" : "camera",
-    });
-
-    // The whole tile is one real button (click, Enter, Space) that opens it
-    // in focus view; the tile's own controls sit above it, never inside it.
-    const select = createElement("button", {
-      type: "button",
-      class: "video-cell-select",
-      "data-tile-control": "select",
-    });
-    select.addEventListener("click", () => api.setFocusedTile(userId));
-
-    const label = buildTileLabel(config);
-    const viewers = config?.isScreenshare === true ? buildViewersBadge() : null;
-    if (config !== undefined && !config.isSelf && config.isScreenshare) {
-      label.appendChild(buildStatsChip(userId));
-    }
-    const { nav, back } = buildTileNav(userId);
-
-    appendChildren(cell, video, select, label, nav);
-    syncVideoSurface(video);
-    if (viewers !== null) cell.appendChild(viewers);
-    cell.addEventListener("click", (e) => onTileClick(e, userId, cell));
-
-    const entry: CellEntry = { el: cell, video, config, listeners: new Disposable(), name: "" };
-    equipTile(userId, entry, stream, nav, back);
-    return entry;
-  }
-
-  /** The tile's zoom, keys, remote controls, menu and self-share cover. */
-  function equipTile(
-    userId: number,
-    entry: CellEntry,
-    stream: MediaStream | null,
-    nav: HTMLElement,
-    back: HTMLElement,
-  ): void {
-    const { el: cell, config } = entry;
-    // Your own screen share shows its cover, not the picture: nothing to zoom.
-    if (config?.isSelf !== true || !config.isScreenshare) {
-      entry.zoom = bindVideoZoom(cell, entry.listeners.signal);
-    }
-    bindFullscreenKeys(cell, userId, entry.listeners.signal);
-    if (config !== undefined && !config.isSelf) addRemoteControls(userId, entry, config, nav, back);
-    // Your own screen share has no menu.
-    if (config !== undefined && (!config.isSelf || !config.isScreenshare)) {
-      bindTileMenu(userId, entry, config);
-    }
-
-    // Your own screen share: say what is going out instead of showing a
-    // hall of mirrors, with Stop sharing always at hand.
-    if (config?.isSelf === true && config.isScreenshare && stream !== null) {
-      cell.appendChild(
-        buildSelfCover(userId, stream, config.hasAudio === true, entry.listeners.signal),
-      );
-    }
-  }
-
   function addStream(
     userId: number,
     username: string,
@@ -527,101 +180,6 @@ export function createGridStreams(st: GridState, api: GridApi) {
     api.relayout();
     api.syncViews();
     if (refocus) api.setFocusedTile(userId);
-  }
-
-  /** A remote tile's menu, with the tile's view state as it is now. */
-  function tileMenuOptions(
-    x: number,
-    y: number,
-    tileId: number,
-    entry: CellEntry,
-    config: TileConfig,
-  ) {
-    const personId = config.audioUserId;
-    const actions = st.callbacks.tileMenu;
-    // Profile and Message leave the tile, which a full-screen tile would hide.
-    const leaving = (run: () => void) => (): void => {
-      if (api.isFullscreen(tileId)) api.leaveFullscreen();
-      run();
-    };
-    // The profile card opens in the app window, out of sight of a pop-out.
-    const onProfile = st.callPop === null ? actions?.onProfile : undefined;
-    const onMessage = actions?.onMessage;
-    const moderation = actions?.moderation?.(personId);
-    return {
-      x,
-      y,
-      name: entry.name,
-      config,
-      doc: api.doc(),
-      signal: entry.listeners.signal,
-      onVolumeChange: (isScreenshare: boolean, level: number, muted: boolean) =>
-        applyVolume(personId, isScreenshare, level, muted),
-      onStopWatching: () => api.setWatching(tileId, false),
-      view: {
-        focused: st.focusedTileId === tileId,
-        fullscreen: api.isFullscreen(tileId),
-        poppedOut: entry.popout !== undefined,
-        onFocus: () => api.setFocusedTile(st.focusedTileId === tileId ? null : tileId),
-        onFullscreen: () => api.toggleFullscreen(tileId),
-        onPopout: () => api.togglePopout(tileId),
-      },
-      person: {
-        ...(onProfile === undefined ? {} : { onProfile: leaving(() => onProfile(personId, x, y)) }),
-        ...(onMessage === undefined ? {} : { onMessage: leaving(() => onMessage(personId)) }),
-        ...(moderation === undefined ? {} : { moderation }),
-      },
-    };
-  }
-
-  /** Your own camera tile's menu: Hide my camera where the call view's toggle
-   *  applies, Turn off camera where the host offers the camera control. */
-  function selfMenuOptions(x: number, y: number, tileId: number, entry: CellEntry) {
-    const onCamera = st.callbacks.callControls?.onCameraToggle;
-    // A hidden full-screen tile would leave a blank screen; focus goes to
-    // the toggle that brings the tile back (on a phone, View options).
-    const hide = (): void => {
-      if (api.isFullscreen(tileId)) api.leaveFullscreen();
-      api.setView("selfCamera", false);
-      const back = isPhoneLayout()
-        ? st.callBar?.querySelector<HTMLElement>("[data-call-control='views']")
-        : st.viewBar?.querySelector<HTMLElement>("[data-view-toggle='selfCamera']");
-      back?.focus();
-    };
-    return {
-      x,
-      y,
-      doc: api.doc(),
-      signal: entry.listeners.signal,
-      ...(st.callView ? { onHide: hide } : {}),
-      ...(onCamera === undefined
-        ? {}
-        : { onCameraOff: onCamera, cameraLocked: api.mediaLockReason() }),
-    };
-  }
-
-  /** The tile's label, and the person's name on its controls and menu. */
-
-  /** A volume changed from a tile menu: draw it on every tile of that
-   *  person showing the same setting (stream or voice). */
-  function applyVolume(
-    audioUserId: number,
-    isScreenshare: boolean,
-    volume: number,
-    muted: boolean,
-  ): void {
-    for (const entry of st.cells.values()) {
-      if (entry.config?.audioUserId !== audioUserId) continue;
-      if (entry.config.isScreenshare !== isScreenshare) continue;
-      entry.applyVolume?.(volume, muted);
-    }
-  }
-
-  /** The sidebar menu (or another tile) changed a user's local Mute. */
-  function onUserLocalMute(e: Event): void {
-    const userId = (e as CustomEvent<{ userId: number }>).detail.userId;
-    const volume = getUserVolume(userId);
-    applyVolume(userId, false, volume, getUserLocalMute(userId) || volume === 0);
   }
 
   /** Update an already-open tile's label in place. No-op if the tile isn't
@@ -777,77 +335,6 @@ export function createGridStreams(st: GridState, api: GridApi) {
 
   function hasStreams(): boolean {
     return st.cells.size > 0;
-  }
-
-  /** Every camera and avatar tile with whose state it marks, or null for a
-   *  tile that marks none (a screen share, or a host-drawn avatar). */
-  function stateTiles(): [HTMLDivElement, number | null][] {
-    const tiles: [HTMLDivElement, number | null][] = [];
-    for (const [id, entry] of st.cells) {
-      const cfg = entry.config;
-      tiles.push([entry.el, cfg?.isScreenshare === true ? null : (cfg?.audioUserId ?? id)]);
-    }
-    for (const person of st.people) {
-      const cell = st.personCells.get(person.userId);
-      if (cell !== undefined) {
-        tiles.push([cell, person.marksOwnState === true ? null : person.userId]);
-      }
-    }
-    return tiles;
-  }
-
-  function applySpeaking(): void {
-    for (const [el, userId] of stateTiles()) {
-      el.classList.toggle("video-cell--speaking", userId !== null && st.speaking.has(userId));
-    }
-  }
-
-  /** Draw each camera and avatar tile's mute/deafen badge from the roster
-   *  state. */
-  function applyUserAudioState(): void {
-    for (const [el, userId] of stateTiles()) {
-      const state = userId === null ? undefined : st.userAudioState.get(userId);
-      let badge = el.querySelector<HTMLElement>("[data-testid='tile-audio-state']");
-      if (state === undefined || (!state.muted && !state.deafened)) {
-        badge?.remove();
-        continue;
-      }
-      if (badge === null) {
-        badge = createElement("span", {
-          class: "video-cell__audio",
-          "data-testid": "tile-audio-state",
-          "aria-hidden": "true",
-        });
-        el.appendChild(badge);
-      }
-      badge.classList.toggle("video-cell__audio--muted", !state.deafened);
-      badge.classList.toggle("video-cell__audio--deafened", state.deafened);
-      while (badge.firstChild) badge.removeChild(badge.firstChild);
-      badge.appendChild(createIcon(state.deafened ? "headphones-off" : "mic-off", 14));
-    }
-  }
-
-  /** Draw each screen-share tile's viewer badge: the other members watching
-   *  it, and you while a remote share plays here. Hidden at zero. */
-  function applyStreamViewers(): void {
-    for (const entry of st.cells.values()) {
-      const config = entry.config;
-      if (config?.isScreenshare !== true) continue;
-      const badge = entry.el.querySelector<HTMLElement>(".video-viewers");
-      if (badge === null) continue;
-      const names = [...(st.streamViewers.get(config.audioUserId) ?? [])];
-      if (!config.isSelf && !entry.el.classList.contains("video-cell--stopped")) {
-        names.unshift(voiceText("tile.viewersYou"));
-      }
-      badge.hidden = names.length === 0;
-      entry.el.classList.toggle("video-cell--has-viewers", names.length > 0);
-      if (names.length === 0) continue;
-      const label = viewersLabel(names);
-      badge.title = label;
-      badge.setAttribute("aria-label", label);
-      const count = badge.querySelector(".video-viewers__count");
-      if (count !== null) setText(count, String(names.length));
-    }
   }
 
   return {
