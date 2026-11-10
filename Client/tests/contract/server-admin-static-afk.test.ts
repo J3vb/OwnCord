@@ -55,6 +55,12 @@ function boot(calls: FetchCall[], respond: (path: string, method: string) => Rep
   return bootAdminPanel<Bridge>(ADMIN_HTML, calls, respond);
 }
 
+/** Enable the Save button the way an edit would, then save. */
+async function saveNow(b: { doc: Document; bridge: Bridge }): Promise<void> {
+  (b.doc.getElementById("saveSettingsBtn") as HTMLButtonElement).disabled = false;
+  await b.bridge.saveSettings();
+}
+
 describe("Server/admin/static — AFK card", () => {
   function responder(opts: {
     channels: unknown;
@@ -121,13 +127,11 @@ describe("Server/admin/static — AFK card", () => {
     const t = b.doc.getElementById("s-afk_timeout_seconds") as HTMLSelectElement;
     expect(t.value).toBe("900");
 
-    (b.doc.getElementById("saveSettingsBtn") as HTMLButtonElement).disabled = false;
-    await b.bridge.saveSettings();
+    await saveNow(b);
     expect(calls.find((c) => c.path === "/settings" && c.method === "PATCH")?.body).toBeUndefined();
 
     t.value = "3600";
-    (b.doc.getElementById("saveSettingsBtn") as HTMLButtonElement).disabled = false;
-    await b.bridge.saveSettings();
+    await saveNow(b);
     expect(calls.find((c) => c.path === "/settings" && c.method === "PATCH")?.body).toEqual({
       afk_timeout_seconds: "3600",
     });
@@ -140,12 +144,10 @@ describe("Server/admin/static — AFK card", () => {
     const cap = b.doc.getElementById("s-voice_max_video_kbps") as HTMLSelectElement;
     expect(cap.value).toBe("0");
     expect(cap.options[0]?.textContent).toBe("No limit");
-    (b.doc.getElementById("saveSettingsBtn") as HTMLButtonElement).disabled = false;
-    await b.bridge.saveSettings();
+    await saveNow(b);
     expect(calls.find((c) => c.path === "/settings" && c.method === "PATCH")?.body).toBeUndefined();
     cap.value = "6000";
-    (b.doc.getElementById("saveSettingsBtn") as HTMLButtonElement).disabled = false;
-    await b.bridge.saveSettings();
+    await saveNow(b);
     expect(calls.find((c) => c.path === "/settings" && c.method === "PATCH")?.body).toEqual({
       voice_max_video_kbps: "6000",
     });
@@ -165,17 +167,22 @@ describe("Server/admin/static — AFK card", () => {
   const patchBody = (calls: FetchCall[]) =>
     calls.find((c) => c.path === "/settings" && c.method === "PATCH")?.body;
 
-  it("the upload speed shows no hint while empty, follows the cap live, and saves only a change", async () => {
-    const calls: FetchCall[] = [];
-    const b = await boot(calls, responder({ channels: CHANNELS }));
+  /** Mount with an upload value the panel shows as empty: no hint, and a save sends nothing. */
+  async function mountEmptyUpload(calls: FetchCall[], upload?: string) {
+    const b = await boot(calls, responder({ channels: CHANNELS, upload }));
     await mountSettings(b.bridge, b.doc);
     const up = b.doc.getElementById("s-server_upload_mbps") as HTMLInputElement;
-    const cap = b.doc.getElementById("s-voice_max_video_kbps") as HTMLSelectElement;
     expect(up.value).toBe("");
     expect(hintText(b.doc)).toBe("");
-    (b.doc.getElementById("saveSettingsBtn") as HTMLButtonElement).disabled = false;
-    await b.bridge.saveSettings();
+    await saveNow(b);
     expect(patchBody(calls)).toBeUndefined();
+    return { b, up };
+  }
+
+  it("the upload speed shows no hint while empty, follows the cap live, and saves only a change", async () => {
+    const calls: FetchCall[] = [];
+    const { b, up } = await mountEmptyUpload(calls);
+    const cap = b.doc.getElementById("s-voice_max_video_kbps") as HTMLSelectElement;
 
     up.value = "100";
     fire(b.doc, up, "input");
@@ -206,18 +213,10 @@ describe("Server/admin/static — AFK card", () => {
   it("a stored upload value the panel cannot read shows empty, no hint, and is not rewritten", async () => {
     for (const stored of ["fast", "1.5", "0"]) {
       const calls: FetchCall[] = [];
-      const b = await boot(calls, responder({ channels: CHANNELS, upload: stored }));
-      await mountSettings(b.bridge, b.doc);
-      const up = b.doc.getElementById("s-server_upload_mbps") as HTMLInputElement;
-      expect(up.value).toBe("");
-      expect(hintText(b.doc)).toBe("");
-      (b.doc.getElementById("saveSettingsBtn") as HTMLButtonElement).disabled = false;
-      await b.bridge.saveSettings();
-      expect(patchBody(calls)).toBeUndefined();
+      const { b, up } = await mountEmptyUpload(calls, stored);
       up.value = "50";
       fire(b.doc, up, "input");
-      (b.doc.getElementById("saveSettingsBtn") as HTMLButtonElement).disabled = false;
-      await b.bridge.saveSettings();
+      await saveNow(b);
       expect(patchBody(calls)).toEqual({ server_upload_mbps: "50" });
     }
     const typedCalls: FetchCall[] = [];
@@ -226,8 +225,7 @@ describe("Server/admin/static — AFK card", () => {
     const typedUp = typed.doc.getElementById("s-server_upload_mbps") as HTMLInputElement;
     typedUp.value = "12.5";
     fire(typed.doc, typedUp, "input");
-    (typed.doc.getElementById("saveSettingsBtn") as HTMLButtonElement).disabled = false;
-    await typed.bridge.saveSettings();
+    await saveNow(typed);
     expect(patchBody(typedCalls)).toEqual({ server_upload_mbps: "12.5" });
     const ok = await boot([], responder({ channels: CHANNELS, upload: "250", videoCap: "10000" }));
     await mountSettings(ok.bridge, ok.doc);
