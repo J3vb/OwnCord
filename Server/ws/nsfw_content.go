@@ -121,6 +121,7 @@ var contentBearingKinds = map[string]bool{
 	MsgTypeStickerUpdate:       false,
 	MsgTypeUploadPolicy:        false,
 	MsgTypeGameActivityPolicy:  false,
+	MsgTypeVideoBitrateCap:     false,
 	MsgTypeServerRestart:       false,
 	MsgTypeError:               false,
 	MsgTypePong:                false,

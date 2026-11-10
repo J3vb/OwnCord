@@ -10,6 +10,7 @@
  */
 
 import { Disposable } from "../disposable";
+import { createVideoZoomNavigator } from "./videoZoomNavigator";
 
 /** Pixels a press may move and still count as a click, not a drag. */
 export const CLICK_SLOP = 5;
@@ -280,10 +281,12 @@ const NO_PAN = "button:not(.video-cell-select), input";
  * no click: the host's click handlers never see it.
  */
 export function bindVideoZoom(host: HTMLElement, signal: AbortSignal): ZoomPan {
+  let updateNavigator: (() => void) | undefined;
   const view: ZoomPan = createZoomPan({
     min: 1,
     max: 8,
     apply: () => {
+      if (signal.aborted) return;
       const zoomed = view.scale > 1;
       if (zoomed) {
         host.style.setProperty("--video-pan", `${view.x}px ${view.y}px`);
@@ -293,6 +296,10 @@ export function bindVideoZoom(host: HTMLElement, signal: AbortSignal): ZoomPan {
         host.style.removeProperty("--video-scale");
       }
       host.classList.toggle("video-zoomed", zoomed);
+      if (zoomed && host.dataset.streamType === "screenshare" && updateNavigator === undefined) {
+        updateNavigator = createVideoZoomNavigator(host, view, signal);
+      }
+      updateNavigator?.();
     },
     centre: () => {
       const r = host.getBoundingClientRect();

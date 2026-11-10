@@ -151,8 +151,8 @@ func (h *Hub) clientSnapshot() []*Client {
 	return h.allClientsLocked()
 }
 
-// hubSettings groups the hub's settings cache, the upload-policy serialiser and
-// the game activity switch. It holds ranked locks (see lock_order.go) and must
+// hubSettings groups the hub's settings cache, the upload-policy serialiser, the
+// game activity switch and the video cap. It holds ranked locks (see lock_order.go) and must
 // never be copied.
 type hubSettings struct {
 	// cache holds server_name, motd and the upload policy, and owns the settings
@@ -162,4 +162,6 @@ type hubSettings struct {
 	uploadPolicyMu syncutil.Ranked[lockRankSerialiser]
 	// gameActivity is the game activity switch.
 	gameActivity gameActivityState
+	// videoCap is the server-wide video upload cap.
+	videoCap videoCapState
 }

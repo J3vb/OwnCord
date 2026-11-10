@@ -57,6 +57,8 @@ func (h *Hub) buildAuthOK(ctx context.Context, user *db.User, roleName string, r
 			// The runtime game activity switch. A resume gets no ready and the unsequenced
 			// game_activity_policy frame is not replayed, so every auth_ok restores it.
 			"game_activity_policy": gameActivityPolicyPayload{Enabled: h.settings.gameActivity.on.Load()},
+			// The video upload cap, restored on every connect and resume for the same reason.
+			"video_bitrate_cap": videoBitrateCapPayload{MaxVideoBitrate: h.videoBitrateCap()},
 		},
 	})
 }

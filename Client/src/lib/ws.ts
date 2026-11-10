@@ -242,7 +242,7 @@ export function createWsClient({
   transport.onCertMismatch(handleCertMismatch);
 
   // Type-safe listener registry
-  const listeners = new Map<string, Set<WsListener<ServerMessage["type"]>>>();
+  const listeners = new Map<string, Set<(payload: never, id?: string) => void>>();
 
   // State change listeners
   const stateListeners = new Set<(state: ConnectionState) => void>();
@@ -718,7 +718,7 @@ export function createWsClient({
     }
     for (const listener of typeListeners) {
       try {
-        listener(msg.payload, msg.id);
+        listener(msg.payload as never, msg.id); // the set holds msg.type's listeners
       } catch (err) {
         log.error(`Listener error for ${msg.type}`, err);
       }
@@ -1109,9 +1109,9 @@ export function createWsClient({
         listeners.set(type, new Set());
       }
       const set = listeners.get(type)!;
-      set.add(listener as unknown as WsListener<ServerMessage["type"]>);
+      set.add(listener);
       return () => {
-        set.delete(listener as unknown as WsListener<ServerMessage["type"]>);
+        set.delete(listener);
       };
     },
 

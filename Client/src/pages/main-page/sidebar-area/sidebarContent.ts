@@ -4,7 +4,7 @@
  */
 import { createElement, setText, clearChildren } from "@lib/dom";
 import { Disposable } from "@lib/disposable";
-import type { DmSidebar } from "@components/DmSidebar";
+import type { DmSidebar } from "../../../features/direct-messages/DmSidebar";
 import { createVoiceModerationCallbacks } from "../VoiceCallbacks";
 import { createSidebarMemberSection, memberPanelUi } from "../SidebarMemberSection";
 import { loadMemberLayout } from "../../../features/members/memberLayout";

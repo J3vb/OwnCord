@@ -6,7 +6,7 @@ import {
   showActionToast,
   showChangeOutcomeToast,
 } from "../../src/lib/ui/toast";
-import type { ToastContainer } from "../../src/components/Toast";
+import type { ToastContainer } from "../../src/lib/ui/toastContainer";
 
 /**
  * Tests for src/lib/ui/toast.ts — global toast helper.

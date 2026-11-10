@@ -8,7 +8,7 @@ let stickerOpts: {
   canManage: boolean;
 } | null = null;
 
-vi.mock("@components/EmojiPicker", () => mocks.emojiPickerMock());
+vi.mock("../../src/features/messaging/EmojiPicker", () => mocks.emojiPickerMock());
 vi.mock("@components/GifPicker", () => mocks.gifPickerMock());
 vi.mock("@components/StickerPicker", () => ({
   createStickerPicker: (opts: NonNullable<typeof stickerOpts>) => {

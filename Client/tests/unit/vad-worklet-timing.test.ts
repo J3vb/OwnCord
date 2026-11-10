@@ -87,10 +87,10 @@ describe("vad-worklet.js VadProcessor timing (128-sample render quanta @48kHz)",
     const VadProcessor = loadVadProcessor();
     const proc = new VadProcessor();
     proc.port.postMessage = vi.fn();
-    // Fast-forward well past the startup grace period with loud (non-gating)
-    // audio. Starting ungated, loud audio never posts a "gate" message, so
-    // this is safe regardless of how long the grace period actually is.
+    // Open the gate on a loud signal, then settle past startup.
     for (let i = 0; i < 300; i++) proc.process([[frame(LOUD)]]);
+    expect(postMessageMock(proc)).toHaveBeenCalledWith({ type: "gate", gated: false });
+    postMessageMock(proc).mockClear();
     return proc;
   }
 
@@ -244,6 +244,29 @@ describe("vad-worklet.js VadProcessor timing (128-sample render quanta @48kHz)",
       }
       expect(calls * FRAME_MS).toBeGreaterThan(460);
       expect(calls * FRAME_MS).toBeLessThan(560);
+    });
+
+    it("starts closed and stays closed when an active threshold changes", () => {
+      const VadProcessor = loadVadProcessor();
+      const proc = new VadProcessor();
+      proc.port.postMessage = vi.fn();
+      proc.port.onmessage({ data: { type: "config", threshold: 0.05, speechGate: true } });
+      expect(postMessageMock(proc)).toHaveBeenCalledWith({ type: "gate", gated: true });
+      for (let i = 0; i < 200; i++) proc.process(quantum(LOUD, 0.2));
+      proc.port.onmessage({ data: { type: "threshold", threshold: 0.01 } });
+      for (let i = 0; i < 200; i++) proc.process(quantum(LOUD, 0.2));
+      expect(postMessageMock(proc)).not.toHaveBeenCalledWith({ type: "gate", gated: false });
+    });
+
+    it("closes within the hold when a quiet word ending gives way to ambiguous noise", () => {
+      const proc = speechGated();
+      for (let i = 0; i < 38; i++) proc.process(quantum(0.03, 0.25));
+      expect(postMessageMock(proc)).not.toHaveBeenCalledWith({ type: "gate", gated: true });
+      for (let i = 0; i < 150; i++) proc.process(quantum(LOUD, 0.25));
+      expect(postMessageMock(proc)).toHaveBeenCalledWith({ type: "gate", gated: true });
+      postMessageMock(proc).mockClear();
+      for (let i = 0; i < 400; i++) proc.process(quantum(LOUD, 0.25));
+      expect(postMessageMock(proc)).not.toHaveBeenCalledWith({ type: "gate", gated: false });
     });
 
     it("a dip of the probability inside a word is bridged by the hold", () => {

@@ -25,8 +25,9 @@ import { externalConsentText } from "../../i18n/externalConsent";
 import { gameActivityText } from "../../i18n/gameActivity";
 import { listeningDetailsText } from "../../i18n/listeningDetails";
 import { settingsText } from "../../i18n/settings";
+import { voiceText } from "../../i18n/voice";
 import { whatsNewText } from "../../i18n/whatsNew";
-import { isAndroidApp, isWindowsDesktop } from "../voice/native/platform";
+import { isAndroidApp, isLinuxDesktop, isWindowsDesktop } from "../voice/native/platform";
 import { platformText } from "./helpers";
 
 const s = settingsText;
@@ -157,6 +158,7 @@ export const SETTINGS_SEARCH_INDEX: Readonly<Record<SearchableTab, () => readonl
     s("voiceAudio.agc.desc"),
     s("voiceAudio.enhanced.label"),
     s("voiceAudio.enhanced.desc"),
+    ...(!isLinuxDesktop() ? [voiceText("audio.buffer.label"), voiceText("audio.buffer.desc")] : []),
   ],
   "Text & Images": () => [
     s("images.linkPreview.label"),

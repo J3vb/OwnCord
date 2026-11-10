@@ -21,18 +21,22 @@ const inviteManagerScreen = createLazyScreen(
   () => import("@components/InviteManager"),
 );
 
+function usernameOf(o: object): string {
+  const name = "username" in o ? o.username : undefined;
+  return typeof name === "string" ? name : "";
+}
+
 export function mapInviteResponse(r: InviteResponse): InviteItem {
-  const extra = r as unknown as Record<string, unknown>;
   // The server now sends creator_username; the legacy nested created_by object
   // is kept as a fallback for an older server.
-  const nested = extra["created_by"];
+  const nested = "created_by" in r ? r.created_by : undefined;
   const creatorUsername =
     typeof r.creator_username === "string" && r.creator_username !== ""
       ? r.creator_username
       : typeof nested === "object" && nested !== null
-        ? ((nested as { username?: string }).username ?? "")
+        ? usernameOf(nested)
         : "";
-  const uses = r.use_count ?? (typeof extra["uses"] === "number" ? extra["uses"] : 0);
+  const uses = r.use_count ?? r.uses ?? 0;
   return {
     code: r.code,
     createdBy: creatorUsername !== "" ? creatorUsername : shellText("invite.unknownCreator"),

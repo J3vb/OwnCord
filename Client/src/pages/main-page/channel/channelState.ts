@@ -6,7 +6,7 @@ import type { QueuedSend } from "../../../features/messaging/sendQueue";
 import type { MessageController } from "../MessageController";
 import type { ReactionController } from "../ReactionController";
 import type { ThreadPanelHost } from "../ThreadPanelHost";
-import type { ThreadListPopover } from "@components/ThreadListPopover";
+import type { ThreadListPopover } from "../../../features/threads/ThreadListPopover";
 import type { ChatHeaderRefs } from "../ChatHeader";
 import type { SavedDraft } from "@lib/prefs/savedDrafts";
 import type { TrackedEdit } from "./channelShared";

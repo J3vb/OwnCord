@@ -61,3 +61,29 @@ func TestPatchSettings_OtherKey_DoesNotApplyGameActivityPolicy(t *testing.T) {
 		t.Errorf("an unrelated save told the hub about game activity: %v", hub.gameActivityPolicies)
 	}
 }
+
+// A video cap save hands the hub the stored kbit/s so live shares follow it.
+func TestPatchSettings_VoiceMaxVideoKbps_AppliesCap(t *testing.T) {
+	database := openAdminTestDB(t)
+	hub := &mockHub{}
+	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, nil, newTestServices(database))
+	_, manageToken := createRoleUser(t, database, 20, "ServerAdmin", permissions.ManageServer, 50, "vcmanager")
+
+	for _, v := range []string{"6000", "0"} {
+		if w := doRequest(t, handler, http.MethodPatch, "/settings", manageToken, map[string]string{"voice_max_video_kbps": v}); w.Code != http.StatusOK {
+			t.Fatalf("PATCH voice_max_video_kbps=%s = %d, want 200; body: %s", v, w.Code, w.Body.String())
+		}
+	}
+	if !slices.Equal(hub.videoBitrateCaps, []int{6000, 0}) {
+		t.Fatalf("hub was told %v, want [6000 0]", hub.videoBitrateCaps)
+	}
+	if w := doRequest(t, handler, http.MethodPatch, "/settings", manageToken, map[string]string{"voice_max_video_kbps": "10"}); w.Code != http.StatusBadRequest {
+		t.Errorf("PATCH an out-of-range cap = %d, want 400", w.Code)
+	}
+	if w := doRequest(t, handler, http.MethodPatch, "/settings", manageToken, map[string]string{"motd": "hi"}); w.Code != http.StatusOK {
+		t.Fatalf("PATCH motd = %d", w.Code)
+	}
+	if len(hub.videoBitrateCaps) != 2 {
+		t.Errorf("a refused or unrelated save told the hub: %v", hub.videoBitrateCaps)
+	}
+}

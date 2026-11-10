@@ -13,7 +13,7 @@
 import { errorText, type ApiClient } from "@lib/api";
 import { createConfirmModal } from "../dialogs/confirmModal";
 import { setUserBlockedByMe } from "@stores/blocks.store";
-import type { ToastType } from "@components/Toast";
+import type { ToastType } from "@lib/ui/toastContainer";
 import { messageRequestsText as t } from "../../i18n/messageRequests";
 import { shellText } from "../../i18n/shell";
 

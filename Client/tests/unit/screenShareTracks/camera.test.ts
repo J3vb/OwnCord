@@ -1,5 +1,5 @@
 /**
- * Tests for the track-publishing half of src/lib/voice/screenShare.ts.
+ * Tests for the track-publishing half of src/features/voice/screenShare.ts.
  *
  * The module sat at 61.1% statements: screen-share-fps.test.ts covers the
  * preset/bitrate helpers, but enableCamera, disableCamera, enableScreenshare,

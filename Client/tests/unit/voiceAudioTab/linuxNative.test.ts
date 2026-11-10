@@ -839,7 +839,7 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
             audio: audio({
               echoCancellation: false,
               noiseSuppression: false,
-              enhancedNoiseSuppression: true,
+              enhancedNoiseSuppression: false,
             }),
           },
         ],
@@ -852,7 +852,7 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
               echoCancellation: false,
               noiseSuppression: false,
               autoGainControl: false,
-              enhancedNoiseSuppression: true,
+              enhancedNoiseSuppression: false,
             }),
           },
         ],

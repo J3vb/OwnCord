@@ -444,7 +444,11 @@ describe("buildSessionDebugInfo", () => {
     expect(got.localMicSettings).toEqual(micSettings);
   });
 
-  it("reports hasRNNoiseProcessor when the mic track carries a processor", () => {
+  it.each([
+    { speechDetection: false, enhanced: false, present: false },
+    { speechDetection: true, enhanced: false, present: true },
+    { speechDetection: false, enhanced: true, present: true },
+  ])("reports whether RNNoise filters audio or only detects speech (%j)", (state) => {
     const room = {
       name: "r",
       state: "connected",
@@ -452,12 +456,19 @@ describe("buildSessionDebugInfo", () => {
       localParticipant: {
         identity: "user-1",
         trackPublications: new Map(),
-        getTrackPublication: () => ({ track: { getProcessor: () => ({ name: "rnnoise" }) } }),
+        getTrackPublication: () => ({ track: { getProcessor: () => ({ name: "owncord-mic" }) } }),
       },
       engine: {},
     } as unknown as Room;
+    const { speechDetection, enhanced, present } = state;
+    const got = buildSessionDebugInfo({
+      ...baseDeps,
+      room,
+      audioPipeline: fakePipeline({ rnnoiseState: { speechDetection, enhanced } }),
+    });
 
-    expect(buildSessionDebugInfo({ ...baseDeps, room }).hasRNNoiseProcessor).toBe(true);
+    expect(got.hasRNNoiseProcessor).toBe(present);
+    expect(got.enhancedNoiseSuppressionActive).toBe(enhanced);
   });
 
   it("maps remote participants, their volumes and their tracks", () => {

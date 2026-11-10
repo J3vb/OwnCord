@@ -6,7 +6,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { useMountContainer } from "../helpers/mountContainer";
 
 import * as mocks from "../helpers/messageInputMocks";
-vi.mock("@components/EmojiPicker", () => mocks.emojiPickerMock());
+vi.mock("../../src/features/messaging/EmojiPicker", () => mocks.emojiPickerMock());
 vi.mock("@components/GifPicker", () => mocks.gifPickerMock());
 
 import { createMessageInput, type MessageInputOptions } from "../helpers/messageInputApi";

@@ -24,6 +24,7 @@ import { ensureIdentityKeyPublished } from "../../lib/net/identity";
 import { showToast } from "../../lib/ui/toast";
 import { noteJoinFailed } from "./joinBackoff";
 import { takeWatchRefusal } from "../../lib/voice/watchRequest";
+import { applyVideoBitrateCap } from "./videoBitrateCap";
 import {
   joinSequence,
   noteJoinSent,
@@ -448,6 +449,11 @@ export function handleVoiceConfig(payload: Payload<"voice_config">): void {
   setVoiceConfig(payload);
 }
 
+/** `video_bitrate_cap`: an admin saved the server's video upload cap. */
+export function handleVideoBitrateCap(payload: Payload<"video_bitrate_cap">): void {
+  applyVideoBitrateCap(payload.max_video_bitrate);
+}
+
 export function handleVoiceTokenFrame(payload: Payload<"voice_token">): void {
   void livekitSession().then(({ handleVoiceToken }) =>
     handleVoiceToken(
@@ -664,7 +670,7 @@ export function handleVoiceError(payload: Payload<"error">, id: string | undefin
     // no id (older server / no correlation available) still falls back
     // to the camera, the only kind this branch used to handle.
     if (id !== undefined) {
-      void import("../../lib/voice/screenShare").then(({ rollbackPendingVideo }) => {
+      void import("./screenShare").then(({ rollbackPendingVideo }) => {
         const kind = rollbackPendingVideo(id);
         // undefined means this id no longer correlates to anything
         // pending (superseded by a later enable of the same kind) — the
@@ -695,7 +701,7 @@ export function rollbackVideoOnError(id: string | undefined): void {
   // like livekitSession() above — it's loaded lazily here too, at its
   // one call site in this file.
   if (id !== undefined) {
-    void import("../../lib/voice/screenShare").then(({ rollbackPendingVideo }) => {
+    void import("./screenShare").then(({ rollbackPendingVideo }) => {
       const kind = rollbackPendingVideo(id);
       if (kind === undefined) return;
       void livekitSession().then(({ disableCamera, disableScreenshare }) =>
@@ -712,6 +718,7 @@ export const wsRoutes: readonly WsRoute[] = [
   route(S.VOICE_DISCONNECTED, (c) => (p) => handleVoiceDisconnected(p, c.clock)),
   route(S.VOICE_LEAVE, (c) => (p) => handleVoiceLeave(p, c.clock)),
   route(S.VOICE_CONFIG, () => handleVoiceConfig),
+  route(S.VIDEO_BITRATE_CAP, () => handleVideoBitrateCap),
   route(S.VOICE_TOKEN, () => handleVoiceTokenFrame),
   route(S.VOICE_E2EE_ANNOUNCE, () => handleVoiceE2eeAnnounce),
   route(S.VOICE_E2EE_OFFER, () => handleVoiceE2eeOffer),

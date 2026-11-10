@@ -111,6 +111,19 @@ const liveCapture = (page: Page) =>
       .map((track) => ({ label: track.label, settings: track.getSettings() })),
   );
 
+const voiceProcessing = (page: Page) =>
+  page.evaluate(() => {
+    const debug = (
+      window as unknown as {
+        __owncord: { lkDebug(): Record<string, unknown> };
+      }
+    ).__owncord.lkDebug();
+    return {
+      silero: debug.sileroDetectionActive === true,
+      enhanced: debug.enhancedNoiseSuppressionActive === true,
+    };
+  });
+
 const NO_BROWSER_PROCESSING = {
   echoCancellation: false,
   noiseSuppression: false,
@@ -142,8 +155,14 @@ test("a mouse click does not open the voice gate, before or after the SDK republ
   const ungated = await loudestHeardDb(bob);
   await leaveVoice(alice);
 
-  await setPrefs(alice, { ...MANUAL, voiceSensitivity: 50 });
+  await setPrefs(alice, {
+    ...MANUAL,
+    voiceSensitivity: 50,
+    noiseSuppression: true,
+    enhancedNoiseSuppression: true,
+  });
   await joinVoice(alice);
+  await expect.poll(() => voiceProcessing(alice)).toEqual({ silero: true, enhanced: true });
   await alice.waitForTimeout(SETTLE_MS);
   const gated = await loudestHeardDb(bob);
 
@@ -197,9 +216,11 @@ test("Enhanced Noise Suppression removes the click with the gate off", async ({
       ...NO_BROWSER_PROCESSING,
       ...MANUAL,
       voiceSensitivity: 100,
+      noiseSuppression: enhanced,
       enhancedNoiseSuppression: enhanced,
     });
     await joinVoice(alice);
+    await expect.poll(() => voiceProcessing(alice)).toEqual({ silero: false, enhanced });
     await alice.waitForTimeout(SETTLE_MS);
     heard[enhanced ? "enhanced" : "off"] = await loudestHeardDb(bob);
     await leaveVoice(alice);
@@ -211,9 +232,8 @@ test("Enhanced Noise Suppression removes the click with the gate off", async ({
     contentType: "application/json",
   });
   expect(heard.off, "the reference click must be audible").toBeGreaterThan(-35);
-  // Measured at -63 to -68 dBFS with the current RNNoise model at its 48 kHz;
-  // the offline unit test (rnnoise-click-suppression) is what separates the
-  // models, this only pins that the processor's RNNoise path is live.
+  // The unit test isolates RNNoise from browser capture effects. Here both
+  // switches enable the call's RNNoise path, verified through its diagnostics.
   expect(heard.enhanced, "click heard through Enhanced Noise Suppression").toBeLessThan(-55);
 });
 

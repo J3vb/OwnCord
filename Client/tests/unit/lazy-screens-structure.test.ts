@@ -41,8 +41,8 @@ const EAGER_SITES = [
   "features/messaging/composer/inputDraft.ts",
   "features/messaging/composer/inputSend.ts",
   "features/messaging/composer/inputShared.ts",
-  "components/SelfProfileCard.ts",
-  "components/EditChannelModal.ts",
+  "features/profiles/SelfProfileCard.ts",
+  "features/channels/editChannelDialog.ts",
   "features/messaging/message-list/quickReactions.ts",
   "pages/MainPage.ts",
   "pages/main-page/dmCalls.ts",
@@ -57,6 +57,7 @@ const EAGER_SITES = [
   "features/direct-messages/dm-call/dmCallRender.ts",
   "features/direct-messages/dm-call/dmCallVerify.ts",
   "features/channels/ChannelSidebar.ts",
+  "features/channels/voiceSidebarRows.ts",
   "pages/main-page/ChatArea.ts",
 ] as const;
 

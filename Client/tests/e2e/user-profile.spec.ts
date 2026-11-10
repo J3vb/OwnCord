@@ -1,7 +1,7 @@
 /**
  * Mocked E2E: user profile surfaces (audit batch N11, gap #14).
  *
- *   - The member profile popup (`components/UserProfilePopup.ts`, opened by
+ *   - The member profile popup (`features/profiles/userProfilePopup.ts`, opened by
  *     clicking a row in the member list) — identity (nickname heading +
  *     @handle), role badge, status, the Message action that starts a DM, and
  *     the close paths (Escape / outside click).
@@ -78,7 +78,7 @@ async function mockSession(page: Page): Promise<void> {
       httpRoutes: [
         ...BASE_SESSION_ROUTES,
         { pattern: "/pins", status: 200, body: MOCK_PINNED_MESSAGES },
-        { pattern: "/api/v1/dms", method: "GET", status: 200, body: DM_CHANNELS },
+        { pattern: "/api/v1/dms", method: "GET", status: 200, body: { dm_channels: DM_CHANNELS } },
         { pattern: "/api/v1/dms", method: "POST", status: 200, body: CREATE_DM_RESPONSE },
       ],
       simulateWsFlow: true,

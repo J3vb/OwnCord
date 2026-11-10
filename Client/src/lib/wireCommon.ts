@@ -72,7 +72,8 @@ export type ReactionAction = "add" | "remove";
 export interface MessageUser {
   readonly id: number;
   readonly username: string;
-  readonly avatar: string | null;
+  /** Omitted when the member has no avatar on a REST reply (Server/db/models.go's UserPublic). */
+  readonly avatar?: string | null;
   /** Nickname to render instead of `username`. Absent/null = use `username`.
    *  Mentions still resolve against `username`, which is the unique handle. */
   readonly display_name?: string | null;

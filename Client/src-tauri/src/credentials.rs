@@ -71,12 +71,11 @@ fn require_non_empty(value: &str, field: &str) -> Result<(), String> {
 // Cross-command serialization
 // ---------------------------------------------------------------------------
 //
-// Every command below is `#[tauri::command(async)]` so the
-// blocking keyring/DPAPI I/O runs off Tauri's IPC main thread instead of
-// freezing the UI on it. Before that, Tauri ran all (sync) commands one at a
+// Every command below is an `async fn` that runs its store operation through
+// `run_store_op` on a blocking thread, so keyring/DPAPI I/O and the lock wait
+// stay off both Tauri's IPC main thread and the async workers. Before that, Tauri ran all (sync) commands one at a
 // time on that thread, so two overlapping invocations were always fully
-// serialized in arrival order. `async` dispatches each invocation onto the
-// async runtime's thread pool instead, so two overlapping calls can now
+// serialized in arrival order. Async dispatch lets two overlapping calls
 // genuinely run concurrently and interleave their OS credential-store
 // operations.
 //
@@ -101,6 +100,22 @@ static CREDENTIAL_LOCK: Mutex<()> = Mutex::new(());
 fn with_credential_lock<T>(f: impl FnOnce() -> T) -> T {
     let _guard = crate::sync::lock(&CREDENTIAL_LOCK);
     f()
+}
+
+/// Run one whole serialized store operation on a blocking thread.
+///
+/// The credential lock is taken inside the blocking closure, so the
+/// operation keeps the same atomicity as before while keyring/DPAPI waits and
+/// lock waits never occupy an async worker.
+async fn run_store_op<T: Send + 'static>(
+    op: impl FnOnce() -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    tauri::async_runtime::spawn_blocking(move || with_credential_lock(op))
+        .await
+        .map_err(|e| {
+            log::warn!("[credentials] store task ended early: {e}");
+            "credential store task failed".to_string()
+        })?
 }
 
 // ---------------------------------------------------------------------------
@@ -148,7 +163,7 @@ fn resolve_password(
 /// this returns — see [`crate::secret_store`] for what happens when it does not
 /// come back.
 #[tauri::command(async)]
-pub fn save_credential(
+pub async fn save_credential(
     app: AppHandle,
     host: String,
     username: String,
@@ -156,7 +171,7 @@ pub fn save_credential(
     password: Option<String>,
     clear_password: Option<bool>,
 ) -> Result<(), String> {
-    with_credential_lock(|| {
+    run_store_op(move || {
         require_non_empty(&host, "host")?;
         require_non_empty(&token, "token")?;
         require_non_empty(&username, "username")?;
@@ -199,13 +214,14 @@ pub fn save_credential(
             .map_err(|e| format!("save_credential failed: {e}"))?;
         Ok(())
     })
+    .await
 }
 
 /// Load a credential from the system credential store.
 ///
 /// Returns `None` when no credential exists for the given host.
 #[tauri::command(async)]
-pub fn load_credential(
+pub async fn load_credential(
     app: AppHandle,
     session: tauri::State<'_, crate::active_session::ActiveSession>,
     host: String,
@@ -213,7 +229,7 @@ pub fn load_credential(
     // Pre-session: the connect page prefills and auto-login reads before any
     // ws_connect. Once a session exists, only its host may be read.
     session.ensure(&host, true)?;
-    with_credential_lock(|| {
+    run_store_op(move || {
         require_non_empty(&host, "host")?;
 
         let Some(json_str) = secret_store::get(&app, &login_account(&host))
@@ -224,6 +240,7 @@ pub fn load_credential(
 
         parse_credential_blob(&json_str).map(Some)
     })
+    .await
 }
 
 /// Parse the stored credential JSON blob.
@@ -263,12 +280,13 @@ fn parse_credential_blob(json_str: &str) -> Result<CredentialData, String> {
 /// touch the session's verified-host set: removing a stored credential must
 /// never widen which hosts a pre-session flow can read.
 #[tauri::command(async)]
-pub fn delete_credential(app: AppHandle, host: String) -> Result<(), String> {
-    with_credential_lock(|| {
+pub async fn delete_credential(app: AppHandle, host: String) -> Result<(), String> {
+    run_store_op(move || {
         require_non_empty(&host, "host")?;
         secret_store::delete(&app, &login_account(&host))
             .map_err(|e| format!("delete_credential failed: {e}"))
     })
+    .await
 }
 
 // ---------------------------------------------------------------------------
@@ -292,7 +310,7 @@ pub fn delete_credential(app: AppHandle, host: String) -> Result<(), String> {
 /// unavailable this returns an error rather than reporting a success that would
 /// leave peers rejecting the user's voice announce after a restart.
 #[tauri::command(async)]
-pub fn save_identity_key(
+pub async fn save_identity_key(
     app: AppHandle,
     session: tauri::State<'_, crate::active_session::ActiveSession>,
     host: String,
@@ -301,7 +319,7 @@ pub fn save_identity_key(
     // Never pre-session: this runs from the ready/voice flow, by which point a
     // session is established. Only its host may be written.
     session.ensure_identity_scope(&host, false)?;
-    with_credential_lock(|| {
+    run_store_op(move || {
         require_non_empty(&host, "host")?;
         require_non_empty(&key, "key")?;
 
@@ -309,42 +327,45 @@ pub fn save_identity_key(
             .map_err(|e| format!("save_identity_key failed: {e}"))?;
         Ok(())
     })
+    .await
 }
 
 /// Load the identity private key for `host`.
 ///
 /// Returns `None` when no identity key exists for the given host.
 #[tauri::command(async)]
-pub fn load_identity_key(
+pub async fn load_identity_key(
     app: AppHandle,
     session: tauri::State<'_, crate::active_session::ActiveSession>,
     host: String,
 ) -> Result<Option<String>, String> {
     // Never pre-session, same as save_identity_key.
     session.ensure_identity_scope(&host, false)?;
-    with_credential_lock(|| {
+    run_store_op(move || {
         require_non_empty(&host, "host")?;
         secret_store::get(&app, &identity_account(&host))
             .map_err(|e| format!("load_identity_key failed: {e}"))
     })
+    .await
 }
 
 /// Delete the identity private key for `host`.
 ///
 /// Deleting a non-existent key is not treated as an error.
 #[tauri::command(async)]
-pub fn delete_identity_key(
+pub async fn delete_identity_key(
     app: AppHandle,
     session: tauri::State<'_, crate::active_session::ActiveSession>,
     host: String,
 ) -> Result<(), String> {
     // Never pre-session, same as save_identity_key.
     session.ensure_identity_scope(&host, false)?;
-    with_credential_lock(|| {
+    run_store_op(move || {
         require_non_empty(&host, "host")?;
         secret_store::delete(&app, &identity_account(&host))
             .map_err(|e| format!("delete_identity_key failed: {e}"))
     })
+    .await
 }
 
 // Pending text is private data. Reuse the credential store's verified,
@@ -380,7 +401,7 @@ fn validate_pending_messages(value: &str) -> Result<(), String> {
 }
 
 #[tauri::command(async)]
-pub fn save_pending_messages(
+pub async fn save_pending_messages(
     app: AppHandle,
     session: tauri::State<'_, crate::active_session::ActiveSession>,
     host: String,
@@ -388,22 +409,23 @@ pub fn save_pending_messages(
     value: String,
 ) -> Result<(), String> {
     session.ensure_verified_host(&host)?;
-    with_credential_lock(|| {
+    run_store_op(move || {
         let account = pending_messages_account(&host, user_id)?;
         validate_pending_messages(&value)?;
         secret_store::set(&app, &account, &value).map(|_| ())
     })
+    .await
 }
 
 #[tauri::command(async)]
-pub fn load_pending_messages(
+pub async fn load_pending_messages(
     app: AppHandle,
     session: tauri::State<'_, crate::active_session::ActiveSession>,
     host: String,
     user_id: u64,
 ) -> Result<Option<String>, String> {
     session.ensure_verified_host(&host)?;
-    with_credential_lock(|| {
+    run_store_op(move || {
         let account = pending_messages_account(&host, user_id)?;
         let value = secret_store::get(&app, &account)?;
         if let Some(ref value) = value {
@@ -411,20 +433,22 @@ pub fn load_pending_messages(
         }
         Ok(value)
     })
+    .await
 }
 
 #[tauri::command(async)]
-pub fn delete_pending_messages(
+pub async fn delete_pending_messages(
     app: AppHandle,
     session: tauri::State<'_, crate::active_session::ActiveSession>,
     host: String,
     user_id: u64,
 ) -> Result<(), String> {
     session.ensure_verified_host(&host)?;
-    with_credential_lock(|| {
+    run_store_op(move || {
         let account = pending_messages_account(&host, user_id)?;
         secret_store::delete(&app, &account)
     })
+    .await
 }
 
 // ---------------------------------------------------------------------------
@@ -500,10 +524,12 @@ pub async fn login_with_saved_password(
     require_non_empty(&username, "username")?;
 
     let account = login_account(&host);
-    let stored = with_credential_lock(|| {
-        secret_store::get(&app, &account)
+    let lookup_app = app.clone();
+    let stored = run_store_op(move || {
+        secret_store::get(&lookup_app, &account)
             .map_err(|e| format!("login_with_saved_password failed: {e}"))
-    })?;
+    })
+    .await?;
     let cred = stored
         .ok_or_else(|| "no stored credential for this host".to_string())
         .and_then(|blob| parse_credential_blob(&blob))?;
@@ -1227,16 +1253,12 @@ mod tests {
         assert!(parse_http_response(&raw).is_err());
     }
 
-    /// All 7 commands moved to `#[tauri::command(async)]`,
-    /// which runs each invocation on the async runtime's thread pool instead
-    /// of Tauri's single IPC main thread. Two overlapping invocations (e.g.
-    /// `identity.ts`'s save-then-delete legacy-key migration, or a logout's
-    /// `delete_credential` racing a connect-page auto-login's
-    /// `load_credential` for the same host) can now genuinely run
-    /// concurrently. `with_credential_lock` must serialize them: this proves
-    /// no two holders of the lock ever run their critical section at the
-    /// same time, regardless of which OS thread the runtime schedules them
-    /// on.
+    /// Overlapping invocations (e.g. `identity.ts`'s save-then-delete legacy-key
+    /// migration, or a logout's `delete_credential` racing a connect-page
+    /// auto-login's `load_credential` for the same host) can run concurrently.
+    /// `with_credential_lock` must serialize them: this proves no two holders
+    /// of the lock ever run their critical section at the same time,
+    /// regardless of which OS thread the runtime schedules them on.
     #[test]
     fn credential_lock_serializes_overlapping_commands() {
         use std::sync::atomic::{AtomicUsize, Ordering};
@@ -1299,5 +1321,96 @@ mod tests {
             42,
             "with_credential_lock must recover from a poisoned mutex, not propagate it"
         );
+    }
+
+    /// The command surface must not run store work on an async worker: every
+    /// credential command is an `async fn` that goes through `run_store_op`,
+    /// which hands the whole locked operation to `spawn_blocking`.
+    #[test]
+    fn credential_commands_are_async_and_use_the_blocking_pool() {
+        let src = include_str!("credentials.rs");
+        let body = src.split("#[cfg(test)]\nmod tests").next().unwrap_or(src);
+        let commands = body.matches("#[tauri::command(async)]").count();
+        let async_fns = body
+            .matches("#[tauri::command(async)]\npub async fn ")
+            .count();
+        assert_eq!(commands, 10, "unexpected command count");
+        assert_eq!(async_fns, commands, "every command must be an async fn");
+        assert_eq!(
+            body.matches("with_credential_lock(").count(),
+            1,
+            "only run_store_op may take the lock directly"
+        );
+        assert!(body.contains("spawn_blocking(move || with_credential_lock(op))"));
+    }
+
+    /// Concurrent `run_store_op` calls keep the critical sections serialized.
+    #[test]
+    fn run_store_op_serializes_concurrent_calls() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        let concurrent = Arc::new(AtomicUsize::new(0));
+        let max_concurrent = Arc::new(AtomicUsize::new(0));
+        tauri::async_runtime::block_on(async {
+            let mut tasks = Vec::new();
+            for _ in 0..8 {
+                let concurrent = Arc::clone(&concurrent);
+                let max_concurrent = Arc::clone(&max_concurrent);
+                tasks.push(tauri::async_runtime::spawn(async move {
+                    run_store_op(move || {
+                        let now = concurrent.fetch_add(1, Ordering::SeqCst) + 1;
+                        max_concurrent.fetch_max(now, Ordering::SeqCst);
+                        std::thread::sleep(Duration::from_millis(5));
+                        concurrent.fetch_sub(1, Ordering::SeqCst);
+                        Ok(())
+                    })
+                    .await
+                }));
+            }
+            for t in tasks {
+                t.await.expect("task joined").expect("store op succeeded");
+            }
+        });
+        assert_eq!(max_concurrent.load(Ordering::SeqCst), 1);
+    }
+
+    /// A stalled store operation does not stop async timers from ticking, and
+    /// a panic inside the operation comes back as an error string.
+    #[test]
+    fn run_store_op_leaves_the_async_runtime_free_while_stalled() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        let ticks = Arc::new(AtomicUsize::new(0));
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .expect("current-thread runtime");
+        let ticks_at_finish = runtime.block_on(async {
+            let ticker = Arc::clone(&ticks);
+            let timer = tokio::spawn(async move {
+                loop {
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                    ticker.fetch_add(1, Ordering::SeqCst);
+                }
+            });
+            let seen = Arc::clone(&ticks);
+            let result = run_store_op(move || {
+                std::thread::sleep(Duration::from_millis(200));
+                Ok(seen.load(Ordering::SeqCst))
+            })
+            .await;
+            timer.abort();
+            result.expect("store op succeeded")
+        });
+        assert!(
+            ticks_at_finish >= 5,
+            "timer only ticked {ticks_at_finish} times"
+        );
+
+        let err = tauri::async_runtime::block_on(run_store_op::<()>(|| panic!("boom")))
+            .expect_err("a panicking op surfaces as an error");
+        assert!(err.contains("credential store task failed"), "{err}");
     }
 }

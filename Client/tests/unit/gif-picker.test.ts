@@ -923,7 +923,7 @@ describe("GifPicker", () => {
           fire = () => cb([{ isIntersecting: true }]);
         }
         observe(el: Element): void {
-          observed.push(el);
+          if (el.classList.contains("gp-sentinel")) observed.push(el);
         }
         unobserve(el: Element): void {
           observed = observed.filter((e) => e !== el);

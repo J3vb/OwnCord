@@ -18,7 +18,7 @@ import {
   type CameraTrackState,
   type ScreenTrackState,
   type VideoTrackDeps,
-} from "@lib/voice/screenShare";
+} from "../../src/features/voice/screenShare";
 import { voiceStore } from "@stores/voice.store";
 
 const setH264GpuProfiles = vi.hoisted(() => vi.fn());

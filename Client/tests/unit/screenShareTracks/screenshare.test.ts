@@ -1,4 +1,4 @@
-// Tests for the track-publishing half of src/lib/voice/screenShare.ts, continued from camera.test.ts.
+// Tests for the track-publishing half of src/features/voice/screenShare.ts, continued from camera.test.ts.
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as mocks from "../../helpers/screenShareTracksMocks";
@@ -6,7 +6,7 @@ import { AudioPresets, Track } from "livekit-client";
 import type { LocalTrack } from "livekit-client";
 import { expectConsole } from "../../helpers/console";
 import { initToast, teardownToast } from "@lib/ui/toast";
-import type { ToastContainer } from "@components/Toast";
+import type { ToastContainer } from "@lib/ui/toastContainer";
 import {
   disableScreenshare,
   enableScreenshare,

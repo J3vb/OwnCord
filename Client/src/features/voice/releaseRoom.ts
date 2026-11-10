@@ -33,9 +33,8 @@ export function detachRoom(room: Room): void {
  *  reachable from navigator.mediaDevices for the page's lifetime. */
 export function releaseRoom(room: Room): Promise<void> {
   detachRoom(room);
-  navigator.mediaDevices?.removeEventListener(
-    "devicechange",
-    (room as unknown as { handleDeviceChange: EventListener }).handleDeviceChange,
-  );
+  // A private Room field; undefined (a test double) removes nothing.
+  const handler: EventListener = Reflect.get(room, "handleDeviceChange");
+  navigator.mediaDevices?.removeEventListener("devicechange", handler);
   return room.disconnect();
 }

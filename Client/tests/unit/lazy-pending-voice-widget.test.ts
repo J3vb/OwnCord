@@ -30,7 +30,7 @@ vi.mock("@lib/presence/profiles", () => mocks.presenceProfilesMock());
 
 vi.mock("../../src/features/channels/ChannelSidebar", () => mocks.channelSidebarMock());
 
-vi.mock("@components/DmSidebar", () => mocks.dmSidebarMock());
+vi.mock("../../src/features/direct-messages/DmSidebar", () => mocks.dmSidebarMock());
 
 vi.mock("../../src/features/members/MemberList", () => mocks.memberListMock());
 
@@ -40,7 +40,7 @@ vi.mock("@components/QuickSwitchOverlay", () => mocks.quickSwitchOverlayMock());
 
 vi.mock("@tauri-apps/api/core", () => mocks.apiCoreMock());
 
-vi.mock("@components/EditChannelModal", () => mocks.editChannelModalMock());
+vi.mock("../../src/features/channels/editChannelDialog", () => mocks.editChannelModalMock());
 
 vi.mock("@components/DeleteChannelModal", () => mocks.deleteChannelModalMock());
 

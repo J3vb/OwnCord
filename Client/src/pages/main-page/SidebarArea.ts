@@ -11,7 +11,7 @@ import type { WsClient } from "@lib/ws";
 import { type ApiClient } from "@lib/api";
 import type { RateLimiterSet } from "@lib/net/rateLimiter";
 import type { PresenceSender } from "@lib/presence/presence";
-import type { ToastContainer } from "@components/Toast";
+import type { ToastContainer } from "@lib/ui/toastContainer";
 import { createCategoryDialogs } from "./categoryDialogs";
 import { logout } from "../../features/connection/logout";
 import { createUserBar } from "@components/UserBar";

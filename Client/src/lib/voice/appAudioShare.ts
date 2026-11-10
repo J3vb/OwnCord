@@ -22,7 +22,7 @@ import {
 import { desktop } from "../../platform/desktop";
 import type { AppAudioErrorCode } from "../../platform/contracts/appAudio";
 import { openAppAudio } from "./appAudioTrack";
-import type { ScreenTrackState } from "./screenShare";
+import type { ScreenTrackState } from "../../features/voice/screenShare";
 import { createLogger } from "../logger";
 import { showToast } from "../ui/toast";
 import { voiceText } from "../../i18n/voice";

@@ -13,7 +13,7 @@ import {
   isAutoReconnecting as mockIsAutoReconnecting,
   failPendingRejoin as mockFailPendingRejoin,
 } from "@lib/voice/livekitSession";
-import { rollbackPendingVideo as mockRollbackPendingVideo } from "@lib/voice/screenShare";
+import { rollbackPendingVideo as mockRollbackPendingVideo } from "../../../src/features/voice/screenShare";
 import { takeVoiceMoved } from "../../../src/features/voice/moveHint";
 import { noteJoinSent, takeJoinRefusal } from "../../../src/features/voice/joinRequest";
 import {
@@ -26,10 +26,11 @@ import {
   voiceStateEvent,
 } from "../../helpers/dispatcherHarness";
 import { signInAs } from "../../helpers/storeSeeds";
+import { onVideoBitrateCap, videoBitrateCap } from "../../../src/features/voice/videoBitrateCap";
 
 vi.mock("@lib/notifications", () => dispatcherMocks.notificationsMock());
 vi.mock("@lib/voice/livekitSession", () => dispatcherMocks.livekitSessionMock());
-vi.mock("@lib/voice/screenShare", () => dispatcherMocks.screenShareMock());
+vi.mock("../../../src/features/voice/screenShare", () => dispatcherMocks.screenShareMock());
 vi.mock("@lib/ui/toast", () => dispatcherMocks.toastMock());
 vi.mock("@lib/net/identity", () => dispatcherMocks.identityMock());
 vi.mock("../../../src/features/connection/dispatchContext", async (importOriginal) =>
@@ -376,6 +377,27 @@ describe("WS Dispatcher", () => {
 
     const configs = voiceStore.getState().voiceConfigs;
     expect(configs.get(3)).toBeDefined();
+  });
+
+  it("wires video_bitrate_cap and auth_ok's cap, and a resume from an older server clears it", () => {
+    const seen: number[] = [];
+    const off = onVideoBitrateCap((b) => seen.push(b));
+    const user = { id: 1, username: "me", avatar: null, role: "member" };
+    mock.dispatch("auth_ok", {
+      user,
+      server_name: "S",
+      motd: "",
+      replay_source: "none",
+      video_bitrate_cap: { max_video_bitrate: 6_000_000 },
+    });
+    expect(videoBitrateCap()).toBe(6_000_000);
+    mock.dispatch("video_bitrate_cap", { max_video_bitrate: 2_500_000 });
+    expect(videoBitrateCap()).toBe(2_500_000);
+    mock.dispatch("video_bitrate_cap", { max_video_bitrate: 2_500_000 });
+    mock.dispatch("auth_ok", { user, server_name: "S", motd: "", replay_source: "buffer" });
+    expect(videoBitrateCap()).toBe(0);
+    expect(seen).toEqual([6_000_000, 2_500_000, 0]);
+    off();
   });
 
   it("wires voice_token to handleVoiceToken", async () => {

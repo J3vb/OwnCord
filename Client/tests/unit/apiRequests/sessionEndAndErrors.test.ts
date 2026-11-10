@@ -10,6 +10,7 @@ import {
   serverErrorText,
 } from "../../../src/lib/api";
 import { connectText } from "../../../src/i18n/connect";
+import { validReply } from "../../helpers/restReplyFixtures";
 import { messageStatusText } from "../../../src/i18n/messageStatus";
 import { expectConsole } from "../../helpers/console";
 import { Api, okResponse, failResponse, useRequestsClient } from "../../helpers/apiRequestsHarness";
@@ -108,6 +109,9 @@ describe("REST client requests", () => {
       "%s leaves no timer and detaches from the caller's signal",
       async (name) => {
         vi.useFakeTimers();
+        mockFetch.mockResolvedValue(
+          okResponse(validReply(name === "getHealth" ? "HealthResponse" : "ServerInfoResponse")),
+        );
         const ac = new AbortController();
         const removed = vi.spyOn(ac.signal, "removeEventListener");
         await api[name]("other.test:9000", 3000, ac.signal);

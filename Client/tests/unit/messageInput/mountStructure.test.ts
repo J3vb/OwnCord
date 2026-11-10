@@ -4,7 +4,7 @@ import { mountMessageInput, useMessageInputContainer } from "../../helpers/messa
 import { resetServerCapabilities, applyReadyCapabilities } from "@lib/net/serverCapabilities";
 import { resetComposerServer } from "../../helpers/composerSheets";
 
-vi.mock("@components/EmojiPicker", () => mocks.emojiPickerMock());
+vi.mock("../../../src/features/messaging/EmojiPicker", () => mocks.emojiPickerMock());
 vi.mock("@components/GifPicker", () => mocks.gifPickerMock());
 
 const upload = vi.fn(async (file: File) => ({ id: "u", url: "/f/u", filename: file.name }));

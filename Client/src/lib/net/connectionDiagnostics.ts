@@ -50,9 +50,9 @@ interface NativeSignaling {
 }
 
 function nativeSignaling(room: Room): NativeSignaling | null {
-  const candidate = room as unknown as Partial<NativeSignaling>;
-  return typeof candidate.isSignalingConnected === "function"
-    ? (candidate as NativeSignaling)
+  const probe: unknown = Reflect.get(room, "isSignalingConnected");
+  return typeof probe === "function"
+    ? { isSignalingConnected: () => probe.call(room) === true }
     : null;
 }
 

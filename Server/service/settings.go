@@ -61,6 +61,8 @@ var allowedSettingKeys = map[string]struct{}{
 	// Whether game activity is shown; MANAGE_SERVER may change it.
 	GameActivityEnabledKey: {},
 	WelcomeChannelKey:      {},
+	// Video upload cap per person in kbit/s; 0 or missing means no cap.
+	VoiceMaxVideoKbpsKey: {},
 }
 
 // VoiceOwnerMovableKey holds whether MOVE_MEMBERS holders may move the owner

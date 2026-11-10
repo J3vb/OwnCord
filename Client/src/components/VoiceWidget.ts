@@ -19,6 +19,7 @@ import {
   type ConnectionStats,
   type ConnectionStatsPoller,
 } from "@lib/voice/connectionStats";
+import { enhancedNoiseSuppressionEnabled } from "@lib/voice/audioPipeline";
 import { getRoomForStats, reapplyEnhancedNoiseSuppression } from "@lib/voice/livekitSession";
 import { loadPref, onPrefChange, savePref } from "@lib/prefs/preferences";
 import { voiceText as t } from "../i18n/voice";
@@ -205,7 +206,9 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
   }
 
   function renderNs(): void {
-    nsBtn?.setAttribute("aria-pressed", String(loadPref("enhancedNoiseSuppression", false)));
+    if (nsBtn === null) return;
+    nsBtn.disabled = !loadPref("noiseSuppression", true);
+    nsBtn.setAttribute("aria-pressed", String(enhancedNoiseSuppressionEnabled()));
   }
 
   /** The call's name: a DM call resolves through the DM store rather than the
@@ -383,7 +386,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     appendChildren(headerMain, statusLabel, timerEl);
     nsBtn = createNoiseButton();
     // savePref announces every change, so a toggle in Settings shows here too.
-    onPrefChange(["enhancedNoiseSuppression"], renderNs, disposable.signal);
+    onPrefChange(["noiseSuppression", "enhancedNoiseSuppression"], renderNs, disposable.signal);
     renderNs();
 
     const headerSub = createElement("div", { class: "vw-header-sub" });

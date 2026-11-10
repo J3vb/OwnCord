@@ -40,7 +40,12 @@ async function mockSession(page: Page): Promise<void> {
         ...BASE_SESSION_ROUTES,
         { pattern: "/api/v1/moderation/members", status: 200, body: [] },
         { pattern: "/api/v1/moderation/members/", method: "PATCH", status: 200, body: {} },
-        { pattern: "/api/v1/moderation/channels/", method: "PATCH", status: 200, body: {} },
+        {
+          pattern: "/api/v1/moderation/channels/",
+          method: "PATCH",
+          status: 200,
+          body: { id: 1, name: "general", type: "text", category: null, position: 0 },
+        },
       ],
       simulateWsFlow: true,
       readyOverrides: {

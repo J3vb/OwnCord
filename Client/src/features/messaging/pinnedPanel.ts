@@ -42,7 +42,7 @@ export function mapToPinnedMessage(msg: {
   readonly user: {
     readonly id: number;
     readonly username: string;
-    readonly avatar: string | null;
+    readonly avatar?: string | null;
     readonly display_name?: string | null;
   };
   readonly content: string;

@@ -47,10 +47,11 @@ and only when it changes something a contributor or fork holder must do
 
 ## Unreleased
 
-- **Voice:** H.264 webcam encoding is now checked for software fallback; changing a shared source, quality or camera device rechecks the encoder without letting stale results affect a new session.
-
 ### Changed
 
+- The app now checks each server reply before using it. A reply it cannot read (from a much older or newer server, or a proxy answering in its place) shows "The server sent a reply this version of OwnCord cannot read" instead of half-loading; after a save, it adds that the change may already have been made.
+- Voice: the microphone gate starts closed and keeps its state when you change the sensitivity.
+- Emoji and GIF pickers load the previews you can see first, fetch the next GIF page earlier, and scroll the emoji list more smoothly.
 - In-app dialogs (join with an invite link, rename prompts, new DM picker, nickname, new thread) use the same Save and Cancel buttons as Create Channel.
 - Privacy & Safety shows a failed load the same way in every section: the message in red with Retry beside it.
 - Small polish: the GIF consent button and the empty sticker panel sit in the middle of the picker; "Load external content" no longer shows an empty card beside it; the certificate prompts open on Cancel instead of the close button; a password voice channel shows its lock in the chat header; a phone menu sheet opens without a focus line on its first row; search on a phone is a top sheet in landscape too.
@@ -68,8 +69,28 @@ and only when it changes something a contributor or fork holder must do
 
 ### Added
 
+- Admin: Settings > Voice has **Max video upload per person** (default No limit), the most one member may send for camera and screen share together. The server sends it to members' apps at once; the apps start keeping their video under it in a following update.
+- Voice: Enhanced Noise Suppression now recognizes short replies like "yes" or "ok", and the **Voice Buffer** slider lets you tune the microphone delay during a call.
+- Zooming a screen share (Ctrl+scroll) shows a small overview you can drag to move around, with the zoom level and a Reset button. It hides again at 100%.
 - On Linux, a crash report after an unexpected exit now includes the app's last error output, which names the library that closed the app when it exits without a crash signal.
 - Voice used to stay off until the whole server restarted after the built-in LiveKit crashed 10 times in a row. OwnCord now tries again every 10 minutes, and the System health page has a **Restart voice server** button to try right away.
+
+### Fixed
+
+- Linux: voice calls skip voice server messages they cannot use, and end with a clear disconnect when a call can no longer continue.
+- Linux: switching audio devices or muting and unmuting no longer makes other voice controls wait.
+- Linux: stopping a camera or screen share no longer makes other voice controls wait, and starting the camera again right after waits for the old one to close.
+- A webcam using H.264 could quietly fall back to the slow software encoder. Webcams are now checked like screen shares and switch to VP8 when that happens, and changing the shared window, quality or camera checks again.
+- Android: the app now stops its file-saving and sharing work cleanly when Android closes or recreates the app screen.
+- Desktop: signing out, switching servers or accepting a changed server certificate now closes the voice connection's local tunnel right away.
+- Desktop and Android: saved logins, media and game activity, notifications, saving or sharing files and installing an update no longer hold up the rest of the app while the system is slow to answer.
+
+### Under the hood
+
+- A review of CI job timings with ideas to speed it up (docs only).
+- The Linux Rust test job prefers the official Ubuntu package mirror, after one run spent 28 minutes on a slow one.
+- Tests for the protocol generator's checks on duplicate names and mismatched error codes.
+- The restore-without-safety-backup test no longer depends on the clock, and the long-session soak test waits for the camera to start before measuring.
 
 ## v2.8.0
 

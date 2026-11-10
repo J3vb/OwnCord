@@ -76,6 +76,17 @@ describe("ChannelSidebar", () => {
     expect(onOpenCall).not.toHaveBeenCalled();
   });
 
+  it("ignores a click of a non-primary button on a voice user row", () => {
+    setChannels(testChannels);
+    addVoiceUser(3, 30, "alice");
+    sidebar.mount(container);
+
+    const row = container.querySelector('.voice-user-item[data-voice-uid="30"]') as HTMLElement;
+    row.dispatchEvent(new MouseEvent("click", { bubbles: true, button: 1 }));
+
+    expect(mockOpenUserProfilePopup).not.toHaveBeenCalled();
+  });
+
   it("Enter or Space on a voice user row opens the profile, own row included (V11)", () => {
     setAdminUser();
     setChannels(testChannels);

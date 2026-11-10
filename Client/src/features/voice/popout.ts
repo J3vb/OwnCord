@@ -155,6 +155,8 @@ export function openPopoutWindow(opts: PopoutWindowOptions): PopoutWindow | null
  *  window could open. */
 export function openPopout(opts: PopoutOptions): Popout | null {
   const root = createElement("div", { class: "video-popout" });
+  root.dataset.streamType =
+    opts.video.closest<HTMLElement>("[data-stream-type]")?.dataset.streamType ?? "camera";
   const button = createElement("button", {
     type: "button",
     class: "video-tile-btn video-popout__fullscreen",
@@ -209,10 +211,12 @@ export function openPopout(opts: PopoutOptions): Popout | null {
     title: opts.title,
     content: root,
     onDraw: (doc, signal) => {
+      const navigator = root.querySelector(".video-zoom-nav");
       root.replaceChildren(
         opts.video,
         ...(opts.controls === undefined ? [] : [opts.controls]),
         button,
+        ...(navigator === null ? [] : [navigator]),
       );
       syncVideoSurface(opts.video);
       doc.addEventListener("fullscreenchange", () => setFullscreen(doc.fullscreenElement != null), {

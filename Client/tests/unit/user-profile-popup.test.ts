@@ -4,7 +4,7 @@ import {
   type ProfileRolesControl,
   type ProfileRolesState,
   type UserProfileData,
-} from "@components/UserProfilePopup";
+} from "../../src/features/profiles/userProfilePopup";
 import { createNoteBinding } from "../../src/features/profiles/userNotes";
 import { useMountContainer } from "../helpers/mountContainer";
 

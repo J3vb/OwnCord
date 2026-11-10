@@ -18,7 +18,7 @@ import { membersStore, memberDisplayName } from "@stores/members.store";
 import { currentUserRoleHasPermission, topPositionFor } from "@lib/permissions";
 import { Permission, type AdminUser } from "@lib/types";
 import { type ApiClient, ApiClientError, errorText } from "@lib/api";
-import type { ToastContainer } from "@components/Toast";
+import type { ToastContainer } from "@lib/ui/toastContainer";
 import { reportEntryText } from "../../i18n/reportEntry";
 import { shellText } from "../../i18n/shell";
 import { moderationText } from "../../i18n/moderation";

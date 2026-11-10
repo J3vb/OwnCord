@@ -15,7 +15,7 @@ CI fails on drift, and the next generator run silently discards your edit.
 | ------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- | ----------------------------------------------------- |
 | `Server/db/dbgen/`                                                                                | `Server/db/queries/sqlite/*.sql`, `Server/migrations/`               | `db-change` skill                                     |
 | `Server/ws/message_types.go`, `Server/httperr/codes.go` **and** `Client/src/lib/protocolTypes.ts` | `protocol/schema.json`                                               | `protocol-change` skill                               |
-| `Client/src/lib/net/wireShapes.ts`                                                                | `Client/src/lib/wire*.ts` payload types, `lib/net/restReplies.ts`    | `cd Client && npm run gen:wire`                       |
+| `Client/src/lib/net/wireShapes.ts`, `Client/src/lib/net/restShapes.ts`                            | `Client/src/lib/wire*.ts` payload types, `lib/net/restReplies.ts`    | `cd Client && npm run gen:wire`                       |
 | `gendocs:*` blocks in `docs/api.md`, `docs/schema.md`, `docs/server-configuration.md`             | `Server/api/route_groups.go`, `Server/migrations/`, `Server/config/` | `cd Server && go run -tags otel,wazero ./cmd/gendocs` |
 
 ## Bug-hunt ledger
@@ -117,6 +117,12 @@ and proceeds, so a reviewer can see what was assumed.
 
 ## Gotchas
 
+- **Project threads skip `.claude/settings.json`.** A Claude project thread
+  starts one folder above this repository, so the SessionStart hook never runs:
+  the container keeps Node 22, no `node_modules` and no git hooks, and the
+  pre-commit gates silently do nothing. Before your first build, test or
+  commit, run `(cd OwnCord && node scripts/claude-hook.mjs session-start)`
+  (about 15 s) and then the `export PATH=...` line it prints.
 - **Verify with the `ci-check` skill**, not with an ad-hoc `go build && go test`.
   CI compiles four Go build-tag variants and runs a deadlock-detection pass;
   the default build proves nothing about the tagged ones.

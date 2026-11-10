@@ -11,10 +11,10 @@
 import { errorText, type ApiClient } from "@lib/api";
 import { Permission } from "@lib/types";
 import { memberHasPermissionIn, topPositionFor } from "@lib/permissions";
-import type { ProfileRolesState } from "@components/UserProfilePopup";
+import type { ProfileRolesState } from "../profiles/userProfilePopup";
 import { authStore } from "@stores/auth.store";
 import { channelsStore, getRoleIdByName } from "@stores/channels.store";
-import type { ToastType } from "@components/Toast";
+import type { ToastType } from "@lib/ui/toastContainer";
 import { shellText } from "../../i18n/shell";
 
 /** Roles offered when the server hasn't sent any. */

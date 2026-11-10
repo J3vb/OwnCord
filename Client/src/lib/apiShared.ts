@@ -7,6 +7,7 @@ import { connectText } from "../i18n/connect";
 import { messageStatusText } from "../i18n/messageStatus";
 import type { ChannelMediaQuery, UserUploadsQuery } from "./types";
 import { RestErrorCode, WsErrorCode } from "@lib/protocolTypes";
+import type { RestReplyShapes } from "./net/restReplies";
 
 /** Configuration for the API client. */
 export interface ApiClientConfig {
@@ -39,6 +40,14 @@ export interface RequestOptions {
  * step with `Client/src-tauri/src/tofu.rs`'s `TLS_CERT_ERROR_CODE`.
  */
 export const TLS_CERT_CODE = "TLS_CERT_UNVERIFIED";
+
+/**
+ * The local code of a 2xx reply whose body is JSON but does not have the shape
+ * its call promised (a required field missing, a field of the wrong kind). The
+ * server never sends it: the client raises it, so it is not in the generated
+ * error-code list.
+ */
+export const REPLY_SHAPE_CODE = "REPLY_UNREADABLE";
 
 /** API client error with parsed error body. */
 export class ApiClientError extends Error {
@@ -589,15 +598,28 @@ export function userUploadsParams(query: UserUploadsQuery): URLSearchParams {
 /** What the per-domain REST modules borrow from createApiClient: its request
  *  helpers and live reads of its config, session and generation. */
 export interface ApiTransport {
-  request<T>(
+  request<K extends keyof RestReplyShapes>(
+    reply: K,
     method: string,
     path: string,
     body?: unknown,
     signal?: AbortSignal,
     opts?: RequestOptions,
-  ): Promise<T>;
-  channelRequest<T>(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T>;
-  memberRequest<T>(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T>;
+  ): Promise<RestReplyShapes[K]>;
+  channelRequest<K extends keyof RestReplyShapes>(
+    reply: K,
+    method: string,
+    path: string,
+    body?: unknown,
+    signal?: AbortSignal,
+  ): Promise<RestReplyShapes[K]>;
+  memberRequest<K extends keyof RestReplyShapes>(
+    reply: K,
+    method: string,
+    path: string,
+    body?: unknown,
+    signal?: AbortSignal,
+  ): Promise<RestReplyShapes[K]>;
   channelContent<T>(channelId: number, load: () => Promise<T>): Promise<T>;
   readonly config: Readonly<ApiClientConfig>;
   readonly session: SessionScope;

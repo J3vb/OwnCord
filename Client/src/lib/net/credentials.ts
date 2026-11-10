@@ -8,6 +8,7 @@ import { TransportError, httpError } from "../api";
 import { desktop } from "../../platform/desktop";
 import type { SavedCredential, SavedLoginResponse } from "../../platform/contracts/credentials";
 import type { AuthResponse } from "../types";
+import { readReply } from "../apiReply";
 import { authStore } from "@stores/auth.store";
 import { connectText } from "../../i18n/connect";
 
@@ -65,8 +66,9 @@ export function createUserUpdateCredentialSaver(
 }
 
 /**
- * Turn the backend's relayed `/auth/login` response into the same
- * `AuthResponse` an ordinary `api.login` call produces.
+ * Turn the backend's relayed `/auth/login` response into its decoded body;
+ * `readRelayedLogin` then checks it is the `AuthResponse` an ordinary
+ * `api.login` call produces.
  *
  * Rust returns status and raw body without interpreting either, so this is the
  * single place the login contract is read for the saved-password path — it
@@ -80,7 +82,7 @@ export function createUserUpdateCredentialSaver(
  * both the token and the 2FA branch unentered and strand the caller with no
  * result and no error.
  */
-export function parseRelayedLogin(relayed: SavedLoginResponse): AuthResponse {
+export function parseRelayedLogin(relayed: SavedLoginResponse): Readonly<Record<string, unknown>> {
   let parsed: unknown;
   try {
     parsed = JSON.parse(relayed.body) as unknown;
@@ -102,7 +104,16 @@ export function parseRelayedLogin(relayed: SavedLoginResponse): AuthResponse {
   if (body === null) {
     throw new Error(connectText("session.loginUnreadable"));
   }
-  return body as unknown as AuthResponse;
+  return body;
+}
+
+/** `parseRelayedLogin`, then the same reply check `api.login` runs on its body. */
+export async function readRelayedLogin(relayed: SavedLoginResponse): Promise<AuthResponse> {
+  return readReply("AuthResponse", parseRelayedLogin(relayed), {
+    method: "POST",
+    path: "/auth/login",
+    status: relayed.status,
+  });
 }
 
 /**

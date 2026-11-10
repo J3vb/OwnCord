@@ -98,12 +98,6 @@ video[hidden] + .video-surface {
   display: none;
 }
 
-.video-cell video,
-.video-cell .video-surface {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-}
 /* Ctrl + wheel zoom and drag pan (lib/ui/zoomPan.ts bindVideoZoom): the host
    tile or pop-out carries the view, its picture shows it. The individual
    properties apply outside `transform`, so a mirrored own camera stays mirrored. */
@@ -111,6 +105,9 @@ video[hidden] + .video-surface {
 .video-cell .video-surface,
 .video-popout video,
 .video-popout .video-surface {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
   translate: var(--video-pan, none);
   scale: var(--video-scale, none);
 }
@@ -122,6 +119,7 @@ video[hidden] + .video-surface {
 .video-panning .video-cell-select {
   cursor: grabbing;
 }
+
 /* A camera fills its grid tile, cropped at the edges as Discord does. Focused
    or full screen it shows the whole frame again. Screen shares always do. */
 .video-cell[data-stream-type="camera"]:not(.focused):not(:fullscreen):not(.video-cell--theatre)
@@ -167,10 +165,6 @@ video[hidden] + .video-surface {
   position: absolute;
   inset: 0;
   z-index: 1;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  cursor: pointer;
 }
 /* The tile clips its children, so the ring is drawn inside it. */
 .video-cell-select:focus-visible {
@@ -345,12 +339,6 @@ video[hidden] + .video-surface {
   inset: 0;
   overflow: hidden;
   background: #000; /* intentional: letterbox bars, as on a tile */
-}
-.video-popout video,
-.video-popout .video-surface {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
 }
 .video-popout video.track-muted,
 .video-popout video.track-muted + .video-surface {
@@ -635,14 +623,12 @@ video[hidden] + .video-surface {
 }
 .tile-mute-btn {
   background: var(--scrim);
-  border: none;
   border-radius: var(--radius-sm);
   color: var(--text-normal);
   padding: 4px;
   /* 24x24 minimum pointer target (Q1 2.5.8); the icon stays 16px. */
   min-width: 24px;
   min-height: 24px;
-  cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -677,10 +663,8 @@ video[hidden] + .video-surface {
 
 /* ── Video focus mode layout ── */
 .video-grid.focus-mode {
-  display: flex;
   flex-wrap: nowrap;
   flex-direction: column;
-  height: 100%;
 }
 .video-focus-main {
   flex: 1;
@@ -769,4 +753,27 @@ video[hidden] + .video-surface {
     min-width: 44px;
     min-height: 44px;
   }
+}
+
+/* The full source remains still while the outlined viewport follows zoom and pan. */
+.video-zoom-nav {
+  position: absolute;
+  z-index: 4;
+  left: 12px;
+  bottom: 48px;
+  padding: 8px;
+  border-radius: var(--radius-md);
+  background: var(--scrim-strong);
+  color: var(--on-fill);
+}
+.video-zoom-nav > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.video-zoom-nav > button {
+  display: grid;
+  margin: 8px auto;
+  border: 1px solid var(--border-control);
+  cursor: grab;
 }

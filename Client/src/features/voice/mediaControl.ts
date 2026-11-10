@@ -37,7 +37,7 @@ import {
   inPlaceSourceChange,
   getLocalScreenshareStats,
   getLocalCameraStats,
-} from "../../lib/voice/screenShare";
+} from "./screenShare";
 
 // Same logger tag as before the extraction, so the media log lines are unchanged.
 const log = createLogger("livekitSession");

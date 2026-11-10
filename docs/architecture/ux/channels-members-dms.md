@@ -18,7 +18,7 @@ category, sorted by position. The sidebar has two modes (`ui.store.sidebarMode`)
 | State              | Trigger                                                                                                                                                                                                                                  | Target reaction                                                                                                        |
 | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
 | `ready`            | Channels loaded from `ready`                                                                                                                                                                                                             | Grouped, collapsible category list                                                                                     |
-| `empty`            | Zero channels                                                                                                                                                                                                                            | "No channels yet" + hint (already the empty-state branch of `renderChannels()`, `features/channels/ChannelSidebar.ts`) |
+| `empty`            | Zero channels                                                                                                                                                                                                                            | "No channels yet" + hint (already the empty-state branch of the list render, `features/channels/channelListRender.ts`) |
 | category collapsed | User toggles                                                                                                                                                                                                                             | Persisted per-server in localStorage (`ui.toggleCategory`); chevron reflects state                                     |
 | active channel     | `setActiveChannel`                                                                                                                                                                                                                       | Highlighted; unread cleared only when actually mounted (UX-8)                                                          |
 | unread             | `chat_message` in a non-active channel, or in the active channel while the reader is away (`isChannelAway`: window unfocused, loaded window detached, or list scrolled away from the live tail) ([messaging.md §7](messaging.md), P4-03) | Unread pill; badge on the channel                                                                                      |
@@ -193,7 +193,7 @@ is one intent, so the user is not asked to choose DM-vs-group up front. Group
 DMs are `channels` rows with `type='dm'` and `is_group=1` server-side
 (migration 028), so leaving a two-person group does not collapse it back into
 a 1:1. "Rename Group" / "Leave Group" affordances live in the DM row context
-menu (the contextmenu handler in `renderDmItem()`, `components/DmSidebar.ts`; leave doubles as "Close DM" for 1:1s);
+menu (the contextmenu handler in `renderDmItem()`, `features/direct-messages/DmSidebar.ts`; leave doubles as "Close DM" for 1:1s);
 ring/incoming calls work the same as 1:1 DMs (`call_ring` fans out to every
 other participant).
 
@@ -230,9 +230,9 @@ and `IsEitherBlocked` is bidirectional). **Target UX:**
 
 ## Source of truth
 
-`src/features/channels/ChannelSidebar.ts` (+ `sidebar/`),
+`src/features/channels/ChannelSidebar.ts` (+ its siblings `channelListRender.ts`, `voiceSidebarRows.ts` and `sidebar/`),
 `src/features/members/MemberList.ts`, `src/components/TypingIndicator.ts`,
-`src/components/DmSidebar.ts`, `src/components/DmProfileSidebar.ts`,
+`src/features/direct-messages/DmSidebar.ts`, `src/components/DmProfileSidebar.ts`,
 `src/pages/main-page/SidebarArea.ts`, `SidebarMemberSection.ts`,
 `SidebarDmSection.ts`, `SidebarDmHelpers.ts`, `src/stores/channels.store.ts`,
 `members.store.ts`, `dm.store.ts`, `src/lib/dispatcher.ts` (+ `src/features/{channels,direct-messages}/wsHandlers.ts`);
