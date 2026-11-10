@@ -92,9 +92,9 @@ class FilesPlugin(private val activity: Activity) : Plugin(activity) {
     val accepted = io.execute(onCancelled = { invoke.reject(CLOSED) }) {
       try {
         writeToMediaStore(file, args)
-        if (!io.isRetired) invoke.resolve(JSObject().apply { put("status", "saved") })
+        invoke.resolve(JSObject().apply { put("status", "saved") })
       } catch (e: Exception) {
-        if (!io.isRetired) invoke.reject("could not save the file: $e", e)
+        invoke.reject("could not save the file: $e", e)
       }
     }
     if (!accepted) invoke.reject(CLOSED)
