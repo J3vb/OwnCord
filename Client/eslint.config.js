@@ -42,9 +42,8 @@ export default tseslint.config(
       ],
       "consistent-return": "error",
 
-      // `any` is banned in src/ (CLAUDE.md, "AI Quality Guardrails"). The
-      // residue in lib/voice/livekitReconnect.ts carries a reasoned eslint-disable
-      // and only shrinks; a new `any` fails the build.
+      // `any` is banned in src/ (CLAUDE.md, "AI Quality Guardrails"); none is
+      // left, and a new `any` fails the build.
       "@typescript-eslint/no-explicit-any": "error",
 
       // --- Relax rules that conflict with project style ---

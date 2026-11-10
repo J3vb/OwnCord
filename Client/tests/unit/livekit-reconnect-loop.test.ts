@@ -315,6 +315,110 @@ describe("attemptAutoReconnect loop", () => {
     });
   });
 
+  describe("steps without a dedicated case", () => {
+    it("falls back to the token the loop was started with when the state carries none", async () => {
+      await runFirstAttempt();
+      expect(room.connect).toHaveBeenCalledWith(RESOLVED, "tok", expect.anything());
+    });
+
+    it("skips the attempt and tries again on the next delay while the membership is unknown", async () => {
+      fn.serverMembership.mockResolvedValueOnce("unknown");
+      const loop = start();
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(fn.createRoom).not.toHaveBeenCalled();
+      expect(fn.rejoinVoice).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(5999);
+      expect(fn.createRoom).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      await loop;
+      expect(attemptsLogged()).toEqual([{ attempt: 1 }, { attempt: 2 }]);
+      expect(fn.createRoom).toHaveBeenCalledTimes(1);
+      expect(fn.setState).toHaveBeenCalledWith(expect.objectContaining({ type: "connected" }));
+    });
+
+    it("waits out each failed attempt with the doubling delay, capped at six seconds", async () => {
+      fn.createRoom.mockRejectedValue(new Error("sfu down"));
+      const loop = start();
+      await vi.advanceTimersByTimeAsync(2999);
+      expect(fn.createRoom).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(fn.createRoom).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(5999);
+      expect(fn.createRoom).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(fn.createRoom).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(6000);
+      expect(fn.createRoom).toHaveBeenCalledTimes(3);
+      await finishWithAbort(loop);
+      claimFailures(3);
+    });
+
+    it("counts a failure after the connected state was installed as a failed attempt and tries again", async () => {
+      fn.setupAudioPipeline.mockImplementationOnce(() => {
+        throw new Error("pipeline broke");
+      });
+      const loop = start();
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(logs.find("Auto-reconnect failed")).toHaveLength(1);
+      expect(mocks.releaseRoom).toHaveBeenCalledWith(room);
+      expect(fn.noticeLostMedia).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(6000);
+      await loop;
+      expect(fn.setupAudioPipeline).toHaveBeenCalledTimes(2);
+      expect(fn.noticeLostMedia).toHaveBeenCalledTimes(1);
+      claimFailures(1);
+    });
+
+    it("does not read the roster for a refresh when retrying stopped being allowed in the slow phase", async () => {
+      fn.tokenAgeMs.mockReturnValue(10 * 60_000);
+      fn.canKeepRetrying.mockImplementation(() => fn.createRoom.mock.calls.length < 5);
+      const { loop } = await reachSlowPhase();
+      await loop;
+      expect(attemptsLogged()).not.toContainEqual({ attempt: 6 });
+      expect(fn.serverMembership).toHaveBeenCalledTimes(5);
+      expect(fn.refreshTokenAndWait).not.toHaveBeenCalled();
+      expect(fn.leaveVoice).toHaveBeenCalledTimes(1);
+      claimFailures(5);
+      expectConsole("error", "Auto-reconnect giving up");
+    });
+
+    it("does not refresh the token when the roster does not show the membership as held", async () => {
+      fn.tokenAgeMs.mockReturnValue(10 * 60_000);
+      fn.serverMembership.mockImplementation(async () =>
+        fn.createRoom.mock.calls.length >= 5 ? "unknown" : "held",
+      );
+      const { loop } = await reachSlowPhase();
+      expect(fn.refreshTokenAndWait).not.toHaveBeenCalled();
+      expect(attemptsLogged()).toContainEqual({ attempt: 6 });
+      await finishWithAbort(loop);
+      claimFailures(5);
+    });
+
+    it("lets a failed token refresh reject the loop without starting the attempt", async () => {
+      fn.tokenAgeMs.mockReturnValue(10 * 60_000);
+      fn.refreshTokenAndWait.mockRejectedValue(new Error("refresh failed"));
+      fn.createRoom.mockRejectedValue(new Error("sfu down"));
+      const loop = start();
+      const rejected = expect(loop).rejects.toThrow("refresh failed");
+      await vi.advanceTimersByTimeAsync(FAST_PHASE_MS);
+      await rejected;
+      expect(fn.createRoom).toHaveBeenCalledTimes(5);
+      expect(attemptsLogged()).not.toContainEqual({ attempt: 6 });
+      expect(fn.leaveVoice).not.toHaveBeenCalled();
+      claimFailures(5);
+    });
+
+    it("lets a failed membership read reject the loop without creating a room", async () => {
+      fn.serverMembership.mockRejectedValue(new Error("roster failed"));
+      const loop = start();
+      const rejected = expect(loop).rejects.toThrow("roster failed");
+      await vi.advanceTimersByTimeAsync(3000);
+      await rejected;
+      expect(fn.createRoom).not.toHaveBeenCalled();
+      expect(fn.leaveVoice).not.toHaveBeenCalled();
+    });
+  });
+
   describe("giving up", () => {
     it("leaves voice and reports the loss when retrying is no longer allowed", async () => {
       fn.canKeepRetrying.mockReturnValue(false);
