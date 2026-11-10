@@ -104,12 +104,6 @@
       "createVoiceComposer > submit": [16],
       "createVoiceComposer > upload": [21]
     },
-    "features/voice/e2eeOffer.ts": {
-      "E2EEOffer > handleOfferInner": [21]
-    },
-    "features/voice/e2eePeerState.ts": {
-      "E2EEPeerState > verifyPeerAnnounce": [33]
-    },
     "features/voice/localVoiceRestore.ts": {
       "restoreLocalVoiceState": [19]
     },
