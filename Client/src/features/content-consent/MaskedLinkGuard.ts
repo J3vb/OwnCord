@@ -7,10 +7,10 @@
  */
 
 import { appendChildren, createElement } from "@lib/dom";
-import { createConfirmModal } from "../features/dialogs/confirmModal";
+import { createConfirmModal } from "../dialogs/confirmModal";
 import { isDomainTrusted, linkDomain, trustDomain } from "@lib/net/trustedDomains";
-import { messagingText } from "../i18n/messaging";
-import { shellText } from "../i18n/shell";
+import { messagingText } from "../../i18n/messaging";
+import { shellText } from "../../i18n/shell";
 
 let dialogShown = false;
 

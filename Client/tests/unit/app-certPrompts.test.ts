@@ -62,7 +62,7 @@ vi.mock("../../src/app/session", () => ({
   sessionTarget: () => hoisted.target,
   abandonInFlight: hoisted.abandonInFlight,
 }));
-vi.mock("@components/CertMismatchModal", () => {
+vi.mock("../../src/features/connection/CertMismatchModal", () => {
   const make = (kind: "first-use" | "mismatch") => (opts: ModalOptions) => {
     if (hoisted.failOpen) throw new Error("modal failed to open");
     const entry = { kind, opts, destroy: vi.fn(), mount: vi.fn() };

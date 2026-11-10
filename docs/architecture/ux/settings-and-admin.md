@@ -298,7 +298,7 @@ the only indicator. Both clear at 0 and on logout.
 ## Source of truth
 
 `src/features/settings/SettingsOverlay.ts` (+ `settings/*`), `src/features/moderation/AdminActions.ts`,
-`src/components/InviteManager.ts`, `CreateChannelModal.ts`, `src/features/channels/editChannelDialog.ts`,
+`src/features/invites/InviteManager.ts`, `CreateChannelModal.ts`, `src/features/channels/editChannelDialog.ts`,
 `DeleteChannelModal.ts`, `src/features/updates/UpdateNotifier.ts`, `src/lib/net/updater.ts`,
 `src/lib/api.ts`, `src/lib/prefs/themes.ts`, `src/lib/prefs/preferences.ts`,
 `src/pages/main-page/SidebarArea.ts`, `SidebarMemberSection.ts`,

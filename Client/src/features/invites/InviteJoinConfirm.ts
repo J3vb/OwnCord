@@ -6,9 +6,9 @@
  */
 
 import { createElement } from "@lib/dom";
-import { createConfirmModal, type ConfirmModalInstance } from "../features/dialogs/confirmModal";
+import { createConfirmModal, type ConfirmModalInstance } from "../dialogs/confirmModal";
 import { onAuthCleared } from "@stores/auth.store";
-import { messagingText } from "../i18n/messaging";
+import { messagingText } from "../../i18n/messaging";
 
 /** The open dialog, so a later request can take it over. */
 interface OpenDialog {

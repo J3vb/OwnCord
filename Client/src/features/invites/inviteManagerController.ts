@@ -6,7 +6,7 @@ import { canManageInvites } from "@lib/permissions";
 import { createLogger } from "@lib/logger";
 import { createLazyScreen } from "@lib/ui/lazyScreen";
 import { createAsyncOverlayController } from "@lib/ui/asyncOverlay";
-import type { InviteItem } from "@components/InviteManager";
+import type { InviteItem } from "./InviteManager";
 import type { InviteResponse } from "@lib/types";
 import { showToast } from "@lib/ui/toast";
 import { authStore } from "@stores/auth.store";
@@ -16,10 +16,7 @@ import { shellText } from "../../i18n/shell";
 
 const log = createLogger("overlays");
 
-const inviteManagerScreen = createLazyScreen(
-  "invite-manager",
-  () => import("@components/InviteManager"),
-);
+const inviteManagerScreen = createLazyScreen("invite-manager", () => import("./InviteManager"));
 
 function usernameOf(o: object): string {
   const name = "username" in o ? o.username : undefined;
@@ -75,7 +72,7 @@ export interface InviteManagerController {
 interface InviteLoad {
   readonly invites: InviteResponse[];
   readonly featuredCode: string | null;
-  readonly screen: typeof import("@components/InviteManager");
+  readonly screen: typeof import("./InviteManager");
 }
 
 const DEFAULT_INVITE_HOURS = 168;

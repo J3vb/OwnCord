@@ -61,7 +61,7 @@ vi.mock("@stores/auth.store", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@stores/auth.store")>()),
   clearAuth: (...args: unknown[]) => hoisted.clearAuth(...args),
 }));
-vi.mock("@components/InviteJoinConfirm", () => ({
+vi.mock("../../src/features/invites/InviteJoinConfirm", () => ({
   confirmInviteJoin: hoisted.confirmInviteJoin,
 }));
 
@@ -292,7 +292,7 @@ describe("an invite link from outside the app", () => {
 
   it("logs a confirmation chunk that fails to load, and changes nothing", async () => {
     setAuth("tok", USER, "Srv", "");
-    vi.doMock("@components/InviteJoinConfirm", () => {
+    vi.doMock("../../src/features/invites/InviteJoinConfirm", () => {
       throw new Error("chunk 404");
     });
     try {
@@ -307,7 +307,7 @@ describe("an invite link from outside the app", () => {
       expect(hoisted.applyInvite).not.toHaveBeenCalled();
       expect(endSession).not.toHaveBeenCalled();
     } finally {
-      vi.doMock("@components/InviteJoinConfirm", () => ({
+      vi.doMock("../../src/features/invites/InviteJoinConfirm", () => ({
         confirmInviteJoin: hoisted.confirmInviteJoin,
       }));
     }

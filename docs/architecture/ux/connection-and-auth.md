@@ -344,7 +344,7 @@ not a mismatch. This is correct today; the spec locks it.
 `src/main.ts`, `src/app/connectRoute.ts`, `src/app/healthSchedule.ts`,
 `src/app/session.ts`, `src/lib/presence/latency.ts`, `src/pages/ConnectPage.ts`,
 `src/pages/connect-page/LoginForm.ts`, `src/lib/ws.ts`, `src/lib/api.ts`,
-`src/lib/net/httpProxy.ts`, `src/components/ConnectedOverlay.ts`,
-`src/components/ServerBanner.ts`, `src/components/CertMismatchModal.ts`,
+`src/lib/net/httpProxy.ts`, `src/features/connection/ConnectedOverlay.ts`,
+`src/components/ServerBanner.ts`, `src/features/connection/CertMismatchModal.ts`,
 `src-tauri/src/ws_proxy.rs`, `src-tauri/src/http_proxy.rs`;
 server `Server/api/auth_handler.go`, `Server/api/totp_handler.go`.

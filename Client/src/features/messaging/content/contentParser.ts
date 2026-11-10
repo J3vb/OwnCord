@@ -564,7 +564,7 @@ function buildInviteLinkNode(url: string): HTMLSpanElement | null {
         ? messagingText("invite.confirmBodyNoHost", { current: name })
         : messagingText("invite.confirmBody", { current: name, target });
     // On demand, like the masked-link guard: keeps the modal off the startup chunk.
-    void import("../../../components/InviteJoinConfirm").then((m) =>
+    void import("../../invites/InviteJoinConfirm").then((m) =>
       m.confirmInviteJoin(body, () => requestInviteJoin(invite.code, invite.host)),
     );
   };

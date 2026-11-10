@@ -21,7 +21,9 @@ vi.mock("@lib/logger", () => ({
 vi.mock("@pages/mainPagePrefetch", () => ({ prefetchMainPage: vi.fn() }));
 vi.mock("@lib/prefs/lastChannel", () => ({ setLastChannelHost: vi.fn() }));
 vi.mock("@lib/dispatcher", () => ({ wireDispatcher: vi.fn(() => () => undefined) }));
-vi.mock("@components/ConnectedOverlay", () => ({ createConnectedOverlay: vi.fn() }));
+vi.mock("../../src/features/connection/ConnectedOverlay", () => ({
+  createConnectedOverlay: vi.fn(),
+}));
 
 import { createApiClient } from "@lib/api";
 import type { WsClient } from "@lib/ws";

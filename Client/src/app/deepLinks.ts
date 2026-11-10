@@ -92,7 +92,7 @@ function handleExternalInviteLink(code: string, host?: string): void {
   const currentName = authStore.getState().serverName ?? api.getConfig().host;
   // On demand, like the in-chat chip: keeps the modal and its catalog out of
   // the startup chunk.
-  void Promise.all([import("@components/InviteJoinConfirm"), import("../i18n/messaging")])
+  void Promise.all([import("../features/invites/InviteJoinConfirm"), import("../i18n/messaging")])
     .then(([{ confirmInviteJoin }, { messagingText }]) => {
       const current =
         currentName === undefined || currentName === ""

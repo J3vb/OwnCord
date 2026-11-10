@@ -25,7 +25,7 @@ vi.mock("@lib/prefs/windowState", () => mocks.prefsWindowStateMock());
 vi.mock("@tauri-apps/plugin-deep-link", () => mocks.deepLinkMock());
 vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
 vi.mock("@lib/nav/messageNavigation", () => mocks.navMessageNavigationMock());
-vi.mock("@components/CertMismatchModal", () => mocks.certMismatchModalMock());
+vi.mock("../../../src/features/connection/CertMismatchModal", () => mocks.certMismatchModalMock());
 vi.mock("@lib/net/certReconnect", () => mocks.netCertReconnectMock());
 vi.mock("@lib/presence/profiles", (importOriginal) => mocks.presenceProfilesMock(importOriginal));
 vi.mock("@lib/net/updater", () => mocks.netUpdaterMock());
@@ -370,7 +370,7 @@ describe("main.ts connected overlay teardown on mid-handshake session end", () =
 
     // Let the hand-off's deadline pass. Without the subscriber's
     // connectedOverlay.destroy() (its AbortController is what cancels the
-    // pending setTimeout — see ConnectedOverlay.ts), the already-armed timer
+    // pending setTimeout — see features/connection/ConnectedOverlay.ts), the already-armed timer
     // still fires onReady() -> router.navigate("main"), mounting MainPage on a
     // cleared authStore and a disconnected socket.
     await vi.advanceTimersByTimeAsync(800);

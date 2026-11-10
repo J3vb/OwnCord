@@ -30,10 +30,10 @@ let certModalActive = false;
 // the startup closure. A failed load (or a modal that throws while opening)
 // releases the guard so a later event retries, then runs `onFail`.
 function withCertModals(
-  open: (m: typeof import("@components/CertMismatchModal")) => void,
+  open: (m: typeof import("../features/connection/CertMismatchModal")) => void,
   onFail: () => void,
 ): void {
-  void import("@components/CertMismatchModal").then(open).catch((err: unknown) => {
+  void import("../features/connection/CertMismatchModal").then(open).catch((err: unknown) => {
     log.error("Failed to open certificate modal", err);
     certModalActive = false;
     onFail();
