@@ -5576,7 +5576,7 @@ A flat map of key → string value. Allowed keys: `server_name`, `server_icon`,
 `registration_mode`, `backup_schedule`, `backup_retention`, `retention_days`,
 `upload_blocked_extensions`, `upload_allowed_extensions`, `afk_timeout_seconds`,
 `voice_owner_movable`, `game_activity_enabled`, `welcome_channel_id`,
-`voice_max_video_kbps`.
+`voice_max_video_kbps`, `server_upload_mbps`.
 Boolean settings
 accept `1/0/true/false` and are normalized to `1`/`0`. `registration_mode`
 accepts `closed`, `invite`, `approval` or `open` (case-insensitive, stored
@@ -5626,6 +5626,12 @@ running hub, which sends the
 [`video_bitrate_cap`](protocol.md#video_bitrate_cap-server---client-broadcast)
 frame to every connected client, so streams already live follow it; an
 unreadable row at start-up counts as no limit.
+
+`server_upload_mbps` is the server's own upload speed in Mbit/s, typed by the
+admin: `0` (or no row) for not set, otherwise `1` to `100000`; anything else is
+refused with `400`. `MANAGE_SERVER` may change it. Only the admin panel reads
+it, to show roughly how many people can watch one stream at once under the
+video cap; nothing is sent to clients.
 
 `retention_days` (B4-11) is the server-wide message-retention window: `0`
 (the default) keeps everything, otherwise between 1 and 3650 days; a change

@@ -55,3 +55,21 @@ func VoiceMaxVideoBitrateFromRead(stored string, err error) (bitrate int, ok boo
 	}
 	return VoiceMaxVideoBitrate(stored), true, nil
 }
+
+// ServerUploadMbpsKey holds the server's own upload speed in Mbit/s, as typed by
+// the admin. Only the admin panel reads it, to estimate how many people can
+// watch one stream at once. 0 or a missing row means not set.
+const ServerUploadMbpsKey = "server_upload_mbps"
+
+// ServerUploadMbpsMax is the largest accepted upload speed in Mbit/s.
+const ServerUploadMbpsMax = 100000
+
+// normalizeServerUploadMbps accepts 0 (not set) or 1 to [ServerUploadMbpsMax],
+// in canonical decimal form.
+func normalizeServerUploadMbps(key, value string) (string, error) {
+	mbps, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil || mbps < 0 || mbps > ServerUploadMbpsMax {
+		return "", fmt.Errorf("%s: must be 0 (not set) or between 1 and %d", key, ServerUploadMbpsMax)
+	}
+	return strconv.Itoa(mbps), nil
+}

@@ -25,11 +25,45 @@ const WELCOME_KEY='welcome_channel_id';
 const VIDEO_CAP_KEY='voice_max_video_kbps';
 const VIDEO_CAPS=[['0','No limit'],['1000','1 Mbps'],['2500','2.5 Mbps'],['4000','4 Mbps'],['6000','6 Mbps'],['8000','8 Mbps'],['10000','10 Mbps'],['15000','15 Mbps'],['20000','20 Mbps']];
 function videoCapOptions(cur){return VIDEO_CAPS.some(([v])=>v===cur)?VIDEO_CAPS:VIDEO_CAPS.concat([[cur,Number.isFinite(Number(cur))?(Number(cur)/1000)+' Mbps':'No limit (unreadable value)']])}
-const SETTINGS_KEYS=['server_name','motd','registration_mode','require_2fa','afk_timeout_seconds',VIDEO_CAP_KEY,WELCOME_KEY,OWNER_MOVABLE_KEY,GAME_ACTIVITY_KEY,...EXT_KEYS];
+/* The server's own upload speed in Mbit/s, typed once by the admin; empty or 0
+   is not set (service.ServerUploadMbpsKey). Only the viewer hint below reads
+   it. A stored value that is not a whole number reads as not set. */
+const UPLOAD_MBPS_KEY='server_upload_mbps';
+/* What one viewer of a full-quality stream takes when no cap is set: the Source
+   screen share rate. Pinned to SCREENSHARE_PUBLISH_BITRATES.source in the client
+   by a contract test. */
+const SOURCE_STREAM_MBPS=10;
+/* The share of the line a stream may use; the rest is for voice, chat and overhead. */
+const UPLOAD_USABLE=0.8;
+/* The upload field's value as a whole number of Mbit/s, or 0 when not set or
+   unreadable. */
+function uploadMbps(v){const t=String(v==null?'':v).trim();return/^\d{1,9}$/.test(t)?Number(t):0}
+/* How many viewers one stream of perViewerMbps can reach on an upload line. */
+function viewerCount(upload,perViewerMbps){return Math.floor(upload*UPLOAD_USABLE/perViewerMbps)}
+/* The hint under the cap row; empty when no upload speed is set. */
+function videoViewerHint(upload,capKbps){
+  const up=uploadMbps(upload);
+  if(!up||up>100000)return'';
+  const cap=Number(capKbps);
+  const noun=n=>n===1?'person':'people';
+  if(!(Number.isFinite(cap)&&cap>0)){
+    const n=viewerCount(up,SOURCE_STREAM_MBPS),c=viewerCount(up,4);
+    return'About '+n+' '+noun(n)+' can watch a full-quality stream with no cap (at 4 Mbps: '+c+')';
+  }
+  const n=viewerCount(up,cap/1000),u=viewerCount(up,SOURCE_STREAM_MBPS);
+  return'About '+n+' '+noun(n)+' can watch a stream at this cap (with no cap: '+u+')';
+}
+function updateVideoHint(){
+  const el=document.getElementById('videoCapHint');if(!el)return;
+  const up=document.getElementById('s-'+UPLOAD_MBPS_KEY),cap=document.getElementById('s-'+VIDEO_CAP_KEY);
+  el.textContent=up&&cap?videoViewerHint(/** @type {HTMLInputElement} */(up).value,/** @type {HTMLSelectElement} */(cap).value):'';
+}
+function videoCapChanged(){updateVideoHint();markSettingsChanged()}
+const SETTINGS_KEYS=['server_name','motd','registration_mode','require_2fa','afk_timeout_seconds',VIDEO_CAP_KEY,UPLOAD_MBPS_KEY,WELCOME_KEY,OWNER_MOVABLE_KEY,GAME_ACTIVITY_KEY,...EXT_KEYS];
 /* An extension list as the server stores it: lower case, no dots, deduped,
    comma-separated; so a respelled but equal list is not a change. */
 function extListNorm(v){return[...new Set(String(v||'').split(/[\s,]+/).map(x=>x.replace(/^\.+/,'').toLowerCase()).filter(Boolean))].join(',')}
-function settingNorm(k,v){return k===OWNER_MOVABLE_KEY||k===GAME_ACTIVITY_KEY?((v==='false'||v==='0')?'false':'true'):k==='afk_timeout_seconds'?(v||AFK_TIMEOUT_DEFAULT):k===VIDEO_CAP_KEY?(String(v||'').trim()||'0'):k==='require_2fa'?((v==='1'||v==='true')?'true':'false'):EXT_KEYS.includes(k)?extListNorm(v):(v||'')}
+function settingNorm(k,v){return k===OWNER_MOVABLE_KEY||k===GAME_ACTIVITY_KEY?((v==='false'||v==='0')?'false':'true'):k==='afk_timeout_seconds'?(v||AFK_TIMEOUT_DEFAULT):k===VIDEO_CAP_KEY?(String(v||'').trim()||'0'):k===UPLOAD_MBPS_KEY?String(uploadMbps(v)):k==='require_2fa'?((v==='1'||v==='true')?'true':'false'):EXT_KEYS.includes(k)?extListNorm(v):(v||'')}
 function settingsFormValues(keys){
   const out={};
   keys.forEach(k=>{
@@ -71,7 +105,7 @@ async function renderSettings(){
   html+=settingsCard('Access & registration',regModeCards(v('registration_mode')||'invite'));
   html+=settingsCard('Security',
     '<div class="setting-row"><div class="setting-info"><div class="setting-name" id="s-require_2fa-name">Require two-factor authentication</div><div class="setting-desc" id="s-require_2fa-desc">Every member must turn on 2FA before they can use the server</div></div><div class="setting-ctrl"><button class="toggle '+(on?'on':'')+'" id="s-require_2fa" role="switch" aria-checked="'+on+'" aria-labelledby="s-require_2fa-name" aria-describedby="s-require_2fa-desc" data-action="toggleSetting"></button></div></div>');
-  html+=await voiceCard(v('afk_timeout_seconds')||AFK_TIMEOUT_DEFAULT,isOwner()?settingNorm(OWNER_MOVABLE_KEY,v(OWNER_MOVABLE_KEY))==='true':null,settingNorm(VIDEO_CAP_KEY,v(VIDEO_CAP_KEY)));
+  html+=await voiceCard(v('afk_timeout_seconds')||AFK_TIMEOUT_DEFAULT,isOwner()?settingNorm(OWNER_MOVABLE_KEY,v(OWNER_MOVABLE_KEY))==='true':null,settingNorm(VIDEO_CAP_KEY,v(VIDEO_CAP_KEY)),v(UPLOAD_MBPS_KEY));
   const gameActivityOn=settingNorm(GAME_ACTIVITY_KEY,v(GAME_ACTIVITY_KEY))==='true';
   html+=settingsCard('Member activity (games and music)',
     '<div class="setting-row"><div class="setting-info"><div class="setting-name" id="s-'+GAME_ACTIVITY_KEY+'-name">Show what members are playing and listening to</div><div class="setting-desc" id="s-'+GAME_ACTIVITY_KEY+'-desc">This covers games and music. Turn it off and no one sees what anyone is playing or listening to on this server. Games and songs already shown are cleared at once, and members\' apps stop sending them</div></div><div class="setting-ctrl"><button class="toggle '+(gameActivityOn?'on':'')+'" id="s-'+GAME_ACTIVITY_KEY+'" role="switch" aria-checked="'+gameActivityOn+'" aria-labelledby="s-'+GAME_ACTIVITY_KEY+'-name" aria-describedby="s-'+GAME_ACTIVITY_KEY+'-desc" data-action="toggleSetting"></button></div></div>');
@@ -125,7 +159,7 @@ async function renderSettings(){
 function afkSelect(id,opts,cur,attrs){
   return'<select class="filter-select" id="'+id+'"'+attrs+'>'+opts.map(([val,label])=>'<option value="'+esc(val)+'"'+(val===cur?' selected':'')+'>'+esc(label)+'</option>').join('')+'</select>';
 }
-async function voiceCard(timeout,movable,videoCap){
+async function voiceCard(timeout,movable,videoCap,uploadRaw){
   let channels=null,chErr='';
   try{const r=await api('GET','/channels');if(Array.isArray(r))channels=r}catch(e){chErr=e.message||''}
   const voice=(channels||[]).filter(c=>c.type==='voice');
@@ -148,7 +182,10 @@ async function voiceCard(timeout,movable,videoCap){
     +settingsRow('afk_timeout_seconds','Move after','How long a member must stay idle, on top of the 10 minutes the app waits before marking them idle',timeoutSel)
     +moving
     +'<h4 class="setting-sub">Video</h4>'
-    +settingsRow(VIDEO_CAP_KEY,'Max video upload per person','The most one person may send for camera and screen share together. Lower it when your server\'s upload line is limited: every viewer of a stream gets their own copy from the server. Members\' apps follow it at once, with no rejoin: each viewer receives at most this much from one person (camera and share together)',afkSelect('s-'+VIDEO_CAP_KEY,videoCapOptions(videoCap),videoCap,' aria-describedby="s-'+VIDEO_CAP_KEY+'-desc" data-change-action="markSettingsChanged"')));
+    +settingsRow(VIDEO_CAP_KEY,'Max video upload per person','The most one person may send for camera and screen share together. Lower it when your server\'s upload line is limited: every viewer of a stream gets their own copy from the server. Members\' apps follow it at once, with no rejoin: each viewer receives at most this much from one person (camera and share together)',afkSelect('s-'+VIDEO_CAP_KEY,videoCapOptions(videoCap),videoCap,' aria-describedby="s-'+VIDEO_CAP_KEY+'-desc" data-change-action="videoCapChanged"'))
+    +'<div class="setting-desc" id="videoCapHint" role="status" aria-live="polite">'+esc(videoViewerHint(uploadRaw,videoCap))+'</div>'
+    +settingsRow(UPLOAD_MBPS_KEY,'Server upload speed (Mbit/s)','Your server\'s upload speed, as your provider states it. Used only for the estimate above; it changes nothing else',
+      '<input class="form-input" type="number" min="1" max="100000" step="1" inputmode="numeric" id="s-'+UPLOAD_MBPS_KEY+'" value="'+(uploadMbps(uploadRaw)?uploadMbps(uploadRaw):'')+'" aria-describedby="s-'+UPLOAD_MBPS_KEY+'-desc" data-input-action="videoCapChanged">'));
 }
 /* Welcome messages: an ordinary setting that rides the save bar. The choices
    are Off and every non-archived text channel; a saved channel that has since
@@ -752,7 +789,7 @@ async function confirmApplyUpdate(){
 }
 
 Object.assign(ACTIONS,{showPendingMembers,applyRetention,toggleRetentionEdit,applyUpdate,checkRestoreConfirm,clearChannelRetention,confirmApplyUpdate,
-  confirmDeleteBackup,confirmRestore,createBackup,downloadArchive,downloadBackup,discardSettings,markBackupPolicyChanged,markSettingsChanged,
+  confirmDeleteBackup,confirmRestore,createBackup,downloadArchive,downloadBackup,discardSettings,markBackupPolicyChanged,markSettingsChanged,videoCapChanged,
   openApplyRetention,openChannelRetention,openDeleteBackupModal,openRestoreModal,saveBackupPolicy,saveChannelRetention,
   saveSettings,saveAfkChannel,syncUpdateConfirm,
   reloadPage(){location.reload()},
