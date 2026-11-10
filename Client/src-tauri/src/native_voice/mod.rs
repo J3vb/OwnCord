@@ -400,7 +400,7 @@ pub async fn native_voice_connect<R: Runtime>(
     let mut connected_key = Some(key.clone());
     let mut session = NativeSession::connect(&url, &token, key, on_event).await?;
     // Playout is needed even for a listen-only join.
-    session.enable_audio(audio);
+    session.enable_audio(audio).await;
     let identity = session.local_identity();
     let mut inner = state.inner.lock().await;
     let rotated = inner.key_after_connect(id, connected_key.as_deref().unwrap_or_default());
@@ -589,12 +589,29 @@ pub async fn native_voice_set_device(
     kind: String,
     device_id: String,
 ) -> Result<(), String> {
-    state
+    let switch = state
         .inner
         .lock()
         .await
         .current(session)?
-        .set_device(&kind, &device_id)
+        .device_switch(&kind)?;
+    // The driver call runs without the session lock; a session that ended
+    // meanwhile releases the switch's handles on the blocking thread and the
+    // result is not reported.
+    let result = tokio::task::spawn_blocking(move || switch.apply(&device_id))
+        .await
+        .map_err(|e| e.to_string())?;
+    let live = state.inner.lock().await.current(session).is_ok();
+    switch_outcome(session, live, result)
+}
+
+/// A device switch's result stands only while its session is still live.
+fn switch_outcome(session: u64, live: bool, result: Result<(), String>) -> Result<(), String> {
+    if live {
+        result
+    } else {
+        Err(format!("native voice session {session} is not current"))
+    }
 }
 
 /// Close session `session` if it is still the live one.
@@ -628,13 +645,37 @@ pub async fn native_voice_set_microphone(
     enabled: bool,
     bitrate: Option<u64>,
 ) -> Result<(), String> {
-    state
+    // Decide under the lock, open or close the stream without it, then commit
+    // under the lock again if this call is still the latest on a live session.
+    let step = state
         .inner
         .lock()
         .await
         .current(session)?
-        .set_microphone(enabled, bitrate)
+        .begin_microphone(enabled, bitrate)
+        .await;
+    let ran = tokio::task::spawn_blocking(move || step.run())
         .await
+        .map_err(|e| e.to_string())??;
+    let Some(commit) = ran else {
+        return Ok(());
+    };
+    let (result, cleanup) = state
+        .inner
+        .lock()
+        .await
+        .current(session)?
+        .finish_microphone(commit)
+        .await;
+    if let Some(stop) = cleanup {
+        let stopped = tokio::task::spawn_blocking(move || stop.run())
+            .await
+            .map_err(|e| e.to_string());
+        if let Ok(Err(e)) | Err(e) = stopped {
+            log::warn!("[native_voice] capture stop: {e}");
+        }
+    }
+    result
 }
 
 /// Close or open push-to-talk's gate on `session`'s microphone.

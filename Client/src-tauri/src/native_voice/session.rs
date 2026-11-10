@@ -7,7 +7,7 @@
 //! (`video.rs`), screen share (`screen.rs`), and a stream of room events for
 //! the webview. No Tauri types here so the interop example
 //! (`examples/native_voice_interop.rs`) drives exactly the code the app runs.
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use livekit::e2ee::EncryptionType;
@@ -396,6 +396,10 @@ pub struct NativeSession {
     /// Set when the server withdrew the microphone publication (a moderator
     /// mute); the next enable republishes instead of unmuting a dead track.
     mic_withdrawn: MicWithdrawn,
+    /// Bumped by every microphone call, under the session lock: a call that
+    /// finds it moved when its driver step ends was superseded and commits
+    /// nothing.
+    mic_epoch: u64,
     camera: VideoSlot,
     /// The running native camera capture, independent of publication: the
     /// self-view preview reads it back over the frame socket's `camera` route.
@@ -424,8 +428,13 @@ pub struct NativeSession {
     next_camera: u64,
     on_event: EventSink,
     frames: FrameServer,
-    playout: Playout,
-    capture: Capture,
+    /// The playout and capture are shared with the blocking threads that
+    /// open and close their devices; `playout_controls` and `capture_controls`
+    /// reach the settings that never wait on a device.
+    playout: Arc<Audio<Playout>>,
+    playout_controls: playout::Controls,
+    capture: Arc<Audio<Capture>>,
+    capture_controls: capture::Controls,
     forwarder: tokio::task::JoinHandle<()>,
     /// Emits the capture's reports (`enable_audio`), off the audio thread.
     capture_reports: Option<tokio::task::JoinHandle<()>>,
@@ -501,6 +510,9 @@ impl NativeSession {
         let screen_publication = VideoSlot::default();
         let screen_audio = VideoSlot::default();
         let playout = Playout::default();
+        let playout_controls = playout.controls();
+        let capture = Capture::default();
+        let capture_controls = capture.controls();
         let mic_withdrawn = MicWithdrawn::default();
         let forwarder = tokio::spawn(forward_events(
             events,
@@ -523,6 +535,7 @@ impl NativeSession {
             mic: None,
             mic_source: None,
             mic_withdrawn,
+            mic_epoch: 0,
             camera,
             camera_capture: None,
             screen: None,
@@ -535,8 +548,10 @@ impl NativeSession {
             next_camera: 0,
             on_event,
             frames,
-            playout,
-            capture: Capture::default(),
+            playout: Arc::new(Audio::new(playout)),
+            playout_controls,
+            capture: Arc::new(Audio::new(capture)),
+            capture_controls,
             forwarder,
             capture_reports: None,
         })
@@ -582,7 +597,7 @@ impl NativeSession {
     /// The playout mixer, for the interop example: CI has no output device,
     /// so it pulls the mix itself to measure per-user volume end to end.
     pub fn playout_mixer(&self) -> Arc<playout::Mixer> {
-        self.playout.mixer().clone()
+        self.playout_controls.mixer().clone()
     }
 
     /// The frame socket's base URL, token included: only the webview (via
@@ -603,7 +618,7 @@ impl NativeSession {
     /// only through the gained mix in `playout.rs`, which is also what the
     /// echo canceller hears. A box with no sound server logs and carries on
     /// listen-only.
-    pub fn enable_audio(&mut self, opts: AudioOptions) {
+    pub async fn enable_audio(&mut self, opts: AudioOptions) {
         if self.apm.is_some() {
             return;
         }
@@ -611,18 +626,20 @@ impl NativeSession {
         let opts = self.audio.unwrap_or(opts);
         self.audio = Some(opts);
         let apm = Apm::new(&opts);
-        self.playout.set_reference(apm.clone());
+        self.playout_controls.set_reference(apm.clone());
         let (on_gate, on_level, emitter) = capture_report_sinks(self.on_event.clone());
         self.capture_reports = Some(emitter);
-        self.capture.configure(
+        self.capture_controls.configure(
             apm.clone(),
             opts.enhanced_noise_suppression,
             on_gate,
             on_level,
         );
         self.apm = Some(apm);
-        if let Err(e) = self.playout.set_device("") {
-            log::warn!("[native_voice] playout unavailable: {e}");
+        let switch = DeviceSwitch::output(&self.playout);
+        match off_runtime(move || switch.apply("")).await {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) | Err(e) => log::warn!("[native_voice] playout unavailable: {e}"),
         }
     }
 
@@ -638,15 +655,15 @@ impl NativeSession {
             ProcessingChange::Remember => self.audio = Some(audio),
             ProcessingChange::Reroute => {
                 if let Some(apm) = &self.apm {
-                    self.capture
+                    self.capture_controls
                         .set_processing(apm.clone(), audio.enhanced_noise_suppression);
                 }
                 self.audio = Some(audio);
             }
             ProcessingChange::Rebuild => {
                 let apm = Apm::new(&audio);
-                self.playout.set_reference(apm.clone());
-                self.capture
+                self.playout_controls.set_reference(apm.clone());
+                self.capture_controls
                     .set_processing(apm.clone(), audio.enhanced_noise_suppression);
                 retire(&mut self.retired, self.apm.replace(apm));
                 self.audio = Some(audio);
@@ -664,6 +681,26 @@ impl NativeSession {
         enabled: bool,
         bitrate: Option<u64>,
     ) -> Result<(), String> {
+        let step = self.begin_microphone(enabled, bitrate).await;
+        let Some(commit) = off_runtime(move || step.run()).await?? else {
+            return Ok(());
+        };
+        let (result, cleanup) = self.finish_microphone(commit).await;
+        if let Some(stop) = cleanup {
+            if let Ok(Err(e)) | Err(e) = off_runtime(move || stop.run()).await {
+                log::warn!("[native_voice] capture stop: {e}");
+            }
+        }
+        result
+    }
+
+    /// The session-locked first step of [`Self::set_microphone`]: decide what
+    /// the call needs from the capture and take its place in line. Run the
+    /// returned step on a blocking thread without the session, then pass what
+    /// it returns to [`Self::finish_microphone`] under the session again.
+    pub async fn begin_microphone(&mut self, enabled: bool, bitrate: Option<u64>) -> MicStep {
+        self.mic_epoch += 1;
+        let epoch = self.mic_epoch;
         let was_withdrawn = enabled && self.mic_withdrawn.take();
         if was_withdrawn {
             // The SFU dropped the publication; the track is dead. Best effort
@@ -675,60 +712,100 @@ impl NativeSession {
                     .unpublish_track(&track.sid())
                     .await;
             }
-            self.capture.stop();
             self.mic_source = None;
         }
-        let Some(track) = &self.mic else {
+        if self.mic.is_none() {
             if !enabled {
-                return Ok(());
+                return self.stop_step();
             }
             // Unbuffered (queue 0): the capture callback hands over whole
             // 10 ms frames and never waits.
             let source =
                 NativeAudioSource::new(AudioSourceOptions::default(), capture::SAMPLE_RATE, 1, 0);
-            self.capture.start(Sink::Track(source.clone()))?;
-            self.mic_source = Some(source.clone());
-            let published = self
-                .publish_audio(RtcAudioSource::Native(source), bitrate)
-                .await;
-            if published.is_err() {
-                self.capture.stop();
-                self.mic_source = None;
-                // The server may not have re-granted yet: stay withdrawn so
-                // the next enable tries a fresh publish again.
-                self.mic_withdrawn.keep_if_failed(was_withdrawn, &published);
-            }
-            return published;
-        };
+            return MicStep::first_publish(&self.capture, epoch, source, bitrate, was_withdrawn);
+        }
         if enabled {
             // The interop example publishes its own source and captures nothing.
-            if let Some(source) = &self.mic_source {
-                self.capture.start(Sink::Track(source.clone()))?;
-            }
-            track.unmute();
-        } else {
-            track.mute();
-            self.capture.stop();
+            let Some(source) = self.mic_source.clone() else {
+                if let Some(track) = &self.mic {
+                    track.unmute();
+                }
+                return MicStep::Idle;
+            };
+            return MicStep::Start {
+                capture: self.capture.clone(),
+                ticket: self.capture.ticket(Class::Running),
+                stop_first: false,
+                commit: MicCommit {
+                    epoch,
+                    source,
+                    publish: None,
+                },
+            };
         }
-        Ok(())
+        if let Some(track) = &self.mic {
+            track.mute();
+        }
+        self.stop_step()
+    }
+
+    fn stop_step(&self) -> MicStep {
+        MicStep::Stop {
+            capture: self.capture.clone(),
+            ticket: self.capture.ticket(Class::Running),
+        }
+    }
+
+    /// The session-locked last step of a microphone call whose capture start
+    /// succeeded: unmute the track, or publish it. A call a later one
+    /// superseded while its step ran changes nothing: the later call decides
+    /// the track and holds the later place in the capture's line. A failed
+    /// publish returns the stop that closes the capture it started.
+    pub async fn finish_microphone(
+        &mut self,
+        commit: MicCommit,
+    ) -> (Result<(), String>, Option<MicStep>) {
+        if self.mic_epoch != commit.epoch {
+            return (Ok(()), None);
+        }
+        let Some((bitrate, was_withdrawn)) = commit.publish else {
+            if let Some(track) = &self.mic {
+                track.unmute();
+            }
+            return (Ok(()), None);
+        };
+        self.mic_source = Some(commit.source.clone());
+        let published = self
+            .publish_audio(RtcAudioSource::Native(commit.source), bitrate)
+            .await;
+        if published.is_err() {
+            self.mic_source = None;
+            // The server may not have re-granted yet: stay withdrawn so
+            // the next enable tries a fresh publish again.
+            self.mic_withdrawn.keep_if_failed(was_withdrawn, &published);
+            let stop = self.stop_step();
+            return (published, Some(stop));
+        }
+        (published, None)
     }
 
     /// Close or open push-to-talk's gate: the capture and the publication
     /// stay as they are, and a closed gate sends silence.
     pub fn set_ptt_gated(&self, gated: bool) {
-        self.capture.set_ptt_gated(gated);
+        self.capture_controls.set_ptt_gated(gated);
     }
 
     /// Set the input-sensitivity gate's threshold (0: no gate); `retune`
     /// moves it without restarting the detector, `speech` adds RNNoise's
     /// verdict to the rule.
     pub fn set_voice_gate(&self, threshold: f32, retune: bool, speech: bool) {
-        self.capture.set_voice_gate(threshold, retune, speech);
+        self.capture_controls
+            .set_voice_gate(threshold, retune, speech);
     }
 
     /// Set the input volume as a linear gain (0 to 2).
     pub fn set_input_gain(&self, gain: f32) {
-        self.capture.set_input_gain(gain);
+        self.capture_controls.set_input_gain(gain);
     }
 
     /// Publish any audio source as the microphone track. The app passes its
@@ -1455,7 +1532,7 @@ impl NativeSession {
     /// Per-user volume: the gain for `identity`'s microphone, 1.0 is unity
     /// (the web path's `RemoteParticipant.setVolume`, 0 to 2 in practice).
     pub fn set_volume(&self, identity: &str, volume: f32) {
-        self.playout
+        self.playout_controls
             .mixer()
             .set_gain(identity, playout::Volume::Microphone, volume);
     }
@@ -1463,18 +1540,21 @@ impl NativeSession {
     /// The gain for `identity`'s screen-share audio, 1.0 is unity (the web
     /// path's screen-share element volume, 0 to 1, 0 when muted).
     pub fn set_screenshare_volume(&self, identity: &str, volume: f32) {
-        self.playout
+        self.playout_controls
             .mixer()
             .set_gain(identity, playout::Volume::ScreenShare, volume);
     }
 
     /// Switch the capture or playout device (a running stream moves to it).
     /// An empty id selects the default, the first listed device.
-    pub fn set_device(&mut self, kind: &str, device_id: &str) -> Result<(), String> {
-        match DeviceKind::parse(kind)? {
-            DeviceKind::Output => self.playout.set_device(device_id),
-            DeviceKind::Input => self.capture.set_device(device_id),
-        }
+    /// The caller runs [`DeviceSwitch::apply`] on a blocking thread, without
+    /// the session. Switches of one kind apply in the order they were made
+    /// here.
+    pub fn device_switch(&self, kind: &str) -> Result<DeviceSwitch, String> {
+        Ok(match DeviceKind::parse(kind)? {
+            DeviceKind::Output => DeviceSwitch::output(&self.playout),
+            DeviceKind::Input => DeviceSwitch::input(&self.capture),
+        })
     }
 
     pub fn resources(&self) -> Resources {
@@ -1485,8 +1565,8 @@ impl NativeSession {
         Resources {
             rooms: 1,
             local_tracks: usize::from(self.mic.is_some()) + camera + screen + screen_audio,
-            capture_streams: self.capture.streams(),
-            audio_streams: self.playout.readers(),
+            capture_streams: self.capture_controls.streams(),
+            audio_streams: self.playout_controls.readers(),
             video_sockets: self.frames.sockets(),
             screen_captures: screen::active_captures(),
             camera_captures: camera::active_captures(),
@@ -1498,7 +1578,13 @@ impl NativeSession {
     /// playout streams close with the session, and dropping the frame server
     /// closes its listener and every frame socket.
     pub async fn close(mut self) {
-        self.capture.stop();
+        // Ticketed after every step already made, so a start still in flight
+        // is skipped or stopped by it.
+        let stop = self.stop_step();
+        match off_runtime(move || stop.run()).await {
+            Ok(Ok(_)) => {}
+            Ok(Err(e)) | Err(e) => log::warn!("[native_voice] capture stop: {e}"),
+        }
         self.release_camera().await.release().await;
         self.release_screen().await.release().await;
         // The track's sid follows a republish; a stored publication's would not.
@@ -1516,6 +1602,7 @@ impl NativeSession {
         if let Some(reports) = &self.capture_reports {
             reports.abort();
         }
+        release_blocking((self.capture, self.playout)).await;
     }
 }
 
@@ -1555,6 +1642,199 @@ impl Retired {
 pub async fn release_blocking<T: Send + 'static>(value: T) {
     if let Err(e) = tokio::task::spawn_blocking(move || drop(value)).await {
         log::warn!("[native_voice] release: {e}");
+    }
+}
+
+/// Run driver work on a blocking thread.
+async fn off_runtime<T: Send + 'static>(
+    work: impl FnOnce() -> T + Send + 'static,
+) -> Result<T, String> {
+    tokio::task::spawn_blocking(work)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// The two kinds of operation on one audio device, each ordered on its own.
+#[derive(Clone, Copy)]
+pub enum Class {
+    /// Starting and stopping the stream (mute, unmute, close).
+    Running,
+    /// Choosing the device.
+    Selection,
+}
+
+/// Orders blocking operations: tickets are taken under the session lock, in
+/// the order the calls arrived, and an operation that finds a later ticket
+/// already applied is skipped.
+#[derive(Default)]
+struct Line {
+    issued: AtomicU64,
+    applied: AtomicU64,
+}
+
+impl Line {
+    fn ticket(&self) -> u64 {
+        self.issued.fetch_add(1, Ordering::SeqCst) + 1
+    }
+
+    /// Whether `ticket` may run now. Called with the device's lock held,
+    /// which is what makes the check and the update one step.
+    fn admit(&self, ticket: u64) -> bool {
+        if self.applied.load(Ordering::SeqCst) > ticket {
+            return false;
+        }
+        self.applied.store(ticket, Ordering::SeqCst);
+        true
+    }
+}
+
+/// A capture or playout shared by the session and the blocking threads that
+/// open, switch and close its device.
+pub struct Audio<T> {
+    device: Mutex<T>,
+    running: Line,
+    selection: Line,
+}
+
+impl<T> Audio<T> {
+    fn new(device: T) -> Self {
+        Self {
+            device: Mutex::new(device),
+            running: Line::default(),
+            selection: Line::default(),
+        }
+    }
+
+    fn line(&self, class: Class) -> &Line {
+        match class {
+            Class::Running => &self.running,
+            Class::Selection => &self.selection,
+        }
+    }
+
+    /// Take the next place in `class`'s line; call under the session lock.
+    fn ticket(&self, class: Class) -> u64 {
+        self.line(class).ticket()
+    }
+
+    /// Run `op` on the device, unless a later ticket of `class` already ran.
+    /// Blocks on the device's lock and on `op`.
+    fn apply<R>(&self, class: Class, ticket: u64, op: impl FnOnce(&mut T) -> R) -> Option<R> {
+        let mut device = lock(&self.device);
+        if !self.line(class).admit(ticket) {
+            return None;
+        }
+        Some(op(&mut *device))
+    }
+}
+
+/// What a microphone call needs the capture to do, made under the session
+/// lock and run by [`MicStep::run`] without it.
+pub enum MicStep {
+    /// Nothing for the driver.
+    Idle,
+    Stop {
+        capture: Arc<Audio<Capture>>,
+        ticket: u64,
+    },
+    Start {
+        capture: Arc<Audio<Capture>>,
+        ticket: u64,
+        /// Close the stream first, so it reopens on the new source.
+        stop_first: bool,
+        commit: MicCommit,
+    },
+}
+
+/// What [`NativeSession::finish_microphone`] needs from a call whose capture
+/// started.
+pub struct MicCommit {
+    epoch: u64,
+    source: NativeAudioSource,
+    /// Publish the source (with this bitrate; whether the server had
+    /// withdrawn the old publication) rather than unmute the existing track.
+    publish: Option<(Option<u64>, bool)>,
+}
+
+impl MicStep {
+    /// The start for a source about to be published for the first time. The
+    /// stream is always closed first: an open stream stays bound to the
+    /// source it was opened for, so this source needs a stream of its own.
+    fn first_publish(
+        capture: &Arc<Audio<Capture>>,
+        epoch: u64,
+        source: NativeAudioSource,
+        bitrate: Option<u64>,
+        was_withdrawn: bool,
+    ) -> Self {
+        Self::Start {
+            capture: capture.clone(),
+            ticket: capture.ticket(Class::Running),
+            stop_first: true,
+            commit: MicCommit {
+                epoch,
+                source,
+                publish: Some((bitrate, was_withdrawn)),
+            },
+        }
+    }
+
+    /// Open or close the capture's stream. Blocks on the audio driver.
+    pub fn run(self) -> Result<Option<MicCommit>, String> {
+        match self {
+            Self::Idle => Ok(None),
+            Self::Stop { capture, ticket } => {
+                capture.apply(Class::Running, ticket, |c| c.stop());
+                Ok(None)
+            }
+            Self::Start {
+                capture,
+                ticket,
+                stop_first,
+                commit,
+            } => {
+                let started = capture.apply(Class::Running, ticket, |c| {
+                    if stop_first {
+                        c.stop();
+                    }
+                    c.start(Sink::Track(commit.source.clone()))
+                });
+                // A start a later call superseded is not an error: that call
+                // owns the capture now.
+                started.unwrap_or(Ok(()))?;
+                Ok(Some(commit))
+            }
+        }
+    }
+}
+
+/// A capture or playout device switch, ready to run without the session.
+pub enum DeviceSwitch {
+    Output(Arc<Audio<Playout>>, u64),
+    Input(Arc<Audio<Capture>>, u64),
+}
+
+impl DeviceSwitch {
+    fn output(playout: &Arc<Audio<Playout>>) -> Self {
+        Self::Output(playout.clone(), playout.ticket(Class::Selection))
+    }
+
+    fn input(capture: &Arc<Audio<Capture>>) -> Self {
+        Self::Input(capture.clone(), capture.ticket(Class::Selection))
+    }
+
+    /// Select device `id` (a running stream moves to it; empty: the default).
+    /// A switch a later one superseded does nothing. Blocks on the audio
+    /// driver.
+    pub fn apply(self, id: &str) -> Result<(), String> {
+        match self {
+            Self::Output(playout, ticket) => playout
+                .apply(Class::Selection, ticket, |p| p.set_device(id))
+                .unwrap_or(Ok(())),
+            Self::Input(capture, ticket) => capture
+                .apply(Class::Selection, ticket, |c| c.set_device(id))
+                .unwrap_or(Ok(())),
+        }
     }
 }
 

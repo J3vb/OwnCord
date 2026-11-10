@@ -80,3 +80,14 @@ touch Linux voice do not load it. `Client/CLAUDE.md` keeps the short rule.
   re-arms on `global-keys-changed` (loss arrives as the host's `ptt-error`).
   Host side: `src-tauri/src/portal_shortcuts.rs`; only a real GNOME 48+/KDE
   Wayland desktop proves the dialog and key delivery.
+- Native voice commands take locks in one order: the camera or screen
+  command gate first, then `NativeVoiceState.inner`, and never a gate while
+  `inner` is held. Camera and screen commands queue on their gate through
+  the release of a stopped capture, so a start waits for the old device or
+  portal session to close; microphone, device and leave commands never take a
+  gate. A gate is dropped before waiting for a first frame or a portal dialog.
+  Audio device work follows three steps: decide under `inner` (which also
+  takes the call's place in the device's ordered line), open or close the
+  device on a blocking thread without `inner`, then take `inner` again and
+  commit only if the call is still the latest on a live session. Operations
+  of one kind on one device run in the order the calls arrived.

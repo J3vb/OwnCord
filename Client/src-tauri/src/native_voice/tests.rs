@@ -335,3 +335,14 @@ async fn a_start_behind_a_stop_waits_for_the_release_and_the_worker_stays_free()
     stop.await.unwrap();
     assert!(start.await.unwrap(), "the start ran after the release");
 }
+
+/// A device switch that finishes after its session ended is not reported.
+#[test]
+fn a_device_switch_result_for_an_ended_session_is_not_reported() {
+    assert_eq!(switch_outcome(3, true, Ok(())), Ok(()));
+    assert_eq!(
+        switch_outcome(3, true, Err("not found".to_string())),
+        Err("not found".to_string())
+    );
+    assert!(switch_outcome(3, false, Ok(())).is_err());
+}
