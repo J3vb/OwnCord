@@ -28,7 +28,7 @@ import {
   MAX_DISPLAY_NAME_LEN,
   runeCount,
 } from "@lib/text/nameLimits";
-import type { ToastType } from "@components/Toast";
+import type { ToastType } from "@lib/ui/toastContainer";
 import { shellText } from "../../i18n/shell";
 import { moderationText as t } from "../../i18n/moderation";
 

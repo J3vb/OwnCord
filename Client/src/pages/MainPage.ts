@@ -7,7 +7,7 @@ import type { MountableComponent } from "@lib/text/safeRender";
 import { type WsClient } from "@lib/ws";
 import { type ApiClient } from "@lib/api";
 import { createRateLimiterSet } from "@lib/net/rateLimiter";
-import { createToastContainer } from "@components/Toast";
+import { createToastContainer } from "@lib/ui/toastContainer";
 import { initToast, teardownToast, showToast } from "@lib/ui/toast";
 import { onPhoneLayoutChange } from "@lib/ui/bottomSheet";
 import { Disposable } from "@lib/disposable";

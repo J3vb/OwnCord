@@ -3,7 +3,7 @@ import type { MountableComponent } from "@lib/text/safeRender";
 import type { UserStatus } from "@lib/types";
 import type { VideoGridComponent } from "@components/VideoGrid";
 import type { ServerBannerControl } from "@components/ServerBanner";
-import type { ToastContainer } from "@components/Toast";
+import type { ToastContainer } from "@lib/ui/toastContainer";
 import type { AutoIdleController } from "@lib/presence/autoIdle";
 import type { GameActivityLoop } from "@lib/presence/gameActivity";
 import type { MusicActivityLoop } from "@lib/presence/musicActivity";

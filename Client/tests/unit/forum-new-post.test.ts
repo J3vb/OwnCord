@@ -7,7 +7,7 @@ import { setConnectionStatus } from "@stores/ui.store";
 import { isForwardRequest } from "../../src/features/messaging/forwardRequests";
 import type { ApiClient } from "@lib/api";
 import { initToast, teardownToast } from "@lib/ui/toast";
-import type { ToastContainer } from "@components/Toast";
+import type { ToastContainer } from "@lib/ui/toastContainer";
 import type { WsClient } from "@lib/ws";
 import { createMockWsClient } from "../helpers/mock-ws";
 import { FORUM, makePost, seedForum } from "../helpers/forum-fixtures";

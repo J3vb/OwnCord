@@ -4,7 +4,7 @@
  */
 
 import { type ApiClient, ApiClientError, errorText } from "@lib/api";
-import type { ToastContainer } from "@components/Toast";
+import type { ToastContainer } from "@lib/ui/toastContainer";
 import type { DmConversation } from "../../features/direct-messages/DmSidebar";
 import { setSidebarMode, setActiveDmUser } from "@stores/ui.store";
 import { channelsStore, setActiveChannel } from "@stores/channels.store";
