@@ -69,6 +69,8 @@
 //	3 S   gameActivityState.mu       hub_settings.go:72       a DB read, then presenceFeedState.mu (the game activity
 //	      (hubSettings.gameActivity)                          sweep), Hub.mu (R), then Client.mu
 //	                                                          (hub_settings.go)
+//	3 S   videoCapState.mu           hub_video_cap.go:19      a DB read, then Hub.mu (R), then Client.mu
+//	      (hubSettings.videoCap)                              (hub_video_cap.go)
 //	3 S   Client.focusMu             client.go:86             Client.mu, PubSub.mu, DB reads (focus_defer.go:21,
 //	                                                          focus_defer.go:132, handlers.go:281-325)
 //	3 S   admissionMu (local)        serve.go:62              Hub.mu (R) via ClientCount (serve.go:73,83)

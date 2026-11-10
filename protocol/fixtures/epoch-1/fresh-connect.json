@@ -41,6 +41,9 @@
               ],
               "status": "online",
               "username": "alice"
+            },
+            "video_bitrate_cap": {
+              "max_video_bitrate": 0
             }
           },
           "type": "auth_ok"
@@ -352,6 +355,9 @@
               ],
               "status": "online",
               "username": "bob"
+            },
+            "video_bitrate_cap": {
+              "max_video_bitrate": 0
             }
           },
           "type": "auth_ok"

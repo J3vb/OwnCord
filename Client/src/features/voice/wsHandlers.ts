@@ -24,6 +24,7 @@ import { ensureIdentityKeyPublished } from "../../lib/net/identity";
 import { showToast } from "../../lib/ui/toast";
 import { noteJoinFailed } from "./joinBackoff";
 import { takeWatchRefusal } from "../../lib/voice/watchRequest";
+import { applyVideoBitrateCap } from "./videoBitrateCap";
 import {
   joinSequence,
   noteJoinSent,
@@ -448,6 +449,11 @@ export function handleVoiceConfig(payload: Payload<"voice_config">): void {
   setVoiceConfig(payload);
 }
 
+/** `video_bitrate_cap`: an admin saved the server's video upload cap. */
+export function handleVideoBitrateCap(payload: Payload<"video_bitrate_cap">): void {
+  applyVideoBitrateCap(payload.max_video_bitrate);
+}
+
 export function handleVoiceTokenFrame(payload: Payload<"voice_token">): void {
   void livekitSession().then(({ handleVoiceToken }) =>
     handleVoiceToken(
@@ -712,6 +718,7 @@ export const wsRoutes: readonly WsRoute[] = [
   route(S.VOICE_DISCONNECTED, (c) => (p) => handleVoiceDisconnected(p, c.clock)),
   route(S.VOICE_LEAVE, (c) => (p) => handleVoiceLeave(p, c.clock)),
   route(S.VOICE_CONFIG, () => handleVoiceConfig),
+  route(S.VIDEO_BITRATE_CAP, () => handleVideoBitrateCap),
   route(S.VOICE_TOKEN, () => handleVoiceTokenFrame),
   route(S.VOICE_E2EE_ANNOUNCE, () => handleVoiceE2eeAnnounce),
   route(S.VOICE_E2EE_OFFER, () => handleVoiceE2eeOffer),

@@ -28,6 +28,7 @@ export const shards = {
     "src/features/voice/native/screenAudioTrack.ts",
     "src/features/voice/sileroDetection.ts",
     "src/features/voice/sileroWorker.ts",
+    "src/features/voice/videoBitrateCap.ts",
     "src/lib/voice/audioPipeline.ts",
     "src/lib/voice/videoPresets.ts",
   ],

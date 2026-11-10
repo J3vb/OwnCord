@@ -41,6 +41,8 @@ export interface AuthOkPayload {
    * on every connect and resume; absent on older servers.
    */
   readonly game_activity_policy?: GameActivityPolicyPayload;
+  /** The video upload cap per person, sent on every connect and resume; absent on older servers. */
+  readonly video_bitrate_cap?: VideoBitrateCapPayload;
 }
 
 /** auth_ok's upload_policy. The server's upload route stays authoritative. */
@@ -920,6 +922,16 @@ export interface VoiceTokenPayload {
  */
 export interface GameActivityPolicyPayload {
   readonly enabled: boolean;
+}
+
+/**
+ * `video_bitrate_cap` — an admin saved the server's video upload cap. Bits per
+ * second for one person's camera and screen share together; 0 means no cap.
+ * Unsequenced and not replayed; `auth_ok` carries the same value on every
+ * connect and resume.
+ */
+export interface VideoBitrateCapPayload {
+  readonly max_video_bitrate: number;
 }
 
 // -----------------------------------------------------------------------------
