@@ -220,6 +220,15 @@ describe("Server/admin/static — AFK card", () => {
       await b.bridge.saveSettings();
       expect(patchBody(calls)).toEqual({ server_upload_mbps: "50" });
     }
+    const typedCalls: FetchCall[] = [];
+    const typed = await boot(typedCalls, responder({ channels: CHANNELS, upload: "100" }));
+    await mountSettings(typed.bridge, typed.doc);
+    const typedUp = typed.doc.getElementById("s-server_upload_mbps") as HTMLInputElement;
+    typedUp.value = "12.5";
+    fire(typed.doc, typedUp, "input");
+    (typed.doc.getElementById("saveSettingsBtn") as HTMLButtonElement).disabled = false;
+    await typed.bridge.saveSettings();
+    expect(patchBody(typedCalls)).toEqual({ server_upload_mbps: "12.5" });
     const ok = await boot([], responder({ channels: CHANNELS, upload: "250", videoCap: "10000" }));
     await mountSettings(ok.bridge, ok.doc);
     expect((ok.doc.getElementById("s-server_upload_mbps") as HTMLInputElement).value).toBe("250");

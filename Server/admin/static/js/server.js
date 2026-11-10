@@ -69,7 +69,9 @@ function settingsFormValues(keys){
   keys.forEach(k=>{
     const el=document.getElementById('s-'+k);if(!el)return;
     if(el instanceof HTMLFieldSetElement){const r=el.querySelector('input:checked');out[k]=r instanceof HTMLInputElement?r.value:'';return}
-    out[k]=el.classList.contains('toggle')?(el.classList.contains('on')?'true':'false'):settingNorm(k,/** @type {HTMLInputElement} */(el).value);
+    const raw=/** @type {HTMLInputElement} */(el).value;
+    // A typed upload speed goes to the server as typed, so a bad edit is refused instead of saved as 0.
+    out[k]=el.classList.contains('toggle')?(el.classList.contains('on')?'true':'false'):k===UPLOAD_MBPS_KEY?(raw.trim()||'0'):settingNorm(k,raw);
   });
   return out;
 }
