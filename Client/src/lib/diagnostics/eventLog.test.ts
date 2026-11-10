@@ -20,6 +20,17 @@ function parsed(): Record<string, unknown>[] {
   return getEventLines(T0).map((line) => JSON.parse(line) as Record<string, unknown>);
 }
 
+const micRate = (value: unknown) =>
+  sanitizeEvent("mic.started", { sample_rate: value as number }, T0)["sample_rate"];
+const cameraGap = (value: unknown) =>
+  sanitizeEvent("camera.resumed", { gap_ms: value as number }, T0)["gap_ms"];
+const voiceNative = (value: unknown) =>
+  sanitizeEvent("voice.joined", { native: value as boolean }, T0)["native"];
+const cameraEncoder = (value: unknown) =>
+  sanitizeEvent("camera.stalled", { encoder: value as string }, T0)["encoder"];
+const patterned = (code: "app.started" | "mic.started" | "voice.joined", name: string, v: string) =>
+  sanitizeEvent(code, { [name]: v }, T0)[name];
+
 describe("diagnostic event log", () => {
   beforeEach(() => {
     resetEventLogForTests();
@@ -52,6 +63,34 @@ describe("diagnostic event log", () => {
       hardware_encoder: true,
       quality_limitation: "cpu",
     });
+  });
+
+  it("rounds a finite number and drops a non-finite or mistyped one, per field type", () => {
+    expect(micRate(48000.6)).toBe(48001);
+    expect(micRate(-3.4)).toBe(-3);
+    expect(micRate(Number.NaN)).toBeUndefined();
+    expect(micRate(Number.POSITIVE_INFINITY)).toBeUndefined();
+    expect(micRate("48000")).toBeUndefined();
+
+    expect(cameraGap(0)).toBe(0);
+    expect(cameraGap(12.5)).toBe(13);
+    expect(cameraGap(Number.NaN)).toBeUndefined();
+    expect(cameraGap("5")).toBeUndefined();
+
+    expect(voiceNative(false)).toBe(false);
+    expect(voiceNative(1)).toBeUndefined();
+  });
+
+  it("holds a version, token, hash and pseudonym to its pattern", () => {
+    expect(patterned("app.started", "app_version", "1.2.3")).toBe("1.2.3");
+    expect(patterned("app.started", "app_version", "1.2.3-beta")).toBeUndefined();
+    expect(patterned("mic.started", "device", "0a1b2c3d")).toBe("0a1b2c3d");
+    expect(patterned("mic.started", "device", "0A1B2C3D")).toBeUndefined();
+    expect(patterned("voice.joined", "channel", "c12")).toBe("c12");
+    expect(patterned("voice.joined", "channel", "12c")).toBeUndefined();
+    expect(cameraEncoder("x264_v1.2")).toBe("x264_v1.2");
+    expect(cameraEncoder("has space")).toBeUndefined();
+    expect(cameraEncoder(7)).toBeUndefined();
   });
 
   it("rejects an enum word outside its list, a negative duration and a URL host", () => {

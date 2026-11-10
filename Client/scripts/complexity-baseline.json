@@ -149,46 +149,8 @@
     "lib/apiShared.ts": {
       "authSliceCopy": [28]
     },
-    "lib/diagnostics/eventLog.ts": {
-      "checkValue": [25]
-    },
     "lib/net/connectionDiagnostics.ts": {
       "runConnectionDiagnostics": [29]
-    },
-    "lib/net/reconcile.ts": {
-      "reconcileKeyed": [31]
-    },
-    "lib/notifications.ts": {
-      "notifyChannelActivity": [36],
-      "notifyIncomingMessage": [30],
-      "notifyMention": [19]
-    },
-    "lib/presence/gameActivity.ts": {
-      "startGameActivity > poll": [24]
-    },
-    "lib/presence/musicActivity.ts": {
-      "startMusicActivity > poll": [19]
-    },
-    "lib/presence/presence.ts": {
-      "createPresenceSender > send": [24]
-    },
-    "lib/store.ts": {
-      "shallowEqual": [25]
-    },
-    "lib/text/markdown.ts": {
-      "parseInline": [23]
-    },
-    "lib/text/nameLimits.ts": {
-      "checkNewUsername": [21]
-    },
-    "lib/ui/a11y.ts": {
-      "enableRovingNavigation > (anonymous)": [28]
-    },
-    "lib/ui/contextMenu.ts": {
-      "enableMenuKeyboard > (anonymous)": [29]
-    },
-    "lib/ui/imageCrop.ts": {
-      "cropImage": [19]
     },
     "lib/voice/connectionStats.ts": {
       "createConnectionStatsPoller > sampleCamera": [17],
@@ -238,9 +200,6 @@
     },
     "features/voice/mediaControl.ts": {
       "MediaControl > doSwitchVideoDevice": [5]
-    },
-    "lib/text/markdown.ts": {
-      "parseInline": [5]
     },
     "lib/voice/livekitE2EE.ts": {
       "E2EEManager > handleParticipantLeft": [5]
