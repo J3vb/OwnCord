@@ -39,10 +39,10 @@ export function mountSendPipeline(st: ChannelState, cc: ChannelApi, ms: MountSco
    * MainPage budget); the gated path mounts no content while it loads.
    */
   ms.mountConsentUi = function mountConsentUi(
-    build: (ui: typeof import("@components/NsfwGate")) => MountableComponent,
+    build: (ui: typeof import("../../../features/content-consent/NsfwGate")) => MountableComponent,
   ): void {
     const gen = ++st.nsfwConsentUiGen;
-    import("@components/NsfwGate").then(
+    import("../../../features/content-consent/NsfwGate").then(
       (ui) => {
         if (ms.signal.aborted || gen !== st.nsfwConsentUiGen) return;
         st.nsfwConsentUi = build(ui);

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { createCertMismatchModal } from "../../src/components/CertMismatchModal";
+import { createCertMismatchModal } from "../../src/features/connection/CertMismatchModal";
 import {
   checkVisibleOverlay,
   registerWarningModalTests,

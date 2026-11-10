@@ -7,7 +7,7 @@
 import { Disposable } from "@lib/disposable";
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import { connectText } from "../i18n/connect";
+import { connectText } from "../../i18n/connect";
 
 export interface ConnectedOverlayOptions {
   readonly serverName: string;

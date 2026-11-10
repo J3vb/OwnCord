@@ -11,8 +11,8 @@ import { createIcon } from "@lib/icons";
 import { applyDialogSemantics, focusDialog, trapFocus } from "@lib/ui/a11y";
 import { closeOnBackdropClick } from "@lib/ui/modalFactory";
 import type { MountableComponent } from "@lib/text/safeRender";
-import { buildRow } from "./CertMismatchModal";
-import { shellText } from "../i18n/shell";
+import { buildRow } from "../connection/CertMismatchModal";
+import { shellText } from "../../i18n/shell";
 
 export interface IdentityMismatchModalOptions {
   readonly username: string;

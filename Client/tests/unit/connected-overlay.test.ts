@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { createConnectedOverlay } from "@components/ConnectedOverlay";
+import { createConnectedOverlay } from "../../src/features/connection/ConnectedOverlay";
 
 describe("ConnectedOverlay", () => {
   beforeEach(() => {

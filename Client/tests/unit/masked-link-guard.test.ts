@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { guardMaskedLink } from "@components/MaskedLinkGuard";
+import { guardMaskedLink } from "../../src/features/content-consent/MaskedLinkGuard";
 import { isDomainTrusted, trustDomain } from "@lib/net/trustedDomains";
 
 const q = <T extends HTMLElement>(testId: string): T | null =>

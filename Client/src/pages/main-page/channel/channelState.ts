@@ -210,7 +210,7 @@ export interface MountScope {
    * MainPage budget); the gated path mounts no content while it loads.
    */
   mountConsentUi: (
-    build: (ui: typeof import("@components/NsfwGate")) => MountableComponent,
+    build: (ui: typeof import("../../../features/content-consent/NsfwGate")) => MountableComponent,
   ) => void;
   mountConsentBar: () => void;
   /** Mirrors onJumpToPresent — reattach clears "loaded" so the tail is refetched. */

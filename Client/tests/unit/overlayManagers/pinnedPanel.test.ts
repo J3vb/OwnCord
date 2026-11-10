@@ -19,7 +19,7 @@ import { guarded, pressBack } from "../../helpers/backNav";
 
 vi.mock("@lib/logger", () => mocks.loggerMock());
 vi.mock("@components/QuickSwitcher", () => mocks.quickSwitcherMock());
-vi.mock("@components/InviteManager", () => mocks.inviteManagerMock());
+vi.mock("../../../src/features/invites/InviteManager", () => mocks.inviteManagerMock());
 vi.mock("@components/PinnedMessages", () => mocks.pinnedMessagesMock());
 vi.mock("@components/SearchOverlay", () => mocks.searchOverlayMock());
 vi.mock("@stores/channels.store", () => mocks.channelsStoreMock());

@@ -48,7 +48,7 @@ vi.mock("@tauri-apps/plugin-deep-link", () => ({
   onOpenUrl: (...args: unknown[]) => mockOnOpenUrl(...args),
 }));
 vi.mock("@lib/nav/messageNavigation", () => ({ jumpToMessage: vi.fn() }));
-vi.mock("@components/CertMismatchModal", () => ({
+vi.mock("../../src/features/connection/CertMismatchModal", () => ({
   createCertMismatchModal: vi.fn(() => ({ mount: vi.fn(), destroy: vi.fn() })),
   createCertFirstUseModal: vi.fn(() => ({ mount: vi.fn(), destroy: vi.fn() })),
 }));

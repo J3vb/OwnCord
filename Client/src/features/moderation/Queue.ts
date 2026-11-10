@@ -498,7 +498,7 @@ function renderReports(
 
   function mountGate(slot: HTMLElement, channelId: number, channelName: string): void {
     const forReport = shown;
-    import("@components/NsfwGate").then(
+    import("../content-consent/NsfwGate").then(
       (ui) => {
         if (signal.aborted || shown !== forReport || !slot.isConnected) return;
         gate = ui.createNsfwGate({

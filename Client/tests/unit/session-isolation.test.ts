@@ -48,7 +48,7 @@ vi.mock("@tauri-apps/plugin-deep-link", () => ({
   onOpenUrl: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock("@lib/nav/messageNavigation", () => mainMocks.navMessageNavigationMock());
-vi.mock("@components/CertMismatchModal", () => mainMocks.certMismatchModalMock());
+vi.mock("../../src/features/connection/CertMismatchModal", () => mainMocks.certMismatchModalMock());
 vi.mock("@lib/net/certReconnect", () => mainMocks.netCertReconnectMock());
 const PROFILES = [
   {

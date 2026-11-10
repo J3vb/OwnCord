@@ -13,7 +13,7 @@ import { createIcon } from "@lib/icons";
 import { applyDialogSemantics, focusDialog, trapFocus } from "@lib/ui/a11y";
 import { closeOnBackdropClick } from "@lib/ui/modalFactory";
 import type { MountableComponent } from "@lib/text/safeRender";
-import { connectText } from "../i18n/connect";
+import { connectText } from "../../i18n/connect";
 
 export interface CertMismatchModalOptions {
   readonly host: string;

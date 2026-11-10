@@ -46,7 +46,7 @@ vi.mock("../../src/app/connectRoute", () => ({
     return [{ destroy: vi.fn() }, hoisted.rerunHealth, hoisted.applyInvite];
   },
 }));
-vi.mock("@components/CertMismatchModal", () => ({
+vi.mock("../../src/features/connection/CertMismatchModal", () => ({
   createCertFirstUseModal: (opts: { onAccept: () => void }) => {
     hoisted.firstUseModals.push(opts);
     return { mount: vi.fn(), destroy: vi.fn() };

@@ -15,7 +15,7 @@ vi.mock("@lib/logger", () => mocks.loggerMock());
 vi.mock("@lib/dom", () => mocks.domMock());
 vi.mock("../../../src/features/messaging/MessageList", () => mocks.messageListMock());
 vi.mock("../../../src/features/messaging/MessageInput", () => mocks.messageInputMock());
-vi.mock("@components/NsfwGate", () => mocks.nsfwGateMock());
+vi.mock("../../../src/features/content-consent/NsfwGate", () => mocks.nsfwGateMock());
 vi.mock("@components/TypingIndicator", () => mocks.typingIndicatorMock());
 vi.mock("@lib/readState", () => mocks.readStateMock());
 vi.mock("@stores/messages.store", () => mocks.messagesStoreMock());
@@ -104,7 +104,7 @@ describe("createChannelController", () => {
     // The first import of the (mocked) lazy module resolves after its async
     // factory; load it once so every test measures the controller, not that.
     beforeAll(async () => {
-      await import("@components/NsfwGate");
+      await import("../../../src/features/content-consent/NsfwGate");
     });
 
     beforeEach(() => {

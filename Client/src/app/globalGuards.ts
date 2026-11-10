@@ -75,7 +75,7 @@ export function installGlobalGuards(): void {
         open(href);
         return;
       }
-      import("@components/MaskedLinkGuard").then(
+      import("../features/content-consent/MaskedLinkGuard").then(
         (m) => m.guardMaskedLink(href, open),
         (err: unknown) => {
           log.warn("masked link warning failed to load", err);
