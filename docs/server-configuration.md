@@ -191,7 +191,7 @@ A member in a voice channel can send two kinds of things through the media serve
 
 - **Off by default.** It is an opt-in while it is tried on more setups. Members need no update and no setting: voice, video, screen share and encryption work the same.
 - **It is read at start-up.** A restart ends every voice session and members rejoin on new grants, so switching it on or off reaches everyone at that restart.
-- **Earlier tokens.** A voice token is valid for five minutes, and one issued before the restart still says what it said then. A connection made with it matches no voice session after the restart, so OwnCord removes it from the media server: at once where the LiveKit webhook is configured, otherwise at the next regular check.
+- **After a restart** OwnCord removes any media-server connection that matches no current voice session: at once where the LiveKit webhook is configured, otherwise at the next regular check.
 - **Turning it off** puts the data right back with the microphone grant and changes nothing else.
 - It covers the grants OwnCord issues. A tool that talks to your media server with its own credentials is not affected.
 

@@ -5,9 +5,11 @@ import (
 	"slices"
 	"testing"
 
+	lkauth "github.com/livekit/protocol/auth"
 	"github.com/livekit/protocol/livekit"
 
 	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
@@ -156,6 +158,40 @@ func TestVoiceGrant_DataPublishingFollowsTheSetting(t *testing.T) {
 					t.Errorf("setting on: room %q identity %q, want %q %q", restricted.room, restricted.identity, open.room, open.identity)
 				}
 			})
+		}
+	}
+}
+
+// The setting reaches the grant from the configuration the client is built
+// with, not only from the field the table above sets.
+func TestVoiceGrant_ConfiguredSettingReachesTheSignedToken(t *testing.T) {
+	for _, restrict := range []bool{false, true} {
+		lk, err := NewLiveKitClient(&config.VoiceConfig{
+			LiveKitAPIKey:          "test-moderation-token-key",
+			LiveKitAPISecret:       moderationTokenSecret,
+			LiveKitURL:             "ws://127.0.0.1:1", // Token signing is local.
+			RestrictDataPublishing: restrict,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		token, err := lk.GenerateToken(1, "alice", 100, "join", true, true, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		verifier, err := lkauth.ParseAPIToken(token)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, claims, err := verifier.Verify(moderationTokenSecret)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := claims.Video.GetCanPublishData(); got == restrict {
+			t.Errorf("restrict_data_publishing=%v: signed data grant = %v, want %v", restrict, got, !restrict)
+		}
+		if !claims.Video.GetCanPublishSource(livekit.TrackSource_MICROPHONE) {
+			t.Errorf("restrict_data_publishing=%v: the microphone grant is missing", restrict)
 		}
 	}
 }

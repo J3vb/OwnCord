@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -33,6 +34,9 @@ const realLiveKitEnv = "OWNCORD_LIVEKIT_TEST_BINARY"
 const (
 	dataProofChannel = int64(7)
 	dataProofWait    = 20 * time.Second
+	// dataProofSettlePackets is how many fresh 20 ms audio packets must cross
+	// the media server before a withheld grant is restored.
+	dataProofSettlePackets = 15
 )
 
 // dataProofRoom is one participant's connection plus what it has received.
@@ -203,7 +207,14 @@ func dataProofToken(t *testing.T, client *LiveKitClient, userID int64, joinToken
 // same ordered reliable channel from the same sender, so once the listener
 // holds the second one, the first was either forwarded before it or never:
 // a media server that ignored the grant cannot pass.
-func assertWithheld(t *testing.T, stage string, sender, listener *dataProofRoom, open *LiveKitClient, userID int64, joinToken string) {
+//
+// The restore travels a different path (HTTP) than the withheld marker, and
+// nothing orders the two at the media server. So the restore waits until
+// fresh audio has crossed the media server after the marker was sent: a
+// margin of a few hundred milliseconds over a channel that needs well under
+// one, not a strict barrier. Too short a margin can only fail this test,
+// never pass it.
+func assertWithheld(t *testing.T, stage string, sender, listener *dataProofRoom, open *LiveKitClient, userID int64, joinToken, speakerIdentity string) {
 	t.Helper()
 	identity := participantIdentity(userID, joinToken)
 	if sender.mayPublishData() {
@@ -211,6 +222,7 @@ func assertWithheld(t *testing.T, stage string, sender, listener *dataProofRoom,
 	}
 	sender.send(t, stage+" withheld", true)
 	sender.send(t, stage+" withheld lossy", false)
+	settleBeforeRestore(t, stage, listener, speakerIdentity)
 
 	// Rollback: the setting off puts the data grant back with the microphone.
 	if err := open.updateParticipantPublishing(context.Background(), dataProofChannel, userID, joinToken, true, true, true); err != nil {
@@ -238,6 +250,29 @@ func assertAudioFlows(t *testing.T, stage string, listener *dataProofRoom, ident
 	})
 }
 
+// settleBeforeRestore gives the media server time to handle what was just
+// sent on the data channels: it returns once a run of fresh audio packets from
+// the speaker, all sent after this call, has come through.
+func settleBeforeRestore(t *testing.T, stage string, listener *dataProofRoom, speakerIdentity string) {
+	t.Helper()
+	before := listener.rtpFrom(speakerIdentity)
+	dataProofEventually(t, stage+": audio before the grant is restored", func() bool {
+		return listener.rtpFrom(speakerIdentity) > before+dataProofSettlePackets
+	})
+}
+
+// assertNothingWithheldArrived is the closing sweep: no marker sent without
+// the data grant reached the listener at any point, on either channel. It
+// also covers a lossy marker, which has no ordered channel to wait on.
+func assertNothingWithheldArrived(t *testing.T, listener *dataProofRoom) {
+	t.Helper()
+	for _, got := range listener.received() {
+		if strings.Contains(got, " withheld") {
+			t.Fatalf("the media server forwarded %q", got)
+		}
+	}
+}
+
 func TestRealLiveKit_DataPublishingGrant(t *testing.T) {
 	cfg := startDataProofSFU(t)
 	open := dataProofClient(t, cfg, false)
@@ -248,14 +283,15 @@ func TestRealLiveKit_DataPublishingGrant(t *testing.T) {
 
 	// A credential minted with the setting on: media publishes, data does not.
 	const speakerJoin = "speaker"
+	speakerIdentity := participantIdentity(2, speakerJoin)
 	speaker := dataProofJoin(t, cfg.LiveKitURL, dataProofToken(t, restricted, 2, speakerJoin, true))
 	speaker.publishAudio(t)
-	assertAudioFlows(t, "fresh grant", listener, participantIdentity(2, speakerJoin))
-	assertWithheld(t, "fresh grant", speaker, listener, open, 2, speakerJoin)
-	assertAudioFlows(t, "fresh grant, after rollback", listener, participantIdentity(2, speakerJoin))
+	assertAudioFlows(t, "fresh grant", listener, speakerIdentity)
+	assertWithheld(t, "fresh grant", speaker, listener, open, 2, speakerJoin, speakerIdentity)
+	assertAudioFlows(t, "fresh grant, after rollback", listener, speakerIdentity)
 
-	// A participant already connected with a credential from before the
-	// setting was on keeps what that credential says until the live update.
+	// A participant connected under the default grant is brought to the
+	// restricted grant by the live update.
 	const earlierJoin = "earlier"
 	earlierToken := dataProofToken(t, open, 3, earlierJoin, true)
 	earlier := dataProofJoin(t, cfg.LiveKitURL, earlierToken)
@@ -270,10 +306,10 @@ func TestRealLiveKit_DataPublishingGrant(t *testing.T) {
 	}
 	dataProofEventually(t, "the live update to withhold data", func() bool { return !earlier.mayPublishData() })
 	assertAudioFlows(t, "live update", listener, participantIdentity(3, earlierJoin))
-	assertWithheld(t, "live update", earlier, listener, open, 3, earlierJoin)
+	assertWithheld(t, "live update", earlier, listener, open, 3, earlierJoin, speakerIdentity)
 
-	// The same earlier credential used again for a new connection: the live
-	// update the join webhook and the sweep send applies to it too.
+	// A new connection under the default grant is brought to the restricted
+	// grant by the same live update.
 	earlier.room.Disconnect()
 	dataProofEventually(t, "the earlier connection to leave", func() bool {
 		ids, err := open.ListParticipants(ctx, dataProofChannel)
@@ -284,5 +320,6 @@ func TestRealLiveKit_DataPublishingGrant(t *testing.T) {
 		t.Fatalf("live update after reconnect: %v", err)
 	}
 	dataProofEventually(t, "the live update after reconnect", func() bool { return !again.mayPublishData() })
-	assertWithheld(t, "reconnect", again, listener, open, 3, earlierJoin)
+	assertWithheld(t, "reconnect", again, listener, open, 3, earlierJoin, speakerIdentity)
+	assertNothingWithheldArrived(t, listener)
 }
