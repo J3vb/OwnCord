@@ -150,6 +150,7 @@ export const voiceText = defineCatalog("voice", {
   "tile.senderLimitedCpu": "Limited by CPU",
   "tile.senderLimitedBandwidth": "Limited by bandwidth",
   "tile.senderLimitedOther": "Limited by something else",
+  "tile.senderLimitedServer": "Limited by server to {value} Mbps",
   "tile.senderUnavailable": "Encoder details not available",
   "tile.stopSharing": "Stop sharing",
   "tile.hidePreview": "Hide preview",

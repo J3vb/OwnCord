@@ -20,6 +20,7 @@ import type { AudioElements } from "../../lib/voice/audioElements";
 import { type DeviceManager, isMicPolicyGated } from "../../lib/voice/deviceManager";
 import { voiceText } from "../../i18n/voice";
 import { CodecSwitchController } from "./codecSwitch";
+import { VideoCapFollower } from "./videoCapFollow";
 import { CameraDeviceUnusable, CameraSwitchUnavailable } from "./cameraSwitch";
 import { setH264GpuProfiles } from "../../lib/voice/h264Profile";
 import { h264GpuPublish } from "./videoCodec";
@@ -76,6 +77,11 @@ export class MediaControl {
     readCameraSenderSample: () => getLocalCameraStats(this._room),
     readScreenSenderSample: () => getLocalScreenshareStats(this._room),
     onSwitchError: (err) => log.warn("Codec switch failed", err),
+  });
+  private readonly capFollow = new VideoCapFollower({
+    getRoom: () => this._room,
+    getCameraState: () => this._cameraState,
+    getScreenState: () => this._screenState,
   });
   private latestVideoDevice: string | null = null;
 
@@ -308,6 +314,7 @@ export class MediaControl {
     await doEnableCamera(this._cameraState, deps);
     // A viewer may have joined while the enable was in flight.
     this.codecSwitch.kick();
+    this.capFollow.kick();
   }
 
   async disableCamera(): Promise<void> {
@@ -317,11 +324,13 @@ export class MediaControl {
   async enableScreenshare(): Promise<void> {
     await doEnableScreenshare(this._screenState, this._videoTrackDeps);
     this.codecSwitch.kick();
+    this.capFollow.kick();
   }
 
-  /** The session ended or is reconnecting: stop the live codec switch. */
+  /** The session ended or is reconnecting: stop the codec switch and cap follower. */
   stopCodecSwitch(): void {
     this.codecSwitch.stop();
+    this.capFollow.stop();
   }
 
   async disableScreenshare(): Promise<void> {

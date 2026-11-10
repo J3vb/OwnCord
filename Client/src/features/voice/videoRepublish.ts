@@ -26,6 +26,8 @@ import {
 } from "./videoTrackState";
 import { disableCamera } from "./cameraTrack";
 import { disableScreenshare } from "./screenTrackStop";
+import { clampPublishedVideo, presetRate } from "./videoCapFollow";
+import { liveVideoBudget } from "./videoBudgetNow";
 
 const log = createLogger("screenShare");
 
@@ -53,11 +55,12 @@ function republishOptions(
   quality: StreamQuality,
 ): TrackPublishOptions {
   return kind === "camera"
-    ? cameraPublishOptions(codec, quality)
+    ? cameraPublishOptions(codec, quality, liveVideoBudget().camera)
     : screenVideoPublishOptions(
         codec,
         quality,
         (state as ScreenTrackState).fps ?? getScreenShareFps(),
+        liveVideoBudget().screen,
       );
 }
 
@@ -153,6 +156,11 @@ export async function republishVideo(
       return false;
     }
     state.published = codec;
+    void clampPublishedVideo(
+      track,
+      kind,
+      presetRate(kind, quality, (state as ScreenTrackState).fps ?? getScreenShareFps()),
+    );
     if (kind === "screen") bumpLocalShareRev();
     log.info("Republished with a codec every viewer plays", { kind, codec });
     return true;

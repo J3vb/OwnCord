@@ -23,6 +23,7 @@ const state = vi.hoisted(() => ({
   qualityRejection: undefined as unknown,
   audioRefusal: null as string | null,
   cameraChangeRefusal: null as string | null,
+  bitrateRefusal: null as string | null,
   micTest: 0,
   micTestRefusal: null as string | null,
   stats: null as unknown,
@@ -80,6 +81,11 @@ vi.mock("@tauri-apps/api/core", () => ({
       return rejection === undefined
         ? Promise.resolve(state.qualitySet)
         : Promise.reject(rejection);
+    }
+    if (cmd === "native_voice_set_video_bitrate") {
+      const refusal = state.bitrateRefusal;
+      state.bitrateRefusal = null;
+      return refusal === null ? Promise.resolve() : Promise.reject(refusal);
     }
     if (cmd === "native_voice_change_camera") {
       const refusal = state.cameraChangeRefusal;
@@ -143,6 +149,9 @@ describeNativeVoiceSuite(async () => {
       },
       refusesCameraChange(reason) {
         state.cameraChangeRefusal = reason;
+      },
+      refusesVideoBitrate(reason) {
+        state.bitrateRefusal = reason;
       },
       refusesScreenChange(reason) {
         state.changeRefusal = reason;

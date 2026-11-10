@@ -50,7 +50,9 @@ import {
   type AppShareAudio,
 } from "../../lib/voice/appAudioShare";
 import { voiceText } from "../../i18n/voice";
-import { applyScreenShareContentHint } from "../../lib/voice/videoPresets";
+import { applyScreenShareContentHint, budgetedRate } from "../../lib/voice/videoPresets";
+import { recordSenderLayers, setSenderTop } from "../../lib/voice/senderLayers";
+import { liveVideoBudget } from "./videoBudgetNow";
 import { recordEvent } from "../../lib/diagnostics/eventSink";
 
 const log = createLogger("screenShare");
@@ -426,27 +428,6 @@ async function qualityInPlace(
   }
 }
 
-/** The encoding the top layer carries (the one at full size). */
-async function setTopLayer(
-  sender: RTCRtpSender | undefined,
-  maxBitrate: number,
-  maxFramerate: number,
-): Promise<void> {
-  if (sender === undefined) return;
-  const params = sender.getParameters();
-  const top = params.encodings.reduce<RTCRtpEncodingParameters | undefined>(
-    (best, e) =>
-      best === undefined || (e.scaleResolutionDownBy ?? 1) <= (best.scaleResolutionDownBy ?? 1)
-        ? e
-        : best,
-    undefined,
-  );
-  if (top === undefined) return;
-  top.maxBitrate = maxBitrate;
-  top.maxFramerate = maxFramerate;
-  await sender.setParameters(params);
-}
-
 /** Change the live share's quality without a new picker: the capture is
  *  re-sized in place and the encoding follows. For this share only; the
  *  saved default in Settings stays. */
@@ -466,7 +447,10 @@ export async function setScreenshareQuality(
   try {
     const fps = live.fps;
     const frameRate = getEffectiveScreenShareFps(quality, fps);
-    const maxBitrate = getScreenShareMaxBitrate(quality, fps);
+    const maxBitrate = budgetedRate(
+      getScreenShareMaxBitrate(quality, fps),
+      liveVideoBudget().screen,
+    );
     const preset = SCREENSHARE_PRESETS[quality].resolution;
     // Source on a GPU H.264 share keeps the encoder's size limit.
     const size = h264GpuPublish(state.published ?? "vp8") ? gpuH264SizeCap(preset) : preset;
@@ -484,7 +468,10 @@ export async function setScreenshareQuality(
     // Re-sets the track on its own sender: the SDK recomputes every layer
     // for the new size (nothing when the size did not change).
     await live.video.replaceTrack(mst, { userProvidedTrack: false });
-    await setTopLayer(live.video.sender, maxBitrate, frameRate);
+    // The SDK just re-sized the layers: take them as the originals, then hold
+    // them under the share's budget.
+    recordSenderLayers(live.video.sender);
+    await setSenderTop(live.video.sender, maxBitrate, frameRate);
     if (superseded(state, deps, live)) return;
     state.quality = quality;
     bumpLocalShareRev();

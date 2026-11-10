@@ -38,9 +38,11 @@ mod audio_line;
 mod events;
 mod publish_options;
 mod screen_share;
+mod video_bitrate;
 
 use audio_line::off_runtime;
 pub use audio_line::{Audio, Class, DeviceSwitch, MicCommit, MicStep};
+pub use video_bitrate::VideoKind;
 
 use events::{forward_events, is_encrypted, permission_event, withdraw_unencrypted};
 pub use events::{Event, EventSink, ParticipantInfo, TrackInfo};
@@ -303,6 +305,10 @@ struct VideoPublication {
     issued: String,
     live: TrackSid,
     capture: Option<u64>,
+    /// The sender's layers (rate, scale-down) right after the publish: what a
+    /// lifted bitrate cap restores (`video_bitrate.rs`). Empty until recorded,
+    /// and again after a republish, whose layers are new.
+    original_layers: Vec<video_bitrate::Layer>,
 }
 
 impl VideoPublication {
@@ -311,6 +317,7 @@ impl VideoPublication {
             issued: sid.to_string(),
             live: sid,
             capture: None,
+            original_layers: Vec::new(),
         }
     }
 
@@ -324,6 +331,7 @@ impl VideoPublication {
     fn republished(&mut self, previous: &TrackSid, sid: TrackSid) {
         if self.live == *previous {
             self.live = sid;
+            self.original_layers.clear();
         }
     }
 }
@@ -913,6 +921,12 @@ impl NativeSession {
         }
         let capture = self.camera_capture.as_ref().map(|c| c.id);
         *lock(&self.camera) = Some(VideoPublication::of_capture(sid.clone(), capture));
+        self.hold_published_layers(
+            VideoKind::Camera,
+            &sid,
+            publication.track(),
+            opts.max_bitrate,
+        );
         Ok(sid.to_string())
     }
 

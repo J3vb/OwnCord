@@ -1022,6 +1022,7 @@ export function buildTauriMockScript(opts: {
         if (cmd === "get_gpu_adapters")
           return { cards: [], saved: "auto", active: null, notFound: false, resetAfterCrash: false, autoOff: false };
         if (cmd === "set_gpu_adapter") return null;
+        if (cmd === "native_voice_set_video_bitrate") return;
         // ---- External-content broker (B7-16) ----
         // No external network here: refuse the way the native broker does,
         // with a bare failure-class string. Teardown also names a fresh

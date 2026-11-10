@@ -194,6 +194,8 @@ export const nativeVoice: NativeVoice = {
       return qualityFailure(err);
     }
   },
+  setVideoBitrate: (session, kind, sid, maxBitrate) =>
+    invokeOrThrow<void>("native_voice_set_video_bitrate", { session, kind, sid, maxBitrate }),
   async changeCamera(session, source, capture) {
     try {
       return await invoke<NativeVoiceCameraStarted>("native_voice_change_camera", {

@@ -153,7 +153,7 @@
       "NoiseFloorTracker > push": [16]
     },
     "lib/voice/shareResolutionRecovery.ts": {
-      "readingFromStats": [17]
+      "readingFromStats": [16]
     },
     "lib/ws.ts": {
       "createWsClient > handleMessage": [27],

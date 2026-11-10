@@ -546,6 +546,18 @@ export interface NativeVoice {
     options: NativeVoiceScreenCapture,
     publish: NativeVoiceScreenOptions,
   ): Promise<NativeVoiceScreenQualityResult>;
+  /** Hold the live publication `sid` (`camera` or `screen`) under `maxBitrate`
+   *  bits per second without republishing it: the top layer runs at it and
+   *  every lower layer at the lower of its own rate and it. 0 restores the
+   *  rates the publish produced. A `sid` that is not the live publication
+   *  (stopped, replaced by a republish) is a no-op. Rejects with the host's
+   *  reason when the encoder refuses; the caller keeps the old rate. */
+  setVideoBitrate(
+    session: number,
+    kind: "camera" | "screen",
+    sid: string,
+    maxBitrate: number,
+  ): Promise<void>;
   /** Use camera `source` instead under the live, published camera: a new
    *  capture starts beside it and takes the publication over (same sid, same
    *  preview socket) once its first frame arrives, then the old capture
