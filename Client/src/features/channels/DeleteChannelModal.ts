@@ -7,10 +7,10 @@
  */
 
 import { createElement, appendChildren } from "@lib/dom";
-import { createConfirmModal, type ConfirmModalInstance } from "../features/dialogs/confirmModal";
+import { createConfirmModal, type ConfirmModalInstance } from "../dialogs/confirmModal";
 import { errorText } from "@lib/api";
 import type { MountableComponent } from "@lib/text/safeRender";
-import { shellText } from "../i18n/shell";
+import { shellText } from "../../i18n/shell";
 
 export interface DeleteChannelModalOptions {
   readonly channelId: number;

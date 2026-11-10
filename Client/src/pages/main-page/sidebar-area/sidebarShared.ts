@@ -28,5 +28,5 @@ export function headerAction(
 // Loads on first use, so its code stays out of the main-page chunk.
 export const createChannelModalScreen = createLazyScreen(
   "create-channel-modal",
-  () => import("@components/CreateChannelModal"),
+  () => import("../../../features/channels/CreateChannelModal"),
 );
