@@ -7,7 +7,7 @@
 //! (`video.rs`), screen share (`screen.rs`), and a stream of room events for
 //! the webview. No Tauri types here so the interop example
 //! (`examples/native_voice_interop.rs`) drives exactly the code the app runs.
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use livekit::e2ee::EncryptionType;
@@ -27,7 +27,7 @@ use super::camera::{
     self, CameraCapture, CameraDevice, CaptureOptions as CameraCaptureOptions,
     Target as CameraTarget,
 };
-use super::capture::{self, Apm, Capture, GateSink, LevelSink, Sink};
+use super::capture::{self, Apm, Capture, GateSink, LevelSink};
 use super::playout::{self, Playout};
 use super::screen::{self, CaptureOptions, ScreenCapture, Started, Target};
 use super::share_audio::ShareAudio;
