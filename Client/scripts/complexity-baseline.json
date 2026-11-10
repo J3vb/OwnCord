@@ -44,26 +44,6 @@
     "features/people-home/PeopleHome.ts": {
       "renderPeopleHome > render": [17]
     },
-    "features/settings/AppearanceTab.ts": {
-      "buildAppearanceTab": [16]
-    },
-    "features/settings/KeybindsTab.ts": {
-      "buildKeybindsTab > renderPortal": [20]
-    },
-    "features/settings/SettingsOverlay.ts": {
-      "createSettingsOverlay > mount": [17],
-      "createSettingsOverlay > mount > (anonymous)": [18]
-    },
-    "features/settings/voice-audio/voiceDevicesPreview.ts": {
-      "mountDevicesAndPreview > (anonymous)": [17],
-      "mountDevicesAndPreview > populateDevices": [25]
-    },
-    "features/settings/voice-audio/voiceMicTest.ts": {
-      "mountMicTest > startNativeTest": [24]
-    },
-    "features/settings/voice-audio/voiceOutputVideo.ts": {
-      "mountOutputAndVideo > codecGroup": [17]
-    },
     "features/voice-messages/recorder.ts": {
       "createVoiceRecorder > openStream": [21],
       "createVoiceRecorder > start": [23]

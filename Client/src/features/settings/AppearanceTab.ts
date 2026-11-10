@@ -52,6 +52,105 @@ function paletteOf(choice: string): string {
   return choice === SYSTEM_THEME ? resolveSystemTheme() : choice;
 }
 
+/** The font size slider row; its label shows the effective size. */
+function buildFontSizeRow(signal: AbortSignal, currentFontSize: number): HTMLElement {
+  const fontRow = createElement("div", { class: "slider-row" });
+  const fontSlider = createElement("input", {
+    class: "settings-slider",
+    type: "range",
+    min: String(MIN_FONT_SIZE_PX),
+    max: String(MAX_FONT_SIZE_PX),
+    value: String(currentFontSize),
+    "aria-label": t("appearance.fontSize"),
+  });
+  // The EFFECTIVE size, not the raw slider position: Large Font can floor it
+  // above where the slider sits, and a label that disagrees with the rendered
+  // text is the same "control that lies" bug in a different place.
+  const fontLabel = createElement(
+    "span",
+    { class: "slider-val" },
+    t("appearance.fontSize.value", { size: effectiveFontSize() }),
+  );
+  fontSlider.addEventListener(
+    "input",
+    () => {
+      const size = Number(fontSlider.value);
+      savePref("fontSize", size);
+      // Both read the pref back, so save first.
+      applyFontSize();
+      setText(fontLabel, t("appearance.fontSize.value", { size: effectiveFontSize() }));
+    },
+    { signal },
+  );
+  appendChildren(fontRow, fontSlider, fontLabel);
+  return buildSettingRow({ label: t("appearance.fontSize"), control: fontRow });
+}
+
+/** The zoom slider row. Null on Android, which has no webview zoom to set. */
+function buildZoomRow(signal: AbortSignal): HTMLElement | null {
+  const zoomRow = createElement("div", { class: "slider-row" });
+  const zoomSlider = createElement("input", {
+    class: "settings-slider",
+    type: "range",
+    min: "0",
+    max: String(ZOOM_LEVELS.length - 1),
+    step: "1",
+    value: String(zoomIndex(appZoom.current())),
+    "aria-label": t("appearance.zoom"),
+  });
+  const zoomLabel = createElement(
+    "span",
+    { class: "slider-val" },
+    t("appearance.zoom.value", { percent: appZoom.current() }),
+  );
+  const zoomReset = createElement(
+    "button",
+    {
+      class: "btn btn-secondary",
+      type: "button",
+      "aria-label": t("appearance.zoom.resetAria"),
+    },
+    t("appearance.zoom.reset"),
+  );
+  const paintZoom = (level: number): void => {
+    zoomSlider.value = String(zoomIndex(level));
+    zoomSlider.setAttribute("aria-valuetext", t("appearance.zoom.value", { percent: level }));
+    setText(zoomLabel, t("appearance.zoom.value", { percent: level }));
+  };
+  paintZoom(appZoom.current());
+  appZoom.subscribe(paintZoom, signal);
+  zoomSlider.addEventListener(
+    "input",
+    () => {
+      void appZoom.set(ZOOM_LEVELS[Number(zoomSlider.value)] ?? 100);
+    },
+    { signal },
+  );
+  zoomReset.addEventListener("click", () => void appZoom.reset(), { signal });
+  appendChildren(zoomRow, zoomSlider, zoomLabel, zoomReset);
+  // The Android app has no webview zoom to set.
+  if (isAndroidApp()) return null;
+  return buildSettingRow({ label: t("appearance.zoom"), control: zoomRow });
+}
+
+/** Apply stored preferences on render; a null accent means none is stored. */
+function applyStoredPreferences(
+  currentTheme: string | null,
+  currentCompact: boolean,
+  storedAccent: string | null,
+): void {
+  if (currentTheme === null) {
+    restoreTheme();
+  } else {
+    applyThemeChoice(currentTheme);
+  }
+  applyFontSize();
+  document.documentElement.classList.toggle("compact-mode", currentCompact);
+  if (storedAccent !== null) {
+    applyAccent(storedAccent);
+  }
+}
+
 export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
   const section = createElement("div", { class: "settings-pane active" });
   const activeThemeName = getActiveThemeName();
@@ -128,84 +227,12 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
     buildSettingRow({ label: t("appearance.theme"), control: themeRow, stacked: true }),
   );
 
-  // Font size slider
-  const fontRow = createElement("div", { class: "slider-row" });
-  const fontSlider = createElement("input", {
-    class: "settings-slider",
-    type: "range",
-    min: String(MIN_FONT_SIZE_PX),
-    max: String(MAX_FONT_SIZE_PX),
-    value: String(currentFontSize),
-    "aria-label": t("appearance.fontSize"),
-  });
-  // The EFFECTIVE size, not the raw slider position: Large Font can floor it
-  // above where the slider sits, and a label that disagrees with the rendered
-  // text is the same "control that lies" bug in a different place.
-  const fontLabel = createElement(
-    "span",
-    { class: "slider-val" },
-    t("appearance.fontSize.value", { size: effectiveFontSize() }),
-  );
-  fontSlider.addEventListener(
-    "input",
-    () => {
-      const size = Number(fontSlider.value);
-      savePref("fontSize", size);
-      // Both read the pref back, so save first.
-      applyFontSize();
-      setText(fontLabel, t("appearance.fontSize.value", { size: effectiveFontSize() }));
-    },
-    { signal },
-  );
-  appendChildren(fontRow, fontSlider, fontLabel);
-  section.appendChild(buildSettingRow({ label: t("appearance.fontSize"), control: fontRow }));
+  section.appendChild(buildFontSizeRow(signal, currentFontSize));
 
   // Zoom level: the native webview zoom, snapping to Discord's levels. The
   // slider follows the zoom keys (Ctrl+= / Ctrl+- / Ctrl+0) while it is open.
-  const zoomRow = createElement("div", { class: "slider-row" });
-  const zoomSlider = createElement("input", {
-    class: "settings-slider",
-    type: "range",
-    min: "0",
-    max: String(ZOOM_LEVELS.length - 1),
-    step: "1",
-    value: String(zoomIndex(appZoom.current())),
-    "aria-label": t("appearance.zoom"),
-  });
-  const zoomLabel = createElement(
-    "span",
-    { class: "slider-val" },
-    t("appearance.zoom.value", { percent: appZoom.current() }),
-  );
-  const zoomReset = createElement(
-    "button",
-    {
-      class: "btn btn-secondary",
-      type: "button",
-      "aria-label": t("appearance.zoom.resetAria"),
-    },
-    t("appearance.zoom.reset"),
-  );
-  const paintZoom = (level: number): void => {
-    zoomSlider.value = String(zoomIndex(level));
-    zoomSlider.setAttribute("aria-valuetext", t("appearance.zoom.value", { percent: level }));
-    setText(zoomLabel, t("appearance.zoom.value", { percent: level }));
-  };
-  paintZoom(appZoom.current());
-  appZoom.subscribe(paintZoom, signal);
-  zoomSlider.addEventListener(
-    "input",
-    () => {
-      void appZoom.set(ZOOM_LEVELS[Number(zoomSlider.value)] ?? 100);
-    },
-    { signal },
-  );
-  zoomReset.addEventListener("click", () => void appZoom.reset(), { signal });
-  appendChildren(zoomRow, zoomSlider, zoomLabel, zoomReset);
-  // The Android app has no webview zoom to set.
-  if (!isAndroidApp()) {
-    section.appendChild(buildSettingRow({ label: t("appearance.zoom"), control: zoomRow }));
-  }
+  const zoomRow = buildZoomRow(signal);
+  if (zoomRow !== null) section.appendChild(zoomRow);
 
   // Compact mode toggle
   const compactToggle = createToggle(currentCompact, {
@@ -383,17 +410,7 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
     syncDisplayedAccent(getDefaultAccent(paletteOf(getActiveThemeName())));
   }, signal);
 
-  // Apply stored preferences on render
-  if (currentTheme === null) {
-    restoreTheme();
-  } else {
-    applyThemeChoice(currentTheme);
-  }
-  applyFontSize();
-  document.documentElement.classList.toggle("compact-mode", currentCompact);
-  if (hasStoredAccent) {
-    applyAccent(currentAccent);
-  }
+  applyStoredPreferences(currentTheme, currentCompact, hasStoredAccent ? currentAccent : null);
 
   return section;
 }

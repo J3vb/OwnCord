@@ -25,6 +25,44 @@ import { micTestVolume } from "./voiceTabShared";
 import { mountGpuAdapterRow } from "./voiceGpuAdapter";
 import type { VoiceTabScope } from "./voiceTabScope";
 
+/**
+ * A saved codec that is no longer offered reads as VP8, as the resolver
+ * does; the pref itself is left alone for a build that offers it.
+ */
+function isCodecUnoffered(
+  savedCodec: string,
+  offerVp9: boolean,
+  offerH265: boolean,
+  h264Available: boolean,
+): boolean {
+  return (
+    (savedCodec === "vp9" && !offerVp9) ||
+    (savedCodec === "h265" && !offerH265) ||
+    (savedCodec === "h264" && !h264Available)
+  );
+}
+
+/** The codec choices on offer, in display order. */
+function codecOptions(
+  linux: boolean,
+  h264Available: boolean,
+  offerVp9: boolean,
+  offerH265: boolean,
+): Array<[string, string]> {
+  return [
+    ["vp8", t("voiceAudio.videoCodec.vp8")],
+    [
+      "h264",
+      h264Available
+        ? t(linux ? "voiceAudio.videoCodec.h264Linux" : "voiceAudio.videoCodec.h264")
+        : t("voiceAudio.videoCodec.h264Unavailable"),
+    ],
+    ...(offerVp9 ? [["vp9", t("voiceAudio.videoCodec.vp9")] as [string, string]] : []),
+    ...(offerH265 ? [["h265", t("voiceAudio.videoCodec.h265")] as [string, string]] : []),
+    ["auto", t(linux ? "voiceAudio.videoCodec.autoLinux" : "voiceAudio.videoCodec.auto")],
+  ];
+}
+
 export function mountOutputAndVideo(sc: VoiceTabScope): void {
   // Output device selector
   sc.outputHeader = createElement(
@@ -311,30 +349,14 @@ export function mountOutputAndVideo(sc: VoiceTabScope): void {
     const offerVp9 = linux ? vp9Native : vp9Offered();
     const offerH265 = h265Offered();
     const savedCodec = getVideoCodecPref();
-    // A saved codec that is no longer offered reads as VP8, as the resolver
-    // does; the pref itself is left alone for a build that offers it.
-    const unoffered =
-      (savedCodec === "vp9" && !offerVp9) ||
-      (savedCodec === "h265" && !offerH265) ||
-      (savedCodec === "h264" && !h264Available);
+    const unoffered = isCodecUnoffered(savedCodec, offerVp9, offerH265, h264Available);
     return [
       ...sc.qualityGroup(
         t("voiceAudio.videoCodec"),
         t(linux ? "voiceAudio.videoCodecDescLinux" : "voiceAudio.videoCodecDesc"),
         "videoCodec",
         unoffered ? "vp8" : savedCodec,
-        [
-          ["vp8", t("voiceAudio.videoCodec.vp8")],
-          [
-            "h264",
-            h264Available
-              ? t(linux ? "voiceAudio.videoCodec.h264Linux" : "voiceAudio.videoCodec.h264")
-              : t("voiceAudio.videoCodec.h264Unavailable"),
-          ],
-          ...(offerVp9 ? [["vp9", t("voiceAudio.videoCodec.vp9")] as [string, string]] : []),
-          ...(offerH265 ? [["h265", t("voiceAudio.videoCodec.h265")] as [string, string]] : []),
-          ["auto", t(linux ? "voiceAudio.videoCodec.autoLinux" : "voiceAudio.videoCodec.auto")],
-        ],
+        codecOptions(linux, h264Available, offerVp9, offerH265),
         h264Available ? new Set() : new Set(["h264"]),
       ),
       createElement(

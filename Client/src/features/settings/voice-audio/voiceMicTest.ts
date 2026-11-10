@@ -25,6 +25,73 @@ import {
 } from "./voiceTabShared";
 import type { VoiceTabScope } from "./voiceTabScope";
 
+/**
+ * The meter's monitor could not start. A call holds the capture (its own
+ * levels drive the meter) or the device did not open: the bar stays empty.
+ * A leaving call stops its levels before the host drops its session, so the
+ * first start can be refused: try a few more times, no more.
+ */
+function handleMonitorStartFailure(
+  sc: VoiceTabScope,
+  err: unknown,
+  request: number,
+  attempt: number,
+): void {
+  log.debug("The meter's monitor could not start", err);
+  sc.endNativeTest();
+  if (!(err instanceof Error && err.message === NATIVE_MIC_TEST_IN_CALL)) return;
+  if (attempt >= MONITOR_RETRIES) return;
+  setOwnedTimeout(
+    sc.signal,
+    () => {
+      if (request !== sc.nativeTestRequest || sc.micTesting || sc.callCapturing) return;
+      void sc.startNativeTest(true, attempt + 1);
+    },
+    MONITOR_RETRY_MS,
+  );
+}
+
+/** The mic test button's own start failed: say why and fall back to the meter. */
+function handleTestStartFailure(sc: VoiceTabScope, err: unknown): void {
+  log.warn("The mic test could not start", err);
+  sc.endNativeTest();
+  sc.micTesting = false;
+  sc.paintTestButton(false);
+  setText(
+    sc.micTestDesc,
+    err instanceof Error && err.message === NATIVE_MIC_TEST_IN_CALL
+      ? t("voiceAudio.micTest.inCall")
+      : t("voiceAudio.micTest.failed"),
+  );
+  sc.startMicMeter();
+}
+
+/** What the host is asked to start: the test, or the silent meter monitor. */
+function nativeTestOptions(
+  sc: VoiceTabScope,
+  monitor: boolean,
+): Parameters<typeof desktop.nativeVoice.startMicTest>[0] {
+  return {
+    input: loadPref<string>("audioInputDevice", ""),
+    output: monitor ? "" : loadPref<string>("audioOutputDevice", ""),
+    audio: nativeTestAudio(),
+    inputGain: sc.inputVolumePercent,
+    outputGain: monitor ? 0 : micTestVolume(loadPref<number>("outputVolume", 100)),
+    threshold: sc.nativeTestThreshold(),
+    speech: true,
+    ...(monitor ? { monitor } : {}),
+  };
+}
+
+/** A call joined and the host stopped the test: the meter follows the call. */
+function finishTestForCall(sc: VoiceTabScope, monitor: boolean): void {
+  sc.endNativeTest();
+  if (monitor) return;
+  sc.micTesting = false;
+  sc.paintTestButton(false);
+  setText(sc.micTestDesc, t("voiceAudio.micTest.inCall"));
+}
+
 export function mountMicTest(sc: VoiceTabScope): void {
   /** Compute sensitivity % from a mouse/touch X position relative to the meter bar. */
   sc.sensitivityFromPointer = function sensitivityFromPointer(clientX: number): number {
@@ -159,16 +226,7 @@ export function mountMicTest(sc: VoiceTabScope): void {
     sc.nativeTestStarting = true;
     sc.nativeTestEndedEarly = null;
     try {
-      const id = await desktop.nativeVoice.startMicTest({
-        input: loadPref<string>("audioInputDevice", ""),
-        output: monitor ? "" : loadPref<string>("audioOutputDevice", ""),
-        audio: nativeTestAudio(),
-        inputGain: sc.inputVolumePercent,
-        outputGain: monitor ? 0 : micTestVolume(loadPref<number>("outputVolume", 100)),
-        threshold: sc.nativeTestThreshold(),
-        speech: true,
-        ...(monitor ? { monitor } : {}),
-      });
+      const id = await desktop.nativeVoice.startMicTest(nativeTestOptions(sc, monitor));
       if (sc.signal.aborted || request !== sc.nativeTestRequest) {
         // Torn down or superseded while starting: stop exactly this test.
         desktop.nativeVoice.stopMicTest(id).catch((err: unknown) => {
@@ -177,50 +235,14 @@ export function mountMicTest(sc: VoiceTabScope): void {
         return;
       }
       if (sc.nativeTestEndedEarly === id) {
-        sc.endNativeTest();
-        if (monitor) return;
-        sc.micTesting = false;
-        sc.paintTestButton(false);
-        setText(sc.micTestDesc, t("voiceAudio.micTest.inCall"));
+        finishTestForCall(sc, monitor);
         return;
       }
       sc.nativeTestId = id;
     } catch (err) {
       if (sc.signal.aborted || request !== sc.nativeTestRequest) return;
-      if (monitor) {
-        // A call holds the capture (its own levels drive the meter) or the
-        // device did not open: the bar stays empty.
-        log.debug("The meter's monitor could not start", err);
-        sc.endNativeTest();
-        // A leaving call stops its levels before the host drops its session,
-        // so the first start can be refused: try a few more times, no more.
-        if (
-          err instanceof Error &&
-          err.message === NATIVE_MIC_TEST_IN_CALL &&
-          attempt < MONITOR_RETRIES
-        ) {
-          setOwnedTimeout(
-            sc.signal,
-            () => {
-              if (request !== sc.nativeTestRequest || sc.micTesting || sc.callCapturing) return;
-              void sc.startNativeTest(true, attempt + 1);
-            },
-            MONITOR_RETRY_MS,
-          );
-        }
-        return;
-      }
-      log.warn("The mic test could not start", err);
-      sc.endNativeTest();
-      sc.micTesting = false;
-      sc.paintTestButton(false);
-      setText(
-        sc.micTestDesc,
-        err instanceof Error && err.message === NATIVE_MIC_TEST_IN_CALL
-          ? t("voiceAudio.micTest.inCall")
-          : t("voiceAudio.micTest.failed"),
-      );
-      sc.startMicMeter();
+      if (monitor) handleMonitorStartFailure(sc, err, request, attempt);
+      else handleTestStartFailure(sc, err);
     } finally {
       if (request === sc.nativeTestRequest) sc.nativeTestStarting = false;
     }
