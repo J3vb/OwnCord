@@ -47,6 +47,7 @@ const EAGER_SITES = [
   "pages/MainPage.ts",
   "pages/main-page/pageMountCalls.ts",
   "pages/main-page/pageMountSettings.ts",
+  "features/settings/mountSettings.ts",
   "pages/main-page/pageMountShell.ts",
   "pages/main-page/pagePresence.ts",
   "pages/main-page/pageShared.ts",
