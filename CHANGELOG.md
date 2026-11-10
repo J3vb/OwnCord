@@ -93,6 +93,7 @@ and only when it changes something a contributor or fork holder must do
 - Tests for the protocol generator's checks on duplicate names and mismatched error codes.
 - The restore-without-safety-backup test no longer depends on the clock, and the long-session soak test waits for the camera to start before measuring.
 - The media-server test step in CI runs its tests again; it had matched none since the LiveKit supervisor moved to its own package.
+- CI scans every pull request and, weekly, the full history for committed secrets.
 
 ## v2.8.0
 

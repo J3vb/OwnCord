@@ -1,0 +1,65 @@
+# Secret-scanning baseline for gitleaks (see the secrets job in
+# .github/workflows/ci.yml and weekly-supply-chain.yml).
+#
+# The default ruleset stays on. Each entry below is scoped to named rules and
+# named paths, and says why the matches are safe. Add a new entry only after
+# reading the match; a real credential is rotated and removed, never listed here.
+
+title = "OwnCord gitleaks config"
+
+[extend]
+useDefault = true
+
+# Test sources: every value is a made-up fixture (planted redaction samples,
+# harness LiveKit secrets, RFC and base32 sample strings). Only the two rules
+# that fire on fixtures are listed; a provider-specific rule still applies.
+[[allowlists]]
+description = "Fixtures in test sources"
+targetRules = ["generic-api-key", "jwt"]
+paths = [
+  '''_test\.go$''',
+  '''\.test\.ts$''',
+  '''\.spec\.ts$''',
+  '''\.suite\.ts$''',
+  '''^Client/tests/''',
+]
+
+# Documentation and protocol fixtures: placeholder tokens, example recovery
+# codes and sample LiveKit values that readers copy into a local setup.
+[[allowlists]]
+description = "Documented placeholder values in docs and protocol fixtures"
+targetRules = ["generic-api-key"]
+paths = [
+  '''^docs/api\.md$''',
+  '''^docs/protocol\.md$''',
+  '''^docs/livekit-setup\.md$''',
+  '''^docs/trust-model\.md$''',
+  '''^docs/architecture/trust-model-evidence\.md$''',
+  '''^docs/brain/06-Specs/(PROTOCOL|SETUP)\.md$''',
+  '''^protocol/fixtures/''',
+]
+
+# Source files whose matches are not credentials: a pinned SHA-256 digest, a
+# public package-signing key fingerprint, the RFC 6455 sample handshake key,
+# prose that happens to look like a key assignment, and the placeholder
+# LiveKit secret the docs generator mounts routes with.
+[[allowlists]]
+description = "Digests, fingerprints and prose that only look like keys"
+targetRules = ["generic-api-key", "discord-api-token"]
+paths = [
+  '''^Client/scripts/gen-emoji-data\.mjs$''',
+  '''^Client/scripts/linux-webrtc-toolchain\.sh$''',
+  '''^Client/(tauri-client/)?src-tauri/src/constants\.rs$''',
+  '''^Client/(tauri-client/)?src-tauri/src/livekit_proxy\.rs$''',
+  '''^Server/auth/totp_encrypt\.go$''',
+  '''^Server/cmd/gendocs/main\.go$''',
+  '''^\.claude/workflows/bughunt\.js$''',
+  '''^\.superpowers/(findings-ledger\.json|FINDINGS\.md)$''',
+]
+
+# Google's published anonymous Tenor test key from its quickstart guide, kept
+# in an early revision of a client file that no longer exists.
+[[allowlists]]
+description = "Public Tenor quickstart test key in a retired client file"
+targetRules = ["gcp-api-key"]
+paths = ['''^Client/tauri-client/src/lib/tenor\.ts$''']
