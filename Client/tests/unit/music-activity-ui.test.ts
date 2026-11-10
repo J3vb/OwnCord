@@ -8,7 +8,7 @@ vi.mock("@lib/logger", () => loggerMock());
 
 import { createUserProfilePopup } from "../../src/features/profiles/userProfilePopup";
 import { createDmProfileSidebar } from "@components/DmProfileSidebar";
-import { createDmSidebar, type DmConversation } from "@components/DmSidebar";
+import { createDmSidebar, type DmConversation } from "../../src/features/direct-messages/DmSidebar";
 import { buildMusicActivityRows } from "../../src/features/settings/MusicActivityRows";
 import { mountListeningCard } from "../../src/features/members/listeningCard";
 import {

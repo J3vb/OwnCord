@@ -11,7 +11,7 @@ import {
   pasteFile,
 } from "../../helpers/messageInputHarness";
 
-vi.mock("@components/EmojiPicker", () => mocks.emojiPickerMock());
+vi.mock("../../../src/features/messaging/EmojiPicker", () => mocks.emojiPickerMock());
 vi.mock("@components/GifPicker", () => mocks.gifPickerMock());
 
 describe("MessageInput", () => {

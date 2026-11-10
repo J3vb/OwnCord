@@ -11,9 +11,9 @@ import {
 } from "vitest";
 import { useMountContainer } from "../helpers/mountContainer";
 import { pressComposingEnter } from "../helpers/keyEvents";
-import { createEmojiPicker } from "@components/EmojiPicker";
+import { createEmojiPicker } from "../../src/features/messaging/EmojiPicker";
 import { quickReactionEmoji } from "../../src/features/messaging/message-list/quickReactions";
-import type { EmojiPickerOptions } from "@components/EmojiPicker";
+import type { EmojiPickerOptions } from "../../src/features/messaging/EmojiPicker";
 import { emojiStore, setCustomEmoji, clearCustomEmoji } from "@stores/emoji.store";
 import { expectConsole } from "../helpers/console";
 import { loadEmojiCatalog, skinTone } from "../../src/features/messaging/emojiCatalog";

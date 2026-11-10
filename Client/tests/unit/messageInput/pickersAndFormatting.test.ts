@@ -16,7 +16,7 @@ import {
 } from "../../helpers/messageInputHarness";
 import { useMountContainer } from "../../helpers/mountContainer";
 
-vi.mock("@components/EmojiPicker", () => mocks.emojiPickerMock());
+vi.mock("../../../src/features/messaging/EmojiPicker", () => mocks.emojiPickerMock());
 vi.mock("@components/GifPicker", () => mocks.gifPickerMock());
 
 describe("MessageInput", () => {

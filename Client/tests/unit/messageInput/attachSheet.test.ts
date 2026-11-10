@@ -6,7 +6,7 @@ import { authStore } from "@stores/auth.store";
 import { mountMessageInput, useMessageInputContainer } from "../../helpers/messageInputHarness";
 import { attachSheetEl, settleHistory } from "../../helpers/composerSheets";
 
-vi.mock("@components/EmojiPicker", () => mocks.emojiPickerMock());
+vi.mock("../../../src/features/messaging/EmojiPicker", () => mocks.emojiPickerMock());
 vi.mock("@components/GifPicker", () => mocks.gifPickerMock());
 
 const sheet = attachSheetEl;

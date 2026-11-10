@@ -27,7 +27,7 @@ import { invalidateChannelMessageWindow } from "@stores/messages.store";
 import { channelsStore } from "@stores/channels.store";
 import { authStore } from "@stores/auth.store";
 import { safetyStore } from "../../features/safety/store";
-import type { ThreadPanelComponent } from "@components/ThreadPanel";
+import type { ThreadPanelComponent } from "../../features/threads/ThreadPanel";
 import { RateLimiter } from "@lib/net/rateLimiter";
 import { setThreadResume, withThreadsStore } from "@stores/threadsLoader";
 import { resumeThreadFocus } from "../../features/messaging/threadResume";
@@ -162,7 +162,7 @@ export function createThreadPanelHost(options: ThreadPanelHostOptions): ThreadPa
     resize.apply();
     const gen = ++loadGen;
     const id = thread.id;
-    void import("@components/ThreadPanel").then(
+    void import("../../features/threads/ThreadPanel").then(
       ({ createThreadPanel }) => {
         if (gen !== loadGen || openId !== id) return;
         const next = createThreadPanel({

@@ -7,37 +7,6 @@
     "app/session.ts": {
       "startSession": [17]
     },
-    "components/AdminActions.ts": {
-      "buildMemberMenu": [38]
-    },
-    "components/ChannelMediaGallery.ts": {
-      "createChannelMediaGallery > loadMore": [18]
-    },
-    "components/DmSidebar.ts": {
-      "convoSignature": [18],
-      "renderDmItem": [16]
-    },
-    "components/EditChannelModal.ts": {
-      "createEditChannelModal > mount": [17]
-    },
-    "components/EmojiPicker.ts": {
-      "createEmojiPicker > renderAllCategories": [16]
-    },
-    "components/SelfProfileCard.ts": {
-      "createSelfProfileCard > open > (anonymous)": [25]
-    },
-    "components/ThreadListPopover.ts": {
-      "openThreadListPopover > loadNext": [16]
-    },
-    "components/ThreadPanel.ts": {
-      "createThreadPanel > sendText": [18]
-    },
-    "components/UpdateNotifier.ts": {
-      "createUpdateNotifier > renderInstallState": [19]
-    },
-    "components/dmContextMenu.ts": {
-      "openDmContextMenu": [30]
-    },
     "features/channels/ChannelSidebar.ts": {
       "buildVoiceModOptions": [16],
       "createChannelSidebar > drawChannels > reconcileRows": [16]

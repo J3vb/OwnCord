@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 let pickerOptions: { onSelect: (emoji: string) => void; onClose: () => void } | null = null;
-vi.mock("@components/EmojiPicker", () => ({
+vi.mock("../../src/features/messaging/EmojiPicker", () => ({
   createEmojiPicker: (opts: NonNullable<typeof pickerOptions>) => {
     pickerOptions = opts;
     return { element: document.createElement("div"), destroy: vi.fn() };

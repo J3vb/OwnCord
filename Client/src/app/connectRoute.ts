@@ -18,7 +18,7 @@ import { SessionScope } from "@lib/net/sessionScope";
 import { parseRegistrationMode, retentionNotice } from "@lib/types";
 import type { AuthResponse } from "@lib/types";
 import { bracketBareIPv6Host } from "@lib/ws";
-import { createUpdateNotifier } from "@components/UpdateNotifier";
+import { createUpdateNotifier } from "../features/updates/UpdateNotifier";
 import { createConnectPage } from "@pages/ConnectPage";
 import { setUpdateRequiredHost, uiStore } from "@stores/ui.store";
 import type { UpdateRequired } from "@stores/ui.store";

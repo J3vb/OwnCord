@@ -15,7 +15,7 @@ vi.mock("@lib/readState", async (importOriginal) => ({
   noteMessageSeen: noteSeen,
 }));
 
-import { createThreadPanel } from "@components/ThreadPanel";
+import { createThreadPanel } from "../../src/features/threads/ThreadPanel";
 import { createMessageList } from "../../src/features/messaging/MessageList";
 import { resumeThreadFocus, withThreadsStore } from "../../src/stores/threadsLoader";
 import { createThreadPanelHost } from "../../src/pages/main-page/ThreadPanelHost";
