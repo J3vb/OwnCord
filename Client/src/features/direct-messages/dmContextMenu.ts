@@ -4,15 +4,15 @@
  * Also owns the destructive group-leave confirm both menus open.
  */
 
-import { createConfirmModal } from "../features/dialogs/confirmModal";
+import { createConfirmModal } from "../dialogs/confirmModal";
 import type { ModalInstance } from "@lib/ui/modalFactory";
 import { showContextMenu, type ContextMenuItem } from "@lib/ui/contextMenu";
-import { requestsText } from "../i18n/requests";
-import { shellText } from "../i18n/shell";
-import { muteChoices, mutedUntilLabel } from "../features/channels/muteMenu";
+import { requestsText } from "../../i18n/requests";
+import { shellText } from "../../i18n/shell";
+import { muteChoices, mutedUntilLabel } from "../channels/muteMenu";
 import { blocksStore } from "@stores/blocks.store";
-import { callUnavailableReason } from "../features/profiles/openUserProfilePopup";
-import { copyWithToast, isDeveloperMode } from "../features/developer-mode/developerTools";
+import { callUnavailableReason } from "../profiles/openUserProfilePopup";
+import { copyWithToast, isDeveloperMode } from "../developer-mode/developerTools";
 
 /** What a DM row's menu needs to know about its conversation. */
 export interface DmMenuConvo {

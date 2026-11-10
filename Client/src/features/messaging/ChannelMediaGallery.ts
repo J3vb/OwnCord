@@ -21,9 +21,9 @@ import type {
   ChannelMediaQuery,
   UserStorage,
 } from "@lib/types";
-import { formatDate, formatNumber } from "../i18n/format";
-import { mediaGalleryText } from "../i18n/mediaGallery";
-import { isSpoilerFilename } from "../features/messaging/spoilerAttachment";
+import { formatDate, formatNumber } from "../../i18n/format";
+import { mediaGalleryText } from "../../i18n/mediaGallery";
+import { isSpoilerFilename } from "./spoilerAttachment";
 import {
   fetchImageAsObjectUrl,
   formatFileSize,
@@ -32,7 +32,7 @@ import {
   isAudioMime,
   resolveServerUrl,
   thumbnailUrl,
-} from "../features/messaging/content/attachments";
+} from "./content/attachments";
 
 /** Quiet period after the last keystroke before a name search runs. */
 export const MEDIA_SEARCH_DEBOUNCE_MS = 300;

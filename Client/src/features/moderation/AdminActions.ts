@@ -5,11 +5,11 @@
 
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { createMenuItem as buildMenuItem, openMenuShell, type OpenMenu } from "@lib/ui/contextMenu";
-import { shellText } from "../i18n/shell";
-import { voiceText } from "../i18n/voice";
-import { copyWithToast, isDeveloperMode } from "../features/developer-mode/developerTools";
-import { TIMEOUT_PRESETS } from "../features/moderation/timeoutPresets";
-import type { VoiceModMenuOptions } from "../features/channels/sidebar/volumeMenu";
+import { shellText } from "../../i18n/shell";
+import { voiceText } from "../../i18n/voice";
+import { copyWithToast, isDeveloperMode } from "../developer-mode/developerTools";
+import { TIMEOUT_PRESETS } from "./timeoutPresets";
+import type { VoiceModMenuOptions } from "../channels/sidebar/volumeMenu";
 
 // ---------------------------------------------------------------------------
 // Types

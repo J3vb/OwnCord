@@ -193,7 +193,7 @@ is one intent, so the user is not asked to choose DM-vs-group up front. Group
 DMs are `channels` rows with `type='dm'` and `is_group=1` server-side
 (migration 028), so leaving a two-person group does not collapse it back into
 a 1:1. "Rename Group" / "Leave Group" affordances live in the DM row context
-menu (the contextmenu handler in `renderDmItem()`, `components/DmSidebar.ts`; leave doubles as "Close DM" for 1:1s);
+menu (the contextmenu handler in `renderDmItem()`, `features/direct-messages/DmSidebar.ts`; leave doubles as "Close DM" for 1:1s);
 ring/incoming calls work the same as 1:1 DMs (`call_ring` fans out to every
 other participant).
 
@@ -232,7 +232,7 @@ and `IsEitherBlocked` is bidirectional). **Target UX:**
 
 `src/features/channels/ChannelSidebar.ts` (+ `sidebar/`),
 `src/features/members/MemberList.ts`, `src/components/TypingIndicator.ts`,
-`src/components/DmSidebar.ts`, `src/components/DmProfileSidebar.ts`,
+`src/features/direct-messages/DmSidebar.ts`, `src/components/DmProfileSidebar.ts`,
 `src/pages/main-page/SidebarArea.ts`, `SidebarMemberSection.ts`,
 `SidebarDmSection.ts`, `SidebarDmHelpers.ts`, `src/stores/channels.store.ts`,
 `members.store.ts`, `dm.store.ts`, `src/lib/dispatcher.ts` (+ `src/features/{channels,direct-messages}/wsHandlers.ts`);

@@ -4,9 +4,9 @@
  */
 
 import type { UserStatus } from "@lib/types";
-import { formatDate } from "../i18n/format";
-import { shellText } from "../i18n/shell";
-import { isAndroidApp } from "../features/voice/native/platform";
+import { formatDate } from "../../i18n/format";
+import { shellText } from "../../i18n/shell";
+import { isAndroidApp } from "../voice/native/platform";
 
 export interface StatusDef {
   readonly value: UserStatus;

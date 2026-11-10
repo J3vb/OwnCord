@@ -164,7 +164,7 @@ and (b) confirm destructive actions.
   inerts the other role options — `currentRole` only updates when the
   `member_update` echoes).
 - **✓ Ban collects a reason (2026-07/08).** The ban flow renders an inline
-  reason input plus a duration choice (`appendBanFlow()` in `components/AdminActions.ts`),
+  reason input plus a duration choice (`appendBanFlow()` in `features/moderation/AdminActions.ts`),
   and the menu passes both through
   (the `onBan` handler in `createSidebarMemberSection()`, `pages/main-page/SidebarMemberSection.ts` → `api.adminBanMember(userId, reason,
 durationHours)`), so temporary bans and stored reasons work from the client.
@@ -297,7 +297,7 @@ the only indicator. Both clear at 0 and on logout.
 
 ## Source of truth
 
-`src/features/settings/SettingsOverlay.ts` (+ `settings/*`), `src/components/AdminActions.ts`,
+`src/features/settings/SettingsOverlay.ts` (+ `settings/*`), `src/features/moderation/AdminActions.ts`,
 `src/components/InviteManager.ts`, `CreateChannelModal.ts`, `EditChannelModal.ts`,
 `DeleteChannelModal.ts`, `src/components/UpdateNotifier.ts`, `src/lib/net/updater.ts`,
 `src/lib/api.ts`, `src/lib/prefs/themes.ts`, `src/lib/prefs/preferences.ts`,

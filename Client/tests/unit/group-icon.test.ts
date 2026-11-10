@@ -11,8 +11,8 @@ vi.mock("../../src/features/messaging/content/attachments", () => ({
 }));
 
 import { useDmSidebarHost } from "../helpers/dmSidebarHost";
-import { buildGroupAvatarStack } from "../../src/components/DmSidebar";
-import type { DmConversation } from "../../src/components/DmSidebar";
+import { buildGroupAvatarStack } from "../../src/features/direct-messages/DmSidebar";
+import type { DmConversation } from "../../src/features/direct-messages/DmSidebar";
 import {
   cropGroupIcon,
   removeGroupIcon,

@@ -15,7 +15,7 @@ import { setConnectionStatus } from "@stores/ui.store";
 import { type UserStatus } from "../../../src/lib/types";
 import { openUserProfilePopup } from "../../../src/features/profiles/openUserProfilePopup";
 import "../../../src/features/profiles/userProfilePopup";
-import "@components/AdminActions";
+import "../../../src/features/moderation/AdminActions";
 import {
   resetStore,
   makeMember,

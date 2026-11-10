@@ -13,8 +13,12 @@ vi.mock("../../src/features/messaging/content/attachments", () =>
   avatarAttachmentsMock(fetchImageAsObjectUrl),
 );
 
-import { createDmSidebar } from "../../src/components/DmSidebar";
-import type { DmConversation, DmSidebar, DmSidebarOptions } from "../../src/components/DmSidebar";
+import { createDmSidebar } from "../../src/features/direct-messages/DmSidebar";
+import type {
+  DmConversation,
+  DmSidebar,
+  DmSidebarOptions,
+} from "../../src/features/direct-messages/DmSidebar";
 import { resetBlocksStore, setUserBlockedByMe } from "../../src/stores/blocks.store";
 import { setConnectionStatus } from "../../src/stores/ui.store";
 

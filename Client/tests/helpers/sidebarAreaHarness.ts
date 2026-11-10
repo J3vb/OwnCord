@@ -7,7 +7,7 @@ import { uiStore } from "../../src/stores/ui.store";
 import { voiceStore, joinVoiceChannel } from "../../src/stores/voice.store";
 import type { DmChannel } from "../../src/stores/dm.store";
 import { createChannelSidebar } from "../../src/features/channels/ChannelSidebar";
-import { createDmSidebar } from "@components/DmSidebar";
+import { createDmSidebar } from "../../src/features/direct-messages/DmSidebar";
 import { createMemberList } from "../../src/features/members/MemberList";
 import { createUserBar } from "@components/UserBar";
 import { createVoiceWidget } from "@components/VoiceWidget";

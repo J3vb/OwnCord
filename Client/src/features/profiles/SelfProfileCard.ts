@@ -45,12 +45,12 @@ import {
   statusNote,
   statusTimerLine,
   type StatusDef,
-} from "@components/statusDefs";
+} from "../presence/statusDefs";
 import { createLazyScreen } from "@lib/ui/lazyScreen";
-import { createAvatarElement } from "../features/profiles/avatar";
-import { copyWithToast, isDeveloperMode } from "../features/developer-mode/developerTools";
-import { shellText } from "../i18n/shell";
-import { connectText } from "../i18n/connect";
+import { createAvatarElement } from "./avatar";
+import { copyWithToast, isDeveloperMode } from "../developer-mode/developerTools";
+import { shellText } from "../../i18n/shell";
+import { connectText } from "../../i18n/connect";
 import { attachLimitHint, collapseSpaces, lineHintText, runeCount } from "@lib/text/nameLimits";
 
 // The picker loads on its first open, so its code stays out of the main-page chunk.

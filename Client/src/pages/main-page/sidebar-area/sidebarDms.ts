@@ -5,8 +5,8 @@
 import { isTextLikeChannel } from "@lib/types";
 import type { MountableComponent } from "@lib/text/safeRender";
 import { errorText } from "@lib/api";
-import { createDmSidebar, type DmSidebar } from "@components/DmSidebar";
-import type { DmMenuActions } from "@components/dmContextMenu";
+import { createDmSidebar, type DmSidebar } from "../../../features/direct-messages/DmSidebar";
+import type { DmMenuActions } from "../../../features/direct-messages/dmContextMenu";
 import { selectDmConversation, handleCreateDm, handleCreateGroupDm } from "../SidebarDmHelpers";
 import { createPromptModal } from "@lib/ui/modalFactory";
 import { muteChannel, toggleChannelMute, unmuteChannel } from "@lib/prefs/channelMutes";

@@ -21,7 +21,7 @@ vi.mock("@components/QuickSwitchOverlay", () => ({
 vi.mock("../../src/features/channels/ChannelSidebar", () => ({
   createChannelSidebar: vi.fn().mockReturnValue({ mount: vi.fn(), destroy: vi.fn() }),
 }));
-vi.mock("@components/DmSidebar", () => ({
+vi.mock("../../src/features/direct-messages/DmSidebar", () => ({
   createDmSidebar: vi.fn().mockReturnValue({ mount: vi.fn(), destroy: vi.fn(), update: vi.fn() }),
 }));
 vi.mock("../../src/features/members/MemberList", () => ({

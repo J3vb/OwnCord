@@ -21,18 +21,14 @@ import { createIcon, type IconName } from "@lib/icons";
 import type { ModalInstance } from "@lib/ui/modalFactory";
 import { openMenuOnKeyboard } from "@lib/ui/contextMenu";
 import type { MountableComponent } from "@lib/text/safeRender";
-import {
-  avatarAnimationMode,
-  isRenderableAvatar,
-  setAvatarSource,
-} from "../features/profiles/avatar";
+import { avatarAnimationMode, isRenderableAvatar, setAvatarSource } from "../profiles/avatar";
 import {
   fetchImageAsObjectUrl,
   recoverEvictedImage,
   resolveServerUrl,
-} from "../features/messaging/content/attachments";
-import { requestsText } from "../i18n/requests";
-import { voiceText } from "../i18n/voice";
+} from "../messaging/content/attachments";
+import { requestsText } from "../../i18n/requests";
+import { voiceText } from "../../i18n/voice";
 import { getChannelMute } from "@lib/prefs/channelMutes";
 import { openDmContextMenu, openLeaveConfirm, type DmMenuConvo } from "./dmContextMenu";
 import { onPrefChange } from "@lib/prefs/preferences";
