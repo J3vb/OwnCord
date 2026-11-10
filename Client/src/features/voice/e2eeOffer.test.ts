@@ -129,6 +129,33 @@ describe("E2EEOffer key placement", () => {
     });
   });
 
+  it("uses a staged first offer at once, then keeps the offered placement for the next", async () => {
+    const { host, offers } = setup();
+    vi.mocked(unwrapRoomKey)
+      .mockResolvedValueOnce({
+        roomKey: new Uint8Array([7]),
+        epoch: 3,
+        placement: { slot: 1, stage: true },
+      })
+      .mockResolvedValueOnce({
+        roomKey: new Uint8Array([8]),
+        epoch: 4,
+        placement: { slot: 0, stage: true },
+      });
+    await offers.handleOffer(HOLDER, "enc", "iv");
+    expect(host.setRoomKeyPlacement).toHaveBeenLastCalledWith({ slot: 1, stage: false });
+    expect(host.applyRoomKey).toHaveBeenLastCalledWith(new Uint8Array([7]), expect.any(Function), {
+      slot: 1,
+      stage: false,
+    });
+    await offers.handleOffer(HOLDER, "enc", "iv");
+    expect(host.setRoomKeyPlacement).toHaveBeenLastCalledWith({ slot: 0, stage: true });
+    expect(host.applyRoomKey).toHaveBeenLastCalledWith(new Uint8Array([8]), expect.any(Function), {
+      slot: 0,
+      stage: true,
+    });
+  });
+
   it("wraps each peer's offer with the placement the host gives that peer", async () => {
     const { state, host, offers } = setup();
     const roomKey = new Uint8Array([5]);
@@ -770,4 +797,65 @@ describe("E2EEOffer with arbitrary offer text", () => {
     },
     PROPERTY_TIMEOUT_MS,
   );
+});
+
+describe("E2EEOffer after the provider write", () => {
+  it.each([
+    ["a rotation advanced the epoch", (s: ReturnType<typeof setup>["state"]) => s.epoch++],
+    [
+      "the session keypair was replaced",
+      (s: ReturnType<typeof setup>["state"]) => (s.keypair = { ...KEYPAIR }),
+    ],
+    ["the attempt was superseded", (s: ReturnType<typeof setup>["state"]) => (s.current = false)],
+  ])("stands nothing down and wakes nobody when %s during the write", async (_label, change) => {
+    const { state, host, offers } = setup();
+    const resolver = vi.fn();
+    state.resolver = resolver;
+    state.keyHolder = true;
+    host.applyRoomKey.mockImplementationOnce(async () => {
+      change(state);
+      return true;
+    });
+    await offers.handleOffer(HOLDER, "enc", "iv");
+    expect(resolver).not.toHaveBeenCalled();
+    expect(state.keyHolder).toBe(true);
+    expect(host.clearKeyRotationTimer).not.toHaveBeenCalled();
+    expect(log.info).toHaveBeenCalledWith(
+      "E2EE: discarding stale offer after setKey (epoch or session keypair changed)",
+      { fromUserId: HOLDER },
+    );
+  });
+
+  it("leaves the epoch high-water mark and key alone for an offer that went stale during unwrap", async () => {
+    const { state, offers } = setup();
+    vi.mocked(unwrapRoomKey).mockImplementationOnce(async () => {
+      state.epoch = 1;
+      return { roomKey: new Uint8Array([7]), epoch: 3 };
+    });
+    await offers.handleOffer(HOLDER, "enc", "iv");
+    expect(state.offerEpochs.has(HOLDER)).toBe(false);
+    expect(state.roomKey).toBeNull();
+  });
+
+  it("does not touch the join waiter or holder role when the unwrap fails for a superseded attempt", async () => {
+    vi.mocked(unwrapRoomKey).mockRejectedValue(new Error("bad"));
+    const { state, offers } = setup();
+    const resolver = vi.fn();
+    state.resolver = resolver;
+    state.keyHolder = true;
+    state.current = false;
+    await offers.handleOffer(HOLDER, "enc", "iv");
+    expect(resolver).not.toHaveBeenCalled();
+    expect(state.keyHolder).toBe(true);
+  });
+
+  it("drops an offer from a non-holder peer without unwrapping or recording an epoch", async () => {
+    const { state, offers } = setup();
+    state.keyHolder = true;
+    state.myUserId = HOLDER;
+    await offers.handleOffer(HOLDER, "enc", "iv");
+    expect(unwrapRoomKey).not.toHaveBeenCalled();
+    expect(state.offerEpochs.size).toBe(0);
+    expect(state.keyHolder).toBe(true);
+  });
 });

@@ -441,6 +441,7 @@ export const shards = {
     "src/features/messaging/emojiCatalog.ts",
     "src/features/reports/openers.ts",
     "src/features/voice/e2eePeerState.ts",
+    "src/features/voice/e2eePinOutcome.ts",
     "src/stores/dm.store.ts",
     "src/stores/followedThreads.store.ts",
     "src/stores/stickers.store.ts",
