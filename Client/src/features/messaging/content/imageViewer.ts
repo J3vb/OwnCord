@@ -9,17 +9,13 @@ import { createElement } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { createZoomPan, PAN_MIN_SCALE, bindTouchZoom } from "@lib/ui/zoomPan";
 import { showToast } from "@lib/ui/toast";
-import { announceSaved } from "@lib/ui/savedNotice";
 import { desktop } from "../../../platform/desktop";
 import type { ExternalImageSource } from "../../../platform/contracts/externalContent";
 import { mediaControlsText } from "../../../i18n/mediaControls";
-import { messageStatusText } from "../../../i18n/messageStatus";
-import { fileTransferText } from "../../../i18n/fileTransfer";
 import type { ImageMenuTarget } from "../message-list/imageMenu";
 import {
   fetchExternalImage,
   fetchImageAsObjectUrl,
-  fetchServerFile,
   isExternalUrl,
   isServerUrl,
   recoverEvictedImage,
@@ -27,113 +23,17 @@ import {
   thumbnailUrl,
 } from "./attachmentCache";
 import { log } from "./attachmentUrls";
+import { downloadFile, failedText, type FileAction } from "./fileDownload";
+import type { LightboxCurrent, LightboxGallery, LightboxHandle } from "./lightboxTypes";
 
-/** One image of a message's lightbox sequence. `url` is the resolved server URL. */
-export interface LightboxGalleryItem {
-  readonly url: string;
-  readonly filename: string;
-  readonly mime: string;
-}
-
-/** The images of the clicked message, for the viewer's previous/next arrows. */
-export interface LightboxGallery {
-  readonly items: readonly LightboxGalleryItem[];
-  readonly index: number;
-  /** True once the message was deleted; checked when the viewer opens. */
-  readonly isGone?: () => boolean;
-  /** Calls `onGone` when the message is deleted; returns the unsubscribe. */
-  readonly watch?: (onGone: () => void) => () => void;
-  /** The message's row, for focus when the viewer closes over a deletion. */
-  readonly row?: () => Element | null;
-}
-
-/** What the viewer shows now: Download, Open original, the image menu and
- *  eviction recovery all read this at use time, never at bind time. */
-export interface LightboxCurrent {
-  readonly external: ExternalImageSource | undefined;
-  readonly alt: string;
-  /** The server URL shown in full when it is not `external`'s file: a HEIC or
-   *  TIFF is shown through its JPEG preview, while Save keeps the original. */
-  readonly shown?: string | undefined;
-}
-
-/** What the lazy gallery module drives (3A-10c). */
-export interface LightboxHandle {
-  readonly overlay: HTMLElement;
-  readonly img: HTMLImageElement;
-  /** Tab cycle, in order; the gallery puts its arrows first. */
-  readonly controls: HTMLButtonElement[];
-  readonly signal: AbortSignal;
-  setCurrent(current: LightboxCurrent): void;
-  /** Resets zoom and pan and ends a drag in progress. */
-  resetView(): void;
-  /** What a sideways swipe at 1x does: 1 is the next image, -1 the previous. */
-  onSwipeStep(step: (direction: 1 | -1) => void): void;
-  closeMenu(): void;
-  /** True while the image menu is open; it owns the arrow keys. */
-  isImageMenuOpen(): boolean;
-  /** Passed in so the lazy gallery module imports only types from here. */
-  fetchImageAsObjectUrl(url: string): Promise<string | null>;
-  thumbnailUrl(fileUrl: string, mime: string): string;
-  shownImageUrl(fileUrl: string, mime: string): string;
-  close(): void;
-}
-
-/** What a file button does with the bytes: save them, or (where the host
- *  has a share sheet) hand them to another app. */
-export type FileAction = "save" | "share";
-
-function failedText(action: FileAction, filename: string): string {
-  return action === "share"
-    ? fileTransferText("shareFailed", { filename })
-    : messageStatusText("file.downloadFailed", { filename });
-}
-
-/** Saves and shares in flight, by action and URL: a second tap while the first
- *  still runs does nothing, so a slow download is not saved twice. */
-const inFlight = new Set<string>();
-
-/** Download a file via Tauri HTTP plugin and save to disk with native dialog,
- *  or open the share sheet on it. `fs:allow-write-file` is statically scoped
- *  to `$APPLOG` (nothing covers app data); the save dialog grants the one path
- *  the user chose at runtime, so the dialog itself is the boundary for the
- *  download. The Android app has no dialog: the host saves into shared
- *  storage and a toast says where. */
-export async function downloadFile(
-  url: string,
-  filename: string,
-  action: FileAction = "save",
-): Promise<void> {
-  const key = `${action} ${url}`;
-  if (inFlight.has(key)) return;
-  inFlight.add(key);
-  try {
-    // The dialog opens before the fetch, so it answers the click at once.
-    const filePath = action === "save" ? await desktop.fileSaver.pickSaveLocation(filename) : null;
-    if (action === "save" && filePath === null) return; // User cancelled
-
-    // Fetch file data — server downloads go through the cert-pinned HTTP proxy
-    // with the session bearer token (the files endpoint requires auth).
-    const res = await fetchServerFile(url);
-    if (!res.ok) {
-      log.error("Download failed", { filename, status: res.status });
-      showToast(messageStatusText("file.downloadHttpFailed", { status: res.status }), "error");
-      return;
-    }
-
-    const data = new Uint8Array(await res.arrayBuffer());
-    if (filePath === null) await desktop.shareSheet.shareFile(filename, data);
-    else announceSaved(await desktop.fileSaver.writeFile(filePath, data), filename);
-  } catch (err) {
-    log.error(action === "share" ? "Share failed" : "Download failed", {
-      filename,
-      error: String(err),
-    });
-    showToast(failedText(action, filename), "error");
-  } finally {
-    inFlight.delete(key);
-  }
-}
+export { downloadFile };
+export type { FileAction };
+export type {
+  LightboxGalleryItem,
+  LightboxGallery,
+  LightboxCurrent,
+  LightboxHandle,
+} from "./lightboxTypes";
 
 // -- Image menu ---------------------------------------------------------------
 

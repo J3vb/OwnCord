@@ -9,43 +9,21 @@ import { createElement, setText, clearChildren } from "@lib/dom";
 import { enableRovingNavigation, setRovingTabindex } from "@lib/ui/a11y";
 import { ApiClientError } from "@lib/api";
 import { searchGifs, getTrendingGifs } from "@lib/media/gifProvider";
-import type { GifApi, GifFavoritesApi, GifPage, GifResult } from "@lib/media/gifProvider";
+import type { GifPage, GifResult } from "@lib/media/gifProvider";
 import { createGifPager } from "@lib/media/gifPager";
-import { createPickerImages, type PickerImages } from "./pickerImages";
-import { gifFavoritesStore, isGifFavorite, toggleGifFavorite } from "@stores/gifFavorites.store";
-import {
-  fetchExternalImage,
-  recoverEvictedImage,
-  renderFailureStatus,
-} from "./content/attachments";
-import {
-  admitDerived,
-  externalAllowed,
-  GIF_PICKER_ITEM,
-  requestExternalItem,
-} from "../content-consent/external";
+import { createPickerImages } from "./pickerImages";
+import { gifFavoritesStore, isGifFavorite } from "@stores/gifFavorites.store";
+import { renderFailureStatus } from "./content/attachments";
+import { externalAllowed, GIF_PICKER_ITEM, requestExternalItem } from "../content-consent/external";
 import { externalConsentText } from "../../i18n/externalConsent";
 import { contentText } from "../../i18n/content";
 import { messagingText } from "../../i18n/messaging";
 import { gifFavoritesText } from "../../i18n/gifFavorites";
 import { RestErrorCode } from "@lib/protocolTypes";
+import type { GifPickerOptions } from "./gifPickerOptions";
+import { appendCells, setStarState, toggleCell } from "./gifPickerCells";
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-export interface GifPickerOptions {
-  /** GIF endpoints on the user's own server. */
-  readonly api: GifApi & GifFavoritesApi;
-  readonly onSelect: (gifUrl: string) => void;
-  readonly onClose: () => void;
-  /**
-   * Called when the server reports GIFs are not configured (503 GIF_DISABLED).
-   * The caller uses this to disable its GIF affordance so the user is not
-   * offered a feature this server does not have.
-   */
-  readonly onUnavailable?: (reason: string) => void;
-}
+export type { GifPickerOptions };
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -59,62 +37,6 @@ const LOAD_MORE_MARGIN = "0px 0px 480px 0px";
 // ---------------------------------------------------------------------------
 // GifPicker
 // ---------------------------------------------------------------------------
-
-function setStarState(star: HTMLElement, on: boolean): void {
-  star.setAttribute("aria-pressed", String(on));
-  star.setAttribute("aria-label", gifFavoritesText(on ? "unfavorite" : "favorite"));
-  star.classList.toggle("on", on);
-  star.textContent = on ? "\u2605" : "\u2606";
-}
-
-/** Star/unstar the GIF a grid cell shows. */
-async function toggleCell(cell: HTMLElement): Promise<void> {
-  const url = cell.dataset.fullUrl;
-  if (url === undefined) return;
-  await toggleGifFavorite({
-    url,
-    preview_url: cell.dataset.previewUrl ?? url,
-    title: cell.dataset.title ?? "",
-  });
-}
-
-function appendCells(grid: HTMLElement, gifs: readonly GifResult[], images: PickerImages): void {
-  for (const gif of gifs) {
-    const item = createElement("div", {
-      class: "gp-item",
-      role: "option",
-      // Same fallback as the img alt below — an untitled GIF still needs a
-      // pronounceable accessible name.
-      "aria-label": gif.title || messagingText("gif.itemLabel"),
-      // Read by the delegated click handler on gridArea (see mount-time
-      // listener above) instead of a per-cell listener.
-      "data-full-url": gif.fullUrl,
-      "data-preview-url": gif.url,
-      "data-title": gif.title,
-      "aria-keyshortcuts": "F",
-    });
-    // Klipy's CDN is still an external host: the thumbnail arrives through
-    // the external-content broker, not as a URL the webview loads itself.
-    const img = createElement("img", {
-      class: "gp-img",
-      alt: gif.title || messagingText("gif.itemLabel"),
-      loading: "lazy",
-    });
-    admitDerived(GIF_PICKER_ITEM, `url:${gif.url}`);
-    recoverEvictedImage(img, { url: gif.url });
-    images.observe(img, () => fetchExternalImage({ url: gif.url }));
-    item.appendChild(img);
-    const star = createElement("button", {
-      type: "button",
-      class: "gp-star",
-      tabindex: "-1",
-    });
-    setStarState(star, isGifFavorite(gif.fullUrl));
-    item.appendChild(star);
-
-    grid.appendChild(item);
-  }
-}
 
 export function createGifPicker(options: GifPickerOptions): {
   readonly element: HTMLDivElement;

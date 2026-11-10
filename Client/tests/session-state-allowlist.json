@@ -8,7 +8,7 @@
       "reason": "Advisory per-host server-info snapshot, rewritten or dropped by each probe of that host; moved verbatim from main.ts, whose registered reset never cleared it"
     },
     {
-      "file": "features/messaging/content/imageViewer.ts",
+      "file": "features/messaging/content/fileDownload.ts",
       "binding": "inFlight",
       "category": "transient",
       "reason": "Saves and shares in flight, each removed in its own finally, so a second tap does not save twice"
