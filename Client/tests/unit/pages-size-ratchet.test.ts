@@ -9,7 +9,7 @@ import { isInstrumented, withoutSandboxHeader } from "../helpers/instrumented";
 const pagesDir = path.resolve(__dirname, "../../src/pages");
 
 /** Lower this when pages/ shrinks (round the new total up to the next 50); it never rises. */
-const PAGES_LINE_CAP = 14750;
+const PAGES_LINE_CAP = 14600;
 
 function pageFiles(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {

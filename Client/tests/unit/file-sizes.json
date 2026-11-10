@@ -1,10 +1,1 @@
-{
-  "src/lib/apiAccount.ts": 550,
-  "src/lib/apiShared.ts": 650,
-  "src/lib/diagnostics/eventCodes.ts": 600,
-  "src/lib/types.ts": 550,
-  "src/lib/wireServer.ts": 1000,
-  "src/pages/ConnectPage.ts": 550,
-  "src/pages/connect-page/ServerPanel.ts": 650,
-  "src/pages/connect-page/login-form/loginFormDom.ts": 600
-}
+{}
