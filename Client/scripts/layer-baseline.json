@@ -70,11 +70,11 @@
     },
     "lib/voice/livekitE2EE.ts": {
       "features/voice/e2eeEpoch.ts": 1,
+      "features/voice/e2eeFlows.ts": 1,
       "features/voice/e2eeIdentity.ts": 1,
       "features/voice/e2eeOffer.ts": 1,
       "features/voice/e2eePeerState.ts": 1,
       "features/voice/e2eeWorker.ts": 1,
-      "stores/auth.store.ts": 1,
       "stores/voice.store.ts": 1
     },
     "lib/voice/livekitReconnect.ts": {

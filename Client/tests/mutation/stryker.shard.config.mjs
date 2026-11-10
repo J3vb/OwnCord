@@ -79,7 +79,12 @@ export const shards = {
     "src/lib/voice/h264Profile.ts",
   ],
   "livekit-6": [
+    "src/features/voice/e2eeAnnounce.ts",
+    "src/features/voice/e2eeFlows.ts",
+    "src/features/voice/e2eeHost.ts",
+    "src/features/voice/e2eeLeave.ts",
     "src/features/voice/e2eeOffer.ts",
+    "src/features/voice/e2eeSetup.ts",
     "src/features/voice/e2eeWorker.ts",
     "src/features/voice/mediaLostNotice.ts",
     "src/features/voice/native/screenPicker.ts",
