@@ -1,5 +1,4 @@
 {
-  "src/app/session.ts": 550,
   "src/features/channels/wsHandlers.ts": 850,
   "src/features/direct-messages/DmProfileSidebar.ts": 650,
   "src/features/forums/ForumView.ts": 750,

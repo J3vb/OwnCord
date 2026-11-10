@@ -11,7 +11,7 @@ import type { ApiClient } from "@lib/api";
 import { loadCredential } from "@lib/net/credentials";
 import { setOwnedTimeout } from "@lib/dom";
 import { createLogger } from "@lib/logger";
-import type { ProfileManager } from "@lib/presence/profiles";
+import type { ProfileManager, ServerProfile } from "@lib/presence/profiles";
 import type { SessionScope } from "@lib/net/sessionScope";
 import type { createConnectPage } from "@pages/ConnectPage";
 import { connectText } from "../i18n/connect";
@@ -31,6 +31,21 @@ type ConnectPage = Pick<
   | "hideServerWait"
 > &
   Parameters<typeof checkHealth>[0];
+
+// Consume any pending skip-auto-login flag. It is the single source of truth
+// for "an explicit logout just happened, don't auto-login" (set by the
+// isAuthenticated subscriber further down).
+function consumeSkipAutoLogin(): boolean {
+  const skip = sessionStorage.getItem("owncord:skip-auto-login") !== null;
+  sessionStorage.removeItem("owncord:skip-auto-login");
+  return skip;
+}
+
+function consumeQuickSwitchTarget(): string | null {
+  const target = sessionStorage.getItem("owncord:quick-switch-target");
+  if (target !== null) sessionStorage.removeItem("owncord:quick-switch-target");
+  return target;
+}
 
 /**
  * Returns [startup, cancel, forgetHost] as a tuple, not an object: object keys
@@ -100,59 +115,64 @@ export function createAutoLogin(
     probeAfter(5_000);
   }
 
+  // The stored token outlives an opt-out whose delete failed, so the
+  // profile's own setting decides, not the credential's presence. The portal
+  // skips this: its store encodes the choice, since an unticked login keeps
+  // the token session-only and it dies with the tab.
+  function mayResume(profile: ResumableProfile): boolean {
+    return __OWNCORD_WEB__ || profile.rememberPassword === true || profile.autoConnect === true;
+  }
+
+  // The synchronous tail of a resume, run in the same step as the ownership
+  // checks that precede it: select the server, show the progress, then hand
+  // the stored token to startSession.
+  function launchResume(
+    profile: ResumableProfile,
+    username: string,
+    token: string,
+    waitIfDown: boolean,
+  ): void {
+    // Pass autoConnect so the checkbox still reads correctly if the
+    // user cancels and lands back on the form.
+    connectPage.selectServer(profile.host, username, profile.autoConnect, profile.rememberPassword);
+    connectPage.showAutoConnecting(profile.name);
+
+    if (autoLoginCancelled) return;
+
+    // Use stored token directly for reconnection, preserving the
+    // profile's existing rememberPassword and autoConnect.
+    //
+    // The credential re-save no longer has to be suppressed here.
+    // save_credential used to treat an absent password as "erase it",
+    // so re-saving without one destroyed the password the user opted
+    // to remember; it now preserves the stored password unless asked
+    // to clear it, so this path can refresh the token normally.
+    api.setConfig({ host: profile.host });
+    ensureProfileExists(profile.host, username, profile.rememberPassword, profile.autoConnect);
+    startSession(
+      profile.host,
+      token,
+      username,
+      undefined,
+      profile.rememberPassword,
+      false,
+      waitIfDown ? () => waitForServer(profile) : undefined,
+      profile.autoConnect,
+    );
+  }
+
   // Resume a profile's session from its stored token — startup auto-login
   // and a quick switch back to a server share this path. No-op when the
   // host has no stored token. A resume the wait itself started does not wait
   // again: a server that answers but never signs in gets the offline error.
   async function resumeStoredSession(profile: ResumableProfile, waitIfDown = true): Promise<void> {
-    // The stored token outlives an opt-out whose delete failed, so the
-    // profile's own setting decides, not the credential's presence. The portal
-    // skips this: its store encodes the choice, since an unticked login keeps
-    // the token session-only and it dies with the tab.
-    if (!__OWNCORD_WEB__ && profile.rememberPassword !== true && profile.autoConnect !== true)
-      return;
+    if (!mayResume(profile)) return;
     const attempt = api.getSession();
     try {
       const cred = await loadCredential(profile.host);
       if (!pageOwner.isCurrent() || !attempt.isCurrent()) return;
       if (cred?.username && cred?.token && !autoLoginCancelled) {
-        // Pass autoConnect so the checkbox still reads correctly if the
-        // user cancels and lands back on the form.
-        connectPage.selectServer(
-          profile.host,
-          cred.username,
-          profile.autoConnect,
-          profile.rememberPassword,
-        );
-        connectPage.showAutoConnecting(profile.name);
-
-        if (autoLoginCancelled) return;
-
-        // Use stored token directly for reconnection, preserving the
-        // profile's existing rememberPassword and autoConnect.
-        //
-        // The credential re-save no longer has to be suppressed here.
-        // save_credential used to treat an absent password as "erase it",
-        // so re-saving without one destroyed the password the user opted
-        // to remember; it now preserves the stored password unless asked
-        // to clear it, so this path can refresh the token normally.
-        api.setConfig({ host: profile.host });
-        ensureProfileExists(
-          profile.host,
-          cred.username,
-          profile.rememberPassword,
-          profile.autoConnect,
-        );
-        startSession(
-          profile.host,
-          cred.token,
-          cred.username,
-          undefined,
-          profile.rememberPassword,
-          false,
-          waitIfDown ? () => waitForServer(profile) : undefined,
-          profile.autoConnect,
-        );
+        launchResume(profile, cred.username, cred.token, waitIfDown);
       }
     } catch (err) {
       // A superseded attempt (e.g. a manual login started while this
@@ -164,6 +184,37 @@ export function createAutoLogin(
         connectPage.showError(connectText("session.autoLoginFailedDetail", { message }));
       }
     }
+  }
+
+  // Auto-select the quick-switch target server profile so the user can
+  // reconnect with one click.
+  function selectQuickSwitchTarget(host: string): ServerProfile | undefined {
+    const targetProfile = profileManager.getAll().find((p) => p.host === host);
+    connectPage.selectServer(
+      host,
+      targetProfile?.username ?? undefined,
+      targetProfile?.autoConnect,
+      targetProfile?.rememberPassword,
+    );
+    return targetProfile;
+  }
+
+  // The portal resumes its one host: the saved profile, or a stand-in when
+  // none was saved. An unticked login leaves no auto-connect profile, so
+  // `getAutoConnectProfile` would never find it.
+  function pickAutoProfile(): ResumableProfile | null | undefined {
+    if (!__OWNCORD_WEB__ || fixedHost === undefined) return profileManager.getAutoConnectProfile();
+    return (
+      profileManager.getAll().find((p) => p.host === fixedHost) ?? {
+        name: fixedHost,
+        host: fixedHost,
+        // Not true: `ensureProfileExists` would persist it and tick
+        // "Stay signed in" for a user who unticked it. The resume runs
+        // anyway, because the web skips the opt-out check.
+        autoConnect: false,
+        rememberPassword: false,
+      }
+    );
   }
 
   /** Capture ownership and load the saved profiles, then resume the right session. */
@@ -192,21 +243,13 @@ export function createAutoLogin(
       // mount — quick-switch included — must clear it here or it survives in
       // sessionStorage and goes on to suppress a later, unrelated
       // auto-login.
-      const skipAutoLogin = sessionStorage.getItem("owncord:skip-auto-login") !== null;
-      sessionStorage.removeItem("owncord:skip-auto-login");
+      const skipAutoLogin = consumeSkipAutoLogin();
 
       // Quick-switch: if the user switched servers via the overlay, auto-select
       // the target server profile so they can reconnect with one click.
-      const quickSwitchTarget = sessionStorage.getItem("owncord:quick-switch-target");
+      const quickSwitchTarget = consumeQuickSwitchTarget();
       if (quickSwitchTarget !== null) {
-        sessionStorage.removeItem("owncord:quick-switch-target");
-        const targetProfile = profileManager.getAll().find((p) => p.host === quickSwitchTarget);
-        connectPage.selectServer(
-          quickSwitchTarget,
-          targetProfile?.username ?? undefined,
-          targetProfile?.autoConnect,
-          targetProfile?.rememberPassword,
-        );
+        const targetProfile = selectQuickSwitchTarget(quickSwitchTarget);
         // A quick switch keeps each server's saved sign-in, so
         // switching back resumes with the stored token exactly as auto-login
         // does. Without a stored credential the prefilled form stays up.
@@ -225,21 +268,7 @@ export function createAutoLogin(
       // Auto-login: if a profile has autoConnect enabled, try to reconnect
       // using the stored token (password is no longer returned from the
       // credential store over IPC for security).
-      // The portal resumes its one host: the saved profile, or a stand-in when
-      // none was saved. An unticked login leaves no auto-connect profile, so
-      // `getAutoConnectProfile` would never find it.
-      const autoProfile =
-        __OWNCORD_WEB__ && fixedHost !== undefined
-          ? (profileManager.getAll().find((p) => p.host === fixedHost) ?? {
-              name: fixedHost,
-              host: fixedHost,
-              // Not true: `ensureProfileExists` would persist it and tick
-              // "Stay signed in" for a user who unticked it. The resume runs
-              // anyway, because the web skips the opt-out check.
-              autoConnect: false,
-              rememberPassword: false,
-            })
-          : profileManager.getAutoConnectProfile();
+      const autoProfile = pickAutoProfile();
       if (autoProfile) await resumeStoredSession(autoProfile);
     })();
   }

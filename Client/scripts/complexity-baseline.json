@@ -1,27 +1,7 @@
 {
   "complexity": {
-    "app/autoLogin.ts": {
-      "createAutoLogin > resumeStoredSession": [18],
-      "createAutoLogin > startup > (anonymous)": [17]
-    },
-    "app/session.ts": {
-      "startSession": [17]
-    },
-    "lib/api.ts": {
-      "createApiClient > doFetch": [30]
-    },
-    "lib/apiShared.ts": {
-      "authSliceCopy": [28]
-    },
     "lib/net/connectionDiagnostics.ts": {
       "runConnectionDiagnostics": [29]
-    },
-    "pages/connect-page/login-form/loginFormDom.ts": {
-      "createLoginFormDom > buildFormPanel": [19]
-    },
-    "pages/connect-page/login-form/loginFormSubmit.ts": {
-      "createLoginFormSubmit > handleFormSubmit": [21],
-      "createLoginFormSubmit > validateForm": [16]
     },
     "platform/desktop/pushToTalkService.ts": {
       "startBinding": [19]
