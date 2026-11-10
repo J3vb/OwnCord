@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as mocks from "../../helpers/overlayManagersMocks";
 import { setMembers } from "@stores/members.store";
-import { createPinnedMessages } from "@components/PinnedMessages";
+import { createPinnedMessages } from "../../../src/features/messaging/PinnedMessages";
 import { channelsStore } from "@stores/channels.store";
 import { messagesStore } from "@stores/messages.store";
 import { membersStore } from "@stores/members.store";
@@ -18,9 +18,9 @@ import {
 import { guarded, pressBack } from "../../helpers/backNav";
 
 vi.mock("@lib/logger", () => mocks.loggerMock());
-vi.mock("@components/QuickSwitcher", () => mocks.quickSwitcherMock());
+vi.mock("../../../src/features/navigation/QuickSwitcher", () => mocks.quickSwitcherMock());
 vi.mock("../../../src/features/invites/InviteManager", () => mocks.inviteManagerMock());
-vi.mock("@components/PinnedMessages", () => mocks.pinnedMessagesMock());
+vi.mock("../../../src/features/messaging/PinnedMessages", () => mocks.pinnedMessagesMock());
 vi.mock("@components/SearchOverlay", () => mocks.searchOverlayMock());
 vi.mock("@stores/channels.store", () => mocks.channelsStoreMock());
 vi.mock("@stores/messages.store", () => mocks.messagesStoreMock());

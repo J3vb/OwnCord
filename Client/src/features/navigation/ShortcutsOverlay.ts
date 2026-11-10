@@ -19,7 +19,7 @@ import { loadEffectiveKeybinds } from "@lib/prefs/keybinds";
 import { comboLabel, comboOrNotSet } from "@lib/prefs/keybindLabels";
 import { vkName } from "@lib/voice/ptt";
 import { loadGlobalShortcutVks } from "@lib/voice/voiceShortcuts";
-import { settingsText as t } from "../i18n/settings";
+import { settingsText as t } from "../../i18n/settings";
 
 let current: ModalInstance | null = null;
 

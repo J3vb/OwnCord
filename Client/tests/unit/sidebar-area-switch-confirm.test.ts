@@ -12,7 +12,7 @@ const { createQuickSwitchOverlay, switchToServer } = vi.hoisted(() => ({
   createQuickSwitchOverlay: vi.fn(),
   switchToServer: vi.fn(),
 }));
-vi.mock("@components/QuickSwitchOverlay", () => ({ createQuickSwitchOverlay }));
+vi.mock("../../src/features/navigation/QuickSwitchOverlay", () => ({ createQuickSwitchOverlay }));
 vi.mock("../../src/features/server-rail/switchServer", () => ({
   switchToServer,
   addServer: vi.fn(),

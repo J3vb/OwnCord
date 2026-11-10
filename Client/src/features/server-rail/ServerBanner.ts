@@ -4,7 +4,7 @@
  */
 
 import { createElement, setText } from "@lib/dom";
-import { shellText } from "../i18n/shell";
+import { shellText } from "../../i18n/shell";
 
 /**
  * Facts that make a connection notice actionable. `offline` is the device's

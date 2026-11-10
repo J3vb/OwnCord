@@ -8,16 +8,16 @@ import { createElement, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/text/safeRender";
 import { parseTimestamp } from "@lib/text/formatting";
-import { messagingText } from "../i18n/messaging";
-import { formatDate } from "../i18n/format";
-import { createAvatarElement } from "../features/profiles/avatar";
-import { renderMessageContent } from "../features/messaging/content/contentParser";
+import { messagingText } from "../../i18n/messaging";
+import { formatDate } from "../../i18n/format";
+import { createAvatarElement } from "../profiles/avatar";
+import { renderMessageContent } from "./content/contentParser";
 import type { ImportedAuthor } from "@lib/types";
 import {
   createImportedAvatar,
   createImportedName,
   createImportedTag,
-} from "../features/messaging/message-list/importedAuthor";
+} from "./message-list/importedAuthor";
 
 export interface PinnedMessage {
   readonly id: number;

@@ -9,7 +9,7 @@ import type { MountableComponent } from "@lib/text/safeRender";
 import { Disposable } from "@lib/disposable";
 import { membersStore, getTypingUsers, memberDisplayName } from "@stores/members.store";
 import type { Member } from "@stores/members.store";
-import { shellText } from "../i18n/shell";
+import { shellText } from "../../i18n/shell";
 
 export interface TypingIndicatorOptions {
   readonly channelId: number;

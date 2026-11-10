@@ -17,7 +17,7 @@ export const gifPickerScreen = createLazyScreen(
 
 export const stickerPickerScreen = createLazyScreen(
   "sticker-picker",
-  () => import("@components/StickerPicker"),
+  () => import("../StickerPicker"),
 );
 
 export const TYPING_THROTTLE_MS = 3_000;

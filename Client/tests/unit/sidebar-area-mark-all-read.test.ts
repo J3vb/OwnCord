@@ -23,7 +23,7 @@ vi.mock("@lib/presence/profiles", () => mocks.presenceProfilesMock());
 vi.mock("../../src/features/voice/UserBar", () => mocks.userBarMock());
 vi.mock("../../src/features/voice/VoiceWidget", () => mocks.voiceWidgetMock());
 vi.mock("../../src/features/members/MemberList", () => mocks.memberListMock());
-vi.mock("@components/QuickSwitchOverlay", () => mocks.quickSwitchOverlayMock());
+vi.mock("../../src/features/navigation/QuickSwitchOverlay", () => mocks.quickSwitchOverlayMock());
 vi.mock("../../src/pages/main-page/OverlayManagers", () => mocks.inviteManagerMock());
 
 import { createSidebarArea } from "../../src/pages/main-page/SidebarArea";

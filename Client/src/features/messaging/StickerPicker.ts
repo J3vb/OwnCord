@@ -9,8 +9,8 @@ import { isImeCommit } from "@lib/text/ime";
 import { createElement, clearChildren } from "@lib/dom";
 import { enableRovingNavigation, setRovingTabindex } from "@lib/ui/a11y";
 import { stickersStore, type Sticker } from "@stores/stickers.store";
-import { loadStickerImage } from "../features/messaging/message-list/sticker";
-import { stickersText } from "../i18n/stickers";
+import { loadStickerImage } from "./message-list/sticker";
+import { stickersText } from "../../i18n/stickers";
 import { addRecentSticker, getRecentStickerIds } from "./stickerRecent";
 
 export interface StickerPickerOptions {

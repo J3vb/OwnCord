@@ -15,7 +15,7 @@ import { createCreateChannelModal } from "@components/CreateChannelModal";
 import "../../../src/pages/main-page/MemberPickerModal";
 import { createEditChannelModal } from "../../../src/features/channels/editChannelDialog";
 import { createDeleteChannelModal } from "@components/DeleteChannelModal";
-import { createQuickSwitchOverlay } from "@components/QuickSwitchOverlay";
+import { createQuickSwitchOverlay } from "../../../src/features/navigation/QuickSwitchOverlay";
 import { createProfileManager } from "@lib/presence/profiles";
 import {
   MockedFn,
@@ -42,7 +42,9 @@ vi.mock("../../../src/features/direct-messages/DmSidebar", () => mocks.dmSidebar
 vi.mock("../../../src/features/members/MemberList", () => mocks.memberListMock());
 vi.mock("../../../src/features/voice/UserBar", () => mocks.userBarMock());
 vi.mock("../../../src/features/voice/VoiceWidget", () => mocks.voiceWidgetMock());
-vi.mock("@components/QuickSwitchOverlay", () => mocks.quickSwitchOverlayMock());
+vi.mock("../../../src/features/navigation/QuickSwitchOverlay", () =>
+  mocks.quickSwitchOverlayMock(),
+);
 vi.mock("@components/CreateChannelModal", () => mocks.createChannelModalMock());
 vi.mock("@tauri-apps/api/core", () => mocks.apiCoreMock());
 vi.mock("../../../src/features/channels/editChannelDialog", () => mocks.editChannelModalMock());

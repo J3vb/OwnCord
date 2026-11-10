@@ -15,7 +15,7 @@ import { createModal } from "@lib/ui/modalFactory";
 import type { WsClient } from "@lib/ws";
 import type { ThreadAutoArchiveMinutes, ThreadInfo } from "@lib/types";
 import { getChannelMessages } from "@stores/messages.store";
-import { claimForwardRequest, releaseForwardRequest } from "../features/messaging/forwardRequests";
+import { claimForwardRequest, releaseForwardRequest } from "../messaging/forwardRequests";
 import {
   AUTO_ARCHIVE_CHOICES,
   DEFAULT_AUTO_ARCHIVE,
@@ -23,8 +23,8 @@ import {
   cleanThreadName,
   isConnected,
   suggestThreadName,
-} from "../features/threads/threadCommands";
-import { threadsText } from "../i18n/threads";
+} from "./threadCommands";
+import { threadsText } from "../../i18n/threads";
 import { WsErrorCode } from "@lib/protocolTypes";
 
 /** How long to wait for the server's answer before saying so. */

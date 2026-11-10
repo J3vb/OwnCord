@@ -25,16 +25,16 @@ import {
   pruneSelection,
   toggleForwardTarget,
   type ForwardTarget,
-} from "../features/messaging/forwardTargets";
+} from "./forwardTargets";
 import {
   createForwardSession,
   type ForwardResult,
   type ForwardSession,
   type ForwardWs,
-} from "../features/messaging/forwardSend";
-import { MAX_MESSAGE_LEN } from "../features/messaging/messageLimits";
-import { forwardText } from "../i18n/forward";
-import { shellText } from "../i18n/shell";
+} from "./forwardSend";
+import { MAX_MESSAGE_LEN } from "./messageLimits";
+import { forwardText } from "../../i18n/forward";
+import { shellText } from "../../i18n/shell";
 import { WsErrorCode } from "@lib/protocolTypes";
 
 export interface ForwardPickerOptions {

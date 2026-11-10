@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
-import { createQuickSwitchOverlay } from "@components/QuickSwitchOverlay";
-import type { QuickSwitchOverlayOptions } from "@components/QuickSwitchOverlay";
+import { createQuickSwitchOverlay } from "../../../src/features/navigation/QuickSwitchOverlay";
+import type { QuickSwitchOverlayOptions } from "../../../src/features/navigation/QuickSwitchOverlay";
 import { useMountContainer } from "../../helpers/mountContainer";
 
 const ONE_SERVER = {

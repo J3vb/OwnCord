@@ -31,7 +31,7 @@ const h = vi.hoisted(() => {
   };
 });
 
-vi.mock("@components/QuickSwitcher", async () => {
+vi.mock("../../src/features/navigation/QuickSwitcher", async () => {
   await h.gates.quick.wait;
   return { createQuickSwitcher: h.createQuickSwitcher };
 });

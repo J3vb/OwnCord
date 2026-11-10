@@ -9,7 +9,7 @@ vi.mock("@lib/presence/profiles", () => mocks.presenceProfilesMock());
 vi.mock("../../src/features/voice/UserBar", () => mocks.userBarMock());
 vi.mock("../../src/features/voice/VoiceWidget", () => mocks.voiceWidgetMock());
 vi.mock("../../src/features/members/MemberList", () => mocks.memberListMock());
-vi.mock("@components/QuickSwitchOverlay", () => mocks.quickSwitchOverlayMock());
+vi.mock("../../src/features/navigation/QuickSwitchOverlay", () => mocks.quickSwitchOverlayMock());
 const { inviteOpen, openAdminPanel, createModal } = vi.hoisted(() => ({
   inviteOpen: vi.fn().mockResolvedValue(undefined),
   openAdminPanel: vi.fn().mockResolvedValue(undefined),

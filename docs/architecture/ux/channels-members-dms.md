@@ -117,7 +117,7 @@ role grouping.
 `typing` events populate `members.typingUsers` with a 5 s auto-clear timer.
 **Target:** show "X is typing…" / "X and Y are typing…" / "Several people are
 typing…" below the message list, excluding the current user (already
-`formatTypingText()` in `components/TypingIndicator.ts`). The client emits `typing_start` while composing
+`formatTypingText()` in `features/messaging/TypingIndicator.ts`). The client emits `typing_start` while composing
 (debounced), never per-keystroke. A `chat_message` clears its sender's entry at
 once (`handleChatMessage`, `features/messaging/wsHandlers.ts`), and the bar keeps
 its 24 px row while empty so typing start/stop never shifts the message list.
@@ -231,7 +231,7 @@ and `IsEitherBlocked` is bidirectional). **Target UX:**
 ## Source of truth
 
 `src/features/channels/ChannelSidebar.ts` (+ its siblings `channelListRender.ts`, `voiceSidebarRows.ts` and `sidebar/`),
-`src/features/members/MemberList.ts`, `src/components/TypingIndicator.ts`,
+`src/features/members/MemberList.ts`, `src/features/messaging/TypingIndicator.ts`,
 `src/features/direct-messages/DmSidebar.ts`, `src/components/DmProfileSidebar.ts`,
 `src/pages/main-page/SidebarArea.ts`, `SidebarMemberSection.ts`,
 `SidebarDmSection.ts`, `SidebarDmHelpers.ts`, `src/stores/channels.store.ts`,

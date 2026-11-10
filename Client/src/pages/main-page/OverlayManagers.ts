@@ -38,7 +38,7 @@ const log = createLogger("overlays");
 // failed one on the next open.
 const quickSwitcherScreen = createLazyScreen(
   "quick-switcher",
-  () => import("@components/QuickSwitcher"),
+  () => import("../../features/navigation/QuickSwitcher"),
 );
 const searchOverlayScreen = createLazyScreen(
   "search-overlay",
@@ -111,7 +111,7 @@ export function createQuickSwitcherManager(
   }
 
   function mountSwitcher(
-    screen: typeof import("@components/QuickSwitcher"),
+    screen: typeof import("../../features/navigation/QuickSwitcher"),
     root: HTMLDivElement,
   ): void {
     instance = screen.createQuickSwitcher({

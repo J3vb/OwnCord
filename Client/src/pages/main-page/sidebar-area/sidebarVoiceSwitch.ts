@@ -5,7 +5,10 @@
 import { createElement } from "@lib/dom";
 import { Disposable } from "@lib/disposable";
 import { createLazyScreen } from "@lib/ui/lazyScreen";
-import { createQuickSwitchOverlay, type QuickSwitchProfile } from "@components/QuickSwitchOverlay";
+import {
+  createQuickSwitchOverlay,
+  type QuickSwitchProfile,
+} from "../../../features/navigation/QuickSwitchOverlay";
 import { createVoiceWidgetCallbacks } from "../VoiceCallbacks";
 import { selectDmConversation } from "../SidebarDmHelpers";
 import { uiStore } from "@stores/ui.store";

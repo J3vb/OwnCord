@@ -55,7 +55,7 @@ vi.mock("../../src/features/voice/UserBar", () => mocks.userBarMock());
 
 vi.mock("../../src/features/voice/VoiceWidget", () => mocks.voiceWidgetMock());
 
-vi.mock("@components/QuickSwitchOverlay", () => mocks.quickSwitchOverlayMock());
+vi.mock("../../src/features/navigation/QuickSwitchOverlay", () => mocks.quickSwitchOverlayMock());
 
 vi.mock("@tauri-apps/api/core", () => mocks.apiCoreMock());
 

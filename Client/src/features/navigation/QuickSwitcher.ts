@@ -12,7 +12,7 @@ import type { Channel } from "@stores/channels.store";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
 import { isChannelMuted } from "@lib/prefs/channelMutes";
 import type { MountableComponent } from "@lib/text/safeRender";
-import { shellText } from "../i18n/shell";
+import { shellText } from "../../i18n/shell";
 
 export interface QuickSwitcherOptions {
   readonly onSelectChannel: (channelId: number) => void;
