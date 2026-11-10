@@ -34,7 +34,7 @@ vi.mock("@lib/text/safeRender", () => ({ safeMount: vi.fn() }));
 vi.mock("@lib/net/credentials", () => ({
   deleteCredential: vi.fn(),
   loginWithSavedPassword: vi.fn(),
-  parseRelayedLogin: vi.fn(),
+  readRelayedLogin: vi.fn(),
 }));
 vi.mock("@lib/pendingMessages", () => ({ deactivatePendingMessages: vi.fn() }));
 vi.mock("@pages/ConnectPage", () => ({
@@ -74,6 +74,7 @@ vi.mock("../../src/app/session", () => ({
 }));
 
 import { setUpdateRequiredHost, uiStore } from "@stores/ui.store";
+import { loginWithSavedPassword, readRelayedLogin } from "@lib/net/credentials";
 import { renderConnect } from "../../src/app/connectRoute";
 
 const PAGE_METHODS = [
@@ -231,6 +232,52 @@ describe("renderConnect", () => {
       api.verifyTotp.mockResolvedValueOnce({ token: "t" });
       await cb("onTotpSubmit")("222222");
       expect(hoisted.startSession).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("saved-password login", () => {
+    let ended = false;
+    beforeEach(() => {
+      ended = false;
+      api.getSession.mockReturnValue({
+        run: <T>(work: Promise<T>): Promise<T> => work,
+        assertCurrent: () => {
+          if (ended) throw new DOMException("superseded", "AbortError");
+        },
+      });
+      vi.mocked(loginWithSavedPassword).mockResolvedValue({ status: 200, body: "{}" });
+    });
+
+    it("signs in with a reply that passes the check", async () => {
+      mount();
+      vi.mocked(readRelayedLogin).mockResolvedValue({ token: "t", requires_2fa: false });
+      await cb("onLoginWithSavedPassword")("host.example", "ann");
+      expect(hoisted.startSession).toHaveBeenCalledTimes(1);
+    });
+
+    it("hands a reply that fails the check to the form and starts no session", async () => {
+      mount();
+      vi.mocked(readRelayedLogin).mockRejectedValue(new Error("unreadable reply"));
+      await expect(cb("onLoginWithSavedPassword")("host.example", "ann")).rejects.toThrow(
+        "unreadable reply",
+      );
+      expect(hoisted.startSession).not.toHaveBeenCalled();
+    });
+
+    it("starts no session when a newer attempt replaced it during the check", async () => {
+      mount();
+      let finishCheck: (auth: { token: string; requires_2fa: boolean }) => void = () => {};
+      vi.mocked(readRelayedLogin).mockReturnValue(
+        new Promise((resolve) => {
+          finishCheck = resolve;
+        }),
+      );
+      const login = cb("onLoginWithSavedPassword")("host.example", "ann");
+      await flushStore();
+      ended = true;
+      finishCheck({ token: "t", requires_2fa: false });
+      await expect(login).rejects.toMatchObject({ name: "AbortError" });
+      expect(hoisted.startSession).not.toHaveBeenCalled();
     });
   });
 

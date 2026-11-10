@@ -36,13 +36,14 @@ export function preloadReplyShapes(): void {
 /**
  * A reply the client cannot read. A call that is not a GET has already been
  * acted on, so its copy says the change may have been made: a blind retry
- * could make it twice.
+ * could make it twice. A sign-in reply changes nothing the user made.
  */
-function unreadable(method: string, status: number): ApiClientError {
+function unreadable(reply: keyof RestReplyShapes, method: string, status: number): ApiClientError {
+  const read = method === "GET" || reply === "AuthResponse";
   return new ApiClientError(
     status,
     REPLY_SHAPE_CODE,
-    connectText(method === "GET" ? "session.unreadableReply" : "session.unreadableWriteReply"),
+    connectText(read ? "session.unreadableReply" : "session.unreadableWriteReply"),
   );
 }
 
@@ -73,7 +74,7 @@ export async function readReply<K extends keyof RestReplyShapes>(
       status: at.status,
       error: err instanceof Error ? err.name : "unknown",
     });
-    throw unreadable(at.method, at.status);
+    throw unreadable(reply, at.method, at.status);
   }
   const fault = checkRest(reply, body, table);
   if (fault === null) return body as RestReplyShapes[K];
@@ -84,5 +85,5 @@ export async function readReply<K extends keyof RestReplyShapes>(
     field: fault.path,
     expected: fault.expected,
   });
-  throw unreadable(at.method, at.status);
+  throw unreadable(reply, at.method, at.status);
 }
