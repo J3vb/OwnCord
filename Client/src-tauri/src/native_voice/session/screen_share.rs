@@ -66,6 +66,12 @@ impl NativeSession {
         }
         let capture = self.screen.as_ref().map(|s| s.id);
         *lock(&self.screen_publication) = Some(VideoPublication::of_capture(sid.clone(), capture));
+        self.hold_published_layers(
+            VideoKind::Screen,
+            &sid,
+            publication.track(),
+            opts.max_bitrate,
+        );
         Ok(sid.to_string())
     }
 
