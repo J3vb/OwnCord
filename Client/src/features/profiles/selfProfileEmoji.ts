@@ -6,7 +6,10 @@ import { runeCount } from "@lib/text/nameLimits";
 import type { CardSession } from "./selfProfileTypes";
 
 // The picker loads on its first open, so its code stays out of the main-page chunk.
-const emojiPickerScreen = createLazyScreen("emoji-picker", () => import("@components/EmojiPicker"));
+const emojiPickerScreen = createLazyScreen(
+  "emoji-picker",
+  () => import("../messaging/EmojiPicker"),
+);
 
 export interface StatusEmojiPicker {
   /** Whether the picker is on screen right now. */
@@ -67,7 +70,7 @@ export function attachEmojiPicker(host: EmojiHost): StatusEmojiPicker {
     host.onInserted();
   }
 
-  function open(screen: typeof import("@components/EmojiPicker")): void {
+  function open(screen: typeof import("../messaging/EmojiPicker")): void {
     picker = screen.createEmojiPicker({
       // Custom statuses render as plain text, so a server emoji would show
       // as ":shortcode:".

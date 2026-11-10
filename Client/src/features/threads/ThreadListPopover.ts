@@ -23,8 +23,8 @@ import {
   createArchiveIcon,
   threadAgoLabel,
   threadCountLabel,
-} from "../features/messaging/message-list/threadChip";
-import { threadsText } from "../i18n/threads";
+} from "../messaging/message-list/threadChip";
+import { threadsText } from "../../i18n/threads";
 
 const PAGE_SIZE = 25;
 

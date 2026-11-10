@@ -22,8 +22,8 @@ import { isImeCommit } from "@lib/text/ime";
 import { createElement, setText } from "@lib/dom";
 import { Disposable } from "@lib/disposable";
 import { createIcon, type IconName } from "@lib/icons";
-import { createConfirmModal } from "../features/dialogs/confirmModal";
-import { openMenuSheet } from "../features/menus/menuSheet";
+import { createConfirmModal } from "../dialogs/confirmModal";
+import { openMenuSheet } from "../menus/menuSheet";
 import { isPhoneLayout } from "@lib/ui/bottomSheet";
 import type { ContextMenuItem } from "@lib/ui/contextMenu";
 import { formatMessageTimestamp, resolveAuthor, userRoleColorVar } from "@lib/text/formatting";
@@ -54,9 +54,9 @@ import {
 } from "@stores/messages.store";
 import { getThread, isFollowed, threadsStore } from "@stores/threads.store";
 import { threadFollowsEnabled } from "@lib/net/serverCapabilities";
-import { safetyStore } from "../features/safety/store";
-import { formatUntil, safetyText } from "../i18n/safety";
-import { messageResponseToMessage } from "../features/messaging/messageModel";
+import { safetyStore } from "../safety/store";
+import { formatUntil, safetyText } from "../../i18n/safety";
+import { messageResponseToMessage } from "../messaging/messageModel";
 import {
   canManageThread,
   cleanThreadName,
@@ -66,28 +66,28 @@ import {
   sendThreadUpdate,
   threadComposerReason,
   THREAD_NAME_MAX,
-} from "../features/threads/threadCommands";
-import { createMessageList, type MessageListComponent } from "../features/messaging/MessageList";
+} from "./threadCommands";
+import { createMessageList, type MessageListComponent } from "../messaging/MessageList";
 import {
   createMessageInput,
   type MessageInputComponent,
   type SentAttachment,
-} from "../features/messaging/MessageInput";
-import { createThreadSendQueue } from "../features/threads/threadSendQueue";
-import { createArchiveIcon } from "../features/messaging/message-list/threadChip";
-import { renderMessageContent } from "../features/messaging/content/contentParser";
-import { createAvatarElement, pickAvatarColor } from "../features/profiles/avatar";
+} from "../messaging/MessageInput";
+import { createThreadSendQueue } from "./threadSendQueue";
+import { createArchiveIcon } from "../messaging/message-list/threadChip";
+import { renderMessageContent } from "../messaging/content/contentParser";
+import { createAvatarElement, pickAvatarColor } from "../profiles/avatar";
 import {
   createImportedAvatar,
   createImportedName,
   createImportedTag,
-} from "../features/messaging/message-list/importedAuthor";
-import { importedName } from "../features/messaging/importedAuthor";
-import type { MessageController } from "../pages/main-page/MessageController";
-import { messagingText } from "../i18n/messaging";
-import { shellText } from "../i18n/shell";
-import { threadsText } from "../i18n/threads";
-import { stickersText } from "../i18n/stickers";
+} from "../messaging/message-list/importedAuthor";
+import { importedName } from "../messaging/importedAuthor";
+import type { MessageController } from "../../pages/main-page/MessageController";
+import { messagingText } from "../../i18n/messaging";
+import { shellText } from "../../i18n/shell";
+import { threadsText } from "../../i18n/threads";
+import { stickersText } from "../../i18n/stickers";
 import { findSticker } from "@stores/stickers.store";
 
 export interface ThreadPanelOptions {

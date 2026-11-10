@@ -295,7 +295,7 @@ export function openPollComposer(opts: PollComposerOptions): void {
 
   function openPicker(index: number, anchor: HTMLElement): void {
     closePicker();
-    void import("./EmojiPicker").then(
+    void import("../features/messaging/EmojiPicker").then(
       ({ createEmojiPicker }) => {
         if (signal.aborted || modal === null) return;
         const made = createEmojiPicker({

@@ -6,8 +6,11 @@ import {
   formatSlowMode,
   MAX_SLOW_MODE_SECONDS,
   MAX_VOICE_LIMIT,
-} from "@components/EditChannelModal";
-import type { EditChannelModalOptions, EditChannelData } from "@components/EditChannelModal";
+} from "../../src/features/channels/editChannelDialog";
+import type {
+  EditChannelModalOptions,
+  EditChannelData,
+} from "../../src/features/channels/editChannelDialog";
 import { channelsStore, setChannels, updateChannel } from "@stores/channels.store";
 import {
   checkBackdropClickCloses,

@@ -43,7 +43,7 @@ vi.mock("@pages/ConnectPage", () => ({
     return hoisted.page;
   },
 }));
-vi.mock("@components/UpdateNotifier", () => ({
+vi.mock("../../src/features/updates/UpdateNotifier", () => ({
   createUpdateNotifier: () => {
     const entry = { mount: vi.fn(), destroy: vi.fn() };
     hoisted.notifiers.push(entry);

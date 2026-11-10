@@ -13,7 +13,7 @@ vi.mock("../../src/features/messaging/emojiCatalog", async (importOriginal) => {
   return { ...actual, loadEmojiCatalog: loadMock };
 });
 
-import { createEmojiPicker } from "@components/EmojiPicker";
+import { createEmojiPicker } from "../../src/features/messaging/EmojiPicker";
 import { emojiCatalog } from "../../src/features/messaging/emojiCatalog";
 import { clearCustomEmoji } from "@stores/emoji.store";
 

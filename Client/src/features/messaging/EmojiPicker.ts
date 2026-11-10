@@ -6,11 +6,11 @@ import { Disposable } from "@lib/disposable";
 import { isImeCommit } from "@lib/text/ime";
 import { createElement, setText, clearChildren } from "@lib/dom";
 import { enableRovingNavigation, setRovingTabindex } from "@lib/ui/a11y";
-import { buildCustomEmojiNode } from "../features/messaging/content/customEmoji";
-import { createPickerImages, type PickerImages } from "../features/messaging/pickerImages";
-import { trackPickerCategory } from "../features/messaging/pickerScroll";
-import { messagingText } from "../i18n/messaging";
-import { addRecentEmoji, getRecentEmoji } from "../features/messaging/emojiRecent";
+import { buildCustomEmojiNode } from "./content/customEmoji";
+import { createPickerImages, type PickerImages } from "./pickerImages";
+import { trackPickerCategory } from "./pickerScroll";
+import { messagingText } from "../../i18n/messaging";
+import { addRecentEmoji, getRecentEmoji } from "./emojiRecent";
 import {
   emojiCatalog,
   emojiMatches,
@@ -20,7 +20,7 @@ import {
   withSkinTone,
   SKIN_TONES,
   type EmojiGroupKey,
-} from "../features/messaging/emojiCatalog";
+} from "./emojiCatalog";
 
 // ---------------------------------------------------------------------------
 // Types

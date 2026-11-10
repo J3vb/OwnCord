@@ -26,9 +26,9 @@ import { canManageChannels } from "@lib/permissions";
 import { forumsEnabled } from "@lib/net/serverCapabilities";
 import type { MountableComponent } from "@lib/text/safeRender";
 import { channelsStore, type Channel, type ChannelsState } from "@stores/channels.store";
-import { shellText } from "../i18n/shell";
-import type { ForumSettingsSection } from "../features/forums/ForumSettingsSection";
-import { forumsText } from "../i18n/forums";
+import { shellText } from "../../i18n/shell";
+import type { ForumSettingsSection } from "../forums/ForumSettingsSection";
+import { forumsText } from "../../i18n/forums";
 import type { ForumSettingsBody } from "@lib/types";
 import {
   channelTypeLabel,
@@ -622,7 +622,7 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
       forumsEnabled() &&
       canManageChannels()
     ) {
-      void import("../features/forums/ForumSettingsSection").then(
+      void import("../forums/ForumSettingsSection").then(
         ({ createForumSettingsSection }) => {
           if (destroyed) return;
           const section = createForumSettingsSection({

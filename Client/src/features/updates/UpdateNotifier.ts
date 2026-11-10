@@ -6,13 +6,13 @@ import { createIcon } from "@lib/icons";
 import type { IconName } from "@lib/icons";
 import { createLogger } from "@lib/logger";
 import { downloadAndInstallUpdate, subscribeToUpdateInstall } from "@lib/net/updater";
-import { createUpdateChecker } from "../features/updates/updateChecker";
-import type { UpdateCheckReason, UpdateOutcome } from "../features/updates/updateChecker";
-import { setAvailableUpdate } from "../features/updates/availableUpdate";
+import { createUpdateChecker } from "./updateChecker";
+import type { UpdateCheckReason, UpdateOutcome } from "./updateChecker";
+import { setAvailableUpdate } from "./availableUpdate";
 import { openSettings, uiStore } from "@stores/ui.store";
 import type { DownloadProgress, UpdateInstallState } from "@lib/net/updater";
 import type { MountableComponent } from "@lib/text/safeRender";
-import { connectText } from "../i18n/connect";
+import { connectText } from "../../i18n/connect";
 
 const log = createLogger("update-notifier");
 

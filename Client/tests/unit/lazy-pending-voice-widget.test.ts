@@ -40,7 +40,7 @@ vi.mock("@components/QuickSwitchOverlay", () => mocks.quickSwitchOverlayMock());
 
 vi.mock("@tauri-apps/api/core", () => mocks.apiCoreMock());
 
-vi.mock("@components/EditChannelModal", () => mocks.editChannelModalMock());
+vi.mock("../../src/features/channels/editChannelDialog", () => mocks.editChannelModalMock());
 
 vi.mock("@components/DeleteChannelModal", () => mocks.deleteChannelModalMock());
 

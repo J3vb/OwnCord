@@ -4,7 +4,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { useMountContainer } from "../helpers/mountContainer";
 
-vi.mock("@components/EmojiPicker", () => ({
+vi.mock("../../src/features/messaging/EmojiPicker", () => ({
   createEmojiPicker: () => ({ element: document.createElement("div"), destroy: vi.fn() }),
 }));
 vi.mock("@components/GifPicker", () => ({

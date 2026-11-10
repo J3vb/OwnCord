@@ -16,7 +16,10 @@ process.env.OC_MUTATION_RUN = "1";
 // out of the mutation surface it was never in; adding it is a separate decision.
 const MOVED_NOT_MUTATED = [
   "src/features/channels/ChannelSidebar.ts",
+  "src/features/channels/channelCategorySelect.ts",
   "src/features/channels/channelReorderRollback.ts",
+  "src/features/channels/channelTypes.ts",
+  "src/features/channels/editChannelDialog.ts",
   "src/features/channels/editChannelModal.ts",
   "src/features/channels/muteMenu.ts",
   "src/features/channels/sidebar/categoryMenu.ts",
@@ -46,6 +49,7 @@ const MOVED_NOT_MUTATED = [
   "src/features/members/MemberList.ts",
   "src/features/members/memberMenuLoader.ts",
   "src/features/messaging/ChannelMediaGallery.ts",
+  "src/features/messaging/EmojiPicker.ts",
   "src/features/messaging/MessageInput.ts",
   "src/features/messaging/MessageList.ts",
   "src/features/messaging/channelInitialState.ts",
@@ -170,6 +174,9 @@ const MOVED_NOT_MUTATED = [
   "src/features/settings/voice-audio/voiceOutputVideo.ts",
   "src/features/settings/voice-audio/voiceTabScope.ts",
   "src/features/settings/voice-audio/voiceTabShared.ts",
+  "src/features/threads/ThreadListPopover.ts",
+  "src/features/threads/ThreadPanel.ts",
+  "src/features/updates/UpdateNotifier.ts",
   "src/features/voice/videoGrid/gridFocus.ts",
   "src/features/voice/videoGrid/gridStats.ts",
   "src/features/voice/videoGridSync.ts",
