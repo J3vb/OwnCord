@@ -5,7 +5,10 @@
 import { createElement } from "@lib/dom";
 import { Disposable } from "@lib/disposable";
 import { createLazyScreen } from "@lib/ui/lazyScreen";
-import { createQuickSwitchOverlay, type QuickSwitchProfile } from "@components/QuickSwitchOverlay";
+import {
+  createQuickSwitchOverlay,
+  type QuickSwitchProfile,
+} from "../../../features/navigation/QuickSwitchOverlay";
 import { createVoiceWidgetCallbacks } from "../VoiceCallbacks";
 import { selectDmConversation } from "../SidebarDmHelpers";
 import { uiStore } from "@stores/ui.store";
@@ -62,7 +65,10 @@ export function mountVoiceAndSwitcher(sc: SidebarScope): void {
   // state, so a late mount shows a session that is already under way. It stays
   // mounted once loaded: it hides itself when the user is not in voice.
   // One loader per sidebar; the browser's module cache shares the code itself.
-  sc.voiceWidgetScreen = createLazyScreen("voice-widget", () => import("@components/VoiceWidget"));
+  sc.voiceWidgetScreen = createLazyScreen(
+    "voice-widget",
+    () => import("../../../features/voice/VoiceWidget"),
+  );
 
   sc.voiceWidgetRequested = false;
 

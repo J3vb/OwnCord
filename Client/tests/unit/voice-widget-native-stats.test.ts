@@ -36,7 +36,7 @@ vi.mock("@lib/voice/livekitSession", () =>
   }),
 );
 
-import { createVoiceWidget } from "../../src/components/VoiceWidget";
+import { createVoiceWidget } from "../../src/features/voice/VoiceWidget";
 import { createNativeRoom } from "../../src/features/voice/native/nativeRoom";
 import { voiceStore, type VoiceStatus, type VoiceUser } from "../../src/stores/voice.store";
 import { setConnectionStatus } from "../../src/stores/ui.store";

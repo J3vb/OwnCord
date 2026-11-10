@@ -15,7 +15,7 @@ vi.mock("@lib/logger", () => ({
 }));
 vi.mock("../../src/features/connection/logout", () => ({ logout: vi.fn() }));
 vi.mock("@lib/voice/livekitSession", () => ({}));
-vi.mock("@components/QuickSwitchOverlay", () => ({
+vi.mock("../../src/features/navigation/QuickSwitchOverlay", () => ({
   createQuickSwitchOverlay: vi.fn().mockReturnValue({ mount: vi.fn(), destroy: vi.fn() }),
 }));
 vi.mock("../../src/features/channels/ChannelSidebar", () => ({
@@ -29,7 +29,7 @@ vi.mock("../../src/features/members/MemberList", () => ({
 }));
 
 import { createSidebarArea, type SidebarAreaOptions } from "../../src/pages/main-page/SidebarArea";
-import { createQuickSwitchOverlay } from "@components/QuickSwitchOverlay";
+import { createQuickSwitchOverlay } from "../../src/features/navigation/QuickSwitchOverlay";
 import { logout } from "../../src/features/connection/logout";
 import { authStore } from "../../src/stores/auth.store";
 import { shellText } from "../../src/i18n/shell";

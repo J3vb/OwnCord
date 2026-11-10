@@ -23,7 +23,7 @@ import type {
   TileConfig,
   VideoGridCallbacks,
   VideoGridComponent,
-} from "@components/VideoGrid";
+} from "../../features/voice/videoGrid/VideoGrid";
 
 export interface LazyVideoGrid extends VideoGridComponent {
   /** Start loading the grid's code (idempotent). Called when the user joins
@@ -48,7 +48,10 @@ function liveOrNull(stream: MediaStream | null): MediaStream | null {
   return stream.getVideoTracks()[0]?.readyState === "ended" ? null : stream;
 }
 
-const videoGridScreen = createLazyScreen("video-grid", () => import("@components/VideoGrid"));
+const videoGridScreen = createLazyScreen(
+  "video-grid",
+  () => import("../../features/voice/videoGrid/VideoGrid"),
+);
 
 export function createLazyVideoGrid(): LazyVideoGrid {
   let real: VideoGridComponent | null = null;

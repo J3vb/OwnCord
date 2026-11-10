@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { fillThumbStrip, seatFocusedTile } from "./gridFocus";
-import type { GridState } from "@components/video-grid/gridState";
+import type { GridState } from "./gridState";
 
 function stateWith(ids: number[]): { st: GridState; els: Map<number, HTMLDivElement> } {
   const els = new Map<number, HTMLDivElement>();

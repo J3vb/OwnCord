@@ -203,7 +203,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         onSearch: () => ms.chatAreaResult.searchCtrl.open(),
         onOpenSettings: () => openSettings(),
         onOpenShortcuts: () =>
-          void import("@components/ShortcutsOverlay")
+          void import("../features/navigation/ShortcutsOverlay")
             .then((m) => {
               // The page may have unmounted while the chunk loaded.
               if (ms.shortcutsClosed) return;

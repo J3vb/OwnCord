@@ -629,7 +629,7 @@ the backend captures with libwebrtc's `DesktopCapturer`
   and titled top-level windows, each with a thumbnail captured on the spot (a
   PNG at most 120×68, which keeps even an incompressible one under 33 KB as a
   data URL, so 30 sources cost about 1 MB of IPC), and the webview's "Share
-  your screen" dialog (`components/ScreenSharePicker.ts`, adapted by
+  your screen" dialog (`features/voice/ScreenSharePicker.ts`, adapted by
   `features/voice/native/screenPicker.ts`) shows them in Screens and
   Applications tabs, so what will be shared is visible before sharing starts.
   Nothing is captured until the user presses Go Live.

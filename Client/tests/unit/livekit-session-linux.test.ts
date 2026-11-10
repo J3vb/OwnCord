@@ -254,7 +254,7 @@ import { nativeCounters } from "../../src/features/voice/native/counters";
 import { initToast, teardownToast } from "@lib/ui/toast";
 import type { ToastContainer } from "@lib/ui/toastContainer";
 import { setScreenSourcePicker } from "../../src/features/voice/native/screenPickerSlot";
-import { showScreenSharePicker } from "../../src/components/ScreenSharePicker";
+import { showScreenSharePicker } from "../../src/features/voice/ScreenSharePicker";
 
 const names = () => host.commands.map(([n]) => n);
 const emit = (envelope: NativeVoiceEnvelope) => {

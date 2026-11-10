@@ -45,7 +45,7 @@ vi.mock("@lib/voice/connectionStats", () => ({
   formatRateCompact: (v: number) => `${v} B/s`,
 }));
 
-import { createVoiceWidget } from "../../src/components/VoiceWidget";
+import { createVoiceWidget } from "../../src/features/voice/VoiceWidget";
 import { voiceStore } from "../../src/stores/voice.store";
 import { setConnectionStatus } from "../../src/stores/ui.store";
 import type { ConnectionStats } from "../../src/lib/voice/connectionStats";

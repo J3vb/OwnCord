@@ -25,7 +25,7 @@ import {
   participantAvatar,
   participantKey,
   type CallParticipant,
-} from "./callParticipants";
+} from "../features/voice/callParticipants";
 
 export interface VoiceJoinSheetOptions {
   readonly channelId: number;

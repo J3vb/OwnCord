@@ -247,7 +247,7 @@ export function mountMessageList(st: ChannelState, cc: ChannelApi, ms: MountScop
       );
     },
     onForwardClick: (msgId: number) => {
-      import("../../../components/ForwardPicker").then(
+      import("../../../features/messaging/ForwardPicker").then(
         ({ openForwardPicker }) => {
           if (ms.signal.aborted) return;
           // Focus goes back to the composer: the menu that opened it is gone.
@@ -268,7 +268,7 @@ export function mountMessageList(st: ChannelState, cc: ChannelApi, ms: MountScop
     onPollEnd: (messageId) => endPoll(st.ws, messageId, ms.signal),
     ...(st.threadHost !== null && {
       onCreateThreadClick: (msgId: number) => {
-        import("../../../components/CreateThreadDialog").then(
+        import("../../../features/threads/CreateThreadDialog").then(
           ({ openCreateThreadDialog }) => {
             if (ms.signal.aborted) return;
             openCreateThreadDialog({

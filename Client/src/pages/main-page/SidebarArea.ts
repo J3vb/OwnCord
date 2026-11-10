@@ -14,7 +14,7 @@ import type { PresenceSender } from "@lib/presence/presence";
 import type { ToastContainer } from "@lib/ui/toastContainer";
 import { createCategoryDialogs } from "./categoryDialogs";
 import { logout } from "../../features/connection/logout";
-import { createUserBar } from "@components/UserBar";
+import { createUserBar } from "../../features/voice/UserBar";
 import { createVoiceWidgetCallbacks } from "./VoiceCallbacks";
 import { type MemberPanel } from "../../features/members/memberPanel";
 import { selectDmConversation, handleCreateDm } from "./SidebarDmHelpers";

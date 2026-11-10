@@ -5,7 +5,7 @@
 import { makeDm } from "../helpers/dmHarness";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { useMountContainer } from "../helpers/mountContainer";
-import { createQuickSwitcher } from "@components/QuickSwitcher";
+import { createQuickSwitcher } from "../../src/features/navigation/QuickSwitcher";
 import { createQuickSwitcherManager } from "../../src/pages/main-page/OverlayManagers";
 import { channelsStore, setChannels } from "@stores/channels.store";
 import { dmStore } from "@stores/dm.store";

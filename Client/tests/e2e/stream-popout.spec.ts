@@ -56,7 +56,7 @@ async function mountGrid(page: Page): Promise<void> {
       isScreenshare: false,
     });
     return true;
-  }, "/src/components/VideoGrid.ts");
+  }, "/src/features/voice/videoGrid/VideoGrid.ts");
   test.skip(!mounted, "needs the dev server's modules");
 }
 

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vitest";
 import { pressComposingEnter } from "../helpers/keyEvents";
 import { makeDm } from "../helpers/dmHarness";
-import { createQuickSwitcher } from "@components/QuickSwitcher";
+import { createQuickSwitcher } from "../../src/features/navigation/QuickSwitcher";
 import { channelsStore, setChannels } from "@stores/channels.store";
 import { addDmToChannelsStore } from "@stores/dm.store";
 import type { DmChannel } from "@stores/dm.store";

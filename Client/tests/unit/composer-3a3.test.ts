@@ -7,7 +7,7 @@ import { useMountContainer } from "../helpers/mountContainer";
 vi.mock("../../src/features/messaging/EmojiPicker", () => ({
   createEmojiPicker: () => ({ element: document.createElement("div"), destroy: vi.fn() }),
 }));
-vi.mock("@components/GifPicker", () => ({
+vi.mock("../../src/features/messaging/GifPicker", () => ({
   createGifPicker: () => ({ element: document.createElement("div"), destroy: vi.fn() }),
 }));
 

@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createErrorText, openCreateThreadDialog } from "@components/CreateThreadDialog";
+import {
+  createErrorText,
+  openCreateThreadDialog,
+} from "../../src/features/threads/CreateThreadDialog";
 import { isForwardRequest } from "../../src/features/messaging/forwardRequests";
 import { openThreadListPopover } from "../../src/features/threads/ThreadListPopover";
 import { resetMessagesStore } from "@stores/messages.store";

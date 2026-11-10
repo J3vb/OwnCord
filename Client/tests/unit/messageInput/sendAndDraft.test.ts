@@ -11,7 +11,7 @@ import {
 import { clearHost, hostAndroidApp, hostDesktopApp } from "../../helpers/androidHost";
 
 vi.mock("../../../src/features/messaging/EmojiPicker", () => mocks.emojiPickerMock());
-vi.mock("@components/GifPicker", () => mocks.gifPickerMock());
+vi.mock("../../../src/features/messaging/GifPicker", () => mocks.gifPickerMock());
 
 describe("MessageInput", () => {
   let container: HTMLDivElement;

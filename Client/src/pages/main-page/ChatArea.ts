@@ -10,7 +10,7 @@ import type { ApiClient } from "@lib/api";
 import type { ToastContainer } from "@lib/ui/toastContainer";
 import { createLazyVideoGrid } from "./lazyVideoGrid";
 import type { LazyVideoGrid } from "./lazyVideoGrid";
-import type { PhoneCallBarOptions } from "@components/PhoneCallBar";
+import type { PhoneCallBarOptions } from "../../features/voice/PhoneCallBar";
 import { createLazyPhoneCallBar } from "./lazyPhoneCallBar";
 import { buildChatHeader } from "./ChatHeader";
 import type { ChatHeaderRefs } from "./ChatHeader";
