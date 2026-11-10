@@ -62,12 +62,20 @@ function limitationText(reason: string | undefined): string | undefined {
  *  share has no sender stats to read (null: no sample yet). */
 export function senderText(sample: ShareSenderSample | null): string {
   if (sample === null) return t("tile.senderUnavailable");
+  const serverLimit =
+    sample.serverLimit === undefined
+      ? undefined
+      : t("tile.senderLimitedServer", {
+          // A whole number stays whole: 3, not 3.0.
+          value: String(Number((sample.serverLimit / 1_000_000).toFixed(1))),
+        });
   const parts = [
     sample.captureFps === undefined
       ? undefined
       : sample.captureFpsSource === "configured"
         ? t("tile.senderCaptureSet", { fps: String(sample.captureFps) })
         : t("tile.senderCapture", { fps: String(sample.captureFps) }),
+    serverLimit,
     limitationText(sample.limitation),
     sample.codec?.split("/").pop()?.toUpperCase(),
     sample.encoder,

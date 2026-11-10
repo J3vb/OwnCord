@@ -41,7 +41,9 @@ added `native_voice_video_codecs` and `native_voice_unpublish_screen`, and WP
 LP-8b (2026-10-16) added `native_voice_publish_screen_audio` and
 `native_voice_unpublish_screen_audio`, which the webview calls from WP LP-8c on,
 and WP M-12a (2026-10-16) added `native_voice_set_screen_quality`, which the
-webview calls from WP M-12b on, and WP M-11a (2026-10-16) widened the
+webview calls from WP M-12b on, and a later change added
+`native_voice_set_video_bitrate` (a live change of a published video's bitrate,
+with no republish), and WP M-11a (2026-10-16) widened the
 `native_voice_video_codecs` result to `{ h264, vp9, decode }` (no new
 command). The
 three counts below are re-derived from the tree by
@@ -101,16 +103,16 @@ platform invoke bindings, including all conditional platform/feature handlers:
 | Measure                                                    | Value |
 | ---------------------------------------------------------- | ----- |
 | Files under `Client/src/` importing `@tauri-apps/*`        | 27    |
-| Distinct `invoke` command names called from `Client/src/`  | 111   |
-| `#[tauri::command]` handlers in `Client/src-tauri/`        | 114   |
+| Distinct `invoke` command names called from `Client/src/`  | 112   |
+| `#[tauri::command]` handlers in `Client/src-tauri/`        | 115   |
 | TS calls with no matching Rust handler                     | 0     |
 | Uses of the `window.__TAURI__` global                      | 0     |
 | Environment-detection helper (`isDesktop()` or equivalent) | 1     |
 | Files under `Client/src/platform/`                         | 62    |
 
-The handler count covers the 113 distinct registrations
+The handler count covers the 114 distinct registrations
 (`Client/src-tauri/src/lib.rs`); `open_devtools` sits behind
-`#[cfg(feature = "devtools")]`, and the forty-three `native_voice_*` commands
+`#[cfg(feature = "devtools")]`, and the forty-four `native_voice_*` commands
 and the two Linux file commands (`clipboard_files`, `read_staged_file`, for
 files dragged in or copied from the file manager) behind
 `#[cfg(target_os = "linux")]` (`read_staged_file` also on Android, where it
@@ -194,6 +196,7 @@ native_voice_set_ptt_gated
 native_voice_set_screen_quality
 native_voice_set_screenshare_volume
 native_voice_set_subscribed
+native_voice_set_video_bitrate
 native_voice_set_video_view
 native_voice_set_voice_gate
 native_voice_set_volume

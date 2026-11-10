@@ -55,6 +55,8 @@ import {
   type VideoTrackDeps,
 } from "./videoTrackState";
 import { disableScreenshare, stopManualScreenTracks, watchScreenEnded } from "./screenTrackStop";
+import { clampPublishedVideo } from "./videoCapFollow";
+import { liveVideoBudget } from "./videoBudgetNow";
 
 const log = createLogger("screenShare");
 
@@ -357,7 +359,12 @@ async function startShare(
     }
     if (videoTrack !== undefined)
       setH264GpuProfiles(videoTrack.mediaStreamTrack, h264GpuPublish(choice.codec));
-    const videoOptions = screenVideoPublishOptions(choice.codec, quality, fps);
+    const videoOptions = screenVideoPublishOptions(
+      choice.codec,
+      quality,
+      fps,
+      liveVideoBudget().screen,
+    );
     if (!(await publishShareTracks(state, room, screenTracks, videoOptions, generation, ended)))
       return;
     // The publish step resolves a tick after its own check: a stop in that
@@ -377,6 +384,7 @@ async function startShare(
     }
     startShareRecovery(state, videoTrack, screenTracks, videoOptions, generation);
     announceShare(state, ws, deps, videoTrack, choice, { quality, fps, effectiveFps, maxBitrate });
+    void clampPublishedVideo(videoTrack, "screen", maxBitrate);
   } catch (err) {
     ended.remove?.();
     failShareEnable(state, room, generation, deps, err);

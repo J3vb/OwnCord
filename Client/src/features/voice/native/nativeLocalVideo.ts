@@ -9,6 +9,7 @@ import { NativeCameraTrack } from "./nativeCameraTrack";
 import { CameraDeviceUnusable, CameraSwitchUnavailable } from "../cameraSwitch";
 import { NativeScreenAudioTrack } from "./screenAudioTrack";
 import { NativeScreenTrack, ScreenQualityError, startError, pickerDismissed } from "./screenTrack";
+import { budgetedShareEncoding } from "../videoBudgetNow";
 import {
   noteChangedQuality,
   noteChangedSource,
@@ -382,9 +383,7 @@ export class NativeLocalVideo {
       {
         width: track.width,
         height: track.height,
-        maxBitrate: settings.maxBitrate,
-        maxFramerate: settings.maxFramerate,
-        simulcast: settings.simulcast,
+        ...budgetedShareEncoding(settings),
         codec: nativeCodec({ videoCodec: published }),
       },
     );
@@ -443,9 +442,8 @@ export class NativeLocalVideo {
     if (!(track instanceof NativeScreenTrack))
       // i18n-exempt: internal unsupported-path guard, never rendered
       throw unsupported("publishing a browser screen track");
-    // The picker's per-share quality, not the shared path's saved-quality
-    // publish options, sets the encoding.
-    const encoding = track.publishEncoding;
+    // The picker's per-share quality (not the saved one) sets the encoding, under the cap.
+    const encoding = budgetedShareEncoding(track.publishEncoding);
     const sid = await desktop.nativeVoice.publishScreen(session, track.capture, {
       width: track.width,
       height: track.height,

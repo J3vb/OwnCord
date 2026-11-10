@@ -290,6 +290,7 @@ describe("browser platform registry", () => {
       () => v.stopScreen(1, 1),
       () => v.changeScreen(1, "s", cap),
       () => v.setScreenQuality(1, 1, cap, publish),
+      () => v.setVideoBitrate(1, "camera", "s", 1),
       () => v.changeCamera(1, "c", cap),
       () => v.debugInfo(),
       () => v.listDevices(),
