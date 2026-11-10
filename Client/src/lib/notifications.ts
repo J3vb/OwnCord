@@ -136,6 +136,126 @@ function chimeEnabled(mentioned: boolean): boolean {
   );
 }
 
+/** What the popup, flash and chime may do for one alert. */
+interface AlertPlan {
+  readonly showPopup: boolean;
+  readonly flash: boolean;
+  readonly chime: boolean;
+}
+
+/**
+ * Do Not Disturb silences all three, a mention included. While the app is
+ * focused on another channel only the chime may play (the popup still shows on
+ * the phone), then each preference gates its own signal.
+ */
+function planAlert(focusedElsewhere: boolean, mentioned: boolean): AlertPlan {
+  const dnd = loadUserStatus() === "dnd";
+  const showPopup =
+    !dnd &&
+    (!focusedElsewhere || popupWhileFocused()) &&
+    loadPref<boolean>("desktopNotifications", true);
+  const flash = !dnd && !focusedElsewhere && loadPref<boolean>("flashTaskbar", true);
+  const chime = !dnd && chimeEnabled(mentioned);
+  return { showPopup, flash, chime };
+}
+
+/** Whether the plan leaves nothing to do. */
+function isSilent(plan: AlertPlan): boolean {
+  return !plan.showPopup && !plan.flash && !plan.chime;
+}
+
+/** Run a plan: the popup (when allowed), then the taskbar flash, then the chime. */
+function deliverAlert(plan: AlertPlan, makePopup: () => Promise<boolean>): void {
+  const popup = plan.showPopup ? makePopup() : null;
+  if (plan.flash) flashTaskbar();
+  if (plan.chime) chimeUnlessOsSounds(popup);
+}
+
+/**
+ * Whether the level and the channel mute let this alert through. The level is
+ * the first gate because `nothing` silences everything, unlike a mute, which a
+ * mention passes.
+ */
+function channelAllows(channelId: number, mentioned: boolean, isDm: boolean): boolean {
+  if (!shouldNotifyForLevel(channelNotificationLevel(channelId), { mentioned, isDm })) {
+    return false;
+  }
+  return notificationAllowed(channelId, mentioned);
+}
+
+/**
+ * Whether the alert counts as a mention: a direct one or @everyone/@here.
+ * Null when "Suppress @everyone" drops it, which applies only to an alert the
+ * @everyone caused alone.
+ */
+function resolveMention(directMention: boolean, everyoneMention: boolean): boolean | null {
+  if (loadPref<boolean>("suppressEveryone", false) && everyoneMention && !directMention) {
+    return null;
+  }
+  return directMention || everyoneMention;
+}
+
+/** Whether the reader is already looking at the alert's surface, and whether the app is focused on another. */
+function surfaceFocus(
+  channelId: number,
+  thread: ThreadNotifyContext | undefined,
+): { readonly viewing: boolean; readonly elsewhere: boolean } {
+  const focused = isWindowFocused();
+  return {
+    viewing: focused && isViewing(channelId, thread),
+    elsewhere: focused && !isOpenSurface(channelId, thread),
+  };
+}
+
+/** Whether a message is from a sender that never alerts: a server row, the reader, or a blocked author. */
+function isIgnoredSender(payload: ChatMessagePayload): boolean {
+  const currentUser = authStore.getState().user;
+  // A server row (a call log or a group event) is a record, not a message: the
+  // ring was the live signal for a call, so it gets no chime and no toast (the unread badge still counts it).
+  if (isServerRowKind(payload.kind)) return true;
+  if (currentUser !== null && payload.user.id === currentUser.id) return true;
+  // A blocked author: no popup, flash or chime at any level
+  return blocksStore.getState().blockedByMe.has(payload.user.id);
+}
+
+/** Whether a `channel_activity` author is the reader or a blocked user. */
+function isIgnoredAuthor(authorId: number | undefined): boolean {
+  if (authorId === undefined) return false;
+  if (authStore.getState().user?.id === authorId) return true;
+  return blocksStore.getState().blockedByMe.has(authorId);
+}
+
+/** The popup title of a chat message: who spoke, and where. */
+function incomingTitle(
+  payload: ChatMessagePayload,
+  mentioned: boolean,
+  channelLabel: string,
+): string {
+  // The name to show for the author, resolved the same way the message list
+  // resolves it (resolveAuthor prefers the live membersStore nickname over
+  // whatever was frozen into the payload; resolveDisplayName falls back to
+  // the username when no nickname is set). Without this the notification
+  // names the sender differently from the message row it points at.
+  const author = resolveDisplayName(resolveAuthor(payload.user));
+  const key = mentioned ? "notifications.mentioned" : "notifications.inChannel";
+  return sanitizeNotif(connectText(key, { author, channel: channelLabel }), 80);
+}
+
+/** The popup title of a `channel_activity` entry; names the author when the frame does. */
+function activityTitle(authorId: number | undefined, mentioned: boolean, channel: string): string {
+  const member = authorId === undefined ? undefined : membersStore.getState().members.get(authorId);
+  if (member === undefined) {
+    return connectText(mentioned ? "notifications.mentionedIn" : "notifications.newIn", {
+      channel,
+    });
+  }
+  const author = resolveDisplayName(member);
+  return connectText(mentioned ? "notifications.mentioned" : "notifications.inChannel", {
+    author,
+    channel,
+  });
+}
+
 /**
  * Handle an incoming chat message — fire desktop notification, flash
  * taskbar, and play sound based on user preferences.
@@ -146,17 +266,7 @@ function chimeEnabled(mentioned: boolean): boolean {
  * channel, only the chime may play.
  */
 export function notifyIncomingMessage(payload: ChatMessagePayload): void {
-  const currentUser = authStore.getState().user;
-
-  // A server row (a call log or a group event) is a record, not a message: the
-  // ring was the live signal for a call, so it gets no chime and no toast (the unread badge still counts it).
-  if (isServerRowKind(payload.kind)) return;
-
-  // Don't notify for own messages
-  if (currentUser !== null && payload.user.id === currentUser.id) return;
-
-  // Nor for a blocked author: no popup, flash or chime at any level
-  if (blocksStore.getState().blockedByMe.has(payload.user.id)) return;
+  if (isIgnoredSender(payload)) return;
 
   // Don't notify if the window is focused AND the message is in the active
   // channel — UNLESS that channel is showing a detached around-window.
@@ -181,51 +291,25 @@ export function notifyIncomingMessage(payload: ChatMessagePayload): void {
   // because the new message is not on screen at all.
   const focusedElsewhere = focused && payload.channel_id !== activeChannelId;
 
-  const mentionInfo = {
+  const directMention = mentionsCurrentUser(payload.content, {
     mentions: payload.mentions,
     mentionsEveryone: payload.mentions_everyone,
     mentionRoles: payload.mention_roles,
-  };
-  const directMention = mentionsCurrentUser(payload.content, mentionInfo);
-  const everyoneMention = payload.mentions_everyone === true;
+  });
+  // "Suppress @everyone" means exactly that: see resolveMention.
+  const mentioned = resolveMention(directMention, payload.mentions_everyone === true);
+  if (mentioned === null) return;
 
-  // "Suppress @everyone" now means exactly that: only a notification the
-  // @everyone/@here caused is dropped. A message that also names the user is
-  // theirs to see, and an @everyone the sender lacked the permission for never
-  // reached mention status in the first place, so it is not suppressed either.
-  if (loadPref<boolean>("suppressEveryone", false) && everyoneMention && !directMention) {
-    return;
-  }
-
-  const mentioned = directMention || everyoneMention;
-
-  // How much this server may interrupt (U1b): All / Mentions only / Nothing,
-  // a global preference with a per-server override. This is the first gate
-  // because `nothing` must silence the popup, the chime AND the taskbar flash —
-  // unlike a channel mute, which deliberately lets a direct mention through.
-  // A DM passes every level; its own mute and Do Not Disturb still apply.
+  // How much this server may interrupt (U1b) and the channel mute. A DM passes
+  // every level; its own mute and Do Not Disturb still apply.
   const { name: channelName, isDm } = resolveNotificationChannel(payload.channel_id);
-  if (!shouldNotifyForLevel(channelNotificationLevel(payload.channel_id), { mentioned, isDm }))
-    return;
-
-  // A muted channel stops making noise entirely — popup, chime AND taskbar
-  // flash, because a flashing taskbar is exactly the interruption the mute was
-  // asked for. The unread badge is untouched (it is drawn from the store, not
-  // from here) and just renders dimmed. A message that names the reader is
-  // never silenced: see @lib/prefs/channelMutes.
-  if (!notificationAllowed(payload.channel_id, mentioned)) return;
+  if (!channelAllows(payload.channel_id, mentioned, isDm)) return;
 
   // Do Not Disturb — the settings panel promises "You will not receive desktop
   // notifications", so honour it for the popup, the chime and the taskbar
   // flash alike (a mention included, matching the popup and chime).
-  const dnd = loadUserStatus() === "dnd";
-  const showPopup =
-    !dnd &&
-    (!focusedElsewhere || popupWhileFocused()) &&
-    loadPref<boolean>("desktopNotifications", true);
-  const flash = !dnd && !focusedElsewhere && loadPref<boolean>("flashTaskbar", true);
-  const chime = !dnd && chimeEnabled(mentioned);
-  if (!showPopup && !flash && !chime) return;
+  const plan = planAlert(focusedElsewhere, mentioned);
+  if (isSilent(plan)) return;
 
   // A burst of messages in one channel is one alert, not twenty (U1c); a DM is
   // a channel like any other. A mention is always announced — it is what the
@@ -233,43 +317,20 @@ export function notifyIncomingMessage(payload: ChatMessagePayload): void {
   if (shouldCoalesce(payload.channel_id, mentioned, Date.now())) return;
 
   const channelLabel = isDm ? channelName : `#${channelName}`;
-
-  // The name to show for the author, resolved the same way the message list
-  // resolves it (resolveAuthor prefers the live membersStore nickname over
-  // whatever was frozen into the payload; resolveDisplayName falls back to
-  // the username when no nickname is set). Without this the notification
-  // names the sender differently from the message row it points at.
-  const authorName = resolveDisplayName(resolveAuthor(payload.user));
-
-  const title = sanitizeNotif(
-    mentioned
-      ? connectText("notifications.mentioned", { author: authorName, channel: channelLabel })
-      : connectText("notifications.inChannel", { author: authorName, channel: channelLabel }),
-    80,
-  );
+  const title = incomingTitle(payload, mentioned, channelLabel);
 
   // Desktop notification. The body (the message's visible words, spoiler
   // label instead of hidden text) is computed inside the async path through a
   // dynamic import of the markdown tokenizer: this module is in the startup
   // closure, so a static import would drag the tokenizer in with it
   // (bundle-budget's startup-closure gate).
-  const popup = showPopup
-    ? fireDesktopNotification(title, payload.content, payload.attachments.length, {
-        host: currentHost(),
-        channelId: payload.channel_id,
-        messageId: payload.id,
-      })
-    : null;
-
-  // Flash taskbar
-  if (flash) {
-    flashTaskbar();
-  }
-
-  // Notification sound
-  if (chime) {
-    chimeUnlessOsSounds(popup);
-  }
+  deliverAlert(plan, () =>
+    fireDesktopNotification(title, payload.content, payload.attachments.length, {
+      host: currentHost(),
+      channelId: payload.channel_id,
+      messageId: payload.id,
+    }),
+  );
 }
 
 /**
@@ -296,35 +357,18 @@ export function notifyMention(channelId: number, thread?: ThreadNotifyContext): 
   if (isDm) return;
   if (loadPref<boolean>("suppressEveryone", false)) return;
 
-  const focused = isWindowFocused();
-  if (focused && isViewing(channelId, thread)) return;
-  const focusedElsewhere = focused && !isOpenSurface(channelId, thread);
+  const focus = surfaceFocus(channelId, thread);
+  if (focus.viewing) return;
+  if (!channelAllows(authority, true, false)) return;
 
-  if (
-    !shouldNotifyForLevel(channelNotificationLevel(authority), { mentioned: true, isDm: false })
-  ) {
-    return;
-  }
-  if (!notificationAllowed(authority, true)) return;
-
-  const dnd = loadUserStatus() === "dnd";
-  const showPopup =
-    !dnd &&
-    (!focusedElsewhere || popupWhileFocused()) &&
-    loadPref<boolean>("desktopNotifications", true);
-  const flash = !dnd && !focusedElsewhere && loadPref<boolean>("flashTaskbar", true);
-  const chime = !dnd && chimeEnabled(true);
-
-  let popup: Promise<boolean> | null = null;
-  if (showPopup) {
+  const plan = planAlert(focus.elsewhere, true);
+  deliverAlert(plan, () => {
     const title = sanitizeNotif(
       connectText("notifications.mentionedIn", { channel: alertLabel(channelName, thread) }),
       80,
     );
-    popup = fireDesktopNotification(title, "", 0, { host: currentHost(), channelId: authority });
-  }
-  if (flash) flashTaskbar();
-  if (chime) chimeUnlessOsSounds(popup);
+    return fireDesktopNotification(title, "", 0, { host: currentHost(), channelId: authority });
+  });
 }
 
 /**
@@ -346,60 +390,27 @@ export function notifyChannelActivity(
   const authority = thread?.parentId ?? entry.channel_id;
   const { name: channelName, isDm } = resolveNotificationChannel(authority);
   if (isDm) return;
+  if (isIgnoredAuthor(entry.author_id)) return;
 
-  const authorId = entry.author_id;
-  if (authorId !== undefined) {
-    if (authStore.getState().user?.id === authorId) return;
-    if (blocksStore.getState().blockedByMe.has(authorId)) return;
-  }
+  const mentioned = resolveMention(entry.mentions_you, entry.mentions_everyone);
+  if (mentioned === null) return;
 
-  const directMention = entry.mentions_you;
-  const everyoneMention = entry.mentions_everyone;
-  if (loadPref<boolean>("suppressEveryone", false) && everyoneMention && !directMention) return;
-  const mentioned = directMention || everyoneMention;
-
-  const focused = isWindowFocused();
-  if (focused && isViewing(entry.channel_id, thread)) return;
-  const focusedElsewhere = focused && !isOpenSurface(entry.channel_id, thread);
+  const focus = surfaceFocus(entry.channel_id, thread);
+  if (focus.viewing) return;
 
   // A followed thread's plain messages pass only a parent at "all": the level
-  // check below needs a mention at any lower level, as in any channel.
-  if (
-    !shouldNotifyForLevel(channelNotificationLevel(authority), {
-      mentioned,
-      isDm: false,
-    })
-  )
-    return;
-  if (!notificationAllowed(authority, mentioned)) return;
+  // check needs a mention at any lower level, as in any channel.
+  if (!channelAllows(authority, mentioned, false)) return;
 
-  const dnd = loadUserStatus() === "dnd";
-  const showPopup =
-    !dnd &&
-    (!focusedElsewhere || popupWhileFocused()) &&
-    loadPref<boolean>("desktopNotifications", true);
-  const flash = !dnd && !focusedElsewhere && loadPref<boolean>("flashTaskbar", true);
-  const chime = !dnd && chimeEnabled(mentioned);
-  if (!showPopup && !flash && !chime) return;
+  const plan = planAlert(focus.elsewhere, mentioned);
+  if (isSilent(plan)) return;
 
   if (shouldCoalesce(entry.channel_id, mentioned, Date.now())) return;
 
-  let popup: Promise<boolean> | null = null;
-  if (showPopup) {
-    const channel = alertLabel(channelName, thread);
-    const member =
-      authorId === undefined ? undefined : membersStore.getState().members.get(authorId);
-    const author = member === undefined ? null : resolveDisplayName(member);
-    const title =
-      author === null
-        ? mentioned
-          ? connectText("notifications.mentionedIn", { channel })
-          : connectText("notifications.newIn", { channel })
-        : mentioned
-          ? connectText("notifications.mentioned", { author, channel })
-          : connectText("notifications.inChannel", { author, channel });
+  deliverAlert(plan, () => {
+    const title = activityTitle(entry.author_id, mentioned, alertLabel(channelName, thread));
     // A thread's message is not in its parent's list, so the click opens the parent.
-    popup = fireDesktopNotification(
+    return fireDesktopNotification(
       sanitizeNotif(title, 80),
       "",
       0,
@@ -407,9 +418,7 @@ export function notifyChannelActivity(
         ? { host: currentHost(), channelId: entry.channel_id, messageId: entry.message_id }
         : { host: currentHost(), channelId: authority },
     );
-  }
-  if (flash) flashTaskbar();
-  if (chime) chimeUnlessOsSounds(popup);
+  });
 }
 
 /**

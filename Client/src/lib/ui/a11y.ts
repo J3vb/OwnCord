@@ -112,6 +112,56 @@ export function setRovingTabindex(container: HTMLElement, cellSelector: string):
   for (const cell of cells) cell.setAttribute("tabindex", cell === stop ? "0" : "-1");
 }
 
+type RovingOrientation = "horizontal" | "vertical" | "grid";
+
+/** The cell index a key moves to in a grid, or null for a key that does not move. */
+function gridTarget(
+  key: string,
+  from: number,
+  cells: readonly HTMLElement[],
+  origin: HTMLElement,
+  gridColumns: number,
+): number | null {
+  // A whole-row step within the origin's own grid. Past its edge, stay
+  // put: the next grid restarts at column 0, so a flat-list step would
+  // land on the wrong column.
+  const rowStep = (to: number): number =>
+    cells[to]?.parentElement !== origin.parentElement ? from : to;
+  if (key === "ArrowRight") return Math.min(from + 1, cells.length - 1);
+  if (key === "ArrowLeft") return Math.max(from - 1, 0);
+  if (key === "ArrowDown") return rowStep(from + gridColumns);
+  if (key === "ArrowUp") return rowStep(from - gridColumns);
+  if (key === "Home") return 0;
+  if (key === "End") return cells.length - 1;
+  return null;
+}
+
+/** The cell index a key moves to in a flat list, or null for a key that does not move. */
+function flatTarget(
+  key: string,
+  from: number,
+  count: number,
+  orientation: RovingOrientation,
+): number | null {
+  const nextKey = orientation === "vertical" ? "ArrowDown" : "ArrowRight";
+  const prevKey = orientation === "vertical" ? "ArrowUp" : "ArrowLeft";
+  if (key === nextKey) return Math.min(from + 1, count - 1);
+  if (key === prevKey) return Math.max(from - 1, 0);
+  if (key === "Home") return 0;
+  if (key === "End") return count - 1;
+  return null;
+}
+
+/** Move the single Tab stop along with focus so tabbing away and back
+ *  returns to the last visited cell, not the first. Clear every cell, not
+ *  just the origin: a mouse click can focus a cell that isn't the stop. */
+function focusCell(cells: readonly HTMLElement[], to: number): void {
+  for (const cell of cells) cell.setAttribute("tabindex", "-1");
+  const target = cells[to]!;
+  target.setAttribute("tabindex", "0");
+  target.focus();
+}
+
 /**
  * Roving-tabindex keyboard support for a flat list of option cells:
  * ArrowLeft/ArrowRight step, Home/End jump to the edges, and Enter/Space
@@ -135,7 +185,7 @@ export function enableRovingNavigation(
   container: HTMLElement,
   cellSelector: string,
   signal: AbortSignal,
-  orientation: "horizontal" | "vertical" | "grid" = "horizontal",
+  orientation: RovingOrientation = "horizontal",
   gridColumns = 8,
 ): void {
   container.addEventListener(
@@ -160,40 +210,14 @@ export function enableRovingNavigation(
       // move within this list.
       if (e.altKey || e.ctrlKey || e.metaKey) return;
 
-      let to: number;
-      if (orientation === "grid") {
-        // A whole-row step within the origin's own grid. Past its edge, stay
-        // put: the next grid restarts at column 0, so a flat-list step would
-        // land on the wrong column.
-        if (e.key === "ArrowRight") to = Math.min(from + 1, cells.length - 1);
-        else if (e.key === "ArrowLeft") to = Math.max(from - 1, 0);
-        else if (e.key === "ArrowDown") {
-          to = from + gridColumns;
-          if (cells[to]?.parentElement !== origin.parentElement) to = from;
-        } else if (e.key === "ArrowUp") {
-          to = from - gridColumns;
-          if (cells[to]?.parentElement !== origin.parentElement) to = from;
-        } else if (e.key === "Home") to = 0;
-        else if (e.key === "End") to = cells.length - 1;
-        else return;
-      } else {
-        const nextKey = orientation === "vertical" ? "ArrowDown" : "ArrowRight";
-        const prevKey = orientation === "vertical" ? "ArrowUp" : "ArrowLeft";
-        if (e.key === nextKey) to = Math.min(from + 1, cells.length - 1);
-        else if (e.key === prevKey) to = Math.max(from - 1, 0);
-        else if (e.key === "Home") to = 0;
-        else if (e.key === "End") to = cells.length - 1;
-        else return;
-      }
+      const to =
+        orientation === "grid"
+          ? gridTarget(e.key, from, cells, origin, gridColumns)
+          : flatTarget(e.key, from, cells.length, orientation);
+      if (to === null) return;
 
       e.preventDefault();
-      // Move the single Tab stop along with focus so tabbing away and back
-      // returns to the last visited cell, not the first. Clear every cell, not
-      // just the origin: a mouse click can focus a cell that isn't the stop.
-      for (const cell of cells) cell.setAttribute("tabindex", "-1");
-      const target = cells[to]!;
-      target.setAttribute("tabindex", "0");
-      target.focus();
+      focusCell(cells, to);
     },
     { signal },
   );

@@ -45,7 +45,6 @@
   "src/lib/notifications.ts": 600,
   "src/lib/presence/profiles.ts": 550,
   "src/lib/readState.ts": 650,
-  "src/lib/text/markdown.ts": 600,
   "src/lib/types.ts": 550,
   "src/lib/ui/contextMenu.ts": 700,
   "src/lib/voice/audioElements.ts": 700,

@@ -145,6 +145,84 @@ export interface MenuKeyboardOptions {
   readonly restoreFocusTo?: () => HTMLElement | null;
 }
 
+/** ArrowLeft inside a sibling flyout closes it and returns to its trigger. Whether it did. */
+function closeFlyoutOnArrowLeft(e: KeyboardEvent, owner: HTMLElement): boolean {
+  if (e.key !== "ArrowLeft" || !owner.matches(SUBMENU_SELECTOR)) return false;
+  const trigger = owner.previousElementSibling;
+  if (!(trigger instanceof HTMLElement) || trigger.getAttribute("aria-haspopup") !== "menu") {
+    return false;
+  }
+  e.preventDefault();
+  hideFlyout(owner);
+  trigger.focus();
+  return true;
+}
+
+/** ArrowRight/Enter/Space on a row that owns a flyout. Whether the key was taken. */
+function openSubmenuOnKey(e: KeyboardEvent, target: HTMLElement): boolean {
+  if (e.key !== "ArrowRight" && e.key !== "Enter" && e.key !== " ") return false;
+  const sub = ownedSubmenu(target);
+  if (sub === null) return false;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  // A trigger that is itself an action (Mute Channel) runs it on Enter
+  // or Space; only ArrowRight opens its flyout. Otherwise Enter or Space
+  // would also fire the trigger's click, which is stopped so the submenu
+  // opens instead of the row activating.
+  if (e.key !== "ArrowRight" && target.dataset["activates"] === "true") target.click();
+  else revealSubmenu(sub);
+  return true;
+}
+
+/** The index an arrow/Home/End key moves to in a menu, or null when it does not move. */
+function menuMoveTarget(key: string, from: number, count: number, inRow: boolean): number | null {
+  if (key === "ArrowDown") return Math.min(from + 1, count - 1);
+  if (key === "ArrowUp") return Math.max(from - 1, 0);
+  if (key === "ArrowRight" && inRow) return Math.min(from + 1, count - 1);
+  if (key === "ArrowLeft" && inRow) return Math.max(from - 1, 0);
+  if (key === "Home") return 0;
+  if (key === "End") return count - 1;
+  return null;
+}
+
+/** Move the roving focus within `owner`'s rows. */
+function moveMenuFocus(e: KeyboardEvent, target: HTMLElement, owner: HTMLElement): void {
+  // Left/Right move along a side-by-side row (the quick reactions); Up/Down
+  // still walk the whole menu.
+  const row = target.closest<HTMLElement>('[role="group"]');
+  const sideways = e.key === "ArrowLeft" || e.key === "ArrowRight";
+  const items = menuItems(owner).filter((el) => !sideways || row?.contains(el) === true);
+  const from = items.indexOf(target);
+  if (from === -1) return;
+  const to = menuMoveTarget(e.key, from, items.length, row !== null);
+  if (to === null) return;
+  e.preventDefault();
+  for (const item of items) item.setAttribute("tabindex", "-1");
+  const next = items[to]!;
+  next.setAttribute("tabindex", "0");
+  next.focus();
+}
+
+function handleMenuKey(e: KeyboardEvent, close: () => void): void {
+  // Escape closes the whole menu from anywhere inside it, submenu or
+  // inline reveal form (the ban reason/duration fields) alike.
+  if (e.key === "Escape" && !isImeCommit(e)) {
+    e.preventDefault();
+    e.stopPropagation();
+    close();
+    return;
+  }
+
+  const target =
+    e.target instanceof HTMLElement ? e.target.closest<HTMLElement>(MENU_ITEM_SELECTOR) : null;
+  if (target === null) return;
+  const owner = target.closest<HTMLElement>(`[role="menu"], ${SUBMENU_SELECTOR}`);
+  if (owner === null) return;
+  if (closeFlyoutOnArrowLeft(e, owner)) return;
+  if (openSubmenuOnKey(e, target)) return;
+  moveMenuFocus(e, target, owner);
+}
+
 /**
  * Attach the shared menu keyboard model to an already-built, mounted menu.
  * Returns a restorer that puts focus back on the invoking control — call it
@@ -190,78 +268,9 @@ export function enableMenuKeyboard(menu: HTMLElement, opts: MenuKeyboardOptions)
       if (!opts.signal.aborted && menu.isConnected) focusFirst();
     });
 
-  menu.addEventListener(
-    "keydown",
-    (e: KeyboardEvent) => {
-      // Escape closes the whole menu from anywhere inside it, submenu or
-      // inline reveal form (the ban reason/duration fields) alike.
-      if (e.key === "Escape" && !isImeCommit(e)) {
-        e.preventDefault();
-        e.stopPropagation();
-        close();
-        return;
-      }
-
-      const target =
-        e.target instanceof HTMLElement ? e.target.closest<HTMLElement>(MENU_ITEM_SELECTOR) : null;
-      if (target === null) return;
-      const owner = target.closest<HTMLElement>(`[role="menu"], ${SUBMENU_SELECTOR}`);
-      if (owner === null) return;
-
-      // ArrowLeft inside a sibling flyout closes it and returns to its trigger.
-      if (e.key === "ArrowLeft" && owner.matches(SUBMENU_SELECTOR)) {
-        const trigger = owner.previousElementSibling;
-        if (trigger instanceof HTMLElement && trigger.getAttribute("aria-haspopup") === "menu") {
-          e.preventDefault();
-          hideFlyout(owner);
-          trigger.focus();
-          return;
-        }
-      }
-
-      if (e.key === "ArrowRight" || e.key === "Enter" || e.key === " ") {
-        const sub = ownedSubmenu(target);
-        // A trigger that is itself an action (Mute Channel) runs it on Enter
-        // or Space; only ArrowRight opens its flyout.
-        if (sub !== null && e.key !== "ArrowRight" && target.dataset["activates"] === "true") {
-          e.preventDefault();
-          e.stopImmediatePropagation();
-          target.click();
-          return;
-        }
-        if (sub !== null) {
-          e.preventDefault();
-          // Enter or Space would otherwise also fire the trigger's click; stop it so the
-          // submenu opens instead of the row activating.
-          e.stopImmediatePropagation();
-          revealSubmenu(sub);
-          return;
-        }
-      }
-
-      // Left/Right move along a side-by-side row (the quick reactions); Up/Down
-      // still walk the whole menu.
-      const row = target.closest<HTMLElement>('[role="group"]');
-      const sideways = e.key === "ArrowLeft" || e.key === "ArrowRight";
-      const items = menuItems(owner).filter((el) => !sideways || row?.contains(el) === true);
-      const from = items.indexOf(target);
-      if (from === -1) return;
-      let to: number | null = null;
-      if (e.key === "ArrowDown") to = Math.min(from + 1, items.length - 1);
-      else if (e.key === "ArrowUp") to = Math.max(from - 1, 0);
-      else if (e.key === "ArrowRight" && row !== null) to = Math.min(from + 1, items.length - 1);
-      else if (e.key === "ArrowLeft" && row !== null) to = Math.max(from - 1, 0);
-      else if (e.key === "Home") to = 0;
-      else if (e.key === "End") to = items.length - 1;
-      if (to === null) return;
-      e.preventDefault();
-      for (const item of items) item.setAttribute("tabindex", "-1");
-      const next = items[to]!;
-      next.setAttribute("tabindex", "0");
-      next.focus();
-    },
-    { signal: opts.signal },
-  );
+  menu.addEventListener("keydown", (e: KeyboardEvent) => handleMenuKey(e, close), {
+    signal: opts.signal,
+  });
 
   return restore;
 }

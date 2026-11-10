@@ -268,6 +268,7 @@ export const shards = {
     "src/lib/prefs/keybindLabels.ts",
     "src/lib/presence/presence.ts",
     "src/lib/text/markdown.ts",
+    "src/lib/text/markdownScan.ts",
     "src/lib/text/safeRender.ts",
     "src/lib/ui/globalKeys.ts",
   ],

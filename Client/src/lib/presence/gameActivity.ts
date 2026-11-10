@@ -168,53 +168,66 @@ export function startGameActivity(options: GameActivityOptions): GameActivityLoo
     }
   }
 
+  /** One scan; a failed one is "no game". */
+  async function scan(): Promise<DetectedGame | null> {
+    try {
+      return await detect(toDetectPrefs(loadGamePrefs()));
+    } catch {
+      return null;
+    }
+  }
+
+  /** Send what a finished scan found, if it differs from what the server was told. */
+  function applyAnswer(detected: DetectedGame | null): void {
+    // The choices are read again: a game hidden while the scan ran (or one
+    // an older host does not skip) is not shown.
+    const prefs = loadGamePrefs();
+    let game = detected;
+    if (game !== null && isHidden(prefs, game.name)) game = null;
+    // A name that trims to nothing is no game.
+    const name = game === null ? null : shownName(displayName(prefs, game.name));
+    if (name === "") game = null;
+    // A program added by hand is already in the list as itself.
+    if (game !== null && game.source !== "manual") recordSeen(game.name);
+    if (game === null || name === null) {
+      if (lastSent !== null) transmit(null, null);
+      return;
+    }
+    if (name === lastSent) {
+      if (game.name === lastDetected) return;
+      // Another game under the same shown name: a clear (never limited)
+      // lets the set below start its own clock.
+      transmit(null, null);
+    }
+    transmit(game, name);
+  }
+
+  /** A scan ended: release the slot, and run the queued rescan if its connection is still current. */
+  function settleScan(mine: number): void {
+    if (scanning === mine) scanning = null;
+    if (rescan && mine === epoch) {
+      rescan = false;
+      void poll();
+    } else if (mine !== epoch) {
+      rescan = false;
+    }
+  }
+
   async function poll(): Promise<void> {
     if (scanning === epoch || !live() || !active()) return;
     const mine = epoch;
     scanning = mine;
     try {
-      let game: DetectedGame | null = null;
-      try {
-        game = await detect(toDetectPrefs(loadGamePrefs()));
-      } catch {
-        // A failed scan is "no game".
-        game = null;
-      }
+      const game = await scan();
       // The connection, the setting or the server may have changed while the
       // scan ran; a stale answer is dropped, the next poll asks again.
       if (mine !== epoch || !live() || !active()) return;
       // The choices changed under this scan: it knows nothing of them, and the
       // scan queued below decides what is sent (one frame, not two).
       if (rescan) return;
-      // The choices are read again: a game hidden while the scan ran (or one
-      // an older host does not skip) is not shown.
-      const prefs = loadGamePrefs();
-      if (game !== null && isHidden(prefs, game.name)) game = null;
-      // A name that trims to nothing is no game.
-      const name = game === null ? null : shownName(displayName(prefs, game.name));
-      if (name === "") game = null;
-      // A program added by hand is already in the list as itself.
-      if (game !== null && game.source !== "manual") recordSeen(game.name);
-      if (game === null || name === null) {
-        if (lastSent === null) return;
-        transmit(null, null);
-        return;
-      }
-      if (name === lastSent) {
-        if (game.name === lastDetected) return;
-        // Another game under the same shown name: a clear (never limited)
-        // lets the set below start its own clock.
-        transmit(null, null);
-      }
-      transmit(game, name);
+      applyAnswer(game);
     } finally {
-      if (scanning === mine) scanning = null;
-      if (rescan && mine === epoch) {
-        rescan = false;
-        void poll();
-      } else if (mine !== epoch) {
-        rescan = false;
-      }
+      settleScan(mine);
     }
   }
 
