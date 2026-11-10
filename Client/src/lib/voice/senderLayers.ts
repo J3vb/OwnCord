@@ -63,13 +63,16 @@ export async function setSenderTop(
 ): Promise<void> {
   if (sender === undefined) return;
   if (!layersBySender.has(sender)) recordSenderLayers(sender);
-  const params = sender.getParameters();
+  let params = sender.getParameters();
+  // A re-size since the last record changes the layer count: start over.
+  if (layersBySender.get(sender)?.original.length !== (params.encodings ?? []).length) {
+    recordSenderLayers(sender);
+    // Reading again ends the earlier read's transaction: set the newest one.
+    params = sender.getParameters();
+  }
   const encodings = params.encodings ?? [];
   const topAt = topIndex(encodings);
-  const layers = layersBySender.get(sender);
-  if (topAt < 0 || layers === undefined) return;
-  // A re-size since the last record changes the layer count: start over.
-  if (layers.original.length !== encodings.length) recordSenderLayers(sender);
+  if (topAt < 0) return;
   const original = layersBySender.get(sender)?.original ?? [];
   const next = cappedLayerRates(original, topAt, top);
   encodings.forEach((e, i) => {

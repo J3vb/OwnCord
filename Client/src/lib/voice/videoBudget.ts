@@ -9,8 +9,8 @@
 export const CAMERA_BUDGET_FLOOR = 300_000;
 
 /** A share's budget must hold its 720p lower layer plus this much for the top
- *  layer before it goes out as simulcast; under that the lower layer would eat
- *  the top one's bitrate, so the share goes out as one layer. */
+ *  layer before it goes out as simulcast; under that the lower layer would take
+ *  too large a share of a small budget, so the share goes out as one layer. */
 const SHARE_TOP_LAYER_MIN = 1_000_000;
 
 /** The share's 720p lower layer's rate (`SCREENSHARE_SIMULCAST_LAYERS`). */

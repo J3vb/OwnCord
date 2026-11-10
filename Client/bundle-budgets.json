@@ -4,7 +4,7 @@
   "history": "Raise reasons go in the commit and PR that change a budget, never in a note here (two lanes appending to one note conflict). Reasoning before 2026-10-17: bundle-budget-history.md.",
   "startup": {
     "budget": 122500,
-    "note": "JS of the entry's static closure: index.html's entry file and everything its static imports reach (CSS is on the css line). A new eagerly-imported chunk joins it automatically."
+    "note": "JS of the entry's static closure: index.html's entry file and everything its static imports reach (CSS is on the css line). A new eagerly-imported chunk joins it automatically. 122000 -> 122500 for the video cap follower's stream-info and session hooks (122194 B)."
   },
   "chunks": {
     "MainPage": {
@@ -19,7 +19,7 @@
     "livekitSession": {
       "budget": 35000,
       "lazy": true,
-      "note": "The voice session facades (livekitSession, livekitE2EE) and the voice modules they import statically."
+      "note": "The voice session facades (livekitSession, livekitE2EE) and the voice modules they import statically. 34500 -> 35000 for the video cap follower's hooks (34554 B)."
     },
     "restShapes": {
       "budget": 2800,
@@ -47,9 +47,9 @@
       "note": "The Tauri window API (@tauri-apps/api/window), imported on demand by the desktop shell."
     },
     "screenShare": {
-      "budget": 10000,
+      "budget": 10200,
       "lazy": true,
-      "note": "Screen share, the peer codec pick and the H.264 profile hook, shared by camera and share. Not in the startup closure. 8000 -> 8200 for the captured track's content hint and the lazy resolution-recovery hook (7917 -> 8088 B); the recovery watcher itself is its own chunk."
+      "note": "Screen share, the peer codec pick and the H.264 profile hook, shared by camera and share. Not in the startup closure. 8700 -> 10200 for the video cap follower and sender layer clamp (10036 B)."
     }
   },
   "forbidEmbeddedWasm": {

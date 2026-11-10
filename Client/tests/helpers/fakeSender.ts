@@ -22,9 +22,18 @@ export function fakeSender(
     }),
     sender: undefined as never,
   };
+  // Like Chromium: every getParameters opens a new transaction, and only the
+  // newest read may be set.
+  let transaction = 0;
   (fake as { sender: RTCRtpSender }).sender = {
-    getParameters: () => ({ encodings: fake.encodings.map((e) => ({ ...e })) }),
-    setParameters: fake.setParameters,
+    getParameters: () => ({
+      transactionId: String(++transaction),
+      encodings: fake.encodings.map((e) => ({ ...e })),
+    }),
+    setParameters: (params: RTCRtpSendParameters) =>
+      params.transactionId === String(transaction)
+        ? (fake.setParameters as (p: RTCRtpSendParameters) => Promise<void>)(params)
+        : Promise.reject(new DOMException("stale transaction", "InvalidModificationError")),
   } as unknown as RTCRtpSender;
   return fake;
 }

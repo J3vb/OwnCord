@@ -16,7 +16,7 @@
  * track is never touched.
  */
 
-import type { LocalVideoTrack, Room } from "livekit-client";
+import { RoomEvent, type LocalVideoTrack, type Room } from "livekit-client";
 import { createLogger } from "../../lib/logger";
 import { voiceStore } from "../../stores/voice.store";
 import { setSenderTop, recordSenderLayers } from "../../lib/voice/senderLayers";
@@ -114,13 +114,30 @@ function topRate(kind: Kind, preset: number): number {
   return budgetedRate(preset, kind === "camera" ? budget.camera : budget.screen);
 }
 
+/** Write `top` into the options the SDK saved at publish, so a recompute from
+ *  them (a source swap, a full reconnect's republish) agrees with the cap. */
+function keepInOptions(kind: Kind, track: LocalVideoTrack, top: number): void {
+  const options = track.publishOptions;
+  if (options === undefined) return;
+  track.publishOptions =
+    kind === "camera"
+      ? { ...options, videoEncoding: { ...options.videoEncoding, maxBitrate: top } }
+      : { ...options, screenShareEncoding: { ...options.screenShareEncoding, maxBitrate: top } };
+}
+
+/** Set `top` on a live web track: its saved options and its sender. */
+async function setWebTop(kind: Kind, track: LocalVideoTrack, top: number): Promise<void> {
+  keepInOptions(kind, track, top);
+  await setSenderTop(track.sender, top);
+}
+
 /** Set `top` on a live track: the host for a native room, else its sender. */
 async function applyTop(room: Room | null, kind: Kind, track: object, top: number): Promise<void> {
   if (isNativeBitrateRoom(room)) {
     await room.setVideoBitrate(kind, track, top);
     return;
   }
-  await setSenderTop((track as LocalVideoTrack).sender, top);
+  await setWebTop(kind, track as LocalVideoTrack, top);
 }
 
 /** What the server lets a live share send when that is below what its quality
@@ -156,8 +173,9 @@ export async function clampPublishedVideo(
   if (sender === undefined) return;
   try {
     recordSenderLayers(sender);
-    // No budget: the layers are as the SDK made them, and are recorded.
-    if (topRate(kind, preset) < preset) await setSenderTop(sender, topRate(kind, preset));
+    // Always: a cap lifted while this publish was in flight left nothing for
+    // the follower to set (the sender did not exist yet).
+    await setWebTop(kind, track as LocalVideoTrack, topRate(kind, preset));
   } catch (err) {
     log.warn("Could not hold the published layers under the cap", err);
   }
@@ -165,6 +183,8 @@ export async function clampPublishedVideo(
 
 export class VideoCapFollower {
   private unsubscribes: Array<() => void> = [];
+  /** The room whose reconnects are watched, and how to stop watching. */
+  private watched: { room: Room; off: () => void } | null = null;
   private slots: Record<Kind, Slot> = { camera: newSlot(), screen: newSlot() };
   /** Bumped by `stop`: a run that began before it leaves everything alone. */
   private epoch = 0;
@@ -178,12 +198,26 @@ export class VideoCapFollower {
       this.unsubscribes.push(
         onVideoBitrateCap(() => this.reapplyAll()),
         voiceStore.subscribeSelector(
-          (s) => `${s.localCamera}|${s.localScreenshare}`,
+          // The revs move when a source swap or device switch rebuilt the layers.
+          (s) =>
+            `${s.localCamera}|${s.localScreenshare}|${s.localCameraRev ?? 0}|${s.localShareRev ?? 0}`,
           () => this.reapplyAll(),
         ),
       );
     }
+    this.watchReconnects();
     this.reapplyAll();
+  }
+
+  /** A reconnect republishes tracks from the options saved at publish (the
+   *  Linux host does the same), which undoes a live cap: apply it again. */
+  private watchReconnects(): void {
+    const room = this.host.getRoom();
+    if (room === null || this.watched?.room === room) return;
+    this.watched?.off();
+    const onReconnected = (): void => this.reapplyAll();
+    room.on(RoomEvent.Reconnected, onReconnected);
+    this.watched = { room, off: () => room.off(RoomEvent.Reconnected, onReconnected) };
   }
 
   /** The session ended or is reconnecting: drop the subscriptions and timers. */
@@ -191,6 +225,8 @@ export class VideoCapFollower {
     this.epoch++;
     for (const unsubscribe of this.unsubscribes) unsubscribe();
     this.unsubscribes = [];
+    this.watched?.off();
+    this.watched = null;
     for (const slot of Object.values(this.slots)) {
       if (slot.retry !== null) clearTimeout(slot.retry);
     }

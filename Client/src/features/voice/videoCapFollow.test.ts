@@ -2,7 +2,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LocalTrack, LocalVideoTrack, Room } from "livekit-client";
 import { bitrates, fakeSender, type FakeSender } from "../../../tests/helpers/fakeSender";
 import { expectConsole } from "../../../tests/helpers/console";
-import { setLocalCamera, setLocalScreenshare, voiceStore } from "../../stores/voice.store";
+import {
+  bumpLocalCameraRev,
+  bumpLocalShareRev,
+  setLocalCamera,
+  setLocalScreenshare,
+  voiceStore,
+} from "../../stores/voice.store";
 import { applyVideoBitrateCap, resetVideoBitrateCap } from "./videoBitrateCap";
 import {
   CAP_FOLLOW_BUSY_RETRY_MS,
@@ -233,8 +239,84 @@ describe("VideoCapFollower on the web path", () => {
 
 /** A native room: it has `setVideoBitrate`, and its tracks have no sender. */
 function nativeRoom(setVideoBitrate: (...args: unknown[]) => Promise<void>): Room {
-  return { setVideoBitrate } as unknown as Room;
+  return { setVideoBitrate, on: vi.fn(), off: vi.fn() } as unknown as Room;
 }
+
+/** What livekit-client does on a source swap or a reconnect's republish. */
+const sdkRebuilds = (share: Live): void => {
+  share.sender.encodings = LAYERS.map(([scale, rate]) => ({
+    scaleResolutionDownBy: scale,
+    maxBitrate: rate,
+  }));
+};
+
+describe("VideoCapFollower after the SDK rebuilt the layers", () => {
+  it("a source swap after a live cap change ends on the cap", async () => {
+    const share = webTrack();
+    setLocalScreenshare(true);
+    follow(liveStates(undefined, share)).kick();
+    applyVideoBitrateCap(1_000_000);
+    await settle();
+    expect(bitrates(share.sender)).toEqual([400_000, 1_000_000]);
+
+    sdkRebuilds(share);
+    bumpLocalShareRev();
+    voiceStore.flush();
+    await settle();
+    expect(bitrates(share.sender)).toEqual([400_000, 1_000_000]);
+  });
+
+  it("a camera device switch after a live cap change ends on the cap", async () => {
+    const camera = webTrack([[1, CAMERA_PRESET]]);
+    setLocalCamera(true);
+    follow(liveStates(camera)).kick();
+    applyVideoBitrateCap(900_000);
+    await settle();
+    camera.sender.encodings = [{ scaleResolutionDownBy: 1, maxBitrate: CAMERA_PRESET }];
+    bumpLocalCameraRev();
+    voiceStore.flush();
+    await settle();
+    expect(bitrates(camera.sender)).toEqual([900_000]);
+  });
+
+  it("keeps the budget in the options the SDK recomputes from", async () => {
+    const share = webTrack();
+    const options = { screenShareEncoding: { maxBitrate: SHARE_PRESET, maxFramerate: 30 } };
+    (share.track as unknown as { publishOptions: unknown }).publishOptions = options;
+    setLocalScreenshare(true);
+    follow(liveStates(undefined, share)).kick();
+    applyVideoBitrateCap(1_000_000);
+    await settle();
+    expect(
+      (share.track as unknown as { publishOptions: typeof options }).publishOptions
+        .screenShareEncoding,
+    ).toEqual({ maxBitrate: 1_000_000, maxFramerate: 30 });
+  });
+
+  it("a reconnect that republished the track from its old options ends on the cap", async () => {
+    const share = webTrack();
+    let reconnected: (() => void) | undefined;
+    const off = vi.fn();
+    const room = {
+      on: (_event: unknown, handler: () => void) => {
+        reconnected = handler;
+      },
+      off,
+    } as unknown as Room;
+    setLocalScreenshare(true);
+    const follower = follow(liveStates(undefined, share), room);
+    follower.kick();
+    applyVideoBitrateCap(1_000_000);
+    await settle();
+
+    sdkRebuilds(share);
+    reconnected?.();
+    await settle();
+    expect(bitrates(share.sender)).toEqual([400_000, 1_000_000]);
+    follower.stop();
+    expect(off).toHaveBeenCalledTimes(1);
+  });
+});
 
 describe("VideoCapFollower on the Linux native path", () => {
   const noSender = {} as unknown as LocalVideoTrack;
@@ -302,11 +384,11 @@ describe("clampPublishedVideo", () => {
     expect(bitrates(share.sender)).toEqual([300_000, 300_000]);
   });
 
-  it("sets nothing while no budget holds the stream back", async () => {
+  it("leaves the rates as they were while no budget holds the stream back", async () => {
     const share = webTrack();
     setLocalScreenshare(true);
     await clampPublishedVideo(share.track, "screen", SHARE_PRESET);
-    expect(share.sender.setParameters).not.toHaveBeenCalled();
+    expect(bitrates(share.sender)).toEqual([400_000, SHARE_PRESET]);
     await expect(clampPublishedVideo(undefined, "screen", SHARE_PRESET)).resolves.toBeUndefined();
   });
 

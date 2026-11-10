@@ -359,8 +359,8 @@ export class NativeLocalVideo {
   }
 
   /** Run the live share `track` at `quality` and `fps`: the host re-sizes the
-   *  running capture and republishes it with the new encoding (the SDK cannot
-   *  change a sender's parameters), at `published`, the codec the share goes
+   *  running capture and republishes it with the new encoding (a new size
+   *  needs new layers, which only a publish builds), at `published`, the codec the share goes
    *  out with now (the room cannot read the share state). Viewers get a new
    *  publication, so its sid replaces the old one. Throws a
    *  `ScreenQualityError`: "refused" when nothing changed, "publish" when the
