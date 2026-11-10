@@ -249,6 +249,8 @@ export const connectText = defineCatalog("connect", {
     "The server accepted your sign-in but did not finish loading. Try again in a moment.",
   "session.unreadableReply":
     "The server sent a reply this version of OwnCord cannot read. Update OwnCord or ask the server owner to update the server.",
+  "session.unreadableWriteReply":
+    "The server's reply could not be read, but your change may have been saved. Check before trying again.",
   "error.notJson":
     "The server answered with a web page instead of the API. A proxy or network gateway in front of it may be intercepting requests.",
   "session.loginFailedStatus": "Login failed ({status})",

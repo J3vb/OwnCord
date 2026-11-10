@@ -1287,7 +1287,7 @@ for (const profile of PROFILES) {
           httpRoutes: [
             ...BASE_SESSION_ROUTES,
             { pattern: "/pins", status: 200, body: { messages: [], has_more: false } },
-            { pattern: "GET /api/v1/dms", status: 200, body: RING_DM_CHANNELS },
+            { pattern: "GET /api/v1/dms", status: 200, body: { dm_channels: RING_DM_CHANNELS } },
           ],
           simulateWsFlow: true,
           wsHandlers: voiceJoinWithTokenHandlers(),

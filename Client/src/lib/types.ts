@@ -194,8 +194,9 @@ export interface HealthResponse {
   readonly status: string;
   /** Version is omitted from unauthenticated endpoints to prevent fingerprinting. */
   readonly version?: string;
-  readonly uptime: number;
-  readonly online_users: number;
+  /** Both are read defensively: a server that does not report them still answers. */
+  readonly uptime?: number;
+  readonly online_users?: number;
 }
 
 /** Registration mode reported by `server-info`. */
@@ -251,7 +252,8 @@ export function retentionNotice(info: ServerInfoResponse | undefined): string | 
 export interface ServerInfoResponse {
   readonly name: string;
   readonly protocol_epoch: number;
-  readonly browser_client_enabled: boolean;
+  /** Not read by this client; an older server may not send it. */
+  readonly browser_client_enabled?: boolean;
   /** Unknown/missing is treated as unavailable; see `parseRegistrationMode`. */
   readonly registration_mode?: RegistrationMode;
   /** Server-default message retention window; `messages_days: 0` = indefinitely. */
@@ -356,8 +358,10 @@ export interface PurgeResponse {
 export interface MemberResponse {
   readonly id: number;
   readonly username: string;
-  readonly avatar: string | null;
-  readonly role: string;
+  /** Omitted while the account has no avatar (Server/api/profile_handler.go's userResponse). */
+  readonly avatar?: string | null;
+  /** The role's name. The server sends `role_id` instead, so this is absent from it. */
+  readonly role?: string;
   readonly status: UserStatus;
   /** Whether 2FA is enrolled. Present on the caller's own GET /users/me
    *  response — the only place the server states it. */
@@ -424,8 +428,11 @@ export interface ApiError {
 export interface InviteResponse {
   readonly id: number;
   readonly code: string;
-  readonly url: string;
+  /** Never sent by the server; kept for callers that still pass one. */
+  readonly url?: string;
   readonly max_uses: number | null;
+  /** How many times the code was redeemed (the server's `uses`). */
+  readonly uses?: number;
   readonly use_count?: number;
   readonly expires_at: string | null;
   readonly revoked?: boolean;
@@ -504,14 +511,35 @@ export interface BlockedUsersResponse {
   readonly blocked_user_ids: readonly number[];
 }
 
-/** TURN/STUN credentials from GET /api/voice/credentials. */
-export interface IceServer {
-  readonly urls: string;
-  readonly username?: string;
-  readonly credential?: string;
+/** The public id of a record the caller just filed (a report or an appeal). */
+export interface PublicIdResponse {
+  readonly id: string;
 }
 
-export interface VoiceCredentialsResponse {
-  readonly ice_servers: readonly IceServer[];
-  readonly expires_in: number;
+/** POST /users/me/totp/enable: the otpauth URI to scan and the first recovery codes. */
+export interface TotpEnrolmentResponse {
+  readonly qr_uri: string;
+  readonly backup_codes: string[];
+}
+
+/** POST /users/me/totp/recovery-codes: the replacement recovery codes. */
+export interface RecoveryCodesResponse {
+  readonly backup_codes: string[];
+}
+
+/** A timeout's answer: its voice half, "applied" or "skipped". */
+export interface TimeoutResult {
+  readonly id: number;
+  readonly voice: "applied" | "skipped";
+}
+
+/** A report-linked action's answer; `voice` is set for a timeout only. */
+export interface ReportActResult {
+  readonly voice?: string;
+}
+
+/** A member nickname change's answer; `display_name` is null once cleared. */
+export interface NicknameResult {
+  readonly user_id: number;
+  readonly display_name: string | null;
 }

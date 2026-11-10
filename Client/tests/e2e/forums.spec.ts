@@ -125,7 +125,7 @@ const ROUTES = [
     pattern: "/api/v1/moderation/channels/9/forum",
     method: "PUT",
     status: 200,
-    body: { id: 9, name: "feedback", type: "forum" },
+    body: { id: 9, name: "feedback", type: "forum", category: null, position: 0 },
   },
 ];
 

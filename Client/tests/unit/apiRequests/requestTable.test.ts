@@ -1,6 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
 import * as mocks from "../../helpers/apiRequestsMocks";
 import { createApiClient } from "../../../src/lib/api";
+import type { RestReplyShapes } from "../../../src/lib/net/restReplies";
+import { validReply } from "../../helpers/restReplyFixtures";
 import {
   Api,
   okResponse,
@@ -32,6 +34,8 @@ describe("REST client requests", () => {
 
   interface Row {
     readonly name: string;
+    /** The reply the server sends for this call, when it has a body. */
+    readonly reply?: keyof RestReplyShapes;
     readonly call: (a: Api) => Promise<unknown>;
     readonly method: string;
     readonly path: string;
@@ -41,6 +45,7 @@ describe("REST client requests", () => {
   const rows: readonly Row[] = [
     {
       name: "login",
+      reply: "AuthResponse",
       call: (a) => a.login("ann", "pw"),
       method: "POST",
       path: "/auth/login",
@@ -48,6 +53,7 @@ describe("REST client requests", () => {
     },
     {
       name: "register",
+      reply: "RegisterResponse",
       call: (a) => a.register("ann", "pw", "inv"),
       method: "POST",
       path: "/auth/register",
@@ -56,6 +62,7 @@ describe("REST client requests", () => {
     { name: "logout", call: (a) => a.logout(), method: "POST", path: "/auth/logout" },
     {
       name: "recoverAccount",
+      reply: "AuthResponse",
       call: (a) => a.recoverAccount("ann", "kit", "newpw"),
       method: "POST",
       path: "/auth/recover",
@@ -68,9 +75,16 @@ describe("REST client requests", () => {
       path: "/auth/account",
       body: { password: "pw" },
     },
-    { name: "getMe", call: (a) => a.getMe(), method: "GET", path: "/auth/me" },
+    {
+      name: "getMe",
+      reply: "MemberResponse",
+      call: (a) => a.getMe(),
+      method: "GET",
+      path: "/auth/me",
+    },
     {
       name: "updateProfile",
+      reply: "MemberResponse",
       call: (a) => a.updateProfile({ display_name: "Ann", about: "hi" }),
       method: "PATCH",
       path: "/users/me",
@@ -78,12 +92,14 @@ describe("REST client requests", () => {
     },
     {
       name: "removeBanner",
+      reply: "MemberResponse",
       call: (a) => a.removeBanner(),
       method: "DELETE",
       path: "/users/me/banner",
     },
     {
       name: "changePassword",
+      reply: "PartialSuccessOrNone",
       call: (a) => a.changePassword("old", "new"),
       method: "PUT",
       path: "/users/me/password",
@@ -91,6 +107,7 @@ describe("REST client requests", () => {
     },
     {
       name: "enableTotp",
+      reply: "TotpEnrolment",
       call: (a) => a.enableTotp("pw"),
       method: "POST",
       path: "/users/me/totp/enable",
@@ -98,6 +115,7 @@ describe("REST client requests", () => {
     },
     {
       name: "confirmTotp",
+      reply: "PartialSuccessOrNone",
       call: (a) => a.confirmTotp("pw", "123456"),
       method: "POST",
       path: "/users/me/totp/confirm",
@@ -105,6 +123,7 @@ describe("REST client requests", () => {
     },
     {
       name: "disableTotp",
+      reply: "PartialSuccessOrNone",
       call: (a) => a.disableTotp("pw"),
       method: "DELETE",
       path: "/users/me/totp",
@@ -112,6 +131,7 @@ describe("REST client requests", () => {
     },
     {
       name: "regenerateRecoveryCodes",
+      reply: "RecoveryCodes",
       call: (a) => a.regenerateRecoveryCodes("pw"),
       method: "POST",
       path: "/users/me/totp/recovery-codes",
@@ -119,6 +139,7 @@ describe("REST client requests", () => {
     },
     {
       name: "enrolRecoveryKit",
+      reply: "RecoveryKitIssue",
       call: (a) => a.enrolRecoveryKit("pw"),
       method: "POST",
       path: "/users/me/recovery-kit",
@@ -126,18 +147,21 @@ describe("REST client requests", () => {
     },
     {
       name: "getRecoveryKitStatus",
+      reply: "RecoveryKitStatus",
       call: (a) => a.getRecoveryKitStatus(),
       method: "GET",
       path: "/users/me/recovery-kit",
     },
     {
       name: "getUserNote",
+      reply: "UserNote",
       call: (a) => a.getUserNote(7),
       method: "GET",
       path: "/users/me/notes/7",
     },
     {
       name: "putUserNote",
+      reply: "UserNote",
       call: (a) => a.putUserNote(7, "remember"),
       method: "PUT",
       path: "/users/me/notes/7",
@@ -145,12 +169,14 @@ describe("REST client requests", () => {
     },
     {
       name: "getDmPrivacy",
+      reply: "DmPrivacy",
       call: (a) => a.getDmPrivacy(),
       method: "GET",
       path: "/users/me/privacy",
     },
     {
       name: "putDmPrivacy",
+      reply: "DmPrivacy",
       call: (a) => a.putDmPrivacy({ allow_member_dms: false, message_requests: true }),
       method: "PUT",
       path: "/users/me/privacy",
@@ -158,33 +184,44 @@ describe("REST client requests", () => {
     },
     {
       name: "getOwnModeration",
+      reply: "OwnModerationActionList",
       call: (a) => a.getOwnModeration(),
       method: "GET",
       path: "/users/me/moderation",
     },
     {
       name: "fileReport",
+      reply: "PublicIdResponse",
       call: (a) =>
         a.fileReport({ target_type: "message", target_id: "9", reason: "spam", detail: "d" }),
       method: "POST",
       path: "/reports",
       body: { target_type: "message", target_id: "9", reason: "spam", detail: "d" },
     },
-    { name: "getMyReports", call: (a) => a.getMyReports(), method: "GET", path: "/reports/mine" },
+    {
+      name: "getMyReports",
+      reply: "OwnReportSummaryList",
+      call: (a) => a.getMyReports(),
+      method: "GET",
+      path: "/reports/mine",
+    },
     {
       name: "getModerationQueue (all open and assigned)",
+      reply: "QueueRowList",
       call: (a) => a.getModerationQueue(""),
       method: "GET",
       path: "/moderation/queue",
     },
     {
       name: "getModerationQueue (filtered)",
+      reply: "QueueRowList",
       call: (a) => a.getModerationQueue("closed"),
       method: "GET",
       path: "/moderation/queue?state=closed",
     },
     {
       name: "getModerationReport",
+      reply: "ModerationReportDetail",
       call: (a) => a.getModerationReport("r/1 x"),
       method: "GET",
       path: "/moderation/queue/r%2F1%20x",
@@ -211,6 +248,7 @@ describe("REST client requests", () => {
     },
     {
       name: "actOnModerationReport",
+      reply: "ReportActResultOrNone",
       call: (a) => a.actOnModerationReport("r1", { kind: "warning", reason: "be nice" }),
       method: "POST",
       path: "/moderation/queue/r1/act",
@@ -218,6 +256,7 @@ describe("REST client requests", () => {
     },
     {
       name: "timeoutMember",
+      reply: "TimeoutResult",
       call: (a) => a.timeoutMember(7, 300, "why"),
       method: "POST",
       path: "/moderation/users/7/timeout",
@@ -225,6 +264,7 @@ describe("REST client requests", () => {
     },
     {
       name: "setMemberNickname",
+      reply: "NicknameResult",
       call: (a) => a.setMemberNickname(7, null),
       method: "PUT",
       path: "/moderation/users/7/nickname",
@@ -238,18 +278,21 @@ describe("REST client requests", () => {
     },
     {
       name: "getModerationAppeals (all open and assigned)",
+      reply: "AppealRowList",
       call: (a) => a.getModerationAppeals(""),
       method: "GET",
       path: "/moderation/appeals",
     },
     {
       name: "getModerationAppeals (filtered)",
+      reply: "AppealRowList",
       call: (a) => a.getModerationAppeals("decided"),
       method: "GET",
       path: "/moderation/appeals?state=decided",
     },
     {
       name: "getModerationAppeal",
+      reply: "ModerationAppealDetail",
       call: (a) => a.getModerationAppeal("a/1"),
       method: "GET",
       path: "/moderation/appeals/a%2F1",
@@ -275,12 +318,19 @@ describe("REST client requests", () => {
     },
     {
       name: "fileAppeal",
+      reply: "PublicIdResponse",
       call: (a) => a.fileAppeal(5, "unfair"),
       method: "POST",
       path: "/appeals/",
       body: { action_id: 5, body: "unfair" },
     },
-    { name: "getMyAppeals", call: (a) => a.getMyAppeals(), method: "GET", path: "/appeals/mine" },
+    {
+      name: "getMyAppeals",
+      reply: "MyAppealList",
+      call: (a) => a.getMyAppeals(),
+      method: "GET",
+      path: "/appeals/mine",
+    },
     {
       name: "withdrawAppeal",
       call: (a) => a.withdrawAppeal("a/1"),
@@ -301,42 +351,49 @@ describe("REST client requests", () => {
     },
     {
       name: "revokeAllSessions",
+      reply: "RevokeAllSessionsResponse",
       call: (a) => a.revokeAllSessions(),
       method: "DELETE",
       path: "/users/me/sessions",
     },
     {
       name: "getMessages (no options)",
+      reply: "MessagesResponse",
       call: (a) => a.getMessages(5),
       method: "GET",
       path: "/channels/5/messages",
     },
     {
       name: "getMessages (before and limit)",
+      reply: "MessagesResponse",
       call: (a) => a.getMessages(5, { before: 90, limit: 25 }),
       method: "GET",
       path: "/channels/5/messages?before=90&limit=25",
     },
     {
       name: "getMessages (after)",
+      reply: "MessagesResponse",
       call: (a) => a.getMessages(5, { after: 10 }),
       method: "GET",
       path: "/channels/5/messages?after=10",
     },
     {
       name: "getMessagesAround (no options)",
+      reply: "MessagesAroundResponse",
       call: (a) => a.getMessagesAround(5, 77),
       method: "GET",
       path: "/channels/5/messages/around/77",
     },
     {
       name: "getMessagesAround (limit)",
+      reply: "MessagesAroundResponse",
       call: (a) => a.getMessagesAround(5, 77, { limit: 20 }),
       method: "GET",
       path: "/channels/5/messages/around/77?limit=20",
     },
     {
       name: "purgeMessages (newest)",
+      reply: "PurgeResponse",
       call: (a) => a.purgeMessages(5, 30),
       method: "POST",
       path: "/channels/5/messages/purge",
@@ -344,6 +401,7 @@ describe("REST client requests", () => {
     },
     {
       name: "purgeMessages (before a message)",
+      reply: "PurgeResponse",
       call: (a) => a.purgeMessages(5, 30, { before: 44 }),
       method: "POST",
       path: "/channels/5/messages/purge",
@@ -351,13 +409,21 @@ describe("REST client requests", () => {
     },
     {
       name: "getReactionUsers",
+      reply: "ReactionUsersResponse",
       call: (a) => a.getReactionUsers(5, 6, "👍 x"),
       method: "GET",
       path: `/channels/5/messages/6/reactions/${encodeURIComponent("👍 x")}/users`,
     },
-    { name: "getPins", call: (a) => a.getPins(5), method: "GET", path: "/channels/5/pins" },
+    {
+      name: "getPins",
+      reply: "MessagesResponse",
+      call: (a) => a.getPins(5),
+      method: "GET",
+      path: "/channels/5/pins",
+    },
     {
       name: "listThreads",
+      reply: "ThreadListResponse",
       call: (a) => a.listThreads(5, "archived=1&limit=10"),
       method: "GET",
       path: "/channels/5/threads?archived=1&limit=10",
@@ -376,18 +442,21 @@ describe("REST client requests", () => {
     },
     {
       name: "search (query only)",
+      reply: "SearchResponse",
       call: (a) => a.search("a b&c"),
       method: "GET",
       path: "/search?q=a+b%26c",
     },
     {
       name: "search (all filters)",
+      reply: "SearchResponse",
       call: (a) => a.search("hi", { channelId: 5, limit: 10, sort: "relevance" }),
       method: "GET",
       path: "/search?q=hi&channel_id=5&limit=10&sort=relevance",
     },
     {
       name: "search (a cursor forces recent order)",
+      reply: "SearchResponse",
       call: (a) => a.search("hi", { sort: "relevance", before: 99 }),
       method: "GET",
       path: "/search?q=hi&sort=recent&before=99",
@@ -406,29 +475,39 @@ describe("REST client requests", () => {
     },
     {
       name: "gifSearch",
+      reply: "GifSearchResponse",
       call: (a) => a.gifSearch("cat dance", 12),
       method: "GET",
       path: "/gif/search?q=cat+dance&limit=12",
     },
     {
       name: "gifSearch (next page)",
+      reply: "GifSearchResponse",
       call: (a) => a.gifSearch("cat", 12, "CURSOR"),
       method: "GET",
       path: "/gif/search?q=cat&limit=12&pos=CURSOR",
     },
     {
       name: "gifTrending",
+      reply: "GifSearchResponse",
       call: (a) => a.gifTrending(8),
       method: "GET",
       path: "/gif/trending?limit=8",
     },
     {
       name: "gifTrending (next page)",
+      reply: "GifSearchResponse",
       call: (a) => a.gifTrending(8, "CURSOR"),
       method: "GET",
       path: "/gif/trending?limit=8&pos=CURSOR",
     },
-    { name: "gifFavorites", call: (a) => a.gifFavorites(), method: "GET", path: "/gif/favorites" },
+    {
+      name: "gifFavorites",
+      reply: "GifFavoritesResponse",
+      call: (a) => a.gifFavorites(),
+      method: "GET",
+      path: "/gif/favorites",
+    },
     {
       name: "addGifFavorite",
       call: (a) => a.addGifFavorite({ url: "https://g/1", preview_url: "https://g/p", title: "t" }),
@@ -448,9 +527,16 @@ describe("REST client requests", () => {
       method: "DELETE",
       path: "/uploads/u%2F1",
     },
-    { name: "getInvites", call: (a) => a.getInvites(), method: "GET", path: "/invites" },
+    {
+      name: "getInvites",
+      reply: "InviteResponseList",
+      call: (a) => a.getInvites(),
+      method: "GET",
+      path: "/invites",
+    },
     {
       name: "createInvite",
+      reply: "InviteResponse",
       call: (a) => a.createInvite({ max_uses: 3, expires_in_hours: 24 }),
       method: "POST",
       path: "/invites",
@@ -462,12 +548,31 @@ describe("REST client requests", () => {
       method: "DELETE",
       path: "/invites/abc123",
     },
-    { name: "listEmoji", call: (a) => a.listEmoji(), method: "GET", path: "/emoji" },
+    {
+      name: "listEmoji",
+      reply: "EmojiResponseList",
+      call: (a) => a.listEmoji(),
+      method: "GET",
+      path: "/emoji",
+    },
     { name: "deleteEmoji", call: (a) => a.deleteEmoji(4), method: "DELETE", path: "/emoji/4" },
-    { name: "listStickers", call: (a) => a.listStickers(), method: "GET", path: "/stickers" },
-    { name: "getDmChannels", call: (a) => a.getDmChannels(), method: "GET", path: "/dms" },
+    {
+      name: "listStickers",
+      reply: "StickerResponseList",
+      call: (a) => a.listStickers(),
+      method: "GET",
+      path: "/stickers",
+    },
+    {
+      name: "getDmChannels",
+      reply: "DmChannelsResponse",
+      call: (a) => a.getDmChannels(),
+      method: "GET",
+      path: "/dms",
+    },
     {
       name: "createDm",
+      reply: "CreateDmResponse",
       call: (a) => a.createDm(8),
       method: "POST",
       path: "/dms",
@@ -475,6 +580,7 @@ describe("REST client requests", () => {
     },
     {
       name: "createGroupDm (named)",
+      reply: "GroupDmResponse",
       call: (a) => a.createGroupDm([2, 3], "crew"),
       method: "POST",
       path: "/dms/group",
@@ -482,6 +588,7 @@ describe("REST client requests", () => {
     },
     {
       name: "createGroupDm (unnamed)",
+      reply: "GroupDmResponse",
       call: (a) => a.createGroupDm([2, 3]),
       method: "POST",
       path: "/dms/group",
@@ -489,6 +596,7 @@ describe("REST client requests", () => {
     },
     {
       name: "renameGroupDm",
+      reply: "GroupDmResponse",
       call: (a) => a.renameGroupDm(9, "new"),
       method: "PATCH",
       path: "/dms/9",
@@ -496,6 +604,7 @@ describe("REST client requests", () => {
     },
     {
       name: "addGroupDmMembers",
+      reply: "GroupDmOrNone",
       call: (a) => a.addGroupDmMembers(9, [4, 5]),
       method: "POST",
       path: "/dms/9/members",
@@ -503,6 +612,7 @@ describe("REST client requests", () => {
     },
     {
       name: "removeGroupDmIcon",
+      reply: "GroupDmOrNone",
       call: (a) => a.removeGroupDmIcon(9),
       method: "DELETE",
       path: "/dms/9/icon",
@@ -515,21 +625,30 @@ describe("REST client requests", () => {
     },
     {
       name: "setGroupDmOwner",
+      reply: "GroupDmOrNone",
       call: (a) => a.setGroupDmOwner(9, 4),
       method: "PUT",
       path: "/dms/9/owner",
       body: { user_id: 4 },
     },
     { name: "closeDm", call: (a) => a.closeDm(9), method: "DELETE", path: "/dms/9" },
-    { name: "listBlocks", call: (a) => a.listBlocks(), method: "GET", path: "/blocks" },
+    {
+      name: "listBlocks",
+      reply: "BlockedUsersResponse",
+      call: (a) => a.listBlocks(),
+      method: "GET",
+      path: "/blocks",
+    },
     {
       name: "listDmRequests",
+      reply: "DmRequestListResponse",
       call: (a) => a.listDmRequests(),
       method: "GET",
       path: "/dm-requests",
     },
     {
       name: "decideDmRequest",
+      reply: "DmRequestDecisionResult",
       call: (a) => a.decideDmRequest(3, "ignore"),
       method: "POST",
       path: "/dm-requests/3/ignore",
@@ -537,13 +656,8 @@ describe("REST client requests", () => {
     { name: "blockUser", call: (a) => a.blockUser(6), method: "PUT", path: "/blocks/6" },
     { name: "unblockUser", call: (a) => a.unblockUser(6), method: "DELETE", path: "/blocks/6" },
     {
-      name: "getVoiceCredentials",
-      call: (a) => a.getVoiceCredentials(),
-      method: "GET",
-      path: "/voice/credentials",
-    },
-    {
       name: "adminCreateChannel",
+      reply: "ChannelResponse",
       call: (a) => a.adminCreateChannel({ name: "general", type: "text", category_id: 2 }),
       method: "POST",
       path: "/moderation/channels",
@@ -551,6 +665,7 @@ describe("REST client requests", () => {
     },
     {
       name: "adminUpdateChannel",
+      reply: "ChannelResponse",
       call: (a) => a.adminUpdateChannel(4, { topic: "t", nsfw: true }),
       method: "PATCH",
       path: "/moderation/channels/4",
@@ -558,6 +673,7 @@ describe("REST client requests", () => {
     },
     {
       name: "adminUpdateForumSettings",
+      reply: "ChannelResponse",
       call: (a) =>
         a.adminUpdateForumSettings(4, {
           tags: [{ name: "bug" }],
@@ -580,6 +696,7 @@ describe("REST client requests", () => {
     },
     {
       name: "adminCreateCategory",
+      reply: "ChannelCategory",
       call: (a) => a.adminCreateCategory("Voice"),
       method: "POST",
       path: "/moderation/channels/categories",
@@ -587,6 +704,7 @@ describe("REST client requests", () => {
     },
     {
       name: "adminRenameCategory",
+      reply: "ChannelCategory",
       call: (a) => a.adminRenameCategory(2, "Talk"),
       method: "PATCH",
       path: "/moderation/channels/categories/2",
@@ -600,6 +718,7 @@ describe("REST client requests", () => {
     },
     {
       name: "adminReorderCategories",
+      reply: "ChannelCategoryList",
       call: (a) => a.adminReorderCategories([3, 1, 2]),
       method: "PUT",
       path: "/moderation/channels/categories/order",
@@ -639,6 +758,7 @@ describe("REST client requests", () => {
     },
     {
       name: "adminBanMember (permanent, no reason)",
+      reply: "BanMemberResponse",
       call: (a) => a.adminBanMember(9),
       method: "PATCH",
       path: "/moderation/members/9",
@@ -646,6 +766,7 @@ describe("REST client requests", () => {
     },
     {
       name: "adminBanMember (timed, with message purge)",
+      reply: "BanMemberResponse",
       call: (a) => a.adminBanMember(9, "spam", 12, undefined, 3600),
       method: "PATCH",
       path: "/moderation/members/9",
@@ -658,6 +779,7 @@ describe("REST client requests", () => {
     },
     {
       name: "adminBanMember (zero duration and zero purge are omitted)",
+      reply: "BanMemberResponse",
       call: (a) => a.adminBanMember(9, "spam", 0, undefined, 0),
       method: "PATCH",
       path: "/moderation/members/9",
@@ -666,6 +788,7 @@ describe("REST client requests", () => {
   ];
 
   it.each(rows)("$name sends $method $path", async (row) => {
+    if (row.reply !== undefined) mockFetch.mockResolvedValue(okResponse(validReply(row.reply)));
     await row.call(api);
     expect(mockFetch).toHaveBeenCalledTimes(1);
     expect(callUrl()).toBe(`${BASE}${row.path}`);
@@ -677,8 +800,9 @@ describe("REST client requests", () => {
   });
 
   it("returns the parsed body of a successful call", async () => {
-    mockFetch.mockResolvedValue(okResponse({ id: 1, username: "ann" }));
-    await expect(api.getMe()).resolves.toEqual({ id: 1, username: "ann" });
+    const body = validReply("MemberResponse");
+    mockFetch.mockResolvedValue(okResponse(body));
+    await expect(api.getMe()).resolves.toEqual(body);
   });
 
   it("returns undefined for a 204 without reading a body", async () => {
@@ -692,6 +816,7 @@ describe("REST client requests", () => {
 
   describe("headers", () => {
     it("sends no Authorization header without a token", async () => {
+      mockFetch.mockResolvedValue(okResponse(validReply("AuthResponse")));
       const anon = createApiClient({ host: "host.test:8443" });
       await anon.login("a", "b");
       expect(callHeaders()["Authorization"]).toBeUndefined();
@@ -699,6 +824,7 @@ describe("REST client requests", () => {
     });
 
     it("lets a per-call token replace the session token", async () => {
+      mockFetch.mockResolvedValue(okResponse(validReply("AuthResponse")));
       await api.verifyTotp("123456", "partial-token");
       expect(callUrl()).toBe(`${BASE}/auth/verify-totp`);
       expect(callInit().method).toBe("POST");
@@ -707,6 +833,7 @@ describe("REST client requests", () => {
     });
 
     it("leaves the Content-Type to the transport for a multipart upload", async () => {
+      mockFetch.mockResolvedValue(okResponse(validReply("UploadResponse")));
       await api.uploadFile(new File(["x"], "a.png", { type: "image/png" }));
       expect(callHeaders()["Content-Type"]).toBeUndefined();
       expect(callHeaders()["Authorization"]).toBe("Bearer tok-1");
