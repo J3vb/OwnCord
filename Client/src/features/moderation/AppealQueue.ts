@@ -23,7 +23,6 @@
  */
 
 import { isImeCommit } from "@lib/text/ime";
-import { ApiClientError, serverErrorText, type ModerationAppealFilter } from "@lib/api";
 import { Disposable } from "@lib/disposable";
 import { appendChildren, clearChildren, createElement, setText } from "@lib/dom";
 import { authStore } from "@stores/auth.store";
@@ -42,47 +41,14 @@ import { dateText } from "./Evidence";
 import { actorName } from "./History";
 import { modAppealStore } from "./store";
 import { RestErrorCode } from "@lib/protocolTypes";
+import { FILTERS, errorText, type AppealsOptions, type AppealsView } from "./appealModel";
 
-const FILTERS = [
-  { value: "", labelKey: "appeal.filter.active", countKey: "appeal.count.active" },
-  { value: "open", labelKey: "appeal.filter.open", countKey: "appeal.count.open" },
-  { value: "assigned", labelKey: "appeal.filter.assigned", countKey: "appeal.count.assigned" },
-  { value: "decided", labelKey: "appeal.filter.decided", countKey: "appeal.count.decided" },
-] as const satisfies readonly {
-  value: ModerationAppealFilter;
-  labelKey: string;
-  countKey: string;
-}[];
-
-export interface AppealsView {
-  /** The other tab lost authority: clear this one too. */
-  readonly deny: () => void;
-}
-
-export interface AppealsOptions {
-  /** This tab lost authority: clear the other one too. */
-  readonly onDenied: () => void;
-  /** Open a linked report in Reports. */
-  readonly openReport: (id: string) => void;
-}
+export type { AppealsOptions, AppealsView } from "./appealModel";
 
 let viewSeq = 0;
 
 const me = (): number => authStore.getState().user?.id ?? -1;
 const NO_DRAFT = (): AppealDraft & { id: string } => ({ id: "", note: "", outcome: null });
-
-function errorText(w: AppealWrite, err: unknown): string {
-  if (isStatus(err, 403, RestErrorCode.SELF_REVIEW)) return t("appeal.selfReview");
-  if (isStatus(err, 409, RestErrorCode.REVERSAL_FAILED)) return t("appeal.reversalFailed");
-  if (isStatus(err, 409))
-    return t(w.kind === "assign" ? "appeal.conflict.assign" : "appeal.conflict.decide");
-  if (isStatus(err, 400)) {
-    const message = err instanceof ApiClientError ? serverErrorText(err.code, err.message, "") : "";
-    if (message !== "") return t("appeal.invalid", { message });
-  }
-  // No answer, or an internal failure: the change may still have been recorded.
-  return t("appeal.unknown");
-}
 
 export function renderAppeals(
   root: HTMLElement,
