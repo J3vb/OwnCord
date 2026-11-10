@@ -16,7 +16,7 @@ import {
   pickScreenSource,
   shareSettings,
 } from "./screenPicker";
-import type { StreamQuality } from "@lib/voice/screenShare";
+import type { StreamQuality } from "../screenShare";
 import type { PublishCodec } from "../videoCodec";
 
 const log = createLogger("nativeRoom");

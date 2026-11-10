@@ -8,7 +8,7 @@
  */
 
 import { type Room, Track } from "livekit-client";
-import type { ShareSenderSample, SenderStatsTrack } from "../../features/voice/shareSenderStats";
+import type { ShareSenderSample, SenderStatsTrack } from "./shareSenderStats";
 import { readSenderSample } from "./shareHostLinks";
 export {
   CAMERA_PRESETS,
@@ -29,8 +29,8 @@ export {
   getScreenShareMaxBitrate,
   screenVideoPublishOptions,
   getScreenShareCaptureOptions,
-} from "./videoPresets";
-export type { StreamQuality } from "./videoPresets";
+} from "../../lib/voice/videoPresets";
+export type { StreamQuality } from "../../lib/voice/videoPresets";
 
 export {
   bumpGeneration,

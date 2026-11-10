@@ -7,7 +7,7 @@ import type { LocalVideoTrack, LocalTrack, TrackPublishOptions } from "livekit-c
 import { setH264GpuProfiles } from "@lib/voice/h264Profile";
 import { createLogger } from "@lib/logger";
 import { voiceText } from "../../i18n/voice";
-import type { PublishCodec } from "../../features/voice/videoCodec";
+import type { PublishCodec } from "./videoCodec";
 import { bumpLocalShareRev, h264GpuPublish, isLinuxDesktop, voiceStore } from "./shareHostLinks";
 import {
   cameraPublishOptions,
@@ -16,7 +16,7 @@ import {
   getScreenShareFps,
   screenVideoPublishOptions,
   type StreamQuality,
-} from "./videoPresets";
+} from "../../lib/voice/videoPresets";
 import {
   registerPendingVideoEnable,
   unpublishManualTrack,

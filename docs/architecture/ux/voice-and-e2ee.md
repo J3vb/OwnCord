@@ -101,8 +101,8 @@ All four are optimistic with rollback; each also emits a WS control message.
 | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- | -------------------------------------------- |
 | **Mute**        | `localMuted` (`setLocalMuted`) — stops the mic capture track (`stopMicTrackOnMute` in the Room's `publishDefaults`, applied by `applyMicMuteState`, `features/voice/mediaControl.ts`), so the OS microphone in-use indicator goes out; the LiveKit publication is **not** removed — it stays muted, and unmute re-acquires the device | `voice_mute{muted}`           | n/a (local-authoritative)                    |
 | **Deafen**      | `localDeafened` + forces mute — unsubscribes remote voice audio and mutes screen-share/stream audio (it stays subscribed; undeafen restores each stream's own per-tile mute)                                                                                                                                                          | `voice_deafen` + `voice_mute` | implies mute                                 |
-| **Camera**      | `localCamera` set optimistically, rolled back on device failure (`enableCamera()` in `lib/voice/screenShare.ts`)                                                                                                                                                                                                                      | `voice_camera{enabled}`       | revert on failure + toast                    |
-| **Screenshare** | `localScreenshare` optimistic, rollback on failure (`enableScreenshare()` in `lib/voice/screenShare.ts`); rate-limited                                                                                                                                                                                                                | `voice_screenshare{enabled}`  | revert + toast; a dismissed picker is silent |
+| **Camera**      | `localCamera` set optimistically, rolled back on device failure (`enableCamera()` in `features/voice/screenShare.ts`)                                                                                                                                                                                                                 | `voice_camera{enabled}`       | revert on failure + toast                    |
+| **Screenshare** | `localScreenshare` optimistic, rollback on failure (`enableScreenshare()` in `features/voice/screenShare.ts`); rate-limited                                                                                                                                                                                                           | `voice_screenshare{enabled}`  | revert + toast; a dismissed picker is silent |
 
 Mute and deafen live in the user panel (`components/UserBar.ts`, next to
 Settings), not the voice widget. They, their keys and the tray work outside a
@@ -554,7 +554,7 @@ never silences message chimes for the rest of the session.
 ## Source of truth
 
 `src/lib/voice/livekitSession.ts`, `src/features/voice/`, `src/lib/voice/livekitE2EE.ts`,
-`src/stores/voice.store.ts`, `src/lib/voice/screenShare.ts`,
+`src/stores/voice.store.ts`, `src/features/voice/screenShare.ts`,
 `src/lib/voice/ptt.ts`, `src/lib/ui/inputMode.ts`, `src/lib/voice/noiseFloor.ts`, `src/lib/voice/roomEventHandlers.ts`, `src/components/VoiceWidget.ts`,
 `src/components/UserBar.ts` (mute and deafen buttons),
 `src/features/channels/ChannelSidebar.ts` (voice rows, join freeze on WS reconnect,

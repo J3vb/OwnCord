@@ -31,7 +31,7 @@ import {
   stopManualCameraTrack,
   stopManualScreenTracks,
   bumpGeneration,
-} from "../../lib/voice/screenShare";
+} from "./screenShare";
 import { attachDiagnosticListeners } from "../../lib/voice/livekitDiagnostics";
 import { recordVoiceLeft } from "../../lib/voice/voiceEventLog";
 import { detachRoom, onRoom } from "./releaseRoom";

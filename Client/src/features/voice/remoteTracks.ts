@@ -7,7 +7,7 @@ import {
   getLocalCameraStream as doGetLocalCameraStream,
   getLocalScreenshareStream as doGetLocalScreenshareStream,
   getLocalScreenshareStats as doGetLocalScreenshareStats,
-} from "../../lib/voice/screenShare";
+} from "./screenShare";
 import { parseUserId } from "./sessionState";
 import { isUnencryptedPublication } from "./mediaEncryption";
 import { autoPlayCameras } from "./autoPlayCameras";

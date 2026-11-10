@@ -37,7 +37,7 @@ vi.mock("../../lib/logger", () => ({
 }));
 vi.mock("../../lib/voice/deviceManager", () => ({ isMicPolicyGated: () => false }));
 vi.mock("../../lib/voice/livekitDiagnostics", () => ({ attachDiagnosticListeners: vi.fn() }));
-vi.mock("../../lib/voice/screenShare", () => ({
+vi.mock("./screenShare", () => ({
   CAMERA_PRESETS: { high: {} },
   CAMERA_PUBLISH_BITRATES: { high: 1 },
   getCameraQuality: () => "high",

@@ -38,7 +38,7 @@ vi.mock("../../src/features/voice/videoCodec", async (importOriginal) => ({
 
 vi.mock("@lib/prefs/preferences", () => shareRig.fallbackPrefsMock(savePref));
 
-const { watchScreenEnded } = await import("@lib/voice/screenShare");
+const { watchScreenEnded } = await import("../../src/features/voice/screenShare");
 const { changeScreenshareSource, setScreenshareQuality } =
   await import("../../src/features/voice/screenshareChange");
 const { voiceStore } = await import("@stores/voice.store");
@@ -341,7 +341,7 @@ describe("changeScreenshareSource", () => {
       }),
     );
     const changing = changeScreenshareSource(rig.state, rig.deps);
-    const { disableScreenshare } = await import("@lib/voice/screenShare");
+    const { disableScreenshare } = await import("../../src/features/voice/screenShare");
     await disableScreenshare(rig.state, rig.deps);
     const fresh = track(Track.Kind.Video, "window-b");
     resolvePick([fresh]);

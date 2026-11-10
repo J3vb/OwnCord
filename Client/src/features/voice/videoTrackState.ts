@@ -8,9 +8,9 @@ import type { Room, LocalVideoTrack, LocalTrack } from "livekit-client";
 import { Track } from "livekit-client";
 import type { WsClient } from "@lib/ws";
 import { createLogger } from "@lib/logger";
-import type { NativeCameraTrack } from "../../features/voice/native/nativeCameraTrack";
-import type { PublishCodec } from "../../features/voice/videoCodec";
-import type { StreamQuality } from "./videoPresets";
+import type { NativeCameraTrack } from "./native/nativeCameraTrack";
+import type { PublishCodec } from "./videoCodec";
+import type { StreamQuality } from "../../lib/voice/videoPresets";
 
 const log = createLogger("screenShare");
 

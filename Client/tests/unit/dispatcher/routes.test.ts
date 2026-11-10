@@ -9,7 +9,7 @@ import { featureRoutes, wireDispatcher } from "../../../src/lib/dispatcher";
 
 vi.mock("@lib/notifications", () => dispatcherMocks.notificationsMock());
 vi.mock("@lib/voice/livekitSession", () => dispatcherMocks.livekitSessionMock());
-vi.mock("@lib/voice/screenShare", () => dispatcherMocks.screenShareMock());
+vi.mock("../../../src/features/voice/screenShare", () => dispatcherMocks.screenShareMock());
 vi.mock("@lib/ui/toast", () => dispatcherMocks.toastMock());
 vi.mock("@lib/net/identity", () => dispatcherMocks.identityMock());
 

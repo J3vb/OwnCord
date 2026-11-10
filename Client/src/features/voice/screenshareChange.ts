@@ -39,7 +39,7 @@ import {
   type ScreenTrackState,
   type StreamQuality,
   type VideoTrackDeps,
-} from "../../lib/voice/screenShare";
+} from "./screenShare";
 import { bumpLocalShareRev } from "../../stores/voice.store";
 import { isLinuxDesktop } from "./native/platform";
 import { fitGpuH264Share, gpuH264SizeCap, setH264GpuProfiles } from "../../lib/voice/h264Profile";

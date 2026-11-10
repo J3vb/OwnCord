@@ -125,15 +125,6 @@
       "features/voice/sessionState.ts": 1,
       "stores/voice.store.ts": 1
     },
-    "lib/voice/shareHostLinks.ts": {
-      "features/voice/native/devices.ts": 1,
-      "features/voice/native/platform.ts": 1,
-      "features/voice/native/screenPickerSlot.ts": 1,
-      "features/voice/peerDecode.ts": 1,
-      "features/voice/shareSenderStats.ts": 1,
-      "features/voice/videoCodec.ts": 1,
-      "stores/voice.store.ts": 1
-    },
     "lib/presence/statusTimer.ts": {
       "stores/auth.store.ts": 1,
       "stores/members.store.ts": 1

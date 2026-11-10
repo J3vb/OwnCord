@@ -6,7 +6,7 @@ import { LiveKitSession } from "../../features/voice/voiceSession";
 export { LiveKitSession } from "../../features/voice/voiceSession";
 
 // Re-export StreamQuality so existing consumers don't break
-export type { StreamQuality } from "@lib/voice/screenShare";
+export type { StreamQuality } from "../../features/voice/screenShare";
 
 // --- Push-to-talk liveness (cross-module signal, no instance state) ---
 

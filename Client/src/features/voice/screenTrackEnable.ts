@@ -21,9 +21,9 @@ import {
   sharePublishOptions,
   stopTracks,
   type ShareSettings,
-} from "./videoCapture";
+} from "../../lib/voice/videoCapture";
 import { voiceText } from "../../i18n/voice";
-import type { CodecChoice } from "../../features/voice/videoCodec";
+import type { CodecChoice } from "./videoCodec";
 import {
   bumpLocalShareRev,
   channelPeerDecode,
@@ -46,7 +46,7 @@ import {
   SCREENSHARE_AUDIO_PUBLISH,
   screenVideoPublishOptions,
   type StreamQuality,
-} from "./videoPresets";
+} from "../../lib/voice/videoPresets";
 import {
   qualityOf,
   registerPendingVideoEnable,
@@ -100,7 +100,7 @@ function publishShareAppAudio(
   videoTrack: LocalTrack,
   generation: number,
 ): Promise<"done" | "stale"> {
-  return import("./appAudioShare")
+  return import("../../lib/voice/appAudioShare")
     .then((m) =>
       m.publishAppAudio(state, room, screenTracks, videoTrack, generation, {
         ...SCREENSHARE_AUDIO_PUBLISH,
@@ -126,7 +126,7 @@ function startShareRecovery(
 ): void {
   if (videoTrack === undefined || isLinuxDesktop()) return;
   const preference = videoOptions.degradationPreference ?? screenShareDegradation();
-  void import("./shareResolutionRecovery")
+  void import("../../lib/voice/shareResolutionRecovery")
     .then(({ watchShareResolutionRecovery }) => {
       if ((state.generation ?? 0) !== generation || state.manualScreenTracks !== screenTracks)
         return;

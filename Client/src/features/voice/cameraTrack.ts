@@ -8,9 +8,9 @@ import type { WsClient } from "@lib/ws";
 import { loadPref } from "@lib/prefs/preferences";
 import { setH264GpuProfiles } from "@lib/voice/h264Profile";
 import { createLogger } from "@lib/logger";
-import { createCameraTrack, hasCameraTracks } from "./videoCapture";
+import { createCameraTrack, hasCameraTracks } from "../../lib/voice/videoCapture";
 import { voiceText } from "../../i18n/voice";
-import type { CodecChoice } from "../../features/voice/videoCodec";
+import type { CodecChoice } from "./videoCodec";
 import {
   channelPeerDecode,
   h264GpuPublish,
@@ -24,7 +24,7 @@ import {
   cameraPublishOptions,
   getCameraQuality,
   type StreamQuality,
-} from "./videoPresets";
+} from "../../lib/voice/videoPresets";
 import {
   bumpGeneration,
   registerPendingVideoEnable,

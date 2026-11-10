@@ -35,7 +35,7 @@ import {
   stopManualCameraTrack,
   stopManualScreenTracks,
   type StreamQuality,
-} from "@lib/voice/screenShare";
+} from "./screenShare";
 import { buildSessionDebugInfo } from "@lib/voice/livekitDiagnostics";
 import { type RoomEventHandlers, createRoomEventHandlers } from "@lib/voice/roomEventHandlers";
 import { VoiceTokenManager } from "@lib/voice/voiceTokenManager";

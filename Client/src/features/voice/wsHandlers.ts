@@ -664,7 +664,7 @@ export function handleVoiceError(payload: Payload<"error">, id: string | undefin
     // no id (older server / no correlation available) still falls back
     // to the camera, the only kind this branch used to handle.
     if (id !== undefined) {
-      void import("../../lib/voice/screenShare").then(({ rollbackPendingVideo }) => {
+      void import("./screenShare").then(({ rollbackPendingVideo }) => {
         const kind = rollbackPendingVideo(id);
         // undefined means this id no longer correlates to anything
         // pending (superseded by a later enable of the same kind) — the
@@ -695,7 +695,7 @@ export function rollbackVideoOnError(id: string | undefined): void {
   // like livekitSession() above — it's loaded lazily here too, at its
   // one call site in this file.
   if (id !== undefined) {
-    void import("../../lib/voice/screenShare").then(({ rollbackPendingVideo }) => {
+    void import("./screenShare").then(({ rollbackPendingVideo }) => {
       const kind = rollbackPendingVideo(id);
       if (kind === undefined) return;
       void livekitSession().then(({ disableCamera, disableScreenshare }) =>

@@ -130,7 +130,7 @@ export function mountOutputAndVideo(sc: VoiceTabScope): void {
     t("voiceAudio.cameraQualityDesc"),
     "streamQuality",
     // The defaults match getCameraQuality/getScreenShareQuality in
-    // lib/voice/screenShare, which this tab does not import (it pulls in the
+    // features/voice/screenShare, which this tab does not import (it pulls in the
     // voice store).
     loadPref<string>("streamQuality", "medium"),
     [
