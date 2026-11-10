@@ -1020,7 +1020,7 @@ export function buildTauriMockScript(opts: {
         if (cmd === "set_window_pref" || cmd === "show_next_launch") return null;
         // Graphics card for video: no cards, so the row stays hidden.
         if (cmd === "get_gpu_adapters")
-          return { cards: [], saved: "auto", active: null, notFound: false, resetAfterCrash: false, autoOff: false };
+          return { cards: [], saved: "auto", active: null, notFound: false, resetAfterCrash: false };
         if (cmd === "set_gpu_adapter") return null;
         if (cmd === "native_voice_set_video_bitrate") return;
         // ---- External-content broker (B7-16) ----

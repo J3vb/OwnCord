@@ -206,7 +206,6 @@ export async function installRealTransport(page: Page, server: TestServer) {
             active: null,
             notFound: false,
             resetAfterCrash: false,
-            autoOff: false,
           };
         case "set_gpu_adapter":
           return null;
