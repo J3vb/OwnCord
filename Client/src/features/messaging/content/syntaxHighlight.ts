@@ -343,20 +343,27 @@ function applySgr(st: AnsiState, body: string): void {
     if (n === 38 || n === 48) {
       // Extended colour: skip its arguments (5;n or 2;r;g;b), no colour set.
       i += parts[i + 1] === "5" ? 2 : parts[i + 1] === "2" ? 4 : 0;
-    } else if (n === 0) {
-      st.fg = 0;
-      st.bg = 0;
-      st.bold = false;
-      st.underline = false;
-    } else if (n === 1) st.bold = true;
-    else if (n === 4) st.underline = true;
-    else if (n >= 30 && n <= 37) st.fg = n;
-    else if (n >= 40 && n <= 47) st.bg = n;
-    else if (n === 39) st.fg = 0;
-    else if (n === 49) st.bg = 0;
-    else if (n === 22) st.bold = false;
-    else if (n === 24) st.underline = false;
+    } else {
+      applySgrCode(st, n);
+    }
   }
+}
+
+/** Apply one plain SGR code (reset, bold, underline, 16 colours and their resets). */
+function applySgrCode(st: AnsiState, n: number): void {
+  if (n === 0) {
+    st.fg = 0;
+    st.bg = 0;
+    st.bold = false;
+    st.underline = false;
+  } else if (n === 1) st.bold = true;
+  else if (n === 4) st.underline = true;
+  else if (n >= 30 && n <= 37) st.fg = n;
+  else if (n >= 40 && n <= 47) st.bg = n;
+  else if (n === 39) st.fg = 0;
+  else if (n === 49) st.bg = 0;
+  else if (n === 22) st.bold = false;
+  else if (n === 24) st.underline = false;
 }
 
 /**
