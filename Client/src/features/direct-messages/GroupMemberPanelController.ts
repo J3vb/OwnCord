@@ -24,9 +24,9 @@ import type { Member } from "@stores/members.store";
 import { membersStore } from "@stores/members.store";
 import { getActiveChannel } from "@stores/channels.store";
 import { dmStore, type DmChannel } from "@stores/dm.store";
-import { openUserProfilePopup } from "../../features/profiles/openUserProfilePopup";
-import type { GroupDmMemberPanelComponent } from "@components/GroupDmMemberPanel";
-import type * as GroupMembers from "../../features/direct-messages/groupMembers";
+import { openUserProfilePopup } from "../profiles/openUserProfilePopup";
+import type { GroupDmMemberPanelComponent } from "./GroupDmMemberPanel";
+import type * as GroupMembers from "./groupMembers";
 import { createMemberPickerModal } from "./MemberPickerModal";
 import type { MountableComponent } from "@lib/text/safeRender";
 import { RestErrorCode } from "@lib/protocolTypes";
@@ -224,10 +224,7 @@ export function createGroupMemberPanelController(
     load = token;
     boundChannelId = channelId;
     syncButton();
-    void Promise.all([
-      import("@components/GroupDmMemberPanel"),
-      import("../../features/direct-messages/groupMembers"),
-    ]).then(
+    void Promise.all([import("./GroupDmMemberPanel"), import("./groupMembers")]).then(
       ([panelMod, membersMod]) => {
         // A close, a newer open or a teardown since the click supersedes this.
         if (destroyed || load !== token) return;

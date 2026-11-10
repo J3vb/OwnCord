@@ -10,7 +10,7 @@ import {
   type QuickSwitchProfile,
 } from "../../../features/navigation/QuickSwitchOverlay";
 import { createVoiceWidgetCallbacks } from "../VoiceCallbacks";
-import { selectDmConversation } from "../SidebarDmHelpers";
+import { selectDmConversation } from "../../../features/direct-messages/SidebarDmHelpers";
 import { uiStore } from "@stores/ui.store";
 import { addServer, switchToServer } from "../../../features/server-rail/switchServer";
 import { shouldConfirmServerSwitch } from "../../../features/server-rail/switchConfirmPref";

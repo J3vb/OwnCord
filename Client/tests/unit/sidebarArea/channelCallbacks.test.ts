@@ -12,7 +12,7 @@ import { dmStore, setDmChannels } from "../../../src/stores/dm.store";
 import { createChannelSidebar } from "../../../src/features/channels/ChannelSidebar";
 import { createVoiceWidget } from "../../../src/features/voice/VoiceWidget";
 import { createCreateChannelModal } from "@components/CreateChannelModal";
-import "../../../src/pages/main-page/MemberPickerModal";
+import "../../../src/features/direct-messages/MemberPickerModal";
 import { createEditChannelModal } from "../../../src/features/channels/editChannelDialog";
 import { createDeleteChannelModal } from "@components/DeleteChannelModal";
 import { createQuickSwitchOverlay } from "../../../src/features/navigation/QuickSwitchOverlay";

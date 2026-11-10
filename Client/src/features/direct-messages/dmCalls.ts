@@ -4,17 +4,27 @@
 import { showToast } from "@lib/ui/toast";
 import { accountText as account } from "../../i18n/account";
 import { shellText } from "../../i18n/shell";
-import { joinBackoffText } from "../../features/voice/joinBackoffText";
+import { joinBackoffText } from "../voice/joinBackoffText";
 import { uiStore } from "@stores/ui.store";
 import { getActiveChannel } from "@stores/channels.store";
 import { dmStore } from "@stores/dm.store";
 import { voiceStore } from "@stores/voice.store";
 import { enableCamera } from "@lib/voice/livekitSession";
-import { createSidebarVoiceCallbacks } from "./VoiceCallbacks";
-import { log, getCurrentUserId } from "./pageShared";
-import type { PageState, PageApi } from "./pageState";
+import { createLogger } from "@lib/logger";
+import type { WsClient } from "@lib/ws";
+import type { PageState, PageApi } from "../../pages/main-page/pageState";
 
-export function createDmCalls(st: PageState, _pg: PageApi) {
+const log = createLogger("main-page");
+
+/** What the page supplies: the voice callbacks factory and the signed-in user's id. */
+export interface DmCallsDeps {
+  /** Built per call, as the page's createSidebarVoiceCallbacks(ws) is. */
+  readonly sidebarVoice: (ws: WsClient) => { onVoiceJoin(channelId: number): void };
+  readonly getCurrentUserId: () => number;
+}
+
+export function createDmCalls(st: PageState, _pg: PageApi, deps: DmCallsDeps) {
+  const { sidebarVoice, getCurrentUserId } = deps;
   /** Join a DM's live call: the call panel's Join strip and a call log row's Join button. */
   function joinDmCall(channelId: number): void {
     if (uiStore.getState().connectionStatus !== "connected") {
@@ -22,7 +32,7 @@ export function createDmCalls(st: PageState, _pg: PageApi) {
       return;
     }
     st.cameraOnJoin = null;
-    createSidebarVoiceCallbacks(st.ws).onVoiceJoin(channelId);
+    sidebarVoice(st.ws).onVoiceJoin(channelId);
   }
 
   /**
@@ -44,7 +54,7 @@ export function createDmCalls(st: PageState, _pg: PageApi) {
       return;
     }
     st.cameraOnJoin = null;
-    createSidebarVoiceCallbacks(st.ws).onVoiceJoin(active.id);
+    sidebarVoice(st.ws).onVoiceJoin(active.id);
     if (withVideo) {
       const v = voiceStore.getState();
       if (v.currentChannelId === active.id && v.voiceStatus === "connected") {

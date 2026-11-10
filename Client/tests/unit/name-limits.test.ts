@@ -18,7 +18,7 @@ import { createPromptModal } from "../../src/lib/ui/modalFactory";
 import { createConnectPage } from "../../src/pages/ConnectPage";
 import { makeCallbacks, testProfiles as profiles } from "../helpers/connectPageHarness";
 import type { ConnectPageCallbacks } from "../../src/pages/ConnectPage";
-import { createMemberPickerModal } from "../../src/pages/main-page/MemberPickerModal";
+import { createMemberPickerModal } from "../../src/features/direct-messages/MemberPickerModal";
 import { membersStore } from "@stores/members.store";
 import { authStore } from "@stores/auth.store";
 

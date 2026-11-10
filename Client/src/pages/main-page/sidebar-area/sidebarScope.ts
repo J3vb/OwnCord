@@ -8,7 +8,7 @@ import type { DmMenuActions } from "../../../features/direct-messages/dmContextM
 import type { VoiceWidgetOptions } from "../../../features/voice/VoiceWidget";
 import type { SidebarMemberSectionResult } from "../SidebarMemberSection";
 import type { MemberPanel } from "../../../features/members/memberPanel";
-import type { DmHelperDeps } from "../SidebarDmHelpers";
+import type { DmHelperDeps } from "../../../features/direct-messages/SidebarDmHelpers";
 import type { ModalInstance } from "@lib/ui/modalFactory";
 import type { CategoryRef } from "@stores/channels.store";
 import type { ProfileManager } from "@lib/presence/profiles";

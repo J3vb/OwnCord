@@ -7,9 +7,9 @@
 import { createElement } from "@lib/dom";
 import { Disposable } from "@lib/disposable";
 import { isPhoneLayout, onPhoneLayoutChange } from "@lib/ui/bottomSheet";
-import { trackCurrentView } from "../../../features/navigation/contentView";
-import { handleCreateDm } from "../SidebarDmHelpers";
-import type { SidebarScope } from "./sidebarScope";
+import { trackCurrentView } from "../navigation/contentView";
+import { handleCreateDm } from "./SidebarDmHelpers";
+import type { SidebarScope } from "../../pages/main-page/sidebar-area/sidebarScope";
 
 const MODE_CLASS = "phone-messages";
 const SEARCH_OPEN = "dm-search-open";
@@ -40,7 +40,7 @@ export function mountDmPhoneHead(sc: SidebarScope, unsubs: Array<() => void>): v
   };
   const people = sc.opts.destinations?.people;
 
-  import("../../../features/people-home/phoneHead").then(
+  import("../people-home/phoneHead").then(
     ({ renderPhoneHead }) => {
       if (signal.aborted) return;
       renderPhoneHead(head, {

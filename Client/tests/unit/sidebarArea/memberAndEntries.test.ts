@@ -18,7 +18,7 @@ import { Permission } from "../../../src/lib/types";
 import { createChannelSidebar } from "../../../src/features/channels/ChannelSidebar";
 import { createMemberList } from "../../../src/features/members/MemberList";
 import { createCreateChannelModal } from "@components/CreateChannelModal";
-import "../../../src/pages/main-page/MemberPickerModal";
+import "../../../src/features/direct-messages/MemberPickerModal";
 import { openBanDialogFor } from "../../helpers/banDialog";
 import {
   MockedFn,

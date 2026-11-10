@@ -13,7 +13,7 @@ import {
 import { createChannelSidebar } from "../../../src/features/channels/ChannelSidebar";
 import { createDmSidebar } from "../../../src/features/direct-messages/DmSidebar";
 import { createMemberList } from "../../../src/features/members/MemberList";
-import "../../../src/pages/main-page/MemberPickerModal";
+import "../../../src/features/direct-messages/MemberPickerModal";
 import {
   MockedFn,
   getMockMount,
