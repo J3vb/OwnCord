@@ -36,10 +36,10 @@
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { createModal, type ModalInstance } from "@lib/ui/modalFactory";
-import type { NativeVoiceScreenSource } from "../platform/contracts/nativeVoice";
-import { voiceText as t } from "../i18n/voice";
-import { desktop } from "../platform/desktop";
-import { getEffectiveScreenShareFps, type StreamQuality } from "../features/voice/screenShare";
+import type { NativeVoiceScreenSource } from "../../platform/contracts/nativeVoice";
+import { voiceText as t } from "../../i18n/voice";
+import { desktop } from "../../platform/desktop";
+import { getEffectiveScreenShareFps, type StreamQuality } from "./screenShare";
 import { SHARE_FPS_OPTIONS } from "@lib/voice/shareFps";
 
 export interface ScreenSharePick {

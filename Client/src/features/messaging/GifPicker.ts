@@ -11,23 +11,23 @@ import { ApiClientError } from "@lib/api";
 import { searchGifs, getTrendingGifs } from "@lib/media/gifProvider";
 import type { GifApi, GifFavoritesApi, GifPage, GifResult } from "@lib/media/gifProvider";
 import { createGifPager } from "@lib/media/gifPager";
-import { createPickerImages, type PickerImages } from "../features/messaging/pickerImages";
+import { createPickerImages, type PickerImages } from "./pickerImages";
 import { gifFavoritesStore, isGifFavorite, toggleGifFavorite } from "@stores/gifFavorites.store";
 import {
   fetchExternalImage,
   recoverEvictedImage,
   renderFailureStatus,
-} from "../features/messaging/content/attachments";
+} from "./content/attachments";
 import {
   admitDerived,
   externalAllowed,
   GIF_PICKER_ITEM,
   requestExternalItem,
-} from "../features/content-consent/external";
-import { externalConsentText } from "../i18n/externalConsent";
-import { contentText } from "../i18n/content";
-import { messagingText } from "../i18n/messaging";
-import { gifFavoritesText } from "../i18n/gifFavorites";
+} from "../content-consent/external";
+import { externalConsentText } from "../../i18n/externalConsent";
+import { contentText } from "../../i18n/content";
+import { messagingText } from "../../i18n/messaging";
+import { gifFavoritesText } from "../../i18n/gifFavorites";
 import { RestErrorCode } from "@lib/protocolTypes";
 
 // ---------------------------------------------------------------------------

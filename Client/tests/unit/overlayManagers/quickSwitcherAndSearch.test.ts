@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as mocks from "../../helpers/overlayManagersMocks";
 import { createQuickSwitcher } from "../../../src/features/navigation/QuickSwitcher";
-import { createSearchOverlay } from "@components/SearchOverlay";
+import { createSearchOverlay } from "../../../src/features/navigation/SearchOverlay";
 import {
   createQuickSwitcherManager,
   createSearchOverlayController,
@@ -20,7 +20,7 @@ vi.mock("@lib/logger", () => mocks.loggerMock());
 vi.mock("../../../src/features/navigation/QuickSwitcher", () => mocks.quickSwitcherMock());
 vi.mock("../../../src/features/invites/InviteManager", () => mocks.inviteManagerMock());
 vi.mock("../../../src/features/messaging/PinnedMessages", () => mocks.pinnedMessagesMock());
-vi.mock("@components/SearchOverlay", () => mocks.searchOverlayMock());
+vi.mock("../../../src/features/navigation/SearchOverlay", () => mocks.searchOverlayMock());
 vi.mock("@stores/channels.store", () => mocks.channelsStoreMock());
 vi.mock("@stores/messages.store", () => mocks.messagesStoreMock());
 vi.mock("@stores/auth.store", () => mocks.authStoreMock());

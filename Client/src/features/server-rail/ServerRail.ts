@@ -38,12 +38,12 @@ import { dmDisplayName, dmStore, type DmChannel } from "@stores/dm.store";
 import { voiceStore } from "@stores/voice.store";
 import { CHANNEL_MUTE_CHANGED } from "@lib/prefs/channelMutes";
 import { dmUnreadCount, totalDmUnread } from "@lib/dmUnread";
-import { createAvatarElement, pickAvatarColor } from "../features/profiles/avatar";
+import { createAvatarElement, pickAvatarColor } from "../profiles/avatar";
 import { formatBadgeCount } from "@lib/text/formatting";
-import { serverRailText } from "../i18n/serverRail";
+import { serverRailText } from "../../i18n/serverRail";
 import { openServerRailJoinModal } from "./ServerRailJoinModal";
-import { shouldConfirmServerSwitch } from "../features/server-rail/switchConfirmPref";
-import { openServerSwitchConfirm } from "../features/server-rail/switchConfirmDialog";
+import { shouldConfirmServerSwitch } from "./switchConfirmPref";
+import { openServerSwitchConfirm } from "./switchConfirmDialog";
 
 export interface ServerRailOptions {
   /** `api.getConfig().host`: the server this session is connected to. */

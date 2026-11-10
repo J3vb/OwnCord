@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { showScreenSharePicker } from "./ScreenSharePicker";
-import type { NativeVoiceScreenSource } from "../platform/contracts/nativeVoice";
+import type { NativeVoiceScreenSource } from "../../platform/contracts/nativeVoice";
 
 // 120 fps is hidden for now (lib/voice/shareFps). Most tests here offer it so the
 // picker's dormant 120 handling (monitor gate, Wayland cap, M-2 hint) keeps

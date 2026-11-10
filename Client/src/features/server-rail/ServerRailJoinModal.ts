@@ -6,8 +6,8 @@
 
 import { appendChildren, createElement, setText } from "@lib/dom";
 import { createModal, type ModalInstance } from "@lib/ui/modalFactory";
-import { shellText } from "../i18n/shell";
-import { serverRailText } from "../i18n/serverRail";
+import { shellText } from "../../i18n/shell";
+import { serverRailText } from "../../i18n/serverRail";
 
 export interface JoinModalOptions {
   /** Called with the trimmed input; returns false when it is not a usable invite. */

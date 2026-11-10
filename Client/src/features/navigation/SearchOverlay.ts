@@ -16,14 +16,11 @@ import { channelsStore } from "@stores/channels.store";
 import { blocksStore } from "@stores/blocks.store";
 import { parseTimestamp, resolveAuthor } from "@lib/text/formatting";
 import { resolveDisplayName } from "@lib/ui/avatar";
-import {
-  createImportedName,
-  createImportedTag,
-} from "../features/messaging/message-list/importedAuthor";
+import { createImportedName, createImportedTag } from "../messaging/message-list/importedAuthor";
 import { setRovingTabindex, enableRovingNavigation } from "@lib/ui/a11y";
 import { markdownToPlainText } from "@lib/text/markdown";
-import { formatDate } from "../i18n/format";
-import { messagingText } from "../i18n/messaging";
+import { formatDate } from "../../i18n/format";
+import { messagingText } from "../../i18n/messaging";
 
 // ---------------------------------------------------------------------------
 // Types

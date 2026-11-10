@@ -6,7 +6,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 
 import * as mocks from "../helpers/messageInputMocks";
 vi.mock("../../src/features/messaging/EmojiPicker", () => mocks.emojiPickerMock());
-vi.mock("@components/GifPicker", () => mocks.gifPickerMock());
+vi.mock("../../src/features/messaging/GifPicker", () => mocks.gifPickerMock());
 
 import {
   createMessageInput,

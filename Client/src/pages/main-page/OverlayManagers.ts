@@ -42,7 +42,7 @@ const quickSwitcherScreen = createLazyScreen(
 );
 const searchOverlayScreen = createLazyScreen(
   "search-overlay",
-  () => import("@components/SearchOverlay"),
+  () => import("../../features/navigation/SearchOverlay"),
 );
 
 // ---------------------------------------------------------------------------
@@ -278,7 +278,7 @@ export function createSearchOverlayController(opts: {
   }
 
   function mountOverlay(
-    screen: typeof import("@components/SearchOverlay"),
+    screen: typeof import("../../features/navigation/SearchOverlay"),
     root: HTMLDivElement,
   ): void {
     const current = opts.getCurrentChannelId();

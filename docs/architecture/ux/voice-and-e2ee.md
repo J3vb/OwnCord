@@ -476,7 +476,7 @@ badge.
   indicators only; hovering a user opens no live preview. There
   is no pre-share preview of your own stream in the app on Windows — that step
   is the OS `getDisplayMedia` picker dialog; on Linux it is the "Share your
-  screen" dialog (`components/ScreenSharePicker.ts`).
+  screen" dialog (`features/voice/ScreenSharePicker.ts`).
 
 ## 9. DM calls (ring)
 
