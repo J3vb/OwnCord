@@ -312,12 +312,11 @@ describe("API Client", () => {
       );
     });
 
-    it("keeps the response's own status on a 201", async () => {
+    it("keeps the response's own status on a 201 and says a write may have gone through", async () => {
       mockFetch.mockResolvedValue(jsonResponse({ id: 12 }, 201));
-      await expect(api.timeoutMember(7, 300, "")).rejects.toMatchObject({
-        status: 201,
-        code: REPLY_SHAPE_CODE,
-      });
+      const err = await api.timeoutMember(7, 300, "").catch((e: unknown) => e);
+      expect(err).toMatchObject({ status: 201, code: REPLY_SHAPE_CODE });
+      expect(errorText(err, "fallback")).toBe(connectText("session.unreadableWriteReply"));
       expectConsole("warn", /Response is not the expected shape.*voice/s);
     });
 

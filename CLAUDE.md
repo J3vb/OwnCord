@@ -15,7 +15,7 @@ CI fails on drift, and the next generator run silently discards your edit.
 | ------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- | ----------------------------------------------------- |
 | `Server/db/dbgen/`                                                                                | `Server/db/queries/sqlite/*.sql`, `Server/migrations/`               | `db-change` skill                                     |
 | `Server/ws/message_types.go`, `Server/httperr/codes.go` **and** `Client/src/lib/protocolTypes.ts` | `protocol/schema.json`                                               | `protocol-change` skill                               |
-| `Client/src/lib/net/wireShapes.ts`                                                                | `Client/src/lib/wire*.ts` payload types, `lib/net/restReplies.ts`    | `cd Client && npm run gen:wire`                       |
+| `Client/src/lib/net/wireShapes.ts`, `Client/src/lib/net/restShapes.ts`                            | `Client/src/lib/wire*.ts` payload types, `lib/net/restReplies.ts`    | `cd Client && npm run gen:wire`                       |
 | `gendocs:*` blocks in `docs/api.md`, `docs/schema.md`, `docs/server-configuration.md`             | `Server/api/route_groups.go`, `Server/migrations/`, `Server/config/` | `cd Server && go run -tags otel,wazero ./cmd/gendocs` |
 
 ## Bug-hunt ledger

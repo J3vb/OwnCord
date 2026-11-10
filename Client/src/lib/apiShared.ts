@@ -171,7 +171,6 @@ const FIXED_ERROR_COPY = new Map<string, Parameters<typeof connectText>[0]>([
   // handshake with this distinct code (http_pool.rs's cert_error_response)
   // rather than a bare 502, so the two failure classes stay distinguishable.
   [TLS_CERT_CODE, "error.tlsFailed"],
-  [REPLY_SHAPE_CODE, "session.unreadableReply"],
   [RestErrorCode.AUTH_BUSY, "error.authBusy"],
   [RestErrorCode.NOT_FOUND, "error.notFound"],
   [WsErrorCode.BANNED, "error.banned"],

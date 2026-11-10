@@ -10,7 +10,7 @@ import type {
   ServerInfoResponse,
 } from "./types";
 import { type DmRequestDecision, type DmRequestDecisionResult, ApiClientError } from "./apiShared";
-import { readReply } from "./apiReply";
+import { preloadReplyShapes, readReply } from "./apiReply";
 import { SessionScope } from "./net/sessionScope";
 import { ensureHttpProxy } from "./net/httpProxy";
 import { desktop } from "../platform/desktop";
@@ -187,6 +187,7 @@ export function createDmsApi(t: ApiTransport) {
       const transport = new AbortController();
       const releaseTransport = owner.addCleanup(() => transport.abort());
       const timer = setTimeout(() => owner.dispose(), timeoutMs);
+      preloadReplyShapes();
       try {
         owner.assertCurrent();
         const origin = await owner.run(ensureHttpProxy(targetHost));
@@ -231,6 +232,7 @@ export function createDmsApi(t: ApiTransport) {
       const transport = new AbortController();
       const releaseTransport = owner.addCleanup(() => transport.abort());
       const timer = setTimeout(() => owner.dispose(), timeoutMs);
+      preloadReplyShapes();
       try {
         owner.assertCurrent();
         const origin = await owner.run(ensureHttpProxy(targetHost));

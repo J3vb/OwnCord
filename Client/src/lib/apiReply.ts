@@ -25,6 +25,28 @@ function loadRestTable(): Promise<RestTable> {
 }
 
 /**
+ * Starts fetching the shape table without waiting for it, so a probe with a
+ * short deadline (the connect page's health and server-info checks) does not
+ * spend that deadline on the chunk load.
+ */
+export function preloadReplyShapes(): void {
+  loadRestTable().catch(() => undefined);
+}
+
+/**
+ * A reply the client cannot read. A call that is not a GET has already been
+ * acted on, so its copy says the change may have been made: a blind retry
+ * could make it twice.
+ */
+function unreadable(method: string, status: number): ApiClientError {
+  return new ApiClientError(
+    status,
+    REPLY_SHAPE_CODE,
+    connectText(method === "GET" ? "session.unreadableReply" : "session.unreadableWriteReply"),
+  );
+}
+
+/**
  * The decoded body of a 2xx reply, once it is known to have the shape `reply`
  * names. A body that does not is a server this client cannot read (an older or
  * newer one, or a gateway answering in its place): the call fails with
@@ -51,7 +73,7 @@ export async function readReply<K extends keyof RestReplyShapes>(
       status: at.status,
       error: err instanceof Error ? err.name : "unknown",
     });
-    throw new ApiClientError(at.status, REPLY_SHAPE_CODE, connectText("session.unreadableReply"));
+    throw unreadable(at.method, at.status);
   }
   const fault = checkRest(reply, body, table);
   if (fault === null) return body as RestReplyShapes[K];
@@ -62,5 +84,5 @@ export async function readReply<K extends keyof RestReplyShapes>(
     field: fault.path,
     expected: fault.expected,
   });
-  throw new ApiClientError(at.status, REPLY_SHAPE_CODE, connectText("session.unreadableReply"));
+  throw unreadable(at.method, at.status);
 }

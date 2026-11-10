@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { readReply } from "../../src/lib/apiReply";
+import { preloadReplyShapes, readReply } from "../../src/lib/apiReply";
 import { ApiClientError, REPLY_SHAPE_CODE } from "../../src/lib/apiShared";
 import { expectConsole } from "../helpers/console";
 import { validReply } from "../helpers/restReplyFixtures";
@@ -23,6 +23,12 @@ describe("loading the REST shape table", () => {
 
     await expect(readReply("BlockedUsersResponse", BODY, AT)).resolves.toEqual(BODY);
     await readReply("BlockedUsersResponse", BODY, AT);
+    expect(attempts).toBe(2);
+  });
+
+  it("a preload reuses the cached table and never rejects", async () => {
+    preloadReplyShapes();
+    await expect(readReply("BlockedUsersResponse", BODY, AT)).resolves.toEqual(BODY);
     expect(attempts).toBe(2);
   });
 });
