@@ -30,7 +30,7 @@ import {
   withRename,
 } from "@lib/prefs/gameActivityPrefs";
 import { desktop } from "../../src/platform/desktop";
-import { buildDmConversations } from "../../src/pages/main-page/SidebarDmHelpers";
+import { buildDmConversations } from "../../src/features/direct-messages/SidebarDmHelpers";
 import { dmStore } from "../../src/stores/dm.store";
 
 const NOW = Date.UTC(2026, 9, 23, 12, 0, 0);

@@ -5,28 +5,29 @@
 import { isTextLikeChannel } from "@lib/types";
 import type { MountableComponent } from "@lib/text/safeRender";
 import { errorText } from "@lib/api";
-import { createDmSidebar, type DmSidebar } from "../../../features/direct-messages/DmSidebar";
-import type { DmMenuActions } from "../../../features/direct-messages/dmContextMenu";
-import { selectDmConversation, handleCreateDm, handleCreateGroupDm } from "../SidebarDmHelpers";
+import { createDmSidebar, type DmSidebar } from "./DmSidebar";
+import type { DmMenuActions } from "./dmContextMenu";
+import { selectDmConversation, handleCreateDm, handleCreateGroupDm } from "./SidebarDmHelpers";
 import { createPromptModal } from "@lib/ui/modalFactory";
 import { muteChannel, toggleChannelMute, unmuteChannel } from "@lib/prefs/channelMutes";
 import { markChannelRead } from "@lib/readState";
 import { setSidebarMode } from "@stores/ui.store";
 import { authStore } from "@stores/auth.store";
 import { channelsStore, setActiveChannel } from "@stores/channels.store";
-import { keepDmForCall, releaseKeptDm } from "../../../features/direct-messages/keptCallDms";
+import { keepDmForCall, releaseKeptDm } from "./keptCallDms";
 import { dmStore, closeDmLocally, restoreDmChannel } from "@stores/dm.store";
 import { clearChannelVoiceUsers } from "@stores/voice.store";
-import { shellText } from "../../../i18n/shell";
-import { connectText } from "../../../i18n/connect";
+import { shellText } from "../../i18n/shell";
+import { connectText } from "../../i18n/connect";
 import {
   collapseSpaces,
   lineHintText,
   visibleLength,
   MAX_GROUP_DM_NAME_LEN,
 } from "@lib/text/nameLimits";
-import { memberPickerScreen, dmConversations } from "./sidebarShared";
-import type { SidebarScope } from "./sidebarScope";
+import { dmConversations } from "./SidebarDmHelpers";
+import { memberPickerScreen } from "./memberPickerScreen";
+import type { SidebarScope } from "../../pages/main-page/sidebar-area/sidebarScope";
 
 export function mountDmSidebar(sc: SidebarScope): void {
   // ---------------------------------------------------------------------------
@@ -201,7 +202,7 @@ export function mountDmSidebar(sc: SidebarScope): void {
         const file = input.files?.[0];
         input.remove();
         if (file === undefined) return;
-        void import("../../../features/direct-messages/groupIcon").then(
+        void import("./groupIcon").then(
           async (icon) =>
             sc.showGroupIconResult(await icon.uploadGroupIcon(sc.api, channelId, file)),
           () => sc.showGroupIconResult(shellText("dm.iconFailed")),
@@ -214,7 +215,7 @@ export function mountDmSidebar(sc: SidebarScope): void {
   };
 
   sc.removeGroupIconFor = function removeGroupIconFor(channelId: number): void {
-    void import("../../../features/direct-messages/groupIcon").then(
+    void import("./groupIcon").then(
       async (icon) => sc.showGroupIconResult(await icon.removeGroupIcon(sc.api, channelId)),
       () => sc.showGroupIconResult(shellText("dm.iconFailed")),
     );
@@ -290,7 +291,7 @@ export function mountDmSidebar(sc: SidebarScope): void {
         if (sc.selectDm(channelId)) sc.opts.onStartCall?.();
       },
       onToggleBlock: (userId, username, block) => {
-        void import("../../../features/blocks/blockActions").then(
+        void import("../blocks/blockActions").then(
           ({ confirmAndToggleBlock }) =>
             confirmAndToggleBlock(
               { api: sc.api, notify: (msg, type) => sc.getToast()?.show(msg, type) },

@@ -14,8 +14,8 @@ import { totalDmUnread } from "@lib/dmUnread";
 import type { DmChannel } from "@stores/dm.store";
 import { setSidebarMode } from "@stores/ui.store";
 import { CHANNEL_MUTE_CHANGED, getChannelMute, isChannelMuted } from "@lib/prefs/channelMutes";
-import { trackCurrentView } from "../../features/navigation/contentView";
-import type { CountSource } from "../../features/navigation/destinations";
+import { trackCurrentView } from "../navigation/contentView";
+import type { CountSource } from "../navigation/destinations";
 import { navigationText } from "../../i18n/navigation";
 import { shellText } from "../../i18n/shell";
 import { voiceStore } from "@stores/voice.store";
@@ -27,10 +27,10 @@ import {
   openLeaveConfirm,
   type DmMenuActions,
   type DmMenuConvo,
-} from "../../features/direct-messages/dmContextMenu";
+} from "./dmContextMenu";
 import { voiceText } from "../../i18n/voice";
 import { dmPreviewText, isDmInCall } from "./SidebarDmHelpers";
-import { rowActivity } from "../../features/members/listeningLine";
+import { rowActivity } from "../members/listeningLine";
 import { onPrefChange } from "@lib/prefs/preferences";
 import { applyStatusIndicator } from "@lib/ui/statusIndicator";
 

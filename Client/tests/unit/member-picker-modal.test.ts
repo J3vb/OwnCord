@@ -3,7 +3,7 @@ import { useMountContainer } from "../helpers/mountContainer";
 import {
   createMemberPickerModal,
   type MemberPickerOptions,
-} from "../../src/pages/main-page/MemberPickerModal";
+} from "../../src/features/direct-messages/MemberPickerModal";
 import type { MountableComponent } from "@lib/text/safeRender";
 import { membersStore } from "../../src/stores/members.store";
 import type { Member } from "../../src/stores/members.store";

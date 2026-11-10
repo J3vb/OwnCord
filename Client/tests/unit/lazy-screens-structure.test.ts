@@ -29,7 +29,7 @@ const EAGER_SITES = [
   "pages/main-page/SidebarArea.ts",
   "pages/main-page/sidebar-area/sidebarChannels.ts",
   "pages/main-page/sidebar-area/sidebarContent.ts",
-  "pages/main-page/sidebar-area/sidebarDms.ts",
+  "features/direct-messages/sidebarDms.ts",
   "pages/main-page/sidebar-area/sidebarHeader.ts",
   "pages/main-page/sidebar-area/sidebarShared.ts",
   "pages/main-page/sidebar-area/sidebarVoiceSwitch.ts",

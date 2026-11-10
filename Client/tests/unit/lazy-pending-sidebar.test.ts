@@ -24,7 +24,7 @@ vi.mock("@components/CreateChannelModal", () => {
   }
   return { createCreateChannelModal: h.createModal };
 });
-vi.mock("../../src/pages/main-page/MemberPickerModal", () => {
+vi.mock("../../src/features/direct-messages/MemberPickerModal", () => {
   if (h.failPicker.value) {
     h.failPicker.value = false;
     throw new Error("chunk load failed");

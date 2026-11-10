@@ -3,7 +3,7 @@ import { useMountContainer } from "../helpers/mountContainer";
 import {
   createSidebarDmSection,
   type SidebarDmSectionOptions,
-} from "../../src/pages/main-page/SidebarDmSection";
+} from "../../src/features/direct-messages/SidebarDmSection";
 import {
   dmStore,
   addDmChannel,

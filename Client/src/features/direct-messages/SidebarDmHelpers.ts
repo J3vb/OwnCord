@@ -5,7 +5,7 @@
 
 import { type ApiClient, ApiClientError, errorText } from "@lib/api";
 import type { ToastContainer } from "@lib/ui/toastContainer";
-import type { DmConversation } from "../../features/direct-messages/DmSidebar";
+import type { DmConversation } from "./DmSidebar";
 import { setSidebarMode, setActiveDmUser } from "@stores/ui.store";
 import { channelsStore, setActiveChannel } from "@stores/channels.store";
 import {
@@ -22,7 +22,7 @@ import { voiceStore } from "@stores/voice.store";
 import { getChannelMute, isChannelMuted } from "@lib/prefs/channelMutes";
 import { markdownToPlainText } from "@lib/text/markdown";
 import { connectText } from "../../i18n/connect";
-import { rowActivity } from "../../features/members/listeningLine";
+import { rowActivity } from "../members/listeningLine";
 import { RestErrorCode } from "@lib/protocolTypes";
 
 // ---------------------------------------------------------------------------
@@ -219,5 +219,13 @@ export function buildDmConversations(activeChannelId: number | null): readonly D
     muted: isChannelMuted(dm.channelId),
     ...timedMute(dm.channelId),
     active: dm.channelId === activeChannelId,
+  }));
+}
+
+/** The DM rows, each marked when someone is in that DM's call. */
+export function dmConversations(activeChannelId: number | null): DmConversation[] {
+  return buildDmConversations(activeChannelId).map((c) => ({
+    ...c,
+    inCall: isDmInCall(c.channelId),
   }));
 }

@@ -16,7 +16,7 @@ import { createChannelSidebar } from "../../../src/features/channels/ChannelSide
 import { createMemberList } from "../../../src/features/members/MemberList";
 import { createUserBar } from "../../../src/features/voice/UserBar";
 import { createVoiceWidget } from "../../../src/features/voice/VoiceWidget";
-import "../../../src/pages/main-page/MemberPickerModal";
+import "../../../src/features/direct-messages/MemberPickerModal";
 import {
   MockedFn,
   getMockMount,

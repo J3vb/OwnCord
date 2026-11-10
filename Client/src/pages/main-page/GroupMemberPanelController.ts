@@ -27,7 +27,7 @@ import { dmStore, type DmChannel } from "@stores/dm.store";
 import { openUserProfilePopup } from "../../features/profiles/openUserProfilePopup";
 import type { GroupDmMemberPanelComponent } from "@components/GroupDmMemberPanel";
 import type * as GroupMembers from "../../features/direct-messages/groupMembers";
-import { createMemberPickerModal } from "./MemberPickerModal";
+import { createMemberPickerModal } from "../../features/direct-messages/MemberPickerModal";
 import type { MountableComponent } from "@lib/text/safeRender";
 import { RestErrorCode } from "@lib/protocolTypes";
 
