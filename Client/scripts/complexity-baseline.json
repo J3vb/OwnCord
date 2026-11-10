@@ -104,12 +104,6 @@
       "createVoiceComposer > submit": [16],
       "createVoiceComposer > upload": [21]
     },
-    "features/voice/e2eeOffer.ts": {
-      "E2EEOffer > handleOfferInner": [21]
-    },
-    "features/voice/e2eePeerState.ts": {
-      "E2EEPeerState > verifyPeerAnnounce": [33]
-    },
     "features/voice/localVoiceRestore.ts": {
       "restoreLocalVoiceState": [19]
     },
@@ -140,11 +134,6 @@
     "lib/voice/connectionStats.ts": {
       "createConnectionStatsPoller > sampleCamera": [17],
       "extractMetrics > (anonymous)": [24]
-    },
-    "lib/voice/livekitE2EE.ts": {
-      "E2EEManager > handleAnnounceInner": [29],
-      "E2EEManager > handleParticipantLeft": [32],
-      "E2EEManager > setupKeyExchange": [27]
     },
     "lib/voice/micProcessor.ts": {
       "createMicProcessor > route": [17]
@@ -182,9 +171,6 @@
     },
     "features/voice/mediaControl.ts": {
       "MediaControl > doSwitchVideoDevice": [5]
-    },
-    "lib/voice/livekitE2EE.ts": {
-      "E2EEManager > handleParticipantLeft": [5]
     }
   }
 }

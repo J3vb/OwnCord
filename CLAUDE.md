@@ -38,7 +38,7 @@ scratch and stays local.
 
 ## Tools for agents
 
-Optional; none is needed to build or test. The last four are also CI checks
+Optional; none is needed to build or test. The last five are also CI checks
 that fail closed on a new finding (Workflow Security Lint and Supply-chain Scan
 are required on `dev`; triggers in `scripts/ci-select.mjs`, pinned versions in
 `.github/workflows/ci.yml`). Run the matching one before pushing that kind of
@@ -52,6 +52,7 @@ change.
 - `cargo-deny` — after changing `Client/src-tauri/Cargo.toml`/`.lock`: `cargo deny --manifest-path Client/src-tauri/Cargo.toml check`
 - `zizmor` — after editing `.github/workflows/`: `zizmor --offline .github/workflows/`
 - `actionlint` — after editing a workflow (CI pins 1.7.7): `actionlint .github/workflows/*.yml`
+- `gitleaks` — after adding config, fixtures or sample values that look like keys: `gitleaks dir --config .gitleaks.toml .` (CI pins 8.30.1)
 
 ## AI Quality Guardrails & Engineering Standards
 

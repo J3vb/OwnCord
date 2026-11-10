@@ -49,10 +49,7 @@ import { buildVoiceModOptions } from "./voiceModOptions";
 // The per-user volume menu loads on its first open.
 const volumeMenuScreen = createLazyScreen("user-volume-menu", () => import("./sidebar/volumeMenu"));
 // The phone join sheet loads on its first tap.
-const joinSheetScreen = createLazyScreen(
-  "voice-join-sheet",
-  () => import("../../components/VoiceJoinSheet"),
-);
+const joinSheetScreen = createLazyScreen("voice-join-sheet", () => import("./VoiceJoinSheet"));
 /** Latest open request per sidebar (keyed by its lifetime signal); an earlier one still loading is dropped. */
 const volumeMenuAttempts = new WeakMap<AbortSignal, number>();
 

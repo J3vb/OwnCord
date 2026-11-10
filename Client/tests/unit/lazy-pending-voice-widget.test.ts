@@ -42,7 +42,7 @@ vi.mock("@tauri-apps/api/core", () => mocks.apiCoreMock());
 
 vi.mock("../../src/features/channels/editChannelDialog", () => mocks.editChannelModalMock());
 
-vi.mock("@components/DeleteChannelModal", () => mocks.deleteChannelModalMock());
+vi.mock("../../src/features/channels/DeleteChannelModal", () => mocks.deleteChannelModalMock());
 
 vi.mock("../../src/pages/main-page/VoiceCallbacks", () => mocks.pageVoiceCallbacksMock());
 

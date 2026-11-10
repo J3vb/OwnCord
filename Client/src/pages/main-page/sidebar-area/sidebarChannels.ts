@@ -12,7 +12,7 @@ import {
   requestOpenThread,
   requestOpenThreadList,
 } from "../../../features/threads/threadNavigation";
-import { createDeleteChannelModal } from "@components/DeleteChannelModal";
+import { createDeleteChannelModal } from "../../../features/channels/DeleteChannelModal";
 import { createSidebarVoiceCallbacks, createVoiceModerationCallbacks } from "../VoiceCallbacks";
 import { markChannelRead } from "@lib/readState";
 import { uiStore } from "@stores/ui.store";

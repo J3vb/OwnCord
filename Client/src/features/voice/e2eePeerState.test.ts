@@ -712,3 +712,209 @@ describe("a verification overtaken by a newer attempt", () => {
     expect(setPeerVerification).not.toHaveBeenCalled();
   });
 });
+
+describe("verifyPeerAnnounce outcome per input", () => {
+  type Pin = { status: "unpinned" } | { status: "pinned"; pin: string } | { status: "unavailable" };
+  const cases: Array<{
+    label: string;
+    pin: Pin;
+    published: string | undefined;
+    signature: string | undefined;
+    sigValid: boolean;
+    accepted: boolean;
+    status: string | undefined;
+    pinWrites: number;
+    buffered: boolean;
+  }> = [
+    {
+      label: "unpinned, no key: legacy accept as unverified",
+      pin: { status: "unpinned" },
+      published: undefined,
+      signature: "sig",
+      sigValid: true,
+      accepted: true,
+      status: "unverified",
+      pinWrites: 0,
+      buffered: false,
+    },
+    {
+      label: "unpinned, key, valid signature: pin and verify",
+      pin: { status: "unpinned" },
+      published: "id",
+      signature: "sig",
+      sigValid: true,
+      accepted: true,
+      status: "verified",
+      pinWrites: 1,
+      buffered: false,
+    },
+    {
+      label: "unpinned, key, invalid signature: block",
+      pin: { status: "unpinned" },
+      published: "id",
+      signature: "sig",
+      sigValid: false,
+      accepted: false,
+      status: "mismatch",
+      pinWrites: 0,
+      buffered: true,
+    },
+    {
+      label: "unpinned, key, no signature: block",
+      pin: { status: "unpinned" },
+      published: "id",
+      signature: undefined,
+      sigValid: true,
+      accepted: false,
+      status: "mismatch",
+      pinWrites: 0,
+      buffered: true,
+    },
+    {
+      label: "pinned match, valid signature: verified without re-pin",
+      pin: { status: "pinned", pin: "id" },
+      published: "id",
+      signature: "sig",
+      sigValid: true,
+      accepted: true,
+      status: "verified",
+      pinWrites: 0,
+      buffered: false,
+    },
+    {
+      label: "pinned match, invalid signature: block",
+      pin: { status: "pinned", pin: "id" },
+      published: "id",
+      signature: "sig",
+      sigValid: false,
+      accepted: false,
+      status: "mismatch",
+      pinWrites: 0,
+      buffered: true,
+    },
+    {
+      label: "pinned, key stripped: block",
+      pin: { status: "pinned", pin: "id" },
+      published: undefined,
+      signature: "sig",
+      sigValid: true,
+      accepted: false,
+      status: "mismatch",
+      pinWrites: 0,
+      buffered: true,
+    },
+    {
+      label: "pinned, new key, valid signature: changed and re-pinned",
+      pin: { status: "pinned", pin: "old" },
+      published: "new",
+      signature: "sig",
+      sigValid: true,
+      accepted: true,
+      status: "changed",
+      pinWrites: 1,
+      buffered: false,
+    },
+    {
+      label: "pinned, new key, invalid signature: block, no re-pin",
+      pin: { status: "pinned", pin: "old" },
+      published: "new",
+      signature: "sig",
+      sigValid: false,
+      accepted: false,
+      status: "mismatch",
+      pinWrites: 0,
+      buffered: true,
+    },
+    {
+      label: "pin store unreadable: fail closed",
+      pin: { status: "unavailable" },
+      published: "id",
+      signature: "sig",
+      sigValid: true,
+      accepted: false,
+      status: "unknown",
+      pinWrites: 0,
+      buffered: false,
+    },
+  ];
+
+  it.each(cases)("$label", async (c) => {
+    vi.mocked(getIdentityPin).mockResolvedValue(c.pin);
+    vi.mocked(verifyEphemeralKeySignature).mockResolvedValue(c.sigValid);
+    if (c.published) members.set(PEER, { identityPublicKey: c.published });
+    const { peers } = setup();
+    await expect(peers.verifyPeerAnnounce(PEER, EPHEMERAL, c.signature, current)).resolves.toBe(
+      c.accepted,
+    );
+    expect(lastVerification()?.status).toBe(c.status);
+    expect(storeIdentityPin).toHaveBeenCalledTimes(c.pinWrites);
+    expect(peers.blockedAnnounces.has(PEER)).toBe(c.buffered);
+    if (c.status !== "verified" && c.status !== "changed") {
+      expect(lastVerification()?.safetyNumber).toBeNull();
+    }
+  });
+});
+
+describe("verifyPeerAnnounce superseded after each await", () => {
+  it("reports nothing for a legacy peer superseded during the fingerprint", async () => {
+    const { peers } = setup();
+    let live = true;
+    const { computeRawKeyFingerprint } = await import("../../lib/net/e2eeCrypto");
+    vi.mocked(computeRawKeyFingerprint).mockImplementationOnce(async () => {
+      live = false;
+      return "session-fp";
+    });
+    await expect(peers.verifyPeerAnnounce(PEER, EPHEMERAL, "sig", () => live)).resolves.toBe(true);
+    expect(setPeerVerification).not.toHaveBeenCalled();
+  });
+
+  it("still accepts but reports nothing when superseded during the pin write", async () => {
+    members.set(PEER, { identityPublicKey: "id" });
+    const { peers } = setup();
+    let live = true;
+    vi.mocked(storeIdentityPin).mockImplementationOnce(async () => {
+      live = false;
+      return "stored";
+    });
+    await expect(peers.verifyPeerAnnounce(PEER, EPHEMERAL, "sig", () => live)).resolves.toBe(true);
+    expect(setPeerVerification).not.toHaveBeenCalled();
+  });
+
+  it("reports nothing when superseded during the safety number", async () => {
+    members.set(PEER, { identityPublicKey: "id" });
+    const { peers } = setup();
+    let live = true;
+    const { computeKeyFingerprint } = await import("../../lib/net/e2eeCrypto");
+    vi.mocked(computeKeyFingerprint).mockImplementationOnce(async () => {
+      live = false;
+      return "safety-number";
+    });
+    await expect(peers.verifyPeerAnnounce(PEER, EPHEMERAL, "sig", () => live)).resolves.toBe(true);
+    expect(setPeerVerification).not.toHaveBeenCalled();
+  });
+
+  it("keeps the blocked announce out of the buffer when superseded during an unreadable-store lookup", async () => {
+    vi.mocked(getIdentityPin).mockResolvedValue({ status: "unavailable" });
+    const { peers } = setup();
+    let live = true;
+    vi.mocked(getIdentityPin).mockImplementationOnce(async () => {
+      live = false;
+      return { status: "unavailable" };
+    });
+    await expect(peers.verifyPeerAnnounce(PEER, EPHEMERAL, "sig", () => live)).resolves.toBe(false);
+    expect(setPeerVerification).not.toHaveBeenCalled();
+    expect(peers.blockedAnnounces.size).toBe(0);
+  });
+
+  it("does not buffer a stripped-key block whose lookup was overtaken", async () => {
+    vi.mocked(getIdentityPin).mockImplementationOnce(async () => ({
+      status: "pinned",
+      pin: "id",
+    }));
+    const { peers } = setup();
+    await expect(peers.verifyPeerAnnounce(PEER, EPHEMERAL, "sig", () => false)).resolves.toBe(
+      false,
+    );
+    expect(peers.blockedAnnounces.size).toBe(0);
+  });
+});

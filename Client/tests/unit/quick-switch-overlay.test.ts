@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
-import { createQuickSwitchOverlay } from "../../../src/features/navigation/QuickSwitchOverlay";
-import type { QuickSwitchOverlayOptions } from "../../../src/features/navigation/QuickSwitchOverlay";
-import { useMountContainer } from "../../helpers/mountContainer";
+import { createQuickSwitchOverlay } from "../../src/features/navigation/QuickSwitchOverlay";
+import type { QuickSwitchOverlayOptions } from "../../src/features/navigation/QuickSwitchOverlay";
+import { useMountContainer } from "../helpers/mountContainer";
 
 const ONE_SERVER = {
   profiles: [{ name: "My Server", host: "localhost:8443" }],

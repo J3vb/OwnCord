@@ -37,6 +37,10 @@ type LiveKitClient struct {
 	url       string
 	roomSvc   *lksdk.RoomServiceClient
 
+	// restrictData is voice.restrict_data_publishing: when set, no grant this
+	// client writes carries the right to publish data packets.
+	restrictData bool
+
 	// removed holds identities RemoveParticipant removed, kept removed for
 	// tokenTTL by the hub's watch (voice_removed_watch.go).
 	removed removedIdentities
@@ -68,11 +72,21 @@ func NewLiveKitClient(cfg *config.VoiceConfig) (*LiveKitClient, error) {
 		"http_url", httpURL)
 
 	return &LiveKitClient{
-		apiKey:    cfg.LiveKitAPIKey,
-		apiSecret: cfg.LiveKitAPISecret,
-		url:       cfg.LiveKitURL,
-		roomSvc:   roomSvc,
+		apiKey:       cfg.LiveKitAPIKey,
+		apiSecret:    cfg.LiveKitAPISecret,
+		url:          cfg.LiveKitURL,
+		roomSvc:      roomSvc,
+		restrictData: cfg.RestrictDataPublishing,
 	}, nil
+}
+
+// canPublishData is the one rule for the data-packet grant, shared by fresh
+// and refreshed tokens (GenerateToken) and by updates to a live participant
+// (updateParticipantPublishing), so the three can never disagree. Data
+// follows the microphone grant unless voice.restrict_data_publishing
+// withholds it from everyone.
+func (c *LiveKitClient) canPublishData(microphone bool) bool {
+	return microphone && !c.restrictData
 }
 
 // RoomName returns the LiveKit room name for an OwnCord channel.
@@ -125,7 +139,8 @@ func (c *LiveKitClient) GenerateToken(
 	} else {
 		grant.CanPublish = &canPublish
 	}
-	grant.CanPublishData = &canPublish
+	canData := c.canPublishData(canPublish)
+	grant.CanPublishData = &canData
 
 	at.SetVideoGrant(grant).
 		SetIdentity(identity).
@@ -176,7 +191,7 @@ func (c *LiveKitClient) updateParticipantPublishing(ctx context.Context, channel
 		Permission: &livekit.ParticipantPermission{
 			CanSubscribe:      true,
 			CanPublish:        len(sources) > 0,
-			CanPublishData:    microphone,
+			CanPublishData:    c.canPublishData(microphone),
 			CanPublishSources: sources,
 		},
 	})

@@ -16,7 +16,6 @@ const srcDir = path.join(clientRoot, "src");
 const aliases: Record<string, string> = {
   "@lib/": "src/lib/",
   "@stores/": "src/stores/",
-  "@components/": "src/components/",
   "@pages/": "src/pages/",
 };
 

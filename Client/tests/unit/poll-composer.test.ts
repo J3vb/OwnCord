@@ -8,7 +8,7 @@ vi.mock("../../src/features/messaging/EmojiPicker", () => ({
   },
 }));
 
-import { openPollComposer } from "../../src/components/PollComposer";
+import { openPollComposer } from "../../src/features/messaging/PollComposer";
 import { POLL_REPLY_TIMEOUT_MS } from "../../src/features/messaging/pollSend";
 import { createMockWsClient, type MockWsClient } from "../helpers/mock-ws";
 

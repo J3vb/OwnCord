@@ -31,10 +31,10 @@ import {
   emptyPollDraft,
   type DraftProblem,
   type PollDraft,
-} from "../features/messaging/pollModel";
-import { createPoll, type PollWs } from "../features/messaging/pollSend";
-import { pollComposerText } from "../i18n/pollComposer";
-import { shellText } from "../i18n/shell";
+} from "./pollModel";
+import { createPoll, type PollWs } from "./pollSend";
+import { pollComposerText } from "../../i18n/pollComposer";
+import { shellText } from "../../i18n/shell";
 import { WsErrorCode } from "@lib/protocolTypes";
 
 export interface PollComposerOptions {
@@ -295,7 +295,7 @@ export function openPollComposer(opts: PollComposerOptions): void {
 
   function openPicker(index: number, anchor: HTMLElement): void {
     closePicker();
-    void import("../features/messaging/EmojiPicker").then(
+    void import("./EmojiPicker").then(
       ({ createEmojiPicker }) => {
         if (signal.aborted || modal === null) return;
         const made = createEmojiPicker({
