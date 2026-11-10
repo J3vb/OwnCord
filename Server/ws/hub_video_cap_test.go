@@ -134,9 +134,15 @@ func TestVideoBitrateCap_SaveRacingConnect_EndsOnLastSave(t *testing.T) {
 
 	var inWindow *Client
 	var inWindowAuth int
+	// The connection is another goroutine, as in production: the save holds its
+	// serialiser, which a registration on the same goroutine would rank against.
 	applyVideoCapAfterSnapshotHook = func() {
-		inWindow = connect("vcracewindow", true)
-		inWindowAuth = authOKVideoCap(t, h, inWindow.user, "none")
+		var reg sync.WaitGroup
+		reg.Go(func() {
+			inWindow = connect("vcracewindow", true)
+			inWindowAuth = authOKVideoCap(t, h, inWindow.user, "none")
+		})
+		reg.Wait()
 	}
 	t.Cleanup(func() { applyVideoCapAfterSnapshotHook = nil })
 	saveVideoCap(t, h, database, 900)
