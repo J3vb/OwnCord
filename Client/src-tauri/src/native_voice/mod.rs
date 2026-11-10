@@ -23,7 +23,9 @@
 pub mod app_sound;
 pub mod camera;
 pub mod capture;
+mod codecs;
 mod hotplug;
+mod keys;
 pub mod mic_test;
 pub mod playout;
 pub mod screen;
@@ -33,6 +35,10 @@ pub mod stats;
 pub mod stream_format;
 pub mod video;
 
+#[cfg(test)]
+use codecs::{decode_codec_name, decode_names, is_h264_mime, is_vp9_mime};
+pub use codecs::{probe_video_codecs, VideoCodecs};
+use keys::wipe;
 use mic_test::{
     level_event, MicTest, MicTestEnvelope, MicTestEvent, MicTestOptions, MicTestUpdate,
     MIC_TEST_EVENT, MIC_TEST_IN_CALL,
@@ -208,12 +214,6 @@ impl NativeVoiceState {
     }
 }
 
-fn wipe(key: &mut Option<Vec<u8>>) {
-    if let Some(mut k) = key.take() {
-        k.iter_mut().for_each(|b| *b = 0);
-    }
-}
-
 /// Report the native LiveKit SDK version and confirm libwebrtc is linked
 /// (phase 0's proof that the prebuilt archive matched the toolchain).
 #[tauri::command]
@@ -229,64 +229,6 @@ fn key_slot(slot: Option<i32>) -> Result<i32, String> {
         Ok(slot)
     } else {
         Err(format!("key slot {slot} out of range"))
-    }
-}
-
-impl Inner {
-    /// Record a room key: staged in `slot` (received with only) or sent
-    /// with at once. Staging into the slot being sent on replaces the sending
-    /// key, so that is a send-at-once.
-    fn install_key(&mut self, material: Vec<u8>, slot: i32, stage: bool) -> bool {
-        let stage = stage && self.key.is_some() && slot != self.key_slot;
-        if stage {
-            if let Some((_, mut old)) = self.staged.take() {
-                old.iter_mut().for_each(|b| *b = 0);
-            }
-            self.staged = Some((slot, material));
-        } else {
-            if matches!(&self.staged, Some((s, _)) if *s == slot) {
-                let mut old = self.staged.take();
-                if let Some((_, k)) = old.as_mut() {
-                    k.iter_mut().for_each(|b| *b = 0);
-                }
-            }
-            wipe(&mut self.key);
-            self.key = Some(material);
-            self.key_slot = slot;
-        }
-        stage
-    }
-
-    /// Send with the key staged in `slot`. The key sent with until now stays
-    /// in its own slot, staged, for frames still in flight. False when nothing
-    /// is staged there.
-    fn use_key_slot(&mut self, slot: i32) -> bool {
-        if slot == self.key_slot && self.key.is_some() {
-            return true;
-        }
-        match self.staged.take() {
-            Some((s, material)) if s == slot => {
-                let previous = self.key.replace(material);
-                if let Some(prev) = previous {
-                    self.staged = Some((self.key_slot, prev));
-                }
-                self.key_slot = slot;
-                true
-            }
-            other => {
-                self.staged = other;
-                false
-            }
-        }
-    }
-
-    /// Forget every key (leave).
-    fn clear_keys(&mut self) {
-        wipe(&mut self.key);
-        if let Some((_, mut k)) = self.staged.take() {
-            k.iter_mut().for_each(|b| *b = 0);
-        }
-        self.key_slot = session::KEY_INDEX;
     }
 }
 
@@ -771,72 +713,6 @@ pub async fn native_voice_camera_support() -> Result<camera::CameraSupport, Stri
     tokio::task::spawn_blocking(camera::support)
         .await
         .map_err(|e| e.to_string())
-}
-
-/// Which video codecs the native engine can encode beyond VP8.
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct VideoCodecs {
-    /// libwebrtc's sender capabilities list `video/H264`: its software
-    /// encoder (OpenH264) is built in.
-    pub h264: bool,
-    /// libwebrtc's sender capabilities list `video/VP9`.
-    pub vp9: bool,
-    /// The lowercased codec subtypes (`vp8`, `h264`, `vp9`, ...) libwebrtc's
-    /// receiver capabilities list, without the rtx, red and fec entries. The
-    /// webview intersects it with what it can decrypt before announcing it.
-    pub decode: Vec<String>,
-}
-
-/// Whether a sender-capability mime type is H.264, ignoring case.
-fn is_h264_mime(mime: &str) -> bool {
-    mime.eq_ignore_ascii_case("video/H264")
-}
-
-/// Whether a sender-capability mime type is VP9, ignoring case.
-fn is_vp9_mime(mime: &str) -> bool {
-    mime.eq_ignore_ascii_case("video/VP9")
-}
-
-/// The codec subtype of a receiver-capability mime type, lowercased, or
-/// `None` for the retransmission and redundancy entries that are not codecs.
-fn decode_codec_name(mime: &str) -> Option<String> {
-    let name = mime.split('/').nth(1)?.to_ascii_lowercase();
-    let is_support =
-        matches!(name.as_str(), "rtx" | "red" | "ulpfec") || name.starts_with("flexfec");
-    if name.is_empty() || is_support {
-        None
-    } else {
-        Some(name)
-    }
-}
-
-/// The distinct decodable codec names of a receiver-capability mime list, in
-/// the order libwebrtc lists them.
-fn decode_names<'a>(mimes: impl Iterator<Item = &'a str>) -> Vec<String> {
-    let mut names: Vec<String> = Vec::new();
-    for name in mimes.filter_map(decode_codec_name) {
-        if !names.contains(&name) {
-            names.push(name);
-        }
-    }
-    names
-}
-
-/// Ask libwebrtc which video codecs it can send. Synchronous: callers off the
-/// async runtime (the interop example) use it directly.
-pub fn probe_video_codecs() -> VideoCodecs {
-    // Outside a call this makes `LkRuntime::instance()` build the libwebrtc
-    // factory just for the probe; acceptable, as the webview asks once (memoised).
-    let runtime = livekit::rtc_engine::lk_runtime::LkRuntime::instance();
-    let factory = runtime.pc_factory();
-    let send = factory.get_rtp_sender_capabilities(livekit::webrtc::MediaType::Video);
-    let receive = factory.get_rtp_receiver_capabilities(livekit::webrtc::MediaType::Video);
-    VideoCodecs {
-        h264: send.codecs.iter().any(|c| is_h264_mime(&c.mime_type)),
-        vp9: send.codecs.iter().any(|c| is_vp9_mime(&c.mime_type)),
-        decode: decode_names(receive.codecs.iter().map(|c| c.mime_type.as_str())),
-    }
 }
 
 /// The codecs this build's libwebrtc can send. The picker enables H.264 only
