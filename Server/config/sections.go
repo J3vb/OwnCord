@@ -156,6 +156,12 @@ type VoiceConfig struct {
 	// API port (7880).
 	UDPPort int    `yaml:"udp_port"`
 	Quality string `yaml:"quality"` // low | medium | high
+	// RestrictDataPublishing withholds the right to publish data packets from
+	// every voice grant: fresh and refreshed tokens and updates to a live
+	// participant alike. Audio, camera and screen share grants are unchanged.
+	// Off by default (the data grant follows the microphone grant). Read once
+	// at start-up.
+	RestrictDataPublishing bool `yaml:"restrict_data_publishing"`
 }
 
 // ServerConfig holds HTTP server settings.

@@ -31,6 +31,7 @@ func supportConfig(cfg *config.Config) map[string]any {
 		"voice.advertise_internal_ip":         cfg.Voice.AdvertiseInternalIP,
 		"voice.livekit_metrics_url_set":       cfg.Voice.LiveKitMetricsURL != "",
 		"voice.quality":                       supportEnum(cfg.Voice.Quality, "low", "medium", "high"),
+		"voice.restrict_data_publishing":      cfg.Voice.RestrictDataPublishing,
 		"event_persistence.enabled":           cfg.EventPersistence.Enabled,
 		"event_persistence.retention_hours":   cfg.EventPersistence.RetentionHours,
 		"event_persistence.replay_ring_size":  cfg.EventPersistence.ReplayRingSize,

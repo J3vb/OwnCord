@@ -74,6 +74,7 @@ and only when it changes something a contributor or fork holder must do
 - Zooming a screen share (Ctrl+scroll) shows a small overview you can drag to move around, with the zoom level and a Reset button. It hides again at 100%.
 - On Linux, a crash report after an unexpected exit now includes the app's last error output, which names the library that closed the app when it exits without a crash signal.
 - Voice used to stay off until the whole server restarted after the built-in LiveKit crashed 10 times in a row. OwnCord now tries again every 10 minutes, and the System health page has a **Restart voice server** button to try right away.
+- Server owners: an opt-in `voice.restrict_data_publishing` setting issues voice grants without the right to send data packets through the media server. OwnCord's own features send none, so voice, video and screen share work the same. Off by default; details in the server configuration guide.
 
 ### Fixed
 
@@ -91,6 +92,7 @@ and only when it changes something a contributor or fork holder must do
 - The Linux Rust test job prefers the official Ubuntu package mirror, after one run spent 28 minutes on a slow one.
 - Tests for the protocol generator's checks on duplicate names and mismatched error codes.
 - The restore-without-safety-backup test no longer depends on the clock, and the long-session soak test waits for the camera to start before measuring.
+- The media-server test step in CI runs its tests again; it had matched none since the LiveKit supervisor moved to its own package.
 
 ## v2.8.0
 
