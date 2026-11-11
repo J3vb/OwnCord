@@ -354,6 +354,42 @@ video[hidden] + .video-surface {
 .video-cell.focused .video-tile-overlay {
   opacity: 1;
 }
+.video-tile-arrange {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 2;
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.video-tile-arrange[hidden] {
+  display: none;
+}
+.video-tile-arrange__sizes {
+  display: flex;
+  gap: 2px;
+}
+.video-cell:hover .video-tile-arrange,
+.video-cell:focus-within .video-tile-arrange {
+  opacity: 1;
+}
+/* A touch screen wider than the phone layout has no hover: always show them. */
+@media (hover: none) {
+  .video-tile-arrange {
+    opacity: 1;
+  }
+}
+.video-tile-arrange .video-tile-btn[aria-checked="true"],
+.video-tile-arrange .video-tile-btn[aria-pressed="true"] {
+  background: var(--accent);
+}
+.focus-mode .video-tile-arrange,
+.video-cell:fullscreen .video-tile-arrange,
+.video-cell--theatre .video-tile-arrange {
+  display: none;
+}
 .video-tile-btn {
   display: inline-flex;
   align-items: center;

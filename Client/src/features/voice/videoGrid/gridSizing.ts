@@ -22,8 +22,10 @@ const DEFAULT_ASPECT = 16 / 9;
 /** A picture whose shape moved less than this share is not worth a re-pack. */
 const ASPECT_TOLERANCE = 0.02;
 
-/** The size a tile asks for: a screen share is large, anything else medium. */
-export function tileSizeOf(entry: CellEntry | undefined): TileSize {
+/** The size a tile takes: the viewer's choice, else a screen share is large
+ *  and anything else medium. */
+export function tileSizeOf(entry: CellEntry | undefined, choice?: TileSize): TileSize {
+  if (choice !== undefined) return choice;
   return entry?.config?.isScreenshare === true ? "large" : "medium";
 }
 
@@ -63,12 +65,14 @@ export function createGridSizing(st: GridState, api: GridApi) {
 
   /** The shown tiles in layout order, with what the packer needs of each. */
   function packInput(shown: readonly HTMLDivElement[]): { el: HTMLDivElement; tile: PackTile }[] {
-    const byEl = new Map<HTMLElement, CellEntry>();
-    for (const entry of st.cells.values()) byEl.set(entry.el, entry);
+    const byEl = new Map<HTMLElement, [number, CellEntry]>();
+    for (const [tileId, entry] of st.cells) byEl.set(entry.el, [tileId, entry]);
     return shown.map((el, id) => {
-      const entry = byEl.get(el);
+      const [tileId, entry] = byEl.get(el) ?? [undefined, undefined];
       const aspect = entry === undefined ? DEFAULT_ASPECT : aspectOf(entry.video);
-      return { el, tile: { id, aspect, size: tileSizeOf(entry) } };
+      const size = tileSizeOf(entry, tileId === undefined ? undefined : st.tileSizes.get(tileId));
+      const pinned = tileId !== undefined && st.pinned.has(tileId);
+      return { el, tile: { id, aspect, size, ...(pinned ? { pinned } : {}) } };
     });
   }
 
@@ -78,6 +82,7 @@ export function createGridSizing(st: GridState, api: GridApi) {
     const { width: cw, height: ch } = st.root.getBoundingClientRect();
     const viewsAbove = st.callBar !== null && !isPhoneLayout() && cw > 0 && cw <= VIEWS_ABOVE_PX;
     st.root.classList.toggle("video-grid--views-above", viewsAbove);
+    api.syncTileArrange();
     const sized = cw > 0 && ch > 0;
     const shown = api.shownTiles();
     const barSpace = barSpaceOf(viewsAbove);

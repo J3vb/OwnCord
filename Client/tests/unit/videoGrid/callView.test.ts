@@ -525,6 +525,8 @@ describe("VideoGrid", () => {
       [...menu()!.querySelectorAll<HTMLElement>("[data-action]")].map((m) => m.dataset["action"]);
     const item = (action: string) =>
       menu()!.querySelector<HTMLButtonElement>(`[data-action='${action}']`)!;
+    /** The size and pin rows every grid-layout tile menu carries. */
+    const ARRANGE = ["size-small", "size-medium", "size-large", "pin"];
     async function openMenu(id: number, x = 30, y = 40): Promise<HTMLElement | null> {
       cell(id).dispatchEvent(
         new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: x, clientY: y }),
@@ -574,6 +576,7 @@ describe("VideoGrid", () => {
         "focus",
         "fullscreen",
         "popout",
+        ...ARRANGE,
         "stop-watching",
         "server-mute",
         "server-deafen",
@@ -587,7 +590,14 @@ describe("VideoGrid", () => {
       grid.addStream(OTTO, "Otto", fakeStream(), remote());
       await openMenu(OTTO);
 
-      expect(actions()).toEqual(["local-mute", "focus", "fullscreen", "popout", "stop-watching"]);
+      expect(actions()).toEqual([
+        "local-mute",
+        "focus",
+        "fullscreen",
+        "popout",
+        ...ARRANGE,
+        "stop-watching",
+      ]);
     });
 
     it("hides moderation when the host returns nothing, and says why when it returns a reason", async () => {
@@ -675,7 +685,13 @@ describe("VideoGrid", () => {
       try {
         grid.addStream(OTTO, "Otto", fakeStream(), remote());
         await openMenu(OTTO);
-        expect(actions()).toEqual(["local-mute", "focus", "fullscreen", "stop-watching"]);
+        expect(actions()).toEqual([
+          "local-mute",
+          "focus",
+          "fullscreen",
+          ...ARRANGE,
+          "stop-watching",
+        ]);
       } finally {
         clearHost();
       }
@@ -769,7 +785,7 @@ describe("VideoGrid", () => {
         await openMenu(SELF);
 
         expect(menu()!.getAttribute("aria-label")).toBe("Your camera");
-        expect(actions()).toEqual(["hide-self", "camera-off"]);
+        expect(actions()).toEqual(["hide-self", "camera-off", ...ARRANGE]);
         expect(menu()!.querySelector("[data-menu-volume]")).toBeNull();
       });
 
@@ -792,7 +808,7 @@ describe("VideoGrid", () => {
         grid.addStream(SELF, "Me (You)", fakeStream(), self());
         await openMenu(SELF);
         // Outside the call view the "Show my camera" toggle does not apply.
-        expect(actions()).toEqual(["camera-off"]);
+        expect(actions()).toEqual(["camera-off", ...ARRANGE]);
         item("camera-off").click();
         expect(cc.onCameraToggle).toHaveBeenCalledTimes(1);
       });
@@ -844,11 +860,13 @@ describe("VideoGrid", () => {
         }
       });
 
-      it("opens no menu outside the call view while the camera is locked", async () => {
+      it("greys Turn off camera beside size and pin while the camera is locked", async () => {
         grid.setCallbacks({ callControls: controls() });
         grid.setCallState({ muted: false, deafened: false, listenOnly: false, connecting: true });
         grid.addStream(SELF, "Me (You)", fakeStream(), self());
-        expect(await openMenu(SELF)).toBeNull();
+        await openMenu(SELF);
+        expect(actions()).toEqual(["camera-off", ...ARRANGE]);
+        expect(item("camera-off").disabled).toBe(true);
       });
 
       it("greys Turn off camera with the reason while the camera is locked", async () => {
@@ -871,9 +889,11 @@ describe("VideoGrid", () => {
         expect(cc.onCameraToggle).not.toHaveBeenCalled();
       });
 
-      it("opens no menu with nothing to offer, and none on your own screen share", async () => {
+      it("offers only size and pin with nothing else to offer, and no menu on your own screen share", async () => {
         grid.addStream(SELF, "Me (You)", fakeStream(), self());
-        expect(await openMenu(SELF)).toBeNull();
+        await openMenu(SELF);
+        expect(actions()).toEqual(ARRANGE);
+        menu()!.remove();
 
         grid.setCallbacks({ callControls: controls() });
         grid.addStream(

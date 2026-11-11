@@ -6,6 +6,7 @@
 import { createElement } from "@lib/dom";
 import { Disposable } from "@lib/disposable";
 import { createIcon } from "@lib/icons";
+import { onPhoneLayoutChange } from "@lib/ui/bottomSheet";
 import { USER_LOCAL_MUTE_CHANGED } from "@lib/constants";
 import { syncVideoSurface } from "@lib/voice/videoSurface";
 import type { MountableComponent } from "@lib/text/safeRender";
@@ -20,6 +21,7 @@ import { createGridLayout } from "./gridLayout";
 import { createGridCallBar } from "./gridCallBar";
 import { createGridWatch } from "./gridWatch";
 import { createGridStreams } from "./gridStreams";
+import { createGridTileSize } from "./gridTileSize";
 import { createGridStats } from "./gridStats";
 
 export interface TileConfig {
@@ -194,6 +196,8 @@ export function createVideoGrid(): VideoGridComponent {
     root: null,
     cells: new Map<number, CellEntry>(),
     focusedTileId: null,
+    tileSizes: new Map(),
+    pinned: new Set(),
     people: [],
     personCells: new Map<number, HTMLDivElement>(),
     resizeObserver: null,
@@ -240,6 +244,7 @@ export function createVideoGrid(): VideoGridComponent {
       loadInfo: () => import("./streamInfo"),
     }),
     createGridWatch(st, api),
+    createGridTileSize(st, api),
     createGridStreams(st, api),
   );
 
@@ -297,6 +302,8 @@ export function createVideoGrid(): VideoGridComponent {
 
     container.appendChild(st.root);
     if (st.callView) api.setCallView(true);
+    // The size controls give way to the tile menu on a phone, and back.
+    onPhoneLayoutChange(() => api.syncTileArrange(), st.gridListeners.signal);
     document.addEventListener("fullscreenchange", api.onFullscreenChange, {
       signal: st.gridListeners.signal,
     });
@@ -356,6 +363,7 @@ export function createVideoGrid(): VideoGridComponent {
       syncVideoSurface(entry.video);
     }
     st.cells.clear();
+    api.forgetTileSizes();
     st.focusedTileId = null;
     st.people = [];
     st.personCells.clear();
