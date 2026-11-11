@@ -32,6 +32,8 @@ export const shards = {
     "src/features/voice/videoBudgetNow.ts",
     "src/features/voice/videoCapFollow.ts",
     "src/lib/voice/audioPipeline.ts",
+    "src/lib/voice/vadDetector.ts",
+    "src/lib/voice/audioRoomCapabilities.ts",
     "src/lib/voice/videoPresets.ts",
   ],
   "livekit-2": [
@@ -154,6 +156,9 @@ export const shards = {
     "src/features/voice/cameraFlip.ts",
     "src/lib/ui/virtualRange.ts",
     "src/lib/voice/audioElements.ts",
+    "src/lib/voice/audioVolumePrefs.ts",
+    "src/lib/voice/audioTrackElements.ts",
+    "src/lib/voice/audioScreenshareState.ts",
     "src/lib/voice/voiceTokenManager.ts",
   ],
   "audio-media-3": [
@@ -233,6 +238,8 @@ export const shards = {
     "src/lib/net/hostValidation.ts",
     "src/lib/net/trustedDomains.ts",
     "src/lib/voice/roomEventHandlers.ts",
+    "src/lib/voice/roomEventTypes.ts",
+    "src/lib/voice/roomSpeakers.ts",
   ],
   "transport-auth-5": [
     "src/lib/apiDms.ts",
@@ -271,6 +278,7 @@ export const shards = {
     "src/lib/pendingMessages.ts",
     "src/lib/prefs/musicActivityPrefs.ts",
     "src/lib/voice/connectionStats.ts",
+    "src/lib/voice/connectionStatsFormat.ts",
   ],
   "lib-rest-1": [
     "src/features/members/memberPanel.ts",

@@ -53,7 +53,7 @@ const clientTrusted: Record<string, string> = {
   "themes.restoreAccent": "this client's settings",
   "supportBundle.allowlistedSettings": "this client's settings",
   "osMotion.manualPreference": "this client's settings",
-  "audioElements.parseStoredVolume": "this client's settings",
+  "audioVolumePrefs.parseStoredVolume": "this client's settings",
   "credentials.parseCredential": "this client's browser credential store",
   "settings.load": "this client's browser settings",
 };
