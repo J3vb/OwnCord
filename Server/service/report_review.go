@@ -12,7 +12,7 @@ import (
 // RequireModerate is requireModerate exported for a handler that must authorize
 // BEFORE resolving anything else: resolving a public id first would make
 // "unknown id" and "real id, no permission" different status codes, an existence
-// oracle. Call it before resolveReportIDParam.
+// oracle. Call it before the report id is resolved (api reportActorAndID).
 func (s *ReportService) RequireModerate(ctx context.Context, actorID int64) error {
 	return requireModerate(ctx, s.perms, actorID)
 }

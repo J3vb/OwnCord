@@ -103,23 +103,24 @@ func MountModerationRoutes(r chi.Router, svc *service.Services, broadcaster Prof
 		Post("/api/v1/users/me/notices/{id}/ack", handleModerationAckNotice(svc))
 }
 
-func moderationTargetIDParam(w http.ResponseWriter, r *http.Request) (int64, bool) {
-	targetID, ok := pathID(r, "id")
+// moderationActorAndTarget resolves the caller and the {id} target of a
+// /users/{id}/moderation route, writing the response on failure.
+func moderationActorAndTarget(w http.ResponseWriter, r *http.Request) (actorID, targetID int64, ok bool) {
+	actorID, ok = requireUserID(w, r)
+	if !ok {
+		return 0, 0, false
+	}
+	targetID, ok = pathID(r, "id")
 	if !ok {
 		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "id must be a positive integer")
-		return 0, false
+		return 0, 0, false
 	}
-	return targetID, true
+	return actorID, targetID, true
 }
 
 func handleModerationWarn(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		actorID, ok := currentUserID(r)
-		if !ok {
-			writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "not authenticated")
-			return
-		}
-		targetID, ok := moderationTargetIDParam(w, r)
+		actorID, targetID, ok := moderationActorAndTarget(w, r)
 		if !ok {
 			return
 		}
@@ -139,12 +140,7 @@ func handleModerationWarn(svc *service.Services) http.HandlerFunc {
 
 func handleModerationTimeout(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		actorID, ok := currentUserID(r)
-		if !ok {
-			writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "not authenticated")
-			return
-		}
-		targetID, ok := moderationTargetIDParam(w, r)
+		actorID, targetID, ok := moderationActorAndTarget(w, r)
 		if !ok {
 			return
 		}
@@ -174,12 +170,7 @@ func handleModerationTimeout(svc *service.Services) http.HandlerFunc {
 
 func handleModerationUntimeout(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		actorID, ok := currentUserID(r)
-		if !ok {
-			writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "not authenticated")
-			return
-		}
-		targetID, ok := moderationTargetIDParam(w, r)
+		actorID, targetID, ok := moderationActorAndTarget(w, r)
 		if !ok {
 			return
 		}
@@ -193,12 +184,7 @@ func handleModerationUntimeout(svc *service.Services) http.HandlerFunc {
 
 func handleModerationActions(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		actorID, ok := currentUserID(r)
-		if !ok {
-			writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "not authenticated")
-			return
-		}
-		targetID, ok := moderationTargetIDParam(w, r)
+		actorID, targetID, ok := moderationActorAndTarget(w, r)
 		if !ok {
 			return
 		}
@@ -213,9 +199,8 @@ func handleModerationActions(svc *service.Services) http.HandlerFunc {
 
 func handleModerationAckNotice(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		userID, ok := currentUserID(r)
+		userID, ok := requireUserID(w, r)
 		if !ok {
-			writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "not authenticated")
 			return
 		}
 		actionID, ok := pathID(r, "id")
@@ -295,12 +280,7 @@ type nicknameResponse struct {
 
 func handleModerationNickname(svc *service.Services, broadcaster ProfileBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		actorID, ok := currentUserID(r)
-		if !ok {
-			writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "not authenticated")
-			return
-		}
-		targetID, ok := moderationTargetIDParam(w, r)
+		actorID, targetID, ok := moderationActorAndTarget(w, r)
 		if !ok {
 			return
 		}
