@@ -11,28 +11,26 @@ import (
 	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
-// presenceBatchPayload is presence_batch. A window batch lists users whose
-// presence changed; a Full snapshot lists every connected user and anyone left out
-// is offline.
+// presenceBatchPayload is presence_batch: a window batch lists users whose presence changed; a Full
+// snapshot lists every connected user and anyone left out is offline.
 type presenceBatchPayload struct {
 	Updates []presenceBatchEntry `json:"updates"`
 	Full    bool                 `json:"full,omitempty"`
 }
 
-// presenceBatchEntry is one user's presence in a batch or snapshot. CustomStatus,
-// Activity and Listening follow presencePayload: always present, null when unset.
+// presenceBatchEntry is one user's presence in a batch or snapshot; CustomStatus, Activity and
+// Listening follow presencePayload (always present, null when unset).
 type presenceBatchEntry struct {
 	UserID       int64              `json:"user_id"`
 	Status       string             `json:"status"`
 	CustomStatus *string            `json:"custom_status"`
 	Activity     *gameActivity      `json:"activity"`
 	Listening    *listeningActivity `json:"listening"`
-	// Mobile is true when the member is on the Android app; omitted when false and
-	// always blank on an entry whose status was mapped to offline.
+	// Mobile is true on the Android app; omitted when false and blank on an entry whose status was
+	// mapped to offline.
 	Mobile bool `json:"mobile,omitempty"`
 }
 
-// memberPayloadFor is the member_join user object.
 func memberPayloadFor(user *db.User, roleName string, roleIDs []int64) memberJoinUser {
 	return memberJoinUser{
 		ID:                user.ID,
@@ -49,21 +47,15 @@ func memberPayloadFor(user *db.User, roleName string, roleIDs []int64) memberJoi
 	}
 }
 
-// Three broadcastMsg fields carry presence (hub_broadcast.go):
-//   - presence, when non-nil, is a coalescing window's entries; deliverBroadcast
-//     builds the presence_batch from them under seqMu (buildPresenceBatch).
-//   - droppable marks a presence-class frame: a client whose normal queue is full
-//     drops it and is marked stale instead of being disconnected
-//     (Client.sendPresenceMsg). Every presence_batch is droppable; a new member's
-//     data goes ahead as a content-class member_join (announceMember), since the
-//     snapshot that repairs a drop has none.
-//   - presenceSnapshot makes the entry a request, like barrier: every
-//     presence-stale client gets a full snapshot (deliverPresenceSnapshots).
+// Three broadcastMsg fields carry presence (hub_broadcast.go): presence (a coalescing window's
+// entries, built into presence_batch under seqMu); droppable (a client with a full normal queue
+// drops the frame and is marked stale instead of disconnected; new-member data goes ahead as a
+// content-class member_join, since the repairing snapshot has none); presenceSnapshot (a request:
+// every presence-stale client gets a full snapshot).
 
-// publishGlobal fans a sequenced global frame out to every connected client but
-// bm.excludeUserID, in the frame's class. private holds a presence batch's
-// per-subject variants (an invisible user's own true entry): that user gets theirs,
-// under the same seq, instead of the public frame.
+// publishGlobal fans a sequenced global frame out to every client but bm.excludeUserID, in the
+// frame's class. private holds a presence batch's per-subject variants: an invisible user gets
+// their own true entry under the same seq.
 func (h *Hub) publishGlobal(bm broadcastMsg, msg []byte, seq uint64, private map[int64][]byte) {
 	priority := PriorityNormal
 	if bm.droppable {
@@ -81,18 +73,14 @@ func (h *Hub) publishGlobal(bm broadcastMsg, msg []byte, seq uint64, private map
 	}
 }
 
-// presenceRepairState tracks presence frames clients dropped on a full queue
-// (Client.sendPresenceMsg) and their repair.
 type presenceRepairState struct {
 	drops    atomic.Uint64 // process-lifetime count (PresenceDropCount)
 	staleAny atomic.Bool   // some client owes a snapshot at the next flush
 	lostAll  atomic.Bool   // a presence frame was refused by the full dispatch queue
-	// users holds whoever dropped a presence frame since their last full ready; their
-	// next resume takes the full ready. joins holds users owed a member_join: marked by
-	// a first-ever connect before its stamp erases the signal (last_seen NULL), cleared
-	// once the member_join is on the dispatch queue, so a handshake failing in between
-	// still announces on the next connect. A restart needs no copy: every client then
-	// takes a full ready. mu is a leaf lock: nothing is acquired while holding it.
+	// users holds whoever dropped a presence frame since their last full ready (their next resume
+	// takes it). joins holds users owed a member_join: marked on a first-ever connect before the
+	// stamp erases the signal, cleared once the member_join is queued, so a failed handshake still
+	// announces next connect. mu is a leaf lock.
 	mu    syncutil.Ranked[lockRankLeaf]
 	users map[resyncKey]struct{} // per device session: a resume of another device cannot clear it
 	joins map[int64]struct{}
@@ -111,14 +99,13 @@ func (s *presenceRepairState) mark(set *map[int64]struct{}, userID int64, on boo
 	}
 }
 
-// resyncKey names one device session: the owed full ready belongs to the session
-// whose frame was dropped, not the account.
+// resyncKey names one device session: the owed full ready belongs to the session whose frame was
+// dropped, not the account.
 type resyncKey struct {
 	userID    int64
 	tokenHash string
 }
 
-// markResync sets (or clears) k in the owed-resync set and reports whether it was set.
 func (s *presenceRepairState) markResync(k resyncKey, on bool) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -148,32 +135,26 @@ func (s *presenceRepairState) marked(set *map[int64]struct{}, userID int64) bool
 	return ok
 }
 
-// pendingPresence is the coalescer's latest-wins entry for one user. member, when
-// set, is member_join data for a user other clients' lists lack; it goes out ahead
-// of the window's batch and survives a later state in the window.
+// pendingPresence is the coalescer's latest-wins entry for one user. member, when set, is
+// member_join data other clients' lists lack; it goes out ahead of the window's batch.
 type pendingPresence struct {
 	status       string
 	customStatus *string
-	// activity is nil from every caller: a connect starts without a game and a
-	// disconnect ends it. An activity change is a live presence frame, not a coalesced entry.
+	// activity is nil from every caller: a connect starts without a game and a disconnect ends it.
 	activity  *gameActivity
 	listening *listeningActivity // nil from every caller, like activity
-	// mobile is the connecting user's merged phone flag (mergeLivePresence); false
-	// for a disconnect.
+	// mobile is the connecting user's merged phone flag; false for a disconnect.
 	mobile bool
-	// connecting, when set, is the connection this entry announces: queuePresence
-	// reads its phone flag under presenceFeed.mu, so a presence_update that landed
-	// first is not overtaken by a flag read before the lock.
+	// connecting is the connection this entry announces: queuePresence reads its phone flag under
+	// presenceFeed.mu so a presence_update that landed first is not overtaken.
 	connecting *Client
 	member     *memberJoinUser
 }
 
-// QueuePresence coalesces connect/disconnect presence: the latest state per user
-// is buffered for presenceCoalesceWindow, then flushed as one sequenced
-// presence_batch. One frame per subject to every client was N^2 frames in a
-// reconnect herd on a 256-slot queue, kicking slow clients and feeding the herd
-// back. Latest-wins: a flap inside the window collapses to its final state.
-// User-chosen status changes (presence_update) do not pass through here.
+// QueuePresence coalesces connect/disconnect presence: the latest state per user is buffered for
+// presenceCoalesceWindow, then flushed as one sequenced presence_batch (one frame per subject was
+// N^2 in a reconnect herd, kicking slow clients and feeding the herd). Chosen status changes
+// (presence_update) bypass it.
 func (h *Hub) QueuePresence(userID int64, status string, customStatus *string) {
 	h.queuePresence(userID, pendingPresence{status: status, customStatus: customStatus})
 }
@@ -199,44 +180,26 @@ func (h *Hub) queuePresence(userID int64, p pendingPresence) {
 	}
 }
 
-// presenceCoalesceWindow is how long QueuePresence buffers presence before
-// flushing: long enough to collapse a socket flap and a herd's arrivals, short
+// presenceCoalesceWindow is long enough to collapse a socket flap and a herd's arrivals, short
 // enough that an arrival still looks immediate.
 const presenceCoalesceWindow = 300 * time.Millisecond
 
-// presenceFlushRaceHook, when non-nil, runs once per flushPresenceQueue call right
-// after the coalesced queue is snapshotted and cleared, with presenceFeed.mu held.
-// Test-only: the window is too narrow to land a concurrent
-// dropQueuedPresenceAndBroadcast reliably.
-//
-// It is handed the Hub being flushed and an installer MUST ignore other Hubs'
-// calls. The hook is package-global but flushes are per-Hub, and QueuePresence's
-// AfterFunc outlives the arming test (dropQueuedPresenceAndBroadcast clears the
-// queue without disarming the timer), so a sibling test's 300ms flush can fire
-// into whatever hook is installed by then; a hook that is safe to run only once
-// (closing a channel) would panic. It is atomic because that stray flush reads
-// it from a timer goroutine while a test installs or clears it.
+// presenceFlushRaceHook runs per flushPresenceQueue call after the queue is snapshotted and
+// cleared, with presenceFeed.mu held. Test-only. It receives the Hub being flushed and an installer
+// MUST ignore other Hubs' calls: the hook is package-global, and a sibling test's stray 300ms
+// AfterFunc flush could fire into it (a run-once hook would panic). Atomic because that flush reads
+// it from a timer goroutine.
 var presenceFlushRaceHook atomic.Pointer[func(*Hub)]
 
-// dropQueuedPresenceAndBroadcast atomically removes any coalesced presence queued
-// for userID and runs broadcast, both under presenceFeed.mu. Called when a fresher
-// presence for that user is delivered directly (presence_update via EmitEvents),
-// so the delete and the send cannot straddle flushPresenceQueue's
-// snapshot-and-enqueue section.
-//
-// Holding presenceFeed.mu across the delete and the broadcast is what closes the race:
-// whichever of this call and flushPresenceQueue acquires it second also enqueues
-// second.
-//   - This call first: it deletes the entry before flush can snapshot it, so flush
-//     never broadcasts the stale state.
-//   - Flush first: the delete is a no-op, but the broadcast cannot run until
-//     flush's batch is enqueued, so the fresher frame gets the higher seq from
-//     deliverBroadcast's single FIFO consumer and every client converges on it.
-//
-// A dropped entry that carried member data still owes other clients the member: it
-// goes out as a member_join ahead of the fresher frame. broadcast runs under
-// presenceFeed.mu: every caller only does a non-blocking enqueue onto h.broadcast, so
-// it cannot block and adds no lock-order edge.
+// dropQueuedPresenceAndBroadcast atomically removes any coalesced presence queued for userID and
+// runs broadcast, both under presenceFeed.mu. Used when a fresher presence is delivered directly
+// (presence_update), so delete and send cannot straddle flushPresenceQueue's snapshot-and-enqueue.
+// Whichever of this and flush takes the lock second also enqueues second: this first deletes the
+// entry before flush snapshots it; flush first makes the delete a no-op, but the broadcast waits
+// for flush's batch, so the fresher frame gets the higher seq from the single FIFO consumer.
+// A dropped entry that carried member data still owes the member_join, sent ahead of the fresher
+// frame. broadcast only does a non-blocking enqueue onto h.broadcast, so it adds no lock-order
+// edge.
 func (h *Hub) dropQueuedPresenceAndBroadcast(userID int64, broadcast func()) {
 	h.presenceFeed.mu.Lock()
 	defer h.presenceFeed.mu.Unlock()
@@ -244,8 +207,8 @@ func (h *Hub) dropQueuedPresenceAndBroadcast(userID int64, broadcast func()) {
 	broadcast()
 }
 
-// dropQueuedPresenceLocked is the drop half of dropQueuedPresenceAndBroadcast, for
-// a caller already holding presenceFeed.mu that broadcasts only after its own check.
+// dropQueuedPresenceLocked drops userID's queued presence. The caller holds presenceFeed.mu and
+// broadcasts only after its own check.
 func (h *Hub) dropQueuedPresenceLocked(userID int64) {
 	if p, ok := h.presenceFeed.queue[userID]; ok && p.member != nil {
 		h.announceMember(userID, p)
@@ -253,10 +216,9 @@ func (h *Hub) dropQueuedPresenceLocked(userID int64) {
 	delete(h.presenceFeed.queue, userID)
 }
 
-// announceMember enqueues the member_join for a member other clients' lists may
-// lack, in the content class: presence may be dropped and the snapshot repairing a
-// drop carries no member data. Once on the dispatch queue the user is no longer
-// owed one. Called with presenceFeed.mu held, ahead of the member's presence frame.
+// announceMember enqueues the member_join for a member other clients' lists may lack, in the
+// content class (presence may be dropped and the repairing snapshot carries no member data). Called
+// with presenceFeed.mu held, ahead of the member's presence frame.
 func (h *Hub) announceMember(userID int64, p pendingPresence) {
 	msg := buildJSON(wsMsg{Type: MsgTypeMemberJoin, Payload: memberJoinPayload{
 		User:   *p.member,
@@ -267,17 +229,13 @@ func (h *Hub) announceMember(userID int64, p pendingPresence) {
 	}
 }
 
-// flushPresenceQueue drains the coalescer into one presence_batch, preceded by a
-// member_join for each new member, and asks for a snapshot for every client that
-// dropped presence since the last flush. A batch or snapshot request the full
-// dispatch queue refuses is repaired the same way: a lost batch marks every
-// connected client stale (and via recordQueueDrop sends a resume from before it to
-// the full ready); a lost request is retried a window later. Runs on the AfterFunc
-// timer goroutine.
-//
-// presenceFeed.mu is held across the batch's enqueue, not just the snapshot, so a
-// concurrent dropQueuedPresenceAndBroadcast serializes with it and the batch and
-// the fresher frame reach h.broadcast in critical-section order.
+// flushPresenceQueue drains the coalescer into one presence_batch, preceded by a member_join per
+// new member, and asks for a snapshot for every client that dropped presence. A batch or request
+// the full dispatch queue refuses is repaired: a lost batch marks every connected client stale (and
+// via recordQueueDrop sends older resumes to the full ready); a lost request is retried a window
+// later. Runs on the AfterFunc timer goroutine.
+// presenceFeed.mu is held across the batch's enqueue so a concurrent dropQueuedPresenceAndBroadcast
+// serializes with it and both reach h.broadcast in critical-section order.
 func (h *Hub) flushPresenceQueue() {
 	h.presenceFeed.mu.Lock()
 	queued := h.presenceFeed.queue
@@ -287,9 +245,8 @@ func (h *Hub) flushPresenceQueue() {
 		(*hook)(h)
 	}
 	lost := false
-	// An offline entry for a user who has connected since is stale: the new
-	// connection's online presence could be coalesced away or ordered behind it. Drop
-	// it (presenceFeed.mu -> Hub.mu (R) is in order).
+	// An offline entry for a user who has connected since is stale (the new online presence could
+	// be coalesced away or ordered behind it): drop it. presenceFeed.mu -> Hub.mu (R) is in order.
 	for uid, p := range queued {
 		if p.status == db.StatusOffline && h.isConnected(uid) {
 			delete(queued, uid)
@@ -321,11 +278,10 @@ func (h *Hub) flushPresenceQueue() {
 	}
 }
 
-// buildPresenceBatch turns a window's entries into the public presence_batch plus
-// a private variant for each invisible subject: others see
-// db.BroadcastStatus(status) with the custom text blanked (it would be a tell),
-// the subject sees the truth. Erased users are left out. Called under seqMu,
-// which guards the tombstones; nil when nothing is left.
+// buildPresenceBatch turns a window into the public presence_batch plus a private variant per
+// invisible subject: others see db.BroadcastStatus with the custom text blanked (a tell), the
+// subject sees the truth. Erased users are left out. Called under seqMu (guards tombstones); nil
+// when nothing is left.
 func (h *Hub) buildPresenceBatch(queued map[int64]pendingPresence) ([]byte, map[int64][]byte) {
 	entries := make([]presenceBatchEntry, 0, len(queued))
 	for uid, p := range queued {
@@ -358,11 +314,10 @@ func (h *Hub) buildPresenceBatch(queued map[int64]pendingPresence) ([]byte, map[
 	return buildPresenceBatchMsg(entries, false), private
 }
 
-// broadcastPresenceFrame enqueues one user's presence (presence_update) as a
-// sequenced global frame on the same dispatch FIFO as the batches, in the presence
-// class: a full queue drops it instead of kicking the client. A refused frame
-// reached nobody, so the next flush snapshots every client; callers may hold
-// presenceFeed.mu, so the clients are marked there, not here.
+// broadcastPresenceFrame enqueues one user's presence_update as a sequenced global frame on the
+// same FIFO as the batches, in the presence class (a full queue drops it instead of kicking). A
+// refused frame reached nobody, so the next flush snapshots every client; callers may hold
+// presenceFeed.mu, so clients are marked there, not here.
 func (h *Hub) broadcastPresenceFrame(excludeUserID int64, msg []byte) {
 	if h.enqueue(broadcastMsg{msg: msg, excludeUserID: excludeUserID, droppable: true}, "presence") {
 		return
@@ -376,12 +331,10 @@ func buildPresenceBatchMsg(updates []presenceBatchEntry, full bool) []byte {
 	return buildJSON(wsMsg{Type: MsgTypePresenceBatch, Payload: presenceBatchPayload{Updates: updates, Full: full}})
 }
 
-// presenceDropped records that the session tokenHash of userID dropped a presence
-// frame: the next flush sends that client a snapshot and the user's next resume
-// takes the full ready, because the dropped seq sits below later ones the client
-// may still ack. Lock-free apart from the leaf presenceRepairState.mu.
-// Client.sendPresenceMsg releases the client's mu before calling this, but its
-// callers may hold seqMu, ps.mu or presenceFeed.mu.
+// presenceDropped records that the session of userID dropped a presence frame: the next flush sends
+// it a snapshot and the user's next resume takes the full ready, because the dropped seq sits below
+// later ones the client may ack. Lock-free apart from the leaf presenceRepairState.mu; callers may
+// hold seqMu, ps.mu or presenceFeed.mu (Client.sendPresenceMsg releases c.mu first).
 func (h *Hub) presenceDropped(userID int64, tokenHash string) {
 	h.presenceFeed.repair.drops.Add(1)
 	h.presenceFeed.repair.markResync(resyncKey{userID, tokenHash}, true)
@@ -390,25 +343,18 @@ func (h *Hub) presenceDropped(userID int64, tokenHash string) {
 	}
 }
 
-// presenceResyncPending reports whether userID's connection dropped a presence
-// frame since their last full ready.
 func (h *Hub) presenceResyncPending(userID int64, tokenHash string) bool {
 	return h.presenceFeed.repair.markedResync(resyncKey{userID, tokenHash})
 }
 
-// setPresenceResync marks (or clears) userID's pending resync and reports whether
-// one was pending.
 func (h *Hub) setPresenceResync(userID int64, tokenHash string, pending bool) bool {
 	return h.presenceFeed.repair.markResync(resyncKey{userID, tokenHash}, pending)
 }
 
-// deliverPresenceSnapshots sends every presence-stale client a full presence_batch:
-// each connected user not offline to that client, with live custom status, its
-// own true presence included; anyone absent is offline, so an invisible user reads
-// like one with no connection. Unsequenced like other targeted repair frames, and
-// droppable again (a still-full queue stays stale). Runs on the dispatch
-// goroutine, so it lands after every presence frame already sequenced and reads a
-// registry no older than them.
+// deliverPresenceSnapshots sends every presence-stale client a full presence_batch: each connected
+// user not offline to it, with live custom status, its own true presence included (anyone absent
+// reads offline, so an invisible user looks unconnected). Unsequenced and droppable again. Runs on
+// the dispatch goroutine, so it lands after every presence frame already sequenced.
 func (h *Hub) deliverPresenceSnapshots() {
 	h.mu.RLock()
 	var stale []*Client
@@ -443,16 +389,13 @@ func (h *Hub) deliverPresenceSnapshots() {
 	slog.Debug("hub: presence snapshots sent", "clients", len(stale))
 }
 
-// applyPresenceChoice records the presence a presence_update set and returns the
-// events to emit. A chosen status (online, dnd, invisible) is stamped on every
-// connection of the user, the sender last, so the newest choice wins the merge
-// (mergeLivePresence) whatever an older device chose; each connection keeps its
-// own idle tracking. An idle update is the sender's own auto-idle and stamps only
-// that connection.
-//
-// The outgoing presence follows the merged state, not the sender's raw status: an
-// idle device must not show the user idle while another is active. An auto-idle
-// that leaves the shown status and text unchanged emits nothing.
+// applyPresenceChoice records a presence_update and returns the events to emit. A chosen status
+// (online, dnd, invisible) is stamped on every connection of the user, the sender last, so the
+// newest choice wins the merge whatever an older device chose; each keeps its own idle tracking. An
+// idle update is the sender's own auto-idle and stamps only that connection.
+// The outgoing presence follows the merged state, not the sender's raw status (an idle device must
+// not show the user idle while another is active); an auto-idle that leaves the shown status
+// unchanged emits nothing.
 func (h *Hub) applyPresenceChoice(c *Client, p *livePresence, events []Event) []Event {
 	before := mergeLivePresence(h.clientsOf(c.userID))
 	if !isIdleStatus(p.status) {
@@ -467,8 +410,8 @@ func (h *Hub) applyPresenceChoice(c *Client, p *livePresence, events []Event) []
 	if isIdleStatus(p.status) && merged.status == before.status && merged.mobile == before.mobile && sameText(merged.customStatus, before.customStatus) {
 		return nil
 	}
-	// The handler's events are built from the sender's raw status and never carry the
-	// phone flag, so they stand only when the merged presence is not on the phone.
+	// The handler's events carry the sender's raw status and no phone flag, so they stand only when
+	// the merged presence is not on the phone.
 	if merged.status == p.status && !merged.mobile && sameText(merged.customStatus, p.customStatus) {
 		return events // the update is what is shown: the handler's events stand
 	}

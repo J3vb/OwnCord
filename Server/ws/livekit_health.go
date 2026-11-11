@@ -10,17 +10,16 @@ import (
 	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
-// liveKitHealthTTL is how long one LiveKit health verdict is reused. Voice joins,
-// metrics scrapes, diagnostics and /health all read the same verdict, so a burst of
-// joins or a scraper costs at most one room listing per window.
+// liveKitHealthTTL is how long one health verdict is reused: voice joins, metrics, diagnostics and
+// /health share it, so a burst costs at most one room listing per window.
 const liveKitHealthTTL = 5 * time.Second
 
-// liveKitHealthFailTTL is how long a failed verdict is reused: short, so one slow
-// probe does not refuse every voice join for the full window once LiveKit is back.
+// liveKitHealthFailTTL is how long a failed verdict is reused: short, so one slow probe does not
+// refuse every join once LiveKit is back.
 const liveKitHealthFailTTL = time.Second
 
-// liveKitHealthCache holds the last verdict and coalesces concurrent probes into
-// one. The zero value is ready to use.
+// liveKitHealthCache holds the last verdict and coalesces concurrent probes; the zero value is
+// ready.
 type liveKitHealthCache struct {
 	mu    syncutil.Ranked[lockRankLeaf]
 	at    time.Time
@@ -56,12 +55,9 @@ func (h *liveKitHealthCache) store(ok bool, err error) {
 	h.at, h.ok, h.err = h.clock(), ok, err
 }
 
-// CachedHealthCheck is HealthCheck behind a liveKitHealthTTL cache (liveKitHealthFailTTL
-// for a failure) with one probe in
-// flight: callers that find the cache cold while a probe runs wait for that probe
-// instead of starting their own. The probe is detached from the first caller's
-// cancellation (HealthCheck bounds it at 3 s), so a caller that gives up does not
-// fail the verdict for the others; a caller whose own ctx ends stops waiting.
+// CachedHealthCheck is HealthCheck behind the TTL cache with one probe in flight: callers finding
+// it cold wait for that probe. The probe is detached from the first caller's cancellation
+// (HealthCheck bounds it at 3 s), so a caller that gives up does not fail the verdict for others.
 func (c *LiveKitClient) CachedHealthCheck(ctx context.Context) (bool, error) {
 	if ok, err, hit := c.health.fresh(); hit {
 		return ok, err

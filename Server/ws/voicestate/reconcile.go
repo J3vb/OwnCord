@@ -5,9 +5,9 @@ import (
 	"github.com/J3vb/OwnCord/Server/ws/lockrank"
 )
 
-// ReconcileMisses is the voice reconciler's cross-tick memory: consecutive ticks an
-// exact SFU identity (user + join token) has been missing. Keyed by identity so a
-// rejoin starts a fresh count, and a member who left voice has its entry pruned.
+// ReconcileMisses is the reconciler's cross-tick memory: consecutive ticks an exact SFU
+// identity (user + join token) has been missing. Keyed by identity so a rejoin starts a
+// fresh count.
 type ReconcileMisses struct {
 	mu      syncutil.Ranked[lockrank.Leaf]
 	missing map[string]int
@@ -24,15 +24,15 @@ func (s *ReconcileMisses) Miss(identity string) int {
 	return s.missing[identity]
 }
 
-// Clear forgets identity (it was seen this tick, or has been reaped).
+// Clear forgets identity (seen this tick, or reaped).
 func (s *ReconcileMisses) Clear(identity string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.missing, identity)
 }
 
-// Prune drops counters whose identity no longer belongs to any voice_states row, so
-// a member who left voice does not leak an entry for the process lifetime.
+// Prune drops counters whose identity no longer belongs to any voice_states row, so none leaks for the
+// process lifetime.
 func (s *ReconcileMisses) Prune(live map[string]struct{}) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

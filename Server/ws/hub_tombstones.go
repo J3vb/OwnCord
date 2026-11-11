@@ -13,13 +13,12 @@ import (
 	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
-// tombstoneMinAge is how long a tombstone outlives its purge at least. After the
-// purge it only drops a late frame from a producer that read the purged rows before
-// the purge, which reaches the hub within moments; an hour is far past any request.
+// tombstoneMinAge is how long a tombstone outlives its purge at least: it only drops a late frame
+// from a producer that read the purged rows before the purge, which reaches the hub within moments.
 const tombstoneMinAge = time.Hour
 
-// tombstoneBatch is one purge's ids, installed at the hub seq seq and the
-// wall-clock time at, in the lookup map set.
+// tombstoneBatch is one purge's ids, installed at hub seq seq and wall-clock time at, in lookup map
+// set.
 type tombstoneBatch struct {
 	seq uint64
 	at  time.Time
@@ -27,25 +26,18 @@ type tombstoneBatch struct {
 	ids []int64
 }
 
-// replayPurgeState holds the replay purge's tombstones and the lock that keeps
-// cold-tier reads out of an in-progress purge.
-//
-// users (erased accounts) and messages (retention-swept messages) map each
-// tombstoned id to the seq of the latest batch that installed it; batches lists the
-// installs oldest first, and since seq and time only grow, expiry pops from the
-// front. All three are guarded by seqMu: installed under it and read under it by
-// every sequencing path, so a frame naming a tombstoned id is dropped from the
-// moment the purge's in-memory step releases seqMu. A batch expires once both
-// tombstoneMinAge has passed and the hub has sequenced more frames past it than the
-// ring and the cold tier can replay.
-//
-// mu is held for writing across a whole purge, from the ring drop to the
-// persisted-row delete. A cold-tier read (purgeGuardedStore) that finds it held, or
-// a purge waiting for it, fails at once instead of waiting, so a resume falls
-// through to the full ready rather than reading rows the ring has dropped but the
-// database still holds. A purge that fails after its ring drop leaves its ids in
-// unfinished, and cold reads keep failing until a retry succeeds. Lock order: mu
-// before seqMu; no path takes mu while holding seqMu.
+// replayPurgeState holds the replay purge's tombstones and the lock that keeps cold-tier reads out
+// of an in-progress purge.
+// users and messages map each tombstoned id to the seq of the latest batch installing it; batches
+// lists installs oldest first, so expiry pops from the front. All are guarded by seqMu (installed
+// and read under it by every sequencing path), so a frame naming a tombstoned id is dropped from
+// the moment the purge's in-memory step releases seqMu. A batch expires once tombstoneMinAge has
+// passed and the hub has sequenced more frames than the ring and cold tier can replay.
+// mu is held for writing across a whole purge (ring drop to persisted-row delete). A cold-tier read
+// (purgeGuardedStore) that finds it held, or a purge waiting, fails at once so a resume takes the
+// full ready rather than read rows the ring dropped but the database still holds. A purge failing
+// after its ring drop leaves its ids in unfinished, and cold reads keep failing until a retry
+// succeeds. Lock order: mu before seqMu; no path takes mu while holding seqMu.
 type replayPurgeState struct {
 	mu       syncutil.RankedRW[lockRankSerialiser]
 	waiting  atomic.Int32
@@ -54,20 +46,18 @@ type replayPurgeState struct {
 	batches  []tombstoneBatch
 	now      func() time.Time
 
-	// live is len(batches), kept so the sequencing path can ask whether any tombstone
-	// exists without taking seqMu. Written under seqMu with batches, read lock-free.
+	// live is len(batches), so the sequencing path can ask whether any tombstone exists without
+	// seqMu. Written under seqMu, read lock-free.
 	live atomic.Int64
-	// lockedParses counts frames parsed under seqMu because they could not be parsed
-	// before it (a window built under the lock, or a tombstone installed in between).
+	// lockedParses counts frames parsed under seqMu because they could not be parsed before it.
 	lockedParses atomic.Uint64
 
 	unfinishedUsers    map[int64]struct{}
 	unfinishedMessages map[int64]struct{}
 }
 
-// lock takes mu for a purge, giving up when ctx ends. It polls rather than
-// blocks so a purge can return on its own deadline; waiting turns new cold
-// reads away meanwhile, so a stream of reconnects cannot starve it.
+// lock takes mu for a purge, giving up when ctx ends. It polls rather than blocks so a purge can
+// return on its own deadline; waiting turns new cold reads away, so reconnects cannot starve it.
 func (t *replayPurgeState) lock(ctx context.Context) error {
 	t.waiting.Add(1)
 	defer t.waiting.Add(-1)
@@ -81,8 +71,8 @@ func (t *replayPurgeState) lock(ctx context.Context) error {
 	return nil
 }
 
-// tryColdRead takes mu for a cold-tier read, or reports that a purge is
-// running, waiting or unfinished. The caller releases mu with RUnlock.
+// tryColdRead takes mu for a cold-tier read, or reports a purge is running, waiting or unfinished.
+// The caller RUnlocks.
 func (t *replayPurgeState) tryColdRead() bool {
 	if t.waiting.Load() > 0 || !t.mu.TryRLock() {
 		return false
@@ -94,7 +84,7 @@ func (t *replayPurgeState) tryColdRead() bool {
 	return true
 }
 
-// settlePurge records whether a purge of ids finished. Caller holds mu.
+// settlePurge records whether a purge of ids finished; the caller holds mu.
 func settlePurge(set *map[int64]struct{}, ids []int64, finished bool) {
 	if finished {
 		for _, id := range ids {
@@ -117,7 +107,7 @@ func (t *replayPurgeState) clock() time.Time {
 	return time.Now()
 }
 
-// add installs ids into set as one batch at seq. Caller holds seqMu.
+// add installs ids into set as one batch at seq; the caller holds seqMu.
 func (t *replayPurgeState) add(set *map[int64]uint64, seq uint64, ids ...int64) {
 	if *set == nil {
 		*set = make(map[int64]uint64, len(ids))
@@ -129,9 +119,8 @@ func (t *replayPurgeState) add(set *map[int64]uint64, seq uint64, ids ...int64) 
 	t.live.Add(1)
 }
 
-// expire pops every batch that is older than tombstoneMinAge and more than
-// horizon frames behind seq, removing each of its ids no later batch has
-// installed again. Caller holds seqMu.
+// expire pops every batch older than tombstoneMinAge and more than horizon frames behind seq,
+// removing ids no later batch reinstalled. Caller holds seqMu.
 func (t *replayPurgeState) expire(seq, horizon uint64) (expired int) {
 	cutoff := t.clock().Add(-tombstoneMinAge)
 	for len(t.batches) > 0 {
@@ -160,8 +149,6 @@ func (t *replayPurgeState) erased(userID int64) bool {
 	return ok
 }
 
-// expireReplayTombstones runs tombstone expiry from the stale tick. The
-// horizon is every frame the ring and the cold tier could replay.
 func (h *Hub) expireReplayTombstones() {
 	h.seqMu.Lock()
 	start := time.Now()
@@ -176,16 +163,14 @@ func (h *Hub) expireReplayTombstones() {
 	}
 }
 
-// preParsedRefs is a frame's refs parsed before seqMu was taken.
 type preParsedRefs struct {
 	refs frameRefs
 	ok   bool
 }
 
-// parseRefsBeforeLock parses msg ahead of the sequencing lock when a tombstone
-// exists, so the lock is held for set lookups only. It returns nil when there is
-// nothing to check; dropsForTombstonesWith then parses under the lock if a
-// tombstone has appeared since. Runs without seqMu.
+// parseRefsBeforeLock parses msg ahead of seqMu when a tombstone exists, so the lock holds set
+// lookups only; nil when there is nothing to check (dropsForTombstonesWith then parses under the
+// lock if one appeared since). Runs without seqMu.
 func (h *Hub) parseRefsBeforeLock(msg []byte) *preParsedRefs {
 	if h.tombstones.live.Load() == 0 {
 		return nil
@@ -194,18 +179,16 @@ func (h *Hub) parseRefsBeforeLock(msg []byte) *preParsedRefs {
 	return &preParsedRefs{refs: refs, ok: ok}
 }
 
-// dropsForTombstones reports whether msg names an erased user or a message a
-// retention sweep removed, and so must not be sequenced: a producer that read the
-// rows before the purge can still hand the hub a frame after it. The frame is parsed
-// once however many tombstones; with none it parses nothing. Caller holds seqMu.
+// dropsForTombstones reports whether msg names an erased user or a swept message and so must not be
+// sequenced (a producer that read the rows before the purge can still hand the hub a frame after
+// it). Parsed once however many tombstones; none parses nothing. Caller holds seqMu.
 func (h *Hub) dropsForTombstones(msg []byte) bool {
 	return h.dropsForTombstonesWith(msg, nil)
 }
 
-// dropsForTombstonesWith is dropsForTombstones with the refs of msg, when the
-// caller parsed them before taking seqMu. Without them (nil) it parses here. The
-// emptiness is judged under the lock either way, so a tombstone installed after
-// the caller's check still drops the frame. Caller holds seqMu.
+// dropsForTombstonesWith is dropsForTombstones with refs the caller parsed before seqMu (nil parses
+// here). Emptiness is judged under the lock either way, so a tombstone installed after the caller's
+// check still drops the frame. Caller holds seqMu.
 func (h *Hub) dropsForTombstonesWith(msg []byte, pre *preParsedRefs) bool {
 	t := &h.tombstones
 	if len(t.users) == 0 && len(t.messages) == 0 {
@@ -231,9 +214,6 @@ func (h *Hub) dropsForTombstonesWith(msg []byte, pre *preParsedRefs) bool {
 	return false
 }
 
-// frameRefs is the part of a wrapped broadcast frame that can name a user or
-// a message: the Go twin of db.EventNamesUserPredicate and
-// db.EventNamesMessagePredicate over the same envelope shape.
 type frameRefs struct {
 	Type    string `json:"type"`
 	Payload struct {
@@ -243,11 +223,9 @@ type frameRefs struct {
 		UserID     *int64  `json:"user_id"`
 		FromUserID *int64  `json:"from_user_id"`
 		Mentions   []int64 `json:"mentions"`
-		// A call log row lists the users who joined the call.
-		Call *struct {
+		Call       *struct {
 			Participants []int64 `json:"participants"`
 		} `json:"call"`
-		// A group add or remove row names the member it concerns.
 		GroupEvent *struct {
 			TargetUserID *int64 `json:"target_user_id"`
 		} `json:"group_event"`
@@ -260,7 +238,6 @@ type frameRefs struct {
 		Members []struct {
 			UserID int64 `json:"user_id"`
 		} `json:"members"`
-		// A reply frame embeds its parent's snippet.
 		Referenced *struct {
 			ID   int64 `json:"id"`
 			User *struct {
@@ -270,9 +247,8 @@ type frameRefs struct {
 	} `json:"payload"`
 }
 
-// parseFrameRefs decodes data once; an unparseable frame names nothing. A
-// field of an unexpected JSON type is skipped and the rest still decoded,
-// so one odd field does not hide the ids the other fields carry.
+// parseFrameRefs decodes data once; an unparseable frame names nothing. A field of an unexpected
+// JSON type is skipped so one odd field does not hide the ids in the others.
 func parseFrameRefs(data []byte) (frameRefs, bool) {
 	var f frameRefs
 	var typeErr *json.UnmarshalTypeError
@@ -282,9 +258,8 @@ func parseFrameRefs(data []byte) (frameRefs, bool) {
 	return f, true
 }
 
-// userIn returns the first user the frame names that is a key of set:
-// payload.user_id, payload.from_user_id, payload.user.id, the replied-to
-// message's author, payload.mentions, payload.call.participants, payload.group_event.target_user_id, payload.updates[].user_id or payload.members[].user_id.
+// userIn returns the first user the frame names that is a key of set (user ids in the payload,
+// replied-to author, mentions, call participants, group_event target, updates[] and members[]).
 func userIn[V any](f *frameRefs, set map[int64]V) (int64, bool) {
 	pl := &f.Payload
 	var ids []int64
@@ -323,10 +298,8 @@ func userIn[V any](f *frameRefs, set map[int64]V) (int64, bool) {
 
 func (f *frameRefs) userIn(set map[int64]uint64) (int64, bool) { return userIn(f, set) }
 
-// messageIn reports whether the frame is a message-family frame about a key
-// of set: payload.id (chat_message), payload.message_id (chat_edited,
-// chat_deleted, reaction_update, poll_update), one of payload.ids (chat_bulk_deleted), or
-// the replied-to message.
+// messageIn reports whether the frame is a message-family frame about a key of set (payload.id,
+// message_id, ids[], or the replied-to message).
 func messageIn[V any](f *frameRefs, set map[int64]V) bool {
 	if _, ok := messageFamily[f.Type]; !ok {
 		return false

@@ -75,6 +75,31 @@
   display: none;
 }
 
+/* Grid layout: the packer sets each tile's left, top, width and height. */
+.video-grid--packed > .video-cell {
+  position: absolute;
+  transition:
+    left 0.15s,
+    top 0.15s,
+    width 0.15s,
+    height 0.15s;
+}
+@media (prefers-reduced-motion: reduce) {
+  .video-grid--packed > .video-cell {
+    transition: none;
+  }
+}
+/* With the tiles out of the flow, the exit control keeps its corner. */
+.video-grid--packed > .video-grid__exit {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 5;
+}
+.video-grid .video-cell.video-cell--no-room {
+  display: none;
+}
+
 .video-cell {
   position: relative;
   overflow: hidden;

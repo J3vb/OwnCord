@@ -16,19 +16,14 @@ import (
 )
 
 // memberCache is the ready payload's shared member-list read: a restart herd builds
-// hundreds of ready payloads at once, and each would otherwise run its own
-// ListMembers (the whole roster, joined and sorted, per socket).
-//
-// The cached list is tagged with the member generation it was read at, a counter
-// SQLite triggers bump in the same commit as every write that can change
-// ListMembers' result. It is reused only while the generation has not moved and no
-// temporary ban it hides has lapsed. Never a TTL: a client that registered after a
-// join's broadcast would miss the join for as long as a TTL served it an older list.
-//
-// users.status is outside the generation, since every connect writes it and
-// a herd would then never share a read. presentableMembers overlays each
-// connected member's live status instead, so a cached row's status never
-// shows: a member whose connection has not stamped one yet shows as offline.
+// hundreds of ready payloads at once, each would otherwise run its own ListMembers. The list
+// is tagged with the member generation it was read at (bumped by SQLite triggers in the same
+// commit as every write that can change ListMembers' result) and reused only while the
+// generation has not moved and no temporary ban it hides has lapsed. Never a TTL: a client
+// registering after a join's broadcast would miss the join for as long as a TTL served an
+// older list. users.status is outside the generation (every connect writes it, so a herd
+// would never share a read); presentableMembers overlays each connected member's live
+// status, so a cached row's status never shows.
 type memberCache struct {
 	mu      syncutil.Ranked[lockRankLeaf]
 	filled  bool
@@ -38,16 +33,15 @@ type memberCache struct {
 	flight  singleflight.Group
 }
 
-// memberRoster is one generation's member list with each member's JSON encoded once,
-// so a ready writes it instead of re-encoding the whole roster per viewer.
+// memberRoster is one generation's member list with each member's JSON encoded once, so a ready does not
+// re-encode the roster per viewer.
 type memberRoster struct {
 	members []db.MemberSummary
 	enc     []memberJSON // enc[i] encodes members[i]
 }
 
-// memberJSON is one member's encoding split around the two fields
-// presentableMembers decides per viewer: head, the status, mid, then the
-// custom_status (last), then "}" is json.Marshal of the presented member.
+// memberJSON is one member's encoding split around the two fields presentableMembers
+// decides per viewer: head, the status, mid, the custom_status (last), then "}".
 type memberJSON struct {
 	head   []byte // `{"id":…,"status":`
 	mid    []byte // `,"role":…,"custom_status":`
@@ -59,10 +53,9 @@ var (
 	nullCustomTail   = []byte(`"custom_status":null}`)
 )
 
-// encodeRoster encodes every member once. The split points are found in
-// json.Marshal's own output, so the verbatim parts follow MemberSummary's
-// tags. A string value cannot hold emptyStatusField: its quotes would be
-// escaped.
+// encodeRoster encodes every member once. Split points are found in json.Marshal's own
+// output so the verbatim parts follow MemberSummary's tags; a string value cannot hold
+// emptyStatusField (its quotes would be escaped).
 func encodeRoster(members []db.MemberSummary) (*memberRoster, error) {
 	enc := make([]memberJSON, len(members))
 	for i, m := range members {
@@ -87,15 +80,13 @@ func encodeRoster(members []db.MemberSummary) (*memberRoster, error) {
 	return &memberRoster{members: members, enc: enc}, nil
 }
 
-// sqliteNow renders the current instant as ListMembers' ban-lapse comparison
-// renders SQLite's clock, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), so a lapse
-// ends the cached list on the same second a fresh read would include it.
+// sqliteNow renders the current instant as ListMembers' ban-lapse comparison renders
+// SQLite's clock, so a lapse ends the cached list on the same second a fresh read would include it.
 func sqliteNow() string {
 	return time.Now().UTC().Format(dbtime.ISOLayout)
 }
 
-// lookup returns the cached roster when it is at least as new as gen and no
-// ban it hides has lapsed since.
+// lookup returns the cached roster when at least as new as gen and no ban it hides has lapsed.
 func (c *memberCache) lookup(gen int64) (*memberRoster, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -105,9 +96,8 @@ func (c *memberCache) lookup(gen int64) (*memberRoster, bool) {
 	return c.roster, true
 }
 
-// store keeps roster as the cached one unless a read at a newer generation
-// already landed: a slow read that started before a write must not replace
-// the list read after it.
+// store keeps roster unless a read at a newer generation already landed: a slow read that
+// started before a write must not replace the list read after it.
 func (c *memberCache) store(gen int64, lapseAt string, roster *memberRoster) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -117,17 +107,11 @@ func (c *memberCache) store(gen int64, lapseAt string, roster *memberRoster) {
 	c.filled, c.gen, c.lapseAt, c.roster = true, gen, lapseAt, roster
 }
 
-// readyMembers returns the member roster for one ready payload, shared with
-// every concurrent and later ready at the same member generation. The roster
-// is shared: callers copy before changing an element (presentableMembers
-// does).
-//
-// The generation is read before the list, so the list is never older than
-// its tag: a write committing in between makes the list newer than the tag
-// claims, which costs one extra read later and never a stale one. Callers
-// that read the same generation share one flight: a caller that read
-// generation g started after every member write up to g committed, and the
-// flight for g read its list after that too.
+// readyMembers returns the roster for one ready, shared with every concurrent and later
+// ready at the same generation; callers copy before changing an element. The generation is
+// read before the list, so the list is never older than its tag (a write in between costs
+// one extra read, never a stale one). Callers that read the same generation share one
+// flight: a caller that read generation g started after every write up to g committed.
 func (h *Hub) readyMembers(ctx context.Context, database ReadySnapshotReader) (*memberRoster, error) {
 	gen, err := database.MemberGeneration(ctx)
 	if err != nil {
@@ -137,11 +121,11 @@ func (h *Hub) readyMembers(ctx context.Context, database ReadySnapshotReader) (*
 		return roster, nil
 	}
 	v, err, _ := h.members.flight.Do(strconv.FormatInt(gen, 10), func() (any, error) {
-		// Detached from the first caller's handshake: that client giving up
-		// mid-herd must not fail every other ready waiting on this read.
+		// Detached from the first caller's handshake: that client giving up must not fail every other ready
+		// waiting on this read.
 		readCtx := context.WithoutCancel(ctx)
-		// Before the list, so a ban lapsing between the two reads ends the
-		// cached list early rather than never.
+		// Before the list, so a ban lapsing between the two reads ends the cached list early rather than
+		// never.
 		lapseAt, err := database.NextMemberBanLapse(readCtx)
 		if err != nil {
 			return nil, err

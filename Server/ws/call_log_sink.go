@@ -6,9 +6,8 @@ import (
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// callEditedPayload is the chat_edited frame that ends a call log row. Unlike
-// an edit it carries edited_at null, so a client does not mark the row
-// "(edited)", and it replaces the row's call block.
+// callEditedPayload is the chat_edited frame that ends a call log row: edited_at
+// is null so the client does not mark it "(edited)".
 type callEditedPayload struct {
 	MessageID        int64      `json:"message_id"`
 	ChannelID        int64      `json:"channel_id"`
@@ -30,10 +29,9 @@ func newCallBlock(ev service.CallLogEvent) *callBlock {
 	return &callBlock{StartedAt: ev.Call.StartedAt, EndedAt: ev.Call.EndedAt, Participants: parts}
 }
 
-// CallLogCreated delivers a new call log row: a dm_channel_open for each
-// recipient whose DM was closed, then the sequenced chat_message to the DM
-// audience. It implements service.CallLogSink and holds no lock of its own;
-// sendSequencedToUsers takes the sequence lock itself.
+// CallLogCreated delivers a new call log row: dm_channel_open for recipients
+// whose DM was closed, then the sequenced chat_message. Takes no lock itself;
+// sendSequencedToUsers takes the sequence lock.
 func (h *Hub) CallLogCreated(ctx context.Context, ev service.CallLogEvent) {
 	if ev.Author == nil {
 		return
@@ -62,8 +60,8 @@ func (h *Hub) CallLogCreated(ctx context.Context, ev service.CallLogEvent) {
 	h.EmitEvents(ctx, events)
 }
 
-// CallLogEnded delivers the end of a call log row as a sequenced chat_edited
-// with edited_at null to the DM audience.
+// CallLogEnded delivers the end of a call log row as a sequenced chat_edited with edited_at null to
+// the DM audience.
 func (h *Hub) CallLogEnded(ctx context.Context, ev service.CallLogEvent) {
 	frame := buildJSON(wsMsg{
 		Type: MsgTypeChatEdited,

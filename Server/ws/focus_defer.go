@@ -9,14 +9,13 @@ import (
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// focusDrainInterval is how long the drain goroutine waits between attempts to
-// spend a freed focus slot: one slot of the focusRateLimit-per-focusRateWindow
-// budget. A package var so tests can shorten it.
+// focusDrainInterval is the wait between attempts to spend a freed focus slot
+// (one of focusRateLimit per focusRateWindow); a var so tests can shorten it.
 var focusDrainInterval = focusRateWindow / focusRateLimit
 
-// applyFocusResult applies a handler's SetChannelID. A channel_focus apply is
-// serialised against the deferred drain by focusMu and supersedes any pending
-// deferred intent, so a stale deferred focus can never overwrite it.
+// applyFocusResult applies a handler's SetChannelID. It is serialised against the
+// deferred drain by focusMu and supersedes any pending deferred intent, so a
+// stale deferred focus never overwrites it.
 func (h *Hub) applyFocusResult(c *Client, msgType string, chID int64) {
 	c.focusMu.Lock()
 	defer c.focusMu.Unlock()
@@ -29,8 +28,6 @@ func (h *Hub) applyFocusResult(c *Client, msgType string, chID int64) {
 	h.applySetChannelID(c, chID)
 }
 
-// deferChannelFocus records chID as c's latest focus intent (the budget was
-// spent) and makes sure a drain goroutine is running to apply it.
 func (h *Hub) deferChannelFocus(c *Client, chID int64, reqID string, read bool) {
 	c.mu.Lock()
 	c.focusSeq++
@@ -48,8 +45,6 @@ func (h *Hub) deferChannelFocus(c *Client, chID int64, reqID string, read bool) 
 	}
 }
 
-// drainDeferredFocus applies c's pending deferred focus once the limiter
-// allows. It exits when nothing is pending, the client is gone, or ctx ends.
 func (h *Hub) drainDeferredFocus(ctx context.Context, c *Client) {
 	for {
 		timer := time.NewTimer(focusDrainInterval)
@@ -69,9 +64,8 @@ func (h *Hub) drainDeferredFocus(ctx context.Context, c *Client) {
 }
 
 // drainFocusOnce makes one attempt; false means the goroutine must exit (the
-// drain flag has been cleared). The service call runs outside focusMu so a
-// readPump focus apply never waits on this attempt's database work; focusMu
-// covers only the supersession check and the apply.
+// drain flag is cleared). The service call runs outside focusMu so a readPump
+// apply never waits on this attempt's database work.
 func (h *Hub) drainFocusOnce(ctx context.Context, c *Client) bool {
 	if c.isSendClosed() || ctx.Err() != nil {
 		c.mu.Lock()
@@ -84,9 +78,8 @@ func (h *Hub) drainFocusOnce(ctx context.Context, c *Client) bool {
 	chID, reqID, seq := c.pendingFocusChID, c.pendingFocusReqID, c.pendingFocusSeq
 	read := c.pendingFocusRead
 	if chID == 0 {
-		// Cleared under the same c.mu hold as the check, so a concurrent
-		// deferral either already set pending (seen above) or sees the flag
-		// false and starts a fresh drain.
+		// Cleared under the same c.mu hold as the check, so a concurrent deferral
+		// either set pending already or sees false and starts a fresh drain.
 		c.focusDrainActive = false
 		c.mu.Unlock()
 		return false
@@ -105,8 +98,8 @@ func (h *Hub) drainFocusOnce(ctx context.Context, c *Client) bool {
 		return true
 	}
 
-	// A deferred read:false focus must stay read:false: it admits and
-	// subscribes without marking the channel read.
+	// A deferred read:false focus stays read:false: it subscribes without marking
+	// the channel read.
 	var err error
 	if read {
 		_, err = d.ChannelSvc.HandleChannelFocus(ctx, c.userID, chID)
@@ -114,9 +107,9 @@ func (h *Hub) drainFocusOnce(ctx context.Context, c *Client) bool {
 		_, err = d.ChannelSvc.AdmitChannelFocus(ctx, c.userID, chID)
 	}
 	if err != nil {
-		// Forbidden or any other error: drop like the handler, but only if no
-		// newer intent replaced this one meanwhile; a replaced intent gets no
-		// error frame for a channel the client has already left.
+		// On error, drop like the handler, but only if no newer intent replaced
+		// this one; a replaced intent gets no error frame for a channel the
+		// client has left.
 		c.mu.Lock()
 		current := c.pendingFocusSeq == seq && c.focusSeq == seq
 		if current {
@@ -144,8 +137,8 @@ func (h *Hub) drainFocusOnce(ctx context.Context, c *Client) bool {
 }
 
 // supersedeDeferredFocus drops c's pending deferred focus: a newer in-budget
-// channel_focus arrived but set no channel (it failed or was refused), and the
-// older deferred channel must not land after it.
+// channel_focus that set no channel (failed or refused) must not be overtaken by
+// the older deferred one.
 func supersedeDeferredFocus(c *Client) {
 	c.mu.Lock()
 	c.focusSeq++

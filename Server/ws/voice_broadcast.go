@@ -15,25 +15,23 @@ const (
 	voiceCameraWindow         = time.Second
 	voiceScreenshareRateLimit = 2
 	voiceScreenshareWindow    = time.Second
-	// Shared by the four voice moderation commands; each fans a voice_state or
-	// voice_leave broadcast out to everyone who can see the channel.
+	// Shared by the four voice moderation commands; each fans a voice_state or voice_leave out to everyone
+	// who can see the channel.
 	voiceModRateLimit = 5
 	voiceModWindow    = time.Second
-	// Extra per-target limit on a voice_mod_move that relies on the missing rank rule
-	// (the target ranks at or above the mover).
+	// Extra per-target limit on a voice_mod_move that relies on the missing rank rule.
 	voiceModMoveTargetLimit  = 3
 	voiceModMoveTargetWindow = 30 * time.Second
 )
 
-// voiceQualities maps accepted voice quality presets to their target bitrate in
-// bits/s; the single source of truth (voice_join.go validates against its keys).
+// voiceQualities maps accepted voice quality presets to target bitrate in bits/s; the single source of truth
+// (voice_join.go validates against its keys).
 var voiceQualities = map[string]int{
 	"low":    32000,
 	"medium": 64000,
 	"high":   128000,
 }
 
-// qualityBitrate returns the target audio bitrate in bits/s for a quality preset.
 func qualityBitrate(quality string) int {
 	if bitrate, ok := voiceQualities[quality]; ok {
 		return bitrate
@@ -41,18 +39,13 @@ func qualityBitrate(quality string) int {
 	return voiceQualities["medium"]
 }
 
-// voiceEventAudience resolves who must receive a voice_state / voice_leave for
-// channelID: the connected clients whose current role may READ it, unioned with
-// the room's own participants, then narrowed by filterDMAudience for a one-to-one DM.
-//
-// The participants are always included because voice membership can outlive
-// READ_MESSAGES (a mid-call revocation, or a DM call after the DM was closed): the
-// READ filter would exclude a live participant, whose client would keep a stale E2EE
-// key holder, stalling rotation and locking new joiners out until e2ee_timeout.
-//
-// subjectID is whose voice state this event is about: a stranger's DM voice call
-// must stay as invisible to a recipient who has not accepted the message request as
-// their chat and typing are.
+// voiceEventAudience resolves who must receive a voice_state / voice_leave for channelID:
+// connected clients whose role may READ it, unioned with the room's participants, narrowed
+// by filterDMAudience for a one-to-one DM. Participants are always included because
+// membership can outlive READ_MESSAGES (a mid-call revocation, or a DM call after the DM
+// closed); excluding them would leave their client with a stale E2EE key holder, stalling
+// rotation until e2ee_timeout. subjectID is whose state this is: a stranger's DM voice call
+// must stay as invisible to a recipient who has not accepted the message request as chat and typing are.
 func (h *Hub) voiceEventAudience(ctx context.Context, channelID, subjectID int64) []int64 {
 	audience := h.channelReadAudience(ctx, channelID)
 	seen := make(map[int64]struct{}, len(audience))
@@ -70,14 +63,12 @@ func (h *Hub) voiceEventAudience(ctx context.Context, channelID, subjectID int64
 	return h.filterDMAudience(ctx, channelID, subjectID, audience)
 }
 
-// filterDMAudience narrows audience, when channelID is a one-to-one DM, to
-// subjectID (always kept) plus every other member who trusts subjectID. Non-DM
-// channels and group DMs are returned as-is. A channel or group lookup error fails
-// CLOSED to subjectID alone: falling back to the full audience would leak a
-// stranger's voice presence to everyone in the room.
+// filterDMAudience narrows audience, for a one-to-one DM, to subjectID (always kept) plus
+// every other member who trusts subjectID; non-DM channels and group DMs are returned as-is.
+// A lookup error fails CLOSED to subjectID alone: the full audience would leak a stranger's
+// voice presence to the room.
 func (h *Hub) filterDMAudience(ctx context.Context, channelID, subjectID int64, audience []int64) []int64 {
-	// Bare test hubs with no DB have no readers to consult (the same guard
-	// channelReadAudienceImpl uses).
+	// Bare test hubs with no DB have no readers (same guard as channelReadAudienceImpl).
 	if h.db == nil {
 		return audience
 	}
@@ -108,40 +99,32 @@ func (h *Hub) filterDMAudience(ctx context.Context, channelID, subjectID int64, 
 	return filtered
 }
 
-// broadcastVoiceEvent enqueues a voice_state / voice_leave message for
-// voiceEventAudience(channelID, subjectID). Not BroadcastToAll, which would hand
-// every client the membership and camera/mute state of voice channels that
-// channel_overrides hides from their role (buildReady filters them). Tagging the
-// event with its real channel id also makes reconnect replay filter it.
-//
-// The audience is resolved here, on the caller's goroutine, so the hub's dispatch
-// loop never blocks on permission lookups.
+// broadcastVoiceEvent enqueues a voice_state / voice_leave for voiceEventAudience. Not
+// BroadcastToAll, which would expose voice channels that channel_overrides hide from a
+// role (buildReady filters them). Tagging the real channel id also makes reconnect replay
+// filter it. The audience is resolved on the caller's goroutine so the dispatch loop never
+// blocks on permission lookups.
 func (h *Hub) broadcastVoiceEvent(ctx context.Context, channelID, subjectID int64, msg []byte) {
 	mark := h.audienceMark()
 	h.broadcastChannelScopedTo(channelID, msg, h.voiceEventAudience(ctx, channelID, subjectID), mark, "voice event")
 }
 
-// sendVoiceEventSync stamps and delivers a voice_state / voice_leave for
-// voiceEventAudience(channelID, subjectID) synchronously on the caller's goroutine
-// instead of enqueuing it on h.broadcast. voiceJoinComplete sends the joiner four
-// other frames (voice_token, existing participants' voice_state, E2EE peer keys,
-// voice_config) directly via c.sendMsg in program order; a joiner's own voice_state
-// through the async queue would have no fixed position among them. Delivery matches
-// deliverBroadcast's recipients path (seqMu, nextSeq, the replay buffer,
-// SendToUser); only the plugin dispatch hook is skipped, as SequencedDMEvent does
-// for every synchronous per-recipient send (emit.go).
+// sendVoiceEventSync delivers a voice_state / voice_leave synchronously on the caller's
+// goroutine instead of via h.broadcast. voiceJoinComplete sends the joiner four other frames
+// directly in program order; the joiner's own voice_state through the async queue would have
+// no fixed position among them. Delivery matches deliverBroadcast's recipients path (seqMu,
+// nextSeq, replay buffer, SendToUser); only the plugin dispatch hook is skipped, as
+// SequencedDMEvent does (emit.go).
 func (h *Hub) sendVoiceEventSync(ctx context.Context, channelID, subjectID int64, msg []byte) {
 	mark := h.audienceMark()
 	h.sendSequencedToUsers(channelID, h.voiceEventAudience(ctx, channelID, subjectID), mark, msg)
 }
 
-// broadcastVoiceEventWithLeaver is broadcastVoiceEvent guaranteeing leaverID is in
-// the audience even though the caller already cleared their client-side voice state,
-// which hides them from the participant union. Every path that tears down a
-// participant before the voice_leave goes out needs this: voice membership can
-// outlive READ_MESSAGES, so a leaver without it would never learn the server ended
-// their call. Mirrors CleanupVoiceForChannel's per-batch leaver union. leaverID is
-// also the DM-audience subject: the leaver always sees their own leave.
+// broadcastVoiceEventWithLeaver is broadcastVoiceEvent guaranteeing leaverID is in the
+// audience even though their client voice state is already cleared (which hides them from
+// the participant union). Every teardown before voice_leave needs this: membership can
+// outlive READ_MESSAGES, and a leaver without it would never learn the server ended their
+// call. Mirrors CleanupVoiceForChannel's leaver union. leaverID is also the DM-audience subject.
 func (h *Hub) broadcastVoiceEventWithLeaver(ctx context.Context, channelID int64, msg []byte, leaverID int64) {
 	mark := h.audienceMark()
 	audience := h.voiceEventAudience(ctx, channelID, leaverID)
@@ -151,8 +134,8 @@ func (h *Hub) broadcastVoiceEventWithLeaver(ctx context.Context, channelID int64
 	h.broadcastChannelScopedTo(channelID, msg, audience, mark, "voice event")
 }
 
-// VoiceSessionCount returns the number of connections currently in a voice
-// channel (an account is in at most one call, so also the number of users).
+// VoiceSessionCount returns the number of connections in a voice channel (one call per account, so also
+// users).
 func (h *Hub) VoiceSessionCount() int {
 	h.mu.RLock()
 	defer h.mu.RUnlock()

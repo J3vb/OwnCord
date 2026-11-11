@@ -13,41 +13,29 @@ import (
 )
 
 // channel_activity is the unread hint for a readable channel the reader has not
-// focused: their chat_message broadcasts never reach them, so the sidebar would
-// wait for the next ready. A hub-owned coalescer records each committed non-DM
-// send and a worker flushes the pending map on a leading-edge window (the first
-// message after a quiet window flushes at once, later ones wait). One flush
-// resolves each channel's audience once and sends each recipient one frame listing
-// every channel that changed for them.
-//
-// The frame is unsequenced and goes straight to the recipient's low queue
-// (sendLowMsg), like typing and mention_count. It never goes through broadcast, so
-// it takes no seq or cseq, is never replayed or persisted, and a full queue drops it
-// without marking loss or forcing a full ready. ready and mention_count stay
-// authoritative.
-//
-// Lock order: activity.mu is a leaf; nothing is acquired while held and it is never
-// taken under seqMu, h.mu, ps.mu or any c.mu. note runs on the readPump goroutine
-// with no hub lock. flush swaps the map out under mu, releases it, then resolves,
-// taking h.mu/ps.mu read locks and c.mu one at a time. flushMu serializes flushes
-// and sits above every other lock: flush and forget take it (forget before mu), so a
-// purge returns only after an in-progress flush finished and cannot send an erased
-// id afterwards. note never takes it, and neither purge entry point holds a hub lock
-// calling forget. markRead takes mu alone and never waits on a flush. Nothing here
-// takes seqMu or runs on the dispatch goroutine.
+// focused: their chat_message broadcasts never reach them. A hub-owned coalescer
+// records each committed non-DM send and a worker flushes on a leading-edge
+// window, sending each recipient one frame listing every changed channel.
+// The frame goes straight to the recipient's low queue (sendLowMsg): no seq or
+// cseq, never replayed or persisted, and a full queue drops it without marking
+// loss. ready and mention_count stay authoritative.
+// Lock order: activity.mu is a leaf, never taken under seqMu, h.mu, ps.mu or any
+// c.mu; flush swaps the map out under mu, releases it, then takes h.mu/ps.mu read
+// locks and c.mu one at a time. flushMu serializes flushes and sits above every
+// other lock (flush and forget take it, forget before mu), so a purge returns
+// only after an in-progress flush finished and cannot send an erased id
+// afterwards. note and markRead never take it; no purge entry point holds a hub
+// lock calling forget. Nothing here takes seqMu or runs on the dispatch
+// goroutine.
 const (
 	activityWindow       = time.Second
 	activityFlushTimeout = 2 * time.Second
-	// activityMaxMentions bounds mentioning messages kept per channel per window; the
-	// oldest are dropped and mention_count still raises the badge.
-	activityMaxMentions = 16
-	// activityReadKeep is how long a read mark can still suppress a hint: a flush
-	// resolves within activityFlushTimeout of its take.
+	activityMaxMentions  = 16
+	// activityReadKeep is how long a read mark can still suppress a hint (a flush
+	// resolves within activityFlushTimeout of its take).
 	activityReadKeep = 5 * time.Second
 )
 
-// readKey names one recipient's channel; readMark is the highest message they had
-// read through there, and when.
 type readKey struct{ uid, ch int64 }
 
 type readMark struct {
@@ -55,7 +43,6 @@ type readMark struct {
 	at    time.Time
 }
 
-// activityNote is one committed send, as the coalescer records it.
 type activityNote struct {
 	channelID int64
 	msgID     int64
@@ -64,11 +51,9 @@ type activityNote struct {
 	roleUsers []int64
 	everyone  bool
 	hereOnly  bool
-	// readBy, when set, makes the note a read mark for that user instead of a send
-	// (channelReadEvt).
-	readBy int64
-	// readUpTo and readSet carry the pointer a read mark is set to; readSet false marks
-	// through everything noted so far.
+	readBy    int64
+	// readUpTo and readSet carry the pointer a read mark is set to; readSet false
+	// marks through everything noted so far.
 	readUpTo int64
 	readSet  bool
 }
@@ -82,7 +67,6 @@ type activityMention struct {
 	hereOnly bool
 }
 
-// pendingChannel is one channel's window: the latest message and the mentioning ones.
 type pendingChannel struct {
 	latestID       int64
 	latestAuthorID int64
@@ -94,9 +78,8 @@ type activityState struct {
 	pending   map[int64]*pendingChannel
 	lastFlush time.Time
 	wake      chan struct{} // cap 1; made on first use so a zero Hub works
-	// highest is the highest message id ever noted per channel; readUpTo is what
-	// mark_read and channel_focus read through, so a hint for an already-read message is
-	// not sent. Both under mu.
+	// highest is the highest message id noted per channel; readUpTo is what
+	// mark_read and channel_focus read through. Both under mu.
 	highest  map[int64]int64
 	readUpTo map[readKey]readMark
 
@@ -156,10 +139,9 @@ func (a *activityState) note(n activityNote) {
 	}
 }
 
-// markRead records how far uid has read channel ch; hints at or below it are dropped
-// at send time. With set, upTo is the database's pointer and replaces the mark,
-// which may lower it (mark_unread) so hints after a partial read still arrive.
-// Without set it is a focus marking the channel read through every message noted.
+// markRead records how far uid has read ch; hints at or below it are dropped at
+// send time. With set, upTo is the database pointer and may lower the mark
+// (mark_unread); without it a focus marks everything noted as read.
 func (a *activityState) markRead(uid, ch, upTo int64, set bool, now time.Time) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -172,15 +154,14 @@ func (a *activityState) markRead(uid, ch, upTo int64, set bool, now time.Time) {
 	a.readUpTo[readKey{uid, ch}] = readMark{msgID: upTo, at: now}
 }
 
-// readMarks is a copy of the read marks for the flush's send loop.
 func (a *activityState) readMarks() map[readKey]readMark {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return maps.Clone(a.readUpTo)
 }
 
-// forget drops pending state naming an erased user or a swept message. A frame
-// already sent cannot be recalled (the contract nsfw_content.go states for shed content).
+// forget drops pending state naming an erased user or swept message; a frame
+// already sent cannot be recalled.
 func (a *activityState) forget(userIDs, msgIDs []int64) {
 	a.flushMu.Lock()
 	defer a.flushMu.Unlock()
@@ -207,8 +188,6 @@ func (a *activityState) forget(userIDs, msgIDs []int64) {
 	}
 }
 
-// due reports whether anything is pending and how long until the window lets it
-// flush (0 = now).
 func (a *activityState) due(now time.Time) (wait time.Duration, pending bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -218,7 +197,6 @@ func (a *activityState) due(now time.Time) (wait time.Duration, pending bool) {
 	return max(0, activityWindow-now.Sub(a.lastFlush)), true
 }
 
-// take swaps the pending map out and opens a new window.
 func (a *activityState) take(now time.Time) map[int64]*pendingChannel {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -236,14 +214,12 @@ func (a *activityState) take(now time.Time) map[int64]*pendingChannel {
 	return batch
 }
 
-// runChannelActivityLife runs the worker on the hub's lifecycle context. A method
-// value, not a closure in Run, so the closures Run holds keep their names (api's
-// goleak filter names Run.func1).
+// runChannelActivityLife is a method value, not a closure in Run, so the closures
+// Run holds keep their names (api's goleak filter names Run.func1).
 func (h *Hub) runChannelActivityLife() { h.runChannelActivity(h.lifeCtx()) }
 
-// runChannelActivity is the coalescer's worker, started once by Run on h.sweeps.
-// Its timer is armed only while something waits for the window; whatever is pending
-// at exit is discarded (it is only a hint).
+// runChannelActivity is the coalescer's worker, started once by Run on h.sweeps;
+// whatever is pending at exit is discarded (only a hint).
 func (h *Hub) runChannelActivity(ctx context.Context) {
 	wake := h.activity.wakeChan()
 	timer := time.NewTimer(time.Hour)
@@ -270,15 +246,14 @@ func (h *Hub) runChannelActivity(ctx context.Context) {
 	}
 }
 
-// channelActivityEntry is one channel of a channel_activity frame.
 type channelActivityEntry struct {
 	ChannelID        int64  `json:"channel_id"`
 	MessageID        int64  `json:"message_id"`
 	AuthorID         *int64 `json:"author_id,omitempty"`
 	MentionsYou      bool   `json:"mentions_you"`
 	MentionsEveryone bool   `json:"mentions_everyone"`
-	// forum marks an entry for a forum-scoped channel: only a connection that declared
-	// forums is sent it (the user may have several devices).
+	// forum marks a forum-scoped entry: only a connection that declared forums is
+	// sent it.
 	forum bool
 }
 
@@ -286,8 +261,6 @@ type channelActivityPayload struct {
 	Channels []channelActivityEntry `json:"channels"`
 }
 
-// flushChannelActivity sends the pending window now, whatever the throttle says.
-// It runs on the worker (and a test barrier), never on dispatch.
 func (h *Hub) flushChannelActivity(ctx context.Context) {
 	a := &h.activity
 	a.flushMu.Lock()
@@ -312,10 +285,9 @@ func (h *Hub) flushChannelActivity(ctx context.Context) {
 		if len(entries) == 0 {
 			continue
 		}
-		// Resolved at send time: a reconnect inside the window gets the frame on its new
-		// connection, and the displaced one is never touched.
+		// Resolved at send time: a reconnect inside the window gets the frame on
+		// its new connection.
 		for _, c := range h.clientsOf(uid) {
-			// A forum's posts go only to a connection that declared forums.
 			shown := entries
 			if lacksForums(c) {
 				shown = slices.DeleteFunc(slices.Clone(entries), func(e channelActivityEntry) bool { return e.forum })
@@ -331,16 +303,16 @@ func (h *Hub) flushChannelActivity(ctx context.Context) {
 	}
 }
 
-// activityReadFailed logs a degraded flush read; the support bundle codes these by
-// the shared prefix (admin/support_redaction.go).
+// activityReadFailed logs a degraded flush read; the support bundle codes these
+// by the shared prefix (admin/support_redaction.go).
 func activityReadFailed(what string, attrs ...any) {
 	slog.Warn("ws: channel_activity read failed: "+what, attrs...)
 }
 
-// resolveChannelActivity appends channel chID's entries to each recipient's list. A
-// failed channel read skips the channel for this window; a failed acknowledgement
-// read treats every reader as unacknowledged; a failed blockers read clears that
-// author's mention flags.
+// resolveChannelActivity appends chID's entries to each recipient's list. A
+// failed channel read skips the channel; a failed acknowledgement read treats
+// every reader as unacknowledged; a failed blockers read clears that author's
+// mention flags.
 func (h *Hub) resolveChannelActivity(ctx context.Context, chID int64, pc *pendingChannel, perUser map[int64][]channelActivityEntry) {
 	vis := h.readers.Visibility
 	ch, err := vis.GetChannel(ctx, chID)
@@ -380,11 +352,9 @@ func (h *Hub) resolveChannelActivity(ctx context.Context, chID int64, pc *pendin
 	}
 }
 
-// threadFollowersOf narrows a thread's read audience to its followers (the client
-// handles every thread entry it gets). audience already holds only users the parent
-// lets read, so a follower who lost the parent is absent and a follow row never
-// widens anything. A hub without a thread service or a failed follower read sends no
-// thread hint; ready is authoritative.
+// threadFollowersOf narrows a thread's audience to its followers; a follow row
+// never widens it. No thread service or a failed read sends no thread hint (ready
+// is authoritative).
 func (h *Hub) threadFollowersOf(ctx context.Context, threadID int64, audience []int64) []int64 {
 	svc := h.threadHub.svc
 	if svc == nil {
@@ -402,8 +372,6 @@ func (h *Hub) threadFollowersOf(ctx context.Context, threadID int64, audience []
 	return slices.DeleteFunc(slices.Clone(audience), func(uid int64) bool { return !following[uid] })
 }
 
-// activityUserEntries is uid's entries for one channel: the latest message that
-// mentioned them (mentions is newest first), then the latest overall when its id is higher.
 func (h *Hub) activityUserEntries(
 	uid, chID int64, pc *pendingChannel, mentions []activityMention, blockers map[int64]map[int64]bool, withhold bool,
 ) []channelActivityEntry {
@@ -428,8 +396,6 @@ func (h *Hub) activityUserEntries(
 	return entries
 }
 
-// activityAcknowledged is the set of users who acknowledged a labelled channel; a
-// failed read yields the empty set, so every reader is unacknowledged.
 func activityAcknowledged(ctx context.Context, vis VisibilityReader, chID int64) map[int64]bool {
 	ids, err := vis.ListNSFWAcknowledgedUserIDs(ctx, chID)
 	if err != nil {
@@ -443,9 +409,9 @@ func activityAcknowledged(ctx context.Context, vis VisibilityReader, chID int64)
 	return acked
 }
 
-// activityMentions returns the window's mentioning messages, newest first, with each
-// author's blockers. A message whose author's blockers cannot be read is dropped, so
-// it sets no mention flag.
+// activityMentions returns the window's mentioning messages, newest first, with
+// author blockers; a message whose blockers cannot be read is dropped so it sets
+// no mention flag.
 func activityMentions(ctx context.Context, vis VisibilityReader, in []activityMention) ([]activityMention, map[int64]map[int64]bool) {
 	blockers := make(map[int64]map[int64]bool, len(in))
 	out := make([]activityMention, 0, len(in))

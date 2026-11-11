@@ -5,15 +5,13 @@ import (
 	"fmt"
 )
 
-// PollAnswerCmd is one answer of a poll_create. Emoji is "" for none.
+// PollAnswerCmd is one answer of a poll_create.
 type PollAnswerCmd struct {
 	Text  string
 	Emoji string
 }
 
-// PollCreateCmd represents a poll_create message: post a poll as a
-// message in ChannelID. The text fields are raw; the service sanitises and
-// bounds them.
+// PollCreateCmd represents a poll_create message: post a poll as a message in ChannelID.
 type PollCreateCmd struct {
 	userID           int64
 	ReqID            string
@@ -28,14 +26,12 @@ type PollCreateCmd struct {
 func (c PollCreateCmd) Type() string  { return MsgTypePollCreate }
 func (c PollCreateCmd) UserID() int64 { return c.userID }
 
-// maxPollAnswerFrames bounds the answers array a frame may carry before the
-// service counts them, so a hostile frame cannot make the parser build a huge
-// slice. The real cap (10) is the service's.
+// maxPollAnswerFrames bounds the answers array so a hostile frame cannot make the
+// parser build a huge slice; the real cap is the service's.
 const maxPollAnswerFrames = 64
 
-// parsePollCreate is the poll_create entry of commandConstructors. The channel
-// id must be a positive integer and client_message_id is required (the service
-// validates its shape), since a poll is only ever retried by receipt.
+// parsePollCreate is the poll_create entry of commandConstructors;
+// client_message_id is required since a poll is retried only by receipt.
 func parsePollCreate(userID int64, reqID string, raw json.RawMessage) (Command, error) {
 	var p struct {
 		ClientMessageID string      `json:"client_message_id"`
@@ -85,9 +81,6 @@ type pollCreateOKPayload struct {
 	Deduplicated    bool   `json:"deduplicated"`
 }
 
-// buildPollCreateOK answers a poll_create: the id of the new message.
-// deduplicated is true when a retry was answered from the receipt and nothing
-// new was posted.
 func buildPollCreateOK(requestID string, msgID, channelID int64, clientMessageID string, duplicate bool) []byte {
 	return buildJSON(wsMsg{
 		Type: MsgTypePollCreateOK,
@@ -98,8 +91,8 @@ func buildPollCreateOK(requestID string, msgID, channelID int64, clientMessageID
 	})
 }
 
-// PollVoteCmd represents a poll_vote message: the sender's whole new selection
-// on a poll. An empty AnswerIDs removes the vote.
+// PollVoteCmd is the sender's whole new selection; an empty AnswerIDs removes the
+// vote.
 type PollVoteCmd struct {
 	userID    int64
 	MessageID int64
@@ -118,9 +111,8 @@ type PollEndCmd struct {
 func (c PollEndCmd) Type() string  { return MsgTypePollEnd }
 func (c PollEndCmd) UserID() int64 { return c.userID }
 
-// parsePollVote is the poll_vote entry of commandConstructors. answer_ids is
-// required (an empty list is the removal), and its length is bounded here so a
-// hostile frame cannot make the parser build a huge slice.
+// parsePollVote requires answer_ids (empty is the removal) and bounds its length
+// so a hostile frame cannot build a huge slice.
 func parsePollVote(userID int64, _ string, raw json.RawMessage) (Command, error) {
 	var p struct {
 		MessageID json.Number `json:"message_id"`
@@ -142,7 +134,6 @@ func parsePollVote(userID int64, _ string, raw json.RawMessage) (Command, error)
 	return PollVoteCmd{userID: userID, MessageID: id, AnswerIDs: *p.AnswerIDs}, nil
 }
 
-// parsePollEnd is the poll_end entry of commandConstructors.
 func parsePollEnd(userID int64, _ string, raw json.RawMessage) (Command, error) {
 	var p struct {
 		MessageID json.Number `json:"message_id"`
@@ -163,8 +154,6 @@ type pollVoteOKPayload struct {
 	AnswerIDs []int64 `json:"answer_ids"`
 }
 
-// buildPollVoteOK answers a poll_vote with the poll's version and the sender's
-// stored selection, never null.
 func buildPollVoteOK(requestID string, msgID, version int64, answerIDs []int64) []byte {
 	if answerIDs == nil {
 		answerIDs = []int64{}
@@ -173,7 +162,6 @@ func buildPollVoteOK(requestID string, msgID, version int64, answerIDs []int64) 
 		Payload: pollVoteOKPayload{MessageID: msgID, Version: version, AnswerIDs: answerIDs}})
 }
 
-// buildPollEndOK answers a poll_end.
 func buildPollEndOK(requestID string, msgID int64) []byte {
 	return buildJSON(wsMsg{Type: MsgTypePollEndOK, ID: requestID, Payload: struct {
 		MessageID int64 `json:"message_id"`
