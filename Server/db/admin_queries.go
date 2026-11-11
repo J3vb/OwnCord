@@ -208,6 +208,54 @@ type ChannelUpdate struct {
 	// no category remains. Without it, a move keeps the rows and unsyncs the channel.
 	SyncGuard ChannelSyncGuard
 	SyncPlan  *ChannelSyncPlan
+	// Base is the row this update was built from. The write keeps the stored value of
+	// every field left equal to Base, so an edit that committed in between survives.
+	Base *Channel
+	// Before receives the row as the write found it; left alone when the channel is gone.
+	Before *Channel
+}
+
+// keepStored returns stored when the request left the field as the snapshot had it.
+func keepStored[T comparable](requested, snapshot, stored T) T {
+	if requested == snapshot {
+		return stored
+	}
+	return requested
+}
+
+// settleAgainstStored applies Base and Before inside the write transaction. A category
+// carried forward from Base follows the stored category the same way.
+func (u ChannelUpdate) settleAgainstStored(ctx context.Context, q *dbgen.Queries, id int64) (ChannelUpdate, error) {
+	if u.Base == nil && u.Before == nil {
+		return u, nil
+	}
+	row, err := q.GetChannel(ctx, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return u, nil
+	}
+	if err != nil {
+		return u, err
+	}
+	cur := channelFromFields(channelFields(row))
+	if u.Before != nil {
+		*u.Before = cur
+	}
+	b := u.Base
+	if b == nil {
+		return u, nil
+	}
+	u.Name = keepStored(u.Name, b.Name, cur.Name)
+	u.Topic = keepStored(u.Topic, b.Topic, cur.Topic)
+	u.SlowMode = keepStored(u.SlowMode, b.SlowMode, cur.SlowMode)
+	u.Position = keepStored(u.Position, b.Position, cur.Position)
+	u.Archived = keepStored(u.Archived, b.Archived, cur.Archived)
+	u.NSFW = keepStored(u.NSFW, b.NSFW, cur.NSFW)
+	u.VoiceMaxUsers = keepStored(u.VoiceMaxUsers, b.VoiceMaxUsers, cur.VoiceMaxUsers)
+	u.VoiceMaxVideo = keepStored(u.VoiceMaxVideo, b.VoiceMaxVideo, cur.VoiceMaxVideo)
+	if u.CategoryName == nil && u.CategoryID == b.CategoryID {
+		u.CategoryID, u.CategoryIfExists = cur.CategoryID, true
+	}
+	return u, nil
 }
 
 // AdminUpdateChannel updates all mutable channel fields, category included, in one transaction.
@@ -220,8 +268,13 @@ func (d *DB) AdminUpdateChannel(ctx context.Context, id int64, u ChannelUpdate) 
 
 func (d *DB) adminUpdateChannel(ctx context.Context, id int64, u ChannelUpdate, clearNSFW bool) error {
 	return d.inWriteTx(ctx, "update", func(q *dbgen.Queries) error {
+		u, err := u.settleAgainstStored(ctx, q, id)
+		if err != nil {
+			return err
+		}
+		// A label kept from a concurrent edit keeps its acknowledgements.
+		clearNSFW := clearNSFW && !u.NSFW
 		var catID *int64
-		var err error
 		var created int64
 		switch {
 		case u.CategoryName != nil:

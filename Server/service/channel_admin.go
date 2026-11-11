@@ -257,6 +257,10 @@ type AdminChannelUpdate struct {
 	// Password sets, changes or removes a voice channel's password: nil leaves it, "" removes
 	// it, else the new one. Any value on a non-voice channel is ErrBadRequest.
 	Password *string
+	// Before, when non-nil, receives the row as the write replaced it, so the caller
+	// can compare it with the result even when another edit landed after it read
+	// its snapshot.
+	Before *db.Channel
 }
 
 // AdminUpdateChannel validates, persists, audits and returns the row read on the
@@ -303,6 +307,10 @@ func (s *ChannelService) AdminUpdateChannel(ctx context.Context, actorID int64, 
 		VoiceMaxUsers:    req.VoiceMaxUsers,
 		VoiceMaxVideo:    req.VoiceMaxVideo,
 		SyncPlan:         &syncPlan,
+		// The request was built from existing: fields it leaves as they were there
+		// keep whatever a concurrent edit stored since.
+		Base:   existing,
+		Before: req.Before,
 	}
 	if err := s.prepareUpdateSync(ctx, req, existing.ID, target.id, &update, &refused); err != nil {
 		return nil, nil, err

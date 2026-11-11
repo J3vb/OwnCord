@@ -122,16 +122,14 @@ func TestNSFWAcknowledge_DuplicatePUTRacingARevokeNeverReportsNotLabelled(t *tes
 	mustDo(t, "RevokeNSFW after the transaction released the writer", database.RevokeNSFW(ctx, 1, 10))
 }
 
-// TestAdminUpdateChannel_ClearsAcksOnResultingFlagRegardlessOfStaleRead is
-// P2-3: the caller's `existing` snapshot can be stale by the time this
-// commits — a concurrent label-and-acknowledge landing after `existing` was
-// read but before this edit's write must not survive an edit that (from
-// existing's point of view) never turned the flag off. The clear is gated on
-// the RESULTING flag (req.NSFW == false), not on existing.NSFW.
-func TestAdminUpdateChannel_ClearsAcksOnResultingFlagRegardlessOfStaleRead(t *testing.T) {
+// The caller's `existing` snapshot can be stale by the time an edit commits.
+// An edit that leaves the label as its snapshot had it keeps whatever a
+// concurrent edit stored, acknowledgements included; an edit that turns the
+// label off clears the acknowledgements on the RESULTING flag, even when the
+// snapshot's read was taken before a concurrent relabel and acknowledgement.
+func TestAdminUpdateChannel_StaleUnlabelledSnapshotKeepsAConcurrentLabelAndItsAcks(t *testing.T) {
 	ctx, database, nsfwSvc, channels := newNSFWRaceFixture(t)
 
-	// existing is read while the channel is NOT labelled.
 	existing, err := database.GetChannel(ctx, 10)
 	if err != nil || existing == nil {
 		t.Fatalf("GetChannel: %v", err)
@@ -140,26 +138,41 @@ func TestAdminUpdateChannel_ClearsAcksOnResultingFlagRegardlessOfStaleRead(t *te
 		t.Fatal("precondition: channel must start unlabelled")
 	}
 
-	// Concurrently: another admin labels it, and a member acknowledges it —
-	// both land before this edit commits, but after `existing` was read.
+	// Another admin labels it and a member acknowledges it after the read.
 	labelChannel(t, database, 10, true)
 	mustDo(t, "Acknowledge", nsfwSvc.Acknowledge(ctx, 1, 10))
-	if ok, hErr := database.HasNSFWAcknowledgement(ctx, 1, 10); hErr != nil || !ok {
-		t.Fatalf("precondition: acknowledgement not recorded: ok=%v err=%v", ok, hErr)
-	}
 
-	// This edit's req.NSFW is false — the same as existing.NSFW's stale
-	// read, so the OLD 1→0-transition-only gate would have skipped the
-	// clear entirely and left the acknowledgement row on file.
+	// This edit never named the label (false, as its snapshot had it).
 	if _, _, err := channels.AdminUpdateChannel(ctx, 1, existing, AdminChannelUpdate{
 		Name: "general", NSFW: false,
 	}, nil); err != nil {
 		t.Fatalf("AdminUpdateChannel: %v", err)
 	}
 
+	now, err := database.GetChannel(ctx, 10)
+	if err != nil || now == nil || !now.NSFW {
+		t.Fatalf("label after the edit = %+v, %v, want the concurrent label kept", now, err)
+	}
+	if ok, hErr := database.HasNSFWAcknowledgement(ctx, 1, 10); hErr != nil || !ok {
+		t.Fatalf("HasNSFWAcknowledgement after the edit = (%v, %v), want (true, nil): the label it belongs to is still on", ok, hErr)
+	}
+}
+
+func TestAdminUpdateChannel_ClearsAcksWhenTheEditTurnsTheLabelOff(t *testing.T) {
+	ctx, database, nsfwSvc, channels := newNSFWRaceFixture(t)
+	labelChannel(t, database, 10, true)
+	existing, err := database.GetChannel(ctx, 10)
+	if err != nil || existing == nil || !existing.NSFW {
+		t.Fatalf("GetChannel: %+v, %v", existing, err)
+	}
+	mustDo(t, "Acknowledge", nsfwSvc.Acknowledge(ctx, 1, 10))
+
+	if _, _, err := channels.AdminUpdateChannel(ctx, 1, existing, AdminChannelUpdate{
+		Name: "general", NSFW: false,
+	}, nil); err != nil {
+		t.Fatalf("AdminUpdateChannel: %v", err)
+	}
 	if ok, hErr := database.HasNSFWAcknowledgement(ctx, 1, 10); hErr != nil || ok {
-		t.Fatalf("HasNSFWAcknowledgement after the edit = (%v, %v), want (false, nil) — "+
-			"consent for a DIFFERENT (concurrent) labelling must not survive an edit whose stale "+
-			"existing.NSFW read never saw it turn on", ok, hErr)
+		t.Fatalf("HasNSFWAcknowledgement after unlabelling = (%v, %v), want (false, nil)", ok, hErr)
 	}
 }

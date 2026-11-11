@@ -92,6 +92,7 @@ and only when it changes something a contributor or fork holder must do
 ### Fixed
 
 - Voice moderation: a server mute (or unmute) given at the exact moment the member was being moved, switched channel or moved the call to another device could be reported as done and then not apply in the new channel. It now either follows the member or the moderator is told the member has left the channel.
+- Two admins editing the same channel at the same moment (or dragging channels while one saves its settings) no longer undo each other: a save keeps every setting it did not change, including a rename, topic, slow mode, age label, archive state or category set a moment earlier.
 - Server owners: backups, the safety copy before a restore, the full archive download and the backup taken before an update all failed when the server's folder path held characters such as an accented letter, brackets, `+`, `@` or an apostrophe (for example a Windows user name like `Jörg` or a folder like `Program Files (x86)`). After an update that changed the database, such a server refused to start. Folder names with those characters now work.
 - Reconnecting: an app that reconnected at the exact moment a channel was renamed or someone joined, left or muted in voice could miss that change and keep showing the old name or voice list. It now receives it.
 - Unread hints: after one of your devices disconnected while it was switching channels quickly, your other devices could stop showing new activity for one channel until the server restarted. The disconnect now always releases that channel.
