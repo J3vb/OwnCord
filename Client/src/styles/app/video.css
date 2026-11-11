@@ -384,6 +384,7 @@ video[hidden] + .video-surface {
 .video-tile-arrange .video-tile-btn[aria-checked="true"],
 .video-tile-arrange .video-tile-btn[aria-pressed="true"] {
   background: var(--accent);
+  color: var(--on-accent);
 }
 .focus-mode .video-tile-arrange,
 .video-cell:fullscreen .video-tile-arrange,

@@ -86,6 +86,19 @@ describe("VideoGrid tile size and pin", () => {
     expect(area(2)).toBeLessThan(area(SHARE));
   });
 
+  it("keeps pinned tiles in the order they were pinned", () => {
+    addCamera(2);
+    addCamera(3);
+    settle();
+    control(3, "pin").click();
+    control(2, "pin").click();
+    settle();
+    const before = (a: number, b: number): boolean =>
+      num(tile(a), "top") < num(tile(b), "top") ||
+      (num(tile(a), "top") === num(tile(b), "top") && num(tile(a), "left") < num(tile(b), "left"));
+    expect(before(3, 2)).toBe(true);
+  });
+
   it("forgets the pin and size of a stream that ends, and moves focus to the grid", () => {
     addCamera(2);
     addCamera(3);

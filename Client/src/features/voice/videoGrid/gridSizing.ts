@@ -67,7 +67,15 @@ export function createGridSizing(st: GridState, api: GridApi) {
   function packInput(shown: readonly HTMLDivElement[]): { el: HTMLDivElement; tile: PackTile }[] {
     const byEl = new Map<HTMLElement, [number, CellEntry]>();
     for (const [tileId, entry] of st.cells) byEl.set(entry.el, [tileId, entry]);
-    return shown.map((el, id) => {
+    // Pinned tiles go first, in the order they were pinned.
+    const pinOrder = [...st.pinned];
+    const rankOf = (el: HTMLElement): number => {
+      const tileId = byEl.get(el)?.[0];
+      const rank = tileId === undefined ? -1 : pinOrder.indexOf(tileId);
+      return rank < 0 ? pinOrder.length : rank;
+    };
+    const ordered = shown.toSorted((a, b) => rankOf(a) - rankOf(b));
+    return ordered.map((el, id) => {
       const [tileId, entry] = byEl.get(el) ?? [undefined, undefined];
       const aspect = entry === undefined ? DEFAULT_ASPECT : aspectOf(entry.video);
       const size = tileSizeOf(entry, tileId === undefined ? undefined : st.tileSizes.get(tileId));
