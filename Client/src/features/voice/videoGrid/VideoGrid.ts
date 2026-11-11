@@ -324,6 +324,7 @@ export function createVideoGrid(): VideoGridComponent {
     st.phoneFullscreen?.end();
     st.phoneFullscreen = null;
     st.gridListeners.destroy();
+    api.resetPeopleStrip();
     if (st.statsTimer !== null) {
       clearInterval(st.statsTimer);
       st.statsTimer = null;

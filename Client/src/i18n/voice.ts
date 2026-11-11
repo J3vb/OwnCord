@@ -118,6 +118,7 @@ export const voiceText = defineCatalog("voice", {
   "grid.viewOptions": "View options",
   "grid.showNonVideo": "Show non-video participants",
   "grid.showMyCamera": "Show my camera",
+  "grid.peopleStrip": "People without video",
   "grid.showStrip": "Show participant strip",
   "grid.popOutCall": "Pop out call",
   "grid.popInCall": "Bring the call back",

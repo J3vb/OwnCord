@@ -9,13 +9,15 @@ import { isPhoneLayout } from "@lib/ui/bottomSheet";
 import { voiceText } from "../../../i18n/voice";
 import { beginPhoneFullscreen } from "../phoneFullscreen";
 import { log, isShown, isFullscreenKey, isSelfCamera } from "./gridShared";
+import { STRIP_CLASS } from "./gridPeopleStrip";
 import { createGridSizing, clearTileLayout } from "./gridSizing";
 import type { GridState, GridApi } from "./gridState";
 import { seatFocusedTile, fillThumbStrip } from "./gridFocus";
 import type { TileConfig } from "./VideoGrid";
 
 export function createGridLayout(st: GridState, api: GridApi) {
-  const { applyGridSizes, watchTileShape } = createGridSizing(st, api);
+  const { applyGridSizes, watchTileShape, inPeopleStrip, keepFocus, resetPeopleStrip } =
+    createGridSizing(st, api);
 
   /** The document the grid is in: the call's pop-out window's, or the app's. */
   function doc(): Document {
@@ -97,12 +99,17 @@ export function createGridLayout(st: GridState, api: GridApi) {
       rebuildFocusLayout();
       return;
     }
-    for (const el of allTiles()) {
-      if (el.classList.contains("video-cell--avatar") || el.parentElement !== st.root) {
-        beforeChrome(el);
+    // A control the user is on keeps focus while its cell moves.
+    keepFocus(allTiles(), () => {
+      for (const el of allTiles()) {
+        // The people strip's cells stay put: applyGridSizes seats them.
+        if (inPeopleStrip(el)) continue;
+        if (el.classList.contains("video-cell--avatar") || el.parentElement !== st.root) {
+          beforeChrome(el);
+        }
       }
-    }
-    applyGridSizes();
+      applyGridSizes();
+    });
   }
 
   /** Schedule a layout recalculation on the next animation frame. */
@@ -240,11 +247,12 @@ export function createGridLayout(st: GridState, api: GridApi) {
    *  controls, which stay last in tab order. */
   function beforeChrome(el: HTMLElement): void {
     if (st.root === null) return;
-    // The trailing run of controls (mount puts the exit control first).
+    // The trailing run of controls (mount puts the exit control first), with
+    // the people strip among them: tiles go before it, in tab order too.
     let anchor: Element | null = null;
     for (
       let c = st.root.lastElementChild;
-      c !== null && isChrome(c);
+      c !== null && (isChrome(c) || c.classList.contains(STRIP_CLASS));
       c = c.previousElementSibling
     ) {
       anchor = c;
@@ -417,6 +425,7 @@ export function createGridLayout(st: GridState, api: GridApi) {
   return {
     doc,
     applyGridSizes,
+    resetPeopleStrip,
     watchTileShape,
     syncPeople,
     hiddenByView,
