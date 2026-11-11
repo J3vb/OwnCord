@@ -102,15 +102,22 @@ platform invoke bindings, including all conditional platform/feature handlers:
 
 | Measure                                                    | Value |
 | ---------------------------------------------------------- | ----- |
-| Files under `Client/src/` importing `@tauri-apps/*`        | 27    |
-| Distinct `invoke` command names called from `Client/src/`  | 113   |
-| `#[tauri::command]` handlers in `Client/src-tauri/`        | 116   |
+| Files under `Client/src/` importing `@tauri-apps/*`        | 28    |
+| Distinct `invoke` command names called from `Client/src/`  | 114   |
+| `#[tauri::command]` handlers in `Client/src-tauri/`        | 117   |
 | TS calls with no matching Rust handler                     | 0     |
 | Uses of the `window.__TAURI__` global                      | 0     |
 | Environment-detection helper (`isDesktop()` or equivalent) | 1     |
 | Files under `Client/src/platform/`                         | 62    |
 
-The handler count covers the 115 distinct registrations
+The handler count includes the Android-only `is_metered` registration
+(`metered_network.rs`). Its `owncord-metered-network` plugin delivers
+`metered-changed` events through an owned plugin listener. The
+`MeteredNetwork` platform contract reports false outside Android.
+Data saver stores `owncord:settings:dataSaver` as `off` (default), `mobile`,
+or `always`; media renderers read it with the device's current network cost.
+An existing deferred element keeps its own tap requirement through a handover.
+The handler count also covers the existing 115 distinct registrations
 (`Client/src-tauri/src/lib.rs`); `open_devtools` sits behind
 `#[cfg(feature = "devtools")]`, and the forty-four `native_voice_*` commands
 and the two Linux file commands (`clipboard_files`, `read_staged_file`, for
@@ -233,6 +240,7 @@ save_identity_key
 save_pending_messages
 save_settings
 set_call_service
+is_metered
 set_gpu_adapter
 set_unread_badge
 set_window_pref
