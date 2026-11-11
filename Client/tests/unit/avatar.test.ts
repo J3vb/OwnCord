@@ -315,14 +315,20 @@ describe("createAvatarElement with deferUntilVisible", () => {
       vi.useRealTimers();
     });
 
-    it("starts at once below flying speed", async () => {
+    it("starts at once below flying speed, and flies just past it", async () => {
       fetchImageAsObjectUrl.mockResolvedValue(null);
-      const { reportListScroll } = await load();
-      const { createAvatarElement: create } = await load();
-      reportListScroll(32, 16, 800);
-      const el = mount(create, 1);
-      show(el);
+      const mod = await load();
+      // Exactly the view height in 150 ms is not flying; one pixel more is,
+      // upward as well as downward.
+      mod.reportListScroll(800, 150, 800);
+      show(mount(mod.createAvatarElement, 1));
       expect(fetchImageAsObjectUrl).toHaveBeenCalledTimes(1);
+
+      mod.reportListScroll(-801, 150, 800);
+      show(mount(mod.createAvatarElement, 2));
+      expect(fetchImageAsObjectUrl).toHaveBeenCalledTimes(1);
+      vi.advanceTimersByTime(100);
+      expect(fetchImageAsObjectUrl).toHaveBeenCalledTimes(2);
     });
 
     it("waits while flying, then starts the rows still in view after the settle time", async () => {
