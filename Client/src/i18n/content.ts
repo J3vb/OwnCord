@@ -5,6 +5,7 @@ import { defineCatalog } from "./format";
  *  the viewer has consented. User/server data (a host, a filename) passes
  *  through parameters; provider names are attribution, not translation. */
 export const contentText = defineCatalog("content", {
+  "media.tapToLoad": "Tap to load",
   "preview.failed": "Preview unavailable",
   "preview.retry": "Retry preview",
   "image.failed": "Image unavailable",
