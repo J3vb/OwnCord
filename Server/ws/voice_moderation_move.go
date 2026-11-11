@@ -2,14 +2,17 @@ package ws
 
 // voice_moderation_move.go: a moderator move evicts and stashes in one membership transaction.
 
-import "context"
+import (
+	"context"
+	"log/slog"
+)
 
 // voiceMoveEvictor is the move's single route to the hub: evict the target from the
 // authorized channel and stash the moderator flags inside one membership transaction
 // (Hub.EvictForModeratorMove), so no channel switch of the target's own can land between
 // them. A Mod without it (a test double) falls back to evictForMove's stash-then-disconnect pair.
 type voiceMoveEvictor interface {
-	EvictForModeratorMove(ctx context.Context, userID, channelID int64, serverMuted, serverDeafened bool, serverMutedBy *int64) bool
+	EvictForModeratorMove(ctx context.Context, userID, channelID int64) bool
 }
 
 // Compile-time check: a silently non-matching assertion would fall back to the unlocked stash this exists to
@@ -18,10 +21,11 @@ var _ voiceMoveEvictor = (*Hub)(nil)
 
 // evictForMove evicts targetID from channelID for a moderator move, carrying their flags to
 // their own re-join; false when nobody was evicted (no connection here, or the target left
-// the checked channel), leaving no stash.
+// the checked channel), leaving no stash. The hub reads the flags again at the eviction;
+// only the fallback below stashes the ones handed in.
 func evictForMove(ctx context.Context, mod VoiceModerator, targetID, channelID int64, serverMuted, serverDeafened bool, serverMutedBy *int64) bool {
 	if m, ok := mod.(voiceMoveEvictor); ok {
-		return m.EvictForModeratorMove(ctx, targetID, channelID, serverMuted, serverDeafened, serverMutedBy)
+		return m.EvictForModeratorMove(ctx, targetID, channelID)
 	}
 	stashPendingModFlags(mod, targetID, serverMuted, serverDeafened, serverMutedBy)
 	if disconnectFromVoiceIn(ctx, mod, targetID, channelID) {
@@ -37,13 +41,21 @@ func evictForMove(ctx context.Context, mod VoiceModerator, targetID, channelID i
 // flags live in and the target's re-join (voiceJoinLeaveCurrent) takes them from the stash.
 // Stashing before the lock let the target's own switch consume the stash, or the move's
 // check fail after it was set; under the lock the stash exists exactly when the eviction
-// happened. False, with nothing stashed, when the target has no connection here or left
-// channelID. A target parked in the grace window has no live connection, so the move is
-// kept for the parking session (parkedModMove): its resume collects the flags and the
-// voice_moved frame and re-joins the destination.
-func (h *Hub) EvictForModeratorMove(ctx context.Context, userID, channelID int64, serverMuted, serverDeafened bool, serverMutedBy *int64) bool {
+// happened. The flags are read from the row here under the moderation lock, held until the
+// row is deleted, so another moderator's change is carried or told the member has left.
+// False, with nothing stashed, when the target has no connection here or left channelID,
+// and when the flags cannot be read: guessing "none" would lift a mute. A target parked in
+// the grace window has no live connection, so the move is kept for the parking session
+// (parkedModMove): its resume collects the flags and voice_moved and re-joins the destination.
+func (h *Hub) EvictForModeratorMove(ctx context.Context, userID, channelID int64) bool {
 	txn := h.begin(userID)
 	defer txn.end()
+	unlockMod := h.voiceHub.mod.Lock(userID)
+	defer unlockMod()
+	flags, ok := h.modFlagsInChannel(ctx, userID, channelID)
+	if !ok {
+		return false
+	}
 	c := h.voiceClient(userID)
 	if c == nil {
 		h.noteModeratorExit(userID, nil)
@@ -51,19 +63,34 @@ func (h *Hub) EvictForModeratorMove(ctx context.Context, userID, channelID int64
 		if !h.leaveParkedVoice(ctx, txn, e, voiceLeaveReasonModerator) {
 			return false
 		}
-		h.voiceHub.reg.voiceGrace.noteParkedModMove(userID, e.client.tokenHash,
-			modFlagStash{muted: serverMuted, deafened: serverDeafened, mutedBy: serverMutedBy})
+		h.voiceHub.reg.voiceGrace.noteParkedModMove(userID, e.client.tokenHash, flags)
 		return true
 	}
-	evicted := h.evictAndStash(ctx, txn, c, channelID,
-		modFlagStash{muted: serverMuted, deafened: serverDeafened, mutedBy: serverMutedBy},
-		voiceLeaveReasonModerator)
+	evicted := h.evictAndStash(ctx, txn, c, channelID, flags, voiceLeaveReasonModerator)
 	if evicted {
 		h.noteModeratorExit(userID, c)
 	}
 	return evicted
 }
 
+// modFlagsInChannel reads the moderator mute/deafen on userID's row when it is in channelID,
+// none when it is elsewhere or gone; !ok when the read failed. Caller holds the moderation lock.
+func (h *Hub) modFlagsInChannel(ctx context.Context, userID, channelID int64) (flags modFlagStash, ok bool) {
+	if h.voice == nil {
+		return modFlagStash{}, true
+	}
+	state, err := h.voice.State(ctx, userID)
+	if err != nil {
+		slog.Warn("voice move: could not read the moderator flags, move refused", "user_id", userID, "channel_id", channelID, "err", err)
+		return modFlagStash{}, false
+	}
+	if state == nil || state.ChannelID != channelID {
+		return modFlagStash{}, true
+	}
+	return modFlagStash{muted: state.ServerMuted, deafened: state.ServerDeafened, mutedBy: state.ServerMutedBy}, true
+}
+
+// modFlagStash is the moderator mute/deafen an eviction carries to the member's re-join.
 type modFlagStash struct {
 	muted, deafened bool
 	mutedBy         *int64

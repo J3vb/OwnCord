@@ -12,10 +12,11 @@ import (
 // interleaves with a fresh mute and an SFU-failure rollback runs against the DB state its
 // own mute produced. It is held across a LiveKit RPC. voiceRegistry.voiceMember serializes
 // every change to a user's voice membership. Order: ws/lock_order.go (hubVoice.mod comes
-// right after voiceMember; a path holding it never calls a membership path). R is the rank
-// the instance's entries carry: same type, different ranks, so the deadlock build tells
-// them apart. The map's own mu is a leaf whatever R is. Entries are evicted once nobody
-// holds or waits on them, so an ever-churning population does not grow the map forever.
+// right after voiceMember: a membership path may take it and then waits for a moderation
+// call in flight; a hubVoice.mod holder never takes voiceMember). R is the rank the
+// instance's entries carry: same type, different ranks, so the deadlock build tells them
+// apart. The map's own mu is a leaf whatever R is. Entries are evicted once nobody holds
+// or waits on them, so an ever-churning population does not grow the map forever.
 type UserLocks[R syncutil.LockRank] struct {
 	mu    syncutil.Ranked[lockrank.Leaf]
 	locks map[int64]*userLockEntry[R]

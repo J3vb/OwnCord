@@ -33,7 +33,7 @@
 //	1 S   voicestate.userLockEntry.mu voice_registry.go:35    DB, broadcasts, seqMu (replay.go:219-275); never a
 //	      (voiceRegistry.voiceMember) voicestate/userlocks.go:39 LiveKit RPC
 //	2 S   voicestate.userLockEntry.mu hub_voice_state.go:29   DB and LiveKit RPC (voicestate/userlocks.go:10-16);
-//	      (hubVoice.mod)             voicestate/userlocks.go:39 never a membership path
+//	      (hubVoice.mod)             voicestate/userlocks.go:39 never voiceMember (rank 1 may take this one)
 //	3 S   replayPurgeState.mu RW     hub_tombstones.go:53     seqMu (hub_events.go:210), then the persister
 //	      (Hub.tombstones)                                    Flush and the DB delete (hub_events.go:218-235).
 //	                                                          Cold reads only TryRLock (eventstore.go:46-62)

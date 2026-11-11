@@ -11,7 +11,7 @@ package ws
 // broadcasts but never a LiveKit RPC (SFU removals are identity/token-scoped and run after
 // unlock or on removeLiveKitParticipantAsync). A goroutine holds at most one user's lock and
 // never takes it while holding a lock to its right; the hub dispatch goroutine never takes
-// it; a path holding voiceHub.mod never calls a membership path. voiceSlot.voiceMu,
+// it; a path that holds voiceHub.mod without this lock never takes it. voiceSlot.voiceMu,
 // voiceGrace.mu and the voicestate rejoin/reconcile locks are leaves: no I/O, no other
 // lock. voiceHub.mod: voicestate/userlocks.go. Order: lock_order.go.
 

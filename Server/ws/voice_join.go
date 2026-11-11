@@ -45,32 +45,43 @@ func (h *Hub) handleVoiceJoinFrame(fctx, ctx context.Context, c *Client, payload
 	txn := h.begin(c.userID)
 	defer txn.end()
 
-	wasServerMuted, wasServerDeafened, wasServerMutedBy, ok := h.voiceJoinLeaveCurrent(fctx, ctx, txn, c, channelID, reqID)
+	wasServerMuted, wasServerDeafened, wasServerMutedBy, ok, unannounced := h.voiceJoinLeaveCurrent(fctx, ctx, txn, c, channelID, reqID)
 	if !ok {
 		h.restorePendingModFlags(c, wasServerMuted, wasServerDeafened, wasServerMutedBy) // a failed switch keeps the stash
+		h.announceUnconfirmedMoveLeave(ctx, c, unannounced)
 		return
+	}
+	if unannounced == channelID {
+		// A same-channel move re-takes the user's own slot: never refused as full.
+		capacity = 0
 	}
 	leaveDone := time.Now()
 
-	state, ok := h.voiceJoinPersist(fctx, ctx, txn, c, capacity, channelID, reqID)
+	state, ok := h.voiceJoinPersistWithModFlags(fctx, ctx, txn, c, capacity, channelID, reqID,
+		modFlagStash{muted: wasServerMuted, deafened: wasServerDeafened, mutedBy: wasServerMutedBy})
 	if !ok {
 		// The stash was consumed and nothing was persisted for voiceJoinRestoreModFlags to apply;
 		// put it back so a retried join still sees it.
 		h.restorePendingModFlags(c, wasServerMuted, wasServerDeafened, wasServerMutedBy)
+		h.announceUnconfirmedMoveLeave(ctx, c, unannounced)
 		return
 	}
-
-	state = h.voiceJoinRestoreModFlags(ctx, c, channelID, state, wasServerMuted, wasServerDeafened, wasServerMutedBy)
 	persistDone := time.Now()
 
-	if !h.voiceJoinGrantToken(ctx, txn, c, channelID, ch.AFK, state, reqID) {
-		// Re-stash: these flags were written into the row the failure path is rolling back.
+	granted, tokenRolledBack := h.voiceJoinGrantToken(ctx, txn, c, channelID, ch.AFK, state, reqID)
+	if !granted {
+		if tokenRolledBack {
+			// This join's own rollback is silent: announce the held-back leave.
+			h.announceUnconfirmedMoveLeave(ctx, c, unannounced)
+			return
+		}
+		// Superseded: the evictor deleted the row holding these flags, so re-stash.
 		h.restorePendingModFlags(c, wasServerMuted, wasServerDeafened, wasServerMutedBy)
 		return
 	}
 	tokenDone := time.Now()
 
-	if h.voiceJoinComplete(ctx, txn, c, ch, channelID, state, reqID) {
+	if completed, _ := h.voiceJoinComplete(ctx, txn, c, ch, channelID, state, reqID); completed {
 		h.voice.NoteJoinCompleted(channelID, c.userID)
 		h.stats.latency.ObserveVoiceJoin(start, precheckDone, leaveDone, persistDone, tokenDone, time.Now())
 	}
@@ -181,43 +192,37 @@ func (h *Hub) voiceJoinPrecheck(ctx context.Context, c *Client, payload json.Raw
 
 // voiceJoinLeaveCurrent handles a client already in voice: same-channel re-join no-ops; a
 // switch snapshots moderator mute/deafen flags, leaves the old channel and verifies the old
-// row is gone. A false third return means the join must not proceed (error already sent).
-func (h *Hub) voiceJoinLeaveCurrent(fctx, ctx context.Context, txn *voiceTxn, c *Client, channelID int64, reqID string) (wasServerMuted, wasServerDeafened bool, wasServerMutedBy *int64, ok bool) {
+// row is gone. A false ok means the join must not proceed (error already sent). unannounced
+// is the channel whose membership a same-channel call move ended without a voice_leave (0
+// otherwise), whatever ok says.
+func (h *Hub) voiceJoinLeaveCurrent(fctx, ctx context.Context, txn *voiceTxn, c *Client, channelID int64, reqID string) (wasServerMuted, wasServerDeafened bool, wasServerMutedBy *int64, ok bool, unannounced int64) {
 	currentChID := c.voice.channel()
 
 	if currentChID == channelID {
 		c.sendMsg(buildErrorMsgWithID(ErrCodeAlreadyJoined, "already in this voice channel", reqID))
-		return false, false, nil, false
+		return false, false, nil, false, 0
 	}
 
 	if currentChID == 0 {
-		if moved, mMuted, mDeafened, mMutedBy, mOK := h.voiceJoinMoveCall(fctx, ctx, txn, c, channelID, reqID); moved {
-			return mMuted, mDeafened, mMutedBy, mOK
+		if moved, mMuted, mDeafened, mMutedBy, mOK, mUnannounced := h.voiceJoinMoveCall(fctx, ctx, txn, c, channelID, reqID); moved {
+			return mMuted, mDeafened, mMutedBy, mOK, mUnannounced
 		}
 	}
 
 	// A moderator mute/deafen must survive a switch: handleVoiceLeave deletes the row, so the
-	// ON CONFLICT preservation never applies; snapshot here and reapply after the new row
-	// exists. currentChID > 0 is the self-switch (row readable); after voice_mod_move the row
-	// is already gone (currentChID 0) and the flags were stashed on the client by
-	// handleVoiceModMoveV2, so take-and-clear them here.
-	if currentChID > 0 {
-		prevState, prevErr := h.voice.State(fctx, c.userID)
-		if commandDeadlineExceeded(fctx, prevErr) {
-			voiceJoinFail(fctx, c, reqID, prevErr, ErrCodeInternal, "voice channel switch failed — please try again")
-			return false, false, nil, false
-		}
-		if prevErr == nil && prevState != nil {
-			wasServerMuted = prevState.ServerMuted
-			wasServerDeafened = prevState.ServerDeafened
-			wasServerMutedBy = prevState.ServerMutedBy
-		}
-	} else {
+	// ON CONFLICT preservation never applies; the flags are read off the row as it is deleted
+	// (leaveForSwitch) and reapplied after the new row exists. After voice_mod_move the row is
+	// already gone (currentChID 0) and the flags were stashed on the client by
+	// EvictForModeratorMove, so take-and-clear them here.
+	if currentChID == 0 {
+		// The stash may sit on another of this user's devices (moved, then changed device).
 		wasServerMuted, wasServerDeafened, wasServerMutedBy = h.takeUserModFlags(c)
-	}
-
-	if currentChID > 0 {
-		h.handleVoiceLeave(ctx, txn, c, voiceLeaveReasonSwitch)
+	} else {
+		flags, left := h.leaveForSwitch(fctx, ctx, txn, c, reqID)
+		if !left {
+			return false, false, nil, false, 0
+		}
+		wasServerMuted, wasServerDeafened, wasServerMutedBy = flags.muted, flags.deafened, flags.mutedBy
 
 		// Verify the old row is gone: if the DB delete failed (retry in background),
 		// JoinVoiceChannelIfCapacity's COUNT(*) would be wrong. Fail so the user can retry.
@@ -226,7 +231,7 @@ func (h *Hub) voiceJoinLeaveCurrent(fctx, ctx context.Context, txn *voiceTxn, c 
 			slog.Warn("handleVoiceJoin: could not verify voice state cleared",
 				"user_id", c.userID, "err", err)
 			voiceJoinFail(fctx, c, reqID, err, ErrCodeInternal, "voice channel switch failed — please try again")
-			return wasServerMuted, wasServerDeafened, wasServerMutedBy, false
+			return wasServerMuted, wasServerDeafened, wasServerMutedBy, false, 0
 		}
 		if vs != nil {
 			slog.Warn("handleVoiceJoin: stale voice state persists after leave, aborting switch",
@@ -235,11 +240,30 @@ func (h *Hub) voiceJoinLeaveCurrent(fctx, ctx context.Context, txn *voiceTxn, c 
 			// client, so restoring would resurrect a session nobody believes exists. The stale row is
 			// reaped by sweepStaleVoiceStates within one tick.
 			c.sendMsg(buildErrorMsgWithID(ErrCodeInternal, "voice channel switch failed — please try again", reqID))
-			return wasServerMuted, wasServerDeafened, wasServerMutedBy, false
+			return wasServerMuted, wasServerDeafened, wasServerMutedBy, false, 0
 		}
 	}
 
-	return wasServerMuted, wasServerDeafened, wasServerMutedBy, true
+	return wasServerMuted, wasServerDeafened, wasServerMutedBy, true, 0
+}
+
+// leaveForSwitch reads the moderator mute/deafen off c's row and runs the leave that
+// deletes it, both under the moderation lock, so a mute or unmute racing the switch is
+// carried or told the member has left. left is false when the read failed: nothing was torn down.
+func (h *Hub) leaveForSwitch(fctx, ctx context.Context, txn *voiceTxn, c *Client, reqID string) (flags modFlagStash, left bool) {
+	unlockMod := h.voiceHub.mod.Lock(c.userID)
+	defer unlockMod()
+	prevState, prevErr := h.voice.State(fctx, c.userID)
+	if prevErr != nil {
+		slog.Warn("voice switch: could not read the moderator flags, switch refused", "user_id", c.userID, "err", prevErr)
+		voiceJoinFail(fctx, c, reqID, prevErr, ErrCodeInternal, "voice channel switch failed — please try again")
+		return modFlagStash{}, false
+	}
+	if prevState != nil {
+		flags = modFlagStash{muted: prevState.ServerMuted, deafened: prevState.ServerDeafened, mutedBy: prevState.ServerMutedBy}
+	}
+	h.handleVoiceLeave(ctx, txn, c, voiceLeaveReasonSwitch)
+	return flags, true
 }
 
 // voiceMicrophoneAllowed combines the role grant with the moderation flags for token
@@ -273,6 +297,24 @@ func (h *Hub) rollbackVoiceJoin(ctx context.Context, txn *voiceTxn, c *Client, c
 				"user_id", c.userID, "channel_id", channelID)
 		}
 	}
+	if broadcast {
+		h.broadcastVoiceEventWithLeaver(ctx, channelID, buildVoiceLeave(channelID, c.userID), c.userID)
+	}
+}
+
+// rollbackVoiceJoinKeepingModFlags rolls back a join whose row moderators could already
+// act on: under one hold of the moderation lock it reads the row's flags and deletes it, and
+// those flags go back onto c for the retry. held stands in when the row is not readable.
+func (h *Hub) rollbackVoiceJoinKeepingModFlags(ctx context.Context, txn *voiceTxn, c *Client, channelID int64, joinedAt string, held modFlagStash, broadcast bool) {
+	flags := held
+	unlockMod := h.voiceHub.mod.Lock(c.userID)
+	row, err := h.voice.State(context.WithoutCancel(ctx), c.userID)
+	if err == nil && row != nil && row.ChannelID == channelID && row.JoinedAt == joinedAt {
+		flags = modFlagStash{muted: row.ServerMuted, deafened: row.ServerDeafened, mutedBy: row.ServerMutedBy}
+	}
+	h.rollbackVoiceJoin(ctx, txn, c, channelID, joinedAt, false)
+	unlockMod()
+	h.restorePendingModFlags(c, flags.muted, flags.deafened, flags.mutedBy)
 	if broadcast {
 		h.broadcastVoiceEventWithLeaver(ctx, channelID, buildVoiceLeave(channelID, c.userID), c.userID)
 	}

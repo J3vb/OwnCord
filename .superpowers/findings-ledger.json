@@ -1,5 +1,5 @@
 {
-  "nextId": 568,
+  "nextId": 571,
   "findings": [
     {
       "id": "OC-0001",
@@ -13106,6 +13106,75 @@
         "commit": "pending",
         "test": "Client/src/features/voice/strandedJoin.test.ts",
         "revertProof": "against the earlier source that test and the passwordRefusal one-bare-leave test fail"
+      },
+      "lens": "flow-voice",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-11",
+      "hunt": "fable-review-2026-11-11",
+      "finder": "claude",
+      "fixedDate": "2026-11-11"
+    },
+    {
+      "id": "OC-0568",
+      "title": "A voice join that failed at its last step dropped the moderator mute it carried",
+      "file": "Server/ws/voice_join.go",
+      "line": 98,
+      "severity": "low",
+      "why": "A join carries a moderator mute or deafen from the previous channel and writes it onto the new seat. When the join failed at its very last step the seat was removed again and the carried mute was not put back, so the user's next join came in unmuted.",
+      "repro": "Server-mute a member, have them switch voice channel, and make the roster read at the end of the join fail once: the join is refused and the retry joins without the mute.",
+      "evidence": "Server/ws/voice_join_stash_test.go (TestVoiceJoin_RosterReadFailureKeepsModeratorMuteForRetry)",
+      "suggestedFix": "Put the carried moderator flags back whenever a join rolls its seat back, including at the last step.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/ws/voice_join_stash_test.go",
+        "revertProof": "without the re-stash TestVoiceJoin_RosterReadFailureKeepsModeratorMuteForRetry fails"
+      },
+      "lens": "flow-voice",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-11",
+      "hunt": "fable-review-2026-11-11",
+      "finder": "claude",
+      "fixedDate": "2026-11-11"
+    },
+    {
+      "id": "OC-0569",
+      "title": "A moderator mute given while the member was changing voice channel could be reported as applied and then not hold",
+      "file": "Server/ws/voice_join.go",
+      "line": 306,
+      "severity": "low",
+      "why": "A channel switch, a call moved to another device and a moderator move all read the member's mute and deafen off the row and then delete it, to put the flags back on the new row. A mute or unmute by another moderator that landed between that read and the delete was answered as applied, but it went with the old row and the new one came up with the earlier state. A join putting the flags back could also overwrite an unmute that landed just after the new row was inserted.",
+      "repro": "Start a channel switch for a member and, between the switch's read of the row and its delete, have a moderator mute them: the moderator is told the mute applied and the member arrives in the new channel unmuted.",
+      "evidence": "Server/ws/voice_mod_flag_race_test.go (TestVoiceJoin_MuteRacingAChannelSwitchIsNotLost, TestMultiDevice_MuteRacingACallMoveIsNotLost, TestModeratorMove_MuteRacingTheEvictionIsNotLost, TestVoiceJoin_UnmuteRacingTheFlagRestoreIsNotOverwritten)",
+      "suggestedFix": "Read the flags and delete the row under the per-member moderation lock every mute and unmute already takes, and put them back on the new row under the same lock, so a moderator's change lands before the read or after the row is gone and is answered truthfully either way.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/ws/voice_mod_flag_race_test.go",
+        "revertProof": "without the lock around the read and the delete TestVoiceJoin_MuteRacingAChannelSwitchIsNotLost fails; without it around the insert and the restore TestVoiceJoin_UnmuteRacingTheFlagRestoreIsNotOverwritten fails"
+      },
+      "lens": "flow-voice",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-11",
+      "hunt": "fable-review-2026-11-11",
+      "finder": "claude",
+      "fixedDate": "2026-11-11"
+    },
+    {
+      "id": "OC-0570",
+      "title": "A same-channel call take-over that failed left the user shown in the channel",
+      "file": "Server/ws/voice_join_move.go",
+      "line": 33,
+      "severity": "medium",
+      "why": "Taking a call over on a second device in the same channel removes the old device's seat without telling anyone, because the new device is about to take it. When the new join was then refused (the channel was over its limit, or a later step failed) the seat was gone but no leave was announced, so every client kept showing the user in the channel until it reconnected.",
+      "repro": "Put a user in a voice channel that is over its user limit, then join the same channel from a second device of that account: the join is refused, the first device is disconnected, and the roster still lists the user.",
+      "evidence": "Server/ws/voice_join_move_failure_test.go (TestMultiDevice_SameChannelMoveIntoOverfullChannelKeepsSlot, TestMultiDevice_SameChannelMoveFailingLaterStepAnnouncesLeave, TestMultiDevice_SameChannelMoveRolledBackAtRosterReadAnnouncesOnce)",
+      "suggestedFix": "Let a same-channel take-over keep its seat without a capacity check, and announce the leave when a take-over that removed the old seat does not finish.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/ws/voice_join_move_failure_test.go",
+        "revertProof": "without the capacity exemption TestMultiDevice_SameChannelMoveIntoOverfullChannelKeepsSlot fails; without the announce TestMultiDevice_SameChannelMoveFailingLaterStepAnnouncesLeave fails"
       },
       "lens": "flow-voice",
       "confidence": "high",

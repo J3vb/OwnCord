@@ -10,7 +10,8 @@ import (
 // voiceJoinCapacity is the cap a join is held to: the channel's voice_max_users, or 0
 // (uncapped) for a voice moderator there. The test is permissions.AuthorizeVoiceModerator,
 // the authorizer behind can_moderate_voice and voice_mod_*, so a per-channel deny of
-// MUTE_MEMBERS removes the bypass too.
+// MUTE_MEMBERS removes the bypass too. The join handler also passes 0 for a same-channel
+// take-over, which re-takes the slot the user's own call just freed.
 func voiceJoinCapacity(sub permissions.Subject, maxUsers int) int {
 	if maxUsers > 0 && permissions.AuthorizeVoiceModerator(sub) == nil {
 		return 0
