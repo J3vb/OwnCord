@@ -54,10 +54,16 @@ func (h *Hub) handleVoiceJoinFrame(fctx, ctx context.Context, c *Client, payload
 	txn := h.begin(c.userID)
 	defer txn.end()
 
-	wasServerMuted, wasServerDeafened, wasServerMutedBy, ok := h.voiceJoinLeaveCurrent(fctx, ctx, txn, c, channelID, reqID)
+	wasServerMuted, wasServerDeafened, wasServerMutedBy, ok, unannounced := h.voiceJoinLeaveCurrent(fctx, ctx, txn, c, channelID, reqID)
 	if !ok {
 		h.restorePendingModFlags(c, wasServerMuted, wasServerDeafened, wasServerMutedBy) // a failed switch keeps the stash
+		h.announceUnconfirmedMoveLeave(ctx, c, unannounced)
 		return
+	}
+	if unannounced == channelID {
+		// A same-channel move frees the user's own slot and re-takes it under the
+		// same member lock; it must not be refused as full.
+		capacity = 0
 	}
 	leaveDone := time.Now()
 
@@ -67,6 +73,7 @@ func (h *Hub) handleVoiceJoinFrame(fctx, ctx context.Context, c *Client, payload
 		// client (or read it off the row it deleted) and nothing was persisted for
 		// voiceJoinRestoreModFlags to apply; put it back so a retried join still sees it.
 		h.restorePendingModFlags(c, wasServerMuted, wasServerDeafened, wasServerMutedBy)
+		h.announceUnconfirmedMoveLeave(ctx, c, unannounced)
 		return
 	}
 
@@ -77,6 +84,7 @@ func (h *Hub) handleVoiceJoinFrame(fctx, ctx context.Context, c *Client, payload
 		// voiceJoinRestoreModFlags wrote these flags into the row that
 		// voiceJoinGrantToken's failure path is about to roll back; re-stash as above.
 		h.restorePendingModFlags(c, wasServerMuted, wasServerDeafened, wasServerMutedBy)
+		h.announceUnconfirmedMoveLeave(ctx, c, unannounced)
 		return
 	}
 	tokenDone := time.Now()
@@ -216,18 +224,20 @@ func (h *Hub) voiceJoinPrecheck(ctx context.Context, c *Client, payload json.Raw
 // the same channel no-ops; a switch snapshots the moderator-imposed mute/deafen
 // flags, leaves the old channel and verifies the old row is gone. The third
 // return false means the join must not proceed (error frame already sent).
-func (h *Hub) voiceJoinLeaveCurrent(fctx, ctx context.Context, txn *voiceTxn, c *Client, channelID int64, reqID string) (wasServerMuted, wasServerDeafened bool, wasServerMutedBy *int64, ok bool) {
+// unannounced is the channel whose membership a same-channel call move ended
+// without a voice_leave (0 otherwise), whatever ok says.
+func (h *Hub) voiceJoinLeaveCurrent(fctx, ctx context.Context, txn *voiceTxn, c *Client, channelID int64, reqID string) (wasServerMuted, wasServerDeafened bool, wasServerMutedBy *int64, ok bool, unannounced int64) {
 	currentChID := c.voice.channel()
 
 	if currentChID == channelID {
 		c.sendMsg(buildErrorMsgWithID(ErrCodeAlreadyJoined, "already in this voice channel", reqID))
-		return false, false, nil, false
+		return false, false, nil, false, 0
 	}
 
 	// The call may be on another of this user's devices: this join takes it over (one call per account).
 	if currentChID == 0 {
-		if moved, mMuted, mDeafened, mMutedBy, mOK := h.voiceJoinMoveCall(fctx, ctx, txn, c, channelID, reqID); moved {
-			return mMuted, mDeafened, mMutedBy, mOK
+		if moved, mMuted, mDeafened, mMutedBy, mOK, mUnannounced := h.voiceJoinMoveCall(fctx, ctx, txn, c, channelID, reqID); moved {
+			return mMuted, mDeafened, mMutedBy, mOK, mUnannounced
 		}
 	}
 
@@ -245,7 +255,7 @@ func (h *Hub) voiceJoinLeaveCurrent(fctx, ctx context.Context, txn *voiceTxn, c 
 		prevState, prevErr := h.voice.State(fctx, c.userID)
 		if commandDeadlineExceeded(fctx, prevErr) {
 			voiceJoinFail(fctx, c, reqID, prevErr, ErrCodeInternal, "voice channel switch failed — please try again")
-			return false, false, nil, false
+			return false, false, nil, false, 0
 		}
 		if prevErr == nil && prevState != nil {
 			wasServerMuted = prevState.ServerMuted
@@ -269,7 +279,7 @@ func (h *Hub) voiceJoinLeaveCurrent(fctx, ctx context.Context, txn *voiceTxn, c 
 			slog.Warn("handleVoiceJoin: could not verify voice state cleared",
 				"user_id", c.userID, "err", err)
 			voiceJoinFail(fctx, c, reqID, err, ErrCodeInternal, "voice channel switch failed — please try again")
-			return wasServerMuted, wasServerDeafened, wasServerMutedBy, false
+			return wasServerMuted, wasServerDeafened, wasServerMutedBy, false, 0
 		}
 		if vs != nil {
 			slog.Warn("handleVoiceJoin: stale voice state persists after leave, aborting switch",
@@ -281,11 +291,11 @@ func (h *Hub) voiceJoinLeaveCurrent(fctx, ctx context.Context, txn *voiceTxn, c 
 			// disagrees with every client's voiceChID, so sweepStaleVoiceStates reaps it
 			// within one tick, and the user_id-PK upsert lets the user rejoin immediately.
 			c.sendMsg(buildErrorMsgWithID(ErrCodeInternal, "voice channel switch failed — please try again", reqID))
-			return wasServerMuted, wasServerDeafened, wasServerMutedBy, false
+			return wasServerMuted, wasServerDeafened, wasServerMutedBy, false, 0
 		}
 	}
 
-	return wasServerMuted, wasServerDeafened, wasServerMutedBy, true
+	return wasServerMuted, wasServerDeafened, wasServerMutedBy, true, 0
 }
 
 // voiceMicrophoneAllowed combines the role grant with the session's moderation

@@ -22,12 +22,15 @@ const voiceMovedReason = "Call moved to another device"
 //
 // A move into the channel the old device is in announces no voice_leave: a self
 // voice_leave would tear down the new join on the connection that sent it.
+// That channel is returned as unannounced, so the caller can announce the leave
+// after all if the join then fails (announceUnconfirmedMoveLeave), and insert
+// without the capacity check: the user already held that slot.
 //
 // moved is false when the user has no call elsewhere (the caller continues as a
 // plain first join). When moved is true, ok=false means the join must not proceed
 // (the error frame was sent) and the three flag results are the moderator
 // mute/deafen to re-apply to the new row. The caller holds txn.
-func (h *Hub) voiceJoinMoveCall(fctx, ctx context.Context, txn *voiceTxn, c *Client, channelID int64, reqID string) (moved, wasServerMuted, wasServerDeafened bool, wasServerMutedBy *int64, ok bool) {
+func (h *Hub) voiceJoinMoveCall(fctx, ctx context.Context, txn *voiceTxn, c *Client, channelID int64, reqID string) (moved, wasServerMuted, wasServerDeafened bool, wasServerMutedBy *int64, ok bool, unannounced int64) {
 	var from *Client
 	for _, o := range h.clientsOf(c.userID) {
 		if o != c && o.voice.channel() != 0 {
@@ -36,7 +39,7 @@ func (h *Hub) voiceJoinMoveCall(fctx, ctx context.Context, txn *voiceTxn, c *Cli
 		}
 	}
 	if from == nil && h.voiceHub.reg.voiceGrace.get(c.userID) == nil {
-		return false, false, false, nil, true
+		return false, false, false, nil, true, 0
 	}
 
 	// A moderator-imposed mute/deafen follows the user to the new device, as it
@@ -45,7 +48,7 @@ func (h *Hub) voiceJoinMoveCall(fctx, ctx context.Context, txn *voiceTxn, c *Cli
 	prev, prevErr := h.voice.State(fctx, c.userID)
 	if commandDeadlineExceeded(fctx, prevErr) {
 		voiceJoinFail(fctx, c, reqID, prevErr, ErrCodeInternal, "voice channel switch failed — please try again")
-		return true, false, false, nil, false
+		return true, false, false, nil, false, 0
 	}
 	if prevErr == nil && prev != nil {
 		wasServerMuted, wasServerDeafened, wasServerMutedBy = prev.ServerMuted, prev.ServerDeafened, prev.ServerMutedBy
@@ -60,6 +63,9 @@ func (h *Hub) voiceJoinMoveCall(fctx, ctx context.Context, txn *voiceTxn, c *Cli
 				"from_channel_id", snap.chID, "to_channel_id", channelID)
 			from.sendMsg(buildVoiceDisconnected(snap.chID, voiceMovedReason))
 			h.finishVoiceLeaveAnnounce(ctx, txn, from, snap.chID, snap.joinToken, voiceLeaveReasonMoved, snap.chID != channelID)
+			if snap.chID == channelID {
+				unannounced = snap.chID
+			}
 		}
 	} else if e := txn.takeParked(0); e != nil {
 		slog.Info("voice parked call moved to another device", "user_id", c.userID,
@@ -72,6 +78,9 @@ func (h *Hub) voiceJoinMoveCall(fctx, ctx context.Context, txn *voiceTxn, c *Cli
 			h.voiceHub.reg.voiceGrace.markMoved(c.userID, e.client.tokenHash, e.snap.chID)
 		}
 		h.finishVoiceLeaveAnnounce(ctx, txn, e.client, e.snap.chID, e.snap.joinToken, voiceLeaveReasonMoved, e.snap.chID != channelID)
+		if e.snap.chID == channelID {
+			unannounced = e.snap.chID
+		}
 	}
 
 	// Same check as a channel switch: the old row must really be gone
@@ -81,15 +90,27 @@ func (h *Hub) voiceJoinMoveCall(fctx, ctx context.Context, txn *voiceTxn, c *Cli
 		slog.Warn("handleVoiceJoin: could not verify voice state cleared after move",
 			"user_id", c.userID, "err", err)
 		voiceJoinFail(fctx, c, reqID, err, ErrCodeInternal, "voice channel switch failed — please try again")
-		return true, wasServerMuted, wasServerDeafened, wasServerMutedBy, false
+		return true, wasServerMuted, wasServerDeafened, wasServerMutedBy, false, unannounced
 	}
 	if vs != nil {
 		slog.Warn("handleVoiceJoin: stale voice state persists after move, aborting join",
 			"user_id", c.userID, "stale_channel", vs.ChannelID, "target_channel", channelID)
 		c.sendMsg(buildErrorMsgWithID(ErrCodeInternal, "voice channel switch failed — please try again", reqID))
-		return true, wasServerMuted, wasServerDeafened, wasServerMutedBy, false
+		return true, wasServerMuted, wasServerDeafened, wasServerMutedBy, false, unannounced
 	}
-	return true, wasServerMuted, wasServerDeafened, wasServerMutedBy, true
+	return true, wasServerMuted, wasServerDeafened, wasServerMutedBy, true, unannounced
+}
+
+// announceUnconfirmedMoveLeave sends the voice_leave a same-channel move left
+// out, for a join that then failed: the old membership is gone and no new one
+// replaces it, so every roster must drop the user. The joining device has no call
+// at this point, so the frame tears nothing down there. channelID 0 (no move, or
+// a move into another channel, which announced its own leave) is a no-op.
+func (h *Hub) announceUnconfirmedMoveLeave(ctx context.Context, c *Client, channelID int64) {
+	if channelID == 0 {
+		return
+	}
+	h.broadcastVoiceEventWithLeaver(ctx, channelID, buildVoiceLeave(channelID, c.userID), c.userID)
 }
 
 // takeUserModFlags takes and clears the pending moderator mute/deafen stash of every
