@@ -116,6 +116,73 @@ describe("animatedStill", () => {
   });
 });
 
+describe("animatedStill memo of pictures that do not move", () => {
+  afterEach(() => {
+    clearAnimatedStills();
+    vi.restoreAllMocks();
+  });
+
+  it("does not make the first picture read its bytes again after 257 others", async () => {
+    const read = vi.fn(async () => gif(1));
+    for (let i = 0; i < 257; i++) await animatedStill(`blob:m${i}`, 64, read);
+    expect(read).toHaveBeenCalledTimes(257);
+    await animatedStill("blob:m0", 64, read);
+    expect(read).toHaveBeenCalledTimes(257);
+  });
+
+  it("forgets everything on clear, also an answer still in flight", async () => {
+    const read = vi.fn(async () => gif(1));
+    await animatedStill("blob:n", 64, read);
+    clearAnimatedStills();
+    await animatedStill("blob:n", 64, read);
+    expect(read).toHaveBeenCalledTimes(2);
+
+    let release: (b: Uint8Array) => void = () => {};
+    let calls = 0;
+    const slow = (): Promise<Uint8Array> => {
+      calls++;
+      if (calls > 1) return Promise.resolve(gif(1));
+      return new Promise<Uint8Array>((resolve) => {
+        release = resolve;
+      });
+    };
+    const inFlight = animatedStill("blob:o", 64, slow);
+    clearAnimatedStills();
+    release(gif(1));
+    await inFlight;
+    await animatedStill("blob:o", 64, slow);
+    expect(calls).toBe(2);
+  });
+
+  it("still gets a still for an animated picture, and asks the bytes once for it", async () => {
+    vi.stubGlobal(
+      "Image",
+      class {
+        naturalWidth = 4;
+        naturalHeight = 4;
+        private onLoad: (() => void) | null = null;
+        addEventListener(type: string, fn: () => void): void {
+          if (type === "load") this.onLoad = fn;
+        }
+        set src(_value: string) {
+          this.onLoad?.();
+        }
+      },
+    );
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
+      drawImage: () => undefined,
+    } as unknown as CanvasRenderingContext2D);
+    vi.spyOn(HTMLCanvasElement.prototype, "toDataURL").mockReturnValue(
+      "data:image/png;base64,eA==",
+    );
+    const read = vi.fn(async () => gif(2));
+    expect(await animatedStill("blob:p", 64, read)).toBe("data:image/png;base64,eA==");
+    expect(await animatedStill("blob:p", 64, read)).toBe("data:image/png;base64,eA==");
+    expect(read).toHaveBeenCalledTimes(1);
+    vi.unstubAllGlobals();
+  });
+});
+
 describe("bindAnimatedImage", () => {
   const STILL = "data:image/png;base64,c3RpbGw=";
   let row: HTMLDivElement;

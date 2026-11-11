@@ -142,6 +142,23 @@ export function captureFirstFrame(src: string, maxSide: number): Promise<string 
 const MAX_STILLS = 256;
 const stills = new Map<string, Promise<string | null>>();
 
+// Keys of pictures that were read and do not move. A key string is cheap, so
+// far more fit than the 256 stills (each holds a PNG data URL); a row that
+// comes back after a long scroll then skips reading the file again.
+const MAX_NOT_ANIMATED = 4096;
+const notAnimated = new Set<string>();
+// Bumped by clearAnimatedStills so an answer still in flight is not recorded
+// under a blob: URL that is already gone.
+let generation = 0;
+
+function rememberNotAnimated(key: string): void {
+  notAnimated.add(key);
+  if (notAnimated.size > MAX_NOT_ANIMATED) {
+    const oldest = notAnimated.values().next().value;
+    if (oldest !== undefined) notAnimated.delete(oldest);
+  }
+}
+
 /**
  * The still for the image at `objectUrl`, or null when it is not animated (or
  * its first frame could not be drawn: it then plays, rather than going blank).
@@ -153,11 +170,20 @@ export function animatedStill(
   readBytes: () => Promise<Uint8Array | null>,
 ): Promise<string | null> {
   const key = `${maxSide}|${objectUrl}`;
+  if (notAnimated.has(key)) return Promise.resolve(null);
   const known = stills.get(key);
   if (known !== undefined) return known;
+  const asked = generation;
   const pending = (async (): Promise<string | null> => {
     const bytes = await readBytes();
-    if (bytes === null || !isAnimatedImage(bytes)) return null;
+    if (bytes === null) return null;
+    if (!isAnimatedImage(bytes)) {
+      if (asked === generation) {
+        stills.delete(key);
+        rememberNotAnimated(key);
+      }
+      return null;
+    }
     return captureFirstFrame(objectUrl, maxSide);
   })().catch(() => null);
   stills.set(key, pending);
@@ -170,7 +196,9 @@ export function animatedStill(
 
 /** Forget every still (the image caches were cleared). */
 export function clearAnimatedStills(): void {
+  generation++;
   stills.clear();
+  notAnimated.clear();
 }
 
 /** When an animated picture plays: while `hover` (its row) is pointed at or
