@@ -166,6 +166,7 @@ func loadBytesWith(raw []byte, cfgPath string, overrides map[string]any) (*Confi
 		}
 	}
 	applyBounds(&cfg)
+	normalizeAllowedOrigins(&cfg.Server)
 	if err := normalizeUploadExtensions(&cfg.Upload); err != nil {
 		return nil, err
 	}

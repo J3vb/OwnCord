@@ -79,7 +79,7 @@ var editableRules = map[string]func(any) (any, error){
 	"voice.livekit_version":   liveKitVersionRule,
 	"voice.node_ip":           nodeIPRule,
 
-	"server.allowed_origins":               listRule(checkOrigin),
+	"server.allowed_origins":               originListRule,
 	"server.metrics_allowed_cidrs":         listRule(checkCIDR),
 	"server.livekit_webhook_allowed_cidrs": listRule(checkCIDR),
 	"plugins.http_allowlist":               listRule(checkHostname),
@@ -299,6 +299,24 @@ func listRule(check func(string) error) func(any) (any, error) {
 		}
 		return items, nil
 	}
+}
+
+// originListRule is listRule(checkOrigin) that stores each entry without its
+// trailing slash, so the saved value is the form the origin checks compare.
+func originListRule(v any) (any, error) {
+	out, err := listRule(checkOrigin)(v)
+	if err != nil {
+		return nil, err
+	}
+	items, ok := out.([]string)
+	if !ok {
+		return out, nil
+	}
+	trimmed := make([]string, len(items))
+	for i, it := range items {
+		trimmed[i] = trimOriginSlashes(it)
+	}
+	return trimmed, nil
 }
 
 func toStringSlice(v any) ([]string, bool) {
