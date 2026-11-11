@@ -57,6 +57,20 @@ test.describe("Emoji Picker — Insert into textarea", () => {
     await expect(page.locator("[data-testid='msg-textarea']")).toHaveValue(emoji!);
   });
 
+  test("an emoji from the last category can be picked after a category-bar jump", async ({
+    page,
+  }) => {
+    await page.locator(".emoji-btn").click();
+    const picker = page.locator(".emoji-picker.open");
+    await expect(picker.locator(".ep-category-label")).toHaveCount(9);
+    await picker.locator(".ep-category-btn").last().click();
+    const cell = picker.locator(".ep-grid").last().locator(".ep-emoji").first();
+    await expect(cell).toBeInViewport();
+    const emoji = await cell.getAttribute("data-emoji");
+    await cell.click();
+    await expect(page.locator("[data-testid='msg-textarea']")).toHaveValue(emoji!);
+  });
+
   test("emoji picker closes after selecting an emoji", async ({ page }) => {
     await page.locator(".emoji-btn").click();
     const picker = page.locator(".emoji-picker.open");
