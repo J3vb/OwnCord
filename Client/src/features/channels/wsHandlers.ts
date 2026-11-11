@@ -4,7 +4,6 @@
 import { authStore, setAuth } from "../../stores/auth.store";
 import {
   channelsStore,
-  setChannels,
   setRoles,
   setCategories,
   setActiveChannel,
@@ -15,180 +14,62 @@ import {
   setNsfwAcknowledged,
   noteChannelMessage,
   firstTextInSidebarOrder,
-  readyChannelMap,
 } from "../../stores/channels.store";
 import {
-  setMembers,
   addMember,
   removeMember,
   updateMemberRoles,
   updateMemberProfile,
-  updatePresence,
-  applyPresenceBatch,
-  applyReadyActivities,
-  applyReadyListening,
-  membersStore,
-  toMemberActivity,
-  toMemberListening,
 } from "../../stores/members.store";
 import { updateVoiceUserProfile } from "../../stores/voice.store";
-import {
-  dmStore,
-  setDmActivityLookup,
-  setDmListeningLookup,
-  updateDmParticipant,
-  type DmUser,
-} from "../../stores/dm.store";
-import { emojiStore, setCustomEmoji } from "../../stores/emoji.store";
-import { setStickers, stickersStore } from "../../stores/stickers.store";
-import { uiStore } from "../../stores/ui.store";
+import { dmStore, updateDmParticipant } from "../../stores/dm.store";
+import { setCustomEmoji } from "../../stores/emoji.store";
+import { setStickers } from "../../stores/stickers.store";
 import { getChannelMessages, markStickersDeleted } from "../../stores/messages.store";
-import {
-  type ChannelActivityEntry,
-  type ReadyActivity,
-  type ReadyListening,
-} from "../../lib/types";
-import { loadLastChannel } from "../../lib/prefs/lastChannel";
+import { type ChannelActivityEntry } from "../../lib/types";
 import {
   acceptReadState,
   failMarkUnread,
-  forgetPendingMarkUnread,
   isChannelAway,
   isHeldUnread,
-  markChannelRead,
-  markChannelReadSeen,
   writeReadPointer,
 } from "../../lib/readState";
-import {
-  applyGameActivityPolicy,
-  applyReadyCapabilities,
-  gameActivityPolicyIsOff,
-  hasReceivedReady,
-  readPointerEnabled,
-  stickersEnabled,
-} from "../../lib/net/serverCapabilities";
+import { hasReceivedReady } from "../../lib/net/serverCapabilities";
 import { showToast } from "../../lib/ui/toast";
-import {
-  notifyChannelActivity,
-  notifyMention,
-  type ThreadNotifyContext,
-} from "../../lib/notifications";
+import { notifyChannelActivity } from "../../lib/notifications";
 import {
   loadedThreadsStore,
   threadsStoreInUse,
   withThreadsStore,
 } from "../../stores/threadsLoader";
-import type { DispatchApi, Payload, WsRoute } from "../connection/dispatchContext";
+import type { Payload, WsRoute } from "../connection/dispatchContext";
 import { log, route } from "../connection/dispatchContext";
 import { connectText } from "../../i18n/connect";
-import { registerSessionReset } from "../../lib/net/sessionRegistry";
 import { WsErrorCode, ServerMessageType as S } from "@lib/protocolTypes";
 
-/** The channel/role/member snapshot of `ready`. */
-export function applyReadyChannels(payload: Payload<"ready">): void {
-  setChannels(payload.channels);
-  // Managers only; absent for everyone else and for older servers, which leaves
-  // the list empty so the groups come from the channels alone.
-  setCategories(payload.categories ?? []);
-  setRoles(payload.roles ?? []);
-  setMembers(payload.members);
-}
+import { handleGameActivityPolicy, handlePresence, handlePresenceBatch } from "./wsGameActivity";
+import {
+  deferMentionAlert,
+  matchMentionEntry,
+  threadNotifyContext,
+  withdrawMentionAlert,
+} from "./wsMentionAlerts";
 
-/**
- * The active-channel slice of `ready`: auto-select, or clear a channel that is
- * gone. Returns the channel markReadyActiveChannelRead should mark read.
- */
-export function applyReadyActiveChannel(payload: Payload<"ready">): number | null {
-  // Auto-select the first text channel if none is active; clear it when
-  // the channel this session was viewing is gone from the fresh snapshot
-  // (deleted, or a DM closed elsewhere while this client was offline) so
-  // the activeChannelId subscriber actually fires and tears down the
-  // stale message list/composer instead of leaving them mounted against
-  // a channel the server no longer recognizes. Checked against the raw
-  // payload (not the synthesized channelsStore row) so a still-open DM
-  // that was never locally synthesized this session isn't wrongly
-  // cleared.
-  const currentActive = channelsStore.select((s) => s.activeChannelId);
-  // Set only when the branch below clears a channel that was active
-  // before this ready — distinct from "no channel was active", which
-  // must NOT mark-read whatever the auto-select branch just picked.
-  let activeChannelCleared = false;
-  // A content view leaves no channel active on purpose; auto-selecting
-  // one would close it.
-  const viewOpen = uiStore.getState().activeView !== null;
-  if (currentActive === null && !viewOpen && payload.channels.length > 0) {
-    // Restore where the user left off rather than always jumping to the
-    // first text channel. The stored id is a hint — ignore it when the channel
-    // is gone or no longer visible. Selecting is not viewing, so neither this
-    // nor the fallback clears the badge (clearUnread: false); the channel
-    // clears only when actually mounted.
-    const remembered = loadLastChannel();
-    const rememberedVisible =
-      remembered !== null && payload.channels.some((ch) => ch.id === remembered);
-    if (rememberedVisible) {
-      setActiveChannel(remembered, { clearUnread: false });
-    } else {
-      const firstText = firstTextInSidebarOrder(readyChannelMap(payload.channels));
-      if (firstText !== undefined) {
-        setActiveChannel(firstText.id, { clearUnread: false });
-      }
-    }
-  } else if (currentActive !== null) {
-    const stillPresent =
-      payload.channels.some((ch) => ch.id === currentActive) ||
-      (payload.dm_channels ?? []).some((dm) => dm.channel_id === currentActive);
-    if (!stillPresent) {
-      setActiveChannel(null);
-      activeChannelCleared = true;
-    }
-  }
-  return activeChannelCleared ? null : currentActive;
-}
-
-/**
- * Mark the channel the user was already reading as read after `ready`.
- *
- * The server's read_states go stale while a channel stays focused
- * (channel_focus is sent once per mount, mark_read only from the context
- * menu), so a full-ready resync restates non-zero unread/mention counts for
- * the very channel the user is reading. Mark it read: this advances the
- * server read state and clears the local badges, for server channels and DMs
- * alike. Skipped on first connect (nothing was active yet) and when
- * applyReadyActiveChannel just cleared a channel that's gone — it returns
- * null for both.
- *
- * Only while the reader is actually watching — a focused window whose
- * loaded window is not detached. An unfocused or background resync restates
- * the messages missed while away, and clearing them here would silently mark
- * those unseen messages read (isChannelAway, lib/readState.ts).
- */
-export function markReadyActiveChannelRead(currentActive: number | null): void {
-  // A forum holds no messages, so there is nothing in it to mark read.
-  if (
-    currentActive !== null &&
-    channelsStore.getState().channels.get(currentActive)?.type === "forum"
-  ) {
-    return;
-  }
-  if (currentActive !== null && !isChannelAway(currentActive)) {
-    // With a read pointer the ready-time mark is only what the reader saw, not
-    // "everything": a resync that restated messages missed while the list was
-    // not on screen must not mark them read. Without one, as it always was.
-    if (readPointerEnabled()) markChannelReadSeen(currentActive);
-    else markChannelRead(currentActive);
-  }
-}
-
-/**
- * The capabilities slice of a full `ready`, applied first. A new `ready`
- * restates every pointer, so a Mark Unread still waiting for its answer from
- * the previous connection is forgotten rather than restored or toasted against
- * the new one.
- */
-export function applyReadyReadPointer(payload: Payload<"ready">): void {
-  applyReadyCapabilities(payload.capabilities);
-  forgetPendingMarkUnread();
-}
+export {
+  applyReadyChannels,
+  applyReadyActiveChannel,
+  markReadyActiveChannelRead,
+  applyReadyReadPointer,
+  applyReadyEmoji,
+  applyReadyStickers,
+} from "./wsReadySlices";
+export {
+  applyReadyGameActivities,
+  applyAuthOkGameActivityPolicy,
+  handlePresence,
+  handlePresenceBatch,
+} from "./wsGameActivity";
+export { MENTION_ALERT_GRACE_MS, resetChannelActivity } from "./wsMentionAlerts";
 
 /**
  * read_state: the server moved this user's read pointer in a channel or DM and
@@ -247,178 +128,6 @@ export function handleMarkUnreadError(payload: Payload<"error">, id: string | un
         ? "notFound"
         : "failed";
   return failMarkUnread(id, notice);
-}
-
-/** The custom-emoji slice of `ready`. */
-export function applyReadyEmoji(api: DispatchApi | undefined): void {
-  // Custom emoji are not in the ready payload (they are server-wide and
-  // change rarely, so they do not belong in the per-session dump). Load
-  // them once here; `emoji_update` keeps them fresh from then on. A
-  // failure is non-fatal — unresolved shortcodes stay plain text.
-  //
-  // Snapshot the revision emojiStore was at right before issuing
-  // this fetch, mirroring the blockedByMeRev guard above. The GET
-  // travels over a separate HTTP connection while an `emoji_update` can
-  // arrive on the already-open socket — if one lands (bumping the
-  // revision) while this GET is in flight, setCustomEmoji sees the
-  // mismatch and skips applying this reply instead of clobbering the
-  // fresher broadcast with a stale full-set snapshot.
-  if (api?.listEmoji !== undefined) {
-    const emojiRevAtFetch = emojiStore.getState().rev ?? 0;
-    api
-      .listEmoji()
-      .then((list) => setCustomEmoji(list, emojiRevAtFetch))
-      .catch((err) => log.warn("Failed to load custom emoji", { error: String(err) }));
-  }
-}
-
-/**
- * The custom-sticker slice of `ready`. Like emoji, the set is not in
- * the ready payload: load it once here, only on a server that advertises the
- * `stickers` capability (applyReadyCapabilities has already run), and let
- * `sticker_update` keep it fresh. A failure is non-fatal: the picker shows its
- * empty state until the next broadcast.
- *
- * The revision snapshot mirrors the emoji one: a `sticker_update` that lands
- * while this GET is in flight bumps it, and the stale reply is then dropped.
- */
-export function applyReadyStickers(api: DispatchApi | undefined): void {
-  if (!stickersEnabled() || api?.listStickers === undefined) return;
-  const revAtFetch = stickersStore.getState().rev;
-  api
-    .listStickers()
-    .then((list) => setStickers(list, revAtFetch))
-    .catch((err) => log.warn("Failed to load custom stickers", { error: String(err) }));
-}
-
-/**
- * `ready.activities` and `ready.listening`: who plays what
- * and who listens to what right now. Applied after the roster and the DM list
- * are in, so it reaches both copies; a server without the key sends none, and
- * the members then play and listen to nothing.
- */
-export function applyReadyGameActivities(payload: Payload<"ready">): void {
-  applyGameActivityList(payload.activities ?? [], payload.listening ?? []);
-}
-
-/**
- * `game_activity_policy`: an admin turned game activity on or off.
- * The capability follows at once. Off also clears every shown game, so none
- * lingers if a clearing `presence` frame is dropped; on restates nothing,
- * since the games return with presence.
- */
-export function handleGameActivityPolicy(payload: Payload<"game_activity_policy">): void {
-  if (applyGameActivityPolicy(payload.enabled) && !payload.enabled) applyGameActivityList([], []);
-}
-
-/**
- * `auth_ok.game_activity_policy`: the same switch on every connect and resume.
- * A resume gets no `ready` and may have missed the frame while offline. An
- * older server states none, and the `ready` capability decides.
- */
-export function applyAuthOkGameActivityPolicy(payload: Payload<"auth_ok">): void {
-  if (payload.game_activity_policy !== undefined) {
-    handleGameActivityPolicy(payload.game_activity_policy);
-  }
-}
-
-/**
- * Who plays what, restated from `list`: the roster and the DM copies of it
- * both follow, and a DM opened from now on takes its people's games from the
- * members store.
- */
-function applyGameActivityList(
-  list: readonly ReadyActivity[],
-  songs: readonly ReadyListening[],
-): void {
-  applyReadyActivities(list);
-  applyReadyListening(songs);
-  setDmActivityLookup((userId) => membersStore.getState().members.get(userId)?.activity);
-  setDmListeningLookup((userId) => membersStore.getState().members.get(userId)?.listening);
-  const byUser = new Map(list.map((a) => [a.user_id, toMemberActivity(a)]));
-  const songByUser = new Map(songs.map((l) => [l.user_id, toMemberListening(l)]));
-  const partners = new Set<number>();
-  for (const c of dmStore.getState().channels) {
-    partners.add(c.recipient.id);
-    for (const p of c.participants) partners.add(p.id);
-  }
-  for (const id of partners) {
-    updateDmParticipant(id, {
-      activity: byUser.get(id) ?? null,
-      listening: songByUser.get(id) ?? null,
-    });
-  }
-}
-
-export function handlePresence(payload: Payload<"presence">): void {
-  // custom_status is passed through verbatim, undefined included: the
-  // store treats "field absent" as "leave the text alone", which is what
-  // an older server's presence event means.
-  // activity follows the same rule: absent leaves the shown game alone.
-  // While the server states game activity is off, a game on a frame that
-  // outran the off frame is not shown.
-  const off = gameActivityPolicyIsOff();
-  const activity = off ? null : payload.activity;
-  // The same switch covers the song.
-  const listening = off ? null : payload.listening;
-  updatePresence(
-    payload.user_id,
-    payload.status,
-    payload.custom_status,
-    undefined,
-    activity,
-    listening,
-    payload.mobile === true,
-  );
-  // dmStore keeps its own frozen copy of a DM partner's status for the
-  // sidebar row (see buildDmConversations) — membersStore alone does not
-  // reach it.
-  updateDmParticipant(payload.user_id, {
-    status: payload.status,
-    mobile: payload.mobile === true,
-    ...(activity === undefined ? {} : { activity: toMemberActivity(activity) }),
-    ...(listening === undefined ? {} : { listening: toMemberListening(listening) }),
-  });
-}
-
-export function handlePresenceBatch(payload: Payload<"presence_batch">): void {
-  const full = payload.full === true;
-  // As in handlePresence: no game is shown while the server states it is off.
-  const off = gameActivityPolicyIsOff();
-  const updates = off
-    ? payload.updates.map((u) => ({ ...u, activity: null, listening: null }))
-    : payload.updates;
-  applyPresenceBatch(updates, full);
-  // Only DM partners need the dmStore copy (see handlePresence); a full
-  // snapshot takes a partner it leaves out offline.
-  const statuses = new Map(updates.map((u) => [u.user_id, u.status]));
-  const activities = new Map(updates.map((u) => [u.user_id, u.activity]));
-  const songs = new Map(updates.map((u) => [u.user_id, u.listening]));
-  const phones = new Set(updates.filter((u) => u.mobile === true).map((u) => u.user_id));
-  const partners = new Set<number>();
-  for (const c of dmStore.getState().channels) {
-    partners.add(c.recipient.id);
-    for (const p of c.participants) partners.add(p.id);
-  }
-  for (const id of partners) {
-    const listed = statuses.has(id);
-    const status = statuses.get(id) ?? (full ? "offline" : undefined);
-    if (status === undefined) continue;
-    const activity = activities.get(id);
-    const song = songs.get(id);
-    // A partner the snapshot leaves out plays and listens to nothing; an entry
-    // without the field (an older server) leaves what is shown alone.
-    const patch: Partial<DmUser> = { status, mobile: phones.has(id) };
-    if (!listed) {
-      updateDmParticipant(id, { ...patch, activity: null, listening: null });
-      continue;
-    }
-    updateDmParticipant(id, {
-      ...patch,
-      ...(activity === undefined ? {} : { activity: toMemberActivity(activity) }),
-      ...(song === undefined ? {} : { listening: toMemberListening(song) }),
-    });
-  }
 }
 
 export function handleChannelCreate(payload: Payload<"channel_create">): void {
@@ -501,116 +210,6 @@ function handleThreadMentionCount(
   else if (payload.count < previous)
     withdrawMentionAlert(payload.channel_id, previous - payload.count);
 }
-
-/** Who an alert for `id` is for when `id` is a followed thread: its parent, name and whether it is open. */
-function threadNotifyContext(id: number): ThreadNotifyContext | undefined {
-  const m = loadedThreadsStore();
-  const t = m?.getThread(id);
-  if (m === null || t === undefined) return undefined;
-  return {
-    parentId: t.parent_id,
-    name: t.name,
-    watching: m.threadsStore.getState().focusedThreadId === id,
-  };
-}
-
-/**
- * How long a mention_count alert waits for a channel_activity entry that
- * carries the mention, and how long a mention entry that came first waits for
- * its rise. The server flushes activity on a 1 s window and
- * resolves a flush within 2 s.
- */
-export const MENTION_ALERT_GRACE_MS = 3000;
-
-/** A channel's mention_count rises still waiting for an activity entry. */
-interface PendingMentionAlert {
-  readonly timer: ReturnType<typeof setTimeout>;
-  /** Rises not yet matched by a mention entry. */
-  owed: number;
-}
-
-const pendingMentionAlerts = new Map<number, PendingMentionAlert>();
-/** Mention entries that arrived before their rise, with when, by channel. */
-const activityCredits = new Map<number, number[]>();
-
-/** Unexpired credits for `channelId`, oldest first. */
-function liveCredits(channelId: number): number[] {
-  const now = Date.now();
-  const live = (activityCredits.get(channelId) ?? []).filter(
-    (at) => now - at < MENTION_ALERT_GRACE_MS,
-  );
-  if (live.length === 0) activityCredits.delete(channelId);
-  else activityCredits.set(channelId, live);
-  return live;
-}
-
-/**
- * Alert for `rises` mention_count rises unless channel_activity announces
- * them. Each mention entry matches one rise, before or after it, so a second
- * mention whose entry never came (the server keeps only a window's newest
- * mentions, a dropped frame, a server without the frame) still alerts, one
- * grace window late.
- */
-function deferMentionAlert(channelId: number, rises: number): void {
-  const credits = liveCredits(channelId);
-  const used = Math.min(credits.length, rises);
-  if (used > 0) {
-    credits.splice(0, used);
-    if (credits.length === 0) activityCredits.delete(channelId);
-  }
-  const owed = rises - used;
-  if (owed === 0) return;
-  const pending = pendingMentionAlerts.get(channelId);
-  if (pending !== undefined) {
-    pending.owed += owed;
-    return;
-  }
-  pendingMentionAlerts.set(channelId, {
-    owed,
-    timer: setTimeout(() => {
-      pendingMentionAlerts.delete(channelId);
-      const thread = threadNotifyContext(channelId);
-      if (thread === undefined) notifyMention(channelId);
-      else notifyMention(channelId, thread);
-    }, MENTION_ALERT_GRACE_MS),
-  });
-}
-
-/** Take back `count` rises a lowered total reversed (a delete or purge). */
-function withdrawMentionAlert(channelId: number, count: number): void {
-  const pending = pendingMentionAlerts.get(channelId);
-  if (pending === undefined) return;
-  pending.owed -= count;
-  if (pending.owed <= 0) {
-    clearTimeout(pending.timer);
-    pendingMentionAlerts.delete(channelId);
-  }
-}
-
-/** A mention entry alerted: it answers one pending rise, or one still to come. */
-function matchMentionEntry(channelId: number): void {
-  const pending = pendingMentionAlerts.get(channelId);
-  if (pending === undefined) {
-    activityCredits.set(channelId, [...liveCredits(channelId), Date.now()]);
-    return;
-  }
-  pending.owed--;
-  if (pending.owed <= 0) {
-    clearTimeout(pending.timer);
-    pendingMentionAlerts.delete(channelId);
-  }
-}
-
-/** Drop pending mention alerts and what they were matched against. Run when
- *  the dispatcher is torn down. */
-export function resetChannelActivity(): void {
-  for (const pending of pendingMentionAlerts.values()) clearTimeout(pending.timer);
-  pendingMentionAlerts.clear();
-  activityCredits.clear();
-}
-// Mention alerts are keyed by this server's channel ids and fire on a timer;
-// a server switch must not let one fire for the next server.
-void registerSessionReset("channels:activity", resetChannelActivity, { phase: "cache" }); // app-lifetime
 
 /** The newest confirmed message loaded for a channel; a pending send has id 0. */
 function newestLoadedId(channelId: number): number {

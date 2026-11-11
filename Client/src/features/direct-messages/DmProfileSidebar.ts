@@ -12,13 +12,17 @@
  * focus first focusable on open.
  */
 
+import type {
+  DmProfileData,
+  DmProfileSidebarComponent,
+  DmProfileSidebarOptions,
+} from "./dmProfileTypes";
+import { appendActionButtons, appendNoteSection, makeDivider } from "./dmProfileSections";
 import { isImeCommit } from "@lib/text/ime";
 import { Disposable } from "@lib/disposable";
 import { dialogOpen } from "@lib/ui/dialogOpen";
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import type { MountableComponent } from "@lib/text/safeRender";
-import type { UserStatus } from "@lib/types";
 import { avatarInitial, resolveDisplayName } from "@lib/ui/avatar";
 import { isRenderableAvatar, setAvatarSource } from "../profiles/avatar";
 import {
@@ -26,97 +30,18 @@ import {
   recoverEvictedImage,
   resolveServerUrl,
 } from "../messaging/content/attachments";
-import { blocksStore } from "@stores/blocks.store";
 import { paintBanner } from "../profiles/banner";
 import { bannerImages } from "../profiles/bannerImages";
-import { shellText } from "../../i18n/shell";
 import {
   applyStatusIndicator,
   applyStatusLine,
   statusIndicatorLabel,
 } from "@lib/ui/statusIndicator";
 import { requestsText } from "../../i18n/requests";
-import { reportEntryText } from "../../i18n/reportEntry";
 import { playingForLine } from "../members/gameActivityLine";
 import { mountListeningCard } from "../members/listeningCard";
-import type { ListeningSong } from "../members/listeningLine";
-import { NOTE_MAX_LENGTH, createNoteBinding, type NotesContext } from "../profiles/userNotes";
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-export interface DmProfileData {
-  readonly id: number;
-  readonly username: string;
-  /** Nickname, when set. The DM header this panel opens from renders through
-   *  `dmDisplayName`, which prefers this over `username` -- without it here
-   *  the panel would show a different identity from the header just clicked. */
-  readonly displayName?: string | null;
-  readonly avatar: string | null;
-  readonly status: UserStatus;
-  /** The person's own status line under the name. Null or absent = none. */
-  readonly customStatus?: string | null;
-  /** On the Android app: the status dot becomes a phone. */
-  readonly mobile?: boolean;
-  /** The game being played: "Playing <game> · for N min" under the status. */
-  readonly activity?: { readonly name: string; readonly startedAt: number } | null;
-  /** The song being listened to, with a progress bar that ticks while open. */
-  readonly listening?: ListeningSong | null;
-  readonly about?: string | null;
-  readonly joinDate?: string | null;
-  /** Banner image path and colour; absent or null = no strip. */
-  readonly banner?: string | null;
-  readonly banner_color?: string | null;
-}
-
-export interface DmProfileSidebarOptions {
-  readonly user: DmProfileData;
-  readonly onClose: () => void;
-  /** Block (`block` true) or Unblock this user. The owner confirms a
-   *  Block; the label follows `blocksStore`. Omitted: no button. */
-  readonly onToggleBlock?: (userId: number, block: boolean) => void;
-  /** Open the report form for this user. Omitted: no button. */
-  readonly onReport?: (userId: number) => void;
-  /**
-   * The connected server's host, used to scope the note's localStorage key.
-   * User ids are per-server, so without this a note about user 5 on one
-   * server is shown for, and overwritten by, the unrelated user 5 on
-   * another — real in the multi-profile client (see profiles.ts). Optional,
-   * and falls back to the legacy unscoped key, so a caller that has not
-   * been updated to pass it yet keeps today's single-profile behavior
-   * exactly (including any note already saved under the old key).
-   */
-  readonly host?: string;
-  /**
-   * Where the note is kept: the session that opened the panel, captured at open
-   * so a flush on close or on a DM switch uses its API client. Omitted: the note
-   * stays in localStorage under `host`, as before the server kept notes.
-   */
-  readonly notes?: NotesContext;
-  /**
-   * Move focus to the panel on mount. True (the default) when the user opened
-   * it; false when it opened by itself with the conversation, so it never takes
-   * focus from the composer or whatever the user was typing in.
-   */
-  readonly focus?: boolean;
-}
-
-export type DmProfileSidebarComponent = MountableComponent & {
-  readonly isOpen: () => boolean;
-  /**
-   * Repaint the name, avatar initial and status (dot + label, both the
-   * avatar-corner one and the inline one) from a fresher `DmProfileData`,
-   * in place -- without rebuilding the panel and losing the note textarea's
-   * focus/selection. The panel itself has no subscription to any store (it
-   * is intentionally presentational); the owner is expected to call this
-   * when the underlying user's presence or identity changes while the panel
-   * stays open, mirroring how ChannelController keeps the DM chat header
-   * live across the same events (see ChannelController.ts's refreshDmHeader).
-   * A no-op before mount() or after destroy().
-   */
-  readonly update: (user: DmProfileData) => void;
-};
+export type { DmProfileData, DmProfileSidebarComponent, DmProfileSidebarOptions };
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -134,9 +59,6 @@ const bannerKeyOf = (u: DmProfileData): string => `${u.banner ?? ""}|${u.banner_
 // ---------------------------------------------------------------------------
 // Component factory
 // ---------------------------------------------------------------------------
-
-// Divider helper
-const makeDivider = (): HTMLDivElement => createElement("div", { class: "dps-divider" });
 
 export function createDmProfileSidebar(
   options: DmProfileSidebarOptions,
@@ -383,110 +305,15 @@ export function createDmProfileSidebar(
       appendChildren(content, joinTitle, joinText);
     }
 
-    // Note section (private; on the server when it keeps notes, else localStorage)
-    content.appendChild(makeDivider());
-    const noteTitle = createElement(
-      "div",
-      { class: "dps-section-title" },
-      requestsText("profile.note"),
-    );
-
-    const noteInput = createElement("textarea", {
-      class: "dps-note",
-      placeholder: requestsText("profile.notePlaceholder"),
-      "data-testid": "dps-note",
-      rows: "3",
-      maxlength: String(NOTE_MAX_LENGTH),
-    });
-    const binding = createNoteBinding(
-      options.notes ?? { api: null, host, sessionSignal: signal },
-      user.id,
-    );
-    // Flush an edit still waiting on its debounce when the body goes away: the
-    // panel closing, or a switch to another DM.
-    contentSignal.addEventListener("abort", () => binding.destroy(), { once: true });
-    let noteDirty = false;
-    if (binding.remote) {
-      void binding.load(contentSignal).then(
-        (text) => {
-          if (!noteDirty && !contentSignal.aborted) noteInput.value = text;
-        },
-        () => undefined,
-      );
-    } else {
-      noteInput.value = binding.readLocal();
-    }
-    const noteError = createElement("div", {
-      class: "dps-note-error",
-      role: "status",
-      "data-testid": "dps-note-error",
-    });
-    binding.onFailedChange((failed) => {
-      setText(noteError, failed ? requestsText("profile.noteNotSaved") : "");
+    appendNoteSection(content, {
+      userId: user.id,
+      host,
+      notes: options.notes,
+      signal,
+      contentSignal,
     });
 
-    noteInput.addEventListener(
-      "input",
-      () => {
-        noteDirty = true;
-        binding.change(noteInput.value);
-      },
-      { signal: contentSignal },
-    );
-    noteInput.addEventListener("blur", () => binding.flush(), { signal: contentSignal });
-
-    appendChildren(content, noteTitle, noteInput, noteError);
-
-    const actionsDivider = makeDivider();
-    let actionsShown = false;
-    const showActionsDivider = (): void => {
-      if (!actionsShown) content.append(actionsDivider);
-      actionsShown = true;
-    };
-
-    if (options.onReport !== undefined) {
-      const onReport = options.onReport;
-      const reportBtn = createElement("button", {
-        class: "dps-report-btn",
-        type: "button",
-        "aria-haspopup": "dialog",
-        "data-testid": "dps-report-btn",
-      });
-      reportBtn.appendChild(createIcon("flag", 14));
-      reportBtn.appendChild(document.createTextNode(` ${reportEntryText("report")}`));
-      reportBtn.addEventListener("click", () => onReport(user.id), { signal: contentSignal });
-      showActionsDivider();
-      content.append(reportBtn);
-    }
-
-    // Block / Unblock. The label follows blocksStore, so it flips when the
-    // owner's request lands and stays put when it fails.
-    if (options.onToggleBlock !== undefined) {
-      const onToggleBlock = options.onToggleBlock;
-      const blockBtn = createElement("button", {
-        class: "dps-block-btn",
-        type: "button",
-        "data-testid": "dps-block-btn",
-      });
-      const paint = (): void => {
-        setText(
-          blockBtn,
-          shellText(
-            blocksStore.getState().blockedByMe.has(user.id) ? "member.unblock" : "member.block",
-          ),
-        );
-      };
-      paint();
-      blockBtn.addEventListener(
-        "click",
-        () => onToggleBlock(user.id, !blocksStore.getState().blockedByMe.has(user.id)),
-        { signal: contentSignal },
-      );
-      const unsub = blocksStore.subscribe(paint);
-      contentSignal.addEventListener("abort", unsub, { once: true });
-      showActionsDivider();
-      content.append(blockBtn);
-    }
+    appendActionButtons(content, user.id, options, contentSignal);
 
     return content;
   }
