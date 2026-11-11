@@ -15,13 +15,13 @@ e.g. `server_restart.reason`) only.** Route by what you are changing —
 most payload work never touches it, and sending a field change through the
 regenerate cycle below is wasted work:
 
-| Change                                                   | What to edit                                                                                                           |
-| -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| New message type                                         | schema + regenerate (steps below)                                                                                      |
-| New or changed value of a schema `enums` field           | schema `enums` + regenerate (steps below)                                                                              |
-| New REST or WebSocket error code                         | schema `error_codes.rest` / `.ws` + regenerate; reply with `httperr.CodeX` / `ws.ErrCodeX`, never the string           |
-| New or changed payload **field** on an existing type     | `Server/ws/command.go`/`messages.go`, `Client/src/lib/protocolTypes.ts`, `docs/protocol.md` — no schema, no regenerate |
-| Content inside an opaque blob the server relays verbatim | `docs/protocol.md` only; often zero Go change                                                                          |
+| Change                                                   | What to edit                                                                                                                                     |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| New message type                                         | schema + regenerate (steps below)                                                                                                                |
+| New or changed value of a schema `enums` field           | schema `enums` + regenerate (steps below)                                                                                                        |
+| New REST or WebSocket error code                         | schema `error_codes.rest` / `.ws` + regenerate; reply with `httperr.CodeX` / `ws.ErrCodeX`, never the string                                     |
+| New or changed payload **field** on an existing type     | `Server/ws/command.go`/`messages.go`, `Client/src/lib/wire*.ts`, `docs/protocol.md`; then run `cd Client && npm run gen:wire` — no schema change |
+| Content inside an opaque blob the server relays verbatim | `docs/protocol.md` only; often zero Go change                                                                                                    |
 
 Before assuming a field needs server work, read the relay handler: if the server
 forwards the message raw, there is nothing to add. If it **re-serialises**, an
