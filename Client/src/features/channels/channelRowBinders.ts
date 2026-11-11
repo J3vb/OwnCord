@@ -12,6 +12,7 @@
 
 import { Disposable } from "@lib/disposable";
 import { navigateToChannel } from "@lib/nav/channelNavigation";
+import { attachPressWarm } from "@lib/nav/pressWarm";
 import {
   NO_CATEGORY,
   UNCATEGORIZED_VOICE_CATEGORY,
@@ -112,6 +113,7 @@ export function createChannelRow(
   const el = model.kind === "voice" ? env.voice.create(ch, signal) : drawTextChannelRow(model);
   if (model.kind !== "voice") {
     el.addEventListener("click", () => navigateToChannel(model.channelId), { signal });
+    attachPressWarm(el, model.channelId, signal);
   }
   attachChannelContextMenu(
     el,
