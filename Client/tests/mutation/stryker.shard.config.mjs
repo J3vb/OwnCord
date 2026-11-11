@@ -140,6 +140,7 @@ export const shards = {
     "src/features/voice/sessionTokens.ts",
     "src/features/voice/talkSlot.ts",
     "src/features/voice/videoGrid/gridConstants.ts",
+    "src/features/voice/videoGrid/gridSizing.ts",
     "src/features/voice/videoGrid/packLayout.ts",
     "src/lib/voice/shareDiagnostics.ts",
   ],

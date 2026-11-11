@@ -64,6 +64,8 @@ export interface GridState {
 export interface GridApi {
   doc(): Document;
   applyGridSizes(): void;
+  /** Pack again when the tile's picture changes shape. */
+  watchTileShape(entry: CellEntry): void;
   syncPeople(): void;
   hiddenByView(el: HTMLDivElement, config: TileConfig | undefined): boolean;
   applyViewFilters(): void;

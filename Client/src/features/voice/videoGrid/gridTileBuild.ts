@@ -286,6 +286,7 @@ export function createGridTileBuild(st: GridState, api: GridApi, menus: GridMenu
       entry.zoom = bindVideoZoom(cell, entry.listeners.signal);
     }
     bindFullscreenKeys(cell, userId, entry.listeners.signal);
+    api.watchTileShape(entry);
     if (config !== undefined && !config.isSelf) addRemoteControls(userId, entry, config, nav, back);
     // Your own screen share has no menu.
     if (config !== undefined && (!config.isSelf || !config.isScreenshare)) {
