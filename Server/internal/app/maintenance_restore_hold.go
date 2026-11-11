@@ -21,14 +21,23 @@ const restoreFileHold = 7 * 24 * time.Hour
 // restoreHoldActive reports whether a pre_restore_ safety copy in dir was taken
 // within restoreFileHold of now, and until when that hold lasts (the newest such
 // copy's time plus restoreFileHold). A folder that does not exist holds nothing.
-// A folder that cannot be read for any other reason is treated as holding, with
-// the error returned, so a folder the server cannot see into never turns into
-// permission to remove uploads.
+// A path that is not a folder, or a folder that cannot be read for any other
+// reason, is treated as holding, with the error returned, so a folder the server
+// cannot see into never turns into permission to remove uploads. The path is
+// examined before it is listed: listing a path that is not a folder fails
+// differently on each system, and on Windows it can look like an empty folder.
 func restoreHoldActive(dir string, now time.Time) (held bool, until time.Time, err error) {
-	entries, err := os.ReadDir(dir)
+	folder, err := os.Stat(dir)
 	if errors.Is(err, fs.ErrNotExist) {
 		return false, time.Time{}, nil
 	}
+	if err != nil {
+		return true, time.Time{}, fmt.Errorf("read backup folder: %w", err)
+	}
+	if !folder.IsDir() {
+		return true, time.Time{}, fmt.Errorf("read backup folder: %s is not a folder", dir)
+	}
+	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return true, time.Time{}, fmt.Errorf("read backup folder: %w", err)
 	}
