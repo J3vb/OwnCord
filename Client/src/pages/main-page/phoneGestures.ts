@@ -18,6 +18,7 @@ import { createElement } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { isPhoneLayout } from "@lib/ui/bottomSheet";
 import { watchSwipes } from "@lib/ui/swipe";
+import { ensureActionsBar } from "../../features/messaging/message-list/messageActionBar";
 
 /** How far a swipe must go before letting go opens or closes a panel. */
 export const PANEL_SWIPE_PX = 60;
@@ -51,7 +52,7 @@ type ChatMode = "pending" | "drawer" | "members" | "reply";
 interface ChatSwipe {
   mode: ChatMode;
   readonly row: HTMLElement | null;
-  readonly replyButton: HTMLElement | null;
+  replyButton: HTMLElement | null;
   icon: HTMLElement | null;
 }
 
@@ -104,10 +105,14 @@ export function installPhoneGestures(opts: PhoneGesturesOptions): void {
       if (!isPhoneLayout() || opts.drawer()?.isOpen() === true) return null;
       if (opts.members()?.isOverlayOpen() === true) return null;
       const row = target.closest<HTMLElement>(".message");
-      const replyButton = row?.querySelector<HTMLElement>(REPLY_BUTTON) ?? null;
-      return { mode: "pending", row: replyButton === null ? null : row, replyButton, icon: null };
+      const withBar = row !== null && row.querySelector(".msg-actions-bar") !== null ? row : null;
+      return { mode: "pending", row: withBar, replyButton: null, icon: null };
     },
     start(swipe, dx) {
+      if (swipe.row !== null && dx < 0) {
+        ensureActionsBar(swipe.row);
+        swipe.replyButton = swipe.row.querySelector<HTMLElement>(REPLY_BUTTON);
+      }
       if (dx > 0) {
         swipe.mode = "drawer";
       } else if (swipe.replyButton !== null && swipe.row !== null) {

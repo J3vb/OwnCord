@@ -6,6 +6,7 @@
 import { getChannelMessages, type Message } from "@stores/messages.store";
 import { buildVirtualItems, keyOf, visibleMessages, type VirtualItem } from "./virtualItems";
 import { blockedUsers, focusSurvivingRow } from "./listShared";
+import { carryActionsBar } from "./messageActionBar";
 import type { ListState, ListApi } from "./listState";
 
 /** What a patch decided from diffing the store's rows against the rendered ones. */
@@ -247,7 +248,9 @@ export function createListPatch(
         rows.push(el);
         reused.add(el);
       } else {
-        rows.push(api.renderVirtualItem(now));
+        const fresh = api.renderVirtualItem(now);
+        if (el !== undefined) carryActionsBar(el, fresh);
+        rows.push(fresh);
       }
     }
     return { rows, reused };

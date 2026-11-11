@@ -534,6 +534,18 @@
       "binding": "layersBySender",
       "category": "dom-owned",
       "reason": "WeakMap keyed by the live RTCRtpSender; its layer rates go with the sender when a stop or leave drops it, so nothing outlives the session"
+    },
+    {
+      "file": "features/messaging/message-list/messageActionBar.ts",
+      "binding": "pendingFills",
+      "category": "dom-owned",
+      "reason": "Fill still owed by each message row that shows only its \"...\" button; keyed by the row element, dropped with it, so a session reset has nothing to clear"
+    },
+    {
+      "file": "features/messaging/message-list/messageActionBar.ts",
+      "binding": "filledRows",
+      "category": "dom-owned",
+      "reason": "Rows whose hover bar is built; keyed by the row element and dropped with it"
     }
   ]
 }

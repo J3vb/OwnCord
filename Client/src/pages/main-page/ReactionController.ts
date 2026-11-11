@@ -11,6 +11,7 @@ import {
   channelCanReact,
   reactionLockReason,
 } from "../../features/messaging/message-list/reactions";
+import { ensureActionsBar } from "../../features/messaging/message-list/messageActionBar";
 import { addOptimisticReaction, getChannelMessages } from "@stores/messages.store";
 import { listCustomEmoji } from "@stores/emoji.store";
 import type { WsClient } from "@lib/ws";
@@ -23,6 +24,13 @@ const emojiPickerScreen = createLazyScreen(
   "emoji-picker",
   () => import("../../features/messaging/EmojiPicker"),
 );
+
+/** The React button of a message's hover bar, building the bar first if it is still a shell. */
+function reactButtonOf(msgId: number): Element | null {
+  const row = document.querySelector(`[data-testid="message-${msgId}"]`);
+  if (row !== null) ensureActionsBar(row);
+  return document.querySelector(`[data-testid="msg-react-${msgId}"]`);
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -97,7 +105,7 @@ export function createReactionController(opts: ReactionControllerOptions): React
 
   function openPicker(msgId: number): void {
     // A phone opens the picker in a sheet, so it needs no hover-bar button to sit by.
-    const reactBtn = document.querySelector(`[data-testid="msg-react-${msgId}"]`);
+    const reactBtn = reactButtonOf(msgId);
     if (reactBtn === null && !isPhoneLayout()) return;
 
     // Close any existing reaction picker (including proper cleanup). A picker
@@ -174,7 +182,7 @@ export function createReactionController(opts: ReactionControllerOptions): React
       return;
     }
     // The row may have re-rendered or gone while the code loaded.
-    const reactBtn = document.querySelector(`[data-testid="msg-react-${msgId}"]`);
+    const reactBtn = reactButtonOf(msgId);
     if (reactBtn === null) return;
     const wrap = createElement("div", { class: "reaction-picker-wrap" });
     wrap.setAttribute("data-message-id", String(msgId));
