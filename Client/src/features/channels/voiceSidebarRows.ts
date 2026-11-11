@@ -189,9 +189,32 @@ export function createVoiceRows(
       onVoiceJoin(channelId);
       if (refused) return;
     }
-    if (voiceStore.getState().currentChannelId !== channelId) return;
     const tileId = user.screenshare ? user.userId + SCREENSHARE_TILE_ID_OFFSET : user.userId;
-    onWatchStream(tileId);
+    const voice = voiceStore.getState();
+    if (voice.switchingTo === channelId) watchAfterSwitch(channelId, tileId);
+    else if (voice.currentChannelId === channelId) onWatchStream?.(tileId);
+  }
+
+  // Ends the wait below; set while a clicked stream waits for a switch.
+  let stopWatchWait: (() => void) | null = null;
+
+  /** Out of another call the join first waits for the server: watch the stream
+   *  once the switch lands, and not at all when it is refused. One stream
+   *  waits at a time, the one clicked last. */
+  function watchAfterSwitch(channelId: number, tileId: number): void {
+    stopWatchWait?.();
+    const unsubscribe = voiceStore.subscribe((state) => {
+      if (state.switchingTo === channelId) return;
+      stop();
+      if (state.currentChannelId === channelId) onWatchStream?.(tileId);
+    });
+    const stop = (): void => {
+      unsubscribe();
+      lifetimeSignal.removeEventListener("abort", stop);
+      stopWatchWait = null;
+    };
+    stopWatchWait = stop;
+    lifetimeSignal.addEventListener("abort", stop, { once: true });
   }
 
   /** The menu and drag handlers of a participant who is not the local user. */

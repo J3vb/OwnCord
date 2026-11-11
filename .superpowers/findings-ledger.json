@@ -1,5 +1,5 @@
 {
-  "nextId": 567,
+  "nextId": 569,
   "findings": [
     {
       "id": "OC-0001",
@@ -13025,18 +13025,18 @@
     },
     {
       "id": "OC-0564",
-      "title": "A same-channel call take-over that failed left the user shown in the channel",
-      "file": "Server/ws/voice_join_move.go",
-      "line": 33,
+      "title": "Clicking a password-protected or full voice channel while in a call ended the call the user was in",
+      "file": "Client/src/features/voice/wsErrors.ts",
+      "line": 27,
       "severity": "medium",
-      "why": "Taking a call over on a second device in the same channel removes the old device's seat without telling anyone, because the new device is about to take it. When the new join was then refused (the channel was over its limit, or a later step failed) the seat was gone but no leave was announced, so every client kept showing the user in the channel until it reconnected.",
-      "repro": "Put a user in a voice channel that is over its user limit, then join the same channel from a second device of that account: the join is refused, the first device is disconnected, and the roster still lists the user.",
-      "evidence": "Server/ws/voice_join_move_failure_test.go (TestMultiDevice_SameChannelMoveIntoOverfullChannelKeepsSlot, TestMultiDevice_SameChannelMoveFailingLaterStepAnnouncesLeave, TestMultiDevice_SameChannelMoveRolledBackAtRosterReadAnnouncesOnce)",
-      "suggestedFix": "Let a same-channel take-over keep its seat without a capacity check, and announce the leave when a take-over that removed the old seat does not finish.",
+      "why": "A click on another voice channel named that channel in the store before the server answered. The server refuses a locked or full channel before it leaves the call the user is in, but the client's rollback of the refused join tore the live session down and sent voice_leave, and only then opened the password dialog.",
+      "repro": "Be connected in voice channel A, click channel B that has a password not entered yet (or is full): the call in A ends, and cancelling the dialog leaves no call.",
+      "evidence": "Client/tests/unit/livekitSession/switchDuringReconnect.test.ts (keeps the call when the server refuses the switch with PASSWORD_REQUIRED / CHANNEL_FULL) and Client/src/features/voice/passwordRefusal.test.ts (for a locked channel clicked from a live call)",
+      "suggestedFix": "Out of a connected call, keep the store on that call and only record the target until the server's voice_leave or voice_token shows the switch going ahead; a refusal then has nothing to undo.",
       "fix": {
         "commit": "pending",
-        "test": "Server/ws/voice_join_move_failure_test.go",
-        "revertProof": "without the capacity exemption TestMultiDevice_SameChannelMoveIntoOverfullChannelKeepsSlot fails; without the announce TestMultiDevice_SameChannelMoveFailingLaterStepAnnouncesLeave fails"
+        "test": "Client/tests/unit/livekitSession/switchDuringReconnect.test.ts",
+        "revertProof": "against the earlier source 12 of the 14 tests on clicks from a live call in switchDuringReconnect.test.ts fail"
       },
       "lens": "flow-voice",
       "confidence": "high",
@@ -13048,18 +13048,18 @@
     },
     {
       "id": "OC-0565",
-      "title": "A voice join that failed at its last step dropped the moderator mute it carried",
-      "file": "Server/ws/voice_join.go",
-      "line": 98,
-      "severity": "low",
-      "why": "A join carries a moderator mute or deafen from the previous channel and writes it onto the new seat. When the join failed at its very last step the seat was removed again and the carried mute was not put back, so the user's next join came in unmuted.",
-      "repro": "Server-mute a member, have them switch voice channel, and make the roster read at the end of the join fail once: the join is refused and the retry joins without the mute.",
-      "evidence": "Server/ws/voice_join_stash_test.go (TestVoiceJoin_RosterReadFailureKeepsModeratorMuteForRetry)",
-      "suggestedFix": "Put the carried moderator flags back whenever a join rolls its seat back, including at the last step.",
+      "title": "Leaving a voice channel and rejoining it before the server answered could end the new call",
+      "file": "Client/src/features/voice/wsHandlers.ts",
+      "line": 180,
+      "severity": "medium",
+      "why": "A self voice_leave names only a channel. After Disconnect and a quick click on the same channel, the leave of the first stay arrived while the store already named the second one, before or after its token, and was taken for the end of the new call: the store was cleared and the session torn down while the server kept the membership.",
+      "repro": "In voice channel A press Disconnect and click A again at once; when the first call's voice_leave arrives after the click, the app shows no call.",
+      "evidence": "Client/tests/unit/livekitSession/switchDuringReconnect.test.ts (Disconnect, then the same channel again) and Client/src/features/voice/joinRequest.test.ts (which stay in a channel a voice_leave ends)",
+      "suggestedFix": "Remember each join sent as the stay it asked for and match a self voice_leave to the oldest one for its channel; when a later join for the same channel exists the leave is about the earlier stay and changes nothing.",
       "fix": {
         "commit": "pending",
-        "test": "Server/ws/voice_join_stash_test.go",
-        "revertProof": "without the re-stash TestVoiceJoin_RosterReadFailureKeepsModeratorMuteForRetry fails"
+        "test": "Client/src/features/voice/joinRequest.test.ts",
+        "revertProof": "against the earlier source the two Disconnect-then-same-channel tests in switchDuringReconnect.test.ts fail"
       },
       "lens": "flow-voice",
       "confidence": "high",
@@ -13083,6 +13083,52 @@
         "commit": "pending",
         "test": "Server/ws/voice_mod_flag_race_test.go",
         "revertProof": "without the lock around the read and the delete TestVoiceJoin_MuteRacingAChannelSwitchIsNotLost fails; without it around the insert and the restore TestVoiceJoin_UnmuteRacingTheFlagRestoreIsNotOverwritten fails"
+      },
+      "lens": "flow-voice",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-11",
+      "hunt": "fable-review-2026-11-11",
+      "finder": "claude",
+      "fixedDate": "2026-11-11"
+    },
+    {
+      "id": "OC-0567",
+      "title": "A same-channel call take-over that failed left the user shown in the channel",
+      "file": "Server/ws/voice_join_move.go",
+      "line": 33,
+      "severity": "medium",
+      "why": "Taking a call over on a second device in the same channel removes the old device's seat without telling anyone, because the new device is about to take it. When the new join was then refused (the channel was over its limit, or a later step failed) the seat was gone but no leave was announced, so every client kept showing the user in the channel until it reconnected.",
+      "repro": "Put a user in a voice channel that is over its user limit, then join the same channel from a second device of that account: the join is refused, the first device is disconnected, and the roster still lists the user.",
+      "evidence": "Server/ws/voice_join_move_failure_test.go (TestMultiDevice_SameChannelMoveIntoOverfullChannelKeepsSlot, TestMultiDevice_SameChannelMoveFailingLaterStepAnnouncesLeave, TestMultiDevice_SameChannelMoveRolledBackAtRosterReadAnnouncesOnce)",
+      "suggestedFix": "Let a same-channel take-over keep its seat without a capacity check, and announce the leave when a take-over that removed the old seat does not finish.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/ws/voice_join_move_failure_test.go",
+        "revertProof": "without the capacity exemption TestMultiDevice_SameChannelMoveIntoOverfullChannelKeepsSlot fails; without the announce TestMultiDevice_SameChannelMoveFailingLaterStepAnnouncesLeave fails"
+      },
+      "lens": "flow-voice",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-11",
+      "hunt": "fable-review-2026-11-11",
+      "finder": "claude",
+      "fixedDate": "2026-11-11"
+    },
+    {
+      "id": "OC-0568",
+      "title": "A voice join that failed at its last step dropped the moderator mute it carried",
+      "file": "Server/ws/voice_join.go",
+      "line": 98,
+      "severity": "low",
+      "why": "A join carries a moderator mute or deafen from the previous channel and writes it onto the new seat. When the join failed at its very last step the seat was removed again and the carried mute was not put back, so the user's next join came in unmuted.",
+      "repro": "Server-mute a member, have them switch voice channel, and make the roster read at the end of the join fail once: the join is refused and the retry joins without the mute.",
+      "evidence": "Server/ws/voice_join_stash_test.go (TestVoiceJoin_RosterReadFailureKeepsModeratorMuteForRetry)",
+      "suggestedFix": "Put the carried moderator flags back whenever a join rolls its seat back, including at the last step.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/ws/voice_join_stash_test.go",
+        "revertProof": "without the re-stash TestVoiceJoin_RosterReadFailureKeepsModeratorMuteForRetry fails"
       },
       "lens": "flow-voice",
       "confidence": "high",

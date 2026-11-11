@@ -19,7 +19,12 @@ import {
 import { showToast } from "../../lib/ui/toast";
 import { takeWatchRefusal } from "../../lib/voice/watchRequest";
 import { applyVideoBitrateCap } from "./videoBitrateCap";
-import { noteJoinAnswered, noteJoinSent, setJoinAnswerWait } from "./joinRequest";
+import {
+  leaveEndsEarlierStay,
+  noteJoinAnswered,
+  noteJoinSent,
+  setJoinAnswerWait,
+} from "./joinRequest";
 import { joinAnswerWaitFor } from "./wsErrors";
 import { noteVoiceMoved, noteAfkMove, takeAfkMove, clearAfkMove } from "./moveHint";
 import { settleVoiceLeave } from "./leaveOwed";
@@ -161,7 +166,26 @@ export function handleVoiceDisconnected(
   showToast(payload.reason || connectText("voice.disconnected"), "error");
 }
 
+/** The server left the call a waiting switch kept, so the switch is going
+ *  ahead: the store follows it, as it would have at the click. Any self leave
+ *  of that call counts, an eviction included: the join sent for the new channel
+ *  is answered either way. */
+function followSwitchOnLeave(channelId: number): void {
+  const { currentChannelId, switchingTo } = voiceStore.getState();
+  if (switchingTo !== null && switchingTo !== undefined && currentChannelId === channelId) {
+    joinVoiceChannel(switchingTo);
+  }
+}
+
 export function handleVoiceLeave(payload: Payload<"voice_leave">, clock: ReconnectClock): void {
+  const currentUserId = authStore.getState().user?.id ?? 0;
+  const isSelf = payload.user_id === currentUserId;
+  // A voice_leave names a channel, not a stay in it. When the user leaves a
+  // channel and is back in it before the server answered, the leave of the
+  // earlier stay arrives while the store already names the newer one, before
+  // or after that join's token: it must not take the user off the roster,
+  // clear the store or end the session of the stay they are in now.
+  const earlierStay = isSelf && leaveEndsEarlierStay(payload.channel_id);
   // removeVoiceUser() below always mutates the roster before
   // handleParticipantLeft below runs, and a pre-mutation snapshot (the
   // earlier attempt this replaced) reads "still present" on every
@@ -170,9 +194,9 @@ export function handleVoiceLeave(payload: Payload<"voice_leave">, clock: Reconne
   // any point relative to that mutation, cannot tell a genuine departure
   // apart from the stale-leave case. Don't try; see
   // E2EEManager.handleParticipantLeft for the current defense.
-  removeVoiceUser(payload);
-  const currentUserId = authStore.getState().user?.id ?? 0;
-  const isSelf = payload.user_id === currentUserId;
+  if (!earlierStay) removeVoiceUser(payload);
+  // An earlier stay's leave says nothing about a switch waiting now.
+  if (isSelf && !earlierStay) followSwitchOnLeave(payload.channel_id);
   // A server-initiated eviction (revocation sweep, channel delete) has no
   // companion teardown message — this voice_leave IS the signal that
   // drives our own LiveKit/E2EE teardown, or mic publish and key material
@@ -180,7 +204,7 @@ export function handleVoiceLeave(payload: Payload<"voice_leave">, clock: Reconne
   // late-arriving voice_leave for a channel we already left (and rejoined
   // elsewhere) must not kill a newer join. Read the store before
   // leaveVoiceChannel() below clears currentChannelId.
-  const sameChannel = voiceStore.getState().currentChannelId === payload.channel_id;
+  const sameChannel = !earlierStay && voiceStore.getState().currentChannelId === payload.channel_id;
   const shouldTeardownSession = isSelf && sameChannel;
   // Leaving after an AFK move was noted ends the move; the leave that
   // precedes the voice_moved frame arrives before the note is made.
@@ -240,6 +264,11 @@ export function handleVideoBitrateCap(payload: Payload<"video_bitrate_cap">): vo
 
 export function handleVoiceTokenFrame(payload: Payload<"voice_token">): void {
   noteJoinAnswered(payload.channel_id);
+  // The switch a live call was kept for is granted: the store follows it now,
+  // and the session below takes the token as it does after any click.
+  if (voiceStore.getState().switchingTo === payload.channel_id) {
+    joinVoiceChannel(payload.channel_id);
+  }
   void livekitSession().then(({ handleVoiceToken }) =>
     handleVoiceToken(
       payload.token,
