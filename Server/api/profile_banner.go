@@ -46,27 +46,10 @@ func handleUploadBanner(
 		// read runs under a transfer deadline instead.
 		release := transferBody(w, r, bannerMaxBodySize)
 		defer release()
-		if err := r.ParseMultipartForm(bannerMultipartMemoryLimit); err != nil {
-			if writeTransferTimedOut(w, err, "banner upload") {
-				return
-			}
-			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "invalid multipart form")
-			return
-		}
-
-		file, header, err := r.FormFile("file")
-		if err != nil {
-			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "missing file field")
-			return
-		}
-		defer file.Close() //nolint:errcheck
-
-		raw, mimeType, width, height, ok := readProfileImage(w, file, bannerImageLimits)
+		raw, filename, mimeType, width, height, ok := readProfileImageForm(w, r, bannerMultipartMemoryLimit, "banner upload", bannerImageLimits)
 		if !ok {
 			return
 		}
-
-		filename := sanitizeUploadFilename(header.Filename)
 		fileID, written, ok := avatarStoreAndRecord(r.Context(), w, svc, store, user.ID, filename, raw, mimeType, "banner", width, height)
 		if !ok {
 			return

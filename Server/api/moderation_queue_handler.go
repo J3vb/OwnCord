@@ -130,38 +130,43 @@ func currentUserID(r *http.Request) (int64, bool) {
 	return user.ID, true
 }
 
-// resolveReportIDParam resolves the {id} route parameter (the report's PUBLIC
-// id) to the internal id ReportService takes. It writes the response and returns
-// ok=false on failure. Callers MUST run requireModerateOrWrite first: resolving
-// before authorizing turns "unknown id" (404) vs "real id, no permission" (403)
-// into an existence oracle, even though every ReportService method checks
-// CanModerate itself.
-func resolveReportIDParam(w http.ResponseWriter, r *http.Request, svc *service.Services) (int64, bool) {
-	publicID := chi.URLParam(r, "id")
-	id, err := svc.Reports.ResolveReportID(r.Context(), publicID)
-	if err != nil {
-		writeReportServiceError(r.Context(), w, err)
-		return 0, false
+// requireUserID is currentUserID that answers the 401 itself.
+func requireUserID(w http.ResponseWriter, r *http.Request) (int64, bool) {
+	id, ok := currentUserID(r)
+	if !ok {
+		writeNotAuthenticated(w)
 	}
-	return id, true
+	return id, ok
 }
 
-// requireModerateOrWrite is authorization-before-existence's front door: the
-// permission check every route below the queue index needs, run before the
-// route's {id} is ever resolved.
-func requireModerateOrWrite(w http.ResponseWriter, r *http.Request, svc *service.Services, actorID int64) bool {
+// reportActorAndID is the front door of every route below the queue index: the
+// caller, the permission check, and only then the {id} route parameter (the
+// report's PUBLIC id) resolved to the internal id ReportService takes. It
+// writes the response and returns ok=false on failure. The order is
+// authorization-before-existence: resolving before authorizing turns "unknown
+// id" (404) vs "real id, no permission" (403) into an existence oracle, even
+// though every ReportService method checks CanModerate itself.
+func reportActorAndID(w http.ResponseWriter, r *http.Request, svc *service.Services) (actorID, id int64, ok bool) {
+	actorID, ok = requireUserID(w, r)
+	if !ok {
+		return 0, 0, false
+	}
 	if err := svc.Reports.RequireModerate(r.Context(), actorID); err != nil {
 		writeReportServiceError(r.Context(), w, err)
-		return false
+		return 0, 0, false
 	}
-	return true
+	id, err := svc.Reports.ResolveReportID(r.Context(), chi.URLParam(r, "id"))
+	if err != nil {
+		writeReportServiceError(r.Context(), w, err)
+		return 0, 0, false
+	}
+	return actorID, id, true
 }
 
 func handleModerationQueueList(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		actorID, ok := currentUserID(r)
+		actorID, ok := requireUserID(w, r)
 		if !ok {
-			writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "not authenticated")
 			return
 		}
 		rows, err := svc.Reports.Queue(r.Context(), actorID, r.URL.Query().Get("state"))
@@ -185,15 +190,7 @@ func handleModerationQueueList(svc *service.Services) http.HandlerFunc {
 
 func handleModerationQueueGet(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		actorID, ok := currentUserID(r)
-		if !ok {
-			writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "not authenticated")
-			return
-		}
-		if !requireModerateOrWrite(w, r, svc, actorID) {
-			return
-		}
-		id, ok := resolveReportIDParam(w, r, svc)
+		actorID, id, ok := reportActorAndID(w, r, svc)
 		if !ok {
 			return
 		}
@@ -236,15 +233,7 @@ func handleModerationQueueGet(svc *service.Services) http.HandlerFunc {
 
 func handleModerationQueueAssign(svc *service.Services, hub ModQueueBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		actorID, ok := currentUserID(r)
-		if !ok {
-			writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "not authenticated")
-			return
-		}
-		if !requireModerateOrWrite(w, r, svc, actorID) {
-			return
-		}
-		id, ok := resolveReportIDParam(w, r, svc)
+		actorID, id, ok := reportActorAndID(w, r, svc)
 		if !ok {
 			return
 		}
@@ -262,15 +251,7 @@ func handleModerationQueueAssign(svc *service.Services, hub ModQueueBroadcaster)
 
 func handleModerationQueueNote(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		actorID, ok := currentUserID(r)
-		if !ok {
-			writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "not authenticated")
-			return
-		}
-		if !requireModerateOrWrite(w, r, svc, actorID) {
-			return
-		}
-		id, ok := resolveReportIDParam(w, r, svc)
+		actorID, id, ok := reportActorAndID(w, r, svc)
 		if !ok {
 			return
 		}
@@ -289,15 +270,7 @@ func handleModerationQueueNote(svc *service.Services) http.HandlerFunc {
 
 func handleModerationQueueClose(svc *service.Services, hub ModQueueBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		actorID, ok := currentUserID(r)
-		if !ok {
-			writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "not authenticated")
-			return
-		}
-		if !requireModerateOrWrite(w, r, svc, actorID) {
-			return
-		}
-		id, ok := resolveReportIDParam(w, r, svc)
+		actorID, id, ok := reportActorAndID(w, r, svc)
 		if !ok {
 			return
 		}
@@ -325,15 +298,7 @@ func handleModerationQueueClose(svc *service.Services, hub ModQueueBroadcaster) 
 // dispatches against.
 func handleModerationQueueAct(svc *service.Services, hub ModQueueBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		actorID, ok := currentUserID(r)
-		if !ok {
-			writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "not authenticated")
-			return
-		}
-		if !requireModerateOrWrite(w, r, svc, actorID) {
-			return
-		}
-		id, ok := resolveReportIDParam(w, r, svc)
+		actorID, id, ok := reportActorAndID(w, r, svc)
 		if !ok {
 			return
 		}

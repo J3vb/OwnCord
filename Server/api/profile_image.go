@@ -43,6 +43,27 @@ func (lim imageLimits) typeRefusal() string {
 	return lim.Label + " must be a PNG, JPEG or WebP image"
 }
 
+// readProfileImageForm is the request stage in front of readProfileImage:
+// parse the multipart body, which the caller has already put under
+// transferBody, and read its `file` part. what names the upload in the reply
+// to a transfer the deadline cut. It writes its own reply and reports ok=false.
+func readProfileImageForm(w http.ResponseWriter, r *http.Request, memoryLimit int64, what string, lim imageLimits) (raw []byte, filename, mimeType string, width, height int, ok bool) {
+	if err := r.ParseMultipartForm(memoryLimit); err != nil {
+		if !writeTransferTimedOut(w, err, what) {
+			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "invalid multipart form")
+		}
+		return nil, "", "", 0, 0, false
+	}
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "missing file field")
+		return nil, "", "", 0, 0, false
+	}
+	defer file.Close() //nolint:errcheck
+	raw, mimeType, width, height, ok = readProfileImage(w, file, lim)
+	return raw, sanitizeUploadFilename(header.Filename), mimeType, width, height, ok
+}
+
 // readProfileImage is the bytes stage of the avatar, group icon and banner
 // uploads: read the uploaded file under lim's cap, sniff its type and measure
 // it. It writes its own 400 and reports ok=false when the upload is not
