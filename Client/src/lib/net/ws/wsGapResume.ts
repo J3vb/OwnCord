@@ -19,7 +19,7 @@ export function noteCseq(s: WsState, cseq: number): void {
   if (cseq !== expected) armGapResume(s, { expected, received: cseq });
 }
 
-export function armGapResume(s: WsState, detail: object, fresh = false): void {
+export function armGapResume(s: WsState, detail: object): void {
   if (s.gapResumeTimer !== null) return;
   const plan = planGapResume(s.gapStreak, s.lastGapResumeAt, Date.now(), s.random());
   s.gapStreak = plan.streak;
@@ -31,20 +31,19 @@ export function armGapResume(s: WsState, detail: object, fresh = false): void {
   s.gapResumeTimer = s.clock.setTimeout(() => {
     s.gapResumeTimer = null;
     if (owner !== s.socketId) return;
-    resumeForGap(s, fresh);
+    resumeForGap(s);
   }, plan.delay);
 }
 
 // Tear down like the liveness deadline does and redial at once: the jitter
 // already spread this client's resume, and the server answers it with the
-// full ready it owes. `fresh` drops the resume point (and so the open channel
-// in the auth frame) so that ready is a full one. The streak and the time of
-// the last resume are kept, so a server that keeps sending the bad frame is
-// redialled at growing intervals, never faster than the last window.
-function resumeForGap(s: WsState, fresh: boolean): void {
+// full ready it owes (after an unreadable frame the auth frame asks for one,
+// see `fullStateOwed`). The streak and the time of the last resume are kept,
+// so a server that keeps sending the bad frame is redialled at growing
+// intervals, never faster than the last window.
+function resumeForGap(s: WsState): void {
   if (s.intentionalClose || s.certMismatchBlock || !s.config) return;
   if (s.state !== "connected" || !s.proxyOpen) return;
-  if (fresh) s.lastSeq = 0;
   s.gapStreak++;
   s.lastGapResumeAt = Date.now();
   s.proxyOpen = false;

@@ -5,7 +5,11 @@ import { authStore } from "../../../src/stores/auth.store";
 import { channelsStore, setRoles, getRoleIdByName } from "../../../src/stores/channels.store";
 import { messagesStore } from "../../../src/stores/messages.store";
 import { membersStore } from "../../../src/stores/members.store";
-import { blocksStore, setUserBlockedByMe } from "../../../src/stores/blocks.store";
+import {
+  blocksStore,
+  setUserBlockedByMe,
+  setUserBlockedByThem,
+} from "../../../src/stores/blocks.store";
 import { uiStore, setUpdateRequiredHost } from "../../../src/stores/ui.store";
 import { PROTOCOL_EPOCH } from "../../../src/lib/protocolTypes";
 import {
@@ -565,6 +569,15 @@ describe("WS Dispatcher", () => {
     await Promise.resolve();
     await Promise.resolve();
     expect([...blocksStore.getState().blockedByMe]).toEqual([7]);
+  });
+
+  it("keeps what a refused send taught about the other side across a resume", () => {
+    replaceDispatcher({ listBlocks: vi.fn().mockResolvedValue({ blocked_user_ids: [] }) });
+    setUserBlockedByThem(9, true);
+
+    mock.dispatch("auth_ok", authOkEvent({ replay_source: "buffer" }) as never);
+
+    expect([...blocksStore.getState().blockedByThem]).toEqual([9]);
   });
 
   it("does not let a slow block list fetched on resume revert a fresher local block", async () => {

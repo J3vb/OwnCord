@@ -20,11 +20,12 @@
  * counts (only through the dispatcher). Every change is published to
  * `followedThreads.store`, which the sidebar and the badge read.
  *
- * `live` holds the thread ids whose held state came from a live frame whose
- * delivery is still guaranteed (see `adoptThreadSnapshots`). The server sends
- * `thread_changed` only to clients focused on the parent channel, so the marks
- * of a parent's threads are cleared when that parent stops being the open
- * channel, and all of them on every authenticated (re)connect.
+ * `live` holds the thread ids whose held state came from a live frame (see
+ * `adoptThreadSnapshots`). The server sends `thread_changed` only to clients
+ * focused on the parent channel, so the marks of a parent's threads are cleared
+ * when that parent is next opened, and all of them on every authenticated
+ * (re)connect. They are kept when the parent is left: a page asked for before
+ * the frame may still be on its way.
  *
  * A `thread_changed` can be sequenced after the `thread_deleted` it raced, so a
  * deleted id is remembered for the session and every later write for it is
@@ -201,11 +202,13 @@ export function removeThread(threadId: number): void {
     if (old?.starter_message_id != null) byStarter.delete(old.starter_message_id);
     const followed = new Map(prev.followed);
     followed.delete(threadId);
+    const live = new Set(prev.live);
+    live.delete(threadId);
     return {
       byId,
       byStarter,
       deleted: new Set(prev.deleted).add(threadId),
-      live: prev.live,
+      live,
       focusedThreadId: prev.focusedThreadId === threadId ? null : prev.focusedThreadId,
       followed,
     };
@@ -423,16 +426,11 @@ export function noteOpenThreadMessage(threadId: number, messageId: number): void
 export function clearFollowedCounts(threadId: number): void {
   commit((prev) => withCountsCleared(prev, threadId));
 }
-// Leaving a parent channel ends the guarantee for its threads' frames, and a
-// mark made while a parent was not open (a follow update) never had one.
-let openParentId = channelsStore.getState().activeChannelId;
+// A parent's frames went unheard while it was not open, so its marks end when
+// it is opened again (the pages asked for from then on are the newer word).
 void channelsStore.subscribeSelector(
   (s) => s.activeChannelId,
   (next) => {
-    const left = openParentId;
-    openParentId = next;
-    if (left === next) return;
-    if (left !== null) clearLiveThreads(left);
     if (next !== null) clearLiveThreads(next);
   },
 ); // app-lifetime: the store lives as long as the app

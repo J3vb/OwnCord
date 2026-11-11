@@ -76,6 +76,10 @@ export interface WsState {
   // send-failure codes are decided on this side of the seam.
   proxyOpen: boolean;
   lastSeq: number;
+  // A sequenced frame could not be read, so the resume point is past an event
+  // this client never applied: the next auth frame, whichever dial sends it,
+  // asks for the full state. Cleared by auth_ok.
+  fullStateOwed: boolean;
   // The last `cseq` seen on the current socket (0 before the first), the socket
   // it belongs to, and the pending gap resume, if any.
   lastCseq: number;
@@ -136,6 +140,7 @@ export function createWsState(
     connectFailureCode: null,
     proxyOpen: false,
     lastSeq: 0,
+    fullStateOwed: false,
     lastCseq: 0,
     socketId: 0,
     gapResumeTimer: null,

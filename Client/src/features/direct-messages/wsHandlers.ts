@@ -109,15 +109,19 @@ export function applyReadyDms(payload: Payload<"ready">): void {
 }
 
 /**
- * The block slice of `ready`, and of a resumed `auth_ok` (a block or unblock made
- * on another device is not replayed): forget "blocked by them" and re-fetch our
- * own blocks.
+ * The block slice of `ready`: forget "blocked by them" and re-fetch our own
+ * blocks. A resumed `auth_ok` (`on: "resume"`) only re-fetches, since a block or
+ * unblock made on another device is not replayed; what a refused send taught
+ * about the other side still holds across a short reconnect.
  */
-export function applyReadyBlocks(api: DispatchApi | undefined): void {
+export function applyReadyBlocks(
+  api: DispatchApi | undefined,
+  on: "ready" | "resume" = "ready",
+): void {
   // Refresh DM block state (channels-members-dms.md §3.2). "Being blocked"
-  // is only known from a refused send, so it's stale after a reconnect —
+  // is only known from a refused send, so it's stale after a full reconnect:
   // clear it and re-fetch our own outgoing blocks authoritatively.
-  clearBlockedByThem();
+  if (on === "ready") clearBlockedByThem();
   if (api !== undefined) {
     // Snapshot the revision blocksStore was at right before
     // issuing this fetch. If the user blocks/unblocks someone (via

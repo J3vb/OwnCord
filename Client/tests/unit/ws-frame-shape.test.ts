@@ -127,6 +127,18 @@ describe("ws frame shape check", () => {
     expectAuthLastSeq(0);
   });
 
+  it("a socket that drops before that redial still reconnects as a fresh connect", async () => {
+    await connectAndAuth(client);
+    const bad = withoutContent("x") as { type: string; payload: unknown };
+    emit({ ...bad, seq: 7 });
+    expectConsole("warn", /Invalid WS frame, dropping/);
+
+    emitTauriEvent("ws-state", "closed");
+    await vi.advanceTimersByTimeAsync(60_000);
+    emitTauriEvent("ws-state", "open");
+    expectAuthLastSeq(0);
+  });
+
   it("the same bad frame right after the fresh state waits longer before the next redial", async () => {
     await connectAndAuth(client);
     const bad = withoutContent("x") as { type: string; payload: unknown };

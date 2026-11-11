@@ -181,6 +181,7 @@ export function createWsClient({
     // (logout). Automatic reconnects go through scheduleReconnect() which
     // preserves lastSeq for server-side event replay.
     s.lastSeq = 0;
+    s.fullStateOwed = false;
     // Reset the backoff exponent too — a session abandoned mid-reconnect must
     // not carry its attempt count (and therefore its backoff ceiling) into
     // the next login's first retry.

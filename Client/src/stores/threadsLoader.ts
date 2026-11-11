@@ -100,6 +100,7 @@ export function resumeThreadFocus(
   api: Pick<Partial<ApiClient>, "getMessages"> | undefined,
 ): void {
   // Frames missed while down: no thread's state is guaranteed live any more.
-  loaded?.clearLiveThreads();
+  // Queued, so it also follows the frames still waiting for the store to load.
+  if (threadsStoreInUse()) withThreadsStore((m) => m.clearLiveThreads());
   resumeHook?.(ws, api);
 }

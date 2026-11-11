@@ -84,7 +84,8 @@ export function buildAuthFrame(
   // fresh connect the ready payload re-establishes everything anyway.
   // Omitted when unknown so the frame stays byte-identical to before
   // for callers that never register a provider.
-  const activeChannelId = s.lastSeq > 0 ? (activeChannelProvider?.() ?? null) : null;
+  const lastSeq = s.fullStateOwed ? 0 : s.lastSeq;
+  const activeChannelId = lastSeq > 0 ? (activeChannelProvider?.() ?? null) : null;
   // A wake dial carries `wake: true`. The server refuses it
   // (ANOTHER_DEVICE_ACTIVE) when another device holds the session, and
   // accepts it otherwise — so a lone device wakes silently while a woken
@@ -92,7 +93,7 @@ export function buildAuthFrame(
   // ordinary auth frame is byte-identical to before.
   return {
     token,
-    last_seq: s.lastSeq,
+    last_seq: lastSeq,
     epoch: PROTOCOL_EPOCH,
     ...(activeChannelId !== null ? { active_channel_id: activeChannelId } : {}),
     ...(s.pendingWake ? { wake: true as const } : {}),

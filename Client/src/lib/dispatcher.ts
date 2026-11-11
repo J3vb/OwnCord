@@ -181,7 +181,7 @@ export function wireDispatcher(
       // (sticker_update is unsequenced; a block or unblock may come from another device.)
       if (payload.replay_source === "buffer" || payload.replay_source === "db") {
         applyReadyDmRequests(api);
-        applyReadyBlocks(api);
+        applyReadyBlocks(api, "resume");
         applyReadyStickers(api);
       }
     }),

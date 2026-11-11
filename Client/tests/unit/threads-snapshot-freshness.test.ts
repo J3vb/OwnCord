@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   adoptThreadSnapshots,
   getThread,
+  removeThread,
   resetThreadsStore,
   threadOfMessage,
   threadsStore,
@@ -47,32 +48,39 @@ describe("a snapshot of a thread no live frame set", () => {
     expect(getThread(91)).toMatchObject(OLD);
   });
 
-  it("replaces a live frame once the parent stopped being the open channel", () => {
+  it("keeps a live frame over a page still on its way when the parent is left", () => {
     upsertThread(makeThread(OLD));
     setActiveChannel(2);
+    channelsStore.flush();
+    adoptThreadSnapshots([makeThread(FRESH)]);
+    expect(getThread(91)).toMatchObject(OLD);
+  });
+
+  it("replaces a live frame once its parent is opened again", () => {
+    upsertThread(makeThread(OLD));
+    setActiveChannel(2);
+    channelsStore.flush();
+    setActiveChannel(1);
     channelsStore.flush();
     adoptThreadSnapshots([makeThread(FRESH)]);
     expect(getThread(91)).toMatchObject(FRESH);
   });
 
-  it("only forgets the live frames of the parent that was left", () => {
+  it("only forgets the live frames of the parent that is opened", () => {
     const other = { id: 92, parent_id: 2, starter_message_id: 5 };
     upsertThread(makeThread({ ...OLD, ...other }));
     upsertThread(makeThread(OLD));
-    setActiveChannel(3);
-    channelsStore.flush();
-    adoptThreadSnapshots([makeThread({ ...FRESH, ...other }), makeThread(FRESH)]);
-    expect(getThread(92)).toMatchObject(OLD);
-    expect(getThread(91)).toMatchObject(FRESH);
-  });
-
-  it("replaces a live frame heard while its parent was not open, once it is opened", () => {
-    const other = { id: 92, parent_id: 2, starter_message_id: 5 };
-    upsertThread(makeThread({ ...OLD, ...other }));
     setActiveChannel(2);
     channelsStore.flush();
-    adoptThreadSnapshots([makeThread({ ...FRESH, ...other })]);
+    adoptThreadSnapshots([makeThread({ ...FRESH, ...other }), makeThread(FRESH)]);
     expect(getThread(92)).toMatchObject(FRESH);
+    expect(getThread(91)).toMatchObject(OLD);
+  });
+
+  it("forgets the mark of a deleted thread", () => {
+    upsertThread(makeThread(OLD));
+    removeThread(91);
+    expect(threadsStore.getState().live.has(91)).toBe(false);
   });
 
   it("replaces a live frame after an authenticated reconnect", async () => {
