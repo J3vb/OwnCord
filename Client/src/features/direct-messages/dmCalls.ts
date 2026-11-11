@@ -65,8 +65,9 @@ export function createDmCalls(st: PageState, _pg: PageApi, deps: DmCallsDeps) {
             log.error("Camera on call start failed", { error: String(err) });
           });
         }
-      } else if (v.currentChannelId === active.id) {
-        // The join started; the voiceStore subscriber turns the camera on once
+      } else if (v.currentChannelId === active.id || v.switchingTo === active.id) {
+        // The join started (out of another call it first waits for the
+        // server); the voiceStore subscriber turns the camera on once
         // connected. A refused join (backoff) leaves nothing armed.
         st.cameraOnJoin = active.id;
       }
@@ -93,6 +94,8 @@ export function createDmCalls(st: PageState, _pg: PageApi, deps: DmCallsDeps) {
     cancelPendingRing();
     const settle = (): boolean => {
       const v = voiceStore.getState();
+      // A switch out of another call: the server has not acted on it yet.
+      if (v.switchingTo === channelId) return false;
       if (v.currentChannelId !== channelId) {
         cancelPendingRing();
         return true;

@@ -1,13 +1,20 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { handleVoiceJoinRollback, handleVoicePasswordRefusal } from "./wsHandlers";
 import { closePasswordPrompt, promptForChannelPassword, sendPasswordJoin } from "./passwordPrompt";
+import { sendUserJoin } from "./joinClick";
 import { noteJoinSent, resetJoinRequest } from "./joinRequest";
 import { joinRetryInMs, noteJoinSucceeded } from "./joinBackoff";
-import { voiceStore, resetVoiceStore, joinVoiceChannel } from "../../stores/voice.store";
+import {
+  voiceStore,
+  resetVoiceStore,
+  joinVoiceChannel,
+  setVoiceStatus,
+} from "../../stores/voice.store";
 import { channelsStore, setChannels } from "../../stores/channels.store";
 import { setConnectionStatus } from "../../stores/ui.store";
 import { authStore } from "../../stores/auth.store";
 import { showToast } from "../../lib/ui/toast";
+import { leaveVoice } from "../../lib/voice/livekitSession";
 import type { DispatchWs, Payload } from "../connection/dispatchContext";
 
 vi.mock("../../lib/voice/livekitSession", () => ({
@@ -305,5 +312,65 @@ describe("password dialog on a refused voice_join", () => {
     sendPasswordJoin(ws, 4, "again");
     expect(sent).toHaveLength(1);
     expect(showToast).toHaveBeenCalled();
+  });
+
+  describe("for a locked channel clicked from a live call", () => {
+    const inCall = { currentChannelId: 2, voiceStatus: "connected" };
+
+    beforeEach(async () => {
+      vi.mocked(leaveVoice).mockClear();
+      joinVoiceChannel(2);
+      setVoiceStatus("connected");
+      sendUserJoin(ws, 4);
+      refuse("PASSWORD_REQUIRED", "join-1");
+      await vi.waitFor(() => expect(dialog()).not.toBeNull());
+    });
+
+    const callUntouched = (): void => {
+      expect(voiceStore.getState()).toMatchObject(inCall);
+      expect(leaveVoice).not.toHaveBeenCalled();
+      expect(sent.filter((msg) => msg.type === "voice_leave")).toHaveLength(0);
+    };
+
+    it("asks for the password and leaves the call as it was", () => {
+      expect(voiceStore.getState().switchingTo).toBeNull();
+      callUntouched();
+      expect(joinRetryInMs()).toBe(0);
+    });
+
+    it("sends the typed password as a switch that still keeps the call", async () => {
+      await typeAndSubmit("hunter2");
+
+      expect(sent.at(-1)).toEqual({
+        type: "voice_join",
+        payload: { channel_id: 4, user_initiated: true, password: "hunter2" },
+      });
+      expect(voiceStore.getState().switchingTo).toBe(4);
+      callUntouched();
+    });
+
+    it("asks again after a wrong password, the call still untouched", async () => {
+      await typeAndSubmit("nope");
+
+      expect(refuse("WRONG_PASSWORD", "join-2")).toBe(true);
+
+      await vi.waitFor(() => expect(errorText()).toBe("Wrong password"));
+      expect(voiceStore.getState().switchingTo).toBeNull();
+      callUntouched();
+    });
+
+    it("Cancel keeps the call", () => {
+      press("channel-password-cancel");
+
+      expect(dialog()).toBeNull();
+      callUntouched();
+    });
+
+    it("sends nothing for a second submit while the first still waits", async () => {
+      await typeAndSubmit("one");
+      sendPasswordJoin(ws, 4, "two");
+
+      expect(sent.filter((msg) => msg.type === "voice_join")).toHaveLength(2);
+    });
   });
 });

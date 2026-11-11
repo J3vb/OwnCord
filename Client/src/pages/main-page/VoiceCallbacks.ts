@@ -7,7 +7,6 @@ import { createLogger } from "@lib/logger";
 import type { WsClient } from "@lib/ws";
 import {
   voiceStore,
-  joinVoiceChannel,
   leaveVoiceChannel,
   isSelfMuted,
   setMutedBeforeDeafen,
@@ -16,7 +15,7 @@ import {
 import { uiStore } from "@stores/ui.store";
 import { showToast } from "@lib/ui/toast";
 import { noteJoinFailed } from "../../features/voice/joinBackoff";
-import { noteJoinSent } from "../../features/voice/joinRequest";
+import { sendUserJoin, switchWaiting } from "../../features/voice/joinClick";
 import { noteVoiceLeave } from "../../features/voice/leaveOwed";
 import { joinBackoffText } from "../../features/voice/joinBackoffText";
 import type { VoiceModerationCallbacks } from "../../features/channels/ChannelSidebar";
@@ -214,6 +213,9 @@ export function createSidebarVoiceCallbacks(ws: WsClient): SidebarVoiceCallbacks
       // watch) stay correct since the guard is idempotent with theirs.
       const { currentChannelId, voiceStatus } = voiceStore.getState();
       if (currentChannelId === channelId) return;
+      // A switch out of this call is already with the server: its answer
+      // decides where the user is, so a second click waits for it.
+      if (switchWaiting()) return;
       const backoffText = joinBackoffText();
       if (backoffText !== null) {
         showToast(backoffText, "error");
@@ -226,12 +228,7 @@ export function createSidebarVoiceCallbacks(ws: WsClient): SidebarVoiceCallbacks
         noteJoinFailed(Date.now(), true);
       }
       log.info("Joining voice channel", { channelId });
-      joinVoiceChannel(channelId);
-      // The user's own join: the server's rejoin block after a moderator
-      // move or kick refuses only automatic rejoins (voice_rejoin_block.go).
-      noteJoinSent(
-        ws.send({ type: "voice_join", payload: { channel_id: channelId, user_initiated: true } }),
-      );
+      sendUserJoin(ws, channelId);
     },
     onVoiceLeave: () => {
       log.info("Leaving voice channel");

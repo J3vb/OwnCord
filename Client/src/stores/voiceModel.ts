@@ -109,6 +109,13 @@ export interface VoiceState {
   readonly shareDenied?: boolean;
   /** Epoch ms when the local user joined the current voice channel (for elapsed timer). */
   readonly joinedAt: number | null;
+  /** The channel a switch out of a live call asked for, while the server has
+   *  not acted on it yet. The server keeps the old call until the switch passes
+   *  its checks (password, capacity), so currentChannelId keeps naming that
+   *  call: the first sign the switch went ahead (the old call's voice_leave or
+   *  the new voice_token) moves it, and a refusal just clears this. Null at any
+   *  other time. Optional for the fixture reason above. */
+  readonly switchingTo?: number | null;
   /** True when joined in listen-only mode (mic permission denied or no mic found). */
   readonly listenOnly: boolean;
   /** Voice-session lifecycle status (drives the widget's connecting/securing/
@@ -182,6 +189,7 @@ export function createVoiceState(): VoiceState {
     localCamera: false,
     localScreenshare: false,
     joinedAt: null,
+    switchingTo: null,
     listenOnly: false,
     voiceStatus: "idle",
     encryptionDegraded: false,

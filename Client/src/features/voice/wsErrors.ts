@@ -2,7 +2,7 @@
 // video rollback), split from wsHandlers.ts. Plain functions only:
 // dispatcher.ts owns every subscription.
 import { authStore } from "../../stores/auth.store";
-import { voiceStore, leaveVoiceChannel } from "../../stores/voice.store";
+import { voiceStore, leaveVoiceChannel, setSwitchingTo } from "../../stores/voice.store";
 import { uiStore } from "../../stores/ui.store";
 import { showToast } from "../../lib/ui/toast";
 import { noteJoinFailed } from "./joinBackoff";
@@ -69,36 +69,53 @@ export function handleVoiceJoinRollback(
   // next checkpoint. It also reads true for a call the reconnect loop handed
   // to this join before its answer: no session is left by then, but the
   // server may still hold that call, and the voice_leave is what ends it.
-  const { voiceStatus, currentChannelId } = voiceStore.getState();
-  if (voiceStatus === "joining" && takeJoinRefusal(payload.code, id, currentChannelId)) {
-    // A refused join abandons an AFK move: nothing to explain.
-    clearAfkMove();
-    // A refused join (often before any voice token) is a failed join: back
-    // off the next one, or every click re-sends voice_join. A password refusal
-    // (and the rate limit on a password try) is the exception: the dialog it
-    // opens is the retry, and a backoff would turn the user's next try away.
-    // Any other refusal of a retry backs off as usual.
-    const passwordRefusal =
-      isPasswordCode(payload.code) ||
-      (payload.code === WsErrorCode.RATE_LIMITED && refusalWasPasswordRetry(id));
-    if (!passwordRefusal) noteJoinFailed();
-    // With no session here the server can still hold a call for this socket:
-    // a join it granted whose token this device let pass (the user had
-    // already clicked on), or the one a refused re-join found in place. A
-    // bare leave gives it back. A join sent while the session module was
-    // still loading owns all of that instead.
-    const stranded = takeStrandedMembership() || payload.code === WsErrorCode.ALREADY_JOINED;
-    const refusedJoin = joinSequence();
-    void livekitSession().then(({ isVoiceSessionActive, leaveVoice, failPendingRejoin }) => {
-      failPendingRejoin();
-      if (isVoiceSessionActive()) void leaveVoice(true);
-      else if (stranded && joinSequence() === refusedJoin) {
-        noteVoiceLeave();
-        ws.send({ type: "voice_leave", payload: {} });
-      }
-    });
-    leaveVoiceChannel();
+  //
+  // A switch out of a live call is the one join that names no channel in the
+  // store while it waits (voiceStore.switchingTo): the server refuses a locked
+  // or full channel before it leaves the call the user is in, so that call was
+  // never touched here either and its refusal has nothing to undo.
+  const { voiceStatus, currentChannelId, switchingTo = null } = voiceStore.getState();
+  if (voiceStatus !== "joining" && switchingTo === null) return;
+  if (!takeJoinRefusal(payload.code, id, switchingTo ?? currentChannelId)) return;
+  // A refused join abandons an AFK move: nothing to explain.
+  clearAfkMove();
+  // A refused join (often before any voice token) is a failed join: back
+  // off the next one, or every click re-sends voice_join. A password refusal
+  // (and the rate limit on a password try) is the exception: the dialog it
+  // opens is the retry, and a backoff would turn the user's next try away.
+  // Any other refusal of a retry backs off as usual.
+  const passwordRefusal =
+    isPasswordCode(payload.code) ||
+    (payload.code === WsErrorCode.RATE_LIMITED && refusalWasPasswordRetry(id));
+  if (!passwordRefusal) noteJoinFailed();
+  if (switchingTo !== null) {
+    setSwitchingTo(null);
+    // "Already joined" there means the server holds another call for this
+    // socket than the one shown: end both sides, as for any other refusal.
+    if (payload.code !== WsErrorCode.ALREADY_JOINED) return;
   }
+  endRefusedJoin(ws, payload.code);
+}
+
+/** Take down what a refused join left: the optimistic store entry, a session
+ *  still up or connecting, and a call the server holds for this socket. */
+function endRefusedJoin(ws: DispatchWs, code: string): void {
+  // With no session here the server can still hold a call for this socket:
+  // a join it granted whose token this device let pass (the user had
+  // already clicked on), or the one a refused re-join found in place. A
+  // bare leave gives it back. A join sent while the session module was
+  // still loading owns all of that instead.
+  const stranded = takeStrandedMembership() || code === WsErrorCode.ALREADY_JOINED;
+  const refusedJoin = joinSequence();
+  void livekitSession().then(({ isVoiceSessionActive, leaveVoice, failPendingRejoin }) => {
+    failPendingRejoin();
+    if (isVoiceSessionActive()) void leaveVoice(true);
+    else if (stranded && joinSequence() === refusedJoin) {
+      noteVoiceLeave();
+      ws.send({ type: "voice_leave", payload: {} });
+    }
+  });
+  leaveVoiceChannel();
 }
 
 /**

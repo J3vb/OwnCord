@@ -1,5 +1,5 @@
 {
-  "nextId": 562,
+  "nextId": 564,
   "findings": [
     {
       "id": "OC-0001",
@@ -12968,6 +12968,52 @@
         "commit": "pending",
         "test": "Client/src/features/voice/strandedJoin.test.ts",
         "revertProof": "without the answer wait and the let-pass token mark the new tests in strandedJoin.test.ts and joinRequest.test.ts fail"
+      },
+      "lens": "flow-voice",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-11",
+      "hunt": "fable-review-2026-11-11",
+      "finder": "claude",
+      "fixedDate": "2026-11-11"
+    },
+    {
+      "id": "OC-0562",
+      "title": "Clicking a password-protected or full voice channel while in a call ended the call the user was in",
+      "file": "Client/src/features/voice/wsErrors.ts",
+      "line": 27,
+      "severity": "medium",
+      "why": "A click on another voice channel named that channel in the store before the server answered. The server refuses a locked or full channel before it leaves the call the user is in, but the client's rollback of the refused join tore the live session down and sent voice_leave, and only then opened the password dialog.",
+      "repro": "Be connected in voice channel A, click channel B that has a password not entered yet (or is full): the call in A ends, and cancelling the dialog leaves no call.",
+      "evidence": "Client/tests/unit/livekitSession/switchDuringReconnect.test.ts (keeps the call when the server refuses the switch with PASSWORD_REQUIRED / CHANNEL_FULL) and Client/src/features/voice/passwordRefusal.test.ts (for a locked channel clicked from a live call)",
+      "suggestedFix": "Out of a connected call, keep the store on that call and only record the target until the server's voice_leave or voice_token shows the switch going ahead; a refusal then has nothing to undo.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/unit/livekitSession/switchDuringReconnect.test.ts",
+        "revertProof": "against the earlier source 12 of the 14 tests on clicks from a live call in switchDuringReconnect.test.ts fail"
+      },
+      "lens": "flow-voice",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-11",
+      "hunt": "fable-review-2026-11-11",
+      "finder": "claude",
+      "fixedDate": "2026-11-11"
+    },
+    {
+      "id": "OC-0563",
+      "title": "Leaving a voice channel and rejoining it before the server answered could end the new call",
+      "file": "Client/src/features/voice/wsHandlers.ts",
+      "line": 180,
+      "severity": "medium",
+      "why": "A self voice_leave names only a channel. After Disconnect and a quick click on the same channel, the leave of the first stay arrived while the store already named the second one, before or after its token, and was taken for the end of the new call: the store was cleared and the session torn down while the server kept the membership.",
+      "repro": "In voice channel A press Disconnect and click A again at once; when the first call's voice_leave arrives after the click, the app shows no call.",
+      "evidence": "Client/tests/unit/livekitSession/switchDuringReconnect.test.ts (Disconnect, then the same channel again) and Client/src/features/voice/joinRequest.test.ts (which stay in a channel a voice_leave ends)",
+      "suggestedFix": "Remember each join sent as the stay it asked for and match a self voice_leave to the oldest one for its channel; when a later join for the same channel exists the leave is about the earlier stay and changes nothing.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/src/features/voice/joinRequest.test.ts",
+        "revertProof": "against the earlier source the two Disconnect-then-same-channel tests in switchDuringReconnect.test.ts fail"
       },
       "lens": "flow-voice",
       "confidence": "high",

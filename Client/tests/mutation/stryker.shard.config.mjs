@@ -103,6 +103,7 @@ export const shards = {
     "src/lib/voice/videoSurface.ts",
   ],
   "livekit-7": [
+    "src/features/voice/joinClick.ts",
     "src/features/voice/joinRequest.ts",
     "src/features/voice/native/nativeCameraTrack.ts",
     "src/features/voice/native/nativeRoom.ts",

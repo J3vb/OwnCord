@@ -37,6 +37,8 @@ function clearFinishedOutgoing(state: VoiceState, host: CallVoiceHost, selfId: (
 /** "Join with video" turns the camera on as soon as the accepted call is connected. */
 function enableCameraOnJoin(state: VoiceState, host: CallVoiceHost): void {
   if (host.cameraOnJoin === null) return;
+  // The switch into that call still waits for the server.
+  if (state.switchingTo === host.cameraOnJoin) return;
   if (state.currentChannelId !== host.cameraOnJoin) {
     host.cameraOnJoin = null;
     return;
