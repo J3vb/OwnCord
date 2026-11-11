@@ -69,6 +69,7 @@ func (d *DB) ListChannelMedia(ctx context.Context, q ChannelMediaQuery) ([]Chann
 	if q.Oldest {
 		order = " ORDER BY a.message_id ASC, a.id ASC"
 	}
+	//nolint:gosec // G202: filter and order are fixed fragments with ? placeholders
 	query := `SELECT a.id, a.filename, a.size, a.mime_type, a.width, a.height, a.duration_ms, a.waveform,
 		        m.id, m.timestamp, u.id, u.username, u.avatar
 		 FROM attachments a
@@ -107,6 +108,7 @@ func (d *DB) ChannelMediaBuckets(ctx context.Context, q ChannelMediaQuery) ([]Me
 	if err != nil {
 		return nil, fmt.Errorf("ChannelMediaBuckets: %w", err)
 	}
+	//nolint:gosec // G202: filter is fixed fragments with ? placeholders
 	query := `SELECT substr(m.timestamp, 1, 13), CAST(substr(m.timestamp, 15, 2) AS INTEGER) / 15, COUNT(*)
 		 FROM messages m
 		 JOIN attachments a ON a.message_id = m.id

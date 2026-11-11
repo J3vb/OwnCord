@@ -100,6 +100,7 @@ func (d *DB) ListOwnUploads(ctx context.Context, q OwnUploadQuery) ([]OwnUpload,
 	}
 	args = append(args, q.Limit)
 
+	//nolint:gosec // G202: the filter and order are fixed fragments with ? placeholders
 	query := `SELECT a.id, a.filename, a.size, a.mime_type, a.width, a.height, a.duration_ms, a.waveform,
 		        a.uploaded_at, a.message_id, m.channel_id,
 		        CASE

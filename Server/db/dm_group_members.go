@@ -166,6 +166,7 @@ func requireNoBlockedPair(ctx context.Context, tx *sql.Tx, fresh, all []int64) e
 			args = append(args, id)
 		}
 	}
+	//nolint:gosec // G202: only "?" placeholders are concatenated, ids are bound
 	query := `SELECT EXISTS (SELECT 1 FROM user_blocks
 	   WHERE (blocker_id IN (` + marks(len(fresh)) + `) AND blocked_id IN (` + marks(len(all)) + `))
 	      OR (blocked_id IN (` + marks(len(fresh)) + `) AND blocker_id IN (` + marks(len(all)) + `)))`

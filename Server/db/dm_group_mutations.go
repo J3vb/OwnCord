@@ -141,6 +141,7 @@ func lowestMemberSQL(channelExpr string) string {
 // ensureGroupDMOwner keeps dm_owner_id naming a member in the caller's transaction,
 // falling to the lowest non-banned member; every membership change runs it last.
 func ensureGroupDMOwner(ctx context.Context, tx *sql.Tx, channelID int64) error {
+	//nolint:gosec // G202: lowestMemberSQL joins constant fragments, no caller input reaches the text
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE channels SET dm_owner_id = `+lowestMemberSQL("?1")+`
 		  WHERE id = ?1 AND is_group = 1

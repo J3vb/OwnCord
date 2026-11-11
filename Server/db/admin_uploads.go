@@ -122,6 +122,7 @@ func (d *DB) ListAllUploads(ctx context.Context, q AdminUploadQuery) ([]AdminUpl
 	}
 	args = append(args, q.Limit)
 
+	//nolint:gosec // G202: the filter and order are fixed fragments with ? placeholders
 	query := `SELECT a.id, a.filename, a.size, a.mime_type, a.width, a.height, a.duration_ms, a.waveform,
 		        a.uploaded_at, a.uploader_id, COALESCE(u.username, ''), a.message_id, m.channel_id,
 		        COALESCE(c.name, ''), COALESCE(c.type, ''),
@@ -267,6 +268,7 @@ func (d *DB) ListMemberStorage(ctx context.Context, userIDs []int64) ([]MemberSt
 		args[i] = id
 	}
 	in := strings.TrimSuffix(strings.Repeat("?,", len(userIDs)), ",")
+	//nolint:gosec // G202: `in` is "?" placeholders only; every id is bound
 	rows, err := d.reader.QueryContext(ctx,
 		`SELECT user_id, bytes_used, quota_mb FROM user_storage WHERE user_id IN (`+in+`) ORDER BY user_id`, args...)
 	if err != nil {
