@@ -110,6 +110,7 @@ and only when it changes something a contributor or fork holder must do
 - A thread reply that failed to send can still be retried after you close and reopen the thread; Retry used to do nothing.
 - A thread or forum post that lost its newest replies (after a failed load, or after scrolling back through hundreds of replies) now recovers: Jump to present reloads the newest replies, scrolling to the bottom loads newer ones, and new replies from others appear again.
 - After saving your profile, the display name and About fields now show what the server stored when it cleaned the text, and Settings no longer asks to discard changes you already saved.
+- A status chosen on one device (Do Not Disturb, Invisible, Online) is now adopted by your other signed-in devices. They used to put their own older status back when they reconnected, started or came back from idle.
 - Linux: voice calls skip voice server messages they cannot use, and end with a clear disconnect when a call can no longer continue.
 - Linux: switching audio devices or muting and unmuting no longer makes other voice controls wait.
 - Linux: stopping a camera or screen share no longer makes other voice controls wait, and starting the camera again right after waits for the old one to close.

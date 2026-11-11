@@ -15,8 +15,8 @@
  *    idle watcher) clears the stored timer in `saveUserStatus`, so this module
  *    sees the change and stands down.
  *  - The timer follows the *locally saved* status. A live presence for us
- *    that differs from the timed one (another device changed it) cancels the
- *    timer and adopts that status locally, sending nothing. A reconnect's
+ *    that differs from the saved one (another device changed it) cancels the
+ *    timer, if any, and adopts that status locally, sending nothing. A reconnect's
  *    auth_ok is not such a signal: the page re-asserts the saved status to
  *    the server on reconnect, so the timed status and its timer carry on.
  *  - The timer firing re-reads the stored timer and the saved status first, so
@@ -96,7 +96,16 @@ export function startStatusTimerWatcher(options: StatusTimerWatcherOptions): Sta
     // own entry reads while the socket is down: not a different choice.
     if (reported === null || reported === "offline") return;
     const timer = loadStatusTimer();
-    if (timer === null || reported === timer.status) return;
+    // With no timer running, a status chosen on another device is still
+    // adopted (any status but idle, which only that device's own idle
+    // watcher produces); otherwise this device would keep its old saved
+    // status and put it back on the next reconnect or return from idle.
+    if (
+      timer === null
+        ? reported === "idle" || reported === loadUserStatus()
+        : reported === timer.status
+    )
+      return;
     // The frame carrying our latest pick may still be queued behind the
     // presence limiter, so the server can still be echoing the status we had.
     const t = now();
