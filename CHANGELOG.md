@@ -55,6 +55,7 @@ and only when it changes something a contributor or fork holder must do
 
 - The app now checks each server reply before using it. A reply it cannot read (from a much older or newer server, or a proxy answering in its place) shows "The server sent a reply this version of OwnCord cannot read" instead of half-loading; after a save, it adds that the change may already have been made.
 - Voice: the microphone gate starts closed and keeps its state when you change the sensitivity.
+- Voice: muting a stream's sound (or deafening) now stops the server sending it to you, instead of only silencing it on your side. That saves about 140 kbps per muted stream; unmuting brings the sound back.
 - Voice: a Medium or High screen share now sends one stream instead of two, which leaves your graphics card more room while gaming. A viewer on a slow connection may see stutters instead of a softer 720p picture; turn on Settings > Voice & Video > **Send a backup copy for slow connections** to send the 720p copy again.
 - Emoji and GIF pickers load the previews you can see first, fetch the next GIF page earlier, and scroll the emoji list more smoothly.
 - In-app dialogs (join with an invite link, rename prompts, new DM picker, nickname, new thread) use the same Save and Cancel buttons as Create Channel.

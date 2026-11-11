@@ -217,6 +217,7 @@ export const shards = {
     "src/lib/ui/savedNotice.ts",
     "src/lib/ui/zoomPan.ts",
     "src/lib/voice/audioScreenshareState.ts",
+    "src/lib/voice/screenshareDelivery.ts",
     "src/lib/voice/gateScale.ts",
   ],
   "transport-auth-1": [

@@ -59,14 +59,39 @@ export abstract class ScreenshareAudioState {
     for (const el of audioEls) el.volume = effective;
   }
 
+  /** Deafen silences stream audio too (Discord's rule) by muting its
+   *  elements, not unsubscribing, so undeafen restores each tile's own mute. */
+  protected applyScreenshareDeafen(deafened: boolean): void {
+    for (const [userId, audioEls] of this.screenshareAudioElements) {
+      const muted = deafened || this.getScreenshareAudioMuted(userId);
+      for (const el of audioEls) el.muted = muted;
+    }
+    this.screenshareGainListener?.();
+  }
+
+  /** Re-apply every per-user screenshare volume scaled by the master output
+   *  multiplier (not just the multiplier, which would drop each user's own). */
+  protected applyScreenshareVolumes(): void {
+    for (const [userId, audioEls] of this.screenshareAudioElements) {
+      const effective = this.getEffectiveScreenshareVolume(userId);
+      for (const audioEl of audioEls) audioEl.volume = effective;
+    }
+    this.screenshareGainListener?.();
+  }
+
   /** Stored per-user screenshare volume (0-1, default 1) for slider init. */
   getScreenshareAudioVolume(userId: number): number {
     return this.screenshareVolumeByUser.get(userId) ?? 1;
   }
 
+  /** Told when a user's stream audio turns silent or audible, so the subclass
+   *  can pause or resume its delivery. */
+  protected abstract syncScreenshareDelivery(userId?: number, deafened?: boolean): void;
+
   muteScreenshareAudio(userId: number, muted: boolean): void {
     this.screenshareAudioMutedByUser.set(userId, muted);
     this.screenshareGainListener?.();
+    this.syncScreenshareDelivery(userId);
     const audioEls = this.screenshareAudioElements.get(userId);
     if (audioEls === undefined) return;
     for (const el of audioEls) el.muted = muted || this.isLocalDeafened();
